@@ -9,8 +9,8 @@
   <version>1.0-SNAPSHOT</version>
 
   <properties>
-    <andy.slf4j.version>1.7.21</andy.slf4j.version>
-    <andy.logback.version>1.1.7</andy.logback.version>
+    <andy.logback.version>1.1.9</andy.logback.version>
+    <andy.slf4j.version>1.7.22</andy.slf4j.version>
   </properties>
 
   <dependencies>
