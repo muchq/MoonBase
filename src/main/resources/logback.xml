@@ -6,6 +6,15 @@
     </encoder>
   </appender>
 
+  <appender name="Sentry" class="com.getsentry.raven.logback.SentryAppender">
+    <dsn>${sentryDsn}</dsn>
+    <tags>tag1:value1,tag2:value2</tags>
+  </appender>
+
+  <root level="WARN">
+    <appender-ref ref="Sentry"/>
+  </root>
+
   <root level="INFO">
     <appender-ref ref="STDOUT" />
   </root>
