@@ -6,8 +6,8 @@ To configure Sentry, set `sentry.dsn` as a system property or `SENTRY_DSN` as an
 # Maven
 ```
 <dependency>
-  <groupId>org.slf4j</groupId>
-  <artifactId>slf4j-api</artifactId>
+  <groupId>com.muchq</groupId>
+  <artifactId>Logging</artifactId>
   <version>1.0-SNAPSHOT</version>
 </dependency>
 ```
