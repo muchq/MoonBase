@@ -9,7 +9,7 @@
   </appender>
 
   <appender name="Sentry" class="com.getsentry.raven.logback.SentryAppender">
-    <dsn>${sentryDsn}</dsn>
+    <dsn>${SENTRY_DSN}</dsn>
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
       <level>WARN</level>
     </filter>
