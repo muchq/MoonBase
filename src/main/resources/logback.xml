@@ -1,21 +1,22 @@
-<configuration>
-
+<configuration scan="true">
   <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
     <encoder>
       <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
     </encoder>
+    <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+      <level>INFO</level>
+    </filter>
   </appender>
 
   <appender name="Sentry" class="com.getsentry.raven.logback.SentryAppender">
     <dsn>${sentryDsn}</dsn>
-    <tags>tag1:value1,tag2:value2</tags>
+    <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+      <level>WARN</level>
+    </filter>
   </appender>
 
-  <root level="WARN">
+  <root level="DEBUG">
     <appender-ref ref="Sentry"/>
-  </root>
-
-  <root level="INFO">
     <appender-ref ref="STDOUT" />
   </root>
 </configuration>
