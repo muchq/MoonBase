@@ -9,6 +9,7 @@ import javax.ws.rs.ext.Provider;
 
 @Provider
 public class ObjectMapperProvider implements ContextResolver<ObjectMapper> {
+  // swap for JsonUtils
   private static final ObjectMapper MAPPER = new ObjectMapper()
         .registerModule(new Jdk8Module())
         .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);

@@ -9,8 +9,8 @@ import java.util.Optional;
 import java.util.Set;
 
 public class Configuration {
-  public static final String PORT_PROPERTY_NAME = "UNSET_ENV_SERVICE_PORT";
-  public static final String CONTEXT_PATH_PROPERTY_NAME = "UNSET_ENV_SERVICE_CONTEXT_PATH";
+  public static final String PORT_PROPERTY_NAME = "PORT";
+  public static final String CONTEXT_PATH_PROPERTY_NAME = "APP_ROOT";
 
   private final Integer port;
   private final Package basePackage;
