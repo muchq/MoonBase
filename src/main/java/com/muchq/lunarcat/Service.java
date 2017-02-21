@@ -1,14 +1,12 @@
 package com.muchq.lunarcat;
 
 
-import com.google.inject.Binding;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.google.inject.Key;
 import com.google.inject.Module;
 import com.google.inject.Stage;
 import com.google.inject.TypeLiteral;
-import com.google.inject.name.Names;
 import com.muchq.lunarcat.config.Configuration;
 import com.muchq.lunarcat.config.LunarCatServiceModule;
 import com.muchq.lunarcat.lifecycle.StartupTask;
@@ -25,14 +23,15 @@ import java.util.Set;
 public class Service {
   private static final String DEFAULT_CONTEXT_PATH = "/";
   private static final String DEFAULT_SERVLET_PATH_SPEC = "/*";
-  private static final int DEFAULT_PORT = 8080;
 
   private final Server server;
   private final Injector injector;
 
   public Service(Configuration configuration) {
     this.injector = createInjector(configuration);
-    this.server = newServer(injector.getInstance(GuiceResteasyBootstrapServletContextListener.class));
+    this.server = newServer(configuration,
+                            injector.getInstance(
+                                GuiceResteasyBootstrapServletContextListener.class));
   }
 
   public void run() {
@@ -64,28 +63,10 @@ public class Service {
     return injector;
   }
 
-  private Server newServer(EventListener listener) {
-    Server server = new Server(getPort());
-    server.setHandler(servletHandler(getAppRoot(), listener));
+  private Server newServer(Configuration configuration, EventListener listener) {
+    Server server = new Server(configuration.getPort());
+    server.setHandler(servletHandler(configuration.getContextPath().orElse(DEFAULT_CONTEXT_PATH), listener));
     return server;
-  }
-
-  private int getPort() {
-    Binding<Integer> portBinding = injector.getExistingBinding(Key.get(Integer.class, Names.named("port")));
-
-    if (portBinding != null) {
-      return portBinding.getProvider().get();
-    }
-    return DEFAULT_PORT;
-  }
-
-  private String getAppRoot() {
-    Binding<String> appRootBinding = injector.getExistingBinding(Key.get(String.class, Names.named("appRoot")));
-
-    if (appRootBinding != null) {
-      return appRootBinding.getProvider().get();
-    }
-    return DEFAULT_CONTEXT_PATH;
   }
 
   private Handler servletHandler(String contextPath, EventListener listener) {
