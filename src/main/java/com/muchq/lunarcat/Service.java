@@ -1,11 +1,14 @@
 package com.muchq.lunarcat;
 
 
+import com.google.inject.Binding;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.google.inject.Key;
 import com.google.inject.Module;
+import com.google.inject.Stage;
 import com.google.inject.TypeLiteral;
+import com.google.inject.name.Names;
 import com.muchq.lunarcat.config.Configuration;
 import com.muchq.lunarcat.config.LunarCatServiceModule;
 import com.muchq.lunarcat.lifecycle.StartupTask;
@@ -17,20 +20,19 @@ import org.jboss.resteasy.plugins.guice.GuiceResteasyBootstrapServletContextList
 import org.jboss.resteasy.plugins.server.servlet.HttpServletDispatcher;
 
 import java.util.EventListener;
-import java.util.Optional;
 import java.util.Set;
 
 public class Service {
   private static final String DEFAULT_CONTEXT_PATH = "/";
   private static final String DEFAULT_SERVLET_PATH_SPEC = "/*";
+  private static final int DEFAULT_PORT = 8080;
 
   private final Server server;
   private final Injector injector;
 
   public Service(Configuration configuration) {
     this.injector = createInjector(configuration);
-    this.server = newServer(configuration,
-                            injector.getInstance(GuiceResteasyBootstrapServletContextListener.class));
+    this.server = newServer(injector.getInstance(GuiceResteasyBootstrapServletContextListener.class));
   }
 
   public void run() {
@@ -55,25 +57,44 @@ public class Service {
   private Injector createInjector(Configuration configuration) {
     Set<Module> modules = configuration.getModules();
     modules.add(new LunarCatServiceModule(configuration.getBasePackage().getName()));
-    Injector injector = Guice.createInjector(modules);
+
+    Injector injector = Guice.createInjector(Stage.PRODUCTION, modules);
     injector.getAllBindings();
     injector.createChildInjector().getAllBindings();
     return injector;
   }
 
-  private Server newServer(Configuration configuration, EventListener listener) {
-    Server server = new Server(configuration.getPort());
-    server.setHandler(servletHandler(configuration.getContextPath(), listener));
+  private Server newServer(EventListener listener) {
+    Server server = new Server(getPort());
+    server.setHandler(servletHandler(getAppRoot(), listener));
     return server;
   }
 
-  private Handler servletHandler(Optional<String> contextPathMaybe, EventListener listener) {
+  private int getPort() {
+    Binding<Integer> portBinding = injector.getExistingBinding(Key.get(Integer.class, Names.named("port")));
+
+    if (portBinding != null) {
+      return portBinding.getProvider().get();
+    }
+    return DEFAULT_PORT;
+  }
+
+  private String getAppRoot() {
+    Binding<String> appRootBinding = injector.getExistingBinding(Key.get(String.class, Names.named("appRoot")));
+
+    if (appRootBinding != null) {
+      return appRootBinding.getProvider().get();
+    }
+    return DEFAULT_CONTEXT_PATH;
+  }
+
+  private Handler servletHandler(String contextPath, EventListener listener) {
     ServletContextHandler servletHandler = new ServletContextHandler();
     servletHandler.addEventListener(listener);
 
     ServletHolder servletHolder = new ServletHolder(HttpServletDispatcher.class);
     servletHandler.addServlet(servletHolder, DEFAULT_SERVLET_PATH_SPEC);
-    servletHandler.setContextPath(contextPathMaybe.orElse(DEFAULT_CONTEXT_PATH));
+    servletHandler.setContextPath(contextPath);
     return servletHandler;
   }
 }
