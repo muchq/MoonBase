@@ -3,6 +3,7 @@ package com.muchq.lunarcat.config;
 import com.google.common.collect.Sets;
 import com.google.inject.AbstractModule;
 import com.google.inject.multibindings.Multibinder;
+import com.muchq.json.ObjectMapperModule;
 import com.muchq.lunarcat.lifecycle.StartupTask;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 import org.reflections.Reflections;
@@ -23,6 +24,7 @@ public class LunarCatServiceModule extends AbstractModule {
   @Override
   protected void configure() {
     install(new RequestScopeModule());
+    install(new ObjectMapperModule());
     packagesToScan.forEach(this::bindJaxRs);
     bindLifeCycle(Multibinder.newSetBinder(binder(), StartupTask.class));
   }
