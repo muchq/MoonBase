@@ -24,6 +24,6 @@ public class Java8Widget {
 
   @Override
   public boolean equals(Object other) {
-    return other instanceof GuavaWidget && ((GuavaWidget) other).getFoo().equals(foo);
+    return other instanceof Java8Widget && ((Java8Widget) other).getFoo().equals(foo);
   }
 }
