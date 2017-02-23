@@ -19,15 +19,15 @@ public class UnhandledExceptionMapper implements ExceptionMapper<Exception> {
   @Override
   public Response toResponse(Exception e) {
     if (e instanceof NotFoundException) {
-      return Response.status(404).entity(new ErrorResponse("not found")).build();
+      return error(404).entity(new ErrorResponse("not found")).build();
     }
 
     if (e instanceof BadRequestException) {
-      return Response.status(400).entity(new ErrorResponse("bad request")).build();
+      return error(400).entity(new ErrorResponse(e.getMessage())).build();
     }
 
     LOG.error("unhandled exception", e);
-    return Response.serverError().entity(new ErrorResponse("internal error")).build();
+    return error(500).entity(new ErrorResponse("internal error")).build();
   }
 
   private static class ErrorResponse {
@@ -40,6 +40,10 @@ public class UnhandledExceptionMapper implements ExceptionMapper<Exception> {
     public String getMessage() {
       return message;
     }
+  }
+
+  private Response.ResponseBuilder error(int status) {
+    return Response.status(status).type(MediaType.APPLICATION_JSON_TYPE);
   }
 }
 
