@@ -12,7 +12,7 @@ import javax.ws.rs.ext.ExceptionMapper;
 import javax.ws.rs.ext.Provider;
 
 @Provider
-@Produces(MediaType.APPLICATION_JSON)
+@Produces({MediaType.APPLICATION_JSON, MediaType.APPLICATION_OCTET_STREAM})
 public class UnhandledExceptionMapper implements ExceptionMapper<Exception> {
   private static final Logger LOG = LoggerFactory.getLogger(UnhandledExceptionMapper.class);
 
