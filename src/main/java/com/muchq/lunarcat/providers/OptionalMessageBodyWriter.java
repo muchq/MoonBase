@@ -16,7 +16,7 @@ import java.lang.reflect.Type;
 import java.util.Optional;
 
 @Provider
-@Produces(MediaType.APPLICATION_JSON)
+@Produces({MediaType.APPLICATION_JSON, MediaType.APPLICATION_OCTET_STREAM})
 public class OptionalMessageBodyWriter implements MessageBodyWriter<Optional<?>> {
   private final ObjectMapper mapper;
 
