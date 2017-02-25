@@ -23,6 +23,7 @@ import java.util.Set;
 public class Service {
   private static final String DEFAULT_CONTEXT_PATH = "/";
   private static final String DEFAULT_SERVLET_PATH_SPEC = "/*";
+  private static final TypeLiteral<Set<StartupTask>> TASKS_TYPE = new TypeLiteral<Set<StartupTask>>(){};
 
   private final Server server;
   private final Injector injector;
@@ -40,8 +41,7 @@ public class Service {
   }
 
   private void runStartupTasks() {
-    injector.getInstance(Key.get(new TypeLiteral<Set<StartupTask>>(){}))
-        .forEach(StartupTask::execute);
+    injector.getInstance(Key.get(TASKS_TYPE)).forEach(StartupTask::execute);
   }
 
   private void startHttp() {

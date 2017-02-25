@@ -14,7 +14,7 @@ import javax.ws.rs.ext.Provider;
 @Provider
 @Produces({MediaType.APPLICATION_JSON, MediaType.APPLICATION_OCTET_STREAM})
 public class UnhandledExceptionMapper implements ExceptionMapper<Exception> {
-  private static final Logger LOG = LoggerFactory.getLogger(UnhandledExceptionMapper.class);
+  private static final Logger LOGGER = LoggerFactory.getLogger(UnhandledExceptionMapper.class);
 
   @Override
   public Response toResponse(Exception e) {
@@ -26,7 +26,7 @@ public class UnhandledExceptionMapper implements ExceptionMapper<Exception> {
       return error(400).entity(new ErrorResponse(e.getMessage())).build();
     }
 
-    LOG.error("unhandled exception", e);
+    LOGGER.error("unhandled exception", e);
     return error(500).entity(new ErrorResponse("internal error")).build();
   }
 
