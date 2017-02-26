@@ -53,9 +53,7 @@ public class ServiceTest {
   @Test
   public void itReturns404OnEmptyOptionals() {
     HttpRequest request = HttpRequest.newBuilder()
-        .setUrl("http://localhost:" + getPort() + "/test/optional-empty")
-        .setMaxRetries(0)
-        .build();
+        .setUrl("http://localhost:" + getPort() + "/test/optional-empty").build();
     HttpResponse response = getClient().execute(request);
     assertThat(response.getStatusCode()).isEqualTo(404);
   }
@@ -64,9 +62,7 @@ public class ServiceTest {
   public void itReturns404OnUnboundPath() {
     String path = UUID.randomUUID().toString();
     HttpRequest request = HttpRequest.newBuilder()
-        .setUrl("http://localhost:" + getPort() + "/" + path)
-        .setMaxRetries(0)
-        .build();
+        .setUrl("http://localhost:" + getPort() + "/" + path).build();
     HttpResponse response = getClient().execute(request);
     assertThat(response.getStatusCode()).isEqualTo(404);
   }
@@ -74,9 +70,7 @@ public class ServiceTest {
   @Test
   public void itReturns404OnNotFound() {
     HttpRequest request = HttpRequest.newBuilder()
-        .setUrl("http://localhost:" + getPort() + "/test/not-found")
-        .setMaxRetries(0)
-        .build();
+        .setUrl("http://localhost:" + getPort() + "/test/not-found").build();
     HttpResponse response = getClient().execute(request);
     assertThat(response.getStatusCode()).isEqualTo(404);
   }
@@ -84,9 +78,7 @@ public class ServiceTest {
   @Test
   public void itReturns500OnServerError() {
     HttpRequest request = HttpRequest.newBuilder()
-        .setUrl("http://localhost:" + getPort() + "/test/server-error")
-        .setMaxRetries(0)
-        .build();
+        .setUrl("http://localhost:" + getPort() + "/test/server-error").build();
     HttpResponse response = getClient().execute(request);
     assertThat(response.getStatusCode()).isEqualTo(500);
   }
@@ -94,9 +86,7 @@ public class ServiceTest {
   @Test
   public void itReturns400OnBadRequest() {
     HttpRequest request = HttpRequest.newBuilder()
-        .setUrl("http://localhost:" + getPort() + "/test/bad-request")
-        .setMaxRetries(0)
-        .build();
+        .setUrl("http://localhost:" + getPort() + "/test/bad-request").build();
     HttpResponse response = getClient().execute(request);
     assertThat(response.getStatusCode()).isEqualTo(400);
   }
