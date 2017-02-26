@@ -10,20 +10,20 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import java.net.ServerSocket;
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class ServiceTest {
   private static Service service;
   private final static HttpClient client = new ApacheHttpClient();
-
-  private static Integer port;
+  private static String baseUrl;
 
   @BeforeClass
   public static void setup() {
+    int port = getPort();
+    baseUrl = "http://localhost:" + port;
     Configuration configuration = Configuration.newBuilder()
-        .withPort(getPort())
+        .withPort(port)
         .withBasePackage(Package.getPackage("com.muchq.lunarcat"))
         .build();
     service = new Service(configuration);
@@ -38,71 +38,59 @@ public class ServiceTest {
   @Test
   public void itServesRequests() {
     String message = "hey";
-    HttpRequest request = HttpRequest.newBuilder().setUrl("http://localhost:" + getPort() + "/test?message=" + message).build();
-    Widget widget = getClient().execute(request).getAs(Widget.class);
+    HttpRequest request = HttpRequest.newBuilder().setUrl(baseUrl + "/test?message=" + message).build();
+    Widget widget = client.execute(request).getAs(Widget.class);
     assertThat(widget.getMessage()).isEqualTo(message);
   }
 
   @Test
   public void itWritesOptionalResponses() {
-    HttpRequest request = HttpRequest.newBuilder().setUrl("http://localhost:" + getPort() + "/test/optional-present").build();
-    HttpResponse response = getClient().execute(request);
+    HttpRequest request = HttpRequest.newBuilder().setUrl(baseUrl + "/test/optional-present").build();
+    HttpResponse response = client.execute(request);
     assertThat(response.getStatusCode()).isEqualTo(200);
   }
 
   @Test
   public void itReturns404OnEmptyOptionals() {
     HttpRequest request = HttpRequest.newBuilder()
-        .setUrl("http://localhost:" + getPort() + "/test/optional-empty").build();
-    HttpResponse response = getClient().execute(request);
+        .setUrl(baseUrl + "/test/optional-empty").build();
+    HttpResponse response = client.execute(request);
     assertThat(response.getStatusCode()).isEqualTo(404);
   }
 
   @Test
   public void itReturns404OnUnboundPath() {
-    String path = UUID.randomUUID().toString();
     HttpRequest request = HttpRequest.newBuilder()
-        .setUrl("http://localhost:" + getPort() + "/" + path).build();
-    HttpResponse response = getClient().execute(request);
+        .setUrl(baseUrl + "/this-is-not-a-real-path").build();
+    HttpResponse response = client.execute(request);
     assertThat(response.getStatusCode()).isEqualTo(404);
   }
 
   @Test
   public void itReturns404OnNotFound() {
     HttpRequest request = HttpRequest.newBuilder()
-        .setUrl("http://localhost:" + getPort() + "/test/not-found").build();
-    HttpResponse response = getClient().execute(request);
+        .setUrl(baseUrl + "/test/not-found").build();
+    HttpResponse response = client.execute(request);
     assertThat(response.getStatusCode()).isEqualTo(404);
   }
 
   @Test
   public void itReturns500OnServerError() {
     HttpRequest request = HttpRequest.newBuilder()
-        .setUrl("http://localhost:" + getPort() + "/test/server-error").build();
-    HttpResponse response = getClient().execute(request);
+        .setUrl(baseUrl + "/test/server-error").build();
+    HttpResponse response = client.execute(request);
     assertThat(response.getStatusCode()).isEqualTo(500);
   }
 
   @Test
   public void itReturns400OnBadRequest() {
     HttpRequest request = HttpRequest.newBuilder()
-        .setUrl("http://localhost:" + getPort() + "/test/bad-request").build();
-    HttpResponse response = getClient().execute(request);
+        .setUrl(baseUrl + "/test/bad-request").build();
+    HttpResponse response = client.execute(request);
     assertThat(response.getStatusCode()).isEqualTo(400);
   }
 
-  public static HttpClient getClient() {
-    return client;
-  }
-
-  public static int getPort() {
-    if (port == null) {
-      port = getAvailablePort();
-    }
-    return port;
-  }
-
-  private static int getAvailablePort() {
+  private static int getPort() {
     try {
       ServerSocket serverSocket = new ServerSocket(0);
       int port = serverSocket.getLocalPort();
