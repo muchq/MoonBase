@@ -16,14 +16,19 @@ import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.jboss.resteasy.plugins.guice.GuiceResteasyBootstrapServletContextListener;
 import org.jboss.resteasy.plugins.server.servlet.HttpServletDispatcher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.EventListener;
 import java.util.Set;
 
 public class Service {
+  private static final Logger LOGGER = LoggerFactory.getLogger(Service.class);
   private static final String DEFAULT_CONTEXT_PATH = "/";
   private static final String DEFAULT_SERVLET_PATH_SPEC = "/*";
   private static final TypeLiteral<Set<StartupTask>> TASKS_TYPE = new TypeLiteral<Set<StartupTask>>(){};
+
+  private enum ServerMode { WAIT, NO_WAIT }
 
   private final Server server;
   private final Injector injector;
@@ -37,17 +42,33 @@ public class Service {
 
   public void run() {
     runStartupTasks();
-    startHttp();
+    startHttp(ServerMode.WAIT);
+  }
+
+  void runNoWait() {
+    runStartupTasks();
+    startHttp(ServerMode.NO_WAIT);
+  }
+
+  public void shutDown() {
+    try {
+      server.stop();
+    } catch (Exception e) {
+      LOGGER.error("failed to stop server due to {}", e.getMessage(), e);
+      throw new RuntimeException(e);
+    }
   }
 
   private void runStartupTasks() {
     injector.getInstance(Key.get(TASKS_TYPE)).forEach(StartupTask::execute);
   }
 
-  private void startHttp() {
+  private void startHttp(ServerMode mode) {
     try {
       server.start();
-      server.join();
+      if (mode == ServerMode.WAIT) {
+        server.join();
+      }
     } catch (Exception e) {
       throw new RuntimeException(e);
     }

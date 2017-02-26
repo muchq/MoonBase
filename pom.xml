@@ -65,6 +65,12 @@
       <artifactId>assertj-core</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>com.hubspot</groupId>
+      <artifactId>HorizonApache</artifactId>
+      <version>0.0.25</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
 </project>
