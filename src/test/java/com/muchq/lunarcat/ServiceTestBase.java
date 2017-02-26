@@ -17,7 +17,6 @@ public class ServiceTestBase {
   @BeforeClass
   public static void setup() {
     Configuration configuration = Configuration.newBuilder()
-        .withAppRoot("/")
         .withPort(getPort())
         .withBasePackage(Package.getPackage("com.muchq.lunarcat"))
         .build();

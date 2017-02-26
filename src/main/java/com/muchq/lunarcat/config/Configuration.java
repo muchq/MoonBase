@@ -89,7 +89,7 @@ public class Configuration {
       if (appRoot != null) {
         actualAppRoot = appRoot;
       } else {
-        actualAppRoot = normalizeAppRoot(findProperty(CONTEXT_PATH_PROPERTY_NAME));
+        actualAppRoot = normalizeAppRoot(findProperty(CONTEXT_PATH_PROPERTY_NAME, false));
       }
 
       return new Configuration(actualPort, basePackage, actualAppRoot, modules);
@@ -108,12 +108,12 @@ public class Configuration {
     return "/" + rawAppRoot;
   }
 
-  private static String findProperty(String propertyName) {
+  private static String findProperty(String propertyName, boolean throwIfNotFound) {
     String property = System.getProperty(propertyName);
     if (property == null) {
       property = System.getenv(propertyName);
     }
-    if (property == null) {
+    if (property == null && throwIfNotFound) {
       throw new RuntimeException("Couldn't find property: " + propertyName);
     }
     return property;
@@ -121,7 +121,7 @@ public class Configuration {
 
   private static Integer parsePropertyAsInteger(String propertyName) {
     try {
-      return Integer.parseInt(findProperty(propertyName));
+      return Integer.parseInt(findProperty(propertyName, true));
     } catch (NumberFormatException n) {
       throw new RuntimeException("Failed to parse '" + propertyName + "' as an integer");
     }
