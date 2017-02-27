@@ -38,7 +38,9 @@ public class LunarCatServiceModule extends AbstractModule {
             .getSubTypesOf(StartupTask.class);
 
     if (tasks != null) {
-      tasks.forEach(multibinder.addBinding()::to);
+      for (Class<? extends StartupTask> task : tasks) {
+        multibinder.addBinding().to(task);
+      }
     }
   }
 
