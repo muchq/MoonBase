@@ -1,5 +1,6 @@
 package com.muchq.json;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -30,6 +31,14 @@ public final class JsonUtils {
   public static <T> T readAs(String json, Class<T> clazz) {
     try {
       return MAPPER.readValue(json, clazz);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  public static <T> T readAs(String json, TypeReference<T> typeReference) {
+    try {
+      return MAPPER.readValue(json, typeReference);
     } catch (IOException e) {
       throw new RuntimeException(e);
     }
