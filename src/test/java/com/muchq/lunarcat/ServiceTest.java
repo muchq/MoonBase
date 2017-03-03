@@ -4,6 +4,7 @@ import com.hubspot.horizon.HttpClient;
 import com.hubspot.horizon.HttpRequest;
 import com.hubspot.horizon.HttpResponse;
 import com.hubspot.horizon.apache.ApacheHttpClient;
+import com.muchq.lunarcat.Service.ServerMode;
 import com.muchq.lunarcat.config.Configuration;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -27,7 +28,7 @@ public class ServiceTest {
         .withBasePackage(Package.getPackage("com.muchq.lunarcat"))
         .build();
     service = new Service(configuration);
-    service.runNoWait();
+    service.run(ServerMode.NO_WAIT);
   }
 
   @AfterClass

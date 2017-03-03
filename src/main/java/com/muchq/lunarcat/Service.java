@@ -28,7 +28,7 @@ public class Service {
   private static final String DEFAULT_SERVLET_PATH_SPEC = "/*";
   private static final TypeLiteral<Set<StartupTask>> TASKS_TYPE = new TypeLiteral<Set<StartupTask>>(){};
 
-  private enum ServerMode { WAIT, NO_WAIT }
+  public enum ServerMode { WAIT, NO_WAIT }
 
   private final Server server;
   private final Injector injector;
@@ -41,13 +41,12 @@ public class Service {
   }
 
   public void run() {
-    runStartupTasks();
-    startHttp(ServerMode.WAIT);
+    run(ServerMode.WAIT);
   }
 
-  void runNoWait() {
+  public void run(ServerMode mode) {
     runStartupTasks();
-    startHttp(ServerMode.NO_WAIT);
+    startHttp(mode);
   }
 
   public void shutDown() {
