@@ -28,6 +28,14 @@ public final class JsonUtils {
     }
   }
 
+  public static <T> byte[] writeAsBytes(T t) {
+    try {
+      return MAPPER.writeValueAsBytes(t);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
   public static <T> T readAs(String json, Class<T> clazz) {
     try {
       return MAPPER.readValue(json, clazz);
@@ -36,9 +44,25 @@ public final class JsonUtils {
     }
   }
 
+  public static <T> T readAs(byte[] bytes, Class<T> clazz) {
+    try {
+      return MAPPER.readValue(bytes, clazz);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
   public static <T> T readAs(String json, TypeReference<T> typeReference) {
     try {
       return MAPPER.readValue(json, typeReference);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  public static <T> T readAs(byte[] bytes, TypeReference<T> typeReference) {
+    try {
+      return MAPPER.readValue(bytes, typeReference);
     } catch (IOException e) {
       throw new RuntimeException(e);
     }

@@ -6,7 +6,9 @@ import com.muchq.json.utils.Java8Widget;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -22,6 +24,23 @@ public class JsonUtilsTest {
     List<Java8Widget> read = JsonUtils.readAs(widgetStrings, new TypeReference<List<Java8Widget>>() {});
 
     assertThat(read).isEqualTo(widgets);
+  }
+
+  @Test
+  public void itCanReadAndWriteClassAsBytes() {
+    Java8Widget widget = new Java8Widget(1);
+    byte[] bytes = JsonUtils.writeAsBytes(widget);
+    Java8Widget read = JsonUtils.readAs(bytes, Java8Widget.class);
+    assertThat(widget).isEqualTo(read);
+  }
+
+  @Test
+  public void itCanReadAndWriteTypeReferenceAsBytes() {
+    Set<Java8Widget> widgets = new HashSet<>();
+    widgets.add(new Java8Widget(1));
+    byte[] bytes = JsonUtils.writeAsBytes(widgets);
+    Set<Java8Widget> read = JsonUtils.readAs(bytes, new TypeReference<Set<Java8Widget>>(){});
+    assertThat(widgets).isEqualTo(read);
   }
 
   @Test
