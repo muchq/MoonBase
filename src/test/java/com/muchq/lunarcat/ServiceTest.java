@@ -2,6 +2,7 @@ package com.muchq.lunarcat;
 
 import com.hubspot.horizon.HttpClient;
 import com.hubspot.horizon.HttpRequest;
+import com.hubspot.horizon.HttpRequest.Method;
 import com.hubspot.horizon.HttpResponse;
 import com.hubspot.horizon.apache.ApacheHttpClient;
 import com.muchq.lunarcat.Service.ServerMode;
@@ -81,6 +82,16 @@ public class ServiceTest {
         .setUrl(baseUrl + "/test/server-error").build();
     HttpResponse response = client.execute(request);
     assertThat(response.getStatusCode()).isEqualTo(500);
+  }
+
+  @Test
+  public void itReturns405OnMethodNotAllowed() {
+    HttpRequest request = HttpRequest.newBuilder()
+        .setUrl(baseUrl + "/test/server-error")
+        .setMethod(Method.POST)
+        .build();
+    HttpResponse response = client.execute(request);
+    assertThat(response.getStatusCode()).isEqualTo(405);
   }
 
   @Test

@@ -3,9 +3,8 @@ package com.muchq.lunarcat.providers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.ws.rs.BadRequestException;
-import javax.ws.rs.NotFoundException;
 import javax.ws.rs.Produces;
+import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.ext.ExceptionMapper;
@@ -18,15 +17,11 @@ public class UnhandledExceptionMapper implements ExceptionMapper<Exception> {
 
   @Override
   public Response toResponse(Exception e) {
-    if (e instanceof NotFoundException) {
-      return error(404).entity(new ErrorResponse("not found")).build();
+    if (e instanceof WebApplicationException) {
+      return ((WebApplicationException) e).getResponse();
     }
 
-    if (e instanceof BadRequestException) {
-      return error(400).entity(new ErrorResponse(e.getMessage())).build();
-    }
-
-    LOGGER.error("unhandled exception", e);
+    LOGGER.error("unhandled exception due to {}", e.getCause(), e);
     return error(500).entity(new ErrorResponse("internal error")).build();
   }
 
