@@ -11,9 +11,10 @@ public final class PublicPreconditions {
     }
   }
 
-  public static <T> void checkNotNull(T arg, String message) {
+  public static <T> T checkNotNull(T arg, String message) {
     if (arg == null) {
       throw new BadRequestException(message);
     }
+    return arg;
   }
 }
