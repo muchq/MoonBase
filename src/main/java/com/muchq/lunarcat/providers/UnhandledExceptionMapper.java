@@ -18,27 +18,18 @@ public class UnhandledExceptionMapper implements ExceptionMapper<Exception> {
   @Override
   public Response toResponse(Exception e) {
     if (e instanceof WebApplicationException) {
-      return ((WebApplicationException) e).getResponse();
+      return error(((WebApplicationException) e).getResponse().getStatus(), e.getMessage());
     }
 
     LOGGER.error("unhandled exception due to {}", e.getCause(), e);
-    return error(500).entity(new ErrorResponse("internal error")).build();
+    return error(500, "internal error");
   }
 
-  private static class ErrorResponse {
-    private final String message;
-
-    private ErrorResponse(String message) {
-      this.message = message;
-    }
-
-    public String getMessage() {
-      return message;
-    }
-  }
-
-  private Response.ResponseBuilder error(int status) {
-    return Response.status(status).type(MediaType.APPLICATION_JSON_TYPE);
+  private Response error(int status, String message) {
+    return Response.status(status)
+        .type(MediaType.APPLICATION_JSON_TYPE)
+        .entity(new ErrorResponse(message))
+        .build();
   }
 }
 

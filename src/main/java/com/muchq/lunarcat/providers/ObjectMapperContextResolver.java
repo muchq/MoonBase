@@ -7,11 +7,11 @@ import javax.ws.rs.ext.ContextResolver;
 import javax.ws.rs.ext.Provider;
 
 @Provider
-public class ObjectMapperProvider implements ContextResolver<ObjectMapper> {
+public class ObjectMapperContextResolver implements ContextResolver<ObjectMapper> {
   private final ObjectMapper mapper;
 
   @Inject
-  public ObjectMapperProvider(ObjectMapper mapper) {
+  public ObjectMapperContextResolver(ObjectMapper mapper) {
     this.mapper = mapper;
   }
 
