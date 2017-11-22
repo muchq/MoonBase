@@ -1,4 +1,5 @@
 # LunarCat
+[![Build Status](https://travis-ci.org/muchq/LunarCat.svg?branch=master)](https://travis-ci.org/muchq/LunarCat)
 
 An easy to use, poorly tested web framework built on RestEasy, Jetty, Jackson, and Guice.
 
