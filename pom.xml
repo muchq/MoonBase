@@ -80,7 +80,7 @@
     <dependency>
       <groupId>com.hubspot</groupId>
       <artifactId>HorizonApache</artifactId>
-      <version>0.0.25</version>
+      <version>0.1.0</version>
       <scope>test</scope>
     </dependency>
   </dependencies>
