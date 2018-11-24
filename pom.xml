@@ -9,9 +9,9 @@
   <version>1.0-SNAPSHOT</version>
 
   <properties>
-    <muchq.logback.version>1.1.9</muchq.logback.version>
-    <muchq.slf4j.version>1.7.22</muchq.slf4j.version>
-    <muchq.raven-logback.version>7.8.1</muchq.raven-logback.version>
+    <muchq.logback.version>1.2.3</muchq.logback.version>
+    <muchq.slf4j.version>1.7.25</muchq.slf4j.version>
+    <muchq.raven-logback.version>8.0.3</muchq.raven-logback.version>
   </properties>
 
   <dependencies>
