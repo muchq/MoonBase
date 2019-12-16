@@ -8,7 +8,7 @@ script: mvn -B -q verify
 sudo: false
 
 before_install:
-  - wget ftp://mirror.reverse.net/pub/apache/maven/maven-3/3.6.3/binaries/apache-maven-3.6.3-bin.zip
+  - wget http://mirrors.ocf.berkeley.edu/apache/maven/maven-3/3.6.3/binaries/apache-maven-3.6.3-bin.zip
   - unzip -qq apache-maven-3.6.3-bin.zip
   - export M2_HOME=$PWD/apache-maven-3.6.3
   - export PATH=$M2_HOME/bin:$PATH
