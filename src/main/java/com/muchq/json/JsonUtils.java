@@ -9,6 +9,8 @@ import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.Reader;
 
 public final class JsonUtils {
   static final ObjectMapper MAPPER = new ObjectMapper()
@@ -19,6 +21,10 @@ public final class JsonUtils {
       .configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
 
   private JsonUtils() {}
+
+  public static ObjectMapper mapper() {
+    return MAPPER.copy();
+  }
 
   public static <T> String writeAsString(T t) {
     try {
@@ -52,6 +58,22 @@ public final class JsonUtils {
     }
   }
 
+  public static <T> T readAs(InputStream stream, Class<T> clazz) {
+    try {
+      return MAPPER.readValue(stream, clazz);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  public static <T> T readAs(Reader reader, Class<T> clazz) {
+    try {
+      return MAPPER.readValue(reader, clazz);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
   public static <T> T readAs(String json, TypeReference<T> typeReference) {
     try {
       return MAPPER.readValue(json, typeReference);
@@ -63,6 +85,22 @@ public final class JsonUtils {
   public static <T> T readAs(byte[] bytes, TypeReference<T> typeReference) {
     try {
       return MAPPER.readValue(bytes, typeReference);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  public static <T> T readAs(InputStream stream, TypeReference<T> typeReference) {
+    try {
+      return MAPPER.readValue(stream, typeReference);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  public static <T> T readAs(Reader reader, TypeReference<T> typeReference) {
+    try {
+      return MAPPER.readValue(reader, typeReference);
     } catch (IOException e) {
       throw new RuntimeException(e);
     }
