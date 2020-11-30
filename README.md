@@ -1,5 +1,16 @@
 # YoChat
 
+### client
 ```
-openssl s_client -connect 127.0.0.1:8992
+openssl s_client -connect <domain>
+```
+
+### nginx
+```
+stream {
+  server {
+    listen     443;
+    proxy_pass localhost:8992;
+  }
+}
 ```
