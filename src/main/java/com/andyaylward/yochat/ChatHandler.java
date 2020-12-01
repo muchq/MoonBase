@@ -45,6 +45,8 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
 
   @Override
   protected void channelRead0(ChannelHandlerContext context, String msg) {
+    LOGGER.info("{} ({}) said {}", context, users.get(context.channel()), msg);
+
     if (DISCONNECT_COMMAND.equals(msg.toLowerCase())) {
       LOGGER.info("{} ({}) disconnected", context, users.get(context.channel()));
       blast(context, idFromContext(context) + " left chat.");
