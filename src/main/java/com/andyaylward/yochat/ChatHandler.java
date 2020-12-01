@@ -25,7 +25,7 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
   private static final String GOODBYE = "Disconnected.\n";
   private static final String SET_NAME_COMMAND = "/name ";
   private static final String HELP_COMMAND = "/help ";
-  private static final String LIST_USERS_COMMAND = "/list ";
+  private static final String LIST_USERS_COMMAND = "/who ";
   private static final String LURKERS_COMMAND = "/lurkers ";
   private static final String DISCONNECT_COMMAND = "/quit";
 
@@ -53,11 +53,12 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
     }
 
     if (msg.startsWith(LURKERS_COMMAND)) {
+      LOGGER.info("{} ({}) did lurkers", context, users.get(context.channel()));
       String lurkersArg = msg.substring(LURKERS_COMMAND.length()).trim();
       if (lurkersArg.isBlank()) {
         LOGGER.info("{} ({}) asked for lurkers", context, users.get(context.channel()));
         context.writeAndFlush("there are " + (channels.size() - users.size()) + " nameless lurkers.\n");
-      } else if (lurkersArg.equalsIgnoreCase("kick")) {
+      } else if ("kick".equalsIgnoreCase(lurkersArg)) {
         LOGGER.info("{} ({}) kicked lurkers", context, users.get(context.channel()));
         Set<Channel> toRemove = new HashSet<>();
         for (Channel channel : channels) {
