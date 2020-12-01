@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 public class ChatHandler extends SimpleChannelInboundHandler<String> {
   private static final Logger LOGGER = LoggerFactory.getLogger(ChatHandler.class);
@@ -24,6 +25,8 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
   private static final String GOODBYE = "Disconnected.\n";
   private static final String SET_NAME_COMMAND = "/name ";
   private static final String HELP_COMMAND = "/help ";
+  private static final String LIST_USERS_COMMAND = "/list ";
+  private static final String LURKERS_COMMAND = "/lurkers ";
   private static final String DISCONNECT_COMMAND = "/quit";
 
   @Override
@@ -43,36 +46,42 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
   @Override
   protected void channelRead0(ChannelHandlerContext context, String msg) {
     if (DISCONNECT_COMMAND.equals(msg.toLowerCase())) {
-      for (Channel c : channels) {
-        if (c != context.channel()) {
-          c.writeAndFlush(idFromContext(context) + " left chat.\n");
-        }
-      }
+      blast(context, idFromContext(context) + " left chat.");
       sayBye(context);
       return;
     }
 
+    if (msg.startsWith(LURKERS_COMMAND)) {
+      String lurkersArg = msg.substring(SET_NAME_COMMAND.length()).trim();
+      if (lurkersArg.isBlank()) {
+        context.writeAndFlush("there are " + (channels.size() - users.size()) + " nameless lurkers.\n");
+      } else if (lurkersArg.equalsIgnoreCase("kick")) {
+        Set<Channel> toRemove = new HashSet<>();
+        for (Channel channel : channels) {
+          if (!users.containsKey(channel)) {
+            channel.close();
+            toRemove.add(channel);
+          }
+        }
+        channels.removeAll(toRemove);
+      }
+    }
+
     if (msg.startsWith(SET_NAME_COMMAND)) {
       String newName = msg.substring(SET_NAME_COMMAND.length()).trim();
-      if (usernames.contains(newName)) {
-        context.writeAndFlush("Sorry that username is taken.\n");
-        return;
-      }
-
-      users.put(context.channel(), new User(newName));
-      usernames.add(newName);
-      context.writeAndFlush("Name set to " + newName + "\n");
-      for (Channel c : channels) {
-        if (c != context.channel()) {
-          c.writeAndFlush(idFromContext(context) + " joined chat.\n");
-        }
-      }
-
+      registerName(context, newName);
+      blast(context, idFromContext(context) + " joined chat.");
       return;
     }
 
     if (msg.startsWith(HELP_COMMAND)) {
       context.writeAndFlush("/name <NAME> to set your username\n/quit to disconnect\n/help prints this message\n");
+      return;
+    }
+
+    if (msg.startsWith(LIST_USERS_COMMAND)) {
+      String users = usernames.stream().collect(Collectors.joining("\n"));
+      context.writeAndFlush("current users:\n" + users + "\n");
       return;
     }
 
@@ -85,18 +94,32 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
       return;
     }
 
-    for (Channel c : channels) {
-      if (c != context.channel()) {
-        c.writeAndFlush(idFromContext(context) + ": " + msg + "\n");
-      }
-    }
-
+    blast(context, idFromContext(context) + ": " + msg);
   }
 
   private String idFromContext(ChannelHandlerContext context) {
     return users.getOrDefault(context.channel(),
                               new User(context.channel().remoteAddress().toString()))
         .name;
+  }
+
+  private void registerName(ChannelHandlerContext context, String name) {
+    if (name == null || name.isBlank()) {
+      context.writeAndFlush("Sorry that username is invalid.\n");
+      return;
+    }
+    if (usernames.contains(name)) {
+      context.writeAndFlush("Sorry that username is taken.\n");
+      return;
+    }
+
+    if (users.containsKey(context.channel())) {
+      blast(context, users.get(context.channel()).name + " is now known as " + name);
+    }
+
+    users.put(context.channel(), new User(name));
+    usernames.add(name);
+    context.writeAndFlush("Name set to " + name + "\n");
   }
 
   private void sayBye(ChannelHandlerContext context) {
@@ -107,5 +130,13 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
       usernames.remove(user.name);
     }
     context.close();
+  }
+
+  private void blast(ChannelHandlerContext context, String message) {
+    for (Channel c : channels) {
+      if (c != context.channel()) {
+        c.writeAndFlush(message + "\n");
+      }
+    }
   }
 }
