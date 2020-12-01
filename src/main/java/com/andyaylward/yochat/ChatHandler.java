@@ -24,9 +24,10 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
   private static final String HELLO = "Connected. Enter a username by typing `/name <your name>`.\n";
   private static final String GOODBYE = "Disconnected.\n";
   private static final String SET_NAME_COMMAND = "/name ";
-  private static final String HELP_COMMAND = "/help ";
-  private static final String LIST_USERS_COMMAND = "/who ";
-  private static final String LURKERS_COMMAND = "/lurkers ";
+  private static final String HELP_COMMAND = "/help";
+  private static final String LIST_USERS_COMMAND = "/who";
+  private static final String LURKERS_COMMAND = "/lurkers";
+  private static final String KICK_LURKERS_COMMAND = "/kick-lurkers";
   private static final String DISCONNECT_COMMAND = "/quit";
 
   @Override
@@ -44,33 +45,33 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
   }
 
   @Override
-  protected void channelRead0(ChannelHandlerContext context, String msg) {
+  protected void channelRead0(ChannelHandlerContext context, String rawMessage) {
+    String msg = rawMessage.trim();
     LOGGER.info("{} ({}) said {}", context, users.get(context.channel()), msg);
 
-    if (DISCONNECT_COMMAND.equals(msg.toLowerCase())) {
+    if (DISCONNECT_COMMAND.equalsIgnoreCase(msg)) {
       LOGGER.info("{} ({}) disconnected", context, users.get(context.channel()));
       blast(context, idFromContext(context) + " left chat.");
       sayBye(context);
       return;
     }
 
-    if (msg.startsWith(LURKERS_COMMAND)) {
-      LOGGER.info("{} ({}) did lurkers", context, users.get(context.channel()));
-      String lurkersArg = msg.substring(LURKERS_COMMAND.length()).trim();
-      if (lurkersArg.isBlank()) {
-        LOGGER.info("{} ({}) asked for lurkers", context, users.get(context.channel()));
-        context.writeAndFlush("there are " + (channels.size() - users.size()) + " nameless lurkers.\n");
-      } else if ("kick".equalsIgnoreCase(lurkersArg)) {
-        LOGGER.info("{} ({}) kicked lurkers", context, users.get(context.channel()));
-        Set<Channel> toRemove = new HashSet<>();
-        for (Channel channel : channels) {
-          if (!users.containsKey(channel)) {
-            channel.close();
-            toRemove.add(channel);
-          }
+    if (LURKERS_COMMAND.equalsIgnoreCase(msg)) {
+      LOGGER.info("{} ({}) asked for lurkers", context, users.get(context.channel()));
+      context.writeAndFlush("there are " + (channels.size() - users.size()) + " nameless lurkers.\n");
+      return;
+    }
+
+    if (KICK_LURKERS_COMMAND.equalsIgnoreCase(msg)) {
+      LOGGER.info("{} ({}) kicked lurkers", context, users.get(context.channel()));
+      Set<Channel> toRemove = new HashSet<>();
+      for (Channel channel : channels) {
+        if (!users.containsKey(channel)) {
+          channel.close();
+          toRemove.add(channel);
         }
-        channels.removeAll(toRemove);
       }
+      channels.removeAll(toRemove);
       return;
     }
 
@@ -82,13 +83,13 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
       return;
     }
 
-    if (msg.startsWith(HELP_COMMAND)) {
+    if (HELP_COMMAND.equalsIgnoreCase(msg)) {
       LOGGER.info("{} ({}) asked for help", context, users.get(context.channel()));
       context.writeAndFlush("/name <NAME> to set your username\n/quit to disconnect\n/help prints this message\n");
       return;
     }
 
-    if (msg.startsWith(LIST_USERS_COMMAND)) {
+    if (LIST_USERS_COMMAND.equalsIgnoreCase(msg)) {
       LOGGER.info("{} ({}) asked for users", context, users.get(context.channel()));
       String users = usernames.stream().collect(Collectors.joining("\n"));
       context.writeAndFlush("current users:\n" + users + "\n");
