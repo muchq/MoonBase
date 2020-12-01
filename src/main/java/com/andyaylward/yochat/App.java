@@ -8,7 +8,7 @@ import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 
 public class App {
-  private static final int PORT = Integer.parseInt(System.getProperty("port", "8992"));
+  private static final int PORT = Integer.parseInt(System.getenv("PORT"));
 
   public static void main(String[] args) throws Exception {
     EventLoopGroup bossGroup = new NioEventLoopGroup(1);
