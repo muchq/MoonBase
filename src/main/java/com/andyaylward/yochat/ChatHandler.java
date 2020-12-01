@@ -46,16 +46,19 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
   @Override
   protected void channelRead0(ChannelHandlerContext context, String msg) {
     if (DISCONNECT_COMMAND.equals(msg.toLowerCase())) {
+      LOGGER.info("{} ({}) disconnected", context, users.get(context.channel()));
       blast(context, idFromContext(context) + " left chat.");
       sayBye(context);
       return;
     }
 
     if (msg.startsWith(LURKERS_COMMAND)) {
-      String lurkersArg = msg.substring(SET_NAME_COMMAND.length()).trim();
+      String lurkersArg = msg.substring(LURKERS_COMMAND.length()).trim();
       if (lurkersArg.isBlank()) {
+        LOGGER.info("{} ({}) asked for lurkers", context, users.get(context.channel()));
         context.writeAndFlush("there are " + (channels.size() - users.size()) + " nameless lurkers.\n");
       } else if (lurkersArg.equalsIgnoreCase("kick")) {
+        LOGGER.info("{} ({}) kicked lurkers", context, users.get(context.channel()));
         Set<Channel> toRemove = new HashSet<>();
         for (Channel channel : channels) {
           if (!users.containsKey(channel)) {
@@ -65,9 +68,11 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
         }
         channels.removeAll(toRemove);
       }
+      return;
     }
 
     if (msg.startsWith(SET_NAME_COMMAND)) {
+      LOGGER.info("{} ({}) set name", context, users.get(context.channel()));
       String newName = msg.substring(SET_NAME_COMMAND.length()).trim();
       registerName(context, newName);
       blast(context, idFromContext(context) + " joined chat.");
@@ -75,11 +80,13 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
     }
 
     if (msg.startsWith(HELP_COMMAND)) {
+      LOGGER.info("{} ({}) asked for help", context, users.get(context.channel()));
       context.writeAndFlush("/name <NAME> to set your username\n/quit to disconnect\n/help prints this message\n");
       return;
     }
 
     if (msg.startsWith(LIST_USERS_COMMAND)) {
+      LOGGER.info("{} ({}) asked for users", context, users.get(context.channel()));
       String users = usernames.stream().collect(Collectors.joining("\n"));
       context.writeAndFlush("current users:\n" + users + "\n");
       return;
