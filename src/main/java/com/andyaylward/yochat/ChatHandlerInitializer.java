@@ -7,23 +7,14 @@ import io.netty.handler.codec.DelimiterBasedFrameDecoder;
 import io.netty.handler.codec.Delimiters;
 import io.netty.handler.codec.string.StringDecoder;
 import io.netty.handler.codec.string.StringEncoder;
-import io.netty.handler.ssl.SslContext;
 
-public class HandlerInitializer extends ChannelInitializer<SocketChannel> {
-
-  private final SslContext sslCtx;
-
-  public HandlerInitializer(SslContext sslCtx) {
-    this.sslCtx = sslCtx;
-  }
-
+public class ChatHandlerInitializer extends ChannelInitializer<SocketChannel> {
   @Override
   public void initChannel(SocketChannel ch) {
     ChannelPipeline pipeline = ch.pipeline();
-    pipeline.addLast(sslCtx.newHandler(ch.alloc()));
     pipeline.addLast(new DelimiterBasedFrameDecoder(8192, Delimiters.lineDelimiter()));
     pipeline.addLast(new StringDecoder());
     pipeline.addLast(new StringEncoder());
-    pipeline.addLast(new Handler());
+    pipeline.addLast(new ChatHandler());
   }
 }

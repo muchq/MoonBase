@@ -5,18 +5,20 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
-import io.netty.handler.ssl.SslHandler;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
-public class Handler extends SimpleChannelInboundHandler<String> {
-  private static final Logger LOGGER = LoggerFactory.getLogger(Handler.class);
+public class ChatHandler extends SimpleChannelInboundHandler<String> {
+  private static final Logger LOGGER = LoggerFactory.getLogger(ChatHandler.class);
   private static final ChannelGroup channels = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
   private static final Map<Channel, User> users = new HashMap<>();
+  private static final Set<String> usernames = new HashSet<>();
 
   private static final String HELLO = "Connected. Enter a username by typing `/name <your name>`.\n";
   private static final String GOODBYE = "Disconnected.\n";
@@ -26,11 +28,8 @@ public class Handler extends SimpleChannelInboundHandler<String> {
 
   @Override
   public void channelActive(ChannelHandlerContext context) {
-    context.pipeline().get(SslHandler.class).handshakeFuture().addListener(
-        future -> {
-          context.writeAndFlush(HELLO);
-         channels.add(context.channel());
-        });
+    context.writeAndFlush(HELLO);
+    channels.add(context.channel());
   }
 
   @Override
@@ -44,14 +43,31 @@ public class Handler extends SimpleChannelInboundHandler<String> {
   @Override
   protected void channelRead0(ChannelHandlerContext context, String msg) {
     if (DISCONNECT_COMMAND.equals(msg.toLowerCase())) {
+      for (Channel c : channels) {
+        if (c != context.channel()) {
+          c.writeAndFlush(idFromContext(context) + " left chat.\n");
+        }
+      }
       sayBye(context);
       return;
     }
 
     if (msg.startsWith(SET_NAME_COMMAND)) {
       String newName = msg.substring(SET_NAME_COMMAND.length()).trim();
+      if (usernames.contains(newName)) {
+        context.writeAndFlush("Sorry that username is taken.\n");
+        return;
+      }
+
       users.put(context.channel(), new User(newName));
+      usernames.add(newName);
       context.writeAndFlush("Name set to " + newName + "\n");
+      for (Channel c : channels) {
+        if (c != context.channel()) {
+          c.writeAndFlush(idFromContext(context) + " joined chat.\n");
+        }
+      }
+
       return;
     }
 
@@ -85,8 +101,11 @@ public class Handler extends SimpleChannelInboundHandler<String> {
 
   private void sayBye(ChannelHandlerContext context) {
     context.writeAndFlush(GOODBYE);
-    context.close();
     channels.remove(context.channel());
-    users.remove(context.channel());
+    User user = users.remove(context.channel());
+    if (user != null) {
+      usernames.remove(user.name);
+    }
+    context.close();
   }
 }
