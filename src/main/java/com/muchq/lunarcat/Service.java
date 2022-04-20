@@ -25,7 +25,7 @@ public class Service {
   private static final Logger LOGGER = LoggerFactory.getLogger(Service.class);
   private static final String DEFAULT_CONTEXT_PATH = "/";
   private static final String DEFAULT_SERVLET_PATH_SPEC = "/*";
-  private static final TypeLiteral<Set<StartupTask>> TASKS_TYPE = new TypeLiteral<Set<StartupTask>>() {};
+  private static final TypeLiteral<Set<StartupTask>> TASKS_TYPE = new TypeLiteral<>() {};
 
   public enum ServerMode {
     WAIT,

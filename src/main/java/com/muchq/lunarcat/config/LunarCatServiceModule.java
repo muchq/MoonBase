@@ -3,7 +3,6 @@ package com.muchq.lunarcat.config;
 import com.google.common.collect.Sets;
 import com.google.inject.AbstractModule;
 import com.google.inject.Inject;
-import com.google.inject.Scope;
 import com.google.inject.Scopes;
 import com.google.inject.Singleton;
 import com.google.inject.multibindings.Multibinder;
@@ -39,7 +38,7 @@ public class LunarCatServiceModule extends AbstractModule {
     Multibinder<StartupTask> multibinder = Multibinder.newSetBinder(binder(), StartupTask.class);
     Set<Class<? extends StartupTask>> tasks = new Reflections(
       new ConfigurationBuilder()
-        .forPackages(packagesToScan.toArray(new String[packagesToScan.size()]))
+        .forPackages(packagesToScan.toArray(new String[0]))
         .setScanners(new SubTypesScanner(true))
     )
       .getSubTypesOf(StartupTask.class);
@@ -69,15 +68,15 @@ public class LunarCatServiceModule extends AbstractModule {
     bindType(reflections, Named.class);
     bindType(reflections, javax.inject.Named.class);
 
-    bindSingleton(reflections, Singleton.class, Scopes.SINGLETON);
-    bindSingleton(reflections, javax.inject.Singleton.class, Scopes.SINGLETON);
+    bindSingleton(reflections, Singleton.class);
+    bindSingleton(reflections, javax.inject.Singleton.class);
   }
 
   private void bindType(Reflections reflections, Class<? extends Annotation> type) {
     reflections.getTypesAnnotatedWith(type).forEach(this::bind);
   }
 
-  private void bindSingleton(Reflections reflections, Class<? extends Annotation> type, Scope scope) {
+  private void bindSingleton(Reflections reflections, Class<? extends Annotation> type) {
     reflections.getTypesAnnotatedWith(type).forEach(this::bindSingleton);
   }
 

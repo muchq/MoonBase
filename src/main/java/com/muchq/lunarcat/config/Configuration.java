@@ -14,7 +14,7 @@ public class Configuration {
 
   private final Integer port;
   private final Package basePackage;
-  private Optional<String> contextPathMaybe = Optional.empty();
+  private Optional<String> contextPathMaybe;
   private final Set<Module> modules = new HashSet<>();
 
   private Configuration(Integer port, Package basePackage, String contextPathMaybe, Set<Module> modules) {

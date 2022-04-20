@@ -51,7 +51,7 @@ public class OptionalMessageBodyWriter implements MessageBodyWriter<Optional<?>>
     MultivaluedMap<String, Object> httpHeaders,
     OutputStream entityStream
   ) throws IOException {
-    if (!entity.isPresent()) {
+    if (entity.isEmpty()) {
       throw new NotFoundException();
     }
 
