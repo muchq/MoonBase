@@ -1,6 +1,5 @@
 package com.muchq.lunarcat;
 
-
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.google.inject.Key;
@@ -10,6 +9,8 @@ import com.google.inject.TypeLiteral;
 import com.muchq.lunarcat.config.Configuration;
 import com.muchq.lunarcat.config.LunarCatServiceModule;
 import com.muchq.lunarcat.lifecycle.StartupTask;
+import java.util.EventListener;
+import java.util.Set;
 import org.eclipse.jetty.server.Handler;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletContextHandler;
@@ -19,25 +20,24 @@ import org.jboss.resteasy.plugins.server.servlet.HttpServletDispatcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.EventListener;
-import java.util.Set;
-
 public class Service {
+
   private static final Logger LOGGER = LoggerFactory.getLogger(Service.class);
   private static final String DEFAULT_CONTEXT_PATH = "/";
   private static final String DEFAULT_SERVLET_PATH_SPEC = "/*";
-  private static final TypeLiteral<Set<StartupTask>> TASKS_TYPE = new TypeLiteral<Set<StartupTask>>(){};
+  private static final TypeLiteral<Set<StartupTask>> TASKS_TYPE = new TypeLiteral<Set<StartupTask>>() {};
 
-  public enum ServerMode { WAIT, NO_WAIT }
+  public enum ServerMode {
+    WAIT,
+    NO_WAIT,
+  }
 
   private final Server server;
   private final Injector injector;
 
   public Service(Configuration configuration) {
     this.injector = createInjector(configuration);
-    this.server = newServer(configuration,
-                            injector.getInstance(
-                                GuiceResteasyBootstrapServletContextListener.class));
+    this.server = newServer(configuration, injector.getInstance(GuiceResteasyBootstrapServletContextListener.class));
   }
 
   public void run() {

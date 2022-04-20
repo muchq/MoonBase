@@ -58,10 +58,6 @@
       <artifactId>guice</artifactId>
     </dependency>
     <dependency>
-      <groupId>com.google.inject.extensions</groupId>
-      <artifactId>guice-multibindings</artifactId>
-    </dependency>
-    <dependency>
       <groupId>com.google.guava</groupId>
       <artifactId>guava</artifactId>
     </dependency>
@@ -79,7 +75,7 @@
     <dependency>
       <groupId>com.hubspot</groupId>
       <artifactId>HorizonApache</artifactId>
-      <version>0.1.0</version>
+      <version>0.2.0</version>
       <scope>test</scope>
     </dependency>
   </dependencies>

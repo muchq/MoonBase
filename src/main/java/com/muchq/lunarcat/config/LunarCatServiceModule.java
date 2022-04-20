@@ -10,17 +10,17 @@ import com.google.inject.multibindings.Multibinder;
 import com.google.inject.name.Named;
 import com.muchq.json.ObjectMapperModule;
 import com.muchq.lunarcat.lifecycle.StartupTask;
+import java.lang.annotation.Annotation;
+import java.util.Set;
+import javax.ws.rs.Path;
+import javax.ws.rs.ext.Provider;
 import org.jboss.resteasy.plugins.guice.ext.RequestScopeModule;
 import org.reflections.Reflections;
 import org.reflections.scanners.SubTypesScanner;
 import org.reflections.util.ConfigurationBuilder;
 
-import javax.ws.rs.Path;
-import javax.ws.rs.ext.Provider;
-import java.lang.annotation.Annotation;
-import java.util.Set;
-
 public class LunarCatServiceModule extends AbstractModule {
+
   private final Set<String> packagesToScan = Sets.newHashSet("com.muchq.lunarcat");
 
   public LunarCatServiceModule(String basePackage) {
@@ -37,12 +37,12 @@ public class LunarCatServiceModule extends AbstractModule {
 
   private void bindStartupTasks() {
     Multibinder<StartupTask> multibinder = Multibinder.newSetBinder(binder(), StartupTask.class);
-    Set<Class<? extends StartupTask>> tasks =
-        new Reflections(
-            new ConfigurationBuilder()
-                .forPackages(packagesToScan.toArray(new String[packagesToScan.size()]))
-                .setScanners(new SubTypesScanner(true)))
-            .getSubTypesOf(StartupTask.class);
+    Set<Class<? extends StartupTask>> tasks = new Reflections(
+      new ConfigurationBuilder()
+        .forPackages(packagesToScan.toArray(new String[packagesToScan.size()]))
+        .setScanners(new SubTypesScanner(true))
+    )
+      .getSubTypesOf(StartupTask.class);
 
     if (tasks != null) {
       for (Class<? extends StartupTask> task : tasks) {
@@ -74,13 +74,11 @@ public class LunarCatServiceModule extends AbstractModule {
   }
 
   private void bindType(Reflections reflections, Class<? extends Annotation> type) {
-    reflections.getTypesAnnotatedWith(type)
-        .forEach(this::bind);
+    reflections.getTypesAnnotatedWith(type).forEach(this::bind);
   }
 
   private void bindSingleton(Reflections reflections, Class<? extends Annotation> type, Scope scope) {
-    reflections.getTypesAnnotatedWith(type)
-        .forEach(this::bindSingleton);
+    reflections.getTypesAnnotatedWith(type).forEach(this::bindSingleton);
   }
 
   private <T> void bindSingleton(Class<T> type) {

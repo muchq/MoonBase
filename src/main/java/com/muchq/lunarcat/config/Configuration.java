@@ -2,13 +2,13 @@ package com.muchq.lunarcat.config;
 
 import com.google.common.base.Preconditions;
 import com.google.inject.Module;
-
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 
 public class Configuration {
+
   public static final String PORT_PROPERTY_NAME = "PORT";
   public static final String CONTEXT_PATH_PROPERTY_NAME = "APP_ROOT";
 
@@ -17,10 +17,7 @@ public class Configuration {
   private Optional<String> contextPathMaybe = Optional.empty();
   private final Set<Module> modules = new HashSet<>();
 
-  private Configuration(Integer port,
-                        Package basePackage,
-                        String contextPathMaybe,
-                        Set<Module> modules) {
+  private Configuration(Integer port, Package basePackage, String contextPathMaybe, Set<Module> modules) {
     this.port = port;
     this.basePackage = basePackage;
     this.contextPathMaybe = Optional.ofNullable(contextPathMaybe);
@@ -48,6 +45,7 @@ public class Configuration {
   }
 
   public static class Builder {
+
     private Package basePackage;
     private Integer port;
     private String appRoot;

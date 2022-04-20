@@ -3,6 +3,7 @@ package com.muchq.lunarcat.util;
 import javax.ws.rs.BadRequestException;
 
 public final class PublicPreconditions {
+
   private PublicPreconditions() {}
 
   public static void checkArgument(boolean condition, String message) {

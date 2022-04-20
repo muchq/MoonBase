@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class BannerStartupTask implements StartupTask {
+
   private static final Logger LOG = LoggerFactory.getLogger(BannerStartupTask.class);
 
   @Override
