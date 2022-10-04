@@ -1,2 +1,4 @@
 target
 *.iml
+bazel-*
+.DS_Store

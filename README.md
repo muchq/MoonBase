@@ -3,13 +3,9 @@ This project provides the [slf4j](https://www.slf4j.org/) api and [logback](http
 
 To configure Sentry, set `sentry.dsn` as a system property or `SENTRY_DSN` as an environment variable.
 
-# Maven
+# Build
 ```
-<dependency>
-  <groupId>com.muchq</groupId>
-  <artifactId>Logging</artifactId>
-  <version>1.0-SNAPSHOT</version>
-</dependency>
+bazel //:logging
 ```
 
 # Support
