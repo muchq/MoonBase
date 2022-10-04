@@ -1,0 +1,3 @@
+build --experimental_convenience_symlinks=ignore
+build --color=yes
+
