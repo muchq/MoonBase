@@ -2,19 +2,32 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<<<<<<< HEAD
   <modelVersion>4.0.0</modelVersion>
 
+=======
+>>>>>>> JsonUtils/master
   <parent>
     <groupId>com.muchq</groupId>
     <artifactId>Base</artifactId>
     <version>1.0-SNAPSHOT</version>
   </parent>
 
+<<<<<<< HEAD
   <artifactId>LunarCat</artifactId>
 
   <issueManagement>
     <system>GitHub Issues</system>
     <url>https://github.com/muchq/LunarCat/issues</url>
+=======
+  <modelVersion>4.0.0</modelVersion>
+  <artifactId>JsonUtils</artifactId>
+  <version>1.0-SNAPSHOT</version>
+
+  <issueManagement>
+    <system>GitHub Issues</system>
+    <url>https://github.com/muchq/JsonUtils/issues</url>
+>>>>>>> JsonUtils/master
   </issueManagement>
   <licenses>
     <license>
@@ -26,6 +39,7 @@
 
   <dependencies>
     <dependency>
+<<<<<<< HEAD
       <groupId>org.jboss.resteasy</groupId>
       <artifactId>resteasy-jackson2-provider</artifactId>
     </dependency>
@@ -60,6 +74,26 @@
     <dependency>
       <groupId>com.google.guava</groupId>
       <artifactId>guava</artifactId>
+=======
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.datatype</groupId>
+      <artifactId>jackson-datatype-jdk8</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.datatype</groupId>
+      <artifactId>jackson-datatype-guava</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.datatype</groupId>
+      <artifactId>jackson-datatype-jsr310</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.muchq</groupId>
+      <artifactId>GuiceyHelpers</artifactId>
+>>>>>>> JsonUtils/master
     </dependency>
 
     <dependency>
@@ -73,6 +107,7 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+<<<<<<< HEAD
       <groupId>com.hubspot</groupId>
       <artifactId>HorizonApache</artifactId>
       <version>0.2.0</version>
@@ -80,4 +115,11 @@
     </dependency>
   </dependencies>
 
+=======
+      <groupId>com.google.guava</groupId>
+      <artifactId>guava</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+>>>>>>> JsonUtils/master
 </project>
