@@ -34,6 +34,6 @@ jobs:
           command: bazel build //...
 
 workflows:
-  my-workflow:
+  moon-base:
     jobs:
       - moon-base-job
