@@ -1,14 +1,36 @@
 version: 2.1
 
+commands:
+  setup-bazel:
+    description: |
+      Setup the Bazel build system used for building Android projects
+    steps:
+      - run:
+          name: Add Bazel Apt repository
+          command: |
+            sudo apt install curl gnupg
+            curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor > bazel.gpg
+            sudo mv bazel.gpg /etc/apt/trusted.gpg.d/
+            echo "deb [arch=amd64] https://storage.googleapis.com/bazel-apt stable jdk11" | sudo tee /etc/apt/sources.list.d/bazel.list
+      - run:
+          name: Install Bazel from Apt
+          command: sudo apt update && sudo apt install bazel
+
 jobs:
-  hello-job:
+  moon-base:
     machine:
       image: ubuntu-2204:2022.07.1
     steps:
+      - setup-bazel
       - checkout # check out the code in the project directory
-      - run: echo "hello world" # run the `echo` command
+      - run:
+        name: Run Tests
+        command: bazel test //...
+      - run
+        name: Run Build
+        command: bazel build //...
 
 workflows:
   my-workflow:
     jobs:
-      - hello-job
+      - moon-base
