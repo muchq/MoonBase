@@ -11,15 +11,18 @@ import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 public class ChatHandler extends SimpleChannelInboundHandler<String> {
   private static final Logger LOGGER = LoggerFactory.getLogger(ChatHandler.class);
-  private static final ChannelGroup channels = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
-  private static final Map<Channel, User> users = new HashMap<>();
-  private static final Set<String> usernames = new HashSet<>();
+
+  private final ChannelGroup channels = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
+  private final Map<Channel, User> users = new HashMap<>();
+  private final Set<String> usernames = new HashSet<>();
+  private final CommandProcessor commandProcessor;
 
   private static final String HELLO = "Connected. Enter a username by typing `/name <your name>`.\n";
   private static final String GOODBYE = "Disconnected.\n";
@@ -29,6 +32,10 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
   private static final String LURKERS_COMMAND = "/lurkers";
   private static final String KICK_LURKERS_COMMAND = "/kick-lurkers";
   private static final String DISCONNECT_COMMAND = "/quit";
+
+  public ChatHandler(CommandProcessor commandProcessor) {
+    this.commandProcessor = commandProcessor;
+  }
 
   @Override
   public void channelActive(ChannelHandlerContext context) {
@@ -47,7 +54,16 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
   @Override
   protected void channelRead0(ChannelHandlerContext context, String rawMessage) {
     String msg = rawMessage.trim();
+    if (msg.isBlank()) {
+      return;
+    }
+
     LOGGER.info("{} ({}) said {}", context, users.get(context.channel()), msg);
+
+    if (msg.startsWith("/")) {
+      commandProcessor.process(context, msg);
+      return;
+    }
 
     if (DISCONNECT_COMMAND.equalsIgnoreCase(msg)) {
       LOGGER.info("{} ({}) disconnected", context, users.get(context.channel()));
@@ -91,17 +107,13 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
 
     if (LIST_USERS_COMMAND.equalsIgnoreCase(msg)) {
       LOGGER.info("{} ({}) asked for users", context, users.get(context.channel()));
-      String users = usernames.stream().collect(Collectors.joining("\n"));
+      String users = String.join("\n", usernames);
       context.writeAndFlush("current users:\n" + users + "\n");
       return;
     }
 
     if (!users.containsKey(context.channel())) {
       context.writeAndFlush("Pick a name before sending messages! Type /help for help.\n");
-      return;
-    }
-
-    if (msg.trim().isBlank()) {
       return;
     }
 

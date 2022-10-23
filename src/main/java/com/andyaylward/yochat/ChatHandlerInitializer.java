@@ -15,6 +15,6 @@ public class ChatHandlerInitializer extends ChannelInitializer<SocketChannel> {
     pipeline.addLast(new DelimiterBasedFrameDecoder(8192, Delimiters.lineDelimiter()));
     pipeline.addLast(new StringDecoder());
     pipeline.addLast(new StringEncoder());
-    pipeline.addLast(new ChatHandler());
+    pipeline.addLast(new ChatHandler(new CommandProcessor()));
   }
 }
