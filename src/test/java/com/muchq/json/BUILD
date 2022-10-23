@@ -1,6 +1,7 @@
-java_test(
-    name = "JsonUtilsTest",
-    size = "small",
+load("//:tools/junit.bzl", "junit_tests")
+
+junit_tests(
+    name = "json_tests",
     srcs = glob(["*.java"]),
     deps = [
       "//src/main/java/com/muchq/json",
