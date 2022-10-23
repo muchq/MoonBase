@@ -8,29 +8,32 @@ commands:
       - run:
           name: Add Bazel Apt repository
           command: |
-            sudo apt install curl gnupg
-            curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor > bazel.gpg
-            sudo mv bazel.gpg /etc/apt/trusted.gpg.d/
-            echo "deb [arch=amd64] https://storage.googleapis.com/bazel-apt stable jdk11" | sudo tee /etc/apt/sources.list.d/bazel.list
+            sudo apt install apt-transport-https curl gnupg
+            curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor >bazel-archive-keyring.gpg
+            sudo mv bazel-archive-keyring.gpg /usr/share/keyrings
+            echo "deb [arch=amd64 signed-by=/usr/share/keyrings/bazel-archive-keyring.gpg] https://storage.googleapis.com/bazel-apt stable jdk1.8" | sudo tee /etc/apt/sources.list.d/bazel.list
       - run:
           name: Install Bazel from Apt
           command: sudo apt update && sudo apt install bazel
+      - run:
+          name: Install JDK
+          command: sudo apt install openjdk-11-jdk
 
 jobs:
-  moon-base:
+  moon-base-job:
     machine:
       image: ubuntu-2204:2022.07.1
     steps:
       - setup-bazel
       - checkout # check out the code in the project directory
       - run:
-        name: Run Tests
-        command: bazel test //...
-      - run:
-        name: Run Build
-        command: bazel build //...
+          name: Run Tests
+          command: bazel test //...
+      - run
+          name: Run Build
+          command: bazel build //...
 
 workflows:
   my-workflow:
     jobs:
-      - moon-base
+      - moon-base-job
