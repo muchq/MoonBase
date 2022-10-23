@@ -1,4 +1,4 @@
-package com.andyaylward.yochat;
+package com.muchq.yochat;
 
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;

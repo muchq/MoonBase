@@ -1,4 +1,4 @@
-package com.andyaylward.yochat;
+package com.muchq.yochat;
 
 import java.util.Objects;
 import java.util.StringJoiner;
