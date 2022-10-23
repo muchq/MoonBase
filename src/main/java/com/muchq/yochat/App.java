@@ -1,5 +1,7 @@
 package com.muchq.yochat;
 
+import com.muchq.yochat.lib.ChatHandlerInitializer;
+
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
