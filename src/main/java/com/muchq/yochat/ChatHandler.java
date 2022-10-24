@@ -1,28 +1,26 @@
-package com.muchq.yochat.lib;
+package com.muchq.yochat;
 
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.group.ChannelGroup;
+import io.netty.channel.group.ChannelMatchers;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListSet;
 
 public class ChatHandler extends SimpleChannelInboundHandler<String> {
   private static final Logger LOGGER = LoggerFactory.getLogger(ChatHandler.class);
 
   private final ChannelGroup channels = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
-  private final Map<Channel, User> users = new HashMap<>();
-  private final Set<String> usernames = new HashSet<>();
-  private final CommandProcessor commandProcessor;
+  private final Map<Channel, String> users = new ConcurrentHashMap<>();
+  private final Set<String> usernames = new ConcurrentSkipListSet<>();
 
   private static final String HELLO = "Connected. Enter a username by typing `/name <your name>`.\n";
   private static final String GOODBYE = "Disconnected.\n";
@@ -32,10 +30,6 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
   private static final String LURKERS_COMMAND = "/lurkers";
   private static final String KICK_LURKERS_COMMAND = "/kick-lurkers";
   private static final String DISCONNECT_COMMAND = "/quit";
-
-  public ChatHandler(CommandProcessor commandProcessor) {
-    this.commandProcessor = commandProcessor;
-  }
 
   @Override
   public void channelActive(ChannelHandlerContext context) {
@@ -47,7 +41,6 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
   public void exceptionCaught(ChannelHandlerContext context, Throwable cause) {
     LOGGER.error("Unhandled error from {}", idFromContext(context), cause);
     users.remove(context.channel());
-    channels.remove(context.channel());
     context.close();
   }
 
@@ -59,11 +52,6 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
     }
 
     LOGGER.info("{} ({}) said {}", context, users.get(context.channel()), msg);
-
-    if (msg.startsWith("/")) {
-      commandProcessor.process(context, msg);
-      return;
-    }
 
     if (DISCONNECT_COMMAND.equalsIgnoreCase(msg)) {
       LOGGER.info("{} ({}) disconnected", context, users.get(context.channel()));
@@ -80,14 +68,11 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
 
     if (KICK_LURKERS_COMMAND.equalsIgnoreCase(msg)) {
       LOGGER.info("{} ({}) kicked lurkers", context, users.get(context.channel()));
-      Set<Channel> toRemove = new HashSet<>();
       for (Channel channel : channels) {
         if (!users.containsKey(channel)) {
           channel.close();
-          toRemove.add(channel);
         }
       }
-      channels.removeAll(toRemove);
       return;
     }
 
@@ -121,11 +106,10 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
   }
 
   private String idFromContext(ChannelHandlerContext context) {
-    return users.getOrDefault(context.channel(),
-                              new User(context.channel().remoteAddress().toString()))
-        .name;
+    return users.getOrDefault(context.channel(), context.channel().remoteAddress().toString());
   }
 
+  // FIXME: racy
   private void registerName(ChannelHandlerContext context, String name) {
     if (name == null || name.isBlank()) {
       context.writeAndFlush("Sorry that username is invalid.\n");
@@ -137,29 +121,25 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
     }
 
     if (users.containsKey(context.channel())) {
-      blast(context, users.get(context.channel()).name + " is now known as " + name);
+      blast(context, users.get(context.channel()) + " is now known as " + name);
     }
 
-    users.put(context.channel(), new User(name));
+    users.put(context.channel(), name);
     usernames.add(name);
     context.writeAndFlush("Name set to " + name + "\n");
   }
 
   private void sayBye(ChannelHandlerContext context) {
     context.writeAndFlush(GOODBYE);
-    channels.remove(context.channel());
-    User user = users.remove(context.channel());
+    String user = users.remove(context.channel());
     if (user != null) {
-      usernames.remove(user.name);
+      usernames.remove(user);
     }
     context.close();
   }
 
   private void blast(ChannelHandlerContext context, String message) {
-    for (Channel c : channels) {
-      if (c != context.channel()) {
-        c.writeAndFlush(message + "\n");
-      }
-    }
+    channels.writeAndFlush(message + "\n", ChannelMatchers.isNot(context.channel()));
   }
 }
+
