@@ -15,9 +15,6 @@ commands:
       - run:
           name: Install Bazel from Apt
           command: sudo apt update && sudo apt install bazel
-#      - run:
-#          name: Install JDK
-#          command: sudo apt install openjdk-17-jdk
 
 jobs:
   moon-base-job:
