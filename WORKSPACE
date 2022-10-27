@@ -1,21 +1,69 @@
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
+########################################################################################
+##################################################
+###################
+#
+#                             scala stuff
+#
+##############################################################
+########################################################################################
+SKYLIB_VERSION = "1.0.3"
+
+http_archive(
+    name = "bazel_skylib",
+    sha256 = "1c531376ac7e5a180e0237938a2536de0c54d93f5c278634818e0efc952dd56c",
+    type = "tar.gz",
+    url = "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/{}/bazel-skylib-{}.tar.gz".format(SKYLIB_VERSION, SKYLIB_VERSION),
+)
+
+RULES_SCALA_VERSION = "887c9be387734d2a49adab441d7a68414e30cbee"
+
+http_archive(
+    name = "io_bazel_rules_scala",
+    strip_prefix = "rules_scala-%s" % RULES_SCALA_VERSION,
+    type = "zip",
+    url = "https://github.com/bazelbuild/rules_scala/archive/%s.zip" % RULES_SCALA_VERSION,
+)
+
+load("@io_bazel_rules_scala//:scala_config.bzl", "scala_config")
+
+scala_config(scala_version = "3.1.0")
+
+load("@io_bazel_rules_scala//scala:scala.bzl", "scala_repositories")
+
+scala_repositories()
+
+load("@io_bazel_rules_scala//scala:toolchains.bzl", "scala_register_toolchains")
+
+scala_register_toolchains()
+
+########################################################################################
+##################################################
+###################
+#
+#                              java stuff
+#
+##############################################################
+########################################################################################
+
 RULES_JVM_EXTERNAL_TAG = "4.4.2"
 RULES_JVM_EXTERNAL_SHA = "735602f50813eb2ea93ca3f5e43b1959bd80b213b836a07a62a29d757670b77b"
 
 http_archive(
     name = "rules_jvm_external",
-    strip_prefix = "rules_jvm_external-%s" % RULES_JVM_EXTERNAL_TAG,
     sha256 = RULES_JVM_EXTERNAL_SHA,
+    strip_prefix = "rules_jvm_external-%s" % RULES_JVM_EXTERNAL_TAG,
     url = "https://github.com/bazelbuild/rules_jvm_external/archive/refs/tags/%s.zip" % RULES_JVM_EXTERNAL_TAG,
 )
 
 DAGGER_TAG = "2.44"
 DAGGER_SHA = "8c0876d46e8ce9332c4d4fbc2444420e0d75f041b3d4bab8313d2542d1e758ff"
+
 http_archive(
     name = "dagger",
-    strip_prefix = "dagger-dagger-%s" % DAGGER_TAG,
     sha256 = DAGGER_SHA,
+    strip_prefix = "dagger-dagger-%s" % DAGGER_TAG,
     urls = ["https://github.com/google/dagger/archive/dagger-%s.zip" % DAGGER_TAG],
 )
 
@@ -61,3 +109,16 @@ maven_install(
         "https://repo1.maven.org/maven2",
     ],
 )
+
+########################################################################################
+##################################################
+###################
+#
+#                             proto stuff
+#
+##############################################################
+########################################################################################
+
+load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
+rules_proto_dependencies()
+rules_proto_toolchains()
