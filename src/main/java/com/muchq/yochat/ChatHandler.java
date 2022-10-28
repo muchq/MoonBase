@@ -33,15 +33,22 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
 
   @Override
   public void channelActive(ChannelHandlerContext context) {
+    LOGGER.info("new connection for {}", context.channel().remoteAddress());
     context.writeAndFlush(HELLO);
     channels.add(context.channel());
   }
 
   @Override
-  public void exceptionCaught(ChannelHandlerContext context, Throwable cause) {
-    LOGGER.error("Unhandled error from {}", idFromContext(context), cause);
+  public void channelInactive(ChannelHandlerContext context) {
+    LOGGER.info("connection terminated for {}", context.channel().remoteAddress());
     users.remove(context.channel());
     context.close();
+  }
+
+  @Override
+  public void exceptionCaught(ChannelHandlerContext context, Throwable cause) {
+    LOGGER.error("Unhandled error from {}", idFromContext(context), cause);
+    channelInactive(context);
   }
 
   @Override
