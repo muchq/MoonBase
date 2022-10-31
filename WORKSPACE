@@ -27,15 +27,12 @@ http_archive(
 )
 
 load("@io_bazel_rules_scala//:scala_config.bzl", "scala_config")
-
 scala_config(scala_version = "3.1.0")
 
 load("@io_bazel_rules_scala//scala:scala.bzl", "scala_repositories")
-
 scala_repositories()
 
 load("@io_bazel_rules_scala//scala:toolchains.bzl", "scala_register_toolchains")
-
 scala_register_toolchains()
 
 ########################################################################################
@@ -48,7 +45,6 @@ scala_register_toolchains()
 ########################################################################################
 
 RULES_JVM_EXTERNAL_TAG = "4.4.2"
-
 RULES_JVM_EXTERNAL_SHA = "735602f50813eb2ea93ca3f5e43b1959bd80b213b836a07a62a29d757670b77b"
 
 http_archive(
@@ -59,7 +55,6 @@ http_archive(
 )
 
 DAGGER_TAG = "2.44"
-
 DAGGER_SHA = "8c0876d46e8ce9332c4d4fbc2444420e0d75f041b3d4bab8313d2542d1e758ff"
 
 http_archive(
@@ -70,14 +65,13 @@ http_archive(
 )
 
 IO_GRPC_GRPC_JAVA_TAG = "1.50.2"
-
 IO_GRPC_GRPC_JAVA_SHA = "9eca289bcc59511a1e22e556c9b460ba9c05129662395af4431f472b642a6220"
 
 http_archive(
     name = "io_grpc_grpc_java",
     sha256 = IO_GRPC_GRPC_JAVA_SHA,
     strip_prefix = "grpc-java-%s" % IO_GRPC_GRPC_JAVA_TAG,
-    url = "https://github.com/grpc/grpc-java/archive/%s.zip" % IO_GRPC_GRPC_JAVA_TAG,
+    url = "https://github.com/grpc/grpc-java/archive/v%s.zip" % IO_GRPC_GRPC_JAVA_TAG,
 )
 
 load("@rules_jvm_external//:repositories.bzl", "rules_jvm_external_deps")
@@ -102,21 +96,13 @@ load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 protobuf_deps()
 
 ASSERTJ_VERSION = "3.23.1"
-
 GUAVA_VERSION = "31.1-jre"
-
 JACKSON_VERSION = "2.13.4"
-
 JUNIT4_VERSION = "4.13.2"
-
 LOGBACK_VERSION = "1.4.3"
-
 NETTY_VERSION = "4.1.84.Final"
-
 RESTEASY_VERSION = "6.2.0.Final"
-
 SENTRY_VERSION = "6.4.2"
-
 SLF4J_VERSION = "2.0.3"
 
 maven_install(
