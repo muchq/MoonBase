@@ -1,16 +1,15 @@
 package com.muchq.json;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.muchq.json.utils.GuavaWidget;
 import com.muchq.json.utils.Java8Widget;
-import org.junit.Test;
-
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-
-import static org.assertj.core.api.Assertions.assertThat;
+import org.junit.Test;
 
 public class JsonUtilsTest {
 
@@ -39,7 +38,7 @@ public class JsonUtilsTest {
     Set<Java8Widget> widgets = new HashSet<>();
     widgets.add(new Java8Widget(1));
     byte[] bytes = JsonUtils.writeAsBytes(widgets);
-    Set<Java8Widget> read = JsonUtils.readAs(bytes, new TypeReference<Set<Java8Widget>>(){});
+    Set<Java8Widget> read = JsonUtils.readAs(bytes, new TypeReference<Set<Java8Widget>>() {});
     assertThat(widgets).isEqualTo(read);
   }
 

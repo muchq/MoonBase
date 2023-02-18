@@ -7,10 +7,10 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
-
 import java.util.Objects;
 
 public class YoServer {
+
   private final ChannelHandler channelHandler;
   private final int port;
 
@@ -24,10 +24,11 @@ public class YoServer {
     EventLoopGroup workerGroup = new NioEventLoopGroup();
     try {
       ServerBootstrap b = new ServerBootstrap();
-      b.group(bossGroup, workerGroup)
-          .channel(NioServerSocketChannel.class)
-          .handler(new LoggingHandler(LogLevel.INFO))
-          .childHandler(channelHandler);
+      b
+        .group(bossGroup, workerGroup)
+        .channel(NioServerSocketChannel.class)
+        .handler(new LoggingHandler(LogLevel.INFO))
+        .childHandler(channelHandler);
 
       b.bind(port).sync().channel().closeFuture().sync();
     } finally {
@@ -41,6 +42,7 @@ public class YoServer {
   }
 
   public static class Builder {
+
     private ChannelHandler channelHandler;
     private Integer port;
 
