@@ -7,18 +7,18 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.guava.GuavaModule;
 import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Reader;
 
 public final class JsonUtils {
+
   static final ObjectMapper MAPPER = new ObjectMapper()
-      .registerModule(new Jdk8Module())
-      .registerModule(new JavaTimeModule())
-      .registerModule(new GuavaModule())
-      .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-      .configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
+    .registerModule(new Jdk8Module())
+    .registerModule(new JavaTimeModule())
+    .registerModule(new GuavaModule())
+    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+    .configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
 
   private JsonUtils() {}
 

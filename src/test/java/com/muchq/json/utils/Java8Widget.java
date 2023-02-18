@@ -2,10 +2,10 @@ package com.muchq.json.utils;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
-
 import java.util.Optional;
 
 public class Java8Widget {
+
   private final Optional<Integer> foo;
 
   @JsonCreator

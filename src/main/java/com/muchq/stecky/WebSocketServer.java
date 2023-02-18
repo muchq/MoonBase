@@ -5,19 +5,19 @@ import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.google.inject.Module;
 import com.google.inject.Stage;
+import java.util.Objects;
+import java.util.Set;
+import javax.servlet.ServletException;
+import javax.websocket.DeploymentException;
+import javax.websocket.server.ServerContainer;
+import javax.websocket.server.ServerEndpointConfig;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.websocket.jsr356.server.deploy.WebSocketServerContainerInitializer;
 
-import javax.servlet.ServletException;
-import javax.websocket.DeploymentException;
-import javax.websocket.server.ServerContainer;
-import javax.websocket.server.ServerEndpointConfig;
-import java.util.Objects;
-import java.util.Set;
-
 public class WebSocketServer {
+
   private final Injector injector;
   private final Server server;
 
@@ -61,6 +61,7 @@ public class WebSocketServer {
   }
 
   public static class Builder {
+
     private Set<Module> modules;
     private int port = 0;
     private Set<Mapping> mappings;
@@ -71,10 +72,8 @@ public class WebSocketServer {
     }
 
     public Builder addModules(Module... modules) {
-      this.modules = ImmutableSet.<Module>builder()
-          .addAll(ImmutableSet.copyOf(modules))
-          .add(new WebSocketModule())
-          .build();
+      this.modules =
+        ImmutableSet.<Module>builder().addAll(ImmutableSet.copyOf(modules)).add(new WebSocketModule()).build();
       return this;
     }
 
@@ -109,9 +108,10 @@ public class WebSocketServer {
       for (Mapping mapping : mappings) {
         try {
           wscontainer.addEndpoint(
-              ServerEndpointConfig.Builder.create(mapping.getHandler(), mapping.getPath())
-                  .configurator(injector.getInstance(GuiceConfigurator.class))
-                  .build()
+            ServerEndpointConfig.Builder
+              .create(mapping.getHandler(), mapping.getPath())
+              .configurator(injector.getInstance(GuiceConfigurator.class))
+              .build()
           );
         } catch (DeploymentException e) {
           throw new RuntimeException(e);

@@ -10,6 +10,7 @@ import io.netty.handler.codec.string.StringDecoder;
 import io.netty.handler.codec.string.StringEncoder;
 
 public class ChannelHandlerInitializer extends ChannelInitializer<SocketChannel> {
+
   private final ChannelHandler channelHandler;
 
   public ChannelHandlerInitializer(ChannelHandler channelHandler) {

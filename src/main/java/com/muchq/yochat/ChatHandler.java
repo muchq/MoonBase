@@ -7,15 +7,15 @@ import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.ChannelMatchers;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.util.concurrent.GlobalEventExecutor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListSet;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ChatHandler extends SimpleChannelInboundHandler<String> {
+
   private static final Logger LOGGER = LoggerFactory.getLogger(ChatHandler.class);
 
   private final ChannelGroup channels = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
@@ -149,4 +149,3 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
     channels.writeAndFlush(message + "\n", ChannelMatchers.isNot(context.channel()));
   }
 }
-
