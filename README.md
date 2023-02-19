@@ -5,7 +5,9 @@
 ![MoonBase](moon.gif)
 
 ### IntelliJ
-Java targets Just Work™. When adding a new scala target, add it to included [project view](/.ijwb/.bazelproject)
+Java targets Just Work™.
+
+When adding a new scala target, add it to then included [project view](/.ijwb/.bazelproject)
 
 ### Dependencies
  - update `dependencies.yaml`
