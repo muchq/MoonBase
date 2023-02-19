@@ -1,13 +1,9 @@
-load("@dagger//:workspace_defs.bzl", "dagger_rules")
-
-dagger_rules()
-
 java_library(
     name = "logging",
     resources = ["config/logback.xml"],
     runtime_deps = [
-      "@maven//:org_slf4j_slf4j_api",
-      "@maven//:ch_qos_logback_logback_classic",
-      "@maven//:io_sentry_sentry_logback",
+        "@third_party//ch/qos/logback:logback_classic",
+        "@third_party//io/sentry:sentry_logback",
+        "@third_party//org/slf4j:slf4j_api",
     ],
 )

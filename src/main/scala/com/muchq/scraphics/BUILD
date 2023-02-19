@@ -5,7 +5,6 @@ scala_binary(
     srcs = ["Tracer.scala"],
     main_class = "com.muchq.scraphics.Tracer",
     deps = [
-        "@maven//:org_scala_lang_scala3_library_3",
-        "@maven//:org_slf4j_slf4j_api",
+        "@third_party//org/slf4j:slf4j_api",
     ],
 )
