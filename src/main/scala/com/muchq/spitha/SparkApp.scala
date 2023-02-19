@@ -1,6 +1,5 @@
 package com.muchq.spitha
 
-import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 
 trait SparkApp {
