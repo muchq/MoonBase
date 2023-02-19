@@ -7,7 +7,7 @@
 ### IntelliJ
 Java targets Just Work™.
 
-When adding a new scala target, add it to then included [project view](/.ijwb/.bazelproject)
+Add new Scala targets to the included [project view](/.ijwb/.bazelproject).
 
 ### Dependencies
  - update `dependencies.yaml`
