@@ -1,6 +1,6 @@
-load("//:tools/junit.bzl", "junit_tests")
+load("@contrib_rules_jvm//java:defs.bzl", "java_test_suite")
 
-junit_tests(
+java_test_suite(
     name = "json_tests",
     size = "small",
     srcs = glob(["*.java"]),
