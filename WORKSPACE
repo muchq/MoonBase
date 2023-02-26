@@ -7,6 +7,11 @@ load("//3rdparty:target_file.bzl", "build_external_workspace")
 
 build_external_workspace(name = "third_party")
 
+bind(
+    name = "io_bazel_rules_scala/dependency/scalatest/scalatest",
+    actual = "//3rdparty/jvm/org/scalatest",
+)
+
 http_archive(
     name = "contrib_rules_jvm",
     sha256 = "548f0583192ff79c317789b03b882a7be9b1325eb5d3da5d7fdcc4b7ca69d543",
@@ -59,6 +64,12 @@ scala_repositories()
 load("@io_bazel_rules_scala//scala:toolchains.bzl", "scala_register_toolchains")
 
 scala_register_toolchains()
+
+load("@io_bazel_rules_scala//testing:scalatest.bzl", "scalatest_repositories", "scalatest_toolchain")
+
+scalatest_repositories()
+
+scalatest_toolchain()
 
 load("@io_bazel_rules_scala//scala/scalafmt:scalafmt_repositories.bzl", "scalafmt_default_config", "scalafmt_repositories")
 

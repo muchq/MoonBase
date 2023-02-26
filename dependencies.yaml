@@ -1,6 +1,6 @@
 options:
   buildHeader: [ "load(\"@io_bazel_rules_scala//scala:scala_import.bzl\", \"scala_import\")",
-    "load(\"@io_bazel_rules_scala//scala:scala.bzl\", \"scala_library\")" ]
+    "load(\"@io_bazel_rules_scala//scala:scala.bzl\", \"scala_library\", \"scala_binary\", \"scala_test\")" ]
   languages: [ "java", "scala:2.13.10" ]
   resolverType: "coursier"
   resolvers:
@@ -76,15 +76,8 @@ dependencies:
       lang: java
       version: "3.23.1"
 
-  org.scalactic:
-    scalactic:
-      lang: scala
-      version: "3.2.15"
-
   org.scalatest:
     scalatest:
-      exports:
-        - "org.scalactic:scalactic"
       lang: scala
       version: "3.2.15"
 
