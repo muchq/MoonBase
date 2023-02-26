@@ -4,6 +4,7 @@ scala_binary(
     name = "Tracer",
     srcs = ["Tracer.scala"],
     main_class = "com.muchq.scraphics.Tracer",
+    visibility = ["//visibility:public"],
     deps = [
         "@third_party//org/slf4j:slf4j_api",
     ],

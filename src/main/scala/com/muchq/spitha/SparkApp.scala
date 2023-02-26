@@ -2,7 +2,7 @@ package com.muchq.spitha
 
 import org.apache.spark.sql.SparkSession
 
-trait SparkApp {
+abstract class SparkApp {
   def main(args: Array[String]): Unit = {
     val spark = SparkSession
       .builder

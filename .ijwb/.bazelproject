@@ -10,6 +10,7 @@ targets:
   # If source code isn't resolving, add additional targets that compile it here
   //src/main/scala/com/muchq/spitha
   //src/main/scala/com/muchq/spitha/example/...
+  //src/test/scala/com/muchq/spitha/example/...
   //src/main/scala/com/muchq/scraphics:Tracer
 
 additional_languages:
