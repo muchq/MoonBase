@@ -77,10 +77,6 @@ scalafmt_default_config()
 
 scalafmt_repositories()
 
-register_toolchains(
-    "//src/main/scala/com/muchq/spitha:diagnostics_reporter_toolchain",
-)
-
 ########################################################################################
 ##################################################
 ###################
