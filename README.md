@@ -5,9 +5,11 @@
 ![MoonBase](moon.gif)
 
 ### IntelliJ
+Tested with [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij)
+
 Java targets Just Work™.
 
-Add new Scala targets to the included [project view](/.ijwb/.bazelproject).
+Add new targets to [project view](/.ijwb/.bazelproject) if they aren't detected automatically.
 
 ### Dependencies
  - update `dependencies.yaml`
