@@ -1,15 +1,15 @@
 #!/bin/bash
 echo -ne "\033[0;32m"
-echo 'Updating bazel dependencies.'
+echo 'Updating bazel dependencies. This will take about five minutes.'
 echo -ne "\033[0m"
 set -e
 
 if [ "$(uname -s)" == "Linux" ]; then
-  BAZEL_DEPS_URL=https://github.com/johnynek/bazel-deps/releases/download/v0.1-13/bazel-deps-linux
-  BAZEL_DEPS_SHA256=e3993d5683884081af3076ce9d3dafdf7c6ba591bf12d7bb82cb5afd6a954681
+  BAZEL_DEPS_URL=https://github.com/bazeltools/bazel-deps/releases/download/v0.1-31/bazel-deps-linux
+  BAZEL_DEPS_SHA256=f08e699afe35c74be5e4f487086c3378d8ebac257a04bf7710cd9df41af5a8ff
 elif [ "$(uname -s)" == "Darwin" ]; then
-  BAZEL_DEPS_URL=https://github.com/johnynek/bazel-deps/releases/download/v0.1-13/bazel-deps-macos
-  BAZEL_DEPS_SHA256=a9189380ec1b2278234a24d29817fdb095e435ca66bd4aef80715a47110425cd
+  BAZEL_DEPS_URL=https://github.com/bazeltools/bazel-deps/releases/download/v0.1-31/bazel-deps-macos
+  BAZEL_DEPS_SHA256=ba43845b99e0109e6c657d7b214e522b5786105509eb728d69c84d390dd77094
 else
   echo "Your platform '$(uname -s)' is unsupported, sorry"
   exit 1
@@ -25,7 +25,7 @@ cd $SCRIPT_LOCATION
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
 BAZEL_DEPS_DIR="$HOME/.bazel-deps-cache"
-BAZEL_DEPS_PATH="${BAZEL_DEPS_DIR}/v0.1-13"
+BAZEL_DEPS_PATH="${BAZEL_DEPS_DIR}/v0.1-31"
 
 if [ ! -f ${BAZEL_DEPS_PATH} ]; then
   ( # Opens a subshell
