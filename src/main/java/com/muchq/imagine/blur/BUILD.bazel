@@ -1,0 +1,8 @@
+java_library(
+    name = "blur",
+    srcs = ["Blurtils.java"],
+    resources = ["//src/main/resources:images_resources"],
+    visibility = ["//visibility:public"],
+    deps = [
+    ],
+)

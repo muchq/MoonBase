@@ -1,0 +1,5 @@
+filegroup(
+    name = "images_resources",
+    srcs = ["MARBLES.BMP"],
+    visibility = ["//visibility:public"],
+)
