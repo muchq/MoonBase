@@ -74,7 +74,7 @@ dependencies:
   org.assertj:
     assertj-core:
       lang: java
-      version: "3.24.2"
+      version: "3.23.1"
 
   org.scalatest:
     scalatest:
