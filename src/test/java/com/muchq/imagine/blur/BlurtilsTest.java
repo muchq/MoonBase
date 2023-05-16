@@ -27,10 +27,11 @@ public class BlurtilsTest {
     public void itCanBlurImages() throws IOException, InterruptedException {
         BufferedImage marbles = ImageIO.read(Blurtils.class.getResourceAsStream("/MARBLES.BMP"));
         BufferedImage gaussianBlur = Blurtils.gaussianBlur(marbles);
-        int[] gaussianFive = {1, 4, 7, 4, 1, 4, 16, 26, 16, 4, 7, 26, 41, 26, 7, 4, 16, 26, 16, 4, 1, 4, 7, 4, 1};
-        BufferedImage bigGaussian = Blurtils.convolution(Blurtils.grayScale(marbles), gaussianFive);
-        BufferedImage gaussian55 = Blurtils.convolution(bigGaussian, gaussianFive);
-        BufferedImage gaussian555 = Blurtils.convolution(gaussian55, gaussianFive);
+        //int[] gaussianFive = {1, 4, 7, 4, 1, 4, 16, 26, 16, 4, 7, 26, 41, 26, 7, 4, 16, 26, 16, 4, 1, 4, 7, 4, 1};
+        int[] heavyGaussian = {0, 2, 2, 2, 0, 2, 4, 6, 4, 2, 2, 6, 10, 6, 2, 2, 4, 6, 4, 2, 0, 2, 2, 2, 0};
+        BufferedImage bigGaussian = Blurtils.convolution(Blurtils.grayScale(marbles), heavyGaussian);
+        BufferedImage gaussian55 = Blurtils.convolution(bigGaussian, heavyGaussian);
+        BufferedImage gaussian555 = Blurtils.convolution(gaussian55, heavyGaussian);
 
         display(marbles);
         display(gaussian555);

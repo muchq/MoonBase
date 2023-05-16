@@ -5,7 +5,6 @@ import java.awt.image.BufferedImage;
 import java.awt.image.ColorModel;
 import java.awt.image.DataBufferByte;
 import java.awt.image.WritableRaster;
-import java.util.stream.IntStream;
 
 public final class Blurtils {
     private Blurtils() {
@@ -60,32 +59,29 @@ public final class Blurtils {
     public static BufferedImage convolution(BufferedImage input, int[] kernel) {
         // TODO: assert that kernel.length is an odd square (3x3, 5x5, 7x7)
         // TODO: what is a GPU?
-        int kernelSize = (int)Math.sqrt(kernel.length);
-        int edgeOffset = kernelSize/2;
-        byte[] inputPixels = getPixels(input);
-        BufferedImage output = copy(input);
-        byte[] outputPixels = getPixels(output);
+        final int edgeOffset = (int)Math.sqrt(kernel.length)/2;
+        final byte[] inputPixels = getPixels(input);
+        final BufferedImage output = copy(input);
+        final byte[] outputPixels = getPixels(output);
 
-        int kernelSum = IntStream.of(kernel).sum();
+        final int kernelSum = sum(kernel);
+        final int width = input.getWidth();
+        final int height = input.getHeight();
 
-        for (int row = edgeOffset; row < input.getHeight() - edgeOffset; row++) {
-            for (int col = edgeOffset; col < input.getWidth() - edgeOffset; col++) {
-                final int r = row;
-                final int c = col;
-                // window is ordered by row,col. i.e top row of pixels is followed by the next row in the array
-                int[] window = IntStream.rangeClosed(-edgeOffset, edgeOffset)
-                        .flatMap(i -> IntStream.rangeClosed(-edgeOffset, edgeOffset)
-                                .map(j -> computeIndex(r + i, c + j, input.getWidth())))
-                        .map(index -> inputPixels[index] & 0xff)
-                        .toArray();
-
-                int sumOfProducts = 0;
-                for (int i=0; i<kernel.length; i++) {
-                    sumOfProducts = Math.addExact(sumOfProducts, kernel[i] * window[i]);
+        for (int row = edgeOffset; row < height - edgeOffset; row++) {
+            for (int col = edgeOffset; col < width - edgeOffset; col++) {
+                int i = 0;
+                int dotProduct = 0;
+                for (int r = -edgeOffset; r <= edgeOffset; r++) {
+                    for (int c = -edgeOffset; c <= edgeOffset; c++) {
+                        int neighborPixel = inputPixels[computeIndex(row+r, col+c, width)] & 0xff;
+                        dotProduct = Math.addExact(dotProduct, kernel[i] * neighborPixel);
+                        i++;
+                    }
                 }
 
-                byte convolvedValue = (byte)(sumOfProducts / kernelSum);
-                outputPixels[computeIndex(row, col, input.getWidth())] = convolvedValue;
+                byte convolvedValue = (byte)(dotProduct / kernelSum);
+                outputPixels[computeIndex(row, col, width)] = convolvedValue;
             }
         }
 
@@ -94,6 +90,16 @@ public final class Blurtils {
 
     private static int computeIndex(int row, int col, int width) {
         return row*width + col;
+    }
+
+    // no need to check for overflow here because these ints are all small kernel values
+    // and kernel sizes are small (3x3, 5x5, 7x7)
+    private static int sum(int[] ints) {
+        int sum = 0;
+        for (int i : ints) {
+            sum += i;
+        }
+        return sum;
     }
 
     private static byte[] getPixels(BufferedImage image) {
