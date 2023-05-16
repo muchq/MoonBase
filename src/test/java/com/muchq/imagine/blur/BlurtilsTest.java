@@ -1,5 +1,6 @@
 package com.muchq.imagine.blur;
 
+import org.assertj.core.util.Files;
 import org.junit.Test;
 
 import javax.imageio.ImageIO;
@@ -14,11 +15,34 @@ public class BlurtilsTest {
     @Test
     public void itCanReadImages() throws IOException, InterruptedException {
         BufferedImage marbles = ImageIO.read(Blurtils.class.getResourceAsStream("/MARBLES.BMP"));
-        BufferedImage marblesCopy = Blurtils.grayScale(marbles);
+        BufferedImage marblesCopy = Blurtils.grayScaleBad(marbles);
+        BufferedImage marblesCopy2 = Blurtils.grayScaleCompact(marbles);
+        BufferedImage marblesCopy3 = Blurtils.grayScaleGood(marbles);
         display(marbles);
         display(marblesCopy);
+        display(marblesCopy2);
+        display(marblesCopy3);
         System.out.println("sup");
         Thread.sleep(35_000);
+    }
+
+    @Test
+    public void itCanBlurImages() throws IOException, InterruptedException {
+        BufferedImage marbles = ImageIO.read(Blurtils.class.getResourceAsStream("/MARBLES.BMP"));
+        BufferedImage gaussianBlur = Blurtils.gaussianBlur(marbles);
+        int[] gaussianFive = {1, 4, 7, 4, 1, 4, 16, 26, 16, 4, 7, 26, 41, 26, 7, 4, 16, 26, 16, 4, 1, 4, 7, 4, 1};
+        BufferedImage bigGaussian = Blurtils.convolution(Blurtils.grayScaleGood(marbles), gaussianFive);
+        BufferedImage gaussian55 = Blurtils.convolution(bigGaussian, gaussianFive);
+        BufferedImage gaussian555 = Blurtils.convolution(gaussian55, gaussianFive);
+
+        display(marbles);
+        display(gaussian555);
+        display(gaussianBlur);
+        System.out.println("sup");
+        ImageIO.write(gaussian555, "png", Files.newFile("blur.png"));
+        Thread.sleep(35_000);
+
+        System.out.println("yo");
     }
 
     private void display(BufferedImage img) {
