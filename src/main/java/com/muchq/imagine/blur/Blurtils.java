@@ -14,20 +14,15 @@ public final class Blurtils {
 
     public static BufferedImage meanBlur(BufferedImage input) {
         int[] kernel = {1, 1, 1, 1, 1, 1, 1, 1, 1};
-        return convolution(grayScaleGood(input), kernel);
+        return convolution(grayScale(input), kernel);
     }
 
     public static BufferedImage gaussianBlur(BufferedImage input) {
         int[] kernel = {1, 3, 1, 3, 9, 3, 1, 3, 1};
-        return convolution(grayScaleGood(input), kernel);
+        return convolution(grayScale(input), kernel);
     }
 
-    public static BufferedImage sobelX(BufferedImage input) {
-        int[] kernel = {1, 3, 1, 3, 9, 3, 1, 3, 1};
-        return convolution(grayScaleGood(input), kernel);
-    }
-
-    public static BufferedImage grayScaleGood(BufferedImage input) {
+    public static BufferedImage grayScale(BufferedImage input) {
         BufferedImage copied = new BufferedImage(input.getWidth(), input.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
         Graphics graphics = copied.getGraphics();
         graphics.drawImage(input, 0, 0, null);
@@ -35,7 +30,7 @@ public final class Blurtils {
         return copied;
     }
 
-    public static BufferedImage grayScaleCompact(BufferedImage input) {
+    public static BufferedImage grayScaleSlow(BufferedImage input) {
         BufferedImage copied = new BufferedImage(input.getWidth(), input.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
 
         byte[] pixels = getPixels(input);
@@ -55,28 +50,6 @@ public final class Blurtils {
         return copied;
     }
 
-    public static BufferedImage grayScaleBad(BufferedImage input) {
-        // TODO: should be able to just store 1 byte per pixel in the grayscale copy instead of 3 or 4...
-        BufferedImage copied = copy(input);
-        byte[] pixels = getPixels(copied);
-        final boolean hasAlpha = copied.getAlphaRaster() != null;
-        final int bytesPerPixel = hasAlpha ? 4 : 3;
-
-        for (int p=0; p<pixels.length; p+= bytesPerPixel) {
-            int r, g, b;
-            int i = hasAlpha ? p+1 : p;
-            r = pixels[i] & 0xff;
-            g = pixels[i+1] & 0xff;
-            b = pixels[i+2] & 0xff;
-            byte avg = (byte)((r + g + b) / 3);
-            if (hasAlpha) {
-                pixels[p] = (byte)0xff;
-            }
-            pixels[i] = pixels[i+1] = pixels[i+2] = avg;
-        }
-        return copied;
-    }
-
     public static BufferedImage copy(BufferedImage input) {
         ColorModel colorModel = input.getColorModel();
         boolean isAlphaPremultiplied = colorModel.isAlphaPremultiplied();
@@ -86,6 +59,7 @@ public final class Blurtils {
 
     public static BufferedImage convolution(BufferedImage input, int[] kernel) {
         // TODO: assert that kernel.length is an odd square (3x3, 5x5, 7x7)
+        // TODO: what is a GPU?
         int kernelSize = (int)Math.sqrt(kernel.length);
         int edgeOffset = kernelSize/2;
         byte[] inputPixels = getPixels(input);

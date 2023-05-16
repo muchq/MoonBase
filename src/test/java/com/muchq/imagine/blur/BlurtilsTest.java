@@ -15,14 +15,11 @@ public class BlurtilsTest {
     @Test
     public void itCanReadImages() throws IOException, InterruptedException {
         BufferedImage marbles = ImageIO.read(Blurtils.class.getResourceAsStream("/MARBLES.BMP"));
-        BufferedImage marblesCopy = Blurtils.grayScaleBad(marbles);
-        BufferedImage marblesCopy2 = Blurtils.grayScaleCompact(marbles);
-        BufferedImage marblesCopy3 = Blurtils.grayScaleGood(marbles);
+        BufferedImage marblesCopy2 = Blurtils.grayScaleSlow(marbles);
+        BufferedImage marblesCopy3 = Blurtils.grayScale(marbles);
         display(marbles);
-        display(marblesCopy);
         display(marblesCopy2);
         display(marblesCopy3);
-        System.out.println("sup");
         Thread.sleep(35_000);
     }
 
@@ -31,14 +28,13 @@ public class BlurtilsTest {
         BufferedImage marbles = ImageIO.read(Blurtils.class.getResourceAsStream("/MARBLES.BMP"));
         BufferedImage gaussianBlur = Blurtils.gaussianBlur(marbles);
         int[] gaussianFive = {1, 4, 7, 4, 1, 4, 16, 26, 16, 4, 7, 26, 41, 26, 7, 4, 16, 26, 16, 4, 1, 4, 7, 4, 1};
-        BufferedImage bigGaussian = Blurtils.convolution(Blurtils.grayScaleGood(marbles), gaussianFive);
+        BufferedImage bigGaussian = Blurtils.convolution(Blurtils.grayScale(marbles), gaussianFive);
         BufferedImage gaussian55 = Blurtils.convolution(bigGaussian, gaussianFive);
         BufferedImage gaussian555 = Blurtils.convolution(gaussian55, gaussianFive);
 
         display(marbles);
         display(gaussian555);
         display(gaussianBlur);
-        System.out.println("sup");
         ImageIO.write(gaussian555, "png", Files.newFile("blur.png"));
         Thread.sleep(35_000);
 
