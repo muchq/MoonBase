@@ -7,3 +7,9 @@ java_library(
         "@third_party//org/slf4j:slf4j_api",
     ],
 )
+
+alias(
+    name = "go-images",
+    actual = "//src/main/golang/images",
+    visibility = ["//visibility:public"],
+)

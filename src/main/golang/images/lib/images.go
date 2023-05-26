@@ -2,15 +2,17 @@ package lib
 
 import (
 	"image"
-	"image/png"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"os"
 )
 
-func ReadImage(path string) (image.Image, error) {
+func ReadImage(path string) (image.Image, string, error) {
 	existingImageFile, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer existingImageFile.Close()
-	return png.Decode(existingImageFile)
+	return image.Decode(existingImageFile)
 }
