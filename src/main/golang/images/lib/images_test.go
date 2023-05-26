@@ -1,7 +1,14 @@
 package lib
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestReadImage(t *testing.T) {
-	ReadImage()
+	_, imageType, err := ReadImage("static_content/marbles.png")
+	if err != nil {
+		t.Fail()
+	}
+	fmt.Print(imageType)
 }

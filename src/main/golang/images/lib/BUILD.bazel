@@ -16,5 +16,6 @@ go_test(
     srcs = [
         "images_test.go",
     ],
+    data = ["//static_content:images"],
     embed = [":image_library"],
 )
