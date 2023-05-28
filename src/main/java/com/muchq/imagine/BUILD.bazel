@@ -1,0 +1,17 @@
+java_library(
+    name = "imagine",
+    srcs = [
+        "ImageUtils.java",
+        "Radius.java",
+    ],
+    resources = ["//src/main/resources:images_resources"],
+    visibility = ["//visibility:public"],
+)
+
+java_binary(
+    name = "sobel",
+    srcs = ["Main.java"],
+    main_class = "com.muchq.imagine.Main",
+    visibility = ["//visibility:public"],
+    deps = [":imagine"],
+)
