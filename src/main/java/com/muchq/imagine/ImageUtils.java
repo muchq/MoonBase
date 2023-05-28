@@ -110,20 +110,18 @@ public final class ImageUtils {
 
     public static BufferedImage convolutionScaleByKernelSum(BufferedImage input, int[] kernel) {
         final int kernelSum = sum(kernel);
-        return convolution(input, kernel, (d, k) -> (byte)(d / kernelSum));
+        return convolve(input, kernel, (d, k) -> (byte)(d / kernelSum));
     }
 
-    public static BufferedImage convolution(BufferedImage input, int[] kernel, BiFunction<Integer, int[], Byte> toByte) {
+    public static BufferedImage convolve(BufferedImage input, int[] kernel, BiFunction<Integer, int[], Byte> toByte) {
         int[] inputPixels = bytesToInts(getPixels(input));
+        BufferedImage output = new BufferedImage(input.getWidth(), input.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
 
         int[] convOutput = convolve(inputPixels, input.getWidth(), input.getHeight(), kernel);
-        byte[] outputPixels = new byte[convOutput.length];
+        byte[] outputPixels = getPixels(output);
         for (int i=0; i<outputPixels.length; i++) {
             outputPixels[i] = toByte.apply(convOutput[i], null);
         }
-
-        BufferedImage output = new BufferedImage(input.getWidth(), input.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
-        System.arraycopy(outputPixels, 0, getPixels(output), 0, outputPixels.length);
 
         return output;
     }
