@@ -1,0 +1,21 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "image_library",
+    srcs = [
+        "images.go",
+    ],
+    data = ["//static_content:images"],
+    importpath = "github.com/muchq/moonbase/golang/images",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "images_test",
+    size = "small",
+    srcs = [
+        "images_test.go",
+    ],
+    data = ["//static_content:images"],
+    embed = [":image_library"],
+)
