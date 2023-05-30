@@ -5,8 +5,6 @@ import java.awt.image.BufferedImage;
 import java.awt.image.ColorModel;
 import java.awt.image.DataBufferByte;
 import java.awt.image.WritableRaster;
-import java.util.Arrays;
-import java.util.function.BiFunction;
 import java.util.function.Function;
 
 public final class ImageUtils {
@@ -21,11 +19,11 @@ public final class ImageUtils {
 
     public static BufferedImage meanBlur(BufferedImage input) {
         int[] kernel = {1, 1, 1, 1, 1, 1, 1, 1, 1};
-        return convolutionScaleByKernelSum(input, kernel);
+        return convolveAndScaleByKernelSum(input, kernel);
     }
 
     public static BufferedImage gaussianBlur(BufferedImage input, Radius radius) {
-        return convolutionScaleByKernelSum(input, radius.getGaussianKernel());
+        return convolveAndScaleByKernelSum(input, radius.getGaussianKernel());
     }
 
     public static BufferedImage grayGaussianBlur(BufferedImage input, Radius radius, int depth) {
@@ -34,7 +32,7 @@ public final class ImageUtils {
         BufferedImage grayCopy = grayScale(input);
         BufferedImage blurred = grayCopy;
         for (int i = 0; i < depth; i++) {
-            blurred = convolutionScaleByKernelSum(blurred, kernel);
+            blurred = convolveAndScaleByKernelSum(blurred, kernel);
         }
         return blurred;
     }
@@ -108,19 +106,15 @@ public final class ImageUtils {
         return new BufferedImage(colorModel, raster, isAlphaPremultiplied, null);
     }
 
-    public static BufferedImage convolutionScaleByKernelSum(BufferedImage input, int[] kernel) {
+    public static BufferedImage convolveAndScaleByKernelSum(BufferedImage input, int[] kernel) {
         final int kernelSum = sum(kernel);
-        return convolve(input, kernel, (d, k) -> (byte)(d / kernelSum));
-    }
+        byte[] inputPixels = getPixels(input);
+        int[] convOutput = convolve(inputPixels, input.getWidth(), input.getHeight(), kernel, (i) -> i/kernelSum);
 
-    public static BufferedImage convolve(BufferedImage input, int[] kernel, BiFunction<Integer, int[], Byte> toByte) {
-        int[] inputPixels = bytesToInts(getPixels(input));
         BufferedImage output = new BufferedImage(input.getWidth(), input.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
-
-        int[] convOutput = convolve(inputPixels, input.getWidth(), input.getHeight(), kernel);
         byte[] outputPixels = getPixels(output);
         for (int i=0; i<outputPixels.length; i++) {
-            outputPixels[i] = toByte.apply(convOutput[i], null);
+            outputPixels[i] = (byte)convOutput[i];
         }
 
         return output;
@@ -134,12 +128,13 @@ public final class ImageUtils {
      * @param width matrix width
      * @param height matrix height
      * @param kernel
+     * @param scaler scale the final value
      */
-    public static int[] convolve(int[] input, int width, int height, int[] kernel) {
+    public static int[] convolve(int[] input, int width, int height, int[] kernel, Function<Integer, Integer> scaler) {
         // TODO: assert that kernel.length is an odd square (3x3, 5x5, 7x7)
         // TODO: what is a GPU?
         final int edgeOffset = (int)Math.sqrt(kernel.length)/2;
-        final int[] outputPixels = Arrays.copyOf(input, input.length);
+        final int[] outputPixels = new int[input.length];
 
         for (int row = edgeOffset; row < height - edgeOffset; row++) {
             for (int col = edgeOffset; col < width - edgeOffset; col++) {
@@ -148,16 +143,64 @@ public final class ImageUtils {
                 for (int r = -edgeOffset; r <= edgeOffset; r++) {
                     for (int c = -edgeOffset; c <= edgeOffset; c++) {
                         int neighborPixel = input[computeIndex(row+r, col+c, width)];
-                        dotProduct = Math.addExact(dotProduct, kernel[i] * neighborPixel);
+                        dotProduct = dotProduct + kernel[i] * neighborPixel;
                         i++;
                     }
                 }
 
-                outputPixels[computeIndex(row, col, width)] = dotProduct;
+                outputPixels[computeIndex(row, col, width)] = scaler.apply(dotProduct);
             }
         }
 
         return outputPixels;
+    }
+
+    /**
+     *
+     * @param input a 1d array representing a 2d matrix laid out with pixels horizontally adjacent
+     *              pixels in the 2d matrix adjacent in the 1d array. To find the pixel immediately
+     *              below a pixel at index i, look at index i + width
+     * @param width matrix width
+     * @param height matrix height
+     * @param kernel
+     * @param scaler scale the final value
+     */
+    public static int[] convolve(byte[] input, int width, int height, int[] kernel, Function<Integer, Integer> scaler) {
+        // TODO: assert that kernel.length is an odd square (3x3, 5x5, 7x7)
+        // TODO: what is a GPU?
+        final int edgeOffset = (int)Math.sqrt(kernel.length)/2;
+        final int[] outputPixels = new int[input.length];
+
+        for (int row = edgeOffset; row < height - edgeOffset; row++) {
+            for (int col = edgeOffset; col < width - edgeOffset; col++) {
+                int i = 0;
+                int dotProduct = 0;
+                for (int r = -edgeOffset; r <= edgeOffset; r++) {
+                    for (int c = -edgeOffset; c <= edgeOffset; c++) {
+                        int neighborPixel = input[computeIndex(row+r, col+c, width)] & 0xff;
+                        dotProduct = dotProduct + kernel[i] * neighborPixel;
+                        i++;
+                    }
+                }
+
+                outputPixels[computeIndex(row, col, width)] = scaler.apply(dotProduct);
+            }
+        }
+
+        return outputPixels;
+    }
+
+    /**
+     *
+     * @param input a 1d array representing a 2d matrix laid out with pixels horizontally adjacent
+     *              pixels in the 2d matrix adjacent in the 1d array. To find the pixel immediately
+     *              below a pixel at index i, look at index i + width
+     * @param width matrix width
+     * @param height matrix height
+     * @param kernel
+     */
+    public static int[] convolve(int[] input, int width, int height, int[] kernel) {
+        return convolve(input, width, height, kernel, Function.identity());
     }
 
     private static int computeIndex(int row, int col, int width) {
