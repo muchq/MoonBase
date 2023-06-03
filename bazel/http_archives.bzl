@@ -23,7 +23,7 @@ def register_http_archive_dependencies():
         name = "io_bazel_rules_go",
         sha256 = "6b65cb7917b4d1709f9410ffe00ecf3e160edf674b78c54a894471320862184f",
         urls = [
-            "https://mirror.bazel_patches.build/github.com/bazelbuild/rules_go/releases/download/v0.39.0/rules_go-v0.39.0.zip",
+            "https://mirror.bazel.build/github.com/bazelbuild/rules_go/releases/download/v0.39.0/rules_go-v0.39.0.zip",
             "https://github.com/bazelbuild/rules_go/releases/download/v0.39.0/rules_go-v0.39.0.zip",
         ],
     )
@@ -32,7 +32,7 @@ def register_http_archive_dependencies():
         name = "contrib_rules_jvm",
         sha256 = "548f0583192ff79c317789b03b882a7be9b1325eb5d3da5d7fdcc4b7ca69d543",
         strip_prefix = "rules_jvm-0.9.0",
-        url = "https://github.com/bazel_patches-contrib/rules_jvm/archive/refs/tags/v0.9.0.tar.gz",
+        url = "https://github.com/bazel-contrib/rules_jvm/archive/refs/tags/v0.9.0.tar.gz",
     )
 
     SKYLIB_VERSION = "1.0.3"
