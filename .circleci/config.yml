@@ -24,11 +24,17 @@ jobs:
       - setup-bazel
       - checkout # check out the code in the project directory
       - run:
-          name: Run Tests
-          command: bazel test //...
-      - run:
           name: Run Build
           command: bazel build //...
+      - run:
+          name: Run Java Tests
+          command: bazel test //src/test/java/...
+      - run:
+          name: Run Scala Tests
+          command: bazel test //src/test/scala/...
+      - run:
+          name: Run Go Tests
+          command: bazel test //src/main/golang/...
 
 workflows:
   moon-base:

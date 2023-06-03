@@ -4,7 +4,7 @@ def register_http_archive_dependencies():
     http_archive(
         name = "com_github_grpc_grpc",
         patch_args = ["-p1"],
-        patches = ["//bazel_patches:grpc_extra_deps.patch"],
+        patches = ["//bazel/patches:grpc_extra_deps.patch"],
         sha256 = "d8c3180df613759e705aabde77798a463b8d2dad08f182cf4cbdc6d8c9d0ebdd",
         strip_prefix = "grpc-fd843629c89a22fc920fbbda8bcd79aa3b86add4",
         urls = [
