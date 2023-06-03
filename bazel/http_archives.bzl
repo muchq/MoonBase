@@ -30,9 +30,9 @@ def register_http_archive_dependencies():
 
     http_archive(
         name = "contrib_rules_jvm",
-        sha256 = "548f0583192ff79c317789b03b882a7be9b1325eb5d3da5d7fdcc4b7ca69d543",
-        strip_prefix = "rules_jvm-0.9.0",
-        url = "https://github.com/bazel-contrib/rules_jvm/archive/refs/tags/v0.9.0.tar.gz",
+        sha256 = "2b710518847279f655a18a51a1629b033e4406f29609e73eb07ecfb6f0138d25",
+        strip_prefix = "rules_jvm-0.13.0",
+        url = "https://github.com/bazel-contrib/rules_jvm/releases/download/v0.13.0/rules_jvm-v0.13.0.tar.gz",
     )
 
     SKYLIB_VERSION = "1.0.3"
