@@ -96,10 +96,6 @@ bind(
     actual = "//3rdparty/jvm/org/scalatest",
 )
 
-SKYLIB_VERSION = "1.0.3"
-
-RULES_SCALA_VERSION = "887c9be387734d2a49adab441d7a68414e30cbee"
-
 load("@io_bazel_rules_scala//:scala_config.bzl", "scala_config")
 
 scala_config(scala_version = "3.1.2")
