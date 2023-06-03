@@ -48,6 +48,7 @@ def register_http_archive_dependencies():
 
     http_archive(
         name = "io_bazel_rules_scala",
+        sha256 = "3dc6881307d5787bf6d06269e1fea25a87ab36c70775b9102576ce3fb6fcd260",
         strip_prefix = "rules_scala-%s" % RULES_SCALA_VERSION,
         type = "zip",
         url = "https://github.com/bazelbuild/rules_scala/archive/%s.zip" % RULES_SCALA_VERSION,
