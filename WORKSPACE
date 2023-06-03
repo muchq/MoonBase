@@ -1,6 +1,18 @@
 workspace(name = "moon_base")
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "com_github_grpc_grpc",
+    patch_args = ["-p1"],
+    patches = ["//bazel:grpc_extra_deps.patch"],
+    sha256 = "d8c3180df613759e705aabde77798a463b8d2dad08f182cf4cbdc6d8c9d0ebdd",
+    strip_prefix = "grpc-fd843629c89a22fc920fbbda8bcd79aa3b86add4",
+    urls = [
+        "https://github.com/grpc/grpc/archive/fd843629c89a22fc920fbbda8bcd79aa3b86add4.tar.gz",
+    ],
+)
+
 load("//3rdparty:workspace.bzl", "maven_dependencies")
 
 maven_dependencies()
@@ -138,16 +150,6 @@ rules_proto_toolchains()
 #
 ##############################################################
 ########################################################################################
-
-http_archive(
-    name = "com_github_grpc_grpc",
-    patch_args = ["-p1"],
-    patches = ["//bazel:grpc_extra_deps.patch"],
-    strip_prefix = "grpc-fd843629c89a22fc920fbbda8bcd79aa3b86add4",
-    urls = [
-        "https://github.com/grpc/grpc/archive/fd843629c89a22fc920fbbda8bcd79aa3b86add4.tar.gz",
-    ],
-)
 
 load("@com_github_grpc_grpc//bazel:grpc_deps.bzl", "grpc_deps")
 
