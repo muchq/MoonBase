@@ -4,27 +4,6 @@ load("//bazel:http_archives.bzl", "register_http_archive_dependencies")
 
 register_http_archive_dependencies()
 
-load("//3rdparty:workspace.bzl", "maven_dependencies")
-
-maven_dependencies()
-
-load("//3rdparty:target_file.bzl", "build_external_workspace")
-
-build_external_workspace(name = "third_party")
-
-bind(
-    name = "io_bazel_rules_scala/dependency/scalatest/scalatest",
-    actual = "//3rdparty/jvm/org/scalatest",
-)
-
-load("@contrib_rules_jvm//:repositories.bzl", "contrib_rules_jvm_deps")
-
-contrib_rules_jvm_deps()
-
-load("@contrib_rules_jvm//:setup.bzl", "contrib_rules_jvm_setup")
-
-contrib_rules_jvm_setup()
-
 ########################################################################################
 ##################################################
 ###################
@@ -81,6 +60,31 @@ load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_
 rules_proto_dependencies()
 
 rules_proto_toolchains()
+
+########################################################################################
+##################################################
+###################
+#
+#                              java stuff
+#
+##############################################################
+########################################################################################
+
+load("//3rdparty:workspace.bzl", "maven_dependencies")
+
+maven_dependencies()
+
+load("//3rdparty:target_file.bzl", "build_external_workspace")
+
+build_external_workspace(name = "third_party")
+
+load("@contrib_rules_jvm//:repositories.bzl", "contrib_rules_jvm_deps")
+
+contrib_rules_jvm_deps()
+
+load("@contrib_rules_jvm//:setup.bzl", "contrib_rules_jvm_setup")
+
+contrib_rules_jvm_setup()
 
 ########################################################################################
 ##################################################
