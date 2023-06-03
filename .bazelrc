@@ -1,5 +1,7 @@
 startup --output_base=~/.bazelout
 
+build --cxxopt=-std=c++17 --host_cxxopt=-std=c++17
+
 build --experimental_convenience_symlinks=ignore
 build --color=yes
 build --java_language_version=11
