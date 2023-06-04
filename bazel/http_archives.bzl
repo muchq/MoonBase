@@ -35,20 +35,20 @@ def register_http_archive_dependencies():
         url = "https://github.com/bazel-contrib/rules_jvm/releases/download/v0.13.0/rules_jvm-v0.13.0.tar.gz",
     )
 
-    SKYLIB_VERSION = "1.0.3"
-
-    RULES_SCALA_VERSION = "887c9be387734d2a49adab441d7a68414e30cbee"
-
     http_archive(
         name = "bazel_skylib",
-        sha256 = "1c531376ac7e5a180e0237938a2536de0c54d93f5c278634818e0efc952dd56c",
-        type = "tar.gz",
-        url = "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/{}/bazel-skylib-{}.tar.gz".format(SKYLIB_VERSION, SKYLIB_VERSION),
+        sha256 = "66ffd9315665bfaafc96b52278f57c7e2dd09f5ede279ea6d39b2be471e7e3aa",
+        urls = [
+            "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.4.2/bazel-skylib-1.4.2.tar.gz",
+            "https://github.com/bazelbuild/bazel-skylib/releases/download/1.4.2/bazel-skylib-1.4.2.tar.gz",
+        ],
     )
+
+    RULES_SCALA_VERSION = "d6b81c893348c55875ba93475966858bc2478cfa"
 
     http_archive(
         name = "io_bazel_rules_scala",
-        sha256 = "3dc6881307d5787bf6d06269e1fea25a87ab36c70775b9102576ce3fb6fcd260",
+        sha256 = "4205be4f075c460158f5b931edac653406d12b6fd49bcdb5670dd6a5007e79b4",
         strip_prefix = "rules_scala-%s" % RULES_SCALA_VERSION,
         type = "zip",
         url = "https://github.com/bazelbuild/rules_scala/archive/%s.zip" % RULES_SCALA_VERSION,
