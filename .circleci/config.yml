@@ -35,6 +35,9 @@ jobs:
       - run:
           name: Run Go Tests
           command: bazel test //src/main/golang/...
+      - run:
+          name: Run Cpp Tests
+          command: bazel test //src/main/cpp/...
 
 workflows:
   moon-base:
