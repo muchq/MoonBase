@@ -13,6 +13,13 @@ def register_http_archive_dependencies():
     )
 
     http_archive(
+        name = "com_google_googletest",
+        sha256 = "0c3a1c0b47a21160ebb7610ae6407d2a6d291ebc5cddc0b99d091bf7641a815e",
+        strip_prefix = "googletest-06f44bc951046150f1348598854b211afdcf37fc",
+        urls = ["https://github.com/google/googletest/archive/06f44bc951046150f1348598854b211afdcf37fc.zip"],
+    )
+
+    http_archive(
         name = "rules_proto_grpc",
         sha256 = "928e4205f701b7798ce32f3d2171c1918b363e9a600390a25c876f075f1efc0a",
         strip_prefix = "rules_proto_grpc-4.4.0",
