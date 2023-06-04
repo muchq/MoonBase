@@ -4,7 +4,7 @@
 #include <string>
 
 namespace example_cc_go {
-    std::string MakeGreeting(std::string name);
+    std::string MakeGreeting(const std::string& name);
 }
 
 #endif
