@@ -1,10 +1,9 @@
 cc_binary(
-    name = "greeter_server",
-    srcs = ["greeter_server.cc"],
-    defines = ["BAZEL_BUILD"],
+    name = "example_service",
+    srcs = ["example_service.cc"],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/main/protos:cpp_examplegrpc_proto",
+        "//src/main/protos:exampleservice_proto",
         "@com_github_grpc_grpc//:grpc++",
         "@com_github_grpc_grpc//:grpc++_reflection",
         "@com_google_absl//absl/flags:flag",
