@@ -27,6 +27,15 @@ def register_http_archive_dependencies():
     )
 
     http_archive(
+        name = "mongoose_cc",
+        strip_prefix = "mongoose-b379816178abdcd59135aa32f990a4b3bbbfb54b",
+        patch_args = ["-p1"],
+        patches = ["//bazel/patches:mongoose.patch"],
+        sha256 = "a3ae70035a010b29cdd13c9bcae655d2b56bfdb724f43132cdbc99d7457f0b1b",
+        urls = ["https://github.com/cesanta/mongoose/archive/b379816178abdcd59135aa32f990a4b3bbbfb54b.tar.gz"],
+    )
+
+    http_archive(
         name = "io_bazel_rules_go",
         sha256 = "6b65cb7917b4d1709f9410ffe00ecf3e160edf674b78c54a894471320862184f",
         urls = [
