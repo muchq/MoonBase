@@ -8,15 +8,15 @@
 
 #include "absl/strings/str_format.h"
 
-#include "src/main/protos/exampleservice.grpc.pb.h"
+#include "src/main/protos/example_service.grpc.pb.h"
 
 using grpc::Server;
 using grpc::ServerBuilder;
 using grpc::ServerContext;
 using grpc::Status;
-using exampleservice::Greeter;
-using exampleservice::HelloReply;
-using exampleservice::HelloRequest;
+using example_service::Greeter;
+using example_service::HelloReply;
+using example_service::HelloRequest;
 
 class GreeterServiceImpl final : public Greeter::Service {
   Status SayHello(ServerContext* context, const HelloRequest* request,
