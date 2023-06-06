@@ -21,7 +21,7 @@ jobs:
     machine: true
     resource_class: muchq/bzl-lght
     steps:
-      - run: echo "Hi I'm on Runners!"
+      - run: echo "Hi I'm on Runner!"
       - checkout # check out the code in the project directory
       - run:
           name: Run Build
