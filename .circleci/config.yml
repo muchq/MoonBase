@@ -17,6 +17,11 @@ commands:
           command: sudo apt update && sudo apt install bazel
 
 jobs:
+  runner-test:
+    machine: true
+    resource_class: muchq/bzl-lght
+    steps:
+      - run: echo "Hi I'm on Runners!"
   moon-base-job:
     machine:
       image: ubuntu-2204:2022.07.1
