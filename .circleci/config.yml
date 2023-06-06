@@ -22,6 +22,10 @@ jobs:
     resource_class: muchq/bzl-lght
     steps:
       - run: echo "Hi I'm on Runners!"
+      - checkout # check out the code in the project directory
+      - run:
+          name: Run Build
+          command: bazel build //...
   moon-base-job:
     machine:
       image: ubuntu-2204:2022.07.1
@@ -47,4 +51,5 @@ jobs:
 workflows:
   moon-base:
     jobs:
+      - runner-test
       - moon-base-job
