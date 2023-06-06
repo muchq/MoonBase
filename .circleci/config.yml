@@ -20,7 +20,7 @@ jobs:
   moon-base-job:
     machine:
       image: ubuntu-2204:2022.07.1
-    resource_class: 2xlarge
+    resource_class: xlarge
     steps:
       - setup-bazel
       - checkout # check out the code in the project directory
