@@ -17,18 +17,10 @@ commands:
           command: sudo apt update && sudo apt install bazel
 
 jobs:
-  runner-test:
-    machine: true
-    resource_class: muchq/bzl-lght
-    steps:
-      - run: echo "Hi I'm on Runner2!"
-      - checkout # check out the code in the project directory
-      - run:
-          name: Run Build
-          command: bazel build //...
   moon-base-job:
     machine:
       image: ubuntu-2204:2022.07.1
+    resource_class: large
     steps:
       - setup-bazel
       - checkout # check out the code in the project directory
@@ -51,5 +43,4 @@ jobs:
 workflows:
   moon-base:
     jobs:
-      - runner-test
       - moon-base-job
