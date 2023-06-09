@@ -22,6 +22,8 @@ func main() {
 		return
 	}
 
+	_ = image_io.WriteImageAsPng(imageData, path+".png")
+
 	greyBlurXImage := images.BoxBlurX(imageData, 1, depth)
 	_ = image_io.WriteImageAsPng(&greyBlurXImage, path+".grey.X.png")
 
