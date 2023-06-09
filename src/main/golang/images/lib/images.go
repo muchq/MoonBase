@@ -6,17 +6,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-	"os"
 )
-
-func ReadImage(path string) (image.Image, string, error) {
-	existingImageFile, err := os.Open(path)
-	if err != nil {
-		return nil, "", err
-	}
-	defer existingImageFile.Close()
-	return image.Decode(existingImageFile)
-}
 
 func GreyScale(img image.Image) image.Gray {
 	cpy := image.NewGray(img.Bounds())
