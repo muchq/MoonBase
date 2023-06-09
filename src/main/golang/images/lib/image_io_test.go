@@ -6,7 +6,7 @@ import (
 )
 
 func TestReadImage(t *testing.T) {
-	_, imageType, err := ReadImage("moon_base/static_content/marbles.png")
+	_, imageType, err := ReadImage("/static_content/marbles.png")
 	if err != nil {
 		fmt.Println("whyyyyyyyyyyyy")
 	} else {

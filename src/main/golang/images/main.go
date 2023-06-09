@@ -22,8 +22,14 @@ func main() {
 		return
 	}
 
-	greyImage := images.BoxBlurX(imageData, 4, depth)
-	_ = image_io.WriteImageAsPng(&greyImage, path+".grey.png")
+	greyBlurXImage := images.BoxBlurX(imageData, 1, depth)
+	_ = image_io.WriteImageAsPng(&greyBlurXImage, path+".grey.X.png")
+
+	greyBlurYImage := images.BoxBlurY(imageData, 1, depth)
+	_ = image_io.WriteImageAsPng(&greyBlurYImage, path+".grey.Y.png")
+
+	greyBlurBoxImage := images.BoxBlur(imageData, 1, depth)
+	_ = image_io.WriteImageAsPng(&greyBlurBoxImage, path+".grey.Box.png")
 }
 
 func parseDepth() (int, error) {
