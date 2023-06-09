@@ -5,9 +5,9 @@ go_binary(
     srcs = [
         "main.go",
     ],
-    data = ["//static_content:images"],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/main/golang/images/lib:image_library",
+        "//src/main/golang/images/lib",
+        "//src/main/golang/images/lib:io",
     ],
 )
