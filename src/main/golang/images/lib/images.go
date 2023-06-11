@@ -18,35 +18,45 @@ func BoxBlur(img image.Image, radius int, depth int) image.Gray {
 	gray := GreyScale(img)
 	i := 0
 	for i < depth {
-		doBoxBlurX(gray, radius)
-		doBoxBlurY(gray, radius)
+		gray = doBoxBlurX(gray, radius)
+		gray = doBoxBlurY(gray, radius)
 		i++
 	}
 	return gray
 }
 
 func BoxBlurX(img image.Image, radius int, depth int) image.Gray {
-	gray := GreyScale(img)
+	return BoxBlurGrayX(GreyScale(img), radius, depth)
+}
+
+func BoxBlurGrayX(img image.Gray, radius int, depth int) image.Gray {
+	gray := img
 	i := 0
 	for i < depth {
-		doBoxBlurX(gray, radius)
+		gray = doBoxBlurX(gray, radius)
 		i++
 	}
 	return gray
 }
 
 func BoxBlurY(img image.Image, radius int, depth int) image.Gray {
-	gray := GreyScale(img)
+	return BoxBlurGrayY(GreyScale(img), radius, depth)
+}
+
+func BoxBlurGrayY(img image.Gray, radius int, depth int) image.Gray {
+	gray := img
 	i := 0
 	for i < depth {
-		doBoxBlurY(gray, radius)
+		gray = doBoxBlurY(gray, radius)
 		i++
 	}
 	return gray
 }
 
-func doBoxBlurX(gray image.Gray, radius int) {
-	pixels := gray.Pix
+func doBoxBlurX(gray image.Gray, radius int) image.Gray {
+	grayCopy := copyGray(gray)
+	originalPixels := gray.Pix
+	copyPixels := grayCopy.Pix
 	divisor := uint8(2*radius + 1)
 
 	row := 0
@@ -55,22 +65,26 @@ func doBoxBlurX(gray image.Gray, radius int) {
 		col := radius
 		for col < gray.Stride-radius {
 			center := row*gray.Stride + col
-			newVal := pixels[center] / divisor
+			newVal := originalPixels[center] / divisor
 			r := 1
 			for r <= radius {
-				newVal = newVal + pixels[center+r]/divisor
-				newVal = newVal + pixels[center-r]/divisor
+				newVal = newVal + originalPixels[center+r]/divisor
+				newVal = newVal + originalPixels[center-r]/divisor
 				r++
 			}
-			pixels[center] = newVal
+			copyPixels[center] = newVal
 			col++
 		}
 		row++
 	}
+
+	return grayCopy
 }
 
-func doBoxBlurY(gray image.Gray, radius int) {
-	pixels := gray.Pix
+func doBoxBlurY(gray image.Gray, radius int) image.Gray {
+	grayCopy := copyGray(gray)
+	originalPixels := gray.Pix
+	copyPixels := grayCopy.Pix
 	divisor := uint8(2*radius + 1)
 
 	row := radius
@@ -79,18 +93,20 @@ func doBoxBlurY(gray image.Gray, radius int) {
 		col := 0
 		for col < gray.Stride {
 			center := row*gray.Stride + col
-			newVal := pixels[center] / divisor
+			newVal := originalPixels[center] / divisor
 			r := 1
 			for r <= radius {
-				newVal = newVal + pixels[(row+r)*gray.Stride+col]/divisor
-				newVal = newVal + pixels[(row-r)*gray.Stride+col]/divisor
+				newVal = newVal + originalPixels[(row+r)*gray.Stride+col]/divisor
+				newVal = newVal + originalPixels[(row-r)*gray.Stride+col]/divisor
 				r++
 			}
-			pixels[center] = newVal
+			copyPixels[center] = newVal
 			col++
 		}
 		row++
 	}
+
+	return grayCopy
 }
 
 func copyGray(img image.Gray) image.Gray {
