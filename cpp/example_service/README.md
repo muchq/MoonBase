@@ -2,17 +2,17 @@
 
 ### Build
 ```
-bazel build //src/main/cpp/example_service
+bazel build //cpp/example_service
 ```
 
 ### Run
 ```
-bazel-bin/src/main/cpp/example_service/example_service
+bazel-bin/cpp/example_service/example_service
 ```
 
 ### Call
 ```
-➜  ~ grpcurl -d '{"name": "Friend"}' -plaintext localhost:8088 exampleservice.Greeter/SayHello
+➜  ~ grpcurl -d '{"name": "Friend"}' -plaintext localhost:8088 example_service.Greeter/SayHello
 {
   "message": "Hello Friend"
 }
