@@ -1,0 +1,13 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary")
+
+go_binary(
+    name = "images",
+    srcs = [
+        "main.go",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//golang/images/lib",
+        "//golang/images/lib:io",
+    ],
+)
