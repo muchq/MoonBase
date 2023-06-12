@@ -13,7 +13,7 @@ Add new targets to [project view](/.ijwb/.bazelproject) if they aren't detected 
 
 C/C++ aren't supported in Bazel for IntelliJ. I haven't had a great CLion experience with Bazel, but we'll see.
 
-### Dependencies
+### JVM Dependencies
  - update `dependencies.yaml`
  - run `./scripts/update_deps.sh`
 
