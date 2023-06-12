@@ -7,11 +7,13 @@
 ### IntelliJ
 Tested with [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij)
 
-Java targets Just Work™.
+Java and Go targets Just Work™.
 
 Add new targets to [project view](/.ijwb/.bazelproject) if they aren't detected automatically.
 
-### Dependencies
+C/C++ aren't supported in Bazel for IntelliJ. I haven't had a great CLion experience with Bazel, but we'll see.
+
+### JVM Dependencies
  - update `dependencies.yaml`
  - run `./scripts/update_deps.sh`
 
