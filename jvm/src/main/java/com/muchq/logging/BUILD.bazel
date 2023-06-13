@@ -1,6 +1,6 @@
 java_library(
     name = "logging",
-    resources = ["jvm/src/main/resources/logback.xml"],
+    resources = ["//jvm/src/main/resources:logback_config"],
     runtime_deps = [
         "@third_party//ch/qos/logback:logback_classic",
         "@third_party//io/sentry:sentry_logback",

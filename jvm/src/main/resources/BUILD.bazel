@@ -3,3 +3,9 @@ filegroup(
     srcs = ["MARBLES.BMP"],
     visibility = ["//visibility:public"],
 )
+
+filegroup(
+    name = "logback_config",
+    srcs = ["logback.xml"],
+    visibility = ["//visibility:public"],
+)
