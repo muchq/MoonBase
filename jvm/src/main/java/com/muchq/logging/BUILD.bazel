@@ -1,0 +1,9 @@
+java_library(
+    name = "logging",
+    resources = ["jvm/src/main/resources/logback.xml"],
+    runtime_deps = [
+        "@third_party//ch/qos/logback:logback_classic",
+        "@third_party//io/sentry:sentry_logback",
+        "@third_party//org/slf4j:slf4j_api",
+    ],
+)
