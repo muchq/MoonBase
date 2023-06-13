@@ -4,7 +4,7 @@ cc_library(
     hdrs = ["example_cc_go.h"],
     visibility = ["//visibility:public"],
     deps = [
-        "//golang/example_lib:example_lib.cc",
+        "//go/example_lib:example_lib.cc",
     ],
 )
 

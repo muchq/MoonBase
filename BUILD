@@ -10,6 +10,6 @@ java_library(
 
 alias(
     name = "go-images",
-    actual = "//golang/images",
+    actual = "//go/images",
     visibility = ["//visibility:public"],
 )
