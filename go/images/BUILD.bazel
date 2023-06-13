@@ -7,7 +7,7 @@ go_binary(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "//golang/images/lib",
-        "//golang/images/lib:io",
+        "//go/images/lib",
+        "//go/images/lib:io",
     ],
 )
