@@ -4,14 +4,19 @@ Going through [computer graphics from scratch](https://gabrielgambetta.com/compu
 
 ## Build
 ```
-bazel build //src/main/scala/com/muchq/scraphics:Tracer
+bazel build jvm/src/main/scala/com/muchq/scraphics:ray_tracer_deploy.jar
 ```
 
 ## Run
-requires scala 3.x
-
+### bazel
+```shell
+bazel run //jvm/src/main/scala/com/muchq/scraphics:ray_tracer
+open bazel-bin/jvm/src/main/scala/com/muchq/scraphics/ray_tracer.runfiles/moon_base/tracer_output.png
 ```
-scala src/main/scala/com/muchq/scraphics/Tracer.scala
+
+### java
+```shell
+java -jar bazel-bin/jvm/src/main/scala/com/muchq/scraphics/ray_tracer_deploy.jar
 open tracer_output.png
 ```
 
