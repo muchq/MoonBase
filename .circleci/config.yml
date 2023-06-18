@@ -36,6 +36,9 @@ jobs:
           name: Run Go Tests
           command: bazel test //go/...
       - run:
+          name: Run Rust Tests
+          command: bazel test //rust/...
+      - run:
           name: Run Cpp Tests
           command: bazel test //cpp/...
 
