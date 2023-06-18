@@ -123,3 +123,21 @@ load("@io_bazel_rules_scala//scala/scalafmt:scalafmt_repositories.bzl", "scalafm
 scalafmt_default_config()
 
 scalafmt_repositories()
+
+#############################################################
+#############
+##               Rust Stuff
+###
+##############
+#############################################################
+
+load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_register_toolchains")
+
+rules_rust_dependencies()
+
+rust_register_toolchains(
+    edition = "2021",
+    versions = [
+        "1.70.0"
+    ],
+)
