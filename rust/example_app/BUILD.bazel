@@ -1,9 +1,10 @@
 load("@rules_rust//rust:defs.bzl", "rust_binary")
 
 rust_binary(
-    name = "hello_rust",
+    name = "example_app",
     srcs = [
-        "src/hello.rs",
+        "src/example_app.rs",
     ],
     visibility = ["//visibility:public"],
+    deps = ["//rust/example_lib"],
 )
