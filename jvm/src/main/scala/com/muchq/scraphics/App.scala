@@ -26,7 +26,7 @@ object App {
   def main(args: Array[String]): Unit =
     val viewportSize: Double = 1.0
     val projectionPlane: Double = 1.0
-    val cameraPosition: Vec3 = Vec3(0, 0, 0)
+    val cameraPosition: Vec3 = Vec3(0, 0, -5)
 
     val spheres: List[Sphere] = List(
       Sphere(Vec3(0, -1, 3), 1, RED, 500, 0.2),

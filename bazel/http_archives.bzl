@@ -69,3 +69,18 @@ def register_http_archive_dependencies():
         type = "zip",
         url = "https://github.com/bazelbuild/rules_scala/archive/%s.zip" % RULES_SCALA_VERSION,
     )
+
+    http_archive(
+        name = "rules_rust",
+        sha256 = "50ec4b84a7ec5370f5882d52f4a1e6b8a75de2f8dcc0a4403747b69b2c4ef5b1",
+        urls = ["https://github.com/bazelbuild/rules_rust/releases/download/0.23.0/rules_rust-v0.23.0.tar.gz"],
+    )
+
+    http_archive(
+        name = "com_github_bazelbuild_buildtools",
+        sha256 = "977a0bd4593c8d4c8f45e056d181c35e48aa01ad4f8090bdb84f78dca42f47dc",
+        strip_prefix = "buildtools-6.1.2",
+        urls = [
+            "https://github.com/bazelbuild/buildtools/archive/refs/tags/v6.1.2.tar.gz",
+        ],
+    )
