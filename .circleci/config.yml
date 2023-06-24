@@ -8,7 +8,7 @@ commands:
       - run:
           name: Install Build and Lint Tools
           command: |
-            scripts/setup/setup-linux
+            sudo scripts/setup/setup-linux
 
 jobs:
   moon-base-job:
