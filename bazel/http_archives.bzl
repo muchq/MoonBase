@@ -64,6 +64,8 @@ def register_http_archive_dependencies():
 
     http_archive(
         name = "io_bazel_rules_scala",
+        patch_args = ["-p1"],
+        patches = ["//bazel/patches:rules_scala_33.patch"],
         sha256 = "5144514f81e63a3337e56d86b2924a22a1d5d9f273e482c2f2fb09639f6388fa",
         strip_prefix = "rules_scala-%s" % RULES_SCALA_VERSION,
         type = "zip",
