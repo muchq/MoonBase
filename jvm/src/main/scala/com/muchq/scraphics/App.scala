@@ -1,6 +1,16 @@
 package com.muchq.scraphics
 
-import com.muchq.scraphics.tracer.{Tracer, Color, Image, Light, LightType, Scene, Sphere, Vec2, Vec3}
+import com.muchq.scraphics.tracer.{
+  Tracer,
+  Color,
+  Image,
+  Light,
+  LightType,
+  Scene,
+  Sphere,
+  Vec2,
+  Vec3
+}
 import com.muchq.scraphics.tracer.Constants.{RED, YELLOW, BLUE, GREEN, BACKGROUND}
 import com.muchq.scraphics.tracer.Utils.clampValue
 
@@ -16,17 +26,15 @@ def printImage(image: Image): Unit =
   for
     x <- 0 until image.width
     y <- 0 until image.height
-  do
-    bufferedImage.setRGB(x, y, clamp(image.data(x)(y)))
+  do bufferedImage.setRGB(x, y, clamp(image.data(x)(y)))
 
   ImageIO.write(bufferedImage, "png", new File("tracer_output.png"))
 
-
 object App {
   def main(args: Array[String]): Unit =
-    val viewportSize: Double = 1.0
+    val viewportSize: Double    = 1.0
     val projectionPlane: Double = 1.0
-    val cameraPosition: Vec3 = Vec3(0, 0, -5)
+    val cameraPosition: Vec3    = Vec3(0, 0, -5)
 
     val spheres: List[Sphere] = List(
       Sphere(Vec3(0, -1, 3), 1, RED, 500, 0.2),
@@ -42,7 +50,7 @@ object App {
     )
 
     val scene: Scene = Scene(viewportSize, projectionPlane, BACKGROUND, spheres, lights)
-    val image = Image(600, 600)
+    val image        = Image(600, 600)
     Tracer.drawScene(scene, image, cameraPosition)
     printImage(image)
 }
