@@ -19,10 +19,10 @@ jobs:
       - setup-build-env
       - run:
           name: CC Lint
-          command: ./scripts/format-cc-check
+          command: scripts/format-cc-check
       - run:
           name: Scala Lint
-          command: ./scripts/format-scala-check
+          command: scripts/format-scala-check
       - run:
           name: Run Build
           command: bazel build //...
