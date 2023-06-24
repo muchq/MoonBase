@@ -18,8 +18,11 @@ jobs:
       - checkout # check out the code in the project directory
       - setup-build-env
       - run:
-          name: Lint
+          name: CC Lint
           command: ./scripts/format-cc-check
+      - run:
+          name: Scala Lint
+          command: ./scripts/format-scala-check
       - run:
           name: Run Build
           command: bazel build //...
