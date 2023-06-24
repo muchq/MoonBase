@@ -1,26 +1,24 @@
-#include <iostream>
-#include <memory>
-#include <string>
-
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
 
-#include "absl/strings/str_format.h"
+#include <iostream>
+#include <memory>
+#include <string>
 
+#include "absl/strings/str_format.h"
 #include "protos/example_service.grpc.pb.h"
 
+using example_service::Greeter;
+using example_service::HelloReply;
+using example_service::HelloRequest;
 using grpc::Server;
 using grpc::ServerBuilder;
 using grpc::ServerContext;
 using grpc::Status;
-using example_service::Greeter;
-using example_service::HelloReply;
-using example_service::HelloRequest;
 
 class GreeterServiceImpl final : public Greeter::Service {
-  Status SayHello(ServerContext* context, const HelloRequest* request,
-                  HelloReply* reply) override {
+  Status SayHello(ServerContext* context, const HelloRequest* request, HelloReply* reply) override {
     std::string prefix("Hello ");
     reply->set_message(prefix + request->name());
     return Status::OK;
@@ -35,7 +33,7 @@ void RunServer(uint16_t port) {
   grpc::reflection::InitProtoReflectionServerBuilderPlugin();
 
   ServerBuilder builder;
-  builder.AddListeningPort(server_address, grpc::InsecureServerCredentials()); // no auth
+  builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());  // no auth
   builder.RegisterService(&service);
   std::unique_ptr<Server> server(builder.BuildAndStart());
 

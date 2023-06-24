@@ -3,7 +3,7 @@ version: 2.1
 commands:
   setup-bazel:
     description: |
-      Setup the Bazel build system used for building Android projects
+      Install Bazel
     steps:
       - run:
           name: Add Bazel Apt repository
@@ -15,6 +15,13 @@ commands:
       - run:
           name: Install Bazel from Apt
           command: sudo apt update && sudo apt install bazel
+  setup-lint-tools:
+    description: |
+      Install the tools required to lint our project
+    steps:
+      - run:
+          name: Install clang-format from Apt
+          command: sudo apt update && sudo apt install clang-format
 
 jobs:
   moon-base-job:
@@ -22,7 +29,11 @@ jobs:
       image: ubuntu-2204:2022.07.1
     steps:
       - setup-bazel
+      - setup-lint-tools
       - checkout # check out the code in the project directory
+      - run:
+          name: Lint
+          command: ./scripts/format-cc-check
       - run:
           name: Run Build
           command: bazel build //...
