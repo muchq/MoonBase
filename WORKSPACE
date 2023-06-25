@@ -102,7 +102,7 @@ bind(
 
 load("@io_bazel_rules_scala//:scala_config.bzl", "scala_config")
 
-scala_config(scala_version = "3.2.1")
+scala_config(scala_version = "3.3.0")
 
 load("@io_bazel_rules_scala//scala:scala.bzl", "scala_repositories")
 
@@ -138,6 +138,6 @@ rules_rust_dependencies()
 rust_register_toolchains(
     edition = "2021",
     versions = [
-        "1.70.0"
+        "1.70.0",
     ],
 )

@@ -60,11 +60,13 @@ def register_http_archive_dependencies():
         ],
     )
 
-    RULES_SCALA_VERSION = "d6b81c893348c55875ba93475966858bc2478cfa"
+    RULES_SCALA_VERSION = "12d60d203591d92572c812f345b45babff688230"
 
     http_archive(
         name = "io_bazel_rules_scala",
-        sha256 = "4205be4f075c460158f5b931edac653406d12b6fd49bcdb5670dd6a5007e79b4",
+        patch_args = ["-p1"],
+        patches = ["//bazel/patches:rules_scala_33.patch"],
+        sha256 = "5144514f81e63a3337e56d86b2924a22a1d5d9f273e482c2f2fb09639f6388fa",
         strip_prefix = "rules_scala-%s" % RULES_SCALA_VERSION,
         type = "zip",
         url = "https://github.com/bazelbuild/rules_scala/archive/%s.zip" % RULES_SCALA_VERSION,
