@@ -13,6 +13,20 @@ Add new targets to [project view](/.ijwb/.bazelproject) if they aren't detected 
 
 C/C++ aren't supported in Bazel for IntelliJ. I haven't had a great CLion experience with Bazel, but we'll see.
 
+### VSCode
+
+Scala support is waiting on [metals integration]()
+
+C/C++ use [hedronvision/bazel-compile-commands-extractor](https://github.com/hedronvision/bazel-compile-commands-extractor)
+
+Follow instructions [here](https://github.com/hedronvision/bazel-compile-commands-extractor#vscode)
+
+and then do
+```
+bazel run :refresh_compile_commands
+code .
+```
+
 ### JVM Dependencies
  - update `dependencies.yaml`
  - run `./scripts/update_deps.sh`

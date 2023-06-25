@@ -4,3 +4,6 @@ target
 bazel-*
 .DS_Store
 out
+.bsp
+.bazelbsp
+.metals
