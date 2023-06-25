@@ -86,3 +86,10 @@ def register_http_archive_dependencies():
             "https://github.com/bazelbuild/buildtools/archive/refs/tags/v6.1.2.tar.gz",
         ],
     )
+
+    http_archive(
+        name = "hedron_compile_commands",
+        sha256 = "3cd0e49f0f4a6d406c1d74b53b7616f5e24f5fd319eafc1bf8eee6e14124d115",
+        strip_prefix = "bazel-compile-commands-extractor-3dddf205a1f5cde20faf2444c1757abe0564ff4c",
+        url = "https://github.com/hedronvision/bazel-compile-commands-extractor/archive/3dddf205a1f5cde20faf2444c1757abe0564ff4c.tar.gz",
+    )
