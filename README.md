@@ -15,7 +15,7 @@ C/C++ aren't supported in Bazel for IntelliJ. I haven't had a great CLion experi
 
 ### VSCode
 
-Scala support is waiting on [metals integration]()
+Scala support is waiting on [metals integration](https://github.com/scalameta/metals/issues/5138)
 
 C/C++ use [hedronvision/bazel-compile-commands-extractor](https://github.com/hedronvision/bazel-compile-commands-extractor)
 
