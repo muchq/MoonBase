@@ -1,6 +1,6 @@
 package com.muchq.scraphics.tracer
 
-import com.muchq.scraphics.tracer.Constants.{INF, EPSILON, BACKGROUND}
+import com.muchq.scraphics.tracer.Constants.{ BACKGROUND, EPSILON, INF }
 
 object Tracer {
   def drawScene(scene: Scene, image: Image, cameraPosition: Vec3): Unit =

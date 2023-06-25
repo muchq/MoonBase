@@ -1,17 +1,17 @@
 package com.muchq.scraphics
 
 import com.muchq.scraphics.tracer.{
-  Tracer,
   Color,
   Image,
   Light,
   LightType,
   Scene,
   Sphere,
+  Tracer,
   Vec2,
   Vec3
 }
-import com.muchq.scraphics.tracer.Constants.{RED, YELLOW, BLUE, GREEN, BACKGROUND}
+import com.muchq.scraphics.tracer.Constants.{ BACKGROUND, BLUE, GREEN, RED, YELLOW }
 import com.muchq.scraphics.tracer.Utils.clampValue
 
 import java.awt.image.BufferedImage
