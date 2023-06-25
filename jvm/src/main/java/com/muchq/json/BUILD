@@ -1,6 +1,6 @@
 java_library(
     name = "json",
-    srcs = glob(["*.java"]),
+    srcs = ["JsonUtils.java"],
     visibility = ["//visibility:public"],
     deps = [
         "@maven//:com_fasterxml_jackson_core_jackson_core",

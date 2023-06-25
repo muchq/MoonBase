@@ -1,0 +1,11 @@
+java_library(
+    name = "physical",
+    srcs = [
+        "Card.java",
+        "Deck.java",
+        "Facing.java",
+        "Suit.java",
+        "Value.java",
+    ],
+    visibility = ["//visibility:public"],
+)
