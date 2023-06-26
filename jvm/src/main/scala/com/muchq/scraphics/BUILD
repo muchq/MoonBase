@@ -9,6 +9,6 @@ scala_binary(
     visibility = ["//visibility:public"],
     deps = [
         "//jvm/src/main/scala/com/muchq/scraphics/tracer",
-        "@third_party//org/slf4j:slf4j_api",
+        "@maven//:org_slf4j_slf4j_api",
     ],
 )

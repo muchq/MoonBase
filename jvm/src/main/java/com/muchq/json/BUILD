@@ -3,10 +3,10 @@ java_library(
     srcs = glob(["*.java"]),
     visibility = ["//visibility:public"],
     deps = [
-        "@third_party//com/fasterxml/jackson/core:jackson_core",
-        "@third_party//com/fasterxml/jackson/core:jackson_databind",
-        "@third_party//com/fasterxml/jackson/datatype:jackson_datatype_guava",
-        "@third_party//com/fasterxml/jackson/datatype:jackson_datatype_jdk8",
-        "@third_party//com/fasterxml/jackson/datatype:jackson_datatype_jsr310",
+        "@maven//:com_fasterxml_jackson_core_jackson_core",
+        "@maven//:com_fasterxml_jackson_core_jackson_databind",
+        "@maven//:com_fasterxml_jackson_datatype_jackson_datatype_guava",
+        "@maven//:com_fasterxml_jackson_datatype_jackson_datatype_jdk8",
+        "@maven//:com_fasterxml_jackson_datatype_jackson_datatype_jsr310",
     ],
 )

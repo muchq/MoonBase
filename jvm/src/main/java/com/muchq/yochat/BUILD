@@ -5,8 +5,8 @@ java_binary(
     visibility = ["//visibility:public"],
     deps = [
         "//jvm/src/main/java/com/muchq/yochat/lib",
-        "@third_party//io/netty:netty_common",
-        "@third_party//io/netty:netty_transport",
-        "@third_party//org/slf4j:slf4j_api",
+        "@maven//:io_netty_netty_common",
+        "@maven//:io_netty_netty_transport",
+        "@maven//:org_slf4j_slf4j_api",
     ],
 )

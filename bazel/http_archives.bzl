@@ -45,6 +45,13 @@ def register_http_archive_dependencies():
     )
 
     http_archive(
+        name = "rules_jvm_external",
+        strip_prefix = "rules_jvm_external-5.3",
+        sha256 = "d31e369b854322ca5098ea12c69d7175ded971435e55c18dd9dd5f29cc5249ac",
+        url = "https://github.com/bazelbuild/rules_jvm_external/releases/download/5.3/rules_jvm_external-5.3.tar.gz",
+    )
+
+    http_archive(
         name = "contrib_rules_jvm",
         sha256 = "2b710518847279f655a18a51a1629b033e4406f29609e73eb07ecfb6f0138d25",
         strip_prefix = "rules_jvm-0.13.0",

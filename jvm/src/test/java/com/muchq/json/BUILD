@@ -7,9 +7,9 @@ java_test_suite(
     deps = [
         "//jvm/src/main/java/com/muchq/json",
         "//jvm/src/test/java/com/muchq/json/utils",
-        "@third_party//com/fasterxml/jackson/core:jackson_core",
-        "@third_party//com/fasterxml/jackson/core:jackson_databind",
-        "@third_party//junit",
-        "@third_party//org/assertj:assertj_core",
+        "@maven//:com_fasterxml_jackson_core_jackson_core",
+        "@maven//:com_fasterxml_jackson_core_jackson_databind",
+        "@maven//:junit_junit",
+        "@maven//:org_assertj_assertj_core",
     ],
 )

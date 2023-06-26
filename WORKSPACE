@@ -74,13 +74,57 @@ rules_proto_toolchains()
 ##############################################################
 ########################################################################################
 
-load("//3rdparty:workspace.bzl", "maven_dependencies")
+load("@rules_jvm_external//:repositories.bzl", "rules_jvm_external_deps")
 
-maven_dependencies()
+rules_jvm_external_deps()
 
-load("//3rdparty:target_file.bzl", "build_external_workspace")
+load("@rules_jvm_external//:setup.bzl", "rules_jvm_external_setup")
 
-build_external_workspace(name = "third_party")
+rules_jvm_external_setup()
+
+load("@rules_jvm_external//:defs.bzl", "maven_install")
+
+maven_install(
+    artifacts = [
+        "ch.qos.logback:logback-classic:1.4.5",
+        "ch.qos.logback:logback-core:1.4.5",
+        "com.fasterxml.jackson.core:jackson-annotations:2.13.4",
+        "com.fasterxml.jackson.core:jackson-core:2.13.4",
+        "com.fasterxml.jackson.core:jackson-databind:2.13.4",
+        "com.fasterxml.jackson.datatype:jackson-datatype-guava:2.13.4",
+        "com.fasterxml.jackson.datatype:jackson-datatype-jdk8:2.13.4",
+        "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.13.4",
+        "com.fasterxml.jackson.module:jackson-module-scala_2.13:2.13.4",
+        "com.google.guava:guava:31.1-jre",
+        "io.netty:netty-common:4.1.87.Final",
+        "io.netty:netty-codec:4.1.87.Final",
+        "io.netty:netty-handler:4.1.87.Final",
+        "io.netty:netty-transport:4.1.87.Final",
+        "io.sentry:sentry-logback:6.4.2",
+        "junit:junit:4.13.2",
+        "org.apache.spark:spark-core_2.13:3.3.1",
+        "org.apache.spark:spark-sql_2.13:3.3.1",
+        "org.apache.spark:spark-tags_2.13:3.3.1",
+        "org.assertj:assertj-core:3.23.1",
+        "org.scala-lang:scala3-library_3:jar:3.3.0",
+        "org.scala-lang:scala3-compiler_3:3.3.0",
+        "org.slf4j:slf4j-api:2.0.6",
+    ],
+    repositories = [
+        "https://maven.google.com",
+        "https://repo1.maven.org/maven2",
+    ],
+)
+
+# switch back to bazel-deps once scala3 support is added
+# https://github.com/bazeltools/bazel-deps/issues/326
+#load("//3rdparty:workspace.bzl", "maven_dependencies")
+#
+#maven_dependencies()
+#
+#load("//3rdparty:target_file.bzl", "build_external_workspace")
+#
+#build_external_workspace(name = "third_party")
 
 load("@contrib_rules_jvm//:repositories.bzl", "contrib_rules_jvm_deps")
 
