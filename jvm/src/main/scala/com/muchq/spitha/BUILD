@@ -7,9 +7,9 @@ scala_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "@third_party//org/apache/spark:spark_core_2_13",
-        "@third_party//org/apache/spark:spark_sql_2_13",
-        "@third_party//org/apache/spark:spark_tags_2_13",
-        "@third_party//org/slf4j:slf4j_api",
+        "@maven//:org_apache_spark_spark_core_2_13",
+        "@maven//:org_apache_spark_spark_sql_2_13",
+        "@maven//:org_apache_spark_spark_tags_2_13",
+        "@maven//:org_slf4j_slf4j_api",
     ],
 )

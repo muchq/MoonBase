@@ -3,11 +3,11 @@ java_library(
     srcs = glob(["*.java"]),
     visibility = ["//visibility:public"],
     deps = [
-        "@third_party//io/netty:netty_buffer",
-        "@third_party//io/netty:netty_codec",
-        "@third_party//io/netty:netty_common",
-        "@third_party//io/netty:netty_handler",
-        "@third_party//io/netty:netty_transport",
-        "@third_party//org/slf4j:slf4j_api",
+        "@maven//:io_netty_netty_buffer",
+        "@maven//:io_netty_netty_codec",
+        "@maven//:io_netty_netty_common",
+        "@maven//:io_netty_netty_handler",
+        "@maven//:io_netty_netty_transport",
+        "@maven//:org_slf4j_slf4j_api",
     ],
 )

@@ -7,7 +7,7 @@
 ### IntelliJ
 Tested with [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij)
 
-Java and Go targets Just Work™.
+Java, Scala and Go targets Just Work™.
 
 Add new targets to [project view](/.ijwb/.bazelproject) if they aren't detected automatically.
 
@@ -15,7 +15,7 @@ C/C++ aren't supported in Bazel for IntelliJ. I haven't had a great CLion experi
 
 ### VSCode
 
-Scala support is waiting on [metals integration](https://github.com/scalameta/metals/issues/5138)
+Scala3 support is waiting on [metals integration](https://github.com/scalameta/metals/issues/5138)
 
 C/C++ use [hedronvision/bazel-compile-commands-extractor](https://github.com/hedronvision/bazel-compile-commands-extractor)
 
@@ -28,8 +28,9 @@ code .
 ```
 
 ### JVM Dependencies
- - update `dependencies.yaml`
- - run `./scripts/update_deps.sh`
+Use rules_jvm_external and update deps in WORKSPACE
+
+At some point, switch back to bazel-deps once it [supports scala3](https://github.com/bazeltools/bazel-deps/issues/326)
 
 ### Importing New Repositories
  - clone the new repo `foo`
