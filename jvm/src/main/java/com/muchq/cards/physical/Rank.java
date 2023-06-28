@@ -1,6 +1,6 @@
 package com.muchq.cards.physical;
 
-public enum Value {
+public enum Rank {
     TWO,
     THREE,
     FOUR,

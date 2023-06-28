@@ -4,8 +4,8 @@ java_library(
         "Card.java",
         "Deck.java",
         "Facing.java",
+        "Rank.java",
         "Suit.java",
-        "Value.java",
     ],
     visibility = ["//visibility:public"],
 )
