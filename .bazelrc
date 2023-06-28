@@ -3,16 +3,10 @@ startup --output_base=~/.bazelout
 common --cxxopt='-std=c++17'
 common --host_cxxopt='-std=c++17'
 
-<<<<<<< Updated upstream
-build --color=yes
-build --java_language_version=17
-build --java_runtime_version=17
-=======
 common --color=yes
 common --java_language_version=17
 common --java_runtime_version=17
 common --tool_java_language_version=17
 common --tool_java_runtime_version=remotejdk_17
->>>>>>> Stashed changes
 
 build --strategy=Scalac=worker
