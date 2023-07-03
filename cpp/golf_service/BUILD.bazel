@@ -1,0 +1,27 @@
+cc_library(
+    name = "golf_lib",
+    srcs = ["golf_lib.cc"],
+    hdrs = ["golf_lib.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//cpp/cards"],
+)
+
+cc_test(
+    name = "golf_lib_test",
+    srcs = ["golf_lib_test.cc"],
+    deps = [
+        ":golf_lib",
+        "@com_google_googletest//:gtest_main",
+    ]
+)
+
+cc_binary(
+    name = "golf_service",
+    srcs = [
+        "Main.cc",
+    ],
+    deps = [
+        ":golf_lib",
+        "@mongoose_cc//:mongoose",
+    ],
+)

@@ -1,7 +1,7 @@
 startup --output_base=~/.bazelout
 
-common --cxxopt='-std=c++17'
-common --host_cxxopt='-std=c++17'
+common --cxxopt='-std=c++20'
+common --host_cxxopt='-std=c++20'
 
 common --color=yes
 common --java_language_version=17

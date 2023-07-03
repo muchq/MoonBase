@@ -1,0 +1,16 @@
+cc_library(
+    name = "cards",
+    srcs = ["card.cc"],
+    hdrs = ["card.h"],
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "cards_test",
+    srcs = ["card_test.cc"],
+    size = "small",
+    deps = [
+        ":cards",
+        "@com_google_googletest//:gtest_main",
+    ]
+)
