@@ -1,4 +1,4 @@
-package com.muchq.cards.physical;
+package com.muchq.cards;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;

@@ -1,4 +1,4 @@
-package com.muchq.cards.physical;
+package com.muchq.cards;
 
 public enum Facing {
     UP,
