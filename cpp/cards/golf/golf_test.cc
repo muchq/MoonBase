@@ -11,7 +11,7 @@
 using namespace cards;
 using namespace golf;
 
-TEST(GOLF_LIB_TEST, PlayerAssertions) {
+TEST(Player, Score) {
   Player p1{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
             Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};  // all twos
   EXPECT_EQ(0, p1.score());
@@ -28,7 +28,7 @@ TEST(GOLF_LIB_TEST, PlayerAssertions) {
   EXPECT_EQ(1, p3.score());
 }
 
-TEST(GOLF_LIB_TEST, GameOverAssertions) {
+TEST(GameState, IsOver) {
   Player p1{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
             Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
   Player p2{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
@@ -49,7 +49,7 @@ TEST(GOLF_LIB_TEST, GameOverAssertions) {
   EXPECT_TRUE(g3.isOver());  // player 1 knocked and it's their turn again
 }
 
-TEST(GOLF_LIB_TEST, WinnerAssertions) {
+TEST(GameState, Winners) {
   Player p1{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
             Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
   Player p2{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
@@ -71,16 +71,86 @@ TEST(GOLF_LIB_TEST, WinnerAssertions) {
   EXPECT_EQ(expectedWinnersG2, g2.winners());
 }
 
-TEST(GOLF_LIB_TEST, GameStateDrawPileAssertions) {
-  Player p1{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
+TEST(GameState, SwapForDrawPile) {
+  const Player p0{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
             Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
-  Player p2{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
+  const Player p1{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
             Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
 
-  std::deque<Card> nonEmptyDrawPile{Card{Suit::Clubs, Rank::Ace}};
-  std::deque<Card> emptyDiscardPile;
-  std::vector<Player> players{p1, p2};
+  std::deque<Card> mutableDrawPile{};
+  mutableDrawPile.push_back(Card{Suit::Diamonds, Rank::Jack});
+  mutableDrawPile.push_back(Card{Suit::Clubs, Rank::Ace});
+  const std::deque<Card> nonEmptyDrawPile = std::move(mutableDrawPile);
+  const std::deque<Card> emptyDiscardPile;
+  const std::vector<Player> players{p0, p1};
 
-  GameState g1{nonEmptyDrawPile, emptyDiscardPile, players, 1, 1};
-  auto g2 = g1.swapForDiscardPile(1, Position::TopLeft);
+  // should swap p1's top left card for Ace of Clubs
+  const GameState g1{nonEmptyDrawPile, emptyDiscardPile, players, 1, -1};
+  auto g2 = g1.swapForDrawPile(1, Position::TopLeft);
+  EXPECT_TRUE(g2.ok());
+
+  GameState updatedState = *g2;
+
+  // game should not be over yet
+  EXPECT_FALSE(updatedState.isOver());
+
+  // check draw pile
+  const std::deque<Card> expectedDrawPile{Card{Suit::Diamonds, Rank::Jack}};
+  EXPECT_EQ(updatedState.getDrawPile(), expectedDrawPile);
+
+  // check discard pile
+  const std::deque<Card> expectedDiscardPile{Card{Suit::Clubs, Rank::Three, Facing::Up}};
+  EXPECT_EQ(updatedState.getDiscardPile(), expectedDiscardPile);
+
+  // check players
+  EXPECT_EQ(updatedState.getPlayers().at(0), p0);
+
+  const Player updatedP1{"Mercy", Card{Suit::Clubs, Rank::Ace}, Card{Suit::Diamonds, Rank::Three}, Card{Suit::Hearts, Rank::Three}, Card{Suit::Spades, Rank::Three}};
+  EXPECT_EQ(updatedState.getPlayers().at(1), updatedP1);
+
+  // check whose turn
+  EXPECT_EQ(updatedState.getWhoseTurn(), 0);
+
+  // check who knocked
+  EXPECT_EQ(updatedState.getWhoKnocked(), -1);
+}
+
+TEST(GameState, SwapForDrawPileFailsWhenGameIsOver) {
+  const Player p0{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
+            Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
+  const Player p1{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
+            Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
+
+  std::deque<Card> mutableDrawPile{};
+  mutableDrawPile.push_back(Card{Suit::Diamonds, Rank::Jack});
+  mutableDrawPile.push_back(Card{Suit::Clubs, Rank::Ace});
+  const std::deque<Card> nonEmptyDrawPile = std::move(mutableDrawPile);
+  const std::deque<Card> emptyDiscardPile;
+  const std::vector<Player> players{p0, p1};
+
+  // should not work because game is over
+  const GameState g1{nonEmptyDrawPile, emptyDiscardPile, players, 1, 1};
+  auto g2 = g1.swapForDrawPile(1, Position::TopLeft);
+  EXPECT_FALSE(g2.ok());
+  EXPECT_EQ(g2.status().message(), "game is over");
+}
+
+TEST(GameState, SwapForDrawPileFailsWhenNotYourTurn) {
+  const Player p0{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
+            Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
+  const Player p1{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
+            Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
+
+  std::deque<Card> mutableDrawPile{};
+  mutableDrawPile.push_back(Card{Suit::Diamonds, Rank::Jack});
+  mutableDrawPile.push_back(Card{Suit::Clubs, Rank::Ace});
+  const std::deque<Card> nonEmptyDrawPile = std::move(mutableDrawPile);
+  const std::deque<Card> emptyDiscardPile;
+  const std::vector<Player> players{p0, p1};
+
+  // should not work because game is over
+  const GameState g1{nonEmptyDrawPile, emptyDiscardPile, players, 0, -1};
+  auto g2 = g1.swapForDrawPile(1, Position::TopLeft);
+  EXPECT_FALSE(g2.ok());
+  EXPECT_EQ(g2.status().message(), "not your turn");
 }

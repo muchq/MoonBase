@@ -6,8 +6,9 @@
 #include "cpp/cards/card.h"
 
 using namespace cards;
+using namespace golf;
 
-const int golf::Player::score() const {
+const int Player::score() const {
   std::unordered_set<Rank> hand;
   int score = 0;
   for (auto c : allCards()) {
@@ -22,7 +23,7 @@ const int golf::Player::score() const {
   return score;
 }
 
-const std::vector<Card> golf::Player::allCards() const {
+const std::vector<Card> Player::allCards() const {
   std::vector<Card> all;
   all.push_back(topLeft);
   all.push_back(topRight);
@@ -31,7 +32,7 @@ const std::vector<Card> golf::Player::allCards() const {
   return all;
 }
 
-const int golf::Player::cardValue(Card c) const {
+const int Player::cardValue(Card c) const {
   switch (c.getRank()) {
     case cards::Rank::Ace:
       return 1;
@@ -64,9 +65,33 @@ const int golf::Player::cardValue(Card c) const {
   }
 }
 
-const bool golf::GameState::isOver() const { return drawPile.empty() || whoseTurn == whoKnocked; }
+const Card Player::cardAt(Position position) const {
+  if (position == Position::TopLeft) {
+    return topLeft;
+  } else if (position == Position::TopRight) {
+    return topRight;
+  } else if (position == Position::BottomLeft) {
+    return bottomLeft;
+  } else {
+    return bottomRight;
+  }
+}
 
-const std::unordered_set<int> golf::GameState::winners() const {
+const Player Player::swapCard(Card toSwap, Position position) const {
+  if (position == Position::TopLeft) {
+    return Player{name, toSwap, topRight, bottomLeft, bottomRight};
+  } else if (position == Position::TopRight) {
+    return Player{name, topLeft, toSwap, bottomLeft, bottomRight};
+  } else if (position == Position::BottomLeft) {
+    return Player{name, topLeft, topRight, toSwap, bottomRight};
+  } else {
+    return Player{name, topLeft, topRight, bottomLeft, toSwap};
+  }
+}
+
+const bool GameState::isOver() const { return drawPile.empty() || whoseTurn == whoKnocked; }
+
+const std::unordered_set<int> GameState::winners() const {
   std::unordered_set<int> winningPlayers;
   int minScore = 40;  // max score is 9 10 Q K == 39
   int playerIndex = 0;
@@ -88,4 +113,45 @@ const std::unordered_set<int> golf::GameState::winners() const {
   }
 
   return winningPlayers;
+}
+
+const absl::StatusOr<GameState> GameState::swapForDrawPile(int player, Position position) const {
+  if (isOver()) {
+    return absl::FailedPreconditionError("game is over");
+  }
+  if (whoseTurn != player) {
+    return absl::FailedPreconditionError("not your turn");
+  }
+
+  // update draw pile
+  std::deque<Card> updatedDrawPile{drawPile};
+  Card toSwampIntoHand = updatedDrawPile.back();
+  updatedDrawPile.pop_back();
+  const std::deque<Card> drawPileForNewGameState = std::move(updatedDrawPile);
+
+  // update current player
+  const Player currentPlayer = players.at(player);
+  Card toSwapOutOfHand = currentPlayer.cardAt(position);
+  const Player updatedCurrentPlayer = currentPlayer.swapCard(toSwampIntoHand, position);
+
+  // update players list
+  std::vector<Player> updatedPlayers;
+  for (int i = 0; i < players.size(); i++) {
+    if (i == whoseTurn) {
+      updatedPlayers.push_back(updatedCurrentPlayer);
+    } else {
+      updatedPlayers.push_back(players.at(i));
+    }
+  }
+  const std::vector<Player> playersForNewGameState = std::move(updatedPlayers);
+
+  // update discard pile
+  std::deque<Card> updatedDiscardPile{discardPile};
+  updatedDiscardPile.push_back(toSwapOutOfHand.flipped());
+  const std::deque<Card> discardPileForNewGameState = std::move(updatedDiscardPile);
+
+  // update whose turn it is
+  int newWhoseTurn = (whoseTurn + 1) % players.size();
+
+  return GameState{drawPileForNewGameState, discardPileForNewGameState, playersForNewGameState, newWhoseTurn, whoKnocked};
 }

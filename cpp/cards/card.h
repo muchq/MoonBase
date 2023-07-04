@@ -43,11 +43,10 @@ class Card {
 
   const Facing getFacing() { return facing; }
 
-  // fails to link in tests when I define as inline in .cc file... no idea why.
-  // error is:
-  // bazel-out/k8-fastbuild/bin/cpp/cards/_objs/cards_test/card_test.pic.o:card_test.cc:function
-  // CARD_TEST_BasicAssertions_Test::TestBody(): error: undefined reference to
-  // 'cards::Card::debug_string[abi:cxx11]()'
+  bool operator==(const Card& o) const {
+    return suit == o.suit && rank == o.rank && facing == o.facing;
+  }
+
   const std::string debug_string();
 
  private:
