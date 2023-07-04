@@ -3,13 +3,15 @@
 #include <unordered_set>
 #include <vector>
 
+#include "cpp/cards/card.h"
+
 using namespace cards;
 
 const int golf::Player::score() {
   std::unordered_set<Rank> hand;
   int score = 0;
   for (auto c : allCards()) {
-    if (hand.contains(c.getRank())) {  // pairs cancel each other
+    if (hand.find(c.getRank()) != hand.end()) {  // pairs cancel each other
       score -= cardValue(c);
       hand.erase(c.getRank());
     } else {

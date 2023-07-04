@@ -9,6 +9,7 @@ cc_library(
 cc_test(
     name = "golf_lib_test",
     srcs = ["golf_lib_test.cc"],
+    size = "small",
     deps = [
         ":golf_lib",
         "@com_google_googletest//:gtest_main",

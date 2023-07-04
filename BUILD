@@ -24,10 +24,3 @@ alias(
     actual = "//go/images",
     visibility = ["//visibility:public"],
 )
-
-refresh_compile_commands(
-    name = "refresh_cards",
-    targets = {
-        "//cpp/cards/...": ""
-    }
-)
