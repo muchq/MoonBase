@@ -63,3 +63,7 @@ const int golf::Player::cardValue(Card c) {
       return -1;  // error
   }
 }
+
+const bool golf::GameState::isOver() {
+  return drawPile.empty() || whoseTurn == whoKnocked;
+}

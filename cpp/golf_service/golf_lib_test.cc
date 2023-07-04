@@ -2,7 +2,9 @@
 
 #include <gtest/gtest.h>
 
+#include <deque>
 #include <iostream>
+#include <vector>
 
 #include "cpp/cards/card.h"
 
@@ -24,4 +26,25 @@ TEST(GOLF_LIB_TEST, PlayerAssertions) {
     std::cout << c.debug_string() << "\n";
   }
   EXPECT_EQ(1, p3.score());
+}
+
+TEST(GOLF_LIB_TEST, GameOverAssertions) {
+  Player p1{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
+            Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
+  Player p2{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
+            Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
+
+  std::deque<Card> emptyDrawPile;
+  std::deque<Card> nonEmptyDrawPile{Card{Suit::Clubs, Rank::Ace}};
+  std::deque<Card> emptyDiscardPile;
+  std::vector<Player> players{p1, p2};
+
+  GameState g1{emptyDrawPile, emptyDiscardPile, players, 0, -1};
+  EXPECT_TRUE(g1.isOver()); // game is over when draw pile is empty
+
+  GameState g2{nonEmptyDrawPile, emptyDiscardPile, players, 0, -1};
+  EXPECT_FALSE(g2.isOver()); // no one knocked and there's still a card on the draw pile
+
+  GameState g3{nonEmptyDrawPile, emptyDiscardPile, players, 1, 1};
+  EXPECT_TRUE(g3.isOver()); // player 1 knocked and it's their turn again
 }
