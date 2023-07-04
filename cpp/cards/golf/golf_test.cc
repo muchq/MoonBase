@@ -262,3 +262,51 @@ TEST(GameState, Knock) {
 
   EXPECT_FALSE(g2->isOver());
 }
+
+TEST(GameState, KnockIsNotAllowedOnGameOver) {
+  const Player p0{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
+                  Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
+  const Player p1{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
+                  Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
+
+  const std::deque<Card> drawPile{};
+  const std::deque<Card> discardPile{Card{Suit::Hearts, Rank::Four, Facing::Up}};
+  const std::vector<Player> players{p0, p1};
+
+  const GameState g1{drawPile, discardPile, players, 0, -1};
+  auto g2 = g1.knock(0);
+  EXPECT_FALSE(g2.ok());
+  EXPECT_EQ(g2.status().message(), "game is over");
+}
+
+TEST(GameState, KnockIsNotAllowedIfNotYourTurn) {
+  const Player p0{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
+                  Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
+  const Player p1{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
+                  Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
+
+  const std::deque<Card> drawPile{Card{Suit::Diamonds, Rank::Ten}};
+  const std::deque<Card> discardPile{Card{Suit::Hearts, Rank::Four, Facing::Up}};
+  const std::vector<Player> players{p0, p1};
+
+  const GameState g1{drawPile, discardPile, players, 1, -1};
+  auto g2 = g1.knock(0);
+  EXPECT_FALSE(g2.ok());
+  EXPECT_EQ(g2.status().message(), "not your turn");
+}
+
+TEST(GameState, KnockIsOnlyAllowedOnce) {
+  const Player p0{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
+                  Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
+  const Player p1{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
+                  Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
+
+  const std::deque<Card> drawPile{Card{Suit::Diamonds, Rank::Ten}};
+  const std::deque<Card> discardPile{Card{Suit::Hearts, Rank::Four, Facing::Up}};
+  const std::vector<Player> players{p0, p1};
+
+  const GameState g1{drawPile, discardPile, players, 1, 0};
+  auto g2 = g1.knock(1);
+  EXPECT_FALSE(g2.ok());
+  EXPECT_EQ(g2.status().message(), "someone already knocked");
+}

@@ -207,6 +207,10 @@ const absl::StatusOr<GameState> GameState::knock(int player) const {
     return absl::FailedPreconditionError("not your turn");
   }
 
+  if (whoKnocked != -1) {
+    return absl::FailedPreconditionError("someone already knocked");
+  }
+
   // update whose turn it is
   int newWhoseTurn = (whoseTurn + 1) % players.size();
 
