@@ -149,7 +149,7 @@ TEST(GameState, SwapForDrawPileFailsWhenNotYourTurn) {
   const std::deque<Card> emptyDiscardPile;
   const std::vector<Player> players{p0, p1};
 
-  // should not work because game is over
+  // should not work because it's player 0's turn
   const GameState g1{nonEmptyDrawPile, emptyDiscardPile, players, 0, -1};
   auto g2 = g1.swapForDrawPile(1, Position::TopLeft);
   EXPECT_FALSE(g2.ok());
@@ -233,9 +233,32 @@ TEST(GameState, SwapForDiscardPileFailsWhenNotYourTurn) {
   const std::deque<Card> discardPile{Card{Suit::Hearts, Rank::Four, Facing::Up}};
   const std::vector<Player> players{p0, p1};
 
-  // should not work because game is over
+  // should not work because it's player 0's turn
   const GameState g1{nonEmptyDrawPile, discardPile, players, 0, -1};
   auto g2 = g1.swapForDrawPile(1, Position::TopLeft);
   EXPECT_FALSE(g2.ok());
   EXPECT_EQ(g2.status().message(), "not your turn");
+}
+
+TEST(GameState, Knock) {
+  const Player p0{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
+                  Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
+  const Player p1{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
+                  Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
+
+  const std::deque<Card> drawPile{Card{Suit::Diamonds, Rank::Ten}};
+  const std::deque<Card> discardPile{Card{Suit::Hearts, Rank::Four, Facing::Up}};
+  const std::vector<Player> players{p0, p1};
+
+  const GameState g1{drawPile, discardPile, players, 0, -1};
+  auto g2 = g1.knock(0);
+  EXPECT_TRUE(g2.ok());
+
+  EXPECT_EQ(g2->getDrawPile(), drawPile);
+  EXPECT_EQ(g2->getDiscardPile(), discardPile);
+  EXPECT_EQ(g2->getPlayers(), players);
+  EXPECT_EQ(g2->getWhoseTurn(), 1);
+  EXPECT_EQ(g2->getWhoKnocked(), 0);
+
+  EXPECT_FALSE(g2->isOver());
 }

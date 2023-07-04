@@ -198,3 +198,17 @@ const absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Positi
   return GameState{drawPile, discardPileForNewGameState, playersForNewGameState, newWhoseTurn,
                    whoKnocked};
 }
+
+const absl::StatusOr<GameState> GameState::knock(int player) const {
+  if (isOver()) {
+    return absl::FailedPreconditionError("game is over");
+  }
+  if (whoseTurn != player) {
+    return absl::FailedPreconditionError("not your turn");
+  }
+
+  // update whose turn it is
+  int newWhoseTurn = (whoseTurn + 1) % players.size();
+
+  return GameState{drawPile, discardPile, players, newWhoseTurn, player};
+}
