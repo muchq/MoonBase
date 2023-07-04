@@ -156,3 +156,45 @@ const absl::StatusOr<GameState> GameState::swapForDrawPile(int player, Position 
   return GameState{drawPileForNewGameState, discardPileForNewGameState, playersForNewGameState,
                    newWhoseTurn, whoKnocked};
 }
+
+const absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Position position) const {
+  if (isOver()) {
+    return absl::FailedPreconditionError("game is over");
+  }
+  if (whoseTurn != player) {
+    return absl::FailedPreconditionError("not your turn");
+  }
+
+  // remove top card from discard pile
+  std::deque<Card> mutableDiscardPile{discardPile};
+
+  // TODO: how should we enforce looking at the card once?
+  Card toSwampIntoHand = mutableDiscardPile.back().flipped();
+  mutableDiscardPile.pop_back();
+
+  // update current player
+  const Player currentPlayer = players.at(player);
+  Card toSwapOutOfHand = currentPlayer.cardAt(position);
+  const Player updatedCurrentPlayer = currentPlayer.swapCard(toSwampIntoHand, position);
+
+  // update discardPile
+  mutableDiscardPile.push_back(toSwapOutOfHand.flipped());
+  const std::deque<Card> discardPileForNewGameState = std::move(mutableDiscardPile);
+
+  // update players list
+  std::vector<Player> updatedPlayers;
+  for (int i = 0; i < players.size(); i++) {
+    if (i == whoseTurn) {
+      updatedPlayers.push_back(updatedCurrentPlayer);
+    } else {
+      updatedPlayers.push_back(players.at(i));
+    }
+  }
+  const std::vector<Player> playersForNewGameState = std::move(updatedPlayers);
+
+  // update whose turn it is
+  int newWhoseTurn = (whoseTurn + 1) % players.size();
+
+  return GameState{drawPile, discardPileForNewGameState, playersForNewGameState,
+                   newWhoseTurn, whoKnocked};
+}
