@@ -70,3 +70,17 @@ TEST(GOLF_LIB_TEST, WinnerAssertions) {
   EXPECT_TRUE(g2.isOver());  // game is over because player 1 knocked and it's their turn again
   EXPECT_EQ(expectedWinnersG2, g2.winners());
 }
+
+TEST(GOLF_LIB_TEST, GameStateDrawPileAssertions) {
+  Player p1{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
+            Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
+  Player p2{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
+            Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
+
+  std::deque<Card> nonEmptyDrawPile{Card{Suit::Clubs, Rank::Ace}};
+  std::deque<Card> emptyDiscardPile;
+  std::vector<Player> players{p1, p2};
+
+  GameState g1{nonEmptyDrawPile, emptyDiscardPile, players, 1, 1};
+  auto g2 = g1.swapForDiscardPile(1, Position::TopLeft);
+}

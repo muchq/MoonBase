@@ -9,6 +9,8 @@
 
 #include "cpp/cards/card.h"
 
+#include "absl/status/statusor.h"
+
 namespace golf {
 using namespace cards;
 
@@ -40,10 +42,10 @@ class GameState {
         whoseTurn(_whoseTurn),
         whoKnocked(_whoKnocked) {}
   const bool isOver() const;
-  const GameState swapForDrawPile(int player, Position Position) const;
-  const GameState swapForDiscardPile(int player, Position Position) const;
-  const GameState knock(int player) const;
   const std::unordered_set<int> winners() const;  // winning player indices
+  const absl::StatusOr<GameState> swapForDrawPile(int player, Position Position) const;
+  const absl::StatusOr<GameState> swapForDiscardPile(int player, Position Position) const;
+  const absl::StatusOr<GameState> knock(int player) const;
 
  private:
   const std::deque<Card> drawPile;

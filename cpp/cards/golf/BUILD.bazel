@@ -3,7 +3,10 @@ cc_library(
     srcs = ["golf.cc"],
     hdrs = ["golf.h"],
     visibility = ["//visibility:public"],
-    deps = ["//cpp/cards"],
+    deps = [
+        "//cpp/cards",
+        "@com_google_absl//absl/status:statusor",
+    ],
 )
 
 cc_test(
@@ -12,6 +15,7 @@ cc_test(
     size = "small",
     deps = [
         ":golf",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_googletest//:gtest_main",
     ]
 )
