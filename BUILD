@@ -1,6 +1,5 @@
 load("@com_github_bazelbuild_buildtools//buildifier:def.bzl", "buildifier")
 load("@io_bazel_rules_scala//scala:scala_toolchain.bzl", "scala_toolchain")
-load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 
 scala_toolchain(
     name = "diagnostics_reporter_toolchain_impl",
