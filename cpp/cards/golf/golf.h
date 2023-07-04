@@ -1,5 +1,5 @@
-#ifndef CPP_GOLF_SERVICE_GOLF_LIB_H
-#define CPP_GOLF_SERVICE_GOLF_LIB_H
+#ifndef CPP_GOLF_SERVICE_GOLF_H
+#define CPP_GOLF_SERVICE_GOLF_H
 
 #include <deque>
 #include <string>
@@ -18,11 +18,11 @@ class Player {
  public:
   Player(std::string _name, Card tl, Card tr, Card bl, Card br)
       : name(_name), topLeft(tl), topRight(tr), bottomLeft(bl), bottomRight(br) {}
-  const int score();
-  const std::vector<Card> allCards();
+  const int score() const;
+  const std::vector<Card> allCards() const;
 
  private:
-  const int cardValue(Card c);
+  const int cardValue(Card c) const;
   const std::string name;
   const Card topLeft;
   const Card topRight;
@@ -39,11 +39,11 @@ class GameState {
         players(_players),
         whoseTurn(_whoseTurn),
         whoKnocked(_whoKnocked) {}
-  const bool isOver();
-  const GameState swapForDrawPile(int player, Position Position);
-  const GameState swapForDiscardPile(int player, Position Position);
-  const GameState knock(int player);
-  const std::unordered_set<Player> winners();
+  const bool isOver() const;
+  const GameState swapForDrawPile(int player, Position Position) const;
+  const GameState swapForDiscardPile(int player, Position Position) const;
+  const GameState knock(int player) const;
+  const std::unordered_set<int> winners() const;  // winning player indices
 
  private:
   const std::deque<Card> drawPile;

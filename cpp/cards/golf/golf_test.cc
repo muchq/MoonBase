@@ -1,4 +1,4 @@
-#include "cpp/golf_service/golf_lib.h"
+#include "cpp/cards/golf/golf.h"
 
 #include <gtest/gtest.h>
 
@@ -47,4 +47,26 @@ TEST(GOLF_LIB_TEST, GameOverAssertions) {
 
   GameState g3{nonEmptyDrawPile, emptyDiscardPile, players, 1, 1};
   EXPECT_TRUE(g3.isOver());  // player 1 knocked and it's their turn again
+}
+
+TEST(GOLF_LIB_TEST, WinnerAssertions) {
+  Player p1{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
+            Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
+  Player p2{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
+            Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
+
+  std::deque<Card> emptyDrawPile;
+  std::deque<Card> nonEmptyDrawPile{Card{Suit::Clubs, Rank::Ace}};
+  std::deque<Card> emptyDiscardPile;
+  std::vector<Player> players{p1, p2};
+
+  GameState g1{emptyDrawPile, emptyDiscardPile, players, 0, -1};
+  std::unordered_set<int> expectedWinnersG1{1, 0};
+  EXPECT_TRUE(g1.isOver());  // game is over when draw pile is empty
+  EXPECT_EQ(expectedWinnersG1, g1.winners());
+
+  GameState g2{nonEmptyDrawPile, emptyDiscardPile, players, 1, 1};
+  std::unordered_set<int> expectedWinnersG2{1};  // tie goes to the runner
+  EXPECT_TRUE(g2.isOver());  // game is over because player 1 knocked and it's their turn again
+  EXPECT_EQ(expectedWinnersG2, g2.winners());
 }

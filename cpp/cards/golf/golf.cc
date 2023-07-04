@@ -1,4 +1,4 @@
-#include "golf_lib.h"
+#include "cpp/cards/golf/golf.h"
 
 #include <unordered_set>
 #include <vector>
@@ -7,7 +7,7 @@
 
 using namespace cards;
 
-const int golf::Player::score() {
+const int golf::Player::score() const {
   std::unordered_set<Rank> hand;
   int score = 0;
   for (auto c : allCards()) {
@@ -22,7 +22,7 @@ const int golf::Player::score() {
   return score;
 }
 
-const std::vector<Card> golf::Player::allCards() {
+const std::vector<Card> golf::Player::allCards() const {
   std::vector<Card> all;
   all.push_back(topLeft);
   all.push_back(topRight);
@@ -31,7 +31,7 @@ const std::vector<Card> golf::Player::allCards() {
   return all;
 }
 
-const int golf::Player::cardValue(Card c) {
+const int golf::Player::cardValue(Card c) const {
   switch (c.getRank()) {
     case cards::Rank::Ace:
       return 1;
@@ -64,4 +64,28 @@ const int golf::Player::cardValue(Card c) {
   }
 }
 
-const bool golf::GameState::isOver() { return drawPile.empty() || whoseTurn == whoKnocked; }
+const bool golf::GameState::isOver() const { return drawPile.empty() || whoseTurn == whoKnocked; }
+
+const std::unordered_set<int> golf::GameState::winners() const {
+  std::unordered_set<int> winningPlayers;
+  int minScore = 40;  // max score is 9 10 Q K == 39
+  int playerIndex = 0;
+  for (auto& p : players) {
+    int playerScore = p.score();
+    if (playerScore < minScore) {
+      minScore = playerScore;
+      winningPlayers.clear();
+    }
+    if (playerScore == minScore) {
+      winningPlayers.insert(playerIndex);
+    }
+
+    playerIndex++;
+  }
+  if (winningPlayers.find(whoKnocked) != winningPlayers.end()) {
+    winningPlayers.clear();
+    winningPlayers.insert(whoKnocked);
+  }
+
+  return winningPlayers;
+}
