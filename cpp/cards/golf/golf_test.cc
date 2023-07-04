@@ -73,9 +73,9 @@ TEST(GameState, Winners) {
 
 TEST(GameState, SwapForDrawPile) {
   const Player p0{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
-            Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
+                  Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
   const Player p1{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
-            Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
+                  Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
 
   std::deque<Card> mutableDrawPile{};
   mutableDrawPile.push_back(Card{Suit::Diamonds, Rank::Jack});
@@ -105,7 +105,8 @@ TEST(GameState, SwapForDrawPile) {
   // check players
   EXPECT_EQ(updatedState.getPlayers().at(0), p0);
 
-  const Player updatedP1{"Mercy", Card{Suit::Clubs, Rank::Ace}, Card{Suit::Diamonds, Rank::Three}, Card{Suit::Hearts, Rank::Three}, Card{Suit::Spades, Rank::Three}};
+  const Player updatedP1{"Mercy", Card{Suit::Clubs, Rank::Ace}, Card{Suit::Diamonds, Rank::Three},
+                         Card{Suit::Hearts, Rank::Three}, Card{Suit::Spades, Rank::Three}};
   EXPECT_EQ(updatedState.getPlayers().at(1), updatedP1);
 
   // check whose turn
@@ -117,9 +118,9 @@ TEST(GameState, SwapForDrawPile) {
 
 TEST(GameState, SwapForDrawPileFailsWhenGameIsOver) {
   const Player p0{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
-            Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
+                  Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
   const Player p1{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
-            Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
+                  Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
 
   std::deque<Card> mutableDrawPile{};
   mutableDrawPile.push_back(Card{Suit::Diamonds, Rank::Jack});
@@ -137,9 +138,9 @@ TEST(GameState, SwapForDrawPileFailsWhenGameIsOver) {
 
 TEST(GameState, SwapForDrawPileFailsWhenNotYourTurn) {
   const Player p0{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
-            Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
+                  Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
   const Player p1{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
-            Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
+                  Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
 
   std::deque<Card> mutableDrawPile{};
   mutableDrawPile.push_back(Card{Suit::Diamonds, Rank::Jack});

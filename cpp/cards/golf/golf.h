@@ -7,9 +7,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include "cpp/cards/card.h"
-
 #include "absl/status/statusor.h"
+#include "cpp/cards/card.h"
 
 namespace golf {
 using namespace cards;
@@ -25,7 +24,8 @@ class Player {
   const Card cardAt(Position position) const;
   const Player swapCard(Card toSwap, Position position) const;
   bool operator==(const Player& o) const {
-    return name == o.name && topLeft == o.topLeft && topRight == o.topRight && bottomLeft == o.bottomLeft && bottomRight == o.bottomRight;
+    return name == o.name && topLeft == o.topLeft && topRight == o.topRight &&
+           bottomLeft == o.bottomLeft && bottomRight == o.bottomRight;
   }
 
  private:
@@ -51,21 +51,11 @@ class GameState {
   const absl::StatusOr<GameState> swapForDrawPile(int player, Position Position) const;
   const absl::StatusOr<GameState> swapForDiscardPile(int player, Position Position) const;
   const absl::StatusOr<GameState> knock(int player) const;
-  const std::deque<Card>& getDrawPile() const {
-    return drawPile;
-  }
-  const std::deque<Card>& getDiscardPile() const {
-    return discardPile;
-  }
-  const std::vector<Player>& getPlayers() const {
-    return players;
-  }
-  const int getWhoseTurn() const {
-    return whoseTurn;
-  }
-  const int getWhoKnocked() const {
-    return whoKnocked;
-  }
+  const std::deque<Card>& getDrawPile() const { return drawPile; }
+  const std::deque<Card>& getDiscardPile() const { return discardPile; }
+  const std::vector<Player>& getPlayers() const { return players; }
+  const int getWhoseTurn() const { return whoseTurn; }
+  const int getWhoKnocked() const { return whoKnocked; }
 
  private:
   const std::deque<Card> drawPile;

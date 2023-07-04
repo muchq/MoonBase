@@ -153,5 +153,6 @@ const absl::StatusOr<GameState> GameState::swapForDrawPile(int player, Position 
   // update whose turn it is
   int newWhoseTurn = (whoseTurn + 1) % players.size();
 
-  return GameState{drawPileForNewGameState, discardPileForNewGameState, playersForNewGameState, newWhoseTurn, whoKnocked};
+  return GameState{drawPileForNewGameState, discardPileForNewGameState, playersForNewGameState,
+                   newWhoseTurn, whoKnocked};
 }
