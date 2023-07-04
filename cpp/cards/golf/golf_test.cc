@@ -156,7 +156,6 @@ TEST(GameState, SwapForDrawPileFailsWhenNotYourTurn) {
   EXPECT_EQ(g2.status().message(), "not your turn");
 }
 
-
 TEST(GameState, SwapForDiscardPile) {
   const Player p0{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
                   Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
@@ -181,7 +180,8 @@ TEST(GameState, SwapForDiscardPile) {
   EXPECT_FALSE(updatedState.isOver());
 
   // check draw pile
-  const std::deque<Card> expectedDrawPile{Card{Suit::Diamonds, Rank::Jack}, Card{Suit::Clubs, Rank::Ace}};
+  const std::deque<Card> expectedDrawPile{Card{Suit::Diamonds, Rank::Jack},
+                                          Card{Suit::Clubs, Rank::Ace}};
   EXPECT_EQ(updatedState.getDrawPile(), expectedDrawPile);
 
   // check discard pile
@@ -191,8 +191,9 @@ TEST(GameState, SwapForDiscardPile) {
   // check players
   EXPECT_EQ(updatedState.getPlayers().at(0), p0);
 
-  const Player updatedP1{"Mercy", Card{Suit::Hearts, Rank::Queen}, Card{Suit::Diamonds, Rank::Three},
-                         Card{Suit::Hearts, Rank::Three}, Card{Suit::Spades, Rank::Three}};
+  const Player updatedP1{"Mercy", Card{Suit::Hearts, Rank::Queen},
+                         Card{Suit::Diamonds, Rank::Three}, Card{Suit::Hearts, Rank::Three},
+                         Card{Suit::Spades, Rank::Three}};
   EXPECT_EQ(updatedState.getPlayers().at(1), updatedP1);
 
   // check whose turn
