@@ -13,6 +13,13 @@ def register_http_archive_dependencies():
     )
 
     http_archive(
+        name = "com_google_absl",
+        urls = ["https://github.com/abseil/abseil-cpp/archive/b1fb259ef793de57c2acefeeec07a6e3286ab9bc.zip"],
+        sha256 = "6c7b209e73667e351e78f96599ce6c395e427be5589b511a648840b64b9c3467",
+        strip_prefix = "abseil-cpp-b1fb259ef793de57c2acefeeec07a6e3286ab9bc",
+    )
+
+    http_archive(
         name = "com_google_googletest",
         sha256 = "0c3a1c0b47a21160ebb7610ae6407d2a6d291ebc5cddc0b99d091bf7641a815e",
         strip_prefix = "googletest-06f44bc951046150f1348598854b211afdcf37fc",

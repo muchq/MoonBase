@@ -1,0 +1,10 @@
+cc_binary(
+    name = "golf_service",
+    srcs = [
+        "Main.cc",
+    ],
+    deps = [
+        "//cpp/cards/golf",
+        "@mongoose_cc//:mongoose",
+    ],
+)
