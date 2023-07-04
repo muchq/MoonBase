@@ -40,11 +40,11 @@ TEST(GOLF_LIB_TEST, GameOverAssertions) {
   std::vector<Player> players{p1, p2};
 
   GameState g1{emptyDrawPile, emptyDiscardPile, players, 0, -1};
-  EXPECT_TRUE(g1.isOver()); // game is over when draw pile is empty
+  EXPECT_TRUE(g1.isOver());  // game is over when draw pile is empty
 
   GameState g2{nonEmptyDrawPile, emptyDiscardPile, players, 0, -1};
-  EXPECT_FALSE(g2.isOver()); // no one knocked and there's still a card on the draw pile
+  EXPECT_FALSE(g2.isOver());  // no one knocked and there's still a card on the draw pile
 
   GameState g3{nonEmptyDrawPile, emptyDiscardPile, players, 1, 1};
-  EXPECT_TRUE(g3.isOver()); // player 1 knocked and it's their turn again
+  EXPECT_TRUE(g3.isOver());  // player 1 knocked and it's their turn again
 }
