@@ -23,7 +23,7 @@ Follow instructions [here](https://github.com/hedronvision/bazel-compile-command
 
 and then do
 ```
-bazel run :refresh_compile_commands
+bazel run @hedron_compile_commands//:refresh_all
 code .
 ```
 

@@ -3,6 +3,7 @@
 
 #include <deque>
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -18,9 +19,13 @@ enum class Position { TopLeft, TopRight, BottomLeft, BottomRight };
 
 class Player {
  public:
-  Player(std::string _name, Card tl, Card tr, Card bl, Card br)
+  Player(std::optional<std::string> _name, Card tl, Card tr, Card bl, Card br)
       : name(_name), topLeft(tl), topRight(tr), bottomLeft(bl), bottomRight(br) {}
+  Player(Card tl, Card tr, Card bl, Card br)
+      : name(std::nullopt), topLeft(tl), topRight(tr), bottomLeft(bl), bottomRight(br) {}
   [[nodiscard]] const int score() const;
+  [[nodiscard]] const bool isPresent() const;
+  [[nodiscard]] const absl::StatusOr<Player> claimHand(std::string username) const;
   [[nodiscard]] const std::vector<Card> allCards() const;
   [[nodiscard]] const Card cardAt(Position position) const;
   [[nodiscard]] const Player swapCard(Card toSwap, Position position) const;
@@ -31,7 +36,7 @@ class Player {
 
  private:
   const int cardValue(Card c) const;
-  const std::string name;
+  const std::optional<std::string> name;
   const Card topLeft;
   const Card topRight;
   const Card bottomLeft;
@@ -49,6 +54,7 @@ class GameState {
         whoKnocked(_whoKnocked),
         gameId(_gameId) {}
   [[nodiscard]] const bool isOver() const;
+  [[nodiscard]] const bool allPlayersPresent() const;
   [[nodiscard]] const std::unordered_set<int> winners() const;  // winning player indices
   [[nodiscard]] const absl::StatusOr<GameState> swapForDrawPile(int player,
                                                                 Position Position) const;
@@ -73,30 +79,31 @@ class GameState {
 
 typedef std::reference_wrapper<GameState> GameRef;
 
-// Not thread safe. requires external synchronization
+// Not thread-safe. requires external synchronization
 class GameManager {
  public:
-  [[nodiscard]] absl::StatusOr<std::string> registerUser(std::string name);
+  [[nodiscard]] const absl::StatusOr<std::string> registerUser(std::string name);
   void unregisterUser(std::string name);
-  const GameRef newGame(std::string userId, int players);
+  const absl::StatusOr<GameRef> newGame(std::string userId, int players);
   const absl::StatusOr<GameRef> joinGame(std::string gameId, std::string userId);
   const absl::StatusOr<GameRef> leaveGame(std::string gameId, std::string userId);
-  absl::StatusOr<GameRef> swapForDrawPile(std::string gameId, std::string userId, Position position);
-  absl::StatusOr<GameRef> swapForDiscardPile(std::string gameId, std::string userId, Position position);
-  absl::StatusOr<GameRef> knock(std::string gameId, std::string userId);
+  const absl::StatusOr<GameRef> swapForDrawPile(std::string gameId, std::string userId,
+                                                Position position);
+  const absl::StatusOr<GameRef> swapForDiscardPile(std::string gameId, std::string userId,
+                                                   Position position);
+  const absl::StatusOr<GameRef> knock(std::string gameId, std::string userId);
 
   const std::unordered_set<std::string> getUsersOnline() const { return usersOnline; }
-  const std::unordered_map<std::string, GameRef> getGamesByUserId() const {
-    return gamesByUserId;
+  const std::unordered_map<std::string, std::string> getGameIdsByUserId() const {
+    return gameIdsByUserId;
   }
-  const std::unordered_map<std::string, GameRef> getGamesById() const {
-    return gamesById;
-  }
+  const std::unordered_map<std::string, GameState> getGamesById() const { return gamesById; }
 
  private:
+  std::deque<Card> shuffleNewDeck() const;
   std::unordered_set<std::string> usersOnline;
-  std::unordered_map<std::string, GameRef> gamesByUserId;
-  std::unordered_map<std::string, GameRef> gamesById;
+  std::unordered_map<std::string, std::string> gameIdsByUserId;
+  std::unordered_map<std::string, GameState> gamesById;
 };
 
 }  // namespace golf

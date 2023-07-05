@@ -324,7 +324,7 @@ TEST(GameManager, Constructor) {
   std::unordered_set<std::string> expectedUsers;
   EXPECT_EQ(gm.getUsersOnline(), expectedUsers);
 
-  EXPECT_TRUE(gm.getGamesByUserId().empty());
+  EXPECT_TRUE(gm.getGameIdsByUserId().empty());
 
   EXPECT_TRUE(gm.getGamesById().empty());
 }
@@ -335,4 +335,49 @@ TEST(GameManager, RegisterUser) {
 
   EXPECT_TRUE(id.ok());
   EXPECT_EQ(*id, "Andy");
+}
+
+TEST(GameManager, RegisterUserValidates) {
+  GameManager gm;
+  auto res1 = gm.registerUser("");
+  EXPECT_FALSE(res1.ok());
+  EXPECT_EQ(res1.status().message(), "username length must be between 4 and 15 chars");
+
+  auto res2 = gm.registerUser("reallylongusername");
+  EXPECT_FALSE(res2.ok());
+  EXPECT_EQ(res2.status().message(), "username length must be between 4 and 15 chars");
+
+  auto res3 = gm.registerUser("weird%$name");
+  EXPECT_FALSE(res3.ok());
+  EXPECT_EQ(res3.status().message(), "only alphanumeric, underscore, or dash allowed in username");
+}
+
+TEST(GameManager, RegisterUserNameTaken) {
+  GameManager gm;
+  auto res1 = gm.registerUser("foosername");
+  EXPECT_TRUE(res1.ok());
+
+  auto res2 = gm.registerUser("foosername");
+  EXPECT_FALSE(res2.ok());
+  EXPECT_EQ(res2.status().message(), "username taken");
+}
+
+TEST(GameManager, NewGame) {
+  GameManager gm;
+  auto res1 = gm.registerUser("user1");
+  EXPECT_TRUE(res1.ok());
+
+  auto res2 = gm.registerUser("user2");
+  EXPECT_TRUE(res2.ok());
+
+  auto res3 = gm.newGame("user1", 2);
+  EXPECT_TRUE(res3.ok());
+  auto gameState = res3->get();
+  EXPECT_FALSE(gameState.getGameId().empty());
+  EXPECT_EQ(gameState.getDrawPile().size(), 43);  // 8 cards for players, 1 in discard
+  EXPECT_EQ(gameState.getDiscardPile().size(), 1);
+  EXPECT_EQ(gameState.getPlayers().size(), 2);
+  EXPECT_EQ(gameState.getWhoseTurn(), 0);
+  EXPECT_EQ(gameState.getWhoKnocked(), -1);
+  EXPECT_FALSE(gameState.isOver());
 }
