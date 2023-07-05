@@ -3,6 +3,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "absl/status/statusor.h"
 #include "cpp/cards/card.h"
 
 using namespace cards;
@@ -153,8 +154,12 @@ const absl::StatusOr<GameState> GameState::swapForDrawPile(int player, Position 
   // update whose turn it is
   int newWhoseTurn = (whoseTurn + 1) % players.size();
 
-  return GameState{drawPileForNewGameState, discardPileForNewGameState, playersForNewGameState,
-                   newWhoseTurn, whoKnocked};
+  return GameState{drawPileForNewGameState,
+                   discardPileForNewGameState,
+                   playersForNewGameState,
+                   newWhoseTurn,
+                   whoKnocked,
+                   gameId};
 }
 
 const absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Position position) const {
@@ -195,8 +200,9 @@ const absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Positi
   // update whose turn it is
   int newWhoseTurn = (whoseTurn + 1) % players.size();
 
-  return GameState{drawPile, discardPileForNewGameState, playersForNewGameState, newWhoseTurn,
-                   whoKnocked};
+  return GameState{
+      drawPile, discardPileForNewGameState, playersForNewGameState, newWhoseTurn, whoKnocked,
+      gameId};
 }
 
 const absl::StatusOr<GameState> GameState::knock(int player) const {
@@ -214,5 +220,6 @@ const absl::StatusOr<GameState> GameState::knock(int player) const {
   // update whose turn it is
   int newWhoseTurn = (whoseTurn + 1) % players.size();
 
-  return GameState{drawPile, discardPile, players, newWhoseTurn, player};
+  return GameState{drawPile, discardPile, players, newWhoseTurn, player, gameId};
 }
+

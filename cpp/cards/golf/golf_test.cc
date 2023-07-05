@@ -39,13 +39,13 @@ TEST(GameState, IsOver) {
   std::deque<Card> emptyDiscardPile;
   std::vector<Player> players{p1, p2};
 
-  GameState g1{emptyDrawPile, emptyDiscardPile, players, 0, -1};
+  GameState g1{emptyDrawPile, emptyDiscardPile, players, 0, -1, "foo"};
   EXPECT_TRUE(g1.isOver());  // game is over when draw pile is empty
 
-  GameState g2{nonEmptyDrawPile, emptyDiscardPile, players, 0, -1};
+  GameState g2{nonEmptyDrawPile, emptyDiscardPile, players, 0, -1, "foo"};
   EXPECT_FALSE(g2.isOver());  // no one knocked and there's still a card on the draw pile
 
-  GameState g3{nonEmptyDrawPile, emptyDiscardPile, players, 1, 1};
+  GameState g3{nonEmptyDrawPile, emptyDiscardPile, players, 1, 1, "foo"};
   EXPECT_TRUE(g3.isOver());  // player 1 knocked and it's their turn again
 }
 
@@ -60,12 +60,12 @@ TEST(GameState, Winners) {
   std::deque<Card> emptyDiscardPile;
   std::vector<Player> players{p1, p2};
 
-  GameState g1{emptyDrawPile, emptyDiscardPile, players, 0, -1};
+  GameState g1{emptyDrawPile, emptyDiscardPile, players, 0, -1, "foo"};
   std::unordered_set<int> expectedWinnersG1{1, 0};
   EXPECT_TRUE(g1.isOver());  // game is over when draw pile is empty
   EXPECT_EQ(expectedWinnersG1, g1.winners());
 
-  GameState g2{nonEmptyDrawPile, emptyDiscardPile, players, 1, 1};
+  GameState g2{nonEmptyDrawPile, emptyDiscardPile, players, 1, 1, "foo"};
   std::unordered_set<int> expectedWinnersG2{1};  // tie goes to the runner
   EXPECT_TRUE(g2.isOver());  // game is over because player 1 knocked and it's their turn again
   EXPECT_EQ(expectedWinnersG2, g2.winners());
@@ -85,7 +85,7 @@ TEST(GameState, SwapForDrawPile) {
   const std::vector<Player> players{p0, p1};
 
   // should swap p1's top left card for Ace of Clubs
-  const GameState g1{nonEmptyDrawPile, emptyDiscardPile, players, 1, -1};
+  const GameState g1{nonEmptyDrawPile, emptyDiscardPile, players, 1, -1, "foo"};
   auto g2 = g1.swapForDrawPile(1, Position::TopLeft);
   EXPECT_TRUE(g2.ok());
 
@@ -114,6 +114,9 @@ TEST(GameState, SwapForDrawPile) {
 
   // check who knocked
   EXPECT_EQ(updatedState.getWhoKnocked(), -1);
+
+  // check game id
+  EXPECT_EQ(updatedState.getGameId(), g1.getGameId());
 }
 
 TEST(GameState, SwapForDrawPileFailsWhenGameIsOver) {
@@ -130,7 +133,7 @@ TEST(GameState, SwapForDrawPileFailsWhenGameIsOver) {
   const std::vector<Player> players{p0, p1};
 
   // should not work because game is over
-  const GameState g1{nonEmptyDrawPile, emptyDiscardPile, players, 1, 1};
+  const GameState g1{nonEmptyDrawPile, emptyDiscardPile, players, 1, 1, "foo"};
   auto g2 = g1.swapForDrawPile(1, Position::TopLeft);
   EXPECT_FALSE(g2.ok());
   EXPECT_EQ(g2.status().message(), "game is over");
@@ -150,7 +153,7 @@ TEST(GameState, SwapForDrawPileFailsWhenNotYourTurn) {
   const std::vector<Player> players{p0, p1};
 
   // should not work because it's player 0's turn
-  const GameState g1{nonEmptyDrawPile, emptyDiscardPile, players, 0, -1};
+  const GameState g1{nonEmptyDrawPile, emptyDiscardPile, players, 0, -1, "foo"};
   auto g2 = g1.swapForDrawPile(1, Position::TopLeft);
   EXPECT_FALSE(g2.ok());
   EXPECT_EQ(g2.status().message(), "not your turn");
@@ -170,7 +173,7 @@ TEST(GameState, SwapForDiscardPile) {
   const std::vector<Player> players{p0, p1};
 
   // should swap p1's top left card for Queen of Hearts
-  const GameState g1{drawPile, discardPile, players, 1, -1};
+  const GameState g1{drawPile, discardPile, players, 1, -1, "foo"};
   auto g2 = g1.swapForDiscardPile(1, Position::TopLeft);
   EXPECT_TRUE(g2.ok());
 
@@ -201,6 +204,9 @@ TEST(GameState, SwapForDiscardPile) {
 
   // check who knocked
   EXPECT_EQ(updatedState.getWhoKnocked(), -1);
+
+  // game id is unchanged
+  EXPECT_EQ(updatedState.getGameId(), g1.getGameId());
 }
 
 TEST(GameState, SwapForDiscardPileFailsWhenGameIsOver) {
@@ -214,7 +220,7 @@ TEST(GameState, SwapForDiscardPileFailsWhenGameIsOver) {
   const std::vector<Player> players{p0, p1};
 
   // should not work because game is over
-  const GameState g1{drawPile, discardPile, players, 0, -1};
+  const GameState g1{drawPile, discardPile, players, 0, -1, "foo"};
   auto g2 = g1.swapForDiscardPile(1, Position::TopLeft);
   EXPECT_FALSE(g2.ok());
   EXPECT_EQ(g2.status().message(), "game is over");
@@ -234,7 +240,7 @@ TEST(GameState, SwapForDiscardPileFailsWhenNotYourTurn) {
   const std::vector<Player> players{p0, p1};
 
   // should not work because it's player 0's turn
-  const GameState g1{nonEmptyDrawPile, discardPile, players, 0, -1};
+  const GameState g1{nonEmptyDrawPile, discardPile, players, 0, -1, "foo"};
   auto g2 = g1.swapForDrawPile(1, Position::TopLeft);
   EXPECT_FALSE(g2.ok());
   EXPECT_EQ(g2.status().message(), "not your turn");
@@ -250,7 +256,7 @@ TEST(GameState, Knock) {
   const std::deque<Card> discardPile{Card{Suit::Hearts, Rank::Four, Facing::Up}};
   const std::vector<Player> players{p0, p1};
 
-  const GameState g1{drawPile, discardPile, players, 0, -1};
+  const GameState g1{drawPile, discardPile, players, 0, -1, "foo"};
   auto g2 = g1.knock(0);
   EXPECT_TRUE(g2.ok());
 
@@ -259,6 +265,7 @@ TEST(GameState, Knock) {
   EXPECT_EQ(g2->getPlayers(), players);
   EXPECT_EQ(g2->getWhoseTurn(), 1);
   EXPECT_EQ(g2->getWhoKnocked(), 0);
+  EXPECT_EQ(g2->getGameId(), g1.getGameId());
 
   EXPECT_FALSE(g2->isOver());
 }
@@ -273,7 +280,7 @@ TEST(GameState, KnockIsNotAllowedOnGameOver) {
   const std::deque<Card> discardPile{Card{Suit::Hearts, Rank::Four, Facing::Up}};
   const std::vector<Player> players{p0, p1};
 
-  const GameState g1{drawPile, discardPile, players, 0, -1};
+  const GameState g1{drawPile, discardPile, players, 0, -1, "foo"};
   auto g2 = g1.knock(0);
   EXPECT_FALSE(g2.ok());
   EXPECT_EQ(g2.status().message(), "game is over");
@@ -289,7 +296,7 @@ TEST(GameState, KnockIsNotAllowedIfNotYourTurn) {
   const std::deque<Card> discardPile{Card{Suit::Hearts, Rank::Four, Facing::Up}};
   const std::vector<Player> players{p0, p1};
 
-  const GameState g1{drawPile, discardPile, players, 1, -1};
+  const GameState g1{drawPile, discardPile, players, 1, -1, "foo"};
   auto g2 = g1.knock(0);
   EXPECT_FALSE(g2.ok());
   EXPECT_EQ(g2.status().message(), "not your turn");
@@ -305,8 +312,27 @@ TEST(GameState, KnockIsOnlyAllowedOnce) {
   const std::deque<Card> discardPile{Card{Suit::Hearts, Rank::Four, Facing::Up}};
   const std::vector<Player> players{p0, p1};
 
-  const GameState g1{drawPile, discardPile, players, 1, 0};
+  const GameState g1{drawPile, discardPile, players, 1, 0, "foo"};
   auto g2 = g1.knock(1);
   EXPECT_FALSE(g2.ok());
   EXPECT_EQ(g2.status().message(), "someone already knocked");
+}
+
+TEST(GameManager, Constructor) {
+  GameManager gm;
+
+  std::unordered_set<std::string> expectedUsers;
+  EXPECT_EQ(gm.getUsersOnline(), expectedUsers);
+
+  EXPECT_TRUE(gm.getGamesByUserId().empty());
+
+  EXPECT_TRUE(gm.getGamesById().empty());
+}
+
+TEST(GameManager, RegisterUser) {
+  GameManager gm;
+  auto id = gm.registerUser("Andy");
+
+  EXPECT_TRUE(id.ok());
+  EXPECT_EQ(*id, "Andy");
 }
