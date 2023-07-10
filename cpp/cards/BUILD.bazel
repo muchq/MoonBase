@@ -1,16 +1,37 @@
 cc_library(
     name = "cards",
-    srcs = ["card.cc"],
     hdrs = ["card.h"],
     visibility = ["//visibility:public"],
 )
 
 cc_test(
     name = "cards_test",
-    srcs = ["card_test.cc"],
     size = "small",
+    srcs = ["card_test.cc"],
     deps = [
         ":cards",
         "@com_google_googletest//:gtest_main",
-    ]
+    ],
+)
+
+cc_library(
+    name = "card_mapper",
+    srcs = ["card_mapper.cc"],
+    hdrs = ["card_mapper.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cards",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "card_mapper_test",
+    size = "small",
+    srcs = ["card_mapper_test.cc"],
+    deps = [
+        ":card_mapper",
+        "@com_google_googletest//:gtest_main",
+    ],
 )

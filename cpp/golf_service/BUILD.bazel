@@ -5,6 +5,7 @@ cc_binary(
     ],
     deps = [
         "//cpp/cards/golf",
+        "@com_google_absl//absl/strings",
         "@mongoose_cc//:mongoose",
     ],
 )

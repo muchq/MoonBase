@@ -16,5 +16,7 @@ test --java_language_version=17
 test --java_runtime_version=17
 test --tool_java_language_version=17
 test --tool_java_runtime_version=remotejdk_17
+test --test_output=streamed
+test --test_verbose_timeout_warnings
 
 build --strategy=Scalac=worker
