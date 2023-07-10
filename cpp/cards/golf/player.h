@@ -20,6 +20,7 @@ class Player {
   Player(Card tl, Card tr, Card bl, Card br)
       : name(std::nullopt), topLeft(tl), topRight(tr), bottomLeft(bl), bottomRight(br) {}
   [[nodiscard]] int score() const;
+  [[nodiscard]] const std::optional<std::string>& getName() const;
   [[nodiscard]] bool isPresent() const;
   [[nodiscard]] absl::StatusOr<Player> claimHand(const std::string& username) const;
   [[nodiscard]] std::vector<Card> allCards() const;

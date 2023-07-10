@@ -10,6 +10,10 @@
 namespace golf {
 using namespace cards;
 
+const std::optional<std::string>& Player::getName() const {
+  return name;
+}
+
 int Player::score() const {
   std::unordered_set<Rank> hand;
   int score = 0;

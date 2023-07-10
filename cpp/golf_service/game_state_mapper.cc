@@ -31,6 +31,16 @@ std::string GameStateMapper::gameStateJson(GameStatePtr state, const std::string
   output.append(",");
   output.append(writeBool("gameOver", state->isOver()));
   output.append(",");
+  if (state->getWhoKnocked() != -1) {
+    const Player& knocker = state->getPlayer(state->getWhoKnocked());
+    if (knocker.getName().has_value()) {
+        output.append(writeString("knocker", knocker.getName().value()));
+    } else {
+        output.append(writeString("knocker", "_"));
+    }
+    output.append(",");
+  }
+
   const int index = state->playerIndex(username);
   const Player& p = state->getPlayer(index);
   output.append(writeString("hand", cm.cardsToString(p.allCards())));
@@ -40,6 +50,7 @@ std::string GameStateMapper::gameStateJson(GameStatePtr state, const std::string
 
   output.append("\"scores\":");
   if (state->isOver()) {
+    output.append("[");
     for (size_t i = 0; i < state->getPlayers().size(); i++) {
       auto& p = state->getPlayers().at(i);
       output.append(std::to_string(p.score()));
@@ -47,15 +58,31 @@ std::string GameStateMapper::gameStateJson(GameStatePtr state, const std::string
         output.append(",");
       }
     }
+    output.append("],");
+  } else {
+    output.append("null,");
   }
+
+  output.append(writeString("topDiscard", cm.cardToString(state->getDiscardPile().back())));
+
+  if (state->getPeekedAtDrawPile()) {
+    output.append(",");
+    output.append(writeString("topDraw", cm.cardToString(state->getDrawPile().back())));
+  }
+
+  output.append("}");
 
   return output;
 }
 
 std::string GameStateMapper::writeString(const std::string& name, const std::string& value) {
-  return "";
+  return "\"" + name + "\":\"" + value + "\"";
 }
-std::string GameStateMapper::writeInt(const std::string& name, const int value) { return ""; }
-std::string GameStateMapper::writeBool(const std::string& name, const bool value) { return ""; }
+std::string GameStateMapper::writeInt(const std::string& name, const int value) {
+  return "\"" + name + "\":\"" + std::to_string(value) + "\"";
+}
+std::string GameStateMapper::writeBool(const std::string& name, const bool value) {
+  return "\"" + name + "\":\"" + std::to_string(value) + "\"";
+}
 
 }  // namespace golf

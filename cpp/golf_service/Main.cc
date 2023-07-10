@@ -47,10 +47,12 @@ static std::string newGame(ARGS args) {
   output.append(gsm.gameStateJson(*res, args.username));
   // serialize visible game state:
   // hand
+  // knocker
   // numberOfPlayers
   // playerNames
   // scores
   // topDiscard
+  // topDraw
   // winner
   // ex: n|ajc9129|2|43|1|2_H|5_D,Q_H,6_C,J_S|ralph,_
   return output;
