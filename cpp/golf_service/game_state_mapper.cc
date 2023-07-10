@@ -1,9 +1,9 @@
+#include "cpp/golf_service/game_state_mapper.h"
+
 #include <string>
 #include <unordered_map>
 
 #include "cpp/cards/card.h"
-#include "cpp/golf_service/game_state_mapper.h"
-
 
 namespace golf {
 using namespace cards;
@@ -22,13 +22,13 @@ static const std::unordered_map<Suit, std::string> SUIT_TO_STRING{
 };
 
 class GameStateMapper {
-    public:
-        static std::string game_state_to_string(const GameState& state);
-    
-    private:
-        static std::string card_to_string(const Card& cards);
-        static std::string cards_to_string(const std::vector<Card>& cards);
-        static std::string cards_to_string(const std::deque<Card>& cards);
+ public:
+  static std::string game_state_to_string(const GameState& state);
+
+ private:
+  static std::string card_to_string(const Card& cards);
+  static std::string cards_to_string(const std::vector<Card>& cards);
+  static std::string cards_to_string(const std::deque<Card>& cards);
 }
 
-}
+}  // namespace golf
