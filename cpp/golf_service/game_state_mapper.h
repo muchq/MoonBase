@@ -5,13 +5,13 @@
 #include <string>
 
 #include "cpp/cards/card_mapper.h"
-#include "cpp/cards/golf/game_state.h"
+#include "cpp/cards/golf/golf.h"
 
 namespace golf {
 
 class GameStateMapper {
  public:
-  static std::string game_state_to_string(const GameState& state);
+  static std::string gameStateToString(GameStatePtr gameStatePtr);
 
  private:
   CardMapper cm;

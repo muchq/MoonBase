@@ -15,30 +15,28 @@
 
 namespace golf {
 
-typedef std::reference_wrapper<GameState> GameRef;
+typedef std::shared_ptr<const GameState> GameStatePtr;
 
 // Not thread-safe. requires external synchronization
 class GameManager {
  public:
   [[nodiscard]] absl::StatusOr<std::string> registerUser(const std::string& name);
   void unregisterUser(const std::string& name);
-  [[nodiscard]] absl::StatusOr<std::shared_ptr<GameState>> newGame(const std::string& name,
-                                                                   int players);
-  [[nodiscard]] absl::StatusOr<std::shared_ptr<GameState>> joinGame(const std::string& gameId,
-                                                                    const std::string& name);
-  [[nodiscard]] absl::StatusOr<GameRef> leaveGame(const std::string& name);
-  [[nodiscard]] absl::StatusOr<std::shared_ptr<GameState>> swapForDrawPile(const std::string& name,
-                                                                           Position position);
-  [[nodiscard]] absl::StatusOr<std::shared_ptr<GameState>> swapForDiscardPile(
-      const std::string& name, Position position);
-  [[nodiscard]] absl::StatusOr<std::shared_ptr<GameState>> knock(const std::string& name);
+  [[nodiscard]] absl::StatusOr<GameStatePtr> newGame(const std::string& name, int players);
+  [[nodiscard]] absl::StatusOr<GameStatePtr> joinGame(const std::string& gameId,
+                                                      const std::string& name);
+  [[nodiscard]] absl::StatusOr<GameStatePtr> leaveGame(const std::string& name);
+  [[nodiscard]] absl::StatusOr<GameStatePtr> swapForDrawPile(const std::string& name,
+                                                             Position position);
+  [[nodiscard]] absl::StatusOr<GameStatePtr> swapForDiscardPile(const std::string& name,
+                                                                Position position);
+  [[nodiscard]] absl::StatusOr<GameStatePtr> knock(const std::string& name);
 
   [[nodiscard]] std::unordered_set<std::string> getUsersOnline() const { return usersOnline; }
   [[nodiscard]] std::unordered_map<std::string, std::string> getGameIdsByUserId() const {
     return gameIdsByUser;
   }
-  [[nodiscard]] const std::unordered_map<std::string, std::shared_ptr<GameState>>& getGamesById()
-      const {
+  [[nodiscard]] const std::unordered_map<std::string, GameStatePtr>& getGamesById() const {
     return gamesById;
   }
   [[nodiscard]] std::unordered_set<std::string> getUsersByGameId(const std::string& gameId) const {
@@ -50,15 +48,14 @@ class GameManager {
   }
 
  private:
-  [[nodiscard]] absl::StatusOr<std::shared_ptr<GameState>> getGameStateForUser(
-      const std::string& name) const;
-  [[nodiscard]] absl::StatusOr<std::shared_ptr<GameState>> updateGameState(
-      absl::StatusOr<GameState> updateResult, const std::string& gameId);
+  [[nodiscard]] absl::StatusOr<GameStatePtr> getGameStateForUser(const std::string& name) const;
+  [[nodiscard]] absl::StatusOr<GameStatePtr> updateGameState(absl::StatusOr<GameState> updateResult,
+                                                             const std::string& gameId);
   [[nodiscard]] static std::deque<Card> shuffleNewDeck();
   std::unordered_set<std::string> usersOnline;
   std::unordered_map<std::string, std::string> gameIdsByUser;
   std::unordered_map<std::string, std::unordered_set<std::string>> usersByGame;
-  std::unordered_map<std::string, std::shared_ptr<GameState>> gamesById;
+  std::unordered_map<std::string, GameStatePtr> gamesById;
 };
 
 }  // namespace golf

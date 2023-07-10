@@ -52,8 +52,8 @@ std::deque<Card> GameManager::shuffleNewDeck() {
 
 // TODO: generate random game id
 // TODO: support multiple decks
-absl::StatusOr<std::shared_ptr<GameState>> GameManager::newGame(const std::string& username,
-                                                                int numberOfPlayers) {
+absl::StatusOr<GameStatePtr> GameManager::newGame(const std::string& username,
+                                                  int numberOfPlayers) {
   if (usersOnline.find(username) == usersOnline.end()) {
     return absl::InvalidArgumentError("unregistered username");
   }
@@ -107,8 +107,8 @@ absl::StatusOr<std::shared_ptr<GameState>> GameManager::newGame(const std::strin
   return gamesById.at(gameId);
 }
 
-absl::StatusOr<std::shared_ptr<GameState>> GameManager::joinGame(const std::string& gameId,
-                                                                 const std::string& username) {
+absl::StatusOr<GameStatePtr> GameManager::joinGame(const std::string& gameId,
+                                                   const std::string& username) {
   if (usersOnline.find(username) == usersOnline.end()) {
     return absl::InvalidArgumentError("unregistered username");
   }
@@ -144,8 +144,7 @@ absl::StatusOr<std::shared_ptr<GameState>> GameManager::joinGame(const std::stri
   return gamesById.at(gameId);
 }
 
-absl::StatusOr<std::shared_ptr<GameState>> GameManager::getGameStateForUser(
-    const std::string& username) const {
+absl::StatusOr<GameStatePtr> GameManager::getGameStateForUser(const std::string& username) const {
   if (usersOnline.find(username) == usersOnline.end()) {
     return absl::InvalidArgumentError("unregistered username");
   }
@@ -157,8 +156,8 @@ absl::StatusOr<std::shared_ptr<GameState>> GameManager::getGameStateForUser(
   return gamesById.at(gameIdsByUser.at(username));
 }
 
-absl::StatusOr<std::shared_ptr<GameState>> GameManager::updateGameState(
-    absl::StatusOr<GameState> updateResult, const std::string& gameId) {
+absl::StatusOr<GameStatePtr> GameManager::updateGameState(absl::StatusOr<GameState> updateResult,
+                                                          const std::string& gameId) {
   if (!updateResult.ok()) {
     return absl::InvalidArgumentError(updateResult.status().message());
   }
@@ -169,8 +168,8 @@ absl::StatusOr<std::shared_ptr<GameState>> GameManager::updateGameState(
   return gamesById.at(gameId);
 }
 
-absl::StatusOr<std::shared_ptr<GameState>> GameManager::swapForDrawPile(const std::string& username,
-                                                                        Position position) {
+absl::StatusOr<GameStatePtr> GameManager::swapForDrawPile(const std::string& username,
+                                                          Position position) {
   auto gameRes = getGameStateForUser(username);
   if (!gameRes.ok()) {
     return absl::InvalidArgumentError(gameRes.status().message());
@@ -182,8 +181,8 @@ absl::StatusOr<std::shared_ptr<GameState>> GameManager::swapForDrawPile(const st
   return updateGameState(game->swapForDrawPile(playerIndex, position), game->getGameId());
 }
 
-absl::StatusOr<std::shared_ptr<GameState>> GameManager::swapForDiscardPile(
-    const std::string& username, Position position) {
+absl::StatusOr<GameStatePtr> GameManager::swapForDiscardPile(const std::string& username,
+                                                             Position position) {
   auto gameRes = getGameStateForUser(username);
   if (!gameRes.ok()) {
     return absl::InvalidArgumentError(gameRes.status().message());
@@ -195,7 +194,7 @@ absl::StatusOr<std::shared_ptr<GameState>> GameManager::swapForDiscardPile(
   return updateGameState(game->swapForDiscardPile(playerIndex, position), game->getGameId());
 }
 
-absl::StatusOr<std::shared_ptr<GameState>> GameManager::knock(const std::string& username) {
+absl::StatusOr<GameStatePtr> GameManager::knock(const std::string& username) {
   auto gameRes = getGameStateForUser(username);
   if (!gameRes.ok()) {
     return absl::InvalidArgumentError(gameRes.status().message());
