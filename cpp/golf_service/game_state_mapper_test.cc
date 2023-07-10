@@ -10,5 +10,5 @@ using namespace golf;
 TEST(GameStateMapper, GameStateToString) {
   GameStateMapper gsm;
   Card c(Suit::Clubs, Rank::Two);
-  EXPECT_EQ(gsm.gameStateToString(nullptr), "2_C");
+  EXPECT_EQ(gsm.gameStateJson(nullptr, ""), "2_C");
 }

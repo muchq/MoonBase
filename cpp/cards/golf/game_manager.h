@@ -26,6 +26,8 @@ class GameManager {
   [[nodiscard]] absl::StatusOr<GameStatePtr> joinGame(const std::string& gameId,
                                                       const std::string& name);
   [[nodiscard]] absl::StatusOr<GameStatePtr> leaveGame(const std::string& name);
+  [[nodiscard]] absl::StatusOr<GameStatePtr> peekAtDrawPile(const std::string& name);
+  [[nodiscard]] absl::StatusOr<GameStatePtr> swapDrawForDiscardPile(const std::string& name);
   [[nodiscard]] absl::StatusOr<GameStatePtr> swapForDrawPile(const std::string& name,
                                                              Position position);
   [[nodiscard]] absl::StatusOr<GameStatePtr> swapForDiscardPile(const std::string& name,

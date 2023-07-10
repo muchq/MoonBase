@@ -5,6 +5,7 @@
 
 #include "absl/strings/str_split.h"
 #include "cpp/cards/golf/golf.h"
+#include "cpp/golf_service/game_state_mapper.h"
 #include "mongoose.h"
 
 typedef struct ARGS {
@@ -21,6 +22,7 @@ typedef struct COMMAND {
 std::mutex m;
 std::unordered_map<std::string, mg_connection *> connectionsByUser;
 golf::GameManager gm;
+golf::GameStateMapper gsm;
 
 static std::string registerCommand(ARGS args) {
   auto res = gm.registerUser(args.username);
@@ -35,23 +37,23 @@ static std::string registerCommand(ARGS args) {
 
 static std::string newGame(ARGS args) {
   auto res = gm.newGame(args.username, args.players);
+  std::string output = "";
   if (!res.ok()) {
-    std::string output = "";
     output.append("error|");
     output.append(res.status().message());
     return output;
   }
+  output.append("ok|");
+  output.append(gsm.gameStateJson(*res, args.username));
   // serialize visible game state:
-  // game over?
-  // game id
+  // hand
   // numberOfPlayers
-  // draw pile size
-  // discard pile size
-  // top discard card
-  // this user's cards
-  // player names
+  // playerNames
+  // scores
+  // topDiscard
+  // winner
   // ex: n|ajc9129|2|43|1|2_H|5_D,Q_H,6_C,J_S|ralph,_
-  return "ok";
+  return output;
 }
 
 const std::unordered_map<std::string, std::string (*)(ARGS)> handlers{

@@ -102,7 +102,7 @@ absl::StatusOr<GameStatePtr> GameManager::newGame(const std::string& username,
   const std::deque<Card> discardPile = std::move(mutableDiscardPile);
 
   gamesById.emplace(gameId, std::make_shared<GameState>(
-                                GameState{drawPile, discardPile, players, 0, -1, gameId}));
+                                GameState{drawPile, discardPile, players, false, 0, -1, gameId}));
   usersByGame.insert(std::make_pair(gameId, std::unordered_set<std::string>{username}));
   return gamesById.at(gameId);
 }
@@ -166,6 +166,30 @@ absl::StatusOr<GameStatePtr> GameManager::updateGameState(absl::StatusOr<GameSta
   gamesById.emplace(gameId, std::make_shared<GameState>(*updateResult));
 
   return gamesById.at(gameId);
+}
+
+absl::StatusOr<GameStatePtr> GameManager::peekAtDrawPile(const std::string& username) {
+  auto gameRes = getGameStateForUser(username);
+  if (!gameRes.ok()) {
+    return absl::InvalidArgumentError(gameRes.status().message());
+  }
+
+  auto game = *gameRes;
+  int playerIndex = game->playerIndex(username);
+
+  return updateGameState(game->peekAtDrawPile(playerIndex), game->getGameId());
+}
+
+absl::StatusOr<GameStatePtr> GameManager::swapDrawForDiscardPile(const std::string& username) {
+  auto gameRes = getGameStateForUser(username);
+  if (!gameRes.ok()) {
+    return absl::InvalidArgumentError(gameRes.status().message());
+  }
+
+  auto game = *gameRes;
+  int playerIndex = game->playerIndex(username);
+
+  return updateGameState(game->swapDrawForDiscardPile(playerIndex), game->getGameId());
 }
 
 absl::StatusOr<GameStatePtr> GameManager::swapForDrawPile(const std::string& username,

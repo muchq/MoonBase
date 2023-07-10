@@ -50,6 +50,56 @@ std::unordered_set<int> GameState::winners() const {
   return winningPlayers;
 }
 
+absl::StatusOr<GameState> GameState::peekAtDrawPile(int player) const {
+  if (isOver()) {
+    return absl::FailedPreconditionError("game is over");
+  }
+  if (!allPlayersPresent()) {
+    return absl::FailedPreconditionError("not all players have joined");
+  }
+  if (whoseTurn != player) {
+    return absl::FailedPreconditionError("not your turn");
+  }
+  if (peekedAtDrawPile) {
+    return absl::FailedPreconditionError("you can only peek once per turn");
+  }
+
+  return GameState{drawPile, discardPile, players, true, whoseTurn, whoKnocked, gameId};
+}
+
+absl::StatusOr<GameState> GameState::swapDrawForDiscardPile(int player) const {
+  if (isOver()) {
+    return absl::FailedPreconditionError("game is over");
+  }
+  if (!allPlayersPresent()) {
+    return absl::FailedPreconditionError("not all players have joined");
+  }
+  if (whoseTurn != player) {
+    return absl::FailedPreconditionError("not your turn");
+  }
+
+  // update draw pile
+  std::deque<Card> updatedDrawPile{drawPile};
+  Card toSwampIntoDiscard = updatedDrawPile.back();
+  updatedDrawPile.pop_back();
+  const std::deque<Card> drawPileForNewGameState = std::move(updatedDrawPile);
+
+  std::deque<Card> updatedDiscardPile{discardPile};
+  updatedDiscardPile.push_back(toSwampIntoDiscard);
+  const std::deque<Card> discardPileForNewGameState = std::move(updatedDiscardPile);
+
+  // update whose turn it is
+  int newWhoseTurn = (whoseTurn + 1) % players.size();
+
+  return GameState{drawPileForNewGameState,
+                   discardPileForNewGameState,
+                   players,
+                   false,
+                   newWhoseTurn,
+                   whoKnocked,
+                   gameId};
+}
+
 absl::StatusOr<GameState> GameState::swapForDrawPile(int player, Position position) const {
   if (isOver()) {
     return absl::FailedPreconditionError("game is over");
@@ -94,6 +144,7 @@ absl::StatusOr<GameState> GameState::swapForDrawPile(int player, Position positi
   return GameState{drawPileForNewGameState,
                    discardPileForNewGameState,
                    playersForNewGameState,
+                   false,
                    newWhoseTurn,
                    whoKnocked,
                    gameId};
@@ -108,6 +159,9 @@ absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Position pos
   }
   if (whoseTurn != player) {
     return absl::FailedPreconditionError("not your turn");
+  }
+  if (peekedAtDrawPile) {
+    return absl::FailedPreconditionError("cannot swap for discard after peeking");
   }
 
   // remove top card from discard pile
@@ -141,7 +195,7 @@ absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Position pos
   int newWhoseTurn = (whoseTurn + 1) % players.size();
 
   return GameState{
-      drawPile, discardPileForNewGameState, playersForNewGameState, newWhoseTurn, whoKnocked,
+      drawPile, discardPileForNewGameState, playersForNewGameState, false, newWhoseTurn, whoKnocked,
       gameId};
 }
 
@@ -155,7 +209,9 @@ absl::StatusOr<GameState> GameState::knock(int player) const {
   if (whoseTurn != player) {
     return absl::FailedPreconditionError("not your turn");
   }
-
+  if (peekedAtDrawPile) {
+    return absl::FailedPreconditionError("cannot knock after peeking");
+  }
   if (whoKnocked != -1) {
     return absl::FailedPreconditionError("someone already knocked");
   }
@@ -163,11 +219,12 @@ absl::StatusOr<GameState> GameState::knock(int player) const {
   // update whose turn it is
   int newWhoseTurn = (whoseTurn + 1) % players.size();
 
-  return GameState{drawPile, discardPile, players, newWhoseTurn, player, gameId};
+  return GameState{drawPile, discardPile, players, false, newWhoseTurn, player, gameId};
 }
 
 GameState GameState::withPlayers(std::vector<Player> newPlayers) const {
-  return GameState{drawPile, discardPile, std::move(newPlayers), whoseTurn, whoKnocked, gameId};
+  return GameState{drawPile,   discardPile, std::move(newPlayers), false, whoseTurn,
+                   whoKnocked, gameId};
 }
 
 }  // namespace golf
