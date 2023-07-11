@@ -23,6 +23,8 @@ static const std::unordered_map<Suit, std::string> SUIT_TO_STRING{
 
 std::string GameStateMapper::gameStateJson(GameStatePtr state, const std::string& username) {
   std::string output = "{";
+  output.append(writeBool("allHere", state->allPlayersPresent()));
+  output.append(",");
   output.append(writeInt("discardSize", state->getDiscardPile().size()));
   output.append(",");
   output.append(writeInt("drawSize", state->getDrawPile().size()));
@@ -34,9 +36,9 @@ std::string GameStateMapper::gameStateJson(GameStatePtr state, const std::string
   if (state->getWhoKnocked() != -1) {
     const Player& knocker = state->getPlayer(state->getWhoKnocked());
     if (knocker.getName().has_value()) {
-        output.append(writeString("knocker", knocker.getName().value()));
+      output.append(writeString("knocker", knocker.getName().value()));
     } else {
-        output.append(writeString("knocker", "_"));
+      output.append(writeString("knocker", "_"));
     }
     output.append(",");
   }
@@ -68,7 +70,9 @@ std::string GameStateMapper::gameStateJson(GameStatePtr state, const std::string
   if (state->getPeekedAtDrawPile()) {
     output.append(",");
     output.append(writeString("topDraw", cm.cardToString(state->getDrawPile().back())));
+    output.append(",");
   }
+  output.append(writeBool("yourTurn", state->getWhoseTurn() == index));
 
   output.append("}");
 
@@ -82,7 +86,11 @@ std::string GameStateMapper::writeInt(const std::string& name, const int value) 
   return "\"" + name + "\":\"" + std::to_string(value) + "\"";
 }
 std::string GameStateMapper::writeBool(const std::string& name, const bool value) {
-  return "\"" + name + "\":\"" + std::to_string(value) + "\"";
+  if (value) {
+    return "\"" + name + "\":true";
+  } else {
+    return "\"" + name + "\":false";
+  }
 }
 
 }  // namespace golf

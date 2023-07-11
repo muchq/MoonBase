@@ -12,6 +12,7 @@ typedef struct ARGS {
   std::string username;
   std::string gameId;
   int players;
+  struct mg_connection *c;
 } ARGS;
 
 typedef struct COMMAND {
@@ -24,46 +25,56 @@ std::unordered_map<std::string, mg_connection *> connectionsByUser;
 golf::GameManager gm;
 golf::GameStateMapper gsm;
 
-static std::string registerCommand(ARGS args) {
+static void registerUser(ARGS args) {
   auto res = gm.registerUser(args.username);
+  std::string output = "";
   if (!res.ok()) {
-    std::string output = "";
     output.append("error|");
     output.append(res.status().message());
-    return output;
+  } else {
+    output.append("ok");
   }
-  return "ok";
+  std::string user = *res;
+  connectionsByUser.insert({user, args.c});
+  mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
 }
 
-static std::string newGame(ARGS args) {
+static void newGame(ARGS args) {
   auto res = gm.newGame(args.username, args.players);
   std::string output = "";
   if (!res.ok()) {
     output.append("error|");
     output.append(res.status().message());
-    return output;
+  } else {
+    output.append(gsm.gameStateJson(*res, args.username));
   }
-  output.append("ok|");
-  output.append(gsm.gameStateJson(*res, args.username));
-  // serialize visible game state:
-  // hand
-  // knocker
-  // numberOfPlayers
-  // playerNames
-  // scores
-  // topDiscard
-  // topDraw
-  // winner
-  // ex: n|ajc9129|2|43|1|2_H|5_D,Q_H,6_C,J_S|ralph,_
-  return output;
+  mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
 }
 
-const std::unordered_map<std::string, std::string (*)(ARGS)> handlers{
-    {"register", registerCommand},
+static void joinGame(ARGS args) {
+  auto res = gm.joinGame(args.gameId, args.username);
+  if (!res.ok()) {
+    std::string output = "error|";
+    output.append(res.status().message());
+    mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
+  }
+
+  auto gameStatePtr = *res;
+
+  for (auto &user : gm.getUsersByGameId(args.gameId)) {
+    auto stateForuser = gsm.gameStateJson(gameStatePtr, user);
+    auto c = connectionsByUser.at(user);
+    mg_ws_send(c, stateForuser.c_str(), stateForuser.size(), WEBSOCKET_OP_TEXT);
+  }
+}
+
+const std::unordered_map<std::string, void (*)(ARGS)> handlers{
+    {"register", registerUser},
     {"new_game", newGame},
+    {"join_game", joinGame},
 };
 
-static ARGS parseArgs(std::vector<std::string> &parts) {
+static ARGS parseArgs(std::vector<std::string> &parts, struct mg_connection *c) {
   std::string username = parts[1];
   std::string gameId = parts.size() >= 3 ? parts[2] : "";
   int numberOfPlayers = parts.size() >= 4 ? std::stoi(parts[3]) : -1;
@@ -71,28 +82,30 @@ static ARGS parseArgs(std::vector<std::string> &parts) {
   std::cout << "gameId '" << gameId << "'\n";
   std::cout << "num '" << numberOfPlayers << "'\n";
 
-  return ARGS{username, gameId, numberOfPlayers};
+  return ARGS{username, gameId, numberOfPlayers, c};
 }
 
-static std::string handleMessage(struct mg_ws_message *wm) {
+static void handleMessage(struct mg_ws_message *wm, struct mg_connection *c) {
   std::scoped_lock lock(m);
 
   std::vector<std::string> commandParts =
       absl::StrSplit(std::string(wm->data.ptr), '|', absl::SkipWhitespace());
 
   if (commandParts.size() < 2) {
-    return "error|arg count";
+    std::string response = "error|arg count";
+    mg_ws_send(c, response.c_str(), response.size(), WEBSOCKET_OP_TEXT);
   }
 
   std::string command = commandParts[0];
-  ARGS args = parseArgs(commandParts);
+  ARGS args = parseArgs(commandParts, c);
 
   auto cmdIter = handlers.find(command);
   if (cmdIter == handlers.end()) {
-    return "error|bad_command";
+    std::string response = "error|bad_command";
+    mg_ws_send(c, response.c_str(), response.size(), WEBSOCKET_OP_TEXT);
   }
 
-  return cmdIter->second(args);
+  cmdIter->second(args);
 }
 
 static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
@@ -107,8 +120,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
     }
   } else if (ev == MG_EV_WS_MSG) {
     struct mg_ws_message *wm = (struct mg_ws_message *)ev_data;
-    std::string response = handleMessage(wm);
-    mg_ws_send(c, response.c_str(), response.size(), WEBSOCKET_OP_TEXT);
+    handleMessage(wm, c);
   }
 }
 
