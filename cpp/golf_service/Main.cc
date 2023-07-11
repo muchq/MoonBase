@@ -1,8 +1,10 @@
 #include <iostream>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 
+#include "absl/status/statusor.h"
 #include "absl/strings/str_split.h"
 #include "cpp/cards/golf/golf.h"
 #include "cpp/golf_service/game_state_mapper.h"
@@ -12,6 +14,7 @@ typedef struct Args {
   std::string username;
   std::string gameId;
   int players;
+  golf::Position position;
   struct mg_connection *c;
 } Args;
 
@@ -51,6 +54,23 @@ static bool usernameMismatch(const Args &args) {
   return false;
 }
 
+static void handleGameManagerResult(const absl::StatusOr<golf::GameStatePtr> &res,
+                                    const Args &args) {
+  if (!res.ok()) {
+    std::string output = "error|";
+    output.append(res.status().message());
+    mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
+    return;
+  }
+
+  auto gameStatePtr = *res;
+  for (auto &user : gm.getUsersByGameId(args.gameId)) {
+    auto stateForuser = gsm.gameStateJson(gameStatePtr, user);
+    auto c = connectionsByUser.at(user);
+    mg_ws_send(c, stateForuser.c_str(), stateForuser.size(), WEBSOCKET_OP_TEXT);
+  }
+}
+
 static void newGame(const Args &args) {
   if (usernameMismatch(args)) {
     return;
@@ -72,20 +92,7 @@ static void joinGame(const Args &args) {
     return;
   }
   auto res = gm.joinGame(args.gameId, args.username);
-  if (!res.ok()) {
-    std::string output = "error|";
-    output.append(res.status().message());
-    mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
-    return;
-  }
-
-  auto gameStatePtr = *res;
-
-  for (auto &user : gm.getUsersByGameId(args.gameId)) {
-    auto stateForuser = gsm.gameStateJson(gameStatePtr, user);
-    auto c = connectionsByUser.at(user);
-    mg_ws_send(c, stateForuser.c_str(), stateForuser.size(), WEBSOCKET_OP_TEXT);
-  }
+  handleGameManagerResult(res, args);
 }
 
 static void peekAtDrawPile(const Args &args) {
@@ -93,20 +100,39 @@ static void peekAtDrawPile(const Args &args) {
     return;
   }
   auto res = gm.peekAtDrawPile(args.username);
-  if (!res.ok()) {
-    std::string output = "error|";
-    output.append(res.status().message());
-    mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
+  handleGameManagerResult(res, args);
+}
+
+static void discardFromDrawPile(const Args &args) {
+  if (usernameMismatch(args)) {
     return;
   }
+  auto res = gm.swapDrawForDiscardPile(args.username);
+  handleGameManagerResult(res, args);
+}
 
-  auto gameStatePtr = *res;
-
-  for (auto &user : gm.getUsersByGameId(args.gameId)) {
-    auto stateForuser = gsm.gameStateJson(gameStatePtr, user);
-    auto c = connectionsByUser.at(user);
-    mg_ws_send(c, stateForuser.c_str(), stateForuser.size(), WEBSOCKET_OP_TEXT);
+static void swapForDrawPile(const Args &args) {
+  if (usernameMismatch(args)) {
+    return;
   }
+  auto res = gm.swapForDrawPile(args.username, args.position);
+  handleGameManagerResult(res, args);
+}
+
+static void swapForDiscardPile(const Args &args) {
+  if (usernameMismatch(args)) {
+    return;
+  }
+  auto res = gm.swapForDiscardPile(args.username, args.position);
+  handleGameManagerResult(res, args);
+}
+
+static void knock(const Args &args) {
+  if (usernameMismatch(args)) {
+    return;
+  }
+  auto res = gm.knock(args.username);
+  handleGameManagerResult(res, args);
 }
 
 const std::unordered_map<std::string, void (*)(const Args &)> handlers{
@@ -114,17 +140,43 @@ const std::unordered_map<std::string, void (*)(const Args &)> handlers{
     {"new", newGame},
     {"join", joinGame},
     {"peek", peekAtDrawPile},
+    {"discardDraw", discardFromDrawPile},
+    {"swapDraw", swapForDrawPile},
+    {"swapDiscard", swapForDiscardPile},
+    {"knock", knock},
 };
 
-static Args parseArgs(std::vector<std::string> &parts, struct mg_connection *c) {
-  std::string username = parts.size() >= 2 ? parts[1] : "";
-  std::string gameId = parts.size() >= 3 ? parts[2] : "";
-  int numberOfPlayers = parts.size() >= 4 ? std::stoi(parts[3]) : -1;
+static absl::StatusOr<Args> parseArgs(std::vector<std::string> &parts, struct mg_connection *c) {
+  if (parts.size() != 5) {
+    return absl::InvalidArgumentError("args -> <user>|<game>|<numPlayers>|<pos>");
+  }
+  std::string username = parts[1];
+  std::string gameId = parts[2];
+  int numberOfPlayers;
+  try {
+    numberOfPlayers = std::stoi(parts[3]);
+  } catch (std::invalid_argument const &ex) {
+    return absl::InvalidArgumentError(ex.what());
+  } catch (std::out_of_range const &ex) {
+    return absl::InvalidArgumentError(ex.what());
+  }
+  golf::Position position;
+  if (parts[4] == "tl") {
+    position = golf::Position::TopLeft;
+  } else if (parts[4] == "tr") {
+    position = golf::Position::TopRight;
+  } else if (parts[4] == "bl") {
+    position = golf::Position::BottomLeft;
+  } else if (parts[4] == "br") {
+    position = golf::Position::BottomRight;
+  } else {
+    return absl::InvalidArgumentError("invalid position. must be in (tl, tr, bl, br)");
+  }
   std::cout << "username '" << username << "'\n";
   std::cout << "gameId '" << gameId << "'\n";
   std::cout << "num '" << numberOfPlayers << "'\n";
 
-  return Args{username, gameId, numberOfPlayers, c};
+  return Args{username, gameId, numberOfPlayers, position, c};
 }
 
 static void handleMessage(struct mg_ws_message *wm, struct mg_connection *c) {
@@ -139,7 +191,15 @@ static void handleMessage(struct mg_ws_message *wm, struct mg_connection *c) {
   }
 
   std::string command = commandParts[0];
-  Args args = parseArgs(commandParts, c);
+  auto res = parseArgs(commandParts, c);
+  if (!res.ok()) {
+    std::string response = "error|";
+    response.append(res.status().message());
+    mg_ws_send(c, response.c_str(), response.size(), WEBSOCKET_OP_TEXT);
+    return;
+  }
+
+  Args args = *res;
 
   auto cmdIter = handlers.find(command);
   if (cmdIter == handlers.end()) {
