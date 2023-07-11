@@ -121,6 +121,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
   } else if (ev == MG_EV_WS_MSG) {
     struct mg_ws_message *wm = (struct mg_ws_message *)ev_data;
     handleMessage(wm, c);
+  } else if (ev == MG_EV_CLOSE) {
+    // handle disconnect here...
   }
 }
 
