@@ -57,11 +57,9 @@ absl::StatusOr<GameStatePtr> GameManager::newGame(const std::string& username,
   if (usersOnline.find(username) == usersOnline.end()) {
     return absl::InvalidArgumentError("unregistered username");
   }
-
   if (gameIdsByUser.find(username) != gameIdsByUser.end()) {
     return absl::InvalidArgumentError("already in game");
   }
-
   if (numberOfPlayers < 2 || numberOfPlayers > 5) {
     return absl::InvalidArgumentError("2 to 5 players");
   }
@@ -104,6 +102,7 @@ absl::StatusOr<GameStatePtr> GameManager::newGame(const std::string& username,
   gamesById.emplace(gameId, std::make_shared<GameState>(
                                 GameState{drawPile, discardPile, players, false, 0, -1, gameId}));
   usersByGame.insert(std::make_pair(gameId, std::unordered_set<std::string>{username}));
+  gameIdsByUser[username] = gameId;
   return gamesById.at(gameId);
 }
 
@@ -140,6 +139,7 @@ absl::StatusOr<GameStatePtr> GameManager::joinGame(const std::string& gameId,
   gamesById.erase(gameId);
   gamesById.emplace(gameId, std::make_shared<GameState>(oldGameState->withPlayers(updatedPlayers)));
   usersByGame.at(gameId).insert(username);
+  gameIdsByUser[username] = gameId;
 
   return gamesById.at(gameId);
 }
@@ -148,7 +148,6 @@ absl::StatusOr<GameStatePtr> GameManager::getGameStateForUser(const std::string&
   if (usersOnline.find(username) == usersOnline.end()) {
     return absl::InvalidArgumentError("unregistered username");
   }
-
   if (gameIdsByUser.find(username) == gameIdsByUser.end()) {
     return absl::InvalidArgumentError("user not in game");
   }

@@ -67,7 +67,7 @@ std::string GameStateMapper::gameStateJson(GameStatePtr state, const std::string
 
   output.append(writeString("topDiscard", cm.cardToString(state->getDiscardPile().back())));
 
-  if (state->getPeekedAtDrawPile()) {
+  if (state->getPeekedAtDrawPile() && state->getWhoseTurn() == index) {
     output.append(",");
     output.append(writeString("topDraw", cm.cardToString(state->getDrawPile().back())));
     output.append(",");

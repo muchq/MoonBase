@@ -8,16 +8,16 @@
 #include "cpp/golf_service/game_state_mapper.h"
 #include "mongoose.h"
 
-typedef struct ARGS {
+typedef struct Args {
   std::string username;
   std::string gameId;
   int players;
   struct mg_connection *c;
-} ARGS;
+} Args;
 
 typedef struct COMMAND {
   const char *name;
-  std::string (*command)(ARGS);
+  std::string (*command)(Args);
 } API;
 
 std::mutex m;
@@ -25,21 +25,37 @@ std::unordered_map<std::string, mg_connection *> connectionsByUser;
 golf::GameManager gm;
 golf::GameStateMapper gsm;
 
-static void registerUser(ARGS args) {
+static void registerUser(const Args &args) {
   auto res = gm.registerUser(args.username);
   std::string output = "";
   if (!res.ok()) {
     output.append("error|");
     output.append(res.status().message());
-  } else {
-    output.append("ok");
+    mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
+    return;
   }
+
+  output.append("ok");
   std::string user = *res;
   connectionsByUser.insert({user, args.c});
   mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
 }
 
-static void newGame(ARGS args) {
+static bool usernameMismatch(const Args &args) {
+  if (connectionsByUser.find(args.username) == connectionsByUser.end() ||
+      connectionsByUser.at(args.username) != args.c) {
+    std::string output("error|username mismatch");
+    mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
+    return true;
+  }
+  return false;
+}
+
+static void newGame(const Args &args) {
+  if (usernameMismatch(args)) {
+    return;
+  }
+
   auto res = gm.newGame(args.username, args.players);
   std::string output = "";
   if (!res.ok()) {
@@ -51,12 +67,16 @@ static void newGame(ARGS args) {
   mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
 }
 
-static void joinGame(ARGS args) {
+static void joinGame(const Args &args) {
+  if (usernameMismatch(args)) {
+    return;
+  }
   auto res = gm.joinGame(args.gameId, args.username);
   if (!res.ok()) {
     std::string output = "error|";
     output.append(res.status().message());
     mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
+    return;
   }
 
   auto gameStatePtr = *res;
@@ -68,21 +88,43 @@ static void joinGame(ARGS args) {
   }
 }
 
-const std::unordered_map<std::string, void (*)(ARGS)> handlers{
+static void peekAtDrawPile(const Args &args) {
+  if (usernameMismatch(args)) {
+    return;
+  }
+  auto res = gm.peekAtDrawPile(args.username);
+  if (!res.ok()) {
+    std::string output = "error|";
+    output.append(res.status().message());
+    mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
+    return;
+  }
+
+  auto gameStatePtr = *res;
+
+  for (auto &user : gm.getUsersByGameId(args.gameId)) {
+    auto stateForuser = gsm.gameStateJson(gameStatePtr, user);
+    auto c = connectionsByUser.at(user);
+    mg_ws_send(c, stateForuser.c_str(), stateForuser.size(), WEBSOCKET_OP_TEXT);
+  }
+}
+
+const std::unordered_map<std::string, void (*)(const Args &)> handlers{
     {"register", registerUser},
-    {"new_game", newGame},
-    {"join_game", joinGame},
+    {"new", newGame},
+    {"join", joinGame},
+    {"peek", peekAtDrawPile},
 };
 
-static ARGS parseArgs(std::vector<std::string> &parts, struct mg_connection *c) {
-  std::string username = parts[1];
+static Args parseArgs(std::vector<std::string> &parts, struct mg_connection *c) {
+  std::string username = parts.size() >= 2 ? parts[1] : "";
   std::string gameId = parts.size() >= 3 ? parts[2] : "";
   int numberOfPlayers = parts.size() >= 4 ? std::stoi(parts[3]) : -1;
   std::cout << "username '" << username << "'\n";
   std::cout << "gameId '" << gameId << "'\n";
   std::cout << "num '" << numberOfPlayers << "'\n";
 
-  return ARGS{username, gameId, numberOfPlayers, c};
+  return Args{username, gameId, numberOfPlayers, c};
 }
 
 static void handleMessage(struct mg_ws_message *wm, struct mg_connection *c) {
@@ -97,7 +139,7 @@ static void handleMessage(struct mg_ws_message *wm, struct mg_connection *c) {
   }
 
   std::string command = commandParts[0];
-  ARGS args = parseArgs(commandParts, c);
+  Args args = parseArgs(commandParts, c);
 
   auto cmdIter = handlers.find(command);
   if (cmdIter == handlers.end()) {
