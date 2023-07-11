@@ -45,13 +45,25 @@ std::string GameStateMapper::gameStateJson(GameStatePtr state, const std::string
 
   const int index = state->playerIndex(username);
   const Player& p = state->getPlayer(index);
-  output.append(writeString("hand", cm.cardsToString(p.allCards())));
-  output.append(",");
+
+  output.append("\"hand\":[");
+  size_t cardIndex = 0;
+  while (cardIndex < 4) {
+    output.append("\"");
+    output.append(cm.cardToString(p.allCards().at(cardIndex)));
+    output.append("\"");
+    if (cardIndex < 3) {
+      output.append(",");
+    }
+    cardIndex++;
+  }
+  output.append("],");
+
   output.append(writeInt("numberOfPlayers", state->getPlayers().size()));
   output.append(",");
 
-  output.append("\"scores\":");
   if (state->isOver()) {
+    output.append("\"scores\":");
     output.append("[");
     for (size_t i = 0; i < state->getPlayers().size(); i++) {
       auto& p = state->getPlayers().at(i);
@@ -61,14 +73,11 @@ std::string GameStateMapper::gameStateJson(GameStatePtr state, const std::string
       }
     }
     output.append("],");
-  } else {
-    output.append("null,");
   }
-
   output.append(writeString("topDiscard", cm.cardToString(state->getDiscardPile().back())));
+  output.append(",");
 
   if (state->getPeekedAtDrawPile() && state->getWhoseTurn() == index) {
-    output.append(",");
     output.append(writeString("topDraw", cm.cardToString(state->getDrawPile().back())));
     output.append(",");
   }
@@ -83,7 +92,7 @@ std::string GameStateMapper::writeString(const std::string& name, const std::str
   return "\"" + name + "\":\"" + value + "\"";
 }
 std::string GameStateMapper::writeInt(const std::string& name, const int value) {
-  return "\"" + name + "\":\"" + std::to_string(value) + "\"";
+  return "\"" + name + "\":" + std::to_string(value);
 }
 std::string GameStateMapper::writeBool(const std::string& name, const bool value) {
   if (value) {
