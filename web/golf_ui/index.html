@@ -3,7 +3,7 @@
   <head>
     <title>Golf!</title>
     <style>
-      
+
 div#connect_holder {
   margin-bottom: 5px;
 }
@@ -38,6 +38,7 @@ div.card {
     margin: 0 auto;
     text-align: center;
     vertical-align: middle;
+    user-select: none;
 }
 
 div.card.selected {
@@ -81,18 +82,18 @@ div#actions button {
   </head>
   <body>
     <div id="connect_holder">
-      <input id="url" type="text" placeholder="Type URL" value="ws://localhost:8000/golf/ws" style="width:20em;" /> 
+      <input id="url" type="text" placeholder="Type URL" value="ws://localhost:8000/golf/ws" style="width:20em;" />
       <button id="connect">connect</button>
     </div>
     <div id="register_holder" class="gone">
-      <input id="message" type="text" placeholder="username" style="width: 20em;" /> 
+      <input id="message" type="text" placeholder="username" style="width: 20em;" />
       <button id="send">register username</button>
     </div>
     <div id="new_game_holder" class="gone">
-      <input id="num_players" type="text" placeholder="number of players" style="width: 5em;" /> 
+      <input id="num_players" type="text" placeholder="number of players" style="width: 5em;" />
       <button id="start_game">new game</button>
       <br/>
-      <input id="game_id" type="text" placeholder="game id" style="width: 10em;" /> 
+      <input id="game_id" type="text" placeholder="game id" style="width: 10em;" />
       <button id="join_game">join game</button>
     </div>
     <div id="log" style="background: #eee; height: 1em; padding: 0.5em;margin-bottom: 5px;"></div>
