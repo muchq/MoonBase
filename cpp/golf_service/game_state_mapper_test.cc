@@ -16,9 +16,9 @@ TEST(GameStateMapper, GameStateToString) {
   GameStatePtr state =
       std::make_shared<GameState>(GameState{drawPile, discardPile, players, false, 0, -1, "foo"});
 
-  std::string expected("{\"allHere\":true,\"discardSize\":1,\"drawSize\":1,\"gameId\":\"foo\",");
-  expected.append("\"gameOver\":false,\"hand\":[\"2_C\",\"3_D\",\"4_H\",\"5_S\"],");
-  expected.append("\"numberOfPlayers\":1,\"topDiscard\":\"8_H\",\"yourTurn\":true");
+  std::string expected(R"({"allHere":true,"discardSize":1,"drawSize":1,"gameId":"foo",)");
+  expected.append(R"("gameOver":false,"hand":["2_C","3_D","4_H","5_S"],)");
+  expected.append(R"("numberOfPlayers":1,"topDiscard":"8_H","yourTurn":true)");
   expected.append("}");
 
   EXPECT_EQ(gsm.gameStateJson(state, "andy"), expected);

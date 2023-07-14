@@ -10,9 +10,11 @@
 #include "cpp/golf_service/game_state_mapper.h"
 #include "mongoose.h"
 
+using std::string;
+
 typedef struct Args {
-  std::string username;
-  std::string gameId;
+  string username;
+  string gameId;
   int players;
   golf::Position position;
   struct mg_connection *c;
@@ -20,19 +22,21 @@ typedef struct Args {
 
 typedef struct COMMAND {
   const char *name;
-  std::string (*command)(Args);
+  string (*command)(Args);
 } API;
+
+using golf::GameStateMapper;
 
 std::mutex m;
 std::unordered_map<std::string, mg_connection *> connectionsByUser;
 golf::GameManager gm;
-golf::GameStateMapper gsm;
+GameStateMapper gsm;
 
 static void registerUser(const Args &args) {
   // don't allow re-registration yet
   for (auto i = connectionsByUser.begin(); i != connectionsByUser.end(); i++) {
     if (connectionsByUser.at(i->first) == args.c) {
-      std::string output("error|already registered");
+      string output("error|already registered");
       mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
       return;
     }
@@ -40,22 +44,22 @@ static void registerUser(const Args &args) {
 
   auto res = gm.registerUser(args.username);
   if (!res.ok()) {
-    std::string output("error|");
+    string output("error|");
     output.append(res.status().message());
     mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
     return;
   }
 
-  std::string user = *res;
+  string user = *res;
   connectionsByUser.insert({user, args.c});
-  std::string output("{\"inGame\":false,\"username\":\"" + user + "\"}");
+  string output(R"({"inGame":false,"username":")" + user + "\"}");
   mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
 }
 
 static bool usernameMismatch(const Args &args) {
   if (connectionsByUser.find(args.username) == connectionsByUser.end() ||
       connectionsByUser.at(args.username) != args.c) {
-    std::string output("error|username mismatch");
+    string output("error|username mismatch");
     mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
     return true;
   }
@@ -65,17 +69,17 @@ static bool usernameMismatch(const Args &args) {
 static void handleGameManagerResult(const absl::StatusOr<golf::GameStatePtr> &res,
                                     const Args &args) {
   if (!res.ok()) {
-    std::string output = "error|";
+    string output("error|");
     output.append(res.status().message());
     mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
     return;
   }
 
-  auto gameStatePtr = *res;
+  const auto &gameStatePtr = *res;
   for (auto &user : gm.getUsersByGameId(args.gameId)) {
-    auto stateForuser = gsm.gameStateJson(gameStatePtr, user);
+    auto stateForUser = GameStateMapper::gameStateJson(gameStatePtr, user);
     auto c = connectionsByUser.at(user);
-    mg_ws_send(c, stateForuser.c_str(), stateForuser.size(), WEBSOCKET_OP_TEXT);
+    mg_ws_send(c, stateForUser.c_str(), stateForUser.size(), WEBSOCKET_OP_TEXT);
   }
 }
 
@@ -85,12 +89,12 @@ static void newGame(const Args &args) {
   }
 
   auto res = gm.newGame(args.username, args.players);
-  std::string output("");
+  string output;
   if (!res.ok()) {
     output.append("error|");
     output.append(res.status().message());
   } else {
-    output.append(gsm.gameStateJson(*res, args.username));
+    output.append(GameStateMapper::gameStateJson(*res, args.username));
   }
   mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
 }
@@ -143,7 +147,7 @@ static void knock(const Args &args) {
   handleGameManagerResult(res, args);
 }
 
-const std::unordered_map<std::string, void (*)(const Args &)> handlers{
+const std::unordered_map<string, void (*)(const Args &)> handlers{
     {"register", registerUser},
     {"new", newGame},
     {"join", joinGame},
@@ -154,12 +158,12 @@ const std::unordered_map<std::string, void (*)(const Args &)> handlers{
     {"knock", knock},
 };
 
-static absl::StatusOr<Args> parseArgs(std::vector<std::string> &parts, struct mg_connection *c) {
+static absl::StatusOr<Args> parseArgs(std::vector<string> &parts, struct mg_connection *c) {
   if (parts.size() != 5) {
     return absl::InvalidArgumentError("args -> <user>|<game>|<numPlayers>|<pos>");
   }
-  std::string username = parts[1];
-  std::string gameId = parts[2];
+  string username = parts[1];
+  string gameId = parts[2];
   int numberOfPlayers;
   try {
     numberOfPlayers = std::stoi(parts[3]);
@@ -187,15 +191,14 @@ static absl::StatusOr<Args> parseArgs(std::vector<std::string> &parts, struct mg
 static void handleMessage(struct mg_ws_message *wm, struct mg_connection *c) {
   std::scoped_lock lock(m);
 
-  std::vector<std::string> commandParts =
-      absl::StrSplit(std::string(wm->data.ptr), '|', absl::SkipWhitespace());
+  std::vector<string> commandParts =
+      absl::StrSplit(string(wm->data.ptr), '|', absl::SkipWhitespace());
 
   if (commandParts.size() < 2) {
-    std::string response = "error|arg count";
+    string response = "error|arg count";
     mg_ws_send(c, response.c_str(), response.size(), WEBSOCKET_OP_TEXT);
   }
 
-  std::string command = commandParts[0];
   auto res = parseArgs(commandParts, c);
   if (!res.ok()) {
     std::string response = "error|";
@@ -206,7 +209,7 @@ static void handleMessage(struct mg_ws_message *wm, struct mg_connection *c) {
 
   Args args = *res;
 
-  auto cmdIter = handlers.find(command);
+  auto cmdIter = handlers.find(commandParts[0]);
   if (cmdIter == handlers.end()) {
     std::string response = "error|bad_command";
     mg_ws_send(c, response.c_str(), response.size(), WEBSOCKET_OP_TEXT);
@@ -218,19 +221,19 @@ static void handleMessage(struct mg_ws_message *wm, struct mg_connection *c) {
 
 static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
   if (ev == MG_EV_HTTP_MSG) {
-    struct mg_http_message *hm = (struct mg_http_message *)ev_data;
+    auto *hm = (struct mg_http_message *)ev_data;
     if (mg_http_match_uri(hm, "/golf/ws")) {
-      mg_ws_upgrade(c, hm, NULL);
+      mg_ws_upgrade(c, hm, nullptr);
     } else if (mg_http_match_uri(hm, "/golf/stats")) {
       mg_http_reply(c, 200, "", "\"stats\": []");
     } else if (mg_http_match_uri(hm, "/golf/ui")) {
-      struct mg_http_serve_opts opts = {.root_dir = NULL};
+      struct mg_http_serve_opts opts = {.root_dir = nullptr};
       mg_http_serve_file(c, hm, "web/golf_ui/index.html", &opts);
     } else {
-      mg_http_reply(c, 404, "", "{\"message\": \"not_found\"}");
+      mg_http_reply(c, 404, "", R"({"message": "not_found"})");
     }
   } else if (ev == MG_EV_WS_MSG) {
-    struct mg_ws_message *wm = (struct mg_ws_message *)ev_data;
+    auto *wm = (struct mg_ws_message *)ev_data;
     handleMessage(wm, c);
   } else if (ev == MG_EV_CLOSE) {
     // handle disconnect here...
@@ -238,9 +241,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
 }
 
 int main() {
-  struct mg_mgr mgr;
+  struct mg_mgr mgr {};
   mg_mgr_init(&mgr);
-  mg_http_listen(&mgr, "http://0.0.0.0:8000", fn, NULL);
+  mg_http_listen(&mgr, "http://0.0.0.0:8000", fn, nullptr);
   std::cout << "listening on port 8000\n";
   for (;;) {
     mg_mgr_poll(&mgr, 500);

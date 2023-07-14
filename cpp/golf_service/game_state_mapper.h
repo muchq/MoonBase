@@ -8,15 +8,17 @@
 
 namespace golf {
 
+using std::string;
+
 class GameStateMapper {
  public:
-  static std::string gameStateJson(GameStatePtr gameStatePtr, const std::string& username);
+  static string gameStateJson(const GameStatePtr& gameStatePtr, const string& username);
 
  private:
   static CardMapper cm;
-  static std::string writeString(const std::string& name, const std::string& value);
-  static std::string writeInt(const std::string& name, const int value);
-  static std::string writeBool(const std::string& name, const bool value);
+  static string writeString(const string& name, const string& value);
+  static string writeInt(const string& name, const int value);
+  static string writeBool(const string& name, const bool value);
 };
 }  // namespace golf
 
