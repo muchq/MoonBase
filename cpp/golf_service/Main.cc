@@ -172,9 +172,6 @@ static absl::StatusOr<Args> parseArgs(std::vector<std::string> &parts, struct mg
   } else {
     return absl::InvalidArgumentError("invalid position. must be in (tl, tr, bl, br)");
   }
-  std::cout << "username '" << username << "'\n";
-  std::cout << "gameId '" << gameId << "'\n";
-  std::cout << "num '" << numberOfPlayers << "'\n";
 
   return Args{username, gameId, numberOfPlayers, position, c};
 }
@@ -205,6 +202,7 @@ static void handleMessage(struct mg_ws_message *wm, struct mg_connection *c) {
   if (cmdIter == handlers.end()) {
     std::string response = "error|bad_command";
     mg_ws_send(c, response.c_str(), response.size(), WEBSOCKET_OP_TEXT);
+    return;
   }
 
   cmdIter->second(args);
