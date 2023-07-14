@@ -29,18 +29,26 @@ golf::GameManager gm;
 golf::GameStateMapper gsm;
 
 static void registerUser(const Args &args) {
+  // don't allow re-registration yet
+  for (auto i = connectionsByUser.begin(); i != connectionsByUser.end(); i++) {
+    if (connectionsByUser.at(i->first) == args.c) {
+      std::string output("error|already registered");
+      mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
+      return;
+    }
+  }
+
   auto res = gm.registerUser(args.username);
-  std::string output = "";
   if (!res.ok()) {
-    output.append("error|");
+    std::string output("error|");
     output.append(res.status().message());
     mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
     return;
   }
 
-  output.append("ok");
   std::string user = *res;
   connectionsByUser.insert({user, args.c});
+  std::string output("{\"inGame\":false,\"username\":\"" + user + "\"}");
   mg_ws_send(args.c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
 }
 
@@ -77,7 +85,7 @@ static void newGame(const Args &args) {
   }
 
   auto res = gm.newGame(args.username, args.players);
-  std::string output = "";
+  std::string output("");
   if (!res.ok()) {
     output.append("error|");
     output.append(res.status().message());
@@ -215,6 +223,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
       mg_ws_upgrade(c, hm, NULL);
     } else if (mg_http_match_uri(hm, "/golf/stats")) {
       mg_http_reply(c, 200, "", "\"stats\": []");
+    } else if (mg_http_match_uri(hm, "/golf/ui")) {
+      struct mg_http_serve_opts opts = {.root_dir = NULL};
+      mg_http_serve_file(c, hm, "web/golf_ui/index.html", &opts);
     } else {
       mg_http_reply(c, 404, "", "{\"message\": \"not_found\"}");
     }
@@ -230,6 +241,7 @@ int main() {
   struct mg_mgr mgr;
   mg_mgr_init(&mgr);
   mg_http_listen(&mgr, "http://0.0.0.0:8000", fn, NULL);
+  std::cout << "listening on port 8000\n";
   for (;;) {
     mg_mgr_poll(&mgr, 500);
   }
