@@ -4,6 +4,18 @@
     <title>Golf!</title>
     <style>
 
+body {
+            width: 90%;
+            max-width: 900px;
+            margin: 2em auto;
+            font: .9em/1.2 Arial, Helvetica, sans-serif;
+        }
+
+div#app {
+  display: grid;
+  place-self: center;
+}
+
 div#connect_holder {
   margin-bottom: 5px;
 }
@@ -81,34 +93,37 @@ div#actions button {
     </style>
   </head>
   <body>
-    <div id="connect_holder">
-      <input id="url" type="text" placeholder="Type URL" value="ws://localhost:8000/golf/ws" style="width:20em;" />
-      <button id="connect">connect</button>
-    </div>
-    <div id="register_holder" class="gone">
-      <input id="message" type="text" placeholder="username" style="width: 20em;" />
-      <button id="send">register username</button>
-    </div>
-    <div id="new_game_holder" class="gone">
-      <input id="num_players" type="text" placeholder="number of players" style="width: 5em;" />
-      <button id="start_game">new game</button>
-      <br/>
-      <input id="game_id" type="text" placeholder="game id" style="width: 10em;" />
-      <button id="join_game">join game</button>
-    </div>
-    <div id="log" style="background: #eee; height: 1em; padding: 0.5em;margin-bottom: 5px;"></div>
-    <div id="table">
-      <div id="draw" class="card">?</div>
-      <div id="discard" class="card"></div>
-      <div id="top_left" class="card">?</div>
-      <div id="top_right" class="card">?</div>
-      <div id="bottom_left" class="card">?</div>
-      <div id="bottom_right" class="card">?</div>
-      <div id="actions">
-        <button id="peek">peek</button><br/>
-        <button id="swap">swap</button><br/>
-        <button id="knock">knock</button>
+    <div id="app">
+      <div id="connect_holder">
+        <input id="url" type="text" placeholder="Type URL" value="ws://localhost:8000/golf/ws" style="width:20em;" />
+        <button id="connect">connect</button>
       </div>
+      <div id="register_holder" class="gone">
+        <input id="message" type="text" placeholder="username" style="width: 20em;" />
+        <button id="send">register username</button>
+      </div>
+      <div id="new_game_holder" class="gone">
+        <input id="num_players" type="text" placeholder="number of players" style="width: 5em;" />
+        <button id="start_game">new game</button>
+        <br/>
+        <input id="game_id" type="text" placeholder="game id" style="width: 10em;" />
+        <button id="join_game">join game</button>
+      </div>
+      <div id="log" style="background: #eee; height: 1em; padding: 0.5em;margin-bottom: 5px;"></div>
+      <div id="table">
+        <div id="draw" class="card">?</div>
+        <div id="discard" class="card"></div>
+        <div id="top_left" class="card">?</div>
+        <div id="top_right" class="card">?</div>
+        <div id="bottom_left" class="card">?</div>
+        <div id="bottom_right" class="card">?</div>
+        <div id="actions">
+          <button id="peek">peek</button><br/>
+          <button id="swap">swap</button><br/>
+          <button id="knock">knock</button>
+        </div>
+      </div>
+
     </div>
   </body>
   <script>
@@ -120,6 +135,7 @@ div#actions button {
     var connected = false;
     var registered = false;
     var inGame = false;
+    var gameId = "";
     var username = "";
     var handSelected = false;
     var nonHandSelected = false;
@@ -157,6 +173,10 @@ div#actions button {
           return;
         }
 
+        if (state.gameId) {
+          gameId = state.gameId;
+        }
+
         new_game_holder.className = "gone";
         connect_holder.className = "";
         discard.innerHTML = state.topDiscard;
@@ -184,7 +204,7 @@ div#actions button {
     }
     start_game.onclick = function() {
       if (!ws) return;
-      var computedMessage = "new|" + username + "|foo|" + num_players.value + "|tl|";
+      var computedMessage = "new|" + username + "|_|" + num_players.value + "|tl|";
       ws.send(computedMessage);
     }
     join_game.onclick = function() {

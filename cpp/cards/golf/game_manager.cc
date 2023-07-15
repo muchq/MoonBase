@@ -58,6 +58,39 @@ deque<Card> GameManager::shuffleNewDeck() {
   return deck;
 }
 
+// https://stackoverflow.com/a/444614/599075
+std::mt19937 GameManager::randomGenerator() const {
+  auto constexpr seed_bytes = sizeof(std::mt19937) * std::mt19937::state_size;
+  auto constexpr seed_len = seed_bytes / sizeof(std::seed_seq::result_type);
+  auto seed = std::array<std::seed_seq::result_type, seed_len>();
+  auto dev = std::random_device();
+  std::generate_n(begin(seed), seed_len, std::ref(dev));
+  auto seed_seq = std::seed_seq(begin(seed), end(seed));
+  return std::mt19937{seed_seq};
+}
+
+std::string GameManager::generateRandomAlphanumericString(std::size_t len) const {
+  static constexpr auto chars =
+      "0123456789"
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+      "abcdefghijklmnopqrstuvwxyz";
+  thread_local auto rng = randomGenerator();
+  auto dist = std::uniform_int_distribution{{}, std::strlen(chars) - 1};
+  auto result = std::string(len, '\0');
+  std::generate_n(begin(result), len, [&]() { return chars[dist(rng)]; });
+  return result;
+}
+
+std::optional<std::string> GameManager::generateUnusedRandomId() const {
+  for (int i = 0; i < 10; i++) {
+    auto attempt = generateRandomAlphanumericString(12);
+    if (gamesById.find(attempt) == gamesById.end()) {
+      return attempt;
+    }
+  }
+  return {};
+}
+
 // TODO: generate random game id
 // TODO: support multiple decks
 StatusOr<GameStatePtr> GameManager::newGame(const string& username, int numberOfPlayers) {
@@ -71,7 +104,11 @@ StatusOr<GameStatePtr> GameManager::newGame(const string& username, int numberOf
     return InvalidArgumentError("2 to 5 players");
   }
 
-  const string gameId = "foo";  // generateUnusedRandomId();
+  auto gameIdMaybe = generateUnusedRandomId();
+  if (!gameIdMaybe.has_value()) {
+    return InvalidArgumentError("could not generate unused game id");
+  }
+  const auto gameId = gameIdMaybe.value();
   deque<Card> mutableDrawPile = shuffleNewDeck();
 
   vector<Card> allDealt{};
@@ -104,8 +141,13 @@ StatusOr<GameStatePtr> GameManager::newGame(const string& username, int numberOf
   const deque<Card> drawPile = std::move(mutableDrawPile);
   const deque<Card> discardPile = std::move(mutableDiscardPile);
 
-  gamesById.emplace(gameId, std::make_shared<GameState>(
-                                GameState{drawPile, discardPile, players, false, 0, -1, gameId}));
+  auto emplaceWorked = gamesById.emplace(
+      gameId,
+      std::make_shared<GameState>(GameState{drawPile, discardPile, players, false, 0, -1, gameId}));
+  if (!emplaceWorked.second) {
+    return InvalidArgumentError("could not generate unused game id");
+  }
+
   usersByGame.insert(std::make_pair(gameId, std::unordered_set<string>{username}));
   gameIdsByUser[username] = gameId;
   return gamesById.at(gameId);

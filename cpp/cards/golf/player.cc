@@ -36,14 +36,7 @@ absl::StatusOr<Player> Player::claimHand(const std::string& username) const {
   return Player{username, topLeft, topRight, bottomLeft, bottomRight};
 }
 
-std::vector<Card> Player::allCards() const {
-  std::vector<Card> all;
-  all.push_back(topLeft);
-  all.push_back(topRight);
-  all.push_back(bottomLeft);
-  all.push_back(bottomRight);
-  return all;
-}
+std::vector<Card> Player::allCards() const { return {topLeft, topRight, bottomLeft, bottomRight}; }
 
 int Player::cardValue(Card c) {
   switch (c.getRank()) {

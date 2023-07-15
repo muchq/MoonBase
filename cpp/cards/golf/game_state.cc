@@ -1,5 +1,6 @@
 #include "cpp/cards/golf/game_state.h"
 
+#include <algorithm>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -22,12 +23,7 @@ using std::vector;
 bool GameState::isOver() const { return drawPile.empty() || whoseTurn == whoKnocked; }
 
 bool GameState::allPlayersPresent() const {
-  for (const auto& p : players) {
-    if (!p.isPresent()) {
-      return false;
-    }
-  }
-  return true;
+  return std::all_of(players.begin(), players.end(), [](const Player& p) { return p.isPresent(); });
 }
 
 unordered_set<int> GameState::winners() const {
