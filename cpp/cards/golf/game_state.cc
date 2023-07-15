@@ -1,9 +1,5 @@
 #include "cpp/cards/golf/game_state.h"
 
-#include <algorithm>
-#include <iostream>
-#include <random>
-#include <stdexcept>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -14,6 +10,14 @@
 
 namespace golf {
 using namespace cards;
+using absl::FailedPreconditionError;
+using absl::StatusOr;
+
+using std::deque;
+using std::string;
+using std::unordered_map;
+using std::unordered_set;
+using std::vector;
 
 bool GameState::isOver() const { return drawPile.empty() || whoseTurn == whoKnocked; }
 
@@ -26,8 +30,8 @@ bool GameState::allPlayersPresent() const {
   return true;
 }
 
-std::unordered_set<int> GameState::winners() const {
-  std::unordered_set<int> winningPlayers;
+unordered_set<int> GameState::winners() const {
+  unordered_set<int> winningPlayers;
   int minScore = 40;  // max score is 9 10 Q K == 39
   int playerIndex = 0;
   for (auto& p : players) {
@@ -50,43 +54,43 @@ std::unordered_set<int> GameState::winners() const {
   return winningPlayers;
 }
 
-absl::StatusOr<GameState> GameState::peekAtDrawPile(int player) const {
+StatusOr<GameState> GameState::peekAtDrawPile(int player) const {
   if (isOver()) {
-    return absl::FailedPreconditionError("game is over");
+    return FailedPreconditionError("game is over");
   }
   if (!allPlayersPresent()) {
-    return absl::FailedPreconditionError("not all players have joined");
+    return FailedPreconditionError("not all players have joined");
   }
   if (whoseTurn != player) {
-    return absl::FailedPreconditionError("not your turn");
+    return FailedPreconditionError("not your turn");
   }
   if (peekedAtDrawPile) {
-    return absl::FailedPreconditionError("you can only peek once per turn");
+    return FailedPreconditionError("you can only peek once per turn");
   }
 
   return GameState{drawPile, discardPile, players, true, whoseTurn, whoKnocked, gameId};
 }
 
-absl::StatusOr<GameState> GameState::swapDrawForDiscardPile(int player) const {
+StatusOr<GameState> GameState::swapDrawForDiscardPile(int player) const {
   if (isOver()) {
-    return absl::FailedPreconditionError("game is over");
+    return FailedPreconditionError("game is over");
   }
   if (!allPlayersPresent()) {
-    return absl::FailedPreconditionError("not all players have joined");
+    return FailedPreconditionError("not all players have joined");
   }
   if (whoseTurn != player) {
-    return absl::FailedPreconditionError("not your turn");
+    return FailedPreconditionError("not your turn");
   }
 
   // update draw pile
-  std::deque<Card> updatedDrawPile{drawPile};
+  deque<Card> updatedDrawPile{drawPile};
   Card toSwampIntoDiscard = updatedDrawPile.back();
   updatedDrawPile.pop_back();
-  const std::deque<Card> drawPileForNewGameState = std::move(updatedDrawPile);
+  const deque<Card> drawPileForNewGameState = std::move(updatedDrawPile);
 
-  std::deque<Card> updatedDiscardPile{discardPile};
+  deque<Card> updatedDiscardPile{discardPile};
   updatedDiscardPile.push_back(toSwampIntoDiscard);
-  const std::deque<Card> discardPileForNewGameState = std::move(updatedDiscardPile);
+  const deque<Card> discardPileForNewGameState = std::move(updatedDiscardPile);
 
   // update whose turn it is
   int newWhoseTurn = (whoseTurn + 1) % players.size();
@@ -100,22 +104,22 @@ absl::StatusOr<GameState> GameState::swapDrawForDiscardPile(int player) const {
                    gameId};
 }
 
-absl::StatusOr<GameState> GameState::swapForDrawPile(int player, Position position) const {
+StatusOr<GameState> GameState::swapForDrawPile(int player, Position position) const {
   if (isOver()) {
-    return absl::FailedPreconditionError("game is over");
+    return FailedPreconditionError("game is over");
   }
   if (!allPlayersPresent()) {
-    return absl::FailedPreconditionError("not all players have joined");
+    return FailedPreconditionError("not all players have joined");
   }
   if (whoseTurn != player) {
-    return absl::FailedPreconditionError("not your turn");
+    return FailedPreconditionError("not your turn");
   }
 
   // update draw pile
-  std::deque<Card> updatedDrawPile{drawPile};
+  deque<Card> updatedDrawPile{drawPile};
   Card toSwampIntoHand = updatedDrawPile.back();
   updatedDrawPile.pop_back();
-  const std::deque<Card> drawPileForNewGameState = std::move(updatedDrawPile);
+  const deque<Card> drawPileForNewGameState = std::move(updatedDrawPile);
 
   // update current player
   const Player currentPlayer = players.at(player);
@@ -123,7 +127,7 @@ absl::StatusOr<GameState> GameState::swapForDrawPile(int player, Position positi
   const Player updatedCurrentPlayer = currentPlayer.swapCard(toSwampIntoHand, position);
 
   // update players list
-  std::vector<Player> updatedPlayers;
+  vector<Player> updatedPlayers;
   for (size_t i = 0; i < players.size(); i++) {
     if (static_cast<int>(i) == whoseTurn) {
       updatedPlayers.push_back(updatedCurrentPlayer);
@@ -131,12 +135,12 @@ absl::StatusOr<GameState> GameState::swapForDrawPile(int player, Position positi
       updatedPlayers.push_back(players.at(i));
     }
   }
-  const std::vector<Player> playersForNewGameState = std::move(updatedPlayers);
+  const vector<Player> playersForNewGameState = std::move(updatedPlayers);
 
   // update discard pile
-  std::deque<Card> updatedDiscardPile{discardPile};
+  deque<Card> updatedDiscardPile{discardPile};
   updatedDiscardPile.push_back(toSwapOutOfHand);
-  const std::deque<Card> discardPileForNewGameState = std::move(updatedDiscardPile);
+  const deque<Card> discardPileForNewGameState = std::move(updatedDiscardPile);
 
   // update whose turn it is
   int newWhoseTurn = (whoseTurn + 1) % players.size();
@@ -152,20 +156,20 @@ absl::StatusOr<GameState> GameState::swapForDrawPile(int player, Position positi
 
 absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Position position) const {
   if (isOver()) {
-    return absl::FailedPreconditionError("game is over");
+    return FailedPreconditionError("game is over");
   }
   if (!allPlayersPresent()) {
-    return absl::FailedPreconditionError("not all players have joined");
+    return FailedPreconditionError("not all players have joined");
   }
   if (whoseTurn != player) {
-    return absl::FailedPreconditionError("not your turn");
+    return FailedPreconditionError("not your turn");
   }
   if (peekedAtDrawPile) {
-    return absl::FailedPreconditionError("cannot swap for discard after peeking");
+    return FailedPreconditionError("cannot swap for discard after peeking");
   }
 
   // remove top card from discard pile
-  std::deque<Card> mutableDiscardPile{discardPile};
+  deque<Card> mutableDiscardPile{discardPile};
 
   // TODO: how should we enforce looking at the card once?
   Card toSwampIntoHand = mutableDiscardPile.back();
@@ -178,10 +182,10 @@ absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Position pos
 
   // update discardPile
   mutableDiscardPile.push_back(toSwapOutOfHand);
-  const std::deque<Card> discardPileForNewGameState = std::move(mutableDiscardPile);
+  const deque<Card> discardPileForNewGameState = std::move(mutableDiscardPile);
 
   // update players list
-  std::vector<Player> updatedPlayers;
+  vector<Player> updatedPlayers;
   for (size_t i = 0; i < players.size(); i++) {
     if (static_cast<int>(i) == whoseTurn) {
       updatedPlayers.push_back(updatedCurrentPlayer);
@@ -189,7 +193,7 @@ absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Position pos
       updatedPlayers.push_back(players.at(i));
     }
   }
-  const std::vector<Player> playersForNewGameState = std::move(updatedPlayers);
+  const vector<Player> playersForNewGameState = std::move(updatedPlayers);
 
   // update whose turn it is
   int newWhoseTurn = (whoseTurn + 1) % players.size();
@@ -199,21 +203,21 @@ absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Position pos
       gameId};
 }
 
-absl::StatusOr<GameState> GameState::knock(int player) const {
+StatusOr<GameState> GameState::knock(int player) const {
   if (isOver()) {
-    return absl::FailedPreconditionError("game is over");
+    return FailedPreconditionError("game is over");
   }
   if (!allPlayersPresent()) {
-    return absl::FailedPreconditionError("not all players have joined");
+    return FailedPreconditionError("not all players have joined");
   }
   if (whoseTurn != player) {
-    return absl::FailedPreconditionError("not your turn");
+    return FailedPreconditionError("not your turn");
   }
   if (peekedAtDrawPile) {
-    return absl::FailedPreconditionError("cannot knock after peeking");
+    return FailedPreconditionError("cannot knock after peeking");
   }
   if (whoKnocked != -1) {
-    return absl::FailedPreconditionError("someone already knocked");
+    return FailedPreconditionError("someone already knocked");
   }
 
   // update whose turn it is
@@ -222,7 +226,7 @@ absl::StatusOr<GameState> GameState::knock(int player) const {
   return GameState{drawPile, discardPile, players, false, newWhoseTurn, player, gameId};
 }
 
-GameState GameState::withPlayers(std::vector<Player> newPlayers) const {
+GameState GameState::withPlayers(vector<Player> newPlayers) const {
   return GameState{drawPile,   discardPile, std::move(newPlayers), false, whoseTurn,
                    whoKnocked, gameId};
 }

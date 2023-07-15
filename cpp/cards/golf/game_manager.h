@@ -15,49 +15,49 @@
 
 namespace golf {
 
+using absl::StatusOr;
+using std::deque;
+using std::string;
+using std::unordered_map;
+using std::unordered_set;
+
 typedef std::shared_ptr<const GameState> GameStatePtr;
 
 // Not thread-safe. requires external synchronization
 class GameManager {
  public:
-  [[nodiscard]] absl::StatusOr<std::string> registerUser(const std::string& name);
-  void unregisterUser(const std::string& name);
-  [[nodiscard]] absl::StatusOr<GameStatePtr> newGame(const std::string& name, int players);
-  [[nodiscard]] absl::StatusOr<GameStatePtr> joinGame(const std::string& gameId,
-                                                      const std::string& name);
-  [[nodiscard]] absl::StatusOr<GameStatePtr> leaveGame(const std::string& name);
-  [[nodiscard]] absl::StatusOr<GameStatePtr> peekAtDrawPile(const std::string& name);
-  [[nodiscard]] absl::StatusOr<GameStatePtr> swapDrawForDiscardPile(const std::string& name);
-  [[nodiscard]] absl::StatusOr<GameStatePtr> swapForDrawPile(const std::string& name,
-                                                             Position position);
-  [[nodiscard]] absl::StatusOr<GameStatePtr> swapForDiscardPile(const std::string& name,
-                                                                Position position);
-  [[nodiscard]] absl::StatusOr<GameStatePtr> knock(const std::string& name);
+  [[nodiscard]] StatusOr<string> registerUser(const string& name);
+  void unregisterUser(const string& name);
+  [[nodiscard]] StatusOr<GameStatePtr> newGame(const string& name, int players);
+  [[nodiscard]] StatusOr<GameStatePtr> joinGame(const string& gameId, const string& name);
+  [[nodiscard]] StatusOr<GameStatePtr> leaveGame(const string& name);
+  [[nodiscard]] StatusOr<GameStatePtr> peekAtDrawPile(const string& name);
+  [[nodiscard]] StatusOr<GameStatePtr> swapDrawForDiscardPile(const string& name);
+  [[nodiscard]] StatusOr<GameStatePtr> swapForDrawPile(const string& name, Position position);
+  [[nodiscard]] StatusOr<GameStatePtr> swapForDiscardPile(const string& name, Position position);
+  [[nodiscard]] StatusOr<GameStatePtr> knock(const string& name);
 
-  [[nodiscard]] std::unordered_set<std::string> getUsersOnline() const { return usersOnline; }
-  [[nodiscard]] std::unordered_map<std::string, std::string> getGameIdsByUserId() const {
-    return gameIdsByUser;
-  }
-  [[nodiscard]] const std::unordered_map<std::string, GameStatePtr>& getGamesById() const {
+  [[nodiscard]] unordered_set<string> getUsersOnline() const { return usersOnline; }
+  [[nodiscard]] unordered_map<string, string> getGameIdsByUserId() const { return gameIdsByUser; }
+  [[nodiscard]] const unordered_map<string, GameStatePtr>& getGamesById() const {
     return gamesById;
   }
-  [[nodiscard]] std::unordered_set<std::string> getUsersByGameId(const std::string& gameId) const {
+  [[nodiscard]] unordered_set<string> getUsersByGameId(const string& gameId) const {
     if (usersByGame.find(gameId) == usersByGame.end()) {
       return {};
     }
-
     return usersByGame.at(gameId);
   }
 
  private:
-  [[nodiscard]] absl::StatusOr<GameStatePtr> getGameStateForUser(const std::string& name) const;
-  [[nodiscard]] absl::StatusOr<GameStatePtr> updateGameState(absl::StatusOr<GameState> updateResult,
-                                                             const std::string& gameId);
-  [[nodiscard]] static std::deque<Card> shuffleNewDeck();
-  std::unordered_set<std::string> usersOnline;
-  std::unordered_map<std::string, std::string> gameIdsByUser;
-  std::unordered_map<std::string, std::unordered_set<std::string>> usersByGame;
-  std::unordered_map<std::string, GameStatePtr> gamesById;
+  [[nodiscard]] StatusOr<GameStatePtr> getGameStateForUser(const string& name) const;
+  [[nodiscard]] StatusOr<GameStatePtr> updateGameState(StatusOr<GameState> updateResult,
+                                                       const string& gameId);
+  [[nodiscard]] static deque<Card> shuffleNewDeck();
+  unordered_set<string> usersOnline;
+  unordered_map<string, string> gameIdsByUser;
+  unordered_map<string, unordered_set<string>> usersByGame;
+  unordered_map<string, GameStatePtr> gamesById;
 };
 
 }  // namespace golf
