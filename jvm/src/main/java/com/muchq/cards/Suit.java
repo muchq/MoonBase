@@ -5,5 +5,5 @@ public enum Suit {
     DIAMONDS,
     HEARTS,
     SPADES,
-    JOKER;
+    NONE;
 }

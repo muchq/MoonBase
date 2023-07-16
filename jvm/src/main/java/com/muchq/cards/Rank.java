@@ -13,6 +13,6 @@ public enum Rank {
     JACK,
     QUEEN,
     KING,
-    ACE, // TODO: sometimes aces are low
+    ACE,
     JOKER
 }

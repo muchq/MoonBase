@@ -2,6 +2,10 @@ java_library(
     name = "castle",
     srcs = [
         "GameState.java",
+        "Player.java",
+        "ThreeDown.java",
+        "ThreeUp.java",
+        "Turn.java",
     ],
     visibility = ["//visibility:public"],
     deps = [

@@ -5,15 +5,15 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
-import java.util.Optional;
 
 public record Deck(Deque<Card> cards) {
+    
+    public boolean hasNext() {
+        return !cards.isEmpty();
+    }
 
-    public Optional<Card> nextCard() {
-        if (cards.isEmpty()) {
-            return Optional.empty();
-        }
-        return Optional.of(cards.removeLast());
+    public Card nextCard() {
+        return cards.removeLast();
     }
 
     public Deck shuffled() {
@@ -24,8 +24,8 @@ public record Deck(Deque<Card> cards) {
 
     public static Deck withJokers() {
         var cards = cardsListWithNoJokers();
-        cards.add(new Card(Suit.JOKER, Rank.JOKER, Facing.DOWN));
-        cards.add(new Card(Suit.JOKER, Rank.JOKER, Facing.DOWN));
+        cards.add(new Card(Suit.NONE, Rank.JOKER));
+        cards.add(new Card(Suit.NONE, Rank.JOKER));
         return new Deck(cards);
     }
 
@@ -37,8 +37,8 @@ public record Deck(Deque<Card> cards) {
         List<Card> cards = new ArrayList<>();
         for (var suit : Suit.values()) {
             for (var value : Rank.values()) {
-                if (suit != Suit.JOKER && value != Rank.JOKER) {
-                    cards.add(new Card(suit, value, Facing.DOWN));
+                if (suit != Suit.NONE && value != Rank.JOKER) {
+                    cards.add(new Card(suit, value));
                 }
             }
         }
