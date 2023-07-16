@@ -2,7 +2,7 @@
 
 [![CircleCI](https://dl.circleci.com/status-badge/img/gh/muchq/MoonBase/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/muchq/MoonBase/tree/main)
 
-![MoonBase](moon.gif)
+![MoonBase](static_content/moon.gif)
 
 ### IntelliJ
 Tested with [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij)
@@ -11,11 +11,18 @@ Java, Scala and Go targets Just Work™.
 
 Add new targets to [project view](/.ijwb/.bazelproject) if they aren't detected automatically.
 
-C/C++ aren't supported in Bazel for IntelliJ. I haven't had a great CLion experience with Bazel, but we'll see.
+C and C++ aren't supported in Bazel for IntelliJ. Use Clion or VSCode.
+
+### Clion
+C++ projects work with [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij), but autocomplete/intellisense doesn't feel very snappy.
+
+Although it's slow, the clang-lint integration is very helpful.
+
+Not sure why!
 
 ### VSCode
 
-Scala3 support is waiting on [metals integration](https://github.com/scalameta/metals/issues/5138)
+Scala3 support in VSCode is waiting on [metals integration](https://github.com/scalameta/metals/issues/5138)
 
 C/C++ use [hedronvision/bazel-compile-commands-extractor](https://github.com/hedronvision/bazel-compile-commands-extractor)
 
@@ -23,7 +30,7 @@ Follow instructions [here](https://github.com/hedronvision/bazel-compile-command
 
 and then do
 ```
-bazel run :refresh_compile_commands
+bazel run @hedron_compile_commands//:refresh_all
 code .
 ```
 

@@ -7,5 +7,6 @@
     "--compile-commands-dir=${workspaceFolder}/",
     "--query-driver=**"
   ],
-  "clangd.checkUpdates": true
+  "clangd.checkUpdates": true,
+  "files.autoSave": "afterDelay"
 }

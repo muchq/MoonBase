@@ -1,10 +1,32 @@
+cc_library(
+    name = "game_state_mapper",
+    srcs = ["game_state_mapper.cc"],
+    hdrs = ["game_state_mapper.h"],
+    deps = [
+        "//cpp/cards:card_mapper",
+        "//cpp/cards",
+        "//cpp/cards/golf",
+    ],
+)
+
+cc_test(
+    name = "game_state_mapper_test",
+    srcs = ["game_state_mapper_test.cc"],
+    deps = [
+        ":game_state_mapper",
+        "@com_google_googletest//:gtest_main",
+    ]
+)
+
 cc_binary(
     name = "golf_service",
     srcs = [
         "Main.cc",
     ],
     deps = [
+        ":game_state_mapper",
         "//cpp/cards/golf",
+        "@com_google_absl//absl/strings",
         "@mongoose_cc//:mongoose",
     ],
 )

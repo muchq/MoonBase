@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Golf!</title>
+    <style>
+
+body {
+            width: 90%;
+            max-width: 900px;
+            margin: 2em auto;
+            font: .9em/1.2 Arial, Helvetica, sans-serif;
+        }
+
+div#app {
+  display: grid;
+  place-self: center;
+}
+
+div#connect_holder {
+  margin-bottom: 5px;
+}
+
+div.block {
+  display: block;
+}
+
+div.gone {
+  display: none;
+}
+
+div#table {
+    position: relative;
+    background: #efefef;
+    height: 350px;
+    width: 400px;
+    border-radius: 5px;
+    border: 1px solid #333;
+    margin: 0 auto;
+    padding: 10px;
+}
+
+div.card {
+    position: absolute;
+    background: #efefef;
+    height: 75px;
+    width: 40px;
+    border-radius: 5px;
+    border: 1px solid #333;
+    padding: 10px;
+    margin: 0 auto;
+    text-align: center;
+    vertical-align: middle;
+    user-select: none;
+}
+
+div.card.selected {
+    border: 3px solid #e4a;
+}
+
+div#draw {
+    top: 10px;
+    left: 120px;
+}
+div#discard {
+    top: 10px;
+    left: 200px;
+}
+div#top_left {
+    top: 150px;
+    left: 120px;
+}
+div#bottom_left {
+    top: 260px;
+    left: 120px;
+}
+div#top_right {
+    top: 150px;
+    left: 200px;
+}
+div#bottom_right {
+    top: 260px;
+    left: 200px;
+}
+div#actions {
+    position: absolute;
+    top: 220px;
+    left: 300px;
+}
+div#actions button {
+  width: 70px;
+  margin-bottom: 5px;
+}
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="connect_holder">
+        <input id="url" type="text" placeholder="Type URL" value="ws://localhost:8000/golf/ws" style="width:20em;" />
+        <button id="connect">connect</button>
+      </div>
+      <div id="register_holder" class="gone">
+        <input id="message" type="text" placeholder="username" style="width: 20em;" />
+        <button id="send">register username</button>
+      </div>
+      <div id="new_game_holder" class="gone">
+        <input id="num_players" type="text" placeholder="number of players" style="width: 5em;" />
+        <button id="start_game">new game</button>
+        <br/>
+        <input id="game_id" type="text" placeholder="game id" style="width: 10em;" />
+        <button id="join_game">join game</button>
+      </div>
+      <div id="log" style="background: #eee; height: 1em; padding: 0.5em;margin-bottom: 5px;"></div>
+      <div id="table">
+        <div id="draw" class="card">?</div>
+        <div id="discard" class="card"></div>
+        <div id="top_left" class="card">?</div>
+        <div id="top_right" class="card">?</div>
+        <div id="bottom_left" class="card">?</div>
+        <div id="bottom_right" class="card">?</div>
+        <div id="actions">
+          <button id="peek">peek</button><br/>
+          <button id="swap">swap</button><br/>
+          <button id="knock">knock</button>
+        </div>
+      </div>
+
+    </div>
+  </body>
+  <script>
+    var ws, E = function(id) { return document.getElementById(id); };
+    var url = E('url'), connect = E('connect'), message = E('message'), send = E('send'), log = E('log');
+    var enable = function(en) { message.disabled = send.disabled = !en; url.disabled = en; connect.innerHTML = en ? 'disconnect' : 'connect'; };
+    enable(false)
+
+    var connected = false;
+    var registered = false;
+    var inGame = false;
+    var gameId = "";
+    var username = "";
+    var handSelected = false;
+    var nonHandSelected = false;
+
+    connect.onclick = function() {
+      if (ws) { ws.close(); return; }
+      ws = new WebSocket(url.value);
+      if (!ws) return;
+      ws.onopen = function() {
+        log.innerHTML = 'CONNECTION OPENED';
+        connected = true;
+        connect_holder.className = "gone";
+        register_holder.className = "";
+      }
+      ws.onmessage = function(ev) {
+        var data = ev.data;
+        if (typeof data != "string") {
+          log.innerHTML = 'WAT: ' + ev.data;
+          return;
+        }
+        if (data.startsWith("error|")) {
+          var errValue = data.split("error|")[1];
+          log.innerHTML = 'ERROR: ' + errValue;
+          return;
+        }
+
+        var state = JSON.parse(data);
+        console.log(state);
+        if (state.username && !state.inGame) {
+          registered = true;
+          username = state.username;
+          register_holder.className = "gone";
+          new_game_holder.className = "";
+          log.innerHTML = "USER: " + username;
+          return;
+        }
+
+        if (state.gameId) {
+          gameId = state.gameId;
+        }
+
+        new_game_holder.className = "gone";
+        connect_holder.className = "";
+        discard.innerHTML = state.topDiscard;
+        draw.className = "card";
+        discard.className = "card";
+        top_left.className = "card";
+        top_right.className = "card";
+        bottom_left.className = "card";
+        bottom_right.className = "card";
+        handSelected = false;
+        nonHandSelected = false;
+      }
+      ws.onerror = function(ev) { log.innerHTML = 'ERROR: ' + ev; }
+      ws.onclose = function() {
+        log.innerHTML = 'CONNECTION CLOSED'; enable(false); ws = null;
+      }
+      enable(true);
+    };
+    send.onclick = function() {
+      if (!ws) return;
+      var name = message.value;
+      var computedMessage = "register|" + name + "|foo|0|tl|";
+      log.innerHTML = 'REGISTERED: ' + message.value + '<br/>';
+      ws.send(computedMessage);
+    }
+    start_game.onclick = function() {
+      if (!ws) return;
+      var computedMessage = "new|" + username + "|_|" + num_players.value + "|tl|";
+      ws.send(computedMessage);
+    }
+    join_game.onclick = function() {
+      if (!ws) return;
+      var computedMessage = "join|" + username + "|" + game_id.value + "|0|tl|";
+      ws.send(computedMessage);
+    }
+
+    function toggleSelected(hand, e) {
+      e.stopPropagation();
+      if (e.target.className == "card selected") {
+        if (hand) {
+          handSelected = false;
+        } else {
+          nonHandSelected = false;
+        }
+        e.target.className = "card";
+      } else {
+        if ((hand && handSelected) || (!hand && nonHandSelected)) {
+          return;
+        }
+        e.target.className = "card selected";
+        if (hand) {
+          handSelected = true;
+        } else {
+          nonHandSelected = true;
+        }
+      }
+    }
+
+    draw.onclick = toggleSelected.bind(null, false);
+    discard.onclick = toggleSelected.bind(null, false);
+    top_left.onclick = toggleSelected.bind(null, true);
+    top_right.onclick = toggleSelected.bind(null, true);
+    bottom_left.onclick = toggleSelected.bind(null, true);
+    bottom_right.onclick = toggleSelected.bind(null, true);
+  </script>
+</html>
