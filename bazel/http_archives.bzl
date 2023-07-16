@@ -1,6 +1,21 @@
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
+_ALL_CONTENT = """\
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+"""
+
 def register_http_archive_dependencies():
+    http_archive(
+        name = "rules_foreign_cc",
+        sha256 = "61b74a99496470a27989b396b8331d93aba6c6cf21997533d6df3848eb5a095c",
+        strip_prefix = "rules_foreign_cc-26c77008307c80a90fabc8fe3f7a72b961120a84",
+        url = "https://github.com/bazelbuild/rules_foreign_cc/archive/26c77008307c80a90fabc8fe3f7a72b961120a84.tar.gz",
+    )
+
     http_archive(
         name = "com_github_grpc_grpc",
         patch_args = ["-p1"],
@@ -106,4 +121,12 @@ def register_http_archive_dependencies():
         sha256 = "3cd0e49f0f4a6d406c1d74b53b7616f5e24f5fd319eafc1bf8eee6e14124d115",
         strip_prefix = "bazel-compile-commands-extractor-3dddf205a1f5cde20faf2444c1757abe0564ff4c",
         url = "https://github.com/hedronvision/bazel-compile-commands-extractor/archive/3dddf205a1f5cde20faf2444c1757abe0564ff4c.tar.gz",
+    )
+
+    http_archive(
+        name = "mongocxx",
+        build_file_content = _ALL_CONTENT,
+        sha256 = "60c7a53a0f6b984aab0b231dc0b31c85c8950059f42a354fb522672b059d5089",
+        strip_prefix = "mongo-cxx-driver-r3.8.0",
+        url = "https://github.com/mongodb/mongo-cxx-driver/releases/download/r3.8.0/mongo-cxx-driver-r3.8.0.tar.gz",
     )

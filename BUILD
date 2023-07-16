@@ -1,5 +1,6 @@
 load("@com_github_bazelbuild_buildtools//buildifier:def.bzl", "buildifier")
 load("@io_bazel_rules_scala//scala:scala_toolchain.bzl", "scala_toolchain")
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
 
 scala_toolchain(
     name = "diagnostics_reporter_toolchain_impl",
@@ -16,6 +17,15 @@ toolchain(
 
 buildifier(
     name = "buildifier",
+)
+
+cmake(
+    name = "mongocxx",
+    cache_entries = {
+        "CMAKE_C_FLAGS": "-fPIC",
+    },
+    lib_source = "@mongocxx//:all_srcs",
+    out_static_libs = ["libpcre.a"],
 )
 
 alias(
