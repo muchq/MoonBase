@@ -3,8 +3,8 @@ cc_library(
     srcs = ["game_state_mapper.cc"],
     hdrs = ["game_state_mapper.h"],
     deps = [
-        "//cpp/cards:card_mapper",
         "//cpp/cards",
+        "//cpp/cards:card_mapper",
         "//cpp/cards/golf",
     ],
 )
@@ -15,7 +15,7 @@ cc_test(
     deps = [
         ":game_state_mapper",
         "@com_google_googletest//:gtest_main",
-    ]
+    ],
 )
 
 cc_binary(
