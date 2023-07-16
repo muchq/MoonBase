@@ -15,3 +15,5 @@ additional_languages:
   # Uncomment any additional languages you want supported
   scala
   go
+
+java_language_level: 17
