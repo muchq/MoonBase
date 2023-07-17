@@ -212,37 +212,6 @@ const std::unordered_map<string, std::pair<handler, argReader>> handlers{
     {"knock", {knock, readKnockRequest}},
 };
 
-//static absl::StatusOr<GolfServiceRequest> parseArgs(std::vector<string> &parts,
-//                                                    struct mg_connection *c) {
-//  if (parts.size() != 5) {
-//    return absl::InvalidArgumentError("args -> <user>|<game>|<numPlayers>|<pos>");
-//  }
-//  string username = parts[1];
-//  string gameId = parts[2];
-//  int numberOfPlayers;
-//  try {
-//    numberOfPlayers = std::stoi(parts[3]);
-//  } catch (std::invalid_argument const &ex) {
-//    return absl::InvalidArgumentError(ex.what());
-//  } catch (std::out_of_range const &ex) {
-//    return absl::InvalidArgumentError(ex.what());
-//  }
-//  golf::Position position;
-//  if (parts[4] == "tl") {
-//    position = golf::Position::TopLeft;
-//  } else if (parts[4] == "tr") {
-//    position = golf::Position::TopRight;
-//  } else if (parts[4] == "bl") {
-//    position = golf::Position::BottomLeft;
-//  } else if (parts[4] == "br") {
-//    position = golf::Position::BottomRight;
-//  } else {
-//    return absl::InvalidArgumentError("invalid position. must be in (tl, tr, bl, br)");
-//  }
-//
-//  return Args{username, gameId, numberOfPlayers, position, c};
-//}
-
 static void handleMessage(struct mg_ws_message *wm, struct mg_connection *c) {
   std::scoped_lock lock(m);
 

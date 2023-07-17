@@ -198,18 +198,18 @@ div#actions button {
     send.onclick = function() {
       if (!ws) return;
       var name = message.value;
-      var computedMessage = "register|" + name + "|foo|0|tl|";
+      var computedMessage = "register|" + name + "|";
       log.innerHTML = 'REGISTERED: ' + message.value + '<br/>';
       ws.send(computedMessage);
     }
     start_game.onclick = function() {
       if (!ws) return;
-      var computedMessage = "new|" + username + "|_|" + num_players.value + "|tl|";
+      var computedMessage = "new|" + username + "|" + num_players.value + "|";
       ws.send(computedMessage);
     }
     join_game.onclick = function() {
       if (!ws) return;
-      var computedMessage = "join|" + username + "|" + game_id.value + "|0|tl|";
+      var computedMessage = "join|" + username + "|" + game_id.value + "|";
       ws.send(computedMessage);
     }
 

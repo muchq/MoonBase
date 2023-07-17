@@ -53,18 +53,16 @@ typedef std::variant<RegisterUserRequest, NewGameRequest, JoinGameRequest, PeekR
 typedef std::function<void(const GolfServiceRequest&, struct mg_connection*)> handler;
 typedef std::function<absl::StatusOr<GolfServiceRequest>(std::vector<std::string>)> argReader;
 
-static absl::StatusOr<GolfServiceRequest> readRegisterUserRequest(
-    const std::vector<std::string>& args);
-static absl::StatusOr<GolfServiceRequest> readNewGameRequest(const std::vector<std::string>& args);
-static absl::StatusOr<GolfServiceRequest> readJoinGameRequest(const std::vector<std::string>& args);
-static absl::StatusOr<GolfServiceRequest> readPeekRequest(const std::vector<std::string>& args);
-static absl::StatusOr<GolfServiceRequest> readDiscardDrawRequest(
-    const std::vector<std::string>& args);
-static absl::StatusOr<GolfServiceRequest> readSwapForDrawRequest(
-    const std::vector<std::string>& args);
-static absl::StatusOr<GolfServiceRequest> readSwapForDiscardRequest(
-    const std::vector<std::string>& args);
-static absl::StatusOr<GolfServiceRequest> readKnockRequest(const std::vector<std::string>& args);
+typedef absl::StatusOr<GolfServiceRequest> StatusOrRequest;
+
+StatusOrRequest readRegisterUserRequest(const std::vector<std::string>& args);
+StatusOrRequest readNewGameRequest(const std::vector<std::string>& args);
+StatusOrRequest readJoinGameRequest(const std::vector<std::string>& args);
+StatusOrRequest readPeekRequest(const std::vector<std::string>& args);
+StatusOrRequest readDiscardDrawRequest(const std::vector<std::string>& args);
+StatusOrRequest readSwapForDrawRequest(const std::vector<std::string>& args);
+StatusOrRequest readSwapForDiscardRequest(const std::vector<std::string>& args);
+StatusOrRequest readKnockRequest(const std::vector<std::string>& args);
 
 }  // namespace golf_service
 
