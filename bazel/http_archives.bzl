@@ -2,13 +2,31 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 def register_http_archive_dependencies():
     http_archive(
+        name = "com_github_bazelbuild_buildtools",
+        sha256 = "977a0bd4593c8d4c8f45e056d181c35e48aa01ad4f8090bdb84f78dca42f47dc",
+        strip_prefix = "buildtools-6.1.2",
+        urls = [
+            "https://github.com/bazelbuild/buildtools/archive/refs/tags/v6.1.2.tar.gz",
+        ],
+    )
+
+    http_archive(
+        name = "rules_proto",
+        sha256 = "bc12122a5ae4b517fa423ea03a8d82ea6352d5127ea48cb54bc324e8ab78493c",
+        strip_prefix = "rules_proto-af6481970a34554c6942d993e194a9aed7987780",
+        urls = [
+            "https://github.com/bazelbuild/rules_proto/archive/af6481970a34554c6942d993e194a9aed7987780.tar.gz",
+        ],
+    )
+
+    http_archive(
         name = "com_github_grpc_grpc",
         patch_args = ["-p1"],
         patches = ["//bazel/patches:grpc_extra_deps.patch"],
-        sha256 = "d8c3180df613759e705aabde77798a463b8d2dad08f182cf4cbdc6d8c9d0ebdd",
-        strip_prefix = "grpc-fd843629c89a22fc920fbbda8bcd79aa3b86add4",
+        sha256 = "64c3756f8f4ac3a876655f6a04f4d9f6858c77612d79200d0528ad923d5550c7",
+        strip_prefix = "grpc-8871dab19b4ab5389e28474d25cfeea61283265c",
         urls = [
-            "https://github.com/grpc/grpc/archive/fd843629c89a22fc920fbbda8bcd79aa3b86add4.tar.gz",
+            "https://github.com/grpc/grpc/archive/8871dab19b4ab5389e28474d25cfeea61283265c.tar.gz",
         ],
     )
 
@@ -84,21 +102,6 @@ def register_http_archive_dependencies():
         strip_prefix = "rules_scala-%s" % RULES_SCALA_VERSION,
         type = "zip",
         url = "https://github.com/bazelbuild/rules_scala/archive/%s.zip" % RULES_SCALA_VERSION,
-    )
-
-    http_archive(
-        name = "rules_rust",
-        sha256 = "50ec4b84a7ec5370f5882d52f4a1e6b8a75de2f8dcc0a4403747b69b2c4ef5b1",
-        urls = ["https://github.com/bazelbuild/rules_rust/releases/download/0.23.0/rules_rust-v0.23.0.tar.gz"],
-    )
-
-    http_archive(
-        name = "com_github_bazelbuild_buildtools",
-        sha256 = "977a0bd4593c8d4c8f45e056d181c35e48aa01ad4f8090bdb84f78dca42f47dc",
-        strip_prefix = "buildtools-6.1.2",
-        urls = [
-            "https://github.com/bazelbuild/buildtools/archive/refs/tags/v6.1.2.tar.gz",
-        ],
     )
 
     http_archive(

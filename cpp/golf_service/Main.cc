@@ -8,9 +8,11 @@
 
 #include "absl/status/statusor.h"
 #include "absl/strings/str_split.h"
+#include <google/protobuf/util/json_util.h>
 #include "cpp/cards/golf/golf.h"
 #include "cpp/golf_service/api.h"
 #include "cpp/golf_service/game_state_mapper.h"
+#include "protos/golf_ws/game_state_response.pb.h"
 #include "mongoose.h"
 
 using golf::GameStateMapper;
@@ -215,31 +217,35 @@ const std::unordered_map<string, std::pair<handler, argReader>> handlers{
 static void handleMessage(struct mg_ws_message *wm, struct mg_connection *c) {
   std::scoped_lock lock(m);
 
-  std::vector<string> commandParts =
-      absl::StrSplit(string(wm->data.ptr), '|', absl::SkipWhitespace());
-  if (commandParts.empty()) {
-    string response = "error|arg count";
-    mg_ws_send(c, response.c_str(), response.size(), WEBSOCKET_OP_TEXT);
+  const string requestText(wm->data.ptr);
+  golf_ws::RequestWrapper requestWrapper;
+  auto status = google::protobuf::util::JsonStringToMessage(requestText, &requestWrapper);
+  if (!status.ok()) {
+    auto messageString = status.message().as_string();
+    mg_ws_send(c, messageString.c_str(), messageString.size(), WEBSOCKET_OP_TEXT);
+    return;
   }
 
-  auto command = handlers.find(commandParts[0]);
+  auto command = handlers.find(requestWrapper.command());
   if (command == handlers.end()) {
     std::string response = "error|bad_command";
     mg_ws_send(c, response.c_str(), response.size(), WEBSOCKET_OP_TEXT);
     return;
   }
 
-  auto res = command->second.second(commandParts);
-  if (!res.ok()) {
-    std::string response = "error|";
-    response.append(res.status().message());
-    mg_ws_send(c, response.c_str(), response.size(), WEBSOCKET_OP_TEXT);
-    return;
-  }
+  auto [apiMethod, parse] = command->second;
+
+//  auto res = parse({});
+//  if (!res.ok()) {
+//    std::string response = "error|";
+//    response.append(res.status().message());
+//    mg_ws_send(c, response.c_str(), response.size(), WEBSOCKET_OP_TEXT);
+//    return;
+//  }
 
   GolfServiceRequest req = *res;
 
-  command->second.first(req, c);
+  apiMethod(req, c);
 }
 
 static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {

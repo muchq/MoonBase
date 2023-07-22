@@ -2,6 +2,7 @@ startup --output_base=~/.bazelout
 
 build --cxxopt='-std=c++17'
 build --host_cxxopt='-std=c++17'
+build --disk_cache=~/bzlcache
 
 test --cxxopt='-std=c++17'
 test --host_cxxopt='-std=c++17'

@@ -1,8 +1,24 @@
 workspace(name = "moon_base")
 
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("//bazel:http_archives.bzl", "register_http_archive_dependencies")
 
 register_http_archive_dependencies()
+
+#######################################################################################
+##################################################
+##################
+#
+#                             load protos first to get pre-compiled version
+#
+#############################################################
+#######################################################################################
+
+load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
+
+rules_proto_dependencies()
+
+rules_proto_toolchains()
 
 ########################################################################################
 ##################################################
@@ -18,6 +34,25 @@ load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_depe
 go_rules_dependencies()
 
 go_register_toolchains(version = "1.20.4")
+
+########################################################################################
+##################################################
+###################
+#
+#                             grpc proto stuff
+#
+##############################################################
+########################################################################################
+
+load("@rules_proto_grpc//:repositories.bzl", "rules_proto_grpc_repos", "rules_proto_grpc_toolchains")
+
+rules_proto_grpc_toolchains()
+
+rules_proto_grpc_repos()
+
+#load("@rules_proto_grpc//cpp:repositories.bzl", "cpp_repos")
+#
+#cpp_repos()
 
 ########################################################################################
 ##################################################
@@ -39,31 +74,6 @@ grpc_extra_deps()
 load("@hedron_compile_commands//:workspace_setup.bzl", "hedron_compile_commands_setup")
 
 hedron_compile_commands_setup()
-
-########################################################################################
-##################################################
-###################
-#
-#                             proto stuff
-#
-##############################################################
-########################################################################################
-
-load("@rules_proto_grpc//:repositories.bzl", "rules_proto_grpc_repos", "rules_proto_grpc_toolchains")
-
-rules_proto_grpc_toolchains()
-
-rules_proto_grpc_repos()
-
-load("@rules_proto_grpc//cpp:repositories.bzl", "cpp_repos")
-
-cpp_repos()
-
-load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
-
-rules_proto_dependencies()
-
-rules_proto_toolchains()
 
 ########################################################################################
 ##################################################
@@ -173,21 +183,3 @@ load("@io_bazel_rules_scala//scala/scalafmt:scalafmt_repositories.bzl", "scalafm
 scalafmt_default_config()
 
 scalafmt_repositories()
-
-#############################################################
-#############
-##               Rust Stuff
-###
-##############
-#############################################################
-
-load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_register_toolchains")
-
-rules_rust_dependencies()
-
-rust_register_toolchains(
-    edition = "2021",
-    versions = [
-        "1.71.0",
-    ],
-)
