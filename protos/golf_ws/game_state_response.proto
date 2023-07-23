@@ -57,6 +57,7 @@ message RequestWrapper {
     SwapForDiscardRequest swap_for_discard_request = 8;
     KnockRequest knock_request = 9;
   }
+  int32 id = 10;
 }
 
 message GameStateResponse {
