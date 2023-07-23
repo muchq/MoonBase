@@ -6,6 +6,7 @@ cc_library(
         "//cpp/cards",
         "//cpp/cards:card_mapper",
         "//cpp/cards/golf",
+        "//protos/golf_ws:golf_cc_proto",
     ],
 )
 

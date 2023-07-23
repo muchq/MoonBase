@@ -60,6 +60,24 @@ message RequestWrapper {
   int32 id = 10;
 }
 
+message VisibleHand {
+  string bottom_left = 1;
+  string bottom_right = 2;
+}
+
 message GameStateResponse {
-  string id = 1;
+  bool all_here = 1;
+  int32 discard_size = 2;
+  int32 draw_size = 3;
+  string game_id = 4;
+  bool game_started = 5;
+  bool game_over = 6;
+  string knocker = 7;
+  VisibleHand hand = 8;
+  int32 number_of_players = 9;
+  repeated string players = 10;
+  repeated int32 scores = 11;
+  string top_discard = 12;
+  string top_draw = 13;
+  bool your_turn = 14;
 }

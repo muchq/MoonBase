@@ -1,20 +1,21 @@
+#include <google/protobuf/util/json_util.h>
+
 #include <iostream>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 
 #include "absl/status/statusor.h"
-#include <google/protobuf/util/json_util.h>
 #include "cpp/cards/golf/golf.h"
 #include "cpp/golf_service/api.h"
 #include "cpp/golf_service/game_state_mapper.h"
-#include "protos/golf_ws/golf_ws.pb.h"
 #include "mongoose.h"
+#include "protos/golf_ws/golf_ws.pb.h"
 
 using golf::GameStateMapper;
 using golf_service::GolfServiceRequest;
-using golf_ws::RequestWrapper;
 using golf_ws::RegisterUserRequest;
+using golf_ws::RequestWrapper;
 using std::string;
 
 std::mutex m;
@@ -23,14 +24,15 @@ golf::GameManager gm;
 GameStateMapper gsm;
 
 template <RequestWrapper::KindCase T>
-static auto validRequestType(const GolfServiceRequest &serviceRequest, struct mg_connection *c) -> bool {
-    if (serviceRequest.kind_case() != T) {
-        string output("error|invalid request");
-        mg_ws_send(c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
-        return false;
-    }
-    return true;
+static auto validRequestType(const GolfServiceRequest &serviceRequest, struct mg_connection *c)
+    -> bool {
+  if (serviceRequest.kind_case() != T) {
+    string output("error|invalid request");
+    mg_ws_send(c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
+    return false;
   }
+  return true;
+}
 
 static void registerUser(const GolfServiceRequest &serviceRequest, struct mg_connection *c) {
   if (!validRequestType<RequestWrapper::KindCase::kRegisterUserRequest>(serviceRequest, c)) {
@@ -71,23 +73,23 @@ static bool usernameMismatch(const string &username, struct mg_connection *c) {
   return false;
 }
 
-static auto validatePosition(const golf_ws::Position &position, struct mg_connection *c) -> absl::StatusOr<golf::Position> {
-    switch (position) {
-        case golf_ws::Position::TOP_LEFT:
-            return golf::Position::TopLeft;
-        case golf_ws::Position::TOP_RIGHT:
-            return golf::Position::TopRight;
-        case golf_ws::Position::BOTTOM_LEFT:
-            return golf::Position::BottomLeft;
-        case golf_ws::Position::BOTTOM_RIGHT:
-            return golf::Position::BottomRight;
-        default:
-            string output("error|invalid position");
-            mg_ws_send(c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
-            return absl::InvalidArgumentError("invalid position");
-    }
+static auto validatePosition(const golf_ws::Position &position, struct mg_connection *c)
+    -> absl::StatusOr<golf::Position> {
+  switch (position) {
+    case golf_ws::Position::TOP_LEFT:
+      return golf::Position::TopLeft;
+    case golf_ws::Position::TOP_RIGHT:
+      return golf::Position::TopRight;
+    case golf_ws::Position::BOTTOM_LEFT:
+      return golf::Position::BottomLeft;
+    case golf_ws::Position::BOTTOM_RIGHT:
+      return golf::Position::BottomRight;
+    default:
+      string output("error|invalid position");
+      mg_ws_send(c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
+      return absl::InvalidArgumentError("invalid position");
+  }
 }
-
 
 static void handleGameManagerResult(const absl::StatusOr<golf::GameStatePtr> &res,
                                     struct mg_connection *c) {
@@ -100,9 +102,11 @@ static void handleGameManagerResult(const absl::StatusOr<golf::GameStatePtr> &re
 
   const auto &gameStatePtr = *res;
   for (auto &user : gm.getUsersByGameId(gameStatePtr->getGameId())) {
-    auto stateForUser = GameStateMapper::gameStateJson(gameStatePtr, user);
+    const auto stateForUser = GameStateMapper::gameStateToProto(gameStatePtr, user);
+    std::string userJson;
+    google::protobuf::util::MessageToJsonString(stateForUser, &userJson);
     auto userConnection = connectionsByUser.at(user);
-    mg_ws_send(userConnection, stateForUser.c_str(), stateForUser.size(), WEBSOCKET_OP_TEXT);
+    mg_ws_send(userConnection, userJson.c_str(), userJson.size(), WEBSOCKET_OP_TEXT);
   }
 }
 
@@ -171,7 +175,7 @@ static void swapForDrawPile(const GolfServiceRequest &serviceRequest, struct mg_
 
   auto positionRes = validatePosition(swapForDrawRequest.position(), c);
   if (!positionRes.ok()) {
-      return;
+    return;
   }
 
   auto res = gm.swapForDrawPile(swapForDrawRequest.username(), *positionRes);
@@ -187,10 +191,10 @@ static void swapForDiscardPile(const GolfServiceRequest &serviceRequest, struct 
   if (usernameMismatch(swapForDiscardRequest.username(), c)) {
     return;
   }
-    auto positionRes = validatePosition(swapForDiscardRequest.position(), c);
-    if (!positionRes.ok()) {
-        return;
-    }
+  auto positionRes = validatePosition(swapForDiscardRequest.position(), c);
+  if (!positionRes.ok()) {
+    return;
+  }
   auto res = gm.swapForDiscardPile(swapForDiscardRequest.username(), *positionRes);
   handleGameManagerResult(res, c);
 }

@@ -1,5 +1,6 @@
 #include "cpp/golf_service/game_state_mapper.h"
 
+#include <memory>
 #include <string>
 #include <unordered_map>
 
@@ -22,6 +23,47 @@ static const unordered_map<Suit, string> SUIT_TO_STRING{
     {Suit::Hearts, "H"},
     {Suit::Spades, "S"},
 };
+
+golf_ws::GameStateResponse GameStateMapper::gameStateToProto(const GameStatePtr& state,
+                                                             const string& username) {
+  golf_ws::GameStateResponse proto;
+  proto.set_all_here(state->allPlayersPresent());
+  proto.set_discard_size(state->getDiscardPile().size());
+  proto.set_draw_size(state->getDrawPile().size());
+  proto.set_game_id(state->getGameId());
+  proto.set_game_over(state->isOver());
+  const Player& knocker = state->getPlayer(state->getWhoKnocked());
+  if (knocker.getName().has_value()) {
+    proto.set_knocker(knocker.getName().value());
+  }
+
+  const int index = state->playerIndex(username);
+  const Player& player = state->getPlayer(index);
+  const auto& cards = player.allCards();
+
+  // parent proto will take ownership and free this appropriately
+  golf_ws::VisibleHand* hand = new golf_ws::VisibleHand;
+  hand->set_bottom_left(CardMapper::cardToString(cards.at(3)));
+  hand->set_bottom_right(CardMapper::cardToString(cards.at(4)));
+  proto.set_allocated_hand(hand);
+  proto.set_number_of_players(state->getPlayers().size());
+
+  if (state->isOver()) {
+    for (auto& p : state->getPlayers()) {
+      proto.add_scores(p.score());
+    }
+  }
+
+  proto.set_top_discard(CardMapper::cardToString(state->getDiscardPile().back()));
+
+  if (state->getPeekedAtDrawPile() && state->getWhoseTurn() == index) {
+    proto.set_top_draw(CardMapper::cardToString(state->getDrawPile().back()));
+  }
+
+  proto.set_your_turn(state->getWhoseTurn() == index);
+
+  return proto;
+}
 
 string GameStateMapper::gameStateJson(const GameStatePtr& state, const string& username) {
   string output("{");
