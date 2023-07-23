@@ -1,36 +1,20 @@
 #include <iostream>
 #include <mutex>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
-#include <utility>
-#include <variant>
 
 #include "absl/status/statusor.h"
-#include "absl/strings/str_split.h"
+#include <google/protobuf/util/json_util.h>
 #include "cpp/cards/golf/golf.h"
 #include "cpp/golf_service/api.h"
 #include "cpp/golf_service/game_state_mapper.h"
+#include "protos/golf_ws/golf_ws.pb.h"
 #include "mongoose.h"
 
 using golf::GameStateMapper;
-using golf_service::DiscardDrawRequest;
 using golf_service::GolfServiceRequest;
-using golf_service::JoinGameRequest;
-using golf_service::KnockRequest;
-using golf_service::NewGameRequest;
-using golf_service::PeekRequest;
-using golf_service::readDiscardDrawRequest;
-using golf_service::readJoinGameRequest;
-using golf_service::readKnockRequest;
-using golf_service::readNewGameRequest;
-using golf_service::readPeekRequest;
-using golf_service::readRegisterUserRequest;
-using golf_service::readSwapForDiscardRequest;
-using golf_service::readSwapForDrawRequest;
-using golf_service::RegisterUserRequest;
-using golf_service::SwapForDiscardRequest;
-using golf_service::SwapForDrawRequest;
+using golf_ws::RequestWrapper;
+using golf_ws::RegisterUserRequest;
 using std::string;
 
 std::mutex m;
@@ -38,23 +22,22 @@ std::unordered_map<std::string, mg_connection *> connectionsByUser;
 golf::GameManager gm;
 GameStateMapper gsm;
 
-template <typename T>
-static bool validRequestType(const GolfServiceRequest &serviceRequest, struct mg_connection *c) {
-  if (std::holds_alternative<T>(serviceRequest)) {
+template <RequestWrapper::KindCase T>
+static auto validRequestType(const GolfServiceRequest &serviceRequest, struct mg_connection *c) -> bool {
+    if (serviceRequest.kind_case() != T) {
+        string output("error|invalid request");
+        mg_ws_send(c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
+        return false;
+    }
     return true;
   }
 
-  string output("error|invalid request");
-  mg_ws_send(c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
-  return false;
-}
-
 static void registerUser(const GolfServiceRequest &serviceRequest, struct mg_connection *c) {
-  if (!validRequestType<RegisterUserRequest>(serviceRequest, c)) {
+  if (!validRequestType<RequestWrapper::KindCase::kRegisterUserRequest>(serviceRequest, c)) {
     return;
   }
 
-  const RegisterUserRequest registerUserRequest = std::get<RegisterUserRequest>(serviceRequest);
+  const RegisterUserRequest &registerUserRequest = serviceRequest.register_user_request();
   // don't allow re-registration yet
   for (auto i = connectionsByUser.begin(); i != connectionsByUser.end(); i++) {
     if (connectionsByUser.at(i->first) == c) {
@@ -64,7 +47,7 @@ static void registerUser(const GolfServiceRequest &serviceRequest, struct mg_con
     }
   }
 
-  auto res = gm.registerUser(registerUserRequest.username);
+  auto res = gm.registerUser(registerUserRequest.username());
   if (!res.ok()) {
     string output("error|");
     output.append(res.status().message());
@@ -88,6 +71,24 @@ static bool usernameMismatch(const string &username, struct mg_connection *c) {
   return false;
 }
 
+static auto validatePosition(const golf_ws::Position &position, struct mg_connection *c) -> absl::StatusOr<golf::Position> {
+    switch (position) {
+        case golf_ws::Position::TOP_LEFT:
+            return golf::Position::TopLeft;
+        case golf_ws::Position::TOP_RIGHT:
+            return golf::Position::TopRight;
+        case golf_ws::Position::BOTTOM_LEFT:
+            return golf::Position::BottomLeft;
+        case golf_ws::Position::BOTTOM_RIGHT:
+            return golf::Position::BottomRight;
+        default:
+            string output("error|invalid position");
+            mg_ws_send(c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
+            return absl::InvalidArgumentError("invalid position");
+    }
+}
+
+
 static void handleGameManagerResult(const absl::StatusOr<golf::GameStatePtr> &res,
                                     struct mg_connection *c) {
   if (!res.ok()) {
@@ -106,94 +107,104 @@ static void handleGameManagerResult(const absl::StatusOr<golf::GameStatePtr> &re
 }
 
 static void newGame(const GolfServiceRequest &serviceRequest, struct mg_connection *c) {
-  if (!validRequestType<NewGameRequest>(serviceRequest, c)) {
+  if (!validRequestType<RequestWrapper::KindCase::kNewGameRequest>(serviceRequest, c)) {
     return;
   }
 
-  auto newGameRequest = std::get<NewGameRequest>(serviceRequest);
-  if (usernameMismatch(newGameRequest.username, c)) {
+  auto &newGameRequest = serviceRequest.new_game_request();
+  if (usernameMismatch(newGameRequest.username(), c)) {
     return;
   }
 
-  auto res = gm.newGame(newGameRequest.username, newGameRequest.players);
+  auto res = gm.newGame(newGameRequest.username(), newGameRequest.number_of_players());
   handleGameManagerResult(res, c);
 }
 
 static void joinGame(const GolfServiceRequest &serviceRequest, struct mg_connection *c) {
-  if (!validRequestType<JoinGameRequest>(serviceRequest, c)) {
+  if (!validRequestType<RequestWrapper::KindCase::kJoinGameRequest>(serviceRequest, c)) {
     return;
   }
 
-  auto joinGameRequest = std::get<JoinGameRequest>(serviceRequest);
-  if (usernameMismatch(joinGameRequest.username, c)) {
+  auto &joinGameRequest = serviceRequest.join_game_request();
+  if (usernameMismatch(joinGameRequest.username(), c)) {
     return;
   }
-  auto res = gm.joinGame(joinGameRequest.gameId, joinGameRequest.username);
+  auto res = gm.joinGame(joinGameRequest.game_id(), joinGameRequest.username());
   handleGameManagerResult(res, c);
 }
 
 static void peekAtDrawPile(const GolfServiceRequest &serviceRequest, struct mg_connection *c) {
-  if (!validRequestType<PeekRequest>(serviceRequest, c)) {
+  if (!validRequestType<RequestWrapper::KindCase::kPeekRequest>(serviceRequest, c)) {
     return;
   }
 
-  auto peekRequest = std::get<PeekRequest>(serviceRequest);
-  if (usernameMismatch(peekRequest.username, c)) {
+  auto &peekRequest = serviceRequest.peek_request();
+  if (usernameMismatch(peekRequest.username(), c)) {
     return;
   }
-  auto res = gm.peekAtDrawPile(peekRequest.username);
+  auto res = gm.peekAtDrawPile(peekRequest.username());
   handleGameManagerResult(res, c);
 }
 
 static void discardFromDrawPile(const GolfServiceRequest &serviceRequest, struct mg_connection *c) {
-  if (!validRequestType<DiscardDrawRequest>(serviceRequest, c)) {
+  if (!validRequestType<RequestWrapper::KindCase::kDiscardDrawRequest>(serviceRequest, c)) {
     return;
   }
 
-  auto discardDrawRequest = std::get<DiscardDrawRequest>(serviceRequest);
-  if (usernameMismatch(discardDrawRequest.username, c)) {
+  auto &discardDrawRequest = serviceRequest.discard_draw_request();
+  if (usernameMismatch(discardDrawRequest.username(), c)) {
     return;
   }
-  auto res = gm.swapDrawForDiscardPile(discardDrawRequest.username);
+  auto res = gm.swapDrawForDiscardPile(discardDrawRequest.username());
   handleGameManagerResult(res, c);
 }
 
 static void swapForDrawPile(const GolfServiceRequest &serviceRequest, struct mg_connection *c) {
-  if (!validRequestType<SwapForDrawRequest>(serviceRequest, c)) {
+  if (!validRequestType<RequestWrapper::KindCase::kSwapForDrawRequest>(serviceRequest, c)) {
     return;
   }
 
-  auto swapForDrawRequest = std::get<SwapForDrawRequest>(serviceRequest);
-  if (usernameMismatch(swapForDrawRequest.username, c)) {
+  auto &swapForDrawRequest = serviceRequest.swap_for_draw_request();
+  if (usernameMismatch(swapForDrawRequest.username(), c)) {
     return;
   }
-  auto res = gm.swapForDrawPile(swapForDrawRequest.username, swapForDrawRequest.position);
+
+  auto positionRes = validatePosition(swapForDrawRequest.position(), c);
+  if (!positionRes.ok()) {
+      return;
+  }
+
+  auto res = gm.swapForDrawPile(swapForDrawRequest.username(), *positionRes);
   handleGameManagerResult(res, c);
 }
 
 static void swapForDiscardPile(const GolfServiceRequest &serviceRequest, struct mg_connection *c) {
-  if (!validRequestType<SwapForDiscardRequest>(serviceRequest, c)) {
+  if (!validRequestType<RequestWrapper::KindCase::kSwapForDiscardRequest>(serviceRequest, c)) {
     return;
   }
 
-  auto swapForDiscardRequest = std::get<SwapForDiscardRequest>(serviceRequest);
-  if (usernameMismatch(swapForDiscardRequest.username, c)) {
+  auto &swapForDiscardRequest = serviceRequest.swap_for_discard_request();
+  if (usernameMismatch(swapForDiscardRequest.username(), c)) {
     return;
   }
-  auto res = gm.swapForDiscardPile(swapForDiscardRequest.username, swapForDiscardRequest.position);
+    auto positionRes = validatePosition(swapForDiscardRequest.position(), c);
+    if (!positionRes.ok()) {
+        return;
+    }
+  auto res = gm.swapForDiscardPile(swapForDiscardRequest.username(), *positionRes);
   handleGameManagerResult(res, c);
 }
 
 static void knock(const GolfServiceRequest &serviceRequest, struct mg_connection *c) {
-  if (!validRequestType<KnockRequest>(serviceRequest, c)) {
+  if (!validRequestType<RequestWrapper::KindCase::kKnockRequest>(serviceRequest, c)) {
     return;
   }
 
-  auto knockRequest = std::get<KnockRequest>(serviceRequest);
-  if (usernameMismatch(knockRequest.username, c)) {
+  auto &knockRequest = serviceRequest.knock_request();
+  if (usernameMismatch(knockRequest.username(), c)) {
     return;
   }
-  auto res = gm.knock(knockRequest.username);
+  auto res = gm.knock(knockRequest.username());
   handleGameManagerResult(res, c);
 }
 
@@ -201,45 +212,38 @@ typedef std::function<void(const GolfServiceRequest &, struct mg_connection *)> 
 typedef std::function<absl::StatusOr<GolfServiceRequest>(std::vector<string>)> argReader;
 
 // make this map<string, pair<handler, parser>>
-const std::unordered_map<string, std::pair<handler, argReader>> handlers{
-    {"register", {registerUser, readRegisterUserRequest}},
-    {"new", {newGame, readNewGameRequest}},
-    {"join", {joinGame, readJoinGameRequest}},
-    {"peek", {peekAtDrawPile, readPeekRequest}},
-    {"discardDraw", {discardFromDrawPile, readDiscardDrawRequest}},
-    {"swapDraw", {swapForDrawPile, readSwapForDrawRequest}},
-    {"swapDiscard", {swapForDiscardPile, readSwapForDiscardRequest}},
-    {"knock", {knock, readKnockRequest}},
+const std::unordered_map<string, handler> handlers{
+    {"register", registerUser},
+    {"new", newGame},
+    {"join", joinGame},
+    {"peek", peekAtDrawPile},
+    {"discardDraw", discardFromDrawPile},
+    {"swapDraw", swapForDrawPile},
+    {"swapDiscard", swapForDiscardPile},
+    {"knock", knock},
 };
 
 static void handleMessage(struct mg_ws_message *wm, struct mg_connection *c) {
   std::scoped_lock lock(m);
 
-  std::vector<string> commandParts =
-      absl::StrSplit(string(wm->data.ptr), '|', absl::SkipWhitespace());
-  if (commandParts.empty()) {
-    string response = "error|arg count";
-    mg_ws_send(c, response.c_str(), response.size(), WEBSOCKET_OP_TEXT);
+  const string requestText(wm->data.ptr);
+  golf_ws::RequestWrapper requestWrapper;
+  auto status = google::protobuf::util::JsonStringToMessage(requestText, &requestWrapper);
+  if (!status.ok()) {
+    auto messageString = status.message().as_string();
+    mg_ws_send(c, messageString.c_str(), messageString.size(), WEBSOCKET_OP_TEXT);
+    return;
   }
 
-  auto command = handlers.find(commandParts[0]);
+  auto command = handlers.find(requestWrapper.command());
   if (command == handlers.end()) {
     std::string response = "error|bad_command";
     mg_ws_send(c, response.c_str(), response.size(), WEBSOCKET_OP_TEXT);
     return;
   }
 
-  auto res = command->second.second(commandParts);
-  if (!res.ok()) {
-    std::string response = "error|";
-    response.append(res.status().message());
-    mg_ws_send(c, response.c_str(), response.size(), WEBSOCKET_OP_TEXT);
-    return;
-  }
-
-  GolfServiceRequest req = *res;
-
-  command->second.first(req, c);
+  auto handler = command->second;
+  handler(requestWrapper, c);
 }
 
 static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {

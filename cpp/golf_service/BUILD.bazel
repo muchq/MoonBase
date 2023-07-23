@@ -20,7 +20,6 @@ cc_test(
 
 cc_library(
     name = "api",
-    srcs = ["api.cc"],
     hdrs = ["api.h"],
     deps = [
         "//cpp/cards/golf",
@@ -38,8 +37,10 @@ cc_binary(
         ":api",
         ":game_state_mapper",
         "//cpp/cards/golf",
+        "//protos/golf_ws:golf_cc_proto",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_protobuf//:protobuf",
         "@mongoose_cc//:mongoose",
     ],
 )

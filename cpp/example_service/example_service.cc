@@ -7,7 +7,7 @@
 #include <string>
 
 #include "absl/strings/str_format.h"
-#include "protos/example_service.grpc.pb.h"
+#include "protos/example_cc_grpc/example_service.grpc.pb.h"
 
 using example_service::Greeter;
 using example_service::HelloReply;

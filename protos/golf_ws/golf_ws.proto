@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package golf_ws;
+
+message RegisterUserRequest {
+  string username = 1;
+}
+
+message NewGameRequest {
+  string username = 1;
+  int32 number_of_players = 2;
+}
+
+message JoinGameRequest {
+  string username = 1;
+  string game_id = 2;
+}
+
+message PeekRequest {
+  string username = 1;
+}
+
+message DiscardDrawRequest {
+  string username = 1;
+}
+
+enum Position {
+  TOP_LEFT = 0;
+  TOP_RIGHT = 1;
+  BOTTOM_LEFT = 2;
+  BOTTOM_RIGHT = 3;
+}
+
+message SwapForDrawRequest {
+  string username = 1;
+  Position position = 2;
+}
+
+message SwapForDiscardRequest {
+  string username = 1;
+  Position position = 2;
+}
+
+message KnockRequest {
+  string username = 1;
+}
+
+message RequestWrapper {
+  string command = 1;
+  oneof kind {
+    RegisterUserRequest register_user_request = 2;
+    NewGameRequest new_game_request = 3;
+    JoinGameRequest join_game_request = 4;
+    PeekRequest peek_request = 5;
+    DiscardDrawRequest discard_draw_request = 6;
+    SwapForDrawRequest swap_for_draw_request = 7;
+    SwapForDiscardRequest swap_for_discard_request = 8;
+    KnockRequest knock_request = 9;
+  }
+  int32 id = 10;
+}
+
+message GameStateResponse {
+  string id = 1;
+}

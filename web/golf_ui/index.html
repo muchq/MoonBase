@@ -132,6 +132,8 @@ div#actions button {
     var enable = function(en) { message.disabled = send.disabled = !en; url.disabled = en; connect.innerHTML = en ? 'disconnect' : 'connect'; };
     enable(false)
 
+    var reqId=1;
+
     var connected = false;
     var registered = false;
     var inGame = false;
@@ -197,20 +199,40 @@ div#actions button {
     };
     send.onclick = function() {
       if (!ws) return;
-      var name = message.value;
-      var computedMessage = "register|" + name + "|";
+      var request = {
+        command: "register",
+        registerUserRequest:  {
+          username: message.value,
+        },
+        id: reqId++
+      };
       log.innerHTML = 'REGISTERED: ' + message.value + '<br/>';
-      ws.send(computedMessage);
+      ws.send(JSON.stringify(request));
     }
     start_game.onclick = function() {
       if (!ws) return;
       var computedMessage = "new|" + username + "|" + num_players.value + "|";
-      ws.send(computedMessage);
+      var request = {
+        command: "new",
+        newGameRequest:  {
+          username: message.value,
+          numberOfPlayers: +num_players.value,
+        },
+        id: reqId++
+      }
+      ws.send(JSON.stringify(request));
     }
     join_game.onclick = function() {
       if (!ws) return;
-      var computedMessage = "join|" + username + "|" + game_id.value + "|";
-      ws.send(computedMessage);
+      var request = {
+        command: "join",
+        joinGameRequest:  {
+          username: message.value,
+          gameId: game_id.value,
+        },
+        id: reqId++
+      }
+      ws.send(JSON.stringify(request));
     }
 
     function toggleSelected(hand, e) {
