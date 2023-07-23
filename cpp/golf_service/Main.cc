@@ -1,18 +1,14 @@
 #include <iostream>
 #include <mutex>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
-#include <utility>
-#include <variant>
 
 #include "absl/status/statusor.h"
-#include "absl/strings/str_split.h"
 #include <google/protobuf/util/json_util.h>
 #include "cpp/cards/golf/golf.h"
 #include "cpp/golf_service/api.h"
 #include "cpp/golf_service/game_state_mapper.h"
-#include "protos/golf_ws/game_state_response.pb.h"
+#include "protos/golf_ws/golf_ws.pb.h"
 #include "mongoose.h"
 
 using golf::GameStateMapper;

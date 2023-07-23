@@ -2,12 +2,12 @@ load("@rules_proto//proto:defs.bzl", "proto_library")
 
 cc_proto_library(
     name = "golf_cc_proto",
-    deps = [":golf_ws_proto"],
     visibility = ["//visibility:public"],
+    deps = [":golf_ws_proto"],
 )
 
 proto_library(
     name = "golf_ws_proto",
-    srcs = ["game_state_response.proto"],
+    srcs = ["golf_ws.proto"],
     visibility = ["//visibility:public"],
 )

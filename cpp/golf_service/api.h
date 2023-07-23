@@ -7,7 +7,7 @@
 
 #include "absl/status/statusor.h"
 #include "cpp/cards/golf/golf.h"
-#include "protos/golf_ws/game_state_response.pb.h"
+#include "protos/golf_ws/golf_ws.pb.h"
 
 namespace golf_service {
 typedef golf_ws::RequestWrapper GolfServiceRequest;
