@@ -12,7 +12,6 @@
 #include "mongoose.h"
 #include "protos/golf_ws/golf_ws.pb.h"
 
-using golf::GameStateMapper;
 using golf_service::GolfServiceRequest;
 using golf_ws::RegisterUserRequest;
 using golf_ws::RequestWrapper;
@@ -21,7 +20,7 @@ using std::string;
 std::mutex m;
 std::unordered_map<std::string, mg_connection *> connectionsByUser;
 golf::GameManager gm;
-GameStateMapper gsm{{}};
+golf::GameStateMapper gameStateMapper{{}};
 
 template <RequestWrapper::KindCase T>
 static auto validRequestType(const GolfServiceRequest &serviceRequest, struct mg_connection *c)
@@ -91,8 +90,8 @@ static auto validatePosition(const golf_ws::Position &position, struct mg_connec
   }
 }
 
-static auto userStateToJson(const golf::GameStatePtr gameStatePtr, const string &user) -> string {
-  const auto stateForUser = gsm.gameStateToProto(gameStatePtr, user);
+static auto userStateToJson(const golf::GameStatePtr &gameStatePtr, const string &user) -> string {
+  const auto stateForUser = gameStateMapper.gameStateToProto(gameStatePtr, user);
   std::string userJson;
   google::protobuf::util::MessageToJsonString(stateForUser, &userJson);
   return userJson;

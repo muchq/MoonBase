@@ -17,7 +17,7 @@ TEST(GameStateMapper, GameStateToProto) {
 
   GameStatePtr state =
       std::make_shared<GameState>(GameState{drawPile, discardPile, players, false, 0, -1, "foo"});
-      
+
   auto proto = gsm.gameStateToProto(state, "andy");
 
   EXPECT_TRUE(proto.all_here());
