@@ -21,7 +21,7 @@ using std::string;
 std::mutex m;
 std::unordered_map<std::string, mg_connection *> connectionsByUser;
 golf::GameManager gm;
-GameStateMapper gsm;
+GameStateMapper gsm{{}};
 
 template <RequestWrapper::KindCase T>
 static auto validRequestType(const GolfServiceRequest &serviceRequest, struct mg_connection *c)
@@ -91,6 +91,13 @@ static auto validatePosition(const golf_ws::Position &position, struct mg_connec
   }
 }
 
+static auto userStateToJson(const golf::GameStatePtr gameStatePtr, const string &user) -> string {
+  const auto stateForUser = gsm.gameStateToProto(gameStatePtr, user);
+  std::string userJson;
+  google::protobuf::util::MessageToJsonString(stateForUser, &userJson);
+  return userJson;
+}
+
 static void handleGameManagerResult(const absl::StatusOr<golf::GameStatePtr> &res,
                                     struct mg_connection *c) {
   if (!res.ok()) {
@@ -102,9 +109,7 @@ static void handleGameManagerResult(const absl::StatusOr<golf::GameStatePtr> &re
 
   const auto &gameStatePtr = *res;
   for (auto &user : gm.getUsersByGameId(gameStatePtr->getGameId())) {
-    const auto stateForUser = GameStateMapper::gameStateToProto(gameStatePtr, user);
-    std::string userJson;
-    google::protobuf::util::MessageToJsonString(stateForUser, &userJson);
+    const auto userJson = userStateToJson(gameStatePtr, user);
     auto userConnection = connectionsByUser.at(user);
     mg_ws_send(userConnection, userJson.c_str(), userJson.size(), WEBSOCKET_OP_TEXT);
   }
