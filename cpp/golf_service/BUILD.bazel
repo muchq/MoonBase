@@ -12,6 +12,7 @@ cc_library(
 
 cc_test(
     name = "game_state_mapper_test",
+    size = "small",
     srcs = ["game_state_mapper_test.cc"],
     deps = [
         ":game_state_mapper",
