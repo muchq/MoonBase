@@ -1,0 +1,11 @@
+#!/bin/bash
+
+echo $GC_CONF | base64 --decode > /home/circleci/gc_conf.json
+
+cat > /home/circleci/.bazelrc << EOF
+build --disk_cache=
+build --google_credentials=/home/circleci/gc_conf.json
+build --remote_cache=https://storage.googleapis.com/moon_base_build_cache
+build --remote_upload_local_results=true
+
+EOF

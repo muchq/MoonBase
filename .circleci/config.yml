@@ -18,6 +18,9 @@ jobs:
       - checkout # check out the code in the project directory
       - setup-build-env
       - run:
+          name: Set Up GC Conf
+          command: scripts/setup/setup-ci
+      - run:
           name: CC Lint
           command: scripts/format-cc-check
       - run:
