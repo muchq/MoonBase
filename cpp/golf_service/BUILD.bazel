@@ -20,11 +20,25 @@ cc_test(
 )
 
 cc_library(
-    name = "api",
-    hdrs = ["api.h"],
+    name = "handlers",
+    srcs = ["handlers.cc"],
+    hdrs = ["handlers.h"],
     deps = [
+        ":game_state_mapper",
         "//cpp/cards/golf",
+        "//protos/golf_ws:golf_cc_proto",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_protobuf//:protobuf",
+        "@mongoose_cc//:mongoose",
+    ],
+)
+
+cc_library(
+    name = "router",
+    srcs = ["router.cc"],
+    hdrs = ["router.h"],
+    deps = [
+        ":handlers",
         "@mongoose_cc//:mongoose",
     ],
 )
@@ -35,13 +49,7 @@ cc_binary(
         "Main.cc",
     ],
     deps = [
-        ":api",
-        ":game_state_mapper",
-        "//cpp/cards/golf",
-        "//protos/golf_ws:golf_cc_proto",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
-        "@com_google_protobuf//:protobuf",
+        ":router",
         "@mongoose_cc//:mongoose",
     ],
 )
