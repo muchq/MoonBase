@@ -57,7 +57,7 @@ message RequestWrapper {
     SwapForDiscardRequest swap_for_discard_request = 8;
     KnockRequest knock_request = 9;
   }
-  int32 id = 10;
+  optional int32 id = 10;
 }
 
 message VisibleHand {
@@ -80,4 +80,16 @@ message GameStateResponse {
   optional string top_discard = 12;
   optional string top_draw = 13;
   bool your_turn = 14;
+}
+
+message ErrorResponse {
+  string message = 1;
+}
+
+message ResponseWrapper {
+  optional int32 id = 1;
+  oneof kind {
+    GameStateResponse response = 2;
+    ErrorResponse error = 3;
+  }
 }
