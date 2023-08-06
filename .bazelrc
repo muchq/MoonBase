@@ -1,7 +1,7 @@
 startup --output_base=~/.bazelout
 common --color=yes
 
-build --crosstool_top=//bazel:g++13-suite
+build --crosstool_top=//bazel:gcc13-suite
 build --host_crosstool_top=@bazel_tools//tools/cpp:toolchain
 
 build --cxxopt='-std=c++17'
