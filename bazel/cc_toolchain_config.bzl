@@ -3,7 +3,7 @@
 load("@bazel_tools//tools/cpp:cc_toolchain_config_lib.bzl", "tool_path")
 
 
-def _darwin_impl(ctx):
+def _impl(ctx):
     tool_paths = [
         tool_path(
             name = "gcc",
@@ -54,14 +54,14 @@ def _darwin_impl(ctx):
         target_system_name = "local",
         target_cpu = "darwin",
         target_libc = "unknown",
-        compiler = "g++13",
+        compiler = "g++-13",
         abi_version = "unknown",
         abi_libc_version = "unknown",
         tool_paths = tool_paths, # NEW
     )
 
 cc_toolchain_config_darwin = rule(
-    implementation = _darwin_impl,
+    implementation = _impl,
     attrs = {},
     provides = [CcToolchainConfigInfo],
 )
