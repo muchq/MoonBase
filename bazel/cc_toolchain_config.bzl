@@ -1,6 +1,20 @@
 "cc build helpers"
 
-load("@bazel_tools//tools/cpp:cc_toolchain_config_lib.bzl", "tool_path")
+load("@bazel_tools//tools/build_defs/cc:action_names.bzl", "ACTION_NAMES")
+load(
+    "@bazel_tools//tools/cpp:cc_toolchain_config_lib.bzl",
+    "feature",
+    "flag_group",
+    "flag_set",
+    "tool_path",
+)
+
+all_link_actions = [
+    ACTION_NAMES.cpp_link_executable,
+    ACTION_NAMES.cpp_link_dynamic_library,
+    ACTION_NAMES.cpp_link_nodeps_dynamic_library,
+]
+
 
 def _darwin_impl(ctx):
     tool_paths = [
@@ -38,8 +52,28 @@ def _darwin_impl(ctx):
         ),
     ]
 
+    features = [
+        feature(
+            name = "default_linker_flags",
+            enabled = True,
+            flag_sets = [
+                flag_set(
+                    actions = all_link_actions,
+                    flag_groups = ([
+                        flag_group(
+                            flags = [
+                                "-lstdc++",
+                            ],
+                        ),
+                  ]),
+                ),
+            ],
+        ),
+    ]
+
     return cc_common.create_cc_toolchain_config_info(
         ctx = ctx,
+        features = features,
         cxx_builtin_include_directories = [
             "/usr/local/Cellar/gcc/13.1.0/include/",
             "/usr/local/Cellar/gcc/13.1.0/lib/gcc/current/gcc/x86_64-apple-darwin22/13/include/",
@@ -94,8 +128,28 @@ def _k8_impl(ctx):
         ),
     ]
 
+    features = [
+        feature(
+            name = "default_linker_flags",
+            enabled = True,
+            flag_sets = [
+                flag_set(
+                    actions = all_link_actions,
+                    flag_groups = ([
+                        flag_group(
+                            flags = [
+                                "-lstdc++",
+                            ],
+                        ),
+                  ]),
+                ),
+            ],
+        ),
+    ]
+
     return cc_common.create_cc_toolchain_config_info(
         ctx = ctx,
+        features = features,
         cxx_builtin_include_directories = [
             "/usr/lib/gcc/x86_64-linux-gnu/13/include/",
             "/usr/include",
