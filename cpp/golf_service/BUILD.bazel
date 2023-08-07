@@ -49,6 +49,7 @@ cc_binary(
     srcs = [
         "Main.cc",
     ],
+    copts = ["-std=c++23"],
     deps = [
         ":router",
         "@mongoose_cc//:mongoose",
