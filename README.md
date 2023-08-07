@@ -2,6 +2,8 @@
 
 [![CircleCI](https://dl.circleci.com/status-badge/img/gh/muchq/MoonBase/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/muchq/MoonBase/tree/main)
 
+[![CircleCI](https://dl.circleci.com/insights-snapshot/gh/muchq/MoonBase/main/moon-base/badge.svg?window=30d)](https://app.circleci.com/insights/github/muchq/MoonBase/workflows/moon-base/overview?branch=main&reporting-window=last-30-days&insights-snapshot=true)
+
 ![MoonBase](static_content/moon.gif)
 
 ### IntelliJ
