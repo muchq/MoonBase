@@ -2,6 +2,7 @@
 
 #include <google/protobuf/util/json_util.h>
 
+#include <mutex>
 #include <string>
 #include <unordered_map>
 
@@ -235,7 +236,7 @@ void golf_service::handleMessage(struct mg_ws_message *wm, struct mg_connection 
   golf_ws::RequestWrapper requestWrapper;
   auto status = google::protobuf::util::JsonStringToMessage(requestText, &requestWrapper);
   if (!status.ok()) {
-    auto messageString = status.message().as_string();
+    auto messageString = std::string{status.message()};
     mg_ws_send(c, messageString.c_str(), messageString.size(), WEBSOCKET_OP_TEXT);
     return;
   }

@@ -5,6 +5,10 @@ load("//bazel:http_archives.bzl", "register_http_archive_dependencies")
 
 register_http_archive_dependencies()
 
+load("@bazel_features//:deps.bzl", "bazel_features_deps")
+
+bazel_features_deps()
+
 #######################################################################################
 ##################################################
 ##################
@@ -14,9 +18,11 @@ register_http_archive_dependencies()
 #############################################################
 #######################################################################################
 
-load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
+load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies")
 
 rules_proto_dependencies()
+
+load("@rules_proto//proto:toolchains.bzl", "rules_proto_toolchains")
 
 rules_proto_toolchains()
 
@@ -50,9 +56,9 @@ rules_proto_grpc_toolchains()
 
 rules_proto_grpc_repos()
 
-#load("@rules_proto_grpc//cpp:repositories.bzl", "cpp_repos")
-#
-#cpp_repos()
+load("@rules_proto_grpc//cpp:repositories.bzl", "cpp_repos")
+
+cpp_repos()
 
 ########################################################################################
 ##################################################

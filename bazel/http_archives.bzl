@@ -2,31 +2,43 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 def register_http_archive_dependencies():
     http_archive(
+        name = "bazel_features",
+        sha256 = "0f23d75c7623d6dba1fd30513a94860447de87c8824570521fcc966eda3151c2",
+        strip_prefix = "bazel_features-1.4.1",
+        url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.4.1/bazel_features-v1.4.1.tar.gz",
+    )
+
+    http_archive(
         name = "com_github_bazelbuild_buildtools",
-        sha256 = "977a0bd4593c8d4c8f45e056d181c35e48aa01ad4f8090bdb84f78dca42f47dc",
-        strip_prefix = "buildtools-6.1.2",
+        sha256 = "05c3c3602d25aeda1e9dbc91d3b66e624c1f9fdadf273e5480b489e744ca7269",
+        strip_prefix = "buildtools-6.4.0",
         urls = [
-            "https://github.com/bazelbuild/buildtools/archive/refs/tags/v6.1.2.tar.gz",
+            "https://github.com/bazelbuild/buildtools/archive/refs/tags/v6.4.0.tar.gz",
         ],
     )
 
     http_archive(
         name = "rules_proto",
-        sha256 = "bc12122a5ae4b517fa423ea03a8d82ea6352d5127ea48cb54bc324e8ab78493c",
-        strip_prefix = "rules_proto-af6481970a34554c6942d993e194a9aed7987780",
-        urls = [
-            "https://github.com/bazelbuild/rules_proto/archive/af6481970a34554c6942d993e194a9aed7987780.tar.gz",
-        ],
+        sha256 = "71fdbed00a0709521ad212058c60d13997b922a5d01dbfd997f0d57d689e7b67",
+        strip_prefix = "rules_proto-6.0.0-rc2",
+        url = "https://github.com/bazelbuild/rules_proto/releases/download/6.0.0-rc2/rules_proto-6.0.0-rc2.tar.gz",
+    )
+
+    http_archive(
+        name = "com_google_protobuf",
+        sha256 = "dc167b7d23ec0d6e4a3d4eae1798de6c8d162e69fa136d39753aaeb7a6e1289d",
+        strip_prefix = "protobuf-23.1",
+        url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v23.1.tar.gz",
     )
 
     http_archive(
         name = "com_github_grpc_grpc",
         patch_args = ["-p1"],
         patches = ["//bazel/patches:grpc_extra_deps.patch"],
-        sha256 = "64c3756f8f4ac3a876655f6a04f4d9f6858c77612d79200d0528ad923d5550c7",
-        strip_prefix = "grpc-8871dab19b4ab5389e28474d25cfeea61283265c",
+        sha256 = "9cf1a69a921534ac0b760dcbefb900f3c2f735f56070bf0536506913bb5bfd74",
+        strip_prefix = "grpc-1.55.0",
         urls = [
-            "https://github.com/grpc/grpc/archive/8871dab19b4ab5389e28474d25cfeea61283265c.tar.gz",
+            "https://github.com/grpc/grpc/archive/refs/tags/v1.55.0.tar.gz",
         ],
     )
 
