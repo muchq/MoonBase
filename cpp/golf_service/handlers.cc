@@ -2,6 +2,7 @@
 
 #include <google/protobuf/util/json_util.h>
 
+#include <mutex>
 #include <string>
 #include <unordered_map>
 
