@@ -166,7 +166,7 @@ bind(
 
 load("@io_bazel_rules_scala//:scala_config.bzl", "scala_config")
 
-scala_config(scala_version = "3.3.0")
+scala_config(scala_version = "3.3.1")
 
 load("@io_bazel_rules_scala//scala:scala.bzl", "scala_repositories")
 
