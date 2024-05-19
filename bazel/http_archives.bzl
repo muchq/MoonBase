@@ -19,9 +19,9 @@ def register_http_archive_dependencies():
 
     http_archive(
         name = "rules_proto",
-        sha256 = "71fdbed00a0709521ad212058c60d13997b922a5d01dbfd997f0d57d689e7b67",
-        strip_prefix = "rules_proto-6.0.0-rc2",
-        url = "https://github.com/bazelbuild/rules_proto/releases/download/6.0.0-rc2/rules_proto-6.0.0-rc2.tar.gz",
+        sha256 = "303e86e722a520f6f326a50b41cfc16b98fe6d1955ce46642a5b7a67c11c0f5d",
+        strip_prefix = "rules_proto-6.0.0",
+        url = "https://github.com/bazelbuild/rules_proto/releases/download/6.0.0/rules_proto-6.0.0.tar.gz",
     )
 
     http_archive(
