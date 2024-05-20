@@ -1,11 +1,12 @@
 #!/bin/bash
 
-apt update && apt install curl clang-format
+apt update && apt install curl clang-format wget
 
 VERSION=3.7.4
 INSTALL_LOCATION=/usr/local/bin/scalafmt-native
 curl https://raw.githubusercontent.com/scalameta/scalafmt/master/bin/install-scalafmt-native.sh | \
   bash -s -- $VERSION $INSTALL_LOCATION
 
-curl -o /bin/bazel https://github.com/bazelbuild/bazelisk/releases/download/v1.20.0/bazelisk-linux-amd64
+wget https://github.com/bazelbuild/bazelisk/releases/download/v1.20.0/bazelisk-linux-amd64
+mv bazelisk-linux-amd64 /bin/bazel
 chmod +x /bin/bazel
