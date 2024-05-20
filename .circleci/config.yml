@@ -3,7 +3,7 @@ version: 2.1
 commands:
   setup-build-env:
     description: |
-      Install Required Tools
+      Install Tools
     steps:
       - run:
           name: Install Build and Lint Tools
@@ -28,19 +28,19 @@ jobs:
           command: scripts/format-scala-check
       - run:
           name: Run Build
-          command: bazel-6.4.0 build //...
+          command: bazel build //...
       - run:
           name: Run Java Tests
-          command: bazel-6.4.0 test //jvm/src/test/java/...
+          command: bazel test //jvm/src/test/java/...
       - run:
           name: Run Scala Tests
-          command: bazel-6.4.0 test //jvm/src/test/scala/...
+          command: bazel test //jvm/src/test/scala/...
       - run:
           name: Run Go Tests
-          command: bazel-6.4.0 test //go/...
+          command: bazel test //go/...
       - run:
           name: Run Cpp Tests
-          command: bazel-6.4.0 test //cpp/...
+          command: bazel test //cpp/...
 
 workflows:
   moon-base:

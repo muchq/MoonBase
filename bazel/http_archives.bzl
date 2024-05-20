@@ -3,17 +3,17 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 def register_http_archive_dependencies():
     http_archive(
         name = "bazel_features",
-        sha256 = "0f23d75c7623d6dba1fd30513a94860447de87c8824570521fcc966eda3151c2",
-        strip_prefix = "bazel_features-1.4.1",
-        url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.4.1/bazel_features-v1.4.1.tar.gz",
+        sha256 = "2cd9e57d4c38675d321731d65c15258f3a66438ad531ae09cb8bb14217dc8572",
+        strip_prefix = "bazel_features-1.11.0",
+        url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.11.0/bazel_features-v1.11.0.tar.gz",
     )
 
     http_archive(
         name = "com_github_bazelbuild_buildtools",
-        sha256 = "05c3c3602d25aeda1e9dbc91d3b66e624c1f9fdadf273e5480b489e744ca7269",
-        strip_prefix = "buildtools-6.4.0",
+        sha256 = "60a9025072ae237f325d0e7b661e1685f34922c29883888c2d06f5789462b939",
+        strip_prefix = "buildtools-7.1.1",
         urls = [
-            "https://github.com/bazelbuild/buildtools/archive/refs/tags/v6.4.0.tar.gz",
+            "https://github.com/bazelbuild/buildtools/archive/refs/tags/v7.1.1.tar.gz",
         ],
     )
 
@@ -26,27 +26,34 @@ def register_http_archive_dependencies():
 
     http_archive(
         name = "com_google_protobuf",
-        sha256 = "dc167b7d23ec0d6e4a3d4eae1798de6c8d162e69fa136d39753aaeb7a6e1289d",
-        strip_prefix = "protobuf-23.1",
-        url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v23.1.tar.gz",
+        sha256 = "8ff511a64fc46ee792d3fe49a5a1bcad6f7dc50dfbba5a28b0e5b979c17f9871",
+        strip_prefix = "protobuf-25.2",
+        url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v25.2.tar.gz",
+    )
+
+    http_archive(
+        name = "rules_python",
+        sha256 = "4912ced70dc1a2a8e4b86cec233b192ca053e82bc72d877b98e126156e8f228d",
+        strip_prefix = "rules_python-0.32.2",
+        url = "https://github.com/bazelbuild/rules_python/releases/download/0.32.2/rules_python-0.32.2.tar.gz",
     )
 
     http_archive(
         name = "com_github_grpc_grpc",
         patch_args = ["-p1"],
         patches = ["//bazel/patches:grpc_extra_deps.patch"],
-        sha256 = "9cf1a69a921534ac0b760dcbefb900f3c2f735f56070bf0536506913bb5bfd74",
-        strip_prefix = "grpc-1.55.0",
+        sha256 = "493d9905aa09124c2f44268b66205dd013f3925a7e82995f36745974e97af609",
+        strip_prefix = "grpc-1.63.0",
         urls = [
-            "https://github.com/grpc/grpc/archive/refs/tags/v1.55.0.tar.gz",
+            "https://github.com/grpc/grpc/archive/refs/tags/v1.63.0.tar.gz",
         ],
     )
 
     http_archive(
         name = "com_google_absl",
-        urls = ["https://github.com/abseil/abseil-cpp/archive/b1fb259ef793de57c2acefeeec07a6e3286ab9bc.zip"],
-        sha256 = "6c7b209e73667e351e78f96599ce6c395e427be5589b511a648840b64b9c3467",
-        strip_prefix = "abseil-cpp-b1fb259ef793de57c2acefeeec07a6e3286ab9bc",
+        urls = ["https://github.com/abseil/abseil-cpp/archive/4a2c63365eff8823a5221db86ef490e828306f9d.zip"],
+        sha256 = "f49929d22751bf70dd61922fb1fd05eb7aec5e7a7f870beece79a6e28f0a06c1",
+        strip_prefix = "abseil-cpp-4a2c63365eff8823a5221db86ef490e828306f9d",
     )
 
     http_archive(
@@ -58,9 +65,9 @@ def register_http_archive_dependencies():
 
     http_archive(
         name = "rules_proto_grpc",
-        sha256 = "928e4205f701b7798ce32f3d2171c1918b363e9a600390a25c876f075f1efc0a",
-        strip_prefix = "rules_proto_grpc-4.4.0",
-        urls = ["https://github.com/rules-proto-grpc/rules_proto_grpc/releases/download/4.4.0/rules_proto_grpc-4.4.0.tar.gz"],
+        sha256 = "2a0860a336ae836b54671cbbe0710eec17c64ef70c4c5a88ccfd47ea6e3739bd",
+        strip_prefix = "rules_proto_grpc-4.6.0",
+        urls = ["https://github.com/rules-proto-grpc/rules_proto_grpc/releases/download/4.6.0/rules_proto_grpc-4.6.0.tar.gz"],
     )
 
     http_archive(
