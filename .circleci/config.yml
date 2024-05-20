@@ -3,7 +3,7 @@ version: 2.1
 commands:
   setup-build-env:
     description: |
-      Install Required Tools
+      Install Tools
     steps:
       - run:
           name: Install Build and Lint Tools
