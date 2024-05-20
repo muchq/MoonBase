@@ -7,7 +7,4 @@ INSTALL_LOCATION=/usr/local/bin/scalafmt-native
 curl https://raw.githubusercontent.com/scalameta/scalafmt/master/bin/install-scalafmt-native.sh | \
   bash -s -- $VERSION $INSTALL_LOCATION
 
-mkdir -p /home/linuxbrew/.linuxbrew
-CI=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
-
-brew install bazelisk
+curl -o /bin/bazel https://github.com/bazelbuild/bazelisk/releases/download/v1.20.0/bazelisk-linux-amd64
