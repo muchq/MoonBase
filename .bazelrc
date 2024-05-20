@@ -1,5 +1,6 @@
 startup --output_base=~/.bazelout
 common --color=yes
+common --enable_bzlmod=false
 
 build --cxxopt='-std=c++17'
 build --host_cxxopt='-std=c++17'
