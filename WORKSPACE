@@ -100,17 +100,21 @@ rules_jvm_external_setup()
 
 load("@rules_jvm_external//:defs.bzl", "maven_install")
 
+JACKSON_VERSION = "2.17.1"
+
+LOGBACK_VERSION = "1.5.6"
+
 maven_install(
     artifacts = [
-        "ch.qos.logback:logback-classic:1.4.5",
-        "ch.qos.logback:logback-core:1.4.5",
-        "com.fasterxml.jackson.core:jackson-annotations:2.13.4",
-        "com.fasterxml.jackson.core:jackson-core:2.13.4",
-        "com.fasterxml.jackson.core:jackson-databind:2.13.4",
-        "com.fasterxml.jackson.datatype:jackson-datatype-guava:2.13.4",
-        "com.fasterxml.jackson.datatype:jackson-datatype-jdk8:2.13.4",
-        "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.13.4",
-        "com.fasterxml.jackson.module:jackson-module-scala_2.13:2.13.4",
+        "ch.qos.logback:logback-classic:%s" % LOGBACK_VERSION,
+        "ch.qos.logback:logback-core:%s" % LOGBACK_VERSION,
+        "com.fasterxml.jackson.core:jackson-annotations:%s" % JACKSON_VERSION,
+        "com.fasterxml.jackson.core:jackson-core:%s" % JACKSON_VERSION,
+        "com.fasterxml.jackson.core:jackson-databind:%s" % JACKSON_VERSION,
+        "com.fasterxml.jackson.datatype:jackson-datatype-guava:%s" % JACKSON_VERSION,
+        "com.fasterxml.jackson.datatype:jackson-datatype-jdk8:%s" % JACKSON_VERSION,
+        "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:%s" % JACKSON_VERSION,
+        "com.fasterxml.jackson.module:jackson-module-scala_2.13:%s" % JACKSON_VERSION,
         "com.google.guava:guava:31.1-jre",
         "io.netty:netty-common:4.1.110.Final",
         "io.netty:netty-codec:4.1.110.Final",
