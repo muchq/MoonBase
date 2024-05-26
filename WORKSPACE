@@ -104,7 +104,7 @@ maven_install(
     artifacts = [
         "ch.qos.logback:logback-classic:1.4.5",
         "ch.qos.logback:logback-core:1.4.5",
-        "com.fasterxml.jackson.core:jackson-annotations:2.13.4",
+        "com.fasterxml.jackson.core:jackson-annotations:2.17.1",
         "com.fasterxml.jackson.core:jackson-core:2.13.4",
         "com.fasterxml.jackson.core:jackson-databind:2.13.4",
         "com.fasterxml.jackson.datatype:jackson-datatype-guava:2.13.4",
