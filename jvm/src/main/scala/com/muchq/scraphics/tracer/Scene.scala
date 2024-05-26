@@ -1,4 +1,5 @@
-package com.muchq.scraphics.tracer
+package com.muchq.scraphics
+package tracer
 
 case class Scene(
     viewportSize: Double,

@@ -1,4 +1,5 @@
-package com.muchq.scraphics.tracer
+package com.muchq.scraphics
+package tracer
 
 case class Vec3(x: Double, y: Double, z: Double):
   def +(o: Vec3): Vec3 =
