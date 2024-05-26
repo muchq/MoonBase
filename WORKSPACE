@@ -120,7 +120,7 @@ maven_install(
         "io.netty:netty-codec:4.1.110.Final",
         "io.netty:netty-handler:4.1.110.Final",
         "io.netty:netty-transport:4.1.110.Final",
-        "io.sentry:sentry-logback:6.4.2",
+        "io.sentry:sentry-logback:6.34.0",
         "junit:junit:4.13.2",
         "org.assertj:assertj-core:3.26.0",
         "org.scala-lang:scala3-library_3:jar:3.3.1",
