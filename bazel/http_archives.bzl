@@ -32,6 +32,14 @@ def register_http_archive_dependencies():
     )
 
     http_archive(
+        name = "rules_java",
+        urls = [
+            "https://github.com/bazelbuild/rules_java/releases/download/7.6.1/rules_java-7.6.1.tar.gz",
+        ],
+        sha256 = "f8ae9ed3887df02f40de9f4f7ac3873e6dd7a471f9cddf63952538b94b59aeb3",
+    )
+
+    http_archive(
         name = "rules_python",
         sha256 = "4912ced70dc1a2a8e4b86cec233b192ca053e82bc72d877b98e126156e8f228d",
         strip_prefix = "rules_python-0.32.2",
