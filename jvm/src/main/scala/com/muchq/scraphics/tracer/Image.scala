@@ -1,4 +1,5 @@
-package com.muchq.scraphics.tracer
+package com.muchq.scraphics
+package tracer
 
 case class Image(width: Int, height: Int):
   val data: Array[Array[Color]] = Array.ofDim[Color](width, height)

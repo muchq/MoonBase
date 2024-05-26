@@ -1,4 +1,5 @@
-package com.muchq.scraphics.tracer
+package com.muchq.scraphics
+package tracer
 
 object Constants {
   val BLACK: Color  = Color(0, 0, 0)

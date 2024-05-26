@@ -1,6 +1,7 @@
-package com.muchq.scraphics.tracer
+package com.muchq.scraphics
+package tracer
 
-import com.muchq.scraphics.tracer.Constants.{ BACKGROUND, EPSILON, INF }
+import tracer.Constants.{ BACKGROUND, EPSILON, INF }
 
 object Tracer {
   def drawScene(scene: Scene, image: Image, cameraPosition: Vec3): Unit =
@@ -34,7 +35,7 @@ object Tracer {
     val t2: Double        = (-b - sqrtDiscr) / (2 * a)
     (t1, t2)
 
-  private def reflectRay(normal: Vec3, ray: Vec3): Vec3 =
+  def reflectRay(normal: Vec3, ray: Vec3): Vec3 =
     (normal * 2 * (normal dot ray)) - ray
 
   private def closestIntersection(
