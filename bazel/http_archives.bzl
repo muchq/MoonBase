@@ -32,6 +32,14 @@ def register_http_archive_dependencies():
     )
 
     http_archive(
+        name = "rules_java",
+        urls = [
+            "https://github.com/bazelbuild/rules_java/releases/download/7.6.1/rules_java-7.6.1.tar.gz",
+        ],
+        sha256 = "f8ae9ed3887df02f40de9f4f7ac3873e6dd7a471f9cddf63952538b94b59aeb3",
+    )
+
+    http_archive(
         name = "rules_python",
         sha256 = "4912ced70dc1a2a8e4b86cec233b192ca053e82bc72d877b98e126156e8f228d",
         strip_prefix = "rules_python-0.32.2",
@@ -82,25 +90,25 @@ def register_http_archive_dependencies():
 
     http_archive(
         name = "io_bazel_rules_go",
-        sha256 = "f74c98d6df55217a36859c74b460e774abc0410a47cc100d822be34d5f990f16",
+        sha256 = "33acc4ae0f70502db4b893c9fc1dd7a9bf998c23e7ff2c4517741d4049a976f8",
         urls = [
-            "https://mirror.bazel.build/github.com/bazelbuild/rules_go/releases/download/v0.47.1/rules_go-v0.47.1.zip",
-            "https://github.com/bazelbuild/rules_go/releases/download/v0.47.1/rules_go-v0.47.1.zip",
+            "https://mirror.bazel.build/github.com/bazelbuild/rules_go/releases/download/v0.48.0/rules_go-v0.48.0.zip",
+            "https://github.com/bazelbuild/rules_go/releases/download/v0.48.0/rules_go-v0.48.0.zip",
         ],
     )
 
     http_archive(
         name = "rules_jvm_external",
-        strip_prefix = "rules_jvm_external-5.3",
-        sha256 = "d31e369b854322ca5098ea12c69d7175ded971435e55c18dd9dd5f29cc5249ac",
-        url = "https://github.com/bazelbuild/rules_jvm_external/releases/download/5.3/rules_jvm_external-5.3.tar.gz",
+        strip_prefix = "rules_jvm_external-6.1",
+        sha256 = "08ea921df02ffe9924123b0686dc04fd0ff875710bfadb7ad42badb931b0fd50",
+        url = "https://github.com/bazelbuild/rules_jvm_external/releases/download/6.1/rules_jvm_external-6.1.tar.gz",
     )
 
     http_archive(
         name = "contrib_rules_jvm",
-        sha256 = "2b710518847279f655a18a51a1629b033e4406f29609e73eb07ecfb6f0138d25",
-        strip_prefix = "rules_jvm-0.13.0",
-        url = "https://github.com/bazel-contrib/rules_jvm/releases/download/v0.13.0/rules_jvm-v0.13.0.tar.gz",
+        sha256 = "a06555618ed249fdfd8b138505de9f012a98eae4672ef00aa3cfc5f154ade6c7",
+        strip_prefix = "rules_jvm-0.26.0",
+        url = "https://github.com/bazel-contrib/rules_jvm/releases/download/v0.26.0/rules_jvm-v0.26.0.tar.gz",
     )
 
     http_archive(
