@@ -7,7 +7,7 @@ class TracerTest extends AnyFunSuite {
 
   test("it reflects rays") {
     val normal = Vec3(1.0, 0.0, 1.0)
-    val ray = Vec3(2.5, 1.5, 3.5)
+    val ray    = Vec3(2.5, 1.5, 3.5)
 
     val reflection = Tracer.reflectRay(normal, ray)
 
