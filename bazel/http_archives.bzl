@@ -81,11 +81,11 @@ def register_http_archive_dependencies():
 
     http_archive(
         name = "mongoose_cc",
-        strip_prefix = "mongoose-b379816178abdcd59135aa32f990a4b3bbbfb54b",
+        strip_prefix = "mongoose-7.14",
         patch_args = ["-p1"],
         patches = ["//bazel/patches:mongoose.patch"],
-        sha256 = "a3ae70035a010b29cdd13c9bcae655d2b56bfdb724f43132cdbc99d7457f0b1b",
-        urls = ["https://github.com/cesanta/mongoose/archive/b379816178abdcd59135aa32f990a4b3bbbfb54b.tar.gz"],
+        sha256 = "7c4aecf92f7f27f1cbb2cbda3c185c385f2b7af84f6bd7c0ce31b84742b15691",
+        urls = ["https://github.com/cesanta/mongoose/archive/refs/tags/7.14.tar.gz"],
     )
 
     http_archive(

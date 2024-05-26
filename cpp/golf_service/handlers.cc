@@ -232,7 +232,7 @@ static const std::unordered_map<string, handler> handlers{
 void golf_service::handleMessage(struct mg_ws_message *wm, struct mg_connection *c) {
   std::scoped_lock lock(m);
 
-  const string requestText(wm->data.ptr);
+  const string requestText(wm->data.buf);
   golf_ws::RequestWrapper requestWrapper;
   auto status = google::protobuf::util::JsonStringToMessage(requestText, &requestWrapper);
   if (!status.ok()) {
