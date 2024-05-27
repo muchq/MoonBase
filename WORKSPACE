@@ -124,7 +124,7 @@ maven_install(
         "junit:junit:4.13.2",
         "org.assertj:assertj-core:3.26.0",
         "org.scala-lang:scala3-library_3:jar:3.3.1",
-        "org.scala-lang:scala3-compiler_3:3.3.1",
+        "org.scala-lang:scala3-compiler_3:3.4.2",
         "org.slf4j:slf4j-api:2.0.13",
     ],
     repositories = [
