@@ -123,8 +123,8 @@ maven_install(
         "io.sentry:sentry-logback:6.34.0",
         "junit:junit:4.13.2",
         "org.assertj:assertj-core:3.26.0",
-        "org.scala-lang:scala3-library_3:jar:3.3.1",
-        "org.scala-lang:scala3-compiler_3:3.3.1",
+        #        "org.scala-lang:scala3-library_3:jar:3.3.1",
+        #        "org.scala-lang:scala3-compiler_3:3.3.1",
         "org.slf4j:slf4j-api:2.0.13",
     ],
     repositories = [
@@ -160,33 +160,33 @@ contrib_rules_jvm_setup()
 ##############################################################
 ########################################################################################
 
-bind(
-    name = "io_bazel_rules_scala/dependency/scalatest/scalatest",
-    actual = "//3rdparty/jvm/org/scalatest",
-)
-
-load("@io_bazel_rules_scala//:scala_config.bzl", "scala_config")
-
-scala_config(scala_version = "3.3.1")
-
-load("@io_bazel_rules_scala//scala:scala.bzl", "scala_repositories")
-
-scala_repositories()
-
-load("@io_bazel_rules_scala//scala:toolchains.bzl", "scala_register_toolchains")
-
-scala_register_toolchains()
-
-load("@io_bazel_rules_scala//testing:scalatest.bzl", "scalatest_repositories", "scalatest_toolchain")
-
-scalatest_repositories()
-
-scalatest_toolchain()
-
-register_toolchains("//:diagnostics_reporter_toolchain")
-
-load("@io_bazel_rules_scala//scala/scalafmt:scalafmt_repositories.bzl", "scalafmt_default_config", "scalafmt_repositories")
-
-scalafmt_default_config()
-
-scalafmt_repositories()
+#bind(
+#    name = "io_bazel_rules_scala/dependency/scalatest/scalatest",
+#    actual = "//3rdparty/jvm/org/scalatest",
+#)
+#
+#load("@io_bazel_rules_scala//:scala_config.bzl", "scala_config")
+#
+#scala_config(scala_version = "3.3.1")
+#
+#load("@io_bazel_rules_scala//scala:scala.bzl", "scala_repositories")
+#
+#scala_repositories()
+#
+#load("@io_bazel_rules_scala//scala:toolchains.bzl", "scala_register_toolchains")
+#
+#scala_register_toolchains()
+#
+#load("@io_bazel_rules_scala//testing:scalatest.bzl", "scalatest_repositories", "scalatest_toolchain")
+#
+#scalatest_repositories()
+#
+#scalatest_toolchain()
+#
+#register_toolchains("//:diagnostics_reporter_toolchain")
+#
+#load("@io_bazel_rules_scala//scala/scalafmt:scalafmt_repositories.bzl", "scalafmt_default_config", "scalafmt_repositories")
+#
+#scalafmt_default_config()
+#
+#scalafmt_repositories()
