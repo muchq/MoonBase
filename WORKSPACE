@@ -115,7 +115,7 @@ maven_install(
         "com.fasterxml.jackson.datatype:jackson-datatype-jdk8:%s" % JACKSON_VERSION,
         "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:%s" % JACKSON_VERSION,
         "com.fasterxml.jackson.module:jackson-module-scala_2.13:%s" % JACKSON_VERSION,
-        "com.google.guava:guava:33.2.0-jre",
+        "com.google.guava:guava:33.2.1-jre",
         "io.netty:netty-common:4.1.110.Final",
         "io.netty:netty-codec:4.1.110.Final",
         "io.netty:netty-handler:4.1.110.Final",
