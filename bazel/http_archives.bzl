@@ -50,10 +50,10 @@ def register_http_archive_dependencies():
         name = "com_github_grpc_grpc",
         patch_args = ["-p1"],
         patches = ["//bazel/patches:grpc_extra_deps.patch"],
-        sha256 = "d5509e40fb24f6390deeef8a88668124f4ec77d2ebb3b1a957b235a2f08b70c0",
-        strip_prefix = "grpc-1.64.0",
+        sha256 = "c5ad277fc21d4899f0e23f6f0337d8a2190d3c66c57ca868378be7c7bfa59fec",
+        strip_prefix = "grpc-1.64.1",
         urls = [
-            "https://github.com/grpc/grpc/archive/refs/tags/v1.64.0.tar.gz",
+            "https://github.com/grpc/grpc/archive/refs/tags/v1.64.1.tar.gz",
         ],
     )
 
