@@ -26,9 +26,9 @@ def register_http_archive_dependencies():
 
     http_archive(
         name = "com_google_protobuf",
-        sha256 = "d19643d265b978383352b3143f04c0641eea75a75235c111cc01a1350173180e",
-        strip_prefix = "protobuf-25.3",
-        url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v25.3.tar.gz",
+        sha256 = "da288bf1daa6c04d03a9051781caa52aceb9163586bff9aa6cfb12f69b9395aa",
+        strip_prefix = "protobuf-27.0",
+        url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v27.0.tar.gz",
     )
 
     http_archive(
