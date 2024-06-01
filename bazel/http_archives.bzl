@@ -60,9 +60,9 @@ def register_http_archive_dependencies():
     # use commit pinned in grpc 1.63.0
     http_archive(
         name = "com_google_absl",
-        urls = ["https://github.com/abseil/abseil-cpp/archive/4a2c63365eff8823a5221db86ef490e828306f9d.zip"],
-        sha256 = "f49929d22751bf70dd61922fb1fd05eb7aec5e7a7f870beece79a6e28f0a06c1",
-        strip_prefix = "abseil-cpp-4a2c63365eff8823a5221db86ef490e828306f9d",
+        urls = ["https://github.com/abseil/abseil-cpp/archive/d06b82773e2306a99a8971934fb5845d5c04a170.zip"],
+        sha256 = "491033c7cfd319b48bfdd12873b0623473279fb2adf961ef0b2f38125c677b52",
+        strip_prefix = "abseil-cpp-d06b82773e2306a99a8971934fb5845d5c04a170",
     )
 
     http_archive(
