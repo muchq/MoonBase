@@ -26,9 +26,9 @@ def register_http_archive_dependencies():
 
     http_archive(
         name = "com_google_protobuf",
-        sha256 = "8ff511a64fc46ee792d3fe49a5a1bcad6f7dc50dfbba5a28b0e5b979c17f9871",
-        strip_prefix = "protobuf-25.2",
-        url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v25.2.tar.gz",
+        sha256 = "d19643d265b978383352b3143f04c0641eea75a75235c111cc01a1350173180e",
+        strip_prefix = "protobuf-25.3",
+        url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v25.3.tar.gz",
     )
 
     http_archive(
@@ -50,10 +50,10 @@ def register_http_archive_dependencies():
         name = "com_github_grpc_grpc",
         patch_args = ["-p1"],
         patches = ["//bazel/patches:grpc_extra_deps.patch"],
-        sha256 = "493d9905aa09124c2f44268b66205dd013f3925a7e82995f36745974e97af609",
-        strip_prefix = "grpc-1.63.0",
+        sha256 = "d5509e40fb24f6390deeef8a88668124f4ec77d2ebb3b1a957b235a2f08b70c0",
+        strip_prefix = "grpc-1.64.0",
         urls = [
-            "https://github.com/grpc/grpc/archive/refs/tags/v1.63.0.tar.gz",
+            "https://github.com/grpc/grpc/archive/refs/tags/v1.64.0.tar.gz",
         ],
     )
 
