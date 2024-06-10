@@ -21,8 +21,8 @@ golf::GameManager gm;
 golf::GameStateMapper gameStateMapper{{}};
 
 template <RequestWrapper::KindCase T>
-static auto validRequestType(const GolfServiceRequest &serviceRequest, struct mg_connection *c)
-    -> bool {
+static auto validRequestType(const GolfServiceRequest &serviceRequest,
+                             struct mg_connection *c) -> bool {
   if (serviceRequest.kind_case() != T) {
     string output("error|invalid request");
     mg_ws_send(c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
@@ -70,8 +70,8 @@ static bool usernameMismatch(const string &username, struct mg_connection *c) {
   return false;
 }
 
-static auto validatePosition(const golf_ws::Position &position, struct mg_connection *c)
-    -> absl::StatusOr<golf::Position> {
+static auto validatePosition(const golf_ws::Position &position,
+                             struct mg_connection *c) -> absl::StatusOr<golf::Position> {
   switch (position) {
     case golf_ws::Position::TOP_LEFT:
       return golf::Position::TopLeft;
