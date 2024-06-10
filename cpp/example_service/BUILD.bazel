@@ -1,13 +1,34 @@
-cc_binary(
-    name = "example_service",
+cc_library(
+    name = "example_service_lib",
     srcs = ["example_service.cc"],
+    hdrs = ["example_service.h"],
     visibility = ["//visibility:public"],
     deps = [
         "//protos/example_cc_grpc:example_service_proto",
         "@com_github_grpc_grpc//:grpc++",
+    ],
+)
+
+cc_binary(
+    name = "example_service",
+    srcs = ["main.cc"],
+    deps = [
+        ":example_service_lib",
         "@com_github_grpc_grpc//:grpc++_reflection",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/flags:parse",
         "@com_google_absl//absl/strings:str_format",
+    ],
+)
+
+
+
+cc_test(
+    name = "example_service_test",
+    size = "small",
+    srcs = ["example_service_test.cc"],
+    deps = [
+        ":example_service_lib",
+        "@com_google_googletest//:gtest_main",
     ],
 )
