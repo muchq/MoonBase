@@ -30,7 +30,7 @@ TEST(SERVICE_TEST, BasicAssertions) {
   builder.RegisterService(&service);
   std::unique_ptr<Server> server(builder.BuildAndStart());
 
-  auto stub = Greeter::NewStub(server.get()->InProcessChannel({}));
+  auto stub = Greeter::NewStub(server->InProcessChannel({}));
 
   ClientContext context;
   HelloRequest req;
