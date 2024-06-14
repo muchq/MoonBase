@@ -1,9 +1,9 @@
 cc_library(
-  name = "so_leet",
-  srcs = [
-    "so_leet.cc",
-  ],
-  hdrs = ["so_leet.h"],
+    name = "so_leet",
+    srcs = [
+        "so_leet.cc",
+    ],
+    hdrs = ["so_leet.h"],
 )
 
 cc_test(
