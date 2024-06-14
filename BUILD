@@ -16,12 +16,14 @@ toolchain(
 
 buildifier(
     name = "buildifier",
+    exclude_patterns = ["./.bazelbsp/*"],
 )
 
 buildifier_test(
     name = "buildifier_test",
     size = "small",
     timeout = "short",
+    exclude_patterns = ["./.bazelbsp/*"],
     lint_mode = "warn",
     mode = "diff",
     no_sandbox = True,
