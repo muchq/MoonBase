@@ -1,4 +1,4 @@
-load("@com_github_bazelbuild_buildtools//buildifier:def.bzl", "buildifier")
+load("@com_github_bazelbuild_buildtools//buildifier:def.bzl", "buildifier", "buildifier_test")
 load("@io_bazel_rules_scala//scala:scala_toolchain.bzl", "scala_toolchain")
 
 scala_toolchain(
@@ -16,6 +16,16 @@ toolchain(
 
 buildifier(
     name = "buildifier",
+)
+
+buildifier_test(
+    name = "buildifier_test",
+    size = "small",
+    timeout = "short",
+    lint_mode = "warn",
+    mode = "diff",
+    no_sandbox = True,
+    workspace = "//:WORKSPACE",
 )
 
 alias(
