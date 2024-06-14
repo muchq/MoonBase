@@ -1,12 +1,17 @@
 #!/bin/bash
 
-apt update && apt install curl clang-format wget
+apt update && apt install curl clang-format wget golang-go
 
-VERSION=3.7.4
-INSTALL_LOCATION=/usr/local/bin/scalafmt-native
-curl https://raw.githubusercontent.com/scalameta/scalafmt/master/bin/install-scalafmt-native.sh | \
-  bash -s -- $VERSION $INSTALL_LOCATION
+# scalafmt
+curl -fL "https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz" | gzip -d > cs
+chmod +x cs
+./cs setup
+./cs install scalafmt
 
+# bazelisk
 wget https://github.com/bazelbuild/bazelisk/releases/download/v1.20.0/bazelisk-linux-amd64
 mv bazelisk-linux-amd64 /bin/bazel
 chmod +x /bin/bazel
+
+# buildifier
+go install github.com/bazelbuild/buildtools/buildifier@latest
