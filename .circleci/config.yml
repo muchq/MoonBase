@@ -6,6 +6,11 @@ commands:
       Install Tools
     steps:
       - run:
+          name: Setup Environment Variables
+          command: |
+            echo 'export PATH="$PATH:/root/.local/share/coursier/bin"' >> "$BASH_ENV"
+
+      - run:
           name: Install Build and Lint Tools
           command: |
             sudo scripts/setup/setup-linux
