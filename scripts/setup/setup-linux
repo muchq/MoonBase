@@ -9,7 +9,7 @@ curl -L -o /bin/coursier "https://github.com/coursier/launchers/raw/master/cs-x8
 chmod +x /bin/coursier
 
 echo "installing scalafmt"
-/coursier install scalafmt
+coursier install scalafmt
 
 # bazelisk
 echo "installing bazelisk"
