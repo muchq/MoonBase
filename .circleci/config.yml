@@ -9,6 +9,7 @@ commands:
           name: Setup Environment Variables
           command: |
             echo 'export PATH="$PATH:/root/.local/share/coursier/bin"' >> "$BASH_ENV"
+            source "$BASH_ENV"
 
       - run:
           name: Install Build and Lint Tools
