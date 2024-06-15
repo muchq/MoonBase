@@ -4,12 +4,11 @@ set -e
 
 apt update && apt install curl clang-format wget
 
-echo "installing coursier"
-curl -fL "https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz" | gzip -d > /bin/coursier
-chmod +x /bin/coursier
-
 echo "installing scalafmt"
-coursier install scalafmt
+VERSION=3.8.2
+INSTALL_LOCATION=/usr/local/bin/scalafmt-native
+curl https://raw.githubusercontent.com/scalameta/scalafmt/master/bin/install-scalafmt-native.sh | \
+  bash -s -- $VERSION $INSTALL_LOCATION
 
 # bazelisk
 echo "installing bazelisk"
