@@ -21,8 +21,6 @@ cc_binary(
     ],
 )
 
-
-
 cc_test(
     name = "example_service_test",
     size = "small",

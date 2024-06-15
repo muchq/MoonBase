@@ -1,4 +1,6 @@
 #!/bin/bash
 
+set -e
+
 find . -name '*.cc' | xargs clang-format -i
 find . -name '*.h' | xargs clang-format -i

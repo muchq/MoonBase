@@ -1,6 +1,5 @@
 workspace(name = "moon_base")
 
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("//bazel:http_archives.bzl", "register_http_archive_dependencies")
 
 register_http_archive_dependencies()

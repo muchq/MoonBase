@@ -30,6 +30,9 @@ jobs:
           name: Run Build
           command: bazel build //...
       - run:
+          name: Bazel Lint
+          command: scripts/format-bazel-check
+      - run:
           name: Run Java Tests
           command: bazel test //jvm/src/test/java/...
       - run:

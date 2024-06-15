@@ -1,6 +1,10 @@
+"loads all external dependencies"
+
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 def register_http_archive_dependencies():
+    "declare http_archive dependencies"
+
     http_archive(
         name = "bazel_features",
         sha256 = "5d7e4eb0bb17aee392143cd667b67d9044c270a9345776a5e5a3cccbc44aa4b3",

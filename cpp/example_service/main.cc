@@ -5,8 +5,8 @@
 #include "cpp/example_service/example_service.h"
 #include "protos/example_cc_grpc/example_service.grpc.pb.h"
 
-using grpc::ServerBuilder;
 using grpc::Server;
+using grpc::ServerBuilder;
 
 void RunServer(uint16_t port) {
   std::string server_address = absl::StrFormat("0.0.0.0:%d", port);
