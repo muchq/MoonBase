@@ -2,21 +2,10 @@
 
 set -e
 
-apt update && apt install curl wget
+deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main
+deb-src http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main
 
-echo "installing llvm"
-bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
-apt update && apt install clang-format-18
-cat > /usr/local/bin/clang-format << EOF
-#!/bin/bash
-
-set -e
-
-clang-format-18
-
-EOF
-
-chmod +x /usr/local/bin/clang-format
+apt update && apt install curl wget clang-format
 
 echo "installing scalafmt"
 VERSION=3.8.2
