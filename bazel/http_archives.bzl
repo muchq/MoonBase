@@ -66,9 +66,9 @@ def register_http_archive_dependencies():
 
     http_archive(
         name = "com_google_googletest",
-        sha256 = "ecb351335da20ab23ea5f14c107a10c475dfdd27d8a50d968757942280dffbe3",
-        strip_prefix = "googletest-a7f443b80b105f940225332ed3c31f2790092f47",
-        urls = ["https://github.com/google/googletest/archive/a7f443b80b105f940225332ed3c31f2790092f47.zip"],
+        sha256 = "e7b11076aae5d96aeaa628cc0767b1a4e665bf673dd7518b54e9c025a5c4094d",
+        strip_prefix = "googletest-1d17ea141d2c11b8917d2c7d029f1c4e2b9769b2",
+        urls = ["https://github.com/google/googletest/archive/1d17ea141d2c11b8917d2c7d029f1c4e2b9769b2.zip"],
     )
 
     http_archive(
