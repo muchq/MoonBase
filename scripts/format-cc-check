@@ -2,5 +2,5 @@
 
 set -e
 
-find . -name '*.cc' | xargs clang-format --dry-run --Werror
-find . -name '*.h' | xargs clang-format --dry-run --Werror
+find . -name '*.cc' | xargs clang-format --dry-run --Werror --verbose
+find . -name '*.h' | xargs clang-format --dry-run --Werror --verbose
