@@ -5,13 +5,11 @@ set -e
 apt update && apt install curl clang-format wget
 
 echo "installing coursier"
-curl -L -o ${HOME}/bin/coursier  "https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz"
-chmod +x ${HOME}/bin/coursier
-curl -fL "https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz" | gzip -d > cs
-chmod +x cs
+curl -L -o /bin/coursier "https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz"
+chmod +x /bin/coursier
 
 echo "installing scalafmt"
-./cs install scalafmt
+/coursier install scalafmt
 
 # bazelisk
 echo "installing bazelisk"
