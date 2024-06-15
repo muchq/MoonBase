@@ -7,9 +7,9 @@ def register_http_archive_dependencies():
 
     http_archive(
         name = "bazel_features",
-        sha256 = "cec7fbc7bce6597cf2e83e01ddd9328a1bb057dc1a3092745238f49d3301ab5a",
-        strip_prefix = "bazel_features-1.12.0",
-        url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.12.0/bazel_features-v1.12.0.tar.gz",
+        sha256 = "5d7e4eb0bb17aee392143cd667b67d9044c270a9345776a5e5a3cccbc44aa4b3",
+        strip_prefix = "bazel_features-1.13.0",
+        url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.13.0/bazel_features-v1.13.0.tar.gz",
     )
 
     http_archive(
@@ -38,16 +38,16 @@ def register_http_archive_dependencies():
     http_archive(
         name = "rules_java",
         urls = [
-            "https://github.com/bazelbuild/rules_java/releases/download/7.6.1/rules_java-7.6.1.tar.gz",
+            "https://github.com/bazelbuild/rules_java/releases/download/7.6.3/rules_java-7.6.3.tar.gz",
         ],
-        sha256 = "f8ae9ed3887df02f40de9f4f7ac3873e6dd7a471f9cddf63952538b94b59aeb3",
+        sha256 = "4fe4b1dc87b5a95cb8bc294e1b13c585d9a8f5a6c84c157d2f1b1291d18ed9f0",
     )
 
     http_archive(
         name = "rules_python",
-        sha256 = "4912ced70dc1a2a8e4b86cec233b192ca053e82bc72d877b98e126156e8f228d",
-        strip_prefix = "rules_python-0.32.2",
-        url = "https://github.com/bazelbuild/rules_python/releases/download/0.32.2/rules_python-0.32.2.tar.gz",
+        sha256 = "5bcfa3852444d084b1d3262714cec151b797648d4d444ea9895c7c7ed79cd715",
+        strip_prefix = "rules_python-0.33.1",
+        url = "https://github.com/bazelbuild/rules_python/releases/download/0.33.1/rules_python-0.33.1.tar.gz",
     )
 
     http_archive(
@@ -63,16 +63,16 @@ def register_http_archive_dependencies():
 
     http_archive(
         name = "com_google_absl",
-        urls = ["https://github.com/abseil/abseil-cpp/archive/2f61aed18c4affd3a75a2b2d2468d23f2f16192a.zip"],
-        sha256 = "fc4a028dd05c727e3050d441c08a2646ae2e632ddf87b942b458bae476aac888",
-        strip_prefix = "abseil-cpp-2f61aed18c4affd3a75a2b2d2468d23f2f16192a",
+        urls = ["https://github.com/abseil/abseil-cpp/archive/f04e489056d9be93072bb633d9818b1e2add6316.zip"],
+        sha256 = "503296d5ad0661260493393cd0f65104a5be711942b20adbda90798b1ea2871f",
+        strip_prefix = "abseil-cpp-f04e489056d9be93072bb633d9818b1e2add6316",
     )
 
     http_archive(
         name = "com_google_googletest",
-        sha256 = "ecb351335da20ab23ea5f14c107a10c475dfdd27d8a50d968757942280dffbe3",
-        strip_prefix = "googletest-a7f443b80b105f940225332ed3c31f2790092f47",
-        urls = ["https://github.com/google/googletest/archive/a7f443b80b105f940225332ed3c31f2790092f47.zip"],
+        sha256 = "e7b11076aae5d96aeaa628cc0767b1a4e665bf673dd7518b54e9c025a5c4094d",
+        strip_prefix = "googletest-1d17ea141d2c11b8917d2c7d029f1c4e2b9769b2",
+        urls = ["https://github.com/google/googletest/archive/1d17ea141d2c11b8917d2c7d029f1c4e2b9769b2.zip"],
     )
 
     http_archive(
