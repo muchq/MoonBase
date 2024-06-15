@@ -6,7 +6,7 @@ apt update && apt install curl wget
 
 echo "installing llvm"
 bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
-apt update && apt install clang-format
+apt update && apt install clang-format-18
 
 echo "installing scalafmt"
 VERSION=3.8.2
