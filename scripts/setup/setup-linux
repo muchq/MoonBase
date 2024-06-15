@@ -1,15 +1,20 @@
 #!/bin/bash
 
+set -e
+
 apt update && apt install curl clang-format wget
 
-# scalafmt
-echo 'export PATH="$PATH:/root/.local/share/coursier/bin"' >> /root/.bashrc
-source /root/.bashrc
+echo "installing coursier"
+curl -L -o ${HOME}/bin/coursier  "https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz"
+chmod +x ${HOME}/bin/coursier
 curl -fL "https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz" | gzip -d > cs
 chmod +x cs
+
+echo "installing scalafmt"
 ./cs install scalafmt
 
 # bazelisk
+echo "installing bazelisk"
 wget https://github.com/bazelbuild/bazelisk/releases/download/v1.20.0/bazelisk-linux-amd64
 mv bazelisk-linux-amd64 /bin/bazel
 chmod +x /bin/bazel
