@@ -13,20 +13,18 @@ Java, Scala and Go targets Just Work™.
 
 Add new targets to [project view](/.ijwb/.bazelproject) if they aren't detected automatically.
 
-C and C++ aren't supported in Bazel for IntelliJ. Use Clion or VSCode.
+C++ is not supported in Bazel for IntelliJ. Use Clion or VSCode.
 
 ### Clion
 C++ projects work with [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij), but autocomplete/intellisense doesn't feel very snappy.
 
 Although it's slow, the clang-lint integration is very helpful.
 
-Not sure why!
+Not sure why it's slow though!
 
 ### VSCode
 
-Scala3 support in VSCode is waiting on [metals integration](https://github.com/scalameta/metals/issues/5138)
-
-C/C++ use [hedronvision/bazel-compile-commands-extractor](https://github.com/hedronvision/bazel-compile-commands-extractor)
+For C++ use [hedronvision/bazel-compile-commands-extractor](https://github.com/hedronvision/bazel-compile-commands-extractor)
 
 Follow instructions [here](https://github.com/hedronvision/bazel-compile-commands-extractor#vscode)
 
