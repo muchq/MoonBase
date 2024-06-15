@@ -21,6 +21,9 @@ jobs:
           name: Set Up GC Conf
           command: scripts/setup/setup-ci
       - run:
+          name: Bazel Lint
+          command: scripts/format-bazel-check
+      - run:
           name: CC Lint
           command: scripts/format-cc-check
       - run:
