@@ -30,9 +30,9 @@ def register_http_archive_dependencies():
 
     http_archive(
         name = "com_google_protobuf",
-        sha256 = "6fbe2e6f703bcd3a246529c2cab586ca12a98c4e641f5f71d51fde09eb48e9e7",
-        strip_prefix = "protobuf-27.1",
-        url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v27.1.tar.gz",
+        sha256 = "e4ff2aeb767da6f4f52485c2e72468960ddfe5262483879ef6ad552e52757a77",
+        strip_prefix = "protobuf-27.2",
+        url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v27.2.tar.gz",
     )
 
     http_archive(
