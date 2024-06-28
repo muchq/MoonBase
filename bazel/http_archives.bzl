@@ -63,9 +63,9 @@ def register_http_archive_dependencies():
 
     http_archive(
         name = "com_google_absl",
-        urls = ["https://github.com/abseil/abseil-cpp/archive/1ee05f285bc7c343b7adbe0808eae15e4a914246.zip"],
-        sha256 = "a4643404194ecd8e292c2f87af1bc274a56120dc3e309da9f33dbad8e3b32bad",
-        strip_prefix = "abseil-cpp-1ee05f285bc7c343b7adbe0808eae15e4a914246",
+        urls = ["https://github.com/abseil/abseil-cpp/archive/a7c5f985f6b7915b51b5d5799c690c99a04afdc5.zip"],
+        sha256 = "536ee511ec5fbcb22aca5260a173bf5824aa75148bcacfd0c92cf0c68a7a20f8",
+        strip_prefix = "abseil-cpp-a7c5f985f6b7915b51b5d5799c690c99a04afdc5",
     )
 
     http_archive(
