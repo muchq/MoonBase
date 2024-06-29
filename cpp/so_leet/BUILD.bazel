@@ -12,6 +12,6 @@ cc_test(
     srcs = ["so_leet_test.cc"],
     deps = [
         ":so_leet",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )

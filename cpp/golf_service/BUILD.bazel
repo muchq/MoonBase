@@ -1,3 +1,5 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+
 cc_library(
     name = "game_state_mapper",
     srcs = ["game_state_mapper.cc"],
@@ -16,7 +18,7 @@ cc_test(
     srcs = ["game_state_mapper_test.cc"],
     deps = [
         ":game_state_mapper",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 

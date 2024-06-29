@@ -3,7 +3,7 @@
 #include <grpcpp/health_check_service_interface.h>
 
 #include "cpp/example_service/example_service.h"
-#include "protos/example_cc_grpc/example_service.grpc.pb.h"
+#include "protos/example_service/helloworld.grpc.pb.h"
 
 using grpc::Server;
 using grpc::ServerBuilder;

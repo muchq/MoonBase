@@ -1,6 +1,8 @@
 startup --output_base=~/.bazelout
+# common --incompatible_enable_proto_toolchain_resolution
 common --color=yes
-common --enable_bzlmod=false
+common --noenable_workspace
+common --enable_bzlmod=true
 
 build --cxxopt='-std=c++17'
 build --host_cxxopt='-std=c++17'
@@ -12,5 +14,9 @@ build --tool_java_language_version=21
 build --tool_java_runtime_version=remotejdk_21
 
 build --strategy=Scalac=worker
+
+# layering check fails because golf_service:handlers depends on :protobuf for json_util.h
+# this is weird because :protobuf hdrs glob **/*.h which includes json_util.h
+# build --features=layering_check
 
 test --test_verbose_timeout_warnings

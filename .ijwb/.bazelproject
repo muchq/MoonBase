@@ -17,3 +17,6 @@ additional_languages:
   go
 
 java_language_level: 17
+
+build_flags:
+  --enable_workspace

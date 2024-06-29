@@ -4,7 +4,7 @@ cc_library(
     hdrs = ["example_service.h"],
     visibility = ["//visibility:public"],
     deps = [
-        "//protos/example_cc_grpc:example_service_proto",
+        "//protos/example_service:example_service_proto",
         "@com_github_grpc_grpc//:grpc++",
     ],
 )
@@ -27,6 +27,6 @@ cc_test(
     srcs = ["example_service_test.cc"],
     deps = [
         ":example_service_lib",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )

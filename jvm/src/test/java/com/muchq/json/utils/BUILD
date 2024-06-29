@@ -1,6 +1,9 @@
 java_library(
     name = "utils",
-    srcs = glob(["*.java"]),
+    srcs = [
+        "GuavaWidget.java",
+        "Java8Widget.java",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "@maven//:com_fasterxml_jackson_core_jackson_annotations",
