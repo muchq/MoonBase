@@ -10,7 +10,7 @@ cc_test(
     srcs = ["card_test.cc"],
     deps = [
         ":cards",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -32,6 +32,6 @@ cc_test(
     srcs = ["card_mapper_test.cc"],
     deps = [
         ":card_mapper",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )

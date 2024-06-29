@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "protos/example_cc_grpc/example_service.grpc.pb.h"
+#include "protos/example_service/helloworld.grpc.pb.h"
 
 using example_service::HelloReply;
 using example_service::HelloRequest;

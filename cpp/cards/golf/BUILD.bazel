@@ -24,7 +24,7 @@ cc_test(
     srcs = ["player_test.cc"],
     deps = [
         ":golf",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -34,7 +34,7 @@ cc_test(
     srcs = ["game_state_test.cc"],
     deps = [
         ":golf",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -44,6 +44,6 @@ cc_test(
     srcs = ["game_manager_test.cc"],
     deps = [
         ":golf",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
     ],
 )

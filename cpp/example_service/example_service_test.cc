@@ -11,7 +11,7 @@
 #include <grpcpp/support/message_allocator.h>
 #include <gtest/gtest.h>
 
-#include "protos/example_cc_grpc/example_service.grpc.pb.h"
+#include "protos/example_service/helloworld.grpc.pb.h"
 
 using example_service::Greeter;
 using example_service::HelloReply;
