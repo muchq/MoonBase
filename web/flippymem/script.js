@@ -75,3 +75,35 @@ function initGame() {
 restartButton.addEventListener('click', initGame);
 
 initGame();
+
+// Chat logic
+const chatSidebar = document.getElementById('chat-sidebar');
+const chatMessages = document.getElementById('chat-messages');
+const chatInput = document.getElementById('chat-input');
+const sendButton = document.getElementById('send-button');
+const toggleChatButton = document.getElementById('toggle-chat');
+
+function addMessage(message) {
+    const messageElement = document.createElement('p');
+    messageElement.textContent = message;
+    chatMessages.appendChild(messageElement);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+sendButton.addEventListener('click', () => {
+    const message = chatInput.value.trim();
+    if (message) {
+        addMessage(`You: ${message}`);
+        chatInput.value = '';
+    }
+});
+
+chatInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        sendButton.click();
+    }
+});
+
+toggleChatButton.addEventListener('click', () => {
+    chatSidebar.classList.toggle('open');
+});
