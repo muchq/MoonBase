@@ -3,16 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Card Matching Game</title>
+    <title>Card Matching Game with Chat</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<div class="container">
+<div class="game-container">
     <h1>Card Matching Game</h1>
     <div id="game-board"></div>
     <div class="score">Moves: <span id="moves">0</span></div>
     <button id="restart">Restart Game</button>
 </div>
+<div id="chat-sidebar" class="chat-sidebar">
+    <h2>Chat</h2>
+    <div id="chat-messages"></div>
+    <input type="text" id="chat-input" placeholder="Type a message...">
+    <button id="send-button">Send</button>
+</div>
+<button id="toggle-chat" class="toggle-chat">Chat</button>
 <script src="script.js"></script>
 </body>
 </html>
