@@ -1,0 +1,5 @@
+# FlippyMem
+
+```bash
+jwebserver
+```
