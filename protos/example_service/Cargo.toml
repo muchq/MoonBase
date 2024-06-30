@@ -1,0 +1,22 @@
+[package]
+name = "example_service"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+
+[lib]
+name = "proto_bindings"
+path = "lib.rs"
+
+
+[dependencies]
+tonic = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+tonic-build = { workspace = true }
+protoc-gen-prost = { workspace = true }
+protoc-gen-tonic = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }

@@ -44,6 +44,7 @@ crate.from_cargo(
     cargo_lockfile = "//:Cargo.lock",
     manifests = [
         "//:Cargo.toml",
+        "//protos/example_service:Cargo.toml",
         "//rust/helloworld_tonic:Cargo.toml",
     ],
 )

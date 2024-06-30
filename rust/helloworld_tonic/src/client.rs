@@ -1,9 +1,5 @@
-use hello_world::greeter_client::GreeterClient;
-use hello_world::HelloRequest;
-
-pub mod hello_world {
-    tonic::include_proto!("example_service");
-}
+use hello_proto::example_service::greeter_client::GreeterClient;
+use hello_proto::example_service::HelloRequest;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
