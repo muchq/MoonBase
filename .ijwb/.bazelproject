@@ -16,7 +16,7 @@ additional_languages:
   scala
   go
 
-java_language_level: 17
+java_language_level: 21
 
 build_flags:
   --enable_workspace

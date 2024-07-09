@@ -12,6 +12,7 @@ cc_library(
 cc_binary(
     name = "example_service",
     srcs = ["main.cc"],
+    visibility = ["//visibility:public"],
     deps = [
         ":example_service_lib",
         "@com_github_grpc_grpc//:grpc++_reflection",

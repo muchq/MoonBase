@@ -3,6 +3,13 @@ module(
     version = "1.0",
 )
 
+bazel_dep(name = "toolchains_llvm", version = "1.0.0")
+git_override(
+    module_name = "toolchains_llvm",
+    commit = "1d685a99db5f1e6523c392e7dfaced583062cbc4",
+    remote = "https://github.com/bazel-contrib/toolchains_llvm",
+)
+
 bazel_dep(name = "rules_python", version = "0.33.2")
 bazel_dep(name = "protobuf", version = "27.2", repo_name = "com_google_protobuf")
 bazel_dep(name = "grpc", version = "1.63.1.bcr.1", repo_name = "com_github_grpc_grpc")
@@ -12,13 +19,6 @@ bazel_dep(name = "apple_support", version = "1.15.1", repo_name = "build_bazel_a
 bazel_dep(name = "rules_cc", version = "0.0.9")
 bazel_dep(name = "platforms", version = "0.0.10")
 bazel_dep(name = "abseil-cpp", version = "20240116.2", repo_name = "com_google_absl")
-bazel_dep(name = "hermetic_cc_toolchain", version = "3.1.0")
-
-toolchains = use_extension("@hermetic_cc_toolchain//toolchain:ext.bzl", "toolchains")
-use_repo(toolchains, "zig_sdk")
-
-register_toolchains()
-
 bazel_dep(name = "rules_jvm_external", version = "6.2")
 bazel_dep(name = "rules_go", version = "0.48.1", repo_name = "io_bazel_rules_go")
 bazel_dep(name = "bazel_features", version = "1.13.0")
@@ -57,6 +57,19 @@ crate.annotation(
     gen_binaries = ["protoc-gen-tonic"],
 )
 use_repo(crate, "crates")
+
+llvm = use_extension("@toolchains_llvm//toolchain/extensions:llvm.bzl", "llvm")
+llvm.toolchain(
+    name = "llvm_toolchain",
+    llvm_versions = {
+        "": "15.0.6",
+        "darwin-aarch64": "15.0.7",
+        "darwin-x86_64": "15.0.7",
+    },
+)
+use_repo(llvm, "llvm_toolchain", "llvm_toolchain_llvm")
+
+register_toolchains("@llvm_toolchain//:all")
 
 bazel_dep(name = "rules_java", version = "7.6.5")
 bazel_dep(name = "contrib_rules_jvm", version = "0.27.0")
@@ -116,3 +129,18 @@ maven.install(
 use_repo(maven, "maven")
 
 bazel_dep(name = "grpc-java", version = "1.64.0")
+bazel_dep(name = "rules_pkg", version = "0.10.1")
+bazel_dep(name = "rules_oci", version = "2.0.0-beta0")
+
+# For testing, check out https://registry.bazel.build/modules/container_structure_test
+oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
+oci.pull(
+    name = "docker_lib_ubuntu",
+    image = "docker.io/library/ubuntu",
+    platforms = [
+        "linux/arm64/v8",
+        "linux/amd64",
+    ],
+    tag = "rolling",
+)
+use_repo(oci, "docker_lib_ubuntu", "docker_lib_ubuntu_linux_amd64", "docker_lib_ubuntu_linux_arm64_v8")
