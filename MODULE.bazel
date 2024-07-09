@@ -143,4 +143,4 @@ oci.pull(
     ],
     tag = "rolling",
 )
-use_repo(oci, "docker_lib_ubuntu")
+use_repo(oci, "docker_lib_ubuntu", "docker_lib_ubuntu_linux_amd64", "docker_lib_ubuntu_linux_arm64_v8")
