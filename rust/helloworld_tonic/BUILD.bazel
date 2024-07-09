@@ -1,23 +1,10 @@
 load("@crates//:defs.bzl", "all_crate_deps")
-
-# load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
 load("@rules_rust//rust:defs.bzl", "rust_binary")
-
-#cargo_build_script(
-#    name = "build_script",
-#    srcs = ["build.rs"],
-#    build_script_env = {
-#        "PROTO_PATH": "$(execpath //protos/example_service:proto_files)",
-#    },
-#    data = ["//protos/example_service:proto_files"],
-#    deps = ["@crates//:tonic-build"],
-#)
 
 rust_binary(
     name = "helloworld_tonic_server",
     srcs = ["src/server.rs"],
     crate_name = "helloworld_tonic",
-    # deps = all_crate_deps() + [":build_script"],
     deps = all_crate_deps() + ["//protos/example_service:hello_proto_rust"],
 )
 
@@ -25,6 +12,5 @@ rust_binary(
     name = "helloworld_tonic_client",
     srcs = ["src/client.rs"],
     crate_name = "helloworld_tonic",
-    # deps = all_crate_deps() + [":build_script"],
     deps = all_crate_deps() + ["//protos/example_service:hello_proto_rust"],
 )
