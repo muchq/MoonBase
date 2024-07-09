@@ -6,7 +6,7 @@ module(
 bazel_dep(name = "toolchains_llvm", version = "1.0.0")
 git_override(
     module_name = "toolchains_llvm",
-    commit = "1d685a99db5f1e6523c392e7dfaced583062cbc4",
+    commit = "421aa20ce5e1686752c60e155a80785c206dd0ac",
     remote = "https://github.com/bazel-contrib/toolchains_llvm",
 )
 
