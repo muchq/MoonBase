@@ -2,7 +2,7 @@
 
 set -e
 
-apt update && apt install curl wget
+apt update && apt install curl wget podman
 
 echo "installing llvm"
 bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
