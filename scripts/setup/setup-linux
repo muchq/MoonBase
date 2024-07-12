@@ -20,3 +20,6 @@ echo "installing bazelisk"
 wget https://github.com/bazelbuild/bazelisk/releases/download/v1.20.0/bazelisk-linux-amd64
 mv bazelisk-linux-amd64 /bin/bazel
 chmod +x /bin/bazel
+
+# cargo
+curl https://sh.rustup.rs -sSf | sh

@@ -47,6 +47,9 @@ jobs:
       - run:
           name: Run Container Build
           command: bazel run //oci:example_cc_grpc_image_tarball
+      - run:
+          name: Run Cargo Compatibility Build
+          command: cargo build
 
 workflows:
   moon-base:
