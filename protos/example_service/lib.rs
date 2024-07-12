@@ -1,3 +1,3 @@
-pub mod hello_world {
+pub mod example_service {
     tonic::include_proto!("example_service");
 }

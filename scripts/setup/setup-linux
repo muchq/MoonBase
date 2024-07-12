@@ -2,11 +2,9 @@
 
 set -e
 
-apt update && apt install curl wget podman
+apt update && apt install curl wget podman clang-format-18
 
-echo "installing llvm"
-bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
-apt update && apt install clang-format-18
+echo "installing clang format"
 ln -s "$(which clang-format-18)" /usr/local/bin/clang-format
 
 echo "installing scalafmt"
@@ -20,3 +18,12 @@ echo "installing bazelisk"
 wget https://github.com/bazelbuild/bazelisk/releases/download/v1.20.0/bazelisk-linux-amd64
 mv bazelisk-linux-amd64 /bin/bazel
 chmod +x /bin/bazel
+
+# rust
+curl https://sh.rustup.rs -sSf | \
+  sh -s -- \
+        -y \
+        --default-toolchain stable \
+        --profile default
+
+source "/root/.cargo/env" && cargo --version
