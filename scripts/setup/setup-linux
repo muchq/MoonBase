@@ -25,3 +25,5 @@ curl https://sh.rustup.rs -sSf | \
         -y \
         --default-toolchain stable \
         --profile default
+
+source "/root/.cargo/env" && cargo --version
