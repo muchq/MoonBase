@@ -6,7 +6,7 @@ rust-version.workspace = true
 
 
 [lib]
-name = "proto_bindings"
+name = "hello_proto"
 path = "lib.rs"
 
 
