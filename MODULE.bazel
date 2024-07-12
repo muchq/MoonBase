@@ -136,11 +136,14 @@ bazel_dep(name = "rules_oci", version = "2.0.0-beta1")
 oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
 oci.pull(
     name = "docker_lib_ubuntu",
+    digest = "sha256:2e863c44b718727c860746568e1d54afd13b2fa71b160f5cd9058fc436217b30",
     image = "docker.io/library/ubuntu",
     platforms = [
-        "linux/arm64/v8",
         "linux/amd64",
+        "linux/arm/v7",
+        "linux/arm64/v8",
+        "linux/ppc64le",
+        "linux/s390x",
     ],
-    tag = "rolling",
 )
 use_repo(oci, "docker_lib_ubuntu", "docker_lib_ubuntu_linux_amd64", "docker_lib_ubuntu_linux_arm64_v8")
