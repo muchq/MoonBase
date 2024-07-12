@@ -13,7 +13,7 @@ commands:
 jobs:
   moon-base-job:
     machine:
-      image: default
+      image: current
     steps:
       - checkout # check out the code in the project directory
       - setup-build-env
