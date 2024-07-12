@@ -2,7 +2,7 @@
 
 set -e
 
-apt update && apt install curl wget podman rustup clang-format-18
+apt update && apt install curl wget podman clang-format-18
 
 echo "installing clang format"
 ln -s "$(which clang-format-18)" /usr/local/bin/clang-format
@@ -19,4 +19,11 @@ wget https://github.com/bazelbuild/bazelisk/releases/download/v1.20.0/bazelisk-l
 mv bazelisk-linux-amd64 /bin/bazel
 chmod +x /bin/bazel
 
-rustup install stable
+# rust
+curl https://sh.rustup.rs -sSf | \
+  sh -s -- \
+        -y \
+        --verbose \
+        --default-toolchain stable \
+        --profile default \
+        --no-modify-path
