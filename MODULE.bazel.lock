@@ -179,8 +179,8 @@
     "https://bcr.bazel.build/modules/rules_license/0.0.8/source.json": "ccfd3964cd0cd1739202efb8dbf9a06baab490e61e174b2ad4790f9c4e610beb",
     "https://bcr.bazel.build/modules/rules_nodejs/5.8.2/MODULE.bazel": "6bc03c8f37f69401b888023bf511cb6ee4781433b0cb56236b2e55a21e3a026a",
     "https://bcr.bazel.build/modules/rules_nodejs/5.8.2/source.json": "6e82cf5753d835ea18308200bc79b9c2e782efe2e2a4edc004a9162ca93382ca",
-    "https://bcr.bazel.build/modules/rules_oci/2.0.0-beta0/MODULE.bazel": "0d0caf177f7103cb750ed1717870d101c9d3870b6fe847b87bcc6b486b0db5dc",
-    "https://bcr.bazel.build/modules/rules_oci/2.0.0-beta0/source.json": "3519f527291ff69ab3432a24246c7239a6862eaf2b9bb12a684f53c7377f28db",
+    "https://bcr.bazel.build/modules/rules_oci/2.0.0-beta1/MODULE.bazel": "4ec537c70cec01503ce989aa17e37b735b6b5782580b1b658cd1733064d29c07",
+    "https://bcr.bazel.build/modules/rules_oci/2.0.0-beta1/source.json": "23e3081125b982ba84d7f7b4d126996f99d877eb13461bbc60bd762e14c40785",
     "https://bcr.bazel.build/modules/rules_pkg/0.7.0/MODULE.bazel": "df99f03fc7934a4737122518bb87e667e62d780b610910f0447665a7e2be62dc",
     "https://bcr.bazel.build/modules/rules_pkg/1.0.1/MODULE.bazel": "5b1df97dbc29623bccdf2b0dcd0f5cb08e2f2c9050aab1092fd39a41e82686ff",
     "https://bcr.bazel.build/modules/rules_pkg/1.0.1/source.json": "bd82e5d7b9ce2d31e380dd9f50c111d678c3bdaca190cb76b0e1c71b05e1ba8a",
@@ -321,7 +321,7 @@
     "@@aspect_bazel_lib~//lib:extensions.bzl%toolchains": {
       "general": {
         "bzlTransitiveDigest": "nzNCCKeGDuuaB6uzXddNTVOHkFu9zZDzQ37VqiZh/Sg=",
-        "usagesDigest": "tq4I4K5pUrTLoSWlq0Woe6MtfUC3PYC38AOmIOU4cXg=",
+        "usagesDigest": "XD9qTBCVrRXBHyPHj40MMITHGmnNzCutKVrheusMDHc=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -2250,7 +2250,7 @@
     "@@rules_oci~//oci:extensions.bzl%oci": {
       "general": {
         "bzlTransitiveDigest": "Q+mLNJUGyOGarVWgVeadIYH5lIC0Os6rDiqoQJ2smQo=",
-        "usagesDigest": "MUkVJSt4aILfwc/s+XYFEBLWrvPIiWnR5UbqVIxgTqo=",
+        "usagesDigest": "ZabKsS5Go5ef/ohPEVrGuwNOMUCbsFL5TfxoOBXllMs=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
