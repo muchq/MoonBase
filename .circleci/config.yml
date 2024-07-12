@@ -12,7 +12,7 @@ commands:
       - run:
           name: Activate Stuff
           command: |
-            source "$HOME/.cargo/env"
+            source "$HOME/.cargo/env" && cargo --version
 
 jobs:
   moon-base-job:
