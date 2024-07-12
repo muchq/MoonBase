@@ -23,7 +23,5 @@ chmod +x /bin/bazel
 curl https://sh.rustup.rs -sSf | \
   sh -s -- \
         -y \
-        --verbose \
         --default-toolchain stable \
-        --profile default \
-        --no-modify-path
+        --profile default
