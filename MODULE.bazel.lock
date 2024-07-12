@@ -2250,7 +2250,7 @@
     "@@rules_oci~//oci:extensions.bzl%oci": {
       "general": {
         "bzlTransitiveDigest": "Q+mLNJUGyOGarVWgVeadIYH5lIC0Os6rDiqoQJ2smQo=",
-        "usagesDigest": "ZabKsS5Go5ef/ohPEVrGuwNOMUCbsFL5TfxoOBXllMs=",
+        "usagesDigest": "kLPFN10qcyodQJvr5B+BVItRcaBCM3n3dGqBkkGT8W8=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -2280,6 +2280,19 @@
             "ruleClassName": "copy_to_directory_platform_repo",
             "attributes": {
               "platform": "freebsd_amd64"
+            }
+          },
+          "docker_lib_ubuntu_linux_ppc64le": {
+            "bzlFile": "@@rules_oci~//oci/private:pull.bzl",
+            "ruleClassName": "oci_pull",
+            "attributes": {
+              "scheme": "https",
+              "registry": "index.docker.io",
+              "repository": "library/ubuntu",
+              "identifier": "sha256:2e863c44b718727c860746568e1d54afd13b2fa71b160f5cd9058fc436217b30",
+              "platform": "linux/ppc64le",
+              "target_name": "docker_lib_ubuntu_linux_ppc64le",
+              "bazel_tags": []
             }
           },
           "oci_crane_linux_arm64": {
@@ -2412,10 +2425,13 @@
               "scheme": "https",
               "registry": "index.docker.io",
               "repository": "library/ubuntu",
-              "identifier": "rolling",
+              "identifier": "sha256:2e863c44b718727c860746568e1d54afd13b2fa71b160f5cd9058fc436217b30",
               "platforms": {
+                "@@platforms//cpu:x86_64": "@docker_lib_ubuntu_linux_amd64",
+                "@@platforms//cpu:armv7": "@docker_lib_ubuntu_linux_arm_v7",
                 "@@platforms//cpu:arm64": "@docker_lib_ubuntu_linux_arm64_v8",
-                "@@platforms//cpu:x86_64": "@docker_lib_ubuntu_linux_amd64"
+                "@@platforms//cpu:ppc": "@docker_lib_ubuntu_linux_ppc64le",
+                "@@platforms//cpu:s390x": "@docker_lib_ubuntu_linux_s390x"
               },
               "bzlmod_repository": "docker_lib_ubuntu",
               "reproducible": true
@@ -2584,7 +2600,7 @@
               "scheme": "https",
               "registry": "index.docker.io",
               "repository": "library/ubuntu",
-              "identifier": "rolling",
+              "identifier": "sha256:2e863c44b718727c860746568e1d54afd13b2fa71b160f5cd9058fc436217b30",
               "platform": "linux/arm64/v8",
               "target_name": "docker_lib_ubuntu_linux_arm64_v8",
               "bazel_tags": []
@@ -2619,6 +2635,19 @@
               "platform": "darwin_amd64"
             }
           },
+          "docker_lib_ubuntu_linux_arm_v7": {
+            "bzlFile": "@@rules_oci~//oci/private:pull.bzl",
+            "ruleClassName": "oci_pull",
+            "attributes": {
+              "scheme": "https",
+              "registry": "index.docker.io",
+              "repository": "library/ubuntu",
+              "identifier": "sha256:2e863c44b718727c860746568e1d54afd13b2fa71b160f5cd9058fc436217b30",
+              "platform": "linux/arm/v7",
+              "target_name": "docker_lib_ubuntu_linux_arm_v7",
+              "bazel_tags": []
+            }
+          },
           "oci_regctl_linux_amd64": {
             "bzlFile": "@@rules_oci~//oci:repositories.bzl",
             "ruleClassName": "regctl_repositories",
@@ -2631,6 +2660,19 @@
             "ruleClassName": "tar_toolchains_repo",
             "attributes": {
               "user_repository_name": "bsd_tar"
+            }
+          },
+          "docker_lib_ubuntu_linux_s390x": {
+            "bzlFile": "@@rules_oci~//oci/private:pull.bzl",
+            "ruleClassName": "oci_pull",
+            "attributes": {
+              "scheme": "https",
+              "registry": "index.docker.io",
+              "repository": "library/ubuntu",
+              "identifier": "sha256:2e863c44b718727c860746568e1d54afd13b2fa71b160f5cd9058fc436217b30",
+              "platform": "linux/s390x",
+              "target_name": "docker_lib_ubuntu_linux_s390x",
+              "bazel_tags": []
             }
           },
           "jq_windows_amd64": {
@@ -2676,7 +2718,7 @@
               "scheme": "https",
               "registry": "index.docker.io",
               "repository": "library/ubuntu",
-              "identifier": "rolling",
+              "identifier": "sha256:2e863c44b718727c860746568e1d54afd13b2fa71b160f5cd9058fc436217b30",
               "platform": "linux/amd64",
               "target_name": "docker_lib_ubuntu_linux_amd64",
               "bazel_tags": []
@@ -2706,8 +2748,11 @@
         "moduleExtensionMetadata": {
           "explicitRootModuleDirectDeps": [
             "docker_lib_ubuntu",
+            "docker_lib_ubuntu_linux_amd64",
+            "docker_lib_ubuntu_linux_arm_v7",
             "docker_lib_ubuntu_linux_arm64_v8",
-            "docker_lib_ubuntu_linux_amd64"
+            "docker_lib_ubuntu_linux_ppc64le",
+            "docker_lib_ubuntu_linux_s390x"
           ],
           "explicitRootModuleDirectDevDeps": [],
           "useAllRepos": "NO",
