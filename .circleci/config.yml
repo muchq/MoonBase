@@ -9,6 +9,10 @@ commands:
           name: Install Build and Lint Tools
           command: |
             sudo scripts/setup/setup-linux
+      - run:
+          name: Activate Stuff
+          command: |
+            source "$HOME/.cargo/env"
 
 jobs:
   moon-base-job:
