@@ -11,7 +11,8 @@ impl Greeter for MyGreeter {
     async fn say_hello(
         &self,
         request: Request<HelloRequest>, // Accept request of type HelloRequest
-    ) -> Result<Response<HelloReply>, Status> { // Return an instance of type HelloReply
+    ) -> Result<Response<HelloReply>, Status> {
+        // Return an instance of type HelloReply
         println!("Got a request: {:?}", request);
 
         let reply = HelloReply {

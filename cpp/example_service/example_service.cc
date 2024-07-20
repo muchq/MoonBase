@@ -1,10 +1,8 @@
 #include "cpp/example_service/example_service.h"
+#include "protos/example_service/helloworld.grpc.pb.h"
 
 #include <grpcpp/grpcpp.h>
-
 #include <string>
-
-#include "protos/example_service/helloworld.grpc.pb.h"
 
 using example_service::HelloReply;
 using example_service::HelloRequest;

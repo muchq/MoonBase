@@ -1,6 +1,7 @@
 directories:
   cpp
   protos
+  rust
 
 # Automatically includes all relevant targets under the 'directories' above
 derive_targets_from_directories: true
@@ -14,3 +15,6 @@ additional_languages:
   # javascript
   # python
   # typescript
+
+build_flags:
+  --enable_workspace

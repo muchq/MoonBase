@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package escapist;
+
+service Escapist {
+  rpc InsertDoc (InsertDocRequest) returns (InsertDocResponse) {}
+  rpc UpdateDoc (UpdateDocRequest) returns (UpdateDocResponse) {}
+  rpc FindDocById (FindDocByIdRequest) returns (FindDocByIdResponse) {}
+  rpc FindDoc (FindDocRequest) returns (FindDocResponse) {}
+}
+
+message DocumentEgg {
+  string bytes = 1;
+  map<string, string> metadata = 2;
+}
+
+message Document {
+  string id = 1;
+  string version = 2;
+  string bytes = 3;
+  map<string, string> metadata = 4;
+  // consider
+  // google.protobuf.Any details = 3;
+  // here. see https://protobuf.dev/programming-guides/proto3/#any
+}
+
+message InsertDocRequest {
+  string collection = 1;
+  DocumentEgg doc = 2;
+}
+
+message InsertDocResponse {
+  string id = 1;
+  string version = 2;
+}
+
+message UpdateDocRequest {
+  string collection = 1;
+  Document doc = 2;
+}
+
+message UpdateDocResponse {
+  string id = 1;
+  string version = 2;
+}
+
+message FindDocByIdRequest {
+  string collection = 1;
+  string id = 2;
+}
+
+message FindDocByIdResponse {
+  Document doc = 3;
+}
+
+message FindDocRequest {
+  string collection = 1;
+  map<string, string> query = 2;
+}
+
+message FindDocResponse {
+  Document doc = 1;
+}
