@@ -1,0 +1,20 @@
+load("@com_github_grpc_grpc//bazel:grpc_build_system.bzl", "grpc_proto_library")
+load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@rules_rust//proto/prost:defs.bzl", "rust_prost_library")
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "escapist_proto",
+    srcs = ["queries.proto"],
+)
+
+rust_prost_library(
+    name = "escapist_proto_rust",
+    proto = ":escapist_proto",
+)
+
+grpc_proto_library(
+    name = "escapist_cc_proto",
+    srcs = ["queries.proto"],
+)

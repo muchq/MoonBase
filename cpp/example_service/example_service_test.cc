@@ -1,14 +1,9 @@
 #include "cpp/example_service/example_service.h"
 
-#include <grpcpp/channel.h>
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
-#include <grpcpp/grpcpp.h>
 #include <grpcpp/server.h>
 #include <grpcpp/server_builder.h>
-#include <grpcpp/server_context.h>
-#include <grpcpp/support/client_callback.h>
-#include <grpcpp/support/message_allocator.h>
 #include <gtest/gtest.h>
 
 #include "protos/example_service/helloworld.grpc.pb.h"

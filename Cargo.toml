@@ -3,7 +3,9 @@ resolver = "2"
 
 members = [
     "rust/helloworld_tonic",
-    "protos/example_service"
+    "rust/escapist",
+    "protos/example_service",
+    "protos/escapist",
 ]
 
 [workspace.package]
@@ -14,6 +16,7 @@ readme = "README.md"
 
 [workspace.dependencies]
 example_service = { path = "protos/example_service" }
+escapist_proto = { path = "protos/escapist" }
 prost = { version = "0.13.0" }
 prost-types = { version = "0.13.0", default-features = false }
 tonic = { version = "0.12.0", features = ["transport"] }
@@ -21,3 +24,8 @@ tonic-build = "0.12.0"
 tokio = { version = "1.38", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
 protoc-gen-tonic = "0.4.0"
 protoc-gen-prost = "0.3.1"
+mongodb = "3.0.1"
+serde = { version = "1.0.204", features = ["derive"] }
+dotenv = "0.15.0"
+futures = "0.3.30"
+uuid = { version = "1.10.0", features = ["v4", "fast-rng"]}

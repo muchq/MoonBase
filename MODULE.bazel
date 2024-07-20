@@ -45,7 +45,9 @@ crate.from_cargo(
     manifests = [
         "//:Cargo.toml",
         "//protos/example_service:Cargo.toml",
+        "//protos/escapist:Cargo.toml",
         "//rust/helloworld_tonic:Cargo.toml",
+        "//rust/escapist:Cargo.toml",
     ],
 )
 crate.annotation(
