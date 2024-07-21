@@ -1,0 +1,10 @@
+cc_library(
+    name = "escapist_client",
+    srcs = ["escapist_client.cc"],
+    hdrs = ["escapist_client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//protos/escapist:escapist_cc_proto",
+        "@com_github_grpc_grpc//:grpc++",
+    ],
+)

@@ -6,7 +6,7 @@ package(default_visibility = ["//visibility:public"])
 
 proto_library(
     name = "escapist_proto",
-    srcs = ["queries.proto"],
+    srcs = ["escapist.proto"],
 )
 
 rust_prost_library(
@@ -16,5 +16,5 @@ rust_prost_library(
 
 grpc_proto_library(
     name = "escapist_cc_proto",
-    srcs = ["queries.proto"],
+    srcs = ["escapist.proto"],
 )

@@ -26,11 +26,11 @@ fn get_collection<T: Send + Sync>(client: &Client, collection_name: String) -> C
 }
 
 fn convert_hashmap_to_document(hash_map: HashMap<String, String>) -> BsonDocument {
-    let metadata_doc: BsonDocument = hash_map.into_iter()
+    let tags_doc: BsonDocument = hash_map.into_iter()
         .map(|(k, v)| (k, Bson::String(v)))
         .collect();
     let mut query_doc = BsonDocument::new();
-    query_doc.insert("metadata", metadata_doc);
+    query_doc.insert("tags", tags_doc);
     query_doc
 }
 
@@ -50,7 +50,7 @@ impl Escapist for EscapistService {
         let mongo_doc = MongoDocEgg {
             bytes: doc_egg.bytes,
             version: version_string.clone(),
-            metadata: doc_egg.metadata,
+            tags: doc_egg.tags,
         };
         let col: Collection<MongoDocEgg> = get_collection(&self.client, req.collection);
 
@@ -87,7 +87,7 @@ impl Escapist for EscapistService {
             _id: id,
             version: new_version.clone(),
             bytes: doc_to_update.bytes,
-            metadata: doc_to_update.metadata,
+            tags: doc_to_update.tags,
         };
 
         let query = doc! { "_id": id, "version": expected_version };
@@ -122,7 +122,7 @@ impl Escapist for EscapistService {
                         id: mongo_doc._id.to_string(),
                         version: mongo_doc.version,
                         bytes: mongo_doc.bytes,
-                        metadata: HashMap::new(),
+                        tags: HashMap::new(),
                     }),
                 };
                 Ok(Response::new(res))
@@ -137,10 +137,10 @@ impl Escapist for EscapistService {
         request: Request<FindDocRequest>,
     ) -> Result<Response<FindDocResponse>, Status> {
         let req = request.into_inner();
-        if req.query.is_empty() {
-            return Err(Status::invalid_argument("query constraints are required"));
+        if req.tags.is_empty() {
+            return Err(Status::invalid_argument("query tags are required"));
         }
-        let bson_query = convert_hashmap_to_document(req.query);
+        let bson_query = convert_hashmap_to_document(req.tags);
 
         let col: Collection<MongoDoc> = get_collection(&self.client, req.collection);
 
@@ -150,7 +150,7 @@ impl Escapist for EscapistService {
                     id: found._id.to_hex(),
                     version: found.version,
                     bytes: found.bytes,
-                    metadata: found.metadata,
+                    tags: found.tags,
                 }),
             })),
             Ok(None) => Err(Status::not_found("not found")),
