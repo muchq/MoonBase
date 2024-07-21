@@ -9,9 +9,8 @@ class EscapistClient {
  public:
   EscapistClient(std::shared_ptr<Escapist::Stub> stub) : stub_(stub) {}
 
-  std::string InsertDoc(const std::string& collection,
-                                      const std::string& bytes,
-                                      const std::unordered_map<std::string, std::string> tags);
+  std::string InsertDoc(const std::string& collection, const std::string& bytes,
+                        const std::unordered_map<std::string, std::string> tags);
 
  private:
   std::shared_ptr<Escapist::Stub> stub_;

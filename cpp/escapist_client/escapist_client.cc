@@ -8,15 +8,14 @@ using grpc::Status;
 
 namespace escapist {
 
-std::string EscapistClient::InsertDoc(const std::string& collection,
-                                      const std::string& bytes,
+std::string EscapistClient::InsertDoc(const std::string& collection, const std::string& bytes,
                                       const std::unordered_map<std::string, std::string> tags) {
   InsertDocRequest request;
 
   DocumentEgg doc_egg;
   doc_egg.set_bytes(bytes);
   auto& doc_egg_tags = *doc_egg.mutable_tags();
-  for (auto & kv : tags) {
+  for (auto& kv : tags) {
     doc_egg_tags.emplace(kv.first, kv.second);
   }
 
