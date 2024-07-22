@@ -16,7 +16,7 @@ std::string EscapistClient::InsertDoc(const std::string& collection, const std::
   doc_egg.set_bytes(bytes);
   auto& doc_egg_tags = *doc_egg.mutable_tags();
   for (auto& kv : tags) {
-    doc_egg_tags.emplace(kv.first, kv.second);
+    doc_egg_tags[kv.first] = kv.second;
   }
 
   request.set_collection(collection);
