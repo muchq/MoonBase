@@ -1,9 +1,8 @@
 #ifndef CPP_ESCAPIST_CLIENT_H
 #define CPP_ESCAPIST_CLIENT_H
 
-#include "protos/escapist/escapist.grpc.pb.h"
-
 #include "absl/status/statusor.h"
+#include "protos/escapist/escapist.grpc.pb.h"
 
 namespace escapist {
 
@@ -19,7 +18,7 @@ class EscapistClient {
   EscapistClient(std::shared_ptr<Escapist::StubInterface> stub) : stub_(stub) {}
 
   StatusOr<DocIdAndVersion> InsertDoc(const std::string& collection, const std::string& bytes,
-                        const std::unordered_map<std::string, std::string>& tags);
+                                      const std::unordered_map<std::string, std::string>& tags);
 
  private:
   std::shared_ptr<Escapist::StubInterface> stub_;

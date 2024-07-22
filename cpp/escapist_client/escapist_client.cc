@@ -7,8 +7,9 @@ namespace escapist {
 using grpc::ClientContext;
 using grpc::Status;
 
-StatusOr<DocIdAndVersion> EscapistClient::InsertDoc(const std::string& collection, const std::string& bytes,
-                                      const std::unordered_map<std::string, std::string>& tags) {
+StatusOr<DocIdAndVersion> EscapistClient::InsertDoc(
+    const std::string& collection, const std::string& bytes,
+    const std::unordered_map<std::string, std::string>& tags) {
   InsertDocRequest request;
 
   DocumentEgg doc_egg;
