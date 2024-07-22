@@ -17,4 +17,5 @@ rust_prost_library(
 grpc_proto_library(
     name = "escapist_cc_proto",
     srcs = ["escapist.proto"],
+    generate_mocks = True,
 )

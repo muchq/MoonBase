@@ -1,15 +1,14 @@
 #include "escapist_client.h"
 
 #include <grpcpp/client_context.h>
-#include <grpcpp/create_channel.h>
+
+namespace escapist {
 
 using grpc::ClientContext;
 using grpc::Status;
 
-namespace escapist {
-
-std::string EscapistClient::InsertDoc(const std::string& collection, const std::string& bytes,
-                                      const std::unordered_map<std::string, std::string> tags) {
+StatusOr<DocIdAndVersion> EscapistClient::InsertDoc(const std::string& collection, const std::string& bytes,
+                                      const std::unordered_map<std::string, std::string>& tags) {
   InsertDocRequest request;
 
   DocumentEgg doc_egg;
@@ -25,15 +24,18 @@ std::string EscapistClient::InsertDoc(const std::string& collection, const std::
   InsertDocResponse reply;
   ClientContext context;
 
-  Status status = stub_->InsertDoc(&context, request, &reply);
+  Status rpc_status = stub_->InsertDoc(&context, request, &reply);
 
-  // Act upon its status.
-  if (status.ok()) {
+  if (rpc_status.ok()) {
     // return id and version and whatnot
-    return "ok";
+    DocIdAndVersion docIdAndVersion;
+    docIdAndVersion.id = reply.id();
+    docIdAndVersion.version = reply.version();
+    return docIdAndVersion;
   } else {
-    std::cout << status.error_code() << ": " << status.error_message() << std::endl;
-    return "RPC failed";
+    // TODO: handle client errors
+    std::cout << rpc_status.error_code() << ": " << rpc_status.error_message() << std::endl;
+    return absl::InternalError(rpc_status.error_message());
   }
 }
 }  // namespace escapist

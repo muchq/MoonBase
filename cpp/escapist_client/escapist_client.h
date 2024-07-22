@@ -3,17 +3,26 @@
 
 #include "protos/escapist/escapist.grpc.pb.h"
 
+#include "absl/status/statusor.h"
+
 namespace escapist {
+
+using absl::StatusOr;
+
+struct DocIdAndVersion {
+  std::string id;
+  std::string version;
+};
 
 class EscapistClient {
  public:
-  EscapistClient(std::shared_ptr<Escapist::Stub> stub) : stub_(stub) {}
+  EscapistClient(std::shared_ptr<Escapist::StubInterface> stub) : stub_(stub) {}
 
-  std::string InsertDoc(const std::string& collection, const std::string& bytes,
-                        const std::unordered_map<std::string, std::string> tags);
+  StatusOr<DocIdAndVersion> InsertDoc(const std::string& collection, const std::string& bytes,
+                        const std::unordered_map<std::string, std::string>& tags);
 
  private:
-  std::shared_ptr<Escapist::Stub> stub_;
+  std::shared_ptr<Escapist::StubInterface> stub_;
 };
 
 }  // namespace escapist
