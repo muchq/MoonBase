@@ -11,4 +11,6 @@ TEST(EscapistClient, InsertDocSuccess) {
   ON_CALL(*stub, InsertDoc(_, _, _))
     .WillByDefault(Return(grpc::Status::OK));
   EscapistClient client(stub);
+
+  // do stuff here
 }
