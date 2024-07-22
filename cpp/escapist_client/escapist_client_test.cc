@@ -12,5 +12,5 @@ TEST(EscapistClient, InsertDocSuccess) {
     .WillByDefault(Return(grpc::Status::OK));
   EscapistClient client(stub);
 
-  // do stuff here
+  EXPECT_TRUE(false);
 }
