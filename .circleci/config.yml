@@ -45,6 +45,9 @@ jobs:
           name: Run Cpp Tests
           command: bazel test //cpp/...
       - run:
+          name: Run Rust Tests
+          command: bazel test //rust/...
+      - run:
           name: Run Container Build
           command: bazel run //oci:example_cc_grpc_image_tarball
       - run:

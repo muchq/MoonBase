@@ -1,5 +1,18 @@
 load("@crates//:defs.bzl", "all_crate_deps")
-load("@rules_rust//rust:defs.bzl", "rust_binary")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+
+rust_library(
+    name = "lib",
+    srcs = [
+        "src/escapist.rs",
+        "src/lib.rs",
+        "src/model.rs",
+    ],
+    crate_name = "escapist",
+    deps = all_crate_deps() + [
+        "//protos/escapist:escapist_proto_rust",
+    ],
+)
 
 rust_binary(
     name = "escapist",
@@ -10,6 +23,20 @@ rust_binary(
     ],
     crate_name = "escapist",
     deps = all_crate_deps() + [
+        ":lib",
         "//protos/escapist:escapist_proto_rust",
     ],
+)
+
+rust_test(
+    name = "test_rpc_success",
+    size = "small",
+    crate = ":lib",
+    crate_features = ["rpc_success"],
+)
+
+rust_test(
+    name = "test_non_rpc_success",
+    size = "small",
+    crate = ":lib",
 )
