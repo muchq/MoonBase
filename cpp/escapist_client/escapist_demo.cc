@@ -19,7 +19,7 @@ void print_doc(const string& op, StatusOr<Doc> status_doc) {
   std::cout << "    version: " << status_doc->version << std::endl;
   std::cout << "      bytes: " << status_doc->bytes << std::endl;
   std::cout << "       tags: " << std::endl;
-  for (auto& [tag_name, tag_value] : status_doc->tags) {
+  for (const auto& [tag_name, tag_value] : status_doc->tags) {
     std::cout << "             " << tag_name << ": " << tag_value << std::endl;
   }
   std::cout << std::endl;
