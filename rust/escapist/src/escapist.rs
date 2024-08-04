@@ -9,6 +9,7 @@ use mongodb::bson::Document as BsonDocument;
 use mongodb::bson::{doc, Bson};
 use mongodb::error::{Error as MongoError, Result as MongoResult};
 use mongodb::{Client, Collection};
+use tonic::metadata::MetadataMap;
 use std::collections::HashMap;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
@@ -16,12 +17,14 @@ use uuid::Uuid;
 trait Crud {
     async fn insert_one(
         &self,
+        db_name: String,
         collection: String,
         doc_egg: MongoDocEgg,
     ) -> Result<ObjectId, MongoError>;
 
     async fn update_one(
         &self,
+        db_name: String,
         collection: String,
         query: BsonDocument,
         replacement: MongoDoc,
@@ -29,6 +32,7 @@ trait Crud {
 
     async fn find_one(
         &self,
+        db_name: String,
         collection: String,
         query: BsonDocument,
     ) -> MongoResult<Option<MongoDoc>>;
@@ -103,12 +107,37 @@ fn convert_hashmap_to_document(hash_map: HashMap<String, String>) -> BsonDocumen
     query_doc
 }
 
+const DB_NAME_KEY: &str = "db-name";
+
+fn read_db_name_from_metadata(metadata: &MetadataMap) -> Option<String> {
+  let db_name_maybe = metadata.get(DB_NAME_KEY);
+  if db_name_maybe.is_none() {
+    return None;
+  }
+  let db_name = db_name_maybe.unwrap();
+  let db_str_maybe = db_name.to_str();
+  if (db_str_maybe.is_err()) {
+    return None;
+  }
+  let db_str = db_str_maybe.unwrap();
+  let db_string = db_str.to_string();
+  if (db_string.is_empty()) {
+    return None;
+  }
+  return Some(db_string);
+}
+
 #[tonic::async_trait]
 impl Escapist for EscapistService {
     async fn insert_doc(
         &self,
         request: Request<InsertDocRequest>,
     ) -> Result<Response<InsertDocResponse>, Status> {
+        let db_name_maybe = read_db_name_from_metadata(request.metadata());
+        if (db_name_maybe.is_none()) {
+          return Err(Status::invalid_argument("db-name is required"));
+        }
+        let db_name = db_name_maybe.unwrap();
         let req = request.into_inner();
         if let Err(status) = validate_insert_request(&req) {
             return Err(status);
@@ -122,7 +151,7 @@ impl Escapist for EscapistService {
             tags: doc_egg.tags,
         };
 
-        match self.insert_one(req.collection, mongo_doc).await {
+        match self.insert_one(db_name, req.collection, mongo_doc).await {
             Ok(object_id) => Ok(Response::new(InsertDocResponse {
                 id: object_id.to_hex(),
                 version: version_string,
@@ -136,6 +165,11 @@ impl Escapist for EscapistService {
         &self,
         request: Request<UpdateDocRequest>,
     ) -> Result<Response<UpdateDocResponse>, Status> {
+        let db_name_maybe = read_db_name_from_metadata(request.metadata());
+        if (db_name_maybe.is_none()) {
+          return Err(Status::invalid_argument("db-name is required"));
+        }
+        let db_name = db_name_maybe.unwrap();
         let req = request.into_inner();
         if let Err(status) = validate_update_request(&req) {
             return Err(status);
@@ -159,7 +193,7 @@ impl Escapist for EscapistService {
 
         let query = doc! { "_id": id, "version": expected_version };
         match self
-            .update_one(req.collection, query, replacement_doc)
+            .update_one(db_name, req.collection, query, replacement_doc)
             .await
         {
             Ok(Some(_)) => Ok(Response::new(UpdateDocResponse {
@@ -175,6 +209,11 @@ impl Escapist for EscapistService {
         &self,
         request: Request<FindDocByIdRequest>,
     ) -> Result<Response<FindDocByIdResponse>, Status> {
+        let db_name_maybe = read_db_name_from_metadata(request.metadata());
+        if (db_name_maybe.is_none()) {
+          return Err(Status::invalid_argument("db-name is required"));
+        }
+        let db_name = db_name_maybe.unwrap();
         let req = request.into_inner();
         if let Err(status) = validate_find_by_id_request(&req) {
             return Err(status);
@@ -186,7 +225,7 @@ impl Escapist for EscapistService {
         }
 
         let id = id_result.unwrap();
-        match self.find_one(req.collection, doc! { "_id": id }).await {
+        match self.find_one(db_name, req.collection, doc! { "_id": id }).await {
             Ok(Some(mongo_doc)) => {
                 let res = FindDocByIdResponse {
                     doc: Some(Document {
@@ -207,13 +246,18 @@ impl Escapist for EscapistService {
         &self,
         request: Request<FindDocRequest>,
     ) -> Result<Response<FindDocResponse>, Status> {
+        let db_name_maybe = read_db_name_from_metadata(request.metadata());
+        if db_name_maybe.is_none() {
+          return Err(Status::invalid_argument("db-name is required"));
+        }
+        let db_name = db_name_maybe.unwrap();
         let req = request.into_inner();
         if let Err(status) = validate_find_by_tags_request(&req) {
             return Err(status);
         }
 
         let bson_query = convert_hashmap_to_document(req.tags);
-        match self.find_one(req.collection, bson_query).await {
+        match self.find_one(db_name, req.collection, bson_query).await {
             Ok(Some(found)) => Ok(Response::new(FindDocResponse {
                 doc: Some(Document {
                     id: found._id.to_hex(),
@@ -228,11 +272,9 @@ impl Escapist for EscapistService {
     }
 }
 
-const DB_NAME: &str = "ESCAPIST";
-
-fn get_collection<T: Send + Sync>(client: &Client, collection_name: String) -> Collection<T> {
+fn get_collection<T: Send + Sync>(client: &Client, db_name: String, collection_name: String) -> Collection<T> {
     client
-        .database(DB_NAME)
+        .database(db_name.as_str())
         .collection(collection_name.as_str())
 }
 
@@ -240,30 +282,33 @@ fn get_collection<T: Send + Sync>(client: &Client, collection_name: String) -> C
 impl Crud for EscapistService {
     async fn insert_one(
         &self,
+        db_name: String,
         collection: String,
         doc_egg: MongoDocEgg,
     ) -> Result<ObjectId, MongoError> {
-        let collection: Collection<MongoDocEgg> = get_collection(&self.client, collection);
+        let collection: Collection<MongoDocEgg> = get_collection(&self.client, db_name, collection);
         let result = collection.insert_one(doc_egg).await;
         return result.map(|r| r.inserted_id.as_object_id().unwrap());
     }
 
     async fn update_one(
         &self,
+        db_name: String,
         collection: String,
         query: BsonDocument,
         replacement: MongoDoc,
     ) -> MongoResult<Option<MongoDoc>> {
-        let collection: Collection<MongoDoc> = get_collection(&self.client, collection);
+        let collection: Collection<MongoDoc> = get_collection(&self.client, db_name, collection);
         return collection.find_one_and_replace(query, replacement).await;
     }
 
     async fn find_one(
         &self,
+        db_name: String,
         collection: String,
         query: BsonDocument,
     ) -> MongoResult<Option<MongoDoc>> {
-        let collection: Collection<MongoDoc> = get_collection(&self.client, collection);
+        let collection: Collection<MongoDoc> = get_collection(&self.client, db_name, collection);
         return collection.find_one(query).await;
     }
 
@@ -286,6 +331,7 @@ mod tests {
     impl Crud for EscapistService {
         async fn insert_one(
             &self,
+            _db_name: String,
             _collection: String,
             _doc_egg: MongoDocEgg,
         ) -> Result<ObjectId, MongoError> {
@@ -298,6 +344,7 @@ mod tests {
 
         async fn update_one(
             &self,
+            _db_name: String,
             _collection: String,
             _query: BsonDocument,
             replacement: MongoDoc,
@@ -311,6 +358,7 @@ mod tests {
 
         async fn find_one(
             &self,
+            _db_name: String,
             _collection: String,
             _query: BsonDocument,
         ) -> MongoResult<Option<MongoDoc>> {
