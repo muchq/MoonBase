@@ -23,9 +23,12 @@ TEST(SERVICE_TEST, BasicAssertions) {
   builder.RegisterService(&service);
   std::unique_ptr<Server> server(builder.BuildAndStart());
 
+  auto channel = server->InProcessChannel({});
   auto stub = Greeter::NewStub(server->InProcessChannel({}));
 
   ClientContext context;
+  context.AddMetadata("app-name", "test-app");
+
   HelloRequest req;
   HelloReply res;
   req.set_name("Test Name");

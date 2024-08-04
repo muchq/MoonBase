@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "absl/status/statusor.h"
-#include "cpp/cards/golf/golf.h"
 #include "mongoose.h"
 #include "protos/golf_ws/golf_ws.pb.h"
 

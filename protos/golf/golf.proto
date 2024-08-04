@@ -1,0 +1,122 @@
+syntax = "proto3";
+
+package golf;
+
+service Golf {
+  rpc RegisterPlayer (RegisterUserRequest) returns (RegisterUserResponse) {}
+  rpc NewGame (NewGameRequest) returns (NewGameResponse) {}
+  rpc JoinGame (JoinGameRequest) returns (JoinGameResponse) {}
+  rpc Peek (PeekRequest) returns (PeekResponse) {}
+  rpc DiscardDraw (DiscardDrawRequest) returns (DiscardDrawResponse) {}
+  rpc SwapForDraw (SwapForDrawRequest) returns (SwapForDrawResponse) {}
+  rpc SwapForDiscard (SwapForDiscardRequest) returns (SwapForDiscardResponse) {}
+  rpc Knock (KnockRequest) returns (KnockResponse) {}
+}
+
+message RegisterUserRequest {
+  string user_id = 1;
+}
+
+message RegisterUserResponse {
+}
+
+message NewGameRequest {
+  string user_id = 1;
+  int32 number_of_players = 2;
+}
+
+message NewGameResponse {
+  GameState game_state = 1;
+}
+
+message JoinGameRequest {
+  string user_id = 1;
+  string game_id = 2;
+}
+
+message JoinGameResponse {
+  GameState game_state = 1;
+}
+
+message PeekRequest {
+  string user_id = 1;
+}
+
+message PeekResponse {
+  GameState game_state = 1;
+}
+
+message DiscardDrawRequest {
+  string user_id = 1;
+}
+
+message DiscardDrawResponse {
+  GameState game_state = 1;
+}
+
+enum Position {
+  TOP_LEFT = 0;
+  TOP_RIGHT = 1;
+  BOTTOM_LEFT = 2;
+  BOTTOM_RIGHT = 3;
+}
+
+message SwapForDrawRequest {
+  string user_id = 1;
+  Position position = 2;
+}
+
+message SwapForDrawResponse {
+  GameState game_state = 1;
+}
+
+message SwapForDiscardRequest {
+  string user_id = 1;
+  Position position = 2;
+}
+
+message SwapForDiscardResponse {
+  GameState game_state = 1;
+}
+
+message KnockRequest {
+  string user_id = 1;
+}
+
+message KnockResponse {
+  GameState game_state = 1;
+}
+
+message VisibleHand {
+  string bottom_left = 1;
+  string bottom_right = 2;
+}
+
+message GameState {
+  bool all_here = 1;
+  int32 discard_size = 2;
+  int32 draw_size = 3;
+  string game_id = 4;
+  bool game_started = 5;
+  bool game_over = 6;
+  optional string knocker = 7;
+  optional VisibleHand hand = 8;
+  int32 number_of_players = 9;
+  repeated string players = 10;
+  repeated int32 scores = 11;
+  optional string top_discard = 12;
+  optional string top_draw = 13;
+  bool your_turn = 14;
+}
+
+message ErrorResponse {
+  string message = 1;
+}
+
+message ResponseWrapper {
+  optional int32 id = 1;
+  oneof kind {
+    GameState game_state = 2;
+    ErrorResponse error = 3;
+  }
+}

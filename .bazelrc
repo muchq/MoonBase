@@ -6,8 +6,9 @@ common --enable_bzlmod=true
 common --disk_cache=~/bzlcache
 common --repository_cache=~/.bzl_repo_cache
 
-common --cxxopt='-std=c++17'
-common --host_cxxopt='-std=c++17'
+common --cxxopt='-std=c++20'
+common --host_cxxopt='-std=c++20'
+# common --action_env=BAZEL_CXXOPTS="-std=c++20"
 
 build:debug -c dbg
 

@@ -2,6 +2,7 @@
 
 #include <grpcpp/client_context.h>
 
+#include <memory>
 #include <string>
 #include <unordered_map>
 
@@ -25,9 +26,9 @@ StatusOr<DocIdAndVersion> EscapistClient::InsertDoc(const string& collection,
   PopulateDocEgg(request.mutable_doc(), input_doc_egg);
 
   InsertDocResponse rpc_reply;
-  ClientContext context;
+  auto context = MakeClientContext();
 
-  auto rpc_status = stub_->InsertDoc(&context, request, &rpc_reply);
+  auto rpc_status = stub_->InsertDoc(context.get(), request, &rpc_reply);
   return HandleIdAndVersionResponse(rpc_status, rpc_reply.id(), rpc_reply.version());
 }
 
@@ -54,9 +55,9 @@ StatusOr<DocIdAndVersion> EscapistClient::UpdateDoc(const string& collection,
   PopulateDocEgg(request.mutable_doc(), input_doc_egg);
 
   UpdateDocResponse rpc_reply;
-  ClientContext context;
+  auto context = MakeClientContext();
 
-  auto rpc_status = stub_->UpdateDoc(&context, request, &rpc_reply);
+  auto rpc_status = stub_->UpdateDoc(context.get(), request, &rpc_reply);
   return HandleIdAndVersionResponse(rpc_status, rpc_reply.id(), rpc_reply.version());
 }
 
@@ -73,9 +74,9 @@ StatusOr<Doc> EscapistClient::FindDocById(const string& collection, const string
   request.set_id(id);
 
   FindDocByIdResponse rpc_reply;
-  ClientContext context;
+  auto context = MakeClientContext();
 
-  auto rpc_status = stub_->FindDocById(&context, request, &rpc_reply);
+  auto rpc_status = stub_->FindDocById(context.get(), request, &rpc_reply);
 
   return HandleDocResponse(rpc_status, rpc_reply.doc());
 }
@@ -97,11 +98,17 @@ StatusOr<Doc> EscapistClient::FindDocByTags(const string& collection,
   }
 
   FindDocResponse rpc_reply;
-  ClientContext context;
+  auto context = MakeClientContext();
 
-  auto rpc_status = stub_->FindDoc(&context, request, &rpc_reply);
+  auto rpc_status = stub_->FindDoc(context.get(), request, &rpc_reply);
 
   return HandleDocResponse(rpc_status, rpc_reply.doc());
+}
+
+std::unique_ptr<ClientContext> EscapistClient::MakeClientContext() {
+  std::unique_ptr<ClientContext> client_context = std::make_unique<ClientContext>();
+  client_context->AddMetadata("db-name", db_);
+  return client_context;
 }
 
 void EscapistClient::PopulateDocEgg(DocumentEgg* mutable_doc_egg, const DocEgg& input_doc_egg) {

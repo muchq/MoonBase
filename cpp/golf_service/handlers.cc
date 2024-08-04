@@ -17,7 +17,8 @@ using std::string;
 
 std::mutex m;
 std::unordered_map<std::string, mg_connection *> connectionsByUser;
-golf::GameManager gm;
+auto game_store = std::make_shared<golf::InMemoryGameStore>();
+golf::GameManager gm{game_store};
 golf::GameStateMapper gameStateMapper{{}};
 
 template <RequestWrapper::KindCase T>
@@ -91,8 +92,11 @@ static auto validatePosition(const golf_ws::Position &position,
 static auto userStateToJson(const golf::GameStatePtr &gameStatePtr, const string &user) -> string {
   const auto stateForUser = gameStateMapper.gameStateToProto(gameStatePtr, user);
   std::string userJson;
-  google::protobuf::util::MessageToJsonString(stateForUser, &userJson);
-  return userJson;
+  auto status = google::protobuf::util::MessageToJsonString(stateForUser, &userJson);
+  if (status.ok()) {
+    return userJson;
+  }
+  return "UNKNOWN";
 }
 
 static void handleGameManagerResult(const absl::StatusOr<golf::GameStatePtr> &res,

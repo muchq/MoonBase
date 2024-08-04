@@ -2,7 +2,6 @@
 #define CPP_CARDS_GOLF_GAME_MANAGER_H
 
 #include <deque>
-#include <functional>
 #include <memory>
 #include <random>
 #include <string>
@@ -12,55 +11,47 @@
 #include "absl/status/statusor.h"
 #include "cpp/cards/card.h"
 #include "cpp/cards/golf/game_state.h"
+#include "cpp/cards/golf/game_store.h"
 #include "cpp/cards/golf/player.h"
 
 namespace golf {
 
 typedef std::shared_ptr<const GameState> GameStatePtr;
+using absl::Status;
+using absl::StatusOr;
+using std::string;
 
 // Not thread-safe. requires external synchronization
 class GameManager {
  public:
-  [[nodiscard]] absl::StatusOr<std::string> registerUser(const std::string& name);
-  void unregisterUser(const std::string& name);
-  [[nodiscard]] absl::StatusOr<GameStatePtr> newGame(const std::string& name, int players);
-  [[nodiscard]] absl::StatusOr<GameStatePtr> joinGame(const std::string& gameId,
-                                                      const std::string& name);
-  [[nodiscard]] absl::StatusOr<GameStatePtr> leaveGame(const std::string& name);
-  [[nodiscard]] absl::StatusOr<GameStatePtr> peekAtDrawPile(const std::string& name);
-  [[nodiscard]] absl::StatusOr<GameStatePtr> swapDrawForDiscardPile(const std::string& name);
-  [[nodiscard]] absl::StatusOr<GameStatePtr> swapForDrawPile(const std::string& name,
-                                                             Position position);
-  [[nodiscard]] absl::StatusOr<GameStatePtr> swapForDiscardPile(const std::string& name,
-                                                                Position position);
-  [[nodiscard]] absl::StatusOr<GameStatePtr> knock(const std::string& name);
+  explicit GameManager(std::shared_ptr<GameStoreInterface> game_store)
+      : game_store_(std::move(game_store)) {}
+  [[nodiscard]] StatusOr<string> registerUser(const string& user_id);
+  void unregisterUser(const string& name);
+  [[nodiscard]] StatusOr<GameStatePtr> newGame(const string& user_id, int players);
+  [[nodiscard]] StatusOr<GameStatePtr> joinGame(const string& game_id, const string& name);
+  [[nodiscard]] StatusOr<GameStatePtr> leaveGame(const string& user_id);
+  [[nodiscard]] StatusOr<GameStatePtr> peekAtDrawPile(const string& user_id);
+  [[nodiscard]] StatusOr<GameStatePtr> swapDrawForDiscardPile(const string& user_id);
+  [[nodiscard]] StatusOr<GameStatePtr> swapForDrawPile(const string& user_id, Position position);
+  [[nodiscard]] StatusOr<GameStatePtr> swapForDiscardPile(const string& user_id, Position position);
+  [[nodiscard]] StatusOr<GameStatePtr> knock(const string& user_id);
 
-  [[nodiscard]] std::unordered_set<std::string> getUsersOnline() const { return usersOnline; }
-  [[nodiscard]] std::unordered_map<std::string, std::string> getGameIdsByUserId() const {
-    return gameIdsByUser;
-  }
-  [[nodiscard]] const std::unordered_map<std::string, GameStatePtr>& getGamesById() const {
-    return gamesById;
-  }
-  [[nodiscard]] std::unordered_set<std::string> getUsersByGameId(const std::string& gameId) const {
-    if (usersByGame.find(gameId) == usersByGame.end()) {
-      return {};
-    }
-    return usersByGame.at(gameId);
-  }
+  // do these methods belong here?
+  [[nodiscard]] std::unordered_set<string> getUsersOnline() const;
+  [[nodiscard]] std::unordered_map<string, string> getGameIdsByUserId() const;
+  [[nodiscard]] std::unordered_set<GameStatePtr> getGames() const;
+  [[nodiscard]] std::unordered_set<string> getUsersByGameId(const string& game_id) const;
 
  private:
-  [[nodiscard]] absl::StatusOr<GameStatePtr> getGameStateForUser(const std::string& name) const;
-  [[nodiscard]] absl::StatusOr<GameStatePtr> updateGameState(absl::StatusOr<GameState> updateResult,
-                                                             const std::string& gameId);
+  [[nodiscard]] StatusOr<GameStatePtr> getGameStateForUser(const string& user_id) const;
+  [[nodiscard]] StatusOr<GameStatePtr> updateGameState(StatusOr<GameState> updateResult,
+                                                       const string& gameId);
   [[nodiscard]] std::mt19937 randomGenerator() const;
-  [[nodiscard]] std::string generateRandomAlphanumericString(std::size_t len) const;
-  [[nodiscard]] std::optional<std::string> generateUnusedRandomId() const;
+  [[nodiscard]] string generateRandomAlphanumericString(std::size_t len) const;
+  [[nodiscard]] std::optional<string> generateUnusedRandomId() const;
   [[nodiscard]] static std::deque<Card> shuffleNewDeck();
-  std::unordered_set<std::string> usersOnline;
-  std::unordered_map<std::string, std::string> gameIdsByUser;
-  std::unordered_map<std::string, std::unordered_set<std::string>> usersByGame;
-  std::unordered_map<std::string, GameStatePtr> gamesById;
+  std::shared_ptr<GameStoreInterface> game_store_;
 };
 
 }  // namespace golf
