@@ -24,6 +24,6 @@ void RunServer(uint16_t port) {
 }
 
 int main() {
-  RunServer(8089);
+  RunServer(8088);
   return 0;
 }
