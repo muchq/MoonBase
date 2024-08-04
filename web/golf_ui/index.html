@@ -206,7 +206,7 @@ div#actions button {
         },
         id: reqId++
       };
-      log.innerText = 'REGISTERED: ' + message.value + '<br/>';
+      log.textContent = 'REGISTERED: ' + message.value + '<br/>';
       ws.send(JSON.stringify(request));
     }
     start_game.onclick = function() {
