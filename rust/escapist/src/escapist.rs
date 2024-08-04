@@ -8,20 +8,25 @@ use mongodb::bson::oid::ObjectId;
 use mongodb::bson::Document as BsonDocument;
 use mongodb::bson::{doc, Bson};
 use mongodb::error::{Error as MongoError, Result as MongoResult};
+#[cfg(not(test))]
 use mongodb::{Client, Collection};
+use tonic::metadata::MetadataMap;
 use std::collections::HashMap;
 use tonic::{Request, Response, Status};
+#[cfg(not(test))]
 use uuid::Uuid;
 
 trait Crud {
     async fn insert_one(
         &self,
+        db_name: String,
         collection: String,
         doc_egg: MongoDocEgg,
     ) -> Result<ObjectId, MongoError>;
 
     async fn update_one(
         &self,
+        db_name: String,
         collection: String,
         query: BsonDocument,
         replacement: MongoDoc,
@@ -29,6 +34,7 @@ trait Crud {
 
     async fn find_one(
         &self,
+        db_name: String,
         collection: String,
         query: BsonDocument,
     ) -> MongoResult<Option<MongoDoc>>;
@@ -43,7 +49,7 @@ fn validate_insert_request(req: &InsertDocRequest) -> Result<(), Status> {
     if req.doc.is_none() {
         return Err(Status::invalid_argument("document is required"));
     }
-    return Result::Ok(());
+    Result::Ok(())
 }
 
 fn validate_update_request(req: &UpdateDocRequest) -> Result<(), Status> {
@@ -59,7 +65,7 @@ fn validate_update_request(req: &UpdateDocRequest) -> Result<(), Status> {
     if req.version.is_empty() {
         return Err(Status::invalid_argument("version is required"));
     }
-    return Result::Ok(());
+    Result::Ok(())
 }
 
 fn validate_find_by_id_request(req: &FindDocByIdRequest) -> Result<(), Status> {
@@ -69,7 +75,7 @@ fn validate_find_by_id_request(req: &FindDocByIdRequest) -> Result<(), Status> {
     if req.id.is_empty() {
         return Err(Status::invalid_argument("id is required"));
     }
-    return Result::Ok(());
+    Result::Ok(())
 }
 
 fn validate_find_by_tags_request(req: &FindDocRequest) -> Result<(), Status> {
@@ -79,7 +85,7 @@ fn validate_find_by_tags_request(req: &FindDocRequest) -> Result<(), Status> {
     if req.tags.is_empty() {
         return Err(Status::invalid_argument("tags are required"));
     }
-    return Result::Ok(());
+    Result::Ok(())
 }
 
 #[cfg(not(test))]
@@ -103,16 +109,37 @@ fn convert_hashmap_to_document(hash_map: HashMap<String, String>) -> BsonDocumen
     query_doc
 }
 
+const DB_NAME_KEY: &str = "db-name";
+
+fn read_db_name_from_metadata(metadata: &MetadataMap) -> Option<String> {
+  let db_name_maybe = metadata.get(DB_NAME_KEY);
+  db_name_maybe?;
+  let db_name = db_name_maybe.unwrap();
+  let db_str_maybe = db_name.to_str();
+  if db_str_maybe.is_err() {
+    return None;
+  }
+  let db_str = db_str_maybe.unwrap();
+  let db_string = db_str.to_string();
+  if db_string.is_empty() {
+    return None;
+  }
+  Some(db_string)
+}
+
 #[tonic::async_trait]
 impl Escapist for EscapistService {
     async fn insert_doc(
         &self,
         request: Request<InsertDocRequest>,
     ) -> Result<Response<InsertDocResponse>, Status> {
-        let req = request.into_inner();
-        if let Err(status) = validate_insert_request(&req) {
-            return Err(status);
+        let db_name_maybe = read_db_name_from_metadata(request.metadata());
+        if db_name_maybe.is_none() {
+          return Err(Status::invalid_argument("db-name is required"));
         }
+        let db_name = db_name_maybe.unwrap();
+        let req = request.into_inner();
+        validate_insert_request(&req)?;
 
         let version_string = self.new_uuid();
         let doc_egg = req.doc.unwrap();
@@ -122,7 +149,7 @@ impl Escapist for EscapistService {
             tags: doc_egg.tags,
         };
 
-        match self.insert_one(req.collection, mongo_doc).await {
+        match self.insert_one(db_name, req.collection, mongo_doc).await {
             Ok(object_id) => Ok(Response::new(InsertDocResponse {
                 id: object_id.to_hex(),
                 version: version_string,
@@ -136,10 +163,13 @@ impl Escapist for EscapistService {
         &self,
         request: Request<UpdateDocRequest>,
     ) -> Result<Response<UpdateDocResponse>, Status> {
-        let req = request.into_inner();
-        if let Err(status) = validate_update_request(&req) {
-            return Err(status);
+        let db_name_maybe = read_db_name_from_metadata(request.metadata());
+        if db_name_maybe.is_none() {
+          return Err(Status::invalid_argument("db-name is required"));
         }
+        let db_name = db_name_maybe.unwrap();
+        let req = request.into_inner();
+        validate_update_request(&req)?;
 
         let doc_to_update = req.doc.unwrap();
         let id_result = ObjectId::parse_str(req.id);
@@ -159,7 +189,7 @@ impl Escapist for EscapistService {
 
         let query = doc! { "_id": id, "version": expected_version };
         match self
-            .update_one(req.collection, query, replacement_doc)
+            .update_one(db_name, req.collection, query, replacement_doc)
             .await
         {
             Ok(Some(_)) => Ok(Response::new(UpdateDocResponse {
@@ -175,10 +205,13 @@ impl Escapist for EscapistService {
         &self,
         request: Request<FindDocByIdRequest>,
     ) -> Result<Response<FindDocByIdResponse>, Status> {
-        let req = request.into_inner();
-        if let Err(status) = validate_find_by_id_request(&req) {
-            return Err(status);
+        let db_name_maybe = read_db_name_from_metadata(request.metadata());
+        if db_name_maybe.is_none() {
+          return Err(Status::invalid_argument("db-name is required"));
         }
+        let db_name = db_name_maybe.unwrap();
+        let req = request.into_inner();
+        validate_find_by_id_request(&req)?;
 
         let id_result = ObjectId::parse_str(&req.id);
         if id_result.is_err() {
@@ -186,7 +219,7 @@ impl Escapist for EscapistService {
         }
 
         let id = id_result.unwrap();
-        match self.find_one(req.collection, doc! { "_id": id }).await {
+        match self.find_one(db_name, req.collection, doc! { "_id": id }).await {
             Ok(Some(mongo_doc)) => {
                 let res = FindDocByIdResponse {
                     doc: Some(Document {
@@ -207,13 +240,16 @@ impl Escapist for EscapistService {
         &self,
         request: Request<FindDocRequest>,
     ) -> Result<Response<FindDocResponse>, Status> {
-        let req = request.into_inner();
-        if let Err(status) = validate_find_by_tags_request(&req) {
-            return Err(status);
+        let db_name_maybe = read_db_name_from_metadata(request.metadata());
+        if db_name_maybe.is_none() {
+          return Err(Status::invalid_argument("db-name is required"));
         }
+        let db_name = db_name_maybe.unwrap();
+        let req = request.into_inner();
+        validate_find_by_tags_request(&req)?;
 
         let bson_query = convert_hashmap_to_document(req.tags);
-        match self.find_one(req.collection, bson_query).await {
+        match self.find_one(db_name, req.collection, bson_query).await {
             Ok(Some(found)) => Ok(Response::new(FindDocResponse {
                 doc: Some(Document {
                     id: found._id.to_hex(),
@@ -228,11 +264,10 @@ impl Escapist for EscapistService {
     }
 }
 
-const DB_NAME: &str = "ESCAPIST";
-
-fn get_collection<T: Send + Sync>(client: &Client, collection_name: String) -> Collection<T> {
+#[cfg(not(test))]
+fn get_collection<T: Send + Sync>(client: &Client, db_name: String, collection_name: String) -> Collection<T> {
     client
-        .database(DB_NAME)
+        .database(db_name.as_str())
         .collection(collection_name.as_str())
 }
 
@@ -240,40 +275,44 @@ fn get_collection<T: Send + Sync>(client: &Client, collection_name: String) -> C
 impl Crud for EscapistService {
     async fn insert_one(
         &self,
+        db_name: String,
         collection: String,
         doc_egg: MongoDocEgg,
     ) -> Result<ObjectId, MongoError> {
-        let collection: Collection<MongoDocEgg> = get_collection(&self.client, collection);
+        let collection: Collection<MongoDocEgg> = get_collection(&self.client, db_name, collection);
         let result = collection.insert_one(doc_egg).await;
-        return result.map(|r| r.inserted_id.as_object_id().unwrap());
+        result.map(|r| r.inserted_id.as_object_id().unwrap())
     }
 
     async fn update_one(
         &self,
+        db_name: String,
         collection: String,
         query: BsonDocument,
         replacement: MongoDoc,
     ) -> MongoResult<Option<MongoDoc>> {
-        let collection: Collection<MongoDoc> = get_collection(&self.client, collection);
-        return collection.find_one_and_replace(query, replacement).await;
+        let collection: Collection<MongoDoc> = get_collection(&self.client, db_name, collection);
+        collection.find_one_and_replace(query, replacement).await
     }
 
     async fn find_one(
         &self,
+        db_name: String,
         collection: String,
         query: BsonDocument,
     ) -> MongoResult<Option<MongoDoc>> {
-        let collection: Collection<MongoDoc> = get_collection(&self.client, collection);
-        return collection.find_one(query).await;
+        let collection: Collection<MongoDoc> = get_collection(&self.client, db_name, collection);
+        collection.find_one(query).await
     }
 
     fn new_uuid(&self) -> String {
-        return Uuid::new_v4().to_string();
+        Uuid::new_v4().to_string()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use tonic::metadata::MetadataValue;
     use crate::escapist::*;
     use escapist_proto::escapist::DocumentEgg;
 
@@ -286,6 +325,7 @@ mod tests {
     impl Crud for EscapistService {
         async fn insert_one(
             &self,
+            _db_name: String,
             _collection: String,
             _doc_egg: MongoDocEgg,
         ) -> Result<ObjectId, MongoError> {
@@ -298,6 +338,7 @@ mod tests {
 
         async fn update_one(
             &self,
+            _db_name: String,
             _collection: String,
             _query: BsonDocument,
             replacement: MongoDoc,
@@ -311,6 +352,7 @@ mod tests {
 
         async fn find_one(
             &self,
+            _db_name: String,
             _collection: String,
             _query: BsonDocument,
         ) -> MongoResult<Option<MongoDoc>> {
@@ -340,6 +382,7 @@ mod tests {
         });
     }
 
+    #[cfg(feature = "rpc_success")]
     fn present_doc() -> Option<Document> {
         let mut tags = HashMap::new();
         tags.insert("player_1".to_string(), "Tippy".to_string());
@@ -356,10 +399,11 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "rpc_success")]
     async fn insert_doc_success() {
-        let req = Request::new(InsertDocRequest {
+        let mut req = Request::new(InsertDocRequest {
             collection: "foo".to_string(),
             doc: present_doc_egg(),
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let response = UNIT_UNDER_TEST.insert_doc(req).await.unwrap().into_inner();
         assert_eq!(response.id, TEST_ID_STRING);
         assert_eq!(response.version, TEST_VERSION_STRING);
@@ -368,12 +412,13 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "rpc_success")]
     async fn update_doc_success() {
-        let req = Request::new(UpdateDocRequest {
+        let mut req = Request::new(UpdateDocRequest {
             collection: "foo".to_string(),
             id: TEST_ID_STRING.to_string(),
             version: "123".to_string(),
             doc: present_doc_egg(),
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let response = UNIT_UNDER_TEST.update_doc(req).await.unwrap().into_inner();
         assert_eq!(response.id, TEST_ID_STRING);
         assert_eq!(response.version, TEST_VERSION_STRING);
@@ -382,10 +427,11 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "rpc_success")]
     async fn find_by_id_success() {
-        let req = Request::new(FindDocByIdRequest {
+        let mut req = Request::new(FindDocByIdRequest {
             collection: "foo".to_string(),
             id: TEST_ID_STRING.to_string(),
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let response = UNIT_UNDER_TEST
             .find_doc_by_id(req)
             .await
@@ -399,10 +445,11 @@ mod tests {
     async fn find_by_tags_success() {
         let mut tags = HashMap::new();
         tags.insert("player_1".to_string(), "Tippy".to_string());
-        let req = Request::new(FindDocRequest {
+        let mut req = Request::new(FindDocRequest {
             collection: "foo".to_string(),
             tags,
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let response = UNIT_UNDER_TEST.find_doc(req).await.unwrap().into_inner();
         assert_eq!(response.doc, present_doc());
     }
@@ -410,13 +457,14 @@ mod tests {
     #[tokio::test]
     #[cfg(not(feature = "rpc_success"))]
     async fn insert_doc_failed() {
-        let req = Request::new(InsertDocRequest {
+        let mut req = Request::new(InsertDocRequest {
             collection: "foo".to_string(),
             doc: Some(DocumentEgg {
                 bytes: "cool doc".to_string(),
                 tags: HashMap::new(),
             }),
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.insert_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::internal("").code());
         assert_eq!(status.message(), "internal error");
@@ -425,7 +473,7 @@ mod tests {
     #[tokio::test]
     #[cfg(not(feature = "rpc_success"))]
     async fn update_doc_failed() {
-        let req = Request::new(UpdateDocRequest {
+        let mut req = Request::new(UpdateDocRequest {
             collection: "foo".to_string(),
             id: TEST_ID_STRING.to_string(),
             version: TEST_VERSION_STRING.to_string(),
@@ -434,6 +482,7 @@ mod tests {
                 tags: HashMap::new(),
             }),
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.update_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::internal("").code());
         assert_eq!(status.message(), "internal error");
@@ -442,10 +491,11 @@ mod tests {
     #[tokio::test]
     #[cfg(not(feature = "rpc_success"))]
     async fn find_doc_by_id_failed() {
-        let req = Request::new(FindDocByIdRequest {
+        let mut req = Request::new(FindDocByIdRequest {
             collection: "foo".to_string(),
             id: TEST_ID_STRING.to_string(),
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.find_doc_by_id(req).await.unwrap_err();
         assert_eq!(status.code(), Status::internal("").code());
         assert_eq!(status.message(), "internal error");
@@ -456,10 +506,11 @@ mod tests {
     async fn find_doc_failed() {
         let mut tags = HashMap::new();
         tags.insert("foo".to_string(), "bar".to_string());
-        let req = Request::new(FindDocRequest {
+        let mut req = Request::new(FindDocRequest {
             collection: "foo".to_string(),
             tags,
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.find_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::internal("").code());
         assert_eq!(status.message(), "internal error");
@@ -467,21 +518,35 @@ mod tests {
 
     #[tokio::test]
     async fn insert_doc_validates_collection_non_empty() {
-        let req = Request::new(InsertDocRequest {
+        let mut req = Request::new(InsertDocRequest {
             collection: "".to_string(),
             doc: present_doc_egg(),
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.insert_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "collection is required");
     }
 
     #[tokio::test]
+    async fn insert_doc_validates_db_name_non_empty() {
+        let mut req = Request::new(InsertDocRequest {
+            collection: "foo".to_string(),
+            doc: present_doc_egg(),
+        });
+        req.metadata_mut().append("db-name", MetadataValue::from_static(""));
+        let status = UNIT_UNDER_TEST.insert_doc(req).await.unwrap_err();
+        assert_eq!(status.code(), Status::invalid_argument("").code());
+        assert_eq!(status.message(), "db-name is required");
+    }
+
+    #[tokio::test]
     async fn insert_doc_validates_doc_present() {
-        let req = Request::new(InsertDocRequest {
+        let mut req = Request::new(InsertDocRequest {
             collection: "foo".to_string(),
             doc: None,
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.insert_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "document is required");
@@ -489,25 +554,40 @@ mod tests {
 
     #[tokio::test]
     async fn update_doc_validates_collection_present() {
-        let req = Request::new(UpdateDocRequest {
+        let mut req = Request::new(UpdateDocRequest {
             collection: "".to_string(),
             id: TEST_ID_STRING.to_string(),
             version: "123".to_string(),
             doc: present_doc_egg(),
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.update_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "collection is required");
     }
 
     #[tokio::test]
-    async fn update_doc_validates_id() {
+    async fn update_doc_validates_db_name_present() {
         let req = Request::new(UpdateDocRequest {
+            collection: "foo".to_string(),
+            id: TEST_ID_STRING.to_string(),
+            version: "123".to_string(),
+            doc: present_doc_egg(),
+        });
+        let status = UNIT_UNDER_TEST.update_doc(req).await.unwrap_err();
+        assert_eq!(status.code(), Status::invalid_argument("").code());
+        assert_eq!(status.message(), "db-name is required");
+    }
+
+    #[tokio::test]
+    async fn update_doc_validates_id() {
+        let mut req = Request::new(UpdateDocRequest {
             collection: "foo".to_string(),
             id: "".to_string(),
             version: "123".to_string(),
             doc: present_doc_egg(),
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.update_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "id is required");
@@ -515,12 +595,13 @@ mod tests {
 
     #[tokio::test]
     async fn update_doc_validates_version() {
-        let req = Request::new(UpdateDocRequest {
+        let mut req = Request::new(UpdateDocRequest {
             collection: "foo".to_string(),
             id: TEST_ID_STRING.to_string(),
             version: "".to_string(),
             doc: present_doc_egg(),
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.update_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "version is required");
@@ -528,21 +609,34 @@ mod tests {
 
     #[tokio::test]
     async fn find_by_id_validates_collection() {
-        let req = Request::new(FindDocByIdRequest {
+        let mut req = Request::new(FindDocByIdRequest {
             collection: "".to_string(),
             id: TEST_ID_STRING.to_string(),
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.find_doc_by_id(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "collection is required");
     }
 
     #[tokio::test]
-    async fn find_by_id_validates_id() {
+    async fn find_by_id_validates_db_name() {
         let req = Request::new(FindDocByIdRequest {
+            collection: "foo".to_string(),
+            id: TEST_ID_STRING.to_string(),
+        });
+        let status = UNIT_UNDER_TEST.find_doc_by_id(req).await.unwrap_err();
+        assert_eq!(status.code(), Status::invalid_argument("").code());
+        assert_eq!(status.message(), "db-name is required");
+    }
+
+    #[tokio::test]
+    async fn find_by_id_validates_id() {
+        let mut req = Request::new(FindDocByIdRequest {
             collection: "foo".to_string(),
             id: "".to_string(),
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.find_doc_by_id(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "id is required");
@@ -552,21 +646,37 @@ mod tests {
     async fn find_by_tags_validates_collection() {
         let mut tags = HashMap::new();
         tags.insert("foo".to_string(), "bar".to_string());
-        let req = Request::new(FindDocRequest {
+        let mut req = Request::new(FindDocRequest {
             collection: "".to_string(),
             tags,
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.find_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "collection is required");
     }
 
     #[tokio::test]
+    async fn find_by_tags_validates_db_name() {
+        let mut tags = HashMap::new();
+        tags.insert("foo".to_string(), "bar".to_string());
+        let mut req = Request::new(FindDocRequest {
+            collection: "foo".to_string(),
+            tags,
+        });
+        req.metadata_mut().append("db-name", MetadataValue::from_static(""));
+        let status = UNIT_UNDER_TEST.find_doc(req).await.unwrap_err();
+        assert_eq!(status.code(), Status::invalid_argument("").code());
+        assert_eq!(status.message(), "db-name is required");
+    }
+
+    #[tokio::test]
     async fn find_by_tags_validates_tags() {
-        let req = Request::new(FindDocRequest {
+        let mut req = Request::new(FindDocRequest {
             collection: "foo".to_string(),
             tags: HashMap::new(),
         });
+        req.metadata_mut().append("db-name", MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.find_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "tags are required");
