@@ -4,24 +4,26 @@
 
 #include <vector>
 
-#include "cpp/cards/card.h"
+#include "cpp/cards/golf/game_store.h"
 
 using namespace cards;
 using namespace golf;
 
 TEST(GameManager, Constructor) {
-  GameManager gm;
+  auto store = std::make_shared<InMemoryGameStore>();
+  GameManager gm{store};
 
   std::unordered_set<std::string> expectedUsers;
   EXPECT_EQ(gm.getUsersOnline(), expectedUsers);
 
   EXPECT_TRUE(gm.getGameIdsByUserId().empty());
 
-  EXPECT_TRUE(gm.getGamesById().empty());
+  EXPECT_TRUE(gm.getGames().empty());
 }
 
 TEST(GameManager, RegisterUser) {
-  GameManager gm;
+  auto store = std::make_shared<InMemoryGameStore>();
+  GameManager gm{store};
   auto id = gm.registerUser("Andy");
 
   EXPECT_TRUE(id.ok());
@@ -29,7 +31,8 @@ TEST(GameManager, RegisterUser) {
 }
 
 TEST(GameManager, RegisterUserValidates) {
-  GameManager gm;
+  auto store = std::make_shared<InMemoryGameStore>();
+  GameManager gm{store};
   auto res1 = gm.registerUser("");
   EXPECT_FALSE(res1.ok());
   EXPECT_EQ(res1.status().message(), "username length must be between 4 and 15 chars");
@@ -44,17 +47,19 @@ TEST(GameManager, RegisterUserValidates) {
 }
 
 TEST(GameManager, RegisterUserNameTaken) {
-  GameManager gm;
+  auto store = std::make_shared<InMemoryGameStore>();
+  GameManager gm{store};
   auto res1 = gm.registerUser("foosername");
   EXPECT_TRUE(res1.ok());
 
   auto res2 = gm.registerUser("foosername");
   EXPECT_FALSE(res2.ok());
-  EXPECT_EQ(res2.status().message(), "username taken");
+  EXPECT_EQ(res2.status().message(), "already exists");
 }
 
 TEST(GameManager, NewGame) {
-  GameManager gm;
+  auto store = std::make_shared<InMemoryGameStore>();
+  GameManager gm{store};
   auto res1 = gm.registerUser("user1");
   EXPECT_TRUE(res1.ok());
 
@@ -72,7 +77,8 @@ TEST(GameManager, NewGame) {
 }
 
 TEST(GameManager, NewGameWithWrongPlayerCount) {
-  GameManager gm;
+  auto store = std::make_shared<InMemoryGameStore>();
+  GameManager gm{store};
   auto res1 = gm.registerUser("user1");
   EXPECT_TRUE(res1.ok());
 
@@ -86,14 +92,16 @@ TEST(GameManager, NewGameWithWrongPlayerCount) {
 }
 
 TEST(GameManager, NewGameWithUnknownUser) {
-  GameManager gm;
+  auto store = std::make_shared<InMemoryGameStore>();
+  GameManager gm{store};
   auto res = gm.newGame("user1", 2);
   EXPECT_FALSE(res.ok());
-  EXPECT_EQ(res.status().message(), "unregistered username");
+  EXPECT_EQ(res.status().message(), "unknown user");
 }
 
 TEST(GameManager, JoinGame) {
-  GameManager gm;
+  auto store = std::make_shared<InMemoryGameStore>();
+  GameManager gm{store};
   auto res1 = gm.registerUser("user1");
   EXPECT_TRUE(res1.ok());
 

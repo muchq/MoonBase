@@ -30,7 +30,7 @@ int main() {
 
   auto channel = grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials());
   auto stub = std::make_shared<Escapist::Stub>(Escapist::Stub(channel));
-  EscapistClient client(stub);
+  EscapistClient client(stub, "demo");
 
   DocEgg doc_egg{"hello this is nice", {{"player_1", "Tippy"}}};
 

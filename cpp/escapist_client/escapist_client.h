@@ -1,6 +1,7 @@
 #ifndef CPP_ESCAPIST_CLIENT_H
 #define CPP_ESCAPIST_CLIENT_H
 
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -34,7 +35,8 @@ struct DocEgg {
 
 class EscapistClient {
  public:
-  explicit EscapistClient(shared_ptr<Escapist::StubInterface> stub) : stub_(std::move(stub)) {}
+  explicit EscapistClient(shared_ptr<Escapist::StubInterface> stub, string db)
+      : stub_(std::move(stub)), db_(db) {}
 
   StatusOr<DocIdAndVersion> InsertDoc(const string& collection, const DocEgg& input_doc_egg);
 
@@ -47,6 +49,7 @@ class EscapistClient {
   StatusOr<Doc> FindDocByTags(const string& collection, const unordered_map<string, string>& tags);
 
  private:
+  std::unique_ptr<grpc::ClientContext> MakeClientContext();
   static void PopulateDocEgg(DocumentEgg* doc, const DocEgg& docEgg);
   static StatusOr<DocIdAndVersion> HandleIdAndVersionResponse(const grpc::Status& rpc_status,
                                                               const string& id,
@@ -54,6 +57,7 @@ class EscapistClient {
   static StatusOr<Doc> HandleDocResponse(const grpc::Status& rpc_status, const Document& doc);
 
   shared_ptr<Escapist::StubInterface> stub_;
+  string db_;
 };
 
 }  // namespace escapist

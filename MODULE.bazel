@@ -3,13 +3,7 @@ module(
     version = "1.0",
 )
 
-bazel_dep(name = "toolchains_llvm", version = "1.0.0")
-git_override(
-    module_name = "toolchains_llvm",
-    commit = "01132cfdae7d7187a885cf79d5a3ac1ed8a02e5a",
-    remote = "https://github.com/bazel-contrib/toolchains_llvm",
-)
-
+bazel_dep(name = "toolchains_llvm", version = "1.1.2")
 bazel_dep(name = "rules_python", version = "0.34.0")
 bazel_dep(name = "protobuf", version = "27.2", repo_name = "com_google_protobuf")
 bazel_dep(name = "grpc", version = "1.65.0", repo_name = "com_github_grpc_grpc")
