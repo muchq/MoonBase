@@ -102,9 +102,8 @@ StatusOr<GameStatePtr> InMemoryGameStore::UpdateGame(const GameStatePtr game_sta
 
 std::unordered_set<GameStatePtr> InMemoryGameStore::ReadAllGames() const {
   std::scoped_lock lock{game_state_mutex};
-  // TODO: switch to ranges once llvm publishes a release build for darwin-x86_64 for a recent version
-  // auto kv = std::ranges::views::values(games_by_id);
-  // return {kv.begin(), kv.end()};
+  // TODO: switch to ranges once llvm publishes a release build for darwin-x86_64 for a recent
+  // version auto kv = std::ranges::views::values(games_by_id); return {kv.begin(), kv.end()};
 
   std::unordered_set<GameStatePtr> games{};
   for (auto [_, game] : games_by_id) {

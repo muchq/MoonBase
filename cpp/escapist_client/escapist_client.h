@@ -35,7 +35,8 @@ struct DocEgg {
 
 class EscapistClient {
  public:
-  explicit EscapistClient(shared_ptr<Escapist::StubInterface> stub, string db) : stub_(std::move(stub)), db_(db) {}
+  explicit EscapistClient(shared_ptr<Escapist::StubInterface> stub, string db)
+      : stub_(std::move(stub)), db_(db) {}
 
   StatusOr<DocIdAndVersion> InsertDoc(const string& collection, const DocEgg& input_doc_egg);
 

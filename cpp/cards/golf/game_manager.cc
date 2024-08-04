@@ -263,45 +263,44 @@ StatusOr<GameStatePtr> GameManager::knock(const string& username) {
   return updateGameState(game->knock(playerIndex), game->getGameId());
 }
 
-  std::unordered_set<string> GameManager::getUsersOnline() const {
-    auto read_users_status = game_store_->GetUsers();
-    if (!read_users_status.ok()) {
-      return {}; // TODO: bubble status to caller
-    }
-    return *read_users_status;
+std::unordered_set<string> GameManager::getUsersOnline() const {
+  auto read_users_status = game_store_->GetUsers();
+  if (!read_users_status.ok()) {
+    return {};  // TODO: bubble status to caller
   }
+  return *read_users_status;
+}
 
+std::unordered_set<GameStatePtr> GameManager::getGames() const {
+  return game_store_->ReadAllGames();
+}
 
-  std::unordered_set<GameStatePtr> GameManager::getGames() const {
-    return game_store_->ReadAllGames();
-  }
-
-  std::unordered_map<string, string> GameManager::getGameIdsByUserId() const {
-    auto games_result = game_store_->ReadAllGames();
-    std::unordered_map<string, string> game_ids_by_user{};
-    for (auto g : games_result) {
-      auto game_id = g->getGameId();
-      for (auto p : g->getPlayers()) {
-        if (p.isPresent() && p.getName().has_value()) {
-          game_ids_by_user[p.getName().value()] = game_id;
-        }
-      }
-    }
-    return game_ids_by_user;
-  }
-
-  std::unordered_set<string> GameManager::getUsersByGameId(const string& game_id) const {
-    auto game_maybe = game_store_->ReadGame(game_id);
-    if (!game_maybe.ok()) {
-      return {};
-    }
-    std::unordered_set<string> users{};
-    for (auto p : (*game_maybe)->getPlayers()) {
+std::unordered_map<string, string> GameManager::getGameIdsByUserId() const {
+  auto games_result = game_store_->ReadAllGames();
+  std::unordered_map<string, string> game_ids_by_user{};
+  for (auto g : games_result) {
+    auto game_id = g->getGameId();
+    for (auto p : g->getPlayers()) {
       if (p.isPresent() && p.getName().has_value()) {
-        users.insert(p.getName().value());
+        game_ids_by_user[p.getName().value()] = game_id;
       }
     }
-    return users;
   }
+  return game_ids_by_user;
+}
+
+std::unordered_set<string> GameManager::getUsersByGameId(const string& game_id) const {
+  auto game_maybe = game_store_->ReadGame(game_id);
+  if (!game_maybe.ok()) {
+    return {};
+  }
+  std::unordered_set<string> users{};
+  for (auto p : (*game_maybe)->getPlayers()) {
+    if (p.isPresent() && p.getName().has_value()) {
+      users.insert(p.getName().value());
+    }
+  }
+  return users;
+}
 
 }  // namespace golf
