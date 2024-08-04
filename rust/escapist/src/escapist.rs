@@ -47,7 +47,7 @@ fn validate_insert_request(req: &InsertDocRequest) -> Result<(), Status> {
     if req.doc.is_none() {
         return Err(Status::invalid_argument("document is required"));
     }
-    return Result::Ok(());
+    Result::Ok(())
 }
 
 fn validate_update_request(req: &UpdateDocRequest) -> Result<(), Status> {
@@ -63,7 +63,7 @@ fn validate_update_request(req: &UpdateDocRequest) -> Result<(), Status> {
     if req.version.is_empty() {
         return Err(Status::invalid_argument("version is required"));
     }
-    return Result::Ok(());
+    Result::Ok(())
 }
 
 fn validate_find_by_id_request(req: &FindDocByIdRequest) -> Result<(), Status> {
@@ -73,7 +73,7 @@ fn validate_find_by_id_request(req: &FindDocByIdRequest) -> Result<(), Status> {
     if req.id.is_empty() {
         return Err(Status::invalid_argument("id is required"));
     }
-    return Result::Ok(());
+    Result::Ok(())
 }
 
 fn validate_find_by_tags_request(req: &FindDocRequest) -> Result<(), Status> {
@@ -83,7 +83,7 @@ fn validate_find_by_tags_request(req: &FindDocRequest) -> Result<(), Status> {
     if req.tags.is_empty() {
         return Err(Status::invalid_argument("tags are required"));
     }
-    return Result::Ok(());
+    Result::Ok(())
 }
 
 #[cfg(not(test))]
@@ -111,20 +111,18 @@ const DB_NAME_KEY: &str = "db-name";
 
 fn read_db_name_from_metadata(metadata: &MetadataMap) -> Option<String> {
   let db_name_maybe = metadata.get(DB_NAME_KEY);
-  if db_name_maybe.is_none() {
-    return None;
-  }
+  db_name_maybe?;
   let db_name = db_name_maybe.unwrap();
   let db_str_maybe = db_name.to_str();
-  if (db_str_maybe.is_err()) {
+  if db_str_maybe.is_err() {
     return None;
   }
   let db_str = db_str_maybe.unwrap();
   let db_string = db_str.to_string();
-  if (db_string.is_empty()) {
+  if db_string.is_empty() {
     return None;
   }
-  return Some(db_string);
+  Some(db_string)
 }
 
 #[tonic::async_trait]
@@ -134,14 +132,12 @@ impl Escapist for EscapistService {
         request: Request<InsertDocRequest>,
     ) -> Result<Response<InsertDocResponse>, Status> {
         let db_name_maybe = read_db_name_from_metadata(request.metadata());
-        if (db_name_maybe.is_none()) {
+        if db_name_maybe.is_none() {
           return Err(Status::invalid_argument("db-name is required"));
         }
         let db_name = db_name_maybe.unwrap();
         let req = request.into_inner();
-        if let Err(status) = validate_insert_request(&req) {
-            return Err(status);
-        }
+        validate_insert_request(&req)?;
 
         let version_string = self.new_uuid();
         let doc_egg = req.doc.unwrap();
@@ -166,14 +162,12 @@ impl Escapist for EscapistService {
         request: Request<UpdateDocRequest>,
     ) -> Result<Response<UpdateDocResponse>, Status> {
         let db_name_maybe = read_db_name_from_metadata(request.metadata());
-        if (db_name_maybe.is_none()) {
+        if db_name_maybe.is_none() {
           return Err(Status::invalid_argument("db-name is required"));
         }
         let db_name = db_name_maybe.unwrap();
         let req = request.into_inner();
-        if let Err(status) = validate_update_request(&req) {
-            return Err(status);
-        }
+        validate_update_request(&req)?;
 
         let doc_to_update = req.doc.unwrap();
         let id_result = ObjectId::parse_str(req.id);
@@ -210,14 +204,12 @@ impl Escapist for EscapistService {
         request: Request<FindDocByIdRequest>,
     ) -> Result<Response<FindDocByIdResponse>, Status> {
         let db_name_maybe = read_db_name_from_metadata(request.metadata());
-        if (db_name_maybe.is_none()) {
+        if db_name_maybe.is_none() {
           return Err(Status::invalid_argument("db-name is required"));
         }
         let db_name = db_name_maybe.unwrap();
         let req = request.into_inner();
-        if let Err(status) = validate_find_by_id_request(&req) {
-            return Err(status);
-        }
+        validate_find_by_id_request(&req)?;
 
         let id_result = ObjectId::parse_str(&req.id);
         if id_result.is_err() {
@@ -252,9 +244,7 @@ impl Escapist for EscapistService {
         }
         let db_name = db_name_maybe.unwrap();
         let req = request.into_inner();
-        if let Err(status) = validate_find_by_tags_request(&req) {
-            return Err(status);
-        }
+        validate_find_by_tags_request(&req)?;
 
         let bson_query = convert_hashmap_to_document(req.tags);
         match self.find_one(db_name, req.collection, bson_query).await {
@@ -288,7 +278,7 @@ impl Crud for EscapistService {
     ) -> Result<ObjectId, MongoError> {
         let collection: Collection<MongoDocEgg> = get_collection(&self.client, db_name, collection);
         let result = collection.insert_one(doc_egg).await;
-        return result.map(|r| r.inserted_id.as_object_id().unwrap());
+        result.map(|r| r.inserted_id.as_object_id().unwrap())
     }
 
     async fn update_one(
@@ -299,7 +289,7 @@ impl Crud for EscapistService {
         replacement: MongoDoc,
     ) -> MongoResult<Option<MongoDoc>> {
         let collection: Collection<MongoDoc> = get_collection(&self.client, db_name, collection);
-        return collection.find_one_and_replace(query, replacement).await;
+        collection.find_one_and_replace(query, replacement).await
     }
 
     async fn find_one(
@@ -309,11 +299,11 @@ impl Crud for EscapistService {
         query: BsonDocument,
     ) -> MongoResult<Option<MongoDoc>> {
         let collection: Collection<MongoDoc> = get_collection(&self.client, db_name, collection);
-        return collection.find_one(query).await;
+        collection.find_one(query).await
     }
 
     fn new_uuid(&self) -> String {
-        return Uuid::new_v4().to_string();
+        Uuid::new_v4().to_string()
     }
 }
 
