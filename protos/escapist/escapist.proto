@@ -10,14 +10,14 @@ service Escapist {
 }
 
 message DocumentEgg {
-  string bytes = 1;
+  bytes bytes = 1;
   map<string, string> tags = 2;
 }
 
 message Document {
   string id = 1;
   string version = 2;
-  string bytes = 3;
+  bytes bytes = 3;
   map<string, string> tags = 4;
   // consider
   // google.protobuf.Any details = 3;

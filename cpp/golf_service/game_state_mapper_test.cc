@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include "cpp/cards/card.h"
+#include "cpp/cards/golf/player.h"
 #include "protos/golf_ws/golf_ws.pb.h"
 
 using namespace cards;
@@ -11,12 +12,12 @@ using namespace golf;
 TEST(GameStateMapper, GameStateToProto) {
   CardMapper cm;
   GameStateMapper gsm{cm};
-  std::deque<Card> drawPile{5};
-  std::deque<Card> discardPile{6};
-  std::vector<Player> players{{"andy", 0, 1, 2, 3}};
+  std::deque<Card> drawPile{Card{5}};
+  std::deque<Card> discardPile{Card{6}};
+  std::vector<Player> players{{"andy", Card{0}, Card{1}, Card{2}, Card{3}}};
 
-  GameStatePtr state =
-      std::make_shared<GameState>(GameState{drawPile, discardPile, players, false, 0, -1, "foo"});
+  GameStatePtr state = std::make_shared<GameState>(
+      GameState{drawPile, discardPile, players, false, 0, -1, "foo", "bar"});
 
   auto proto = gsm.gameStateToProto(state, "andy");
 

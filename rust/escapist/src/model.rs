@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MongoDocEgg {
-    pub bytes: String,
+    pub bytes: Vec<u8>,
     pub version: String,
     pub tags: HashMap<String, String>,
 }
@@ -12,7 +12,7 @@ pub struct MongoDocEgg {
 #[derive(Serialize, Deserialize)]
 pub struct MongoDoc {
     pub _id: ObjectId,
-    pub bytes: String,
+    pub bytes: Vec<u8>,
     pub version: String,
     pub tags: HashMap<String, String>,
 }

@@ -1,4 +1,4 @@
-#include "cpp/cards/golf/game_store.h"
+#include "cpp/cards/golf/in_memory_game_store.h"
 
 #include <mutex>
 #include <ranges>
@@ -11,9 +11,12 @@ namespace golf {
 using absl::Status;
 using absl::StatusOr;
 using std::string;
+using std::unordered_set;
 
 std::mutex users_mutex{};
 std::mutex game_state_mutex{};
+
+static int counter = 0;
 
 Status InMemoryGameStore::AddUser(const string& user_id) {
   std::scoped_lock lock{users_mutex};
@@ -25,7 +28,7 @@ Status InMemoryGameStore::AddUser(const string& user_id) {
   return absl::OkStatus();
 }
 
-bool InMemoryGameStore::UserExists(const string& user_id) {
+StatusOr<bool> InMemoryGameStore::UserExists(const string& user_id) const {
   std::scoped_lock lock{users_mutex};
   return users_online.contains(user_id);
 }
@@ -36,14 +39,15 @@ Status InMemoryGameStore::RemoveUser(const string& user_id) {
   return absl::OkStatus();
 }
 
-StatusOr<std::unordered_set<string>> InMemoryGameStore::GetUsers() const {
+StatusOr<unordered_set<string>> InMemoryGameStore::GetUsers() const {
   std::scoped_lock lock{users_mutex};
   return users_online;
 }
 
-StatusOr<GameStatePtr> InMemoryGameStore::NewGame(const GameStatePtr game_state) {
+StatusOr<GameStatePtr> InMemoryGameStore::NewGame(const GameStatePtr game_state_no_id) {
   std::scoped_lock lock{game_state_mutex};
-  auto game_id = game_state->getGameId();
+  string game_id = std::to_string(counter++);
+  auto game_state = std::make_shared<GameState>(game_state_no_id->withIdAndVersion(game_id, "foo"));
   auto user_id_maybe = game_state->getPlayer(0).getName();
   if (user_id_maybe->empty()) {
     return absl::InternalError(
@@ -100,13 +104,13 @@ StatusOr<GameStatePtr> InMemoryGameStore::UpdateGame(const GameStatePtr game_sta
   return game_state;
 }
 
-std::unordered_set<GameStatePtr> InMemoryGameStore::ReadAllGames() const {
+StatusOr<unordered_set<GameStatePtr>> InMemoryGameStore::ReadAllGames() const {
   std::scoped_lock lock{game_state_mutex};
   // TODO: switch to ranges once llvm publishes a release build for darwin-x86_64 for a recent
   // version auto kv = std::ranges::views::values(games_by_id); return {kv.begin(), kv.end()};
 
   std::unordered_set<GameStatePtr> games{};
-  for (auto [_, game] : games_by_id) {
+  for (auto& [_, game] : games_by_id) {
     games.insert(game);
   }
   return games;

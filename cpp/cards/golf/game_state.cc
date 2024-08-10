@@ -64,7 +64,7 @@ StatusOr<GameState> GameState::peekAtDrawPile(int player) const {
     return FailedPreconditionError("you can only peek once per turn");
   }
 
-  return GameState{drawPile, discardPile, players, true, whoseTurn, whoKnocked, gameId};
+  return GameState{drawPile, discardPile, players, true, whoseTurn, whoKnocked, gameId, version_id};
 }
 
 StatusOr<GameState> GameState::swapDrawForDiscardPile(int player) const {
@@ -97,7 +97,8 @@ StatusOr<GameState> GameState::swapDrawForDiscardPile(int player) const {
                    false,
                    newWhoseTurn,
                    whoKnocked,
-                   gameId};
+                   gameId,
+                   version_id};
 }
 
 StatusOr<GameState> GameState::swapForDrawPile(int player, Position position) const {
@@ -147,7 +148,8 @@ StatusOr<GameState> GameState::swapForDrawPile(int player, Position position) co
                    false,
                    newWhoseTurn,
                    whoKnocked,
-                   gameId};
+                   gameId,
+                   version_id};
 }
 
 absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Position position) const {
@@ -194,9 +196,14 @@ absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Position pos
   // update whose turn it is
   int newWhoseTurn = (whoseTurn + 1) % players.size();
 
-  return GameState{
-      drawPile, discardPileForNewGameState, playersForNewGameState, false, newWhoseTurn, whoKnocked,
-      gameId};
+  return GameState{drawPile,
+                   discardPileForNewGameState,
+                   playersForNewGameState,
+                   false,
+                   newWhoseTurn,
+                   whoKnocked,
+                   gameId,
+                   version_id};
 }
 
 StatusOr<GameState> GameState::knock(int player) const {
@@ -219,12 +226,18 @@ StatusOr<GameState> GameState::knock(int player) const {
   // update whose turn it is
   int newWhoseTurn = (whoseTurn + 1) % players.size();
 
-  return GameState{drawPile, discardPile, players, false, newWhoseTurn, player, gameId};
+  return GameState{drawPile, discardPile, players, false, newWhoseTurn, player, gameId, version_id};
 }
 
 GameState GameState::withPlayers(vector<Player> newPlayers) const {
-  return GameState{drawPile,   discardPile, std::move(newPlayers), false, whoseTurn,
-                   whoKnocked, gameId};
+  return GameState{drawPile, discardPile, std::move(newPlayers), false, whoseTurn, whoKnocked,
+                   gameId,   version_id};
+}
+
+GameState GameState::withIdAndVersion(const std::string& _game_id,
+                                      const std::string& _version_id) const {
+  return GameState{drawPile,  discardPile, players,  peekedAtDrawPile,
+                   whoseTurn, whoKnocked,  _game_id, _version_id};
 }
 
 }  // namespace golf

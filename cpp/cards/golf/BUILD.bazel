@@ -18,14 +18,39 @@ cc_library(
 )
 
 cc_library(
+    name = "escapist_game_store",
+    srcs = ["escapist_game_store.cc"],
+    hdrs = ["escapist_game_store.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":game_state",
+        ":game_store",
+        "//cpp/escapist_client",
+        "//protos/escapist:escapist_cc_proto",
+        "//protos/golf:golf_model_cc",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_library(
+    name = "in_memory_game_store",
+    srcs = ["in_memory_game_store.cc"],
+    hdrs = ["in_memory_game_store.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":game_state",
+        ":game_store",
+    ],
+)
+
+cc_library(
     name = "game_store",
-    srcs = ["game_store.cc"],
+    srcs = [],
     hdrs = ["game_store.h"],
     visibility = ["//visibility:public"],
     deps = [
         ":game_state",
-        ":player",
-        "//cpp/cards",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
     ],
@@ -80,6 +105,7 @@ cc_test(
     srcs = ["game_manager_test.cc"],
     deps = [
         ":golf",
+        ":in_memory_game_store",
         "@googletest//:gtest_main",
     ],
 )

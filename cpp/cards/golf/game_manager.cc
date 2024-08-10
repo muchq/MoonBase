@@ -66,43 +66,13 @@ deque<Card> GameManager::shuffleNewDeck() {
   return deck;
 }
 
-// https://stackoverflow.com/a/444614/599075
-std::mt19937 GameManager::randomGenerator() const {
-  auto constexpr seed_bytes = sizeof(std::mt19937) * std::mt19937::state_size;
-  auto constexpr seed_len = seed_bytes / sizeof(std::seed_seq::result_type);
-  auto seed = std::array<std::seed_seq::result_type, seed_len>();
-  auto dev = std::random_device();
-  std::generate_n(begin(seed), seed_len, std::ref(dev));
-  auto seed_seq = std::seed_seq(begin(seed), end(seed));
-  return std::mt19937{seed_seq};
-}
-
-std::string GameManager::generateRandomAlphanumericString(std::size_t len) const {
-  static constexpr auto chars =
-      "0123456789"
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-      "abcdefghijklmnopqrstuvwxyz";
-  thread_local auto rng = randomGenerator();
-  auto dist = std::uniform_int_distribution{{}, std::strlen(chars) - 1};
-  auto result = std::string(len, '\0');
-  std::generate_n(begin(result), len, [&]() { return chars[dist(rng)]; });
-  return result;
-}
-
-std::optional<std::string> GameManager::generateUnusedRandomId() const {
-  for (int i = 0; i < 10; i++) {
-    auto attempt = generateRandomAlphanumericString(12);
-    auto existing_game = game_store_->ReadGame(attempt);
-    if (!existing_game.ok()) {
-      return attempt;
-    }
-  }
-  return {};
-}
-
 // TODO: support multiple decks for many players?
 StatusOr<GameStatePtr> GameManager::newGame(const string& user_id, int number_of_players) {
-  if (!game_store_->UserExists(user_id)) {
+  auto user_exists_status = game_store_->UserExists(user_id);
+  if (!user_exists_status.ok()) {
+    return user_exists_status.status();
+  }
+  if (!*user_exists_status) {
     return InvalidArgumentError("unknown user");
   }
 
@@ -110,11 +80,6 @@ StatusOr<GameStatePtr> GameManager::newGame(const string& user_id, int number_of
     return InvalidArgumentError("2 to 5 players");
   }
 
-  auto gameIdMaybe = generateUnusedRandomId();
-  if (!gameIdMaybe.has_value()) {
-    return InvalidArgumentError("could not generate unused game id");
-  }
-  const auto gameId = gameIdMaybe.value();
   deque<Card> mutableDrawPile = shuffleNewDeck();
 
   vector<Card> allDealt{};
@@ -148,13 +113,17 @@ StatusOr<GameStatePtr> GameManager::newGame(const string& user_id, int number_of
   const deque<Card> discardPile = std::move(mutableDiscardPile);
 
   auto game_state =
-      std::make_shared<GameState>(GameState{drawPile, discardPile, players, false, 0, -1, gameId});
+      std::make_shared<GameState>(GameState{drawPile, discardPile, players, false, 0, -1});
   return game_store_->NewGame(game_state);
 }
 
 StatusOr<GameStatePtr> GameManager::joinGame(const string& game_id, const string& user_id) {
-  if (!game_store_->UserExists(user_id)) {
-    return InvalidArgumentError("unregistered username");
+  auto user_exists_status = game_store_->UserExists(user_id);
+  if (!user_exists_status.ok()) {
+    return absl::InternalError("internal error");
+  }
+  if (!*user_exists_status) {
+    return InvalidArgumentError("unknown user");
   }
 
   auto game_read_status = game_store_->ReadGame(game_id);
@@ -185,12 +154,18 @@ StatusOr<GameStatePtr> GameManager::joinGame(const string& game_id, const string
   return game_store_->UpdateGame(updated_game);
 }
 
-StatusOr<GameStatePtr> GameManager::getGameStateForUser(const string& user_id) const {
-  if (!game_store_->UserExists(user_id)) {
+StatusOr<GameStatePtr> GameManager::getGameStateForUser(const string& game_id,
+                                                        const string& user_id) const {
+  auto user_exists_status = game_store_->UserExists(user_id);
+  if (!user_exists_status.ok()) {
+    return absl::InternalError("internal error");
+  }
+  if (!*user_exists_status) {
     return InvalidArgumentError("unknown user");
   }
 
-  return game_store_->ReadGameByUserId(user_id);
+  // TODO: validate user is in this game
+  return game_store_->ReadGame(game_id);
 }
 
 StatusOr<GameStatePtr> GameManager::updateGameState(StatusOr<GameState> updateResult,
@@ -203,62 +178,65 @@ StatusOr<GameStatePtr> GameManager::updateGameState(StatusOr<GameState> updateRe
   return game_store_->UpdateGame(game_state);
 }
 
-StatusOr<GameStatePtr> GameManager::peekAtDrawPile(const string& username) {
-  auto gameRes = getGameStateForUser(username);
-  if (!gameRes.ok()) {
-    return InvalidArgumentError(gameRes.status().message());
+StatusOr<GameStatePtr> GameManager::peekAtDrawPile(const string& game_id, const string& user_id) {
+  auto game_res = getGameStateForUser(game_id, user_id);
+  if (!game_res.ok()) {
+    return InvalidArgumentError(game_res.status().message());
   }
 
-  auto game = *gameRes;
-  int playerIndex = game->playerIndex(username);
+  auto game = game_res.value();
+  int player_index = game->playerIndex(user_id);
 
-  return updateGameState(game->peekAtDrawPile(playerIndex), game->getGameId());
+  return updateGameState(game->peekAtDrawPile(player_index), game->getGameId());
 }
 
-StatusOr<GameStatePtr> GameManager::swapDrawForDiscardPile(const string& username) {
-  auto gameRes = getGameStateForUser(username);
-  if (!gameRes.ok()) {
-    return InvalidArgumentError(gameRes.status().message());
+StatusOr<GameStatePtr> GameManager::swapDrawForDiscardPile(const string& game_id,
+                                                           const string& user_id) {
+  auto game_res = getGameStateForUser(game_id, user_id);
+  if (!game_res.ok()) {
+    return InvalidArgumentError(game_res.status().message());
   }
 
-  auto game = *gameRes;
-  int playerIndex = game->playerIndex(username);
+  auto game = game_res.value();
+  int player_index = game->playerIndex(user_id);
 
-  return updateGameState(game->swapDrawForDiscardPile(playerIndex), game->getGameId());
+  return updateGameState(game->swapDrawForDiscardPile(player_index), game->getGameId());
 }
 
-StatusOr<GameStatePtr> GameManager::swapForDrawPile(const string& username, Position position) {
-  auto gameRes = getGameStateForUser(username);
-  if (!gameRes.ok()) {
-    return InvalidArgumentError(gameRes.status().message());
+StatusOr<GameStatePtr> GameManager::swapForDrawPile(const string& game_id, const string& user_id,
+                                                    Position position) {
+  auto game_res = getGameStateForUser(game_id, user_id);
+  if (!game_res.ok()) {
+    return InvalidArgumentError(game_res.status().message());
   }
 
-  auto game = *gameRes;
-  int playerIndex = game->playerIndex(username);
+  auto game = game_res.value();
+  int player_index = game->playerIndex(user_id);
 
-  return updateGameState(game->swapForDrawPile(playerIndex, position), game->getGameId());
+  return updateGameState(game->swapForDrawPile(player_index, position), game->getGameId());
 }
 
-StatusOr<GameStatePtr> GameManager::swapForDiscardPile(const string& username, Position position) {
-  auto gameRes = getGameStateForUser(username);
+StatusOr<GameStatePtr> GameManager::swapForDiscardPile(const string& game_id, const string& user_id,
+                                                       Position position) {
+  auto gameRes = getGameStateForUser(game_id, user_id);
   if (!gameRes.ok()) {
     return InvalidArgumentError(gameRes.status().message());
   }
 
   auto game = *gameRes;
-  int playerIndex = game->playerIndex(username);
+  int playerIndex = game->playerIndex(user_id);
 
   return updateGameState(game->swapForDiscardPile(playerIndex, position), game->getGameId());
 }
 
-StatusOr<GameStatePtr> GameManager::knock(const string& username) {
-  auto gameRes = getGameStateForUser(username);
+StatusOr<GameStatePtr> GameManager::knock(const string& game_id, const string& user_id) {
+  auto gameRes = getGameStateForUser(game_id, user_id);
   if (!gameRes.ok()) {
     return InvalidArgumentError(gameRes.status().message());
   }
 
   auto game = *gameRes;
-  int playerIndex = game->playerIndex(username);
+  int playerIndex = game->playerIndex(user_id);
 
   return updateGameState(game->knock(playerIndex), game->getGameId());
 }
@@ -272,15 +250,19 @@ std::unordered_set<string> GameManager::getUsersOnline() const {
 }
 
 std::unordered_set<GameStatePtr> GameManager::getGames() const {
-  return game_store_->ReadAllGames();
+  auto all_games_status = game_store_->ReadAllGames();
+  if (!all_games_status.ok()) {
+    return {};
+  }
+  return *all_games_status;
 }
 
 std::unordered_map<string, string> GameManager::getGameIdsByUserId() const {
-  auto games_result = game_store_->ReadAllGames();
+  auto games_result = this->getGames();
   std::unordered_map<string, string> game_ids_by_user{};
-  for (auto g : games_result) {
+  for (auto& g : games_result) {
     auto game_id = g->getGameId();
-    for (auto p : g->getPlayers()) {
+    for (auto& p : g->getPlayers()) {
       if (p.isPresent() && p.getName().has_value()) {
         game_ids_by_user[p.getName().value()] = game_id;
       }
@@ -295,7 +277,7 @@ std::unordered_set<string> GameManager::getUsersByGameId(const string& game_id) 
     return {};
   }
   std::unordered_set<string> users{};
-  for (auto p : (*game_maybe)->getPlayers()) {
+  for (auto& p : (*game_maybe)->getPlayers()) {
     if (p.isPresent() && p.getName().has_value()) {
       users.insert(p.getName().value());
     }

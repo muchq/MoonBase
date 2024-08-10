@@ -46,9 +46,9 @@ golf_ws::GameStateResponse GameStateMapper::gameStateToProto(const GameStatePtr&
   const auto& cards = player.allCards();
 
   // parent proto will take ownership and free this appropriately
-  golf_ws::VisibleHand* hand = new golf_ws::VisibleHand;
-  hand->set_bottom_left(CardMapper::cardToString(cards.at(2)));
-  hand->set_bottom_right(CardMapper::cardToString(cards.at(3)));
+  auto hand = new golf_ws::VisibleHand;
+  hand->set_bottom_left(card_mapper.cardToString(cards.at(2)));
+  hand->set_bottom_right(card_mapper.cardToString(cards.at(3)));
   proto.set_allocated_hand(hand);
   proto.set_number_of_players(state->getPlayers().size());
 
@@ -58,10 +58,10 @@ golf_ws::GameStateResponse GameStateMapper::gameStateToProto(const GameStatePtr&
     }
   }
 
-  proto.set_top_discard(cm.cardToString(state->getDiscardPile().back()));
+  proto.set_top_discard(card_mapper.cardToString(state->getDiscardPile().back()));
 
   if (state->getPeekedAtDrawPile() && state->getWhoseTurn() == index) {
-    proto.set_top_draw(cm.cardToString(state->getDrawPile().back()));
+    proto.set_top_draw(card_mapper.cardToString(state->getDrawPile().back()));
   }
 
   proto.set_your_turn(state->getWhoseTurn() == index);

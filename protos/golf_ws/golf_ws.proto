@@ -18,10 +18,12 @@ message JoinGameRequest {
 
 message PeekRequest {
   string username = 1;
+  string game_id = 2;
 }
 
 message DiscardDrawRequest {
   string username = 1;
+  string game_id = 2;
 }
 
 enum Position {
@@ -33,16 +35,19 @@ enum Position {
 
 message SwapForDrawRequest {
   string username = 1;
-  Position position = 2;
+  string game_id = 2;
+  Position position = 3;
 }
 
 message SwapForDiscardRequest {
   string username = 1;
-  Position position = 2;
+  string game_id = 2;
+  Position position = 3;
 }
 
 message KnockRequest {
   string username = 1;
+  string game_id = 2;
 }
 
 message RequestWrapper {

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package golf;
+package golf_rpc;
 
 service Golf {
   rpc RegisterPlayer (RegisterUserRequest) returns (RegisterUserResponse) {}
@@ -97,16 +97,17 @@ message GameState {
   int32 discard_size = 2;
   int32 draw_size = 3;
   string game_id = 4;
-  bool game_started = 5;
-  bool game_over = 6;
-  optional string knocker = 7;
-  optional VisibleHand hand = 8;
-  int32 number_of_players = 9;
-  repeated string players = 10;
-  repeated int32 scores = 11;
-  optional string top_discard = 12;
-  optional string top_draw = 13;
-  bool your_turn = 14;
+  string version = 5;
+  bool game_started = 6;
+  bool game_over = 7;
+  optional string knocker = 8;
+  optional VisibleHand hand = 9;
+  int32 number_of_players = 10;
+  repeated string players = 11;
+  repeated int32 scores = 12;
+  optional string top_discard = 13;
+  optional string top_draw = 14;
+  bool your_turn = 15;
 }
 
 message ErrorResponse {

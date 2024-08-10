@@ -18,6 +18,7 @@ cc_test(
     srcs = ["game_state_mapper_test.cc"],
     deps = [
         ":game_state_mapper",
+        "//cpp/cards/golf:player",
         "@googletest//:gtest_main",
     ],
 )
@@ -29,7 +30,11 @@ cc_library(
     deps = [
         ":game_state_mapper",
         "//cpp/cards/golf",
+        "//cpp/cards/golf:escapist_game_store",
+        "//cpp/escapist_client",
         "//protos/golf_ws:golf_cc_proto",
+        "@com_github_grpc_grpc//:grpc++",
+        "@com_google_absl//absl/log:initialize",
         "@com_google_absl//absl/status:statusor",
         "@com_google_protobuf//:protobuf",
         "@mongoose_cc//:mongoose",
@@ -53,6 +58,9 @@ cc_binary(
     ],
     deps = [
         ":router",
+        "//cpp/escapist_client",
+        "@com_github_grpc_grpc//:grpc++",
+        "@com_google_absl//absl/log:initialize",
         "@mongoose_cc//:mongoose",
     ],
 )
