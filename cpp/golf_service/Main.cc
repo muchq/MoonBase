@@ -1,13 +1,12 @@
-#include <iostream>
-
-#include "cpp/golf_service/router.h"
-#include "mongoose.h"
-
 #include <grpcpp/create_channel.h>
 
+#include <iostream>
+
 #include "absl/log/initialize.h"
-#include "cpp/escapist_client/escapist_client.h"
 #include "cpp/cards/golf/escapist_game_store.h"
+#include "cpp/escapist_client/escapist_client.h"
+#include "cpp/golf_service/router.h"
+#include "mongoose.h"
 
 namespace {
 struct RouterHolder {
