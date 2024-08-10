@@ -11,12 +11,12 @@ namespace golf {
 
 class GameStateMapper {
  public:
-  GameStateMapper(const CardMapper _cm) : cm(_cm) {}
+  GameStateMapper(const CardMapper _cm) : card_mapper(_cm) {}
   golf_ws::GameStateResponse gameStateToProto(const GameStatePtr& gameStatePtr,
                                               const std::string& username) const;
 
  private:
-  const CardMapper cm;
+  const CardMapper card_mapper;
 };
 }  // namespace golf
 

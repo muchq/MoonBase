@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package golf_proto;
+
+enum Suit {
+  Clubs = 0;
+  Diamonds = 1;
+  Hearts = 2;
+  Spades = 3;
+};
+
+enum Rank {
+  Two = 0;
+  Three = 1;
+  Four = 2;
+  Five = 3;
+  Six = 4;
+  Seven = 5;
+  Eight = 6;
+  Nine = 7;
+  Ten = 8;
+  Jack = 9;
+  Queen = 10;
+  King = 11;
+  Ace = 12;
+};
+
+message Card {
+  Suit suit = 1;
+  Rank rank = 2;
+}
+
+message Hand {
+  Card top_left = 1;
+  Card top_right = 2;
+  Card bottom_left = 3;
+  Card bottom_right = 4;
+}
+
+message Player {
+  optional string name = 1;
+  Hand hand = 2;
+}
+
+message BackendGameState {
+  repeated Card draw_pile = 1;
+  repeated Card discard_pile = 2;
+  repeated Player players = 3;
+  bool peeked_at_draw_pile = 4;
+  int32 whose_turn = 5;
+  int32 who_knocked = 6;
+}

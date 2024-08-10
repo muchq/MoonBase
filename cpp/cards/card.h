@@ -13,11 +13,11 @@ class Card {
  public:
   Card(const Suit _suit, const Rank _rank) : suit(_suit), rank(_rank) {}
 
-  Card(const int shuffleIndex)
+  explicit Card(const int shuffleIndex)
       : suit(static_cast<Suit>(shuffleIndex % 4)), rank(static_cast<Rank>(shuffleIndex % 13)) {}
 
-  const Suit& getSuit() const { return suit; }
-  const Rank& getRank() const { return rank; }
+  [[nodiscard]] const Suit& getSuit() const { return suit; }
+  [[nodiscard]] const Rank& getRank() const { return rank; }
   bool operator==(const Card& o) const { return suit == o.suit && rank == o.rank; }
 
  private:

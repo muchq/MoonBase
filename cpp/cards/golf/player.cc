@@ -15,7 +15,7 @@ const std::optional<std::string>& Player::getName() const { return name; }
 int Player::score() const {
   std::unordered_set<Rank> hand;
   int score = 0;
-  for (auto c : allCards()) {
+  for (auto& c : allCards()) {
     if (hand.find(c.getRank()) != hand.end()) {  // pairs cancel each other
       score -= cardValue(c);
       hand.erase(c.getRank());

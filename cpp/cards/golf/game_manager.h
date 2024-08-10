@@ -30,12 +30,15 @@ class GameManager {
   void unregisterUser(const string& name);
   [[nodiscard]] StatusOr<GameStatePtr> newGame(const string& user_id, int players);
   [[nodiscard]] StatusOr<GameStatePtr> joinGame(const string& game_id, const string& name);
-  [[nodiscard]] StatusOr<GameStatePtr> leaveGame(const string& user_id);
-  [[nodiscard]] StatusOr<GameStatePtr> peekAtDrawPile(const string& user_id);
-  [[nodiscard]] StatusOr<GameStatePtr> swapDrawForDiscardPile(const string& user_id);
-  [[nodiscard]] StatusOr<GameStatePtr> swapForDrawPile(const string& user_id, Position position);
-  [[nodiscard]] StatusOr<GameStatePtr> swapForDiscardPile(const string& user_id, Position position);
-  [[nodiscard]] StatusOr<GameStatePtr> knock(const string& user_id);
+  [[nodiscard]] StatusOr<GameStatePtr> leaveGame(const string& game_id, const string& user_id);
+  [[nodiscard]] StatusOr<GameStatePtr> peekAtDrawPile(const string& game_id, const string& user_id);
+  [[nodiscard]] StatusOr<GameStatePtr> swapDrawForDiscardPile(const string& game_id,
+                                                              const string& user_id);
+  [[nodiscard]] StatusOr<GameStatePtr> swapForDrawPile(const string& game_id, const string& user_id,
+                                                       Position position);
+  [[nodiscard]] StatusOr<GameStatePtr> swapForDiscardPile(const string& game_id,
+                                                          const string& user_id, Position position);
+  [[nodiscard]] StatusOr<GameStatePtr> knock(const string& game_id, const string& user_id);
 
   // do these methods belong here?
   [[nodiscard]] std::unordered_set<string> getUsersOnline() const;
@@ -44,9 +47,10 @@ class GameManager {
   [[nodiscard]] std::unordered_set<string> getUsersByGameId(const string& game_id) const;
 
  private:
-  [[nodiscard]] StatusOr<GameStatePtr> getGameStateForUser(const string& user_id) const;
-  [[nodiscard]] StatusOr<GameStatePtr> updateGameState(StatusOr<GameState> updateResult,
-                                                       const string& gameId);
+  [[nodiscard]] StatusOr<GameStatePtr> getGameStateForUser(const string& game_id,
+                                                           const string& user_id) const;
+  [[nodiscard]] StatusOr<GameStatePtr> updateGameState(StatusOr<GameState> update_result,
+                                                       const string& game_id);
   [[nodiscard]] std::mt19937 randomGenerator() const;
   [[nodiscard]] string generateRandomAlphanumericString(std::size_t len) const;
   [[nodiscard]] std::optional<string> generateUnusedRandomId() const;
