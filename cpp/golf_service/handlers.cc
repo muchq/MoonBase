@@ -1,9 +1,7 @@
 #include "cpp/golf_service/handlers.h"
 
 #include <google/protobuf/util/json_util.h>
-#include <grpcpp/create_channel.h>
 
-#include <mutex>
 #include <string>
 #include <unordered_map>
 
@@ -14,8 +12,6 @@ using golf_service::GolfServiceRequest;
 using golf_ws::RegisterUserRequest;
 using golf_ws::RequestWrapper;
 using std::string;
-
-std::mutex m;
 
 namespace golf_service {
 
