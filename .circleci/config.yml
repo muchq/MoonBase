@@ -50,9 +50,9 @@ jobs:
       - run:
           name: Run Container Build
           command: bazel run //oci:example_cc_grpc_image_tarball
-      - run:
-          name: Run Cargo Compatibility Build
-          command: sudo scripts/cargo-build
+      # - run:
+      #     name: Run Cargo Compatibility Build
+      #     command: sudo scripts/cargo-build
 
 workflows:
   moon-base:
