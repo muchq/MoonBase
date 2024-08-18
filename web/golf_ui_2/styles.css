@@ -1,33 +1,47 @@
 /* styles.css */
-body {
-    font-family: Arial, sans-serif;
-    background-color: #f4f4f4;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-    margin: 0;
+@keyframes BACK_COLOR_WARP {
+    0%   { box-shadow: 0 0 50px green; background-color: #222; color: #660000; }
+    25%  { box-shadow: 0 0 50px blue; background-color: #333; color: #BDA0CB; }
+    50%  { box-shadow: 0 0 50px red; background-color: #444; color: #222; }
+    75%  { box-shadow: 0 0 50px green; background-color: #222; color: gold; }
+    100% { box-shadow: 0 0 50px green; background-color: #222; color: #660000; }
+}
+
+@keyframes SPAN_COLOR_WARP {
+    0%   { color: #999; }
+    25%  { color: #999; }
+    50%  { color: #999; }
+    75%  { color: #999; }
+    100% { color: #999; }
+}
+
+html {
+    background-color: #222;
+    font-family: Helvetica, sans-serif;
 }
 
 .game-container {
     text-align: center;
-    background: white;
+    background: #333; /* Dark background for the game container */
     padding: 20px;
     border-radius: 10px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
     max-width: 90%;
     width: 500px; /* Adjusted width to accommodate piles */
+    animation: BACK_COLOR_WARP 25s infinite; /* Background animation */
 }
 
 h1 {
     margin-bottom: 20px;
+    color: #660000; /* Title color */
+    text-shadow: 1px 1px 2px #999; /* Title shadow */
 }
 
 .status-bar {
     display: flex;
     justify-content: space-between;
-    background-color: #007bff;
-    color: white;
+    background-color: #444; /* Status bar background */
+    color: #BDA0CB; /* Status text color */
     padding: 10px;
     border-radius: 5px;
     margin-bottom: 20px;
@@ -55,13 +69,13 @@ h1 {
 .card {
     width: 100px; /* Card width */
     height: 140px; /* Card height */
-    background: linear-gradient(135deg, #4a90e2, #9013fe);
+    background: linear-gradient(135deg, #4a90e2, #9013fe); /* Card gradient */
     border-radius: 5px;
     display: flex;
     justify-content: center;
     align-items: center;
     font-size: 24px;
-    color: white;
+    color: white; /* Card text color */
     transition: transform 0.2s;
     position: relative;
     overflow: hidden;
@@ -89,7 +103,7 @@ h1 {
 }
 
 .draw-pile, .discard-pile {
-    background: #f9f9f9;
+    background: #444; /* Background for the piles */
     border: 1px solid #ccc;
     border-radius: 5px;
     padding: 10px;
@@ -110,14 +124,14 @@ button {
     margin: 5px;
     border: none;
     border-radius: 5px;
-    background-color: #007bff;
+    background-color: #007bff; /* Button color */
     color: white;
     cursor: pointer;
     transition: background-color 0.3s, transform 0.2s;
 }
 
 button:hover {
-    background-color: #0056b3;
+    background-color: #0056b3; /* Button hover color */
     transform: scale(1.05);
 }
 
