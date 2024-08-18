@@ -1,4 +1,6 @@
 /* styles.css */
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+
 @keyframes BACK_COLOR_WARP {
     0%   { box-shadow: 0 0 50px green; background-color: #222; color: #660000; }
     25%  { box-shadow: 0 0 50px blue; background-color: #333; color: #BDA0CB; }
@@ -7,17 +9,19 @@
     100% { box-shadow: 0 0 50px green; background-color: #222; color: #660000; }
 }
 
-@keyframes SPAN_COLOR_WARP {
-    0%   { color: #999; }
-    25%  { color: #999; }
-    50%  { color: #999; }
-    75%  { color: #999; }
-    100% { color: #999; }
-}
-
 html {
     background-color: #222;
-    font-family: Helvetica, sans-serif;
+    font-family: 'Roboto', sans-serif; /* Updated font */
+    margin: 0;
+    padding: 0;
+    height: 100%; /* Ensure full height for centering */
+}
+
+body {
+    display: flex; /* Use flexbox for centering */
+    justify-content: center; /* Center horizontally */
+    align-items: center; /* Center vertically */
+    height: 100vh; /* Full viewport height */
 }
 
 .game-container {
@@ -28,6 +32,7 @@ html {
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
     max-width: 90%;
     width: 500px; /* Adjusted width to accommodate piles */
+    margin: auto; /* Centering the container */
     animation: BACK_COLOR_WARP 25s infinite; /* Background animation */
 }
 
@@ -54,7 +59,7 @@ h1 {
 
 .game-area {
     display: flex; /* Use flex to arrange cards and piles */
-    justify-content: space-between; /* Space between cards and piles */
+    justify-content: flex-start; /* Align items to the left */
     align-items: flex-start; /* Align items at the top */
 }
 
@@ -64,6 +69,31 @@ h1 {
     grid-gap: 10px; /* Space between cards */
     margin-bottom: 20px;
     justify-items: center; /* Center cards within grid cells */
+    width: 70%; /* Make it responsive */
+}
+
+.pile-container {
+    display: flex; /* Align draw and discard piles side by side */
+    flex-direction: row; /* Horizontal layout */
+    align-items: flex-start; /* Align items at the top */
+    margin-left: 20px; /* Space between cards and piles */
+}
+
+.draw-pile, .discard-pile {
+    background: #444; /* Background for the piles */
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column; /* Stack cards vertically */
+    align-items: center; /* Center contents */
+    width: 100px; /* Set the same width for both piles */
+    margin-right: 10px; /* Space between the draw and discard piles */
+}
+
+.draw-pile .card, .discard-pile .card {
+    width: 100%; /* Match card width for consistency */
+    height: 140px; /* Match card height for consistency */
 }
 
 .card {
@@ -96,29 +126,6 @@ h1 {
     transform: scale(1.05);
 }
 
-.pile-container {
-    display: flex; /* Align draw and discard piles side by side */
-    align-items: flex-start; /* Align items at the top */
-    margin-left: 20px; /* Space between cards and piles */
-}
-
-.draw-pile, .discard-pile {
-    background: #444; /* Background for the piles */
-    border: 1px solid #ccc;
-    border-radius: 5px;
-    padding: 10px;
-    display: flex;
-    flex-direction: column; /* Stack cards vertically */
-    align-items: center; /* Center contents */
-    width: 100px; /* Set the same width for both piles */
-    margin-right: 10px; /* Space between the draw and discard piles */
-}
-
-.draw-pile .card, .discard-pile .card {
-    width: 100%; /* Match card width for consistency */
-    height: 140px; /* Match card height for consistency */
-}
-
 button {
     padding: 10px 15px;
     margin: 5px;
@@ -132,27 +139,4 @@ button {
 
 button:hover {
     background-color: #0056b3; /* Button hover color */
-    transform: scale(1.05);
-}
-
-button:active {
-    transform: scale(0.95);
-}
-
-.action-buttons {
-    display: flex;
-    justify-content: center;
-    flex-wrap: wrap;
-}
-
-@media (max-width: 600px) {
-    .card {
-        width: 80px; /* Mobile card width */
-        height: 120px; /* Mobile card height */
-        font-size: 20px;
-    }
-    button {
-        padding: 8px 12px; /* Smaller button size for mobile */
-        font-size: 14px;
-    }
-}
+    transform: scale
