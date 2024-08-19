@@ -1,20 +1,11 @@
 /* styles.css */
 @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
 
-@keyframes BACK_COLOR_WARP {
-    0%   { box-shadow: 0 0 50px green; background-color: #222; color: #660000; }
-    25%  { box-shadow: 0 0 50px blue; background-color: #333; color: #BDA0CB; }
-    50%  { box-shadow: 0 0 50px red; background-color: #444; color: #222; }
-    75%  { box-shadow: 0 0 50px green; background-color: #222; color: gold; }
-    100% { box-shadow: 0 0 50px green; background-color: #222; color: #660000; }
-}
-
 html {
-    background-color: #222;
+    background-color: #f0f0f0; /* Light gray background for the whole page */
     font-family: 'Roboto', sans-serif; /* Updated font */
     margin: 0;
     padding: 0;
-    height: 100%; /* Ensure full height for centering */
 }
 
 body {
@@ -26,27 +17,26 @@ body {
 
 .game-container {
     text-align: center;
-    background: #333; /* Dark background for the game container */
+    background: #ffffff; /* White background for the game container */
     padding: 20px;
     border-radius: 10px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
     max-width: 90%;
     width: 500px; /* Adjusted width to accommodate piles */
     margin: auto; /* Centering the container */
-    animation: BACK_COLOR_WARP 25s infinite; /* Background animation */
 }
 
 h1 {
     margin-bottom: 20px;
-    color: #660000; /* Title color */
-    text-shadow: 1px 1px 2px #999; /* Title shadow */
+    color: #333; /* Title color */
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.1); /* Title shadow */
 }
 
 .status-bar {
     display: flex;
     justify-content: space-between;
-    background-color: #444; /* Status bar background */
-    color: #BDA0CB; /* Status text color */
+    background-color: #e0f7fa; /* Status bar background */
+    color: #333; /* Status text color */
     padding: 10px;
     border-radius: 5px;
     margin-bottom: 20px;
@@ -80,7 +70,7 @@ h1 {
 }
 
 .draw-pile, .discard-pile {
-    background: #444; /* Background for the piles */
+    background: #e0f7fa; /* Background for the piles */
     border: 1px solid #ccc;
     border-radius: 5px;
     padding: 10px;
@@ -99,7 +89,7 @@ h1 {
 .card {
     width: 100px; /* Card width */
     height: 140px; /* Card height */
-    background: linear-gradient(135deg, #4a90e2, #9013fe); /* Card gradient */
+    background: linear-gradient(135deg, #4caf50, #81c784); /* Card gradient */
     border-radius: 5px;
     display: flex;
     justify-content: center;
@@ -139,4 +129,30 @@ button {
 
 button:hover {
     background-color: #0056b3; /* Button hover color */
-    transform: scale
+    transform: scale(1.05);
+}
+
+button:active {
+    transform: scale(0.95);
+}
+
+.action-buttons {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+@media (max-width: 600px) {
+    .game-container {
+        width: 90%; /* Make the game container responsive */
+    }
+    .card {
+        width: 80px; /* Mobile card width */
+        height: 120px; /* Mobile card height */
+        font-size: 20px;
+    }
+    button {
+        padding: 8px 12px; /* Smaller button size for mobile */
+        font-size: 14px;
+    }
+}
