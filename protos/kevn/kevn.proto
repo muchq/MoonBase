@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package kevn;
+
+service Kevn {
+  rpc ReadMetaData (ReadMetaDataRequest) returns (ReadMetaDataResponse) {}
+  rpc ReadContent (ReadContentRequest) returns (stream ReadContentResponse) {}
+  rpc Write (WriteRequest) returns (WriteResponse) {}
+}
+
+service KevnControl {
+  rpc CheckStatus (NodeStatusRequest) returns (NodeStatusResponse) {}
+  rpc ReadCompleteState (ReadCompleteStateRequest) returns (stream ReadCompleteStateResponse) {}
+}
+
+message NodeStatusRequest {
+}
+
+enum Mode {
+  UNKNOWN = 0;
+  PRIMARY = 1;
+  REPLICA = 2;
+}
+
+message NodeStatusResponse {
+  Mode mode = 1;
+  bool caught_up = 2;
+  uint64 last_op_index = 3;
+  uint64 sync_replication_since_index = 4;
+  double disk_usage = 5;
+  double cpu_usage = 6;
+  int32 read_errors_last_five_minutes = 7;
+  int32 write_errors_last_five_minutes = 8;
+}
+
+message ReadMetaDataRequest {
+  string namespace = 1;
+  string key = 2;
+}
+
+message ReadMetaDataResponse {
+  string namespace = 1;
+  string key = 2;
+  uint64 created_at = 3;
+  uint64 size_in_bytes = 4;
+}
+
+message ReadContentRequest {
+  string namespace = 1;
+  string key = 2;
+}
+
+message ReadContentResponse {
+  bytes chunk = 1;
+}
+
+message ReadCompleteStateRequest {
+}
+
+message ReadCompleteStateResponse {
+  string namespace = 1;
+  string key = 2;
+  bytes bytes = 3;
+}
+
+enum ReplicationMode {
+  SYNC_ALL = 0;
+  SYNC_ONE = 1;
+  ASYNC = 2;
+}
+
+message WriteRequest {
+  string namespace = 1;
+  string key = 2;
+  ReplicationMode replication_mode = 3;
+  bytes bytes = 4;
+}
+
+message WriteResponse {
+}

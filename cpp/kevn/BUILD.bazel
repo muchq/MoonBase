@@ -1,0 +1,33 @@
+cc_library(
+    name = "kevn_lib",
+    srcs = ["kevn_service.cc"],
+    hdrs = ["kevn_service.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//protos/kevn:kevn_grpc_proto",
+        "@com_github_grpc_grpc//:grpc++",
+    ],
+)
+
+cc_binary(
+    name = "kevn_service",
+    srcs = ["main.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":kevn_lib",
+        "@com_github_grpc_grpc//:grpc++_reflection",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/flags:parse",
+        "@com_google_absl//absl/strings:str_format",
+    ],
+)
+
+cc_test(
+    name = "kevn_service_test",
+    size = "small",
+    srcs = ["kevn_service_test.cc"],
+    deps = [
+        ":kevn_lib",
+        "@googletest//:gtest_main",
+    ],
+)
