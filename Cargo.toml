@@ -23,7 +23,7 @@ tonic = { version = "0.12.0", features = ["transport"] }
 tonic-build = "0.12.0"
 tokio = { version = "1.38", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
 protoc-gen-tonic = "0.4.0"
-protoc-gen-prost = "0.3.1"
+protoc-gen-prost = "0.4.0"
 mongodb = "3.0.1"
 serde = { version = "1.0.204", features = ["derive"] }
 dotenv = "0.15.0"
