@@ -1,4 +1,4 @@
-package com.muchq.cards;
+package com.muchq.cards.model;
 
 public enum Suit {
     CLUBS,
