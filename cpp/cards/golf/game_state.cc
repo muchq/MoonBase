@@ -31,7 +31,7 @@ unordered_set<int> GameState::winners() const {
   int minScore = 40;  // max score is 9 10 Q K == 39
   int playerIndex = 0;
   for (auto& p : players) {
-    int playerScore = p.score();
+    const int playerScore = p.score();
     if (playerScore < minScore) {
       minScore = playerScore;
       winningPlayers.clear();
@@ -42,7 +42,7 @@ unordered_set<int> GameState::winners() const {
 
     playerIndex++;
   }
-  if (winningPlayers.find(whoKnocked) != winningPlayers.end()) {
+  if (winningPlayers.contains(whoKnocked)) {
     winningPlayers.clear();
     winningPlayers.insert(whoKnocked);
   }
@@ -89,7 +89,7 @@ StatusOr<GameState> GameState::swapDrawForDiscardPile(int player) const {
   const deque<Card> discardPileForNewGameState = std::move(updatedDiscardPile);
 
   // update whose turn it is
-  int newWhoseTurn = (whoseTurn + 1) % players.size();
+  const int newWhoseTurn = (whoseTurn + 1) % players.size();
 
   return GameState{drawPileForNewGameState,
                    discardPileForNewGameState,

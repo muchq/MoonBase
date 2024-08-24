@@ -1,6 +1,6 @@
 package com.muchq.cards.castle;
 
-import com.muchq.cards.Card;
+import com.muchq.cards.model.Card;
 
 import java.util.Deque;
 import java.util.List;
