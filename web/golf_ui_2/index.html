@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Golf</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="game-container">
+    <h1>Golf</h1>
+    <div class="status-bar" id="status-bar">
+        <span id="player-names">Players: Player 1, Player 2</span>
+        <span id="turn-indicator">Current Turn: Player 1</span>
+        <span id="knock-status"></span>
+    </div>
+    <div class="game-area">
+        <div class="cards-container">
+            <div class="card" id="card1"></div>
+            <div class="card" id="card2"></div>
+            <div class="card" id="card3"></div>
+            <div class="card" id="card4"></div>
+        </div>
+        <div class="pile-container">
+            <div class="draw-pile">
+                <h2>Draw</h2>
+                <div class="card" id="draw-card"></div>
+            </div>
+            <div class="discard-pile">
+                <h2>Discard</h2>
+                <div class="card" id="discard-card"></div>
+            </div>
+        </div>
+    </div>
+    <div class="action-buttons">
+        <button id="draw-button">Draw Card</button>
+        <button id="swap-button">Swap</button>
+        <button id="discard-button">Discard Card</button>
+        <button id="knock-button">Knock</button>
+    </div>
+</div>
+<script src="script.js"></script>
+</body>
+</html>

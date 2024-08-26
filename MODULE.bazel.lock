@@ -243,7 +243,7 @@
   "moduleExtensions": {
     "//bazel:extensions.bzl%non_module_deps": {
       "general": {
-        "bzlTransitiveDigest": "zLsAbhCRYA8SAIDnvldYmtRqnoTGXpUEmDx4f5IeVWY=",
+        "bzlTransitiveDigest": "4XJlEYCEdwmr+lEy3dwqbFWhKYXvuiWmF2zIrZPr8hI=",
         "usagesDigest": "YjXEuNYcmWBonUVHNI3O9fGt+8oQLjb+9QIXjYZBOfU=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
@@ -253,16 +253,16 @@
             "bzlFile": "@@bazel_tools//tools/build_defs/repo:http.bzl",
             "ruleClassName": "http_archive",
             "attributes": {
-              "strip_prefix": "mongoose-7.14",
+              "strip_prefix": "mongoose-7.15",
               "patch_args": [
                 "-p1"
               ],
               "patches": [
                 "@@//bazel/patches:mongoose.patch"
               ],
-              "sha256": "7c4aecf92f7f27f1cbb2cbda3c185c385f2b7af84f6bd7c0ce31b84742b15691",
+              "sha256": "efcb5aa89b85d40373dcff3241316ddc0f2f130ad7f05c9c964f8cc1e2078a0b",
               "urls": [
-                "https://github.com/cesanta/mongoose/archive/refs/tags/7.14.tar.gz"
+                "https://github.com/cesanta/mongoose/archive/refs/tags/7.15.tar.gz"
               ]
             }
           }
@@ -2018,7 +2018,7 @@
     },
     "@@rules_rust~//rust:extensions.bzl%rust": {
       "general": {
-        "bzlTransitiveDigest": "+fQbsbLp8BvPc9rhJX50IuW468jot4Uo3I1CYJnm/rk=",
+        "bzlTransitiveDigest": "rHVdWjCikfO/ARlbv1qD8XST/f+Jh9+FsTYYIrd/Uiw=",
         "usagesDigest": "uFPZtKT70BuCY4uYFNByLoCqKT6YGqwzTAm6wWZwz8U=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
