@@ -1,5 +1,5 @@
 startup --output_base=~/.bazelout
-# common --incompatible_enable_proto_toolchain_resolution
+common --incompatible_enable_proto_toolchain_resolution
 common --color=yes
 common --noenable_workspace
 common --enable_bzlmod=true
