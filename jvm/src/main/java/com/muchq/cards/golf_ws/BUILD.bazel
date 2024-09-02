@@ -1,0 +1,20 @@
+java_binary(
+    name = "golf_ws",
+    srcs = [
+        "Game.java",
+        "GameHandler.java",
+        "Main.java",
+        "Request.java",
+        "Response.java",
+    ],
+    main_class = "com.muchq.cards.golf_ws.Main",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//jvm/src/main/java/com/muchq/json",
+        "@maven//:org_eclipse_jetty_jetty_server",
+        "@maven//:org_eclipse_jetty_jetty_servlet",
+        "@maven//:org_eclipse_jetty_websocket_websocket_jetty_api",
+        "@maven//:org_eclipse_jetty_websocket_websocket_jetty_server",
+        "@maven//:org_slf4j_slf4j_api",
+    ],
+)
