@@ -1082,7 +1082,7 @@
     "@@googleapis~//:extensions.bzl%switched_rules": {
       "general": {
         "bzlTransitiveDigest": "vG6fuTzXD8MMvHWZEQud0MMH7eoC4GXY0va7VrFFh04=",
-        "usagesDigest": "MwsIBmSf2qaMlNBGyvY+UaWwqm7RB5pDdvCHOjpTu44=",
+        "usagesDigest": "7o7bShr/I46gnEaJ8ZJU9O7X0w0iiM/JEWcQs8fWhks=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -1313,8 +1313,8 @@
     },
     "@@grpc~//bazel:grpc_deps.bzl%grpc_repo_deps_ext": {
       "general": {
-        "bzlTransitiveDigest": "l84NPn2UvoMHG8AU4O/XUkNJu/ye3HhaapaVqGxbtio=",
-        "usagesDigest": "llWWFnUUqizMGOmi6h2BTx88okRb0E3Z+mpBvvRj7cA=",
+        "bzlTransitiveDigest": "vp+IFf88o0zj4FtqQWndTl5HZOJwHl6jvNTHXxIH47o=",
+        "usagesDigest": "7cst0urJBsds3o0bAO/gW7BW9avuKAERJ0uX+1LaR5c=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -1335,11 +1335,11 @@
             "bzlFile": "@@bazel_tools//tools/build_defs/repo:http.bzl",
             "ruleClassName": "http_archive",
             "attributes": {
-              "sha256": "ddd3beedda1178a79e0d988f76f362002aced09749452515853f106e22bd2249",
-              "strip_prefix": "data-plane-api-78f198cf96ecdc7120ef640406770aa01af775c4",
+              "sha256": "e525a6fb6e6ed3eef1eec6bef3da9b5708e471f0f9335a7604df14a4b386231e",
+              "strip_prefix": "data-plane-api-f8b75d1efa92bbf534596a013d9ca5873f79dd30",
               "urls": [
-                "https://storage.googleapis.com/grpc-bazel-mirror/github.com/envoyproxy/data-plane-api/archive/78f198cf96ecdc7120ef640406770aa01af775c4.tar.gz",
-                "https://github.com/envoyproxy/data-plane-api/archive/78f198cf96ecdc7120ef640406770aa01af775c4.tar.gz"
+                "https://storage.googleapis.com/grpc-bazel-mirror/github.com/envoyproxy/data-plane-api/archive/f8b75d1efa92bbf534596a013d9ca5873f79dd30.tar.gz",
+                "https://github.com/envoyproxy/data-plane-api/archive/f8b75d1efa92bbf534596a013d9ca5873f79dd30.tar.gz"
               ]
             }
           },
