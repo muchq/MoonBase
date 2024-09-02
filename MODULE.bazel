@@ -80,7 +80,7 @@ git_override(
 
 bazel_dep(name = "googletest", version = "1.15.2")
 
-bazel_dep(name = "buildifier_prebuilt", version = "7.1.2", dev_dependency = True)
+bazel_dep(name = "buildifier_prebuilt", version = "7.3.1", dev_dependency = True)
 
 go_sdk = use_extension("@io_bazel_rules_go//go:extensions.bzl", "go_sdk")
 go_sdk.download(version = "1.22.2")
