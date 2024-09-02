@@ -126,7 +126,7 @@ use_repo(maven, "maven")
 
 bazel_dep(name = "grpc-java", version = "1.64.0")
 bazel_dep(name = "rules_pkg", version = "1.0.1")
-bazel_dep(name = "rules_oci", version = "2.0.0-beta1")
+bazel_dep(name = "rules_oci", version = "2.0.0-rc0")
 
 # For testing, check out https://registry.bazel.build/modules/container_structure_test
 oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
