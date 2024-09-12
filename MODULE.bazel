@@ -32,7 +32,7 @@ register_toolchains("@rules_rust//proto/protobuf:default-proto-toolchain")
 
 register_toolchains("//tools/toolchains:prost_toolchain")
 
-crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate")
+crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate", isolate = True)
 crate.from_cargo(
     name = "crates",
     cargo_lockfile = "//:Cargo.lock",
