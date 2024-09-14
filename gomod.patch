@@ -1,0 +1,514 @@
+diff --git a/BUILD b/BUILD.bazel
+similarity index 87%
+rename from BUILD
+rename to BUILD.bazel
+index ddd65f4..e42501b 100644
+--- a/BUILD
++++ b/BUILD.bazel
+@@ -1,5 +1,8 @@
++load("@bazel_gazelle//:def.bzl", "gazelle")
+ load("@buildifier_prebuilt//:rules.bzl", "buildifier", "buildifier_test")
+ 
++gazelle(name = "gazelle")
++
+ buildifier(
+     name = "buildifier",
+     exclude_patterns = [
+diff --git a/MODULE.bazel b/MODULE.bazel
+index d89fb48..7162e63 100644
+--- a/MODULE.bazel
++++ b/MODULE.bazel
+@@ -83,7 +83,15 @@ bazel_dep(name = "googletest", version = "1.15.2")
+ bazel_dep(name = "buildifier_prebuilt", version = "7.3.1", dev_dependency = True)
+ 
+ go_sdk = use_extension("@io_bazel_rules_go//go:extensions.bzl", "go_sdk")
+-go_sdk.download(version = "1.22.2")
++go_sdk.download(version = "1.23.0")
++
++go_deps = use_extension("@bazel_gazelle//:extensions.bzl", "go_deps")
++go_deps.from_file(go_mod = "//:go.mod")
++use_repo(
++    go_deps,
++    "com_github_gofiber_fiber_v2",
++    "org_golang_google_grpc",
++)
+ 
+ non_module_deps = use_extension("//bazel:extensions.bzl", "non_module_deps")
+ use_repo(non_module_deps, "mongoose_cc")
+diff --git a/go.mod b/go.mod
+new file mode 100644
+index 0000000..6f64498
+--- /dev/null
++++ b/go.mod
+@@ -0,0 +1,24 @@
++module github.com/muchq/moonbase
++
++go 1.23.0
++
++require github.com/gofiber/fiber/v2 v2.52.5
++require google.golang.org/grpc v1.66.2
++
++require (
++	github.com/andybalholm/brotli v1.1.0 // indirect
++	github.com/google/uuid v1.6.0 // indirect
++	github.com/klauspost/compress v1.17.9 // indirect
++	github.com/mattn/go-colorable v0.1.13 // indirect
++	github.com/mattn/go-isatty v0.0.20 // indirect
++	github.com/mattn/go-runewidth v0.0.16 // indirect
++	github.com/rivo/uniseg v0.4.7 // indirect
++	github.com/valyala/bytebufferpool v1.0.0 // indirect
++	github.com/valyala/fasthttp v1.55.0 // indirect
++	github.com/valyala/tcplisten v1.0.0 // indirect
++	golang.org/x/net v0.29.0 // indirect
++	golang.org/x/sys v0.25.0 // indirect
++	golang.org/x/text v0.18.0 // indirect
++	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
++	google.golang.org/protobuf v1.34.2 // indirect
++)
+diff --git a/go.sum b/go.sum
+new file mode 100644
+index 0000000..ff11d0d
+--- /dev/null
++++ b/go.sum
+@@ -0,0 +1,57 @@
++github.com/andybalholm/brotli v1.0.5 h1:8uQZIdzKmjc/iuPu7O2ioW48L81FgatrcpfFmiq/cCs=
++github.com/andybalholm/brotli v1.0.5/go.mod h1:fO7iG3H7G2nSZ7m0zPUDn85XEX2GTukHGRSepvi9Eig=
++github.com/andybalholm/brotli v1.1.0 h1:eLKJA0d02Lf0mVpIDgYnqXcUn0GqVmEFny3VuID1U3M=
++github.com/andybalholm/brotli v1.1.0/go.mod h1:sms7XGricyQI9K10gOSf56VKKWS4oLer58Q+mhRPtnY=
++github.com/gofiber/fiber/v2 v2.52.5 h1:tWoP1MJQjGEe4GB5TUGOi7P2E0ZMMRx5ZTG4rT+yGMo=
++github.com/gofiber/fiber/v2 v2.52.5/go.mod h1:KEOE+cXMhXG0zHc9d8+E38hoX+ZN7bhOtgeF2oT6jrQ=
++github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
++github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
++github.com/klauspost/compress v1.17.0 h1:Rnbp4K9EjcDuVuHtd0dgA4qNuv9yKDYKK1ulpJwgrqM=
++github.com/klauspost/compress v1.17.0/go.mod h1:ntbaceVETuRiXiv4DpjP66DpAtAGkEQskQzEyD//IeE=
++github.com/klauspost/compress v1.17.9 h1:6KIumPrER1LHsvBVuDa0r5xaG0Es51mhhB9BQB2qeMA=
++github.com/klauspost/compress v1.17.9/go.mod h1:Di0epgTjJY877eYKx5yC51cX2A2Vl2ibi7bDH9ttBbw=
++github.com/mattn/go-colorable v0.1.13 h1:fFA4WZxdEF4tXPZVKMLwD8oUnCTTo08duU7wxecdEvA=
++github.com/mattn/go-colorable v0.1.13/go.mod h1:7S9/ev0klgBDR4GtXTXX8a3vIGJpMovkB8vQcUbaXHg=
++github.com/mattn/go-isatty v0.0.16/go.mod h1:kYGgaQfpe5nmfYZH+SKPsOc2e4SrIfOl2e/yFXSvRLM=
++github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
++github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
++github.com/mattn/go-runewidth v0.0.15 h1:UNAjwbU9l54TA3KzvqLGxwWjHmMgBUVhBiTjelZgg3U=
++github.com/mattn/go-runewidth v0.0.15/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
++github.com/mattn/go-runewidth v0.0.16 h1:E5ScNMtiwvlvB5paMFdw9p4kSQzbXFikJ5SQO6TULQc=
++github.com/mattn/go-runewidth v0.0.16/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
++github.com/rivo/uniseg v0.2.0 h1:S1pD9weZBuJdFmowNwbpi7BJ8TNftyUImj/0WQi72jY=
++github.com/rivo/uniseg v0.2.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJtxc=
++github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
++github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUcx88=
++github.com/valyala/bytebufferpool v1.0.0 h1:GqA5TC/0021Y/b9FG4Oi9Mr3q7XYx6KllzawFIhcdPw=
++github.com/valyala/bytebufferpool v1.0.0/go.mod h1:6bBcMArwyJ5K/AmCkWv1jt77kVWyCJ6HpOuEn7z0Csc=
++github.com/valyala/fasthttp v1.51.0 h1:8b30A5JlZ6C7AS81RsWjYMQmrZG6feChmgAolCl1SqA=
++github.com/valyala/fasthttp v1.51.0/go.mod h1:oI2XroL+lI7vdXyYoQk03bXBThfFl2cVdIA3Xl7cH8g=
++github.com/valyala/fasthttp v1.55.0 h1:Zkefzgt6a7+bVKHnu/YaYSOPfNYNisSVBo/unVCf8k8=
++github.com/valyala/fasthttp v1.55.0/go.mod h1:NkY9JtkrpPKmgwV3HTaS2HWaJss9RSIsRVfcxxoHiOM=
++github.com/valyala/tcplisten v1.0.0 h1:rBHj/Xf+E1tRGZyWIWwJDiRY0zc1Js+CV5DqwacVSA8=
++github.com/valyala/tcplisten v1.0.0/go.mod h1:T0xQ8SeCZGxckz9qRXTfG43PvQ/mcWh7FwZEA7Ioqkc=
++golang.org/x/net v0.26.0 h1:soB7SVo0PWrY4vPW/+ay0jKDNScG2X9wFeYlXIvJsOQ=
++golang.org/x/net v0.26.0/go.mod h1:5YKkiSynbBIh3p6iOc/vibscux0x38BZDkn8sCUPxHE=
++golang.org/x/net v0.29.0 h1:5ORfpBpCs4HzDYoodCDBbwHzdR5UrLBZ3sOnUJmFoHo=
++golang.org/x/net v0.29.0/go.mod h1:gLkgy8jTGERgjzMic6DS9+SP0ajcu6Xu3Orq/SpETg0=
++golang.org/x/sys v0.0.0-20220811171246-fbc7d0a398ab/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
++golang.org/x/sys v0.6.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
++golang.org/x/sys v0.21.0 h1:rF+pYz3DAGSQAxAu1CbC7catZg4ebC4UIeIhKxBZvws=
++golang.org/x/sys v0.21.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=
++golang.org/x/sys v0.25.0 h1:r+8e+loiHxRqhXVl6ML1nO3l1+oFoWbnlu2Ehimmi34=
++golang.org/x/sys v0.25.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=
++golang.org/x/text v0.16.0 h1:a94ExnEXNtEwYLGJSIUxnWoxoRz/ZcCsV63ROupILh4=
++golang.org/x/text v0.16.0/go.mod h1:GhwF1Be+LQoKShO3cGOHzqOgRrGaYc9AvblQOmPVHnI=
++golang.org/x/text v0.18.0 h1:XvMDiNzPAl0jr17s6W9lcaIhGUfUORdGCNsuLmPG224=
++golang.org/x/text v0.18.0/go.mod h1:BuEKDfySbSR4drPmRPG/7iBdf8hvFMuRexcpahXilzY=
++google.golang.org/genproto/googleapis/rpc v0.0.0-20240604185151-ef581f913117 h1:1GBuWVLM/KMVUv1t1En5Gs+gFZCNd360GGb4sSxtrhU=
++google.golang.org/genproto/googleapis/rpc v0.0.0-20240604185151-ef581f913117/go.mod h1:EfXuqaE1J41VCDicxHzUDm+8rk+7ZdXzHV0IhO/I6s0=
++google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 h1:pPJltXNxVzT4pK9yD8vR9X75DaWYYmLGMsEvBfFQZzQ=
++google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1/go.mod h1:UqMtugtsSgubUsoxbuAoiCXvqvErP7Gf0so0mK9tHxU=
++google.golang.org/grpc v1.66.2 h1:3QdXkuq3Bkh7w+ywLdLvM56cmGvQHUMZpiCzt6Rqaoo=
++google.golang.org/grpc v1.66.2/go.mod h1:s3/l6xSSCURdVfAnL+TqCNMyTDAGN6+lZeVxnZR128Y=
++google.golang.org/protobuf v1.34.1 h1:9ddQBjfCyZPOHPUiPxpYESBLc+T8P3E+Vo4IbKZgFWg=
++google.golang.org/protobuf v1.34.1/go.mod h1:c6P6GXX6sHbq/GpV6MGZEdwhWPcYBgnhAHhKbcUYpos=
++google.golang.org/protobuf v1.34.2 h1:6xV6lTsCfpGD21XK49h7MhtcApnLqkfYgPcdHftf6hg=
++google.golang.org/protobuf v1.34.2/go.mod h1:qYOHts0dSfpeUzUFpOMr/WGzszTmLH+DiWniOlNbLDw=
+diff --git a/go/example_grpc/BUILD.bazel b/go/example_grpc/BUILD.bazel
+new file mode 100644
+index 0000000..2fd3305
+--- /dev/null
++++ b/go/example_grpc/BUILD.bazel
+@@ -0,0 +1,18 @@
++load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
++
++go_library(
++    name = "example_grpc_lib",
++    srcs = ["main.go"],
++    importpath = "github.com/muchq/moonbase/go/example_grpc",
++    visibility = ["//visibility:private"],
++    deps = [
++        "//protos/example_service",
++        "@org_golang_google_grpc//:grpc",
++    ],
++)
++
++go_binary(
++    name = "example_grpc",
++    embed = [":example_grpc_lib"],
++    visibility = ["//visibility:public"],
++)
+diff --git a/go/example_grpc/main.go b/go/example_grpc/main.go
+new file mode 100644
+index 0000000..c7afcec
+--- /dev/null
++++ b/go/example_grpc/main.go
+@@ -0,0 +1,39 @@
++package main
++
++import (
++	"context"
++	"flag"
++	"fmt"
++	"log"
++	"net"
++
++	pb "github.com/muchq/moonbase/protos/example_service"
++	"google.golang.org/grpc"
++)
++
++var (
++	port = flag.Int("port", 50051, "The server port")
++)
++
++type server struct {
++	pb.UnimplementedGreeterServer
++}
++
++func (s *server) SayHello(ctx context.Context, in *pb.HelloRequest) (*pb.HelloReply, error) {
++	log.Printf("Received: %v", in.GetName())
++	return &pb.HelloReply{Message: "Hello " + in.GetName()}, nil
++}
++
++func main() {
++	flag.Parse()
++	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", *port))
++	if err != nil {
++		log.Fatalf("failed to listen: %v", err)
++	}
++	s := grpc.NewServer()
++	pb.RegisterGreeterServer(s, &server{})
++	log.Printf("server listening at %v", lis.Addr())
++	if err := s.Serve(lis); err != nil {
++		log.Fatalf("failed to serve: %v", err)
++	}
++}
+diff --git a/go/example_http/BUILD.bazel b/go/example_http/BUILD.bazel
+new file mode 100644
+index 0000000..b9a1999
+--- /dev/null
++++ b/go/example_http/BUILD.bazel
+@@ -0,0 +1,15 @@
++load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
++
++go_library(
++    name = "example_http_lib",
++    srcs = ["main.go"],
++    importpath = "github.com/muchq/moonbase/go/example_http",
++    visibility = ["//visibility:private"],
++    deps = ["@com_github_gofiber_fiber_v2//:fiber"],
++)
++
++go_binary(
++    name = "example_http",
++    embed = [":example_http_lib"],
++    visibility = ["//visibility:public"],
++)
+diff --git a/go/example_http/main.go b/go/example_http/main.go
+new file mode 100644
+index 0000000..95f914c
+--- /dev/null
++++ b/go/example_http/main.go
+@@ -0,0 +1,17 @@
++package main
++
++import (
++	"log"
++
++	"github.com/gofiber/fiber/v2"
++)
++
++func main() {
++	app := fiber.New()
++
++	app.Get("/", func(c *fiber.Ctx) error {
++		return c.SendString("Hello, World!")
++	})
++
++	log.Fatal(app.Listen(":3000"))
++}
+diff --git a/go/example_lib/BUILD.bazel b/go/example_lib/BUILD.bazel
+index 474ed85..78e25bd 100644
+--- a/go/example_lib/BUILD.bazel
++++ b/go/example_lib/BUILD.bazel
+@@ -1,11 +1,16 @@
+-load("@io_bazel_rules_go//go:def.bzl", "go_binary")
++load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+ 
+ go_binary(
+     name = "example_lib",
+-    srcs = [
+-        "example_lib.go",
+-    ],
+-    cgo = True,
++    embed = [":example_lib_lib"],
+     linkmode = "c-archive",
+     visibility = ["//visibility:public"],
+ )
++
++go_library(
++    name = "example_lib_lib",
++    srcs = ["example_lib.go"],
++    cgo = True,
++    importpath = "github.com/muchq/moonbase/go/example_lib",
++    visibility = ["//visibility:private"],
++)
+diff --git a/go/images/BUILD.bazel b/go/images/BUILD.bazel
+index 2c4d288..eb19c69 100644
+--- a/go/images/BUILD.bazel
++++ b/go/images/BUILD.bazel
+@@ -1,13 +1,15 @@
+-load("@io_bazel_rules_go//go:def.bzl", "go_binary")
++load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+ 
+ go_binary(
+     name = "images",
+-    srcs = [
+-        "main.go",
+-    ],
++    embed = [":images_lib"],
+     visibility = ["//visibility:public"],
+-    deps = [
+-        "//go/images/lib",
+-        "//go/images/lib:io",
+-    ],
++)
++
++go_library(
++    name = "images_lib",
++    srcs = ["main.go"],
++    importpath = "github.com/muchq/moonbase/go/images",
++    visibility = ["//visibility:private"],
++    deps = ["//go/images/lib"],
+ )
+diff --git a/go/images/lib/BUILD.bazel b/go/images/lib/BUILD.bazel
+index c5b812b..43647c3 100644
+--- a/go/images/lib/BUILD.bazel
++++ b/go/images/lib/BUILD.bazel
+@@ -3,17 +3,16 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+ go_library(
+     name = "lib",
+     srcs = [
++        "image_io.go",
+         "images.go",
+     ],
+-    importpath = "github.com/muchq/moonbase/golang/images",
++    importpath = "github.com/muchq/moonbase/go/images/lib",
+     visibility = ["//visibility:public"],
+ )
+ 
+ go_library(
+     name = "io",
+-    srcs = [
+-        "image_io.go",
+-    ],
++    srcs = ["image_io.go"],
+     importpath = "github.com/muchq/moonbase/golang/image_io",
+     visibility = ["//visibility:public"],
+ )
+@@ -21,18 +20,23 @@ go_library(
+ go_test(
+     name = "images_test",
+     size = "small",
+-    srcs = [
+-        "images_test.go",
+-    ],
++    srcs = ["images_test.go"],
+     embed = [":lib"],
+ )
+ 
+ go_test(
+     name = "image_io_test",
+     size = "small",
++    srcs = ["image_io_test.go"],
++    data = ["//static_content:images"],
++    embed = [":io"],
++)
++
++go_test(
++    name = "lib_test",
+     srcs = [
+         "image_io_test.go",
++        "images_test.go",
+     ],
+-    data = ["//static_content:images"],
+-    embed = [":io"],
++    embed = [":lib"],
+ )
+diff --git a/go/images/main.go b/go/images/main.go
+index 6f6994d..cdd501c 100644
+--- a/go/images/main.go
++++ b/go/images/main.go
+@@ -2,10 +2,11 @@ package main
+ 
+ import (
+ 	"fmt"
+-	image_io "github.com/muchq/moonbase/golang/image_io"
+-	images "github.com/muchq/moonbase/golang/images"
+ 	"os"
+ 	"strconv"
++
++	image_io "github.com/muchq/moonbase/go/images/lib"
++	images "github.com/muchq/moonbase/go/images/lib"
+ )
+ 
+ func main() {
+diff --git a/protos/escapist/BUILD.bazel b/protos/escapist/BUILD.bazel
+index e15772d..de524df 100644
+--- a/protos/escapist/BUILD.bazel
++++ b/protos/escapist/BUILD.bazel
+@@ -1,4 +1,6 @@
+ load("@com_github_grpc_grpc//bazel:grpc_build_system.bzl", "grpc_proto_library")
++load("@io_bazel_rules_go//go:def.bzl", "go_library")
++load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
+ load("@rules_proto//proto:defs.bzl", "proto_library")
+ load("@rules_rust//proto/prost:defs.bzl", "rust_prost_library")
+ 
+@@ -19,3 +21,16 @@ grpc_proto_library(
+     srcs = ["escapist.proto"],
+     generate_mocks = True,
+ )
++
++go_proto_library(
++    name = "escapist_go_proto",
++    compilers = ["@io_bazel_rules_go//proto:go_grpc"],
++    importpath = "github.com/muchq/moonbase/protos/escapist",
++    proto = ":escapist_proto",
++)
++
++go_library(
++    name = "escapist",
++    embed = [":escapist_go_proto"],
++    importpath = "github.com/muchq/moonbase/protos/escapist",
++)
+diff --git a/protos/example_service/BUILD.bazel b/protos/example_service/BUILD.bazel
+index ae10017..95a427c 100644
+--- a/protos/example_service/BUILD.bazel
++++ b/protos/example_service/BUILD.bazel
+@@ -1,4 +1,6 @@
+ load("@com_github_grpc_grpc//bazel:grpc_build_system.bzl", "grpc_proto_library")
++load("@io_bazel_rules_go//go:def.bzl", "go_library")
++load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
+ load("@rules_proto//proto:defs.bzl", "proto_library")
+ load("@rules_rust//proto/prost:defs.bzl", "rust_prost_library")
+ 
+@@ -23,3 +25,16 @@ grpc_proto_library(
+     name = "example_service_proto",
+     srcs = ["helloworld.proto"],
+ )
++
++go_proto_library(
++    name = "example_service_go_proto",
++    compilers = ["@io_bazel_rules_go//proto:go_grpc"],
++    importpath = "github.com/muchq/moonbase/protos/example_service",
++    proto = ":hello_proto",
++)
++
++go_library(
++    name = "example_service",
++    embed = [":example_service_go_proto"],
++    importpath = "github.com/muchq/moonbase/protos/example_service",
++)
+diff --git a/protos/golf/BUILD.bazel b/protos/golf/BUILD.bazel
+index ad3081f..85e6e56 100644
+--- a/protos/golf/BUILD.bazel
++++ b/protos/golf/BUILD.bazel
+@@ -1,4 +1,5 @@
+-load("@com_github_grpc_grpc//bazel:grpc_build_system.bzl", "grpc_proto_library")
++load("@io_bazel_rules_go//go:def.bzl", "go_library")
++load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
+ load("@rules_cc//cc:defs.bzl", "cc_proto_library")
+ load("@rules_proto//proto:defs.bzl", "proto_library")
+ 
+@@ -14,7 +15,14 @@ cc_proto_library(
+     deps = [":golf_model"],
+ )
+ 
+-grpc_proto_library(
+-    name = "golf_grpc",
+-    srcs = ["golf.proto"],
++go_proto_library(
++    name = "golf_proto_go_proto",
++    importpath = "github.com/muchq/moonbase/protos/golf",
++    proto = ":golf_model",
++)
++
++go_library(
++    name = "golf",
++    embed = [":golf_proto_go_proto"],
++    importpath = "github.com/muchq/moonbase/protos/golf",
+ )
+diff --git a/protos/golf_grpc/BUILD.bazel b/protos/golf_grpc/BUILD.bazel
+new file mode 100644
+index 0000000..91e6a13
+--- /dev/null
++++ b/protos/golf_grpc/BUILD.bazel
+@@ -0,0 +1,22 @@
++load("@com_github_grpc_grpc//bazel:grpc_build_system.bzl", "grpc_proto_library")
++load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
++load("@rules_proto//proto:defs.bzl", "proto_library")
++
++package(default_visibility = ["//visibility:public"])
++
++grpc_proto_library(
++    name = "golf_grpc",
++    srcs = ["golf.proto"],
++)
++
++proto_library(
++    name = "golf_rpc_proto",
++    srcs = ["golf.proto"],
++)
++
++go_proto_library(
++    name = "golf_rpc_go_proto",
++    compilers = ["@io_bazel_rules_go//proto:go_grpc"],
++    importpath = "github.com/muchq/moonbase/protos/golf_grpc",
++    proto = ":golf_rpc_proto",
++)
+diff --git a/protos/golf/golf.proto b/protos/golf_grpc/golf.proto
+similarity index 100%
+rename from protos/golf/golf.proto
+rename to protos/golf_grpc/golf.proto
+diff --git a/protos/golf_ws/BUILD.bazel b/protos/golf_ws/BUILD.bazel
+index 707944d..010c4ba 100644
+--- a/protos/golf_ws/BUILD.bazel
++++ b/protos/golf_ws/BUILD.bazel
+@@ -1,3 +1,5 @@
++load("@io_bazel_rules_go//go:def.bzl", "go_library")
++load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
+ load("@rules_cc//cc:defs.bzl", "cc_proto_library")
+ load("@rules_proto//proto:defs.bzl", "proto_library")
+ 
+@@ -12,3 +14,17 @@ proto_library(
+     srcs = ["golf_ws.proto"],
+     visibility = ["//visibility:public"],
+ )
++
++go_proto_library(
++    name = "golf_ws_go_proto",
++    importpath = "github.com/muchq/moonbase/protos/golf_ws",
++    proto = ":golf_ws_proto",
++    visibility = ["//visibility:public"],
++)
++
++go_library(
++    name = "golf_ws",
++    embed = [":golf_ws_go_proto"],
++    importpath = "github.com/muchq/moonbase/protos/golf_ws",
++    visibility = ["//visibility:public"],
++)

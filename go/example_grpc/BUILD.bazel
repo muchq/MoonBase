@@ -1,0 +1,18 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "example_grpc_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/muchq/moonbase/go/example_grpc",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//protos/example_service",
+        "@org_golang_google_grpc//:grpc",
+    ],
+)
+
+go_binary(
+    name = "example_grpc",
+    embed = [":example_grpc_lib"],
+    visibility = ["//visibility:public"],
+)

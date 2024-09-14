@@ -1,11 +1,16 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_binary")
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
 
 go_binary(
     name = "example_lib",
-    srcs = [
-        "example_lib.go",
-    ],
-    cgo = True,
+    embed = [":example_lib_lib"],
     linkmode = "c-archive",
     visibility = ["//visibility:public"],
+)
+
+go_library(
+    name = "example_lib_lib",
+    srcs = ["example_lib.go"],
+    cgo = True,
+    importpath = "github.com/muchq/moonbase/go/example_lib",
+    visibility = ["//visibility:private"],
 )

@@ -2,10 +2,11 @@ package main
 
 import (
 	"fmt"
-	image_io "github.com/muchq/moonbase/golang/image_io"
-	images "github.com/muchq/moonbase/golang/images"
 	"os"
 	"strconv"
+
+	image_io "github.com/muchq/moonbase/go/images/lib"
+	images "github.com/muchq/moonbase/go/images/lib"
 )
 
 func main() {
