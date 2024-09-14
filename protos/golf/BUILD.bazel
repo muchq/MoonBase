@@ -1,4 +1,5 @@
-load("@com_github_grpc_grpc//bazel:grpc_build_system.bzl", "grpc_proto_library")
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_proto_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 
@@ -14,7 +15,14 @@ cc_proto_library(
     deps = [":golf_model"],
 )
 
-grpc_proto_library(
-    name = "golf_grpc",
-    srcs = ["golf.proto"],
+go_proto_library(
+    name = "golf_proto_go_proto",
+    importpath = "github.com/muchq/moonbase/protos/golf",
+    proto = ":golf_model",
+)
+
+go_library(
+    name = "golf",
+    embed = [":golf_proto_go_proto"],
+    importpath = "github.com/muchq/moonbase/protos/golf",
 )

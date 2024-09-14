@@ -3,17 +3,16 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "lib",
     srcs = [
+        "image_io.go",
         "images.go",
     ],
-    importpath = "github.com/muchq/moonbase/golang/images",
+    importpath = "github.com/muchq/moonbase/go/images/lib",
     visibility = ["//visibility:public"],
 )
 
 go_library(
     name = "io",
-    srcs = [
-        "image_io.go",
-    ],
+    srcs = ["image_io.go"],
     importpath = "github.com/muchq/moonbase/golang/image_io",
     visibility = ["//visibility:public"],
 )
@@ -21,18 +20,23 @@ go_library(
 go_test(
     name = "images_test",
     size = "small",
-    srcs = [
-        "images_test.go",
-    ],
+    srcs = ["images_test.go"],
     embed = [":lib"],
 )
 
 go_test(
     name = "image_io_test",
     size = "small",
-    srcs = [
-        "image_io_test.go",
-    ],
+    srcs = ["image_io_test.go"],
     data = ["//static_content:images"],
     embed = [":io"],
+)
+
+go_test(
+    name = "lib_test",
+    srcs = [
+        "image_io_test.go",
+        "images_test.go",
+    ],
+    embed = [":lib"],
 )
