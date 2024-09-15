@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"net/http"
 )
 
@@ -12,5 +13,7 @@ func main() {
 
 	router.HandleFunc("POST /shorten", ShortenHandler)
 
-	http.ListenAndServe(":"+config.port, router)
+	router.HandleFunc("GET /r/{slug}", RedirectHandler)
+
+	log.Fatal(http.ListenAndServe(":"+config.port, router))
 }
