@@ -5,12 +5,6 @@ import (
 	"log"
 )
 
-type UrlDao interface {
-	InsertUrl(longUrl string, expiresAt int64) (string, error)
-	GetLongUrl(slug string) (string, error)
-	Close()
-}
-
 type ShortDB struct {
 	db *sql.DB
 }
