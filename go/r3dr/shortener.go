@@ -38,6 +38,9 @@ func (s *Shortener) Shorten(request ShortenRequest) (ShortenResponse, error) {
 }
 
 func (s *Shortener) Redirect(slug string) (string, error) {
+	if len(slug) < 2 {
+		return "", errors.New("invalid slug")
+	}
 	return s.urlDao.GetLongUrl(slug)
 }
 
