@@ -12,6 +12,7 @@ go_library(
         "short_db.go",
         "shortener.go",
         "shortener_api.go",
+        "url_dao.go",
     ],
     importpath = "github.com/muchq/moonbase/go/r3dr",
     visibility = ["//visibility:private"],
