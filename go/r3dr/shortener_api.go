@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 )
 
@@ -31,8 +30,11 @@ func (api *ShortenerApi) ShortenHandler(w http.ResponseWriter, r *http.Request) 
 	response, err := api.shortener.Shorten(shortenRequest)
 
 	if err != nil {
-		log.Println(err)
-		http.Error(w, "bad request", http.StatusBadRequest)
+		if err.Error() == InternalError {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
 		return
 	}
 

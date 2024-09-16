@@ -5,6 +5,7 @@ go_library(
     srcs = [
         "base62.go",
         "config.go",
+        "constants.go",
         "dto.go",
         "main.go",
         "ping.go",

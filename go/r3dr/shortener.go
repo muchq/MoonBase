@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"log"
 	"strings"
 	"time"
 )
@@ -22,10 +23,17 @@ func (s *Shortener) Shorten(request ShortenRequest) (ShortenResponse, error) {
 		// shortest allowed url is like http://g.co
 		return ShortenResponse{}, errors.New("longUrl too short")
 	}
+	if len(request.LongUrl) > 1000 {
+		return ShortenResponse{}, errors.New("max url length is 1000 chars")
+	}
 	if request.ExpiresAt != 0 && request.ExpiresAt < time.Now().UnixMilli() {
 		return ShortenResponse{}, errors.New("expiresAt is less then now")
 	}
 	slug, err := s.urlDao.InsertUrl(request.LongUrl, request.ExpiresAt)
+	if err != nil {
+		log.Println(err)
+		return ShortenResponse{}, errors.New(InternalError)
+	}
 	return ShortenResponse{Slug: slug}, err
 }
 
