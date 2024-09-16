@@ -1,0 +1,32 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "r3dr_lib",
+    srcs = [
+        "base62.go",
+        "config.go",
+        "constants.go",
+        "dto.go",
+        "main.go",
+        "ping.go",
+        "short_db.go",
+        "shortener.go",
+        "shortener_api.go",
+    ],
+    importpath = "github.com/muchq/moonbase/go/r3dr",
+    visibility = ["//visibility:private"],
+    deps = ["@com_github_go_sql_driver_mysql//:mysql"],
+)
+
+go_binary(
+    name = "r3dr",
+    embed = [":r3dr_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "base62_test",
+    size = "small",
+    srcs = ["base62_test.go"],
+    embed = [":r3dr_lib"],
+)

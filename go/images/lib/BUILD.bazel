@@ -34,6 +34,7 @@ go_test(
 
 go_test(
     name = "lib_test",
+    size = "small",
     srcs = [
         "image_io_test.go",
         "images_test.go",
