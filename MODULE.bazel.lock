@@ -4642,7 +4642,7 @@
     },
     "@@rules_rust~//rust/private:extensions.bzl%i": {
       "general": {
-        "bzlTransitiveDigest": "CUz8cElgiK2ArbzsjhxFTHtOsNuaAOlfjmWIQBGUhG0=",
+        "bzlTransitiveDigest": "xx3MJ8xcmVKTvuwd00d6/ha+1Dyiq9Yk2Mgq0Tsrftw=",
         "usagesDigest": "N9KOSbL/xg0Vwm89EK9hUP4OTcSNc663kx+/4CqIh0o=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
