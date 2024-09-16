@@ -3,12 +3,14 @@ load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 go_library(
     name = "r3dr_lib",
     srcs = [
+        "base62.go",
         "config.go",
         "dto.go",
         "main.go",
         "ping.go",
         "short_db.go",
-        "shorten.go",
+        "shortener.go",
+        "shortener_api.go",
     ],
     importpath = "github.com/muchq/moonbase/go/r3dr",
     visibility = ["//visibility:private"],
@@ -22,8 +24,8 @@ go_binary(
 )
 
 go_test(
-    name = "shorten_test",
+    name = "base62_test",
     size = "small",
-    srcs = ["shorten_test.go"],
+    srcs = ["base62_test.go"],
     embed = [":r3dr_lib"],
 )

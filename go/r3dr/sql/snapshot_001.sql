@@ -7,4 +7,6 @@ CREATE TABLE `urls` (
     `created_by` varchar(40) DEFAULT NULL,
     PRIMARY KEY (`id`),
     KEY `slug_idx` (`short_url`) USING HASH
-);
+)
+  CHARACTER SET 'utf8mb4'
+  COLLATE 'utf8mb4_bin';

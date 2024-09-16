@@ -18,8 +18,12 @@
 
 ### TODO
  - vanity urls
- - shorter short urls
  - stats
- - logs
  - cache
  - rate limits
+ - clean-up worker (archive/delete expired stuff)
+ - logs
+ - request tracing
+
+### Reusing expired slugs
+Currently, there's no way to reclaim the nice short slugs associated with low ids even after the redirects expire.

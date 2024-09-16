@@ -6,12 +6,12 @@ import (
 	"net/http"
 )
 
-type ShortenerService struct {
-	shortDb *ShortDB
+type ShortenerApi struct {
+	shortener *Shortener
 }
 
-func NewShortenerService(shortDb *ShortDB) *ShortenerService {
-	return &ShortenerService{shortDb: shortDb}
+func NewShortenerApi(shortener *Shortener) *ShortenerApi {
+	return &ShortenerApi{shortener}
 }
 
 func readBody(r *http.Request) (ShortenRequest, error) {
@@ -21,30 +21,29 @@ func readBody(r *http.Request) (ShortenRequest, error) {
 	return shortenRequest, err
 }
 
-func (svc *ShortenerService) ShortenHandler(w http.ResponseWriter, r *http.Request) {
+func (api *ShortenerApi) ShortenHandler(w http.ResponseWriter, r *http.Request) {
 	shortenRequest, err := readBody(r)
 	if err != nil {
-		log.Println(err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	slug, err := svc.shortDb.InsertUrl(shortenRequest.LongUrl, shortenRequest.ExpiresAt)
+	response, err := api.shortener.Shorten(shortenRequest)
+
 	if err != nil {
 		log.Println(err)
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 
-	shortenResponse := ShortenResponse{slug}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(shortenResponse)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
-func (svc *ShortenerService) RedirectHandler(w http.ResponseWriter, r *http.Request) {
+func (api *ShortenerApi) RedirectHandler(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
-	target, err := svc.shortDb.GetLongUrl(slug)
+	target, err := api.shortener.Redirect(slug)
 	if err != nil {
 		http.NotFound(w, r)
 	} else {
@@ -52,6 +51,6 @@ func (svc *ShortenerService) RedirectHandler(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-func (svc *ShortenerService) Close() {
-	svc.shortDb.Close()
+func (api *ShortenerApi) Close() {
+	api.shortener.Close()
 }
