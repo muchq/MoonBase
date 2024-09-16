@@ -4,8 +4,10 @@ go_library(
     name = "r3dr_lib",
     srcs = [
         "config.go",
+        "dto.go",
         "main.go",
         "ping.go",
+        "short_db.go",
         "shorten.go",
     ],
     importpath = "github.com/muchq/moonbase/go/r3dr",

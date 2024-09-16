@@ -6,8 +6,8 @@ import (
 )
 
 type Config struct {
-	port             string
-	connectionString string
+	Port             string
+	ConnectionString string
 }
 
 func ReadConfig() Config {
