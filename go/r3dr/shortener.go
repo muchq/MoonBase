@@ -41,7 +41,15 @@ func (s *Shortener) Redirect(slug string) (string, error) {
 	if len(slug) < 2 {
 		return "", errors.New("invalid slug")
 	}
-	return s.urlDao.GetLongUrl(slug)
+	target, err := s.urlDao.GetLongUrl(slug)
+	if err == nil && target == "" {
+		return "", errors.New(NotFound)
+	} else if err != nil {
+		log.Println(err)
+		return "", errors.New(InternalError)
+	}
+
+	return target, nil
 }
 
 func (s *Shortener) Close() {

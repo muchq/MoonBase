@@ -27,7 +27,7 @@ func (d *ShortDB) InsertUrl(longUrl string, expiresAt int64) (string, error) {
 		return "", insertErr
 	}
 
-	slug, _ := ToBase62(id)
+	slug, _ := EncodeId(id)
 
 	_, updateErr := d.db.Exec("UPDATE urls SET short_url=? WHERE id=?", slug, id)
 	if updateErr != nil {
@@ -40,13 +40,15 @@ func (d *ShortDB) InsertUrl(longUrl string, expiresAt int64) (string, error) {
 func (d *ShortDB) GetLongUrl(slug string) (string, error) {
 	statement, err := d.db.Prepare("SELECT long_url FROM urls WHERE short_url = ?")
 	if err != nil {
-		log.Printf("oops: %v", err)
 		return "", err
 	}
 	defer statement.Close()
 
 	var target string
 	err = statement.QueryRow(slug).Scan(&target)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
 	return target, err
 }
 
