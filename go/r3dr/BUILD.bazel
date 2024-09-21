@@ -7,6 +7,7 @@ go_library(
         "config.go",
         "constants.go",
         "dto.go",
+        "encoding.go",
         "main.go",
         "ping.go",
         "short_db.go",
@@ -26,8 +27,15 @@ go_binary(
 )
 
 go_test(
-    name = "base62_test",
+    name = "encoding_test",
     size = "small",
-    srcs = ["base62_test.go"],
+    srcs = ["encoding_test.go"],
+    embed = [":r3dr_lib"],
+)
+
+go_test(
+    name = "shortener_test",
+    size = "small",
+    srcs = ["shortener_test.go"],
     embed = [":r3dr_lib"],
 )
