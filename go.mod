@@ -4,7 +4,7 @@ go 1.23.0
 
 require github.com/gofiber/fiber/v2 v2.52.5
 
-require google.golang.org/grpc v1.66.2
+require google.golang.org/grpc v1.67.0
 
 require github.com/go-sql-driver/mysql v1.8.1
 
