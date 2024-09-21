@@ -17,15 +17,15 @@ readme = "README.md"
 [workspace.dependencies]
 example_service = { path = "protos/example_service" }
 escapist_proto = { path = "protos/escapist" }
-prost = { version = "0.13.0" }
-prost-types = { version = "0.13.0", default-features = false }
+prost = { version = "0.13.2" }
+prost-types = { version = "0.13.2", default-features = false }
 tonic = { version = "0.12.2", features = ["transport"] }
 tonic-build = "0.12.2"
-tokio = { version = "1.38", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
+tokio = { version = "1.40.0", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
 protoc-gen-tonic = "0.4.1"
 protoc-gen-prost = "0.4.0"
 mongodb = "3.0.1"
-serde = { version = "1.0.209", features = ["derive"] }
+serde = { version = "1.0.210", features = ["derive"] }
 dotenv = "0.15.0"
 futures = "0.3.30"
 uuid = { version = "1.10.0", features = ["v4", "fast-rng"]}
