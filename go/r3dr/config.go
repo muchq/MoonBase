@@ -11,9 +11,9 @@ type Config struct {
 }
 
 func ReadConfig() Config {
-	connectionString, ok := os.LookupEnv("MYSQL_CONNECTION_STRING")
+	connectionString, ok := os.LookupEnv("DB_CONNECTION_STRING")
 	if !ok {
-		log.Fatalf("MYSQL_CONNECTION_STRING env var not set.")
+		log.Fatalf("DB_CONNECTION_STRING env var not set.")
 	}
 
 	port, ok := os.LookupEnv("PORT")

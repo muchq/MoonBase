@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	_ "github.com/lib/pq"
 	"log"
 )
 
@@ -10,7 +11,7 @@ type ShortDB struct {
 }
 
 func NewShortDB(config Config) *ShortDB {
-	db, err := sql.Open("mysql", config.ConnectionString)
+	db, err := sql.Open("postgres", config.ConnectionString)
 	if err != nil {
 		log.Fatalf("could not connect to database: %v", err)
 	}
