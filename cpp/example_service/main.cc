@@ -1,6 +1,7 @@
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
+#include <cstdlib>
 
 #include "cpp/example_service/example_service.h"
 
@@ -23,7 +24,14 @@ void RunServer(uint16_t port) {
   server->Wait();
 }
 
+uint16_t ReadPort(uint16_t default_port) {
+  if (const char* env_p = std::getenv("PORT")) {
+    return static_cast<uint16_t>(std::atoi(env_p));
+  }
+  return default_port;
+}
+
 int main() {
-  RunServer(8088);
+  RunServer(ReadPort(8080));
   return 0;
 }
