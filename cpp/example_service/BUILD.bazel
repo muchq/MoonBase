@@ -1,3 +1,7 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+
 cc_library(
     name = "example_service_lib",
     srcs = ["example_service.cc"],
@@ -30,4 +34,32 @@ cc_test(
         ":example_service_lib",
         "@googletest//:gtest_main",
     ],
+)
+
+pkg_tar(
+    name = "example_cc_grpc_tar",
+    srcs = [":example_service"],
+)
+
+oci_image(
+    name = "example_cc_grpc_image",
+    base = "@docker_lib_ubuntu",
+    entrypoint = ["/example_service"],
+    exposed_ports = [
+        str(x)
+        for x in range(8080, 8090)
+    ],
+    tars = [":example_cc_grpc_tar"],
+)
+
+oci_load(
+    name = "oci_tarball",
+    image = ":example_cc_grpc_image",
+    repo_tags = ["example_cc_grpc:latest"],
+)
+
+filegroup(
+    name = "example_service_oci.tar",
+    srcs = [":oci_tarball"],
+    output_group = "tarball",
 )
