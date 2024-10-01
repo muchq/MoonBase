@@ -2,10 +2,10 @@
 
 set -e
 
-apt update && apt install curl wget podman clang-format-19
+apt update && apt install curl wget podman clang-format-18
 
 echo "installing clang format"
-ln -s "$(which clang-format-19)" /usr/local/bin/clang-format
+ln -s "$(which clang-format-18)" /usr/local/bin/clang-format
 
 #echo "installing scalafmt"
 #VERSION=3.8.2

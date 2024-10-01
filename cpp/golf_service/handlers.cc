@@ -16,8 +16,8 @@ using std::string;
 namespace golf_service {
 
 template <RequestWrapper::KindCase T>
-auto Handler::validRequestType(const GolfServiceRequest &serviceRequest, struct mg_connection *c)
-    -> bool {
+auto Handler::validRequestType(const GolfServiceRequest &serviceRequest,
+                               struct mg_connection *c) -> bool {
   if (serviceRequest.kind_case() != T) {
     string output("error|invalid request");
     mg_ws_send(c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
@@ -65,8 +65,8 @@ bool Handler::usernameMismatch(const string &username, struct mg_connection *c) 
   return false;
 }
 
-auto Handler::validatePosition(const golf_ws::Position &position, struct mg_connection *c)
-    -> absl::StatusOr<golf::Position> {
+auto Handler::validatePosition(const golf_ws::Position &position,
+                               struct mg_connection *c) -> absl::StatusOr<golf::Position> {
   switch (position) {
     case golf_ws::Position::TOP_LEFT:
       return golf::Position::TopLeft;
