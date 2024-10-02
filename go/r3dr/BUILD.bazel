@@ -16,7 +16,7 @@ go_library(
     ],
     importpath = "github.com/muchq/moonbase/go/r3dr",
     visibility = ["//visibility:private"],
-    deps = ["@com_github_go_sql_driver_mysql//:mysql"],
+    deps = ["@com_github_lib_pq//:pq"],
 )
 
 go_binary(
