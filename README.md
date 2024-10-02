@@ -1,6 +1,7 @@
 # MoonBase
 
 [![CircleCI](https://dl.circleci.com/status-badge/img/gh/muchq/MoonBase/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/muchq/MoonBase/tree/main)
+[![Build status](https://badge.buildkite.com/45b9e056ab54df4abc6ccad6b48a06c06fb23285ee679809c2.svg)](https://buildkite.com/muchq/moonbase)
 
 ![MoonBase](static_content/moon.gif)
 
@@ -20,7 +21,9 @@ C++ projects work with [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin
 
 Although it's slow, the clang-lint integration is very helpful.
 
-Not sure why it's slow though!
+### GoLand
+Go projects work with [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij).
+Alternatively, you can use IntelliJ for Go too.
 
 ### VSCode
 

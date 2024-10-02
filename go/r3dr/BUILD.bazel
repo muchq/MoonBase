@@ -1,4 +1,6 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 
 go_library(
     name = "r3dr_lib",
@@ -37,4 +39,28 @@ go_test(
     size = "small",
     srcs = ["shortener_test.go"],
     embed = [":r3dr_lib"],
+)
+
+pkg_tar(
+    name = "r3dr_tar",
+    srcs = [":r3dr"],
+)
+
+oci_image(
+    name = "r3dr_image",
+    base = "@docker_lib_ubuntu",
+    entrypoint = ["/r3dr"],
+    tars = [":r3dr_tar"],
+)
+
+oci_load(
+    name = "oci_load_tarball",
+    image = ":r3dr_image",
+    repo_tags = ["ghcr.io/muchq/r3dr:latest"],
+)
+
+filegroup(
+    name = "r3dr_oci.tar",
+    srcs = [":oci_load_tarball"],
+    output_group = "tarball",
 )
