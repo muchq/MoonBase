@@ -1,0 +1,8 @@
+services:
+  r3dr:
+    image: ghcr.io/muchq/r3dr:latest
+    restart: always
+    ports:
+      - "8080:8080"
+    volumes:
+      - /etc/r3dr:/etc/r3dr
