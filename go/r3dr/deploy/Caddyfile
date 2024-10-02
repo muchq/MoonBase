@@ -18,7 +18,7 @@ r3dr.net {
 
 	file_server
 	log {
-		output file /var/log/access.log {
+		output file /var/log/caddy/access.log {
 			roll_size 1gb
 			roll_keep 5
 			roll_keep_for 90d
