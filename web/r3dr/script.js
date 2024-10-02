@@ -20,10 +20,13 @@ document.getElementById('submitBtn').addEventListener('click', async () => {
         }
 
         const data = await response.json();
+        clearError();
         displayResult(data.slug);
+        document.getElementById('urlInput').value = "";
 
     } catch (error) {
         displayError("Error shortening the URL. Please try again.");
+        clearResults();
         console.error(error);
     }
 });
@@ -33,7 +36,17 @@ function displayResult(shortenedUrl) {
     resultDiv.textContent = `Shortened URL: https://r3dr.net/r/${shortenedUrl}`;
 }
 
+function clearResults() {
+    const resultDiv = document.getElementById('result');
+    resultDiv.textContent = "";
+}
+
 function displayError(message) {
     const errorDiv = document.getElementById('error');
     errorDiv.textContent = message;
+}
+
+function clearError() {
+    const errorDiv = document.getElementById('error');
+    errorDiv.textContent = "";
 }

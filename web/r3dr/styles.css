@@ -1,42 +1,50 @@
 body {
-    background-color: #1a1a2e;
-    color: #e94560;
-    font-family: 'Courier New', Courier, monospace;
+    background-color: #1a1a2e; /* Dark background for retro-futuristic look */
+    color: #e94560; /* Bright text color */
+    font-family: 'Courier New', Courier, monospace; /* Monospace font for retro style */
     display: flex;
     justify-content: center;
     align-items: center;
     height: 100vh;
     margin: 0;
+    padding: 20px; /* Added padding for mobile */
+    box-sizing: border-box; /* Ensures padding does not affect total size */
 }
 
 .container {
     text-align: center;
+    max-width: 600px; /* Increased max width for better desktop experience */
+    width: 100%; /* Full width on smaller screens */
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.8); /* Slightly opaque background for contrast */
+    padding: 20px; /* Inner padding */
+    box-shadow: 0 0 20px rgba(233, 69, 96, 0.5); /* Glowing effect */
 }
 
 .title {
     font-size: 2.5em;
     margin-bottom: 20px;
+    text-shadow: 2px 2px #d0344e; /* Text shadow for retro effect */
 }
 
-input[type="text"] {
-    padding: 10px;
-    width: 300px;
+input[type="text"], button {
+    padding: 15px; /* Increased padding for better touch targets */
+    width: calc(100% - 40px); /* Make input and button the same width */
+    margin-bottom: 10px; /* Space between input and button */
     border: none;
     border-radius: 5px;
-    box-shadow: 0 0 10px rgba(233, 69, 96, 0.5);
+    box-shadow: 0 0 10px rgba(233, 69, 96, 0.5); /* Input glow effect */
+    font-size: 1.1em; /* Responsive font size */
 }
 
 button {
-    padding: 10px 20px;
-    background-color: #e94560;
-    border: none;
-    border-radius: 5px;
+    background-color: #e94560; /* Button color */
     cursor: pointer;
     transition: background-color 0.3s ease;
 }
 
 button:hover {
-    background-color: #d0344e;
+    background-color: #d0344e; /* Darker shade on hover */
 }
 
 .result {
@@ -44,5 +52,42 @@ button:hover {
 }
 
 .error {
-    color: #ffcc00; /* Yellow for errors */
+    color: #ffcc00; /* Bright yellow for errors, maintaining retro styling */
+}
+
+/* Media Queries for Better Mobile Experience */
+@media (max-width: 900px) {
+    body {
+        flex-direction: column; /* Stack elements vertically on mobile */
+        justify-content: center; /* Center content vertically */
+        align-items: center; /* Center content horizontally */
+        height: auto; /* Allow height to adjust based on content */
+        padding-top: 40px; /* Add some space at the top on mobile */
+        padding-bottom: 40px; /* Add some space at the bottom on mobile */
+    }
+
+    .container {
+        margin-top: 20px;
+        width: calc(100% - 40px); /* Ensure container is full-width minus padding */
+        padding-left: 10px; /* Adjust padding for better alignment on mobile */
+        padding-right: 10px; /* Adjust padding for better alignment on mobile */
+    }
+
+    .title {
+        font-size: 2em; /* Smaller title on mobile */
+        margin-bottom: 15px; /* Adjusted margin */
+    }
+
+    input[type="text"], button {
+        font-size: 0.9em; /* Slightly smaller font size on mobile */
+        padding: 12px; /* Adjusted padding for smaller screens */
+        width: calc(100% - 24px); /* Full width on mobile with padding adjustment */
+    }
+
+    .result,
+    .error {
+        font-size: 1em; /* Ensure text is readable on smaller devices */
+        margin-top: 10px; /* Adjusted margin for results/errors */
+        word-wrap: break-word; /* Prevent overflow of long URLs */
+    }
 }
