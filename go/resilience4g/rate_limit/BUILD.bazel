@@ -1,0 +1,15 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "rate_limit",
+    srcs = [
+        "http_middleware.go",
+        "rate_limiter.go",
+        "token_bucket_rate_limiter.go",
+    ],
+    importpath = "github.com/muchq/moonbase/go/resilience4g/rate_limit",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/mucks",
+    ],
+)
