@@ -28,6 +28,7 @@ grpc_proto_library(
     srcs = ["helloworld.proto"],
 )
 
+# gazelle:ignore
 go_proto_library(
     name = "example_service_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],

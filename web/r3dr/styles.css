@@ -18,18 +18,18 @@ body {
     border-radius: 10px;
     background: rgba(0, 0, 0, 0.8); /* Slightly opaque background for contrast */
     padding: 20px; /* Inner padding */
-    box-shadow: 0 0 20px rgba(233, 69, 96, 0.5); /* Glowing effect */
+    box-shadow: 0 0 10px rgba(233, 69, 96, 0.5); /* Glowing effect */
 }
 
 .title {
     font-size: 2.5em;
     margin-bottom: 20px;
-    text-shadow: 2px 2px #d0344e; /* Text shadow for retro effect */
+    text-shadow: 1px 1px yellowgreen; /* Text shadow for retro effect */
 }
 
-input[type="text"], button {
+input[type="text"] {
     padding: 15px; /* Increased padding for better touch targets */
-    width: calc(100% - 40px); /* Make input and button the same width */
+    width: calc(100% - 75px);
     margin-bottom: 10px; /* Space between input and button */
     border: none;
     border-radius: 5px;
@@ -41,6 +41,12 @@ button {
     background-color: #e94560; /* Button color */
     cursor: pointer;
     transition: background-color 0.3s ease;
+    padding: 15px; /* Increased padding for better touch targets */
+    width: calc(100% - 40px); /* Make input and button the same width */
+    border: none;
+    border-radius: 5px;
+    box-shadow: 0 0 10px rgba(233, 69, 96, 0.5); /* Input glow effect */
+    font-size: 1.1em; /* Responsive font size */
 }
 
 button:hover {
@@ -81,6 +87,13 @@ button:hover {
     input[type="text"], button {
         font-size: 0.9em; /* Slightly smaller font size on mobile */
         padding: 12px; /* Adjusted padding for smaller screens */
+    }
+
+    input[type="text"] {
+        width: calc(100% - 50px); /* Full width on mobile with padding adjustment */
+    }
+
+    button {
         width: calc(100% - 24px); /* Full width on mobile with padding adjustment */
     }
 
