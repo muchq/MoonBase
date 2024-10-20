@@ -1,6 +1,7 @@
 package rate_limit
 
 import (
+	"fmt"
 	"github.com/muchq/moonbase/go/mucks"
 	"net"
 	"net/http"
@@ -51,9 +52,16 @@ func (m *RateLimiterMiddleware) Wrap(next http.HandlerFunc) http.HandlerFunc {
 
 		// TODO: what should happen if the extracted key is empty?
 
-		m.ensureLimiter(key)
+		err := m.ensureLimiter(key)
+		if err != nil {
+			// TODO: throttle logging
+			fmt.Println("failing open due to error creating rate limiter: ", err)
+			next(w, r)
+			return
+		}
+
 		limiter := m.Limiters[key]
-		if limiter.Allow(m.Config.OpCost) {
+		if limiter.Allow(m.Config.GetOpCost()) {
 			next(w, r)
 		} else {
 			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
@@ -61,11 +69,16 @@ func (m *RateLimiterMiddleware) Wrap(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func (m *RateLimiterMiddleware) ensureLimiter(key string) {
+func (m *RateLimiterMiddleware) ensureLimiter(key string) error {
 	m.Mutex.Lock()
 	defer m.Mutex.Unlock()
 	_, ok := m.Limiters[key]
 	if !ok {
-		m.Limiters[key] = m.Factory.NewRateLimiter(m.Config)
+		limiter, err := m.Factory.NewRateLimiter(m.Config)
+		if err != nil {
+			return err
+		}
+		m.Limiters[key] = limiter
 	}
+	return nil
 }

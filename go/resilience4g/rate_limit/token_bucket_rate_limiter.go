@@ -1,22 +1,34 @@
 package rate_limit
 
 import (
+	"errors"
 	"sync"
 	"time"
 )
+
+type Clock interface {
+	Now() time.Time
+}
+
+type SystemUtcClock struct {
+}
+
+func (sc *SystemUtcClock) Now() time.Time {
+	return time.Now().UTC()
+}
 
 // TokenBucketRateLimiter should always be passed and accessed by pointer
 // because it contains a sync.Mutex field which cannot be safely copied.
 // Use NewInMemoryRateLimiter when constructing instances.
 type TokenBucketRateLimiter struct {
-	MaxTokens     int64
-	RefillRate    int64
+	Config        RateLimiterConfig
 	LastRefill    int64
 	CurrentTokens float64
+	Clock         Clock
 	Lock          sync.Mutex
 }
 
-func (rl *TokenBucketRateLimiter) Allow(cost int) bool {
+func (rl *TokenBucketRateLimiter) Allow(cost int64) bool {
 	rl.Lock.Lock()
 	defer rl.Lock.Unlock()
 	rl.refill()
@@ -30,23 +42,41 @@ func (rl *TokenBucketRateLimiter) Allow(cost int) bool {
 }
 
 func (rl *TokenBucketRateLimiter) refill() {
-	now := time.Now().UnixNano()
-	toAdd := float64((now - rl.LastRefill) * rl.RefillRate / 1e9)
+	now := rl.Clock.Now().UnixNano()
+	toAdd := float64((now - rl.LastRefill) * rl.Config.GetRefillRate() / 1e9)
 	if toAdd < 1.0 {
 		return
 	}
-	rl.CurrentTokens = min(rl.CurrentTokens+toAdd, float64(rl.MaxTokens))
+	rl.CurrentTokens = min(rl.CurrentTokens+toAdd, float64(rl.Config.GetMaxTokens()))
 	rl.LastRefill = now
 }
 
 type TokenBucketRateLimiterFactory struct {
 }
 
-func (TokenBucketRateLimiterFactory) NewRateLimiter(config RateLimiterConfig) RateLimiterInterface {
-	return &TokenBucketRateLimiter{
-		MaxTokens:     config.MaxTokens,
-		RefillRate:    config.RefillRate,
-		CurrentTokens: float64(config.MaxTokens),
-		LastRefill:    time.Now().UnixNano(),
+func checkPositive(value int64, message string) error {
+	if value <= 0 {
+		return errors.New(message)
 	}
+	return nil
+}
+
+func (TokenBucketRateLimiterFactory) NewRateLimiter(config RateLimiterConfig) (RateLimiterInterface, error) {
+	if config.GetMaxTokens() <= 0 {
+		return nil, errors.New("max tokens must be positive")
+	}
+	if config.GetRefillRate() <= 0 {
+		return nil, errors.New("refill rate must be positive")
+	}
+	if config.GetOpCost() <= 0 {
+		return nil, errors.New("op cost must be positive")
+	}
+
+	clock := &SystemUtcClock{}
+	return &TokenBucketRateLimiter{
+		Config:        config,
+		CurrentTokens: float64(config.GetMaxTokens()),
+		Clock:         clock,
+		LastRefill:    clock.Now().UnixNano(),
+	}, nil
 }
