@@ -60,11 +60,11 @@ func (c *TestClock) Now() time.Time {
 	return time.Unix(c.unixSeconds, 0)
 }
 
-func (c *TestClock) Tick() {
-	c.unixSeconds += 1
+func (c *TestClock) Tick(secs int64) {
+	c.unixSeconds += secs
 }
 
 func TestLimiterAllowsRequestsIfCurrentTokensLessThanOpCost(t *testing.T) {
 	testClock := &TestClock{}
-
+	testClock.Tick(100)
 }
