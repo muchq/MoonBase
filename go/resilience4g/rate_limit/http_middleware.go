@@ -15,6 +15,7 @@ type KeyExtractor interface {
 type RemoteIpKeyExtractor struct {
 }
 
+// Apply implements the KeyExtractor interface.
 // RemoteIpKeyExtractor tries to read the request's remote-ip
 // from the X-Forwarded-For header. If that header is not present,
 // we fall back to the RemoteAddr of the request.

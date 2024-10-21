@@ -7,21 +7,21 @@ type RateLimiterConfig interface {
 }
 
 type DefaultRateLimitConfig struct {
-	maxTokens  int64
-	refillRate int64
-	opCost     int64
+	MaxTokens  int64
+	RefillRate int64
+	OpCost     int64
 }
 
 func (c *DefaultRateLimitConfig) GetMaxTokens() int64 {
-	return c.maxTokens
+	return c.MaxTokens
 }
 
 func (c *DefaultRateLimitConfig) GetRefillRate() int64 {
-	return c.refillRate
+	return c.RefillRate
 }
 
 func (c *DefaultRateLimitConfig) GetOpCost() int64 {
-	return c.opCost
+	return c.OpCost
 }
 
 type RateLimiterInterface interface {

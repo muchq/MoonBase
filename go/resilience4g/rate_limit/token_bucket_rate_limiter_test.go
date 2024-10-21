@@ -8,9 +8,9 @@ import (
 
 var factory TokenBucketRateLimiterFactory = TokenBucketRateLimiterFactory{}
 var validConfig RateLimiterConfig = &DefaultRateLimitConfig{
-	maxTokens:  1,
-	refillRate: 1,
-	opCost:     1,
+	MaxTokens:  1,
+	RefillRate: 1,
+	OpCost:     1,
 }
 
 func TestFactoryAllowsValidConfig(t *testing.T) {
@@ -20,9 +20,9 @@ func TestFactoryAllowsValidConfig(t *testing.T) {
 
 func TestFactoryValidatesMaxTokens(t *testing.T) {
 	config := &DefaultRateLimitConfig{
-		maxTokens:  0,
-		refillRate: 1,
-		opCost:     1,
+		MaxTokens:  0,
+		RefillRate: 1,
+		OpCost:     1,
 	}
 
 	_, err := factory.NewRateLimiter(config)
@@ -31,9 +31,9 @@ func TestFactoryValidatesMaxTokens(t *testing.T) {
 
 func TestFactoryValidatesRefillRate(t *testing.T) {
 	config := &DefaultRateLimitConfig{
-		maxTokens:  1,
-		refillRate: 0,
-		opCost:     1,
+		MaxTokens:  1,
+		RefillRate: 0,
+		OpCost:     1,
 	}
 
 	_, err := factory.NewRateLimiter(config)
@@ -42,9 +42,9 @@ func TestFactoryValidatesRefillRate(t *testing.T) {
 
 func TestFactoryValidatesOpCost(t *testing.T) {
 	config := &DefaultRateLimitConfig{
-		maxTokens:  1,
-		refillRate: 1,
-		opCost:     0,
+		MaxTokens:  1,
+		RefillRate: 1,
+		OpCost:     0,
 	}
 
 	_, err := factory.NewRateLimiter(config)
