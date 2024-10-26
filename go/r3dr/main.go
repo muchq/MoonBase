@@ -13,11 +13,18 @@ func MakeShortenerApi(config Config) *ShortenerApi {
 	return NewShortenerApi(shortener)
 }
 
-func MakeIpRateLimiterMiddleware() mucks.Middleware {
+func MakeFallbackLimiterMiddleware(config rate_limit.RateLimiterConfig) mucks.Middleware {
+	return rate_limit.NewRateLimiterMiddleware(
+		rate_limit.TokenBucketRateLimiterFactory{},
+		rate_limit.ConstKeyExtractor{},
+		config)
+}
+
+func MakeIpRateLimiterMiddleware(config rate_limit.RateLimiterConfig) mucks.Middleware {
 	return rate_limit.NewRateLimiterMiddleware(
 		rate_limit.TokenBucketRateLimiterFactory{},
 		rate_limit.RemoteIpKeyExtractor{},
-		ShortenRateLimiterConfig)
+		config)
 }
 
 func main() {
@@ -27,12 +34,18 @@ func main() {
 	defer shortenerApi.Close()
 
 	router := mucks.NewMucks()
+
+	// Add fallback rate-limiter at the router layer
+	fallbackRateLimiter := MakeFallbackLimiterMiddleware(FallbackRateLimiterConfig)
+	router.Add(fallbackRateLimiter)
+
+	// Ping endpoint
 	router.HandleFunc("GET /ping", PingHandler)
 
 	// Rate-limited Shorten API endpoint
-	ipRateLimiter := MakeIpRateLimiterMiddleware()
+	shortenRateLimiter := MakeIpRateLimiterMiddleware(ShortenRateLimiterConfig)
 	router.HandleFunc("POST /shorten",
-		ipRateLimiter.Wrap(shortenerApi.ShortenHandler))
+		shortenRateLimiter.Wrap(shortenerApi.ShortenHandler))
 
 	// Non rate-limited Redirect API endpoint
 	router.HandleFunc("GET /r/{slug}",

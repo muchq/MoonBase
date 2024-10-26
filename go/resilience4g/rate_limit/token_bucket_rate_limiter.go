@@ -2,20 +2,9 @@ package rate_limit
 
 import (
 	"errors"
+	"github.com/muchq/moonbase/go/clock"
 	"sync"
-	"time"
 )
-
-type Clock interface {
-	Now() time.Time
-}
-
-type SystemUtcClock struct {
-}
-
-func (sc *SystemUtcClock) Now() time.Time {
-	return time.Now().UTC()
-}
 
 // TokenBucketRateLimiter should always be passed and accessed by pointer
 // because it contains a sync.Mutex field which cannot be safely copied.
@@ -24,7 +13,7 @@ type TokenBucketRateLimiter struct {
 	Config        RateLimiterConfig
 	LastRefill    int64
 	CurrentTokens float64
-	Clock         Clock
+	Clock         clock.Clock
 	Lock          sync.Mutex
 }
 
@@ -72,7 +61,7 @@ func (TokenBucketRateLimiterFactory) NewRateLimiter(config RateLimiterConfig) (R
 		return nil, errors.New("op cost must be positive")
 	}
 
-	clock := &SystemUtcClock{}
+	clock := clock.NewSystemUtcClock()
 	return &TokenBucketRateLimiter{
 		Config:        config,
 		CurrentTokens: float64(config.GetMaxTokens()),

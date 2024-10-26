@@ -3,8 +3,9 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "mucks",
     srcs = [
-        "json_middleware.go",
+        "middleware.go",
         "mucks.go",
+        "problem.go",
     ],
     importpath = "github.com/muchq/moonbase/go/mucks",
     visibility = ["//visibility:public"],

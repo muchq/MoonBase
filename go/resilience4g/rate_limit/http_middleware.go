@@ -12,6 +12,15 @@ type KeyExtractor interface {
 	Apply(r *http.Request) string
 }
 
+type ConstKeyExtractor struct {
+}
+
+// Apply implements the KeyExtractor interface.
+// ConstKeyExtractor always returns the same key.
+func (ConstKeyExtractor) Apply(r *http.Request) string {
+	return "SENTINEL"
+}
+
 type RemoteIpKeyExtractor struct {
 }
 

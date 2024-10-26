@@ -10,3 +10,9 @@ var ShortenRateLimiterConfig = &rate_limit.DefaultRateLimitConfig{
 	RefillRate: 1,
 	OpCost:     1,
 }
+
+var FallbackRateLimiterConfig = &rate_limit.DefaultRateLimitConfig{
+	MaxTokens:  1200,
+	RefillRate: 1000,
+	OpCost:     1,
+}

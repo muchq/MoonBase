@@ -1,4 +1,4 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_cross_binary", "go_library", "go_test")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 
@@ -31,9 +31,17 @@ go_binary(
     visibility = ["//visibility:public"],
 )
 
+go_cross_binary(
+    name = "r3dr_linux_amd64",
+    platform = "@io_bazel_rules_go//go/toolchain:linux_amd64",
+    target = ":r3dr",
+    visibility = ["//visibility:public"],
+)
+
 pkg_tar(
     name = "r3dr_tar",
-    srcs = [":r3dr"],
+    srcs = [":r3dr_linux_amd64"],
+    remap_paths = {"/r3dr_linux_amd64": "/r3dr"},
 )
 
 oci_image(

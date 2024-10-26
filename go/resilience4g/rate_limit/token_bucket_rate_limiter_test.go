@@ -1,12 +1,12 @@
 package rate_limit
 
 import (
+	"github.com/muchq/moonbase/go/clock"
 	"github.com/stretchr/testify/assert"
 	"testing"
-	"time"
 )
 
-var factory TokenBucketRateLimiterFactory = TokenBucketRateLimiterFactory{}
+var factory = TokenBucketRateLimiterFactory{}
 var validConfig RateLimiterConfig = &DefaultRateLimitConfig{
 	MaxTokens:  1,
 	RefillRate: 1,
@@ -51,20 +51,42 @@ func TestFactoryValidatesOpCost(t *testing.T) {
 	assert.EqualError(t, err, "op cost must be positive")
 }
 
-type TestClock struct {
-	unixSeconds int64
+func TestLimiterAllowsRequestsIfCurrentTokensGreaterThanOpCost(t *testing.T) {
+	testClock := clock.NewTestClock()
+	limiter := &TokenBucketRateLimiter{
+		Config:        validConfig,
+		CurrentTokens: float64(validConfig.GetMaxTokens()),
+		Clock:         testClock,
+		LastRefill:    testClock.Now().UnixNano(),
+	}
+
+	assert.True(t, limiter.Allow(1), "op with cost 1 is allowed")
 }
 
-// Now implements the Clock interface
-func (c *TestClock) Now() time.Time {
-	return time.Unix(c.unixSeconds, 0)
+func TestLimiterDeniesRequestsIfCurrentTokensLessThanOpCost(t *testing.T) {
+	testClock := clock.NewTestClock()
+	limiter := &TokenBucketRateLimiter{
+		Config:        validConfig,
+		CurrentTokens: float64(validConfig.GetMaxTokens()),
+		Clock:         testClock,
+		LastRefill:    testClock.Now().UnixNano(),
+	}
+
+	assert.False(t, limiter.Allow(2), "op with cost 2 is not allowed")
 }
 
-func (c *TestClock) Tick(secs int64) {
-	c.unixSeconds += secs
-}
+func TestLimiterRefreshesTokens(t *testing.T) {
+	testClock := clock.NewTestClock()
+	limiter := &TokenBucketRateLimiter{
+		Config:        validConfig,
+		CurrentTokens: float64(validConfig.GetMaxTokens()),
+		Clock:         testClock,
+		LastRefill:    testClock.Now().UnixNano(),
+	}
 
-func TestLimiterAllowsRequestsIfCurrentTokensLessThanOpCost(t *testing.T) {
-	testClock := &TestClock{}
-	testClock.Tick(100)
+	assert.True(t, limiter.Allow(1), "op with cost 1 is allowed")
+	assert.False(t, limiter.Allow(1), "tokens should be used")
+
+	testClock.Tick(1)
+	assert.True(t, limiter.Allow(1), "op with cost 1 is allowed again after 1 second")
 }
