@@ -21,6 +21,7 @@ common --tool_java_language_version=21
 common --tool_java_runtime_version=remotejdk_21
 
 # build --strategy=Scalac=worker
+build --spawn_strategy=sandboxed
 
 # layering check fails because golf_service:handlers depends on :protobuf for json_util.h
 # this is weird because :protobuf hdrs glob **/*.h which includes json_util.h
