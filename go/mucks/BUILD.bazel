@@ -1,0 +1,21 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "mucks",
+    srcs = [
+        "middleware.go",
+        "mucks.go",
+        "problem.go",
+    ],
+    importpath = "github.com/muchq/moonbase/go/mucks",
+    visibility = ["//visibility:public"],
+    deps = ["@com_github_google_uuid//:uuid"],
+)
+
+go_test(
+    name = "mucks_test",
+    size = "small",
+    srcs = ["mucks_test.go"],
+    embed = [":mucks"],
+    deps = ["@com_github_stretchr_testify//assert"],
+)

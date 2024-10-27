@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/muchq/moonbase/go/mucks"
 	"net/http"
 )
 
@@ -23,7 +24,7 @@ func readBody(r *http.Request) (ShortenRequest, error) {
 func (api *ShortenerApi) ShortenHandler(w http.ResponseWriter, r *http.Request) {
 	shortenRequest, err := readBody(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		mucks.JsonError(w, mucks.NewBadRequest(err.Error()))
 		return
 	}
 
@@ -31,14 +32,14 @@ func (api *ShortenerApi) ShortenHandler(w http.ResponseWriter, r *http.Request) 
 
 	if err != nil {
 		if err.Error() == InternalError {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			mucks.JsonError(w, mucks.NewServerError(500))
 		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			mucks.JsonError(w, mucks.NewBadRequest(err.Error()))
 		}
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(mucks.ContentType, mucks.ApplicationJsonContentType)
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(response)
 }
