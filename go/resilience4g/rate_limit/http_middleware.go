@@ -2,6 +2,7 @@ package rate_limit
 
 import (
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/muchq/moonbase/go/mucks"
 	"net"
 	"net/http"
@@ -74,7 +75,7 @@ func (m *RateLimiterMiddleware) Wrap(next http.HandlerFunc) http.HandlerFunc {
 		if limiter.Allow(m.Config.GetOpCost()) {
 			next(w, r)
 		} else {
-			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			mucks.JsonError(w, NewRateLimitExceeded())
 		}
 	}
 }
@@ -91,4 +92,14 @@ func (m *RateLimiterMiddleware) ensureLimiter(key string) error {
 		m.Limiters[key] = limiter
 	}
 	return nil
+}
+
+func NewRateLimitExceeded() mucks.Problem {
+	return mucks.Problem{
+		StatusCode: http.StatusTooManyRequests,
+		ErrorCode:  http.StatusTooManyRequests,
+		Message:    "Rate Limit Exceeded",
+		Detail:     "Rate Limit Exceeded", // retry-after etc
+		Instance:   uuid.NewString(),
+	}
 }

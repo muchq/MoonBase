@@ -40,11 +40,6 @@ func TestMucks_NotFoundDefault(t *testing.T) {
 	assert.Equal(t, 404, p.StatusCode)
 }
 
-type FooResponse struct {
-	Name  string `json:"name"`
-	Value int    `json:"value"`
-}
-
 func TestMucks_SimpleHandler(t *testing.T) {
 	m, s, client := Setup()
 	defer s.Close()
@@ -69,6 +64,11 @@ func TestMucks_SimpleMiddleware(t *testing.T) {
 	assert.Nil(t, err, "error on Get")
 
 	assert.Equal(t, "123", response.Header.Get("Foo"), "header should be set")
+}
+
+type FooResponse struct {
+	Name  string `json:"name"`
+	Value int    `json:"value"`
 }
 
 func FooHandler(w http.ResponseWriter, _ *http.Request) {
