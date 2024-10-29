@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"testing"
-	"time"
 )
 
 func TestShortenWorksOnValidUrl(t *testing.T) {
@@ -21,96 +20,6 @@ func TestShortenWorksOnValidUrl(t *testing.T) {
 
 	if response.Slug != "slug" {
 		t.Error("expected fake slug in response")
-	}
-}
-
-func TestShortenErrorOnEmptyLongUrl(t *testing.T) {
-	// Arrange
-	shortener := NewShortener(WorkingUrlDao{})
-	request := ShortenRequest{LongUrl: ""}
-
-	// Act
-	_, err := shortener.Shorten(request)
-
-	// Assert
-	if err == nil {
-		t.Error("shortener should return error on empty LongUrl")
-	}
-}
-
-func TestShortenErrorOnLongUrlWithoutProtocol(t *testing.T) {
-	// Arrange
-	shortener := NewShortener(WorkingUrlDao{})
-	request := ShortenRequest{LongUrl: "google.com"}
-
-	// Act
-	_, err := shortener.Shorten(request)
-
-	// Assert
-	if err == nil || err.Error() != "longUrl must include protocol" {
-		t.Error("protocol should be required")
-	}
-}
-
-func TestShortenErrorOnLongUrlTooShort(t *testing.T) {
-	// Arrange
-	shortener := NewShortener(WorkingUrlDao{})
-	request := ShortenRequest{LongUrl: "http://g.c"}
-
-	// Act
-	_, err := shortener.Shorten(request)
-
-	// Assert
-	if err == nil || err.Error() != "longUrl too short" {
-		t.Error("LongUrl must be 11 chars or longer")
-	}
-}
-
-func TestShortenErrorLongUrlTooLong(t *testing.T) {
-	// Arrange
-	shortener := NewShortener(WorkingUrlDao{})
-	runes := make([]rune, 985)
-	for i := range runes {
-		runes[i] = 'a'
-	}
-	queryString := "?foo=" + string(runes)
-	request := ShortenRequest{LongUrl: "http://g.co" + queryString}
-
-	// Act
-	_, err := shortener.Shorten(request)
-
-	// Assert
-	if err == nil || err.Error() != "max url length is 1000 chars" {
-		t.Error("max LongUrl length is 1000 chars")
-	}
-}
-
-func TestShortenErrorOnNegativeExpiresAt(t *testing.T) {
-	// Arrange
-	shortener := NewShortener(WorkingUrlDao{})
-	request := ShortenRequest{LongUrl: "http://g.co", ExpiresAt: -129}
-
-	// Act
-	_, err := shortener.Shorten(request)
-
-	// Assert
-	if err == nil || err.Error() != "expiresAt is less then now" {
-		t.Error("negative ExpiresAt is not allowed")
-	}
-}
-
-func TestShortenErrorOnExpiresAtInThePast(t *testing.T) {
-	// Arrange
-	nowMillis := time.Now().UnixMilli()
-	shortener := NewShortener(WorkingUrlDao{})
-	request := ShortenRequest{LongUrl: "http://g.co", ExpiresAt: nowMillis - 10_000}
-
-	// Act
-	_, err := shortener.Shorten(request)
-
-	// Assert
-	if err == nil || err.Error() != "expiresAt is less then now" {
-		t.Error("ExpiresAt in the past is not allowed")
 	}
 }
 

@@ -12,7 +12,10 @@ document.getElementById('submitBtn').addEventListener('click', async () => {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ longUrl: urlInput })
+            body: JSON.stringify({
+                longUrl: urlInput,
+                expiresAt: Date.now() + 1000 * 60 * 60 * 24 * 30,
+            })
         });
 
         if (!response.ok) {

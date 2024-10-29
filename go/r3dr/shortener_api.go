@@ -2,16 +2,18 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/muchq/moonbase/go/clock"
 	"github.com/muchq/moonbase/go/mucks"
 	"net/http"
 )
 
 type ShortenerApi struct {
+	clock     clock.Clock
 	shortener *Shortener
 }
 
-func NewShortenerApi(shortener *Shortener) *ShortenerApi {
-	return &ShortenerApi{shortener}
+func NewShortenerApi(clock clock.Clock, shortener *Shortener) *ShortenerApi {
+	return &ShortenerApi{clock: clock, shortener: shortener}
 }
 
 func readBody(r *http.Request) (ShortenRequest, error) {
@@ -23,6 +25,12 @@ func readBody(r *http.Request) (ShortenRequest, error) {
 
 func (api *ShortenerApi) ShortenHandler(w http.ResponseWriter, r *http.Request) {
 	shortenRequest, err := readBody(r)
+	if err != nil {
+		mucks.JsonError(w, mucks.NewBadRequest(err.Error()))
+		return
+	}
+
+	err = ValidateShortenRequest(shortenRequest, api.clock)
 	if err != nil {
 		mucks.JsonError(w, mucks.NewBadRequest(err.Error()))
 		return
