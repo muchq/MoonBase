@@ -21,7 +21,6 @@ jobs:
           repository-cache: true
           google-credentials: ${{ secrets.GOOGLE_CLOUD_KEY }}
           bazelrc: |
-            build --disk_cache=
             build --remote_cache=https://storage.googleapis.com/moon_base_build_cache
             build --remote_upload_local_results=true
 
@@ -42,7 +41,6 @@ jobs:
           repository-cache: true
           google-credentials: ${{ secrets.GOOGLE_CLOUD_KEY }}
           bazelrc: |
-            build --disk_cache=
             build --remote_cache=https://storage.googleapis.com/moon_base_build_cache
             build --remote_upload_local_results=true
 
