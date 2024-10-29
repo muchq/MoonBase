@@ -53,7 +53,7 @@ oci_image(
 )
 
 oci_push(
-    name = "push",
+    name = "push_image",
     image = ":r3dr_image",
     remote_tags = ["latest"],
     repository = "ghcr.io/muchq/r3dr",
