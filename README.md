@@ -1,7 +1,7 @@
 # MoonBase
 
 [![CircleCI](https://dl.circleci.com/status-badge/img/gh/muchq/MoonBase/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/muchq/MoonBase/tree/main)
-[![Build status](https://badge.buildkite.com/45b9e056ab54df4abc6ccad6b48a06c06fb23285ee679809c2.svg)](https://buildkite.com/muchq/moonbase)
+![Test + Publish](https://github.com/muchq/aaylward/actions/workflows/publish.yml/badge.svg)
 
 ![MoonBase](static_content/moon.gif)
 
