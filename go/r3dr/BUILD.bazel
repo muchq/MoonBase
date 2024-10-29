@@ -52,6 +52,14 @@ oci_image(
     tars = [":r3dr_tar"],
 )
 
+oci_push(
+    name = "push",
+    image = ":r3dr_image",
+    remote_tags = ["latest"],
+    repository = "ghcr.io/muchq/r3dr",
+    tags = ["manual"],
+)
+
 oci_load(
     name = "oci_load_tarball",
     image = ":r3dr_image",
