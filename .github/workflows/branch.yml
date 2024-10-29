@@ -1,0 +1,92 @@
+name: "Branch Build"
+
+on:
+  push:
+    branches-ignore: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  run-build:
+    runs-on: [ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bazel-contrib/setup-bazel@0.9.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+
+      - name: bazel-lint
+        run: |
+          bazel run //:buildifier_test
+
+      - name: bazel-build
+        run: |
+          bazel build //...
+
+  test-go:
+    needs: run-build
+    runs-on: [ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bazel-contrib/setup-bazel@0.9.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+
+      - name: bazel-test-go
+        run: |
+          bazel test //go/...
+
+  test-cpp:
+    needs: run-build
+    runs-on: [ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bazel-contrib/setup-bazel@0.9.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+
+      - name: bazel-test-cpp
+        run: |
+          bazel test //cpp/...
+
+  test-java:
+    needs: run-build
+    runs-on: [ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bazel-contrib/setup-bazel@0.9.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+
+      - name: bazel-test-java
+        run: |
+          bazel test //jvm/src/test/java/...
+
+  test-rust:
+    needs: run-build
+    runs-on: [ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bazel-contrib/setup-bazel@0.9.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+
+      - name: bazel-test-rust
+        run: |
+          bazel test //rust/...
