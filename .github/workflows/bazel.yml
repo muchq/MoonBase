@@ -1,0 +1,49 @@
+name: "Bazel"
+
+on:
+  push:
+    branches: [ "main", "testing_actions_bzl" ]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  run-tests:
+    runs-on: [ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bazel-contrib/setup-bazel@0.9.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+
+      - name: bazel-test
+        run: |
+          bazel test //...
+
+  push-images:
+    needs: run-tests
+    runs-on: [ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bazel-contrib/setup-bazel@0.9.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: bazel-run-oci-push
+        run: |
+          bazel query 'kind(oci_push, //...)' | xargs -n1 bazel run
+
