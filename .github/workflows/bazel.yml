@@ -17,12 +17,13 @@ jobs:
       - uses: bazel-contrib/setup-bazel@0.9.0
         with:
           bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
           google-credentials: ${{ secrets.GOOGLE_CLOUD_KEY }}
           bazelrc: |
             build --disk_cache=
             build --remote_cache=https://storage.googleapis.com/moon_base_build_cache
-            build --remote_upload_local_results=false
-          repository-cache: true
+            build --remote_upload_local_results=true
 
       - name: bazel-test
         run: |
@@ -37,12 +38,13 @@ jobs:
       - uses: bazel-contrib/setup-bazel@0.9.0
         with:
           bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
           google-credentials: ${{ secrets.GOOGLE_CLOUD_KEY }}
           bazelrc: |
             build --disk_cache=
             build --remote_cache=https://storage.googleapis.com/moon_base_build_cache
-            build --remote_upload_local_results=false
-          repository-cache: true
+            build --remote_upload_local_results=true
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
