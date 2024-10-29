@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   run-build:
-    runs-on: [ubuntu-latest]
+    runs-on: ubuntu-latest-m
 
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +29,7 @@ jobs:
 
   test-go:
     needs: run-build
-    runs-on: [ubuntu-latest]
+    runs-on: ubuntu-latest-m
 
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +45,7 @@ jobs:
 
   test-cpp:
     needs: run-build
-    runs-on: [ubuntu-latest]
+    runs-on: ubuntu-latest-m
 
     steps:
       - uses: actions/checkout@v4
@@ -61,7 +61,7 @@ jobs:
 
   test-java:
     needs: run-build
-    runs-on: [ubuntu-latest]
+    runs-on: ubuntu-latest-m
 
     steps:
       - uses: actions/checkout@v4
@@ -77,7 +77,7 @@ jobs:
 
   test-rust:
     needs: run-build
-    runs-on: [ubuntu-latest]
+    runs-on: ubuntu-latest-m
 
     steps:
       - uses: actions/checkout@v4
