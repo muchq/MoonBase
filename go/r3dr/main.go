@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/muchq/moonbase/go/clock"
 	"github.com/muchq/moonbase/go/mucks"
 	"github.com/muchq/moonbase/go/resilience4g/rate_limit"
 	"log"
@@ -10,7 +11,7 @@ import (
 func MakeShortenerApi(config Config) *ShortenerApi {
 	shortDB := NewShortDB(config)
 	shortener := NewShortener(shortDB)
-	return NewShortenerApi(shortener)
+	return NewShortenerApi(clock.NewSystemUtcClock(), shortener)
 }
 
 func MakeFallbackLimiterMiddleware(config rate_limit.RateLimiterConfig) mucks.Middleware {
