@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   run-tests:
-    runs-on: [ubuntu-latest]
+    runs-on: big_j
 
     steps:
       - uses: actions/checkout@v4
@@ -26,11 +26,11 @@ jobs:
 
       - name: bazel-test
         run: |
-          bazel test //...
+          bazel build //... && bazel test //...
 
   push-images:
     needs: run-tests
-    runs-on: [ubuntu-latest]
+    runs-on: big_j
 
     steps:
       - uses: actions/checkout@v4
