@@ -1,16 +1,20 @@
 package main
 
 import (
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/muchq/moonbase/go/clock"
 	"github.com/muchq/moonbase/go/mucks"
 	"github.com/muchq/moonbase/go/resilience4g/rate_limit"
 	"log"
 	"net/http"
+	"time"
 )
 
 func MakeShortenerApi(config Config) *ShortenerApi {
 	shortDB := NewShortDB(config)
-	shortener := NewShortener(shortDB)
+	cacheConfig := config.CacheConfig
+	cache := expirable.NewLRU[string, string](cacheConfig.MaxItems, nil, time.Minute*cacheConfig.ExpirationMinutes)
+	shortener := NewShortener(shortDB, cache)
 	return NewShortenerApi(clock.NewSystemUtcClock(), shortener)
 }
 

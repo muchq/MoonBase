@@ -22,6 +22,8 @@ go_library(
         "//go/clock",
         "//go/mucks",
         "//go/resilience4g/rate_limit",
+        "@com_github_hashicorp_golang_lru_v2//expirable",
+        "@com_github_hashicorp_golang_lru_v2//simplelru",
         "@com_github_lib_pq//:pq",
     ],
 )
@@ -83,6 +85,8 @@ go_test(
     embed = [":r3dr_lib"],
     deps = [
         "//go/clock",
+        "@com_github_hashicorp_golang_lru_v2//expirable",
+        "@com_github_hashicorp_golang_lru_v2//simplelru",
         "@com_github_stretchr_testify//assert",
     ],
 )
