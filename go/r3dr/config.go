@@ -9,6 +9,7 @@ import (
 type Config struct {
 	Port             string
 	ConnectionString string
+	CacheConfig      ShortenerCacheConfig
 }
 
 func ReadConnectionString() (string, bool) {
@@ -43,5 +44,9 @@ func ReadConfig() Config {
 		port = "8080"
 	}
 
-	return Config{port, connectionString}
+	return Config{
+		Port:             port,
+		ConnectionString: connectionString,
+		CacheConfig:      CacheConfig,
+	}
 }

@@ -106,6 +106,7 @@ use_repo(
     go_deps,
     "com_github_gofiber_fiber_v2",
     "com_github_google_uuid",
+    "com_github_hashicorp_golang_lru_v2",
     "com_github_lib_pq",
     "com_github_stretchr_testify",
     "org_golang_google_grpc",

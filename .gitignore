@@ -10,3 +10,4 @@ out
 vcpkg_installed
 conan
 rust-project.json
+go/r3dr/deploy/deploy.sh
