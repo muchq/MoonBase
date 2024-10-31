@@ -9,7 +9,8 @@ permissions:
 
 jobs:
   build-and-test:
-    runs-on: {{ (startsWith(github.head_ref, 'renovate/') && 'ubuntu-latest') || 'lil_j' }}
+    if: startsWith(github.head_ref, 'renovate/')
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
