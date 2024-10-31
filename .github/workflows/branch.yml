@@ -8,8 +8,25 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test:
+  build-and-test-cheap:
+    if: startsWith(github.head_ref, 'renovate/')
     runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bazel-contrib/setup-bazel@0.9.1
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+
+      - name: bazel-build-and-test
+        run: |
+          bazel build //... && bazel test //...
+
+  build-and-test-expensive:
+    if: ${{ ! startsWith(github.head_ref, 'renovate/') }}
+    runs-on: lil_j
 
     steps:
       - uses: actions/checkout@v4
