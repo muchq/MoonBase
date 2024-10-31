@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   build-and-test:
+    if: startsWith(github.head_ref, 'renovate/')
     runs-on: ubuntu-latest
 
     steps:
