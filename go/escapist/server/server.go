@@ -10,6 +10,7 @@ import (
 
 type EscapistServer struct {
 	pb.UnimplementedEscapistServer
+	dao *DaoInterface
 }
 
 func (*EscapistServer) InsertDoc(context.Context, *pb.InsertDocRequest) (*pb.InsertDocResponse, error) {
