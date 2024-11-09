@@ -10,7 +10,7 @@ bazel_dep(name = "grpc", version = "1.66.0.bcr.3", repo_name = "com_github_grpc_
 bazel_dep(name = "rules_proto", version = "6.0.2")
 bazel_dep(name = "rules_apple", version = "3.11.2", repo_name = "build_bazel_rules_apple")
 bazel_dep(name = "apple_support", version = "1.17.1", repo_name = "build_bazel_apple_support")
-bazel_dep(name = "rules_cc", version = "0.0.13")
+bazel_dep(name = "rules_cc", version = "0.1.0")
 bazel_dep(name = "platforms", version = "0.0.10")
 bazel_dep(name = "abseil-cpp", version = "20240722.0", repo_name = "com_google_absl")
 bazel_dep(name = "rules_jvm_external", version = "6.5")
