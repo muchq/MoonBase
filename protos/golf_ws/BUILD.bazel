@@ -1,15 +1,7 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_library")
 load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
-
-#load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 
-#cc_proto_library(
-#    name = "golf_cc_proto",
-#    visibility = ["//visibility:public"],
-#    deps = [":golf_ws_proto"],
-#)
-#
 proto_library(
     name = "golf_ws_proto",
     srcs = ["golf_ws.proto"],
