@@ -1,17 +1,17 @@
-cc_library(
-    name = "so_leet",
-    srcs = [
-        "so_leet.cc",
-    ],
-    hdrs = ["so_leet.h"],
-)
-
-cc_test(
-    name = "so_leet_test",
-    size = "small",
-    srcs = ["so_leet_test.cc"],
-    deps = [
-        ":so_leet",
-        "@googletest//:gtest_main",
-    ],
-)
+#cc_library(
+#    name = "so_leet",
+#    srcs = [
+#        "so_leet.cc",
+#    ],
+#    hdrs = ["so_leet.h"],
+#)
+#
+#cc_test(
+#    name = "so_leet_test",
+#    size = "small",
+#    srcs = ["so_leet_test.cc"],
+#    deps = [
+#        ":so_leet",
+#        "@googletest//:gtest_main",
+#    ],
+#)

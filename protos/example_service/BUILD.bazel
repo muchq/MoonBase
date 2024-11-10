@@ -1,4 +1,4 @@
-load("@com_github_grpc_grpc//bazel:grpc_build_system.bzl", "grpc_proto_library")
+#load("@com_github_grpc_grpc//bazel:grpc_build_system.bzl", "grpc_proto_library")
 load("@io_bazel_rules_go//go:def.bzl", "go_library")
 load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
@@ -23,11 +23,11 @@ rust_prost_library(
     proto = ":hello_proto",
 )
 
-grpc_proto_library(
-    name = "example_service_proto",
-    srcs = ["helloworld.proto"],
-)
-
+#grpc_proto_library(
+#    name = "example_service_proto",
+#    srcs = ["helloworld.proto"],
+#)
+#
 # gazelle:ignore
 go_proto_library(
     name = "example_service_go_proto",

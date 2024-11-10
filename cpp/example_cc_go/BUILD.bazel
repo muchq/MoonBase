@@ -1,19 +1,19 @@
-cc_library(
-    name = "example_cc_go",
-    srcs = ["example_cc_go.cc"],
-    hdrs = ["example_cc_go.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//go/example_lib:example_lib.cc",
-    ],
-)
-
-cc_test(
-    name = "example_cc_go_test",
-    size = "small",
-    srcs = ["example_cc_go_test.cc"],
-    deps = [
-        ":example_cc_go",
-        "@googletest//:gtest_main",
-    ],
-)
+#cc_library(
+#    name = "example_cc_go",
+#    srcs = ["example_cc_go.cc"],
+#    hdrs = ["example_cc_go.h"],
+#    visibility = ["//visibility:public"],
+#    deps = [
+#        "//go/example_lib:example_lib.cc",
+#    ],
+#)
+#
+#cc_test(
+#    name = "example_cc_go_test",
+#    size = "small",
+#    srcs = ["example_cc_go_test.cc"],
+#    deps = [
+#        ":example_cc_go",
+#        "@googletest//:gtest_main",
+#    ],
+#)

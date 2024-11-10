@@ -18,6 +18,7 @@ buildifier_test(
     timeout = "short",
     exclude_patterns = [
         "./.bazelbsp/*",
+        "./.ijwb/*",
         "./vcpkg_installed/*",
     ],
     lint_mode = "warn",
