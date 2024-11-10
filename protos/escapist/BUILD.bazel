@@ -1,4 +1,4 @@
-load("@com_github_grpc_grpc//bazel:grpc_build_system.bzl", "grpc_proto_library")
+#load("@com_github_grpc_grpc//bazel:grpc_build_system.bzl", "grpc_proto_library")
 load("@io_bazel_rules_go//go:def.bzl", "go_library")
 load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
@@ -16,11 +16,11 @@ rust_prost_library(
     proto = ":escapist_proto",
 )
 
-grpc_proto_library(
-    name = "escapist_cc_proto",
-    srcs = ["escapist.proto"],
-    generate_mocks = True,
-)
+#grpc_proto_library(
+#    name = "escapist_cc_proto",
+#    srcs = ["escapist.proto"],
+#    generate_mocks = True,
+#)
 
 go_proto_library(
     name = "escapist_go_proto",

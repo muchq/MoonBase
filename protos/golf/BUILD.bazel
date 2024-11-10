@@ -1,6 +1,7 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_library")
 load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
-load("@rules_cc//cc:defs.bzl", "cc_proto_library")
+
+#load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 
 package(default_visibility = ["//visibility:public"])
@@ -10,10 +11,10 @@ proto_library(
     srcs = ["golf_model.proto"],
 )
 
-cc_proto_library(
-    name = "golf_model_cc",
-    deps = [":golf_model"],
-)
+#cc_proto_library(
+#    name = "golf_model_cc",
+#    deps = [":golf_model"],
+#)
 
 go_proto_library(
     name = "golf_proto_go_proto",
