@@ -1,14 +1,14 @@
 "bzlmod extensions"
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load("@hedron_compile_commands//:workspace_setup.bzl", "hedron_compile_commands_setup")
+#load("@hedron_compile_commands//:workspace_setup.bzl", "hedron_compile_commands_setup")
 
-def _hedron_impl(ctx):  # buildifier: disable=unused-variable
-    hedron_compile_commands_setup()
-
-hedron_setup = module_extension(
-    implementation = _hedron_impl,
-)
+#def _hedron_impl(ctx):  # buildifier: disable=unused-variable
+#    hedron_compile_commands_setup()
+#
+#hedron_setup = module_extension(
+#    implementation = _hedron_impl,
+#)
 
 def _http_impl(ctx):  # buildifier: disable=unused-variable
     http_archive(

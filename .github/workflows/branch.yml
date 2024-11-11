@@ -4,12 +4,15 @@ on:
   pull_request:
     branches: [ "main" ]
 
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   build-and-test:
-    if: startsWith(github.head_ref, 'renovate/')
     runs-on: ubuntu-latest
 
     steps:
