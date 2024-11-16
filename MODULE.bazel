@@ -9,7 +9,7 @@ bazel_dep(name = "rules_python", version = "0.39.0")
 bazel_dep(name = "rules_proto", version = "6.0.2")
 
 #bazel_dep(name = "grpc", repo_name = "com_github_grpc_grpc", version = "1.66.0.bcr.3")
-bazel_dep(name = "rules_apple", version = "3.11.2", repo_name = "build_bazel_rules_apple")
+bazel_dep(name = "rules_apple", version = "3.13.0", repo_name = "build_bazel_rules_apple")
 bazel_dep(name = "apple_support", version = "1.17.1", repo_name = "build_bazel_apple_support")
 bazel_dep(name = "rules_cc", version = "0.1.0")
 bazel_dep(name = "platforms", version = "0.0.10")
