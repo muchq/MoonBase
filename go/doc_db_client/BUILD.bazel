@@ -1,0 +1,29 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "doc_db_client",
+    srcs = [
+        "doc_db_client.go",
+        "model.go",
+    ],
+    importpath = "github.com/muchq/moonbase/go/doc_db_client",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//protos/doc_db",
+        "@org_golang_google_grpc//metadata",
+    ],
+)
+
+go_test(
+    name = "doc_db_client_test",
+    size = "small",
+    srcs = ["doc_db_client_test.go"],
+    embed = [":doc_db_client"],
+    deps = [
+        "//protos/doc_db",
+        "@com_github_stretchr_testify//assert",
+        "@org_golang_google_grpc//:grpc",
+        "@org_golang_google_grpc//codes",
+        "@org_golang_google_grpc//status",
+    ],
+)

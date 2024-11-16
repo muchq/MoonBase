@@ -4,27 +4,27 @@ load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
 rust_library(
     name = "lib",
     srcs = [
-        "src/escapist.rs",
+        "src/doc_db.rs",
         "src/lib.rs",
         "src/model.rs",
     ],
-    crate_name = "escapist",
+    crate_name = "doc_db",
     deps = all_crate_deps() + [
-        "//protos/escapist:escapist_proto_rust",
+        "//protos/doc_db:doc_db_proto_rust",
     ],
 )
 
 rust_binary(
-    name = "escapist",
+    name = "doc_db",
     srcs = [
-        "src/escapist.rs",
+        "src/doc_db.rs",
         "src/main.rs",
         "src/model.rs",
     ],
-    crate_name = "escapist",
+    crate_name = "doc_db",
     deps = all_crate_deps() + [
         ":lib",
-        "//protos/escapist:escapist_proto_rust",
+        "//protos/doc_db:doc_db_proto_rust",
     ],
 )
 

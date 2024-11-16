@@ -394,6 +394,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "doc_db"
+version = "0.1.0"
+dependencies = [
+ "doc_db_proto",
+ "dotenv",
+ "futures",
+ "mongodb",
+ "serde",
+ "tokio",
+ "tonic",
+ "uuid",
+]
+
+[[package]]
+name = "doc_db_proto"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "prost-types",
+ "protoc-gen-prost",
+ "protoc-gen-tonic",
+ "tonic",
+ "tonic-build",
+]
+
+[[package]]
 name = "dotenv"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -431,32 +457,6 @@ checksum = "534c5cf6194dfab3db3242765c03bbe257cf92f22b38f6bc0c58d59108a820ba"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "escapist"
-version = "0.1.0"
-dependencies = [
- "dotenv",
- "escapist_proto",
- "futures",
- "mongodb",
- "serde",
- "tokio",
- "tonic",
- "uuid",
-]
-
-[[package]]
-name = "escapist_proto"
-version = "0.1.0"
-dependencies = [
- "prost",
- "prost-types",
- "protoc-gen-prost",
- "protoc-gen-tonic",
- "tonic",
- "tonic-build",
 ]
 
 [[package]]
