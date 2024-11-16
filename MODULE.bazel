@@ -55,9 +55,9 @@ crate.from_cargo(
     manifests = [
         "//:Cargo.toml",
         "//protos/example_service:Cargo.toml",
-        "//protos/escapist:Cargo.toml",
+        "//protos/doc_db:Cargo.toml",
         "//rust/helloworld_tonic:Cargo.toml",
-        "//rust/escapist:Cargo.toml",
+        "//rust/doc_db:Cargo.toml",
     ],
     supported_platform_triples = [
         "aarch64-apple-darwin",

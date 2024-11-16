@@ -1,17 +1,25 @@
-package escapist_client
+package doc_db_client
 
 import (
 	"context"
 	"errors"
-	"github.com/muchq/moonbase/protos/escapist"
+	"github.com/muchq/moonbase/protos/doc_db"
+	"google.golang.org/grpc/metadata"
 )
 
-type EscapistClient struct {
+type DocDbClient struct {
 	Namespace string
-	stub      escapist.EscapistClient
+	stub      doc_db.DocDbClient
 }
 
-func (c *EscapistClient) InsertDoc(collection string, inputDocEgg DocEgg) (DocIdAndVersion, error) {
+func NewDocDbClient(stub doc_db.DocDbClient, namespace string) *DocDbClient {
+	return &DocDbClient{
+		Namespace: namespace,
+		stub:      stub,
+	}
+}
+
+func (c *DocDbClient) InsertDoc(collection string, inputDocEgg DocEgg) (DocIdAndVersion, error) {
 	if collection == "" {
 		return DocIdAndVersion{}, errors.New("collection cannot be empty")
 	}
@@ -19,7 +27,7 @@ func (c *EscapistClient) InsertDoc(collection string, inputDocEgg DocEgg) (DocId
 		return DocIdAndVersion{}, errors.New("bytes cannot be empty")
 	}
 
-	request := &escapist.InsertDocRequest{
+	request := &doc_db.InsertDocRequest{
 		Collection: collection,
 		Doc:        makeDocEggProto(inputDocEgg),
 	}
@@ -28,7 +36,7 @@ func (c *EscapistClient) InsertDoc(collection string, inputDocEgg DocEgg) (DocId
 	return handleDocIdResponse(res, err)
 }
 
-func (c *EscapistClient) UpdateDoc(collection string, idAndVersion DocIdAndVersion, inputDocEgg DocEgg) (DocIdAndVersion, error) {
+func (c *DocDbClient) UpdateDoc(collection string, idAndVersion DocIdAndVersion, inputDocEgg DocEgg) (DocIdAndVersion, error) {
 	if collection == "" {
 		return DocIdAndVersion{}, errors.New("collection cannot be empty")
 	}
@@ -42,7 +50,7 @@ func (c *EscapistClient) UpdateDoc(collection string, idAndVersion DocIdAndVersi
 		return DocIdAndVersion{}, errors.New("bytes cannot be empty")
 	}
 
-	request := &escapist.UpdateDocRequest{
+	request := &doc_db.UpdateDocRequest{
 		Collection: collection,
 		Id:         idAndVersion.Id,
 		Version:    idAndVersion.Version,
@@ -53,7 +61,7 @@ func (c *EscapistClient) UpdateDoc(collection string, idAndVersion DocIdAndVersi
 	return handleDocIdResponse(res, err)
 }
 
-func (c *EscapistClient) FindDocById(collection string, id string) (Doc, error) {
+func (c *DocDbClient) FindDocById(collection string, id string) (Doc, error) {
 	if collection == "" {
 		return Doc{}, errors.New("collection cannot be empty")
 	}
@@ -61,7 +69,7 @@ func (c *EscapistClient) FindDocById(collection string, id string) (Doc, error) 
 		return Doc{}, errors.New("id cannot be empty")
 	}
 
-	request := &escapist.FindDocByIdRequest{
+	request := &doc_db.FindDocByIdRequest{
 		Collection: collection,
 		Id:         id,
 	}
@@ -70,7 +78,7 @@ func (c *EscapistClient) FindDocById(collection string, id string) (Doc, error) 
 	return handleDocResponse(res, err)
 }
 
-func (c *EscapistClient) FindDocByTags(collection string, tags map[string]string) (Doc, error) {
+func (c *DocDbClient) FindDocByTags(collection string, tags map[string]string) (Doc, error) {
 	if collection == "" {
 		return Doc{}, errors.New("collection cannot be empty")
 	}
@@ -78,7 +86,7 @@ func (c *EscapistClient) FindDocByTags(collection string, tags map[string]string
 		return Doc{}, errors.New("tags cannot be empty")
 	}
 
-	request := &escapist.FindDocRequest{
+	request := &doc_db.FindDocRequest{
 		Collection: collection,
 		Tags:       tags,
 	}
@@ -87,8 +95,8 @@ func (c *EscapistClient) FindDocByTags(collection string, tags map[string]string
 	return handleDocResponse(res, err)
 }
 
-func (c *EscapistClient) makeContext() context.Context {
-	return context.WithValue(context.Background(), "db_namespace", c.Namespace)
+func (c *DocDbClient) makeContext() context.Context {
+	return metadata.AppendToOutgoingContext(context.Background(), "db_namespace", c.Namespace)
 }
 
 func handleDocResponse(response DocResponse, err error) (Doc, error) {
@@ -113,8 +121,8 @@ func handleDocIdResponse(response DocIdResponse, err error) (DocIdAndVersion, er
 	return docIdAndVersion, err
 }
 
-func makeDocEggProto(inputDocEgg DocEgg) *escapist.DocumentEgg {
-	return &escapist.DocumentEgg{
+func makeDocEggProto(inputDocEgg DocEgg) *doc_db.DocumentEgg {
+	return &doc_db.DocumentEgg{
 		Bytes: inputDocEgg.Bytes,
 		Tags:  inputDocEgg.Tags,
 	}

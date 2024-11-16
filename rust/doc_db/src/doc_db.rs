@@ -1,6 +1,6 @@
 use crate::model::{MongoDoc, MongoDocEgg};
-use escapist_proto::escapist::escapist_server::Escapist;
-use escapist_proto::escapist::{
+use doc_db_proto::doc_db::doc_db_server::DocDb;
+use doc_db_proto::doc_db::{
     Document, FindDocByIdRequest, FindDocByIdResponse, FindDocRequest, FindDocResponse,
     InsertDocRequest, InsertDocResponse, UpdateDocRequest, UpdateDocResponse,
 };
@@ -95,7 +95,7 @@ type MongoClient = Client;
 type MongoClient = u8;
 
 #[derive(Debug)]
-pub struct EscapistService {
+pub struct DocDbService {
     pub client: MongoClient,
 }
 
@@ -109,7 +109,7 @@ fn convert_hashmap_to_document(hash_map: HashMap<String, String>) -> BsonDocumen
     query_doc
 }
 
-const DB_NAME_KEY: &str = "db-name";
+const DB_NAME_KEY: &str = "db_namespace";
 
 fn read_db_name_from_metadata(metadata: &MetadataMap) -> Option<String> {
     let db_name_maybe = metadata.get(DB_NAME_KEY);
@@ -128,7 +128,7 @@ fn read_db_name_from_metadata(metadata: &MetadataMap) -> Option<String> {
 }
 
 #[tonic::async_trait]
-impl Escapist for EscapistService {
+impl DocDb for DocDbService {
     async fn insert_doc(
         &self,
         request: Request<InsertDocRequest>,
@@ -279,7 +279,7 @@ fn get_collection<T: Send + Sync>(
 }
 
 #[cfg(not(test))]
-impl Crud for EscapistService {
+impl Crud for DocDbService {
     async fn insert_one(
         &self,
         db_name: String,
@@ -319,8 +319,8 @@ impl Crud for EscapistService {
 
 #[cfg(test)]
 mod tests {
-    use crate::escapist::*;
-    use escapist_proto::escapist::DocumentEgg;
+    use crate::doc_db::*;
+    use doc_db_proto::doc_db::DocumentEgg;
     use tonic::metadata::MetadataValue;
 
     const TEST_ID_STRING: &str = "66a040ff87471136d177c687";
@@ -329,7 +329,7 @@ mod tests {
         return ObjectId::parse_str(obj_id_str).unwrap();
     }
 
-    impl Crud for EscapistService {
+    impl Crud for DocDbService {
         async fn insert_one(
             &self,
             _db_name: String,
@@ -401,7 +401,7 @@ mod tests {
         });
     }
 
-    const UNIT_UNDER_TEST: EscapistService = EscapistService { client: 0 };
+    const UNIT_UNDER_TEST: DocDbService = DocDbService { client: 0 };
 
     #[tokio::test]
     #[cfg(feature = "rpc_success")]

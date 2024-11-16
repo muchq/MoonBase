@@ -1,12 +1,12 @@
 [package]
-name = "escapist_proto"
+name = "doc_db_proto"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 
 
 [lib]
-name = "escapist_proto"
+name = "doc_db_proto"
 path = "lib.rs"
 
 

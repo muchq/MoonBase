@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package escapist;
+package doc_db;
 
-service Escapist {
+service DocDb {
   rpc InsertDoc (InsertDocRequest) returns (InsertDocResponse) {}
   rpc UpdateDoc (UpdateDocRequest) returns (UpdateDocResponse) {}
   rpc FindDocById (FindDocByIdRequest) returns (FindDocByIdResponse) {}
