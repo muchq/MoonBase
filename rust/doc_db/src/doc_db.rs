@@ -135,7 +135,7 @@ impl DocDb for DocDbService {
     ) -> Result<Response<InsertDocResponse>, Status> {
         let db_name_maybe = read_db_name_from_metadata(request.metadata());
         if db_name_maybe.is_none() {
-            return Err(Status::invalid_argument("db-name is required"));
+            return Err(Status::invalid_argument("db_namespace is required"));
         }
         let db_name = db_name_maybe.unwrap();
         let req = request.into_inner();
@@ -165,7 +165,7 @@ impl DocDb for DocDbService {
     ) -> Result<Response<UpdateDocResponse>, Status> {
         let db_name_maybe = read_db_name_from_metadata(request.metadata());
         if db_name_maybe.is_none() {
-            return Err(Status::invalid_argument("db-name is required"));
+            return Err(Status::invalid_argument("db_namespace is required"));
         }
         let db_name = db_name_maybe.unwrap();
         let req = request.into_inner();
@@ -207,7 +207,7 @@ impl DocDb for DocDbService {
     ) -> Result<Response<FindDocByIdResponse>, Status> {
         let db_name_maybe = read_db_name_from_metadata(request.metadata());
         if db_name_maybe.is_none() {
-            return Err(Status::invalid_argument("db-name is required"));
+            return Err(Status::invalid_argument("db_namespace is required"));
         }
         let db_name = db_name_maybe.unwrap();
         let req = request.into_inner();
@@ -245,7 +245,7 @@ impl DocDb for DocDbService {
     ) -> Result<Response<FindDocResponse>, Status> {
         let db_name_maybe = read_db_name_from_metadata(request.metadata());
         if db_name_maybe.is_none() {
-            return Err(Status::invalid_argument("db-name is required"));
+            return Err(Status::invalid_argument("db_namespace is required"));
         }
         let db_name = db_name_maybe.unwrap();
         let req = request.into_inner();
@@ -411,7 +411,7 @@ mod tests {
             doc: present_doc_egg(),
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append("db_namespace", MetadataValue::from_static("test"));
         let response = UNIT_UNDER_TEST.insert_doc(req).await.unwrap().into_inner();
         assert_eq!(response.id, TEST_ID_STRING);
         assert_eq!(response.version, TEST_VERSION_STRING);
@@ -427,7 +427,7 @@ mod tests {
             doc: present_doc_egg(),
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append(DB_NAME_KEY, MetadataValue::from_static("test"));
         let response = UNIT_UNDER_TEST.update_doc(req).await.unwrap().into_inner();
         assert_eq!(response.id, TEST_ID_STRING);
         assert_eq!(response.version, TEST_VERSION_STRING);
@@ -441,7 +441,7 @@ mod tests {
             id: TEST_ID_STRING.to_string(),
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append(DB_NAME_KEY, MetadataValue::from_static("test"));
         let response = UNIT_UNDER_TEST
             .find_doc_by_id(req)
             .await
@@ -460,7 +460,7 @@ mod tests {
             tags,
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append(DB_NAME_KEY, MetadataValue::from_static("test"));
         let response = UNIT_UNDER_TEST.find_doc(req).await.unwrap().into_inner();
         assert_eq!(response.doc, present_doc());
     }
@@ -476,7 +476,7 @@ mod tests {
             }),
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append(DB_NAME_KEY, MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.insert_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::internal("").code());
         assert_eq!(status.message(), "internal error");
@@ -495,7 +495,7 @@ mod tests {
             }),
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append(DB_NAME_KEY, MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.update_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::internal("").code());
         assert_eq!(status.message(), "internal error");
@@ -509,7 +509,7 @@ mod tests {
             id: TEST_ID_STRING.to_string(),
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append(DB_NAME_KEY, MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.find_doc_by_id(req).await.unwrap_err();
         assert_eq!(status.code(), Status::internal("").code());
         assert_eq!(status.message(), "internal error");
@@ -525,7 +525,7 @@ mod tests {
             tags,
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append(DB_NAME_KEY, MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.find_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::internal("").code());
         assert_eq!(status.message(), "internal error");
@@ -538,7 +538,7 @@ mod tests {
             doc: present_doc_egg(),
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append(DB_NAME_KEY, MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.insert_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "collection is required");
@@ -551,10 +551,10 @@ mod tests {
             doc: present_doc_egg(),
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static(""));
+            .append(DB_NAME_KEY, MetadataValue::from_static(""));
         let status = UNIT_UNDER_TEST.insert_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
-        assert_eq!(status.message(), "db-name is required");
+        assert_eq!(status.message(), "db_namespace is required");
     }
 
     #[tokio::test]
@@ -564,7 +564,7 @@ mod tests {
             doc: None,
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append(DB_NAME_KEY, MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.insert_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "document is required");
@@ -579,7 +579,7 @@ mod tests {
             doc: present_doc_egg(),
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append(DB_NAME_KEY, MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.update_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "collection is required");
@@ -595,7 +595,7 @@ mod tests {
         });
         let status = UNIT_UNDER_TEST.update_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
-        assert_eq!(status.message(), "db-name is required");
+        assert_eq!(status.message(), "db_namespace is required");
     }
 
     #[tokio::test]
@@ -607,7 +607,7 @@ mod tests {
             doc: present_doc_egg(),
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append(DB_NAME_KEY, MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.update_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "id is required");
@@ -622,7 +622,7 @@ mod tests {
             doc: present_doc_egg(),
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append(DB_NAME_KEY, MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.update_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "version is required");
@@ -635,7 +635,7 @@ mod tests {
             id: TEST_ID_STRING.to_string(),
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append(DB_NAME_KEY, MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.find_doc_by_id(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "collection is required");
@@ -649,7 +649,7 @@ mod tests {
         });
         let status = UNIT_UNDER_TEST.find_doc_by_id(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
-        assert_eq!(status.message(), "db-name is required");
+        assert_eq!(status.message(), "db_namespace is required");
     }
 
     #[tokio::test]
@@ -659,7 +659,7 @@ mod tests {
             id: "".to_string(),
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append(DB_NAME_KEY, MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.find_doc_by_id(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "id is required");
@@ -674,7 +674,7 @@ mod tests {
             tags,
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append(DB_NAME_KEY, MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.find_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "collection is required");
@@ -689,10 +689,10 @@ mod tests {
             tags,
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static(""));
+            .append(DB_NAME_KEY, MetadataValue::from_static(""));
         let status = UNIT_UNDER_TEST.find_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
-        assert_eq!(status.message(), "db-name is required");
+        assert_eq!(status.message(), "db_namespace is required");
     }
 
     #[tokio::test]
@@ -702,7 +702,7 @@ mod tests {
             tags: HashMap::new(),
         });
         req.metadata_mut()
-            .append("db-name", MetadataValue::from_static("test"));
+            .append(DB_NAME_KEY, MetadataValue::from_static("test"));
         let status = UNIT_UNDER_TEST.find_doc(req).await.unwrap_err();
         assert_eq!(status.code(), Status::invalid_argument("").code());
         assert_eq!(status.message(), "tags are required");
