@@ -3,9 +3,9 @@ resolver = "2"
 
 members = [
     "rust/helloworld_tonic",
-    "rust/escapist",
+    "rust/doc_db",
     "protos/example_service",
-    "protos/escapist",
+    "protos/doc_db",
 ]
 
 [workspace.package]
@@ -16,7 +16,7 @@ readme = "README.md"
 
 [workspace.dependencies]
 example_service = { path = "protos/example_service" }
-escapist_proto = { path = "protos/escapist" }
+doc_db_proto = { path = "protos/doc_db" }
 prost = { version = "0.13.3" }
 prost-types = { version = "0.13.3", default-features = false }
 tonic = { version = "0.12.3", features = ["transport"] }

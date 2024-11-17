@@ -1,17 +1,17 @@
 [package]
-name = "escapist"
+name = "doc_db"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 readme.workspace = true
 
 [[bin]]
-name = "escapist"
+name = "doc_db"
 path = "src/main.rs"
 
 [dependencies]
 dotenv = { workspace = true }
-escapist_proto = { workspace = true }
+doc_db_proto = { workspace = true }
 futures = { workspace = true }
 mongodb = { workspace = true }
 serde = { workspace = true }

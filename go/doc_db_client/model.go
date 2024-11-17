@@ -1,6 +1,6 @@
-package escapist_client
+package doc_db_client
 
-import "github.com/muchq/moonbase/protos/escapist"
+import "github.com/muchq/moonbase/protos/doc_db"
 
 type DocIdAndVersion struct {
 	Id      string
@@ -20,7 +20,7 @@ type DocEgg struct {
 }
 
 type DocResponse interface {
-	GetDoc() *escapist.Document
+	GetDoc() *doc_db.Document
 }
 
 type DocIdResponse interface {
