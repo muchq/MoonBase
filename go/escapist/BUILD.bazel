@@ -1,0 +1,15 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "escapist_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/muchq/moonbase/go/escapist",
+    visibility = ["//visibility:private"],
+    deps = ["//go/escapist/server"],
+)
+
+go_binary(
+    name = "escapist",
+    embed = [":escapist_lib"],
+    visibility = ["//visibility:public"],
+)
