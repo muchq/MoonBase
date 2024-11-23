@@ -88,7 +88,7 @@ use_repo(crate, "crates")
 #
 #register_toolchains("@llvm_toolchain//:all")
 
-bazel_dep(name = "rules_java", version = "8.3.2")
+bazel_dep(name = "rules_java", version = "8.5.1")
 bazel_dep(name = "contrib_rules_jvm", version = "0.27.0")
 bazel_dep(name = "bazel_skylib", version = "1.7.1")
 
