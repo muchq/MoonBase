@@ -19,6 +19,7 @@ buildifier_test(
     exclude_patterns = [
         "./.bazelbsp/*",
         "./.ijwb/*",
+        "./.clwb/*",
         "./vcpkg_installed/*",
     ],
     lint_mode = "warn",
