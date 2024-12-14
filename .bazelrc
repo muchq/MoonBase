@@ -1,12 +1,31 @@
 startup --output_base=~/.bazelout
-common --incompatible_enable_proto_toolchain_resolution
+startup --digest_function=BLAKE3
+
 common --color=yes
+
+# Allow rules to bring their own precompiled protoc
+common --incompatible_enable_proto_toolchain_resolution
+
+# Enforce BzlMod usage
 common --noenable_workspace
 common --enable_bzlmod=true
+
 common --disk_cache=~/bzlcache
 common --repository_cache=~/.bzl_repo_cache
+
+# needed for rules_rust as of https://github.com/muchq/MoonBase/pull/295/files
+# updating protobuf to v28.0 caused a conflict with the crates repo
 common --experimental_isolated_extension_usages
+
+# use a static value for PATH and does not inherit LD_LIBRARY_PATH
+# improves analysis cache hits when building in intellij and from
+# the command line
 common --incompatible_strict_action_env
+
+# go faster I hope
+common --remote_build_event_upload=minimal
+common --remote_download_outputs=minimal
+common --remote_cache_compression
 
 common --cxxopt='-std=c++20'
 common --host_cxxopt='-std=c++20'

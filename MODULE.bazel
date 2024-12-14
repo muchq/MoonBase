@@ -3,34 +3,34 @@ module(
     version = "1.0",
 )
 
-#bazel_dep(name = "toolchains_llvm", version = "1.2.0")
-bazel_dep(name = "toolchains_protoc", version = "0.3.4")
-bazel_dep(name = "rules_python", version = "0.40.0")
-bazel_dep(name = "rules_proto", version = "7.0.2")
+####### PROTOBUF ##########
+bazel_dep(name = "toolchains_protoc", version = "0.3.6")
+
+protoc = use_extension("@toolchains_protoc//protoc:extensions.bzl", "protoc")
+protoc.toolchain(
+    google_protobuf = "com_google_protobuf",
+    version = "v29.0-rc3",
+)
+use_repo(protoc, "com_google_protobuf", "toolchains_protoc_hub")
+
+bazel_dep(name = "rules_python", version = "0.31.0")
+bazel_dep(name = "rules_proto", version = "6.0.2")
 bazel_dep(name = "bazel_skylib", version = "1.7.1")
 
 #bazel_dep(name = "grpc", repo_name = "com_github_grpc_grpc", version = "1.66.0.bcr.3")
 #bazel_dep(name = "rules_apple", version = "3.13.0", repo_name = "build_bazel_rules_apple")
 #bazel_dep(name = "apple_support", version = "1.17.1", repo_name = "build_bazel_apple_support")
-bazel_dep(name = "rules_cc", version = "0.1.0")
+bazel_dep(name = "rules_cc", version = "0.0.13")
 bazel_dep(name = "platforms", version = "0.0.10")
 
 #bazel_dep(name = "abseil-cpp", version = "20240722.0.bcr.1", repo_name = "com_google_absl")
-bazel_dep(name = "rules_jvm_external", version = "6.6")
+bazel_dep(name = "rules_jvm_external", version = "6.5")
 bazel_dep(name = "rules_go", version = "0.50.1", repo_name = "io_bazel_rules_go")
 bazel_dep(name = "bazel_features", version = "1.21.0")
-bazel_dep(name = "rules_rust", version = "0.54.1")
-bazel_dep(name = "gazelle", version = "0.40.0", repo_name = "bazel_gazelle")
+bazel_dep(name = "rules_rust", version = "0.48.0")
+bazel_dep(name = "gazelle", version = "0.38.0", repo_name = "bazel_gazelle")
 
 bazel_dep(name = "buildifier_prebuilt", version = "7.3.1", dev_dependency = True)
-
-####### PROTOBUF ##########
-protoc = use_extension("@toolchains_protoc//protoc:extensions.bzl", "protoc")
-protoc.toolchain(
-    google_protobuf = "com_google_protobuf",
-    version = "v28.2",
-)
-use_repo(protoc, "com_google_protobuf", "toolchains_protoc_hub")
 
 ####### RUST ########
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
@@ -63,7 +63,6 @@ crate.from_cargo(
     ],
     supported_platform_triples = [
         "aarch64-apple-darwin",
-        "x86_64-apple-darwin",
         "x86_64-unknown-linux-gnu",
     ],
 )
@@ -77,20 +76,7 @@ crate.annotation(
 )
 use_repo(crate, "crates")
 
-#llvm = use_extension("@toolchains_llvm//toolchain/extensions:llvm.bzl", "llvm")
-#llvm.toolchain(
-#    name = "llvm_toolchain",
-#    llvm_versions = {
-#        "": "15.0.6",
-#        "darwin-aarch64": "15.0.7",
-#        "darwin-x86_64": "15.0.7",
-#    },
-#)
-#use_repo(llvm, "llvm_toolchain", "llvm_toolchain_llvm")
-#
-#register_toolchains("@llvm_toolchain//:all")
-
-bazel_dep(name = "rules_java", version = "8.5.1")
+bazel_dep(name = "rules_java", version = "7.12.3")
 bazel_dep(name = "contrib_rules_jvm", version = "0.27.0")
 
 #bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
