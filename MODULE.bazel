@@ -76,7 +76,7 @@ crate.annotation(
 )
 use_repo(crate, "crates")
 
-bazel_dep(name = "rules_java", version = "7.12.3")
+bazel_dep(name = "rules_java", version = "7.12.4")
 bazel_dep(name = "contrib_rules_jvm", version = "0.27.0")
 
 #bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
