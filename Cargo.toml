@@ -17,15 +17,15 @@ readme = "README.md"
 [workspace.dependencies]
 example_service = { path = "protos/example_service" }
 doc_db_proto = { path = "protos/doc_db" }
-prost = { version = "0.13.3" }
-prost-types = { version = "0.13.3", default-features = false }
+prost = { version = "0.13.4" }
+prost-types = { version = "0.13.4", default-features = false }
 tonic = { version = "0.12.3", features = ["transport"] }
 tonic-build = "0.12.3"
-tokio = { version = "1.41.0", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
+tokio = { version = "1.42.0", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
 protoc-gen-tonic = "0.4.1"
 protoc-gen-prost = "0.4.0"
-mongodb = "3.0.1"
-serde = { version = "1.0.213", features = ["derive"] }
+mongodb = "3.1.1"
+serde = { version = "1.0.216", features = ["derive"] }
 dotenv = "0.15.0"
 futures = "0.3.31"
 uuid = { version = "1.11.0", features = ["v4", "fast-rng"]}
