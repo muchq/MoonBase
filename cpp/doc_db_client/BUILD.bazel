@@ -1,0 +1,36 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+
+cc_library(
+    name = "doc_db_client",
+    srcs = ["doc_db_client.cc"],
+    hdrs = ["doc_db_client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//protos/doc_db:doc_db_cc_proto",
+        "@com_github_grpc_grpc//:grpc++",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_test(
+    name = "unit_test",
+    size = "small",
+    srcs = ["doc_db_client_test.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "doc_db_client",
+        "//protos/doc_db:doc_db_cc_proto",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_binary(
+    name = "demo",
+    srcs = ["doc_db_demo.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":doc_db_client",
+        "@com_github_grpc_grpc//:grpc++",
+        "@com_google_absl//absl/log:initialize",
+    ],
+)

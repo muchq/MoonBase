@@ -1,111 +1,113 @@
-#cc_library(
-#    name = "golf",
-#    srcs = [
-#        "game_manager.cc",
-#    ],
-#    hdrs = [
-#        "game_manager.h",
-#        "golf.h",
-#    ],
-#    visibility = ["//visibility:public"],
-#    deps = [
-#        ":game_state",
-#        ":game_store",
-#        ":player",
-#        "//cpp/cards",
-#        "@com_google_absl//absl/status:statusor",
-#    ],
-#)
-#
-#cc_library(
-#    name = "escapist_game_store",
-#    srcs = ["escapist_game_store.cc"],
-#    hdrs = ["escapist_game_store.h"],
-#    visibility = ["//visibility:public"],
-#    deps = [
-#        ":game_state",
-#        ":game_store",
-#        "//cpp/escapist_client",
-#        "//protos/escapist:escapist_cc_proto",
-#        "//protos/golf:golf_model_cc",
-#        "@com_google_absl//absl/status",
-#        "@com_google_absl//absl/status:statusor",
-#    ],
-#)
-#
-#cc_library(
-#    name = "in_memory_game_store",
-#    srcs = ["in_memory_game_store.cc"],
-#    hdrs = ["in_memory_game_store.h"],
-#    visibility = ["//visibility:public"],
-#    deps = [
-#        ":game_state",
-#        ":game_store",
-#    ],
-#)
-#
-#cc_library(
-#    name = "game_store",
-#    srcs = [],
-#    hdrs = ["game_store.h"],
-#    visibility = ["//visibility:public"],
-#    deps = [
-#        ":game_state",
-#        "@com_google_absl//absl/status",
-#        "@com_google_absl//absl/status:statusor",
-#    ],
-#)
-#
-#cc_library(
-#    name = "game_state",
-#    srcs = ["game_state.cc"],
-#    hdrs = ["game_state.h"],
-#    visibility = ["//visibility:public"],
-#    deps = [
-#        ":player",
-#        "//cpp/cards",
-#        "@com_google_absl//absl/status:statusor",
-#    ],
-#)
-#
-#cc_library(
-#    name = "player",
-#    srcs = ["player.cc"],
-#    hdrs = ["player.h"],
-#    visibility = ["//visibility:public"],
-#    deps = [
-#        "//cpp/cards",
-#        "@com_google_absl//absl/status:statusor",
-#    ],
-#)
-#
-#cc_test(
-#    name = "player_test",
-#    size = "small",
-#    srcs = ["player_test.cc"],
-#    deps = [
-#        ":player",
-#        "@googletest//:gtest_main",
-#    ],
-#)
-#
-#cc_test(
-#    name = "game_state_test",
-#    size = "small",
-#    srcs = ["game_state_test.cc"],
-#    deps = [
-#        ":game_state",
-#        "@googletest//:gtest_main",
-#    ],
-#)
-#
-#cc_test(
-#    name = "game_manager_test",
-#    size = "small",
-#    srcs = ["game_manager_test.cc"],
-#    deps = [
-#        ":golf",
-#        ":in_memory_game_store",
-#        "@googletest//:gtest_main",
-#    ],
-#)
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+cc_library(
+    name = "golf",
+    srcs = [
+        "game_manager.cc",
+    ],
+    hdrs = [
+        "game_manager.h",
+        "golf.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":game_state",
+        ":game_store",
+        ":player",
+        "//cpp/cards",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_library(
+    name = "doc_db_game_store",
+    srcs = ["doc_db_game_store.cc"],
+    hdrs = ["doc_db_game_store.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":game_state",
+        ":game_store",
+        "//cpp/doc_db_client",
+        "//protos/doc_db:doc_db_cc_proto",
+        "//protos/golf:golf_model_cc",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_library(
+    name = "in_memory_game_store",
+    srcs = ["in_memory_game_store.cc"],
+    hdrs = ["in_memory_game_store.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":game_state",
+        ":game_store",
+    ],
+)
+
+cc_library(
+    name = "game_store",
+    srcs = [],
+    hdrs = ["game_store.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":game_state",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_library(
+    name = "game_state",
+    srcs = ["game_state.cc"],
+    hdrs = ["game_state.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":player",
+        "//cpp/cards",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_library(
+    name = "player",
+    srcs = ["player.cc"],
+    hdrs = ["player.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//cpp/cards",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_test(
+    name = "player_test",
+    size = "small",
+    srcs = ["player_test.cc"],
+    deps = [
+        ":player",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "game_state_test",
+    size = "small",
+    srcs = ["game_state_test.cc"],
+    deps = [
+        ":game_state",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "game_manager_test",
+    size = "small",
+    srcs = ["game_manager_test.cc"],
+    deps = [
+        ":golf",
+        ":in_memory_game_store",
+        "@googletest//:gtest_main",
+    ],
+)

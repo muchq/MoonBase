@@ -1,5 +1,5 @@
-#ifndef CPP_ESCAPIST_CLIENT_H
-#define CPP_ESCAPIST_CLIENT_H
+#ifndef CPP_DOC_DB_CLIENT_H
+#define CPP_DOC_DB_CLIENT_H
 
 #include <memory>
 #include <string>
@@ -7,9 +7,9 @@
 #include <utility>
 
 #include "absl/status/statusor.h"
-#include "protos/escapist/escapist.grpc.pb.h"
+#include "protos/doc_db/doc_db.grpc.pb.h"
 
-namespace escapist {
+namespace doc_db {
 
 using absl::StatusOr;
 using std::shared_ptr;
@@ -33,9 +33,9 @@ struct DocEgg {
   unordered_map<string, string> tags;
 };
 
-class EscapistClient {
+class DocDbClient {
  public:
-  explicit EscapistClient(shared_ptr<Escapist::StubInterface> stub, string db)
+  explicit DocDbClient(shared_ptr<DocDb::StubInterface> stub, string db)
       : stub_(std::move(stub)), db_(db) {}
 
   StatusOr<DocIdAndVersion> InsertDoc(const string& collection, const DocEgg& input_doc_egg);
@@ -56,10 +56,10 @@ class EscapistClient {
                                                               const string& version);
   static StatusOr<Doc> HandleDocResponse(const grpc::Status& rpc_status, const Document& doc);
 
-  shared_ptr<Escapist::StubInterface> stub_;
+  shared_ptr<DocDb::StubInterface> stub_;
   string db_;
 };
 
-}  // namespace escapist
+}  // namespace doc_db
 
-#endif  // CPP_ESCAPIST_CLIENT_H
+#endif  // CPP_DOC_DB_CLIENT_H

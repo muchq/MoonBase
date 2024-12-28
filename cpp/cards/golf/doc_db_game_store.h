@@ -1,5 +1,5 @@
-#ifndef CPP_CARDS_GOLF_ESCAPIST_GAME_STORE_H
-#define CPP_CARDS_GOLF_ESCAPIST_GAME_STORE_H
+#ifndef CPP_CARDS_GOLF_DOC_DB_GAME_STORE_H
+#define CPP_CARDS_GOLF_DOC_DB_GAME_STORE_H
 
 #include <memory>
 #include <string>
@@ -10,19 +10,19 @@
 #include "absl/status/statusor.h"
 #include "cpp/cards/golf/game_state.h"
 #include "cpp/cards/golf/game_store.h"
-#include "cpp/escapist_client/escapist_client.h"
+#include "cpp/doc_db_client/doc_db_client.h"
 
 namespace golf {
 
 using absl::Status;
 using absl::StatusOr;
-using escapist::EscapistClient;
+using doc_db::DocDbClient;
 using std::string;
 using std::unordered_set;
 
-class EscapistGameStore final : public GameStoreInterface {
+class DocDbGameStore final : public GameStoreInterface {
  public:
-  explicit EscapistGameStore(std::shared_ptr<EscapistClient> client) : client_(std::move(client)) {}
+  explicit DocDbGameStore(std::shared_ptr<DocDbClient> client) : client_(std::move(client)) {}
 
   Status AddUser(const string& user_id) override;
   StatusOr<bool> UserExists(const string& user_id) const override;
@@ -35,7 +35,7 @@ class EscapistGameStore final : public GameStoreInterface {
   StatusOr<GameStatePtr> UpdateGame(const GameStatePtr game_state) override;
 
  private:
-  std::shared_ptr<EscapistClient> client_;
+  std::shared_ptr<DocDbClient> client_;
 };
 }  // namespace golf
 

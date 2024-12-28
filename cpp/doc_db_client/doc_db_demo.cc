@@ -1,9 +1,9 @@
 #include <grpcpp/create_channel.h>
 
 #include "absl/log/initialize.h"
-#include "cpp/escapist_client/escapist_client.h"
+#include "cpp/doc_db_client/doc_db_client.h"
 
-using namespace escapist;
+using namespace doc_db;
 
 void print_doc_id_and_version(const string& op, StatusOr<DocIdAndVersion>& status_doc_id) {
   std::cout << op << ":" << std::endl;
@@ -29,8 +29,8 @@ int main() {
   absl::InitializeLog();
 
   auto channel = grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials());
-  auto stub = std::make_shared<Escapist::Stub>(Escapist::Stub(channel));
-  EscapistClient client(stub, "demo");
+  auto stub = std::make_shared<DocDb::Stub>(DocDb::Stub(channel));
+  DocDbClient client(stub, "demo");
 
   DocEgg doc_egg{"hello this is nice", {{"player_1", "Tippy"}}};
 

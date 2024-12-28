@@ -1,16 +1,16 @@
-#include "cpp/cards/golf/escapist_game_store.h"
+#include "cpp/cards/golf/doc_db_game_store.h"
 
 #include <unordered_map>
 
 #include "protos/golf/golf_model.pb.h"
 
 namespace golf {
-using escapist::DocEgg;
-using escapist::DocIdAndVersion;
+using doc_db::DocEgg;
+using doc_db::DocIdAndVersion;
 using golf_proto::BackendGameState;
 using std::unordered_map;
 
-Status EscapistGameStore::AddUser(const string& user_id) {
+Status DocDbGameStore::AddUser(const string& user_id) {
   DocEgg doc_egg;
   doc_egg.bytes = user_id;
   doc_egg.tags = {{"user", user_id}};
@@ -21,7 +21,7 @@ Status EscapistGameStore::AddUser(const string& user_id) {
   return status.status();
 }
 
-StatusOr<bool> EscapistGameStore::UserExists(const string& user_id) const {
+StatusOr<bool> DocDbGameStore::UserExists(const string& user_id) const {
   auto status = client_->FindDocByTags("users", {{"user", user_id}});
   if (status.ok()) {
     return true;
@@ -32,11 +32,11 @@ StatusOr<bool> EscapistGameStore::UserExists(const string& user_id) const {
   return status.status();
 }
 
-Status EscapistGameStore::RemoveUser(const string& user_id) {
+Status DocDbGameStore::RemoveUser(const string& user_id) {
   return absl::UnimplementedError("todo");
 }
 
-StatusOr<std::unordered_set<string>> EscapistGameStore::GetUsers() const {
+StatusOr<std::unordered_set<string>> DocDbGameStore::GetUsers() const {
   return absl::UnimplementedError("todo");
 }
 
@@ -127,7 +127,7 @@ auto game_to_proto(const GameStatePtr game_state) -> BackendGameState {
   return game_proto;
 }
 
-StatusOr<GameStatePtr> EscapistGameStore::NewGame(const GameStatePtr game_state) {
+StatusOr<GameStatePtr> DocDbGameStore::NewGame(const GameStatePtr game_state) {
   auto new_game_proto = game_to_proto(game_state);
   DocEgg doc_egg;
   doc_egg.bytes = new_game_proto.SerializeAsString();
@@ -162,7 +162,7 @@ auto proto_to_game_state(const BackendGameState& proto, const string& game_id,
                    proto.whose_turn(), proto.who_knocked(), game_id, version_id};
 }
 
-StatusOr<GameStatePtr> EscapistGameStore::ReadGame(const string& game_id) const {
+StatusOr<GameStatePtr> DocDbGameStore::ReadGame(const string& game_id) const {
   auto status = client_->FindDocById("games", game_id);
   if (!status.ok()) {
     return status.status();
@@ -177,15 +177,15 @@ StatusOr<GameStatePtr> EscapistGameStore::ReadGame(const string& game_id) const 
   return std::make_shared<GameState>(proto_to_game_state(game_state_proto, game_id, version_id));
 }
 
-StatusOr<GameStatePtr> EscapistGameStore::ReadGameByUserId(const string& user_id) const {
+StatusOr<GameStatePtr> DocDbGameStore::ReadGameByUserId(const string& user_id) const {
   return absl::UnimplementedError("todo");
 }
 
-StatusOr<unordered_set<GameStatePtr>> EscapistGameStore::ReadAllGames() const {
+StatusOr<unordered_set<GameStatePtr>> DocDbGameStore::ReadAllGames() const {
   return absl::UnimplementedError("todo");
 }
 
-StatusOr<GameStatePtr> EscapistGameStore::UpdateGame(const GameStatePtr game_state) {
+StatusOr<GameStatePtr> DocDbGameStore::UpdateGame(const GameStatePtr game_state) {
   auto game_proto = game_to_proto(game_state);
   DocEgg doc_egg;
   doc_egg.bytes = game_proto.SerializeAsString();
