@@ -4,7 +4,7 @@ startup --digest_function=BLAKE3
 common --color=yes
 
 # Allow rules to bring their own precompiled protoc
-common --incompatible_enable_proto_toolchain_resolution
+# common --incompatible_enable_proto_toolchain_resolution
 
 # Enforce BzlMod usage
 common --noenable_workspace

@@ -1,4 +1,4 @@
-#include "escapist_client.h"
+#include "doc_db_client.h"
 
 #include <grpcpp/client_context.h>
 
@@ -6,14 +6,14 @@
 #include <string>
 #include <unordered_map>
 
-namespace escapist {
+namespace doc_db {
 
 using grpc::ClientContext;
 using std::string;
 using std::unordered_map;
 
-StatusOr<DocIdAndVersion> EscapistClient::InsertDoc(const string& collection,
-                                                    const DocEgg& input_doc_egg) {
+StatusOr<DocIdAndVersion> DocDbClient::InsertDoc(const string& collection,
+                                                 const DocEgg& input_doc_egg) {
   if (collection.empty()) {
     return absl::InvalidArgumentError("collection cannot be empty");
   }
@@ -32,9 +32,9 @@ StatusOr<DocIdAndVersion> EscapistClient::InsertDoc(const string& collection,
   return HandleIdAndVersionResponse(rpc_status, rpc_reply.id(), rpc_reply.version());
 }
 
-StatusOr<DocIdAndVersion> EscapistClient::UpdateDoc(const string& collection,
-                                                    const DocIdAndVersion& input_id,
-                                                    const DocEgg& input_doc_egg) {
+StatusOr<DocIdAndVersion> DocDbClient::UpdateDoc(const string& collection,
+                                                 const DocIdAndVersion& input_id,
+                                                 const DocEgg& input_doc_egg) {
   if (collection.empty()) {
     return absl::InvalidArgumentError("collection cannot be empty");
   }
@@ -61,7 +61,7 @@ StatusOr<DocIdAndVersion> EscapistClient::UpdateDoc(const string& collection,
   return HandleIdAndVersionResponse(rpc_status, rpc_reply.id(), rpc_reply.version());
 }
 
-StatusOr<Doc> EscapistClient::FindDocById(const string& collection, const string& id) {
+StatusOr<Doc> DocDbClient::FindDocById(const string& collection, const string& id) {
   if (collection.empty()) {
     return absl::InvalidArgumentError("collection cannot be empty");
   }
@@ -81,8 +81,8 @@ StatusOr<Doc> EscapistClient::FindDocById(const string& collection, const string
   return HandleDocResponse(rpc_status, rpc_reply.doc());
 }
 
-StatusOr<Doc> EscapistClient::FindDocByTags(const string& collection,
-                                            const unordered_map<string, string>& tags) {
+StatusOr<Doc> DocDbClient::FindDocByTags(const string& collection,
+                                         const unordered_map<string, string>& tags) {
   if (collection.empty()) {
     return absl::InvalidArgumentError("collection cannot be empty");
   }
@@ -105,13 +105,13 @@ StatusOr<Doc> EscapistClient::FindDocByTags(const string& collection,
   return HandleDocResponse(rpc_status, rpc_reply.doc());
 }
 
-std::unique_ptr<ClientContext> EscapistClient::MakeClientContext() {
+std::unique_ptr<ClientContext> DocDbClient::MakeClientContext() {
   std::unique_ptr<ClientContext> client_context = std::make_unique<ClientContext>();
   client_context->AddMetadata("db-name", db_);
   return client_context;
 }
 
-void EscapistClient::PopulateDocEgg(DocumentEgg* mutable_doc_egg, const DocEgg& input_doc_egg) {
+void DocDbClient::PopulateDocEgg(DocumentEgg* mutable_doc_egg, const DocEgg& input_doc_egg) {
   mutable_doc_egg->set_bytes(input_doc_egg.bytes);
   auto& doc_egg_tags = *mutable_doc_egg->mutable_tags();
   for (auto& kv : input_doc_egg.tags) {
@@ -119,9 +119,9 @@ void EscapistClient::PopulateDocEgg(DocumentEgg* mutable_doc_egg, const DocEgg& 
   }
 }
 
-StatusOr<DocIdAndVersion> EscapistClient::HandleIdAndVersionResponse(const grpc::Status& rpc_status,
-                                                                     const string& id,
-                                                                     const string& version) {
+StatusOr<DocIdAndVersion> DocDbClient::HandleIdAndVersionResponse(const grpc::Status& rpc_status,
+                                                                  const string& id,
+                                                                  const string& version) {
   if (rpc_status.ok()) {
     DocIdAndVersion output_id;
     output_id.id = id;
@@ -133,8 +133,7 @@ StatusOr<DocIdAndVersion> EscapistClient::HandleIdAndVersionResponse(const grpc:
   }
 }
 
-StatusOr<Doc> EscapistClient::HandleDocResponse(const grpc::Status& rpc_status,
-                                                const Document& doc) {
+StatusOr<Doc> DocDbClient::HandleDocResponse(const grpc::Status& rpc_status, const Document& doc) {
   if (rpc_status.ok()) {
     Doc output_doc;
     output_doc.id = doc.id();
@@ -148,4 +147,4 @@ StatusOr<Doc> EscapistClient::HandleDocResponse(const grpc::Status& rpc_status,
   }
 }
 
-}  // namespace escapist
+}  // namespace doc_db

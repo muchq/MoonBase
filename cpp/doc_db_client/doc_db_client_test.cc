@@ -1,8 +1,8 @@
-#include "escapist_client.h"
+#include "doc_db_client.h"
 
-#include "protos/escapist/escapist_mock.grpc.pb.h"
+#include "protos/doc_db/doc_db_mock.grpc.pb.h"
 
-using namespace escapist;
+using namespace doc_db;
 using ::testing::_;
 using ::testing::DoAll;
 using ::testing::Return;
@@ -22,17 +22,17 @@ DocIdAndVersion MakeInputIds(string id, string version) {
   return input_ids;
 }
 
-TEST(EscapistClient, InsertDocRpcSuccess) {
+TEST(DocDbClient, InsertDocRpcSuccess) {
   // Arrange
   InsertDocResponse resp;
   resp.set_id("foo");
   resp.set_version("123");
 
-  auto stub = std::make_shared<MockEscapistStub>();
+  auto stub = std::make_shared<MockDocDbStub>();
   ON_CALL(*stub, InsertDoc(_, _, _))
       .WillByDefault(DoAll(SetArgPointee<2>(resp), Return(grpc::Status::OK)));
 
-  EscapistClient client(stub, "test");
+  DocDbClient client(stub, "test");
   DocEgg input_doc_egg = MakeDocEgg("cool bytes", {});
 
   // Act
@@ -44,11 +44,11 @@ TEST(EscapistClient, InsertDocRpcSuccess) {
   EXPECT_EQ(status->version, "123");
 }
 
-TEST(EscapistClient, InsertDocRpcFailure) {
+TEST(DocDbClient, InsertDocRpcFailure) {
   // Arrange
-  auto stub = std::make_shared<MockEscapistStub>();
+  auto stub = std::make_shared<MockDocDbStub>();
   ON_CALL(*stub, InsertDoc(_, _, _)).WillByDefault(Return(grpc::Status::CANCELLED));
-  EscapistClient client(stub, "test");
+  DocDbClient client(stub, "test");
   DocEgg input_doc_egg = MakeDocEgg("cool bytes", {});
 
   // Act
@@ -59,10 +59,10 @@ TEST(EscapistClient, InsertDocRpcFailure) {
   EXPECT_EQ(status.status().code(), absl::StatusCode(grpc::StatusCode::CANCELLED));
 }
 
-TEST(EscapistClient, InsertDocClientValidatesCollection) {
+TEST(DocDbClient, InsertDocClientValidatesCollection) {
   // Arrange
-  auto stub = std::make_shared<MockEscapistStub>();
-  EscapistClient client(stub, "test");
+  auto stub = std::make_shared<MockDocDbStub>();
+  DocDbClient client(stub, "test");
   DocEgg input_doc_egg = MakeDocEgg("cool bytes", {});
 
   // Act
@@ -73,10 +73,10 @@ TEST(EscapistClient, InsertDocClientValidatesCollection) {
   EXPECT_EQ(status.status().code(), absl::StatusCode(grpc::StatusCode::INVALID_ARGUMENT));
 }
 
-TEST(EscapistClient, InsertDocClientValidatesBytes) {
+TEST(DocDbClient, InsertDocClientValidatesBytes) {
   // Arrange
-  auto stub = std::make_shared<MockEscapistStub>();
-  EscapistClient client(stub, "test");
+  auto stub = std::make_shared<MockDocDbStub>();
+  DocDbClient client(stub, "test");
   DocEgg input_doc_egg = MakeDocEgg("", {});
 
   // Act
@@ -87,17 +87,17 @@ TEST(EscapistClient, InsertDocClientValidatesBytes) {
   EXPECT_EQ(status.status().code(), absl::StatusCode(grpc::StatusCode::INVALID_ARGUMENT));
 }
 
-TEST(EscapistClient, UpdateDocRpcSuccess) {
+TEST(DocDbClient, UpdateDocRpcSuccess) {
   // Arrange
   UpdateDocResponse resp;
   resp.set_id("foo");
   resp.set_version("123");
 
-  auto stub = std::make_shared<MockEscapistStub>();
+  auto stub = std::make_shared<MockDocDbStub>();
   ON_CALL(*stub, UpdateDoc(_, _, _))
       .WillByDefault(DoAll(SetArgPointee<2>(resp), Return(grpc::Status::OK)));
 
-  EscapistClient client(stub, "test");
+  DocDbClient client(stub, "test");
   DocEgg input_doc_egg = MakeDocEgg("cool bytes", {});
   DocIdAndVersion input_id;
   input_id.id = "foo";
@@ -112,11 +112,11 @@ TEST(EscapistClient, UpdateDocRpcSuccess) {
   EXPECT_EQ(status->version, "123");
 }
 
-TEST(EscapistClient, UpdateDocRpcFailure) {
+TEST(DocDbClient, UpdateDocRpcFailure) {
   // Arrange
-  auto stub = std::make_shared<MockEscapistStub>();
+  auto stub = std::make_shared<MockDocDbStub>();
   ON_CALL(*stub, UpdateDoc(_, _, _)).WillByDefault(Return(grpc::Status::CANCELLED));
-  EscapistClient client(stub, "test");
+  DocDbClient client(stub, "test");
   DocEgg input_doc_egg = MakeDocEgg("cool bytes", {});
   DocIdAndVersion input_ids = MakeInputIds("foo", "001");
 
@@ -128,10 +128,10 @@ TEST(EscapistClient, UpdateDocRpcFailure) {
   EXPECT_EQ(status.status().code(), absl::StatusCode(grpc::StatusCode::CANCELLED));
 }
 
-TEST(EscapistClient, UpdateDocClientValidatesCollection) {
+TEST(DocDbClient, UpdateDocClientValidatesCollection) {
   // Arrange
-  auto stub = std::make_shared<MockEscapistStub>();
-  EscapistClient client(stub, "test");
+  auto stub = std::make_shared<MockDocDbStub>();
+  DocDbClient client(stub, "test");
   DocEgg input_doc_egg = MakeDocEgg("cool bytes", {});
   DocIdAndVersion input_ids = MakeInputIds("foo", "001");
 
@@ -143,10 +143,10 @@ TEST(EscapistClient, UpdateDocClientValidatesCollection) {
   EXPECT_EQ(status.status().code(), absl::StatusCode(grpc::StatusCode::INVALID_ARGUMENT));
 }
 
-TEST(EscapistClient, UpdateDocClientValidatesId) {
+TEST(DocDbClient, UpdateDocClientValidatesId) {
   // Arrange
-  auto stub = std::make_shared<MockEscapistStub>();
-  EscapistClient client(stub, "test");
+  auto stub = std::make_shared<MockDocDbStub>();
+  DocDbClient client(stub, "test");
   DocEgg input_doc_egg = MakeDocEgg("cool bytes", {});
   DocIdAndVersion input_ids = MakeInputIds("", "001");
 
@@ -158,10 +158,10 @@ TEST(EscapistClient, UpdateDocClientValidatesId) {
   EXPECT_EQ(status.status().code(), absl::StatusCode(grpc::StatusCode::INVALID_ARGUMENT));
 }
 
-TEST(EscapistClient, UpdateDocClientValidatesVersion) {
+TEST(DocDbClient, UpdateDocClientValidatesVersion) {
   // Arrange
-  auto stub = std::make_shared<MockEscapistStub>();
-  EscapistClient client(stub, "test");
+  auto stub = std::make_shared<MockDocDbStub>();
+  DocDbClient client(stub, "test");
   DocEgg input_doc_egg = MakeDocEgg("cool bytes", {});
   DocIdAndVersion input_ids = MakeInputIds("foo", "");
 
@@ -173,10 +173,10 @@ TEST(EscapistClient, UpdateDocClientValidatesVersion) {
   EXPECT_EQ(status.status().code(), absl::StatusCode(grpc::StatusCode::INVALID_ARGUMENT));
 }
 
-TEST(EscapistClient, UpdateDocClientValidatesBytes) {
+TEST(DocDbClient, UpdateDocClientValidatesBytes) {
   // Arrange
-  auto stub = std::make_shared<MockEscapistStub>();
-  EscapistClient client(stub, "test");
+  auto stub = std::make_shared<MockDocDbStub>();
+  DocDbClient client(stub, "test");
   DocEgg input_doc_egg = MakeDocEgg("", {});
   DocIdAndVersion input_ids = MakeInputIds("foo", "001");
 
@@ -188,7 +188,7 @@ TEST(EscapistClient, UpdateDocClientValidatesBytes) {
   EXPECT_EQ(status.status().code(), absl::StatusCode(grpc::StatusCode::INVALID_ARGUMENT));
 }
 
-TEST(EscapistClient, FindDocByIdRpcSuccess) {
+TEST(DocDbClient, FindDocByIdRpcSuccess) {
   // Arrange
   FindDocByIdResponse resp;
   auto doc = resp.mutable_doc();
@@ -196,11 +196,11 @@ TEST(EscapistClient, FindDocByIdRpcSuccess) {
   doc->set_version("123");
   doc->set_bytes("neat bytes");
 
-  auto stub = std::make_shared<MockEscapistStub>();
+  auto stub = std::make_shared<MockDocDbStub>();
   ON_CALL(*stub, FindDocById(_, _, _))
       .WillByDefault(DoAll(SetArgPointee<2>(resp), Return(grpc::Status::OK)));
 
-  EscapistClient client(stub, "test");
+  DocDbClient client(stub, "test");
 
   // Act
   auto status = client.FindDocById("foo_col", "foo");
@@ -213,11 +213,11 @@ TEST(EscapistClient, FindDocByIdRpcSuccess) {
   EXPECT_TRUE(status->tags.empty());
 }
 
-TEST(EscapistClient, FindDocByIdRpcFailure) {
+TEST(DocDbClient, FindDocByIdRpcFailure) {
   // Arrange
-  auto stub = std::make_shared<MockEscapistStub>();
+  auto stub = std::make_shared<MockDocDbStub>();
   ON_CALL(*stub, FindDocById(_, _, _)).WillByDefault(Return(grpc::Status::CANCELLED));
-  EscapistClient client(stub, "test");
+  DocDbClient client(stub, "test");
 
   // Act
   auto status = client.FindDocById("foo_col", "foo");
@@ -227,10 +227,10 @@ TEST(EscapistClient, FindDocByIdRpcFailure) {
   EXPECT_EQ(status.status().code(), absl::StatusCode(grpc::StatusCode::CANCELLED));
 }
 
-TEST(EscapistClient, FindDocByIdClientValidatesCollection) {
+TEST(DocDbClient, FindDocByIdClientValidatesCollection) {
   // Arrange
-  auto stub = std::make_shared<MockEscapistStub>();
-  EscapistClient client(stub, "test");
+  auto stub = std::make_shared<MockDocDbStub>();
+  DocDbClient client(stub, "test");
 
   // Act
   auto status = client.FindDocById("", "foo");
@@ -240,10 +240,10 @@ TEST(EscapistClient, FindDocByIdClientValidatesCollection) {
   EXPECT_EQ(status.status().code(), absl::StatusCode(grpc::StatusCode::INVALID_ARGUMENT));
 }
 
-TEST(EscapistClient, FindDocByIdClientValidatesId) {
+TEST(DocDbClient, FindDocByIdClientValidatesId) {
   // Arrange
-  auto stub = std::make_shared<MockEscapistStub>();
-  EscapistClient client(stub, "test");
+  auto stub = std::make_shared<MockDocDbStub>();
+  DocDbClient client(stub, "test");
 
   // Act
   auto status = client.FindDocById("foo_col", "");
@@ -253,7 +253,7 @@ TEST(EscapistClient, FindDocByIdClientValidatesId) {
   EXPECT_EQ(status.status().code(), absl::StatusCode(grpc::StatusCode::INVALID_ARGUMENT));
 }
 
-TEST(EscapistClient, FindDocByTagsRpcSuccess) {
+TEST(DocDbClient, FindDocByTagsRpcSuccess) {
   // Arrange
   FindDocResponse resp;
   auto doc = resp.mutable_doc();
@@ -263,11 +263,11 @@ TEST(EscapistClient, FindDocByTagsRpcSuccess) {
   auto& tags = *doc->mutable_tags();
   tags["player_1"] = "Tippy";
 
-  auto stub = std::make_shared<MockEscapistStub>();
+  auto stub = std::make_shared<MockDocDbStub>();
   ON_CALL(*stub, FindDoc(_, _, _))
       .WillByDefault(DoAll(SetArgPointee<2>(resp), Return(grpc::Status::OK)));
 
-  EscapistClient client(stub, "test");
+  DocDbClient client(stub, "test");
   unordered_map<string, string> input_tags;
   input_tags["player_1"] = "Tippy";
 
@@ -282,12 +282,12 @@ TEST(EscapistClient, FindDocByTagsRpcSuccess) {
   EXPECT_EQ(status->tags["player_1"], "Tippy");
 }
 
-TEST(EscapistClient, FindDocByTagsRpcFailure) {
+TEST(DocDbClient, FindDocByTagsRpcFailure) {
   // Arrange
-  auto stub = std::make_shared<MockEscapistStub>();
+  auto stub = std::make_shared<MockDocDbStub>();
   ON_CALL(*stub, FindDoc(_, _, _)).WillByDefault(Return(grpc::Status::CANCELLED));
 
-  EscapistClient client(stub, "test");
+  DocDbClient client(stub, "test");
   unordered_map<string, string> input_tags;
   input_tags["player_1"] = "Tippy";
 
@@ -299,10 +299,10 @@ TEST(EscapistClient, FindDocByTagsRpcFailure) {
   EXPECT_EQ(status.status().code(), absl::StatusCode(grpc::StatusCode::CANCELLED));
 }
 
-TEST(EscapistClient, FindDocByTagsClientValidatesCollection) {
+TEST(DocDbClient, FindDocByTagsClientValidatesCollection) {
   // Arrange
-  auto stub = std::make_shared<MockEscapistStub>();
-  EscapistClient client(stub, "test");
+  auto stub = std::make_shared<MockDocDbStub>();
+  DocDbClient client(stub, "test");
   unordered_map<string, string> input_tags;
   input_tags["player_1"] = "Tippy";
 
@@ -314,10 +314,10 @@ TEST(EscapistClient, FindDocByTagsClientValidatesCollection) {
   EXPECT_EQ(status.status().code(), absl::StatusCode(grpc::StatusCode::INVALID_ARGUMENT));
 }
 
-TEST(EscapistClient, FindDocByTagsClientValidatesTags) {
+TEST(DocDbClient, FindDocByTagsClientValidatesTags) {
   // Arrange
-  auto stub = std::make_shared<MockEscapistStub>();
-  EscapistClient client(stub, "test");
+  auto stub = std::make_shared<MockDocDbStub>();
+  DocDbClient client(stub, "test");
   unordered_map<string, string> input_tags;
 
   // Act
