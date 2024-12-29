@@ -82,14 +82,12 @@ use_repo(crate, "crates")
 bazel_dep(name = "rules_java", version = "8.6.3")
 bazel_dep(name = "contrib_rules_jvm", version = "0.27.0")
 
-#bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
-#git_override(
-#    module_name = "hedron_compile_commands",
-#    commit = "a14ad3a64e7bf398ab48105aaa0348e032ac87f8",
-#    remote = "https://github.com/hedronvision/bazel-compile-commands-extractor.git",
-#)
-
-#bazel_dep(name = "googletest", version = "1.15.2")
+bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
+git_override(
+    module_name = "hedron_compile_commands",
+    commit = "4f28899228fb3ad0126897876f147ca15026151e",
+    remote = "https://github.com/hedronvision/bazel-compile-commands-extractor.git",
+)
 
 go_sdk = use_extension("@io_bazel_rules_go//go:extensions.bzl", "go_sdk")
 go_sdk.download(version = "1.23.0")

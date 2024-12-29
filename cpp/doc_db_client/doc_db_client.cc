@@ -107,7 +107,7 @@ StatusOr<Doc> DocDbClient::FindDocByTags(const string& collection,
 
 std::unique_ptr<ClientContext> DocDbClient::MakeClientContext() {
   std::unique_ptr<ClientContext> client_context = std::make_unique<ClientContext>();
-  client_context->AddMetadata("db-name", db_);
+  client_context->AddMetadata("db_namespace", db_);
   return client_context;
 }
 
