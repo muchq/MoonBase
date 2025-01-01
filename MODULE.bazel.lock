@@ -319,6 +319,40 @@
   },
   "selectedYankedVersions": {},
   "moduleExtensions": {
+    "//bazel:extensions.bzl%non_module_deps": {
+      "general": {
+        "bzlTransitiveDigest": "W8/iSRgRvUrIUQUiuQhtZ2RIOjEqsSsvVcXT2kRjTJo=",
+        "usagesDigest": "RQVjzSnrxlfMtBYYYJae0jwtFiL+pFwGynpCnxE7GBw=",
+        "recordedFileInputs": {},
+        "recordedDirentsInputs": {},
+        "envVariables": {},
+        "generatedRepoSpecs": {
+          "mongoose_cc": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "mongoose-7.16",
+              "patch_args": [
+                "-p1"
+              ],
+              "patches": [
+                "@@//bazel/patches:mongoose.patch"
+              ],
+              "sha256": "f2c42135f7bc34b3d10b6401e9326a20ba5dd42d4721b6a526826ba31c1679fd",
+              "urls": [
+                "https://github.com/cesanta/mongoose/archive/refs/tags/7.16.tar.gz"
+              ]
+            }
+          }
+        },
+        "recordedRepoMappingEntries": [
+          [
+            "",
+            "bazel_tools",
+            "bazel_tools"
+          ]
+        ]
+      }
+    },
     "@@apple_rules_lint+//lint:extensions.bzl%linter": {
       "general": {
         "bzlTransitiveDigest": "GRMyLraxrIqwpYRdzOfjZMmByG37F1TiOwo1vnf4KJ4=",
