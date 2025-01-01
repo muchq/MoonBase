@@ -3,8 +3,8 @@
 #include <iostream>
 
 #include "absl/log/initialize.h"
-#include "cpp/cards/golf/escapist_game_store.h"
-#include "cpp/escapist_client/escapist_client.h"
+#include "cpp/cards/golf/doc_db_game_store.h"
+#include "cpp/doc_db_client/doc_db_client.h"
 #include "cpp/golf_service/router.h"
 #include "mongoose.h"
 
@@ -28,9 +28,9 @@ int main() {
   absl::InitializeLog();
 
   auto channel = grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials());
-  auto stub = std::make_shared<escapist::Escapist::Stub>(escapist::Escapist::Stub(channel));
-  auto client = std::make_shared<escapist::EscapistClient>(escapist::EscapistClient{stub, "golf"});
-  auto game_store = std::make_shared<golf::EscapistGameStore>(golf::EscapistGameStore{client});
+  auto stub = std::make_shared<doc_db::DocDb::Stub>(doc_db::DocDb::Stub(channel));
+  auto client = std::make_shared<doc_db::DocDbClient>(doc_db::DocDbClient{stub, "golf"});
+  auto game_store = std::make_shared<golf::DocDbGameStore>(golf::DocDbGameStore{client});
   golf::GameManager game_manager{game_store};
   auto handler = std::make_shared<golf_service::Handler>(golf_service::Handler{game_manager});
   rh.router_ = golf_service::Router{handler};
