@@ -4,7 +4,7 @@
 
 #include <cstdlib>
 
-#include "cpp/golf_grpc/golf_grpc_service.h"
+#include "cpp/golf_grpc_service/golf_grpc_service.h"
 
 using grpc::Server;
 using grpc::ServerBuilder;

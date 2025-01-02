@@ -3,7 +3,7 @@ syntax = "proto3";
 package golf_grpc;
 
 service Golf {
-  rpc RegisterPlayer (RegisterUserRequest) returns (RegisterUserResponse) {}
+  rpc RegisterUser (RegisterUserRequest) returns (RegisterUserResponse) {}
   rpc NewGame (NewGameRequest) returns (NewGameResponse) {}
   rpc JoinGame (JoinGameRequest) returns (JoinGameResponse) {}
   rpc Peek (PeekRequest) returns (PeekResponse) {}

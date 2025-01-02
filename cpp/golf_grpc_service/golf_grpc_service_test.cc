@@ -1,42 +1,40 @@
-#include "cpp/golf_grpc/example_service.h"
-
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/server.h>
 #include <grpcpp/server_builder.h>
 #include <gtest/gtest.h>
 
-#include "protos/golf_grpc/helloworld.grpc.pb.h"
+#include "cpp/golf_grpc_service/golf_grpc_service.h"
+#include "protos/golf_grpc/golf.grpc.pb.h"
 
-using example_service::Greeter;
-using example_service::HelloReply;
-using example_service::HelloRequest;
+using golf_grpc::Golf;
+using golf_grpc::RegisterUserResponse;
+using golf_grpc::RegisterUserRequest;
 using grpc::ClientContext;
 using grpc::Server;
 using grpc::ServerBuilder;
 using grpc::Status;
 
 TEST(SERVICE_TEST, BasicAssertions) {
-  GreeterServiceImpl service;
+  GolfServiceImpl service;
 
   ServerBuilder builder;
   builder.RegisterService(&service);
   std::unique_ptr<Server> server(builder.BuildAndStart());
 
   auto channel = server->InProcessChannel({});
-  auto stub = Greeter::NewStub(server->InProcessChannel({}));
+  auto stub = Golf::NewStub(server->InProcessChannel({}));
 
   ClientContext context;
   context.AddMetadata("app-name", "test-app");
 
-  HelloRequest req;
-  HelloReply res;
-  req.set_name("Test Name");
+  RegisterUserRequest req;
+  req.set_user_id("hello@example.org");
+  RegisterUserResponse res;
 
-  Status status = stub->SayHello(&context, req, &res);
+  Status status = stub->RegisterUser(&context, req, &res);
 
   EXPECT_TRUE(status.ok());
-  EXPECT_EQ(res.message(), "Hello Test Name");
 
   server->Shutdown();
 }

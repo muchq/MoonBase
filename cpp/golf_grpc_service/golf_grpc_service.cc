@@ -2,18 +2,56 @@
 
 #include <grpcpp/grpcpp.h>
 
-#include <string>
+#include "protos/golf_grpc/golf.pb.h"
 
-#include "protos/golf_grpc/golf.grpc.pb.h"
-
-using golf_grpc::HelloReply;
-using golf_grpc::HelloRequest;
+using golf_grpc::DiscardDrawRequest;
+using golf_grpc::DiscardDrawResponse;
+using golf_grpc::KnockRequest;
+using golf_grpc::KnockResponse;
+using golf_grpc::NewGameRequest;
+using golf_grpc::NewGameResponse;
+using golf_grpc::PeekRequest;
+using golf_grpc::PeekResponse;
+using golf_grpc::RegisterUserRequest;
+using golf_grpc::RegisterUserResponse;
+using golf_grpc::SwapForDiscardRequest;
+using golf_grpc::SwapForDiscardResponse;
+using golf_grpc::SwapForDrawRequest;
+using golf_grpc::SwapForDrawResponse;
 using grpc::ServerContext;
 using grpc::Status;
 
-Status GreeterServiceImpl::SayHello(ServerContext* context, const HelloRequest* request,
-                                    HelloReply* reply) {
-  std::string prefix("Hello ");
-  reply->set_message(prefix + request->name());
+Status GolfServiceImpl::RegisterUser(ServerContext* context, const RegisterUserRequest* request,
+                                     RegisterUserResponse* response) {
+  return Status::OK;
+};
+
+Status GolfServiceImpl::NewGame(ServerContext* context, const NewGameRequest* request,
+                                NewGameResponse* response) {
+  return Status::OK;
+};
+
+Status GolfServiceImpl::Peek(ServerContext* context, const PeekRequest* request,
+                             PeekResponse* response) {
+  return Status::OK;
+};
+
+Status GolfServiceImpl::DiscardDraw(ServerContext* context, const DiscardDrawRequest* request,
+                                    DiscardDrawResponse* response) {
+  return Status::OK;
+};
+
+Status GolfServiceImpl::SwapForDraw(ServerContext* context, const SwapForDrawRequest* request,
+                                    SwapForDrawResponse* response) {
+  return Status::OK;
+};
+
+Status GolfServiceImpl::SwapForDiscard(ServerContext* context, const SwapForDiscardRequest* request,
+                                       SwapForDiscardResponse* response) {
+  return Status::OK;
+};
+
+Status GolfServiceImpl::Knock(ServerContext* context, const KnockRequest* request,
+                              KnockResponse* response) {
   return Status::OK;
 };
