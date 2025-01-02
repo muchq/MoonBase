@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package golf_rpc;
+package golf_grpc;
 
 service Golf {
   rpc RegisterPlayer (RegisterUserRequest) returns (RegisterUserResponse) {}
