@@ -1,22 +1,25 @@
+#include "cpp/golf_grpc/server/golf_grpc_service.h"
+
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/server.h>
 #include <grpcpp/server_builder.h>
 #include <gtest/gtest.h>
 
-#include "cpp/golf_grpc_service/golf_grpc_service.h"
+#include "cpp/cards/golf/in_memory_game_store.h"
 #include "protos/golf_grpc/golf.grpc.pb.h"
 
 using golf_grpc::Golf;
-using golf_grpc::RegisterUserResponse;
 using golf_grpc::RegisterUserRequest;
+using golf_grpc::RegisterUserResponse;
 using grpc::ClientContext;
 using grpc::Server;
 using grpc::ServerBuilder;
-using grpc::Status;
 
 TEST(SERVICE_TEST, BasicAssertions) {
-  GolfServiceImpl service;
+  auto store = std::make_shared<golf::InMemoryGameStore>();
+  golf::GameManager const game_manager{store};
+  GolfServiceImpl service{game_manager};
 
   ServerBuilder builder;
   builder.RegisterService(&service);
@@ -32,7 +35,7 @@ TEST(SERVICE_TEST, BasicAssertions) {
   req.set_user_id("hello@example.org");
   RegisterUserResponse res;
 
-  Status status = stub->RegisterUser(&context, req, &res);
+  auto status = stub->RegisterUser(&context, req, &res);
 
   EXPECT_TRUE(status.ok());
 

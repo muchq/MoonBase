@@ -36,15 +36,16 @@ TEST(GameManager, RegisterUserValidates) {
   GameManager gm{store};
   auto res1 = gm.registerUser("");
   EXPECT_FALSE(res1.ok());
-  EXPECT_EQ(res1.status().message(), "username length must be between 4 and 15 chars");
+  EXPECT_EQ(res1.status().message(), "username length must be between 4 and 40 chars");
 
-  auto res2 = gm.registerUser("really_long_username");
+  auto res2 = gm.registerUser("really_long_username_super_long_it_very_big_and_too_long");
   EXPECT_FALSE(res2.ok());
-  EXPECT_EQ(res2.status().message(), "username length must be between 4 and 15 chars");
+  EXPECT_EQ(res2.status().message(), "username length must be between 4 and 40 chars");
 
   auto res3 = gm.registerUser("weird%$name");
   EXPECT_FALSE(res3.ok());
-  EXPECT_EQ(res3.status().message(), "only alphanumeric, underscore, or dash allowed in username");
+  EXPECT_EQ(res3.status().message(),
+            "only alphanumeric, underscore, @, dot, or dash allowed in username");
 }
 
 TEST(GameManager, RegisterUserNameTaken) {

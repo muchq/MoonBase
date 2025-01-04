@@ -1,28 +1,21 @@
-#include "cpp/golf_grpc_service/golf_grpc_service.h"
+#include "cpp/golf_grpc/server/golf_grpc_service.h"
 
 #include <grpcpp/grpcpp.h>
 
 #include "protos/golf_grpc/golf.pb.h"
 
-using golf_grpc::DiscardDrawRequest;
-using golf_grpc::DiscardDrawResponse;
-using golf_grpc::KnockRequest;
-using golf_grpc::KnockResponse;
-using golf_grpc::NewGameRequest;
-using golf_grpc::NewGameResponse;
-using golf_grpc::PeekRequest;
-using golf_grpc::PeekResponse;
-using golf_grpc::RegisterUserRequest;
-using golf_grpc::RegisterUserResponse;
-using golf_grpc::SwapForDiscardRequest;
-using golf_grpc::SwapForDiscardResponse;
-using golf_grpc::SwapForDrawRequest;
-using golf_grpc::SwapForDrawResponse;
+using namespace golf_grpc;
 using grpc::ServerContext;
 using grpc::Status;
 
 Status GolfServiceImpl::RegisterUser(ServerContext* context, const RegisterUserRequest* request,
                                      RegisterUserResponse* response) {
+  auto res = gm.registerUser(request->user_id());
+  if (!res.ok()) {
+    auto status = res.status();
+    return Status(static_cast<grpc::StatusCode>(status.code()), status.message().data());
+  }
+
   return Status::OK;
 };
 

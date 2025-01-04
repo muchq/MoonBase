@@ -4,14 +4,22 @@
 
 #include <cstdlib>
 
-#include "cpp/golf_grpc_service/golf_grpc_service.h"
+#include "cpp/cards/golf/doc_db_game_store.h"
+#include "cpp/doc_db_client/doc_db_client.h"
+#include "cpp/golf_grpc/server/golf_grpc_service.h"
 
 using grpc::Server;
 using grpc::ServerBuilder;
 
 void RunServer(uint16_t port) {
   std::string server_address = absl::StrFormat("0.0.0.0:%d", port);
-  GolfServiceImpl service;
+
+  auto channel = grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials());
+  auto stub = std::make_shared<doc_db::DocDb::Stub>(doc_db::DocDb::Stub(channel));
+  auto client = std::make_shared<doc_db::DocDbClient>(doc_db::DocDbClient{stub, "golf"});
+  auto game_store = std::make_shared<golf::DocDbGameStore>(golf::DocDbGameStore{client});
+  golf::GameManager game_manager{game_store};
+  GolfServiceImpl service{game_manager};
 
   grpc::EnableDefaultHealthCheckService(true);
   grpc::reflection::InitProtoReflectionServerBuilderPlugin();
