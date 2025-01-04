@@ -22,15 +22,16 @@ using std::string;
 using std::vector;
 
 static const std::string allowedChars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-@.";
 
 auto validate_user_id(const string& user_id) -> Status {
-  if (user_id.size() < 4 || user_id.size() > 15) {
-    return InvalidArgumentError("username length must be between 4 and 15 chars");
+  if (user_id.size() < 4 || user_id.size() > 40) {
+    return InvalidArgumentError("username length must be between 4 and 40 chars");
   }
 
   if (user_id.find_first_not_of(allowedChars) != string::npos) {
-    return InvalidArgumentError("only alphanumeric, underscore, or dash allowed in username");
+    return InvalidArgumentError(
+        "only alphanumeric, underscore, @, dot, or dash allowed in username");
   }
   return absl::OkStatus();
 }

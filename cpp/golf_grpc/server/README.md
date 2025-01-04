@@ -2,12 +2,12 @@
 
 ### Build
 ```
-bazel build //cpp/golf_grpc_service
+bazel build //cpp/golf_grpc/server
 ```
 
 ### Run
 ```
-bazel-bin/cpp/golf_grpc_service/golf_grpc_service
+bazel-bin/cpp/golf_grpc_service/golf_grpc/server
 ```
 
 ### Call
@@ -22,7 +22,7 @@ bazel-bin/cpp/golf_grpc_service/golf_grpc_service
 ```shell
 
 sudo apt install podman
-bazel run //cpp/golf_grpc_service:oci_tarball
+bazel run //cpp/golf_grpc/server:oci_tarball
 podman run -p 8080:8089 golf_grpc_cc_grpc
 grpcurl -d '{"name": "Bip"}' -plaintext localhost:8080 golf_grpc_service.Golf/RegisterUser
 ```

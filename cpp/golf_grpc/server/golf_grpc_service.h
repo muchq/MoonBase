@@ -1,9 +1,13 @@
-#ifndef CPP_GOLF_GRPC_GOLF_GRPC_SERVICE_H
-#define CPP_GOLF_GRPC_GOLF_GRPC_SERVICE_H
+#ifndef CPP_GOLF_GRPC_SERVER_GOLF_GRPC_SERVICE_H
+#define CPP_GOLF_GRPC_SERVER_GOLF_GRPC_SERVICE_H
 
+#include "cpp/cards/golf/game_manager.h"
 #include "protos/golf_grpc/golf.grpc.pb.h"
 
 class GolfServiceImpl final : public golf_grpc::Golf::Service {
+ public:
+  explicit GolfServiceImpl(golf::GameManager gm_) : gm(std::move(gm_)) {}
+
   grpc::Status RegisterUser(grpc::ServerContext* context,
                             const golf_grpc::RegisterUserRequest* request,
                             golf_grpc::RegisterUserResponse* response) override;
@@ -22,6 +26,9 @@ class GolfServiceImpl final : public golf_grpc::Golf::Service {
                               golf_grpc::SwapForDiscardResponse* response) override;
   grpc::Status Knock(grpc::ServerContext* context, const golf_grpc::KnockRequest* request,
                      golf_grpc::KnockResponse* response) override;
+
+ private:
+  golf::GameManager gm;
 };
 
 #endif

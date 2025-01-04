@@ -6,20 +6,21 @@ load("@rules_proto//proto:defs.bzl", "proto_library")
 package(default_visibility = ["//visibility:public"])
 
 proto_library(
-    name = "golf_grpc_proto",
+    name = "proto",
     srcs = ["golf.proto"],
 )
 
 grpc_proto_library(
-    name = "golf_grpc_service_proto",
+    name = "golf_grpc_cc_proto",
     srcs = ["golf.proto"],
+    generate_mocks = True,
 )
 
 go_proto_library(
     name = "golf_grpc_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
     importpath = "github.com/muchq/moonbase/protos/golf_grpc",
-    proto = ":golf_grpc_proto",
+    proto = ":proto",
 )
 
 go_library(

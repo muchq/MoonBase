@@ -8,7 +8,8 @@ cc_library(
     hdrs = ["golf_grpc_service.h"],
     visibility = ["//visibility:public"],
     deps = [
-        "//protos/golf_grpc:golf_grpc_service_proto",
+        "//cpp/cards/golf",
+        "//protos/golf_grpc:golf_grpc_cc_proto",
         "@com_github_grpc_grpc//:grpc++",
     ],
 )
@@ -19,6 +20,8 @@ cc_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":golf_grpc_service_lib",
+        "//cpp/cards/golf:doc_db_game_store",
+        "//cpp/doc_db_client",
         "@com_github_grpc_grpc//:grpc++_reflection",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/flags:parse",
@@ -32,6 +35,7 @@ cc_test(
     srcs = ["golf_grpc_service_test.cc"],
     deps = [
         ":golf_grpc_service_lib",
+        "//cpp/cards/golf:in_memory_game_store",
         "@googletest//:gtest_main",
     ],
 )
@@ -44,7 +48,7 @@ pkg_tar(
 oci_image(
     name = "golf_grpc_cc_grpc_image",
     base = "@docker_lib_ubuntu",
-    entrypoint = ["/golf_grpc_service"],
+    entrypoint = ["/server"],
     exposed_ports = [
         str(x)
         for x in range(8080, 8090)
