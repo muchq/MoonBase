@@ -25,7 +25,7 @@ tokio = { version = "1.42.0", default-features = false, features = ["macros", "n
 protoc-gen-tonic = "0.4.1"
 protoc-gen-prost = "0.4.0"
 mongodb = "3.1.1"
-serde = { version = "1.0.216", features = ["derive"] }
+serde = { version = "1.0.217", features = ["derive"] }
 dotenv = "0.15.0"
 futures = "0.3.31"
 uuid = { version = "1.11.0", features = ["v4", "fast-rng"]}
