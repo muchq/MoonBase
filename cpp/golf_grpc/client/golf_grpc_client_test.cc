@@ -1,5 +1,7 @@
 #include "golf_grpc_client.h"
 
+#include <gtest/gtest.h>
+
 #include "protos/golf_grpc/golf_mock.grpc.pb.h"
 
 using namespace golf_grpc;
@@ -23,7 +25,6 @@ TEST(GolfClient, RegisterUserRpcSuccess) {
 
   // Assert
   EXPECT_TRUE(status.ok());
-  EXPECT_EQ(status.value(), "Tippy");
 }
 
 TEST(GolfClient, RegisterUserRpcFailure) {
@@ -37,5 +38,5 @@ TEST(GolfClient, RegisterUserRpcFailure) {
 
   // Assert
   EXPECT_FALSE(status.ok());
-  EXPECT_EQ(status.status().code(), absl::StatusCode(grpc::StatusCode::CANCELLED));
+  EXPECT_EQ(status.code(), absl::StatusCode(grpc::StatusCode::CANCELLED));
 }

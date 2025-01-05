@@ -1,29 +1,23 @@
 #include "golf_grpc_client.h"
 
+#include "cpp/futility/status/status.h"
+
 namespace golf_grpc {
 
 using grpc::ClientContext;
-using grpc::Status;
 using std::string;
 
-StatusOr<string> GolfClient::RegisterUser(const string& username) {
+using futility::status::GrpcToAbseil;
+
+absl::Status GolfClient::RegisterUser(const string& user_id) {
   RegisterUserRequest request;
-  request.set_user_id(username);
+  request.set_user_id(user_id);
 
   RegisterUserResponse rpc_reply;
   ClientContext context;
 
   auto rpc_status = stub_->RegisterUser(&context, request, &rpc_reply);
-  if (rpc_status.ok()) {
-    return username;
-  }
-
-  return GrpcStatusToAbseil(rpc_status);
-}
-
-absl::Status GolfClient::GrpcStatusToAbseil(Status status) {
-  auto status_code = absl::StatusCode(status.error_code());
-  return absl::Status(status_code, status.error_message());
+  return GrpcToAbseil(rpc_status);
 }
 
 }  // namespace golf_grpc

@@ -1,0 +1,23 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+cc_library(
+    name = "status",
+    srcs = ["status.cc"],
+    hdrs = ["status.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_github_grpc_grpc//:grpcpp_status",
+        "@com_google_absl//absl/status",
+    ],
+)
+
+cc_test(
+    name = "status_test",
+    size = "small",
+    srcs = ["status_test.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":status",
+        "@googletest//:gtest_main",
+    ],
+)

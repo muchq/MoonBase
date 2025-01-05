@@ -3,29 +3,20 @@
 
 #include <memory>
 #include <string>
-#include <unordered_map>
 
 #include "absl/status/status.h"
-#include "absl/status/statusor.h"
 #include "protos/golf_grpc/golf.grpc.pb.h"
 
 namespace golf_grpc {
 
-using absl::StatusOr;
-using std::shared_ptr;
-using std::string;
-using std::unique_ptr;
-using std::unordered_map;
-
 class GolfClient {
  public:
-  explicit GolfClient(shared_ptr<Golf::StubInterface> stub) : stub_(std::move(stub)) {}
+  explicit GolfClient(std::shared_ptr<Golf::StubInterface> stub) : stub_(std::move(stub)) {}
 
-  StatusOr<string> RegisterUser(const string& username);
+  absl::Status RegisterUser(const std::string& user_id);
 
  private:
-  absl::Status GrpcStatusToAbseil(grpc::Status status);
-  shared_ptr<Golf::StubInterface> stub_;
+  std::shared_ptr<Golf::StubInterface> stub_;
 };
 
 }  // namespace golf_grpc

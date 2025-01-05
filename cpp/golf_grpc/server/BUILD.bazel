@@ -9,6 +9,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//cpp/cards/golf",
+        "//cpp/futility/status",
         "//protos/golf_grpc:golf_grpc_cc_proto",
         "@com_github_grpc_grpc//:grpc++",
     ],
