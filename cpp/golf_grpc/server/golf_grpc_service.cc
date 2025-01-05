@@ -6,9 +6,9 @@
 #include "protos/golf_grpc/golf.pb.h"
 
 using namespace golf_grpc;
+using futility::status::AbseilToGrpc;
 using grpc::ServerContext;
 using grpc::Status;
-using futility::status::AbseilToGrpc;
 
 Status GolfServiceImpl::RegisterUser(ServerContext* context, const RegisterUserRequest* request,
                                      RegisterUserResponse* response) {
