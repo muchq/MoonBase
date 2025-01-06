@@ -1,8 +1,7 @@
-package server
+package lib
 
 import (
 	"database/sql"
-	_ "github.com/lib/pq"
 )
 
 type DaoInterface interface {

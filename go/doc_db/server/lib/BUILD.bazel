@@ -1,16 +1,15 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_library")
 
 go_library(
-    name = "server",
+    name = "lib",
     srcs = [
         "dao.go",
-        "server.go",
+        "doc_db_server.go",
     ],
-    importpath = "github.com/muchq/moonbase/go/escapist/server",
+    importpath = "github.com/muchq/moonbase/go/doc_db/server/lib",
     visibility = ["//visibility:public"],
     deps = [
-        "//protos/escapist",
-        "@com_github_lib_pq//:pq",
+        "//protos/doc_db",
         "@org_golang_google_grpc//:grpc",
         "@org_golang_google_grpc//codes",
         "@org_golang_google_grpc//status",
