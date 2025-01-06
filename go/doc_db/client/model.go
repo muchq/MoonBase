@@ -1,4 +1,4 @@
-package doc_db_client
+package client
 
 import "github.com/muchq/moonbase/protos/doc_db"
 

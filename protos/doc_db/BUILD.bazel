@@ -31,6 +31,7 @@ go_proto_library(
 
 go_library(
     name = "doc_db",
+    srcs = ["empty.go"],
     embed = [":doc_db_go_proto"],
     importpath = "github.com/muchq/moonbase/protos/doc_db",
 )

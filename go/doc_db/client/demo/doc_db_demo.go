@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/muchq/moonbase/go/doc_db_client"
+	doc_db_client "github.com/muchq/moonbase/go/doc_db/client"
 	"log"
 
 	pb "github.com/muchq/moonbase/protos/doc_db"
