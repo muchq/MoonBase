@@ -6,8 +6,11 @@
 #include <string>
 #include <unordered_map>
 
+#include "cpp/futility/status/status.h"
+
 namespace doc_db {
 
+using futility::status::GrpcToAbseil;
 using grpc::ClientContext;
 using std::string;
 using std::unordered_map;
@@ -122,29 +125,25 @@ void DocDbClient::PopulateDocEgg(DocumentEgg* mutable_doc_egg, const DocEgg& inp
 StatusOr<DocIdAndVersion> DocDbClient::HandleIdAndVersionResponse(const grpc::Status& rpc_status,
                                                                   const string& id,
                                                                   const string& version) {
-  if (rpc_status.ok()) {
-    DocIdAndVersion output_id;
-    output_id.id = id;
-    output_id.version = version;
-    return output_id;
-  } else {
-    auto status_code = absl::StatusCode(rpc_status.error_code());
-    return absl::Status(status_code, rpc_status.error_message());
+  if (!rpc_status.ok()) {
+    return GrpcToAbseil(rpc_status);
   }
+  DocIdAndVersion output_id;
+  output_id.id = id;
+  output_id.version = version;
+  return output_id;
 }
 
 StatusOr<Doc> DocDbClient::HandleDocResponse(const grpc::Status& rpc_status, const Document& doc) {
-  if (rpc_status.ok()) {
-    Doc output_doc;
-    output_doc.id = doc.id();
-    output_doc.version = doc.version();
-    output_doc.bytes = doc.bytes();
-    output_doc.tags = unordered_map<string, string>(doc.tags().begin(), doc.tags().end());
-    return output_doc;
-  } else {
-    auto status_code = absl::StatusCode(rpc_status.error_code());
-    return absl::Status(status_code, rpc_status.error_message());
+  if (!rpc_status.ok()) {
+    return GrpcToAbseil(rpc_status);
   }
+  Doc output_doc;
+  output_doc.id = doc.id();
+  output_doc.version = doc.version();
+  output_doc.bytes = doc.bytes();
+  output_doc.tags = unordered_map<string, string>(doc.tags().begin(), doc.tags().end());
+  return output_doc;
 }
 
 }  // namespace doc_db
