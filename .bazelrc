@@ -46,3 +46,6 @@ common --tool_java_runtime_version=remotejdk_21
 
 common --test_verbose_timeout_warnings
 common --test_output=errors
+
+# don't block on remote-cache uploads
+common --bes_upload_mode=fully_async
