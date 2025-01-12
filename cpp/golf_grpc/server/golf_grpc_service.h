@@ -6,7 +6,7 @@
 
 class GolfServiceImpl final : public golf_grpc::Golf::Service {
  public:
-  explicit GolfServiceImpl(golf::GameManager gm_) : gm(std::move(gm_)) {}
+  explicit GolfServiceImpl(golf::GameManager gm);
 
   grpc::Status RegisterUser(grpc::ServerContext* context,
                             const golf_grpc::RegisterUserRequest* request,
@@ -28,7 +28,10 @@ class GolfServiceImpl final : public golf_grpc::Golf::Service {
                      golf_grpc::KnockResponse* response) override;
 
  private:
-  golf::GameManager gm;
+  void HydrateResponseGameState(const std::string& current_user_id, golf_grpc::GameState* response_state,
+                                const golf::GameState* game_state);
+
+  golf::GameManager gm_;
 };
 
 #endif

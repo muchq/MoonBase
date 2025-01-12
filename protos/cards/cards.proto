@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package cards_proto;
+
+option go_package = "github.com/muchq/moonbase/protos/cards";
+
+enum Suit {
+  Clubs = 0;
+  Diamonds = 1;
+  Hearts = 2;
+  Spades = 3;
+}
+
+enum Rank {
+  Two = 0;
+  Three = 1;
+  Four = 2;
+  Five = 3;
+  Six = 4;
+  Seven = 5;
+  Eight = 6;
+  Nine = 7;
+  Ten = 8;
+  Jack = 9;
+  Queen = 10;
+  King = 11;
+  Ace = 12;
+}
+
+message Card {
+  Suit suit = 1;
+  Rank rank = 2;
+}

@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package golf_grpc;
 
+import "protos/cards/cards.proto";
+
 service Golf {
   rpc RegisterUser (RegisterUserRequest) returns (RegisterUserResponse) {}
   rpc NewGame (NewGameRequest) returns (NewGameResponse) {}
@@ -88,8 +90,8 @@ message KnockResponse {
 }
 
 message VisibleHand {
-  string bottom_left = 1;
-  string bottom_right = 2;
+  cards_proto.Card bottom_left = 1;
+  cards_proto.Card bottom_right = 2;
 }
 
 message GameState {
@@ -105,8 +107,8 @@ message GameState {
   int32 number_of_players = 10;
   repeated string players = 11;
   repeated int32 scores = 12;
-  optional string top_discard = 13;
-  optional string top_draw = 14;
+  optional cards_proto.Card top_discard = 13;
+  optional cards_proto.Card top_draw = 14;
   bool your_turn = 15;
 }
 
