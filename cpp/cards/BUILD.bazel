@@ -46,8 +46,6 @@ cc_library(
     deps = [
         ":cards",
         "//protos/cards:cards_cc_proto",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
     ],
 )
 
