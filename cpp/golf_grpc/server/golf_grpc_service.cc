@@ -2,6 +2,7 @@
 
 #include <grpcpp/grpcpp.h>
 
+#include "cpp/cards/card_proto_mapper.h"
 #include "cpp/futility/status/status.h"
 #include "protos/golf_grpc/golf.pb.h"
 
@@ -15,18 +16,20 @@ GolfServiceImpl::GolfServiceImpl(golf::GameManager gm) : gm_(std::move(gm)) {}
 Status GolfServiceImpl::RegisterUser(ServerContext* context,
                                      const golf_grpc::RegisterUserRequest* request,
                                      golf_grpc::RegisterUserResponse* response) {
-  auto res = gm_.registerUser(request->user_id());
-  return AbseilToGrpc(res.status());
+  const auto status_or_username = gm_.registerUser(request->user_id());
+  return AbseilToGrpc(status_or_username.status());
 };
 
 Status GolfServiceImpl::NewGame(ServerContext* context, const golf_grpc::NewGameRequest* request,
                                 golf_grpc::NewGameResponse* response) {
-  auto res = gm_.newGame(request->user_id(), request->number_of_players());
-  if (!res.ok()) {
-    return AbseilToGrpc(res.status());
+  auto status_or_game_state = gm_.newGame(request->user_id(), request->number_of_players());
+  if (!status_or_game_state.ok()) {
+    return AbseilToGrpc(status_or_game_state.status());
   }
 
-  HydrateResponseGameState(request->user_id(), response->mutable_game_state(), res->get());
+  auto game_state = status_or_game_state.value();
+
+  HydrateResponseGameState(request->user_id(), response->mutable_game_state(), game_state);
   return Status::OK;
 };
 
@@ -60,7 +63,7 @@ Status GolfServiceImpl::Knock(ServerContext* context, const golf_grpc::KnockRequ
 
 void GolfServiceImpl::HydrateResponseGameState(const string& current_user_id,
                                                golf_grpc::GameState* response_state,
-                                               const golf::GameState* game_state) {
+                                               const golf::GameStatePtr game_state) {
   response_state->set_all_here(game_state->allPlayersPresent());
   response_state->set_discard_size(game_state->getDiscardPile().size());
   response_state->set_draw_size(game_state->getDrawPile().size());
@@ -85,12 +88,19 @@ void GolfServiceImpl::HydrateResponseGameState(const string& current_user_id,
     player_scores->Add(p.score());
   }
 
-  // if (!game_state->getDiscardPile().empty()) {
-  //   auto response_top_discard = response_state->mutable_top_discard();
-  //   auto& top_discard = game_state->getDiscardPile().back();
-  //   top_discard->set_suit(game_state->getDiscardPile().back());
-  // }
-  // response_state->set_top_draw(game_state->getDrawPile().back());
+  if (!game_state->getDiscardPile().empty()) {
+    auto response_top_discard = response_state->mutable_top_discard();
+    auto& top_discard = game_state->getDiscardPile().back();
+    response_top_discard->set_suit(cards::SuitToProto(top_discard.getSuit()));
+    response_top_discard->set_rank(cards::RankToProto(top_discard.getRank()));
+  }
+
+  if (!game_state->getDrawPile().empty()) {
+    auto response_top_draw = response_state->mutable_top_draw();
+    auto& top_draw = game_state->getDrawPile().back();
+    response_top_draw->set_suit(cards::SuitToProto(top_draw.getSuit()));
+    response_top_draw->set_rank(cards::RankToProto(top_draw.getRank()));
+  }
 
   response_state->set_your_turn(game_state->playerIndex(current_user_id) ==
                                 game_state->getWhoseTurn());

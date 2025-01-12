@@ -8,6 +8,7 @@ cc_library(
     hdrs = ["golf_grpc_service.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "//cpp/cards:card_proto_mapper",
         "//cpp/cards/golf",
         "//cpp/futility/status",
         "//protos/golf_grpc:golf_grpc_cc_grpc",

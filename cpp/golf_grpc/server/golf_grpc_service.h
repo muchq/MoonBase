@@ -30,7 +30,7 @@ class GolfServiceImpl final : public golf_grpc::Golf::Service {
  private:
   void HydrateResponseGameState(const std::string& current_user_id,
                                 golf_grpc::GameState* response_state,
-                                const golf::GameState* game_state);
+                                golf::GameStatePtr game_state);
 
   golf::GameManager gm_;
 };
