@@ -6,8 +6,8 @@
 
 namespace cards {
 
-cards_proto::Suit SuitToProto(const Suit& s) const;
-cards_proto::Rank RankToProto(const Rank& r) const;
+cards_proto::Suit SuitToProto(const Suit& s);
+cards_proto::Rank RankToProto(const Rank& r);
 
 }  // namespace cards
 
