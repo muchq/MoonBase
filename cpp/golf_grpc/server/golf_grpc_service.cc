@@ -102,6 +102,6 @@ void GolfServiceImpl::HydrateResponseGameState(const string& current_user_id,
     response_top_draw->set_rank(cards::RankToProto(top_draw.getRank()));
   }
 
-  response_state->set_your_turn(game_state->playerIndex(current_user_id) ==
-                                game_state->getWhoseTurn());
+  auto current_player_index = game_state->playerIndex(current_user_id);
+  response_state->set_your_turn(current_player_index == game_state->getWhoseTurn());
 }
