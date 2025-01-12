@@ -37,3 +37,25 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_library(
+    name = "card_proto_mapper",
+    srcs = ["card_proto_mapper.cc"],
+    hdrs = ["card_proto_mapper.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cards",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "card_proto_mapper_test",
+    size = "small",
+    srcs = ["card_proto_mapper_test.cc"],
+    deps = [
+        ":card_proto_mapper",
+        "@googletest//:gtest_main",
+    ],
+)
