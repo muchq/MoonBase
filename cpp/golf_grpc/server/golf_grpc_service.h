@@ -28,7 +28,8 @@ class GolfServiceImpl final : public golf_grpc::Golf::Service {
                      golf_grpc::KnockResponse* response) override;
 
  private:
-  void HydrateResponseGameState(const std::string& current_user_id, golf_grpc::GameState* response_state,
+  void HydrateResponseGameState(const std::string& current_user_id,
+                                golf_grpc::GameState* response_state,
                                 const golf::GameState* game_state);
 
   golf::GameManager gm_;

@@ -12,7 +12,8 @@ using std::string;
 
 GolfServiceImpl::GolfServiceImpl(golf::GameManager gm) : gm_(std::move(gm)) {}
 
-Status GolfServiceImpl::RegisterUser(ServerContext* context, const golf_grpc::RegisterUserRequest* request,
+Status GolfServiceImpl::RegisterUser(ServerContext* context,
+                                     const golf_grpc::RegisterUserRequest* request,
                                      golf_grpc::RegisterUserResponse* response) {
   auto res = gm_.registerUser(request->user_id());
   return AbseilToGrpc(res.status());
@@ -34,17 +35,20 @@ Status GolfServiceImpl::Peek(ServerContext* context, const golf_grpc::PeekReques
   return Status::OK;
 };
 
-Status GolfServiceImpl::DiscardDraw(ServerContext* context, const golf_grpc::DiscardDrawRequest* request,
+Status GolfServiceImpl::DiscardDraw(ServerContext* context,
+                                    const golf_grpc::DiscardDrawRequest* request,
                                     golf_grpc::DiscardDrawResponse* response) {
   return Status::OK;
 };
 
-Status GolfServiceImpl::SwapForDraw(ServerContext* context, const golf_grpc::SwapForDrawRequest* request,
+Status GolfServiceImpl::SwapForDraw(ServerContext* context,
+                                    const golf_grpc::SwapForDrawRequest* request,
                                     golf_grpc::SwapForDrawResponse* response) {
   return Status::OK;
 };
 
-Status GolfServiceImpl::SwapForDiscard(ServerContext* context, const golf_grpc::SwapForDiscardRequest* request,
+Status GolfServiceImpl::SwapForDiscard(ServerContext* context,
+                                       const golf_grpc::SwapForDiscardRequest* request,
                                        golf_grpc::SwapForDiscardResponse* response) {
   return Status::OK;
 };
@@ -54,7 +58,9 @@ Status GolfServiceImpl::Knock(ServerContext* context, const golf_grpc::KnockRequ
   return Status::OK;
 };
 
-void GolfServiceImpl::HydrateResponseGameState(const string& current_user_id, golf_grpc::GameState* response_state, const golf::GameState* game_state) {
+void GolfServiceImpl::HydrateResponseGameState(const string& current_user_id,
+                                               golf_grpc::GameState* response_state,
+                                               const golf::GameState* game_state) {
   response_state->set_all_here(game_state->allPlayersPresent());
   response_state->set_discard_size(game_state->getDiscardPile().size());
   response_state->set_draw_size(game_state->getDrawPile().size());
@@ -86,5 +92,6 @@ void GolfServiceImpl::HydrateResponseGameState(const string& current_user_id, go
   // }
   // response_state->set_top_draw(game_state->getDrawPile().back());
 
-  response_state->set_your_turn(game_state->playerIndex(current_user_id) == game_state->getWhoseTurn());
+  response_state->set_your_turn(game_state->playerIndex(current_user_id) ==
+                                game_state->getWhoseTurn());
 }
