@@ -15,29 +15,50 @@ using golf_grpc::RegisterUserResponse;
 using grpc::ClientContext;
 using grpc::Server;
 using grpc::ServerBuilder;
+using grpc::Status;
 
-TEST(SERVICE_TEST, BasicAssertions) {
+namespace {
+auto MakeAllocatedGolfService() -> std::unique_ptr<GolfServiceImpl> {
   auto store = std::make_shared<golf::InMemoryGameStore>();
   golf::GameManager const game_manager{store};
-  GolfServiceImpl service{game_manager};
+  return std::make_unique<GolfServiceImpl>(game_manager);
+}
 
+auto MakeAllocatedServer(GolfServiceImpl* service) -> std::unique_ptr<Server> {
   ServerBuilder builder;
-  builder.RegisterService(&service);
-  std::unique_ptr<Server> server(builder.BuildAndStart());
+  builder.RegisterService(service);
+  std::unique_ptr server(builder.BuildAndStart());
+  return server;
+}
 
-  auto channel = server->InProcessChannel({});
-  auto stub = Golf::NewStub(server->InProcessChannel({}));
-
+auto CallRegisterUser(std::string user_id, Golf::Stub* stub) -> Status {
   ClientContext context;
   context.AddMetadata("app-name", "test-app");
 
   RegisterUserRequest req;
-  req.set_user_id("hello@example.org");
+  req.set_user_id(user_id);
   RegisterUserResponse res;
 
-  auto status = stub->RegisterUser(&context, req, &res);
+  return stub->RegisterUser(&context, req, &res);
+}
+}  // namespace
 
-  EXPECT_TRUE(status.ok());
+TEST(SERVICE_TEST, RegisterUser) {
+  auto service = MakeAllocatedGolfService();
+  auto server = MakeAllocatedServer(service.get());
+
+  auto channel = server->InProcessChannel({});
+  auto stub = Golf::NewStub(server->InProcessChannel({}));
+
+  const std::string user_id{"hello@example.org"};
+
+  auto status1 = CallRegisterUser(user_id, stub.get());
+
+  EXPECT_TRUE(status1.ok());
+
+  auto status2 = CallRegisterUser(user_id, stub.get());
+
+  EXPECT_EQ(status2.error_code(), grpc::StatusCode::ALREADY_EXISTS);
 
   server->Shutdown();
 }
