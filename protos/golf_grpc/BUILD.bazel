@@ -1,6 +1,4 @@
 load("@com_github_grpc_grpc//bazel:cc_grpc_library.bzl", "cc_grpc_library")
-
-# load("@com_github_grpc_grpc//bazel:grpc_build_system.bzl", "grpc_proto_library")
 load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 load("@io_bazel_rules_go//go:def.bzl", "go_library")
 load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
@@ -28,12 +26,6 @@ cc_grpc_library(
     grpc_only = True,
     deps = [":golf_grpc_cc_proto"],
 )
-
-#grpc_proto_library(
-#    name = "golf_grpc_cc_proto",
-#    srcs = ["golf.proto"],
-#    generate_mocks = True,
-#)
 
 go_proto_library(
     name = "golf_grpc_go_proto",
