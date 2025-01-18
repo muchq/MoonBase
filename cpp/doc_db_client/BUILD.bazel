@@ -7,6 +7,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//cpp/futility/status",
+        "//protos/doc_db:doc_db_cc_grpc",
         "//protos/doc_db:doc_db_cc_proto",
         "@com_github_grpc_grpc//:grpc++",
         "@com_google_absl//absl/status:statusor",
@@ -20,6 +21,7 @@ cc_test(
     visibility = ["//visibility:public"],
     deps = [
         "doc_db_client",
+        "//protos/doc_db:doc_db_cc_grpc",
         "//protos/doc_db:doc_db_cc_proto",
         "@googletest//:gtest_main",
     ],

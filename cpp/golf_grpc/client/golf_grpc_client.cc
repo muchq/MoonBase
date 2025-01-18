@@ -1,5 +1,7 @@
 #include "golf_grpc_client.h"
 
+#include <grpcpp/client_context.h>
+
 #include "cpp/futility/status/status.h"
 
 namespace golf_grpc {
@@ -9,7 +11,7 @@ using std::string;
 
 using futility::status::GrpcToAbseil;
 
-absl::Status GolfClient::RegisterUser(const string& user_id) {
+absl::Status GolfClient::RegisterUser(const string& user_id) const {
   RegisterUserRequest request;
   request.set_user_id(user_id);
 
@@ -18,6 +20,21 @@ absl::Status GolfClient::RegisterUser(const string& user_id) {
 
   auto rpc_status = stub_->RegisterUser(&context, request, &rpc_reply);
   return GrpcToAbseil(rpc_status);
+}
+
+absl::StatusOr<GameState> GolfClient::NewGame(const std::string& user_id, int number_of_players) const {
+  NewGameRequest request;
+  request.set_user_id(user_id);
+  request.set_number_of_players(number_of_players);
+
+  NewGameResponse rpc_reply;
+  ClientContext context;
+
+  auto rpc_status = stub_->NewGame(&context, request, &rpc_reply);
+  if (!rpc_status.ok()) {
+    return GrpcToAbseil(rpc_status);
+  }
+  return rpc_reply.game_state();
 }
 
 }  // namespace golf_grpc

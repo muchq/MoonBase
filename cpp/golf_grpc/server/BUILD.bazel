@@ -8,8 +8,10 @@ cc_library(
     hdrs = ["golf_grpc_service.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "//cpp/cards:card_proto_mapper",
         "//cpp/cards/golf",
         "//cpp/futility/status",
+        "//protos/golf_grpc:golf_grpc_cc_grpc",
         "//protos/golf_grpc:golf_grpc_cc_proto",
         "@com_github_grpc_grpc//:grpc++",
     ],
@@ -33,10 +35,14 @@ cc_binary(
 cc_test(
     name = "golf_grpc_service_test",
     size = "small",
-    srcs = ["golf_grpc_service_test.cc"],
+    srcs = [
+        "golf_grpc_service_test.cc",
+        "test_helpers.h",
+    ],
     deps = [
         ":golf_grpc_service_lib",
         "//cpp/cards/golf:in_memory_game_store",
+        "//cpp/golf_grpc/client:golf_grpc_client",
         "@googletest//:gtest_main",
     ],
 )
