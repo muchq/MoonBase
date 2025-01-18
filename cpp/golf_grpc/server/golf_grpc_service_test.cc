@@ -1,43 +1,83 @@
 #include "cpp/golf_grpc/server/golf_grpc_service.h"
 
-#include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/server.h>
 #include <grpcpp/server_builder.h>
 #include <gtest/gtest.h>
 
 #include "cpp/cards/golf/in_memory_game_store.h"
+#include "cpp/golf_grpc/client/golf_grpc_client.h"
+#include "cpp/golf_grpc/server/test_helpers.h"
 #include "protos/golf_grpc/golf.grpc.pb.h"
 
 using golf_grpc::Golf;
-using golf_grpc::RegisterUserRequest;
-using golf_grpc::RegisterUserResponse;
-using grpc::ClientContext;
-using grpc::Server;
-using grpc::ServerBuilder;
+using namespace test_helpers;
 
-TEST(SERVICE_TEST, BasicAssertions) {
-  auto store = std::make_shared<golf::InMemoryGameStore>();
-  golf::GameManager const game_manager{store};
-  GolfServiceImpl service{game_manager};
-
-  ServerBuilder builder;
-  builder.RegisterService(&service);
-  std::unique_ptr<Server> server(builder.BuildAndStart());
+TEST(SERVICE_TEST, RegisterUser) {
+  // Arrange
+  auto service = MakeAllocatedGolfService();
+  auto server = MakeAllocatedServer(service.get());
 
   auto channel = server->InProcessChannel({});
-  auto stub = Golf::NewStub(server->InProcessChannel({}));
+  auto stub = std::make_shared<Golf::Stub>(Golf::Stub(channel));
+  auto client = golf_grpc::GolfClient{stub};
 
-  ClientContext context;
-  context.AddMetadata("app-name", "test-app");
+  const std::string user_id{"hello@example.org"};
 
-  RegisterUserRequest req;
-  req.set_user_id("hello@example.org");
-  RegisterUserResponse res;
+  // Act
+  auto status1 = client.RegisterUser(user_id);
+  auto status2 = client.RegisterUser(user_id);
 
-  auto status = stub->RegisterUser(&context, req, &res);
+  // Assert
+  EXPECT_TRUE(status1.ok());
+  EXPECT_EQ(status2.code(), absl::StatusCode::kAlreadyExists);
 
-  EXPECT_TRUE(status.ok());
+  server->Shutdown();
+}
+
+TEST(SERVICE_TEST, NewGame) {
+  // Arrange
+  auto service = MakeAllocatedGolfService();
+  auto server = MakeAllocatedServer(service.get());
+
+  auto channel = server->InProcessChannel({});
+  auto stub = std::make_shared<Golf::Stub>(Golf::Stub(channel));
+  auto client = golf_grpc::GolfClient{stub};
+
+  const std::string user_id{"hello@example.org"};
+
+  // Act
+  auto status1 = client.RegisterUser(user_id);
+  auto status_or_game = client.NewGame(user_id, 2);
+
+  // Assert
+  EXPECT_TRUE(status1.ok());
+  EXPECT_TRUE(status_or_game.ok());
+
+  const auto& game_state = status_or_game.value();
+
+  EXPECT_EQ(game_state.number_of_players(), 2);
+
+  server->Shutdown();
+}
+
+TEST(SERVICE_TEST, NewGameFailsWithoutUser) {
+  // Arrange
+  auto service = MakeAllocatedGolfService();
+  auto server = MakeAllocatedServer(service.get());
+
+  auto channel = server->InProcessChannel({});
+  auto stub = std::make_shared<Golf::Stub>(Golf::Stub(channel));
+  auto client = golf_grpc::GolfClient{stub};
+
+  const std::string user_id{"hello@example.org"};
+
+  // Act
+  auto status = client.NewGame(user_id, 2);
+
+  // Assert
+  EXPECT_FALSE(status.ok());
+  EXPECT_EQ(status.status().message(), "unknown user");
 
   server->Shutdown();
 }
