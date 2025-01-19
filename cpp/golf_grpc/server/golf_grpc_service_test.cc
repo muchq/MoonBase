@@ -81,3 +81,26 @@ TEST(SERVICE_TEST, NewGameFailsWithoutUser) {
 
   server->Shutdown();
 }
+
+TEST(SERVICE_TEST, NewGameFailsOnNegativeUserCount) {
+  // Arrange
+  auto service = MakeAllocatedGolfService();
+  auto server = MakeAllocatedServer(service.get());
+
+  auto channel = server->InProcessChannel({});
+  auto stub = std::make_shared<Golf::Stub>(Golf::Stub(channel));
+  auto client = golf_grpc::GolfClient{stub};
+
+  const std::string user_id{"hello@example.org"};
+
+  // Act
+  auto register_status = client.RegisterUser(user_id);
+  auto new_game_status_or_game = client.NewGame(user_id, -3);
+
+  // Assert
+  EXPECT_TRUE(register_status.ok());
+  EXPECT_FALSE(new_game_status_or_game.ok());
+  EXPECT_EQ(new_game_status_or_game.status().message(), "2 to 5 players");
+
+  server->Shutdown();
+}
