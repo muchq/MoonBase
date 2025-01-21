@@ -39,6 +39,8 @@ class GameManager {
   [[nodiscard]] StatusOr<GameStatePtr> swapForDiscardPile(const string& game_id,
                                                           const string& user_id, Position position);
   [[nodiscard]] StatusOr<GameStatePtr> knock(const string& game_id, const string& user_id);
+  [[nodiscard]] StatusOr<GameStatePtr> getGameStateForUser(const string& game_id,
+                                                           const string& user_id) const;
 
   // do these methods belong here?
   [[nodiscard]] std::unordered_set<string> getUsersOnline() const;
@@ -47,8 +49,6 @@ class GameManager {
   [[nodiscard]] std::unordered_set<string> getUsersByGameId(const string& game_id) const;
 
  private:
-  [[nodiscard]] StatusOr<GameStatePtr> getGameStateForUser(const string& game_id,
-                                                           const string& user_id) const;
   [[nodiscard]] StatusOr<GameStatePtr> updateGameState(StatusOr<GameState> update_result,
                                                        const string& game_id);
   [[nodiscard]] std::mt19937 randomGenerator() const;
