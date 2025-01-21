@@ -165,8 +165,15 @@ StatusOr<GameStatePtr> GameManager::getGameStateForUser(const string& game_id,
     return InvalidArgumentError("unknown user");
   }
 
-  // TODO: validate user is in this game
-  return game_store_->ReadGame(game_id);
+  auto status_or_game = game_store_->ReadGame(game_id);
+  if (!status_or_game.ok()) {
+    return status_or_game.status();
+  }
+  auto game_read = status_or_game.value();
+  if (game_read->playerIndex(user_id) < 0) {
+    return InvalidArgumentError("unknown user");
+  }
+  return game_read;
 }
 
 StatusOr<GameStatePtr> GameManager::updateGameState(StatusOr<GameState> updateResult,

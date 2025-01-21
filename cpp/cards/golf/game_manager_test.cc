@@ -148,3 +148,34 @@ TEST(GameManager, Knock) {
   auto after_knock = good_knock_status.value();
   EXPECT_EQ(after_knock->getWhoKnocked(), 0);
 }
+
+TEST(GameManager, GetGameStateForUser) {
+  auto store = std::make_shared<InMemoryGameStore>();
+  GameManager gm{store};
+  std::string user_id = "user1";
+  auto res1 = gm.registerUser(user_id);
+  auto res2 = gm.newGame(user_id, 2);
+  EXPECT_TRUE(res2.ok());
+  auto game_id = res2->get()->getGameId();
+
+  auto status_or_game = gm.getGameStateForUser(game_id, user_id);
+  EXPECT_TRUE(status_or_game.ok());
+}
+
+TEST(GameManager, GetGameStateForIncorrectUser) {
+  auto store = std::make_shared<InMemoryGameStore>();
+  GameManager gm{store};
+  std::string user_id = "user1";
+  auto res1 = gm.registerUser(user_id);
+  auto res2 = gm.newGame(user_id, 2);
+  EXPECT_TRUE(res2.ok());
+  auto game_id = res2->get()->getGameId();
+
+  auto status_or_game = gm.getGameStateForUser(game_id, "fake_user");
+  EXPECT_FALSE(status_or_game.ok());
+
+  auto status = status_or_game.status();
+
+  EXPECT_EQ(status.code(), absl::StatusCode::kInvalidArgument);
+  EXPECT_EQ(status.message(), "unknown user");
+}
