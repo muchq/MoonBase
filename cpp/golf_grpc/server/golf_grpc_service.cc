@@ -35,6 +35,18 @@ Status GolfServiceImpl::NewGame(ServerContext* context, const golf_grpc::NewGame
 
 Status GolfServiceImpl::Peek(ServerContext* context, const golf_grpc::PeekRequest* request,
                              golf_grpc::PeekResponse* response) {
+  auto status_or_game_state = gm_.peekAtDrawPile(request->game_id(), request->user_id());
+  if (!status_or_game_state.ok()) {
+    return AbseilToGrpc(status_or_game_state.status());
+  }
+
+  auto game_state = status_or_game_state.value();
+  auto mutable_game_state = response->mutable_game_state();
+
+  HydrateResponseGameState(request->user_id(), mutable_game_state, game_state);
+
+  // show the top card from the draw pile
+  FlipCard(mutable_game_state->mutable_top_draw(), game_state->getDrawPile());
   return Status::OK;
 };
 
@@ -88,20 +100,18 @@ void GolfServiceImpl::HydrateResponseGameState(const string& current_user_id,
     player_scores->Add(p.score());
   }
 
-  if (!game_state->getDiscardPile().empty()) {
-    auto response_top_discard = response_state->mutable_top_discard();
-    auto& top_discard = game_state->getDiscardPile().back();
-    response_top_discard->set_suit(cards::SuitToProto(top_discard.getSuit()));
-    response_top_discard->set_rank(cards::RankToProto(top_discard.getRank()));
-  }
+  // always show the top of the discard pile
+  FlipCard(response_state->mutable_top_discard(), game_state->getDiscardPile());
 
-  if (!game_state->getDrawPile().empty()) {
-    auto response_top_draw = response_state->mutable_top_draw();
-    auto& top_draw = game_state->getDrawPile().back();
-    response_top_draw->set_suit(cards::SuitToProto(top_draw.getSuit()));
-    response_top_draw->set_rank(cards::RankToProto(top_draw.getRank()));
-  }
-
-  auto current_player_index = game_state->playerIndex(current_user_id);
+  const auto current_player_index = game_state->playerIndex(current_user_id);
   response_state->set_your_turn(current_player_index == game_state->getWhoseTurn());
+}
+
+void GolfServiceImpl::FlipCard(cards_proto::Card* response_card,
+                               const std::deque<cards::Card>& deck) {
+  if (!deck.empty()) {
+    auto& top_of_deck = deck.back();
+    response_card->set_suit(cards::SuitToProto(top_of_deck.getSuit()));
+    response_card->set_rank(cards::RankToProto(top_of_deck.getRank()));
+  }
 }

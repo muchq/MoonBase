@@ -31,6 +31,7 @@ class GolfServiceImpl final : public golf_grpc::Golf::Service {
   void HydrateResponseGameState(const std::string& current_user_id,
                                 golf_grpc::GameState* response_state,
                                 golf::GameStatePtr game_state);
+  void FlipCard(cards_proto::Card* response_card, const std::deque<cards::Card>& deck);
 
   golf::GameManager gm_;
 };

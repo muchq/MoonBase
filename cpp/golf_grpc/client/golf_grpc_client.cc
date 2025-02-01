@@ -22,7 +22,8 @@ absl::Status GolfClient::RegisterUser(const string& user_id) const {
   return GrpcToAbseil(rpc_status);
 }
 
-absl::StatusOr<GameState> GolfClient::NewGame(const std::string& user_id, int number_of_players) const {
+absl::StatusOr<GameState> GolfClient::NewGame(const std::string& user_id,
+                                              int number_of_players) const {
   NewGameRequest request;
   request.set_user_id(user_id);
   request.set_number_of_players(number_of_players);
