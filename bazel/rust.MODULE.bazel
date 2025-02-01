@@ -1,0 +1,44 @@
+bazel_dep(name = "rules_rust", version = "0.54.1")
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = "2021",
+    versions = ["1.83.0"],
+)
+use_repo(rust, "rust_toolchains")
+
+register_toolchains("@rust_toolchains//:all")
+
+register_toolchains("@rules_rust//proto/protobuf:default-proto-toolchain")
+
+register_toolchains("//tools/toolchains:prost_toolchain")
+
+crate = use_extension(
+    "@rules_rust//crate_universe:extension.bzl",
+    "crate",
+    isolate = True,
+)
+crate.from_cargo(
+    name = "crates",
+    cargo_lockfile = "//:Cargo.lock",
+    manifests = [
+        "//:Cargo.toml",
+        "//protos/example_service:Cargo.toml",
+        "//protos/doc_db:Cargo.toml",
+        "//rust/helloworld_tonic:Cargo.toml",
+        "//rust/doc_db:Cargo.toml",
+    ],
+    supported_platform_triples = [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+    ],
+)
+crate.annotation(
+    crate = "protoc-gen-prost",
+    gen_binaries = ["protoc-gen-prost"],
+)
+crate.annotation(
+    crate = "protoc-gen-tonic",
+    gen_binaries = ["protoc-gen-tonic"],
+)
+use_repo(crate, "crates")
