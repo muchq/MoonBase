@@ -1,0 +1,18 @@
+bazel_dep(name = "rules_pkg", version = "1.0.1")
+bazel_dep(name = "rules_oci", version = "2.2.0")
+
+# For testing, check out https://registry.bazel.build/modules/container_structure_test
+oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
+oci.pull(
+    name = "docker_lib_ubuntu",
+    digest = "sha256:80dd3c3b9c6cecb9f1667e9290b3bc61b78c2678c02cbdae5f0fea92cc6734ab",
+    image = "docker.io/library/ubuntu",
+    platforms = [
+        "linux/amd64",
+        "linux/arm/v7",
+        "linux/arm64/v8",
+        "linux/ppc64le",
+        "linux/s390x",
+    ],
+)
+use_repo(oci, "docker_lib_ubuntu", "docker_lib_ubuntu_linux_amd64", "docker_lib_ubuntu_linux_arm64_v8", "docker_lib_ubuntu_linux_arm_v7", "docker_lib_ubuntu_linux_ppc64le", "docker_lib_ubuntu_linux_s390x")
