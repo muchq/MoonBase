@@ -38,7 +38,8 @@ absl::StatusOr<GameState> GolfClient::NewGame(const std::string& user_id,
   return rpc_reply.game_state();
 }
 
-absl::StatusOr<GameState> GolfClient::JoinGame(const std::string &user_id, const std::string &game_id) const {
+absl::StatusOr<GameState> GolfClient::JoinGame(const std::string& user_id,
+                                               const std::string& game_id) const {
   JoinGameRequest request;
   request.set_user_id(user_id);
   request.set_game_id(game_id);

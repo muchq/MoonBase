@@ -1,7 +1,5 @@
 #include "cpp/cards/golf/game_manager.h"
 
-#include <algorithm>
-#include <random>
 #include <unordered_set>
 #include <vector>
 
@@ -50,20 +48,8 @@ StatusOr<string> GameManager::registerUser(const string& user_id) {
 }
 
 deque<Card> GameManager::shuffleNewDeck() {
-  vector<int> cards{};
-  cards.reserve(52);
-  for (int i = 0; i < 52; i++) {
-    cards.push_back(i);
-  }
-
-  std::random_device rd;
-  std::mt19937 g(rd());
-  std::shuffle(cards.begin(), cards.end(), g);
-
-  deque<Card> deck{};
-  for (auto c : cards) {
-    deck.emplace_back(c);
-  }
+  auto deck = dealer_->DealNewUnshuffledDeck();
+  dealer_->ShuffleDeck(deck);
   return deck;
 }
 

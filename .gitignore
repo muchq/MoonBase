@@ -1,6 +1,7 @@
 target
 *.iml
 .ijwb
+.clwb
 bazel-*
 .DS_Store
 out

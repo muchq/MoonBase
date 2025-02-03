@@ -7,7 +7,7 @@
 
 class GolfServiceImpl final : public golf_grpc::Golf::Service {
  public:
-  explicit GolfServiceImpl(golf::GameManager gm);
+  explicit GolfServiceImpl(std::shared_ptr<golf::GameManager> gm);
 
   grpc::Status RegisterUser(grpc::ServerContext* context,
                             const golf_grpc::RegisterUserRequest* request,
@@ -39,7 +39,7 @@ class GolfServiceImpl final : public golf_grpc::Golf::Service {
                                        const std::string& user_id,
                                        golf_grpc::GameState* response_state);
 
-  golf::GameManager gm_;
+  std::shared_ptr<golf::GameManager> gm_;
 };
 
 #endif

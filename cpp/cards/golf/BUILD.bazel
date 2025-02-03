@@ -15,6 +15,7 @@ cc_library(
         ":game_store",
         ":player",
         "//cpp/cards",
+        "//cpp/cards:dealer",
         "@com_google_absl//absl/status:statusor",
     ],
 )

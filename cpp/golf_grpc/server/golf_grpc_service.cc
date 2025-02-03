@@ -11,43 +11,42 @@ using grpc::ServerContext;
 using grpc::Status;
 using std::string;
 
-GolfServiceImpl::GolfServiceImpl(golf::GameManager gm) : gm_(std::move(gm)) {}
+GolfServiceImpl::GolfServiceImpl(std::shared_ptr<golf::GameManager> gm) : gm_(std::move(gm)) {}
 
 Status GolfServiceImpl::RegisterUser(ServerContext* context,
                                      const golf_grpc::RegisterUserRequest* request,
                                      golf_grpc::RegisterUserResponse* response) {
-  const auto status_or_username = gm_.registerUser(request->user_id());
+  const auto status_or_username = gm_->registerUser(request->user_id());
   return AbseilToGrpc(status_or_username.status());
 };
 
 Status GolfServiceImpl::NewGame(ServerContext* context, const golf_grpc::NewGameRequest* request,
                                 golf_grpc::NewGameResponse* response) {
-  auto status_or_game_state = gm_.newGame(request->user_id(), request->number_of_players());
-  return HandleGameStateResponse(status_or_game_state, request->user_id(), response->mutable_game_state());
+  auto status_or_game_state = gm_->newGame(request->user_id(), request->number_of_players());
+  return HandleGameStateResponse(status_or_game_state, request->user_id(),
+                                 response->mutable_game_state());
 }
 
 grpc::Status GolfServiceImpl::JoinGame(grpc::ServerContext* context,
                                        const golf_grpc::JoinGameRequest* request,
                                        golf_grpc::JoinGameResponse* response) {
-  auto status_or_game_state = gm_.joinGame(request->game_id(), request->user_id());
-  return HandleGameStateResponse(status_or_game_state, request->user_id(), response->mutable_game_state());
+  auto status_or_game_state = gm_->joinGame(request->game_id(), request->user_id());
+  return HandleGameStateResponse(status_or_game_state, request->user_id(),
+                                 response->mutable_game_state());
 };
 
 Status GolfServiceImpl::Peek(ServerContext* context, const golf_grpc::PeekRequest* request,
                              golf_grpc::PeekResponse* response) {
-  auto status_or_game_state = gm_.peekAtDrawPile(request->game_id(), request->user_id());
-  if (!status_or_game_state.ok()) {
-    return AbseilToGrpc(status_or_game_state.status());
-  }
-
-  auto game_state = status_or_game_state.value();
+  auto status_or_game_state = gm_->peekAtDrawPile(request->game_id(), request->user_id());
   auto mutable_game_state = response->mutable_game_state();
 
-  HydrateResponseGameState(request->user_id(), mutable_game_state, game_state);
-
-  // show the top card from the draw pile
-  FlipCard(mutable_game_state->mutable_top_draw(), game_state->getDrawPile());
-  return Status::OK;
+  auto status_to_return =
+      HandleGameStateResponse(status_or_game_state, request->user_id(), mutable_game_state);
+  if (status_to_return.ok()) {
+    auto& game_state = status_or_game_state.value();
+    FlipCard(mutable_game_state->mutable_top_draw(), game_state->getDrawPile());
+  }
+  return status_to_return;
 };
 
 Status GolfServiceImpl::DiscardDraw(ServerContext* context,
@@ -97,7 +96,9 @@ void GolfServiceImpl::HydrateResponseGameState(const string& current_user_id,
   auto player_scores = response_state->mutable_scores();
   for (auto& p : game_state->getPlayers()) {
     player_names->Add(p.getName().value_or("N/A"));
-    player_scores->Add(p.score());
+    if (game_state->isOver()) {
+      player_scores->Add(p.score());
+    }
   }
 
   // always show the top of the discard pile
@@ -111,8 +112,8 @@ void GolfServiceImpl::FlipCard(cards_proto::Card* response_card,
                                const std::deque<cards::Card>& deck) {
   if (!deck.empty()) {
     auto& top_of_deck = deck.back();
-    response_card->set_suit(cards::SuitToProto(top_of_deck.getSuit()));
-    response_card->set_rank(cards::RankToProto(top_of_deck.getRank()));
+    response_card->set_suit(SuitToProto(top_of_deck.getSuit()));
+    response_card->set_rank(RankToProto(top_of_deck.getRank()));
   }
 }
 

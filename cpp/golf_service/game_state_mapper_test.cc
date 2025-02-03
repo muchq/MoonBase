@@ -12,8 +12,8 @@ using namespace golf;
 TEST(GameStateMapper, GameStateToProto) {
   CardMapper cm;
   GameStateMapper gsm{cm};
-  std::deque<Card> drawPile{Card{5}};
-  std::deque<Card> discardPile{Card{6}};
+  std::deque<Card> drawPile{Card{5}};     // 3D
+  std::deque<Card> discardPile{Card{6}};  // 3H
   std::vector<Player> players{{"andy", Card{0}, Card{1}, Card{2}, Card{3}}};
 
   GameStatePtr state = std::make_shared<GameState>(
@@ -29,13 +29,13 @@ TEST(GameStateMapper, GameStateToProto) {
   EXPECT_TRUE(proto.has_hand());
 
   const auto &hand = proto.hand();
-  EXPECT_EQ(hand.bottom_left(), "4_H");
-  EXPECT_EQ(hand.bottom_right(), "5_S");
+  EXPECT_EQ(hand.bottom_left(), "2_H");
+  EXPECT_EQ(hand.bottom_right(), "2_S");
 
   EXPECT_FALSE(proto.has_knocker());
   EXPECT_EQ(proto.number_of_players(), 1);
   EXPECT_TRUE(proto.has_top_discard());
-  EXPECT_EQ(proto.top_discard(), "8_H");
+  EXPECT_EQ(proto.top_discard(), "3_H");
   EXPECT_FALSE(proto.has_top_draw());
   EXPECT_TRUE(proto.your_turn());
 }
