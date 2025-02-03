@@ -29,7 +29,7 @@ Status GolfServiceImpl::NewGame(ServerContext* context, const golf_grpc::NewGame
 grpc::Status GolfServiceImpl::JoinGame(grpc::ServerContext* context,
                                        const golf_grpc::JoinGameRequest* request,
                                        golf_grpc::JoinGameResponse* response) {
-  auto status_or_game_state = gm_.joinGame(request->user_id(), request->game_id());
+  auto status_or_game_state = gm_.joinGame(request->game_id(), request->user_id());
   return HandleGameStateResponse(status_or_game_state, request->user_id(), response->mutable_game_state());
 };
 
