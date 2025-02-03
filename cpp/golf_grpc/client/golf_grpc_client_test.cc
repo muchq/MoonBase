@@ -74,16 +74,16 @@ TEST(GolfClient, NewGameRpcFailure) {
 
 TEST(GolfClient, JoinGameRpcSuccess) {
   // Arrange
-  NewGameResponse resp;
+  JoinGameResponse resp;
 
   auto stub = std::make_shared<MockGolfStub>();
-  ON_CALL(*stub, NewGame(_, _, _))
+  ON_CALL(*stub, JoinGame(_, _, _))
       .WillByDefault(DoAll(SetArgPointee<2>(resp), Return(grpc::Status::OK)));
 
   GolfClient client(stub);
 
   // Act
-  auto status_or_game = client.NewGame("Tippy", 2);
+  auto status_or_game = client.JoinGame("Tippy", "123");
 
   // Assert
   EXPECT_TRUE(status_or_game.ok());
@@ -92,11 +92,11 @@ TEST(GolfClient, JoinGameRpcSuccess) {
 TEST(GolfClient, JoinGameRpcFailure) {
   // Arrange
   auto stub = std::make_shared<MockGolfStub>();
-  ON_CALL(*stub, NewGame(_, _, _)).WillByDefault(Return(grpc::Status::CANCELLED));
+  ON_CALL(*stub, JoinGame(_, _, _)).WillByDefault(Return(grpc::Status::CANCELLED));
   GolfClient client(stub);
 
   // Act
-  auto status_or_game = client.NewGame("Tippy", 2);
+  auto status_or_game = client.JoinGame("Tippy", "123");
 
   // Assert
   EXPECT_FALSE(status_or_game.ok());
