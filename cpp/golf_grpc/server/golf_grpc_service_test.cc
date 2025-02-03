@@ -104,3 +104,29 @@ TEST(SERVICE_TEST, NewGameFailsOnNegativeUserCount) {
 
   server->Shutdown();
 }
+
+TEST(SERVICE_TEST, Peek) {
+  // Arrange
+  auto service = MakeAllocatedGolfService();
+  auto server = MakeAllocatedServer(service.get());
+
+  auto channel = server->InProcessChannel({});
+  auto stub = std::make_shared<Golf::Stub>(Golf::Stub(channel));
+  auto client = golf_grpc::GolfClient{stub};
+
+  const std::string user_id{"hello@example.org"};
+  const std::string user_two{"bonk@example.org"};
+
+  // Act
+  auto register_status = client.RegisterUser(user_id);
+  auto register2_status = client.RegisterUser(user_two);
+  auto new_game_status_or_game = client.NewGame(user_id, 2);
+  auto join_game_status_or_game = client.JoinGame(user_id, new_game_status_or_game->game_id());
+  auto peek_status_or_game = client.PeekAtDrawPile(user_id, new_game_status_or_game->game_id());
+
+  std::cout << peek_status_or_game.status().message() << std::endl;
+
+  // Assert
+  EXPECT_TRUE(peek_status_or_game.ok());
+  server->Shutdown();
+}

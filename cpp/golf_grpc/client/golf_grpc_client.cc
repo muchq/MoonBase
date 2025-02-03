@@ -38,4 +38,34 @@ absl::StatusOr<GameState> GolfClient::NewGame(const std::string& user_id,
   return rpc_reply.game_state();
 }
 
+absl::StatusOr<GameState> GolfClient::JoinGame(const std::string &user_id, const std::string &game_id) const {
+  JoinGameRequest request;
+  request.set_user_id(user_id);
+  request.set_game_id(game_id);
+
+  JoinGameResponse rpc_reply;
+  ClientContext context;
+
+  auto rpc_status = stub_->JoinGame(&context, request, &rpc_reply);
+  if (!rpc_status.ok()) {
+    return GrpcToAbseil(rpc_status);
+  }
+  return rpc_reply.game_state();
+}
+
+absl::StatusOr<GameState> GolfClient::PeekAtDrawPile(const std::string& user_id,
+                                                     const std::string& game_id) const {
+  PeekRequest request;
+  request.set_user_id(user_id);
+  request.set_game_id(game_id);
+
+  PeekResponse rpc_reply;
+  ClientContext context;
+
+  auto rpc_status = stub_->Peek(&context, request, &rpc_reply);
+  if (!rpc_status.ok()) {
+    return GrpcToAbseil(rpc_status);
+  }
+  return rpc_reply.game_state();
+}
 }  // namespace golf_grpc

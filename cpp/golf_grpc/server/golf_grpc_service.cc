@@ -23,14 +23,14 @@ Status GolfServiceImpl::RegisterUser(ServerContext* context,
 Status GolfServiceImpl::NewGame(ServerContext* context, const golf_grpc::NewGameRequest* request,
                                 golf_grpc::NewGameResponse* response) {
   auto status_or_game_state = gm_.newGame(request->user_id(), request->number_of_players());
-  if (!status_or_game_state.ok()) {
-    return AbseilToGrpc(status_or_game_state.status());
-  }
+  return HandleGameStateResponse(status_or_game_state, request->user_id(), response->mutable_game_state());
+}
 
-  auto game_state = status_or_game_state.value();
-
-  HydrateResponseGameState(request->user_id(), response->mutable_game_state(), game_state);
-  return Status::OK;
+grpc::Status GolfServiceImpl::JoinGame(grpc::ServerContext* context,
+                                       const golf_grpc::JoinGameRequest* request,
+                                       golf_grpc::JoinGameResponse* response) {
+  auto status_or_game_state = gm_.joinGame(request->user_id(), request->game_id());
+  return HandleGameStateResponse(status_or_game_state, request->user_id(), response->mutable_game_state());
 };
 
 Status GolfServiceImpl::Peek(ServerContext* context, const golf_grpc::PeekRequest* request,
@@ -114,4 +114,17 @@ void GolfServiceImpl::FlipCard(cards_proto::Card* response_card,
     response_card->set_suit(cards::SuitToProto(top_of_deck.getSuit()));
     response_card->set_rank(cards::RankToProto(top_of_deck.getRank()));
   }
+}
+
+Status GolfServiceImpl::HandleGameStateResponse(
+    absl::StatusOr<golf::GameStatePtr> status_or_game_state, const std::string& user_id,
+    golf_grpc::GameState* response_state) {
+  if (!status_or_game_state.ok()) {
+    return AbseilToGrpc(status_or_game_state.status());
+  }
+
+  const auto& game_state = status_or_game_state.value();
+
+  HydrateResponseGameState(user_id, response_state, game_state);
+  return Status::OK;
 }

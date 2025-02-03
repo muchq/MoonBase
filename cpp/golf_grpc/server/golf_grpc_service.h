@@ -1,6 +1,7 @@
 #ifndef CPP_GOLF_GRPC_SERVER_GOLF_GRPC_SERVICE_H
 #define CPP_GOLF_GRPC_SERVER_GOLF_GRPC_SERVICE_H
 
+#include "absl/status/statusor.h"
 #include "cpp/cards/golf/game_manager.h"
 #include "protos/golf_grpc/golf.grpc.pb.h"
 
@@ -13,6 +14,8 @@ class GolfServiceImpl final : public golf_grpc::Golf::Service {
                             golf_grpc::RegisterUserResponse* response) override;
   grpc::Status NewGame(grpc::ServerContext* context, const golf_grpc::NewGameRequest* request,
                        golf_grpc::NewGameResponse* response) override;
+  grpc::Status JoinGame(grpc::ServerContext* context, const golf_grpc::JoinGameRequest* request,
+                        golf_grpc::JoinGameResponse* response) override;
   grpc::Status Peek(grpc::ServerContext* context, const golf_grpc::PeekRequest* request,
                     golf_grpc::PeekResponse* response) override;
   grpc::Status DiscardDraw(grpc::ServerContext* context,
@@ -32,6 +35,9 @@ class GolfServiceImpl final : public golf_grpc::Golf::Service {
                                 golf_grpc::GameState* response_state,
                                 golf::GameStatePtr game_state);
   void FlipCard(cards_proto::Card* response_card, const std::deque<cards::Card>& deck);
+  grpc::Status HandleGameStateResponse(absl::StatusOr<golf::GameStatePtr> status_or_game_state,
+                                       const std::string& user_id,
+                                       golf_grpc::GameState* response_state);
 
   golf::GameManager gm_;
 };
