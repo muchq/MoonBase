@@ -4,8 +4,6 @@
 #include <grpcpp/server.h>
 #include <grpcpp/server_builder.h>
 #include <gtest/gtest.h>
-//
-// #include <google/protobuf/util/json_util.h>
 
 #include "cpp/cards/golf/in_memory_game_store.h"
 #include "cpp/golf_grpc/client/golf_grpc_client.h"
@@ -121,21 +119,16 @@ TEST(SERVICE_TEST, Peek) {
 
   // Act
   auto register_status = client.RegisterUser(user_id);
-  auto register2_status = client.RegisterUser(user_two);
+  auto register_user_two_status = client.RegisterUser(user_two);
   auto new_game_status_or_game = client.NewGame(user_id, 2);
   auto join_game_status_or_game = client.JoinGame(user_two, new_game_status_or_game->game_id());
   auto peek_status_or_game = client.PeekAtDrawPile(user_id, new_game_status_or_game->game_id());
 
-  // std::string debug_json;
-  // auto status = google::protobuf::util::MessageToJsonString(new_game_status_or_game.value(), &debug_json);
-  //
-  // std::cout << debug_json << std::endl;
-  // std::cout << join_game_status_or_game.status().message() << std::endl;
-
   // Assert
   EXPECT_TRUE(new_game_status_or_game.ok());
-  EXPECT_TRUE(register2_status.ok());
+  EXPECT_TRUE(register_user_two_status.ok());
   EXPECT_TRUE(join_game_status_or_game.ok());
   EXPECT_TRUE(peek_status_or_game.ok());
+  
   server->Shutdown();
 }
