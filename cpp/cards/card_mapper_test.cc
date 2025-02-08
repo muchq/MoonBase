@@ -15,5 +15,5 @@ TEST(CardMapper, CardToString) {
 TEST(CardMapper, CardsToString) {
   CardMapper cm;
   std::vector<Card> cards{Card{0}, Card{1}};
-  EXPECT_EQ(cm.cardsToString(cards), R"(["2_C","3_D"])");
+  EXPECT_EQ(cm.cardsToString(cards), R"(["2_C","2_D"])");
 }

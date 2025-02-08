@@ -58,3 +58,24 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_library(
+    name = "dealer",
+    srcs = ["dealer.cc"],
+    hdrs = ["dealer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cards",
+        "//protos/cards:cards_cc_proto",
+    ],
+)
+
+cc_test(
+    name = "dealer_test",
+    size = "small",
+    srcs = ["dealer_test.cc"],
+    deps = [
+        ":dealer",
+        "@googletest//:gtest_main",
+    ],
+)

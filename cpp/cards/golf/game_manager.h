@@ -10,6 +10,7 @@
 
 #include "absl/status/statusor.h"
 #include "cpp/cards/card.h"
+#include "cpp/cards/dealer.h"
 #include "cpp/cards/golf/game_state.h"
 #include "cpp/cards/golf/game_store.h"
 #include "cpp/cards/golf/player.h"
@@ -25,7 +26,11 @@ using std::string;
 class GameManager {
  public:
   explicit GameManager(std::shared_ptr<GameStoreInterface> game_store)
-      : game_store_(std::move(game_store)) {}
+      : game_store_(std::move(game_store)), dealer_(std::make_shared<Dealer>()) {}
+  explicit GameManager(std::shared_ptr<GameStoreInterface> game_store,
+                       std::shared_ptr<Dealer> dealer)
+      : game_store_(std::move(game_store)), dealer_(std::move(dealer)) {}
+  GameManager(GameManager& other) : game_store_(std::move(other.game_store_)) {}
   [[nodiscard]] StatusOr<string> registerUser(const string& user_id);
   void unregisterUser(const string& name);
   [[nodiscard]] StatusOr<GameStatePtr> newGame(const string& user_id, int players);
@@ -54,8 +59,9 @@ class GameManager {
   [[nodiscard]] std::mt19937 randomGenerator() const;
   [[nodiscard]] string generateRandomAlphanumericString(std::size_t len) const;
   [[nodiscard]] std::optional<string> generateUnusedRandomId() const;
-  [[nodiscard]] static std::deque<Card> shuffleNewDeck();
+  [[nodiscard]] std::deque<Card> shuffleNewDeck();
   std::shared_ptr<GameStoreInterface> game_store_;
+  std::shared_ptr<Dealer> dealer_;
 };
 
 }  // namespace golf

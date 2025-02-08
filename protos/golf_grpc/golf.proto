@@ -42,6 +42,7 @@ message JoinGameResponse {
 
 message PeekRequest {
   string user_id = 1;
+  string game_id = 2;
 }
 
 message PeekResponse {
@@ -50,6 +51,7 @@ message PeekResponse {
 
 message DiscardDrawRequest {
   string user_id = 1;
+  string game_id = 2;
 }
 
 message DiscardDrawResponse {
@@ -65,7 +67,8 @@ enum Position {
 
 message SwapForDrawRequest {
   string user_id = 1;
-  Position position = 2;
+  string game_id = 2;
+  Position position = 3;
 }
 
 message SwapForDrawResponse {
@@ -74,7 +77,8 @@ message SwapForDrawResponse {
 
 message SwapForDiscardRequest {
   string user_id = 1;
-  Position position = 2;
+  string game_id = 2;
+  Position position = 3;
 }
 
 message SwapForDiscardResponse {
@@ -83,6 +87,7 @@ message SwapForDiscardResponse {
 
 message KnockRequest {
   string user_id = 1;
+  string game_id = 2;
 }
 
 message KnockResponse {

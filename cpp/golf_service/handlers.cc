@@ -41,7 +41,7 @@ void Handler::registerUser(const GolfServiceRequest &serviceRequest, struct mg_c
     }
   }
 
-  auto res = gm.registerUser(registerUserRequest.username());
+  auto res = gm->registerUser(registerUserRequest.username());
   if (!res.ok()) {
     string output("error|");
     output.append(res.status().message());
@@ -103,7 +103,7 @@ void Handler::handleGameManagerResult(const absl::StatusOr<golf::GameStatePtr> &
   }
 
   const auto &gameStatePtr = *res;
-  for (auto &user : gm.getUsersByGameId(gameStatePtr->getGameId())) {
+  for (auto &user : gm->getUsersByGameId(gameStatePtr->getGameId())) {
     const auto userJson = userStateToJson(gameStatePtr, user);
     auto userConnection = connectionsByUser.at(user);
     mg_ws_send(userConnection, userJson.c_str(), userJson.size(), WEBSOCKET_OP_TEXT);
@@ -120,7 +120,7 @@ void Handler::newGame(const GolfServiceRequest &serviceRequest, struct mg_connec
     return;
   }
 
-  auto res = gm.newGame(newGameRequest.username(), newGameRequest.number_of_players());
+  auto res = gm->newGame(newGameRequest.username(), newGameRequest.number_of_players());
   handleGameManagerResult(res, c);
 }
 
@@ -133,7 +133,7 @@ void Handler::joinGame(const GolfServiceRequest &serviceRequest, struct mg_conne
   if (usernameMismatch(joinGameRequest.username(), c)) {
     return;
   }
-  auto res = gm.joinGame(joinGameRequest.game_id(), joinGameRequest.username());
+  auto res = gm->joinGame(joinGameRequest.game_id(), joinGameRequest.username());
   handleGameManagerResult(res, c);
 }
 
@@ -146,7 +146,7 @@ void Handler::peekAtDrawPile(const GolfServiceRequest &serviceRequest, struct mg
   if (usernameMismatch(peekRequest.username(), c)) {
     return;
   }
-  auto res = gm.peekAtDrawPile(peekRequest.game_id(), peekRequest.username());
+  auto res = gm->peekAtDrawPile(peekRequest.game_id(), peekRequest.username());
   handleGameManagerResult(res, c);
 }
 
@@ -160,7 +160,8 @@ void Handler::discardFromDrawPile(const GolfServiceRequest &serviceRequest,
   if (usernameMismatch(discardDrawRequest.username(), c)) {
     return;
   }
-  auto res = gm.swapDrawForDiscardPile(discardDrawRequest.game_id(), discardDrawRequest.username());
+  auto res =
+      gm->swapDrawForDiscardPile(discardDrawRequest.game_id(), discardDrawRequest.username());
   handleGameManagerResult(res, c);
 }
 
@@ -179,8 +180,8 @@ void Handler::swapForDrawPile(const GolfServiceRequest &serviceRequest, struct m
     return;
   }
 
-  auto res =
-      gm.swapForDrawPile(swapForDrawRequest.game_id(), swapForDrawRequest.username(), *positionRes);
+  auto res = gm->swapForDrawPile(swapForDrawRequest.game_id(), swapForDrawRequest.username(),
+                                 *positionRes);
   handleGameManagerResult(res, c);
 }
 
@@ -198,8 +199,8 @@ void Handler::swapForDiscardPile(const GolfServiceRequest &serviceRequest,
   if (!positionRes.ok()) {
     return;
   }
-  auto res = gm.swapForDiscardPile(swapForDiscardRequest.game_id(),
-                                   swapForDiscardRequest.username(), *positionRes);
+  auto res = gm->swapForDiscardPile(swapForDiscardRequest.game_id(),
+                                    swapForDiscardRequest.username(), *positionRes);
   handleGameManagerResult(res, c);
 }
 
@@ -212,7 +213,7 @@ void Handler::knock(const GolfServiceRequest &serviceRequest, struct mg_connecti
   if (usernameMismatch(knockRequest.username(), c)) {
     return;
   }
-  auto res = gm.knock(knockRequest.game_id(), knockRequest.username());
+  auto res = gm->knock(knockRequest.game_id(), knockRequest.username());
   handleGameManagerResult(res, c);
 }
 

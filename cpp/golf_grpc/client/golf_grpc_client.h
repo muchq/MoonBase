@@ -15,6 +15,9 @@ class GolfClient {
 
   absl::Status RegisterUser(const std::string& user_id) const;
   absl::StatusOr<GameState> NewGame(const std::string& user_id, int number_of_players) const;
+  absl::StatusOr<GameState> JoinGame(const std::string& user_id, const std::string& game_id) const;
+  absl::StatusOr<GameState> PeekAtDrawPile(const std::string& user_id,
+                                           const std::string& game_id) const;
 
  private:
   std::shared_ptr<Golf::StubInterface> stub_;

@@ -18,7 +18,7 @@ void RunServer(uint16_t port) {
   auto stub = std::make_shared<doc_db::DocDb::Stub>(doc_db::DocDb::Stub(channel));
   auto client = std::make_shared<doc_db::DocDbClient>(doc_db::DocDbClient{stub, "golf"});
   auto game_store = std::make_shared<golf::DocDbGameStore>(golf::DocDbGameStore{client});
-  golf::GameManager game_manager{game_store};
+  auto game_manager = std::make_shared<golf::GameManager>(game_store);
   GolfServiceImpl service{game_manager};
 
   grpc::EnableDefaultHealthCheckService(true);

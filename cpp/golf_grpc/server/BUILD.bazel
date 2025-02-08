@@ -43,6 +43,7 @@ cc_test(
         ":golf_grpc_service_lib",
         "//cpp/cards/golf:in_memory_game_store",
         "//cpp/golf_grpc/client:golf_grpc_client",
+        "@com_google_protobuf//:differencer",
         "@googletest//:gtest_main",
     ],
 )

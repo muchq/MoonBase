@@ -4,6 +4,8 @@
 #include <grpcpp/server.h>
 #include <grpcpp/server_builder.h>
 
+#include <memory>
+
 #include "cpp/cards/golf/in_memory_game_store.h"
 #include "protos/golf_grpc/golf.grpc.pb.h"
 
@@ -21,8 +23,9 @@ using grpc::Status;
 
 inline auto MakeAllocatedGolfService() -> std::unique_ptr<GolfServiceImpl> {
   auto store = std::make_shared<golf::InMemoryGameStore>();
-  golf::GameManager const game_manager{store};
-  return std::make_unique<GolfServiceImpl>(game_manager);
+  auto dealer = std::make_shared<golf::NoShuffleDealer>();
+  auto manager = std::make_shared<golf::GameManager>(store, dealer);
+  return std::make_unique<GolfServiceImpl>(manager);
 }
 
 inline auto MakeAllocatedServer(GolfServiceImpl* service) -> std::unique_ptr<Server> {

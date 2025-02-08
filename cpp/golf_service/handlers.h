@@ -26,7 +26,7 @@ void handleMessage(struct ::mg_ws_message *wm, struct ::mg_connection *c);
 
 class Handler {
  public:
-  explicit Handler(golf::GameManager gm_) : gm(std::move(gm_)) {}
+  explicit Handler(std::shared_ptr<golf::GameManager> gm_) : gm(std::move(gm_)) {}
   void handleDisconnect(struct ::mg_connection *c);
   void handleMessage(struct ::mg_ws_message *wm, struct ::mg_connection *c);
 
@@ -63,7 +63,7 @@ class Handler {
       {"swapDiscard", &Handler::swapForDiscardPile},
       {"knock", &Handler::knock}};
 
-  golf::GameManager gm;
+  std::shared_ptr<golf::GameManager> gm;
   golf::GameStateMapper gameStateMapper{{}};
   std::unordered_map<std::string, mg_connection *> connectionsByUser;
 };
