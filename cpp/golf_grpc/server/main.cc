@@ -1,13 +1,13 @@
+#include <string>
+
+#include "absl/strings/str_format.h"
 #include "cpp/cards/golf/doc_db_game_store.h"
 #include "cpp/doc_db_client/doc_db_client.h"
 #include "cpp/golf_grpc/server/golf_grpc_service.h"
 #include "cpp/lakitu/lakitu.h"
 
-#include "absl/strings/str_format.h"
-#include <string>
-
-using lakitu::Server;
 using lakitu::ReadPort;
+using lakitu::Server;
 
 void RunServer(uint16_t port) {
   const std::string server_address = absl::StrFormat("0.0.0.0:%d", port);
