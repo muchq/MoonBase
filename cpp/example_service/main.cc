@@ -1,10 +1,9 @@
+#include "absl/strings/str_format.h"
 #include "cpp/example_service/example_service.h"
 #include "cpp/lakitu/lakitu.h"
 
-#include "absl/strings/str_format.h"
-
-using lakitu::Server;
 using lakitu::ReadPort;
+using lakitu::Server;
 
 void RunServer(uint16_t port) {
   const std::string server_address = absl::StrFormat("0.0.0.0:%d", port);
