@@ -12,7 +12,7 @@ bazel-bin/cpp/example_service/example_service
 
 ### Call
 ```
-➜  ~ grpcurl -d '{"name": "Friend"}' -plaintext localhost:8088 example_service.Greeter/SayHello
+➜  ~ grpcurl -d '{"name": "Friend"}' -plaintext localhost:8080 example_service.Greeter/SayHello
 {
   "message": "Hello Friend"
 }

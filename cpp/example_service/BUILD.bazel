@@ -20,9 +20,7 @@ cc_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":example_service_lib",
-        "@com_github_grpc_grpc//:grpc++_reflection",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/flags:parse",
+        "//cpp/lakitu",
         "@com_google_absl//absl/strings:str_format",
     ],
 )

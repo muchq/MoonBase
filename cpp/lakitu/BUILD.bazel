@@ -1,0 +1,11 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "lakitu",
+    srcs = ["lakitu.cc"],
+    hdrs = ["lakitu.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_github_grpc_grpc//:grpc++_reflection",
+    ],
+)
