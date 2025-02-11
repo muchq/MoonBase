@@ -31,10 +31,9 @@ maven.install(
         "org.scala-lang:scala3-compiler_3:3.6.3",
         "org.slf4j:slf4j-api:2.0.16",
     ],
+    lock_file = "//:rules_jvm_external++maven+maven_install.json",
     repositories = [
         "https://repo1.maven.org/maven2",
-        "https://maven.google.com",
     ],
-    lock_file = "//:rules_jvm_external++maven+maven_install.json",
 )
 use_repo(maven, "maven")
