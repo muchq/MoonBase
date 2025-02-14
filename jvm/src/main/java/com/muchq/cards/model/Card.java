@@ -1,4 +1,4 @@
-package com.muchq.cards;
+package com.muchq.cards.model;
 
 import java.util.List;
 

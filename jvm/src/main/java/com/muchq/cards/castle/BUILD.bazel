@@ -11,6 +11,6 @@ java_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "//jvm/src/main/java/com/muchq/cards",
+        "//jvm/src/main/java/com/muchq/cards/model",
     ],
 )
