@@ -11,7 +11,7 @@ register_toolchains("@rust_toolchains//:all")
 
 register_toolchains("@rules_rust//proto/protobuf:default-proto-toolchain")
 
-register_toolchains("//tools/toolchains:prost_toolchain")
+register_toolchains("//bazel/toolchains:prost_toolchain")
 
 crate = use_extension(
     "@rules_rust//crate_universe:extension.bzl",
