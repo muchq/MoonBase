@@ -18,7 +18,7 @@ def _http_impl(ctx):  # buildifier: disable=unused-variable
         strip_prefix = "raylib-5.5_macos",
         build_file = "@//bazel/3p:raylib.BUILD",
     )
-    
+
     http_archive(
         name = "raylib_linux",
         urls = ["https://github.com/raysan5/raylib/releases/download/5.5/raylib-5.5_linux_amd64.tar.gz"],

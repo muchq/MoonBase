@@ -11,4 +11,4 @@ git_override(
 )
 
 non_module_deps = use_extension("//bazel/extensions:extensions.bzl", "non_module_deps")
-use_repo(non_module_deps, "mongoose_cc", "raylib_macos", "raylib_linux")
+use_repo(non_module_deps, "mongoose_cc", "raylib_linux", "raylib_macos")
