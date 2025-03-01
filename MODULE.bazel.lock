@@ -329,10 +329,10 @@
   },
   "selectedYankedVersions": {},
   "moduleExtensions": {
-    "//bazel/extensions:extensions.bzl%non_module_deps": {
+    "//bazel/extensions:mongoose.bzl%mongoose": {
       "general": {
-        "bzlTransitiveDigest": "vcICN7x9/1ahKFNjCKfaalB1+FaQDJyiOwXn8OeJZ7M=",
-        "usagesDigest": "0HVDWfSgmwkriir9UieGgzM4qaacm5qyLwCMceFu5Kk=",
+        "bzlTransitiveDigest": "qXe7y8l+WGgQO+VlGqEWd1pVGq1tSWbbwhc9lZ8/Ld0=",
+        "usagesDigest": "FX3UnNwMbycOq4TjX1A1Drngl0chc6Z1BwgWaHVTZlE=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -347,27 +347,32 @@
               ],
               "build_file": "@@//bazel/3p:mongoose.BUILD"
             }
-          },
-          "raylib_macos": {
+          }
+        },
+        "recordedRepoMappingEntries": [
+          [
+            "",
+            "bazel_tools",
+            "bazel_tools"
+          ]
+        ]
+      }
+    },
+    "//bazel/extensions:raylib.bzl%raylib": {
+      "general": {
+        "bzlTransitiveDigest": "grFok7iX6c/RXZXZXuzSTiaxczLQkfNTWS/1yKsdwao=",
+        "usagesDigest": "B8GaWFUgJ9b9iPFqwQkzrowZE0RSWZTs8IpHcr1ww0g=",
+        "recordedFileInputs": {},
+        "recordedDirentsInputs": {},
+        "envVariables": {},
+        "generatedRepoSpecs": {
+          "raylib": {
             "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
             "attributes": {
-              "urls": [
-                "https://github.com/raysan5/raylib/releases/download/5.5/raylib-5.5_macos.tar.gz"
-              ],
+              "url": "https://github.com/raysan5/raylib/releases/download/5.5/raylib-5.5_macos.tar.gz",
               "sha256": "930c67b676963c6cffbd965814664523081ecbf3d30fc9df4211d0064aa6ba39",
               "strip_prefix": "raylib-5.5_macos",
-              "build_file": "@@//bazel/3p:raylib.BUILD"
-            }
-          },
-          "raylib_linux": {
-            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
-            "attributes": {
-              "urls": [
-                "https://github.com/raysan5/raylib/releases/download/5.5/raylib-5.5_linux_amd64.tar.gz"
-              ],
-              "sha256": "3d95ef03d5b38dfa55c0a16ca122d382134b078f0e5b270b52fe7eae0549c000",
-              "strip_prefix": "raylib-5.5_linux_amd64",
-              "build_file": "@@//bazel/3p:raylib.BUILD"
+              "build_file_content": "load(\"@rules_cc//cc:defs.bzl\", \"cc_import\")\n\ncc_import(\n    name = \"raylib\",\n    hdrs = [\n        \"include/raylib.h\",\n        \"include/raymath.h\",\n        \"include/rlgl.h\",\n    ],\n    shared_library = \"lib/libraylib.550.dylib\",\n    visibility = [\"//visibility:public\"],\n)\n        "
             }
           }
         },
