@@ -1,4 +1,5 @@
-bazel_dep(name = "rules_rust", version = "0.54.1")
+bazel_dep(name = "rules_rust", version = "0.59.2")
+bazel_dep(name = "rules_rust_prost", version = "0.59.2")
 
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(
@@ -8,8 +9,6 @@ rust.toolchain(
 use_repo(rust, "rust_toolchains")
 
 register_toolchains("@rust_toolchains//:all")
-
-register_toolchains("@rules_rust//proto/protobuf:default-proto-toolchain")
 
 register_toolchains("//bazel/toolchains:prost_toolchain")
 
