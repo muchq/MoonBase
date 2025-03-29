@@ -13,6 +13,6 @@ use_repo(llvm, "llvm_toolchain")
 
 register_toolchains("@llvm_toolchain//:all")
 
-bazel_dep(name = "bazel_features", version = "1.26.0")
+bazel_dep(name = "bazel_features", version = "1.27.0")
 
 bazel_dep(name = "buildifier_prebuilt", version = "8.0.1", dev_dependency = True)
