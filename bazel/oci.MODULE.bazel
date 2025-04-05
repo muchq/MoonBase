@@ -1,5 +1,5 @@
 bazel_dep(name = "rules_pkg", version = "1.1.0")
-bazel_dep(name = "rules_oci", version = "2.2.3")
+bazel_dep(name = "rules_oci", version = "2.2.5")
 
 # For testing, check out https://registry.bazel.build/modules/container_structure_test
 oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
