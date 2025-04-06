@@ -1,33 +1,33 @@
-# Golf Service - C++ Implementation
+# Golf gRPC Service - C++ Implementation
 
-This directory contains the core C++ implementation of the golf service. It provides the backend functionality for golf game management and scoring.
+This directory contains the gRPC service implementation for the golf application. It provides the remote procedure call interface for clients to interact with the golf service.
 
 ## Related Projects
 
-This service is part of a larger golf application ecosystem. Related components can be found in:
-- [Golf gRPC Service](../golf_grpc) - gRPC interface implementation
+This gRPC service is part of a larger golf application ecosystem. Related components can be found in:
+- [Core Golf Service](../golf_service) - Backend implementation
 - [Original Golf UI](../../web/golf_ui) - Original web interface
 - [Updated Golf UI](../../web/golf_ui_2) - Modernized web interface
 
 ## Features
 
-- Golf game management
-- Player scoring
-- Course management
-- Game state persistence
+- gRPC service definition and implementation
+- Protocol buffer message handling
+- Client-server communication
+- Service discovery and registration
 
 ## Building
 
 This project uses Bazel for building:
 
 ```bash
-bazel build //cpp/golf_service:...
+bazel build //cpp/golf_grpc:...
 ```
 
 ## Testing
 
 ```bash
-bazel test //cpp/golf_service:...
+bazel test //cpp/golf_grpc:...
 ```
 
 ## Protocol Buffers

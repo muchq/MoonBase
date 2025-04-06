@@ -17,7 +17,7 @@ func main() {
     foo := &Foo{
         Clock: NewSystemUtcClock(),
     }
-	
+
     fmt.PrintLn(foo.SecondsSinceEpochIsEven())
 }
 ```
@@ -29,9 +29,9 @@ func TestFoo_SecondsSinceEpochIsEven(t * testing.T) {
     foo := &Foo{
         Clock: testClock,
     }
-	
+
     assert.True(t, foo.SecondsSinceEpochIsEven(), "zero is even")
-    
+
     testClock.Tick(1)
     assert.False(t, foo.SecondsSinceEpochIsEven(), "1 is odd")
 }

@@ -1,28 +1,39 @@
-# Example GRPC Service
+# Example Service - C++ Implementation
 
-### Build
-```
-bazel build //cpp/example_service
+This directory contains a C++ implementation of an example service. It serves as a reference implementation for building C++ services in this repository.
+
+## Features
+
+- Service architecture
+- Protocol buffer integration
+- Error handling
+- Logging
+- Configuration management
+
+## Building
+
+This project uses Bazel for building:
+
+```bash
+bazel build //cpp/example_service:...
 ```
 
-### Run
-```
-bazel-bin/cpp/example_service/example_service
+## Testing
+
+```bash
+bazel test //cpp/example_service:...
 ```
 
-### Call
-```
-➜  ~ grpcurl -d '{"name": "Friend"}' -plaintext localhost:8080 example_service.Greeter/SayHello
-{
-  "message": "Hello Friend"
-}
+## Running the Service
+
+```bash
+bazel run //cpp/example_service:server
 ```
 
-### OCI
-# OCI
-```shell
-sudo apt install podman
-bazel run //cpp/example_service:oci_tarball
-podman run -p 8080:8089 example_cc_grpc
-grpcurl -d '{"name": "Friend"}' -plaintext localhost:8080 example_service.Greeter/SayHello
-```
+## Protocol Buffers
+
+This service uses protocol buffers for data serialization. The proto definitions can be found in the [protos](../../protos) directory.
+
+## IDE Support
+
+For optimal development experience, use CLion with the Bazel plugin or VSCode with the compile commands extractor as described in the main [README](../../README.md).
