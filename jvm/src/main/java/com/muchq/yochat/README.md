@@ -1,4 +1,11 @@
-# YoChat
+# Yochat - a chat server
+
+## Features
+
+- Real-time messaging
+- SSL
+
+## Example Usage
 
 ### client
 ```

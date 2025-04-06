@@ -1,9 +1,6 @@
 #ifndef CPP_CARDS_CARD_H
 #define CPP_CARDS_CARD_H
 
-#include <string>
-#include <unordered_map>
-
 namespace cards {
 
 enum class Suit { Clubs, Diamonds, Hearts, Spades };

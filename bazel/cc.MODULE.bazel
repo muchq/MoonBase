@@ -12,6 +12,3 @@ git_override(
 
 mongoose_ext = use_extension("//bazel/extensions:mongoose.bzl", "mongoose")
 use_repo(mongoose_ext, "mongoose_cc")
-
-raylib_ext = use_extension("//bazel/extensions:raylib.bzl", "raylib")
-use_repo(raylib_ext, "raylib")

@@ -3,7 +3,9 @@ resolver = "2"
 
 members = [
     "rust/helloworld_tonic",
+    "rust/cards",
     "rust/doc_db",
+    "rust/wordchains",
     "protos/example_service",
     "protos/doc_db",
 ]
@@ -17,11 +19,11 @@ readme = "README.md"
 [workspace.dependencies]
 example_service = { path = "protos/example_service" }
 doc_db_proto = { path = "protos/doc_db" }
-prost = { version = "0.13.4" }
+prost = { version = "0.13.5" }
 prost-types = { version = "0.13.5", default-features = false }
 tonic = { version = "0.12.3", features = ["transport"] }
 tonic-build = "0.12.3"
-tokio = { version = "1.43.0", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
+tokio = { version = "1.44.1", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
 protoc-gen-tonic = "0.4.1"
 protoc-gen-prost = "0.4.0"
 mongodb = "3.2.3"

@@ -49,7 +49,7 @@ fn validate_insert_request(req: &InsertDocRequest) -> Result<(), Status> {
     if req.doc.is_none() {
         return Err(Status::invalid_argument("document is required"));
     }
-    Result::Ok(())
+    Ok(())
 }
 
 fn validate_update_request(req: &UpdateDocRequest) -> Result<(), Status> {
@@ -65,7 +65,7 @@ fn validate_update_request(req: &UpdateDocRequest) -> Result<(), Status> {
     if req.version.is_empty() {
         return Err(Status::invalid_argument("version is required"));
     }
-    Result::Ok(())
+    Ok(())
 }
 
 fn validate_find_by_id_request(req: &FindDocByIdRequest) -> Result<(), Status> {
@@ -75,7 +75,7 @@ fn validate_find_by_id_request(req: &FindDocByIdRequest) -> Result<(), Status> {
     if req.id.is_empty() {
         return Err(Status::invalid_argument("id is required"));
     }
-    Result::Ok(())
+    Ok(())
 }
 
 fn validate_find_by_tags_request(req: &FindDocRequest) -> Result<(), Status> {
@@ -85,7 +85,7 @@ fn validate_find_by_tags_request(req: &FindDocRequest) -> Result<(), Status> {
     if req.tags.is_empty() {
         return Err(Status::invalid_argument("tags are required"));
     }
-    Result::Ok(())
+    Ok(())
 }
 
 #[cfg(not(test))]
@@ -326,7 +326,7 @@ mod tests {
     const TEST_ID_STRING: &str = "66a040ff87471136d177c687";
     const TEST_VERSION_STRING: &str = "02250728-a46d-4b97-ab68-41a26319b98e";
     fn to_object_id(obj_id_str: &str) -> ObjectId {
-        return ObjectId::parse_str(obj_id_str).unwrap();
+        ObjectId::parse_str(obj_id_str).unwrap()
     }
 
     impl Crud for DocDbService {
@@ -336,11 +336,11 @@ mod tests {
             _collection: String,
             _doc_egg: MongoDocEgg,
         ) -> Result<ObjectId, MongoError> {
-            return if cfg!(feature = "rpc_success") {
+            if cfg!(feature = "rpc_success") {
                 Ok(to_object_id(TEST_ID_STRING))
             } else {
                 Err(MongoError::custom("broken"))
-            };
+            }
         }
 
         async fn update_one(
@@ -350,11 +350,11 @@ mod tests {
             _query: BsonDocument,
             replacement: MongoDoc,
         ) -> MongoResult<Option<MongoDoc>> {
-            return if cfg!(feature = "rpc_success") {
+            if cfg!(feature = "rpc_success") {
                 Ok(Some(replacement))
             } else {
                 Err(MongoError::custom("broken"))
-            };
+            }
         }
 
         async fn find_one(
@@ -363,7 +363,7 @@ mod tests {
             _collection: String,
             _query: BsonDocument,
         ) -> MongoResult<Option<MongoDoc>> {
-            return if cfg!(feature = "rpc_success") {
+            if cfg!(feature = "rpc_success") {
                 let mut tags = HashMap::new();
                 tags.insert("player_1".to_string(), "Tippy".to_string());
                 Ok(Some(MongoDoc {
@@ -374,19 +374,19 @@ mod tests {
                 }))
             } else {
                 Err(MongoError::custom("broken"))
-            };
+            }
         }
 
         fn new_uuid(&self) -> String {
-            return TEST_VERSION_STRING.to_string();
+            TEST_VERSION_STRING.to_string()
         }
     }
 
     fn present_doc_egg() -> Option<DocumentEgg> {
-        return Some(DocumentEgg {
+        Some(DocumentEgg {
             bytes: "foo".as_bytes().to_vec(),
             tags: HashMap::new(),
-        });
+        })
     }
 
     #[cfg(feature = "rpc_success")]
