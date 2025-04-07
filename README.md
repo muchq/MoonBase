@@ -57,8 +57,8 @@
   - [`clock`](go/clock) - a Clock
 - **JS**:
   - [`flippymem`](web/flippymem) - Flippy memory game
-- **JVM**: [`java and scala stuff`](jvm)
-  - misc stuff
+- **JVM**:
+  - [`misc stuff`](jvm)
    
 ## IDE Support
 ### IntelliJ
