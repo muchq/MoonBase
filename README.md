@@ -4,40 +4,7 @@
 
 ![MoonBase](static_content/moon.gif)
 
-## IDE Support
-### IntelliJ
-Tested with [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij)
-
-Java and Go targets Just Work™.
-
-Add new targets to [project view](/.ijwb/.bazelproject) if they aren't detected automatically.
-
-### Clion
-C++ and Rust projects work with [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij), but autocomplete/intellisense doesn't feel very snappy.
-
-### GoLand
-Go projects work with [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij).
-Alternatively, you can use IntelliJ for Go too.
-
-### VSCode
-
-For C++ use [hedronvision/bazel-compile-commands-extractor](https://github.com/hedronvision/bazel-compile-commands-extractor)
-
-Follow instructions [here](https://github.com/hedronvision/bazel-compile-commands-extractor#vscode)
-
-and then do
-```
-bazel run @hedron_compile_commands//:refresh_all
-code .
-```
-
-## Importing a project?
-See [IMPORTING](./IMPORTING.md)
-
-## Repository Contents
-
-This repository contains multiple projects implemented across various programming languages. Here's a summary of the major components:
-
+## Contents
 ### Card Games
 - **Rust**: [`/rust/cards`](rust/cards) - Experimenting with moving card game engines to Rust
 - **C++**: [`/cpp/cards`](cpp/cards) - Golf implementation and some helpers
@@ -92,3 +59,34 @@ This repository contains multiple projects implemented across various programmin
   - [`flippymem`](web/flippymem) - Flippy memory game
 - **JVM**: [`java and scala stuff`](jvm)
   - misc stuff
+   
+## IDE Support
+### IntelliJ
+Tested with [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij)
+
+Java and Go targets Just Work™.
+
+Add new targets to [project view](/.ijwb/.bazelproject) if they aren't detected automatically.
+
+### Clion
+C++ and Rust projects work with [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij), but autocomplete/intellisense doesn't feel very snappy.
+
+### GoLand
+Go projects work with [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij).
+Alternatively, you can use IntelliJ for Go too.
+
+### VSCode
+
+For C++ use [hedronvision/bazel-compile-commands-extractor](https://github.com/hedronvision/bazel-compile-commands-extractor)
+
+Follow instructions [here](https://github.com/hedronvision/bazel-compile-commands-extractor#vscode)
+
+and then do
+```
+bazel run @hedron_compile_commands//:refresh_all
+code .
+```
+
+## Importing a project?
+See [IMPORTING](./IMPORTING.md)
+
