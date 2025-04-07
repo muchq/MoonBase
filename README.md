@@ -40,7 +40,7 @@ This repository contains multiple projects implemented across various programmin
 
 ### Card Games
 - **Rust**: [`/rust/cards`](rust/cards) - Experimenting with moving card game engines to Rust
-- **C++**: [`/cpp/cards`](cpp/cards) - Golf rules implementation and some helpers
+- **C++**: [`/cpp/cards`](cpp/cards) - Golf implementation and some helpers
 - **Go**: [`/go/cards`](go/cards) - Experimenting with moving card game engines to Go
 
 ### Document Database
@@ -62,6 +62,7 @@ This repository contains multiple projects implemented across various programmin
   - [`example_service`](cpp/example_service) - Example service
 - **Java**:
   - [`lunarcat`](jvm/src/main/java/com/muchq/lunarcat) - Rest-style HTTP server
+  - [`yochat`](jvm/src/main/java/com/muchq/yochat) - Chat server
 - **Rust**:
   - [`helloworld_tonic`](rust/helloworld_tonic) - gRPC example using Tonic
 - **Go**:
@@ -70,6 +71,14 @@ This repository contains multiple projects implemented across various programmin
   - [`mucks`](go/mucks) - Router wrapper middleware
   - [`example_grpc`](go/example_grpc) - gRPC example
 
+### Graphics Stuff
+- **Scala**:
+  - [`scraphics`](jvm/src/main/scala/com/muchq/scraphics) - a basic ray tracer
+- **Go**:
+  - [`blurring`](go/images) - some image processing tools
+- **Java**:
+  - [`imagine`](jvm/src/main/java/com/muchq/imagine) - a couple of blur filters
+ 
 ### Other Projects
 - **Rust**:
   - [`wordchains`](rust/wordchains) - Word chain implementation
@@ -81,4 +90,5 @@ This repository contains multiple projects implemented across various programmin
   - [`clock`](go/clock) - a Clock
 - **JS**:
   - [`flippymem`](web/flippymem) - Flippy memory game
-- **JVM**: [`java and scala stuff`](jvm) - Java/Scala projects
+- **JVM**: [`java and scala stuff`](jvm)
+  - misc stuff
