@@ -1,0 +1,10 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+
+rust_binary(
+    name = "wordchains",
+    srcs = [
+        "src/main.rs",
+    ],
+    crate_name = "wordchains",
+    deps = [],
+)
