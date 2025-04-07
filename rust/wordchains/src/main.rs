@@ -20,7 +20,6 @@ fn read_words(filename: String) -> Vec<String> {
     result
 }
 
-// TODO: doc + tests
 fn words_are_one_away(first: &str, second: &str) -> bool {
     if first.len() != second.len() {
         return false;
@@ -153,5 +152,17 @@ fn main() {
     match target {
         Some(path) => println!("Path from {} to {}: {:?}", start, end, path),
         None => println!("No path found from {} to {}", start, end),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_words_are_one_away() {
+        assert_eq!(words_are_one_away("star", "stat"), true);
+        assert_eq!(words_are_one_away("star", "stub"), false);
+        assert_eq!(words_are_one_away("foo", "foop"), false);
     }
 }
