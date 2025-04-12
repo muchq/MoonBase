@@ -135,10 +135,11 @@ fn main() {
     let mut matches: Vec<usize> = Vec::new();
     let mut word_graph: Vec<Vec<usize>> = vec![vec![]; num_words];
     for (i, word1) in words.iter().enumerate() {
-        for j in i..num_words {
+        for j in (i+1)..num_words {
             let word2 = words[j].clone();
             if words_are_one_away(word1, &word2) {
                 word_graph[i].push(j);
+                word_graph[j].push(i);
                 matches.push(i);
                 matches.push(j);
             }
