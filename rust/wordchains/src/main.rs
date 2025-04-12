@@ -3,6 +3,8 @@ use std::{
     env,
     fs::read_to_string,
 };
+use std::fs::File;
+use std::io::Write;
 
 #[derive(Debug, Clone)]
 struct Node {
@@ -11,13 +13,9 @@ struct Node {
 }
 
 fn read_words(filename: String) -> Vec<String> {
-    let mut result = Vec::new();
-
-    for line in read_to_string(filename).unwrap().lines() {
-        result.push(line.trim().to_lowercase());
-    }
-
-    result
+    read_to_string(filename).unwrap().lines()
+        .map(|l| l.trim().to_lowercase())
+        .collect()
 }
 
 fn words_are_one_away(first: &str, second: &str) -> bool {
@@ -33,7 +31,7 @@ fn words_are_one_away(first: &str, second: &str) -> bool {
     diff == 1
 }
 
-fn to_path(end: Node) -> Option<Vec<String>> {
+fn to_path(end: Node) -> Vec<String> {
     let mut path: Vec<String> = vec![end.value.clone()];
     let mut node = end;
     while node.parent.is_some() {
@@ -42,7 +40,7 @@ fn to_path(end: Node) -> Option<Vec<String>> {
         node = *parent;
     }
     path.reverse();
-    Some(path)
+    path
 }
 
 fn bfs_for_target(
@@ -71,7 +69,7 @@ fn bfs_for_target(
         let current = queue.pop_front().unwrap();
         if current.eq(target_word) {
             let target_node = seen.get(&current).unwrap().clone();
-            return to_path(target_node);
+            return Some(to_path(target_node));
         }
 
         let i = word_to_index.get(&current).unwrap();
@@ -113,7 +111,7 @@ fn main() {
     println!("Reading dictionary from \"{}\"...", path);
     let words: Vec<String> = read_words(String::from(path))
         .iter()
-        .filter(|word| word.len() == start.len())
+        .filter(|word| word.len() < 9)
         .map(|word| word.to_owned())
         .collect();
     let num_words = words.len();
@@ -133,19 +131,28 @@ fn main() {
     }
 
     println!("building graph...");
+    let mut indexes: Vec<u8> = Vec::new();
+    let mut matches: Vec<usize> = Vec::new();
     let mut word_graph: Vec<Vec<usize>> = vec![vec![]; num_words];
     for (i, word1) in words.iter().enumerate() {
-        for j in 0..num_words {
+        for j in i..num_words {
             let word2 = words[j].clone();
             if words_are_one_away(word1, &word2) {
                 word_graph[i].push(j);
+                matches.push(i);
+                matches.push(j);
             }
         }
     }
     // println!("{:?}", word_graph);
+    for m in matches {
+        for x in m.to_be_bytes() {
+            indexes.push(x);
+        }
+    }
 
-    // let mut file = File::create("60df739928ea654af9a0e7cf8fa19e3f.graph").unwrap();
-    // file.write_all(&indexes).unwrap();
+    let mut file = File::create("60df739928ea654af9a0e7cf8fa19e3f.graph").unwrap();
+    file.write_all(&indexes).unwrap();
     println!("starting search...");
     let target = bfs_for_target(start.clone(), end, &word_graph, &word_to_index, &words);
 
