@@ -1,9 +1,9 @@
 mod doc_db;
 mod model;
 
-use std::time::Duration;
-use mongodb::Client;
 use mongodb::options::ClientOptions;
+use mongodb::Client;
+use std::time::Duration;
 use tonic::transport::Server;
 
 use crate::doc_db::DocDbService;
