@@ -1,5 +1,5 @@
-use std::collections::{HashMap, VecDeque};
 use log::info;
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Debug, Clone)]
 pub struct Node {
