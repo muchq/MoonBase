@@ -1,17 +1,13 @@
 mod graph;
 
 use log::{info, warn, LevelFilter};
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::Write;
-use std::{
-    collections::HashMap,
-    env,
-    fs::read_to_string,
-};
-use std::collections::HashSet;
+use std::{collections::HashMap, env, fs::read_to_string};
 
-use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
 use crate::graph::{bfs_for_target, build_graph};
+use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
 
 // TODO: handle missing file
 fn read_words(filename: String) -> Vec<String> {
@@ -51,8 +47,39 @@ fn main() {
         LevelFilter::Debug,
         Config::default(),
         TerminalMode::Stdout,
-        ColorChoice::Always
-    ).unwrap();
+        ColorChoice::Always,
+    )
+    .unwrap();
+
+    let cmd = clap::Command::new("wordchains")
+        .bin_name("wordchains")
+        .subcommand_required(true)
+        .subcommand(
+            clap::command!("search")
+                .arg(
+                    clap::arg!(--"start" <START>)
+                        .required(true)
+                        .value_parser(clap::value_parser!(String)))
+                .arg(
+                    clap::arg!(--"end" <END>)
+                        .required(true)
+                        .value_parser(clap::value_parser!(String)))
+        )
+        .subcommand(
+            clap::command!("repl")
+                .arg(
+                    clap::arg!(--"dictionary-path" <PATH>)
+                        .value_parser(clap::value_parser!(std::path::PathBuf))
+                )
+        )
+        .subcommand(
+            clap::command!("generate-graph").arg(
+                clap::arg!(--"dictionary-path" <PATH>)
+                    .value_parser(clap::value_parser!(std::path::PathBuf)),
+            ),
+        );
+
+    let _matches = cmd.get_matches();
 
     let args: Vec<String> = env::args().collect();
     if args.len() != 3 {

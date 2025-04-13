@@ -6,5 +6,6 @@ rust-version.workspace = true
 readme.workspace = true
 
 [dependencies]
-log = {workspace = true}
+clap = { workspace = true }
+log = { workspace = true }
 simplelog = { workspace = true }
