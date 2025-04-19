@@ -30,6 +30,6 @@ protoc-gen-prost = "0.4.0"
 serde = { version = "1.0.219", features = ["derive"] }
 simplelog = { version = "0.12.2", features = ["paris"] }
 tokio = { version = "1.44.2", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
-tonic = { version = "0.12.3", features = ["transport"] }
-tonic-build = "0.12.3"
+tonic = { version = "0.13.0", features = ["transport"] }
+tonic-build = "0.13.0"
 uuid = { version = "1.16.0", features = ["v4", "fast-rng"]}
