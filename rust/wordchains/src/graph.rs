@@ -1,43 +1,21 @@
 use log::{info, warn};
 use std::collections::{HashMap, VecDeque};
-use std::fs::read;
 use crate::model::{Graph, Node};
 
-pub fn build_graph(words: Vec<String>, digest: &str) -> (Graph, Vec<usize>) {
+pub fn build_graph(words: Vec<String>) -> (Graph, Vec<usize>) {
     let num_words = words.len();
     let mut word_graph: Vec<Vec<usize>> = vec![vec![]; num_words];
     let mut matches: Vec<usize> = Vec::new();
 
-    // TODO: move file format specific stuff to separate module
-    // TODO: probably don't call build_graph at all if we already have a graph?
-    match read(format!("{}.graph", digest)) {
-        Ok(content) => {
-            info!("reading graph from {}.graph...", digest);
-            let mut chunks = content.chunks(8);
-            let num_chunks = chunks.len();
-            for _ in 0..(num_chunks/2) {
-                let i_bytes: [u8; 8] = chunks.next().unwrap().try_into().expect("invalid graph file");
-                let j_bytes: [u8; 8] = chunks.next().unwrap().try_into().expect("invalid graph file");
-                let i = usize::from_be_bytes(i_bytes);
-                let j = usize::from_be_bytes(j_bytes);
+    info!("building graph...");
+    for (i, word1) in words.iter().enumerate() {
+        for j in (i + 1)..num_words {
+            let word2 = words[j].clone();
+            if words_are_one_away(word1, &word2) {
                 word_graph[i].push(j);
                 word_graph[j].push(i);
                 matches.push(i);
                 matches.push(j);
-            }
-        },
-        Err(_) => {
-            info!("building graph...");
-            for (i, word1) in words.iter().enumerate() {
-                for j in (i + 1)..num_words {
-                    let word2 = words[j].clone();
-                    if words_are_one_away(word1, &word2) {
-                        word_graph[i].push(j);
-                        word_graph[j].push(i);
-                        matches.push(i);
-                        matches.push(j);
-                    }
-                }
             }
         }
     }

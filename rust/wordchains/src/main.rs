@@ -45,7 +45,7 @@ fn main() {
     let word_graph = match read_existing_graph(&digest, words.len()) {
         Some(e) => Graph{nodes: words, edges: e},
         None => {
-            let (g, data) = build_graph(words, &digest);
+            let (g, data) = build_graph(words);
             write_graph_to_file(data, &digest);
             g
         }
