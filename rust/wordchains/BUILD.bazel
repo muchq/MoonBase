@@ -4,8 +4,14 @@ load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
 rust_binary(
     name = "wordchains",
     srcs = [
+        "src/args.rs",
         "src/graph.rs",
+        "src/logging.rs",
         "src/main.rs",
+        "src/model.rs",
+        "src/repl.rs",
+        "src/sha.rs",
+        "src/storage.rs",
     ],
     crate_name = "wordchains",
     deps = all_crate_deps(),

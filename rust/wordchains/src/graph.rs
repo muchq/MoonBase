@@ -1,40 +1,76 @@
+use log::{info, warn};
 use std::collections::{HashMap, VecDeque};
-use log::info;
+use std::fs::read;
+use crate::model::{Graph, Node};
 
-#[derive(Debug, Clone)]
-pub struct Node {
-    pub value: String,
-    pub parent: Option<Box<Node>>,
-}
-
-pub fn build_graph(words: &Vec<String>) -> (Vec<Vec<usize>>, Vec<usize>) {
-    info!("building graph...");
-    let mut matches: Vec<usize> = Vec::new();
+pub fn build_graph(words: Vec<String>, digest: &str) -> (Graph, Vec<usize>) {
     let num_words = words.len();
     let mut word_graph: Vec<Vec<usize>> = vec![vec![]; num_words];
-    for (i, word1) in words.iter().enumerate() {
-        for j in (i + 1)..num_words {
-            let word2 = words[j].clone();
-            if words_are_one_away(word1, &word2) {
+    let mut matches: Vec<usize> = Vec::new();
+
+    // TODO: move file format specific stuff to separate module
+    // TODO: probably don't call build_graph at all if we already have a graph?
+    match read(format!("{}.graph", digest)) {
+        Ok(content) => {
+            info!("reading graph from {}.graph...", digest);
+            let mut chunks = content.chunks(8);
+            let num_chunks = chunks.len();
+            for _ in 0..(num_chunks/2) {
+                let i_bytes: [u8; 8] = chunks.next().unwrap().try_into().expect("invalid graph file");
+                let j_bytes: [u8; 8] = chunks.next().unwrap().try_into().expect("invalid graph file");
+                let i = usize::from_be_bytes(i_bytes);
+                let j = usize::from_be_bytes(j_bytes);
                 word_graph[i].push(j);
                 word_graph[j].push(i);
                 matches.push(i);
                 matches.push(j);
             }
+        },
+        Err(_) => {
+            info!("building graph...");
+            for (i, word1) in words.iter().enumerate() {
+                for j in (i + 1)..num_words {
+                    let word2 = words[j].clone();
+                    if words_are_one_away(word1, &word2) {
+                        word_graph[i].push(j);
+                        word_graph[j].push(i);
+                        matches.push(i);
+                        matches.push(j);
+                    }
+                }
+            }
         }
     }
-    (word_graph, matches)
+
+    (Graph{nodes: words, edges: word_graph}, matches)
 }
 
 pub fn bfs_for_target(
     start: String,
-    target_word: &String,
-    word_graph: &[Vec<usize>],
-    word_to_index: &HashMap<String, usize>,
-    words: &[String],
+    target_word: &str,
+    word_graph: Graph,
 ) -> Option<Vec<String>> {
     if start.eq(target_word) {
         return Some(vec![start]);
+    }
+
+    if start.len() != target_word.len() {
+        return None;
+    }
+
+    let mut word_to_index: HashMap<String, usize> = HashMap::new();
+    for (i, word) in word_graph.nodes.iter().enumerate() {
+        word_to_index.insert(word.to_owned(), i);
+    }
+
+    if !word_to_index.contains_key(&start) {
+        warn!("{} is not in my dictionary.", &start);
+        return None;
+    }
+
+    if !word_to_index.contains_key(target_word) {
+        warn!("{} is not in my dictionary.", &target_word);
+        return None;
     }
 
     let mut seen: HashMap<String, Node> = HashMap::new();
@@ -56,15 +92,15 @@ pub fn bfs_for_target(
         }
 
         let i = word_to_index.get(&current).unwrap();
-        for j in &word_graph[*i] {
-            if !seen.contains_key(&words[*j]) {
+        for j in &word_graph.edges[*i] {
+            if !seen.contains_key(&word_graph.nodes[*j]) {
                 let parent_node = Box::new(seen.get(&current)?.clone());
                 let neighbor_node = Node {
-                    value: words[*j].clone(),
+                    value: word_graph.nodes[*j].clone(),
                     parent: Some(parent_node),
                 };
-                seen.insert(words[*j].clone(), neighbor_node);
-                queue.push_back(words[*j].clone());
+                seen.insert(word_graph.nodes[*j].clone(), neighbor_node);
+                queue.push_back(word_graph.nodes[*j].clone());
             }
         }
     }
@@ -102,8 +138,8 @@ mod tests {
 
     #[test]
     fn test_words_are_one_away() {
-        assert_eq!(words_are_one_away("star", "stat"), true);
-        assert_eq!(words_are_one_away("star", "stub"), false);
-        assert_eq!(words_are_one_away("foo", "foop"), false);
+        assert!(words_are_one_away("star", "stat"));
+        assert!(!words_are_one_away("star", "stub"));
+        assert!(!words_are_one_away("foo", "foop"));
     }
 }
