@@ -11,12 +11,13 @@ members = [
 ]
 
 [workspace.package]
-edition = "2021"
-rust-version = "1.81.0"
+edition = "2024"
+rust-version = "1.86.0"
 readme = "README.md"
 
 
 [workspace.dependencies]
+base64ct = { version = "1.7.3", features = ["alloc"] }
 clap = { version = "4.5.36", features = ["cargo"] }
 doc_db_proto = { path = "protos/doc_db" }
 dotenv = "0.15.0"
@@ -29,6 +30,7 @@ prost-types = { version = "0.13.5", default-features = false }
 protoc-gen-tonic = "0.4.1"
 protoc-gen-prost = "0.4.0"
 serde = { version = "1.0.219", features = ["derive"] }
+sha2 = "0.11.0-pre.5"
 simplelog = { version = "0.12.2", features = ["paris"] }
 tokio = { version = "1.44.2", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
 tonic = { version = "0.12.3", features = ["transport"] }
