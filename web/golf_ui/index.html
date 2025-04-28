@@ -160,7 +160,7 @@ div#actions button {
         }
         if (data.startsWith("error|")) {
           var errValue = data.split("error|")[1];
-          log.innerHTML = 'ERROR: ' + errValue;
+          log.textContent = 'ERROR: ' + errValue;
           return;
         }
 
