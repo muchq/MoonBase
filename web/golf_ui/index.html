@@ -155,7 +155,7 @@ div#actions button {
       ws.onmessage = function(ev) {
         var data = ev.data;
         if (typeof data != "string") {
-          log.innerHTML = 'WAT: ' + ev.data;
+          log.textContent = 'WAT: ' + ev.data;
           return;
         }
         if (data.startsWith("error|")) {
