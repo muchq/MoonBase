@@ -28,7 +28,7 @@ maven.install(
         "io.netty:netty-codec:%s" % NETTY_VERSION,
         "io.netty:netty-handler:%s" % NETTY_VERSION,
         "io.netty:netty-transport:%s" % NETTY_VERSION,
-        "io.sentry:sentry-logback:8.10.0",
+        "io.sentry:sentry-logback:8.11.1",
         "junit:junit:4.13.2",
         "org.assertj:assertj-core:3.27.3",
         "org.eclipse.jetty:jetty-server:%s" % JETTY_VERSION,
