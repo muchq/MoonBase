@@ -3,40 +3,100 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Golf</title>
+    <meta name="description" content="Golf Card Game - A modern web implementation">
+    <title>Golf Card Game</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 </head>
 <body>
 <div class="game-container">
-    <h1>Golf</h1>
+    <header>
+        <h1><i class="fas fa-golf-ball"></i> Golf Card Game</h1>
+        <div class="theme-toggle">
+            <button id="theme-toggle-btn" aria-label="Toggle dark mode">
+                <i class="fas fa-moon"></i>
+            </button>
+        </div>
+    </header>
+
     <div class="status-bar" id="status-bar">
         <span id="player-names">Players: Player 1, Player 2</span>
         <span id="turn-indicator">Current Turn: Player 1</span>
         <span id="knock-status"></span>
     </div>
+
+    <div class="score-display" id="score-display">
+        <div class="player-score">
+            <span>Player 1: </span>
+            <span id="player1-score">0</span>
+        </div>
+        <div class="player-score">
+            <span>Player 2: </span>
+            <span id="player2-score">0</span>
+        </div>
+    </div>
+
     <div class="game-area">
         <div class="cards-container">
-            <div class="card" id="card1"></div>
-            <div class="card" id="card2"></div>
-            <div class="card" id="card3"></div>
-            <div class="card" id="card4"></div>
+            <div class="card" id="card1" tabindex="0" aria-label="Card 1"></div>
+            <div class="card" id="card2" tabindex="0" aria-label="Card 2"></div>
+            <div class="card" id="card3" tabindex="0" aria-label="Card 3"></div>
+            <div class="card" id="card4" tabindex="0" aria-label="Card 4"></div>
         </div>
         <div class="pile-container">
             <div class="draw-pile">
                 <h2>Draw</h2>
-                <div class="card" id="draw-card"></div>
+                <div class="card" id="draw-card" tabindex="0" aria-label="Draw card"></div>
+                <div class="card-count" id="draw-count">52</div>
             </div>
             <div class="discard-pile">
                 <h2>Discard</h2>
-                <div class="card" id="discard-card"></div>
+                <div class="card" id="discard-card" tabindex="0" aria-label="Discard card"></div>
+                <div class="card-count" id="discard-count">0</div>
             </div>
         </div>
     </div>
+
     <div class="action-buttons">
-        <button id="draw-button">Draw Card</button>
-        <button id="swap-button">Swap</button>
-        <button id="discard-button">Discard Card</button>
-        <button id="knock-button">Knock</button>
+        <button id="draw-button" class="action-btn"><i class="fas fa-hand-paper"></i> Draw Card</button>
+        <button id="swap-button" class="action-btn"><i class="fas fa-exchange-alt"></i> Swap</button>
+        <button id="discard-button" class="action-btn"><i class="fas fa-trash-alt"></i> Discard</button>
+        <button id="knock-button" class="action-btn"><i class="fas fa-gavel"></i> Knock</button>
+    </div>
+
+    <div class="game-controls">
+        <button id="new-game-button" class="control-btn"><i class="fas fa-redo"></i> New Game</button>
+        <button id="rules-button" class="control-btn"><i class="fas fa-book"></i> Rules</button>
+    </div>
+
+    <div id="notification" class="notification hidden"></div>
+
+    <div id="rules-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <h2>Golf Card Game Rules</h2>
+            <div class="rules-content">
+                <p>Golf is a card game for 2-6 players. The objective is to get the lowest score.</p>
+                <h3>Setup:</h3>
+                <ul>
+                    <li>Each player gets 4 cards face down in a 2x2 grid</li>
+                    <li>Players may peek at two of their cards at the start</li>
+                </ul>
+                <h3>Gameplay:</h3>
+                <ul>
+                    <li>On your turn, draw a card from the deck or discard pile</li>
+                    <li>You may swap it with one of your cards or discard it</li>
+                    <li>The goal is to get the lowest total value of cards</li>
+                </ul>
+                <h3>Scoring:</h3>
+                <ul>
+                    <li>Number cards are worth their face value</li>
+                    <li>Face cards (J, Q, K) are worth 10 points</li>
+                    <li>Aces are worth 1 point</li>
+                    <li>Matching cards in the same column cancel out (worth 0)</li>
+                </ul>
+            </div>
+        </div>
     </div>
 </div>
 <script src="script.js"></script>
