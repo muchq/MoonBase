@@ -155,12 +155,12 @@ div#actions button {
       ws.onmessage = function(ev) {
         var data = ev.data;
         if (typeof data != "string") {
-          log.innerHTML = 'WAT: ' + ev.data;
+          log.textContent = 'WAT: ' + ev.data;
           return;
         }
         if (data.startsWith("error|")) {
           var errValue = data.split("error|")[1];
-          log.innerHTML = 'ERROR: ' + errValue;
+          log.textContent = 'ERROR: ' + errValue;
           return;
         }
 
@@ -171,7 +171,7 @@ div#actions button {
           username = state.username;
           register_holder.className = "gone";
           new_game_holder.className = "";
-          log.innerHTML = "USER: " + username;
+          log.textContent = "USER: " + username;
           return;
         }
 

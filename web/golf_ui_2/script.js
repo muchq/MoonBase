@@ -441,8 +441,5 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// Remove or comment out old game logic like initGame(), shuffle(), etc.
-// const initGame = () => { ... old logic ... };
-// const shuffle = (array) => { ... old logic ... };
 // Player card click (peek) logic will also need to be adapted to send server messages.
 // elements.playerCardsElements.forEach((cardElement, index) => { ... old logic ... });
