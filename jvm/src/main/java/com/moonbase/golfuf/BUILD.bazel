@@ -19,7 +19,7 @@ java_library(
         "@maven//:io_grpc_grpc_stub",
         "@maven//:io_grpc_grpc_protobuf",
         "@maven//:io_grpc_grpc_netty_shaded", # Or grpc_netty
-        "@maven//:javax_annotation_javax_annotation_api", # For @PostConstruct, etc.
+        "@maven//:jakarta_annotation_jakarta_annotation_api", # For @PostConstruct, etc.
         # Jackson for JSON processing in WebSocketHandler
         "@maven//:com_fasterxml_jackson_core_jackson_databind",
         # Project's own protobufs
