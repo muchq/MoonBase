@@ -236,9 +236,9 @@ h2 {
     box-shadow: 0 8px 16px var(--shadow-color);
 }
 
-.card.selected {
-    border: 3px solid var(--accent-color);
-    transform: translateY(-5px);
+.cards-container .card.selected {
+    border: 3px solid gold;
+    box-shadow: 0 0 10px gold;
 }
 
 .card.face-up {

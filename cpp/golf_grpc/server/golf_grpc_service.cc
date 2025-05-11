@@ -84,17 +84,20 @@ void GolfServiceImpl::HydrateResponseGameState(const string& current_user_id,
   response_state->set_game_over(game_state->isOver());
 
   auto knocker_index = game_state->getWhoKnocked();
-  if (knocker_index > -1) {
-    response_state->set_knocker(game_state->getPlayer(knocker_index).getName().value());
+  if (knocker_index > -1 && knocker_index < game_state->getPlayers().size()) {
+    response_state->set_knocker(game_state->getPlayer(knocker_index).getName().value_or(""));
   }
 
   //   TODO: on game start, let all players peek at their bottom two cards
   //   optional VisibleHand hand = 9;
 
   response_state->set_number_of_players(game_state->getPlayers().size());
-  auto player_names = response_state->mutable_players();
-  auto player_scores = response_state->mutable_scores();
-  for (auto& p : game_state->getPlayers()) {
+  auto* player_names = response_state->mutable_players();
+  player_names->Clear();
+  auto* player_scores = response_state->mutable_scores();
+  player_scores->Clear();
+
+  for (const auto& p : game_state->getPlayers()) {
     player_names->Add(p.getName().value_or("N/A"));
     if (game_state->isOver()) {
       player_scores->Add(p.score());
@@ -104,8 +107,16 @@ void GolfServiceImpl::HydrateResponseGameState(const string& current_user_id,
   // always show the top of the discard pile
   FlipCard(response_state->mutable_top_discard(), game_state->getDiscardPile());
 
-  const auto current_player_index = game_state->playerIndex(current_user_id);
-  response_state->set_your_turn(current_player_index == game_state->getWhoseTurn());
+  const auto current_player_making_call_index = game_state->playerIndex(current_user_id);
+  response_state->set_your_turn(current_player_making_call_index != -1 && current_player_making_call_index == game_state->getWhoseTurn());
+
+  // Set the new current_player_id field
+  int global_current_turn_idx = game_state->getWhoseTurn();
+  if (global_current_turn_idx >= 0 && global_current_turn_idx < game_state->getPlayers().size()) {
+    response_state->set_current_player_id(game_state->getPlayer(global_current_turn_idx).getName().value_or(""));
+  } else {
+    response_state->set_current_player_id(""); // No current player or game not started
+  }
 }
 
 void GolfServiceImpl::FlipCard(cards_proto::Card* response_card,

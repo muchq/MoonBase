@@ -115,6 +115,7 @@ message GameState {
   optional cards_proto.Card top_discard = 13;
   optional cards_proto.Card top_draw = 14;
   bool your_turn = 15;
+  string current_player_id = 16;
 }
 
 message ErrorResponse {
