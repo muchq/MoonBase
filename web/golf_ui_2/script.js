@@ -249,11 +249,19 @@ function renderCard(element, cardData, faceUp) {
     element.className = 'card face-up';
     const isRed = cardData.suit === 'Hearts' || cardData.suit === 'Diamonds'; // Match Java enum names
     element.style.color = isRed ? '#e53935' : '#212121';
-    element.innerHTML = `
-        <span class="card-rank">${cardData.rank.replace('Ten', '10').replace('Jack', 'J').replace('Queen', 'Q').replace('King', 'K').replace('Ace', 'A').substring(0,2)}</span>
-        <span class="card-suit top-left">${SUITS_MAP[cardData.suit] || '?'}</span>
-        <span class="card-suit bottom-right">${SUITS_MAP[cardData.suit] || '?'}</span>
-    `;
+    element.innerHTML = ''; // Clear existing content
+    const rankSpan = document.createElement('span');
+    rankSpan.className = 'card-rank';
+    rankSpan.textContent = cardData.rank.replace('Ten', '10').replace('Jack', 'J').replace('Queen', 'Q').replace('King', 'K').replace('Ace', 'A').substring(0, 2);
+    const suitTopLeftSpan = document.createElement('span');
+    suitTopLeftSpan.className = 'card-suit top-left';
+    suitTopLeftSpan.textContent = SUITS_MAP[cardData.suit] || '?';
+    const suitBottomRightSpan = document.createElement('span');
+    suitBottomRightSpan.className = 'card-suit bottom-right';
+    suitBottomRightSpan.textContent = SUITS_MAP[cardData.suit] || '?';
+    element.appendChild(rankSpan);
+    element.appendChild(suitTopLeftSpan);
+    element.appendChild(suitBottomRightSpan);
 }
 
 const SUITS_MAP = { 'Clubs': '♣', 'Diamonds': '♦', 'Hearts': '♥', 'Spades': '♠' };
