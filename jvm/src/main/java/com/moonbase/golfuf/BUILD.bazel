@@ -1,0 +1,73 @@
+load("@rules_java//java:defs.bzl", "java_binary", "java_library")
+
+# Define external dependencies for Spring Boot and gRPC if not already in WORKSPACE
+# This is a placeholder; actual dependency management (e.g., using rules_jvm_external)
+# would be needed in the WORKSPACE file.
+# Example:
+#SPRING_BOOT_DEPS = ["@maven//:org_springframework_boot_spring_boot_starter_websocket", ...]
+#GRPC_DEPS = ["@maven//:io_grpc_grpc_netty_shaded", ...]
+
+java_library(
+    name = "golfuf_lib",
+    srcs = glob(["*.java"]),
+    deps = [
+        # Spring Boot dependencies - replace with actual resolved artifacts
+        # Assuming these are defined in WORKSPACE or a similar central place
+        "@maven//:org_springframework_boot_spring_boot_starter_web",
+        "@maven//:org_springframework_boot_spring_boot_starter_websocket",
+        # gRPC dependencies
+        "@maven//:io_grpc_grpc_stub",
+        "@maven//:io_grpc_grpc_protobuf",
+        "@maven//:io_grpc_grpc_netty_shaded", # Or grpc_netty
+        "@maven//:javax_annotation_javax_annotation_api", # For @PostConstruct, etc.
+        # Jackson for JSON processing in WebSocketHandler
+        "@maven//:com_fasterxml_jackson_core_jackson_databind",
+        # Project's own protobufs
+        "//protos/cards:cards_java_proto",
+        "//protos/golf_grpc:golf_grpc_java_grpc",
+        "//protos/golf_grpc:golf_grpc_java_proto",
+    ],
+)
+
+java_binary(
+    name = "golfuf_server",
+    main_class = "com.moonbase.golfuf.GolfUiServerApplication",
+    runtime_deps = [":golfuf_lib"],
+    resources = [
+        "//jvm/src/main/resources:application.properties",
+        "//web/golf_ui_2:golf_ui_2_static_files",
+    ],
+    # The files from //web/golf_ui_2:golf_ui_2_static_files need to be placed
+    # into a "static" directory in the runfiles/jar for Spring Boot to serve them automatically.
+    # This might require a custom rule or ensuring the filegroup paths are structured accordingly,
+    # or using a resource_strip_prefix if available and appropriate in the java_binary or a java_plugin.
+    # A common way is to ensure the filegroup itself has paths like "static/index.html".
+    # For now, this declares the dependency. The exact path mapping needs verification with Bazel Java rules.
+    # If using Spring Boot, files in `src/main/resources/static` are served automatically.
+    # So, the files from the filegroup //web/golf_ui_2:golf_ui_2_static_files
+    # should effectively be placed in that classpath location (e.g. /static/index.html).
+    # One way to achieve this is by using `resource_strip_prefix` or structuring the filegroup source paths.
+    # A simpler approach for Bazel might be to have a genrule that copies them into the desired structure
+    # or modify the filegroup to include the `static/` prefix if possible.
+
+    # Assuming `rules_jvm_external` or similar provides a way to package resources with prefixes, or
+    # that Spring Boot can be configured to find them from the root of resources if not in /static.
+    # For a standard Spring Boot project with Bazel, you often see resources copied to a specific
+    # `resources/static` directory that is then included.
+    # The `resources` attribute here makes them available in the classpath.
+    # We may need to add a Spring Boot resource handler configuration if they are not in /static in classpath.
+)
+
+# Test rule (to be expanded later)
+# java_test(
+#     name = "golfuf_tests",
+#     srcs = glob(["../test/java/com/moonbase/golfuf/*.java"]),
+#     deps = [
+#         ":golfuf_lib",
+#         # Test dependencies like JUnit, Mockito, Spring Boot Test
+#         "@maven//:org_springframework_boot_spring_boot_starter_test",
+#         "@maven//:org_junit_jupiter_junit_jupiter_api",
+#         "@maven//:org_mockito_mockito_core",
+#     ],
+#     test_class = "com.moonbase.golfuf.YourPrimaryTestClass", # Specify a test class
+# )

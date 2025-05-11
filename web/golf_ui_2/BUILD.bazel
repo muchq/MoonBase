@@ -1,0 +1,11 @@
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "golf_ui_2_static_files",
+    srcs = glob([
+        "index.html",
+        "script.js",
+        "styles.css",
+        # Add any other static assets like images, fonts if they exist
+    ]),
+)
