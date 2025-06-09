@@ -17,7 +17,7 @@ readme = "README.md"
 
 
 [workspace.dependencies]
-base64ct = { version = "1.7.3", features = ["alloc"] }
+base64ct = { version = "1.8.0", features = ["alloc"] }
 clap = { version = "4.5.39", features = ["cargo"] }
 doc_db_proto = { path = "protos/doc_db" }
 dotenv = "0.15.0"
