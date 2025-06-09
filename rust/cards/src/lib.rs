@@ -1,12 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-enum Suit {
+#[derive(Serialize, Deserialize, Debug)]
+pub enum Suit {
     Clubs,
     Diamonds,
     Hearts,
     Spades,
 }
-enum Rank {
+#[derive(Serialize, Deserialize, Debug)]
+pub enum Rank {
     Two,
     Three,
     Four,
