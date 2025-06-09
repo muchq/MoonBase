@@ -4,15 +4,9 @@ module(
 )
 
 include("//bazel:tools.MODULE.bazel")
-
 include("//bazel:proto.MODULE.bazel")
-
 include("//bazel:cc.MODULE.bazel")
-
 include("//bazel:go.MODULE.bazel")
-
 include("//bazel:rust.MODULE.bazel")
-
 include("//bazel:java.MODULE.bazel")
-
 include("//bazel:oci.MODULE.bazel")
