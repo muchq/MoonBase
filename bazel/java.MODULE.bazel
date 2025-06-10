@@ -1,19 +1,6 @@
 bazel_dep(name = "rules_java", version = "8.12.0")
 bazel_dep(name = "rules_jvm_external", version = "6.7")
 bazel_dep(name = "contrib_rules_jvm", version = "0.29.0")
-bazel_dep(name = "rules_scala", version = "7.0.0")
-
-scala_config = use_extension(
-    "@rules_scala//scala/extensions:config.bzl",
-    "scala_config",
-)
-scala_config.settings(scala_version = "3.7.0")
-
-scala_deps = use_extension(
-    "@rules_scala//scala/extensions:deps.bzl",
-    "scala_deps",
-)
-scala_deps.scala()
 
 maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 
