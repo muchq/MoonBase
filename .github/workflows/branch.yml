@@ -24,7 +24,7 @@ jobs:
           repository-cache: true
       - name: setup-system-deps
         run: |
-          ./scripts/setup/setup-linux
+          sudo ./scripts/setup/setup-linux
       - name: bazel-build-and-test
         run: |
           bazel build //... && bazel test //...
