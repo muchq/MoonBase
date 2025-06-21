@@ -25,7 +25,7 @@ jobs:
             build --remote_upload_local_results=true
       - name: setup-system-deps
         run: |
-          ./scripts/setup-linux
+          ./scripts/setup/setup-linux
       - name: bazel-test
         run: |
           bazel build //... && bazel test //...
