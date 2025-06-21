@@ -23,7 +23,9 @@ jobs:
           bazelrc: |
             build --remote_cache=https://storage.googleapis.com/moon_base_build_cache
             build --remote_upload_local_results=true
-
+      - name: setup-system-deps
+        run: |
+          ./scripts/setup-linux
       - name: bazel-test
         run: |
           bazel build //... && bazel test //...
