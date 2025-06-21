@@ -22,7 +22,9 @@ jobs:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}
           repository-cache: true
-
+      - name: setup-system-deps
+        run: |
+          sudo ./scripts/setup/setup-linux
       - name: bazel-build-and-test
         run: |
           bazel build //... && bazel test //...

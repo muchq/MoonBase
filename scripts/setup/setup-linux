@@ -2,7 +2,13 @@
 
 set -e
 
-apt update && apt install curl wget podman clang-format-18
+apt update && apt install -y curl wget podman clang-format-18 build-essential git make \
+pkg-config cmake ninja-build gnome-desktop-testing libasound2-dev libpulse-dev \
+libaudio-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
+libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev \
+libegl1-mesa-dev libdbus-1-dev libibus-1.0-dev libudev-dev libxinerama-dev \
+libpipewire-0.3-dev libwayland-dev libdecor-0-dev liburing-dev libx11-dev \
 
 echo "installing clang format"
 ln -s "$(which clang-format-18)" /usr/local/bin/clang-format
@@ -14,16 +20,16 @@ ln -s "$(which clang-format-18)" /usr/local/bin/clang-format
 #  bash -s -- $VERSION $INSTALL_LOCATION
 
 # bazelisk
-echo "installing bazelisk"
-wget https://github.com/bazelbuild/bazelisk/releases/download/v1.20.0/bazelisk-linux-amd64
-mv bazelisk-linux-amd64 /bin/bazel
-chmod +x /bin/bazel
+# echo "installing bazelisk"
+# wget https://github.com/bazelbuild/bazelisk/releases/download/v1.20.0/bazelisk-linux-amd64
+# mv bazelisk-linux-amd64 /bin/bazel
+# chmod +x /bin/bazel
 
-# rust
-curl https://sh.rustup.rs -sSf | \
-  sh -s -- \
-        -y \
-        --default-toolchain stable \
-        --profile default
+# # rust
+# curl https://sh.rustup.rs -sSf | \
+#   sh -s -- \
+#         -y \
+#         --default-toolchain stable \
+#         --profile default
 
-source "/root/.cargo/env" && cargo --version
+# source "/root/.cargo/env" && cargo --version
