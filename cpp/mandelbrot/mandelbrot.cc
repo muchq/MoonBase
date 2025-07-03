@@ -33,6 +33,7 @@ int in_mandelbrot(complex<double> c, int depth) {
 struct AppContext {
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
+    SDL_Texture* texture = nullptr;
     SDL_AppResult state = SDL_APP_CONTINUE;
     complex<double> current_top_left = {-2, 2};
     complex<double> current_bottom_right = {2, -2};
@@ -79,10 +80,17 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_Fail();
     }
 
+    // a texture to hold renderer mandelbrot images while we draw the mouse selection area for zooming
+    SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, windowStartWidth, windowStartHeight);
+    if (!texture){
+        return SDL_Fail();
+    }
+
     // set up the application data
     *appstate = new AppContext{
        .window = window,
        .renderer = renderer,
+       .texture = texture,
     };
 
     SDL_SetRenderVSync(renderer, 2);   // enable vysnc on every other vertical refresh
@@ -116,6 +124,8 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event* event) {
     } else if (event->type == SDL_EVENT_MOUSE_MOTION) {
         // draw box
         if (app->mouse_down_raw != complex<double>{0, 0}) {
+            SDL_RenderClear(app->renderer);
+            SDL_RenderTexture(app->renderer, app->texture, nullptr, nullptr);
             app->selected = {
                 .x = static_cast<float>(app->mouse_down_raw.real()),
                 .y = static_cast<float>(app->mouse_down_raw.imag()),
@@ -132,9 +142,9 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event* event) {
 }
 
 struct Color {
-    int r = 0;
-    int g = 0;
-    int b = 0;
+    u_int8_t r = 0;
+    u_int8_t g = 0;
+    u_int8_t b = 0;
 };
 
 Color escape_time_to_color(int escape_time) {
@@ -146,27 +156,39 @@ Color escape_time_to_color(int escape_time) {
         };
     } else {
         return Color{
-            .r = 2*escape_time % 255,
-            .g = 13*escape_time % 255,
-            .b = 25*escape_time % 255,
+            .r = static_cast<u_int8_t>(2 * escape_time % 255),
+            .g = static_cast<u_int8_t>(13*escape_time % 255),
+            .b = static_cast<u_int8_t>(25*escape_time % 255),
         };
     }
 }
 
 void render(AppContext *app) {
-    SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-    SDL_RenderClear(app->renderer);
-
-    for (double x=0.0; x<1.0; x += 0.001) {
-        for (double y=0.0; y<1.0; y += 0.001) {
+    int *pixels = nullptr;
+    int pitch_bytes;
+    if (SDL_LockTexture(app->texture, nullptr, reinterpret_cast<void **>(&pixels), &pitch_bytes)) {
+        int pitch = pitch_bytes / 4;
+        for (int px = 0; px < app->current_height * app->current_width; px++) {
+            int row = px / pitch;
+            int col = px % pitch;
+            double x = static_cast<double>(col) / static_cast<double>(pitch);
+            double y = static_cast<double>(row) / static_cast<double>(app->current_width);
             double real = lerp(app->current_top_left.real(), app->current_bottom_right.real(), x);
             double imag = lerp(app->current_top_left.imag(), app->current_bottom_right.imag(), y);
             int escape_time = in_mandelbrot(complex<double>{real, imag}, app->iterations);
             Color c = escape_time_to_color(escape_time);
-            SDL_SetRenderDrawColor(app->renderer, c.r, c.g, c.b, SDL_ALPHA_OPAQUE);
-            SDL_RenderPoint(app->renderer, x * 1000, y * 1000);
+            int px_val = (c.r | c.g << 8 | c.b << 16 | SDL_ALPHA_OPAQUE << 24);
+            pixels[px] = px_val;
         }
+        SDL_UnlockTexture(app->texture);
+    } else {
+        SDL_Log("lock texture failed");
     }
+
+    SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderClear(app->renderer);
+
+    SDL_RenderTexture(app->renderer, app->texture, nullptr, nullptr);
 
     SDL_RenderPresent(app->renderer);
     SDL_Log("Rendered something");
