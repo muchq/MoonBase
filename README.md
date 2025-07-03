@@ -22,7 +22,7 @@
 - **Web**:
   - [`golf_ui`](web/golf_ui) - Original golf UI
   - [`golf_ui_2`](web/golf_ui_2) - Updated golf UI
- 
+
 ### Web Related
 - **C++**:
   - [`lakitu`](cpp/lakitu) - GRPC wrapper for C++
@@ -45,7 +45,9 @@
   - [`blurring`](go/images) - some image processing tools
 - **Java**:
   - [`imagine`](jvm/src/main/java/com/muchq/imagine) - a couple of blur filters
- 
+- **C++**:
+  - [`mandelbrot`](cpp/mandelbrot) - a basic cpu mandelbrot renderer
+
 ### Other Projects
 - **Rust**:
   - [`wordchains`](rust/wordchains) - Word chain implementation
@@ -59,7 +61,7 @@
   - [`flippymem`](web/flippymem) - Flippy memory game
 - **JVM**:
   - [`misc stuff`](jvm)
-   
+
 ## IDE Support
 ### IntelliJ
 Tested with [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij)
@@ -89,4 +91,3 @@ code .
 
 ## Importing a project?
 See [IMPORTING](./IMPORTING.md)
-
