@@ -33,6 +33,6 @@ serde = { version = "1.0.219", features = ["derive"] }
 sha2 = "0.11.0-rc.0"
 simplelog = { version = "0.12.2", features = ["paris"] }
 tokio = { version = "1.46.1", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
-tonic = { version = "0.12.3", features = ["transport"] }
-tonic-build = "0.12.3"
+tonic = { version = "0.13.0", features = ["transport"] }
+tonic-build = "0.13.0"
 uuid = { version = "1.17.0", features = ["v4", "fast-rng"]}
