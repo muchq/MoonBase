@@ -18,13 +18,13 @@ readme = "README.md"
 
 [workspace.dependencies]
 base64ct = { version = "1.8.0", features = ["alloc"] }
-clap = { version = "4.5.39", features = ["cargo"] }
+clap = { version = "4.5.40", features = ["cargo"] }
 doc_db_proto = { path = "protos/doc_db" }
 dotenv = "0.15.0"
 example_service = { path = "protos/example_service" }
 futures = "0.3.31"
 log = "0.4.27"
-mongodb = "3.2.3"
+mongodb = "3.2.4"
 prost = { version = "0.13.5" }
 prost-types = { version = "0.13.5", default-features = false }
 protoc-gen-tonic = "0.4.1"
@@ -32,7 +32,7 @@ protoc-gen-prost = "0.4.0"
 serde = { version = "1.0.219", features = ["derive"] }
 sha2 = "0.11.0-rc.0"
 simplelog = { version = "0.12.2", features = ["paris"] }
-tokio = { version = "1.45.1", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
+tokio = { version = "1.46.1", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
 tonic = { version = "0.12.3", features = ["transport"] }
 tonic-build = "0.12.3"
 uuid = { version = "1.17.0", features = ["v4", "fast-rng"]}
