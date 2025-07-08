@@ -1,4 +1,21 @@
-load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+
+cc_library(
+    name = "color",
+    srcs = ["color.cc"],
+    hdrs = ["color.h"],
+    deps = [],
+)
+
+cc_library(
+    name = "app_state",
+    srcs = ["app_state.cc"],
+    hdrs = ["app_state.h"],
+    deps = [
+        "//cpp/trill",
+        "@sdl3",
+    ],
+)
 
 cc_binary(
     name = "mandelbrot",
@@ -42,6 +59,7 @@ cc_binary(
     }),
     visibility = ["//visibility:public"],
     deps = [
+        ":color",
         "@sdl3",
     ],
 )
