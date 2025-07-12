@@ -5,10 +5,10 @@
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL_video.h>
+#include <sys/stat.h>
 
 #include <complex>
 #include <numeric>
-#include <sys/stat.h>
 
 #include "color.h"
 
@@ -149,7 +149,8 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
   return SDL_APP_CONTINUE;
 }
 
-int render_pixel(complex<double> top_left, complex<double> bottom_right, double x, double y, int iterations) {
+int render_pixel(complex<double> top_left, complex<double> bottom_right, double x, double y,
+                 int iterations) {
   double real = lerp(top_left.real(), bottom_right.real(), x);
   double imag = lerp(top_left.imag(), bottom_right.imag(), y);
   int escape_time = in_mandelbrot(complex<double>{real, imag}, iterations);
@@ -157,7 +158,8 @@ int render_pixel(complex<double> top_left, complex<double> bottom_right, double 
   return c.r | c.g << 8 | c.b << 16 | SDL_ALPHA_OPAQUE << 24;
 }
 
-void render_to_texture(SDL_Texture* texture, complex<double> top_left, complex<double> bottom_right, int iterations) {
+void render_to_texture(SDL_Texture* texture, complex<double> top_left, complex<double> bottom_right,
+                       int iterations) {
   int* pixels = nullptr;
   int pitch_bytes;
 
@@ -187,7 +189,7 @@ void render_to_texture(SDL_Texture* texture, complex<double> top_left, complex<d
   SDL_UnlockTexture(texture);
 }
 
-void draw_texture(SDL_Renderer *renderer, SDL_Texture *texture) {
+void draw_texture(SDL_Renderer* renderer, SDL_Texture* texture) {
   SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
 
@@ -198,7 +200,8 @@ void draw_texture(SDL_Renderer *renderer, SDL_Texture *texture) {
 }
 
 void render(AppContext* app) {
-  render_to_texture(app->texture, app->current_top_left, app->current_bottom_right, app->iterations);
+  render_to_texture(app->texture, app->current_top_left, app->current_bottom_right,
+                    app->iterations);
   draw_texture(app->renderer, app->texture);
 }
 
