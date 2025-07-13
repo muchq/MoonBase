@@ -2,5 +2,4 @@
 
 set -e
 
-find . -name '*.cc' | xargs clang-format -i
-find . -name '*.h' | xargs clang-format -i
+find . -type f -iname '*.cc' -o -iname '*.h' | xargs clang-format -i
