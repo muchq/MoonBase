@@ -11,6 +11,7 @@
 #include <numeric>
 
 #include "color.h"
+#include "cpp/trill/trill.h"
 
 constexpr uint32_t windowStartWidth = 1000;
 constexpr uint32_t windowStartHeight = 1000;
@@ -34,9 +35,7 @@ int in_mandelbrot(complex<double> c, int depth) {
 }
 
 struct AppContext {
-  SDL_Window* window = nullptr;
-  SDL_Renderer* renderer = nullptr;
-  SDL_Texture* texture = nullptr;
+  trill::SdlContext sdl_context;
   complex<double> current_top_left = {-2, 2};
   complex<double> current_bottom_right = {2, -2};
   int current_width = windowStartWidth;
@@ -59,51 +58,14 @@ bool no_change(const AppContext* app_context) {
          app_context->current_bottom_right == app_context->previous_bottom_right;
 }
 
-SDL_AppResult SDL_Fail() {
-  SDL_LogError(SDL_LOG_CATEGORY_CUSTOM, "Error %s", SDL_GetError());
-  return SDL_APP_FAILURE;
-}
-
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
-  // init the library, here we make a window so we only need the Video capabilities.
-  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
-    return SDL_Fail();
-  }
+  trill::InitConfig init_config{.name = "Mandelbrot"};
+  trill::SdlContext sdlContext{};
 
-  // create a window
-  SDL_Window* window =
-      SDL_CreateWindow("Mandelbrot", windowStartWidth, windowStartHeight,
-                       SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
-  if (!window) {
-    return SDL_Fail();
-  }
+  auto result = trill::Initialize(init_config, &sdlContext);
 
-  // create a renderer
-  SDL_Renderer* renderer = SDL_CreateRenderer(window, nullptr);
-  if (!renderer) {
-    return SDL_Fail();
-  }
-
-  // a texture to hold renderer mandelbrot images while we draw the mouse selection area for zooming
-  SDL_Texture* texture =
-      SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING,
-                        windowStartWidth, windowStartHeight);
-  if (!texture) {
-    return SDL_Fail();
-  }
-
-  // set up the application data
-  *appstate = new AppContext{
-      .window = window,
-      .renderer = renderer,
-      .texture = texture,
-  };
-
-  SDL_SetRenderVSync(renderer, 2);  // enable vysnc on every other vertical refresh
-
-  SDL_Log("Application started successfully!");
-  SDL_ShowWindow(window);
-  return SDL_APP_CONTINUE;
+  *appstate = new AppContext{.sdl_context = sdlContext};
+  return result;
 }
 
 complex<double> event_to_position(const SDL_Event* event, AppContext* app) {
@@ -132,17 +94,17 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
   } else if (event->type == SDL_EVENT_MOUSE_MOTION) {
     // draw box
     if (app->mouse_down_raw != complex<double>{0, 0}) {
-      SDL_RenderClear(app->renderer);
-      SDL_RenderTexture(app->renderer, app->texture, nullptr, nullptr);
+      SDL_RenderClear(app->sdl_context.renderer);
+      SDL_RenderTexture(app->sdl_context.renderer, app->sdl_context.background, nullptr, nullptr);
       app->selected = {
           .x = static_cast<float>(app->mouse_down_raw.real()),
           .y = static_cast<float>(app->mouse_down_raw.imag()),
           .w = event->motion.x - static_cast<float>(app->mouse_down_raw.real()),
           .h = event->motion.y - static_cast<float>(app->mouse_down_raw.imag()),
       };
-      SDL_SetRenderDrawColor(app->renderer, 255, 255, 255, 80);
-      SDL_RenderRect(app->renderer, &app->selected);
-      SDL_RenderPresent(app->renderer);
+      SDL_SetRenderDrawColor(app->sdl_context.renderer, 255, 255, 255, 80);
+      SDL_RenderRect(app->sdl_context.renderer, &app->selected);
+      SDL_RenderPresent(app->sdl_context.renderer);
     }
   }
 
@@ -200,9 +162,9 @@ void draw_texture(SDL_Renderer* renderer, SDL_Texture* texture) {
 }
 
 void render(AppContext* app) {
-  render_to_texture(app->texture, app->current_top_left, app->current_bottom_right,
+  render_to_texture(app->sdl_context.background, app->current_top_left, app->current_bottom_right,
                     app->iterations);
-  draw_texture(app->renderer, app->texture);
+  draw_texture(app->sdl_context.renderer, app->sdl_context.background);
 }
 
 SDL_AppResult SDL_AppIterate(void* appstate) {
@@ -226,9 +188,9 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 void SDL_AppQuit(void* appstate, SDL_AppResult result) {
   auto* app = (AppContext*)appstate;
   if (app) {
-    SDL_DestroyTexture(app->texture);
-    SDL_DestroyRenderer(app->renderer);
-    SDL_DestroyWindow(app->window);
+    SDL_DestroyTexture(app->sdl_context.background);
+    SDL_DestroyRenderer(app->sdl_context.renderer);
+    SDL_DestroyWindow(app->sdl_context.window);
     delete app;
   }
   SDL_Log("Application quit successfully!");
