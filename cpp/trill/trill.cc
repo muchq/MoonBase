@@ -1,9 +1,6 @@
 #include "trill.h"
 
-#include <SDL3/SDL_init.h>
-#include <SDL3/SDL_log.h>
-#include <SDL3/SDL_render.h>
-#include <SDL3/SDL_video.h>
+#include <SDL3/SDL.h>
 
 namespace trill {
 
@@ -23,16 +20,11 @@ InitializeResult Initialize(const InitConfig& initConfig) {
     return SDL_Fail(sdl_context);
   }
 
-  // create a window
-  SDL_Window* window = SDL_CreateWindow(initConfig.name.c_str(), initConfig.width,
-                                        initConfig.height, initConfig.window_flags);
-  if (!window) {
-    return SDL_Fail(sdl_context);
-  }
-
-  // create a renderer
-  SDL_Renderer* renderer = SDL_CreateRenderer(window, nullptr);
-  if (!renderer) {
+  // create a window and renderer
+  SDL_Window* window = nullptr;
+  SDL_Renderer* renderer = nullptr;
+  if (!SDL_CreateWindowAndRenderer(initConfig.name.c_str(), initConfig.width, initConfig.height,
+                                   initConfig.window_flags, &window, &renderer)) {
     return SDL_Fail(sdl_context);
   }
 
