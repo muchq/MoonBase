@@ -36,6 +36,19 @@ InitializeResult Initialize(const InitConfig& initConfig) {
     return SDL_Fail(sdl_context);
   }
 
+  int rw = 0, rh = 0;
+  SDL_GetRenderOutputSize(renderer, &rw, &rh);
+  if (rw != initConfig.width) {
+    float widthScale = (float)rw / (float)initConfig.width;
+    float heightScale = (float)rh / (float)initConfig.height;
+
+    if (widthScale != heightScale) {
+      SDL_Log("WARNING: width scale != height scale");
+    }
+
+    SDL_SetRenderScale(renderer, widthScale, heightScale);
+  }
+
   // a texture to hold renderer mandelbrot images while we draw the mouse selection area for zooming
   SDL_Texture* texture =
       SDL_CreateTexture(renderer, initConfig.pixel_format, initConfig.texture_access,
