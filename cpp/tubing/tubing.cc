@@ -59,24 +59,18 @@ void render(AppContext* app) {
       static_cast<float>(((now_ms + 4000) % 5000) / 5000.0),
   };
 
-  std::vector<SDL_FRect> rects{};
-  auto op = [app](float scale) -> SDL_FRect {
-    const float w = 900.0f * scale;
-    const float h = 700.0f * scale;
-
-    const SDL_FRect r{
+  std::ranges::for_each(scales, [app, renderer](float scale) {
+    float w = 900.0f * scale;
+    float h = 700.0f * scale;
+    SDL_FRect r{
         .x = app->width - w / 2,
         .y = app->height - h / 2,
         .w = w,
         .h = h,
     };
-    return r;
-  };
-  std::ranges::transform(scales, std::back_inserter(rects), op);
-
-  for (auto r : rects) {
     SDL_RenderRect(renderer, &r);
-  }
+  });
+
   SDL_RenderPresent(renderer);
 }
 
