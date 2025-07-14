@@ -4,8 +4,8 @@
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL_main.h>
+#include <SDL3/SDL_rect.h>
 #include <SDL3/SDL_video.h>
-#include <sys/stat.h>
 
 #include <complex>
 #include <numeric>
@@ -60,9 +60,8 @@ bool no_change(const AppContext* app_context) {
 
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
   trill::InitConfig init_config{.name = "Mandelbrot"};
-  trill::SdlContext sdlContext{};
 
-  auto result = trill::Initialize(init_config, &sdlContext);
+  auto [result, sdlContext] = trill::Initialize(init_config);
 
   *appstate = new AppContext{.sdl_context = sdlContext};
   return result;
@@ -196,40 +195,3 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result) {
   SDL_Log("Application quit successfully!");
   SDL_Quit();
 }
-
-// int main() {
-//     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
-//         throw std::runtime_error("SDL_Init failed");
-//     }
-//
-//     SDL_Window *window = SDL_CreateWindow("Mandelbrot", 800, 600, SDL_WINDOW_HIDDEN |
-//     SDL_WINDOW_RESIZABLE); if (!window) {
-//         throw std::runtime_error("SDL_CreateWindow failed");
-//     }
-//     SDL_Renderer *renderer = SDL_CreateRenderer(window, nullptr);
-//     if (!renderer) {
-//         throw std::runtime_error("SDL_CreateRenderer failed");
-//     }
-//
-//     SDL_ShowWindow(window);
-//
-//     bool isRunning = true;
-//     SDL_Event event;
-//
-//     while (isRunning) {
-//         while (SDL_PollEvent(&event)) {
-//             switch (event.type) {
-//                 case SDL_EVENT_QUIT:
-//                     isRunning = false;
-//                 case SDL_EVENT_WINDOW_RESIZED:
-//                     render();
-//             }
-//         }
-//     }
-//
-//     SDL_DestroyRenderer(renderer);
-//     SDL_DestroyWindow(window);
-//     SDL_Quit();
-//
-//     return 0;
-// }

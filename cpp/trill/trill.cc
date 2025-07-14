@@ -7,28 +7,33 @@
 
 namespace trill {
 
-SDL_AppResult SDL_Fail() {
+InitializeResult SDL_Fail(SdlContext context) {
   SDL_LogError(SDL_LOG_CATEGORY_CUSTOM, "Error %s", SDL_GetError());
-  return SDL_APP_FAILURE;
+  return InitializeResult{
+      .result = SDL_APP_FAILURE,
+      .context = context,
+  };
 }
 
-SDL_AppResult Initialize(const InitConfig& initConfig, SdlContext* sdlContext) {
+InitializeResult Initialize(const InitConfig& initConfig) {
+  SdlContext sdl_context = {};
+
   // init the library, here we make a window so we only need the Video capabilities.
   if (!SDL_Init(initConfig.init_flags)) {
-    return SDL_Fail();
+    return SDL_Fail(sdl_context);
   }
 
   // create a window
   SDL_Window* window = SDL_CreateWindow(initConfig.name.c_str(), initConfig.width,
                                         initConfig.height, initConfig.window_flags);
   if (!window) {
-    return SDL_Fail();
+    return SDL_Fail(sdl_context);
   }
 
   // create a renderer
   SDL_Renderer* renderer = SDL_CreateRenderer(window, nullptr);
   if (!renderer) {
-    return SDL_Fail();
+    return SDL_Fail(sdl_context);
   }
 
   // a texture to hold renderer mandelbrot images while we draw the mouse selection area for zooming
@@ -36,18 +41,21 @@ SDL_AppResult Initialize(const InitConfig& initConfig, SdlContext* sdlContext) {
       SDL_CreateTexture(renderer, initConfig.pixel_format, initConfig.texture_access,
                         initConfig.width, initConfig.height);
   if (!texture) {
-    return SDL_Fail();
+    return SDL_Fail(sdl_context);
   }
 
   // set up the application data
-  sdlContext->window = window;
-  sdlContext->renderer = renderer;
-  sdlContext->background = texture;
+  sdl_context.window = window;
+  sdl_context.renderer = renderer;
+  sdl_context.background = texture;
 
   SDL_SetRenderVSync(renderer, 2);  // enable vysnc on every other vertical refresh
 
   SDL_Log("Application started successfully!");
   SDL_ShowWindow(window);
-  return SDL_APP_CONTINUE;
+  return InitializeResult{
+      .result = SDL_APP_CONTINUE,
+      .context = sdl_context,
+  };
 }
 }  // namespace trill
