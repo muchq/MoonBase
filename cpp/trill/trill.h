@@ -25,7 +25,12 @@ struct InitConfig {
   SDL_TextureAccess texture_access = SDL_TEXTUREACCESS_STREAMING;
 };
 
-SDL_AppResult Initialize(const InitConfig& initConfig, SdlContext* sdlContext);
+struct InitializeResult {
+  SDL_AppResult result;
+  SdlContext context;
+};
+
+InitializeResult Initialize(const InitConfig& initConfig);
 }  // namespace trill
 
 #endif
