@@ -62,8 +62,8 @@ void render(AppContext* app) {
     float w = 900.0f * scale;
     float h = 700.0f * scale;
     SDL_FRect r{
-        .x = app->width - w / 2,
-        .y = app->height - h / 2,
+        .x = (app->width - w) / 2,
+        .y = (app->height - h) / 2,
         .w = w,
         .h = h,
     };
