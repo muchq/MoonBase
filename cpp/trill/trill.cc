@@ -38,11 +38,11 @@ InitializeResult Initialize(const InitConfig& initConfig) {
 
   int rw = 0, rh = 0;
   SDL_GetRenderOutputSize(renderer, &rw, &rh);
-  if(rw != initConfig.width) {
-    float widthScale = (float)rw / (float) initConfig.width;
-    float heightScale = (float)rh / (float) initConfig.height;
+  if (rw != initConfig.width) {
+    float widthScale = (float)rw / (float)initConfig.width;
+    float heightScale = (float)rh / (float)initConfig.height;
 
-    if(widthScale != heightScale) {
+    if (widthScale != heightScale) {
       SDL_Log("WARNING: width scale != height scale");
     }
 
