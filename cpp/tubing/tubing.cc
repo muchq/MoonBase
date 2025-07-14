@@ -50,7 +50,6 @@ void render(AppContext* app) {
   SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
 
-  SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
   std::vector<float> scales{
       static_cast<float>((now_ms % 5000) / 5000.0),
       static_cast<float>(((now_ms + 1000) % 5000) / 5000.0),
@@ -68,6 +67,10 @@ void render(AppContext* app) {
         .w = w,
         .h = h,
     };
+
+    uint8_t gray = 255 * scale;
+
+    SDL_SetRenderDrawColor(renderer, gray, gray, gray, SDL_ALPHA_OPAQUE);
     SDL_RenderRect(renderer, &r);
   });
 
