@@ -1,4 +1,5 @@
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("//bazel/rules:cc.bzl", "sdl_cc_binary")
 
 cc_library(
     name = "color",
@@ -7,46 +8,9 @@ cc_library(
     deps = [],
 )
 
-cc_binary(
+sdl_cc_binary(
     name = "mandelbrot",
     srcs = ["mandelbrot.cc"],
-    linkopts = select({
-        "@platforms//os:macos": [
-            "-framework",
-            "Metal",
-            "-framework",
-            "IOKit",
-            "-framework",
-            "CoreVideo",
-            "-framework",
-            "CoreAudio",
-            "-framework",
-            "CoreGraphics",
-            "-framework",
-            "CoreMedia",
-            "-framework",
-            "CoreHaptics",
-            "-framework",
-            "AppKit",
-            "-framework",
-            "Carbon",
-            "-framework",
-            "QuartzCore",
-            "-framework",
-            "AudioToolbox",
-            "-framework",
-            "GameController",
-            "-framework",
-            "ForceFeedback",
-            "-framework",
-            "AVFoundation",
-            "-framework",
-            "CoreFoundation",
-            "-framework",
-            "UniformTypeIdentifiers",
-        ],
-        "//conditions:default": [],
-    }),
     visibility = ["//visibility:public"],
     deps = [
         ":color",
