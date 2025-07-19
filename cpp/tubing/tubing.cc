@@ -7,8 +7,10 @@
 #include <SDL3/SDL_rect.h>
 #include <SDL3/SDL_render.h>
 #include <SDL3/SDL_video.h>
+#include <math.h>
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 #include "cpp/trill/trill.h"
@@ -43,6 +45,16 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
   return SDL_APP_CONTINUE;
 }
 
+std::vector<float> compute_scales(uint64_t now_ms, int ms_per_cycle, uint8_t subdivisions) {
+  std::vector<float> scales{};
+  for (int i = 0; i < subdivisions; i++) {
+    scales.emplace_back(((now_ms + i * (ms_per_cycle / subdivisions)) % ms_per_cycle) /
+                        static_cast<float>(ms_per_cycle));
+  }
+
+  return scales;
+}
+
 void render(AppContext* app) {
   const uint64_t now_ms = SDL_GetTicks();
   SDL_Renderer* renderer = app->sdl_context.renderer;
@@ -50,17 +62,11 @@ void render(AppContext* app) {
   SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
 
-  std::vector<float> scales{
-      static_cast<float>((now_ms % 5000) / 5000.0),
-      static_cast<float>(((now_ms + 1000) % 5000) / 5000.0),
-      static_cast<float>(((now_ms + 2000) % 5000) / 5000.0),
-      static_cast<float>(((now_ms + 3000) % 5000) / 5000.0),
-      static_cast<float>(((now_ms + 4000) % 5000) / 5000.0),
-  };
+  std::vector<float> scales = compute_scales(now_ms, 12000, 10);
 
   std::ranges::for_each(scales, [app, renderer](float scale) {
-    float w = 900.0f * scale;
-    float h = 700.0f * scale;
+    float w = app->width * scale;
+    float h = app->height * scale;
     SDL_FRect r{
         .x = (app->width - w) / 2,
         .y = (app->height - h) / 2,
@@ -68,9 +74,11 @@ void render(AppContext* app) {
         .h = h,
     };
 
-    uint8_t gray = 255 * scale;
+    float sin_scale = std::sin(scale * M_PI);
+    uint8_t gray = 255 * sin_scale;
 
-    SDL_SetRenderDrawColor(renderer, gray, gray, gray, SDL_ALPHA_OPAQUE);
+    SDL_SetRenderDrawColor(renderer, std::floor(std::sin(gray / 2)), gray, 255,
+                           std::ceil(SDL_ALPHA_OPAQUE * (1 - scale)));
     SDL_RenderRect(renderer, &r);
   });
 

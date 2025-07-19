@@ -19,3 +19,6 @@ use_repo(sdl3_ext, "sdl3")
 
 raylib_ext = use_extension("//bazel/extensions:raylib.bzl", "raylib")
 use_repo(raylib_ext, "raylib")
+
+sfml_ext = use_extension("//bazel/extensions:sfml.bzl", "sfml")
+use_repo(sfml_ext, "sfml")

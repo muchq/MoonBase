@@ -456,6 +456,35 @@
         ]
       }
     },
+    "//bazel/extensions:sfml.bzl%sfml": {
+      "general": {
+        "bzlTransitiveDigest": "nIaWVj6ZCNZK+yej08rl+vN0tOJ99snE+dtyakoUcng=",
+        "usagesDigest": "/4Cy3XejljP+PQqF0qQREPG7U/f5pF20HNsflUS26d8=",
+        "recordedFileInputs": {},
+        "recordedDirentsInputs": {},
+        "envVariables": {},
+        "generatedRepoSpecs": {
+          "sfml": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/SFML/SFML/archive/refs/tags/3.0.1.zip"
+              ],
+              "integrity": "sha256-jHkTaMSvvLaJDWZ0FY+Pbp7ztOlvvUzugvbWH1p+iaU=",
+              "strip_prefix": "SFML-3.0.1",
+              "build_file": "@@//bazel/3p:sfml.BUILD"
+            }
+          }
+        },
+        "recordedRepoMappingEntries": [
+          [
+            "",
+            "bazel_tools",
+            "bazel_tools"
+          ]
+        ]
+      }
+    },
     "@@apple_rules_lint+//lint:extensions.bzl%linter": {
       "general": {
         "bzlTransitiveDigest": "GRMyLraxrIqwpYRdzOfjZMmByG37F1TiOwo1vnf4KJ4=",

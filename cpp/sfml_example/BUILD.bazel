@@ -1,0 +1,10 @@
+load("//bazel/rules:cc.bzl", "sfml_cc_binary")
+
+sfml_cc_binary(
+    name = "sfml_example",
+    srcs = ["hello_sfml.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@sfml",
+    ],
+)
