@@ -1,5 +1,4 @@
-load("@rules_cc//cc:defs.bzl", "cc_library")
-load("//bazel/rules:cc.bzl", "sdl_cc_binary")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 
 cc_library(
     name = "color",
@@ -8,7 +7,7 @@ cc_library(
     deps = [],
 )
 
-sdl_cc_binary(
+cc_binary(
     name = "mandelbrot",
     srcs = ["mandelbrot.cc"],
     visibility = ["//visibility:public"],

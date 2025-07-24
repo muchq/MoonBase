@@ -3,17 +3,6 @@ load("@rules_cc//cc:defs.bzl", "cc_binary")
 cc_binary(
     name = "raylib_example",
     srcs = ["hello_raylib.cc"],
-    linkopts = select({
-        "@platforms//os:macos": [
-            "-framework",
-            "IOKit",
-            "-framework",
-            "CoreGraphics",
-            "-framework",
-            "AppKit",
-        ],
-        "//conditions:default": [],
-    }),
     visibility = ["//visibility:public"],
     deps = [
         "@raylib",
