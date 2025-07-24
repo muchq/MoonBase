@@ -1,3 +1,5 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
 # This is copied from https://github.com/tarsir/SDL3_bazel
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
 
@@ -39,7 +41,6 @@ cmake(
 # Main SDL3 target with platform-specific linking
 cc_library(
     name = "sdl3",
-    deps = [":sdl3_cmake"],
     linkopts = select({
         "@platforms//os:macos": [
             "-framework",
@@ -77,5 +78,6 @@ cc_library(
         ],
         "//conditions:default": [],
     }),
+    deps = [":sdl3_cmake"],
     alwayslink = True,  # Ensures linking flags are always applied
 )

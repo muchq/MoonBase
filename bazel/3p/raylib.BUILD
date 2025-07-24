@@ -1,3 +1,4 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
 
 package(
@@ -19,7 +20,6 @@ cmake(
 # Main raylib target with platform-specific linking
 cc_library(
     name = "raylib",
-    deps = [":raylib_cmake"],
     linkopts = select({
         "@platforms//os:macos": [
             "-framework",
@@ -31,5 +31,6 @@ cc_library(
         ],
         "//conditions:default": [],
     }),
+    deps = [":raylib_cmake"],
     alwayslink = True,  # Ensures linking flags are always applied
 )

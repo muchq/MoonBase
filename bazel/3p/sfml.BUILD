@@ -1,3 +1,4 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
 
 package(
@@ -53,14 +54,13 @@ cmake(
 # Main SFML target with platform-specific linking
 cc_library(
     name = "sfml",
-    deps = [":sfml_cmake"],
     linkopts = select({
         "@platforms//os:macos": [
             "-ObjC",
             "-framework",
             "IOKit",
             "-framework",
-            "CoreGraphics", 
+            "CoreGraphics",
             "-framework",
             "AppKit",
             "-framework",
@@ -84,5 +84,6 @@ cc_library(
         ],
         "//conditions:default": [],
     }),
+    deps = [":sfml_cmake"],
     alwayslink = True,  # Ensures linking flags are always applied
 )
