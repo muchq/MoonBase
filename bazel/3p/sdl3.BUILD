@@ -1,3 +1,5 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
 # This is copied from https://github.com/tarsir/SDL3_bazel
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
 
@@ -10,7 +12,7 @@ filegroup(
 )
 
 cmake(
-    name = "sdl3",
+    name = "sdl3_cmake",
     defines = select({
         "@bazel_tools//src/conditions:darwin": [
             "CMAKE_OSX_DEPLOYMENT_TARGET=10.13",
@@ -34,4 +36,48 @@ cmake(
         "@platforms//os:wasi": ["libSDL3.a"],
     }),
     visibility = ["//visibility:public"],
+)
+
+# Main SDL3 target with platform-specific linking
+cc_library(
+    name = "sdl3",
+    linkopts = select({
+        "@platforms//os:macos": [
+            "-framework",
+            "Metal",
+            "-framework",
+            "IOKit",
+            "-framework",
+            "CoreVideo",
+            "-framework",
+            "CoreAudio",
+            "-framework",
+            "CoreGraphics",
+            "-framework",
+            "CoreMedia",
+            "-framework",
+            "CoreHaptics",
+            "-framework",
+            "AppKit",
+            "-framework",
+            "Carbon",
+            "-framework",
+            "QuartzCore",
+            "-framework",
+            "AudioToolbox",
+            "-framework",
+            "GameController",
+            "-framework",
+            "ForceFeedback",
+            "-framework",
+            "AVFoundation",
+            "-framework",
+            "CoreFoundation",
+            "-framework",
+            "UniformTypeIdentifiers",
+        ],
+        "//conditions:default": [],
+    }),
+    deps = [":sdl3_cmake"],
+    alwayslink = True,  # Ensures linking flags are always applied
 )

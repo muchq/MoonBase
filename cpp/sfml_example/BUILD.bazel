@@ -1,6 +1,6 @@
-load("//bazel/rules:cc.bzl", "sfml_cc_binary")
+load("@rules_cc//cc:defs.bzl", "cc_binary")
 
-sfml_cc_binary(
+cc_binary(
     name = "sfml_example",
     srcs = ["hello_sfml.cc"],
     visibility = ["//visibility:public"],

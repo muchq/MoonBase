@@ -1,6 +1,6 @@
-load("//bazel/rules:cc.bzl", "sdl_cc_binary")
+load("@rules_cc//cc:defs.bzl", "cc_binary")
 
-sdl_cc_binary(
+cc_binary(
     name = "tubing",
     srcs = ["tubing.cc"],
     visibility = ["//visibility:public"],
