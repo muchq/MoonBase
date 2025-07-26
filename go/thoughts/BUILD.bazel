@@ -1,10 +1,11 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 load("//bazel/rules:oci.bzl", "linux_oci_go")
 
 go_library(
     name = "thoughts_lib",
     srcs = [
         "client.go",
+        "game.go",
         "hub.go",
         "main.go",
     ],
@@ -20,6 +21,16 @@ go_binary(
     name = "thoughts",
     embed = [":thoughts_lib"],
     visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "thoughts_test",
+    srcs = [
+        "game_test.go",
+        "hub_test.go",
+    ],
+    embed = [":thoughts_lib"],
+    deps = ["@com_github_gorilla_websocket//:go_default_library"],
 )
 
 linux_oci_go(bin_name = "thoughts")

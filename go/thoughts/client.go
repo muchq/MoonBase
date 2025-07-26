@@ -31,6 +31,9 @@ var (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Allow connections from any origin
+	},
 }
 
 // Client is a middleman between the websocket connection and the hub.
@@ -65,8 +68,11 @@ func (c *Client) readPump() {
 			}
 			break
 		}
-		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
-		c.hub.broadcast <- message
+		message = bytes.TrimSpace(message)
+		c.hub.gameMessage <- GameMessageData{
+			Message: message,
+			Sender:  c,
+		}
 	}
 }
 
