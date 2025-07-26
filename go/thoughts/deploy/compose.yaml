@@ -1,0 +1,8 @@
+services:
+  thoughts:
+    image: ghcr.io/muchq/thoughts:latest
+    restart: always
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - /etc/thoughts:/etc/thoughts
