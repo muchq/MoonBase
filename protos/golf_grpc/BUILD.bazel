@@ -29,7 +29,7 @@ cc_grpc_library(
 
 go_proto_library(
     name = "golf_grpc_go_proto",
-    compilers = ["@io_bazel_rules_go//proto:go_grpc"],
+    compilers = ["@io_bazel_rules_go//proto:go_grpc_v2"],
     importpath = "github.com/muchq/moonbase/protos/golf_grpc",
     proto = ":golf_grpc_proto",
     deps = ["//protos/cards"],

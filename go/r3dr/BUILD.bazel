@@ -1,6 +1,5 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_cross_binary", "go_library", "go_test")
-load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
-load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("//bazel/rules:oci.bzl", "linux_oci_go")
 
 go_library(
     name = "r3dr_lib",
@@ -34,46 +33,6 @@ go_binary(
     visibility = ["//visibility:public"],
 )
 
-go_cross_binary(
-    name = "r3dr_linux_amd64",
-    platform = "@io_bazel_rules_go//go/toolchain:linux_amd64",
-    target = ":r3dr",
-    visibility = ["//visibility:public"],
-)
-
-pkg_tar(
-    name = "r3dr_tar",
-    srcs = [":r3dr_linux_amd64"],
-    remap_paths = {"/r3dr_linux_amd64": "/r3dr"},
-)
-
-oci_image(
-    name = "r3dr_image",
-    base = "@docker_lib_ubuntu",
-    entrypoint = ["/r3dr"],
-    tars = [":r3dr_tar"],
-)
-
-oci_push(
-    name = "push_image",
-    image = ":r3dr_image",
-    remote_tags = ["latest"],
-    repository = "ghcr.io/muchq/r3dr",
-    tags = ["manual"],
-)
-
-oci_load(
-    name = "oci_load_tarball",
-    image = ":r3dr_image",
-    repo_tags = ["ghcr.io/muchq/r3dr:latest"],
-)
-
-filegroup(
-    name = "r3dr_oci.tar",
-    srcs = [":oci_load_tarball"],
-    output_group = "tarball",
-)
-
 go_test(
     name = "r3dr_test",
     size = "small",
@@ -90,3 +49,5 @@ go_test(
         "@com_github_stretchr_testify//assert",
     ],
 )
+
+linux_oci_go(bin_name = "r3dr")

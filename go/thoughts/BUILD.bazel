@@ -1,0 +1,25 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+load("//bazel/rules:oci.bzl", "linux_oci_go")
+
+go_library(
+    name = "thoughts_lib",
+    srcs = [
+        "client.go",
+        "hub.go",
+        "main.go",
+    ],
+    embedsrcs = [
+        "index.html",
+    ],
+    importpath = "github.com/muchq/moonbase/go/thoughts",
+    visibility = ["//visibility:public"],
+    deps = ["@com_github_gorilla_websocket//:go_default_library"],
+)
+
+go_binary(
+    name = "thoughts",
+    embed = [":thoughts_lib"],
+    visibility = ["//visibility:public"],
+)
+
+linux_oci_go(bin_name = "thoughts")
