@@ -5,6 +5,13 @@ load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 
 def linux_oci_go(bin_name):
+    """
+    generate linux oci container for go binaries
+
+    Args:
+      bin_name: the binary target name to be wrapper
+    """
+
     linux_amd_target_name = bin_name + "_linux_amd64"
     tar_name = bin_name + "_tar"
     image_name = bin_name + "_image"
