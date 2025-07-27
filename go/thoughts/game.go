@@ -12,6 +12,9 @@ type Position [3]float64
 // Color represents RGB values [r, g, b] as floats 0.0-1.0
 type Color [3]float64
 
+// Shape represents the 3D shape type (0=Sphere, 1=Cube, 2=Pyramid)
+type Shape int
+
 // BaseMessage contains common fields for all game messages
 type BaseMessage struct {
 	Type      string `json:"type"`
@@ -24,12 +27,19 @@ type PlayerJoinMessage struct {
 	BaseMessage
 	Position Position `json:"position"`
 	Color    Color    `json:"color"`
+	Shape    Shape    `json:"shape"`
 }
 
 // PositionUpdateMessage represents a player position update
 type PositionUpdateMessage struct {
 	BaseMessage
 	Position Position `json:"position"`
+}
+
+// ShapeUpdateMessage represents a player shape change
+type ShapeUpdateMessage struct {
+	BaseMessage
+	Shape Shape `json:"shape"`
 }
 
 // PlayerLeaveMessage represents a player leaving the game
@@ -42,6 +52,7 @@ type GameStatePlayer struct {
 	PlayerID string   `json:"playerId"`
 	Position Position `json:"position"`
 	Color    Color    `json:"color"`
+	Shape    Shape    `json:"shape"`
 }
 
 // GameStateMessage represents the full game state
@@ -56,6 +67,7 @@ type Player struct {
 	ID       string
 	Position Position
 	Color    Color
+	Shape    Shape
 	Client   *Client
 }
 
@@ -65,6 +77,7 @@ type GameMessage struct {
 	PlayerID  string          `json:"playerId"`
 	Position  *Position       `json:"position,omitempty"`
 	Color     *Color          `json:"color,omitempty"`
+	Shape     *Shape          `json:"shape,omitempty"`
 	Timestamp int64           `json:"timestamp"`
 	RawData   json.RawMessage `json:"-"`
 }
@@ -105,6 +118,14 @@ func ValidateColor(color Color) error {
 	return nil
 }
 
+// ValidateShape checks if shape value is valid (0=Sphere, 1=Cube, 2=Pyramid)
+func ValidateShape(shape Shape) error {
+	if shape < 0 || shape > 2 {
+		return fmt.Errorf("shape value %d out of range (0-2)", shape)
+	}
+	return nil
+}
+
 // CreatePlayerJoinMessage creates a properly formatted player join message
 func CreatePlayerJoinMessage(player *Player) ([]byte, error) {
 	msg := PlayerJoinMessage{
@@ -115,6 +136,7 @@ func CreatePlayerJoinMessage(player *Player) ([]byte, error) {
 		},
 		Position: player.Position,
 		Color:    player.Color,
+		Shape:    player.Shape,
 	}
 	return json.Marshal(msg)
 }
@@ -128,6 +150,19 @@ func CreatePositionUpdateMessage(playerID string, position Position) ([]byte, er
 			Timestamp: time.Now().UnixMilli(),
 		},
 		Position: position,
+	}
+	return json.Marshal(msg)
+}
+
+// CreateShapeUpdateMessage creates a properly formatted shape update message
+func CreateShapeUpdateMessage(playerID string, shape Shape) ([]byte, error) {
+	msg := ShapeUpdateMessage{
+		BaseMessage: BaseMessage{
+			Type:      "shape_update",
+			PlayerID:  playerID,
+			Timestamp: time.Now().UnixMilli(),
+		},
+		Shape: shape,
 	}
 	return json.Marshal(msg)
 }
@@ -152,6 +187,7 @@ func CreateGameStateMessage(players map[string]*Player) ([]byte, error) {
 			PlayerID: player.ID,
 			Position: player.Position,
 			Color:    player.Color,
+			Shape:    player.Shape,
 		})
 	}
 	
