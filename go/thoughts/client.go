@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -35,6 +36,9 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
+		if _, isSet := os.LookupEnv("DEV_MODE"); isSet {
+			return true
+		}
 		origin := r.Header.Get("Origin")
 		fmt.Printf("request from origin URL: %s\n", origin)
 		u, err := url.Parse(origin)
