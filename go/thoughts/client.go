@@ -2,8 +2,12 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"net/http"
+	"net/url"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -32,7 +36,18 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow connections from any origin
+		if _, isSet := os.LookupEnv("DEV_MODE"); isSet {
+			return true
+		}
+		origin := r.Header.Get("Origin")
+		fmt.Printf("request from origin URL: %s\n", origin)
+		u, err := url.Parse(origin)
+		if err != nil {
+			fmt.Printf("Error parsing origin URL: %s\n", err)
+			return false
+		}
+		hostname := u.Hostname()
+		return strings.HasPrefix(hostname, "thoughts.muchq.com") || strings.HasPrefix(hostname, "muchq.com")
 	},
 }
 

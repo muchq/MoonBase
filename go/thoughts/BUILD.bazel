@@ -25,6 +25,7 @@ go_binary(
 
 go_test(
     name = "thoughts_test",
+    size = "small",
     srcs = [
         "game_test.go",
         "hub_test.go",

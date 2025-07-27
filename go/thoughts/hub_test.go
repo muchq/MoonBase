@@ -79,6 +79,7 @@ func TestHub_PlayerJoin(t *testing.T) {
 		"playerId": "player-1",
 		"position": [10.0, 0, -5.0],
 		"color": [0.8, 0.2, 0.6],
+		"shape": 0,
 		"timestamp": 1703123456789
 	}`
 
@@ -138,6 +139,7 @@ func TestHub_PositionUpdate(t *testing.T) {
 		"playerId": "player-1",
 		"position": [10.0, 0, -5.0],
 		"color": [0.8, 0.2, 0.6],
+		"shape": 0,
 		"timestamp": 1703123456789
 	}`
 	hub.gameMessage <- GameMessageData{
@@ -217,6 +219,7 @@ func TestHub_PlayerLeave(t *testing.T) {
 		"playerId": "player-1",
 		"position": [10.0, 0, -5.0],
 		"color": [0.8, 0.2, 0.6],
+		"shape": 0,
 		"timestamp": 1703123456789
 	}`
 	hub.gameMessage <- GameMessageData{
@@ -269,6 +272,95 @@ func TestHub_PlayerLeave(t *testing.T) {
 	client2.close()
 }
 
+func TestHub_ShapeUpdate(t *testing.T) {
+	hub := newHub()
+	go hub.run()
+
+	// Create and register mock clients
+	client1 := newMockClient("client1")
+	client1.collectMessages()
+	client2 := newMockClient("client2")
+	client2.collectMessages()
+
+	hubClient1 := &Client{hub: hub, send: client1.send}
+	hubClient2 := &Client{hub: hub, send: client2.send}
+
+	hub.register <- hubClient1
+	hub.register <- hubClient2
+	time.Sleep(10 * time.Millisecond)
+
+	// Player 1 joins first
+	joinMsg := `{
+		"type": "player_join",
+		"playerId": "player-1",
+		"position": [10.0, 0, -5.0],
+		"color": [0.8, 0.2, 0.6],
+		"shape": 0,
+		"timestamp": 1703123456789
+	}`
+	hub.gameMessage <- GameMessageData{
+		Message: []byte(joinMsg),
+		Sender:  hubClient1,
+	}
+	time.Sleep(10 * time.Millisecond)
+
+	// Clear messages to focus on shape update
+	client1.messages = nil
+	client2.messages = nil
+
+	// Player 1 sends shape update (sphere to cube)
+	shapeUpdateMsg := `{
+		"type": "shape_update",
+		"playerId": "player-1",
+		"shape": 1,
+		"timestamp": 1703123456950
+	}`
+	hub.gameMessage <- GameMessageData{
+		Message: []byte(shapeUpdateMsg),
+		Sender:  hubClient1,
+	}
+	time.Sleep(10 * time.Millisecond)
+
+	// Player 1 should NOT receive the echo
+	messages1 := client1.getMessages()
+	if len(messages1) != 0 {
+		t.Errorf("Player 1 should not receive echo of their own shape update, got %d messages", len(messages1))
+	}
+
+	// Player 2 should receive the shape update
+	messages2 := client2.getMessages()
+	if len(messages2) != 1 {
+		t.Fatalf("Expected 1 shape update for player 2, got %d", len(messages2))
+	}
+
+	var shapeUpdate ShapeUpdateMessage
+	if err := json.Unmarshal(messages2[0], &shapeUpdate); err != nil {
+		t.Fatalf("Failed to parse shape update: %v", err)
+	}
+	if shapeUpdate.Type != "shape_update" {
+		t.Errorf("Expected shape_update, got %s", shapeUpdate.Type)
+	}
+	if shapeUpdate.PlayerID != "player-1" {
+		t.Errorf("Expected player-1, got %s", shapeUpdate.PlayerID)
+	}
+	expectedShape := Shape(1)
+	if shapeUpdate.Shape != expectedShape {
+		t.Errorf("Expected shape %v, got %v", expectedShape, shapeUpdate.Shape)
+	}
+
+	// Verify the player's shape was updated in the hub
+	if player, exists := hub.players["player-1"]; exists {
+		if player.Shape != Shape(1) {
+			t.Errorf("Expected player shape to be updated to 1, got %v", player.Shape)
+		}
+	} else {
+		t.Error("Player-1 not found in hub after shape update")
+	}
+
+	client1.close()
+	client2.close()
+}
+
 func TestHub_InvalidMessages(t *testing.T) {
 	hub := newHub()
 	go hub.run()
@@ -294,15 +386,27 @@ func TestHub_InvalidMessages(t *testing.T) {
 		},
 		{
 			name: "missing color in join",
-			msg:  `{"type":"player_join","playerId":"player-1","position":[10,0,-5],"timestamp":123}`,
+			msg:  `{"type":"player_join","playerId":"player-1","position":[10,0,-5],"shape":0,"timestamp":123}`,
+		},
+		{
+			name: "missing shape in join",
+			msg:  `{"type":"player_join","playerId":"player-1","position":[10,0,-5],"color":[0.8,0.2,0.6],"timestamp":123}`,
 		},
 		{
 			name: "invalid position boundary",
-			msg:  `{"type":"player_join","playerId":"player-1","position":[100,0,-5],"color":[0.8,0.2,0.6],"timestamp":123}`,
+			msg:  `{"type":"player_join","playerId":"player-1","position":[100,0,-5],"color":[0.8,0.2,0.6],"shape":0,"timestamp":123}`,
 		},
 		{
 			name: "invalid color range",
-			msg:  `{"type":"player_join","playerId":"player-1","position":[10,0,-5],"color":[1.5,0.2,0.6],"timestamp":123}`,
+			msg:  `{"type":"player_join","playerId":"player-1","position":[10,0,-5],"color":[1.5,0.2,0.6],"shape":0,"timestamp":123}`,
+		},
+		{
+			name: "invalid shape range negative",
+			msg:  `{"type":"player_join","playerId":"player-1","position":[10,0,-5],"color":[0.8,0.2,0.6],"shape":-1,"timestamp":123}`,
+		},
+		{
+			name: "invalid shape range too high",
+			msg:  `{"type":"player_join","playerId":"player-1","position":[10,0,-5],"color":[0.8,0.2,0.6],"shape":3,"timestamp":123}`,
 		},
 		{
 			name: "unknown message type",
@@ -350,6 +454,7 @@ func TestHub_GameStateForNewPlayer(t *testing.T) {
 		"playerId": "player-1",
 		"position": [10.0, 0, -5.0],
 		"color": [0.8, 0.2, 0.6],
+		"shape": 0,
 		"timestamp": 1703123456789
 	}`
 	hub.gameMessage <- GameMessageData{
@@ -371,6 +476,7 @@ func TestHub_GameStateForNewPlayer(t *testing.T) {
 		"playerId": "player-2",
 		"position": [20.0, 0, 15.0],
 		"color": [0.3, 0.9, 0.4],
+		"shape": 1,
 		"timestamp": 1703123457000
 	}`
 	hub.gameMessage <- GameMessageData{

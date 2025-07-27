@@ -94,6 +94,8 @@ func (h *Hub) handleGameMessage(msgData GameMessageData) {
 		h.handlePlayerJoin(gameMsg, msgData.Sender)
 	case "position_update":
 		h.handlePositionUpdate(gameMsg, msgData.Sender)
+	case "shape_update":
+		h.handleShapeUpdate(gameMsg, msgData.Sender)
 	case "player_leave":
 		h.handlePlayerLeaveMessage(gameMsg, msgData.Sender)
 	default:
@@ -103,12 +105,12 @@ func (h *Hub) handleGameMessage(msgData GameMessageData) {
 
 // handlePlayerJoin processes player join messages
 func (h *Hub) handlePlayerJoin(msg *GameMessage, sender *Client) {
-	if msg.Position == nil || msg.Color == nil {
-		log.Printf("Invalid player_join message: missing position or color")
+	if msg.Position == nil || msg.Color == nil || msg.Shape == nil {
+		log.Printf("Invalid player_join message: missing position, color, or shape")
 		return
 	}
 	
-	// Validate position and color
+	// Validate position, color, and shape
 	if err := ValidatePosition(*msg.Position); err != nil {
 		log.Printf("Invalid position in join: %v", err)
 		return
@@ -117,12 +119,17 @@ func (h *Hub) handlePlayerJoin(msg *GameMessage, sender *Client) {
 		log.Printf("Invalid color in join: %v", err)
 		return
 	}
+	if err := ValidateShape(*msg.Shape); err != nil {
+		log.Printf("Invalid shape in join: %v", err)
+		return
+	}
 	
 	// Create player
 	player := &Player{
 		ID:       msg.PlayerID,
 		Position: *msg.Position,
 		Color:    *msg.Color,
+		Shape:    *msg.Shape,
 		Client:   sender,
 	}
 	
@@ -164,6 +171,30 @@ func (h *Hub) handlePositionUpdate(msg *GameMessage, sender *Client) {
 		
 		// Broadcast to all other clients (don't echo back to sender)
 		if updateMsg, err := CreatePositionUpdateMessage(msg.PlayerID, *msg.Position); err == nil {
+			h.broadcastToOthers(updateMsg, sender)
+		}
+	}
+}
+
+// handleShapeUpdate processes shape update messages
+func (h *Hub) handleShapeUpdate(msg *GameMessage, sender *Client) {
+	if msg.Shape == nil {
+		log.Printf("Invalid shape_update message: missing shape")
+		return
+	}
+	
+	// Validate shape
+	if err := ValidateShape(*msg.Shape); err != nil {
+		log.Printf("Invalid shape in update: %v", err)
+		return
+	}
+	
+	// Update player shape
+	if player, exists := h.players[msg.PlayerID]; exists {
+		player.Shape = *msg.Shape
+		
+		// Broadcast to all other clients (don't echo back to sender)
+		if updateMsg, err := CreateShapeUpdateMessage(msg.PlayerID, *msg.Shape); err == nil {
 			h.broadcastToOthers(updateMsg, sender)
 		}
 	}

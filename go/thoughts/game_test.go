@@ -14,9 +14,15 @@ func TestParseGameMessage(t *testing.T) {
 	}{
 		{
 			name:    "valid player_join message",
-			input:   `{"type":"player_join","playerId":"player-123","position":[10.0,0,-5.0],"color":[0.8,0.2,0.6],"timestamp":1703123456789}`,
+			input:   `{"type":"player_join","playerId":"player-123","position":[10.0,0,-5.0],"color":[0.8,0.2,0.6],"shape":0,"timestamp":1703123456789}`,
 			wantErr: false,
 			msgType: "player_join",
+		},
+		{
+			name:    "valid shape_update message",
+			input:   `{"type":"shape_update","playerId":"player-123","shape":1,"timestamp":1703123456950}`,
+			wantErr: false,
+			msgType: "shape_update",
 		},
 		{
 			name:    "valid position_update message",
@@ -157,11 +163,60 @@ func TestValidateColor(t *testing.T) {
 	}
 }
 
+func TestValidateShape(t *testing.T) {
+	tests := []struct {
+		name    string
+		shape   Shape
+		wantErr bool
+	}{
+		{
+			name:    "valid shape sphere",
+			shape:   Shape(0),
+			wantErr: false,
+		},
+		{
+			name:    "valid shape cube",
+			shape:   Shape(1),
+			wantErr: false,
+		},
+		{
+			name:    "valid shape pyramid",
+			shape:   Shape(2),
+			wantErr: false,
+		},
+		{
+			name:    "invalid shape negative",
+			shape:   Shape(-1),
+			wantErr: true,
+		},
+		{
+			name:    "invalid shape too high",
+			shape:   Shape(3),
+			wantErr: true,
+		},
+		{
+			name:    "invalid shape way too high",
+			shape:   Shape(100),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateShape(tt.shape)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateShape() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestCreatePlayerJoinMessage(t *testing.T) {
 	player := &Player{
 		ID:       "player-test123",
 		Position: Position{10.0, 0, -5.0},
 		Color:    Color{0.8, 0.2, 0.6},
+		Shape:    Shape(1),
 	}
 
 	data, err := CreatePlayerJoinMessage(player)
@@ -185,6 +240,9 @@ func TestCreatePlayerJoinMessage(t *testing.T) {
 	}
 	if msg.Color != player.Color {
 		t.Errorf("Expected color %v, got %v", player.Color, msg.Color)
+	}
+	if msg.Shape != player.Shape {
+		t.Errorf("Expected shape %v, got %v", player.Shape, msg.Shape)
 	}
 	if msg.Timestamp == 0 {
 		t.Error("Expected non-zero timestamp")
@@ -213,6 +271,34 @@ func TestCreatePositionUpdateMessage(t *testing.T) {
 	}
 	if msg.Position != position {
 		t.Errorf("Expected position %v, got %v", position, msg.Position)
+	}
+	if msg.Timestamp == 0 {
+		t.Error("Expected non-zero timestamp")
+	}
+}
+
+func TestCreateShapeUpdateMessage(t *testing.T) {
+	playerID := "player-test123"
+	shape := Shape(2)
+
+	data, err := CreateShapeUpdateMessage(playerID, shape)
+	if err != nil {
+		t.Fatalf("CreateShapeUpdateMessage() error = %v", err)
+	}
+
+	var msg ShapeUpdateMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		t.Fatalf("Failed to unmarshal message: %v", err)
+	}
+
+	if msg.Type != "shape_update" {
+		t.Errorf("Expected type 'shape_update', got %s", msg.Type)
+	}
+	if msg.PlayerID != playerID {
+		t.Errorf("Expected playerID %s, got %s", playerID, msg.PlayerID)
+	}
+	if msg.Shape != shape {
+		t.Errorf("Expected shape %v, got %v", shape, msg.Shape)
 	}
 	if msg.Timestamp == 0 {
 		t.Error("Expected non-zero timestamp")
@@ -249,11 +335,13 @@ func TestCreateGameStateMessage(t *testing.T) {
 			ID:       "player-1",
 			Position: Position{10.0, 0, -5.0},
 			Color:    Color{0.8, 0.2, 0.6},
+			Shape:    Shape(0),
 		},
 		"player-2": {
 			ID:       "player-2",
 			Position: Position{20.0, 0, 15.0},
 			Color:    Color{0.3, 0.9, 0.4},
+			Shape:    Shape(1),
 		},
 	}
 
@@ -293,6 +381,7 @@ func TestGameMessage_JSONRoundTrip(t *testing.T) {
 		ID:       "player-roundtrip",
 		Position: Position{25.5, 0, -12.3},
 		Color:    Color{0.7, 0.1, 0.9},
+		Shape:    Shape(2),
 	}
 
 	// Test player join message round trip
@@ -313,6 +402,16 @@ func TestGameMessage_JSONRoundTrip(t *testing.T) {
 	}
 	if parsedUpdate.Type != "position_update" || parsedUpdate.PlayerID != player.ID {
 		t.Error("Update message round trip failed")
+	}
+
+	// Test shape update message round trip
+	shapeData, _ := CreateShapeUpdateMessage(player.ID, player.Shape)
+	parsedShape, err := ParseGameMessage(shapeData)
+	if err != nil {
+		t.Fatalf("Failed to parse generated shape message: %v", err)
+	}
+	if parsedShape.Type != "shape_update" || parsedShape.PlayerID != player.ID {
+		t.Error("Shape message round trip failed")
 	}
 
 	// Test player leave message round trip
