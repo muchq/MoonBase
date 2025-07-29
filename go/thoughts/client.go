@@ -2,12 +2,10 @@ package main
 
 import (
 	"bytes"
-	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -36,18 +34,65 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
+		// Allow all origins in dev mode
 		if _, isSet := os.LookupEnv("DEV_MODE"); isSet {
+			slog.Debug("WebSocket connection allowed in dev mode",
+				"origin", r.Header.Get("Origin"),
+				"remoteAddr", r.RemoteAddr)
 			return true
 		}
+		
 		origin := r.Header.Get("Origin")
-		fmt.Printf("request from origin URL: %s\n", origin)
-		u, err := url.Parse(origin)
-		if err != nil {
-			fmt.Printf("Error parsing origin URL: %s\n", err)
+		if origin == "" {
+			slog.Warn("WebSocket connection rejected: missing origin header",
+				"remoteAddr", r.RemoteAddr)
 			return false
 		}
+		
+		u, err := url.Parse(origin)
+		if err != nil {
+			slog.Error("WebSocket connection rejected: invalid origin URL",
+				"origin", origin,
+				"error", err,
+				"remoteAddr", r.RemoteAddr)
+			return false
+		}
+		
+		// Check scheme - only allow HTTPS in production
+		if u.Scheme != "https" {
+			slog.Warn("WebSocket connection rejected: non-HTTPS origin",
+				"origin", origin,
+				"scheme", u.Scheme,
+				"remoteAddr", r.RemoteAddr)
+			return false
+		}
+		
+		// Extract hostname without port
 		hostname := u.Hostname()
-		return strings.HasPrefix(hostname, "thoughts.muchq.com") || strings.HasPrefix(hostname, "muchq.com")
+		
+		// Define allowed origins exactly (no prefix matching!)
+		allowedOrigins := []string{
+			"thoughts.muchq.com",
+			"muchq.com",
+			"www.muchq.com",
+		}
+		
+		// Exact match check
+		for _, allowed := range allowedOrigins {
+			if hostname == allowed {
+				slog.Info("WebSocket connection accepted",
+					"origin", origin,
+					"hostname", hostname,
+					"remoteAddr", r.RemoteAddr)
+				return true
+			}
+		}
+		
+		slog.Warn("WebSocket connection rejected: unauthorized origin",
+			"origin", origin,
+			"hostname", hostname,
+			"remoteAddr", r.RemoteAddr)
+		return false
 	},
 }
 
@@ -79,7 +124,9 @@ func (c *Client) readPump() {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("error: %v", err)
+				slog.Error("WebSocket read error",
+					"error", err,
+					"clientAddr", c.conn.RemoteAddr().String())
 			}
 			break
 		}
@@ -141,9 +188,17 @@ func (c *Client) writePump() {
 func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println(err)
+		slog.Error("WebSocket upgrade failed",
+			"error", err,
+			"remoteAddr", r.RemoteAddr,
+			"origin", r.Header.Get("Origin"))
 		return
 	}
+	
+	slog.Debug("WebSocket client connected",
+		"remoteAddr", conn.RemoteAddr().String(),
+		"origin", r.Header.Get("Origin"))
+	
 	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}
 	client.hub.register <- client
 

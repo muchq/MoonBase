@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -45,6 +46,13 @@ type ShapeUpdateMessage struct {
 // PlayerLeaveMessage represents a player leaving the game
 type PlayerLeaveMessage struct {
 	BaseMessage
+}
+
+// WelcomeMessage represents the initial message sent to a new client
+type WelcomeMessage struct {
+	Type      string `json:"type"`
+	PlayerID  string `json:"playerId"`
+	Timestamp int64  `json:"timestamp"`
 }
 
 // GameStatePlayer represents a player in the game state
@@ -126,6 +134,54 @@ func ValidateShape(shape Shape) error {
 	return nil
 }
 
+// PlayerIDGenerator defines the interface for generating player IDs
+type PlayerIDGenerator interface {
+	GenerateID() string
+}
+
+// RandomIDGenerator generates cryptographically secure random IDs for production
+type RandomIDGenerator struct{}
+
+// GenerateID creates a random player ID string using crypto/rand
+func (g *RandomIDGenerator) GenerateID() string {
+	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	const length = 8
+	
+	bytes := make([]byte, length)
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to time-based ID if crypto/rand fails
+		return fmt.Sprintf("player-%d", time.Now().UnixNano()%1000000)
+	}
+	
+	for i := range bytes {
+		bytes[i] = charset[bytes[i]%byte(len(charset))]
+	}
+	
+	return string(bytes)
+}
+
+// DeterministicIDGenerator generates predictable IDs for testing
+type DeterministicIDGenerator struct {
+	counter int
+}
+
+// GenerateID creates a deterministic player ID for testing
+func (g *DeterministicIDGenerator) GenerateID() string {
+	g.counter++
+	return fmt.Sprintf("player-%d", g.counter)
+}
+
+// NewDeterministicIDGenerator creates a new deterministic ID generator
+func NewDeterministicIDGenerator() *DeterministicIDGenerator {
+	return &DeterministicIDGenerator{counter: 0}
+}
+
+// GeneratePlayerID creates a random player ID string (deprecated - use RandomIDGenerator)
+func GeneratePlayerID() string {
+	generator := &RandomIDGenerator{}
+	return generator.GenerateID()
+}
+
 // CreatePlayerJoinMessage creates a properly formatted player join message
 func CreatePlayerJoinMessage(player *Player) ([]byte, error) {
 	msg := PlayerJoinMessage{
@@ -175,6 +231,16 @@ func CreatePlayerLeaveMessage(playerID string) ([]byte, error) {
 			PlayerID:  playerID,
 			Timestamp: time.Now().UnixMilli(),
 		},
+	}
+	return json.Marshal(msg)
+}
+
+// CreateWelcomeMessage creates a welcome message with assigned player ID
+func CreateWelcomeMessage(playerID string) ([]byte, error) {
+	msg := WelcomeMessage{
+		Type:      "welcome",
+		PlayerID:  playerID,
+		Timestamp: time.Now().UnixMilli(),
 	}
 	return json.Marshal(msg)
 }

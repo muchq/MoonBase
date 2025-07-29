@@ -4,7 +4,9 @@ import (
 	_ "embed"
 	"flag"
 	"log"
+	"log/slog"
 	"net/http"
+	"os"
 )
 
 var addr = flag.String("addr", ":8080", "http service address")
@@ -13,7 +15,11 @@ var addr = flag.String("addr", ":8080", "http service address")
 var indexHTML []byte
 
 func serveHome(w http.ResponseWriter, r *http.Request) {
-	log.Println(r.URL)
+	slog.Debug("HTTP request",
+		"method", r.Method,
+		"path", r.URL.Path,
+		"remoteAddr", r.RemoteAddr)
+	
 	if r.URL.Path != "/" {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
@@ -28,14 +34,36 @@ func serveHome(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	flag.Parse()
+	
+	// Configure structured logging
+	var logLevel slog.Level
+	if _, isSet := os.LookupEnv("DEV_MODE"); isSet {
+		logLevel = slog.LevelDebug
+	} else {
+		logLevel = slog.LevelInfo
+	}
+	
+	opts := &slog.HandlerOptions{
+		Level: logLevel,
+	}
+	handler := slog.NewJSONHandler(os.Stdout, opts)
+	slog.SetDefault(slog.New(handler))
+	
+	slog.Info("Starting thoughts game server",
+		"addr", *addr,
+		"devMode", os.Getenv("DEV_MODE") != "")
+	
 	hub := newHub()
 	go hub.run()
 	http.HandleFunc("/", serveHome)
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(hub, w, r)
 	})
+	
+	slog.Info("Server listening", "addr", *addr)
 	err := http.ListenAndServe(*addr, nil)
 	if err != nil {
+		slog.Error("Server failed", "error", err)
 		log.Fatal("ListenAndServe: ", err)
 	}
 }
