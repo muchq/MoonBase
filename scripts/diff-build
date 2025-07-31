@@ -1,0 +1,122 @@
+#!/bin/bash
+set -euo pipefail
+
+# Script to run bazel-diff for selective building and testing
+# Usage: ./scripts/diff-build [base-revision]
+
+BASE_REVISION=${1:-"origin/main"}
+WORKSPACE_ROOT=$(bazel info workspace)
+BAZEL_PATH=$(which bazel)
+BAZEL_DIFF_BIN="/tmp/bazel_diff"
+
+# Extract bazel-diff binary
+bazel run @bazel-diff//:bazel-diff --script_path="$BAZEL_DIFF_BIN"
+
+# Output files
+starting_hashes_json="/tmp/starting_hashes.json"
+final_hashes_json="/tmp/final_hashes.json"
+impacted_targets_path="/tmp/impacted_targets.txt"
+
+echo "Running bazel-diff against base revision: $BASE_REVISION"
+
+# Get current commit for restoration
+CURRENT_COMMIT=$(git rev-parse HEAD)
+
+# Get list of external repos for fine-grained hashing (must be done from current commit)
+echo "Getting external repositories list..."
+cd "$WORKSPACE_ROOT"
+# Use bazel query to find all external repositories used by the project
+EXTERNAL_REPOS=$("$BAZEL_PATH" query --output=package 'deps(//...)' 2>/dev/null | grep "^@" | sed 's/^@//' | sed 's/+.*//' | sort -u | grep -v "bazel_tools\|local_config" | head -50 | sed 's/^/--fineGrainedHashExternalRepos=/' | tr '\n' ' ') || true
+if [ -z "$EXTERNAL_REPOS" ]; then
+  echo "Could not determine external repos automatically, continuing without fine-grained hashing"
+else
+  echo "Found external repos for fine-grained hashing"
+fi
+
+# Generate hashes for base revision
+echo "Generating hashes for base revision..."
+git -C "$WORKSPACE_ROOT" checkout "$BASE_REVISION" --quiet
+"$BAZEL_DIFF_BIN" generate-hashes -w "$WORKSPACE_ROOT" -b "$BAZEL_PATH" $EXTERNAL_REPOS "$starting_hashes_json"
+
+# Generate hashes for current revision
+echo "Generating hashes for current revision..."  
+git -C "$WORKSPACE_ROOT" checkout "$CURRENT_COMMIT" --quiet
+"$BAZEL_DIFF_BIN" generate-hashes -w "$WORKSPACE_ROOT" -b "$BAZEL_PATH" $EXTERNAL_REPOS "$final_hashes_json"
+
+# Get impacted targets
+echo "Computing impacted targets..."
+"$BAZEL_DIFF_BIN" get-impacted-targets -sh "$starting_hashes_json" -fh "$final_hashes_json" -o "$impacted_targets_path"
+
+# Read impacted targets
+impacted_targets=()
+if [ -f "$impacted_targets_path" ]; then
+  while IFS= read -r line; do
+    impacted_targets+=("$line")
+  done < "$impacted_targets_path"
+fi
+
+if [ ${#impacted_targets[@]} -eq 0 ]; then
+  echo "No impacted targets found. Skipping build and test."
+  exit 0
+fi
+
+echo "==================== IMPACTED TARGETS ===================="
+echo "Found ${#impacted_targets[@]} impacted targets:"
+echo ""
+
+# Categorize targets
+local_targets=()
+external_targets=()
+for target in "${impacted_targets[@]}"; do
+  if [[ "$target" == @* ]]; then
+    external_targets+=("$target")
+  else
+    local_targets+=("$target")
+  fi
+done
+
+# Display categorized targets
+if [ ${#local_targets[@]} -gt 0 ]; then
+  echo "LOCAL TARGETS (${#local_targets[@]}):"
+  printf '  %s\n' "${local_targets[@]}"
+  echo ""
+fi
+
+if [ ${#external_targets[@]} -gt 0 ]; then
+  echo "EXTERNAL TARGETS (${#external_targets[@]}):"
+  printf '  %s\n' "${external_targets[@]}"
+  echo ""
+fi
+
+echo "=========================================================="
+echo ""
+
+# Separate build and test targets (only for local targets)
+build_targets=()
+test_targets=()
+for target in "${local_targets[@]}"; do
+  if [[ "$target" == *"_test" ]] || [[ "$target" == *":test" ]]; then
+    test_targets+=("$target")
+  else
+    build_targets+=("$target")
+  fi
+done
+
+# Build only non-test targets
+if [ ${#build_targets[@]} -gt 0 ]; then
+  echo "Building ${#build_targets[@]} targets..."
+  bazel build "${build_targets[@]}"
+else
+  echo "No build targets to build."
+fi
+
+# Test only test targets
+if [ ${#test_targets[@]} -gt 0 ]; then
+  echo "Testing ${#test_targets[@]} test targets..."
+  bazel test "${test_targets[@]}"
+else
+  echo "No test targets to run."
+fi
+
+echo ""
+echo "bazel-diff build completed successfully!"
