@@ -16,3 +16,4 @@ register_toolchains("@llvm_toolchain//:all")
 bazel_dep(name = "bazel_features", version = "1.32.0")
 
 bazel_dep(name = "buildifier_prebuilt", version = "8.2.0.2", dev_dependency = True)
+bazel_dep(name = "bazel-diff", version = "10.1.0")
