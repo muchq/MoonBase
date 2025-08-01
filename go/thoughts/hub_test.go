@@ -44,6 +44,12 @@ func (m *mockClient) getMessages() [][]byte {
 	return result
 }
 
+func (m *mockClient) clearMessages() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.messages = nil
+}
+
 func (m *mockClient) close() {
 	m.mu.Lock()
 	m.closed = true
@@ -52,7 +58,8 @@ func (m *mockClient) close() {
 }
 
 func TestHub_PlayerJoin(t *testing.T) {
-	hub := newHub()
+	// Use deterministic ID generator for predictable tests
+	hub := newHubWithIDGenerator(NewDeterministicIDGenerator())
 	go hub.run()
 	defer func() {
 		// Clean shutdown would require more complex coordination
@@ -68,15 +75,28 @@ func TestHub_PlayerJoin(t *testing.T) {
 	hubClient1 := &Client{hub: hub, send: client1.send}
 	hubClient2 := &Client{hub: hub, send: client2.send}
 
-	// Register clients
+	// Register clients (they will receive welcome messages)
 	hub.register <- hubClient1
 	hub.register <- hubClient2
 	time.Sleep(10 * time.Millisecond) // Allow processing
 
-	// Player 1 joins
+	// Check welcome messages were sent
+	messages1 := client1.getMessages()
+	if len(messages1) != 1 {
+		t.Fatalf("Expected 1 welcome message for first player, got %d", len(messages1))
+	}
+	messages2 := client2.getMessages()
+	if len(messages2) != 1 {
+		t.Fatalf("Expected 1 welcome message for second player, got %d", len(messages2))
+	}
+
+	// Clear messages to test join flow
+	client1.clearMessages()
+	client2.clearMessages()
+
+	// Player 1 joins (no playerId in message - server assigns)
 	joinMsg1 := `{
 		"type": "player_join",
-		"playerId": "player-1",
 		"position": [10.0, 0, -5.0],
 		"color": [0.8, 0.2, 0.6],
 		"shape": 0,
@@ -90,13 +110,13 @@ func TestHub_PlayerJoin(t *testing.T) {
 	time.Sleep(10 * time.Millisecond) // Allow processing
 
 	// Check that player 1 got no messages (no existing players to show)
-	messages1 := client1.getMessages()
+	messages1 = client1.getMessages()
 	if len(messages1) != 0 {
 		t.Fatalf("Expected 0 messages for first player, got %d", len(messages1))
 	}
 
 	// Check that player 2 got the join broadcast
-	messages2 := client2.getMessages()
+	messages2 = client2.getMessages()
 	if len(messages2) != 1 {
 		t.Fatalf("Expected 1 message for player 2, got %d", len(messages2))
 	}
@@ -117,7 +137,8 @@ func TestHub_PlayerJoin(t *testing.T) {
 }
 
 func TestHub_PositionUpdate(t *testing.T) {
-	hub := newHub()
+	// Use deterministic ID generator for predictable tests
+	hub := newHubWithIDGenerator(NewDeterministicIDGenerator())
 	go hub.run()
 
 	// Create and register mock clients
@@ -133,10 +154,13 @@ func TestHub_PositionUpdate(t *testing.T) {
 	hub.register <- hubClient2
 	time.Sleep(10 * time.Millisecond)
 
-	// Player 1 joins first
+	// Clear welcome messages
+	client1.clearMessages()
+	client2.clearMessages()
+
+	// Player 1 joins first (no playerId in client message)
 	joinMsg := `{
 		"type": "player_join",
-		"playerId": "player-1",
 		"position": [10.0, 0, -5.0],
 		"color": [0.8, 0.2, 0.6],
 		"shape": 0,
@@ -149,13 +173,12 @@ func TestHub_PositionUpdate(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Clear messages to focus on position update
-	client1.messages = nil
-	client2.messages = nil
+	client1.clearMessages()
+	client2.clearMessages()
 
-	// Player 1 sends position update
+	// Player 1 sends position update (no playerId in client message)
 	updateMsg := `{
 		"type": "position_update",
-		"playerId": "player-1",
 		"position": [15.0, 0, -8.0],
 		"timestamp": 1703123456890
 	}`
@@ -197,7 +220,8 @@ func TestHub_PositionUpdate(t *testing.T) {
 }
 
 func TestHub_PlayerLeave(t *testing.T) {
-	hub := newHub()
+	// Use deterministic ID generator for predictable tests
+	hub := newHubWithIDGenerator(NewDeterministicIDGenerator())
 	go hub.run()
 
 	// Create and register mock clients
@@ -213,10 +237,13 @@ func TestHub_PlayerLeave(t *testing.T) {
 	hub.register <- hubClient2
 	time.Sleep(10 * time.Millisecond)
 
-	// Player 1 joins
+	// Clear welcome messages
+	client1.clearMessages()
+	client2.clearMessages()
+
+	// Player 1 joins (no playerId in client message)
 	joinMsg := `{
 		"type": "player_join",
-		"playerId": "player-1",
 		"position": [10.0, 0, -5.0],
 		"color": [0.8, 0.2, 0.6],
 		"shape": 0,
@@ -232,13 +259,13 @@ func TestHub_PlayerLeave(t *testing.T) {
 	if len(hub.players) != 1 {
 		t.Errorf("Expected 1 player in hub, got %d", len(hub.players))
 	}
-	if len(hub.clientToPlayer) != 1 {
-		t.Errorf("Expected 1 client mapping, got %d", len(hub.clientToPlayer))
+	if len(hub.clientToPlayer) != 2 {
+		t.Errorf("Expected 2 client mappings, got %d", len(hub.clientToPlayer))
 	}
 
 	// Clear messages to focus on leave handling
-	client1.messages = nil
-	client2.messages = nil
+	client1.clearMessages()
+	client2.clearMessages()
 
 	// Player 1 disconnects (unregister)
 	hub.unregister <- hubClient1
@@ -248,8 +275,8 @@ func TestHub_PlayerLeave(t *testing.T) {
 	if len(hub.players) != 0 {
 		t.Errorf("Expected 0 players after disconnect, got %d", len(hub.players))
 	}
-	if len(hub.clientToPlayer) != 0 {
-		t.Errorf("Expected 0 client mappings after disconnect, got %d", len(hub.clientToPlayer))
+	if len(hub.clientToPlayer) != 1 {
+		t.Errorf("Expected 1 client mapping after disconnect, got %d", len(hub.clientToPlayer))
 	}
 
 	// Player 2 should receive leave broadcast
@@ -273,7 +300,8 @@ func TestHub_PlayerLeave(t *testing.T) {
 }
 
 func TestHub_ShapeUpdate(t *testing.T) {
-	hub := newHub()
+	// Use deterministic ID generator for predictable tests
+	hub := newHubWithIDGenerator(NewDeterministicIDGenerator())
 	go hub.run()
 
 	// Create and register mock clients
@@ -289,10 +317,13 @@ func TestHub_ShapeUpdate(t *testing.T) {
 	hub.register <- hubClient2
 	time.Sleep(10 * time.Millisecond)
 
-	// Player 1 joins first
+	// Clear welcome messages
+	client1.clearMessages()
+	client2.clearMessages()
+
+	// Player 1 joins first (no playerId in client message)
 	joinMsg := `{
 		"type": "player_join",
-		"playerId": "player-1",
 		"position": [10.0, 0, -5.0],
 		"color": [0.8, 0.2, 0.6],
 		"shape": 0,
@@ -305,13 +336,12 @@ func TestHub_ShapeUpdate(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Clear messages to focus on shape update
-	client1.messages = nil
-	client2.messages = nil
+	client1.clearMessages()
+	client2.clearMessages()
 
-	// Player 1 sends shape update (sphere to cube)
+	// Player 1 sends shape update (sphere to cube, no playerId in client message)
 	shapeUpdateMsg := `{
 		"type": "shape_update",
-		"playerId": "player-1",
 		"shape": 1,
 		"timestamp": 1703123456950
 	}`
@@ -362,7 +392,8 @@ func TestHub_ShapeUpdate(t *testing.T) {
 }
 
 func TestHub_InvalidMessages(t *testing.T) {
-	hub := newHub()
+	// Use deterministic ID generator for predictable tests
+	hub := newHubWithIDGenerator(NewDeterministicIDGenerator())
 	go hub.run()
 
 	client1 := newMockClient("client1")
@@ -371,6 +402,9 @@ func TestHub_InvalidMessages(t *testing.T) {
 
 	hub.register <- hubClient1
 	time.Sleep(10 * time.Millisecond)
+
+	// Clear welcome message
+	client1.clearMessages()
 
 	tests := []struct {
 		name string
@@ -382,42 +416,42 @@ func TestHub_InvalidMessages(t *testing.T) {
 		},
 		{
 			name: "missing position in join",
-			msg:  `{"type":"player_join","playerId":"player-1","color":[0.8,0.2,0.6],"timestamp":123}`,
+			msg:  `{"type":"player_join","color":[0.8,0.2,0.6],"timestamp":123}`,
 		},
 		{
 			name: "missing color in join",
-			msg:  `{"type":"player_join","playerId":"player-1","position":[10,0,-5],"shape":0,"timestamp":123}`,
+			msg:  `{"type":"player_join","position":[10,0,-5],"shape":0,"timestamp":123}`,
 		},
 		{
 			name: "missing shape in join",
-			msg:  `{"type":"player_join","playerId":"player-1","position":[10,0,-5],"color":[0.8,0.2,0.6],"timestamp":123}`,
+			msg:  `{"type":"player_join","position":[10,0,-5],"color":[0.8,0.2,0.6],"timestamp":123}`,
 		},
 		{
 			name: "invalid position boundary",
-			msg:  `{"type":"player_join","playerId":"player-1","position":[100,0,-5],"color":[0.8,0.2,0.6],"shape":0,"timestamp":123}`,
+			msg:  `{"type":"player_join","position":[100,0,-5],"color":[0.8,0.2,0.6],"shape":0,"timestamp":123}`,
 		},
 		{
 			name: "invalid color range",
-			msg:  `{"type":"player_join","playerId":"player-1","position":[10,0,-5],"color":[1.5,0.2,0.6],"shape":0,"timestamp":123}`,
+			msg:  `{"type":"player_join","position":[10,0,-5],"color":[1.5,0.2,0.6],"shape":0,"timestamp":123}`,
 		},
 		{
 			name: "invalid shape range negative",
-			msg:  `{"type":"player_join","playerId":"player-1","position":[10,0,-5],"color":[0.8,0.2,0.6],"shape":-1,"timestamp":123}`,
+			msg:  `{"type":"player_join","position":[10,0,-5],"color":[0.8,0.2,0.6],"shape":-1,"timestamp":123}`,
 		},
 		{
 			name: "invalid shape range too high",
-			msg:  `{"type":"player_join","playerId":"player-1","position":[10,0,-5],"color":[0.8,0.2,0.6],"shape":3,"timestamp":123}`,
+			msg:  `{"type":"player_join","position":[10,0,-5],"color":[0.8,0.2,0.6],"shape":3,"timestamp":123}`,
 		},
 		{
 			name: "unknown message type",
-			msg:  `{"type":"unknown_type","playerId":"player-1","timestamp":123}`,
+			msg:  `{"type":"unknown_type","timestamp":123}`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Clear previous messages
-			client1.messages = nil
+			client1.clearMessages()
 
 			// Send invalid message
 			hub.gameMessage <- GameMessageData{
@@ -438,7 +472,8 @@ func TestHub_InvalidMessages(t *testing.T) {
 }
 
 func TestHub_GameStateForNewPlayer(t *testing.T) {
-	hub := newHub()
+	// Use deterministic ID generator for predictable tests
+	hub := newHubWithIDGenerator(NewDeterministicIDGenerator())
 	go hub.run()
 
 	// Create first player
@@ -448,10 +483,12 @@ func TestHub_GameStateForNewPlayer(t *testing.T) {
 	hub.register <- hubClient1
 	time.Sleep(10 * time.Millisecond)
 
-	// Player 1 joins
+	// Clear welcome message
+	client1.clearMessages()
+
+	// Player 1 joins (no playerId in client message)
 	joinMsg1 := `{
 		"type": "player_join",
-		"playerId": "player-1",
 		"position": [10.0, 0, -5.0],
 		"color": [0.8, 0.2, 0.6],
 		"shape": 0,
@@ -470,10 +507,12 @@ func TestHub_GameStateForNewPlayer(t *testing.T) {
 	hub.register <- hubClient2
 	time.Sleep(10 * time.Millisecond)
 
-	// Player 2 joins
+	// Clear welcome message for player 2
+	client2.clearMessages()
+
+	// Player 2 joins (no playerId in client message)
 	joinMsg2 := `{
 		"type": "player_join",
-		"playerId": "player-2",
 		"position": [20.0, 0, 15.0],
 		"color": [0.3, 0.9, 0.4],
 		"shape": 1,

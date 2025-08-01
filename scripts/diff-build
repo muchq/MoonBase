@@ -9,8 +9,19 @@ WORKSPACE_ROOT=$(bazel info workspace)
 BAZEL_PATH=$(which bazel)
 BAZEL_DIFF_BIN="/tmp/bazel_diff"
 
-# Extract bazel-diff binary
-bazel run @bazel-diff//:bazel-diff --script_path="$BAZEL_DIFF_BIN"
+# Download pre-built bazel-diff binary if not already cached
+if [ ! -f "$BAZEL_DIFF_BIN" ]; then
+  echo "Downloading bazel-diff binary..."
+  BAZEL_DIFF_VERSION="10.1.0"
+  BAZEL_DIFF_URL="https://github.com/Tinder/bazel-diff/releases/download/${BAZEL_DIFF_VERSION}/bazel-diff_deploy.jar"
+  curl -sL "$BAZEL_DIFF_URL" -o "$BAZEL_DIFF_BIN.jar"
+  # Create wrapper script to run the jar
+  cat > "$BAZEL_DIFF_BIN" << 'EOF'
+#!/bin/bash
+exec java -jar "$(dirname "$0")/bazel_diff.jar" "$@"
+EOF
+  chmod +x "$BAZEL_DIFF_BIN"
+fi
 
 # Output files
 starting_hashes_json="/tmp/starting_hashes.json"
@@ -18,6 +29,15 @@ final_hashes_json="/tmp/final_hashes.json"
 impacted_targets_path="/tmp/impacted_targets.txt"
 
 echo "Running bazel-diff against base revision: $BASE_REVISION"
+
+# Always run buildifier test first
+echo "Running buildifier test..."
+bazel test //:buildifier_test || {
+    echo "ERROR: buildifier test failed. Please run 'bazel run //:buildifier_fix' to fix formatting issues."
+    exit 1
+}
+echo "Buildifier test passed!"
+echo ""
 
 # Get current commit for restoration
 CURRENT_COMMIT=$(git rev-parse HEAD)
