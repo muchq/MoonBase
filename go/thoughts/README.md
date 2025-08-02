@@ -71,8 +71,8 @@ docker-compose up -d
 **Priority**: Foundation security improvements
 
 **Required Changes**:
-- [ ] Remove client-generated player IDs from the protocol
-- [ ] Implement server-side ID generation during WebSocket handshake
+- [x] Remove client-generated player IDs from the protocol
+- [x] Implement server-side ID generation during WebSocket handshake
 - [ ] Add session token management for reconnection support
 - [ ] Update protocol to include server-assigned IDs in initial handshake message
 

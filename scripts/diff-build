@@ -55,12 +55,13 @@ fi
 
 # Generate hashes for base revision
 echo "Generating hashes for base revision..."
-git -C "$WORKSPACE_ROOT" checkout "$BASE_REVISION" --quiet
+# Force checkout, discarding local changes to MODULE.bazel.lock
+git -C "$WORKSPACE_ROOT" checkout "$BASE_REVISION" --quiet --force
 "$BAZEL_DIFF_BIN" generate-hashes -w "$WORKSPACE_ROOT" -b "$BAZEL_PATH" $EXTERNAL_REPOS "$starting_hashes_json"
 
 # Generate hashes for current revision
 echo "Generating hashes for current revision..."  
-git -C "$WORKSPACE_ROOT" checkout "$CURRENT_COMMIT" --quiet
+git -C "$WORKSPACE_ROOT" checkout "$CURRENT_COMMIT" --quiet --force
 "$BAZEL_DIFF_BIN" generate-hashes -w "$WORKSPACE_ROOT" -b "$BAZEL_PATH" $EXTERNAL_REPOS "$final_hashes_json"
 
 # Get impacted targets

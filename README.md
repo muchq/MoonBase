@@ -35,6 +35,7 @@
 - **Go**:
   - [`resilience4g`](go/resilience4g) - Resilience4J for Go
   - [`r3dr`](go/r3dr) - a url shortening service
+  - [`thoughts`](go/thoughts) - websocket backend for this [thing that's sort of a game?](https://muchq.com/thoughts)
   - [`mucks`](go/mucks) - Router wrapper middleware
   - [`example_grpc`](go/example_grpc) - gRPC example
 
