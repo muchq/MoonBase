@@ -27,7 +27,6 @@ const (
 
 var (
 	newline = []byte{'\n'}
-	space   = []byte{' '}
 )
 
 var upgrader = websocket.Upgrader{

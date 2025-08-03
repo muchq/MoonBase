@@ -87,7 +87,6 @@ type GameMessage struct {
 	Color     *Color          `json:"color,omitempty"`
 	Shape     *Shape          `json:"shape,omitempty"`
 	Timestamp int64           `json:"timestamp"`
-	RawData   json.RawMessage `json:"-"`
 }
 
 // ParseGameMessage parses a JSON message into a GameMessage
@@ -97,7 +96,6 @@ func ParseGameMessage(data []byte) (*GameMessage, error) {
 		return nil, fmt.Errorf("failed to parse JSON: %w", err)
 	}
 	
-	msg.RawData = json.RawMessage(data)
 	return &msg, nil
 }
 
@@ -139,26 +137,6 @@ type PlayerIDGenerator interface {
 	GenerateID() string
 }
 
-// RandomIDGenerator generates cryptographically secure random IDs for production
-type RandomIDGenerator struct{}
-
-// GenerateID creates a random player ID string using crypto/rand
-func (g *RandomIDGenerator) GenerateID() string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	const length = 8
-	
-	bytes := make([]byte, length)
-	if _, err := rand.Read(bytes); err != nil {
-		// Fallback to time-based ID if crypto/rand fails
-		return fmt.Sprintf("player-%d", time.Now().UnixNano()%1000000)
-	}
-	
-	for i := range bytes {
-		bytes[i] = charset[bytes[i]%byte(len(charset))]
-	}
-	
-	return string(bytes)
-}
 
 // DeterministicIDGenerator generates predictable IDs for testing
 type DeterministicIDGenerator struct {
