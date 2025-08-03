@@ -52,9 +52,10 @@ func main() {
 	slog.Info("Starting thoughts game server",
 		"addr", *addr,
 		"devMode", os.Getenv("DEV_MODE") != "")
-	
+
 	hub := newHub()
 	go hub.run()
+	// Deprecated for removal.
 	http.HandleFunc("/", serveHome)
 	// Deprecated. Use /thoughts-ws
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
