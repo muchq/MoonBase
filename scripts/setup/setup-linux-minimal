@@ -1,0 +1,29 @@
+#!/bin/bash
+
+set -e
+
+# Only install what's not already available on GitHub runners
+echo "[setup-linux-minimal] >> installing only missing packages"
+
+# Check and install only missing packages
+MISSING_PACKAGES=""
+
+# Add packages that are typically not pre-installed
+for pkg in clang-format-18 podman libdecor-0-dev liburing-dev libpipewire-0.3-dev; do
+    if ! dpkg -l | grep -q "^ii  $pkg"; then
+        MISSING_PACKAGES="$MISSING_PACKAGES $pkg"
+    fi
+done
+
+if [ -n "$MISSING_PACKAGES" ]; then
+    echo "[setup-linux-minimal] >> updating apt and installing: $MISSING_PACKAGES"
+    sudo apt-get update
+    sudo apt-get install -y $MISSING_PACKAGES
+else
+    echo "[setup-linux-minimal] >> all required packages already installed"
+fi
+
+# Create clang-format symlink if needed
+if [ -f "$(which clang-format-18)" ]; then
+    sudo ln -sf "$(which clang-format-18)" /usr/local/bin/clang-format
+fi
