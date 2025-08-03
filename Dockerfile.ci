@@ -1,5 +1,9 @@
 FROM ubuntu:latest
 
+# Set up UTF-8 locale to handle files with special characters
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
 # Install all dependencies at image build time
 RUN apt-get update && \
     apt-get install -y \
