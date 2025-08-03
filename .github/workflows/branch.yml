@@ -15,7 +15,7 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/${{ github.repository }}/ci-base:latest
+      image: ghcr.io/muchq/moonbase/ci-base:latest
 
     steps:
       - uses: actions/checkout@v4
