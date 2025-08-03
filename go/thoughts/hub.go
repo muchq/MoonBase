@@ -36,7 +36,7 @@ type Hub struct {
 }
 
 func newHub() *Hub {
-	return newHubWithIDGenerator(&RandomIDGenerator{})
+	return newHubWithIDGenerator(&WhimsicalIDGenerator{})
 }
 
 func newHubWithIDGenerator(idGenerator PlayerIDGenerator) *Hub {

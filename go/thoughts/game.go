@@ -87,7 +87,6 @@ type GameMessage struct {
 	Color     *Color          `json:"color,omitempty"`
 	Shape     *Shape          `json:"shape,omitempty"`
 	Timestamp int64           `json:"timestamp"`
-	RawData   json.RawMessage `json:"-"`
 }
 
 // ParseGameMessage parses a JSON message into a GameMessage
@@ -97,7 +96,6 @@ func ParseGameMessage(data []byte) (*GameMessage, error) {
 		return nil, fmt.Errorf("failed to parse JSON: %w", err)
 	}
 	
-	msg.RawData = json.RawMessage(data)
 	return &msg, nil
 }
 
@@ -139,26 +137,6 @@ type PlayerIDGenerator interface {
 	GenerateID() string
 }
 
-// RandomIDGenerator generates cryptographically secure random IDs for production
-type RandomIDGenerator struct{}
-
-// GenerateID creates a random player ID string using crypto/rand
-func (g *RandomIDGenerator) GenerateID() string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	const length = 8
-	
-	bytes := make([]byte, length)
-	if _, err := rand.Read(bytes); err != nil {
-		// Fallback to time-based ID if crypto/rand fails
-		return fmt.Sprintf("player-%d", time.Now().UnixNano()%1000000)
-	}
-	
-	for i := range bytes {
-		bytes[i] = charset[bytes[i]%byte(len(charset))]
-	}
-	
-	return string(bytes)
-}
 
 // DeterministicIDGenerator generates predictable IDs for testing
 type DeterministicIDGenerator struct {
@@ -176,11 +154,56 @@ func NewDeterministicIDGenerator() *DeterministicIDGenerator {
 	return &DeterministicIDGenerator{counter: 0}
 }
 
-// GeneratePlayerID creates a random player ID string (deprecated - use RandomIDGenerator)
-func GeneratePlayerID() string {
-	generator := &RandomIDGenerator{}
-	return generator.GenerateID()
+// WhimsicalIDGenerator generates fun, memorable player IDs
+type WhimsicalIDGenerator struct{}
+
+var (
+	whimsicalAdjectives = []string{
+		"bouncy", "giggly", "sparkly", "fuzzy", "wiggly",
+		"snuggly", "dreamy", "bubbly", "twinkly", "jolly",
+		"quirky", "peppy", "zesty", "frisky", "silly",
+		"perky", "cheeky", "zippy", "groovy", "jazzy",
+	}
+	
+	whimsicalColors = []string{
+		"lavender", "periwinkle", "coral", "mint", "peach",
+		"turquoise", "magenta", "cerulean", "lilac", "salmon",
+		"chartreuse", "crimson", "cobalt", "amber", "jade",
+		"fuchsia", "indigo", "teal", "mauve", "vermillion",
+	}
+	
+	cuteAustralianAnimals = []string{
+		"koala", "kangaroo", "wombat", "quokka", "platypus",
+		"echidna", "wallaby", "bilby", "numbat", "possum",
+		"kookaburra", "cockatoo", "lorikeet", "galah", "budgie",
+		"dingo", "bandicoot", "pademelon", "potoroo", "glider",
+	}
+)
+
+// GenerateID creates a whimsical player ID in format: {adj}-{color}-{animal}-{4char}
+func (g *WhimsicalIDGenerator) GenerateID() string {
+	// Generate random indices for each component
+	bytes := make([]byte, 7) // 3 for array indices + 4 for alphanumeric slug
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to time-based ID if crypto/rand fails
+		return fmt.Sprintf("player-%d", time.Now().UnixNano()%1000000)
+	}
+	
+	// Select random words from each list
+	adjective := whimsicalAdjectives[int(bytes[0])%len(whimsicalAdjectives)]
+	color := whimsicalColors[int(bytes[1])%len(whimsicalColors)]
+	animal := cuteAustralianAnimals[int(bytes[2])%len(cuteAustralianAnimals)]
+	
+	// Generate 4-character alphanumeric slug
+	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	slug := make([]byte, 4)
+	for i := 0; i < 4; i++ {
+		slug[i] = charset[bytes[3+i]%byte(len(charset))]
+	}
+	
+	return fmt.Sprintf("%s-%s-%s-%s", adjective, color, animal, string(slug))
 }
+
 
 // CreatePlayerJoinMessage creates a properly formatted player join message
 func CreatePlayerJoinMessage(player *Player) ([]byte, error) {
