@@ -1,7 +1,6 @@
 package main
 
 import (
-	_ "embed"
 	"flag"
 	"log"
 	"log/slog"
@@ -10,27 +9,6 @@ import (
 )
 
 var addr = flag.String("addr", ":8080", "http service address")
-
-//go:embed index.html
-var indexHTML []byte
-
-func serveHome(w http.ResponseWriter, r *http.Request) {
-	slog.Debug("HTTP request",
-		"method", r.Method,
-		"path", r.URL.Path,
-		"remoteAddr", r.RemoteAddr)
-
-	if r.URL.Path != "/" {
-		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-		return
-	}
-	if r.Method != http.MethodGet {
-		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(indexHTML)
-}
 
 func main() {
 	flag.Parse()
@@ -55,12 +33,6 @@ func main() {
 
 	hub := newHub()
 	go hub.run()
-	// Deprecated for removal.
-	http.HandleFunc("/", serveHome)
-	// Deprecated. Use /thoughts-ws
-	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		serveWs(hub, w, r)
-	})
 	http.HandleFunc("/thoughts-ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(hub, w, r)
 	})

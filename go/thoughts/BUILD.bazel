@@ -9,9 +9,6 @@ go_library(
         "hub.go",
         "main.go",
     ],
-    embedsrcs = [
-        "index.html",
-    ],
     importpath = "github.com/muchq/moonbase/go/thoughts",
     visibility = ["//visibility:public"],
     deps = ["@com_github_gorilla_websocket//:go_default_library"],
