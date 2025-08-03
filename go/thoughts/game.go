@@ -226,11 +226,6 @@ func (g *WhimsicalIDGenerator) GenerateID() string {
 	return fmt.Sprintf("%s-%s-%s-%s", adjective, color, animal, string(slug))
 }
 
-// GeneratePlayerID creates a random player ID string (deprecated - use RandomIDGenerator)
-func GeneratePlayerID() string {
-	generator := &RandomIDGenerator{}
-	return generator.GenerateID()
-}
 
 // CreatePlayerJoinMessage creates a properly formatted player join message
 func CreatePlayerJoinMessage(player *Player) ([]byte, error) {
