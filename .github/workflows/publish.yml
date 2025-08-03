@@ -11,6 +11,8 @@ permissions:
 jobs:
   run-tests:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/ci-base:latest
 
     steps:
       - uses: actions/checkout@v4
@@ -23,9 +25,7 @@ jobs:
           bazelrc: |
             build --remote_cache=https://storage.googleapis.com/moon_base_build_cache
             build --remote_upload_local_results=true
-      - name: setup-system-deps
-        run: |
-          sudo ./scripts/setup/setup-linux
+      # Dependencies are pre-installed in the Docker image
       - name: bazel-test
         run: |
           bazel build //... && bazel test //...
@@ -33,6 +33,8 @@ jobs:
   push-images:
     needs: run-tests
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/ci-base:latest
 
     steps:
       - uses: actions/checkout@v4

@@ -14,6 +14,8 @@ permissions:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/ci-base:latest
 
     steps:
       - uses: actions/checkout@v4
@@ -24,9 +26,8 @@ jobs:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}
           repository-cache: true
-      - name: setup-system-deps
-        run: |
-          sudo ./scripts/setup/setup-linux
+      # Dependencies are pre-installed in the Docker image
+      # No need to run setup-linux anymore!
       - name: Create bazel-diff output directory
         run: |
           mkdir -p bazel-diff-output
