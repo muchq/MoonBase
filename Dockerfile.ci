@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:latest
 
 # Install all dependencies at image build time
 RUN apt-get update && \
