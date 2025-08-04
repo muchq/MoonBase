@@ -1,0 +1,24 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+load("//bazel/rules:oci.bzl", "linux_oci_go")
+
+go_library(
+    name = "games_ws_backend_lib",
+    srcs = [
+        "main.go",
+    ],
+    importpath = "github.com/muchq/moonbase/go/thoughts",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/games_ws_backend/hub",
+        "//go/games_ws_backend/thoughts",
+        "@com_github_gorilla_websocket//:go_default_library",
+    ],
+)
+
+go_binary(
+    name = "games_ws_backend",
+    embed = [":games_ws_backend_lib"],
+    visibility = ["//visibility:public"],
+)
+
+linux_oci_go(bin_name = "games_ws_backend")
