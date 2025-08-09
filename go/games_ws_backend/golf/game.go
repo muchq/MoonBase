@@ -410,9 +410,14 @@ func (g *Game) GetStateForPlayer(clientID string) *GameState {
 		DiscardPile:        make([]*Card, len(g.state.DiscardPile)),
 		GamePhase:          g.state.GamePhase,
 		KnockedPlayerID:    g.state.KnockedPlayerID,
-		DrawnCard:          g.state.DrawnCard,
+		DrawnCard:          nil, // Will be set below only for current player
 		PeekedAtDrawPile:   g.state.PeekedAtDrawPile,
 		AllPlayersPeeked:   g.state.AllPlayersPeeked,
+	}
+	
+	// Only show drawn card to the current player
+	if g.state.DrawnCard != nil && g.state.Players[g.state.CurrentPlayerIndex].ID == viewingPlayer.ID {
+		stateCopy.DrawnCard = g.state.DrawnCard
 	}
 
 	// Copy players with visibility rules
