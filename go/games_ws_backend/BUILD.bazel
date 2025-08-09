@@ -9,6 +9,7 @@ go_library(
     importpath = "github.com/muchq/moonbase/go/thoughts",
     visibility = ["//visibility:public"],
     deps = [
+        "//go/games_ws_backend/golf",
         "//go/games_ws_backend/hub",
         "//go/games_ws_backend/thoughts",
         "@com_github_gorilla_websocket//:go_default_library",

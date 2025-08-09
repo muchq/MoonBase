@@ -1,0 +1,32 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "golf",
+    srcs = [
+        "game.go",
+        "golf_hub.go",
+        "types.go",
+    ],
+    importpath = "github.com/muchq/moonbase/go/games_ws_backend/golf",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/games_ws_backend/hub",
+        "@com_github_gorilla_websocket//:go_default_library",
+    ],
+)
+
+go_test(
+    name = "golf_test",
+    size = "small",
+    srcs = [
+        "game_test.go",
+        "golf_hub_test.go",
+        "state_transitions_test.go",
+        "types_test.go",
+    ],
+    embed = [":golf"],
+    deps = [
+        "//go/games_ws_backend/hub",
+        "@com_github_gorilla_websocket//:go_default_library",
+    ],
+)

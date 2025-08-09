@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/muchq/moonbase/go/games_ws_backend/golf"
 	"github.com/muchq/moonbase/go/games_ws_backend/hub"
 	"github.com/muchq/moonbase/go/games_ws_backend/thoughts"
 )
@@ -39,6 +40,13 @@ func main() {
 	go thoughtsHub.Run()
 	http.HandleFunc("/thoughts-ws", func(w http.ResponseWriter, r *http.Request) {
 		hub.ServeWs(thoughtsHub, w, r)
+	})
+
+	// Serve golf backend
+	golfHub := golf.NewGolfHub()
+	go golfHub.Run()
+	http.HandleFunc("/golf-ws", func(w http.ResponseWriter, r *http.Request) {
+		hub.ServeWs(golfHub, w, r)
 	})
 
 	slog.Info("Server listening", "addr", *addr)
