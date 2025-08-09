@@ -1,0 +1,30 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "network",
+    srcs = [
+        "model.go",
+        "optimizer.go",
+    ],
+    importpath = "github.com/MoonBase/go/neuro/network",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/neuro/layers",
+        "//go/neuro/loss",
+        "//go/neuro/utils",
+    ],
+)
+
+go_test(
+    name = "network_test",
+    size = "small",
+    srcs = ["model_test.go"],
+    embed = [":network"],
+    deps = [
+        "//go/neuro/activations",
+        "//go/neuro/data",
+        "//go/neuro/layers",
+        "//go/neuro/loss",
+        "//go/neuro/utils",
+    ],
+)

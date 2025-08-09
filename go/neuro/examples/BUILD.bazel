@@ -1,0 +1,54 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary")
+
+go_binary(
+    name = "mnist_example",
+    srcs = ["mnist_example.go"],
+    deps = [
+        "//go/neuro/activations",
+        "//go/neuro/data",
+        "//go/neuro/inference",
+        "//go/neuro/layers",
+        "//go/neuro/loss",
+        "//go/neuro/network",
+        "//go/neuro/utils",
+    ],
+)
+
+go_binary(
+    name = "mnist_real",
+    srcs = ["mnist_real.go"],
+    deps = [
+        "//go/neuro/activations",
+        "//go/neuro/data",
+        "//go/neuro/inference",
+        "//go/neuro/layers",
+        "//go/neuro/loss",
+        "//go/neuro/network",
+        "//go/neuro/utils",
+    ],
+)
+
+go_binary(
+    name = "mnist_vendored",
+    srcs = ["mnist_vendored.go"],
+    deps = [
+        "//go/neuro/activations",
+        "//go/neuro/data",
+        "//go/neuro/inference",
+        "//go/neuro/layers",
+        "//go/neuro/loss",
+        "//go/neuro/network",
+        "//go/neuro/utils",
+    ],
+)
+
+go_binary(
+    name = "mnist_production",
+    srcs = ["mnist_production.go"],
+    deps = [
+        "//go/mucks",
+        "//go/neuro/inference",
+        "//go/neuro/utils",
+        "//go/resilience4g/rate_limit",
+    ],
+)
