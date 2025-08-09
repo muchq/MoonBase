@@ -17,6 +17,7 @@ go_library(
 
 go_test(
     name = "network_test",
+    size = "small",
     srcs = ["model_test.go"],
     embed = [":network"],
     deps = [

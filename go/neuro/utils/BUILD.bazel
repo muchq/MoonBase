@@ -12,6 +12,7 @@ go_library(
 
 go_test(
     name = "utils_test",
+    size = "small",
     srcs = ["tensor_test.go"],
     embed = [":utils"],
 )
