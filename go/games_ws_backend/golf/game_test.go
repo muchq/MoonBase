@@ -934,3 +934,115 @@ func TestRaceConditionProtection(t *testing.T) {
 		t.Errorf("Too many players: %d", len(state.Players))
 	}
 }
+
+func TestDrawnCardPrivacy(t *testing.T) {
+	game := NewGame("TEST_PRIVACY")
+	game.AddPlayer("client1")
+	game.AddPlayer("client2")
+	game.AddPlayer("client3")
+	game.StartGame()
+	
+	// Player 1 draws a card
+	err := game.DrawCard("client1")
+	if err != nil {
+		t.Fatalf("Failed to draw card: %v", err)
+	}
+	
+	// Verify that the drawn card exists in the game state
+	if game.state.DrawnCard == nil {
+		t.Fatal("No drawn card in game state after drawing")
+	}
+	
+	// Get the actual drawn card for comparison
+	actualDrawnCard := game.state.DrawnCard
+	
+	// Get state for player 1 (who drew the card)
+	stateForPlayer1 := game.GetStateForPlayer("client1")
+	if stateForPlayer1.DrawnCard == nil {
+		t.Error("Player 1 should see the drawn card")
+	}
+	if stateForPlayer1.DrawnCard != actualDrawnCard {
+		t.Error("Player 1 should see the correct drawn card")
+	}
+	
+	// Get state for player 2 (who did not draw)
+	stateForPlayer2 := game.GetStateForPlayer("client2")
+	if stateForPlayer2.DrawnCard != nil {
+		t.Errorf("Player 2 should NOT see the drawn card, but sees: %v", stateForPlayer2.DrawnCard)
+	}
+	
+	// Get state for player 3 (who did not draw)
+	stateForPlayer3 := game.GetStateForPlayer("client3")
+	if stateForPlayer3.DrawnCard != nil {
+		t.Errorf("Player 3 should NOT see the drawn card, but sees: %v", stateForPlayer3.DrawnCard)
+	}
+	
+	// Complete the turn
+	err = game.DiscardDrawn("client1")
+	if err != nil {
+		t.Fatalf("Failed to discard drawn card: %v", err)
+	}
+	
+	// Now it's player 2's turn, they draw a card
+	err = game.DrawCard("client2")
+	if err != nil {
+		t.Fatalf("Failed to draw card for player 2: %v", err)
+	}
+	
+	// Verify the new drawn card exists
+	if game.state.DrawnCard == nil {
+		t.Fatal("No drawn card in game state after player 2 draws")
+	}
+	newDrawnCard := game.state.DrawnCard
+	
+	// Get state for each player again
+	stateForPlayer1 = game.GetStateForPlayer("client1")
+	stateForPlayer2 = game.GetStateForPlayer("client2")
+	stateForPlayer3 = game.GetStateForPlayer("client3")
+	
+	// Player 1 should NOT see the card drawn by player 2
+	if stateForPlayer1.DrawnCard != nil {
+		t.Errorf("Player 1 should NOT see the card drawn by player 2, but sees: %v", stateForPlayer1.DrawnCard)
+	}
+	
+	// Player 2 should see their own drawn card
+	if stateForPlayer2.DrawnCard == nil {
+		t.Error("Player 2 should see their own drawn card")
+	}
+	if stateForPlayer2.DrawnCard != newDrawnCard {
+		t.Error("Player 2 should see the correct drawn card")
+	}
+	
+	// Player 3 should NOT see the card drawn by player 2
+	if stateForPlayer3.DrawnCard != nil {
+		t.Errorf("Player 3 should NOT see the card drawn by player 2, but sees: %v", stateForPlayer3.DrawnCard)
+	}
+	
+	// Test with taking from discard pile
+	err = game.DiscardDrawn("client2")
+	if err != nil {
+		t.Fatalf("Failed to discard for player 2: %v", err)
+	}
+	
+	// Player 3's turn - they take from discard
+	err = game.TakeFromDiscard("client3")
+	if err != nil {
+		t.Fatalf("Failed to take from discard: %v", err)
+	}
+	
+	// Verify drawn card privacy when taken from discard
+	stateForPlayer1 = game.GetStateForPlayer("client1")
+	stateForPlayer2 = game.GetStateForPlayer("client2")
+	stateForPlayer3 = game.GetStateForPlayer("client3")
+	
+	// Only player 3 should see the drawn card
+	if stateForPlayer1.DrawnCard != nil {
+		t.Error("Player 1 should NOT see card taken from discard by player 3")
+	}
+	if stateForPlayer2.DrawnCard != nil {
+		t.Error("Player 2 should NOT see card taken from discard by player 3")
+	}
+	if stateForPlayer3.DrawnCard == nil {
+		t.Error("Player 3 should see the card they took from discard")
+	}
+}
