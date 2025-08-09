@@ -1,0 +1,9 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "activations",
+    srcs = ["activations.go"],
+    importpath = "github.com/MoonBase/go/neuro/activations",
+    visibility = ["//visibility:public"],
+    deps = ["//go/neuro/utils"],
+)

@@ -1,0 +1,4 @@
+# Mark MNIST dataset files as binary
+*.gz binary
+*.gz -diff
+*.gz -merge

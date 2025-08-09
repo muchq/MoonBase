@@ -1,0 +1,17 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "inference",
+    srcs = [
+        "inference.go",
+        "serialization.go",
+    ],
+    importpath = "github.com/MoonBase/go/neuro/inference",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/neuro/activations",
+        "//go/neuro/layers",
+        "//go/neuro/network",
+        "//go/neuro/utils",
+    ],
+)
