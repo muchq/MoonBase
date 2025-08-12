@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/muchq/moonbase/go/games_ws_backend/hub"
+	"github.com/muchq/moonbase/go/games_ws_backend/players"
 )
 
 // mockClient simulates a websocket client for testing
@@ -61,7 +62,7 @@ func (m *mockClient) close() {
 
 func TestHub_PlayerJoin(t *testing.T) {
 	// Use deterministic ID generator for predictable tests
-	thoughtsHub := NewThoughtsHubWithIDGenerator(NewDeterministicIDGenerator())
+	thoughtsHub := NewThoughtsHubWithIDGenerator(players.NewDeterministicIDGenerator())
 	go thoughtsHub.Run()
 	defer func() {
 		// Clean shutdown would require more complex coordination
@@ -140,7 +141,7 @@ func TestHub_PlayerJoin(t *testing.T) {
 
 func TestHub_PositionUpdate(t *testing.T) {
 	// Use deterministic ID generator for predictable tests
-	thoughtsHub := NewThoughtsHubWithIDGenerator(NewDeterministicIDGenerator())
+	thoughtsHub := NewThoughtsHubWithIDGenerator(players.NewDeterministicIDGenerator())
 	go thoughtsHub.Run()
 
 	// Create and register mock clients
@@ -230,7 +231,7 @@ func TestHub_PlayerLeave(t *testing.T) {
 		clients:        make(map[*hub.Client]bool),
 		players:        make(map[string]*Player),
 		clientToPlayer: make(map[*hub.Client]string),
-		idGenerator:    NewDeterministicIDGenerator(),
+		idGenerator:    players.NewDeterministicIDGenerator(),
 	}
 	go thoughtsHub.Run()
 
@@ -318,7 +319,7 @@ func TestHub_ShapeUpdate(t *testing.T) {
 		clients:        make(map[*hub.Client]bool),
 		players:        make(map[string]*Player),
 		clientToPlayer: make(map[*hub.Client]string),
-		idGenerator:    NewDeterministicIDGenerator(),
+		idGenerator:    players.NewDeterministicIDGenerator(),
 	}
 	go thoughtsHub.Run()
 
@@ -411,7 +412,7 @@ func TestHub_ShapeUpdate(t *testing.T) {
 
 func TestHub_InvalidMessages(t *testing.T) {
 	// Use deterministic ID generator for predictable tests
-	thoughtsHub := NewThoughtsHubWithIDGenerator(NewDeterministicIDGenerator())
+	thoughtsHub := NewThoughtsHubWithIDGenerator(players.NewDeterministicIDGenerator())
 	go thoughtsHub.Run()
 
 	client1 := newMockClient("client1")
@@ -491,7 +492,7 @@ func TestHub_InvalidMessages(t *testing.T) {
 
 func TestHub_GameStateForNewPlayer(t *testing.T) {
 	// Use deterministic ID generator for predictable tests
-	thoughtsHub := NewThoughtsHubWithIDGenerator(NewDeterministicIDGenerator())
+	thoughtsHub := NewThoughtsHubWithIDGenerator(players.NewDeterministicIDGenerator())
 	go thoughtsHub.Run()
 
 	// Create first player
