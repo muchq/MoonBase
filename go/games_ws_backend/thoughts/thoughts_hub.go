@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/muchq/moonbase/go/games_ws_backend/hub"
+	"github.com/muchq/moonbase/go/games_ws_backend/players"
 )
 
 // GameMessageData represents a message with its sender
@@ -34,7 +35,7 @@ type ThoughtsHub struct {
 	unregister chan *hub.Client
 
 	// Player ID generator
-	idGenerator PlayerIDGenerator
+	idGenerator players.PlayerIDGenerator
 }
 
 func (t *ThoughtsHub) Register(c *hub.Client) {
@@ -50,10 +51,10 @@ func (t *ThoughtsHub) GameMessage(data hub.GameMessageData) {
 }
 
 func NewThoughtsHub() hub.Hub {
-	return NewThoughtsHubWithIDGenerator(&WhimsicalIDGenerator{})
+	return NewThoughtsHubWithIDGenerator(&players.WhimsicalIDGenerator{})
 }
 
-func NewThoughtsHubWithIDGenerator(idGenerator PlayerIDGenerator) hub.Hub {
+func NewThoughtsHubWithIDGenerator(idGenerator players.PlayerIDGenerator) hub.Hub {
 	return &ThoughtsHub{
 		gameMessage:    make(chan hub.GameMessageData),
 		register:       make(chan *hub.Client),

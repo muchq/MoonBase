@@ -7,24 +7,25 @@ import (
 	"sync"
 
 	"github.com/muchq/moonbase/go/games_ws_backend/hub"
+	"github.com/muchq/moonbase/go/games_ws_backend/players"
 )
 
 // GolfHub maintains active games and routes messages
 type GolfHub struct {
 	// Active games mapped by game ID
 	games map[string]*Game
-	
+
 	// Client to game ID mapping
 	clientToGame map[*hub.Client]string
-	
+
 	// Mutex for thread safety
 	mu sync.RWMutex
-	
+
 	// Channels from hub interface
 	gameMessage chan hub.GameMessageData
 	register    chan *hub.Client
 	unregister  chan *hub.Client
-	
+
 	// Registered clients
 	clients map[*hub.Client]bool
 }
@@ -32,12 +33,12 @@ type GolfHub struct {
 // NewGolfHub creates a new golf hub instance
 func NewGolfHub() hub.Hub {
 	return &GolfHub{
-		games:           make(map[string]*Game),
-		clientToGame:    make(map[*hub.Client]string),
-		gameMessage:     make(chan hub.GameMessageData),
-		register:        make(chan *hub.Client),
-		unregister:      make(chan *hub.Client),
-		clients:         make(map[*hub.Client]bool),
+		games:        make(map[string]*Game),
+		clientToGame: make(map[*hub.Client]string),
+		gameMessage:  make(chan hub.GameMessageData),
+		register:     make(chan *hub.Client),
+		unregister:   make(chan *hub.Client),
+		clients:      make(map[*hub.Client]bool),
 	}
 }
 
@@ -62,10 +63,10 @@ func (h *GolfHub) Run() {
 		select {
 		case client := <-h.register:
 			h.handleRegister(client)
-			
+
 		case client := <-h.unregister:
 			h.handleUnregister(client)
-			
+
 		case msgData := <-h.gameMessage:
 			h.handleGameMessage(msgData)
 		}
@@ -77,19 +78,19 @@ func (h *GolfHub) handleRegister(client *hub.Client) {
 	h.mu.Lock()
 	h.clients[client] = true
 	h.mu.Unlock()
-	
-	slog.Info("Golf client connected", 
+
+	slog.Info("Golf client connected",
 		"clientAddr", getClientAddr(client))
 }
 
 // handleUnregister processes client disconnection
 func (h *GolfHub) handleUnregister(client *hub.Client) {
 	var gameToUpdate *Game
-	
+
 	func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		
+
 		if _, ok := h.clients[client]; ok {
 			// Remove player from game if they're in one
 			if gameID, exists := h.clientToGame[client]; exists {
@@ -101,7 +102,7 @@ func (h *GolfHub) handleUnregister(client *hub.Client) {
 					} else {
 						// Store game reference for broadcasting after releasing lock
 						gameToUpdate = game
-						
+
 						// Clean up empty games
 						if len(game.state.Players) == 0 {
 							delete(h.games, gameID)
@@ -112,15 +113,15 @@ func (h *GolfHub) handleUnregister(client *hub.Client) {
 				}
 				delete(h.clientToGame, client)
 			}
-			
+
 			delete(h.clients, client)
 			close(client.Send)
-			
+
 			slog.Info("Golf client disconnected",
 				"clientAddr", getClientAddr(client))
 		}
 	}()
-	
+
 	// Broadcast updated game state after releasing the lock
 	if gameToUpdate != nil {
 		h.broadcastGameState(gameToUpdate)
@@ -134,7 +135,7 @@ func (h *GolfHub) handleGameMessage(msgData hub.GameMessageData) {
 		h.sendError(msgData.Sender, "Invalid message format")
 		return
 	}
-	
+
 	switch msg.Type {
 	case "createGame":
 		h.handleCreateGame(msgData.Sender)
@@ -165,18 +166,19 @@ func (h *GolfHub) handleGameMessage(msgData hub.GameMessageData) {
 func (h *GolfHub) handleCreateGame(client *hub.Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	
+
 	// Check if client is already in a game
 	if _, exists := h.clientToGame[client]; exists {
 		h.sendError(client, "Already in a game")
 		return
 	}
-	
+
 	// Create new game
 	gameID := GenerateGameID()
-	game := NewGame(gameID)
+	idGenerator := &players.WhimsicalIDGenerator{}
+	game := NewGame(gameID, idGenerator)
 	h.games[gameID] = game
-	
+
 	// Add player to game
 	player, err := game.AddPlayer(getClientID(client))
 	if err != nil {
@@ -184,12 +186,12 @@ func (h *GolfHub) handleCreateGame(client *hub.Client) {
 		delete(h.games, gameID)
 		return
 	}
-	
+
 	h.clientToGame[client] = gameID
-	
+
 	// Send game joined message with personalized view
 	h.sendGameJoined(client, player.ID, game.GetStateForPlayer(getClientID(client)))
-	
+
 	slog.Info("Game created",
 		"gameID", gameID,
 		"playerID", player.ID,
@@ -200,18 +202,18 @@ func (h *GolfHub) handleCreateGame(client *hub.Client) {
 func (h *GolfHub) handleJoinGame(client *hub.Client, gameID string) {
 	var game *Game
 	var player *Player
-	
+
 	// Do the joining logic with the lock
 	func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		
+
 		// Check if client is already in a game
 		if _, exists := h.clientToGame[client]; exists {
 			h.sendError(client, "Already in a game")
 			return
 		}
-		
+
 		// Find game
 		var exists bool
 		game, exists = h.games[gameID]
@@ -219,7 +221,7 @@ func (h *GolfHub) handleJoinGame(client *hub.Client, gameID string) {
 			h.sendError(client, "Game not found")
 			return
 		}
-		
+
 		// Add player to game
 		var err error
 		player, err = game.AddPlayer(getClientID(client))
@@ -227,21 +229,21 @@ func (h *GolfHub) handleJoinGame(client *hub.Client, gameID string) {
 			h.sendError(client, err.Error())
 			return
 		}
-		
+
 		h.clientToGame[client] = gameID
 	}()
-	
+
 	// Exit if join failed
 	if game == nil || player == nil {
 		return
 	}
-	
+
 	// Send game joined message to new player with personalized view
 	h.sendGameJoined(client, player.ID, game.GetStateForPlayer(getClientID(client)))
-	
+
 	// Broadcast updated state to all players (without holding the lock)
 	h.broadcastGameState(game)
-	
+
 	slog.Info("Player joined game",
 		"gameID", gameID,
 		"playerID", player.ID,
@@ -253,23 +255,23 @@ func (h *GolfHub) handleStartGame(client *hub.Client) {
 	h.mu.RLock()
 	game := h.getClientGame(client)
 	h.mu.RUnlock()
-	
+
 	if game == nil {
 		h.sendError(client, "Not in a game")
 		return
 	}
-	
+
 	if err := game.StartGame(); err != nil {
 		h.sendError(client, err.Error())
 		return
 	}
-	
+
 	// Broadcast game started message
 	h.broadcastToGameLocked(game, &GameStartedMessage{Type: "gameStarted"})
-	
+
 	// Broadcast updated game state
 	h.broadcastGameState(game)
-	
+
 	slog.Info("Game started", "gameID", game.state.ID)
 }
 
@@ -278,17 +280,17 @@ func (h *GolfHub) handlePeekCard(client *hub.Client, cardIndex int) {
 	h.mu.RLock()
 	game := h.getClientGame(client)
 	h.mu.RUnlock()
-	
+
 	if game == nil {
 		h.sendError(client, "Not in a game")
 		return
 	}
-	
+
 	if err := game.PeekCard(getClientID(client), cardIndex); err != nil {
 		h.sendError(client, err.Error())
 		return
 	}
-	
+
 	// Send updated game state to all players if all have peeked
 	if game.state.GamePhase == "peeking" {
 		h.broadcastGameState(game)
@@ -303,17 +305,17 @@ func (h *GolfHub) handleDrawCard(client *hub.Client) {
 	h.mu.RLock()
 	game := h.getClientGame(client)
 	h.mu.RUnlock()
-	
+
 	if game == nil {
 		h.sendError(client, "Not in a game")
 		return
 	}
-	
+
 	if err := game.DrawCard(getClientID(client)); err != nil {
 		h.sendError(client, err.Error())
 		return
 	}
-	
+
 	// Broadcast updated state
 	h.broadcastGameState(game)
 }
@@ -323,17 +325,17 @@ func (h *GolfHub) handleTakeFromDiscard(client *hub.Client) {
 	h.mu.RLock()
 	game := h.getClientGame(client)
 	h.mu.RUnlock()
-	
+
 	if game == nil {
 		h.sendError(client, "Not in a game")
 		return
 	}
-	
+
 	if err := game.TakeFromDiscard(getClientID(client)); err != nil {
 		h.sendError(client, err.Error())
 		return
 	}
-	
+
 	// Broadcast updated state
 	h.broadcastGameState(game)
 }
@@ -343,27 +345,27 @@ func (h *GolfHub) handleSwapCard(client *hub.Client, cardIndex int) {
 	h.mu.RLock()
 	game := h.getClientGame(client)
 	h.mu.RUnlock()
-	
+
 	if game == nil {
 		h.sendError(client, "Not in a game")
 		return
 	}
-	
+
 	oldPlayerIndex := game.state.CurrentPlayerIndex
-	
+
 	if err := game.SwapCard(getClientID(client), cardIndex); err != nil {
 		h.sendError(client, err.Error())
 		return
 	}
-	
+
 	// Broadcast updated state
 	h.broadcastGameState(game)
-	
+
 	// Check if turn changed
 	if oldPlayerIndex != game.state.CurrentPlayerIndex {
 		h.broadcastTurnChanged(game)
 	}
-	
+
 	// Check if game ended
 	if game.state.GamePhase == "ended" {
 		h.broadcastGameEnded(game)
@@ -375,27 +377,27 @@ func (h *GolfHub) handleDiscardDrawn(client *hub.Client) {
 	h.mu.RLock()
 	game := h.getClientGame(client)
 	h.mu.RUnlock()
-	
+
 	if game == nil {
 		h.sendError(client, "Not in a game")
 		return
 	}
-	
+
 	oldPlayerIndex := game.state.CurrentPlayerIndex
-	
+
 	if err := game.DiscardDrawn(getClientID(client)); err != nil {
 		h.sendError(client, err.Error())
 		return
 	}
-	
+
 	// Broadcast updated state
 	h.broadcastGameState(game)
-	
+
 	// Check if turn changed
 	if oldPlayerIndex != game.state.CurrentPlayerIndex {
 		h.broadcastTurnChanged(game)
 	}
-	
+
 	// Check if game ended
 	if game.state.GamePhase == "ended" {
 		h.broadcastGameEnded(game)
@@ -407,29 +409,29 @@ func (h *GolfHub) handleKnock(client *hub.Client) {
 	h.mu.RLock()
 	game := h.getClientGame(client)
 	h.mu.RUnlock()
-	
+
 	if game == nil {
 		h.sendError(client, "Not in a game")
 		return
 	}
-	
+
 	player := game.GetPlayerByClientID(getClientID(client))
 	if player == nil {
 		h.sendError(client, "Player not found")
 		return
 	}
-	
+
 	if err := game.Knock(getClientID(client)); err != nil {
 		h.sendError(client, err.Error())
 		return
 	}
-	
+
 	// Broadcast player knocked message
 	h.broadcastToGameLocked(game, &PlayerKnockedMessage{
 		Type:       "playerKnocked",
 		PlayerName: player.Name,
 	})
-	
+
 	// Broadcast updated state
 	h.broadcastGameState(game)
 }
@@ -476,7 +478,7 @@ func (h *GolfHub) broadcastGameState(game *Game) {
 		state  *GameState
 	}
 	var pairs []clientStatePair
-	
+
 	// Collect all clients and their personalized states
 	h.mu.RLock()
 	for client, gameID := range h.clientToGame {
@@ -486,7 +488,7 @@ func (h *GolfHub) broadcastGameState(game *Game) {
 		}
 	}
 	h.mu.RUnlock()
-	
+
 	// Send messages without holding the lock
 	for _, pair := range pairs {
 		msg := &GameStateUpdateMessage{
@@ -514,7 +516,7 @@ func (h *GolfHub) broadcastGameEnded(game *Game) {
 	if winner == nil {
 		return
 	}
-	
+
 	msg := &GameEndedMessage{
 		Type:        "gameEnded",
 		Winner:      winner.Name,
@@ -526,7 +528,7 @@ func (h *GolfHub) broadcastGameEnded(game *Game) {
 func (h *GolfHub) broadcastToGame(game *Game, message interface{}) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	
+
 	h.broadcastToGameLocked(game, message)
 }
 
@@ -546,7 +548,7 @@ func (h *GolfHub) sendJSON(client *hub.Client, message interface{}) {
 			"type", message)
 		return
 	}
-	
+
 	select {
 	case client.Send <- data:
 	default:
@@ -562,15 +564,15 @@ func (h *GolfHub) handleHideCards(client *hub.Client) {
 	h.mu.RLock()
 	game := h.getClientGame(client)
 	h.mu.RUnlock()
-	
+
 	if game == nil {
 		h.sendError(client, "Not in a game")
 		return
 	}
-	
+
 	// Hide the cards
 	game.HidePeekedCards()
-	
+
 	// Broadcast updated state to all players
 	h.broadcastGameState(game)
 }

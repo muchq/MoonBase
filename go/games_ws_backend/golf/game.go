@@ -3,6 +3,8 @@ package golf
 import (
 	"fmt"
 	"sync"
+
+	"github.com/muchq/moonbase/go/games_ws_backend/players"
 )
 
 // Game represents a single golf game instance
@@ -12,10 +14,11 @@ type Game struct {
 	deck             []*Card
 	playersByClient  map[string]*Player // client ID -> player
 	finalRoundPlayed map[string]bool    // track who has played their final turn
+	idGenerator      players.PlayerIDGenerator
 }
 
 // NewGame creates a new game instance
-func NewGame(gameID string) *Game {
+func NewGame(gameID string, idGenerator players.PlayerIDGenerator) *Game {
 	return &Game{
 		state: &GameState{
 			ID:                 gameID,
@@ -30,6 +33,7 @@ func NewGame(gameID string) *Game {
 		},
 		playersByClient:  make(map[string]*Player),
 		finalRoundPlayed: make(map[string]bool),
+		idGenerator:      idGenerator,
 	}
 }
 
@@ -49,7 +53,7 @@ func (g *Game) AddPlayer(clientID string) (*Player, error) {
 	// Generate player ID and name
 	playerNum := len(g.state.Players) + 1
 	playerID := fmt.Sprintf("player_%s_%d", g.state.ID, playerNum)
-	playerName := GeneratePlayerName(playerNum)
+	playerName := g.idGenerator.GenerateID()
 
 	player := &Player{
 		ID:            playerID,
@@ -171,7 +175,7 @@ func (g *Game) PeekCard(clientID string, cardIndex int) error {
 	// Mark that player has peeked
 	if len(player.RevealedCards) == 2 {
 		player.HasPeeked = true
-		
+
 		// Check if all players have peeked
 		allPeeked := true
 		for _, p := range g.state.Players {
@@ -180,7 +184,7 @@ func (g *Game) PeekCard(clientID string, cardIndex int) error {
 				break
 			}
 		}
-		
+
 		if allPeeked {
 			// Set the flag that all players have peeked
 			g.state.GamePhase = "peeking"
@@ -330,7 +334,7 @@ func (g *Game) Knock(clientID string) error {
 	g.state.GamePhase = "knocked"
 
 	// Don't mark the knocking player as having played - they knocked instead of playing
-	
+
 	// Advance to next player
 	g.state.CurrentPlayerIndex = (g.state.CurrentPlayerIndex + 1) % len(g.state.Players)
 
@@ -414,7 +418,7 @@ func (g *Game) GetStateForPlayer(clientID string) *GameState {
 		PeekedAtDrawPile:   g.state.PeekedAtDrawPile,
 		AllPlayersPeeked:   g.state.AllPlayersPeeked,
 	}
-	
+
 	// Only show drawn card to the current player
 	if g.state.DrawnCard != nil && g.state.Players[g.state.CurrentPlayerIndex].ID == viewingPlayer.ID {
 		stateCopy.DrawnCard = g.state.DrawnCard
@@ -502,7 +506,7 @@ func (g *Game) endTurn(clientID string) error {
 
 	// Reset peeked state for next turn
 	g.state.PeekedAtDrawPile = false
-	
+
 	// Advance to next player
 	g.state.CurrentPlayerIndex = (g.state.CurrentPlayerIndex + 1) % len(g.state.Players)
 	return nil
@@ -527,7 +531,7 @@ func (g *Game) calculatePlayerFinalScore(player *Player) int {
 			rankCounts[player.Cards[i].Rank]++
 		}
 	}
-	
+
 	// Calculate score with pairs canceling out
 	score := 0
 	for i := 0; i < 4; i++ {
@@ -540,7 +544,7 @@ func (g *Game) calculatePlayerFinalScore(player *Player) int {
 			// If there are 2 or 4 of the same rank, they cancel out
 		}
 	}
-	
+
 	return score
 }
 
