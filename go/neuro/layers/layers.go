@@ -3,8 +3,8 @@ package layers
 import (
 	"fmt"
 	
-	"github.com/MoonBase/go/neuro/activations"
-	"github.com/MoonBase/go/neuro/utils"
+	"github.com/muchq/moonbase/go/neuro/activations"
+	"github.com/muchq/moonbase/go/neuro/utils"
 )
 
 type Layer interface {
@@ -12,6 +12,7 @@ type Layer interface {
 	Backward(gradOutput *utils.Tensor) *utils.Tensor
 	UpdateWeights(lr float64)
 	GetParams() []*utils.Tensor
+	GetGradients() []*utils.Tensor
 	SetParams(params []*utils.Tensor)
 	Name() string
 }
@@ -102,6 +103,9 @@ func (d *Dense) Backward(gradOutput *utils.Tensor) *utils.Tensor {
 }
 
 func (d *Dense) UpdateWeights(lr float64) {
+	if d.GradW == nil || d.GradB == nil {
+		return
+	}
 	for i := range d.Weights.Data {
 		d.Weights.Data[i] -= lr * d.GradW.Data[i]
 	}
@@ -112,6 +116,10 @@ func (d *Dense) UpdateWeights(lr float64) {
 
 func (d *Dense) GetParams() []*utils.Tensor {
 	return []*utils.Tensor{d.Weights, d.Bias}
+}
+
+func (d *Dense) GetGradients() []*utils.Tensor {
+	return []*utils.Tensor{d.GradW, d.GradB}
 }
 
 func (d *Dense) SetParams(params []*utils.Tensor) {
@@ -179,6 +187,10 @@ func (d *Dropout) Backward(gradOutput *utils.Tensor) *utils.Tensor {
 func (d *Dropout) UpdateWeights(lr float64) {}
 
 func (d *Dropout) GetParams() []*utils.Tensor {
+	return []*utils.Tensor{}
+}
+
+func (d *Dropout) GetGradients() []*utils.Tensor {
 	return []*utils.Tensor{}
 }
 
@@ -344,6 +356,10 @@ func (b *BatchNorm) UpdateWeights(lr float64) {
 
 func (b *BatchNorm) GetParams() []*utils.Tensor {
 	return []*utils.Tensor{b.Gamma, b.Beta, b.RunMean, b.RunVar}
+}
+
+func (b *BatchNorm) GetGradients() []*utils.Tensor {
+	return []*utils.Tensor{b.GradGamma, b.GradBeta}
 }
 
 func (b *BatchNorm) SetParams(params []*utils.Tensor) {

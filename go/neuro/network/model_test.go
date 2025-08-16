@@ -4,11 +4,11 @@ import (
 	"math"
 	"testing"
 	
-	"github.com/MoonBase/go/neuro/activations"
-	"github.com/MoonBase/go/neuro/data"
-	"github.com/MoonBase/go/neuro/layers"
-	"github.com/MoonBase/go/neuro/loss"
-	"github.com/MoonBase/go/neuro/utils"
+	"github.com/muchq/moonbase/go/neuro/activations"
+	"github.com/muchq/moonbase/go/neuro/data"
+	"github.com/muchq/moonbase/go/neuro/layers"
+	"github.com/muchq/moonbase/go/neuro/loss"
+	"github.com/muchq/moonbase/go/neuro/utils"
 )
 
 func TestModelForwardPass(t *testing.T) {

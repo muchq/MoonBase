@@ -6,10 +6,10 @@ import (
 	"io"
 	"os"
 	
-	"github.com/MoonBase/go/neuro/activations"
-	"github.com/MoonBase/go/neuro/layers"
-	"github.com/MoonBase/go/neuro/network"
-	"github.com/MoonBase/go/neuro/utils"
+	"github.com/muchq/moonbase/go/neuro/activations"
+	"github.com/muchq/moonbase/go/neuro/layers"
+	"github.com/muchq/moonbase/go/neuro/network"
+	"github.com/muchq/moonbase/go/neuro/utils"
 )
 
 type InferenceEngine struct {
@@ -102,6 +102,47 @@ func (e *InferenceEngine) createLayer(config LayerConfig) (layers.Layer, error) 
 		}
 		
 		return layers.NewDense(inputSize, outputSize, activation), nil
+		
+	case "Conv2D":
+		inChannels := int(config.Params["in_channels"].(float64))
+		outChannels := int(config.Params["out_channels"].(float64))
+		
+		// Handle kernel_size which could be an array or a single value
+		var kernelSize []int
+		if ks, ok := config.Params["kernel_size"].([]interface{}); ok {
+			kernelSize = make([]int, len(ks))
+			for i, v := range ks {
+				kernelSize[i] = int(v.(float64))
+			}
+		} else if ks, ok := config.Params["kernel_size"].(float64); ok {
+			kernelSize = []int{int(ks), int(ks)}
+		}
+		
+		stride := int(config.Params["stride"].(float64))
+		padding := config.Params["padding"].(string)
+		useBias := config.Params["use_bias"].(bool)
+		
+		return layers.NewConv2D(inChannels, outChannels, kernelSize, stride, padding, useBias), nil
+		
+	case "MaxPool2D":
+		// Handle pool_size which could be an array or a single value
+		var poolSize []int
+		if ps, ok := config.Params["pool_size"].([]interface{}); ok {
+			poolSize = make([]int, len(ps))
+			for i, v := range ps {
+				poolSize[i] = int(v.(float64))
+			}
+		} else if ps, ok := config.Params["pool_size"].(float64); ok {
+			poolSize = []int{int(ps), int(ps)}
+		}
+		
+		stride := int(config.Params["stride"].(float64))
+		padding := config.Params["padding"].(string)
+		
+		return layers.NewMaxPool2D(poolSize, stride, padding), nil
+		
+	case "Flatten":
+		return layers.NewFlatten(), nil
 		
 	case "Dropout":
 		rate := config.Params["rate"].(float64)

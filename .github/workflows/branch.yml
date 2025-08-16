@@ -21,10 +21,19 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0  # Fetch full history for bazel-diff
-      
+
       - name: Configure git safe directory
         run: git config --global --add safe.directory /__w/MoonBase/MoonBase
-      
+
+      - name: Free up disk space
+        run: |
+          df -h
+          rm -rf /usr/share/dotnet
+          rm -rf /opt/ghc
+          rm -rf "/usr/local/share/boost"
+          rm -rf "$AGENT_TOOLSDIRECTORY"
+          df -h
+
       - uses: bazel-contrib/setup-bazel@0.15.0
         with:
           bazelisk-cache: true

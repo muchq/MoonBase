@@ -3,7 +3,7 @@ package activations
 import (
 	"math"
 	
-	"github.com/MoonBase/go/neuro/utils"
+	"github.com/muchq/moonbase/go/neuro/utils"
 )
 
 type Activation interface {

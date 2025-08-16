@@ -3,8 +3,8 @@ package network
 import (
 	"math"
 	
-	"github.com/MoonBase/go/neuro/layers"
-	"github.com/MoonBase/go/neuro/utils"
+	"github.com/muchq/moonbase/go/neuro/layers"
+	"github.com/muchq/moonbase/go/neuro/utils"
 )
 
 type Optimizer interface {

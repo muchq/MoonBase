@@ -1,4 +1,4 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_binary")
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_test")
 
 go_binary(
     name = "mnist_example",
@@ -29,20 +29,6 @@ go_binary(
 )
 
 go_binary(
-    name = "mnist_vendored",
-    srcs = ["mnist_vendored.go"],
-    deps = [
-        "//go/neuro/activations",
-        "//go/neuro/data",
-        "//go/neuro/inference",
-        "//go/neuro/layers",
-        "//go/neuro/loss",
-        "//go/neuro/network",
-        "//go/neuro/utils",
-    ],
-)
-
-go_binary(
     name = "mnist_production",
     srcs = ["mnist_production.go"],
     deps = [
@@ -50,5 +36,124 @@ go_binary(
         "//go/neuro/inference",
         "//go/neuro/utils",
         "//go/resilience4g/rate_limit",
+    ],
+)
+
+go_binary(
+    name = "mnist_production_unified",
+    srcs = ["mnist_production_unified.go"],
+    deps = [
+        "//go/mucks",
+        "//go/neuro/inference",
+        "//go/neuro/utils",
+        "//go/resilience4g/rate_limit",
+    ],
+)
+
+go_binary(
+    name = "mnist_cnn",
+    srcs = ["mnist_cnn.go"],
+    deps = [
+        "//go/neuro/activations",
+        "//go/neuro/data",
+        "//go/neuro/layers",
+        "//go/neuro/utils",
+    ],
+)
+
+go_binary(
+    name = "mnist_cnn_full",
+    srcs = ["mnist_cnn_full.go"],
+    deps = [
+        "//go/neuro/activations",
+        "//go/neuro/data",
+        "//go/neuro/inference",
+        "//go/neuro/layers",
+        "//go/neuro/network",
+        "//go/neuro/utils",
+    ],
+)
+
+go_binary(
+    name = "mnist_cnn_production",
+    srcs = ["mnist_cnn_production.go"],
+    deps = [
+        "//go/mucks",
+        "//go/neuro/inference",
+        "//go/neuro/utils",
+        "//go/resilience4g/rate_limit",
+    ],
+)
+
+go_binary(
+    name = "mnist_cnn_parallel",
+    srcs = ["mnist_cnn_parallel.go"],
+    deps = [
+        "//go/neuro/activations",
+        "//go/neuro/data",
+        "//go/neuro/inference",
+        "//go/neuro/layers",
+        "//go/neuro/network",
+        "//go/neuro/utils",
+    ],
+)
+
+go_test(
+    name = "mnist_cnn_parallel_test",
+    size = "small",
+    srcs = [
+        "mnist_cnn_parallel.go",
+        "mnist_cnn_parallel_test.go",
+    ],
+    deps = [
+        "//go/neuro/activations",
+        "//go/neuro/data",
+        "//go/neuro/inference",
+        "//go/neuro/layers",
+        "//go/neuro/network",
+        "//go/neuro/utils",
+    ],
+)
+
+go_binary(
+    name = "mnist_cnn_parallel_optimized",
+    srcs = ["mnist_cnn_parallel_optimized.go"],
+    deps = [
+        "//go/neuro/activations",
+        "//go/neuro/data",
+        "//go/neuro/inference",
+        "//go/neuro/layers",
+        "//go/neuro/network",
+        "//go/neuro/utils",
+    ],
+)
+
+go_test(
+    name = "mnist_cnn_parallel_optimized_test",
+    size = "small",
+    srcs = [
+        "mnist_cnn_parallel_optimized.go",
+        "mnist_cnn_parallel_optimized_test.go",
+    ],
+    deps = [
+        "//go/neuro/activations",
+        "//go/neuro/data",
+        "//go/neuro/inference",
+        "//go/neuro/layers",
+        "//go/neuro/network",
+        "//go/neuro/utils",
+    ],
+)
+
+go_binary(
+    name = "mnist_cnn_parallel_fixed",
+    srcs = ["mnist_cnn_parallel_fixed.go"],
+    deps = [
+        "//go/neuro/activations",
+        "//go/neuro/data",
+        "//go/neuro/inference",
+        "//go/neuro/layers",
+        "//go/neuro/network",
+        "//go/neuro/utils",
     ],
 )

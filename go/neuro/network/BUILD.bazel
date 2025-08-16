@@ -6,7 +6,7 @@ go_library(
         "model.go",
         "optimizer.go",
     ],
-    importpath = "github.com/MoonBase/go/neuro/network",
+    importpath = "github.com/muchq/moonbase/go/neuro/network",
     visibility = ["//visibility:public"],
     deps = [
         "//go/neuro/layers",
