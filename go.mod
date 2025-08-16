@@ -9,6 +9,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/stretchr/testify v1.10.0
 	google.golang.org/grpc v1.74.2
+	gonum.org/v1/gonum v0.16.0
 )
 
 require (

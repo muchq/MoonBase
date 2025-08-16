@@ -6,13 +6,13 @@ import (
 	"math/rand"
 	"time"
 	
-	"github.com/MoonBase/go/neuro/activations"
-	"github.com/MoonBase/go/neuro/data"
-	"github.com/MoonBase/go/neuro/inference"
-	"github.com/MoonBase/go/neuro/layers"
-	"github.com/MoonBase/go/neuro/loss"
-	"github.com/MoonBase/go/neuro/network"
-	"github.com/MoonBase/go/neuro/utils"
+	"github.com/muchq/moonbase/go/neuro/activations"
+	"github.com/muchq/moonbase/go/neuro/data"
+	"github.com/muchq/moonbase/go/neuro/inference"
+	"github.com/muchq/moonbase/go/neuro/layers"
+	"github.com/muchq/moonbase/go/neuro/loss"
+	"github.com/muchq/moonbase/go/neuro/network"
+	"github.com/muchq/moonbase/go/neuro/utils"
 )
 
 func main() {

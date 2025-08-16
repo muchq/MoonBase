@@ -5,14 +5,21 @@ go_library(
     srcs = [
         "math.go",
         "tensor.go",
+        "tensor_conv.go",
     ],
-    importpath = "github.com/MoonBase/go/neuro/utils",
+    importpath = "github.com/muchq/moonbase/go/neuro/utils",
     visibility = ["//visibility:public"],
+    deps = [
+        "@org_gonum_v1_gonum//mat:go_default_library",
+    ],
 )
 
 go_test(
     name = "utils_test",
     size = "small",
-    srcs = ["tensor_test.go"],
+    srcs = [
+        "tensor_conv_test.go",
+        "tensor_test.go",
+    ],
     embed = [":utils"],
 )

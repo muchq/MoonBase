@@ -1,4 +1,4 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library")
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "inference",
@@ -6,8 +6,21 @@ go_library(
         "inference.go",
         "serialization.go",
     ],
-    importpath = "github.com/MoonBase/go/neuro/inference",
+    importpath = "github.com/muchq/moonbase/go/neuro/inference",
     visibility = ["//visibility:public"],
+    deps = [
+        "//go/neuro/activations",
+        "//go/neuro/layers",
+        "//go/neuro/network",
+        "//go/neuro/utils",
+    ],
+)
+
+go_test(
+    name = "inference_test",
+    size = "small",
+    srcs = ["serialization_test.go"],
+    embed = [":inference"],
     deps = [
         "//go/neuro/activations",
         "//go/neuro/layers",

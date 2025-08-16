@@ -3,7 +3,7 @@ package data
 import (
 	"math/rand"
 	
-	"github.com/MoonBase/go/neuro/utils"
+	"github.com/muchq/moonbase/go/neuro/utils"
 )
 
 type Dataset struct {
