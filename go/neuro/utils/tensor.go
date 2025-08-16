@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"gonum.org/v1/gonum/mat"
 )
 
 type Tensor struct {
@@ -383,24 +384,23 @@ func (t *Tensor) Scale(scalar float64) *Tensor {
 func (t *Tensor) MatMul(other *Tensor) *Tensor {
 	// Handle both 2D and 3D (batched) matrix multiplication
 	if len(t.Shape) == 2 && len(other.Shape) == 2 {
-		// Standard 2D matrix multiplication
+		// Standard 2D matrix multiplication using Gonum
 		if t.Shape[1] != other.Shape[0] {
 			panic(fmt.Sprintf("incompatible shapes for matmul: (%d,%d) and (%d,%d)", 
 				t.Shape[0], t.Shape[1], other.Shape[0], other.Shape[1]))
 		}
 		
 		m, k, n := t.Shape[0], t.Shape[1], other.Shape[1]
-		result := NewTensor(m, n)
 		
-		for i := 0; i < m; i++ {
-			for j := 0; j < n; j++ {
-				sum := 0.0
-				for l := 0; l < k; l++ {
-					sum += t.Get(i, l) * other.Get(l, j)
-				}
-				result.Set(sum, i, j)
-			}
-		}
+		// Use Gonum for optimized matrix multiplication
+		a := mat.NewDense(m, k, t.Data)
+		b := mat.NewDense(k, n, other.Data)
+		c := mat.NewDense(m, n, nil)
+		c.Mul(a, b)
+		
+		// Extract the result data
+		result := NewTensor(m, n)
+		copy(result.Data, c.RawMatrix().Data)
 		
 		return result
 	} else if len(t.Shape) == 3 && len(other.Shape) == 2 {
@@ -415,16 +415,20 @@ func (t *Tensor) MatMul(other *Tensor) *Tensor {
 		p := other.Shape[1]
 		
 		result := NewTensor(batchSize, m, p)
+		
+		// Use Gonum for each batch
+		b_mat := mat.NewDense(n, p, other.Data)
+		
 		for b := 0; b < batchSize; b++ {
-			for i := 0; i < m; i++ {
-				for j := 0; j < p; j++ {
-					sum := 0.0
-					for k := 0; k < n; k++ {
-						sum += t.Get(b, i, k) * other.Get(k, j)
-					}
-					result.Set(sum, b, i, j)
-				}
-			}
+			// Extract batch slice
+			batchStart := b * m * n
+			a_mat := mat.NewDense(m, n, t.Data[batchStart:batchStart+m*n])
+			c_mat := mat.NewDense(m, p, nil)
+			c_mat.Mul(a_mat, b_mat)
+			
+			// Copy result to output tensor
+			resultStart := b * m * p
+			copy(result.Data[resultStart:resultStart+m*p], c_mat.RawMatrix().Data)
 		}
 		return result
 	} else if len(t.Shape) == 3 && len(other.Shape) == 3 {
@@ -439,16 +443,20 @@ func (t *Tensor) MatMul(other *Tensor) *Tensor {
 		p := other.Shape[2]
 		
 		result := NewTensor(batchSize, m, p)
+		
+		// Use Gonum for each batch
 		for b := 0; b < batchSize; b++ {
-			for i := 0; i < m; i++ {
-				for j := 0; j < p; j++ {
-					sum := 0.0
-					for k := 0; k < n; k++ {
-						sum += t.Get(b, i, k) * other.Get(b, k, j)
-					}
-					result.Set(sum, b, i, j)
-				}
-			}
+			// Extract batch slices
+			aStart := b * m * n
+			bStart := b * n * p
+			a_mat := mat.NewDense(m, n, t.Data[aStart:aStart+m*n])
+			b_mat := mat.NewDense(n, p, other.Data[bStart:bStart+n*p])
+			c_mat := mat.NewDense(m, p, nil)
+			c_mat.Mul(a_mat, b_mat)
+			
+			// Copy result to output tensor
+			resultStart := b * m * p
+			copy(result.Data[resultStart:resultStart+m*p], c_mat.RawMatrix().Data)
 		}
 		return result
 	} else if len(t.Shape) == 4 && len(other.Shape) == 4 {
@@ -465,17 +473,23 @@ func (t *Tensor) MatMul(other *Tensor) *Tensor {
 		p := other.Shape[3]
 		
 		result := NewTensor(batchSize, heads, m, p)
+		
+		// Use Gonum for each batch and head
 		for b := 0; b < batchSize; b++ {
 			for h := 0; h < heads; h++ {
-				for i := 0; i < m; i++ {
-					for j := 0; j < p; j++ {
-						sum := 0.0
-						for k := 0; k < n; k++ {
-							sum += t.Get(b, h, i, k) * other.Get(b, h, k, j)
-						}
-						result.Set(sum, b, h, i, j)
-					}
-				}
+				// Calculate offsets for this batch and head
+				aOffset := (b*heads + h) * m * n
+				bOffset := (b*heads + h) * n * p
+				
+				// Create matrices for this batch/head
+				a_mat := mat.NewDense(m, n, t.Data[aOffset:aOffset+m*n])
+				b_mat := mat.NewDense(n, p, other.Data[bOffset:bOffset+n*p])
+				c_mat := mat.NewDense(m, p, nil)
+				c_mat.Mul(a_mat, b_mat)
+				
+				// Copy result to output tensor
+				resultOffset := (b*heads + h) * m * p
+				copy(result.Data[resultOffset:resultOffset+m*p], c_mat.RawMatrix().Data)
 			}
 		}
 		return result
@@ -489,12 +503,13 @@ func (t *Tensor) Transpose() *Tensor {
 		panic("transpose only supported for 2D tensors")
 	}
 	
+	// Use Gonum for efficient transpose
+	m := mat.NewDense(t.Shape[0], t.Shape[1], t.Data)
+	transposed := mat.DenseCopyOf(m.T())
+	
 	result := NewTensor(t.Shape[1], t.Shape[0])
-	for i := 0; i < t.Shape[0]; i++ {
-		for j := 0; j < t.Shape[1]; j++ {
-			result.Set(t.Get(i, j), j, i)
-		}
-	}
+	copy(result.Data, transposed.RawMatrix().Data)
+	
 	return result
 }
 
