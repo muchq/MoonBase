@@ -7,7 +7,7 @@ go_library(
         "mnist_vendored.go",
     ],
     embedsrcs = glob(["mnist_vendor/*.gz"]),
-    importpath = "github.com/MoonBase/go/neuro/data",
+    importpath = "github.com/muchq/moonbase/go/neuro/data",
     visibility = ["//visibility:public"],
     deps = ["//go/neuro/utils"],
 )

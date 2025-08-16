@@ -10,8 +10,8 @@ import (
 	
 	"github.com/muchq/moonbase/go/mucks"
 	"github.com/muchq/moonbase/go/resilience4g/rate_limit"
-	"github.com/MoonBase/go/neuro/inference"
-	"github.com/MoonBase/go/neuro/utils"
+	"github.com/muchq/moonbase/go/neuro/inference"
+	"github.com/muchq/moonbase/go/neuro/utils"
 )
 
 // ProductionServer demonstrates a proper production inference service
@@ -40,14 +40,14 @@ func main() {
 	
 	// In production, you would load a model trained elsewhere
 	// For this demo, we'll use a model if it exists
-	modelPath := "models/mnist_vendored_model"
+	modelPath := "models/mnist_real_model"
 	
 	logger.Info("Loading model", "path", modelPath)
 	engine, err := inference.LoadModelForInference(modelPath)
 	if err != nil {
 		logger.Error("Model not found", "error", err)
-		fmt.Println("Please run mnist_vendored example first to train a model.")
-		fmt.Println("Run: bazel run //go/neuro/examples:mnist_vendored")
+		fmt.Println("Please run mnist_real example first to train a model.")
+		fmt.Println("Run: bazel run //go/neuro/examples:mnist_real")
 		
 		// For demo purposes, create a mock server
 		logger.Info("Starting mock server for demonstration")
@@ -310,7 +310,7 @@ func startMockServer() {
 			StatusCode: http.StatusServiceUnavailable,
 			ErrorCode:  503,
 			Message:    "Model not loaded",
-			Detail:     "Run mnist_vendored example first to train a model",
+			Detail:     "Run mnist_real example first to train a model",
 		})
 	})
 	

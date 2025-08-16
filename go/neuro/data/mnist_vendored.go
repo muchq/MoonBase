@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	
-	"github.com/MoonBase/go/neuro/utils"
+	"github.com/muchq/moonbase/go/neuro/utils"
 )
 
 // Embed the MNIST dataset files directly into the binary

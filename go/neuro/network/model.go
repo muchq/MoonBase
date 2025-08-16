@@ -3,9 +3,9 @@ package network
 import (
 	"fmt"
 	
-	"github.com/MoonBase/go/neuro/layers"
-	"github.com/MoonBase/go/neuro/loss"
-	"github.com/MoonBase/go/neuro/utils"
+	"github.com/muchq/moonbase/go/neuro/layers"
+	"github.com/muchq/moonbase/go/neuro/loss"
+	"github.com/muchq/moonbase/go/neuro/utils"
 )
 
 type Model struct {
