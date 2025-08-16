@@ -18,7 +18,7 @@ readme = "README.md"
 
 [workspace.dependencies]
 base64ct = { version = "1.8.0", features = ["alloc"] }
-clap = { version = "4.5.42", features = ["cargo"] }
+clap = { version = "4.5.45", features = ["cargo"] }
 doc_db_proto = { path = "protos/doc_db" }
 dotenv = "0.15.0"
 example_service = { path = "protos/example_service" }
@@ -35,4 +35,4 @@ simplelog = { version = "0.12.2", features = ["paris"] }
 tokio = { version = "1.47.1", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
 tonic = { version = "0.12.3", features = ["transport"] }
 tonic-build = "0.12.3"
-uuid = { version = "1.17.0", features = ["v4", "fast-rng"]}
+uuid = { version = "1.18.0", features = ["v4", "fast-rng"]}
