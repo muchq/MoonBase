@@ -28,10 +28,10 @@ jobs:
       - name: Free up disk space
         run: |
           df -h
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf "/usr/local/share/boost"
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          rm -rf /usr/share/dotnet
+          rm -rf /opt/ghc
+          rm -rf "/usr/local/share/boost"
+          rm -rf "$AGENT_TOOLSDIRECTORY"
           df -h
 
       - uses: bazel-contrib/setup-bazel@0.15.0
