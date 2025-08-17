@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/rand"
 	"gonum.org/v1/gonum/mat"
+	"gonum.org/v1/gonum/floats"
 )
 
 type Tensor struct {
@@ -91,22 +92,17 @@ func (t *Tensor) Copy() *Tensor {
 }
 
 func (t *Tensor) Add(other *Tensor) *Tensor {
-	// Handle same shape
+	// Handle same shape - use gonum for efficient vector addition
 	if shapeEqual(t.Shape, other.Shape) {
 		result := t.Copy()
-		for i := range result.Data {
-			result.Data[i] += other.Data[i]
-		}
+		floats.Add(result.Data, other.Data)
 		return result
 	}
 	
-	// Handle broadcasting when other is scalar (shape [1])
+	// Handle broadcasting when other is scalar (shape [1]) - use gonum
 	if len(other.Shape) == 1 && other.Shape[0] == 1 {
 		result := t.Copy()
-		scalar := other.Data[0]
-		for i := range result.Data {
-			result.Data[i] += scalar
-		}
+		floats.AddConst(other.Data[0], result.Data)
 		return result
 	}
 	
@@ -199,11 +195,9 @@ func (t *Tensor) Add(other *Tensor) *Tensor {
 func (t *Tensor) Sub(other *Tensor) *Tensor {
 	// Handle broadcasting for common cases
 	if shapeEqual(t.Shape, other.Shape) {
-		// Same shape - element-wise subtraction
+		// Same shape - element-wise subtraction using gonum
 		result := t.Copy()
-		for i := range result.Data {
-			result.Data[i] -= other.Data[i]
-		}
+		floats.Sub(result.Data, other.Data)
 		return result
 	}
 	
@@ -268,22 +262,17 @@ func (t *Tensor) Sub(other *Tensor) *Tensor {
 }
 
 func (t *Tensor) Mul(other *Tensor) *Tensor {
-	// Handle same shape
+	// Handle same shape - use gonum for efficient element-wise multiplication
 	if shapeEqual(t.Shape, other.Shape) {
 		result := t.Copy()
-		for i := range result.Data {
-			result.Data[i] *= other.Data[i]
-		}
+		floats.Mul(result.Data, other.Data)
 		return result
 	}
 	
-	// Handle broadcasting when other is scalar (shape [1])
+	// Handle broadcasting when other is scalar (shape [1]) - use gonum
 	if len(other.Shape) == 1 && other.Shape[0] == 1 {
 		result := t.Copy()
-		scalar := other.Data[0]
-		for i := range result.Data {
-			result.Data[i] *= scalar
-		}
+		floats.Scale(other.Data[0], result.Data)
 		return result
 	}
 	
@@ -375,9 +364,7 @@ func (t *Tensor) Mul(other *Tensor) *Tensor {
 
 func (t *Tensor) Scale(scalar float64) *Tensor {
 	result := t.Copy()
-	for i := range result.Data {
-		result.Data[i] *= scalar
-	}
+	floats.Scale(scalar, result.Data)
 	return result
 }
 
@@ -514,11 +501,7 @@ func (t *Tensor) Transpose() *Tensor {
 }
 
 func (t *Tensor) Sum() float64 {
-	sum := 0.0
-	for _, v := range t.Data {
-		sum += v
-	}
-	return sum
+	return floats.Sum(t.Data)
 }
 
 func (t *Tensor) Mean() float64 {
@@ -651,19 +634,15 @@ func AddBias(t *Tensor, bias *Tensor) *Tensor {
 
 func AddScalar(t *Tensor, scalar float64) *Tensor {
 	result := t.Copy()
-	for i := range result.Data {
-		result.Data[i] += scalar
-	}
+	floats.AddConst(scalar, result.Data)
 	return result
 }
 
 func Divide(a, b *Tensor) *Tensor {
-	// Handle same shape
+	// Handle same shape - use gonum for element-wise division
 	if shapeEqual(a.Shape, b.Shape) {
 		result := a.Copy()
-		for i := range result.Data {
-			result.Data[i] /= b.Data[i]
-		}
+		floats.Div(result.Data, b.Data)
 		return result
 	}
 	
@@ -796,9 +775,7 @@ func SqrtTensor(t *Tensor) *Tensor {
 
 func DivideScalar(t *Tensor, scalar float64) *Tensor {
 	result := t.Copy()
-	for i := range result.Data {
-		result.Data[i] /= scalar
-	}
+	floats.Scale(1.0/scalar, result.Data)
 	return result
 }
 

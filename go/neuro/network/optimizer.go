@@ -5,6 +5,7 @@ import (
 	
 	"github.com/muchq/moonbase/go/neuro/layers"
 	"github.com/muchq/moonbase/go/neuro/utils"
+	"gonum.org/v1/gonum/floats"
 )
 
 type Optimizer interface {
@@ -115,34 +116,56 @@ func (a *Adam) updateDense(layer *layers.Dense) {
 	vW := a.v[layer][0]
 	vB := a.v[layer][1]
 	
-	for i := range weights.Data {
-		grad := 0.0
-		if layer.GradW != nil {
-			grad = layer.GradW.Data[i]
+	// Update weights using vectorized operations
+	if layer.GradW != nil {
+		// m = beta1 * m + (1 - beta1) * grad
+		floats.Scale(a.beta1, mW.Data)
+		floats.AddScaled(mW.Data, 1-a.beta1, layer.GradW.Data)
+		
+		// v = beta2 * v + (1 - beta2) * grad^2
+		gradSquared := make([]float64, len(layer.GradW.Data))
+		copy(gradSquared, layer.GradW.Data)
+		floats.Mul(gradSquared, layer.GradW.Data) // grad^2
+		
+		floats.Scale(a.beta2, vW.Data)
+		floats.AddScaled(vW.Data, 1-a.beta2, gradSquared)
+		
+		// Bias correction and update
+		mHatCorr := 1.0 / (1 - math.Pow(a.beta1, float64(a.t)))
+		vHatCorr := 1.0 / (1 - math.Pow(a.beta2, float64(a.t)))
+		
+		// weights = weights - lr * m_hat / (sqrt(v_hat) + eps)
+		for i := range weights.Data {
+			mHat := mW.Data[i] * mHatCorr
+			vHat := vW.Data[i] * vHatCorr
+			weights.Data[i] -= a.lr * mHat / (math.Sqrt(vHat) + a.epsilon)
 		}
-		
-		mW.Data[i] = a.beta1*mW.Data[i] + (1-a.beta1)*grad
-		vW.Data[i] = a.beta2*vW.Data[i] + (1-a.beta2)*grad*grad
-		
-		mHat := mW.Data[i] / (1 - math.Pow(a.beta1, float64(a.t)))
-		vHat := vW.Data[i] / (1 - math.Pow(a.beta2, float64(a.t)))
-		
-		weights.Data[i] -= a.lr * mHat / (math.Sqrt(vHat) + a.epsilon)
 	}
 	
-	for i := range bias.Data {
-		grad := 0.0
-		if layer.GradB != nil {
-			grad = layer.GradB.Data[i]
+	// Update bias using vectorized operations
+	if layer.GradB != nil {
+		// m = beta1 * m + (1 - beta1) * grad
+		floats.Scale(a.beta1, mB.Data)
+		floats.AddScaled(mB.Data, 1-a.beta1, layer.GradB.Data)
+		
+		// v = beta2 * v + (1 - beta2) * grad^2
+		gradSquared := make([]float64, len(layer.GradB.Data))
+		copy(gradSquared, layer.GradB.Data)
+		floats.Mul(gradSquared, layer.GradB.Data) // grad^2
+		
+		floats.Scale(a.beta2, vB.Data)
+		floats.AddScaled(vB.Data, 1-a.beta2, gradSquared)
+		
+		// Bias correction and update
+		mHatCorr := 1.0 / (1 - math.Pow(a.beta1, float64(a.t)))
+		vHatCorr := 1.0 / (1 - math.Pow(a.beta2, float64(a.t)))
+		
+		// bias = bias - lr * m_hat / (sqrt(v_hat) + eps)
+		for i := range bias.Data {
+			mHat := mB.Data[i] * mHatCorr
+			vHat := vB.Data[i] * vHatCorr
+			bias.Data[i] -= a.lr * mHat / (math.Sqrt(vHat) + a.epsilon)
 		}
-		
-		mB.Data[i] = a.beta1*mB.Data[i] + (1-a.beta1)*grad
-		vB.Data[i] = a.beta2*vB.Data[i] + (1-a.beta2)*grad*grad
-		
-		mHat := mB.Data[i] / (1 - math.Pow(a.beta1, float64(a.t)))
-		vHat := vB.Data[i] / (1 - math.Pow(a.beta2, float64(a.t)))
-		
-		bias.Data[i] -= a.lr * mHat / (math.Sqrt(vHat) + a.epsilon)
 	}
 }
 
@@ -160,34 +183,54 @@ func (a *Adam) updateBatchNorm(layer *layers.BatchNorm) {
 	vGamma := a.v[layer][0]
 	vBeta := a.v[layer][1]
 	
-	for i := range gamma.Data {
-		grad := 0.0
-		if layer.GradGamma != nil {
-			grad = layer.GradGamma.Data[i]
+	// Update gamma using vectorized operations
+	if layer.GradGamma != nil {
+		// m = beta1 * m + (1 - beta1) * grad
+		floats.Scale(a.beta1, mGamma.Data)
+		floats.AddScaled(mGamma.Data, 1-a.beta1, layer.GradGamma.Data)
+		
+		// v = beta2 * v + (1 - beta2) * grad^2
+		gradSquared := make([]float64, len(layer.GradGamma.Data))
+		copy(gradSquared, layer.GradGamma.Data)
+		floats.Mul(gradSquared, layer.GradGamma.Data) // grad^2
+		
+		floats.Scale(a.beta2, vGamma.Data)
+		floats.AddScaled(vGamma.Data, 1-a.beta2, gradSquared)
+		
+		// Bias correction and update
+		mHatCorr := 1.0 / (1 - math.Pow(a.beta1, float64(a.t)))
+		vHatCorr := 1.0 / (1 - math.Pow(a.beta2, float64(a.t)))
+		
+		for i := range gamma.Data {
+			mHat := mGamma.Data[i] * mHatCorr
+			vHat := vGamma.Data[i] * vHatCorr
+			gamma.Data[i] -= a.lr * mHat / (math.Sqrt(vHat) + a.epsilon)
 		}
-		
-		mGamma.Data[i] = a.beta1*mGamma.Data[i] + (1-a.beta1)*grad
-		vGamma.Data[i] = a.beta2*vGamma.Data[i] + (1-a.beta2)*grad*grad
-		
-		mHat := mGamma.Data[i] / (1 - math.Pow(a.beta1, float64(a.t)))
-		vHat := vGamma.Data[i] / (1 - math.Pow(a.beta2, float64(a.t)))
-		
-		gamma.Data[i] -= a.lr * mHat / (math.Sqrt(vHat) + a.epsilon)
 	}
 	
-	for i := range beta.Data {
-		grad := 0.0
-		if layer.GradBeta != nil {
-			grad = layer.GradBeta.Data[i]
+	// Update beta using vectorized operations
+	if layer.GradBeta != nil {
+		// m = beta1 * m + (1 - beta1) * grad
+		floats.Scale(a.beta1, mBeta.Data)
+		floats.AddScaled(mBeta.Data, 1-a.beta1, layer.GradBeta.Data)
+		
+		// v = beta2 * v + (1 - beta2) * grad^2
+		gradSquared := make([]float64, len(layer.GradBeta.Data))
+		copy(gradSquared, layer.GradBeta.Data)
+		floats.Mul(gradSquared, layer.GradBeta.Data) // grad^2
+		
+		floats.Scale(a.beta2, vBeta.Data)
+		floats.AddScaled(vBeta.Data, 1-a.beta2, gradSquared)
+		
+		// Bias correction and update
+		mHatCorr := 1.0 / (1 - math.Pow(a.beta1, float64(a.t)))
+		vHatCorr := 1.0 / (1 - math.Pow(a.beta2, float64(a.t)))
+		
+		for i := range beta.Data {
+			mHat := mBeta.Data[i] * mHatCorr
+			vHat := vBeta.Data[i] * vHatCorr
+			beta.Data[i] -= a.lr * mHat / (math.Sqrt(vHat) + a.epsilon)
 		}
-		
-		mBeta.Data[i] = a.beta1*mBeta.Data[i] + (1-a.beta1)*grad
-		vBeta.Data[i] = a.beta2*vBeta.Data[i] + (1-a.beta2)*grad*grad
-		
-		mHat := mBeta.Data[i] / (1 - math.Pow(a.beta1, float64(a.t)))
-		vHat := vBeta.Data[i] / (1 - math.Pow(a.beta2, float64(a.t)))
-		
-		beta.Data[i] -= a.lr * mHat / (math.Sqrt(vHat) + a.epsilon)
 	}
 }
 

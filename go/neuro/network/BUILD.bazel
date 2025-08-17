@@ -12,6 +12,7 @@ go_library(
         "//go/neuro/layers",
         "//go/neuro/loss",
         "//go/neuro/utils",
+        "@org_gonum_v1_gonum//floats:go_default_library",
     ],
 )
 
