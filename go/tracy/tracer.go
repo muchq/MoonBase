@@ -33,8 +33,8 @@ func intersectRaySphere(origin, direction Vec3, sphere Sphere) (float64, float64
 	}
 	
 	sqrtDiscr := math.Sqrt(discriminant)
-	t1 := (-b + sqrtDiscr) / (2 * a)
-	t2 := (-b - sqrtDiscr) / (2 * a)
+	t1 := (-b - sqrtDiscr) / (2 * a)
+	t2 := (-b + sqrtDiscr) / (2 * a)
 	return t1, t2
 }
 
