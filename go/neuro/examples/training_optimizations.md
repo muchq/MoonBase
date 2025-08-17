@@ -84,26 +84,22 @@ type MixedPrecisionTensor struct {
 
 ## 6. Hardware Acceleration
 
-### Using GoNum BLAS
-Install optimized BLAS library:
+### Optimized Linear Algebra (Already Implemented)
+The codebase already uses GoNum's optimized libraries:
+
+- **Matrix operations**: `gonum.org/v1/gonum/mat` - automatically uses optimized BLAS (OpenBLAS, Intel MKL) when available
+- **Vector operations**: `gonum.org/v1/gonum/floats` - optimized element-wise operations
+- **Statistics**: `gonum.org/v1/gonum/stat` - efficient statistical computations
+
+The high-level GoNum API provides excellent performance without the complexity of direct BLAS calls. Install optimized BLAS libraries for maximum performance:
 
 ```bash
-# Install OpenBLAS
+# Install OpenBLAS for additional optimization
 brew install openblas  # macOS
 apt-get install libopenblas-dev  # Linux
-
-# Set environment variable
-export CGO_LDFLAGS="-lopenblas"
 ```
 
-Then use gonum for matrix operations:
-
-```go
-import "gonum.org/v1/gonum/blas/blas64"
-
-// Use BLAS for matrix multiplication
-blas64.Gemm(blas.NoTrans, blas.NoTrans, ...)
-```
+**Note**: Direct BLAS usage would provide minimal performance gains while significantly increasing code complexity and maintenance burden.
 
 ### GPU Acceleration (Future)
 - Use CUDA bindings for Go
