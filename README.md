@@ -43,6 +43,7 @@
 - **Scala**:
   - [`scraphics`](jvm/src/main/scala/com/muchq/scraphics) - a basic ray tracer
 - **Go**:
+  - [`tracy`](go/tracy) - ray tracer
   - [`blurring`](go/images) - some image processing tools
 - **Java**:
   - [`imagine`](jvm/src/main/java/com/muchq/imagine) - a couple of blur filters
