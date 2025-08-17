@@ -17,6 +17,8 @@ go_library(
     deps = [
         "//go/neuro/activations",
         "//go/neuro/utils",
+        "@org_gonum_v1_gonum//floats:go_default_library",
+        "@org_gonum_v1_gonum//stat:go_default_library",
     ],
 )
 

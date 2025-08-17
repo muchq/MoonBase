@@ -5,6 +5,8 @@ import (
 	
 	"github.com/muchq/moonbase/go/neuro/activations"
 	"github.com/muchq/moonbase/go/neuro/utils"
+	"gonum.org/v1/gonum/floats"
+	"gonum.org/v1/gonum/stat"
 )
 
 type Layer interface {
@@ -242,31 +244,33 @@ func (b *BatchNorm) Forward(input *utils.Tensor, training bool) *utils.Tensor {
 		b.Variance = utils.NewTensor(b.Size)
 		
 		batchSize := input.Shape[0]
-		for i := 0; i < batchSize; i++ {
-			for j := 0; j < b.Size; j++ {
-				idx := i*b.Size + j
-				b.Mean.Data[j] += input.Data[idx]
-			}
-		}
+		
+		// Compute mean and variance per feature using gonum
 		for j := 0; j < b.Size; j++ {
-			b.Mean.Data[j] /= float64(batchSize)
+			// Extract feature j across the batch
+			feature := make([]float64, batchSize)
+			for i := 0; i < batchSize; i++ {
+				feature[i] = input.Data[i*b.Size + j]
+			}
+			
+			// Use gonum for efficient statistical computation
+			b.Mean.Data[j] = stat.Mean(feature, nil)
+			b.Variance.Data[j] = stat.Variance(feature, nil)
 		}
 		
-		for i := 0; i < batchSize; i++ {
-			for j := 0; j < b.Size; j++ {
-				idx := i*b.Size + j
-				diff := input.Data[idx] - b.Mean.Data[j]
-				b.Variance.Data[j] += diff * diff
-			}
-		}
-		for j := 0; j < b.Size; j++ {
-			b.Variance.Data[j] /= float64(batchSize)
-		}
+		// Update running statistics using vectorized operations
+		// RunMean = momentum * RunMean + (1-momentum) * Mean
+		temp := make([]float64, b.Size)
+		copy(temp, b.Mean.Data)
+		floats.Scale(1-b.Momentum, temp)
+		floats.Scale(b.Momentum, b.RunMean.Data)
+		floats.Add(b.RunMean.Data, temp)
 		
-		for j := 0; j < b.Size; j++ {
-			b.RunMean.Data[j] = b.Momentum*b.RunMean.Data[j] + (1-b.Momentum)*b.Mean.Data[j]
-			b.RunVar.Data[j] = b.Momentum*b.RunVar.Data[j] + (1-b.Momentum)*b.Variance.Data[j]
-		}
+		// RunVar = momentum * RunVar + (1-momentum) * Variance  
+		copy(temp, b.Variance.Data)
+		floats.Scale(1-b.Momentum, temp)
+		floats.Scale(b.Momentum, b.RunVar.Data)
+		floats.Add(b.RunVar.Data, temp)
 	} else {
 		b.Mean = b.RunMean
 		b.Variance = b.RunVar
