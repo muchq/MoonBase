@@ -1,0 +1,32 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "tracy_lib",
+    srcs = [
+        "color.go",
+        "constants.go",
+        "image.go",
+        "light.go",
+        "scene.go",
+        "sphere.go",
+        "tracer.go",
+        "vec3.go",
+    ],
+    importpath = "github.com/muchq/moonbase/go/tracy",
+    visibility = ["//visibility:public"],
+    deps = [],
+)
+
+go_binary(
+    name = "tracy",
+    srcs = ["main.go"],
+    visibility = ["//visibility:public"],
+    deps = [":tracy_lib"],
+)
+
+go_test(
+    name = "tracy_test",
+    size = "small",
+    srcs = ["tracy_test.go"],
+    embed = [":tracy_lib"],
+)
