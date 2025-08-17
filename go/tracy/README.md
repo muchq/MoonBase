@@ -2,7 +2,7 @@
 
 A ray tracer implementation in Go following [computer graphics from scratch](https://gabrielgambetta.com/computer-graphics-from-scratch/).
 
-This is a port of the Scala version located [here](../../jvm/src/main/scala/com/muchq/scraphics).
+This is a port of the Scala version located [here](../../jvm/src/main/scala/com/muchq/scraphics). Earlier version [here](https://gist.github.com/aaylward/5a0aabd1def217b1f1319a4695429adf).
 
 ## Output
 

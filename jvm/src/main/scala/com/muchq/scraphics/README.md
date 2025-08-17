@@ -2,6 +2,8 @@
 
 Going through [computer graphics from scratch](https://gabrielgambetta.com/computer-graphics-from-scratch/)
 
+An earlier version of this tracer can be found [here](https://gist.github.com/aaylward/5a0aabd1def217b1f1319a4695429adf).
+
 ## output
 
 ### no light
