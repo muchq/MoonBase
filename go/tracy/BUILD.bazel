@@ -26,6 +26,7 @@ go_binary(
 
 go_test(
     name = "tracy_test",
+    size = "small",
     srcs = ["tracy_test.go"],
     embed = [":tracy_lib"],
 )
