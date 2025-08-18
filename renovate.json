@@ -4,6 +4,6 @@
     "config:recommended"
   ],
   "schedule": [
-    "every weekend"
+    "* 1 2 */2 *"
   ]
 }
