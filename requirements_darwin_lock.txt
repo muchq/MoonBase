@@ -4,6 +4,8 @@
 #
 #    bazel run //:requirements.update
 #
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 filelock==3.19.1 \
     --hash=sha256:66eda1888b0171c998b35be2bcc0f6d75c388a7ce20c3f3f37aa8e96c2dddf58 \
     --hash=sha256:d38e30481def20772f5baf097c122c3babc4fcdb7e14e57049eb9d88c6dc017d
@@ -275,7 +277,7 @@ sympy==1.14.0 \
     --hash=sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517 \
     --hash=sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5
     # via torch
-torch==2.8.0 \
+torch==2.8.0 ; sys_platform != "linux" \
     --hash=sha256:06fcee8000e5c62a9f3e52a688b9c5abb7c6228d0e56e3452983416025c41381 \
     --hash=sha256:0be92c08b44009d4131d1ff7a8060d10bafdb7ddcb7359ef8d8c5169007ea905 \
     --hash=sha256:1a62a1ec4b0498930e2543535cf70b1bef8c777713de7ceb84cd79115f553767 \
@@ -303,7 +305,7 @@ torch==2.8.0 \
     # via
     #   -r requirements.in
     #   torchvision
-torchvision==0.23.0 \
+torchvision==0.23.0 ; sys_platform != "linux" \
     --hash=sha256:01dc33ee24c79148aee7cdbcf34ae8a3c9da1674a591e781577b716d233b1fa6 \
     --hash=sha256:07d069cb29691ff566e3b7f11f20d91044f079e1dbdc9d72e0655899a9b06938 \
     --hash=sha256:09bfde260e7963a15b80c9e442faa9f021c7e7f877ac0a36ca6561b367185013 \

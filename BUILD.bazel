@@ -6,6 +6,10 @@ load("@rules_python//python:pip.bzl", "compile_pip_requirements")
 compile_pip_requirements(
     name = "requirements",
     src = "requirements.in",
+    extra_args = [
+        "--extra-index-url",
+        "https://download.pytorch.org/whl/cpu",
+    ],
     requirements_darwin = "requirements_darwin_lock.txt",
     requirements_linux = "requirements_linux_lock.txt",
     requirements_txt = "requirements_lock.txt",
