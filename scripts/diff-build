@@ -72,7 +72,10 @@ echo "Computing impacted targets..."
 impacted_targets=()
 if [ -f "$impacted_targets_path" ]; then
   while IFS= read -r line; do
-    impacted_targets+=("$line")
+    # Skip deprecated requirements_test target (use requirements.test instead)
+    if [[ "$line" != "//:requirements_test" ]]; then
+      impacted_targets+=("$line")
+    fi
   done < "$impacted_targets_path"
 fi
 
