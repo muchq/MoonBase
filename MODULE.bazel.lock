@@ -512,6 +512,24 @@
         ]
       }
     },
+    "@@apple_rules_lint+//lint:extensions.bzl%linter": {
+      "general": {
+        "bzlTransitiveDigest": "GRMyLraxrIqwpYRdzOfjZMmByG37F1TiOwo1vnf4KJ4=",
+        "usagesDigest": "jTOwxDX06coCna6ZG2TdoE5lX5fW4b+uJpv1bucdx+Q=",
+        "recordedFileInputs": {},
+        "recordedDirentsInputs": {},
+        "envVariables": {},
+        "generatedRepoSpecs": {
+          "apple_linters": {
+            "repoRuleId": "@@apple_rules_lint+//lint/private:register_linters.bzl%register_linters",
+            "attributes": {
+              "linters": {}
+            }
+          }
+        },
+        "recordedRepoMappingEntries": []
+      }
+    },
     "@@apple_support+//crosstool:setup.bzl%apple_cc_configure_extension": {
       "general": {
         "bzlTransitiveDigest": "JJV/C5bhYKZip41t/GGZvqIMmmrcwr0Ydybkn97uXxQ=",
