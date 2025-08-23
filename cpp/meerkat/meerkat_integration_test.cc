@@ -15,7 +15,7 @@ class MeerkatIntegrationTest : public ::testing::Test {
     server_ = std::make_unique<HttpServer>();
     client_ = std::make_unique<HttpClient>();
     static int port_counter = 9100;  // Use different range than http_client_test
-    port_ = port_counter++;  // Use different ports for each test
+    port_ = port_counter++;          // Use different ports for each test
   }
 
   void TearDown() override {

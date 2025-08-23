@@ -6,8 +6,8 @@
 #include <set>
 #include <thread>
 
-#include "cpp/meerkat/meerkat.h"
 #include "cpp/meerkat/http_client.h"
+#include "cpp/meerkat/meerkat.h"
 
 using namespace meerkat;
 
@@ -242,12 +242,13 @@ TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationCreateUserMissingFields) {
   json incomplete_user = {{"name", "Incomplete User"}};  // Missing email
   auto response = client_->post_json(GetBaseUrl() + "/api/users", incomplete_user, 10000);
 
-  EXPECT_TRUE(response.success);  // Connection succeeded
+  EXPECT_TRUE(response.success);         // Connection succeeded
   EXPECT_EQ(response.status_code, 400);  // But request was bad
 
   json response_json = json::parse(response.body);
   EXPECT_TRUE(response_json.contains("error"));
-  EXPECT_TRUE(response_json["error"].get<std::string>().find("Missing required fields") != std::string::npos);
+  EXPECT_TRUE(response_json["error"].get<std::string>().find("Missing required fields") !=
+              std::string::npos);
 }
 
 TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationGetAllUsersEmpty) {
@@ -308,7 +309,7 @@ TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationGetUserById) {
   // Create a user first
   json user_data = {{"name", "Found User"}, {"email", "found@example.com"}};
   auto create_response = client_->post_json(GetBaseUrl() + "/api/users", user_data, 10000);
-  
+
   ASSERT_TRUE(create_response.success);
   ASSERT_EQ(create_response.status_code, 201);
 
@@ -334,7 +335,7 @@ TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationGetUserByIdNotFound) {
 
   auto response = client_->get(GetBaseUrl() + "/api/user?id=999", 10000);
 
-  EXPECT_TRUE(response.success);  // Connection succeeded
+  EXPECT_TRUE(response.success);         // Connection succeeded
   EXPECT_EQ(response.status_code, 404);  // But user not found
 
   json response_json = json::parse(response.body);
@@ -348,7 +349,7 @@ TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationGetUserMissingIdParameter) 
 
   auto response = client_->get(GetBaseUrl() + "/api/user", 10000);  // No id parameter
 
-  EXPECT_TRUE(response.success);  // Connection succeeded
+  EXPECT_TRUE(response.success);         // Connection succeeded
   EXPECT_EQ(response.status_code, 400);  // But missing parameter
 
   json response_json = json::parse(response.body);
@@ -363,7 +364,7 @@ TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationDeleteUser) {
   // Create a user first
   json user_data = {{"name", "Delete Me"}, {"email", "delete@example.com"}};
   auto create_response = client_->post_json(GetBaseUrl() + "/api/users", user_data, 10000);
-  
+
   ASSERT_TRUE(create_response.success);
   ASSERT_EQ(create_response.status_code, 201);
 
@@ -392,7 +393,7 @@ TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationDeleteUserNotFound) {
 
   auto response = client_->del(GetBaseUrl() + "/api/user?id=999", 10000);
 
-  EXPECT_TRUE(response.success);  // Connection succeeded
+  EXPECT_TRUE(response.success);         // Connection succeeded
   EXPECT_EQ(response.status_code, 404);  // But user not found
 
   json response_json = json::parse(response.body);
@@ -420,9 +421,10 @@ TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationCreateUserWorkflow) {
   StartServerAsync();
 
   // 1. Create user
-  json user_data = {{"name", "Workflow User"}, {"email", "workflow@example.com"}, {"department", "Engineering"}};
+  json user_data = {
+      {"name", "Workflow User"}, {"email", "workflow@example.com"}, {"department", "Engineering"}};
   auto create_response = client_->post_json(GetBaseUrl() + "/api/users", user_data, 10000);
-  
+
   ASSERT_TRUE(create_response.success);
   ASSERT_EQ(create_response.status_code, 201);
 
@@ -433,7 +435,7 @@ TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationCreateUserWorkflow) {
   // 2. Retrieve user
   std::string get_url = GetBaseUrl() + "/api/user?id=" + std::to_string(user_id);
   auto get_response = client_->get(get_url, 10000);
-  
+
   EXPECT_TRUE(get_response.success);
   EXPECT_EQ(get_response.status_code, 200);
 
@@ -454,7 +456,7 @@ TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationCreateUserWorkflow) {
   // 4. Delete user
   std::string delete_url = GetBaseUrl() + "/api/user?id=" + std::to_string(user_id);
   auto delete_response = client_->del(delete_url, 10000);
-  
+
   EXPECT_TRUE(delete_response.success);
   EXPECT_EQ(delete_response.status_code, 200);
 
