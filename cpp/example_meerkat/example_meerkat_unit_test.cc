@@ -420,7 +420,7 @@ TEST_F(ExampleMeerkatUnitTest, ServerCanPoll) {
 
   // Test polling (non-blocking) - should not crash even when not running
   server_->poll(10);  // 10ms timeout
-  
+
   // Polling without a running server should be safe but not initialize anything
   EXPECT_FALSE(server_->is_listening());
   EXPECT_FALSE(server_->is_running());

@@ -15,7 +15,7 @@ class HttpClientTest : public ::testing::Test {
     // Use a unique port for each test - start from higher range to avoid conflicts
     static int port_counter = 9000;
     port_ = port_counter++;
-    
+
     client_ = std::make_unique<HttpClient>();
     server_ = std::make_unique<HttpServer>();
 
@@ -30,11 +30,11 @@ class HttpClientTest : public ::testing::Test {
     if (server_thread_.valid()) {
       server_thread_.wait();
     }
-    
+
     // Reset server and client before next test
     server_.reset();
     client_.reset();
-    
+
     // Small delay to ensure cleanup is complete
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
@@ -156,7 +156,7 @@ TEST_F(HttpClientTest, ConnectionTimeout) {
   // Don't start server - connection should fail quickly
   // The server created in SetUp won't be used, but we keep it alive
   // to avoid any cleanup issues
-  
+
   auto response = client_->get("http://127.0.0.1:99999/nonexistent", 1000);
 
   EXPECT_FALSE(response.success);

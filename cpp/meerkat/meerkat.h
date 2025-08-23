@@ -112,7 +112,7 @@ class HttpServer {
   struct mg_connection* listener_;
   bool running_;
   bool mgr_initialized_;
-  
+
   // Deferred listening parameters
   std::string listen_address_;
   int listen_port_;
