@@ -14,6 +14,7 @@ public class Main {
         BufferedImage graussian = ImageUtils.grayGaussianBlur(marbles, Radius.FIVE, 1);
         BufferedImage sobel = ImageUtils.sobel(graussian);
 
+        ImageIO.write(graussian, "png", new File("blurred.png"));
         ImageIO.write(sobel, "png", new File("edges.png"));
     }
 }
