@@ -1,14 +1,12 @@
-load("@rules_python//python:py_binary.bzl", "py_binary")
-load("@rules_python//python:py_library.bzl", "py_library")
-load("@rules_python//python:py_test.bzl", "py_test")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 
 py_library(
     name = "inference",
     srcs = ["inference.py"],
+    visibility = ["//visibility:public"],
     deps = [
         "@pypi//torch",
     ],
-    visibility = ["//visibility:public"],
 )
 
 py_binary(
@@ -16,19 +14,19 @@ py_binary(
     srcs = ["inference_demo.py"],
     deps = [
         ":inference",
-        "@pypi//torch",
         "@pypi//numpy",
+        "@pypi//torch",
     ],
 )
 
 py_test(
     name = "test_inference",
-    srcs = ["test_inference.py"],
     size = "small",
+    srcs = ["test_inference.py"],
     deps = [
         ":inference",
-        "@pypi//torch",
-        "@pypi//pytest",
         "@pypi//numpy",
+        "@pypi//pytest",
+        "@pypi//torch",
     ],
 )
