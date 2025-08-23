@@ -11,6 +11,17 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "http_client",
+    srcs = ["http_client.cc"],
+    hdrs = ["http_client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@mongoose_cc//:mongoose",
+        "@nlohmann_json//:json",
+    ],
+)
+
 cc_test(
     name = "meerkat_test",
     size = "small",
@@ -28,7 +39,19 @@ cc_test(
     srcs = ["meerkat_integration_test.cc"],
     deps = [
         ":meerkat",
+        ":http_client",
         "@googletest//:gtest_main",
         "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "http_client_test",
+    size = "small",
+    srcs = ["http_client_test.cc"],
+    deps = [
+        ":http_client",
+        ":meerkat",
+        "@googletest//:gtest_main",
     ],
 )

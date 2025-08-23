@@ -158,14 +158,12 @@ HttpRequest HttpServer::parse_request(struct mg_http_message* hm) const {
   request.method = std::string(hm->method.buf, hm->method.len);
   
   // URI and query params
-  std::string full_uri(hm->uri.buf, hm->uri.len);
-  size_t query_pos = full_uri.find('?');
-  if (query_pos != std::string::npos) {
-    request.uri = full_uri.substr(0, query_pos);
-    std::string query = full_uri.substr(query_pos + 1);
+  request.uri = std::string(hm->uri.buf, hm->uri.len);
+  
+  // Parse query params from the separate query field
+  if (hm->query.len > 0) {
+    std::string query(hm->query.buf, hm->query.len);
     request.query_params = parse_query_params(query);
-  } else {
-    request.uri = full_uri;
   }
   
   // Body
@@ -183,9 +181,20 @@ HttpRequest HttpServer::parse_request(struct mg_http_message* hm) const {
 
 void HttpServer::send_response(struct mg_connection* c, const HttpResponse& response) const {
   std::ostringstream headers_stream;
+  
+  // Add Content-Length header if not already present
+  bool has_content_length = false;
   for (const auto& [key, value] : response.headers) {
+    if (key == "Content-Length") {
+      has_content_length = true;
+    }
     headers_stream << key << ": " << value << "\r\n";
   }
+  
+  if (!has_content_length) {
+    headers_stream << "Content-Length: " << response.body.length() << "\r\n";
+  }
+  
   std::string headers_str = headers_stream.str();
   
   mg_printf(c, "HTTP/1.1 %d %s\r\n%s\r\n%s",
@@ -197,6 +206,9 @@ void HttpServer::send_response(struct mg_connection* c, const HttpResponse& resp
             (response.status_code == 500) ? "Internal Server Error" : "Unknown",
             headers_str.c_str(),
             response.body.c_str());
+  
+  // Close the connection to signal end of response
+  c->is_draining = 1;
 }
 
 RouteHandler* HttpServer::find_handler(const std::string& method, const std::string& uri) {
