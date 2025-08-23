@@ -157,7 +157,7 @@ TEST_F(HttpClientTest, ConnectionTimeout) {
   // The server created in SetUp won't be used, but we keep it alive
   // to avoid any cleanup issues
 
-  auto response = client_->get("http://127.0.0.1:99999/nonexistent", 1000);
+  auto response = client_->get("http://127.0.0.1:99999/nonexistent", 3000);
 
   EXPECT_FALSE(response.success);
   EXPECT_FALSE(response.error_message.empty());
