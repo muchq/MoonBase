@@ -10,14 +10,14 @@ permissions:
 
 jobs:
   test-and-publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-4-cores
 
     steps:
       - uses: actions/checkout@v5
-      
+
       - name: Install dependencies
         run: sudo ./scripts/setup/setup-linux
-      
+
       - uses: bazel-contrib/setup-bazel@0.15.0
         with:
           bazelisk-cache: true
