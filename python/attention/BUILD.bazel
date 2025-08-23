@@ -1,0 +1,20 @@
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
+
+py_library(
+    name = "attention",
+    srcs = ["attention.py"],
+    deps = [
+        "@pypi//torch",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+py_binary(
+    name = "attention_demo",
+    srcs = ["attention_demo.py"],
+    deps = [
+        ":attention",
+        "@pypi//torch",
+    ],
+)
