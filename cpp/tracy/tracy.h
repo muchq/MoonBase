@@ -95,7 +95,7 @@ class Tracer {
  private:
   std::mt19937 rng{std::random_device{}()};
   std::uniform_real_distribution<double> dist{0.0, 1.0};
-  
+
   Vec3 canvasToViewport(Vec2 canvasPoint, Image<RGB_Double> &image, Scene &scene);
   std::tuple<double, double> intersectRaySphere(Vec3 &origin, Vec3 &direction, Sphere &sphere);
   Vec3 reflectRay(Vec3 &normal, Vec3 &ray);
