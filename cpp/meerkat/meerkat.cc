@@ -16,6 +16,7 @@ HttpServer::~HttpServer() {
   mg_mgr_free(&mgr_);
 }
 
+
 void HttpServer::get(const std::string& path, RouteHandler handler) {
   route("GET", path, std::move(handler));
 }
@@ -88,9 +89,6 @@ void HttpServer::event_handler(struct mg_connection* c, int ev, void* ev_data) {
   if (ev == MG_EV_HTTP_MSG) {
     struct mg_http_message* hm = static_cast<struct mg_http_message*>(ev_data);
     server->handle_request(c, hm);
-  } else if (ev == MG_EV_WS_HANDSHAKE) {
-    struct mg_http_message* hm = static_cast<struct mg_http_message*>(ev_data);
-    server->handle_websocket_handshake(c, hm);
   } else if (ev == MG_EV_WS_MSG) {
     struct mg_ws_message* wm = static_cast<struct mg_ws_message*>(ev_data);
     server->handle_websocket_message(c, wm);
@@ -201,7 +199,7 @@ void HttpServer::send_response(struct mg_connection* c, const HttpResponse& resp
             response.body.c_str());
 }
 
-HttpServer::RouteHandler* HttpServer::find_handler(const std::string& method, const std::string& uri) {
+RouteHandler* HttpServer::find_handler(const std::string& method, const std::string& uri) {
   for (auto& route : routes_) {
     if (route.method == method && route.path == uri) {
       return &route.handler;
@@ -421,7 +419,7 @@ namespace websocket {
     mg_ws_send(c, data, length, WEBSOCKET_OP_BINARY);
   }
   
-  void close(struct mg_connection* c, int code = 1000, const std::string& reason = "") {
+  void close(struct mg_connection* c, int code, const std::string& reason) {
     mg_ws_send(c, reason.c_str(), reason.length(), WEBSOCKET_OP_CLOSE);
   }
 }

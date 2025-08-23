@@ -54,11 +54,11 @@ public:
   HttpServer();
   ~HttpServer();
   
-  // Non-copyable, moveable
+  // Non-copyable, non-moveable (mongoose mgr can't be safely moved)
   HttpServer(const HttpServer&) = delete;
   HttpServer& operator=(const HttpServer&) = delete;
-  HttpServer(HttpServer&&) = default;
-  HttpServer& operator=(HttpServer&&) = default;
+  HttpServer(HttpServer&&) = delete;
+  HttpServer& operator=(HttpServer&&) = delete;
   
   // Route registration methods
   void get(const std::string& path, RouteHandler handler);

@@ -4,76 +4,15 @@
 #include <thread>
 #include <chrono>
 #include <future>
-#include <curl/curl.h>
 
 using namespace meerkat;
-
-// Helper struct for HTTP client responses
-struct HttpClientResponse {
-  std::string body;
-  long response_code;
-  std::unordered_map<std::string, std::string> headers;
-};
-
-// Simple HTTP client for testing
-class SimpleHttpClient {
-public:
-  SimpleHttpClient() {
-    curl_global_init(CURL_GLOBAL_DEFAULT);
-  }
-  
-  ~SimpleHttpClient() {
-    curl_global_cleanup();
-  }
-  
-  HttpClientResponse get(const std::string& url) {
-    return request("GET", url, "");
-  }
-  
-  HttpClientResponse post(const std::string& url, const std::string& data) {
-    return request("POST", url, data);
-  }
-  
-private:
-  static size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::string* data) {
-    data->append((char*)contents, size * nmemb);
-    return size * nmemb;
-  }
-  
-  HttpClientResponse request(const std::string& method, const std::string& url, const std::string& data) {
-    HttpClientResponse response;
-    CURL* curl = curl_easy_init();
-    
-    if (curl) {
-      curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-      curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-      curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
-      curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
-      
-      if (method == "POST") {
-        curl_easy_setopt(curl, CURLOPT_POST, 1L);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data.c_str());
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, data.length());
-      }
-      
-      CURLcode res = curl_easy_perform(curl);
-      if (res == CURLE_OK) {
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.response_code);
-      }
-      
-      curl_easy_cleanup(curl);
-    }
-    
-    return response;
-  }
-};
 
 class MeerkatIntegrationTest : public ::testing::Test {
 protected:
   void SetUp() override {
     server_ = std::make_unique<HttpServer>();
-    client_ = std::make_unique<SimpleHttpClient>();
-    port_ = 8090;  // Use a different port for integration tests
+    static int port_counter = 8090;
+    port_ = port_counter++;  // Use different ports for each test
   }
   
   void TearDown() override {
@@ -81,7 +20,6 @@ protected:
       server_->stop();
     }
     server_.reset();
-    client_.reset();
   }
   
   void StartServerAsync() {
@@ -98,13 +36,9 @@ protected:
   }
   
   std::unique_ptr<HttpServer> server_;
-  std::unique_ptr<SimpleHttpClient> client_;
   std::future<void> server_thread_;
   int port_;
 };
-
-// Note: These integration tests will only work if curl is available
-// They are designed to demonstrate the library usage
 
 TEST_F(MeerkatIntegrationTest, BasicGetRequest) {
   server_->get("/hello", [](const HttpRequest& req) -> HttpResponse {
@@ -114,8 +48,8 @@ TEST_F(MeerkatIntegrationTest, BasicGetRequest) {
   ASSERT_TRUE(server_->listen("127.0.0.1", port_));
   StartServerAsync();
   
-  // Test with a simple poll instead of full HTTP request for now
-  // since we can't assume curl is available in the test environment
+  // Test with a simple poll instead of full HTTP request
+  // since we don't want external dependencies
   server_->poll(10);
   
   EXPECT_TRUE(server_->is_running());
