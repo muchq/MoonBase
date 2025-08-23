@@ -1,6 +1,7 @@
 #include "cpp/tracy/tracy.h"
 
 #include <iostream>
+#include <random>
 
 #include "cpp/image_core/image_core.h"
 
@@ -130,7 +131,7 @@ RGB_Double Tracer::traceRay(Vec3 &origin, Vec3 &direction, double tMin, double t
       closestIntersection(origin, direction, tMin, tMax, scene.spheres);
   if (!closestSphereMaybe.has_value()) {
     if (scene.backgroundStarProbability > 0.0) {
-      auto r = (double)rand() / (RAND_MAX);
+      auto r = dist(rng);
       if (r < scene.backgroundStarProbability) {
         return constants::LIGHT;
       }
