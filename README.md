@@ -5,50 +5,57 @@
 ![MoonBase](static_content/moon.gif)
 
 ## Contents
-### Card Games
-- **Rust**: [`/rust/cards`](rust/cards) - Experimenting with moving card game engines to Rust
-- **C++**: [`/cpp/cards`](cpp/cards) - Golf implementation and some helpers
-- **Go**: [`/go/cards`](go/cards) - Experimenting with moving card game engines to Go
-
-### Document Database
-- **Rust**: [`doc_db`](rust/doc_db) - DocDB with Mongo backend
-- **Go**: [`doc_db`](go/doc_db) - DocDB WIP
-- **C++**: [`doc_db_client`](cpp/doc_db_client) - Document database client
-
-### Golf Services
-- **C++**:
-  - [`golf_service`](cpp/golf_service) - Golf websocket server
-  - [`golf_grpc`](cpp/golf_grpc) - Golf gRPC service
-- **Web**:
-  - [`golf_ui`](web/golf_ui) - Original golf UI
-  - [`golf_ui_2`](web/golf_ui_2) - Updated golf UI
-
-### Web Related
+### Web Stuff
 - **C++**:
   - [`lakitu`](cpp/lakitu) - GRPC wrapper for C++
   - [`example_service`](cpp/example_service) - Example service
+  - [`doc_db_client`](cpp/doc_db_client) - Document database client
 - **Java**:
   - [`lunarcat`](jvm/src/main/java/com/muchq/lunarcat) - Rest-style HTTP server
   - [`yochat`](jvm/src/main/java/com/muchq/yochat) - Chat server
 - **Rust**:
+  - [`doc_db`](rust/doc_db) - DocDB with Mongo backend
   - [`helloworld_tonic`](rust/helloworld_tonic) - gRPC example using Tonic
 - **Go**:
   - [`resilience4g`](go/resilience4g) - Resilience4J for Go
   - [`r3dr`](go/r3dr) - a url shortening service
+  - [`games_ws_backend`](go/games_ws_backend) - websocket backend for [some games on muchq.com](https://muchq.com)
   - [`thoughts`](go/thoughts) - websocket backend for this [thing that's sort of a game?](https://muchq.com/thoughts)
   - [`mucks`](go/mucks) - Router wrapper middleware
   - [`example_grpc`](go/example_grpc) - gRPC example
+  - [`doc_db`](go/doc_db) - DocDB WIP
 
 ### Graphics Stuff
+- **C++**:
+    - [`tracy`](cpp/tracy) - ray tracer with some neat knobs
+    - [`trill`](cpp/trill) - SDL3 helpers
+    - [`mandelbrot`](cpp/mandelbrot) - a basic cpu mandelbrot renderer
+- **Java**:
+    - [`imagine`](jvm/src/main/java/com/muchq/imagine) - a couple of blur filters and some edge detection
+- **Go**:
+    - [`tracy`](go/tracy) - ray tracer
+    - [`blurring`](go/images) - some image processing tools
 - **Scala**:
   - [`scraphics`](jvm/src/main/scala/com/muchq/scraphics) - a basic ray tracer
+
+### AI Stuff
 - **Go**:
-  - [`tracy`](go/tracy) - ray tracer
-  - [`blurring`](go/images) - some image processing tools
-- **Java**:
-  - [`imagine`](jvm/src/main/java/com/muchq/imagine) - a couple of blur filters
+  - [`neuro`](go/neuro) - using LLMs to learn about Neural Networks
+- **Python**:
+  - [`pytorch_hello`](python/pytorch_hello) - just starting learn about pytorch
+
+### Card Games
+- **Rust**:
+    - [`/rust/cards`](rust/cards) - Experimenting with moving card game engines to Rust
 - **C++**:
-  - [`mandelbrot`](cpp/mandelbrot) - a basic cpu mandelbrot renderer
+    - [`/cpp/cards`](cpp/cards) - Golf implementation and some helpers
+    - [`golf_service`](cpp/golf_service) - Golf websocket server
+    - [`golf_grpc`](cpp/golf_grpc) - Golf gRPC service
+- **Web**:
+    - [`golf_ui`](web/golf_ui) - Original golf UI
+    - [`golf_ui_2`](web/golf_ui_2) - Updated golf UI
+- **Go**:
+    - [`/go/cards`](go/cards) - Experimenting with moving card game engines to Go
 
 ### Other Projects
 - **Rust**:
