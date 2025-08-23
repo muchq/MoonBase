@@ -20,7 +20,7 @@ cc_test(
 
 cc_test(
     name = "example_meerkat_integration_test",
-    size = "medium",
+    size = "small",
     srcs = ["example_meerkat_integration_test.cc"],
     deps = [
         "//cpp/meerkat",
