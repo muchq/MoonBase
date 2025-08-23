@@ -16,24 +16,13 @@ This service is part of a larger golf application ecosystem. Related components 
 - Course management
 - Game state persistence
 
-## Building
-
-This project uses Bazel for building:
-
+## Build
 ```bash
 bazel build //cpp/golf_service:...
 ```
 
-## Testing
+## Test
 
 ```bash
 bazel test //cpp/golf_service:...
 ```
-
-## Protocol Buffers
-
-This service uses protocol buffers for data serialization and gRPC communication. The proto definitions can be found in the [protos](../../protos) directory.
-
-## IDE Support
-
-For optimal development experience, use CLion with the Bazel plugin or VSCode with the compile commands extractor as described in the main [README](../../README.md).
