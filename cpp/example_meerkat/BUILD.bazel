@@ -1,0 +1,19 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+
+cc_binary(
+    name = "example_meerkat",
+    srcs = ["main.cc"],
+    deps = [
+        "//cpp/meerkat",
+    ],
+)
+
+cc_test(
+    name = "example_meerkat_test",
+    size = "small",
+    srcs = ["example_meerkat_test.cc"],
+    deps = [
+        "//cpp/meerkat",
+        "@googletest//:gtest_main",
+    ],
+)
