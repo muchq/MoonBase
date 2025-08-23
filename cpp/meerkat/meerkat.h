@@ -72,6 +72,7 @@ class HttpServer {
   bool listen(const std::string& address, int port);
   void stop();
   bool is_running() const { return running_; }
+  bool is_listening() const { return listener_ != nullptr && listener_->is_listening; }
 
   // Non-blocking poll (call in a loop)
   void poll(int timeout_ms = 100);
@@ -110,6 +111,12 @@ class HttpServer {
   struct mg_mgr mgr_;
   struct mg_connection* listener_;
   bool running_;
+  bool mgr_initialized_;
+  
+  // Deferred listening parameters
+  std::string listen_address_;
+  int listen_port_;
+  bool should_listen_;
 
   struct Route {
     std::string method;

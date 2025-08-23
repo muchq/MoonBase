@@ -5,15 +5,20 @@
 
 namespace meerkat {
 
-HttpServer::HttpServer() : listener_(nullptr), running_(false), cors_enabled_(false) {
-  mg_mgr_init(&mgr_);
+HttpServer::HttpServer() : listener_(nullptr), running_(false), mgr_initialized_(false),
+                           listen_port_(0), should_listen_(false), cors_enabled_(false) {
+  // Initialize mgr_ to zero to ensure consistent behavior across platforms
+  memset(&mgr_, 0, sizeof(mgr_));
+  
+  // Clear WebSocket connections map
+  websocket_connections_.clear();
 }
 
 HttpServer::~HttpServer() {
   if (running_) {
     stop();
   }
-  mg_mgr_free(&mgr_);
+  // mg_mgr_free is now called in run() to ensure it happens in the same thread
 }
 
 void HttpServer::get(const std::string& path, RouteHandler handler) {
@@ -45,36 +50,60 @@ bool HttpServer::listen(const std::string& address, int port) {
     return false;
   }
 
-  std::string url = "http://" + address + ":" + std::to_string(port);
-  listener_ = mg_http_listen(&mgr_, url.c_str(), event_handler, this);
-
-  if (listener_ == nullptr || !listener_->is_listening) {
-    return false;
-  }
-
-  running_ = true;
+  // Store parameters for initialization in run() thread
+  listen_address_ = address;
+  listen_port_ = port;
+  
+  // Mark that we should start listening when run() is called
+  should_listen_ = true;
+  
   return true;
 }
 
 void HttpServer::stop() {
   if (running_) {
     running_ = false;
-    if (listener_) {
-      mg_close_conn(listener_);
-      listener_ = nullptr;
-    }
+    // Don't close listener here - let the run() thread handle all mongoose cleanup
   }
 }
 
 void HttpServer::poll(int timeout_ms) {
-  if (running_) {
+  if (running_ && mgr_initialized_ && listener_) {
     mg_mgr_poll(&mgr_, timeout_ms);
   }
 }
 
 void HttpServer::run() {
+  // Initialize mongoose in the polling thread to avoid thread safety issues
+  if (should_listen_ && !mgr_initialized_) {
+    mg_mgr_init(&mgr_);
+    mgr_initialized_ = true;
+    
+    std::string url = "http://" + listen_address_ + ":" + std::to_string(listen_port_);
+    listener_ = mg_http_listen(&mgr_, url.c_str(), event_handler, this);
+    
+    if (listener_ == nullptr || !listener_->is_listening) {
+      // Failed to listen
+      if (mgr_initialized_) {
+        mg_mgr_free(&mgr_);
+        mgr_initialized_ = false;
+      }
+      return;
+    }
+    
+    running_ = true;
+    should_listen_ = false;
+  }
+  
   while (running_) {
     poll();
+  }
+  
+  // Clean up mongoose in the same thread where it was initialized
+  if (mgr_initialized_) {
+    mg_mgr_free(&mgr_);
+    mgr_initialized_ = false;
+    listener_ = nullptr;
   }
 }
 
@@ -83,7 +112,25 @@ void HttpServer::serve_static(const std::string& path_prefix, const std::string&
 }
 
 void HttpServer::event_handler(struct mg_connection* c, int ev, void* ev_data) {
-  HttpServer* server = static_cast<HttpServer*>(c->fn_data);
+  // Get the server pointer - for accepted connections, we need to get it from the listener
+  HttpServer* server = nullptr;
+  
+  if (c->fn_data) {
+    server = static_cast<HttpServer*>(c->fn_data);
+  } else if (c->mgr) {
+    // For accepted connections, fn_data may not be set, so find the listener
+    for (struct mg_connection* lc = c->mgr->conns; lc != nullptr; lc = lc->next) {
+      if (lc->is_listening && lc->fn_data) {
+        server = static_cast<HttpServer*>(lc->fn_data);
+        c->fn_data = server;  // Cache it for future events
+        break;
+      }
+    }
+  }
+  
+  if (!server) {
+    return;  // Safety check
+  }
 
   if (ev == MG_EV_HTTP_MSG) {
     struct mg_http_message* hm = static_cast<struct mg_http_message*>(ev_data);

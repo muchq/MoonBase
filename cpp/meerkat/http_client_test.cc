@@ -12,12 +12,12 @@ using namespace meerkat;
 class HttpClientTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    client_ = std::make_unique<HttpClient>();
-    server_ = std::make_unique<HttpServer>();
-
     // Use a unique port for each test - start from higher range to avoid conflicts
     static int port_counter = 9000;
     port_ = port_counter++;
+    
+    client_ = std::make_unique<HttpClient>();
+    server_ = std::make_unique<HttpServer>();
 
     SetupTestServer();
   }
@@ -26,8 +26,17 @@ class HttpClientTest : public ::testing::Test {
     if (server_->is_running()) {
       server_->stop();
     }
-    client_.reset();
+    // Wait for the server thread to finish before destroying the server object
+    if (server_thread_.valid()) {
+      server_thread_.wait();
+    }
+    
+    // Reset server and client before next test
     server_.reset();
+    client_.reset();
+    
+    // Small delay to ensure cleanup is complete
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 
   void SetupTestServer() {
@@ -65,8 +74,13 @@ class HttpClientTest : public ::testing::Test {
   void StartServerAsync() {
     server_thread_ = std::async(std::launch::async, [this]() { server_->run(); });
 
-    // Give the server time to start
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // Wait for server to actually start listening
+    for (int i = 0; i < 50; i++) {
+      if (server_->is_listening()) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
   }
 
   std::string GetBaseUrl() { return "http://127.0.0.1:" + std::to_string(port_); }
@@ -140,7 +154,9 @@ TEST_F(HttpClientTest, ErrorResponse) {
 
 TEST_F(HttpClientTest, ConnectionTimeout) {
   // Don't start server - connection should fail quickly
-
+  // The server created in SetUp won't be used, but we keep it alive
+  // to avoid any cleanup issues
+  
   auto response = client_->get("http://127.0.0.1:99999/nonexistent", 1000);
 
   EXPECT_FALSE(response.success);
