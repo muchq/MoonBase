@@ -1,7 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <chrono>
-#include <future>
 #include <memory>
 #include <set>
 #include <thread>
@@ -58,7 +56,7 @@ class UserStore {
   }
 };
 
-class ExampleMeerkatTest : public ::testing::Test {
+class ExampleMeerkatUnitTest : public ::testing::Test {
  protected:
   void SetUp() override {
     user_store_ = std::make_unique<UserStore>();
@@ -68,8 +66,6 @@ class ExampleMeerkatTest : public ::testing::Test {
 
     // Clear any existing state
     user_store_->clear_all_users();
-
-    SetupRoutes();
   }
 
   void TearDown() override {
@@ -80,108 +76,13 @@ class ExampleMeerkatTest : public ::testing::Test {
     user_store_.reset();
   }
 
-  void SetupRoutes() {
-    // Basic greeting endpoint
-    server_->get("/", [](const HttpRequest& req) -> HttpResponse {
-      return responses::ok(
-          json{{"message", "Welcome to Meerkat Example API!"}, {"version", "1.0.0"}});
-    });
-
-    // Health check endpoint
-    server_->get("/health", [](const HttpRequest& req) -> HttpResponse {
-      return responses::ok(json{{"status", "healthy"}, {"timestamp", std::time(nullptr)}});
-    });
-
-    // Get all users
-    server_->get("/api/users", [this](const HttpRequest& req) -> HttpResponse {
-      json users = user_store_->get_all_users();
-      return responses::ok(json{{"users", users}});
-    });
-
-    // Create a new user
-    server_->post("/api/users", [this](const HttpRequest& req) -> HttpResponse {
-      try {
-        json user_data = json::parse(req.body);
-
-        // Validate required fields
-        if (!user_data.contains("name") || !user_data.contains("email")) {
-          return responses::bad_request("Missing required fields: name and email");
-        }
-
-        json new_user = user_store_->create_user(user_data);
-        return responses::created(new_user);
-
-      } catch (const json::exception& e) {
-        return responses::bad_request("Invalid JSON: " + std::string(e.what()));
-      }
-    });
-
-    // Get user by ID
-    server_->get("/api/user", [this](const HttpRequest& req) -> HttpResponse {
-      auto id_param = req.query_params.find("id");
-      if (id_param == req.query_params.end()) {
-        return responses::bad_request("Missing id parameter");
-      }
-
-      try {
-        int id = std::stoi(id_param->second);
-        auto user = user_store_->get_user(id);
-        if (user.has_value()) {
-          return responses::ok(user.value());
-        } else {
-          return responses::not_found("User not found");
-        }
-      } catch (const std::exception& e) {
-        return responses::bad_request("Invalid user ID");
-      }
-    });
-
-    // Delete user by ID
-    server_->del("/api/user", [this](const HttpRequest& req) -> HttpResponse {
-      auto id_param = req.query_params.find("id");
-      if (id_param == req.query_params.end()) {
-        return responses::bad_request("Missing id parameter");
-      }
-
-      try {
-        int id = std::stoi(id_param->second);
-        if (user_store_->delete_user(id)) {
-          return responses::ok(json{{"message", "User deleted successfully"}});
-        } else {
-          return responses::not_found("User not found");
-        }
-      } catch (const std::exception& e) {
-        return responses::bad_request("Invalid user ID");
-      }
-    });
-
-    // Add logging middleware
-    server_->use_middleware([](const HttpRequest& req, HttpResponse& res) -> bool {
-      // In tests, we don't want to spam stdout
-      return true;
-    });
-
-    // Enable CORS
-    server_->allow_all_origins();
-  }
-
-  void StartServerAsync() {
-    server_thread_ = std::async(std::launch::async, [this]() { server_->run(); });
-
-    // Give the server a moment to start
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
-
-  std::string GetBaseUrl() { return "http://127.0.0.1:" + std::to_string(port_); }
-
   std::unique_ptr<UserStore> user_store_;
   std::unique_ptr<HttpServer> server_;
-  std::future<void> server_thread_;
   int port_;
 };
 
 // Unit tests for UserStore
-TEST_F(ExampleMeerkatTest, UserStoreCreateAndRetrieve) {
+TEST_F(ExampleMeerkatUnitTest, UserStoreCreateAndRetrieve) {
   json user_data = {{"name", "John Doe"}, {"email", "john@example.com"}};
 
   json created_user = user_store_->create_user(user_data);
@@ -195,7 +96,7 @@ TEST_F(ExampleMeerkatTest, UserStoreCreateAndRetrieve) {
   EXPECT_EQ(retrieved_user.value()["name"], "John Doe");
 }
 
-TEST_F(ExampleMeerkatTest, UserStoreMultipleUsers) {
+TEST_F(ExampleMeerkatUnitTest, UserStoreMultipleUsers) {
   json user1 = {{"name", "John"}, {"email", "john@test.com"}};
   json user2 = {{"name", "Jane"}, {"email", "jane@test.com"}};
 
@@ -221,7 +122,7 @@ TEST_F(ExampleMeerkatTest, UserStoreMultipleUsers) {
   EXPECT_TRUE(found_user2);
 }
 
-TEST_F(ExampleMeerkatTest, UserStoreDelete) {
+TEST_F(ExampleMeerkatUnitTest, UserStoreDelete) {
   json user_data = {{"name", "Test User"}, {"email", "test@example.com"}};
   user_store_->create_user(user_data);
 
@@ -233,7 +134,7 @@ TEST_F(ExampleMeerkatTest, UserStoreDelete) {
   EXPECT_FALSE(user.has_value());
 }
 
-TEST_F(ExampleMeerkatTest, UserStoreThreadSafety) {
+TEST_F(ExampleMeerkatUnitTest, UserStoreThreadSafety) {
   // Test concurrent access to user store
   std::vector<std::thread> threads;
   const int num_threads = 10;
@@ -259,8 +160,8 @@ TEST_F(ExampleMeerkatTest, UserStoreThreadSafety) {
   EXPECT_EQ(all_users.size(), num_threads * users_per_thread);
 }
 
-// HTTP Route Handler Tests
-TEST_F(ExampleMeerkatTest, RootEndpointReturnsWelcome) {
+// HTTP Route Handler Tests (testing handlers directly, not via HTTP)
+TEST_F(ExampleMeerkatUnitTest, RootEndpointReturnsWelcome) {
   HttpRequest req;
   req.method = "GET";
   req.uri = "/";
@@ -276,7 +177,7 @@ TEST_F(ExampleMeerkatTest, RootEndpointReturnsWelcome) {
   EXPECT_EQ(response_json["version"], "1.0.0");
 }
 
-TEST_F(ExampleMeerkatTest, HealthEndpointReturnsHealthy) {
+TEST_F(ExampleMeerkatUnitTest, HealthEndpointReturnsHealthy) {
   HttpRequest req;
   req.method = "GET";
   req.uri = "/health";
@@ -290,7 +191,7 @@ TEST_F(ExampleMeerkatTest, HealthEndpointReturnsHealthy) {
   EXPECT_TRUE(response_json.contains("timestamp"));
 }
 
-TEST_F(ExampleMeerkatTest, CreateUserWithValidData) {
+TEST_F(ExampleMeerkatUnitTest, CreateUserWithValidData) {
   // Create a user first
   json user_data = {{"name", "Test User"}, {"email", "test@example.com"}, {"age", 25}};
   std::string request_body = user_data.dump();
@@ -324,7 +225,7 @@ TEST_F(ExampleMeerkatTest, CreateUserWithValidData) {
   }
 }
 
-TEST_F(ExampleMeerkatTest, CreateUserWithMissingFields) {
+TEST_F(ExampleMeerkatUnitTest, CreateUserWithMissingFields) {
   json incomplete_user = {{"name", "Incomplete User"}};  // Missing email
 
   HttpRequest req;
@@ -348,7 +249,7 @@ TEST_F(ExampleMeerkatTest, CreateUserWithMissingFields) {
   }
 }
 
-TEST_F(ExampleMeerkatTest, CreateUserWithInvalidJson) {
+TEST_F(ExampleMeerkatUnitTest, CreateUserWithInvalidJson) {
   HttpRequest req;
   req.method = "POST";
   req.uri = "/api/users";
@@ -365,7 +266,7 @@ TEST_F(ExampleMeerkatTest, CreateUserWithInvalidJson) {
   }
 }
 
-TEST_F(ExampleMeerkatTest, GetUserByIdExists) {
+TEST_F(ExampleMeerkatUnitTest, GetUserByIdExists) {
   // Create a user first
   json user_data = {{"name", "Found User"}, {"email", "found@example.com"}};
   user_store_->create_user(user_data);
@@ -392,7 +293,7 @@ TEST_F(ExampleMeerkatTest, GetUserByIdExists) {
   EXPECT_EQ(response_json["id"], 1);
 }
 
-TEST_F(ExampleMeerkatTest, GetUserByIdNotFound) {
+TEST_F(ExampleMeerkatUnitTest, GetUserByIdNotFound) {
   HttpRequest req;
   req.method = "GET";
   req.uri = "/api/user";
@@ -410,7 +311,7 @@ TEST_F(ExampleMeerkatTest, GetUserByIdNotFound) {
   EXPECT_EQ(response.status_code, 404);
 }
 
-TEST_F(ExampleMeerkatTest, GetUserMissingIdParameter) {
+TEST_F(ExampleMeerkatUnitTest, GetUserMissingIdParameter) {
   HttpRequest req;
   req.method = "GET";
   req.uri = "/api/user";
@@ -426,7 +327,7 @@ TEST_F(ExampleMeerkatTest, GetUserMissingIdParameter) {
   }
 }
 
-TEST_F(ExampleMeerkatTest, DeleteUserExists) {
+TEST_F(ExampleMeerkatUnitTest, DeleteUserExists) {
   // Create a user first
   json user_data = {{"name", "Delete Me"}, {"email", "delete@example.com"}};
   user_store_->create_user(user_data);
@@ -448,7 +349,7 @@ TEST_F(ExampleMeerkatTest, DeleteUserExists) {
   EXPECT_EQ(response.status_code, 200);
 }
 
-TEST_F(ExampleMeerkatTest, DeleteUserNotFound) {
+TEST_F(ExampleMeerkatUnitTest, DeleteUserNotFound) {
   HttpRequest req;
   req.method = "DELETE";
   req.uri = "/api/user";
@@ -466,7 +367,7 @@ TEST_F(ExampleMeerkatTest, DeleteUserNotFound) {
   EXPECT_EQ(response.status_code, 404);
 }
 
-TEST_F(ExampleMeerkatTest, GetAllUsersEmpty) {
+TEST_F(ExampleMeerkatUnitTest, GetAllUsersEmpty) {
   json all_users = user_store_->get_all_users();
   auto response = responses::ok(json{{"users", all_users}});
 
@@ -477,7 +378,7 @@ TEST_F(ExampleMeerkatTest, GetAllUsersEmpty) {
   EXPECT_EQ(response_json["users"].size(), 0);
 }
 
-TEST_F(ExampleMeerkatTest, GetAllUsersWithData) {
+TEST_F(ExampleMeerkatUnitTest, GetAllUsersWithData) {
   // Create multiple users
   user_store_->create_user({{"name", "User 1"}, {"email", "user1@example.com"}});
   user_store_->create_user({{"name", "User 2"}, {"email", "user2@example.com"}});
@@ -502,8 +403,8 @@ TEST_F(ExampleMeerkatTest, GetAllUsersWithData) {
   EXPECT_TRUE(user_names.count("User 3"));
 }
 
-// Integration tests (testing the server setup)
-TEST_F(ExampleMeerkatTest, ServerCanStartAndStop) {
+// Server configuration tests
+TEST_F(ExampleMeerkatUnitTest, ServerCanStartAndStop) {
   EXPECT_FALSE(server_->is_running());
 
   bool started = server_->listen("127.0.0.1", port_);
@@ -514,7 +415,7 @@ TEST_F(ExampleMeerkatTest, ServerCanStartAndStop) {
   EXPECT_FALSE(server_->is_running());
 }
 
-TEST_F(ExampleMeerkatTest, ServerCanPoll) {
+TEST_F(ExampleMeerkatUnitTest, ServerCanPoll) {
   ASSERT_TRUE(server_->listen("127.0.0.1", port_));
 
   // Test polling (non-blocking)
@@ -525,7 +426,7 @@ TEST_F(ExampleMeerkatTest, ServerCanPoll) {
 }
 
 // Test middleware behavior
-TEST_F(ExampleMeerkatTest, MiddlewareIsConfigured) {
+TEST_F(ExampleMeerkatUnitTest, MiddlewareIsConfigured) {
   bool middleware_called = false;
 
   // Create a new server with testable middleware

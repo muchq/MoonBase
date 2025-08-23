@@ -15,8 +15,8 @@ class HttpClientTest : public ::testing::Test {
     client_ = std::make_unique<HttpClient>();
     server_ = std::make_unique<HttpServer>();
 
-    // Use a unique port for each test
-    static int port_counter = 8090;
+    // Use a unique port for each test - start from higher range to avoid conflicts
+    static int port_counter = 9000;
     port_ = port_counter++;
 
     SetupTestServer();
