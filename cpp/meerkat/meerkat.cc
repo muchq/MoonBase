@@ -23,7 +23,6 @@ HttpServer::~HttpServer() {
   if (running_) {
     stop();
   }
-  // mg_mgr_free is now called in run() to ensure it happens in the same thread
 }
 
 void HttpServer::get(const std::string& path, RouteHandler handler) {
@@ -233,32 +232,17 @@ HttpRequest HttpServer::parse_request(struct mg_http_message* hm) const {
 void HttpServer::send_response(struct mg_connection* c, const HttpResponse& response) const {
   std::ostringstream headers_stream;
 
-  // Add Content-Length header if not already present
-  bool has_content_length = false;
+  // Build headers string (mg_http_reply will add Content-Length automatically)
   for (const auto& [key, value] : response.headers) {
-    if (key == "Content-Length") {
-      has_content_length = true;
+    // Skip Content-Length as mg_http_reply adds it automatically
+    if (key != "Content-Length") {
+      headers_stream << key << ": " << value << "\r\n";
     }
-    headers_stream << key << ": " << value << "\r\n";
-  }
-
-  if (!has_content_length) {
-    headers_stream << "Content-Length: " << response.body.length() << "\r\n";
   }
 
   std::string headers_str = headers_stream.str();
 
-  mg_printf(c, "HTTP/1.1 %d %s\r\n%s\r\n%s", response.status_code,
-            (response.status_code == 200)   ? "OK"
-            : (response.status_code == 201) ? "Created"
-            : (response.status_code == 400) ? "Bad Request"
-            : (response.status_code == 404) ? "Not Found"
-            : (response.status_code == 500) ? "Internal Server Error"
-                                            : "Unknown",
-            headers_str.c_str(), response.body.c_str());
-
-  // Close the connection to signal end of response
-  c->is_draining = 1;
+  mg_http_reply(c, response.status_code, headers_str.c_str(), response.body.c_str());
 }
 
 RouteHandler* HttpServer::find_handler(const std::string& method, const std::string& uri) {
