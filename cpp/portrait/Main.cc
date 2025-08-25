@@ -50,7 +50,7 @@ int main() {
   server.allow_all_origins();
 
   // Start the server
-  const std::string host = "127.0.0.1";
+  const std::string host = "0.0.0.0";
   const int port = readPort(8080);
 
   if (server.listen(host, port)) {
