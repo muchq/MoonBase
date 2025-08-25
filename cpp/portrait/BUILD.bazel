@@ -1,0 +1,48 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+
+cc_library(
+    name = "types",
+    srcs = ["types.cc"],
+    hdrs = ["types.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//cpp/tracy",
+        "@com_google_absl//absl/status",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_test(
+    name = "types_test",
+    srcs = ["types_test.cc"],
+    deps = [
+        ":types",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_library(
+    name = "tracer_service",
+    srcs = ["tracer_service.cc"],
+    hdrs = ["tracer_service.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":types",
+        "//cpp/tracy",
+    ],
+)
+
+cc_binary(
+    name = "portrait",
+    srcs = ["Main.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":tracer_service",
+        ":types",
+        "//cpp/meerkat",
+        "//cpp/tracy",
+        "@com_google_absl//absl/status",
+    ],
+)
