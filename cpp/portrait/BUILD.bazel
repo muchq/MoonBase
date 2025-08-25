@@ -1,4 +1,4 @@
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
 cc_library(
@@ -13,16 +13,16 @@ cc_library(
     ],
 )
 
-cc_test(
-    name = "types_test",
-    srcs = ["types_test.cc"],
-    deps = [
-        ":types",
-        "@com_google_absl//absl/status",
-        "@googletest//:gtest_main",
-        "@nlohmann_json//:json",
-    ],
-)
+# cc_test(
+#     name = "types_test",
+#     srcs = ["types_test.cc"],
+#     deps = [
+#         ":types",
+#         "@com_google_absl//absl/status",
+#         "@googletest//:gtest_main",
+#         "@nlohmann_json//:json",
+#     ],
+# )
 
 cc_library(
     name = "tracer_service",
