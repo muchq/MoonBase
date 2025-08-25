@@ -23,7 +23,7 @@ int main() {
   });
 
   // Create a new user
-  server.post("/api/trace", [](const HttpRequest& req) -> HttpResponse {
+  server.post("/v1/trace", [](const HttpRequest& req) -> HttpResponse {
     try {
       json request_json = json::parse(req.body);
       auto trace_request = request_json.template get<TraceRequest>();
@@ -57,7 +57,7 @@ int main() {
     std::cout << "Portrait Server running on http://" << host << ":" << port << std::endl;
     std::cout << "Serving:" << std::endl;
     std::cout << "  GET  http://localhost:8080/health" << std::endl;
-    std::cout << "  POST http://localhost:8080/api/trace" << std::endl;
+    std::cout << "  POST http://localhost:8080/v1/trace" << std::endl;
     std::cout << std::endl;
     std::cout << "Press Ctrl+C to stop the server" << std::endl;
 
