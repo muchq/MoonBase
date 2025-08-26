@@ -44,6 +44,8 @@ cc_binary(
         ":types",
         "//cpp/meerkat",
         "//cpp/tracy",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:initialize",
         "@com_google_absl//absl/status",
     ],
 )
