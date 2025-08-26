@@ -1,3 +1,4 @@
+#include "../meerkat/meerkat.h"
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
@@ -42,8 +43,8 @@ int main() {
   });
 
   server.enable_health_checks();
-  server.use_middleware(middleware::trace_id());
-  server.use_middleware(middleware::request_logging());
+  server.enable_tracing();
+  server.use_response_interceptor(interceptors::response::logging());
   server.allow_all_origins();
 
   const std::string host = "0.0.0.0";

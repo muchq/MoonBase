@@ -129,11 +129,11 @@ int main() {
     }
   });
 
+  // Enable trace-id headers
+  server.enable_tracing();
+
   // Add logging middleware
-  server.use_middleware([](const HttpRequest& req, HttpResponse& res) -> bool {
-    std::cout << "[" << std::time(nullptr) << "] " << req.method << " " << req.uri << std::endl;
-    return true;
-  });
+  server.use_response_interceptor(interceptors::response::logging());
 
   // Enable CORS for development
   server.allow_all_origins();

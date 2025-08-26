@@ -88,6 +88,9 @@ class HttpServer {
   // Health Checks
   void enable_health_checks();
 
+  // Request Tracing
+  void enable_tracing();
+
   // CORS configuration
   struct CorsConfig {
     std::set<std::string> allowed_origins;
@@ -186,8 +189,13 @@ void close(struct mg_connection* c, int code = 1000, const std::string& reason =
 }  // namespace websocket
 
 namespace interceptors {
-RequestInterceptor trace_id_request_interceptor();
-ResponseInterceptor request_logging_response_interceptor();
+namespace request {
+RequestInterceptor trace_id();
+}
+namespace response {
+ResponseInterceptor trace_id_header();
+ResponseInterceptor logging();
+}
 }  // namespace interceptors
 
 }  // namespace meerkat

@@ -128,6 +128,11 @@ void HttpServer::enable_health_checks() {
   });
 }
 
+void HttpServer::enable_tracing() {
+  use_request_interceptor(interceptors::request::trace_id());
+  use_response_interceptor(interceptors::response::trace_id_header());
+}
+
 void HttpServer::event_handler(struct mg_connection* c, int ev, void* ev_data) {
   // Get the server pointer - for accepted connections, we need to get it from the listener
   HttpServer* server = nullptr;
@@ -475,34 +480,39 @@ static long random_positive_long() {
   return dis(gen);
 }
 
-RequestInterceptor trace_id_request_interceptor() {
+namespace request {
+RequestInterceptor trace_id() {
   return [](HttpRequest& req, HttpResponse& res) -> bool {
-    // propagate trace-id if we have one on the request
+    // propagate trace-id if we have one
     // add a new trace-id if we don't
-    if (req.headers.contains(TRACE_ID_HEADER_NAME)) {
-      res.headers.try_emplace(TRACE_ID_HEADER_NAME, req.headers.at(TRACE_ID_HEADER_NAME));
-    } else {
-      auto trace_id = std::to_string(random_positive_long());
-      // add trace-id to req in case we're a proxy
-      req.headers.try_emplace(TRACE_ID_HEADER_NAME, trace_id);
-      res.headers.try_emplace(TRACE_ID_HEADER_NAME, trace_id);
+    if (!req.headers.contains(TRACE_ID_HEADER_NAME)) {
+      req.headers.try_emplace(TRACE_ID_HEADER_NAME, std::to_string(random_positive_long()));
     }
     return true;
   };
 }
+}  // namespace request
 
-ResponseInterceptor request_logging_response_interceptor() {
-  return [](const HttpRequest& req, HttpResponse& res) -> bool {
-    std::string trace_id = "unknown";
+namespace response {
+ResponseInterceptor trace_id_header() {
+  return [](const HttpRequest& req, HttpResponse& res) -> void {
     if (req.headers.contains(TRACE_ID_HEADER_NAME)) {
-      trace_id = req.headers.at(TRACE_ID_HEADER_NAME);
+      res.headers.try_emplace(TRACE_ID_HEADER_NAME, req.headers.at(TRACE_ID_HEADER_NAME));
+    }
+  };
+}
+ResponseInterceptor logging() {
+  return [](const HttpRequest& req, HttpResponse& res) -> void {
+    static std::string trace_id = "unknown";
+    if (res.headers.contains(TRACE_ID_HEADER_NAME)) {
+      trace_id = res.headers.at(TRACE_ID_HEADER_NAME);
     }
     LOG(INFO) << "[" << req.method << " " << req.uri << "]: trace_id=" << trace_id
               << " status=" << res.status_code << " res.body.bytes=" << res.body.size();
-    return true;
   };
 }
-}  // namespace middleware
+}  // namespace response
+}  // namespace interceptors
 
 // WebSocket utility functions
 namespace websocket {

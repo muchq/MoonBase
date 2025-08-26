@@ -163,10 +163,7 @@ class ExampleMeerkatIntegrationTest : public ::testing::Test {
     });
 
     // Add logging middleware
-    server_->use_middleware([](const HttpRequest& req, HttpResponse& res) -> bool {
-      // In tests, we don't want to spam stdout
-      return true;
-    });
+    server_->use_response_interceptor(interceptors::response::logging());
 
     // Enable CORS
     server_->allow_all_origins();

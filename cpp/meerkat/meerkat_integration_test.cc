@@ -100,12 +100,12 @@ TEST_F(MeerkatIntegrationTest, JsonPostRequest) {
   EXPECT_EQ(response_json["created"], true);
 }
 
-TEST_F(MeerkatIntegrationTest, MiddlewareAuthentication) {
-  std::cout << "Starting MiddlewareAuthentication test..." << std::endl;
+TEST_F(MeerkatIntegrationTest, RequestInterceptorAuthentication) {
+  std::cout << "Starting RequestInterceptorAuthentication test..." << std::endl;
 
-  // Add simple middleware that doesn't capture anything
-  server_->use_middleware([](const HttpRequest& req, HttpResponse& res) -> bool {
-    std::cout << "Middleware executed" << std::endl;
+  // Add simple request interceptor that doesn't capture anything
+  server_->use_request_interceptor([](HttpRequest& req, HttpResponse& res) -> bool {
+    std::cout << "Request interceptor executed" << std::endl;
 
     auto auth_header = req.headers.find("Authorization");
     if (auth_header == req.headers.end() || auth_header->second != "Bearer valid-token") {
@@ -117,7 +117,7 @@ TEST_F(MeerkatIntegrationTest, MiddlewareAuthentication) {
     return true;  // Continue processing
   });
 
-  std::cout << "Added middleware..." << std::endl;
+  std::cout << "Added request interceptor..." << std::endl;
 
   server_->get("/protected", [](const HttpRequest& req) -> HttpResponse {
     std::cout << "Handler executed" << std::endl;
