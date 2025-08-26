@@ -28,14 +28,3 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
-
-# Legacy test target - points to unit tests for backwards compatibility
-cc_test(
-    name = "example_meerkat_test",
-    size = "small",
-    srcs = ["example_meerkat_unit_test.cc"],
-    deps = [
-        "//cpp/meerkat",
-        "@googletest//:gtest_main",
-    ],
-)
