@@ -1,6 +1,7 @@
 #include "cpp/meerkat/meerkat.h"
 #include "cpp/portrait/types.h"
 #include "cpp/tracy/tracy.h"
+#include "tracer_service.h"
 
 using namespace meerkat;
 using namespace portrait;
@@ -16,11 +17,7 @@ int main() {
   std::cout << "Starting Portrait Server..." << std::endl;
 
   HttpServer server;
-
-  // Health check endpoint
-  server.get("/health", [](const HttpRequest& req) -> HttpResponse {
-    return responses::ok(json{{"status", "healthy"}, {"timestamp", std::time(nullptr)}});
-  });
+  TracerService tracer_service;
 
   // Create a new user
   server.post("/v1/trace", [](const HttpRequest& req) -> HttpResponse {
@@ -40,16 +37,10 @@ int main() {
     }
   });
 
-  // Add logging middleware
-  server.use_middleware([](const HttpRequest& req, HttpResponse& res) -> bool {
-    std::cout << "[" << std::time(nullptr) << "] " << req.method << " " << req.uri << std::endl;
-    return true;
-  });
-
-  // Enable CORS for development
+  server.enable_health_checks();
+  server.use_middleware(middleware::request_logging());
   server.allow_all_origins();
 
-  // Start the server
   const std::string host = "0.0.0.0";
   const int port = readPort(8080);
 

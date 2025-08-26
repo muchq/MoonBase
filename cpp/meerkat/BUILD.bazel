@@ -6,6 +6,7 @@ cc_library(
     hdrs = ["meerkat.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "@com_google_absl//absl/log",
         "@mongoose_cc//:mongoose",
         "@nlohmann_json//:json",
     ],

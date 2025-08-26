@@ -3,6 +3,8 @@
 #include <iostream>
 #include <sstream>
 
+#include "absl/log/log.h"
+
 namespace meerkat {
 
 HttpServer::HttpServer()
@@ -115,6 +117,12 @@ void HttpServer::serve_static(const std::string& path_prefix, const std::string&
   static_paths_[path_prefix] = directory;
 }
 
+void HttpServer::enable_health_checks() {
+  get("/health", [](const HttpRequest& req) -> HttpResponse {
+    return responses::ok(json{{"status", "healthy"}, {"timestamp", std::time(nullptr)}});
+  });
+}
+
 void HttpServer::event_handler(struct mg_connection* c, int ev, void* ev_data) {
   // Get the server pointer - for accepted connections, we need to get it from the listener
   HttpServer* server = nullptr;
@@ -137,10 +145,10 @@ void HttpServer::event_handler(struct mg_connection* c, int ev, void* ev_data) {
   }
 
   if (ev == MG_EV_HTTP_MSG) {
-    struct mg_http_message* hm = static_cast<struct mg_http_message*>(ev_data);
+    const auto hm = static_cast<struct mg_http_message*>(ev_data);
     server->handle_request(c, hm);
   } else if (ev == MG_EV_WS_MSG) {
-    struct mg_ws_message* wm = static_cast<struct mg_ws_message*>(ev_data);
+    const auto wm = static_cast<struct mg_ws_message*>(ev_data);
     server->handle_websocket_message(c, wm);
   } else if (ev == MG_EV_CLOSE) {
     server->handle_websocket_close(c);
@@ -148,7 +156,7 @@ void HttpServer::event_handler(struct mg_connection* c, int ev, void* ev_data) {
 }
 
 void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message* hm) {
-  HttpRequest request = parse_request(hm);
+  const HttpRequest request = parse_request(hm);
   HttpResponse response;
 
   // Handle CORS preflight requests
@@ -204,22 +212,17 @@ void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message*
 HttpRequest HttpServer::parse_request(struct mg_http_message* hm) const {
   HttpRequest request;
 
-  // Method
   request.method = std::string(hm->method.buf, hm->method.len);
-
-  // URI and query params
   request.uri = std::string(hm->uri.buf, hm->uri.len);
 
-  // Parse query params from the separate query field
+  // Parse query params
   if (hm->query.len > 0) {
     std::string query(hm->query.buf, hm->query.len);
     request.query_params = parse_query_params(query);
   }
 
-  // Body
   request.body = std::string(hm->body.buf, hm->body.len);
 
-  // Headers
   for (int i = 0; i < MG_MAX_HTTP_HEADERS && hm->headers[i].name.buf; i++) {
     std::string name(hm->headers[i].name.buf, hm->headers[i].name.len);
     std::string value(hm->headers[i].value.buf, hm->headers[i].value.len);
@@ -232,9 +235,8 @@ HttpRequest HttpServer::parse_request(struct mg_http_message* hm) const {
 void HttpServer::send_response(struct mg_connection* c, const HttpResponse& response) const {
   std::ostringstream headers_stream;
 
-  // Build headers string (mg_http_reply will add Content-Length automatically)
   for (const auto& [key, value] : response.headers) {
-    // Skip Content-Length as mg_http_reply adds it automatically
+    // mg_http_reply adds Content-Length
     if (key != "Content-Length") {
       headers_stream << key << ": " << value << "\r\n";
     }
@@ -450,6 +452,16 @@ HttpResponse internal_error(const std::string& message) {
   return response;
 }
 }  // namespace responses
+
+namespace middleware {
+MiddlewareHandler request_logging() {
+  return [](const HttpRequest& req, HttpResponse& res) -> bool {
+    LOG(INFO) << "[" << req.method << " " << req.uri << "]: " << res.status_code << " "
+              << res.body.size();
+    return true;
+  };
+}
+}  // namespace middleware
 
 // WebSocket utility functions
 namespace websocket {
