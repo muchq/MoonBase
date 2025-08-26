@@ -75,6 +75,7 @@ HttpClientResponse HttpClient::make_request(
     auto current_time = std::chrono::steady_clock::now();
     if (current_time - start_time > timeout_duration) {
       ctx->response.error_message = "Request timed out";
+      ctx->done = true;
       break;
     }
 

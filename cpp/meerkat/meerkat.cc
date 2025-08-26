@@ -1,11 +1,16 @@
 #include "cpp/meerkat/meerkat.h"
 
+#include <climits>
 #include <iostream>
+#include <random>
 #include <sstream>
+#include <string>
 
 #include "absl/log/log.h"
 
 namespace meerkat {
+// TODO: move this header name to some language neutral config format for cross-project sharing
+const std::string TRACE_ID_HEADER_NAME{"x-trace-id"};
 
 HttpServer::HttpServer()
     : listener_(nullptr),
@@ -14,11 +19,7 @@ HttpServer::HttpServer()
       listen_port_(0),
       should_listen_(false),
       cors_enabled_(false) {
-  // Initialize mgr_ to zero to ensure consistent behavior across platforms
-  memset(&mgr_, 0, sizeof(mgr_));
-
-  // Clear WebSocket connections map
-  websocket_connections_.clear();
+  mg_mgr_init(&mgr_);
 }
 
 HttpServer::~HttpServer() {
@@ -47,8 +48,12 @@ void HttpServer::route(const std::string& method, const std::string& path, Route
   routes_.push_back({method, path, std::move(handler)});
 }
 
-void HttpServer::use_middleware(MiddlewareHandler middleware) {
-  middleware_.push_back(std::move(middleware));
+void HttpServer::use_request_interceptor(RequestInterceptor request_interceptor) {
+  request_interceptors_.push_back(std::move(request_interceptor));
+}
+
+void HttpServer::use_response_interceptor(ResponseInterceptor response_interceptor) {
+  response_interceptors_.push_back(std::move(response_interceptor));
 }
 
 bool HttpServer::listen(const std::string& address, int port) {
@@ -123,6 +128,11 @@ void HttpServer::enable_health_checks() {
   });
 }
 
+void HttpServer::enable_tracing() {
+  use_request_interceptor(interceptors::request::trace_id());
+  use_response_interceptor(interceptors::response::trace_id_header());
+}
+
 void HttpServer::event_handler(struct mg_connection* c, int ev, void* ev_data) {
   // Get the server pointer - for accepted connections, we need to get it from the listener
   HttpServer* server = nullptr;
@@ -156,7 +166,7 @@ void HttpServer::event_handler(struct mg_connection* c, int ev, void* ev_data) {
 }
 
 void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message* hm) {
-  const HttpRequest request = parse_request(hm);
+  HttpRequest request = parse_request(hm);
   HttpResponse response;
 
   // Handle CORS preflight requests
@@ -166,9 +176,9 @@ void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message*
   }
 
   // Apply middleware
-  for (const auto& middleware : middleware_) {
-    if (!middleware(request, response)) {
-      // Middleware blocked the request
+  for (const auto& request_interceptor : request_interceptors_) {
+    if (!request_interceptor(request, response)) {
+      // Request interceptor blocked the request
       if (cors_enabled_) {
         add_cors_headers(response, request);
       }
@@ -199,6 +209,14 @@ void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message*
     }
   } else {
     response = responses::not_found();
+  }
+
+  try {
+    for (const auto& response_interceptor : response_interceptors_) {
+      response_interceptor(request, response);
+    }
+  } catch (...) {
+    response = responses::internal_error();
   }
 
   // Add CORS headers if enabled
@@ -453,15 +471,48 @@ HttpResponse internal_error(const std::string& message) {
 }
 }  // namespace responses
 
-namespace middleware {
-MiddlewareHandler request_logging() {
-  return [](const HttpRequest& req, HttpResponse& res) -> bool {
-    LOG(INFO) << "[" << req.method << " " << req.uri << "]: " << res.status_code << " "
-              << res.body.size();
+namespace interceptors {
+static long random_positive_long() {
+  static std::random_device rd;
+  static std::mt19937_64 gen(rd());
+  static std::uniform_int_distribution<long> dis(1, LONG_MAX);
+
+  return dis(gen);
+}
+
+namespace request {
+RequestInterceptor trace_id() {
+  return [](HttpRequest& req, HttpResponse& res) -> bool {
+    // propagate trace-id if we have one
+    // add a new trace-id if we don't
+    if (!req.headers.contains(TRACE_ID_HEADER_NAME)) {
+      req.headers.try_emplace(TRACE_ID_HEADER_NAME, std::to_string(random_positive_long()));
+    }
     return true;
   };
 }
-}  // namespace middleware
+}  // namespace request
+
+namespace response {
+ResponseInterceptor trace_id_header() {
+  return [](const HttpRequest& req, HttpResponse& res) -> void {
+    if (req.headers.contains(TRACE_ID_HEADER_NAME)) {
+      res.headers.try_emplace(TRACE_ID_HEADER_NAME, req.headers.at(TRACE_ID_HEADER_NAME));
+    }
+  };
+}
+ResponseInterceptor logging() {
+  return [](const HttpRequest& req, HttpResponse& res) -> void {
+    static std::string trace_id = "unknown";
+    if (res.headers.contains(TRACE_ID_HEADER_NAME)) {
+      trace_id = res.headers.at(TRACE_ID_HEADER_NAME);
+    }
+    LOG(INFO) << "[" << req.method << " " << req.uri << "]: trace_id=" << trace_id
+              << " status=" << res.status_code << " res.body.bytes=" << res.body.size();
+  };
+}
+}  // namespace response
+}  // namespace interceptors
 
 // WebSocket utility functions
 namespace websocket {

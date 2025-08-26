@@ -59,15 +59,32 @@ TEST_F(MeerkatTest, CanRegisterRoutes) {
   // and making actual HTTP requests. Integration tests will cover that.
 }
 
-TEST_F(MeerkatTest, CanRegisterMiddleware) {
-  bool middleware_called = false;
+TEST_F(MeerkatTest, CanRegisterRequestInterceptor) {
+  // Test that interceptor registration doesn't crash and accepts correct signature
+  bool interceptor_registered = false;
 
-  server_->use_middleware([&middleware_called](const HttpRequest& req, HttpResponse& res) -> bool {
-    middleware_called = true;
+  server_->use_request_interceptor([&](HttpRequest& req, HttpResponse& res) -> bool {
+    interceptor_registered = true;
     return true;  // Continue processing
   });
 
-  // Middleware is registered but won't be called until a request is processed
+  // The interceptor is registered but won't be called until actual request processing
+  // This test verifies the API works and the lambda has the correct signature
+  EXPECT_FALSE(interceptor_registered);  // Not called yet since no request processed
+}
+
+TEST_F(MeerkatTest, CanRegisterMultipleRequestInterceptors) {
+  // Test that multiple interceptors can be registered
+  server_->use_request_interceptor([](HttpRequest& req, HttpResponse& res) -> bool {
+    return true;  // Continue processing
+  });
+
+  server_->use_request_interceptor([](HttpRequest& req, HttpResponse& res) -> bool {
+    return false;  // Block processing
+  });
+
+  // Both interceptors are registered - actual execution order testing
+  // would require integration tests with real HTTP requests
 }
 
 TEST_F(MeerkatTest, ResponseUtilities) {
