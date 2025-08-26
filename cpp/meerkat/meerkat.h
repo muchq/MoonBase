@@ -83,6 +83,9 @@ class HttpServer {
   // Static file serving
   void serve_static(const std::string& path_prefix, const std::string& directory);
 
+  // Health Checks
+  void enable_health_checks();
+
   // CORS configuration
   struct CorsConfig {
     std::set<std::string> allowed_origins;
@@ -178,6 +181,10 @@ void send_json(struct mg_connection* c, const json& data);
 void send_binary(struct mg_connection* c, const void* data, size_t length);
 void close(struct mg_connection* c, int code = 1000, const std::string& reason = "");
 }  // namespace websocket
+
+namespace middleware {
+MiddlewareHandler request_logging();
+}
 
 }  // namespace meerkat
 
