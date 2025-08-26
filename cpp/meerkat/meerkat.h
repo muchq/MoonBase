@@ -195,7 +195,7 @@ RequestInterceptor trace_id();
 namespace response {
 ResponseInterceptor trace_id_header();
 ResponseInterceptor logging();
-}
+}  // namespace response
 }  // namespace interceptors
 
 }  // namespace meerkat
