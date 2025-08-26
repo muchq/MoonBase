@@ -1,8 +1,9 @@
 #include "cpp/meerkat/meerkat.h"
 
-#include "absl/log/log.h"
 #include <iostream>
 #include <sstream>
+
+#include "absl/log/log.h"
 
 namespace meerkat {
 
@@ -117,11 +118,10 @@ void HttpServer::serve_static(const std::string& path_prefix, const std::string&
 }
 
 void HttpServer::enable_health_checks() {
-get("/health", [](const HttpRequest& req) -> HttpResponse {
-  return responses::ok(json{{"status", "healthy"}, {"timestamp", std::time(nullptr)}});
-});
+  get("/health", [](const HttpRequest& req) -> HttpResponse {
+    return responses::ok(json{{"status", "healthy"}, {"timestamp", std::time(nullptr)}});
+  });
 }
-
 
 void HttpServer::event_handler(struct mg_connection* c, int ev, void* ev_data) {
   // Get the server pointer - for accepted connections, we need to get it from the listener
@@ -456,13 +456,12 @@ HttpResponse internal_error(const std::string& message) {
 namespace middleware {
 MiddlewareHandler request_logging() {
   return [](const HttpRequest& req, HttpResponse& res) -> bool {
-    LOG(INFO)
-    << "[" << req.method << " " << req.uri << "]: "
-    << res.status_code << " " << res.body.size();
+    LOG(INFO) << "[" << req.method << " " << req.uri << "]: " << res.status_code << " "
+              << res.body.size();
     return true;
   };
 }
-} // namespace middleware
+}  // namespace middleware
 
 // WebSocket utility functions
 namespace websocket {
