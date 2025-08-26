@@ -1,3 +1,4 @@
+#include "tracer_service.h"
 #include "cpp/meerkat/meerkat.h"
 #include "cpp/portrait/types.h"
 #include "cpp/tracy/tracy.h"

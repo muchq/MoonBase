@@ -1,5 +1,6 @@
 #include "cpp/meerkat/meerkat.h"
 
+#include "absl/log/log.h"
 #include <iostream>
 #include <sstream>
 
