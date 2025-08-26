@@ -183,8 +183,9 @@ void close(struct mg_connection* c, int code = 1000, const std::string& reason =
 }  // namespace websocket
 
 namespace middleware {
+MiddlewareHandler trace_id();
 MiddlewareHandler request_logging();
-}
+}  // namespace middleware
 
 }  // namespace meerkat
 

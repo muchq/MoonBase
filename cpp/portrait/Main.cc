@@ -1,6 +1,8 @@
+#include "absl/log/globals.h"
+#include "absl/log/initialize.h"
+#include "absl/log/log.h"
 #include "cpp/meerkat/meerkat.h"
 #include "cpp/portrait/types.h"
-#include "cpp/tracy/tracy.h"
 #include "tracer_service.h"
 
 using namespace meerkat;
@@ -14,7 +16,9 @@ uint16_t readPort(const uint16_t default_port) {
 }
 
 int main() {
-  std::cout << "Starting Portrait Server..." << std::endl;
+  absl::InitializeLog();
+  absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
+  LOG(INFO) << "Starting Portrait Server...";
 
   HttpServer server;
   TracerService tracer_service;
@@ -38,6 +42,7 @@ int main() {
   });
 
   server.enable_health_checks();
+  server.use_middleware(middleware::trace_id());
   server.use_middleware(middleware::request_logging());
   server.allow_all_origins();
 
@@ -45,16 +50,15 @@ int main() {
   const int port = readPort(8080);
 
   if (server.listen(host, port)) {
-    std::cout << "Portrait Server running on http://" << host << ":" << port << std::endl;
-    std::cout << "Serving:" << std::endl;
-    std::cout << "  GET  http://localhost:8080/health" << std::endl;
-    std::cout << "  POST http://localhost:8080/v1/trace" << std::endl;
-    std::cout << std::endl;
-    std::cout << "Press Ctrl+C to stop the server" << std::endl;
+    LOG(INFO) << "Portrait Server running on http://" << host << ":" << port;
+    LOG(INFO) << "Serving:";
+    LOG(INFO) << "  GET  http://localhost:8080/health";
+    LOG(INFO) << "  POST http://localhost:8080/v1/trace";
+    LOG(INFO) << "Press Ctrl+C to stop the server";
 
     server.run();
   } else {
-    std::cerr << "Failed to start server on " << host << ":" << port << std::endl;
+    LOG(ERROR) << "Failed to start server on " << host << ":" << port;
     return 1;
   }
 

@@ -1,11 +1,16 @@
 #include "cpp/meerkat/meerkat.h"
 
+#include <climits>
 #include <iostream>
+#include <random>
 #include <sstream>
+#include <string>
 
 #include "absl/log/log.h"
 
 namespace meerkat {
+
+std::string TRACE_ID_HEADER_NAME{"x-trace-id"};
 
 HttpServer::HttpServer()
     : listener_(nullptr),
@@ -454,10 +459,29 @@ HttpResponse internal_error(const std::string& message) {
 }  // namespace responses
 
 namespace middleware {
+static long random_positive_long() {
+  static std::random_device rd;
+  static std::mt19937_64 gen(rd());
+  static std::uniform_int_distribution<long> dis(1, LONG_MAX);
+
+  return dis(gen);
+}
+
+MiddlewareHandler trace_id() {
+  return [](const HttpRequest& req, HttpResponse& res) -> bool {
+    res.headers.try_emplace(TRACE_ID_HEADER_NAME, std::to_string(random_positive_long()));
+    return true;
+  };
+}
+
 MiddlewareHandler request_logging() {
   return [](const HttpRequest& req, HttpResponse& res) -> bool {
-    LOG(INFO) << "[" << req.method << " " << req.uri << "]: " << res.status_code << " "
-              << res.body.size();
+    std::string trace_id = "unknown";
+    if (res.headers.contains(TRACE_ID_HEADER_NAME)) {
+      trace_id = res.headers[TRACE_ID_HEADER_NAME];
+    }
+    LOG(INFO) << "[" << req.method << " " << req.uri << "]: trace_id=" << trace_id
+              << " status=" << res.status_code << " res.body.bytes=" << res.body.size();
     return true;
   };
 }
