@@ -9,8 +9,8 @@
 #include "absl/log/log.h"
 
 namespace meerkat {
-
-std::string TRACE_ID_HEADER_NAME{"x-trace-id"};
+// TODO: move this header name to some language neutral config format for cross-project sharing
+const std::string TRACE_ID_HEADER_NAME{"x-trace-id"};
 
 HttpServer::HttpServer()
     : listener_(nullptr),
@@ -19,11 +19,7 @@ HttpServer::HttpServer()
       listen_port_(0),
       should_listen_(false),
       cors_enabled_(false) {
-  // Initialize mgr_ to zero to ensure consistent behavior across platforms
-  memset(&mgr_, 0, sizeof(mgr_));
-
-  // Clear WebSocket connections map
-  websocket_connections_.clear();
+  mg_mgr_init(&mgr_);
 }
 
 HttpServer::~HttpServer() {
