@@ -59,15 +59,63 @@ TEST_F(MeerkatTest, CanRegisterRoutes) {
   // and making actual HTTP requests. Integration tests will cover that.
 }
 
-TEST_F(MeerkatTest, CanRegisterMiddleware) {
-  bool middleware_called = false;
+TEST_F(MeerkatTest, CanRegisterRequestInterceptor) {
+  bool request_interceptor_called = false;
+  std::string intercepted_method;
+  std::string intercepted_uri;
+  bool interceptor_can_modify_request = false;
+  bool interceptor_can_modify_response = false;
 
-  server_->use_middleware([&middleware_called](const HttpRequest& req, HttpResponse& res) -> bool {
-    middleware_called = true;
+  // Test that interceptor can examine and modify request/response
+  server_->use_request_interceptor([&](HttpRequest& req, HttpResponse& res) -> bool {
+    request_interceptor_called = true;
+    intercepted_method = req.method;
+    intercepted_uri = req.uri;
+    
+    // Test that interceptor can modify the request
+    req.headers["X-Intercepted"] = "true";
+    interceptor_can_modify_request = true;
+    
+    // Test that interceptor can modify the response
+    res.headers["X-Response-Intercepted"] = "true";
+    interceptor_can_modify_response = true;
+    
     return true;  // Continue processing
   });
 
-  // Middleware is registered but won't be called until a request is processed
+  // Register a test route to trigger the interceptor
+  bool route_called = false;
+  server_->get("/test-interceptor", [&](const HttpRequest& req) -> HttpResponse {
+    route_called = true;
+    // Verify that the interceptor modified the request
+    EXPECT_EQ(req.headers.at("X-Intercepted"), "true");
+    return responses::ok(json{{"message", "interceptor test"}});
+  });
+
+  // Create a mock request to simulate what happens during actual request processing
+  HttpRequest test_request;
+  test_request.method = "GET";
+  test_request.uri = "/test-interceptor";
+  test_request.headers["User-Agent"] = "test-client";
+
+  HttpResponse test_response;
+
+  // Manually execute the interceptor logic (since we can't easily start the full server)
+  bool continue_processing = true;
+  for (const auto& interceptor : server_->request_interceptors_) {
+    continue_processing = interceptor(test_request, test_response);
+    if (!continue_processing) break;
+  }
+
+  // Verify interceptor was called and modified request/response
+  EXPECT_TRUE(request_interceptor_called);
+  EXPECT_EQ(intercepted_method, "GET");
+  EXPECT_EQ(intercepted_uri, "/test-interceptor");
+  EXPECT_TRUE(interceptor_can_modify_request);
+  EXPECT_TRUE(interceptor_can_modify_response);
+  EXPECT_TRUE(continue_processing);
+  EXPECT_EQ(test_request.headers["X-Intercepted"], "true");
+  EXPECT_EQ(test_response.headers["X-Response-Intercepted"], "true");
 }
 
 TEST_F(MeerkatTest, ResponseUtilities) {

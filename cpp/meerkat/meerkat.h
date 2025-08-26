@@ -42,7 +42,8 @@ struct HttpResponse {
 };
 
 using RouteHandler = std::function<HttpResponse(const HttpRequest&)>;
-using MiddlewareHandler = std::function<bool(const HttpRequest&, HttpResponse&)>;
+using RequestInterceptor = std::function<bool(HttpRequest&, HttpResponse&)>;
+using ResponseInterceptor = std::function<void(const HttpRequest&, HttpResponse&)>;
 using WebSocketHandler = std::function<void(struct mg_connection*, const std::string&)>;
 using WebSocketConnectHandler = std::function<bool(struct mg_connection*, const HttpRequest&)>;
 using WebSocketCloseHandler = std::function<void(struct mg_connection*)>;
@@ -65,8 +66,9 @@ class HttpServer {
   void del(const std::string& path, RouteHandler handler);
   void route(const std::string& method, const std::string& path, RouteHandler handler);
 
-  // Middleware registration
-  void use_middleware(MiddlewareHandler middleware);
+  // Interceptor registration
+  void use_request_interceptor(RequestInterceptor interceptor);
+  void use_response_interceptor(ResponseInterceptor interceptor);
 
   // Server control
   bool listen(const std::string& address, int port);
@@ -128,7 +130,8 @@ class HttpServer {
   };
 
   std::vector<Route> routes_;
-  std::vector<MiddlewareHandler> middleware_;
+  std::vector<RequestInterceptor> request_interceptors_;
+  std::vector<ResponseInterceptor> response_interceptors_;
   std::unordered_map<std::string, std::string> static_paths_;
 
   // CORS configuration
@@ -182,10 +185,10 @@ void send_binary(struct mg_connection* c, const void* data, size_t length);
 void close(struct mg_connection* c, int code = 1000, const std::string& reason = "");
 }  // namespace websocket
 
-namespace middleware {
-MiddlewareHandler trace_id();
-MiddlewareHandler request_logging();
-}  // namespace middleware
+namespace interceptors {
+RequestInterceptor trace_id_request_interceptor();
+ResponseInterceptor request_logging_response_interceptor();
+}  // namespace interceptors
 
 }  // namespace meerkat
 

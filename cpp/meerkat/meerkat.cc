@@ -48,8 +48,12 @@ void HttpServer::route(const std::string& method, const std::string& path, Route
   routes_.push_back({method, path, std::move(handler)});
 }
 
-void HttpServer::use_middleware(MiddlewareHandler middleware) {
-  middleware_.push_back(std::move(middleware));
+void HttpServer::use_request_interceptor(RequestInterceptor request_interceptor) {
+  request_interceptors_.push_back(std::move(request_interceptor));
+}
+
+void HttpServer::use_response_interceptor(ResponseInterceptor response_interceptor) {
+  response_interceptors_.push_back(std::move(response_interceptor));
 }
 
 bool HttpServer::listen(const std::string& address, int port) {
@@ -157,7 +161,7 @@ void HttpServer::event_handler(struct mg_connection* c, int ev, void* ev_data) {
 }
 
 void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message* hm) {
-  const HttpRequest request = parse_request(hm);
+  HttpRequest request = parse_request(hm);
   HttpResponse response;
 
   // Handle CORS preflight requests
@@ -167,9 +171,9 @@ void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message*
   }
 
   // Apply middleware
-  for (const auto& middleware : middleware_) {
-    if (!middleware(request, response)) {
-      // Middleware blocked the request
+  for (const auto& request_interceptor : request_interceptors_) {
+    if (!request_interceptor(request, response)) {
+      // Request interceptor blocked the request
       if (cors_enabled_) {
         add_cors_headers(response, request);
       }
@@ -200,6 +204,14 @@ void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message*
     }
   } else {
     response = responses::not_found();
+  }
+
+  try {
+    for (const auto& response_interceptor : response_interceptors_) {
+      response_interceptor(request, response);
+    }
+  } catch (...) {
+    response = responses::internal_error();
   }
 
   // Add CORS headers if enabled
@@ -454,7 +466,7 @@ HttpResponse internal_error(const std::string& message) {
 }
 }  // namespace responses
 
-namespace middleware {
+namespace interceptors {
 static long random_positive_long() {
   static std::random_device rd;
   static std::mt19937_64 gen(rd());
@@ -463,18 +475,27 @@ static long random_positive_long() {
   return dis(gen);
 }
 
-MiddlewareHandler trace_id() {
-  return [](const HttpRequest& req, HttpResponse& res) -> bool {
-    res.headers.try_emplace(TRACE_ID_HEADER_NAME, std::to_string(random_positive_long()));
+RequestInterceptor trace_id_request_interceptor() {
+  return [](HttpRequest& req, HttpResponse& res) -> bool {
+    // propagate trace-id if we have one on the request
+    // add a new trace-id if we don't
+    if (req.headers.contains(TRACE_ID_HEADER_NAME)) {
+      res.headers.try_emplace(TRACE_ID_HEADER_NAME, req.headers.at(TRACE_ID_HEADER_NAME));
+    } else {
+      auto trace_id = std::to_string(random_positive_long());
+      // add trace-id to req in case we're a proxy
+      req.headers.try_emplace(TRACE_ID_HEADER_NAME, trace_id);
+      res.headers.try_emplace(TRACE_ID_HEADER_NAME, trace_id);
+    }
     return true;
   };
 }
 
-MiddlewareHandler request_logging() {
+ResponseInterceptor request_logging_response_interceptor() {
   return [](const HttpRequest& req, HttpResponse& res) -> bool {
     std::string trace_id = "unknown";
-    if (res.headers.contains(TRACE_ID_HEADER_NAME)) {
-      trace_id = res.headers[TRACE_ID_HEADER_NAME];
+    if (req.headers.contains(TRACE_ID_HEADER_NAME)) {
+      trace_id = req.headers.at(TRACE_ID_HEADER_NAME);
     }
     LOG(INFO) << "[" << req.method << " " << req.uri << "]: trace_id=" << trace_id
               << " status=" << res.status_code << " res.body.bytes=" << res.body.size();
