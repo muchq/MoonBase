@@ -1,19 +1,19 @@
 load("@bazel_gazelle//:def.bzl", "gazelle")
 load("@buildifier_prebuilt//:rules.bzl", "buildifier", "buildifier_test")
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
-load("@rules_python//python:pip.bzl", "compile_pip_requirements")
+# load("@rules_python//python:pip.bzl", "compile_pip_requirements")
 
-compile_pip_requirements(
-    name = "requirements",
-    src = "requirements.in",
-    extra_args = [
-        "--extra-index-url",
-        "https://download.pytorch.org/whl/cpu",
-    ],
-    requirements_darwin = "requirements_darwin_lock.txt",
-    requirements_linux = "requirements_linux_lock.txt",
-    requirements_txt = "requirements_lock.txt",
-)
+# compile_pip_requirements(
+#     name = "requirements",
+#     src = "requirements.in",
+#     extra_args = [
+#         "--extra-index-url",
+#         "https://download.pytorch.org/whl/cpu",
+#     ],
+#     requirements_darwin = "requirements_darwin_lock.txt",
+#     requirements_linux = "requirements_linux_lock.txt",
+#     requirements_txt = "requirements_lock.txt",
+# )
 
 refresh_compile_commands(
     name = "refresh_compile_commands",
