@@ -1,10 +1,10 @@
-load("@rules_python//python:defs.bzl", "py_binary")
-
-py_binary(
-    name = "pytorch_hello",
-    srcs = ["pytorch_hello.py"],
-    deps = [
-        "@pypi//torch",
-        "@pypi//torchvision",
-    ],
-)
+# load("@rules_python//python:defs.bzl", "py_binary")
+#
+# py_binary(
+#     name = "pytorch_hello",
+#     srcs = ["pytorch_hello.py"],
+#     deps = [
+#         "@pypi//torch",
+#         "@pypi//torchvision",
+#     ],
+# )
