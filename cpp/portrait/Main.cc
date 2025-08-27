@@ -3,8 +3,10 @@
 #include "absl/log/log.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "base64.h"
 #include "cpp/image_core/image_core.h"
 #include "cpp/meerkat/meerkat.h"
+#include "cpp/png_plusplus/png_plusplus.h"
 #include "cpp/portrait/types.h"
 #include "tracer_service.h"
 
@@ -37,6 +39,15 @@ absl::StatusOr<TraceRequest> parseTraceRequest(const std::string& body) {
   }
 }
 
+TraceResponse toResponse(const Image<RGB_Double>& image) {
+  const std::vector<unsigned char> png_bytes = pngpp::imageToPng(image);
+  return TraceResponse{
+      .base64_png = pngToBase64(png_bytes),
+      .width = image.width,
+      .height = image.height,
+  };
+}
+
 int main() {
   absl::InitializeLog();
   absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
@@ -54,7 +65,8 @@ int main() {
     }
     auto [scene, perspective, output] = trace_or_status.value();
     auto image = tracer_service.trace(scene, perspective, output);
-    return responses::ok(json{{"status", "ok"}});
+    json response = toResponse(image);
+    return responses::ok(response);
   });
 
   server.enable_health_checks();

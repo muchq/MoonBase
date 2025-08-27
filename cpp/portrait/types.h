@@ -2,6 +2,7 @@
 #define CPP_PORTRAIT_TYPES_H
 
 #include <nlohmann/json.hpp>
+#include <string>
 #include <tuple>
 
 #include "absl/status/status.h"
@@ -64,6 +65,13 @@ struct TraceRequest {
   Output output;
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(TraceRequest, scene, perspective, output)
+
+struct TraceResponse {
+  std::string base64_png;
+  int width;
+  int height;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(TraceResponse, base64_png, width, height)
 
 absl::Status validateTraceRequest(TraceRequest &request);
 
