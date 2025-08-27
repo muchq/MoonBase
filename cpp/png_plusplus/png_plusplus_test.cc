@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <cmath>
 
 namespace pngpp {
 namespace {
@@ -321,6 +322,387 @@ TEST_F(PngPlusPlusTest, ReadModifyWriteWorkflow) {
 
   // Clean up
   std::remove(modified_filename.c_str());
+}
+
+// Tests for Image<RGB_Double> roundtrip functionality
+TEST_F(PngPlusPlusTest, ImageRgbDoubleToMemoryPngRoundtrip) {
+  const int width = 50;
+  const int height = 50;
+
+  // Create an Image<RGB_Double> with various values including fractional components
+  image_core::Image<image_core::RGB_Double> original_image(width, height);
+  
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      // Create a gradient pattern with fractional values
+      double r = (static_cast<double>(x) / width) * 255.0;
+      double g = (static_cast<double>(y) / height) * 255.0;
+      double b = ((static_cast<double>(x + y) / (width + height)) * 127.5) + 63.75;
+      original_image.data[y][x] = image_core::RGB_Double{r, g, b};
+    }
+  }
+
+  // Convert to PNG buffer
+  std::vector<unsigned char> png_buffer;
+  EXPECT_NO_THROW({ png_buffer = imageToPng(original_image); });
+  EXPECT_GT(png_buffer.size(), 0);
+
+  // Convert back to Image<RGB_Double>
+  image_core::Image<image_core::RGB_Double> roundtrip_image(1, 1);  // Dummy initialization
+  EXPECT_NO_THROW({ roundtrip_image = pngToImage(png_buffer); });
+
+  // Verify dimensions
+  EXPECT_EQ(roundtrip_image.width, width);
+  EXPECT_EQ(roundtrip_image.height, height);
+
+  // Verify pixel values (note: due to quantization, values should be within 1.0 of original)
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      // Original values
+      double orig_r = original_image.data[y][x].r;
+      double orig_g = original_image.data[y][x].g;
+      double orig_b = original_image.data[y][x].b;
+      
+      // Roundtrip values
+      double round_r = roundtrip_image.data[y][x].r;
+      double round_g = roundtrip_image.data[y][x].g;
+      double round_b = roundtrip_image.data[y][x].b;
+      
+      // Check that clamped values match (RGB quantizes to [0,255] range)
+      int expected_r = std::min(255, std::max(0, static_cast<int>(orig_r)));
+      int expected_g = std::min(255, std::max(0, static_cast<int>(orig_g)));
+      int expected_b = std::min(255, std::max(0, static_cast<int>(orig_b)));
+      
+      EXPECT_EQ(static_cast<int>(round_r), expected_r) 
+          << "Red mismatch at (" << x << "," << y << ")";
+      EXPECT_EQ(static_cast<int>(round_g), expected_g) 
+          << "Green mismatch at (" << x << "," << y << ")";
+      EXPECT_EQ(static_cast<int>(round_b), expected_b) 
+          << "Blue mismatch at (" << x << "," << y << ")";
+    }
+  }
+}
+
+TEST_F(PngPlusPlusTest, ImageRgbDoubleEdgeCases) {
+  const int width = 20;
+  const int height = 20;
+
+  // Test with extreme values (negative, zero, very large)
+  image_core::Image<image_core::RGB_Double> edge_image(width, height);
+  
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      if (x < width / 4) {
+        // Negative values (should clamp to 0)
+        edge_image.data[y][x] = image_core::RGB_Double{-50.0, -100.0, -25.0};
+      } else if (x < width / 2) {
+        // Zero values
+        edge_image.data[y][x] = image_core::RGB_Double{0.0, 0.0, 0.0};
+      } else if (x < 3 * width / 4) {
+        // Values above 255 (should clamp to 255)
+        edge_image.data[y][x] = image_core::RGB_Double{300.0, 500.0, 1000.0};
+      } else {
+        // Valid values
+        edge_image.data[y][x] = image_core::RGB_Double{128.5, 64.7, 192.3};
+      }
+    }
+  }
+
+  // Convert to PNG and back
+  std::vector<unsigned char> png_buffer = imageToPng(edge_image);
+  image_core::Image<image_core::RGB_Double> result_image = pngToImage(png_buffer);
+
+  EXPECT_EQ(result_image.width, width);
+  EXPECT_EQ(result_image.height, height);
+
+  // Verify clamping behavior
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      double r = result_image.data[y][x].r;
+      double g = result_image.data[y][x].g;
+      double b = result_image.data[y][x].b;
+      
+      if (x < width / 4) {
+        // Negative values should become 0
+        EXPECT_EQ(static_cast<int>(r), 0);
+        EXPECT_EQ(static_cast<int>(g), 0);
+        EXPECT_EQ(static_cast<int>(b), 0);
+      } else if (x < width / 2) {
+        // Zero values remain zero
+        EXPECT_EQ(static_cast<int>(r), 0);
+        EXPECT_EQ(static_cast<int>(g), 0);
+        EXPECT_EQ(static_cast<int>(b), 0);
+      } else if (x < 3 * width / 4) {
+        // Large values should clamp to 255
+        EXPECT_EQ(static_cast<int>(r), 255);
+        EXPECT_EQ(static_cast<int>(g), 255);
+        EXPECT_EQ(static_cast<int>(b), 255);
+      } else {
+        // Valid values should be truncated properly
+        EXPECT_EQ(static_cast<int>(r), 128);  // 128.5 -> 128
+        EXPECT_EQ(static_cast<int>(g), 64);   // 64.7 -> 64
+        EXPECT_EQ(static_cast<int>(b), 192);  // 192.3 -> 192
+      }
+    }
+  }
+}
+
+TEST_F(PngPlusPlusTest, MemoryPngWriterBasicFunctionality) {
+  const int width = 30;
+  const int height = 25;
+
+  std::vector<std::vector<RGB>> test_image(height, std::vector<RGB>(width));
+  
+  // Create a diagonal pattern
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      if ((x + y) % 2 == 0) {
+        test_image[y][x] = RGB{255, 0, 0};  // Red
+      } else {
+        test_image[y][x] = RGB{0, 0, 255};  // Blue
+      }
+    }
+  }
+
+  MemoryPngWriter writer(width, height);
+  EXPECT_NO_THROW({ writer.writeImage(test_image); });
+
+  const std::vector<unsigned char>& buffer = writer.getBuffer();
+  EXPECT_GT(buffer.size(), 0);
+  EXPECT_EQ(writer.getWidth(), width);
+  EXPECT_EQ(writer.getHeight(), height);
+
+  // Verify PNG signature (first 8 bytes should be PNG signature)
+  EXPECT_GE(buffer.size(), 8);
+  const unsigned char png_signature[] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+  for (int i = 0; i < 8; ++i) {
+    EXPECT_EQ(buffer[i], png_signature[i]) << "PNG signature mismatch at byte " << i;
+  }
+}
+
+TEST_F(PngPlusPlusTest, MemoryPngReaderBasicFunctionality) {
+  const int width = 15;
+  const int height = 10;
+
+  // Create test image
+  std::vector<std::vector<RGB>> original_image(height, std::vector<RGB>(width));
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      unsigned char r = static_cast<unsigned char>((x * 255) / width);
+      unsigned char g = static_cast<unsigned char>((y * 255) / height);
+      unsigned char b = 128;
+      original_image[y][x] = RGB{r, g, b};
+    }
+  }
+
+  // Write to memory buffer
+  MemoryPngWriter writer(width, height);
+  writer.writeImage(original_image);
+  const std::vector<unsigned char>& png_buffer = writer.getBuffer();
+
+  // Read back from memory buffer
+  MemoryPngReader reader(png_buffer);
+  std::vector<std::vector<RGB>> read_image;
+  EXPECT_NO_THROW({ read_image = reader.readImage(); });
+
+  // Verify dimensions and content
+  EXPECT_EQ(read_image.size(), height);
+  EXPECT_EQ(read_image[0].size(), width);
+
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      EXPECT_EQ(read_image[y][x].r, original_image[y][x].r);
+      EXPECT_EQ(read_image[y][x].g, original_image[y][x].g);
+      EXPECT_EQ(read_image[y][x].b, original_image[y][x].b);
+    }
+  }
+}
+
+TEST_F(PngPlusPlusTest, MultipleRoundtripsPreserveData) {
+  const int width = 40;
+  const int height = 30;
+
+  // Create initial image with specific pattern
+  image_core::Image<image_core::RGB_Double> image1(width, height);
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      double intensity = static_cast<double>((x + y) % 256);
+      image1.data[y][x] = image_core::RGB_Double{intensity, intensity, intensity};
+    }
+  }
+
+  // Perform multiple roundtrips
+  image_core::Image<image_core::RGB_Double> current_image = image1;
+  
+  for (int i = 0; i < 3; ++i) {
+    std::vector<unsigned char> png_buffer = imageToPng(current_image);
+    current_image = pngToImage(png_buffer);
+    
+    // Verify dimensions haven't changed
+    EXPECT_EQ(current_image.width, width);
+    EXPECT_EQ(current_image.height, height);
+  }
+
+  // After multiple roundtrips, values should be stable (since they're already quantized)
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      int expected = (x + y) % 256;
+      int actual_r = static_cast<int>(current_image.data[y][x].r);
+      int actual_g = static_cast<int>(current_image.data[y][x].g);
+      int actual_b = static_cast<int>(current_image.data[y][x].b);
+      
+      EXPECT_EQ(actual_r, expected);
+      EXPECT_EQ(actual_g, expected);
+      EXPECT_EQ(actual_b, expected);
+    }
+  }
+}
+
+TEST_F(PngPlusPlusTest, EmptyImageHandling) {
+  // Test zero-sized image
+  EXPECT_THROW({
+    image_core::Image<image_core::RGB_Double> empty_image(0, 0);
+    imageToPng(empty_image);
+  }, PngException);
+  
+  EXPECT_THROW({
+    image_core::Image<image_core::RGB_Double> empty_width(0, 10);
+    imageToPng(empty_width);
+  }, PngException);
+  
+  EXPECT_THROW({
+    image_core::Image<image_core::RGB_Double> empty_height(10, 0);
+    imageToPng(empty_height);
+  }, PngException);
+}
+
+TEST_F(PngPlusPlusTest, InvalidPngBufferHandling) {
+  // Test with invalid PNG data
+  std::vector<unsigned char> invalid_buffer = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05};
+  
+  EXPECT_THROW({ pngToImage(invalid_buffer); }, PngException);
+  
+  // Test with empty buffer
+  std::vector<unsigned char> empty_buffer;
+  EXPECT_THROW({ pngToImage(empty_buffer); }, PngException);
+}
+
+TEST_F(PngPlusPlusTest, CompressionLevelSupport) {
+  const int width = 50;
+  const int height = 50;
+
+  // Create a test image with repeating pattern (compresses well)
+  image_core::Image<image_core::RGB_Double> test_image(width, height);
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      // Create a pattern that should compress well
+      if ((x / 10 + y / 10) % 2 == 0) {
+        test_image.data[y][x] = image_core::RGB_Double{255.0, 0.0, 0.0};  // Red
+      } else {
+        test_image.data[y][x] = image_core::RGB_Double{0.0, 0.0, 255.0};  // Blue
+      }
+    }
+  }
+
+  // Test different compression levels
+  std::vector<unsigned char> no_compression = imageToPng(test_image, 0);
+  std::vector<unsigned char> default_compression = imageToPng(test_image);  // -1 default
+  std::vector<unsigned char> best_compression = imageToPng(test_image, 9);
+
+  // All should produce valid PNG data
+  EXPECT_GT(no_compression.size(), 0);
+  EXPECT_GT(default_compression.size(), 0);
+  EXPECT_GT(best_compression.size(), 0);
+
+  // Verify PNG signatures
+  const unsigned char png_signature[] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+  for (int i = 0; i < 8; ++i) {
+    EXPECT_EQ(no_compression[i], png_signature[i]);
+    EXPECT_EQ(default_compression[i], png_signature[i]);
+    EXPECT_EQ(best_compression[i], png_signature[i]);
+  }
+
+  // Best compression should generally produce smaller files than no compression
+  // Note: For small images, overhead might make this not always true, so we just verify they're different
+  EXPECT_NE(no_compression.size(), best_compression.size());
+
+  // All should decode to the same image
+  image_core::Image<image_core::RGB_Double> decoded_no_comp = pngToImage(no_compression);
+  image_core::Image<image_core::RGB_Double> decoded_default = pngToImage(default_compression);
+  image_core::Image<image_core::RGB_Double> decoded_best = pngToImage(best_compression);
+
+  EXPECT_EQ(decoded_no_comp.width, width);
+  EXPECT_EQ(decoded_default.width, width);
+  EXPECT_EQ(decoded_best.width, width);
+
+  // Verify pixel values are identical across all compression levels
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      EXPECT_EQ(static_cast<int>(decoded_no_comp.data[y][x].r), 
+                static_cast<int>(decoded_default.data[y][x].r));
+      EXPECT_EQ(static_cast<int>(decoded_default.data[y][x].r), 
+                static_cast<int>(decoded_best.data[y][x].r));
+      
+      EXPECT_EQ(static_cast<int>(decoded_no_comp.data[y][x].g), 
+                static_cast<int>(decoded_default.data[y][x].g));
+      EXPECT_EQ(static_cast<int>(decoded_default.data[y][x].g), 
+                static_cast<int>(decoded_best.data[y][x].g));
+      
+      EXPECT_EQ(static_cast<int>(decoded_no_comp.data[y][x].b), 
+                static_cast<int>(decoded_default.data[y][x].b));
+      EXPECT_EQ(static_cast<int>(decoded_default.data[y][x].b), 
+                static_cast<int>(decoded_best.data[y][x].b));
+    }
+  }
+}
+
+TEST_F(PngPlusPlusTest, MemoryPngWriterCompressionLevelGetter) {
+  const int width = 20;
+  const int height = 20;
+
+  // Test default compression level
+  MemoryPngWriter writer_default(width, height);
+  EXPECT_EQ(writer_default.getCompressionLevel(), -1);
+
+  // Test specific compression levels
+  MemoryPngWriter writer_no_compress(width, height, 0);
+  EXPECT_EQ(writer_no_compress.getCompressionLevel(), 0);
+
+  MemoryPngWriter writer_best_compress(width, height, 9);
+  EXPECT_EQ(writer_best_compress.getCompressionLevel(), 9);
+
+  // Test invalid compression level (should still store the value but not apply it)
+  MemoryPngWriter writer_invalid(width, height, 15);
+  EXPECT_EQ(writer_invalid.getCompressionLevel(), 15);
+}
+
+TEST_F(PngPlusPlusTest, CompressionLevelValidation) {
+  const int width = 30;
+  const int height = 30;
+
+  // Create simple test image
+  std::vector<std::vector<RGB>> simple_image(height, std::vector<RGB>(width, RGB{128, 128, 128}));
+
+  // Test that invalid compression levels don't crash
+  EXPECT_NO_THROW({
+    MemoryPngWriter writer_negative(width, height, -5);
+    writer_negative.writeImage(simple_image);
+  });
+
+  EXPECT_NO_THROW({
+    MemoryPngWriter writer_too_high(width, height, 20);
+    writer_too_high.writeImage(simple_image);
+  });
+
+  // Valid compression levels should work
+  for (int level = 0; level <= 9; ++level) {
+    EXPECT_NO_THROW({
+      MemoryPngWriter writer(width, height, level);
+      writer.writeImage(simple_image);
+      const auto& buffer = writer.getBuffer();
+      EXPECT_GT(buffer.size(), 0);
+    }) << "Compression level " << level << " failed";
+  }
 }
 
 }  // namespace
