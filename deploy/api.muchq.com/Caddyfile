@@ -1,4 +1,36 @@
 api.muchq.com {
+	@post_portrait {
+		method POST
+		path /v1/trace
+	}
+
+	@options {
+		method OPTIONS
+	}
+
+	header {
+		Access-Control-Allow-Origin "https://muchq.com"
+		Access-Control-Allow-Methods "GET, POST, OPTIONS"
+		Access-Control-Allow-Headers "Content-Type, Authorization"
+		Access-Control-Max-Age "86400"
+	}
+
+	handle @options {
+		header {
+			Access-Control-Allow-Origin "https://muchq.com"
+			Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			Access-Control-Allow-Headers "Content-Type, Authorization"
+			Access-Control-Max-Age "86400"
+		}
+		respond 204
+	}
+
+	reverse_proxy @post_portrait localhost:8081 {
+		header_down -Access-Control-Allow-Origin
+		header_down -Access-Control-Allow-Methods
+		header_down -Access-Control-Allow-Headers
+		header_down -Access-Control-Max-Age
+	}
 	reverse_proxy localhost:8080
 	log {
 		output file /var/log/caddy/access.log {

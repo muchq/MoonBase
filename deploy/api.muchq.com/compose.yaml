@@ -1,8 +1,17 @@
 services:
-  thoughts:
+  games_ws_backend:
     image: ghcr.io/muchq/games_ws_backend:latest
     restart: always
     ports:
-      - "127.0.0.1:8080:8080"
+      - "8080:8080"
+    volumes:
+      - /etc/games_ws_backend:/etc/games_ws_backend
+  portrait:
+    image: ghcr.io/muchq/portrait:latest
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
     volumes:
       - /etc/games_ws_backend:/etc/games_ws_backend
