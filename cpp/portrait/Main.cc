@@ -4,6 +4,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "base64.h"
+#include "cpp/futility/cache/lru_cache.h"
 #include "cpp/image_core/image_core.h"
 #include "cpp/meerkat/meerkat.h"
 #include "cpp/png_plusplus/png_plusplus.h"
@@ -13,6 +14,7 @@
 using namespace meerkat;
 using namespace portrait;
 
+using futility::cache::LRUCache;
 using image_core::Image;
 using image_core::RGB_Double;
 
@@ -39,12 +41,16 @@ absl::StatusOr<TraceRequest> parseTraceRequest(const std::string& body) {
   }
 }
 
-TraceResponse toResponse(const Image<RGB_Double>& image) {
+std::string imageToBase64(Image<RGB_Double>& image) {
   const std::vector<unsigned char> png_bytes = pngpp::imageToPng(image);
+  return pngToBase64(png_bytes);
+}
+
+TraceResponse toResponse(const Output& output, std::string& base64) {
   return TraceResponse{
-      .base64_png = pngToBase64(png_bytes),
-      .width = image.width,
-      .height = image.height,
+      .base64_png = base64,
+      .width = output.width,
+      .height = output.height,
   };
 }
 
@@ -55,17 +61,27 @@ int main() {
 
   HttpServer server;
   TracerService tracer_service;
+  LRUCache<TraceRequest, std::string> cache(100);
 
-  // Create a new user
-  server.post("/v1/trace", [&tracer_service](const HttpRequest& req) -> HttpResponse {
+  // ray tracing endpoint
+  server.post("/v1/trace", [&tracer_service, &cache](const HttpRequest& req) -> HttpResponse {
     absl::StatusOr<TraceRequest> trace_or_status = parseTraceRequest(req.body);
     if (!trace_or_status.ok()) {
       return responses::bad_request(
           absl::StrCat("Invalid JSON: ", trace_or_status.status().message()));
     }
-    auto [scene, perspective, output] = trace_or_status.value();
+    auto trace_request = trace_or_status.value();
+    auto cached_image = cache.get(trace_request);
+    if (cached_image.has_value()) {
+      auto b64Png = cached_image.value();
+      json response = toResponse(trace_request.output, b64Png);
+      return responses::ok(response);
+    }
+    auto [scene, perspective, output] = trace_request;
     auto image = tracer_service.trace(scene, perspective, output);
-    json response = toResponse(image);
+    auto b64Png = imageToBase64(image);
+    json response = toResponse(output, b64Png);
+    cache.insert(trace_request, std::move(b64Png));
     return responses::ok(response);
   });
 

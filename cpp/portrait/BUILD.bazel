@@ -8,6 +8,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//cpp/tracy",
+        "@com_google_absl//absl/hash",
         "@com_google_absl//absl/status",
         "@nlohmann_json//:json",
     ],
@@ -64,6 +65,7 @@ cc_binary(
         "base64",
         ":tracer_service",
         ":types",
+        "//cpp/futility/cache",
         "//cpp/meerkat",
         "//cpp/png_plusplus",
         "//cpp/tracy",
