@@ -1,0 +1,20 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+cc_library(
+    name = "cache",
+    srcs = [],
+    hdrs = ["lru_cache.h"],
+    visibility = ["//visibility:public"],
+    deps = [],
+)
+
+cc_test(
+    name = "cache_test",
+    size = "small",
+    srcs = ["lru_cache_test.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cache",
+        "@googletest//:gtest_main",
+    ],
+)
