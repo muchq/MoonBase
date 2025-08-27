@@ -57,7 +57,10 @@ vector<tracy::Light> TracerService::tracify(const vector<Light>& lights) {
   return tracyLights;
 }
 
-tracy::Vec3 TracerService::tracify(const Vec3& v) { return tracy::Vec3(v.x, v.y, v.z); }
+tracy::Vec3 TracerService::tracify(const Vec3& v) {
+  auto [x, y, z] = v;
+  return tracy::Vec3(x, y, z);
+}
 
 tracy::LightType TracerService::tracify(const LightType& lightType) {
   return static_cast<tracy::LightType>(lightType);

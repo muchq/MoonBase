@@ -49,7 +49,8 @@ int main() {
   server.post("/v1/trace", [&tracer_service](const HttpRequest& req) -> HttpResponse {
     absl::StatusOr<TraceRequest> trace_or_status = parseTraceRequest(req.body);
     if (!trace_or_status.ok()) {
-      return responses::bad_request(absl::StrCat("Invalid JSON: ", trace_or_status.status().message()));
+      return responses::bad_request(
+          absl::StrCat("Invalid JSON: ", trace_or_status.status().message()));
     }
     auto [scene, perspective, output] = trace_or_status.value();
     auto image = tracer_service.trace(scene, perspective, output);

@@ -1,5 +1,6 @@
 #include "cpp/meerkat/meerkat.h"
 
+#include <chrono>
 #include <climits>
 #include <iostream>
 #include <random>
@@ -167,6 +168,7 @@ void HttpServer::event_handler(struct mg_connection* c, int ev, void* ev_data) {
 
 void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message* hm) {
   HttpRequest request = parse_request(hm);
+  request.start_time = std::chrono::steady_clock::now();
   HttpResponse response;
 
   // Handle CORS preflight requests
@@ -507,8 +509,14 @@ ResponseInterceptor logging() {
     if (res.headers.contains(TRACE_ID_HEADER_NAME)) {
       trace_id = res.headers.at(TRACE_ID_HEADER_NAME);
     }
+
+    auto end_time = std::chrono::steady_clock::now();
+    auto duration =
+        std::chrono::duration_cast<std::chrono::milliseconds>(end_time - req.start_time);
+
     LOG(INFO) << "[" << req.method << " " << req.uri << "]: trace_id=" << trace_id
-              << " status=" << res.status_code << " res.body.bytes=" << res.body.size();
+              << " status=" << res.status_code << " res.body.bytes=" << res.body.size()
+              << " duration_ms=" << duration.count();
   };
 }
 }  // namespace response
