@@ -63,7 +63,7 @@ int main() {
   TracerService tracer_service;
   LRUCache<TraceRequest, std::string> cache(100);
 
-  // Create a new user
+  // ray tracing endpoint
   server.post("/v1/trace", [&tracer_service, &cache](const HttpRequest& req) -> HttpResponse {
     absl::StatusOr<TraceRequest> trace_or_status = parseTraceRequest(req.body);
     if (!trace_or_status.ok()) {
@@ -80,8 +80,8 @@ int main() {
     auto [scene, perspective, output] = trace_request;
     auto image = tracer_service.trace(scene, perspective, output);
     auto b64Png = imageToBase64(image);
-    cache.insert(trace_request, std::move(b64Png));
     json response = toResponse(output, b64Png);
+    cache.insert(trace_request, std::move(b64Png));
     return responses::ok(response);
   });
 
