@@ -1,4 +1,4 @@
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
 cc_library(
@@ -25,6 +25,26 @@ cc_library(
 # )
 
 cc_library(
+    name = "base64",
+    srcs = ["base64.cc"],
+    hdrs = ["base64.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "base64_test",
+    size = "small",
+    srcs = ["base64_test.cc"],
+    deps = [
+        ":base64",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
     name = "tracer_service",
     srcs = ["tracer_service.cc"],
     hdrs = ["tracer_service.h"],
@@ -41,9 +61,11 @@ cc_binary(
     srcs = ["Main.cc"],
     visibility = ["//visibility:public"],
     deps = [
+        "base64",
         ":tracer_service",
         ":types",
         "//cpp/meerkat",
+        "//cpp/png_plusplus",
         "//cpp/tracy",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:globals",
