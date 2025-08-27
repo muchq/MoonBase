@@ -252,7 +252,7 @@ inline std::vector<std::vector<RGB>> readPng(const std::string& filename) {
 class MemoryPngWriter {
  public:
   // Compression levels: 0 (no compression) to 9 (best compression), -1 (default)
-  MemoryPngWriter(int width, int height, int compression_level = -1) 
+  MemoryPngWriter(int width, int height, int compression_level = -1)
       : width_(width), height_(height), compression_level_(compression_level) {
     png_ = png_create_write_struct(PNG_LIBPNG_VER_STRING, this, &MemoryPngWriter::errorHandler,
                                    &MemoryPngWriter::warningHandler);
@@ -474,7 +474,7 @@ class MemoryPngReader {
 };
 
 // Convenience functions for Image<RGB_Double> conversion
-inline std::vector<unsigned char> imageToPng(const image_core::Image<image_core::RGB_Double>& image, 
+inline std::vector<unsigned char> imageToPng(const image_core::Image<image_core::RGB_Double>& image,
                                              int compression_level = -1) {
   MemoryPngWriter writer(image.width, image.height, compression_level);
   std::vector<std::vector<RGB>> rgb_image = image.toRGB();
@@ -482,20 +482,21 @@ inline std::vector<unsigned char> imageToPng(const image_core::Image<image_core:
   return writer.getBuffer();
 }
 
-inline image_core::Image<image_core::RGB_Double> pngToImage(const std::vector<unsigned char>& png_buffer) {
+inline image_core::Image<image_core::RGB_Double> pngToImage(
+    const std::vector<unsigned char>& png_buffer) {
   MemoryPngReader reader(png_buffer);
   std::vector<std::vector<RGB>> rgb_image = reader.readImage();
-  
+
   int height = static_cast<int>(rgb_image.size());
   int width = height > 0 ? static_cast<int>(rgb_image[0].size()) : 0;
-  
+
   image_core::Image<image_core::RGB_Double> result(width, height);
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
       result.data[y][x] = rgb_image[y][x].toRGB_Double();
     }
   }
-  
+
   return result;
 }
 

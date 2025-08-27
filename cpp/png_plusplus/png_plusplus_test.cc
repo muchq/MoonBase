@@ -2,10 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
-#include <cmath>
 
 namespace pngpp {
 namespace {
@@ -331,7 +331,7 @@ TEST_F(PngPlusPlusTest, ImageRgbDoubleToMemoryPngRoundtrip) {
 
   // Create an Image<RGB_Double> with various values including fractional components
   image_core::Image<image_core::RGB_Double> original_image(width, height);
-  
+
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
       // Create a gradient pattern with fractional values
@@ -362,22 +362,22 @@ TEST_F(PngPlusPlusTest, ImageRgbDoubleToMemoryPngRoundtrip) {
       double orig_r = original_image.data[y][x].r;
       double orig_g = original_image.data[y][x].g;
       double orig_b = original_image.data[y][x].b;
-      
+
       // Roundtrip values
       double round_r = roundtrip_image.data[y][x].r;
       double round_g = roundtrip_image.data[y][x].g;
       double round_b = roundtrip_image.data[y][x].b;
-      
+
       // Check that clamped values match (RGB quantizes to [0,255] range)
       int expected_r = std::min(255, std::max(0, static_cast<int>(orig_r)));
       int expected_g = std::min(255, std::max(0, static_cast<int>(orig_g)));
       int expected_b = std::min(255, std::max(0, static_cast<int>(orig_b)));
-      
-      EXPECT_EQ(static_cast<int>(round_r), expected_r) 
+
+      EXPECT_EQ(static_cast<int>(round_r), expected_r)
           << "Red mismatch at (" << x << "," << y << ")";
-      EXPECT_EQ(static_cast<int>(round_g), expected_g) 
+      EXPECT_EQ(static_cast<int>(round_g), expected_g)
           << "Green mismatch at (" << x << "," << y << ")";
-      EXPECT_EQ(static_cast<int>(round_b), expected_b) 
+      EXPECT_EQ(static_cast<int>(round_b), expected_b)
           << "Blue mismatch at (" << x << "," << y << ")";
     }
   }
@@ -389,7 +389,7 @@ TEST_F(PngPlusPlusTest, ImageRgbDoubleEdgeCases) {
 
   // Test with extreme values (negative, zero, very large)
   image_core::Image<image_core::RGB_Double> edge_image(width, height);
-  
+
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
       if (x < width / 4) {
@@ -421,7 +421,7 @@ TEST_F(PngPlusPlusTest, ImageRgbDoubleEdgeCases) {
       double r = result_image.data[y][x].r;
       double g = result_image.data[y][x].g;
       double b = result_image.data[y][x].b;
-      
+
       if (x < width / 4) {
         // Negative values should become 0
         EXPECT_EQ(static_cast<int>(r), 0);
@@ -452,7 +452,7 @@ TEST_F(PngPlusPlusTest, MemoryPngWriterBasicFunctionality) {
   const int height = 25;
 
   std::vector<std::vector<RGB>> test_image(height, std::vector<RGB>(width));
-  
+
   // Create a diagonal pattern
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
@@ -533,11 +533,11 @@ TEST_F(PngPlusPlusTest, MultipleRoundtripsPreserveData) {
 
   // Perform multiple roundtrips
   image_core::Image<image_core::RGB_Double> current_image = image1;
-  
+
   for (int i = 0; i < 3; ++i) {
     std::vector<unsigned char> png_buffer = imageToPng(current_image);
     current_image = pngToImage(png_buffer);
-    
+
     // Verify dimensions haven't changed
     EXPECT_EQ(current_image.width, width);
     EXPECT_EQ(current_image.height, height);
@@ -550,7 +550,7 @@ TEST_F(PngPlusPlusTest, MultipleRoundtripsPreserveData) {
       int actual_r = static_cast<int>(current_image.data[y][x].r);
       int actual_g = static_cast<int>(current_image.data[y][x].g);
       int actual_b = static_cast<int>(current_image.data[y][x].b);
-      
+
       EXPECT_EQ(actual_r, expected);
       EXPECT_EQ(actual_g, expected);
       EXPECT_EQ(actual_b, expected);
@@ -560,28 +560,34 @@ TEST_F(PngPlusPlusTest, MultipleRoundtripsPreserveData) {
 
 TEST_F(PngPlusPlusTest, EmptyImageHandling) {
   // Test zero-sized image
-  EXPECT_THROW({
-    image_core::Image<image_core::RGB_Double> empty_image(0, 0);
-    imageToPng(empty_image);
-  }, PngException);
-  
-  EXPECT_THROW({
-    image_core::Image<image_core::RGB_Double> empty_width(0, 10);
-    imageToPng(empty_width);
-  }, PngException);
-  
-  EXPECT_THROW({
-    image_core::Image<image_core::RGB_Double> empty_height(10, 0);
-    imageToPng(empty_height);
-  }, PngException);
+  EXPECT_THROW(
+      {
+        image_core::Image<image_core::RGB_Double> empty_image(0, 0);
+        imageToPng(empty_image);
+      },
+      PngException);
+
+  EXPECT_THROW(
+      {
+        image_core::Image<image_core::RGB_Double> empty_width(0, 10);
+        imageToPng(empty_width);
+      },
+      PngException);
+
+  EXPECT_THROW(
+      {
+        image_core::Image<image_core::RGB_Double> empty_height(10, 0);
+        imageToPng(empty_height);
+      },
+      PngException);
 }
 
 TEST_F(PngPlusPlusTest, InvalidPngBufferHandling) {
   // Test with invalid PNG data
   std::vector<unsigned char> invalid_buffer = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05};
-  
+
   EXPECT_THROW({ pngToImage(invalid_buffer); }, PngException);
-  
+
   // Test with empty buffer
   std::vector<unsigned char> empty_buffer;
   EXPECT_THROW({ pngToImage(empty_buffer); }, PngException);
@@ -623,7 +629,8 @@ TEST_F(PngPlusPlusTest, CompressionLevelSupport) {
   }
 
   // Best compression should generally produce smaller files than no compression
-  // Note: For small images, overhead might make this not always true, so we just verify they're different
+  // Note: For small images, overhead might make this not always true, so we just verify they're
+  // different
   EXPECT_NE(no_compression.size(), best_compression.size());
 
   // All should decode to the same image
@@ -638,19 +645,19 @@ TEST_F(PngPlusPlusTest, CompressionLevelSupport) {
   // Verify pixel values are identical across all compression levels
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
-      EXPECT_EQ(static_cast<int>(decoded_no_comp.data[y][x].r), 
+      EXPECT_EQ(static_cast<int>(decoded_no_comp.data[y][x].r),
                 static_cast<int>(decoded_default.data[y][x].r));
-      EXPECT_EQ(static_cast<int>(decoded_default.data[y][x].r), 
+      EXPECT_EQ(static_cast<int>(decoded_default.data[y][x].r),
                 static_cast<int>(decoded_best.data[y][x].r));
-      
-      EXPECT_EQ(static_cast<int>(decoded_no_comp.data[y][x].g), 
+
+      EXPECT_EQ(static_cast<int>(decoded_no_comp.data[y][x].g),
                 static_cast<int>(decoded_default.data[y][x].g));
-      EXPECT_EQ(static_cast<int>(decoded_default.data[y][x].g), 
+      EXPECT_EQ(static_cast<int>(decoded_default.data[y][x].g),
                 static_cast<int>(decoded_best.data[y][x].g));
-      
-      EXPECT_EQ(static_cast<int>(decoded_no_comp.data[y][x].b), 
+
+      EXPECT_EQ(static_cast<int>(decoded_no_comp.data[y][x].b),
                 static_cast<int>(decoded_default.data[y][x].b));
-      EXPECT_EQ(static_cast<int>(decoded_default.data[y][x].b), 
+      EXPECT_EQ(static_cast<int>(decoded_default.data[y][x].b),
                 static_cast<int>(decoded_best.data[y][x].b));
     }
   }
@@ -701,7 +708,8 @@ TEST_F(PngPlusPlusTest, CompressionLevelValidation) {
       writer.writeImage(simple_image);
       const auto& buffer = writer.getBuffer();
       EXPECT_GT(buffer.size(), 0);
-    }) << "Compression level " << level << " failed";
+    }) << "Compression level "
+       << level << " failed";
   }
 }
 
