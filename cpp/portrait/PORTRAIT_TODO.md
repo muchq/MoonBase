@@ -6,28 +6,28 @@ This document outlines the tasks required to add ray tracer output PNG download 
 ## Detailed Tasks
 
 ### 1. Core Ray Tracing Integration
-- [ ] Import and adapt the ray tracing logic from `cpp/tracy` module
-- [ ] Create a `TracerService` class that wraps the tracy::Tracer functionality
-- [ ] Map portrait data structures (Vec3, Color, Sphere, Light, Scene) to tracy equivalents
-- [ ] Handle coordinate system conversions between portrait and tracy
+- [x] Import and adapt the ray tracing logic from `cpp/tracy` module
+- [x] Create a `TracerService` class that wraps the tracy::Tracer functionality
+- [x] Map portrait data structures (Vec3, Color, Sphere, Light, Scene) to tracy equivalents
+- [x] Handle coordinate system conversions between portrait and tracy
 
 ### 2. Ray Tracing Service Implementation
-- [ ] Create `tracer_service.h` and `tracer_service.cc` files
-- [ ] Implement scene conversion from portrait::TraceRequest to tracy::Scene
-- [ ] Add viewport and projection plane calculations based on output dimensions
-- [ ] Implement camera positioning and orientation from Perspective data
+- [x] Create `tracer_service.h` and `tracer_service.cc` files
+- [x] Implement scene conversion from portrait::TraceRequest to tracy::Scene
+- [x] Add viewport and projection plane calculations based on output dimensions
+- [x] Implement camera positioning and orientation from Perspective data
 
 ### 3. Image Rendering Pipeline
-- [ ] Set up Image<RGB_Double> buffer for ray tracing output
-- [ ] Implement the render method that calls tracy::Tracer::drawScene
-- [ ] Convert RGB_Double values to RGB for PNG export
-- [ ] Handle image dimensions from Output specification
+- [x] Set up Image<RGB_Double> buffer for ray tracing output
+- [x] Implement the render method that calls tracy::Tracer::drawScene
+- [x] Convert RGB_Double values to RGB for PNG export (handled by image_core::Image::toRGB())
+- [x] Handle image dimensions from Output specification
 
 ### 4. PNG Generation
-- [ ] Integrate `cpp/png_plusplus` library for PNG writing
-- [ ] Create in-memory PNG buffer instead of file-based output
-- [ ] Implement PNG data serialization to byte array
-- [ ] Add compression level configuration
+- [x] Integrate `cpp/png_plusplus` library for PNG writing
+- [x] Create in-memory PNG buffer instead of file-based output
+- [x] Implement PNG data serialization to byte array
+- [x] Add compression level configuration
 
 ### 5. Base64 Encoding
 - [ ] Add base64 encoding utility for binary PNG data
@@ -47,10 +47,10 @@ This document outlines the tasks required to add ray tracer output PNG download 
 - [ ] Add Content-Disposition header for browser downloads
 
 ### 8. Build Configuration
-- [ ] Update BUILD.bazel to include tracy and png_plusplus dependencies
-- [ ] Add image_core dependency for RGB types
-- [ ] Configure libpng external dependency
-- [ ] Set up proper visibility rules
+- [x] Update BUILD.bazel to include tracy and png_plusplus dependencies
+- [x] Add image_core dependency for RGB types
+- [x] Configure libpng external dependency
+- [x] Set up proper visibility rules
 
 ### 9. Error Handling
 - [ ] Add validation for scene complexity limits
@@ -122,19 +122,23 @@ This document outlines the tasks required to add ray tracer output PNG download 
 ## Key Files to Modify/Create
 
 ### New Files
-- `cpp/portrait/tracer_service.h`
-- `cpp/portrait/tracer_service.cc`
-- `cpp/portrait/tracer_service_test.cc`
-- `cpp/portrait/png_utils.h`
-- `cpp/portrait/png_utils.cc`
-- `cpp/portrait/base64.h`
-- `cpp/portrait/base64.cc`
+- [x] `cpp/portrait/tracer_service.h`
+- [x] `cpp/portrait/tracer_service.cc`
+- [ ] `cpp/portrait/tracer_service_test.cc`
+- [ ] `cpp/portrait/png_utils.h` (superseded by cpp/png_plusplus enhancements)
+- [ ] `cpp/portrait/png_utils.cc` (superseded by cpp/png_plusplus enhancements)
+- [ ] `cpp/portrait/base64.h`
+- [ ] `cpp/portrait/base64.cc`
 
 ### Modified Files
-- `cpp/portrait/BUILD.bazel` - Add new dependencies
-- `cpp/portrait/Main.cc` - Update endpoints
-- `cpp/portrait/types.h` - Add response types
-- `cpp/portrait/types.cc` - Add validation
+- [x] `cpp/portrait/BUILD.bazel` - Add new dependencies
+- [ ] `cpp/portrait/Main.cc` - Update endpoints
+- [ ] `cpp/portrait/types.h` - Add response types
+- [ ] `cpp/portrait/types.cc` - Add validation
+
+### Enhanced Files
+- [x] `cpp/png_plusplus/png_plusplus.h` - Added MemoryPngWriter, MemoryPngReader, imageToPng(), pngToImage()
+- [x] `cpp/png_plusplus/png_plusplus_test.cc` - Added comprehensive roundtrip tests for Image<RGB_Double>
 
 ## Dependencies Required
 - `//cpp/tracy` - Ray tracing engine
