@@ -48,7 +48,8 @@ struct Light {
   Vec3 position;
 
   bool operator==(const Light& other) const {
-    return lightType == other.lightType && intensity == other.intensity && position == other.position;
+    return lightType == other.lightType && intensity == other.intensity &&
+           position == other.position;
   }
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Light, lightType, intensity, position)
@@ -90,7 +91,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Scene, backgroundColor, backgrou
 
 template <typename H>
 H AbslHashValue(H h, const Scene& s) {
-  return H::combine(std::move(h), s.backgroundColor, s.backgroundStarProbability, s.spheres, s.lights);
+  return H::combine(std::move(h), s.backgroundColor, s.backgroundStarProbability, s.spheres,
+                    s.lights);
 }
 
 struct Output {
@@ -131,7 +133,7 @@ struct TraceResponse {
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(TraceResponse, base64_png, width, height)
 
-absl::Status validateTraceRequest(TraceRequest &request);
+absl::Status validateTraceRequest(TraceRequest& request);
 
 }  // namespace portrait
 

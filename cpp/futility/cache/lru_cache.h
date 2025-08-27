@@ -14,7 +14,8 @@ class LRUCache {
   typedef Key key_type;
   typedef Value value_type;
   typedef std::list<key_type> list_type;
-  typedef std::unordered_map<key_type, std::pair<value_type, typename list_type::iterator> > map_type;
+  typedef std::unordered_map<key_type, std::pair<value_type, typename list_type::iterator> >
+      map_type;
 
   LRUCache(size_t capacity) : m_capacity(capacity) {}
 
@@ -90,7 +91,6 @@ class LRUCache {
   list_type m_list;
   size_t m_capacity;
 };
-} // namespace futility::cache
-
+}  // namespace futility::cache
 
 #endif

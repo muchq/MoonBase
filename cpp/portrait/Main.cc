@@ -4,12 +4,12 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "base64.h"
+#include "cpp/futility/cache/lru_cache.h"
 #include "cpp/image_core/image_core.h"
 #include "cpp/meerkat/meerkat.h"
 #include "cpp/png_plusplus/png_plusplus.h"
 #include "cpp/portrait/types.h"
 #include "tracer_service.h"
-#include "cpp/futility/cache/lru_cache.h"
 
 using namespace meerkat;
 using namespace portrait;
@@ -70,7 +70,7 @@ int main() {
       return responses::bad_request(
           absl::StrCat("Invalid JSON: ", trace_or_status.status().message()));
     }
-    auto trace_request= trace_or_status.value();
+    auto trace_request = trace_or_status.value();
     auto cached_image = cache.get(trace_request);
     if (cached_image.has_value()) {
       auto b64Png = cached_image.value();
