@@ -2,6 +2,7 @@
 #define CPP_PORTRAIT_TYPES_H
 
 #include <nlohmann/json.hpp>
+#include <tuple>
 
 #include "absl/status/status.h"
 #include "cpp/tracy/tracy.h"
@@ -9,15 +10,8 @@
 namespace portrait {
 using namespace nlohmann::literals;
 
-struct Vec3 {
-  double x, y, z;
-};
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Vec3, x, y, z)
-
-struct Color {
-  unsigned char r, g, b;
-};
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Color, r, g, b)
+using Vec3 = std::tuple<double, double, double>;
+using Color = std::tuple<unsigned char, unsigned char, unsigned char>;
 
 struct Sphere {
   Vec3 center;

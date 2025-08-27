@@ -1,6 +1,7 @@
 #ifndef CPP_MEERKAT_MEERKAT_H
 #define CPP_MEERKAT_MEERKAT_H
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <set>
@@ -21,6 +22,7 @@ struct HttpRequest {
   std::string body;
   std::unordered_map<std::string, std::string> headers;
   std::unordered_map<std::string, std::string> query_params;
+  std::chrono::steady_clock::time_point start_time;
 };
 
 struct HttpResponse {
