@@ -1,7 +1,8 @@
 #include "cpp/portrait/tracer_service.h"
 
-#include "cpp/portrait/base64.h"
 #include <vector>
+
+#include "cpp/portrait/base64.h"
 
 namespace portrait {
 using image_core::Image;
@@ -9,17 +10,17 @@ using image_core::RGB_Double;
 using std::vector;
 
 TraceResponse TracerService::trace(TraceRequest& trace_request) {
-    auto cached_image = cache_.get(trace_request);
-    if (cached_image.has_value()) {
-      auto b64Png = cached_image.value();
-      return toResponse(trace_request.output, b64Png);
-    }
+  auto cached_image = cache_.get(trace_request);
+  if (cached_image.has_value()) {
+    auto b64Png = cached_image.value();
+    return toResponse(trace_request.output, b64Png);
+  }
 
-    auto [scene, perspective, output] = trace_request;
-    auto image = trace(scene, perspective, output);
-    auto b64Png = imageToBase64(image);
-    auto traceResponse = toResponse(output, b64Png);
-    cache.insert(trace_request, std::move(b64Png));
+  auto [scene, perspective, output] = trace_request;
+  auto image = trace(scene, perspective, output);
+  auto b64Png = imageToBase64(image);
+  auto traceResponse = toResponse(output, b64Png);
+  cache.insert(trace_request, std::move(b64Png));
   return traceResponse;
 }
 
@@ -89,11 +90,10 @@ std::string TracerService::imageToBase64(Image<RGB_Double>& image) {
 
 TraceResponse TracerService::toResponse(const Output& output, std::string& base64) {
   return TraceResponse{
-    .base64_png = base64,
-    .width = output.width,
-    .height = output.height,
-};
+      .base64_png = base64,
+      .width = output.width,
+      .height = output.height,
+  };
 }
-
 
 }  // namespace portrait
