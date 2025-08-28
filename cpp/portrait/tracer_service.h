@@ -23,6 +23,8 @@ class TracerService {
   std::vector<tracy::Light> tracify(const std::vector<Light> &lights);
   tracy::Vec3 tracify(const Vec3 &v);
   tracy::LightType tracify(const LightType &lightType);
+  std::string imageToBase64(image_core::Image<image_core::RGB_Double>& image);
+  TraceResponse toResponse(const Output& output, std::string& base64);
 
   tracy::Tracer tracer_;
   futility::cache::LRUCache<TraceRequest, std::string> cache_;

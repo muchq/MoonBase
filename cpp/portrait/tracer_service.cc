@@ -9,7 +9,18 @@ using image_core::RGB_Double;
 using std::vector;
 
 TraceResponse TracerService::trace(TraceRequest& trace_request) {
+    auto cached_image = cache_.get(trace_request);
+    if (cached_image.has_value()) {
+      auto b64Png = cached_image.value();
+      return toResponse(trace_request.output, b64Png);
+    }
 
+    auto [scene, perspective, output] = trace_request;
+    auto image = trace(scene, perspective, output);
+    auto b64Png = imageToBase64(image);
+    auto traceResponse = toResponse(output, b64Png);
+    cache.insert(trace_request, std::move(b64Png));
+  return traceResponse;
 }
 
 Image<RGB_Double> TracerService::trace(Scene& scene, Perspective& perspective,
