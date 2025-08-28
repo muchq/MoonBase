@@ -41,19 +41,6 @@ absl::StatusOr<TraceRequest> parseTraceRequest(const std::string& body) {
   }
 }
 
-std::string imageToBase64(Image<RGB_Double>& image) {
-  const std::vector<unsigned char> png_bytes = pngpp::imageToPng(image);
-  return pngToBase64(png_bytes);
-}
-
-TraceResponse toResponse(const Output& output, std::string& base64) {
-  return TraceResponse{
-      .base64_png = base64,
-      .width = output.width,
-      .height = output.height,
-  };
-}
-
 int main() {
   absl::InitializeLog();
   absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
