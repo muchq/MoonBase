@@ -25,9 +25,9 @@ uint16_t readPort(const uint16_t default_port) {
   return default_port;
 }
 
-absl::StatusOr<TraceRequest> parseTraceRequest(const std::string& body) {
+absl::StatusOr<TraceRequest> readTraceRequest(const std::string& body) {
   try {
-    json request_json = json::parse(body);
+    const json request_json = json::parse(body);
     auto trace_request = request_json.template get<TraceRequest>();
 
     auto trace_request_status = validateTraceRequest(trace_request);
@@ -52,23 +52,12 @@ int main() {
 
   // ray tracing endpoint
   server.post("/v1/trace", [&tracer_service, &cache](const HttpRequest& req) -> HttpResponse {
-    absl::StatusOr<TraceRequest> trace_or_status = parseTraceRequest(req.body);
+    absl::StatusOr<TraceRequest> trace_or_status = readTraceRequest(req.body);
     if (!trace_or_status.ok()) {
       return responses::bad_request(
           absl::StrCat("Invalid JSON: ", trace_or_status.status().message()));
     }
-    auto trace_request = trace_or_status.value();
-    auto cached_image = cache.get(trace_request);
-    if (cached_image.has_value()) {
-      auto b64Png = cached_image.value();
-      json response = toResponse(trace_request.output, b64Png);
-      return responses::ok(response);
-    }
-    auto [scene, perspective, output] = trace_request;
-    auto image = tracer_service.trace(scene, perspective, output);
-    auto b64Png = imageToBase64(image);
-    json response = toResponse(output, b64Png);
-    cache.insert(trace_request, std::move(b64Png));
+    const json response = tracer_service.trace(trace_or_status.value());
     return responses::ok(response);
   });
 
