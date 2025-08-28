@@ -3,6 +3,7 @@
 
 #include <vector>
 
+#include "cpp/futility/cache/lru_cache.h"
 #include "cpp/image_core/image_core.h"
 #include "cpp/tracy/tracy.h"
 #include "types.h"
@@ -10,6 +11,8 @@
 namespace portrait {
 class TracerService {
  public:
+  explicit TracerService();
+  explicit TracerService(uint16_t _cache_size);
   image_core::Image<image_core::RGB_Double> trace(Scene &scene, Perspective &perspective,
                                                   const Output &output);
 
@@ -21,6 +24,7 @@ class TracerService {
   tracy::LightType tracify(const LightType &lightType);
 
   tracy::Tracer tracer_;
+    futility::cache::LRUCache<TraceRequest, std::string> cache_;
 };
 }  // namespace portrait
 

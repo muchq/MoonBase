@@ -51,7 +51,9 @@ cc_library(
     hdrs = ["tracer_service.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":base64",
         ":types",
+        "//cpp/futility/cache",
         "//cpp/image_core",
         "//cpp/tracy",
     ],
@@ -62,10 +64,8 @@ cc_binary(
     srcs = ["Main.cc"],
     visibility = ["//visibility:public"],
     deps = [
-        "base64",
         ":tracer_service",
         ":types",
-        "//cpp/futility/cache",
         "//cpp/meerkat",
         "//cpp/png_plusplus",
         "//cpp/tracy",
