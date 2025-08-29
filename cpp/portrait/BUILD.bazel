@@ -16,6 +16,7 @@ cc_library(
 
 cc_test(
     name = "types_test",
+    size = "small",
     srcs = ["types_test.cc"],
     deps = [
         ":types",

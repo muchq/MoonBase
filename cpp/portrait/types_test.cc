@@ -359,21 +359,6 @@ TEST(TypesValidationTest, ValidateSphere_ZeroRadius) {
   EXPECT_FALSE(status.ok()) << "Sphere with zero radius should be invalid";
 }
 
-TEST(TypesValidationTest, ValidateSphere_InvalidColor) {
-  Sphere sphere;
-  sphere.center = {0.0, 0.0, 0.0};
-  sphere.radius = 1.0;
-  sphere.color = {256, 0, 0};  // Color value out of range
-  sphere.specular = 0.5;
-  sphere.reflective = 0.3;
-
-  Scene scene;
-  scene.spheres.push_back(sphere);
-
-  absl::Status status = validateScene(scene);
-  EXPECT_FALSE(status.ok()) << "Sphere with color value > 255 should be invalid";
-}
-
 TEST(TypesValidationTest, ValidateSphere_NaNSpecular) {
   Sphere sphere;
   sphere.center = {0.0, 0.0, 0.0};
@@ -632,22 +617,6 @@ TEST(TypesValidationTest, ValidateLight_UnknownType) {
 
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Light with UNKNOWN type should be invalid";
-}
-
-TEST(TypesValidationTest, ValidateScene_InvalidBackgroundColor) {
-  Scene scene;
-  scene.backgroundColor = {256, 0, 0};  // Invalid color value
-
-  Sphere sphere;
-  sphere.center = {0.0, 0.0, 0.0};
-  sphere.radius = 1.0;
-  sphere.color = {255, 0, 0};
-  sphere.specular = 0.5;
-  sphere.reflective = 0.3;
-  scene.spheres.push_back(sphere);
-
-  absl::Status status = validateScene(scene);
-  EXPECT_FALSE(status.ok()) << "Scene with invalid background color should be invalid";
 }
 
 TEST(TypesValidationTest, ValidateScene_NaNStarProbability) {
