@@ -14,7 +14,7 @@ using namespace portrait;
 
 template <typename REQ, typename RESP>
 std::function<HttpResponse(HttpRequest)> wrap(std::function<absl::StatusOr<RESP>(REQ)> handler) {
-  return [&handler](HttpRequest req) -> HttpResponse {
+  return [&handler](const HttpRequest &req) -> HttpResponse {
     absl::StatusOr<REQ> status_or_request = requests::read_request<REQ>(req);
     if (!status_or_request.ok()) {
       return responses::bad_request(
