@@ -2,8 +2,8 @@
 
 #include <vector>
 
-#include "cpp/portrait/base64.h"
 #include "cpp/png_plusplus/png_plusplus.h"
+#include "cpp/portrait/base64.h"
 
 namespace portrait {
 using image_core::Image;
