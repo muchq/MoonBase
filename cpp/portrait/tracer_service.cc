@@ -2,10 +2,11 @@
 
 #include <vector>
 
+#include "cpp/futility/base64/base64.h"
 #include "cpp/png_plusplus/png_plusplus.h"
-#include "cpp/portrait/base64.h"
 
 namespace portrait {
+using futility::base64::Base64;
 using image_core::Image;
 using image_core::RGB_Double;
 using std::vector;

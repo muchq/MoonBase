@@ -1,8 +1,8 @@
-#include "cpp/portrait/base64.h"
+#include "base64.h"
 
 #include "absl/strings/escaping.h"
 
-namespace portrait {
+namespace futility::base64 {
 
 std::string Base64::encode(const std::vector<uint8_t>& data) {
   return absl::Base64Escape(std::string(data.begin(), data.end()));
@@ -19,4 +19,4 @@ std::vector<uint8_t> Base64::decode(const std::string& encoded) {
   }
   return std::vector<uint8_t>(decoded.begin(), decoded.end());
 }
-}  // namespace portrait
+}  // namespace futility::base64

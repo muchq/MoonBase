@@ -1,8 +1,8 @@
-#include "cpp/portrait/base64.h"
+#include "base64.h"
 
 #include <gtest/gtest.h>
 
-namespace portrait {
+namespace futility::base64 {
 namespace {
 
 TEST(Base64Test, EncodeEmptyVector) {
@@ -59,4 +59,4 @@ TEST(Base64Test, LargeBinaryData) {
 }
 
 }  // namespace
-}  // namespace portrait
+}  // namespace futility::base64

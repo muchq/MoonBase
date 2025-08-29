@@ -1,10 +1,10 @@
-#ifndef CPP_PORTRAIT_BASE64_H_
-#define CPP_PORTRAIT_BASE64_H_
+#ifndef CPP_FUTILITY_BASE64_BASE64_H
+#define CPP_FUTILITY_BASE64_BASE64_H
 
 #include <string>
 #include <vector>
 
-namespace portrait {
+namespace futility::base64 {
 
 class Base64 {
  public:
@@ -12,6 +12,6 @@ class Base64 {
   static std::string encode(const uint8_t* data, size_t length);
   static std::vector<uint8_t> decode(const std::string& encoded);
 };
-}  // namespace portrait
+}  // namespace futility::base64
 
-#endif  // CPP_PORTRAIT_BASE64_H_
+#endif  // CPP_FUTILITY_BASE64_BASE64_H

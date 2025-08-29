@@ -1,0 +1,21 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+cc_library(
+    name = "base64",
+    srcs = ["base64.cc"],
+    hdrs = ["base64.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "base64_test",
+    size = "small",
+    srcs = ["base64_test.cc"],
+    deps = [
+        ":base64",
+        "@googletest//:gtest_main",
+    ],
+)
