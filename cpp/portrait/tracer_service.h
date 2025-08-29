@@ -17,8 +17,8 @@ class TracerService {
   absl::StatusOr<TraceResponse> trace(TraceRequest& trace_request);
 
  private:
-  image_core::Image<image_core::RGB_Double> trace(Scene& scene, Perspective& perspective,
-                                                  const Output& output);
+  image_core::Image<image_core::RGB_Double> do_trace(Scene& scene, Perspective& perspective,
+                                                     const Output& output);
   tracy::Scene toTracyScene(Scene& scene, const Output& output);
   std::vector<tracy::Sphere> tracify(const std::vector<Sphere>& spheres);
   std::vector<tracy::Light> tracify(const std::vector<Light>& lights);

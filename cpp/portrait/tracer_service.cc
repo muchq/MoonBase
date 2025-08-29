@@ -22,15 +22,15 @@ absl::StatusOr<TraceResponse> TracerService::trace(TraceRequest& trace_request) 
   }
 
   auto [scene, perspective, output] = trace_request;
-  auto image = trace(scene, perspective, output);
+  auto image = do_trace(scene, perspective, output);
   auto b64Png = imageToBase64(image);
   auto traceResponse = toResponse(output, b64Png);
   cache_.insert(trace_request, std::move(b64Png));
   return traceResponse;
 }
 
-Image<RGB_Double> TracerService::trace(Scene& scene, Perspective& perspective,
-                                       const Output& output) {
+Image<RGB_Double> TracerService::do_trace(Scene& scene, Perspective& perspective,
+                                          const Output& output) {
   auto image = Image<RGB_Double>(output.width, output.height);
   tracy::Scene tracyScene = toTracyScene(scene, output);
   auto [x, y, z] = perspective.cameraPosition;

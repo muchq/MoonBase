@@ -1,3 +1,5 @@
+#include <functional>
+
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
@@ -10,6 +12,19 @@
 using namespace meerkat;
 using namespace portrait;
 
+template <typename REQ, typename RESP>
+std::function<HttpResponse(HttpRequest)> wrap(std::function<absl::StatusOr<RESP>(REQ)> handler) {
+  return [&handler](HttpRequest req) -> HttpResponse {
+    absl::StatusOr<REQ> status_or_request = requests::read_request<TraceRequest>(req);
+    if (!status_or_request.ok()) {
+      return responses::bad_request(
+          absl::StrCat("Invalid JSON: ", status_or_request.status().message()));
+    }
+    const auto status_or_response = handler(status_or_request);
+    return responses::wrap(status_or_response);
+  };
+}
+
 int main() {
   absl::InitializeLog();
   absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
@@ -19,15 +34,7 @@ int main() {
   TracerService tracer_service;
 
   // ray tracing endpoint
-  server.post("/v1/trace", [&tracer_service](const HttpRequest& req) -> HttpResponse {
-    absl::StatusOr<TraceRequest> trace_or_status = requests::read_request<TraceRequest>(req);
-    if (!trace_or_status.ok()) {
-      return responses::bad_request(
-          absl::StrCat("Invalid JSON: ", trace_or_status.status().message()));
-    }
-    const auto status_or_response = tracer_service.trace(trace_or_status.value());
-    return responses::wrap(status_or_response);
-  });
+  server.post("/v1/trace", wrap<TraceRequest, TraceResponse>(TracerService::trace));
 
   server.enable_health_checks();
   server.enable_tracing();
