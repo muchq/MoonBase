@@ -47,28 +47,6 @@ TEST(Base64Test, RoundTripEncoding) {
   EXPECT_EQ(original_data, decoded);
 }
 
-TEST(Base64Test, PngToBase64HelperFunction) {
-  std::vector<uint8_t> png_data = {0x89, 0x50, 0x4E, 0x47};  // PNG signature start
-  std::string encoded = pngToBase64(png_data);
-  EXPECT_EQ(encoded, "iVBORw==");
-}
-
-TEST(Base64Test, Base64ToPngHelperFunction) {
-  std::string base64_data = "iVBORw==";
-  std::vector<uint8_t> decoded = base64ToPng(base64_data);
-  std::vector<uint8_t> expected = {0x89, 0x50, 0x4E, 0x47};
-  EXPECT_EQ(decoded, expected);
-}
-
-TEST(Base64Test, PngRoundTripHelperFunctions) {
-  std::vector<uint8_t> original_png = {
-      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A  // Full PNG signature
-  };
-  std::string encoded = pngToBase64(original_png);
-  std::vector<uint8_t> decoded = base64ToPng(encoded);
-  EXPECT_EQ(original_png, decoded);
-}
-
 TEST(Base64Test, LargeBinaryData) {
   std::vector<uint8_t> large_data(1000);
   for (size_t i = 0; i < large_data.size(); ++i) {

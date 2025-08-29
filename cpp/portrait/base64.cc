@@ -19,11 +19,4 @@ std::vector<uint8_t> Base64::decode(const std::string& encoded) {
   }
   return std::vector<uint8_t>(decoded.begin(), decoded.end());
 }
-
-std::string pngToBase64(const std::vector<uint8_t>& png_data) { return Base64::encode(png_data); }
-
-std::vector<uint8_t> base64ToPng(const std::string& base64_data) {
-  return Base64::decode(base64_data);
-}
-
 }  // namespace portrait
