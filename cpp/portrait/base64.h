@@ -13,10 +13,6 @@ class Base64 {
   static std::string encode(const uint8_t* data, size_t length);
 
   static std::vector<uint8_t> decode(const std::string& encoded);
-
-  static size_t getEncodedSize(size_t input_size);
-
-  static size_t getDecodedSize(const std::string& encoded);
 };
 
 std::string pngToBase64(const std::vector<uint8_t>& png_data);

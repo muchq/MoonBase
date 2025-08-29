@@ -47,23 +47,6 @@ TEST(Base64Test, RoundTripEncoding) {
   EXPECT_EQ(original_data, decoded);
 }
 
-TEST(Base64Test, GetEncodedSize) {
-  EXPECT_EQ(Base64::getEncodedSize(0), 0);
-  EXPECT_EQ(Base64::getEncodedSize(1), 4);
-  EXPECT_EQ(Base64::getEncodedSize(2), 4);
-  EXPECT_EQ(Base64::getEncodedSize(3), 4);
-  EXPECT_EQ(Base64::getEncodedSize(4), 8);
-  EXPECT_EQ(Base64::getEncodedSize(5), 8);
-  EXPECT_EQ(Base64::getEncodedSize(6), 8);
-}
-
-TEST(Base64Test, GetDecodedSize) {
-  EXPECT_EQ(Base64::getDecodedSize(""), 0);
-  EXPECT_EQ(Base64::getDecodedSize("QQ=="), 1);
-  EXPECT_EQ(Base64::getDecodedSize("VGVzdA=="), 4);
-  EXPECT_EQ(Base64::getDecodedSize("SGVsbG8="), 5);
-}
-
 TEST(Base64Test, PngToBase64HelperFunction) {
   std::vector<uint8_t> png_data = {0x89, 0x50, 0x4E, 0x47};  // PNG signature start
   std::string encoded = pngToBase64(png_data);
@@ -95,9 +78,6 @@ TEST(Base64Test, LargeBinaryData) {
   std::string encoded = Base64::encode(large_data);
   std::vector<uint8_t> decoded = Base64::decode(encoded);
   EXPECT_EQ(large_data, decoded);
-
-  size_t expected_encoded_size = Base64::getEncodedSize(large_data.size());
-  EXPECT_EQ(encoded.size(), expected_encoded_size);
 }
 
 }  // namespace

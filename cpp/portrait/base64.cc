@@ -20,22 +20,6 @@ std::vector<uint8_t> Base64::decode(const std::string& encoded) {
   return std::vector<uint8_t>(decoded.begin(), decoded.end());
 }
 
-size_t Base64::getEncodedSize(size_t input_size) { return ((input_size + 2) / 3) * 4; }
-
-size_t Base64::getDecodedSize(const std::string& encoded) {
-  if (encoded.empty()) {
-    return 0;
-  }
-
-  size_t len = encoded.length();
-  size_t padding = 0;
-
-  if (encoded[len - 1] == '=') padding++;
-  if (encoded[len - 2] == '=') padding++;
-
-  return (len * 3) / 4 - padding;
-}
-
 std::string pngToBase64(const std::vector<uint8_t>& png_data) { return Base64::encode(png_data); }
 
 std::vector<uint8_t> base64ToPng(const std::string& base64_data) {
