@@ -179,8 +179,15 @@ class HttpServer {
 // Utility functions for request handling
 namespace requests {
 template <typename T>
-absl::StatusOr<T> read_request(const HttpRequest& request);
+absl::StatusOr<T> read_request(const HttpRequest& request) {
+  try {
+    const json request_json = json::parse(request.body);
+    return request_json.template get<T>();
+  } catch (const json::exception& e) {
+    return absl::Status(absl::StatusCode::kInvalidArgument, std::string(e.what()));
+  }
 }
+}  // namespace requests
 
 // Utility functions for common responses
 namespace responses {

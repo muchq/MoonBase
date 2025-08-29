@@ -443,18 +443,6 @@ void HttpServer::handle_websocket_close(struct mg_connection* c) {
   }
 }
 
-namespace requests {
-template <typename T>
-absl::StatusOr<T> read_request(HttpRequest& request) {
-  try {
-    const json request_json = json::parse(request.body);
-    return request_json.template get<T>();
-  } catch (const json::exception& e) {
-    return absl::Status(absl::StatusCode::kInvalidArgument, std::string(e.what()));
-  }
-}
-}  // namespace requests
-
 namespace responses {
 HttpResponse wrap(const absl::StatusOr<json> status_or_data) {
   if (!status_or_data.ok()) {
