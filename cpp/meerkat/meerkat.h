@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "absl/status/statusor.h"
 #include "mongoose.h"
 #include "nlohmann/json.hpp"
 
@@ -49,6 +50,8 @@ using ResponseInterceptor = std::function<void(const HttpRequest&, HttpResponse&
 using WebSocketHandler = std::function<void(struct mg_connection*, const std::string&)>;
 using WebSocketConnectHandler = std::function<bool(struct mg_connection*, const HttpRequest&)>;
 using WebSocketCloseHandler = std::function<void(struct mg_connection*)>;
+
+uint16_t read_port(const uint16_t default_port);
 
 class HttpServer {
  public:
@@ -173,8 +176,16 @@ class HttpServer {
   void handle_websocket_close(struct mg_connection* c);
 };
 
+// Utility functions for request handling
+namespace requests {
+template <typename T>
+absl::StatusOr<T> read_request(const HttpRequest& request);
+}
+
 // Utility functions for common responses
 namespace responses {
+
+HttpResponse wrap(const absl::StatusOr<json> status_or_data);
 HttpResponse ok(const json& data = json::object());
 HttpResponse created(const json& data = json::object());
 HttpResponse bad_request(const std::string& message = "Bad Request");

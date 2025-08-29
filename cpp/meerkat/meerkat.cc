@@ -13,6 +13,13 @@ namespace meerkat {
 // TODO: move this header name to some language neutral config format for cross-project sharing
 const std::string TRACE_ID_HEADER_NAME{"x-trace-id"};
 
+uint16_t read_port(const uint16_t default_port) {
+  if (const char* env_p = std::getenv("PORT")) {
+    return static_cast<uint16_t>(std::atoi(env_p));
+  }
+  return default_port;
+}
+
 HttpServer::HttpServer()
     : listener_(nullptr),
       running_(false),
@@ -436,7 +443,36 @@ void HttpServer::handle_websocket_close(struct mg_connection* c) {
   }
 }
 
+namespace requests {
+template <typename T>
+absl::StatusOr<T> read_request(HttpRequest& request) {
+  try {
+    const json request_json = json::parse(request.body);
+    return request_json.template get<T>();
+  } catch (const json::exception& e) {
+    return absl::Status(absl::StatusCode::kInvalidArgument, std::string(e.what()));
+  }
+}
+}  // namespace requests
+
 namespace responses {
+HttpResponse wrap(const absl::StatusOr<json> status_or_data) {
+  if (!status_or_data.ok()) {
+    switch (status_or_data.status().code()) {
+      case absl::StatusCode::kInvalidArgument: {
+        return bad_request(status_or_data.status().message().data());
+      }
+      case absl::StatusCode::kNotFound: {
+        return not_found(status_or_data.status().message().data());
+      }
+      default: {
+        return internal_error();
+      }
+    }
+  }
+  return ok(status_or_data.value());
+}
+
 HttpResponse ok(const json& data) {
   HttpResponse response;
   response.status_code = 200;

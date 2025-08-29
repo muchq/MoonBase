@@ -6,7 +6,7 @@
 #include "cpp/image_core/image_core.h"
 
 namespace tracy {
-void Tracer::drawScene(Scene &scene, Image<RGB_Double> &image, Vec3 cameraPosition) {
+void Tracer::drawScene(Scene& scene, Image<RGB_Double>& image, Vec3 cameraPosition) {
   for (int x = -image.width / 2; x <= image.width / 2; x++) {
     for (int y = -image.height / 2; y <= image.height / 2; y++) {
       Vec3 direction = canvasToViewport(
@@ -20,14 +20,14 @@ void Tracer::drawScene(Scene &scene, Image<RGB_Double> &image, Vec3 cameraPositi
   }
 }
 
-Vec3 Tracer::canvasToViewport(Vec2 canvasPoint, Image<RGB_Double> &image, Scene &scene) {
+Vec3 Tracer::canvasToViewport(Vec2 canvasPoint, Image<RGB_Double>& image, Scene& scene) {
   return Vec3{.x = canvasPoint.x * scene.viewportWidth / image.width,
               .y = canvasPoint.y * scene.viewportHeight / image.height,
               .z = scene.projectionPlane};
 }
 
-std::tuple<double, double> Tracer::intersectRaySphere(Vec3 &origin, Vec3 &direction,
-                                                      Sphere &sphere) {
+std::tuple<double, double> Tracer::intersectRaySphere(Vec3& origin, Vec3& direction,
+                                                      Sphere& sphere) {
   Vec3 originToSphere = origin - sphere.center;
   double a = direction.dot(direction);
   double b = originToSphere.dot(direction) * 2;
@@ -44,14 +44,14 @@ std::tuple<double, double> Tracer::intersectRaySphere(Vec3 &origin, Vec3 &direct
   return {t1, t2};
 }
 
-Vec3 Tracer::reflectRay(Vec3 &normal, Vec3 &ray) { return normal * 2 * normal.dot(ray) - ray; }
+Vec3 Tracer::reflectRay(Vec3& normal, Vec3& ray) { return normal * 2 * normal.dot(ray) - ray; }
 
 std::tuple<std::optional<Sphere>, double> Tracer::closestIntersection(
-    Vec3 &origin, Vec3 &direction, double tMin, double tMax, std::vector<Sphere> &spheres) {
+    Vec3& origin, Vec3& direction, double tMin, double tMax, std::vector<Sphere>& spheres) {
   std::optional<Sphere> closestSphere;
   double closestT = constants::INF;
 
-  for (auto &s : spheres) {
+  for (auto& s : spheres) {
     auto [t1, t2] = intersectRaySphere(origin, direction, s);
     if (t1 < closestT && tMin < t1 && t1 < tMax) {
       closestT = t1;
@@ -67,7 +67,7 @@ std::tuple<std::optional<Sphere>, double> Tracer::closestIntersection(
   return {closestSphere, closestT};
 }
 
-double Tracer::specularLightIntensity(Vec3 &normal, Vec3 &ray, Vec3 &view, Light &light,
+double Tracer::specularLightIntensity(Vec3& normal, Vec3& ray, Vec3& view, Light& light,
                                       double specular) {
   if (specular <= 0) {
     return 0.0;
@@ -82,10 +82,10 @@ double Tracer::specularLightIntensity(Vec3 &normal, Vec3 &ray, Vec3 &view, Light
   return light.intensity * std::pow(rDotV / reflectedRay.length() * view.length(), specular);
 }
 
-double Tracer::computeLighting(Vec3 &point, Vec3 &normal, Vec3 &view, Scene &scene,
+double Tracer::computeLighting(Vec3& point, Vec3& normal, Vec3& view, Scene& scene,
                                double specular) {
   double intensity = 0.0;
-  for (auto &light : scene.lights) {
+  for (auto& light : scene.lights) {
     if (light.lightType == LightType::AMBIENT) {
       intensity += light.intensity;
     } else {
@@ -125,7 +125,7 @@ double Tracer::computeLighting(Vec3 &point, Vec3 &normal, Vec3 &view, Scene &sce
   return intensity;
 }
 
-RGB_Double Tracer::traceRay(Vec3 &origin, Vec3 &direction, double tMin, double tMax, Scene &scene,
+RGB_Double Tracer::traceRay(Vec3& origin, Vec3& direction, double tMin, double tMax, Scene& scene,
                             int recursionDepth) {
   auto [closestSphereMaybe, closestT] =
       closestIntersection(origin, direction, tMin, tMax, scene.spheres);

@@ -10,7 +10,11 @@ using image_core::Image;
 using image_core::RGB_Double;
 using std::vector;
 
-TraceResponse TracerService::trace(TraceRequest& trace_request) {
+absl::StatusOr<TraceResponse> TracerService::trace(TraceRequest& trace_request) {
+  auto validation_status = validateTraceRequest(trace_request);
+  if (!validation_status.ok()) {
+    return validation_status;
+  }
   auto cached_image = cache_.get(trace_request);
   if (cached_image.has_value()) {
     auto b64Png = cached_image.value();

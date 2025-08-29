@@ -4,9 +4,9 @@
 
 namespace portrait {
 
-absl::Status validateVec3(Vec3 &vec3) { return absl::OkStatus(); }
+absl::Status validateVec3(Vec3& vec3) { return absl::OkStatus(); }
 
-absl::Status validatePerspective(Perspective &perspective) {
+absl::Status validatePerspective(Perspective& perspective) {
   auto positionStatus = validateVec3(perspective.cameraPosition);
   if (!positionStatus.ok()) {
     return positionStatus;
@@ -14,7 +14,7 @@ absl::Status validatePerspective(Perspective &perspective) {
   return validateVec3(perspective.cameraFocus);
 }
 
-absl::Status validateScene(const Scene &scene) {
+absl::Status validateScene(const Scene& scene) {
   if (scene.spheres.empty()) {
     return absl::Status(absl::StatusCode::kInvalidArgument, "empty scene");
   }
@@ -24,7 +24,7 @@ absl::Status validateScene(const Scene &scene) {
   return absl::OkStatus();
 }
 
-absl::Status validateOutput(const Output &output) {
+absl::Status validateOutput(const Output& output) {
   if (output.width < 20) {
     return absl::Status(absl::StatusCode::kInvalidArgument, "min width is 20 pixels");
   }
@@ -40,7 +40,7 @@ absl::Status validateOutput(const Output &output) {
   return absl::OkStatus();
 }
 
-absl::Status validateTraceRequest(TraceRequest &traceRequest) {
+absl::Status validateTraceRequest(TraceRequest& traceRequest) {
   auto perspectiveStatus = validatePerspective(traceRequest.perspective);
   if (!perspectiveStatus.ok()) {
     return perspectiveStatus;

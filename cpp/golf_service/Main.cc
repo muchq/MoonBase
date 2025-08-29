@@ -15,7 +15,7 @@ struct RouterHolder {
 
 RouterHolder rh;
 
-void do_route(struct ::mg_connection *c, int ev, void *ev_data) {
+void do_route(struct ::mg_connection* c, int ev, void* ev_data) {
   rh.router_.value().route(c, ev, ev_data);
 }
 }  // namespace
