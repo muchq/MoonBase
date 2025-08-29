@@ -80,6 +80,7 @@ class HttpServer {
   void stop();
   bool is_running() const { return running_; }
   bool is_listening() const { return listener_ != nullptr && listener_->is_listening; }
+  int get_port() const;
 
   // Non-blocking poll (call in a loop)
   void poll(int timeout_ms = 100);

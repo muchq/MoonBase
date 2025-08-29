@@ -2,6 +2,8 @@
 
 #include <chrono>
 #include <climits>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <random>
 #include <sstream>
@@ -84,6 +86,24 @@ void HttpServer::stop() {
     running_ = false;
     // Don't close listener here - let the run() thread handle all mongoose cleanup
   }
+}
+
+int HttpServer::get_port() const {
+  if (listener_ && listener_->is_listening) {
+    // Parse the actual port from the listener's local address
+    // Mongoose stores the address in the format "ip:port"
+    char addr[100];
+    mg_snprintf(addr, sizeof(addr), "%M", mg_print_ip_port, &listener_->loc);
+
+    // Extract port from "ip:port" format
+    const char* port_str = strrchr(addr, ':');
+    if (port_str) {
+      return atoi(port_str + 1);
+    }
+  }
+
+  // If not listening yet, return the configured port
+  return listen_port_;
 }
 
 void HttpServer::poll(int timeout_ms) {

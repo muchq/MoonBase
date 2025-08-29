@@ -51,17 +51,23 @@ HttpClientResponse HttpClient::put_json(const std::string& url, const json& data
 HttpClientResponse HttpClient::make_request(
     const std::string& method, const std::string& url, const std::string& body,
     const std::unordered_map<std::string, std::string>& headers, int timeout_ms) {
-  // Use heap-allocated context to avoid use-after-free when Mongoose callbacks
-  // access the context from a different thread or after this function returns
-  std::unique_ptr<RequestContext> ctx = std::make_unique<RequestContext>();
+  // Use shared_ptr with mutex for thread-safe memory management
+  auto ctx = std::make_shared<RequestContext>();
   ctx->method = method;
   ctx->url = url;
   ctx->request_body = body;
   ctx->request_headers = headers;
 
-  // Create connection - pass raw pointer that will be managed by Mongoose
-  struct mg_connection* conn = mg_http_connect(&mgr_, url.c_str(), event_handler, ctx.get());
+  // Wrapper to hold shared_ptr for Mongoose callback
+  struct ContextHolder {
+    std::shared_ptr<RequestContext> ctx;
+  };
+  auto* holder = new ContextHolder{ctx};
+
+  // Create connection - pass holder pointer
+  struct mg_connection* conn = mg_http_connect(&mgr_, url.c_str(), event_handler, holder);
   if (!conn) {
+    delete holder;  // Clean up holder since connection failed
     HttpClientResponse response;
     response.error_message = "Failed to create connection";
     return response;
@@ -71,9 +77,17 @@ HttpClientResponse HttpClient::make_request(
   auto start_time = std::chrono::steady_clock::now();
   auto timeout_duration = std::chrono::milliseconds(timeout_ms);
 
-  while (!ctx->done) {
+  while (true) {
+    {
+      std::lock_guard<std::mutex> lock(ctx->mutex);
+      if (ctx->done) {
+        break;
+      }
+    }
+
     auto current_time = std::chrono::steady_clock::now();
     if (current_time - start_time > timeout_duration) {
+      std::lock_guard<std::mutex> lock(ctx->mutex);
       ctx->response.error_message = "Request timed out";
       ctx->done = true;
       break;
@@ -82,27 +96,43 @@ HttpClientResponse HttpClient::make_request(
     mg_mgr_poll(&mgr_, 100);  // Poll every 100ms
   }
 
-  // Copy response before context is destroyed
-  HttpClientResponse response = ctx->response;
+  // Copy response under lock
+  HttpClientResponse response;
+  {
+    std::lock_guard<std::mutex> lock(ctx->mutex);
+    response = ctx->response;
+  }
 
-  // Transfer ownership to event handler for cleanup on connection close
-  ctx.release();
+  // Continue polling briefly to allow cleanup
+  // The holder will be deleted by the event handler when connection closes naturally
+  for (int i = 0; i < 5; ++i) {
+    mg_mgr_poll(&mgr_, 10);
+  }
 
+  // ctx will be automatically destroyed when all shared_ptr references are released
   return response;
 }
 
 void HttpClient::event_handler(struct mg_connection* c, int ev, void* ev_data) {
-  RequestContext* ctx = static_cast<RequestContext*>(c->fn_data);
-  if (!ctx) return;
+  struct ContextHolder {
+    std::shared_ptr<RequestContext> ctx;
+  };
 
-  // Clean up context on close to prevent memory leak
+  auto* holder = static_cast<ContextHolder*>(c->fn_data);
+  if (!holder || !holder->ctx) return;
+
+  auto ctx = holder->ctx;  // Get shared_ptr (increases ref count)
+
+  // Handle connection close
   if (ev == MG_EV_CLOSE) {
     c->fn_data = nullptr;
-    delete ctx;  // Safe to delete now that connection is closed
+    delete holder;  // This releases the shared_ptr reference
+    // ctx will be destroyed when last reference is gone
     return;
   }
 
   if (ev == MG_EV_CONNECT) {
+    std::lock_guard<std::mutex> lock(ctx->mutex);
     // Connection established, send request
     std::ostringstream request_stream;
 
@@ -156,6 +186,7 @@ void HttpClient::event_handler(struct mg_connection* c, int ev, void* ev_data) {
     mg_send(c, request_str.c_str(), request_str.length());
 
   } else if (ev == MG_EV_HTTP_MSG) {
+    std::lock_guard<std::mutex> lock(ctx->mutex);
     // Response received
     struct mg_http_message* hm = static_cast<struct mg_http_message*>(ev_data);
 
@@ -176,16 +207,10 @@ void HttpClient::event_handler(struct mg_connection* c, int ev, void* ev_data) {
     ctx->done = true;
 
   } else if (ev == MG_EV_ERROR) {
+    std::lock_guard<std::mutex> lock(ctx->mutex);
     // Connection error
     char* error_msg = static_cast<char*>(ev_data);
     ctx->response.error_message = error_msg ? std::string(error_msg) : "Unknown connection error";
-    ctx->done = true;
-
-  } else if (ev == MG_EV_CLOSE) {
-    // Connection closed
-    if (!ctx->done && ctx->response.error_message.empty()) {
-      ctx->response.error_message = "Connection closed unexpectedly";
-    }
     ctx->done = true;
   }
 }
