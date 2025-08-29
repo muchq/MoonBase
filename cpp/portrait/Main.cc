@@ -15,12 +15,12 @@ using namespace portrait;
 template <typename REQ, typename RESP>
 std::function<HttpResponse(HttpRequest)> wrap(std::function<absl::StatusOr<RESP>(REQ)> handler) {
   return [&handler](HttpRequest req) -> HttpResponse {
-    absl::StatusOr<REQ> status_or_request = requests::read_request<TraceRequest>(req);
+    absl::StatusOr<REQ> status_or_request = requests::read_request<REQ>(req);
     if (!status_or_request.ok()) {
       return responses::bad_request(
           absl::StrCat("Invalid JSON: ", status_or_request.status().message()));
     }
-    const auto status_or_response = handler(status_or_request);
+    const auto status_or_response = handler(status_or_request.value());
     return responses::wrap(status_or_response);
   };
 }
@@ -34,7 +34,8 @@ int main() {
   TracerService tracer_service;
 
   // ray tracing endpoint
-  server.post("/v1/trace", wrap<TraceRequest, TraceResponse>(TracerService::trace));
+  server.post("/v1/trace", wrap<TraceRequest, TraceResponse>(
+      [&tracer_service](TraceRequest req) { return tracer_service.trace(req); }));
 
   server.enable_health_checks();
   server.enable_tracing();
