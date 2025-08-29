@@ -20,14 +20,14 @@ TEST(TypesValidationTest, ValidatePerspective_Valid) {
   Perspective perspective;
   perspective.cameraPosition = {0.0, 0.0, 0.0};
   perspective.cameraFocus = {0.0, 0.0, 1.0};
-  
+
   absl::Status status = validatePerspective(perspective);
   EXPECT_TRUE(status.ok());
 }
 
 TEST(TypesValidationTest, ValidateScene_Empty) {
   Scene scene;
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok());
   EXPECT_EQ(status.code(), absl::StatusCode::kInvalidArgument);
@@ -45,7 +45,7 @@ TEST(TypesValidationTest, ValidateScene_TooManySpheres) {
     sphere.reflective = 0.3;
     scene.spheres.push_back(sphere);
   }
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok());
   EXPECT_EQ(status.code(), absl::StatusCode::kInvalidArgument);
@@ -61,7 +61,7 @@ TEST(TypesValidationTest, ValidateScene_Valid) {
   sphere.specular = 0.5;
   sphere.reflective = 0.3;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_TRUE(status.ok());
 }
@@ -77,7 +77,7 @@ TEST(TypesValidationTest, ValidateScene_MaxSpheres) {
     sphere.reflective = 0.3;
     scene.spheres.push_back(sphere);
   }
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_TRUE(status.ok());
 }
@@ -86,7 +86,7 @@ TEST(TypesValidationTest, ValidateOutput_TooSmallWidth) {
   Output output;
   output.width = 19;
   output.height = 100;
-  
+
   absl::Status status = validateOutput(output);
   EXPECT_FALSE(status.ok());
   EXPECT_EQ(status.code(), absl::StatusCode::kInvalidArgument);
@@ -97,7 +97,7 @@ TEST(TypesValidationTest, ValidateOutput_TooSmallHeight) {
   Output output;
   output.width = 100;
   output.height = 19;
-  
+
   absl::Status status = validateOutput(output);
   EXPECT_FALSE(status.ok());
   EXPECT_EQ(status.code(), absl::StatusCode::kInvalidArgument);
@@ -108,7 +108,7 @@ TEST(TypesValidationTest, ValidateOutput_TooLargeWidth) {
   Output output;
   output.width = 1201;
   output.height = 100;
-  
+
   absl::Status status = validateOutput(output);
   EXPECT_FALSE(status.ok());
   EXPECT_EQ(status.code(), absl::StatusCode::kInvalidArgument);
@@ -119,7 +119,7 @@ TEST(TypesValidationTest, ValidateOutput_TooLargeHeight) {
   Output output;
   output.width = 100;
   output.height = 1201;
-  
+
   absl::Status status = validateOutput(output);
   EXPECT_FALSE(status.ok());
   EXPECT_EQ(status.code(), absl::StatusCode::kInvalidArgument);
@@ -130,7 +130,7 @@ TEST(TypesValidationTest, ValidateOutput_Valid) {
   Output output;
   output.width = 640;
   output.height = 480;
-  
+
   absl::Status status = validateOutput(output);
   EXPECT_TRUE(status.ok());
 }
@@ -139,7 +139,7 @@ TEST(TypesValidationTest, ValidateOutput_MinDimensions) {
   Output output;
   output.width = 20;
   output.height = 20;
-  
+
   absl::Status status = validateOutput(output);
   EXPECT_TRUE(status.ok());
 }
@@ -148,17 +148,17 @@ TEST(TypesValidationTest, ValidateOutput_MaxDimensions) {
   Output output;
   output.width = 1200;
   output.height = 1200;
-  
+
   absl::Status status = validateOutput(output);
   EXPECT_TRUE(status.ok());
 }
 
 TEST(TypesValidationTest, ValidateTraceRequest_Valid) {
   TraceRequest request;
-  
+
   request.perspective.cameraPosition = {0.0, 0.0, 0.0};
   request.perspective.cameraFocus = {0.0, 0.0, 1.0};
-  
+
   Sphere sphere;
   sphere.center = {0.0, 0.0, 5.0};
   sphere.radius = 1.0;
@@ -166,23 +166,23 @@ TEST(TypesValidationTest, ValidateTraceRequest_Valid) {
   sphere.specular = 0.5;
   sphere.reflective = 0.3;
   request.scene.spheres.push_back(sphere);
-  
+
   request.output.width = 640;
   request.output.height = 480;
-  
+
   absl::Status status = validateTraceRequest(request);
   EXPECT_TRUE(status.ok());
 }
 
 TEST(TypesValidationTest, ValidateTraceRequest_InvalidScene) {
   TraceRequest request;
-  
+
   request.perspective.cameraPosition = {0.0, 0.0, 0.0};
   request.perspective.cameraFocus = {0.0, 0.0, 1.0};
-  
+
   request.output.width = 640;
   request.output.height = 480;
-  
+
   absl::Status status = validateTraceRequest(request);
   EXPECT_FALSE(status.ok());
   EXPECT_EQ(status.code(), absl::StatusCode::kInvalidArgument);
@@ -191,10 +191,10 @@ TEST(TypesValidationTest, ValidateTraceRequest_InvalidScene) {
 
 TEST(TypesValidationTest, ValidateTraceRequest_InvalidOutput) {
   TraceRequest request;
-  
+
   request.perspective.cameraPosition = {0.0, 0.0, 0.0};
   request.perspective.cameraFocus = {0.0, 0.0, 1.0};
-  
+
   Sphere sphere;
   sphere.center = {0.0, 0.0, 5.0};
   sphere.radius = 1.0;
@@ -202,10 +202,10 @@ TEST(TypesValidationTest, ValidateTraceRequest_InvalidOutput) {
   sphere.specular = 0.5;
   sphere.reflective = 0.3;
   request.scene.spheres.push_back(sphere);
-  
+
   request.output.width = 10;
   request.output.height = 480;
-  
+
   absl::Status status = validateTraceRequest(request);
   EXPECT_FALSE(status.ok());
   EXPECT_EQ(status.code(), absl::StatusCode::kInvalidArgument);
@@ -261,10 +261,10 @@ TEST(TypesValidationTest, ValidateSphere_NaNCenter) {
   sphere.color = {255, 0, 0};
   sphere.specular = 0.5;
   sphere.reflective = 0.3;
-  
+
   Scene scene;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Sphere with NaN center should be invalid";
 }
@@ -276,10 +276,10 @@ TEST(TypesValidationTest, ValidateSphere_InfiniteCenter) {
   sphere.color = {255, 0, 0};
   sphere.specular = 0.5;
   sphere.reflective = 0.3;
-  
+
   Scene scene;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Sphere with infinite center should be invalid";
 }
@@ -291,10 +291,10 @@ TEST(TypesValidationTest, ValidateSphere_NaNRadius) {
   sphere.color = {255, 0, 0};
   sphere.specular = 0.5;
   sphere.reflective = 0.3;
-  
+
   Scene scene;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Sphere with NaN radius should be invalid";
 }
@@ -306,10 +306,10 @@ TEST(TypesValidationTest, ValidateSphere_InfiniteRadius) {
   sphere.color = {255, 0, 0};
   sphere.specular = 0.5;
   sphere.reflective = 0.3;
-  
+
   Scene scene;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Sphere with infinite radius should be invalid";
 }
@@ -321,10 +321,10 @@ TEST(TypesValidationTest, ValidateSphere_NegativeRadius) {
   sphere.color = {255, 0, 0};
   sphere.specular = 0.5;
   sphere.reflective = 0.3;
-  
+
   Scene scene;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Sphere with negative radius should be invalid";
 }
@@ -336,10 +336,10 @@ TEST(TypesValidationTest, ValidateSphere_ExcessiveRadius) {
   sphere.color = {255, 0, 0};
   sphere.specular = 0.5;
   sphere.reflective = 0.3;
-  
+
   Scene scene;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Sphere with excessive radius (>10000) should be invalid";
 }
@@ -351,10 +351,10 @@ TEST(TypesValidationTest, ValidateSphere_ZeroRadius) {
   sphere.color = {255, 0, 0};
   sphere.specular = 0.5;
   sphere.reflective = 0.3;
-  
+
   Scene scene;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Sphere with zero radius should be invalid";
 }
@@ -366,10 +366,10 @@ TEST(TypesValidationTest, ValidateSphere_InvalidColor) {
   sphere.color = {256, 0, 0};  // Color value out of range
   sphere.specular = 0.5;
   sphere.reflective = 0.3;
-  
+
   Scene scene;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Sphere with color value > 255 should be invalid";
 }
@@ -381,10 +381,10 @@ TEST(TypesValidationTest, ValidateSphere_NaNSpecular) {
   sphere.color = {255, 0, 0};
   sphere.specular = std::nan("");
   sphere.reflective = 0.3;
-  
+
   Scene scene;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Sphere with NaN specular should be invalid";
 }
@@ -396,10 +396,10 @@ TEST(TypesValidationTest, ValidateSphere_InfiniteSpecular) {
   sphere.color = {255, 0, 0};
   sphere.specular = std::numeric_limits<double>::infinity();
   sphere.reflective = 0.3;
-  
+
   Scene scene;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Sphere with infinite specular should be invalid";
 }
@@ -411,10 +411,10 @@ TEST(TypesValidationTest, ValidateSphere_ExcessiveSpecular) {
   sphere.color = {255, 0, 0};
   sphere.specular = 10000.0;  // Unreasonably large specular exponent
   sphere.reflective = 0.3;
-  
+
   Scene scene;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Sphere with excessive specular (>1000) should be invalid";
 }
@@ -426,10 +426,10 @@ TEST(TypesValidationTest, ValidateSphere_NegativeSpecular) {
   sphere.color = {255, 0, 0};
   sphere.specular = -1.0;
   sphere.reflective = 0.3;
-  
+
   Scene scene;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Sphere with negative specular should be invalid";
 }
@@ -441,10 +441,10 @@ TEST(TypesValidationTest, ValidateSphere_NaNReflective) {
   sphere.color = {255, 0, 0};
   sphere.specular = 0.5;
   sphere.reflective = std::nan("");
-  
+
   Scene scene;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Sphere with NaN reflective should be invalid";
 }
@@ -456,10 +456,10 @@ TEST(TypesValidationTest, ValidateSphere_InfiniteReflective) {
   sphere.color = {255, 0, 0};
   sphere.specular = 0.5;
   sphere.reflective = std::numeric_limits<double>::infinity();
-  
+
   Scene scene;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Sphere with infinite reflective should be invalid";
 }
@@ -471,10 +471,10 @@ TEST(TypesValidationTest, ValidateSphere_NegativeReflective) {
   sphere.color = {255, 0, 0};
   sphere.specular = 0.5;
   sphere.reflective = -0.1;
-  
+
   Scene scene;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Sphere with negative reflective should be invalid";
 }
@@ -486,10 +486,10 @@ TEST(TypesValidationTest, ValidateSphere_ReflectiveGreaterThanOne) {
   sphere.color = {255, 0, 0};
   sphere.specular = 0.5;
   sphere.reflective = 1.1;
-  
+
   Scene scene;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Sphere with reflective > 1.0 should be invalid";
 }
@@ -499,7 +499,7 @@ TEST(TypesValidationTest, ValidateLight_NaNIntensity) {
   light.lightType = AMBIENT;
   light.intensity = std::nan("");
   light.position = {0.0, 0.0, 0.0};
-  
+
   Scene scene;
   Sphere sphere;
   sphere.center = {0.0, 0.0, 0.0};
@@ -509,7 +509,7 @@ TEST(TypesValidationTest, ValidateLight_NaNIntensity) {
   sphere.reflective = 0.3;
   scene.spheres.push_back(sphere);
   scene.lights.push_back(light);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Light with NaN intensity should be invalid";
 }
@@ -519,7 +519,7 @@ TEST(TypesValidationTest, ValidateLight_InfiniteIntensity) {
   light.lightType = AMBIENT;
   light.intensity = std::numeric_limits<double>::infinity();
   light.position = {0.0, 0.0, 0.0};
-  
+
   Scene scene;
   Sphere sphere;
   sphere.center = {0.0, 0.0, 0.0};
@@ -529,7 +529,7 @@ TEST(TypesValidationTest, ValidateLight_InfiniteIntensity) {
   sphere.reflective = 0.3;
   scene.spheres.push_back(sphere);
   scene.lights.push_back(light);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Light with infinite intensity should be invalid";
 }
@@ -539,7 +539,7 @@ TEST(TypesValidationTest, ValidateLight_ExcessiveIntensity) {
   light.lightType = AMBIENT;
   light.intensity = 100.0;  // Unreasonably bright
   light.position = {0.0, 0.0, 0.0};
-  
+
   Scene scene;
   Sphere sphere;
   sphere.center = {0.0, 0.0, 0.0};
@@ -549,7 +549,7 @@ TEST(TypesValidationTest, ValidateLight_ExcessiveIntensity) {
   sphere.reflective = 0.3;
   scene.spheres.push_back(sphere);
   scene.lights.push_back(light);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Light with excessive intensity (>10) should be invalid";
 }
@@ -559,7 +559,7 @@ TEST(TypesValidationTest, ValidateLight_NegativeIntensity) {
   light.lightType = AMBIENT;
   light.intensity = -0.5;
   light.position = {0.0, 0.0, 0.0};
-  
+
   Scene scene;
   Sphere sphere;
   sphere.center = {0.0, 0.0, 0.0};
@@ -569,7 +569,7 @@ TEST(TypesValidationTest, ValidateLight_NegativeIntensity) {
   sphere.reflective = 0.3;
   scene.spheres.push_back(sphere);
   scene.lights.push_back(light);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Light with negative intensity should be invalid";
 }
@@ -579,7 +579,7 @@ TEST(TypesValidationTest, ValidateLight_NaNPosition) {
   light.lightType = POINT;
   light.intensity = 0.5;
   light.position = {std::nan(""), 0.0, 0.0};
-  
+
   Scene scene;
   Sphere sphere;
   sphere.center = {0.0, 0.0, 0.0};
@@ -589,7 +589,7 @@ TEST(TypesValidationTest, ValidateLight_NaNPosition) {
   sphere.reflective = 0.3;
   scene.spheres.push_back(sphere);
   scene.lights.push_back(light);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Light with NaN position should be invalid";
 }
@@ -599,7 +599,7 @@ TEST(TypesValidationTest, ValidateLight_InfinitePosition) {
   light.lightType = POINT;
   light.intensity = 0.5;
   light.position = {0.0, std::numeric_limits<double>::infinity(), 0.0};
-  
+
   Scene scene;
   Sphere sphere;
   sphere.center = {0.0, 0.0, 0.0};
@@ -609,7 +609,7 @@ TEST(TypesValidationTest, ValidateLight_InfinitePosition) {
   sphere.reflective = 0.3;
   scene.spheres.push_back(sphere);
   scene.lights.push_back(light);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Light with infinite position should be invalid";
 }
@@ -619,7 +619,7 @@ TEST(TypesValidationTest, ValidateLight_UnknownType) {
   light.lightType = UNKNOWN;
   light.intensity = 0.5;
   light.position = {0.0, 0.0, 0.0};
-  
+
   Scene scene;
   Sphere sphere;
   sphere.center = {0.0, 0.0, 0.0};
@@ -629,7 +629,7 @@ TEST(TypesValidationTest, ValidateLight_UnknownType) {
   sphere.reflective = 0.3;
   scene.spheres.push_back(sphere);
   scene.lights.push_back(light);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Light with UNKNOWN type should be invalid";
 }
@@ -637,7 +637,7 @@ TEST(TypesValidationTest, ValidateLight_UnknownType) {
 TEST(TypesValidationTest, ValidateScene_InvalidBackgroundColor) {
   Scene scene;
   scene.backgroundColor = {256, 0, 0};  // Invalid color value
-  
+
   Sphere sphere;
   sphere.center = {0.0, 0.0, 0.0};
   sphere.radius = 1.0;
@@ -645,7 +645,7 @@ TEST(TypesValidationTest, ValidateScene_InvalidBackgroundColor) {
   sphere.specular = 0.5;
   sphere.reflective = 0.3;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Scene with invalid background color should be invalid";
 }
@@ -653,7 +653,7 @@ TEST(TypesValidationTest, ValidateScene_InvalidBackgroundColor) {
 TEST(TypesValidationTest, ValidateScene_NaNStarProbability) {
   Scene scene;
   scene.backgroundStarProbability = std::nan("");
-  
+
   Sphere sphere;
   sphere.center = {0.0, 0.0, 0.0};
   sphere.radius = 1.0;
@@ -661,7 +661,7 @@ TEST(TypesValidationTest, ValidateScene_NaNStarProbability) {
   sphere.specular = 0.5;
   sphere.reflective = 0.3;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Scene with NaN star probability should be invalid";
 }
@@ -669,7 +669,7 @@ TEST(TypesValidationTest, ValidateScene_NaNStarProbability) {
 TEST(TypesValidationTest, ValidateScene_InfiniteStarProbability) {
   Scene scene;
   scene.backgroundStarProbability = std::numeric_limits<double>::infinity();
-  
+
   Sphere sphere;
   sphere.center = {0.0, 0.0, 0.0};
   sphere.radius = 1.0;
@@ -677,7 +677,7 @@ TEST(TypesValidationTest, ValidateScene_InfiniteStarProbability) {
   sphere.specular = 0.5;
   sphere.reflective = 0.3;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Scene with infinite star probability should be invalid";
 }
@@ -685,7 +685,7 @@ TEST(TypesValidationTest, ValidateScene_InfiniteStarProbability) {
 TEST(TypesValidationTest, ValidateScene_NegativeStarProbability) {
   Scene scene;
   scene.backgroundStarProbability = -0.1;
-  
+
   Sphere sphere;
   sphere.center = {0.0, 0.0, 0.0};
   sphere.radius = 1.0;
@@ -693,7 +693,7 @@ TEST(TypesValidationTest, ValidateScene_NegativeStarProbability) {
   sphere.specular = 0.5;
   sphere.reflective = 0.3;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Scene with negative star probability should be invalid";
 }
@@ -701,7 +701,7 @@ TEST(TypesValidationTest, ValidateScene_NegativeStarProbability) {
 TEST(TypesValidationTest, ValidateScene_StarProbabilityGreaterThanOne) {
   Scene scene;
   scene.backgroundStarProbability = 1.1;
-  
+
   Sphere sphere;
   sphere.center = {0.0, 0.0, 0.0};
   sphere.radius = 1.0;
@@ -709,7 +709,7 @@ TEST(TypesValidationTest, ValidateScene_StarProbabilityGreaterThanOne) {
   sphere.specular = 0.5;
   sphere.reflective = 0.3;
   scene.spheres.push_back(sphere);
-  
+
   absl::Status status = validateScene(scene);
   EXPECT_FALSE(status.ok()) << "Scene with star probability > 1.0 should be invalid";
 }
@@ -718,7 +718,7 @@ TEST(TypesValidationTest, ValidatePerspective_SamePositionAndFocus) {
   Perspective perspective;
   perspective.cameraPosition = {1.0, 2.0, 3.0};
   perspective.cameraFocus = {1.0, 2.0, 3.0};
-  
+
   absl::Status status = validatePerspective(perspective);
   EXPECT_FALSE(status.ok()) << "Camera position and focus should not be the same";
 }
@@ -727,7 +727,7 @@ TEST(TypesValidationTest, ValidatePerspective_InvalidCameraPosition) {
   Perspective perspective;
   perspective.cameraPosition = {std::nan(""), 0.0, 0.0};
   perspective.cameraFocus = {0.0, 0.0, 1.0};
-  
+
   absl::Status status = validatePerspective(perspective);
   EXPECT_FALSE(status.ok()) << "Camera position with NaN should be invalid";
 }
@@ -736,7 +736,7 @@ TEST(TypesValidationTest, ValidatePerspective_InvalidCameraFocus) {
   Perspective perspective;
   perspective.cameraPosition = {0.0, 0.0, 0.0};
   perspective.cameraFocus = {std::numeric_limits<double>::infinity(), 0.0, 1.0};
-  
+
   absl::Status status = validatePerspective(perspective);
   EXPECT_FALSE(status.ok()) << "Camera focus with infinity should be invalid";
 }
@@ -745,7 +745,7 @@ TEST(TypesValidationTest, ValidateOutput_AspectRatioTooExtreme) {
   Output output;
   output.width = 1200;
   output.height = 20;  // Aspect ratio 60:1
-  
+
   absl::Status status = validateOutput(output);
   EXPECT_FALSE(status.ok()) << "Extreme aspect ratio should be invalid";
 }
@@ -754,7 +754,7 @@ TEST(TypesValidationTest, ValidateOutput_NegativeWidth) {
   Output output;
   output.width = -100;
   output.height = 100;
-  
+
   absl::Status status = validateOutput(output);
   EXPECT_FALSE(status.ok()) << "Negative width should be invalid";
 }
@@ -763,7 +763,7 @@ TEST(TypesValidationTest, ValidateOutput_NegativeHeight) {
   Output output;
   output.width = 100;
   output.height = -100;
-  
+
   absl::Status status = validateOutput(output);
   EXPECT_FALSE(status.ok()) << "Negative height should be invalid";
 }

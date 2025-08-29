@@ -61,6 +61,18 @@ cc_library(
     ],
 )
 
+cc_test(
+    name = "tracer_service_test",
+    size = "small",
+    srcs = ["tracer_service_test.cc"],
+    deps = [
+        ":tracer_service",
+        ":types",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_binary(
     name = "portrait",
     srcs = ["Main.cc"],
