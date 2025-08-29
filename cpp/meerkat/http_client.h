@@ -4,6 +4,7 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 
@@ -60,6 +61,7 @@ class HttpClient {
     std::string url;
     std::string request_body;
     std::unordered_map<std::string, std::string> request_headers;
+    std::mutex mutex;  // Protects access to this context
   };
 
   HttpClientResponse make_request(const std::string& method, const std::string& url,

@@ -94,14 +94,14 @@ int HttpServer::get_port() const {
     // Mongoose stores the address in the format "ip:port"
     char addr[100];
     mg_snprintf(addr, sizeof(addr), "%M", mg_print_ip_port, &listener_->loc);
-    
+
     // Extract port from "ip:port" format
     const char* port_str = strrchr(addr, ':');
     if (port_str) {
       return atoi(port_str + 1);
     }
   }
-  
+
   // If not listening yet, return the configured port
   return listen_port_;
 }

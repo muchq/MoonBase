@@ -16,7 +16,7 @@ class HttpClientTest : public ::testing::Test {
   void SetUp() override {
     client_ = std::make_unique<HttpClient>();
     server_ = std::make_unique<HttpServer>();
-    
+
     SetupTestServer();
   }
 
@@ -25,12 +25,12 @@ class HttpClientTest : public ::testing::Test {
     if (server_ && server_->is_running()) {
       server_->stop();
     }
-    
+
     // Wait for server thread to complete
     if (server_thread_.valid()) {
       server_thread_.wait();
     }
-    
+
     // Clean shutdown
     server_.reset();
     client_.reset();
@@ -73,12 +73,10 @@ class HttpClientTest : public ::testing::Test {
     if (!server_->listen("127.0.0.1", 0)) {
       return false;
     }
-    
+
     // Start server in background thread
-    server_thread_ = std::async(std::launch::async, [this]() {
-      server_->run();
-    });
-    
+    server_thread_ = std::async(std::launch::async, [this]() { server_->run(); });
+
     // Wait for server to actually start listening
     // The server needs to call mg_http_listen before we can get the port
     for (int i = 0; i < 100; ++i) {
@@ -96,13 +94,11 @@ class HttpClientTest : public ::testing::Test {
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    
+
     return false;
   }
 
-  std::string GetBaseUrl() { 
-    return "http://127.0.0.1:" + std::to_string(port_); 
-  }
+  std::string GetBaseUrl() { return "http://127.0.0.1:" + std::to_string(port_); }
 
   std::unique_ptr<HttpClient> client_;
   std::unique_ptr<HttpServer> server_;
@@ -112,27 +108,27 @@ class HttpClientTest : public ::testing::Test {
 
 TEST_F(HttpClientTest, BasicGetRequest) {
   ASSERT_TRUE(StartServer()) << "Failed to start server";
-  
+
   auto response = client_->get(GetBaseUrl() + "/echo");
-  
+
   ASSERT_TRUE(response.success) << "Request failed: " << response.error_message;
   EXPECT_EQ(response.status_code, 200);
   EXPECT_FALSE(response.body.empty());
-  
+
   json response_json = json::parse(response.body);
   EXPECT_EQ(response_json["echoed"], "GET /echo");
 }
 
 TEST_F(HttpClientTest, JsonPostRequest) {
   ASSERT_TRUE(StartServer()) << "Failed to start server";
-  
+
   json request_data = {{"name", "test user"}, {"email", "test@example.com"}};
-  
+
   auto response = client_->post_json(GetBaseUrl() + "/json", request_data);
-  
+
   ASSERT_TRUE(response.success) << "Request failed: " << response.error_message;
   EXPECT_EQ(response.status_code, 201);
-  
+
   json response_json = json::parse(response.body);
   EXPECT_EQ(response_json["method"], "POST");
   EXPECT_EQ(response_json["received"]["name"], "test user");
@@ -141,16 +137,16 @@ TEST_F(HttpClientTest, JsonPostRequest) {
 
 TEST_F(HttpClientTest, CustomHeaders) {
   ASSERT_TRUE(StartServer()) << "Failed to start server";
-  
+
   std::unordered_map<std::string, std::string> headers;
   headers["X-Custom-Header"] = "test-value";
   headers["Authorization"] = "Bearer test-token";
-  
+
   auto response = client_->get(GetBaseUrl() + "/headers", headers);
-  
+
   ASSERT_TRUE(response.success) << "Request failed: " << response.error_message;
   EXPECT_EQ(response.status_code, 200);
-  
+
   json response_json = json::parse(response.body);
   EXPECT_EQ(response_json["X-Custom-Header"], "test-value");
   EXPECT_EQ(response_json["Authorization"], "Bearer test-token");
@@ -158,9 +154,9 @@ TEST_F(HttpClientTest, CustomHeaders) {
 
 TEST_F(HttpClientTest, ErrorResponse) {
   ASSERT_TRUE(StartServer()) << "Failed to start server";
-  
+
   auto response = client_->get(GetBaseUrl() + "/error");
-  
+
   ASSERT_TRUE(response.success);  // Connection should succeed
   EXPECT_EQ(response.status_code, 500);
   EXPECT_FALSE(response.body.empty());
@@ -170,28 +166,28 @@ TEST_F(HttpClientTest, ConnectionRefused) {
   // Don't start server - connection should be refused
   // Use a specific port that we know is not listening
   auto response = client_->get("http://127.0.0.1:65432");
-  
+
   EXPECT_FALSE(response.success);
   EXPECT_FALSE(response.error_message.empty());
 }
 
 TEST_F(HttpClientTest, NotFoundEndpoint) {
   ASSERT_TRUE(StartServer()) << "Failed to start server";
-  
+
   auto response = client_->get(GetBaseUrl() + "/nonexistent");
-  
+
   ASSERT_TRUE(response.success);  // Connection should succeed
   EXPECT_EQ(response.status_code, 404);
 }
 
 TEST_F(HttpClientTest, ResponseHeaders) {
   ASSERT_TRUE(StartServer()) << "Failed to start server";
-  
+
   auto response = client_->get(GetBaseUrl() + "/echo");
-  
+
   ASSERT_TRUE(response.success) << "Request failed: " << response.error_message;
   EXPECT_EQ(response.status_code, 200);
-  
+
   // Check that we received response headers
   EXPECT_FALSE(response.headers.empty());
   EXPECT_EQ(response.headers["Content-Type"], "application/json");
@@ -199,25 +195,25 @@ TEST_F(HttpClientTest, ResponseHeaders) {
 
 TEST_F(HttpClientTest, MultipleSequentialRequests) {
   ASSERT_TRUE(StartServer()) << "Failed to start server";
-  
+
   // First request - simple GET
   auto response1 = client_->get(GetBaseUrl() + "/echo");
   ASSERT_TRUE(response1.success) << "First request failed: " << response1.error_message;
   EXPECT_EQ(response1.status_code, 200);
-  
+
   // Second request - with custom headers
   std::unordered_map<std::string, std::string> headers;
   headers["Authorization"] = "Bearer valid-token";
   headers["X-Custom"] = "test-value";
-  
+
   auto response2 = client_->get(GetBaseUrl() + "/headers", headers);
   ASSERT_TRUE(response2.success) << "Second request failed: " << response2.error_message;
   EXPECT_EQ(response2.status_code, 200);
-  
+
   json response_json = json::parse(response2.body);
   EXPECT_EQ(response_json["Authorization"], "Bearer valid-token");
   EXPECT_EQ(response_json["X-Custom"], "test-value");
-  
+
   // Third request - POST with JSON
   json post_data = {{"test", "data"}};
   auto response3 = client_->post_json(GetBaseUrl() + "/json", post_data);
@@ -227,18 +223,18 @@ TEST_F(HttpClientTest, MultipleSequentialRequests) {
 
 TEST_F(HttpClientTest, LargePayload) {
   ASSERT_TRUE(StartServer()) << "Failed to start server";
-  
+
   // Create a large JSON payload
   json large_data;
   for (int i = 0; i < 1000; ++i) {
     large_data["field_" + std::to_string(i)] = "value_" + std::to_string(i);
   }
-  
+
   auto response = client_->post_json(GetBaseUrl() + "/json", large_data);
-  
+
   ASSERT_TRUE(response.success) << "Request failed: " << response.error_message;
   EXPECT_EQ(response.status_code, 201);
-  
+
   json response_json = json::parse(response.body);
   EXPECT_EQ(response_json["received"]["field_0"], "value_0");
   EXPECT_EQ(response_json["received"]["field_999"], "value_999");
@@ -246,9 +242,9 @@ TEST_F(HttpClientTest, LargePayload) {
 
 TEST_F(HttpClientTest, EmptyBody) {
   ASSERT_TRUE(StartServer()) << "Failed to start server";
-  
+
   auto response = client_->post(GetBaseUrl() + "/json", "", {{"Content-Type", "application/json"}});
-  
+
   // Should get bad request since empty string is not valid JSON
   ASSERT_TRUE(response.success);  // Connection should succeed
   EXPECT_EQ(response.status_code, 400);
