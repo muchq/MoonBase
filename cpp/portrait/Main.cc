@@ -3,20 +3,12 @@
 #include "absl/log/log.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
-#include "base64.h"
-#include "cpp/futility/cache/lru_cache.h"
-#include "cpp/image_core/image_core.h"
 #include "cpp/meerkat/meerkat.h"
-#include "cpp/png_plusplus/png_plusplus.h"
 #include "cpp/portrait/types.h"
 #include "tracer_service.h"
 
 using namespace meerkat;
 using namespace portrait;
-
-using futility::cache::LRUCache;
-using image_core::Image;
-using image_core::RGB_Double;
 
 uint16_t readPort(const uint16_t default_port) {
   if (const char* env_p = std::getenv("PORT")) {
@@ -48,10 +40,9 @@ int main() {
 
   HttpServer server;
   TracerService tracer_service;
-  LRUCache<TraceRequest, std::string> cache(100);
 
   // ray tracing endpoint
-  server.post("/v1/trace", [&tracer_service, &cache](const HttpRequest& req) -> HttpResponse {
+  server.post("/v1/trace", [&tracer_service](const HttpRequest& req) -> HttpResponse {
     absl::StatusOr<TraceRequest> trace_or_status = readTraceRequest(req.body);
     if (!trace_or_status.ok()) {
       return responses::bad_request(

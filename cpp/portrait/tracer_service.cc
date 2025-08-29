@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "cpp/portrait/base64.h"
+#include "cpp/png_plusplus/png_plusplus.h"
 
 namespace portrait {
 using image_core::Image;
@@ -20,7 +21,7 @@ TraceResponse TracerService::trace(TraceRequest& trace_request) {
   auto image = trace(scene, perspective, output);
   auto b64Png = imageToBase64(image);
   auto traceResponse = toResponse(output, b64Png);
-  cache.insert(trace_request, std::move(b64Png));
+  cache_.insert(trace_request, std::move(b64Png));
   return traceResponse;
 }
 

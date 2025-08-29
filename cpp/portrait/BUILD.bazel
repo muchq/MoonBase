@@ -55,6 +55,7 @@ cc_library(
         ":types",
         "//cpp/futility/cache",
         "//cpp/image_core",
+        "//cpp/png_plusplus",
         "//cpp/tracy",
     ],
 )
@@ -67,7 +68,6 @@ cc_binary(
         ":tracer_service",
         ":types",
         "//cpp/meerkat",
-        "//cpp/png_plusplus",
         "//cpp/tracy",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:globals",
