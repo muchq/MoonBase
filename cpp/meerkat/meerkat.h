@@ -3,13 +3,13 @@
 
 #include <chrono>
 #include <functional>
-#include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "mongoose.h"
 #include "nlohmann/json.hpp"
 
@@ -217,6 +217,19 @@ ResponseInterceptor trace_id_header();
 ResponseInterceptor logging();
 }  // namespace response
 }  // namespace interceptors
+
+template <typename REQ, typename RESP>
+std::function<HttpResponse(HttpRequest)> wrap(std::function<absl::StatusOr<RESP>(REQ&)> handler) {
+  return [&handler](const HttpRequest& req) -> HttpResponse {
+    absl::StatusOr<REQ> status_or_request = requests::read_request<REQ>(req);
+    if (!status_or_request.ok()) {
+      return responses::bad_request(
+          absl::StrCat("Invalid JSON: ", status_or_request.status().message()));
+    }
+    auto status_or_response = handler(status_or_request.value());
+    return responses::wrap(status_or_response);
+  };
+}
 
 }  // namespace meerkat
 

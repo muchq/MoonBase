@@ -69,13 +69,9 @@ cc_binary(
         ":tracer_service",
         ":types",
         "//cpp/meerkat",
-        "//cpp/tracy",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:globals",
         "@com_google_absl//absl/log:initialize",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
     ],
 )
 
