@@ -133,6 +133,10 @@ struct TraceResponse {
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(TraceResponse, base64_png, width, height)
 
+absl::Status validateVec3(Vec3& vec3);
+absl::Status validatePerspective(Perspective& perspective);
+absl::Status validateScene(const Scene& scene);
+absl::Status validateOutput(const Output& output);
 absl::Status validateTraceRequest(TraceRequest& request);
 
 }  // namespace portrait

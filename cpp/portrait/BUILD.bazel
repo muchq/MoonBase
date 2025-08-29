@@ -14,16 +14,16 @@ cc_library(
     ],
 )
 
-# cc_test(
-#     name = "types_test",
-#     srcs = ["types_test.cc"],
-#     deps = [
-#         ":types",
-#         "@com_google_absl//absl/status",
-#         "@googletest//:gtest_main",
-#         "@nlohmann_json//:json",
-#     ],
-# )
+cc_test(
+    name = "types_test",
+    srcs = ["types_test.cc"],
+    deps = [
+        ":types",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+    ],
+)
 
 cc_library(
     name = "base64",
