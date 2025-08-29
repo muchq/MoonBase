@@ -28,7 +28,7 @@ TEST(GameStateMapper, GameStateToProto) {
   EXPECT_FALSE(proto.game_over());
   EXPECT_TRUE(proto.has_hand());
 
-  const auto &hand = proto.hand();
+  const auto& hand = proto.hand();
   EXPECT_EQ(hand.bottom_left(), "2_H");
   EXPECT_EQ(hand.bottom_right(), "2_S");
 

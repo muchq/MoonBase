@@ -7,6 +7,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@mongoose_cc//:mongoose",
         "@nlohmann_json//:json",
     ],

@@ -14,16 +14,17 @@ cc_library(
     ],
 )
 
-# cc_test(
-#     name = "types_test",
-#     srcs = ["types_test.cc"],
-#     deps = [
-#         ":types",
-#         "@com_google_absl//absl/status",
-#         "@googletest//:gtest_main",
-#         "@nlohmann_json//:json",
-#     ],
-# )
+cc_test(
+    name = "types_test",
+    size = "small",
+    srcs = ["types_test.cc"],
+    deps = [
+        ":types",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+    ],
+)
 
 cc_library(
     name = "base64",
@@ -51,9 +52,25 @@ cc_library(
     hdrs = ["tracer_service.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":base64",
         ":types",
+        "//cpp/futility/cache",
         "//cpp/image_core",
+        "//cpp/png_plusplus",
         "//cpp/tracy",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_test(
+    name = "tracer_service_test",
+    size = "small",
+    srcs = ["tracer_service_test.cc"],
+    deps = [
+        ":tracer_service",
+        ":types",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -62,19 +79,12 @@ cc_binary(
     srcs = ["Main.cc"],
     visibility = ["//visibility:public"],
     deps = [
-        "base64",
         ":tracer_service",
         ":types",
-        "//cpp/futility/cache",
         "//cpp/meerkat",
-        "//cpp/png_plusplus",
-        "//cpp/tracy",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:globals",
         "@com_google_absl//absl/log:initialize",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
     ],
 )
 

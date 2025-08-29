@@ -41,9 +41,9 @@ struct Vec2 {
 struct Vec3 {
   double x, y, z;
 
-  Vec3 operator+(Vec3 &o) { return Vec3{.x = x + o.x, .y = y + o.y, .z = z + o.z}; }
+  Vec3 operator+(Vec3& o) { return Vec3{.x = x + o.x, .y = y + o.y, .z = z + o.z}; }
 
-  Vec3 operator-(Vec3 &o) { return Vec3{.x = x - o.x, .y = y - o.y, .z = z - o.z}; }
+  Vec3 operator-(Vec3& o) { return Vec3{.x = x - o.x, .y = y - o.y, .z = z - o.z}; }
 
   Vec3 operator*(double o) { return Vec3{.x = x * o, .y = y * o, .z = z * o}; }
 
@@ -90,21 +90,21 @@ struct Scene {
 
 class Tracer {
  public:
-  void drawScene(Scene &scene, Image<RGB_Double> &image, Vec3 cameraPosition);
+  void drawScene(Scene& scene, Image<RGB_Double>& image, Vec3 cameraPosition);
 
  private:
   std::mt19937 rng{std::random_device{}()};
   std::uniform_real_distribution<double> dist{0.0, 1.0};
 
-  Vec3 canvasToViewport(Vec2 canvasPoint, Image<RGB_Double> &image, Scene &scene);
-  std::tuple<double, double> intersectRaySphere(Vec3 &origin, Vec3 &direction, Sphere &sphere);
-  Vec3 reflectRay(Vec3 &normal, Vec3 &ray);
-  std::tuple<std::optional<Sphere>, double> closestIntersection(Vec3 &origin, Vec3 &direction,
+  Vec3 canvasToViewport(Vec2 canvasPoint, Image<RGB_Double>& image, Scene& scene);
+  std::tuple<double, double> intersectRaySphere(Vec3& origin, Vec3& direction, Sphere& sphere);
+  Vec3 reflectRay(Vec3& normal, Vec3& ray);
+  std::tuple<std::optional<Sphere>, double> closestIntersection(Vec3& origin, Vec3& direction,
                                                                 double tMin, double tMax,
-                                                                std::vector<Sphere> &spheres);
-  double specularLightIntensity(Vec3 &normal, Vec3 &ray, Vec3 &view, Light &light, double specular);
-  double computeLighting(Vec3 &point, Vec3 &normal, Vec3 &view, Scene &scene, double specular);
-  RGB_Double traceRay(Vec3 &origin, Vec3 &direction, double tMin, double tMax, Scene &scene,
+                                                                std::vector<Sphere>& spheres);
+  double specularLightIntensity(Vec3& normal, Vec3& ray, Vec3& view, Light& light, double specular);
+  double computeLighting(Vec3& point, Vec3& normal, Vec3& view, Scene& scene, double specular);
+  RGB_Double traceRay(Vec3& origin, Vec3& direction, double tMin, double tMax, Scene& scene,
                       int recursionDepth);
 };
 

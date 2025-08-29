@@ -16,7 +16,7 @@ using std::string;
 namespace golf_service {
 
 template <RequestWrapper::KindCase T>
-auto Handler::validRequestType(const GolfServiceRequest &serviceRequest, struct mg_connection *c)
+auto Handler::validRequestType(const GolfServiceRequest& serviceRequest, struct mg_connection* c)
     -> bool {
   if (serviceRequest.kind_case() != T) {
     string output("error|invalid request");
@@ -26,12 +26,12 @@ auto Handler::validRequestType(const GolfServiceRequest &serviceRequest, struct 
   return true;
 }
 
-void Handler::registerUser(const GolfServiceRequest &serviceRequest, struct mg_connection *c) {
+void Handler::registerUser(const GolfServiceRequest& serviceRequest, struct mg_connection* c) {
   if (!validRequestType<RequestWrapper::KindCase::kRegisterUserRequest>(serviceRequest, c)) {
     return;
   }
 
-  const RegisterUserRequest &registerUserRequest = serviceRequest.register_user_request();
+  const RegisterUserRequest& registerUserRequest = serviceRequest.register_user_request();
   // don't allow re-registration yet
   for (auto i = connectionsByUser.begin(); i != connectionsByUser.end(); i++) {
     if (connectionsByUser.at(i->first) == c) {
@@ -55,7 +55,7 @@ void Handler::registerUser(const GolfServiceRequest &serviceRequest, struct mg_c
   mg_ws_send(c, output.c_str(), output.size(), WEBSOCKET_OP_TEXT);
 }
 
-bool Handler::usernameMismatch(const string &username, struct mg_connection *c) {
+bool Handler::usernameMismatch(const string& username, struct mg_connection* c) {
   if (connectionsByUser.find(username) == connectionsByUser.end() ||
       connectionsByUser.at(username) != c) {
     string output("error|username mismatch");
@@ -65,7 +65,7 @@ bool Handler::usernameMismatch(const string &username, struct mg_connection *c) 
   return false;
 }
 
-auto Handler::validatePosition(const golf_ws::Position &position, struct mg_connection *c)
+auto Handler::validatePosition(const golf_ws::Position& position, struct mg_connection* c)
     -> absl::StatusOr<golf::Position> {
   switch (position) {
     case golf_ws::Position::TOP_LEFT:
@@ -83,7 +83,7 @@ auto Handler::validatePosition(const golf_ws::Position &position, struct mg_conn
   }
 }
 
-string Handler::userStateToJson(const golf::GameStatePtr &gameStatePtr, const string &user) {
+string Handler::userStateToJson(const golf::GameStatePtr& gameStatePtr, const string& user) {
   const auto stateForUser = gameStateMapper.gameStateToProto(gameStatePtr, user);
   std::string userJson;
   auto status = google::protobuf::util::MessageToJsonString(stateForUser, &userJson);
@@ -93,8 +93,8 @@ string Handler::userStateToJson(const golf::GameStatePtr &gameStatePtr, const st
   return "UNKNOWN";
 }
 
-void Handler::handleGameManagerResult(const absl::StatusOr<golf::GameStatePtr> &res,
-                                      struct mg_connection *c) {
+void Handler::handleGameManagerResult(const absl::StatusOr<golf::GameStatePtr>& res,
+                                      struct mg_connection* c) {
   if (!res.ok()) {
     string output("error|");
     output.append(res.status().message());
@@ -102,20 +102,20 @@ void Handler::handleGameManagerResult(const absl::StatusOr<golf::GameStatePtr> &
     return;
   }
 
-  const auto &gameStatePtr = *res;
-  for (auto &user : gm->getUsersByGameId(gameStatePtr->getGameId())) {
+  const auto& gameStatePtr = *res;
+  for (auto& user : gm->getUsersByGameId(gameStatePtr->getGameId())) {
     const auto userJson = userStateToJson(gameStatePtr, user);
     auto userConnection = connectionsByUser.at(user);
     mg_ws_send(userConnection, userJson.c_str(), userJson.size(), WEBSOCKET_OP_TEXT);
   }
 }
 
-void Handler::newGame(const GolfServiceRequest &serviceRequest, struct mg_connection *c) {
+void Handler::newGame(const GolfServiceRequest& serviceRequest, struct mg_connection* c) {
   if (!validRequestType<RequestWrapper::KindCase::kNewGameRequest>(serviceRequest, c)) {
     return;
   }
 
-  auto &newGameRequest = serviceRequest.new_game_request();
+  auto& newGameRequest = serviceRequest.new_game_request();
   if (usernameMismatch(newGameRequest.username(), c)) {
     return;
   }
@@ -124,12 +124,12 @@ void Handler::newGame(const GolfServiceRequest &serviceRequest, struct mg_connec
   handleGameManagerResult(res, c);
 }
 
-void Handler::joinGame(const GolfServiceRequest &serviceRequest, struct mg_connection *c) {
+void Handler::joinGame(const GolfServiceRequest& serviceRequest, struct mg_connection* c) {
   if (!validRequestType<RequestWrapper::KindCase::kJoinGameRequest>(serviceRequest, c)) {
     return;
   }
 
-  auto &joinGameRequest = serviceRequest.join_game_request();
+  auto& joinGameRequest = serviceRequest.join_game_request();
   if (usernameMismatch(joinGameRequest.username(), c)) {
     return;
   }
@@ -137,12 +137,12 @@ void Handler::joinGame(const GolfServiceRequest &serviceRequest, struct mg_conne
   handleGameManagerResult(res, c);
 }
 
-void Handler::peekAtDrawPile(const GolfServiceRequest &serviceRequest, struct mg_connection *c) {
+void Handler::peekAtDrawPile(const GolfServiceRequest& serviceRequest, struct mg_connection* c) {
   if (!validRequestType<RequestWrapper::KindCase::kPeekRequest>(serviceRequest, c)) {
     return;
   }
 
-  auto &peekRequest = serviceRequest.peek_request();
+  auto& peekRequest = serviceRequest.peek_request();
   if (usernameMismatch(peekRequest.username(), c)) {
     return;
   }
@@ -150,13 +150,13 @@ void Handler::peekAtDrawPile(const GolfServiceRequest &serviceRequest, struct mg
   handleGameManagerResult(res, c);
 }
 
-void Handler::discardFromDrawPile(const GolfServiceRequest &serviceRequest,
-                                  struct mg_connection *c) {
+void Handler::discardFromDrawPile(const GolfServiceRequest& serviceRequest,
+                                  struct mg_connection* c) {
   if (!validRequestType<RequestWrapper::KindCase::kDiscardDrawRequest>(serviceRequest, c)) {
     return;
   }
 
-  auto &discardDrawRequest = serviceRequest.discard_draw_request();
+  auto& discardDrawRequest = serviceRequest.discard_draw_request();
   if (usernameMismatch(discardDrawRequest.username(), c)) {
     return;
   }
@@ -165,12 +165,12 @@ void Handler::discardFromDrawPile(const GolfServiceRequest &serviceRequest,
   handleGameManagerResult(res, c);
 }
 
-void Handler::swapForDrawPile(const GolfServiceRequest &serviceRequest, struct mg_connection *c) {
+void Handler::swapForDrawPile(const GolfServiceRequest& serviceRequest, struct mg_connection* c) {
   if (!validRequestType<RequestWrapper::KindCase::kSwapForDrawRequest>(serviceRequest, c)) {
     return;
   }
 
-  auto &swapForDrawRequest = serviceRequest.swap_for_draw_request();
+  auto& swapForDrawRequest = serviceRequest.swap_for_draw_request();
   if (usernameMismatch(swapForDrawRequest.username(), c)) {
     return;
   }
@@ -185,13 +185,13 @@ void Handler::swapForDrawPile(const GolfServiceRequest &serviceRequest, struct m
   handleGameManagerResult(res, c);
 }
 
-void Handler::swapForDiscardPile(const GolfServiceRequest &serviceRequest,
-                                 struct mg_connection *c) {
+void Handler::swapForDiscardPile(const GolfServiceRequest& serviceRequest,
+                                 struct mg_connection* c) {
   if (!validRequestType<RequestWrapper::KindCase::kSwapForDiscardRequest>(serviceRequest, c)) {
     return;
   }
 
-  auto &swapForDiscardRequest = serviceRequest.swap_for_discard_request();
+  auto& swapForDiscardRequest = serviceRequest.swap_for_discard_request();
   if (usernameMismatch(swapForDiscardRequest.username(), c)) {
     return;
   }
@@ -204,12 +204,12 @@ void Handler::swapForDiscardPile(const GolfServiceRequest &serviceRequest,
   handleGameManagerResult(res, c);
 }
 
-void Handler::knock(const GolfServiceRequest &serviceRequest, struct mg_connection *c) {
+void Handler::knock(const GolfServiceRequest& serviceRequest, struct mg_connection* c) {
   if (!validRequestType<RequestWrapper::KindCase::kKnockRequest>(serviceRequest, c)) {
     return;
   }
 
-  auto &knockRequest = serviceRequest.knock_request();
+  auto& knockRequest = serviceRequest.knock_request();
   if (usernameMismatch(knockRequest.username(), c)) {
     return;
   }
@@ -217,7 +217,7 @@ void Handler::knock(const GolfServiceRequest &serviceRequest, struct mg_connecti
   handleGameManagerResult(res, c);
 }
 
-void Handler::handleMessage(struct mg_ws_message *wm, struct mg_connection *c) {
+void Handler::handleMessage(struct mg_ws_message* wm, struct mg_connection* c) {
   const string requestText(wm->data.buf);
   golf_ws::RequestWrapper requestWrapper;
   auto status = google::protobuf::util::JsonStringToMessage(requestText, &requestWrapper);
@@ -238,7 +238,7 @@ void Handler::handleMessage(struct mg_ws_message *wm, struct mg_connection *c) {
   (this->*(handler))(requestWrapper, c);
 }
 
-void Handler::handleDisconnect(struct ::mg_connection *c) {
+void Handler::handleDisconnect(struct ::mg_connection* c) {
   // TODO: unregister connection
   // TODO: notify players in shared games
 }

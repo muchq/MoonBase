@@ -3,12 +3,13 @@
 
 #include <chrono>
 #include <functional>
-#include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "mongoose.h"
 #include "nlohmann/json.hpp"
 
@@ -49,6 +50,8 @@ using ResponseInterceptor = std::function<void(const HttpRequest&, HttpResponse&
 using WebSocketHandler = std::function<void(struct mg_connection*, const std::string&)>;
 using WebSocketConnectHandler = std::function<bool(struct mg_connection*, const HttpRequest&)>;
 using WebSocketCloseHandler = std::function<void(struct mg_connection*)>;
+
+uint16_t read_port(const uint16_t default_port);
 
 class HttpServer {
  public:
@@ -173,8 +176,23 @@ class HttpServer {
   void handle_websocket_close(struct mg_connection* c);
 };
 
+// Utility functions for request handling
+namespace requests {
+template <typename T>
+absl::StatusOr<T> read_request(const HttpRequest& request) {
+  try {
+    const json request_json = json::parse(request.body);
+    return request_json.template get<T>();
+  } catch (const json::exception& e) {
+    return absl::Status(absl::StatusCode::kInvalidArgument, std::string(e.what()));
+  }
+}
+}  // namespace requests
+
 // Utility functions for common responses
 namespace responses {
+
+HttpResponse wrap(const absl::StatusOr<json> status_or_data);
 HttpResponse ok(const json& data = json::object());
 HttpResponse created(const json& data = json::object());
 HttpResponse bad_request(const std::string& message = "Bad Request");
@@ -199,6 +217,19 @@ ResponseInterceptor trace_id_header();
 ResponseInterceptor logging();
 }  // namespace response
 }  // namespace interceptors
+
+template <typename REQ, typename RESP>
+std::function<HttpResponse(HttpRequest)> wrap(std::function<absl::StatusOr<RESP>(REQ&)> handler) {
+  return [&handler](const HttpRequest& req) -> HttpResponse {
+    absl::StatusOr<REQ> status_or_request = requests::read_request<REQ>(req);
+    if (!status_or_request.ok()) {
+      return responses::bad_request(
+          absl::StrCat("Invalid JSON: ", status_or_request.status().message()));
+    }
+    auto status_or_response = handler(status_or_request.value());
+    return responses::wrap(status_or_response);
+  };
+}
 
 }  // namespace meerkat
 

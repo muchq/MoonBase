@@ -17,42 +17,42 @@ using golf_ws::RequestWrapper;
 using std::string;
 
 typedef golf_ws::RequestWrapper GolfServiceRequest;
-typedef std::function<void(const GolfServiceRequest &, struct ::mg_connection *)> handler;
+typedef std::function<void(const GolfServiceRequest&, struct ::mg_connection*)> handler;
 typedef std::function<absl::StatusOr<GolfServiceRequest>(std::vector<std::string>)> argReader;
 typedef absl::StatusOr<GolfServiceRequest> StatusOrRequest;
 
-void handleDisconnect(struct ::mg_connection *c);
-void handleMessage(struct ::mg_ws_message *wm, struct ::mg_connection *c);
+void handleDisconnect(struct ::mg_connection* c);
+void handleMessage(struct ::mg_ws_message* wm, struct ::mg_connection* c);
 
 class Handler {
  public:
   explicit Handler(std::shared_ptr<golf::GameManager> gm_) : gm(std::move(gm_)) {}
-  void handleDisconnect(struct ::mg_connection *c);
-  void handleMessage(struct ::mg_ws_message *wm, struct ::mg_connection *c);
+  void handleDisconnect(struct ::mg_connection* c);
+  void handleMessage(struct ::mg_ws_message* wm, struct ::mg_connection* c);
 
  private:
   template <RequestWrapper::KindCase T>
-  bool validRequestType(const GolfServiceRequest &serviceRequest, struct mg_connection *c);
+  bool validRequestType(const GolfServiceRequest& serviceRequest, struct mg_connection* c);
 
-  void registerUser(const GolfServiceRequest &serviceRequest, struct mg_connection *c);
-  bool usernameMismatch(const string &username, struct mg_connection *c);
-  StatusOr<golf::Position> validatePosition(const golf_ws::Position &position,
-                                            struct mg_connection *c);
-  string userStateToJson(const golf::GameStatePtr &gameStatePtr, const string &user);
+  void registerUser(const GolfServiceRequest& serviceRequest, struct mg_connection* c);
+  bool usernameMismatch(const string& username, struct mg_connection* c);
+  StatusOr<golf::Position> validatePosition(const golf_ws::Position& position,
+                                            struct mg_connection* c);
+  string userStateToJson(const golf::GameStatePtr& gameStatePtr, const string& user);
 
-  void handleGameManagerResult(const absl::StatusOr<golf::GameStatePtr> &res,
-                               struct mg_connection *c);
-  void newGame(const GolfServiceRequest &serviceRequest, struct mg_connection *c);
-  void joinGame(const GolfServiceRequest &serviceRequest, struct mg_connection *c);
-  void peekAtDrawPile(const GolfServiceRequest &serviceRequest, struct mg_connection *c);
-  void discardFromDrawPile(const GolfServiceRequest &serviceRequest, struct mg_connection *c);
-  void swapForDrawPile(const GolfServiceRequest &serviceRequest, struct mg_connection *c);
-  void swapForDiscardPile(const GolfServiceRequest &serviceRequest, struct mg_connection *c);
-  void knock(const GolfServiceRequest &serviceRequest, struct mg_connection *c);
+  void handleGameManagerResult(const absl::StatusOr<golf::GameStatePtr>& res,
+                               struct mg_connection* c);
+  void newGame(const GolfServiceRequest& serviceRequest, struct mg_connection* c);
+  void joinGame(const GolfServiceRequest& serviceRequest, struct mg_connection* c);
+  void peekAtDrawPile(const GolfServiceRequest& serviceRequest, struct mg_connection* c);
+  void discardFromDrawPile(const GolfServiceRequest& serviceRequest, struct mg_connection* c);
+  void swapForDrawPile(const GolfServiceRequest& serviceRequest, struct mg_connection* c);
+  void swapForDiscardPile(const GolfServiceRequest& serviceRequest, struct mg_connection* c);
+  void knock(const GolfServiceRequest& serviceRequest, struct mg_connection* c);
 
   // TODO: make this map<string, pair<handler, parser>> ?
 
-  typedef void (Handler::*handler_method_t)(const GolfServiceRequest &, struct ::mg_connection *);
+  typedef void (Handler::*handler_method_t)(const GolfServiceRequest&, struct ::mg_connection*);
   std::unordered_map<string, handler_method_t> handlers{
       {"register", &Handler::registerUser},
       {"new", &Handler::newGame},
@@ -65,7 +65,7 @@ class Handler {
 
   std::shared_ptr<golf::GameManager> gm;
   golf::GameStateMapper gameStateMapper{{}};
-  std::unordered_map<std::string, mg_connection *> connectionsByUser;
+  std::unordered_map<std::string, mg_connection*> connectionsByUser;
 };
 
 }  // namespace golf_service

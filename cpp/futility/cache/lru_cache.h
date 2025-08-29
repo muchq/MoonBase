@@ -27,9 +27,9 @@ class LRUCache {
 
   bool empty() const { return m_map.empty(); }
 
-  bool contains(const key_type &key) { return m_map.find(key) != m_map.end(); }
+  bool contains(const key_type& key) { return m_map.find(key) != m_map.end(); }
 
-  void insert(const key_type &key, const value_type &value) {
+  void insert(const key_type& key, const value_type& value) {
     if (!m_map.contains(key)) {
       // insert item into the cache, but first check if it is full
       if (size() >= m_capacity) {
@@ -43,7 +43,7 @@ class LRUCache {
     }
   }
 
-  std::optional<value_type> get(const key_type &key) {
+  std::optional<value_type> get(const key_type& key) {
     // lookup value in the cache
     typename map_type::iterator i = m_map.find(key);
     if (i == m_map.end()) {
@@ -61,7 +61,7 @@ class LRUCache {
 
       // update iterator in map
       j = m_list.begin();
-      const value_type &value = i->second.first;
+      const value_type& value = i->second.first;
       m_map[key] = std::make_pair(value, j);
 
       // return the value

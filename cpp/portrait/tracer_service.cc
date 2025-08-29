@@ -2,13 +2,35 @@
 
 #include <vector>
 
+#include "cpp/png_plusplus/png_plusplus.h"
+#include "cpp/portrait/base64.h"
+
 namespace portrait {
 using image_core::Image;
 using image_core::RGB_Double;
 using std::vector;
 
-Image<RGB_Double> TracerService::trace(Scene& scene, Perspective& perspective,
-                                       const Output& output) {
+absl::StatusOr<TraceResponse> TracerService::trace(TraceRequest& trace_request) {
+  auto validation_status = validateTraceRequest(trace_request);
+  if (!validation_status.ok()) {
+    return validation_status;
+  }
+  auto cached_image = cache_.get(trace_request);
+  if (cached_image.has_value()) {
+    auto b64Png = cached_image.value();
+    return toResponse(trace_request.output, b64Png);
+  }
+
+  auto [scene, perspective, output] = trace_request;
+  auto image = do_trace(scene, perspective, output);
+  auto b64Png = imageToBase64(image);
+  auto traceResponse = toResponse(output, b64Png);
+  cache_.insert(trace_request, std::move(b64Png));
+  return traceResponse;
+}
+
+Image<RGB_Double> TracerService::do_trace(Scene& scene, Perspective& perspective,
+                                          const Output& output) {
   auto image = Image<RGB_Double>(output.width, output.height);
   tracy::Scene tracyScene = toTracyScene(scene, output);
   auto [x, y, z] = perspective.cameraPosition;
@@ -64,6 +86,19 @@ tracy::Vec3 TracerService::tracify(const Vec3& v) {
 
 tracy::LightType TracerService::tracify(const LightType& lightType) {
   return static_cast<tracy::LightType>(lightType);
+}
+
+std::string TracerService::imageToBase64(Image<RGB_Double>& image) {
+  const std::vector<unsigned char> png_bytes = pngpp::imageToPng(image);
+  return pngToBase64(png_bytes);
+}
+
+TraceResponse TracerService::toResponse(const Output& output, std::string& base64) {
+  return TraceResponse{
+      .base64_png = base64,
+      .width = output.width,
+      .height = output.height,
+  };
 }
 
 }  // namespace portrait

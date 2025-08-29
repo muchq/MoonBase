@@ -8,7 +8,7 @@ namespace golf_service {
 class Router {
  public:
   explicit Router(std::shared_ptr<Handler> handler) : handler_(handler) {}
-  void route(struct ::mg_connection *c, int ev, void *ev_data) const;
+  void route(struct ::mg_connection* c, int ev, void* ev_data) const;
 
  private:
   std::shared_ptr<Handler> handler_;

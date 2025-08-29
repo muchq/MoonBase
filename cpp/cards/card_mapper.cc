@@ -20,7 +20,7 @@ static const std::unordered_map<Suit, std::string> SUIT_TO_STRING{
     {Suit::Spades, "S"},
 };
 
-std::string CardMapper::cardToString(const Card &c) const {
+std::string CardMapper::cardToString(const Card& c) const {
   std::string repr;
   if (RANK_TO_STRING.find(c.getRank()) != RANK_TO_STRING.end()) {
     repr.append(RANK_TO_STRING.at(c.getRank()));
@@ -37,7 +37,7 @@ std::string CardMapper::cardToString(const Card &c) const {
   return repr;
 }
 
-std::string CardMapper::cardsToString(const std::vector<Card> &cards) const {
+std::string CardMapper::cardsToString(const std::vector<Card>& cards) const {
   std::string repr;
   repr.append("[");
   for (size_t i = 0; i < cards.size(); i++) {
