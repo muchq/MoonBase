@@ -2,10 +2,11 @@
 
 #include <vector>
 
+#include "cpp/futility/base64/base64.h"
 #include "cpp/png_plusplus/png_plusplus.h"
-#include "cpp/portrait/base64.h"
 
 namespace portrait {
+using futility::base64::Base64;
 using image_core::Image;
 using image_core::RGB_Double;
 using std::vector;
@@ -88,9 +89,9 @@ tracy::LightType TracerService::tracify(const LightType& lightType) {
   return static_cast<tracy::LightType>(lightType);
 }
 
-std::string TracerService::imageToBase64(Image<RGB_Double>& image) {
+std::string TracerService::imageToBase64(const Image<RGB_Double>& image) {
   const std::vector<unsigned char> png_bytes = pngpp::imageToPng(image);
-  return pngToBase64(png_bytes);
+  return Base64::encode(png_bytes);
 }
 
 TraceResponse TracerService::toResponse(const Output& output, std::string& base64) {

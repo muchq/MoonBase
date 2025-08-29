@@ -27,33 +27,13 @@ cc_test(
 )
 
 cc_library(
-    name = "base64",
-    srcs = ["base64.cc"],
-    hdrs = ["base64.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "@com_google_absl//absl/strings",
-    ],
-)
-
-cc_test(
-    name = "base64_test",
-    size = "small",
-    srcs = ["base64_test.cc"],
-    deps = [
-        ":base64",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_library(
     name = "tracer_service",
     srcs = ["tracer_service.cc"],
     hdrs = ["tracer_service.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":base64",
         ":types",
+        "//cpp/futility/base64",
         "//cpp/futility/cache",
         "//cpp/image_core",
         "//cpp/png_plusplus",
