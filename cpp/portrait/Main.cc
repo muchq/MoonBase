@@ -14,7 +14,7 @@ using namespace portrait;
 
 template <typename REQ, typename RESP>
 std::function<HttpResponse(HttpRequest)> wrap(std::function<absl::StatusOr<RESP>(REQ)> handler) {
-  return [&handler](const HttpRequest &req) -> HttpResponse {
+  return [&handler](const HttpRequest& req) -> HttpResponse {
     absl::StatusOr<REQ> status_or_request = requests::read_request<REQ>(req);
     if (!status_or_request.ok()) {
       return responses::bad_request(
@@ -34,8 +34,11 @@ int main() {
   TracerService tracer_service;
 
   // ray tracing endpoint
-  server.post("/v1/trace", wrap<TraceRequest, TraceResponse>(
-      [&tracer_service](TraceRequest req) { return tracer_service.trace(req); }));
+  server.post("/v1/trace",
+              wrap<TraceRequest, TraceResponse>(
+                  [&tracer_service](TraceRequest req) -> absl::StatusOr<TraceResponse> {
+                    return tracer_service.trace(req);
+                  }));
 
   server.enable_health_checks();
   server.enable_tracing();
