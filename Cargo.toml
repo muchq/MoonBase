@@ -18,13 +18,13 @@ readme = "README.md"
 
 [workspace.dependencies]
 base64ct = { version = "1.8.0", features = ["alloc"] }
-clap = { version = "4.5.45", features = ["cargo"] }
+clap = { version = "4.5.46", features = ["cargo"] }
 doc_db_proto = { path = "protos/doc_db" }
 dotenv = "0.15.0"
 example_service = { path = "protos/example_service" }
 futures = "0.3.31"
 log = "0.4.27"
-mongodb = "3.2.4"
+mongodb = "3.2.5"
 prost = { version = "0.13.5" }
 prost-types = { version = "0.13.5", default-features = false }
 protoc-gen-tonic = "0.4.1"
