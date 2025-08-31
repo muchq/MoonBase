@@ -1360,7 +1360,7 @@
     "@@googleapis+//:extensions.bzl%switched_rules": {
       "general": {
         "bzlTransitiveDigest": "JLpojYeGHLdgnwSUuQWOrtkL9UMygBUUEFJZh7ASlmA=",
-        "usagesDigest": "x4hR/omyebgyJLKxB4vL0zyS2o1RL5MZ74dIrOuB1To=",
+        "usagesDigest": "ZXlTbWi7tZjERT3Ymi3D2JhNsPHlGHXNn9QIqlrl7cE=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
