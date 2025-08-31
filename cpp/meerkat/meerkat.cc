@@ -4,16 +4,17 @@
 #include <climits>
 #include <cstdlib>
 #include <cstring>
-#include <iostream>
 #include <random>
 #include <sstream>
 #include <string>
 
 #include "absl/log/log.h"
+#include "cpp/futility/rate_limiter/sliding_window_rate_limiter.h"
 
 namespace meerkat {
 // TODO: move this header name to some language neutral config format for cross-project sharing
 const std::string TRACE_ID_HEADER_NAME{"x-trace-id"};
+const std::string X_FORWARDED_FOR{"X-Forwarded-For"};
 
 uint16_t read_port(const uint16_t default_port) {
   if (const char* env_p = std::getenv("PORT")) {
@@ -29,6 +30,8 @@ HttpServer::HttpServer()
       listen_port_(0),
       should_listen_(false),
       cors_enabled_(false) {
+  // Disable mongoose verbose logging (default is MG_LL_INFO)
+  mg_log_set(MG_LL_ERROR);
   mg_mgr_init(&mgr_);
 }
 
@@ -115,6 +118,7 @@ void HttpServer::poll(int timeout_ms) {
 void HttpServer::run() {
   // Initialize mongoose in the polling thread to avoid thread safety issues
   if (should_listen_ && !mgr_initialized_) {
+    mg_log_set(MG_LL_ERROR);
     mg_mgr_init(&mgr_);
     mgr_initialized_ = true;
 
@@ -509,6 +513,13 @@ HttpResponse not_found(const std::string& message) {
   return response;
 }
 
+HttpResponse too_many_requests(const std::string& message) {
+  HttpResponse response;
+  response.status_code = 429;
+  response.set_json(json{{"error", message}});
+  return response;
+}
+
 HttpResponse internal_error(const std::string& message) {
   HttpResponse response;
   response.status_code = 500;
@@ -537,6 +548,21 @@ RequestInterceptor trace_id() {
     return true;
   };
 }
+
+using futility::rate_limiter::SlidingWindowRateLimiter;
+
+RequestInterceptor rate_limiter(
+    std::shared_ptr<SlidingWindowRateLimiter<std::string>> ip_rate_limiter) {
+  return [ip_rate_limiter](HttpRequest& req, HttpResponse& res) -> bool {
+    auto ip_address = req.headers[X_FORWARDED_FOR];
+    if (!ip_rate_limiter->allow(ip_address, 1)) {
+        res.status_code = 429;
+        res.set_json(json{{"error", "Too many requests"}});
+        return false;
+    }
+    return true;
+  };
+}
 }  // namespace request
 
 namespace response {
@@ -558,7 +584,12 @@ ResponseInterceptor logging() {
     auto duration =
         std::chrono::duration_cast<std::chrono::milliseconds>(end_time - req.start_time);
 
-    LOG(INFO) << "[" << req.method << " " << req.uri << "]: trace_id=" << trace_id
+    std::string ip_address;
+    if (req.headers.contains(X_FORWARDED_FOR)) {
+      ip_address = req.headers.at(TRACE_ID_HEADER_NAME);
+    }
+
+    LOG(INFO) << "[" << req.method << " " << req.uri << "]: X-Forwarded-For=" << ip_address << " trace_id=" << trace_id
               << " status=" << res.status_code << " res.body.bytes=" << res.body.size()
               << " duration_ms=" << duration.count();
   };

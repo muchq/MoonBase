@@ -1,5 +1,5 @@
-#ifndef CPP_FUTILITY_RESILIENCE_RATE_LIMITER_H
-#define CPP_FUTILITY_RESILIENCE_RATE_LIMITER_H
+#ifndef CPP_FUTILITY_RATE_LIMITER_SLIDING_WINDOW_RATE_LIMITER_H
+#define CPP_FUTILITY_RATE_LIMITER_SLIDING_WINDOW_RATE_LIMITER_H
 
 #include <algorithm>
 #include <chrono>
@@ -11,7 +11,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace futility::resilience {
+namespace futility::rate_limiter {
 struct WindowState {
   std::mutex mutex;
   long previous_count{0};
@@ -158,6 +158,6 @@ class SlidingWindowRateLimiter {
   typename Clock::time_point last_cleanup_;
 };
 
-}  // namespace futility::resilience
+}  // namespace futility::rate_limiter
 
 #endif

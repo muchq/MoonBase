@@ -198,6 +198,7 @@ HttpResponse ok(const json& data = json::object());
 HttpResponse created(const json& data = json::object());
 HttpResponse bad_request(const std::string& message = "Bad Request");
 HttpResponse not_found(const std::string& message = "Not Found");
+HttpResponse too_many_requests(const std::string& message = "Too Many Requests");
 HttpResponse internal_error(const std::string& message = "Internal Server Error");
 }  // namespace responses
 
@@ -212,7 +213,8 @@ void close(struct mg_connection* c, int code = 1000, const std::string& reason =
 namespace interceptors {
 namespace request {
 RequestInterceptor trace_id();
-}
+RequestInterceptor rate_limiter();
+}  // namespace request
 namespace response {
 ResponseInterceptor trace_id_header();
 ResponseInterceptor logging();

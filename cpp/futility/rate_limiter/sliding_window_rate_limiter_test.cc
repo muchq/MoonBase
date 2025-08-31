@@ -1,4 +1,4 @@
-#include "cpp/futility/resilience/rate_limiter.h"
+#include "cpp/futility/rate_limiter/sliding_window_rate_limiter.h"
 
 #include <gtest/gtest.h>
 
@@ -8,7 +8,7 @@
 #include <thread>
 #include <vector>
 
-namespace futility::resilience {
+namespace futility::rate_limiter {
 
 // MockClock for predictable testing
 class MockClock {
@@ -567,4 +567,4 @@ TEST_F(SlidingWindowRateLimiterTest, WindowSlidingExactBoundaries) {
   EXPECT_FALSE(limiter.allow("key1"));
 }
 
-}  // namespace futility::resilience
+}  // namespace futility::rate_limiter

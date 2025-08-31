@@ -1,0 +1,39 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+cc_library(
+    name = "token_bucket_rate_limiter",
+    srcs = [],
+    hdrs = ["token_bucket_rate_limiter.h"],
+    visibility = ["//visibility:public"],
+    deps = [],
+)
+
+cc_test(
+    name = "token_bucket_rate_limiter_test",
+    size = "small",
+    srcs = ["token_bucket_rate_limiter_test.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":token_bucket_rate_limiter",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "sliding_window_rate_limiter",
+    srcs = [],
+    hdrs = ["sliding_window_rate_limiter.h"],
+    visibility = ["//visibility:public"],
+    deps = [],
+)
+
+cc_test(
+    name = "sliding_window_rate_limiter_test",
+    size = "small",
+    srcs = ["sliding_window_rate_limiter_test.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":sliding_window_rate_limiter",
+        "@googletest//:gtest_main",
+    ],
+)
