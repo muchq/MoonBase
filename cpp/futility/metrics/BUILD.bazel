@@ -23,10 +23,10 @@ cc_library(
 
 cc_library(
     name = "mock_clock",
+    testonly = True,
     srcs = [],
     hdrs = ["mock_clock.h"],
     visibility = ["//visibility:public"],
-    testonly = True,
     deps = [],
 )
 
@@ -36,8 +36,8 @@ cc_library(
     hdrs = ["latency_histogram.h"],
     visibility = ["//visibility:public"],
     deps = [
-        "@hdrhistogram_c//:hdrhistogram_c",
         "@com_google_absl//absl/synchronization",
+        "@hdrhistogram_c",
     ],
 )
 
@@ -47,8 +47,8 @@ cc_library(
     hdrs = ["metrics_service.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":sliding_window",
         ":latency_histogram",
+        ":sliding_window",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
@@ -60,8 +60,8 @@ cc_test(
     size = "small",
     srcs = ["time_bucket_test.cc"],
     deps = [
-        ":time_bucket",
         ":mock_clock",
+        ":time_bucket",
         "@googletest//:gtest_main",
     ],
 )
@@ -71,8 +71,8 @@ cc_test(
     size = "small",
     srcs = ["sliding_window_test.cc"],
     deps = [
-        ":sliding_window",
         ":mock_clock",
+        ":sliding_window",
         "@googletest//:gtest_main",
     ],
 )
