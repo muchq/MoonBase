@@ -579,7 +579,7 @@ ResponseInterceptor logging() {
 
     std::string ip_address;
     if (req.headers.contains(X_FORWARDED_FOR)) {
-      ip_address = req.headers.at(TRACE_ID_HEADER_NAME);
+      ip_address = req.headers.at(X_FORWARDED_FOR);
     }
 
     LOG(INFO) << "[" << req.method << " " << req.uri << "]: X-Forwarded-For=" << ip_address
