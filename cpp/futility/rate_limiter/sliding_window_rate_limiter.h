@@ -1,5 +1,5 @@
-#ifndef CPP_FUTILITY_RESILIENCE_RATE_LIMITER_H
-#define CPP_FUTILITY_RESILIENCE_RATE_LIMITER_H
+#ifndef CPP_FUTILITY_RATE_LIMITER_SLIDING_WINDOW_RATE_LIMITER_H
+#define CPP_FUTILITY_RATE_LIMITER_SLIDING_WINDOW_RATE_LIMITER_H
 
 #include <algorithm>
 #include <chrono>
@@ -11,7 +11,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace futility::resilience {
+namespace futility::rate_limiter {
 struct WindowState {
   std::mutex mutex;
   long previous_count{0};
@@ -22,33 +22,37 @@ struct WindowState {
   WindowState(std::chrono::steady_clock::time_point now) : window_start(now), last_access(now) {}
 };
 
+struct SlidingWindowRateLimiterConfig {
+  long max_requests_per_key;
+  std::chrono::milliseconds window_size;
+  std::chrono::milliseconds ttl = std::chrono::minutes(5);
+  std::chrono::milliseconds cleanup_interval = std::chrono::seconds(30);
+  std::optional<size_t> max_keys = std::nullopt;
+};
+
 template <typename Key, typename Clock = std::chrono::steady_clock>
 class SlidingWindowRateLimiter {
  public:
-  explicit SlidingWindowRateLimiter(
-      long max_requests_per_key, std::chrono::milliseconds window_size,
-      std::chrono::milliseconds ttl = std::chrono::minutes(5),
-      std::chrono::milliseconds cleanup_interval = std::chrono::seconds(30),
-      std::optional<size_t> max_keys = std::nullopt)
-      : max_requests_per_key_(max_requests_per_key),
-        window_size_(window_size),
-        cleanup_interval_(cleanup_interval),
-        ttl_(ttl),
-        max_keys_(max_keys),
+  explicit SlidingWindowRateLimiter(const SlidingWindowRateLimiterConfig& config)
+      : max_requests_per_key_(config.max_requests_per_key),
+        window_size_(config.window_size),
+        cleanup_interval_(config.cleanup_interval),
+        ttl_(config.ttl),
+        max_keys_(config.max_keys),
         last_cleanup_(Clock::now()) {
-    if (max_requests_per_key <= 0) {
+    if (config.max_requests_per_key <= 0) {
       throw std::invalid_argument("max_requests_per_key must be positive");
     }
-    if (window_size <= std::chrono::milliseconds::zero()) {
+    if (config.window_size <= std::chrono::milliseconds::zero()) {
       throw std::invalid_argument("window_size must be positive");
     }
-    if (ttl <= std::chrono::milliseconds::zero()) {
+    if (config.ttl <= std::chrono::milliseconds::zero()) {
       throw std::invalid_argument("ttl must be positive");
     }
-    if (cleanup_interval <= std::chrono::milliseconds::zero()) {
+    if (config.cleanup_interval <= std::chrono::milliseconds::zero()) {
       throw std::invalid_argument("cleanup_interval must be positive");
     }
-    if (max_keys && *max_keys == 0) {
+    if (config.max_keys && *config.max_keys == 0) {
       throw std::invalid_argument("max_keys must be positive if specified");
     }
   }
@@ -158,6 +162,6 @@ class SlidingWindowRateLimiter {
   typename Clock::time_point last_cleanup_;
 };
 
-}  // namespace futility::resilience
+}  // namespace futility::rate_limiter
 
 #endif

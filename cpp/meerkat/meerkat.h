@@ -10,6 +10,7 @@
 
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "cpp/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "mongoose.h"
 #include "nlohmann/json.hpp"
 
@@ -198,6 +199,7 @@ HttpResponse ok(const json& data = json::object());
 HttpResponse created(const json& data = json::object());
 HttpResponse bad_request(const std::string& message = "Bad Request");
 HttpResponse not_found(const std::string& message = "Not Found");
+HttpResponse too_many_requests(const std::string& message = "Too Many Requests");
 HttpResponse internal_error(const std::string& message = "Internal Server Error");
 }  // namespace responses
 
@@ -212,7 +214,9 @@ void close(struct mg_connection* c, int code = 1000, const std::string& reason =
 namespace interceptors {
 namespace request {
 RequestInterceptor trace_id();
-}
+RequestInterceptor rate_limiter(
+    std::shared_ptr<futility::rate_limiter::SlidingWindowRateLimiter<std::string>> ip_rate_limiter);
+}  // namespace request
 namespace response {
 ResponseInterceptor trace_id_header();
 ResponseInterceptor logging();

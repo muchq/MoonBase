@@ -1,4 +1,4 @@
-#include "cpp/futility/resilience/rate_limiter.h"
+#include "cpp/futility/rate_limiter/sliding_window_rate_limiter.h"
 
 #include <gtest/gtest.h>
 
@@ -8,7 +8,7 @@
 #include <thread>
 #include <vector>
 
-namespace futility::resilience {
+namespace futility::rate_limiter {
 
 // MockClock for predictable testing
 class MockClock {
@@ -48,7 +48,8 @@ class SlidingWindowRateLimiterTest : public ::testing::Test {
 };
 
 TEST_F(SlidingWindowRateLimiterTest, BasicRateLimitingAllowsWithinLimit) {
-  SlidingWindowRateLimiter<std::string> limiter(max_requests, window_size, ttl, cleanup_interval);
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, ttl, cleanup_interval};
+  SlidingWindowRateLimiter<std::string> limiter(config);
   std::string key = "test_key";
 
   // Should allow all requests within the limit
@@ -58,7 +59,8 @@ TEST_F(SlidingWindowRateLimiterTest, BasicRateLimitingAllowsWithinLimit) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, BasicRateLimitingRejectsOverLimit) {
-  SlidingWindowRateLimiter<std::string> limiter(max_requests, window_size, ttl, cleanup_interval);
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, ttl, cleanup_interval};
+  SlidingWindowRateLimiter<std::string> limiter(config);
   std::string key = "test_key";
 
   // Fill up to the limit
@@ -71,8 +73,9 @@ TEST_F(SlidingWindowRateLimiterTest, BasicRateLimitingRejectsOverLimit) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, SlidingWindowResetsAfterWindowSize) {
-  SlidingWindowRateLimiter<std::string> limiter(max_requests, std::chrono::milliseconds(100), ttl,
-                                                cleanup_interval);
+  SlidingWindowRateLimiterConfig config{max_requests, std::chrono::milliseconds(100), ttl,
+                                        cleanup_interval};
+  SlidingWindowRateLimiter<std::string> limiter(config);
   std::string key = "test_key";
 
   // Fill up to the limit
@@ -91,8 +94,9 @@ TEST_F(SlidingWindowRateLimiterTest, SlidingWindowResetsAfterWindowSize) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, SlidingWindowGradualTransition) {
-  SlidingWindowRateLimiter<std::string> limiter(max_requests, std::chrono::milliseconds(200), ttl,
-                                                cleanup_interval);
+  SlidingWindowRateLimiterConfig config{max_requests, std::chrono::milliseconds(200), ttl,
+                                        cleanup_interval};
+  SlidingWindowRateLimiter<std::string> limiter(config);
   std::string key = "test_key";
 
   // Fill up to the limit
@@ -117,7 +121,8 @@ TEST_F(SlidingWindowRateLimiterTest, SlidingWindowGradualTransition) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, MultipleKeysIndependent) {
-  SlidingWindowRateLimiter<std::string> limiter(max_requests, window_size, ttl, cleanup_interval);
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, ttl, cleanup_interval};
+  SlidingWindowRateLimiter<std::string> limiter(config);
   std::string key1 = "key1";
   std::string key2 = "key2";
 
@@ -139,7 +144,8 @@ TEST_F(SlidingWindowRateLimiterTest, MultipleKeysIndependent) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, CostParameterBasicFunctionality) {
-  SlidingWindowRateLimiter<std::string> limiter(10, window_size, ttl, cleanup_interval);
+  SlidingWindowRateLimiterConfig config{10, window_size, ttl, cleanup_interval};
+  SlidingWindowRateLimiter<std::string> limiter(config);
   std::string key = "test_key";
 
   // Use cost of 3, should allow 3 requests (3*3 = 9 < 10)
@@ -152,7 +158,8 @@ TEST_F(SlidingWindowRateLimiterTest, CostParameterBasicFunctionality) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, CostParameterMixedCosts) {
-  SlidingWindowRateLimiter<std::string> limiter(10, window_size, ttl, cleanup_interval);
+  SlidingWindowRateLimiterConfig config{10, window_size, ttl, cleanup_interval};
+  SlidingWindowRateLimiter<std::string> limiter(config);
   std::string key = "test_key";
 
   EXPECT_TRUE(limiter.allow(key, 5));  // Total: 5
@@ -165,7 +172,8 @@ TEST_F(SlidingWindowRateLimiterTest, CostParameterMixedCosts) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, CostParameterLargeSingleRequest) {
-  SlidingWindowRateLimiter<std::string> limiter(10, window_size, ttl, cleanup_interval);
+  SlidingWindowRateLimiterConfig config{10, window_size, ttl, cleanup_interval};
+  SlidingWindowRateLimiter<std::string> limiter(config);
   std::string key = "test_key";
 
   // Large single request that exceeds limit
@@ -176,10 +184,9 @@ TEST_F(SlidingWindowRateLimiterTest, CostParameterLargeSingleRequest) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, CleanupRemovesExpiredKeys) {
-  SlidingWindowRateLimiter<std::string> limiter(
-      max_requests, window_size,
-      std::chrono::milliseconds(50),   // Short TTL
-      std::chrono::milliseconds(10));  // Short cleanup interval
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, std::chrono::milliseconds(50),
+                                        std::chrono::milliseconds(10)};
+  SlidingWindowRateLimiter<std::string> limiter(config);
   std::string key = "test_key";
 
   // Make some requests
@@ -199,9 +206,9 @@ TEST_F(SlidingWindowRateLimiterTest, CleanupRemovesExpiredKeys) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, CleanupRespectCleanupInterval) {
-  SlidingWindowRateLimiter<std::string> limiter(max_requests, window_size,
-                                                std::chrono::milliseconds(50),  // Short TTL
-                                                std::chrono::seconds(10));  // Long cleanup interval
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, std::chrono::milliseconds(50),
+                                        std::chrono::seconds(10)};
+  SlidingWindowRateLimiter<std::string> limiter(config);
   std::string key1 = "key1";
   std::string key2 = "key2";
 
@@ -219,8 +226,9 @@ TEST_F(SlidingWindowRateLimiterTest, CleanupRespectCleanupInterval) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, ConcurrentAccess) {
-  SlidingWindowRateLimiter<std::string> limiter(100, std::chrono::milliseconds(1000), ttl,
-                                                cleanup_interval);
+  SlidingWindowRateLimiterConfig config{100, std::chrono::milliseconds(1000), ttl,
+                                        cleanup_interval};
+  SlidingWindowRateLimiter<std::string> limiter(config);
   std::string key = "concurrent_key";
 
   const int num_threads = 10;
@@ -252,8 +260,8 @@ TEST_F(SlidingWindowRateLimiterTest, ConcurrentAccess) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, ConcurrentAccessMultipleKeys) {
-  SlidingWindowRateLimiter<std::string> limiter(20, std::chrono::milliseconds(1000), ttl,
-                                                cleanup_interval);
+  SlidingWindowRateLimiterConfig config{20, std::chrono::milliseconds(1000), ttl, cleanup_interval};
+  SlidingWindowRateLimiter<std::string> limiter(config);
 
   const int num_keys = 5;
   const int num_threads_per_key = 4;
@@ -293,7 +301,8 @@ TEST_F(SlidingWindowRateLimiterTest, ConcurrentAccessMultipleKeys) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, EdgeCaseZeroCost) {
-  SlidingWindowRateLimiter<std::string> limiter(max_requests, window_size, ttl, cleanup_interval);
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, ttl, cleanup_interval};
+  SlidingWindowRateLimiter<std::string> limiter(config);
   std::string key = "test_key";
 
   // Zero cost should always be allowed and not consume quota
@@ -310,7 +319,8 @@ TEST_F(SlidingWindowRateLimiterTest, EdgeCaseZeroCost) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, EdgeCaseNegativeCost) {
-  SlidingWindowRateLimiter<std::string> limiter(max_requests, window_size, ttl, cleanup_interval);
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, ttl, cleanup_interval};
+  SlidingWindowRateLimiter<std::string> limiter(config);
   std::string key = "test_key";
 
   // Fill up to limit
@@ -331,7 +341,8 @@ TEST_F(SlidingWindowRateLimiterTest, EdgeCaseNegativeCost) {
 
 TEST_F(SlidingWindowRateLimiterTest, DifferentKeyTypes) {
   // Test with integer keys
-  SlidingWindowRateLimiter<int> int_limiter(max_requests, window_size, ttl, cleanup_interval);
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, ttl, cleanup_interval};
+  SlidingWindowRateLimiter<int> int_limiter(config);
 
   for (int i = 0; i < max_requests; ++i) {
     EXPECT_TRUE(int_limiter.allow(42));
@@ -344,8 +355,8 @@ TEST_F(SlidingWindowRateLimiterTest, DifferentKeyTypes) {
 
 TEST_F(SlidingWindowRateLimiterTest, WeightedCountCalculation) {
   // Use MockClock for predictable timing
-  SlidingWindowRateLimiter<std::string, MockClock> limiter(10, std::chrono::milliseconds(400), ttl,
-                                                           cleanup_interval);
+  SlidingWindowRateLimiterConfig config{10, std::chrono::milliseconds(400), ttl, cleanup_interval};
+  SlidingWindowRateLimiter<std::string, MockClock> limiter(config);
   std::string key = "test_key";
 
   // Reset mock clock to a known time
@@ -395,57 +406,57 @@ TEST_F(SlidingWindowRateLimiterTest, WeightedCountCalculation) {
 // Tests for new functionality added by improvements
 
 TEST_F(SlidingWindowRateLimiterTest, ConstructorBoundsCheckingInvalidMaxRequests) {
-  EXPECT_THROW(SlidingWindowRateLimiter<std::string>(0, window_size, ttl, cleanup_interval),
-               std::invalid_argument);
-  EXPECT_THROW(SlidingWindowRateLimiter<std::string>(-1, window_size, ttl, cleanup_interval),
-               std::invalid_argument);
+  SlidingWindowRateLimiterConfig config1{0, window_size, ttl, cleanup_interval};
+  EXPECT_THROW((SlidingWindowRateLimiter<std::string>(config1)), std::invalid_argument);
+  SlidingWindowRateLimiterConfig config2{-1, window_size, ttl, cleanup_interval};
+  EXPECT_THROW((SlidingWindowRateLimiter<std::string>(config2)), std::invalid_argument);
 }
 
 TEST_F(SlidingWindowRateLimiterTest, ConstructorBoundsCheckingInvalidWindowSize) {
-  EXPECT_THROW(SlidingWindowRateLimiter<std::string>(max_requests, std::chrono::milliseconds(0),
-                                                     ttl, cleanup_interval),
-               std::invalid_argument);
-  EXPECT_THROW(SlidingWindowRateLimiter<std::string>(max_requests, std::chrono::milliseconds(-1),
-                                                     ttl, cleanup_interval),
-               std::invalid_argument);
+  SlidingWindowRateLimiterConfig config1{max_requests, std::chrono::milliseconds(0), ttl,
+                                         cleanup_interval};
+  EXPECT_THROW((SlidingWindowRateLimiter<std::string>(config1)), std::invalid_argument);
+  SlidingWindowRateLimiterConfig config2{max_requests, std::chrono::milliseconds(-1), ttl,
+                                         cleanup_interval};
+  EXPECT_THROW((SlidingWindowRateLimiter<std::string>(config2)), std::invalid_argument);
 }
 
 TEST_F(SlidingWindowRateLimiterTest, ConstructorBoundsCheckingInvalidTTL) {
-  EXPECT_THROW(SlidingWindowRateLimiter<std::string>(
-                   max_requests, window_size, std::chrono::milliseconds(0), cleanup_interval),
-               std::invalid_argument);
-  EXPECT_THROW(SlidingWindowRateLimiter<std::string>(
-                   max_requests, window_size, std::chrono::milliseconds(-1), cleanup_interval),
-               std::invalid_argument);
+  SlidingWindowRateLimiterConfig config1{max_requests, window_size, std::chrono::milliseconds(0),
+                                         cleanup_interval};
+  EXPECT_THROW((SlidingWindowRateLimiter<std::string>(config1)), std::invalid_argument);
+  SlidingWindowRateLimiterConfig config2{max_requests, window_size, std::chrono::milliseconds(-1),
+                                         cleanup_interval};
+  EXPECT_THROW((SlidingWindowRateLimiter<std::string>(config2)), std::invalid_argument);
 }
 
 TEST_F(SlidingWindowRateLimiterTest, ConstructorBoundsCheckingInvalidCleanupInterval) {
-  EXPECT_THROW(SlidingWindowRateLimiter<std::string>(max_requests, window_size, ttl,
-                                                     std::chrono::milliseconds(0)),
-               std::invalid_argument);
-  EXPECT_THROW(SlidingWindowRateLimiter<std::string>(max_requests, window_size, ttl,
-                                                     std::chrono::milliseconds(-1)),
-               std::invalid_argument);
+  SlidingWindowRateLimiterConfig config1{max_requests, window_size, ttl,
+                                         std::chrono::milliseconds(0)};
+  EXPECT_THROW((SlidingWindowRateLimiter<std::string>(config1)), std::invalid_argument);
+  SlidingWindowRateLimiterConfig config2{max_requests, window_size, ttl,
+                                         std::chrono::milliseconds(-1)};
+  EXPECT_THROW((SlidingWindowRateLimiter<std::string>(config2)), std::invalid_argument);
 }
 
 TEST_F(SlidingWindowRateLimiterTest, ConstructorBoundsCheckingInvalidMaxKeys) {
-  EXPECT_THROW(
-      SlidingWindowRateLimiter<std::string>(max_requests, window_size, ttl, cleanup_interval, 0),
-      std::invalid_argument);
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, ttl, cleanup_interval, 0};
+  EXPECT_THROW((SlidingWindowRateLimiter<std::string>(config)), std::invalid_argument);
 }
 
 TEST_F(SlidingWindowRateLimiterTest, ConstructorValidParameters) {
-  EXPECT_NO_THROW(
-      SlidingWindowRateLimiter<std::string>(max_requests, window_size, ttl, cleanup_interval));
-  EXPECT_NO_THROW(
-      SlidingWindowRateLimiter<std::string>(max_requests, window_size, ttl, cleanup_interval, 10));
-  EXPECT_NO_THROW(SlidingWindowRateLimiter<std::string>(max_requests, window_size, ttl,
-                                                        cleanup_interval, std::nullopt));
+  SlidingWindowRateLimiterConfig config1{max_requests, window_size, ttl, cleanup_interval};
+  EXPECT_NO_THROW((SlidingWindowRateLimiter<std::string>(config1)));
+  SlidingWindowRateLimiterConfig config2{max_requests, window_size, ttl, cleanup_interval, 10};
+  EXPECT_NO_THROW((SlidingWindowRateLimiter<std::string>(config2)));
+  SlidingWindowRateLimiterConfig config3{max_requests, window_size, ttl, cleanup_interval,
+                                         std::nullopt};
+  EXPECT_NO_THROW((SlidingWindowRateLimiter<std::string>(config3)));
 }
 
 TEST_F(SlidingWindowRateLimiterTest, MaxKeysLimitBasicFunctionality) {
-  SlidingWindowRateLimiter<std::string> limiter(max_requests, window_size, ttl, cleanup_interval,
-                                                2);
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, ttl, cleanup_interval, 2};
+  SlidingWindowRateLimiter<std::string> limiter(config);
 
   // First two keys should work
   EXPECT_TRUE(limiter.allow("key1"));
@@ -460,7 +471,8 @@ TEST_F(SlidingWindowRateLimiterTest, MaxKeysLimitBasicFunctionality) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, MaxKeysLimitWithNoLimit) {
-  SlidingWindowRateLimiter<std::string> limiter(max_requests, window_size, ttl, cleanup_interval);
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, ttl, cleanup_interval};
+  SlidingWindowRateLimiter<std::string> limiter(config);
 
   // Should allow many keys without limit
   for (int i = 0; i < 50; ++i) {
@@ -469,11 +481,9 @@ TEST_F(SlidingWindowRateLimiterTest, MaxKeysLimitWithNoLimit) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, MaxKeysLimitInteractsWithCleanup) {
-  SlidingWindowRateLimiter<std::string> limiter(
-      max_requests, window_size,
-      std::chrono::milliseconds(50),  // Short TTL
-      std::chrono::milliseconds(10),  // Short cleanup interval
-      2);                             // Max 2 keys
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, std::chrono::milliseconds(50),
+                                        std::chrono::milliseconds(10), 2};
+  SlidingWindowRateLimiter<std::string> limiter(config);
 
   // Fill up to max keys
   EXPECT_TRUE(limiter.allow("key1"));
@@ -490,8 +500,8 @@ TEST_F(SlidingWindowRateLimiterTest, MaxKeysLimitInteractsWithCleanup) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, WindowSlidingLongIdlePeriodMockClock) {
-  SlidingWindowRateLimiter<std::string, MockClock> limiter(5, std::chrono::milliseconds(100), ttl,
-                                                           cleanup_interval);
+  SlidingWindowRateLimiterConfig config{5, std::chrono::milliseconds(100), ttl, cleanup_interval};
+  SlidingWindowRateLimiter<std::string, MockClock> limiter(config);
 
   auto start_time = std::chrono::steady_clock::now();
   MockClock::set_time(start_time);
@@ -514,8 +524,8 @@ TEST_F(SlidingWindowRateLimiterTest, WindowSlidingLongIdlePeriodMockClock) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, WindowSlidingNormalSlideMockClock) {
-  SlidingWindowRateLimiter<std::string, MockClock> limiter(5, std::chrono::milliseconds(100), ttl,
-                                                           cleanup_interval);
+  SlidingWindowRateLimiterConfig config{5, std::chrono::milliseconds(100), ttl, cleanup_interval};
+  SlidingWindowRateLimiter<std::string, MockClock> limiter(config);
 
   auto start_time = std::chrono::steady_clock::now();
   MockClock::set_time(start_time);
@@ -542,8 +552,8 @@ TEST_F(SlidingWindowRateLimiterTest, WindowSlidingNormalSlideMockClock) {
 }
 
 TEST_F(SlidingWindowRateLimiterTest, WindowSlidingExactBoundaries) {
-  SlidingWindowRateLimiter<std::string, MockClock> limiter(5, std::chrono::milliseconds(100), ttl,
-                                                           cleanup_interval);
+  SlidingWindowRateLimiterConfig config{5, std::chrono::milliseconds(100), ttl, cleanup_interval};
+  SlidingWindowRateLimiter<std::string, MockClock> limiter(config);
 
   auto start_time = std::chrono::steady_clock::now();
   MockClock::set_time(start_time);
@@ -567,4 +577,4 @@ TEST_F(SlidingWindowRateLimiterTest, WindowSlidingExactBoundaries) {
   EXPECT_FALSE(limiter.allow("key1"));
 }
 
-}  // namespace futility::resilience
+}  // namespace futility::rate_limiter

@@ -6,6 +6,7 @@ cc_library(
     hdrs = ["meerkat.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "//cpp/futility/rate_limiter:sliding_window_rate_limiter",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
