@@ -208,6 +208,8 @@ void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message*
     return;
   }
 
+  bool process_request = true;
+
   // Apply middleware
   for (const auto& request_interceptor : request_interceptors_) {
     if (!request_interceptor(request, response)) {
@@ -215,24 +217,15 @@ void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message*
       if (cors_enabled_) {
         add_cors_headers(response, request);
       }
-      send_response(c, response);
-      return;
+      process_request = false;
+      break;
     }
   }
 
-  // Check for static file serving
-  for (const auto& [prefix, directory] : static_paths_) {
-    if (request.uri.starts_with(prefix)) {
-      std::string file_path = directory + request.uri.substr(prefix.length());
-      mg_http_serve_file(c, hm, file_path.c_str(), nullptr);
-      return;
-    }
-  }
-
-  // Find route handler
+  // TODO: validate mime-type
   RouteHandler* handler = find_handler(request.method, request.uri);
 
-  if (handler) {
+  if (process_request && handler) {
     try {
       response = (*handler)(request);
     } catch (const std::exception& e) {
@@ -240,7 +233,7 @@ void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message*
     } catch (...) {
       response = responses::internal_error("Unknown error occurred");
     }
-  } else {
+  } else if (process_request) {
     response = responses::not_found();
   }
 
