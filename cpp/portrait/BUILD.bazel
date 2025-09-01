@@ -35,6 +35,7 @@ cc_library(
         ":types",
         "//cpp/futility/base64",
         "//cpp/futility/cache",
+        "//cpp/futility/rate_limiter:sliding_window_rate_limiter",
         "//cpp/image_core",
         "//cpp/png_plusplus",
         "//cpp/tracy",

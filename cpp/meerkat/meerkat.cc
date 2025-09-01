@@ -556,9 +556,9 @@ RequestInterceptor rate_limiter(
   return [ip_rate_limiter](HttpRequest& req, HttpResponse& res) -> bool {
     auto ip_address = req.headers[X_FORWARDED_FOR];
     if (!ip_rate_limiter->allow(ip_address, 1)) {
-        res.status_code = 429;
-        res.set_json(json{{"error", "Too many requests"}});
-        return false;
+      res.status_code = 429;
+      res.set_json(json{{"error", "Too many requests"}});
+      return false;
     }
     return true;
   };
@@ -589,9 +589,9 @@ ResponseInterceptor logging() {
       ip_address = req.headers.at(TRACE_ID_HEADER_NAME);
     }
 
-    LOG(INFO) << "[" << req.method << " " << req.uri << "]: X-Forwarded-For=" << ip_address << " trace_id=" << trace_id
-              << " status=" << res.status_code << " res.body.bytes=" << res.body.size()
-              << " duration_ms=" << duration.count();
+    LOG(INFO) << "[" << req.method << " " << req.uri << "]: X-Forwarded-For=" << ip_address
+              << " trace_id=" << trace_id << " status=" << res.status_code
+              << " res.body.bytes=" << res.body.size() << " duration_ms=" << duration.count();
   };
 }
 }  // namespace response
