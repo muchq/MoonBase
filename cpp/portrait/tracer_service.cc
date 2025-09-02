@@ -13,49 +13,49 @@ using std::vector;
 
 absl::StatusOr<TraceResponse> TracerService::trace(TraceRequest& trace_request) {
   auto start_time = std::chrono::steady_clock::now();
-  
+
   // Record request counter
   metrics_.RecordCounter("trace_requests_total");
-  
+
   auto validation_status = validateTraceRequest(trace_request);
   if (!validation_status.ok()) {
     metrics_.RecordCounter("trace_requests_failed", 1, {{"error", "validation_failed"}});
     return validation_status;
   }
-  
+
   auto cached_image = cache_.get(trace_request);
   if (cached_image.has_value()) {
     auto b64Png = cached_image.value();
     auto duration = std::chrono::steady_clock::now() - start_time;
-    metrics_.RecordLatency("trace_request_duration", 
-                          std::chrono::duration_cast<std::chrono::microseconds>(duration),
-                          {{"cache_hit", "true"}});
+    metrics_.RecordLatency("trace_request_duration",
+                           std::chrono::duration_cast<std::chrono::microseconds>(duration),
+                           {{"cache_hit", "true"}});
     metrics_.RecordCounter("trace_cache_hits");
     return toResponse(trace_request.output, b64Png);
   }
 
   metrics_.RecordCounter("trace_cache_misses");
-  
+
   try {
     auto [scene, perspective, output] = trace_request;
-    
+
     // Record scene complexity metrics
     metrics_.RecordGauge("scene_sphere_count", static_cast<double>(scene.spheres.size()));
     metrics_.RecordGauge("scene_light_count", static_cast<double>(scene.lights.size()));
-    
+
     auto image = do_trace(scene, perspective, output);
     auto b64Png = imageToBase64(image);
     auto traceResponse = toResponse(output, b64Png);
     cache_.insert(trace_request, std::move(b64Png));
-    
+
     auto duration = std::chrono::steady_clock::now() - start_time;
     metrics_.RecordLatency("trace_request_duration",
-                          std::chrono::duration_cast<std::chrono::microseconds>(duration), 
-                          {{"cache_hit", "false"}});
-    
+                           std::chrono::duration_cast<std::chrono::microseconds>(duration),
+                           {{"cache_hit", "false"}});
+
     metrics_.RecordCounter("trace_requests_completed");
     return traceResponse;
-    
+
   } catch (const std::exception& e) {
     metrics_.RecordCounter("trace_requests_failed", 1, {{"error", "rendering_failed"}});
     throw;

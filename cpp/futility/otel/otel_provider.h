@@ -1,8 +1,8 @@
 #pragma once
 
+#include <chrono>
 #include <memory>
 #include <string>
-#include <chrono>
 
 #include "opentelemetry/metrics/provider.h"
 
@@ -27,4 +27,4 @@ class OtelProvider {
   static bool initialized_;
 };
 
-} // namespace futility::otel
+}  // namespace futility::otel

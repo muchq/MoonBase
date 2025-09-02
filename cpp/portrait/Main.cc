@@ -16,15 +16,13 @@ using namespace portrait;
 int main() {
   absl::InitializeLog();
   absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
-  
+
   // Initialize OpenTelemetry
-  futility::otel::OtelConfig otel_config{
-    .service_name = "portrait",
-    .service_version = "1.0.0",
-    .otlp_endpoint = "http://localhost:4318/v1/metrics"
-  };
+  futility::otel::OtelConfig otel_config{.service_name = "portrait",
+                                         .service_version = "1.0.0",
+                                         .otlp_endpoint = "http://localhost:4318/v1/metrics"};
   futility::otel::OtelProvider::Initialize(otel_config);
-  
+
   LOG(INFO) << "Starting Portrait Server with OpenTelemetry metrics...";
 
   HttpServer server;
