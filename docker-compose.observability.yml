@@ -1,11 +1,10 @@
-version: '3.8'
 services:
   prometheus:
     image: prom/prometheus:v3.5.0
     ports:
       - "9090:9090"
     volumes:
-      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./o11y/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -15,43 +14,37 @@ services:
       - '--storage.tsdb.retention.time=7d'
       - '--storage.tsdb.retention.size=5GB'
       - '--web.enable-lifecycle'
-    depends_on:
-      - otelcol
 
-  grafana:
-    image: grafana/grafana:10.1.0
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./observability/grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ./observability/grafana/datasources:/etc/grafana/provisioning/datasources
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin123
-      - GF_SECURITY_ADMIN_USER=admin
-
-  jaeger:
-    image: jaegertracing/all-in-one:1.49
-    ports:
-      - "14268:14268"  # jaeger.thrift HTTP
-      - "16686:16686"  # UI
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
-      - SPAN_STORAGE_TYPE=memory
+  # grafana:
+  #   image: grafana/grafana:11.2.0
+  #   ports:
+  #     - "3000:3000"
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #     - ./o11y/grafana/dashboards:/etc/grafana/provisioning/dashboards
+  #     - ./o11y/grafana/datasources:/etc/grafana/provisioning/datasources
+  #   environment:
+  #     - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
+  #     - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+  #     - GF_SERVER_ROOT_URL=https://api.muchq.com/grafana/
+  #     - GF_SERVER_SERVE_FROM_SUB_PATH=true
+  #   networks:
+  #     - app_network
 
   otelcol:
-    image: otel/opentelemetry-collector-contrib:0.86.0
+    image: otel/opentelemetry-collector-contrib:0.133.0
     command: ["--config=/etc/otel-collector-config.yml"]
     volumes:
-      - ./observability/otel-collector.yml:/etc/otel-collector-config.yml
+      - ./o11y/otel-collector.yml:/etc/otel-collector-config.yml
     ports:
-      - "4317:4317"   # OTLP gRPC receiver
       - "4318:4318"   # OTLP HTTP receiver
       - "8889:8889"   # Prometheus metrics endpoint
-    depends_on:
-      - prometheus
-      - jaeger
 
 volumes:
   prometheus_data:
   grafana_data:
+
+networks:
+  app_network:
+    external: true
+    name: muchq_network
