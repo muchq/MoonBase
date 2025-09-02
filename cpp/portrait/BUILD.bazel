@@ -35,6 +35,7 @@ cc_library(
         ":types",
         "//cpp/futility/base64",
         "//cpp/futility/cache",
+        "//cpp/futility/otel:metrics",
         "//cpp/futility/rate_limiter:sliding_window_rate_limiter",
         "//cpp/image_core",
         "//cpp/png_plusplus",
@@ -62,6 +63,7 @@ cc_binary(
     deps = [
         ":tracer_service",
         ":types",
+        "//cpp/futility/otel:otel_provider",
         "//cpp/meerkat",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:globals",

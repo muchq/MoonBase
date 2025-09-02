@@ -1,0 +1,26 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "otel_provider",
+    srcs = ["otel_provider.cc"],
+    hdrs = ["otel_provider.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/strings",
+        "@opentelemetry-cpp//api",
+        "@opentelemetry-cpp//exporters/otlp:otlp_http_metric_exporter",
+        "@opentelemetry-cpp//sdk/src/metrics",
+    ],
+)
+
+cc_library(
+    name = "metrics",
+    srcs = ["metrics.cc"],
+    hdrs = ["metrics.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":otel_provider",
+        "@com_google_absl//absl/strings",
+        "@opentelemetry-cpp//api",
+    ],
+)

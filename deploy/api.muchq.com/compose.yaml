@@ -1,4 +1,21 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - /var/log/caddy:/var/log/caddy
+    depends_on:
+      - games_ws_backend
+      - portrait
+    networks:
+      - app_network
+  
   games_ws_backend:
     image: ghcr.io/muchq/games_ws_backend:latest
     restart: always
@@ -6,6 +23,8 @@ services:
       - "8080:8080"
     volumes:
       - /etc/games_ws_backend:/etc/games_ws_backend
+    networks:
+      - app_network
   portrait:
     image: ghcr.io/muchq/portrait:latest
     restart: always
@@ -15,3 +34,14 @@ services:
       - PORT=8081
     volumes:
       - /etc/games_ws_backend:/etc/games_ws_backend
+    networks:
+      - app_network
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  app_network:
+    name: muchq_network
+    driver: bridge

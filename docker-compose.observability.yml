@@ -1,0 +1,50 @@
+services:
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./o11y/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=7d'
+      - '--storage.tsdb.retention.size=5GB'
+      - '--web.enable-lifecycle'
+
+  # grafana:
+  #   image: grafana/grafana:11.2.0
+  #   ports:
+  #     - "3000:3000"
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #     - ./o11y/grafana/dashboards:/etc/grafana/provisioning/dashboards
+  #     - ./o11y/grafana/datasources:/etc/grafana/provisioning/datasources
+  #   environment:
+  #     - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
+  #     - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+  #     - GF_SERVER_ROOT_URL=https://api.muchq.com/grafana/
+  #     - GF_SERVER_SERVE_FROM_SUB_PATH=true
+  #   networks:
+  #     - app_network
+
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:0.133.0
+    command: ["--config=/etc/otel-collector-config.yml"]
+    volumes:
+      - ./o11y/otel-collector.yml:/etc/otel-collector-config.yml
+    ports:
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8889:8889"   # Prometheus metrics endpoint
+
+volumes:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  app_network:
+    external: true
+    name: muchq_network

@@ -1,0 +1,79 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Portrait Service Dashboard",
+    "tags": ["moonbase", "portrait"],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Request Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(trace_requests_total[5m])",
+            "legendFormat": "Requests/sec"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Cache Hit Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(trace_cache_hits[5m]) / (rate(trace_cache_hits[5m]) + rate(trace_cache_misses[5m])) * 100",
+            "legendFormat": "Hit Rate %"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Request Latency",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(trace_request_duration_microseconds_bucket[5m]))",
+            "legendFormat": "95th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(trace_request_duration_microseconds_bucket[5m]))",
+            "legendFormat": "50th percentile"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+        "yAxes": [
+          {
+            "unit": "µs"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Scene Complexity",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "scene_sphere_count_gauge",
+            "legendFormat": "Spheres"
+          },
+          {
+            "expr": "scene_light_count_gauge",
+            "legendFormat": "Lights"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}
+      }
+    ],
+    "time": {
+      "from": "now-5m",
+      "to": "now"
+    },
+    "refresh": "10s",
+    "schemaVersion": 27,
+    "version": 0
+  }
+}

@@ -5,6 +5,7 @@
 
 #include "absl/status/statusor.h"
 #include "cpp/futility/cache/lru_cache.h"
+#include "cpp/futility/otel/metrics.h"
 #include "cpp/image_core/image_core.h"
 #include "cpp/tracy/tracy.h"
 #include "types.h"
@@ -12,8 +13,8 @@
 namespace portrait {
 class TracerService {
  public:
-  explicit TracerService() : cache_(50) {};
-  explicit TracerService(uint16_t _cache_size) : cache_(_cache_size) {};
+  explicit TracerService() : cache_(50), metrics_("portrait") {};
+  explicit TracerService(uint16_t _cache_size) : cache_(_cache_size), metrics_("portrait") {};
   absl::StatusOr<TraceResponse> trace(TraceRequest& trace_request);
 
  private:
@@ -29,6 +30,7 @@ class TracerService {
 
   tracy::Tracer tracer_;
   futility::cache::LRUCache<TraceRequest, std::string> cache_;
+  futility::otel::MetricsRecorder metrics_;
 };
 }  // namespace portrait
 

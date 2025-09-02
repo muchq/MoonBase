@@ -15,3 +15,5 @@ rust-project.json
 go/r3dr/deploy/deploy.sh
 models
 checkpoints
+
+.env
