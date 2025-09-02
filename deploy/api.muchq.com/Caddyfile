@@ -31,9 +31,6 @@ api.muchq.com {
 		header_down -Access-Control-Allow-Headers
 		header_down -Access-Control-Max-Age
 	}
-	handle /grafana* {
-		reverse_proxy grafana:3000
-	}
 	
 	reverse_proxy games_ws_backend:8080
 	log {
