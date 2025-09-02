@@ -17,11 +17,9 @@ int main() {
   absl::InitializeLog();
   absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
 
-  // Initialize OpenTelemetry
-  futility::otel::OtelConfig otel_config{.service_name = "portrait",
-                                         .service_version = "1.0.0",
-                                         .otlp_endpoint = "http://localhost:4318/v1/metrics"};
-  futility::otel::OtelProvider::Initialize(otel_config);
+  // Initialize OpenTelemetry with RAII
+  futility::otel::OtelConfig otel_config{.service_name = "portrait", .service_version = "1.0.0"};
+  futility::otel::OtelProvider otel_provider(otel_config);
 
   LOG(INFO) << "Starting Portrait Server with OpenTelemetry metrics...";
 
@@ -59,10 +57,8 @@ int main() {
     server.run();
   } else {
     LOG(ERROR) << "Failed to start server on " << host << ":" << port;
-    futility::otel::OtelProvider::Shutdown();
     return 1;
   }
 
-  futility::otel::OtelProvider::Shutdown();
   return 0;
 }

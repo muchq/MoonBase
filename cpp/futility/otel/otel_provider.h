@@ -18,13 +18,20 @@ struct OtelConfig {
 
 class OtelProvider {
  public:
-  static void Initialize(const OtelConfig& config);
-  static std::shared_ptr<opentelemetry::v1::metrics::MeterProvider> GetMeterProvider();
-  static void Shutdown();
+  explicit OtelProvider(const OtelConfig& config);
+  ~OtelProvider();
+
+  // Non-copyable, non-movable
+  OtelProvider(const OtelProvider&) = delete;
+  OtelProvider& operator=(const OtelProvider&) = delete;
+  OtelProvider(OtelProvider&&) = delete;
+  OtelProvider& operator=(OtelProvider&&) = delete;
+
+  std::shared_ptr<opentelemetry::v1::metrics::MeterProvider> GetMeterProvider() const;
 
  private:
-  static std::shared_ptr<opentelemetry::v1::metrics::MeterProvider> meter_provider_;
-  static bool initialized_;
+  std::shared_ptr<opentelemetry::v1::metrics::MeterProvider> meter_provider_;
+  bool metrics_enabled_;
 };
 
 }  // namespace futility::otel

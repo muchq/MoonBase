@@ -1,5 +1,7 @@
 #include "cpp/futility/otel/otel_provider.h"
 
+#include <cstdlib>
+
 #include "opentelemetry/exporters/otlp/otlp_http_metric_exporter.h"
 #include "opentelemetry/exporters/otlp/otlp_http_metric_exporter_factory.h"
 #include "opentelemetry/exporters/otlp/otlp_http_metric_exporter_options.h"
@@ -14,17 +16,15 @@
 
 namespace futility::otel {
 
-std::shared_ptr<opentelemetry::v1::metrics::MeterProvider> OtelProvider::meter_provider_;
-bool OtelProvider::initialized_ = false;
-
-void OtelProvider::Initialize(const OtelConfig& config) {
-  if (initialized_) {
+OtelProvider::OtelProvider(const OtelConfig& config) : metrics_enabled_(config.enable_metrics) {
+  if (!config.enable_metrics) {
     return;
   }
 
-  if (!config.enable_metrics) {
-    initialized_ = true;
-    return;
+  // Get OTLP endpoint from environment variable or use config default
+  std::string otlp_endpoint = config.otlp_endpoint;
+  if (const char* env_endpoint = std::getenv("OTEL_EXPORTER_OTLP_ENDPOINT")) {
+    otlp_endpoint = std::string(env_endpoint) + "/v1/metrics";
   }
 
   // Create resource with service information
@@ -34,7 +34,7 @@ void OtelProvider::Initialize(const OtelConfig& config) {
 
   // Create OTLP HTTP metric exporter
   opentelemetry::exporter::otlp::OtlpHttpMetricExporterOptions otlp_options;
-  otlp_options.url = config.otlp_endpoint;
+  otlp_options.url = otlp_endpoint;
   otlp_options.content_type = opentelemetry::exporter::otlp::HttpRequestContentType::kJson;
 
   auto otlp_exporter =
@@ -60,19 +60,19 @@ void OtelProvider::Initialize(const OtelConfig& config) {
   // Set global meter provider
   meter_provider_ = std::move(meter_provider);
   opentelemetry::metrics::Provider::SetMeterProvider(meter_provider_);
-
-  initialized_ = true;
 }
 
-std::shared_ptr<opentelemetry::v1::metrics::MeterProvider> OtelProvider::GetMeterProvider() {
-  return meter_provider_;
-}
-
-void OtelProvider::Shutdown() {
-  if (meter_provider_) {
+OtelProvider::~OtelProvider() {
+  if (metrics_enabled_ && meter_provider_) {
+    // Reset global provider to default
+    opentelemetry::metrics::Provider::SetMeterProvider(
+        std::shared_ptr<opentelemetry::v1::metrics::MeterProvider>{});
     meter_provider_.reset();
   }
-  initialized_ = false;
+}
+
+std::shared_ptr<opentelemetry::v1::metrics::MeterProvider> OtelProvider::GetMeterProvider() const {
+  return meter_provider_;
 }
 
 }  // namespace futility::otel

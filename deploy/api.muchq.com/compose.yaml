@@ -32,6 +32,9 @@ services:
       - "8081:8081"
     environment:
       - PORT=8081
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
+      - OTEL_SERVICE_NAME=portrait
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=portrait,service.version=latest
     volumes:
       - /etc/games_ws_backend:/etc/games_ws_backend
     networks:
