@@ -14,22 +14,8 @@ services:
       - '--storage.tsdb.retention.time=7d'
       - '--storage.tsdb.retention.size=5GB'
       - '--web.enable-lifecycle'
-
-  # grafana:
-  #   image: grafana/grafana:11.2.0
-  #   ports:
-  #     - "3000:3000"
-  #   volumes:
-  #     - grafana_data:/var/lib/grafana
-  #     - ./o11y/grafana/dashboards:/etc/grafana/provisioning/dashboards
-  #     - ./o11y/grafana/datasources:/etc/grafana/provisioning/datasources
-  #   environment:
-  #     - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
-  #     - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
-  #     - GF_SERVER_ROOT_URL=https://api.muchq.com/grafana/
-  #     - GF_SERVER_SERVE_FROM_SUB_PATH=true
-  #   networks:
-  #     - app_network
+    networks:
+      - app_network
 
   otelcol:
     image: otel/opentelemetry-collector-contrib:0.133.0
@@ -39,6 +25,8 @@ services:
     ports:
       - "4318:4318"   # OTLP HTTP receiver
       - "8889:8889"   # Prometheus metrics endpoint
+    networks:
+      - app_network
 
 volumes:
   prometheus_data:
