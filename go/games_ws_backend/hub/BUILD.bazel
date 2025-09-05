@@ -2,10 +2,8 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library")
 
 go_library(
     name = "hub",
-    srcs = [
-        "hub.go",
-    ],
+    srcs = ["hub.go"],
     importpath = "github.com/muchq/moonbase/go/games_ws_backend/hub",
     visibility = ["//visibility:public"],
-    deps = ["@com_github_gorilla_websocket//:go_default_library"],
+    deps = ["@com_github_gorilla_websocket//:websocket"],
 )

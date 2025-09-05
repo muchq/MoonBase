@@ -3,16 +3,13 @@ load("//bazel/rules:oci.bzl", "linux_oci_go")
 
 go_library(
     name = "games_ws_backend_lib",
-    srcs = [
-        "main.go",
-    ],
-    importpath = "github.com/muchq/moonbase/go/thoughts",
+    srcs = ["main.go"],
+    importpath = "github.com/muchq/moonbase/go/games_ws_backend",
     visibility = ["//visibility:public"],
     deps = [
         "//go/games_ws_backend/golf",
         "//go/games_ws_backend/hub",
         "//go/games_ws_backend/thoughts",
-        "@com_github_gorilla_websocket//:go_default_library",
     ],
 )
 

@@ -17,3 +17,4 @@ models
 checkpoints
 
 .env
+local_docker

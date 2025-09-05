@@ -31,7 +31,21 @@ api.muchq.com {
 		header_down -Access-Control-Allow-Headers
 		header_down -Access-Control-Max-Age
 	}
-	
+
+	@get_timeseries {
+		method GET
+		path /v1/timeseries/*
+	}
+
+	reverse_proxy @get_timeseries prom_proxy:8082
+
+	@get_metrics {
+		method GET
+		path /v1/metrics/*
+	}
+
+	reverse_proxy @get_metrics prom_proxy:8082
+
 	reverse_proxy games_ws_backend:8080
 	log {
 		output file /var/log/caddy/access.log {

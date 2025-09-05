@@ -13,9 +13,10 @@ services:
     depends_on:
       - games_ws_backend
       - portrait
+      - prom_proxy
     networks:
       - app_network
-  
+
   games_ws_backend:
     image: ghcr.io/muchq/games_ws_backend:latest
     restart: always
@@ -25,6 +26,7 @@ services:
       - /etc/games_ws_backend:/etc/games_ws_backend
     networks:
       - app_network
+
   portrait:
     image: ghcr.io/muchq/portrait:latest
     restart: always
@@ -36,7 +38,20 @@ services:
       - OTEL_SERVICE_NAME=portrait
       - OTEL_RESOURCE_ATTRIBUTES=service.name=portrait,service.version=latest
     volumes:
-      - /etc/games_ws_backend:/etc/games_ws_backend
+      - /etc/portrait:/etc/portrait
+    networks:
+      - app_network
+
+  prom_proxy:
+    image: ghcr.io/muchq/prom_proxy:latest
+    restart: always
+    ports:
+      - "8082:8082"
+    environment:
+      - PORT=8082
+      - PROMETHEUS_URL=http://prometheus:9090
+    volumes:
+      - /etc/prom_proxy:/etc/prom_proxy
     networks:
       - app_network
 

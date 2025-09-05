@@ -11,7 +11,6 @@ go_library(
     deps = [
         "//go/games_ws_backend/hub",
         "//go/games_ws_backend/players",
-        "@com_github_gorilla_websocket//:go_default_library",
     ],
 )
 
@@ -23,5 +22,8 @@ go_test(
         "thoughts_hub_test.go",
     ],
     embed = [":thoughts"],
-    deps = ["@com_github_gorilla_websocket//:go_default_library"],
+    deps = [
+        "//go/games_ws_backend/hub",
+        "//go/games_ws_backend/players",
+    ],
 )
