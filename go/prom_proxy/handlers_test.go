@@ -55,6 +55,30 @@ func TestExtractFloatValue(t *testing.T) {
 			},
 			expectError: true,
 		},
+		{
+			name: "NaNValue",
+			result: Result{
+				Value: []interface{}{1609459200.0, "NaN"},
+			},
+			expected:    0,
+			expectError: false,
+		},
+		{
+			name: "PositiveInfinityValue",
+			result: Result{
+				Value: []interface{}{1609459200.0, "+Inf"},
+			},
+			expected:    0,
+			expectError: false,
+		},
+		{
+			name: "NegativeInfinityValue",
+			result: Result{
+				Value: []interface{}{1609459200.0, "-Inf"},
+			},
+			expected:    0,
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -150,6 +174,27 @@ func TestExtractTimeSeries(t *testing.T) {
 				"__name__": "empty_metric",
 			},
 			expectedValues: 0,
+			expectError:    false,
+		},
+		{
+			name: "TimeSeriesWithNaNValues",
+			result: Result{
+				Metric: map[string]string{
+					"__name__": "test_metric_with_nan",
+				},
+				Values: [][]interface{}{
+					{1609459200.0, "25.5"},
+					{1609459230.0, "NaN"},
+					{1609459260.0, "+Inf"},
+					{1609459290.0, "-Inf"},
+					{1609459320.0, "30.1"},
+				},
+			},
+			expectedName: "test_metric_with_nan",
+			expectedLabels: map[string]string{
+				"__name__": "test_metric_with_nan",
+			},
+			expectedValues: 5, // All values should be included, NaN/Inf converted to 0
 			expectError:    false,
 		},
 	}
