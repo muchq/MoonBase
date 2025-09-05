@@ -21,6 +21,12 @@ func extractFloatValue(result *Result) (float64, error) {
 		return 0, fmt.Errorf("value is not a string")
 	}
 	
+	// Handle NaN, +Inf, -Inf values gracefully
+	switch valueStr {
+	case "NaN", "+Inf", "-Inf":
+		return 0, nil // Return 0 for invalid mathematical results
+	}
+	
 	return strconv.ParseFloat(valueStr, 64)
 }
 
@@ -57,9 +63,17 @@ func extractTimeSeries(result *Result) (TimeSeries, error) {
 			continue
 		}
 		
-		value, err := strconv.ParseFloat(valueStr, 64)
-		if err != nil {
-			continue
+		// Handle NaN, +Inf, -Inf values gracefully
+		var value float64
+		switch valueStr {
+		case "NaN", "+Inf", "-Inf":
+			value = 0 // Use 0 for invalid mathematical results
+		default:
+			var err error
+			value, err = strconv.ParseFloat(valueStr, 64)
+			if err != nil {
+				continue
+			}
 		}
 		
 		ts.Values = append(ts.Values, DataPoint{
