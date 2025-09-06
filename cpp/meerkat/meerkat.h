@@ -18,10 +18,10 @@ namespace meerkat {
 
 using json = nlohmann::json;
 
-  struct Context {
-    std::chrono::steady_clock::time_point start_time;
-    std::string trace_id;
-  };
+struct Context {
+  std::chrono::steady_clock::time_point start_time;
+  std::string trace_id;
+};
 
 struct HttpRequest {
   std::string method;
