@@ -1,6 +1,7 @@
 services:
   prometheus:
     image: prom/prometheus:v3.5.0
+    restart: always
     ports:
       - "9090:9090"
     volumes:
@@ -19,6 +20,7 @@ services:
 
   otelcol:
     image: otel/opentelemetry-collector-contrib:0.133.0
+    restart: always
     command: ["--config=/etc/otel-collector-config.yml"]
     volumes:
       - ./o11y/otel-collector.yml:/etc/otel-collector-config.yml
