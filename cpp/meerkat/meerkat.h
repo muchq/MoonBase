@@ -18,13 +18,17 @@ namespace meerkat {
 
 using json = nlohmann::json;
 
+  struct Context {
+    std::chrono::steady_clock::time_point start_time;
+    std::string trace_id;
+  };
+
 struct HttpRequest {
   std::string method;
   std::string uri;
   std::string body;
   std::unordered_map<std::string, std::string> headers;
   std::unordered_map<std::string, std::string> query_params;
-  std::chrono::steady_clock::time_point start_time;
 };
 
 struct HttpResponse {
@@ -45,9 +49,9 @@ struct HttpResponse {
   }
 };
 
-using RouteHandler = std::function<HttpResponse(const HttpRequest&)>;
-using RequestInterceptor = std::function<bool(HttpRequest&, HttpResponse&)>;
-using ResponseInterceptor = std::function<void(const HttpRequest&, HttpResponse&)>;
+using RouteHandler = std::function<HttpResponse(const HttpRequest&, Context&)>;
+using RequestInterceptor = std::function<bool(HttpRequest&, HttpResponse&, Context&)>;
+using ResponseInterceptor = std::function<void(const HttpRequest&, HttpResponse&, Context&)>;
 using WebSocketHandler = std::function<void(struct mg_connection*, const std::string&)>;
 using WebSocketConnectHandler = std::function<bool(struct mg_connection*, const HttpRequest&)>;
 using WebSocketCloseHandler = std::function<void(struct mg_connection*)>;

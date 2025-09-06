@@ -45,12 +45,12 @@ TEST_F(MeerkatTest, CanRegisterRoutes) {
   bool get_called = false;
   bool post_called = false;
 
-  server_->get("/test", [&get_called](const HttpRequest& req) -> HttpResponse {
+  server_->get("/test", [&get_called](const HttpRequest& req, Context& ctx) -> HttpResponse {
     get_called = true;
     return responses::ok(json{{"message", "GET received"}});
   });
 
-  server_->post("/test", [&post_called](const HttpRequest& req) -> HttpResponse {
+  server_->post("/test", [&post_called](const HttpRequest& req, Context& ctx) -> HttpResponse {
     post_called = true;
     return responses::created(json{{"message", "POST received"}});
   });
@@ -63,7 +63,7 @@ TEST_F(MeerkatTest, CanRegisterRequestInterceptor) {
   // Test that interceptor registration doesn't crash and accepts correct signature
   bool interceptor_registered = false;
 
-  server_->use_request_interceptor([&](HttpRequest& req, HttpResponse& res) -> bool {
+  server_->use_request_interceptor([&](HttpRequest& req, HttpResponse& res, Context& ctx) -> bool {
     interceptor_registered = true;
     return true;  // Continue processing
   });
@@ -75,11 +75,11 @@ TEST_F(MeerkatTest, CanRegisterRequestInterceptor) {
 
 TEST_F(MeerkatTest, CanRegisterMultipleRequestInterceptors) {
   // Test that multiple interceptors can be registered
-  server_->use_request_interceptor([](HttpRequest& req, HttpResponse& res) -> bool {
+  server_->use_request_interceptor([](HttpRequest& req, HttpResponse& res, Context& ctx) -> bool {
     return true;  // Continue processing
   });
 
-  server_->use_request_interceptor([](HttpRequest& req, HttpResponse& res) -> bool {
+  server_->use_request_interceptor([](HttpRequest& req, HttpResponse& res, Context& ctx) -> bool {
     return false;  // Block processing
   });
 

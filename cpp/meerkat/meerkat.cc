@@ -155,7 +155,7 @@ void HttpServer::serve_static(const std::string& path_prefix, const std::string&
 }
 
 void HttpServer::enable_health_checks() {
-  get("/health", [](const HttpRequest& req) -> HttpResponse {
+  get("/health", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
     return responses::ok(json{{"status", "healthy"}, {"timestamp", std::time(nullptr)}});
   });
 }
@@ -199,7 +199,8 @@ void HttpServer::event_handler(struct mg_connection* c, int ev, void* ev_data) {
 
 void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message* hm) {
   HttpRequest request = parse_request(hm);
-  request.start_time = std::chrono::steady_clock::now();
+  Context context = {};
+  context.start_time = std::chrono::steady_clock::now();
   HttpResponse response;
 
   // Handle CORS preflight requests
@@ -212,7 +213,7 @@ void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message*
 
   // Apply middleware
   for (const auto& request_interceptor : request_interceptors_) {
-    if (!request_interceptor(request, response)) {
+    if (!request_interceptor(request, response, context)) {
       // Request interceptor blocked the request
       if (cors_enabled_) {
         add_cors_headers(response, request);
@@ -227,7 +228,7 @@ void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message*
 
   if (process_request && handler) {
     try {
-      response = (*handler)(request);
+      response = (*handler)(request, context);
     } catch (const std::exception& e) {
       response = responses::internal_error(e.what());
     } catch (...) {
@@ -239,7 +240,7 @@ void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message*
 
   try {
     for (const auto& response_interceptor : response_interceptors_) {
-      response_interceptor(request, response);
+      response_interceptor(request, response, context);
     }
   } catch (...) {
     response = responses::internal_error();
@@ -532,11 +533,13 @@ static long random_positive_long() {
 
 namespace request {
 RequestInterceptor trace_id() {
-  return [](HttpRequest& req, HttpResponse& res) -> bool {
+  return [](HttpRequest& req, HttpResponse& res, Context& ctx) -> bool {
     // propagate trace-id if we have one
     // add a new trace-id if we don't
-    if (!req.headers.contains(TRACE_ID_HEADER_NAME)) {
-      req.headers.try_emplace(TRACE_ID_HEADER_NAME, std::to_string(random_positive_long()));
+    if (req.headers.contains(TRACE_ID_HEADER_NAME)) {
+      ctx.trace_id = req.headers[TRACE_ID_HEADER_NAME];
+    } else {
+      ctx.trace_id = std::to_string(random_positive_long());
     }
     return true;
   };
@@ -546,7 +549,7 @@ using futility::rate_limiter::SlidingWindowRateLimiter;
 
 RequestInterceptor rate_limiter(
     std::shared_ptr<SlidingWindowRateLimiter<std::string>> ip_rate_limiter) {
-  return [ip_rate_limiter](HttpRequest& req, HttpResponse& res) -> bool {
+  return [ip_rate_limiter](HttpRequest& req, HttpResponse& res, Context& ctx) -> bool {
     auto ip_address = req.headers[X_FORWARDED_FOR];
     if (!ip_rate_limiter->allow(ip_address, 1)) {
       res.status_code = 429;
@@ -560,22 +563,17 @@ RequestInterceptor rate_limiter(
 
 namespace response {
 ResponseInterceptor trace_id_header() {
-  return [](const HttpRequest& req, HttpResponse& res) -> void {
-    if (req.headers.contains(TRACE_ID_HEADER_NAME)) {
-      res.headers.try_emplace(TRACE_ID_HEADER_NAME, req.headers.at(TRACE_ID_HEADER_NAME));
+  return [](const HttpRequest& req, HttpResponse& res, Context& ctx) -> void {
+    if (!ctx.trace_id.empty()) {
+      res.headers.try_emplace(TRACE_ID_HEADER_NAME, ctx.trace_id);
     }
   };
 }
 ResponseInterceptor logging() {
-  return [](const HttpRequest& req, HttpResponse& res) -> void {
-    static std::string trace_id = "unknown";
-    if (res.headers.contains(TRACE_ID_HEADER_NAME)) {
-      trace_id = res.headers.at(TRACE_ID_HEADER_NAME);
-    }
-
+  return [](const HttpRequest& req, HttpResponse& res, Context& ctx) -> void {
     auto end_time = std::chrono::steady_clock::now();
     auto duration =
-        std::chrono::duration_cast<std::chrono::milliseconds>(end_time - req.start_time);
+        std::chrono::duration_cast<std::chrono::milliseconds>(end_time - ctx.start_time);
 
     std::string ip_address;
     if (req.headers.contains(X_FORWARDED_FOR)) {
@@ -583,7 +581,7 @@ ResponseInterceptor logging() {
     }
 
     LOG(INFO) << "[" << req.method << " " << req.uri << "]: X-Forwarded-For=" << ip_address
-              << " trace_id=" << trace_id << " status=" << res.status_code
+              << " trace_id=" << ctx.trace_id << " status=" << res.status_code
               << " res.body.bytes=" << res.body.size() << " duration_ms=" << duration.count();
   };
 }
