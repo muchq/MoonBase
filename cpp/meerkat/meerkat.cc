@@ -150,7 +150,7 @@ void HttpServer::run() {
 }
 
 void HttpServer::enable_health_checks() {
-  get("/health", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
+  get("/health", [](const HttpRequest& req) -> HttpResponse {
     return responses::ok(json{{"status", "healthy"}, {"timestamp", std::time(nullptr)}});
   });
 }
@@ -209,7 +209,7 @@ void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message*
 
   if (process_request && handler) {
     try {
-      response = (*handler)(request, context);
+      response = (*handler)(request);
     } catch (const std::exception& e) {
       response = responses::internal_error(e.what());
     } catch (...) {

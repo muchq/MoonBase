@@ -45,12 +45,12 @@ TEST_F(MeerkatTest, CanRegisterRoutes) {
   bool get_called = false;
   bool post_called = false;
 
-  server_->get("/test", [&get_called](const HttpRequest& req, Context& ctx) -> HttpResponse {
+  server_->get("/test", [&get_called](const HttpRequest& req) -> HttpResponse {
     get_called = true;
     return responses::ok(json{{"message", "GET received"}});
   });
 
-  server_->post("/test", [&post_called](const HttpRequest& req, Context& ctx) -> HttpResponse {
+  server_->post("/test", [&post_called](const HttpRequest& req) -> HttpResponse {
     post_called = true;
     return responses::created(json{{"message", "POST received"}});
   });

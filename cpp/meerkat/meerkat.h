@@ -48,7 +48,7 @@ struct HttpResponse {
   }
 };
 
-using RouteHandler = std::function<HttpResponse(const HttpRequest&, Context&)>;
+using RouteHandler = std::function<HttpResponse(const HttpRequest&)>;
 using RequestInterceptor = std::function<bool(HttpRequest&, HttpResponse&, Context&)>;
 using ResponseInterceptor = std::function<void(const HttpRequest&, HttpResponse&, Context&)>;
 
@@ -164,8 +164,8 @@ ResponseInterceptor logging();
 }  // namespace interceptors
 
 template <typename REQ, typename RESP>
-std::function<HttpResponse(HttpRequest, Context&)> wrap(std::function<absl::StatusOr<RESP>(REQ&)> handler) {
-  return [&handler](const HttpRequest& req, Context& ctx) -> HttpResponse {
+std::function<HttpResponse(HttpRequest)> wrap(std::function<absl::StatusOr<RESP>(REQ&)> handler) {
+  return [&handler](const HttpRequest& req) -> HttpResponse {
     absl::StatusOr<REQ> status_or_request = requests::read_request<REQ>(req);
     if (!status_or_request.ok()) {
       return responses::bad_request(

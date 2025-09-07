@@ -89,24 +89,24 @@ class ExampleMeerkatIntegrationTest : public ::testing::Test {
 
   void SetupRoutes() {
     // Basic greeting endpoint
-    server_->get("/", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
+    server_->get("/", [](const HttpRequest& req) -> HttpResponse {
       return responses::ok(
           json{{"message", "Welcome to Meerkat Example API!"}, {"version", "1.0.0"}});
     });
 
     // Health check endpoint
-    server_->get("/health", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
+    server_->get("/health", [](const HttpRequest& req) -> HttpResponse {
       return responses::ok(json{{"status", "healthy"}, {"timestamp", std::time(nullptr)}});
     });
 
     // Get all users
-    server_->get("/api/users", [this](const HttpRequest& req, Context& ctx) -> HttpResponse {
+    server_->get("/api/users", [this](const HttpRequest& req) -> HttpResponse {
       json users = user_store_->get_all_users();
       return responses::ok(json{{"users", users}});
     });
 
     // Create a new user
-    server_->post("/api/users", [this](const HttpRequest& req, Context& ctx) -> HttpResponse {
+    server_->post("/api/users", [this](const HttpRequest& req) -> HttpResponse {
       try {
         json user_data = json::parse(req.body);
 
@@ -124,7 +124,7 @@ class ExampleMeerkatIntegrationTest : public ::testing::Test {
     });
 
     // Get user by ID
-    server_->get("/api/user", [this](const HttpRequest& req, Context& ctx) -> HttpResponse {
+    server_->get("/api/user", [this](const HttpRequest& req) -> HttpResponse {
       auto id_param = req.query_params.find("id");
       if (id_param == req.query_params.end()) {
         return responses::bad_request("Missing id parameter");
@@ -144,7 +144,7 @@ class ExampleMeerkatIntegrationTest : public ::testing::Test {
     });
 
     // Delete user by ID
-    server_->del("/api/user", [this](const HttpRequest& req, Context& ctx) -> HttpResponse {
+    server_->del("/api/user", [this](const HttpRequest& req) -> HttpResponse {
       auto id_param = req.query_params.find("id");
       if (id_param == req.query_params.end()) {
         return responses::bad_request("Missing id parameter");

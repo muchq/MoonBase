@@ -20,12 +20,12 @@ int main() {
     HttpServer server;
     
     // Simple GET endpoint
-    server.get("/hello", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
+    server.get("/hello", [](const HttpRequest& req) -> HttpResponse {
         return responses::ok(json{{"message", "Hello, World!"}});
     });
     
     // POST endpoint with JSON
-    server.post("/api/users", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
+    server.post("/api/users", [](const HttpRequest& req) -> HttpResponse {
         try {
             json user_data = json::parse(req.body);
             

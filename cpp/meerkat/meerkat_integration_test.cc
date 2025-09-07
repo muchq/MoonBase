@@ -46,7 +46,7 @@ class MeerkatIntegrationTest : public ::testing::Test {
 };
 
 TEST_F(MeerkatIntegrationTest, BasicGetRequest) {
-  server_->get("/hello", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
+  server_->get("/hello", [](const HttpRequest& req) -> HttpResponse {
     return responses::ok(json{{"message", "Hello, World!"}});
   });
 
@@ -65,7 +65,7 @@ TEST_F(MeerkatIntegrationTest, BasicGetRequest) {
 }
 
 TEST_F(MeerkatIntegrationTest, JsonPostRequest) {
-  server_->post("/api/users", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
+  server_->post("/api/users", [](const HttpRequest& req) -> HttpResponse {
     try {
       json request_data = json::parse(req.body);
 
@@ -119,7 +119,7 @@ TEST_F(MeerkatIntegrationTest, RequestInterceptorAuthentication) {
 
   std::cout << "Added request interceptor..." << std::endl;
 
-  server_->get("/protected", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
+  server_->get("/protected", [](const HttpRequest& req) -> HttpResponse {
     std::cout << "Handler executed" << std::endl;
     return responses::ok(json{{"message", "Access granted"}});
   });
@@ -164,7 +164,7 @@ TEST_F(MeerkatIntegrationTest, RequestInterceptorAuthentication) {
 }
 
 TEST_F(MeerkatIntegrationTest, ErrorHandling) {
-  server_->get("/error", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
+  server_->get("/error", [](const HttpRequest& req) -> HttpResponse {
     throw std::runtime_error("Intentional test error");
     return responses::ok();  // This won't be reached
   });
@@ -181,7 +181,7 @@ TEST_F(MeerkatIntegrationTest, ErrorHandling) {
 }
 
 TEST_F(MeerkatIntegrationTest, QueryParameters) {
-  server_->get("/search", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
+  server_->get("/search", [](const HttpRequest& req) -> HttpResponse {
     std::cout << "Server received request:" << std::endl;
     std::cout << "  URI: '" << req.uri << "'" << std::endl;
     std::cout << "  Query params count: " << req.query_params.size() << std::endl;

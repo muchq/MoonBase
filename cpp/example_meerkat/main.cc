@@ -53,7 +53,7 @@ int main() {
   UserStore user_store;
 
   // Basic greeting endpoint
-  server.get("/", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
+  server.get("/", [](const HttpRequest& req) -> HttpResponse {
     return responses::ok(
         json{{"message", "Welcome to Meerkat Example API!"},
              {"version", "1.0.0"},
@@ -62,18 +62,18 @@ int main() {
   });
 
   // Health check endpoint
-  server.get("/health", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
+  server.get("/health", [](const HttpRequest& req) -> HttpResponse {
     return responses::ok(json{{"status", "healthy"}, {"timestamp", std::time(nullptr)}});
   });
 
   // Get all users
-  server.get("/api/users", [&user_store](const HttpRequest& req, Context& ctx) -> HttpResponse {
+  server.get("/api/users", [&user_store](const HttpRequest& req) -> HttpResponse {
     json users = user_store.get_all_users();
     return responses::ok(json{{"users", users}});
   });
 
   // Create a new user
-  server.post("/api/users", [&user_store](const HttpRequest& req, Context& ctx) -> HttpResponse {
+  server.post("/api/users", [&user_store](const HttpRequest& req) -> HttpResponse {
     try {
       json user_data = json::parse(req.body);
 
@@ -91,7 +91,7 @@ int main() {
   });
 
   // Get user by ID (simplified - using query parameter)
-  server.get("/api/user", [&user_store](const HttpRequest& req, Context& ctx) -> HttpResponse {
+  server.get("/api/user", [&user_store](const HttpRequest& req) -> HttpResponse {
     auto id_param = req.query_params.find("id");
     if (id_param == req.query_params.end()) {
       return responses::bad_request("Missing id parameter");
@@ -111,7 +111,7 @@ int main() {
   });
 
   // Delete user by ID (simplified - using query parameter)
-  server.del("/api/user", [&user_store](const HttpRequest& req, Context& ctx) -> HttpResponse {
+  server.del("/api/user", [&user_store](const HttpRequest& req) -> HttpResponse {
     auto id_param = req.query_params.find("id");
     if (id_param == req.query_params.end()) {
       return responses::bad_request("Missing id parameter");

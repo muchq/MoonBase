@@ -38,12 +38,12 @@ class HttpClientTest : public ::testing::Test {
 
   void SetupTestServer() {
     // Basic echo endpoint
-    server_->get("/echo", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
+    server_->get("/echo", [](const HttpRequest& req) -> HttpResponse {
       return responses::ok(json{{"echoed", "GET /echo"}});
     });
 
     // JSON POST endpoint
-    server_->post("/json", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
+    server_->post("/json", [](const HttpRequest& req) -> HttpResponse {
       try {
         json request_data = json::parse(req.body);
         json response_data = {{"received", request_data}, {"method", "POST"}};
@@ -54,7 +54,7 @@ class HttpClientTest : public ::testing::Test {
     });
 
     // Headers test endpoint
-    server_->get("/headers", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
+    server_->get("/headers", [](const HttpRequest& req) -> HttpResponse {
       json headers_json;
       for (const auto& [key, value] : req.headers) {
         headers_json[key] = value;
@@ -63,7 +63,7 @@ class HttpClientTest : public ::testing::Test {
     });
 
     // Error endpoint
-    server_->get("/error", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
+    server_->get("/error", [](const HttpRequest& req) -> HttpResponse {
       return responses::internal_error("Intentional server error");
     });
   }
