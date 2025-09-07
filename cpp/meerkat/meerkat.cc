@@ -28,8 +28,7 @@ HttpServer::HttpServer()
       running_(false),
       mgr_initialized_(false),
       listen_port_(0),
-      should_listen_(false),
-      cors_enabled_(false) {
+      should_listen_(false) {
   // Disable mongoose verbose logging (default is MG_LL_INFO)
   mg_log_set(MG_LL_ERROR);
   mg_mgr_init(&mgr_);
@@ -150,10 +149,6 @@ void HttpServer::run() {
   }
 }
 
-void HttpServer::serve_static(const std::string& path_prefix, const std::string& directory) {
-  static_paths_[path_prefix] = directory;
-}
-
 void HttpServer::enable_health_checks() {
   get("/health", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
     return responses::ok(json{{"status", "healthy"}, {"timestamp", std::time(nullptr)}});
@@ -189,11 +184,6 @@ void HttpServer::event_handler(struct mg_connection* c, int ev, void* ev_data) {
   if (ev == MG_EV_HTTP_MSG) {
     const auto hm = static_cast<struct mg_http_message*>(ev_data);
     server->handle_request(c, hm);
-  } else if (ev == MG_EV_WS_MSG) {
-    const auto wm = static_cast<struct mg_ws_message*>(ev_data);
-    server->handle_websocket_message(c, wm);
-  } else if (ev == MG_EV_CLOSE) {
-    server->handle_websocket_close(c);
   }
 }
 
@@ -203,21 +193,12 @@ void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message*
   context.start_time = std::chrono::steady_clock::now();
   HttpResponse response;
 
-  // Handle CORS preflight requests
-  if (cors_enabled_ && request.method == "OPTIONS") {
-    handle_cors_preflight(c, request);
-    return;
-  }
-
   bool process_request = true;
 
   // Apply middleware
   for (const auto& request_interceptor : request_interceptors_) {
     if (!request_interceptor(request, response, context)) {
       // Request interceptor blocked the request
-      if (cors_enabled_) {
-        add_cors_headers(response, request);
-      }
       process_request = false;
       break;
     }
@@ -244,11 +225,6 @@ void HttpServer::handle_request(struct mg_connection* c, struct mg_http_message*
     }
   } catch (...) {
     response = responses::internal_error();
-  }
-
-  // Add CORS headers if enabled
-  if (cors_enabled_) {
-    add_cors_headers(response, request);
   }
 
   send_response(c, response);
@@ -288,7 +264,6 @@ void HttpServer::send_response(struct mg_connection* c, const HttpResponse& resp
   }
 
   std::string headers_str = headers_stream.str();
-
   mg_http_reply(c, response.status_code, headers_str.c_str(), response.body.c_str());
 }
 
@@ -319,146 +294,6 @@ std::unordered_map<std::string, std::string> HttpServer::parse_query_params(
   }
 
   return params;
-}
-
-// CORS implementation
-void HttpServer::enable_cors(const CorsConfig& config) {
-  cors_enabled_ = true;
-  cors_config_ = config;
-}
-
-void HttpServer::allow_origin(const std::string& origin) {
-  cors_enabled_ = true;
-  cors_config_.allowed_origins.insert(origin);
-}
-
-void HttpServer::allow_all_origins() {
-  cors_enabled_ = true;
-  cors_config_.allowed_origins.insert("*");
-}
-
-void HttpServer::handle_cors_preflight(struct mg_connection* c, const HttpRequest& request) {
-  HttpResponse response;
-  response.status_code = 204;  // No Content
-  add_cors_headers(response, request);
-
-  // Add preflight-specific headers
-  if (!cors_config_.allowed_methods.empty()) {
-    std::string methods;
-    for (const auto& method : cors_config_.allowed_methods) {
-      if (!methods.empty()) methods += ", ";
-      methods += method;
-    }
-    response.headers["Access-Control-Allow-Methods"] = methods;
-  }
-
-  if (!cors_config_.allowed_headers.empty()) {
-    std::string headers;
-    for (const auto& header : cors_config_.allowed_headers) {
-      if (!headers.empty()) headers += ", ";
-      headers += header;
-    }
-    response.headers["Access-Control-Allow-Headers"] = headers;
-  }
-
-  response.headers["Access-Control-Max-Age"] = std::to_string(cors_config_.max_age);
-
-  send_response(c, response);
-}
-
-void HttpServer::add_cors_headers(HttpResponse& response, const HttpRequest& request) {
-  if (!cors_enabled_) return;
-
-  // Access-Control-Allow-Origin
-  if (cors_config_.allowed_origins.count("*")) {
-    response.headers["Access-Control-Allow-Origin"] = "*";
-  } else {
-    auto origin_header = request.headers.find("Origin");
-    if (origin_header != request.headers.end()) {
-      const std::string& origin = origin_header->second;
-      if (cors_config_.allowed_origins.count(origin)) {
-        response.headers["Access-Control-Allow-Origin"] = origin;
-      }
-    }
-  }
-
-  // Access-Control-Allow-Credentials
-  if (cors_config_.allow_credentials) {
-    response.headers["Access-Control-Allow-Credentials"] = "true";
-  }
-
-  // Access-Control-Expose-Headers
-  if (!cors_config_.exposed_headers.empty()) {
-    std::string headers;
-    for (const auto& header : cors_config_.exposed_headers) {
-      if (!headers.empty()) headers += ", ";
-      headers += header;
-    }
-    response.headers["Access-Control-Expose-Headers"] = headers;
-  }
-}
-
-// WebSocket implementation
-void HttpServer::websocket(const std::string& path, WebSocketHandler message_handler,
-                           WebSocketConnectHandler connect_handler,
-                           WebSocketCloseHandler close_handler) {
-  websocket_routes_.push_back(
-      {path, std::move(message_handler), std::move(connect_handler), std::move(close_handler)});
-}
-
-HttpServer::WebSocketRoute* HttpServer::find_websocket_route(const std::string& uri) {
-  for (auto& route : websocket_routes_) {
-    if (route.path == uri) {
-      return &route;
-    }
-  }
-  return nullptr;
-}
-
-void HttpServer::handle_websocket_handshake(struct mg_connection* c, struct mg_http_message* hm) {
-  HttpRequest request = parse_request(hm);
-  WebSocketRoute* route = find_websocket_route(request.uri);
-
-  if (route) {
-    // Check if connection should be accepted
-    bool accept = true;
-    if (route->connect_handler) {
-      accept = route->connect_handler(c, request);
-    }
-
-    if (accept) {
-      mg_ws_upgrade(c, hm, nullptr);
-      websocket_connections_[c] = request.uri;
-    } else {
-      HttpResponse response = responses::bad_request("WebSocket connection rejected");
-      send_response(c, response);
-    }
-  } else {
-    HttpResponse response = responses::not_found("WebSocket endpoint not found");
-    send_response(c, response);
-  }
-}
-
-void HttpServer::handle_websocket_message(struct mg_connection* c, struct mg_ws_message* wm) {
-  auto conn_it = websocket_connections_.find(c);
-  if (conn_it != websocket_connections_.end()) {
-    WebSocketRoute* route = find_websocket_route(conn_it->second);
-    if (route && route->message_handler) {
-      std::string message(reinterpret_cast<const char*>(wm->data.buf), wm->data.len);
-      route->message_handler(c, message);
-    }
-  }
-}
-
-void HttpServer::handle_websocket_close(struct mg_connection* c) {
-  auto conn_it = websocket_connections_.find(c);
-  if (conn_it != websocket_connections_.end()) {
-    WebSocketRoute* route = find_websocket_route(conn_it->second);
-    if (route && route->close_handler) {
-      route->close_handler(c);
-    }
-    websocket_connections_.erase(conn_it);
-  }
 }
 
 namespace responses {
@@ -534,8 +369,6 @@ static long random_positive_long() {
 namespace request {
 RequestInterceptor trace_id() {
   return [](HttpRequest& req, HttpResponse& res, Context& ctx) -> bool {
-    // propagate trace-id if we have one
-    // add a new trace-id if we don't
     if (req.headers.contains(TRACE_ID_HEADER_NAME)) {
       ctx.trace_id = req.headers[TRACE_ID_HEADER_NAME];
     } else {
@@ -587,25 +420,4 @@ ResponseInterceptor logging() {
 }
 }  // namespace response
 }  // namespace interceptors
-
-// WebSocket utility functions
-namespace websocket {
-void send_text(struct mg_connection* c, const std::string& message) {
-  mg_ws_send(c, message.c_str(), message.length(), WEBSOCKET_OP_TEXT);
-}
-
-void send_json(struct mg_connection* c, const json& data) {
-  std::string message = data.dump();
-  send_text(c, message);
-}
-
-void send_binary(struct mg_connection* c, const void* data, size_t length) {
-  mg_ws_send(c, data, length, WEBSOCKET_OP_BINARY);
-}
-
-void close(struct mg_connection* c, int code, const std::string& reason) {
-  mg_ws_send(c, reason.c_str(), reason.length(), WEBSOCKET_OP_CLOSE);
-}
-}  // namespace websocket
-
 }  // namespace meerkat

@@ -433,12 +433,12 @@ TEST_F(ExampleMeerkatUnitTest, MiddlewareIsConfigured) {
   // Create a new server with request interceptor
   HttpServer test_server;
   test_server.use_request_interceptor(
-      [&middleware_called](HttpRequest& req, HttpResponse& res) -> bool {
+      [&middleware_called](HttpRequest& req, HttpResponse& res, Context& ctx) -> bool {
         middleware_called = true;
         return true;
       });
 
-  test_server.get("/test", [](const HttpRequest& req) -> HttpResponse { return responses::ok(); });
+  test_server.get("/test", [](const HttpRequest& req, Context& ctx) -> HttpResponse { return responses::ok(); });
 
   // Middleware registration should succeed
   EXPECT_TRUE(test_server.listen("127.0.0.1", port_ + 1000));

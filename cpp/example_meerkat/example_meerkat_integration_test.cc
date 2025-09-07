@@ -89,24 +89,24 @@ class ExampleMeerkatIntegrationTest : public ::testing::Test {
 
   void SetupRoutes() {
     // Basic greeting endpoint
-    server_->get("/", [](const HttpRequest& req) -> HttpResponse {
+    server_->get("/", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
       return responses::ok(
           json{{"message", "Welcome to Meerkat Example API!"}, {"version", "1.0.0"}});
     });
 
     // Health check endpoint
-    server_->get("/health", [](const HttpRequest& req) -> HttpResponse {
+    server_->get("/health", [](const HttpRequest& req, Context& ctx) -> HttpResponse {
       return responses::ok(json{{"status", "healthy"}, {"timestamp", std::time(nullptr)}});
     });
 
     // Get all users
-    server_->get("/api/users", [this](const HttpRequest& req) -> HttpResponse {
+    server_->get("/api/users", [this](const HttpRequest& req, Context& ctx) -> HttpResponse {
       json users = user_store_->get_all_users();
       return responses::ok(json{{"users", users}});
     });
 
     // Create a new user
-    server_->post("/api/users", [this](const HttpRequest& req) -> HttpResponse {
+    server_->post("/api/users", [this](const HttpRequest& req, Context& ctx) -> HttpResponse {
       try {
         json user_data = json::parse(req.body);
 
@@ -124,7 +124,7 @@ class ExampleMeerkatIntegrationTest : public ::testing::Test {
     });
 
     // Get user by ID
-    server_->get("/api/user", [this](const HttpRequest& req) -> HttpResponse {
+    server_->get("/api/user", [this](const HttpRequest& req, Context& ctx) -> HttpResponse {
       auto id_param = req.query_params.find("id");
       if (id_param == req.query_params.end()) {
         return responses::bad_request("Missing id parameter");
@@ -144,7 +144,7 @@ class ExampleMeerkatIntegrationTest : public ::testing::Test {
     });
 
     // Delete user by ID
-    server_->del("/api/user", [this](const HttpRequest& req) -> HttpResponse {
+    server_->del("/api/user", [this](const HttpRequest& req, Context& ctx) -> HttpResponse {
       auto id_param = req.query_params.find("id");
       if (id_param == req.query_params.end()) {
         return responses::bad_request("Missing id parameter");
@@ -165,8 +165,6 @@ class ExampleMeerkatIntegrationTest : public ::testing::Test {
     // Add logging middleware
     server_->use_response_interceptor(interceptors::response::logging());
 
-    // Enable CORS
-    server_->allow_all_origins();
   }
 
   void StartServerAsync() {
@@ -398,19 +396,6 @@ TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationDeleteUserNotFound) {
   EXPECT_EQ(response_json["error"], "User not found");
 }
 
-TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationCorsHeadersPresent) {
-  ASSERT_TRUE(server_->listen("127.0.0.1", port_));
-  StartServerAsync();
-
-  auto response = client_->get(GetBaseUrl() + "/", 10000);
-
-  EXPECT_TRUE(response.success);
-  EXPECT_EQ(response.status_code, 200);
-
-  // CORS headers should be present due to allow_all_origins() in SetupRoutes
-  EXPECT_TRUE(response.headers.count("Access-Control-Allow-Origin"));
-  EXPECT_EQ(response.headers["Access-Control-Allow-Origin"], "*");
-}
 
 TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationCreateUserWorkflow) {
   // Test complete create -> retrieve -> delete workflow
