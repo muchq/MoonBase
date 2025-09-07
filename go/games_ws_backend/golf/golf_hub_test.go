@@ -137,52 +137,52 @@ func TestHub_CreateAndJoinGame(t *testing.T) {
 	})
 	time.Sleep(10 * time.Millisecond)
 	
-	// Check client 1 received gameJoined message
+	// Check client 1 received roomJoined message
 	messages1 := client1.getMessages()
 	if len(messages1) != 1 {
 		t.Fatalf("Expected 1 message for client1, got %d", len(messages1))
 	}
 	
-	var joinedMsg GameJoinedMessage
+	var joinedMsg RoomJoinedMessage
 	if err := json.Unmarshal(messages1[0], &joinedMsg); err != nil {
-		t.Fatalf("Failed to parse gameJoined message: %v", err)
+		t.Fatalf("Failed to parse roomJoined message: %v", err)
 	}
 	
-	if joinedMsg.Type != "gameJoined" {
-		t.Errorf("Expected gameJoined message, got %s", joinedMsg.Type)
+	if joinedMsg.Type != "roomJoined" {
+		t.Errorf("Expected roomJoined message, got %s", joinedMsg.Type)
 	}
 	
-	gameID := joinedMsg.GameState.ID
-	if len(gameID) != 6 {
-		t.Errorf("Expected 6-character game ID, got %s", gameID)
+	roomID := joinedMsg.RoomState.ID
+	if len(roomID) != 6 {
+		t.Errorf("Expected 6-character room ID, got %s", roomID)
 	}
 	
-	// Client 2 joins the game
+	// Client 2 joins the room
 	client2.clearMessages()
-	joinMsg := `{"type": "joinGame", "gameId": "` + gameID + `"}`
+	joinMsg := `{"type": "joinGame", "gameId": "` + roomID + `"}`
 	golfHub.GameMessage(hub.GameMessageData{
 		Message: []byte(joinMsg),
 		Sender:  hubClient2,
 	})
 	time.Sleep(10 * time.Millisecond)
 	
-	// Check client 2 received gameJoined message (and possibly a game state broadcast)
+	// Check client 2 received roomJoined message (and possibly a room state broadcast)
 	messages2 := client2.getMessages()
 	if len(messages2) == 0 {
 		t.Fatal("Expected at least 1 message for client2")
 	}
 	
-	var joined2Msg GameJoinedMessage
+	var joined2Msg RoomJoinedMessage
 	if err := json.Unmarshal(messages2[0], &joined2Msg); err != nil {
-		t.Fatalf("Failed to parse gameJoined message: %v", err)
+		t.Fatalf("Failed to parse roomJoined message: %v", err)
 	}
 	
-	if joined2Msg.GameState.ID != gameID {
-		t.Errorf("Expected to join game %s, got %s", gameID, joined2Msg.GameState.ID)
+	if joined2Msg.RoomState.ID != roomID {
+		t.Errorf("Expected to join room %s, got %s", roomID, joined2Msg.RoomState.ID)
 	}
 	
-	if len(joined2Msg.GameState.Players) != 2 {
-		t.Errorf("Expected 2 players in game, got %d", len(joined2Msg.GameState.Players))
+	if len(joined2Msg.RoomState.Players) != 2 {
+		t.Errorf("Expected 2 players in room, got %d", len(joined2Msg.RoomState.Players))
 	}
 	
 	client1.close()
@@ -214,12 +214,12 @@ func TestHub_StartGame(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	
 	messages1 := client1.getMessages()
-	var joinedMsg GameJoinedMessage
+	var joinedMsg RoomJoinedMessage
 	json.Unmarshal(messages1[0], &joinedMsg)
-	gameID := joinedMsg.GameState.ID
+	roomID := joinedMsg.RoomState.ID
 	
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(`{"type": "joinGame", "gameId": "` + gameID + `"}`),
+		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `"}`),
 		Sender:  hubClient2,
 	})
 	time.Sleep(10 * time.Millisecond)
@@ -295,14 +295,14 @@ func TestHub_PeekCard(t *testing.T) {
 	})
 	time.Sleep(10 * time.Millisecond)
 	
-	// Get game ID and join with second player
+	// Get room ID and join with second player
 	messages1 := client1.getMessages()
-	var joinedMsg GameJoinedMessage
-	json.Unmarshal(messages1[0], &joinedMsg)
-	gameID := joinedMsg.GameState.ID
+	var roomJoinedMsg RoomJoinedMessage
+	json.Unmarshal(messages1[0], &roomJoinedMsg)
+	roomID := roomJoinedMsg.RoomState.ID
 	
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(`{"type": "joinGame", "gameId": "` + gameID + `"}`),
+		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `"}`),
 		Sender:  hubClient2,
 	})
 	time.Sleep(10 * time.Millisecond)
@@ -313,6 +313,25 @@ func TestHub_PeekCard(t *testing.T) {
 		Sender:  hubClient1,
 	})
 	time.Sleep(10 * time.Millisecond)
+	
+	// Get the actual game ID from the game state after starting
+	startMessages := client1.getMessages()
+	var gameID string
+	for _, msg := range startMessages {
+		var gameStateMsg GameStateUpdateMessage
+		if err := json.Unmarshal(msg, &gameStateMsg); err == nil && gameStateMsg.Type == "gameState" {
+			gameID = gameStateMsg.GameState.ID
+			break
+		}
+	}
+	if gameID == "" {
+		t.Fatal("Could not find game ID after starting game")
+	}
+	
+	// Verify game ID is different from room ID
+	if gameID == roomID {
+		t.Fatal("Game ID should be different from room ID")
+	}
 	
 	client1.clearMessages()
 	
@@ -383,13 +402,13 @@ func TestHub_GameFlow(t *testing.T) {
 	
 	// Get game ID
 	messages1 := client1.getMessages()
-	var joinedMsg GameJoinedMessage
-	json.Unmarshal(messages1[0], &joinedMsg)
-	gameID := joinedMsg.GameState.ID
+	var roomJoinedMsg RoomJoinedMessage
+	json.Unmarshal(messages1[0], &roomJoinedMsg)
+	roomID := roomJoinedMsg.RoomState.ID
 	
 	// Player 2 joins
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(`{"type": "joinGame", "gameId": "` + gameID + `"}`),
+		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `"}`),
 		Sender:  hubClient2,
 	})
 	time.Sleep(10 * time.Millisecond)
@@ -478,13 +497,13 @@ func TestHub_PlayerDisconnect(t *testing.T) {
 	
 	// Get game ID
 	messages1 := client1.getMessages()
-	var joinedMsg GameJoinedMessage
-	json.Unmarshal(messages1[0], &joinedMsg)
-	gameID := joinedMsg.GameState.ID
+	var roomJoinedMsg RoomJoinedMessage
+	json.Unmarshal(messages1[0], &roomJoinedMsg)
+	roomID := roomJoinedMsg.RoomState.ID
 	
 	// Player 2 joins
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(`{"type": "joinGame", "gameId": "` + gameID + `"}`),
+		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `"}`),
 		Sender:  hubClient2,
 	})
 	time.Sleep(10 * time.Millisecond)

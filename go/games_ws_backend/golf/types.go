@@ -7,14 +7,33 @@ import (
 	"time"
 )
 
+// Room represents a persistent room where multiple games can be played
+type Room struct {
+	ID              string         `json:"id"`
+	Players         []*Player      `json:"players"`
+	CurrentGame     *Game          `json:"currentGame,omitempty"`
+	GameHistory     []*GameResult  `json:"gameHistory"`
+	CreatedAt       time.Time      `json:"createdAt"`
+	LastActivity    time.Time      `json:"lastActivity"`
+}
+
+// GameResult stores the outcome of a completed game
+type GameResult struct {
+	GameID          string        `json:"gameId"`
+	Winner          string        `json:"winner"`
+	FinalScores     []*FinalScore `json:"finalScores"`
+	CompletedAt     time.Time     `json:"completedAt"`
+}
+
 // Card represents a playing card
 type Card struct {
 	Rank string `json:"rank"`
 	Suit string `json:"suit"`
 }
 
-// Player represents a player in the game
+// Player represents a player in the game and room
 type Player struct {
+	// Game-specific fields
 	ID            string  `json:"id"`
 	Name          string  `json:"name"`
 	Cards         []*Card `json:"cards"`
@@ -22,6 +41,14 @@ type Player struct {
 	RevealedCards []int   `json:"revealedCards"`
 	IsReady       bool    `json:"isReady"`
 	HasPeeked     bool    `json:"hasPeeked"`
+	
+	// Room/persistence fields
+	ClientID      string    `json:"clientId"`
+	TotalScore    int       `json:"totalScore"`    // Running total across all games
+	GamesPlayed   int       `json:"gamesPlayed"`
+	GamesWon      int       `json:"gamesWon"`
+	IsConnected   bool      `json:"isConnected"`
+	JoinedAt      time.Time `json:"joinedAt"`
 }
 
 // GameState represents the full game state
@@ -45,7 +72,8 @@ type CreateGameMessage struct {
 
 type JoinGameMessage struct {
 	Type   string `json:"type"`
-	GameID string `json:"gameId"`
+	RoomID string `json:"roomId"`
+	GameID string `json:"gameId,omitempty"` // Optional - if not provided, joins the current game in the room
 }
 
 type StartGameMessage struct {
@@ -79,6 +107,14 @@ type KnockMessage struct {
 }
 
 type HideCardsMessage struct {
+	Type string `json:"type"`
+}
+
+type StartNewGameMessage struct {
+	Type string `json:"type"`
+}
+
+type GetRoomStateMessage struct {
 	Type string `json:"type"`
 }
 
@@ -124,9 +160,25 @@ type GameEndedMessage struct {
 	FinalScores []*FinalScore `json:"finalScores"`
 }
 
+type RoomJoinedMessage struct {
+	Type      string     `json:"type"`
+	PlayerID  string     `json:"playerId"`
+	RoomState *Room      `json:"roomState"`
+}
+
+type RoomStateUpdateMessage struct {
+	Type      string `json:"type"`
+	RoomState *Room  `json:"roomState"`
+}
+
+type NewGameStartedMessage struct {
+	Type string `json:"type"`
+}
+
 // Generic message for parsing
 type IncomingMessage struct {
 	Type      string `json:"type"`
+	RoomID    string `json:"roomId,omitempty"`
 	GameID    string `json:"gameId,omitempty"`
 	CardIndex int    `json:"cardIndex,omitempty"`
 }
@@ -181,6 +233,11 @@ func GenerateGameID() string {
 		b[i] = charset[rand.Intn(len(charset))]
 	}
 	return string(b)
+}
+
+// GenerateRoomID generates a 6-character uppercase alphanumeric room ID
+func GenerateRoomID() string {
+	return GenerateGameID() // Same format as game ID
 }
 
 // GeneratePlayerName generates a simple player name
