@@ -104,7 +104,7 @@ TEST_F(MeerkatIntegrationTest, RequestInterceptorAuthentication) {
   std::cout << "Starting RequestInterceptorAuthentication test..." << std::endl;
 
   // Add simple request interceptor that doesn't capture anything
-  server_->use_request_interceptor([](HttpRequest& req, HttpResponse& res) -> bool {
+  server_->use_request_interceptor([](HttpRequest& req, HttpResponse& res, Context& ctx) -> bool {
     std::cout << "Request interceptor executed" << std::endl;
 
     auto auth_header = req.headers.find("Authorization");
@@ -217,86 +217,4 @@ TEST_F(MeerkatIntegrationTest, QueryParameters) {
   EXPECT_EQ(response_json["params"]["q"], "test");
   EXPECT_EQ(response_json["params"]["category"], "books");
   EXPECT_EQ(response_json["params"]["limit"], "10");
-}
-
-TEST_F(MeerkatIntegrationTest, CorsPreflightRequest) {
-  // Enable CORS with specific configuration
-  HttpServer::CorsConfig config;
-  config.allowed_origins.insert("https://example.com");
-  config.allowed_methods.insert("POST");
-  config.allowed_methods.insert("PUT");
-  config.allowed_headers.insert("Content-Type");
-  config.allowed_headers.insert("Authorization");
-  config.allow_credentials = true;
-  config.max_age = 3600;
-
-  server_->enable_cors(config);
-
-  // Add a regular route
-  server_->post("/api/data", [](const HttpRequest& req) -> HttpResponse {
-    return responses::ok(json{{"message", "POST received"}});
-  });
-
-  ASSERT_TRUE(server_->listen("127.0.0.1", port_));
-  StartServerAsync();
-
-  server_->poll(10);
-  EXPECT_TRUE(server_->is_running());
-}
-
-TEST_F(MeerkatIntegrationTest, WebSocketConnection) {
-  std::vector<std::string> received_messages;
-  bool connection_accepted = false;
-  bool connection_closed = false;
-
-  server_->websocket(
-      "/ws/test",
-      // Message handler
-      [&received_messages](struct mg_connection* c, const std::string& message) {
-        received_messages.push_back(message);
-
-        // Echo the message back
-        websocket::send_text(c, "Echo: " + message);
-
-        // Send a JSON response
-        json response = {
-            {"type", "echo"}, {"original", message}, {"timestamp", std::time(nullptr)}};
-        websocket::send_json(c, response);
-      },
-      // Connect handler
-      [&connection_accepted](struct mg_connection* c, const HttpRequest& req) -> bool {
-        connection_accepted = true;
-
-        // Check for authentication or other connection criteria
-        auto auth_header = req.headers.find("Authorization");
-        if (auth_header != req.headers.end() && auth_header->second == "Bearer valid-token") {
-          return true;  // Accept connection
-        }
-
-        // For this test, accept all connections
-        return true;
-      },
-      // Close handler
-      [&connection_closed](struct mg_connection* c) { connection_closed = true; });
-
-  ASSERT_TRUE(server_->listen("127.0.0.1", port_));
-  StartServerAsync();
-
-  server_->poll(10);
-  EXPECT_TRUE(server_->is_running());
-}
-
-TEST_F(MeerkatIntegrationTest, WebSocketWithCors) {
-  // Enable CORS for WebSocket upgrades
-  server_->allow_all_origins();
-
-  server_->websocket("/ws/cors", [](struct mg_connection* c, const std::string& message) {
-    websocket::send_text(c, "CORS WebSocket: " + message);
-  });
-
-  ASSERT_TRUE(server_->listen("127.0.0.1", port_));
-  StartServerAsync();
-
-  server_->poll(10);
-  EXPECT_TRUE(server_->is_running());
 }

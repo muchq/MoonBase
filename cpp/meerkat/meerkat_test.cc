@@ -63,7 +63,7 @@ TEST_F(MeerkatTest, CanRegisterRequestInterceptor) {
   // Test that interceptor registration doesn't crash and accepts correct signature
   bool interceptor_registered = false;
 
-  server_->use_request_interceptor([&](HttpRequest& req, HttpResponse& res) -> bool {
+  server_->use_request_interceptor([&](HttpRequest& req, HttpResponse& res, Context& ctx) -> bool {
     interceptor_registered = true;
     return true;  // Continue processing
   });
@@ -75,11 +75,11 @@ TEST_F(MeerkatTest, CanRegisterRequestInterceptor) {
 
 TEST_F(MeerkatTest, CanRegisterMultipleRequestInterceptors) {
   // Test that multiple interceptors can be registered
-  server_->use_request_interceptor([](HttpRequest& req, HttpResponse& res) -> bool {
+  server_->use_request_interceptor([](HttpRequest& req, HttpResponse& res, Context& ctx) -> bool {
     return true;  // Continue processing
   });
 
-  server_->use_request_interceptor([](HttpRequest& req, HttpResponse& res) -> bool {
+  server_->use_request_interceptor([](HttpRequest& req, HttpResponse& res, Context& ctx) -> bool {
     return false;  // Block processing
   });
 
@@ -135,42 +135,4 @@ TEST_F(MeerkatTest, HttpServerCannotBeCopiedOrMoved) {
   EXPECT_FALSE(server1.is_running());
   server1.stop();
   EXPECT_FALSE(server1.is_running());
-}
-
-TEST_F(MeerkatTest, CorsConfiguration) {
-  HttpServer::CorsConfig config;
-  config.allowed_origins.insert("https://example.com");
-  config.allowed_origins.insert("https://app.example.com");
-  config.allowed_methods.insert("POST");
-  config.allowed_headers.insert("X-Custom-Header");
-  config.allow_credentials = true;
-  config.max_age = 3600;
-
-  server_->enable_cors(config);
-
-  // Test allow_origin method
-  server_->allow_origin("https://another.com");
-
-  // Test allow_all_origins method
-  HttpServer server2;
-  server2.allow_all_origins();
-}
-
-TEST_F(MeerkatTest, WebSocketRouteRegistration) {
-  bool message_received = false;
-  bool connection_established = false;
-  bool connection_closed = false;
-
-  server_->websocket(
-      "/ws",
-      [&message_received](struct mg_connection* c, const std::string& message) {
-        message_received = true;
-      },
-      [&connection_established](struct mg_connection* c, const HttpRequest& req) -> bool {
-        connection_established = true;
-        return true;  // Accept connection
-      },
-      [&connection_closed](struct mg_connection* c) { connection_closed = true; });
-
-  // WebSocket routes are registered but won't be tested without actual connections
 }

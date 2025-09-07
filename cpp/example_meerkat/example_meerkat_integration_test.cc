@@ -165,8 +165,6 @@ class ExampleMeerkatIntegrationTest : public ::testing::Test {
     // Add logging middleware
     server_->use_response_interceptor(interceptors::response::logging());
 
-    // Enable CORS
-    server_->allow_all_origins();
   }
 
   void StartServerAsync() {
@@ -398,19 +396,6 @@ TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationDeleteUserNotFound) {
   EXPECT_EQ(response_json["error"], "User not found");
 }
 
-TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationCorsHeadersPresent) {
-  ASSERT_TRUE(server_->listen("127.0.0.1", port_));
-  StartServerAsync();
-
-  auto response = client_->get(GetBaseUrl() + "/", 10000);
-
-  EXPECT_TRUE(response.success);
-  EXPECT_EQ(response.status_code, 200);
-
-  // CORS headers should be present due to allow_all_origins() in SetupRoutes
-  EXPECT_TRUE(response.headers.count("Access-Control-Allow-Origin"));
-  EXPECT_EQ(response.headers["Access-Control-Allow-Origin"], "*");
-}
 
 TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationCreateUserWorkflow) {
   // Test complete create -> retrieve -> delete workflow

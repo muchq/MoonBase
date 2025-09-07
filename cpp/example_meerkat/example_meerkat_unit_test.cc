@@ -433,7 +433,7 @@ TEST_F(ExampleMeerkatUnitTest, MiddlewareIsConfigured) {
   // Create a new server with request interceptor
   HttpServer test_server;
   test_server.use_request_interceptor(
-      [&middleware_called](HttpRequest& req, HttpResponse& res) -> bool {
+      [&middleware_called](HttpRequest& req, HttpResponse& res, Context& ctx) -> bool {
         middleware_called = true;
         return true;
       });

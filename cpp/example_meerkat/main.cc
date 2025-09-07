@@ -135,9 +135,6 @@ int main() {
   // Add logging middleware
   server.use_response_interceptor(interceptors::response::logging());
 
-  // Enable CORS for development
-  server.allow_all_origins();
-
   // Start the server
   const std::string host = "127.0.0.1";
   const int port = 8080;
