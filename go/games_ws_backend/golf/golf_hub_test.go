@@ -206,9 +206,9 @@ func TestHub_StartGame(t *testing.T) {
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
 
-	// Create game and get both players in
+	// Create room, game and get both players in
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(`{"type": "createGame"}`),
+		Message: []byte(`{"type": "createRoom"}`),
 		Sender:  hubClient1,
 	})
 	time.Sleep(10 * time.Millisecond)
