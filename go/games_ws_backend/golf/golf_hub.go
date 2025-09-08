@@ -16,8 +16,11 @@ type GolfHub struct {
 	// Active rooms mapped by room ID
 	rooms map[string]*Room
 
-	// Client to room ID mapping
-	clientToRoom map[*hub.Client]string
+	// Client to game context mapping
+	clientToRoom map[*hub.Client]*Room
+
+	// Client to game context mapping
+	clientToGame map[*hub.Client]*GameContext
 
 	// Mutex for thread safety
 	mu sync.RWMutex
@@ -35,7 +38,8 @@ type GolfHub struct {
 func NewGolfHub() hub.Hub {
 	return &GolfHub{
 		rooms:        make(map[string]*Room),
-		clientToRoom: make(map[*hub.Client]string),
+		clientToRoom: make(map[*hub.Client]*Room),
+		clientToGame: make(map[*hub.Client]*GameContext),
 		gameMessage:  make(chan hub.GameMessageData),
 		register:     make(chan *hub.Client),
 		unregister:   make(chan *hub.Client),
@@ -94,10 +98,10 @@ func (h *GolfHub) handleUnregister(client *hub.Client) {
 
 		if _, ok := h.clients[client]; ok {
 			// Remove player from room if they're in one
-			if roomID, exists := h.clientToRoom[client]; exists {
-				if room, roomExists := h.rooms[roomID]; roomExists {
+			if gameContext, exists := h.clientToGame[client]; exists {
+				if room, roomExists := h.rooms[gameContext.RoomID]; roomExists {
 					clientID := getClientID(client)
-					
+
 					// Mark player as disconnected
 					for _, player := range room.Players {
 						if player.ClientID == clientID {
@@ -105,20 +109,22 @@ func (h *GolfHub) handleUnregister(client *hub.Client) {
 							break
 						}
 					}
-					
-					// Remove player from current game if there is one
-					if room.CurrentGame != nil {
-						if err := room.CurrentGame.RemovePlayer(clientID); err != nil {
-							slog.Error("Failed to remove player from game",
-								"error", err,
-								"roomID", roomID,
-								"gameID", room.CurrentGame.state.ID)
+
+					// Remove player from their current game if there is one
+					if gameContext.GameID != "" {
+						if game, gameExists := room.Games[gameContext.GameID]; gameExists {
+							if err := game.RemovePlayer(clientID); err != nil {
+								slog.Error("Failed to remove player from game",
+									"error", err,
+									"roomID", gameContext.RoomID,
+									"gameID", gameContext.GameID)
+							}
 						}
 					}
-					
+
 					room.LastActivity = time.Now()
 					roomToUpdate = room
-					
+
 					// Clean up empty rooms (no connected players)
 					connectedCount := 0
 					for _, player := range room.Players {
@@ -127,12 +133,12 @@ func (h *GolfHub) handleUnregister(client *hub.Client) {
 						}
 					}
 					if connectedCount == 0 {
-						delete(h.rooms, roomID)
-						slog.Info("Removed empty room", "roomID", roomID)
+						delete(h.rooms, gameContext.RoomID)
+						slog.Info("Removed empty room", "roomID", gameContext.RoomID)
 						roomToUpdate = nil // Don't broadcast for empty rooms
 					}
 				}
-				delete(h.clientToRoom, client)
+				delete(h.clientToGame, client)
 			}
 
 			delete(h.clients, client)
@@ -158,10 +164,12 @@ func (h *GolfHub) handleGameMessage(msgData hub.GameMessageData) {
 	}
 
 	switch msg.Type {
-	case "createGame":
+	case "createRoom":
 		h.handleCreateRoom(msgData.Sender)
+	case "createGame":
+		h.handleCreateGame(msgData.Sender, msg.RoomID)
 	case "joinGame":
-		h.handleJoinRoom(msgData.Sender, msg.RoomID)
+		h.handleJoinGame(msgData.Sender, msg.RoomID, msg.GameID)
 	case "startGame":
 		h.handleStartGame(msgData.Sender)
 	case "startNewGame":
@@ -201,7 +209,11 @@ func (h *GolfHub) handleCreateRoom(client *hub.Client) {
 	// Create new room
 	room := h.createRoom(client)
 	h.rooms[room.ID] = room
-	h.clientToRoom[client] = room.ID
+	h.clientToRoom[client] = room
+	h.clientToGame[client] = &GameContext{
+		RoomID: room.ID,
+		GameID: "", // Not in a specific game yet
+	}
 
 	// Send room joined message
 	player := room.Players[0] // First player is the creator
@@ -213,8 +225,84 @@ func (h *GolfHub) handleCreateRoom(client *hub.Client) {
 		"clientAddr", getClientAddr(client))
 }
 
-// handleJoinRoom joins an existing room
-func (h *GolfHub) handleJoinRoom(client *hub.Client, roomID string) {
+// handleCreateGame creates a new game within an existing room
+func (h *GolfHub) handleCreateGame(client *hub.Client, roomID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// Validate roomID
+	if roomID == "" {
+		h.sendError(client, "Room ID is required")
+		return
+	}
+
+	// Check if room exists
+	room, exists := h.rooms[roomID]
+	if !exists {
+		h.sendError(client, "Room not found")
+		return
+	}
+
+	// Check if client is in this room
+	gameContext, inRoom := h.clientToGame[client]
+	if !inRoom || gameContext.RoomID != roomID {
+		h.sendError(client, "Must be in the room to create a game")
+		return
+	}
+
+	// Generate a unique game ID for this room
+	gameID := h.generateGameID(room)
+
+	// Create the game using existing helper
+	game, err := h.createGameInRoom(roomID, gameID)
+	if err != nil {
+		h.sendError(client, err.Error())
+		return
+	}
+
+	// Add client to the new game
+	clientID := getClientID(client)
+	player, err := game.AddPlayer(clientID)
+	if err != nil {
+		h.sendError(client, err.Error())
+		return
+	}
+
+	// Update client's game context
+	h.clientToGame[client] = &GameContext{
+		RoomID: roomID,
+		GameID: gameID,
+	}
+
+	room.LastActivity = time.Now()
+
+	slog.Info("Game created in room",
+		"roomID", roomID,
+		"gameID", gameID,
+		"playerID", player.ID,
+		"clientAddr", getClientAddr(client))
+
+	// Send game joined message
+	h.sendGameJoined(client, player.ID, game.GetStateForPlayer(clientID))
+
+	// Broadcast room state update to show new game
+	h.broadcastRoomState(room)
+}
+
+// generateGameID generates a unique game ID within a room
+func (h *GolfHub) generateGameID(room *Room) string {
+	for i := 1; i <= 100; i++ {
+		gameID := fmt.Sprintf("GAME%d", i)
+		if _, exists := room.Games[gameID]; !exists {
+			return gameID
+		}
+	}
+	// Fallback to random ID if somehow we have 100 games
+	return GenerateGameID()
+}
+
+// handleJoinGame joins an existing room and specific game
+func (h *GolfHub) handleJoinGame(client *hub.Client, roomID string, gameID string) {
 	var room *Room
 	var player *Player
 
@@ -223,22 +311,71 @@ func (h *GolfHub) handleJoinRoom(client *hub.Client, roomID string) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 
-		// Check if client is already in a room
-		if _, exists := h.clientToRoom[client]; exists {
-			h.sendError(client, "Already in a room")
+		// Validate required parameters
+		if roomID == "" {
+			h.sendError(client, "Room ID is required")
+			return
+		}
+		if gameID == "" {
+			h.sendError(client, "Game ID is required")
 			return
 		}
 
-		// Add player to room
-		var err error
-		player, err = h.addPlayerToRoom(roomID, client)
-		if err != nil {
-			h.sendError(client, err.Error())
-			return
+		// Check if client is already in a room/game context
+		if gameContext, exists := h.clientToGame[client]; exists {
+			// If already in the same room, just update their game ID
+			if gameContext.RoomID == roomID {
+				// Update game context to join the specific game
+				gameContext.GameID = gameID
+				room = h.rooms[roomID]
+
+				// Find the player in the room
+				clientID := getClientID(client)
+				for _, p := range room.Players {
+					if p.ClientID == clientID {
+						player = p
+						break
+					}
+				}
+
+				if player == nil {
+					h.sendError(client, "Player not found in room")
+					return
+				}
+			} else {
+				h.sendError(client, "Already in a different room")
+				return
+			}
+		} else {
+			// Add player to room (new player)
+			var err error
+			player, err = h.addPlayerToRoom(roomID, client)
+			if err != nil {
+				h.sendError(client, err.Error())
+				return
+			}
+			room = h.rooms[roomID]
 		}
 
-		room = h.rooms[roomID]
-		h.clientToRoom[client] = roomID
+		// Check if game exists, create it if it doesn't
+		if _, exists := room.Games[gameID]; !exists {
+			// Create new game
+			_, err := h.createGameInRoom(roomID, gameID)
+			if err != nil {
+				h.sendError(client, err.Error())
+				return
+			}
+		}
+
+		// Set or update client's game context
+		if gameContext, exists := h.clientToGame[client]; exists {
+			gameContext.GameID = gameID // Update existing context
+		} else {
+			h.clientToGame[client] = &GameContext{
+				RoomID: roomID,
+				GameID: gameID,
+			}
+		}
 	}()
 
 	// Exit if join failed
@@ -252,34 +389,43 @@ func (h *GolfHub) handleJoinRoom(client *hub.Client, roomID string) {
 	// Broadcast updated state to all players in room
 	h.broadcastRoomState(room)
 
-	slog.Info("Player joined room",
+	slog.Info("Player joined room and game",
 		"roomID", roomID,
+		"gameID", gameID,
 		"playerID", player.ID,
 		"clientAddr", getClientAddr(client))
 }
 
-// handleStartGame starts a game within the current room
+// handleStartGame starts a specific game within the current room
 func (h *GolfHub) handleStartGame(client *hub.Client) {
 	h.mu.Lock()
-	room := h.getClientRoom(client)
-	if room == nil {
+	gameContext := h.clientToGame[client]
+	if gameContext == nil {
 		h.mu.Unlock()
 		h.sendError(client, "Not in a room")
 		return
 	}
-	
-	// If there's no current game, create one
-	if room.CurrentGame == nil {
-		_, err := h.startNewGameInRoom(room.ID)
-		if err != nil {
-			h.mu.Unlock()
-			h.sendError(client, err.Error())
-			return
-		}
-		room = h.rooms[room.ID] // Refresh room reference
+
+	room := h.rooms[gameContext.RoomID]
+	if room == nil {
+		h.mu.Unlock()
+		h.sendError(client, "Room not found")
+		return
 	}
-	
-	game := room.CurrentGame
+
+	if gameContext.GameID == "" {
+		h.mu.Unlock()
+		h.sendError(client, "Not in a specific game")
+		return
+	}
+
+	game := room.Games[gameContext.GameID]
+	if game == nil {
+		h.mu.Unlock()
+		h.sendError(client, "Game not found")
+		return
+	}
+
 	h.mu.Unlock()
 
 	if err := game.StartGame(); err != nil {
@@ -293,7 +439,7 @@ func (h *GolfHub) handleStartGame(client *hub.Client) {
 	// Broadcast updated game state
 	h.broadcastGameState(game)
 
-	slog.Info("Game started", "gameID", game.state.ID, "roomID", room.ID)
+	slog.Info("Game started", "gameID", game.state.ID, "roomID", gameContext.RoomID)
 }
 
 // handlePeekCard handles card peeking
@@ -460,11 +606,66 @@ func (h *GolfHub) handleKnock(client *hub.Client) {
 // Helper methods
 
 func (h *GolfHub) getClientGame(client *hub.Client) *Game {
-	room := h.getClientRoom(client)
+	gameContext := h.clientToGame[client]
+	if gameContext == nil {
+		return nil
+	}
+
+	room := h.rooms[gameContext.RoomID]
 	if room == nil {
 		return nil
 	}
-	return room.CurrentGame
+
+	return room.Games[gameContext.GameID]
+}
+
+// getClientRoom returns the room for a given client using the new GameContext
+func (h *GolfHub) getClientRoom(client *hub.Client) *Room {
+	gameContext := h.clientToGame[client]
+	if gameContext == nil {
+		return nil
+	}
+	return h.rooms[gameContext.RoomID]
+}
+
+// createGameInRoom creates a new game within a room
+func (h *GolfHub) createGameInRoom(roomID string, gameID string) (*Game, error) {
+	room, exists := h.rooms[roomID]
+	if !exists {
+		return nil, fmt.Errorf("room not found")
+	}
+
+	connectedPlayers := make([]*Player, 0)
+
+	// Create new game
+	idGenerator := &players.WhimsicalIDGenerator{}
+	game := NewGameInRoom(gameID, roomID, connectedPlayers, idGenerator)
+
+	room.Games[gameID] = game
+	room.LastActivity = time.Now()
+
+	return game, nil
+}
+
+// removeGameFromRoom removes a completed game from the room
+func (h *GolfHub) removeGameFromRoom(roomID string, gameID string) error {
+	room, exists := h.rooms[roomID]
+	if !exists {
+		return fmt.Errorf("room not found")
+	}
+
+	game, exists := room.Games[gameID]
+	if !exists {
+		return fmt.Errorf("game not found")
+	}
+
+	// Only remove if game is ended
+	if game.state.GamePhase == "ended" {
+		delete(room.Games, gameID)
+		room.LastActivity = time.Now()
+	}
+
+	return nil
 }
 
 func (h *GolfHub) sendError(client *hub.Client, message string) {
@@ -502,10 +703,14 @@ func (h *GolfHub) broadcastGameState(game *Game) {
 
 	// Collect all clients and their personalized states
 	h.mu.RLock()
-	for client, roomID := range h.clientToRoom {
-		if room, exists := h.rooms[roomID]; exists && room.CurrentGame != nil && room.CurrentGame.state.ID == game.state.ID {
-			personalizedState := game.GetStateForPlayer(getClientID(client))
-			pairs = append(pairs, clientStatePair{client: client, state: personalizedState})
+	for client, gameContext := range h.clientToGame {
+		if gameContext != nil && gameContext.GameID == game.state.ID {
+			if room, exists := h.rooms[gameContext.RoomID]; exists {
+				if gameInRoom, gameExists := room.Games[gameContext.GameID]; gameExists && gameInRoom.state.ID == game.state.ID {
+					personalizedState := game.GetStateForPlayer(getClientID(client))
+					pairs = append(pairs, clientStatePair{client: client, state: personalizedState})
+				}
+			}
 		}
 	}
 	h.mu.RUnlock()
@@ -557,12 +762,12 @@ func (h *GolfHub) broadcastToGame(game *Game, message interface{}) {
 func (h *GolfHub) handleGameEnded(game *Game) {
 	// First broadcast the game ended message
 	h.broadcastGameEnded(game)
-	
+
 	// If this game belongs to a room, update room statistics
 	roomID := game.GetRoomID()
 	if roomID != "" {
 		h.mu.Lock()
-		err := h.completeGameInRoom(roomID)
+		err := h.completeGameInRoom(roomID, game.state.ID)
 		if err != nil {
 			slog.Error("Failed to complete game in room",
 				"error", err,
@@ -573,7 +778,7 @@ func (h *GolfHub) handleGameEnded(game *Game) {
 			if room, exists := h.rooms[roomID]; exists {
 				h.mu.Unlock()
 				h.broadcastRoomState(room)
-				
+
 				slog.Info("Game completed and room stats updated",
 					"roomID", roomID,
 					"gameID", game.state.ID)
@@ -585,9 +790,13 @@ func (h *GolfHub) handleGameEnded(game *Game) {
 }
 
 func (h *GolfHub) broadcastToGameLocked(game *Game, message interface{}) {
-	for client, roomID := range h.clientToRoom {
-		if room, exists := h.rooms[roomID]; exists && room.CurrentGame != nil && room.CurrentGame.state.ID == game.state.ID {
-			h.sendJSON(client, message)
+	for client, gameContext := range h.clientToGame {
+		if gameContext != nil && gameContext.GameID == game.state.ID {
+			if room, exists := h.rooms[gameContext.RoomID]; exists {
+				if gameInRoom, gameExists := room.Games[gameContext.GameID]; gameExists && gameInRoom.state.ID == game.state.ID {
+					h.sendJSON(client, message)
+				}
+			}
 		}
 	}
 }
@@ -654,32 +863,32 @@ func (h *GolfHub) createRoom(client *hub.Client) *Room {
 	clientID := getClientID(client)
 	idGenerator := &players.WhimsicalIDGenerator{}
 	playerName := idGenerator.GenerateID()
-	
+
 	player := &Player{
-		ID:          fmt.Sprintf("player_%s_%d", roomID, 1),
-		Name:        playerName,
-		ClientID:    clientID,
-		Cards:       CreateHiddenCards(),
-		Score:       0,
+		ID:            fmt.Sprintf("player_%s_%d", roomID, 1),
+		Name:          playerName,
+		ClientID:      clientID,
+		Cards:         CreateHiddenCards(),
+		Score:         0,
 		RevealedCards: make([]int, 0),
-		IsReady:     false,
-		HasPeeked:   false,
-		TotalScore:  0,
-		GamesPlayed: 0,
-		GamesWon:    0,
-		IsConnected: true,
-		JoinedAt:    time.Now(),
+		IsReady:       false,
+		HasPeeked:     false,
+		TotalScore:    0,
+		GamesPlayed:   0,
+		GamesWon:      0,
+		IsConnected:   true,
+		JoinedAt:      time.Now(),
 	}
-	
+
 	room := &Room{
 		ID:           roomID,
 		Players:      []*Player{player},
-		CurrentGame:  nil,
+		Games:        make(map[string]*Game),
 		GameHistory:  make([]*GameResult, 0),
 		CreatedAt:    time.Now(),
 		LastActivity: time.Now(),
 	}
-	
+
 	return room
 }
 
@@ -689,13 +898,13 @@ func (h *GolfHub) addPlayerToRoom(roomID string, client *hub.Client) (*Player, e
 	if !exists {
 		return nil, fmt.Errorf("room not found")
 	}
-	
+
 	if len(room.Players) >= 4 {
 		return nil, fmt.Errorf("room is full")
 	}
-	
+
 	clientID := getClientID(client)
-	
+
 	// Check if player is already in room
 	for _, player := range room.Players {
 		if player.ClientID == clientID {
@@ -704,93 +913,65 @@ func (h *GolfHub) addPlayerToRoom(roomID string, client *hub.Client) (*Player, e
 			return player, nil
 		}
 	}
-	
+
 	// Create new player
 	idGenerator := &players.WhimsicalIDGenerator{}
 	playerName := idGenerator.GenerateID()
 	playerNum := len(room.Players) + 1
-	
+
 	player := &Player{
-		ID:          fmt.Sprintf("player_%s_%d", roomID, playerNum),
-		Name:        playerName,
-		ClientID:    clientID,
-		Cards:       CreateHiddenCards(),
-		Score:       0,
+		ID:            fmt.Sprintf("player_%s_%d", roomID, playerNum),
+		Name:          playerName,
+		ClientID:      clientID,
+		Cards:         CreateHiddenCards(),
+		Score:         0,
 		RevealedCards: make([]int, 0),
-		IsReady:     false,
-		HasPeeked:   false,
-		TotalScore:  0,
-		GamesPlayed: 0,
-		GamesWon:    0,
-		IsConnected: true,
-		JoinedAt:    time.Now(),
+		IsReady:       false,
+		HasPeeked:     false,
+		TotalScore:    0,
+		GamesPlayed:   0,
+		GamesWon:      0,
+		IsConnected:   true,
+		JoinedAt:      time.Now(),
 	}
-	
+
 	room.Players = append(room.Players, player)
 	room.LastActivity = time.Now()
-	
+
 	return player, nil
 }
 
-// startNewGameInRoom starts a new game within a room
+// startNewGameInRoom creates a new game within a room with a generated game ID
 func (h *GolfHub) startNewGameInRoom(roomID string) (*Game, error) {
-	room, exists := h.rooms[roomID]
-	if !exists {
-		return nil, fmt.Errorf("room not found")
-	}
-	
-	if room.CurrentGame != nil && room.CurrentGame.state.GamePhase != "ended" {
-		return nil, fmt.Errorf("game already in progress")
-	}
-	
-	// Get connected players
-	var connectedPlayers []*Player
-	for _, player := range room.Players {
-		if player.IsConnected {
-			connectedPlayers = append(connectedPlayers, player)
-		}
-	}
-	
-	if len(connectedPlayers) < 2 {
-		return nil, fmt.Errorf("need at least 2 connected players to start game")
-	}
-	
-	if len(connectedPlayers) > 4 {
-		return nil, fmt.Errorf("too many players for golf game")
-	}
-	
-	// Create new game
 	gameID := GenerateGameID()
-	idGenerator := &players.WhimsicalIDGenerator{}
-	game := NewGameInRoom(gameID, roomID, connectedPlayers, idGenerator)
-	
-	room.CurrentGame = game
-	room.LastActivity = time.Now()
-	
-	return game, nil
+	return h.createGameInRoom(roomID, gameID)
 }
 
 // completeGameInRoom handles game completion and updates room stats
-func (h *GolfHub) completeGameInRoom(roomID string) error {
+func (h *GolfHub) completeGameInRoom(roomID string, gameID string) error {
 	room, exists := h.rooms[roomID]
 	if !exists {
 		return fmt.Errorf("room not found")
 	}
-	
-	if room.CurrentGame == nil || room.CurrentGame.state.GamePhase != "ended" {
-		return fmt.Errorf("no completed game to process")
+
+	game, exists := room.Games[gameID]
+	if !exists {
+		return fmt.Errorf("game not found")
 	}
-	
-	game := room.CurrentGame
+
+	if game.state.GamePhase != "ended" {
+		return fmt.Errorf("game is not completed")
+	}
+
 	gameResult := game.GetGameResult()
 	if gameResult == nil {
 		return fmt.Errorf("failed to get game result")
 	}
-	
+
 	// Update room history
 	room.GameHistory = append(room.GameHistory, gameResult)
 	room.LastActivity = time.Now()
-	
+
 	// Update player statistics
 	for _, finalScore := range gameResult.FinalScores {
 		for _, roomPlayer := range room.Players {
@@ -804,20 +985,11 @@ func (h *GolfHub) completeGameInRoom(roomID string) error {
 			}
 		}
 	}
-	
-	// Clear current game
-	room.CurrentGame = nil
-	
-	return nil
-}
 
-// getClientRoom returns the room for a given client
-func (h *GolfHub) getClientRoom(client *hub.Client) *Room {
-	roomID, exists := h.clientToRoom[client]
-	if !exists {
-		return nil
-	}
-	return h.rooms[roomID]
+	// Remove completed game from active games
+	delete(room.Games, gameID)
+
+	return nil
 }
 
 // broadcastRoomState broadcasts room state to all players in the room
@@ -828,16 +1000,16 @@ func (h *GolfHub) broadcastRoomState(room *Room) {
 		room   *Room
 	}
 	var pairs []clientRoomPair
-	
+
 	// Collect all clients in this room
 	h.mu.RLock()
-	for client, roomID := range h.clientToRoom {
-		if roomID == room.ID {
+	for client, gameContext := range h.clientToGame {
+		if gameContext != nil && gameContext.RoomID == room.ID {
 			pairs = append(pairs, clientRoomPair{client: client, room: room})
 		}
 	}
 	h.mu.RUnlock()
-	
+
 	// Send messages without holding the lock
 	for _, pair := range pairs {
 		msg := &RoomStateUpdateMessage{
@@ -859,7 +1031,7 @@ func (h *GolfHub) handleStartNewGame(client *hub.Client) {
 		h.sendError(client, "Not in a room")
 		return
 	}
-	
+
 	// Start new game in room
 	game, err := h.startNewGameInRoom(room.ID)
 	if err != nil {
@@ -868,14 +1040,14 @@ func (h *GolfHub) handleStartNewGame(client *hub.Client) {
 		return
 	}
 	h.mu.Unlock()
-	
+
 	// Broadcast new game started message
 	h.broadcastToRoom(room, &NewGameStartedMessage{Type: "newGameStarted"})
-	
+
 	// Broadcast updated room state
 	h.broadcastRoomState(room)
-	
-	slog.Info("New game started in room", 
+
+	slog.Info("New game started in room",
 		"roomID", room.ID,
 		"gameID", game.state.ID)
 }
@@ -885,12 +1057,12 @@ func (h *GolfHub) handleGetRoomState(client *hub.Client) {
 	h.mu.RLock()
 	room := h.getClientRoom(client)
 	h.mu.RUnlock()
-	
+
 	if room == nil {
 		h.sendError(client, "Not in a room")
 		return
 	}
-	
+
 	// Send room state update
 	msg := &RoomStateUpdateMessage{
 		Type:      "roomStateUpdate",
@@ -914,8 +1086,8 @@ func (h *GolfHub) broadcastToRoom(room *Room, message interface{}) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	for client, roomID := range h.clientToRoom {
-		if roomID == room.ID {
+	for client, gameContext := range h.clientToGame {
+		if gameContext != nil && gameContext.RoomID == room.ID {
 			h.sendJSON(client, message)
 		}
 	}

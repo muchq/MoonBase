@@ -9,12 +9,18 @@ import (
 
 // Room represents a persistent room where multiple games can be played
 type Room struct {
-	ID              string         `json:"id"`
-	Players         []*Player      `json:"players"`
-	CurrentGame     *Game          `json:"currentGame,omitempty"`
-	GameHistory     []*GameResult  `json:"gameHistory"`
-	CreatedAt       time.Time      `json:"createdAt"`
-	LastActivity    time.Time      `json:"lastActivity"`
+	ID              string                 `json:"id"`
+	Players         []*Player              `json:"players"`
+	Games           map[string]*Game       `json:"games"` // Active games mapped by game ID
+	GameHistory     []*GameResult          `json:"gameHistory"`
+	CreatedAt       time.Time              `json:"createdAt"`
+	LastActivity    time.Time              `json:"lastActivity"`
+}
+
+// GameContext holds both room and game context for a client
+type GameContext struct {
+	RoomID string `json:"roomId"`
+	GameID string `json:"gameId"`
 }
 
 // GameResult stores the outcome of a completed game
@@ -66,14 +72,19 @@ type GameState struct {
 }
 
 // Client-to-server message types
-type CreateGameMessage struct {
+type CreateRoomMessage struct {
 	Type string `json:"type"`
+}
+
+type CreateGameMessage struct {
+	Type   string `json:"type"`
+	RoomID string `json:"roomId"`
 }
 
 type JoinGameMessage struct {
 	Type   string `json:"type"`
 	RoomID string `json:"roomId"`
-	GameID string `json:"gameId,omitempty"` // Optional - if not provided, joins the current game in the room
+	GameID string `json:"gameId"` // Required - must specify which game to join
 }
 
 type StartGameMessage struct {
@@ -115,6 +126,19 @@ type StartNewGameMessage struct {
 }
 
 type GetRoomStateMessage struct {
+	Type string `json:"type"`
+}
+
+// New message types for multi-game support
+type ListGamesMessage struct {
+	Type string `json:"type"`
+}
+
+type CreateGameInRoomMessage struct {
+	Type string `json:"type"`
+}
+
+type LeaveGameMessage struct {
 	Type string `json:"type"`
 }
 
@@ -173,6 +197,18 @@ type RoomStateUpdateMessage struct {
 
 type NewGameStartedMessage struct {
 	Type string `json:"type"`
+}
+
+// Server-to-client message types for multi-game support
+type GameListMessage struct {
+	Type  string            `json:"type"`
+	Games map[string]*Game  `json:"games"` // Games in current room
+}
+
+type GameListUpdateMessage struct {
+	Type   string `json:"type"`
+	Action string `json:"action"` // "added", "removed", "updated"
+	GameID string `json:"gameId"`
 }
 
 // Generic message for parsing
@@ -276,4 +312,14 @@ func ParseIncomingMessage(data []byte) (*IncomingMessage, error) {
 		return nil, fmt.Errorf("failed to parse message: %w", err)
 	}
 	return &msg, nil
+}
+
+// GetPlayerByClientID returns the player associated with a client ID
+func (r *Room) GetPlayerByClientID(clientID string) *Player {
+	for _, player := range r.Players {
+		if player.ClientID == clientID {
+			return player
+		}
+	}
+	return nil
 }

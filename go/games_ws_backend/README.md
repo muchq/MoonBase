@@ -5,6 +5,7 @@ A real-time multiplayer, multitenant WebSocket game server
 ## Overview
 This server handles real-time player interactions for
 - [Thoughts](../thoughts), a pretty chill 3D vibe you can play [here](https://muchq.com/thoughts)
+- **[Golf](golf/)**, a 4-card golf game with room-based multi-game architecture
 - Some other games someday
 
 ### Core Components
@@ -39,8 +40,20 @@ go/games_ws_backend/deploy/deploy.sh
 - **Origin Validation**: Only allows connections from `thoughts.muchq.com`, `muchq.com`, and `www.muchq.com` in production
 - **HTTPS Enforcement**: Rejects non-HTTPS origins in production
 
+## Game Implementations
+
+### Golf (`/golf-ws`)
+4-card golf game with advanced room-based multi-game architecture:
+- **Multiple concurrent games** within the same room
+- **Room-based player management** with persistent statistics
+- **Chat-ready architecture** - players can join rooms without joining games
+- **Game isolation** - complete separation between concurrent games
+- **Automatic cleanup** of completed games
+
+See [golf/README.md](golf/README.md) for detailed documentation.
+
 ### Future Enhancements to Consider
-- [ ] **Chat**: Is this worth doing?
+- [ ] **Chat**: Room-based chat system (architecture ready in golf)
 - [ ] **Rate Limiting**: Implement per-player rate limiting for actions
 - [ ] **Persistence**: Add database support for player progress and game history
 - [ ] **Metrics**: Implement Prometheus metrics for monitoring
