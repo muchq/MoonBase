@@ -93,11 +93,13 @@ type PrometheusQuerier interface {
 
 type MetricsHandler struct {
 	promClient PrometheusQuerier
+	cache      *MetricsCache
 }
 
-func NewMetricsHandler(promClient PrometheusQuerier) *MetricsHandler {
+func NewMetricsHandler(promClient PrometheusQuerier, cache *MetricsCache) *MetricsHandler {
 	return &MetricsHandler{
 		promClient: promClient,
+		cache:      cache,
 	}
 }
 
@@ -110,14 +112,20 @@ func (h *MetricsHandler) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	mucks.JsonOk(w, response)
 }
 
-func (h *MetricsHandler) GetSystemMetrics(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
+func (h *MetricsHandler) CacheStatusHandler(w http.ResponseWriter, r *http.Request) {
+	cacheInfo := h.cache.GetCacheInfo()
+	cacheInfo["status"] = "cache-info"
+	cacheInfo["service"] = "prometheus-proxy-cache"
+	cacheInfo["timestamp"] = time.Now().UTC().Format(time.RFC3339)
 	
-	metrics, err := h.fetchSystemMetrics(ctx)
-	if err != nil {
-		problem := mucks.NewServerError(500)
-		problem.Detail = "Failed to fetch system metrics: " + err.Error()
+	mucks.JsonOk(w, cacheInfo)
+}
+
+func (h *MetricsHandler) GetSystemMetrics(w http.ResponseWriter, r *http.Request) {
+	metrics := h.cache.GetSystemMetrics()
+	if metrics == nil {
+		problem := mucks.NewServerError(503)
+		problem.Detail = "System metrics not available in cache"
 		mucks.JsonError(w, problem)
 		return
 	}
@@ -126,13 +134,10 @@ func (h *MetricsHandler) GetSystemMetrics(w http.ResponseWriter, r *http.Request
 }
 
 func (h *MetricsHandler) GetPortraitMetrics(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	
-	metrics, err := h.fetchPortraitMetrics(ctx)
-	if err != nil {
-		problem := mucks.NewServerError(500)
-		problem.Detail = "Failed to fetch portrait metrics: " + err.Error()
+	metrics := h.cache.GetPortraitMetrics()
+	if metrics == nil {
+		problem := mucks.NewServerError(503)
+		problem.Detail = "Portrait metrics not available in cache"
 		mucks.JsonError(w, problem)
 		return
 	}
@@ -141,21 +146,12 @@ func (h *MetricsHandler) GetPortraitMetrics(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *MetricsHandler) GetSummaryMetrics(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
+	systemMetrics := h.cache.GetSystemMetrics()
+	portraitMetrics := h.cache.GetPortraitMetrics()
 	
-	systemMetrics, err := h.fetchSystemMetrics(ctx)
-	if err != nil {
-		problem := mucks.NewServerError(500)
-		problem.Detail = "Failed to fetch system metrics: " + err.Error()
-		mucks.JsonError(w, problem)
-		return
-	}
-	
-	portraitMetrics, err := h.fetchPortraitMetrics(ctx)
-	if err != nil {
-		problem := mucks.NewServerError(500)
-		problem.Detail = "Failed to fetch portrait metrics: " + err.Error()
+	if systemMetrics == nil || portraitMetrics == nil {
+		problem := mucks.NewServerError(503)
+		problem.Detail = "Metrics not available in cache"
 		mucks.JsonError(w, problem)
 		return
 	}
@@ -178,13 +174,10 @@ func (h *MetricsHandler) GetSystemMetricsTimeSeries(w http.ResponseWriter, r *ht
 		return
 	}
 	
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	
-	response, err := h.fetchSystemMetricsTimeSeries(ctx, TimeRange(timeRange))
-	if err != nil {
-		problem := mucks.NewServerError(500)
-		problem.Detail = "Failed to fetch system metrics timeseries: " + err.Error()
+	response := h.cache.GetSystemTimeseries(TimeRange(timeRange))
+	if response == nil {
+		problem := mucks.NewServerError(503)
+		problem.Detail = "System timeseries not available in cache"
 		mucks.JsonError(w, problem)
 		return
 	}
@@ -201,13 +194,10 @@ func (h *MetricsHandler) GetPortraitMetricsTimeSeries(w http.ResponseWriter, r *
 		return
 	}
 	
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	
-	response, err := h.fetchPortraitMetricsTimeSeries(ctx, TimeRange(timeRange))
-	if err != nil {
-		problem := mucks.NewServerError(500)
-		problem.Detail = "Failed to fetch portrait metrics timeseries: " + err.Error()
+	response := h.cache.GetPortraitTimeseries(TimeRange(timeRange))
+	if response == nil {
+		problem := mucks.NewServerError(503)
+		problem.Detail = "Portrait timeseries not available in cache"
 		mucks.JsonError(w, problem)
 		return
 	}
