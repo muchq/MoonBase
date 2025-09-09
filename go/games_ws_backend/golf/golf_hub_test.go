@@ -110,7 +110,7 @@ func TestParseIncomingMessage(t *testing.T) {
 
 // Hub Integration Tests
 
-func TestHub_CreateAndJoinGame(t *testing.T) {
+func TestHub_CreateAndJoinRoom(t *testing.T) {
 	golfHub := NewGolfHub()
 	go golfHub.Run()
 
@@ -159,7 +159,7 @@ func TestHub_CreateAndJoinGame(t *testing.T) {
 
 	// Client 2 joins the room with a specific room ID
 	client2.clearMessages()
-	joinMsg := `{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "GAME1"}`
+	joinMsg := `{"type": "joinRoom", "roomId": "` + roomID + `"}`
 	golfHub.GameMessage(hub.GameMessageData{
 		Message: []byte(joinMsg),
 		Sender:  hubClient2,
@@ -177,12 +177,169 @@ func TestHub_CreateAndJoinGame(t *testing.T) {
 		t.Fatalf("Failed to parse roomJoined message: %v", err)
 	}
 
+	if joined2Msg.Type != "roomJoined" {
+		t.Errorf("Expected roomJoined got %s", joined2Msg.Type)
+	}
+
 	if joined2Msg.RoomState.ID != roomID {
 		t.Errorf("Expected to join room %s, got %s", roomID, joined2Msg.RoomState.ID)
 	}
 
 	if len(joined2Msg.RoomState.Players) != 2 {
 		t.Errorf("Expected 2 players in room, got %d", len(joined2Msg.RoomState.Players))
+	}
+
+	client1.close()
+	client2.close()
+}
+
+func TestHub_CreateAndJoinGame(t *testing.T) {
+	golfHub := NewGolfHub()
+	go golfHub.Run()
+
+	// Create mock clients
+	client1 := newMockClient("client1")
+	client1.collectMessages()
+	client2 := newMockClient("client2")
+	client2.collectMessages()
+
+	// Convert to hub clients
+	hubClient1 := &hub.Client{Hub: golfHub, Send: client1.send}
+	hubClient2 := &hub.Client{Hub: golfHub, Send: client2.send}
+
+	// Register clients
+	golfHub.Register(hubClient1)
+	golfHub.Register(hubClient2)
+	time.Sleep(10 * time.Millisecond)
+
+	// Client 1 creates room
+	createRoomMsg := `{"type": "createRoom"}`
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(createRoomMsg),
+		Sender:  hubClient1,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Check client 1 received roomJoined message
+	messages1 := client1.getMessages()
+	if len(messages1) != 1 {
+		t.Fatalf("Expected 1 message for client1, got %d", len(messages1))
+	}
+
+	var createdRoomMsg RoomJoinedMessage
+	if err := json.Unmarshal(messages1[0], &createdRoomMsg); err != nil {
+		t.Fatalf("Failed to parse roomJoined message: %v", err)
+	}
+
+	if createdRoomMsg.Type != "roomJoined" {
+		t.Errorf("Expected roomJoined message, got %s", createdRoomMsg.Type)
+	}
+
+	roomID := createdRoomMsg.RoomState.ID
+	if len(roomID) != 6 {
+		t.Errorf("Expected 6-character room ID, got %s", roomID)
+	}
+
+	// Client 2 joins the room with a specific room ID
+	client2.clearMessages()
+	joinRoomMsg := `{"type": "joinRoom", "roomId": "` + roomID + `"}`
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(joinRoomMsg),
+		Sender:  hubClient2,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Check client 2 received roomJoined message (and possibly a room state broadcast)
+	messages2 := client2.getMessages()
+	if len(messages2) == 0 {
+		t.Fatal("Expected at least 1 message for client2")
+	}
+
+	var joinedRoomMsg RoomJoinedMessage
+	if err := json.Unmarshal(messages2[0], &joinedRoomMsg); err != nil {
+		t.Fatalf("Failed to parse roomJoined message: %v", err)
+	}
+
+	if joinedRoomMsg.RoomState.ID != roomID {
+		t.Errorf("Expected to join room %s, got %s", roomID, joinedRoomMsg.RoomState.ID)
+	}
+
+	if len(joinedRoomMsg.RoomState.Players) != 2 {
+		t.Errorf("Expected 2 players in room, got %d", len(joinedRoomMsg.RoomState.Players))
+	}
+
+	// Client 1 creates Game
+	client1.clearMessages()
+	createGameMsg := `{"type": "createGame", "roomId": "` + roomID + `"}`
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(createGameMsg),
+		Sender:  hubClient1,
+	})
+	time.Sleep(100 * time.Millisecond)
+
+	// Check client 1 received gameJoined message and roomStateUpdate message
+	gameCreated1 := client1.getMessages()
+	if len(gameCreated1) < 1 {
+		t.Fatalf("Expected at least 1 message for client1, got %d", len(gameCreated1))
+	}
+
+	// Look for gameJoined message
+	var createdGameMsg GameJoinedMessage
+	foundGameJoined := false
+	for _, msg := range gameCreated1 {
+		var testMsg GameJoinedMessage
+		if err := json.Unmarshal(msg, &testMsg); err == nil && testMsg.Type == "gameJoined" {
+			createdGameMsg = testMsg
+			foundGameJoined = true
+			break
+		}
+	}
+	
+	if !foundGameJoined {
+		t.Fatal("Expected to find gameJoined message")
+	}
+
+	if createdGameMsg.Type != "gameJoined" {
+		t.Errorf("Expected gameJoined message, got %s", createdGameMsg.Type)
+	}
+
+	gameID := createdGameMsg.GameState.ID
+	if len(gameID) < 4 {
+		t.Errorf("Expected game ID with at least 4 characters, got %s", gameID)
+	}
+
+	// Client 2 joins the game that client 1 created
+	client2.clearMessages()
+	joinGameMsg := `{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "` + gameID + `"}`
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(joinGameMsg),
+		Sender:  hubClient2,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Check client 2 received roomStateUpdate message (broadcast when joining game)
+	messages4 := client2.getMessages()
+	if len(messages4) == 0 {
+		t.Fatal("Expected at least 1 message for client2")
+	}
+
+	// Look for room state update in the messages (since joining a game broadcasts room state)
+	foundRoomUpdate := false
+	for _, msg := range messages4 {
+		var roomUpdateMsg RoomStateUpdateMessage
+		if err := json.Unmarshal(msg, &roomUpdateMsg); err == nil && roomUpdateMsg.Type == "roomStateUpdate" {
+			if roomUpdateMsg.RoomState.ID == roomID {
+				foundRoomUpdate = true
+				if len(roomUpdateMsg.RoomState.Players) != 2 {
+					t.Errorf("Expected 2 players in room, got %d", len(roomUpdateMsg.RoomState.Players))
+				}
+				break
+			}
+		}
+	}
+
+	if !foundRoomUpdate {
+		t.Error("Expected to receive room state update after joining game")
 	}
 
 	client1.close()
@@ -206,7 +363,7 @@ func TestHub_StartGame(t *testing.T) {
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
 
-	// Create room, game and get both players in
+	// Player 1 creates room (automatically joins)
 	golfHub.GameMessage(hub.GameMessageData{
 		Message: []byte(`{"type": "createRoom"}`),
 		Sender:  hubClient1,
@@ -218,14 +375,34 @@ func TestHub_StartGame(t *testing.T) {
 	json.Unmarshal(messages1[0], &joinedMsg)
 	roomID := joinedMsg.RoomState.ID
 
-	// Both clients need to join the same game
+	// Player 2 joins the room
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "GAME1"}`),
+		Message: []byte(`{"type": "joinRoom", "roomId": "` + roomID + `"}`),
+		Sender:  hubClient2,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Player 1 creates game (automatically joins)
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type": "createGame", "roomId": "` + roomID + `"}`),
 		Sender:  hubClient1,
 	})
+	time.Sleep(10 * time.Millisecond)
 
+	// Get the game ID from player 1's gameJoined message
+	gameMessages := client1.getMessages()
+	var gameID string
+	for _, msg := range gameMessages {
+		var gameJoinedMsg GameJoinedMessage
+		if err := json.Unmarshal(msg, &gameJoinedMsg); err == nil && gameJoinedMsg.Type == "gameJoined" {
+			gameID = gameJoinedMsg.GameState.ID
+			break
+		}
+	}
+
+	// Player 2 joins the game
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "GAME1"}`),
+		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "` + gameID + `"}`),
 		Sender:  hubClient2,
 	})
 	time.Sleep(10 * time.Millisecond)
@@ -294,27 +471,47 @@ func TestHub_PeekCard(t *testing.T) {
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
 
-	// Create game
+	// Player 1 creates room (automatically joins)
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(`{"type": "createGame"}`),
+		Message: []byte(`{"type": "createRoom"}`),
 		Sender:  hubClient1,
 	})
 	time.Sleep(10 * time.Millisecond)
 
-	// Get room ID and join both players to the same game
+	// Get room ID from player 1's roomJoined message
 	messages1 := client1.getMessages()
 	var roomJoinedMsg RoomJoinedMessage
 	json.Unmarshal(messages1[0], &roomJoinedMsg)
 	roomID := roomJoinedMsg.RoomState.ID
 
-	// Both clients need to join the same game
+	// Player 2 joins the room
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "GAME1"}`),
+		Message: []byte(`{"type": "joinRoom", "roomId": "` + roomID + `"}`),
+		Sender:  hubClient2,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Player 1 creates game (automatically joins)
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type": "createGame", "roomId": "` + roomID + `"}`),
 		Sender:  hubClient1,
 	})
+	time.Sleep(10 * time.Millisecond)
 
+	// Get the game ID from player 1's gameJoined message
+	gameMessages := client1.getMessages()
+	var gameID string
+	for _, msg := range gameMessages {
+		var gameJoinedMsg GameJoinedMessage
+		if err := json.Unmarshal(msg, &gameJoinedMsg); err == nil && gameJoinedMsg.Type == "gameJoined" {
+			gameID = gameJoinedMsg.GameState.ID
+			break
+		}
+	}
+
+	// Player 2 joins the game
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "GAME1"}`),
+		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "` + gameID + `"}`),
 		Sender:  hubClient2,
 	})
 	time.Sleep(10 * time.Millisecond)
@@ -326,21 +523,7 @@ func TestHub_PeekCard(t *testing.T) {
 	})
 	time.Sleep(10 * time.Millisecond)
 
-	// Get the actual game ID from the game state after starting
-	startMessages := client1.getMessages()
-	var gameID string
-	for _, msg := range startMessages {
-		var gameStateMsg GameStateUpdateMessage
-		if err := json.Unmarshal(msg, &gameStateMsg); err == nil && gameStateMsg.Type == "gameState" {
-			gameID = gameStateMsg.GameState.ID
-			break
-		}
-	}
-	if gameID == "" {
-		t.Fatal("Could not find game ID after starting game")
-	}
-
-	// Verify game ID is different from room ID
+	// Verify game ID is different from room ID (we already have gameID from earlier)
 	if gameID == roomID {
 		t.Fatal("Game ID should be different from room ID")
 	}
@@ -405,27 +588,47 @@ func TestHub_GameFlow(t *testing.T) {
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
 
-	// Create game
+	// Player 1 creates room (automatically joins)
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(`{"type": "createGame"}`),
+		Message: []byte(`{"type": "createRoom"}`),
 		Sender:  hubClient1,
 	})
 	time.Sleep(10 * time.Millisecond)
 
-	// Get room ID and join both players to the same game
+	// Get room ID from player 1's roomJoined message
 	messages1 := client1.getMessages()
 	var roomJoinedMsg RoomJoinedMessage
 	json.Unmarshal(messages1[0], &roomJoinedMsg)
 	roomID := roomJoinedMsg.RoomState.ID
 
-	// Both players join the same game
+	// Player 2 joins the room
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "GAME1"}`),
+		Message: []byte(`{"type": "joinRoom", "roomId": "` + roomID + `"}`),
+		Sender:  hubClient2,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Player 1 creates game (automatically joins)
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type": "createGame", "roomId": "` + roomID + `"}`),
 		Sender:  hubClient1,
 	})
+	time.Sleep(10 * time.Millisecond)
 
+	// Get the game ID from player 1's gameJoined message
+	gameMessages := client1.getMessages()
+	var gameID string
+	for _, msg := range gameMessages {
+		var gameJoinedMsg GameJoinedMessage
+		if err := json.Unmarshal(msg, &gameJoinedMsg); err == nil && gameJoinedMsg.Type == "gameJoined" {
+			gameID = gameJoinedMsg.GameState.ID
+			break
+		}
+	}
+
+	// Player 2 joins the game
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "GAME1"}`),
+		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "` + gameID + `"}`),
 		Sender:  hubClient2,
 	})
 	time.Sleep(10 * time.Millisecond)
@@ -505,27 +708,47 @@ func TestHub_PlayerDisconnect(t *testing.T) {
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
 
-	// Create game
+	// Player 1 creates room (automatically joins)
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(`{"type": "createGame"}`),
+		Message: []byte(`{"type": "createRoom"}`),
 		Sender:  hubClient1,
 	})
 	time.Sleep(10 * time.Millisecond)
 
-	// Get room ID and join both players to the same game
+	// Get room ID from player 1's roomJoined message
 	messages1 := client1.getMessages()
 	var roomJoinedMsg RoomJoinedMessage
 	json.Unmarshal(messages1[0], &roomJoinedMsg)
 	roomID := roomJoinedMsg.RoomState.ID
 
-	// Both players join the same game
+	// Player 2 joins the room
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "GAME1"}`),
+		Message: []byte(`{"type": "joinRoom", "roomId": "` + roomID + `"}`),
+		Sender:  hubClient2,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Player 1 creates game (automatically joins)
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type": "createGame", "roomId": "` + roomID + `"}`),
 		Sender:  hubClient1,
 	})
+	time.Sleep(10 * time.Millisecond)
 
+	// Get the game ID from player 1's gameJoined message
+	gameMessages := client1.getMessages()
+	var gameID string
+	for _, msg := range gameMessages {
+		var gameJoinedMsg GameJoinedMessage
+		if err := json.Unmarshal(msg, &gameJoinedMsg); err == nil && gameJoinedMsg.Type == "gameJoined" {
+			gameID = gameJoinedMsg.GameState.ID
+			break
+		}
+	}
+
+	// Player 2 joins the game
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "GAME1"}`),
+		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "` + gameID + `"}`),
 		Sender:  hubClient2,
 	})
 	time.Sleep(10 * time.Millisecond)
@@ -656,7 +879,7 @@ func TestHub_MultiGameSupport(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Client 1 creates a room
-	createMsg := `{"type": "createGame"}`
+	createMsg := `{"type": "createRoom"}`
 	golfHub.GameMessage(hub.GameMessageData{
 		Message: []byte(createMsg),
 		Sender:  hubClient1,
@@ -675,18 +898,34 @@ func TestHub_MultiGameSupport(t *testing.T) {
 	}
 	roomID := joinedMsg.RoomState.ID
 
-	// Client 2 joins the room with game ID "GAME1"
-	joinMsg2 := `{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "GAME1"}`
+	// Client 2 joins the room first
+	joinRoomMsg2 := `{"type": "joinRoom", "roomId": "` + roomID + `"}`
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(joinMsg2),
+		Message: []byte(joinRoomMsg2),
 		Sender:  hubClient2,
 	})
 	time.Sleep(10 * time.Millisecond)
 
-	// Client 3 joins the room with game ID "GAME2" (different game)
-	joinMsg3 := `{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "GAME2"}`
+	// Client 3 joins the room first  
+	joinRoomMsg3 := `{"type": "joinRoom", "roomId": "` + roomID + `"}`
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(joinMsg3),
+		Message: []byte(joinRoomMsg3),
+		Sender:  hubClient3,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Client 2 creates game "GAME1"
+	createGame1Msg := `{"type": "createGame", "roomId": "` + roomID + `"}`
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(createGame1Msg),
+		Sender:  hubClient2,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Client 3 creates game "GAME2"  
+	createGame2Msg := `{"type": "createGame", "roomId": "` + roomID + `"}`
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(createGame2Msg),
 		Sender:  hubClient3,
 	})
 	time.Sleep(10 * time.Millisecond)
@@ -706,12 +945,17 @@ func TestHub_MultiGameSupport(t *testing.T) {
 		t.Error("Client1 should not be in a specific game yet (created room, not joined game)")
 	}
 
-	if context2.GameID != "GAME1" {
-		t.Errorf("Client2 should be in GAME1, got %s", context2.GameID)
+	// Client2 and Client3 should be in different games (whatever IDs were auto-generated)
+	if context2.GameID == "" {
+		t.Error("Client2 should be in a game after creating one")
 	}
 
-	if context3.GameID != "GAME2" {
-		t.Errorf("Client3 should be in GAME2, got %s", context3.GameID)
+	if context3.GameID == "" {
+		t.Error("Client3 should be in a game after creating one")
+	}
+
+	if context2.GameID == context3.GameID {
+		t.Error("Client2 and Client3 should be in different games")
 	}
 
 	// Check that multiple games exist in the room
@@ -720,12 +964,13 @@ func TestHub_MultiGameSupport(t *testing.T) {
 		t.Errorf("Expected 2 games in room, got %d", len(room.Games))
 	}
 
-	if _, exists := room.Games["GAME1"]; !exists {
-		t.Error("GAME1 should exist in room")
+	// Verify the specific games exist (using the actual generated IDs)
+	if _, exists := room.Games[context2.GameID]; !exists {
+		t.Errorf("Game %s should exist in room", context2.GameID)
 	}
 
-	if _, exists := room.Games["GAME2"]; !exists {
-		t.Error("GAME2 should exist in room")
+	if _, exists := room.Games[context3.GameID]; !exists {
+		t.Errorf("Game %s should exist in room", context3.GameID)
 	}
 	hub.mu.RUnlock()
 
@@ -763,7 +1008,7 @@ func TestHub_GameIsolation(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Client 1 creates a room
-	createMsg := `{"type": "createGame"}`
+	createMsg := `{"type": "createRoom"}`
 	golfHub.GameMessage(hub.GameMessageData{
 		Message: []byte(createMsg),
 		Sender:  hubClient1,
@@ -776,28 +1021,66 @@ func TestHub_GameIsolation(t *testing.T) {
 	json.Unmarshal(messages1[0], &joinedMsg)
 	roomID := joinedMsg.RoomState.ID
 
-	// Create two separate games
-	// Game 1: Client1 and Client2
-	joinMsg1 := `{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "GAME1"}`
+	// All other clients join the room
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(joinMsg1),
-		Sender:  hubClient1,
-	})
-
-	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(joinMsg1),
+		Message: []byte(`{"type": "joinRoom", "roomId": "` + roomID + `"}`),
 		Sender:  hubClient2,
 	})
-
-	// Game 2: Client3 and Client4
-	joinMsg2 := `{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "GAME2"}`
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(joinMsg2),
+		Message: []byte(`{"type": "joinRoom", "roomId": "` + roomID + `"}`),
 		Sender:  hubClient3,
 	})
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type": "joinRoom", "roomId": "` + roomID + `"}`),
+		Sender:  hubClient4,
+	})
+	time.Sleep(20 * time.Millisecond)
+
+	// Create two separate games
+	// Game 1: Client1 creates, Client2 joins
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type": "createGame", "roomId": "` + roomID + `"}`),
+		Sender:  hubClient1,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Get game1 ID from client1's response
+	game1Messages := client1.getMessages()
+	var game1ID string
+	for _, msg := range game1Messages {
+		var gameJoinedMsg GameJoinedMessage
+		if err := json.Unmarshal(msg, &gameJoinedMsg); err == nil && gameJoinedMsg.Type == "gameJoined" {
+			game1ID = gameJoinedMsg.GameState.ID
+			break
+		}
+	}
 
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(joinMsg2),
+		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "` + game1ID + `"}`),
+		Sender:  hubClient2,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Game 2: Client3 creates, Client4 joins
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type": "createGame", "roomId": "` + roomID + `"}`),
+		Sender:  hubClient3,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Get game2 ID from client3's response
+	game2Messages := client3.getMessages()
+	var game2ID string
+	for _, msg := range game2Messages {
+		var gameJoinedMsg GameJoinedMessage
+		if err := json.Unmarshal(msg, &gameJoinedMsg); err == nil && gameJoinedMsg.Type == "gameJoined" {
+			game2ID = gameJoinedMsg.GameState.ID
+			break
+		}
+	}
+
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "` + game2ID + `"}`),
 		Sender:  hubClient4,
 	})
 	time.Sleep(20 * time.Millisecond)
@@ -854,7 +1137,7 @@ func TestHub_RequiredGameID(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Client 1 creates room
-	createMsg := `{"type": "createGame"}`
+	createMsg := `{"type": "createRoom"}`
 	golfHub.GameMessage(hub.GameMessageData{
 		Message: []byte(createMsg),
 		Sender:  hubClient1,
@@ -915,8 +1198,8 @@ func TestHub_GameCleanup(t *testing.T) {
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
 
-	// Create room and join game
-	createMsg := `{"type": "createGame"}`
+	// Player 1 creates room (automatically joins)
+	createMsg := `{"type": "createRoom"}`
 	golfHub.GameMessage(hub.GameMessageData{
 		Message: []byte(createMsg),
 		Sender:  hubClient1,
@@ -928,14 +1211,34 @@ func TestHub_GameCleanup(t *testing.T) {
 	json.Unmarshal(messages1[0], &joinedMsg)
 	roomID := joinedMsg.RoomState.ID
 
-	// Both clients join the same game
-	joinMsg := `{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "TESTGAME"}`
+	// Player 2 joins the room
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(joinMsg),
+		Message: []byte(`{"type": "joinRoom", "roomId": "` + roomID + `"}`),
+		Sender:  hubClient2,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Player 1 creates game (automatically joins)
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type": "createGame", "roomId": "` + roomID + `"}`),
 		Sender:  hubClient1,
 	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Get the game ID from player 1's gameJoined message
+	gameMessages := client1.getMessages()
+	var gameID string
+	for _, msg := range gameMessages {
+		var gameJoinedMsg GameJoinedMessage
+		if err := json.Unmarshal(msg, &gameJoinedMsg); err == nil && gameJoinedMsg.Type == "gameJoined" {
+			gameID = gameJoinedMsg.GameState.ID
+			break
+		}
+	}
+
+	// Player 2 joins the game
 	golfHub.GameMessage(hub.GameMessageData{
-		Message: []byte(joinMsg),
+		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "` + gameID + `"}`),
 		Sender:  hubClient2,
 	})
 	time.Sleep(20 * time.Millisecond)
@@ -947,7 +1250,7 @@ func TestHub_GameCleanup(t *testing.T) {
 	if len(room.Games) != 1 {
 		t.Errorf("Expected 1 game before completion, got %d", len(room.Games))
 	}
-	game := room.Games["TESTGAME"]
+	game := room.Games[gameID]
 	if game == nil {
 		t.Fatal("Game should exist before completion")
 	}
@@ -960,7 +1263,7 @@ func TestHub_GameCleanup(t *testing.T) {
 
 	// Trigger game completion
 	hub.mu.Lock()
-	err := hub.completeGameInRoom(roomID, "TESTGAME")
+	err := hub.completeGameInRoom(roomID, gameID)
 	hub.mu.Unlock()
 
 	if err != nil {

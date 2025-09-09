@@ -166,6 +166,8 @@ func (h *GolfHub) handleGameMessage(msgData hub.GameMessageData) {
 	switch msg.Type {
 	case "createRoom":
 		h.handleCreateRoom(msgData.Sender)
+	case "joinRoom":
+		h.handleJoinRoom(msgData.Sender, msg.RoomID)
 	case "createGame":
 		h.handleCreateGame(msgData.Sender, msg.RoomID)
 	case "joinGame":
@@ -225,64 +227,154 @@ func (h *GolfHub) handleCreateRoom(client *hub.Client) {
 		"clientAddr", getClientAddr(client))
 }
 
-// handleCreateGame creates a new game within an existing room
-func (h *GolfHub) handleCreateGame(client *hub.Client, roomID string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+// handleJoinRoom joins an existing room
+func (h *GolfHub) handleJoinRoom(client *hub.Client, roomID string) {
+	var room *Room
+	var player *Player
 
-	// Validate roomID
-	if roomID == "" {
-		h.sendError(client, "Room ID is required")
+	// Do the joining logic with the lock
+	func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+
+		// Validate required parameters
+		if roomID == "" {
+			h.sendError(client, "Room ID is required")
+			return
+		}
+
+		// Check if client is already in a room/game context
+		if gameContext, exists := h.clientToGame[client]; exists {
+			// If already in the same room, do nothing
+			if gameContext.RoomID == roomID {
+				room = h.rooms[roomID]
+
+				// Find the player in the room
+				clientID := getClientID(client)
+				for _, p := range room.Players {
+					if p.ClientID == clientID {
+						player = p
+						break
+					}
+				}
+
+				if player == nil {
+					// This would be some kind of problem
+					h.sendError(client, "Player not found in room")
+					return
+				}
+			} else {
+				h.sendError(client, "Already in a different room")
+				return
+			}
+		} else {
+			// Add player to room (new player)
+			var err error
+			player, err = h.addPlayerToRoom(roomID, client)
+			if err != nil {
+				h.sendError(client, err.Error())
+				return
+			}
+			room = h.rooms[roomID]
+			
+			// Set up client mappings for new player
+			h.clientToRoom[client] = room
+			h.clientToGame[client] = &GameContext{
+				RoomID: roomID,
+				GameID: "", // Not in a specific game yet
+			}
+		}
+	}()
+
+	// Exit if join failed
+	if room == nil || player == nil {
 		return
 	}
 
-	// Check if room exists
-	room, exists := h.rooms[roomID]
-	if !exists {
-		h.sendError(client, "Room not found")
-		return
-	}
+	// Send room joined message to new player
+	h.sendRoomJoined(client, player.ID, room)
 
-	// Check if client is in this room
-	gameContext, inRoom := h.clientToGame[client]
-	if !inRoom || gameContext.RoomID != roomID {
-		h.sendError(client, "Must be in the room to create a game")
-		return
-	}
+	// Broadcast updated state to all players in room
+	h.broadcastRoomState(room)
 
-	// Generate a unique game ID for this room
-	gameID := h.generateGameID(room)
-
-	// Create the game using existing helper
-	game, err := h.createGameInRoom(roomID, gameID)
-	if err != nil {
-		h.sendError(client, err.Error())
-		return
-	}
-
-	// Add client to the new game
-	clientID := getClientID(client)
-	player, err := game.AddPlayer(clientID)
-	if err != nil {
-		h.sendError(client, err.Error())
-		return
-	}
-
-	// Update client's game context
-	h.clientToGame[client] = &GameContext{
-		RoomID: roomID,
-		GameID: gameID,
-	}
-
-	room.LastActivity = time.Now()
-
-	slog.Info("Game created in room",
+	slog.Info("Player joined room and game",
 		"roomID", roomID,
-		"gameID", gameID,
 		"playerID", player.ID,
 		"clientAddr", getClientAddr(client))
+}
+
+// handleCreateGame creates a new game within an existing room
+func (h *GolfHub) handleCreateGame(client *hub.Client, roomID string) {
+	var room *Room
+	var game *Game
+	var player *Player
+	
+	func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+
+		// Validate roomID
+		if roomID == "" {
+			h.sendError(client, "Room ID is required")
+			return
+		}
+
+		// Check if room exists
+		var exists bool
+		room, exists = h.rooms[roomID]
+		if !exists {
+			h.sendError(client, "Room not found")
+			return
+		}
+
+		// Check if client is in this room
+		gameContext, inRoom := h.clientToGame[client]
+		if !inRoom || gameContext.RoomID != roomID {
+			h.sendError(client, "Must be in the room to create a game")
+			return
+		}
+
+		// Generate a unique game ID for this room
+		gameID := h.generateGameID(room)
+
+		// Create the game using existing helper
+		var err error
+		game, err = h.createGameInRoom(roomID, gameID)
+		if err != nil {
+			h.sendError(client, err.Error())
+			return
+		}
+
+		// Add client to the new game
+		clientID := getClientID(client)
+		player, err = game.AddPlayer(clientID)
+		if err != nil {
+			h.sendError(client, err.Error())
+			return
+		}
+
+		// Update client's game context
+		h.clientToGame[client] = &GameContext{
+			RoomID: roomID,
+			GameID: gameID,
+		}
+
+		room.LastActivity = time.Now()
+
+		slog.Info("Game created in room",
+			"roomID", roomID,
+			"gameID", gameID,
+			"playerID", player.ID,
+			"clientAddr", getClientAddr(client))
+	}()
+
+	// Exit early if we failed to create game/player
+	if room == nil || game == nil || player == nil {
+		return
+	}
 
 	// Send game joined message
+	clientID := getClientID(client)
 	h.sendGameJoined(client, player.ID, game.GetStateForPlayer(clientID))
 
 	// Broadcast room state update to show new game
@@ -304,7 +396,9 @@ func (h *GolfHub) generateGameID(room *Room) string {
 // handleJoinGame joins an existing room and specific game
 func (h *GolfHub) handleJoinGame(client *hub.Client, roomID string, gameID string) {
 	var room *Room
+	var game *Game
 	var player *Player
+	var err error
 
 	// Do the joining logic with the lock
 	func() {
@@ -321,50 +415,34 @@ func (h *GolfHub) handleJoinGame(client *hub.Client, roomID string, gameID strin
 			return
 		}
 
-		// Check if client is already in a room/game context
-		if gameContext, exists := h.clientToGame[client]; exists {
-			// If already in the same room, just update their game ID
-			if gameContext.RoomID == roomID {
-				// Update game context to join the specific game
-				gameContext.GameID = gameID
-				room = h.rooms[roomID]
-
-				// Find the player in the room
-				clientID := getClientID(client)
-				for _, p := range room.Players {
-					if p.ClientID == clientID {
-						player = p
-						break
-					}
-				}
-
-				if player == nil {
-					h.sendError(client, "Player not found in room")
-					return
-				}
-			} else {
-				h.sendError(client, "Already in a different room")
-				return
-			}
-		} else {
-			// Add player to room (new player)
-			var err error
-			player, err = h.addPlayerToRoom(roomID, client)
-			if err != nil {
-				h.sendError(client, err.Error())
-				return
-			}
-			room = h.rooms[roomID]
+		// Check if client is in the room
+		gameContext, inRoom := h.clientToGame[client]
+		if !inRoom || gameContext.RoomID != roomID {
+			h.sendError(client, "Player not found in room")
+			return
+		}
+		
+		// Get the room from the rooms map
+		var roomExists bool
+		room, roomExists = h.rooms[roomID]
+		if !roomExists {
+			h.sendError(client, "Room not found")
+			return
 		}
 
-		// Check if game exists, create it if it doesn't
-		if _, exists := room.Games[gameID]; !exists {
-			// Create new game
-			_, err := h.createGameInRoom(roomID, gameID)
-			if err != nil {
-				h.sendError(client, err.Error())
-				return
-			}
+		// Check if game exists
+		var gameExists bool
+		game, gameExists = room.Games[gameID]
+		if !gameExists {
+			h.sendError(client, "Game does not exist in room")
+			return
+		}
+
+		clientID := getClientID(client)
+		player, err = game.AddPlayer(clientID)
+		if err != nil {
+			h.sendError(client, err.Error())
+			return
 		}
 
 		// Set or update client's game context
@@ -379,17 +457,14 @@ func (h *GolfHub) handleJoinGame(client *hub.Client, roomID string, gameID strin
 	}()
 
 	// Exit if join failed
-	if room == nil || player == nil {
+	if room == nil || game == nil || player == nil {
 		return
 	}
-
-	// Send room joined message to new player
-	h.sendRoomJoined(client, player.ID, room)
 
 	// Broadcast updated state to all players in room
 	h.broadcastRoomState(room)
 
-	slog.Info("Player joined room and game",
+	slog.Info("Player joined game",
 		"roomID", roomID,
 		"gameID", gameID,
 		"playerID", player.ID,
