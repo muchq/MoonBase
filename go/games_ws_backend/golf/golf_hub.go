@@ -461,6 +461,10 @@ func (h *GolfHub) handleJoinGame(client *hub.Client, roomID string, gameID strin
 		return
 	}
 
+	// Send game joined message to the player who just joined
+	clientID := getClientID(client)
+	h.sendGameJoined(client, player.ID, game.GetStateForPlayer(clientID))
+
 	// Broadcast updated state to all players in room
 	h.broadcastRoomState(room)
 

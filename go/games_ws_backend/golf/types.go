@@ -17,6 +17,30 @@ type Room struct {
 	LastActivity    time.Time              `json:"lastActivity"`
 }
 
+// MarshalJSON implements custom JSON marshaling for Room
+// This ensures that Games are serialized using their GetState() method
+func (r *Room) MarshalJSON() ([]byte, error) {
+	// Create a temporary struct for JSON serialization
+	type Alias Room
+	
+	// Convert Games map to GameState map
+	gameStates := make(map[string]*GameState)
+	for gameID, game := range r.Games {
+		if game != nil {
+			gameStates[gameID] = game.GetState()
+		}
+	}
+	
+	// Create the JSON representation
+	return json.Marshal(&struct {
+		*Alias
+		Games map[string]*GameState `json:"games"`
+	}{
+		Alias: (*Alias)(r),
+		Games: gameStates,
+	})
+}
+
 // GameContext holds both room and game context for a client
 type GameContext struct {
 	RoomID string `json:"roomId"`

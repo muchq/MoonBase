@@ -407,6 +407,39 @@ func TestHub_StartGame(t *testing.T) {
 	})
 	time.Sleep(10 * time.Millisecond)
 
+	// Verify player 2 received gameJoined message
+	player2Messages := client2.getMessages()
+	foundGameJoined := false
+	var player2GameJoinedMsg GameJoinedMessage
+	
+	for _, msg := range player2Messages {
+		var testMsg struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(msg, &testMsg); err == nil && testMsg.Type == "gameJoined" {
+			if err := json.Unmarshal(msg, &player2GameJoinedMsg); err == nil {
+				foundGameJoined = true
+				break
+			}
+		}
+	}
+	
+	if !foundGameJoined {
+		t.Fatal("Player 2 should have received gameJoined message when joining the game")
+	}
+	
+	if player2GameJoinedMsg.Type != "gameJoined" {
+		t.Errorf("Expected gameJoined message for player 2, got %s", player2GameJoinedMsg.Type)
+	}
+	
+	if player2GameJoinedMsg.GameState.ID != gameID {
+		t.Errorf("Expected game ID %s in gameJoined message, got %s", gameID, player2GameJoinedMsg.GameState.ID)
+	}
+	
+	if len(player2GameJoinedMsg.GameState.Players) != 2 {
+		t.Errorf("Expected 2 players in game state, got %d", len(player2GameJoinedMsg.GameState.Players))
+	}
+
 	// Clear messages
 	client1.clearMessages()
 	client2.clearMessages()
