@@ -1,0 +1,14 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+filegroup(
+    name = "settings_json",
+    srcs = ["settings.json"],
+)
+
+go_library(
+    name = "settings",
+    srcs = ["settings.go"],
+    data = [":settings_json"],
+    importpath = "github.com/muchq/moonbase/go/chess/settings",
+    visibility = ["//visibility:public"],
+)

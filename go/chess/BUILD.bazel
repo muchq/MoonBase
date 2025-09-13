@@ -1,0 +1,29 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_binary(
+    name = "main",
+    srcs = ["main.go"],
+    importpath = "github.com/muchq/moonbase/go/chess",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":types",
+        "//go/chess/settings",
+    ],
+)
+
+go_library(
+    name = "types",
+    srcs = ["types.go"],
+    importpath = "github.com/muchq/moonbase/go/chess",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/chess/settings",
+    ],
+)
+
+go_test(
+    name = "types_test",
+    size = "small",
+    srcs = ["types_test.go"],
+    embed = [":types"],
+)
