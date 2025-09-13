@@ -123,9 +123,13 @@ type Move struct {
 	CapturedPiece *Piece
 }
 
-func (g *Game) GenerateMoves() []*Move {
+func (m Move) String() string {
+	return fmt.Sprintf("%d:%d:%d", m.Source, m.Target, m.Piece)
+}
+
+func (g *Game) GenerateMoves() []Move {
 	fmt.Println("generating moves...")
-	moveList := make([]*Move, 0)
+	moveList := make([]Move, 0)
 	for idx, piece := range g.Board {
 		//square := g.Settings.Coordinates[idx]
 		if piece != nil && piece.Side == g.Side {
@@ -182,18 +186,18 @@ func (g *Game) GenerateMoves() []*Move {
 						return nil
 					}
 
-					moveList = append(moveList, &Move{
+					moveList = append(moveList, Move{
 						Source:        idx,
 						Target:        targetSquare,
 						Piece:         piece,
 						CapturedPiece: capturedPiece,
 					})
 
-					g.Board[targetSquare] = piece
-					g.Board[idx] = nil
-					fmt.Println(g.String())
-					g.Board[targetSquare] = capturedPiece
-					g.Board[idx] = piece
+					//g.Board[targetSquare] = piece
+					//g.Board[idx] = nil
+					//fmt.Println(g.String())
+					//g.Board[targetSquare] = capturedPiece
+					//g.Board[idx] = piece
 
 					// we've run into an opponent's piece
 					if capturedPiece != nil && capturedPiece.Side != g.Side {

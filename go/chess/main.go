@@ -36,7 +36,7 @@ func (c *Chess) pieceMightMove(p s.Piece, color s.Color) bool {
 	return false
 }
 
-func (c *Chess) indexToSquare(idx int) string {
+func (c *Chess) IndexToSquare(idx int) string {
 	return c.Settings.Coordinates[idx]
 }
 
@@ -50,7 +50,7 @@ func (c *Chess) GenerateMoves() {
 		piece := s.Piece(p)
 		if c.pieceMightMove(piece, c.ToMove) {
 			for _, offset := range c.Settings.Directions[piece] {
-				fmt.Printf("piece %s on square %s with offset %d\n", c.pieceToGlyph(piece), c.indexToSquare(square), offset)
+				fmt.Printf("piece %s on square %s with offset %d\n", c.pieceToGlyph(piece), c.IndexToSquare(square), offset)
 				targetSquare := square
 				for true {
 					targetSquare += offset
@@ -128,11 +128,11 @@ func main() {
 		return
 	}
 
-	//chess, err := NewChess(settings)
-	//if err != nil {
-	//	fmt.Println("failed to create chess: ", err)
-	//	return
-	//}
+	chess, err := NewChess(settings)
+	if err != nil {
+		fmt.Println("failed to create chess: ", err)
+		return
+	}
 	//
 	//chess.PrintBoard()
 	//if chess.ToMove == s.White {
@@ -149,5 +149,13 @@ func main() {
 
 	fmt.Println(game.String())
 
-	game.GenerateMoves()
+	moveList := game.GenerateMoves()
+
+	for _, move := range moveList {
+		captured := ""
+		if move.CapturedPiece != nil {
+			captured = fmt.Sprintf(" captured %c", move.CapturedPiece.Glyph)
+		}
+		fmt.Println(fmt.Sprintf("%c %s-%s%s", move.Piece.Glyph, chess.IndexToSquare(move.Source), chess.IndexToSquare(move.Target), captured))
+	}
 }
