@@ -5,6 +5,7 @@ go_library(
     srcs = [
         "game.go",
         "golf_hub.go",
+        "state_validation.go",
         "types.go",
     ],
     importpath = "github.com/muchq/moonbase/go/games_ws_backend/golf",
@@ -21,6 +22,7 @@ go_test(
     srcs = [
         "game_test.go",
         "golf_hub_test.go",
+        "integration_test.go",
         "state_transitions_test.go",
         "types_test.go",
     ],

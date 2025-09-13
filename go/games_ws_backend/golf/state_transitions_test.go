@@ -1,10 +1,17 @@
 package golf
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/muchq/moonbase/go/games_ws_backend/players"
 )
+
+// Helper function to add test players with consistent IDs
+func addTestPlayer(g *Game, clientID string) (*Player, error) {
+	playerID := fmt.Sprintf("TestPlayer%s", clientID)
+	return g.AddPlayer(clientID, playerID, playerID)
+}
 
 // TestStateTransitions_GamePhases tests all valid game phase transitions
 func TestStateTransitions_GamePhases(t *testing.T) {
@@ -21,8 +28,8 @@ func TestStateTransitions_GamePhases(t *testing.T) {
 			name: "waiting to playing - valid with 2 players",
 			setupFunc: func() *Game {
 				g := NewGame("TEST1", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				return g
 			},
 			action: func(g *Game) error {
@@ -35,7 +42,7 @@ func TestStateTransitions_GamePhases(t *testing.T) {
 			name: "waiting to playing - invalid with 1 player",
 			setupFunc: func() *Game {
 				g := NewGame("TEST2", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
+				addTestPlayer(g, "p1")
 				return g
 			},
 			action: func(g *Game) error {
@@ -62,8 +69,8 @@ func TestStateTransitions_GamePhases(t *testing.T) {
 			name: "playing to knocked - valid knock",
 			setupFunc: func() *Game {
 				g := NewGame("TEST4", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				return g
 			},
@@ -77,8 +84,8 @@ func TestStateTransitions_GamePhases(t *testing.T) {
 			name: "playing to knocked - invalid knock after draw",
 			setupFunc: func() *Game {
 				g := NewGame("TEST5", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.DrawCard("p1")
 				return g
@@ -95,8 +102,8 @@ func TestStateTransitions_GamePhases(t *testing.T) {
 			name: "knocked to ended - when knocker's turn comes again",
 			setupFunc: func() *Game {
 				g := NewGame("TEST6", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.Knock("p1") // p1 knocks, turn goes to p2
 				g.DrawCard("p2")
@@ -113,8 +120,8 @@ func TestStateTransitions_GamePhases(t *testing.T) {
 			name: "ended state - no transitions allowed",
 			setupFunc: func() *Game {
 				g := NewGame("TEST7", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.Knock("p1")
 				g.DrawCard("p2")
@@ -169,8 +176,8 @@ func TestStateTransitions_DrawOperations(t *testing.T) {
 			name: "draw from pile - valid on player's turn",
 			setupFunc: func() *Game {
 				g := NewGame("TEST1", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				return g
 			},
@@ -191,8 +198,8 @@ func TestStateTransitions_DrawOperations(t *testing.T) {
 			name: "draw from pile - invalid when not your turn",
 			setupFunc: func() *Game {
 				g := NewGame("TEST2", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				return g
 			},
@@ -206,8 +213,8 @@ func TestStateTransitions_DrawOperations(t *testing.T) {
 			name: "draw from pile - invalid when already drawn",
 			setupFunc: func() *Game {
 				g := NewGame("TEST3", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.DrawCard("p1")
 				return g
@@ -222,8 +229,8 @@ func TestStateTransitions_DrawOperations(t *testing.T) {
 			name: "draw from pile - invalid when game not started",
 			setupFunc: func() *Game {
 				g := NewGame("TEST4", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				return g
 			},
 			action: func(g *Game) error {
@@ -236,8 +243,8 @@ func TestStateTransitions_DrawOperations(t *testing.T) {
 			name: "draw from pile - invalid when game is over",
 			setupFunc: func() *Game {
 				g := NewGame("TEST5", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.state.GamePhase = "ended"
 				return g
@@ -253,8 +260,8 @@ func TestStateTransitions_DrawOperations(t *testing.T) {
 			name: "take from discard - valid on player's turn",
 			setupFunc: func() *Game {
 				g := NewGame("TEST6", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				return g
 			},
@@ -275,8 +282,8 @@ func TestStateTransitions_DrawOperations(t *testing.T) {
 			name: "take from discard - invalid when not your turn",
 			setupFunc: func() *Game {
 				g := NewGame("TEST7", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				return g
 			},
@@ -290,8 +297,8 @@ func TestStateTransitions_DrawOperations(t *testing.T) {
 			name: "take from discard - invalid when already have drawn card",
 			setupFunc: func() *Game {
 				g := NewGame("TEST8", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.DrawCard("p1")
 				return g
@@ -306,8 +313,8 @@ func TestStateTransitions_DrawOperations(t *testing.T) {
 			name: "take from discard - invalid when discard is empty",
 			setupFunc: func() *Game {
 				g := NewGame("TEST9", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.state.DiscardPile = []*Card{} // Empty it
 				return g
@@ -358,8 +365,8 @@ func TestStateTransitions_SwapOperations(t *testing.T) {
 			name: "swap card - valid after drawing",
 			setupFunc: func() *Game {
 				g := NewGame("TEST1", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.DrawCard("p1")
 				return g
@@ -384,8 +391,8 @@ func TestStateTransitions_SwapOperations(t *testing.T) {
 			name: "swap card - invalid without drawn card",
 			setupFunc: func() *Game {
 				g := NewGame("TEST2", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				return g
 			},
@@ -399,8 +406,8 @@ func TestStateTransitions_SwapOperations(t *testing.T) {
 			name: "swap card - invalid card index negative",
 			setupFunc: func() *Game {
 				g := NewGame("TEST3", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.DrawCard("p1")
 				return g
@@ -415,8 +422,8 @@ func TestStateTransitions_SwapOperations(t *testing.T) {
 			name: "swap card - invalid card index too high",
 			setupFunc: func() *Game {
 				g := NewGame("TEST4", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.DrawCard("p1")
 				return g
@@ -431,8 +438,8 @@ func TestStateTransitions_SwapOperations(t *testing.T) {
 			name: "swap card - invalid when not your turn",
 			setupFunc: func() *Game {
 				g := NewGame("TEST5", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.DrawCard("p1")
 				return g
@@ -447,8 +454,8 @@ func TestStateTransitions_SwapOperations(t *testing.T) {
 			name: "discard drawn - valid after drawing",
 			setupFunc: func() *Game {
 				g := NewGame("TEST6", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.DrawCard("p1")
 				return g
@@ -473,8 +480,8 @@ func TestStateTransitions_SwapOperations(t *testing.T) {
 			name: "discard drawn - invalid without drawn card",
 			setupFunc: func() *Game {
 				g := NewGame("TEST7", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				return g
 			},
@@ -488,8 +495,8 @@ func TestStateTransitions_SwapOperations(t *testing.T) {
 			name: "discard drawn - invalid when not your turn",
 			setupFunc: func() *Game {
 				g := NewGame("TEST8", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.DrawCard("p1")
 				return g
@@ -540,8 +547,8 @@ func TestStateTransitions_KnockMechanics(t *testing.T) {
 			name: "knock - valid on player's turn before drawing",
 			setupFunc: func() *Game {
 				g := NewGame("TEST1", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				return g
 			},
@@ -553,7 +560,7 @@ func TestStateTransitions_KnockMechanics(t *testing.T) {
 				if g.state.GamePhase != "knocked" {
 					t.Error("Game should be in knocked phase")
 				}
-				if g.state.KnockedPlayerID == nil || *g.state.KnockedPlayerID != "player_TEST1_1" {
+				if g.state.KnockedPlayerID == nil || *g.state.KnockedPlayerID != "TestPlayerp1" {
 					t.Error("Knocked player ID not set correctly")
 				}
 				if g.state.CurrentPlayerIndex != 1 {
@@ -565,8 +572,8 @@ func TestStateTransitions_KnockMechanics(t *testing.T) {
 			name: "knock - invalid when not your turn",
 			setupFunc: func() *Game {
 				g := NewGame("TEST2", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				return g
 			},
@@ -580,8 +587,8 @@ func TestStateTransitions_KnockMechanics(t *testing.T) {
 			name: "knock - invalid after drawing",
 			setupFunc: func() *Game {
 				g := NewGame("TEST3", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.DrawCard("p1")
 				return g
@@ -596,9 +603,9 @@ func TestStateTransitions_KnockMechanics(t *testing.T) {
 			name: "knock - invalid when already knocked",
 			setupFunc: func() *Game {
 				g := NewGame("TEST4", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
-				g.AddPlayer("p3")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
+				addTestPlayer(g, "p3")
 				g.StartGame()
 				g.Knock("p1") // p1 knocks, turn goes to p2
 				return g
@@ -613,8 +620,8 @@ func TestStateTransitions_KnockMechanics(t *testing.T) {
 			name: "knock - invalid when game not started",
 			setupFunc: func() *Game {
 				g := NewGame("TEST5", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				return g
 			},
 			action: func(g *Game) error {
@@ -627,8 +634,8 @@ func TestStateTransitions_KnockMechanics(t *testing.T) {
 			name: "knock - invalid when game is over",
 			setupFunc: func() *Game {
 				g := NewGame("TEST6", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.state.GamePhase = "ended"
 				return g
@@ -676,8 +683,8 @@ func TestStateTransitions_TurnAdvancement(t *testing.T) {
 			name: "turn advances after draw and discard",
 			setup: func() *Game {
 				g := NewGame("TEST1", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				// Player 1's turn
 				g.DrawCard("p1")
@@ -694,8 +701,8 @@ func TestStateTransitions_TurnAdvancement(t *testing.T) {
 			name: "turn advances after draw and swap",
 			setup: func() *Game {
 				g := NewGame("TEST2", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.DrawCard("p1")
 				g.SwapCard("p1", 0)
@@ -711,8 +718,8 @@ func TestStateTransitions_TurnAdvancement(t *testing.T) {
 			name: "turn wraps around to first player",
 			setup: func() *Game {
 				g := NewGame("TEST3", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				// P1 turn
 				g.DrawCard("p1")
@@ -732,9 +739,9 @@ func TestStateTransitions_TurnAdvancement(t *testing.T) {
 			name: "turn advances after knock",
 			setup: func() *Game {
 				g := NewGame("TEST4", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
-				g.AddPlayer("p3")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
+				addTestPlayer(g, "p3")
 				g.StartGame()
 				g.Knock("p1")
 				return g
@@ -769,8 +776,8 @@ func TestStateTransitions_GameEndConditions(t *testing.T) {
 			name: "game ends when knocker's turn comes again - 2 players",
 			setup: func() *Game {
 				g := NewGame("TEST1", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				g.Knock("p1")        // P1 knocks, turn to P2
 				g.DrawCard("p2")     // P2 takes final turn
@@ -793,9 +800,9 @@ func TestStateTransitions_GameEndConditions(t *testing.T) {
 			name: "game ends when knocker's turn comes again - 3 players",
 			setup: func() *Game {
 				g := NewGame("TEST2", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
-				g.AddPlayer("p3")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
+				addTestPlayer(g, "p3")
 				g.StartGame()
 				g.Knock("p1")        // P1 knocks, turn to P2
 				g.DrawCard("p2")     // P2 takes turn
@@ -814,10 +821,10 @@ func TestStateTransitions_GameEndConditions(t *testing.T) {
 			name: "game ends when knocker's turn comes again - 4 players",
 			setup: func() *Game {
 				g := NewGame("TEST3", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
-				g.AddPlayer("p3")
-				g.AddPlayer("p4")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
+				addTestPlayer(g, "p3")
+				addTestPlayer(g, "p4")
 				g.StartGame()
 				g.Knock("p1")        // P1 knocks, turn to P2
 				g.DrawCard("p2")     // P2 takes turn
@@ -838,9 +845,9 @@ func TestStateTransitions_GameEndConditions(t *testing.T) {
 			name: "game continues if not back to knocker yet",
 			setup: func() *Game {
 				g := NewGame("TEST4", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
-				g.AddPlayer("p3")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
+				addTestPlayer(g, "p3")
 				g.StartGame()
 				g.Knock("p1")        // P1 knocks, turn to P2
 				g.DrawCard("p2")     // P2 takes turn
@@ -882,7 +889,7 @@ func TestStateTransitions_PlayerManagement(t *testing.T) {
 				return NewGame("TEST1", &players.DeterministicIDGenerator{})
 			},
 			action: func(g *Game) error {
-				_, err := g.AddPlayer("p1")
+				_, err := addTestPlayer(g, "p1")
 				return err
 			},
 			expectError: false,
@@ -896,13 +903,13 @@ func TestStateTransitions_PlayerManagement(t *testing.T) {
 			name: "add 4th player - should succeed",
 			setupFunc: func() *Game {
 				g := NewGame("TEST2", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
-				g.AddPlayer("p3")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
+				addTestPlayer(g, "p3")
 				return g
 			},
 			action: func(g *Game) error {
-				_, err := g.AddPlayer("p4")
+				_, err := addTestPlayer(g, "p4")
 				return err
 			},
 			expectError: false,
@@ -916,14 +923,14 @@ func TestStateTransitions_PlayerManagement(t *testing.T) {
 			name: "add 5th player - should fail",
 			setupFunc: func() *Game {
 				g := NewGame("TEST3", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
-				g.AddPlayer("p3")
-				g.AddPlayer("p4")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
+				addTestPlayer(g, "p3")
+				addTestPlayer(g, "p4")
 				return g
 			},
 			action: func(g *Game) error {
-				_, err := g.AddPlayer("p5")
+				_, err := addTestPlayer(g, "p5")
 				return err
 			},
 			expectError:   true,
@@ -933,13 +940,13 @@ func TestStateTransitions_PlayerManagement(t *testing.T) {
 			name: "add player after game started - should fail",
 			setupFunc: func() *Game {
 				g := NewGame("TEST4", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				g.StartGame()
 				return g
 			},
 			action: func(g *Game) error {
-				_, err := g.AddPlayer("p3")
+				_, err := addTestPlayer(g, "p3")
 				return err
 			},
 			expectError:   true,
@@ -951,8 +958,8 @@ func TestStateTransitions_PlayerManagement(t *testing.T) {
 			name: "remove player from waiting game",
 			setupFunc: func() *Game {
 				g := NewGame("TEST6", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
 				return g
 			},
 			action: func(g *Game) error {
@@ -969,7 +976,7 @@ func TestStateTransitions_PlayerManagement(t *testing.T) {
 			name: "remove non-existent player",
 			setupFunc: func() *Game {
 				g := NewGame("TEST7", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
+				addTestPlayer(g, "p1")
 				return g
 			},
 			action: func(g *Game) error {
@@ -982,9 +989,9 @@ func TestStateTransitions_PlayerManagement(t *testing.T) {
 			name: "remove player after game started - should succeed but be careful",
 			setupFunc: func() *Game {
 				g := NewGame("TEST8", &players.DeterministicIDGenerator{})
-				g.AddPlayer("p1")
-				g.AddPlayer("p2")
-				g.AddPlayer("p3")
+				addTestPlayer(g, "p1")
+				addTestPlayer(g, "p2")
+				addTestPlayer(g, "p3")
 				g.StartGame()
 				return g
 			},
@@ -1033,20 +1040,20 @@ func TestStateTransitions_CompleteGameFlow(t *testing.T) {
 	game := NewGame("COMPLETE", &players.DeterministicIDGenerator{})
 
 	// Add players
-	p1, err := game.AddPlayer("client1")
+	p1, err := addTestPlayer(game, "client1")
 	if err != nil {
 		t.Fatalf("Failed to add player 1: %v", err)
 	}
-	if p1.Name != "player-1" {
-		t.Errorf("Expected player-1, got %s", p1.Name)
+	if p1.Name != "TestPlayerclient1" {
+		t.Errorf("Expected TestPlayerclient1, got %s", p1.Name)
 	}
 
-	p2, err := game.AddPlayer("client2")
+	p2, err := addTestPlayer(game, "client2")
 	if err != nil {
 		t.Fatalf("Failed to add player 2: %v", err)
 	}
-	if p2.Name != "player-2" {
-		t.Errorf("Expected player-2, got %s", p2.Name)
+	if p2.Name != "TestPlayerclient2" {
+		t.Errorf("Expected TestPlayerclient2, got %s", p2.Name)
 	}
 
 	// Verify waiting state
