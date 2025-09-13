@@ -9,6 +9,7 @@ import (
 
 	"github.com/muchq/moonbase/go/games_ws_backend/golf"
 	"github.com/muchq/moonbase/go/games_ws_backend/hub"
+	"github.com/muchq/moonbase/go/games_ws_backend/players"
 	"github.com/muchq/moonbase/go/games_ws_backend/thoughts"
 )
 
@@ -43,7 +44,7 @@ func main() {
 	})
 
 	// Serve golf backend
-	golfHub := golf.NewGolfHub()
+	golfHub := golf.NewGolfHub(&players.WhimsicalIDGenerator{})
 	go golfHub.Run()
 	http.HandleFunc("/golf-ws", func(w http.ResponseWriter, r *http.Request) {
 		hub.ServeWs(golfHub, w, r)

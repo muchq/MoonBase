@@ -3,6 +3,7 @@ package golf
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/muchq/moonbase/go/games_ws_backend/players"
 )
@@ -15,6 +16,7 @@ type Game struct {
 	playersByClient  map[string]*Player // client ID -> player
 	finalRoundPlayed map[string]bool    // track who has played their final turn
 	idGenerator      players.PlayerIDGenerator
+	roomID           string             // ID of the room this game belongs to
 }
 
 // NewGame creates a new game instance
@@ -34,11 +36,60 @@ func NewGame(gameID string, idGenerator players.PlayerIDGenerator) *Game {
 		playersByClient:  make(map[string]*Player),
 		finalRoundPlayed: make(map[string]bool),
 		idGenerator:      idGenerator,
+		roomID:           "", // Will be set when game is created in a room
 	}
 }
 
-// AddPlayer adds a new player to the game
-func (g *Game) AddPlayer(clientID string) (*Player, error) {
+// NewGameInRoom creates a new game instance for a specific room
+func NewGameInRoom(gameID string, roomID string, roomPlayers []*Player, idGenerator players.PlayerIDGenerator) *Game {
+	// Create game players from room players with reset game-specific state
+	gamePlayers := make([]*Player, len(roomPlayers))
+	playersByClient := make(map[string]*Player)
+	
+	for i, roomPlayer := range roomPlayers {
+		gamePlayer := &Player{
+			// Copy persistent room data
+			ID:          roomPlayer.ID,
+			Name:        roomPlayer.Name,
+			ClientID:    roomPlayer.ClientID,
+			TotalScore:  roomPlayer.TotalScore,
+			GamesPlayed: roomPlayer.GamesPlayed,
+			GamesWon:    roomPlayer.GamesWon,
+			IsConnected: roomPlayer.IsConnected,
+			JoinedAt:    roomPlayer.JoinedAt,
+			
+			// Reset game-specific state
+			Cards:         CreateHiddenCards(),
+			Score:         0,
+			RevealedCards: make([]int, 0),
+			IsReady:       false,
+			HasPeeked:     false,
+		}
+		gamePlayers[i] = gamePlayer
+		playersByClient[roomPlayer.ClientID] = gamePlayer
+	}
+	
+	return &Game{
+		state: &GameState{
+			ID:                 gameID,
+			Players:            gamePlayers,
+			CurrentPlayerIndex: 0,
+			DrawPile:           0,
+			DiscardPile:        make([]*Card, 0),
+			GamePhase:          "waiting",
+			KnockedPlayerID:    nil,
+			DrawnCard:          nil,
+			PeekedAtDrawPile:   false,
+		},
+		playersByClient:  playersByClient,
+		finalRoundPlayed: make(map[string]bool),
+		idGenerator:      idGenerator,
+		roomID:           roomID,
+	}
+}
+
+// AddPlayer adds a new player to the game with given playerID and playerName
+func (g *Game) AddPlayer(clientID string, playerID string, playerName string) (*Player, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -50,19 +101,17 @@ func (g *Game) AddPlayer(clientID string) (*Player, error) {
 		return nil, fmt.Errorf("game is full")
 	}
 
-	// Generate player ID and name
-	playerNum := len(g.state.Players) + 1
-	playerID := fmt.Sprintf("player_%s_%d", g.state.ID, playerNum)
-	playerName := g.idGenerator.GenerateID()
-
 	player := &Player{
 		ID:            playerID,
 		Name:          playerName,
+		ClientID:      clientID,
 		Cards:         CreateHiddenCards(),
 		Score:         0,
 		RevealedCards: make([]int, 0),
 		IsReady:       false,
 		HasPeeked:     false,
+		IsConnected:   true,
+		JoinedAt:      time.Now(),
 	}
 
 	g.state.Players = append(g.state.Players, player)
@@ -654,4 +703,33 @@ func (g *Game) ShouldShowCards(clientID string) bool {
 	}
 
 	return false
+}
+
+// GetRoomID returns the room ID this game belongs to
+func (g *Game) GetRoomID() string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.roomID
+}
+
+// GetGameResult returns the result of this game for room tracking
+func (g *Game) GetGameResult() *GameResult {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	
+	if g.state.GamePhase != "ended" {
+		return nil
+	}
+	
+	winner := g.GetWinner()
+	if winner == nil {
+		return nil
+	}
+	
+	return &GameResult{
+		GameID:      g.state.ID,
+		Winner:      winner.Name,
+		FinalScores: g.GetFinalScores(),
+		CompletedAt: time.Now(),
+	}
 }

@@ -1,10 +1,17 @@
 package golf
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/muchq/moonbase/go/games_ws_backend/players"
 )
+
+// Helper function to add test players with consistent IDs
+func addTestPlayerToGame(g *Game, clientID string) (*Player, error) {
+	playerID := fmt.Sprintf("TestPlayer%s", clientID)
+	return g.AddPlayer(clientID, playerID, playerID)
+}
 
 func TestNewGame(t *testing.T) {
 	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
@@ -25,22 +32,22 @@ func TestNewGame(t *testing.T) {
 func TestAddPlayer(t *testing.T) {
 	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
 
-	player1, err := game.AddPlayer("client1")
+	player1, err := addTestPlayerToGame(game, "client1")
 	if err != nil {
 		t.Fatalf("Failed to add player1: %v", err)
 	}
 
-	if player1.Name != "player-1" {
-		t.Errorf("Expected player-1, got %s", player1.Name)
+	if player1.Name != "TestPlayerclient1" {
+		t.Errorf("Expected TestPlayerclient1, got %s", player1.Name)
 	}
 
-	player2, err := game.AddPlayer("client2")
+	player2, err := addTestPlayerToGame(game, "client2")
 	if err != nil {
 		t.Fatalf("Failed to add player2: %v", err)
 	}
 
-	if player2.Name != "player-2" {
-		t.Errorf("Expected player-2, got %s", player2.Name)
+	if player2.Name != "TestPlayerclient2" {
+		t.Errorf("Expected TestPlayerclient2, got %s", player2.Name)
 	}
 
 	if len(game.state.Players) != 2 {
@@ -58,8 +65,8 @@ func TestStartGame(t *testing.T) {
 	}
 
 	// Add players
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
 
 	// Start game
 	err = game.StartGame()
@@ -126,8 +133,8 @@ func TestGenerateGameID(t *testing.T) {
 
 func TestPeekCard(t *testing.T) {
 	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
 	game.StartGame()
 
 	// Test peeking at first card
@@ -172,8 +179,8 @@ func TestPeekCard(t *testing.T) {
 
 func TestDrawCard(t *testing.T) {
 	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
 	game.StartGame()
 
 	// Test drawing when it's player's turn
@@ -206,8 +213,8 @@ func TestDrawCard(t *testing.T) {
 
 func TestTakeFromDiscard(t *testing.T) {
 	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
 	game.StartGame()
 
 	discardTop := game.state.DiscardPile[len(game.state.DiscardPile)-1]
@@ -232,8 +239,8 @@ func TestTakeFromDiscard(t *testing.T) {
 
 func TestSwapCard(t *testing.T) {
 	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
 	game.StartGame()
 
 	// Draw a card first
@@ -278,8 +285,8 @@ func TestSwapCard(t *testing.T) {
 
 func TestDiscardDrawn(t *testing.T) {
 	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
 	game.StartGame()
 
 	// Draw a card first
@@ -311,8 +318,8 @@ func TestDiscardDrawn(t *testing.T) {
 
 func TestKnock(t *testing.T) {
 	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
 	game.StartGame()
 
 	// Test knocking
@@ -325,7 +332,7 @@ func TestKnock(t *testing.T) {
 		t.Errorf("Expected game phase 'knocked', got %s", game.state.GamePhase)
 	}
 
-	if game.state.KnockedPlayerID == nil || *game.state.KnockedPlayerID != "player_TEST123_1" {
+	if game.state.KnockedPlayerID == nil || *game.state.KnockedPlayerID != "TestPlayerclient1" {
 		t.Error("Knocked player ID not set correctly")
 	}
 
@@ -337,8 +344,8 @@ func TestKnock(t *testing.T) {
 
 	// Test knocking after drawing (should fail)
 	game = NewGame("TEST456", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
 	game.StartGame()
 	game.DrawCard("client1")
 
@@ -350,8 +357,8 @@ func TestKnock(t *testing.T) {
 
 func TestGameEnd(t *testing.T) {
 	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
 	game.StartGame()
 
 	// Player 1 knocks (it's their turn)
@@ -399,8 +406,8 @@ func TestGameEnd(t *testing.T) {
 
 func TestGetWinner(t *testing.T) {
 	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
 	game.StartGame()
 
 	// Manually set up a winning scenario
@@ -429,8 +436,8 @@ func TestGetWinner(t *testing.T) {
 		t.Fatal("No winner returned")
 	}
 
-	if winner.Name != "player-1" {
-		t.Errorf("Expected player-1 to win, got %s", winner.Name)
+	if winner.Name != "TestPlayerclient1" {
+		t.Errorf("Expected TestPlayerclient1 to win, got %s", winner.Name)
 	}
 
 	if winner.Score != 0 { // 4 Aces = 2 pairs that cancel out = 0 points
@@ -440,9 +447,9 @@ func TestGetWinner(t *testing.T) {
 
 func TestRemovePlayer(t *testing.T) {
 	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
-	game.AddPlayer("client3")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+	addTestPlayerToGame(game, "client3")
 
 	if len(game.state.Players) != 3 {
 		t.Fatalf("Expected 3 players, got %d", len(game.state.Players))
@@ -497,8 +504,8 @@ func TestValidateCardIndex(t *testing.T) {
 
 func TestTurnValidation(t *testing.T) {
 	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
 	game.StartGame()
 
 	// Player 2 tries to draw (not their turn)
@@ -525,7 +532,7 @@ func TestTurnValidation(t *testing.T) {
 
 func TestGamePhaseValidation(t *testing.T) {
 	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
+	addTestPlayerToGame(game, "client1")
 
 	// Try to draw before game starts
 	err := game.DrawCard("client1")
@@ -546,7 +553,7 @@ func TestGamePhaseValidation(t *testing.T) {
 	}
 
 	// Add second player and start
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client2")
 	game.StartGame()
 
 	// Now drawing should work
@@ -561,14 +568,14 @@ func TestMaxPlayers(t *testing.T) {
 
 	// Add 4 players (max)
 	for i := 0; i < 4; i++ {
-		_, err := game.AddPlayer(string(rune('a' + i)))
+		_, err := addTestPlayerToGame(game, string(rune('a' + i)))
 		if err != nil {
 			t.Fatalf("Failed to add player %d: %v", i+1, err)
 		}
 	}
 
 	// Try to add 5th player
-	_, err := game.AddPlayer("client5")
+	_, err := addTestPlayerToGame(game, "client5")
 	if err == nil {
 		t.Error("Expected error when adding 5th player")
 	}
@@ -576,8 +583,8 @@ func TestMaxPlayers(t *testing.T) {
 
 func TestGetState(t *testing.T) {
 	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
 	game.StartGame()
 
 	// Get state copy
@@ -620,7 +627,7 @@ func TestConcurrentPlayerJoins(t *testing.T) {
 
 	for i := 0; i < 10; i++ {
 		go func(clientID string) {
-			player, err := game.AddPlayer(clientID)
+			player, err := addTestPlayerToGame(game, clientID)
 			results <- result{player, err}
 		}(string(rune('a' + i)))
 	}
@@ -647,8 +654,8 @@ func TestConcurrentPlayerJoins(t *testing.T) {
 
 func TestConcurrentGameActions(t *testing.T) {
 	game := NewGame("CONCURRENT2", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
 	game.StartGame()
 
 	// Multiple goroutines trying to perform actions
@@ -707,8 +714,8 @@ func TestConcurrentGameActions(t *testing.T) {
 
 func TestConcurrentStateReads(t *testing.T) {
 	game := NewGame("CONCURRENT3", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
 	game.StartGame()
 
 	// Many concurrent reads
@@ -735,8 +742,8 @@ func TestConcurrentStateReads(t *testing.T) {
 
 func TestConcurrentTurnActions(t *testing.T) {
 	game := NewGame("CONCURRENT4", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
 	game.StartGame()
 
 	// Both players try to draw at the same time
@@ -773,9 +780,9 @@ func TestConcurrentTurnActions(t *testing.T) {
 
 func TestConcurrentKnocking(t *testing.T) {
 	game := NewGame("CONCURRENT5", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
-	game.AddPlayer("client3")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+	addTestPlayerToGame(game, "client3")
 	game.StartGame()
 
 	// Multiple players try to knock simultaneously
@@ -822,8 +829,8 @@ func TestConcurrentKnocking(t *testing.T) {
 
 func TestScoreVisibilityDuringGame(t *testing.T) {
 	game := NewGame("TEST_SCORE", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
 	game.StartGame()
 
 	// Get state for player 1 during gameplay
@@ -891,7 +898,7 @@ func TestRaceConditionProtection(t *testing.T) {
 	// Add players
 	for i := 0; i < 5; i++ {
 		go func(id string) {
-			game.AddPlayer(id)
+			addTestPlayerToGame(game, id)
 			done <- true
 		}(string(rune('a' + i)))
 	}
@@ -939,9 +946,9 @@ func TestRaceConditionProtection(t *testing.T) {
 
 func TestDrawnCardPrivacy(t *testing.T) {
 	game := NewGame("TEST_PRIVACY", &players.DeterministicIDGenerator{})
-	game.AddPlayer("client1")
-	game.AddPlayer("client2")
-	game.AddPlayer("client3")
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+	addTestPlayerToGame(game, "client3")
 	game.StartGame()
 
 	// Player 1 draws a card

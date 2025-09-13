@@ -9,6 +9,7 @@ go_library(
     deps = [
         "//go/games_ws_backend/golf",
         "//go/games_ws_backend/hub",
+        "//go/games_ws_backend/players",
         "//go/games_ws_backend/thoughts",
     ],
 )
