@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode"
 
-	s "github.com/muchq/moonbase/go/toyfish/settings"
+	s "github.com/muchq/moonbase/go/chess/toyfish/settings"
 )
 
 type Color int

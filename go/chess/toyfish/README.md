@@ -3,16 +3,16 @@
 Learning about chess programming by following along with this fun [chess programming](https://www.youtube.com/playlist?list=PLmN0neTso3JyHJ4YqTo4IT8LPm4laNhZ5) youtube series
 
 ```shell
-➜  MoonBase git:(chess2) ✗ bazel run //go/toyfish:main
-INFO: Invocation ID: 575b66c5-9ce0-41f4-8fe4-a349a73c99e6
-INFO: Analyzed target //go/toyfish:main (0 packages loaded, 0 targets configured).
+➜  MoonBase git:(chess2) ✗ bazel run //go/chess/toyfish:main
+INFO: Invocation ID: 48aceb73-d0ae-47e3-9e86-59d449ef557f
+INFO: Analyzed target //go/chess/toyfish:main (0 packages loaded, 0 targets configured).
 INFO: Found 1 target...
-Target //go/toyfish:main up-to-date:
-  bazel-bin/go/toyfish/main_/main
-INFO: Elapsed time: 0.116s, Critical Path: 0.00s
+Target //go/chess/toyfish:main up-to-date:
+  bazel-bin/go/chess/toyfish/main_/main
+INFO: Elapsed time: 0.126s, Critical Path: 0.00s
 INFO: 1 process: 1 internal.
 INFO: Build completed successfully, 1 total action
-INFO: Running command line: bazel-bin/go/toyfish/main_/main
+INFO: Running command line: bazel-bin/go/chess/toyfish/main_/main
 
 
  ♜♞♝♛♚♝♞♜

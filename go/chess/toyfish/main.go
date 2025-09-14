@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode"
 
-	ch "github.com/muchq/moonbase/go/toyfish"
-	s "github.com/muchq/moonbase/go/toyfish/settings"
+	ch "github.com/muchq/moonbase/go/chess/toyfish"
+	s "github.com/muchq/moonbase/go/chess/toyfish/settings"
 )
 
 type Chess struct {
