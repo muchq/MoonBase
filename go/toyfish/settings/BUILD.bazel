@@ -9,6 +9,6 @@ go_library(
     name = "settings",
     srcs = ["settings.go"],
     data = [":settings_json"],
-    importpath = "github.com/muchq/moonbase/go/chess/settings",
+    importpath = "github.com/muchq/moonbase/go/toyfish/settings",
     visibility = ["//visibility:public"],
 )

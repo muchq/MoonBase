@@ -3,21 +3,21 @@ load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 go_binary(
     name = "main",
     srcs = ["main.go"],
-    importpath = "github.com/muchq/moonbase/go/chess",
+    importpath = "github.com/muchq/moonbase/go/toyfish",
     visibility = ["//visibility:public"],
     deps = [
         ":types",
-        "//go/chess/settings",
+        "//go/toyfish/settings",
     ],
 )
 
 go_library(
     name = "types",
     srcs = ["types.go"],
-    importpath = "github.com/muchq/moonbase/go/chess",
+    importpath = "github.com/muchq/moonbase/go/toyfish",
     visibility = ["//visibility:public"],
     deps = [
-        "//go/chess/settings",
+        "//go/toyfish/settings",
     ],
 )
 

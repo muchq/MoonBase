@@ -1,4 +1,4 @@
-package chess
+package toyfish
 
 import (
 	"errors"
@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode"
 
-	s "github.com/muchq/moonbase/go/chess/settings"
+	s "github.com/muchq/moonbase/go/toyfish/settings"
 )
 
 type Color int

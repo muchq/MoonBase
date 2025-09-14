@@ -29,7 +29,7 @@ type Settings struct {
 }
 
 func NewSettings() (*Settings, error) {
-	const settingsJson = "go/chess/settings/settings.json"
+	const settingsJson = "go/toyfish/settings/settings.json"
 	abs, err := filepath.Abs(settingsJson)
 	if err != nil {
 		return nil, err
