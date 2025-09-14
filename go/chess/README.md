@@ -11,6 +11,6 @@
  - etc
 
 ### FUTURE
-
+ - [more projects](https://www.chessprogramming.org/Recommended_Reading)
  - Bitboards?
  - Other stuff?
