@@ -178,6 +178,9 @@ func (g *Game) GenerateMoves() []Move {
 							break
 						}
 					}
+					// TODO: implement es-passant capture suppoer
+
+					// TODO: implement castling rules
 
 					// ***************************************************
 					// ******************* CHECKMATE *********************
