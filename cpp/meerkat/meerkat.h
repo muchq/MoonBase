@@ -10,6 +10,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "cpp/futility/rate_limiter/sliding_window_rate_limiter.h"
+#include "cpp/meerkat/metrics_manager.h"
 #include "mongoose.h"
 #include "nlohmann/json.hpp"
 
@@ -20,6 +21,7 @@ using json = nlohmann::json;
 struct Context {
   std::chrono::steady_clock::time_point start_time;
   std::string trace_id;
+  std::string route_pattern;  // For metrics: the route pattern (e.g., "/v1/trace")
 };
 
 struct HttpRequest {
@@ -95,6 +97,10 @@ class HttpServer {
   // Request Tracing
   void enable_tracing();
 
+  // Metrics
+  void enable_metrics(const std::string& service_name);
+  void disable_metrics();
+
  private:
   struct mg_mgr mgr_;
   struct mg_connection* listener_;
@@ -116,6 +122,10 @@ class HttpServer {
   std::vector<RequestInterceptor> request_interceptors_;
   std::vector<ResponseInterceptor> response_interceptors_;
 
+  // Metrics
+  std::shared_ptr<HttpMetricsManager> metrics_manager_;
+  bool metrics_enabled_ = false;
+
   static void event_handler(struct mg_connection* c, int ev, void* ev_data);
   void handle_request(struct mg_connection* c, struct mg_http_message* hm);
 
@@ -124,6 +134,9 @@ class HttpServer {
 
   RouteHandler* find_handler(const std::string& method, const std::string& uri);
   std::unordered_map<std::string, std::string> parse_query_params(const std::string& query) const;
+
+  // Metrics helpers
+  std::string ExtractRoutePattern(const std::string& uri, const std::string& method) const;
 };
 
 // Utility functions for request handling
@@ -156,10 +169,12 @@ namespace request {
 RequestInterceptor trace_id();
 RequestInterceptor rate_limiter(
     std::shared_ptr<futility::rate_limiter::SlidingWindowRateLimiter<std::string>> ip_rate_limiter);
+RequestInterceptor metrics(std::shared_ptr<HttpMetricsManager> manager);
 }  // namespace request
 namespace response {
 ResponseInterceptor trace_id_header();
 ResponseInterceptor logging();
+ResponseInterceptor metrics(std::shared_ptr<HttpMetricsManager> manager);
 }  // namespace response
 }  // namespace interceptors
 

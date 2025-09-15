@@ -392,6 +392,22 @@ RequestInterceptor rate_limiter(
     return true;
   };
 }
+
+RequestInterceptor metrics(std::shared_ptr<HttpMetricsManager> manager) {
+  return [manager](HttpRequest& req, HttpResponse& res, Context& ctx) -> bool {
+    if (!manager) return true;
+
+    // Extract route pattern for metrics (this will be the registered route path)
+    // For now, we'll use the URI as-is since we don't have access to the HttpServer's
+    // route matching logic here. This will be refined when we integrate with the server.
+    ctx.route_pattern = req.uri;
+
+    // Record request start
+    manager->RecordRequestStart(ctx.route_pattern, req.method);
+
+    return true;
+  };
+}
 }  // namespace request
 
 namespace response {
@@ -418,6 +434,53 @@ ResponseInterceptor logging() {
               << " res.body.bytes=" << res.body.size() << " duration_ms=" << duration.count();
   };
 }
+
+ResponseInterceptor metrics(std::shared_ptr<HttpMetricsManager> manager) {
+  return [manager](const HttpRequest& req, HttpResponse& res, Context& ctx) -> void {
+    if (!manager) return;
+
+    auto end_time = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - ctx.start_time);
+
+    // Use the route pattern stored in context, fallback to URI if not set
+    std::string route = ctx.route_pattern.empty() ? req.uri : ctx.route_pattern;
+
+    // Record request completion
+    manager->RecordRequestComplete(route, req.method, res.status_code, duration);
+  };
+}
 }  // namespace response
 }  // namespace interceptors
+
+// HttpServer metrics methods
+void HttpServer::enable_metrics(const std::string& service_name) {
+  metrics_manager_ = std::make_shared<HttpMetricsManager>(service_name);
+  metrics_enabled_ = true;
+
+  // Automatically add metrics interceptors
+  use_request_interceptor(interceptors::request::metrics(metrics_manager_));
+  use_response_interceptor(interceptors::response::metrics(metrics_manager_));
+}
+
+void HttpServer::disable_metrics() {
+  metrics_manager_.reset();
+  metrics_enabled_ = false;
+}
+
+std::string HttpServer::ExtractRoutePattern(const std::string& uri, const std::string& method) const {
+  // For now, use exact path matching since meerkat uses simple routes
+  // Future enhancement: implement parameterized route pattern matching
+
+  // Find matching route in our registered routes
+  for (const auto& route : routes_) {
+    if (route.method == method && route.path == uri) {
+      return route.path;
+    }
+  }
+
+  // If no exact match found, return the URI as-is
+  // This handles dynamic routes or routes not found
+  return uri;
+}
+
 }  // namespace meerkat

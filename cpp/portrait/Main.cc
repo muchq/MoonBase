@@ -24,6 +24,7 @@ int main() {
   LOG(INFO) << "Starting Portrait Server with OpenTelemetry metrics...";
 
   HttpServer server;
+  server.enable_metrics("portrait");
   TracerService tracer_service;
   futility::rate_limiter::SlidingWindowRateLimiterConfig config{
       .max_requests_per_key = 20,
