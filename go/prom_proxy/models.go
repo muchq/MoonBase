@@ -105,6 +105,8 @@ type RequestMetrics struct {
 	Rate            float64 `json:"rate_per_sec"`
 	SuccessRate     float64 `json:"success_rate_percent"`
 	AverageDuration float64 `json:"avg_duration_microseconds"`
+	SuccessCount    float64 `json:"success_count"`
+	FailureCount    float64 `json:"failure_count"`
 }
 
 type CacheMetrics struct {
