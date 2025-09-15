@@ -15,7 +15,7 @@ void HttpMetricsManager::RecordRequestStart(const std::string& route, const std:
   auto base_attrs = CreateBaseAttributes(route, method);
 
   // Increment total requests counter
-  recorder_->RecordCounter("http_server_requests_total", 1, base_attrs);
+  recorder_->RecordCounter("http_server_requests", 1, base_attrs);
 
   // Increment active requests gauge
   recorder_->RecordGauge("http_server_requests_active", 1, base_attrs);
@@ -38,11 +38,11 @@ void HttpMetricsManager::RecordRequestComplete(const std::string& route,
 
   // Record success or failure
   if (IsSuccess(status_code)) {
-    recorder_->RecordCounter("http_server_requests_success_total", 1, base_attrs);
+    recorder_->RecordCounter("http_server_requests_success", 1, base_attrs);
   } else {
     auto failure_attrs = request_attrs;
     failure_attrs["error_type"] = DetermineErrorType(status_code);
-    recorder_->RecordCounter("http_server_requests_failure_total", 1, failure_attrs);
+    recorder_->RecordCounter("http_server_requests_failure", 1, failure_attrs);
   }
 }
 
