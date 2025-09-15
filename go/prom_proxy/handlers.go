@@ -433,6 +433,8 @@ func (h *MetricsHandler) fetchPortraitMetricsTimeSeries(ctx context.Context, tim
 		"cache_operations_rate":  `rate(trace_cache_hits_total[5m])+rate(trace_cache_misses_total[5m])`,
 		"scene_sphere_count":     `scene_sphere_count_gauge`,
 		"scene_light_count":      `scene_light_count_gauge`,
+		"request_success_count":  `trace_requests_completed_total`,
+		"request_failure_count":  `trace_requests_failed_total`,
 	}
 	
 	// Execute each query as a range query
@@ -495,6 +497,24 @@ func (h *MetricsHandler) fetchPortraitMetrics(ctx context.Context) (*PortraitMet
 	if err == nil && len(durationResp.Data.Result) > 0 {
 		if val, err := extractFloatValue(&durationResp.Data.Result[0]); err == nil {
 			metrics.Requests.AverageDuration = val
+		}
+	}
+
+	// Fetch success count
+	successCountQuery := `trace_requests_completed_total`
+	successCountResp, err := h.promClient.Query(ctx, successCountQuery)
+	if err == nil && len(successCountResp.Data.Result) > 0 {
+		if val, err := extractFloatValue(&successCountResp.Data.Result[0]); err == nil {
+			metrics.Requests.SuccessCount = val
+		}
+	}
+
+	// Fetch failure count
+	failureCountQuery := `trace_requests_failed_total`
+	failureCountResp, err := h.promClient.Query(ctx, failureCountQuery)
+	if err == nil && len(failureCountResp.Data.Result) > 0 {
+		if val, err := extractFloatValue(&failureCountResp.Data.Result[0]); err == nil {
+			metrics.Requests.FailureCount = val
 		}
 	}
 	
