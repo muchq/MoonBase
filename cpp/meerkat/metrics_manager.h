@@ -1,4 +1,5 @@
-#pragma once
+#ifndef CPP_MEERKAT_METRICS_MANAGER_H
+#define CPP_MEERKAT_METRICS_MANAGER_H
 
 #include <chrono>
 #include <map>
@@ -40,3 +41,5 @@ class HttpMetricsManager {
 };
 
 }  // namespace meerkat
+
+#endif  // CPP_MEERKAT_METRICS_MANAGER_H
