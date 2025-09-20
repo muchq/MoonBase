@@ -12,6 +12,7 @@ rust_library(
         "src/storage.rs",
     ],
     crate_name = "wordchains",
+    visibility = ["//visibility:public"],
     deps = crate_deps([
         "base64ct",
         "sha2",

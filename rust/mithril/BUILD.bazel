@@ -8,7 +8,9 @@ rust_binary(
         "src/main.rs",
     ],
     crate_name = "mithril",
-    deps = all_crate_deps(),
+    deps = [
+        "//rust/wordchains:wordchains_lib",
+    ] + all_crate_deps(),
 )
 
 linux_amd64_oci_binary(bin_name = "mithril")
