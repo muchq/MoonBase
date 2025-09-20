@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use std::env;
 use tracing::{event, Level};
 use tracing_subscriber;
+use wordchains::initialize_graph;
 
 const DEFAULT_PORT: u16 = 8080;
 
@@ -19,10 +20,14 @@ async fn wordchain_post() -> Json<Value> {
 async fn main() {
     tracing_subscriber::fmt::init();
 
+    let path = "/usr/share/dict/words";
+    let word_graph = initialize_graph(path);
+
     let port = env::var("PORT")
         .ok()
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(DEFAULT_PORT);
+
 
     let listen_address = format!("0.0.0.0:{}", &port);
 

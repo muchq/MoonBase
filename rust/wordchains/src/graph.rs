@@ -1,4 +1,4 @@
-use log::{info, warn};
+use tracing::{event, Level};
 use std::collections::{HashMap, VecDeque};
 use crate::model::{Graph, Node};
 
@@ -7,7 +7,7 @@ pub fn build_graph(words: Vec<String>) -> (Graph, Vec<usize>) {
     let mut word_graph: Vec<Vec<usize>> = vec![vec![]; num_words];
     let mut matches: Vec<usize> = Vec::new();
 
-    info!("building graph...");
+    event!(Level::INFO, "building graph...");
     for (i, word1) in words.iter().enumerate() {
         for j in (i + 1)..num_words {
             let word2 = words[j].clone();
@@ -42,12 +42,12 @@ pub fn bfs_for_target(
     }
 
     if !word_to_index.contains_key(&start) {
-        warn!("{} is not in my dictionary.", &start);
+        event!(Level::DEBUG, "{} is not in dictionary.", &start);
         return None;
     }
 
     if !word_to_index.contains_key(target_word) {
-        warn!("{} is not in my dictionary.", &target_word);
+        event!(Level::DEBUG, "{} is not in dictionary.", &target_word);
         return None;
     }
 

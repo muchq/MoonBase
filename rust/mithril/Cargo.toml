@@ -9,5 +9,6 @@ readme.workspace = true
 axum = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-tracing = {workspace = true}
-tracing-subscriber = {workspace = true}
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+wordchains = { workspace = true }

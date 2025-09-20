@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::fs::{read, read_to_string, write};
-use log::info;
+use tracing::{event, Level};
 
 // TODO: handle missing file
 fn read_words(filename: String) -> Vec<String> {
@@ -14,7 +14,7 @@ fn read_words(filename: String) -> Vec<String> {
 }
 
 pub fn read_dictionary(path: &str) -> Vec<String> {
-    info!("Reading dictionary from \"{}\"...", path);
+    event!(Level::INFO, "Reading dictionary from \"{}\"...", path);
     let mut word_list: Vec<String> = read_words(String::from(path))
         .iter()
         .filter(|word| word.len() < 9)
@@ -37,7 +37,7 @@ pub fn read_existing_graph(digest: &str, num_words: usize) -> Option<Vec<Vec<usi
     let mut word_graph = vec![vec![]; num_words];
     match read(digest_to_path(digest)) {
         Ok(content) => {
-            info!("reading graph from {}.graph...", digest);
+            event!(Level::INFO, "reading graph from {}.graph...", digest);
             let mut chunks = content.chunks(8);
             let num_chunks = chunks.len();
             for _ in 0..(num_chunks / 2) {
