@@ -1,5 +1,7 @@
 directories:
+  bazel
   cpp
+  deploy
   protos
   rust
 

@@ -12,6 +12,7 @@ services:
       - /var/log/caddy:/var/log/caddy
     depends_on:
       - games_ws_backend
+      - mithril
       - portrait
       - prom_proxy
     networks:
@@ -52,6 +53,18 @@ services:
       - PROMETHEUS_URL=http://prometheus:9090
     volumes:
       - /etc/prom_proxy:/etc/prom_proxy
+    networks:
+      - app_network
+
+  mithril:
+    image: ghcr.io/muchq/mithril:latest
+    restart: always
+    ports:
+      - "8083:8083"
+    environment:
+      - PORT=8083
+    volumes:
+      - /etc/mithril:/etc/mithril
     networks:
       - app_network
 

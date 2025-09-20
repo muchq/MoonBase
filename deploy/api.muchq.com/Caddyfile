@@ -4,6 +4,11 @@ api.muchq.com {
 		path /v1/trace
 	}
 
+	@post_mithril {
+		method POST
+		path /v1/wordchain
+	}
+
 	@options {
 		method OPTIONS
 	}
@@ -26,6 +31,13 @@ api.muchq.com {
 	}
 
 	reverse_proxy @post_portrait portrait:8081 {
+		header_down -Access-Control-Allow-Origin
+		header_down -Access-Control-Allow-Methods
+		header_down -Access-Control-Allow-Headers
+		header_down -Access-Control-Max-Age
+	}
+
+	reverse_proxy @post_mithril mithril:8083 {
 		header_down -Access-Control-Allow-Origin
 		header_down -Access-Control-Allow-Methods
 		header_down -Access-Control-Allow-Headers
