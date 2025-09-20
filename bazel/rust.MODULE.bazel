@@ -27,6 +27,7 @@ crate.from_cargo(
         "//rust/helloworld_tonic:Cargo.toml",
         "//rust/cards:Cargo.toml",
         "//rust/doc_db:Cargo.toml",
+        "//rust/mithril:Cargo.toml",
         "//rust/wordchains:Cargo.toml",
     ],
     supported_platform_triples = [
