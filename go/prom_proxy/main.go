@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/muchq/moonbase/go/mucks"
-	prom_proxy "github.com/muchq/moonbase/go/prom_proxy_lib"
+	"github.com/muchq/moonbase/go/prom_proxy"
 )
 
 func getEnvWithDefault(key, defaultValue string) string {

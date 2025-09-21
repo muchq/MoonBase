@@ -1,6 +1,6 @@
 bazel_dep(name = "rules_java", version = "8.15.2")
 bazel_dep(name = "rules_jvm_external", version = "6.8")
-bazel_dep(name = "contrib_rules_jvm", version = "0.29.0")
+bazel_dep(name = "contrib_rules_jvm", version = "0.30.0")
 
 maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 
@@ -23,18 +23,18 @@ maven.install(
         "com.fasterxml.jackson.datatype:jackson-datatype-jdk8:%s" % JACKSON_VERSION,
         "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:%s" % JACKSON_VERSION,
         "com.fasterxml.jackson.module:jackson-module-scala_2.13:%s" % JACKSON_VERSION,
-        "com.google.guava:guava:33.4.8-jre",
+        "com.google.guava:guava:33.5.0-jre",
         "io.netty:netty-common:%s" % NETTY_VERSION,
         "io.netty:netty-codec:%s" % NETTY_VERSION,
         "io.netty:netty-handler:%s" % NETTY_VERSION,
         "io.netty:netty-transport:%s" % NETTY_VERSION,
         "io.sentry:sentry-logback:8.18.0",
         "junit:junit:4.13.2",
-        "org.assertj:assertj-core:3.27.4",
+        "org.assertj:assertj-core:3.27.5",
         "org.eclipse.jetty:jetty-server:%s" % JETTY_VERSION,
         "org.eclipse.jetty.websocket:websocket-jetty-server:%s" % JETTY_VERSION,
         "org.scala-lang:scala3-library_3:jar:3.3.1",
-        "org.scala-lang:scala3-compiler_3:3.7.2",
+        "org.scala-lang:scala3-compiler_3:3.7.3",
         "org.slf4j:slf4j-api:2.0.17",
     ],
     lock_file = "//:maven_install.json",
