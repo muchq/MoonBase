@@ -69,8 +69,8 @@ async fn wordchain_post(
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let path = "/usr/share/dict/words";
-    let word_graph = initialize_graph(path);
+    let path = "rust/mithril/data/words.txt";
+    let word_graph = initialize_graph(path, Some("rust/mithril/data"));
 
     let shared_state = Arc::new(AppState { word_graph: word_graph });
 

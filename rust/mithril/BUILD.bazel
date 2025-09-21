@@ -8,6 +8,10 @@ rust_binary(
         "src/main.rs",
     ],
     crate_name = "mithril",
+    data = [
+        "//rust/mithril:data/j4YL7Lh1H2PAgHy_a625LegUoxk94ZOimjzzx0QKI+Y_.graph",
+        "//rust/mithril:data/words.txt",
+    ],
     deps = [
         "//rust/wordchains:wordchains_lib",
     ] + all_crate_deps(),
