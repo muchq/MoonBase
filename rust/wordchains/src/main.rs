@@ -1,10 +1,10 @@
-mod logging;
 mod args;
+mod logging;
 
-use log::info;
 use crate::args::get_cmd;
 use crate::logging::init_logging;
-use wordchains::{initialize_graph, bfs_for_target};
+use log::info;
+use wordchains::{bfs_for_target, initialize_graph};
 
 fn main() {
     init_logging();

@@ -1,17 +1,11 @@
-use axum::{
-    routing::get,
-    routing::post,
-    response::Json,
-    extract::Json as ExtractJson,
-    Router,
-};
-use serde::{Deserialize, Serialize, Deserializer};
+use axum::extract::State;
+use axum::{Router, extract::Json as ExtractJson, response::Json, routing::get, routing::post};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::env;
 use std::sync::Arc;
-use axum::extract::State;
-use tracing::{event, Level};
+use tracing::{Level, event};
 use tracing_subscriber;
-use wordchains::{bfs_for_target, initialize_graph, Graph};
+use wordchains::{Graph, bfs_for_target, initialize_graph};
 
 const DEFAULT_PORT: u16 = 8080;
 
@@ -54,12 +48,13 @@ struct WordchainResponse {
 }
 
 struct AppState {
-    word_graph: Graph
+    word_graph: Graph,
 }
 
 async fn wordchain_post(
     State(state): State<Arc<AppState>>,
-    ExtractJson(request): ExtractJson<WordchainRequest>) -> Json<WordchainResponse> {
+    ExtractJson(request): ExtractJson<WordchainRequest>,
+) -> Json<WordchainResponse> {
     let result = bfs_for_target(request.start, request.end.as_str(), &state.word_graph);
     let response = WordchainResponse { path: result };
     Json(response)
@@ -73,13 +68,14 @@ async fn main() {
     let path = format!("{}/words.txt", data_dir);
     let word_graph = initialize_graph(&path, Some(data_dir));
 
-    let shared_state = Arc::new(AppState { word_graph: word_graph });
+    let shared_state = Arc::new(AppState {
+        word_graph: word_graph,
+    });
 
     let port = env::var("PORT")
         .ok()
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(DEFAULT_PORT);
-
 
     let listen_address = format!("0.0.0.0:{}", &port);
 
@@ -89,7 +85,9 @@ async fn main() {
         .route("/v1/wordchain", post(wordchain_post))
         .with_state(shared_state);
 
-    let listener = tokio::net::TcpListener::bind(listen_address.clone()).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(listen_address.clone())
+        .await
+        .unwrap();
     event!(Level::INFO, "listening on {}", listen_address);
     axum::serve(listener, app).await.unwrap();
 }

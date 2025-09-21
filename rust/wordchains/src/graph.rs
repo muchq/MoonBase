@@ -1,6 +1,6 @@
-use tracing::{event, Level};
-use std::collections::{HashMap, VecDeque};
 use crate::model::{Graph, Node};
+use std::collections::{HashMap, VecDeque};
+use tracing::{Level, event};
 
 pub fn build_graph(words: Vec<String>) -> (Graph, Vec<usize>) {
     let num_words = words.len();
@@ -20,14 +20,16 @@ pub fn build_graph(words: Vec<String>) -> (Graph, Vec<usize>) {
         }
     }
 
-    (Graph{nodes: words, edges: word_graph}, matches)
+    (
+        Graph {
+            nodes: words,
+            edges: word_graph,
+        },
+        matches,
+    )
 }
 
-pub fn bfs_for_target(
-    start: String,
-    target_word: &str,
-    word_graph: &Graph,
-) -> Option<Vec<String>> {
+pub fn bfs_for_target(start: String, target_word: &str, word_graph: &Graph) -> Option<Vec<String>> {
     if start.eq(target_word) {
         return Some(vec![start]);
     }

@@ -9,8 +9,5 @@ pub fn compute_sha(sorted_word_list: &[String]) -> String {
 
     let sha256 = hasher.finalize();
     let sha_string = Base64::encode_string(&sha256);
-    sha_string
-        .replace("/", "_")
-        .replace("=", "_")
+    sha_string.replace("/", "_").replace("=", "_")
 }
-
