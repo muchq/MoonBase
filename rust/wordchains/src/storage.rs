@@ -29,13 +29,16 @@ pub fn read_dictionary(path: &str) -> Vec<String> {
     word_list
 }
 
-fn digest_to_path(digest: &str) -> String {
-    format!("{}.graph", digest)
+fn digest_to_path(digest: &str, data_dir: Option<&str>) -> String {
+    match data_dir {
+        Some(dir) => format!("{}/{}.graph", dir, digest),
+        None => format!("{}.graph", digest),
+    }
 }
 
-pub fn read_existing_graph(digest: &str, num_words: usize) -> Option<Vec<Vec<usize>>> {
+pub fn read_existing_graph(digest: &str, num_words: usize, data_dir: Option<&str>) -> Option<Vec<Vec<usize>>> {
     let mut word_graph = vec![vec![]; num_words];
-    match read(digest_to_path(digest)) {
+    match read(digest_to_path(digest, data_dir)) {
         Ok(content) => {
             event!(Level::INFO, "reading graph from {}.graph...", digest);
             let mut chunks = content.chunks(8);
@@ -56,7 +59,7 @@ pub fn read_existing_graph(digest: &str, num_words: usize) -> Option<Vec<Vec<usi
     }
 }
 
-pub fn write_graph_to_file(matches: Vec<usize>, digest: &str) {
+pub fn write_graph_to_file(matches: Vec<usize>, digest: &str, data_dir: Option<&str>) {
     let mut indexes: Vec<u8> = Vec::new();
     for m in matches {
         for x in m.to_be_bytes() {
@@ -64,5 +67,5 @@ pub fn write_graph_to_file(matches: Vec<usize>, digest: &str) {
         }
     }
 
-    write(digest_to_path(digest), indexes).unwrap();
+    write(digest_to_path(digest, data_dir), indexes).unwrap();
 }

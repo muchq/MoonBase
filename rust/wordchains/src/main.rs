@@ -31,7 +31,7 @@ fn main() {
     let path = "/usr/share/dict/words";
     //let path = "/Volumes/Envoy Ultra 4TB/words/oed_2/oed_words.txt";
 
-    let word_graph = initialize_graph(path);
+    let word_graph = initialize_graph(path, None);
 
     info!("starting search...");
     let target = bfs_for_target(start.clone(), end, &word_graph);
