@@ -20,6 +20,7 @@ def _create_oci_image(bin_name, binary_target, binary_path):
         name = tar_name,
         srcs = [":" + binary_target],
         remap_paths = {"/" + binary_target: binary_path},
+        include_runfiles = True,
     )
 
     oci_image(
