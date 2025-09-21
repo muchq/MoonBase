@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::fs::{read, read_to_string, write};
-use tracing::{event, Level};
+use tracing::{Level, event};
 
 // TODO: handle missing file
 fn read_words(filename: String) -> Vec<String> {
@@ -36,7 +36,11 @@ fn digest_to_path(digest: &str, data_dir: Option<&str>) -> String {
     }
 }
 
-pub fn read_existing_graph(digest: &str, num_words: usize, data_dir: Option<&str>) -> Option<Vec<Vec<usize>>> {
+pub fn read_existing_graph(
+    digest: &str,
+    num_words: usize,
+    data_dir: Option<&str>,
+) -> Option<Vec<Vec<usize>>> {
     let mut word_graph = vec![vec![]; num_words];
     match read(digest_to_path(digest, data_dir)) {
         Ok(content) => {
@@ -44,18 +48,24 @@ pub fn read_existing_graph(digest: &str, num_words: usize, data_dir: Option<&str
             let mut chunks = content.chunks(8);
             let num_chunks = chunks.len();
             for _ in 0..(num_chunks / 2) {
-                let i_bytes: [u8; 8] = chunks.next().unwrap().try_into().expect("invalid graph file");
-                let j_bytes: [u8; 8] = chunks.next().unwrap().try_into().expect("invalid graph file");
+                let i_bytes: [u8; 8] = chunks
+                    .next()
+                    .unwrap()
+                    .try_into()
+                    .expect("invalid graph file");
+                let j_bytes: [u8; 8] = chunks
+                    .next()
+                    .unwrap()
+                    .try_into()
+                    .expect("invalid graph file");
                 let i = usize::from_be_bytes(i_bytes);
                 let j = usize::from_be_bytes(j_bytes);
                 word_graph[i].push(j);
                 word_graph[j].push(i);
             }
             Some(word_graph)
-        },
-        Err(_) => {
-            None
         }
+        Err(_) => None,
     }
 }
 

@@ -1,8 +1,8 @@
 mod doc_db;
 mod model;
 
-use mongodb::options::ClientOptions;
 use mongodb::Client;
+use mongodb::options::ClientOptions;
 use std::time::Duration;
 use tonic::transport::Server;
 

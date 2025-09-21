@@ -4,9 +4,9 @@ use doc_db_proto::doc_db::{
     Document, FindDocByIdRequest, FindDocByIdResponse, FindDocRequest, FindDocResponse,
     InsertDocRequest, InsertDocResponse, UpdateDocRequest, UpdateDocResponse,
 };
-use mongodb::bson::oid::ObjectId;
 use mongodb::bson::Document as BsonDocument;
-use mongodb::bson::{doc, Bson};
+use mongodb::bson::oid::ObjectId;
+use mongodb::bson::{Bson, doc};
 use mongodb::error::{Error as MongoError, Result as MongoResult};
 #[cfg(not(test))]
 use mongodb::{Client, Collection};

@@ -2,7 +2,6 @@
 resolver = "2"
 
 members = [
-    "rust/helloworld_tonic",
     "rust/cards",
     "rust/doc_db",
     "rust/mithril",

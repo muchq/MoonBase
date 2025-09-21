@@ -8,5 +8,5 @@ pub fn init_logging() {
         TerminalMode::Stdout,
         ColorChoice::Always,
     )
-        .unwrap();
+    .unwrap();
 }

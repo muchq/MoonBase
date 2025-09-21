@@ -8,7 +8,10 @@ pub fn initialize_graph(dict_path: &str, data_dir: Option<&str>) -> Graph {
     let digest = compute_sha(&words);
 
     match read_existing_graph(&digest, words.len(), data_dir) {
-        Some(e) => Graph{nodes: words, edges: e},
+        Some(e) => Graph {
+            nodes: words,
+            edges: e,
+        },
         None => {
             let (g, data) = build_graph(words);
             write_graph_to_file(data, &digest, data_dir);
