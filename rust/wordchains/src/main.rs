@@ -34,7 +34,7 @@ fn main() {
     let word_graph = initialize_graph(path);
 
     info!("starting search...");
-    let target = bfs_for_target(start.clone(), end, word_graph);
+    let target = bfs_for_target(start.clone(), end, &word_graph);
 
     match target {
         Some(path) => info!("path found from {} to {}: {:?}", start, end, path),

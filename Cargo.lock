@@ -1502,6 +1502,7 @@ name = "mithril"
 version = "0.1.0"
 dependencies = [
  "axum 0.8.4",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

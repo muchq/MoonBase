@@ -26,7 +26,7 @@ pub fn build_graph(words: Vec<String>) -> (Graph, Vec<usize>) {
 pub fn bfs_for_target(
     start: String,
     target_word: &str,
-    word_graph: Graph,
+    word_graph: &Graph,
 ) -> Option<Vec<String>> {
     if start.eq(target_word) {
         return Some(vec![start]);
