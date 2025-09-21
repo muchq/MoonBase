@@ -9,4 +9,3 @@ pub struct Graph {
     pub nodes: Vec<String>,
     pub edges: Vec<Vec<usize>>,
 }
-

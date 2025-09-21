@@ -1,18 +1,10 @@
-mod graph;
-mod storage;
-mod model;
-mod repl;
 mod logging;
 mod args;
-mod sha;
 
 use log::info;
-use crate::graph::{bfs_for_target, build_graph};
 use crate::args::get_cmd;
 use crate::logging::init_logging;
-use crate::model::Graph;
-use crate::sha::compute_sha;
-use crate::storage::{read_dictionary, read_existing_graph, write_graph_to_file};
+use wordchains::{initialize_graph, bfs_for_target};
 
 fn main() {
     init_logging();
@@ -39,20 +31,10 @@ fn main() {
     let path = "/usr/share/dict/words";
     //let path = "/Volumes/Envoy Ultra 4TB/words/oed_2/oed_words.txt";
 
-    let words = read_dictionary(path);
-    let digest = compute_sha(&words);
-
-    let word_graph = match read_existing_graph(&digest, words.len()) {
-        Some(e) => Graph{nodes: words, edges: e},
-        None => {
-            let (g, data) = build_graph(words);
-            write_graph_to_file(data, &digest);
-            g
-        }
-    };
+    let word_graph = initialize_graph(path);
 
     info!("starting search...");
-    let target = bfs_for_target(start.clone(), end, word_graph);
+    let target = bfs_for_target(start.clone(), end, &word_graph);
 
     match target {
         Some(path) => info!("path found from {} to {}: {:?}", start, end, path),

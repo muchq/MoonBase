@@ -11,3 +11,4 @@ clap = { workspace = true }
 log = { workspace = true }
 sha2 = { workspace = true }
 simplelog = { workspace = true }
+tracing = { workspace = true }
