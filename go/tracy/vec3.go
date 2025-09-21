@@ -40,6 +40,14 @@ func (v Vec3) Normalize() Vec3 {
 	return v.Scale(1.0 / l)
 }
 
+func (v Vec3) Cross(o Vec3) Vec3 {
+	return Vec3{
+		X: v.Y*o.Z - v.Z*o.Y,
+		Y: v.Z*o.X - v.X*o.Z,
+		Z: v.X*o.Y - v.Y*o.X,
+	}
+}
+
 type Vec2 struct {
 	X, Y float64
 }

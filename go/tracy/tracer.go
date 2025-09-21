@@ -2,11 +2,11 @@ package tracy
 
 import "math"
 
-func DrawScene(scene Scene, image *Image, cameraPosition Vec3) {
+func DrawScene(scene Scene, image *Image, camera Camera) {
 	for x := -image.Width / 2; x < image.Width/2; x++ {
 		for y := -image.Height / 2; y < image.Height/2; y++ {
-			direction := canvasToViewport(Vec2{float64(x), float64(y)}, image, scene)
-			color := traceRay(cameraPosition, direction, 1.0, Inf, scene, 2)
+			direction := camera.GetRayDirection(Vec2{float64(x), float64(y)}, image, scene)
+			color := traceRay(camera.Position, direction, 1.0, Inf, scene, 2)
 			image.PutPixel(float64(x), float64(y), color)
 		}
 	}

@@ -13,7 +13,11 @@ import (
 func main() {
 	viewportSize := 1.0
 	projectionPlane := 1.0
-	cameraPosition := Vec3{0, 0, -5}
+
+	camera := NewCameraLookAt(
+		Vec3{3, 2, -5},  // position: slightly to the right and up
+		Vec3{0, 0, 3},   // looking at center of scene
+	)
 
 	spheres := []Sphere{
 		NewSphere(Vec3{0, -1, 3}, 1, Red, 500, 0.2),
@@ -31,7 +35,7 @@ func main() {
 	scene := NewScene(viewportSize, projectionPlane, Background, spheres, lights)
 	img := NewImage(600, 600)
 
-	DrawScene(scene, img, cameraPosition)
+	DrawScene(scene, img, camera)
 
 	outputPath := "tracer_output.png"
 	saveImage(img, outputPath)
