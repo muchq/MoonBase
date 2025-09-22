@@ -1,6 +1,6 @@
 services:
   prometheus:
-    image: prom/prometheus:v3.5.0
+    image: prom/prometheus:v3.6.0
     restart: always
     ports:
       - "9090:9090"
