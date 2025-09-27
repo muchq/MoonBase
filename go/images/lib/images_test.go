@@ -1,10 +1,20 @@
 package lib
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"testing"
 )
+
+func TestReadImage(t *testing.T) {
+	_, imageType, err := ReadImage("/static_content/marbles.png")
+	if err != nil {
+		fmt.Println("whyyyyyyyyyyyy")
+	} else {
+		fmt.Print(imageType)
+	}
+}
 
 func TestGreyScaleImage(t *testing.T) {
 	img := newRBGA(3, 3)

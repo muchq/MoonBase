@@ -5,13 +5,12 @@ import (
 	"os"
 	"strconv"
 
-	imageio "github.com/muchq/moonbase/go/images/lib"
 	images "github.com/muchq/moonbase/go/images/lib"
 )
 
 func main() {
 	path := os.Args[1]
-	imageData, _, err := imageio.ReadImage(path)
+	imageData, _, err := images.ReadImage(path)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -23,16 +22,16 @@ func main() {
 		return
 	}
 
-	_ = imageio.WriteImageAsPng(imageData, path+".png")
+	_ = images.WriteImageAsPng(imageData, path+".png")
 
 	greyBlurXImage := images.BoxBlurX(imageData, 1, depth)
-	_ = imageio.WriteImageAsPng(&greyBlurXImage, path+".grey.X.png")
+	_ = images.WriteImageAsPng(&greyBlurXImage, path+".grey.X.png")
 
 	greyBlurYImage := images.BoxBlurY(imageData, 1, depth)
-	_ = imageio.WriteImageAsPng(&greyBlurYImage, path+".grey.Y.png")
+	_ = images.WriteImageAsPng(&greyBlurYImage, path+".grey.Y.png")
 
 	greyBlurBoxImage := images.BoxBlur(imageData, 1, depth)
-	_ = imageio.WriteImageAsPng(&greyBlurBoxImage, path+".grey.Box.png")
+	_ = images.WriteImageAsPng(&greyBlurBoxImage, path+".grey.Box.png")
 }
 
 func parseDepth() (int, error) {
