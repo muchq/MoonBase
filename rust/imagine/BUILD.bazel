@@ -5,6 +5,9 @@ rust_library(
     name = "imagine_lib",
     srcs = [
         "src/lib.rs",
+        "src/processing.rs",
+        "src/radius.rs",
+        "src/storage.rs",
     ],
     crate_name = "imagine",
     visibility = ["//visibility:public"],
@@ -20,6 +23,9 @@ rust_binary(
         "src/main.rs",
     ],
     crate_name = "imagine",
+    data = [
+        "//static_content:marbles",
+    ],
     deps = all_crate_deps() + [":imagine_lib"],
 )
 
