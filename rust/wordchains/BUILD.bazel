@@ -34,5 +34,5 @@ rust_binary(
 rust_test(
     name = "test_wordchains",
     size = "small",
-    crate = ":wordchains_lib",
+    crate = ":wordchains",
 )

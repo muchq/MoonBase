@@ -1,5 +1,5 @@
 filegroup(
-    name = "images",
+    name = "marbles",
     srcs = ["marbles.png"],
     visibility = ["//visibility:public"],
 )

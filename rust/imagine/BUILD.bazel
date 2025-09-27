@@ -1,0 +1,30 @@
+load("@crates//:defs.bzl", "all_crate_deps", "crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+
+rust_library(
+    name = "imagine_lib",
+    srcs = [
+        "src/lib.rs",
+    ],
+    crate_name = "imagine",
+    visibility = ["//visibility:public"],
+    deps = crate_deps([
+        "image",
+        "tracing",
+    ]),
+)
+
+rust_binary(
+    name = "imagine",
+    srcs = [
+        "src/main.rs",
+    ],
+    crate_name = "imagine",
+    deps = all_crate_deps() + [":imagine_lib"],
+)
+
+rust_test(
+    name = "test_imagine",
+    size = "small",
+    crate = ":imagine",
+)

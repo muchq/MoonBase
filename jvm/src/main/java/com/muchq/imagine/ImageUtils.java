@@ -88,11 +88,10 @@ public final class ImageUtils {
         final int bytesPerPixel = hasAlpha ? 4 : 3;
 
         for (int p=0, outputIndex=0; p<pixels.length; p+= bytesPerPixel, outputIndex++) {
-            int r, g, b;
             int i = hasAlpha ? p+1 : p;
-            r = pixels[i] & 0xff;
-            g = pixels[i+1] & 0xff;
-            b = pixels[i+2] & 0xff;
+            int r = pixels[i] & 0xff;
+            int g = pixels[i+1] & 0xff;
+            int b = pixels[i+2] & 0xff;
             byte avg = (byte)((r + g + b) / 3);
             outputPixels[outputIndex] = avg;
         }

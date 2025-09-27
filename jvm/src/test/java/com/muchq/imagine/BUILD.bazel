@@ -4,7 +4,7 @@ java_test_suite(
     name = "imagine",
     size = "small",
     srcs = ["ImageUtilsTest.java"],
-    data = ["//static_content:images"],
+    data = ["//static_content:marbles"],
     deps = [
         "//jvm/src/main/java/com/muchq/imagine",
         "@maven//:junit_junit",

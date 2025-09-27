@@ -4,6 +4,7 @@ resolver = "2"
 members = [
     "rust/cards",
     "rust/doc_db",
+    "rust/imagine",
     "rust/mithril",
     "rust/wordchains",
     "protos/example_service",
@@ -12,7 +13,7 @@ members = [
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.86.0"
+rust-version = "1.88.0"
 readme = "README.md"
 
 
@@ -24,6 +25,7 @@ doc_db_proto = { path = "protos/doc_db" }
 dotenv = "0.15.0"
 example_service = { path = "protos/example_service" }
 futures = "0.3.31"
+image = { version = "0.25.8", default-features = false, features = ["png", "jpeg"] }
 log = "0.4.28"
 mongodb = "3.3.0"
 prost = { version = "0.13.5" }
