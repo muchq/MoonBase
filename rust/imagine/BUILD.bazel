@@ -2,37 +2,35 @@ load("@crates//:defs.bzl", "all_crate_deps", "crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
 
 rust_library(
-    name = "wordchains_lib",
+    name = "imagine_lib",
     srcs = [
-        "src/graph.rs",
-        "src/init.rs",
         "src/lib.rs",
-        "src/model.rs",
-        "src/sha.rs",
+        "src/processing.rs",
+        "src/radius.rs",
         "src/storage.rs",
     ],
-    crate_name = "wordchains",
+    crate_name = "imagine",
     visibility = ["//visibility:public"],
     deps = crate_deps([
-        "base64ct",
-        "sha2",
+        "image",
         "tracing",
     ]),
 )
 
 rust_binary(
-    name = "wordchains",
+    name = "imagine",
     srcs = [
-        "src/args.rs",
-        "src/logging.rs",
         "src/main.rs",
     ],
-    crate_name = "wordchains",
-    deps = all_crate_deps() + [":wordchains_lib"],
+    crate_name = "imagine",
+    data = [
+        "//static_content:marbles",
+    ],
+    deps = all_crate_deps() + [":imagine_lib"],
 )
 
 rust_test(
-    name = "test_wordchains",
+    name = "test_imagine",
     size = "small",
-    crate = ":wordchains",
+    crate = ":imagine",
 )

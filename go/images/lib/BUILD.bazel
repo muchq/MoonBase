@@ -28,7 +28,7 @@ go_test(
     name = "image_io_test",
     size = "small",
     srcs = ["image_io_test.go"],
-    data = ["//static_content:images"],
+    data = ["//static_content:marbles"],
     embed = [":io"],
 )
 
