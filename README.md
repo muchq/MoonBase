@@ -33,6 +33,8 @@
     - [`mandelbrot`](cpp/mandelbrot) - a basic cpu mandelbrot renderer
 - **Java**:
     - [`imagine`](jvm/src/main/java/com/muchq/imagine) - a couple of blur filters and some edge detection
+- **Rust**:
+    - [`imagine`](rust/imagine) - port of java imagine lib
 - **Go**:
     - [`tracy`](go/tracy) - ray tracer
     - [`blurring`](go/images) - some image processing tools
