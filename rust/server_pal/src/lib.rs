@@ -1,5 +1,5 @@
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::routing::{MethodRouter, get};
 use std::env;
 use std::time::Duration;
@@ -41,6 +41,7 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
         self.router
             .route("/health", get(|_: State<S>| async { "Ok" }))
             .layer(TraceLayer::new_for_http())
+            .layer(DefaultBodyLimit::disable())
             .layer(RequestBodyLimitLayer::new(7 * 1024 * 1024)) // 7MB to accommodate 5MB base64 + JSON overhead
             .layer(CompressionLayer::new())
             .layer(ValidateRequestHeaderLayer::accept("application/json"))
