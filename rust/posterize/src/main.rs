@@ -26,10 +26,27 @@ where
     Ok(b64_png)
 }
 
+fn validate_sigma<'de, D>(deserializer: D) -> Result<Option<f32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let sigma_maybe = Option::<f32>::deserialize(deserializer)?;
+
+    if let Some(sigma) = sigma_maybe {
+        if sigma <= 0.0 {
+            return Err(serde::de::Error::custom("sigma must be positive"));
+        }
+    }
+
+    Ok(sigma_maybe)
+}
+
 #[derive(Deserialize)]
 struct BlurRequest {
     #[serde(deserialize_with = "validate_png")]
     b64_png: String,
+    #[serde(deserialize_with = "validate_sigma")]
+    sigma: Option<f32>,
 }
 
 #[derive(Serialize)]
@@ -69,7 +86,7 @@ async fn blur_post(
         )
     })?;
 
-    let blurred = tokio::task::spawn_blocking(move || fast_blur(&input_png, 2.0))
+    let blurred = tokio::task::spawn_blocking(move || fast_blur(&input_png, request.sigma.unwrap_or(5.0)))
         .await
         .map_err(|_| {
             (
