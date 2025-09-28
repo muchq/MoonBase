@@ -13,6 +13,7 @@ rust_binary(
         "//rust/mithril:data/words.txt",
     ],
     deps = [
+        "//rust/server_pal",
         "//rust/wordchains:wordchains_lib",
     ] + all_crate_deps(),
 )

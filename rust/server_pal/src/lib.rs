@@ -1,0 +1,50 @@
+use axum::Router;
+use axum::extract::State;
+use axum::routing::{MethodRouter, get};
+use std::env;
+use std::time::Duration;
+use tower_http::catch_panic::CatchPanicLayer;
+use tower_http::compression::CompressionLayer;
+use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::timeout::TimeoutLayer;
+use tower_http::trace::TraceLayer;
+use tower_http::validate_request::ValidateRequestHeaderLayer;
+
+const DEFAULT_PORT: u16 = 8080;
+
+pub fn listen_addr_pal() -> String {
+    let port = env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(DEFAULT_PORT);
+
+    format!("0.0.0.0:{}", &port)
+}
+
+pub struct RouterBuilder<S: Clone + Send + Sync + 'static> {
+    router: Router<S>,
+}
+
+pub fn router_builder<S: Clone + Send + Sync + 'static>() -> RouterBuilder<S> {
+    RouterBuilder {
+        router: Router::new(),
+    }
+}
+
+impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
+    pub fn route(mut self, path: &str, method_router: MethodRouter<S>) -> Self {
+        self.router = self.router.route(path, method_router);
+        self
+    }
+
+    pub fn build(self) -> Router<S> {
+        self.router
+            .route("/health", get(|_: State<S>| async { "Ok" }))
+            .layer(TraceLayer::new_for_http())
+            .layer(RequestBodyLimitLayer::new(7 * 1024 * 1024)) // 7MB to accommodate 5MB base64 + JSON overhead
+            .layer(CompressionLayer::new())
+            .layer(ValidateRequestHeaderLayer::accept("application/json"))
+            .layer(TimeoutLayer::new(Duration::from_secs(10)))
+            .layer(CatchPanicLayer::new())
+    }
+}

@@ -1,13 +1,11 @@
 use axum::extract::State;
-use axum::{Router, extract::Json as ExtractJson, response::Json, routing::get, routing::post};
+use axum::{extract::Json as ExtractJson, response::Json, routing::post};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::env;
+use server_pal::{listen_addr_pal, router_builder};
 use std::sync::Arc;
 use tracing::{Level, event};
 use tracing_subscriber;
 use wordchains::{Graph, bfs_for_target, initialize_graph};
-
-const DEFAULT_PORT: u16 = 8080;
 
 fn validate_word<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
@@ -72,17 +70,12 @@ async fn main() {
         word_graph: word_graph,
     });
 
-    let port = env::var("PORT")
-        .ok()
-        .and_then(|p| p.parse::<u16>().ok())
-        .unwrap_or(DEFAULT_PORT);
-
-    let listen_address = format!("0.0.0.0:{}", &port);
+    let listen_address = listen_addr_pal();
 
     // build our application with a single route
-    let app = Router::new()
-        .route("/health", get(|| async { "Ok" }))
+    let app = router_builder()
         .route("/v1/wordchain", post(wordchain_post))
+        .build()
         .with_state(shared_state);
 
     let listener = tokio::net::TcpListener::bind(listen_address.clone())

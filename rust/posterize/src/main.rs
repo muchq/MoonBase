@@ -1,25 +1,14 @@
-use axum::Router;
 use axum::extract::Json as ExtractJson;
 use axum::http::StatusCode;
 use axum::response::Json;
-use axum::routing::{get, post};
+use axum::routing::post;
 use base64::{Engine as _, engine::general_purpose};
 use image::ImageFormat;
 use imagine::{Radius, gray_gaussian_blur};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::env;
+use server_pal::{listen_addr_pal, router_builder};
 use std::io::Cursor;
-use std::panic;
-use std::time::Duration;
-use tower_http::catch_panic::CatchPanicLayer;
-use tower_http::compression::CompressionLayer;
-use tower_http::limit::RequestBodyLimitLayer;
-use tower_http::timeout::TimeoutLayer;
-use tower_http::trace::TraceLayer;
-use tower_http::validate_request::ValidateRequestHeaderLayer;
 use tracing::{Level, event};
-
-const DEFAULT_PORT: u16 = 8080;
 
 fn validate_png<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
@@ -80,15 +69,17 @@ async fn blur_post(
         )
     })?;
 
-    let blurred = panic::catch_unwind(|| gray_gaussian_blur(&input_png, Radius::Five, 10))
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "Image processing failed".to_string(),
-                }),
-            )
-        })?;
+    let blurred =
+        tokio::task::spawn_blocking(move || gray_gaussian_blur(&input_png, Radius::Five, 10))
+            .await
+            .map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: "Image processing failed".to_string(),
+                    }),
+                )
+            })?;
 
     let mut png_bytes = Vec::new();
     let mut cursor = Cursor::new(&mut png_bytes);
@@ -119,22 +110,11 @@ async fn blur_post(
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let port = env::var("PORT")
-        .ok()
-        .and_then(|p| p.parse::<u16>().ok())
-        .unwrap_or(DEFAULT_PORT);
+    let listen_address = listen_addr_pal();
 
-    let listen_address = format!("0.0.0.0:{}", &port);
-
-    let app = Router::new()
-        .layer(TraceLayer::new_for_http())
-        .layer(RequestBodyLimitLayer::new(7 * 1024 * 1024)) // 7MB to accommodate 5MB base64 + JSON overhead
-        .layer(CompressionLayer::new())
-        .layer(ValidateRequestHeaderLayer::accept("application/json"))
-        .layer(TimeoutLayer::new(Duration::from_secs(10)))
-        .layer(CatchPanicLayer::new())
-        .route("/health", get(|| async { "Ok" }))
-        .route("/v1/imagine/blur", post(blur_post));
+    let app = router_builder()
+        .route("/v1/imagine/blur", post(blur_post))
+        .build();
 
     let listener = tokio::net::TcpListener::bind(listen_address.clone())
         .await
