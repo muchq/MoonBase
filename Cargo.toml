@@ -41,6 +41,7 @@ simplelog = { version = "0.12.2", features = ["paris"] }
 tokio = { version = "1.47.1", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
 tonic = { version = "0.12.3", features = ["transport"] }
 tonic-build = "0.12.3"
+tower-http = { version = "0.6.6", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.20"
 uuid = { version = "1.18.1", features = ["v4", "fast-rng"]}

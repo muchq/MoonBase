@@ -50,7 +50,11 @@ api.muchq.com {
 	reverse_proxy @get_timeseries prom_proxy:8082
 	reverse_proxy @get_metrics prom_proxy:8082
 	reverse_proxy @post_mithril mithril:8083
-	reverse_proxy @post_posterize_blur posterize:8084
+	reverse_proxy @post_posterize_blur posterize:8084 {
+		request_body {
+			max_size 5MB
+		}
+	}
 
 	log {
 		output file /var/log/caddy/access.log {

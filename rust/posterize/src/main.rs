@@ -1,12 +1,20 @@
-use axum::{Router, extract::Json as ExtractJson, response::Json, routing::get, routing::post};
-use base64::{engine::general_purpose, Engine as _};
+use axum::Router;
+use axum::extract::Json as ExtractJson;
+use axum::http::StatusCode;
+use axum::response::Json;
+use axum::routing::{get, post};
+use base64::{Engine as _, engine::general_purpose};
 use image::ImageFormat;
-use imagine::{gray_gaussian_blur, Radius};
+use imagine::{Radius, gray_gaussian_blur};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::env;
 use std::io::Cursor;
 use std::panic;
-use axum::http::StatusCode;
+use tower_http::catch_panic::CatchPanicLayer;
+use tower_http::compression::CompressionLayer;
+use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::trace::TraceLayer;
+use tower_http::validate_request::ValidateRequestHeaderLayer;
 use tracing::{Level, event};
 
 const DEFAULT_PORT: u16 = 8080;
@@ -21,8 +29,8 @@ where
         return Err(serde::de::Error::custom("png cannot be empty"));
     }
 
-    if b64_png.len() > 10_000_000 {
-        return Err(serde::de::Error::custom("b64 png must be at most 10MiB"));
+    if b64_png.len() > 5_000_000 {
+        return Err(serde::de::Error::custom("b64 png must be at most 5MiB"));
     }
     Ok(b64_png)
 }
@@ -61,26 +69,24 @@ async fn blur_post(
             )
         })?;
 
-    let input_png = image::load_from_memory(&image_bytes)
-        .map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: format!("Invalid image format: {}", e),
-                }),
-            )
-        })?;
-
-    let blurred = panic::catch_unwind(|| {
-        gray_gaussian_blur(&input_png, Radius::Five, 10)
-    }).map_err(|_| {
+    let input_png = image::load_from_memory(&image_bytes).map_err(|e| {
         (
-            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
-                error: "Image processing failed".to_string(),
+                error: format!("Invalid image format: {}", e),
             }),
         )
     })?;
+
+    let blurred = panic::catch_unwind(|| gray_gaussian_blur(&input_png, Radius::Five, 10))
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Image processing failed".to_string(),
+                }),
+            )
+        })?;
 
     let mut png_bytes = Vec::new();
     let mut cursor = Cursor::new(&mut png_bytes);
@@ -119,6 +125,11 @@ async fn main() {
     let listen_address = format!("0.0.0.0:{}", &port);
 
     let app = Router::new()
+        .layer(TraceLayer::new_for_http())
+        .layer(RequestBodyLimitLayer::new(4096))
+        .layer(CompressionLayer::new())
+        .layer(ValidateRequestHeaderLayer::accept("application/json"))
+        .layer(CatchPanicLayer::new())
         .route("/health", get(|| async { "Ok" }))
         .route("/v1/imagine/blur", post(blur_post));
 
