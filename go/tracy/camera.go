@@ -39,7 +39,7 @@ func (c *Camera) Move(direction Vec3) {
 	c.Target = c.Target.Add(direction)
 }
 
-func (c Camera) GetRayDirection(canvasPoint Vec2, image *Image, scene Scene) Vec3 {
+func (c *Camera) GetRayDirection(canvasPoint Vec2, image *Image, scene Scene) Vec3 {
 	viewportX := canvasPoint.X * scene.ViewportSize / float64(image.Width)
 	viewportY := canvasPoint.Y * scene.ViewportSize / float64(image.Height)
 

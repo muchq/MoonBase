@@ -6,6 +6,7 @@ members = [
     "rust/doc_db",
     "rust/imagine",
     "rust/mithril",
+    "rust/posterize",
     "rust/wordchains",
     "protos/example_service",
     "protos/doc_db",
@@ -19,13 +20,14 @@ readme = "README.md"
 
 [workspace.dependencies]
 axum = "0.8.4"
+base64 = "0.22.1"
 base64ct = { version = "1.8.0", features = ["alloc"] }
 clap = { version = "4.5.48", features = ["cargo"] }
 doc_db_proto = { path = "protos/doc_db" }
 dotenv = "0.15.0"
-example_service = { path = "protos/example_service" }
 futures = "0.3.31"
 image = { version = "0.25.8", default-features = false, features = ["png", "jpeg"] }
+imagine = { path = "rust/imagine" }
 log = "0.4.28"
 mongodb = "3.3.0"
 prost = { version = "0.13.5" }

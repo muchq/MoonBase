@@ -38,6 +38,9 @@ ssh ubuntu@api.muchq.com << EOF
   
   sudo docker compose -f compose.yaml -f docker-compose.observability.yml pull
   sudo docker compose -f compose.yaml -f docker-compose.observability.yml up -d --remove-orphans
+
+  # Reload Caddy configuration
+  sudo docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
 EOF
 
 echo "Deployment complete!"

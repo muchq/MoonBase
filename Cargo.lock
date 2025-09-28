@@ -1809,6 +1809,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "posterize"
+version = "0.1.0"
+dependencies = [
+ "axum 0.8.4",
+ "base64 0.22.1",
+ "image",
+ "imagine",
+ "serde",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "powerfmt"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -59,6 +59,12 @@ pub fn gray_gaussian_blur(input: &DynamicImage, radius: Radius, depth: u8) -> Gr
     let kernel = radius.gaussian_kernel();
     let gray_copy = gray_scale(input);
     let mut blurred = gray_copy;
+
+    // Don't try to use a kernel that's bigger than half the image width or height
+    if blurred.width()/2 < kernel.len() as u32 || blurred.height()/2 < kernel.len() as u32 {
+        return blurred;
+    }
+
     for _i in 0..depth {
         blurred = convolve_and_scale_by_kernel_sum(&blurred, kernel);
     }
