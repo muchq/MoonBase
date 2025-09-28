@@ -68,6 +68,18 @@ services:
     networks:
       - app_network
 
+  posterize:
+    image: ghcr.io/muchq/posterize:latest
+    restart: always
+    ports:
+      - "8084:8084"
+    environment:
+      - PORT=8084
+    volumes:
+      - /etc/posterize:/etc/posterize
+    networks:
+      - app_network
+
 volumes:
   caddy_data:
   caddy_config:

@@ -11,7 +11,6 @@
   - [`resilience4g`](go/resilience4g) - Resilience4J for Go
   - [`r3dr`](go/r3dr) - a url shortening service
   - [`games_ws_backend`](go/games_ws_backend) - websocket backend for [some games on muchq.com](https://muchq.com)
-  - [`thoughts`](go/thoughts) - websocket backend for this [thing that's sort of a game?](https://muchq.com/thoughts)
   - [`doc_db`](go/doc_db) - DocDB WIP
   - [`example_grpc`](go/example_grpc) - gRPC example
 - **C++**:
@@ -24,7 +23,8 @@
   - [`yochat`](jvm/src/main/java/com/muchq/yochat) - Chat server
 - **Rust**:
   - [`doc_db`](rust/doc_db) - DocDB with Mongo backend
-  - [`helloworld_tonic`](rust/helloworld_tonic) - gRPC example using Tonic
+  - [`mithril`](rust/mithril) - HTTP api for wordchains solver
+  - [`posterize`](rust/posterize) - HTTP api for imagine image processing
 
 ### Graphics Stuff
 - **C++**:
@@ -45,18 +45,16 @@
 - **Go**:
   - [`neuro`](go/neuro) - using LLMs to learn about Neural Networks
 - **Python**:
-  - [`pytorch_hello`](python/pytorch_hello) - just starting learn about pytorch
+  - [`pytorch_hello`](python/pytorch_hello) - just starting to learn about pytorch
 
 ### Card Games
 - **Rust**:
-    - [`/rust/cards`](rust/cards) - Experimenting with moving card game engines to Rust
+    - [`/rust/cards`](rust/cards) - Experimenting with moving card games to Rust
 - **C++**:
     - [`/cpp/cards`](cpp/cards) - Golf implementation and some helpers
     - [`golf_service`](cpp/golf_service) - Golf websocket server
     - [`golf_grpc`](cpp/golf_grpc) - Golf gRPC service
-- **Web**: (UIs mostly live [here](https://github.com/muchq/muchq.github.io) now)
-    - [`golf_ui`](web/golf_ui) - Original golf UI
-    - [`golf_ui_2`](web/golf_ui_2) - Updated golf UI
+- **Web**: (UIs live [here](https://github.com/muchq/muchq.github.io) for now)
 - **Go**:
     - [`/go/cards`](go/cards) - Experimenting with moving card game engines to Go
 
