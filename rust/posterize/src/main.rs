@@ -10,9 +10,11 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::env;
 use std::io::Cursor;
 use std::panic;
+use std::time::Duration;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tower_http::validate_request::ValidateRequestHeaderLayer;
 use tracing::{Level, event};
@@ -126,9 +128,10 @@ async fn main() {
 
     let app = Router::new()
         .layer(TraceLayer::new_for_http())
-        .layer(RequestBodyLimitLayer::new(4096))
+        .layer(RequestBodyLimitLayer::new(7 * 1024 * 1024)) // 7MB to accommodate 5MB base64 + JSON overhead
         .layer(CompressionLayer::new())
         .layer(ValidateRequestHeaderLayer::accept("application/json"))
+        .layer(TimeoutLayer::new(Duration::from_secs(10)))
         .layer(CatchPanicLayer::new())
         .route("/health", get(|| async { "Ok" }))
         .route("/v1/imagine/blur", post(blur_post));
