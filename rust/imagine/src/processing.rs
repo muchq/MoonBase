@@ -1,5 +1,5 @@
 use crate::radius::Radius;
-use image::{DynamicImage, GrayImage, ImageBuffer};
+use image::{DynamicImage, GrayImage, ImageBuffer, Rgba};
 
 pub fn gray_scale(img: &DynamicImage) -> GrayImage {
     return img.clone().into_luma8();
@@ -57,16 +57,19 @@ fn convolve_and_scale_by_kernel_sum(input: &GrayImage, kernel: &[u8]) -> GrayIma
 pub fn gray_gaussian_blur(input: &DynamicImage, radius: Radius, depth: u8) -> GrayImage {
     // TODO: validateDepth(depth);
     let kernel = radius.gaussian_kernel();
-    let gray_copy = gray_scale(input);
-    let mut blurred = gray_copy;
+    let mut gray_copy = gray_scale(input);
 
     // Don't try to use a kernel that's bigger than half the image width or height
-    if blurred.width() / 2 < kernel.len() as u32 || blurred.height() / 2 < kernel.len() as u32 {
-        return blurred;
+    if gray_copy.width() / 2 < kernel.len() as u32 || gray_copy.height() / 2 < kernel.len() as u32 {
+        return gray_copy;
     }
 
     for _i in 0..depth {
-        blurred = convolve_and_scale_by_kernel_sum(&blurred, kernel);
+        gray_copy = convolve_and_scale_by_kernel_sum(&gray_copy, kernel);
     }
-    return blurred;
+    return gray_copy;
+}
+
+pub fn fast_blur(input: &DynamicImage, sigma: f32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    image::imageops::fast_blur(&input.clone().into_rgba8(), sigma)
 }
