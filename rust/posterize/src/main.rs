@@ -4,7 +4,7 @@ use axum::response::Json;
 use axum::routing::post;
 use base64::{Engine as _, engine::general_purpose};
 use image::ImageFormat;
-use imagine::{Radius, gray_gaussian_blur};
+use imagine::fast_blur;
 use serde::{Deserialize, Deserializer, Serialize};
 use server_pal::{listen_addr_pal, router_builder};
 use std::io::Cursor;
@@ -69,17 +69,16 @@ async fn blur_post(
         )
     })?;
 
-    let blurred =
-        tokio::task::spawn_blocking(move || gray_gaussian_blur(&input_png, Radius::Five, 10))
-            .await
-            .map_err(|_| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse {
-                        error: "Image processing failed".to_string(),
-                    }),
-                )
-            })?;
+    let blurred = tokio::task::spawn_blocking(move || fast_blur(&input_png, 2.0))
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Image processing failed".to_string(),
+                }),
+            )
+        })?;
 
     let mut png_bytes = Vec::new();
     let mut cursor = Cursor::new(&mut png_bytes);
