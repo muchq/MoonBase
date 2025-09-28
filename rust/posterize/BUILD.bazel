@@ -10,6 +10,7 @@ rust_binary(
     crate_name = "posterize",
     deps = [
         "//rust/imagine:imagine_lib",
+        "//rust/server_pal",
     ] + all_crate_deps(),
 )
 

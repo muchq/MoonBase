@@ -7,6 +7,7 @@ members = [
     "rust/imagine",
     "rust/mithril",
     "rust/posterize",
+    "rust/server_pal",
     "rust/wordchains",
     "protos/example_service",
     "protos/doc_db",
@@ -36,6 +37,7 @@ protoc-gen-tonic = "0.4.1"
 protoc-gen-prost = "0.4.0"
 serde = { version = "1.0.226", features = ["derive"] }
 serde_json = "1.0.145"
+server_pal = { path = "rust/server_pal" }
 sha2 = "0.11.0-rc.2"
 simplelog = { version = "0.12.2", features = ["paris"] }
 tokio = { version = "1.47.1", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }

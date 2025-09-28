@@ -1666,6 +1666,7 @@ dependencies = [
  "axum 0.8.4",
  "serde",
  "serde_json",
+ "server_pal",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1930,8 +1931,8 @@ dependencies = [
  "image",
  "imagine",
  "serde",
+ "server_pal",
  "tokio",
- "tower-http",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2404,6 +2405,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "server_pal"
+version = "0.1.0"
+dependencies = [
+ "axum 0.8.4",
+ "tower-http",
 ]
 
 [[package]]
