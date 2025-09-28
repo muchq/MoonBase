@@ -42,7 +42,7 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
             .route("/health", get(|_: State<S>| async { "Ok" }))
             .layer(TraceLayer::new_for_http())
             .layer(DefaultBodyLimit::disable())
-            .layer(RequestBodyLimitLayer::new(7 * 1024 * 1024)) // 7MB to accommodate 5MB base64 + JSON overhead
+            .layer(RequestBodyLimitLayer::new(4 * 1024 * 1024)) // 4MB to accommodate 3MB base64 + JSON overhead
             .layer(CompressionLayer::new())
             .layer(ValidateRequestHeaderLayer::accept("application/json"))
             .layer(TimeoutLayer::new(Duration::from_secs(10)))
