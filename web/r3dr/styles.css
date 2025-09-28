@@ -1,106 +1,243 @@
+* {
+    box-sizing: border-box;
+}
+
 body {
-    background-color: #1a1a2e; /* Dark background for retro-futuristic look */
-    color: #e94560; /* Bright text color */
-    font-family: 'Courier New', Courier, monospace; /* Monospace font for retro style */
+    background: linear-gradient(135deg, #0f0f1e 0%, #1a1a2e 50%, #16213e 100%);
+    color: #e94560;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     display: flex;
     justify-content: center;
     align-items: center;
-    height: 100vh;
+    min-height: 100vh;
     margin: 0;
-    padding: 20px; /* Added padding for mobile */
-    box-sizing: border-box; /* Ensures padding does not affect total size */
+    padding: 20px;
+    position: relative;
+    overflow-x: hidden;
+}
+
+body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background:
+        radial-gradient(circle at 20% 80%, rgba(233, 69, 96, 0.1) 0%, transparent 50%),
+        radial-gradient(circle at 80% 20%, rgba(233, 69, 96, 0.05) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: -1;
 }
 
 .container {
     text-align: center;
-    max-width: 600px; /* Increased max width for better desktop experience */
-    width: 100%; /* Full width on smaller screens */
-    border-radius: 10px;
-    background: rgba(0, 0, 0, 0.8); /* Slightly opaque background for contrast */
-    padding: 20px; /* Inner padding */
-    box-shadow: 0 0 10px rgba(233, 69, 96, 0.5); /* Glowing effect */
+    max-width: 500px;
+    width: 100%;
+    border-radius: 20px;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(233, 69, 96, 0.2);
+    padding: 40px 30px;
+    box-shadow:
+        0 20px 40px rgba(0, 0, 0, 0.4),
+        0 0 60px rgba(233, 69, 96, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    position: relative;
+    z-index: 1;
 }
 
 .title {
-    font-size: 2.5em;
-    margin-bottom: 20px;
-    text-shadow: 1px 1px yellowgreen; /* Text shadow for retro effect */
+    font-size: clamp(2rem, 5vw, 3rem);
+    font-weight: 700;
+    margin-bottom: 30px;
+    background: linear-gradient(135deg, #e94560 0%, #ff6b8a 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-shadow: none;
+    letter-spacing: -0.02em;
 }
 
 input[type="text"] {
-    padding: 15px; /* Increased padding for better touch targets */
-    width: calc(100% - 75px);
-    margin-bottom: 10px; /* Space between input and button */
-    border: none;
-    border-radius: 5px;
-    box-shadow: 0 0 10px rgba(233, 69, 96, 0.5); /* Input glow effect */
-    font-size: 1.1em; /* Responsive font size */
+    width: 100%;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    border: 1px solid rgba(233, 69, 96, 0.3);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #ffffff;
+    font-size: 16px;
+    font-family: inherit;
+    outline: none;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    backdrop-filter: blur(10px);
+}
+
+input[type="text"]:focus {
+    border-color: #e94560;
+    box-shadow: 0 0 0 3px rgba(233, 69, 96, 0.2);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+input[type="text"]::placeholder {
+    color: rgba(255, 255, 255, 0.5);
 }
 
 button {
-    background-color: #e94560; /* Button color */
-    cursor: pointer;
-    transition: background-color 0.3s ease;
-    padding: 15px; /* Increased padding for better touch targets */
-    width: calc(100% - 40px); /* Make input and button the same width */
+    width: 100%;
+    padding: 16px 20px;
+    margin-bottom: 20px;
     border: none;
-    border-radius: 5px;
-    box-shadow: 0 0 10px rgba(233, 69, 96, 0.5); /* Input glow effect */
-    font-size: 1.1em; /* Responsive font size */
+    border-radius: 12px;
+    background: linear-gradient(135deg, #e94560 0%, #d0344e 100%);
+    color: white;
+    font-size: 16px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
 }
 
 button:hover {
-    background-color: #d0344e; /* Darker shade on hover */
+    transform: translateY(-2px);
+    box-shadow:
+        0 8px 25px rgba(233, 69, 96, 0.4),
+        0 4px 10px rgba(0, 0, 0, 0.3);
 }
 
+button:active {
+    transform: translateY(0);
+    transition-duration: 0.1s;
+}
+
+button::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    transition: left 0.5s;
+}
+
+button:hover::before {
+    left: 100%;
+}
+
+
 .result {
-    margin-top: 20px;
+    margin-top: 30px;
+    padding: 16px 20px;
+    border-radius: 12px;
+    background: rgba(0, 255, 136, 0.1);
+    border: 1px solid rgba(0, 255, 136, 0.3);
+    color: #00ff88;
+    font-size: 14px;
+    word-break: break-all;
+    position: relative;
+}
+
+.result:empty {
+    display: none;
+}
+
+.result-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.result-url {
+    flex: 1;
+    min-width: 0;
+}
+
+.copy-btn {
+    background: rgba(0, 255, 136, 0.2);
+    border: 1px solid rgba(0, 255, 136, 0.4);
+    color: #00ff88;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    margin: 0;
+    width: auto;
+}
+
+.copy-btn:hover {
+    background: rgba(0, 255, 136, 0.3);
+    transform: none;
+    box-shadow: 0 2px 8px rgba(0, 255, 136, 0.2);
+}
+
+.copy-btn:active {
+    transform: scale(0.95);
+}
+
+.copy-btn.copied {
+    background: rgba(0, 255, 136, 0.4);
+    color: #ffffff;
 }
 
 .error {
-    color: #ffcc00; /* Bright yellow for errors, maintaining retro styling */
+    margin-top: 20px;
+    padding: 16px 20px;
+    border-radius: 12px;
+    background: rgba(255, 204, 0, 0.1);
+    border: 1px solid rgba(255, 204, 0, 0.3);
+    color: #ffcc00;
+    font-size: 14px;
+}
+
+.error:empty {
+    display: none;
 }
 
 /* Media Queries for Better Mobile Experience */
-@media (max-width: 900px) {
+@media (max-width: 768px) {
     body {
-        flex-direction: column; /* Stack elements vertically on mobile */
-        justify-content: center; /* Center content vertically */
-        align-items: center; /* Center content horizontally */
-        height: auto; /* Allow height to adjust based on content */
-        padding-top: 40px; /* Add some space at the top on mobile */
-        padding-bottom: 40px; /* Add some space at the bottom on mobile */
+        padding: 15px;
     }
 
     .container {
-        margin-top: 20px;
-        width: calc(100% - 40px); /* Ensure container is full-width minus padding */
-        padding-left: 10px; /* Adjust padding for better alignment on mobile */
-        padding-right: 10px; /* Adjust padding for better alignment on mobile */
+        padding: 30px 20px;
+        border-radius: 16px;
     }
 
     .title {
-        font-size: 2em; /* Smaller title on mobile */
-        margin-bottom: 15px; /* Adjusted margin */
+        font-size: clamp(1.5rem, 8vw, 2.5rem);
+        margin-bottom: 25px;
     }
 
-    input[type="text"], button {
-        font-size: 0.9em; /* Slightly smaller font size on mobile */
-        padding: 12px; /* Adjusted padding for smaller screens */
-    }
-
-    input[type="text"] {
-        width: calc(100% - 50px); /* Full width on mobile with padding adjustment */
-    }
-
+    input[type="text"],
     button {
-        width: calc(100% - 24px); /* Full width on mobile with padding adjustment */
+        padding: 14px 18px;
+        font-size: 16px;
+    }
+
+    .result-content {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+
+    .copy-btn {
+        width: 100%;
+        padding: 10px;
     }
 
     .result,
     .error {
-        font-size: 1em; /* Ensure text is readable on smaller devices */
-        margin-top: 10px; /* Adjusted margin for results/errors */
-        word-wrap: break-word; /* Prevent overflow of long URLs */
+        font-size: 13px;
+        padding: 14px 16px;
     }
 }
+
