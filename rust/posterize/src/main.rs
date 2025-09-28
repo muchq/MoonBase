@@ -126,7 +126,7 @@ async fn main() {
 
     let app = Router::new()
         .layer(TraceLayer::new_for_http())
-        .layer(RequestBodyLimitLayer::new(4096))
+        .layer(RequestBodyLimitLayer::new(7 * 1024 * 1024)) // 7MB to accommodate 5MB base64 + JSON overhead
         .layer(CompressionLayer::new())
         .layer(ValidateRequestHeaderLayer::accept("application/json"))
         .layer(CatchPanicLayer::new())
