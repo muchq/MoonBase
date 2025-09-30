@@ -60,3 +60,35 @@ api.muchq.com {
 		}
 	}
 }
+
+www.r3dr.net {
+	redir https://r3dr.net{uri}
+}
+
+r3dr.net {
+	encode gzip
+	@postshorten {
+		method POST
+		path /shorten
+	}
+	@getredir {
+		method GET
+		path /r/*
+	}
+	root * /var/www/r3dr
+	reverse_proxy @postshorten r3dr:8080
+	reverse_proxy @getredir r3dr:8080
+
+	file_server
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 1gb
+			roll_keep 5
+			roll_keep_for 90d
+		}
+	}
+}
+
+consolidated.cmptr.info {
+	respond "Consolidating..."
+}

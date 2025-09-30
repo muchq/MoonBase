@@ -118,3 +118,19 @@ type SceneMetrics struct {
 	AverageSpheres float64 `json:"avg_spheres"`
 	AverageLights  float64 `json:"avg_lights"`
 }
+
+type ContainerMetrics struct {
+	Timestamp  time.Time             `json:"timestamp"`
+	Containers []ContainerStats      `json:"containers"`
+}
+
+type ContainerStats struct {
+	Name                string  `json:"name"`
+	CPUUsagePercent     float64 `json:"cpu_usage_percent"`
+	CPUThrottledSeconds float64 `json:"cpu_throttled_seconds"`
+	MemoryUsageBytes    float64 `json:"memory_usage_bytes"`
+	MemoryLimitBytes    float64 `json:"memory_limit_bytes"`
+	MemoryUsagePercent  float64 `json:"memory_usage_percent"`
+	NetworkRxBytes      float64 `json:"network_rx_bytes_per_sec"`
+	NetworkTxBytes      float64 `json:"network_tx_bytes_per_sec"`
+}

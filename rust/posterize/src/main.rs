@@ -8,6 +8,7 @@ use imagine::{fast_blur, gray_gaussian_blur, Radius};
 use serde::{Deserialize, Deserializer, Serialize};
 use server_pal::{listen_addr_pal, router_builder};
 use std::io::Cursor;
+use std::time::Duration;
 use tracing::{Level, event};
 
 fn validate_png<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -87,14 +88,25 @@ async fn blur_post(
         )
     })?;
 
-    let blurred = tokio::task::spawn_blocking(move || {
-        if request.gray {
-            image::DynamicImage::ImageLuma8(gray_gaussian_blur(&input_png, Radius::Five, 3))
-        } else {
-            image::DynamicImage::ImageRgba8(fast_blur(&input_png, request.sigma.unwrap_or(5.0)))
-        }
-    })
+    let blurred = tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || {
+            if request.gray {
+                image::DynamicImage::ImageLuma8(gray_gaussian_blur(&input_png, Radius::Five, 3))
+            } else {
+                image::DynamicImage::ImageRgba8(fast_blur(&input_png, request.sigma.unwrap_or(5.0)))
+            }
+        })
+    )
         .await
+        .map_err(|_| {
+            (
+                StatusCode::REQUEST_TIMEOUT,
+                Json(ErrorResponse {
+                    error: "Image processing timed out after 10 seconds".to_string(),
+                }),
+            )
+        })?
         .map_err(|_| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,

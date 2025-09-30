@@ -552,6 +552,176 @@ func (h *MetricsHandler) fetchPortraitMetrics(ctx context.Context) (*PortraitMet
 			metrics.SceneComplexity.AverageLights = val
 		}
 	}
-	
+
 	return metrics, nil
+}
+
+func (h *MetricsHandler) GetContainerMetrics(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	metrics, err := h.fetchContainerMetrics(ctx)
+	if err != nil {
+		problem := mucks.NewServerError(500)
+		problem.Detail = "Failed to fetch container metrics: " + err.Error()
+		mucks.JsonError(w, problem)
+		return
+	}
+
+	mucks.JsonOk(w, metrics)
+}
+
+func (h *MetricsHandler) GetContainerMetricsTimeSeries(w http.ResponseWriter, r *http.Request) {
+	timeRange := r.PathValue("range")
+
+	if !ValidTimeRange(timeRange) {
+		problem := mucks.NewBadRequest("Invalid time range. Valid options: 30m, 1d, 7d")
+		mucks.JsonError(w, problem)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	response, err := h.fetchContainerMetricsTimeSeries(ctx, TimeRange(timeRange))
+	if err != nil {
+		problem := mucks.NewServerError(500)
+		problem.Detail = "Failed to fetch container metrics timeseries: " + err.Error()
+		mucks.JsonError(w, problem)
+		return
+	}
+
+	mucks.JsonOk(w, response)
+}
+
+func (h *MetricsHandler) fetchContainerMetrics(ctx context.Context) (*ContainerMetrics, error) {
+	metrics := &ContainerMetrics{
+		Timestamp:  time.Now().UTC(),
+		Containers: []ContainerStats{},
+	}
+
+	// Get list of containers
+	containerQuery := `count by (name) (container_last_seen)`
+	containerResp, err := h.promClient.Query(ctx, containerQuery)
+	if err != nil {
+		return nil, err
+	}
+
+	containerNames := []string{}
+	for _, result := range containerResp.Data.Result {
+		if name, exists := result.Metric["name"]; exists && name != "" {
+			containerNames = append(containerNames, name)
+		}
+	}
+
+	// Fetch metrics for each container
+	for _, name := range containerNames {
+		stats := ContainerStats{Name: name}
+
+		// CPU usage (percentage)
+		cpuQuery := fmt.Sprintf(`rate(container_cpu_usage_seconds_total{name="%s"}[5m])*100`, name)
+		cpuResp, err := h.promClient.Query(ctx, cpuQuery)
+		if err == nil && len(cpuResp.Data.Result) > 0 {
+			if val, err := extractFloatValue(&cpuResp.Data.Result[0]); err == nil {
+				stats.CPUUsagePercent = val
+			}
+		}
+
+		// CPU throttling
+		throttleQuery := fmt.Sprintf(`rate(container_cpu_cfs_throttled_seconds_total{name="%s"}[5m])`, name)
+		throttleResp, err := h.promClient.Query(ctx, throttleQuery)
+		if err == nil && len(throttleResp.Data.Result) > 0 {
+			if val, err := extractFloatValue(&throttleResp.Data.Result[0]); err == nil {
+				stats.CPUThrottledSeconds = val
+			}
+		}
+
+		// Memory usage
+		memQuery := fmt.Sprintf(`container_memory_usage_bytes{name="%s"}`, name)
+		memResp, err := h.promClient.Query(ctx, memQuery)
+		if err == nil && len(memResp.Data.Result) > 0 {
+			if val, err := extractFloatValue(&memResp.Data.Result[0]); err == nil {
+				stats.MemoryUsageBytes = val
+			}
+		}
+
+		// Memory limit
+		memLimitQuery := fmt.Sprintf(`container_spec_memory_limit_bytes{name="%s"}`, name)
+		memLimitResp, err := h.promClient.Query(ctx, memLimitQuery)
+		if err == nil && len(memLimitResp.Data.Result) > 0 {
+			if val, err := extractFloatValue(&memLimitResp.Data.Result[0]); err == nil {
+				stats.MemoryLimitBytes = val
+				if stats.MemoryUsageBytes > 0 && val > 0 {
+					stats.MemoryUsagePercent = (stats.MemoryUsageBytes / val) * 100
+				}
+			}
+		}
+
+		// Network RX
+		netRxQuery := fmt.Sprintf(`rate(container_network_receive_bytes_total{name="%s"}[5m])`, name)
+		netRxResp, err := h.promClient.Query(ctx, netRxQuery)
+		if err == nil && len(netRxResp.Data.Result) > 0 {
+			if val, err := extractFloatValue(&netRxResp.Data.Result[0]); err == nil {
+				stats.NetworkRxBytes = val
+			}
+		}
+
+		// Network TX
+		netTxQuery := fmt.Sprintf(`rate(container_network_transmit_bytes_total{name="%s"}[5m])`, name)
+		netTxResp, err := h.promClient.Query(ctx, netTxQuery)
+		if err == nil && len(netTxResp.Data.Result) > 0 {
+			if val, err := extractFloatValue(&netTxResp.Data.Result[0]); err == nil {
+				stats.NetworkTxBytes = val
+			}
+		}
+
+		metrics.Containers = append(metrics.Containers, stats)
+	}
+
+	return metrics, nil
+}
+
+func (h *MetricsHandler) fetchContainerMetricsTimeSeries(ctx context.Context, timeRange TimeRange) (*TimeSeriesResponse, error) {
+	duration, step := GetTimeRangeConfig(timeRange)
+	endTime := time.Now().UTC()
+	startTime := endTime.Add(-duration)
+
+	response := &TimeSeriesResponse{
+		TimeRange: string(timeRange),
+		StartTime: startTime,
+		EndTime:   endTime,
+		Step:      step,
+		Series:    []TimeSeries{},
+	}
+
+	// Define key container metrics queries
+	queries := map[string]string{
+		"cpu_usage":           `rate(container_cpu_usage_seconds_total[5m])*100`,
+		"cpu_throttled":       `rate(container_cpu_cfs_throttled_seconds_total[5m])`,
+		"memory_usage":        `container_memory_usage_bytes`,
+		"memory_usage_percent": `(container_memory_usage_bytes/container_spec_memory_limit_bytes)*100`,
+		"network_rx":          `rate(container_network_receive_bytes_total[5m])`,
+		"network_tx":          `rate(container_network_transmit_bytes_total[5m])`,
+	}
+
+	// Execute each query as a range query
+	for metricName, query := range queries {
+		resp, err := h.promClient.QueryRange(ctx, query, startTime, endTime, step)
+		if err != nil {
+			// Log error but continue with other metrics
+			continue
+		}
+
+		// Process results and add to response
+		for _, result := range resp.Data.Result {
+			ts, err := extractTimeSeries(&result)
+			if err != nil {
+				continue
+			}
+			ts.MetricName = metricName
+			response.Series = append(response.Series, ts)
+		}
+	}
+
+	return response, nil
 }
