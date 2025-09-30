@@ -17,6 +17,11 @@ services:
       - '--web.enable-lifecycle'
     networks:
       - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
 
   otelcol:
     image: otel/opentelemetry-collector-contrib:0.135.0
@@ -29,6 +34,29 @@ services:
       - "8889:8889"   # Prometheus metrics endpoint
     networks:
       - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.53.0
+    restart: always
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    privileged: true
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
 
 volumes:
   prometheus_data:

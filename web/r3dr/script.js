@@ -1,4 +1,4 @@
-document.getElementById('submitBtn').addEventListener('click', async () => {
+async function shortenUrl() {
     const urlInput = document.getElementById('urlInput').value.trim();
 
     if (!urlInput) {
@@ -30,6 +30,14 @@ document.getElementById('submitBtn').addEventListener('click', async () => {
         displayError("Error shortening the URL. Please try again.");
         clearResults();
         console.error(error);
+    }
+}
+
+document.getElementById('submitBtn').addEventListener('click', shortenUrl);
+
+document.getElementById('urlInput').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        shortenUrl();
     }
 });
 

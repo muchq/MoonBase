@@ -10,13 +10,20 @@ services:
       - caddy_data:/data
       - caddy_config:/config
       - /var/log/caddy:/var/log/caddy
+      - /var/www/r3dr:/var/www/r3dr
     depends_on:
       - games_ws_backend
       - mithril
       - portrait
       - prom_proxy
+      - r3dr
     networks:
       - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
   games_ws_backend:
     image: ghcr.io/muchq/games_ws_backend:latest
@@ -27,6 +34,11 @@ services:
       - /etc/games_ws_backend:/etc/games_ws_backend
     networks:
       - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
 
   portrait:
     image: ghcr.io/muchq/portrait:latest
@@ -42,6 +54,11 @@ services:
       - /etc/portrait:/etc/portrait
     networks:
       - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
 
   prom_proxy:
     image: ghcr.io/muchq/prom_proxy:latest
@@ -55,6 +72,11 @@ services:
       - /etc/prom_proxy:/etc/prom_proxy
     networks:
       - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
 
   mithril:
     image: ghcr.io/muchq/mithril:latest
@@ -67,6 +89,11 @@ services:
       - /etc/mithril:/etc/mithril
     networks:
       - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
 
   posterize:
     image: ghcr.io/muchq/posterize:latest
@@ -79,6 +106,26 @@ services:
       - /etc/posterize:/etc/posterize
     networks:
       - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  r3dr:
+    image: ghcr.io/muchq/r3dr:latest
+    restart: always
+    ports:
+      - "8085:8080"
+    volumes:
+      - /etc/r3dr:/etc/r3dr
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
 
 volumes:
   caddy_data:
