@@ -55,7 +55,7 @@ Room (6-character ID)
 
 ## WebSocket Endpoints
 
-The golf game is served at `/golf-ws` on the games backend server.
+The golf game is served at `/games/v1/golf-ws` on the games backend server.
 
 ## Message Protocol
 

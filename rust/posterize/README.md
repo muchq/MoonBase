@@ -4,10 +4,10 @@ Image post-processing api
 
 ## Routes
 
-### POST /v1/imagine/blur
+### POST /imagine/v1/blur
 
 blur a png
 
-### POST /v1/imagine/edges
+### POST /imagine/v1/edges
 
 detect edges on a png
