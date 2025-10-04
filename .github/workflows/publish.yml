@@ -11,12 +11,14 @@ permissions:
 jobs:
   test-and-publish:
     runs-on: ubuntu-latest-4-cores
+    container:
+      image: ghcr.io/muchq/moonbase/ci-base:latest
 
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install dependencies
-        run: sudo ./scripts/setup/setup-linux
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory /__w/MoonBase/MoonBase
 
       - uses: bazel-contrib/setup-bazel@0.15.0
         with:
@@ -27,7 +29,7 @@ jobs:
           bazelrc: |
             build --remote_cache=https://storage.googleapis.com/moon_base_build_cache
             build --remote_upload_local_results=true
-      # Dependencies are pre-installed in the Docker image
+
       - name: bazel-test
         run: |
           bazel build //... && bazel test //...

@@ -9,7 +9,13 @@ fn compute_index(row: i32, col: i32, width: i32) -> usize {
     return (row * width + col) as usize;
 }
 
-fn convolve<F>(input_pixels: &Vec<u8>, width: u32, height: u32, kernel: &[i32], scaler: F) -> Vec<i32>
+fn convolve<F>(
+    input_pixels: &Vec<u8>,
+    width: u32,
+    height: u32,
+    kernel: &[i32],
+    scaler: F,
+) -> Vec<i32>
 where
     F: Fn(i32) -> i32,
 {
@@ -61,8 +67,20 @@ pub fn sobel(input: &GrayImage) -> GrayImage {
 
     let input_pixels = input.as_raw();
 
-    let sobel_x = convolve(input_pixels, input.width(), input.height(), SOBEL_X_KERNEL, |x| x);
-    let sobel_y = convolve(input_pixels, input.width(), input.height(), SOBEL_Y_KERNEL, |x| x);
+    let sobel_x = convolve(
+        input_pixels,
+        input.width(),
+        input.height(),
+        SOBEL_X_KERNEL,
+        |x| x,
+    );
+    let sobel_y = convolve(
+        input_pixels,
+        input.width(),
+        input.height(),
+        SOBEL_Y_KERNEL,
+        |x| x,
+    );
 
     let mut output_pixels = vec![0u8; input_pixels.len()];
     for i in 0..input_pixels.len() {

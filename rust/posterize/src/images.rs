@@ -6,14 +6,17 @@ use base64::engine::general_purpose;
 use image::{DynamicImage, ImageFormat};
 use std::io::Cursor;
 use std::time::Duration;
-use tracing::{event, Level};
+use tracing::{Level, event};
 
 fn error_response(status_code: StatusCode, message: String) -> (StatusCode, Json<ErrorResponse>) {
     (status_code, Json(ErrorResponse { error: message }))
 }
 
 fn server_error() -> (StatusCode, Json<ErrorResponse>) {
-    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Server Error".to_string())
+    error_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Server Error".to_string(),
+    )
 }
 
 pub fn read_png_from_b64_string(
@@ -71,7 +74,5 @@ pub async fn process_image(
             "Image processing timed out after 10 seconds".to_string(),
         )
     })?
-    .map_err(|_| {
-        server_error()
-    })
+    .map_err(|_| server_error())
 }
