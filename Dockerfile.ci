@@ -7,7 +7,7 @@ ENV LC_ALL=C.UTF-8
 # Install all dependencies at image build time
 RUN apt-get update && \
     apt-get install -y \
-    curl wget podman clang-format-18 build-essential git make \
+    curl wget docker.io clang-format-18 build-essential git make \
     pkg-config cmake ninja-build openjdk-21-jdk \
     gnome-desktop-testing libasound2-dev \
     libpulse-dev libaudio-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
@@ -17,7 +17,6 @@ RUN apt-get update && \
     libpipewire-0.3-dev libwayland-dev libdecor-0-dev liburing-dev \
     libfreetype6-dev libopenal-dev libflac-dev libogg-dev libvorbis-dev && \
     ln -s "$(which clang-format-18)" /usr/local/bin/clang-format && \
-    ln -s "$(which podman)" /usr/bin/docker && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
