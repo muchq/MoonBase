@@ -14,6 +14,11 @@ api.muchq.com {
 		path /v1/imagine/blur
 	}
 
+	@post_posterize_edges {
+		method POST
+		path /v1/imagine/edges
+	}
+
 	@get_timeseries {
 		method GET
 		path /v1/timeseries/*
@@ -22,6 +27,14 @@ api.muchq.com {
 	@get_metrics {
 		method GET
 		path /v1/metrics/*
+	}
+
+	@ws_thoughts {
+		path /v1/games/thoughts-ws
+	}
+
+	@ws_golf {
+		path /v1/games/golf-ws
 	}
 
 	@options {
@@ -45,12 +58,14 @@ api.muchq.com {
 		respond 204
 	}
 
-	reverse_proxy games_ws_backend:8080
+	reverse_proxy @ws_thoughts games_ws_backend:8080
+	reverse_proxy @ws_golf games_ws_backend:8080
 	reverse_proxy @post_portrait portrait:8081
 	reverse_proxy @get_timeseries prom_proxy:8082
 	reverse_proxy @get_metrics prom_proxy:8082
 	reverse_proxy @post_mithril mithril:8083
 	reverse_proxy @post_posterize_blur posterize:8084
+	reverse_proxy @post_posterize_edges posterize:8084
 
 	log {
 		output file /var/log/caddy/access.log {

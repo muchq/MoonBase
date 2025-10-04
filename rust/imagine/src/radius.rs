@@ -5,7 +5,7 @@ pub enum Radius {
 }
 
 impl Radius {
-    pub fn gaussian_kernel(&self) -> &'static [u8] {
+    pub fn gaussian_kernel(&self) -> &'static [i32] {
         match self {
             Radius::Three => &[1, 3, 1, 3, 9, 3, 1, 3, 1],
             Radius::Five => &[

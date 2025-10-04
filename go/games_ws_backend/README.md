@@ -4,7 +4,7 @@ A real-time multiplayer, multitenant WebSocket game server
 
 ## Overview
 This server handles real-time player interactions for
-- [Thoughts](../thoughts), a pretty chill 3D vibe you can play [here](https://muchq.com/thoughts)
+- **[Thoughts](../thoughts)**, a pretty chill 3D vibe you can play [here](https://muchq.com/thoughts)
 - **[Golf](golf/)**, a 4-card golf game with room-based multi-game architecture
 - Some other games someday
 
@@ -17,17 +17,18 @@ This server handles real-time player interactions for
 
 ### Build
 ```bash
-bazel build //go/backend_ws_server
+bazel build //go/games_ws_backend
 ```
 
 ### Development Mode
 ```bash
-DEV_MODE=1 bazel-bin/go/games_ws_backend/games_ws_backend_/games_ws_backend
+DEV_MODE=1 bazel run //go/games_ws_backend
 ```
 
 ### Deploy
+This is now deployed as part of the consolidated deploy in
 ```bash
-go/games_ws_backend/deploy/deploy.sh
+deploy/consolidated/deploy.sh
 ```
 
 ### Configuration
@@ -42,7 +43,7 @@ go/games_ws_backend/deploy/deploy.sh
 
 ## Game Implementations
 
-### Golf (`/golf-ws`)
+### Golf (`/v1/games/golf-ws`)
 4-card golf game with advanced room-based multi-game architecture:
 - **Multiple concurrent games** within the same room
 - **Room-based player management** with persistent statistics

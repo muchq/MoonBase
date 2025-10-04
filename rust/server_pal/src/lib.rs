@@ -1,6 +1,7 @@
 use axum::Router;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::routing::{MethodRouter, get};
+use axum::http::{StatusCode, Uri};
 use std::env;
 use std::time::Duration;
 use tower_http::catch_panic::CatchPanicLayer;
@@ -19,6 +20,10 @@ pub fn listen_addr_pal() -> String {
         .unwrap_or(DEFAULT_PORT);
 
     format!("0.0.0.0:{}", &port)
+}
+
+async fn fallback(uri: Uri) -> (StatusCode, String) {
+    (StatusCode::NOT_FOUND, "Not Found".to_string())
 }
 
 pub struct RouterBuilder<S: Clone + Send + Sync + 'static> {
@@ -40,6 +45,7 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
     pub fn build(self) -> Router<S> {
         self.router
             .route("/health", get(|_: State<S>| async { "Ok" }))
+            .fallback(fallback)
             .layer(TraceLayer::new_for_http())
             .layer(DefaultBodyLimit::disable())
             .layer(RequestBodyLimitLayer::new(4 * 1024 * 1024)) // 4MB to accommodate 3MB base64 + JSON overhead

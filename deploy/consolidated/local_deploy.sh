@@ -16,8 +16,8 @@ mkdir -p local_docker
 
 # Copy deployment files
 echo "Copying deployment files..."
-cp deploy/api.muchq.com/compose.yaml local_docker/
-cp deploy/api.muchq.com/Caddyfile local_docker/
+cp deploy/consolidated/compose.yaml local_docker/
+cp deploy/consolidated/Caddyfile local_docker/
 
 # Copy observability compose file from root
 echo "Copying observability compose file..."

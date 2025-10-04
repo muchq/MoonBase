@@ -1,0 +1,71 @@
+:2015 {
+	@post_portrait {
+		method POST
+		path /v1/trace
+	}
+
+	@post_mithril {
+		method POST
+		path /v1/wordchain
+	}
+
+	@post_posterize_blur {
+		method POST
+		path /v1/imagine/blur
+	}
+
+	@post_posterize_edges {
+		method POST
+		path /v1/imagine/edges
+	}
+
+	@get_timeseries {
+		method GET
+		path /v1/timeseries/*
+	}
+
+	@get_metrics {
+		method GET
+		path /v1/metrics/*
+	}
+
+	@ws_thoughts {
+		path /v1/games/thoughts-ws
+	}
+
+	@ws_golf {
+		path /v1/games/golf-ws
+	}
+
+	@options {
+		method OPTIONS
+	}
+
+	header {
+		Access-Control-Allow-Origin "*"
+		Access-Control-Allow-Methods "GET, POST, OPTIONS"
+		Access-Control-Allow-Headers "Content-Type, Authorization"
+		Access-Control-Max-Age "86400"
+	}
+
+	handle @options {
+		header {
+			Access-Control-Allow-Origin "*"
+			Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			Access-Control-Allow-Headers "Content-Type, Authorization"
+			Access-Control-Max-Age "86400"
+		}
+		respond 204
+	}
+
+	reverse_proxy @ws_thoughts localhost:8080
+	reverse_proxy @ws_golf localhost:8080
+	reverse_proxy @post_portrait localhost:8081
+	reverse_proxy @post_mithril localhost:8083
+	reverse_proxy @post_posterize_blur localhost:8084
+	reverse_proxy @post_posterize_edges localhost:8084
+
+	log {
+		output stdout
+	}
+}

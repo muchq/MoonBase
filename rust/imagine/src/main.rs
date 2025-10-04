@@ -1,4 +1,4 @@
-use imagine::{Radius, gray_gaussian_blur, gray_scale, read_png, write_gray_png};
+use imagine::{Radius, gray_gaussian_blur, gray_scale, read_png, write_gray_png, sobel};
 use std::env;
 
 fn main() {
@@ -15,4 +15,9 @@ fn main() {
     let gray_blur = gray_gaussian_blur(&dyn_img, Radius::Five, 5);
     write_gray_png(&gray_blur, "gray_blur.png");
     println!("wrote output to: gray_blur.png");
+
+    let edges = sobel(&gray_blur);
+    write_gray_png(&edges, "edges.png");
+    println!("wrote output to: edges.png");
+
 }

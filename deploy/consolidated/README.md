@@ -5,14 +5,14 @@ This directory contains the consolidated deployment configuration for multiple s
 ## Services Deployed
 
 - **api.muchq.com** - API backend services
-  - `games_ws_backend` (port 8080)
-  - `portrait` (port 8081)
-  - `prom_proxy` (port 8082)
-  - `mithril` (port 8083)
-  - `posterize` (port 8084)
+  - [`games_ws_backend`](../../go/games_ws_backend) (port 8080)
+  - [`portrait`](../../cpp/portrait) (port 8081)
+  - [`prom_proxy`](../../go/prom_proxy) (port 8082)
+  - [`mithril`](../../rust/mithril) (port 8083)
+  - [`posterize`](../../rust/posterize) (port 8084)
 
 - **r3dr.net** - URL shortener service
-  - `r3dr` (port 8085)
+  - [`r3dr`](../../go/r3dr) (port 8085)
   - Static assets served from `/var/www/r3dr`
 
 - **Observability Stack**
@@ -47,7 +47,7 @@ This script will:
 4. Copy the database config file to `/etc/r3dr/db_config`
 
 **Requirements:**
-- SSH access to the host configured (e.g., `ssh ubuntu@api.muchq.com`)
+- SSH access to the host configured (e.g., `ssh ubuntu@consolidated.cmptr.info`)
 - Database config file for r3dr service
 
 After initialization, you may need to reboot the instance.
@@ -80,4 +80,4 @@ Services require configuration files in their respective `/etc` directories on t
 
 ## Network
 
-All services run on the `muchq_network` Docker bridge network, allowing them to communicate with each other using service names.
+All services run on the `muchq_network` Docker bridge network.
