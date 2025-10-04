@@ -37,15 +37,15 @@ func main() {
 	router.HandleFunc("GET /health", metricsHandler.HealthHandler)
 
 	// Metrics endpoints - current point-in-time data
-	router.HandleFunc("GET /v1/metrics/system", metricsHandler.GetSystemMetrics)
-	router.HandleFunc("GET /v1/metrics/portrait", metricsHandler.GetPortraitMetrics)
-	router.HandleFunc("GET /v1/metrics/containers", metricsHandler.GetContainerMetrics)
-	router.HandleFunc("GET /v1/metrics/summary", metricsHandler.GetSummaryMetrics)
+	router.HandleFunc("GET /metrics/v1/scalar/system", metricsHandler.GetSystemMetrics)
+	router.HandleFunc("GET /metrics/v1/scalar/portrait", metricsHandler.GetPortraitMetrics)
+	router.HandleFunc("GET /metrics/v1/scalar/containers", metricsHandler.GetContainerMetrics)
+	router.HandleFunc("GET /metrics/v1/scalar/summary", metricsHandler.GetSummaryMetrics)
 
 	// Timeseries endpoints - historical data with time ranges
-	router.HandleFunc("GET /v1/timeseries/system/{range}", metricsHandler.GetSystemMetricsTimeSeries)
-	router.HandleFunc("GET /v1/timeseries/portrait/{range}", metricsHandler.GetPortraitMetricsTimeSeries)
-	router.HandleFunc("GET /v1/timeseries/containers/{range}", metricsHandler.GetContainerMetricsTimeSeries)
+	router.HandleFunc("GET /metrics/v1/timeseries/system/{range}", metricsHandler.GetSystemMetricsTimeSeries)
+	router.HandleFunc("GET /metrics/v1/timeseries/portrait/{range}", metricsHandler.GetPortraitMetricsTimeSeries)
+	router.HandleFunc("GET /metrics/v1/timeseries/containers/{range}", metricsHandler.GetContainerMetricsTimeSeries)
 
 	log.Printf("Starting Prometheus proxy server on port %s", port)
 	log.Printf("Prometheus backend: %s", prometheusURL)

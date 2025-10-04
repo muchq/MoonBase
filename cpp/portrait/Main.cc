@@ -36,7 +36,7 @@ int main() {
       std::make_shared<futility::rate_limiter::SlidingWindowRateLimiter<std::string>>(config);
 
   // ray tracing endpoint
-  server.post("/v1/trace", wrap<TraceRequest, TraceResponse>([&tracer_service](TraceRequest& req) {
+  server.post("/portrait/v1/trace", wrap<TraceRequest, TraceResponse>([&tracer_service](TraceRequest& req) {
                 return tracer_service.trace(req);
               }));
 
@@ -52,7 +52,7 @@ int main() {
     LOG(INFO) << "Portrait Server running on http://" << host << ":" << port;
     LOG(INFO) << "Serving:";
     LOG(INFO) << "  GET  http://localhost:8080/health";
-    LOG(INFO) << "  POST http://localhost:8080/v1/trace";
+    LOG(INFO) << "  POST http://localhost:8080/portrait/v1/trace";
     LOG(INFO) << "Press Ctrl+C to stop the server";
 
     server.run();
