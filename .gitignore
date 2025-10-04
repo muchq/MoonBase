@@ -18,3 +18,4 @@ checkpoints
 
 .env
 local_docker
+local_docs
