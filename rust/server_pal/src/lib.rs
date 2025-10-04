@@ -1,7 +1,7 @@
 use axum::Router;
 use axum::extract::{DefaultBodyLimit, State};
-use axum::routing::{MethodRouter, get};
 use axum::http::{StatusCode, Uri};
+use axum::routing::{MethodRouter, get};
 use std::env;
 use std::time::Duration;
 use tower_http::catch_panic::CatchPanicLayer;

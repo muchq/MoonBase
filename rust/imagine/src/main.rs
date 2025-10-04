@@ -1,4 +1,4 @@
-use imagine::{Radius, gray_gaussian_blur, gray_scale, read_png, write_gray_png, sobel};
+use imagine::{Radius, gray_gaussian_blur, gray_scale, read_png, sobel, write_gray_png};
 use std::env;
 
 fn main() {
@@ -19,5 +19,4 @@ fn main() {
     let edges = sobel(&gray_blur);
     write_gray_png(&edges, "edges.png");
     println!("wrote output to: edges.png");
-
 }
