@@ -39,14 +39,14 @@ func main() {
 	// Serve thoughts backend
 	thoughtsHub := thoughts.NewThoughtsHub()
 	go thoughtsHub.Run()
-	http.HandleFunc("/thoughts-ws", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/v1/games/thoughts-ws", func(w http.ResponseWriter, r *http.Request) {
 		hub.ServeWs(thoughtsHub, w, r)
 	})
 
 	// Serve golf backend
 	golfHub := golf.NewGolfHub(&players.WhimsicalIDGenerator{})
 	go golfHub.Run()
-	http.HandleFunc("/golf-ws", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/v1/games/golf-ws", func(w http.ResponseWriter, r *http.Request) {
 		hub.ServeWs(golfHub, w, r)
 	})
 

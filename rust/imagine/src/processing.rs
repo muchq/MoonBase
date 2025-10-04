@@ -9,14 +9,14 @@ fn compute_index(row: i32, col: i32, width: i32) -> usize {
     return (row * width + col) as usize;
 }
 
-fn convolve<F>(input_pixels: &Vec<u8>, width: u32, height: u32, kernel: &[u8], scaler: F) -> Vec<u8>
+fn convolve<F>(input_pixels: &Vec<u8>, width: u32, height: u32, kernel: &[i32], scaler: F) -> Vec<i32>
 where
-    F: Fn(i32) -> u8,
+    F: Fn(i32) -> i32,
 {
     // TODO: assert that kernel.length is an odd square (3x3, 5x5, 7x7)
     // TODO: what is a GPU?
     let edge_offset = ((kernel.len() as f32).sqrt() / 2.0) as u32;
-    let mut output_pixels = vec![0u8; input_pixels.len()];
+    let mut output_pixels = vec![0i32; input_pixels.len()];
 
     for row in edge_offset..(height - edge_offset) {
         for col in edge_offset..(width - edge_offset) {
@@ -27,7 +27,7 @@ where
                     let neighbor_pixel = input_pixels
                         [compute_index(row as i32 + r, col as i32 + c, width as i32)]
                         & 0xff;
-                    dot_product = dot_product + (kernel[i] as i32) * neighbor_pixel as i32;
+                    dot_product = dot_product + (kernel[i]) * neighbor_pixel as i32;
                     i += 1;
                 }
             }
@@ -40,17 +40,38 @@ where
     return output_pixels;
 }
 
-fn convolve_and_scale_by_kernel_sum(input: &GrayImage, kernel: &[u8]) -> GrayImage {
-    let kernel_sum: i32 = kernel.iter().map(|&x| x as i32).sum();
+fn convolve_and_scale_by_kernel_sum(input: &GrayImage, kernel: &[i32]) -> GrayImage {
+    let kernel_sum: i32 = kernel.iter().sum();
     let input_pixels = input.as_raw();
     let conv_output = convolve(
         input_pixels,
         input.width(),
         input.height(),
         kernel,
-        |i: i32| (i / kernel_sum).try_into().unwrap(),
+        |i: i32| i / kernel_sum,
     );
-    return ImageBuffer::from_vec(input.width(), input.height(), conv_output)
+    let byte_output: Vec<u8> = conv_output.iter().map(|&x| x as u8).collect();
+    return ImageBuffer::from_vec(input.width(), input.height(), byte_output)
+        .expect("Failed to create image from vector");
+}
+
+pub fn sobel(input: &GrayImage) -> GrayImage {
+    const SOBEL_X_KERNEL: &[i32] = &[1, 0, -1, 2, 0, -2, 1, 0, -1];
+    const SOBEL_Y_KERNEL: &[i32] = &[1, 2, 1, 0, 0, 0, -1, -2, -1];
+
+    let input_pixels = input.as_raw();
+
+    let sobel_x = convolve(input_pixels, input.width(), input.height(), SOBEL_X_KERNEL, |x| x);
+    let sobel_y = convolve(input_pixels, input.width(), input.height(), SOBEL_Y_KERNEL, |x| x);
+
+    let mut output_pixels = vec![0u8; input_pixels.len()];
+    for i in 0..input_pixels.len() {
+        let xi = sobel_x[i];
+        let yi = sobel_y[i];
+        output_pixels[i] = ((255.0 * ((xi * xi + yi * yi) as f64).sqrt()) / 360.0) as u8
+    }
+
+    return ImageBuffer::from_vec(input.width(), input.height(), output_pixels)
         .expect("Failed to create image from vector");
 }
 

@@ -5,7 +5,10 @@ load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 rust_binary(
     name = "posterize",
     srcs = [
+        "src/images.rs",
         "src/main.rs",
+        "src/service.rs",
+        "src/types.rs",
     ],
     crate_name = "posterize",
     deps = [

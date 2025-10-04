@@ -1,5 +1,6 @@
 startup --output_base=~/.bazelout
 startup --digest_function=BLAKE3
+startup --max_idle_secs=86400
 
 common --color=yes
 
