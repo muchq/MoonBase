@@ -9,11 +9,12 @@
 - **Go**:
   - [`mucks`](go/mucks) - Router wrapper middleware
   - [`resilience4g`](go/resilience4g) - Resilience4J for Go
-  - [`r3dr`](go/r3dr) - a url shortening service
+  - [`r3dr`](go/r3dr) - a url shortening service deployed at [r3dr.net](https://r3dr.net)
   - [`games_ws_backend`](go/games_ws_backend) - websocket backend for [some games on muchq.com](https://muchq.com)
   - [`doc_db`](go/doc_db) - DocDB WIP
   - [`example_grpc`](go/example_grpc) - gRPC example
 - **C++**:
+  - [`portrait`](cpp/portrait/) - HTTP api for tracy ray tracer
   - [`meerkat`](cpp/meerkat/) - Mongoose wrapper
   - [`lakitu`](cpp/lakitu) - gRPC wrapper
   - [`example_service`](cpp/example_service) - Example gRPC service
