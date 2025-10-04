@@ -22,7 +22,7 @@ pub fn listen_addr_pal() -> String {
     format!("0.0.0.0:{}", &port)
 }
 
-async fn fallback(uri: Uri) -> (StatusCode, String) {
+async fn fallback(_: Uri) -> (StatusCode, String) {
     (StatusCode::NOT_FOUND, "Not Found".to_string())
 }
 
