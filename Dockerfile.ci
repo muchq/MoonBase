@@ -17,6 +17,7 @@ RUN apt-get update && \
     libpipewire-0.3-dev libwayland-dev libdecor-0-dev liburing-dev \
     libfreetype6-dev libopenal-dev libflac-dev libogg-dev libvorbis-dev && \
     ln -s "$(which clang-format-18)" /usr/local/bin/clang-format && \
+    ln -s "$(which podman)" /usr/bin/docker && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
