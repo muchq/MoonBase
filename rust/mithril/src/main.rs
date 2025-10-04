@@ -74,7 +74,7 @@ async fn main() {
 
     // build our application with a single route
     let app = router_builder()
-        .route("/v1/wordchain", post(wordchain_post))
+        .route("/mithril/v1/wordchain", post(wordchain_post))
         .build()
         .with_state(shared_state);
 

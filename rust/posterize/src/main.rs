@@ -14,8 +14,8 @@ async fn main() {
     let listen_address = listen_addr_pal();
 
     let app = router_builder()
-        .route("/v1/imagine/blur", post(blur_post))
-        .route("/v1/imagine/edges", post(edges_post))
+        .route("/imagine/v1/blur", post(blur_post))
+        .route("/imagine/v1/edges", post(edges_post))
         .build();
 
     let listener = tokio::net::TcpListener::bind(listen_address.clone())

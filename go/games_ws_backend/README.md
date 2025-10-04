@@ -43,7 +43,7 @@ deploy/consolidated/deploy.sh
 
 ## Game Implementations
 
-### Golf (`/v1/games/golf-ws`)
+### Golf (`/games/v1/golf-ws`)
 4-card golf game with advanced room-based multi-game architecture:
 - **Multiple concurrent games** within the same room
 - **Room-based player management** with persistent statistics
