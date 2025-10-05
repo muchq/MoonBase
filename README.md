@@ -9,12 +9,12 @@
 - **Go**:
   - [`mucks`](go/mucks) - Router wrapper middleware
   - [`resilience4g`](go/resilience4g) - Resilience4J for Go
-  - [`r3dr`](go/r3dr) - a url shortening service deployed at [r3dr.net](https://r3dr.net)
-  - [`games_ws_backend`](go/games_ws_backend) - websocket backend for [some games on muchq.com](https://muchq.com)
+  - [`r3dr`](go/r3dr) - a url shortening service [r3dr.net](https://r3dr.net)
+  - [`games_ws_backend`](go/games_ws_backend) - websocket backend for some games on [muchq.com](https://muchq.com)
   - [`doc_db`](go/doc_db) - DocDB WIP
   - [`example_grpc`](go/example_grpc) - gRPC example
 - **C++**:
-  - [`portrait`](cpp/portrait/) - HTTP api for tracy ray tracer
+  - [`portrait`](cpp/portrait/) - HTTP api for tracy ray tracer at [muchq.com/tracy](https://muchq.com/tracy)
   - [`meerkat`](cpp/meerkat/) - Mongoose wrapper
   - [`lakitu`](cpp/lakitu) - gRPC wrapper
   - [`example_service`](cpp/example_service) - Example gRPC service
@@ -24,8 +24,8 @@
   - [`yochat`](jvm/src/main/java/com/muchq/yochat) - Chat server
 - **Rust**:
   - [`doc_db`](rust/doc_db) - DocDB with Mongo backend
-  - [`mithril`](rust/mithril) - HTTP api for wordchains solver
-  - [`posterize`](rust/posterize) - HTTP api for imagine image processing
+  - [`mithril`](rust/mithril) - HTTP api for wordchains solver at [muchq.com/wordchains](https://muchq.com/wordchains)
+  - [`posterize`](rust/posterize) - HTTP api for imagine image processing at [muchq.com/posterize](https://muchq.com/posterize)
 
 ### Graphics Stuff
 - **C++**:
