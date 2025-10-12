@@ -101,6 +101,11 @@ func (g *Game) AddPlayer(clientID string, playerID string, playerName string) (*
 		return nil, fmt.Errorf("game is full")
 	}
 
+	// Check if player is already in the game
+	if _, exists := g.playersByClient[clientID]; exists {
+		return nil, fmt.Errorf("player already in game")
+	}
+
 	player := &Player{
 		ID:            playerID,
 		Name:          playerName,

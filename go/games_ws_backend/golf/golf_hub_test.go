@@ -1320,3 +1320,202 @@ func TestHub_GameCleanup(t *testing.T) {
 	client1.close()
 	client2.close()
 }
+
+// Double Join Prevention Tests
+
+func TestHub_JoinGameTwice(t *testing.T) {
+	golfHub := NewGolfHub(&players.DeterministicIDGenerator{})
+	go golfHub.Run()
+
+	client1 := newMockClient("client1")
+	client1.collectMessages()
+	client2 := newMockClient("client2")
+	client2.collectMessages()
+
+	hubClient1 := &hub.Client{Hub: golfHub, Send: client1.send}
+	hubClient2 := &hub.Client{Hub: golfHub, Send: client2.send}
+
+	golfHub.Register(hubClient1)
+	golfHub.Register(hubClient2)
+	time.Sleep(10 * time.Millisecond)
+
+	// Client 1 creates room
+	createMsg := `{"type": "createRoom"}`
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(createMsg),
+		Sender:  hubClient1,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Extract room ID
+	messages1 := client1.getMessages()
+	var joinedMsg RoomJoinedMessage
+	json.Unmarshal(messages1[0], &joinedMsg)
+	roomID := joinedMsg.RoomState.ID
+
+	// Client 2 joins the room
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type": "joinRoom", "roomId": "` + roomID + `"}`),
+		Sender:  hubClient2,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Client 1 creates a game
+	client1.clearMessages()
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type": "createGame", "roomId": "` + roomID + `"}`),
+		Sender:  hubClient1,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Get game ID from client1's response
+	game1Messages := client1.getMessages()
+	var gameID string
+	for _, msg := range game1Messages {
+		var gameJoinedMsg GameJoinedMessage
+		if err := json.Unmarshal(msg, &gameJoinedMsg); err == nil && gameJoinedMsg.Type == "gameJoined" {
+			gameID = gameJoinedMsg.GameState.ID
+			break
+		}
+	}
+
+	if gameID == "" {
+		t.Fatal("Failed to get game ID from client1")
+	}
+
+	// Client 2 joins the game
+	client2.clearMessages()
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "` + gameID + `"}`),
+		Sender:  hubClient2,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Verify client 2 successfully joined
+	messages2 := client2.getMessages()
+	foundGameJoined := false
+	for _, msg := range messages2 {
+		var gameJoinedMsg GameJoinedMessage
+		if err := json.Unmarshal(msg, &gameJoinedMsg); err == nil && gameJoinedMsg.Type == "gameJoined" {
+			foundGameJoined = true
+			break
+		}
+	}
+	if !foundGameJoined {
+		t.Fatal("Client 2 should have received gameJoined message")
+	}
+
+	// Now client 2 tries to join the same game again
+	client2.clearMessages()
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type": "joinGame", "roomId": "` + roomID + `", "gameId": "` + gameID + `"}`),
+		Sender:  hubClient2,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Client 2 should receive an error message
+	messages2 = client2.getMessages()
+	foundError := false
+	var errorMsg ErrorMessage
+	for _, msg := range messages2 {
+		if err := json.Unmarshal(msg, &errorMsg); err == nil && errorMsg.Type == "error" {
+			foundError = true
+			break
+		}
+	}
+
+	if !foundError {
+		t.Error("Expected error message when player tries to join game twice")
+	}
+
+	if errorMsg.Message != "player already in game" {
+		t.Errorf("Expected 'player already in game' error, got: %s", errorMsg.Message)
+	}
+
+	// Verify that the game still has only 2 players
+	hub := golfHub.(*GolfHub)
+	hub.mu.RLock()
+	room := hub.rooms[roomID]
+	game := room.Games[gameID]
+	if len(game.state.Players) != 2 {
+		t.Errorf("Expected 2 players in game after double-join attempt, got %d", len(game.state.Players))
+	}
+	hub.mu.RUnlock()
+
+	client1.close()
+	client2.close()
+}
+
+func TestHub_JoinRoomTwice(t *testing.T) {
+	golfHub := NewGolfHub(&players.DeterministicIDGenerator{})
+	go golfHub.Run()
+
+	client1 := newMockClient("client1")
+	client1.collectMessages()
+
+	hubClient1 := &hub.Client{Hub: golfHub, Send: client1.send}
+
+	golfHub.Register(hubClient1)
+	time.Sleep(10 * time.Millisecond)
+
+	// Client 1 creates room (automatically joins)
+	createMsg := `{"type": "createRoom"}`
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(createMsg),
+		Sender:  hubClient1,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Extract room ID
+	messages1 := client1.getMessages()
+	var joinedMsg RoomJoinedMessage
+	json.Unmarshal(messages1[0], &joinedMsg)
+	roomID := joinedMsg.RoomState.ID
+
+	// Verify client 1 successfully created and joined the room
+	if joinedMsg.Type != "roomJoined" {
+		t.Fatal("Client 1 should have received roomJoined message")
+	}
+
+	if len(joinedMsg.RoomState.Players) != 1 {
+		t.Errorf("Expected 1 player in room, got %d", len(joinedMsg.RoomState.Players))
+	}
+
+	// Now client 1 tries to join the same room again
+	client1.clearMessages()
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type": "joinRoom", "roomId": "` + roomID + `"}`),
+		Sender:  hubClient1,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Client 1 should receive an error message
+	messages1 = client1.getMessages()
+	foundError := false
+	var errorMsg ErrorMessage
+	for _, msg := range messages1 {
+		if err := json.Unmarshal(msg, &errorMsg); err == nil && errorMsg.Type == "error" {
+			foundError = true
+			break
+		}
+	}
+
+	if !foundError {
+		t.Error("Expected error message when player tries to join room twice")
+	}
+
+	if errorMsg.Message != "player already in room" {
+		t.Errorf("Expected 'player already in room' error, got: %s", errorMsg.Message)
+	}
+
+	// Verify that the room still has only 1 player
+	hub := golfHub.(*GolfHub)
+	hub.mu.RLock()
+	room := hub.rooms[roomID]
+	if len(room.Players) != 1 {
+		t.Errorf("Expected 1 player in room after double-join attempt, got %d", len(room.Players))
+	}
+	hub.mu.RUnlock()
+
+	client1.close()
+}
