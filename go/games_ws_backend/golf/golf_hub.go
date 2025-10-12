@@ -256,24 +256,10 @@ func (h *GolfHub) handleJoinRoom(client *hub.Client, roomID string) {
 		// Check if client is already in a room
 		ctx := h.clientContexts[client]
 		if ctx != nil && ctx.RoomID != "" {
-			// If already in the same room, do nothing
+			// If already in the same room, return error
 			if ctx.RoomID == roomID {
-				room = h.rooms[roomID]
-
-				// Find the player in the room
-				clientID := getClientID(client)
-				for _, p := range room.Players {
-					if p.ClientID == clientID {
-						player = p
-						break
-					}
-				}
-
-				if player == nil {
-					// This would be some kind of problem
-					h.sendError(client, "Player not found in room")
-					return
-				}
+				h.sendError(client, "player already in room")
+				return
 			} else {
 				h.sendError(client, "Already in a different room")
 				return

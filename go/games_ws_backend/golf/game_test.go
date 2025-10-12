@@ -1055,3 +1055,63 @@ func TestDrawnCardPrivacy(t *testing.T) {
 		t.Error("Player 3 should see the card they took from discard")
 	}
 }
+
+// Double Join Prevention Tests
+
+func TestAddPlayerTwice(t *testing.T) {
+	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
+
+	// Add player once
+	player1, err := addTestPlayerToGame(game, "client1")
+	if err != nil {
+		t.Fatalf("Failed to add player1: %v", err)
+	}
+
+	if player1.Name != "TestPlayerclient1" {
+		t.Errorf("Expected TestPlayerclient1, got %s", player1.Name)
+	}
+
+	if len(game.state.Players) != 1 {
+		t.Errorf("Expected 1 player, got %d", len(game.state.Players))
+	}
+
+	// Try to add the same player again (should fail)
+	_, err = addTestPlayerToGame(game, "client1")
+	if err == nil {
+		t.Error("Expected error when adding the same player twice")
+	}
+
+	// Verify player count hasn't changed
+	if len(game.state.Players) != 1 {
+		t.Errorf("Expected still 1 player after double-join attempt, got %d", len(game.state.Players))
+	}
+
+	// Verify the error message indicates already joined
+	if err != nil && err.Error() != "player already in game" {
+		t.Errorf("Expected 'player already in game' error, got: %s", err.Error())
+	}
+}
+
+func TestAddPlayerTwiceAfterGameStarted(t *testing.T) {
+	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
+
+	// Add two players
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+
+	// Start the game
+	err := game.StartGame()
+	if err != nil {
+		t.Fatalf("Failed to start game: %v", err)
+	}
+
+	// Try to add a player who's already in the game (should fail with "already started")
+	_, err = addTestPlayerToGame(game, "client1")
+	if err == nil {
+		t.Error("Expected error when adding player to already started game")
+	}
+
+	if err.Error() != "game already started" {
+		t.Errorf("Expected 'game already started' error, got: %s", err.Error())
+	}
+}
