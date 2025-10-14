@@ -9,10 +9,7 @@ oci.pull(
     image = "docker.io/library/ubuntu",
     platforms = [
         "linux/amd64",
-        "linux/arm/v7",
         "linux/arm64/v8",
-        "linux/ppc64le",
-        "linux/s390x",
     ],
 )
-use_repo(oci, "docker_lib_ubuntu", "docker_lib_ubuntu_linux_amd64", "docker_lib_ubuntu_linux_arm64_v8", "docker_lib_ubuntu_linux_arm_v7", "docker_lib_ubuntu_linux_ppc64le", "docker_lib_ubuntu_linux_s390x")
+use_repo(oci, "docker_lib_ubuntu", "docker_lib_ubuntu_linux_amd64", "docker_lib_ubuntu_linux_arm64_v8")

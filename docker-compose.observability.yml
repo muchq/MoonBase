@@ -24,7 +24,7 @@ services:
           memory: 1G
 
   otelcol:
-    image: otel/opentelemetry-collector-contrib:0.135.0
+    image: otel/opentelemetry-collector-contrib:0.137.0
     restart: always
     command: ["--config=/etc/otel-collector-config.yml"]
     volumes:
