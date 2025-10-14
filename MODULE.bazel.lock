@@ -62,8 +62,8 @@
     "https://bcr.bazel.build/modules/bazel_features/1.3.0/MODULE.bazel": "cdcafe83ec318cda34e02948e81d790aab8df7a929cec6f6969f13a489ccecd9",
     "https://bcr.bazel.build/modules/bazel_features/1.30.0/MODULE.bazel": "a14b62d05969a293b80257e72e597c2da7f717e1e69fa8b339703ed6731bec87",
     "https://bcr.bazel.build/modules/bazel_features/1.32.0/MODULE.bazel": "095d67022a58cb20f7e20e1aefecfa65257a222c18a938e2914fd257b5f1ccdc",
-    "https://bcr.bazel.build/modules/bazel_features/1.36.0/MODULE.bazel": "596cb62090b039caf1cad1d52a8bc35cf188ca9a4e279a828005e7ee49a1bec3",
-    "https://bcr.bazel.build/modules/bazel_features/1.36.0/source.json": "279625cafa5b63cc0a8ee8448d93bc5ac1431f6000c50414051173fd22a6df3c",
+    "https://bcr.bazel.build/modules/bazel_features/1.37.0/MODULE.bazel": "bd8f7e20ce3125d3507eb24e672f8db0b7da203572705fc8df6160a927bd8ff4",
+    "https://bcr.bazel.build/modules/bazel_features/1.37.0/source.json": "b90ae265a662942485cdc153d5adbad8696666092c31ecba3ea12923a739bceb",
     "https://bcr.bazel.build/modules/bazel_features/1.4.1/MODULE.bazel": "e45b6bb2350aff3e442ae1111c555e27eac1d915e77775f6fdc4b351b758b5d7",
     "https://bcr.bazel.build/modules/bazel_features/1.9.1/MODULE.bazel": "8f679097876a9b609ad1f60249c49d68bfab783dd9be012faf9d82547b14815a",
     "https://bcr.bazel.build/modules/bazel_skylib/1.0.3/MODULE.bazel": "bcb0fd896384802d1ad283b4e4eb4d718eebd8cb820b0a2c3a347fb971afd9d8",
@@ -1959,8 +1959,8 @@
     },
     "@@rules_oci+//oci:extensions.bzl%oci": {
       "general": {
-        "bzlTransitiveDigest": "M6zgl3MCTa0jJwB7Xuu8bk/B26duX++o3d465z7sP54=",
-        "usagesDigest": "qE29IHw3CswfLDWbcwG4yMYGAT3ftm8XYy7BcNI8TiQ=",
+        "bzlTransitiveDigest": "3IkGQPWndkBu/CwcGBgpZxSz4yx1KvZaPtnqKc6CIx0=",
+        "usagesDigest": "BvkTA0cLMZe3Gd0ZB5x/7ixtWe1bXzmLMT3TEBwrlGU=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -1978,19 +1978,6 @@
               "bazel_tags": []
             }
           },
-          "docker_lib_ubuntu_linux_arm_v7": {
-            "repoRuleId": "@@rules_oci+//oci/private:pull.bzl%oci_pull",
-            "attributes": {
-              "www_authenticate_challenges": {},
-              "scheme": "https",
-              "registry": "index.docker.io",
-              "repository": "library/ubuntu",
-              "identifier": "sha256:353675e2a41babd526e2b837d7ec780c2a05bca0164f7ea5dbbd433d21d166fc",
-              "platform": "linux/arm/v7",
-              "target_name": "docker_lib_ubuntu_linux_arm_v7",
-              "bazel_tags": []
-            }
-          },
           "docker_lib_ubuntu_linux_arm64_v8": {
             "repoRuleId": "@@rules_oci+//oci/private:pull.bzl%oci_pull",
             "attributes": {
@@ -2001,32 +1988,6 @@
               "identifier": "sha256:353675e2a41babd526e2b837d7ec780c2a05bca0164f7ea5dbbd433d21d166fc",
               "platform": "linux/arm64/v8",
               "target_name": "docker_lib_ubuntu_linux_arm64_v8",
-              "bazel_tags": []
-            }
-          },
-          "docker_lib_ubuntu_linux_ppc64le": {
-            "repoRuleId": "@@rules_oci+//oci/private:pull.bzl%oci_pull",
-            "attributes": {
-              "www_authenticate_challenges": {},
-              "scheme": "https",
-              "registry": "index.docker.io",
-              "repository": "library/ubuntu",
-              "identifier": "sha256:353675e2a41babd526e2b837d7ec780c2a05bca0164f7ea5dbbd433d21d166fc",
-              "platform": "linux/ppc64le",
-              "target_name": "docker_lib_ubuntu_linux_ppc64le",
-              "bazel_tags": []
-            }
-          },
-          "docker_lib_ubuntu_linux_s390x": {
-            "repoRuleId": "@@rules_oci+//oci/private:pull.bzl%oci_pull",
-            "attributes": {
-              "www_authenticate_challenges": {},
-              "scheme": "https",
-              "registry": "index.docker.io",
-              "repository": "library/ubuntu",
-              "identifier": "sha256:353675e2a41babd526e2b837d7ec780c2a05bca0164f7ea5dbbd433d21d166fc",
-              "platform": "linux/s390x",
-              "target_name": "docker_lib_ubuntu_linux_s390x",
               "bazel_tags": []
             }
           },
@@ -2041,10 +2002,7 @@
               "identifier": "sha256:353675e2a41babd526e2b837d7ec780c2a05bca0164f7ea5dbbd433d21d166fc",
               "platforms": {
                 "@@platforms//cpu:x86_64": "@docker_lib_ubuntu_linux_amd64",
-                "@@platforms//cpu:armv7": "@docker_lib_ubuntu_linux_arm_v7",
-                "@@platforms//cpu:arm64": "@docker_lib_ubuntu_linux_arm64_v8",
-                "@@platforms//cpu:ppc": "@docker_lib_ubuntu_linux_ppc64le",
-                "@@platforms//cpu:s390x": "@docker_lib_ubuntu_linux_s390x"
+                "@@platforms//cpu:arm64": "@docker_lib_ubuntu_linux_arm64_v8"
               },
               "bzlmod_repository": "docker_lib_ubuntu",
               "reproducible": true
@@ -2168,10 +2126,7 @@
           "explicitRootModuleDirectDeps": [
             "docker_lib_ubuntu",
             "docker_lib_ubuntu_linux_amd64",
-            "docker_lib_ubuntu_linux_arm_v7",
-            "docker_lib_ubuntu_linux_arm64_v8",
-            "docker_lib_ubuntu_linux_ppc64le",
-            "docker_lib_ubuntu_linux_s390x"
+            "docker_lib_ubuntu_linux_arm64_v8"
           ],
           "explicitRootModuleDirectDevDeps": [],
           "useAllRepos": "NO",
@@ -2323,7 +2278,7 @@
     },
     "@@rules_rust+//crate_universe:extension.bzl%crate%<root>+crate": {
       "general": {
-        "bzlTransitiveDigest": "wbA/Pjar8Yw+33zFu4MqY+pbNPv3vsA1T/X4U74DXA4=",
+        "bzlTransitiveDigest": "cg1WKR+Wq/XK5Rk/rrSzML36zCJI5OlllgdkUgeR/Mw=",
         "usagesDigest": "DHz/0EANM8jbCkaWhJDEncpi7wT+wVwCwo2O6ZI9pxA=",
         "recordedFileInputs": {
           "@@//Cargo.lock": "d34584bd4284fb2eaf464ceae74f95832cf3248d0553083c4230f6f65bc018cd",
