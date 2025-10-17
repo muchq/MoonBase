@@ -11,21 +11,18 @@
   - [`resilience4g`](go/resilience4g) - Resilience4J for Go
   - [`r3dr`](go/r3dr) - a url shortening service [r3dr.net](https://r3dr.net)
   - [`games_ws_backend`](go/games_ws_backend) - websocket backend for some games on [muchq.com](https://muchq.com)
-  - [`doc_db`](go/doc_db) - DocDB WIP
-  - [`example_grpc`](go/example_grpc) - gRPC example
 - **C++**:
   - [`portrait`](cpp/portrait/) - HTTP api for tracy ray tracer at [muchq.com/tracy](https://muchq.com/tracy)
   - [`meerkat`](cpp/meerkat/) - Mongoose wrapper
   - [`lakitu`](cpp/lakitu) - gRPC wrapper
-  - [`example_service`](cpp/example_service) - Example gRPC service
   - [`doc_db_client`](cpp/doc_db_client) - Document database client
 - **Java**:
   - [`lunarcat`](jvm/src/main/java/com/muchq/lunarcat) - Rest-style HTTP server
   - [`yochat`](jvm/src/main/java/com/muchq/yochat) - Chat server
 - **Rust**:
-  - [`doc_db`](rust/doc_db) - DocDB with Mongo backend
   - [`mithril`](rust/mithril) - HTTP api for wordchains solver at [muchq.com/wordchains](https://muchq.com/wordchains)
   - [`posterize`](rust/posterize) - HTTP api for imagine image processing at [muchq.com/posterize](https://muchq.com/posterize)
+  - [`doc_db`](rust/doc_db) - DocDB api
 
 ### Graphics Stuff
 - **C++**:
@@ -50,14 +47,14 @@
 
 ### Card Games
 - **Rust**:
-    - [`/rust/cards`](rust/cards) - Experimenting with moving card games to Rust
+    - [`rust/cards`](rust/cards) - Experimenting with moving card games to Rust
 - **C++**:
-    - [`/cpp/cards`](cpp/cards) - Golf implementation and some helpers
+    - [`cpp/cards`](cpp/cards) - Golf implementation and some helpers
     - [`golf_service`](cpp/golf_service) - Golf websocket server
     - [`golf_grpc`](cpp/golf_grpc) - Golf gRPC service
 - **Web**: (UIs live [here](https://github.com/muchq/muchq.github.io) for now)
 - **Go**:
-    - [`/go/cards`](go/cards) - Experimenting with moving card game engines to Go
+    - [`cards`](go/cards) - Experimenting with moving card game engines to Go
 
 ### Other Projects
 - **Rust**:
