@@ -16,6 +16,7 @@ Build Pal is a development tool that provides a unified command-line interface f
 2. WHEN the config file specifies a supported tool type (bazel, maven, etc.) THEN the system SHALL use the appropriate command execution strategy
 3. WHEN the config file is malformed or missing required fields THEN the system SHALL display a clear error message
 4. WHEN the config file specifies an unsupported tool type THEN the system SHALL display an error listing supported tool types
+5. WHEN the config file includes mode, retention, or environment settings THEN the system SHALL apply those configurations to build execution
 
 ### Requirement 2
 
@@ -164,3 +165,145 @@ Build Pal is a development tool that provides a unified command-line interface f
 3. WHEN a user clicks on a project THEN the system SHALL navigate to that project's detailed build history page (as described in Requirement 11)
 4. WHEN a project hasn't been used recently THEN the system SHALL still display it in the list with appropriate status indicators
 5. WHEN no projects have been configured THEN the system SHALL display helpful getting-started information with links to documentation
+
+### Requirement 14
+
+**User Story:** As a developer, I want to configure build_pal to run in sync or async mode, so that I can choose between immediate CLI output or background processing based on my workflow needs.
+
+#### Acceptance Criteria
+
+1. WHEN the config file specifies "mode": "sync" THEN the system SHALL print build command output directly to the CLI while also storing it in the backend
+2. WHEN the config file specifies "mode": "async" THEN the system SHALL run builds in the background and provide only the web URL for log viewing
+3. WHEN running in sync mode THEN the system SHALL stream real-time output to both CLI and web interface simultaneously
+4. WHEN running in sync mode THEN the CLI SHALL block until the build completes and return the appropriate exit code
+5. WHEN the mode is not specified THEN the system SHALL default to async mode
+6. WHEN a user passes --sync flag THEN the system SHALL override the configured mode and run in sync mode for that command
+7. WHEN a user passes --async flag THEN the system SHALL override the configured mode and run in async mode for that command
+
+### Requirement 15
+
+**User Story:** As a developer, I want to configure log retention policies, so that I can control storage usage by only keeping logs for failed builds or all builds based on my needs.
+
+#### Acceptance Criteria
+
+1. WHEN the config file specifies "retention": "all" THEN the system SHALL store logs for all build executions regardless of outcome
+2. WHEN the config file specifies "retention": "error" THEN the system SHALL only store logs when builds have compile errors or test failures
+3. WHEN retention is set to "error" and a build succeeds THEN the system SHALL discard the logs after providing real-time viewing
+4. WHEN retention is set to "error" and a build fails THEN the system SHALL persist the complete logs and metadata
+5. WHEN retention mode is not specified THEN the system SHALL default to "all" mode
+
+### Requirement 16
+
+**User Story:** As a developer, I want build_pal to support both dockerized and native execution environments, so that I can use it in different development setups including containerized workflows.
+
+#### Acceptance Criteria
+
+1. WHEN the config file specifies "environment": "docker" THEN the system SHALL execute build commands within a Docker container with rsync for file synchronization
+2. WHEN the config file specifies "environment": "native" THEN the system SHALL execute build commands directly on the host system
+3. WHEN using docker environment THEN the system SHALL sync project files to the container before executing builds
+4. WHEN using docker environment THEN the system SHALL sync build artifacts back to the host after execution
+5. WHEN environment is not specified THEN the system SHALL default to "native" mode
+
+### Requirement 17
+
+**User Story:** As a developer, I want to trigger build commands from the web interface, so that I can initiate builds without switching to the command line.
+
+#### Acceptance Criteria
+
+1. WHEN viewing a project in the web interface THEN the system SHALL display available build commands based on the project's tool type
+2. WHEN a user clicks on a build command in the web interface THEN the system SHALL execute that command and redirect to the live log view
+3. WHEN displaying available commands THEN the system SHALL show common commands like "build", "test", "clean" appropriate for the build tool
+4. WHEN a build is triggered from the web interface THEN the system SHALL capture the same git context and metadata as CLI-triggered builds
+5. WHEN multiple builds are triggered THEN the system SHALL queue them appropriately and show status in the interface
+
+### Requirement 18
+
+**User Story:** As a developer, I want AI-powered failure analysis as a future enhancement, so that I can get intelligent insights about build failures and suggested fixes.
+
+#### Acceptance Criteria
+
+1. WHEN AI analysis is enabled and a build fails THEN the system SHALL analyze the error logs and provide suggested fixes
+2. WHEN AI analysis is configured THEN the system SHALL support bring-your-own LLM subscriptions (OpenAI, Anthropic, etc.)
+3. WHEN AI analysis is performed THEN the system SHALL display the analysis results in a dedicated section of the build view
+4. WHEN AI analysis fails or is unavailable THEN the system SHALL gracefully degrade to standard error parsing
+5. WHEN AI analysis is not configured THEN the system SHALL function normally without AI features
+
+### Requirement 19
+
+**User Story:** As a developer, I want to install build_pal easily using standard package managers, so that I can quickly set up the tool on my development machine without complex installation procedures.
+
+#### Acceptance Criteria
+
+1. WHEN a user runs `brew install build_pal` on macOS THEN the system SHALL install the build_pal CLI and server components
+2. WHEN a user runs `sudo apt install build_pal` on Ubuntu/Debian THEN the system SHALL install the build_pal CLI and server components
+3. WHEN build_pal is installed via package manager THEN the system SHALL be available in the user's PATH for immediate use
+4. WHEN build_pal is installed via package manager THEN the system SHALL include all necessary dependencies and runtime requirements
+5. WHEN build_pal is updated via package manager THEN the system SHALL preserve user configuration and build history data
+
+### Requirement 20
+
+**User Story:** As a developer, I want to access comprehensive documentation on the build_pal website, so that I can learn how to use the tool effectively and troubleshoot any issues.
+
+#### Acceptance Criteria
+
+1. WHEN a user visits the build_pal website THEN the system SHALL provide comprehensive documentation including installation, configuration, and usage guides
+2. WHEN viewing the documentation THEN the system SHALL include examples for all supported build tools (Bazel, Maven, Gradle)
+3. WHEN accessing the documentation THEN the system SHALL provide API reference documentation for plugin development
+4. WHEN browsing the documentation THEN the system SHALL include troubleshooting guides for common issues and error scenarios
+5. WHEN the documentation is updated THEN the system SHALL maintain version-specific documentation for different build_pal releases
+
+## Future Considerations
+
+The following features represent potential future enhancements to build_pal that would expand its capabilities beyond build execution and monitoring into comprehensive project lifecycle management.
+
+### Project Generation and Scaffolding
+
+**Vision:** Transform build_pal into a complete development platform that can bootstrap new projects from templates and generate code from specifications.
+
+**Potential Features:**
+- **Project Archetypes**: CLI and web interface for generating new projects from templates
+  - Language-specific templates (Go services with Gin/Echo, Rust services with Axum/Warp)
+  - Framework-specific scaffolding (Spring Boot, Express.js, FastAPI)
+  - Microservice architectures with Docker and Kubernetes configurations
+- **Code Generation from Specifications**:
+  - AWS Smithy file ingestion to generate service stubs and clients
+  - Protocol Buffer definitions to gRPC service generation
+  - OpenAPI specifications to REST API scaffolding
+  - GraphQL schema to resolver implementations
+- **Template Management**:
+  - Community template repository
+  - Custom template creation and sharing
+  - Template versioning and dependency management
+  - Template validation and testing
+- **Integration with Build Tools**:
+  - Automatic build configuration generation
+  - Dependency management setup
+  - CI/CD pipeline templates
+  - Testing framework integration
+
+**Example Usage:**
+```bash
+# Generate new Go service
+build_pal generate service --lang=go --framework=gin --name=user-service
+
+# Generate from Smithy specification
+build_pal generate smithy --spec=user-api.smithy --lang=rust --framework=axum
+
+# Generate gRPC service from protobuf
+build_pal generate grpc --proto=user.proto --lang=go --output=./user-service
+
+# List available templates
+build_pal templates list --category=microservice
+
+# Create custom template
+build_pal templates create --name=my-template --from=./template-dir
+```
+
+**Technical Considerations:**
+- Template engine integration (Handlebars, Jinja2, or custom)
+- Code generation pipeline with validation
+- Dependency resolution and version management
+- Integration with existing plugin architecture
+- Web interface for template browsing and project generation
+
+This enhancement would position build_pal as a comprehensive development platform, handling the entire project lifecycle from initial generation through build execution and monitoring.
