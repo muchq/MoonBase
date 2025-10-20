@@ -1,0 +1,47 @@
+# Build Pal Web UI
+# Bazel build for integration tests with Rust server components
+
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
+
+package(default_visibility = ["//visibility:public"])
+
+# TypeScript configuration
+ts_config(
+    name = "tsconfig",
+    src = "tsconfig.json",
+    visibility = ["//visibility:public"],
+)
+
+# TypeScript compilation
+ts_project(
+    name = "build_pal_web_types",
+    srcs = glob([
+        "src/types/**/*.ts",
+    ]),
+    declaration = True,
+    tsconfig = ":tsconfig",
+)
+
+# Integration tests (API contract tests)
+js_test(
+    name = "integration_tests",
+    size = "medium",
+    timeout = "short",
+    data = [
+        ":build_pal_web_types",
+        "//rust/build_pal/server:build_pal_server",
+    ],
+    entry_point = "src/test/integration.test.ts",
+)
+
+# Type compatibility tests
+js_test(
+    name = "type_tests",
+    size = "small",
+    timeout = "short",
+    data = [
+        ":build_pal_web_types",
+    ],
+    entry_point = "src/test/types.test.ts",
+)

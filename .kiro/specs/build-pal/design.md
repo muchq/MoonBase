@@ -128,6 +128,7 @@ interface CLIConfig {
   description?: string;
   mode: 'sync' | 'async';
   retention: 'all' | 'error';
+  retention_duration_days?: number;
   environment: 'native' | 'docker';
   parsing?: PluginConfig;
   ai?: AIConfig;
@@ -495,6 +496,7 @@ CREATE TABLE ai_analyses (
   "description": "High-performance web service",
   "mode": "async",
   "retention": "error",
+  "retention_duration_days": 14,
   "environment": "docker",
   "parsing": {
     "plugin": "bazel-parser",

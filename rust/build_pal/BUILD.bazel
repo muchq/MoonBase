@@ -1,0 +1,25 @@
+# Build Pal parent directory
+# Contains CLI, server, and core components
+
+load("@crates//:defs.bzl", "crate_deps")
+
+# Integration test that validates the build pipeline
+load("@rules_rust//rust:defs.bzl", "rust_test")
+
+rust_test(
+    name = "build_pipeline_integration_test",
+    size = "medium",
+    srcs = ["tests/integration_test.rs"],
+    data = [
+        "tests/fixtures/sample_project/.build_pal",
+        "tests/fixtures/sample_project/README.md",
+    ],
+    deps = [
+        "//rust/build_pal/cli:build_pal_cli_lib",
+        "//rust/build_pal/core:build_pal_core",
+        "//rust/build_pal/server:build_pal_server_lib",
+    ] + crate_deps([
+        "serde_json",
+        "tokio",
+    ]),
+)

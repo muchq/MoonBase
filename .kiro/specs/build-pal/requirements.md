@@ -182,7 +182,7 @@ Build Pal is a development tool that provides a unified command-line interface f
 
 ### Requirement 15
 
-**User Story:** As a developer, I want to configure log retention policies, so that I can control storage usage by only keeping logs for failed builds or all builds based on my needs.
+**User Story:** As a developer, I want to configure log retention policies and duration, so that I can control storage usage by only keeping logs for failed builds or all builds based on my needs, and automatically clean up old logs after a specified time period.
 
 #### Acceptance Criteria
 
@@ -191,6 +191,9 @@ Build Pal is a development tool that provides a unified command-line interface f
 3. WHEN retention is set to "error" and a build succeeds THEN the system SHALL discard the logs after providing real-time viewing
 4. WHEN retention is set to "error" and a build fails THEN the system SHALL persist the complete logs and metadata
 5. WHEN retention mode is not specified THEN the system SHALL default to "all" mode
+6. WHEN the config file specifies "retention_duration_days" THEN the system SHALL automatically delete logs older than the specified number of days
+7. WHEN retention duration is not specified THEN the system SHALL default to 7 days (1 week)
+8. WHEN retention duration is set to 0 or negative value THEN the system SHALL display an error message indicating duration must be greater than 0
 
 ### Requirement 16
 

@@ -1,0 +1,9 @@
+{
+  "tool": "bazel",
+  "name": "sample-project",
+  "description": "Sample project for integration testing",
+  "mode": "async",
+  "retention": "all",
+  "retention_duration_days": 14,
+  "environment": "native"
+}
