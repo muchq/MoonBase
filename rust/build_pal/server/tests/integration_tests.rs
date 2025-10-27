@@ -86,9 +86,8 @@ async fn test_complete_build_workflow() {
     assert_eq!(status_response.build.command, "echo 'Integration test build output'");
     assert_eq!(status_response.build.status, BuildStatus::Queued);
 
-    // Step 3: Wait a moment and check if logs are available
-    // Note: Since we're not actually executing builds in the background yet,
-    // we'll test the log retrieval endpoint structure
+    // Step 3: Check if logs are available
+    // Logs should be available (even if empty) since builds execute in the background
     sleep(Duration::from_millis(100)).await;
 
     let logs_response = app
@@ -101,8 +100,16 @@ async fn test_complete_build_workflow() {
         .await
         .unwrap();
 
-    // Should return 404 since build hasn't been executed yet
-    assert_eq!(logs_response.status(), StatusCode::NOT_FOUND);
+    // Should return 200 OK with logs (may be empty or contain execution output)
+    assert_eq!(logs_response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(logs_response.into_body(), usize::MAX).await.unwrap();
+    let logs_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    // Verify response structure
+    assert_eq!(logs_json["build_id"], build_id.to_string());
+    assert!(logs_json["logs"].is_array());
+    assert!(logs_json["log_count"].is_number());
 }
 
 /// Test concurrent build handling

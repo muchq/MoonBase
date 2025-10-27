@@ -62,7 +62,7 @@ rust_test(
 
 rust_test(
     name = "integration_tests",
-    size = "medium",
+    size = "small",
     srcs = ["tests/integration_tests.rs"],
     deps = [
         ":build_pal_server_lib",

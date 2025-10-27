@@ -20,7 +20,9 @@ async fn main() -> Result<(), BuildPalError> {
             Arg::new("command")
                 .help("Build command to execute (e.g., 'build //...', 'test', 'clean')")
                 .required(true)
-                .index(1),
+                .num_args(1..)
+                .trailing_var_arg(true)
+                .allow_hyphen_values(true),
         )
         .arg(
             Arg::new("sync")

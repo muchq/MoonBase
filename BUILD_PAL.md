@@ -148,7 +148,7 @@ bazel-bin/rust/build_pal/cli/build_pal_cli [command]
 #### CLI Examples
 
 ```bash
-# Build your project
+# Build your project (no quotes needed!)
 build_pal build //...
 
 # Run tests
@@ -162,15 +162,18 @@ build_pal package
 build_pal clean build
 build_pal assemble
 
-# Override execution mode
-build_pal build //... --sync    # Force synchronous mode
-build_pal build //... --async   # Force asynchronous mode
+# Bazel with config flags
+build_pal build //... --config=release
+
+# Override execution mode (flags must come before command)
+build_pal --sync build //...    # Force synchronous mode
+build_pal --async build //...   # Force asynchronous mode
 
 # Cancel a running build
 build_pal --cancel <build-id>
 
-# Use custom config file
-build_pal build //... --config /path/to/.build_pal
+# Use custom config file (flags must come before command)
+build_pal --config /path/to/.build_pal build //...
 ```
 
 ## Configuration Options

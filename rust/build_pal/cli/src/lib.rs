@@ -21,7 +21,9 @@ pub struct CLIArgs {
 impl CLIArgs {
     /// Parse CLI arguments from clap matches
     pub fn from_matches(matches: &ArgMatches) -> Result<Self> {
-        let command = matches.get_one::<String>("command").cloned();
+        // Join multiple command arguments into a single string
+        let command = matches.get_many::<String>("command")
+            .map(|values| values.map(|s| s.as_str()).collect::<Vec<_>>().join(" "));
         let cancel_build_id = matches.get_one::<String>("cancel").cloned();
         let config_path = matches.get_one::<String>("config").cloned();
 
@@ -192,7 +194,9 @@ mod tests {
                 Arg::new("command")
                     .help("Build command to execute")
                     .required(false)
-                    .index(1),
+                    .num_args(1..)
+                    .trailing_var_arg(true)
+                    .allow_hyphen_values(true),
             )
             .arg(
                 Arg::new("sync")
@@ -247,7 +251,7 @@ mod tests {
     #[test]
     fn test_cli_args_sync_mode() {
         let app = create_test_app();
-        let matches = app.try_get_matches_from(vec!["build_pal", "test", "--sync"]).unwrap();
+        let matches = app.try_get_matches_from(vec!["build_pal", "--sync", "test"]).unwrap();
         let args = CLIArgs::from_matches(&matches).unwrap();
 
         assert_eq!(args.command, Some("test".to_string()));
@@ -257,7 +261,7 @@ mod tests {
     #[test]
     fn test_cli_args_async_mode() {
         let app = create_test_app();
-        let matches = app.try_get_matches_from(vec!["build_pal", "build", "--async"]).unwrap();
+        let matches = app.try_get_matches_from(vec!["build_pal", "--async", "build"]).unwrap();
         let args = CLIArgs::from_matches(&matches).unwrap();
 
         assert_eq!(args.command, Some("build".to_string()));
@@ -277,7 +281,7 @@ mod tests {
     #[test]
     fn test_cli_args_custom_config() {
         let app = create_test_app();
-        let matches = app.try_get_matches_from(vec!["build_pal", "build", "--config", "/path/to/config"]).unwrap();
+        let matches = app.try_get_matches_from(vec!["build_pal", "--config", "/path/to/config", "build"]).unwrap();
         let args = CLIArgs::from_matches(&matches).unwrap();
 
         assert_eq!(args.command, Some("build".to_string()));
@@ -298,7 +302,7 @@ mod tests {
     fn test_cli_args_conflicting_modes() {
         let app = create_test_app();
         // This should fail at clap level due to conflicts_with
-        let result = app.try_get_matches_from(vec!["build_pal", "build", "--sync", "--async"]);
+        let result = app.try_get_matches_from(vec!["build_pal", "--sync", "--async", "build"]);
         assert!(result.is_err());
     }
 
@@ -306,7 +310,7 @@ mod tests {
     fn test_cli_args_cancel_with_command_conflict() {
         let app = create_test_app();
         // This should fail at clap level due to conflicts_with_all
-        let result = app.try_get_matches_from(vec!["build_pal", "build", "--cancel", "abc123"]);
+        let result = app.try_get_matches_from(vec!["build_pal", "--cancel", "abc123", "build"]);
         assert!(result.is_err());
     }
 
@@ -395,9 +399,10 @@ mod tests {
     #[test]
     fn test_cli_args_complex_command() {
         let app = create_test_app();
-        let matches = app.try_get_matches_from(vec!["build_pal", "bazel build //src/... --config=release"]).unwrap();
+        // Test multiple arguments being joined together
+        let matches = app.try_get_matches_from(vec!["build_pal", "build", "//...", "--config=release"]).unwrap();
         let args = CLIArgs::from_matches(&matches).unwrap();
 
-        assert_eq!(args.command, Some("bazel build //src/... --config=release".to_string()));
+        assert_eq!(args.command, Some("build //... --config=release".to_string()));
     }
 }

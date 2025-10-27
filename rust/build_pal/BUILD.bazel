@@ -6,7 +6,7 @@ load("@rules_rust//rust:defs.bzl", "rust_test")
 
 rust_test(
     name = "build_pipeline_integration_test",
-    size = "medium",
+    size = "small",
     srcs = ["tests/integration_test.rs"],
     data = [
         "tests/fixtures/gradle_project/.build_pal",
@@ -31,7 +31,7 @@ rust_test(
 
 rust_test(
     name = "end_to_end_integration_test",
-    size = "large",
+    size = "small",
     srcs = ["tests/end_to_end_test.rs"],
     deps = [
         "//rust/build_pal/cli:build_pal_cli_lib",
@@ -47,7 +47,7 @@ rust_test(
 
 rust_test(
     name = "error_handling_test",
-    size = "medium",
+    size = "small",
     srcs = ["tests/error_handling_test.rs"],
     deps = [
         "//rust/build_pal/cli:build_pal_cli_lib",
