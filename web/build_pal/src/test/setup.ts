@@ -1,5 +1,9 @@
 // Test setup for vitest
-import { expect } from 'vitest'
+import { afterEach } from 'vitest'
+import { cleanup } from '@testing-library/react'
+import '@testing-library/jest-dom'
 
 // Global test setup
-// Add any global test configuration here
+afterEach(() => {
+  cleanup()
+})

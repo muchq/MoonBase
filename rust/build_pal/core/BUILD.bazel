@@ -11,6 +11,13 @@ rust_library(
         "uuid",
         "chrono",
         "serde_json",
+        "thiserror",
+        "anyhow",
+        "tracing",
+        "tracing-subscriber",
+        "tokio",
+        "git2",
+        "reqwest",
     ]),
 )
 

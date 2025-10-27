@@ -1,5 +1,7 @@
 // TypeScript interfaces corresponding to Rust API types
 
+import type { CLIConfig } from './config';
+
 export type BuildStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type ExecutionMode = 'sync' | 'async';
 export type Environment = 'native' | 'docker';

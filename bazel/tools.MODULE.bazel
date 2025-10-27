@@ -17,3 +17,4 @@ bazel_dep(name = "bazel_features", version = "1.37.0")
 bazel_dep(name = "buildifier_prebuilt", version = "8.2.0.2", dev_dependency = True)
 
 bazel_dep(name = "bazel-diff", version = "10.1.0")
+bazel_dep(name = "rules_shell", version = "0.6.1")

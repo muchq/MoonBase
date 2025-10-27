@@ -1,0 +1,13 @@
+# This is a placeholder pnpm-lock.yaml for Bazel integration
+# The actual dependency management is handled by npm/package.json
+lockfileVersion: '6.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+dependencies: {}
+
+devDependencies: {}
+
+packages: {}

@@ -1,0 +1,17 @@
+{
+  "tool": "gradle",
+  "name": "gradle-test-project",
+  "mode": "async",
+  "retention": "all",
+  "environment": "docker",
+  "docker": {
+    "image": "openjdk:11",
+    "workdir": "/app",
+    "volumes": ["./:/app"],
+    "environment": {
+      "GRADLE_OPTS": "-Xmx2g"
+    },
+    "rsync_options": ["--exclude=build/", "--exclude=.gradle/"],
+    "sync_strategy": "pre-build"
+  }
+}

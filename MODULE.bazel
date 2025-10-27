@@ -9,6 +9,7 @@ include("//bazel:cc.MODULE.bazel")
 include("//bazel:go.MODULE.bazel")
 include("//bazel:rust.MODULE.bazel")
 include("//bazel:java.MODULE.bazel")
+include("//bazel:js.MODULE.bazel")
 
 # include("//bazel:scala.MODULE.bazel")
 include("//bazel:python.MODULE.bazel")

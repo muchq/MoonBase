@@ -228,7 +228,7 @@ moonbase/
 ### Phase 1: Foundation & Core Infrastructure (MVP)
 *Goal: Basic CLI → Server → Web workflow with simple build execution*
 
-- [-] 1. Set up MoonBase integration and toolchain
+- [x] 1. Set up MoonBase integration and toolchain
 - [x] 1.1 Integrate build_pal into MoonBase monorepo structure
   - Add build_pal/* crates to workspace members in root Cargo.toml
   - Add required dependencies to [workspace.dependencies]
@@ -251,106 +251,115 @@ moonbase/
   - Create BUILD.bazel files with rust_binary and rust_library targets
   - _Requirements: 19.3, 19.4_
 
-- [ ] 2. Implement minimal CLI client (Rust)
-- [ ] 2.1 Create CLI argument parsing and configuration reader
+- [x] 2. Implement minimal CLI client (Rust)
+- [x] 2.1 Create CLI argument parsing and configuration reader
   - Write tests for command-line argument parsing
   - Implement `.build_pal` config file parsing with validation
   - Add support for basic config fields (tool, name, mode)
   - Handle missing and malformed configuration files
   - _Requirements: 1.1, 1.3, 1.4, 14.1, 14.5_
 
-- [ ] 2.2 Implement basic server communication
+- [x] 2.2 Implement basic server communication
   - Write tests for HTTP client communication
   - Implement build request submission to server
   - Add basic error handling and retry logic
   - Handle server unavailable scenarios
   - _Requirements: 4.2, 4.3_
 
-- [ ] 2.3 Add git context capture
+- [x] 2.3 Add git context capture
   - Write tests for git repository detection and info extraction
   - Implement branch, commit hash, and author capture
   - Handle non-git repositories gracefully
   - Add basic uncommitted changes detection
   - _Requirements: 8.1, 8.4, 8.5_
 
-- [ ] 2.4 Write CLI integration tests
+- [x] 2.4 Write CLI integration tests
   - Test end-to-end CLI workflow from config to server request
   - Test error scenarios and edge cases
   - Test git context capture in various repository states
   - _Requirements: 1.1, 4.1, 8.1_
 
 - [ ] 3. Implement core server components (Rust)
-- [ ] 3.1 Create REST API server with basic endpoints using axum
+- [x] 3.1 Create REST API server with basic endpoints using axum
   - Write tests for HTTP server setup and routing
   - Implement POST /api/builds endpoint for build creation
   - Add GET /api/builds/{id} for build status
   - Implement proper HTTP status codes and error responses using axum
+  - Run tests with Bazel
   - _Requirements: 4.3_
 
-- [ ] 3.2 Implement basic build execution engine in Rust
+- [x] 3.2 Implement basic build execution engine in Rust
   - Write tests for process spawning using tokio::process
   - Implement native command execution (no Docker yet)
   - Add process lifecycle management and cleanup
   - Handle build success/failure status tracking with async/await
+  - Run tests with Bazel
   - _Requirements: 3.3, 2.1, 2.2_
 
-- [ ] 3.3 Add basic log capture and storage
+- [x] 3.3 Add basic log capture and storage
   - Write tests for log streaming and storage using tokio streams
   - Implement in-memory log storage with Arc<Mutex<HashMap>>
   - Add basic log retrieval by build ID
   - Handle concurrent log access with async primitives
+  - Run tests with Bazel
   - _Requirements: 5.1, 5.6_
 
-- [ ] 3.4 Write server integration tests
+- [x] 3.4 Write server integration tests
   - Test API endpoints with real build execution
   - Test concurrent build handling using tokio test framework
   - Test log capture and retrieval
+  - Run tests with Bazel
   - _Requirements: 3.2, 5.1_
 
-- [ ] 4. Create minimal web interface (TypeScript/React)
-- [ ] 4.1 Set up React application with basic routing
+- [x] 4. Create minimal web interface (TypeScript/React)
+- [x] 4.1 Set up React application with basic routing
+  - Ensure Bazel build works correctly and all relevant deps added to a submodule imported by Module.bazel
   - Write tests for React component rendering
   - Implement basic application structure and routing
   - Add TypeScript configuration and type definitions
   - Create basic layout and navigation components
+  - Ensure the build works correctly with both Bazel (for ci) and npm/vite directly (for quick local dev)
   - _Requirements: 13.1_
 
-- [ ] 4.2 Implement build status viewer
+- [x] 4.2 Implement build status viewer
   - Write tests for build status display components
   - Create build detail page with basic information
   - Add real-time status updates (polling initially)
   - Display build logs in a simple text area
+  - Run tests with Bazel and with npm directly
   - _Requirements: 5.1, 6.1, 6.2_
 
-- [ ] 4.3 Add project dashboard
+- [x] 4.3 Add project dashboard
   - Write tests for project listing components
   - Implement basic project grid view
   - Add project status indicators
   - Create navigation to build details
+  - Run tests with Bazel and with npm directly
   - _Requirements: 13.1, 13.2_
 
-- [ ] 4.4 Write web UI integration tests
+- [x] 4.4 Write web UI integration tests
   - Test React components with mock API data
   - Test navigation and routing functionality
   - Test build status display and updates
+  - Run tests with Bazel and with npm directly
   - _Requirements: 13.1, 5.1_
 
-- [ ] 5. End-to-end MVP integration
-- [ ] 5.1 Wire CLI → Server → Web workflow
+- [x] 5. End-to-end MVP integration
+- [x] 5.1 Wire CLI → Server → Web workflow
   - Write tests for complete end-to-end workflow
   - Test CLI build submission through to web display
   - Verify build execution and log capture
   - Test error handling across all components
   - _Requirements: All core requirements (1-6)_
 
-- [ ] 5.2 Add basic error handling and logging
+- [x] 5.2 Add basic error handling and logging
   - Write tests for error scenarios across components
   - Implement structured logging in all components
   - Add user-friendly error messages
   - Test system behavior under failure conditions
   - _Requirements: 1.3, 1.4_
 
-- [ ] 5.3 Create MVP deployment and packaging
+- [x] 5.3 Create MVP deployment and packaging
   - Write tests for build artifact generation
   - Create basic deployment scripts
   - Generate distributable binaries for CLI and server

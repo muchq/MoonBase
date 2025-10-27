@@ -1,9 +1,13 @@
 pub mod api;
 pub mod config;
+pub mod error;
+pub mod logging;
 pub mod types;
 
 pub use api::*;
 pub use config::*;
+pub use error::*;
+pub use logging::*;
 pub use types::*;
 
 #[cfg(test)]

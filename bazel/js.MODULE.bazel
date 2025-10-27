@@ -1,0 +1,18 @@
+# JavaScript/TypeScript dependencies for Build Pal Web UI
+
+bazel_dep(name = "aspect_rules_js", version = "1.40.0")
+bazel_dep(name = "aspect_rules_ts", version = "2.1.0")
+bazel_dep(name = "rules_nodejs", version = "6.0.3")
+
+# Node.js toolchain
+node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
+node.toolchain(node_version = "18.18.0")
+
+# npm dependencies
+npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm", dev_dependency = True)
+npm.npm_translate_lock(
+    name = "npm",
+    pnpm_lock = "//web/build_pal:pnpm-lock.yaml",
+    verify_node_modules_ignored = "//web/build_pal:.bazelignore",
+)
+use_repo(npm, "npm")

@@ -20,6 +20,7 @@ rust_library(
         "anyhow",
         "tokio",
         "tracing",
+        "uuid",
     ]),
 )
 
@@ -36,6 +37,7 @@ rust_binary(
         "anyhow",
         "tokio",
         "tracing-subscriber",
+        "uuid",
     ]),
 )
 
@@ -45,5 +47,7 @@ rust_test(
     crate = ":build_pal_cli_lib",
     deps = [
         "//rust/build_pal/core:build_pal_core",
-    ] + all_crate_deps(),
+    ] + all_crate_deps() + crate_deps([
+        "tempfile",
+    ]),
 )

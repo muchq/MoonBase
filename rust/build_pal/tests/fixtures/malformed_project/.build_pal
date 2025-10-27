@@ -1,0 +1,5 @@
+{
+  "tool": "bazel",
+  "name": "malformed-project"
+  "mode": "async"
+}

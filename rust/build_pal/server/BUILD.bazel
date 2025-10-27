@@ -14,10 +14,13 @@ rust_library(
     ] + crate_deps([
         "axum",
         "tokio",
+        "tokio-stream",
+        "tower",
         "tower-http",
         "serde",
         "serde_json",
         "uuid",
+        "chrono",
         "sqlx",
         "bollard",
         "tokio-tungstenite",
@@ -26,6 +29,8 @@ rust_library(
         "tracing",
         "anyhow",
         "thiserror",
+        "async-stream",
+        "futures",
     ]),
 )
 
@@ -53,4 +58,22 @@ rust_test(
     deps = [
         "//rust/build_pal/core:build_pal_core",
     ] + all_crate_deps(),
+)
+
+rust_test(
+    name = "integration_tests",
+    size = "medium",
+    srcs = ["tests/integration_tests.rs"],
+    deps = [
+        ":build_pal_server_lib",
+        "//rust/build_pal/core:build_pal_core",
+    ] + crate_deps([
+        "axum",
+        "tokio",
+        "tokio-stream",
+        "tower",
+        "serde_json",
+        "uuid",
+        "anyhow",
+    ]),
 )
