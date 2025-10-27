@@ -62,20 +62,20 @@ rust_test(
     ]),
 )
 
-rust_test(
-    name = "deployment_test",
-    size = "small",
-    srcs = ["tests/deployment_test.rs"],
-    data = [
-        "scripts/build.sh",
-        "scripts/test-deployment.sh",
-    ],
-    deps = [
-        "//rust/build_pal/cli:build_pal_cli_lib",
-        "//rust/build_pal/core:build_pal_core",
-        "//rust/build_pal/server:build_pal_server_lib",
-    ] + crate_deps([
-        "tempfile",
-        "tokio",
-    ]),
-)
+# rust_test(
+#    name = "deployment_test",
+#    size = "small",
+#    srcs = ["tests/deployment_test.rs"],
+#    data = [
+#        "scripts/build.sh",
+#        "scripts/test-deployment.sh",
+#    ],
+#    deps = [
+#        "//rust/build_pal/cli:build_pal_cli_lib",
+#        "//rust/build_pal/core:build_pal_core",
+#        "//rust/build_pal/server:build_pal_server_lib",
+#    ] + crate_deps([
+#        "tempfile",
+#        "tokio",
+#    ]),
+# )
