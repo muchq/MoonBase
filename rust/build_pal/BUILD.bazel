@@ -1,0 +1,81 @@
+# Build Pal parent directory
+# Contains CLI, server, and core components
+
+load("@crates//:defs.bzl", "crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_test")
+
+rust_test(
+    name = "build_pipeline_integration_test",
+    size = "small",
+    srcs = ["tests/integration_test.rs"],
+    data = [
+        "tests/fixtures/gradle_project/.build_pal",
+        "tests/fixtures/invalid_project/.build_pal",
+        "tests/fixtures/malformed_project/.build_pal",
+        "tests/fixtures/maven_project/.build_pal",
+        "tests/fixtures/sample_project/.build_pal",
+        "tests/fixtures/sample_project/README.md",
+    ],
+    deps = [
+        "//rust/build_pal/cli:build_pal_cli_lib",
+        "//rust/build_pal/core:build_pal_core",
+        "//rust/build_pal/server:build_pal_server_lib",
+    ] + crate_deps([
+        "serde_json",
+        "tokio",
+        "tempfile",
+        "git2",
+        "clap",
+    ]),
+)
+
+rust_test(
+    name = "end_to_end_integration_test",
+    size = "small",
+    srcs = ["tests/end_to_end_test.rs"],
+    deps = [
+        "//rust/build_pal/cli:build_pal_cli_lib",
+        "//rust/build_pal/core:build_pal_core",
+        "//rust/build_pal/server:build_pal_server_lib",
+    ] + crate_deps([
+        "serde_json",
+        "tokio",
+        "tempfile",
+        "git2",
+    ]),
+)
+
+rust_test(
+    name = "error_handling_test",
+    size = "small",
+    srcs = ["tests/error_handling_test.rs"],
+    deps = [
+        "//rust/build_pal/cli:build_pal_cli_lib",
+        "//rust/build_pal/core:build_pal_core",
+        "//rust/build_pal/server:build_pal_server_lib",
+    ] + crate_deps([
+        "serde_json",
+        "tokio",
+        "tempfile",
+        "anyhow",
+        "tracing",
+    ]),
+)
+
+# rust_test(
+#    name = "deployment_test",
+#    size = "small",
+#    srcs = ["tests/deployment_test.rs"],
+#    data = [
+#        "scripts/build.sh",
+#        "scripts/test-deployment.sh",
+#    ],
+#    deps = [
+#        "//rust/build_pal/cli:build_pal_cli_lib",
+#        "//rust/build_pal/core:build_pal_core",
+#        "//rust/build_pal/server:build_pal_server_lib",
+#    ] + crate_deps([
+#        "tempfile",
+#        "tokio",
+#    ]),
+# )

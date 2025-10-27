@@ -1,0 +1,9 @@
+  {
+  "tool": "bazel",
+  "name": "moonbase",
+  "description": "Experimental Weekend Monorepo",
+  "mode": "async",
+  "retention": "all",
+  "retention_duration_days": 14,
+  "environment": "native"
+}

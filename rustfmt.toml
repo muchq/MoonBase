@@ -1,0 +1,41 @@
+# Rustfmt configuration for MoonBase
+# Following Rust standard formatting with some project-specific preferences
+
+# Edition
+edition = "2024"
+
+# Line width
+max_width = 100
+hard_tabs = false
+tab_spaces = 4
+
+# Imports
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
+reorder_imports = true
+
+# Functions and control flow
+fn_single_line = false
+control_brace_style = "AlwaysSameLine"
+brace_style = "SameLineWhere"
+
+# Comments and documentation
+normalize_comments = true
+normalize_doc_attributes = true
+wrap_comments = true
+comment_width = 80
+
+# Formatting options
+use_small_heuristics = "Default"
+newline_style = "Unix"
+remove_nested_parens = true
+combine_control_expr = true
+
+# Trailing elements
+trailing_comma = "Vertical"
+trailing_semicolon = true
+
+# Misc
+format_code_in_doc_comments = true
+format_strings = false
+format_macro_matchers = true

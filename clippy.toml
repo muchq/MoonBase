@@ -1,0 +1,25 @@
+# Clippy configuration for MoonBase
+# Rust linting configuration
+
+# Cognitive complexity threshold
+cognitive-complexity-threshold = 30
+
+# Documentation requirements
+missing-docs-in-crate-items = false
+
+# Allow certain patterns that are common in this codebase
+# These can be adjusted based on team preferences
+
+# Performance and style preferences
+single-char-lifetime-names = true
+trivial-casts = true
+trivial-numeric-casts = true
+
+# Error handling
+result-large-err = 128
+
+# Naming conventions
+enum-variant-names-threshold = 3
+
+# Documentation
+doc-markdown = true
