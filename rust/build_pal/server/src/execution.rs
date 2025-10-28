@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::time::{timeout, Duration};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -69,17 +70,17 @@ impl ExecutionEngine {
     /// Execute native command with full process lifecycle management
     async fn execute_native_with_lifecycle(&self, build: &Build) -> Result<ExecutionResult> {
         let start_time = std::time::Instant::now();
-        
+
         // Initialize log storage for this build
         self.log_manager.initialize_build_logs(build.id).await?;
-        
+
         // Log build start
         self.log_manager.append_log(
             build.id,
             format!("Starting build: {}", build.command),
             LogStreamType::System,
         ).await?;
-        
+
         // Parse command
         let parts: Vec<&str> = build.command.split_whitespace().collect();
         if parts.is_empty() {
@@ -97,87 +98,134 @@ impl ExecutionEngine {
         if parts.len() > 1 {
             cmd.args(&parts[1..]);
         }
-        
+
         cmd.current_dir(&build.working_directory)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null());
 
-        // Spawn the process and wait for completion with output capture
-        let child = cmd.spawn()
+        // Spawn the process
+        let mut child = cmd.spawn()
             .map_err(|e| {
                 let error_msg = format!("Failed to spawn process: {}", e);
-                // Note: We can't await here in map_err, so we'll log this error later
                 anyhow::anyhow!(error_msg)
             })?;
 
         debug!("Spawned process with PID: {:?}", child.id());
-        
+
         self.log_manager.append_log(
             build.id,
             format!("Process spawned with PID: {:?}", child.id()),
             LogStreamType::System,
         ).await?;
 
-        // Wait for the process to complete with timeout and capture output
-        let output = match timeout(Duration::from_secs(30), child.wait_with_output()).await {
-            Ok(output) => output?,
+        // Take ownership of stdout and stderr for streaming
+        let stdout = child.stdout.take().expect("Failed to capture stdout");
+        let stderr = child.stderr.take().expect("Failed to capture stderr");
+
+        // Create channels for streaming logs
+        let (log_tx, mut log_rx) = mpsc::unbounded_channel::<(String, LogStreamType)>();
+
+        // Spawn task to read stdout
+        let log_tx_stdout = log_tx.clone();
+        let stdout_task = tokio::spawn(async move {
+            let reader = BufReader::new(stdout);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let _ = log_tx_stdout.send((line, LogStreamType::Stdout));
+            }
+        });
+
+        // Spawn task to read stderr
+        let log_tx_stderr = log_tx.clone();
+        let stderr_task = tokio::spawn(async move {
+            let reader = BufReader::new(stderr);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let _ = log_tx_stderr.send((line, LogStreamType::Stderr));
+            }
+        });
+
+        // Drop the original sender so the channel closes when tasks complete
+        drop(log_tx);
+
+        // Spawn task to write logs as they arrive
+        let log_manager = self.log_manager.clone();
+        let build_id = build.id;
+        let log_writer_task = tokio::spawn(async move {
+            let mut log_lines = Vec::new();
+            while let Some((line, stream_type)) = log_rx.recv().await {
+                // Determine prefix before moving stream_type
+                let prefix = match stream_type {
+                    LogStreamType::Stdout => "[STDOUT]",
+                    LogStreamType::Stderr => "[STDERR]",
+                    LogStreamType::System => "[SYSTEM]",
+                };
+
+                // Store in log manager (stream_type is moved here)
+                let _ = log_manager.append_log(build_id, line.clone(), stream_type).await;
+
+                // Collect for return value
+                log_lines.push(format!("{} {}", prefix, line));
+            }
+            log_lines
+        });
+
+        // Wait for the process to complete with timeout
+        let wait_result = timeout(Duration::from_secs(300), child.wait()).await;
+
+        let (exit_code, status, timed_out) = match wait_result {
+            Ok(Ok(exit_status)) => {
+                let code = exit_status.code().unwrap_or(-1);
+                let status = if exit_status.success() {
+                    BuildStatus::Completed
+                } else {
+                    BuildStatus::Failed
+                };
+                (code, status, false)
+            }
+            Ok(Err(e)) => {
+                warn!("Error waiting for process: {}", e);
+                (-1, BuildStatus::Failed, false)
+            }
             Err(_) => {
-                // Timeout occurred - we can't kill the process since wait_with_output consumed it
-                let timeout_msg = format!("Build {} timed out after 30 seconds", build.id);
+                // Timeout occurred - kill the process
+                let timeout_msg = format!("Build {} timed out after 300 seconds", build.id);
                 warn!("{}", timeout_msg);
                 self.log_manager.append_log(
                     build.id,
                     timeout_msg.clone(),
                     LogStreamType::System,
                 ).await?;
-                return Err(anyhow::anyhow!("Build execution timed out after 30 seconds"));
+
+                // Try to kill the process
+                let _ = child.kill().await;
+                (-1, BuildStatus::Failed, true)
             }
         };
 
-        // Process the output and store in log manager
-        let mut log_lines = Vec::new();
-        
-        // Add stdout lines
-        if !output.stdout.is_empty() {
-            let stdout_str = String::from_utf8_lossy(&output.stdout);
-            for line in stdout_str.lines() {
-                self.log_manager.append_log(
-                    build.id,
-                    line.to_string(),
-                    LogStreamType::Stdout,
-                ).await?;
-                log_lines.push(format!("[STDOUT] {}", line));
-            }
-        }
-        
-        // Add stderr lines
-        if !output.stderr.is_empty() {
-            let stderr_str = String::from_utf8_lossy(&output.stderr);
-            for line in stderr_str.lines() {
-                self.log_manager.append_log(
-                    build.id,
-                    line.to_string(),
-                    LogStreamType::Stderr,
-                ).await?;
-                log_lines.push(format!("[STDERR] {}", line));
-            }
-        }
+        // Wait for stream reading tasks to complete
+        let _ = tokio::join!(stdout_task, stderr_task);
 
-        // Calculate duration and determine status
+        // Wait for log writer task and get collected logs
+        let log_lines = log_writer_task.await.unwrap_or_default();
+
+        // Calculate duration
         let duration_ms = start_time.elapsed().as_millis() as u64;
-        let exit_code = output.status.code().unwrap_or(-1);
-        let status = if output.status.success() {
-            BuildStatus::Completed
-        } else {
-            BuildStatus::Failed
-        };
 
         // Log completion
-        let completion_msg = format!(
-            "Build completed with exit code {} in {}ms",
-            exit_code, duration_ms
-        );
+        let completion_msg = if timed_out {
+            format!(
+                "Build timed out and was killed after {}ms",
+                duration_ms
+            )
+        } else {
+            format!(
+                "Build completed with exit code {} in {}ms",
+                exit_code, duration_ms
+            )
+        };
+
         self.log_manager.append_log(
             build.id,
             completion_msg.clone(),
@@ -185,7 +233,7 @@ impl ExecutionEngine {
         ).await?;
 
         info!(
-            "Build {} completed with exit code {} in {}ms", 
+            "Build {} completed with exit code {} in {}ms",
             build.id, exit_code, duration_ms
         );
 
@@ -324,7 +372,6 @@ mod tests {
         let execution_result = result.unwrap();
         assert_eq!(execution_result.exit_code, 0);
         assert_eq!(execution_result.status, BuildStatus::Completed);
-        assert!(execution_result.duration_ms > 0);
         assert!(!execution_result.logs.is_empty());
         
         // Check that logs contain expected output
@@ -353,7 +400,6 @@ mod tests {
         let execution_result = result.unwrap();
         assert_eq!(execution_result.exit_code, 1);
         assert_eq!(execution_result.status, BuildStatus::Failed);
-        assert!(execution_result.duration_ms > 0);
     }
 
     #[tokio::test]

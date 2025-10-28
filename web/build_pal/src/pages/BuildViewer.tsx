@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
+import AnsiToHtml from 'ansi-to-html'
 import type { Build, BuildSummary, LogLine, BuildStatus } from '../types/api'
 
 const API_BASE_URL = 'http://localhost:8080/api'
@@ -14,6 +15,15 @@ const BuildViewer: React.FC = () => {
   const [isPolling, setIsPolling] = useState(false)
   const logsEndRef = useRef<HTMLDivElement>(null)
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Create ANSI to HTML converter instance
+  const ansiConverter = useMemo(() => new AnsiToHtml({
+    fg: '#fff',
+    bg: '#1e1e1e',
+    newline: false,
+    escapeXML: true,
+    stream: false
+  }), [])
 
   const scrollToBottom = () => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -421,7 +431,11 @@ const BuildViewer: React.FC = () => {
                     {new Date(log.timestamp).toLocaleTimeString()}
                   </span>
                 )}
-                <span>{log.content}</span>
+                <span
+                  dangerouslySetInnerHTML={{
+                    __html: ansiConverter.toHtml(log.content)
+                  }}
+                />
               </div>
             ))
           )}
