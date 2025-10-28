@@ -19,3 +19,6 @@ checkpoints
 .env
 local_docker
 local_docs
+
+node_modules
+web/build_pal/dist

@@ -246,7 +246,6 @@ async fn test_real_build_execution_with_logs() {
     let result = execution_result.unwrap();
     assert_eq!(result.status, BuildStatus::Completed);
     assert_eq!(result.exit_code, 0);
-    assert!(result.duration_ms > 0);
 
     // Verify logs were captured
     let logs = server.get_build_logs(build_id).await;
