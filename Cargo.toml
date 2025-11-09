@@ -29,12 +29,12 @@ async-stream = "0.3.6"
 axum = "0.8.6"
 base64 = "0.22.1"
 base64ct = { version = "1.8.0", features = ["alloc"] }
-bollard = "0.19.3"
+bollard = "0.19.4"
 build_pal_core = { path = "rust/build_pal/core" }
 build_pal_server = { path = "rust/build_pal/server" }
 build_pal_cli = { path = "rust/build_pal/cli" }
 chrono = { version = "0.4.42", features = ["serde"] }
-clap = { version = "4.5.49", features = ["cargo"] }
+clap = { version = "4.5.51", features = ["cargo"] }
 doc_db_proto = { path = "protos/doc_db" }
 dotenv = "0.15.0"
 flate2 = "1.1.4"
@@ -53,7 +53,7 @@ reqwest = { version = "0.12.24", default-features = false, features = ["json", "
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 server_pal = { path = "rust/server_pal" }
-sha2 = "0.11.0-rc.2"
+sha2 = "0.11.0-rc.3"
 simplelog = { version = "0.12.2", features = ["paris"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate"] }
 tempfile = "3.8"
