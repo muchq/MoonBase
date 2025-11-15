@@ -53,3 +53,9 @@ common --test_output=errors
 
 # don't block on remote-cache uploads
 common --bes_upload_mode=fully_async
+
+# Platform-specific configurations
+build:macos --features=-module_maps
+
+# Auto-detect platform
+build --enable_platform_specific_config
