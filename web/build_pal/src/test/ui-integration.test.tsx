@@ -56,11 +56,12 @@ const mockBuild: Build = {
 }
 
 const mockBuildSummary: BuildSummary = {
-  build_id: 'build-456',
+  build: mockBuild,
   error_count: 0,
   warning_count: 2,
   parsed_errors: [
     {
+      error_type: 'warning',
       severity: 'warning',
       message: 'Deprecated API usage detected',
       file: 'src/main.rs',
@@ -72,6 +73,7 @@ const mockBuildSummary: BuildSummary = {
     total: 15,
     passed: 15,
     failed: 0,
+    failed_tests: [],
     skipped: 0
   }
 }
@@ -120,14 +122,22 @@ describe('UI Integration Tests', () => {
   describe('Dashboard to Project Navigation', () => {
     it('should navigate from dashboard to project history when clicking on a project', async () => {
       // Mock API responses
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          projects: [mockProject],
-          total: 1,
-          has_more: false
-        } as ListProjectsResponse)
-      })
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            projects: [mockProject],
+            total: 1,
+            has_more: false
+          } as ListProjectsResponse)
+        })
+        // Mock the project history API call
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            builds: []
+          })
+        })
 
       render(
         <MemoryRouter initialEntries={['/']}>
@@ -154,7 +164,8 @@ describe('UI Integration Tests', () => {
       // Should navigate to project history
       await waitFor(() => {
         expect(screen.getByText('Project History')).toBeInTheDocument()
-        expect(screen.getByText('Viewing history for project: project-123')).toBeInTheDocument()
+        expect(screen.getByText('← Back to Dashboard')).toBeInTheDocument()
+        expect(screen.getByText('Recent Builds (0)')).toBeInTheDocument()
       })
     })
 
@@ -203,9 +214,9 @@ describe('UI Integration Tests', () => {
       await waitFor(() => {
         expect(screen.getByText('No projects configured yet.')).toBeInTheDocument()
         // Check for the specific paragraph with the build_pal command
-        expect(screen.getByText((content, element) => {
-          return element?.tagName === 'P' && 
-                 element?.textContent?.includes('build_pal') && 
+        expect(screen.getByText((_content, element) => {
+          return element?.tagName === 'P' &&
+                 element?.textContent?.includes('build_pal') &&
                  element?.textContent?.includes('in a project directory') || false
         })).toBeInTheDocument()
       })

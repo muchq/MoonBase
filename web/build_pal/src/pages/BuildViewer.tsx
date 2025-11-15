@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import AnsiToHtml from 'ansi-to-html'
 import type { Build, BuildSummary, LogLine, BuildStatus } from '../types/api'
@@ -29,27 +29,7 @@ const BuildViewer: React.FC = () => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  const fetchBuildStatus = async () => {
-    if (!id) return
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/builds/${id}`)
-      if (!response.ok) {
-        throw new Error(`Failed to fetch build: ${response.statusText}`)
-      }
-      const data = await response.json()
-      setBuild(data.build)
-      
-      // If build is complete, fetch summary
-      if (data.build.status === 'completed' || data.build.status === 'failed') {
-        fetchBuildSummary()
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch build')
-    }
-  }
-
-  const fetchBuildSummary = async () => {
+  const fetchBuildSummary = useCallback(async () => {
     if (!id) return
 
     try {
@@ -61,9 +41,29 @@ const BuildViewer: React.FC = () => {
     } catch (err) {
       console.warn('Failed to fetch build summary:', err)
     }
-  }
+  }, [id])
 
-  const fetchLogs = async () => {
+  const fetchBuildStatus = useCallback(async () => {
+    if (!id) return
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/builds/${id}`)
+      if (!response.ok) {
+        throw new Error(`Failed to fetch build: ${response.statusText}`)
+      }
+      const data = await response.json()
+      setBuild(data.build)
+
+      // If build is complete, fetch summary
+      if (data.build.status === 'completed' || data.build.status === 'failed') {
+        fetchBuildSummary()
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch build')
+    }
+  }, [id, fetchBuildSummary])
+
+  const fetchLogs = useCallback(async () => {
     if (!id) return
 
     try {
@@ -73,31 +73,31 @@ const BuildViewer: React.FC = () => {
       }
       const data = await response.json()
       setLogs(data.logs || [])
-      
+
       // Auto-scroll to bottom when new logs arrive
       setTimeout(scrollToBottom, 100)
     } catch (err) {
       console.warn('Failed to fetch logs:', err)
     }
-  }
+  }, [id])
 
-  const startPolling = () => {
+  const startPolling = useCallback(() => {
     if (pollIntervalRef.current) return
-    
+
     setIsPolling(true)
     pollIntervalRef.current = setInterval(() => {
       fetchBuildStatus()
       fetchLogs()
     }, 2000) // Poll every 2 seconds
-  }
+  }, [fetchBuildStatus, fetchLogs])
 
-  const stopPolling = () => {
+  const stopPolling = useCallback(() => {
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current)
       pollIntervalRef.current = null
     }
     setIsPolling(false)
-  }
+  }, [])
 
   const cancelBuild = async () => {
     if (!id || !build) return
@@ -129,7 +129,7 @@ const BuildViewer: React.FC = () => {
     return () => {
       stopPolling()
     }
-  }, [id])
+  }, [id, fetchBuildStatus, fetchLogs, stopPolling])
 
   useEffect(() => {
     if (build && build.status) {
@@ -140,7 +140,7 @@ const BuildViewer: React.FC = () => {
         stopPolling()
       }
     }
-  }, [build?.status])
+  }, [build, startPolling, stopPolling])
 
   const getStatusColor = (status: BuildStatus): string => {
     switch (status) {

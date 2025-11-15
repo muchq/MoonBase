@@ -82,7 +82,7 @@ describe('Dashboard', () => {
     await waitFor(() => {
       expect(screen.getByText('Projects')).toBeInTheDocument()
       expect(screen.getByText('No projects configured yet.')).toBeInTheDocument()
-      expect(screen.getByText((content, element) => {
+      expect(screen.getByText((_content, element) => {
         return (element?.tagName === 'P' && element?.textContent?.includes('in a project directory to get started')) ?? false
       })).toBeInTheDocument()
     })

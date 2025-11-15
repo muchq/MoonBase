@@ -187,7 +187,7 @@ export interface HealthResponse {
 export interface ErrorResponse {
   error: string;
   code: string;
-  details?: any;
+  details?: unknown;
 }
 
 // WebSocket message types
