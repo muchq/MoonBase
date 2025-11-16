@@ -1359,7 +1359,7 @@
     "@@rules_oci+//oci:extensions.bzl%oci": {
       "general": {
         "bzlTransitiveDigest": "53t+4J9YPKcuq+htl5V7oPEVFjJEbqq3ro9Oi5kbj7Q=",
-        "usagesDigest": "BvkTA0cLMZe3Gd0ZB5x/7ixtWe1bXzmLMT3TEBwrlGU=",
+        "usagesDigest": "gbMtqoYRL6OvigvEUqTcg3273d8WYydUSTSFGcREfDA=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -1371,7 +1371,7 @@
               "scheme": "https",
               "registry": "index.docker.io",
               "repository": "library/ubuntu",
-              "identifier": "sha256:353675e2a41babd526e2b837d7ec780c2a05bca0164f7ea5dbbd433d21d166fc",
+              "identifier": "sha256:c35e29c9450151419d9448b0fd75374fec4fff364a27f176fb458d472dfc9e54",
               "platform": "linux/amd64",
               "target_name": "docker_lib_ubuntu_linux_amd64",
               "bazel_tags": []
@@ -1384,7 +1384,7 @@
               "scheme": "https",
               "registry": "index.docker.io",
               "repository": "library/ubuntu",
-              "identifier": "sha256:353675e2a41babd526e2b837d7ec780c2a05bca0164f7ea5dbbd433d21d166fc",
+              "identifier": "sha256:c35e29c9450151419d9448b0fd75374fec4fff364a27f176fb458d472dfc9e54",
               "platform": "linux/arm64/v8",
               "target_name": "docker_lib_ubuntu_linux_arm64_v8",
               "bazel_tags": []
@@ -1398,7 +1398,7 @@
               "scheme": "https",
               "registry": "index.docker.io",
               "repository": "library/ubuntu",
-              "identifier": "sha256:353675e2a41babd526e2b837d7ec780c2a05bca0164f7ea5dbbd433d21d166fc",
+              "identifier": "sha256:c35e29c9450151419d9448b0fd75374fec4fff364a27f176fb458d472dfc9e54",
               "platforms": {
                 "@@platforms//cpu:x86_64": "@docker_lib_ubuntu_linux_amd64",
                 "@@platforms//cpu:arm64": "@docker_lib_ubuntu_linux_arm64_v8"
