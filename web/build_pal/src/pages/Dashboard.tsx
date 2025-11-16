@@ -127,10 +127,7 @@ const Dashboard: React.FC = () => {
                   padding: '1rem',
                   backgroundColor: '#ffffff',
                   cursor: 'pointer',
-                  transition: 'box-shadow 0.2s',
-                  ':hover': {
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-                  }
+                  transition: 'box-shadow 0.2s'
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)'

@@ -17,7 +17,7 @@ export interface CLIConfig {
 
 export interface PluginConfig {
   plugin: string;
-  config?: Record<string, any>;
+  config?: Record<string, unknown>;
 }
 
 export interface DockerConfig {
