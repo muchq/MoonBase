@@ -5,7 +5,7 @@ bazel_dep(name = "rules_oci", version = "2.2.6")
 oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
 oci.pull(
     name = "docker_lib_ubuntu",
-    digest = "sha256:353675e2a41babd526e2b837d7ec780c2a05bca0164f7ea5dbbd433d21d166fc",
+    digest = "sha256:c35e29c9450151419d9448b0fd75374fec4fff364a27f176fb458d472dfc9e54",
     image = "docker.io/library/ubuntu",
     platforms = [
         "linux/amd64",
