@@ -1,0 +1,31 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+cc_library(
+    name = "string_splitter",
+    srcs = ["string_splitter.c"],
+    hdrs = ["string_splitter.h"],
+    visibility = ["//visibility:public"],
+    deps = [],
+)
+
+#cc_test(
+#    name = "string_splitter_test",
+#    size = "small",
+#    srcs = ["string_splitter_test.c"],
+#    visibility = ["//visibility:public"],
+#    deps = [
+#        ":string_splitter",
+#        "@check",
+#    ],
+#)
+
+cc_test(
+    name = "string_splitter_test",
+    size = "small",
+    srcs = ["string_splitter_test.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":string_splitter",
+        "@googletest//:gtest_main",
+    ],
+)
