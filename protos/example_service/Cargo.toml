@@ -12,3 +12,4 @@ path = "lib.rs"
 
 [dependencies]
 tonic = { workspace = true }
+tonic-prost = { workspace = true }
