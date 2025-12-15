@@ -1,7 +1,7 @@
 # JavaScript/TypeScript dependencies for Build Pal Web UI
 
-bazel_dep(name = "aspect_rules_js", version = "2.8.1")
-bazel_dep(name = "aspect_rules_ts", version = "3.7.1")
+bazel_dep(name = "aspect_rules_js", version = "2.8.3")
+bazel_dep(name = "aspect_rules_ts", version = "3.8.0")
 bazel_dep(name = "rules_nodejs", version = "6.6.2")
 
 # Node.js toolchain

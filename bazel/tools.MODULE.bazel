@@ -1,4 +1,4 @@
-bazel_dep(name = "toolchains_llvm", version = "1.5.0")
+bazel_dep(name = "toolchains_llvm", version = "1.6.0")
 bazel_dep(name = "bazel_skylib", version = "1.8.2")
 bazel_dep(name = "platforms", version = "1.0.0")
 
@@ -14,7 +14,7 @@ register_toolchains("@llvm_toolchain//:all")
 
 bazel_dep(name = "bazel_features", version = "1.38.0")
 
-bazel_dep(name = "buildifier_prebuilt", version = "8.2.1", dev_dependency = True)
+bazel_dep(name = "buildifier_prebuilt", version = "8.2.1.1", dev_dependency = True)
 
 bazel_dep(name = "bazel-diff", version = "12.1.1")
 bazel_dep(name = "rules_shell", version = "0.6.1")
