@@ -12,4 +12,22 @@ oci.pull(
         "linux/arm64/v8",
     ],
 )
-use_repo(oci, "docker_lib_ubuntu", "docker_lib_ubuntu_linux_amd64", "docker_lib_ubuntu_linux_arm64_v8")
+oci.pull(
+    name = "java_base",
+    image = "docker.io/azul/zulu-openjdk",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64/v8",
+    ],
+    tag = "25-jre",
+)
+oci.pull(
+    name = "distroless_base",
+    digest = "sha256:786007f631d22e8a1a5084c5b177352d9dcac24b1e8c815187750f70b24a9fc6",
+    image = "gcr.io/distroless/base-debian12",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64/v8",
+    ],
+)
+use_repo(oci, "distroless_base", "docker_lib_ubuntu", "docker_lib_ubuntu_linux_amd64", "docker_lib_ubuntu_linux_arm64_v8", "java_base")
