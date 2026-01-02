@@ -1,0 +1,19 @@
+load("@rules_java//java:defs.bzl", "java_plugin")
+
+java_plugin(
+    name = "micronaut_validation_processor",
+    processor_class = "io.micronaut.validation.processor.ValidationAnnotationProcessor",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@maven//:io_micronaut_validation_micronaut_validation_processor",
+    ],
+)
+
+java_plugin(
+    name = "micronaut_jaxrs_processor",
+    processor_class = "io.micronaut.jaxrs.processor.JaxRsAnnotationProcessor",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@maven//:io_micronaut_jaxrs_micronaut_jaxrs_processor",
+    ],
+)
