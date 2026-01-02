@@ -1,19 +1,48 @@
 load("@rules_java//java:defs.bzl", "java_plugin")
 
 java_plugin(
-    name = "micronaut_validation_processor",
-    processor_class = "io.micronaut.validation.processor.ValidationAnnotationProcessor",
+    name = "micronaut_type_element_visitor_processor",
+    generates_api = True,
+    processor_class = "io.micronaut.annotation.processing.TypeElementVisitorProcessor",
     visibility = ["//visibility:public"],
     deps = [
+        "@maven//:io_micronaut_jaxrs_micronaut_jaxrs_processor",
+        "@maven//:io_micronaut_micronaut_inject_java",
         "@maven//:io_micronaut_validation_micronaut_validation_processor",
     ],
 )
 
 java_plugin(
-    name = "micronaut_jaxrs_processor",
-    processor_class = "io.micronaut.jaxrs.processor.JaxRsAnnotationProcessor",
+    name = "micronaut_aggregating_type_element_visitor_processor",
+    generates_api = True,
+    processor_class = "io.micronaut.annotation.processing.AggregatingTypeElementVisitorProcessor",
     visibility = ["//visibility:public"],
     deps = [
         "@maven//:io_micronaut_jaxrs_micronaut_jaxrs_processor",
+        "@maven//:io_micronaut_micronaut_inject_java",
+        "@maven//:io_micronaut_validation_micronaut_validation_processor",
+    ],
+)
+
+java_plugin(
+    name = "micronaut_bean_definition_inject_processor",
+    generates_api = True,
+    processor_class = "io.micronaut.annotation.processing.BeanDefinitionInjectProcessor",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@maven//:io_micronaut_jaxrs_micronaut_jaxrs_processor",
+        "@maven//:io_micronaut_micronaut_inject_java",
+        "@maven//:io_micronaut_validation_micronaut_validation_processor",
+    ],
+)
+
+java_plugin(
+    name = "micronaut_package_element_visitor_processor",
+    processor_class = "io.micronaut.annotation.processing.PackageElementVisitorProcessor",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@maven//:io_micronaut_jaxrs_micronaut_jaxrs_processor",
+        "@maven//:io_micronaut_micronaut_inject_java",
+        "@maven//:io_micronaut_validation_micronaut_validation_processor",
     ],
 )

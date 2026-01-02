@@ -4,15 +4,29 @@ load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 
 java_binary(
     name = "helloworld",
-    srcs = ["App.java"],
+    srcs = [
+        "App.java",
+        "HelloWorldResource.java",
+    ],
     main_class = "com.muchq.helloworld.App",
+    plugins = [
+        "//bazel/rules:micronaut_type_element_visitor_processor",
+        "//bazel/rules:micronaut_aggregating_type_element_visitor_processor",
+        "//bazel/rules:micronaut_bean_definition_inject_processor",
+        "//bazel/rules:micronaut_package_element_visitor_processor",
+    ],
+    resources = ["//jvm/src/main/resources:micronaut_config"],
     visibility = ["//visibility:public"],
     runtime_deps = [
         "@maven//:ch_qos_logback_logback_classic",
     ],
     deps = [
-        "@maven//:org_eclipse_jetty_jetty_server",
-        "@maven//:org_eclipse_jetty_toolchain_jetty_jakarta_servlet_api",
+        "@maven//:io_micronaut_jaxrs_micronaut_jaxrs_server",
+        "@maven//:io_micronaut_micronaut_context",
+        "@maven//:io_micronaut_micronaut_http_server_netty",
+        "@maven//:io_micronaut_micronaut_jackson_databind",
+        "@maven//:io_micronaut_micronaut_runtime",
+        "@maven//:jakarta_ws_rs_jakarta_ws_rs_api",
         "@maven//:org_slf4j_slf4j_api",
     ],
 )

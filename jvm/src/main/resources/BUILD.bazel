@@ -9,3 +9,9 @@ filegroup(
     srcs = ["logback.xml"],
     visibility = ["//visibility:public"],
 )
+
+filegroup(
+    name = "micronaut_config",
+    srcs = ["application.yml"],
+    visibility = ["//visibility:public"],
+)

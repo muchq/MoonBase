@@ -27,6 +27,7 @@ maven.install(
         "com.fasterxml.jackson.module:jackson-module-scala_2.13:%s" % JACKSON_VERSION,
         "com.google.guava:guava:33.5.0-jre",
         "io.micronaut:micronaut-inject:%s" % MICRONAUT_VERSION,
+        "io.micronaut:micronaut-inject-java:%s" % MICRONAUT_VERSION,
         "io.micronaut.validation:micronaut-validation:%s" % MICRONAUT_VERSION,
         "io.micronaut.validation:micronaut-validation-processor:%s" % MICRONAUT_VERSION,
         "io.micronaut:micronaut-http-client:%s" % MICRONAUT_VERSION,
