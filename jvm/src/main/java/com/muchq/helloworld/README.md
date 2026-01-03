@@ -1,13 +1,13 @@
 # Hello World Java HTTP Server
 
-A simple HTTP server built with Jetty that responds with JSON on all endpoints.
+A simple HTTP server built with Micronaut using JAX-RS style annotations and Netty.
 
 ## Features
 
-- Lightweight Jetty-based HTTP server
-- JSON response format
+- Micronaut 4.10 with JAX-RS annotations
+- Netty HTTP server (non-blocking)
+- JSON responses
 - Configurable port via environment variable
-- SLF4J logging with Logback
 - Docker/OCI image support
 
 ## Building
@@ -53,12 +53,12 @@ docker run -e PORT=9090 -p 9090:9090 helloworld:latest
 
 ```bash
 # Test the server
-curl http://localhost:8080/hello
+curl http://localhost:8080/
 
 # Expected response:
 {
   "message": "Hello, World!",
-  "path": "/hello",
+  "path": "/",
   "method": "GET"
 }
 ```
@@ -69,15 +69,11 @@ curl http://localhost:8080/hello
 
 ## Architecture
 
-- **Jetty 11.0.23**: HTTP server implementation
-- **SLF4J + Logback**: Logging framework
-- **Azul Zulu OpenJDK 25 JRE**: Base Docker image (multi-platform: linux/amd64, linux/arm64/v8)
-- **Bazel**: Build system with OCI image support
+- **Micronaut 4.10**: Compile-time dependency injection framework
+- **Netty**: Non-blocking HTTP server
+- **JAX-RS**: Jakarta RESTful Web Services annotations
+- **Jackson**: JSON serialization
 
 ## Deployment
 
-The Docker image is production-ready and can be deployed to:
-- Kubernetes (using the OCI image)
-- Docker Swarm
-- Cloud Run, ECS, or other container platforms
-- Any OCI-compatible container runtime
+The OCI image can be deployed to Kubernetes, Cloud Run, ECS, or any container platform.
