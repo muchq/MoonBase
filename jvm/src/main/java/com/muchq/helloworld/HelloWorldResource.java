@@ -9,14 +9,12 @@ import org.slf4j.LoggerFactory;
 
 @Path("/")
 public class HelloWorldResource {
-  private static final Logger logger = LoggerFactory.getLogger(HelloWorldResource.class);
+  private static final Logger LOG = LoggerFactory.getLogger(HelloWorldResource.class);
 
   @GET
   @Produces(MediaType.APPLICATION_JSON)
   public HelloResponse hello() {
-    logger.info("GET /");
+    LOG.info("GET /");
     return new HelloResponse("Hello, World!", "/", "GET");
   }
-
-  public record HelloResponse(String message, String path, String method) {}
 }
