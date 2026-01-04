@@ -1,0 +1,12 @@
+load("@rules_java//java:java_library.bzl", "java_library")
+
+java_library(
+    name = "chess_com_api",
+    srcs = [
+        "Best.java",
+        "Record.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+    ],
+)
