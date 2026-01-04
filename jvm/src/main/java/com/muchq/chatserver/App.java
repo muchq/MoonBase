@@ -8,7 +8,7 @@ public class App {
   private static final Logger LOG = LoggerFactory.getLogger(App.class);
 
   public static void main(String[] args) {
-    LOG.info("Starting Micronaut WebSocket chat server");
+    LOG.info("Starting Micronaut MCP server");
     Micronaut.run(App.class, args);
   }
 }

@@ -5,9 +5,15 @@ java_binary(
     name = "chatserver",
     srcs = [
         "App.java",
-        "BroadcastMessage.java",
-        "ChatMessage.java",
-        "ChatWebSocket.java",
+        "ClientInfo.java",
+        "InitializeParams.java",
+        "JsonRpcError.java",
+        "JsonRpcRequest.java",
+        "JsonRpcResponse.java",
+        "McpWebSocket.java",
+        "Tool.java",
+        "ToolCallParams.java",
+        "ToolRegistry.java",
     ],
     main_class = "com.muchq.chatserver.App",
     plugins = [
