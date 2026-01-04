@@ -4,6 +4,28 @@ load("@io_bazel_rules_go//go:def.bzl", "go_cross_binary")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 
+def _push_and_load(image_name, bin_name):
+    """
+    push and load oci image
+
+    Args:
+      image_name: the image name
+      bin_name: the binary name for the image
+    """
+    oci_push(
+        name = "push_image",
+        image = ":" + image_name,
+        remote_tags = ["latest"],
+        repository = "ghcr.io/muchq/" + bin_name,
+        tags = ["manual"],
+    )
+
+    oci_load(
+        name = "oci_load_tarball",
+        image = ":" + image_name,
+        repo_tags = ["ghcr.io/muchq/" + bin_name + ":latest"],
+    )
+
 def _create_oci_image(bin_name, binary_target, binary_path):
     """
     create oci image, push, and load targets for a binary
@@ -30,19 +52,7 @@ def _create_oci_image(bin_name, binary_target, binary_path):
         tars = [":" + tar_name],
     )
 
-    oci_push(
-        name = "push_image",
-        image = ":" + image_name,
-        remote_tags = ["latest"],
-        repository = "ghcr.io/muchq/" + bin_name,
-        tags = ["manual"],
-    )
-
-    oci_load(
-        name = "oci_load_tarball",
-        image = ":" + image_name,
-        repo_tags = ["ghcr.io/muchq/" + bin_name + ":latest"],
-    )
+    _push_and_load(image_name = image_name, bin_name = bin_name)
 
 def linux_oci_go(bin_name):
     """
@@ -72,3 +82,34 @@ def linux_amd64_oci_binary(bin_name):
     """
 
     _create_oci_image(bin_name, bin_name, "/" + bin_name)
+
+def linux_oci_java(bin_name):
+    """
+    generate oci image, push, and load targets for a java binary
+
+    Args:
+      bin_name: the binary name for the image
+    """
+    uber_jar_name = bin_name + "_deploy.jar"
+    tar_name = bin_name + "_tar"
+    image_name = bin_name + "_image"
+
+    pkg_tar(
+        name = tar_name,
+        srcs = [":" + uber_jar_name],
+        package_dir = "/app",
+        include_runfiles = True,
+    )
+
+    oci_image(
+        name = image_name,
+        base = "@java_base",
+        entrypoint = [
+            "java",
+            "-jar",
+            "/app/" + uber_jar_name,
+        ],
+        tars = [":" + tar_name],
+    )
+
+    _push_and_load(image_name = image_name, bin_name = bin_name)

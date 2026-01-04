@@ -1,11 +1,11 @@
 load("@rules_java//java:java_binary.bzl", "java_binary")
-load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
-load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("//bazel/rules:oci.bzl", "linux_oci_java")
 
 java_binary(
     name = "helloworld",
     srcs = [
         "App.java",
+        "HelloResponse.java",
         "HelloWorldResource.java",
     ],
     main_class = "com.muchq.helloworld.App",
@@ -31,37 +31,4 @@ java_binary(
     ],
 )
 
-# Package the deploy JAR into a tarball
-pkg_tar(
-    name = "helloworld_tar",
-    srcs = [":helloworld_deploy.jar"],
-    package_dir = "/app",
-)
-
-# Create OCI image with java_base
-oci_image(
-    name = "helloworld_image",
-    base = "@java_base",
-    entrypoint = [
-        "java",
-        "-jar",
-        "/app/helloworld_deploy.jar",
-    ],
-    env = {"PORT": "8080"},
-    exposed_ports = ["8080"],
-    tars = [":helloworld_tar"],
-)
-
-# Load image for local Docker use
-oci_load(
-    name = "oci_tarball",
-    image = ":helloworld_image",
-    repo_tags = ["helloworld:latest"],
-)
-
-# Export as tarball file
-filegroup(
-    name = "helloworld_oci.tar",
-    srcs = [":oci_tarball"],
-    output_group = "tarball",
-)
+linux_oci_java(bin_name = "helloworld")
