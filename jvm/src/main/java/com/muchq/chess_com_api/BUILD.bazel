@@ -1,12 +1,23 @@
-load("@rules_java//java:java_library.bzl", "java_library")
+load("@rules_java//java:defs.bzl", "java_binary")
 
-java_library(
+java_binary(
     name = "chess_com_api",
     srcs = [
         "Best.java",
+        "ChessClient.java",
+        "InstantRating.java",
+        "Last.java",
         "Record.java",
+        "Stats.java",
+        "StatsResponse.java",
+        "Tactics.java",
     ],
+    main_class = "com.muchq.chess_com_api.ChessClient",
     visibility = ["//visibility:public"],
     deps = [
+        "//jvm/src/main/java/com/muchq/json",
+        "@maven//:com_fasterxml_jackson_core_jackson_annotations",
+        "@maven//:com_fasterxml_jackson_core_jackson_core",
+        "@maven//:com_fasterxml_jackson_core_jackson_databind",
     ],
 )
