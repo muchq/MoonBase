@@ -28,6 +28,7 @@ java_binary(
         "@maven//:ch_qos_logback_logback_classic",
     ],
     deps = [
+        "@maven//:com_fasterxml_jackson_core_jackson_annotations",
         "@maven//:com_fasterxml_jackson_core_jackson_databind",
         "@maven//:io_micronaut_micronaut_context",
         "@maven//:io_micronaut_micronaut_http_server_netty",
