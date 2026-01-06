@@ -72,7 +72,7 @@ public class ToolRegistry {
     return Collections.unmodifiableList(tools);
   }
 
-  public Object executeTool(String name, Map<String, Object> arguments) {
+  public String executeTool(String name, Map<String, Object> arguments) {
     LOG.info("Executing tool: {} with arguments: {}", name, arguments);
 
     return switch (name) {
@@ -89,20 +89,22 @@ public class ToolRegistry {
     return "Echo: " + message;
   }
 
-  private double executeAdd(Map<String, Object> arguments) {
+  private String executeAdd(Map<String, Object> arguments) {
     Number a = (Number) arguments.get("a");
     Number b = (Number) arguments.get("b");
-    return a.doubleValue() + b.doubleValue();
+    double result = a.doubleValue() + b.doubleValue();
+    return String.valueOf(result);
   }
 
   private String executeGetTimestamp(Map<String, Object> arguments) {
     return Instant.now().toString();
   }
 
-  private int executeRandom(Map<String, Object> arguments) {
+  private String executeRandom(Map<String, Object> arguments) {
     int min = ((Number) arguments.get("min")).intValue();
     int max = ((Number) arguments.get("max")).intValue();
     Random random = new Random();
-    return random.nextInt(max - min + 1) + min;
+    int result = random.nextInt(max - min + 1) + min;
+    return String.valueOf(result);
   }
 }

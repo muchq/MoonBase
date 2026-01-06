@@ -62,27 +62,18 @@ public class McpWebSocket {
   }
 
   private String handleInitialize(JsonRpcRequest request) throws Exception {
-    Map<String, Object> result = new HashMap<>();
-    result.put("protocolVersion", PROTOCOL_VERSION);
-
-    Map<String, Object> capabilities = new HashMap<>();
-    Map<String, Object> toolsCapability = new HashMap<>();
-    toolsCapability.put("listChanged", true);
-    capabilities.put("tools", toolsCapability);
-    result.put("capabilities", capabilities);
-
-    Map<String, String> serverInfo = new HashMap<>();
-    serverInfo.put("name", "micronaut-mcp-server");
-    serverInfo.put("version", "1.0.0");
-    result.put("serverInfo", serverInfo);
+    InitializeResult result =
+        new InitializeResult(
+            PROTOCOL_VERSION,
+            new ServerCapabilities(new ToolsCapability(true)),
+            new ServerInfo("micronaut-mcp-server", "1.0.0"));
 
     JsonRpcResponse response = new JsonRpcResponse("2.0", request.id(), result, null);
     return objectMapper.writeValueAsString(response);
   }
 
   private String handleToolsList(JsonRpcRequest request) throws Exception {
-    Map<String, Object> result = new HashMap<>();
-    result.put("tools", toolRegistry.getTools());
+    ToolsListResult result = new ToolsListResult(toolRegistry.getTools());
 
     JsonRpcResponse response = new JsonRpcResponse("2.0", request.id(), result, null);
     return objectMapper.writeValueAsString(response);
@@ -92,10 +83,10 @@ public class McpWebSocket {
     ToolCallParams params =
         objectMapper.convertValue(request.params(), ToolCallParams.class);
 
-    Object toolResult = toolRegistry.executeTool(params.name(), params.arguments());
+    String toolResult = toolRegistry.executeTool(params.name(), params.arguments());
 
-    Map<String, Object> result = new HashMap<>();
-    result.put("content", List.of(Map.of("type", "text", "text", toolResult.toString())));
+    ToolCallResult result =
+        new ToolCallResult(List.of(new ContentItem("text", toolResult)));
 
     JsonRpcResponse response = new JsonRpcResponse("2.0", request.id(), result, null);
     return objectMapper.writeValueAsString(response);
