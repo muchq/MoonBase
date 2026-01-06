@@ -1,4 +1,4 @@
-package com.muchq.chatserver;
+package com.muchq.mcpserver;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Map;

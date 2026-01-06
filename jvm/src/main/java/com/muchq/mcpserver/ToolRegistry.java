@@ -1,4 +1,4 @@
-package com.muchq.chatserver;
+package com.muchq.mcpserver;
 
 import jakarta.inject.Singleton;
 import java.time.Instant;

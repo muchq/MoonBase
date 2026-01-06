@@ -1,4 +1,4 @@
-package com.muchq.chatserver;
+package com.muchq.mcpserver;
 
 import io.micronaut.runtime.Micronaut;
 import org.slf4j.Logger;

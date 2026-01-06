@@ -20,32 +20,32 @@ The Model Context Protocol (MCP) is an open protocol that enables seamless integ
 ## Build the Java binary
 
 ```bash
-bazel build //jvm/src/main/java/com/muchq/chatserver:chatserver
+bazel build //jvm/src/main/java/com/muchq/mcpserver:mcpserver
 ```
 
 ## Build the Docker image
 
 ```bash
-bazel build //jvm/src/main/java/com/muchq/chatserver:oci_tarball
+bazel build //jvm/src/main/java/com/muchq/mcpserver:oci_tarball
 ```
 
 ## Run with Docker
 
 ```bash
 # Load the image into Docker
-bazel run //jvm/src/main/java/com/muchq/chatserver:oci_tarball
+bazel run //jvm/src/main/java/com/muchq/mcpserver:oci_tarball
 
 # Run the container
-docker run -p 8080:8080 chatserver:latest
+docker run -p 8080:8080 mcpserver:latest
 
 # Run on custom port
-docker run -e PORT=9090 -e APP_NAME=mcp-server -p 9090:9090 chatserver:latest
+docker run -e PORT=9090 -e APP_NAME=mcp-server -p 9090:9090 mcpserver:latest
 ```
 
 ## Run locally
 
 ```bash
-bazel run //jvm/src/main/java/com/muchq/chatserver:chatserver
+bazel run //jvm/src/main/java/com/muchq/mcpserver:mcpserver
 ```
 
 ## Testing with websocat

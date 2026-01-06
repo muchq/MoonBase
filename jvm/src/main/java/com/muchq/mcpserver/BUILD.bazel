@@ -2,7 +2,7 @@ load("@rules_java//java:java_binary.bzl", "java_binary")
 load("//bazel/rules:oci.bzl", "linux_oci_java")
 
 java_binary(
-    name = "chatserver",
+    name = "mcpserver",
     srcs = [
         "App.java",
         "ClientInfo.java",
@@ -15,7 +15,7 @@ java_binary(
         "ToolCallParams.java",
         "ToolRegistry.java",
     ],
-    main_class = "com.muchq.chatserver.App",
+    main_class = "com.muchq.mcpserver.App",
     plugins = [
         "//bazel/rules:micronaut_type_element_visitor_processor",
         "//bazel/rules:micronaut_aggregating_type_element_visitor_processor",
@@ -40,4 +40,4 @@ java_binary(
     ],
 )
 
-linux_oci_java(bin_name = "chatserver")
+linux_oci_java(bin_name = "mcpserver")

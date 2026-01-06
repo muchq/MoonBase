@@ -1,4 +1,4 @@
-package com.muchq.chatserver;
+package com.muchq.mcpserver;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micronaut.websocket.WebSocketSession;

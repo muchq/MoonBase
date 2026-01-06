@@ -1,11 +1,11 @@
-package com.muchq.chatserver;
+package com.muchq.mcpserver;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record JsonRpcResponse(
+public record JsonRpcRequest(
     @JsonProperty("jsonrpc") String jsonrpc,
     @JsonProperty("id") Object id,
-    @JsonProperty("result") Object result,
-    @JsonProperty("error") JsonRpcError error) {}
+    @JsonProperty("method") String method,
+    @JsonProperty("params") Object params) {}
