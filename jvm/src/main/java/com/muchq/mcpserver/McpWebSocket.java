@@ -16,8 +16,14 @@ public class McpWebSocket {
   private static final Logger LOG = LoggerFactory.getLogger(McpWebSocket.class);
   private static final String PROTOCOL_VERSION = "2024-11-05";
 
-  @Inject private ObjectMapper objectMapper;
-  @Inject private ToolRegistry toolRegistry;
+  private final ObjectMapper objectMapper;
+  private final ToolRegistry toolRegistry;
+
+  @Inject
+  public McpWebSocket(ObjectMapper objectMapper, ToolRegistry toolRegistry) {
+    this.objectMapper = objectMapper;
+    this.toolRegistry = toolRegistry;
+  }
 
   @OnOpen
   public void onOpen(WebSocketSession session) {
