@@ -1,23 +1,49 @@
-load("@rules_java//java:defs.bzl", "java_binary")
+load("@rules_java//java:defs.bzl", "java_binary", "java_library")
 
-java_binary(
+java_library(
     name = "chess_com_api",
     srcs = [
+        "Accuracies.java",
         "Best.java",
         "ChessClient.java",
+        "GamesResponse.java",
         "InstantRating.java",
         "Last.java",
+        "PlayedGame.java",
+        "Player.java",
+        "PlayerResult.java",
         "Record.java",
         "Stats.java",
         "StatsResponse.java",
+        "StreamingPlatform.java",
         "Tactics.java",
     ],
-    main_class = "com.muchq.chess_com_api.ChessClient",
     visibility = ["//visibility:public"],
     deps = [
-        "//jvm/src/main/java/com/muchq/json",
+        "//jvm/src/main/java/com/muchq/http_client/core",
         "@maven//:com_fasterxml_jackson_core_jackson_annotations",
         "@maven//:com_fasterxml_jackson_core_jackson_core",
         "@maven//:com_fasterxml_jackson_core_jackson_databind",
+        "@maven//:org_slf4j_slf4j_api",
+    ],
+)
+
+java_binary(
+    name = "demo",
+    srcs = ["Demo.java"],
+    main_class = "com.muchq.chess_com_api.Demo",
+    resources = ["//jvm/src/main/resources:micronaut_config"],
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        "@maven//:ch_qos_logback_logback_classic",
+    ],
+    deps = [
+        ":chess_com_api",
+        "//jvm/src/main/java/com/muchq/http_client/core",
+        "//jvm/src/main/java/com/muchq/http_client/jdk11",
+        "//jvm/src/main/java/com/muchq/json",
+        "@maven//:com_fasterxml_jackson_core_jackson_core",
+        "@maven//:com_fasterxml_jackson_core_jackson_databind",
+        "@maven//:org_slf4j_slf4j_api",
     ],
 )

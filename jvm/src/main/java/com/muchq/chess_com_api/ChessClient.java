@@ -1,18 +1,21 @@
 package com.muchq.chess_com_api;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.muchq.json.JsonUtils;
+import com.muchq.http_client.core.HttpClient;
+import com.muchq.http_client.core.HttpRequest;
+import com.muchq.http_client.core.HttpResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
 import java.util.Optional;
 
 public class ChessClient {
+    private static final Logger LOG = LoggerFactory.getLogger(ChessClient.class);
     private static final String BASE_URL = "https://api.chess.com/pub/player";
+    private static final DateTimeFormatter YEAR_MONTH_FORMATTER = DateTimeFormatter.ofPattern("yyyy/MM");
 
     private final HttpClient httpClient;
     private final ObjectMapper mapper;
@@ -22,41 +25,42 @@ public class ChessClient {
         this.mapper = objectMapper;
     }
 
+    public Optional<Player> fetchPlayer(String player) {
+        String url = BASE_URL + "/" + player;
+        return getAs(url, Player.class);
+    }
+
     public Optional<StatsResponse> fetchStats(String player) {
         String url = BASE_URL + "/" + player + "/stats";
+        return getAs(url, StatsResponse.class);
+    }
 
+    public Optional<GamesResponse> fetchGames(String player, YearMonth yearMonth) {
+        String url = BASE_URL + "/" + player + "/games/" + yearMonth.format(YEAR_MONTH_FORMATTER);
+        return getAs(url, GamesResponse.class);
+    }
+
+    private <T> Optional<T> getAs(String url, Class<T> clazz) {
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .GET()
+                .setUrl(url)
                 .build();
 
-        HttpResponse<String> response = null;
-        try {
-            response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
-        }
+        HttpResponse response = httpClient.execute(request);
 
-        if (response.statusCode() == 404) {
+        if (response.getStatusCode() == 404) {
             return Optional.empty();
         }
 
+        // TODO: Failsafe-ify, 429, etc
+        if (response.getStatusCode() != 200) {
+            LOG.debug(response.toString());
+            throw new RuntimeException("api error");
+        }
+
         try {
-            return Optional.of(mapper.readValue(response.body(), StatsResponse.class));
-        } catch (JsonProcessingException e) {
+            return Optional.of(mapper.readValue(response.getAsInputStream(), clazz));
+        } catch (IOException e) {
             throw new RuntimeException(e);
         }
-    }
-
-    public static void main(String[] args) {
-        ObjectMapper mapper = JsonUtils.mapper();
-        HttpClient client = HttpClient.newHttpClient();
-
-        var chessClient = new ChessClient(client, mapper);
-        var stats = chessClient.fetchStats("drawlya");
-        System.out.println(stats);
     }
 }

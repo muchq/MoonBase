@@ -4,51 +4,53 @@ bazel_dep(name = "contrib_rules_jvm", version = "0.31.1")
 
 maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 
-JACKSON_VERSION = "2.17.1"
-
 JETTY_VERSION = "11.0.23"
 
 LOGBACK_VERSION = "1.5.6"
-
-MICRONAUT_VERSION = "4.10.0"
-
-NETTY_VERSION = "4.1.118.Final"
 
 maven.install(
     artifacts = [
         "ch.qos.logback:logback-classic:%s" % LOGBACK_VERSION,
         "ch.qos.logback:logback-core:%s" % LOGBACK_VERSION,
-        "com.fasterxml.jackson.core:jackson-annotations:%s" % JACKSON_VERSION,
-        "com.fasterxml.jackson.core:jackson-core:%s" % JACKSON_VERSION,
-        "com.fasterxml.jackson.core:jackson-databind:%s" % JACKSON_VERSION,
-        "com.fasterxml.jackson.datatype:jackson-datatype-guava:%s" % JACKSON_VERSION,
-        "com.fasterxml.jackson.datatype:jackson-datatype-jdk8:%s" % JACKSON_VERSION,
-        "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:%s" % JACKSON_VERSION,
-        "com.fasterxml.jackson.module:jackson-module-scala_2.13:%s" % JACKSON_VERSION,
+        "com.fasterxml.jackson.core:jackson-annotations",
+        "com.fasterxml.jackson.core:jackson-core",
+        "com.fasterxml.jackson.core:jackson-databind",
+        "com.fasterxml.jackson.datatype:jackson-datatype-guava",
+        "com.fasterxml.jackson.datatype:jackson-datatype-jdk8",
+        "com.fasterxml.jackson.datatype:jackson-datatype-jsr310",
+        "com.fasterxml.jackson.module:jackson-module-scala_2.13",
         "com.google.guava:guava:33.5.0-jre",
-        "io.micronaut:micronaut-inject:%s" % MICRONAUT_VERSION,
-        "io.micronaut:micronaut-inject-java:%s" % MICRONAUT_VERSION,
-        "io.micronaut.validation:micronaut-validation:%s" % MICRONAUT_VERSION,
-        "io.micronaut.validation:micronaut-validation-processor:%s" % MICRONAUT_VERSION,
-        "io.micronaut:micronaut-http-client:%s" % MICRONAUT_VERSION,
-        "io.micronaut:micronaut-http-server-netty:%s" % MICRONAUT_VERSION,
-        "io.micronaut:micronaut-jackson-databind:%s" % MICRONAUT_VERSION,
-        "io.micronaut:micronaut-runtime:%s" % MICRONAUT_VERSION,
-        "io.micronaut.jaxrs:micronaut-jaxrs-processor:%s" % MICRONAUT_VERSION,
-        "io.micronaut.jaxrs:micronaut-jaxrs-server:%s" % MICRONAUT_VERSION,
-        "io.netty:netty-common:%s" % NETTY_VERSION,
-        "io.netty:netty-codec:%s" % NETTY_VERSION,
-        "io.netty:netty-handler:%s" % NETTY_VERSION,
-        "io.netty:netty-transport:%s" % NETTY_VERSION,
+        "io.micronaut:micronaut-inject",
+        "io.micronaut:micronaut-inject-java",
+        "io.micronaut.validation:micronaut-validation",
+        "io.micronaut.validation:micronaut-validation-processor",
+        "io.micronaut:micronaut-http-client",
+        "io.micronaut:micronaut-http-server-netty",
+        "io.micronaut:micronaut-jackson-databind",
+        "io.micronaut:micronaut-runtime",
+        "io.micronaut.jaxrs:micronaut-jaxrs-processor",
+        "io.micronaut.jaxrs:micronaut-jaxrs-server",
+        "io.netty:netty-common",
+        "io.netty:netty-codec",
+        "io.netty:netty-handler",
+        "io.netty:netty-transport",
         "io.sentry:sentry-logback:8.26.0",
         "jakarta.annotation:jakarta.annotation-api:3.0.0",
         "junit:junit:4.13.2",
         "org.assertj:assertj-core:3.27.6",
         "org.eclipse.jetty:jetty-server:%s" % JETTY_VERSION,
         "org.eclipse.jetty.websocket:websocket-jetty-server:%s" % JETTY_VERSION,
+        "org.jspecify:jspecify:1.0.0",
         "org.scala-lang:scala3-library_3:jar:3.3.1",
         "org.scala-lang:scala3-compiler_3:3.7.4",
         "org.slf4j:slf4j-api:2.0.17",
+    ],
+    boms = [
+        "io.netty:netty-bom:4.2.9.Final",
+        "io.micronaut:micronaut-core-bom:4.10.12",
+        "io.micronaut.jaxrs:micronaut-jaxrs-bom:4.10.0",
+        "io.micronaut.validation:micronaut-validation-bom:4.12.0",
+        "com.fasterxml.jackson:jackson-bom:2.20.1",
     ],
     generate_compat_repositories = True,
     lock_file = "//:maven_install.json",
