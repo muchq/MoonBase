@@ -1,9 +1,0 @@
-{
-  "tool": "maven",
-  "name": "maven-test-project",
-  "description": "Maven project for testing",
-  "mode": "sync",
-  "retention": "error",
-  "retention_duration_days": 30,
-  "environment": "native"
-}
