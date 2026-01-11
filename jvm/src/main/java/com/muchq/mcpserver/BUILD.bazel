@@ -23,6 +23,10 @@ java_binary(
         "@maven//:ch_qos_logback_logback_classic",
     ],
     deps = [
+        "//jvm/src/main/java/com/muchq/chess_com_api",
+        "//jvm/src/main/java/com/muchq/http_client/core",
+        "//jvm/src/main/java/com/muchq/http_client/jdk11",
+        "//jvm/src/main/java/com/muchq/json",
         "//jvm/src/main/java/com/muchq/mcpserver/dtos",
         "//jvm/src/main/java/com/muchq/mcpserver/tools",
         "@maven//:com_fasterxml_jackson_core_jackson_annotations",
