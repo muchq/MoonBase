@@ -4,6 +4,7 @@ java_library(
     name = "tools",
     srcs = [
         "AddTool.java",
+        "ChessComGamesTool.java",
         "EchoTool.java",
         "McpTool.java",
         "RandomIntTool.java",
@@ -12,7 +13,10 @@ java_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        "//jvm/src/main/java/com/muchq/chess_com_api",
         "//jvm/src/main/java/com/muchq/mcpserver/dtos",
+        "@maven//:com_fasterxml_jackson_core_jackson_core",
+        "@maven//:com_fasterxml_jackson_core_jackson_databind",
         "@maven//:org_slf4j_slf4j_api",
     ],
 )
