@@ -1,5 +1,7 @@
 package com.muchq.mcpserver;
 
+import com.muchq.mcpserver.dtos.JsonRpcError;
+import com.muchq.mcpserver.dtos.JsonRpcResponse;
 import io.micronaut.context.annotation.Requires;
 import io.micronaut.context.annotation.Value;
 import io.micronaut.http.HttpRequest;

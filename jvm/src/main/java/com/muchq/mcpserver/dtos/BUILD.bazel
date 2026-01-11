@@ -1,0 +1,25 @@
+load("@rules_java//java:defs.bzl", "java_library")
+
+java_library(
+    name = "dtos",
+    srcs = [
+        "ClientInfo.java",
+        "ContentItem.java",
+        "InitializeParams.java",
+        "InitializeResult.java",
+        "JsonRpcError.java",
+        "JsonRpcRequest.java",
+        "JsonRpcResponse.java",
+        "ServerCapabilities.java",
+        "ServerInfo.java",
+        "Tool.java",
+        "ToolCallParams.java",
+        "ToolCallResult.java",
+        "ToolsCapability.java",
+        "ToolsListResult.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@maven//:com_fasterxml_jackson_core_jackson_annotations",
+    ],
+)

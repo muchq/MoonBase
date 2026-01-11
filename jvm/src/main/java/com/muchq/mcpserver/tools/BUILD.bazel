@@ -1,0 +1,20 @@
+load("@rules_java//java:defs.bzl", "java_library")
+
+java_library(
+    name = "tools",
+    srcs = [
+        "AddTool.java",
+        "EchoTool.java",
+        "McpTool.java",
+        "RandomIntTool.java",
+        "ServerTimeTool.java",
+        "Tool.java",
+        "ToolRegistry.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//jvm/src/main/java/com/muchq/mcpserver/dtos",
+        "@maven//:jakarta_inject_jakarta_inject_api",
+        "@maven//:org_slf4j_slf4j_api",
+    ],
+)
