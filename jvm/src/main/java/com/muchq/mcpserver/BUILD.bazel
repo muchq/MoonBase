@@ -5,9 +5,9 @@ java_binary(
     name = "mcpserver",
     srcs = [
         "App.java",
-        "ClockFactory.java",
         "McpAuthenticationFilter.java",
         "McpController.java",
+        "McpModule.java",
         "McpRequestHandler.java",
     ],
     main_class = "com.muchq.mcpserver.App",
