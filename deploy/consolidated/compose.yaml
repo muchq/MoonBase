@@ -17,6 +17,7 @@ services:
       - portrait
       - prom_proxy
       - r3dr
+      - mcpserver
     networks:
       - app_network
     deploy:
@@ -126,6 +127,24 @@ services:
         limits:
           cpus: '0.25'
           memory: 256M
+
+  mcpserver:
+    image: ghcr.io/muchq/mcpserver:latest
+    restart: always
+    ports:
+      - "8086:8080"
+    environment:
+      - PORT=8080
+      - APP_NAME=mcpserver
+    volumes:
+      - /etc/mcpserver:/etc/mcpserver
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
 
 volumes:
   caddy_data:

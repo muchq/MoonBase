@@ -107,3 +107,20 @@ r3dr.net {
 consolidated.cmptr.info {
 	respond "Consolidating..."
 }
+
+mcp.1d4.net {
+	@mcp {
+		method POST
+		path /mcp
+	}
+
+	reverse_proxy @mcp mcpserver:8080
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 1gb
+			roll_keep 5
+			roll_keep_for 90d
+		}
+	}
+}
