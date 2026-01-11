@@ -1,7 +1,8 @@
 package com.muchq.mcpserver.tools;
 
 import com.muchq.mcpserver.dtos.Tool;
-import jakarta.inject.Singleton;
+import io.micronaut.context.annotation.Context;
+import jakarta.inject.Inject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -10,13 +11,15 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-@Singleton
+@Context
 public class ToolRegistry {
   private static final Logger LOG = LoggerFactory.getLogger(ToolRegistry.class);
   private final Map<String, McpTool> toolsByName;
 
+  @Inject
   public ToolRegistry(List<McpTool> tools) {
     this.toolsByName = tools.stream().collect(Collectors.toMap(McpTool::getName, Function.identity()));
+    LOG.info("tools: {}", tools);
     for (var tool : tools) {
       LOG.info("registered {} tool", tool.getName());
     }
