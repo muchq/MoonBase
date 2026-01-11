@@ -109,11 +109,12 @@ consolidated.cmptr.info {
 }
 
 mcp.1d4.net {
-	@mcp_ws {
+	@mcp {
+		method POST
 		path /mcp
 	}
 
-	reverse_proxy @mcp_ws mcpserver:8080
+	reverse_proxy @mcp mcpserver:8080
 
 	log {
 		output file /var/log/caddy/access.log {
