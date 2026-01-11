@@ -1,12 +1,8 @@
 package com.muchq.mcpserver.tools;
 
-import jakarta.inject.Singleton;
-
 import java.util.List;
 import java.util.Map;
 
-@Tool
-@Singleton
 public class AddTool implements McpTool {
     @Override
     public String getName() {

@@ -1,13 +1,9 @@
 package com.muchq.mcpserver.tools;
 
-import jakarta.inject.Singleton;
-
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Map;
 
-@Tool
-@Singleton
 public class ServerTimeTool implements McpTool {
     private final Clock clock;
 
