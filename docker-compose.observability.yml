@@ -41,7 +41,7 @@ services:
           memory: 512M
 
   cadvisor:
-    image: ghcr.io/google/cadvisor:v0.54.1
+    image: ghcr.io/google/cadvisor:0.55.1
     restart: always
     volumes:
       - /:/rootfs:ro
