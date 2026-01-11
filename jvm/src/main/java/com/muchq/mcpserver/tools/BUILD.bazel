@@ -1,0 +1,28 @@
+load("@rules_java//java:defs.bzl", "java_library")
+
+java_library(
+    name = "tools",
+    srcs = [
+        "AddTool.java",
+        "EchoTool.java",
+        "McpTool.java",
+        "RandomIntTool.java",
+        "ServerTimeTool.java",
+        "Tool.java",
+        "ToolRegistry.java",
+    ],
+    plugins = [
+        "//bazel/rules:micronaut_type_element_visitor_processor",
+        "//bazel/rules:micronaut_aggregating_type_element_visitor_processor",
+        "//bazel/rules:micronaut_bean_definition_inject_processor",
+        "//bazel/rules:micronaut_package_element_visitor_processor",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//jvm/src/main/java/com/muchq/mcpserver/dtos",
+        "@maven//:io_micronaut_micronaut_context",
+        "@maven//:io_micronaut_micronaut_inject",
+        "@maven//:jakarta_inject_jakarta_inject_api",
+        "@maven//:org_slf4j_slf4j_api",
+    ],
+)

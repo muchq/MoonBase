@@ -1,4 +1,4 @@
-package com.muchq.mcpserver;
+package com.muchq.mcpserver.dtos;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;

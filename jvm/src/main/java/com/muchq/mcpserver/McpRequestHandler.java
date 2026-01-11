@@ -1,11 +1,24 @@
 package com.muchq.mcpserver;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.muchq.mcpserver.dtos.ContentItem;
+import com.muchq.mcpserver.dtos.InitializeResult;
+import com.muchq.mcpserver.dtos.JsonRpcError;
+import com.muchq.mcpserver.dtos.JsonRpcRequest;
+import com.muchq.mcpserver.dtos.JsonRpcResponse;
+import com.muchq.mcpserver.dtos.ServerCapabilities;
+import com.muchq.mcpserver.dtos.ServerInfo;
+import com.muchq.mcpserver.dtos.ToolCallParams;
+import com.muchq.mcpserver.dtos.ToolCallResult;
+import com.muchq.mcpserver.dtos.ToolsCapability;
+import com.muchq.mcpserver.dtos.ToolsListResult;
+import com.muchq.mcpserver.tools.ToolRegistry;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import java.util.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.List;
 
 @Singleton
 public class McpRequestHandler {
