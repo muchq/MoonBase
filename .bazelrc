@@ -38,10 +38,10 @@ build:debug -c dbg
 build --compilation_mode=opt
 test --compilation_mode=opt
 
-common --java_language_version=21
-common --java_runtime_version=remotejdk_21
-common --tool_java_language_version=21
-common --tool_java_runtime_version=remotejdk_21
+common --java_language_version=25
+common --java_runtime_version=remotejdk_25
+common --tool_java_language_version=25
+common --tool_java_runtime_version=remotejdk_25
 
 # build --strategy=Scalac=worker
 
