@@ -3,3 +3,7 @@ micronaut:
     port: ${PORT:8080}
   application:
     name: ${APP_NAME:helloworld}
+
+mcp:
+  auth:
+    token: ${MCP_AUTH_TOKEN:}
