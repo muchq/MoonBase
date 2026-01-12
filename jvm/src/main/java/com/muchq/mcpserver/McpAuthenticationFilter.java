@@ -17,6 +17,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+
 @Filter("/mcp/**")
 @Requires(property = "mcp.auth.token")
 public class McpAuthenticationFilter implements HttpServerFilter {
@@ -61,7 +64,9 @@ public class McpAuthenticationFilter implements HttpServerFilter {
 
     String token = authHeader.substring(7); // Remove "Bearer " prefix
 
-    if (!requiredToken.equals(token)) {
+    if (!MessageDigest.isEqual(
+            requiredToken.getBytes(StandardCharsets.UTF_8),
+            token.getBytes(StandardCharsets.UTF_8))) {
       LOG.warn("Invalid authentication token");
       return Mono.just(
           HttpResponse.status(HttpStatus.UNAUTHORIZED)
