@@ -37,15 +37,17 @@ public class ChessComGamesTool implements McpTool {
                         "year", Map.of("type", "string", "description", "The year the games were played (yyyy format)"),
                         "month", Map.of("type", "string", "description", "The month the games were played (MM format)")
                         ),
-                "required", List.of("message")
+                "required", List.of("username", "year", "month")
         );
     }
 
     @Override
     public String execute(Map<String, Object> arguments) {
-        String player = (String) arguments.get("message");
-        int year = ((Number) arguments.get("year")).intValue();
-        int month = ((Number) arguments.get("month")).intValue();
+        String player = (String) arguments.get("username");
+        String yearStr = (String) arguments.get("year");
+        String monthStr = (String) arguments.get("month");
+        int year = Integer.parseInt(yearStr);
+        int month = Integer.parseInt(monthStr);
         var gamesMaybe = chessClient.fetchGames(player, YearMonth.of(year, month));
 
         try {
