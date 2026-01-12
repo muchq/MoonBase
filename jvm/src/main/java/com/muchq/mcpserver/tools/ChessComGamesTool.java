@@ -50,8 +50,12 @@ public class ChessComGamesTool implements McpTool {
         int month = Integer.parseInt(monthStr);
         var gamesMaybe = chessClient.fetchGames(player, YearMonth.of(year, month));
 
+        if (gamesMaybe.isEmpty()) {
+            return "player not found";
+        }
+
         try {
-            return mapper.writeValueAsString(gamesMaybe);
+            return mapper.writeValueAsString(gamesMaybe.get());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

@@ -7,6 +7,8 @@ import com.muchq.http_client.jdk.Jdk11HttpClient;
 import com.muchq.json.JsonUtils;
 import com.muchq.mcpserver.tools.AddTool;
 import com.muchq.mcpserver.tools.ChessComGamesTool;
+import com.muchq.mcpserver.tools.ChessComPlayerTool;
+import com.muchq.mcpserver.tools.ChessComStatsTool;
 import com.muchq.mcpserver.tools.EchoTool;
 import com.muchq.mcpserver.tools.McpTool;
 import com.muchq.mcpserver.tools.RandomIntTool;
@@ -43,12 +45,14 @@ public class McpModule {
 
     @Context
     public List<McpTool> mcpTools(Clock clock, ChessClient chessClient, ObjectMapper objectMapper) {
-        return List.of(
-                new AddTool(),
-                new ChessComGamesTool(chessClient, objectMapper),
-                new EchoTool(),
-                new RandomIntTool(),
-                new ServerTimeTool(clock));
+    return List.of(
+        new AddTool(),
+        new ChessComGamesTool(chessClient, objectMapper),
+        new ChessComPlayerTool(chessClient, objectMapper),
+        new ChessComStatsTool(chessClient, objectMapper),
+        new EchoTool(),
+        new RandomIntTool(),
+        new ServerTimeTool(clock));
     }
 
     @Context
