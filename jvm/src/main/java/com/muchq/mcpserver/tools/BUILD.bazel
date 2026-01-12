@@ -5,6 +5,8 @@ java_library(
     srcs = [
         "AddTool.java",
         "ChessComGamesTool.java",
+        "ChessComPlayerTool.java",
+        "ChessComStatsTool.java",
         "EchoTool.java",
         "McpTool.java",
         "RandomIntTool.java",
