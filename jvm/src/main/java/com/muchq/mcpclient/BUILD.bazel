@@ -1,0 +1,21 @@
+load("@rules_java//java:java_library.bzl", "java_library")
+
+java_library(
+    name = "config",
+    srcs = ["McpClientConfig.java"],
+    visibility = [
+        "//jvm/src/main/java/com/muchq/mcpclient:__subpackages__",
+    ],
+)
+
+java_library(
+    name = "mcpclient",
+    srcs = ["McpClientWrapper.java"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":config",
+        "//jvm/src/main/java/com/muchq/mcpclient/oauth",
+        "@maven//:io_modelcontextprotocol_sdk_mcp",
+        "@maven//:org_slf4j_slf4j_api",
+    ],
+)

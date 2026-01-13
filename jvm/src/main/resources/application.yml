@@ -7,3 +7,8 @@ micronaut:
 mcp:
   auth:
     token: ${MCP_AUTH_TOKEN:}
+  oauth:
+    enabled: ${MCP_OAUTH_ENABLED:true}
+    authorization-server: ${MCP_OAUTH_AUTHZ_SERVER:http://localhost:8180/realms/mcp-demo}
+    resource-uri: ${MCP_RESOURCE_URI:http://localhost:8080}
+    jwks-uri: ${MCP_OAUTH_JWKS_URI:http://localhost:8180/realms/mcp-demo/protocol/openid-connect/certs}

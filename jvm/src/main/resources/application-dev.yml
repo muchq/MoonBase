@@ -1,0 +1,6 @@
+mcp:
+  oauth:
+    enabled: true
+    authorization-server: http://localhost:8180/realms/mcp-demo
+    resource-uri: http://localhost:8080
+    jwks-uri: http://localhost:8180/realms/mcp-demo/protocol/openid-connect/certs
