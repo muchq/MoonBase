@@ -29,6 +29,8 @@ class GolfServiceImpl final : public golf_grpc::Golf::Service {
                               golf_grpc::SwapForDiscardResponse* response) override;
   grpc::Status Knock(grpc::ServerContext* context, const golf_grpc::KnockRequest* request,
                      golf_grpc::KnockResponse* response) override;
+  grpc::Status GetGame(grpc::ServerContext* context, const golf_grpc::GetGameRequest* request,
+                       golf_grpc::GetGameResponse* response) override;
 
  private:
   void HydrateResponseGameState(const std::string& current_user_id,
