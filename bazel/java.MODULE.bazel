@@ -1,4 +1,4 @@
-bazel_dep(name = "rules_java", version = "9.0.3")
+bazel_dep(name = "rules_java", version = "9.3.0")
 bazel_dep(name = "rules_jvm_external", version = "6.9")
 bazel_dep(name = "contrib_rules_jvm", version = "0.31.1")
 
@@ -41,8 +41,6 @@ maven.install(
         "org.eclipse.jetty:jetty-server:%s" % JETTY_VERSION,
         "org.eclipse.jetty.websocket:websocket-jetty-server:%s" % JETTY_VERSION,
         "org.jspecify:jspecify:1.0.0",
-        "org.scala-lang:scala3-library_3:jar:3.3.1",
-        "org.scala-lang:scala3-compiler_3:3.7.4",
         "org.slf4j:slf4j-api:2.0.17",
     ],
     boms = [

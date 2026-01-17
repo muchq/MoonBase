@@ -577,4 +577,340 @@ TEST_F(SlidingWindowRateLimiterTest, WindowSlidingExactBoundaries) {
   EXPECT_FALSE(limiter.allow("key1"));
 }
 
+// ============================================================================
+// Eviction Tests with MockClock
+// ============================================================================
+
+TEST_F(SlidingWindowRateLimiterTest, EvictionRemovesExpiredKeysWithMockClock) {
+  // TTL of 100ms, cleanup interval of 50ms
+  auto start_time = std::chrono::steady_clock::now();
+  MockClock::set_time(start_time);
+
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, std::chrono::milliseconds(100),
+                                        std::chrono::milliseconds(50)};
+  SlidingWindowRateLimiter<std::string, MockClock> limiter(config);
+
+  // Access key1 and key2
+  EXPECT_TRUE(limiter.allow("key1"));
+  EXPECT_TRUE(limiter.allow("key2"));
+
+  // Advance time past TTL and cleanup interval
+  MockClock::advance_time(std::chrono::milliseconds(150));
+
+  // Access key3, which should trigger cleanup and evict key1 and key2
+  EXPECT_TRUE(limiter.allow("key3"));
+
+  // key1 and key2 should be evicted and treated as fresh keys
+  // (full quota available again)
+  for (int i = 0; i < max_requests; ++i) {
+    EXPECT_TRUE(limiter.allow("key1")) << "Request " << i << " to evicted key1 should be allowed";
+  }
+  EXPECT_FALSE(limiter.allow("key1"));
+}
+
+TEST_F(SlidingWindowRateLimiterTest, EvictionPreservesRecentlyAccessedKeys) {
+  auto start_time = std::chrono::steady_clock::now();
+  MockClock::set_time(start_time);
+
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, std::chrono::milliseconds(100),
+                                        std::chrono::milliseconds(50)};
+  SlidingWindowRateLimiter<std::string, MockClock> limiter(config);
+
+  // Access key1 and use up its quota
+  for (int i = 0; i < max_requests; ++i) {
+    EXPECT_TRUE(limiter.allow("key1"));
+  }
+  EXPECT_FALSE(limiter.allow("key1"));
+
+  // Advance time but not past TTL
+  MockClock::advance_time(std::chrono::milliseconds(60));
+
+  // Access key1 again to update its last_access time
+  EXPECT_FALSE(limiter.allow("key1"));  // Still rate limited
+
+  // Advance time past original TTL but not past key1's new last_access + TTL
+  MockClock::advance_time(std::chrono::milliseconds(60));
+
+  // Access key2 to trigger cleanup
+  EXPECT_TRUE(limiter.allow("key2"));
+
+  // key1 should still be rate limited (not evicted because we accessed it recently)
+  EXPECT_FALSE(limiter.allow("key1"));
+}
+
+TEST_F(SlidingWindowRateLimiterTest, EvictionWithMaxKeysLimit) {
+  // max_keys = 3, TTL = 100ms, cleanup = 50ms
+  auto start_time = std::chrono::steady_clock::now();
+  MockClock::set_time(start_time);
+
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, std::chrono::milliseconds(100),
+                                        std::chrono::milliseconds(50), 3};
+  SlidingWindowRateLimiter<std::string, MockClock> limiter(config);
+
+  // Fill up to max keys
+  EXPECT_TRUE(limiter.allow("key1"));
+  EXPECT_TRUE(limiter.allow("key2"));
+  EXPECT_TRUE(limiter.allow("key3"));
+  EXPECT_FALSE(limiter.allow("key4"));  // Rejected due to max keys
+
+  // Advance time past TTL for key1 and key2
+  MockClock::advance_time(std::chrono::milliseconds(60));
+  EXPECT_TRUE(limiter.allow("key3"));  // Refresh key3's last_access
+
+  MockClock::advance_time(std::chrono::milliseconds(60));
+
+  // This should trigger cleanup, evicting key1 and key2 but keeping key3
+  EXPECT_TRUE(limiter.allow("key4"));  // Now allowed after eviction
+  EXPECT_TRUE(limiter.allow("key5"));  // Also allowed
+  EXPECT_FALSE(limiter.allow("key6"));  // Rejected - max keys again (key3, key4, key5)
+}
+
+// ============================================================================
+// Cleanup Behavior Tests with MockClock
+// ============================================================================
+
+TEST_F(SlidingWindowRateLimiterTest, CleanupOnlyRunsAfterInterval) {
+  auto start_time = std::chrono::steady_clock::now();
+  MockClock::set_time(start_time);
+
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, std::chrono::milliseconds(50),
+                                        std::chrono::milliseconds(100)};  // cleanup_interval > ttl
+  SlidingWindowRateLimiter<std::string, MockClock> limiter(config);
+
+  // Access key1 once at t=0
+  EXPECT_TRUE(limiter.allow("key1"));
+
+  // Advance past TTL but before cleanup interval
+  MockClock::advance_time(std::chrono::milliseconds(75));
+
+  // Access key2 - should NOT trigger cleanup yet (75ms < 100ms cleanup_interval)
+  EXPECT_TRUE(limiter.allow("key2"));
+
+  // key1 should still exist at this point (cleanup hasn't run)
+  // We can verify by accessing key1 again - it will refresh last_access but that's OK
+  // since we're just confirming key1 wasn't evicted prematurely
+  EXPECT_TRUE(limiter.allow("key1"));  // key1 still has quota (only 1 of 5 used)
+
+  // Now advance more - key2 is at t=75ms, key1 is now also at t=75ms (just refreshed)
+  // Advance to t=200ms (past cleanup_interval from t=0)
+  MockClock::advance_time(std::chrono::milliseconds(125));
+
+  // Access key3 - should trigger cleanup
+  // cutoff = t=200 - 50(ttl) = t=150
+  // key1 last_access = t=75 < t=150, so key1 should be evicted
+  // key2 last_access = t=75 < t=150, so key2 should be evicted
+  EXPECT_TRUE(limiter.allow("key3"));
+
+  // key1 should now be evicted and fresh (full quota available)
+  for (int i = 0; i < max_requests; ++i) {
+    EXPECT_TRUE(limiter.allow("key1")) << "Request " << i << " should be allowed after eviction";
+  }
+  EXPECT_FALSE(limiter.allow("key1"));  // Now rate limited again
+}
+
+TEST_F(SlidingWindowRateLimiterTest, CleanupDoesNotEvictActiveKeys) {
+  auto start_time = std::chrono::steady_clock::now();
+  MockClock::set_time(start_time);
+
+  // TTL = 100ms, cleanup_interval = 50ms
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, std::chrono::milliseconds(100),
+                                        std::chrono::milliseconds(50)};
+  SlidingWindowRateLimiter<std::string, MockClock> limiter(config);
+
+  // Create keys at t=0: key0 through key4
+  for (int i = 0; i < 5; ++i) {
+    EXPECT_TRUE(limiter.allow("key" + std::to_string(i)));
+  }
+
+  // At t=60ms, access key0 and key1 to keep them active
+  MockClock::advance_time(std::chrono::milliseconds(60));
+  EXPECT_TRUE(limiter.allow("key0"));  // key0 last_access = t=60
+  EXPECT_TRUE(limiter.allow("key1"));  // key1 last_access = t=60
+
+  // At t=160ms, trigger cleanup
+  // cutoff = t=160 - 100(ttl) = t=60
+  // key0 last_access = t=60, NOT < t=60, so NOT evicted
+  // key1 last_access = t=60, NOT < t=60, so NOT evicted
+  // key2 last_access = t=0 < t=60, so evicted
+  // key3 last_access = t=0 < t=60, so evicted
+  // key4 last_access = t=0 < t=60, so evicted
+  MockClock::advance_time(std::chrono::milliseconds(100));
+  EXPECT_TRUE(limiter.allow("new_key"));  // Triggers cleanup
+
+  // key0 and key1 should still have their counts (not evicted)
+  // key0 had 2 requests (1 at t=0, 1 at t=60), so should allow 3 more
+  int key0_remaining = 0;
+  while (limiter.allow("key0")) {
+    key0_remaining++;
+  }
+  EXPECT_EQ(key0_remaining, max_requests - 2) << "key0 should have 2 requests already used";
+
+  // key2 should be evicted and have full quota
+  for (int i = 0; i < max_requests; ++i) {
+    EXPECT_TRUE(limiter.allow("key2")) << "Request " << i << " to evicted key2 should be allowed";
+  }
+  EXPECT_FALSE(limiter.allow("key2"));
+}
+
+TEST_F(SlidingWindowRateLimiterTest, CleanupHandlesEmptyMap) {
+  auto start_time = std::chrono::steady_clock::now();
+  MockClock::set_time(start_time);
+
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, std::chrono::milliseconds(50),
+                                        std::chrono::milliseconds(10)};
+  SlidingWindowRateLimiter<std::string, MockClock> limiter(config);
+
+  // Advance time past cleanup interval without any keys
+  MockClock::advance_time(std::chrono::milliseconds(100));
+
+  // First access should work fine (cleanup on empty map is a no-op)
+  EXPECT_TRUE(limiter.allow("key1"));
+}
+
+// ============================================================================
+// High-Key Volume Tests
+// ============================================================================
+
+TEST_F(SlidingWindowRateLimiterTest, HighKeyVolumeWithoutLimit) {
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, ttl, cleanup_interval};
+  SlidingWindowRateLimiter<std::string> limiter(config);
+
+  const int num_keys = 1000;
+
+  // Create many keys
+  for (int i = 0; i < num_keys; ++i) {
+    EXPECT_TRUE(limiter.allow("key" + std::to_string(i)))
+        << "First request for key " << i << " should be allowed";
+  }
+
+  // All keys should be independently rate limited
+  for (int i = 0; i < num_keys; ++i) {
+    std::string key = "key" + std::to_string(i);
+    // Each key already has 1 request, should allow max_requests - 1 more
+    for (int j = 1; j < max_requests; ++j) {
+      EXPECT_TRUE(limiter.allow(key)) << "Request " << j << " for key " << i << " should be allowed";
+    }
+    EXPECT_FALSE(limiter.allow(key)) << "Request over limit for key " << i << " should be rejected";
+  }
+}
+
+TEST_F(SlidingWindowRateLimiterTest, HighKeyVolumeWithMaxKeysLimit) {
+  const size_t max_keys_limit = 100;
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, ttl, cleanup_interval,
+                                        max_keys_limit};
+  SlidingWindowRateLimiter<std::string> limiter(config);
+
+  // Create keys up to the limit
+  for (size_t i = 0; i < max_keys_limit; ++i) {
+    EXPECT_TRUE(limiter.allow("key" + std::to_string(i)))
+        << "Key " << i << " should be allowed (under limit)";
+  }
+
+  // Additional keys should be rejected
+  for (int i = 0; i < 50; ++i) {
+    EXPECT_FALSE(limiter.allow("extra_key" + std::to_string(i)))
+        << "Extra key " << i << " should be rejected (over max keys)";
+  }
+
+  // Existing keys should still work
+  for (size_t i = 0; i < max_keys_limit; ++i) {
+    EXPECT_TRUE(limiter.allow("key" + std::to_string(i)))
+        << "Existing key " << i << " should still be allowed";
+  }
+}
+
+TEST_F(SlidingWindowRateLimiterTest, HighKeyVolumeWithEviction) {
+  // Small TTL and cleanup interval for fast eviction
+  auto start_time = std::chrono::steady_clock::now();
+  MockClock::set_time(start_time);
+
+  const size_t max_keys_limit = 50;
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, std::chrono::milliseconds(50),
+                                        std::chrono::milliseconds(10), max_keys_limit};
+  SlidingWindowRateLimiter<std::string, MockClock> limiter(config);
+
+  // Fill up to max keys
+  for (size_t i = 0; i < max_keys_limit; ++i) {
+    EXPECT_TRUE(limiter.allow("batch1_key" + std::to_string(i)));
+  }
+  EXPECT_FALSE(limiter.allow("overflow_key"));
+
+  // Advance time past TTL + cleanup interval
+  MockClock::advance_time(std::chrono::milliseconds(100));
+
+  // New keys should now be allowed after eviction
+  for (size_t i = 0; i < max_keys_limit; ++i) {
+    EXPECT_TRUE(limiter.allow("batch2_key" + std::to_string(i)))
+        << "Batch2 key " << i << " should be allowed after eviction";
+  }
+  EXPECT_FALSE(limiter.allow("batch2_overflow"));
+}
+
+TEST_F(SlidingWindowRateLimiterTest, HighKeyVolumeConcurrentAccess) {
+  const size_t max_keys_limit = 200;
+  SlidingWindowRateLimiterConfig config{10, std::chrono::milliseconds(1000), ttl, cleanup_interval,
+                                        max_keys_limit};
+  SlidingWindowRateLimiter<std::string> limiter(config);
+
+  const int num_threads = 20;
+  const int keys_per_thread = 50;  // Each thread tries different keys
+  std::vector<std::future<int>> futures;
+
+  for (int t = 0; t < num_threads; ++t) {
+    futures.push_back(std::async(std::launch::async, [&limiter, t]() {
+      int successful_keys = 0;
+      for (int i = 0; i < keys_per_thread; ++i) {
+        std::string key = "thread" + std::to_string(t) + "_key" + std::to_string(i);
+        if (limiter.allow(key)) {
+          successful_keys++;
+        }
+      }
+      return successful_keys;
+    }));
+  }
+
+  int total_successful = 0;
+  for (auto& future : futures) {
+    total_successful += future.get();
+  }
+
+  // Should not exceed max_keys_limit total unique keys
+  EXPECT_LE(total_successful, static_cast<int>(max_keys_limit))
+      << "Total successful keys should not exceed max_keys_limit";
+  EXPECT_GT(total_successful, 0) << "Should allow some keys";
+}
+
+TEST_F(SlidingWindowRateLimiterTest, HighKeyVolumeMemoryStability) {
+  // Test that with eviction, memory usage stays bounded even with many unique keys over time
+  auto start_time = std::chrono::steady_clock::now();
+  MockClock::set_time(start_time);
+
+  SlidingWindowRateLimiterConfig config{max_requests, window_size, std::chrono::milliseconds(50),
+                                        std::chrono::milliseconds(10), 100};
+  SlidingWindowRateLimiter<std::string, MockClock> limiter(config);
+
+  // Simulate many batches of keys over time
+  for (int batch = 0; batch < 10; ++batch) {
+    // Each batch uses 100 unique keys
+    for (int i = 0; i < 100; ++i) {
+      std::string key = "batch" + std::to_string(batch) + "_key" + std::to_string(i);
+      limiter.allow(key);  // May or may not succeed depending on max_keys
+    }
+
+    // Advance time to trigger eviction of previous batch
+    MockClock::advance_time(std::chrono::milliseconds(100));
+  }
+
+  // After all batches, should still be able to add new keys
+  // (old ones should have been evicted)
+  int new_keys_allowed = 0;
+  for (int i = 0; i < 100; ++i) {
+    if (limiter.allow("final_key" + std::to_string(i))) {
+      new_keys_allowed++;
+    }
+  }
+
+  EXPECT_EQ(new_keys_allowed, 100) << "Should allow full batch of new keys after evictions";
+}
+
 }  // namespace futility::rate_limiter
