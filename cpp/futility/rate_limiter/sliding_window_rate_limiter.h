@@ -1,6 +1,32 @@
 #ifndef CPP_FUTILITY_RATE_LIMITER_SLIDING_WINDOW_RATE_LIMITER_H
 #define CPP_FUTILITY_RATE_LIMITER_SLIDING_WINDOW_RATE_LIMITER_H
 
+/// @file sliding_window_rate_limiter.h
+/// @brief Thread-safe per-key sliding window rate limiter.
+///
+/// This rate limiter uses a sliding window algorithm that provides smoother rate limiting
+/// compared to fixed window approaches. It interpolates between the previous and current
+/// window counts based on elapsed time, preventing the "burst at window boundary" problem.
+///
+/// Example usage:
+/// @code
+///   SlidingWindowRateLimiterConfig config{
+///     .max_requests_per_key = 100,
+///     .window_size = std::chrono::seconds(60),
+///     .ttl = std::chrono::minutes(5),
+///     .cleanup_interval = std::chrono::seconds(30),
+///     .max_keys = 10000
+///   };
+///   SlidingWindowRateLimiter<std::string> limiter(config);
+///
+///   std::string client_ip = "192.168.1.1";
+///   if (limiter.allow(client_ip)) {
+///     // Process request
+///   } else {
+///     // Reject with 429 Too Many Requests
+///   }
+/// @endcode
+
 #include <algorithm>
 #include <chrono>
 #include <memory>
@@ -12,27 +38,78 @@
 #include <unordered_map>
 
 namespace futility::rate_limiter {
-struct WindowState {
-  std::mutex mutex;
-  long previous_count{0};
-  long current_count{0};
-  std::chrono::steady_clock::time_point window_start;
-  std::chrono::steady_clock::time_point last_access;
 
-  WindowState(std::chrono::steady_clock::time_point now) : window_start(now), last_access(now) {}
+/// @brief Internal state for tracking a single key's rate limit window.
+/// @note This is an implementation detail and should not be used directly.
+struct WindowState {
+  std::mutex mutex;                                  ///< Per-key mutex for thread safety
+  long previous_count{0};                            ///< Request count from previous window
+  long current_count{0};                             ///< Request count in current window
+  std::chrono::steady_clock::time_point window_start;  ///< Start time of current window
+  std::chrono::steady_clock::time_point last_access;   ///< Last access time (for TTL eviction)
+
+  explicit WindowState(std::chrono::steady_clock::time_point now)
+      : window_start(now), last_access(now) {}
 };
 
+/// @brief Configuration for SlidingWindowRateLimiter.
 struct SlidingWindowRateLimiterConfig {
+  /// Maximum number of requests allowed per key within the window.
+  /// Must be positive.
   long max_requests_per_key;
+
+  /// Duration of the sliding window.
+  /// Must be positive.
   std::chrono::milliseconds window_size;
+
+  /// Time-to-live for inactive keys. Keys not accessed within this duration
+  /// are eligible for eviction during cleanup.
+  /// Default: 5 minutes.
   std::chrono::milliseconds ttl = std::chrono::minutes(5);
+
+  /// Interval between cleanup runs that evict expired keys.
+  /// Lower values reduce memory usage but increase overhead.
+  /// Default: 30 seconds.
   std::chrono::milliseconds cleanup_interval = std::chrono::seconds(30);
+
+  /// Optional maximum number of unique keys to track.
+  /// When set, new keys are rejected if this limit is reached.
+  /// Useful for preventing memory exhaustion from key cardinality attacks.
+  /// Default: no limit (nullopt).
   std::optional<size_t> max_keys = std::nullopt;
 };
 
+/// @brief Thread-safe per-key sliding window rate limiter.
+///
+/// This class implements a sliding window rate limiting algorithm that tracks
+/// request counts per key (e.g., IP address, user ID, API key). The sliding window
+/// approach interpolates between two fixed windows to provide smoother rate limiting.
+///
+/// Thread Safety:
+/// - All public methods are thread-safe.
+/// - Uses a shared mutex for the key map and per-key mutexes for individual states.
+/// - Suitable for high-concurrency scenarios.
+///
+/// Memory Management:
+/// - Automatically evicts keys that haven't been accessed within the TTL.
+/// - Optionally limits the total number of tracked keys via max_keys.
+/// - Cleanup runs lazily during allow() calls, not in a background thread.
+///
+/// @tparam Key The type used to identify rate limit buckets (e.g., std::string, int).
+///             Must be hashable (usable as unordered_map key).
+/// @tparam Clock The clock type for time measurements. Defaults to std::chrono::steady_clock.
+///               Can be substituted with a mock clock for testing.
 template <typename Key, typename Clock = std::chrono::steady_clock>
 class SlidingWindowRateLimiter {
  public:
+  /// @brief Constructs a rate limiter with the given configuration.
+  /// @param config The rate limiter configuration.
+  /// @throws std::invalid_argument if any configuration value is invalid:
+  ///         - max_requests_per_key <= 0
+  ///         - window_size <= 0
+  ///         - ttl <= 0
+  ///         - cleanup_interval <= 0
+  ///         - max_keys == 0 (if specified)
   explicit SlidingWindowRateLimiter(const SlidingWindowRateLimiterConfig& config)
       : max_requests_per_key_(config.max_requests_per_key),
         window_size_(config.window_size),
@@ -57,6 +134,18 @@ class SlidingWindowRateLimiter {
     }
   }
 
+  /// @brief Checks if a request should be allowed and consumes quota if so.
+  ///
+  /// This method atomically checks whether the request can be allowed within
+  /// the rate limit and, if so, increments the request count. The check uses
+  /// a weighted average of the previous and current window counts.
+  ///
+  /// @param key The identifier for the rate limit bucket.
+  /// @param cost The cost of this request (default: 1). Useful for requests
+  ///             that should consume more quota (e.g., batch operations).
+  /// @return true if the request is allowed, false if rate limited.
+  /// @note Returns false if max_keys is set and the limit is reached for new keys.
+  /// @note Calling allow() on a key updates its last_access time, preventing eviction.
   bool allow(const Key& key, long cost = 1) {
     auto state_ptr = get_or_create_state(key);
     if (!state_ptr) {
