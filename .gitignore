@@ -9,6 +9,7 @@ out
 .bazelbsp
 .metals
 .claude
+.kiro
 vcpkg_installed
 conan
 rust-project.json

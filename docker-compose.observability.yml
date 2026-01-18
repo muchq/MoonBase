@@ -24,7 +24,7 @@ services:
           memory: 1G
 
   otelcol:
-    image: otel/opentelemetry-collector-contrib:0.142.0
+    image: otel/opentelemetry-collector-contrib:0.143.1
     restart: always
     command: ["--config=/etc/otel-collector-config.yml"]
     volumes:
@@ -41,7 +41,7 @@ services:
           memory: 512M
 
   cadvisor:
-    image: ghcr.io/google/cadvisor:0.55.1
+    image: ghcr.io/google/cadvisor:0.56.2
     restart: always
     volumes:
       - /:/rootfs:ro
