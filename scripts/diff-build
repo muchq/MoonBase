@@ -42,6 +42,32 @@ echo ""
 # Get current commit for restoration
 CURRENT_COMMIT=$(git rev-parse HEAD)
 
+# Check if Bazel version is changing between base and current
+# If so, bazel-diff won't work reliably, so we need a full build
+CURRENT_BAZEL_VERSION=$(cat .bazelversion 2>/dev/null || echo "")
+BASE_BAZEL_VERSION=$(git show "$BASE_REVISION:.bazelversion" 2>/dev/null || echo "")
+
+if [ "$CURRENT_BAZEL_VERSION" != "$BASE_BAZEL_VERSION" ]; then
+  echo "==================== BAZEL VERSION CHANGE DETECTED ===================="
+  echo "Base version:    ${BASE_BAZEL_VERSION:-'(none)'}"
+  echo "Current version: ${CURRENT_BAZEL_VERSION:-'(none)'}"
+  echo "========================================================================"
+  echo ""
+  echo "bazel-diff is not reliable across Bazel version changes."
+  echo "Falling back to full build and test..."
+  echo ""
+
+  echo "Building all targets..."
+  bazel build //... || exit 1
+
+  echo "Testing all targets..."
+  bazel test //... || exit 1
+
+  echo ""
+  echo "Full build completed successfully!"
+  exit 0
+fi
+
 # Get list of external repos for fine-grained hashing (must be done from current commit)
 echo "Getting external repositories list..."
 cd "$WORKSPACE_ROOT"
