@@ -13,6 +13,7 @@ service Golf {
   rpc SwapForDraw (SwapForDrawRequest) returns (SwapForDrawResponse) {}
   rpc SwapForDiscard (SwapForDiscardRequest) returns (SwapForDiscardResponse) {}
   rpc Knock (KnockRequest) returns (KnockResponse) {}
+  rpc GetGame (GetGameRequest) returns (GetGameResponse) {}
 }
 
 message RegisterUserRequest {
@@ -91,6 +92,15 @@ message KnockRequest {
 }
 
 message KnockResponse {
+  GameState game_state = 1;
+}
+
+message GetGameRequest {
+  string user_id = 1;
+  string game_id = 2;
+}
+
+message GetGameResponse {
   GameState game_state = 1;
 }
 

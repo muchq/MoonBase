@@ -70,6 +70,23 @@ Status GolfServiceImpl::SwapForDiscard(ServerContext* context,
 Status GolfServiceImpl::Knock(ServerContext* context, const golf_grpc::KnockRequest* request,
                               golf_grpc::KnockResponse* response) {
   return Status::OK;
+}
+
+grpc::Status GolfServiceImpl::GetGame(grpc::ServerContext* context,
+                                      const golf_grpc::GetGameRequest* request,
+                                      golf_grpc::GetGameResponse* response) {
+  auto status_or_game_state = gm_->getGameStateForUser(request->game_id(), request->user_id());
+  auto mutable_game_state = response->mutable_game_state();
+
+  auto status_to_return =
+      HandleGameStateResponse(status_or_game_state, request->user_id(), mutable_game_state);
+  if (status_to_return.ok()) {
+    auto& game_state = status_or_game_state.value();
+    if (mutable_game_state->your_turn() && game_state->getPeekedAtDrawPile()) {
+      FlipCard(mutable_game_state->mutable_top_draw(), game_state->getDrawPile());
+    }
+  }
+  return status_to_return;
 };
 
 void GolfServiceImpl::HydrateResponseGameState(const string& current_user_id,
