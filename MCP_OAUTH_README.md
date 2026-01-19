@@ -120,44 +120,54 @@ mcp:
 
 ### Prerequisites
 
-1. **Java/Bazel** - Already set up (you're in MoonBase)
-2. **Docker** - Fix credentials issue first:
+Verify you have the required dependencies:
 
 ```bash
-# Option 1: Add Docker Desktop to PATH
-export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
-echo 'export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"' >> ~/.zshrc
+# Required
+docker --version          # Docker 20+ (with compose v2)
+docker compose version    # Should be built-in with modern Docker
+bazel --version           # Bazel 8+
+java -version             # Java 21+ (or Bazel will manage it)
+python3 --version         # Python 3.x (for JSON parsing in script)
+curl --version            # curl (for health checks)
 
-# Option 2: Disable credential helper
-vim ~/.docker/config.json
-# Remove the "credsStore": "desktop" line
+# macOS only
+lsof -v                   # lsof (for port cleanup)
 ```
+
+**Docker credentials issue (macOS):** If you see `docker-credential-desktop` errors:
+
+```bash
+# Edit ~/.docker/config.json and remove this line:
+# "credsStore": "desktop"
+```
+
+**Ports:** The demo uses ports 8080 (MCP server), 8180 (Keycloak), and 8888 (OAuth callback). Ensure these are free.
 
 ### Run the Demo
 
 ```bash
-cd /Users/andy/src/MoonBase
-
-# Run the complete demo
+# From the repository root
 ./scripts/run-mcp-oauth-demo.sh
 ```
 
 **What happens:**
-1. ✅ Starts Keycloak on http://localhost:8180
-2. ✅ Starts MCP Server with OAuth on http://localhost:8080
-3. 🚀 Runs MCP client which:
-   - Discovers authorization server (RFC 9728)
-   - Fetches authorization server metadata (RFC 8414)
-   - Dynamically registers as OAuth client (RFC 7591)
-   - Generates PKCE parameters (S256)
-   - Opens browser for user login
-   - Exchanges authorization code for token (RFC 8707)
-   - Validates token audience matches MCP server
-   - Displays success message
 
-**Login Credentials:**
-- Username: `testuser`
-- Password: `testpass`
+1. Starts Keycloak authorization server on http://localhost:8180
+2. Starts MCP Server with OAuth enabled on http://localhost:8080
+3. Prompts you to press Enter to start the client demo
+4. Opens your browser for Keycloak login
+5. After you log in, completes the OAuth flow and displays success
+
+**During the demo, you will:**
+
+1. Press Enter when prompted to start
+2. Log in to Keycloak when browser opens:
+   - Username: `testuser`
+   - Password: `testpass`
+3. See the OAuth flow complete in the terminal
+
+**Cleanup:** The script automatically stops all services when done. Use `--keep-keycloak` to leave Keycloak running for debugging.
 
 ### Manual Setup
 
