@@ -3,13 +3,10 @@ load("@rules_java//java:defs.bzl", "java_library")
 java_library(
     name = "tools",
     srcs = [
-        "AddTool.java",
         "ChessComGamesTool.java",
         "ChessComPlayerTool.java",
         "ChessComStatsTool.java",
-        "EchoTool.java",
         "McpTool.java",
-        "RandomIntTool.java",
         "ServerTimeTool.java",
         "ToolRegistry.java",
     ],

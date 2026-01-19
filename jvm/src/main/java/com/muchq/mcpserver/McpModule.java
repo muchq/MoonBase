@@ -5,13 +5,10 @@ import com.muchq.chess_com_api.ChessClient;
 import com.muchq.http_client.core.HttpClient;
 import com.muchq.http_client.jdk.Jdk11HttpClient;
 import com.muchq.json.JsonUtils;
-import com.muchq.mcpserver.tools.AddTool;
 import com.muchq.mcpserver.tools.ChessComGamesTool;
 import com.muchq.mcpserver.tools.ChessComPlayerTool;
 import com.muchq.mcpserver.tools.ChessComStatsTool;
-import com.muchq.mcpserver.tools.EchoTool;
 import com.muchq.mcpserver.tools.McpTool;
-import com.muchq.mcpserver.tools.RandomIntTool;
 import com.muchq.mcpserver.tools.ServerTimeTool;
 import com.muchq.mcpserver.tools.ToolRegistry;
 import io.micronaut.context.annotation.Context;
@@ -46,12 +43,9 @@ public class McpModule {
     @Context
     public List<McpTool> mcpTools(Clock clock, ChessClient chessClient, ObjectMapper objectMapper) {
     return List.of(
-        new AddTool(),
         new ChessComGamesTool(chessClient, objectMapper),
         new ChessComPlayerTool(chessClient, objectMapper),
         new ChessComStatsTool(chessClient, objectMapper),
-        new EchoTool(),
-        new RandomIntTool(),
         new ServerTimeTool(clock));
     }
 

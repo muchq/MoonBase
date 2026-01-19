@@ -4,12 +4,9 @@ java_test_suite(
     name = "tools",
     size = "small",
     srcs = [
-        "AddToolTest.java",
         "ChessComGamesToolTest.java",
         "ChessComPlayerToolTest.java",
         "ChessComStatsToolTest.java",
-        "EchoToolTest.java",
-        "RandomIntToolTest.java",
         "ServerTimeToolTest.java",
     ],
     deps = [
