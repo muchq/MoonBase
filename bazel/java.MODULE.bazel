@@ -34,7 +34,7 @@ maven.install(
         "io.netty:netty-codec",
         "io.netty:netty-handler",
         "io.netty:netty-transport",
-        "io.sentry:sentry-logback:8.26.0",
+        "io.sentry:sentry-logback:8.30.0",
         "jakarta.annotation:jakarta.annotation-api:3.0.0",
         "junit:junit:4.13.2",
         "org.assertj:assertj-core:3.27.6",
