@@ -4,9 +4,11 @@ import com.muchq.mcpserver.dtos.JsonRpcError;
 import com.muchq.mcpserver.dtos.JsonRpcRequest;
 import com.muchq.mcpserver.dtos.JsonRpcResponse;
 import io.micronaut.http.HttpRequest;
+import io.micronaut.http.HttpResponse;
 import io.micronaut.http.annotation.Body;
 import io.micronaut.http.annotation.Controller;
 import io.micronaut.http.annotation.Error;
+import io.micronaut.http.annotation.Get;
 import io.micronaut.http.annotation.Post;
 import jakarta.inject.Inject;
 import org.slf4j.Logger;
@@ -27,6 +29,11 @@ public class McpController {
   public JsonRpcResponse handleRequest(@Body JsonRpcRequest request) {
     LOG.info("Received MCP request: method={}, id={}", request.method(), request.id());
     return requestHandler.handleRequest(request);
+  }
+
+  @Get
+  public HttpResponse<Void> noopGet() {
+    return HttpResponse.noContent();
   }
 
   @Error(global = true)

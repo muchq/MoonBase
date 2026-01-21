@@ -22,6 +22,7 @@ import java.security.MessageDigest;
 
 @Filter("/mcp/**")
 @Requires(property = "mcp.auth.token")
+@Requires(property = "mcp.oauth.enabled", value = "false", defaultValue = "false")
 public class McpAuthenticationFilter implements HttpServerFilter {
   private static final Logger LOG = LoggerFactory.getLogger(McpAuthenticationFilter.class);
 

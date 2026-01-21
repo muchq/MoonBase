@@ -28,6 +28,7 @@ java_binary(
         "//jvm/src/main/java/com/muchq/http_client/jdk11",
         "//jvm/src/main/java/com/muchq/json",
         "//jvm/src/main/java/com/muchq/mcpserver/dtos",
+        "//jvm/src/main/java/com/muchq/mcpserver/oauth",
         "//jvm/src/main/java/com/muchq/mcpserver/tools",
         "@maven//:com_fasterxml_jackson_core_jackson_annotations",
         "@maven//:com_fasterxml_jackson_core_jackson_databind",

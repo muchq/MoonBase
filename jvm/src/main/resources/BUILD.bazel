@@ -12,6 +12,9 @@ filegroup(
 
 filegroup(
     name = "micronaut_config",
-    srcs = ["application.yml"],
+    srcs = [
+        "application.yml",
+        "application-dev.yml",
+    ],
     visibility = ["//visibility:public"],
 )

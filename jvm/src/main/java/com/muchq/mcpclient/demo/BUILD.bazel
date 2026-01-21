@@ -1,0 +1,17 @@
+load("@rules_java//java:java_binary.bzl", "java_binary")
+
+java_binary(
+    name = "demo",
+    srcs = ["McpClientDemo.java"],
+    main_class = "com.muchq.mcpclient.demo.McpClientDemo",
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        "@maven//:ch_qos_logback_logback_classic",
+    ],
+    deps = [
+        "//jvm/src/main/java/com/muchq/mcpclient",
+        "//jvm/src/main/java/com/muchq/mcpclient:config",
+        "@maven//:io_modelcontextprotocol_sdk_mcp",
+        "@maven//:org_slf4j_slf4j_api",
+    ],
+)

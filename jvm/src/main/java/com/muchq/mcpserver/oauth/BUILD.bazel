@@ -1,0 +1,26 @@
+load("@rules_java//java:defs.bzl", "java_library")
+
+java_library(
+    name = "oauth",
+    srcs = glob(["*.java"]),
+    plugins = [
+        "//bazel/rules:micronaut_type_element_visitor_processor",
+        "//bazel/rules:micronaut_aggregating_type_element_visitor_processor",
+        "//bazel/rules:micronaut_bean_definition_inject_processor",
+        "//bazel/rules:micronaut_package_element_visitor_processor",
+    ],
+    visibility = ["//jvm/src/main/java/com/muchq/mcpserver:__pkg__"],
+    deps = [
+        "//jvm/src/main/java/com/muchq/mcpserver/dtos",
+        "@maven//:com_fasterxml_jackson_core_jackson_annotations",
+        "@maven//:com_nimbusds_nimbus_jose_jwt",
+        "@maven//:io_micronaut_micronaut_context",
+        "@maven//:io_micronaut_micronaut_core",
+        "@maven//:io_micronaut_micronaut_http",
+        "@maven//:io_micronaut_micronaut_inject",
+        "@maven//:io_projectreactor_reactor_core",
+        "@maven//:jakarta_inject_jakarta_inject_api",
+        "@maven//:org_reactivestreams_reactive_streams",
+        "@maven//:org_slf4j_slf4j_api",
+    ],
+)
