@@ -2,33 +2,51 @@ package com.muchq.mcpclient.demo;
 
 import com.muchq.mcpclient.McpClientConfig;
 import com.muchq.mcpclient.McpClientWrapper;
+import io.modelcontextprotocol.spec.McpSchema.InitializeResult;
+import io.modelcontextprotocol.spec.McpSchema.ListPromptsResult;
+import io.modelcontextprotocol.spec.McpSchema.ListResourcesResult;
+import io.modelcontextprotocol.spec.McpSchema.ListToolsResult;
+import io.modelcontextprotocol.spec.McpSchema.Prompt;
+import io.modelcontextprotocol.spec.McpSchema.Resource;
+import io.modelcontextprotocol.spec.McpSchema.Tool;
+import java.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Demo application for MCP OAuth 2.1 + PKCE + DCR flow.
+ * Demo application for MCP OAuth 2.1 + PKCE + DCR flow with full SDK integration.
  *
- * This demonstrates:
- * 1. Creating an MCP client with OAuth support
- * 2. Automatic OAuth discovery (RFC 9728, RFC 8414)
- * 3. Dynamic Client Registration (RFC 7591)
- * 4. PKCE-protected authorization code flow
- * 5. Token management and usage
+ * <p>This demonstrates:
+ * <ol>
+ *   <li>Creating an MCP client with OAuth support</li>
+ *   <li>Automatic OAuth discovery (RFC 9728, RFC 8414)</li>
+ *   <li>Dynamic Client Registration (RFC 7591)</li>
+ *   <li>PKCE-protected authorization code flow</li>
+ *   <li>Token management and automatic refresh</li>
+ *   <li>Full MCP SDK integration with typed APIs</li>
+ * </ol>
  *
- * Prerequisites:
- * - Keycloak running on http://localhost:8180
- * - MCP server running on http://localhost:8080 with OAuth enabled
+ * <p>Prerequisites:
+ * <ul>
+ *   <li>Keycloak running on http://localhost:8180</li>
+ *   <li>MCP server running on http://localhost:8080 with OAuth enabled</li>
+ * </ul>
  *
- * Environment variables:
- * - MCP_SERVER_URL (default: http://localhost:8080/mcp)
- * - MCP_CLIENT_NAME (default: MCP Demo Client)
- * - CALLBACK_PORT (default: 8888)
+ * <p>Environment variables:
+ * <ul>
+ *   <li>MCP_SERVER_URL (default: http://localhost:8080/mcp)</li>
+ *   <li>MCP_CLIENT_NAME (default: MCP Demo Client)</li>
+ *   <li>CALLBACK_PORT (default: 8888)</li>
+ *   <li>MCP_CLIENT_ID (optional: pre-registered client ID)</li>
+ *   <li>MCP_CLIENT_SECRET (optional: pre-registered client secret)</li>
+ * </ul>
  */
 public class McpClientDemo {
 
     private static final Logger LOG = LoggerFactory.getLogger(McpClientDemo.class);
 
     public static void main(String[] args) {
+        McpClientWrapper client = null;
         try {
             LOG.info("=== MCP OAuth Demo Starting ===");
 
@@ -63,31 +81,72 @@ public class McpClientDemo {
                 .callbackPort(callbackPort)
                 .build();
 
-            // Create MCP client
-            McpClientWrapper client = new McpClientWrapper(config);
+            // Create MCP client with custom timeout
+            client = new McpClientWrapper(config, Duration.ofSeconds(30));
 
-            // Initialize connection (triggers OAuth flow on first 401)
+            // Initialize connection (triggers OAuth flow if needed)
             LOG.info("\n=== Step 1: Initializing MCP Connection ===");
-            String initResult = client.initialize();
-            LOG.info("Initialization result: {}", initResult);
+            InitializeResult initResult = client.initialize();
+            LOG.info("Server: {} v{}", initResult.serverInfo().name(), initResult.serverInfo().version());
+            LOG.info("Protocol version: {}", initResult.protocolVersion());
 
             // Check authentication status
             LOG.info("\n=== Step 2: Checking Authentication ===");
             if (client.isAuthenticated()) {
                 LOG.info("Client is authenticated!");
-                LOG.info("Access token available: {}", client.getAccessToken().substring(0, 20) + "...");
+                String token = client.getAccessToken();
+                LOG.info("Access token available: {}...", token.substring(0, Math.min(20, token.length())));
             } else {
                 LOG.error("Client is NOT authenticated!");
                 System.exit(1);
             }
 
-            // Make real MCP requests to verify authenticated access
-            LOG.info("\n=== Step 3: Calling MCP tools/list ===");
-            String toolsResponse = client.listTools();
-            LOG.info("tools/list response: {}", toolsResponse);
+            // List available tools
+            LOG.info("\n=== Step 3: Listing Available Tools ===");
+            ListToolsResult toolsResult = client.listTools();
+            if (toolsResult.tools() != null && !toolsResult.tools().isEmpty()) {
+                LOG.info("Found {} tools:", toolsResult.tools().size());
+                for (Tool tool : toolsResult.tools()) {
+                    LOG.info("  - {}: {}", tool.name(), tool.description());
+                }
+            } else {
+                LOG.info("No tools available from server");
+            }
+
+            // List available resources (if supported)
+            LOG.info("\n=== Step 4: Listing Available Resources ===");
+            if (initResult.capabilities() != null && initResult.capabilities().resources() != null) {
+                ListResourcesResult resourcesResult = client.listResources();
+                if (resourcesResult.resources() != null && !resourcesResult.resources().isEmpty()) {
+                    LOG.info("Found {} resources:", resourcesResult.resources().size());
+                    for (Resource resource : resourcesResult.resources()) {
+                        LOG.info("  - {}: {}", resource.uri(), resource.name());
+                    }
+                } else {
+                    LOG.info("No resources available from server");
+                }
+            } else {
+                LOG.info("Server does not support resources capability - skipping");
+            }
+
+            // List available prompts (if supported)
+            LOG.info("\n=== Step 5: Listing Available Prompts ===");
+            if (initResult.capabilities() != null && initResult.capabilities().prompts() != null) {
+                ListPromptsResult promptsResult = client.listPrompts();
+                if (promptsResult.prompts() != null && !promptsResult.prompts().isEmpty()) {
+                    LOG.info("Found {} prompts:", promptsResult.prompts().size());
+                    for (Prompt prompt : promptsResult.prompts()) {
+                        LOG.info("  - {}: {}", prompt.name(), prompt.description());
+                    }
+                } else {
+                    LOG.info("No prompts available from server");
+                }
+            } else {
+                LOG.info("Server does not support prompts capability - skipping");
+            }
 
             LOG.info("\n=== Demo Completed Successfully! ===");
-            LOG.info("The OAuth 2.1 + PKCE + DCR flow worked correctly.");
+            LOG.info("The OAuth 2.1 + PKCE + DCR flow with full MCP SDK integration worked correctly.");
             LOG.info("Key accomplishments:");
             LOG.info("  1. Discovered authorization server via RFC 9728");
             LOG.info("  2. Fetched authorization server metadata via RFC 8414");
@@ -96,12 +155,17 @@ public class McpClientDemo {
             LOG.info("  5. Opened browser for user authentication");
             LOG.info("  6. Received authorization code via callback");
             LOG.info("  7. Exchanged code for access token (with resource parameter)");
-            LOG.info("  8. Token has correct audience claim for MCP server");
+            LOG.info("  8. Successfully used MCP SDK with typed APIs");
             LOG.info("\nYou can now use this pattern to make authenticated MCP requests!");
 
         } catch (Exception e) {
             LOG.error("Demo failed with error", e);
             System.exit(1);
+        } finally {
+            // Clean up resources
+            if (client != null) {
+                client.close();
+            }
         }
     }
 }

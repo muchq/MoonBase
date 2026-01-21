@@ -15,6 +15,12 @@ import java.time.Instant;
  */
 public class TokenManager {
 
+    /**
+     * Safety buffer in seconds before token expiration.
+     * This prevents race conditions where a token expires between validation and use.
+     */
+    private static final long EXPIRATION_BUFFER_SECONDS = 30;
+
     private volatile String accessToken;
     private volatile String refreshToken;
     private volatile Instant expiresAt;
@@ -41,6 +47,7 @@ public class TokenManager {
 
     /**
      * Retrieves the access token if it's still valid.
+     * Includes a safety buffer before actual expiration to prevent race conditions.
      *
      * @return Access token, or null if expired/missing
      */
@@ -49,8 +56,9 @@ public class TokenManager {
             return null;
         }
 
-        // Check if token is expired
-        if (Instant.now().isAfter(expiresAt)) {
+        // Check if token is expired (with safety buffer)
+        Instant bufferExpiry = expiresAt.minusSeconds(EXPIRATION_BUFFER_SECONDS);
+        if (Instant.now().isAfter(bufferExpiry)) {
             return null;
         }
 

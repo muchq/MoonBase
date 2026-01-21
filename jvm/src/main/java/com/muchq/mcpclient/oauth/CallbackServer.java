@@ -167,6 +167,7 @@ public class CallbackServer {
 
     /**
      * Parses query string into key-value map.
+     * Handles parameters with and without values (e.g., "foo=bar" and "foo").
      */
     private Map<String, String> parseQueryString(String query) {
         Map<String, String> params = new HashMap<>();
@@ -175,10 +176,13 @@ public class CallbackServer {
         }
 
         for (String param : query.split("&")) {
-            String[] pair = param.split("=", 2);
-            if (pair.length == 2) {
-                params.put(urlDecode(pair[0]), urlDecode(pair[1]));
+            if (param.isEmpty()) {
+                continue;
             }
+            String[] pair = param.split("=", 2);
+            String key = urlDecode(pair[0]);
+            String value = pair.length == 2 ? urlDecode(pair[1]) : "";
+            params.put(key, value);
         }
 
         return params;

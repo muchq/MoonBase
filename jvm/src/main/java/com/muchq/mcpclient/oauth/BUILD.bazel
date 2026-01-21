@@ -3,13 +3,17 @@ load("@rules_java//java:java_library.bzl", "java_library")
 java_library(
     name = "oauth",
     srcs = glob(["*.java"]),
-    visibility = ["//jvm/src/main/java/com/muchq/mcpclient:__pkg__"],
+    visibility = [
+        "//jvm/src/main/java/com/muchq/mcpclient:__pkg__",
+        "//jvm/src/test/java/com/muchq/mcpclient/oauth:__pkg__",
+    ],
     deps = [
         "//jvm/src/main/java/com/muchq/mcpclient:config",
         "@maven//:com_fasterxml_jackson_core_jackson_annotations",
         "@maven//:com_fasterxml_jackson_core_jackson_databind",
         "@maven//:com_nimbusds_nimbus_jose_jwt",
         "@maven//:com_nimbusds_oauth2_oidc_sdk",
+        "@maven//:io_modelcontextprotocol_sdk_mcp",
         "@maven//:org_slf4j_slf4j_api",
     ],
 )

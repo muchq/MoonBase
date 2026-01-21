@@ -7,8 +7,19 @@ package com.muchq.mcpclient;
  * - Connect to the MCP server
  * - Identify the client during OAuth registration
  * - Configure the local OAuth callback server
+ * - Select transport type (HTTP or SSE)
  */
 public class McpClientConfig {
+
+    /**
+     * Transport type for MCP communication.
+     */
+    public enum TransportType {
+        /** Streamable HTTP transport (request/response). */
+        HTTP,
+        /** Server-Sent Events transport (streaming). */
+        SSE
+    }
 
     private final String serverUrl;
     private final String clientName;
@@ -16,6 +27,7 @@ public class McpClientConfig {
     private final int callbackPort;
     private final String clientId;
     private final String clientSecret;
+    private final TransportType transportType;
 
     private McpClientConfig(Builder builder) {
         this.serverUrl = builder.serverUrl;
@@ -24,6 +36,7 @@ public class McpClientConfig {
         this.callbackPort = builder.callbackPort;
         this.clientId = builder.clientId;
         this.clientSecret = builder.clientSecret;
+        this.transportType = builder.transportType;
     }
 
     public String getServerUrl() {
@@ -50,6 +63,10 @@ public class McpClientConfig {
         return clientSecret;
     }
 
+    public TransportType getTransportType() {
+        return transportType;
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -61,6 +78,7 @@ public class McpClientConfig {
         private int callbackPort = 8888;
         private String clientId;
         private String clientSecret;
+        private TransportType transportType = TransportType.HTTP;
 
         public Builder serverUrl(String serverUrl) {
             this.serverUrl = serverUrl;
@@ -89,6 +107,11 @@ public class McpClientConfig {
 
         public Builder clientSecret(String clientSecret) {
             this.clientSecret = clientSecret;
+            return this;
+        }
+
+        public Builder transportType(TransportType transportType) {
+            this.transportType = transportType;
             return this;
         }
 

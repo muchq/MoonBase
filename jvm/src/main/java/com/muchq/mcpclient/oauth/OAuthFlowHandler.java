@@ -3,6 +3,7 @@ package com.muchq.mcpclient.oauth;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.muchq.mcpclient.McpClientConfig;
 import com.nimbusds.oauth2.sdk.*;
+import com.nimbusds.oauth2.sdk.RefreshTokenGrant;
 import com.nimbusds.oauth2.sdk.auth.ClientAuthentication;
 import com.nimbusds.oauth2.sdk.auth.ClientAuthenticationMethod;
 import com.nimbusds.oauth2.sdk.auth.ClientSecretBasic;
@@ -58,11 +59,108 @@ public class OAuthFlowHandler {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
+    // Cached state for token refresh
+    private volatile String cachedTokenEndpoint;
+    private volatile ClientRegistration cachedClientRegistration;
+    private volatile String cachedResourceUri;
+
     public OAuthFlowHandler(McpClientConfig config, TokenManager tokenManager) {
         this.config = config;
         this.tokenManager = tokenManager;
         this.httpClient = HttpClient.newHttpClient();
         this.objectMapper = new ObjectMapper();
+    }
+
+    /**
+     * Refreshes the access token using the stored refresh token.
+     *
+     * @throws Exception if token refresh fails or no refresh token is available
+     */
+    public synchronized void refreshAccessToken() throws Exception {
+        String refreshToken = tokenManager.getRefreshToken();
+        if (refreshToken == null) {
+            throw new IOException("No refresh token available for token refresh");
+        }
+
+        if (cachedTokenEndpoint == null || cachedClientRegistration == null) {
+            LOG.info("No cached OAuth metadata, performing full discovery...");
+            // Re-discover OAuth endpoints
+            String resourceUri = extractResourceUri(config.getServerUrl());
+            ProtectedResourceMetadata resourceMetadata = fetchProtectedResourceMetadata(resourceUri);
+            String authzServerUrl = resourceMetadata.authorization_servers().get(0);
+            AuthorizationServerMetadata authzMetadata = fetchAuthorizationServerMetadata(authzServerUrl);
+
+            cachedTokenEndpoint = authzMetadata.token_endpoint();
+            cachedResourceUri = resourceUri;
+
+            String redirectUri = "http://localhost:" + config.getCallbackPort() + "/callback";
+            cachedClientRegistration = resolveClientRegistration(authzMetadata, redirectUri);
+        }
+
+        LOG.info("Refreshing access token...");
+
+        RefreshTokenGrant grant = new RefreshTokenGrant(
+            new com.nimbusds.oauth2.sdk.token.RefreshToken(refreshToken)
+        );
+
+        ClientAuthentication clientAuthentication = buildClientAuthentication(cachedClientRegistration);
+        List<URI> resources = List.of(URI.create(cachedResourceUri));
+
+        com.nimbusds.oauth2.sdk.TokenRequest tokenRequest;
+        if (clientAuthentication == null) {
+            tokenRequest = new com.nimbusds.oauth2.sdk.TokenRequest(
+                URI.create(cachedTokenEndpoint),
+                cachedClientRegistration.clientId(),
+                grant,
+                null,
+                resources,
+                null,
+                null
+            );
+        } else {
+            tokenRequest = new com.nimbusds.oauth2.sdk.TokenRequest(
+                URI.create(cachedTokenEndpoint),
+                clientAuthentication,
+                grant,
+                null,
+                resources,
+                null
+            );
+        }
+
+        HTTPRequest httpRequest = tokenRequest.toHTTPRequest();
+        HTTPResponse httpResponse = httpRequest.send();
+
+        com.nimbusds.oauth2.sdk.TokenResponse tokenResponse = OIDCTokenResponseParser.parse(httpResponse);
+
+        if (!tokenResponse.indicatesSuccess()) {
+            // Clear cached state on failure so next attempt does full flow
+            clearCachedState();
+            throw new IOException("Token refresh failed: " + tokenResponse.toErrorResponse().getErrorObject());
+        }
+
+        OIDCTokenResponse successResponse = (OIDCTokenResponse) tokenResponse.toSuccessResponse();
+        AccessToken accessToken = successResponse.getOIDCTokens().getAccessToken();
+        com.nimbusds.oauth2.sdk.token.RefreshToken newRefreshToken = successResponse.getOIDCTokens().getRefreshToken();
+
+        long expiresIn = accessToken.getLifetime() != 0 ? accessToken.getLifetime() : 300L;
+
+        tokenManager.storeTokens(
+            accessToken.getValue(),
+            newRefreshToken != null ? newRefreshToken.getValue() : refreshToken,
+            expiresIn
+        );
+
+        LOG.info("Access token refreshed successfully, expires in {} seconds", expiresIn);
+    }
+
+    /**
+     * Clears cached OAuth state, forcing full re-discovery on next operation.
+     */
+    public synchronized void clearCachedState() {
+        cachedTokenEndpoint = null;
+        cachedClientRegistration = null;
+        cachedResourceUri = null;
     }
 
     /**
@@ -98,9 +196,13 @@ public class OAuthFlowHandler {
         );
         LOG.info("Client ID: {}", clientRegistration.clientId().getValue());
 
-        // Step 4: Generate PKCE parameters
-        PkceGenerator.PkceParams pkce = PkceGenerator.generate();
-        CodeVerifier codeVerifier = new CodeVerifier(pkce.codeVerifier());
+        // Cache OAuth state for token refresh
+        this.cachedTokenEndpoint = authzMetadata.token_endpoint();
+        this.cachedClientRegistration = clientRegistration;
+        this.cachedResourceUri = resourceUri;
+
+        // Step 4: Generate PKCE parameters (Nimbus SDK handles this)
+        CodeVerifier codeVerifier = new CodeVerifier();
         CodeChallenge codeChallenge = CodeChallenge.compute(CodeChallengeMethod.S256, codeVerifier);
 
         // Step 5: Build authorization request with resource parameter (RFC 8707)
@@ -377,6 +479,7 @@ public class OAuthFlowHandler {
 
     // DTOs for metadata and tokens
 
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
     public record ProtectedResourceMetadata(
         String resource,
         List<String> authorization_servers,

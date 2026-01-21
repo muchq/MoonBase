@@ -5,6 +5,7 @@ java_library(
     srcs = ["McpClientConfig.java"],
     visibility = [
         "//jvm/src/main/java/com/muchq/mcpclient:__subpackages__",
+        "//jvm/src/test/java/com/muchq/mcpclient:__subpackages__",
     ],
 )
 
