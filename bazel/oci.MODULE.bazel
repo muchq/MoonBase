@@ -5,7 +5,7 @@ bazel_dep(name = "rules_oci", version = "2.2.7")
 oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
 oci.pull(
     name = "docker_lib_ubuntu",
-    digest = "sha256:c35e29c9450151419d9448b0fd75374fec4fff364a27f176fb458d472dfc9e54",
+    digest = "sha256:cd1dba651b3080c3686ecf4e3c4220f026b521fb76978881737d24f200828b2b",
     image = "docker.io/library/ubuntu",
     platforms = [
         "linux/amd64",
@@ -23,11 +23,11 @@ oci.pull(
 )
 oci.pull(
     name = "distroless_base",
-    digest = "sha256:786007f631d22e8a1a5084c5b177352d9dcac24b1e8c815187750f70b24a9fc6",
+    digest = "sha256:0c70ab4e14f5ed87c4ce5d0fdff83f5f1e7ead3c6a7b0acbe9df67caae62bbd3",
     image = "gcr.io/distroless/base-debian12",
     platforms = [
         "linux/amd64",
         "linux/arm64/v8",
     ],
 )
-use_repo(oci, "distroless_base", "docker_lib_ubuntu", "docker_lib_ubuntu_linux_amd64", "docker_lib_ubuntu_linux_arm64_v8", "java_base")
+use_repo(oci, "distroless_base", "distroless_base_linux_amd64", "distroless_base_linux_arm64_v8", "docker_lib_ubuntu", "docker_lib_ubuntu_linux_amd64", "docker_lib_ubuntu_linux_arm64_v8", "java_base", "java_base_linux_amd64", "java_base_linux_arm64_v8")
