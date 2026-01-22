@@ -12,6 +12,10 @@ common --@com_google_protobuf//bazel/toolchains:prefer_prebuilt_protoc
 common --noenable_workspace
 common --enable_bzlmod=true
 
+# Fork BCR for testing (remove after upstream merge)
+common --registry=https://raw.githubusercontent.com/aaylward/bazel-central-registry/otel_cpp_bazel_8_9
+common --registry=https://bcr.bazel.build
+
 common --disk_cache=~/bzlcache
 common --repository_cache=~/.bzl_repo_cache
 
