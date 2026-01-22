@@ -2,7 +2,7 @@ package mucks
 
 import "github.com/google/uuid"
 
-// This is sorta similar to the http problem spec...
+// Problem represents an error response based on RFC 7807 (Problem Details for HTTP APIs).
 type Problem struct {
 	StatusCode int    `json:"status"`
 	ErrorCode  int    `json:"errorCode"`
