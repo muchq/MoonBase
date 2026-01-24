@@ -7,7 +7,6 @@ bazel-*
 out
 .bsp
 .bazelbsp
-.bazelout
 .metals
 .claude
 .kiro
