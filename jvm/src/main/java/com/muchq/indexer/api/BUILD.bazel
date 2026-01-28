@@ -1,0 +1,20 @@
+load("@rules_java//java:java_library.bzl", "java_library")
+
+java_library(
+    name = "api",
+    srcs = [
+        "IndexController.java",
+        "QueryController.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//jvm/src/main/java/com/muchq/indexer/api/dto",
+        "//jvm/src/main/java/com/muchq/indexer/chessql/ast",
+        "//jvm/src/main/java/com/muchq/indexer/chessql/compiler",
+        "//jvm/src/main/java/com/muchq/indexer/chessql/parser",
+        "//jvm/src/main/java/com/muchq/indexer/db",
+        "//jvm/src/main/java/com/muchq/indexer/queue",
+        "@maven//:jakarta_ws_rs_jakarta_ws_rs_api",
+        "@maven//:org_slf4j_slf4j_api",
+    ],
+)

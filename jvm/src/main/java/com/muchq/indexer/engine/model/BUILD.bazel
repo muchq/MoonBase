@@ -1,0 +1,12 @@
+load("@rules_java//java:java_library.bzl", "java_library")
+
+java_library(
+    name = "model",
+    srcs = [
+        "GameFeatures.java",
+        "Motif.java",
+        "ParsedGame.java",
+        "PositionContext.java",
+    ],
+    visibility = ["//visibility:public"],
+)

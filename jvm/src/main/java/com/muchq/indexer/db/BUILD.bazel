@@ -1,0 +1,17 @@
+load("@rules_java//java:java_library.bzl", "java_library")
+
+java_library(
+    name = "db",
+    srcs = [
+        "DataSourceFactory.java",
+        "GameFeatureDao.java",
+        "IndexingRequestDao.java",
+        "Migration.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//jvm/src/main/java/com/muchq/indexer/chessql/compiler",
+        "@maven//:com_zaxxer_HikariCP",
+        "@maven//:org_slf4j_slf4j_api",
+    ],
+)
