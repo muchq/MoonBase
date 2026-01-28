@@ -12,6 +12,7 @@ maven.install(
     artifacts = [
         "ch.qos.logback:logback-classic:%s" % LOGBACK_VERSION,
         "ch.qos.logback:logback-core:%s" % LOGBACK_VERSION,
+        "com.zaxxer:HikariCP:5.1.0",
         "com.fasterxml.jackson.core:jackson-annotations",
         "com.fasterxml.jackson.core:jackson-core",
         "com.fasterxml.jackson.core:jackson-databind",
@@ -41,7 +42,12 @@ maven.install(
         "org.eclipse.jetty:jetty-server:%s" % JETTY_VERSION,
         "org.eclipse.jetty.websocket:websocket-jetty-server:%s" % JETTY_VERSION,
         "org.jspecify:jspecify:1.0.0",
+        "org.postgresql:postgresql:42.7.4",
         "org.slf4j:slf4j-api:2.0.17",
+        "software.amazon.awssdk:auth:2.29.44",
+        "software.amazon.awssdk:regions:2.29.44",
+        "software.amazon.awssdk:sqs:2.29.44",
+        "software.amazon.awssdk:url-connection-client:2.29.44",
     ],
     boms = [
         "io.netty:netty-bom:4.2.9.Final",
