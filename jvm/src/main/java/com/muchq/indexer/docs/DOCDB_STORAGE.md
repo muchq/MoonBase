@@ -662,3 +662,322 @@ DocumentDB is ~50% more expensive on compute but eliminates partition management
 | `api/IndexController.java` | Modify | Use `IndexingRequestStore` interface |
 
 ~8 new files, ~6 modified files, ~800 lines of new code.
+
+---
+
+## Leveraging the Rust doc_db Service
+
+The repository contains an existing Rust-based document database service at `rust/doc_db/` that wraps MongoDB with a gRPC interface. This section analyzes its suitability for the chess indexer and documents required changes.
+
+### Current doc_db Architecture
+
+```
+┌─────────────────┐     gRPC      ┌─────────────────┐
+│  Java Indexer   │ ────────────► │  Rust doc_db    │
+│  (client)       │               │  (tonic server) │
+└─────────────────┘               └────────┬────────┘
+                                           │
+                                    ┌──────▼──────┐
+                                    │   MongoDB   │
+                                    │  /DocumentDB│
+                                    └─────────────┘
+```
+
+### Current doc_db API (from `protos/doc_db/doc_db.proto`)
+
+```protobuf
+service DocDb {
+  rpc InsertDoc (InsertDocRequest) returns (InsertDocResponse) {}
+  rpc UpdateDoc (UpdateDocRequest) returns (UpdateDocResponse) {}
+  rpc FindDocById (FindDocByIdRequest) returns (FindDocByIdResponse) {}
+  rpc FindDoc (FindDocRequest) returns (FindDocResponse) {}
+}
+
+message Document {
+  string id = 1;
+  string version = 2;
+  bytes bytes = 3;
+  map<string, string> tags = 4;
+}
+```
+
+### Current doc_db Data Model
+
+| Field     | Type                   | Purpose                                      |
+|-----------|------------------------|----------------------------------------------|
+| `_id`     | ObjectId               | MongoDB document ID                          |
+| `bytes`   | `Vec<u8>`              | Opaque payload (serialized document)         |
+| `version` | String (UUID)          | Optimistic concurrency control               |
+| `tags`    | `HashMap<String,String>` | Queryable string key-value pairs           |
+
+### Suitability Analysis
+
+| Requirement | Current doc_db Support | Gap |
+|-------------|----------------------|-----|
+| Store game documents | Partial — `bytes` field can hold serialized JSON | No native nested document support |
+| Query by numeric fields (`white.elo >= 2500`) | **No** — tags are string equality only | Cannot express range queries |
+| Query by motif booleans (`motif(fork)`) | Partial — could encode as tag `"has_fork": "true"` | String equality, not boolean |
+| Complex boolean queries (AND/OR/NOT) | **No** — `FindDoc` matches exact tag set | No boolean combinators |
+| Pagination (limit/offset) | **No** — returns single document | Cannot paginate results |
+| Batch queries | **No** — `find_one` only | No `find_many` |
+| TTL / retention | **No** — no TTL support | Would need MongoDB-side TTL index + bypass doc_db |
+| Indexing | **No** — no index management | Must create indexes out-of-band |
+
+**Verdict**: The current doc_db API is designed for simple key-value / tag-based document storage with optimistic locking. It is **not suitable** for the chess indexer's ChessQL query requirements without significant extensions.
+
+### Required doc_db Extensions
+
+To support the chess indexer, doc_db would need the following additions:
+
+#### 1. Rich Query Support
+
+New RPC for MongoDB-style queries:
+
+```protobuf
+message QueryRequest {
+  string collection = 1;
+  bytes filter_bson = 2;     // Serialized BSON filter document
+  int32 limit = 3;
+  int32 skip = 4;
+  bytes sort_bson = 5;       // Optional sort specification
+}
+
+message QueryResponse {
+  repeated Document docs = 1;
+  int64 total_count = 2;     // For pagination UI
+}
+
+service DocDb {
+  // ... existing RPCs ...
+  rpc Query (QueryRequest) returns (QueryResponse) {}
+}
+```
+
+The `filter_bson` field would accept a raw BSON-serialized MongoDB query document, allowing the Java client to build arbitrary queries using the MongoDB Java driver's `Filters` API and serialize to BSON.
+
+**Rust implementation sketch**:
+
+```rust
+async fn query(&self, request: Request<QueryRequest>) -> Result<Response<QueryResponse>, Status> {
+    let req = request.into_inner();
+    let db_name = read_db_name_from_metadata(request.metadata())?;
+
+    let filter: BsonDocument = bson::from_slice(&req.filter_bson)
+        .map_err(|e| Status::invalid_argument(format!("invalid filter: {}", e)))?;
+
+    let collection = self.client.database(&db_name).collection::<MongoDoc>(&req.collection);
+
+    let options = FindOptions::builder()
+        .limit(req.limit as i64)
+        .skip(req.skip as u64)
+        .build();
+
+    let mut cursor = collection.find(filter, options).await
+        .map_err(|e| Status::internal(e.to_string()))?;
+
+    let mut docs = Vec::new();
+    while let Some(doc) = cursor.try_next().await? {
+        docs.push(to_proto_document(doc));
+    }
+
+    Ok(Response::new(QueryResponse { docs, total_count: docs.len() as i64 }))
+}
+```
+
+#### 2. Batch Insert
+
+For efficient game indexing:
+
+```protobuf
+message BatchInsertRequest {
+  string collection = 1;
+  repeated DocumentEgg docs = 2;
+}
+
+message BatchInsertResponse {
+  repeated string ids = 1;
+  int32 inserted_count = 2;
+}
+
+service DocDb {
+  rpc BatchInsert (BatchInsertRequest) returns (BatchInsertResponse) {}
+}
+```
+
+#### 3. Index Management
+
+```protobuf
+message CreateIndexRequest {
+  string collection = 1;
+  bytes index_spec_bson = 2;  // e.g., {"white.elo": 1}
+  IndexOptions options = 3;
+}
+
+message IndexOptions {
+  bool unique = 1;
+  int64 expire_after_seconds = 2;  // For TTL indexes
+  string name = 3;
+}
+
+message CreateIndexResponse {
+  string index_name = 1;
+}
+
+service DocDb {
+  rpc CreateIndex (CreateIndexRequest) returns (CreateIndexResponse) {}
+}
+```
+
+#### 4. Native Document Storage (Alternative to bytes)
+
+Instead of serializing to `bytes`, store native BSON documents:
+
+```protobuf
+message RichDocument {
+  string id = 1;
+  string version = 2;
+  bytes bson_content = 3;  // Full BSON document, not just payload
+}
+
+message InsertRichDocRequest {
+  string collection = 1;
+  bytes bson_content = 2;  // Client serializes full document
+}
+```
+
+This allows MongoDB to index nested fields directly without the doc_db service needing to understand the schema.
+
+### Integration Architecture Options
+
+#### Option A: Extend doc_db (Recommended if Rust investment is desired)
+
+```
+┌─────────────────┐     gRPC      ┌─────────────────┐
+│  Java Indexer   │ ────────────► │  Rust doc_db    │
+│                 │               │  (extended)     │
+│  - ChessQL      │               │  - Query()      │
+│  - MongoCompiler│               │  - BatchInsert()│
+│    → BSON bytes │               │  - CreateIndex()│
+└─────────────────┘               └────────┬────────┘
+                                           │
+                                    ┌──────▼──────┐
+                                    │  DocumentDB │
+                                    └─────────────┘
+```
+
+**Pros**:
+- Single MongoDB connection pool managed by Rust service
+- Rust service can add caching, rate limiting, connection management
+- Language-agnostic — other services can use the gRPC API
+- Existing doc_db codebase provides foundation
+
+**Cons**:
+- Requires Rust development for new RPCs
+- Additional network hop (Java → gRPC → MongoDB)
+- BSON serialization/deserialization overhead at both ends
+- More complex deployment (two services)
+
+#### Option B: Direct MongoDB from Java (Current doc recommendation)
+
+```
+┌─────────────────┐
+│  Java Indexer   │
+│                 │
+│  - ChessQL      │──────────────────┐
+│  - MongoCompiler│                  │
+│  - MongoDriver  │                  │
+└─────────────────┘                  │
+                              ┌──────▼──────┐
+                              │  DocumentDB │
+                              └─────────────┘
+```
+
+**Pros**:
+- No additional service to deploy
+- Native MongoDB driver has full feature support
+- Lower latency (no gRPC hop)
+- Simpler debugging
+
+**Cons**:
+- Each Java service manages its own connection pool
+- MongoDB-specific code in Java (less portable)
+
+#### Option C: Hybrid — Use doc_db for Simple Ops, Direct for Queries
+
+```
+┌─────────────────┐     gRPC      ┌─────────────────┐
+│  Java Indexer   │ ────────────► │  Rust doc_db    │ ← InsertDoc, UpdateDoc
+│                 │               │  (unchanged)    │
+│  - ChessQL      │               └────────┬────────┘
+│  - MongoCompiler│──────────────────┐     │
+│  - MongoDriver  │                  │     │
+└─────────────────┘                  │     │
+                              ┌──────▼─────▼┐
+                              │  DocumentDB │
+                              └─────────────┘
+```
+
+Use doc_db for writes (with optimistic locking), direct MongoDB driver for complex queries. This avoids extending doc_db while leveraging its write-side features.
+
+### Estimated Changes to doc_db
+
+| Change | Complexity | Lines of Rust |
+|--------|-----------|---------------|
+| Add `Query` RPC with BSON filter | Medium | ~100 |
+| Add `BatchInsert` RPC | Low | ~50 |
+| Add `CreateIndex` RPC | Low | ~40 |
+| Add pagination to `FindDoc` | Low | ~30 |
+| Proto file updates | Low | ~50 |
+| Tests for new RPCs | Medium | ~200 |
+| **Total** | | **~470 lines** |
+
+### Java Client for Extended doc_db
+
+Generate Java gRPC stubs from the updated proto:
+
+```
+# bazel/java.MODULE.bazel
+"io.grpc:grpc-netty-shaded:1.62.2",
+"io.grpc:grpc-protobuf:1.62.2",
+"io.grpc:grpc-stub:1.62.2",
+```
+
+```java
+public class DocDbGameFeatureStore implements GameFeatureStore {
+    private final DocDbGrpc.DocDbBlockingStub stub;
+    private final ObjectMapper mapper;
+
+    @Override
+    public List<GameFeatureDocument> query(Object compiledQuery, int limit, int offset) {
+        Bson bsonFilter = (Bson) compiledQuery;
+        byte[] filterBytes = toBsonBytes(bsonFilter);
+
+        QueryRequest request = QueryRequest.newBuilder()
+                .setCollection("game_features")
+                .setFilterBson(ByteString.copyFrom(filterBytes))
+                .setLimit(limit)
+                .setSkip(offset)
+                .build();
+
+        QueryResponse response = stub.query(request);
+        return response.getDocsList().stream()
+                .map(this::fromProtoDocument)
+                .toList();
+    }
+}
+```
+
+### Recommendation
+
+**For the chess indexer specifically**: Use **Option B (Direct MongoDB from Java)** as documented in the main sections above. The doc_db service's current API is not a good fit, and extending it adds complexity without significant benefit for a single-consumer scenario.
+
+**Consider extending doc_db if**:
+- Multiple services (not just the indexer) need MongoDB access
+- You want to centralize connection management, caching, and rate limiting
+- The team prefers Rust for database interaction logic
+- You need a language-agnostic document API for future polyglot services
+
+**Keep doc_db as-is for**:
+- Its original use case (simple document storage with optimistic locking)
+- Services that only need tag-based lookup (not range queries)
+- Write-heavy workloads where the version-based update pattern is valuable
