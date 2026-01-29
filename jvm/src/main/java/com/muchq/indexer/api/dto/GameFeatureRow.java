@@ -1,5 +1,7 @@
 package com.muchq.indexer.api.dto;
 
+import com.muchq.indexer.db.GameFeatureStore;
+
 import java.time.Instant;
 
 public record GameFeatureRow(
@@ -20,7 +22,7 @@ public record GameFeatureRow(
         boolean hasSkewer,
         boolean hasDiscoveredAttack
 ) {
-    public static GameFeatureRow fromStore(com.muchq.indexer.db.GameFeatureStore.GameFeature row) {
+    public static GameFeatureRow fromStore(GameFeatureStore.GameFeature row) {
         return new GameFeatureRow(
                 row.gameUrl(),
                 row.platform(),
