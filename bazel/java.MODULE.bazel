@@ -9,14 +9,16 @@ JETTY_VERSION = "11.0.23"
 LOGBACK_VERSION = "1.5.6"
 
 maven.install(
+    known_contributing_modules = ["moon-base", "protobuf"],
     artifacts = [
         "ch.qos.logback:logback-classic:%s" % LOGBACK_VERSION,
         "ch.qos.logback:logback-core:%s" % LOGBACK_VERSION,
         "com.fasterxml.jackson.core:jackson-annotations",
         "com.fasterxml.jackson.core:jackson-core",
         "com.fasterxml.jackson.core:jackson-databind",
-        "com.zaxxer:HikariCP:6.2.1",
+        "com.zaxxer:HikariCP:6.3.3",
         "io.github.tors42:chariot:0.1.10",
+        "com.h2database:h2:2.2.224",
         "org.postgresql:postgresql:42.7.4",
         "com.fasterxml.jackson.datatype:jackson-datatype-guava",
         "com.fasterxml.jackson.datatype:jackson-datatype-jdk8",

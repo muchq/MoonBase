@@ -15,25 +15,39 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-public class GameFeatureDao {
+public class GameFeatureDao implements GameFeatureStore {
     private static final Logger LOG = LoggerFactory.getLogger(GameFeatureDao.class);
 
-    private final DataSource dataSource;
+    private static final String H2_INSERT = """
+        MERGE INTO game_features (
+            request_id, game_url, platform, white_username, black_username,
+            white_elo, black_elo, time_class, eco, result, played_at, num_moves,
+            has_pin, has_cross_pin, has_fork, has_skewer, has_discovered_attack,
+            motifs_json, pgn
+        ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """;
 
-    public GameFeatureDao(DataSource dataSource) {
+    private static final String PG_INSERT = """
+        INSERT INTO game_features (
+            request_id, game_url, platform, white_username, black_username,
+            white_elo, black_elo, time_class, eco, result, played_at, num_moves,
+            has_pin, has_cross_pin, has_fork, has_skewer, has_discovered_attack,
+            motifs_json, pgn
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
+        ON CONFLICT (game_url) DO NOTHING
+        """;
+
+    private final DataSource dataSource;
+    private final boolean useH2;
+
+    public GameFeatureDao(DataSource dataSource, boolean useH2) {
         this.dataSource = dataSource;
+        this.useH2 = useH2;
     }
 
-    public void insert(GameFeatureRow row) {
-        String sql = """
-            INSERT INTO game_features (
-                request_id, game_url, platform, white_username, black_username,
-                white_elo, black_elo, time_class, eco, result, played_at, num_moves,
-                has_pin, has_cross_pin, has_fork, has_skewer, has_discovered_attack,
-                motifs_json, pgn
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
-            ON CONFLICT (game_url) DO NOTHING
-            """;
+    @Override
+    public void insert(GameFeature row) {
+        String sql = useH2 ? H2_INSERT : PG_INSERT;
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setObject(1, row.requestId());
@@ -62,20 +76,24 @@ public class GameFeatureDao {
         }
     }
 
-    public List<GameFeatureRow> query(CompiledQuery compiledQuery, int limit, int offset) {
-        String sql = "SELECT * FROM game_features WHERE " + compiledQuery.sql()
+    @Override
+    public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
+        if (!(compiledQuery instanceof CompiledQuery cq)) {
+            throw new IllegalArgumentException("Expected CompiledQuery, got: " + compiledQuery.getClass());
+        }
+        String sql = "SELECT * FROM game_features WHERE " + cq.sql()
                 + " LIMIT ? OFFSET ?";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             int idx = 1;
-            for (Object param : compiledQuery.parameters()) {
+            for (Object param : cq.parameters()) {
                 ps.setObject(idx++, param);
             }
             ps.setInt(idx++, limit);
             ps.setInt(idx, offset);
 
             try (ResultSet rs = ps.executeQuery()) {
-                List<GameFeatureRow> results = new ArrayList<>();
+                List<GameFeature> results = new ArrayList<>();
                 while (rs.next()) {
                     results.add(mapRow(rs));
                 }
@@ -86,8 +104,8 @@ public class GameFeatureDao {
         }
     }
 
-    private GameFeatureRow mapRow(ResultSet rs) throws SQLException {
-        return new GameFeatureRow(
+    private GameFeature mapRow(ResultSet rs) throws SQLException {
+        return new GameFeature(
                 UUID.fromString(rs.getString("id")),
                 UUID.fromString(rs.getString("request_id")),
                 rs.getString("game_url"),
@@ -123,27 +141,4 @@ public class GameFeatureDao {
         int val = rs.getInt(column);
         return rs.wasNull() ? null : val;
     }
-
-    public record GameFeatureRow(
-            UUID id,
-            UUID requestId,
-            String gameUrl,
-            String platform,
-            String whiteUsername,
-            String blackUsername,
-            Integer whiteElo,
-            Integer blackElo,
-            String timeClass,
-            String eco,
-            String result,
-            java.time.Instant playedAt,
-            Integer numMoves,
-            boolean hasPin,
-            boolean hasCrossPin,
-            boolean hasFork,
-            boolean hasSkewer,
-            boolean hasDiscoveredAttack,
-            String motifsJson,
-            String pgn
-    ) {}
 }

@@ -8,12 +8,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Timestamp;
-import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
-public class IndexingRequestDao {
+public class IndexingRequestDao implements IndexingRequestStore {
     private static final Logger LOG = LoggerFactory.getLogger(IndexingRequestDao.class);
 
     private final DataSource dataSource;
@@ -22,6 +20,7 @@ public class IndexingRequestDao {
         this.dataSource = dataSource;
     }
 
+    @Override
     public UUID create(String player, String platform, String startMonth, String endMonth) {
         String sql = """
             INSERT INTO indexing_requests (player, platform, start_month, end_month)
@@ -43,7 +42,8 @@ public class IndexingRequestDao {
         }
     }
 
-    public Optional<IndexingRequestRow> findById(UUID id) {
+    @Override
+    public Optional<IndexingRequest> findById(UUID id) {
         String sql = "SELECT * FROM indexing_requests WHERE id = ?";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -59,6 +59,7 @@ public class IndexingRequestDao {
         }
     }
 
+    @Override
     public void updateStatus(UUID id, String status, String errorMessage, int gamesIndexed) {
         String sql = """
             UPDATE indexing_requests
@@ -77,8 +78,8 @@ public class IndexingRequestDao {
         }
     }
 
-    private IndexingRequestRow mapRow(ResultSet rs) throws SQLException {
-        return new IndexingRequestRow(
+    private IndexingRequest mapRow(ResultSet rs) throws SQLException {
+        return new IndexingRequest(
                 UUID.fromString(rs.getString("id")),
                 rs.getString("player"),
                 rs.getString("platform"),
@@ -91,17 +92,4 @@ public class IndexingRequestDao {
                 rs.getInt("games_indexed")
         );
     }
-
-    public record IndexingRequestRow(
-            UUID id,
-            String player,
-            String platform,
-            String startMonth,
-            String endMonth,
-            String status,
-            Instant createdAt,
-            Instant updatedAt,
-            String errorMessage,
-            int gamesIndexed
-    ) {}
 }

@@ -20,7 +20,7 @@ public record GameFeatureRow(
         boolean hasSkewer,
         boolean hasDiscoveredAttack
 ) {
-    public static GameFeatureRow fromDao(com.muchq.indexer.db.GameFeatureDao.GameFeatureRow row) {
+    public static GameFeatureRow fromStore(com.muchq.indexer.db.GameFeatureStore.GameFeature row) {
         return new GameFeatureRow(
                 row.gameUrl(),
                 row.platform(),

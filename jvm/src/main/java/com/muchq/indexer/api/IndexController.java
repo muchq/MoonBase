@@ -2,7 +2,7 @@ package com.muchq.indexer.api;
 
 import com.muchq.indexer.api.dto.IndexRequest;
 import com.muchq.indexer.api.dto.IndexResponse;
-import com.muchq.indexer.db.IndexingRequestDao;
+import com.muchq.indexer.db.IndexingRequestStore;
 import com.muchq.indexer.queue.IndexMessage;
 import com.muchq.indexer.queue.IndexQueue;
 import jakarta.ws.rs.Consumes;
@@ -21,10 +21,10 @@ import java.util.UUID;
 public class IndexController {
     private static final Logger LOG = LoggerFactory.getLogger(IndexController.class);
 
-    private final IndexingRequestDao requestDao;
+    private final IndexingRequestStore requestDao;
     private final IndexQueue queue;
 
-    public IndexController(IndexingRequestDao requestDao, IndexQueue queue) {
+    public IndexController(IndexingRequestStore requestDao, IndexQueue queue) {
         this.requestDao = requestDao;
         this.queue = queue;
     }

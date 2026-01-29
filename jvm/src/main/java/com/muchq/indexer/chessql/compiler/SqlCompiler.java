@@ -14,7 +14,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-public class SqlCompiler {
+public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     private static final Set<String> VALID_COLUMNS = Set.of(
             "white_username", "black_username", "white_elo", "black_elo",
             "time_class", "eco", "result", "num_moves", "platform",

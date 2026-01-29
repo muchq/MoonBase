@@ -4,10 +4,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.muchq.chess_com_api.ChessClient;
 import com.muchq.http_client.core.HttpClient;
 import com.muchq.http_client.jdk.Jdk11HttpClient;
+import com.muchq.indexer.chessql.compiler.CompiledQuery;
+import com.muchq.indexer.chessql.compiler.QueryCompiler;
 import com.muchq.indexer.chessql.compiler.SqlCompiler;
 import com.muchq.indexer.db.DataSourceFactory;
 import com.muchq.indexer.db.GameFeatureDao;
+import com.muchq.indexer.db.GameFeatureStore;
 import com.muchq.indexer.db.IndexingRequestDao;
+import com.muchq.indexer.db.IndexingRequestStore;
 import com.muchq.indexer.db.Migration;
 import com.muchq.indexer.engine.FeatureExtractor;
 import com.muchq.indexer.engine.GameReplayer;
@@ -50,27 +54,33 @@ public class IndexerModule {
 
     @Context
     public DataSource dataSource(
-            @Value("${indexer.db.url:jdbc:postgresql://localhost:5432/indexer}") String jdbcUrl,
-            @Value("${indexer.db.username:indexer}") String username,
-            @Value("${indexer.db.password:indexer}") String password) {
+            @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl,
+            @Value("${indexer.db.username:sa}") String username,
+            @Value("${indexer.db.password:}") String password) {
         return DataSourceFactory.create(jdbcUrl, username, password);
     }
 
     @Context
-    public Migration migration(DataSource dataSource) {
-        Migration migration = new Migration(dataSource);
+    public Migration migration(
+            DataSource dataSource,
+            @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl) {
+        boolean useH2 = jdbcUrl.contains(":h2:");
+        Migration migration = new Migration(dataSource, useH2);
         migration.run();
         return migration;
     }
 
     @Context
-    public IndexingRequestDao indexingRequestDao(DataSource dataSource) {
+    public IndexingRequestStore indexingRequestStore(DataSource dataSource) {
         return new IndexingRequestDao(dataSource);
     }
 
     @Context
-    public GameFeatureDao gameFeatureDao(DataSource dataSource) {
-        return new GameFeatureDao(dataSource);
+    public GameFeatureStore gameFeatureStore(
+            DataSource dataSource,
+            @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl) {
+        boolean useH2 = jdbcUrl.contains(":h2:");
+        return new GameFeatureDao(dataSource, useH2);
     }
 
     @Context
@@ -79,7 +89,7 @@ public class IndexerModule {
     }
 
     @Context
-    public SqlCompiler sqlCompiler() {
+    public QueryCompiler<CompiledQuery> queryCompiler() {
         return new SqlCompiler();
     }
 
@@ -113,10 +123,10 @@ public class IndexerModule {
     public IndexWorker indexWorker(
             ChessClient chessClient,
             FeatureExtractor featureExtractor,
-            IndexingRequestDao requestDao,
-            GameFeatureDao gameFeatureDao,
+            IndexingRequestStore requestStore,
+            GameFeatureStore gameFeatureStore,
             ObjectMapper objectMapper) {
-        return new IndexWorker(chessClient, featureExtractor, requestDao, gameFeatureDao, objectMapper);
+        return new IndexWorker(chessClient, featureExtractor, requestStore, gameFeatureStore, objectMapper);
     }
 
     @Context

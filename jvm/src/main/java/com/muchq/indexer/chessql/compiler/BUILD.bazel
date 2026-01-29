@@ -4,6 +4,7 @@ java_library(
     name = "compiler",
     srcs = [
         "CompiledQuery.java",
+        "QueryCompiler.java",
         "SqlCompiler.java",
     ],
     visibility = ["//visibility:public"],

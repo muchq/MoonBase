@@ -5,12 +5,15 @@ java_library(
     srcs = [
         "DataSourceFactory.java",
         "GameFeatureDao.java",
+        "GameFeatureStore.java",
         "IndexingRequestDao.java",
+        "IndexingRequestStore.java",
         "Migration.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
         "//jvm/src/main/java/com/muchq/indexer/chessql/compiler",
+        "@maven//:com_h2database_h2",
         "@maven//:com_zaxxer_HikariCP",
         "@maven//:org_slf4j_slf4j_api",
     ],

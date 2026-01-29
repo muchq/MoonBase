@@ -2,7 +2,7 @@
 
 ## Overview
 
-An entirely self-contained mode where the indexer runs with no external dependencies — no PostgreSQL, no SQS, no S3. Everything lives in-process using an in-memory queue (already implemented) and an in-memory database.
+**In-process mode is the default.** The indexer runs with no external dependencies — no PostgreSQL, no SQS, no S3. Everything lives in-process using an in-memory queue and an H2 in-memory database.
 
 This mode is useful for:
 - Local development without Docker or PostgreSQL installed
@@ -10,6 +10,8 @@ This mode is useful for:
 - CLI tooling (index a player, query results, exit)
 - Demos and evaluations
 - CI pipelines
+
+To use PostgreSQL instead, set the `INDEXER_DB_URL` environment variable to a PostgreSQL JDBC URL (e.g., `jdbc:postgresql://localhost:5432/indexer`).
 
 ## Architecture
 
@@ -179,14 +181,16 @@ public class IndexerModule {
 
 ### 6. Configuration
 
-Single environment variable controls the mode:
+Environment variables control the mode (H2 in-memory is the default):
 
-| Variable       | Value          | Effect                                      |
-|----------------|----------------|---------------------------------------------|
-| `INDEXER_MODE` | `postgres`     | Default. Requires external PostgreSQL.      |
-| `INDEXER_MODE` | `in-process`   | H2 in-memory DB + in-memory queue. No external deps. |
+| Variable              | Default Value                            | Effect                                      |
+|-----------------------|------------------------------------------|---------------------------------------------|
+| `INDEXER_DB_URL`      | `jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1`  | H2 in-memory (default). No external deps.   |
+| `INDEXER_DB_URL`      | `jdbc:postgresql://localhost:5432/...`   | PostgreSQL mode. Requires external database.|
+| `INDEXER_DB_USERNAME` | `sa`                                     | Database username.                          |
+| `INDEXER_DB_PASSWORD` | (empty)                                  | Database password.                          |
 
-Everything else is ignored in `in-process` mode (`INDEXER_DB_URL`, `INDEXER_DB_USERNAME`, `INDEXER_DB_PASSWORD`).
+The system auto-detects H2 vs PostgreSQL from the JDBC URL and uses the appropriate SQL dialect.
 
 ## Operational Characteristics
 
@@ -291,19 +295,17 @@ public class IntegrationTest {
 
 No test containers. No Docker. No database setup. Sub-second test execution.
 
-## Files to Create / Modify
+## Files Modified
 
-| File | Action | Description |
-|------|--------|-------------|
-| `bazel/java.MODULE.bazel` | Modify | Add `com.h2database:h2:2.2.224` |
-| `DataSourceFactory.java` | Modify | Add `createInMemory()` method |
-| `Migration.java` | Modify | H2 dialect detection + compatible DDL |
-| `IndexingRequestDao.java` | Modify | Replace `RETURNING` with Java-side UUID |
-| `GameFeatureDao.java` | Modify | Dialect-aware `jsonb` cast |
-| `IndexerModule.java` | Modify | `INDEXER_MODE` switch for DataSource |
-| `BUILD.bazel` (indexer) | Modify | Add H2 runtime dep |
+| File | Description |
+|------|-------------|
+| `bazel/java.MODULE.bazel` | Added `com.h2database:h2:2.2.224` |
+| `Migration.java` | H2 dialect detection + compatible DDL (separate SQL for H2 vs PostgreSQL) |
+| `GameFeatureDao.java` | Dialect-aware `jsonb` cast and `MERGE` vs `ON CONFLICT` |
+| `IndexerModule.java` | Default to H2 in-memory, auto-detect dialect from JDBC URL |
+| `db/BUILD.bazel` | Added H2 runtime dep |
 
-No new source files needed. The entire in-process mode is a configuration switch with ~100 lines of dialect adaptation across existing files.
+The entire in-process mode is a configuration default with ~100 lines of dialect adaptation across existing files.
 
 ## Comparison with Alternatives
 

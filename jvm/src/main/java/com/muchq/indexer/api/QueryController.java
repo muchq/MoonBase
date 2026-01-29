@@ -5,9 +5,9 @@ import com.muchq.indexer.api.dto.QueryRequest;
 import com.muchq.indexer.api.dto.QueryResponse;
 import com.muchq.indexer.chessql.ast.Expr;
 import com.muchq.indexer.chessql.compiler.CompiledQuery;
-import com.muchq.indexer.chessql.compiler.SqlCompiler;
+import com.muchq.indexer.chessql.compiler.QueryCompiler;
 import com.muchq.indexer.chessql.parser.Parser;
-import com.muchq.indexer.db.GameFeatureDao;
+import com.muchq.indexer.db.GameFeatureStore;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
@@ -22,12 +22,12 @@ import java.util.List;
 public class QueryController {
     private static final Logger LOG = LoggerFactory.getLogger(QueryController.class);
 
-    private final GameFeatureDao gameFeatureDao;
-    private final SqlCompiler sqlCompiler;
+    private final GameFeatureStore gameFeatureStore;
+    private final QueryCompiler<CompiledQuery> queryCompiler;
 
-    public QueryController(GameFeatureDao gameFeatureDao, SqlCompiler sqlCompiler) {
-        this.gameFeatureDao = gameFeatureDao;
-        this.sqlCompiler = sqlCompiler;
+    public QueryController(GameFeatureStore gameFeatureStore, QueryCompiler<CompiledQuery> queryCompiler) {
+        this.gameFeatureStore = gameFeatureStore;
+        this.queryCompiler = queryCompiler;
     }
 
     @POST
@@ -37,13 +37,13 @@ public class QueryController {
         LOG.info("POST /query query={} limit={} offset={}", request.query(), request.limit(), request.offset());
 
         Expr expr = Parser.parse(request.query());
-        CompiledQuery compiled = sqlCompiler.compile(expr);
+        CompiledQuery compiled = queryCompiler.compile(expr);
 
-        List<com.muchq.indexer.db.GameFeatureDao.GameFeatureRow> rows =
-                gameFeatureDao.query(compiled, request.limit(), request.offset());
+        List<GameFeatureStore.GameFeature> rows =
+                gameFeatureStore.query(compiled, request.limit(), request.offset());
 
         List<GameFeatureRow> dtos = rows.stream()
-                .map(GameFeatureRow::fromDao)
+                .map(GameFeatureRow::fromStore)
                 .toList();
 
         return new QueryResponse(dtos, dtos.size());
