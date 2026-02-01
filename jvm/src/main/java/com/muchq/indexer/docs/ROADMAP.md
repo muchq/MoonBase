@@ -18,6 +18,26 @@
 - No retry logic for chess.com API failures
 - No data retention or lifecycle management
 - No observability beyond SLF4J logging
+- Motif occurrences only record move number, not the actual move notation (see below)
+
+### Motif Recording Enhancement
+
+Currently, `MotifOccurrence` records only the move number where a motif was detected:
+```json
+{"moveNumber": 12, "description": "Fork detected at move 12"}
+```
+
+This should be enhanced to record the actual move in algebraic notation:
+- White knight fork on move 12: `"12. Nf3"` (or the square the knight moved to)
+- Black bishop fork after capturing on d5: `"14...Bxd5"`
+- Include the piece type, source/destination squares, and capture notation
+
+**Implementation notes:**
+- `PositionContext` needs to include the move that led to the position (currently only has FEN and move number)
+- `GameReplayer` should pass the SAN (Standard Algebraic Notation) for each move
+- `MotifOccurrence` should store: `moveNumber`, `san` (e.g., "Nf3"), `fullNotation` (e.g., "12. Nf3"), `piece`, `fromSquare`, `toSquare`
+
+This enables richer query results and makes it possible to jump directly to the tactical moment in a game viewer.
 
 ---
 
@@ -55,6 +75,43 @@ Add a Micronaut `@Error` handler or exception mapper:
 ### Duplicate Request Detection
 
 Before creating a new indexing request, check if an identical (player, platform, startMonth, endMonth) request already exists with status PENDING or PROCESSING. Return the existing request ID instead of creating a duplicate.
+
+### Historical Period Caching
+
+Avoid re-fetching games for player/platform/month combinations that have already been fully indexed.
+
+**Key insight:** A month's games are only "complete" if the fetch occurred *after* the month ended. For example:
+- Fetching hikaru's January 2024 games on February 1, 2024 → complete, safe to cache
+- Fetching hikaru's January 2024 games on January 15, 2024 → partial, should re-fetch later
+
+**Implementation:**
+
+1. New table to track fetched periods:
+```sql
+CREATE TABLE indexed_periods (
+    id            UUID PRIMARY KEY,
+    player        VARCHAR(255) NOT NULL,
+    platform      VARCHAR(50) NOT NULL,
+    month         VARCHAR(7) NOT NULL,      -- "2024-01"
+    fetched_at    TIMESTAMP NOT NULL,
+    is_complete   BOOLEAN NOT NULL,         -- true if fetched_at > end of month
+    games_count   INT NOT NULL,
+    UNIQUE (player, platform, month)
+);
+```
+
+2. Before fetching a month's games:
+   - Check if `indexed_periods` has a complete entry for (player, platform, month)
+   - If complete: skip fetch, return existing game count
+   - If incomplete or missing: fetch from API, upsert the period record
+
+3. Mark `is_complete = true` only if `fetched_at > last day of month`
+
+4. Optional: Admin endpoint to invalidate cached periods and force re-fetch
+
+**Edge cases:**
+- Player changes username → old username's cache is stale (detect via player ID if API provides it)
+- Games added retroactively by chess.com (rare) → accept minor staleness or add TTL
 
 ### Estimated Changes
 

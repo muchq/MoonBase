@@ -1,5 +1,30 @@
 # Chess Game Indexer — In-Process Mode
 
+## Quick Start
+
+```bash
+# Start the service (H2 in-memory, no external dependencies)
+INDEXER_DB_URL="jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1" bazel run //jvm/src/main/java/com/muchq/indexer:indexer
+
+# Index a player's games
+curl -X POST http://localhost:8080/index \
+  -H 'Content-Type: application/json' \
+  -d '{"player":"hikaru","platform":"CHESS_COM","startMonth":"2026-01","endMonth":"2026-01"}'
+
+# Check indexing status (replace {id} with the returned ID)
+curl http://localhost:8080/index/{id}
+
+# Query indexed games using ChessQL
+curl -X POST http://localhost:8080/query \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"white.elo > 2500","limit":10,"offset":0}'
+
+# Query with motif detection
+curl -X POST http://localhost:8080/query \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"motif(fork) AND motif(pin)","limit":10,"offset":0}'
+```
+
 ## Overview
 
 **In-process mode is the default.** The indexer runs with no external dependencies — no PostgreSQL, no SQS, no S3. Everything lives in-process using an in-memory queue and an H2 in-memory database.

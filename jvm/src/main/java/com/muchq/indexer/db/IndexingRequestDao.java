@@ -22,21 +22,20 @@ public class IndexingRequestDao implements IndexingRequestStore {
 
     @Override
     public UUID create(String player, String platform, String startMonth, String endMonth) {
+        UUID id = UUID.randomUUID();
         String sql = """
-            INSERT INTO indexing_requests (player, platform, start_month, end_month)
-            VALUES (?, ?, ?, ?)
-            RETURNING id
+            INSERT INTO indexing_requests (id, player, platform, start_month, end_month)
+            VALUES (?, ?, ?, ?, ?)
             """;
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, player);
-            ps.setString(2, platform);
-            ps.setString(3, startMonth);
-            ps.setString(4, endMonth);
-            try (ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                return UUID.fromString(rs.getString("id"));
-            }
+            ps.setObject(1, id);
+            ps.setString(2, player);
+            ps.setString(3, platform);
+            ps.setString(4, startMonth);
+            ps.setString(5, endMonth);
+            ps.executeUpdate();
+            return id;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to create indexing request", e);
         }

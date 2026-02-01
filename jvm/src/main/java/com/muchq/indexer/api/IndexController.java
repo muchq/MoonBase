@@ -15,8 +15,10 @@ import jakarta.ws.rs.core.MediaType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import jakarta.inject.Singleton;
 import java.util.UUID;
 
+@Singleton
 @Path("/index")
 public class IndexController {
     private static final Logger LOG = LoggerFactory.getLogger(IndexController.class);

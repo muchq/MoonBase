@@ -19,10 +19,13 @@ import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class IndexWorker {
     private static final Logger LOG = LoggerFactory.getLogger(IndexWorker.class);
     private static final DateTimeFormatter MONTH_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM");
+    private static final Pattern ECO_PATTERN = Pattern.compile("\\[ECO\\s+\"([^\"]+)\"\\]");
 
     private final ChessClient chessClient;
     private final FeatureExtractor featureExtractor;
@@ -103,7 +106,7 @@ public class IndexWorker {
                 game.whiteResult() != null ? Integer.valueOf(game.whiteResult().rating()) : null,
                 game.blackResult() != null ? Integer.valueOf(game.blackResult().rating()) : null,
                 game.timeClass(),
-                game.eco(),
+                extractEcoFromPgn(game.pgn()),
                 result,
                 game.endTime(),
                 features.numMoves(),
@@ -120,9 +123,55 @@ public class IndexWorker {
     }
 
     private String determineResult(PlayedGame game) {
-        if (game.whiteResult() != null && game.whiteResult().result() != null) {
-            return game.whiteResult().result();
+        String whiteResult = game.whiteResult() != null ? game.whiteResult().result() : null;
+        String blackResult = game.blackResult() != null ? game.blackResult().result() : null;
+
+        if (whiteResult == null && blackResult == null) {
+            return "unknown";
         }
+
+        // Winning results for the player
+        if ("win".equals(whiteResult)) {
+            return "1-0";  // White wins
+        }
+        if ("win".equals(blackResult)) {
+            return "0-1";  // Black wins
+        }
+
+        // Draw results
+        if (isDrawResult(whiteResult) || isDrawResult(blackResult)) {
+            return "1/2-1/2";
+        }
+
+        // If white lost (resigned, checkmated, timeout, etc.), black won
+        if (isLossResult(whiteResult)) {
+            return "0-1";
+        }
+        // If black lost, white won
+        if (isLossResult(blackResult)) {
+            return "1-0";
+        }
+
         return "unknown";
+    }
+
+    private boolean isDrawResult(String result) {
+        if (result == null) return false;
+        return result.equals("agreed") || result.equals("repetition") ||
+               result.equals("stalemate") || result.equals("insufficient") ||
+               result.equals("50move") || result.equals("timevsinsufficient") ||
+               result.equals("drawn");
+    }
+
+    private boolean isLossResult(String result) {
+        if (result == null) return false;
+        return result.equals("resigned") || result.equals("checkmated") ||
+               result.equals("timeout") || result.equals("abandoned") ||
+               result.equals("lose");
+    }
+
+    private String extractEcoFromPgn(String pgn) {
+        Matcher m = ECO_PATTERN.matcher(pgn);
+        return m.find() ? m.group(1) : null;
     }
 }

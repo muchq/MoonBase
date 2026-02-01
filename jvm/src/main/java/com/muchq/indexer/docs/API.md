@@ -19,7 +19,7 @@ Start indexing games for a player over a month range.
 ```json
 {
   "player": "hikaru",
-  "platform": "chess.com",
+  "platform": "CHESS_COM",
   "startMonth": "2024-03",
   "endMonth": "2024-03"
 }
@@ -28,7 +28,7 @@ Start indexing games for a player over a month range.
 | Field       | Type   | Required | Description                            |
 |-------------|--------|----------|----------------------------------------|
 | player      | string | yes      | Username on the chess platform          |
-| platform    | string | yes      | `"chess.com"` (lichess planned)        |
+| platform    | string | yes      | `"CHESS_COM"` (lichess planned)        |
 | startMonth  | string | yes      | Start month inclusive, format `YYYY-MM` |
 | endMonth    | string | yes      | End month inclusive, format `YYYY-MM`   |
 
@@ -100,15 +100,15 @@ Search indexed games using ChessQL.
   "games": [
     {
       "gameUrl": "https://www.chess.com/game/live/12345",
-      "platform": "chess.com",
-      "whiteUsername": "hikaru",
-      "blackUsername": "magnuscarlsen",
+      "platform": "CHESS_COM",
+      "whiteUsername": "Hikaru",
+      "blackUsername": "MagnusCarlsen",
       "whiteElo": 2850,
       "blackElo": 2830,
       "timeClass": "blitz",
       "eco": "B90",
-      "result": "win",
-      "playedAt": "2024-03-15T18:30:00Z",
+      "result": "1-0",
+      "playedAt": 1710524400.0,
       "numMoves": 42,
       "hasPin": true,
       "hasCrossPin": false,
@@ -119,6 +119,13 @@ Search indexed games using ChessQL.
   ],
   "count": 1
 }
+```
+
+**Result values:**
+- `1-0` — White wins
+- `0-1` — Black wins
+- `1/2-1/2` — Draw (stalemate, repetition, agreement, etc.)
+- `unknown` — Result could not be determined
 ```
 
 ### Error Responses
@@ -136,20 +143,33 @@ Search indexed games using ChessQL.
 ## Example Session
 
 ```bash
+# Start the service (in-process mode with H2)
+INDEXER_DB_URL="jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1" bazel run //jvm/src/main/java/com/muchq/indexer:indexer
+
 # 1. Start indexing
 curl -X POST http://localhost:8080/index \
   -H "Content-Type: application/json" \
-  -d '{"player":"hikaru","platform":"chess.com","startMonth":"2024-03","endMonth":"2024-03"}'
+  -d '{"player":"hikaru","platform":"CHESS_COM","startMonth":"2026-01","endMonth":"2026-01"}'
 
-# Response: {"id":"abc-123","status":"PENDING","gamesIndexed":0,"errorMessage":null}
+# Response: {"id":"abc-123","status":"PENDING","gamesIndexed":0}
 
 # 2. Poll until completed
 curl http://localhost:8080/index/abc-123
 
-# Response: {"id":"abc-123","status":"COMPLETED","gamesIndexed":147,"errorMessage":null}
+# Response: {"id":"abc-123","status":"COMPLETED","gamesIndexed":828}
 
 # 3. Query indexed games
 curl -X POST http://localhost:8080/query \
   -H "Content-Type: application/json" \
   -d '{"query":"white.elo > 2700 AND motif(fork)","limit":10,"offset":0}'
+
+# 4. Query games with multiple motifs
+curl -X POST http://localhost:8080/query \
+  -H "Content-Type: application/json" \
+  -d '{"query":"motif(pin) AND motif(skewer)","limit":10,"offset":0}'
+
+# 5. Query by ECO opening code
+curl -X POST http://localhost:8080/query \
+  -H "Content-Type: application/json" \
+  -d '{"query":"eco = \"B90\"","limit":10,"offset":0}'
 ```

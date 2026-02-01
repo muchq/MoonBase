@@ -16,8 +16,10 @@ import jakarta.ws.rs.core.MediaType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import jakarta.inject.Singleton;
 import java.util.List;
 
+@Singleton
 @Path("/query")
 public class QueryController {
     private static final Logger LOG = LoggerFactory.getLogger(QueryController.class);

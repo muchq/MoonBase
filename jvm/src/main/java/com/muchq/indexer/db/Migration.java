@@ -13,7 +13,7 @@ public class Migration {
 
     private static final String H2_INDEXING_REQUESTS = """
         CREATE TABLE IF NOT EXISTS indexing_requests (
-            id            UUID PRIMARY KEY DEFAULT random_uuid(),
+            id            UUID DEFAULT random_uuid() PRIMARY KEY,
             player        VARCHAR(255) NOT NULL,
             platform      VARCHAR(50) NOT NULL,
             start_month   VARCHAR(7) NOT NULL,
@@ -28,7 +28,7 @@ public class Migration {
 
     private static final String H2_GAME_FEATURES = """
         CREATE TABLE IF NOT EXISTS game_features (
-            id            UUID PRIMARY KEY DEFAULT random_uuid(),
+            id            UUID DEFAULT random_uuid() PRIMARY KEY,
             request_id    UUID NOT NULL REFERENCES indexing_requests(id),
             game_url      VARCHAR(1024) NOT NULL UNIQUE,
             platform      VARCHAR(50) NOT NULL,
