@@ -5,6 +5,7 @@ java_library(
     srcs = [
         "IndexWorker.java",
         "IndexWorkerLifecycle.java",
+        "ResultMapper.java",
     ],
     visibility = ["//visibility:public"],
     deps = [

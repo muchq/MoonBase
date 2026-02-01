@@ -125,49 +125,7 @@ public class IndexWorker {
     private String determineResult(PlayedGame game) {
         String whiteResult = game.whiteResult() != null ? game.whiteResult().result() : null;
         String blackResult = game.blackResult() != null ? game.blackResult().result() : null;
-
-        if (whiteResult == null && blackResult == null) {
-            return "unknown";
-        }
-
-        // Winning results for the player
-        if ("win".equals(whiteResult)) {
-            return "1-0";  // White wins
-        }
-        if ("win".equals(blackResult)) {
-            return "0-1";  // Black wins
-        }
-
-        // Draw results
-        if (isDrawResult(whiteResult) || isDrawResult(blackResult)) {
-            return "1/2-1/2";
-        }
-
-        // If white lost (resigned, checkmated, timeout, etc.), black won
-        if (isLossResult(whiteResult)) {
-            return "0-1";
-        }
-        // If black lost, white won
-        if (isLossResult(blackResult)) {
-            return "1-0";
-        }
-
-        return "unknown";
-    }
-
-    private boolean isDrawResult(String result) {
-        if (result == null) return false;
-        return result.equals("agreed") || result.equals("repetition") ||
-               result.equals("stalemate") || result.equals("insufficient") ||
-               result.equals("50move") || result.equals("timevsinsufficient") ||
-               result.equals("drawn");
-    }
-
-    private boolean isLossResult(String result) {
-        if (result == null) return false;
-        return result.equals("resigned") || result.equals("checkmated") ||
-               result.equals("timeout") || result.equals("abandoned") ||
-               result.equals("lose");
+        return ResultMapper.mapResult(whiteResult, blackResult);
     }
 
     private String extractEcoFromPgn(String pgn) {
