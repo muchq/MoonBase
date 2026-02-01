@@ -1,0 +1,11 @@
+load("@rules_java//java:java_library.bzl", "java_library")
+
+java_library(
+    name = "queue",
+    srcs = [
+        "InMemoryIndexQueue.java",
+        "IndexMessage.java",
+        "IndexQueue.java",
+    ],
+    visibility = ["//visibility:public"],
+)

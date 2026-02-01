@@ -1,0 +1,25 @@
+load("@rules_java//java:java_library.bzl", "java_library")
+
+java_library(
+    name = "worker",
+    srcs = [
+        "IndexWorker.java",
+        "IndexWorkerLifecycle.java",
+        "ResultMapper.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//jvm/src/main/java/com/muchq/chess_com_api",
+        "//jvm/src/main/java/com/muchq/indexer/db",
+        "//jvm/src/main/java/com/muchq/indexer/engine",
+        "//jvm/src/main/java/com/muchq/indexer/engine/model",
+        "//jvm/src/main/java/com/muchq/indexer/queue",
+        "@maven//:com_fasterxml_jackson_core_jackson_core",
+        "@maven//:com_fasterxml_jackson_core_jackson_databind",
+        "@maven//:io_micronaut_micronaut_context",
+        "@maven//:io_micronaut_micronaut_http_server_netty",
+        "@maven//:io_micronaut_micronaut_inject",
+        "@maven//:io_micronaut_micronaut_runtime",
+        "@maven//:org_slf4j_slf4j_api",
+    ],
+)
