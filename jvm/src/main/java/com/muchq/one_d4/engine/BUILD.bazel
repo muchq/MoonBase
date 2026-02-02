@@ -1,0 +1,17 @@
+load("@rules_java//java:java_library.bzl", "java_library")
+
+java_library(
+    name = "engine",
+    srcs = [
+        "FeatureExtractor.java",
+        "GameReplayer.java",
+        "PgnParser.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//jvm/src/main/java/com/muchq/one_d4/engine/model",
+        "//jvm/src/main/java/com/muchq/one_d4/motifs",
+        "@maven//:io_github_tors42_chariot",
+        "@maven//:org_slf4j_slf4j_api",
+    ],
+)

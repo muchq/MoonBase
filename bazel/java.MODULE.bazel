@@ -1,6 +1,6 @@
 bazel_dep(name = "rules_java", version = "9.3.0")
 bazel_dep(name = "rules_jvm_external", version = "6.9")
-bazel_dep(name = "contrib_rules_jvm", version = "0.31.1")
+bazel_dep(name = "contrib_rules_jvm", version = "0.32.0")
 
 maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 
@@ -16,9 +16,9 @@ maven.install(
         "com.fasterxml.jackson.core:jackson-core",
         "com.fasterxml.jackson.core:jackson-databind",
         "com.zaxxer:HikariCP:6.3.3",
-        "io.github.tors42:chariot:0.1.10",
-        "com.h2database:h2:2.2.224",
-        "org.postgresql:postgresql:42.7.4",
+        "io.github.tors42:chariot:0.2.6",
+        "com.h2database:h2:2.4.240",
+        "org.postgresql:postgresql:42.7.9",
         "com.fasterxml.jackson.datatype:jackson-datatype-guava",
         "com.fasterxml.jackson.datatype:jackson-datatype-jdk8",
         "com.fasterxml.jackson.datatype:jackson-datatype-jsr310",
@@ -38,10 +38,10 @@ maven.install(
         "io.netty:netty-codec",
         "io.netty:netty-handler",
         "io.netty:netty-transport",
-        "io.sentry:sentry-logback:8.30.0",
+        "io.sentry:sentry-logback:8.31.0",
         "jakarta.annotation:jakarta.annotation-api:3.0.0",
         "junit:junit:4.13.2",
-        "org.assertj:assertj-core:3.27.6",
+        "org.assertj:assertj-core:3.27.7",
         "org.eclipse.jetty:jetty-server:%s" % JETTY_VERSION,
         "org.eclipse.jetty.websocket:websocket-jetty-server:%s" % JETTY_VERSION,
         "org.jspecify:jspecify:1.0.0",

@@ -1,0 +1,17 @@
+load("@contrib_rules_jvm//java:defs.bzl", "java_test_suite")
+
+java_test_suite(
+    name = "motifs",
+    size = "small",
+    srcs = [
+        "ForkDetectorTest.java",
+        "PinDetectorTest.java",
+        "SkewerDetectorTest.java",
+    ],
+    deps = [
+        "//jvm/src/main/java/com/muchq/one_d4/engine/model",
+        "//jvm/src/main/java/com/muchq/one_d4/motifs",
+        "@maven//:junit_junit",
+        "@maven//:org_assertj_assertj_core",
+    ],
+)
