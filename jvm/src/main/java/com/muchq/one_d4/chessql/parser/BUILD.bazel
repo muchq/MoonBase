@@ -1,0 +1,14 @@
+load("@rules_java//java:java_library.bzl", "java_library")
+
+java_library(
+    name = "parser",
+    srcs = [
+        "ParseException.java",
+        "Parser.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//jvm/src/main/java/com/muchq/one_d4/chessql/ast",
+        "//jvm/src/main/java/com/muchq/one_d4/chessql/lexer",
+    ],
+)

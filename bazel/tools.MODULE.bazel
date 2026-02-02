@@ -12,9 +12,9 @@ use_repo(llvm, "llvm_toolchain")
 
 register_toolchains("@llvm_toolchain//:all")
 
-bazel_dep(name = "bazel_features", version = "1.39.0")
+bazel_dep(name = "bazel_features", version = "1.41.0")
 
-bazel_dep(name = "buildifier_prebuilt", version = "8.2.1.1", dev_dependency = True)
+bazel_dep(name = "buildifier_prebuilt", version = "8.2.1.2", dev_dependency = True)
 
 bazel_dep(name = "bazel-diff", version = "12.1.1")
 bazel_dep(name = "rules_shell", version = "0.6.1")
