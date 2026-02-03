@@ -1,6 +1,16 @@
 load("@bazel_gazelle//:def.bzl", "gazelle")
 load("@buildifier_prebuilt//:rules.bzl", "buildifier", "buildifier_test")
 
+alias(
+    name = "format",
+    actual = "//bazel/format",
+)
+
+alias(
+    name = "format.check",
+    actual = "//bazel/format:format.check",
+)
+
 gazelle(name = "gazelle")
 
 buildifier(

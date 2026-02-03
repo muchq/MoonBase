@@ -176,13 +176,22 @@ public class GameReplayerTest {
     }
 
     @Test
-    public void testAmbiguousMoveWithRank() {
-        // Simpler test for rank disambiguation - two rooks can move to same square
-        // After Rae1 and Rfe1 type moves
+    public void testLongerGame() {
+        // Test that a typical opening sequence replays correctly
         List<PositionContext> positions = replayer.replay(
                 "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O");
 
-        // Should handle the game without errors
         assertThat(positions).hasSize(17); // initial + 16 half-moves
+    }
+
+    @Test
+    public void testAmbiguousMoveWithRank() {
+        // After move 10, white has Ra3 and Rf1. Both can reach a1 (back rank is clear
+        // since Nc3, Be3, Qd2 have moved those pieces). R3a1 uses rank disambiguation.
+        List<PositionContext> positions = replayer.replay(
+                "1. e4 e5 2. d3 d6 3. Nf3 Nf6 4. Nc3 Nc6 5. Be2 Be7 6. O-O O-O " +
+                "7. Be3 Be6 8. Qd2 Qd7 9. a4 a5 10. Ra3 Ra6 11. R3a1");
+
+        assertThat(positions).hasSize(22); // initial + 21 half-moves
     }
 }

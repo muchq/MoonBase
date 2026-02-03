@@ -18,3 +18,11 @@ bazel_dep(name = "buildifier_prebuilt", version = "8.2.1.2", dev_dependency = Tr
 
 bazel_dep(name = "bazel-diff", version = "12.1.1")
 bazel_dep(name = "rules_shell", version = "0.6.1")
+bazel_dep(name = "aspect_rules_lint", version = "2.0.0")
+
+http_jar = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_jar")
+http_jar(
+    name = "google-java-format",
+    sha256 = "697707af07c7753f29cba415c6a76b7882702ff464f807da98b28069b8751910",
+    url = "https://repo1.maven.org/maven2/com/google/googlejavaformat/google-java-format/1.33.0/google-java-format-1.33.0-all-deps.jar",
+)
