@@ -11,125 +11,125 @@ import com.muchq.one_d4.engine.FeatureExtractor;
 import com.muchq.one_d4.engine.model.GameFeatures;
 import com.muchq.one_d4.engine.model.Motif;
 import com.muchq.one_d4.queue.IndexMessage;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.time.Instant;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
-import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class IndexWorker {
-    private static final Logger LOG = LoggerFactory.getLogger(IndexWorker.class);
-    private static final DateTimeFormatter MONTH_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM");
-    private static final Pattern ECO_PATTERN = Pattern.compile("\\[ECO\\s+\"([^\"]+)\"\\]");
+  private static final Logger LOG = LoggerFactory.getLogger(IndexWorker.class);
+  private static final DateTimeFormatter MONTH_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM");
+  private static final Pattern ECO_PATTERN = Pattern.compile("\\[ECO\\s+\"([^\"]+)\"\\]");
 
-    private final ChessClient chessClient;
-    private final FeatureExtractor featureExtractor;
-    private final IndexingRequestStore requestStore;
-    private final GameFeatureStore gameFeatureStore;
-    private final ObjectMapper objectMapper;
+  private final ChessClient chessClient;
+  private final FeatureExtractor featureExtractor;
+  private final IndexingRequestStore requestStore;
+  private final GameFeatureStore gameFeatureStore;
+  private final ObjectMapper objectMapper;
 
-    public IndexWorker(
-            ChessClient chessClient,
-            FeatureExtractor featureExtractor,
-            IndexingRequestStore requestStore,
-            GameFeatureStore gameFeatureStore,
-            ObjectMapper objectMapper) {
-        this.chessClient = chessClient;
-        this.featureExtractor = featureExtractor;
-        this.requestStore = requestStore;
-        this.gameFeatureStore = gameFeatureStore;
-        this.objectMapper = objectMapper;
-    }
+  public IndexWorker(
+      ChessClient chessClient,
+      FeatureExtractor featureExtractor,
+      IndexingRequestStore requestStore,
+      GameFeatureStore gameFeatureStore,
+      ObjectMapper objectMapper) {
+    this.chessClient = chessClient;
+    this.featureExtractor = featureExtractor;
+    this.requestStore = requestStore;
+    this.gameFeatureStore = gameFeatureStore;
+    this.objectMapper = objectMapper;
+  }
 
-    public void process(IndexMessage message) {
-        LOG.info("Processing index request {} for player={} platform={}",
-                message.requestId(), message.player(), message.platform());
+  public void process(IndexMessage message) {
+    LOG.info(
+        "Processing index request {} for player={} platform={}",
+        message.requestId(),
+        message.player(),
+        message.platform());
 
-        try {
-            requestStore.updateStatus(message.requestId(), "PROCESSING", null, 0);
+    try {
+      requestStore.updateStatus(message.requestId(), "PROCESSING", null, 0);
 
-            YearMonth start = YearMonth.parse(message.startMonth(), MONTH_FORMAT);
-            YearMonth end = YearMonth.parse(message.endMonth(), MONTH_FORMAT);
-            int totalIndexed = 0;
+      YearMonth start = YearMonth.parse(message.startMonth(), MONTH_FORMAT);
+      YearMonth end = YearMonth.parse(message.endMonth(), MONTH_FORMAT);
+      int totalIndexed = 0;
 
-            for (YearMonth month = start; !month.isAfter(end); month = month.plusMonths(1)) {
-                Optional<GamesResponse> response = chessClient.fetchGames(message.player(), month);
-                if (response.isEmpty()) {
-                    LOG.warn("No games found for player={} month={}", message.player(), month);
-                    continue;
-                }
-
-                for (PlayedGame game : response.get().games()) {
-                    try {
-                        indexGame(message, game);
-                        totalIndexed++;
-                    } catch (Exception e) {
-                        LOG.warn("Failed to index game {}", game.url(), e);
-                    }
-                }
-
-                requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
-            }
-
-            requestStore.updateStatus(message.requestId(), "COMPLETED", null, totalIndexed);
-            LOG.info("Completed indexing request {} with {} games", message.requestId(), totalIndexed);
-        } catch (Exception e) {
-            LOG.error("Failed to process index request {}", message.requestId(), e);
-            requestStore.updateStatus(message.requestId(), "FAILED", e.getMessage(), 0);
-        }
-    }
-
-    private void indexGame(IndexMessage message, PlayedGame game) {
-        GameFeatures features = featureExtractor.extract(game.pgn());
-
-        String motifsJson;
-        try {
-            motifsJson = objectMapper.writeValueAsString(features.occurrences());
-        } catch (JsonProcessingException e) {
-            motifsJson = "{}";
+      for (YearMonth month = start; !month.isAfter(end); month = month.plusMonths(1)) {
+        Optional<GamesResponse> response = chessClient.fetchGames(message.player(), month);
+        if (response.isEmpty()) {
+          LOG.warn("No games found for player={} month={}", message.player(), month);
+          continue;
         }
 
-        String result = determineResult(game);
+        for (PlayedGame game : response.get().games()) {
+          try {
+            indexGame(message, game);
+            totalIndexed++;
+          } catch (Exception e) {
+            LOG.warn("Failed to index game {}", game.url(), e);
+          }
+        }
 
-        GameFeatureStore.GameFeature row = new GameFeatureStore.GameFeature(
-                null, // id generated by DB
-                message.requestId(),
-                game.url(),
-                message.platform(),
-                game.whiteResult() != null ? game.whiteResult().username() : null,
-                game.blackResult() != null ? game.blackResult().username() : null,
-                game.whiteResult() != null ? Integer.valueOf(game.whiteResult().rating()) : null,
-                game.blackResult() != null ? Integer.valueOf(game.blackResult().rating()) : null,
-                game.timeClass(),
-                extractEcoFromPgn(game.pgn()),
-                result,
-                game.endTime(),
-                features.numMoves(),
-                features.hasMotif(Motif.PIN),
-                features.hasMotif(Motif.CROSS_PIN),
-                features.hasMotif(Motif.FORK),
-                features.hasMotif(Motif.SKEWER),
-                features.hasMotif(Motif.DISCOVERED_ATTACK),
-                motifsJson,
-                game.pgn()
-        );
+        requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
+      }
 
-        gameFeatureStore.insert(row);
+      requestStore.updateStatus(message.requestId(), "COMPLETED", null, totalIndexed);
+      LOG.info("Completed indexing request {} with {} games", message.requestId(), totalIndexed);
+    } catch (Exception e) {
+      LOG.error("Failed to process index request {}", message.requestId(), e);
+      requestStore.updateStatus(message.requestId(), "FAILED", e.getMessage(), 0);
+    }
+  }
+
+  private void indexGame(IndexMessage message, PlayedGame game) {
+    GameFeatures features = featureExtractor.extract(game.pgn());
+
+    String motifsJson;
+    try {
+      motifsJson = objectMapper.writeValueAsString(features.occurrences());
+    } catch (JsonProcessingException e) {
+      motifsJson = "{}";
     }
 
-    private String determineResult(PlayedGame game) {
-        String whiteResult = game.whiteResult() != null ? game.whiteResult().result() : null;
-        String blackResult = game.blackResult() != null ? game.blackResult().result() : null;
-        return ResultMapper.mapResult(whiteResult, blackResult);
-    }
+    String result = determineResult(game);
 
-    private String extractEcoFromPgn(String pgn) {
-        Matcher m = ECO_PATTERN.matcher(pgn);
-        return m.find() ? m.group(1) : null;
-    }
+    GameFeatureStore.GameFeature row =
+        new GameFeatureStore.GameFeature(
+            null, // id generated by DB
+            message.requestId(),
+            game.url(),
+            message.platform(),
+            game.whiteResult() != null ? game.whiteResult().username() : null,
+            game.blackResult() != null ? game.blackResult().username() : null,
+            game.whiteResult() != null ? Integer.valueOf(game.whiteResult().rating()) : null,
+            game.blackResult() != null ? Integer.valueOf(game.blackResult().rating()) : null,
+            game.timeClass(),
+            extractEcoFromPgn(game.pgn()),
+            result,
+            game.endTime(),
+            features.numMoves(),
+            features.hasMotif(Motif.PIN),
+            features.hasMotif(Motif.CROSS_PIN),
+            features.hasMotif(Motif.FORK),
+            features.hasMotif(Motif.SKEWER),
+            features.hasMotif(Motif.DISCOVERED_ATTACK),
+            motifsJson,
+            game.pgn());
+
+    gameFeatureStore.insert(row);
+  }
+
+  private String determineResult(PlayedGame game) {
+    String whiteResult = game.whiteResult() != null ? game.whiteResult().result() : null;
+    String blackResult = game.blackResult() != null ? game.blackResult().result() : null;
+    return ResultMapper.mapResult(whiteResult, blackResult);
+  }
+
+  private String extractEcoFromPgn(String pgn) {
+    Matcher m = ECO_PATTERN.matcher(pgn);
+    return m.find() ? m.group(1) : null;
+  }
 }

@@ -13,12 +13,13 @@ import java.io.Reader;
 
 public final class JsonUtils {
 
-  static final ObjectMapper MAPPER = new ObjectMapper()
-    .registerModule(new Jdk8Module())
-    .registerModule(new JavaTimeModule())
-    .registerModule(new GuavaModule())
-    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-    .configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
+  static final ObjectMapper MAPPER =
+      new ObjectMapper()
+          .registerModule(new Jdk8Module())
+          .registerModule(new JavaTimeModule())
+          .registerModule(new GuavaModule())
+          .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+          .configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
 
   private JsonUtils() {}
 

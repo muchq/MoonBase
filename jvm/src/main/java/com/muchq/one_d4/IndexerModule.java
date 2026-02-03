@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.muchq.chess_com_api.ChessClient;
 import com.muchq.http_client.core.HttpClient;
 import com.muchq.http_client.jdk.Jdk11HttpClient;
+import com.muchq.json.JsonUtils;
 import com.muchq.one_d4.chessql.compiler.CompiledQuery;
 import com.muchq.one_d4.chessql.compiler.QueryCompiler;
 import com.muchq.one_d4.chessql.compiler.SqlCompiler;
@@ -26,111 +27,110 @@ import com.muchq.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.one_d4.queue.IndexQueue;
 import com.muchq.one_d4.worker.IndexWorker;
 import com.muchq.one_d4.worker.IndexWorkerLifecycle;
-import com.muchq.json.JsonUtils;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.context.annotation.Factory;
 import io.micronaut.context.annotation.Value;
-
-import javax.sql.DataSource;
 import java.util.List;
+import javax.sql.DataSource;
 
 @Factory
 public class IndexerModule {
 
-    @Context
-    public ObjectMapper objectMapper() {
-        return JsonUtils.mapper();
-    }
+  @Context
+  public ObjectMapper objectMapper() {
+    return JsonUtils.mapper();
+  }
 
-    @Context
-    public HttpClient httpClient() {
-        return new Jdk11HttpClient(java.net.http.HttpClient.newHttpClient());
-    }
+  @Context
+  public HttpClient httpClient() {
+    return new Jdk11HttpClient(java.net.http.HttpClient.newHttpClient());
+  }
 
-    @Context
-    public ChessClient chessClient(HttpClient httpClient, ObjectMapper objectMapper) {
-        return new ChessClient(httpClient, objectMapper);
-    }
+  @Context
+  public ChessClient chessClient(HttpClient httpClient, ObjectMapper objectMapper) {
+    return new ChessClient(httpClient, objectMapper);
+  }
 
-    @Context
-    public DataSource dataSource(
-            @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl,
-            @Value("${indexer.db.username:sa}") String username,
-            @Value("${indexer.db.password:}") String password) {
-        return DataSourceFactory.create(jdbcUrl, username, password);
-    }
+  @Context
+  public DataSource dataSource(
+      @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl,
+      @Value("${indexer.db.username:sa}") String username,
+      @Value("${indexer.db.password:}") String password) {
+    return DataSourceFactory.create(jdbcUrl, username, password);
+  }
 
-    @Context
-    public Migration migration(
-            DataSource dataSource,
-            @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl) {
-        boolean useH2 = jdbcUrl.contains(":h2:");
-        Migration migration = new Migration(dataSource, useH2);
-        migration.run();
-        return migration;
-    }
+  @Context
+  public Migration migration(
+      DataSource dataSource,
+      @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl) {
+    boolean useH2 = jdbcUrl.contains(":h2:");
+    Migration migration = new Migration(dataSource, useH2);
+    migration.run();
+    return migration;
+  }
 
-    @Context
-    public IndexingRequestStore indexingRequestStore(DataSource dataSource) {
-        return new IndexingRequestDao(dataSource);
-    }
+  @Context
+  public IndexingRequestStore indexingRequestStore(DataSource dataSource) {
+    return new IndexingRequestDao(dataSource);
+  }
 
-    @Context
-    public GameFeatureStore gameFeatureStore(
-            DataSource dataSource,
-            @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl) {
-        boolean useH2 = jdbcUrl.contains(":h2:");
-        return new GameFeatureDao(dataSource, useH2);
-    }
+  @Context
+  public GameFeatureStore gameFeatureStore(
+      DataSource dataSource,
+      @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl) {
+    boolean useH2 = jdbcUrl.contains(":h2:");
+    return new GameFeatureDao(dataSource, useH2);
+  }
 
-    @Context
-    public IndexQueue indexQueue() {
-        return new InMemoryIndexQueue();
-    }
+  @Context
+  public IndexQueue indexQueue() {
+    return new InMemoryIndexQueue();
+  }
 
-    @Context
-    public QueryCompiler<CompiledQuery> queryCompiler() {
-        return new SqlCompiler();
-    }
+  @Context
+  public QueryCompiler<CompiledQuery> queryCompiler() {
+    return new SqlCompiler();
+  }
 
-    @Context
-    public List<MotifDetector> motifDetectors() {
-        return List.of(
-                new PinDetector(),
-                new CrossPinDetector(),
-                new ForkDetector(),
-                new SkewerDetector(),
-                new DiscoveredAttackDetector()
-        );
-    }
+  @Context
+  public List<MotifDetector> motifDetectors() {
+    return List.of(
+        new PinDetector(),
+        new CrossPinDetector(),
+        new ForkDetector(),
+        new SkewerDetector(),
+        new DiscoveredAttackDetector());
+  }
 
-    @Context
-    public PgnParser pgnParser() {
-        return new PgnParser();
-    }
+  @Context
+  public PgnParser pgnParser() {
+    return new PgnParser();
+  }
 
-    @Context
-    public GameReplayer gameReplayer() {
-        return new GameReplayer();
-    }
+  @Context
+  public GameReplayer gameReplayer() {
+    return new GameReplayer();
+  }
 
-    @Context
-    public FeatureExtractor featureExtractor(PgnParser pgnParser, GameReplayer replayer, List<MotifDetector> detectors) {
-        return new FeatureExtractor(pgnParser, replayer, detectors);
-    }
+  @Context
+  public FeatureExtractor featureExtractor(
+      PgnParser pgnParser, GameReplayer replayer, List<MotifDetector> detectors) {
+    return new FeatureExtractor(pgnParser, replayer, detectors);
+  }
 
-    @Context
-    public IndexWorker indexWorker(
-            ChessClient chessClient,
-            FeatureExtractor featureExtractor,
-            IndexingRequestStore requestStore,
-            GameFeatureStore gameFeatureStore,
-            ObjectMapper objectMapper) {
-        return new IndexWorker(chessClient, featureExtractor, requestStore, gameFeatureStore, objectMapper);
-    }
+  @Context
+  public IndexWorker indexWorker(
+      ChessClient chessClient,
+      FeatureExtractor featureExtractor,
+      IndexingRequestStore requestStore,
+      GameFeatureStore gameFeatureStore,
+      ObjectMapper objectMapper) {
+    return new IndexWorker(
+        chessClient, featureExtractor, requestStore, gameFeatureStore, objectMapper);
+  }
 
-    @Context
-    public IndexWorkerLifecycle indexWorkerLifecycle(IndexQueue queue, IndexWorker worker) {
-        return new IndexWorkerLifecycle(queue, worker);
-    }
+  @Context
+  public IndexWorkerLifecycle indexWorkerLifecycle(IndexQueue queue, IndexWorker worker) {
+    return new IndexWorkerLifecycle(queue, worker);
+  }
 }

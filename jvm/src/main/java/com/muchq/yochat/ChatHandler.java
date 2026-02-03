@@ -22,7 +22,8 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
   private final Map<Channel, String> users = new ConcurrentHashMap<>();
   private final Set<String> usernames = new ConcurrentSkipListSet<>();
 
-  private static final String HELLO = "Connected. Enter a username by typing `/name <your name>`.\n";
+  private static final String HELLO =
+      "Connected. Enter a username by typing `/name <your name>`.\n";
   private static final String GOODBYE = "Disconnected.\n";
   private static final String SET_NAME_COMMAND = "/name ";
   private static final String HELP_COMMAND = "/help";
@@ -69,7 +70,8 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
 
     if (LURKERS_COMMAND.equalsIgnoreCase(msg)) {
       LOGGER.info("{} ({}) asked for lurkers", context, users.get(context.channel()));
-      context.writeAndFlush("there are " + (channels.size() - users.size()) + " nameless lurkers.\n");
+      context.writeAndFlush(
+          "there are " + (channels.size() - users.size()) + " nameless lurkers.\n");
       return;
     }
 
@@ -93,7 +95,8 @@ public class ChatHandler extends SimpleChannelInboundHandler<String> {
 
     if (HELP_COMMAND.equalsIgnoreCase(msg)) {
       LOGGER.info("{} ({}) asked for help", context, users.get(context.channel()));
-      context.writeAndFlush("/name <NAME> to set your username\n/quit to disconnect\n/help prints this message\n");
+      context.writeAndFlush(
+          "/name <NAME> to set your username\n/quit to disconnect\n/help prints this message\n");
       return;
     }
 

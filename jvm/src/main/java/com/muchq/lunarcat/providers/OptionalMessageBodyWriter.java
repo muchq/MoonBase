@@ -15,7 +15,7 @@ import javax.ws.rs.ext.MessageBodyWriter;
 import javax.ws.rs.ext.Provider;
 
 @Provider
-@Produces({ MediaType.APPLICATION_JSON, MediaType.APPLICATION_OCTET_STREAM })
+@Produces({MediaType.APPLICATION_JSON, MediaType.APPLICATION_OCTET_STREAM})
 public class OptionalMessageBodyWriter implements MessageBodyWriter<Optional<?>> {
 
   private final ObjectMapper mapper;
@@ -27,30 +27,30 @@ public class OptionalMessageBodyWriter implements MessageBodyWriter<Optional<?>>
 
   @Override
   public long getSize(
-    Optional<?> entity,
-    Class<?> type,
-    Type genericType,
-    Annotation[] annotations,
-    MediaType mediaType
-  ) {
+      Optional<?> entity,
+      Class<?> type,
+      Type genericType,
+      Annotation[] annotations,
+      MediaType mediaType) {
     return 0;
   }
 
   @Override
-  public boolean isWriteable(Class<?> type, Type genericType, Annotation[] annotations, MediaType mediaType) {
+  public boolean isWriteable(
+      Class<?> type, Type genericType, Annotation[] annotations, MediaType mediaType) {
     return (Optional.class.isAssignableFrom(type));
   }
 
   @Override
   public void writeTo(
-    Optional<?> entity,
-    Class<?> type,
-    Type genericType,
-    Annotation[] annotations,
-    MediaType mediaType,
-    MultivaluedMap<String, Object> httpHeaders,
-    OutputStream entityStream
-  ) throws IOException {
+      Optional<?> entity,
+      Class<?> type,
+      Type genericType,
+      Annotation[] annotations,
+      MediaType mediaType,
+      MultivaluedMap<String, Object> httpHeaders,
+      OutputStream entityStream)
+      throws IOException {
     if (entity.isEmpty()) {
       throw new NotFoundException();
     }

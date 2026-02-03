@@ -15,10 +15,9 @@ import com.muchq.mcpserver.dtos.ToolsListResult;
 import com.muchq.mcpserver.tools.ToolRegistry;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.List;
 
 @Singleton
 public class McpRequestHandler {
@@ -64,13 +63,11 @@ public class McpRequestHandler {
 
   private JsonRpcResponse handleToolsCall(JsonRpcRequest request) {
     try {
-      ToolCallParams params =
-          objectMapper.convertValue(request.params(), ToolCallParams.class);
+      ToolCallParams params = objectMapper.convertValue(request.params(), ToolCallParams.class);
 
       String toolResult = toolRegistry.executeTool(params.name(), params.arguments());
 
-      ToolCallResult result =
-          new ToolCallResult(List.of(new ContentItem("text", toolResult)));
+      ToolCallResult result = new ToolCallResult(List.of(new ContentItem("text", toolResult)));
 
       return new JsonRpcResponse("2.0", request.id(), result, null);
     } catch (Exception e) {

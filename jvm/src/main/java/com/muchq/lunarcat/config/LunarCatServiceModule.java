@@ -36,12 +36,12 @@ public class LunarCatServiceModule extends AbstractModule {
 
   private void bindStartupTasks() {
     Multibinder<StartupTask> multibinder = Multibinder.newSetBinder(binder(), StartupTask.class);
-    Set<Class<? extends StartupTask>> tasks = new Reflections(
-      new ConfigurationBuilder()
-        .forPackages(packagesToScan.toArray(new String[0]))
-        .setScanners(new SubTypesScanner(true))
-    )
-      .getSubTypesOf(StartupTask.class);
+    Set<Class<? extends StartupTask>> tasks =
+        new Reflections(
+                new ConfigurationBuilder()
+                    .forPackages(packagesToScan.toArray(new String[0]))
+                    .setScanners(new SubTypesScanner(true)))
+            .getSubTypesOf(StartupTask.class);
 
     if (tasks != null) {
       for (Class<? extends StartupTask> task : tasks) {
