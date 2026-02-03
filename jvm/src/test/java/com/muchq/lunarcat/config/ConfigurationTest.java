@@ -15,16 +15,17 @@ public class ConfigurationTest {
   public void itHasThePropertiesYouSet() {
     int port = ThreadLocalRandom.current().nextInt();
     String appRoot = UUID.randomUUID().toString();
-    Module module = new AbstractModule() {
-      protected void configure() {}
-    };
-    Configuration configuration = Configuration
-      .newBuilder()
-      .withBasePackage(getClass().getPackage())
-      .withModules(module)
-      .withAppRoot(appRoot)
-      .withPort(port)
-      .build();
+    Module module =
+        new AbstractModule() {
+          protected void configure() {}
+        };
+    Configuration configuration =
+        Configuration.newBuilder()
+            .withBasePackage(getClass().getPackage())
+            .withModules(module)
+            .withAppRoot(appRoot)
+            .withPort(port)
+            .build();
 
     assertThat(configuration.getBasePackage()).isSameAs(getClass().getPackage());
     assertThat(configuration.getModules()).contains(module).hasSize(1);

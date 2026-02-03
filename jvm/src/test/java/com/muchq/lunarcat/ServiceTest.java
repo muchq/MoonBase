@@ -24,11 +24,11 @@ public class ServiceTest {
   public static void setup() {
     int port = getPort();
     baseUrl = "http://localhost:" + port;
-    Configuration configuration = Configuration
-      .newBuilder()
-      .withPort(port)
-      .withBasePackage(Package.getPackage("com.muchq.lunarcat"))
-      .build();
+    Configuration configuration =
+        Configuration.newBuilder()
+            .withPort(port)
+            .withBasePackage(Package.getPackage("com.muchq.lunarcat"))
+            .build();
     service = new Service(configuration);
     service.run(ServerMode.NO_WAIT);
   }
@@ -41,14 +41,16 @@ public class ServiceTest {
   @Test
   public void itServesRequests() {
     String message = "hey";
-    HttpRequest request = HttpRequest.newBuilder().setUrl(baseUrl + "/test?message=" + message).build();
+    HttpRequest request =
+        HttpRequest.newBuilder().setUrl(baseUrl + "/test?message=" + message).build();
     Widget widget = client.execute(request).getAs(Widget.class);
     assertThat(widget.getMessage()).isEqualTo(message);
   }
 
   @Test
   public void itWritesOptionalResponses() {
-    HttpRequest request = HttpRequest.newBuilder().setUrl(baseUrl + "/test/optional-present").build();
+    HttpRequest request =
+        HttpRequest.newBuilder().setUrl(baseUrl + "/test/optional-present").build();
     HttpResponse response = client.execute(request);
     assertThat(response.getStatusCode()).isEqualTo(200);
   }
@@ -62,7 +64,8 @@ public class ServiceTest {
 
   @Test
   public void itReturns404OnUnboundPath() {
-    HttpRequest request = HttpRequest.newBuilder().setUrl(baseUrl + "/this-is-not-a-real-path").build();
+    HttpRequest request =
+        HttpRequest.newBuilder().setUrl(baseUrl + "/this-is-not-a-real-path").build();
     HttpResponse response = client.execute(request);
     assertThat(response.getStatusCode()).isEqualTo(404);
   }
@@ -83,11 +86,11 @@ public class ServiceTest {
 
   @Test
   public void itReturns405OnMethodNotAllowed() {
-    HttpRequest request = HttpRequest
-      .newBuilder()
-      .setUrl(baseUrl + "/test/server-error")
-      .setMethod(Method.POST)
-      .build();
+    HttpRequest request =
+        HttpRequest.newBuilder()
+            .setUrl(baseUrl + "/test/server-error")
+            .setMethod(Method.POST)
+            .build();
     HttpResponse response = client.execute(request);
     assertThat(response.getStatusCode()).isEqualTo(405);
   }

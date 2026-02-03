@@ -39,6 +39,9 @@ jobs:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}
           repository-cache: true
+      - name: bazel-format-check
+        run: |
+          bazel run //:format.check
       # Dependencies are pre-installed in the Docker image
       # No need to run setup-linux anymore!
       - name: Create bazel-diff output directory

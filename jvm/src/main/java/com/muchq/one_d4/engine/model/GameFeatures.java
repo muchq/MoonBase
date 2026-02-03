@@ -5,13 +5,10 @@ import java.util.Map;
 import java.util.Set;
 
 public record GameFeatures(
-        Set<Motif> motifs,
-        int numMoves,
-        Map<Motif, List<MotifOccurrence>> occurrences
-) {
-    public boolean hasMotif(Motif motif) {
-        return motifs.contains(motif);
-    }
+    Set<Motif> motifs, int numMoves, Map<Motif, List<MotifOccurrence>> occurrences) {
+  public boolean hasMotif(Motif motif) {
+    return motifs.contains(motif);
+  }
 
-    public record MotifOccurrence(int moveNumber, String description) {}
+  public record MotifOccurrence(int moveNumber, String description) {}
 }

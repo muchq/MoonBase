@@ -4,7 +4,9 @@ import java.time.Duration;
 import java.util.Optional;
 
 public interface IndexQueue {
-    void enqueue(IndexMessage message);
-    Optional<IndexMessage> poll(Duration timeout);
-    int size();
+  void enqueue(IndexMessage message);
+
+  Optional<IndexMessage> poll(Duration timeout);
+
+  int size();
 }

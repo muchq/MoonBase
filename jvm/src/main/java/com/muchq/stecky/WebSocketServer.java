@@ -73,7 +73,10 @@ public class WebSocketServer {
 
     public Builder addModules(Module... modules) {
       this.modules =
-        ImmutableSet.<Module>builder().addAll(ImmutableSet.copyOf(modules)).add(new WebSocketModule()).build();
+          ImmutableSet.<Module>builder()
+              .addAll(ImmutableSet.copyOf(modules))
+              .add(new WebSocketModule())
+              .build();
       return this;
     }
 
@@ -108,11 +111,9 @@ public class WebSocketServer {
       for (Mapping mapping : mappings) {
         try {
           wscontainer.addEndpoint(
-            ServerEndpointConfig.Builder
-              .create(mapping.getHandler(), mapping.getPath())
-              .configurator(injector.getInstance(GuiceConfigurator.class))
-              .build()
-          );
+              ServerEndpointConfig.Builder.create(mapping.getHandler(), mapping.getPath())
+                  .configurator(injector.getInstance(GuiceConfigurator.class))
+                  .build());
         } catch (DeploymentException e) {
           throw new RuntimeException(e);
         }

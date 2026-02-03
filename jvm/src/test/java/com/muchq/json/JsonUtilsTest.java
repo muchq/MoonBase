@@ -20,7 +20,8 @@ public class JsonUtilsTest {
     widgets.add(new Java8Widget(2));
 
     String widgetStrings = JsonUtils.writeAsString(widgets);
-    List<Java8Widget> read = JsonUtils.readAs(widgetStrings, new TypeReference<List<Java8Widget>>() {});
+    List<Java8Widget> read =
+        JsonUtils.readAs(widgetStrings, new TypeReference<List<Java8Widget>>() {});
 
     assertThat(read).isEqualTo(widgets);
   }

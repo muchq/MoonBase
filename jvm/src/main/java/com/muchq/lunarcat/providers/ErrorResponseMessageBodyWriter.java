@@ -23,31 +23,31 @@ public class ErrorResponseMessageBodyWriter implements MessageBodyWriter<ErrorRe
   }
 
   @Override
-  public boolean isWriteable(Class<?> type, Type genericType, Annotation[] annotations, MediaType mediaType) {
+  public boolean isWriteable(
+      Class<?> type, Type genericType, Annotation[] annotations, MediaType mediaType) {
     return ErrorResponse.class.isAssignableFrom(type);
   }
 
   @Override
   public long getSize(
-    ErrorResponse errorResponse,
-    Class<?> type,
-    Type genericType,
-    Annotation[] annotations,
-    MediaType mediaType
-  ) {
+      ErrorResponse errorResponse,
+      Class<?> type,
+      Type genericType,
+      Annotation[] annotations,
+      MediaType mediaType) {
     return 0;
   }
 
   @Override
   public void writeTo(
-    ErrorResponse errorResponse,
-    Class<?> type,
-    Type genericType,
-    Annotation[] annotations,
-    MediaType mediaType,
-    MultivaluedMap<String, Object> httpHeaders,
-    OutputStream entityStream
-  ) throws IOException, WebApplicationException {
+      ErrorResponse errorResponse,
+      Class<?> type,
+      Type genericType,
+      Annotation[] annotations,
+      MediaType mediaType,
+      MultivaluedMap<String, Object> httpHeaders,
+      OutputStream entityStream)
+      throws IOException, WebApplicationException {
     entityStream.write(mapper.writeValueAsBytes(errorResponse));
   }
 }

@@ -17,7 +17,8 @@ public class Configuration {
   private Optional<String> contextPathMaybe;
   private final Set<Module> modules = new HashSet<>();
 
-  private Configuration(Integer port, Package basePackage, String contextPathMaybe, Set<Module> modules) {
+  private Configuration(
+      Integer port, Package basePackage, String contextPathMaybe, Set<Module> modules) {
     this.port = port;
     this.basePackage = basePackage;
     this.contextPathMaybe = Optional.ofNullable(contextPathMaybe);

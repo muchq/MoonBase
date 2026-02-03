@@ -7,8 +7,7 @@ import org.junit.rules.ExpectedException;
 
 public class PublicPreconditionsTest {
 
-  @Rule
-  public ExpectedException expectedException = ExpectedException.none();
+  @Rule public ExpectedException expectedException = ExpectedException.none();
 
   @Test
   public void itThrowsBadRequestOnFalsePredicate() {

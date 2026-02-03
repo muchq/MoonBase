@@ -37,7 +37,10 @@ public class Service {
 
   public Service(Configuration configuration) {
     this.injector = createInjector(configuration);
-    this.server = newServer(configuration, injector.getInstance(GuiceResteasyBootstrapServletContextListener.class));
+    this.server =
+        newServer(
+            configuration,
+            injector.getInstance(GuiceResteasyBootstrapServletContextListener.class));
   }
 
   public void run() {
@@ -85,7 +88,8 @@ public class Service {
 
   private Server newServer(Configuration configuration, EventListener listener) {
     Server server = new Server(configuration.getPort());
-    server.setHandler(servletHandler(configuration.getContextPath().orElse(DEFAULT_CONTEXT_PATH), listener));
+    server.setHandler(
+        servletHandler(configuration.getContextPath().orElse(DEFAULT_CONTEXT_PATH), listener));
     return server;
   }
 

@@ -32,6 +32,10 @@ jobs:
             build --remote_cache=https://storage.googleapis.com/moon_base_build_cache
             build --remote_upload_local_results=true
 
+      - name: bazel-format-check
+        run: |
+          bazel run //:format.check
+
       - name: bazel-test
         run: |
           bazel build //... && bazel test //...
@@ -46,4 +50,3 @@ jobs:
       - name: bazel-run-oci-push
         run: |
           bazel query 'kind(oci_push, //...)' | xargs -n1 bazel run
-
