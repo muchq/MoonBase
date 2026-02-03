@@ -25,7 +25,7 @@ public class ChessComGamesTool implements McpTool {
   @Override
   public String getDescription() {
     return "Returns the requested user's chess.com games for the specified month and year. For"
-               + " example, username: hikaru, year: 2025, month: 01";
+        + " example, username: hikaru, year: 2025, month: 01";
   }
 
   @Override
