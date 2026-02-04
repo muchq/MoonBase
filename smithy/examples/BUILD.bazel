@@ -1,0 +1,41 @@
+load("//smithy/bazel:smithy.bzl", "smithy_java_server", "smithy_go_server", "smithy_rust_server", "smithy_cpp_server")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "petstore.smithy",
+    "petstore.json",
+])
+
+filegroup(
+    name = "petstore_model",
+    srcs = ["petstore.json"],
+)
+
+# Java server generation
+smithy_java_server(
+    name = "petstore_java",
+    model = ":petstore_model",
+    package_name = "com.example.petstore",
+)
+
+# Go server generation
+smithy_go_server(
+    name = "petstore_go",
+    model = ":petstore_model",
+    module_name = "petstore",
+)
+
+# Rust server generation
+smithy_rust_server(
+    name = "petstore_rust",
+    model = ":petstore_model",
+    crate_name = "petstore",
+)
+
+# C++ server generation
+smithy_cpp_server(
+    name = "petstore_cpp",
+    model = ":petstore_model",
+    module_name = "petstore",
+)

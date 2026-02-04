@@ -1,0 +1,386 @@
+{
+  "smithy": "2.0",
+  "shapes": {
+    "com.example.petstore#PetStore": {
+      "type": "service",
+      "version": "2024-01-01",
+      "operations": [
+        {"target": "com.example.petstore#GetPet"},
+        {"target": "com.example.petstore#ListPets"},
+        {"target": "com.example.petstore#CreatePet"},
+        {"target": "com.example.petstore#UpdatePet"},
+        {"target": "com.example.petstore#DeletePet"}
+      ],
+      "errors": [
+        {"target": "com.example.petstore#ValidationError"},
+        {"target": "com.example.petstore#NotFoundError"},
+        {"target": "com.example.petstore#InternalServerError"}
+      ],
+      "traits": {
+        "aws.protocols#restJson1": {},
+        "smithy.api#documentation": "A simple pet store service for managing pets"
+      }
+    },
+    "com.example.petstore#GetPet": {
+      "type": "operation",
+      "input": {"target": "com.example.petstore#GetPetInput"},
+      "output": {"target": "com.example.petstore#GetPetOutput"},
+      "errors": [{"target": "com.example.petstore#NotFoundError"}],
+      "traits": {
+        "smithy.api#http": {"method": "GET", "uri": "/pets/{petId}", "code": 200},
+        "smithy.api#readonly": {},
+        "smithy.api#documentation": "Get a pet by ID"
+      }
+    },
+    "com.example.petstore#ListPets": {
+      "type": "operation",
+      "input": {"target": "com.example.petstore#ListPetsInput"},
+      "output": {"target": "com.example.petstore#ListPetsOutput"},
+      "traits": {
+        "smithy.api#http": {"method": "GET", "uri": "/pets", "code": 200},
+        "smithy.api#readonly": {},
+        "smithy.api#paginated": {
+          "inputToken": "nextToken",
+          "outputToken": "nextToken",
+          "pageSize": "maxResults",
+          "items": "pets"
+        },
+        "smithy.api#documentation": "List all pets with optional filtering"
+      }
+    },
+    "com.example.petstore#CreatePet": {
+      "type": "operation",
+      "input": {"target": "com.example.petstore#CreatePetInput"},
+      "output": {"target": "com.example.petstore#CreatePetOutput"},
+      "errors": [{"target": "com.example.petstore#ValidationError"}],
+      "traits": {
+        "smithy.api#http": {"method": "POST", "uri": "/pets", "code": 201},
+        "smithy.api#documentation": "Create a new pet"
+      }
+    },
+    "com.example.petstore#UpdatePet": {
+      "type": "operation",
+      "input": {"target": "com.example.petstore#UpdatePetInput"},
+      "output": {"target": "com.example.petstore#UpdatePetOutput"},
+      "errors": [
+        {"target": "com.example.petstore#NotFoundError"},
+        {"target": "com.example.petstore#ValidationError"}
+      ],
+      "traits": {
+        "smithy.api#http": {"method": "PUT", "uri": "/pets/{petId}", "code": 200},
+        "smithy.api#idempotent": {},
+        "smithy.api#documentation": "Update an existing pet"
+      }
+    },
+    "com.example.petstore#DeletePet": {
+      "type": "operation",
+      "input": {"target": "com.example.petstore#DeletePetInput"},
+      "output": {"target": "com.example.petstore#DeletePetOutput"},
+      "errors": [{"target": "com.example.petstore#NotFoundError"}],
+      "traits": {
+        "smithy.api#http": {"method": "DELETE", "uri": "/pets/{petId}", "code": 204},
+        "smithy.api#idempotent": {},
+        "smithy.api#documentation": "Delete a pet"
+      }
+    },
+    "com.example.petstore#GetPetInput": {
+      "type": "structure",
+      "members": {
+        "petId": {
+          "target": "smithy.api#String",
+          "traits": {
+            "smithy.api#required": {},
+            "smithy.api#httpLabel": {}
+          }
+        }
+      },
+      "traits": {
+        "smithy.api#input": {}
+      }
+    },
+    "com.example.petstore#GetPetOutput": {
+      "type": "structure",
+      "members": {
+        "pet": {
+          "target": "com.example.petstore#Pet",
+          "traits": {"smithy.api#required": {}}
+        }
+      },
+      "traits": {
+        "smithy.api#output": {}
+      }
+    },
+    "com.example.petstore#ListPetsInput": {
+      "type": "structure",
+      "members": {
+        "species": {
+          "target": "com.example.petstore#PetSpecies",
+          "traits": {"smithy.api#httpQuery": "species"}
+        },
+        "status": {
+          "target": "com.example.petstore#PetStatus",
+          "traits": {"smithy.api#httpQuery": "status"}
+        },
+        "maxResults": {
+          "target": "smithy.api#Integer",
+          "traits": {"smithy.api#httpQuery": "maxResults"}
+        },
+        "nextToken": {
+          "target": "smithy.api#String",
+          "traits": {"smithy.api#httpQuery": "nextToken"}
+        }
+      },
+      "traits": {
+        "smithy.api#input": {}
+      }
+    },
+    "com.example.petstore#ListPetsOutput": {
+      "type": "structure",
+      "members": {
+        "pets": {
+          "target": "com.example.petstore#PetList",
+          "traits": {"smithy.api#required": {}}
+        },
+        "nextToken": {"target": "smithy.api#String"},
+        "totalCount": {"target": "smithy.api#Integer"}
+      },
+      "traits": {
+        "smithy.api#output": {}
+      }
+    },
+    "com.example.petstore#CreatePetInput": {
+      "type": "structure",
+      "members": {
+        "name": {
+          "target": "smithy.api#String",
+          "traits": {"smithy.api#required": {}}
+        },
+        "species": {
+          "target": "com.example.petstore#PetSpecies",
+          "traits": {"smithy.api#required": {}}
+        },
+        "age": {"target": "smithy.api#Integer"},
+        "tags": {"target": "com.example.petstore#TagList"},
+        "attributes": {"target": "com.example.petstore#AttributeMap"}
+      },
+      "traits": {
+        "smithy.api#input": {}
+      }
+    },
+    "com.example.petstore#CreatePetOutput": {
+      "type": "structure",
+      "members": {
+        "pet": {
+          "target": "com.example.petstore#Pet",
+          "traits": {"smithy.api#required": {}}
+        }
+      },
+      "traits": {
+        "smithy.api#output": {}
+      }
+    },
+    "com.example.petstore#UpdatePetInput": {
+      "type": "structure",
+      "members": {
+        "petId": {
+          "target": "smithy.api#String",
+          "traits": {
+            "smithy.api#required": {},
+            "smithy.api#httpLabel": {}
+          }
+        },
+        "name": {"target": "smithy.api#String"},
+        "species": {"target": "com.example.petstore#PetSpecies"},
+        "status": {"target": "com.example.petstore#PetStatus"},
+        "age": {"target": "smithy.api#Integer"},
+        "tags": {"target": "com.example.petstore#TagList"}
+      },
+      "traits": {
+        "smithy.api#input": {}
+      }
+    },
+    "com.example.petstore#UpdatePetOutput": {
+      "type": "structure",
+      "members": {
+        "pet": {
+          "target": "com.example.petstore#Pet",
+          "traits": {"smithy.api#required": {}}
+        }
+      },
+      "traits": {
+        "smithy.api#output": {}
+      }
+    },
+    "com.example.petstore#DeletePetInput": {
+      "type": "structure",
+      "members": {
+        "petId": {
+          "target": "smithy.api#String",
+          "traits": {
+            "smithy.api#required": {},
+            "smithy.api#httpLabel": {}
+          }
+        }
+      },
+      "traits": {
+        "smithy.api#input": {}
+      }
+    },
+    "com.example.petstore#DeletePetOutput": {
+      "type": "structure",
+      "members": {},
+      "traits": {
+        "smithy.api#output": {}
+      }
+    },
+    "com.example.petstore#Pet": {
+      "type": "structure",
+      "members": {
+        "id": {
+          "target": "smithy.api#String",
+          "traits": {"smithy.api#required": {}}
+        },
+        "name": {
+          "target": "smithy.api#String",
+          "traits": {"smithy.api#required": {}}
+        },
+        "species": {
+          "target": "com.example.petstore#PetSpecies",
+          "traits": {"smithy.api#required": {}}
+        },
+        "status": {
+          "target": "com.example.petstore#PetStatus",
+          "traits": {"smithy.api#required": {}}
+        },
+        "age": {"target": "smithy.api#Integer"},
+        "tags": {"target": "com.example.petstore#TagList"},
+        "attributes": {"target": "com.example.petstore#AttributeMap"},
+        "createdAt": {
+          "target": "smithy.api#Timestamp",
+          "traits": {"smithy.api#required": {}}
+        },
+        "updatedAt": {"target": "smithy.api#Timestamp"}
+      },
+      "traits": {
+        "smithy.api#documentation": "A pet in the store"
+      }
+    },
+    "com.example.petstore#Tag": {
+      "type": "structure",
+      "members": {
+        "key": {
+          "target": "smithy.api#String",
+          "traits": {"smithy.api#required": {}}
+        },
+        "value": {
+          "target": "smithy.api#String",
+          "traits": {"smithy.api#required": {}}
+        }
+      },
+      "traits": {
+        "smithy.api#documentation": "Tag for categorizing pets"
+      }
+    },
+    "com.example.petstore#PetList": {
+      "type": "list",
+      "member": {"target": "com.example.petstore#Pet"}
+    },
+    "com.example.petstore#TagList": {
+      "type": "list",
+      "member": {"target": "com.example.petstore#Tag"}
+    },
+    "com.example.petstore#AttributeMap": {
+      "type": "map",
+      "key": {"target": "smithy.api#String"},
+      "value": {"target": "smithy.api#String"}
+    },
+    "com.example.petstore#PetSpecies": {
+      "type": "enum",
+      "members": {
+        "DOG": {"target": "smithy.api#Unit"},
+        "CAT": {"target": "smithy.api#Unit"},
+        "BIRD": {"target": "smithy.api#Unit"},
+        "FISH": {"target": "smithy.api#Unit"},
+        "REPTILE": {"target": "smithy.api#Unit"},
+        "OTHER": {"target": "smithy.api#Unit"}
+      },
+      "traits": {
+        "smithy.api#documentation": "Species of pet"
+      }
+    },
+    "com.example.petstore#PetStatus": {
+      "type": "enum",
+      "members": {
+        "AVAILABLE": {"target": "smithy.api#Unit"},
+        "PENDING": {"target": "smithy.api#Unit"},
+        "SOLD": {"target": "smithy.api#Unit"}
+      },
+      "traits": {
+        "smithy.api#documentation": "Status of a pet"
+      }
+    },
+    "com.example.petstore#ValidationError": {
+      "type": "structure",
+      "members": {
+        "message": {
+          "target": "smithy.api#String",
+          "traits": {"smithy.api#required": {}}
+        },
+        "fieldErrors": {"target": "com.example.petstore#FieldErrorList"}
+      },
+      "traits": {
+        "smithy.api#error": "client",
+        "smithy.api#httpError": 400,
+        "smithy.api#documentation": "Validation error for invalid input"
+      }
+    },
+    "com.example.petstore#FieldError": {
+      "type": "structure",
+      "members": {
+        "field": {
+          "target": "smithy.api#String",
+          "traits": {"smithy.api#required": {}}
+        },
+        "message": {
+          "target": "smithy.api#String",
+          "traits": {"smithy.api#required": {}}
+        }
+      }
+    },
+    "com.example.petstore#FieldErrorList": {
+      "type": "list",
+      "member": {"target": "com.example.petstore#FieldError"}
+    },
+    "com.example.petstore#NotFoundError": {
+      "type": "structure",
+      "members": {
+        "message": {
+          "target": "smithy.api#String",
+          "traits": {"smithy.api#required": {}}
+        },
+        "resourceType": {"target": "smithy.api#String"},
+        "resourceId": {"target": "smithy.api#String"}
+      },
+      "traits": {
+        "smithy.api#error": "client",
+        "smithy.api#httpError": 404,
+        "smithy.api#documentation": "Resource not found error"
+      }
+    },
+    "com.example.petstore#InternalServerError": {
+      "type": "structure",
+      "members": {
+        "message": {
+          "target": "smithy.api#String",
+          "traits": {"smithy.api#required": {}}
+        },
+        "requestId": {"target": "smithy.api#String"}
+      },
+      "traits": {
+        "smithy.api#error": "server",
+        "smithy.api#httpError": 500,
+        "smithy.api#documentation": "Internal server error"
+      }
+    }
+  }
+}

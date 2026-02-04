@@ -1,0 +1,44 @@
+load("@rules_java//java:defs.bzl", "java_library", "java_test")
+
+package(default_visibility = ["//visibility:public"])
+
+java_library(
+    name = "smithy-core",
+    srcs = glob(["src/main/java/**/*.java"]),
+    deps = [
+        "@maven//:com_google_guava_guava",
+        "@maven//:com_google_code_gson_gson",
+    ],
+)
+
+java_test(
+    name = "SmithyParserTest",
+    srcs = ["src/test/java/com/moonbase/smithy/parser/SmithyParserTest.java"],
+    test_class = "com.moonbase.smithy.parser.SmithyParserTest",
+    deps = [
+        ":smithy-core",
+        "@maven//:org_junit_jupiter_junit_jupiter_api",
+        "@maven//:org_junit_jupiter_junit_jupiter_engine",
+        "@maven//:org_junit_jupiter_junit_jupiter_params",
+    ],
+)
+
+java_test(
+    name = "NameUtilsTest",
+    srcs = ["src/test/java/com/moonbase/smithy/codegen/NameUtilsTest.java"],
+    test_class = "com.moonbase.smithy.codegen.NameUtilsTest",
+    deps = [
+        ":smithy-core",
+        "@maven//:org_junit_jupiter_junit_jupiter_api",
+        "@maven//:org_junit_jupiter_junit_jupiter_engine",
+        "@maven//:org_junit_jupiter_junit_jupiter_params",
+    ],
+)
+
+test_suite(
+    name = "core-tests",
+    tests = [
+        ":SmithyParserTest",
+        ":NameUtilsTest",
+    ],
+)
