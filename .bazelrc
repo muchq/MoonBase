@@ -45,6 +45,7 @@ common --tool_java_runtime_version=remotejdk_25
 
 build --experimental_strict_java_deps=error
 build --experimental_java_classpath=bazel
+build --extra_toolchains=//bazel/toolchains:nullaway_java_toolchain
 
 # build --strategy=Scalac=worker
 

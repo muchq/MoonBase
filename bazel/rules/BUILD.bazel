@@ -1,6 +1,16 @@
 load("@rules_java//java:defs.bzl", "java_plugin")
 
 java_plugin(
+    name = "nullaway",
+    processor_class = "com.uber.nullaway.NullAway",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@maven//:com_google_errorprone_error_prone_core",
+        "@maven//:com_uber_nullaway_nullaway",
+    ],
+)
+
+java_plugin(
     name = "micronaut_type_element_visitor_processor",
     generates_api = True,
     processor_class = "io.micronaut.annotation.processing.TypeElementVisitorProcessor",

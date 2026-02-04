@@ -1,4 +1,4 @@
-load("@rules_java//java:java_binary.bzl", "java_binary")
+load("//bazel/rules:nullaway.bzl", "java_binary")
 
 java_binary(
     name = "yochat",

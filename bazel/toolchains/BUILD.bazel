@@ -1,5 +1,33 @@
+load("@rules_java//java:defs.bzl", "java_package_configuration")
+load("@rules_java//toolchains:default_java_toolchain.bzl", "default_java_toolchain")
 load("@rules_rust//rust:defs.bzl", "rust_library_group")
 load("@rules_rust_prost//:defs.bzl", "rust_prost_toolchain")
+
+package_group(
+    name = "nullaway_packages",
+    packages = [
+        "//jvm/...",
+    ],
+)
+
+java_package_configuration(
+    name = "nullaway_config",
+    javacopts = [
+        "-Xep:NullAway:ERROR",
+        "-XepOpt:NullAway:OnlyNullMarked=true",
+        "-XepOpt:NullAway:HandleTestAssertionLibraries=true",
+    ],
+    packages = [":nullaway_packages"],
+)
+
+default_java_toolchain(
+    name = "nullaway_java_toolchain",
+    configuration = dict(),
+    package_configuration = [":nullaway_config"],
+    source_version = "25",
+    target_version = "25",
+    visibility = ["//visibility:public"],
+)
 
 #proto_lang_toolchain(
 #    name = "protoc_java_toolchain",
