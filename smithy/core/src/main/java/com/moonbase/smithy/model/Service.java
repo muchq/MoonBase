@@ -95,6 +95,10 @@ public class Service {
         if (protocol != null) {
             return protocol;
         }
+        // Check for WebSocket protocol first
+        if (hasTrait(Trait.WEBSOCKET)) {
+            return "websocket";
+        }
         // Check for common protocol traits
         if (hasTrait("aws.protocols#restJson1")) {
             return "restJson1";
@@ -115,5 +119,45 @@ public class Service {
             return "ec2Query";
         }
         return "restJson1"; // Default
+    }
+
+    /**
+     * Checks if this service uses WebSocket protocol.
+     */
+    public boolean isWebSocket() {
+        return "websocket".equals(detectProtocol()) || hasTrait(Trait.WEBSOCKET);
+    }
+
+    /**
+     * Gets WebSocket operations grouped by type (connect, disconnect, message handlers).
+     */
+    public List<Operation> getWebSocketConnectOperations() {
+        return operations.stream()
+            .filter(o -> o.hasTrait(Trait.WS_CONNECT))
+            .toList();
+    }
+
+    public List<Operation> getWebSocketDisconnectOperations() {
+        return operations.stream()
+            .filter(o -> o.hasTrait(Trait.WS_DISCONNECT))
+            .toList();
+    }
+
+    public List<Operation> getWebSocketMessageOperations() {
+        return operations.stream()
+            .filter(o -> o.hasTrait(Trait.WS_MESSAGE) || o.hasTrait(Trait.WS_ROUTE))
+            .toList();
+    }
+
+    public List<Operation> getWebSocketSubscribeOperations() {
+        return operations.stream()
+            .filter(o -> o.hasTrait(Trait.WS_SUBSCRIBE))
+            .toList();
+    }
+
+    public List<Operation> getWebSocketPublishOperations() {
+        return operations.stream()
+            .filter(o -> o.hasTrait(Trait.WS_PUBLISH))
+            .toList();
     }
 }

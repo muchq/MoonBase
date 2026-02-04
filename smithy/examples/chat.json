@@ -1,0 +1,204 @@
+{
+  "smithy": "2.0",
+  "shapes": {
+    "com.example.chat#ChatService": {
+      "type": "service",
+      "version": "1.0",
+      "operations": [
+        {"target": "com.example.chat#OnConnect"},
+        {"target": "com.example.chat#OnDisconnect"},
+        {"target": "com.example.chat#SendMessage"},
+        {"target": "com.example.chat#JoinRoom"},
+        {"target": "com.example.chat#LeaveRoom"},
+        {"target": "com.example.chat#GetRoomMembers"}
+      ],
+      "traits": {
+        "smithy.ws#websocket": {},
+        "smithy.api#documentation": "A real-time chat service using WebSockets"
+      }
+    },
+    "com.example.chat#OnConnect": {
+      "type": "operation",
+      "input": {"target": "com.example.chat#ConnectInput"},
+      "output": {"target": "com.example.chat#ConnectOutput"},
+      "traits": {
+        "smithy.ws#onConnect": {},
+        "smithy.api#documentation": "Called when a client connects"
+      }
+    },
+    "com.example.chat#OnDisconnect": {
+      "type": "operation",
+      "input": {"target": "com.example.chat#DisconnectInput"},
+      "traits": {
+        "smithy.ws#onDisconnect": {},
+        "smithy.api#documentation": "Called when a client disconnects"
+      }
+    },
+    "com.example.chat#SendMessage": {
+      "type": "operation",
+      "input": {"target": "com.example.chat#SendMessageInput"},
+      "output": {"target": "com.example.chat#SendMessageOutput"},
+      "traits": {
+        "smithy.ws#onMessage": {"route": "sendMessage"},
+        "smithy.api#documentation": "Send a chat message to a room"
+      }
+    },
+    "com.example.chat#JoinRoom": {
+      "type": "operation",
+      "input": {"target": "com.example.chat#JoinRoomInput"},
+      "output": {"target": "com.example.chat#JoinRoomOutput"},
+      "traits": {
+        "smithy.ws#onMessage": {"route": "joinRoom"},
+        "smithy.api#documentation": "Join a chat room"
+      }
+    },
+    "com.example.chat#LeaveRoom": {
+      "type": "operation",
+      "input": {"target": "com.example.chat#LeaveRoomInput"},
+      "traits": {
+        "smithy.ws#onMessage": {"route": "leaveRoom"},
+        "smithy.api#documentation": "Leave a chat room"
+      }
+    },
+    "com.example.chat#GetRoomMembers": {
+      "type": "operation",
+      "input": {"target": "com.example.chat#GetRoomMembersInput"},
+      "output": {"target": "com.example.chat#GetRoomMembersOutput"},
+      "traits": {
+        "smithy.ws#onMessage": {"route": "getRoomMembers"},
+        "smithy.api#documentation": "Get members of a room"
+      }
+    },
+    "com.example.chat#ConnectInput": {
+      "type": "structure",
+      "members": {
+        "userId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}},
+        "username": {"target": "smithy.api#String"}
+      }
+    },
+    "com.example.chat#ConnectOutput": {
+      "type": "structure",
+      "members": {
+        "sessionId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}},
+        "serverTime": {"target": "smithy.api#Timestamp"}
+      }
+    },
+    "com.example.chat#DisconnectInput": {
+      "type": "structure",
+      "members": {
+        "reason": {"target": "smithy.api#String"}
+      }
+    },
+    "com.example.chat#SendMessageInput": {
+      "type": "structure",
+      "members": {
+        "roomId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}},
+        "content": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}},
+        "messageType": {"target": "com.example.chat#MessageType"}
+      }
+    },
+    "com.example.chat#SendMessageOutput": {
+      "type": "structure",
+      "members": {
+        "messageId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}},
+        "timestamp": {"target": "smithy.api#Timestamp", "traits": {"smithy.api#required": {}}}
+      }
+    },
+    "com.example.chat#JoinRoomInput": {
+      "type": "structure",
+      "members": {
+        "roomId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}}
+      }
+    },
+    "com.example.chat#JoinRoomOutput": {
+      "type": "structure",
+      "members": {
+        "roomId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}},
+        "members": {"target": "com.example.chat#MemberList"}
+      }
+    },
+    "com.example.chat#LeaveRoomInput": {
+      "type": "structure",
+      "members": {
+        "roomId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}}
+      }
+    },
+    "com.example.chat#GetRoomMembersInput": {
+      "type": "structure",
+      "members": {
+        "roomId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}}
+      }
+    },
+    "com.example.chat#GetRoomMembersOutput": {
+      "type": "structure",
+      "members": {
+        "members": {"target": "com.example.chat#MemberList", "traits": {"smithy.api#required": {}}}
+      }
+    },
+    "com.example.chat#MemberList": {
+      "type": "list",
+      "member": {"target": "com.example.chat#Member"}
+    },
+    "com.example.chat#Member": {
+      "type": "structure",
+      "members": {
+        "userId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}},
+        "username": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}},
+        "status": {"target": "com.example.chat#UserStatus"}
+      }
+    },
+    "com.example.chat#MessageType": {
+      "type": "enum",
+      "members": {
+        "TEXT": {"target": "smithy.api#Unit"},
+        "IMAGE": {"target": "smithy.api#Unit"},
+        "FILE": {"target": "smithy.api#Unit"},
+        "SYSTEM": {"target": "smithy.api#Unit"}
+      }
+    },
+    "com.example.chat#UserStatus": {
+      "type": "enum",
+      "members": {
+        "ONLINE": {"target": "smithy.api#Unit"},
+        "AWAY": {"target": "smithy.api#Unit"},
+        "DO_NOT_DISTURB": {"target": "smithy.api#Unit"},
+        "OFFLINE": {"target": "smithy.api#Unit"}
+      }
+    },
+    "com.example.chat#RoomNotFoundError": {
+      "type": "structure",
+      "members": {
+        "message": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}},
+        "roomId": {"target": "smithy.api#String"}
+      },
+      "traits": {
+        "smithy.api#error": "client",
+        "smithy.api#httpError": 404,
+        "smithy.api#documentation": "Error when a room is not found"
+      }
+    },
+    "com.example.chat#UnauthorizedError": {
+      "type": "structure",
+      "members": {
+        "message": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}}
+      },
+      "traits": {
+        "smithy.api#error": "client",
+        "smithy.api#httpError": 403,
+        "smithy.api#documentation": "Error when user is not authorized"
+      }
+    },
+    "com.example.chat#RateLimitError": {
+      "type": "structure",
+      "members": {
+        "message": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}},
+        "retryAfterSeconds": {"target": "smithy.api#Integer"}
+      },
+      "traits": {
+        "smithy.api#error": "client",
+        "smithy.api#httpError": 429,
+        "smithy.api#documentation": "Error when rate limit is exceeded"
+      }
+    }
+  }
+}

@@ -43,7 +43,12 @@ public class JavaServerGenerator implements CodeGenerator {
         for (Service service : model.getServices().values()) {
             generateServiceInterface(service, model, packageName, packageDir);
             generateServiceHandler(service, model, packageName, packageDir);
-            generateRouter(service, model, packageName, packageDir);
+
+            if (service.isWebSocket()) {
+                generateWebSocketHandler(service, model, packageName, packageDir);
+            } else {
+                generateRouter(service, model, packageName, packageDir);
+            }
         }
 
         // Generate error classes
@@ -415,6 +420,149 @@ public class JavaServerGenerator implements CodeGenerator {
         writer.closeBlock();
 
         writer.writeToFile(packageDir.resolve(routerName + ".java"));
+    }
+
+    private void generateWebSocketHandler(Service service, SmithyModel model, String packageName, Path packageDir) throws IOException {
+        CodeWriter writer = new CodeWriter();
+        String serviceName = NameUtils.toPascalCase(service.getName());
+        String handlerName = serviceName + "WebSocketHandler";
+
+        writer.writeLine("package %s;", packageName);
+        writer.newLine();
+        writer.writeLine("import com.moonbase.smithy.runtime.JsonCodec;");
+        writer.writeLine("import com.moonbase.smithy.runtime.WebSocketSession;");
+        writer.writeLine("import com.moonbase.smithy.runtime.WebSocketHandler;");
+        writer.writeLine("import com.moonbase.smithy.runtime.WebSocketMessage;");
+        writer.writeLine("import java.util.Map;");
+        writer.writeLine("import java.util.concurrent.ConcurrentHashMap;");
+        writer.writeLine("import java.util.function.Consumer;");
+        writer.newLine();
+
+        writer.writeJavaDoc("WebSocket handler for " + serviceName + ". Routes incoming messages to the appropriate operation handler.");
+
+        writer.openBlock("public class %s implements WebSocketHandler", handlerName);
+
+        writer.writeLine("private final %s service;", serviceName);
+        writer.writeLine("private final JsonCodec codec;");
+        writer.writeLine("private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();");
+        writer.newLine();
+
+        // Constructor
+        writer.openBlock("public %s(%s service, JsonCodec codec)", handlerName, serviceName);
+        writer.writeLine("this.service = service;");
+        writer.writeLine("this.codec = codec;");
+        writer.closeBlock();
+        writer.newLine();
+
+        // onConnect
+        writer.writeLine("@Override");
+        writer.openBlock("public void onConnect(WebSocketSession session)");
+        writer.writeLine("sessions.put(session.getId(), session);");
+        for (Operation op : service.getWebSocketConnectOperations()) {
+            String methodName = NameUtils.toCamelCase(op.getName());
+            String inputType = op.getInput() != null
+                ? NameUtils.toPascalCase(NameUtils.getSimpleName(op.getInput()))
+                : "Void";
+            if (!inputType.equals("Void")) {
+                writer.writeLine("service.%s(%s.builder().build());", methodName, inputType);
+            } else {
+                writer.writeLine("service.%s(null);", methodName);
+            }
+        }
+        writer.closeBlock();
+        writer.newLine();
+
+        // onDisconnect
+        writer.writeLine("@Override");
+        writer.openBlock("public void onDisconnect(WebSocketSession session)");
+        writer.writeLine("sessions.remove(session.getId());");
+        for (Operation op : service.getWebSocketDisconnectOperations()) {
+            String methodName = NameUtils.toCamelCase(op.getName());
+            String inputType = op.getInput() != null
+                ? NameUtils.toPascalCase(NameUtils.getSimpleName(op.getInput()))
+                : "Void";
+            if (!inputType.equals("Void")) {
+                writer.writeLine("service.%s(%s.builder().build());", methodName, inputType);
+            } else {
+                writer.writeLine("service.%s(null);", methodName);
+            }
+        }
+        writer.closeBlock();
+        writer.newLine();
+
+        // onMessage
+        writer.writeLine("@Override");
+        writer.openBlock("public void onMessage(WebSocketSession session, WebSocketMessage message)");
+        writer.writeLine("String action = message.getAction();");
+        writer.writeLine("String payload = message.getPayload();");
+        writer.newLine();
+
+        writer.openBlock("switch (action)");
+        for (Operation op : service.getWebSocketMessageOperations()) {
+            String route = op.getWebSocketRoute();
+            String methodName = NameUtils.toCamelCase(op.getName());
+            String inputType = op.getInput() != null
+                ? NameUtils.toPascalCase(NameUtils.getSimpleName(op.getInput()))
+                : "Void";
+            String outputType = op.getOutput() != null
+                ? NameUtils.toPascalCase(NameUtils.getSimpleName(op.getOutput()))
+                : "Void";
+
+            writer.openBlock("case \"%s\":", route);
+            if (!inputType.equals("Void")) {
+                writer.writeLine("%s input = codec.deserialize(payload, %s.class);", inputType, inputType);
+                writer.openBlock("service.%s(input).thenAccept(output ->", methodName);
+            } else {
+                writer.openBlock("service.%s(null).thenAccept(output ->", methodName);
+            }
+            if (!outputType.equals("Void")) {
+                writer.writeLine("session.send(new WebSocketMessage(\"%s\", codec.serialize(output)));", route + "Response");
+            }
+            writer.closeBlock(");");
+            writer.writeLine("break;");
+            writer.closeBlock();
+        }
+        writer.openBlock("default:");
+        writer.writeLine("session.send(new WebSocketMessage(\"error\", \"{\\\"message\\\":\\\"Unknown action: \" + action + \"\\\"}\"));");
+        writer.writeLine("break;");
+        writer.closeBlock();
+        writer.closeBlock(); // switch
+        writer.closeBlock(); // onMessage
+        writer.newLine();
+
+        // broadcast method
+        writer.writeJavaDoc("Broadcasts a message to all connected sessions.");
+        writer.openBlock("public void broadcast(String action, Object data)");
+        writer.writeLine("String payload = codec.serialize(data);");
+        writer.writeLine("WebSocketMessage message = new WebSocketMessage(action, payload);");
+        writer.writeLine("sessions.values().forEach(session -> session.send(message));");
+        writer.closeBlock();
+        writer.newLine();
+
+        // send to specific session
+        writer.writeJavaDoc("Sends a message to a specific session.");
+        writer.openBlock("public void sendTo(String sessionId, String action, Object data)");
+        writer.writeLine("WebSocketSession session = sessions.get(sessionId);");
+        writer.openBlock("if (session != null)");
+        writer.writeLine("session.send(new WebSocketMessage(action, codec.serialize(data)));");
+        writer.closeBlock();
+        writer.closeBlock();
+        writer.newLine();
+
+        // getSession
+        writer.openBlock("public WebSocketSession getSession(String sessionId)");
+        writer.writeLine("return sessions.get(sessionId);");
+        writer.closeBlock();
+        writer.newLine();
+
+        // getSessionCount
+        writer.openBlock("public int getSessionCount()");
+        writer.writeLine("return sessions.size();");
+        writer.closeBlock();
+
+        writer.closeBlock(); // class
+
+        writer.writeToFile(packageDir.resolve(handlerName + ".java"));
     }
 
     private void generateErrorClasses(SmithyModel model, String packageName, Path packageDir) throws IOException {

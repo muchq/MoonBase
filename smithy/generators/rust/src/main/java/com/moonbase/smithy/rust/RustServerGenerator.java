@@ -40,7 +40,11 @@ public class RustServerGenerator implements CodeGenerator {
         // Generate services
         for (Service service : model.getServices().values()) {
             generateService(service, model, srcDir);
-            generateHandler(service, model, srcDir);
+            if (service.isWebSocket()) {
+                generateWebSocketHandler(service, model, srcDir);
+            } else {
+                generateHandler(service, model, srcDir);
+            }
         }
 
         // Generate Cargo.toml
@@ -548,6 +552,307 @@ public class RustServerGenerator implements CodeGenerator {
         writer.writeLine("}");
 
         writer.writeToFile(srcDir.resolve(modName + "_handler.rs"));
+    }
+
+    private void generateWebSocketHandler(Service service, SmithyModel model, Path srcDir) throws IOException {
+        CodeWriter writer = new CodeWriter();
+        String serviceName = NameUtils.toPascalCase(service.getName());
+        String modName = NameUtils.toSnakeCase(service.getName());
+        String handlerName = serviceName + "WebSocketHandler";
+
+        writer.writeLine("//! WebSocket handler for %s", serviceName);
+        writer.newLine();
+        writer.writeLine("use crate::%s::%s;", modName, serviceName);
+        writer.writeLine("use crate::types::*;");
+        writer.writeLine("use axum::{");
+        writer.indent();
+        writer.writeLine("extract::{");
+        writer.indent();
+        writer.writeLine("ws::{Message, WebSocket, WebSocketUpgrade},");
+        writer.writeLine("State,");
+        writer.dedent();
+        writer.writeLine("},");
+        writer.writeLine("response::IntoResponse,");
+        writer.writeLine("routing::get,");
+        writer.writeLine("Router,");
+        writer.dedent();
+        writer.writeLine("};");
+        writer.writeLine("use futures::{SinkExt, StreamExt};");
+        writer.writeLine("use serde::{Deserialize, Serialize};");
+        writer.writeLine("use std::{collections::HashMap, sync::Arc};");
+        writer.writeLine("use tokio::sync::{broadcast, RwLock};");
+        writer.newLine();
+
+        // WebSocketMessage struct
+        writer.writeLine("/// Message format for WebSocket communication");
+        writer.writeLine("#[derive(Debug, Clone, Serialize, Deserialize)]");
+        writer.writeLine("pub struct WebSocketMessage {");
+        writer.indent();
+        writer.writeLine("pub action: String,");
+        writer.writeLine("#[serde(default)]");
+        writer.writeLine("pub payload: serde_json::Value,");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.newLine();
+
+        // Session struct
+        writer.writeLine("/// Represents a connected WebSocket session");
+        writer.writeLine("#[derive(Debug)]");
+        writer.writeLine("pub struct WebSocketSession {");
+        writer.indent();
+        writer.writeLine("pub id: String,");
+        writer.writeLine("pub attributes: HashMap<String, serde_json::Value>,");
+        writer.writeLine("sender: broadcast::Sender<String>,");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.newLine();
+
+        writer.writeLine("impl WebSocketSession {");
+        writer.indent();
+        writer.writeLine("pub fn send(&self, action: &str, data: impl Serialize) -> Result<(), broadcast::error::SendError<String>> {");
+        writer.indent();
+        writer.writeLine("let msg = WebSocketMessage {");
+        writer.indent();
+        writer.writeLine("action: action.to_string(),");
+        writer.writeLine("payload: serde_json::to_value(data).unwrap_or_default(),");
+        writer.dedent();
+        writer.writeLine("};");
+        writer.writeLine("self.sender.send(serde_json::to_string(&msg).unwrap())?;");
+        writer.writeLine("Ok(())");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.newLine();
+
+        // Handler struct
+        writer.writeDocComment("WebSocket handler for " + serviceName, "///");
+        writer.writeLine("pub struct %s<T: %s> {", handlerName, serviceName);
+        writer.indent();
+        writer.writeLine("service: Arc<T>,");
+        writer.writeLine("sessions: Arc<RwLock<HashMap<String, Arc<WebSocketSession>>>>,");
+        writer.writeLine("broadcast_tx: broadcast::Sender<String>,");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.newLine();
+
+        writer.writeLine("impl<T: %s + 'static> %s<T> {", serviceName, handlerName);
+        writer.indent();
+
+        // Constructor
+        writer.writeLine("pub fn new(service: T) -> Self {");
+        writer.indent();
+        writer.writeLine("let (broadcast_tx, _) = broadcast::channel(1024);");
+        writer.writeLine("Self {");
+        writer.indent();
+        writer.writeLine("service: Arc::new(service),");
+        writer.writeLine("sessions: Arc::new(RwLock::new(HashMap::new())),");
+        writer.writeLine("broadcast_tx,");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.newLine();
+
+        // Router
+        writer.writeLine("pub fn router(self) -> Router {");
+        writer.indent();
+        writer.writeLine("let handler = Arc::new(self);");
+        writer.writeLine("Router::new()");
+        writer.indent();
+        writer.writeLine(".route(\"/ws\", get(Self::ws_handler))");
+        writer.writeLine(".with_state(handler)");
+        writer.dedent();
+        writer.dedent();
+        writer.writeLine("}");
+        writer.newLine();
+
+        // WS handler
+        writer.writeLine("async fn ws_handler(");
+        writer.indent();
+        writer.writeLine("ws: WebSocketUpgrade,");
+        writer.writeLine("State(handler): State<Arc<Self>>,");
+        writer.dedent();
+        writer.writeLine(") -> impl IntoResponse {");
+        writer.indent();
+        writer.writeLine("ws.on_upgrade(move |socket| handler.handle_socket(socket))");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.newLine();
+
+        // handle_socket
+        writer.writeLine("async fn handle_socket(self: Arc<Self>, socket: WebSocket) {");
+        writer.indent();
+        writer.writeLine("let session_id = uuid::Uuid::new_v4().to_string();");
+        writer.writeLine("let (mut sender, mut receiver) = socket.split();");
+        writer.newLine();
+        writer.writeLine("let session = Arc::new(WebSocketSession {");
+        writer.indent();
+        writer.writeLine("id: session_id.clone(),");
+        writer.writeLine("attributes: HashMap::new(),");
+        writer.writeLine("sender: self.broadcast_tx.clone(),");
+        writer.dedent();
+        writer.writeLine("});");
+        writer.newLine();
+        writer.writeLine("self.sessions.write().await.insert(session_id.clone(), session.clone());");
+        writer.newLine();
+
+        // OnConnect
+        for (Operation op : service.getWebSocketConnectOperations()) {
+            String methodName = NameUtils.toSnakeCase(op.getName());
+            String inputType = op.getInput() != null
+                ? NameUtils.toPascalCase(NameUtils.getSimpleName(op.getInput()))
+                : "()";
+            if (!inputType.equals("()")) {
+                writer.writeLine("let _ = self.service.%s(%s::default()).await;", methodName, inputType);
+            } else {
+                writer.writeLine("let _ = self.service.%s(()).await;", methodName);
+            }
+        }
+        writer.newLine();
+
+        // Receive loop
+        writer.writeLine("let mut broadcast_rx = self.broadcast_tx.subscribe();");
+        writer.newLine();
+        writer.writeLine("loop {");
+        writer.indent();
+        writer.writeLine("tokio::select! {");
+        writer.indent();
+        writer.writeLine("msg = broadcast_rx.recv() => {");
+        writer.indent();
+        writer.writeLine("if let Ok(msg) = msg {");
+        writer.indent();
+        writer.writeLine("if sender.send(Message::Text(msg)).await.is_err() {");
+        writer.indent();
+        writer.writeLine("break;");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.writeLine("msg = receiver.next() => {");
+        writer.indent();
+        writer.writeLine("match msg {");
+        writer.indent();
+        writer.writeLine("Some(Ok(Message::Text(text))) => {");
+        writer.indent();
+        writer.writeLine("if let Ok(ws_msg) = serde_json::from_str::<WebSocketMessage>(&text) {");
+        writer.indent();
+        writer.writeLine("self.handle_message(&session, ws_msg).await;");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.writeLine("Some(Ok(Message::Close(_))) | None => break,");
+        writer.writeLine("_ => {}");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.newLine();
+
+        // OnDisconnect
+        writer.writeLine("self.sessions.write().await.remove(&session_id);");
+        for (Operation op : service.getWebSocketDisconnectOperations()) {
+            String methodName = NameUtils.toSnakeCase(op.getName());
+            String inputType = op.getInput() != null
+                ? NameUtils.toPascalCase(NameUtils.getSimpleName(op.getInput()))
+                : "()";
+            if (!inputType.equals("()")) {
+                writer.writeLine("let _ = self.service.%s(%s::default()).await;", methodName, inputType);
+            } else {
+                writer.writeLine("let _ = self.service.%s(()).await;", methodName);
+            }
+        }
+        writer.dedent();
+        writer.writeLine("}");
+        writer.newLine();
+
+        // handle_message
+        writer.writeLine("async fn handle_message(&self, session: &WebSocketSession, msg: WebSocketMessage) {");
+        writer.indent();
+        writer.writeLine("match msg.action.as_str() {");
+        writer.indent();
+
+        for (Operation op : service.getWebSocketMessageOperations()) {
+            String route = op.getWebSocketRoute();
+            String methodName = NameUtils.toSnakeCase(op.getName());
+            String inputType = op.getInput() != null
+                ? NameUtils.toPascalCase(NameUtils.getSimpleName(op.getInput()))
+                : "()";
+            String outputType = op.getOutput() != null
+                ? NameUtils.toPascalCase(NameUtils.getSimpleName(op.getOutput()))
+                : "()";
+
+            writer.writeLine("\"%s\" => {", route);
+            writer.indent();
+            if (!inputType.equals("()")) {
+                writer.writeLine("if let Ok(input) = serde_json::from_value::<<%s>>>(msg.payload) {", inputType);
+                writer.indent();
+                writer.writeLine("match self.service.%s(input).await {", methodName);
+            } else {
+                writer.writeLine("match self.service.%s(()).await {", methodName);
+            }
+            writer.indent();
+            if (!outputType.equals("()")) {
+                writer.writeLine("Ok(output) => { let _ = session.send(\"%sResponse\", output); }", route);
+            } else {
+                writer.writeLine("Ok(_) => {}");
+            }
+            writer.writeLine("Err(e) => { let _ = session.send(\"error\", serde_json::json!({\"message\": e.to_string()})); }");
+            writer.dedent();
+            writer.writeLine("}");
+            if (!inputType.equals("()")) {
+                writer.dedent();
+                writer.writeLine("}");
+            }
+            writer.dedent();
+            writer.writeLine("}");
+        }
+
+        writer.writeLine("_ => {");
+        writer.indent();
+        writer.writeLine("let _ = session.send(\"error\", serde_json::json!({\"message\": format!(\"Unknown action: {}\", msg.action)}));");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.newLine();
+
+        // broadcast
+        writer.writeLine("/// Broadcasts a message to all connected sessions");
+        writer.writeLine("pub fn broadcast(&self, action: &str, data: impl Serialize) {");
+        writer.indent();
+        writer.writeLine("let msg = WebSocketMessage {");
+        writer.indent();
+        writer.writeLine("action: action.to_string(),");
+        writer.writeLine("payload: serde_json::to_value(data).unwrap_or_default(),");
+        writer.dedent();
+        writer.writeLine("};");
+        writer.writeLine("let _ = self.broadcast_tx.send(serde_json::to_string(&msg).unwrap());");
+        writer.dedent();
+        writer.writeLine("}");
+        writer.newLine();
+
+        // session_count
+        writer.writeLine("/// Returns the number of active sessions");
+        writer.writeLine("pub async fn session_count(&self) -> usize {");
+        writer.indent();
+        writer.writeLine("self.sessions.read().await.len()");
+        writer.dedent();
+        writer.writeLine("}");
+
+        writer.dedent();
+        writer.writeLine("}");
+
+        writer.writeToFile(srcDir.resolve(modName + "_websocket_handler.rs"));
     }
 
     private void generateCargoToml(String crateName, Path outputDir) throws IOException {

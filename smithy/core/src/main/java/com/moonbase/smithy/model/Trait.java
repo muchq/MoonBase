@@ -96,4 +96,27 @@ public class Trait {
     public static final String LENGTH = "smithy.api#length";
     public static final String RANGE = "smithy.api#range";
     public static final String ENUM = "smithy.api#enum";
+
+    // WebSocket traits (custom extension for bidirectional communication)
+    public static final String WEBSOCKET = "smithy.ws#websocket";
+    public static final String WS_CONNECT = "smithy.ws#onConnect";
+    public static final String WS_DISCONNECT = "smithy.ws#onDisconnect";
+    public static final String WS_MESSAGE = "smithy.ws#onMessage";
+    public static final String WS_SUBSCRIBE = "smithy.ws#subscribe";
+    public static final String WS_PUBLISH = "smithy.ws#publish";
+    public static final String WS_ROUTE = "smithy.ws#route";
+
+    /**
+     * Checks if this is a WebSocket-related trait.
+     */
+    public boolean isWebSocketTrait() {
+        return name != null && name.startsWith("smithy.ws#");
+    }
+
+    /**
+     * Gets the WebSocket route/action for message routing.
+     */
+    public Optional<String> getWebSocketRoute() {
+        return getMapValue().map(m -> (String) m.get("route"));
+    }
 }

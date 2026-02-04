@@ -289,4 +289,223 @@ class GoServerGeneratorTest {
         assertTrue(content.contains("module myservice"));
         assertTrue(content.contains("go 1.21"));
     }
+
+    @Nested
+    @DisplayName("WebSocket Service Generation")
+    class WebSocketServiceGeneration {
+
+        private final String webSocketServiceJson = """
+            {
+              "smithy": "2.0",
+              "shapes": {
+                "com.example#ChatService": {
+                  "type": "service",
+                  "version": "1.0",
+                  "operations": [
+                    {"target": "com.example#OnConnect"},
+                    {"target": "com.example#OnDisconnect"},
+                    {"target": "com.example#SendMessage"},
+                    {"target": "com.example#JoinRoom"}
+                  ],
+                  "traits": {
+                    "smithy.ws#websocket": {}
+                  }
+                },
+                "com.example#OnConnect": {
+                  "type": "operation",
+                  "input": {"target": "com.example#ConnectInput"},
+                  "traits": {"smithy.ws#onConnect": {}}
+                },
+                "com.example#OnDisconnect": {
+                  "type": "operation",
+                  "traits": {"smithy.ws#onDisconnect": {}}
+                },
+                "com.example#SendMessage": {
+                  "type": "operation",
+                  "input": {"target": "com.example#SendMessageInput"},
+                  "output": {"target": "com.example#SendMessageOutput"},
+                  "traits": {"smithy.ws#onMessage": {"route": "sendMessage"}}
+                },
+                "com.example#JoinRoom": {
+                  "type": "operation",
+                  "input": {"target": "com.example#JoinRoomInput"},
+                  "output": {"target": "com.example#JoinRoomOutput"},
+                  "traits": {"smithy.ws#onMessage": {"route": "joinRoom"}}
+                },
+                "com.example#ConnectInput": {
+                  "type": "structure",
+                  "members": {
+                    "userId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}}
+                  }
+                },
+                "com.example#SendMessageInput": {
+                  "type": "structure",
+                  "members": {
+                    "roomId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}},
+                    "content": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}}
+                  }
+                },
+                "com.example#SendMessageOutput": {
+                  "type": "structure",
+                  "members": {
+                    "messageId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}}
+                  }
+                },
+                "com.example#JoinRoomInput": {
+                  "type": "structure",
+                  "members": {
+                    "roomId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}}
+                  }
+                },
+                "com.example#JoinRoomOutput": {
+                  "type": "structure",
+                  "members": {
+                    "members": {"target": "smithy.api#String"}
+                  }
+                }
+              }
+            }
+            """;
+
+        @Test
+        @DisplayName("should generate WebSocket handler instead of HTTP handler")
+        void shouldGenerateWebSocketHandler(@TempDir Path tempDir) throws IOException {
+            SmithyModel model = parser.parseString(webSocketServiceJson);
+            GeneratorOptions options = new GeneratorOptions().setModuleName("chat");
+
+            generator.generate(model, tempDir, options);
+
+            // WebSocket handler should be generated
+            Path wsHandlerFile = tempDir.resolve("chat_service_websocket_handler.go");
+            assertTrue(Files.exists(wsHandlerFile), "WebSocket handler should be generated");
+
+            // HTTP handler should NOT be generated
+            Path httpHandlerFile = tempDir.resolve("chat_service_handler.go");
+            assertFalse(Files.exists(httpHandlerFile), "HTTP handler should not be generated for WebSocket service");
+        }
+
+        @Test
+        @DisplayName("should generate WebSocket handler with gorilla/websocket")
+        void shouldGenerateWebSocketHandlerWithGorilla(@TempDir Path tempDir) throws IOException {
+            SmithyModel model = parser.parseString(webSocketServiceJson);
+            GeneratorOptions options = new GeneratorOptions().setModuleName("chat");
+
+            generator.generate(model, tempDir, options);
+
+            Path wsHandlerFile = tempDir.resolve("chat_service_websocket_handler.go");
+            String content = Files.readString(wsHandlerFile);
+
+            // Verify imports
+            assertTrue(content.contains("\"github.com/gorilla/websocket\""));
+            assertTrue(content.contains("\"sync\""));
+
+            // Verify WebSocketMessage struct
+            assertTrue(content.contains("type WebSocketMessage struct {"));
+            assertTrue(content.contains("Action  string          `json:\"action\"`"));
+            assertTrue(content.contains("Payload json.RawMessage `json:\"payload\"`"));
+
+            // Verify WebSocketSession struct
+            assertTrue(content.contains("type WebSocketSession struct {"));
+            assertTrue(content.contains("ID         string"));
+            assertTrue(content.contains("Conn       *websocket.Conn"));
+            assertTrue(content.contains("Attributes map[string]interface{}"));
+        }
+
+        @Test
+        @DisplayName("should generate handler struct and constructor")
+        void shouldGenerateHandlerStructAndConstructor(@TempDir Path tempDir) throws IOException {
+            SmithyModel model = parser.parseString(webSocketServiceJson);
+            GeneratorOptions options = new GeneratorOptions().setModuleName("chat");
+
+            generator.generate(model, tempDir, options);
+
+            String content = Files.readString(tempDir.resolve("chat_service_websocket_handler.go"));
+
+            assertTrue(content.contains("type ChatServiceWebSocketHandler struct {"));
+            assertTrue(content.contains("service  ChatService"));
+            assertTrue(content.contains("sessions map[string]*WebSocketSession"));
+            assertTrue(content.contains("mu       sync.RWMutex"));
+            assertTrue(content.contains("upgrader websocket.Upgrader"));
+
+            assertTrue(content.contains("func NewChatServiceWebSocketHandler(service ChatService) *ChatServiceWebSocketHandler"));
+        }
+
+        @Test
+        @DisplayName("should generate HandleConnection with lifecycle methods")
+        void shouldGenerateHandleConnection(@TempDir Path tempDir) throws IOException {
+            SmithyModel model = parser.parseString(webSocketServiceJson);
+            GeneratorOptions options = new GeneratorOptions().setModuleName("chat");
+
+            generator.generate(model, tempDir, options);
+
+            String content = Files.readString(tempDir.resolve("chat_service_websocket_handler.go"));
+
+            // HandleConnection method
+            assertTrue(content.contains("func (h *ChatServiceWebSocketHandler) HandleConnection(ctx context.Context, conn *websocket.Conn, sessionID string)"));
+
+            // Session management
+            assertTrue(content.contains("h.sessions[sessionID] = session"));
+            assertTrue(content.contains("delete(h.sessions, sessionID)"));
+
+            // Write pump
+            assertTrue(content.contains("go h.writePump(session)"));
+        }
+
+        @Test
+        @DisplayName("should generate message routing switch")
+        void shouldGenerateMessageRouting(@TempDir Path tempDir) throws IOException {
+            SmithyModel model = parser.parseString(webSocketServiceJson);
+            GeneratorOptions options = new GeneratorOptions().setModuleName("chat");
+
+            generator.generate(model, tempDir, options);
+
+            String content = Files.readString(tempDir.resolve("chat_service_websocket_handler.go"));
+
+            // handleMessage method
+            assertTrue(content.contains("func (h *ChatServiceWebSocketHandler) handleMessage(ctx context.Context, session *WebSocketSession, rawMessage []byte)"));
+
+            // Switch statement for routing
+            assertTrue(content.contains("switch msg.Action {"));
+            assertTrue(content.contains("case \"sendMessage\":"));
+            assertTrue(content.contains("case \"joinRoom\":"));
+            assertTrue(content.contains("default:"));
+            assertTrue(content.contains("Unknown action"));
+        }
+
+        @Test
+        @DisplayName("should generate broadcast and session management methods")
+        void shouldGenerateBroadcastMethods(@TempDir Path tempDir) throws IOException {
+            SmithyModel model = parser.parseString(webSocketServiceJson);
+            GeneratorOptions options = new GeneratorOptions().setModuleName("chat");
+
+            generator.generate(model, tempDir, options);
+
+            String content = Files.readString(tempDir.resolve("chat_service_websocket_handler.go"));
+
+            // Broadcast
+            assertTrue(content.contains("func (h *ChatServiceWebSocketHandler) Broadcast(action string, data interface{})"));
+            assertTrue(content.contains("h.mu.RLock()"));
+
+            // GetSession
+            assertTrue(content.contains("func (h *ChatServiceWebSocketHandler) GetSession(sessionID string) *WebSocketSession"));
+
+            // SessionCount
+            assertTrue(content.contains("func (h *ChatServiceWebSocketHandler) SessionCount() int"));
+        }
+
+        @Test
+        @DisplayName("should generate Session.Send method")
+        void shouldGenerateSessionSendMethod(@TempDir Path tempDir) throws IOException {
+            SmithyModel model = parser.parseString(webSocketServiceJson);
+            GeneratorOptions options = new GeneratorOptions().setModuleName("chat");
+
+            generator.generate(model, tempDir, options);
+
+            String content = Files.readString(tempDir.resolve("chat_service_websocket_handler.go"));
+
+            assertTrue(content.contains("func (s *WebSocketSession) Send(action string, data interface{}) error"));
+            assertTrue(content.contains("json.Marshal(data)"));
+            assertTrue(content.contains("s.send <- msgBytes"));
+        }
+    }
 }

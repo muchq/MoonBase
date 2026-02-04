@@ -365,4 +365,232 @@ class JavaServerGeneratorTest {
             assertTrue(content.contains("public static Result error(String value)"));
         }
     }
+
+    @Nested
+    @DisplayName("WebSocket Service Generation")
+    class WebSocketServiceGeneration {
+
+        private final String webSocketServiceJson = """
+            {
+              "smithy": "2.0",
+              "shapes": {
+                "com.example#ChatService": {
+                  "type": "service",
+                  "version": "1.0",
+                  "operations": [
+                    {"target": "com.example#OnConnect"},
+                    {"target": "com.example#OnDisconnect"},
+                    {"target": "com.example#SendMessage"}
+                  ],
+                  "traits": {
+                    "smithy.ws#websocket": {},
+                    "smithy.api#documentation": "A WebSocket chat service"
+                  }
+                },
+                "com.example#OnConnect": {
+                  "type": "operation",
+                  "input": {"target": "com.example#ConnectInput"},
+                  "output": {"target": "com.example#ConnectOutput"},
+                  "traits": {
+                    "smithy.ws#onConnect": {}
+                  }
+                },
+                "com.example#OnDisconnect": {
+                  "type": "operation",
+                  "input": {"target": "com.example#DisconnectInput"},
+                  "traits": {
+                    "smithy.ws#onDisconnect": {}
+                  }
+                },
+                "com.example#SendMessage": {
+                  "type": "operation",
+                  "input": {"target": "com.example#SendMessageInput"},
+                  "output": {"target": "com.example#SendMessageOutput"},
+                  "traits": {
+                    "smithy.ws#onMessage": {"route": "sendMessage"},
+                    "smithy.api#documentation": "Send a message"
+                  }
+                },
+                "com.example#ConnectInput": {
+                  "type": "structure",
+                  "members": {
+                    "userId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}}
+                  }
+                },
+                "com.example#ConnectOutput": {
+                  "type": "structure",
+                  "members": {
+                    "sessionId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}}
+                  }
+                },
+                "com.example#DisconnectInput": {
+                  "type": "structure",
+                  "members": {
+                    "reason": {"target": "smithy.api#String"}
+                  }
+                },
+                "com.example#SendMessageInput": {
+                  "type": "structure",
+                  "members": {
+                    "roomId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}},
+                    "content": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}}
+                  }
+                },
+                "com.example#SendMessageOutput": {
+                  "type": "structure",
+                  "members": {
+                    "messageId": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}}
+                  }
+                }
+              }
+            }
+            """;
+
+        @Test
+        @DisplayName("should detect WebSocket service")
+        void shouldDetectWebSocketService() throws IOException {
+            SmithyModel model = parser.parseString(webSocketServiceJson);
+
+            Service service = model.getServices().values().iterator().next();
+            assertTrue(service.isWebSocket(), "Service should be detected as WebSocket");
+        }
+
+        @Test
+        @DisplayName("should generate WebSocket handler instead of HTTP router")
+        void shouldGenerateWebSocketHandler(@TempDir Path tempDir) throws IOException {
+            SmithyModel model = parser.parseString(webSocketServiceJson);
+            GeneratorOptions options = new GeneratorOptions().setPackageName("com.example");
+
+            generator.generate(model, tempDir, options);
+
+            // WebSocket handler should be generated
+            Path wsHandlerFile = tempDir.resolve("com/example/ChatServiceWebSocketHandler.java");
+            assertTrue(Files.exists(wsHandlerFile), "WebSocket handler should be generated");
+
+            // HTTP router should NOT be generated for WebSocket services
+            Path routerFile = tempDir.resolve("com/example/ChatServiceRouter.java");
+            assertFalse(Files.exists(routerFile), "HTTP router should not be generated for WebSocket service");
+        }
+
+        @Test
+        @DisplayName("should generate WebSocket handler with onConnect/onDisconnect/onMessage")
+        void shouldGenerateWebSocketHandlerMethods(@TempDir Path tempDir) throws IOException {
+            SmithyModel model = parser.parseString(webSocketServiceJson);
+            GeneratorOptions options = new GeneratorOptions().setPackageName("com.example");
+
+            generator.generate(model, tempDir, options);
+
+            Path wsHandlerFile = tempDir.resolve("com/example/ChatServiceWebSocketHandler.java");
+            String content = Files.readString(wsHandlerFile);
+
+            // Verify class structure
+            assertTrue(content.contains("public class ChatServiceWebSocketHandler implements WebSocketHandler"));
+
+            // Verify lifecycle methods
+            assertTrue(content.contains("public void onConnect(WebSocketSession session)"));
+            assertTrue(content.contains("public void onDisconnect(WebSocketSession session)"));
+            assertTrue(content.contains("public void onMessage(WebSocketSession session, WebSocketMessage message)"));
+
+            // Verify session management
+            assertTrue(content.contains("sessions.put(session.getId(), session)"));
+            assertTrue(content.contains("sessions.remove(session.getId())"));
+
+            // Verify message routing
+            assertTrue(content.contains("switch (action)"));
+            assertTrue(content.contains("case \"sendMessage\":"));
+
+            // Verify broadcast/send methods
+            assertTrue(content.contains("public void broadcast(String action, Object data)"));
+            assertTrue(content.contains("public void sendTo(String sessionId, String action, Object data)"));
+        }
+
+        @Test
+        @DisplayName("should generate service interface for WebSocket service")
+        void shouldGenerateServiceInterfaceForWebSocket(@TempDir Path tempDir) throws IOException {
+            SmithyModel model = parser.parseString(webSocketServiceJson);
+            GeneratorOptions options = new GeneratorOptions().setPackageName("com.example");
+
+            generator.generate(model, tempDir, options);
+
+            Path serviceFile = tempDir.resolve("com/example/ChatService.java");
+            assertTrue(Files.exists(serviceFile));
+
+            String content = Files.readString(serviceFile);
+
+            assertTrue(content.contains("public interface ChatService"));
+            assertTrue(content.contains("CompletableFuture<ConnectOutput> onConnect(ConnectInput input)"));
+            assertTrue(content.contains("CompletableFuture<Void> onDisconnect(DisconnectInput input)"));
+            assertTrue(content.contains("CompletableFuture<SendMessageOutput> sendMessage(SendMessageInput input)"));
+        }
+
+        @Test
+        @DisplayName("should categorize WebSocket operations correctly")
+        void shouldCategorizeWebSocketOperations() throws IOException {
+            SmithyModel model = parser.parseString(webSocketServiceJson);
+
+            Service service = model.getServices().values().iterator().next();
+
+            assertEquals(1, service.getWebSocketConnectOperations().size(),
+                "Should have 1 connect operation");
+            assertEquals(1, service.getWebSocketDisconnectOperations().size(),
+                "Should have 1 disconnect operation");
+            assertEquals(1, service.getWebSocketMessageOperations().size(),
+                "Should have 1 message operation");
+        }
+
+        @Test
+        @DisplayName("should get WebSocket route from operation")
+        void shouldGetWebSocketRoute() throws IOException {
+            SmithyModel model = parser.parseString(webSocketServiceJson);
+
+            Service service = model.getServices().values().iterator().next();
+            Operation sendMessage = service.getOperation("SendMessage").orElseThrow();
+
+            assertEquals("sendMessage", sendMessage.getWebSocketRoute(),
+                "WebSocket route should be extracted from trait");
+            assertTrue(sendMessage.isWebSocketMessage(),
+                "Operation should be identified as WebSocket message handler");
+        }
+    }
+
+    @Nested
+    @DisplayName("WebSocket Runtime Classes")
+    class WebSocketRuntimeClasses {
+
+        @Test
+        @DisplayName("WebSocketMessage should parse JSON correctly")
+        void webSocketMessageShouldParseJson() {
+            String json = "{\"action\":\"sendMessage\",\"payload\":{\"roomId\":\"room1\",\"content\":\"hello\"}}";
+            var message = com.moonbase.smithy.runtime.WebSocketMessage.fromJson(json);
+
+            assertEquals("sendMessage", message.getAction());
+            assertTrue(message.getPayload().contains("roomId"));
+            assertTrue(message.getPayload().contains("room1"));
+        }
+
+        @Test
+        @DisplayName("WebSocketMessage should serialize to JSON correctly")
+        void webSocketMessageShouldSerializeToJson() {
+            var message = new com.moonbase.smithy.runtime.WebSocketMessage("test", "{\"key\":\"value\"}");
+            String json = message.toJson();
+
+            assertTrue(json.contains("\"action\":\"test\""));
+            assertTrue(json.contains("\"payload\":"));
+        }
+
+        @Test
+        @DisplayName("WebSocketSession test implementation should work")
+        void webSocketSessionTestImplShouldWork() {
+            var session = com.moonbase.smithy.runtime.WebSocketSession.createTestSession("test-123");
+
+            assertEquals("test-123", session.getId());
+            assertTrue(session.isOpen());
+
+            session.setAttribute("user", "alice");
+            assertEquals("alice", session.getAttribute("user"));
+
+            session.close();
+            assertFalse(session.isOpen());
+        }
+    }
 }

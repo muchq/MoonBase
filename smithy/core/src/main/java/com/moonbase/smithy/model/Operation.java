@@ -111,4 +111,65 @@ public class Operation {
             .or(() -> getTrait("documentation"))
             .map(Trait::getStringValue);
     }
+
+    // WebSocket helpers
+
+    /**
+     * Checks if this is a WebSocket operation.
+     */
+    public boolean isWebSocketOperation() {
+        return hasTrait(Trait.WS_CONNECT)
+            || hasTrait(Trait.WS_DISCONNECT)
+            || hasTrait(Trait.WS_MESSAGE)
+            || hasTrait(Trait.WS_SUBSCRIBE)
+            || hasTrait(Trait.WS_PUBLISH)
+            || hasTrait(Trait.WS_ROUTE);
+    }
+
+    /**
+     * Gets the WebSocket route/action name for message routing.
+     * Falls back to operation name if not specified.
+     */
+    public String getWebSocketRoute() {
+        return getTrait(Trait.WS_ROUTE)
+            .flatMap(Trait::getWebSocketRoute)
+            .or(() -> getTrait(Trait.WS_MESSAGE)
+                .flatMap(Trait::getWebSocketRoute))
+            .orElse(name);
+    }
+
+    /**
+     * Checks if this is a WebSocket connect handler.
+     */
+    public boolean isWebSocketConnect() {
+        return hasTrait(Trait.WS_CONNECT);
+    }
+
+    /**
+     * Checks if this is a WebSocket disconnect handler.
+     */
+    public boolean isWebSocketDisconnect() {
+        return hasTrait(Trait.WS_DISCONNECT);
+    }
+
+    /**
+     * Checks if this is a WebSocket message handler.
+     */
+    public boolean isWebSocketMessage() {
+        return hasTrait(Trait.WS_MESSAGE) || hasTrait(Trait.WS_ROUTE);
+    }
+
+    /**
+     * Checks if this is a WebSocket subscribe operation (client subscribes to events).
+     */
+    public boolean isWebSocketSubscribe() {
+        return hasTrait(Trait.WS_SUBSCRIBE);
+    }
+
+    /**
+     * Checks if this is a WebSocket publish operation (server pushes to clients).
+     */
+    public boolean isWebSocketPublish() {
+        return hasTrait(Trait.WS_PUBLISH);
+    }
 }
