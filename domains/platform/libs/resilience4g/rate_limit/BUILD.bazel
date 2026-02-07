@@ -1,0 +1,32 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "rate_limit",
+    srcs = [
+        "http_middleware.go",
+        "rate_limiter.go",
+        "token_bucket_rate_limiter.go",
+    ],
+    importpath = "github.com/muchq/moonbase/domains/platform/libs/resilience4g/rate_limit",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/platform/libs/clock",
+        "//domains/platform/libs/mucks",
+        "@com_github_google_uuid//:uuid",
+    ],
+)
+
+go_test(
+    name = "rate_limit_test",
+    size = "small",
+    srcs = [
+        "http_middleware_test.go",
+        "token_bucket_rate_limiter_test.go",
+    ],
+    embed = [":rate_limit"],
+    deps = [
+        "//domains/platform/libs/clock",
+        "//domains/platform/libs/mucks",
+        "@com_github_stretchr_testify//assert",
+    ],
+)

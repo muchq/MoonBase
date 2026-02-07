@@ -1,0 +1,23 @@
+load("//bazel/rules:java.bzl", "artifact", "java_library", "java_test_suite")
+
+java_library(
+    name = "imagine",
+    srcs = [
+        "src/main/java/com/muchq/graphics/imagine/ImageUtils.java",
+        "src/main/java/com/muchq/graphics/imagine/Radius.java",
+    ],
+    resources = ["//domains/graphics/data:marbles_bmp"],
+    visibility = ["//visibility:public"],
+)
+
+java_test_suite(
+    name = "imagine_tests",
+    size = "small",
+    srcs = ["src/test/java/com/muchq/graphics/imagine/ImageUtilsTest.java"],
+    data = ["//domains/graphics/data:marbles"],
+    deps = [
+        ":imagine",
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)

@@ -1,0 +1,42 @@
+load("//bazel/rules:java.bzl", "artifact", "java_library", "java_test_suite")
+
+java_library(
+    name = "chess_com_client",
+    srcs = [
+        "src/main/java/com/muchq/games/chess_com_client/Accuracies.java",
+        "src/main/java/com/muchq/games/chess_com_client/Best.java",
+        "src/main/java/com/muchq/games/chess_com_client/ChessClient.java",
+        "src/main/java/com/muchq/games/chess_com_client/GamesResponse.java",
+        "src/main/java/com/muchq/games/chess_com_client/InstantRating.java",
+        "src/main/java/com/muchq/games/chess_com_client/Last.java",
+        "src/main/java/com/muchq/games/chess_com_client/PlayedGame.java",
+        "src/main/java/com/muchq/games/chess_com_client/Player.java",
+        "src/main/java/com/muchq/games/chess_com_client/PlayerResult.java",
+        "src/main/java/com/muchq/games/chess_com_client/Record.java",
+        "src/main/java/com/muchq/games/chess_com_client/Stats.java",
+        "src/main/java/com/muchq/games/chess_com_client/StatsResponse.java",
+        "src/main/java/com/muchq/games/chess_com_client/StreamingPlatform.java",
+        "src/main/java/com/muchq/games/chess_com_client/Tactics.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/platform/libs/http_client:core",
+        artifact("com.fasterxml.jackson.core:jackson-annotations"),
+        artifact("com.fasterxml.jackson.core:jackson-core"),
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("org.slf4j:slf4j-api"),
+    ],
+)
+
+java_test_suite(
+    name = "chess_com_client_tests",
+    size = "small",
+    srcs = ["src/test/java/com/muchq/games/chess_com_client/ChessClientTest.java"],
+    deps = [
+        ":chess_com_client",
+        "//domains/platform/libs/http_client:core",
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)

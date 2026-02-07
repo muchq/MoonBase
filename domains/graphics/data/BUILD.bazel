@@ -1,0 +1,11 @@
+filegroup(
+    name = "marbles",
+    srcs = ["marbles.png"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "marbles_bmp",
+    srcs = ["MARBLES.BMP"],
+    visibility = ["//visibility:public"],
+)

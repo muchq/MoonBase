@@ -1,26 +1,25 @@
+load("@rules_proto//proto:defs.bzl", "proto_lang_toolchain", "proto_toolchain")
 load("@rules_rust//rust:defs.bzl", "rust_library_group")
 load("@rules_rust_prost//:defs.bzl", "rust_prost_toolchain")
 
-#proto_lang_toolchain(
-#    name = "protoc_java_toolchain",
-#    command_line = "--java_out=%s",
-#    progress_message = "Generating Java proto_library %{label}",
-#    runtime = "@protobuf-java//jar",
-#    toolchain_type = "@rules_java//java/proto:toolchain_type",
-#)
+proto_lang_toolchain(
+    name = "protoc_cc_toolchain",
+    command_line = "--cpp_out=%s",
+    progress_message = "Generating Cpp proto_library %{label}",
+    runtime = "@com_google_protobuf//:protobuf",
+    toolchain_type = "@rules_cc//cc/proto:toolchain_type",
+)
 
-#proto_lang_toolchain(
-#    name = "protoc_cc_toolchain",
-#    command_line = "--cpp_out=%s",
-#    progress_message = "Generating Cpp proto_library %{label}",
-#    runtime = "@com_google_protobuf//:protobuf",
-#    toolchain_type = "@rules_cc//cc/proto:toolchain_type",
-#)
-#
-#proto_toolchain(
-#    name = "base_toolchain",
-#    proto_compiler = "@com_google_protobuf//:protoc",
-#)
+toolchain(
+    name = "protoc_cc_toolchain_impl",
+    toolchain = ":protoc_cc_toolchain",
+    toolchain_type = "@rules_cc//cc/proto:toolchain_type",
+)
+
+proto_toolchain(
+    name = "base_toolchain",
+    proto_compiler = "@com_google_protobuf//:protoc",
+)
 
 rust_library_group(
     name = "prost_runtime",

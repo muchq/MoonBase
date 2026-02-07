@@ -1,0 +1,42 @@
+load("@com_github_grpc_grpc//bazel:cc_grpc_library.bzl", "cc_grpc_library")
+load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
+load("@rules_proto//proto:defs.bzl", "proto_library")
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "golf_grpc_proto",
+    srcs = ["golf.proto"],
+    deps = [
+        "//domains/games/protos/cards:cards_proto",
+    ],
+)
+
+cc_proto_library(
+    name = "golf_grpc_cc_proto",
+    deps = [":golf_grpc_proto"],
+)
+
+cc_grpc_library(
+    name = "golf_grpc_cc_grpc",
+    srcs = [":golf_grpc_proto"],
+    generate_mocks = True,
+    grpc_only = True,
+    deps = [":golf_grpc_cc_proto"],
+)
+
+go_proto_library(
+    name = "golf_grpc_go_proto",
+    compilers = ["@io_bazel_rules_go//proto:go_grpc"],
+    importpath = "github.com/muchq/moonbase/domains/games/protos/golf_grpc",
+    proto = ":golf_grpc_proto",
+    deps = ["//domains/games/protos/cards"],
+)
+
+go_library(
+    name = "golf_grpc",
+    embed = [":golf_grpc_go_proto"],
+    importpath = "github.com/muchq/moonbase/domains/games/protos/golf_grpc",
+)

@@ -1,0 +1,18 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "neuro",
+    srcs = [],
+    importpath = "github.com/muchq/moonbase/domains/ai/libs/neuro",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/ai/libs/neuro/activations",
+        "//domains/ai/libs/neuro/data",
+        "//domains/ai/libs/neuro/embeddings",
+        "//domains/ai/libs/neuro/inference",
+        "//domains/ai/libs/neuro/layers",
+        "//domains/ai/libs/neuro/loss",
+        "//domains/ai/libs/neuro/network",
+        "//domains/ai/libs/neuro/utils",
+    ],
+)

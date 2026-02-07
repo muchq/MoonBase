@@ -1,0 +1,48 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("//bazel/rules:oci.bzl", "linux_oci_go")
+
+go_library(
+    name = "prom_proxy_lib",
+    srcs = [
+        "handlers.go",
+        "models.go",
+        "prometheus_client.go",
+    ],
+    importpath = "github.com/muchq/moonbase/domains/platform/apis/prom_proxy",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/platform/libs/mucks",
+        "@com_github_prometheus_client_golang//api",
+        "@com_github_prometheus_client_golang//api/prometheus/v1:go_default_library",
+        "@com_github_prometheus_common//model:go_default_library",
+    ],
+)
+
+go_test(
+    name = "prom_proxy_test",
+    size = "small",
+    srcs = [
+        "handlers_test.go",
+        "models_test.go",
+        "prometheus_client_test.go",
+    ],
+    embed = [":prom_proxy_lib"],
+    deps = [
+        "@com_github_prometheus_client_golang//api",
+        "@com_github_prometheus_client_golang//api/prometheus/v1:go_default_library",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)
+
+go_binary(
+    name = "prom_proxy",
+    srcs = ["main.go"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":prom_proxy_lib",
+        "//domains/platform/libs/mucks",
+    ],
+)
+
+linux_oci_go(bin_name = "prom_proxy")

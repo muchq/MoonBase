@@ -1,0 +1,110 @@
+load("//bazel/rules:java.bzl", "artifact", "java_binary", "java_library", "java_test_suite")
+load("//bazel/rules:oci.bzl", "linux_oci_java")
+
+java_library(
+    name = "dtos",
+    srcs = [
+        "src/main/java/com/muchq/games/mcpserver/dtos/ClientInfo.java",
+        "src/main/java/com/muchq/games/mcpserver/dtos/ContentItem.java",
+        "src/main/java/com/muchq/games/mcpserver/dtos/InitializeParams.java",
+        "src/main/java/com/muchq/games/mcpserver/dtos/InitializeResult.java",
+        "src/main/java/com/muchq/games/mcpserver/dtos/JsonRpcError.java",
+        "src/main/java/com/muchq/games/mcpserver/dtos/JsonRpcRequest.java",
+        "src/main/java/com/muchq/games/mcpserver/dtos/JsonRpcResponse.java",
+        "src/main/java/com/muchq/games/mcpserver/dtos/ServerCapabilities.java",
+        "src/main/java/com/muchq/games/mcpserver/dtos/ServerInfo.java",
+        "src/main/java/com/muchq/games/mcpserver/dtos/Tool.java",
+        "src/main/java/com/muchq/games/mcpserver/dtos/ToolCallParams.java",
+        "src/main/java/com/muchq/games/mcpserver/dtos/ToolCallResult.java",
+        "src/main/java/com/muchq/games/mcpserver/dtos/ToolsCapability.java",
+        "src/main/java/com/muchq/games/mcpserver/dtos/ToolsListResult.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        artifact("com.fasterxml.jackson.core:jackson-annotations"),
+    ],
+)
+
+java_library(
+    name = "tools",
+    srcs = [
+        "src/main/java/com/muchq/games/mcpserver/tools/ChessComGamesTool.java",
+        "src/main/java/com/muchq/games/mcpserver/tools/ChessComPlayerTool.java",
+        "src/main/java/com/muchq/games/mcpserver/tools/ChessComStatsTool.java",
+        "src/main/java/com/muchq/games/mcpserver/tools/McpTool.java",
+        "src/main/java/com/muchq/games/mcpserver/tools/ServerTimeTool.java",
+        "src/main/java/com/muchq/games/mcpserver/tools/ToolRegistry.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":dtos",
+        "//domains/games/libs/chess_com_client",
+        artifact("com.fasterxml.jackson.core:jackson-core"),
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("org.slf4j:slf4j-api"),
+    ],
+)
+
+java_binary(
+    name = "mcpserver",
+    srcs = [
+        "src/main/java/com/muchq/games/mcpserver/App.java",
+        "src/main/java/com/muchq/games/mcpserver/McpAuthenticationFilter.java",
+        "src/main/java/com/muchq/games/mcpserver/McpController.java",
+        "src/main/java/com/muchq/games/mcpserver/McpModule.java",
+        "src/main/java/com/muchq/games/mcpserver/McpRequestHandler.java",
+    ],
+    main_class = "com.muchq.games.mcpserver.App",
+    plugins = [
+        "//bazel/rules:micronaut_type_element_visitor_processor",
+        "//bazel/rules:micronaut_aggregating_type_element_visitor_processor",
+        "//bazel/rules:micronaut_bean_definition_inject_processor",
+        "//bazel/rules:micronaut_package_element_visitor_processor",
+    ],
+    resources = ["//domains/platform/resources:micronaut_config"],
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        artifact("ch.qos.logback:logback-classic"),
+    ],
+    deps = [
+        ":dtos",
+        ":tools",
+        "//domains/games/libs/chess_com_client",
+        "//domains/platform/libs/http_client:core",
+        "//domains/platform/libs/http_client:jdk11",
+        "//domains/platform/libs/json",
+        artifact("com.fasterxml.jackson.core:jackson-annotations"),
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("io.micronaut:micronaut-context"),
+        artifact("io.micronaut:micronaut-core"),
+        artifact("io.micronaut:micronaut-http"),
+        artifact("io.micronaut:micronaut-http-server-netty"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("io.micronaut:micronaut-jackson-databind"),
+        artifact("io.micronaut:micronaut-runtime"),
+        artifact("io.projectreactor:reactor-core"),
+        artifact("jakarta.inject:jakarta-inject-api"),
+        artifact("org.reactivestreams:reactive-streams"),
+        artifact("org.slf4j:slf4j-api"),
+    ],
+)
+
+linux_oci_java(bin_name = "mcpserver")
+
+java_test_suite(
+    name = "tools_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/mcpserver/tools/ChessComGamesToolTest.java",
+        "src/test/java/com/muchq/games/mcpserver/tools/ChessComPlayerToolTest.java",
+        "src/test/java/com/muchq/games/mcpserver/tools/ChessComStatsToolTest.java",
+        "src/test/java/com/muchq/games/mcpserver/tools/ServerTimeToolTest.java",
+    ],
+    deps = [
+        ":tools",
+        "//domains/games/libs/chess_com_client",
+        "//domains/platform/libs/json",
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)

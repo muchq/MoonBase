@@ -1,0 +1,12 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+cc_binary(
+    name = "tracy_demo",
+    srcs = ["Main.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/graphics/libs/image_core",
+        "//domains/graphics/libs/png_plusplus",
+        "//domains/graphics/libs/tracy_cpp:tracy",
+    ],
+)

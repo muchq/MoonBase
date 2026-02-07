@@ -1,5 +1,0 @@
-filegroup(
-    name = "marbles",
-    srcs = ["marbles.png"],
-    visibility = ["//visibility:public"],
-)

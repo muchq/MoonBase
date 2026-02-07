@@ -1,0 +1,53 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("//bazel/rules:oci.bzl", "linux_oci_go")
+
+go_library(
+    name = "r3dr_lib",
+    srcs = [
+        "config.go",
+        "constants.go",
+        "dto.go",
+        "encoding.go",
+        "main.go",
+        "ping.go",
+        "short_db.go",
+        "shortener.go",
+        "shortener_api.go",
+        "url_dao.go",
+    ],
+    importpath = "github.com/muchq/moonbase/domains/r3dr/apis/r3dr",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//domains/platform/libs/clock",
+        "//domains/platform/libs/mucks",
+        "//domains/platform/libs/resilience4g/rate_limit",
+        "@com_github_hashicorp_golang_lru_v2//expirable",
+        "@com_github_hashicorp_golang_lru_v2//simplelru",
+        "@com_github_lib_pq//:pq",
+    ],
+)
+
+go_binary(
+    name = "r3dr",
+    embed = [":r3dr_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "r3dr_test",
+    size = "small",
+    srcs = [
+        "dto_test.go",
+        "encoding_test.go",
+        "shortener_test.go",
+    ],
+    embed = [":r3dr_lib"],
+    deps = [
+        "//domains/platform/libs/clock",
+        "@com_github_hashicorp_golang_lru_v2//expirable",
+        "@com_github_hashicorp_golang_lru_v2//simplelru",
+        "@com_github_stretchr_testify//assert",
+    ],
+)
+
+linux_oci_go(bin_name = "r3dr")

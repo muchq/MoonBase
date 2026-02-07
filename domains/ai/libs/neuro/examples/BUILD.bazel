@@ -1,0 +1,159 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_test")
+
+go_binary(
+    name = "mnist_example",
+    srcs = ["mnist_example.go"],
+    deps = [
+        "//domains/ai/libs/neuro/activations",
+        "//domains/ai/libs/neuro/data",
+        "//domains/ai/libs/neuro/inference",
+        "//domains/ai/libs/neuro/layers",
+        "//domains/ai/libs/neuro/loss",
+        "//domains/ai/libs/neuro/network",
+        "//domains/ai/libs/neuro/utils",
+    ],
+)
+
+go_binary(
+    name = "mnist_real",
+    srcs = ["mnist_real.go"],
+    deps = [
+        "//domains/ai/libs/neuro/activations",
+        "//domains/ai/libs/neuro/data",
+        "//domains/ai/libs/neuro/inference",
+        "//domains/ai/libs/neuro/layers",
+        "//domains/ai/libs/neuro/loss",
+        "//domains/ai/libs/neuro/network",
+        "//domains/ai/libs/neuro/utils",
+    ],
+)
+
+go_binary(
+    name = "mnist_production",
+    srcs = ["mnist_production.go"],
+    deps = [
+        "//domains/ai/libs/neuro/inference",
+        "//domains/ai/libs/neuro/utils",
+        "//domains/platform/libs/mucks",
+        "//domains/platform/libs/resilience4g/rate_limit",
+    ],
+)
+
+go_binary(
+    name = "mnist_production_unified",
+    srcs = ["mnist_production_unified.go"],
+    deps = [
+        "//domains/ai/libs/neuro/inference",
+        "//domains/ai/libs/neuro/utils",
+        "//domains/platform/libs/mucks",
+        "//domains/platform/libs/resilience4g/rate_limit",
+    ],
+)
+
+go_binary(
+    name = "mnist_cnn",
+    srcs = ["mnist_cnn.go"],
+    deps = [
+        "//domains/ai/libs/neuro/activations",
+        "//domains/ai/libs/neuro/data",
+        "//domains/ai/libs/neuro/layers",
+        "//domains/ai/libs/neuro/utils",
+    ],
+)
+
+go_binary(
+    name = "mnist_cnn_full",
+    srcs = ["mnist_cnn_full.go"],
+    deps = [
+        "//domains/ai/libs/neuro/activations",
+        "//domains/ai/libs/neuro/data",
+        "//domains/ai/libs/neuro/inference",
+        "//domains/ai/libs/neuro/layers",
+        "//domains/ai/libs/neuro/network",
+        "//domains/ai/libs/neuro/utils",
+    ],
+)
+
+go_binary(
+    name = "mnist_cnn_production",
+    srcs = ["mnist_cnn_production.go"],
+    deps = [
+        "//domains/ai/libs/neuro/inference",
+        "//domains/ai/libs/neuro/utils",
+        "//domains/platform/libs/mucks",
+        "//domains/platform/libs/resilience4g/rate_limit",
+    ],
+)
+
+go_binary(
+    name = "mnist_cnn_parallel",
+    srcs = ["mnist_cnn_parallel.go"],
+    deps = [
+        "//domains/ai/libs/neuro/activations",
+        "//domains/ai/libs/neuro/data",
+        "//domains/ai/libs/neuro/inference",
+        "//domains/ai/libs/neuro/layers",
+        "//domains/ai/libs/neuro/network",
+        "//domains/ai/libs/neuro/utils",
+    ],
+)
+
+go_test(
+    name = "mnist_cnn_parallel_test",
+    size = "small",
+    srcs = [
+        "mnist_cnn_parallel.go",
+        "mnist_cnn_parallel_test.go",
+    ],
+    deps = [
+        "//domains/ai/libs/neuro/activations",
+        "//domains/ai/libs/neuro/data",
+        "//domains/ai/libs/neuro/inference",
+        "//domains/ai/libs/neuro/layers",
+        "//domains/ai/libs/neuro/network",
+        "//domains/ai/libs/neuro/utils",
+    ],
+)
+
+go_binary(
+    name = "mnist_cnn_parallel_optimized",
+    srcs = ["mnist_cnn_parallel_optimized.go"],
+    deps = [
+        "//domains/ai/libs/neuro/activations",
+        "//domains/ai/libs/neuro/data",
+        "//domains/ai/libs/neuro/inference",
+        "//domains/ai/libs/neuro/layers",
+        "//domains/ai/libs/neuro/network",
+        "//domains/ai/libs/neuro/utils",
+    ],
+)
+
+go_test(
+    name = "mnist_cnn_parallel_optimized_test",
+    size = "small",
+    srcs = [
+        "mnist_cnn_parallel_optimized.go",
+        "mnist_cnn_parallel_optimized_test.go",
+    ],
+    deps = [
+        "//domains/ai/libs/neuro/activations",
+        "//domains/ai/libs/neuro/data",
+        "//domains/ai/libs/neuro/inference",
+        "//domains/ai/libs/neuro/layers",
+        "//domains/ai/libs/neuro/network",
+        "//domains/ai/libs/neuro/utils",
+    ],
+)
+
+go_binary(
+    name = "mnist_cnn_parallel_fixed",
+    srcs = ["mnist_cnn_parallel_fixed.go"],
+    deps = [
+        "//domains/ai/libs/neuro/activations",
+        "//domains/ai/libs/neuro/data",
+        "//domains/ai/libs/neuro/inference",
+        "//domains/ai/libs/neuro/layers",
+        "//domains/ai/libs/neuro/network",
+        "//domains/ai/libs/neuro/utils",
+    ],
+)

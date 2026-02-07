@@ -1,0 +1,29 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "thoughts",
+    srcs = [
+        "game.go",
+        "thoughts_hub.go",
+    ],
+    importpath = "github.com/muchq/moonbase/domains/games/apis/games_ws_backend/thoughts",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/games/apis/games_ws_backend/hub",
+        "//domains/games/apis/games_ws_backend/players",
+    ],
+)
+
+go_test(
+    name = "thoughts_test",
+    size = "small",
+    srcs = [
+        "game_test.go",
+        "thoughts_hub_test.go",
+    ],
+    embed = [":thoughts"],
+    deps = [
+        "//domains/games/apis/games_ws_backend/hub",
+        "//domains/games/apis/games_ws_backend/players",
+    ],
+)

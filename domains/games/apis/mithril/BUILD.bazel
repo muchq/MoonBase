@@ -1,0 +1,21 @@
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary")
+load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
+
+rust_binary(
+    name = "mithril",
+    srcs = [
+        "src/main.rs",
+    ],
+    crate_name = "mithril",
+    data = [
+        "//domains/games/apis/mithril:data/j4YL7Lh1H2PAgHy_a625LegUoxk94ZOimjzzx0QKI+Y_.graph",
+        "//domains/games/apis/mithril:data/words.txt",
+    ],
+    deps = [
+        "//domains/games/libs/wordchains:wordchains_lib",
+        "//domains/platform/libs/server_pal",
+    ] + all_crate_deps(),
+)
+
+linux_amd64_oci_binary(bin_name = "mithril")
