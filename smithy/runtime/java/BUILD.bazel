@@ -1,0 +1,11 @@
+load("@rules_java//java:defs.bzl", "java_library")
+
+package(default_visibility = ["//visibility:public"])
+
+java_library(
+    name = "smithy-runtime",
+    srcs = glob(["src/main/java/**/*.java"]),
+    deps = [
+        "@maven//:com_google_code_gson_gson",
+    ],
+)

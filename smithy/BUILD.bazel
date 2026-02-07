@@ -1,0 +1,8 @@
+# Smithy Server Generator
+# Generates server code from Smithy models for Java, Go, Rust, and C++
+
+load("@rules_java//java:defs.bzl", "java_binary", "java_library")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["bazel/smithy.bzl"])

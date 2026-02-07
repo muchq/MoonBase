@@ -1,0 +1,30 @@
+load("@rules_java//java:defs.bzl", "java_binary", "java_library", "java_test")
+
+package(default_visibility = ["//visibility:public"])
+
+java_library(
+    name = "smithy-java-generator",
+    srcs = glob(["src/main/java/**/*.java"]),
+    deps = [
+        "//smithy/core:smithy-core",
+        "@maven//:com_google_guava_guava",
+    ],
+)
+
+java_binary(
+    name = "generate",
+    main_class = "com.moonbase.smithy.java.JavaServerGenerator",
+    runtime_deps = [":smithy-java-generator"],
+)
+
+java_test(
+    name = "JavaServerGeneratorTest",
+    srcs = ["src/test/java/com/moonbase/smithy/java/JavaServerGeneratorTest.java"],
+    test_class = "com.moonbase.smithy.java.JavaServerGeneratorTest",
+    deps = [
+        ":smithy-java-generator",
+        "//smithy/core:smithy-core",
+        "@maven//:org_junit_jupiter_junit_jupiter_api",
+        "@maven//:org_junit_jupiter_junit_jupiter_engine",
+    ],
+)
