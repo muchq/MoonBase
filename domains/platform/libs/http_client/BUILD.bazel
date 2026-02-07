@@ -1,0 +1,27 @@
+load("//bazel/rules:java.bzl", "artifact", "java_library")
+
+java_library(
+    name = "core",
+    srcs = [
+        "src/main/java/com/muchq/platform/http_client/core/Header.java",
+        "src/main/java/com/muchq/platform/http_client/core/HttpClient.java",
+        "src/main/java/com/muchq/platform/http_client/core/HttpRequest.java",
+        "src/main/java/com/muchq/platform/http_client/core/HttpResponse.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        artifact("org.jspecify:jspecify"),
+    ],
+)
+
+java_library(
+    name = "jdk11",
+    srcs = [
+        "src/main/java/com/muchq/platform/http_client/jdk/Jdk11HttpClient.java",
+        "src/main/java/com/muchq/platform/http_client/jdk/Jdk11HttpResponse.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":core",
+    ],
+)

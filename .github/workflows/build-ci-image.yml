@@ -5,7 +5,7 @@ on:
     branches: [ main ]
     paths:
       # Only rebuild when these files change
-      - 'Dockerfile.ci'
+      - '.github/docker/Dockerfile.ci'
       - 'scripts/setup/setup-linux'
       - '.github/workflows/build-ci-image.yml'
   workflow_dispatch: # Allow manual trigger
@@ -49,7 +49,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile.ci
+          file: .github/docker/Dockerfile.ci
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -1,0 +1,246 @@
+load("//bazel/rules:java.bzl", "artifact", "java_binary", "java_library", "java_test_suite")
+load("//bazel/rules:oci.bzl", "linux_oci_java")
+
+java_library(
+    name = "model",
+    srcs = [
+        "src/main/java/com/muchq/games/one_d4/engine/model/GameFeatures.java",
+        "src/main/java/com/muchq/games/one_d4/engine/model/Motif.java",
+        "src/main/java/com/muchq/games/one_d4/engine/model/ParsedGame.java",
+        "src/main/java/com/muchq/games/one_d4/engine/model/PositionContext.java",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+java_library(
+    name = "motifs",
+    srcs = [
+        "src/main/java/com/muchq/games/one_d4/motifs/CrossPinDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/DiscoveredAttackDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/ForkDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/MotifDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/PinDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/SkewerDetector.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":model",
+        artifact("io.github.tors42:chariot"),
+    ],
+)
+
+java_library(
+    name = "engine",
+    srcs = [
+        "src/main/java/com/muchq/games/one_d4/engine/FeatureExtractor.java",
+        "src/main/java/com/muchq/games/one_d4/engine/GameReplayer.java",
+        "src/main/java/com/muchq/games/one_d4/engine/PgnParser.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":model",
+        ":motifs",
+        artifact("io.github.tors42:chariot"),
+        artifact("org.slf4j:slf4j-api"),
+    ],
+)
+
+java_library(
+    name = "queue",
+    srcs = [
+        "src/main/java/com/muchq/games/one_d4/queue/InMemoryIndexQueue.java",
+        "src/main/java/com/muchq/games/one_d4/queue/IndexMessage.java",
+        "src/main/java/com/muchq/games/one_d4/queue/IndexQueue.java",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+java_library(
+    name = "db",
+    srcs = [
+        "src/main/java/com/muchq/games/one_d4/db/DataSourceFactory.java",
+        "src/main/java/com/muchq/games/one_d4/db/GameFeatureDao.java",
+        "src/main/java/com/muchq/games/one_d4/db/GameFeatureStore.java",
+        "src/main/java/com/muchq/games/one_d4/db/IndexingRequestDao.java",
+        "src/main/java/com/muchq/games/one_d4/db/IndexingRequestStore.java",
+        "src/main/java/com/muchq/games/one_d4/db/Migration.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":dto",
+        "//domains/games/libs/chessql:compiler",
+        artifact("org.jspecify:jspecify"),
+        artifact("com.h2database:h2"),
+        artifact("com.zaxxer:HikariCP"),
+        artifact("org.slf4j:slf4j-api"),
+    ],
+)
+
+java_library(
+    name = "worker",
+    srcs = [
+        "src/main/java/com/muchq/games/one_d4/worker/IndexWorker.java",
+        "src/main/java/com/muchq/games/one_d4/worker/IndexWorkerLifecycle.java",
+        "src/main/java/com/muchq/games/one_d4/worker/ResultMapper.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":db",
+        ":dto",
+        ":engine",
+        ":model",
+        ":queue",
+        "//domains/games/libs/chess_com_client",
+        artifact("com.fasterxml.jackson.core:jackson-core"),
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("io.micronaut:micronaut-context"),
+        artifact("io.micronaut:micronaut-http-server-netty"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("io.micronaut:micronaut-runtime"),
+        artifact("org.slf4j:slf4j-api"),
+    ],
+)
+
+java_library(
+    name = "dto",
+    srcs = [
+        "src/main/java/com/muchq/games/one_d4/api/dto/GameFeature.java",
+        "src/main/java/com/muchq/games/one_d4/api/dto/GameFeatureRow.java",
+        "src/main/java/com/muchq/games/one_d4/api/dto/IndexRequest.java",
+        "src/main/java/com/muchq/games/one_d4/api/dto/IndexResponse.java",
+        "src/main/java/com/muchq/games/one_d4/api/dto/QueryRequest.java",
+        "src/main/java/com/muchq/games/one_d4/api/dto/QueryResponse.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        artifact("org.jspecify:jspecify"),
+    ],
+)
+
+java_library(
+    name = "api",
+    srcs = [
+        "src/main/java/com/muchq/games/one_d4/api/IndexController.java",
+        "src/main/java/com/muchq/games/one_d4/api/QueryController.java",
+    ],
+    plugins = [
+        "//bazel/rules:micronaut_type_element_visitor_processor",
+        "//bazel/rules:micronaut_aggregating_type_element_visitor_processor",
+        "//bazel/rules:micronaut_bean_definition_inject_processor",
+        "//bazel/rules:micronaut_package_element_visitor_processor",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":dto",
+        "//domains/games/apis/one_d4:db",
+        "//domains/games/apis/one_d4:queue",
+        "//domains/games/libs/chessql:ast",
+        "//domains/games/libs/chessql:compiler",
+        "//domains/games/libs/chessql:parser",
+        artifact("io.micronaut.jaxrs:micronaut-jaxrs-server"),
+        artifact("jakarta.inject:jakarta-inject-api"),
+        artifact("jakarta.ws.rs:jakarta-ws.rs-api"),
+        artifact("org.slf4j:slf4j-api"),
+    ],
+)
+
+java_binary(
+    name = "one_d4",
+    srcs = [
+        "src/main/java/com/muchq/games/one_d4/App.java",
+        "src/main/java/com/muchq/games/one_d4/IndexerModule.java",
+    ],
+    main_class = "com.muchq.games.one_d4.App",
+    plugins = [
+        "//bazel/rules:micronaut_type_element_visitor_processor",
+        "//bazel/rules:micronaut_aggregating_type_element_visitor_processor",
+        "//bazel/rules:micronaut_bean_definition_inject_processor",
+        "//bazel/rules:micronaut_package_element_visitor_processor",
+    ],
+    resources = ["//domains/platform/resources:micronaut_config"],
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        artifact("ch.qos.logback:logback-classic"),
+        artifact("org.postgresql:postgresql"),
+    ],
+    deps = [
+        ":api",
+        ":db",
+        ":dto",
+        ":engine",
+        ":model",
+        ":motifs",
+        ":queue",
+        ":worker",
+        "//domains/games/libs/chess_com_client",
+        "//domains/games/libs/chessql:compiler",
+        "//domains/platform/libs/http_client:core",
+        "//domains/platform/libs/http_client:jdk11",
+        "//domains/platform/libs/json",
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("com.zaxxer:HikariCP"),
+        artifact("io.micronaut.jaxrs:micronaut-jaxrs-server"),
+        artifact("io.micronaut:micronaut-context"),
+        artifact("io.micronaut:micronaut-http-server-netty"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("io.micronaut:micronaut-jackson-databind"),
+        artifact("io.micronaut:micronaut-runtime"),
+        artifact("jakarta.inject:jakarta-inject-api"),
+        artifact("org.slf4j:slf4j-api"),
+    ],
+)
+
+linux_oci_java(bin_name = "one_d4")
+
+java_test_suite(
+    name = "engine_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/engine/GameReplayerTest.java",
+        "src/test/java/com/muchq/games/one_d4/engine/PgnParserTest.java",
+    ],
+    deps = [
+        ":engine",
+        ":model",
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_test_suite(
+    name = "motifs_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/motifs/ForkDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/PinDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/SkewerDetectorTest.java",
+    ],
+    deps = [
+        ":model",
+        ":motifs",
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_test_suite(
+    name = "queue_tests",
+    size = "small",
+    srcs = ["src/test/java/com/muchq/games/one_d4/queue/InMemoryIndexQueueTest.java"],
+    deps = [
+        ":queue",
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_test_suite(
+    name = "worker_tests",
+    size = "small",
+    srcs = ["src/test/java/com/muchq/games/one_d4/worker/ResultMapperTest.java"],
+    deps = [
+        ":worker",
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)

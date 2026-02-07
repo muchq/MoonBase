@@ -1,0 +1,21 @@
+load("//bazel/rules:java.bzl", "artifact", "java_binary")
+
+java_binary(
+    name = "chess_demo",
+    srcs = ["src/main/java/com/muchq/games/chess_demo/Demo.java"],
+    main_class = "com.muchq.games.chess_demo.Demo",
+    resources = ["//domains/platform/resources:micronaut_config"],
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        artifact("ch.qos.logback:logback-classic"),
+    ],
+    deps = [
+        "//domains/games/libs/chess_com_client",
+        "//domains/platform/libs/http_client:core",
+        "//domains/platform/libs/http_client:jdk11",
+        "//domains/platform/libs/json",
+        artifact("com.fasterxml.jackson.core:jackson-core"),
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("org.slf4j:slf4j-api"),
+    ],
+)

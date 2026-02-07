@@ -1,0 +1,28 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+cc_library(
+    name = "doc_db_client",
+    srcs = ["doc_db_client.cc"],
+    hdrs = ["doc_db_client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/platform/libs/futility/status",
+        "//domains/platform/protos/doc_db:doc_db_cc_grpc",
+        "//domains/platform/protos/doc_db:doc_db_cc_proto",
+        "@com_github_grpc_grpc//:grpc++",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_test(
+    name = "unit_test",
+    size = "small",
+    srcs = ["doc_db_client_test.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "doc_db_client",
+        "//domains/platform/protos/doc_db:doc_db_cc_grpc",
+        "//domains/platform/protos/doc_db:doc_db_cc_proto",
+        "@googletest//:gtest_main",
+    ],
+)

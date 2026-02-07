@@ -1,0 +1,15 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "players",
+    srcs = ["players.go"],
+    importpath = "github.com/muchq/moonbase/domains/games/apis/games_ws_backend/players",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "players_test",
+    size = "small",
+    srcs = ["players_test.go"],
+    embed = [":players"],
+)

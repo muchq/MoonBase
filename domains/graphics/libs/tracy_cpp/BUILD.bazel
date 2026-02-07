@@ -1,0 +1,19 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+cc_library(
+    name = "tracy",
+    srcs = ["tracy.cc"],
+    hdrs = ["tracy.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//domains/graphics/libs/image_core"],
+)
+
+cc_test(
+    name = "tracy_test",
+    size = "small",
+    srcs = ["tracy_test.cc"],
+    deps = [
+        ":tracy",
+        "@googletest//:gtest_main",
+    ],
+)

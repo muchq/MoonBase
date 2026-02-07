@@ -1,0 +1,15 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_binary(
+    name = "images",
+    embed = [":images_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_library(
+    name = "images_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/muchq/moonbase/domains/graphics/libs/imagine_go",
+    visibility = ["//visibility:private"],
+    deps = ["//domains/graphics/libs/imagine_go/lib"],
+)

@@ -1,0 +1,16 @@
+load("//bazel/rules:java.bzl", "artifact", "java_library")
+
+java_library(
+    name = "lib",
+    srcs = glob(["src/main/java/com/muchq/chat/yochat/lib/*.java"]),
+    visibility = ["//visibility:public"],
+    deps = [
+        artifact("io.netty:netty-buffer"),
+        artifact("io.netty:netty-codec-base"),
+        artifact("io.netty:netty-common"),
+        artifact("io.netty:netty-handler"),
+        artifact("io.netty:netty-transport"),
+        artifact("org.jspecify:jspecify"),
+        artifact("org.slf4j:slf4j-api"),
+    ],
+)

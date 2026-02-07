@@ -1,0 +1,74 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
+
+cc_library(
+    name = "types",
+    srcs = ["types.cc"],
+    hdrs = ["types.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/graphics/libs/tracy_cpp:tracy",
+        "@com_google_absl//absl/hash",
+        "@com_google_absl//absl/status",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_test(
+    name = "types_test",
+    size = "small",
+    srcs = ["types_test.cc"],
+    deps = [
+        ":types",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_library(
+    name = "tracer_service",
+    srcs = ["tracer_service.cc"],
+    hdrs = ["tracer_service.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":types",
+        "//domains/graphics/libs/image_core",
+        "//domains/graphics/libs/png_plusplus",
+        "//domains/graphics/libs/tracy_cpp:tracy",
+        "//domains/platform/libs/futility/base64",
+        "//domains/platform/libs/futility/cache",
+        "//domains/platform/libs/futility/otel:metrics",
+        "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_test(
+    name = "tracer_service_test",
+    size = "small",
+    srcs = ["tracer_service_test.cc"],
+    deps = [
+        ":tracer_service",
+        ":types",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_binary(
+    name = "portrait",
+    srcs = ["Main.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":tracer_service",
+        ":types",
+        "//domains/platform/libs/futility/otel:otel_provider",
+        "//domains/platform/libs/meerkat",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:globals",
+        "@com_google_absl//absl/log:initialize",
+    ],
+)
+
+linux_amd64_oci_binary(bin_name = "portrait")
