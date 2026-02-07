@@ -1,0 +1,19 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+
+cc_library(
+    name = "color",
+    srcs = ["color.cc"],
+    hdrs = ["color.h"],
+    deps = [],
+)
+
+cc_binary(
+    name = "mandelbrot",
+    srcs = ["mandelbrot.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":color",
+        "//domains/graphics/libs/trill",
+        "@sdl3",
+    ],
+)

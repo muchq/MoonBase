@@ -1,0 +1,27 @@
+load("//bazel/rules:java.bzl", "java_library")
+
+java_library(
+    name = "cards_java",
+    srcs = [
+        "src/main/java/com/muchq/games/cards/Card.java",
+        "src/main/java/com/muchq/games/cards/Deck.java",
+        "src/main/java/com/muchq/games/cards/Rank.java",
+        "src/main/java/com/muchq/games/cards/Suit.java",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+java_library(
+    name = "castle",
+    srcs = [
+        "src/main/java/com/muchq/games/cards/castle/GameState.java",
+        "src/main/java/com/muchq/games/cards/castle/Player.java",
+        "src/main/java/com/muchq/games/cards/castle/ThreeDown.java",
+        "src/main/java/com/muchq/games/cards/castle/ThreeUp.java",
+        "src/main/java/com/muchq/games/cards/castle/Turn.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cards_java",
+    ],
+)

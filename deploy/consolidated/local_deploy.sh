@@ -18,20 +18,18 @@ mkdir -p local_docker
 echo "Copying deployment files..."
 cp deploy/consolidated/compose.yaml local_docker/
 cp deploy/consolidated/Caddyfile local_docker/
+cp deploy/consolidated/docker-compose.observability.yml local_docker/
 
-# Copy observability compose file from root
-echo "Copying observability compose file..."
-cp docker-compose.observability.yml local_docker/
+# Copy r3dr static assets
+echo "Copying r3dr static assets..."
+mkdir -p local_docker/r3dr-assets
+cp -r domains/r3dr/apps/r3dr_web/* local_docker/r3dr-assets/
 
 # Create observability directory structure and copy configs
 echo "Setting up observability configs..."
 mkdir -p local_docker/o11y
+cp -r deploy/consolidated/o11y/* local_docker/o11y/
 
-# Copy observability configs if they exist
-if [ -d "o11y" ]; then
-  echo "Copying observability configuration files..."
-  cp -r o11y/* local_docker/o11y/
-fi
 
 # Copy .env file if it exists
 if [ -f ".env" ]; then

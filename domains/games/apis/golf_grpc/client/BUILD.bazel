@@ -1,0 +1,29 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+cc_library(
+    name = "golf_grpc_client",
+    srcs = ["golf_grpc_client.cc"],
+    hdrs = ["golf_grpc_client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/games/protos/golf_grpc:golf_grpc_cc_grpc",
+        "//domains/games/protos/golf_grpc:golf_grpc_cc_proto",
+        "//domains/platform/libs/futility/status",
+        "@com_github_grpc_grpc//:grpc++",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_test(
+    name = "golf_grpc_client_test",
+    size = "small",
+    srcs = ["golf_grpc_client_test.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":golf_grpc_client",
+        "//domains/games/protos/golf_grpc:golf_grpc_cc_grpc",
+        "//domains/games/protos/golf_grpc:golf_grpc_cc_proto",
+        "@googletest//:gtest_main",
+    ],
+)

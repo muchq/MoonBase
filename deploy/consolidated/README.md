@@ -5,14 +5,15 @@ This directory contains the consolidated deployment configuration for multiple s
 ## Services Deployed
 
 - **api.muchq.com** - API backend services
-  - [`games_ws_backend`](../../go/games_ws_backend) (port 8080)
-  - [`portrait`](../../cpp/portrait) (port 8081)
-  - [`prom_proxy`](../../go/prom_proxy) (port 8082)
-  - [`mithril`](../../rust/mithril) (port 8083)
-  - [`posterize`](../../rust/posterize) (port 8084)
+  - [`games_ws_backend`](../../domains/games/apis/games_ws_backend) (port 8080)
+  - [`portrait`](../../domains/graphics/apis/portrait) (port 8081)
+  - [`prom_proxy`](../../domains/platform/apis/prom_proxy) (port 8082)
+  - [`mithril`](../../domains/games/apis/mithril) (port 8083)
+  - [`posterize`](../../domains/graphics/apis/posterize) (port 8084)
+  - [`mcpserver`](../../domains/games/apis/mcpserver) (port 8086)
 
 - **r3dr.net** - URL shortener service
-  - [`r3dr`](../../go/r3dr) (port 8085)
+  - [`r3dr`](../../domains/r3dr/apis/r3dr) (port 8085)
   - Static assets served from `/var/www/r3dr`
 
 - **Observability Stack**
@@ -28,7 +29,7 @@ This directory contains the consolidated deployment configuration for multiple s
 
 - `compose.yaml` - Main Docker Compose configuration for application services
 - `Caddyfile` - Caddy reverse proxy configuration
-- `docker-compose.observability.yml` - Observability stack configuration (copied from root)
+- `docker-compose.observability.yml` - Observability stack configuration
 - `deploy.sh` - Deployment script
 - `initialize_host.sh` - Script to set up a fresh host
 
@@ -77,6 +78,7 @@ Services require configuration files in their respective `/etc` directories on t
 - `/etc/prom_proxy/` - Prometheus proxy configuration
 - `/etc/mithril/` - Mithril service configuration
 - `/etc/posterize/` - Posterize service configuration
+- `/etc/mcpserver/` - MCP server configuration
 
 ## Network
 

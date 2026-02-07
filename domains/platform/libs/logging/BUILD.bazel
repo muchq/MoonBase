@@ -1,0 +1,11 @@
+load("//bazel/rules:java.bzl", "artifact", "java_library")
+
+java_library(
+    name = "logging",
+    resources = ["//domains/platform/resources:logback_config"],
+    runtime_deps = [
+        artifact("ch.qos.logback:logback-classic"),
+        artifact("io.sentry:sentry-logback"),
+        artifact("org.slf4j:slf4j-api"),
+    ],
+)

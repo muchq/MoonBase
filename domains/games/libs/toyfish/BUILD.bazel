@@ -1,0 +1,29 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_binary(
+    name = "main",
+    srcs = ["main.go"],
+    importpath = "github.com/muchq/moonbase/domains/games/libs/toyfish",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":types",
+        "//domains/games/libs/toyfish/settings",
+    ],
+)
+
+go_library(
+    name = "types",
+    srcs = ["types.go"],
+    importpath = "github.com/muchq/moonbase/domains/games/libs/toyfish",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/games/libs/toyfish/settings",
+    ],
+)
+
+go_test(
+    name = "types_test",
+    size = "small",
+    srcs = ["types_test.go"],
+    embed = [":types"],
+)

@@ -1,0 +1,18 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "lib",
+    srcs = [
+        "images.go",
+    ],
+    importpath = "github.com/muchq/moonbase/domains/graphics/libs/imagine_go/lib",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "images_test",
+    size = "small",
+    srcs = ["images_test.go"],
+    data = ["//domains/graphics/data:marbles"],
+    embed = [":lib"],
+)

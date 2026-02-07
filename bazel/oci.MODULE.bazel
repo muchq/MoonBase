@@ -14,12 +14,12 @@ oci.pull(
 )
 oci.pull(
     name = "java_base",
+    digest = "sha256:491b07ff956a81ee716c17c1aee5c5581915ba0fc6e354135af8520b66e11760",
     image = "docker.io/azul/zulu-openjdk",
     platforms = [
         "linux/amd64",
         "linux/arm64/v8",
     ],
-    tag = "25-jre",
 )
 oci.pull(
     name = "distroless_base",

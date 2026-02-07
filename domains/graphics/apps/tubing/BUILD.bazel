@@ -1,0 +1,11 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+cc_binary(
+    name = "tubing",
+    srcs = ["tubing.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/graphics/libs/trill",
+        "@sdl3",
+    ],
+)
