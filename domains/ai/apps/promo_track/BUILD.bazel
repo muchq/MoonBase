@@ -1,0 +1,56 @@
+load("@crates//:defs.bzl", "all_crate_deps", "crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+
+rust_library(
+    name = "promo_track_lib",
+    srcs = [
+        "src/agent/commands.rs",
+        "src/agent/mod.rs",
+        "src/archetype/mod.rs",
+        "src/evidence/card.rs",
+        "src/evidence/mod.rs",
+        "src/evidence/store.rs",
+        "src/integrations/gdocs.rs",
+        "src/integrations/github.rs",
+        "src/integrations/jira.rs",
+        "src/integrations/mod.rs",
+        "src/integrations/slack.rs",
+        "src/lib.rs",
+        "src/llm/context.rs",
+        "src/llm/mod.rs",
+        "src/output/mod.rs",
+        "src/output/packet.rs",
+        "src/output/status.rs",
+        "src/readiness/mod.rs",
+        "src/rubric/default.rs",
+        "src/rubric/mod.rs",
+    ],
+    crate_name = "promo_track",
+    visibility = ["//visibility:public"],
+    deps = crate_deps([
+        "chrono",
+        "dirs",
+        "genai",
+        "serde",
+        "serde_json",
+        "serde_yaml",
+        "tracing",
+        "uuid",
+    ]),
+)
+
+rust_binary(
+    name = "stafftrack",
+    srcs = [
+        "src/cli.rs",
+        "src/main.rs",
+    ],
+    crate_name = "stafftrack",
+    deps = all_crate_deps() + [":promo_track_lib"],
+)
+
+rust_test(
+    name = "test_promo_track",
+    size = "small",
+    crate = ":stafftrack",
+)
