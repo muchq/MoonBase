@@ -14,7 +14,7 @@ pub struct SlackConnector {
 impl SlackConnector {
     pub fn new() -> Self {
         Self {
-            token: std::env::var("STAFFTRACK_SLACK_TOKEN").ok(),
+            token: std::env::var("IMPACT_MCP_SLACK_TOKEN").ok(),
         }
     }
 }
@@ -32,7 +32,7 @@ impl Connector for SlackConnector {
         Box::pin(async move {
             if !self.is_configured() {
                 return Err(ConnectorError::NotConfigured(
-                    "Set STAFFTRACK_SLACK_TOKEN to enable Slack integration".into(),
+                    "Set IMPACT_MCP_SLACK_TOKEN to enable Slack integration".into(),
                 ));
             }
 

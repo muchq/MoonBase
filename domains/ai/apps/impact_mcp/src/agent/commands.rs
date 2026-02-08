@@ -28,10 +28,10 @@ impl CommandHandler {
         if normalized.contains("archetype") && normalized.contains("lean into") {
             return Some(self.suggest_archetype(agent));
         }
-        if normalized.contains("missing") && normalized.contains("staff") {
+        if normalized.contains("missing") || (normalized.contains("improve") && normalized.contains("impact")) {
             return Some(self.show_gaps(agent));
         }
-        if normalized.contains("promotion packet") || normalized.contains("update my") {
+        if normalized.contains("promotion packet") || normalized.contains("impact narrative") || normalized.contains("update my") {
             return Some(self.update_packet(agent));
         }
         if normalized.contains("weekly status") || normalized.contains("status update") {
@@ -64,7 +64,7 @@ impl CommandHandler {
             "Your rubric is stored as a YAML file. Edit it directly or use the CLI:\n\n\
              Current rubric: {} (v{})\n\
              Dimensions: {}\n\n\
-             To customize, modify your rubric.yaml and reload with `stafftrack rubric load`.",
+             To customize, modify your rubric.yaml and reload with `impact-mcp rubric load`.",
             agent.rubric.name,
             agent.rubric.version,
             agent
@@ -171,19 +171,19 @@ impl CommandHandler {
         }
 
         out.push_str(&format!(
-            "\n{} gap(s) identified. Ask \"what am I missing for Staff?\" for details.",
+            "\n{} gap(s) identified. Ask \"what am I missing?\" for details.",
             readiness.gaps.len()
         ));
         out
     }
 
     fn help(&self) -> String {
-        "StaffTrack — available commands:\n\n\
+        "impact-mcp — available commands:\n\n\
          \x20 \"What rubric am I using?\"\n\
          \x20 \"Edit my rubric\"\n\
          \x20 \"What Staff archetypes am I currently showing?\"\n\
-         \x20 \"Which archetype should I lean into for promotion?\"\n\
-         \x20 \"What am I missing for Staff?\"\n\
+         \x20 \"Which archetype should I lean into?\"\n\
+         \x20 \"What am I missing?\"\n\
          \x20 \"Update my promotion packet\"\n\
          \x20 \"Draft my weekly status update\"\n\
          \x20 \"Explain my readiness score\"\n\

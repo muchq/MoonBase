@@ -8,9 +8,9 @@ use crate::llm::{self, LlmClient};
 use crate::readiness::ReadinessMap;
 use crate::rubric::Rubric;
 
-/// The StaffTrack agent — an interactive, chat-based assistant that
+/// The impact-mcp agent — an interactive, chat-based assistant that
 /// reasons over the local evidence store and rubric to help the user
-/// understand and improve their promotion readiness.
+/// amplify their impact and understand growth opportunities.
 ///
 /// Known commands are handled deterministically (fast path). Freeform
 /// questions fall through to the LLM, which is grounded in a system

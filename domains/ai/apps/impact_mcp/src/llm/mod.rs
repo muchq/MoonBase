@@ -5,12 +5,12 @@ pub use context::build_system_prompt;
 use genai::chat::{ChatMessage, ChatRequest};
 use genai::Client;
 
-/// Default model used when `STAFFTRACK_MODEL` is not set.
+/// Default model used when `IMPACT_MCP_MODEL` is not set.
 /// The genai crate routes model names to the correct provider automatically
 /// (e.g. "claude-*" -> Anthropic, "gpt-*" -> OpenAI, "gemini-*" -> Gemini).
 const DEFAULT_MODEL: &str = "claude-sonnet-4-5-20250929";
 
-/// Thin wrapper around genai providing StaffTrack-specific defaults.
+/// Thin wrapper around genai providing impact-mcp-specific defaults.
 pub struct LlmClient {
     client: Client,
     model: String,
@@ -20,12 +20,12 @@ pub struct LlmClient {
 impl LlmClient {
     /// Create a new client.
     ///
-    /// The model is resolved from `STAFFTRACK_MODEL` env var, falling back
+    /// The model is resolved from `IMPACT_MCP_MODEL` env var, falling back
     /// to Claude Sonnet. The provider API key is resolved by genai from
     /// standard env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.).
     pub fn new(system_prompt: String) -> Self {
         let model =
-            std::env::var("STAFFTRACK_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+            std::env::var("IMPACT_MCP_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
         Self {
             client: Client::default(),
             model,

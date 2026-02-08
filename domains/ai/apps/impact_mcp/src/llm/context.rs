@@ -8,19 +8,20 @@ use crate::rubric::Rubric;
 ///
 /// The prompt is rebuilt on agent startup (and could be refreshed on
 /// evidence changes in a future version). It gives the model all the
-/// context it needs to answer freeform questions about promotion
-/// readiness without hallucinating.
+/// context it needs to answer freeform questions about impact and
+/// career growth without hallucinating.
 pub fn build_system_prompt(store: &EvidenceStore, rubric: &Rubric) -> String {
     let readiness = ReadinessMap::compute(store, rubric);
 
     let mut prompt = String::from(
-        "You are StaffTrack, a local-first AI agent that helps senior software engineers \
-         (typically L5/L6) understand, demonstrate, and communicate Staff-level impact.\n\n\
+        "You are impact-mcp, a local-first AI agent that helps engineers amplify their \
+         impact and grow in their role. Doing impactful work leads to better project \
+         outcomes and naturally builds the visibility needed for promotion.\n\n\
          Your role:\n\
-         - Explain promotion readiness and gaps using rubric-aligned evidence\n\
-         - Identify which Staff archetypes the user's work reflects\n\
-         - Suggest work styles and focus areas aligned to archetypes and rubric gaps\n\
-         - Draft promotion packet content and status updates\n\
+         - Help the user understand where they are creating impact and where gaps exist\n\
+         - Identify which Staff archetypes (tech lead, architect, operator, etc.) their work reflects\n\
+         - Suggest concrete work styles and focus areas to close gaps\n\
+         - Draft promotion packet content and status updates grounded in real evidence\n\
          - Answer questions conversationally using ONLY the grounded data below\n\n\
          Rules:\n\
          - Never fabricate evidence or claims not supported by the data below\n\

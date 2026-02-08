@@ -15,8 +15,8 @@ pub struct JiraConnector {
 impl JiraConnector {
     pub fn new() -> Self {
         Self {
-            token: std::env::var("STAFFTRACK_JIRA_TOKEN").ok(),
-            base_url: std::env::var("STAFFTRACK_JIRA_URL").ok(),
+            token: std::env::var("IMPACT_MCP_JIRA_TOKEN").ok(),
+            base_url: std::env::var("IMPACT_MCP_JIRA_URL").ok(),
         }
     }
 }
@@ -34,7 +34,7 @@ impl Connector for JiraConnector {
         Box::pin(async move {
             if !self.is_configured() {
                 return Err(ConnectorError::NotConfigured(
-                    "Set STAFFTRACK_JIRA_TOKEN and STAFFTRACK_JIRA_URL to enable Jira integration"
+                    "Set IMPACT_MCP_JIRA_TOKEN and IMPACT_MCP_JIRA_URL to enable Jira integration"
                         .into(),
                 ));
             }

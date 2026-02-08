@@ -6,11 +6,11 @@ use std::process;
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
-use promo_track::agent::Agent;
-use promo_track::archetype::Archetype;
-use promo_track::evidence::{EvidenceCard, EvidenceSource, EvidenceStore};
-use promo_track::integrations::Connector;
-use promo_track::rubric::{self, Rubric};
+use impact_mcp::agent::Agent;
+use impact_mcp::archetype::Archetype;
+use impact_mcp::evidence::{EvidenceCard, EvidenceSource, EvidenceStore};
+use impact_mcp::integrations::Connector;
+use impact_mcp::rubric::{self, Rubric};
 
 use crate::cli::{Cli, Command};
 
@@ -43,7 +43,7 @@ async fn main() {
 fn default_data_dir() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("stafftrack")
+        .join("impact-mcp")
 }
 
 fn load_rubric(data_dir: &PathBuf) -> Rubric {
@@ -74,7 +74,7 @@ fn build_agent(data_dir: &PathBuf) -> Agent {
 async fn run_chat(data_dir: &PathBuf) {
     let agent = build_agent(data_dir);
 
-    println!("StaffTrack v{}", env!("CARGO_PKG_VERSION"));
+    println!("impact-mcp v{}", env!("CARGO_PKG_VERSION"));
     if let Some(model) = agent.model_name() {
         println!("LLM: {model}");
     } else {
@@ -88,7 +88,7 @@ async fn run_chat(data_dir: &PathBuf) {
     });
 
     loop {
-        match rl.readline("stafftrack> ") {
+        match rl.readline("impact-mcp> ") {
             Ok(line) => {
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
@@ -140,7 +140,7 @@ fn run_archetypes() {
     }
     println!(
         "\nArchetypes are advisory and combinable. Select yours with \
-         `stafftrack chat` and ask \"which archetype should I lean into?\""
+         `impact-mcp chat` and ask \"which archetype should I lean into?\""
     );
 }
 
@@ -195,7 +195,7 @@ fn run_evidence(data_dir: &PathBuf, sub: cli::EvidenceCommand) {
             });
             let cards = store.all();
             if cards.is_empty() {
-                println!("No evidence cards yet. Use `stafftrack evidence add` or `stafftrack pull`.");
+                println!("No evidence cards yet. Use `impact-mcp evidence add` or `impact-mcp pull`.");
                 return;
             }
             println!("{} evidence card(s):\n", cards.len());
@@ -263,7 +263,7 @@ fn run_evidence(data_dir: &PathBuf, sub: cli::EvidenceCommand) {
 }
 
 async fn run_pull(data_dir: &PathBuf) {
-    use promo_track::integrations::{
+    use impact_mcp::integrations::{
         gdocs::GdocsConnector, github::GithubConnector, jira::JiraConnector,
         slack::SlackConnector,
     };

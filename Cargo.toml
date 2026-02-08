@@ -2,7 +2,7 @@
 resolver = "2"
 
 members = [
-    "domains/ai/apps/promo_track",
+    "domains/ai/apps/impact_mcp",
     "domains/platform/apis/doc_db",
     "domains/graphics/libs/imagine_rust",
     "domains/games/apis/mithril",

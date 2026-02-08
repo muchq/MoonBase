@@ -1470,6 +1470,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "impact_mcp"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "dirs",
+ "genai",
+ "rmcp",
+ "rustyline",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2147,25 +2166,6 @@ dependencies = [
  "tokio",
  "tracing",
  "windows",
-]
-
-[[package]]
-name = "promo_track"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "dirs",
- "genai",
- "rmcp",
- "rustyline",
- "serde",
- "serde_json",
- "serde_yaml",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]

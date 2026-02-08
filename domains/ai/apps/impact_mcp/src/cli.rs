@@ -4,16 +4,16 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    name = "stafftrack",
-    about = "StaffTrack — make Staff-level impact visible, actionable, and promotable",
+    name = "impact-mcp",
+    about = "impact-mcp — amplify your impact and make it visible",
     version,
-    long_about = "A local-first AI agent that helps senior engineers capture Staff-level \
-                   impact from everyday work artifacts, understand promotion expectations, \
-                   maintain a promotion packet, and draft high-quality status updates."
+    long_about = "A local-first AI agent that helps engineers capture evidence of impact, \
+                   understand role expectations, close gaps, and communicate contributions \
+                   clearly — for better project results and growth in your career."
 )]
 pub struct Cli {
-    /// Path to the StaffTrack data directory.
-    #[arg(long, env = "STAFFTRACK_DATA_DIR")]
+    /// Path to the impact-mcp data directory.
+    #[arg(long, env = "IMPACT_MCP_DATA_DIR")]
     pub data_dir: Option<PathBuf>,
 
     #[command(subcommand)]
@@ -22,19 +22,19 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Start an interactive chat session with the StaffTrack agent.
+    /// Start an interactive chat session with the impact-mcp agent.
     Chat,
 
     /// Draft a weekly status update from recent evidence.
     Status,
 
-    /// Generate or update your promotion packet draft.
+    /// Generate or update your impact narrative draft.
     Packet,
 
-    /// Show your current readiness score and dimension breakdown.
+    /// Show your current impact readiness score and dimension breakdown.
     Readiness,
 
-    /// List the supported Staff archetypes.
+    /// List the supported impact archetypes.
     Archetypes,
 
     /// Manage your role rubric.

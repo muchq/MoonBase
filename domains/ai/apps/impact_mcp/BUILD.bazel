@@ -2,7 +2,7 @@ load("@crates//:defs.bzl", "all_crate_deps", "crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
 
 rust_library(
-    name = "promo_track_lib",
+    name = "impact_mcp_lib",
     srcs = [
         "src/agent/commands.rs",
         "src/agent/mod.rs",
@@ -18,6 +18,7 @@ rust_library(
         "src/lib.rs",
         "src/llm/context.rs",
         "src/llm/mod.rs",
+        "src/mcp/mod.rs",
         "src/output/mod.rs",
         "src/output/packet.rs",
         "src/output/status.rs",
@@ -25,32 +26,34 @@ rust_library(
         "src/rubric/default.rs",
         "src/rubric/mod.rs",
     ],
-    crate_name = "promo_track",
+    crate_name = "impact_mcp",
     visibility = ["//visibility:public"],
     deps = crate_deps([
         "chrono",
         "dirs",
         "genai",
+        "rmcp",
         "serde",
         "serde_json",
         "serde_yaml",
+        "tokio",
         "tracing",
         "uuid",
     ]),
 )
 
 rust_binary(
-    name = "stafftrack",
+    name = "impact-mcp",
     srcs = [
         "src/cli.rs",
         "src/main.rs",
     ],
-    crate_name = "stafftrack",
-    deps = all_crate_deps() + [":promo_track_lib"],
+    crate_name = "impact_mcp_bin",
+    deps = all_crate_deps() + [":impact_mcp_lib"],
 )
 
 rust_test(
-    name = "test_promo_track",
+    name = "test_impact_mcp",
     size = "small",
-    crate = ":stafftrack",
+    crate = ":impact-mcp",
 )

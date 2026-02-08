@@ -13,7 +13,7 @@ pub struct GithubConnector {
 impl GithubConnector {
     pub fn new() -> Self {
         Self {
-            token: std::env::var("STAFFTRACK_GITHUB_TOKEN").ok(),
+            token: std::env::var("IMPACT_MCP_GITHUB_TOKEN").ok(),
         }
     }
 }
@@ -31,7 +31,7 @@ impl Connector for GithubConnector {
         Box::pin(async move {
             if !self.is_configured() {
                 return Err(ConnectorError::NotConfigured(
-                    "Set STAFFTRACK_GITHUB_TOKEN to enable GitHub integration".into(),
+                    "Set IMPACT_MCP_GITHUB_TOKEN to enable GitHub integration".into(),
                 ));
             }
 

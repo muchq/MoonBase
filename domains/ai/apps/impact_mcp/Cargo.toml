@@ -1,13 +1,13 @@
 [package]
-name = "promo_track"
+name = "impact_mcp"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 readme.workspace = true
-description = "StaffTrack — a local-first agent helping senior engineers demonstrate and communicate Staff-level impact"
+description = "impact-mcp — a local-first AI agent helping engineers amplify impact and grow in their role"
 
 [[bin]]
-name = "stafftrack"
+name = "impact-mcp"
 path = "src/main.rs"
 
 [dependencies]

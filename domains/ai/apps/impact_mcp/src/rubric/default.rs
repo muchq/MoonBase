@@ -4,8 +4,8 @@ use super::{Rubric, RubricDimension};
 /// expectations across the industry.
 pub fn default_rubric() -> Rubric {
     Rubric {
-        name: "Default Staff Rubric".into(),
-        version: 1,
+        name: "Default Impact Rubric".into(),
+        version: 2,
         dimensions: vec![
             RubricDimension {
                 key: "scope".into(),
@@ -38,6 +38,15 @@ pub fn default_rubric() -> Rubric {
                 label: "Quality".into(),
                 description: "Technical excellence, code review caliber, RFC quality, \
                               and the standard of engineering artifacts produced."
+                    .into(),
+                weight: 1.0,
+            },
+            RubricDimension {
+                key: "ops".into(),
+                label: "Operations".into(),
+                description: "Reliability, on-call diligence, incident response, and \
+                              systemic risk reduction. Keeping systems healthy so teams \
+                              can move fast safely."
                     .into(),
                 weight: 1.0,
             },

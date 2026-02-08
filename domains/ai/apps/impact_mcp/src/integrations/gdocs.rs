@@ -13,9 +13,9 @@ use super::{Connector, ConnectorError};
 /// post-mortems, and other long-form technical writing.
 ///
 /// Requires:
-/// - `STAFFTRACK_GDOCS_MCP_CMD`: path to the MCP server entry point
+/// - `IMPACT_MCP_GDOCS_MCP_CMD`: path to the MCP server entry point
 ///   (default: `npx`)
-/// - `STAFFTRACK_GDOCS_MCP_ARGS`: arguments to pass (default:
+/// - `IMPACT_MCP_GDOCS_MCP_ARGS`: arguments to pass (default:
 ///   `google-docs-mcp`)
 /// - The MCP server must be installed and configured with Google
 ///   OAuth credentials independently.
@@ -26,9 +26,9 @@ pub struct GdocsConnector {
 
 impl GdocsConnector {
     pub fn new() -> Self {
-        let mcp_cmd = std::env::var("STAFFTRACK_GDOCS_MCP_CMD")
+        let mcp_cmd = std::env::var("IMPACT_MCP_GDOCS_MCP_CMD")
             .unwrap_or_else(|_| "npx".to_string());
-        let mcp_args = std::env::var("STAFFTRACK_GDOCS_MCP_ARGS")
+        let mcp_args = std::env::var("IMPACT_MCP_GDOCS_MCP_ARGS")
             .unwrap_or_else(|_| "google-docs-mcp".to_string())
             .split_whitespace()
             .map(String::from)
@@ -166,7 +166,7 @@ impl Connector for GdocsConnector {
     fn is_configured(&self) -> bool {
         // We consider the connector configured if the user has explicitly
         // set the MCP command env var, or if the default `npx` is on PATH.
-        std::env::var("STAFFTRACK_GDOCS_MCP_CMD").is_ok()
+        std::env::var("IMPACT_MCP_GDOCS_MCP_CMD").is_ok()
             || std::process::Command::new(&self.mcp_cmd)
                 .arg("--version")
                 .stdout(std::process::Stdio::null())
