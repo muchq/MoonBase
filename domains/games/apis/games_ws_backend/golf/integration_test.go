@@ -127,15 +127,26 @@ func NewTestEnvironment() *TestEnvironment {
 func (env *TestEnvironment) CreateClient(id string) *TestClient {
 	env.mu.Lock()
 	defer env.mu.Unlock()
-	
+
 	testClient := NewTestClient(id)
 	testClient.StartCollecting()
-	
+
 	hubClient := &hub.Client{Hub: env.hub, Send: testClient.send}
 	env.hub.Register(hubClient)
-	
+
 	env.clients[id] = testClient
 	env.hubClients[id] = hubClient
+
+	// Authenticate the client
+	env.mu.Unlock() // Unlock while sending message
+	env.hub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type":"authenticate"}`),
+		Sender:  hubClient,
+	})
+	time.Sleep(10 * time.Millisecond)
+	testClient.ClearMessages() // Clear the authenticated message
+	env.mu.Lock() // Re-lock
+
 	return testClient
 }
 

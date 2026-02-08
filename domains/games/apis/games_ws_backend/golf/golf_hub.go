@@ -19,6 +19,15 @@ type GolfHub struct {
 	// Client contexts mapping
 	clientContexts map[*hub.Client]*ClientContext
 
+	// Session token to context mapping for reconnection
+	sessionTokens map[string]*ClientContext
+
+	// Track which clients are authenticated (first-message auth)
+	authenticatedClients map[*hub.Client]bool
+
+	// Cleanup timers for disconnected players (key: sessionToken)
+	cleanupTimers map[string]*time.Timer
+
 	// Player ID generator
 	idGenerator players.PlayerIDGenerator
 
@@ -34,12 +43,15 @@ type GolfHub struct {
 // NewGolfHub creates a new golf hub instance
 func NewGolfHub(idGenerator players.PlayerIDGenerator) hub.Hub {
 	return &GolfHub{
-		rooms:          make(map[string]*Room),
-		clientContexts: make(map[*hub.Client]*ClientContext),
-		idGenerator:    idGenerator,
-		gameMessage:    make(chan hub.GameMessageData),
-		register:       make(chan *hub.Client),
-		unregister:     make(chan *hub.Client),
+		rooms:                make(map[string]*Room),
+		clientContexts:       make(map[*hub.Client]*ClientContext),
+		sessionTokens:        make(map[string]*ClientContext),
+		authenticatedClients: make(map[*hub.Client]bool),
+		cleanupTimers:        make(map[string]*time.Timer),
+		idGenerator:          idGenerator,
+		gameMessage:          make(chan hub.GameMessageData),
+		register:             make(chan *hub.Client),
+		unregister:           make(chan *hub.Client),
 	}
 }
 
@@ -77,86 +89,242 @@ func (h *GolfHub) Run() {
 // handleRegister processes client registration
 func (h *GolfHub) handleRegister(client *hub.Client) {
 	h.mu.Lock()
-	// Generate unique player ID when client connects (whimsical name directly)
-	playerID := h.idGenerator.GenerateID()
-	
-	h.clientContexts[client] = &ClientContext{
-		PlayerID:   playerID,
-		JoinedAt:   time.Now(),
-		LastAction: time.Now(),
-	}
-	h.mu.Unlock()
+	defer h.mu.Unlock()
 
-	slog.Info("Golf client connected",
-		"clientAddr", getClientAddr(client),
-		"playerID", playerID)
+	// Client is not authenticated yet - they must send an "authenticate" message first
+	h.authenticatedClients[client] = false
+
+	slog.Info("Golf client connected (unauthenticated)",
+		"clientAddr", getClientAddr(client))
 }
 
-// handleUnregister processes client disconnection
+// handleAuthenticate processes first-message authentication
+func (h *GolfHub) handleAuthenticate(client *hub.Client, sessionToken string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// Check if client is already authenticated
+	if authenticated, exists := h.authenticatedClients[client]; exists && authenticated {
+		h.sendErrorLocked(client, "Already authenticated")
+		return
+	}
+
+	var ctx *ClientContext
+	var reconnected bool
+
+	if sessionToken != "" {
+		// Reconnection attempt - validate token
+		if err := ValidateSessionToken(sessionToken); err != nil {
+			h.sendErrorLocked(client, fmt.Sprintf("Invalid session token: %v", err))
+			return
+		}
+
+		// Look up existing context by token
+		existingCtx, exists := h.sessionTokens[sessionToken]
+		if !exists {
+			h.sendErrorLocked(client, "Session not found - token may be expired")
+			return
+		}
+
+		// Check if token is expired
+		if time.Now().After(existingCtx.TokenExpiry) {
+			// Clean up expired token
+			delete(h.sessionTokens, sessionToken)
+			h.sendErrorLocked(client, "Session token expired")
+			return
+		}
+
+		// Cancel cleanup timer if exists
+		if timer, exists := h.cleanupTimers[sessionToken]; exists {
+			timer.Stop()
+			delete(h.cleanupTimers, sessionToken)
+		}
+
+		// Reconnect player
+		ctx = existingCtx
+		reconnected = true
+
+		// Update player connection status if in a room
+		if ctx.RoomID != "" {
+			if room, roomExists := h.rooms[ctx.RoomID]; roomExists {
+				if player := room.GetPlayerByClientID(ctx.PlayerID); player != nil {
+					player.IsConnected = true
+					player.DisconnectedAt = nil
+				}
+			}
+		}
+
+		slog.Info("Player reconnected",
+			"playerID", ctx.PlayerID,
+			"roomID", ctx.RoomID,
+			"gameID", ctx.GameID)
+	} else {
+		// New session - generate token and player ID
+		token, err := CreateSessionToken()
+		if err != nil {
+			h.sendErrorLocked(client, "Failed to create session")
+			slog.Error("Failed to create session token", "error", err)
+			return
+		}
+
+		playerID := h.idGenerator.GenerateID()
+
+		ctx = &ClientContext{
+			PlayerID:     playerID,
+			SessionToken: token.Token,
+			TokenExpiry:  token.ExpiresAt,
+			JoinedAt:     time.Now(),
+			LastAction:   time.Now(),
+		}
+
+		// Store token mapping
+		h.sessionTokens[token.Token] = ctx
+
+		slog.Info("New session created",
+			"playerID", playerID,
+			"tokenExpiry", token.ExpiresAt)
+	}
+
+	// Associate context with client
+	h.clientContexts[client] = ctx
+	h.authenticatedClients[client] = true
+
+	// Send authentication success message
+	authMsg := AuthenticatedMessage{
+		Type:         "authenticated",
+		SessionToken: ctx.SessionToken,
+		Reconnected:  reconnected,
+	}
+	h.sendMessageLocked(client, authMsg)
+}
+
+// handleUnregister processes client disconnection with reconnect grace period
 func (h *GolfHub) handleUnregister(client *hub.Client) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	ctx, ok := h.clientContexts[client]
+	if !ok {
+		// Client not found - may not have authenticated
+		delete(h.authenticatedClients, client)
+		slog.Info("Unauthenticated client disconnected",
+			"clientAddr", getClientAddr(client))
+		return
+	}
+
+	sessionToken := ctx.SessionToken
+	now := time.Now()
+
+	// Mark player as disconnected if in a room
+	var roomToUpdate *Room
+	if ctx.RoomID != "" {
+		if room, roomExists := h.rooms[ctx.RoomID]; roomExists {
+			if player := room.GetPlayerByClientID(ctx.PlayerID); player != nil {
+				player.IsConnected = false
+				player.DisconnectedAt = &now
+				roomToUpdate = room
+			}
+		}
+	}
+
+	// Remove client association but keep session token mapping for reconnection
+	delete(h.clientContexts, client)
+	delete(h.authenticatedClients, client)
+	close(client.Send)
+
+	slog.Info("Client disconnected - grace period started",
+		"playerID", ctx.PlayerID,
+		"roomID", ctx.RoomID,
+		"gameID", ctx.GameID,
+		"gracePeriod", ReconnectGracePeriod)
+
+	// Schedule cleanup after grace period
+	timer := time.AfterFunc(ReconnectGracePeriod, func() {
+		h.cleanupDisconnectedPlayer(sessionToken)
+	})
+	h.cleanupTimers[sessionToken] = timer
+
+	// Broadcast updated room state after releasing the lock
+	if roomToUpdate != nil {
+		h.mu.Unlock()
+		h.broadcastRoomState(roomToUpdate)
+		h.mu.Lock()
+	}
+}
+
+// cleanupDisconnectedPlayer removes a player after reconnect grace period expires
+func (h *GolfHub) cleanupDisconnectedPlayer(sessionToken string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// Remove cleanup timer
+	delete(h.cleanupTimers, sessionToken)
+
+	// Get context
+	ctx, exists := h.sessionTokens[sessionToken]
+	if !exists {
+		return // Already cleaned up or reconnected
+	}
+
+	// Check if player reconnected
+	for _, clientCtx := range h.clientContexts {
+		if clientCtx.SessionToken == sessionToken {
+			slog.Info("Player reconnected before cleanup",
+				"playerID", ctx.PlayerID)
+			return // Player reconnected, don't clean up
+		}
+	}
+
 	var roomToUpdate *Room
 
-	func() {
-		h.mu.Lock()
-		defer h.mu.Unlock()
-
-		if ctx, ok := h.clientContexts[client]; ok {
-			// Remove player from room if they're in one
-			if ctx.RoomID != "" {
-				if room, roomExists := h.rooms[ctx.RoomID]; roomExists {
-					clientID := getClientID(client)
-
-					// Mark player as disconnected
-					for _, player := range room.Players {
-						if player.ClientID == clientID {
-							player.IsConnected = false
-							break
-						}
-					}
-
-					// Remove player from their current game if there is one
-					if ctx.GameID != "" {
-						if game, gameExists := room.Games[ctx.GameID]; gameExists {
-							if err := game.RemovePlayer(clientID); err != nil {
-								slog.Error("Failed to remove player from game",
-									"error", err,
-									"roomID", ctx.RoomID,
-									"gameID", ctx.GameID)
-							}
-						}
-					}
-
-					room.LastActivity = time.Now()
-					roomToUpdate = room
-
-					// Clean up empty rooms (no connected players)
-					connectedCount := 0
-					for _, player := range room.Players {
-						if player.IsConnected {
-							connectedCount++
-						}
-					}
-					if connectedCount == 0 {
-						delete(h.rooms, ctx.RoomID)
-						slog.Info("Removed empty room", "roomID", ctx.RoomID)
-						roomToUpdate = nil // Don't broadcast for empty rooms
+	// Remove player from room if they're in one
+	if ctx.RoomID != "" {
+		if room, roomExists := h.rooms[ctx.RoomID]; roomExists {
+			// Remove player from their current game if there is one
+			if ctx.GameID != "" {
+				if game, gameExists := room.Games[ctx.GameID]; gameExists {
+					if err := game.RemovePlayer(ctx.PlayerID); err != nil {
+						slog.Error("Failed to remove player from game",
+							"error", err,
+							"roomID", ctx.RoomID,
+							"gameID", ctx.GameID)
 					}
 				}
 			}
 
-			delete(h.clientContexts, client)
-			close(client.Send)
+			// Remove player from room
+			for i, player := range room.Players {
+				if player.ClientID == ctx.PlayerID {
+					room.Players = append(room.Players[:i], room.Players[i+1:]...)
+					break
+				}
+			}
 
-			slog.Info("Golf client disconnected",
-				"clientAddr", getClientAddr(client),
-				"roomID", ctx.RoomID,
-				"gameID", ctx.GameID)
+			room.LastActivity = time.Now()
+			roomToUpdate = room
+
+			// Clean up empty rooms
+			if len(room.Players) == 0 {
+				delete(h.rooms, ctx.RoomID)
+				slog.Info("Removed empty room", "roomID", ctx.RoomID)
+				roomToUpdate = nil // Don't broadcast for empty rooms
+			}
 		}
-	}()
+	}
+
+	// Remove session token
+	delete(h.sessionTokens, sessionToken)
+
+	slog.Info("Player cleaned up after disconnect timeout",
+		"playerID", ctx.PlayerID,
+		"roomID", ctx.RoomID,
+		"sessionToken", sessionToken[:16]+"...")
 
 	// Broadcast updated room state after releasing the lock
 	if roomToUpdate != nil {
+		h.mu.Unlock()
 		h.broadcastRoomState(roomToUpdate)
+		h.mu.Lock()
 	}
 }
 
@@ -165,6 +333,27 @@ func (h *GolfHub) handleGameMessage(msgData hub.GameMessageData) {
 	msg, err := ParseIncomingMessage(msgData.Message)
 	if err != nil {
 		h.sendError(msgData.Sender, "Invalid message format")
+		return
+	}
+
+	// Handle authentication message (doesn't require prior authentication)
+	if msg.Type == "authenticate" {
+		var authMsg AuthenticateMessage
+		if err := json.Unmarshal(msgData.Message, &authMsg); err != nil {
+			h.sendError(msgData.Sender, "Invalid authenticate message")
+			return
+		}
+		h.handleAuthenticate(msgData.Sender, authMsg.SessionToken)
+		return
+	}
+
+	// All other messages require authentication
+	h.mu.RLock()
+	authenticated := h.authenticatedClients[msgData.Sender]
+	h.mu.RUnlock()
+
+	if !authenticated {
+		h.sendError(msgData.Sender, "Not authenticated - send authenticate message first")
 		return
 	}
 
@@ -219,17 +408,17 @@ func (h *GolfHub) handleCreateRoom(client *hub.Client) {
 	// Create new room
 	room := h.createRoom(client)
 	h.rooms[room.ID] = room
-	h.clientContexts[client] = &ClientContext{
-		RoomID:     room.ID,
-		GameID:     "", // Not in a specific game yet
-		PlayerID:   room.Players[0].ID,
-		JoinedAt:   time.Now(),
-		LastAction: time.Now(),
+
+	// Update existing context (authenticated) with room info
+	if ctx := h.clientContexts[client]; ctx != nil {
+		ctx.RoomID = room.ID
+		ctx.GameID = "" // Not in a specific game yet
+		ctx.LastAction = time.Now()
 	}
 
-	// Send room joined message
+	// Send room joined message with session token
 	player := room.Players[0] // First player is the creator
-	h.sendRoomJoined(client, player.ID, room)
+	h.sendRoomJoined(client, player.ID, ctx.SessionToken, room)
 
 	slog.Info("Room created",
 		"roomID", room.ID,
@@ -274,13 +463,11 @@ func (h *GolfHub) handleJoinRoom(client *hub.Client, roomID string) {
 			}
 			room = h.rooms[roomID]
 
-			// Set up client context for new player
-			h.clientContexts[client] = &ClientContext{
-				RoomID:     roomID,
-				GameID:     "", // Not in a specific game yet
-				PlayerID:   player.ID,
-				JoinedAt:   time.Now(),
-				LastAction: time.Now(),
+			// Update existing context (authenticated) with room info
+			if ctx := h.clientContexts[client]; ctx != nil {
+				ctx.RoomID = roomID
+				ctx.GameID = "" // Not in a specific game yet
+				ctx.LastAction = time.Now()
 			}
 		}
 	}()
@@ -290,8 +477,17 @@ func (h *GolfHub) handleJoinRoom(client *hub.Client, roomID string) {
 		return
 	}
 
+	// Get session token from context
+	h.mu.RLock()
+	ctx := h.clientContexts[client]
+	sessionToken := ""
+	if ctx != nil {
+		sessionToken = ctx.SessionToken
+	}
+	h.mu.RUnlock()
+
 	// Send room joined message to new player
-	h.sendRoomJoined(client, player.ID, room)
+	h.sendRoomJoined(client, player.ID, sessionToken, room)
 
 	// Broadcast updated state to all players in room
 	h.broadcastRoomState(room)
@@ -830,6 +1026,43 @@ func (h *GolfHub) sendError(client *hub.Client, message string) {
 	h.sendJSON(client, msg)
 }
 
+// sendErrorLocked sends an error when lock is already held
+func (h *GolfHub) sendErrorLocked(client *hub.Client, message string) {
+	msg := &ErrorMessage{
+		Type:    "error",
+		Message: message,
+	}
+	h.sendJSONLocked(client, msg)
+}
+
+// sendMessageLocked sends a message when lock is already held
+func (h *GolfHub) sendMessageLocked(client *hub.Client, message interface{}) {
+	h.sendJSONLocked(client, message)
+}
+
+// sendJSONLocked sends JSON when lock is already held
+func (h *GolfHub) sendJSONLocked(client *hub.Client, message interface{}) {
+	data, err := json.Marshal(message)
+	if err != nil {
+		slog.Error("Failed to marshal message",
+			"error", err,
+			"type", message)
+		return
+	}
+
+	select {
+	case client.Send <- data:
+		// Successfully sent message
+	default:
+		// Buffer full - force disconnect
+		slog.Warn("Client send buffer full, forcing disconnect",
+			"clientAddr", getClientAddr(client),
+			"messageType", fmt.Sprintf("%T", message))
+		close(client.Send)
+		delete(h.clientContexts, client)
+	}
+}
+
 func (h *GolfHub) sendGameJoined(client *hub.Client, playerID string, state *GameState) {
 	msg := &GameJoinedMessage{
 		Type:      "gameJoined",
@@ -1019,8 +1252,7 @@ func getClientAddr(client *hub.Client) string {
 // createRoom creates a new room with the given client as the first player
 func (h *GolfHub) createRoom(client *hub.Client) *Room {
 	roomID := GenerateRoomID()
-	clientID := getClientID(client)
-	
+
 	// Use persistent player ID from context
 	ctx := h.clientContexts[client]
 	if ctx == nil || ctx.PlayerID == "" {
@@ -1031,7 +1263,7 @@ func (h *GolfHub) createRoom(client *hub.Client) *Room {
 	player := &Player{
 		ID:            ctx.PlayerID,
 		Name:          ctx.PlayerID,
-		ClientID:      clientID,
+		ClientID:      ctx.PlayerID, // Use stable player ID for reconnection
 		Cards:         CreateHiddenCards(),
 		Score:         0,
 		RevealedCards: make([]int, 0),
@@ -1067,27 +1299,25 @@ func (h *GolfHub) addPlayerToRoom(roomID string, client *hub.Client) (*Player, e
 		return nil, fmt.Errorf("room is full")
 	}
 
-	clientID := getClientID(client)
-
-	// Check if player is already in room
-	for _, player := range room.Players {
-		if player.ClientID == clientID {
-			player.IsConnected = true
-			room.LastActivity = time.Now()
-			return player, nil
-		}
-	}
-
 	// Create new player using persistent player ID from context
 	ctx := h.clientContexts[client]
 	if ctx == nil || ctx.PlayerID == "" {
 		return nil, fmt.Errorf("client context not found or missing player ID")
 	}
 
+	// Check if player is already in room (by stable player ID)
+	for _, player := range room.Players {
+		if player.ClientID == ctx.PlayerID {
+			player.IsConnected = true
+			room.LastActivity = time.Now()
+			return player, nil
+		}
+	}
+
 	player := &Player{
 		ID:            ctx.PlayerID,
 		Name:          ctx.PlayerID,
-		ClientID:      clientID,
+		ClientID:      ctx.PlayerID, // Use stable player ID for reconnection
 		Cards:         CreateHiddenCards(),
 		Score:         0,
 		RevealedCards: make([]int, 0),
@@ -1290,11 +1520,12 @@ func (h *GolfHub) handleGetRoomState(client *hub.Client) {
 }
 
 // sendRoomJoined sends room joined message to client
-func (h *GolfHub) sendRoomJoined(client *hub.Client, playerID string, room *Room) {
+func (h *GolfHub) sendRoomJoined(client *hub.Client, playerID string, sessionToken string, room *Room) {
 	msg := &RoomJoinedMessage{
-		Type:      "roomJoined",
-		PlayerID:  playerID,
-		RoomState: room,
+		Type:         "roomJoined",
+		PlayerID:     playerID,
+		SessionToken: sessionToken,
+		RoomState:    room,
 	}
 	h.sendJSON(client, msg)
 }

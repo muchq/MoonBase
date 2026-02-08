@@ -7,6 +7,15 @@ import (
 	"time"
 )
 
+// Session token constants
+const (
+	// SessionTokenLifetime is how long a session token remains valid
+	SessionTokenLifetime = 24 * time.Hour
+
+	// ReconnectGracePeriod is how long to wait before cleaning up disconnected players
+	ReconnectGracePeriod = 30 * time.Second
+)
+
 // Room represents a persistent room where multiple games can be played
 type Room struct {
 	ID              string                 `json:"id"`
@@ -43,11 +52,13 @@ func (r *Room) MarshalJSON() ([]byte, error) {
 
 // ClientContext holds the complete context for a client including room and game state
 type ClientContext struct {
-	RoomID     string    `json:"roomId"`     // Room the client is in (empty if not in room)
-	GameID     string    `json:"gameId"`     // Game the client is in (empty if not in specific game)
-	PlayerID   string    `json:"playerId"`   // Player ID for faster lookups
-	JoinedAt   time.Time `json:"joinedAt"`   // When client joined the room
-	LastAction time.Time `json:"lastAction"` // Last action timestamp
+	RoomID       string    `json:"roomId"`       // Room the client is in (empty if not in room)
+	GameID       string    `json:"gameId"`       // Game the client is in (empty if not in specific game)
+	PlayerID     string    `json:"playerId"`     // Player ID for faster lookups
+	SessionToken string    `json:"sessionToken"` // Session token for reconnection
+	TokenExpiry  time.Time `json:"tokenExpiry"`  // When the session token expires
+	JoinedAt     time.Time `json:"joinedAt"`     // When client joined the room
+	LastAction   time.Time `json:"lastAction"`   // Last action timestamp
 }
 
 // GameResult stores the outcome of a completed game
@@ -74,14 +85,15 @@ type Player struct {
 	RevealedCards []int   `json:"revealedCards"`
 	IsReady       bool    `json:"isReady"`
 	HasPeeked     bool    `json:"hasPeeked"`
-	
+
 	// Room/persistence fields
-	ClientID      string    `json:"clientId"`
-	TotalScore    int       `json:"totalScore"`    // Running total across all games
-	GamesPlayed   int       `json:"gamesPlayed"`
-	GamesWon      int       `json:"gamesWon"`
-	IsConnected   bool      `json:"isConnected"`
-	JoinedAt      time.Time `json:"joinedAt"`
+	ClientID       string     `json:"clientId"`
+	TotalScore     int        `json:"totalScore"`     // Running total across all games
+	GamesPlayed    int        `json:"gamesPlayed"`
+	GamesWon       int        `json:"gamesWon"`
+	IsConnected    bool       `json:"isConnected"`
+	DisconnectedAt *time.Time `json:"disconnectedAt"` // When player disconnected (nil if connected)
+	JoinedAt       time.Time  `json:"joinedAt"`
 }
 
 // GameState represents the full game state
@@ -99,6 +111,13 @@ type GameState struct {
 }
 
 // Client-to-server message types
+
+// AuthenticateMessage is sent as the first message after WebSocket connection
+type AuthenticateMessage struct {
+	Type         string `json:"type"` // "authenticate"
+	SessionToken string `json:"sessionToken,omitempty"` // Empty for new session, provided for reconnect
+}
+
 type CreateRoomMessage struct {
 	Type string `json:"type"`
 }
@@ -170,6 +189,14 @@ type LeaveGameMessage struct {
 }
 
 // Server-to-client message types
+
+// AuthenticatedMessage is sent after successful authentication
+type AuthenticatedMessage struct {
+	Type         string `json:"type"` // "authenticated"
+	SessionToken string `json:"sessionToken"` // Session token for future reconnects
+	Reconnected  bool   `json:"reconnected"` // True if this was a reconnection
+}
+
 type GameJoinedMessage struct {
 	Type      string     `json:"type"`
 	PlayerID  string     `json:"playerId"`
@@ -212,9 +239,10 @@ type GameEndedMessage struct {
 }
 
 type RoomJoinedMessage struct {
-	Type      string     `json:"type"`
-	PlayerID  string     `json:"playerId"`
-	RoomState *Room      `json:"roomState"`
+	Type         string `json:"type"`
+	PlayerID     string `json:"playerId"`
+	SessionToken string `json:"sessionToken"` // Session token for reconnection
+	RoomState    *Room  `json:"roomState"`
 }
 
 type RoomStateUpdateMessage struct {

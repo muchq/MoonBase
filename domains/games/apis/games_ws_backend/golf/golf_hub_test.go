@@ -60,6 +60,35 @@ func (m *mockClient) close() {
 	close(m.send)
 }
 
+// authenticateClient is a helper that authenticates a client in tests
+// For use with mockClient that has collectMessages() running
+func authenticateClient(t *testing.T, h *GolfHub, client *hub.Client, mockClient *mockClient) string {
+	t.Helper()
+
+	// Send authenticate message
+	authMsg := `{"type": "authenticate"}`
+	h.GameMessage(hub.GameMessageData{
+		Message: []byte(authMsg),
+		Sender:  client,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Get messages from mock client
+	messages := mockClient.getMessages()
+	if len(messages) == 0 {
+		t.Fatal("No authenticated message received")
+		return ""
+	}
+
+	// Parse the authenticated message
+	var authResponse AuthenticatedMessage
+	if err := json.Unmarshal(messages[len(messages)-1], &authResponse); err != nil {
+		t.Fatalf("Failed to unmarshal authenticated message: %v", err)
+	}
+
+	return authResponse.SessionToken
+}
+
 func TestParseIncomingMessage(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -129,6 +158,12 @@ func TestHub_CreateAndJoinRoom(t *testing.T) {
 	golfHub.Register(hubClient1)
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
+
+	// Authenticate clients
+	authenticateClient(t, golfHub.(*GolfHub), hubClient1, client1)
+	authenticateClient(t, golfHub.(*GolfHub), hubClient2, client2)
+	client1.clearMessages() // Clear auth messages
+	client2.clearMessages()
 
 	// Client 1 creates room
 	createMsg := `{"type": "createRoom"}`
@@ -212,6 +247,12 @@ func TestHub_CreateAndJoinGame(t *testing.T) {
 	golfHub.Register(hubClient1)
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
+
+	// Authenticate clients
+	authenticateClient(t, golfHub.(*GolfHub), hubClient1, client1)
+	authenticateClient(t, golfHub.(*GolfHub), hubClient2, client2)
+	client1.clearMessages()
+	client2.clearMessages()
 
 	// Client 1 creates room
 	createRoomMsg := `{"type": "createRoom"}`
@@ -364,6 +405,12 @@ func TestHub_StartGame(t *testing.T) {
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
 
+	// Authenticate clients
+	authenticateClient(t, golfHub.(*GolfHub), hubClient1, client1)
+	authenticateClient(t, golfHub.(*GolfHub), hubClient2, client2)
+	client1.clearMessages()
+	client2.clearMessages()
+
 	// Player 1 creates room (automatically joins)
 	golfHub.GameMessage(hub.GameMessageData{
 		Message: []byte(`{"type": "createRoom"}`),
@@ -505,6 +552,12 @@ func TestHub_PeekCard(t *testing.T) {
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
 
+	// Authenticate clients
+	authenticateClient(t, golfHub.(*GolfHub), hubClient1, client1)
+	authenticateClient(t, golfHub.(*GolfHub), hubClient2, client2)
+	client1.clearMessages()
+	client2.clearMessages()
+
 	// Player 1 creates room (automatically joins)
 	golfHub.GameMessage(hub.GameMessageData{
 		Message: []byte(`{"type": "createRoom"}`),
@@ -621,6 +674,12 @@ func TestHub_GameFlow(t *testing.T) {
 	golfHub.Register(hubClient1)
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
+
+	// Authenticate clients
+	authenticateClient(t, golfHub.(*GolfHub), hubClient1, client1)
+	authenticateClient(t, golfHub.(*GolfHub), hubClient2, client2)
+	client1.clearMessages()
+	client2.clearMessages()
 
 	// Player 1 creates room (automatically joins)
 	golfHub.GameMessage(hub.GameMessageData{
@@ -742,6 +801,12 @@ func TestHub_PlayerDisconnect(t *testing.T) {
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
 
+	// Authenticate clients
+	authenticateClient(t, golfHub.(*GolfHub), hubClient1, client1)
+	authenticateClient(t, golfHub.(*GolfHub), hubClient2, client2)
+	client1.clearMessages()
+	client2.clearMessages()
+
 	// Player 1 creates room (automatically joins)
 	golfHub.GameMessage(hub.GameMessageData{
 		Message: []byte(`{"type": "createRoom"}`),
@@ -832,6 +897,10 @@ func TestHub_InvalidMessages(t *testing.T) {
 	golfHub.Register(hubClient1)
 	time.Sleep(10 * time.Millisecond)
 
+	// Authenticate client
+	authenticateClient(t, golfHub.(*GolfHub), hubClient1, client1)
+	client1.clearMessages()
+
 	tests := []struct {
 		name string
 		msg  string
@@ -911,6 +980,14 @@ func TestHub_MultiGameSupport(t *testing.T) {
 	golfHub.Register(hubClient2)
 	golfHub.Register(hubClient3)
 	time.Sleep(10 * time.Millisecond)
+
+	// Authenticate clients
+	authenticateClient(t, golfHub.(*GolfHub), hubClient1, client1)
+	authenticateClient(t, golfHub.(*GolfHub), hubClient2, client2)
+	authenticateClient(t, golfHub.(*GolfHub), hubClient3, client3)
+	client1.clearMessages()
+	client2.clearMessages()
+	client3.clearMessages()
 
 	// Client 1 creates a room
 	createMsg := `{"type": "createRoom"}`
@@ -1041,6 +1118,16 @@ func TestHub_GameIsolation(t *testing.T) {
 	golfHub.Register(hubClient4)
 	time.Sleep(10 * time.Millisecond)
 
+	// Authenticate clients
+	authenticateClient(t, golfHub.(*GolfHub), hubClient1, client1)
+	authenticateClient(t, golfHub.(*GolfHub), hubClient2, client2)
+	authenticateClient(t, golfHub.(*GolfHub), hubClient3, client3)
+	authenticateClient(t, golfHub.(*GolfHub), hubClient4, client4)
+	client1.clearMessages()
+	client2.clearMessages()
+	client3.clearMessages()
+	client4.clearMessages()
+
 	// Client 1 creates a room
 	createMsg := `{"type": "createRoom"}`
 	golfHub.GameMessage(hub.GameMessageData{
@@ -1170,6 +1257,12 @@ func TestHub_RequiredGameID(t *testing.T) {
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
 
+	// Authenticate clients
+	authenticateClient(t, golfHub.(*GolfHub), hubClient1, client1)
+	authenticateClient(t, golfHub.(*GolfHub), hubClient2, client2)
+	client1.clearMessages()
+	client2.clearMessages()
+
 	// Client 1 creates room
 	createMsg := `{"type": "createRoom"}`
 	golfHub.GameMessage(hub.GameMessageData{
@@ -1231,6 +1324,12 @@ func TestHub_GameCleanup(t *testing.T) {
 	golfHub.Register(hubClient1)
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
+
+	// Authenticate clients
+	authenticateClient(t, golfHub.(*GolfHub), hubClient1, client1)
+	authenticateClient(t, golfHub.(*GolfHub), hubClient2, client2)
+	client1.clearMessages()
+	client2.clearMessages()
 
 	// Player 1 creates room (automatically joins)
 	createMsg := `{"type": "createRoom"}`
@@ -1338,6 +1437,12 @@ func TestHub_JoinGameTwice(t *testing.T) {
 	golfHub.Register(hubClient1)
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
+
+	// Authenticate clients
+	authenticateClient(t, golfHub.(*GolfHub), hubClient1, client1)
+	authenticateClient(t, golfHub.(*GolfHub), hubClient2, client2)
+	client1.clearMessages()
+	client2.clearMessages()
 
 	// Client 1 creates room
 	createMsg := `{"type": "createRoom"}`
@@ -1457,6 +1562,10 @@ func TestHub_JoinRoomTwice(t *testing.T) {
 
 	golfHub.Register(hubClient1)
 	time.Sleep(10 * time.Millisecond)
+
+	// Authenticate client
+	authenticateClient(t, golfHub.(*GolfHub), hubClient1, client1)
+	client1.clearMessages()
 
 	// Client 1 creates room (automatically joins)
 	createMsg := `{"type": "createRoom"}`

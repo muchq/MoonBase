@@ -5,6 +5,7 @@ go_library(
     srcs = [
         "game.go",
         "golf_hub.go",
+        "session.go",
         "state_validation.go",
         "types.go",
     ],
@@ -23,6 +24,8 @@ go_test(
         "game_test.go",
         "golf_hub_test.go",
         "integration_test.go",
+        "session_integration_test.go",
+        "session_test.go",
         "state_transitions_test.go",
         "types_test.go",
     ],
