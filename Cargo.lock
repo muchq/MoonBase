@@ -1471,7 +1471,7 @@ dependencies = [
 
 [[package]]
 name = "impact_mcp"
-version = "0.0.1-alpha"
+version = "0.0.3-alpha"
 dependencies = [
  "chrono",
  "clap",
