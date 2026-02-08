@@ -51,9 +51,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          ref: main
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/download-artifact@v4
         with:
@@ -69,12 +66,16 @@ jobs:
             --generate-notes \
             artifacts/**/*.tar.gz
 
-      - name: Update formula
+      - name: Update Homebrew tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME#impact-mcp-v}"
           MAC_SHA=$(cat artifacts/aarch64-apple-darwin/sha256.txt)
           LINUX_SHA=$(cat artifacts/x86_64-unknown-linux-gnu/sha256.txt)
-          FORMULA="domains/ai/apps/impact_mcp/Formula/impact-mcp.rb"
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/muchq/homebrew-muchq.git" tap
+          FORMULA="tap/Formula/impact-mcp.rb"
 
           python3 - "$FORMULA" "$VERSION" "$MAC_SHA" "$LINUX_SHA" <<'EOF'
           import re, sys
@@ -96,8 +97,9 @@ jobs:
               f.write(content)
           EOF
 
+          cd tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "$FORMULA"
-          git commit -m "chore: update impact-mcp formula to v${VERSION}"
-          git push origin HEAD:main
+          git add Formula/impact-mcp.rb
+          git commit -m "impact-mcp ${VERSION}"
+          git push
