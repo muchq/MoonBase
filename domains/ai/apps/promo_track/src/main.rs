@@ -36,7 +36,7 @@ async fn main() {
         Command::Archetypes => run_archetypes(),
         Command::Rubric { subcommand } => run_rubric(&data_dir, subcommand),
         Command::Evidence { subcommand } => run_evidence(&data_dir, subcommand),
-        Command::Pull => run_pull(&data_dir),
+        Command::Pull => run_pull(&data_dir).await,
     }
 }
 
@@ -262,8 +262,11 @@ fn run_evidence(data_dir: &PathBuf, sub: cli::EvidenceCommand) {
     }
 }
 
-fn run_pull(data_dir: &PathBuf) {
-    use promo_track::integrations::{gdocs::GdocsConnector, github::GithubConnector, jira::JiraConnector, slack::SlackConnector};
+async fn run_pull(data_dir: &PathBuf) {
+    use promo_track::integrations::{
+        gdocs::GdocsConnector, github::GithubConnector, jira::JiraConnector,
+        slack::SlackConnector,
+    };
 
     let connectors: Vec<Box<dyn Connector>> = vec![
         Box::new(GithubConnector::new()),
@@ -283,7 +286,7 @@ fn run_pull(data_dir: &PathBuf) {
             println!("  [skip] {} — not configured", connector.name());
             continue;
         }
-        match connector.pull() {
+        match connector.pull().await {
             Ok(cards) => {
                 let n = cards.len();
                 for card in cards {

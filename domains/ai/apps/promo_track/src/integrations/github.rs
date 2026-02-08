@@ -1,3 +1,6 @@
+use std::future::Future;
+use std::pin::Pin;
+
 use crate::evidence::{EvidenceCard, EvidenceSource};
 
 use super::{Connector, ConnectorError};
@@ -24,22 +27,24 @@ impl Connector for GithubConnector {
         self.token.is_some()
     }
 
-    fn pull(&self) -> Result<Vec<EvidenceCard>, ConnectorError> {
-        if !self.is_configured() {
-            return Err(ConnectorError::NotConfigured(
-                "Set STAFFTRACK_GITHUB_TOKEN to enable GitHub integration".into(),
-            ));
-        }
+    fn pull(&self) -> Pin<Box<dyn Future<Output = Result<Vec<EvidenceCard>, ConnectorError>> + Send + '_>> {
+        Box::pin(async move {
+            if !self.is_configured() {
+                return Err(ConnectorError::NotConfigured(
+                    "Set STAFFTRACK_GITHUB_TOKEN to enable GitHub integration".into(),
+                ));
+            }
 
-        // POC stub — real implementation will use the GitHub API to fetch:
-        // - PRs authored & reviewed
-        // - RFC/ADR discussions
-        // - Cross-repo contributions
-        // - Release participation
-        tracing::info!("GitHub connector: pull not yet implemented (POC stub)");
-        Ok(vec![EvidenceCard::new(
-            EvidenceSource::Github,
-            "[stub] example GitHub evidence card",
-        )])
+            // POC stub — real implementation will use the GitHub API to fetch:
+            // - PRs authored & reviewed
+            // - RFC/ADR discussions
+            // - Cross-repo contributions
+            // - Release participation
+            tracing::info!("GitHub connector: pull not yet implemented (POC stub)");
+            Ok(vec![EvidenceCard::new(
+                EvidenceSource::Github,
+                "[stub] example GitHub evidence card",
+            )])
+        })
     }
 }

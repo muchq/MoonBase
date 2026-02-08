@@ -1,3 +1,6 @@
+use std::future::Future;
+use std::pin::Pin;
+
 use crate::evidence::{EvidenceCard, EvidenceSource};
 
 use super::{Connector, ConnectorError};
@@ -27,22 +30,24 @@ impl Connector for JiraConnector {
         self.token.is_some() && self.base_url.is_some()
     }
 
-    fn pull(&self) -> Result<Vec<EvidenceCard>, ConnectorError> {
-        if !self.is_configured() {
-            return Err(ConnectorError::NotConfigured(
-                "Set STAFFTRACK_JIRA_TOKEN and STAFFTRACK_JIRA_URL to enable Jira integration"
-                    .into(),
-            ));
-        }
+    fn pull(&self) -> Pin<Box<dyn Future<Output = Result<Vec<EvidenceCard>, ConnectorError>> + Send + '_>> {
+        Box::pin(async move {
+            if !self.is_configured() {
+                return Err(ConnectorError::NotConfigured(
+                    "Set STAFFTRACK_JIRA_TOKEN and STAFFTRACK_JIRA_URL to enable Jira integration"
+                        .into(),
+                ));
+            }
 
-        // POC stub — real implementation will fetch:
-        // - Epics owned / driven
-        // - Cross-team ticket involvement
-        // - Planning and roadmap artifacts
-        tracing::info!("Jira connector: pull not yet implemented (POC stub)");
-        Ok(vec![EvidenceCard::new(
-            EvidenceSource::Jira,
-            "[stub] example Jira evidence card",
-        )])
+            // POC stub — real implementation will fetch:
+            // - Epics owned / driven
+            // - Cross-team ticket involvement
+            // - Planning and roadmap artifacts
+            tracing::info!("Jira connector: pull not yet implemented (POC stub)");
+            Ok(vec![EvidenceCard::new(
+                EvidenceSource::Jira,
+                "[stub] example Jira evidence card",
+            )])
+        })
     }
 }
