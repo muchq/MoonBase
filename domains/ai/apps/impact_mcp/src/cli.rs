@@ -51,6 +51,9 @@ pub enum Command {
 
     /// Pull new evidence from configured integrations.
     Pull,
+
+    /// Start as an MCP server over stdio.
+    Serve,
 }
 
 #[derive(Subcommand)]

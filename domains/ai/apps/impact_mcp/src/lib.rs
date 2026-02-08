@@ -7,3 +7,4 @@ pub mod mcp;
 pub mod output;
 pub mod readiness;
 pub mod rubric;
+pub mod server;

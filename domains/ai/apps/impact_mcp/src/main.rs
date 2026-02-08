@@ -6,11 +6,14 @@ use std::process;
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
+use rmcp::ServiceExt;
+
 use impact_mcp::agent::Agent;
 use impact_mcp::archetype::Archetype;
 use impact_mcp::evidence::{EvidenceCard, EvidenceSource, EvidenceStore};
 use impact_mcp::integrations::Connector;
 use impact_mcp::rubric::{self, Rubric};
+use impact_mcp::server::ImpactServer;
 
 use crate::cli::{Cli, Command};
 
@@ -37,6 +40,7 @@ async fn main() {
         Command::Rubric { subcommand } => run_rubric(&data_dir, subcommand),
         Command::Evidence { subcommand } => run_evidence(&data_dir, subcommand),
         Command::Pull => run_pull(&data_dir).await,
+        Command::Serve => run_serve(&data_dir).await,
     }
 }
 
@@ -303,4 +307,22 @@ async fn run_pull(data_dir: &PathBuf) {
         }
     }
     println!("\n{total} total evidence card(s) added.");
+}
+
+async fn run_serve(data_dir: &PathBuf) {
+    let store = EvidenceStore::open(data_dir).unwrap_or_else(|e| {
+        eprintln!("error: cannot open evidence store: {e}");
+        process::exit(1);
+    });
+    let rubric = load_rubric(data_dir);
+    let server = ImpactServer::new(store, rubric);
+    let transport = rmcp::transport::io::stdio();
+    let service = server.serve(transport).await.unwrap_or_else(|e| {
+        eprintln!("error: MCP server failed to start: {e}");
+        process::exit(1);
+    });
+    service.waiting().await.unwrap_or_else(|e| {
+        eprintln!("error: MCP server error: {e}");
+        process::exit(1);
+    });
 }

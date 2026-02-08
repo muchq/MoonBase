@@ -25,6 +25,7 @@ rust_library(
         "src/readiness/mod.rs",
         "src/rubric/default.rs",
         "src/rubric/mod.rs",
+        "src/server.rs",
     ],
     crate_name = "impact_mcp",
     visibility = ["//visibility:public"],
@@ -33,9 +34,10 @@ rust_library(
         "dirs",
         "genai",
         "rmcp",
+        "schemars",
         "serde",
         "serde_json",
-        "serde_yaml",
+        "serde_yaml_ng",
         "tokio",
         "tracing",
         "uuid",
@@ -56,4 +58,13 @@ rust_test(
     name = "test_impact_mcp",
     size = "small",
     crate = ":impact-mcp",
+)
+
+rust_test(
+    name = "test_impact_mcp_lib",
+    size = "small",
+    crate = ":impact_mcp_lib",
+    deps = crate_deps([
+        "tempfile",
+    ]),
 )

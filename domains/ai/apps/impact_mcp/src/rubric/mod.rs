@@ -47,12 +47,12 @@ impl Rubric {
     /// Load a rubric from a YAML file.
     pub fn load(path: &Path) -> Result<Self, RubricError> {
         let data = fs::read_to_string(path).map_err(RubricError::Io)?;
-        serde_yaml::from_str(&data).map_err(RubricError::Yaml)
+        serde_yaml_ng::from_str(&data).map_err(RubricError::Yaml)
     }
 
     /// Save this rubric to a YAML file.
     pub fn save(&self, path: &Path) -> Result<(), RubricError> {
-        let data = serde_yaml::to_string(self).map_err(RubricError::Yaml)?;
+        let data = serde_yaml_ng::to_string(self).map_err(RubricError::Yaml)?;
         fs::write(path, data).map_err(RubricError::Io)?;
         Ok(())
     }
@@ -61,7 +61,7 @@ impl Rubric {
 #[derive(Debug)]
 pub enum RubricError {
     Io(std::io::Error),
-    Yaml(serde_yaml::Error),
+    Yaml(serde_yaml_ng::Error),
 }
 
 impl std::fmt::Display for RubricError {
