@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 use uuid::Uuid;
 
@@ -13,14 +12,9 @@ use crate::archetype::Archetype;
 /// Cards are persisted as individual JSON files under
 /// `<data_dir>/evidence/`. The store provides query methods
 /// for filtering by source, rubric dimension, and archetype.
-///
-/// The store tracks the evidence directory's modification time
-/// so that `refresh()` can skip re-reading when nothing has changed.
 pub struct EvidenceStore {
     dir: PathBuf,
     cards: HashMap<Uuid, EvidenceCard>,
-    /// Last-seen modification time of the evidence directory.
-    dir_mtime: Option<SystemTime>,
 }
 
 impl EvidenceStore {
@@ -41,14 +35,9 @@ impl EvidenceStore {
             }
         }
 
-        let dir_mtime = fs::metadata(&evidence_dir)
-            .and_then(|m| m.modified())
-            .ok();
-
         Ok(Self {
             dir: evidence_dir,
             cards,
-            dir_mtime,
         })
     }
 
@@ -58,7 +47,6 @@ impl EvidenceStore {
         let data = serde_json::to_string_pretty(&card).map_err(StoreError::Parse)?;
         fs::write(&path, data).map_err(StoreError::Io)?;
         self.cards.insert(card.id, card);
-        self.sync_mtime();
         Ok(())
     }
 
@@ -69,23 +57,11 @@ impl EvidenceStore {
             fs::remove_file(&path).map_err(StoreError::Io)?;
         }
         let removed = self.cards.remove(&id);
-        self.sync_mtime();
         Ok(removed)
     }
 
-    /// Re-read cards from disk if the directory has been modified since
-    /// our last load. Uses the directory mtime as a cheap change indicator
-    /// so callers can invoke this on every read without I/O overhead when
-    /// nothing has changed.
+    /// Re-read all cards from disk.
     pub fn refresh(&mut self) -> Result<(), StoreError> {
-        let current_mtime = fs::metadata(&self.dir)
-            .and_then(|m| m.modified())
-            .ok();
-
-        if current_mtime == self.dir_mtime {
-            return Ok(());
-        }
-
         let mut cards = HashMap::new();
         for entry in fs::read_dir(&self.dir).map_err(StoreError::Io)? {
             let entry = entry.map_err(StoreError::Io)?;
@@ -98,7 +74,6 @@ impl EvidenceStore {
             }
         }
         self.cards = cards;
-        self.dir_mtime = current_mtime;
         Ok(())
     }
 
@@ -138,14 +113,6 @@ impl EvidenceStore {
             .collect()
     }
 
-    /// Update stored mtime to match the directory's current state,
-    /// so a subsequent `refresh()` won't re-read our own writes.
-    fn sync_mtime(&mut self) {
-        self.dir_mtime = fs::metadata(&self.dir)
-            .and_then(|m| m.modified())
-            .ok();
-    }
-
     fn card_path(&self, id: Uuid) -> PathBuf {
         self.dir.join(format!("{id}.json"))
     }
@@ -171,8 +138,6 @@ impl std::error::Error for StoreError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
-    use std::time::Duration;
     use tempfile::TempDir;
 
     fn tmp_store() -> (TempDir, EvidenceStore) {
@@ -229,62 +194,32 @@ mod tests {
     }
 
     #[test]
-    fn refresh_skips_reread_when_unchanged() {
-        let (_dir, mut store) = tmp_store();
-
-        let card = EvidenceCard::new(EvidenceSource::Manual, "test");
-        store.insert(card).unwrap();
-
-        // Capture mtime after insert
-        let mtime_after_insert = store.dir_mtime;
-
-        // refresh should be a no-op (mtime unchanged)
-        store.refresh().unwrap();
-        assert_eq!(store.dir_mtime, mtime_after_insert);
-        assert_eq!(store.count(), 1);
-    }
-
-    #[test]
-    fn refresh_detects_mtime_change_from_external_write() {
+    fn refresh_picks_up_direct_disk_write() {
         let (dir, mut store) = tmp_store();
 
-        let mtime_before = store.dir_mtime;
-
-        // Simulate external process writing a card directly to disk
-        // Sleep briefly so mtime differs (filesystem granularity)
-        thread::sleep(Duration::from_millis(50));
+        // Write a card directly to disk (simulates an external process)
         let card = EvidenceCard::new(EvidenceSource::Slack, "external card");
         let path = dir.path().join("evidence").join(format!("{}.json", card.id));
         let data = serde_json::to_string_pretty(&card).unwrap();
         fs::write(&path, data).unwrap();
 
-        // Store doesn't see it yet
         assert_eq!(store.count(), 0);
 
-        // Mtime should have changed on disk
-        let current_mtime = fs::metadata(dir.path().join("evidence"))
-            .and_then(|m| m.modified())
-            .ok();
-        assert_ne!(current_mtime, mtime_before);
-
-        // refresh detects the change and reloads
         store.refresh().unwrap();
         assert_eq!(store.count(), 1);
         assert_eq!(store.all()[0].summary, "external card");
     }
 
     #[test]
-    fn insert_syncs_mtime_so_refresh_is_noop() {
+    fn refresh_is_idempotent() {
         let (_dir, mut store) = tmp_store();
 
         let card = EvidenceCard::new(EvidenceSource::Manual, "my card");
         store.insert(card).unwrap();
 
-        let mtime_after = store.dir_mtime;
-
-        // refresh should not change anything
         store.refresh().unwrap();
-        assert_eq!(store.dir_mtime, mtime_after);
+        assert_eq!(store.count(), 1);
+        store.refresh().unwrap();
         assert_eq!(store.count(), 1);
     }
 }

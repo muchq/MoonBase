@@ -2,7 +2,7 @@ class ImpactMcp < Formula
   desc "Local-first AI agent helping engineers amplify impact and grow in their role"
   homepage "https://github.com/muchq/MoonBase"
   license "MIT"
-  version "0.0.1-alpha"
+  version "0.0.2-alpha"
 
   on_macos do
     url "https://github.com/muchq/MoonBase/releases/download/impact-mcp-v#{version}/impact-mcp-#{version}-aarch64-apple-darwin.tar.gz"
