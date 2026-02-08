@@ -1,0 +1,105 @@
+name: Release impact-mcp
+
+on:
+  push:
+    tags:
+      - 'impact-mcp-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: bazel-contrib/setup-bazel@0.18.0
+        with:
+          bazelisk-cache: true
+          disk-cache: release-impact-mcp-${{ matrix.target }}
+          repository-cache: true
+
+      - name: Build
+        run: bazel build -c opt //domains/ai/apps/impact_mcp:impact-mcp
+
+      - name: Package
+        run: |
+          VERSION="${GITHUB_REF_NAME#impact-mcp-v}"
+          TARBALL="impact-mcp-${VERSION}-${{ matrix.target }}.tar.gz"
+          cp bazel-bin/domains/ai/apps/impact_mcp/impact-mcp impact-mcp
+          tar czf "$TARBALL" impact-mcp
+          shasum -a 256 "$TARBALL" | awk '{print $1}' > sha256.txt
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            ${{ env.TARBALL }}
+            sha256.txt
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#impact-mcp-v}"
+          gh release create "$GITHUB_REF_NAME" \
+            --title "impact-mcp v${VERSION}" \
+            --generate-notes \
+            artifacts/**/*.tar.gz
+
+      - name: Update Homebrew tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#impact-mcp-v}"
+          MAC_SHA=$(cat artifacts/aarch64-apple-darwin/sha256.txt)
+          LINUX_SHA=$(cat artifacts/x86_64-unknown-linux-gnu/sha256.txt)
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/muchq/homebrew-muchq.git" tap
+          FORMULA="tap/Formula/impact-mcp.rb"
+
+          python3 - "$FORMULA" "$VERSION" "$MAC_SHA" "$LINUX_SHA" <<'EOF'
+          import re, sys
+          formula_path, version, mac_sha, linux_sha = sys.argv[1:]
+          with open(formula_path) as f:
+              content = f.read()
+          content = re.sub(r'(  version ")[^"]*(")', rf'\g<1>{version}\g<2>', content)
+          content = re.sub(
+              r'(url "[^"]*aarch64-apple-darwin[^"]*"\n\s+sha256 ")[^"]*(")',
+              rf'\g<1>{mac_sha}\g<2>',
+              content,
+          )
+          content = re.sub(
+              r'(url "[^"]*x86_64-unknown-linux-gnu[^"]*"\n\s+sha256 ")[^"]*(")',
+              rf'\g<1>{linux_sha}\g<2>',
+              content,
+          )
+          with open(formula_path, 'w') as f:
+              f.write(content)
+          EOF
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/impact-mcp.rb
+          git commit -m "impact-mcp ${VERSION}"
+          git push
