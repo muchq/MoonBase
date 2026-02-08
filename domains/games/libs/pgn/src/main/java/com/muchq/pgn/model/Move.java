@@ -12,16 +12,12 @@ import java.util.Optional;
  * @param variations Alternative lines (recursive)
  */
 public record Move(
-    String san,
-    Optional<String> comment,
-    List<Nag> nags,
-    List<List<Move>> variations
-) {
-    public Move(String san) {
-        this(san, Optional.empty(), List.of(), List.of());
-    }
+    String san, Optional<String> comment, List<Nag> nags, List<List<Move>> variations) {
+  public Move(String san) {
+    this(san, Optional.empty(), List.of(), List.of());
+  }
 
-    public Move(String san, String comment) {
-        this(san, Optional.of(comment), List.of(), List.of());
-    }
+  public Move(String san, String comment) {
+    this(san, Optional.of(comment), List.of(), List.of());
+  }
 }
