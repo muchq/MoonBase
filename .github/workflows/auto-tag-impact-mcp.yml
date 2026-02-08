@@ -1,11 +1,12 @@
 name: Auto-tag impact-mcp version
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Test + Publish"]
+    types:
+      - completed
     branches:
       - main
-    paths:
-      - 'domains/ai/apps/impact_mcp/Cargo.toml'
 
 permissions:
   contents: write
@@ -13,6 +14,7 @@ permissions:
 jobs:
   check-and-tag:
     runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
     steps:
       - uses: actions/checkout@v6
         with:
