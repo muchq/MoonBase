@@ -11,6 +11,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: auto-tag-impact-mcp
+  cancel-in-progress: false  # Let running tags complete
+
 jobs:
   check-and-tag:
     runs-on: ubuntu-latest
@@ -18,7 +22,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 2  # Need previous commit to compare
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 2  # Need previous commit to compare versions
 
       - name: Check if version changed
         id: version_check
@@ -52,9 +57,9 @@ jobs:
           VERSION="${{ steps.version_check.outputs.current_version }}"
           TAG="impact-mcp-v${VERSION}"
 
-          # Check if tag already exists
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists, skipping"
+          # Check if tag already exists on remote
+          if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
+            echo "Tag $TAG already exists on remote, skipping"
             exit 0
           fi
 
