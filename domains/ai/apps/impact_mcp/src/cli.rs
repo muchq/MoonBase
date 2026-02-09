@@ -22,21 +22,6 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Start an interactive chat session with the impact-mcp agent.
-    Chat,
-
-    /// Draft a weekly status update from recent evidence.
-    Status,
-
-    /// Generate or update your impact narrative draft.
-    Packet,
-
-    /// Show your current impact readiness score and dimension breakdown.
-    Readiness,
-
-    /// List the supported impact archetypes.
-    Archetypes,
-
     /// Manage your role rubric.
     Rubric {
         #[command(subcommand)]
@@ -54,6 +39,12 @@ pub enum Command {
 
     /// Start as an MCP server over stdio.
     Serve,
+
+    /// Set up Claude integration (commands and MCP server config).
+    Setup,
+
+    /// Set up automatic hourly evidence pulls (macOS only).
+    SetupCron,
 }
 
 #[derive(Subcommand)]

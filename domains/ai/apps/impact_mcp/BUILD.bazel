@@ -4,8 +4,6 @@ load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
 rust_library(
     name = "impact_mcp_lib",
     srcs = [
-        "src/agent/commands.rs",
-        "src/agent/mod.rs",
         "src/archetype/mod.rs",
         "src/evidence/card.rs",
         "src/evidence/mod.rs",
@@ -16,12 +14,7 @@ rust_library(
         "src/integrations/mod.rs",
         "src/integrations/slack.rs",
         "src/lib.rs",
-        "src/llm/context.rs",
-        "src/llm/mod.rs",
         "src/mcp/mod.rs",
-        "src/output/mod.rs",
-        "src/output/packet.rs",
-        "src/output/status.rs",
         "src/readiness/mod.rs",
         "src/rubric/default.rs",
         "src/rubric/mod.rs",
@@ -32,7 +25,6 @@ rust_library(
     deps = crate_deps([
         "chrono",
         "dirs",
-        "genai",
         "rmcp",
         "schemars",
         "serde",
