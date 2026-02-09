@@ -105,6 +105,7 @@ jobs:
 
   build:
     needs: [prepare]
+    if: always() && needs.prepare.result == 'success'
     strategy:
       matrix:
         include:
@@ -156,6 +157,7 @@ jobs:
 
   release:
     needs: [prepare, build]
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
