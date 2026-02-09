@@ -10,9 +10,7 @@ name = "doc_db"
 path = "src/main.rs"
 
 [dependencies]
-dotenv = { workspace = true }
 doc_db_proto = { workspace = true }
-futures = { workspace = true }
 mongodb = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }
