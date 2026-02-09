@@ -9,6 +9,7 @@ members = [
     "domains/graphics/apis/posterize",
     "domains/platform/libs/server_pal",
     "domains/games/libs/wordchains",
+    "domains/games/apps/wordchains",
     "domains/platform/protos/example_grpc",
     "domains/platform/protos/doc_db",
 ]
