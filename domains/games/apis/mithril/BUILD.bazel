@@ -13,7 +13,7 @@ rust_binary(
         "//domains/games/apis/mithril:data/words.txt",
     ],
     deps = [
-        "//domains/games/libs/wordchains:wordchains_lib",
+        "//domains/games/libs/wordchains",
         "//domains/platform/libs/server_pal",
     ] + all_crate_deps(),
 )
