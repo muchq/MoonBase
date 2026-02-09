@@ -5,8 +5,6 @@ on:
     workflows: ["Test + Publish"]
     types:
       - completed
-    branches:
-      - main
   push:
     tags:
       - 'impact-mcp-v*'

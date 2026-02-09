@@ -9,13 +9,15 @@ Use the impact-mcp MCP server to understand your staff archetype profile and get
 
 ## Staff Archetypes
 
-The five staff engineer archetypes are:
+The seven staff engineer archetypes are:
 
 1. **Tech Lead** — Leading teams through technical direction and mentorship
 2. **Architect** — Designing and evolving systems at scale
 3. **Problem Solver** — Tackling critical, ambiguous challenges
 4. **Operator** — Ensuring reliability, efficiency, and operational excellence
 5. **Mentor** — Growing engineers and building organizational capability
+6. **Right Hand** — Extending executive attention across complex organizations
+7. **Glue** — Doing the essential cross-team work that holds organizations together
 
 ## Steps
 
