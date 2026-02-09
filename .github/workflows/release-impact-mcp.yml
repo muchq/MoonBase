@@ -1,6 +1,12 @@
 name: Release impact-mcp
 
 on:
+  workflow_run:
+    workflows: ["Test + Publish"]
+    types:
+      - completed
+    branches:
+      - main
   push:
     tags:
       - 'impact-mcp-v*'
@@ -8,8 +14,97 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-impact-mcp
+  cancel-in-progress: false
+
 jobs:
+  check-and-tag:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+    outputs:
+      version: ${{ steps.version_check.outputs.current_version }}
+      should_release: ${{ steps.version_check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 2  # Need previous commit to compare versions
+
+      - name: Check if version changed
+        id: version_check
+        run: |
+          # Get version from current commit
+          CURRENT_VERSION=$(grep '^version = ' domains/ai/apps/impact_mcp/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+
+          # Get version from previous commit
+          git checkout HEAD~1 -- domains/ai/apps/impact_mcp/Cargo.toml 2>/dev/null || true
+          PREVIOUS_VERSION=$(grep '^version = ' domains/ai/apps/impact_mcp/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/' || echo "")
+
+          # Restore current version
+          git checkout HEAD -- domains/ai/apps/impact_mcp/Cargo.toml
+
+          echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "previous_version=$PREVIOUS_VERSION" >> "$GITHUB_OUTPUT"
+
+          if [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ] && [ -n "$CURRENT_VERSION" ]; then
+            echo "Version changed from $PREVIOUS_VERSION to $CURRENT_VERSION"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version unchanged: $CURRENT_VERSION"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push tag
+        if: steps.version_check.outputs.changed == 'true'
+        run: |
+          VERSION="${{ steps.version_check.outputs.current_version }}"
+          TAG="impact-mcp-v${VERSION}"
+
+          # Check if tag already exists on remote
+          if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
+            echo "Tag $TAG already exists on remote, skipping"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "$TAG" -m "Release impact-mcp v${VERSION}"
+          git push origin "$TAG"
+
+          echo "Created and pushed tag: $TAG"
+
+  prepare:
+    needs: [check-and-tag]
+    if: |
+      always() &&
+      (github.event_name == 'push' ||
+       (needs.check-and-tag.result == 'success' && needs.check-and-tag.outputs.should_release == 'true'))
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      ref: ${{ steps.resolve.outputs.ref }}
+    steps:
+      - name: Resolve version and ref
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#impact-mcp-v}"
+            REF="${{ github.ref }}"
+          else
+            VERSION="${{ needs.check-and-tag.outputs.version }}"
+            TAG="impact-mcp-v${VERSION}"
+            REF="${{ github.event.workflow_run.head_sha }}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: [prepare]
     strategy:
       matrix:
         include:
@@ -20,10 +115,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
 
-      - name: Verify version matches tag
+      - name: Verify version matches Cargo.toml
+        if: github.event_name == 'push'
         run: |
-          VERSION="${GITHUB_REF_NAME#impact-mcp-v}"
+          VERSION="${{ needs.prepare.outputs.version }}"
           CARGO_VERSION=$(grep '^version = ' domains/ai/apps/impact_mcp/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           if [ "$VERSION" != "$CARGO_VERSION" ]; then
             echo "Error: Tag version ($VERSION) doesn't match Cargo.toml ($CARGO_VERSION)"
@@ -42,7 +140,7 @@ jobs:
 
       - name: Package
         run: |
-          VERSION="${GITHUB_REF_NAME#impact-mcp-v}"
+          VERSION="${{ needs.prepare.outputs.version }}"
           TARBALL="impact-mcp-${VERSION}-${{ matrix.target }}.tar.gz"
           cp bazel-bin/domains/ai/apps/impact_mcp/impact-mcp impact-mcp
           tar czf "$TARBALL" impact-mcp
@@ -57,7 +155,7 @@ jobs:
             sha256.txt
 
   release:
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -70,17 +168,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${GITHUB_REF_NAME#impact-mcp-v}"
-          gh release create "$GITHUB_REF_NAME" \
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TAG="${{ needs.prepare.outputs.tag }}"
+          gh release create "$TAG" \
             --title "impact-mcp v${VERSION}" \
             --generate-notes \
-            artifacts/**/*.tar.gz
+            artifacts/**/*.tar.gz \
+            artifacts/**/sha256.txt
 
       - name: Update Homebrew tap
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          VERSION="${GITHUB_REF_NAME#impact-mcp-v}"
+          VERSION="${{ needs.prepare.outputs.version }}"
           MAC_SHA=$(cat artifacts/aarch64-apple-darwin/sha256.txt)
           LINUX_SHA=$(cat artifacts/x86_64-unknown-linux-gnu/sha256.txt)
 
