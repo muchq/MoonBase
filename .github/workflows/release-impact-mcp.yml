@@ -141,17 +141,19 @@ jobs:
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
           TARBALL="impact-mcp-${VERSION}-${{ matrix.target }}.tar.gz"
+          SHA_FILE="impact-mcp-${VERSION}-${{ matrix.target }}.sha256.txt"
           cp bazel-bin/domains/ai/apps/impact_mcp/impact-mcp impact-mcp
           tar czf "$TARBALL" impact-mcp
-          shasum -a 256 "$TARBALL" | awk '{print $1}' > sha256.txt
+          shasum -a 256 "$TARBALL" | awk '{print $1}' > "$SHA_FILE"
           echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+          echo "SHA_FILE=$SHA_FILE" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
           path: |
             ${{ env.TARBALL }}
-            sha256.txt
+            ${{ env.SHA_FILE }}
 
   release:
     needs: [prepare, build]
@@ -174,15 +176,15 @@ jobs:
             --title "impact-mcp v${VERSION}" \
             --generate-notes \
             artifacts/**/*.tar.gz \
-            artifacts/**/sha256.txt
+            artifacts/**/*.sha256.txt
 
       - name: Update Homebrew tap
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          MAC_SHA=$(cat artifacts/aarch64-apple-darwin/sha256.txt)
-          LINUX_SHA=$(cat artifacts/x86_64-unknown-linux-gnu/sha256.txt)
+          MAC_SHA=$(cat artifacts/aarch64-apple-darwin/*.sha256.txt)
+          LINUX_SHA=$(cat artifacts/x86_64-unknown-linux-gnu/*.sha256.txt)
 
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/muchq/homebrew-muchq.git" tap
           FORMULA="tap/Formula/impact-mcp.rb"
