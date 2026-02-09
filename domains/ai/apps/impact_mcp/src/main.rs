@@ -163,6 +163,8 @@ fn run_evidence(data_dir: &PathBuf, sub: cli::EvidenceCommand) {
                         "problem_solver" | "problemsolver" => Some(Archetype::ProblemSolver),
                         "operator" => Some(Archetype::Operator),
                         "mentor" => Some(Archetype::Mentor),
+                        "right_hand" | "righthand" => Some(Archetype::RightHand),
+                        "glue" => Some(Archetype::Glue),
                         _ => None,
                     })
                     .collect();
@@ -224,8 +226,6 @@ async fn run_pull(data_dir: &PathBuf) {
 }
 
 fn run_setup_cron() {
-    use std::fs;
-
     #[cfg(not(target_os = "macos"))]
     {
         eprintln!("error: setup-cron is only supported on macOS");
@@ -236,6 +236,7 @@ fn run_setup_cron() {
 
     #[cfg(target_os = "macos")]
     {
+        use std::fs;
         println!("Setting up automatic hourly evidence pulls...\n");
 
         let home = dirs::home_dir().unwrap_or_else(|| {

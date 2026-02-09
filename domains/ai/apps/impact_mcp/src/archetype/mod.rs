@@ -18,15 +18,21 @@ pub enum Archetype {
     Operator,
     /// Multiplying others, raising the organizational bar.
     Mentor,
+    /// Extends executive attention across complex organizations.
+    RightHand,
+    /// Essential cross-team work that holds organizations together.
+    Glue,
 }
 
 impl Archetype {
-    pub const ALL: [Archetype; 5] = [
+    pub const ALL: [Archetype; 7] = [
         Self::TechLead,
         Self::Architect,
         Self::ProblemSolver,
         Self::Operator,
         Self::Mentor,
+        Self::RightHand,
+        Self::Glue,
     ];
 
     pub fn label(self) -> &'static str {
@@ -36,6 +42,8 @@ impl Archetype {
             Self::ProblemSolver => "Problem Solver",
             Self::Operator => "Operator",
             Self::Mentor => "Mentor",
+            Self::RightHand => "Right Hand",
+            Self::Glue => "Glue",
         }
     }
 
@@ -55,6 +63,12 @@ impl Archetype {
             }
             Self::Mentor => {
                 "Multiplies others' effectiveness and raises the organizational engineering bar"
+            }
+            Self::RightHand => {
+                "Extends an executive's attention, borrowing their scope and authority to operate complex organizations"
+            }
+            Self::Glue => {
+                "Does the essential cross-team work that holds organizations together — onboarding, unblocking, filling gaps, and driving alignment"
             }
         }
     }

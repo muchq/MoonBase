@@ -135,6 +135,8 @@ impl ImpactServer {
                     "problem_solver" | "problemsolver" => Some(Archetype::ProblemSolver),
                     "operator" => Some(Archetype::Operator),
                     "mentor" => Some(Archetype::Mentor),
+                    "right_hand" | "righthand" => Some(Archetype::RightHand),
+                    "glue" => Some(Archetype::Glue),
                     _ => None,
                 })
                 .collect();
@@ -179,6 +181,8 @@ impl ImpactServer {
                 "problem_solver" | "problemsolver" => Archetype::ProblemSolver,
                 "operator" => Archetype::Operator,
                 "mentor" => Archetype::Mentor,
+                "right_hand" | "righthand" => Archetype::RightHand,
+                "glue" => Archetype::Glue,
                 _ => return format!("Unknown archetype: {arch}"),
             };
             store.by_archetype(archetype)
