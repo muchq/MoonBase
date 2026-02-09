@@ -21,6 +21,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Verify version matches tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#impact-mcp-v}"
+          CARGO_VERSION=$(grep '^version = ' domains/ai/apps/impact_mcp/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          if [ "$VERSION" != "$CARGO_VERSION" ]; then
+            echo "Error: Tag version ($VERSION) doesn't match Cargo.toml ($CARGO_VERSION)"
+            exit 1
+          fi
+          echo "Version verification passed: $VERSION"
+
       - uses: bazel-contrib/setup-bazel@0.18.0
         with:
           bazelisk-cache: true
@@ -82,6 +92,7 @@ jobs:
           formula_path, version, mac_sha, linux_sha = sys.argv[1:]
           with open(formula_path) as f:
               content = f.read()
+          original_content = content
           content = re.sub(r'(  version ")[^"]*(")', rf'\g<1>{version}\g<2>', content)
           content = re.sub(
               r'(url "[^"]*aarch64-apple-darwin[^"]*"\n\s+sha256 ")[^"]*(")',
@@ -93,9 +104,19 @@ jobs:
               rf'\g<1>{linux_sha}\g<2>',
               content,
           )
+          if content == original_content:
+              print("Error: No changes made to formula. Regex patterns may not match.", file=sys.stderr)
+              sys.exit(1)
           with open(formula_path, 'w') as f:
               f.write(content)
           EOF
+
+          # Verify the formula was updated
+          if ! grep -q "version \"${VERSION}\"" "$FORMULA"; then
+            echo "Error: Formula was not updated with version ${VERSION}"
+            exit 1
+          fi
+          echo "Formula successfully updated to version ${VERSION}"
 
           cd tap
           git config user.name "github-actions[bot]"
