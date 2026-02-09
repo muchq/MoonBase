@@ -8,7 +8,6 @@ use tracing_subscriber::EnvFilter;
 
 use rmcp::ServiceExt;
 
-use impact_mcp::agent::Agent;
 use impact_mcp::archetype::Archetype;
 use impact_mcp::evidence::{EvidenceCard, EvidenceSource, EvidenceStore};
 use impact_mcp::integrations::Connector;
@@ -32,15 +31,12 @@ async fn main() {
     }
 
     match cli.command {
-        Command::Chat => run_chat(&data_dir).await,
-        Command::Status => run_status(&data_dir).await,
-        Command::Packet => run_packet(&data_dir).await,
-        Command::Readiness => run_readiness(&data_dir).await,
-        Command::Archetypes => run_archetypes(),
         Command::Rubric { subcommand } => run_rubric(&data_dir, subcommand),
         Command::Evidence { subcommand } => run_evidence(&data_dir, subcommand),
         Command::Pull => run_pull(&data_dir).await,
         Command::Serve => run_serve(&data_dir).await,
+        Command::Setup => run_setup(),
+        Command::SetupCron => run_setup_cron(),
     }
 }
 
@@ -64,88 +60,6 @@ fn load_rubric(data_dir: &PathBuf) -> Rubric {
         }
         r
     }
-}
-
-fn build_agent(data_dir: &PathBuf) -> Agent {
-    let store = EvidenceStore::open(data_dir).unwrap_or_else(|e| {
-        eprintln!("error: cannot open evidence store: {e}");
-        process::exit(1);
-    });
-    let rubric = load_rubric(data_dir);
-    Agent::with_llm(store, rubric)
-}
-
-async fn run_chat(data_dir: &PathBuf) {
-    let agent = build_agent(data_dir);
-
-    println!("impact-mcp v{}", env!("CARGO_PKG_VERSION"));
-    if let Some(model) = agent.model_name() {
-        println!("LLM: {model}");
-    } else {
-        println!("LLM: disabled (set ANTHROPIC_API_KEY or OPENAI_API_KEY to enable)");
-    }
-    println!("Type \"help\" for commands, \"quit\" to exit.\n");
-
-    let mut rl = rustyline::DefaultEditor::new().unwrap_or_else(|e| {
-        eprintln!("error: cannot initialize readline: {e}");
-        process::exit(1);
-    });
-
-    loop {
-        match rl.readline("impact-mcp> ") {
-            Ok(line) => {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                if trimmed == "quit" || trimmed == "exit" {
-                    break;
-                }
-                let _ = rl.add_history_entry(trimmed);
-                let response = agent.handle(trimmed).await;
-                println!("\n{response}");
-            }
-            Err(
-                rustyline::error::ReadlineError::Interrupted
-                | rustyline::error::ReadlineError::Eof,
-            ) => {
-                break;
-            }
-            Err(e) => {
-                eprintln!("error: {e}");
-                break;
-            }
-        }
-    }
-}
-
-async fn run_status(data_dir: &PathBuf) {
-    let agent = build_agent(data_dir);
-    let response = agent.handle("draft my weekly status update").await;
-    println!("{response}");
-}
-
-async fn run_packet(data_dir: &PathBuf) {
-    let agent = build_agent(data_dir);
-    let response = agent.handle("update my promotion packet").await;
-    println!("{response}");
-}
-
-async fn run_readiness(data_dir: &PathBuf) {
-    let agent = build_agent(data_dir);
-    let response = agent.handle("explain my readiness score").await;
-    println!("{response}");
-}
-
-fn run_archetypes() {
-    println!("Staff Archetypes:\n");
-    for arch in Archetype::ALL {
-        println!("  {:<15} {}", arch.label(), arch.description());
-    }
-    println!(
-        "\nArchetypes are advisory and combinable. Select yours with \
-         `impact-mcp chat` and ask \"which archetype should I lean into?\""
-    );
 }
 
 fn run_rubric(data_dir: &PathBuf, sub: cli::RubricCommand) {
@@ -309,13 +223,230 @@ async fn run_pull(data_dir: &PathBuf) {
     println!("\n{total} total evidence card(s) added.");
 }
 
-async fn run_serve(data_dir: &PathBuf) {
-    let store = EvidenceStore::open(data_dir).unwrap_or_else(|e| {
-        eprintln!("error: cannot open evidence store: {e}");
+fn run_setup_cron() {
+    use std::fs;
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        eprintln!("error: setup-cron is only supported on macOS");
+        eprintln!("For other platforms, set up a cron job manually:");
+        eprintln!("  0 * * * * impact-mcp pull");
+        process::exit(1);
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        println!("Setting up automatic hourly evidence pulls...\n");
+
+        let home = dirs::home_dir().unwrap_or_else(|| {
+            eprintln!("error: cannot determine home directory");
+            process::exit(1);
+        });
+
+        let launch_agents_dir = home.join("Library/LaunchAgents");
+        if let Err(e) = fs::create_dir_all(&launch_agents_dir) {
+            eprintln!("error: cannot create ~/Library/LaunchAgents/: {e}");
+            process::exit(1);
+        }
+
+        // Get the plist template
+        let exe_path = std::env::current_exe().unwrap_or_else(|e| {
+            eprintln!("error: cannot determine executable path: {e}");
+            process::exit(1);
+        });
+        let exe_dir = exe_path.parent().unwrap_or_else(|| {
+            eprintln!("error: cannot determine executable directory");
+            process::exit(1);
+        });
+
+        let plist_source = if exe_dir.join("../../install/com.impact-mcp.pull.plist").exists() {
+            exe_dir.join("../../install/com.impact-mcp.pull.plist")
+        } else if exe_dir.join("../install/com.impact-mcp.pull.plist").exists() {
+            exe_dir.join("../install/com.impact-mcp.pull.plist")
+        } else {
+            let cwd = std::env::current_dir().unwrap_or_else(|e| {
+                eprintln!("error: cannot determine current directory: {e}");
+                process::exit(1);
+            });
+            cwd.join("domains/ai/apps/impact_mcp/install/com.impact-mcp.pull.plist")
+        };
+
+        if !plist_source.exists() {
+            eprintln!("error: cannot find plist template at {}", plist_source.display());
+            process::exit(1);
+        }
+
+        let plist_content = fs::read_to_string(&plist_source).unwrap_or_else(|e| {
+            eprintln!("error: cannot read plist template: {e}");
+            process::exit(1);
+        });
+
+        // Replace placeholders
+        let binary_path = exe_path.display().to_string();
+        let home_path = home.display().to_string();
+        let plist_content = plist_content
+            .replace("BINARY_PATH_PLACEHOLDER", &binary_path)
+            .replace("HOME_PLACEHOLDER", &home_path);
+
+        let plist_dest = launch_agents_dir.join("com.impact-mcp.pull.plist");
+        match fs::write(&plist_dest, plist_content) {
+            Ok(_) => println!("  [ok]   Wrote {}", plist_dest.display()),
+            Err(e) => {
+                eprintln!("  [err]  Failed to write plist: {e}");
+                process::exit(1);
+            }
+        }
+
+        // Load the agent
+        use std::process::Command;
+        match Command::new("launchctl")
+            .args(["load", plist_dest.to_str().unwrap()])
+            .output()
+        {
+            Ok(output) => {
+                if output.status.success() {
+                    println!("  [ok]   LaunchAgent loaded");
+                } else {
+                    eprintln!(
+                        "  [warn] LaunchAgent load failed: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!("  [warn] Failed to load LaunchAgent: {e}");
+            }
+        }
+
+        println!("\n✓ Automatic hourly pulls configured!");
+        println!("\nThe LaunchAgent will run `impact-mcp pull` every hour.");
+        println!("Logs: ~/.impact-mcp/pull.log");
+        println!("Errors: ~/.impact-mcp/pull.err.log");
+        println!("\nTo stop automatic pulls:");
+        println!("  launchctl unload ~/Library/LaunchAgents/com.impact-mcp.pull.plist");
+    }
+}
+
+fn run_setup() {
+    use std::fs;
+
+    println!("Setting up impact-mcp integration with Claude...\n");
+
+    // 1. Copy command files to ~/.claude/commands/
+    let home = dirs::home_dir().unwrap_or_else(|| {
+        eprintln!("error: cannot determine home directory");
         process::exit(1);
     });
-    let rubric = load_rubric(data_dir);
-    let server = ImpactServer::new(store, rubric);
+
+    let claude_commands_dir = home.join(".claude/commands");
+    if let Err(e) = fs::create_dir_all(&claude_commands_dir) {
+        eprintln!("error: cannot create ~/.claude/commands/: {e}");
+        process::exit(1);
+    }
+
+    // Get the executable's directory to find bundled commands
+    let exe_path = std::env::current_exe().unwrap_or_else(|e| {
+        eprintln!("error: cannot determine executable path: {e}");
+        process::exit(1);
+    });
+    let exe_dir = exe_path.parent().unwrap_or_else(|| {
+        eprintln!("error: cannot determine executable directory");
+        process::exit(1);
+    });
+
+    // In dev mode, commands are in source tree; in release, they're bundled
+    let commands_source = if exe_dir.join("../../commands").exists() {
+        exe_dir.join("../../commands")
+    } else if exe_dir.join("../commands").exists() {
+        exe_dir.join("../commands")
+    } else {
+        // Look in current directory (for bazel runs)
+        let cwd = std::env::current_dir().unwrap_or_else(|e| {
+            eprintln!("error: cannot determine current directory: {e}");
+            process::exit(1);
+        });
+        cwd.join("domains/ai/apps/impact_mcp/commands")
+    };
+
+    let command_files = [
+        "impact-status.md",
+        "impact-packet.md",
+        "impact-gaps.md",
+        "impact-readiness.md",
+        "impact-archetypes.md",
+    ];
+
+    println!("Installing Claude commands:");
+    for file in &command_files {
+        let src = commands_source.join(file);
+        let dst = claude_commands_dir.join(file);
+
+        if !src.exists() {
+            eprintln!("  [skip] {} — source not found at {}", file, src.display());
+            continue;
+        }
+
+        match fs::copy(&src, &dst) {
+            Ok(_) => println!("  [ok]   {} → {}", file, dst.display()),
+            Err(e) => eprintln!("  [err]  {} — {}", file, e),
+        }
+    }
+
+    // 2. Update ~/.claude/settings.json with MCP server config
+    println!("\nMCP Server Configuration:");
+    let settings_path = home.join(".claude/settings.json");
+
+    let binary_path = std::env::current_exe()
+        .unwrap_or_else(|_| PathBuf::from("impact-mcp"))
+        .display()
+        .to_string();
+
+    let mcp_config = serde_json::json!({
+        "command": binary_path,
+        "args": ["serve"],
+        "env": {}
+    });
+
+    let mut settings = if settings_path.exists() {
+        let content = fs::read_to_string(&settings_path).unwrap_or_else(|e| {
+            eprintln!("warning: cannot read settings.json: {e}");
+            String::from("{}")
+        });
+        serde_json::from_str::<serde_json::Value>(&content).unwrap_or_else(|e| {
+            eprintln!("warning: cannot parse settings.json: {e}");
+            serde_json::json!({})
+        })
+    } else {
+        serde_json::json!({})
+    };
+
+    // Ensure mcpServers object exists
+    if !settings.get("mcpServers").is_some() {
+        settings["mcpServers"] = serde_json::json!({});
+    }
+
+    // Add or update impact-mcp entry
+    settings["mcpServers"]["impact-mcp"] = mcp_config;
+
+    match fs::write(&settings_path, serde_json::to_string_pretty(&settings).unwrap()) {
+        Ok(_) => println!("  [ok]   Updated {}", settings_path.display()),
+        Err(e) => {
+            eprintln!("  [err]  Failed to write settings.json: {e}");
+            process::exit(1);
+        }
+    }
+
+    println!("\n✓ Setup complete!");
+    println!("\nNext steps:");
+    println!("  1. Restart Claude Code to load the new MCP server");
+    println!("  2. Use commands like /impact-status or /impact-packet");
+    println!("  3. Add evidence with: impact-mcp evidence add --summary \"...\"");
+    println!("  4. Pull from integrations: impact-mcp pull");
+    println!("\nFor automatic hourly pulls, run: impact-mcp setup-cron");
+}
+
+async fn run_serve(data_dir: &PathBuf) {
+    let server = ImpactServer::new(data_dir.clone());
     let transport = rmcp::transport::io::stdio();
     let service = server.serve(transport).await.unwrap_or_else(|e| {
         eprintln!("error: MCP server failed to start: {e}");

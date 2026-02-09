@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.impact-mcp.pull</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>BINARY_PATH_PLACEHOLDER</string>
+        <string>pull</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>HOME_PLACEHOLDER/.impact-mcp/pull.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>HOME_PLACEHOLDER/.impact-mcp/pull.err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>
