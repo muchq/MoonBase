@@ -45,6 +45,7 @@ rust_binary(
         "src/cli.rs",
         "src/main.rs",
     ],
+    compile_data = glob(["commands/*.md"]),
     crate_name = "impact_mcp_bin",
     deps = all_crate_deps() + [":impact_mcp_lib"],
 )
@@ -52,7 +53,11 @@ rust_binary(
 rust_test(
     name = "test_impact_mcp",
     size = "small",
+    compile_data = glob(["commands/*.md"]),
     crate = ":impact-mcp",
+    deps = crate_deps([
+        "tempfile",
+    ]),
 )
 
 rust_test(

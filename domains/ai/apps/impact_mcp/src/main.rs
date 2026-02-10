@@ -37,7 +37,10 @@ async fn main() {
         Command::WeeklyUpdate => run_weekly_update(&data_dir),
         Command::Pull { claude, codex } => run_pull(&data_dir, claude, codex).await,
         Command::Serve => run_serve(&data_dir).await,
-        Command::Setup => run_setup(),
+        Command::Setup {
+            claude_skills_dir,
+            codex_skills_dir,
+        } => run_setup(claude_skills_dir, codex_skills_dir),
         Command::SetupCron => run_setup_cron(),
     }
 }
@@ -421,73 +424,63 @@ fn run_setup_cron() {
     }
 }
 
-fn run_setup() {
+const SKILLS: &[(&str, &str)] = &[
+    (
+        "impact-status.md",
+        include_str!("../commands/impact-status.md"),
+    ),
+    (
+        "impact-packet.md",
+        include_str!("../commands/impact-packet.md"),
+    ),
+    (
+        "impact-gaps.md",
+        include_str!("../commands/impact-gaps.md"),
+    ),
+    (
+        "impact-readiness.md",
+        include_str!("../commands/impact-readiness.md"),
+    ),
+    (
+        "impact-archetypes.md",
+        include_str!("../commands/impact-archetypes.md"),
+    ),
+    (
+        "impact-projects.md",
+        include_str!("../commands/impact-projects.md"),
+    ),
+];
+
+fn install_skills(target_dir: &std::path::Path) {
+    if let Err(e) = std::fs::create_dir_all(target_dir) {
+        eprintln!("error: cannot create {}: {e}", target_dir.display());
+        process::exit(1);
+    }
+
+    println!("Installing skills to {}:", target_dir.display());
+    for (filename, content) in SKILLS {
+        let dst = target_dir.join(filename);
+        match std::fs::write(&dst, content) {
+            Ok(_) => println!("  [ok]   {} → {}", filename, dst.display()),
+            Err(e) => eprintln!("  [err]  {} — {}", filename, e),
+        }
+    }
+}
+
+fn run_setup(claude_skills_dir: Option<PathBuf>, codex_skills_dir: Option<PathBuf>) {
     use std::fs;
 
-    println!("Setting up impact-mcp integration with Claude...\n");
+    println!("Setting up impact-mcp integration...\n");
 
-    // 1. Copy command files to ~/.claude/commands/
     let home = dirs::home_dir().unwrap_or_else(|| {
         eprintln!("error: cannot determine home directory");
         process::exit(1);
     });
 
-    let claude_commands_dir = home.join(".claude/commands");
-    if let Err(e) = fs::create_dir_all(&claude_commands_dir) {
-        eprintln!("error: cannot create ~/.claude/commands/: {e}");
-        process::exit(1);
-    }
+    let claude_target = claude_skills_dir.unwrap_or_else(|| home.join(".claude/skills"));
+    install_skills(&claude_target);
 
-    // Get the executable's directory to find bundled commands
-    let exe_path = std::env::current_exe().unwrap_or_else(|e| {
-        eprintln!("error: cannot determine executable path: {e}");
-        process::exit(1);
-    });
-    let exe_dir = exe_path.parent().unwrap_or_else(|| {
-        eprintln!("error: cannot determine executable directory");
-        process::exit(1);
-    });
-
-    // In dev mode, commands are in source tree; in release, they're bundled
-    let commands_source = if exe_dir.join("../../commands").exists() {
-        exe_dir.join("../../commands")
-    } else if exe_dir.join("../commands").exists() {
-        exe_dir.join("../commands")
-    } else {
-        // Look in current directory (for bazel runs)
-        let cwd = std::env::current_dir().unwrap_or_else(|e| {
-            eprintln!("error: cannot determine current directory: {e}");
-            process::exit(1);
-        });
-        cwd.join("domains/ai/apps/impact_mcp/commands")
-    };
-
-    let command_files = [
-        "impact-status.md",
-        "impact-packet.md",
-        "impact-gaps.md",
-        "impact-readiness.md",
-        "impact-archetypes.md",
-        "impact-projects.md",
-    ];
-
-    println!("Installing Claude commands:");
-    for file in &command_files {
-        let src = commands_source.join(file);
-        let dst = claude_commands_dir.join(file);
-
-        if !src.exists() {
-            eprintln!("  [skip] {} — source not found at {}", file, src.display());
-            continue;
-        }
-
-        match fs::copy(&src, &dst) {
-            Ok(_) => println!("  [ok]   {} → {}", file, dst.display()),
-            Err(e) => eprintln!("  [err]  {} — {}", file, e),
-        }
-    }
-
-    // 2. Update ~/.claude/settings.json with MCP server config
+    // Update ~/.claude/settings.json with MCP server config
     println!("\nMCP Server Configuration:");
     let settings_path = home.join(".claude/settings.json");
 
@@ -531,12 +524,16 @@ fn run_setup() {
         }
     }
 
+    // Install Codex skills
+    let codex_target = codex_skills_dir.unwrap_or_else(|| home.join(".codex/skills"));
+    install_skills(&codex_target);
+
     println!("\n✓ Setup complete!");
     println!("\nNext steps:");
-    println!("  1. Restart Claude Code to load the new MCP server");
-    println!("  2. Use commands like /impact-status or /impact-packet");
-    println!("  3. Add evidence with: impact-mcp evidence add --summary \"...\"");
-    println!("  4. Pull from integrations: impact-mcp pull");
+    println!("  * Restart Claude Code to load the new MCP server");
+    println!("  * Use commands like /impact-status or /impact-packet");
+    println!("  * Add evidence with: impact-mcp evidence add --summary \"...\"");
+    println!("  * Pull from integrations: impact-mcp pull");
     println!("\nFor automatic hourly pulls, run: impact-mcp setup-cron");
 }
 
@@ -551,4 +548,23 @@ async fn run_serve(data_dir: &PathBuf) {
         eprintln!("error: MCP server error: {e}");
         process::exit(1);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn install_skills_copies_all_embedded_skills() {
+        let dir = TempDir::new().unwrap();
+        install_skills(dir.path());
+
+        for (filename, content) in SKILLS {
+            let path = dir.path().join(filename);
+            assert!(path.exists(), "{} should exist", filename);
+            let on_disk = std::fs::read_to_string(path).unwrap();
+            assert_eq!(on_disk, *content, "{} content mismatch", filename);
+        }
+    }
 }
