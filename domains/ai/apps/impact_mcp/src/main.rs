@@ -529,6 +529,7 @@ fn run_setup() {
         "impact-gaps.md",
         "impact-readiness.md",
         "impact-archetypes.md",
+        "impact-projects.md",
     ];
 
     println!("Installing Claude commands:");
