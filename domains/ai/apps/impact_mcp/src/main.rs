@@ -1,8 +1,7 @@
-mod cli;
-
 use std::path::PathBuf;
 use std::process;
 
+use chrono::{Duration, Local, Utc};
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
@@ -11,10 +10,11 @@ use rmcp::ServiceExt;
 use impact_mcp::archetype::Archetype;
 use impact_mcp::evidence::{EvidenceCard, EvidenceSource, EvidenceStore};
 use impact_mcp::integrations::Connector;
+use impact_mcp::projects::ProjectStore;
+use impact_mcp::prompts::generate_pull_prompt;
+use impact_mcp::cli::{self, Cli, Command};
 use impact_mcp::rubric::{self, Rubric};
 use impact_mcp::server::ImpactServer;
-
-use crate::cli::{Cli, Command};
 
 #[tokio::main]
 async fn main() {
@@ -33,7 +33,9 @@ async fn main() {
     match cli.command {
         Command::Rubric { subcommand } => run_rubric(&data_dir, subcommand),
         Command::Evidence { subcommand } => run_evidence(&data_dir, subcommand),
-        Command::Pull => run_pull(&data_dir).await,
+        Command::Projects { subcommand } => run_projects(&data_dir, subcommand),
+        Command::WeeklyUpdate => run_weekly_update(&data_dir),
+        Command::Pull { claude, codex } => run_pull(&data_dir, claude, codex).await,
         Command::Serve => run_serve(&data_dir).await,
         Command::Setup => run_setup(),
         Command::SetupCron => run_setup_cron(),
@@ -182,17 +184,108 @@ fn run_evidence(data_dir: &PathBuf, sub: cli::EvidenceCommand) {
     }
 }
 
-async fn run_pull(data_dir: &PathBuf) {
+fn run_projects(data_dir: &PathBuf, sub: cli::ProjectsCommand) {
+    let mut store = ProjectStore::open(data_dir).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        process::exit(1);
+    });
+
+    if let Err(e) =
+        impact_mcp::projects::handle_project_command(&mut store, sub, &mut std::io::stdout())
+    {
+        eprintln!("error: {e}");
+        process::exit(1);
+    }
+}
+
+fn run_weekly_update(data_dir: &PathBuf) {
+    let pstore = ProjectStore::open(data_dir).unwrap_or_else(|e| {
+        eprintln!("error opening project store: {e}");
+        process::exit(1);
+    });
+
+    println!("# Weekly Update");
+    println!("Date: {}\n", Local::now().format("%Y-%m-%d"));
+
+    let projects = pstore.all();
+    if projects.is_empty() {
+        println!("_(No tracked projects)_");
+    } else {
+        for project in projects {
+            println!("## {} ({})", project.name, project.role);
+            println!(
+                "**Status:** {} ({:.0}% complete)",
+                project.status,
+                project.completion * 100.0
+            );
+            println!("**Highlights:**");
+            println!("* ");
+            println!("**Blockers:**");
+            println!("* None\n");
+        }
+    }
+
+    // Recent evidence
+    if let Ok(estore) = EvidenceStore::open(data_dir) {
+        let now = Utc::now();
+        let week_ago = now - Duration::days(7);
+        let mut cards: Vec<_> = estore
+            .all()
+            .into_iter()
+            .filter(|c| c.timestamp >= week_ago)
+            .collect();
+        // Sort by timestamp descending
+        cards.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+        if !cards.is_empty() {
+            println!("## Recent Evidence (Last 7 Days)");
+            for card in cards {
+                println!("* [{}] {}", card.source, card.summary);
+            }
+            println!();
+        }
+    }
+}
+
+async fn run_pull(data_dir: &PathBuf, claude: bool, codex: bool) {
+    if claude || codex {
+        let binary = if claude { "claude" } else { "codex" };
+
+        let store_opt = ProjectStore::open(data_dir).ok();
+        let projects = if let Some(ref store) = store_opt {
+            store.all()
+        } else {
+            Vec::new()
+        };
+
+        let prompt = generate_pull_prompt(&projects);
+
+        println!("Invoking {} with prompt...\n", binary);
+
+        let status = std::process::Command::new(binary).arg(prompt).status();
+
+        match status {
+            Ok(s) => {
+                if !s.success() {
+                    eprintln!("{} exited with status: {}", binary, s);
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to run {}: {}", binary, e);
+                eprintln!("Make sure it is installed and in your PATH.");
+            }
+        }
+        return;
+    }
+
     use impact_mcp::integrations::{
-        gdocs::GdocsConnector, github::GithubConnector, jira::JiraConnector,
-        slack::SlackConnector,
+        github::GithubConnector, jira::JiraConnector, slack::SlackConnector,
     };
 
     let connectors: Vec<Box<dyn Connector>> = vec![
         Box::new(GithubConnector::new()),
         Box::new(JiraConnector::new()),
         Box::new(SlackConnector::new()),
-        Box::new(GdocsConnector::new()),
     ];
 
     let mut store = EvidenceStore::open(data_dir).unwrap_or_else(|e| {
@@ -375,6 +468,7 @@ fn run_setup() {
         "impact-gaps.md",
         "impact-readiness.md",
         "impact-archetypes.md",
+        "impact-projects.md",
     ];
 
     println!("Installing Claude commands:");
