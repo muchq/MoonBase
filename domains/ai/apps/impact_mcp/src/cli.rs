@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "impact-mcp",
     about = "impact-mcp — amplify your impact and make it visible",
-    version = "0.0.7-alpha",
+    version,
     long_about = "A local-first AI agent that helps engineers capture evidence of impact, \
                    understand role expectations, close gaps, and communicate contributions \
                    clearly — for better project results and growth in your career."
@@ -40,16 +40,16 @@ pub enum Command {
         subcommand: ProjectsCommand,
     },
 
-    /// Generate a weekly status update.
+    /// Generate a weekly update summary template.
     WeeklyUpdate,
 
     /// Pull new evidence from configured integrations.
     Pull {
-        /// Only run the Claude prompt generation (print prompt to stdout).
+        /// Use Claude to pull evidence (via MCP).
         #[arg(long)]
         claude: bool,
 
-        /// Only run the Codex prompt generation (print prompt to stdout).
+        /// Use Codex to pull evidence (via MCP).
         #[arg(long)]
         codex: bool,
     },
@@ -57,16 +57,8 @@ pub enum Command {
     /// Start as an MCP server over stdio.
     Serve,
 
-    /// Set up skills and MCP configuration.
-    Setup {
-        /// Install Claude skills to this directory.
-        #[arg(long)]
-        claude_skills_dir: Option<PathBuf>,
-
-        /// Install Codex skills to this directory.
-        #[arg(long)]
-        codex_skills_dir: Option<PathBuf>,
-    },
+    /// Set up Claude integration (commands and MCP server config).
+    Setup,
 
     /// Set up automatic hourly evidence pulls (macOS only).
     SetupCron,
@@ -127,25 +119,25 @@ pub enum ProjectsCommand {
         #[arg(long)]
         name: String,
 
-        /// Your role on the project (e.g. "Tech Lead", "Contributor").
+        /// Your role in the project.
         #[arg(long)]
         role: String,
 
-        /// Status of the project (e.g. "On Track", "At Risk").
-        #[arg(long, default_value = "Active")]
-        status: String,
-
-        /// Estimated completion percentage (0.0-1.0).
-        #[arg(long, default_value = "0.0")]
-        completion: f64,
-
-        /// Comma-separated list of Jira project keys to track (e.g. "PROJ,TEAM").
+        /// Related Jira projects (comma-separated).
         #[arg(long)]
         jira: Option<String>,
 
-        /// Comma-separated list of Git repositories to track (e.g. "owner/repo").
+        /// Related Git repositories (comma-separated).
         #[arg(long)]
         repos: Option<String>,
+
+        /// Status of the project (e.g. "Active", "Planning", "Done").
+        #[arg(long, default_value = "Active")]
+        status: String,
+
+        /// Completion percentage (0.0 - 1.0).
+        #[arg(long, default_value = "0.0")]
+        completion: f64,
     },
 
     /// Update an existing project.
@@ -154,7 +146,7 @@ pub enum ProjectsCommand {
         #[arg(long)]
         name: String,
 
-        /// New role.
+        /// New role in the project.
         #[arg(long)]
         role: Option<String>,
 
@@ -162,20 +154,20 @@ pub enum ProjectsCommand {
         #[arg(long)]
         status: Option<String>,
 
-        /// New completion percentage (0.0-1.0).
+        /// New completion percentage (0.0 - 1.0).
         #[arg(long)]
         completion: Option<f64>,
 
-        /// Add Jira projects (comma-separated).
+        /// New Jira projects (comma-separated).
         #[arg(long)]
         jira: Option<String>,
 
-        /// Add Git repos (comma-separated).
+        /// New Git repositories (comma-separated).
         #[arg(long)]
         repos: Option<String>,
     },
 
-    /// Remove a tracked project.
+    /// Remove a project.
     Remove {
         /// Name of the project to remove.
         #[arg(long)]
