@@ -1,6 +1,6 @@
 # MoonBase
 
-![Test + Publish](https://github.com/muchq/MoonBase/actions/workflows/publish.yml/badge.svg)
+![Test and Publish](https://github.com/muchq/MoonBase/actions/workflows/publish.yml/badge.svg)
 
 a polyglot playground for experiments in application architecture, API design, library ergonomics, and developer tooling.
 
