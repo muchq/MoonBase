@@ -282,15 +282,13 @@ impl ImpactServer {
     )]
     async fn pull_all(&self) -> String {
         use crate::integrations::{
-            gdocs::GdocsConnector, github::GithubConnector, jira::JiraConnector,
-            slack::SlackConnector, Connector,
+            github::GithubConnector, jira::JiraConnector, slack::SlackConnector, Connector,
         };
 
         let connectors: Vec<Box<dyn Connector>> = vec![
             Box::new(GithubConnector::new()),
             Box::new(JiraConnector::new()),
             Box::new(SlackConnector::new()),
-            Box::new(GdocsConnector::new()),
         ];
 
         let mut store = match self.open_store() {
@@ -332,15 +330,13 @@ impl ImpactServer {
     )]
     async fn pull_source(&self, Parameters(req): Parameters<PullSourceRequest>) -> String {
         use crate::integrations::{
-            gdocs::GdocsConnector, github::GithubConnector, jira::JiraConnector,
-            slack::SlackConnector, Connector,
+            github::GithubConnector, jira::JiraConnector, slack::SlackConnector, Connector,
         };
 
         let connector: Box<dyn Connector> = match req.source.to_lowercase().as_str() {
             "github" => Box::new(GithubConnector::new()),
             "jira" => Box::new(JiraConnector::new()),
             "slack" => Box::new(SlackConnector::new()),
-            "gdocs" => Box::new(GdocsConnector::new()),
             _ => return format!("Unknown source: {}", req.source),
         };
 

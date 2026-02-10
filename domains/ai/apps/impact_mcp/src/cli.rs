@@ -34,8 +34,25 @@ pub enum Command {
         subcommand: EvidenceCommand,
     },
 
+    /// Manage tracked projects.
+    Projects {
+        #[command(subcommand)]
+        subcommand: ProjectsCommand,
+    },
+
+    /// Generate a weekly update summary template.
+    WeeklyUpdate,
+
     /// Pull new evidence from configured integrations.
-    Pull,
+    Pull {
+        /// Use Claude to pull evidence (via MCP).
+        #[arg(long)]
+        claude: bool,
+
+        /// Use Codex to pull evidence (via MCP).
+        #[arg(long)]
+        codex: bool,
+    },
 
     /// Start as an MCP server over stdio.
     Serve,
@@ -88,5 +105,37 @@ pub enum EvidenceCommand {
         /// Comma-separated archetype tags (e.g. "tech_lead,architect").
         #[arg(long)]
         archetype_tags: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ProjectsCommand {
+    /// List all tracked projects.
+    List,
+
+    /// Add a new project.
+    Add {
+        /// Name of the project.
+        #[arg(long)]
+        name: String,
+
+        /// Your role in the project.
+        #[arg(long)]
+        role: String,
+
+        /// Related Jira projects (comma-separated).
+        #[arg(long)]
+        jira: Option<String>,
+
+        /// Related Git repositories (comma-separated).
+        #[arg(long)]
+        repos: Option<String>,
+    },
+
+    /// Remove a project.
+    Remove {
+        /// Name of the project to remove.
+        #[arg(long)]
+        name: String,
     },
 }

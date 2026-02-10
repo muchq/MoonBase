@@ -3,6 +3,7 @@ mod cli;
 use std::path::PathBuf;
 use std::process;
 
+use chrono::{Duration, Local, Utc};
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
@@ -11,6 +12,7 @@ use rmcp::ServiceExt;
 use impact_mcp::archetype::Archetype;
 use impact_mcp::evidence::{EvidenceCard, EvidenceSource, EvidenceStore};
 use impact_mcp::integrations::Connector;
+use impact_mcp::projects::{Project, ProjectStore};
 use impact_mcp::rubric::{self, Rubric};
 use impact_mcp::server::ImpactServer;
 
@@ -33,7 +35,9 @@ async fn main() {
     match cli.command {
         Command::Rubric { subcommand } => run_rubric(&data_dir, subcommand),
         Command::Evidence { subcommand } => run_evidence(&data_dir, subcommand),
-        Command::Pull => run_pull(&data_dir).await,
+        Command::Projects { subcommand } => run_projects(&data_dir, subcommand),
+        Command::WeeklyUpdate => run_weekly_update(&data_dir),
+        Command::Pull { claude, codex } => run_pull(&data_dir, claude, codex).await,
         Command::Serve => run_serve(&data_dir).await,
         Command::Setup => run_setup(),
         Command::SetupCron => run_setup_cron(),
@@ -182,17 +186,167 @@ fn run_evidence(data_dir: &PathBuf, sub: cli::EvidenceCommand) {
     }
 }
 
-async fn run_pull(data_dir: &PathBuf) {
+fn run_projects(data_dir: &PathBuf, sub: cli::ProjectsCommand) {
+    let mut store = ProjectStore::open(data_dir).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        process::exit(1);
+    });
+
+    match sub {
+        cli::ProjectsCommand::List => {
+            let projects = store.all();
+            if projects.is_empty() {
+                println!("No tracked projects. Use `impact-mcp projects add`.");
+                return;
+            }
+            println!("{} tracked project(s):\n", projects.len());
+            for p in &projects {
+                println!("  * {} (Role: {})", p.name, p.role);
+                if !p.jira_projects.is_empty() {
+                    println!("    Jira: {}", p.jira_projects.join(", "));
+                }
+                if !p.git_repos.is_empty() {
+                    println!("    Repos: {}", p.git_repos.join(", "));
+                }
+            }
+        }
+        cli::ProjectsCommand::Add {
+            name,
+            role,
+            jira,
+            repos,
+        } => {
+            let mut project = Project::new(&name, &role);
+            if let Some(j) = jira {
+                project = project.with_jira_projects(j.split(',').map(|s| s.trim().to_string()).collect());
+            }
+            if let Some(r) = repos {
+                project = project.with_git_repos(r.split(',').map(|s| s.trim().to_string()).collect());
+            }
+
+            match store.insert(project) {
+                Ok(()) => println!("Project \"{}\" added.", name),
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    process::exit(1);
+                }
+            }
+        }
+        cli::ProjectsCommand::Remove { name } => {
+            match store.remove_by_name(&name) {
+                Ok(Some(_)) => println!("Project \"{}\" removed.", name),
+                Ok(None) => println!("Project \"{}\" not found.", name),
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    process::exit(1);
+                }
+            }
+        }
+    }
+}
+
+fn run_weekly_update(data_dir: &PathBuf) {
+    let pstore = ProjectStore::open(data_dir).unwrap_or_else(|e| {
+        eprintln!("error opening project store: {e}");
+        process::exit(1);
+    });
+
+    println!("# Weekly Update");
+    println!("Date: {}\n", Local::now().format("%Y-%m-%d"));
+
+    let projects = pstore.all();
+    if projects.is_empty() {
+        println!("_(No tracked projects)_");
+    } else {
+        for project in projects {
+            println!("## {} ({})", project.name, project.role);
+            println!("**Status:** [On Track | At Risk | Off Track]");
+            println!("**Highlights:**");
+            println!("* ");
+            println!("**Blockers:**");
+            println!("* None\n");
+        }
+    }
+
+    // Recent evidence
+    if let Ok(estore) = EvidenceStore::open(data_dir) {
+        let now = Utc::now();
+        let week_ago = now - Duration::days(7);
+        let mut cards: Vec<_> = estore
+            .all()
+            .into_iter()
+            .filter(|c| c.timestamp >= week_ago)
+            .collect();
+        // Sort by timestamp descending
+        cards.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+        if !cards.is_empty() {
+            println!("## Recent Evidence (Last 7 Days)");
+            for card in cards {
+                println!("* [{}] {}", card.source, card.summary);
+            }
+            println!();
+        }
+    }
+}
+
+async fn run_pull(data_dir: &PathBuf, claude: bool, codex: bool) {
+    if claude || codex {
+        let binary = if claude { "claude" } else { "codex" };
+        let mut prompt = String::new();
+        prompt.push_str("You are an AI assistant helping me track my impact. Please use your available MCP tools to pull relevant evidence for my projects.\n\n");
+
+        if let Ok(store) = ProjectStore::open(data_dir) {
+            let projects = store.all();
+            if !projects.is_empty() {
+                prompt.push_str("My current projects are:\n");
+                for p in projects {
+                    prompt.push_str(&format!("* {} (Role: {})\n", p.name, p.role));
+                    if !p.jira_projects.is_empty() {
+                        prompt.push_str(&format!(
+                            "  - Jira Projects: {}\n",
+                            p.jira_projects.join(", ")
+                        ));
+                    }
+                    if !p.git_repos.is_empty() {
+                        prompt.push_str(&format!("  - Git Repos: {}\n", p.git_repos.join(", ")));
+                    }
+                }
+                prompt.push_str("\n");
+            }
+        }
+
+        prompt.push_str("For each project, please:\n");
+        prompt.push_str("1. Check for recent activity (last 7 days) in the associated Git repositories (PRs, commits, reviews) using `gh`.\n");
+        prompt.push_str("2. Check for recent updates in Jira tickets or Confluence pages using `atlassian`.\n");
+        prompt.push_str("3. Summarize the findings and ask me if I want to save any of them as evidence cards using `impact-mcp evidence add`.\n");
+
+        println!("Invoking {} with prompt...\n", binary);
+
+        let status = std::process::Command::new(binary).arg(prompt).status();
+
+        match status {
+            Ok(s) => {
+                if !s.success() {
+                    eprintln!("{} exited with status: {}", binary, s);
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to run {}: {}", binary, e);
+                eprintln!("Make sure it is installed and in your PATH.");
+            }
+        }
+        return;
+    }
+
     use impact_mcp::integrations::{
-        gdocs::GdocsConnector, github::GithubConnector, jira::JiraConnector,
-        slack::SlackConnector,
+        github::GithubConnector, jira::JiraConnector, slack::SlackConnector,
     };
 
     let connectors: Vec<Box<dyn Connector>> = vec![
         Box::new(GithubConnector::new()),
         Box::new(JiraConnector::new()),
         Box::new(SlackConnector::new()),
-        Box::new(GdocsConnector::new()),
     ];
 
     let mut store = EvidenceStore::open(data_dir).unwrap_or_else(|e| {
