@@ -30,6 +30,7 @@ imagine = { path = "domains/graphics/libs/imagine_rust" }
 log = "0.4.29"
 mongodb = "3.5.0"
 prost = { version = "0.14.3" }
+prost-types = { version = "0.14.3", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 server_pal = { path = "domains/platform/libs/server_pal" }
@@ -39,6 +40,8 @@ tokio = { version = "1.49.0", default-features = false, features = ["macros", "n
 tonic = { version = "0.14.2", features = ["transport"] }
 tonic-prost = "0.14.2"
 tonic-prost-build = "0.14.2"
+protoc-gen-prost = "0.5.0"
+protoc-gen-tonic = "0.5.0"
 tower-http = { version = "0.6.8", features = ["full"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
