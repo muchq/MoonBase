@@ -536,11 +536,13 @@ fn run_setup(claude_skills_dir: Option<PathBuf>, codex_skills_dir: Option<PathBu
     println!("\n✓ Setup complete!");
     println!("\nNext steps:");
     if do_claude {
-        println!("  1. Restart Claude Code to load the new MCP server");
-        println!("  2. Use commands like /impact-status or /impact-packet");
+        println!("  * Restart Claude Code to load the new MCP server");
+        println!("  * Use commands like /impact-status or /impact-packet");
+    } else {
+        println!("  * Codex skills installed. Configure your agent to use them.");
     }
-    println!("  3. Add evidence with: impact-mcp evidence add --summary \"...\"");
-    println!("  4. Pull from integrations: impact-mcp pull");
+    println!("  * Add evidence with: impact-mcp evidence add --summary \"...\"");
+    println!("  * Pull from integrations: impact-mcp pull");
     println!("\nFor automatic hourly pulls, run: impact-mcp setup-cron");
 }
 

@@ -55,6 +55,9 @@ rust_test(
     size = "small",
     compile_data = glob(["commands/*.md"]),
     crate = ":impact-mcp",
+    deps = crate_deps([
+        "tempfile",
+    ]),
 )
 
 rust_test(
