@@ -13,6 +13,7 @@ use impact_mcp::archetype::Archetype;
 use impact_mcp::evidence::{EvidenceCard, EvidenceSource, EvidenceStore};
 use impact_mcp::integrations::Connector;
 use impact_mcp::projects::{Project, ProjectStore};
+use impact_mcp::prompts::generate_pull_prompt;
 use impact_mcp::rubric::{self, Rubric};
 use impact_mcp::server::ImpactServer;
 
@@ -293,33 +294,15 @@ fn run_weekly_update(data_dir: &PathBuf) {
 async fn run_pull(data_dir: &PathBuf, claude: bool, codex: bool) {
     if claude || codex {
         let binary = if claude { "claude" } else { "codex" };
-        let mut prompt = String::new();
-        prompt.push_str("You are an AI assistant helping me track my impact. Please use your available MCP tools to pull relevant evidence for my projects.\n\n");
 
-        if let Ok(store) = ProjectStore::open(data_dir) {
-            let projects = store.all();
-            if !projects.is_empty() {
-                prompt.push_str("My current projects are:\n");
-                for p in projects {
-                    prompt.push_str(&format!("* {} (Role: {})\n", p.name, p.role));
-                    if !p.jira_projects.is_empty() {
-                        prompt.push_str(&format!(
-                            "  - Jira Projects: {}\n",
-                            p.jira_projects.join(", ")
-                        ));
-                    }
-                    if !p.git_repos.is_empty() {
-                        prompt.push_str(&format!("  - Git Repos: {}\n", p.git_repos.join(", ")));
-                    }
-                }
-                prompt.push_str("\n");
-            }
-        }
+        let store_opt = ProjectStore::open(data_dir).ok();
+        let projects = if let Some(ref store) = store_opt {
+            store.all()
+        } else {
+            Vec::new()
+        };
 
-        prompt.push_str("For each project, please:\n");
-        prompt.push_str("1. Check for recent activity (last 7 days) in the associated Git repositories (PRs, commits, reviews) using `gh`.\n");
-        prompt.push_str("2. Check for recent updates in Jira tickets or Confluence pages using `atlassian`.\n");
-        prompt.push_str("3. Summarize the findings and ask me if I want to save any of them as evidence cards using `impact-mcp evidence add`.\n");
+        let prompt = generate_pull_prompt(&projects);
 
         println!("Invoking {} with prompt...\n", binary);
 

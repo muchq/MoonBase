@@ -15,6 +15,7 @@ rust_library(
         "src/lib.rs",
         "src/mcp/mod.rs",
         "src/projects.rs",
+        "src/prompts.rs",
         "src/readiness/mod.rs",
         "src/rubric/default.rs",
         "src/rubric/mod.rs",
