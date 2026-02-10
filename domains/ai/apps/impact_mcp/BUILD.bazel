@@ -26,6 +26,7 @@ rust_library(
     visibility = ["//visibility:public"],
     deps = crate_deps([
         "chrono",
+        "clap",
         "dirs",
         "rmcp",
         "schemars",
