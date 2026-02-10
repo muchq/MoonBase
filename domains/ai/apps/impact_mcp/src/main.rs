@@ -202,7 +202,13 @@ fn run_projects(data_dir: &PathBuf, sub: cli::ProjectsCommand) {
             }
             println!("{} tracked project(s):\n", projects.len());
             for p in &projects {
-                println!("  * {} (Role: {})", p.name, p.role);
+                println!(
+                    "  * {} (Role: {}) — {} ({:.0}%)",
+                    p.name,
+                    p.role,
+                    p.status,
+                    p.completion * 100.0
+                );
                 if !p.jira_projects.is_empty() {
                     println!("    Jira: {}", p.jira_projects.join(", "));
                 }
@@ -216,17 +222,66 @@ fn run_projects(data_dir: &PathBuf, sub: cli::ProjectsCommand) {
             role,
             jira,
             repos,
+            status,
+            completion,
         } => {
-            let mut project = Project::new(&name, &role);
+            let mut project = Project::new(&name, &role)
+                .with_status(&status)
+                .with_completion(completion);
+
             if let Some(j) = jira {
-                project = project.with_jira_projects(j.split(',').map(|s| s.trim().to_string()).collect());
+                project =
+                    project.with_jira_projects(j.split(',').map(|s| s.trim().to_string()).collect());
             }
             if let Some(r) = repos {
-                project = project.with_git_repos(r.split(',').map(|s| s.trim().to_string()).collect());
+                project =
+                    project.with_git_repos(r.split(',').map(|s| s.trim().to_string()).collect());
             }
 
             match store.insert(project) {
                 Ok(()) => println!("Project \"{}\" added.", name),
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    process::exit(1);
+                }
+            }
+        }
+        cli::ProjectsCommand::Update {
+            name,
+            role,
+            status,
+            completion,
+            jira,
+            repos,
+        } => {
+            let mut project = match store.all().into_iter().find(|p| p.name == name) {
+                Some(p) => p.clone(),
+                None => {
+                    println!("Project \"{}\" not found.", name);
+                    return;
+                }
+            };
+
+            if let Some(r) = role {
+                project.role = r;
+            }
+            if let Some(s) = status {
+                project = project.with_status(&s);
+            }
+            if let Some(c) = completion {
+                project = project.with_completion(c);
+            }
+            if let Some(j) = jira {
+                project =
+                    project.with_jira_projects(j.split(',').map(|s| s.trim().to_string()).collect());
+            }
+            if let Some(r) = repos {
+                project =
+                    project.with_git_repos(r.split(',').map(|s| s.trim().to_string()).collect());
+            }
+
+            match store.insert(project) {
+                Ok(()) => println!("Project \"{}\" updated.", name),
                 Err(e) => {
                     eprintln!("error: {e}");
                     process::exit(1);
@@ -261,7 +316,11 @@ fn run_weekly_update(data_dir: &PathBuf) {
     } else {
         for project in projects {
             println!("## {} ({})", project.name, project.role);
-            println!("**Status:** [On Track | At Risk | Off Track]");
+            println!(
+                "**Status:** {} ({:.0}% complete)",
+                project.status,
+                project.completion * 100.0
+            );
             println!("**Highlights:**");
             println!("* ");
             println!("**Blockers:**");

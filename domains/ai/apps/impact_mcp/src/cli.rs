@@ -130,6 +130,41 @@ pub enum ProjectsCommand {
         /// Related Git repositories (comma-separated).
         #[arg(long)]
         repos: Option<String>,
+
+        /// Status of the project (e.g. "Active", "Planning", "Done").
+        #[arg(long, default_value = "Active")]
+        status: String,
+
+        /// Completion percentage (0.0 - 1.0).
+        #[arg(long, default_value = "0.0")]
+        completion: f64,
+    },
+
+    /// Update an existing project.
+    Update {
+        /// Name of the project to update.
+        #[arg(long)]
+        name: String,
+
+        /// New role in the project.
+        #[arg(long)]
+        role: Option<String>,
+
+        /// New status.
+        #[arg(long)]
+        status: Option<String>,
+
+        /// New completion percentage (0.0 - 1.0).
+        #[arg(long)]
+        completion: Option<f64>,
+
+        /// New Jira projects (comma-separated).
+        #[arg(long)]
+        jira: Option<String>,
+
+        /// New Git repositories (comma-separated).
+        #[arg(long)]
+        repos: Option<String>,
     },
 
     /// Remove a project.

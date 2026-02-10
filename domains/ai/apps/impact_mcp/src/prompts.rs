@@ -7,7 +7,13 @@ pub fn generate_pull_prompt(projects: &[&Project]) -> String {
     if !projects.is_empty() {
         prompt.push_str("My current projects are:\n");
         for p in projects {
-            prompt.push_str(&format!("* {} (Role: {})\n", p.name, p.role));
+            prompt.push_str(&format!(
+                "* {} (Role: {}, Status: {}, Completion: {:.0}%)\n",
+                p.name,
+                p.role,
+                p.status,
+                p.completion * 100.0
+            ));
             if !p.jira_projects.is_empty() {
                 prompt.push_str(&format!(
                     "  - Jira Projects: {}\n",
@@ -54,10 +60,10 @@ mod tests {
         let prompt = generate_pull_prompt(&projects);
 
         assert!(prompt.contains("My current projects are:"));
-        assert!(prompt.contains("* Project Alpha (Role: Lead)"));
+        assert!(prompt.contains("* Project Alpha (Role: Lead, Status: Active, Completion: 0%)"));
         assert!(prompt.contains("  - Jira Projects: ALPHA"));
         assert!(prompt.contains("  - Git Repos: repo/alpha"));
-        assert!(prompt.contains("* Project Beta (Role: Contributor)"));
+        assert!(prompt.contains("* Project Beta (Role: Contributor, Status: Active, Completion: 0%)"));
         assert!(prompt.contains("For each project, please:"));
     }
 }

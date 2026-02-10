@@ -10,10 +10,18 @@ pub struct Project {
     pub id: Uuid,
     pub name: String,
     pub role: String,
+    #[serde(default = "default_status")]
+    pub status: String,
+    #[serde(default)]
+    pub completion: f64,
     #[serde(default)]
     pub jira_projects: Vec<String>,
     #[serde(default)]
     pub git_repos: Vec<String>,
+}
+
+fn default_status() -> String {
+    "Active".to_string()
 }
 
 impl Project {
@@ -22,9 +30,21 @@ impl Project {
             id: Uuid::new_v4(),
             name: name.to_string(),
             role: role.to_string(),
+            status: "Active".to_string(),
+            completion: 0.0,
             jira_projects: Vec::new(),
             git_repos: Vec::new(),
         }
+    }
+
+    pub fn with_status(mut self, status: &str) -> Self {
+        self.status = status.to_string();
+        self
+    }
+
+    pub fn with_completion(mut self, completion: f64) -> Self {
+        self.completion = completion.clamp(0.0, 1.0);
+        self
     }
 
     pub fn with_jira_projects(mut self, projects: Vec<String>) -> Self {
