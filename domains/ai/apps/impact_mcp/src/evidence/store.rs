@@ -44,8 +44,11 @@ impl EvidenceStore {
     /// Persist a new card to disk and add it to the in-memory index.
     pub fn insert(&mut self, card: EvidenceCard) -> Result<(), StoreError> {
         let path = self.card_path(card.id);
+        let tmp_path = path.with_extension("tmp");
         let data = serde_json::to_string_pretty(&card).map_err(StoreError::Parse)?;
-        fs::write(&path, data).map_err(StoreError::Io)?;
+        fs::write(&tmp_path, data).map_err(StoreError::Io)?;
+        fs::rename(&tmp_path, &path).map_err(StoreError::Io)?;
+
         self.cards.insert(card.id, card);
         Ok(())
     }
@@ -67,10 +70,15 @@ impl EvidenceStore {
             let entry = entry.map_err(StoreError::Io)?;
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "json") {
-                let data = fs::read_to_string(&path).map_err(StoreError::Io)?;
-                let card: EvidenceCard =
-                    serde_json::from_str(&data).map_err(StoreError::Parse)?;
-                cards.insert(card.id, card);
+                match fs::read_to_string(&path) {
+                    Ok(data) => {
+                        let card: EvidenceCard =
+                            serde_json::from_str(&data).map_err(StoreError::Parse)?;
+                        cards.insert(card.id, card);
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(e) => return Err(StoreError::Io(e)),
+                }
             }
         }
         self.cards = cards;
@@ -221,5 +229,19 @@ mod tests {
         assert_eq!(store.count(), 1);
         store.refresh().unwrap();
         assert_eq!(store.count(), 1);
+    }
+
+    #[test]
+    fn refresh_ignores_tmp_files() {
+        let (dir, mut store) = tmp_store();
+
+        // Create a .tmp file that looks like a card but shouldn't be loaded
+        let card = EvidenceCard::new(EvidenceSource::Manual, "hidden");
+        let path = dir.path().join("evidence").join(format!("{}.json.tmp", card.id));
+        let data = serde_json::to_string_pretty(&card).unwrap();
+        fs::write(&path, data).unwrap();
+
+        store.refresh().unwrap();
+        assert_eq!(store.count(), 0);
     }
 }
