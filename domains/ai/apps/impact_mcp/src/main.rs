@@ -1,5 +1,3 @@
-mod cli;
-
 use std::path::PathBuf;
 use std::process;
 
@@ -12,12 +10,11 @@ use rmcp::ServiceExt;
 use impact_mcp::archetype::Archetype;
 use impact_mcp::evidence::{EvidenceCard, EvidenceSource, EvidenceStore};
 use impact_mcp::integrations::Connector;
-use impact_mcp::projects::{Project, ProjectStore};
+use impact_mcp::projects::ProjectStore;
 use impact_mcp::prompts::generate_pull_prompt;
+use impact_mcp::cli::{self, Cli, Command};
 use impact_mcp::rubric::{self, Rubric};
 use impact_mcp::server::ImpactServer;
-
-use crate::cli::{Cli, Command};
 
 #[tokio::main]
 async fn main() {
@@ -193,111 +190,11 @@ fn run_projects(data_dir: &PathBuf, sub: cli::ProjectsCommand) {
         process::exit(1);
     });
 
-    match sub {
-        cli::ProjectsCommand::List => {
-            let projects = store.all();
-            if projects.is_empty() {
-                println!("No tracked projects. Use `impact-mcp projects add`.");
-                return;
-            }
-            println!("{} tracked project(s):\n", projects.len());
-            for p in &projects {
-                println!(
-                    "  * {} (Role: {}) — {} ({:.0}%)",
-                    p.name,
-                    p.role,
-                    p.status,
-                    p.completion * 100.0
-                );
-                if !p.jira_projects.is_empty() {
-                    println!("    Jira: {}", p.jira_projects.join(", "));
-                }
-                if !p.git_repos.is_empty() {
-                    println!("    Repos: {}", p.git_repos.join(", "));
-                }
-            }
-        }
-        cli::ProjectsCommand::Add {
-            name,
-            role,
-            jira,
-            repos,
-            status,
-            completion,
-        } => {
-            let mut project = Project::new(&name, &role)
-                .with_status(&status)
-                .with_completion(completion);
-
-            if let Some(j) = jira {
-                project =
-                    project.with_jira_projects(j.split(',').map(|s| s.trim().to_string()).collect());
-            }
-            if let Some(r) = repos {
-                project =
-                    project.with_git_repos(r.split(',').map(|s| s.trim().to_string()).collect());
-            }
-
-            match store.insert(project) {
-                Ok(()) => println!("Project \"{}\" added.", name),
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    process::exit(1);
-                }
-            }
-        }
-        cli::ProjectsCommand::Update {
-            name,
-            role,
-            status,
-            completion,
-            jira,
-            repos,
-        } => {
-            let mut project = match store.all().into_iter().find(|p| p.name == name) {
-                Some(p) => p.clone(),
-                None => {
-                    println!("Project \"{}\" not found.", name);
-                    return;
-                }
-            };
-
-            if let Some(r) = role {
-                project.role = r;
-            }
-            if let Some(s) = status {
-                project = project.with_status(&s);
-            }
-            if let Some(c) = completion {
-                project = project.with_completion(c);
-            }
-            if let Some(j) = jira {
-                project =
-                    project.with_jira_projects(j.split(',').map(|s| s.trim().to_string()).collect());
-            }
-            if let Some(r) = repos {
-                project =
-                    project.with_git_repos(r.split(',').map(|s| s.trim().to_string()).collect());
-            }
-
-            match store.insert(project) {
-                Ok(()) => println!("Project \"{}\" updated.", name),
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    process::exit(1);
-                }
-            }
-        }
-        cli::ProjectsCommand::Remove { name } => {
-            match store.remove_by_name(&name) {
-                Ok(Some(_)) => println!("Project \"{}\" removed.", name),
-                Ok(None) => println!("Project \"{}\" not found.", name),
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    process::exit(1);
-                }
-            }
-        }
+    if let Err(e) =
+        impact_mcp::projects::handle_project_command(&mut store, sub, &mut std::io::stdout())
+    {
+        eprintln!("error: {e}");
+        process::exit(1);
     }
 }
 

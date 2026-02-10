@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::cli::ProjectsCommand;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -111,6 +112,118 @@ impl ProjectStore {
     }
 }
 
+pub fn handle_project_command<W: std::io::Write>(
+    store: &mut ProjectStore,
+    command: ProjectsCommand,
+    writer: &mut W,
+) -> std::io::Result<()> {
+    match command {
+        ProjectsCommand::List => {
+            let projects = store.all();
+            if projects.is_empty() {
+                writeln!(writer, "No tracked projects. Use `impact-mcp projects add`.")?;
+                return Ok(());
+            }
+            writeln!(writer, "{} tracked project(s):\n", projects.len())?;
+            for p in &projects {
+                writeln!(
+                    writer,
+                    "  * {} (Role: {}) — {} ({:.0}%)",
+                    p.name,
+                    p.role,
+                    p.status,
+                    p.completion * 100.0
+                )?;
+                if !p.jira_projects.is_empty() {
+                    writeln!(writer, "    Jira: {}", p.jira_projects.join(", "))?;
+                }
+                if !p.git_repos.is_empty() {
+                    writeln!(writer, "    Repos: {}", p.git_repos.join(", "))?;
+                }
+            }
+        }
+        ProjectsCommand::Add {
+            name,
+            role,
+            jira,
+            repos,
+            status,
+            completion,
+        } => {
+            let mut project = Project::new(&name, &role)
+                .with_status(&status)
+                .with_completion(completion);
+
+            if let Some(j) = jira {
+                project =
+                    project.with_jira_projects(j.split(',').map(|s| s.trim().to_string()).collect());
+            }
+            if let Some(r) = repos {
+                project =
+                    project.with_git_repos(r.split(',').map(|s| s.trim().to_string()).collect());
+            }
+
+            match store.insert(project) {
+                Ok(()) => writeln!(writer, "Project \"{}\" added.", name)?,
+                Err(e) => {
+                    return Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()));
+                }
+            }
+        }
+        ProjectsCommand::Update {
+            name,
+            role,
+            status,
+            completion,
+            jira,
+            repos,
+        } => {
+            let mut project = match store.all().into_iter().find(|p| p.name == name) {
+                Some(p) => p.clone(),
+                None => {
+                    writeln!(writer, "Project \"{}\" not found.", name)?;
+                    return Ok(());
+                }
+            };
+
+            if let Some(r) = role {
+                project.role = r;
+            }
+            if let Some(s) = status {
+                project = project.with_status(&s);
+            }
+            if let Some(c) = completion {
+                project = project.with_completion(c);
+            }
+            if let Some(j) = jira {
+                project =
+                    project.with_jira_projects(j.split(',').map(|s| s.trim().to_string()).collect());
+            }
+            if let Some(r) = repos {
+                project =
+                    project.with_git_repos(r.split(',').map(|s| s.trim().to_string()).collect());
+            }
+
+            match store.insert(project) {
+                Ok(()) => writeln!(writer, "Project \"{}\" updated.", name)?,
+                Err(e) => {
+                    return Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()));
+                }
+            }
+        }
+        ProjectsCommand::Remove { name } => {
+            match store.remove_by_name(&name) {
+                Ok(Some(_)) => writeln!(writer, "Project \"{}\" removed.", name)?,
+                Ok(None) => writeln!(writer, "Project \"{}\" not found.", name)?,
+                Err(e) => {
+                    return Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug)]
 pub enum StoreError {
     Io(std::io::Error),
@@ -131,6 +244,7 @@ impl std::error::Error for StoreError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::ProjectsCommand;
     use tempfile::TempDir;
 
     fn tmp_store() -> (TempDir, ProjectStore) {
@@ -168,5 +282,123 @@ mod tests {
         let p = store2.all()[0];
         assert_eq!(p.name, "Project B");
         assert_eq!(p.jira_projects, vec!["JIRA-1"]);
+    }
+
+    #[test]
+    fn test_handle_add_project() {
+        let (_dir, mut store) = tmp_store();
+        let mut output = Vec::new();
+
+        let cmd = ProjectsCommand::Add {
+            name: "New Project".to_string(),
+            role: "Owner".to_string(),
+            jira: Some("JIRA-123".to_string()),
+            repos: Some("repo/new".to_string()),
+            status: "Active".to_string(),
+            completion: 0.25,
+        };
+
+        handle_project_command(&mut store, cmd, &mut output).unwrap();
+
+        let out_str = String::from_utf8(output).unwrap();
+        assert!(out_str.contains("Project \"New Project\" added."));
+
+        let projects = store.all();
+        assert_eq!(projects.len(), 1);
+        let p = projects[0];
+        assert_eq!(p.name, "New Project");
+        assert_eq!(p.role, "Owner");
+        assert_eq!(p.status, "Active");
+        assert_eq!(p.completion, 0.25);
+        assert_eq!(p.jira_projects, vec!["JIRA-123"]);
+        assert_eq!(p.git_repos, vec!["repo/new"]);
+    }
+
+    #[test]
+    fn test_handle_update_project() {
+        let (_dir, mut store) = tmp_store();
+        let project = Project::new("Update Me", "Dev");
+        store.insert(project).unwrap();
+
+        let mut output = Vec::new();
+        let cmd = ProjectsCommand::Update {
+            name: "Update Me".to_string(),
+            role: Some("Lead".to_string()),
+            status: Some("Done".to_string()),
+            completion: Some(1.0),
+            jira: Some("JIRA-999".to_string()),
+            repos: None,
+        };
+
+        handle_project_command(&mut store, cmd, &mut output).unwrap();
+
+        let out_str = String::from_utf8(output).unwrap();
+        assert!(out_str.contains("Project \"Update Me\" updated."));
+
+        let projects = store.all();
+        assert_eq!(projects.len(), 1);
+        let p = projects[0];
+        assert_eq!(p.role, "Lead");
+        assert_eq!(p.status, "Done");
+        assert_eq!(p.completion, 1.0);
+        assert_eq!(p.jira_projects, vec!["JIRA-999"]);
+        assert!(p.git_repos.is_empty());
+    }
+
+    #[test]
+    fn test_handle_update_non_existent_project() {
+        let (_dir, mut store) = tmp_store();
+        let mut output = Vec::new();
+
+        let cmd = ProjectsCommand::Update {
+            name: "Ghost Project".to_string(),
+            role: None,
+            status: None,
+            completion: None,
+            jira: None,
+            repos: None,
+        };
+
+        handle_project_command(&mut store, cmd, &mut output).unwrap();
+
+        let out_str = String::from_utf8(output).unwrap();
+        assert!(out_str.contains("Project \"Ghost Project\" not found."));
+    }
+
+    #[test]
+    fn test_handle_list_projects() {
+        let (_dir, mut store) = tmp_store();
+        let mut output = Vec::new();
+
+        handle_project_command(&mut store, ProjectsCommand::List, &mut output).unwrap();
+        assert!(String::from_utf8(output.clone()).unwrap().contains("No tracked projects"));
+
+        output.clear();
+        let project = Project::new("List Me", "Viewer")
+            .with_status("Planning")
+            .with_completion(0.1);
+        store.insert(project).unwrap();
+
+        handle_project_command(&mut store, ProjectsCommand::List, &mut output).unwrap();
+        let out_str = String::from_utf8(output).unwrap();
+        assert!(out_str.contains("1 tracked project(s)"));
+        assert!(out_str.contains("* List Me (Role: Viewer) — Planning (10%)"));
+    }
+
+    #[test]
+    fn test_handle_remove_project() {
+        let (_dir, mut store) = tmp_store();
+        let project = Project::new("Remove Me", "Dev");
+        store.insert(project).unwrap();
+
+        let mut output = Vec::new();
+        let cmd = ProjectsCommand::Remove {
+            name: "Remove Me".to_string(),
+        };
+
+        handle_project_command(&mut store, cmd, &mut output).unwrap();
+        let out_str = String::from_utf8(output).unwrap();
+        assert!(out_str.contains("Project \"Remove Me\" removed."));
+        assert!(store.all().is_empty());
     }
 }
