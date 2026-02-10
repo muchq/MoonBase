@@ -1,7 +1,10 @@
 pub mod archetype;
+pub mod cli;
 pub mod evidence;
 pub mod integrations;
 pub mod mcp;
+pub mod projects;
+pub mod prompts;
 pub mod readiness;
 pub mod rubric;
 pub mod server;

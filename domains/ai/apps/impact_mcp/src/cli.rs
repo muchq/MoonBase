@@ -34,8 +34,25 @@ pub enum Command {
         subcommand: EvidenceCommand,
     },
 
+    /// Manage tracked projects.
+    Projects {
+        #[command(subcommand)]
+        subcommand: ProjectsCommand,
+    },
+
+    /// Generate a weekly status update.
+    WeeklyUpdate,
+
     /// Pull new evidence from configured integrations.
-    Pull,
+    Pull {
+        /// Only run the Claude prompt generation (print prompt to stdout).
+        #[arg(long)]
+        claude: bool,
+
+        /// Only run the Codex prompt generation (print prompt to stdout).
+        #[arg(long)]
+        codex: bool,
+    },
 
     /// Start as an MCP server over stdio.
     Serve,
@@ -96,5 +113,72 @@ pub enum EvidenceCommand {
         /// Comma-separated archetype tags (e.g. "tech_lead,architect").
         #[arg(long)]
         archetype_tags: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ProjectsCommand {
+    /// List all tracked projects.
+    List,
+
+    /// Add a new project.
+    Add {
+        /// Name of the project.
+        #[arg(long)]
+        name: String,
+
+        /// Your role on the project (e.g. "Tech Lead", "Contributor").
+        #[arg(long)]
+        role: String,
+
+        /// Status of the project (e.g. "On Track", "At Risk").
+        #[arg(long, default_value = "Active")]
+        status: String,
+
+        /// Estimated completion percentage (0.0-1.0).
+        #[arg(long, default_value = "0.0")]
+        completion: f64,
+
+        /// Comma-separated list of Jira project keys to track (e.g. "PROJ,TEAM").
+        #[arg(long)]
+        jira: Option<String>,
+
+        /// Comma-separated list of Git repositories to track (e.g. "owner/repo").
+        #[arg(long)]
+        repos: Option<String>,
+    },
+
+    /// Update an existing project.
+    Update {
+        /// Name of the project to update.
+        #[arg(long)]
+        name: String,
+
+        /// New role.
+        #[arg(long)]
+        role: Option<String>,
+
+        /// New status.
+        #[arg(long)]
+        status: Option<String>,
+
+        /// New completion percentage (0.0-1.0).
+        #[arg(long)]
+        completion: Option<f64>,
+
+        /// Add Jira projects (comma-separated).
+        #[arg(long)]
+        jira: Option<String>,
+
+        /// Add Git repos (comma-separated).
+        #[arg(long)]
+        repos: Option<String>,
+    },
+
+    /// Remove a tracked project.
+    Remove {
+        /// Name of the project to remove.
+        #[arg(long)]
+        name: String,
     },
 }
