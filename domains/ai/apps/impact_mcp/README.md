@@ -51,7 +51,31 @@ impact-mcp setup
 
 Follow the instructions to restart your MCP client (e.g., Claude Code).
 
-### 2. Managing Rubrics
+### 2. Tracking Projects
+
+Track your active projects, role, status, and completion to generate meaningful updates.
+
+```bash
+# Add a new project
+impact-mcp projects add \
+  --name "Payment Service Migration" \
+  --role "Tech Lead" \
+  --status "Execution" \
+  --completion 0.4 \
+  --jira "PAY" \
+  --repos "pay-serv,pay-lib"
+
+# Update an existing project
+impact-mcp projects update \
+  --name "Payment Service Migration" \
+  --status "Delivered" \
+  --completion 1.0
+
+# List tracked projects
+impact-mcp projects list
+```
+
+### 3. Managing Rubrics
 
 Initialize a default rubric or load a custom one to define role expectations.
 
@@ -66,7 +90,7 @@ impact-mcp rubric show
 impact-mcp rubric load --path /path/to/rubric.yaml
 ```
 
-### 3. Collecting Evidence
+### 4. Collecting Evidence
 
 You can add evidence manually or pull it from integrations.
 
@@ -81,9 +105,13 @@ impact-mcp evidence add \
 ```
 
 **Automated Pull:**
-(Requires configuration of integration tokens/credentials - see Configuration below)
+You can use an AI agent (Claude or Codex) to intelligently pull and summarize evidence from your projects, or use the built-in connectors.
 
 ```bash
+# Use Claude to pull evidence for your tracked projects (Recommended)
+impact-mcp pull --claude
+
+# Use built-in connectors (GitHub, Jira, Slack)
 impact-mcp pull
 ```
 
@@ -93,7 +121,15 @@ impact-mcp pull
 impact-mcp evidence list
 ```
 
-### 4. Automatic Sync (macOS)
+### 5. Weekly Updates
+
+Generate a weekly status update template based on your tracked projects and recent evidence.
+
+```bash
+impact-mcp weekly-update
+```
+
+### 6. Automatic Sync (macOS)
 
 Set up an hourly cron job to pull data from integrations automatically.
 
@@ -114,6 +150,3 @@ To enable automated pulls, set the following environment variables:
 *   **GitHub**: `IMPACT_MCP_GITHUB_TOKEN`
 *   **Jira**: `IMPACT_MCP_JIRA_TOKEN` and `IMPACT_MCP_JIRA_URL`
 *   **Slack**: `IMPACT_MCP_SLACK_TOKEN`
-*   **Google Docs**:
-    *   `IMPACT_MCP_GDOCS_MCP_CMD`: Command to run the Google Docs MCP server (default: `npx`).
-    *   `IMPACT_MCP_GDOCS_MCP_ARGS`: Arguments for the command (default: `google-docs-mcp`).
