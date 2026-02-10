@@ -46,7 +46,7 @@ cargo run
 First, configure the integration with Claude or Codex. This installs necessary MCP server configurations and skills.
 
 ```bash
-# Default setup (installs Claude skills to ~/.claude/skills)
+# Default setup (installs Claude skills to ~/.claude/skills and Codex skills to ~/.codex/skills)
 impact-mcp setup
 
 # Custom skill installation directories
@@ -54,8 +54,8 @@ impact-mcp setup --claude-skills-dir /path/to/claude/skills --codex-skills-dir /
 ```
 
 This will:
-1.  Install skill files (markdown prompts) to the specified directories.
-2.  Configure the MCP server in `~/.claude/settings.json`.
+1.  Install skill files (markdown prompts) to `~/.claude/skills` (and configure `~/.claude/settings.json`).
+2.  Install skill files to `~/.codex/skills`.
 
 Follow the instructions to restart your MCP client (e.g., Claude Code).
 

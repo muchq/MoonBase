@@ -477,70 +477,61 @@ fn run_setup(claude_skills_dir: Option<PathBuf>, codex_skills_dir: Option<PathBu
         process::exit(1);
     });
 
-    let do_claude = claude_skills_dir.is_some() || codex_skills_dir.is_none();
+    let claude_target = claude_skills_dir.unwrap_or_else(|| home.join(".claude/skills"));
+    install_skills(&claude_target);
 
-    if do_claude {
-        // 1. Install Claude skills
-        let target = claude_skills_dir.unwrap_or_else(|| home.join(".claude/skills"));
-        install_skills(&target);
+    // Update ~/.claude/settings.json with MCP server config
+    println!("\nMCP Server Configuration:");
+    let settings_path = home.join(".claude/settings.json");
 
-        // 2. Update ~/.claude/settings.json with MCP server config
-        println!("\nMCP Server Configuration:");
-        let settings_path = home.join(".claude/settings.json");
+    let binary_path = std::env::current_exe()
+        .unwrap_or_else(|_| PathBuf::from("impact-mcp"))
+        .display()
+        .to_string();
 
-        let binary_path = std::env::current_exe()
-            .unwrap_or_else(|_| PathBuf::from("impact-mcp"))
-            .display()
-            .to_string();
+    let mcp_config = serde_json::json!({
+        "command": binary_path,
+        "args": ["serve"],
+        "env": {}
+    });
 
-        let mcp_config = serde_json::json!({
-            "command": binary_path,
-            "args": ["serve"],
-            "env": {}
+    let mut settings = if settings_path.exists() {
+        let content = fs::read_to_string(&settings_path).unwrap_or_else(|e| {
+            eprintln!("warning: cannot read settings.json: {e}");
+            String::from("{}")
         });
-
-        let mut settings = if settings_path.exists() {
-            let content = fs::read_to_string(&settings_path).unwrap_or_else(|e| {
-                eprintln!("warning: cannot read settings.json: {e}");
-                String::from("{}")
-            });
-            serde_json::from_str::<serde_json::Value>(&content).unwrap_or_else(|e| {
-                eprintln!("warning: cannot parse settings.json: {e}");
-                serde_json::json!({})
-            })
-        } else {
+        serde_json::from_str::<serde_json::Value>(&content).unwrap_or_else(|e| {
+            eprintln!("warning: cannot parse settings.json: {e}");
             serde_json::json!({})
-        };
+        })
+    } else {
+        serde_json::json!({})
+    };
 
-        // Ensure mcpServers object exists
-        if !settings.get("mcpServers").is_some() {
-            settings["mcpServers"] = serde_json::json!({});
-        }
+    // Ensure mcpServers object exists
+    if !settings.get("mcpServers").is_some() {
+        settings["mcpServers"] = serde_json::json!({});
+    }
 
-        // Add or update impact-mcp entry
-        settings["mcpServers"]["impact-mcp"] = mcp_config;
+    // Add or update impact-mcp entry
+    settings["mcpServers"]["impact-mcp"] = mcp_config;
 
-        match fs::write(&settings_path, serde_json::to_string_pretty(&settings).unwrap()) {
-            Ok(_) => println!("  [ok]   Updated {}", settings_path.display()),
-            Err(e) => {
-                eprintln!("  [err]  Failed to write settings.json: {e}");
-                process::exit(1);
-            }
+    match fs::write(&settings_path, serde_json::to_string_pretty(&settings).unwrap()) {
+        Ok(_) => println!("  [ok]   Updated {}", settings_path.display()),
+        Err(e) => {
+            eprintln!("  [err]  Failed to write settings.json: {e}");
+            process::exit(1);
         }
     }
 
-    if let Some(target) = codex_skills_dir {
-        install_skills(&target);
-    }
+    // Install Codex skills
+    let codex_target = codex_skills_dir.unwrap_or_else(|| home.join(".codex/skills"));
+    install_skills(&codex_target);
 
     println!("\n✓ Setup complete!");
     println!("\nNext steps:");
-    if do_claude {
-        println!("  * Restart Claude Code to load the new MCP server");
-        println!("  * Use commands like /impact-status or /impact-packet");
-    } else {
-        println!("  * Codex skills installed. Configure your agent to use them.");
-    }
+    println!("  * Restart Claude Code to load the new MCP server");
+    println!("  * Use commands like /impact-status or /impact-packet");
     println!("  * Add evidence with: impact-mcp evidence add --summary \"...\"");
     println!("  * Pull from integrations: impact-mcp pull");
     println!("\nFor automatic hourly pulls, run: impact-mcp setup-cron");
