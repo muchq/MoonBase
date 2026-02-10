@@ -5,6 +5,7 @@ rust_library(
     name = "impact_mcp_lib",
     srcs = [
         "src/archetype/mod.rs",
+        "src/cli.rs",
         "src/evidence/card.rs",
         "src/evidence/mod.rs",
         "src/evidence/store.rs",

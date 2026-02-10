@@ -189,8 +189,8 @@ pub fn handle_project_command<W: std::io::Write>(
             if let Some(r) = role {
                 project.role = r;
             }
-            if let Some(s) = status {
-                project = project.with_status(&s);
+            if let Some(ref s) = status {
+                project = project.with_status(s);
             }
             if let Some(c) = completion {
                 project = project.with_completion(c);
