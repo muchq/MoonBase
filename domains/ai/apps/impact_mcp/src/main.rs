@@ -185,6 +185,25 @@ fn run_evidence(data_dir: &PathBuf, sub: cli::EvidenceCommand) {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn install_skills_copies_all_embedded_skills() {
+        let dir = TempDir::new().unwrap();
+        install_skills(dir.path());
+
+        for (filename, content) in SKILLS {
+            let path = dir.path().join(filename);
+            assert!(path.exists(), "{} should exist", filename);
+            let on_disk = std::fs::read_to_string(path).unwrap();
+            assert_eq!(on_disk, *content, "{} content mismatch", filename);
+        }
+    }
+}
+
 async fn run_pull(data_dir: &PathBuf) {
     use impact_mcp::integrations::{
         gdocs::GdocsConnector, github::GithubConnector, jira::JiraConnector,
