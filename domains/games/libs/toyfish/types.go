@@ -52,7 +52,7 @@ func populatePieceMap() map[int8]*Piece {
 			Side:    White,
 			Value:   pieceInfo.S,
 		}
-		lowerCased := int8(strings.ToLower(string(pieceInfo.F))[0])
+		lowerCased := int8(strings.ToLower(string(rune(pieceInfo.F)))[0])
 		pieceMap[lowerCased] = &Piece{
 			FenRepr: lowerCased,
 			Glyph:   pieceInfo.G[1],
@@ -65,10 +65,11 @@ func populatePieceMap() map[int8]*Piece {
 }
 
 type Game struct {
-	StartingFen string
-	Settings    *s.Settings
-	Board       Board
-	Side        Color
+	StartingFen     string
+	Settings        *s.Settings
+	Board           Board
+	Side            Color
+	EnPassantSquare int
 }
 
 func FenToBoard(fen string, pieceMap map[int8]*Piece) (Board, error) {
@@ -133,7 +134,7 @@ func (g *Game) GenerateMoves() []Move {
 	for idx, piece := range g.Board {
 		//square := g.Settings.Coordinates[idx]
 		if piece != nil && piece.Side == g.Side {
-			for _, offset := range g.Settings.Directions[s.Piece(piece.FenRepr)] {
+			for _, offset := range g.Settings.Directions[s.Piece(rune(piece.FenRepr))] {
 				//fmt.Printf("piece %c on square %s with offset %d\n", piece.Glyph, square, offset)
 				targetSquare := idx
 				for {
@@ -151,10 +152,20 @@ func (g *Game) GenerateMoves() []Move {
 					// ***************************************************
 					// ******************* PAWN LOGIC ********************
 					// ***************************************************
-					if strings.Contains("pP", string(piece.FenRepr)) {
+					if strings.Contains("pP", string(rune(piece.FenRepr))) {
 						// no en-passant on empty square
 						if offset%10 != 0 && capturedPiece == nil {
-							break
+							if targetSquare == g.EnPassantSquare {
+								capturedPawnIdx := targetSquare
+								if piece.Side == White {
+									capturedPawnIdx += 10
+								} else {
+									capturedPawnIdx -= 10
+								}
+								capturedPiece = g.Board[capturedPawnIdx]
+							} else {
+								break
+							}
 						}
 						// pawns can't capture forward
 						if offset%10 == 0 && capturedPiece != nil {
@@ -178,14 +189,12 @@ func (g *Game) GenerateMoves() []Move {
 							break
 						}
 					}
-					// TODO: implement es-passant capture suppoer
-
 					// TODO: implement castling rules
 
 					// ***************************************************
 					// ******************* CHECKMATE *********************
 					// ***************************************************
-					if capturedPiece != nil && strings.Contains("kK", string(capturedPiece.FenRepr)) {
+					if capturedPiece != nil && strings.Contains("kK", string(rune(capturedPiece.FenRepr))) {
 						return nil
 					}
 
@@ -208,7 +217,7 @@ func (g *Game) GenerateMoves() []Move {
 					}
 
 					// pawn, knight, and king aren't sliding pieces (only one move at a time in each allowed direction)
-					if strings.Contains("pPnNkK", string(piece.FenRepr)) {
+					if strings.Contains("pPnNkK", string(rune(piece.FenRepr))) {
 						break
 					}
 				}
@@ -224,11 +233,27 @@ func NewGame(settings *s.Settings) (*Game, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	enPassantSquare := -1
+	parts := strings.Split(settings.Fen, " ")
+	if len(parts) > 3 {
+		epTarget := parts[3]
+		if epTarget != "-" {
+			for i, coord := range settings.Coordinates {
+				if coord == epTarget {
+					enPassantSquare = i
+					break
+				}
+			}
+		}
+	}
+
 	game := Game{
-		StartingFen: settings.Fen,
-		Settings:    settings,
-		Board:       board,
-		Side:        White,
+		StartingFen:     settings.Fen,
+		Settings:        settings,
+		Board:           board,
+		Side:            White,
+		EnPassantSquare: enPassantSquare,
 	}
 
 	return &game, nil
