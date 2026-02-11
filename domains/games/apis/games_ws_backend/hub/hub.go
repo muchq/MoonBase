@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -112,6 +113,9 @@ type Hub interface {
 type Client struct {
 	Hub Hub
 
+	// Unique session ID for the client
+	ID string
+
 	// The websocket connection.
 	Conn *websocket.Conn
 
@@ -211,7 +215,12 @@ func ServeWs(hub Hub, w http.ResponseWriter, r *http.Request) {
 		"remoteAddr", conn.RemoteAddr().String(),
 		"origin", r.Header.Get("Origin"))
 
-	client := &Client{Hub: hub, Conn: conn, Send: make(chan []byte, 256)}
+	client := &Client{
+		Hub:  hub,
+		ID:   uuid.New().String(),
+		Conn: conn,
+		Send: make(chan []byte, 256),
+	}
 	client.Hub.Register(client)
 
 	// Allow collection of memory referenced by the caller by doing all work in
