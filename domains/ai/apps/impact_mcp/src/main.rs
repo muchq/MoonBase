@@ -489,7 +489,21 @@ fn install_codex_skills(target_dir: &std::path::Path) {
 
     println!("Installing Codex skills to {}:", target_dir.display());
     for (filename, content) in SKILLS {
-        let dst = target_dir.join(filename);
+        let stem = std::path::Path::new(filename)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(filename);
+        let skill_dir = target_dir.join(stem);
+
+        if let Err(e) = std::fs::create_dir_all(&skill_dir) {
+            eprintln!(
+                "  [err]  {} — failed to create directory: {}",
+                filename, e
+            );
+            continue;
+        }
+
+        let dst = skill_dir.join("SKILL.md");
         match std::fs::write(&dst, content) {
             Ok(_) => println!("  [ok]   {} → {}", filename, dst.display()),
             Err(e) => eprintln!("  [err]  {} — {}", filename, e),
@@ -583,13 +597,18 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn install_codex_skills_copies_all_embedded_skills() {
+    fn install_codex_skills_creates_nested_structure() {
         let dir = TempDir::new().unwrap();
         install_codex_skills(dir.path());
 
         for (filename, content) in SKILLS {
-            let path = dir.path().join(filename);
-            assert!(path.exists(), "{} should exist", filename);
+            let stem = std::path::Path::new(filename)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap();
+            let path = dir.path().join(stem).join("SKILL.md");
+
+            assert!(path.exists(), "{} should exist at {}", filename, path.display());
             let on_disk = std::fs::read_to_string(path).unwrap();
             assert_eq!(on_disk, *content, "{} content mismatch", filename);
         }
