@@ -116,8 +116,7 @@ pub fn rent_the_runway_rubric() -> Rubric {
             RubricDimension {
                 key: "communication_leadership".into(),
                 label: "Comm & Leadership".into(), // Shortened label for better display
-                description: "Communication, collaboration, mentorship, and leading others."
-                    .into(),
+                description: "Communication, collaboration, mentorship, and leading others.".into(),
                 weight: 1.0,
             },
         ],
@@ -141,15 +140,15 @@ pub fn etsy_rubric() -> Rubric {
             RubricDimension {
                 key: "domain_expertise".into(),
                 label: "Domain Expertise".into(),
-                description: "Knowledge of discipline, language, tools, and business/product sense."
-                    .into(),
+                description:
+                    "Knowledge of discipline, language, tools, and business/product sense.".into(),
                 weight: 1.0,
             },
             RubricDimension {
                 key: "problem_solving".into(),
                 label: "Problem Solving".into(),
-                description: "Architecture, design patterns, critical thinking, and decision making."
-                    .into(),
+                description:
+                    "Architecture, design patterns, critical thinking, and decision making.".into(),
                 weight: 1.0,
             },
             RubricDimension {

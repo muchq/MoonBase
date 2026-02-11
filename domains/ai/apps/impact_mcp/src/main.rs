@@ -8,11 +8,11 @@ use tracing_subscriber::EnvFilter;
 use rmcp::ServiceExt;
 
 use impact_mcp::archetype::Archetype;
+use impact_mcp::cli::{self, Cli, Command};
 use impact_mcp::evidence::{EvidenceCard, EvidenceSource, EvidenceStore};
 use impact_mcp::integrations::Connector;
 use impact_mcp::projects::ProjectStore;
 use impact_mcp::prompts::generate_pull_prompt;
-use impact_mcp::cli::{self, Cli, Command};
 use impact_mcp::rubric::{self, Rubric};
 use impact_mcp::server::ImpactServer;
 
@@ -26,7 +26,10 @@ async fn main() {
 
     let data_dir = cli.data_dir.unwrap_or_else(default_data_dir);
     if let Err(e) = std::fs::create_dir_all(&data_dir) {
-        eprintln!("error: cannot create data directory {}: {e}", data_dir.display());
+        eprintln!(
+            "error: cannot create data directory {}: {e}",
+            data_dir.display()
+        );
         process::exit(1);
     }
 
@@ -124,7 +127,9 @@ fn run_evidence(data_dir: &PathBuf, sub: cli::EvidenceCommand) {
             });
             let cards = store.all();
             if cards.is_empty() {
-                println!("No evidence cards yet. Use `impact-mcp evidence add` or `impact-mcp pull`.");
+                println!(
+                    "No evidence cards yet. Use `impact-mcp evidence add` or `impact-mcp pull`."
+                );
                 return;
             }
             println!("{} evidence card(s):\n", cards.len());
@@ -163,7 +168,8 @@ fn run_evidence(data_dir: &PathBuf, sub: cli::EvidenceCommand) {
                 card = card.with_link(l);
             }
             if let Some(tags) = rubric_tags {
-                card = card.with_rubric_tags(tags.split(',').map(|s| s.trim().to_string()).collect());
+                card =
+                    card.with_rubric_tags(tags.split(',').map(|s| s.trim().to_string()).collect());
             }
             if let Some(tags) = archetype_tags {
                 let archetypes: Vec<Archetype> = tags
@@ -362,9 +368,15 @@ fn run_setup_cron() {
             process::exit(1);
         });
 
-        let plist_source = if exe_dir.join("../../install/com.impact-mcp.pull.plist").exists() {
+        let plist_source = if exe_dir
+            .join("../../install/com.impact-mcp.pull.plist")
+            .exists()
+        {
             exe_dir.join("../../install/com.impact-mcp.pull.plist")
-        } else if exe_dir.join("../install/com.impact-mcp.pull.plist").exists() {
+        } else if exe_dir
+            .join("../install/com.impact-mcp.pull.plist")
+            .exists()
+        {
             exe_dir.join("../install/com.impact-mcp.pull.plist")
         } else {
             let cwd = std::env::current_dir().unwrap_or_else(|e| {
@@ -375,7 +387,10 @@ fn run_setup_cron() {
         };
 
         if !plist_source.exists() {
-            eprintln!("error: cannot find plist template at {}", plist_source.display());
+            eprintln!(
+                "error: cannot find plist template at {}",
+                plist_source.display()
+            );
             process::exit(1);
         }
 
@@ -439,10 +454,7 @@ const SKILLS: &[(&str, &str)] = &[
         "impact-packet.md",
         include_str!("../commands/impact-packet.md"),
     ),
-    (
-        "impact-gaps.md",
-        include_str!("../commands/impact-gaps.md"),
-    ),
+    ("impact-gaps.md", include_str!("../commands/impact-gaps.md")),
     (
         "impact-readiness.md",
         include_str!("../commands/impact-readiness.md"),
@@ -472,10 +484,7 @@ fn install_claude_skills(target_dir: &std::path::Path) {
         let skill_dir = target_dir.join(stem);
 
         if let Err(e) = std::fs::create_dir_all(&skill_dir) {
-            eprintln!(
-                "  [err]  {} — failed to create directory: {}",
-                filename, e
-            );
+            eprintln!("  [err]  {} — failed to create directory: {}", filename, e);
             continue;
         }
 
@@ -502,10 +511,7 @@ fn install_codex_skills(target_dir: &std::path::Path) {
         let skill_dir = target_dir.join(stem);
 
         if let Err(e) = std::fs::create_dir_all(&skill_dir) {
-            eprintln!(
-                "  [err]  {} — failed to create directory: {}",
-                filename, e
-            );
+            eprintln!("  [err]  {} — failed to create directory: {}", filename, e);
             continue;
         }
 
@@ -614,7 +620,12 @@ mod tests {
                 .unwrap();
             let path = dir.path().join(stem).join("SKILL.md");
 
-            assert!(path.exists(), "{} should exist at {}", filename, path.display());
+            assert!(
+                path.exists(),
+                "{} should exist at {}",
+                filename,
+                path.display()
+            );
             let on_disk = std::fs::read_to_string(path).unwrap();
             assert_eq!(on_disk, *content, "{} content mismatch", filename);
         }
@@ -632,7 +643,12 @@ mod tests {
                 .unwrap();
             let path = dir.path().join(stem).join("SKILL.md");
 
-            assert!(path.exists(), "{} should exist at {}", filename, path.display());
+            assert!(
+                path.exists(),
+                "{} should exist at {}",
+                filename,
+                path.display()
+            );
             let on_disk = std::fs::read_to_string(path).unwrap();
             assert_eq!(on_disk, *content, "{} content mismatch", filename);
         }
