@@ -1,7 +1,7 @@
 #[derive(Debug, Clone)]
 pub struct Node {
     pub value: String,
-    pub parent: Option<Box<Node>>,
+    pub parent: Option<String>,
 }
 
 #[derive(Debug, Clone)]

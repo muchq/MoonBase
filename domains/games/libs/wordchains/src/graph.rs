@@ -67,17 +67,15 @@ pub fn bfs_for_target(start: String, target_word: &str, word_graph: &Graph) -> O
     while !queue.is_empty() {
         let current = queue.pop_front().unwrap();
         if current.eq(target_word) {
-            let target_node = seen.get(&current).unwrap().clone();
-            return Some(to_path(target_node));
+            return Some(to_path(&current, &seen));
         }
 
         let i = word_to_index.get(&current).unwrap();
         for j in &word_graph.edges[*i] {
             if !seen.contains_key(&word_graph.nodes[*j]) {
-                let parent_node = Box::new(seen.get(&current)?.clone());
                 let neighbor_node = Node {
                     value: word_graph.nodes[*j].clone(),
-                    parent: Some(parent_node),
+                    parent: Some(current.clone()),
                 };
                 seen.insert(word_graph.nodes[*j].clone(), neighbor_node);
                 queue.push_back(word_graph.nodes[*j].clone());
@@ -87,13 +85,17 @@ pub fn bfs_for_target(start: String, target_word: &str, word_graph: &Graph) -> O
     None
 }
 
-fn to_path(end: Node) -> Vec<String> {
-    let mut path: Vec<String> = vec![end.value.clone()];
-    let mut node = end;
-    while node.parent.is_some() {
-        let parent = node.parent.unwrap();
-        path.push(parent.value.clone());
-        node = *parent;
+fn to_path(target_val: &str, seen: &HashMap<String, Node>) -> Vec<String> {
+    let mut path: Vec<String> = vec![target_val.to_string()];
+    let mut current_val = target_val.to_string();
+
+    while let Some(node) = seen.get(&current_val) {
+        if let Some(parent_val) = &node.parent {
+            path.push(parent_val.clone());
+            current_val = parent_val.clone();
+        } else {
+            break;
+        }
     }
     path.reverse();
     path
@@ -121,5 +123,26 @@ mod tests {
         assert!(words_are_one_away("star", "stat"));
         assert!(!words_are_one_away("star", "stub"));
         assert!(!words_are_one_away("foo", "foop"));
+    }
+
+    #[test]
+    fn test_bfs_for_target() {
+        let words = vec![
+            "cat".to_string(),
+            "cot".to_string(),
+            "cog".to_string(),
+            "dog".to_string(),
+        ];
+        let (graph, _) = build_graph(words);
+        let path = bfs_for_target("cat".to_string(), "dog", &graph);
+        assert_eq!(
+            path,
+            Some(vec![
+                "cat".to_string(),
+                "cot".to_string(),
+                "cog".to_string(),
+                "dog".to_string()
+            ])
+        );
     }
 }
