@@ -451,13 +451,43 @@ const SKILLS: &[(&str, &str)] = &[
     ),
 ];
 
-fn install_skills(target_dir: &std::path::Path) {
+fn install_claude_skills(target_dir: &std::path::Path) {
     if let Err(e) = std::fs::create_dir_all(target_dir) {
         eprintln!("error: cannot create {}: {e}", target_dir.display());
         process::exit(1);
     }
 
-    println!("Installing skills to {}:", target_dir.display());
+    println!("Installing Claude skills to {}:", target_dir.display());
+    for (filename, content) in SKILLS {
+        let stem = std::path::Path::new(filename)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(filename);
+        let skill_dir = target_dir.join(stem);
+
+        if let Err(e) = std::fs::create_dir_all(&skill_dir) {
+            eprintln!(
+                "  [err]  {} — failed to create directory: {}",
+                filename, e
+            );
+            continue;
+        }
+
+        let dst = skill_dir.join("SKILL.md");
+        match std::fs::write(&dst, content) {
+            Ok(_) => println!("  [ok]   {} → {}", filename, dst.display()),
+            Err(e) => eprintln!("  [err]  {} — {}", filename, e),
+        }
+    }
+}
+
+fn install_codex_skills(target_dir: &std::path::Path) {
+    if let Err(e) = std::fs::create_dir_all(target_dir) {
+        eprintln!("error: cannot create {}: {e}", target_dir.display());
+        process::exit(1);
+    }
+
+    println!("Installing Codex skills to {}:", target_dir.display());
     for (filename, content) in SKILLS {
         let dst = target_dir.join(filename);
         match std::fs::write(&dst, content) {
@@ -468,8 +498,6 @@ fn install_skills(target_dir: &std::path::Path) {
 }
 
 fn run_setup(claude_skills_dir: Option<PathBuf>, codex_skills_dir: Option<PathBuf>) {
-    use std::fs;
-
     println!("Setting up impact-mcp integration...\n");
 
     let home = dirs::home_dir().unwrap_or_else(|| {
@@ -478,55 +506,54 @@ fn run_setup(claude_skills_dir: Option<PathBuf>, codex_skills_dir: Option<PathBu
     });
 
     let claude_target = claude_skills_dir.unwrap_or_else(|| home.join(".claude/skills"));
-    install_skills(&claude_target);
+    install_claude_skills(&claude_target);
 
-    // Update ~/.claude/settings.json with MCP server config
+    // Update MCP server config using `claude` CLI
     println!("\nMCP Server Configuration:");
-    let settings_path = home.join(".claude/settings.json");
 
     let binary_path = std::env::current_exe()
         .unwrap_or_else(|_| PathBuf::from("impact-mcp"))
         .display()
         .to_string();
 
-    let mcp_config = serde_json::json!({
-        "command": binary_path,
-        "args": ["serve"],
-        "env": {}
-    });
+    println!("  Run `claude mcp add`...");
+    let status = std::process::Command::new("claude")
+        .args([
+            "mcp",
+            "add",
+            "--scope",
+            "user",
+            "--transport",
+            "stdio",
+            "impact-mcp",
+            "--",
+            &binary_path,
+            "serve",
+        ])
+        .status();
 
-    let mut settings = if settings_path.exists() {
-        let content = fs::read_to_string(&settings_path).unwrap_or_else(|e| {
-            eprintln!("warning: cannot read settings.json: {e}");
-            String::from("{}")
-        });
-        serde_json::from_str::<serde_json::Value>(&content).unwrap_or_else(|e| {
-            eprintln!("warning: cannot parse settings.json: {e}");
-            serde_json::json!({})
-        })
-    } else {
-        serde_json::json!({})
-    };
-
-    // Ensure mcpServers object exists
-    if !settings.get("mcpServers").is_some() {
-        settings["mcpServers"] = serde_json::json!({});
-    }
-
-    // Add or update impact-mcp entry
-    settings["mcpServers"]["impact-mcp"] = mcp_config;
-
-    match fs::write(&settings_path, serde_json::to_string_pretty(&settings).unwrap()) {
-        Ok(_) => println!("  [ok]   Updated {}", settings_path.display()),
+    match status {
+        Ok(s) => {
+            if s.success() {
+                println!("  [ok]   Successfully added impact-mcp to Claude configuration.");
+            } else {
+                eprintln!("  [err]  `claude mcp add` failed with status: {}", s);
+            }
+        }
         Err(e) => {
-            eprintln!("  [err]  Failed to write settings.json: {e}");
-            process::exit(1);
+            eprintln!("  [err]  Failed to run `claude`: {}", e);
+            eprintln!("         Please ensure the Claude CLI is installed and in your PATH.");
+            eprintln!("         Or configure manually in ~/.claude/settings.json:");
+            eprintln!(
+                "         {{ \"mcpServers\": {{ \"impact-mcp\": {{ \"command\": \"{}\", \"args\": [\"serve\"] }} }} }}",
+                binary_path
+            );
         }
     }
 
     // Install Codex skills
     let codex_target = codex_skills_dir.unwrap_or_else(|| home.join(".codex/skills"));
-    install_skills(&codex_target);
+    install_codex_skills(&codex_target);
 
     println!("\n✓ Setup complete!");
     println!("\nNext steps:");
@@ -556,13 +583,31 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn install_skills_copies_all_embedded_skills() {
+    fn install_codex_skills_copies_all_embedded_skills() {
         let dir = TempDir::new().unwrap();
-        install_skills(dir.path());
+        install_codex_skills(dir.path());
 
         for (filename, content) in SKILLS {
             let path = dir.path().join(filename);
             assert!(path.exists(), "{} should exist", filename);
+            let on_disk = std::fs::read_to_string(path).unwrap();
+            assert_eq!(on_disk, *content, "{} content mismatch", filename);
+        }
+    }
+
+    #[test]
+    fn install_claude_skills_creates_nested_structure() {
+        let dir = TempDir::new().unwrap();
+        install_claude_skills(dir.path());
+
+        for (filename, content) in SKILLS {
+            let stem = std::path::Path::new(filename)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap();
+            let path = dir.path().join(stem).join("SKILL.md");
+
+            assert!(path.exists(), "{} should exist at {}", filename, path.display());
             let on_disk = std::fs::read_to_string(path).unwrap();
             assert_eq!(on_disk, *content, "{} content mismatch", filename);
         }
