@@ -18,6 +18,15 @@ const (
 	Black       = 1
 )
 
+type CastlingRights uint8
+
+const (
+	CastlingWhiteKingSide  CastlingRights = 1 << 0
+	CastlingWhiteQueenSide CastlingRights = 1 << 1
+	CastlingBlackKingSide  CastlingRights = 1 << 2
+	CastlingBlackQueenSide CastlingRights = 1 << 3
+)
+
 type Piece struct {
 	FenRepr int8
 	Glyph   rune
@@ -52,7 +61,7 @@ func populatePieceMap() map[int8]*Piece {
 			Side:    White,
 			Value:   pieceInfo.S,
 		}
-		lowerCased := int8(strings.ToLower(string(pieceInfo.F))[0])
+		lowerCased := int8(strings.ToLower(string(rune(pieceInfo.F)))[0])
 		pieceMap[lowerCased] = &Piece{
 			FenRepr: lowerCased,
 			Glyph:   pieceInfo.G[1],
@@ -69,6 +78,7 @@ type Game struct {
 	Settings    *s.Settings
 	Board       Board
 	Side        Color
+	Castling    CastlingRights
 }
 
 func FenToBoard(fen string, pieceMap map[int8]*Piece) (Board, error) {
@@ -116,6 +126,91 @@ func (g *Game) Fen() string {
 	return g.StartingFen
 }
 
+func (g *Game) IsAttacked(square int, attackerSide Color) bool {
+	// Check for attacks from sliding pieces (Rook, Queen)
+	for _, offset := range g.Settings.Directions["R"] {
+		target := square
+		for {
+			target += offset
+			if g.Settings.Coordinates[target] == "xx" {
+				break
+			}
+			p := g.Board[target]
+			if p != nil {
+				if p.Side == attackerSide && strings.Contains("rRqQ", string(rune(p.FenRepr))) {
+					return true
+				}
+				break
+			}
+		}
+	}
+
+	// Check for attacks from sliding pieces (Bishop, Queen)
+	for _, offset := range g.Settings.Directions["B"] {
+		target := square
+		for {
+			target += offset
+			if g.Settings.Coordinates[target] == "xx" {
+				break
+			}
+			p := g.Board[target]
+			if p != nil {
+				if p.Side == attackerSide && strings.Contains("bBqQ", string(rune(p.FenRepr))) {
+					return true
+				}
+				break
+			}
+		}
+	}
+
+	// Check for attacks from Knights
+	for _, offset := range g.Settings.Directions["N"] {
+		target := square + offset
+		if g.Settings.Coordinates[target] != "xx" {
+			p := g.Board[target]
+			if p != nil && p.Side == attackerSide && strings.Contains("nN", string(rune(p.FenRepr))) {
+				return true
+			}
+		}
+	}
+
+	// Check for attacks from Kings
+	for _, offset := range g.Settings.Directions["K"] {
+		target := square + offset
+		if g.Settings.Coordinates[target] != "xx" {
+			p := g.Board[target]
+			if p != nil && p.Side == attackerSide && strings.Contains("kK", string(rune(p.FenRepr))) {
+				return true
+			}
+		}
+	}
+
+	// Check for attacks from Pawns
+	// White pawns attack up (-9, -11). So if attacker is White, look down (+9, +11).
+	// Black pawns attack down (+9, +11). So if attacker is Black, look up (-9, -11).
+	var pawnOffsets []int
+	var pawnChar string
+	if attackerSide == White {
+		pawnOffsets = []int{9, 11}
+		pawnChar = "P"
+	} else {
+		pawnOffsets = []int{-9, -11}
+		pawnChar = "p"
+	}
+
+	for _, offset := range pawnOffsets {
+		target := square + offset
+		if g.Settings.Coordinates[target] != "xx" {
+			p := g.Board[target]
+			if p != nil && p.Side == attackerSide && string(rune(p.FenRepr)) == pawnChar {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 type Move struct {
 	Source        int
 	Target        int
@@ -133,7 +228,7 @@ func (g *Game) GenerateMoves() []Move {
 	for idx, piece := range g.Board {
 		//square := g.Settings.Coordinates[idx]
 		if piece != nil && piece.Side == g.Side {
-			for _, offset := range g.Settings.Directions[s.Piece(piece.FenRepr)] {
+			for _, offset := range g.Settings.Directions[s.Piece(rune(piece.FenRepr))] {
 				//fmt.Printf("piece %c on square %s with offset %d\n", piece.Glyph, square, offset)
 				targetSquare := idx
 				for {
@@ -151,7 +246,7 @@ func (g *Game) GenerateMoves() []Move {
 					// ***************************************************
 					// ******************* PAWN LOGIC ********************
 					// ***************************************************
-					if strings.Contains("pP", string(piece.FenRepr)) {
+					if strings.Contains("pP", string(rune(piece.FenRepr))) {
 						// no en-passant on empty square
 						if offset%10 != 0 && capturedPiece == nil {
 							break
@@ -180,12 +275,77 @@ func (g *Game) GenerateMoves() []Move {
 					}
 					// TODO: implement es-passant capture suppoer
 
-					// TODO: implement castling rules
+					// Castling Logic
+					if (piece.FenRepr == 'K' || piece.FenRepr == 'k') {
+						if piece.Side == White && idx == 95 {
+							// King Side (e1 -> g1)
+							if g.Castling&CastlingWhiteKingSide != 0 {
+								// Check path empty: f1(96), g1(97)
+								if g.Board[96] == nil && g.Board[97] == nil {
+									// Check safe: e1(idx), f1(96), g1(97)
+									if !g.IsAttacked(idx, Black) && !g.IsAttacked(96, Black) && !g.IsAttacked(97, Black) {
+										moveList = append(moveList, Move{
+											Source:        idx,
+											Target:        97,
+											Piece:         piece,
+											CapturedPiece: nil,
+										})
+									}
+								}
+							}
+							// Queen Side (e1 -> c1)
+							if g.Castling&CastlingWhiteQueenSide != 0 {
+								// Check path empty: d1(94), c1(93), b1(92)
+								if g.Board[94] == nil && g.Board[93] == nil && g.Board[92] == nil {
+									// Check safe: e1(idx), d1(94), c1(93)
+									if !g.IsAttacked(idx, Black) && !g.IsAttacked(94, Black) && !g.IsAttacked(93, Black) {
+										moveList = append(moveList, Move{
+											Source:        idx,
+											Target:        93,
+											Piece:         piece,
+											CapturedPiece: nil,
+										})
+									}
+								}
+							}
+						} else if piece.Side == Black && idx == 25 {
+							// Black King Side (e8 -> g8)
+							if g.Castling&CastlingBlackKingSide != 0 {
+								// Check path empty: f8(26), g8(27)
+								if g.Board[26] == nil && g.Board[27] == nil {
+									// Check safe: e8(idx), f8(26), g8(27)
+									if !g.IsAttacked(idx, White) && !g.IsAttacked(26, White) && !g.IsAttacked(27, White) {
+										moveList = append(moveList, Move{
+											Source:        idx,
+											Target:        27,
+											Piece:         piece,
+											CapturedPiece: nil,
+										})
+									}
+								}
+							}
+							// Black Queen Side (e8 -> c8)
+							if g.Castling&CastlingBlackQueenSide != 0 {
+								// Check path empty: d8(24), c8(23), b8(22)
+								if g.Board[24] == nil && g.Board[23] == nil && g.Board[22] == nil {
+									// Check safe: e8(idx), d8(24), c8(23)
+									if !g.IsAttacked(idx, White) && !g.IsAttacked(24, White) && !g.IsAttacked(23, White) {
+										moveList = append(moveList, Move{
+											Source:        idx,
+											Target:        23,
+											Piece:         piece,
+											CapturedPiece: nil,
+										})
+									}
+								}
+							}
+						}
+					}
 
 					// ***************************************************
 					// ******************* CHECKMATE *********************
 					// ***************************************************
-					if capturedPiece != nil && strings.Contains("kK", string(capturedPiece.FenRepr)) {
+					if capturedPiece != nil && strings.Contains("kK", string(rune(capturedPiece.FenRepr))) {
 						return nil
 					}
 
@@ -208,7 +368,7 @@ func (g *Game) GenerateMoves() []Move {
 					}
 
 					// pawn, knight, and king aren't sliding pieces (only one move at a time in each allowed direction)
-					if strings.Contains("pPnNkK", string(piece.FenRepr)) {
+					if strings.Contains("pPnNkK", string(rune(piece.FenRepr))) {
 						break
 					}
 				}
@@ -224,11 +384,38 @@ func NewGame(settings *s.Settings) (*Game, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	parts := strings.Split(settings.Fen, " ")
+	var side Color = White
+	if len(parts) >= 2 {
+		if parts[1] == "b" {
+			side = Black
+		}
+	}
+
+	var castling CastlingRights
+	if len(parts) >= 3 {
+		c := parts[2]
+		if strings.Contains(c, "K") {
+			castling |= CastlingWhiteKingSide
+		}
+		if strings.Contains(c, "Q") {
+			castling |= CastlingWhiteQueenSide
+		}
+		if strings.Contains(c, "k") {
+			castling |= CastlingBlackKingSide
+		}
+		if strings.Contains(c, "q") {
+			castling |= CastlingBlackQueenSide
+		}
+	}
+
 	game := Game{
 		StartingFen: settings.Fen,
 		Settings:    settings,
 		Board:       board,
-		Side:        White,
+		Side:        side,
+		Castling:    castling,
 	}
 
 	return &game, nil
