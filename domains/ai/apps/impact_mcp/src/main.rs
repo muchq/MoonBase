@@ -79,11 +79,17 @@ fn run_rubric(data_dir: &PathBuf, sub: cli::RubricCommand) {
                 );
             }
         }
-        cli::RubricCommand::Init => {
-            let rubric = rubric::default_rubric();
+        cli::RubricCommand::Init { style } => {
+            let rubric = match style {
+                cli::RubricStyle::Default => rubric::default_rubric(),
+                cli::RubricStyle::Dropbox => rubric::presets::dropbox_rubric(),
+                cli::RubricStyle::Spotify => rubric::presets::spotify_rubric(),
+                cli::RubricStyle::RentTheRunway => rubric::presets::rent_the_runway_rubric(),
+                cli::RubricStyle::Etsy => rubric::presets::etsy_rubric(),
+            };
             let path = data_dir.join("rubric.yaml");
             match rubric.save(&path) {
-                Ok(()) => println!("Default rubric written to {}", path.display()),
+                Ok(()) => println!("Rubric written to {}", path.display()),
                 Err(e) => {
                     eprintln!("error: {e}");
                     process::exit(1);

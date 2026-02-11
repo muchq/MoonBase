@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(
     name = "impact-mcp",
     about = "impact-mcp — amplify your impact and make it visible",
-    version = "0.0.9-alpha",
-    long_about = "A local-first AI agent that helps engineers capture evidence of impact, \
+    version = "0.0.10",
+    long_about = "A local-first AI toolkit that helps engineers capture evidence of impact, \
                    understand role expectations, close gaps, and communicate contributions \
                    clearly — for better project results and growth in your career."
 )]
@@ -78,13 +78,26 @@ pub enum RubricCommand {
     Show,
 
     /// Write the default rubric to the data directory.
-    Init,
+    Init {
+        /// The style of rubric to use.
+        #[arg(long, default_value = "default")]
+        style: RubricStyle,
+    },
 
     /// Load a rubric from a YAML file.
     Load {
         /// Path to the rubric YAML file.
         path: PathBuf,
     },
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+pub enum RubricStyle {
+    Default,
+    Dropbox,
+    Spotify,
+    RentTheRunway,
+    Etsy,
 }
 
 #[derive(Subcommand)]
