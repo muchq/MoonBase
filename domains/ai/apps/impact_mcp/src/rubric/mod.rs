@@ -1,4 +1,5 @@
 mod default;
+pub mod presets;
 
 pub use default::default_rubric;
 

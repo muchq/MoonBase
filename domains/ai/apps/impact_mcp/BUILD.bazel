@@ -20,6 +20,7 @@ rust_library(
         "src/readiness/mod.rs",
         "src/rubric/default.rs",
         "src/rubric/mod.rs",
+        "src/rubric/presets.rs",
         "src/server.rs",
     ],
     crate_name = "impact_mcp",

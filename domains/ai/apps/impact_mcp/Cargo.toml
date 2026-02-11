@@ -1,10 +1,10 @@
 [package]
 name = "impact_mcp"
-version = "0.0.9-alpha"
+version = "0.0.10"
 edition.workspace = true
 rust-version.workspace = true
 readme.workspace = true
-description = "impact-mcp — a local-first AI agent helping engineers amplify impact and grow in their role"
+description = "impact-mcp — a local-first AI toolkit helping engineers amplify impact and grow in their role"
 
 [[bin]]
 name = "impact-mcp"

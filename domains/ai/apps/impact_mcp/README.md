@@ -1,6 +1,6 @@
 # impact-mcp
 
-**A local-first AI agent to help engineers amplify impact and grow in their role.**
+**A local-first AI toolkit to help engineers amplify impact and grow in their role.**
 
 `impact-mcp` is a tool designed to capture evidence of your engineering impact, clarify role expectations through rubrics, and provide a local AI assistant via the Model Context Protocol (MCP) to help you communicate your contributions effectively.
 
