@@ -15,8 +15,6 @@ tonic = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 tonic-prost = { workspace = true }
-protoc-gen-prost = { workspace = true }
-protoc-gen-tonic = { workspace = true }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }
