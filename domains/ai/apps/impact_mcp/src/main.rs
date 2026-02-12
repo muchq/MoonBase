@@ -470,6 +470,10 @@ const SKILLS: &[(&str, &str)] = &[
         "impact-projects.md",
         include_str!("../commands/impact-projects.md"),
     ),
+    (
+        "impact-pull.md",
+        include_str!("../commands/impact-pull.md"),
+    ),
 ];
 
 fn install_claude_skills(target_dir: &std::path::Path) {
