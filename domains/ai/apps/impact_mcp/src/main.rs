@@ -315,7 +315,7 @@ async fn run_pull(data_dir: &PathBuf, claude: bool, codex: bool) {
             continue;
         }
         match connector.pull().await {
-            Ok(cards) => {
+            Ok((cards, warnings)) => {
                 let n = cards.len();
                 for card in cards {
                     if let Err(e) = store.insert(card) {
@@ -323,6 +323,9 @@ async fn run_pull(data_dir: &PathBuf, claude: bool, codex: bool) {
                     }
                 }
                 println!("  [ok]   {} — {n} card(s) pulled", connector.name());
+                for warning in warnings {
+                    println!("         ⚠️ {}", warning);
+                }
                 total += n;
             }
             Err(e) => {

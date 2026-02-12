@@ -17,8 +17,9 @@ pub trait Connector: Send + Sync {
     fn name(&self) -> &str;
 
     /// Pull recent artifacts and convert them to evidence cards.
+    /// Returns a tuple of (evidence cards, warnings/prompts).
     /// Returns an empty vec when no new evidence is found.
-    fn pull(&self) -> Pin<Box<dyn Future<Output = Result<Vec<EvidenceCard>, ConnectorError>> + Send + '_>>;
+    fn pull(&self) -> Pin<Box<dyn Future<Output = Result<(Vec<EvidenceCard>, Vec<String>), ConnectorError>> + Send + '_>>;
 
     /// Whether this connector has been configured with credentials.
     fn is_configured(&self) -> bool;

@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use crate::archetype::{Archetype, ArchetypeProfile};
 use crate::evidence::{EvidenceCard, EvidenceSource, EvidenceStore};
+use crate::projects::ProjectStore;
 use crate::readiness::{CoverageLevel, ReadinessMap};
 use crate::rubric::Rubric;
 
@@ -100,6 +101,10 @@ impl ImpactServer {
 
     fn open_store(&self) -> Result<EvidenceStore, String> {
         EvidenceStore::open(&self.data_dir).map_err(|e| format!("Failed to open store: {e}"))
+    }
+
+    fn open_project_store(&self) -> Result<ProjectStore, String> {
+        ProjectStore::open(&self.data_dir).map_err(|e| format!("Failed to open project store: {e}"))
     }
 }
 
@@ -297,6 +302,20 @@ impl ImpactServer {
         };
 
         let mut out = String::new();
+
+        // Project check
+        match self.open_project_store() {
+            Ok(pstore) => {
+                if pstore.all().is_empty() {
+                    out.push_str("  [warn] No projects configured. Use `impact-mcp projects add` to track your work.\n\n");
+                }
+            }
+            Err(e) => {
+                 // Log error but continue
+                 tracing::warn!("Failed to open project store: {}", e);
+            }
+        }
+
         let mut total = 0;
         for connector in &connectors {
             if !connector.is_configured() {
@@ -304,7 +323,7 @@ impl ImpactServer {
                 continue;
             }
             match connector.pull().await {
-                Ok(cards) => {
+                Ok((cards, warnings)) => {
                     let n = cards.len();
                     for card in cards {
                         if let Err(e) = store.insert(card) {
@@ -312,6 +331,9 @@ impl ImpactServer {
                         }
                     }
                     out.push_str(&format!("  [ok]   {} — {n} card(s) pulled\n", connector.name()));
+                    for warning in warnings {
+                        out.push_str(&format!("         ⚠️ {}\n", warning));
+                    }
                     total += n;
                 }
                 Err(e) => {
@@ -350,14 +372,18 @@ impl ImpactServer {
         };
 
         match connector.pull().await {
-            Ok(cards) => {
+            Ok((cards, warnings)) => {
                 let n = cards.len();
                 for card in cards {
                     if let Err(e) = store.insert(card) {
                         return format!("Error storing card: {e}");
                     }
                 }
-                format!("{} — {n} card(s) pulled", connector.name())
+                let mut output = format!("{} — {n} card(s) pulled\n", connector.name());
+                for warning in warnings {
+                    output.push_str(&format!("⚠️ {}\n", warning));
+                }
+                output
             }
             Err(e) => format!("Error: {e}"),
         }
