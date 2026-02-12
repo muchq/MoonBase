@@ -29,6 +29,7 @@ rust_library(
         "chrono",
         "clap",
         "dirs",
+        "reqwest",
         "rmcp",
         "schemars",
         "serde",
