@@ -146,9 +146,32 @@ services:
           cpus: '0.5'
           memory: 512M
 
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:14
+    restart: always
+    ports:
+      - "222:22"
+      - "3000:3000"
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+    volumes:
+      - forgejo_data:/data
+      - /etc/forgejo:/data/gitea/conf
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
 volumes:
   caddy_data:
   caddy_config:
+  forgejo_data:
 
 networks:
   app_network:

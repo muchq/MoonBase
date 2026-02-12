@@ -51,6 +51,11 @@ ssh ubuntu@api.muchq.com << 'EOF'
   echo "Creating r3dr config directory..."
   sudo mkdir -p /etc/r3dr
 
+  # Create Forgejo config directory
+  echo "Creating Forgejo config directory..."
+  sudo mkdir -p /etc/forgejo
+  sudo chown 1000:1000 /etc/forgejo
+
   echo "Docker installation complete!"
 EOF
 
