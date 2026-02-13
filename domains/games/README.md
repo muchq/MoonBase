@@ -15,6 +15,7 @@ Game engines, services, and libraries.
 
 - [**FlippyMem**](apps/flippymem): A simple memory game (web-based).
 - [**Chess Demo**](apps/chess_demo): Demonstration application for chess-related functionality.
+- [**Wordchains**](apps/wordchains): Interactive solver for Lewis Carroll's "Doublets" (Word Ladder) game. Supports graph generation, shortest path finding, and exploring all paths between words.
 
 ## Libraries
 
@@ -23,7 +24,7 @@ Game engines, services, and libraries.
 - [**Toyfish**](libs/toyfish): Toy chess engine in Go.
 - [**Chess.com Client**](libs/chess_com_client): API client for interacting with Chess.com.
 - [**ChessQL**](libs/chessql): Query language/engine for chess data.
-- [**Wordchains**](libs/wordchains): Word-based game logic in Rust.
+- [**Wordchains**](libs/wordchains): Core graph algorithms and data structures for word chain puzzles.
 
 ## Protos
 
