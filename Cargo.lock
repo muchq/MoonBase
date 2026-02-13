@@ -1608,6 +1608,50 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
+name = "microgpt"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "microgpt_cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "microgpt",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "microgpt_serve"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "microgpt",
+ "serde",
+ "serde_json",
+ "server_pal",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "microgpt_train"
+version = "0.1.0"
+dependencies = [
+ "microgpt",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"

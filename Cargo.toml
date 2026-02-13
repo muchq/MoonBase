@@ -3,6 +3,10 @@ resolver = "2"
 
 members = [
     "domains/ai/apps/impact_mcp",
+    "domains/ai/apps/microgpt_cli",
+    "domains/ai/apps/microgpt_train",
+    "domains/ai/apis/microgpt_serve",
+    "domains/ai/libs/microgpt",
     "domains/platform/apis/doc_db",
     "domains/graphics/libs/imagine_rust",
     "domains/games/apis/mithril",
@@ -51,4 +55,5 @@ dirs = "6.0.0"
 rmcp = { version = "0.13.0", features = ["client", "server", "macros", "transport-child-process", "transport-io"] }
 schemars = "1.0"
 serde_yaml_ng = "0.10"
+microgpt = { path = "domains/ai/libs/microgpt" }
 wordchains = { path = "domains/games/libs/wordchains" }
