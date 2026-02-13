@@ -27,3 +27,12 @@ http_jar(
     sha256 = "697707af07c7753f29cba415c6a76b7882702ff464f807da98b28069b8751910",
     url = "https://repo1.maven.org/maven2/com/google/googlejavaformat/google-java-format/1.33.0/google-java-format-1.33.0-all-deps.jar",
 )
+
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+http_file(
+    name = "english_words",
+    downloaded_file_path = "words_alpha.txt",
+    sha256 = "3ed0c94610d8bcf7c11bbb49c56aa49c7234d32b66824df91f554169e572da48",
+    urls = ["https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt"],
+)

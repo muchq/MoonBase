@@ -1,21 +1,19 @@
-name: Release impact-mcp
+name: Release wordchains
 
 on:
   workflow_run:
     workflows: ["Test and Publish"]
-    branches: [main]
     types:
       - completed
-  workflow_dispatch: {}
   push:
     tags:
-      - 'impact-mcp-v*'
+      - 'wordchains-v*'
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-impact-mcp
+  group: release-wordchains
   cancel-in-progress: false
 
 jobs:
@@ -35,14 +33,14 @@ jobs:
         id: version_check
         run: |
           # Get version from current commit
-          CURRENT_VERSION=$(grep '^version = ' domains/ai/apps/impact_mcp/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          CURRENT_VERSION=$(grep '^version = ' domains/games/apps/wordchains/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
 
           # Get version from previous commit
-          git checkout HEAD~1 -- domains/ai/apps/impact_mcp/Cargo.toml 2>/dev/null || true
-          PREVIOUS_VERSION=$(grep '^version = ' domains/ai/apps/impact_mcp/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/' || echo "")
+          git checkout HEAD~1 -- domains/games/apps/wordchains/Cargo.toml 2>/dev/null || true
+          PREVIOUS_VERSION=$(grep '^version = ' domains/games/apps/wordchains/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/' || echo "")
 
           # Restore current version
-          git checkout HEAD -- domains/ai/apps/impact_mcp/Cargo.toml
+          git checkout HEAD -- domains/games/apps/wordchains/Cargo.toml
 
           echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
           echo "previous_version=$PREVIOUS_VERSION" >> "$GITHUB_OUTPUT"
@@ -59,7 +57,7 @@ jobs:
         if: steps.version_check.outputs.changed == 'true'
         run: |
           VERSION="${{ steps.version_check.outputs.current_version }}"
-          TAG="impact-mcp-v${VERSION}"
+          TAG="wordchains-v${VERSION}"
 
           # Check if tag already exists on remote
           if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
@@ -70,7 +68,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git tag -a "$TAG" -m "Release impact-mcp v${VERSION}"
+          git tag -a "$TAG" -m "Release wordchains v${VERSION}"
           git push origin "$TAG"
 
           echo "Created and pushed tag: $TAG"
@@ -92,11 +90,11 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             TAG="${GITHUB_REF_NAME}"
-            VERSION="${TAG#impact-mcp-v}"
+            VERSION="${TAG#wordchains-v}"
             REF="${{ github.ref }}"
           else
             VERSION="${{ needs.check-and-tag.outputs.version }}"
-            TAG="impact-mcp-v${VERSION}"
+            TAG="wordchains-v${VERSION}"
             REF="${{ github.event.workflow_run.head_sha }}"
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -123,7 +121,7 @@ jobs:
         if: github.event_name == 'push'
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          CARGO_VERSION=$(grep '^version = ' domains/ai/apps/impact_mcp/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          CARGO_VERSION=$(grep '^version = ' domains/games/apps/wordchains/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           if [ "$VERSION" != "$CARGO_VERSION" ]; then
             echo "Error: Tag version ($VERSION) doesn't match Cargo.toml ($CARGO_VERSION)"
             exit 1
@@ -133,19 +131,19 @@ jobs:
       - uses: bazel-contrib/setup-bazel@0.18.0
         with:
           bazelisk-cache: true
-          disk-cache: release-impact-mcp-${{ matrix.target }}
+          disk-cache: release-wordchains-${{ matrix.target }}
           repository-cache: true
 
       - name: Build
-        run: bazel build //domains/ai/apps/impact_mcp:impact-mcp
+        run: bazel build //domains/games/apps/wordchains:wordchains
 
       - name: Package
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          TARBALL="impact-mcp-${VERSION}-${{ matrix.target }}.tar.gz"
-          SHA_FILE="impact-mcp-${VERSION}-${{ matrix.target }}.sha256.txt"
-          cp bazel-bin/domains/ai/apps/impact_mcp/impact-mcp impact-mcp
-          tar czf "$TARBALL" impact-mcp
+          TARBALL="wordchains-${VERSION}-${{ matrix.target }}.tar.gz"
+          SHA_FILE="wordchains-${VERSION}-${{ matrix.target }}.sha256.txt"
+          cp bazel-bin/domains/games/apps/wordchains/wordchains wordchains
+          tar czf "$TARBALL" wordchains
           shasum -a 256 "$TARBALL" | awk '{print $1}' > "$SHA_FILE"
           echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
           echo "SHA_FILE=$SHA_FILE" >> "$GITHUB_ENV"
@@ -175,7 +173,7 @@ jobs:
           VERSION="${{ needs.prepare.outputs.version }}"
           TAG="${{ needs.prepare.outputs.tag }}"
           gh release create "$TAG" \
-            --title "impact-mcp v${VERSION}" \
+            --title "wordchains v${VERSION}" \
             --generate-notes \
             artifacts/**/*.tar.gz \
             artifacts/**/*.sha256.txt
@@ -189,7 +187,7 @@ jobs:
           LINUX_SHA=$(cat artifacts/x86_64-unknown-linux-gnu/*.sha256.txt)
 
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/muchq/homebrew-muchq.git" tap
-          FORMULA="tap/Formula/impact-mcp.rb"
+          FORMULA="tap/Formula/wordchains.rb"
 
           python3 - "$FORMULA" "$VERSION" "$MAC_SHA" "$LINUX_SHA" <<'EOF'
           import re, sys
@@ -225,6 +223,6 @@ jobs:
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/impact-mcp.rb
-          git commit -m "impact-mcp ${VERSION}"
+          git add Formula/wordchains.rb
+          git commit -m "wordchains ${VERSION}"
           git push

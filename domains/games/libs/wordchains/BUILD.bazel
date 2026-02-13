@@ -1,8 +1,8 @@
-load("@crates//:defs.bzl", "all_crate_deps", "crate_deps")
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+load("@crates//:defs.bzl", "crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
-    name = "wordchains_lib",
+    name = "wordchains",
     srcs = [
         "src/graph.rs",
         "src/init.rs",
@@ -17,22 +17,13 @@ rust_library(
         "base64ct",
         "sha2",
         "tracing",
+        "serde",
+        "serde_json",
     ]),
 )
 
-rust_binary(
-    name = "wordchains",
-    srcs = [
-        "src/args.rs",
-        "src/logging.rs",
-        "src/main.rs",
-    ],
-    crate_name = "wordchains",
-    deps = all_crate_deps() + [":wordchains_lib"],
-)
-
 rust_test(
-    name = "test_wordchains",
+    name = "test_wordchains_lib",
     size = "small",
     crate = ":wordchains",
 )
