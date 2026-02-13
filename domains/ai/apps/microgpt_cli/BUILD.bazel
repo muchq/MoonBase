@@ -1,0 +1,13 @@
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary")
+
+rust_binary(
+    name = "microgpt",
+    srcs = [
+        "src/main.rs",
+    ],
+    crate_name = "microgpt_cli",
+    deps = [
+        "//domains/ai/libs/microgpt",
+    ] + all_crate_deps(),
+)
