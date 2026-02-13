@@ -137,7 +137,7 @@ jobs:
           repository-cache: true
 
       - name: Build
-        run: bazel build -c opt //domains/ai/apps/impact_mcp:impact-mcp
+        run: bazel build //domains/ai/apps/impact_mcp:impact-mcp
 
       - name: Package
         run: |

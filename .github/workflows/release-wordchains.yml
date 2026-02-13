@@ -2,7 +2,7 @@ name: Release wordchains
 
 on:
   workflow_run:
-    workflows: ["Test + Publish"]
+    workflows: ["Test and Publish"]
     types:
       - completed
   push:
@@ -135,7 +135,7 @@ jobs:
           repository-cache: true
 
       - name: Build
-        run: bazel build -c opt //domains/games/apps/wordchains:wordchains
+        run: bazel build //domains/games/apps/wordchains:wordchains
 
       - name: Package
         run: |

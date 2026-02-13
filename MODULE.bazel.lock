@@ -1450,7 +1450,7 @@
           "FILE:@@//domains/platform/libs/server_pal/Cargo.toml 46f54128e5eb9ba6d20f718cb05b97cd51613cbdfa5102d755d304889b532fa4",
           "FILE:@@//domains/games/libs/wordchains/Cargo.toml f4d8a206f4cf49457115d76b54279238f52a974cb92d204ab8fdf9be3cd10e47",
           "FILE:@@//domains/graphics/apis/posterize/Cargo.toml 314f0147be0c9639e214862343eeff917f3b08c8871b2399e1a23927210c8fa9",
-          "FILE:@@//domains/games/apps/wordchains/Cargo.toml 12e6e54511664819ec493581532670aed9256ab41dd3d39fcb3ca21e1a919e7c",
+          "FILE:@@//domains/games/apps/wordchains/Cargo.toml 3bf02cc56ed664ff2f094f1f74191055db5562f663fc7229e5128644f91f78c1",
           "FILE:@@//domains/platform/protos/example_grpc/Cargo.toml 221c79bbaddd55a35b01abc4685108123d22e9ad1a40bf47c270d0ce9b59f3b1"
         ],
         "generatedRepoSpecs": {

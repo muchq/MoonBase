@@ -162,7 +162,6 @@ pub fn find_all_shortest_paths(
         for v_idx in &word_graph.edges[u_idx] {
             let neighbor = &word_graph.nodes[*v_idx];
             if *neighbor == target_word {
-                println!("Found target via {} at dist {}", current, d + 1);
                 found_min_dist = d + 1;
                 parents.entry(neighbor.clone()).or_default().push(current.clone());
             } else {
@@ -210,6 +209,9 @@ fn backtrack(
     }
 }
 
+const MAX_ALL_PATHS_RESULTS: usize = 1000;
+const MAX_ALL_PATHS_DEPTH_MARGIN: usize = 2;
+
 pub fn find_all_paths(
     start: String,
     target_word: &str,
@@ -224,6 +226,16 @@ pub fn find_all_paths(
         return vec![];
     }
 
+    if start == target_word {
+        return vec![vec![start]];
+    }
+
+    // BFS to find shortest path length, then cap DFS depth to avoid combinatorial explosion.
+    let max_depth = match bfs_shortest_distance(&start, target_word, word_graph, &word_to_index) {
+        Some(d) => d + MAX_ALL_PATHS_DEPTH_MARGIN,
+        None => return vec![],
+    };
+
     let mut result = Vec::new();
     let mut path = vec![start.clone()];
     let mut visited = HashMap::new();
@@ -237,9 +249,38 @@ pub fn find_all_paths(
         &mut visited,
         &mut path,
         &mut result,
+        max_depth,
     );
 
     result
+}
+
+fn bfs_shortest_distance(
+    start: &str,
+    target: &str,
+    graph: &Graph,
+    word_to_index: &HashMap<String, usize>,
+) -> Option<usize> {
+    let mut dist: HashMap<&str, usize> = HashMap::new();
+    let mut queue: VecDeque<&str> = VecDeque::new();
+    dist.insert(start, 0);
+    queue.push_back(start);
+
+    while let Some(current) = queue.pop_front() {
+        let d = dist[current];
+        if current == target {
+            return Some(d);
+        }
+        let u_idx = *word_to_index.get(current).unwrap();
+        for v_idx in &graph.edges[u_idx] {
+            let neighbor = graph.nodes[*v_idx].as_str();
+            if !dist.contains_key(neighbor) {
+                dist.insert(neighbor, d + 1);
+                queue.push_back(neighbor);
+            }
+        }
+    }
+    None
 }
 
 fn dfs_all_paths(
@@ -250,15 +291,14 @@ fn dfs_all_paths(
     visited: &mut HashMap<String, bool>,
     path: &mut Vec<String>,
     result: &mut Vec<Vec<String>>,
+    max_depth: usize,
 ) {
     if current == target {
         result.push(path.clone());
         return;
     }
 
-    // Heuristic: Don't go deeper than typically needed for word ladders to avoid stack overflow or infinite runtime on large graphs?
-    // Word ladders can be long, but usually < 20. Let's limit to 50 for safety?
-    if path.len() > 50 {
+    if path.len() > max_depth || result.len() >= MAX_ALL_PATHS_RESULTS {
         return;
     }
 
@@ -268,7 +308,7 @@ fn dfs_all_paths(
         if !*visited.get(neighbor).unwrap_or(&false) {
             visited.insert(neighbor.clone(), true);
             path.push(neighbor.clone());
-            dfs_all_paths(neighbor, target, graph, word_to_index, visited, path, result);
+            dfs_all_paths(neighbor, target, graph, word_to_index, visited, path, result, max_depth);
             path.pop();
             visited.insert(neighbor.clone(), false);
         }
@@ -336,5 +376,81 @@ mod tests {
         let paths = find_all_paths("cat".to_string(), "dog", &graph);
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0], vec!["cat", "cot", "cog", "dog"]);
+    }
+
+    #[test]
+    fn test_find_all_paths_multiple_routes() {
+        // Two shortest paths plus one longer path within the depth margin
+        let words = vec![
+            "cat".to_string(),
+            "cot".to_string(),
+            "cog".to_string(),
+            "dog".to_string(),
+            "cag".to_string(),
+            "dag".to_string(),
+        ];
+        let (graph, _) = build_graph(words);
+        let paths = find_all_paths("cat".to_string(), "dog", &graph);
+        // Shortest is length 4 (cat-cot-cog-dog, cat-cag-cog-dog)
+        // With margin of 2, max depth is 6, so longer routes are also included
+        assert!(paths.len() >= 2);
+        for p in &paths {
+            assert_eq!(p.first().unwrap(), "cat");
+            assert_eq!(p.last().unwrap(), "dog");
+            assert!(p.len() <= 7); // shortest (4) + margin (2) + 1
+        }
+    }
+
+    #[test]
+    fn test_find_all_paths_no_path() {
+        let words = vec![
+            "cat".to_string(),
+            "cot".to_string(),
+            "dog".to_string(), // not reachable from cat/cot (no cog)
+        ];
+        let (graph, _) = build_graph(words);
+        let paths = find_all_paths("cat".to_string(), "dog", &graph);
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn test_find_all_paths_same_word() {
+        let words = vec!["cat".to_string()];
+        let (graph, _) = build_graph(words);
+        let paths = find_all_paths("cat".to_string(), "cat", &graph);
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0], vec!["cat"]);
+    }
+
+    #[test]
+    fn test_find_all_paths_missing_word() {
+        let words = vec!["cat".to_string()];
+        let (graph, _) = build_graph(words);
+        let paths = find_all_paths("cat".to_string(), "dog", &graph);
+        assert!(paths.is_empty());
+        let paths = find_all_paths("dog".to_string(), "cat", &graph);
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn test_find_all_paths_dense_graph_terminates() {
+        // Build a dense 3-letter word graph that would explode without bounds
+        let mut words = Vec::new();
+        for a in b'a'..=b'z' {
+            for b in b'a'..=b'z' {
+                for c in b'a'..=b'z' {
+                    words.push(String::from_utf8(vec![a, b, c]).unwrap());
+                }
+            }
+        }
+        let (graph, _) = build_graph(words);
+        let paths = find_all_paths("cat".to_string(), "bot", &graph);
+        // Should terminate and return bounded results
+        assert!(!paths.is_empty());
+        assert!(paths.len() <= super::MAX_ALL_PATHS_RESULTS);
+        for p in &paths {
+            assert_eq!(p.first().unwrap(), "cat");
+            assert_eq!(p.last().unwrap(), "bot");
+        }
     }
 }
