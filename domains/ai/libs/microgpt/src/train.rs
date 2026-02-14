@@ -1,4 +1,4 @@
-use crate::model::{Gpt, KvCache, BLOCK_SIZE};
+use crate::model::{Gpt, KvCache};
 use crate::value::{self, Value};
 
 /// Configuration for a training run.
@@ -46,8 +46,9 @@ pub fn train_step(
     config: &TrainConfig,
     step: usize,
 ) -> f64 {
-    let n = BLOCK_SIZE.min(tokens.len() - 1);
-    let mut kv = KvCache::new();
+    let block_size = model.config.block_size;
+    let n = block_size.min(tokens.len() - 1);
+    let mut kv = KvCache::new(&model.config);
     let mut losses = Vec::with_capacity(n);
 
     for pos_id in 0..n {
@@ -86,12 +87,13 @@ pub fn generate(
     rng_seed: u64,
     decode: impl Fn(usize) -> Option<char>,
 ) -> String {
-    let mut kv = KvCache::new();
+    let block_size = model.config.block_size;
+    let mut kv = KvCache::new(&model.config);
     let mut token_id = bos;
     let mut sample = String::new();
     let mut rng_state = if rng_seed == 0 { 1u64 } else { rng_seed };
 
-    for pos_id in 0..BLOCK_SIZE {
+    for pos_id in 0..block_size {
         let logits = model.forward(token_id, pos_id, &mut kv);
         let scaled: Vec<Value> = logits
             .iter()

@@ -13,7 +13,7 @@ use microgpt::{InferenceGpt, Tokenizer};
 use server_pal::{listen_addr_pal, router_builder};
 use tracing::{Level, event};
 
-use crate::service::generate_post;
+use crate::service::{chat_post, generate_post};
 
 pub struct AppState {
     pub model: InferenceGpt,
@@ -47,16 +47,14 @@ async fn main() {
         eprintln!("error: cannot read {}: {e}", weights_path.display());
         process::exit(1);
     });
-    let model = InferenceGpt::load_weights(meta.vocab_size, &weights_json).unwrap_or_else(|e| {
-        eprintln!("error: {e}");
-        process::exit(1);
-    });
+    let config = meta.config();
+    let model = InferenceGpt::load_weights_with_config(meta.vocab_size, &weights_json, config)
+        .unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            process::exit(1);
+        });
 
-    let tokenizer = Tokenizer {
-        bos: meta.chars.len(),
-        vocab_size: meta.vocab_size,
-        chars: meta.chars,
-    };
+    let tokenizer = Tokenizer::from_meta(meta.chars, meta.special_tokens.as_deref());
 
     event!(
         Level::INFO,
@@ -68,8 +66,12 @@ async fn main() {
     let state = Arc::new(AppState { model, tokenizer });
 
     let listen_address = listen_addr_pal();
+    let has_chat = state.tokenizer.special_tokens.is_some();
+    event!(Level::INFO, "chat support: {}", has_chat);
+
     let app = router_builder()
         .route("/microgpt/v1/generate", post(generate_post))
+        .route("/microgpt/v1/chat", post(chat_post))
         .build()
         .with_state(state);
 
