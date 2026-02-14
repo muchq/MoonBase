@@ -28,7 +28,7 @@ impl Connector for SlackConnector {
         self.token.is_some()
     }
 
-    fn pull(&self) -> Pin<Box<dyn Future<Output = Result<Vec<EvidenceCard>, ConnectorError>> + Send + '_>> {
+    fn pull(&self) -> Pin<Box<dyn Future<Output = Result<(Vec<EvidenceCard>, Vec<String>), ConnectorError>> + Send + '_>> {
         Box::pin(async move {
             if !self.is_configured() {
                 return Err(ConnectorError::NotConfigured(
@@ -41,10 +41,11 @@ impl Connector for SlackConnector {
             // - Mentorship / teaching moments
             // - Technical decision discussions
             tracing::info!("Slack connector: pull not yet implemented (POC stub)");
-            Ok(vec![EvidenceCard::new(
+            let cards = vec![EvidenceCard::new(
                 EvidenceSource::Slack,
                 "[stub] example Slack evidence card",
-            )])
+            )];
+            Ok((cards, vec![]))
         })
     }
 }

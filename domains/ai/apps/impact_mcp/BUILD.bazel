@@ -23,12 +23,14 @@ rust_library(
         "src/rubric/presets.rs",
         "src/server.rs",
     ],
+    compile_data = glob(["commands/*.md"]),
     crate_name = "impact_mcp",
     visibility = ["//visibility:public"],
     deps = crate_deps([
         "chrono",
         "clap",
         "dirs",
+        "reqwest",
         "rmcp",
         "schemars",
         "serde",
@@ -64,6 +66,7 @@ rust_test(
 rust_test(
     name = "test_impact_mcp_lib",
     size = "small",
+    compile_data = glob(["commands/*.md"]),
     crate = ":impact_mcp_lib",
     deps = crate_deps([
         "tempfile",
