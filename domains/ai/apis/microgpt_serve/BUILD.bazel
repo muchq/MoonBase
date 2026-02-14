@@ -1,0 +1,19 @@
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary")
+load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
+
+rust_binary(
+    name = "microgpt-serve",
+    srcs = [
+        "src/main.rs",
+        "src/service.rs",
+        "src/types.rs",
+    ],
+    crate_name = "microgpt_serve",
+    deps = [
+        "//domains/ai/libs/microgpt",
+        "//domains/platform/libs/server_pal",
+    ] + all_crate_deps(),
+)
+
+linux_amd64_oci_binary(bin_name = "microgpt-serve")
