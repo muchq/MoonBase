@@ -1,0 +1,228 @@
+name: Release wordchains-ios
+
+on:
+  workflow_run:
+    workflows: ["Test and Publish"]
+    types:
+      - completed
+  push:
+    tags:
+      - 'wordchains-ios-v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-wordchains-ios
+  cancel-in-progress: false
+
+jobs:
+  check-and-tag:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+    outputs:
+      version: ${{ steps.version_check.outputs.current_version }}
+      should_release: ${{ steps.version_check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 2
+
+      - name: Check if version changed
+        id: version_check
+        run: |
+          PLIST="domains/games/apps/wordchains_ios/Info.plist"
+
+          # Get version from current commit
+          CURRENT_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "")
+
+          # Get version from previous commit
+          git checkout HEAD~1 -- "$PLIST" 2>/dev/null || true
+          PREVIOUS_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "")
+
+          # Restore current version
+          git checkout HEAD -- "$PLIST"
+
+          echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "previous_version=$PREVIOUS_VERSION" >> "$GITHUB_OUTPUT"
+
+          if [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ] && [ -n "$CURRENT_VERSION" ]; then
+            echo "Version changed from $PREVIOUS_VERSION to $CURRENT_VERSION"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version unchanged: $CURRENT_VERSION"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push tag
+        if: steps.version_check.outputs.changed == 'true'
+        run: |
+          VERSION="${{ steps.version_check.outputs.current_version }}"
+          TAG="wordchains-ios-v${VERSION}"
+
+          if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
+            echo "Tag $TAG already exists on remote, skipping"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "$TAG" -m "Release wordchains-ios v${VERSION}"
+          git push origin "$TAG"
+
+          echo "Created and pushed tag: $TAG"
+
+  prepare:
+    needs: [check-and-tag]
+    if: |
+      always() &&
+      (github.event_name == 'push' ||
+       (needs.check-and-tag.result == 'success' && needs.check-and-tag.outputs.should_release == 'true'))
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      ref: ${{ steps.resolve.outputs.ref }}
+      build_number: ${{ steps.resolve.outputs.build_number }}
+    steps:
+      - name: Resolve version and ref
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#wordchains-ios-v}"
+            REF="${{ github.ref }}"
+          else
+            VERSION="${{ needs.check-and-tag.outputs.version }}"
+            TAG="wordchains-ios-v${VERSION}"
+            REF="${{ github.event.workflow_run.head_sha }}"
+          fi
+
+          # Auto-increment build number from run number
+          BUILD_NUMBER="${{ github.run_number }}"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [prepare]
+    if: always() && needs.prepare.result == 'success'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - name: Verify version matches Info.plist
+        if: github.event_name == 'push'
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          PLIST_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" domains/games/apps/wordchains_ios/Info.plist)
+          if [ "$VERSION" != "$PLIST_VERSION" ]; then
+            echo "Error: Tag version ($VERSION) doesn't match Info.plist ($PLIST_VERSION)"
+            exit 1
+          fi
+          echo "Version verification passed: $VERSION"
+
+      - name: Set build number
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ needs.prepare.outputs.build_number }}" \
+            domains/games/apps/wordchains_ios/Info.plist
+
+      - uses: bazel-contrib/setup-bazel@0.18.0
+        with:
+          bazelisk-cache: true
+          disk-cache: release-wordchains-ios
+          repository-cache: true
+
+      # Generate the word graph JSON using the Rust wordchains CLI tool
+      - name: Generate word graph
+        run: |
+          bazel build //domains/games/apps/wordchains:generate_graph_json
+
+      # Build the iOS app archive
+      - name: Build iOS app
+        run: |
+          bazel build //domains/games/apps/wordchains_ios:WordChains \
+            --ios_minimum_os=17.0 \
+            --apple_platform_type=ios
+
+      # For App Store submission, we need an xcarchive + IPA.
+      # Bazel produces the .app bundle; we package it into an IPA.
+      - name: Package IPA
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          BUILD="${{ needs.prepare.outputs.build_number }}"
+          APP_PATH=$(find bazel-bin/domains/games/apps/wordchains_ios -name "WordChains.app" -type d | head -1)
+
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+          zip -r "WordChains-${VERSION}-${BUILD}.ipa" Payload
+          shasum -a 256 "WordChains-${VERSION}-${BUILD}.ipa" | awk '{print $1}' > "WordChains-${VERSION}-${BUILD}.sha256.txt"
+
+          echo "IPA_FILE=WordChains-${VERSION}-${BUILD}.ipa" >> "$GITHUB_ENV"
+          echo "SHA_FILE=WordChains-${VERSION}-${BUILD}.sha256.txt" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wordchains-ios-ipa
+          path: |
+            ${{ env.IPA_FILE }}
+            ${{ env.SHA_FILE }}
+
+  release:
+    needs: [prepare, build]
+    if: always() && needs.build.result == 'success'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TAG="${{ needs.prepare.outputs.tag }}"
+          gh release create "$TAG" \
+            --title "wordchains-ios v${VERSION}" \
+            --generate-notes \
+            artifacts/**/*.ipa \
+            artifacts/**/*.sha256.txt
+
+      # Upload to App Store Connect via the App Store Connect API.
+      # Requires: APP_STORE_CONNECT_API_KEY_ID, APP_STORE_CONNECT_ISSUER_ID,
+      #           APP_STORE_CONNECT_API_KEY (base64-encoded .p8 private key)
+      # See docs/RELEASE.md for setup instructions.
+      - name: Upload to App Store Connect
+        env:
+          APP_STORE_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        run: |
+          if [ -z "$APP_STORE_KEY_ID" ]; then
+            echo "::warning::APP_STORE_CONNECT_API_KEY_ID not set — skipping App Store upload."
+            echo "See docs/RELEASE.md for setup instructions."
+            exit 0
+          fi
+
+          # Write API key to file
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$APP_STORE_KEY" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_${APP_STORE_KEY_ID}.p8
+
+          IPA_FILE=$(find artifacts -name "*.ipa" | head -1)
+
+          xcrun altool --upload-app \
+            --type ios \
+            --file "$IPA_FILE" \
+            --apiKey "$APP_STORE_KEY_ID" \
+            --apiIssuer "$APP_STORE_ISSUER_ID"
+
+          echo "Uploaded to App Store Connect successfully."
