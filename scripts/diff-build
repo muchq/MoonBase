@@ -141,16 +141,35 @@ fi
 echo "=========================================================="
 echo ""
 
-# Separate build and test targets (only for local targets)
+# Use bazel query to reliably identify test targets (not name heuristics)
 build_targets=()
 test_targets=()
-for target in "${local_targets[@]}"; do
-  if [[ "$target" == *"_test" ]] || [[ "$target" == *":test" ]]; then
-    test_targets+=("$target")
-  else
-    build_targets+=("$target")
+
+if [ ${#local_targets[@]} -gt 0 ]; then
+  # Filter to rule targets only (skip source files like :src/foo.rs, :BUILD.bazel)
+  rule_targets=()
+  for target in "${local_targets[@]}"; do
+    label="${target##*:}"
+    if [[ "$label" != *"/"* ]] && [[ "$label" != *"."* ]]; then
+      rule_targets+=("$target")
+    fi
+  done
+
+  # Ask Bazel which rule targets are test rules
+  test_set=""
+  if [ ${#rule_targets[@]} -gt 0 ]; then
+    target_set="${rule_targets[*]}"
+    test_set=$(bazel query "kind('.*_test rule', set($target_set))" 2>/dev/null || echo "")
   fi
-done
+
+  for target in "${local_targets[@]}"; do
+    if echo "$test_set" | grep -qxF "$target"; then
+      test_targets+=("$target")
+    else
+      build_targets+=("$target")
+    fi
+  done
+fi
 
 # Build only non-test targets
 if [ ${#build_targets[@]} -gt 0 ]; then
