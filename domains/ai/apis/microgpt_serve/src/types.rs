@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+// ---------- Generate (existing) ----------
+
 #[derive(Deserialize)]
 pub struct GenerateRequest {
     /// Number of samples to generate (default 1, max 50).
@@ -30,4 +32,39 @@ fn default_seed() -> u64 {
 #[derive(Serialize)]
 pub struct GenerateResponse {
     pub samples: Vec<String>,
+}
+
+// ---------- Chat ----------
+
+#[derive(Deserialize)]
+pub struct ChatRequest {
+    /// Conversation messages. Each must have a "role" and "content".
+    pub messages: Vec<Message>,
+
+    /// Sampling temperature (default 0.5).
+    #[serde(default = "default_temperature")]
+    pub temperature: f64,
+
+    /// RNG seed for reproducibility (default 42).
+    #[serde(default = "default_seed")]
+    pub seed: u64,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub struct Message {
+    /// "user" or "assistant".
+    pub role: String,
+    /// The text content of the message.
+    pub content: String,
+}
+
+#[derive(Serialize)]
+pub struct ChatResponse {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Serialize)]
+pub struct ErrorResponse {
+    pub error: String,
 }
