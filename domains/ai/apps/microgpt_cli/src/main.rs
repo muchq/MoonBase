@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process;
 
@@ -6,7 +7,10 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use microgpt::model::ModelMeta;
-use microgpt::{Adam, Dataset, Gpt, Tokenizer, TrainConfig, generate, train_step};
+use microgpt::{
+    Adam, ChatDataset, Dataset, Gpt, InferenceGpt, ModelConfig, Tokenizer, TrainConfig, generate,
+    train_step,
+};
 
 #[derive(Parser)]
 #[command(
@@ -25,7 +29,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Train a model on a text file (one document per line).
+    /// Train a model on a text file (one document per line, or JSONL with --chat).
     Train {
         /// Path to the training data file.
         #[arg(long)]
@@ -46,6 +50,26 @@ enum Command {
         /// Learning rate.
         #[arg(long, default_value = "0.01")]
         lr: f64,
+
+        /// Enable chat mode. Input must be JSONL with conversation arrays.
+        #[arg(long)]
+        chat: bool,
+
+        /// Embedding dimension.
+        #[arg(long, default_value = "16")]
+        n_embd: usize,
+
+        /// Number of attention heads (must divide n_embd evenly).
+        #[arg(long, default_value = "4")]
+        n_head: usize,
+
+        /// Number of transformer layers.
+        #[arg(long, default_value = "1")]
+        n_layer: usize,
+
+        /// Context window size in tokens.
+        #[arg(long, default_value = "16")]
+        block_size: usize,
     },
 
     /// Generate samples from a trained model.
@@ -57,6 +81,21 @@ enum Command {
         /// Number of samples to generate.
         #[arg(long, default_value = "20")]
         num_samples: usize,
+
+        /// Sampling temperature.
+        #[arg(long, default_value = "0.5")]
+        temperature: f64,
+
+        /// Random seed.
+        #[arg(long, default_value = "42")]
+        seed: u64,
+    },
+
+    /// Interactive chat with a trained model.
+    Chat {
+        /// Directory containing weights.json and meta.json.
+        #[arg(long, default_value = "output")]
+        model_dir: PathBuf,
 
         /// Sampling temperature.
         #[arg(long, default_value = "0.5")]
@@ -89,18 +128,51 @@ fn main() {
             steps,
             seed,
             lr,
-        } => run_train(input, output, steps, seed, lr),
+            chat,
+            n_embd,
+            n_head,
+            n_layer,
+            block_size,
+        } => {
+            let model_config = ModelConfig {
+                n_embd,
+                n_head,
+                n_layer,
+                block_size,
+            };
+            if n_embd % n_head != 0 {
+                eprintln!("error: n_embd ({n_embd}) must be divisible by n_head ({n_head})");
+                process::exit(1);
+            }
+            if chat {
+                run_train_chat(input, output, steps, seed, lr, model_config);
+            } else {
+                run_train(input, output, steps, seed, lr, model_config);
+            }
+        }
         Command::Generate {
             model_dir,
             num_samples,
             temperature,
             seed,
         } => run_generate(model_dir, num_samples, temperature, seed),
+        Command::Chat {
+            model_dir,
+            temperature,
+            seed,
+        } => run_chat(model_dir, temperature, seed),
         Command::Info { model_dir } => run_info(model_dir),
     }
 }
 
-fn run_train(input: PathBuf, output: PathBuf, steps: usize, seed: u64, lr: f64) {
+fn run_train(
+    input: PathBuf,
+    output: PathBuf,
+    steps: usize,
+    seed: u64,
+    lr: f64,
+    model_config: ModelConfig,
+) {
     if !input.exists() {
         eprintln!("error: input file not found: {}", input.display());
         process::exit(1);
@@ -115,10 +187,11 @@ fn run_train(input: PathBuf, output: PathBuf, steps: usize, seed: u64, lr: f64) 
         process::exit(1);
     });
 
+    print_config("text", &model_config);
     println!("num docs:    {}", dataset.docs.len());
     println!("vocab size:  {}", dataset.tokenizer.vocab_size);
 
-    let model = Gpt::new(dataset.tokenizer.vocab_size, seed);
+    let model = Gpt::with_config(dataset.tokenizer.vocab_size, seed, model_config);
     let params = model.params();
     println!("num params:  {}", params.len());
     println!();
@@ -148,6 +221,61 @@ fn run_train(input: PathBuf, output: PathBuf, steps: usize, seed: u64, lr: f64) 
     }
 }
 
+fn run_train_chat(
+    input: PathBuf,
+    output: PathBuf,
+    steps: usize,
+    seed: u64,
+    lr: f64,
+    model_config: ModelConfig,
+) {
+    if !input.exists() {
+        eprintln!("error: input file not found: {}", input.display());
+        process::exit(1);
+    }
+    if let Err(e) = fs::create_dir_all(&output) {
+        eprintln!("error: cannot create output directory: {e}");
+        process::exit(1);
+    }
+
+    let dataset = ChatDataset::load(&input).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        process::exit(1);
+    });
+
+    print_config("chat", &model_config);
+    println!("num convos:  {}", dataset.len());
+    println!("vocab size:  {}", dataset.tokenizer.vocab_size);
+
+    let model = Gpt::with_config(dataset.tokenizer.vocab_size, seed, model_config);
+    let params = model.params();
+    println!("num params:  {}", params.len());
+    println!();
+
+    let config = TrainConfig {
+        learning_rate: lr,
+        num_steps: steps,
+        ..TrainConfig::default()
+    };
+    let mut adam = Adam::new(params.len());
+
+    for step in 0..steps {
+        let tokens = dataset.encode_conversation(step % dataset.len());
+        let loss = train_step(&model, &tokens, &params, &mut adam, &config, step);
+        println!("step {:4} / {:4} | loss {:.4}", step + 1, steps, loss);
+    }
+
+    save_model(&model, &dataset.tokenizer, &output);
+}
+
+fn print_config(mode: &str, config: &ModelConfig) {
+    println!("microgpt train ({mode})");
+    println!("  n_embd:      {}", config.n_embd);
+    println!("  n_head:      {}", config.n_head);
+    println!("  n_layer:     {}", config.n_layer);
+    println!("  block_size:  {}", config.block_size);
+}
+
 fn run_generate(model_dir: PathBuf, num_samples: usize, temperature: f64, seed: u64) {
     let (model, tokenizer) = load_model(&model_dir);
 
@@ -156,6 +284,100 @@ fn run_generate(model_dir: PathBuf, num_samples: usize, temperature: f64, seed: 
             tokenizer.decode(id)
         });
         println!("sample {:2}: {sample}", i + 1);
+    }
+}
+
+fn run_chat(model_dir: PathBuf, temperature: f64, seed: u64) {
+    let (tokenizer, model) = load_inference_model(&model_dir);
+
+    let special = match &tokenizer.special_tokens {
+        Some(s) => s.clone(),
+        None => {
+            eprintln!("error: this model was not trained with chat tokens");
+            eprintln!("hint: retrain with --chat to enable chat support");
+            process::exit(1);
+        }
+    };
+
+    println!("microgpt chat (block_size={})", model.config.block_size);
+    println!("type /quit to exit, /clear to reset history\n");
+
+    let mut rl = rustyline::DefaultEditor::new().unwrap_or_else(|e| {
+        eprintln!("error: failed to initialize readline: {e}");
+        process::exit(1);
+    });
+
+    let mut history: Vec<usize> = Vec::new();
+    let mut turn_count: u64 = 0;
+
+    loop {
+        let input = match rl.readline("you> ") {
+            Ok(line) => line,
+            Err(
+                rustyline::error::ReadlineError::Interrupted
+                | rustyline::error::ReadlineError::Eof,
+            ) => break,
+            Err(e) => {
+                eprintln!("error: {e}");
+                break;
+            }
+        };
+
+        let input = input.trim();
+        if input.is_empty() {
+            continue;
+        }
+
+        match input {
+            "/quit" => break,
+            "/clear" => {
+                history.clear();
+                turn_count = 0;
+                println!("(history cleared)");
+                continue;
+            }
+            _ => {}
+        }
+
+        let _ = rl.add_history_entry(input);
+
+        // Encode user turn and append to history.
+        history.extend(tokenizer.encode_turn("user", input));
+
+        // Append the assistant role token to prompt the model.
+        history.push(special.assistant);
+
+        // Truncate history from the front if it exceeds block_size,
+        // leaving room for at least one generated token.
+        let max_prompt = model.config.block_size.saturating_sub(1);
+        if history.len() > max_prompt {
+            let excess = history.len() - max_prompt;
+            history.drain(..excess);
+        }
+
+        // Generate response.
+        print!("microgpt> ");
+        let rng_seed = seed.wrapping_add(turn_count);
+
+        let output = model.generate_from_prompt(
+            &history,
+            special.end_turn,
+            temperature,
+            rng_seed,
+            |tok| {
+                if let Some(ch) = tokenizer.decode(tok) {
+                    print!("{ch}");
+                    io::stdout().flush().ok();
+                }
+            },
+        );
+        println!();
+
+        // Append assistant response + end_turn to history for next turn.
+        history.extend(&output);
+        history.push(special.end_turn);
+
+        turn_count += 1;
     }
 }
 
@@ -171,12 +393,15 @@ fn run_info(model_dir: PathBuf) {
     });
 
     println!("microgpt model");
-    println!("  vocab_size:  {}", meta.vocab_size);
-    println!("  n_embd:      {}", meta.n_embd);
-    println!("  n_head:      {}", meta.n_head);
-    println!("  n_layer:     {}", meta.n_layer);
-    println!("  block_size:  {}", meta.block_size);
-    println!("  charset:     {:?}", meta.chars);
+    println!("  vocab_size:      {}", meta.vocab_size);
+    println!("  n_embd:          {}", meta.n_embd);
+    println!("  n_head:          {}", meta.n_head);
+    println!("  n_layer:         {}", meta.n_layer);
+    println!("  block_size:      {}", meta.block_size);
+    println!("  charset:         {:?}", meta.chars);
+    if let Some(ref st) = meta.special_tokens {
+        println!("  special_tokens:  {:?}", st);
+    }
 
     let weights_path = model_dir.join("weights.json");
     if weights_path.exists() {
@@ -184,15 +409,17 @@ fn run_info(model_dir: PathBuf) {
             eprintln!("error: cannot read weights: {e}");
             process::exit(1);
         });
-        let model = Gpt::load_weights(meta.vocab_size, &weights_json).unwrap_or_else(|e| {
-            eprintln!("error: {e}");
-            process::exit(1);
-        });
-        println!("  num_params:  {}", model.params().len());
+        let config = meta.config();
+        let model = Gpt::load_weights_with_config(meta.vocab_size, &weights_json, config)
+            .unwrap_or_else(|e| {
+                eprintln!("error: {e}");
+                process::exit(1);
+            });
+        println!("  num_params:      {}", model.params().len());
     }
 }
 
-fn save_model(model: &Gpt, tokenizer: &microgpt::Tokenizer, output: &PathBuf) {
+fn save_model(model: &Gpt, tokenizer: &Tokenizer, output: &PathBuf) {
     let weights_json = model.save_weights();
     let weights_path = output.join("weights.json");
     if let Err(e) = fs::write(&weights_path, &weights_json) {
@@ -203,11 +430,12 @@ fn save_model(model: &Gpt, tokenizer: &microgpt::Tokenizer, output: &PathBuf) {
 
     let meta = ModelMeta {
         vocab_size: tokenizer.vocab_size,
-        n_embd: microgpt::N_EMBD,
-        n_head: microgpt::N_HEAD,
-        n_layer: microgpt::N_LAYER,
-        block_size: microgpt::BLOCK_SIZE,
+        n_embd: model.config.n_embd,
+        n_head: model.config.n_head,
+        n_layer: model.config.n_layer,
+        block_size: model.config.block_size,
         chars: tokenizer.chars.clone(),
+        special_tokens: tokenizer.special_token_names(),
     };
     let meta_json = serde_json::to_string_pretty(&meta).expect("meta serialization");
     let meta_path = output.join("meta.json");
@@ -219,6 +447,30 @@ fn save_model(model: &Gpt, tokenizer: &microgpt::Tokenizer, output: &PathBuf) {
 }
 
 fn load_model(model_dir: &PathBuf) -> (Gpt, Tokenizer) {
+    let (meta, weights_json) = load_meta_and_weights(model_dir);
+    let config = meta.config();
+    let model = Gpt::load_weights_with_config(meta.vocab_size, &weights_json, config)
+        .unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            process::exit(1);
+        });
+    let tokenizer = Tokenizer::from_meta(meta.chars, meta.special_tokens.as_deref());
+    (model, tokenizer)
+}
+
+fn load_inference_model(model_dir: &PathBuf) -> (Tokenizer, InferenceGpt) {
+    let (meta, weights_json) = load_meta_and_weights(model_dir);
+    let config = meta.config();
+    let model = InferenceGpt::load_weights_with_config(meta.vocab_size, &weights_json, config)
+        .unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            process::exit(1);
+        });
+    let tokenizer = Tokenizer::from_meta(meta.chars, meta.special_tokens.as_deref());
+    (tokenizer, model)
+}
+
+fn load_meta_and_weights(model_dir: &PathBuf) -> (ModelMeta, String) {
     let meta_path = model_dir.join("meta.json");
     let meta_json = fs::read_to_string(&meta_path).unwrap_or_else(|e| {
         eprintln!("error: cannot read {}: {e}", meta_path.display());
@@ -234,16 +486,6 @@ fn load_model(model_dir: &PathBuf) -> (Gpt, Tokenizer) {
         eprintln!("error: cannot read {}: {e}", weights_path.display());
         process::exit(1);
     });
-    let model = Gpt::load_weights(meta.vocab_size, &weights_json).unwrap_or_else(|e| {
-        eprintln!("error: {e}");
-        process::exit(1);
-    });
 
-    let tokenizer = Tokenizer {
-        bos: meta.chars.len(),
-        vocab_size: meta.vocab_size,
-        chars: meta.chars,
-    };
-
-    (model, tokenizer)
+    (meta, weights_json)
 }
