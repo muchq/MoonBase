@@ -54,7 +54,7 @@ mod tests {
 
         // Should contain content from impact-pull.md
         assert!(prompt.contains("Pull & Analyze Evidence"));
-        assert!(prompt.contains("CRITICAL: Pay close attention to the output"));
+        assert!(prompt.contains("**CRITICAL:** Pay close attention to the output"));
         // Should NOT contain frontmatter
         assert!(!prompt.contains("name: impact-pull"));
     }
