@@ -4,7 +4,6 @@ resolver = "2"
 members = [
     "domains/ai/apps/impact_mcp",
     "domains/ai/apps/microgpt_cli",
-    "domains/ai/apps/microgpt_train",
     "domains/ai/apis/microgpt_serve",
     "domains/ai/libs/microgpt",
     "domains/platform/apis/doc_db",
