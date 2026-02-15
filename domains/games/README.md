@@ -16,6 +16,7 @@ Game engines, services, and libraries.
 - [**FlippyMem**](apps/flippymem): A simple memory game (web-based).
 - [**Chess Demo**](apps/chess_demo): Demonstration application for chess-related functionality.
 - [**Wordchains**](apps/wordchains): Interactive solver for Lewis Carroll's "Doublets" (Word Ladder) game. Supports graph generation, shortest path finding, and exploring all paths between words.
+- [**Wordchains iOS**](apps/wordchains_ios): SwiftUI iOS app for the Word Chains puzzle game. Quick Play, Daily Challenge, and Time Attack modes. Reuses the same word graph and algorithms as the CLI.
 
 ## Libraries
 

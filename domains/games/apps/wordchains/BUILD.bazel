@@ -27,6 +27,7 @@ genrule(
     outs = ["word_graph.json"],
     cmd = "$(location :wordchains_generator) generate-graph --dictionary-path $(location @english_words//file) --output-path $@",
     tools = [":wordchains_generator"],
+    visibility = ["//domains/games/apps/wordchains_ios:__pkg__"],
 )
 
 # Rule to generate Rust source with embedded bytes

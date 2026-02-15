@@ -23,3 +23,5 @@ local_docs
 
 node_modules
 web/build_pal/dist
+.build
+.swiftpm
