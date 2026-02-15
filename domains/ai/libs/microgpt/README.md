@@ -3,12 +3,11 @@
 A minimal GPT implementation in pure Rust with a from-scratch autograd engine.
 Ported from [karpathy's microgpt.py](https://gist.github.com/aaylward/f9cfa5bff5aada3dcce46db0110eb34e) — the complete algorithm; everything else is just efficiency.
 
-## Architecture (4 crates)
+## Architecture (3 crates)
 
 ```
 domains/ai/libs/microgpt          ← core library (autograd, model, training, data)
 domains/ai/apps/microgpt_cli      ← CLI for training, generation, chat, and inspection
-domains/ai/apps/microgpt_train    ← deployable training binary (env-var configured)
 domains/ai/apis/microgpt_serve    ← HTTP inference service (server_pal)
 ```
 
@@ -39,7 +38,7 @@ Models can be trained in chat mode with special tokens for multi-turn conversati
 
 ## Usage
 
-### Train a model (CLI)
+### Train a model
 
 ```bash
 # Prepare data: one document per line (e.g., names)
@@ -57,20 +56,7 @@ cargo run -p microgpt_cli -- train --input convos.jsonl --output chat-model --ch
   --n-embd 128 --n-head 8 --n-layer 4 --block-size 256 --steps 10000
 ```
 
-### Train a model (deployable app)
-
-```bash
-# Text mode (default)
-TRAIN_INPUT=names.txt TRAIN_OUTPUT_DIR=output TRAIN_STEPS=1000 \
-  cargo run -p microgpt_train
-
-# Chat mode with custom dimensions
-TRAIN_INPUT=convos.jsonl TRAIN_CHAT=1 TRAIN_STEPS=10000 \
-  TRAIN_N_EMBD=128 TRAIN_N_HEAD=8 TRAIN_N_LAYER=4 TRAIN_BLOCK_SIZE=256 \
-  TRAIN_LR=0.005 cargo run -p microgpt_train
-```
-
-### Generate samples (CLI)
+### Generate samples
 
 ```bash
 cargo run -p microgpt_cli -- generate --model-dir output --num-samples 20 --temperature 0.5

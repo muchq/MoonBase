@@ -5,7 +5,6 @@ Artificial Intelligence and Machine Learning libraries and services.
 ## Apps
 
 - [**impact-mcp**](apps/impact_mcp): A local-first AI agent that helps engineers amplify their impact, close gaps against a customizable rubric, and communicate contributions clearly — for better project results and career growth.
-- [**microgpt-train**](apps/microgpt_train): Deployable training app for the microgpt character-level language model. Reads training data, runs the full training loop, and saves weights.
 - [**microgpt (cli)**](apps/microgpt_cli): CLI agent for local training, inference, and model inspection. Wraps the full microgpt workflow in a single binary.
 
 ## APIs

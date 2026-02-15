@@ -2,6 +2,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process;
+use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
@@ -202,13 +203,27 @@ fn run_train(
         ..TrainConfig::default()
     };
     let mut adam = Adam::new(params.len());
+    let train_start = Instant::now();
 
     for step in 0..steps {
         let doc = &dataset.docs[step % dataset.docs.len()];
         let tokens = dataset.tokenizer.encode_doc(doc);
         let loss = train_step(&model, &tokens, &params, &mut adam, &config, step);
-        println!("step {:4} / {:4} | loss {:.4}", step + 1, steps, loss);
+        let elapsed = train_start.elapsed().as_secs_f64();
+        let avg = elapsed / (step + 1) as f64;
+        let eta = avg * (steps - step - 1) as f64;
+        println!(
+            "step {:4} / {:4} | loss {:.4} | {:.1}s/step | eta {}",
+            step + 1,
+            steps,
+            loss,
+            avg,
+            format_eta(eta),
+        );
     }
+
+    let total = train_start.elapsed().as_secs_f64();
+    println!("\ntraining complete in {}", format_eta(total));
 
     save_model(&model, &dataset.tokenizer, &output);
 
@@ -258,14 +273,39 @@ fn run_train_chat(
         ..TrainConfig::default()
     };
     let mut adam = Adam::new(params.len());
+    let train_start = Instant::now();
 
     for step in 0..steps {
         let tokens = dataset.encode_conversation(step % dataset.len());
         let loss = train_step(&model, &tokens, &params, &mut adam, &config, step);
-        println!("step {:4} / {:4} | loss {:.4}", step + 1, steps, loss);
+        let elapsed = train_start.elapsed().as_secs_f64();
+        let avg = elapsed / (step + 1) as f64;
+        let eta = avg * (steps - step - 1) as f64;
+        println!(
+            "step {:4} / {:4} | loss {:.4} | {:.1}s/step | eta {}",
+            step + 1,
+            steps,
+            loss,
+            avg,
+            format_eta(eta),
+        );
     }
 
+    let total = train_start.elapsed().as_secs_f64();
+    println!("\ntraining complete in {}", format_eta(total));
+
     save_model(&model, &dataset.tokenizer, &output);
+}
+
+fn format_eta(secs: f64) -> String {
+    let s = secs as u64;
+    if s < 60 {
+        format!("{s}s")
+    } else if s < 3600 {
+        format!("{}m {:02}s", s / 60, s % 60)
+    } else {
+        format!("{}h {:02}m", s / 3600, (s % 3600) / 60)
+    }
 }
 
 fn print_config(mode: &str, config: &ModelConfig) {
