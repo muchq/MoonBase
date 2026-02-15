@@ -90,9 +90,11 @@ USE_BAZEL_VERSION=8.2.1 bazel build //domains/games/apps/wordchains_ios:WordChai
 ## Known Issues
 
 - **Bazel 9 incompatibility:** `rules_apple` (latest: 4.3.3) does not support
-  Bazel 9 yet. The CI workflow and local builds use `USE_BAZEL_VERSION=8.2.1`
-  as a workaround. This will be resolved when `rules_apple` publishes a
-  Bazel 9-compatible release.
+  Bazel 9 yet. All targets in `BUILD.bazel` are tagged `manual` so they are
+  excluded from `bazel build //...` and `bazel test //...`. Build them
+  explicitly with `USE_BAZEL_VERSION=8.2.1`. Tracking issues:
+  - [bazelbuild/rules_apple#2863 — Support Bazel 9+](https://github.com/bazelbuild/rules_apple/issues/2863)
+  - [bazelbuild/rules_apple#2857 — multi_arch_platform removed in Bazel 9](https://github.com/bazelbuild/rules_apple/issues/2857)
 
 ## Setup TODOs
 

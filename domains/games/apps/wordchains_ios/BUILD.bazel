@@ -19,6 +19,7 @@ swift_library(
 )
 
 # Tagged manual: rules_apple doesn't support Bazel 9 yet.
+# https://github.com/bazelbuild/rules_apple/issues/2863
 # Build with: USE_BAZEL_VERSION=8.2.1 bazel build //domains/games/apps/wordchains_ios:WordChains
 ios_application(
     name = "WordChains",
