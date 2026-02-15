@@ -10,17 +10,89 @@ The iOS release pipeline mirrors the wordchains CLI release process:
 4. **Release** — creates a GitHub Release with the IPA artifact
 5. **App Store upload** — pushes the IPA to App Store Connect via `xcrun altool`
 
+## Testing Before Publication
+
+### Run unit tests (fastest)
+
+A `Package.swift` is provided for running tests locally via Swift Package Manager.
+This exercises the WordGraph BFS algorithms, `isOneLetterAway` validation, and
+graph query helpers — the same logic paths used in the iOS app.
+
+```sh
+cd domains/games/apps/wordchains_ios
+swift test
+```
+
+All 12 tests should pass (shortest path, all-shortest-paths, graph queries, etc.).
+
+### Run in the iOS Simulator (Xcode)
+
+To test the full app UI on a simulator:
+
+```sh
+cd domains/games/apps/wordchains_ios
+open Package.swift
+```
+
+In Xcode:
+1. Select the **WordChains** scheme
+2. Choose an iPhone simulator (e.g. iPhone 16 Pro, iOS 18.6)
+3. Press **Cmd+R** to build and run
+
+> **Note:** The app loads `word_graph.json` from the bundle at startup. When
+> running via SPM in Xcode, the graph won't be bundled automatically. For
+> full-app testing with the real graph, use the Bazel build (see below) or
+> manually copy the generated graph into the simulator's app container.
+
+### Build with Bazel
+
+The canonical build uses Bazel. `rules_apple` does not yet support Bazel 9,
+so iOS builds must use Bazel 8 LTS via bazelisk:
+
+```sh
+# Build the iOS app (simulator):
+USE_BAZEL_VERSION=8.2.1 bazel build //domains/games/apps/wordchains_ios:WordChains \
+  --ios_minimum_os=17.0 \
+  --apple_platform_type=ios
+
+# Run the Bazel-based unit tests:
+USE_BAZEL_VERSION=8.2.1 bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
+  --ios_minimum_os=17.0
+```
+
+> **Simulator runtime:** The build requires an iOS simulator runtime matching
+> your Xcode SDK version. If you see "No simulator runtime version available",
+> install the matching runtime: **Xcode > Settings > Platforms > + (iOS)**.
+
+### Manual testing checklist
+
+Before submitting to the App Store, verify these scenarios:
+
+- [ ] **Quick Play** — start a game, enter valid words, reach the target word
+- [ ] **Daily Challenge** — same puzzle generates for the same date
+- [ ] **Time Attack** — timer counts down, new puzzle loads after solving
+- [ ] **Input validation** — wrong length, not in dictionary, not one-letter-away, already used
+- [ ] **Hint system** — lightbulb button fills the next word on the shortest path
+- [ ] **Scoring** — optimal solve gives 150 pts (100 base + 50 bonus), extra steps reduce score
+- [ ] **Difficulty levels** — Easy (3 letters), Medium (4), Hard (5)
+- [ ] **iPad layout** — views adapt to wider screens
+- [ ] **Dark mode** — colors remain readable in dark appearance
+
 ## Build
 
 ```sh
-# Generate the word graph (reuses the wordchains Rust CLI generator)
-bazel build //domains/games/apps/wordchains:generate_graph_json
-
-# Build the iOS app
-bazel build //domains/games/apps/wordchains_ios:WordChains \
+# Build (requires Bazel 8 LTS):
+USE_BAZEL_VERSION=8.2.1 bazel build //domains/games/apps/wordchains_ios:WordChains \
   --ios_minimum_os=17.0 \
   --apple_platform_type=ios
 ```
+
+## Known Issues
+
+- **Bazel 9 incompatibility:** `rules_apple` (latest: 4.3.3) does not support
+  Bazel 9 yet. The CI workflow and local builds use `USE_BAZEL_VERSION=8.2.1`
+  as a workaround. This will be resolved when `rules_apple` publishes a
+  Bazel 9-compatible release.
 
 ## Setup TODOs
 

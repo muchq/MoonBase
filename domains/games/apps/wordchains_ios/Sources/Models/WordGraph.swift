@@ -85,7 +85,7 @@ struct WordGraph: Codable {
 
         if foundMinDist == Int.max { return [] }
 
-        var results: [[String]] = []
+        var results: [[Int]] = []
         var path = [targetIdx]
         backtrack(current: targetIdx, start: startIdx, parents: parents, path: &path, results: &results)
         return results.map { $0.map { nodes[$0] } }

@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 enum Theme {
     // MARK: - Colors
@@ -16,9 +19,15 @@ enum Theme {
     static let warningOrange = Color(red: 1.0, green: 0.62, blue: 0.25)
     static let hintBlue = Color(red: 0.40, green: 0.65, blue: 1.0)
 
+    #if canImport(UIKit)
     static let cardBackground = Color(.systemBackground)
     static let secondaryBackground = Color(.secondarySystemBackground)
     static let tertiaryBackground = Color(.tertiarySystemBackground)
+    #else
+    static let cardBackground = Color(.windowBackgroundColor)
+    static let secondaryBackground = Color(.controlBackgroundColor)
+    static let tertiaryBackground = Color(.textBackgroundColor)
+    #endif
 
     static var headerGradient: LinearGradient {
         LinearGradient(colors: [gradientStart, gradientEnd], startPoint: .leading, endPoint: .trailing)
@@ -63,7 +72,11 @@ extension Color {
         var g: CGFloat = 0
         var b: CGFloat = 0
         var o: CGFloat = 0
+        #if canImport(UIKit)
         UIColor(self).getRed(&r, green: &g, blue: &b, alpha: &o)
+        #else
+        NSColor(self).getRed(&r, green: &g, blue: &b, alpha: &o)
+        #endif
         return (Double(r), Double(g), Double(b), Double(o))
     }
 }

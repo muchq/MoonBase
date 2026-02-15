@@ -30,7 +30,7 @@ struct GameView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
+            ToolbarItem(placement: .cancellationAction) {
                 Button {
                     dismiss()
                 } label: {

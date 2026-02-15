@@ -31,7 +31,9 @@ struct WordInputView: View {
     private var textField: some View {
         TextField("Enter a word...", text: $inputText)
             .font(.system(size: 18, weight: .medium, design: .rounded))
+            #if os(iOS)
             .textInputAutocapitalization(.never)
+            #endif
             .autocorrectionDisabled()
             .focused($isFocused)
             .padding(.horizontal, 16)
@@ -144,7 +146,9 @@ struct WordInputView: View {
     }
 
     private func hapticError() {
+        #if canImport(UIKit)
         let generator = UINotificationFeedbackGenerator()
         generator.notificationOccurred(.error)
+        #endif
     }
 }

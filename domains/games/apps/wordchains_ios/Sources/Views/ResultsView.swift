@@ -190,8 +190,10 @@ struct ResultsView: View {
     }
 
     private func hapticSuccess() {
+        #if canImport(UIKit)
         let generator = UINotificationFeedbackGenerator()
         generator.notificationOccurred(.success)
+        #endif
     }
 }
 

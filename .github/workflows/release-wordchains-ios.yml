@@ -133,19 +133,21 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ needs.prepare.outputs.build_number }}" \
             domains/games/apps/wordchains_ios/Info.plist
 
+      - name: Run unit tests
+        working-directory: domains/games/apps/wordchains_ios
+        run: swift test
+
       - uses: bazel-contrib/setup-bazel@0.18.0
         with:
           bazelisk-cache: true
           disk-cache: release-wordchains-ios
           repository-cache: true
 
-      # Generate the word graph JSON using the Rust wordchains CLI tool
-      - name: Generate word graph
-        run: |
-          bazel build //domains/games/apps/wordchains:generate_graph_json
-
-      # Build the iOS app archive
+      # rules_apple doesn't support Bazel 9 yet; pin to Bazel 8 LTS for iOS builds.
+      # Track: https://github.com/bazelbuild/rules_apple/issues
       - name: Build iOS app
+        env:
+          USE_BAZEL_VERSION: 8.2.1
         run: |
           bazel build //domains/games/apps/wordchains_ios:WordChains \
             --ios_minimum_os=17.0 \
