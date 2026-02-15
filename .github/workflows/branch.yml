@@ -50,3 +50,26 @@ jobs:
       - name: bazel-diff-build-and-test
         run: |
           ./scripts/diff-build origin/main
+
+  # iOS targets can't build on Ubuntu; run Swift tests on macOS when relevant files change.
+  test-ios:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for iOS changes
+        id: filter
+        run: |
+          CHANGED=$(git diff --name-only origin/main...HEAD -- domains/games/apps/wordchains_ios/ domains/games/libs/wordchains/)
+          if [ -n "$CHANGED" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run wordchains-ios tests
+        if: steps.filter.outputs.changed == 'true'
+        working-directory: domains/games/apps/wordchains_ios
+        run: swift test
