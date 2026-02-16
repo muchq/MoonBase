@@ -6,6 +6,10 @@ rust-version.workspace = true
 readme.workspace = true
 description = "CLI agent for local microgpt training and inference"
 
+[features]
+default = []
+metal = ["microgpt/metal"]
+
 [[bin]]
 name = "microgpt"
 path = "src/main.rs"

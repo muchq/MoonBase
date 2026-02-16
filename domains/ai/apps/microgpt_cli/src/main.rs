@@ -9,8 +9,8 @@ use tracing_subscriber::EnvFilter;
 
 use microgpt::model::ModelMeta;
 use microgpt::{
-    Adam, ChatDataset, Dataset, Gpt, InferenceGpt, ModelConfig, Tokenizer, TrainConfig, generate,
-    train_step,
+    ChatDataset, Dataset, InferenceGpt, ModelConfig, TensorAdam, TensorGpt, Tokenizer, TrainConfig,
+    tensor_train_step,
 };
 
 #[derive(Parser)]
@@ -71,6 +71,10 @@ enum Command {
         /// Context window size in tokens.
         #[arg(long, default_value = "16")]
         block_size: usize,
+
+        /// Device to train on: cpu or metal (requires --features metal).
+        #[arg(long, default_value = "cpu")]
+        device: String,
     },
 
     /// Generate samples from a trained model.
@@ -134,6 +138,7 @@ fn main() {
             n_head,
             n_layer,
             block_size,
+            device,
         } => {
             let model_config = ModelConfig {
                 n_embd,
@@ -145,10 +150,11 @@ fn main() {
                 eprintln!("error: n_embd ({n_embd}) must be divisible by n_head ({n_head})");
                 process::exit(1);
             }
+            let device = parse_device(&device);
             if chat {
-                run_train_chat(input, output, steps, seed, lr, model_config);
+                run_train_chat(input, output, steps, seed, lr, model_config, &device);
             } else {
-                run_train(input, output, steps, seed, lr, model_config);
+                run_train(input, output, steps, seed, lr, model_config, &device);
             }
         }
         Command::Generate {
@@ -166,6 +172,30 @@ fn main() {
     }
 }
 
+fn parse_device(s: &str) -> microgpt::Device {
+    match s {
+        "cpu" => microgpt::Device::Cpu,
+        "metal" => {
+            #[cfg(feature = "metal")]
+            {
+                microgpt::Device::new_metal(0).unwrap_or_else(|e| {
+                    eprintln!("error: failed to initialize Metal device: {e}");
+                    process::exit(1);
+                })
+            }
+            #[cfg(not(feature = "metal"))]
+            {
+                eprintln!("error: metal support requires building with --features metal");
+                process::exit(1);
+            }
+        }
+        other => {
+            eprintln!("error: unknown device {other:?} (expected \"cpu\" or \"metal\")");
+            process::exit(1);
+        }
+    }
+}
+
 fn run_train(
     input: PathBuf,
     output: PathBuf,
@@ -173,6 +203,7 @@ fn run_train(
     seed: u64,
     lr: f64,
     model_config: ModelConfig,
+    device: &microgpt::Device,
 ) {
     if !input.exists() {
         eprintln!("error: input file not found: {}", input.display());
@@ -188,13 +219,18 @@ fn run_train(
         process::exit(1);
     });
 
-    print_config("text", &model_config);
+    print_config("text", &model_config, device);
     println!("num docs:    {}", dataset.docs.len());
     println!("vocab size:  {}", dataset.tokenizer.vocab_size);
 
-    let model = Gpt::with_config(dataset.tokenizer.vocab_size, seed, model_config);
-    let params = model.params();
-    println!("num params:  {}", params.len());
+    let model = TensorGpt::new(dataset.tokenizer.vocab_size, seed, model_config, device);
+    let num_params: usize = model
+        .varmap
+        .all_vars()
+        .iter()
+        .map(|v| v.as_tensor().elem_count())
+        .sum();
+    println!("num params:  {}", num_params);
     println!();
 
     let config = TrainConfig {
@@ -202,13 +238,20 @@ fn run_train(
         num_steps: steps,
         ..TrainConfig::default()
     };
-    let mut adam = Adam::new(params.len());
+    let mut optimizer = TensorAdam::new(&model.varmap, &config).unwrap_or_else(|e| {
+        eprintln!("error: failed to create optimizer: {e}");
+        process::exit(1);
+    });
     let train_start = Instant::now();
 
     for step in 0..steps {
         let doc = &dataset.docs[step % dataset.docs.len()];
         let tokens = dataset.tokenizer.encode_doc(doc);
-        let loss = train_step(&model, &tokens, &params, &mut adam, &config, step);
+        let loss = tensor_train_step(&model, &tokens, &mut optimizer, &config, step)
+            .unwrap_or_else(|e| {
+                eprintln!("error: training step failed: {e}");
+                process::exit(1);
+            });
         let elapsed = train_start.elapsed().as_secs_f64();
         let avg = elapsed / (step + 1) as f64;
         let eta = avg * (steps - step - 1) as f64;
@@ -225,14 +268,21 @@ fn run_train(
     let total = train_start.elapsed().as_secs_f64();
     println!("\ntraining complete in {}", format_eta(total));
 
-    save_model(&model, &dataset.tokenizer, &output);
+    save_tensor_model(&model, &dataset.tokenizer, &output);
 
-    // Show a few samples
+    // Show a few samples via InferenceGpt
     println!("\n--- samples ---");
+    let weights_json = model.save_weights();
+    let inf = InferenceGpt::load_weights_with_config(
+        dataset.tokenizer.vocab_size,
+        &weights_json,
+        model_config,
+    )
+    .unwrap();
     let tok = &dataset.tokenizer;
     for i in 0..5 {
-        let name = generate(&model, tok.bos, 0.5, seed + i, |id| tok.decode(id));
-        println!("  {name}");
+        let sample = inf.generate(tok.bos, 0.5, seed + i, |id| tok.decode(id));
+        println!("  {sample}");
     }
 }
 
@@ -243,6 +293,7 @@ fn run_train_chat(
     seed: u64,
     lr: f64,
     model_config: ModelConfig,
+    device: &microgpt::Device,
 ) {
     if !input.exists() {
         eprintln!("error: input file not found: {}", input.display());
@@ -258,13 +309,18 @@ fn run_train_chat(
         process::exit(1);
     });
 
-    print_config("chat", &model_config);
+    print_config("chat", &model_config, device);
     println!("num convos:  {}", dataset.len());
     println!("vocab size:  {}", dataset.tokenizer.vocab_size);
 
-    let model = Gpt::with_config(dataset.tokenizer.vocab_size, seed, model_config);
-    let params = model.params();
-    println!("num params:  {}", params.len());
+    let model = TensorGpt::new(dataset.tokenizer.vocab_size, seed, model_config, device);
+    let num_params: usize = model
+        .varmap
+        .all_vars()
+        .iter()
+        .map(|v| v.as_tensor().elem_count())
+        .sum();
+    println!("num params:  {}", num_params);
     println!();
 
     let config = TrainConfig {
@@ -272,12 +328,19 @@ fn run_train_chat(
         num_steps: steps,
         ..TrainConfig::default()
     };
-    let mut adam = Adam::new(params.len());
+    let mut optimizer = TensorAdam::new(&model.varmap, &config).unwrap_or_else(|e| {
+        eprintln!("error: failed to create optimizer: {e}");
+        process::exit(1);
+    });
     let train_start = Instant::now();
 
     for step in 0..steps {
         let tokens = dataset.encode_conversation(step % dataset.len());
-        let loss = train_step(&model, &tokens, &params, &mut adam, &config, step);
+        let loss = tensor_train_step(&model, &tokens, &mut optimizer, &config, step)
+            .unwrap_or_else(|e| {
+                eprintln!("error: training step failed: {e}");
+                process::exit(1);
+            });
         let elapsed = train_start.elapsed().as_secs_f64();
         let avg = elapsed / (step + 1) as f64;
         let eta = avg * (steps - step - 1) as f64;
@@ -294,7 +357,7 @@ fn run_train_chat(
     let total = train_start.elapsed().as_secs_f64();
     println!("\ntraining complete in {}", format_eta(total));
 
-    save_model(&model, &dataset.tokenizer, &output);
+    save_tensor_model(&model, &dataset.tokenizer, &output);
 }
 
 fn format_eta(secs: f64) -> String {
@@ -308,8 +371,12 @@ fn format_eta(secs: f64) -> String {
     }
 }
 
-fn print_config(mode: &str, config: &ModelConfig) {
-    println!("microgpt train ({mode})");
+fn print_config(mode: &str, config: &ModelConfig, device: &microgpt::Device) {
+    let device_name = match device {
+        microgpt::Device::Cpu => "cpu",
+        _ => "metal",
+    };
+    println!("microgpt train ({mode}, device={device_name})");
     println!("  n_embd:      {}", config.n_embd);
     println!("  n_head:      {}", config.n_head);
     println!("  n_layer:     {}", config.n_layer);
@@ -317,10 +384,10 @@ fn print_config(mode: &str, config: &ModelConfig) {
 }
 
 fn run_generate(model_dir: PathBuf, num_samples: usize, temperature: f64, seed: u64) {
-    let (model, tokenizer) = load_model(&model_dir);
+    let (tokenizer, model) = load_inference_model(&model_dir);
 
     for i in 0..num_samples {
-        let sample = generate(&model, tokenizer.bos, temperature, seed + i as u64, |id| {
+        let sample = model.generate(tokenizer.bos, temperature, seed + i as u64, |id| {
             tokenizer.decode(id)
         });
         println!("sample {:2}: {sample}", i + 1);
@@ -450,16 +517,16 @@ fn run_info(model_dir: PathBuf) {
             process::exit(1);
         });
         let config = meta.config();
-        let model = Gpt::load_weights_with_config(meta.vocab_size, &weights_json, config)
+        let model = InferenceGpt::load_weights_with_config(meta.vocab_size, &weights_json, config)
             .unwrap_or_else(|e| {
                 eprintln!("error: {e}");
                 process::exit(1);
             });
-        println!("  num_params:      {}", model.params().len());
+        println!("  num_params:      {}", model.num_params());
     }
 }
 
-fn save_model(model: &Gpt, tokenizer: &Tokenizer, output: &PathBuf) {
+fn save_tensor_model(model: &TensorGpt, tokenizer: &Tokenizer, output: &PathBuf) {
     let weights_json = model.save_weights();
     let weights_path = output.join("weights.json");
     if let Err(e) = fs::write(&weights_path, &weights_json) {
@@ -484,18 +551,6 @@ fn save_model(model: &Gpt, tokenizer: &Tokenizer, output: &PathBuf) {
         process::exit(1);
     }
     println!("metadata saved to {}", meta_path.display());
-}
-
-fn load_model(model_dir: &PathBuf) -> (Gpt, Tokenizer) {
-    let (meta, weights_json) = load_meta_and_weights(model_dir);
-    let config = meta.config();
-    let model = Gpt::load_weights_with_config(meta.vocab_size, &weights_json, config)
-        .unwrap_or_else(|e| {
-            eprintln!("error: {e}");
-            process::exit(1);
-        });
-    let tokenizer = Tokenizer::from_meta(meta.chars, meta.special_tokens.as_deref());
-    (model, tokenizer)
 }
 
 fn load_inference_model(model_dir: &PathBuf) -> (Tokenizer, InferenceGpt) {
