@@ -7,6 +7,8 @@ rust_library(
         "src/data.rs",
         "src/lib.rs",
         "src/model.rs",
+        "src/tensor_model.rs",
+        "src/tensor_train.rs",
         "src/train.rs",
         "src/value.rs",
     ],
