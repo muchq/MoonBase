@@ -63,6 +63,39 @@ func closestIntersection(origin, direction Vec3, tMin, tMax float64, spheres []S
 	return closestSphere, closestT
 }
 
+func anyIntersection(origin, direction Vec3, tMin, tMax float64, spheres []Sphere) bool {
+	// Optimization: precompute 'a' which is constant for the ray
+	a := direction.Dot(direction)
+	inv2a := 1.0 / (2 * a)
+
+	for i := range spheres {
+		// Inline intersection logic to avoid function call overhead and reuse 'a'
+		sphere := spheres[i]
+		originToSphere := origin.Sub(sphere.Center)
+
+		b := originToSphere.Dot(direction) * 2
+		c := originToSphere.Dot(originToSphere) - sphere.R2
+
+		discriminant := b*b - 4*a*c
+		if discriminant < 0 {
+			continue
+		}
+
+		sqrtDiscr := math.Sqrt(discriminant)
+		t1 := (-b - sqrtDiscr) * inv2a
+
+		if tMin < t1 && t1 < tMax {
+			return true
+		}
+
+		t2 := (-b + sqrtDiscr) * inv2a
+		if tMin < t2 && t2 < tMax {
+			return true
+		}
+	}
+	return false
+}
+
 func computeLighting(point, normal, view Vec3, scene Scene, specular float64) float64 {
 	intensity := 0.0
 	
@@ -82,8 +115,7 @@ func computeLighting(point, normal, view Vec3, scene Scene, specular float64) fl
 				tMax = Inf
 			}
 			
-			shadowSphere, _ := closestIntersection(point, ray, Epsilon, tMax, scene.Spheres)
-			if shadowSphere == nil {
+			if !anyIntersection(point, ray, Epsilon, tMax, scene.Spheres) {
 				nDotR := normal.Dot(ray)
 				if nDotR > 0 {
 					intensity += light.Intensity * (nDotR / (normal.Length() * ray.Length()))
