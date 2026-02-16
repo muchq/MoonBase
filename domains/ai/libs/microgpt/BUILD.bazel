@@ -20,3 +20,13 @@ rust_test(
     size = "small",
     crate = ":microgpt",
 )
+
+rust_test(
+    name = "e2e_test",
+    size = "small",
+    srcs = ["tests/e2e.rs"],
+    edition = "2021",
+    deps = [
+        ":microgpt",
+    ] + all_crate_deps(),
+)
