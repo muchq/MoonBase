@@ -17,7 +17,7 @@ fn test_forward_parity() {
 
     let gpt = Gpt::with_config(vocab_size, seed, config);
     let json = gpt.save_weights();
-    let tensor_gpt = TensorGpt::load_weights(vocab_size, &json).expect("load failed");
+    let tensor_gpt = TensorGpt::load_weights_with_config(vocab_size, &json, config).expect("load failed");
 
     let tokens = vec![1usize, 2, 3, 4];
 

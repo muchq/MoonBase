@@ -7,6 +7,9 @@ rust_library(
         "src/data.rs",
         "src/lib.rs",
         "src/model.rs",
+        "src/tensor.rs",
+        "src/tensor_model.rs",
+        "src/tensor_train.rs",
         "src/train.rs",
         "src/value.rs",
     ],
@@ -25,6 +28,16 @@ rust_test(
     name = "e2e_test",
     size = "small",
     srcs = ["tests/e2e.rs"],
+    edition = "2021",
+    deps = [
+        ":microgpt",
+    ] + all_crate_deps(),
+)
+
+rust_test(
+    name = "tensor_parity",
+    size = "small",
+    srcs = ["tests/tensor_parity.rs"],
     edition = "2021",
     deps = [
         ":microgpt",

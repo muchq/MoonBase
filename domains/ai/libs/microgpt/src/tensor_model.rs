@@ -56,15 +56,13 @@ impl TensorGpt {
     }
 
     /// Load weights from JSON string (compatible with Gpt).
-    pub fn load_weights(_vocab_size: usize, json: &str) -> Result<Self> {
+    pub fn load_weights(vocab_size: usize, json: &str) -> Result<Self> {
+        Self::load_weights_with_config(vocab_size, json, ModelConfig::default())
+    }
+
+    pub fn load_weights_with_config(_vocab_size: usize, json: &str, config: ModelConfig) -> Result<Self> {
         let snapshot: HashMap<String, Vec<Vec<f64>>> =
             serde_json::from_str(json).map_err(|e| candle_core::Error::Msg(e.to_string()))?;
-
-        // Infer config from shapes? Or use default?
-        // The original load_weights uses default config.
-        let config = ModelConfig::default(); // simplistic
-        // Better to require config or infer it.
-        // Let's stick to default for now, matching `Gpt::load_weights`.
 
         let device = Device::Cpu;
         let mut sd = HashMap::new();
