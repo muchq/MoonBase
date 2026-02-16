@@ -34,8 +34,20 @@ jobs:
           rm -rf "$AGENT_TOOLSDIRECTORY"
           df -h
 
+      - name: Check for secrets
+        id: check_secrets
+        shell: bash
+        env:
+          GOOGLE_CLOUD_KEY: ${{ secrets.GOOGLE_CLOUD_KEY }}
+        run: |
+          if [ -n "$GOOGLE_CLOUD_KEY" ]; then
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup Bazel (Main Repo - Remote Cache)
-        if: ${{ secrets.GOOGLE_CLOUD_KEY != '' }}
+        if: steps.check_secrets.outputs.has_key == 'true'
         uses: bazel-contrib/setup-bazel@0.18.0
         with:
           bazelisk-cache: true
@@ -48,7 +60,7 @@ jobs:
             build --remote_upload_local_results=true
 
       - name: Setup Bazel (Fork - Disk Cache)
-        if: ${{ secrets.GOOGLE_CLOUD_KEY == '' }}
+        if: steps.check_secrets.outputs.has_key == 'false'
         uses: bazel-contrib/setup-bazel@0.18.0
         with:
           bazelisk-cache: true
