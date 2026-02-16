@@ -34,7 +34,21 @@ jobs:
           rm -rf "$AGENT_TOOLSDIRECTORY"
           df -h
 
-      - uses: bazel-contrib/setup-bazel@0.18.0
+      - name: Setup Bazel (Main Repo - Remote Cache)
+        if: ${{ secrets.GOOGLE_CLOUD_KEY != '' }}
+        uses: bazel-contrib/setup-bazel@0.18.0
+        with:
+          bazelisk-cache: true
+          disk-cache: false
+          repository-cache: true
+          google-credentials: ${{ secrets.GOOGLE_CLOUD_KEY }}
+          bazelrc: |
+            build --remote_cache=https://storage.googleapis.com/moon_base_build_cache
+            build --remote_upload_local_results=true
+
+      - name: Setup Bazel (Fork - Disk Cache)
+        if: ${{ secrets.GOOGLE_CLOUD_KEY == '' }}
+        uses: bazel-contrib/setup-bazel@0.18.0
         with:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}
