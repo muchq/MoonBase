@@ -17,7 +17,7 @@ use microgpt::{
 #[command(
     name = "microgpt",
     about = "microgpt — a minimal GPT trainer and generator",
-    version = "0.1.0",
+    version = "0.1.1",
     long_about = "A from-scratch GPT implementation in Rust with its own autograd engine.\n\
                   Trains character-level language models and generates samples.\n\
                   Ported from karpathy's microgpt.py — the complete algorithm,\n\
