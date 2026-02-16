@@ -3,6 +3,9 @@
 CLI for training, generation, chat, and model inspection. Wraps the full
 microgpt workflow in a single binary with subcommands.
 
+Training uses candle's tensor engine (`TensorGpt`) with batched forward passes
+and autograd. On macOS, GPU acceleration is available via Metal.
+
 ## Subcommands
 
 ### `train`
@@ -16,6 +19,10 @@ cargo run -p microgpt_cli -- train --input names.txt --output output --steps 100
 # Chat mode from JSONL conversations
 cargo run -p microgpt_cli -- train --input convos.jsonl --output chat-model --chat \
   --n-embd 128 --n-head 8 --n-layer 4 --block-size 256 --steps 10000
+
+# Train on Apple Silicon GPU
+cargo run -p microgpt_cli --features metal -- train --input names.txt --device metal \
+  --output output --steps 1000
 ```
 
 | Flag | Default | Description |
@@ -30,6 +37,7 @@ cargo run -p microgpt_cli -- train --input convos.jsonl --output chat-model --ch
 | `--n-head` | 4 | Number of attention heads (must divide n_embd) |
 | `--n-layer` | 1 | Number of transformer layers |
 | `--block-size` | 16 | Context window size in tokens |
+| `--device` | `cpu` | Device: `cpu` or `metal` (requires `--features metal`) |
 
 ### `generate`
 

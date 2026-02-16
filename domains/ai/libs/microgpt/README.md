@@ -1,12 +1,12 @@
 # microgpt
 
-A minimal GPT implementation in pure Rust with a from-scratch autograd engine.
+A minimal GPT implementation in Rust, using [candle](https://github.com/huggingface/candle) for tensor operations and autograd.
 Ported from [karpathy's microgpt.py](https://gist.github.com/aaylward/f9cfa5bff5aada3dcce46db0110eb34e) — the complete algorithm; everything else is just efficiency.
 
 ## Architecture (3 crates)
 
 ```
-domains/ai/libs/microgpt          ← core library (autograd, model, training, data)
+domains/ai/libs/microgpt          ← core library (model, training, data)
 domains/ai/apps/microgpt_cli      ← CLI for training, generation, chat, and inspection
 domains/ai/apis/microgpt_serve    ← HTTP inference service (server_pal)
 ```
@@ -15,16 +15,17 @@ domains/ai/apis/microgpt_serve    ← HTTP inference service (server_pal)
 
 | Module | Purpose |
 |--------|---------|
-| `value.rs` | Scalar autograd engine (`Value` type) with forward ops and reverse-mode backprop via topological sort |
-| `model.rs` | GPT model — token/positional embeddings, multi-head self-attention, feed-forward MLP, RMSNorm. Also contains `InferenceGpt` (plain f64, `Send + Sync`) for serving |
-| `train.rs` | Training loop — cross-entropy loss, Adam optimizer with learning-rate decay, temperature-controlled sampling |
+| `tensor_model.rs` | `TensorGpt` — batched forward pass using candle tensors and `VarMap` for autograd-tracked weights |
+| `tensor_train.rs` | Training loop — cross-entropy loss, Adam optimizer (via `candle_nn::AdamW`), linear learning-rate decay |
+| `model.rs` | `InferenceGpt` (plain f64, `Send + Sync`) for autoregressive generation and serving. Also defines `ModelConfig` and `ModelMeta` |
 | `data.rs` | Character-level tokenizer, dataset loader, and chat conversation encoder |
+| `train.rs` | `TrainConfig` (learning rate, Adam hyperparameters, step count) |
 
 ## Key design decisions
 
-- **Autograd via `Rc<RefCell>`**: `Value` uses shared ownership to build a computational graph during the forward pass. `backward()` topologically sorts the graph and propagates gradients in reverse — identical semantics to the Python original.
-- **Dual model types**: `Gpt` (with `Value`) carries the autograd graph for training. `InferenceGpt` (plain `f64`) is `Send + Sync` and used by the HTTP server behind `Arc`. Both share the same forward-pass logic.
-- **No external ML dependencies**: The only deps are `serde`/`serde_json` for weight serialization. The autograd, optimizer, and model are all self-contained.
+- **Candle tensor engine**: Training uses `TensorGpt` backed by [candle](https://github.com/huggingface/candle) for batched tensor operations and reverse-mode autograd via `Var`/`VarMap`. This replaces the original scalar autograd engine.
+- **Dual model types**: `TensorGpt` (candle tensors) is used for training with full autograd support. `InferenceGpt` (plain `f64`) is `Send + Sync` and used by the HTTP server behind `Arc`. Both share the same weight format.
+- **Metal GPU support**: Training can run on Apple Silicon GPUs via candle's Metal backend. Enable with `--features metal` and `--device metal`.
 - **Configurable hyperparameters**: `ModelConfig` allows runtime-configurable `n_embd`, `n_head`, `n_layer`, and `block_size`. Defaults match the original gist's educational scale (16/4/1/16).
 
 ## Chat support
@@ -50,6 +51,10 @@ cargo run -p microgpt_cli -- train --input names.txt --output output --steps 100
 # Train with custom model dimensions and learning rate
 cargo run -p microgpt_cli -- train --input names.txt --steps 500 --lr 0.005 \
   --n-embd 32 --n-head 4 --n-layer 2 --block-size 64
+
+# Train on Apple Silicon GPU (requires --features metal)
+cargo run -p microgpt_cli --features metal -- train --input names.txt --device metal \
+  --output output --steps 1000
 
 # Train a chat model from JSONL conversations
 cargo run -p microgpt_cli -- train --input convos.jsonl --output chat-model --chat \
