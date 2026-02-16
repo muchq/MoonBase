@@ -11,6 +11,7 @@ name = "microgpt"
 path = "src/main.rs"
 
 [dependencies]
+candle-core = "0.9.2"
 clap = { workspace = true, features = ["derive"] }
 microgpt = { path = "../../libs/microgpt" }
 rustyline = { workspace = true }

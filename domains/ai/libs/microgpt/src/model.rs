@@ -66,18 +66,18 @@ pub struct Gpt {
 }
 
 /// Simple xorshift64 RNG for reproducible weight initialization.
-struct Rng {
+pub struct Rng {
     state: u64,
 }
 
 impl Rng {
-    fn new(seed: u64) -> Self {
+    pub fn new(seed: u64) -> Self {
         Rng {
             state: if seed == 0 { 1 } else { seed },
         }
     }
 
-    fn next_u64(&mut self) -> u64 {
+    pub fn next_u64(&mut self) -> u64 {
         let mut x = self.state;
         x ^= x << 13;
         x ^= x >> 7;
@@ -87,7 +87,7 @@ impl Rng {
     }
 
     /// Approximate Gaussian via Box-Muller transform.
-    fn gauss(&mut self, mean: f64, std: f64) -> f64 {
+    pub fn gauss(&mut self, mean: f64, std: f64) -> f64 {
         let u1 = (self.next_u64() as f64) / (u64::MAX as f64);
         let u2 = (self.next_u64() as f64) / (u64::MAX as f64);
         let u1 = u1.max(1e-15); // avoid log(0)
