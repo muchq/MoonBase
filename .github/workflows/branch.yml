@@ -35,7 +35,7 @@ jobs:
           df -h
 
       - name: Setup Bazel (Main Repo - Remote Cache)
-        if: ${{ secrets.GOOGLE_CLOUD_KEY != '' }}
+        if: secrets.GOOGLE_CLOUD_KEY != ''
         uses: bazel-contrib/setup-bazel@0.18.0
         with:
           bazelisk-cache: true
@@ -47,7 +47,7 @@ jobs:
             build --remote_upload_local_results=true
 
       - name: Setup Bazel (Fork - Disk Cache)
-        if: ${{ secrets.GOOGLE_CLOUD_KEY == '' }}
+        if: secrets.GOOGLE_CLOUD_KEY == ''
         uses: bazel-contrib/setup-bazel@0.18.0
         with:
           bazelisk-cache: true
