@@ -1,13 +1,12 @@
 use microgpt::{
-    Device, Gpt, InferenceGpt, KvCache, ModelConfig, TensorAdam, TensorGpt, TrainConfig,
-    tensor_train_step,
+    Device, InferenceGpt, ModelConfig, TensorAdam, TensorGpt, TrainConfig, tensor_train_step,
 };
 use microgpt::model::InferenceKvCache;
 
 #[test]
 fn test_forward_pass_parity() {
-    // Verify that Gpt (autograd) and InferenceGpt (plain f64) produce the
-    // same logits for the same input.
+    // Verify that TensorGpt (batched) and InferenceGpt (autoregressive f64)
+    // produce the same logits for position 0 given the same weights.
 
     let config = ModelConfig {
         n_embd: 16,
@@ -17,25 +16,27 @@ fn test_forward_pass_parity() {
     };
     let vocab_size = 10;
     let seed = 42;
+    let device = Device::Cpu;
 
-    let gpt = Gpt::with_config(vocab_size, seed, config);
-    let json = gpt.save_weights();
+    let tensor_gpt = TensorGpt::new(vocab_size, seed, config, &device);
+    let json = tensor_gpt.save_weights();
     let inference_gpt = InferenceGpt::load_weights_with_config(vocab_size, &json, config).unwrap();
 
-    let mut kv_gpt = KvCache::new(&config);
-    let mut kv_inf = InferenceKvCache::new(&config);
-
     let token_id = 1;
-    let pos_id = 0;
 
-    let logits_gpt = gpt.forward(token_id, pos_id, &mut kv_gpt);
-    let logits_inf = inference_gpt.forward(token_id, pos_id, &mut kv_inf);
+    // TensorGpt batched forward for a single token at position 0
+    let logits_tensor = tensor_gpt.forward(&[token_id]).unwrap();
+    let logits_tensor: Vec<f64> = logits_tensor.squeeze(0).unwrap().to_vec1().unwrap();
 
-    assert_eq!(logits_gpt.len(), logits_inf.len());
-    for (i, (v_gpt, v_inf)) in logits_gpt.iter().zip(logits_inf.iter()).enumerate() {
+    // InferenceGpt autoregressive forward for the same token at position 0
+    let mut kv_inf = InferenceKvCache::new(&config);
+    let logits_inf = inference_gpt.forward(token_id, 0, &mut kv_inf);
+
+    assert_eq!(logits_tensor.len(), logits_inf.len());
+    for (i, (a, b)) in logits_tensor.iter().zip(logits_inf.iter()).enumerate() {
         assert!(
-            (v_gpt.data() - v_inf).abs() < 1e-10,
-            "mismatch at index {}: {} vs {}", i, v_gpt.data(), v_inf
+            (a - b).abs() < 1e-10,
+            "mismatch at index {}: {} vs {}", i, a, b
         );
     }
 }

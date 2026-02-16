@@ -10,7 +10,6 @@ rust_library(
         "src/tensor_model.rs",
         "src/tensor_train.rs",
         "src/train.rs",
-        "src/value.rs",
     ],
     crate_name = "microgpt",
     visibility = ["//visibility:public"],
