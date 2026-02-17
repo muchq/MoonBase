@@ -57,7 +57,7 @@ pub fn tensor_train_step(
     // Cross-entropy loss
     let targets = Tensor::new(target_tokens, &model.device)?;
     let loss = candle_nn::loss::cross_entropy(&logits, &targets)?;
-    let loss_val = loss.to_scalar::<f64>()?;
+    let loss_val = loss.to_scalar::<f32>()? as f64;
 
     // Backward + update
     optimizer.inner.backward_step(&loss)?;

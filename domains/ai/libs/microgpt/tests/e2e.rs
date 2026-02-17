@@ -26,7 +26,7 @@ fn test_forward_pass_parity() {
 
     // TensorGpt batched forward for a single token at position 0
     let logits_tensor = tensor_gpt.forward(&[token_id]).unwrap();
-    let logits_tensor: Vec<f64> = logits_tensor.squeeze(0).unwrap().to_vec1().unwrap();
+    let logits_tensor: Vec<f32> = logits_tensor.squeeze(0).unwrap().to_vec1().unwrap();
 
     // InferenceGpt autoregressive forward for the same token at position 0
     let mut kv_inf = InferenceKvCache::new(&config);
@@ -35,7 +35,7 @@ fn test_forward_pass_parity() {
     assert_eq!(logits_tensor.len(), logits_inf.len());
     for (i, (a, b)) in logits_tensor.iter().zip(logits_inf.iter()).enumerate() {
         assert!(
-            (a - b).abs() < 1e-10,
+            (*a as f64 - b).abs() < 1e-4,
             "mismatch at index {}: {} vs {}", i, a, b
         );
     }
@@ -114,7 +114,7 @@ fn test_weight_serialization_roundtrip() {
         for (row1, row2) in v1.iter().zip(v2.iter()) {
             for (x1, x2) in row1.iter().zip(row2.iter()) {
                 assert!(
-                    (x1 - x2).abs() < 1e-15,
+                    (x1 - x2).abs() < 1e-6,
                     "weight mismatch for key {}: {} vs {}", k, x1, x2
                 );
             }
