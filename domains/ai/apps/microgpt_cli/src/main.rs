@@ -646,7 +646,10 @@ fn run_chat(model_dir: PathBuf, temperature: f64, seed: u64) {
         history.push(special.assistant);
 
         // Truncate history to fit within block_size, reserving room for generation.
-        tokenizer.truncate_chat_prompt(&mut history, model.config.block_size);
+        let dropped = tokenizer.truncate_chat_prompt(&mut history, model.config.block_size);
+        if dropped > 0 {
+            println!("(context truncated, dropped {dropped} tokens of early history)");
+        }
 
         // Generate response.
         print!("microgpt> ");

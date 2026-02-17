@@ -92,7 +92,8 @@ pub async fn chat_post(
     prompt_tokens.push(special.assistant);
 
     // Truncate prompt to fit within block_size, reserving room for generation.
-    tok.truncate_chat_prompt(&mut prompt_tokens, state.model.config.block_size);
+    let tokens_dropped =
+        tok.truncate_chat_prompt(&mut prompt_tokens, state.model.config.block_size);
 
     // Generate response.
     let output_tokens = state.model.generate_from_prompt(
@@ -108,6 +109,7 @@ pub async fn chat_post(
     Json(serde_json::to_value(ChatResponse {
         role: "assistant".to_string(),
         content,
+        tokens_dropped,
     })
     .unwrap())
     .into_response()
