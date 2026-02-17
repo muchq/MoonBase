@@ -155,6 +155,17 @@ if [ ${#local_targets[@]} -gt 0 ]; then
     fi
   done
 
+  # Filter out targets tagged as manual (e.g., iOS targets on Linux)
+  if [ ${#rule_targets[@]} -gt 0 ]; then
+    target_set="${rule_targets[*]}"
+    # Use bazel query to filter out manual targets
+    # Note: set() expects space-separated list of targets
+    non_manual_targets=$(bazel query "set($target_set) except attr(tags, 'manual', set($target_set))" 2>/dev/null || echo "")
+
+    # Re-populate rule_targets with only non-manual targets
+    rule_targets=($non_manual_targets)
+  fi
+
   # Ask Bazel which rule targets are test rules
   test_set=""
   if [ ${#rule_targets[@]} -gt 0 ]; then
