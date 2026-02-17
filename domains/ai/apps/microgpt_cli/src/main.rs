@@ -646,11 +646,19 @@ fn run_chat(model_dir: PathBuf, temperature: f64, seed: u64) {
         history.push(special.assistant);
 
         // Truncate history from the front if it exceeds block_size,
-        // leaving room for at least one generated token.
-        let max_prompt = model.config.block_size.saturating_sub(1);
+        // reserving at least 1/4 of the context window for generation.
+        let max_gen = model.config.block_size / 4;
+        let max_prompt = model.config.block_size.saturating_sub(max_gen);
         if history.len() > max_prompt {
-            let excess = history.len() - max_prompt;
-            history.drain(..excess);
+            let target_start = history.len() - max_prompt;
+            // Snap forward to the nearest turn boundary (end_turn token)
+            // so the model sees coherent conversation context.
+            let truncate_at = history[target_start..]
+                .iter()
+                .position(|&t| t == special.end_turn)
+                .map(|i| target_start + i + 1) // skip past end_turn
+                .unwrap_or(target_start);
+            history.drain(..truncate_at);
         }
 
         // Generate response.
