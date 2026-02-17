@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::time::Instant;
 
@@ -10,7 +10,7 @@ use tracing_subscriber::EnvFilter;
 use microgpt::model::ModelMeta;
 use microgpt::{
     ChatDataset, Dataset, InferenceGpt, ModelConfig, TensorAdam, TensorGpt, Tokenizer, TrainConfig,
-    tensor_train_step,
+    TrainState, tensor_train_step,
 };
 
 #[derive(Parser)]
@@ -75,6 +75,14 @@ enum Command {
         /// Device to train on: cpu or metal (requires --features metal).
         #[arg(long, default_value = "cpu")]
         device: String,
+
+        /// Resume training from a checkpoint directory.
+        #[arg(long)]
+        resume: Option<PathBuf>,
+
+        /// Save checkpoint every N steps (0 = only at end).
+        #[arg(long, default_value = "0")]
+        checkpoint_every: usize,
     },
 
     /// Generate samples from a trained model.
@@ -139,6 +147,8 @@ fn main() {
             n_layer,
             block_size,
             device,
+            resume,
+            checkpoint_every,
         } => {
             let model_config = ModelConfig {
                 n_embd,
@@ -152,9 +162,29 @@ fn main() {
             }
             let device = parse_device(&device);
             if chat {
-                run_train_chat(input, output, steps, seed, lr, model_config, &device);
+                run_train_chat(
+                    input,
+                    output,
+                    steps,
+                    seed,
+                    lr,
+                    model_config,
+                    &device,
+                    resume,
+                    checkpoint_every,
+                );
             } else {
-                run_train(input, output, steps, seed, lr, model_config, &device);
+                run_train(
+                    input,
+                    output,
+                    steps,
+                    seed,
+                    lr,
+                    model_config,
+                    &device,
+                    resume,
+                    checkpoint_every,
+                );
             }
         }
         Command::Generate {
@@ -196,6 +226,92 @@ fn parse_device(s: &str) -> microgpt::Device {
     }
 }
 
+/// Checkpoint state loaded from a resume directory.
+struct ResumeState {
+    model: TensorGpt,
+    start_step: usize,
+    adam_step: usize,
+    m_json: String,
+    v_json: String,
+}
+
+/// Load a full checkpoint for resuming training.
+fn load_resume_state(resume_dir: &Path, device: &microgpt::Device) -> ResumeState {
+    let (meta, weights_json) = load_meta_and_weights(&resume_dir.to_path_buf());
+    let config = meta.config();
+    let model =
+        TensorGpt::load_weights_with_config(meta.vocab_size, &weights_json, config, device)
+            .unwrap_or_else(|e| {
+                eprintln!("error: failed to load checkpoint weights: {e}");
+                process::exit(1);
+            });
+
+    let state_path = resume_dir.join("train_state.json");
+    let state_json = fs::read_to_string(&state_path).unwrap_or_else(|e| {
+        eprintln!("error: cannot read {}: {e}", state_path.display());
+        process::exit(1);
+    });
+    let state: TrainState = serde_json::from_str(&state_json).unwrap_or_else(|e| {
+        eprintln!("error: invalid train_state.json: {e}");
+        process::exit(1);
+    });
+
+    let m_path = resume_dir.join("optimizer_m.json");
+    let m_json = fs::read_to_string(&m_path).unwrap_or_else(|e| {
+        eprintln!("error: cannot read {}: {e}", m_path.display());
+        process::exit(1);
+    });
+    let v_path = resume_dir.join("optimizer_v.json");
+    let v_json = fs::read_to_string(&v_path).unwrap_or_else(|e| {
+        eprintln!("error: cannot read {}: {e}", v_path.display());
+        process::exit(1);
+    });
+
+    ResumeState {
+        model,
+        start_step: state.step,
+        adam_step: state.adam_step,
+        m_json,
+        v_json,
+    }
+}
+
+/// Save a full training checkpoint (weights + optimizer state + train state).
+fn save_checkpoint(
+    model: &TensorGpt,
+    tokenizer: &Tokenizer,
+    optimizer: &TensorAdam,
+    step: usize,
+    output: &Path,
+) {
+    save_tensor_model(model, tokenizer, &output.to_path_buf());
+
+    let train_state = TrainState {
+        step,
+        adam_step: optimizer.step_t,
+    };
+    let state_json = serde_json::to_string_pretty(&train_state).expect("state serialization");
+    let state_path = output.join("train_state.json");
+    if let Err(e) = fs::write(&state_path, state_json) {
+        eprintln!("error: failed to save train state: {e}");
+        process::exit(1);
+    }
+
+    let m_json = optimizer.save_m();
+    let m_path = output.join("optimizer_m.json");
+    if let Err(e) = fs::write(&m_path, &m_json) {
+        eprintln!("error: failed to save optimizer m: {e}");
+        process::exit(1);
+    }
+
+    let v_json = optimizer.save_v();
+    let v_path = output.join("optimizer_v.json");
+    if let Err(e) = fs::write(&v_path, &v_json) {
+        eprintln!("error: failed to save optimizer v: {e}");
+        process::exit(1);
+    }
+}
+
 fn run_train(
     input: PathBuf,
     output: PathBuf,
@@ -204,6 +320,8 @@ fn run_train(
     lr: f64,
     model_config: ModelConfig,
     device: &microgpt::Device,
+    resume: Option<PathBuf>,
+    checkpoint_every: usize,
 ) {
     if !input.exists() {
         eprintln!("error: input file not found: {}", input.display());
@@ -219,32 +337,61 @@ fn run_train(
         process::exit(1);
     });
 
-    print_config("text", &model_config, device);
-    println!("num docs:    {}", dataset.docs.len());
-    println!("vocab size:  {}", dataset.tokenizer.vocab_size);
+    let (model, start_step, adam_step, optimizer_state) =
+        if let Some(ref resume_dir) = resume {
+            let rs = load_resume_state(resume_dir, device);
+            println!(
+                "resuming from step {} (adam_step={})",
+                rs.start_step, rs.adam_step
+            );
+            (
+                rs.model,
+                rs.start_step,
+                rs.adam_step,
+                Some((rs.m_json, rs.v_json)),
+            )
+        } else {
+            print_config("text", &model_config, device);
+            println!("num docs:    {}", dataset.docs.len());
+            println!("vocab size:  {}", dataset.tokenizer.vocab_size);
 
-    let model = TensorGpt::new(dataset.tokenizer.vocab_size, seed, model_config, device);
-    let num_params: usize = model
-        .varmap
-        .all_vars()
-        .iter()
-        .map(|v| v.as_tensor().elem_count())
-        .sum();
-    println!("num params:  {}", num_params);
-    println!();
+            let model =
+                TensorGpt::new(dataset.tokenizer.vocab_size, seed, model_config, device);
+            let num_params: usize = model
+                .varmap
+                .all_vars()
+                .iter()
+                .map(|v| v.as_tensor().elem_count())
+                .sum();
+            println!("num params:  {}", num_params);
+            println!();
 
+            (model, 0, 0, None)
+        };
+
+    let total_steps = start_step + steps;
     let config = TrainConfig {
         learning_rate: lr,
-        num_steps: steps,
+        num_steps: total_steps,
         ..TrainConfig::default()
     };
     let mut optimizer = TensorAdam::new(&model.varmap, &config).unwrap_or_else(|e| {
         eprintln!("error: failed to create optimizer: {e}");
         process::exit(1);
     });
+
+    if let Some((m_json, v_json)) = optimizer_state {
+        optimizer
+            .load_state(&m_json, &v_json, adam_step)
+            .unwrap_or_else(|e| {
+                eprintln!("error: failed to restore optimizer state: {e}");
+                process::exit(1);
+            });
+    }
+
     let train_start = Instant::now();
 
-    for step in 0..steps {
+    for step in start_step..total_steps {
         let doc = &dataset.docs[step % dataset.docs.len()];
         let tokens = dataset.tokenizer.encode_doc(doc);
         let loss = tensor_train_step(&model, &tokens, &mut optimizer, &config, step)
@@ -252,23 +399,29 @@ fn run_train(
                 eprintln!("error: training step failed: {e}");
                 process::exit(1);
             });
+        let steps_done = step - start_step + 1;
         let elapsed = train_start.elapsed().as_secs_f64();
-        let avg = elapsed / (step + 1) as f64;
-        let eta = avg * (steps - step - 1) as f64;
+        let avg = elapsed / steps_done as f64;
+        let eta = avg * (total_steps - step - 1) as f64;
         println!(
             "step {:4} / {:4} | loss {:.4} | {:.1}s/step | eta {}",
             step + 1,
-            steps,
+            total_steps,
             loss,
             avg,
             format_eta(eta),
         );
+
+        if checkpoint_every > 0 && steps_done % checkpoint_every == 0 && step + 1 < total_steps {
+            println!("saving checkpoint at step {}...", step + 1);
+            save_checkpoint(&model, &dataset.tokenizer, &optimizer, step + 1, &output);
+        }
     }
 
     let total = train_start.elapsed().as_secs_f64();
     println!("\ntraining complete in {}", format_eta(total));
 
-    save_tensor_model(&model, &dataset.tokenizer, &output);
+    save_checkpoint(&model, &dataset.tokenizer, &optimizer, total_steps, &output);
 
     // Show a few samples via InferenceGpt
     println!("\n--- samples ---");
@@ -276,7 +429,7 @@ fn run_train(
     let inf = InferenceGpt::load_weights_with_config(
         dataset.tokenizer.vocab_size,
         &weights_json,
-        model_config,
+        model.config,
     )
     .unwrap();
     let tok = &dataset.tokenizer;
@@ -294,6 +447,8 @@ fn run_train_chat(
     lr: f64,
     model_config: ModelConfig,
     device: &microgpt::Device,
+    resume: Option<PathBuf>,
+    checkpoint_every: usize,
 ) {
     if !input.exists() {
         eprintln!("error: input file not found: {}", input.display());
@@ -309,55 +464,90 @@ fn run_train_chat(
         process::exit(1);
     });
 
-    print_config("chat", &model_config, device);
-    println!("num convos:  {}", dataset.len());
-    println!("vocab size:  {}", dataset.tokenizer.vocab_size);
+    let (model, start_step, adam_step, optimizer_state) =
+        if let Some(ref resume_dir) = resume {
+            let rs = load_resume_state(resume_dir, device);
+            println!(
+                "resuming from step {} (adam_step={})",
+                rs.start_step, rs.adam_step
+            );
+            (
+                rs.model,
+                rs.start_step,
+                rs.adam_step,
+                Some((rs.m_json, rs.v_json)),
+            )
+        } else {
+            print_config("chat", &model_config, device);
+            println!("num convos:  {}", dataset.len());
+            println!("vocab size:  {}", dataset.tokenizer.vocab_size);
 
-    let model = TensorGpt::new(dataset.tokenizer.vocab_size, seed, model_config, device);
-    let num_params: usize = model
-        .varmap
-        .all_vars()
-        .iter()
-        .map(|v| v.as_tensor().elem_count())
-        .sum();
-    println!("num params:  {}", num_params);
-    println!();
+            let model =
+                TensorGpt::new(dataset.tokenizer.vocab_size, seed, model_config, device);
+            let num_params: usize = model
+                .varmap
+                .all_vars()
+                .iter()
+                .map(|v| v.as_tensor().elem_count())
+                .sum();
+            println!("num params:  {}", num_params);
+            println!();
 
+            (model, 0, 0, None)
+        };
+
+    let total_steps = start_step + steps;
     let config = TrainConfig {
         learning_rate: lr,
-        num_steps: steps,
+        num_steps: total_steps,
         ..TrainConfig::default()
     };
     let mut optimizer = TensorAdam::new(&model.varmap, &config).unwrap_or_else(|e| {
         eprintln!("error: failed to create optimizer: {e}");
         process::exit(1);
     });
+
+    if let Some((m_json, v_json)) = optimizer_state {
+        optimizer
+            .load_state(&m_json, &v_json, adam_step)
+            .unwrap_or_else(|e| {
+                eprintln!("error: failed to restore optimizer state: {e}");
+                process::exit(1);
+            });
+    }
+
     let train_start = Instant::now();
 
-    for step in 0..steps {
+    for step in start_step..total_steps {
         let tokens = dataset.encode_conversation(step % dataset.len());
         let loss = tensor_train_step(&model, &tokens, &mut optimizer, &config, step)
             .unwrap_or_else(|e| {
                 eprintln!("error: training step failed: {e}");
                 process::exit(1);
             });
+        let steps_done = step - start_step + 1;
         let elapsed = train_start.elapsed().as_secs_f64();
-        let avg = elapsed / (step + 1) as f64;
-        let eta = avg * (steps - step - 1) as f64;
+        let avg = elapsed / steps_done as f64;
+        let eta = avg * (total_steps - step - 1) as f64;
         println!(
             "step {:4} / {:4} | loss {:.4} | {:.1}s/step | eta {}",
             step + 1,
-            steps,
+            total_steps,
             loss,
             avg,
             format_eta(eta),
         );
+
+        if checkpoint_every > 0 && steps_done % checkpoint_every == 0 && step + 1 < total_steps {
+            println!("saving checkpoint at step {}...", step + 1);
+            save_checkpoint(&model, &dataset.tokenizer, &optimizer, step + 1, &output);
+        }
     }
 
     let total = train_start.elapsed().as_secs_f64();
     println!("\ntraining complete in {}", format_eta(total));
 
-    save_tensor_model(&model, &dataset.tokenizer, &output);
+    save_checkpoint(&model, &dataset.tokenizer, &optimizer, total_steps, &output);
 }
 
 fn format_eta(secs: f64) -> String {
@@ -534,7 +724,7 @@ fn save_tensor_model(model: &TensorGpt, tokenizer: &Tokenizer, output: &PathBuf)
         eprintln!("error: failed to save weights: {e}");
         process::exit(1);
     }
-    println!("\nweights saved to {}", weights_path.display());
+    println!("weights saved to {}", weights_path.display());
 
     let meta = ModelMeta {
         vocab_size: tokenizer.vocab_size,
