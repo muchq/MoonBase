@@ -17,7 +17,7 @@ use microgpt::{
 #[command(
     name = "microgpt",
     about = "microgpt — a minimal GPT trainer and generator",
-    version = "0.2.1",
+    version = "0.2.2",
     long_about = "A minimal GPT implementation in Rust using candle for tensor ops.\n\
                   Trains character-level language models and generates samples.\n\
                   Ported from karpathy's microgpt.py — the complete algorithm,\n\
@@ -41,7 +41,7 @@ enum Command {
         output: PathBuf,
 
         /// Number of training steps.
-        #[arg(long, default_value = "1000")]
+        #[arg(long, default_value = "5000")]
         steps: usize,
 
         /// Random seed.
@@ -57,7 +57,7 @@ enum Command {
         chat: bool,
 
         /// Embedding dimension.
-        #[arg(long, default_value = "16")]
+        #[arg(long, default_value = "64")]
         n_embd: usize,
 
         /// Number of attention heads (must divide n_embd evenly).
@@ -65,11 +65,11 @@ enum Command {
         n_head: usize,
 
         /// Number of transformer layers.
-        #[arg(long, default_value = "1")]
+        #[arg(long, default_value = "2")]
         n_layer: usize,
 
-        /// Context window size in tokens.
-        #[arg(long, default_value = "16")]
+        /// Context window size in tokens (should exceed typical document/conversation length).
+        #[arg(long, default_value = "256")]
         block_size: usize,
 
         /// Device to train on: cpu or metal (requires --features metal).
