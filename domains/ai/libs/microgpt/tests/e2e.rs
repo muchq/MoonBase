@@ -168,3 +168,41 @@ fn test_deterministic_training() {
         }
     }
 }
+
+#[test]
+#[cfg(target_os = "macos")]
+fn test_metal_training() {
+    // Verify that the full train-forward-backward pipeline works on Metal GPU.
+    // Uses minimal model size — just enough to exercise Metal matmul with
+    // the multi-head attention reshape+permute path.
+
+    let device = Device::new_metal(0).expect("Metal device should be available on macOS");
+
+    let config = ModelConfig {
+        n_embd: 16,
+        n_head: 2,
+        n_layer: 1,
+        block_size: 8,
+    };
+    let vocab_size = 10;
+    let seed = 42;
+
+    let model = TensorGpt::new(vocab_size, seed, config, &device);
+    let train_config = TrainConfig {
+        learning_rate: 0.01,
+        num_steps: 3,
+        ..Default::default()
+    };
+
+    let mut optimizer = TensorAdam::new(&model.varmap, &train_config).unwrap();
+    let tokens = vec![1, 2, 3, 4, 5, 1, 2, 3];
+
+    let mut losses = Vec::new();
+    for i in 0..train_config.num_steps {
+        let loss = tensor_train_step(&model, &tokens, &mut optimizer, &train_config, i).unwrap();
+        assert!(loss.is_finite(), "loss should be finite at step {i}");
+        losses.push(loss);
+    }
+
+    assert!(losses.last().unwrap() < losses.first().unwrap(), "loss should decrease over training");
+}
