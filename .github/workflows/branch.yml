@@ -51,6 +51,29 @@ jobs:
         run: |
           ./scripts/diff-build origin/main
 
+  # Metal GPU training requires macOS; run microgpt tests on Apple Silicon when relevant files change.
+  test-microgpt-metal:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for microgpt changes
+        id: filter
+        run: |
+          CHANGED=$(git diff --name-only origin/main...HEAD -- domains/ai/libs/microgpt/ domains/ai/apps/microgpt_cli/)
+          if [ -n "$CHANGED" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run microgpt Metal tests
+        if: steps.filter.outputs.changed == 'true'
+        working-directory: domains/ai/libs/microgpt
+        run: cargo test --features metal -- test_metal
+
   # iOS targets can't build on Ubuntu; run Swift tests on macOS when relevant files change.
   test-ios:
     runs-on: macos-26
