@@ -6,6 +6,10 @@ rust_binary(
     srcs = [
         "src/main.rs",
     ],
+    crate_features = select({
+        "//:is_mac": ["metal"],
+        "//conditions:default": [],
+    }),
     crate_name = "microgpt_cli",
     deps = [
         "//domains/ai/libs/microgpt",

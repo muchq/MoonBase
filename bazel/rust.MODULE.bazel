@@ -30,6 +30,14 @@ crate.from_cargo(
     ],
 )
 crate.annotation(
+    crate = "candle-core",
+    crate_features = ["metal"],
+)
+crate.annotation(
+    crate = "candle-nn",
+    crate_features = ["metal"],
+)
+crate.annotation(
     crate = "protoc-gen-prost",
     gen_binaries = ["protoc-gen-prost"],
 )
