@@ -117,7 +117,14 @@ echo ""
 # Categorize targets
 local_targets=()
 external_targets=()
+OS_NAME=$(uname)
 for target in "${impacted_targets[@]}"; do
+  # Skip iOS targets on non-macOS platforms
+  if [[ "$OS_NAME" != "Darwin" ]] && [[ "$target" == *"wordchains_ios"* ]]; then
+    echo "Skipping iOS target on non-macOS: $target"
+    continue
+  fi
+
   if [[ "$target" == @* ]]; then
     external_targets+=("$target")
   else
