@@ -4,7 +4,9 @@ load("@rules_rust//rust:defs.bzl", "rust_binary")
 rust_binary(
     name = "microgpt",
     srcs = [
+        "src/infer.rs",
         "src/main.rs",
+        "src/train.rs",
     ],
     crate_features = select({
         "//:is_mac": ["metal"],

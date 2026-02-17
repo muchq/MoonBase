@@ -62,6 +62,9 @@ pub struct Message {
 pub struct ChatResponse {
     pub role: String,
     pub content: String,
+    /// Number of tokens dropped from early conversation history to fit within
+    /// the context window. 0 means no truncation occurred.
+    pub tokens_dropped: usize,
 }
 
 #[derive(Serialize)]

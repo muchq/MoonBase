@@ -168,6 +168,33 @@ impl Tokenizer {
         tokens
     }
 
+    /// Truncate a chat prompt to fit within `block_size`, reserving 1/4 of the
+    /// context window for generation and snapping to the nearest turn boundary.
+    ///
+    /// Returns the number of tokens dropped (0 if no truncation was needed).
+    /// This is a no-op if the tokenizer has no special tokens or the prompt
+    /// already fits.
+    pub fn truncate_chat_prompt(&self, tokens: &mut Vec<usize>, block_size: usize) -> usize {
+        let end_turn = match &self.special_tokens {
+            Some(s) => s.end_turn,
+            None => return 0,
+        };
+        let max_gen = block_size / 4;
+        let max_prompt = block_size.saturating_sub(max_gen);
+        if tokens.len() > max_prompt {
+            let target_start = tokens.len() - max_prompt;
+            let truncate_at = tokens[target_start..]
+                .iter()
+                .position(|&t| t == end_turn)
+                .map(|i| target_start + i + 1)
+                .unwrap_or(target_start);
+            tokens.drain(..truncate_at);
+            truncate_at
+        } else {
+            0
+        }
+    }
+
     /// Returns the names of special tokens (for serialization into ModelMeta).
     pub fn special_token_names(&self) -> Option<Vec<String>> {
         self.special_tokens.as_ref().map(|_| {

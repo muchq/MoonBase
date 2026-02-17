@@ -11,4 +11,4 @@ pub use model::{
 };
 pub use tensor_model::TensorGpt;
 pub use tensor_train::{TensorAdam, tensor_train_step};
-pub use train::TrainConfig;
+pub use train::{TrainConfig, TrainState};

@@ -91,12 +91,9 @@ pub async fn chat_post(
     // Append assistant role token to prompt the model.
     prompt_tokens.push(special.assistant);
 
-    // Truncate from the front if exceeding block_size.
-    let max_prompt = state.model.config.block_size.saturating_sub(1);
-    if prompt_tokens.len() > max_prompt {
-        let excess = prompt_tokens.len() - max_prompt;
-        prompt_tokens.drain(..excess);
-    }
+    // Truncate prompt to fit within block_size, reserving room for generation.
+    let tokens_dropped =
+        tok.truncate_chat_prompt(&mut prompt_tokens, state.model.config.block_size);
 
     // Generate response.
     let output_tokens = state.model.generate_from_prompt(
@@ -112,6 +109,7 @@ pub async fn chat_post(
     Json(serde_json::to_value(ChatResponse {
         role: "assistant".to_string(),
         content,
+        tokens_dropped,
     })
     .unwrap())
     .into_response()

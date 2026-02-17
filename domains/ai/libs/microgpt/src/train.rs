@@ -1,3 +1,12 @@
+use serde::{Deserialize, Serialize};
+
+/// Checkpoint state for resuming a training run.
+#[derive(Serialize, Deserialize)]
+pub struct TrainState {
+    pub step: usize,
+    pub adam_step: usize,
+}
+
 /// Configuration for a training run.
 pub struct TrainConfig {
     pub learning_rate: f64,

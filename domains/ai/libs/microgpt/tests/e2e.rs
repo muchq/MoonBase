@@ -206,3 +206,183 @@ fn test_metal_training() {
 
     assert!(losses.last().unwrap() < losses.first().unwrap(), "loss should decrease over training");
 }
+
+#[test]
+fn test_checkpoint_resume_roundtrip() {
+    // Train N steps, checkpoint, resume for M more steps.
+    // Compare with a single uninterrupted N+M step run.
+    // Weights should match exactly.
+
+    let config = ModelConfig {
+        n_embd: 16,
+        n_head: 2,
+        n_layer: 1,
+        block_size: 8,
+    };
+    let vocab_size = 10;
+    let seed = 42;
+    let device = Device::Cpu;
+    let tokens = vec![1, 2, 3, 4, 5, 1, 2, 3];
+
+    let n_first = 3;
+    let n_second = 4;
+    let total = n_first + n_second;
+
+    let train_config_total = TrainConfig {
+        learning_rate: 0.01,
+        num_steps: total,
+        ..Default::default()
+    };
+
+    // --- Single uninterrupted run ---
+    let model_ref = TensorGpt::new(vocab_size, seed, config, &device);
+    let mut opt_ref = TensorAdam::new(&model_ref.varmap, &train_config_total).unwrap();
+    for i in 0..total {
+        tensor_train_step(&model_ref, &tokens, &mut opt_ref, &train_config_total, i).unwrap();
+    }
+    let weights_ref = model_ref.save_weights();
+
+    // --- Two-phase run with checkpoint/resume ---
+    // Phase 1: train N steps
+    let train_config_p1 = TrainConfig {
+        learning_rate: 0.01,
+        num_steps: total, // LR decay uses total steps
+        ..Default::default()
+    };
+    let model_p1 = TensorGpt::new(vocab_size, seed, config, &device);
+    let mut opt_p1 = TensorAdam::new(&model_p1.varmap, &train_config_p1).unwrap();
+    for i in 0..n_first {
+        tensor_train_step(&model_p1, &tokens, &mut opt_p1, &train_config_p1, i).unwrap();
+    }
+
+    // Save checkpoint
+    let ckpt_weights = model_p1.save_weights();
+    let ckpt_m = opt_p1.save_m();
+    let ckpt_v = opt_p1.save_v();
+    let ckpt_step = n_first;
+    let ckpt_adam_step = opt_p1.step_t;
+
+    // Phase 2: resume from checkpoint
+    let model_p2 =
+        TensorGpt::load_weights_with_config(vocab_size, &ckpt_weights, config, &device).unwrap();
+    let train_config_p2 = TrainConfig {
+        learning_rate: 0.01,
+        num_steps: total,
+        ..Default::default()
+    };
+    let mut opt_p2 = TensorAdam::new(&model_p2.varmap, &train_config_p2).unwrap();
+    opt_p2
+        .load_state(&ckpt_m, &ckpt_v, ckpt_adam_step)
+        .unwrap();
+
+    for i in ckpt_step..total {
+        tensor_train_step(&model_p2, &tokens, &mut opt_p2, &train_config_p2, i).unwrap();
+    }
+    let weights_resumed = model_p2.save_weights();
+
+    // --- Compare ---
+    let snap_ref: std::collections::HashMap<String, Vec<Vec<f64>>> =
+        serde_json::from_str(&weights_ref).unwrap();
+    let snap_res: std::collections::HashMap<String, Vec<Vec<f64>>> =
+        serde_json::from_str(&weights_resumed).unwrap();
+
+    assert_eq!(snap_ref.len(), snap_res.len());
+    for (k, v1) in &snap_ref {
+        let v2 = snap_res
+            .get(k)
+            .unwrap_or_else(|| panic!("missing key {k} in resumed model"));
+        for (row1, row2) in v1.iter().zip(v2.iter()) {
+            for (x1, x2) in row1.iter().zip(row2.iter()) {
+                assert!(
+                    (x1 - x2).abs() < 1e-6,
+                    "weight mismatch for key {k}: {x1} vs {x2}"
+                );
+            }
+        }
+    }
+
+    // Also verify optimizer step counts match
+    assert_eq!(opt_ref.step_t, opt_p2.step_t);
+}
+
+#[test]
+fn test_optimizer_state_serialization_roundtrip() {
+    // Verify that saving and loading optimizer state preserves m/v exactly.
+
+    let config = ModelConfig {
+        n_embd: 16,
+        n_head: 2,
+        n_layer: 1,
+        block_size: 8,
+    };
+    let vocab_size = 10;
+    let seed = 42;
+    let device = Device::Cpu;
+    let tokens = vec![1, 2, 3, 4, 5, 1, 2, 3];
+
+    let train_config = TrainConfig {
+        learning_rate: 0.01,
+        num_steps: 5,
+        ..Default::default()
+    };
+
+    let model = TensorGpt::new(vocab_size, seed, config, &device);
+    let mut optimizer = TensorAdam::new(&model.varmap, &train_config).unwrap();
+
+    // Train a few steps to populate m/v
+    for i in 0..3 {
+        tensor_train_step(&model, &tokens, &mut optimizer, &train_config, i).unwrap();
+    }
+
+    // Save optimizer state
+    let m_json = optimizer.save_m();
+    let v_json = optimizer.save_v();
+    let step_t = optimizer.step_t;
+
+    // Create a fresh optimizer and load state
+    let mut optimizer2 = TensorAdam::new(&model.varmap, &train_config).unwrap();
+    optimizer2.load_state(&m_json, &v_json, step_t).unwrap();
+
+    // Verify step_t matches
+    assert_eq!(optimizer2.step_t, step_t);
+
+    // Verify m/v roundtrip by re-serializing
+    let m_json2 = optimizer2.save_m();
+    let v_json2 = optimizer2.save_v();
+
+    let m1: std::collections::HashMap<String, Vec<Vec<f64>>> =
+        serde_json::from_str(&m_json).unwrap();
+    let m2: std::collections::HashMap<String, Vec<Vec<f64>>> =
+        serde_json::from_str(&m_json2).unwrap();
+
+    assert_eq!(m1.len(), m2.len());
+    for (k, v1) in &m1 {
+        let v2 = m2.get(k).unwrap();
+        for (row1, row2) in v1.iter().zip(v2.iter()) {
+            for (x1, x2) in row1.iter().zip(row2.iter()) {
+                assert!(
+                    (x1 - x2).abs() < 1e-6,
+                    "m mismatch for key {k}: {x1} vs {x2}"
+                );
+            }
+        }
+    }
+
+    let v1: std::collections::HashMap<String, Vec<Vec<f64>>> =
+        serde_json::from_str(&v_json).unwrap();
+    let v2: std::collections::HashMap<String, Vec<Vec<f64>>> =
+        serde_json::from_str(&v_json2).unwrap();
+
+    assert_eq!(v1.len(), v2.len());
+    for (k, val1) in &v1 {
+        let val2 = v2.get(k).unwrap();
+        for (row1, row2) in val1.iter().zip(val2.iter()) {
+            for (x1, x2) in row1.iter().zip(row2.iter()) {
+                assert!(
+                    (x1 - x2).abs() < 1e-6,
+                    "v mismatch for key {k}: {x1} vs {x2}"
+                );
+            }
+        }
+    }
+}

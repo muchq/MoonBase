@@ -51,7 +51,7 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
             .layer(RequestBodyLimitLayer::new(4 * 1024 * 1024)) // 4MB to accommodate 3MB base64 + JSON overhead
             .layer(CompressionLayer::new())
             .layer(ValidateRequestHeaderLayer::accept("application/json"))
-            .layer(TimeoutLayer::new(Duration::from_secs(10)))
+            .layer(TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, Duration::from_secs(10)))
             .layer(CatchPanicLayer::new())
     }
 }
