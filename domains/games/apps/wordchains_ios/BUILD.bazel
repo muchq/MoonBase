@@ -16,6 +16,7 @@ swift_library(
     ],
     module_name = "WordChains",
     tags = ["manual"],
+    target_compatible_with = ["@platforms//os:macos"],
 )
 
 # Tagged manual: rules_apple doesn't support Bazel 9 yet.
@@ -34,6 +35,7 @@ ios_application(
         ":word_graph_json",
     ] + glob(["Sources/Resources/**"]),
     tags = ["manual"],
+    target_compatible_with = ["@platforms//os:macos"],
     visibility = ["//visibility:public"],
     deps = [":WordChainsLib"],
 )
@@ -43,6 +45,7 @@ swift_library(
     testonly = True,
     srcs = glob(["Tests/**/*.swift"]),
     tags = ["manual"],
+    target_compatible_with = ["@platforms//os:macos"],
     deps = [":WordChainsLib"],
 )
 
@@ -50,5 +53,6 @@ ios_unit_test(
     name = "WordChainsTests",
     minimum_os_version = "17.0",
     tags = ["manual"],
+    target_compatible_with = ["@platforms//os:macos"],
     deps = [":WordChainsTestLib"],
 )
