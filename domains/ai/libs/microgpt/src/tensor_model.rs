@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use candle_core::{Device, Result, Tensor, Var, D};
+use candle_core::{DType, Device, Result, Tensor, Var, D};
 use candle_nn::VarMap;
 
 use crate::model::ModelConfig;
@@ -48,7 +48,9 @@ impl Rng {
 }
 
 fn init_tensor(rng: &mut Rng, rows: usize, cols: usize, std: f64, device: &Device) -> Tensor {
-    let data: Vec<f64> = (0..rows * cols).map(|_| rng.gauss(0.0, std)).collect();
+    let data: Vec<f32> = (0..rows * cols)
+        .map(|_| rng.gauss(0.0, std) as f32)
+        .collect();
     Tensor::from_vec(data, (rows, cols), device).unwrap()
 }
 
@@ -203,7 +205,16 @@ impl TensorGpt {
         let snapshot: HashMap<String, Vec<Vec<f64>>> = data
             .iter()
             .map(|(name, var)| {
-                let mat: Vec<Vec<f64>> = var.as_tensor().to_vec2::<f64>().unwrap();
+                let t = var.as_tensor();
+                let mat: Vec<Vec<f64>> = if t.dtype() == DType::F32 {
+                    t.to_vec2::<f32>()
+                        .unwrap()
+                        .into_iter()
+                        .map(|row| row.into_iter().map(|v| v as f64).collect())
+                        .collect()
+                } else {
+                    t.to_vec2::<f64>().unwrap()
+                };
                 (name.clone(), mat)
             })
             .collect();
@@ -225,7 +236,7 @@ impl TensorGpt {
         for (name, mat) in &snapshot {
             let rows = mat.len();
             let cols = if rows > 0 { mat[0].len() } else { 0 };
-            let flat: Vec<f64> = mat.iter().flatten().copied().collect();
+            let flat: Vec<f32> = mat.iter().flatten().map(|&v| v as f32).collect();
             let tensor = Tensor::from_vec(flat, (rows, cols), device)?;
             insert_var(&varmap, name, tensor);
         }
@@ -251,10 +262,10 @@ fn rmsnorm(x: &Tensor) -> Result<Tensor> {
 
 /// Build a causal attention mask: 0 for allowed positions, -inf for masked.
 fn build_causal_mask(seq_len: usize, device: &Device) -> Result<Tensor> {
-    let mut mask_data = vec![0.0f64; seq_len * seq_len];
+    let mut mask_data = vec![0.0f32; seq_len * seq_len];
     for i in 0..seq_len {
         for j in (i + 1)..seq_len {
-            mask_data[i * seq_len + j] = f64::NEG_INFINITY;
+            mask_data[i * seq_len + j] = f32::NEG_INFINITY;
         }
     }
     Tensor::from_vec(mask_data, (seq_len, seq_len), device)

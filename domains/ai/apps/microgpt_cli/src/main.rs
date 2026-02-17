@@ -17,7 +17,7 @@ use microgpt::{
 #[command(
     name = "microgpt",
     about = "microgpt — a minimal GPT trainer and generator",
-    version = "0.2.0",
+    version = "0.2.1",
     long_about = "A minimal GPT implementation in Rust using candle for tensor ops.\n\
                   Trains character-level language models and generates samples.\n\
                   Ported from karpathy's microgpt.py — the complete algorithm,\n\
@@ -414,7 +414,7 @@ fn run_chat(model_dir: PathBuf, temperature: f64, seed: u64) {
         process::exit(1);
     });
 
-    let mut history: Vec<usize> = Vec::new();
+    let mut history: Vec<usize> = vec![tokenizer.bos];
     let mut turn_count: u64 = 0;
 
     loop {
@@ -439,6 +439,7 @@ fn run_chat(model_dir: PathBuf, temperature: f64, seed: u64) {
             "/quit" => break,
             "/clear" => {
                 history.clear();
+                history.push(tokenizer.bos);
                 turn_count = 0;
                 println!("(history cleared)");
                 continue;
