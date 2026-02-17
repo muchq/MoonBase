@@ -1,4 +1,4 @@
-use crate::model::{Graph, Node};
+use crate::model::Graph;
 use std::collections::{HashMap, VecDeque};
 use tracing::{Level, event};
 
@@ -61,65 +61,59 @@ pub fn bfs_for_target(start: String, target_word: &str, word_graph: &Graph) -> O
         return None;
     }
 
-    let mut word_to_index: HashMap<String, usize> = HashMap::new();
+    // Optimization: Use HashMap<&str, usize> to avoid cloning strings
+    let mut word_to_index: HashMap<&str, usize> = HashMap::with_capacity(word_graph.nodes.len());
     for (i, word) in word_graph.nodes.iter().enumerate() {
-        word_to_index.insert(word.to_owned(), i);
+        word_to_index.insert(word.as_str(), i);
     }
 
-    if !word_to_index.contains_key(&start) {
-        event!(Level::DEBUG, "{} is not in dictionary.", &start);
-        return None;
-    }
+    let start_idx = match word_to_index.get(start.as_str()) {
+        Some(&i) => i,
+        None => {
+            event!(Level::DEBUG, "{} is not in dictionary.", &start);
+            return None;
+        }
+    };
 
-    if !word_to_index.contains_key(target_word) {
-        event!(Level::DEBUG, "{} is not in dictionary.", &target_word);
-        return None;
-    }
+    let target_idx = match word_to_index.get(target_word) {
+        Some(&i) => i,
+        None => {
+            event!(Level::DEBUG, "{} is not in dictionary.", &target_word);
+            return None;
+        }
+    };
 
-    let mut seen: HashMap<String, Node> = HashMap::new();
-    let mut queue: VecDeque<String> = VecDeque::new();
-    seen.insert(
-        start.clone(),
-        Node {
-            value: start.clone(),
-            parent: None,
-        },
-    );
-    queue.push_back(start);
+    // Optimization: Use integer-based BFS
+    let mut parents: Vec<Option<usize>> = vec![None; word_graph.nodes.len()];
+    let mut visited: Vec<bool> = vec![false; word_graph.nodes.len()];
+    let mut queue: VecDeque<usize> = VecDeque::new();
 
-    while !queue.is_empty() {
-        let current = queue.pop_front().unwrap();
-        if current.eq(target_word) {
-            let target_node = seen.get(&current).unwrap().clone();
-            return Some(to_path(target_node));
+    visited[start_idx] = true;
+    queue.push_back(start_idx);
+
+    while let Some(u) = queue.pop_front() {
+        if u == target_idx {
+            // Path reconstruction
+            let mut path = Vec::new();
+            let mut curr = u;
+            path.push(word_graph.nodes[curr].clone());
+            while let Some(p) = parents[curr] {
+                path.push(word_graph.nodes[p].clone());
+                curr = p;
+            }
+            path.reverse();
+            return Some(path);
         }
 
-        let i = word_to_index.get(&current).unwrap();
-        for j in &word_graph.edges[*i] {
-            if !seen.contains_key(&word_graph.nodes[*j]) {
-                let parent_node = Box::new(seen.get(&current)?.clone());
-                let neighbor_node = Node {
-                    value: word_graph.nodes[*j].clone(),
-                    parent: Some(parent_node),
-                };
-                seen.insert(word_graph.nodes[*j].clone(), neighbor_node);
-                queue.push_back(word_graph.nodes[*j].clone());
+        for &v in &word_graph.edges[u] {
+            if !visited[v] {
+                visited[v] = true;
+                parents[v] = Some(u);
+                queue.push_back(v);
             }
         }
     }
     None
-}
-
-fn to_path(end: Node) -> Vec<String> {
-    let mut path: Vec<String> = vec![end.value.clone()];
-    let mut node = end;
-    while node.parent.is_some() {
-        let parent = node.parent.unwrap();
-        path.push(parent.value.clone());
-        node = *parent;
-    }
-    path.reverse();
-    path
 }
 
 pub fn find_all_shortest_paths(
