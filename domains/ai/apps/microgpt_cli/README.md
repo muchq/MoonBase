@@ -42,6 +42,16 @@ microgpt train --input convos.jsonl --output chat-model --chat \
 microgpt train --input convos.jsonl --output chat-model-lg --chat \
   --n-embd 256 --n-head 8 --n-layer 6 --block-size 2048 \
   --lr 0.001 --steps 100000 --device metal
+
+# Checkpoint every 10k steps for long runs
+microgpt train --input convos.jsonl --output chat-model --chat \
+  --n-embd 128 --n-head 8 --n-layer 4 --block-size 1024 \
+  --lr 0.003 --steps 100000 --device metal --checkpoint-every 10000
+
+# Resume training from a checkpoint for 50k more steps
+# Model architecture flags are ignored (taken from checkpoint)
+microgpt train --input convos.jsonl --output chat-model --chat \
+  --resume chat-model --steps 50000
 ```
 
 **Choosing block-size:** This is a character-level model, so block-size is
@@ -77,6 +87,8 @@ print(f'recommended block-size: {p90} or higher')
 | `--n-layer` | 2 | Number of transformer layers |
 | `--block-size` | 256 | Context window size in characters |
 | `--device` | `cpu` | Device: `cpu` or `metal` (requires Metal-enabled build) |
+| `--resume` | none | Resume training from a checkpoint directory |
+| `--checkpoint-every` | 0 | Save checkpoint every N steps (0 = only at end) |
 
 ### `generate`
 

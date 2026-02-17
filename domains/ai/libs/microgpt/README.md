@@ -22,10 +22,10 @@ brew install muchq/muchq/microgpt
 | Module | Purpose |
 |--------|---------|
 | `tensor_model.rs` | `TensorGpt` — batched forward pass using candle tensors and `VarMap` for autograd-tracked weights |
-| `tensor_train.rs` | Training loop — cross-entropy loss, Adam optimizer (via `candle_nn::AdamW`), linear learning-rate decay |
+| `tensor_train.rs` | Training loop — cross-entropy loss, custom Adam optimizer with serializable state (for checkpoint/resume), linear learning-rate decay |
 | `model.rs` | `InferenceGpt` (plain f64, `Send + Sync`) for autoregressive generation and serving. Also defines `ModelConfig` and `ModelMeta` |
 | `data.rs` | Character-level tokenizer, dataset loader, and chat conversation encoder |
-| `train.rs` | `TrainConfig` (learning rate, Adam hyperparameters, step count) |
+| `train.rs` | `TrainConfig` (learning rate, Adam hyperparameters, step count) and `TrainState` (checkpoint step/optimizer state) |
 
 ## Key design decisions
 
@@ -54,6 +54,15 @@ microgpt train --input convos.jsonl --output chat-model --chat \
 microgpt train --input convos.jsonl --output chat-model-lg --chat \
   --n-embd 256 --n-head 8 --n-layer 8 --block-size 512 \
   --lr 0.001 --steps 50000 --device metal
+
+# Long run with periodic checkpoints (every 10k steps)
+microgpt train --input convos.jsonl --output chat-model --chat \
+  --n-embd 128 --n-head 8 --n-layer 4 --block-size 1024 \
+  --lr 0.003 --steps 100000 --device metal --checkpoint-every 10000
+
+# Resume training from a checkpoint for 50k more steps
+microgpt train --input convos.jsonl --output chat-model --chat \
+  --resume chat-model --steps 50000
 ```
 
 ### Generate samples
@@ -116,11 +125,17 @@ Response: `{ "samples": ["alice", "bob", ...] }`
 | `temperature` | float | 0.5 | Sampling temperature |
 | `seed` | int | 42 | RNG seed |
 
-Response: `{ "role": "assistant", "content": "..." }`
+Response: `{ "role": "assistant", "content": "...", "tokens_dropped": 0 }`
+
+`tokens_dropped` indicates how many tokens of early conversation history were
+truncated to fit within the model's context window. 0 means no truncation.
 
 ## Saved model format
 
-Training produces two files:
+Training produces two files (plus checkpoint files when using `--checkpoint-every` or `--resume`):
 
 - `weights.json` — model weights as nested JSON arrays
 - `meta.json` — model metadata (vocab size, charset, hyperparameters, special tokens)
+- `train_state.json` — checkpoint state (training step, optimizer step)
+- `optimizer_m.json` — Adam first-moment (momentum) vectors
+- `optimizer_v.json` — Adam second-moment (variance) vectors

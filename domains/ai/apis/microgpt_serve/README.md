@@ -50,6 +50,9 @@ curl -X POST http://localhost:8080/microgpt/v1/chat \
   -d '{"messages": [{"role": "user", "content": "hello"}]}'
 ```
 
-Response: `{ "role": "assistant", "content": "..." }`
+Response: `{ "role": "assistant", "content": "...", "tokens_dropped": 0 }`
+
+`tokens_dropped` indicates how many tokens of early conversation history were
+truncated to fit within the model's context window. 0 means no truncation.
 
 Returns 400 if the loaded model was not trained with chat tokens.
