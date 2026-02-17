@@ -11,6 +11,12 @@ domains/ai/apps/microgpt_cli      ← CLI for training, generation, chat, and in
 domains/ai/apis/microgpt_serve    ← HTTP inference service (server_pal)
 ```
 
+## Install
+
+```bash
+brew install muchq/muchq/microgpt
+```
+
 ## Core library modules
 
 | Module | Purpose |
@@ -25,61 +31,59 @@ domains/ai/apis/microgpt_serve    ← HTTP inference service (server_pal)
 
 - **Candle tensor engine**: Training uses `TensorGpt` backed by [candle](https://github.com/huggingface/candle) for batched tensor operations and reverse-mode autograd via `Var`/`VarMap`. This replaces the original scalar autograd engine.
 - **Dual model types**: `TensorGpt` (candle tensors) is used for training with full autograd support. `InferenceGpt` (plain `f64`) is `Send + Sync` and used by the HTTP server behind `Arc`. Both share the same weight format.
-- **Metal GPU support**: Training can run on Apple Silicon GPUs via candle's Metal backend. Enable with `--features metal` and `--device metal`.
+- **Metal GPU support**: Training can run on Apple Silicon GPUs via candle's Metal backend. Enable with `--device metal`.
 - **Configurable hyperparameters**: `ModelConfig` allows runtime-configurable `n_embd`, `n_head`, `n_layer`, and `block_size`. Defaults match the original gist's educational scale (16/4/1/16).
-
-## Chat support
-
-Models can be trained in chat mode with special tokens for multi-turn conversations:
-
-- **Special tokens**: `<|user|>`, `<|assistant|>`, `<|end_turn|>` are added to the vocabulary when training with `--chat`
-- **Training data**: JSONL format where each line is a conversation (array of `{"role": "user|assistant", "content": "..."}` messages)
-- **Inference**: `generate_from_prompt()` prefills the KV cache with conversation history, then decodes until the stop token
-- **Endpoints**: Chat REPL in the CLI (`chat` subcommand) and `POST /microgpt/v1/chat` in the HTTP API
 
 ## Usage
 
 ### Train a model
 
 ```bash
-# Prepare data: one document per line (e.g., names)
+# Quick test: train a tiny name generator
 curl -o names.txt https://raw.githubusercontent.com/karpathy/makemore/master/names.txt
+microgpt train --input names.txt --output names-model --steps 1000
 
-# Train for 1000 steps
-cargo run -p microgpt_cli -- train --input names.txt --output output --steps 1000
+# Train a chat model on Apple Silicon (M4 Pro / 64GB)
+# ~2M params, fits comfortably in memory, trains in minutes
+microgpt train --input convos.jsonl --output chat-model --chat \
+  --n-embd 128 --n-head 8 --n-layer 4 --block-size 256 \
+  --lr 0.003 --steps 10000 --device metal
 
-# Train with custom model dimensions and learning rate
-cargo run -p microgpt_cli -- train --input names.txt --steps 500 --lr 0.005 \
-  --n-embd 32 --n-head 4 --n-layer 2 --block-size 64
-
-# Train on Apple Silicon GPU (requires --features metal)
-cargo run -p microgpt_cli --features metal -- train --input names.txt --device metal \
-  --output output --steps 1000
-
-# Train a chat model from JSONL conversations
-cargo run -p microgpt_cli -- train --input convos.jsonl --output chat-model --chat \
-  --n-embd 128 --n-head 8 --n-layer 4 --block-size 256 --steps 10000
+# Larger chat model for longer training runs
+# ~8M params, still manageable on 64GB, benefits from more data/steps
+microgpt train --input convos.jsonl --output chat-model-lg --chat \
+  --n-embd 256 --n-head 8 --n-layer 8 --block-size 512 \
+  --lr 0.001 --steps 50000 --device metal
 ```
 
 ### Generate samples
 
 ```bash
-cargo run -p microgpt_cli -- generate --model-dir output --num-samples 20 --temperature 0.5
+microgpt generate --model-dir names-model --num-samples 20 --temperature 0.5
 
 # Inspect model metadata
-cargo run -p microgpt_cli -- info --model-dir output
+microgpt info --model-dir names-model
 ```
 
-### Interactive chat (CLI)
+### Interactive chat
 
 ```bash
-cargo run -p microgpt_cli -- chat --model-dir chat-model --temperature 0.5
+microgpt chat --model-dir chat-model --temperature 0.5
+```
+
+### Chat training data format
+
+JSONL file where each line is a conversation — an array of messages with `role` and `content`:
+
+```json
+[{"role": "user", "content": "hello"}, {"role": "assistant", "content": "hi there!"}]
+[{"role": "user", "content": "what is rust?"}, {"role": "assistant", "content": "a systems programming language"}]
 ```
 
 ### Serve inference over HTTP
 
 ```bash
-MODEL_DIR=output PORT=8080 cargo run -p microgpt_serve
+MODEL_DIR=chat-model PORT=8080 cargo run -p microgpt_serve
 
 # Generate
 curl -X POST http://localhost:8080/microgpt/v1/generate \
