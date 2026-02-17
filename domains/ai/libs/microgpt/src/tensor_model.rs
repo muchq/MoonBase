@@ -153,15 +153,20 @@ impl TensorGpt {
             let v = x.matmul(&wv.t()?)?;
 
             // Reshape to [n_head, seq_len, head_dim]
+            // contiguous() is needed after permute for Metal's GEMM kernel,
+            // which only supports row-major or column-major strides.
             let q = q
                 .reshape((seq_len, n_head, head_dim))?
-                .permute((1, 0, 2))?;
+                .permute((1, 0, 2))?
+                .contiguous()?;
             let k = k
                 .reshape((seq_len, n_head, head_dim))?
-                .permute((1, 0, 2))?;
+                .permute((1, 0, 2))?
+                .contiguous()?;
             let v = v
                 .reshape((seq_len, n_head, head_dim))?
-                .permute((1, 0, 2))?;
+                .permute((1, 0, 2))?
+                .contiguous()?;
 
             // Attention scores: [n_head, seq_len, seq_len]
             let scale = (head_dim as f64).sqrt();
@@ -255,7 +260,7 @@ fn rmsnorm(x: &Tensor) -> Result<Tensor> {
     let x_sq = x.sqr()?;
     let mean = x_sq.mean_keepdim(D::Minus1)?;
     let scale = mean
-        .broadcast_add(&Tensor::new(1e-5, x.device())?.to_dtype(x.dtype())?)?
+        .broadcast_add(&Tensor::new(1e-5f32, x.device())?.to_dtype(x.dtype())?)?
         .powf(-0.5)?;
     x.broadcast_mul(&scale)
 }
