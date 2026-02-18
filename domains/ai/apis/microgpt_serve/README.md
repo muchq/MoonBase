@@ -25,6 +25,7 @@ Generate unconditional samples from the model.
 | `num_samples` | int | 1 | Number of samples (max 50) |
 | `temperature` | float | 0.5 | Sampling temperature |
 | `seed` | int | 42 | RNG seed |
+| `max_tokens` | int | block_size | Max tokens per sample (capped at block_size) |
 
 ```bash
 curl -X POST http://localhost:8080/microgpt/v1/generate \
@@ -43,6 +44,7 @@ Multi-turn chat completion. Requires a model trained with `--chat`.
 | `messages` | array | required | `[{"role": "user", "content": "..."}]` |
 | `temperature` | float | 0.5 | Sampling temperature |
 | `seed` | int | 42 | RNG seed |
+| `max_tokens` | int | block_size - prompt_len | Max tokens to generate (capped at remaining context) |
 
 ```bash
 curl -X POST http://localhost:8080/microgpt/v1/chat \
@@ -61,8 +63,8 @@ Returns 400 if the loaded model was not trained with chat tokens.
 
 Generation runs synchronously — the full response is buffered before sending.
 For the chat endpoint this means time-to-first-byte equals total generation
-time. Adding a `max_tokens` request field would let clients cap output length
-and reduce wait times proportionally (fewer tokens = fewer forward passes).
+time. Use `max_tokens` to cap output length and reduce wait times
+proportionally (fewer tokens = fewer forward passes).
 
 ### Future: streaming responses
 

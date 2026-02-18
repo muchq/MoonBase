@@ -21,7 +21,7 @@ pub async fn generate_post(
         .map(|i| {
             state
                 .model
-                .generate(tok.bos, req.temperature, req.seed + i as u64, |id| {
+                .generate(tok.bos, req.temperature, req.seed + i as u64, req.max_tokens, |id| {
                     tok.decode(id)
                 })
         })
@@ -101,6 +101,7 @@ pub async fn chat_post(
         special.end_turn,
         req.temperature,
         req.seed,
+        req.max_tokens,
         |_| {},
     );
 

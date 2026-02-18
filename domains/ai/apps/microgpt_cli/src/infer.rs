@@ -12,7 +12,7 @@ pub fn run_generate(model_dir: PathBuf, num_samples: usize, temperature: f64, se
     let (tokenizer, model) = load_inference_model(&model_dir);
 
     for i in 0..num_samples {
-        let sample = model.generate(tokenizer.bos, temperature, seed + i as u64, |id| {
+        let sample = model.generate(tokenizer.bos, temperature, seed + i as u64, None, |id| {
             tokenizer.decode(id)
         });
         println!("sample {:2}: {sample}", i + 1);
@@ -95,6 +95,7 @@ pub fn run_chat(model_dir: PathBuf, temperature: f64, seed: u64) {
             special.end_turn,
             temperature,
             rng_seed,
+            None,
             |tok| {
                 if let Some(ch) = tokenizer.decode(tok) {
                     print!("{ch}");
