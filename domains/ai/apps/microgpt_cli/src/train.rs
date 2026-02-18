@@ -241,7 +241,7 @@ pub fn run_train(
         )
         .unwrap();
         for i in 0..5 {
-            let sample = inf.generate(tokenizer.bos, 0.5, seed + i, |id| tokenizer.decode(id));
+            let sample = inf.generate(tokenizer.bos, 0.5, seed + i, None, |id| tokenizer.decode(id));
             println!("  {sample}");
         }
     }

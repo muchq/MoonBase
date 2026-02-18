@@ -214,19 +214,23 @@ impl InferenceGpt {
     }
 
     /// Generate a sample using temperature-controlled sampling.
+    /// If `max_tokens` is Some, generation stops after that many tokens
+    /// (capped at block_size).
     pub fn generate(
         &self,
         bos: usize,
         temperature: f64,
         rng_seed: u64,
+        max_tokens: Option<usize>,
         decode: impl Fn(usize) -> Option<char>,
     ) -> String {
         let mut kv = InferenceKvCache::new(&self.config);
         let mut token_id = bos;
         let mut sample = String::new();
         let mut rng_state = if rng_seed == 0 { 1u64 } else { rng_seed };
+        let limit = max_tokens.unwrap_or(self.config.block_size).min(self.config.block_size);
 
-        for pos_id in 0..self.config.block_size {
+        for pos_id in 0..limit {
             let logits = self.forward(token_id, pos_id, &mut kv);
             let scaled: Vec<f64> = logits.iter().map(|l| l / temperature).collect();
             let probs = f_softmax(&scaled);
@@ -248,13 +252,16 @@ impl InferenceGpt {
     ///
     /// Encodes the prompt into the KV cache ("prefill"), then samples tokens
     /// one at a time until `stop_token` is emitted or the context window is
-    /// exhausted. Calls `on_token` for each generated token (for streaming).
+    /// exhausted. If `max_tokens` is Some, generation stops after that many
+    /// output tokens (capped at block_size - prompt_len).
+    /// Calls `on_token` for each generated token (for streaming).
     pub fn generate_from_prompt(
         &self,
         prompt_tokens: &[usize],
         stop_token: usize,
         temperature: f64,
         rng_seed: u64,
+        max_tokens: Option<usize>,
         mut on_token: impl FnMut(usize),
     ) -> Vec<usize> {
         assert!(!prompt_tokens.is_empty(), "prompt must not be empty");
@@ -271,8 +278,13 @@ impl InferenceGpt {
         // Decode: process last prompt token and sample continuation.
         let mut output = Vec::new();
         let mut token_id = *prompt_tokens.last().unwrap();
+        let decode_start = prompt_tokens.len() - 1;
+        let max_pos = max_tokens
+            .map(|n| decode_start + n)
+            .unwrap_or(block_size)
+            .min(block_size);
 
-        for pos in (prompt_tokens.len() - 1)..block_size {
+        for pos in decode_start..max_pos {
             let logits = self.forward(token_id, pos, &mut kv);
             let scaled: Vec<f64> = logits.iter().map(|l| l / temperature).collect();
             let probs = f_softmax(&scaled);
@@ -383,6 +395,7 @@ mod tests {
             stop_token,
             0.5,
             42,
+            None,
             |tok| streamed.push(tok),
         );
 
@@ -403,6 +416,7 @@ mod tests {
             4,
             0.8,
             123,
+            None,
             |_| count += 1,
         );
         assert_eq!(count, output.len());
@@ -421,7 +435,7 @@ mod tests {
         let json = model.save_weights();
         let inf = InferenceGpt::load_weights_with_config(5, &json, cfg).unwrap();
 
-        let output = inf.generate_from_prompt(&[4, 0], 4, 0.5, 42, |_| {});
+        let output = inf.generate_from_prompt(&[4, 0], 4, 0.5, 42, None, |_| {});
         assert!(output.len() <= 7);
     }
 

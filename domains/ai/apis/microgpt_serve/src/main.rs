@@ -10,7 +10,7 @@ use std::sync::Arc;
 use axum::routing::post;
 use microgpt::model::ModelMeta;
 use microgpt::{InferenceGpt, Tokenizer};
-use server_pal::{listen_addr_pal, router_builder};
+use server_pal::{RateLimit, listen_addr_pal, router_builder, serve};
 use tracing::{Level, event};
 
 use crate::service::{chat_post, generate_post};
@@ -72,12 +72,10 @@ async fn main() {
     let app = router_builder()
         .route("/microgpt/v1/generate", post(generate_post))
         .route("/microgpt/v1/chat", post(chat_post))
+        .rate_limit(Some(RateLimit { per_second: 5, burst: 10 }))
         .build()
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(listen_address.clone())
-        .await
-        .unwrap();
     event!(Level::INFO, "listening on {}", listen_address);
-    axum::serve(listener, app).await.unwrap();
+    serve(app, &listen_address).await;
 }

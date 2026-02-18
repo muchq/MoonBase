@@ -75,8 +75,8 @@ fn test_train_save_load_roundtrip() {
     let inference_gpt = InferenceGpt::load_weights_with_config(vocab_size, &json, config).unwrap();
 
     let seed_gen = 123;
-    let output1 = inference_gpt.generate(1, 1.0, seed_gen, |id| Some((id as u8 + b'a') as char));
-    let output2 = inference_gpt.generate(1, 1.0, seed_gen, |id| Some((id as u8 + b'a') as char));
+    let output1 = inference_gpt.generate(1, 1.0, seed_gen, None, |id| Some((id as u8 + b'a') as char));
+    let output2 = inference_gpt.generate(1, 1.0, seed_gen, None, |id| Some((id as u8 + b'a') as char));
 
     assert_eq!(output1, output2);
     assert!(!output1.is_empty());

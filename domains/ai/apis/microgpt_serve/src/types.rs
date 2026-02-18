@@ -15,6 +15,9 @@ pub struct GenerateRequest {
     /// RNG seed for reproducibility (default 42).
     #[serde(default = "default_seed")]
     pub seed: u64,
+
+    /// Maximum tokens to generate per sample. Omit for model default (block_size).
+    pub max_tokens: Option<usize>,
 }
 
 fn default_num_samples() -> usize {
@@ -48,6 +51,9 @@ pub struct ChatRequest {
     /// RNG seed for reproducibility (default 42).
     #[serde(default = "default_seed")]
     pub seed: u64,
+
+    /// Maximum tokens to generate. Omit for model default (block_size - prompt_len).
+    pub max_tokens: Option<usize>,
 }
 
 #[derive(Deserialize, Serialize, Clone)]

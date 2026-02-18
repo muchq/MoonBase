@@ -4,7 +4,7 @@ mod types;
 
 use crate::service::{blur_post, edges_post};
 use axum::routing::post;
-use server_pal::{listen_addr_pal, router_builder};
+use server_pal::{listen_addr_pal, router_builder, serve};
 use tracing::{Level, event};
 
 #[tokio::main]
@@ -18,9 +18,6 @@ async fn main() {
         .route("/imagine/v1/edges", post(edges_post))
         .build();
 
-    let listener = tokio::net::TcpListener::bind(listen_address.clone())
-        .await
-        .unwrap();
     event!(Level::INFO, "listening on {}", listen_address);
-    axum::serve(listener, app).await.unwrap();
+    serve(app, &listen_address).await;
 }
