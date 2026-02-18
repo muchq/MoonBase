@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
-use candle_core::{DType, Device, Result, Tensor, Var, D};
+use candle_core::{Device, Result, Tensor, Var, D};
 use candle_nn::VarMap;
+use safetensors::tensor::{Dtype as StDtype, SafeTensors, TensorView};
 
 use crate::model::ModelConfig;
 
@@ -204,48 +205,47 @@ impl TensorGpt {
         Ok(logits)
     }
 
-    /// Serialize model weights to JSON (same format as `Gpt::save_weights`).
-    pub fn save_weights(&self) -> String {
+    /// Serialize model weights to safetensors (f32).
+    pub fn save_weights_st(&self) -> Vec<u8> {
         let data = self.varmap.data().lock().unwrap();
-        let snapshot: HashMap<String, Vec<Vec<f64>>> = data
+        // Collect names, shapes, and byte buffers first so TensorView can borrow them.
+        let buffers: Vec<(String, Vec<usize>, Vec<u8>)> = data
             .iter()
             .map(|(name, var)| {
                 let t = var.as_tensor();
-                let mat: Vec<Vec<f64>> = if t.dtype() == DType::F32 {
-                    t.to_vec2::<f32>()
-                        .unwrap()
-                        .into_iter()
-                        .map(|row| row.into_iter().map(|v| v as f64).collect())
-                        .collect()
-                } else {
-                    t.to_vec2::<f64>().unwrap()
-                };
-                (name.clone(), mat)
+                let flat: Vec<f32> = t.flatten_all().unwrap().to_vec1::<f32>().unwrap();
+                let bytes: Vec<u8> = flat.iter().flat_map(|v| v.to_le_bytes()).collect();
+                (name.clone(), t.dims().to_vec(), bytes)
             })
             .collect();
-        serde_json::to_string(&snapshot).expect("serialization should not fail")
+        let tensors: Vec<(String, TensorView)> = buffers
+            .iter()
+            .map(|(name, shape, bytes)| {
+                (
+                    name.clone(),
+                    TensorView::new(StDtype::F32, shape.clone(), bytes).unwrap(),
+                )
+            })
+            .collect();
+        safetensors::tensor::serialize(tensors, None).unwrap()
     }
 
-    /// Load model weights from JSON (same format as `Gpt::load_weights`).
-    pub fn load_weights_with_config(
+    /// Load model weights from safetensors bytes.
+    pub fn load_weights_st(
         vocab_size: usize,
-        json: &str,
+        bytes: &[u8],
         config: ModelConfig,
         device: &Device,
     ) -> Result<Self> {
-        let snapshot: HashMap<String, Vec<Vec<f64>>> =
-            serde_json::from_str(json).map_err(|e| candle_core::Error::Msg(format!("{e}")))?;
-
+        let st = SafeTensors::deserialize(bytes)
+            .map_err(|e| candle_core::Error::Msg(format!("safetensors: {e}")))?;
         let varmap = VarMap::new();
-
-        for (name, mat) in &snapshot {
-            let rows = mat.len();
-            let cols = if rows > 0 { mat[0].len() } else { 0 };
-            let flat: Vec<f32> = mat.iter().flatten().map(|&v| v as f32).collect();
-            let tensor = Tensor::from_vec(flat, (rows, cols), device)?;
-            insert_var(&varmap, name, tensor);
+        for (name, view) in st.tensors() {
+            let shape = view.shape().to_vec();
+            let flat = st_view_to_f32(&view);
+            let tensor = Tensor::from_vec(flat, shape.as_slice(), device)?;
+            insert_var(&varmap, &name, tensor);
         }
-
         Ok(TensorGpt {
             varmap,
             vocab_size,
@@ -253,6 +253,66 @@ impl TensorGpt {
             device: device.clone(),
         })
     }
+
+}
+
+/// Convert a safetensors TensorView to Vec<f32>, handling f32 and f16 input.
+pub fn st_view_to_f32(view: &TensorView) -> Vec<f32> {
+    match view.dtype() {
+        StDtype::F32 => view
+            .data()
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+            .collect(),
+        StDtype::F16 => view
+            .data()
+            .chunks_exact(2)
+            .map(|c| {
+                let bits = u16::from_le_bytes(c.try_into().unwrap());
+                half::f16::from_bits(bits).to_f32()
+            })
+            .collect(),
+        other => panic!("unsupported safetensors dtype: {other:?}"),
+    }
+}
+
+/// Serialize tensors from a HashMap<String, Vec<Vec<f64>>> (InferenceGpt state_dict)
+/// to safetensors bytes in the given dtype (F32 or F16).
+pub fn serialize_state_dict_st(
+    state_dict: &HashMap<String, Vec<Vec<f64>>>,
+    dtype: StDtype,
+) -> Vec<u8> {
+    let buffers: Vec<(String, Vec<usize>, Vec<u8>)> = state_dict
+        .iter()
+        .map(|(name, mat)| {
+            let rows = mat.len();
+            let cols = if rows > 0 { mat[0].len() } else { 0 };
+            let bytes: Vec<u8> = match dtype {
+                StDtype::F32 => mat
+                    .iter()
+                    .flatten()
+                    .flat_map(|&v| (v as f32).to_le_bytes())
+                    .collect(),
+                StDtype::F16 => mat
+                    .iter()
+                    .flatten()
+                    .flat_map(|&v| half::f16::from_f32(v as f32).to_le_bytes())
+                    .collect(),
+                _ => panic!("unsupported export dtype: {dtype:?}"),
+            };
+            (name.clone(), vec![rows, cols], bytes)
+        })
+        .collect();
+    let tensors: Vec<(String, TensorView)> = buffers
+        .iter()
+        .map(|(name, shape, bytes)| {
+            (
+                name.clone(),
+                TensorView::new(dtype, shape.clone(), bytes).unwrap(),
+            )
+        })
+        .collect();
+    safetensors::tensor::serialize(tensors, None).unwrap()
 }
 
 /// RMS normalization along the last dimension.

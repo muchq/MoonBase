@@ -30,7 +30,8 @@ brew install muchq/muchq/microgpt
 ## Key design decisions
 
 - **Candle tensor engine**: Training uses `TensorGpt` backed by [candle](https://github.com/huggingface/candle) for batched tensor operations and reverse-mode autograd via `Var`/`VarMap`. This replaces the original scalar autograd engine.
-- **Dual model types**: `TensorGpt` (candle tensors) is used for training with full autograd support. `InferenceGpt` (plain `f64`) is `Send + Sync` and used by the HTTP server behind `Arc`. Both share the same weight format.
+- **Dual model types**: `TensorGpt` (candle tensors) is used for training with full autograd support. `InferenceGpt` (plain `f64`) is `Send + Sync` and used by the HTTP server behind `Arc`. Both use safetensors for weight serialization.
+- **Safetensors format**: Weights and optimizer state are stored as [safetensors](https://github.com/huggingface/safetensors) (f32). Inference-only models can be exported as f16 via `microgpt export --half`, cutting file size in half.
 - **Metal GPU support**: Training can run on Apple Silicon GPUs via candle's Metal backend. Enable with `--device metal`.
 - **Configurable hyperparameters**: `ModelConfig` allows runtime-configurable `n_embd`, `n_head`, `n_layer`, and `block_size`. Defaults match the original gist's educational scale (16/4/1/16).
 
@@ -132,10 +133,13 @@ truncated to fit within the model's context window. 0 means no truncation.
 
 ## Saved model format
 
-Training produces two files (plus checkpoint files when using `--checkpoint-every` or `--resume`):
+Training produces a checkpoint directory:
 
-- `weights.json` — model weights as nested JSON arrays
+- `weights.safetensors` — model weights (f32)
 - `meta.json` — model metadata (vocab size, charset, hyperparameters, special tokens)
 - `train_state.json` — checkpoint state (training step, optimizer step)
-- `optimizer_m.json` — Adam first-moment (momentum) vectors
-- `optimizer_v.json` — Adam second-moment (variance) vectors
+- `optimizer_m.safetensors` — Adam first-moment (momentum) vectors (f32)
+- `optimizer_v.safetensors` — Adam second-moment (variance) vectors (f32)
+
+Inference-only exports (via `microgpt export`) contain only `weights.safetensors`
+(f32 or f16) and `meta.json`.

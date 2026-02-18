@@ -11,8 +11,8 @@ Built on [server_pal](../../../platform/libs/server_pal) (Axum + tower-http).
 MODEL_DIR=output PORT=8080 cargo run -p microgpt_serve
 ```
 
-Set `MODEL_DIR` to the directory containing `weights.json` and `meta.json`
-produced by training. Defaults to `./output`.
+Set `MODEL_DIR` to the directory containing `weights.safetensors` and `meta.json`
+produced by training (or `microgpt export`). Defaults to `./output`.
 
 ## Endpoints
 

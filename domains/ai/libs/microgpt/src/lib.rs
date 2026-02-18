@@ -9,6 +9,7 @@ pub use data::{ChatDataset, ChatMessage, Dataset, SpecialTokens, Tokenizer};
 pub use model::{
     InferenceGpt, ModelConfig, ModelMeta, BLOCK_SIZE, HEAD_DIM, N_EMBD, N_HEAD, N_LAYER,
 };
-pub use tensor_model::TensorGpt;
+pub use safetensors::tensor::Dtype as StDtype;
+pub use tensor_model::{TensorGpt, serialize_state_dict_st, st_view_to_f32};
 pub use tensor_train::{TensorAdam, tensor_train_step};
 pub use train::{TrainConfig, TrainState};

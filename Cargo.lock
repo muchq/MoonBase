@@ -2342,13 +2342,15 @@ version = "0.1.0"
 dependencies = [
  "candle-core",
  "candle-nn",
+ "half",
+ "safetensors 0.7.0",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "microgpt_cli"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "clap",
  "microgpt",
