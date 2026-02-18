@@ -13,6 +13,7 @@ services:
       - /var/www/r3dr:/var/www/r3dr
     depends_on:
       - games_ws_backend
+      - microgpt-serve
       - mithril
       - portrait
       - prom_proxy
@@ -138,6 +139,24 @@ services:
       - APP_NAME=mcpserver
     volumes:
       - /etc/mcpserver:/etc/mcpserver
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  microgpt-serve:
+    image: ghcr.io/muchq/microgpt-serve:latest
+    restart: always
+    ports:
+      - "8087:8087"
+    environment:
+      - PORT=8087
+      - MODEL_DIR=/etc/microgpt-serve/model
+    volumes:
+      - /etc/microgpt-serve:/etc/microgpt-serve
     networks:
       - app_network
     deploy:
