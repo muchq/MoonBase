@@ -121,7 +121,7 @@ git.muchq.com {
 }
 
 gpt.muchq.com {
-	@cors_origin header Origin ~^https://([a-zA-Z0-9-]+\.)?(muchq\.com|tty1\.uk|bitfear\.net)$
+	@cors_origin header Origin ~^(https://([a-zA-Z0-9-]+\.)?(muchq\.com|tty1\.uk|bitfear\.net|github\.io)|http://(localhost|127\.0\.0\.1)(:[0-9]+)?)$
 
 	@post_generate {
 		method POST
