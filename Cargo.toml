@@ -59,4 +59,5 @@ schemars = "1.0"
 serde_yaml_ng = "0.10"
 microgpt = { path = "domains/ai/libs/microgpt" }
 rustyline = "15.0.0"
+tower_governor = "0.8.0"
 wordchains = { path = "domains/games/libs/wordchains" }
