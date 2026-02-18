@@ -103,6 +103,10 @@ microgpt generate --model-dir names-model --num-samples 20 --temperature 0.5
 Interactive multi-turn chat REPL. Requires a model trained with `--chat`.
 
 ```bash
+# Uses ~/.config/microgpt/default-chat-model by default (installed by Homebrew)
+microgpt chat
+
+# Or point at any model directory
 microgpt chat --model-dir chat-model --temperature 0.5
 ```
 
@@ -115,6 +119,24 @@ Print model metadata from a saved checkpoint.
 ```bash
 microgpt info --model-dir chat-model
 ```
+
+## Updating the bundled chat model
+
+The Homebrew formula installs a pre-trained chat model to
+`~/.config/microgpt/default-chat-model`. This model is pinned to a specific
+release and does **not** update automatically when a new version of the CLI is
+installed.
+
+To replace it with a model you've trained yourself:
+
+```bash
+microgpt train --input convos.jsonl --output ~/.config/microgpt/default-chat-model --chat ...
+```
+
+There is currently no automated training pipeline — model updates are manual.
+When a new bundled model is published, the Homebrew formula's `chat-model`
+resource will be updated to point to it, but you'll need to run
+`brew reinstall microgpt` and re-copy the model to pick it up.
 
 ## Chat training data format
 

@@ -103,8 +103,9 @@ enum Command {
     /// Interactive chat with a trained model.
     Chat {
         /// Directory containing weights.json and meta.json.
-        #[arg(long, default_value = "output")]
-        model_dir: PathBuf,
+        /// Defaults to ~/.config/microgpt/default-chat-model.
+        #[arg(long)]
+        model_dir: Option<PathBuf>,
 
         /// Sampling temperature.
         #[arg(long, default_value = "0.5")]
@@ -205,7 +206,13 @@ fn main() {
             model_dir,
             temperature,
             seed,
-        } => infer::run_chat(model_dir, temperature, seed),
+        } => {
+            let model_dir = model_dir.unwrap_or_else(|| {
+                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                PathBuf::from(home).join(".config/microgpt/default-chat-model")
+            });
+            infer::run_chat(model_dir, temperature, seed);
+        }
         Command::Info { model_dir } => infer::run_info(model_dir),
     }
 }
