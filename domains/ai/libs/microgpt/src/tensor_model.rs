@@ -9,7 +9,7 @@ use crate::model::ModelConfig;
 /// A GPT model backed by candle tensors for batched forward passes and autograd.
 ///
 /// Uses the same architecture and weight naming as `Gpt` (the scalar autograd
-/// model), producing identical `weights.json` output for interoperability with
+/// model), producing identical `weights.safetensors` output for interoperability with
 /// `InferenceGpt`.
 pub struct TensorGpt {
     pub varmap: VarMap,

@@ -16,12 +16,12 @@ overhead.
 The training and inference paths are already cleanly separated:
 
 ```
-Training:   Value (autograd) → Gpt → train_step() → weights.json
-Inference:  weights.json → InferenceGpt (plain f64) → generate/chat
+Training:   Value (autograd) → Gpt → train_step() → weights.safetensors
+Inference:  weights.safetensors → InferenceGpt (plain f64) → generate/chat
 ```
 
 The tensor engine replaces only the training side. Everything downstream
-of `weights.json` — InferenceGpt, chat REPL, chat API, tokenizer — is
+of `weights.safetensors` — InferenceGpt, chat REPL, chat API, tokenizer — is
 unchanged.
 
 ### What to replace
@@ -42,8 +42,8 @@ unchanged.
 
 ### Interface contract
 
-The tensor engine must produce the same `weights.json` and `meta.json`
-format. `InferenceGpt::load_weights_with_config()` loads them unchanged.
+The tensor engine must produce the same `weights.safetensors` and `meta.json`
+format. `InferenceGpt::load_safetensors()` loads them.
 
 ## Design
 
