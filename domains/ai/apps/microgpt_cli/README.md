@@ -37,6 +37,12 @@ microgpt train --input convos.jsonl --output chat-model --chat \
   --n-embd 128 --n-head 8 --n-layer 4 --block-size 1024 \
   --lr 0.003 --steps 50000 --device metal
 
+# Recommended: train on OASST2 (13.8k multilingual conversations)
+# ~8M params, block-size 1024 covers p95 conversation length
+microgpt train --input domains/ai/data/oasst2_chat.jsonl --output chat-model --chat \
+  --n-embd 256 --n-head 8 --n-layer 6 --block-size 1024 \
+  --lr 0.0005 --steps 200000 --device metal --checkpoint-every 10000
+
 # Larger chat model for longer conversations / more data
 # ~8M params, still manageable on 64GB
 microgpt train --input convos.jsonl --output chat-model-lg --chat \
