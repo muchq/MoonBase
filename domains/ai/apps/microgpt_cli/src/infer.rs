@@ -3,10 +3,9 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process;
 
-use microgpt::model::ModelMeta;
 use microgpt::{InferenceGpt, Tokenizer};
 
-use crate::train::load_meta_and_weights;
+use crate::train::{load_meta, load_weights};
 
 pub fn run_generate(model_dir: PathBuf, num_samples: usize, temperature: f64, seed: u64) {
     let (tokenizer, model) = load_inference_model(&model_dir);
@@ -114,15 +113,7 @@ pub fn run_chat(model_dir: PathBuf, temperature: f64, seed: u64) {
 }
 
 pub fn run_info(model_dir: PathBuf) {
-    let meta_path = model_dir.join("meta.json");
-    let meta_json = fs::read_to_string(&meta_path).unwrap_or_else(|e| {
-        eprintln!("error: cannot read {}: {e}", meta_path.display());
-        process::exit(1);
-    });
-    let meta: ModelMeta = serde_json::from_str(&meta_json).unwrap_or_else(|e| {
-        eprintln!("error: invalid meta.json: {e}");
-        process::exit(1);
-    });
+    let meta = load_meta(&model_dir);
 
     println!("microgpt model");
     println!("  vocab_size:      {}", meta.vocab_size);
@@ -135,26 +126,70 @@ pub fn run_info(model_dir: PathBuf) {
         println!("  special_tokens:  {:?}", st);
     }
 
-    let weights_path = model_dir.join("weights.json");
-    if weights_path.exists() {
-        let weights_json = fs::read_to_string(&weights_path).unwrap_or_else(|e| {
-            eprintln!("error: cannot read weights: {e}");
+    let config = meta.config();
+    let weights_bytes = load_weights(&model_dir);
+    let model = InferenceGpt::load_safetensors(meta.vocab_size, &weights_bytes, config)
+        .unwrap_or_else(|e| {
+            eprintln!("error: {e}");
             process::exit(1);
         });
-        let config = meta.config();
-        let model = InferenceGpt::load_weights_with_config(meta.vocab_size, &weights_json, config)
-            .unwrap_or_else(|e| {
-                eprintln!("error: {e}");
-                process::exit(1);
-            });
-        println!("  num_params:      {}", model.num_params());
+    println!("  num_params:      {}", model.num_params());
+
+    let st_path = model_dir.join("weights.safetensors");
+    let size = fs::metadata(&st_path).map(|m| m.len()).unwrap_or(0);
+    println!("  format:          safetensors ({:.1} MB)", size as f64 / 1e6);
+}
+
+pub fn run_export(model_dir: PathBuf, output: PathBuf, half: bool) {
+    let meta = load_meta(&model_dir);
+    let config = meta.config();
+    let weights_bytes = load_weights(&model_dir);
+    let model = InferenceGpt::load_safetensors(meta.vocab_size, &weights_bytes, config)
+        .unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            process::exit(1);
+        });
+
+    if let Err(e) = fs::create_dir_all(&output) {
+        eprintln!("error: cannot create output directory: {e}");
+        process::exit(1);
     }
+
+    let dtype = if half {
+        microgpt::StDtype::F16
+    } else {
+        microgpt::StDtype::F32
+    };
+    let bytes = microgpt::serialize_state_dict_st(&model.state_dict, dtype);
+    let weights_path = output.join("weights.safetensors");
+    if let Err(e) = fs::write(&weights_path, &bytes) {
+        eprintln!("error: failed to write weights: {e}");
+        process::exit(1);
+    }
+
+    // Write meta.json
+    let meta_json = serde_json::to_string_pretty(&meta).expect("meta serialization");
+    if let Err(e) = fs::write(output.join("meta.json"), &meta_json) {
+        eprintln!("error: failed to write meta.json: {e}");
+        process::exit(1);
+    }
+
+    let dtype_name = if half { "f16" } else { "f32" };
+    let size = fs::metadata(&weights_path).map(|m| m.len()).unwrap_or(0);
+    println!(
+        "exported {} model ({} params) to {} ({dtype_name}, {:.1} MB)",
+        if half { "f16" } else { "f32" },
+        model.num_params(),
+        weights_path.display(),
+        size as f64 / 1e6
+    );
 }
 
 fn load_inference_model(model_dir: &PathBuf) -> (Tokenizer, InferenceGpt) {
-    let (meta, weights_json) = load_meta_and_weights(model_dir);
+    let meta = load_meta(model_dir);
     let config = meta.config();
-    let model = InferenceGpt::load_weights_with_config(meta.vocab_size, &weights_json, config)
+    let weights_bytes = load_weights(model_dir);
+    let model = InferenceGpt::load_safetensors(meta.vocab_size, &weights_bytes, config)
         .unwrap_or_else(|e| {
             eprintln!("error: {e}");
             process::exit(1);

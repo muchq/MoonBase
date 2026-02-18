@@ -2,8 +2,9 @@ use std::collections::HashMap;
 
 use candle_core::{DType, Device, Result, Tensor};
 use candle_nn::VarMap;
+use safetensors::tensor::{Dtype as StDtype, SafeTensors, TensorView};
 
-use crate::tensor_model::TensorGpt;
+use crate::tensor_model::{st_view_to_f32, TensorGpt};
 use crate::train::TrainConfig;
 
 /// Custom Adam optimizer with serializable state.
@@ -104,53 +105,55 @@ impl TensorAdam {
         self.lr = lr;
     }
 
-    /// Serialize first-moment (m) accumulators as JSON.
-    pub fn save_m(&self) -> String {
-        tensor_map_to_json(&self.m)
+    /// Serialize first-moment (m) accumulators as safetensors.
+    pub fn save_m_st(&self) -> Vec<u8> {
+        tensor_map_to_st(&self.m)
     }
 
-    /// Serialize second-moment (v) accumulators as JSON.
-    pub fn save_v(&self) -> String {
-        tensor_map_to_json(&self.v)
+    /// Serialize second-moment (v) accumulators as safetensors.
+    pub fn save_v_st(&self) -> Vec<u8> {
+        tensor_map_to_st(&self.v)
     }
 
-    /// Restore optimizer state from serialized m/v and step counter.
-    pub fn load_state(&mut self, m_json: &str, v_json: &str, step_t: usize) -> Result<()> {
-        self.m = json_to_tensor_map(m_json, &self.device)?;
-        self.v = json_to_tensor_map(v_json, &self.device)?;
+    /// Restore optimizer state from safetensors m/v and step counter.
+    pub fn load_state_st(&mut self, m_bytes: &[u8], v_bytes: &[u8], step_t: usize) -> Result<()> {
+        self.m = st_to_tensor_map(m_bytes, &self.device)?;
+        self.v = st_to_tensor_map(v_bytes, &self.device)?;
         self.step_t = step_t;
         Ok(())
     }
+
 }
 
-fn tensor_map_to_json(map: &HashMap<String, Tensor>) -> String {
-    let snapshot: HashMap<String, Vec<Vec<f64>>> = map
+fn tensor_map_to_st(map: &HashMap<String, Tensor>) -> Vec<u8> {
+    let buffers: Vec<(String, Vec<usize>, Vec<u8>)> = map
         .iter()
         .map(|(name, t)| {
-            let mat: Vec<Vec<f64>> = if t.dtype() == DType::F32 {
-                t.to_vec2::<f32>()
-                    .unwrap()
-                    .into_iter()
-                    .map(|row| row.into_iter().map(|v| v as f64).collect())
-                    .collect()
-            } else {
-                t.to_vec2::<f64>().unwrap()
-            };
-            (name.clone(), mat)
+            let flat: Vec<f32> = t.flatten_all().unwrap().to_vec1::<f32>().unwrap();
+            let bytes: Vec<u8> = flat.iter().flat_map(|v| v.to_le_bytes()).collect();
+            (name.clone(), t.dims().to_vec(), bytes)
         })
         .collect();
-    serde_json::to_string(&snapshot).expect("serialization should not fail")
+    let tensors: Vec<(String, TensorView)> = buffers
+        .iter()
+        .map(|(name, shape, bytes)| {
+            (
+                name.clone(),
+                TensorView::new(StDtype::F32, shape.clone(), bytes).unwrap(),
+            )
+        })
+        .collect();
+    safetensors::tensor::serialize(tensors, None).unwrap()
 }
 
-fn json_to_tensor_map(json: &str, device: &Device) -> Result<HashMap<String, Tensor>> {
-    let snapshot: HashMap<String, Vec<Vec<f64>>> =
-        serde_json::from_str(json).map_err(|e| candle_core::Error::Msg(format!("{e}")))?;
+fn st_to_tensor_map(bytes: &[u8], device: &Device) -> Result<HashMap<String, Tensor>> {
+    let st = SafeTensors::deserialize(bytes)
+        .map_err(|e| candle_core::Error::Msg(format!("safetensors: {e}")))?;
     let mut map = HashMap::new();
-    for (name, mat) in snapshot {
-        let rows = mat.len();
-        let cols = if rows > 0 { mat[0].len() } else { 0 };
-        let flat: Vec<f32> = mat.iter().flatten().map(|&v| v as f32).collect();
-        let tensor = Tensor::from_vec(flat, (rows, cols), device)?;
+    for (name, view) in st.tensors() {
+        let shape = view.shape().to_vec();
+        let flat = st_view_to_f32(&view);
+        let tensor = Tensor::from_vec(flat, shape.as_slice(), device)?;
         map.insert(name, tensor);
     }
     Ok(map)

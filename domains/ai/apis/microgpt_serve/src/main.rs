@@ -3,7 +3,7 @@ mod types;
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
 
@@ -28,12 +28,11 @@ async fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("output"));
 
-    let weights_path = model_dir.join("weights.json");
     let meta_path = model_dir.join("meta.json");
 
     let meta_json = fs::read_to_string(&meta_path).unwrap_or_else(|e| {
         eprintln!(
-            "error: cannot read {}: {e}\nSet MODEL_DIR to the directory containing weights.json and meta.json",
+            "error: cannot read {}: {e}\nSet MODEL_DIR to the directory containing weights.safetensors and meta.json",
             meta_path.display()
         );
         process::exit(1);
@@ -43,16 +42,8 @@ async fn main() {
         process::exit(1);
     });
 
-    let weights_json = fs::read_to_string(&weights_path).unwrap_or_else(|e| {
-        eprintln!("error: cannot read {}: {e}", weights_path.display());
-        process::exit(1);
-    });
     let config = meta.config();
-    let model = InferenceGpt::load_weights_with_config(meta.vocab_size, &weights_json, config)
-        .unwrap_or_else(|e| {
-            eprintln!("error: {e}");
-            process::exit(1);
-        });
+    let model = load_model(&model_dir, &meta, config);
 
     let tokenizer = Tokenizer::from_meta(meta.chars, meta.special_tokens.as_deref());
 
@@ -78,4 +69,22 @@ async fn main() {
 
     event!(Level::INFO, "listening on {}", listen_address);
     serve(app, &listen_address).await;
+}
+
+/// Load model weights, preferring safetensors over legacy JSON.
+fn load_model(
+    model_dir: &Path,
+    meta: &ModelMeta,
+    config: microgpt::ModelConfig,
+) -> InferenceGpt {
+    let st_path = model_dir.join("weights.safetensors");
+    let bytes = fs::read(&st_path).unwrap_or_else(|e| {
+        eprintln!("error: cannot read {}: {e}", st_path.display());
+        process::exit(1);
+    });
+    InferenceGpt::load_safetensors(meta.vocab_size, &bytes, config)
+        .unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            process::exit(1);
+        })
 }

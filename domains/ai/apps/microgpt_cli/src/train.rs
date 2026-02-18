@@ -52,19 +52,20 @@ struct ResumeState {
     model: TensorGpt,
     start_step: usize,
     adam_step: usize,
-    m_json: String,
-    v_json: String,
+    optimizer_m: Vec<u8>,
+    optimizer_v: Vec<u8>,
 }
 
 fn load_resume_state(resume_dir: &Path, device: &microgpt::Device) -> ResumeState {
-    let (meta, weights_json) = load_meta_and_weights(&resume_dir.to_path_buf());
+    let meta = load_meta(resume_dir);
     let config = meta.config();
-    let model =
-        TensorGpt::load_weights_with_config(meta.vocab_size, &weights_json, config, device)
-            .unwrap_or_else(|e| {
-                eprintln!("error: failed to load checkpoint weights: {e}");
-                process::exit(1);
-            });
+
+    let weights_bytes = load_weights(resume_dir);
+    let model = TensorGpt::load_weights_st(meta.vocab_size, &weights_bytes, config, device)
+        .unwrap_or_else(|e| {
+            eprintln!("error: failed to load checkpoint weights: {e}");
+            process::exit(1);
+        });
 
     let state_path = resume_dir.join("train_state.json");
     let state_json = fs::read_to_string(&state_path).unwrap_or_else(|e| {
@@ -76,14 +77,12 @@ fn load_resume_state(resume_dir: &Path, device: &microgpt::Device) -> ResumeStat
         process::exit(1);
     });
 
-    let m_path = resume_dir.join("optimizer_m.json");
-    let m_json = fs::read_to_string(&m_path).unwrap_or_else(|e| {
-        eprintln!("error: cannot read {}: {e}", m_path.display());
+    let m_bytes = fs::read(resume_dir.join("optimizer_m.safetensors")).unwrap_or_else(|e| {
+        eprintln!("error: cannot read optimizer_m.safetensors: {e}");
         process::exit(1);
     });
-    let v_path = resume_dir.join("optimizer_v.json");
-    let v_json = fs::read_to_string(&v_path).unwrap_or_else(|e| {
-        eprintln!("error: cannot read {}: {e}", v_path.display());
+    let v_bytes = fs::read(resume_dir.join("optimizer_v.safetensors")).unwrap_or_else(|e| {
+        eprintln!("error: cannot read optimizer_v.safetensors: {e}");
         process::exit(1);
     });
 
@@ -91,8 +90,8 @@ fn load_resume_state(resume_dir: &Path, device: &microgpt::Device) -> ResumeStat
         model,
         start_step: state.step,
         adam_step: state.adam_step,
-        m_json,
-        v_json,
+        optimizer_m: m_bytes,
+        optimizer_v: v_bytes,
     }
 }
 
@@ -115,14 +114,14 @@ fn save_checkpoint(
         process::exit(1);
     }
 
-    let m_json = optimizer.save_m();
-    if let Err(e) = fs::write(output.join("optimizer_m.json"), &m_json) {
+    let m_bytes = optimizer.save_m_st();
+    if let Err(e) = fs::write(output.join("optimizer_m.safetensors"), &m_bytes) {
         eprintln!("error: failed to save optimizer m: {e}");
         process::exit(1);
     }
 
-    let v_json = optimizer.save_v();
-    if let Err(e) = fs::write(output.join("optimizer_v.json"), &v_json) {
+    let v_bytes = optimizer.save_v_st();
+    if let Err(e) = fs::write(output.join("optimizer_v.safetensors"), &v_bytes) {
         eprintln!("error: failed to save optimizer v: {e}");
         process::exit(1);
     }
@@ -157,7 +156,7 @@ pub fn run_train(
                 rs.model,
                 rs.start_step,
                 rs.adam_step,
-                Some((rs.m_json, rs.v_json)),
+                Some((rs.optimizer_m, rs.optimizer_v)),
             )
         } else {
             print_config(data.mode_name(), &model_config, device);
@@ -188,9 +187,9 @@ pub fn run_train(
         process::exit(1);
     });
 
-    if let Some((m_json, v_json)) = optimizer_state {
+    if let Some((m_bytes, v_bytes)) = optimizer_state {
         optimizer
-            .load_state(&m_json, &v_json, adam_step)
+            .load_state_st(&m_bytes, &v_bytes, adam_step)
             .unwrap_or_else(|e| {
                 eprintln!("error: failed to restore optimizer state: {e}");
                 process::exit(1);
@@ -233,10 +232,10 @@ pub fn run_train(
     // Show samples for text mode (non-chat) models.
     if tokenizer.special_tokens.is_none() {
         println!("\n--- samples ---");
-        let weights_json = model.save_weights();
-        let inf = InferenceGpt::load_weights_with_config(
+        let weights_bytes = model.save_weights_st();
+        let inf = InferenceGpt::load_safetensors(
             tokenizer.vocab_size,
-            &weights_json,
+            &weights_bytes,
             model.config,
         )
         .unwrap();
@@ -273,9 +272,9 @@ fn print_config(mode: &str, config: &ModelConfig, device: &microgpt::Device) {
 // --- Shared I/O helpers (used by both train and infer modules) ---
 
 pub fn save_tensor_model(model: &TensorGpt, tokenizer: &Tokenizer, output: &Path) {
-    let weights_json = model.save_weights();
-    let weights_path = output.join("weights.json");
-    if let Err(e) = fs::write(&weights_path, &weights_json) {
+    let weights_bytes = model.save_weights_st();
+    let weights_path = output.join("weights.safetensors");
+    if let Err(e) = fs::write(&weights_path, &weights_bytes) {
         eprintln!("error: failed to save weights: {e}");
         process::exit(1);
     }
@@ -299,22 +298,22 @@ pub fn save_tensor_model(model: &TensorGpt, tokenizer: &Tokenizer, output: &Path
     println!("metadata saved to {}", meta_path.display());
 }
 
-pub fn load_meta_and_weights(model_dir: &PathBuf) -> (ModelMeta, String) {
+pub fn load_meta(model_dir: &Path) -> ModelMeta {
     let meta_path = model_dir.join("meta.json");
     let meta_json = fs::read_to_string(&meta_path).unwrap_or_else(|e| {
         eprintln!("error: cannot read {}: {e}", meta_path.display());
         process::exit(1);
     });
-    let meta: ModelMeta = serde_json::from_str(&meta_json).unwrap_or_else(|e| {
+    serde_json::from_str(&meta_json).unwrap_or_else(|e| {
         eprintln!("error: invalid meta.json: {e}");
         process::exit(1);
-    });
+    })
+}
 
-    let weights_path = model_dir.join("weights.json");
-    let weights_json = fs::read_to_string(&weights_path).unwrap_or_else(|e| {
-        eprintln!("error: cannot read {}: {e}", weights_path.display());
+pub fn load_weights(model_dir: &Path) -> Vec<u8> {
+    let st_path = model_dir.join("weights.safetensors");
+    fs::read(&st_path).unwrap_or_else(|e| {
+        eprintln!("error: cannot read {}: {e}", st_path.display());
         process::exit(1);
-    });
-
-    (meta, weights_json)
+    })
 }

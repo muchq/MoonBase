@@ -126,6 +126,18 @@ Print model metadata from a saved checkpoint.
 microgpt info --model-dir chat-model
 ```
 
+### `export`
+
+Export an inference-only model (no optimizer state), optionally converting to f16.
+
+```bash
+# Export as f32 safetensors (same precision as training)
+microgpt export --model-dir chat-model --output chat-model-export
+
+# Export as f16 (half the file size, minimal quality loss for inference)
+microgpt export --model-dir chat-model --output chat-model-f16 --half
+```
+
 ## Updating the bundled chat model
 
 The Homebrew formula installs a pre-trained chat model to

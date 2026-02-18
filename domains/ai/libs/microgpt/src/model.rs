@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
+use safetensors::SafeTensors;
 use serde::{Deserialize, Serialize};
+
+use crate::tensor_model::st_view_to_f32;
 
 // Default constants — used when no ModelConfig is provided.
 pub const N_EMBD: usize = 16;
@@ -115,19 +118,30 @@ fn f_rmsnorm(x: &[f64]) -> Vec<f64> {
 }
 
 impl InferenceGpt {
-    /// Load from JSON weights file using default config.
-    pub fn load_weights(vocab_size: usize, json: &str) -> Result<Self, String> {
-        Self::load_weights_with_config(vocab_size, json, ModelConfig::default())
-    }
-
-    /// Load from JSON weights file with a specific config.
-    pub fn load_weights_with_config(
+    /// Load from safetensors bytes. Handles both f32 and f16 input.
+    pub fn load_safetensors(
         vocab_size: usize,
-        json: &str,
+        bytes: &[u8],
         config: ModelConfig,
     ) -> Result<Self, String> {
-        let state_dict: HashMap<String, FMatrix> =
-            serde_json::from_str(json).map_err(|e| format!("failed to parse weights: {e}"))?;
+        let st = SafeTensors::deserialize(bytes)
+            .map_err(|e| format!("failed to load safetensors: {e}"))?;
+        let mut state_dict = HashMap::new();
+        for (name, view) in st.tensors() {
+            let shape = view.shape();
+            let rows = shape[0];
+            let cols = shape[1];
+            let flat = st_view_to_f32(&view);
+            let mat: FMatrix = (0..rows)
+                .map(|r| {
+                    flat[r * cols..(r + 1) * cols]
+                        .iter()
+                        .map(|&v| v as f64)
+                        .collect()
+                })
+                .collect();
+            state_dict.insert(name.to_string(), mat);
+        }
         Ok(InferenceGpt {
             state_dict,
             vocab_size,
@@ -346,28 +360,36 @@ mod tests {
         assert_eq!(cfg.head_dim(), 4);
     }
 
+    /// Helper: create TensorGpt → save as safetensors → load as InferenceGpt.
+    fn tensor_to_inference(vocab_size: usize, seed: u64, config: ModelConfig) -> InferenceGpt {
+        let device = candle_core::Device::Cpu;
+        let model = TensorGpt::new(vocab_size, seed, config, &device);
+        let bytes = model.save_weights_st();
+        InferenceGpt::load_safetensors(vocab_size, &bytes, config).unwrap()
+    }
+
     #[test]
     fn inference_gpt_forward_produces_vocab_sized_logits() {
-        let device = candle_core::Device::Cpu;
-        let model = TensorGpt::new(10, 42, ModelConfig::default(), &device);
-        let json = model.save_weights();
-        let inf = InferenceGpt::load_weights(10, &json).unwrap();
-
+        let inf = tensor_to_inference(10, 42, ModelConfig::default());
         let mut kv = InferenceKvCache::new(&inf.config);
         let logits = inf.forward(0, 0, &mut kv);
         assert_eq!(logits.len(), 10);
     }
 
     #[test]
-    fn inference_gpt_save_load_roundtrip() {
+    fn inference_gpt_safetensors_roundtrip() {
         let device = candle_core::Device::Cpu;
-        let model = TensorGpt::new(5, 42, ModelConfig::default(), &device);
-        let json = model.save_weights();
-        let inf = InferenceGpt::load_weights(5, &json).unwrap();
+        let config = ModelConfig::default();
+        let model = TensorGpt::new(5, 42, config, &device);
+        let bytes = model.save_weights_st();
+        let inf = InferenceGpt::load_safetensors(5, &bytes, config).unwrap();
 
-        // Re-serialize from InferenceGpt and reload
-        let json2 = serde_json::to_string(&inf.state_dict).unwrap();
-        let inf2 = InferenceGpt::load_weights(5, &json2).unwrap();
+        // Re-serialize via serialize_state_dict_st and reload
+        let bytes2 = crate::tensor_model::serialize_state_dict_st(
+            &inf.state_dict,
+            crate::StDtype::F32,
+        );
+        let inf2 = InferenceGpt::load_safetensors(5, &bytes2, config).unwrap();
 
         let mut kv1 = InferenceKvCache::new(&inf.config);
         let mut kv2 = InferenceKvCache::new(&inf2.config);
@@ -380,11 +402,37 @@ mod tests {
     }
 
     #[test]
-    fn generate_from_prompt_respects_stop_token() {
+    fn inference_gpt_f16_roundtrip() {
         let device = candle_core::Device::Cpu;
-        let model = TensorGpt::new(5, 42, ModelConfig::default(), &device);
-        let json = model.save_weights();
-        let inf = InferenceGpt::load_weights(5, &json).unwrap();
+        let config = ModelConfig::default();
+        let model = TensorGpt::new(5, 42, config, &device);
+        let bytes_f32 = model.save_weights_st();
+        let inf_f32 = InferenceGpt::load_safetensors(5, &bytes_f32, config).unwrap();
+
+        // Export as f16 and reload
+        let bytes_f16 = crate::tensor_model::serialize_state_dict_st(
+            &inf_f32.state_dict,
+            crate::StDtype::F16,
+        );
+        let inf_f16 = InferenceGpt::load_safetensors(5, &bytes_f16, config).unwrap();
+
+        // f16 has lower precision, so use a looser tolerance
+        let mut kv1 = InferenceKvCache::new(&inf_f32.config);
+        let mut kv2 = InferenceKvCache::new(&inf_f16.config);
+        let logits1 = inf_f32.forward(0, 0, &mut kv1);
+        let logits2 = inf_f16.forward(0, 0, &mut kv2);
+
+        for (a, b) in logits1.iter().zip(logits2.iter()) {
+            assert!(
+                (a - b).abs() < 0.1,
+                "f16 roundtrip diverged: {a} vs {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn generate_from_prompt_respects_stop_token() {
+        let inf = tensor_to_inference(5, 42, ModelConfig::default());
 
         let stop_token = 4; // BOS for vocab_size=5
         let prompt = vec![stop_token, 0];
@@ -405,10 +453,7 @@ mod tests {
 
     #[test]
     fn generate_from_prompt_streaming_callback_fires() {
-        let device = candle_core::Device::Cpu;
-        let model = TensorGpt::new(5, 99, ModelConfig::default(), &device);
-        let json = model.save_weights();
-        let inf = InferenceGpt::load_weights(5, &json).unwrap();
+        let inf = tensor_to_inference(5, 99, ModelConfig::default());
 
         let mut count = 0;
         let output = inf.generate_from_prompt(
@@ -430,10 +475,7 @@ mod tests {
             n_layer: 1,
             block_size: 8,
         };
-        let device = candle_core::Device::Cpu;
-        let model = TensorGpt::new(5, 42, cfg, &device);
-        let json = model.save_weights();
-        let inf = InferenceGpt::load_weights_with_config(5, &json, cfg).unwrap();
+        let inf = tensor_to_inference(5, 42, cfg);
 
         let output = inf.generate_from_prompt(&[4, 0], 4, 0.5, 42, None, |_| {});
         assert!(output.len() <= 7);

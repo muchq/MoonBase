@@ -122,6 +122,21 @@ enum Command {
         #[arg(long, default_value = "output")]
         model_dir: PathBuf,
     },
+
+    /// Export an inference-only model (no optimizer state), optionally in f16.
+    Export {
+        /// Source model directory.
+        #[arg(long)]
+        model_dir: PathBuf,
+
+        /// Output directory for the exported model.
+        #[arg(long)]
+        output: PathBuf,
+
+        /// Export weights in f16 (half precision) instead of f32.
+        #[arg(long)]
+        half: bool,
+    },
 }
 
 fn main() {
@@ -214,6 +229,11 @@ fn main() {
             infer::run_chat(model_dir, temperature, seed);
         }
         Command::Info { model_dir } => infer::run_info(model_dir),
+        Command::Export {
+            model_dir,
+            output,
+            half,
+        } => infer::run_export(model_dir, output, half),
     }
 }
 

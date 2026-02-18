@@ -2342,6 +2342,8 @@ version = "0.1.0"
 dependencies = [
  "candle-core",
  "candle-nn",
+ "half",
+ "safetensors 0.7.0",
  "serde",
  "serde_json",
 ]

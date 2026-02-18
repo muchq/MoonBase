@@ -13,6 +13,8 @@ metal = ["candle-core/metal", "candle-nn/metal"]
 [dependencies]
 candle-core = { workspace = true }
 candle-nn = { workspace = true }
+half = { workspace = true }
+safetensors = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 

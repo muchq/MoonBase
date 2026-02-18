@@ -19,8 +19,8 @@ fn test_forward_pass_parity() {
     let device = Device::Cpu;
 
     let tensor_gpt = TensorGpt::new(vocab_size, seed, config, &device);
-    let json = tensor_gpt.save_weights();
-    let inference_gpt = InferenceGpt::load_weights_with_config(vocab_size, &json, config).unwrap();
+    let bytes = tensor_gpt.save_weights_st();
+    let inference_gpt = InferenceGpt::load_safetensors(vocab_size, &bytes, config).unwrap();
 
     let token_id = 1;
 
@@ -71,8 +71,8 @@ fn test_train_save_load_roundtrip() {
         let _loss = tensor_train_step(&model, &tokens, &mut optimizer, &train_config, i).unwrap();
     }
 
-    let json = model.save_weights();
-    let inference_gpt = InferenceGpt::load_weights_with_config(vocab_size, &json, config).unwrap();
+    let bytes = model.save_weights_st();
+    let inference_gpt = InferenceGpt::load_safetensors(vocab_size, &bytes, config).unwrap();
 
     let seed_gen = 123;
     let output1 = inference_gpt.generate(1, 1.0, seed_gen, None, |id| Some((id as u8 + b'a') as char));
@@ -84,7 +84,7 @@ fn test_train_save_load_roundtrip() {
 
 #[test]
 fn test_weight_serialization_roundtrip() {
-    // Save TensorGpt weights, reload them, confirm they match exactly.
+    // Save TensorGpt weights as safetensors, reload them, confirm logits match.
 
     let config = ModelConfig {
         n_embd: 16,
@@ -97,28 +97,25 @@ fn test_weight_serialization_roundtrip() {
     let device = Device::Cpu;
 
     let model = TensorGpt::new(vocab_size, seed, config, &device);
-    let json = model.save_weights();
+    let bytes = model.save_weights_st();
 
-    let model2 = TensorGpt::load_weights_with_config(vocab_size, &json, config, &device).unwrap();
-    let json2 = model2.save_weights();
+    let model2 = TensorGpt::load_weights_st(vocab_size, &bytes, config, &device).unwrap();
+    let bytes2 = model2.save_weights_st();
 
-    // Parse both JSON weight snapshots and compare values.
-    let snap1: std::collections::HashMap<String, Vec<Vec<f64>>> =
-        serde_json::from_str(&json).unwrap();
-    let snap2: std::collections::HashMap<String, Vec<Vec<f64>>> =
-        serde_json::from_str(&json2).unwrap();
+    // Compare by loading both as InferenceGpt and checking logits
+    let inf1 = InferenceGpt::load_safetensors(vocab_size, &bytes, config).unwrap();
+    let inf2 = InferenceGpt::load_safetensors(vocab_size, &bytes2, config).unwrap();
 
-    assert_eq!(snap1.len(), snap2.len());
-    for (k, v1) in &snap1 {
-        let v2 = snap2.get(k).expect("missing key in reloaded model");
-        for (row1, row2) in v1.iter().zip(v2.iter()) {
-            for (x1, x2) in row1.iter().zip(row2.iter()) {
-                assert!(
-                    (x1 - x2).abs() < 1e-6,
-                    "weight mismatch for key {}: {} vs {}", k, x1, x2
-                );
-            }
-        }
+    let mut kv1 = InferenceKvCache::new(&config);
+    let mut kv2 = InferenceKvCache::new(&config);
+    let logits1 = inf1.forward(1, 0, &mut kv1);
+    let logits2 = inf2.forward(1, 0, &mut kv2);
+
+    for (a, b) in logits1.iter().zip(logits2.iter()) {
+        assert!(
+            (a - b).abs() < 1e-6,
+            "logits mismatch: {} vs {}", a, b
+        );
     }
 }
 
@@ -148,33 +145,20 @@ fn test_deterministic_training() {
         for i in 0..train_config.num_steps {
             tensor_train_step(&model, &tokens, &mut optimizer, &train_config, i).unwrap();
         }
-        model.save_weights()
+        model.save_weights_st()
     };
 
-    let weights1 = run_training();
-    let weights2 = run_training();
+    let bytes1 = run_training();
+    let bytes2 = run_training();
 
-    let snap1: std::collections::HashMap<String, Vec<Vec<f64>>> =
-        serde_json::from_str(&weights1).unwrap();
-    let snap2: std::collections::HashMap<String, Vec<Vec<f64>>> =
-        serde_json::from_str(&weights2).unwrap();
-
-    for (k, v1) in &snap1 {
-        let v2 = snap2.get(k).expect("missing key in second run");
-        for (row1, row2) in v1.iter().zip(v2.iter()) {
-            for (x1, x2) in row1.iter().zip(row2.iter()) {
-                assert_eq!(x1, x2, "Weight mismatch for key {}", k);
-            }
-        }
-    }
+    // Both safetensors blobs should be byte-identical for deterministic training
+    assert_eq!(bytes1, bytes2, "deterministic training produced different weights");
 }
 
 #[test]
 #[cfg(target_os = "macos")]
 fn test_metal_training() {
     // Verify that the full train-forward-backward pipeline works on Metal GPU.
-    // Uses minimal model size — just enough to exercise Metal matmul with
-    // the multi-head attention reshape+permute path.
 
     let device = Device::new_metal(0).expect("Metal device should be available on macOS");
 
@@ -211,7 +195,6 @@ fn test_metal_training() {
 fn test_checkpoint_resume_roundtrip() {
     // Train N steps, checkpoint, resume for M more steps.
     // Compare with a single uninterrupted N+M step run.
-    // Weights should match exactly.
 
     let config = ModelConfig {
         n_embd: 16,
@@ -240,7 +223,7 @@ fn test_checkpoint_resume_roundtrip() {
     for i in 0..total {
         tensor_train_step(&model_ref, &tokens, &mut opt_ref, &train_config_total, i).unwrap();
     }
-    let weights_ref = model_ref.save_weights();
+    let weights_ref = model_ref.save_weights_st();
 
     // --- Two-phase run with checkpoint/resume ---
     // Phase 1: train N steps
@@ -256,15 +239,14 @@ fn test_checkpoint_resume_roundtrip() {
     }
 
     // Save checkpoint
-    let ckpt_weights = model_p1.save_weights();
-    let ckpt_m = opt_p1.save_m();
-    let ckpt_v = opt_p1.save_v();
-    let ckpt_step = n_first;
+    let ckpt_weights = model_p1.save_weights_st();
+    let ckpt_m = opt_p1.save_m_st();
+    let ckpt_v = opt_p1.save_v_st();
     let ckpt_adam_step = opt_p1.step_t;
 
     // Phase 2: resume from checkpoint
     let model_p2 =
-        TensorGpt::load_weights_with_config(vocab_size, &ckpt_weights, config, &device).unwrap();
+        TensorGpt::load_weights_st(vocab_size, &ckpt_weights, config, &device).unwrap();
     let train_config_p2 = TrainConfig {
         learning_rate: 0.01,
         num_steps: total,
@@ -272,34 +254,16 @@ fn test_checkpoint_resume_roundtrip() {
     };
     let mut opt_p2 = TensorAdam::new(&model_p2.varmap, &train_config_p2).unwrap();
     opt_p2
-        .load_state(&ckpt_m, &ckpt_v, ckpt_adam_step)
+        .load_state_st(&ckpt_m, &ckpt_v, ckpt_adam_step)
         .unwrap();
 
-    for i in ckpt_step..total {
+    for i in n_first..total {
         tensor_train_step(&model_p2, &tokens, &mut opt_p2, &train_config_p2, i).unwrap();
     }
-    let weights_resumed = model_p2.save_weights();
+    let weights_resumed = model_p2.save_weights_st();
 
-    // --- Compare ---
-    let snap_ref: std::collections::HashMap<String, Vec<Vec<f64>>> =
-        serde_json::from_str(&weights_ref).unwrap();
-    let snap_res: std::collections::HashMap<String, Vec<Vec<f64>>> =
-        serde_json::from_str(&weights_resumed).unwrap();
-
-    assert_eq!(snap_ref.len(), snap_res.len());
-    for (k, v1) in &snap_ref {
-        let v2 = snap_res
-            .get(k)
-            .unwrap_or_else(|| panic!("missing key {k} in resumed model"));
-        for (row1, row2) in v1.iter().zip(v2.iter()) {
-            for (x1, x2) in row1.iter().zip(row2.iter()) {
-                assert!(
-                    (x1 - x2).abs() < 1e-6,
-                    "weight mismatch for key {k}: {x1} vs {x2}"
-                );
-            }
-        }
-    }
+    // Compare: both safetensors blobs should be identical
+    assert_eq!(weights_ref, weights_resumed, "checkpoint resume produced different weights");
 
     // Also verify optimizer step counts match
     assert_eq!(opt_ref.step_t, opt_p2.step_t);
@@ -335,54 +299,93 @@ fn test_optimizer_state_serialization_roundtrip() {
     }
 
     // Save optimizer state
-    let m_json = optimizer.save_m();
-    let v_json = optimizer.save_v();
+    let m_bytes = optimizer.save_m_st();
+    let v_bytes = optimizer.save_v_st();
     let step_t = optimizer.step_t;
 
     // Create a fresh optimizer and load state
     let mut optimizer2 = TensorAdam::new(&model.varmap, &train_config).unwrap();
-    optimizer2.load_state(&m_json, &v_json, step_t).unwrap();
+    optimizer2.load_state_st(&m_bytes, &v_bytes, step_t).unwrap();
 
     // Verify step_t matches
     assert_eq!(optimizer2.step_t, step_t);
 
     // Verify m/v roundtrip by re-serializing
-    let m_json2 = optimizer2.save_m();
-    let v_json2 = optimizer2.save_v();
+    let m_bytes2 = optimizer2.save_m_st();
+    let v_bytes2 = optimizer2.save_v_st();
 
-    let m1: std::collections::HashMap<String, Vec<Vec<f64>>> =
-        serde_json::from_str(&m_json).unwrap();
-    let m2: std::collections::HashMap<String, Vec<Vec<f64>>> =
-        serde_json::from_str(&m_json2).unwrap();
+    assert_eq!(m_bytes, m_bytes2, "optimizer m state changed after roundtrip");
+    assert_eq!(v_bytes, v_bytes2, "optimizer v state changed after roundtrip");
+}
 
-    assert_eq!(m1.len(), m2.len());
-    for (k, v1) in &m1 {
-        let v2 = m2.get(k).unwrap();
-        for (row1, row2) in v1.iter().zip(v2.iter()) {
-            for (x1, x2) in row1.iter().zip(row2.iter()) {
-                assert!(
-                    (x1 - x2).abs() < 1e-6,
-                    "m mismatch for key {k}: {x1} vs {x2}"
-                );
-            }
-        }
+#[test]
+fn test_safetensors_save_load_byte_identity() {
+    // save_weights_st → load_weights_st → save_weights_st should produce
+    // identical bytes, guarding against non-deterministic serialization order.
+
+    let config = ModelConfig {
+        n_embd: 16,
+        n_head: 2,
+        n_layer: 1,
+        block_size: 8,
+    };
+    let vocab_size = 10;
+    let device = Device::Cpu;
+
+    let model = TensorGpt::new(vocab_size, 42, config, &device);
+    let bytes1 = model.save_weights_st();
+
+    let model2 = TensorGpt::load_weights_st(vocab_size, &bytes1, config, &device).unwrap();
+    let bytes2 = model2.save_weights_st();
+
+    assert_eq!(bytes1, bytes2, "safetensors roundtrip changed bytes");
+}
+
+#[test]
+fn test_f16_export_generates_valid_output() {
+    // Train a model, export as f16 via serialize_state_dict_st, reload,
+    // and verify generation produces non-empty output without panicking.
+
+    let config = ModelConfig {
+        n_embd: 16,
+        n_head: 2,
+        n_layer: 1,
+        block_size: 8,
+    };
+    let vocab_size = 10;
+    let device = Device::Cpu;
+
+    let model = TensorGpt::new(vocab_size, 42, config, &device);
+    let train_config = TrainConfig {
+        learning_rate: 0.01,
+        num_steps: 5,
+        ..Default::default()
+    };
+    let mut optimizer = TensorAdam::new(&model.varmap, &train_config).unwrap();
+    let tokens = vec![1, 2, 3, 4, 1, 2, 3, 4];
+    for i in 0..train_config.num_steps {
+        tensor_train_step(&model, &tokens, &mut optimizer, &train_config, i).unwrap();
     }
 
-    let v1: std::collections::HashMap<String, Vec<Vec<f64>>> =
-        serde_json::from_str(&v_json).unwrap();
-    let v2: std::collections::HashMap<String, Vec<Vec<f64>>> =
-        serde_json::from_str(&v_json2).unwrap();
+    // Export as f32 → load into InferenceGpt → re-export as f16
+    let bytes_f32 = model.save_weights_st();
+    let inf_f32 = InferenceGpt::load_safetensors(vocab_size, &bytes_f32, config).unwrap();
 
-    assert_eq!(v1.len(), v2.len());
-    for (k, val1) in &v1 {
-        let val2 = v2.get(k).unwrap();
-        for (row1, row2) in val1.iter().zip(val2.iter()) {
-            for (x1, x2) in row1.iter().zip(row2.iter()) {
-                assert!(
-                    (x1 - x2).abs() < 1e-6,
-                    "v mismatch for key {k}: {x1} vs {x2}"
-                );
-            }
-        }
-    }
+    let bytes_f16 = microgpt::serialize_state_dict_st(
+        &inf_f32.state_dict,
+        microgpt::StDtype::F16,
+    );
+    let inf_f16 = InferenceGpt::load_safetensors(vocab_size, &bytes_f16, config).unwrap();
+
+    // Generate from the f16 model
+    let output = inf_f16.generate(1, 1.0, 123, None, |id| Some((id as u8 + b'a') as char));
+    assert!(!output.is_empty(), "f16 model should produce non-empty output");
+
+    // Verify f16 file is roughly half the size of f32
+    assert!(
+        bytes_f16.len() < bytes_f32.len(),
+        "f16 ({}) should be smaller than f32 ({})",
+        bytes_f16.len(),
+        bytes_f32.len()
+    );
 }
