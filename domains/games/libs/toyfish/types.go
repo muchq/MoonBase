@@ -128,7 +128,6 @@ func (m Move) String() string {
 }
 
 func (g *Game) GenerateMoves() []Move {
-	fmt.Println("generating moves...")
 	moveList := make([]Move, 0)
 	for idx, piece := range g.Board {
 		//square := g.Settings.Coordinates[idx]
@@ -151,7 +150,7 @@ func (g *Game) GenerateMoves() []Move {
 					// ***************************************************
 					// ******************* PAWN LOGIC ********************
 					// ***************************************************
-					if strings.Contains("pP", string(piece.FenRepr)) {
+					if piece.FenRepr == 'p' || piece.FenRepr == 'P' {
 						// no en-passant on empty square
 						if offset%10 != 0 && capturedPiece == nil {
 							break
@@ -185,7 +184,7 @@ func (g *Game) GenerateMoves() []Move {
 					// ***************************************************
 					// ******************* CHECKMATE *********************
 					// ***************************************************
-					if capturedPiece != nil && strings.Contains("kK", string(capturedPiece.FenRepr)) {
+					if capturedPiece != nil && (capturedPiece.FenRepr == 'k' || capturedPiece.FenRepr == 'K') {
 						return nil
 					}
 
@@ -208,7 +207,9 @@ func (g *Game) GenerateMoves() []Move {
 					}
 
 					// pawn, knight, and king aren't sliding pieces (only one move at a time in each allowed direction)
-					if strings.Contains("pPnNkK", string(piece.FenRepr)) {
+					if piece.FenRepr == 'p' || piece.FenRepr == 'P' ||
+						piece.FenRepr == 'n' || piece.FenRepr == 'N' ||
+						piece.FenRepr == 'k' || piece.FenRepr == 'K' {
 						break
 					}
 				}
