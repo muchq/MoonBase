@@ -206,17 +206,9 @@ pub fn run_train(
                 process::exit(1);
             });
         let steps_done = step - start_step + 1;
-        let elapsed = train_start.elapsed().as_secs_f64();
-        let avg = elapsed / steps_done as f64;
-        let eta = avg * (total_steps - step - 1) as f64;
-        println!(
-            "step {:4} / {:4} | loss {:.4} | {:.1}s/step | eta {}",
-            step + 1,
-            total_steps,
-            loss,
-            avg,
-            format_eta(eta),
-        );
+        if steps_done % 500 == 0 || step + 1 == total_steps {
+            log_step(step, total_steps, loss, steps_done, &train_start);
+        }
 
         if checkpoint_every > 0 && steps_done % checkpoint_every == 0 && step + 1 < total_steps {
             println!("saving checkpoint at step {}...", step + 1);
@@ -244,6 +236,20 @@ pub fn run_train(
             println!("  {sample}");
         }
     }
+}
+
+fn log_step(step: usize, total_steps: usize, loss: f64, steps_done: usize, train_start: &std::time::Instant) {
+    let elapsed = train_start.elapsed().as_secs_f64();
+    let avg = elapsed / steps_done as f64;
+    let eta = avg * (total_steps - step - 1) as f64;
+    println!(
+        "step {:4} / {:4} | loss {:.4} | {:.1}s/step | eta {}",
+        step + 1,
+        total_steps,
+        loss,
+        avg,
+        format_eta(eta),
+    );
 }
 
 fn format_eta(secs: f64) -> String {

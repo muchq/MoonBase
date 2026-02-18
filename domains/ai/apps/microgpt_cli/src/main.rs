@@ -13,7 +13,7 @@ use microgpt::{ChatDataset, Dataset, ModelConfig};
 #[command(
     name = "microgpt",
     about = "microgpt — a minimal GPT trainer and generator",
-    version = "0.4.0",
+    version = "0.5.0",
     long_about = "A minimal GPT implementation in Rust using candle for tensor ops.\n\
                   Trains character-level language models and generates samples.\n\
                   Ported from karpathy's microgpt.py — the complete algorithm,\n\
@@ -83,7 +83,7 @@ enum Command {
 
     /// Generate samples from a trained model.
     Generate {
-        /// Directory containing weights.json and meta.json.
+        /// Directory containing weights.safetensors and meta.json.
         #[arg(long, default_value = "output")]
         model_dir: PathBuf,
 
@@ -102,7 +102,7 @@ enum Command {
 
     /// Interactive chat with a trained model.
     Chat {
-        /// Directory containing weights.json and meta.json.
+        /// Directory containing weights.safetensors and meta.json.
         /// Defaults to ~/.config/microgpt/default-chat-model.
         #[arg(long)]
         model_dir: Option<PathBuf>,

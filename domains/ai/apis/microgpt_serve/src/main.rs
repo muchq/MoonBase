@@ -71,7 +71,7 @@ async fn main() {
     serve(app, &listen_address).await;
 }
 
-/// Load model weights, preferring safetensors over legacy JSON.
+/// Load model weights from safetensors.
 fn load_model(
     model_dir: &Path,
     meta: &ModelMeta,
