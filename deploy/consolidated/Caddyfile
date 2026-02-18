@@ -120,6 +120,44 @@ git.muchq.com {
 	}
 }
 
+gpt.muchq.com {
+	@cors_origin header Origin ~^https://([a-zA-Z0-9-]+\.)?(muchq\.com|tty1\.uk|bitfear\.net)$
+
+	@post_generate {
+		method POST
+		path /microgpt/v1/generate
+	}
+
+	@post_chat {
+		method POST
+		path /microgpt/v1/chat
+	}
+
+	@options {
+		method OPTIONS
+	}
+
+	header @cors_origin Access-Control-Allow-Origin {http.request.header.Origin}
+	header Access-Control-Allow-Methods "POST, OPTIONS"
+	header Access-Control-Allow-Headers "Content-Type"
+	header Access-Control-Max-Age "86400"
+
+	handle @options {
+		respond 204
+	}
+
+	reverse_proxy @post_generate microgpt-serve:8087
+	reverse_proxy @post_chat microgpt-serve:8087
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 1gb
+			roll_keep 5
+			roll_keep_for 90d
+		}
+	}
+}
+
 mcp.1d4.net {
 	@mcp {
 		method POST
