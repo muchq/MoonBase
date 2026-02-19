@@ -404,20 +404,6 @@ pub fn run_train(args: TrainArgs) {
     }
 }
 
-fn log_step(step: usize, total_steps: usize, loss: f64, steps_done: usize, train_start: &std::time::Instant) {
-    let elapsed = train_start.elapsed().as_secs_f64();
-    let avg = elapsed / steps_done as f64;
-    let eta = avg * (total_steps - step - 1) as f64;
-    println!(
-        "step {:4} / {:4} | loss {:.4} | {:.1}s/step | eta {}",
-        step + 1,
-        total_steps,
-        loss,
-        avg,
-        format_eta(eta),
-    );
-}
-
 fn format_eta(secs: f64) -> String {
     let s = secs as u64;
     if s < 60 {
