@@ -5,17 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::tensor_model::st_view_to_f32;
 
-// Default constants — used when no ModelConfig is provided.
-pub const N_EMBD: usize = 16;
-pub const N_HEAD: usize = 4;
-pub const N_LAYER: usize = 1;
-pub const BLOCK_SIZE: usize = 16;
-pub const HEAD_DIM: usize = N_EMBD / N_HEAD;
-
 /// Runtime-configurable model hyperparameters.
-///
-/// Allows different checkpoints to use different sizes instead of being
-/// locked to the compile-time constants above.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct ModelConfig {
     pub n_embd: usize,
@@ -33,10 +23,10 @@ impl ModelConfig {
 impl Default for ModelConfig {
     fn default() -> Self {
         ModelConfig {
-            n_embd: N_EMBD,
-            n_head: N_HEAD,
-            n_layer: N_LAYER,
-            block_size: BLOCK_SIZE,
+            n_embd: 16,
+            n_head: 4,
+            n_layer: 1,
+            block_size: 16,
         }
     }
 }
@@ -49,7 +39,6 @@ pub struct ModelMeta {
     pub n_head: usize,
     pub n_layer: usize,
     pub block_size: usize,
-    pub chars: Vec<char>,
     /// Names of special tokens (e.g. ["user", "assistant", "end_turn"]).
     /// Present only for models trained with chat support.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -131,7 +120,8 @@ impl InferenceGpt {
             let shape = view.shape();
             let rows = shape[0];
             let cols = shape[1];
-            let flat = st_view_to_f32(&view);
+            let flat = st_view_to_f32(&view)
+                .map_err(|e| format!("failed to decode tensor {name}: {e}"))?;
             let mat: FMatrix = (0..rows)
                 .map(|r| {
                     flat[r * cols..(r + 1) * cols]
@@ -236,7 +226,7 @@ impl InferenceGpt {
         temperature: f64,
         rng_seed: u64,
         max_tokens: Option<usize>,
-        decode: impl Fn(usize) -> Option<char>,
+        decode: impl Fn(usize) -> Option<String>,
     ) -> String {
         let mut kv = InferenceKvCache::new(&self.config);
         let mut token_id = bos;
@@ -246,33 +236,33 @@ impl InferenceGpt {
 
         for pos_id in 0..limit {
             let logits = self.forward(token_id, pos_id, &mut kv);
-            let scaled: Vec<f64> = logits.iter().map(|l| l / temperature).collect();
-            let probs = f_softmax(&scaled);
-
-            token_id = weighted_sample_f64(&probs, &mut rng_state);
+            token_id = sample_token(&logits, temperature, &mut rng_state);
 
             if token_id == bos {
                 break;
             }
-            if let Some(ch) = decode(token_id) {
-                sample.push(ch);
+            if let Some(s) = decode(token_id) {
+                sample.push_str(&s);
             }
         }
 
-        sample
+        sample.trim().to_string()
     }
 
     /// Generate from a prompt using temperature-controlled sampling.
     ///
     /// Encodes the prompt into the KV cache ("prefill"), then samples tokens
-    /// one at a time until `stop_token` is emitted or the context window is
-    /// exhausted. If `max_tokens` is Some, generation stops after that many
-    /// output tokens (capped at block_size - prompt_len).
+    /// one at a time until any token in `stop_tokens` is emitted or the
+    /// context window is exhausted. Tokens in `suppress_tokens` are masked
+    /// from the sampling distribution (logits set to -inf) so the model
+    /// cannot generate them. If `max_tokens` is Some, generation stops
+    /// after that many output tokens (capped at block_size - prompt_len).
     /// Calls `on_token` for each generated token (for streaming).
     pub fn generate_from_prompt(
         &self,
         prompt_tokens: &[usize],
-        stop_token: usize,
+        stop_tokens: &[usize],
+        suppress_tokens: &[usize],
         temperature: f64,
         rng_seed: u64,
         max_tokens: Option<usize>,
@@ -299,12 +289,25 @@ impl InferenceGpt {
             .min(block_size);
 
         for pos in decode_start..max_pos {
-            let logits = self.forward(token_id, pos, &mut kv);
-            let scaled: Vec<f64> = logits.iter().map(|l| l / temperature).collect();
-            let probs = f_softmax(&scaled);
-            token_id = weighted_sample_f64(&probs, &mut rng_state);
+            let mut logits = self.forward(token_id, pos, &mut kv);
+            for &id in suppress_tokens {
+                if id < logits.len() {
+                    logits[id] = f64::NEG_INFINITY;
+                }
+            }
+            // Suppress stop tokens until at least one content token has been
+            // generated, preventing undertrained models from immediately
+            // emitting end-of-turn on the first position.
+            if output.is_empty() {
+                for &id in stop_tokens {
+                    if id < logits.len() {
+                        logits[id] = f64::NEG_INFINITY;
+                    }
+                }
+            }
+            token_id = sample_token(&logits, temperature, &mut rng_state);
 
-            if token_id == stop_token {
+            if stop_tokens.contains(&token_id) {
                 break;
             }
             on_token(token_id);
@@ -312,6 +315,22 @@ impl InferenceGpt {
         }
 
         output
+    }
+}
+
+/// Sample a token from logits. Greedy argmax when temperature <= 0.
+fn sample_token(logits: &[f64], temperature: f64, rng_state: &mut u64) -> usize {
+    if temperature <= 0.0 {
+        logits
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .map(|(i, _)| i)
+            .unwrap_or(0)
+    } else {
+        let scaled: Vec<f64> = logits.iter().map(|l| l / temperature).collect();
+        let probs = f_softmax(&scaled);
+        weighted_sample_f64(&probs, rng_state)
     }
 }
 
@@ -340,13 +359,13 @@ mod tests {
     use crate::TensorGpt;
 
     #[test]
-    fn model_config_default_matches_constants() {
+    fn model_config_default_values() {
         let cfg = ModelConfig::default();
-        assert_eq!(cfg.n_embd, N_EMBD);
-        assert_eq!(cfg.n_head, N_HEAD);
-        assert_eq!(cfg.n_layer, N_LAYER);
-        assert_eq!(cfg.block_size, BLOCK_SIZE);
-        assert_eq!(cfg.head_dim(), HEAD_DIM);
+        assert_eq!(cfg.n_embd, 16);
+        assert_eq!(cfg.n_head, 4);
+        assert_eq!(cfg.n_layer, 1);
+        assert_eq!(cfg.block_size, 16);
+        assert_eq!(cfg.head_dim(), 4);
     }
 
     #[test]
@@ -363,8 +382,8 @@ mod tests {
     /// Helper: create TensorGpt → save as safetensors → load as InferenceGpt.
     fn tensor_to_inference(vocab_size: usize, seed: u64, config: ModelConfig) -> InferenceGpt {
         let device = candle_core::Device::Cpu;
-        let model = TensorGpt::new(vocab_size, seed, config, &device);
-        let bytes = model.save_weights_st();
+        let model = TensorGpt::new(vocab_size, seed, config, &device, candle_core::DType::F32);
+        let bytes = model.save_weights_st().unwrap();
         InferenceGpt::load_safetensors(vocab_size, &bytes, config).unwrap()
     }
 
@@ -380,15 +399,15 @@ mod tests {
     fn inference_gpt_safetensors_roundtrip() {
         let device = candle_core::Device::Cpu;
         let config = ModelConfig::default();
-        let model = TensorGpt::new(5, 42, config, &device);
-        let bytes = model.save_weights_st();
+        let model = TensorGpt::new(5, 42, config, &device, candle_core::DType::F32);
+        let bytes = model.save_weights_st().unwrap();
         let inf = InferenceGpt::load_safetensors(5, &bytes, config).unwrap();
 
         // Re-serialize via serialize_state_dict_st and reload
         let bytes2 = crate::tensor_model::serialize_state_dict_st(
             &inf.state_dict,
             crate::StDtype::F32,
-        );
+        ).unwrap();
         let inf2 = InferenceGpt::load_safetensors(5, &bytes2, config).unwrap();
 
         let mut kv1 = InferenceKvCache::new(&inf.config);
@@ -405,15 +424,15 @@ mod tests {
     fn inference_gpt_f16_roundtrip() {
         let device = candle_core::Device::Cpu;
         let config = ModelConfig::default();
-        let model = TensorGpt::new(5, 42, config, &device);
-        let bytes_f32 = model.save_weights_st();
+        let model = TensorGpt::new(5, 42, config, &device, candle_core::DType::F32);
+        let bytes_f32 = model.save_weights_st().unwrap();
         let inf_f32 = InferenceGpt::load_safetensors(5, &bytes_f32, config).unwrap();
 
         // Export as f16 and reload
         let bytes_f16 = crate::tensor_model::serialize_state_dict_st(
             &inf_f32.state_dict,
             crate::StDtype::F16,
-        );
+        ).unwrap();
         let inf_f16 = InferenceGpt::load_safetensors(5, &bytes_f16, config).unwrap();
 
         // f16 has lower precision, so use a looser tolerance
@@ -440,7 +459,8 @@ mod tests {
         let mut streamed = Vec::new();
         let output = inf.generate_from_prompt(
             &prompt,
-            stop_token,
+            &[stop_token],
+            &[],
             0.5,
             42,
             None,
@@ -448,7 +468,7 @@ mod tests {
         );
 
         assert_eq!(output, streamed);
-        assert!(output.len() <= BLOCK_SIZE - prompt.len() + 1);
+        assert!(output.len() <= inf.config.block_size - prompt.len() + 1);
     }
 
     #[test]
@@ -458,7 +478,8 @@ mod tests {
         let mut count = 0;
         let output = inf.generate_from_prompt(
             &[4, 0, 1],
-            4,
+            &[4],
+            &[],
             0.8,
             123,
             None,
@@ -477,7 +498,7 @@ mod tests {
         };
         let inf = tensor_to_inference(5, 42, cfg);
 
-        let output = inf.generate_from_prompt(&[4, 0], 4, 0.5, 42, None, |_| {});
+        let output = inf.generate_from_prompt(&[4, 0], &[4], &[], 0.5, 42, None, |_| {});
         assert!(output.len() <= 7);
     }
 
@@ -489,7 +510,6 @@ mod tests {
             n_head: 8,
             n_layer: 2,
             block_size: 64,
-            chars: vec!['a', 'b'],
             special_tokens: Some(vec![
                 "user".to_string(),
                 "assistant".to_string(),
@@ -511,7 +531,6 @@ mod tests {
             n_head: 4,
             n_layer: 1,
             block_size: 16,
-            chars: vec!['a'],
             special_tokens: Some(vec!["user".into(), "assistant".into(), "end_turn".into()]),
         };
         let json = serde_json::to_string(&meta).unwrap();
@@ -521,7 +540,7 @@ mod tests {
 
     #[test]
     fn model_meta_serde_without_special_tokens() {
-        let json = r#"{"vocab_size":5,"n_embd":16,"n_head":4,"n_layer":1,"block_size":16,"chars":["a","b","c","d"]}"#;
+        let json = r#"{"vocab_size":5,"n_embd":16,"n_head":4,"n_layer":1,"block_size":16}"#;
         let meta: ModelMeta = serde_json::from_str(json).unwrap();
         assert!(meta.special_tokens.is_none());
     }
