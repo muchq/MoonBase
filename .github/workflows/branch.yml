@@ -40,10 +40,8 @@ jobs:
           disk-cache: ${{ github.workflow }}
           repository-cache: true
           bazelrc: |
-            build --local_ram_resources=4096
-            build --local_cpu_resources=2
-            test --local_ram_resources=4096
-            test --local_cpu_resources=2
+            build --local_resources=cpu=2
+            build --local_resources=memory=4096
       - name: bazel-format-check
         run: |
           bazel run //:format.check
