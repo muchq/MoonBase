@@ -23,14 +23,14 @@ Generate unconditional samples from the model.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `num_samples` | int | 1 | Number of samples (max 50) |
-| `temperature` | float | 0.5 | Sampling temperature (must be >= 0) |
+| `temperature` | float | 0.8 | Sampling temperature (must be >= 0) |
 | `seed` | int | 42 | RNG seed |
 | `max_tokens` | int | block_size | Max tokens per sample (capped at block_size) |
 
 ```bash
 curl -X POST http://localhost:8080/microgpt/v1/generate \
   -H "Content-Type: application/json" \
-  -d '{"num_samples": 5, "temperature": 0.5, "max_tokens": 100}'
+  -d '{"num_samples": 5, "temperature": 0.8, "max_tokens": 100}'
 ```
 
 Response: `{ "samples": ["alice", "bob", ...] }`
@@ -42,7 +42,7 @@ Multi-turn chat completion. Requires a model trained with `--chat`.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `messages` | array | required | `[{"role": "user", "content": "..."}]` |
-| `temperature` | float | 0.5 | Sampling temperature (must be >= 0) |
+| `temperature` | float | 0.8 | Sampling temperature (must be >= 0) |
 | `seed` | int | 42 | RNG seed |
 | `max_tokens` | int | block_size - prompt_len | Max tokens to generate (capped at remaining context) |
 
