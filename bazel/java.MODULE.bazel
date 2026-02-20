@@ -2,6 +2,11 @@ bazel_dep(name = "rules_java", version = "9.5.0")
 bazel_dep(name = "rules_jvm_external", version = "6.10")
 bazel_dep(name = "contrib_rules_jvm", version = "0.32.0")
 
+single_version_override(
+    module_name = "rules_android",
+    version = "0.7.1",
+)
+
 maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 
 JETTY_VERSION = "11.0.23"
