@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest-4-cores
+    runs-on: ubuntu-latest
     container:
       image: ghcr.io/muchq/moonbase/ci-base:latest
 
@@ -39,6 +39,11 @@ jobs:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}
           repository-cache: true
+          bazelrc: |
+            build --local_ram_resources=4096
+            build --local_cpu_resources=2
+            test --local_ram_resources=4096
+            test --local_cpu_resources=2
       - name: bazel-format-check
         run: |
           bazel run //:format.check
