@@ -111,7 +111,7 @@ jobs:
   build:
     needs: [prepare]
     if: always() && needs.prepare.result == 'success'
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -169,7 +169,7 @@ jobs:
           echo "IPA_FILE=WordChains-${VERSION}-${BUILD}.ipa" >> "$GITHUB_ENV"
           echo "SHA_FILE=WordChains-${VERSION}-${BUILD}.sha256.txt" >> "$GITHUB_ENV"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: wordchains-ios-ipa
           path: |
@@ -179,11 +179,11 @@ jobs:
   release:
     needs: [prepare, build]
     if: always() && needs.build.result == 'success'
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: artifacts
 
