@@ -8,7 +8,7 @@ pub struct GenerateRequest {
     #[serde(default = "default_num_samples")]
     pub num_samples: usize,
 
-    /// Sampling temperature (default 0.5). Higher = more random.
+    /// Sampling temperature (default 0.8). Higher = more random.
     #[serde(default = "default_temperature")]
     pub temperature: f64,
 
@@ -43,7 +43,7 @@ fn default_num_samples() -> usize {
 }
 
 fn default_temperature() -> f64 {
-    0.5
+    0.8
 }
 
 fn default_seed() -> u64 {
@@ -62,7 +62,7 @@ pub struct ChatRequest {
     /// Conversation messages. Each must have a "role" and "content".
     pub messages: Vec<Message>,
 
-    /// Sampling temperature (default 0.5).
+    /// Sampling temperature (default 0.8).
     #[serde(default = "default_temperature")]
     pub temperature: f64,
 
@@ -132,7 +132,7 @@ mod tests {
     fn generate_request_defaults() {
         let req: GenerateRequest = serde_json::from_str("{}").unwrap();
         assert_eq!(req.num_samples, 1);
-        assert_eq!(req.temperature, 0.5);
+        assert_eq!(req.temperature, 0.8);
         assert_eq!(req.seed, 42);
         assert!(req.max_tokens.is_none());
     }
@@ -209,7 +209,7 @@ mod tests {
             r#"{"messages":[{"role":"user","content":"hi"}]}"#,
         )
         .unwrap();
-        assert_eq!(req.temperature, 0.5);
+        assert_eq!(req.temperature, 0.8);
         assert_eq!(req.seed, 42);
         assert!(req.max_tokens.is_none());
         assert_eq!(req.messages.len(), 1);

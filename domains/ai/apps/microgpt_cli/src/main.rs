@@ -1,7 +1,7 @@
 mod infer;
 mod train;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::fs;
 
@@ -14,7 +14,7 @@ use microgpt::{ChatDataset, Dataset, ModelConfig, TrainState};
 #[command(
     name = "microgpt",
     about = "microgpt — a minimal GPT trainer and generator",
-    version = "0.6.0",
+    version = "0.6.1",
     long_about = "A minimal GPT implementation in Rust using candle for tensor ops.\n\
                   Trains BPE-tokenized language models and generates samples.\n\
                   Ported from karpathy's microgpt.py — the complete algorithm,\n\
@@ -208,10 +208,7 @@ fn main() {
             temperature,
             seed,
         } => {
-            let model_dir = model_dir.unwrap_or_else(|| {
-                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-                PathBuf::from(home).join(".config/microgpt/default-chat-model")
-            });
+            let model_dir = model_dir.unwrap_or_else(default_chat_model_dir);
             infer::run_chat(model_dir, temperature, seed);
         }
         Command::Info { model_dir } => infer::run_info(model_dir),
@@ -220,6 +217,29 @@ fn main() {
             output,
             half,
         } => infer::run_export(model_dir, output, half),
+    }
+}
+
+const BREW_MODEL_DIR: &str = "/opt/homebrew/opt/microgpt/share/microgpt/default-chat-model";
+const MODEL_FILES: &[&str] = &["meta.json", "tokenizer.json", "weights.safetensors"];
+
+fn default_chat_model_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let config_dir = PathBuf::from(home).join(".config/microgpt/default-chat-model");
+    ensure_model_dir(&config_dir, Path::new(BREW_MODEL_DIR));
+    config_dir
+}
+
+fn ensure_model_dir(config_dir: &Path, brew_source: &Path) {
+    if !config_dir.join("meta.json").exists() && brew_source.join("meta.json").exists() {
+        eprintln!("copying default chat model from Homebrew to {}", config_dir.display());
+        let _ = fs::create_dir_all(config_dir);
+        for name in MODEL_FILES {
+            let src = brew_source.join(name);
+            if src.exists() {
+                let _ = fs::copy(&src, config_dir.join(name));
+            }
+        }
     }
 }
 
@@ -394,5 +414,65 @@ fn parse_device(s: &str) -> microgpt::Device {
             eprintln!("error: unknown device {other:?} (expected \"cpu\" or \"metal\")");
             process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("microgpt_cli_test_{name}_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn ensure_model_dir_copies_from_brew_source() {
+        let root = temp_dir("copy");
+        let brew = root.join("brew");
+        let config = root.join("config");
+        fs::create_dir_all(&brew).unwrap();
+        fs::write(brew.join("meta.json"), "{}").unwrap();
+        fs::write(brew.join("tokenizer.json"), "{}").unwrap();
+        fs::write(brew.join("weights.safetensors"), "data").unwrap();
+
+        ensure_model_dir(&config, &brew);
+
+        assert!(config.join("meta.json").exists());
+        assert!(config.join("tokenizer.json").exists());
+        assert!(config.join("weights.safetensors").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn ensure_model_dir_no_op_when_already_exists() {
+        let root = temp_dir("noop");
+        let brew = root.join("brew");
+        let config = root.join("config");
+        fs::create_dir_all(&brew).unwrap();
+        fs::create_dir_all(&config).unwrap();
+        fs::write(brew.join("meta.json"), "new").unwrap();
+        fs::write(config.join("meta.json"), "existing").unwrap();
+
+        ensure_model_dir(&config, &brew);
+
+        let content = fs::read_to_string(config.join("meta.json")).unwrap();
+        assert_eq!(content, "existing", "should not overwrite existing model");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn ensure_model_dir_no_op_when_no_brew_source() {
+        let root = temp_dir("nobrew");
+        let brew = root.join("brew_missing");
+        let config = root.join("config");
+
+        ensure_model_dir(&config, &brew);
+
+        assert!(!config.exists(), "should not create config dir without brew source");
+        let _ = fs::remove_dir_all(&root);
     }
 }
