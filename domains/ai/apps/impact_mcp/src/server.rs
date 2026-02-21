@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    GetPromptRequestParam, GetPromptResult, Implementation, ListPromptsResult,
-    PaginatedRequestParam, Prompt, PromptMessage, PromptMessageRole, ServerCapabilities,
+    GetPromptRequestParams, GetPromptResult, Implementation, ListPromptsResult,
+    PaginatedRequestParams, Prompt, PromptMessage, PromptMessageRole, ServerCapabilities,
     ServerInfo,
 };
 use rmcp::service::RequestContext;
@@ -397,6 +397,7 @@ impl ServerHandler for ImpactServer {
             server_info: Implementation {
                 name: "impact-mcp".into(),
                 version: env!("CARGO_PKG_VERSION").into(),
+                description: Some("impact-mcp server".into()),
                 title: None,
                 icons: None,
                 website_url: None,
@@ -412,7 +413,7 @@ impl ServerHandler for ImpactServer {
 
     async fn list_prompts(
         &self,
-        _params: Option<PaginatedRequestParam>,
+        _params: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, ErrorData> {
         Ok(ListPromptsResult {
@@ -466,7 +467,7 @@ impl ServerHandler for ImpactServer {
 
     async fn get_prompt(
         &self,
-        params: GetPromptRequestParam,
+        params: GetPromptRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<GetPromptResult, ErrorData> {
         let store = self
