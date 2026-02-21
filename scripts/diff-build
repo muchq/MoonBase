@@ -12,7 +12,7 @@ BAZEL_DIFF_BIN="/tmp/bazel_diff"
 # Download pre-built bazel-diff binary if not already cached
 if [ ! -f "$BAZEL_DIFF_BIN" ]; then
   echo "Downloading bazel-diff binary..."
-  BAZEL_DIFF_VERSION="12.1.1"
+  BAZEL_DIFF_VERSION="14.0.1"
   BAZEL_DIFF_URL="https://github.com/Tinder/bazel-diff/releases/download/${BAZEL_DIFF_VERSION}/bazel-diff_deploy.jar"
   curl -sL "$BAZEL_DIFF_URL" -o "$BAZEL_DIFF_BIN.jar"
   # Create wrapper script to run the jar
