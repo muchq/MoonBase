@@ -14,6 +14,7 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,6 +47,15 @@ public class IndexController {
         request.platform(),
         request.startMonth(),
         request.endMonth());
+
+    Optional<IndexingRequestStore.IndexingRequest> existing =
+        requestDao.findExistingRequest(
+            request.player(), request.platform(), request.startMonth(), request.endMonth());
+    if (existing.isPresent()) {
+      IndexingRequestStore.IndexingRequest row = existing.get();
+      LOG.info("Returning existing index request {} (status={})", row.id(), row.status());
+      return new IndexResponse(row.id(), row.status(), row.gamesIndexed(), row.errorMessage());
+    }
 
     UUID id =
         requestDao.create(
