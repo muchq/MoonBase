@@ -15,6 +15,7 @@ services:
       - games_ws_backend
       - microgpt-serve
       - mithril
+      - one_d4
       - portrait
       - prom_proxy
       - r3dr
@@ -147,6 +148,33 @@ services:
           cpus: '0.5'
           memory: 512M
 
+  one_d4:
+    image: ghcr.io/muchq/one_d4:latest
+    restart: always
+    ports:
+      - "8088:8080"
+    environment:
+      - PORT=8080
+      - INDEXER_DB_URL=jdbc:h2:file:/data/indexer;DB_CLOSE_DELAY=-1
+      - INDEXER_DB_USERNAME=sa
+      - INDEXER_DB_PASSWORD=
+    volumes:
+      - /etc/one_d4:/etc/one_d4
+      - one_d4_data:/data
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   microgpt-serve:
     image: ghcr.io/muchq/microgpt-serve:latest
     restart: always
@@ -191,6 +219,7 @@ volumes:
   caddy_data:
   caddy_config:
   forgejo_data:
+  one_d4_data:
 
 networks:
   app_network:
