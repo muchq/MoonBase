@@ -48,8 +48,8 @@ MCP tools call the indexer's REST API over HTTP. The indexer runs as a separate 
 ```
 ┌────────────────────┐       HTTP        ┌──────────────────┐
 │    mcpserver       │ ────────────────► │    indexer        │
-│  IndexGamesTool ───┤  POST /index      │  IndexController  │
-│  QueryGamesTool ───┤  POST /query      │  QueryController  │
+│  IndexGamesTool ───┤  POST /v1/index  │  IndexController  │
+│  QueryGamesTool ───┤  POST /v1/query  │  QueryController  │
 └────────────────────┘                   └──────────────────┘
 ```
 
@@ -356,16 +356,16 @@ public class IndexerHttpClient {
     private final String baseUrl; // e.g. http://localhost:8080
 
     public IndexResult index(String player, String platform, String startMonth, String endMonth) {
-        // POST http://localhost:8080/index
+        // POST http://localhost:8080/v1/index
         // Body: {"player":"...","platform":"...","startMonth":"...","endMonth":"..."}
     }
 
     public IndexResult getStatus(UUID requestId) {
-        // GET http://localhost:8080/index/{id}
+        // GET http://localhost:8080/v1/index/{id}
     }
 
     public QueryResult query(String chessql, int limit) {
-        // POST http://localhost:8080/query
+        // POST http://localhost:8080/v1/query
         // Body: {"query":"...","limit":N,"offset":0}
     }
 }

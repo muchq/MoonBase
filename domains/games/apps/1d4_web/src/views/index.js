@@ -1,12 +1,20 @@
 /**
- * Enqueue index form + request status list. Submit calls POST api.1d4.net/index.
- * Recent requests stored in sessionStorage; poll GET api.1d4.net/index/{id}.
+ * Enqueue index form + request status list. Submit calls POST api.1d4.net/v1/index.
+ * Recent requests stored in sessionStorage; poll GET api.1d4.net/v1/index/{id}.
  */
 
 import { createIndex, getIndexStatus } from '../api.js';
 
 const STORAGE_KEY = '1d4_index_request_ids';
 const POLL_INTERVAL_MS = 3000;
+
+function normalizeMonth(value) {
+  const m = value.match(/^(\d{4})-(\d{1,2})$/);
+  if (!m) return value;
+  const month = m[2].padStart(2, '0');
+  if (parseInt(month, 10) > 12) return value;
+  return `${m[1]}-${month}`;
+}
 
 function getStoredIds() {
   try {
@@ -87,22 +95,30 @@ export function renderIndex(container) {
       </div>
       <div class="form-group">
         <label for="startMonth">Start month (YYYY-MM)</label>
-        <input id="startMonth" name="startMonth" type="text" placeholder="2024-01" required>
+        <input id="startMonth" name="startMonth" type="text" placeholder="2024-03" required>
       </div>
       <div class="form-group">
         <label for="endMonth">End month (YYYY-MM)</label>
-        <input id="endMonth" name="endMonth" type="text" placeholder="2024-01" required>
+        <input id="endMonth" name="endMonth" type="text" placeholder="2024-03" required>
       </div>
       <button type="submit" class="btn">Submit</button>
     `;
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const fd = new FormData(form);
-      const player = fd.get('player').trim();
-      const platform = fd.get('platform');
-      const startMonth = fd.get('startMonth').trim();
-      const endMonth = fd.get('endMonth').trim();
-      createIndex({ player, platform, startMonth, endMonth })
+      const player = String(fd.get('player') ?? '').trim();
+      const platform = String(fd.get('platform') ?? 'CHESS_COM').trim() || 'CHESS_COM';
+      const startMonth = normalizeMonth(String(fd.get('startMonth') ?? '').trim());
+      const endMonth = normalizeMonth(String(fd.get('endMonth') ?? '').trim());
+      if (!player || !startMonth || !endMonth) {
+        const msg = document.createElement('div');
+        msg.className = 'message error';
+        msg.textContent = 'Please fill in username and both months (YYYY-MM).';
+        container.insertBefore(msg, container.firstChild);
+        return;
+      }
+      const body = { player, platform, startMonth, endMonth };
+      createIndex(body)
         .then((res) => {
           addStoredId(res.id);
           requestStatuses[res.id] = res;
@@ -115,7 +131,16 @@ export function renderIndex(container) {
         .catch((err) => {
           const msg = document.createElement('div');
           msg.className = 'message error';
-          msg.textContent = err.body || err.message || 'Request failed';
+          let text = err.message || 'Request failed';
+          if (err.body) {
+            try {
+              const parsed = JSON.parse(err.body);
+              text = parsed.message ?? parsed.error ?? err.body;
+            } catch {
+              text = err.body;
+            }
+          }
+          msg.textContent = text;
           container.insertBefore(msg, container.firstChild);
         });
     });

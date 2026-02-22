@@ -27,33 +27,33 @@ async function request(path, options = {}) {
 }
 
 /**
- * POST /index — enqueue an index request.
+ * POST /v1/index — enqueue an index request.
  * @param {{ player: string, platform: string, startMonth: string, endMonth: string }} body
  * @returns {Promise<{ id: string, status: string, gamesIndexed: number, errorMessage: string|null }>}
  */
 export async function createIndex(body) {
-  return request('/index', {
+  return request('/v1/index', {
     method: 'POST',
     body: JSON.stringify(body),
   });
 }
 
 /**
- * GET /index/{id} — get status of an indexing request.
+ * GET /v1/index/{id} — get status of an indexing request.
  * @param {string} id — UUID
  * @returns {Promise<{ id: string, status: string, gamesIndexed: number, errorMessage: string|null }>}
  */
 export async function getIndexStatus(id) {
-  return request(`/index/${id}`);
+  return request(`/v1/index/${id}`);
 }
 
 /**
- * POST /query — run ChessQL query.
+ * POST /v1/query — run ChessQL query.
  * @param {{ query: string, limit: number, offset: number }} body
  * @returns {Promise<{ games: import('./components/table.js').GameRow[], count: number }>}
  */
 export async function query(body) {
-  return request('/query', {
+  return request('/v1/query', {
     method: 'POST',
     body: JSON.stringify(body),
   });

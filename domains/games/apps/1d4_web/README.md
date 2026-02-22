@@ -5,7 +5,7 @@ Lightweight web frontend for the [one_d4](https://github.com/muchq/MoonBase/tree
 ## Features
 
 - **Games** — Browse indexed games with sortable columns (player, ELO, time class, ECO, result, motifs), motif badges, and click-through to chess.com. Pagination.
-- **Index** — Enqueue index requests (username, platform chess.com, start/end month). Submit calls `POST https://api.1d4.net/index`. View recent request status with auto-poll via `GET https://api.1d4.net/index/{id}`.
+- **Index** — Enqueue index requests (username, platform chess.com, start/end month). Submit calls `POST https://api.1d4.net/v1/index`. View recent request status with auto-poll via `GET https://api.1d4.net/v1/index/{id}`.
 - **Query** — ChessQL query input with syntax help and example chips; results table and limit selector.
 
 ## Run locally

@@ -69,11 +69,13 @@ public class IndexWorker {
           try {
             indexGame(message, game);
             totalIndexed++;
+            if (totalIndexed % 10 == 0) {
+              requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
+            }
           } catch (Exception e) {
             LOG.warn("Failed to index game {}", game.url(), e);
           }
         }
-
         requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
       }
 
