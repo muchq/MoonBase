@@ -25,14 +25,19 @@ function setActiveNav(route) {
 
 function render() {
   const route = getRoute();
-  setActiveNav(route);
+  const allowedRoutes = ['games', 'index', 'query'];
+  const safeRoute = allowedRoutes.includes(route) ? route : 'games';
+  setActiveNav(safeRoute);
   const main = document.getElementById('app');
   main.innerHTML = '';
   const view = document.createElement('div');
   view.className = 'view active';
-  view.id = `view-${route}`;
+  view.id = `view-${safeRoute}`;
   main.appendChild(view);
-  const fn = routes[route] || routes.games;
+  let fn = routes[safeRoute] || routes.games;
+  if (typeof fn !== 'function') {
+    fn = routes.games;
+  }
   fn(view);
 }
 
