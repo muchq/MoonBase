@@ -52,8 +52,7 @@ public class IndexE2ETest {
 
   @Before
   public void setUp() {
-    String jdbcUrl =
-        "jdbc:h2:mem:e2e_" + System.currentTimeMillis() + ";DB_CLOSE_DELAY=-1";
+    String jdbcUrl = "jdbc:h2:mem:e2e_" + System.currentTimeMillis() + ";DB_CLOSE_DELAY=-1";
     DataSource dataSource = DataSourceFactory.create(jdbcUrl, "sa", "");
     Migration migration = new Migration(dataSource, true);
     migration.run();
@@ -178,8 +177,7 @@ public class IndexE2ETest {
     List<FakeChessClient.FetchCall> calls = fakeChessClient.getFetchCalls();
     assertThat(calls)
         .containsExactly(
-            new FakeChessClient.FetchCall(PLAYER, jan),
-            new FakeChessClient.FetchCall(PLAYER, mar));
+            new FakeChessClient.FetchCall(PLAYER, jan), new FakeChessClient.FetchCall(PLAYER, mar));
   }
 
   private void processQueueUntilIdle() {

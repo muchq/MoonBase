@@ -103,9 +103,7 @@ public class IndexWorkerTest {
     worker.process(message);
 
     assertThat(stubChessClient.getFetchCalls())
-        .containsExactly(
-            java.time.YearMonth.of(2024, 1),
-            java.time.YearMonth.of(2024, 3));
+        .containsExactly(java.time.YearMonth.of(2024, 1), java.time.YearMonth.of(2024, 3));
     assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
     assertThat(requestStore.getLastGamesIndexed()).isEqualTo(5);
   }
