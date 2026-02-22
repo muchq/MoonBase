@@ -109,7 +109,7 @@ export function renderIndex(container) {
           render();
           const msg = document.createElement('div');
           msg.className = 'message success';
-          msg.innerHTML = `Request created. ID: <strong>${res.id}</strong> — <a href="#index" class="external">View status below</a>.`;
+          msg.innerHTML = `Request created. ID: <strong>${res.id}</strong> — <a href="/index" class="external">View status below</a>.`;
           container.insertBefore(msg, container.firstChild);
         })
         .catch((err) => {
@@ -146,7 +146,7 @@ export function renderIndex(container) {
         const tr = document.createElement('tr');
         const statusClass = (row.status || '').toLowerCase().replace(' ', '-');
         tr.innerHTML = `
-          <td><a href="#index" class="external">${id}</a></td>
+          <td><a href="/index" class="external">${id}</a></td>
           <td class="status-${statusClass}">${row.status || '—'}</td>
           <td>${row.gamesIndexed ?? 0}</td>
           <td>${row.errorMessage || '—'}</td>

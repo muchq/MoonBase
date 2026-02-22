@@ -8,11 +8,23 @@ import { renderGamesTable } from '../components/table.js';
 const DEFAULT_QUERY = 'num.moves >= 0';
 const PAGE_SIZES = [10, 25, 50, 100];
 
+function escapeChessQLString(s) {
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function buildQuery(username) {
+  const u = username.trim();
+  if (!u) return DEFAULT_QUERY;
+  const escaped = escapeChessQLString(u);
+  return `white.username = "${escaped}" OR black.username = "${escaped}"`;
+}
+
 export function renderGames(container) {
   let limit = 25;
   let offset = 0;
   let sortBy = 'playedAt';
   let sortDir = 'desc';
+  let usernameFilter = '';
   let games = [];
   let totalCount = 0;
   let loading = true;
@@ -39,7 +51,8 @@ export function renderGames(container) {
     loading = true;
     error = null;
     render();
-    query({ query: DEFAULT_QUERY, limit: 500, offset: 0 })
+    const q = buildQuery(usernameFilter);
+    query({ query: q, limit: 500, offset: 0 })
       .then((res) => {
         games = res.games || [];
         totalCount = res.count ?? games.length;
@@ -57,7 +70,35 @@ export function renderGames(container) {
     container.innerHTML = '';
     const panel = document.createElement('div');
     panel.className = 'panel';
-    panel.innerHTML = '<h2>Indexed games</h2><p class="text-muted">Browse all indexed games. Sorted by played date (newest first).</p>';
+    panel.innerHTML = '<h2>Indexed games</h2><p class="text-muted">Browse indexed games. Optionally filter by username (exact match, white or black).</p>';
+    const searchRow = document.createElement('div');
+    searchRow.className = 'form-group';
+    searchRow.style.marginTop = '0.75rem';
+    searchRow.style.display = 'flex';
+    searchRow.style.flexWrap = 'wrap';
+    searchRow.style.gap = '0.5rem';
+    searchRow.style.alignItems = 'center';
+    const label = document.createElement('label');
+    label.htmlFor = 'games-username';
+    label.textContent = 'Username';
+    label.style.marginBottom = 0;
+    const input = document.createElement('input');
+    input.id = 'games-username';
+    input.type = 'text';
+    input.placeholder = 'e.g. Hikaru';
+    input.value = usernameFilter;
+    input.style.maxWidth = '200px';
+    input.addEventListener('input', () => { usernameFilter = input.value; });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); fetchPage(); } });
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.textContent = 'Search';
+    btn.addEventListener('click', () => { usernameFilter = input.value; fetchPage(); });
+    searchRow.appendChild(label);
+    searchRow.appendChild(input);
+    searchRow.appendChild(btn);
+    panel.appendChild(searchRow);
     container.appendChild(panel);
 
     if (error) {

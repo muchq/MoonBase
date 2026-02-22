@@ -97,9 +97,9 @@ export function renderQuery(container) {
     const help = document.createElement('div');
     help.className = 'syntax-help';
     help.innerHTML = `
-      <strong>ChessQL</strong> — Fields: <code>white.elo</code>, <code>black.elo</code>, <code>eco</code>, <code>result</code>, <code>time.class</code>, <code>num.moves</code>, <code>platform</code>, <code>game.url</code>, <code>played.at</code>.
-      Motifs: <code>motif(pin)</code>, <code>motif(fork)</code>, <code>motif(skewer)</code>, <code>motif(cross_pin)</code>, <code>motif(discovered_attack)</code>.
-      Combine with <code>AND</code>, <code>OR</code>, <code>NOT</code>. Strings in double quotes, e.g. <code>eco = "B90"</code>.
+      <strong>ChessQL</strong> — Fields: <code>white.elo</code>, <code>black.elo</code>, <code>white.username</code>, <code>black.username</code>, <code>time.class</code>, <code>num.moves</code>, <code>eco</code>, <code>result</code>, <code>platform</code>, <code>game.url</code>, <code>played.at</code>.
+      Motifs: <code>motif(pin)</code>, <code>motif(cross_pin)</code>, <code>motif(fork)</code>, <code>motif(skewer)</code>, <code>motif(discovered_attack)</code>.
+      Combine with <code>AND</code>, <code>OR</code>, <code>NOT</code>. Strings in double quotes, e.g. <code>eco = "B90"</code>. Do not use SELECT or *.
     `;
     container.appendChild(help);
 

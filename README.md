@@ -10,6 +10,7 @@ a polyglot playground for experiments in application architecture, API design, l
 |-----------------|-----|----------------------------|
 | **muchq**       | [muchq.com](https://muchq.com) | Project landing page       |
 | **r3dr**        | [r3dr.net](https://r3dr.net) | Another URL shortener      |
+| **1d4**         | [1d4.net](https://1d4.net) | Chess game indexer web UI  |
 | **1d4.net MCP** | [mcp.1d4.net](https://mcp.1d4.net) | MCP server for chess tools |
 | **microgpt**    | [tty1.uk](https://tty1.uk)     | Minimal GPT implementation |
 
