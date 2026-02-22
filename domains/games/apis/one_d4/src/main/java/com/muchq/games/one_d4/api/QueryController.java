@@ -26,17 +26,23 @@ public class QueryController {
 
   private final GameFeatureStore gameFeatureStore;
   private final QueryCompiler<CompiledQuery> queryCompiler;
+  private final QueryRequestValidator validator;
 
   public QueryController(
-      GameFeatureStore gameFeatureStore, QueryCompiler<CompiledQuery> queryCompiler) {
+      GameFeatureStore gameFeatureStore,
+      QueryCompiler<CompiledQuery> queryCompiler,
+      QueryRequestValidator validator) {
     this.gameFeatureStore = gameFeatureStore;
     this.queryCompiler = queryCompiler;
+    this.validator = validator;
   }
 
   @POST
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   public QueryResponse query(QueryRequest request) {
+    validator.validate(request);
+
     LOG.info(
         "POST /query query={} limit={} offset={}",
         request.query(),

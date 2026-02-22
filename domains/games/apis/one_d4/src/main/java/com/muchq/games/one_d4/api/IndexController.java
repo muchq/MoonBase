@@ -13,6 +13,7 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
+import java.util.NoSuchElementException;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,16 +25,21 @@ public class IndexController {
 
   private final IndexingRequestStore requestDao;
   private final IndexQueue queue;
+  private final IndexRequestValidator validator;
 
-  public IndexController(IndexingRequestStore requestDao, IndexQueue queue) {
+  public IndexController(
+      IndexingRequestStore requestDao, IndexQueue queue, IndexRequestValidator validator) {
     this.requestDao = requestDao;
     this.queue = queue;
+    this.validator = validator;
   }
 
   @POST
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   public IndexResponse createIndex(IndexRequest request) {
+    validator.validate(request);
+
     LOG.info(
         "POST /index player={} platform={} months={}-{}",
         request.player(),
@@ -62,6 +68,6 @@ public class IndexController {
         .map(
             row ->
                 new IndexResponse(row.id(), row.status(), row.gamesIndexed(), row.errorMessage()))
-        .orElseThrow(() -> new RuntimeException("Indexing request not found: " + id));
+        .orElseThrow(() -> new NoSuchElementException("Indexing request not found: " + id));
   }
 }

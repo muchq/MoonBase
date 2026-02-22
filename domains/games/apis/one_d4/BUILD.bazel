@@ -120,8 +120,12 @@ java_library(
 java_library(
     name = "api",
     srcs = [
+        "src/main/java/com/muchq/games/one_d4/api/ErrorHandler.java",
+        "src/main/java/com/muchq/games/one_d4/api/HealthController.java",
         "src/main/java/com/muchq/games/one_d4/api/IndexController.java",
+        "src/main/java/com/muchq/games/one_d4/api/IndexRequestValidator.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryController.java",
+        "src/main/java/com/muchq/games/one_d4/api/QueryRequestValidator.java",
     ],
     plugins = [
         "//bazel/rules:micronaut_type_element_visitor_processor",
@@ -137,6 +141,8 @@ java_library(
         "//domains/games/libs/chessql:ast",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
+        artifact("io.micronaut:micronaut-http"),
+        artifact("io.micronaut:micronaut-inject"),
         artifact("io.micronaut.jaxrs:micronaut-jaxrs-server"),
         artifact("jakarta.inject:jakarta-inject-api"),
         artifact("jakarta.ws.rs:jakarta-ws.rs-api"),
@@ -240,6 +246,21 @@ java_test_suite(
     srcs = ["src/test/java/com/muchq/games/one_d4/worker/ResultMapperTest.java"],
     deps = [
         ":worker",
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_test_suite(
+    name = "api_validation_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/api/IndexRequestValidatorTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/QueryRequestValidatorTest.java",
+    ],
+    deps = [
+        ":api",
+        ":dto",
         artifact("junit:junit"),
         artifact("org.assertj:assertj-core"),
     ],

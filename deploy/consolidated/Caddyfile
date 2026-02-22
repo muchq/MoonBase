@@ -176,6 +176,62 @@ gpt.muchq.com {
 	}
 }
 
+api.1d4.net {
+	@post_index {
+		method POST
+		path /index
+	}
+
+	@get_index {
+		method GET
+		path /index/*
+	}
+
+	@post_query {
+		method POST
+		path /query
+	}
+
+	@get_health {
+		method GET
+		path /health
+	}
+
+	@options {
+		method OPTIONS
+	}
+
+	header {
+		Access-Control-Allow-Origin "https://1d4.net"
+		Access-Control-Allow-Methods "GET, POST, OPTIONS"
+		Access-Control-Allow-Headers "Content-Type, Authorization"
+		Access-Control-Max-Age "86400"
+	}
+
+	handle @options {
+		header {
+			Access-Control-Allow-Origin "https://1d4.net"
+			Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			Access-Control-Allow-Headers "Content-Type, Authorization"
+			Access-Control-Max-Age "86400"
+		}
+		respond 204
+	}
+
+	reverse_proxy @post_index one_d4:8080
+	reverse_proxy @get_index one_d4:8080
+	reverse_proxy @post_query one_d4:8080
+	reverse_proxy @get_health one_d4:8080
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 1gb
+			roll_keep 5
+			roll_keep_for 90d
+		}
+	}
+}
+
 mcp.1d4.net {
 	@mcp {
 		method POST
