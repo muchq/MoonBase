@@ -59,6 +59,34 @@ public class IndexingRequestDao implements IndexingRequestStore {
   }
 
   @Override
+  public Optional<IndexingRequest> findExistingRequest(
+      String player, String platform, String startMonth, String endMonth) {
+    String sql =
+        """
+        SELECT * FROM indexing_requests
+        WHERE player = ? AND platform = ? AND start_month = ? AND end_month = ?
+          AND status IN ('PENDING', 'PROCESSING')
+        ORDER BY created_at ASC
+        LIMIT 1
+        """;
+    try (Connection conn = dataSource.getConnection();
+        PreparedStatement ps = conn.prepareStatement(sql)) {
+      ps.setString(1, player);
+      ps.setString(2, platform);
+      ps.setString(3, startMonth);
+      ps.setString(4, endMonth);
+      try (ResultSet rs = ps.executeQuery()) {
+        if (rs.next()) {
+          return Optional.of(mapRow(rs));
+        }
+        return Optional.empty();
+      }
+    } catch (SQLException e) {
+      throw new RuntimeException("Failed to find existing indexing request", e);
+    }
+  }
+
+  @Override
   public void updateStatus(UUID id, String status, String errorMessage, int gamesIndexed) {
     String sql =
         """

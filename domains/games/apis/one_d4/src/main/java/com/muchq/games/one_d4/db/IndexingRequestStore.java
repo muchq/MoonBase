@@ -9,6 +9,13 @@ public interface IndexingRequestStore {
 
   Optional<IndexingRequest> findById(UUID id);
 
+  /**
+   * Returns an existing request with the same (player, platform, startMonth, endMonth) that is
+   * PENDING or PROCESSING, if any. Used to avoid creating duplicate indexing work.
+   */
+  Optional<IndexingRequest> findExistingRequest(
+      String player, String platform, String startMonth, String endMonth);
+
   void updateStatus(UUID id, String status, String errorMessage, int gamesIndexed);
 
   record IndexingRequest(
