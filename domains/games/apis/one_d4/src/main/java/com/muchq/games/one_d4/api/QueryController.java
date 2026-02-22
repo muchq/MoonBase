@@ -23,28 +23,25 @@ import org.slf4j.LoggerFactory;
 @Path("/query")
 public class QueryController {
   private static final Logger LOG = LoggerFactory.getLogger(QueryController.class);
-  private static final int MAX_QUERY_LENGTH = 4096;
 
   private final GameFeatureStore gameFeatureStore;
   private final QueryCompiler<CompiledQuery> queryCompiler;
+  private final QueryRequestValidator validator;
 
   public QueryController(
-      GameFeatureStore gameFeatureStore, QueryCompiler<CompiledQuery> queryCompiler) {
+      GameFeatureStore gameFeatureStore,
+      QueryCompiler<CompiledQuery> queryCompiler,
+      QueryRequestValidator validator) {
     this.gameFeatureStore = gameFeatureStore;
     this.queryCompiler = queryCompiler;
+    this.validator = validator;
   }
 
   @POST
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   public QueryResponse query(QueryRequest request) {
-    if (request.query() == null || request.query().isBlank()) {
-      throw new IllegalArgumentException("query is required");
-    }
-    if (request.query().length() > MAX_QUERY_LENGTH) {
-      throw new IllegalArgumentException(
-          "query exceeds maximum length of " + MAX_QUERY_LENGTH + " characters");
-    }
+    validator.validate(request);
 
     LOG.info(
         "POST /query query={} limit={} offset={}",

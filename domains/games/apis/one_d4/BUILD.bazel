@@ -123,7 +123,9 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/api/ErrorHandler.java",
         "src/main/java/com/muchq/games/one_d4/api/HealthController.java",
         "src/main/java/com/muchq/games/one_d4/api/IndexController.java",
+        "src/main/java/com/muchq/games/one_d4/api/IndexRequestValidator.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryController.java",
+        "src/main/java/com/muchq/games/one_d4/api/QueryRequestValidator.java",
     ],
     plugins = [
         "//bazel/rules:micronaut_type_element_visitor_processor",
@@ -244,6 +246,21 @@ java_test_suite(
     srcs = ["src/test/java/com/muchq/games/one_d4/worker/ResultMapperTest.java"],
     deps = [
         ":worker",
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_test_suite(
+    name = "api_validation_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/api/IndexRequestValidatorTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/QueryRequestValidatorTest.java",
+    ],
+    deps = [
+        ":api",
+        ":dto",
         artifact("junit:junit"),
         artifact("org.assertj:assertj-core"),
     ],

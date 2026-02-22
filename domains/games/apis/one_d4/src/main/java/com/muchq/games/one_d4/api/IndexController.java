@@ -13,8 +13,6 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
-import java.time.YearMonth;
-import java.time.format.DateTimeParseException;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -27,17 +25,20 @@ public class IndexController {
 
   private final IndexingRequestStore requestDao;
   private final IndexQueue queue;
+  private final IndexRequestValidator validator;
 
-  public IndexController(IndexingRequestStore requestDao, IndexQueue queue) {
+  public IndexController(
+      IndexingRequestStore requestDao, IndexQueue queue, IndexRequestValidator validator) {
     this.requestDao = requestDao;
     this.queue = queue;
+    this.validator = validator;
   }
 
   @POST
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   public IndexResponse createIndex(IndexRequest request) {
-    validateIndexRequest(request);
+    validator.validate(request);
 
     LOG.info(
         "POST /index player={} platform={} months={}-{}",
@@ -68,38 +69,5 @@ public class IndexController {
             row ->
                 new IndexResponse(row.id(), row.status(), row.gamesIndexed(), row.errorMessage()))
         .orElseThrow(() -> new NoSuchElementException("Indexing request not found: " + id));
-  }
-
-  private static void validateIndexRequest(IndexRequest request) {
-    if (request.player() == null || request.player().isBlank()) {
-      throw new IllegalArgumentException("player is required");
-    }
-    if (request.platform() == null || request.platform().isBlank()) {
-      throw new IllegalArgumentException("platform is required");
-    }
-    if (!request.platform().equals("CHESS_COM")) {
-      throw new IllegalArgumentException(
-          "Unsupported platform: " + request.platform() + ". Supported: CHESS_COM");
-    }
-    YearMonth start = parseMonth(request.startMonth(), "startMonth");
-    YearMonth end = parseMonth(request.endMonth(), "endMonth");
-    if (start.isAfter(end)) {
-      throw new IllegalArgumentException("startMonth must not be after endMonth");
-    }
-    long monthSpan = start.until(end, java.time.temporal.ChronoUnit.MONTHS) + 1;
-    if (monthSpan > 12) {
-      throw new IllegalArgumentException("Maximum range is 12 months, got " + monthSpan);
-    }
-  }
-
-  private static YearMonth parseMonth(String value, String fieldName) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(fieldName + " is required");
-    }
-    try {
-      return YearMonth.parse(value);
-    } catch (DateTimeParseException e) {
-      throw new IllegalArgumentException(fieldName + " must be in YYYY-MM format, got: " + value);
-    }
   }
 }
