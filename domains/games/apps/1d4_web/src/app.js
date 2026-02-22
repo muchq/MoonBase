@@ -1,5 +1,5 @@
 /**
- * Router and app init — hash-based routing, no framework.
+ * Router and app init — History API (path-based), no framework.
  */
 
 import { renderGames } from './views/games.js';
@@ -13,13 +13,17 @@ const routes = {
 };
 
 function getRoute() {
-  const hash = window.location.hash.slice(1) || 'games';
-  return hash.split('/')[0];
+  const path = window.location.pathname.replace(/^\/+/, '') || 'games';
+  return path.split('/')[0];
 }
 
 function setActiveNav(route) {
+  const pathname = window.location.pathname.replace(/\/$/, '') || '/';
   document.querySelectorAll('.nav-link').forEach((a) => {
-    a.classList.toggle('active', a.getAttribute('href') === `#${route}`);
+    const href = (a.getAttribute('href') || '/').replace(/\/$/, '') || '/';
+    const isGamesPage = pathname === '/' || pathname === '/games';
+    const active = (href === '/games' && isGamesPage) || (href !== '/' && href === pathname);
+    a.classList.toggle('active', active);
   });
 }
 
@@ -41,5 +45,27 @@ function render() {
   fn(view);
 }
 
-window.addEventListener('hashchange', render);
+function navigate(path) {
+  if (window.location.pathname !== path) {
+    history.pushState(null, '', path);
+  }
+  render();
+}
+
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a');
+  if (!a || a.target === '_blank' || a.hasAttribute('download')) return;
+  const href = a.getAttribute('href');
+  if (!href || href.startsWith('#') || !href.startsWith('/')) return;
+  try {
+    const url = new URL(href, window.location.origin);
+    if (url.origin !== window.location.origin) return;
+  } catch {
+    return;
+  }
+  e.preventDefault();
+  navigate(a.getAttribute('href'));
+});
+
+window.addEventListener('popstate', render);
 window.addEventListener('load', render);
