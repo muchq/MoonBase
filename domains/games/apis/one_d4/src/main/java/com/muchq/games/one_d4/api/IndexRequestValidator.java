@@ -9,7 +9,7 @@ import java.time.temporal.ChronoUnit;
 @Singleton
 public class IndexRequestValidator {
 
-  void validate(IndexRequest request) {
+  public void validate(IndexRequest request) {
     if (request.player() == null || request.player().isBlank()) {
       throw new IllegalArgumentException("player is required");
     }
