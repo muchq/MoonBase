@@ -1,5 +1,5 @@
 load("@crates//:defs.bzl", "all_crate_deps")
-load("@rules_rust//rust:defs.bzl", "rust_binary")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
 
 rust_binary(
     name = "microgpt",
@@ -16,4 +16,10 @@ rust_binary(
     deps = [
         "//domains/ai/libs/microgpt",
     ] + all_crate_deps(),
+)
+
+rust_test(
+    name = "test_microgpt_cli",
+    size = "small",
+    crate = ":microgpt",
 )

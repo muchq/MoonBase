@@ -31,3 +31,13 @@ rust_test(
         ":microgpt",
     ] + all_crate_deps(),
 )
+
+rust_test(
+    name = "training_safety_test",
+    size = "small",
+    srcs = ["tests/training_safety.rs"],
+    edition = "2021",
+    deps = [
+        ":microgpt",
+    ] + all_crate_deps(),
+)

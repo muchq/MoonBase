@@ -14,4 +14,4 @@ Artificial Intelligence and Machine Learning libraries and services.
 ## Libraries
 
 - [**Neuro**](libs/neuro): A pure Go implementation of a deep neural network library suitable for training classification models on images, text, and audio data. Features support for various layer types, optimizers, and inference utilities.
-- [**microgpt**](libs/microgpt): A minimal GPT implementation in pure Rust with a from-scratch autograd engine. Ported from [karpathy's microgpt.py](https://gist.github.com/aaylward/f9cfa5bff5aada3dcce46db0110eb34e) — the complete algorithm; everything else is just efficiency.
+- [**microgpt**](libs/microgpt): A minimal GPT implementation in Rust using candle for tensor ops and BPE tokenization. Ported from [karpathy's microgpt.py](https://gist.github.com/aaylward/f9cfa5bff5aada3dcce46db0110eb34e) — the complete algorithm; everything else is just efficiency.

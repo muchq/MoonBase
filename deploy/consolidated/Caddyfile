@@ -19,6 +19,16 @@ api.muchq.com {
 		path /imagine/v1/edges
 	}
 
+	@post_generate {
+		method POST
+		path /microgpt/v1/generate
+	}
+
+	@post_chat {
+		method POST
+		path /microgpt/v1/chat
+	}
+
 	@get_timeseries {
 		method GET
 		path /metrics/v1/timeseries/*
@@ -66,6 +76,8 @@ api.muchq.com {
 	reverse_proxy @post_mithril mithril:8083
 	reverse_proxy @post_posterize_blur posterize:8084
 	reverse_proxy @post_posterize_edges posterize:8084
+	reverse_proxy @post_generate microgpt-serve:8087
+	reverse_proxy @post_chat microgpt-serve:8087
 
 	log {
 		output file /var/log/caddy/access.log {
@@ -121,8 +133,6 @@ git.muchq.com {
 }
 
 gpt.muchq.com {
-	@cors_origin header Origin ~^https://([a-zA-Z0-9-]+\.)?(muchq\.com|tty1\.uk|bitfear\.net)$
-
 	@post_generate {
 		method POST
 		path /microgpt/v1/generate
@@ -137,12 +147,20 @@ gpt.muchq.com {
 		method OPTIONS
 	}
 
-	header @cors_origin Access-Control-Allow-Origin {http.request.header.Origin}
-	header Access-Control-Allow-Methods "POST, OPTIONS"
-	header Access-Control-Allow-Headers "Content-Type"
-	header Access-Control-Max-Age "86400"
+	header {
+		Access-Control-Allow-Origin "https://tty1.uk"
+		Access-Control-Allow-Methods "POST, OPTIONS"
+		Access-Control-Allow-Headers "Content-Type"
+		Access-Control-Max-Age "86400"
+	}
 
 	handle @options {
+		header {
+			Access-Control-Allow-Origin "https://tty1.uk"
+			Access-Control-Allow-Methods "POST, OPTIONS"
+			Access-Control-Allow-Headers "Content-Type"
+			Access-Control-Max-Age "86400"
+		}
 		respond 204
 	}
 

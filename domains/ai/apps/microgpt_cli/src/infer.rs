@@ -1,5 +1,4 @@
 use std::fs;
-use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process;
 
@@ -11,8 +10,9 @@ pub fn run_generate(model_dir: PathBuf, num_samples: usize, temperature: f64, se
     let (tokenizer, model) = load_inference_model(&model_dir);
 
     for i in 0..num_samples {
-        let sample = model.generate(tokenizer.bos, temperature, seed + i as u64, None, |id| {
-            tokenizer.decode(id)
+        let tok = &tokenizer;
+        let sample = model.generate(tok.bos, temperature, seed + i as u64, None, |id| {
+            tok.decode(id)
         });
         println!("sample {:2}: {sample}", i + 1);
     }
@@ -73,40 +73,49 @@ pub fn run_chat(model_dir: PathBuf, temperature: f64, seed: u64) {
 
         let _ = rl.add_history_entry(input);
 
-        // Encode user turn and append to history.
         history.extend(tokenizer.encode_turn("user", input));
-
-        // Append the assistant role token to prompt the model.
         history.push(special.assistant);
 
-        // Truncate history to fit within block_size, reserving room for generation.
         let dropped = tokenizer.truncate_chat_prompt(&mut history, model.config.block_size);
         if dropped > 0 {
+            // Re-prepend BOS so the model always sees a proper sequence start
+            if history.first() != Some(&tokenizer.bos) {
+                history.insert(0, tokenizer.bos);
+            }
             println!("(context truncated, dropped {dropped} tokens of early history)");
         }
 
-        // Generate response.
-        print!("microgpt> ");
         let rng_seed = seed.wrapping_add(turn_count);
+        let remaining = model.config.block_size.saturating_sub(history.len());
+        let max_gen = remaining.max(64).min(model.config.block_size / 4);
 
+        let mut raw_text = String::new();
+        let stop_tokens = [special.end_turn];
+        let suppress_tokens = [tokenizer.bos, special.user, special.assistant];
         let output = model.generate_from_prompt(
             &history,
-            special.end_turn,
+            &stop_tokens,
+            &suppress_tokens,
             temperature,
             rng_seed,
-            None,
+            Some(max_gen),
             |tok| {
-                if let Some(ch) = tokenizer.decode(tok) {
-                    print!("{ch}");
-                    io::stdout().flush().ok();
+                if let Some(s) = tokenizer.decode(tok) {
+                    raw_text.push_str(&s);
                 }
             },
         );
-        println!();
+        let trimmed = raw_text.trim().trim_start_matches(|c: char| c.is_ascii_punctuation());
+        println!("microgpt> {}", trimmed.trim_start());
 
-        // Append assistant response + end_turn to history for next turn.
-        history.extend(&output);
-        history.push(special.end_turn);
+        // Only add non-empty responses to history to avoid wasting context
+        if !output.is_empty() {
+            history.extend(&output);
+            history.push(special.end_turn);
+        } else {
+            // Remove the dangling <assistant> token we added above
+            history.pop();
+        }
 
         turn_count += 1;
     }
@@ -121,7 +130,7 @@ pub fn run_info(model_dir: PathBuf) {
     println!("  n_head:          {}", meta.n_head);
     println!("  n_layer:         {}", meta.n_layer);
     println!("  block_size:      {}", meta.block_size);
-    println!("  charset:         {:?}", meta.chars);
+    println!("  tokenizer:       BPE");
     if let Some(ref st) = meta.special_tokens {
         println!("  special_tokens:  {:?}", st);
     }
@@ -160,18 +169,30 @@ pub fn run_export(model_dir: PathBuf, output: PathBuf, half: bool) {
     } else {
         microgpt::StDtype::F32
     };
-    let bytes = microgpt::serialize_state_dict_st(&model.state_dict, dtype);
+    let bytes = microgpt::serialize_state_dict_st(&model.state_dict, dtype).unwrap_or_else(|e| {
+        eprintln!("error: failed to serialize weights: {e}");
+        process::exit(1);
+    });
     let weights_path = output.join("weights.safetensors");
     if let Err(e) = fs::write(&weights_path, &bytes) {
         eprintln!("error: failed to write weights: {e}");
         process::exit(1);
     }
 
-    // Write meta.json
     let meta_json = serde_json::to_string_pretty(&meta).expect("meta serialization");
     if let Err(e) = fs::write(output.join("meta.json"), &meta_json) {
         eprintln!("error: failed to write meta.json: {e}");
         process::exit(1);
+    }
+
+    // Copy tokenizer.json from source model
+    let src_tok = model_dir.join("tokenizer.json");
+    if src_tok.exists() {
+        let dst_tok = output.join("tokenizer.json");
+        if let Err(e) = fs::copy(&src_tok, &dst_tok) {
+            eprintln!("error: failed to copy tokenizer.json: {e}");
+            process::exit(1);
+        }
     }
 
     let dtype_name = if half { "f16" } else { "f32" };
@@ -185,7 +206,7 @@ pub fn run_export(model_dir: PathBuf, output: PathBuf, half: bool) {
     );
 }
 
-fn load_inference_model(model_dir: &PathBuf) -> (Tokenizer, InferenceGpt) {
+fn load_inference_model(model_dir: &std::path::Path) -> (Tokenizer, InferenceGpt) {
     let meta = load_meta(model_dir);
     let config = meta.config();
     let weights_bytes = load_weights(model_dir);
@@ -194,6 +215,12 @@ fn load_inference_model(model_dir: &PathBuf) -> (Tokenizer, InferenceGpt) {
             eprintln!("error: {e}");
             process::exit(1);
         });
-    let tokenizer = Tokenizer::from_meta(meta.chars, meta.special_tokens.as_deref());
+
+    let tok_path = model_dir.join("tokenizer.json");
+    let tokenizer = Tokenizer::from_file(&tok_path).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        process::exit(1);
+    });
+
     (tokenizer, model)
 }

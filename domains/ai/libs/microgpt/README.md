@@ -22,17 +22,23 @@ brew install muchq/muchq/microgpt
 | Module | Purpose |
 |--------|---------|
 | `tensor_model.rs` | `TensorGpt` — batched forward pass using candle tensors and `VarMap` for autograd-tracked weights |
-| `tensor_train.rs` | Training loop — cross-entropy loss, custom Adam optimizer with serializable state (for checkpoint/resume), linear learning-rate decay |
+| `tensor_train.rs` | Training loop — cross-entropy loss, custom Adam optimizer with serializable state (for checkpoint/resume) |
 | `model.rs` | `InferenceGpt` (plain f64, `Send + Sync`) for autoregressive generation and serving. Also defines `ModelConfig` and `ModelMeta` |
-| `data.rs` | Character-level tokenizer, dataset loader, and chat conversation encoder |
-| `train.rs` | `TrainConfig` (learning rate, Adam hyperparameters, step count) and `TrainState` (checkpoint step/optimizer state) |
+| `data.rs` | BPE tokenizer (via HuggingFace `tokenizers` crate), dataset loader with automatic chat data cleanup, and chat conversation encoder |
+| `train.rs` | `TrainConfig` (learning rate, warmup, Adam hyperparameters, step count) and `TrainState` (checkpoint step/optimizer state) |
 
 ## Key design decisions
 
 - **Candle tensor engine**: Training uses `TensorGpt` backed by [candle](https://github.com/huggingface/candle) for batched tensor operations and reverse-mode autograd via `Var`/`VarMap`. This replaces the original scalar autograd engine.
 - **Dual model types**: `TensorGpt` (candle tensors) is used for training with full autograd support. `InferenceGpt` (plain `f64`) is `Send + Sync` and used by the HTTP server behind `Arc`. Both use safetensors for weight serialization.
-- **Safetensors format**: Weights and optimizer state are stored as [safetensors](https://github.com/huggingface/safetensors) (f32). Inference-only models can be exported as f16 via `microgpt export --half`, cutting file size in half.
-- **Metal GPU support**: Training can run on Apple Silicon GPUs via candle's Metal backend. Enable with `--device metal`.
+- **BPE tokenization**: Byte-level BPE via the HuggingFace `tokenizers` crate. The tokenizer is trained on the input corpus at the start of each fresh training run. Vocabulary size is configurable (default 4096). Special tokens (`<bos>`, `<user>`, `<assistant>`, `<end_turn>`) are added for chat mode.
+- **Safetensors format**: Weights and optimizer state are stored as [safetensors](https://github.com/huggingface/safetensors). Inference-only models can be exported as f16 via `microgpt export --half`, cutting file size in half.
+- **Metal GPU support**: Training can run on Apple Silicon GPUs via candle's Metal backend. Enable with `--device metal`. Critical numerical operations (rmsnorm, log_softmax) are computed in F32 for stability even when training in BF16.
+- **Learning rate warmup**: Linear warmup from 0 to peak LR over `warmup_steps` (default 200), followed by linear decay to 0. Prevents early loss spikes from Adam's bias correction.
+- **Chat data cleanup**: Conversations are automatically trimmed to end at the last assistant turn. Trailing user messages with no reply are dropped (they provide no supervision for assistant generation and teach the model to produce empty responses). Conversations with no assistant turn are skipped entirely.
+- **Data filtering (`--skip-long`)**: Optionally exclude training documents/conversations whose tokenized length exceeds `block_size` instead of truncating them. Recommended for chat training so the model always sees complete conversations with proper turn boundaries.
+- **Token suppression at inference**: Special tokens (`<bos>`, `<user>`, `<assistant>`) are masked to negative infinity during generation sampling. A `min_tokens` guard temporarily suppresses stop tokens on the first generated position, preventing undertrained models from immediately emitting `<end_turn>`.
+- **Output post-processing**: Leading ASCII punctuation is stripped from generated chat responses to work around artifacts from token suppression in undertrained models.
 - **Configurable hyperparameters**: `ModelConfig` allows runtime-configurable `n_embd`, `n_head`, `n_layer`, and `block_size`. Defaults match the original gist's educational scale (16/4/1/16).
 
 ## Usage
@@ -44,26 +50,20 @@ brew install muchq/muchq/microgpt
 curl -o names.txt https://raw.githubusercontent.com/karpathy/makemore/master/names.txt
 microgpt train --input names.txt --output names-model --steps 1000
 
-# Train a chat model on Apple Silicon (M4 Pro / 64GB)
-# ~2M params, fits comfortably in memory, trains in minutes
-microgpt train --input convos.jsonl --output chat-model --chat \
-  --n-embd 128 --n-head 8 --n-layer 4 --block-size 256 \
-  --lr 0.003 --steps 10000 --device metal
+# Train a chat model on Apple Silicon (~8M params, ~2h on M4 Pro)
+# --skip-long ensures only complete conversations are used for training
+microgpt train --input convos.jsonl --output chat-model --chat --skip-long \
+  --n-embd 256 --n-head 8 --n-layer 6 --block-size 1024 \
+  --lr 0.001 --batch-size 4 --steps 10000 --device metal
 
-# Larger chat model for longer training runs
-# ~8M params, still manageable on 64GB, benefits from more data/steps
-microgpt train --input convos.jsonl --output chat-model-lg --chat \
-  --n-embd 256 --n-head 8 --n-layer 8 --block-size 512 \
-  --lr 0.001 --steps 50000 --device metal
-
-# Long run with periodic checkpoints (every 10k steps)
-microgpt train --input convos.jsonl --output chat-model --chat \
-  --n-embd 128 --n-head 8 --n-layer 4 --block-size 1024 \
-  --lr 0.003 --steps 100000 --device metal --checkpoint-every 10000
+# Larger chat model (~25M params)
+microgpt train --input convos.jsonl --output chat-model-lg --chat --skip-long \
+  --n-embd 384 --n-head 8 --n-layer 8 --block-size 1024 \
+  --lr 0.001 --steps 100000 --batch-size 4 --device metal \
+  --checkpoint-every 5000
 
 # Resume training from a checkpoint for 50k more steps
-microgpt train --input convos.jsonl --output chat-model --chat \
-  --resume chat-model --steps 50000
+microgpt train --resume chat-model --steps 50000
 ```
 
 ### Generate samples
@@ -113,33 +113,41 @@ curl -X POST http://localhost:8080/microgpt/v1/chat \
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `num_samples` | int | 1 | Number of samples (max 50) |
-| `temperature` | float | 0.5 | Sampling temperature |
+| `temperature` | float | 0.5 | Sampling temperature (must be >= 0) |
 | `seed` | int | 42 | RNG seed |
+| `max_tokens` | int | block_size | Max tokens per sample (capped at block_size) |
 
 Response: `{ "samples": ["alice", "bob", ...] }`
+
+Returns 400 if validation fails (e.g. negative temperature, zero num_samples).
 
 ### `POST /microgpt/v1/chat`
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `messages` | array | required | `[{"role": "user", "content": "..."}]` |
-| `temperature` | float | 0.5 | Sampling temperature |
+| `temperature` | float | 0.5 | Sampling temperature (must be >= 0) |
 | `seed` | int | 42 | RNG seed |
+| `max_tokens` | int | block_size - prompt_len | Max tokens to generate (capped at remaining context) |
 
 Response: `{ "role": "assistant", "content": "...", "tokens_dropped": 0 }`
 
 `tokens_dropped` indicates how many tokens of early conversation history were
 truncated to fit within the model's context window. 0 means no truncation.
 
+Returns 400 if validation fails (empty messages, unknown role, empty content, negative temperature).
+Returns 400 if the loaded model was not trained with chat tokens.
+
 ## Saved model format
 
 Training produces a checkpoint directory:
 
-- `weights.safetensors` — model weights (f32)
-- `meta.json` — model metadata (vocab size, charset, hyperparameters, special tokens)
-- `train_state.json` — checkpoint state (training step, optimizer step)
-- `optimizer_m.safetensors` — Adam first-moment (momentum) vectors (f32)
-- `optimizer_v.safetensors` — Adam second-moment (variance) vectors (f32)
+- `weights.safetensors` — model weights (native dtype: f32, bf16, or f16)
+- `tokenizer.json` — BPE tokenizer (HuggingFace format)
+- `meta.json` — model metadata (vocab size, hyperparameters, special token names)
+- `train_state.json` — checkpoint state (training step, optimizer step, learning rate, batch size, dtype)
+- `optimizer_m.safetensors` — Adam first-moment (momentum) vectors
+- `optimizer_v.safetensors` — Adam second-moment (variance) vectors
 
 Inference-only exports (via `microgpt export`) contain only `weights.safetensors`
-(f32 or f16) and `meta.json`.
+(f32 or f16), `tokenizer.json`, and `meta.json`.

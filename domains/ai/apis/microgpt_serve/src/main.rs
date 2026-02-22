@@ -45,7 +45,11 @@ async fn main() {
     let config = meta.config();
     let model = load_model(&model_dir, &meta, config);
 
-    let tokenizer = Tokenizer::from_meta(meta.chars, meta.special_tokens.as_deref());
+    let tok_path = model_dir.join("tokenizer.json");
+    let tokenizer = Tokenizer::from_file(&tok_path).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        process::exit(1);
+    });
 
     event!(
         Level::INFO,

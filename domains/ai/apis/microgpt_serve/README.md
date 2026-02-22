@@ -11,8 +11,8 @@ Built on [server_pal](../../../platform/libs/server_pal) (Axum + tower-http).
 MODEL_DIR=output PORT=8080 cargo run -p microgpt_serve
 ```
 
-Set `MODEL_DIR` to the directory containing `weights.safetensors` and `meta.json`
-produced by training (or `microgpt export`). Defaults to `./output`.
+Set `MODEL_DIR` to the directory containing `weights.safetensors`, `tokenizer.json`,
+and `meta.json` produced by training (or `microgpt export`). Defaults to `./output`.
 
 ## Endpoints
 
@@ -23,14 +23,14 @@ Generate unconditional samples from the model.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `num_samples` | int | 1 | Number of samples (max 50) |
-| `temperature` | float | 0.5 | Sampling temperature |
+| `temperature` | float | 0.5 | Sampling temperature (must be >= 0) |
 | `seed` | int | 42 | RNG seed |
 | `max_tokens` | int | block_size | Max tokens per sample (capped at block_size) |
 
 ```bash
 curl -X POST http://localhost:8080/microgpt/v1/generate \
   -H "Content-Type: application/json" \
-  -d '{"num_samples": 5, "temperature": 0.5}'
+  -d '{"num_samples": 5, "temperature": 0.5, "max_tokens": 100}'
 ```
 
 Response: `{ "samples": ["alice", "bob", ...] }`
@@ -42,14 +42,14 @@ Multi-turn chat completion. Requires a model trained with `--chat`.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `messages` | array | required | `[{"role": "user", "content": "..."}]` |
-| `temperature` | float | 0.5 | Sampling temperature |
+| `temperature` | float | 0.5 | Sampling temperature (must be >= 0) |
 | `seed` | int | 42 | RNG seed |
 | `max_tokens` | int | block_size - prompt_len | Max tokens to generate (capped at remaining context) |
 
 ```bash
 curl -X POST http://localhost:8080/microgpt/v1/chat \
   -H "Content-Type: application/json" \
-  -d '{"messages": [{"role": "user", "content": "hello"}]}'
+  -d '{"messages": [{"role": "user", "content": "hello"}], "max_tokens": 50}'
 ```
 
 Response: `{ "role": "assistant", "content": "...", "tokens_dropped": 0 }`
@@ -58,6 +58,23 @@ Response: `{ "role": "assistant", "content": "...", "tokens_dropped": 0 }`
 truncated to fit within the model's context window. 0 means no truncation.
 
 Returns 400 if the loaded model was not trained with chat tokens.
+
+## Validation
+
+Both endpoints validate input before processing:
+
+- `temperature` must be >= 0
+- `num_samples` must be >= 1 (generate only)
+- `max_tokens` must be >= 1 when specified
+- `messages` must not be empty (chat only)
+- Each message `role` must be `"user"` or `"assistant"`
+- Each message `content` must not be empty or whitespace-only
+
+Invalid requests return `400 Bad Request` with a JSON error body:
+
+```json
+{"error": "temperature must be >= 0, got -0.5"}
+```
 
 ## Response latency and output size
 
