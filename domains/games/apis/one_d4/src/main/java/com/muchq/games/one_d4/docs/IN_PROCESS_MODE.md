@@ -7,20 +7,20 @@
 INDEXER_DB_URL="jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1" bazel run //domains/games/apis/one_d4:indexer
 
 # Index a player's games
-curl -X POST http://localhost:8080/index \
+curl -X POST http://localhost:8080/v1/index \
   -H 'Content-Type: application/json' \
   -d '{"player":"hikaru","platform":"CHESS_COM","startMonth":"2026-01","endMonth":"2026-01"}'
 
 # Check indexing status (replace {id} with the returned ID)
-curl http://localhost:8080/index/{id}
+curl http://localhost:8080/v1/index/{id}
 
 # Query indexed games using ChessQL
-curl -X POST http://localhost:8080/query \
+curl -X POST http://localhost:8080/v1/query \
   -H 'Content-Type: application/json' \
   -d '{"query":"white.elo > 2500","limit":10,"offset":0}'
 
 # Query with motif detection
-curl -X POST http://localhost:8080/query \
+curl -X POST http://localhost:8080/v1/query \
   -H 'Content-Type: application/json' \
   -d '{"query":"motif(fork) AND motif(pin)","limit":10,"offset":0}'
 ```
@@ -46,8 +46,8 @@ To use PostgreSQL instead, set the `INDEXER_DB_URL` environment variable to a Po
 │                                               │
 │  ┌───────────┐   ┌──────────────────────┐    │
 │  │ HTTP API  │   │  InMemoryIndexQueue   │    │
-│  │ /index    ├──►│  (LinkedBlockingQueue) │    │
-│  │ /query    │   └──────────┬───────────┘    │
+│  │ /v1/index ├──►│  (LinkedBlockingQueue) │    │
+│  │ /v1/query │   └──────────┬───────────┘    │
 │  └─────┬─────┘              │                │
 │        │              ┌─────▼──────┐         │
 │        │              │IndexWorker │         │
@@ -221,7 +221,7 @@ The system auto-detects H2 vs PostgreSQL from the JDBC URL and uses the appropri
 
 ### What Works
 
-- All API endpoints (`POST /index`, `GET /index/{id}`, `POST /query`)
+- All API endpoints (`POST /v1/index`, `GET /v1/index/{id}`, `POST /v1/query`)
 - Full ChessQL query support
 - Full motif detection pipeline
 - chess.com API fetching (still makes real HTTP calls)

@@ -19,7 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Singleton
-@Path("/index")
+@Path("/v1/index")
 public class IndexController {
   private static final Logger LOG = LoggerFactory.getLogger(IndexController.class);
 
@@ -41,7 +41,7 @@ public class IndexController {
     validator.validate(request);
 
     LOG.info(
-        "POST /index player={} platform={} months={}-{}",
+        "POST /v1/index player={} platform={} months={}-{}",
         request.player(),
         request.platform(),
         request.startMonth(),
@@ -62,7 +62,7 @@ public class IndexController {
   @Path("/{id}")
   @Produces(MediaType.APPLICATION_JSON)
   public IndexResponse getIndex(@PathParam("id") UUID id) {
-    LOG.info("GET /index/{}", id);
+    LOG.info("GET /v1/index/{}", id);
     return requestDao
         .findById(id)
         .map(

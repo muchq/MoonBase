@@ -254,11 +254,11 @@ public class ApiKeyFilter implements HttpServerFilter {
 ### Authorization
 
 Phase 1: Single-tier (any valid key has full access).
-Phase 2: Role-based — `admin` keys can access /admin/*, `user` keys can access /index and /query.
+Phase 2: Role-based — `admin` keys can access /admin/*, `user` keys can access /v1/index and /v1/query.
 
 ### Rate Limiting
 
-Per-key rate limiting on the /query endpoint:
+Per-key rate limiting on the /v1/query endpoint:
 - 100 queries/minute per API key
 - 429 response with `Retry-After` header
 - In-memory counter with sliding window (Guava `Cache<String, AtomicInteger>`)
