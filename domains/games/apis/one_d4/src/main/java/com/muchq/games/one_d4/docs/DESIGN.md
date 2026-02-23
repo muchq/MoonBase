@@ -57,7 +57,7 @@ com.muchq.indexer/
 
   api/dto/
     IndexRequest.java               Inbound: player, platform, month range
-    IndexResponse.java              Outbound: id, status, gamesIndexed, error
+    IndexResponse.java              Outbound: id, player, platform, startMonth, endMonth, status, gamesIndexed, errorMessage
     QueryRequest.java               Inbound: ChessQL query string, limit, offset
     QueryResponse.java              Outbound: list of GameFeatureRow, count
     GameFeatureRow.java             Projection of game_features for API consumers

@@ -37,6 +37,10 @@ Start indexing games for a player over a month range.
 ```json
 {
   "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "player": "hikaru",
+  "platform": "CHESS_COM",
+  "startMonth": "2024-03",
+  "endMonth": "2024-03",
   "status": "PENDING",
   "gamesIndexed": 0,
   "errorMessage": null
@@ -61,6 +65,10 @@ Poll the status of an indexing request.
 ```json
 {
   "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "player": "hikaru",
+  "platform": "CHESS_COM",
+  "startMonth": "2024-03",
+  "endMonth": "2024-03",
   "status": "COMPLETED",
   "gamesIndexed": 147,
   "errorMessage": null

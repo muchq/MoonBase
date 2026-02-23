@@ -95,3 +95,28 @@ curl -X POST http://localhost:8080/v1/query \
 - `motif(fork)`
 - `motif(skewer)`
 - `motif(discovered_attack)`
+
+---
+
+## Inspecting the database (deployed)
+
+On the deployed machine the indexer uses H2 file storage at `/data/indexer` inside the container (Compose volume `one_d4_data`).
+
+### Via the API (no direct DB access)
+
+- **Index requests:** `GET http://localhost:8088/v1/index/{id}` — returns `id`, `status`, `gamesIndexed`, `errorMessage` for that request. There is no list-all-requests endpoint; you need the request UUID.
+- **Query games:** `POST http://localhost:8088/v1/query` with a ChessQL query (e.g. `white_username = "drawlya"` or `black_username = "drawlya"`) and check the `playedAt` field in the results to see what date ranges are indexed.
+
+### Direct H2 access (copy DB out)
+
+1. Find the container: `docker ps | grep one_d4` (Compose names it like `*_one_d4_*`).
+2. Copy the H2 files from the container (e.g. replace `CONTAINER` with the actual name):
+   ```bash
+   docker cp CONTAINER:/data ./one_d4_data_backup
+   ```
+   The DB file is `./one_d4_data_backup/indexer.mv.db`. Copying while the app is running is usually safe for a read-only snapshot; for a fully consistent copy you can stop the container first.
+3. On a machine with [H2](https://www.h2database.com/) installed, open the copy:
+   - **H2 Console (jar):** `java -jar h2*.jar` → JDBC URL `jdbc:h2:file:/path/to/one_d4_data_backup/indexer`, user `sa`, password blank.
+   - Or use any SQL client that supports H2 (e.g. DBeaver).
+
+Main tables: `indexing_requests` (id, player, platform, start_month, end_month, status, games_indexed, …), `game_features` (request_id, game_url, played_at, …), `indexed_periods` (player, platform, year_month, is_complete, games_count, …).

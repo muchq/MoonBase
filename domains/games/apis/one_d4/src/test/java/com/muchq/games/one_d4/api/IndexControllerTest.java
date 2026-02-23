@@ -35,6 +35,10 @@ public class IndexControllerTest {
     IndexResponse response = controller.createIndex(request);
 
     assertThat(response.id()).isNotNull();
+    assertThat(response.player()).isEqualTo("hikaru");
+    assertThat(response.platform()).isEqualTo("CHESS_COM");
+    assertThat(response.startMonth()).isEqualTo("2024-01");
+    assertThat(response.endMonth()).isEqualTo("2024-03");
     assertThat(response.status()).isEqualTo("PENDING");
     assertThat(response.gamesIndexed()).isEqualTo(0);
     assertThat(requestStore.createCallCount()).isEqualTo(1);
@@ -65,6 +69,10 @@ public class IndexControllerTest {
     IndexResponse response = controller.createIndex(request);
 
     assertThat(response.id()).isEqualTo(existingId);
+    assertThat(response.player()).isEqualTo("hikaru");
+    assertThat(response.platform()).isEqualTo("CHESS_COM");
+    assertThat(response.startMonth()).isEqualTo("2024-01");
+    assertThat(response.endMonth()).isEqualTo("2024-03");
     assertThat(response.status()).isEqualTo("PROCESSING");
     assertThat(response.gamesIndexed()).isEqualTo(50);
     assertThat(requestStore.createCallCount()).isEqualTo(0);
@@ -91,17 +99,54 @@ public class IndexControllerTest {
         controller.createIndex(new IndexRequest("player", "CHESS_COM", "2024-06", "2024-06"));
 
     assertThat(response.id()).isEqualTo(existingId);
+    assertThat(response.player()).isEqualTo("player");
+    assertThat(response.platform()).isEqualTo("CHESS_COM");
+    assertThat(response.startMonth()).isEqualTo("2024-06");
+    assertThat(response.endMonth()).isEqualTo("2024-06");
     assertThat(response.status()).isEqualTo("PENDING");
     assertThat(response.gamesIndexed()).isEqualTo(0);
     assertThat(requestStore.createCallCount()).isEqualTo(0);
   }
 
+  @Test
+  public void getIndex_returnsRequestWithPlayerAndDateRange() {
+    IndexingRequestStore.IndexingRequest stored =
+        new IndexingRequestStore.IndexingRequest(
+            UUID.randomUUID(),
+            "drawlya",
+            "CHESS_COM",
+            "2026-01",
+            "2026-02",
+            "COMPLETED",
+            Instant.now(),
+            Instant.now(),
+            null,
+            42);
+    requestStore.setExistingRequest(stored);
+    requestStore.setFindByIdResponse(stored);
+
+    IndexResponse response = controller.getIndex(stored.id());
+
+    assertThat(response.id()).isEqualTo(stored.id());
+    assertThat(response.player()).isEqualTo("drawlya");
+    assertThat(response.platform()).isEqualTo("CHESS_COM");
+    assertThat(response.startMonth()).isEqualTo("2026-01");
+    assertThat(response.endMonth()).isEqualTo("2026-02");
+    assertThat(response.status()).isEqualTo("COMPLETED");
+    assertThat(response.gamesIndexed()).isEqualTo(42);
+  }
+
   private static final class FakeIndexingRequestStore implements IndexingRequestStore {
     private Optional<IndexingRequestStore.IndexingRequest> existingRequest = Optional.empty();
+    private Optional<IndexingRequestStore.IndexingRequest> findByIdResponse = Optional.empty();
     private int createCallCount = 0;
 
     void setExistingRequest(IndexingRequestStore.IndexingRequest request) {
       this.existingRequest = Optional.of(request);
+    }
+
+    void setFindByIdResponse(IndexingRequestStore.IndexingRequest request) {
+      this.findByIdResponse = Optional.of(request);
     }
 
     int createCallCount() {
@@ -116,7 +161,7 @@ public class IndexControllerTest {
 
     @Override
     public Optional<IndexingRequestStore.IndexingRequest> findById(UUID id) {
-      return Optional.empty();
+      return findByIdResponse.filter(r -> r.id().equals(id));
     }
 
     @Override
