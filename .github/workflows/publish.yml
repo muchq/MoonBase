@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   test-and-publish:
-    runs-on: ubuntu-latest-4-cores
+    runs-on: ubuntu-latest
     container:
       image: ghcr.io/muchq/moonbase/ci-base:latest
       volumes:
