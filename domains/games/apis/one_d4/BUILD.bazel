@@ -61,6 +61,8 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/db/DataSourceFactory.java",
         "src/main/java/com/muchq/games/one_d4/db/GameFeatureDao.java",
         "src/main/java/com/muchq/games/one_d4/db/GameFeatureStore.java",
+        "src/main/java/com/muchq/games/one_d4/db/IndexedPeriodDao.java",
+        "src/main/java/com/muchq/games/one_d4/db/IndexedPeriodStore.java",
         "src/main/java/com/muchq/games/one_d4/db/IndexingRequestDao.java",
         "src/main/java/com/muchq/games/one_d4/db/IndexingRequestStore.java",
         "src/main/java/com/muchq/games/one_d4/db/Migration.java",
@@ -120,8 +122,12 @@ java_library(
 java_library(
     name = "api",
     srcs = [
+        "src/main/java/com/muchq/games/one_d4/api/ErrorHandler.java",
+        "src/main/java/com/muchq/games/one_d4/api/HealthController.java",
         "src/main/java/com/muchq/games/one_d4/api/IndexController.java",
+        "src/main/java/com/muchq/games/one_d4/api/IndexRequestValidator.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryController.java",
+        "src/main/java/com/muchq/games/one_d4/api/QueryRequestValidator.java",
     ],
     plugins = [
         "//bazel/rules:micronaut_type_element_visitor_processor",
@@ -137,6 +143,8 @@ java_library(
         "//domains/games/libs/chessql:ast",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
+        artifact("io.micronaut:micronaut-http"),
+        artifact("io.micronaut:micronaut-inject"),
         artifact("io.micronaut.jaxrs:micronaut-jaxrs-server"),
         artifact("jakarta.inject:jakarta-inject-api"),
         artifact("jakarta.ws.rs:jakarta-ws.rs-api"),
@@ -237,9 +245,85 @@ java_test_suite(
 java_test_suite(
     name = "worker_tests",
     size = "small",
-    srcs = ["src/test/java/com/muchq/games/one_d4/worker/ResultMapperTest.java"],
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/worker/IndexWorkerTest.java",
+        "src/test/java/com/muchq/games/one_d4/worker/ResultMapperTest.java",
+    ],
     deps = [
+        ":db",
+        ":dto",
+        ":engine",
+        ":motifs",
+        ":queue",
         ":worker",
+        "//domains/games/libs/chess_com_client",
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_test_suite(
+    name = "api_validation_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/api/IndexControllerTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/IndexRequestValidatorTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/QueryRequestValidatorTest.java",
+    ],
+    deps = [
+        ":api",
+        ":db",
+        ":dto",
+        ":queue",
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_test_suite(
+    name = "db_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/db/IndexedPeriodDaoTest.java",
+        "src/test/java/com/muchq/games/one_d4/db/IndexingRequestDaoTest.java",
+    ],
+    deps = [
+        ":db",
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_library(
+    name = "e2e_support",
+    testonly = True,
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/e2e/FakeChessClient.java",
+    ],
+    deps = [
+        "//domains/games/libs/chess_com_client",
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+    ],
+)
+
+java_test_suite(
+    name = "e2e_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/e2e/IndexE2ETest.java",
+    ],
+    deps = [
+        ":api",
+        ":db",
+        ":dto",
+        ":e2e_support",
+        ":engine",
+        ":motifs",
+        ":queue",
+        ":worker",
+        "//domains/games/libs/chess_com_client",
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("junit:junit"),
         artifact("org.assertj:assertj-core"),
     ],

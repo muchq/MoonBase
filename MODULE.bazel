@@ -12,4 +12,5 @@ include("//bazel:java.MODULE.bazel")
 
 # include("//bazel:scala.MODULE.bazel")
 include("//bazel:python.MODULE.bazel")
+include("//bazel:apple.MODULE.bazel")
 include("//bazel:oci.MODULE.bazel")

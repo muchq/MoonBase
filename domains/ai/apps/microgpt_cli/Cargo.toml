@@ -1,0 +1,23 @@
+[package]
+name = "microgpt_cli"
+version = "0.6.1"
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+description = "CLI agent for local microgpt training and inference"
+
+[features]
+default = []
+metal = ["microgpt/metal"]
+
+[[bin]]
+name = "microgpt"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true, features = ["derive"] }
+microgpt = { path = "../../libs/microgpt" }
+rustyline = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

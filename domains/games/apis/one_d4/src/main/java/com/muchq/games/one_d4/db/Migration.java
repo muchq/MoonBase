@@ -52,6 +52,20 @@ public class Migration {
       )
       """;
 
+  private static final String H2_INDEXED_PERIODS =
+      """
+      CREATE TABLE IF NOT EXISTS indexed_periods (
+          id            UUID DEFAULT random_uuid() PRIMARY KEY,
+          player        VARCHAR(255) NOT NULL,
+          platform      VARCHAR(50) NOT NULL,
+          year_month    VARCHAR(7) NOT NULL,
+          fetched_at    TIMESTAMP NOT NULL,
+          is_complete   BOOLEAN NOT NULL,
+          games_count   INT NOT NULL,
+          UNIQUE (player, platform, year_month)
+      )
+      """;
+
   private static final String PG_INDEXING_REQUESTS =
       """
       CREATE TABLE IF NOT EXISTS indexing_requests (
@@ -94,6 +108,20 @@ public class Migration {
       )
       """;
 
+  private static final String PG_INDEXED_PERIODS =
+      """
+      CREATE TABLE IF NOT EXISTS indexed_periods (
+          id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          player        VARCHAR(255) NOT NULL,
+          platform      VARCHAR(50) NOT NULL,
+          year_month    VARCHAR(7) NOT NULL,
+          fetched_at    TIMESTAMP NOT NULL,
+          is_complete   BOOLEAN NOT NULL,
+          games_count   INT NOT NULL,
+          UNIQUE (player, platform, year_month)
+      )
+      """;
+
   private final DataSource dataSource;
   private final boolean useH2;
 
@@ -109,9 +137,11 @@ public class Migration {
       if (useH2) {
         stmt.execute(H2_INDEXING_REQUESTS);
         stmt.execute(H2_GAME_FEATURES);
+        stmt.execute(H2_INDEXED_PERIODS);
       } else {
         stmt.execute(PG_INDEXING_REQUESTS);
         stmt.execute(PG_GAME_FEATURES);
+        stmt.execute(PG_INDEXED_PERIODS);
       }
 
       LOG.info("Database migration completed successfully (H2={})", useH2);

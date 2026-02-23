@@ -1,0 +1,30 @@
+name: Release wordchains
+
+on:
+  workflow_run:
+    workflows: ["Test and Publish"]
+    types:
+      - completed
+  push:
+    tags:
+      - 'wordchains-v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-wordchains
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: ./.github/workflows/release-rust-tool.yml
+    with:
+      tool_name: wordchains
+      cargo_toml: domains/games/apps/wordchains/Cargo.toml
+      bazel_target: "//domains/games/apps/wordchains:wordchains"
+      binary_name: wordchains
+      caller_event_name: ${{ github.event_name }}
+      workflow_run_sha: ${{ github.event.workflow_run.head_sha || '' }}
+      workflow_run_conclusion: ${{ github.event.workflow_run.conclusion || '' }}
+    secrets: inherit

@@ -1,7 +1,7 @@
 use axum::extract::State;
 use axum::{extract::Json as ExtractJson, response::Json, routing::post};
 use serde::{Deserialize, Deserializer, Serialize};
-use server_pal::{listen_addr_pal, router_builder};
+use server_pal::{listen_addr_pal, router_builder, serve};
 use std::sync::Arc;
 use tracing::{Level, event};
 use tracing_subscriber;
@@ -78,9 +78,6 @@ async fn main() {
         .build()
         .with_state(shared_state);
 
-    let listener = tokio::net::TcpListener::bind(listen_address.clone())
-        .await
-        .unwrap();
     event!(Level::INFO, "listening on {}", listen_address);
-    axum::serve(listener, app).await.unwrap();
+    serve(app, &listen_address).await;
 }

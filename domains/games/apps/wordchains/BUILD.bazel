@@ -1,0 +1,67 @@
+load("@crates//:defs.bzl", "crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary")
+
+# Generator binary (host configuration)
+rust_binary(
+    name = "wordchains_generator",
+    srcs = [
+        "src/args.rs",
+        "src/logging.rs",
+        "src/main.rs",
+    ],
+    crate_name = "wordchains_gen",
+    deps = crate_deps([
+        "clap",
+        "log",
+        "simplelog",
+        "tracing",
+        "serde",
+        "serde_json",
+    ]) + ["//domains/games/libs/wordchains"],
+)
+
+# Rule to generate graph JSON
+genrule(
+    name = "generate_graph_json",
+    srcs = ["@english_words//file"],
+    outs = ["word_graph.json"],
+    cmd = "$(location :wordchains_generator) generate-graph --dictionary-path $(location @english_words//file) --output-path $@",
+    tools = [":wordchains_generator"],
+    visibility = ["//domains/games/apps/wordchains_ios:__pkg__"],
+)
+
+# Rule to generate Rust source with embedded bytes
+genrule(
+    name = "generate_graph_rs",
+    srcs = [":word_graph.json"],
+    outs = ["graph_loader.rs"],
+    cmd = "echo 'pub const GRAPH_BYTES: &[u8] = include_bytes!(\"word_graph.json\");' > $@",
+)
+
+# Final binary with embedded graph
+rust_binary(
+    name = "wordchains",
+    srcs = [
+        "src/args.rs",
+        "src/logging.rs",
+        "src/main.rs",
+    ],
+    compile_data = [
+        ":generate_graph_json",
+        ":generate_graph_rs",
+    ],
+    crate_features = ["embedded-graph"],
+    crate_name = "wordchains",
+    rustc_env = {
+        "GRAPH_LOADER_PATH": "$(execpath :generate_graph_rs)",
+    },
+    visibility = ["//visibility:public"],
+    deps = crate_deps([
+        "clap",
+        "log",
+        "simplelog",
+        "tracing",
+        "serde",
+        "serde_json",
+    ]) + ["//domains/games/libs/wordchains"],
+)

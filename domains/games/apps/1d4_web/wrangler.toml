@@ -1,0 +1,11 @@
+name = "1d4-web"
+main = "worker/index.js"
+compatibility_date = "2024-01-01"
+
+# Domain: 1d4.net (api.1d4.net is backend, mcp.1d4.net is MCP server)
+# routes = [{ pattern = "1d4.net", zone_name = "1d4.net" }]
+
+[assets]
+directory = "src"
+binding = "ASSETS"
+not_found_handling = "single-page-application"

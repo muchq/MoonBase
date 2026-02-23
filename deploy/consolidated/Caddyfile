@@ -19,6 +19,16 @@ api.muchq.com {
 		path /imagine/v1/edges
 	}
 
+	@post_generate {
+		method POST
+		path /microgpt/v1/generate
+	}
+
+	@post_chat {
+		method POST
+		path /microgpt/v1/chat
+	}
+
 	@get_timeseries {
 		method GET
 		path /metrics/v1/timeseries/*
@@ -27,6 +37,26 @@ api.muchq.com {
 	@get_metrics {
 		method GET
 		path /metrics/v1/scalar/*
+	}
+
+	@get_1d4_health {
+		method GET
+		path /1d4/v1/health
+	}
+
+	@post_1d4_index {
+		method POST
+		path /1d4/v1/index
+	}
+
+	@get_1d4_index {
+		method GET
+		path /1d4/v1/index/*
+	}
+
+	@post_1d4_query {
+		method POST
+		path /1d4/v1/query
 	}
 
 	@ws_thoughts {
@@ -66,6 +96,25 @@ api.muchq.com {
 	reverse_proxy @post_mithril mithril:8083
 	reverse_proxy @post_posterize_blur posterize:8084
 	reverse_proxy @post_posterize_edges posterize:8084
+	reverse_proxy @post_generate microgpt-serve:8087
+	reverse_proxy @post_chat microgpt-serve:8087
+
+	handle @get_1d4_health {
+		rewrite * /health
+		reverse_proxy one_d4:8080
+	}
+	handle @post_1d4_index {
+		rewrite * /v1/index
+		reverse_proxy one_d4:8080
+	}
+	handle @get_1d4_index {
+		uri strip_prefix /1d4
+		reverse_proxy one_d4:8080
+	}
+	handle @post_1d4_query {
+		rewrite * /v1/query
+		reverse_proxy one_d4:8080
+	}
 
 	log {
 		output file /var/log/caddy/access.log {
@@ -106,6 +155,133 @@ r3dr.net {
 
 consolidated.cmptr.info {
 	respond "Consolidating..."
+}
+
+git.muchq.com {
+	reverse_proxy forgejo:3000
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 1gb
+			roll_keep 5
+			roll_keep_for 90d
+		}
+	}
+}
+
+gpt.muchq.com {
+	@post_generate {
+		method POST
+		path /microgpt/v1/generate
+	}
+
+	@post_chat {
+		method POST
+		path /microgpt/v1/chat
+	}
+
+	@options {
+		method OPTIONS
+	}
+
+	header {
+		Access-Control-Allow-Origin "https://tty1.uk"
+		Access-Control-Allow-Methods "POST, OPTIONS"
+		Access-Control-Allow-Headers "Content-Type"
+		Access-Control-Max-Age "86400"
+	}
+
+	handle @options {
+		header {
+			Access-Control-Allow-Origin "https://tty1.uk"
+			Access-Control-Allow-Methods "POST, OPTIONS"
+			Access-Control-Allow-Headers "Content-Type"
+			Access-Control-Max-Age "86400"
+		}
+		respond 204
+	}
+
+	reverse_proxy @post_generate microgpt-serve:8087
+	reverse_proxy @post_chat microgpt-serve:8087
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 1gb
+			roll_keep 5
+			roll_keep_for 90d
+		}
+	}
+}
+
+api.1d4.net {
+	@post_index {
+		method POST
+		path /v1/index
+	}
+
+	@get_index {
+		method GET
+		path /v1/index /v1/index/*
+	}
+
+	@post_query {
+		method POST
+		path /v1/query
+	}
+
+	@get_health {
+		method GET
+		path /health
+	}
+
+	@options {
+		method OPTIONS
+	}
+
+	header {
+		Access-Control-Allow-Origin "https://1d4.net"
+		Access-Control-Allow-Methods "GET, POST, OPTIONS"
+		Access-Control-Allow-Headers "Content-Type, Authorization"
+		Access-Control-Max-Age "86400"
+	}
+
+	handle @options {
+		header {
+			Access-Control-Allow-Origin "https://1d4.net"
+			Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			Access-Control-Allow-Headers "Content-Type, Authorization"
+			Access-Control-Max-Age "86400"
+		}
+		respond 204
+	}
+
+	handle @post_index {
+		reverse_proxy one_d4:8080
+	}
+
+	handle @get_index {
+		reverse_proxy one_d4:8080
+	}
+
+	handle @post_query {
+		reverse_proxy one_d4:8080
+	}
+
+	handle @get_health {
+		reverse_proxy one_d4:8080
+	}
+
+	handle {
+		respond 404
+	}
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 1gb
+			roll_keep 5
+			roll_keep_for 90d
+		}
+	}
 }
 
 mcp.1d4.net {

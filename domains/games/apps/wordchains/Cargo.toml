@@ -1,0 +1,17 @@
+[package]
+name = "wordchains-bin"
+version = "0.1.1"
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+embedded-graph = []
+
+[dependencies]
+clap = { workspace = true, features = ["derive"] }
+log = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+simplelog = { workspace = true }
+tracing = { workspace = true }
+wordchains = { workspace = true }

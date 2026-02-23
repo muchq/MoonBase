@@ -52,12 +52,12 @@ com.muchq.indexer/
   IndexerModule.java                @Factory — wires all beans
 
   api/
-    IndexController.java            POST /index, GET /index/{id}
-    QueryController.java            POST /query
+    IndexController.java            POST /v1/index, GET /v1/index/{id}
+    QueryController.java            POST /v1/query
 
   api/dto/
     IndexRequest.java               Inbound: player, platform, month range
-    IndexResponse.java              Outbound: id, status, gamesIndexed, error
+    IndexResponse.java              Outbound: id, player, platform, startMonth, endMonth, status, gamesIndexed, errorMessage
     QueryRequest.java               Inbound: ChessQL query string, limit, offset
     QueryResponse.java              Outbound: list of GameFeatureRow, count
     GameFeatureRow.java             Projection of game_features for API consumers
@@ -107,7 +107,7 @@ com.muchq.indexer/
 
 ### Indexing
 
-1. Client sends `POST /index` with player, platform, month range
+1. Client sends `POST /v1/index` with player, platform, month range
 2. `IndexController` creates a row in `indexing_requests` (status=PENDING), enqueues an `IndexMessage`
 3. `IndexWorkerLifecycle` daemon thread polls the queue
 4. `IndexWorker.process()`:
@@ -120,7 +120,7 @@ com.muchq.indexer/
 
 ### Querying
 
-1. Client sends `POST /query` with a ChessQL string, limit, offset
+1. Client sends `POST /v1/query` with a ChessQL string, limit, offset
 2. `QueryController` parses ChessQL → AST → compiles to parameterized SQL
 3. `GameFeatureDao.query()` executes the SQL against `game_features`
 4. Results mapped to API DTOs and returned

@@ -20,25 +20,31 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Singleton
-@Path("/query")
+@Path("/v1/query")
 public class QueryController {
   private static final Logger LOG = LoggerFactory.getLogger(QueryController.class);
 
   private final GameFeatureStore gameFeatureStore;
   private final QueryCompiler<CompiledQuery> queryCompiler;
+  private final QueryRequestValidator validator;
 
   public QueryController(
-      GameFeatureStore gameFeatureStore, QueryCompiler<CompiledQuery> queryCompiler) {
+      GameFeatureStore gameFeatureStore,
+      QueryCompiler<CompiledQuery> queryCompiler,
+      QueryRequestValidator validator) {
     this.gameFeatureStore = gameFeatureStore;
     this.queryCompiler = queryCompiler;
+    this.validator = validator;
   }
 
   @POST
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   public QueryResponse query(QueryRequest request) {
+    validator.validate(request);
+
     LOG.info(
-        "POST /query query={} limit={} offset={}",
+        "POST /v1/query query={} limit={} offset={}",
         request.query(),
         request.limit(),
         request.offset());

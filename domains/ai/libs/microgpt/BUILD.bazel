@@ -1,0 +1,43 @@
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "microgpt",
+    srcs = [
+        "src/data.rs",
+        "src/lib.rs",
+        "src/model.rs",
+        "src/tensor_model.rs",
+        "src/tensor_train.rs",
+        "src/train.rs",
+    ],
+    crate_name = "microgpt",
+    visibility = ["//visibility:public"],
+    deps = all_crate_deps(),
+)
+
+rust_test(
+    name = "test_microgpt",
+    size = "small",
+    crate = ":microgpt",
+)
+
+rust_test(
+    name = "e2e_test",
+    size = "small",
+    srcs = ["tests/e2e.rs"],
+    edition = "2021",
+    deps = [
+        ":microgpt",
+    ] + all_crate_deps(),
+)
+
+rust_test(
+    name = "training_safety_test",
+    size = "small",
+    srcs = ["tests/training_safety.rs"],
+    edition = "2021",
+    deps = [
+        ":microgpt",
+    ] + all_crate_deps(),
+)

@@ -7,12 +7,15 @@ import com.muchq.games.chess_com_client.GamesResponse;
 import com.muchq.games.chess_com_client.PlayedGame;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.db.GameFeatureStore;
+import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import com.muchq.games.one_d4.queue.IndexMessage;
+import java.time.Instant;
 import java.time.YearMonth;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -29,6 +32,7 @@ public class IndexWorker {
   private final FeatureExtractor featureExtractor;
   private final IndexingRequestStore requestStore;
   private final GameFeatureStore gameFeatureStore;
+  private final IndexedPeriodStore periodStore;
   private final ObjectMapper objectMapper;
 
   public IndexWorker(
@@ -36,11 +40,13 @@ public class IndexWorker {
       FeatureExtractor featureExtractor,
       IndexingRequestStore requestStore,
       GameFeatureStore gameFeatureStore,
+      IndexedPeriodStore periodStore,
       ObjectMapper objectMapper) {
     this.chessClient = chessClient;
     this.featureExtractor = featureExtractor;
     this.requestStore = requestStore;
     this.gameFeatureStore = gameFeatureStore;
+    this.periodStore = periodStore;
     this.objectMapper = objectMapper;
   }
 
@@ -59,21 +65,47 @@ public class IndexWorker {
       int totalIndexed = 0;
 
       for (YearMonth month = start; !month.isAfter(end); month = month.plusMonths(1)) {
+        String monthStr = month.format(MONTH_FORMAT);
+        Optional<IndexedPeriodStore.IndexedPeriod> cached =
+            periodStore.findCompletePeriod(message.player(), message.platform(), monthStr);
+        if (cached.isPresent()) {
+          int count = cached.get().gamesCount();
+          totalIndexed += count;
+          LOG.debug(
+              "Skipping fetch for player={} platform={} month={} (cached, games={})",
+              message.player(),
+              message.platform(),
+              monthStr,
+              count);
+          requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
+          continue;
+        }
+
         Optional<GamesResponse> response = chessClient.fetchGames(message.player(), month);
         if (response.isEmpty()) {
           LOG.warn("No games found for player={} month={}", message.player(), month);
           continue;
         }
 
+        int monthCount = 0;
         for (PlayedGame game : response.get().games()) {
           try {
             indexGame(message, game);
+            monthCount++;
             totalIndexed++;
+            if (totalIndexed % 10 == 0) {
+              requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
+            }
           } catch (Exception e) {
             LOG.warn("Failed to index game {}", game.url(), e);
           }
         }
-
+        Instant fetchedAt = Instant.now();
+        Instant firstDayNextMonth =
+            month.plusMonths(1).atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        boolean isComplete = !fetchedAt.isBefore(firstDayNextMonth);
+        periodStore.upsertPeriod(
+            message.player(), message.platform(), monthStr, fetchedAt, isComplete, monthCount);
         requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
       }
 

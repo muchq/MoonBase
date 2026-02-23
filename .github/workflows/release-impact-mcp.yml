@@ -1,0 +1,32 @@
+name: Release impact-mcp
+
+on:
+  workflow_run:
+    workflows: ["Test and Publish"]
+    branches: [main]
+    types:
+      - completed
+  workflow_dispatch: {}
+  push:
+    tags:
+      - 'impact-mcp-v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-impact-mcp
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: ./.github/workflows/release-rust-tool.yml
+    with:
+      tool_name: impact-mcp
+      cargo_toml: domains/ai/apps/impact_mcp/Cargo.toml
+      bazel_target: "//domains/ai/apps/impact_mcp:impact-mcp"
+      binary_name: impact-mcp
+      caller_event_name: ${{ github.event_name }}
+      workflow_run_sha: ${{ github.event.workflow_run.head_sha || '' }}
+      workflow_run_conclusion: ${{ github.event.workflow_run.conclusion || '' }}
+    secrets: inherit

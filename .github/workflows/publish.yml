@@ -1,4 +1,4 @@
-name: "Test + Publish"
+name: "Test and Publish"
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   test-and-publish:
-    runs-on: ubuntu-latest-4-cores
+    runs-on: ubuntu-latest
     container:
       image: ghcr.io/muchq/moonbase/ci-base:latest
       volumes:
@@ -50,3 +50,12 @@ jobs:
       - name: bazel-run-oci-push
         run: |
           bazel query 'kind(oci_push, //...)' | xargs -n1 bazel run
+
+      - name: Tag images with commit SHA (for rollback)
+        run: |
+          repos=$(bazel query 'kind(oci_push, //...)' --output=build | sed -n 's/.*repository = "\(ghcr\.io\/muchq\/[^"]*\)".*/\1/p')
+          for repo in $repos; do
+            docker pull "$repo:latest"
+            docker tag "$repo:latest" "$repo:${{ github.sha }}"
+            docker push "$repo:${{ github.sha }}"
+          done

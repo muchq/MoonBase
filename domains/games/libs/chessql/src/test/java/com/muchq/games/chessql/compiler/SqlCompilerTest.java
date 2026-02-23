@@ -50,8 +50,22 @@ public class SqlCompilerTest {
   @Test
   public void testInExpression() {
     CompiledQuery result = compile("platform IN [\"lichess\", \"chess.com\"]");
-    assertThat(result.sql()).isEqualTo("platform IN (?, ?)");
+    assertThat(result.sql()).isEqualTo("LOWER(platform) IN (LOWER(?), LOWER(?))");
     assertThat(result.parameters()).isEqualTo(List.of("lichess", "chess.com"));
+  }
+
+  @Test
+  public void testStringEqualityCaseInsensitive() {
+    CompiledQuery result = compile("white.username = \"hikaru\"");
+    assertThat(result.sql()).isEqualTo("LOWER(white_username) = LOWER(?)");
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru"));
+  }
+
+  @Test
+  public void testNumericEqualityNotWrapped() {
+    CompiledQuery result = compile("white.elo = 3000");
+    assertThat(result.sql()).isEqualTo("white_elo = ?");
+    assertThat(result.parameters()).isEqualTo(List.of(3000));
   }
 
   @Test

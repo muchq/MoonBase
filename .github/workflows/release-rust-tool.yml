@@ -1,0 +1,226 @@
+name: Release Rust Tool
+
+on:
+  workflow_call:
+    inputs:
+      tool_name:
+        required: true
+        type: string
+      cargo_toml:
+        required: true
+        type: string
+      bazel_target:
+        required: true
+        type: string
+      binary_name:
+        required: true
+        type: string
+      caller_event_name:
+        required: true
+        type: string
+        description: "The event that triggered the caller (push, workflow_run, etc.)"
+      workflow_run_sha:
+        required: false
+        type: string
+        default: ''
+        description: "github.event.workflow_run.head_sha from the caller"
+      workflow_run_conclusion:
+        required: false
+        type: string
+        default: ''
+        description: "github.event.workflow_run.conclusion from the caller"
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        required: true
+
+jobs:
+  check-and-tag:
+    runs-on: ubuntu-latest
+    if: inputs.caller_event_name == 'workflow_run' && inputs.workflow_run_conclusion == 'success'
+    outputs:
+      version: ${{ steps.version_check.outputs.current_version }}
+      should_release: ${{ steps.version_check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.workflow_run_sha }}
+          fetch-depth: 2
+
+      - name: Check if version changed
+        id: version_check
+        run: |
+          CARGO_TOML="${{ inputs.cargo_toml }}"
+
+          CURRENT_VERSION=$(grep '^version = ' "$CARGO_TOML" | head -1 | sed 's/version = "\(.*\)"/\1/')
+
+          git checkout HEAD~1 -- "$CARGO_TOML" 2>/dev/null || true
+          PREVIOUS_VERSION=$(grep '^version = ' "$CARGO_TOML" | head -1 | sed 's/version = "\(.*\)"/\1/' || echo "")
+
+          git checkout HEAD -- "$CARGO_TOML"
+
+          echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "previous_version=$PREVIOUS_VERSION" >> "$GITHUB_OUTPUT"
+
+          if [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ] && [ -n "$CURRENT_VERSION" ]; then
+            echo "Version changed from $PREVIOUS_VERSION to $CURRENT_VERSION"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version unchanged: $CURRENT_VERSION"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push tag
+        if: steps.version_check.outputs.changed == 'true'
+        run: |
+          VERSION="${{ steps.version_check.outputs.current_version }}"
+          TAG="${{ inputs.tool_name }}-v${VERSION}"
+
+          if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
+            echo "Tag $TAG already exists on remote, skipping"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "$TAG" -m "Release ${{ inputs.tool_name }} v${VERSION}"
+          git push origin "$TAG"
+
+          echo "Created and pushed tag: $TAG"
+
+  prepare:
+    needs: [check-and-tag]
+    if: |
+      always() &&
+      (inputs.caller_event_name == 'push' ||
+       (needs.check-and-tag.result == 'success' && needs.check-and-tag.outputs.should_release == 'true'))
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      ref: ${{ steps.resolve.outputs.ref }}
+    steps:
+      - name: Resolve version and ref
+        id: resolve
+        run: |
+          if [ "${{ inputs.caller_event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#${{ inputs.tool_name }}-v}"
+            REF="${{ github.ref }}"
+          else
+            VERSION="${{ needs.check-and-tag.outputs.version }}"
+            TAG="${{ inputs.tool_name }}-v${VERSION}"
+            REF="${{ inputs.workflow_run_sha }}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [prepare]
+    if: always() && needs.prepare.result == 'success'
+    strategy:
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - name: Verify version matches Cargo.toml
+        if: inputs.caller_event_name == 'push'
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          CARGO_VERSION=$(grep '^version = ' ${{ inputs.cargo_toml }} | head -1 | sed 's/version = "\(.*\)"/\1/')
+          if [ "$VERSION" != "$CARGO_VERSION" ]; then
+            echo "Error: Tag version ($VERSION) doesn't match Cargo.toml ($CARGO_VERSION)"
+            exit 1
+          fi
+          echo "Version verification passed: $VERSION"
+
+      - uses: bazel-contrib/setup-bazel@0.18.0
+        with:
+          bazelisk-cache: true
+          disk-cache: release-${{ inputs.tool_name }}-${{ matrix.target }}
+          repository-cache: true
+
+      - name: Build
+        run: bazel build ${{ inputs.bazel_target }}
+
+      - name: Package
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          BINARY="${{ inputs.binary_name }}"
+          TARBALL="${BINARY}-${VERSION}-${{ matrix.target }}.tar.gz"
+          SHA_FILE="${BINARY}-${VERSION}-${{ matrix.target }}.sha256.txt"
+
+          TARGET="${{ inputs.bazel_target }}"
+          BAZEL_BIN="bazel-bin/$(echo "${TARGET#//}" | tr ':' '/')"
+          cp "$BAZEL_BIN" "$BINARY"
+
+          tar czf "$TARBALL" "$BINARY"
+          shasum -a 256 "$TARBALL" | awk '{print $1}' > "$SHA_FILE"
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+          echo "SHA_FILE=$SHA_FILE" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            ${{ env.TARBALL }}
+            ${{ env.SHA_FILE }}
+
+  release:
+    needs: [prepare, build]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TAG="${{ needs.prepare.outputs.tag }}"
+          gh release create "$TAG" \
+            --title "${{ inputs.tool_name }} v${VERSION}" \
+            --generate-notes \
+            artifacts/**/*.tar.gz \
+            artifacts/**/*.sha256.txt
+
+      - name: Update Homebrew tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TOOL="${{ inputs.tool_name }}"
+          MAC_SHA=$(cat artifacts/aarch64-apple-darwin/*.sha256.txt)
+          LINUX_SHA=$(cat artifacts/x86_64-unknown-linux-gnu/*.sha256.txt)
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/muchq/homebrew-muchq.git" tap
+          FORMULA="tap/Formula/${TOOL}.rb"
+
+          python3 .github/scripts/update-homebrew-formula.py "$FORMULA" "$TOOL" "$VERSION" "$MAC_SHA" "$LINUX_SHA"
+
+          if ! grep -qF "${TOOL}-v${VERSION}" "$FORMULA"; then
+            echo "Error: Formula was not updated with version ${VERSION}"
+            exit 1
+          fi
+          echo "Formula successfully updated to version ${VERSION}"
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "Formula/${TOOL}.rb"
+          git commit -m "${TOOL} ${VERSION}"
+          git push

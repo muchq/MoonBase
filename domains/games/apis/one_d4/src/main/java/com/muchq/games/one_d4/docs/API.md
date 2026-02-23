@@ -10,7 +10,7 @@ Configurable via `PORT` environment variable.
 
 ---
 
-## POST /index
+## POST /v1/index
 
 Start indexing games for a player over a month range.
 
@@ -37,6 +37,10 @@ Start indexing games for a player over a month range.
 ```json
 {
   "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "player": "hikaru",
+  "platform": "CHESS_COM",
+  "startMonth": "2024-03",
+  "endMonth": "2024-03",
   "status": "PENDING",
   "gamesIndexed": 0,
   "errorMessage": null
@@ -52,7 +56,7 @@ PENDING → PROCESSING → COMPLETED
 
 ---
 
-## GET /index/{id}
+## GET /v1/index/{id}
 
 Poll the status of an indexing request.
 
@@ -61,6 +65,10 @@ Poll the status of an indexing request.
 ```json
 {
   "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "player": "hikaru",
+  "platform": "CHESS_COM",
+  "startMonth": "2024-03",
+  "endMonth": "2024-03",
   "status": "COMPLETED",
   "gamesIndexed": 147,
   "errorMessage": null
@@ -73,7 +81,7 @@ Returned when the ID does not match any indexing request.
 
 ---
 
-## POST /query
+## POST /v1/query
 
 Search indexed games using ChessQL.
 
@@ -147,29 +155,29 @@ Search indexed games using ChessQL.
 INDEXER_DB_URL="jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1" bazel run //domains/games/apis/one_d4:indexer
 
 # 1. Start indexing
-curl -X POST http://localhost:8080/index \
+curl -X POST http://localhost:8080/v1/index \
   -H "Content-Type: application/json" \
   -d '{"player":"hikaru","platform":"CHESS_COM","startMonth":"2026-01","endMonth":"2026-01"}'
 
 # Response: {"id":"abc-123","status":"PENDING","gamesIndexed":0}
 
 # 2. Poll until completed
-curl http://localhost:8080/index/abc-123
+curl http://localhost:8080/v1/index/abc-123
 
 # Response: {"id":"abc-123","status":"COMPLETED","gamesIndexed":828}
 
 # 3. Query indexed games
-curl -X POST http://localhost:8080/query \
+curl -X POST http://localhost:8080/v1/query \
   -H "Content-Type: application/json" \
   -d '{"query":"white.elo > 2700 AND motif(fork)","limit":10,"offset":0}'
 
 # 4. Query games with multiple motifs
-curl -X POST http://localhost:8080/query \
+curl -X POST http://localhost:8080/v1/query \
   -H "Content-Type: application/json" \
   -d '{"query":"motif(pin) AND motif(skewer)","limit":10,"offset":0}'
 
 # 5. Query by ECO opening code
-curl -X POST http://localhost:8080/query \
+curl -X POST http://localhost:8080/v1/query \
   -H "Content-Type: application/json" \
   -d '{"query":"eco = \"B90\"","limit":10,"offset":0}'
 ```
