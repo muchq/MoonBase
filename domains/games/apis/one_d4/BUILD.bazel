@@ -309,7 +309,7 @@ java_library(
 
 java_test_suite(
     name = "e2e_tests",
-    size = "medium",
+    size = "small",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/e2e/IndexE2ETest.java",
     ],
