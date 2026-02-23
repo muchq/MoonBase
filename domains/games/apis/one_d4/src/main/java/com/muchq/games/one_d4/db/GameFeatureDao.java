@@ -86,7 +86,9 @@ public class GameFeatureDao implements GameFeatureStore {
           "Expected CompiledQuery, got: " + compiledQuery.getClass());
     }
     String sql =
-        "SELECT * FROM game_features WHERE " + cq.sql() + " ORDER BY played_at DESC LIMIT ? OFFSET ?";
+        "SELECT * FROM game_features WHERE "
+            + cq.sql()
+            + " ORDER BY played_at DESC LIMIT ? OFFSET ?";
     try (Connection conn = dataSource.getConnection();
         PreparedStatement ps = conn.prepareStatement(sql)) {
       int idx = 1;

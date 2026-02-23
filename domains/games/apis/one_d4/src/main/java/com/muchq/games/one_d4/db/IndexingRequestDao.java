@@ -90,8 +90,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
 
   @Override
   public List<IndexingRequest> listRecent(int limit) {
-    String sql =
-        "SELECT * FROM indexing_requests ORDER BY created_at DESC LIMIT ?";
+    String sql = "SELECT * FROM indexing_requests ORDER BY created_at DESC LIMIT ?";
     try (Connection conn = dataSource.getConnection();
         PreparedStatement ps = conn.prepareStatement(sql)) {
       ps.setInt(1, limit);

@@ -15,7 +15,8 @@ public class IndexingRequestDaoTest {
 
   @Before
   public void setUp() {
-    String jdbcUrl = "jdbc:h2:mem:index_req_test_" + System.currentTimeMillis() + ";DB_CLOSE_DELAY=-1";
+    String jdbcUrl =
+        "jdbc:h2:mem:index_req_test_" + System.currentTimeMillis() + ";DB_CLOSE_DELAY=-1";
     DataSource dataSource = DataSourceFactory.create(jdbcUrl, "sa", "");
     Migration migration = new Migration(dataSource, true);
     migration.run();
