@@ -44,6 +44,9 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
 
   private static final Set<String> VALID_OPS = Set.of("=", "!=", "<", "<=", ">", ">=");
 
+  private static final Set<String> STRING_COLUMNS =
+      Set.of("white_username", "black_username", "time_class", "eco", "result", "platform", "game_url");
+
   public CompiledQuery compile(Expr expr) {
     List<Object> params = new ArrayList<>();
     String sql = compileExpr(expr, params);
@@ -74,6 +77,9 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       throw new IllegalArgumentException("Invalid operator: " + op);
     }
     params.add(cmp.value());
+    if (STRING_COLUMNS.contains(column) && (op.equals("=") || op.equals("!="))) {
+      return "LOWER(" + column + ") " + op + " LOWER(?)";
+    }
     return column + " " + op + " ?";
   }
 
@@ -81,6 +87,11 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     String column = resolveColumn(in.field());
     params.addAll(in.values());
     String placeholders = in.values().stream().map(v -> "?").collect(Collectors.joining(", "));
+    if (STRING_COLUMNS.contains(column)) {
+      String lowerPlaceholders =
+          in.values().stream().map(v -> "LOWER(?)").collect(Collectors.joining(", "));
+      return "LOWER(" + column + ") IN (" + lowerPlaceholders + ")";
+    }
     return column + " IN (" + placeholders + ")";
   }
 
