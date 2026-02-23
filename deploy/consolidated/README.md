@@ -68,6 +68,16 @@ This will:
 4. Pull latest Docker images
 5. Restart all services
 
+## Rollback
+
+Images are pushed with both a `latest` tag and the Git commit SHA (e.g. `abc1234`). To roll back, pin the service to a known-good commit in `compose.yaml`:
+
+```yaml
+image: ghcr.io/muchq/portrait:abc1234   # instead of :latest
+```
+
+Then run `deploy.sh` again so the host pulls the pinned image.
+
 ## Configuration Requirements
 
 Services require configuration files in their respective `/etc` directories on the host:
