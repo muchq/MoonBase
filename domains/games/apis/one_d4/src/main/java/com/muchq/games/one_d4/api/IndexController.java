@@ -54,7 +54,15 @@ public class IndexController {
     if (existing.isPresent()) {
       IndexingRequestStore.IndexingRequest row = existing.get();
       LOG.info("Returning existing index request {} (status={})", row.id(), row.status());
-      return new IndexResponse(row.id(), row.status(), row.gamesIndexed(), row.errorMessage());
+      return new IndexResponse(
+          row.id(),
+          row.player(),
+          row.platform(),
+          row.startMonth(),
+          row.endMonth(),
+          row.status(),
+          row.gamesIndexed(),
+          row.errorMessage());
     }
 
     UUID id =
@@ -65,7 +73,15 @@ public class IndexController {
         new IndexMessage(
             id, request.player(), request.platform(), request.startMonth(), request.endMonth()));
 
-    return new IndexResponse(id, "PENDING", 0, null);
+    return new IndexResponse(
+        id,
+        request.player(),
+        request.platform(),
+        request.startMonth(),
+        request.endMonth(),
+        "PENDING",
+        0,
+        null);
   }
 
   @GET
@@ -77,7 +93,15 @@ public class IndexController {
         .findById(id)
         .map(
             row ->
-                new IndexResponse(row.id(), row.status(), row.gamesIndexed(), row.errorMessage()))
+                new IndexResponse(
+                    row.id(),
+                    row.player(),
+                    row.platform(),
+                    row.startMonth(),
+                    row.endMonth(),
+                    row.status(),
+                    row.gamesIndexed(),
+                    row.errorMessage()))
         .orElseThrow(() -> new NoSuchElementException("Indexing request not found: " + id));
   }
 }

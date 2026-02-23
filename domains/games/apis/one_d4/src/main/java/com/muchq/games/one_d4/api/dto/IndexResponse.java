@@ -4,4 +4,11 @@ import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 
 public record IndexResponse(
-    UUID id, String status, int gamesIndexed, @Nullable String errorMessage) {}
+    UUID id,
+    String player,
+    String platform,
+    String startMonth,
+    String endMonth,
+    String status,
+    int gamesIndexed,
+    @Nullable String errorMessage) {}

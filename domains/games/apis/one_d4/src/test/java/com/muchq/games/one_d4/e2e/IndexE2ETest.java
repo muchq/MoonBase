@@ -105,6 +105,10 @@ public class IndexE2ETest {
     IndexResponse after = controller.getIndex(created.id());
     assertThat(after.status()).isEqualTo("COMPLETED");
     assertThat(after.gamesIndexed()).isEqualTo(2);
+    assertThat(after.player()).isEqualTo(PLAYER);
+    assertThat(after.platform()).isEqualTo(PLATFORM);
+    assertThat(after.startMonth()).isEqualTo("2024-03");
+    assertThat(after.endMonth()).isEqualTo("2024-03");
     assertThat(fakeChessClient.getFetchCalls())
         .containsExactly(new FakeChessClient.FetchCall(PLAYER, month));
   }

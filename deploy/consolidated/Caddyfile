@@ -260,6 +260,10 @@ api.1d4.net {
 	reverse_proxy @post_query one_d4:8080
 	reverse_proxy @get_health one_d4:8080
 
+	handle {
+		respond 404
+	}
+
 	log {
 		output file /var/log/caddy/access.log {
 			roll_size 1gb
