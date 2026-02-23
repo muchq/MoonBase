@@ -45,7 +45,14 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
   private static final Set<String> VALID_OPS = Set.of("=", "!=", "<", "<=", ">", ">=");
 
   private static final Set<String> STRING_COLUMNS =
-      Set.of("white_username", "black_username", "time_class", "eco", "result", "platform", "game_url");
+      Set.of(
+          "white_username",
+          "black_username",
+          "time_class",
+          "eco",
+          "result",
+          "platform",
+          "game_url");
 
   public CompiledQuery compile(Expr expr) {
     List<Object> params = new ArrayList<>();
