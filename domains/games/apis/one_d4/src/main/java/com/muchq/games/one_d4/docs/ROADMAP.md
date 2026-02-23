@@ -113,6 +113,65 @@ CREATE TABLE indexed_periods (
 - Player changes username → old username's cache is stale (detect via player ID if API provides it)
 - Games added retroactively by chess.com (rare) → accept minor staleness or add TTL
 
+### Skip-cache
+
+Allow forcing a full re-fetch and re-index for periods that would otherwise be served from `indexed_periods`, for example when the user knows data changed or for debugging.
+
+**Per-request skip:** Add an optional `skipCache` (or `forceRefresh`) flag to the index request:
+
+- `POST /v1/index` body: `{ "player": "...", "platform": "...", "startMonth": "...", "endMonth": "...", "skipCache": true }`
+- When `skipCache` is true, the worker does not use `findCompletePeriod` for that request; it fetches every month in the range from the API and re-indexes, then upserts `indexed_periods` as usual. Existing `game_features` rows for those games may be updated or deduped by `game_url` depending on current insert/merge behavior.
+
+**Admin invalidation:** Optional endpoint to clear or invalidate cached periods so that future requests re-fetch:
+
+- `DELETE /admin/indexed-periods?player=X&platform=Y&yearMonth=2024-01` (or body with a list of (player, platform, year_month)) to delete specific rows from `indexed_periods`.
+- Or a “soft” invalidate (e.g. set `is_complete = false` or bump a version) so the next index request for that period refetches.
+
+**Implementation notes:**
+- Index request DTO and validation: add optional `Boolean skipCache` (default false).
+- IndexWorker: when processing a message, if the request has skipCache, do not call `periodStore.findCompletePeriod` for any month in the range; always fetch. Either pass the flag on `IndexMessage` or look up the request row and read a `skip_cache` column.
+
+### Disk cap
+
+Avoid filling disk when using file-based storage (e.g. H2 file in Docker with `one_d4_data` volume). Neither H2 nor the current Compose config impose a size limit; the volume can grow until the host runs out of space.
+
+**App-level cap (optional):**
+
+- Config: `indexer.disk.maxBytes` (or `INDEXER_DISK_MAX_BYTES`) — maximum allowed size for the data directory (or H2 DB files). Default: 0 or unset = no cap.
+- Before accepting a new index request (or before the worker processes the next month): check total size of the data path (e.g. `/data` or the directory containing the H2 `.mv.db` file). If at or over the cap, refuse new work:
+  - `POST /v1/index` → 503 or 429 with a clear message (“disk cap reached”).
+  - Worker: skip processing or mark request failed with “disk cap reached” and do not fetch/index more data until below cap.
+- Optionally expose status: e.g. `GET /health` or a simple admin endpoint that reports current usage and cap so operators can monitor.
+
+**Deployment / volume:**
+
+- Document that production deployments should put the indexer data volume on a quota-backed filesystem or use a volume driver that supports a size limit where available.
+- Compose does not support a max size on named volumes directly; document recommended host-level limits or quota setup for `one_d4_data`.
+
+**Note:** Once the indexer uses PostgreSQL (e.g. Neon) instead of H2 file storage, this is less of a concern: the database runs in a managed service with its own storage limits and scaling; the app no longer owns the data directory on disk.
+
+### Fanout by player+year_month
+
+**Current:** One queue message per API request (one `IndexMessage` per player, platform, startMonth, endMonth). The worker iterates months inside `process()`. Overlapping requests (e.g. 2024-01–03 and 2024-02–04) do not dedupe at the queue level; we only skip re-fetching months that are already complete in `indexed_periods`.
+
+**Proposed:** Fan out so that work is enqueued and deduped at (player, platform, year_month) granularity.
+
+1. **Work units:** When `POST /v1/index` is received for a range (e.g. 2024-01 to 2024-03), instead of enqueueing a single message for the range, enqueue one work unit per month in the range (e.g. three units: 2024-01, 2024-02, 2024-03). Each unit is keyed by (player, platform, year_month).
+
+2. **Deduplication:** Before enqueueing a (player, platform, year_month) unit:
+   - If that period is already complete in `indexed_periods`, skip (no message).
+   - If that unit is already in the queue or currently being processed (e.g. from another request), skip or coalesce so each (player, platform, year_month) is processed at most once.
+
+3. **Request identity:** The API still returns a single request ID for the range. Options:
+   - Each work unit carries the request ID(s) that “need” that month; when the unit completes, update progress for all associated requests.
+   - Or: one parent “request” row plus a separate table of (request_id, player, platform, year_month) rows; workers process per-month units and update the parent request’s status/count as months complete.
+
+4. **Benefits:** Overlapping requests (e.g. 2024-01–03 and 2024-02–04) automatically share work for 2024-02 and 2024-03; no duplicate fetch or index for the same player+month.
+
+**Implementation notes:**
+- `IndexMessage` (or a new per-month message type) would be (requestId, player, platform, year_month) or equivalent; the worker processes one month per message.
+- Queue implementation (in-memory, SQS, etc.) may need to support “enqueue if not already present” for (player, platform, year_month), or a separate “pending months” store that the worker claims from.
+
 ### Estimated Changes
 
 - 3-4 files modified (DTOs, controllers)
@@ -254,11 +313,11 @@ public class ApiKeyFilter implements HttpServerFilter {
 ### Authorization
 
 Phase 1: Single-tier (any valid key has full access).
-Phase 2: Role-based — `admin` keys can access /admin/*, `user` keys can access /index and /query.
+Phase 2: Role-based — `admin` keys can access /admin/*, `user` keys can access /v1/index and /v1/query.
 
 ### Rate Limiting
 
-Per-key rate limiting on the /query endpoint:
+Per-key rate limiting on the /v1/query endpoint:
 - 100 queries/minute per API key
 - 429 response with `Retry-After` header
 - In-memory counter with sliding window (Guava `Cache<String, AtomicInteger>`)

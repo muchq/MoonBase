@@ -39,6 +39,26 @@ api.muchq.com {
 		path /metrics/v1/scalar/*
 	}
 
+	@get_1d4_health {
+		method GET
+		path /1d4/v1/health
+	}
+
+	@post_1d4_index {
+		method POST
+		path /1d4/v1/index
+	}
+
+	@get_1d4_index {
+		method GET
+		path /1d4/v1/index/*
+	}
+
+	@post_1d4_query {
+		method POST
+		path /1d4/v1/query
+	}
+
 	@ws_thoughts {
 		path /games/v1/thoughts-ws
 	}
@@ -78,6 +98,23 @@ api.muchq.com {
 	reverse_proxy @post_posterize_edges posterize:8084
 	reverse_proxy @post_generate microgpt-serve:8087
 	reverse_proxy @post_chat microgpt-serve:8087
+
+	handle @get_1d4_health {
+		rewrite * /health
+		reverse_proxy one_d4:8080
+	}
+	handle @post_1d4_index {
+		rewrite * /v1/index
+		reverse_proxy one_d4:8080
+	}
+	handle @get_1d4_index {
+		uri strip_prefix /1d4
+		reverse_proxy one_d4:8080
+	}
+	handle @post_1d4_query {
+		rewrite * /v1/query
+		reverse_proxy one_d4:8080
+	}
 
 	log {
 		output file /var/log/caddy/access.log {
@@ -179,17 +216,17 @@ gpt.muchq.com {
 api.1d4.net {
 	@post_index {
 		method POST
-		path /index
+		path /v1/index
 	}
 
 	@get_index {
 		method GET
-		path /index/*
+		path /v1/index/*
 	}
 
 	@post_query {
 		method POST
-		path /query
+		path /v1/query
 	}
 
 	@get_health {

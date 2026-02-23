@@ -17,11 +17,11 @@ curl -X GET http://localhost:8080/health
 Starts a background task to index games for a specific player on a platform within a given time range.
 
 ```bash
-curl -X POST http://localhost:8080/index \
+curl -X POST http://localhost:8080/v1/index \
   -H "Content-Type: application/json" \
   -d '{
     "player": "magnuscarlsen",
-    "platform": "chess.com",
+    "platform": "CHESS_COM",
     "startMonth": "2023-01",
     "endMonth": "2023-12"
   }'
@@ -32,10 +32,10 @@ curl -X POST http://localhost:8080/index \
 Retrieves the status of a previously submitted indexing request.
 
 ```bash
-curl -X GET http://localhost:8080/index/{id}
+curl -X GET http://localhost:8080/v1/index/{id}
 ```
 
-Replace `{id}` with the UUID returned from the `POST /index` request.
+Replace `{id}` with the UUID returned from the `POST /v1/index` request.
 
 ### Query Games
 
@@ -43,7 +43,7 @@ Query indexed game features using the ChessQL expression language. ChessQL is an
 
 **Example: Query by rating**
 ```bash
-curl -X POST http://localhost:8080/query \
+curl -X POST http://localhost:8080/v1/query \
   -H "Content-Type: application/json" \
   -d '{
     "query": "white_elo > 2500 OR black_elo > 2500",
@@ -54,7 +54,7 @@ curl -X POST http://localhost:8080/query \
 
 **Example: Query by motifs**
 ```bash
-curl -X POST http://localhost:8080/query \
+curl -X POST http://localhost:8080/v1/query \
   -H "Content-Type: application/json" \
   -d '{
     "query": "motif(fork) AND white_elo >= 2400",
@@ -64,7 +64,7 @@ curl -X POST http://localhost:8080/query \
 
 **Example: Query by opening (ECO)**
 ```bash
-curl -X POST http://localhost:8080/query \
+curl -X POST http://localhost:8080/v1/query \
   -H "Content-Type: application/json" \
   -d '{
     "query": "eco = \"B90\" AND platform IN [\"chess.com\", \"lichess\"]",

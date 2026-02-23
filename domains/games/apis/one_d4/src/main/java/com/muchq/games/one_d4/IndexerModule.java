@@ -8,6 +8,8 @@ import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.one_d4.db.DataSourceFactory;
 import com.muchq.games.one_d4.db.GameFeatureDao;
 import com.muchq.games.one_d4.db.GameFeatureStore;
+import com.muchq.games.one_d4.db.IndexedPeriodDao;
+import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestDao;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.db.Migration;
@@ -83,6 +85,14 @@ public class IndexerModule {
   }
 
   @Context
+  public IndexedPeriodStore indexedPeriodStore(
+      DataSource dataSource,
+      @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl) {
+    boolean useH2 = jdbcUrl.contains(":h2:");
+    return new IndexedPeriodDao(dataSource, useH2);
+  }
+
+  @Context
   public IndexQueue indexQueue() {
     return new InMemoryIndexQueue();
   }
@@ -124,9 +134,10 @@ public class IndexerModule {
       FeatureExtractor featureExtractor,
       IndexingRequestStore requestStore,
       GameFeatureStore gameFeatureStore,
+      IndexedPeriodStore periodStore,
       ObjectMapper objectMapper) {
     return new IndexWorker(
-        chessClient, featureExtractor, requestStore, gameFeatureStore, objectMapper);
+        chessClient, featureExtractor, requestStore, gameFeatureStore, periodStore, objectMapper);
   }
 
   @Context
