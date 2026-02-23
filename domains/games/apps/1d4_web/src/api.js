@@ -39,6 +39,14 @@ export async function createIndex(body) {
 }
 
 /**
+ * GET /v1/index — list recent indexing requests.
+ * @returns {Promise<Array<{ id: string, player: string, platform: string, startMonth: string, endMonth: string, status: string, gamesIndexed: number, errorMessage: string|null }>>}
+ */
+export async function listIndexRequests() {
+  return request('/v1/index');
+}
+
+/**
  * GET /v1/index/{id} — get status of an indexing request.
  * @param {string} id — UUID
  * @returns {Promise<{ id: string, status: string, gamesIndexed: number, errorMessage: string|null }>}

@@ -1,6 +1,7 @@
 package com.muchq.games.one_d4.db;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -15,6 +16,8 @@ public interface IndexingRequestStore {
    */
   Optional<IndexingRequest> findExistingRequest(
       String player, String platform, String startMonth, String endMonth);
+
+  List<IndexingRequest> listRecent(int limit);
 
   void updateStatus(UUID id, String status, String errorMessage, int gamesIndexed);
 

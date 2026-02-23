@@ -221,7 +221,7 @@ api.1d4.net {
 
 	@get_index {
 		method GET
-		path /v1/index/*
+		path /v1/index /v1/index/*
 	}
 
 	@post_query {
@@ -255,10 +255,21 @@ api.1d4.net {
 		respond 204
 	}
 
-	reverse_proxy @post_index one_d4:8080
-	reverse_proxy @get_index one_d4:8080
-	reverse_proxy @post_query one_d4:8080
-	reverse_proxy @get_health one_d4:8080
+	handle @post_index {
+		reverse_proxy one_d4:8080
+	}
+
+	handle @get_index {
+		reverse_proxy one_d4:8080
+	}
+
+	handle @post_query {
+		reverse_proxy one_d4:8080
+	}
+
+	handle @get_health {
+		reverse_proxy one_d4:8080
+	}
 
 	handle {
 		respond 404

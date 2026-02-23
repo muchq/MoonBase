@@ -4,6 +4,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
@@ -83,6 +85,24 @@ public class IndexingRequestDao implements IndexingRequestStore {
       }
     } catch (SQLException e) {
       throw new RuntimeException("Failed to find existing indexing request", e);
+    }
+  }
+
+  @Override
+  public List<IndexingRequest> listRecent(int limit) {
+    String sql = "SELECT * FROM indexing_requests ORDER BY created_at DESC LIMIT ?";
+    try (Connection conn = dataSource.getConnection();
+        PreparedStatement ps = conn.prepareStatement(sql)) {
+      ps.setInt(1, limit);
+      try (ResultSet rs = ps.executeQuery()) {
+        List<IndexingRequest> results = new ArrayList<>();
+        while (rs.next()) {
+          results.add(mapRow(rs));
+        }
+        return results;
+      }
+    } catch (SQLException e) {
+      throw new RuntimeException("Failed to list indexing requests", e);
     }
   }
 

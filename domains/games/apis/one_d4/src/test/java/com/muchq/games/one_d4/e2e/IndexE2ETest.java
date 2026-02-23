@@ -184,6 +184,27 @@ public class IndexE2ETest {
             new FakeChessClient.FetchCall(PLAYER, jan), new FakeChessClient.FetchCall(PLAYER, mar));
   }
 
+  @Test
+  public void listRequests_returnsAllRequestsIncludingCompleted() {
+    YearMonth month = YearMonth.of(2024, 5);
+    fakeChessClient.addGame(PLAYER, month, "https://chess.com/game/list-1");
+
+    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-05", "2024-05");
+    IndexResponse created = controller.createIndex(request);
+
+    List<IndexResponse> pending = controller.listRequests();
+    assertThat(pending).hasSize(1);
+    assertThat(pending.get(0).id()).isEqualTo(created.id());
+    assertThat(pending.get(0).status()).isEqualTo("PENDING");
+
+    processQueueUntilIdle();
+
+    List<IndexResponse> completed = controller.listRequests();
+    assertThat(completed).hasSize(1);
+    assertThat(completed.get(0).status()).isEqualTo("COMPLETED");
+    assertThat(completed.get(0).gamesIndexed()).isEqualTo(1);
+  }
+
   private void processQueueUntilIdle() {
     int maxIterations = 100;
     for (int i = 0; i < maxIterations; i++) {

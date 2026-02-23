@@ -155,6 +155,11 @@ public class IndexWorkerTest {
     }
 
     @Override
+    public List<IndexingRequestStore.IndexingRequest> listRecent(int limit) {
+      return List.of();
+    }
+
+    @Override
     public Optional<IndexingRequestStore.IndexingRequest> findExistingRequest(
         String player, String platform, String startMonth, String endMonth) {
       return Optional.empty();
