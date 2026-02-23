@@ -13,6 +13,7 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.UUID;
@@ -33,6 +34,25 @@ public class IndexController {
     this.requestDao = requestDao;
     this.queue = queue;
     this.validator = validator;
+  }
+
+  @GET
+  @Produces(MediaType.APPLICATION_JSON)
+  public List<IndexResponse> listRequests() {
+    LOG.info("GET /v1/index");
+    return requestDao.listRecent(50).stream()
+        .map(
+            row ->
+                new IndexResponse(
+                    row.id(),
+                    row.player(),
+                    row.platform(),
+                    row.startMonth(),
+                    row.endMonth(),
+                    row.status(),
+                    row.gamesIndexed(),
+                    row.errorMessage()))
+        .toList();
   }
 
   @POST

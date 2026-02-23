@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.IntStream;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -109,6 +110,30 @@ public class IndexControllerTest {
   }
 
   @Test
+  public void listRequests_returnsAllStoredRequests() {
+    int count = 3;
+    IntStream.range(0, count)
+        .forEach(
+            i ->
+                requestStore.addRequest(
+                    new IndexingRequestStore.IndexingRequest(
+                        UUID.randomUUID(),
+                        "player" + i,
+                        "CHESS_COM",
+                        "2024-0" + (i + 1),
+                        "2024-0" + (i + 1),
+                        "COMPLETE",
+                        Instant.now(),
+                        Instant.now(),
+                        null,
+                        10)));
+
+    List<IndexResponse> responses = controller.listRequests();
+
+    assertThat(responses).hasSize(count);
+  }
+
+  @Test
   public void getIndex_returnsRequestWithPlayerAndDateRange() {
     IndexingRequestStore.IndexingRequest stored =
         new IndexingRequestStore.IndexingRequest(
@@ -139,6 +164,7 @@ public class IndexControllerTest {
   private static final class FakeIndexingRequestStore implements IndexingRequestStore {
     private Optional<IndexingRequestStore.IndexingRequest> existingRequest = Optional.empty();
     private Optional<IndexingRequestStore.IndexingRequest> findByIdResponse = Optional.empty();
+    private final List<IndexingRequestStore.IndexingRequest> allRequests = new ArrayList<>();
     private int createCallCount = 0;
 
     void setExistingRequest(IndexingRequestStore.IndexingRequest request) {
@@ -147,6 +173,10 @@ public class IndexControllerTest {
 
     void setFindByIdResponse(IndexingRequestStore.IndexingRequest request) {
       this.findByIdResponse = Optional.of(request);
+    }
+
+    void addRequest(IndexingRequestStore.IndexingRequest request) {
+      allRequests.add(request);
     }
 
     int createCallCount() {
@@ -162,6 +192,11 @@ public class IndexControllerTest {
     @Override
     public Optional<IndexingRequestStore.IndexingRequest> findById(UUID id) {
       return findByIdResponse.filter(r -> r.id().equals(id));
+    }
+
+    @Override
+    public List<IndexingRequestStore.IndexingRequest> listRecent(int limit) {
+      return allRequests.stream().limit(limit).toList();
     }
 
     @Override

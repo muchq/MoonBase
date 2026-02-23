@@ -1,11 +1,10 @@
 /**
  * Enqueue index form + request status list. Submit calls POST api.1d4.net/v1/index.
- * Recent requests stored in sessionStorage; poll GET api.1d4.net/v1/index/{id}.
+ * Status table populated from GET api.1d4.net/v1/index (list of recent requests).
  */
 
-import { createIndex, getIndexStatus } from '../api.js';
+import { createIndex, listIndexRequests } from '../api.js';
 
-const STORAGE_KEY = '1d4_index_request_ids';
 const POLL_INTERVAL_MS = 3000;
 
 function normalizeMonth(value) {
@@ -16,49 +15,30 @@ function normalizeMonth(value) {
   return `${m[1]}-${month}`;
 }
 
-function getStoredIds() {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function addStoredId(id) {
-  const ids = getStoredIds();
-  if (!ids.includes(id)) ids.unshift(id);
-  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(ids.slice(0, 50)));
-}
-
 export function renderIndex(container) {
-  let requestStatuses = {};
+  let requests = [];
   let pollTimer = null;
 
-  function loadStatuses() {
-    const ids = getStoredIds();
-    if (ids.length === 0) return;
-    ids.forEach((id) => {
-      getIndexStatus(id)
-        .then((res) => {
-          requestStatuses[id] = res;
-          render();
-        })
-        .catch(() => {
-          requestStatuses[id] = { id, status: 'FAILED', errorMessage: 'Failed to fetch' };
-          render();
-        });
-    });
+  function loadRequests() {
+    return listIndexRequests()
+      .then((res) => {
+        requests = Array.isArray(res) ? res : [];
+        render();
+      })
+      .catch(() => {
+        render();
+      });
+  }
+
+  function hasActive() {
+    return requests.some((r) => ['PENDING', 'PROCESSING'].includes(r.status));
   }
 
   function startPolling() {
     if (pollTimer) return;
-    const hasActive = getStoredIds().some(
-      (id) => requestStatuses[id] && ['PENDING', 'PROCESSING'].includes(requestStatuses[id].status)
-    );
-    if (!hasActive) return;
+    if (!hasActive()) return;
     pollTimer = setInterval(() => {
-      loadStatuses();
+      loadRequests();
     }, POLL_INTERVAL_MS);
   }
 
@@ -70,10 +50,7 @@ export function renderIndex(container) {
   }
 
   function render() {
-    const hasActive = getStoredIds().some(
-      (id) => requestStatuses[id] && ['PENDING', 'PROCESSING'].includes(requestStatuses[id].status)
-    );
-    if (!hasActive) stopPolling();
+    if (!hasActive()) stopPolling();
     else startPolling();
 
     container.innerHTML = '';
@@ -117,15 +94,14 @@ export function renderIndex(container) {
         container.insertBefore(msg, container.firstChild);
         return;
       }
-      const body = { player, platform, startMonth, endMonth };
-      createIndex(body)
-        .then((res) => {
-          addStoredId(res.id);
-          requestStatuses[res.id] = res;
-          render();
+      createIndex({ player, platform, startMonth, endMonth })
+        .then(() => {
+          return loadRequests();
+        })
+        .then(() => {
           const msg = document.createElement('div');
           msg.className = 'message success';
-          msg.innerHTML = `Request created. ID: <strong>${res.id}</strong> — <a href="/index" class="external">View status below</a>.`;
+          msg.textContent = 'Request created.';
           container.insertBefore(msg, container.firstChild);
         })
         .catch((err) => {
@@ -150,15 +126,17 @@ export function renderIndex(container) {
     const statusPanel = document.createElement('div');
     statusPanel.className = 'panel';
     statusPanel.innerHTML = '<h2>Request status</h2>';
-    const ids = getStoredIds();
-    if (ids.length === 0) {
-      statusPanel.appendChild(document.createElement('p')).className = 'empty';
-      statusPanel.querySelector('.empty').textContent = 'No recent requests. Submit a request above.';
+    if (requests.length === 0) {
+      const p = document.createElement('p');
+      p.className = 'empty';
+      p.textContent = 'No recent requests. Submit a request above.';
+      statusPanel.appendChild(p);
     } else {
       const table = document.createElement('table');
       table.innerHTML = `
         <thead><tr>
-          <th>Request ID</th>
+          <th>Player</th>
+          <th>Months</th>
           <th>Status</th>
           <th>Games</th>
           <th>Error</th>
@@ -166,12 +144,12 @@ export function renderIndex(container) {
         <tbody></tbody>
       `;
       const tbody = table.querySelector('tbody');
-      for (const id of ids) {
-        const row = requestStatuses[id] || { id, status: '…', gamesIndexed: 0, errorMessage: null };
+      for (const row of requests) {
         const tr = document.createElement('tr');
         const statusClass = (row.status || '').toLowerCase().replace(' ', '-');
         tr.innerHTML = `
-          <td><a href="/index" class="external">${id}</a></td>
+          <td>${row.player}</td>
+          <td>${row.startMonth} – ${row.endMonth}</td>
           <td class="status-${statusClass}">${row.status || '—'}</td>
           <td>${row.gamesIndexed ?? 0}</td>
           <td>${row.errorMessage || '—'}</td>
@@ -183,6 +161,5 @@ export function renderIndex(container) {
     container.appendChild(statusPanel);
   }
 
-  loadStatuses();
-  render();
+  loadRequests();
 }
