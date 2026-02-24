@@ -154,6 +154,7 @@ public class IndexWorker {
             features.hasMotif(Motif.PROMOTION),
             features.hasMotif(Motif.PROMOTION_WITH_CHECK),
             features.hasMotif(Motif.PROMOTION_WITH_CHECKMATE),
+            Instant.now(),
             motifsJson,
             game.pgn());
 

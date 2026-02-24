@@ -13,12 +13,18 @@ public record GameFeatureRow(
     String eco,
     String result,
     Instant playedAt,
+    Instant indexedAt,
     Integer numMoves,
     boolean hasPin,
     boolean hasCrossPin,
     boolean hasFork,
     boolean hasSkewer,
-    boolean hasDiscoveredAttack) {
+    boolean hasDiscoveredAttack,
+    boolean hasCheck,
+    boolean hasCheckmate,
+    boolean hasPromotion,
+    boolean hasPromotionWithCheck,
+    boolean hasPromotionWithCheckmate) {
   public static GameFeatureRow fromStore(GameFeature row) {
     return new GameFeatureRow(
         row.gameUrl(),
@@ -31,11 +37,17 @@ public record GameFeatureRow(
         row.eco(),
         row.result(),
         row.playedAt(),
+        row.indexedAt(),
         row.numMoves(),
         row.hasPin(),
         row.hasCrossPin(),
         row.hasFork(),
         row.hasSkewer(),
-        row.hasDiscoveredAttack());
+        row.hasDiscoveredAttack(),
+        row.hasCheck(),
+        row.hasCheckmate(),
+        row.hasPromotion(),
+        row.hasPromotionWithCheck(),
+        row.hasPromotionWithCheckmate());
   }
 }

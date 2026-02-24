@@ -89,6 +89,7 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/worker/IndexWorker.java",
         "src/main/java/com/muchq/games/one_d4/worker/IndexWorkerLifecycle.java",
         "src/main/java/com/muchq/games/one_d4/worker/ResultMapper.java",
+        "src/main/java/com/muchq/games/one_d4/worker/RetentionWorker.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -258,6 +259,7 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/games/one_d4/worker/IndexWorkerTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/ResultMapperTest.java",
+        "src/test/java/com/muchq/games/one_d4/worker/RetentionWorkerTest.java",
     ],
     deps = [
         ":db",
@@ -267,6 +269,8 @@ java_test_suite(
         ":queue",
         ":worker",
         "//domains/games/libs/chess_com_client",
+        "//domains/games/libs/chessql:compiler",
+        "//domains/games/libs/chessql:parser",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("junit:junit"),
         artifact("org.assertj:assertj-core"),

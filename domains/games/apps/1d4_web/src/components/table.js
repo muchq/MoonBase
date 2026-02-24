@@ -11,12 +11,18 @@
  * @property {string} eco
  * @property {string} result
  * @property {string|number} playedAt
+ * @property {string|number} indexedAt
  * @property {number} numMoves
  * @property {boolean} hasPin
  * @property {boolean} hasCrossPin
  * @property {boolean} hasFork
  * @property {boolean} hasSkewer
  * @property {boolean} hasDiscoveredAttack
+ * @property {boolean} hasCheck
+ * @property {boolean} hasCheckmate
+ * @property {boolean} hasPromotion
+ * @property {boolean} hasPromotionWithCheck
+ * @property {boolean} hasPromotionWithCheckmate
  */
 
 import { renderMotifs } from './motifs.js';
@@ -31,6 +37,7 @@ const COLUMNS = [
   { id: 'eco', label: 'ECO', sort: true },
   { id: 'result', label: 'Result', sort: true },
   { id: 'playedAt', label: 'Played', sort: true },
+  { id: 'indexedAt', label: 'Indexed', sort: true },
   { id: 'motifs', label: 'Motifs', sort: false },
 ];
 
@@ -91,8 +98,8 @@ export function renderGamesTable(games, options = {}) {
         td.appendChild(renderMotifs(game));
       } else if (col.id === 'whiteElo' || col.id === 'blackElo') {
         td.textContent = formatElo(game[col.id]);
-      } else if (col.id === 'playedAt') {
-        td.textContent = formatDate(game.playedAt);
+      } else if (col.id === 'playedAt' || col.id === 'indexedAt') {
+        td.textContent = formatDate(game[col.id]);
       } else {
         td.textContent = game[col.id] ?? '—';
       }

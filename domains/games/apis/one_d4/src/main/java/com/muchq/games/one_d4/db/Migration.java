@@ -52,6 +52,7 @@ public class Migration {
           has_promotion BOOLEAN DEFAULT FALSE,
           has_promotion_with_check BOOLEAN DEFAULT FALSE,
           has_promotion_with_checkmate BOOLEAN DEFAULT FALSE,
+          indexed_at    TIMESTAMP NOT NULL DEFAULT current_timestamp(),
           motifs_json   TEXT,
           pgn           TEXT
       )
@@ -113,6 +114,7 @@ public class Migration {
           has_promotion BOOLEAN DEFAULT FALSE,
           has_promotion_with_check BOOLEAN DEFAULT FALSE,
           has_promotion_with_checkmate BOOLEAN DEFAULT FALSE,
+          indexed_at    TIMESTAMP NOT NULL DEFAULT now(),
           motifs_json   JSONB,
           pgn           TEXT
       )
@@ -152,6 +154,9 @@ public class Migration {
   private static final String ADD_PROMOTION_WITH_CHECKMATE_COLUMN =
       "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_promotion_with_checkmate BOOLEAN"
           + " DEFAULT FALSE";
+  private static final String ADD_INDEXED_AT_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS indexed_at TIMESTAMP NOT NULL DEFAULT"
+          + " now()";
 
   public void run() {
     try (Connection conn = dataSource.getConnection();
@@ -172,6 +177,7 @@ public class Migration {
       stmt.execute(ADD_PROMOTION_COLUMN);
       stmt.execute(ADD_PROMOTION_WITH_CHECK_COLUMN);
       stmt.execute(ADD_PROMOTION_WITH_CHECKMATE_COLUMN);
+      stmt.execute(ADD_INDEXED_AT_COLUMN);
 
       LOG.info("Database migration completed successfully (H2={})", useH2);
     } catch (SQLException e) {

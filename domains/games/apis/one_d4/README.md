@@ -72,6 +72,10 @@ curl -X POST http://localhost:8080/v1/query \
   }'
 ```
 
+### Data Retention Policy
+
+The indexer maintains a **7-day retention policy**. Games are automatically deleted 7 days after they are indexed (based on the `indexed_at` timestamp). This policy is enforced by a background worker that runs hourly.
+
 ### Available Fields
 
 **Note:** Query fields must use **snake_case** or **dot.notation**, even though the API response returns fields in **camelCase**.
@@ -87,6 +91,7 @@ curl -X POST http://localhost:8080/v1/query \
 - `platform`
 - `game_url` (or `game.url`)
 - `played_at` (or `played.at`)
+- `indexed_at` (or `indexed.at`)
 
 ### Available Motifs
 
@@ -124,4 +129,4 @@ On the deployed machine the indexer uses H2 file storage at `/data/indexer` insi
    - **H2 Console (jar):** `java -jar h2*.jar` → JDBC URL `jdbc:h2:file:/path/to/one_d4_data_backup/indexer`, user `sa`, password blank.
    - Or use any SQL client that supports H2 (e.g. DBeaver).
 
-Main tables: `indexing_requests` (id, player, platform, start_month, end_month, status, games_indexed, …), `game_features` (request_id, game_url, played_at, …), `indexed_periods` (player, platform, year_month, is_complete, games_count, …).
+Main tables: `indexing_requests` (id, player, platform, start_month, end_month, status, games_indexed, …), `game_features` (request_id, game_url, played_at, indexed_at, …), `indexed_periods` (player, platform, year_month, is_complete, games_count, …).

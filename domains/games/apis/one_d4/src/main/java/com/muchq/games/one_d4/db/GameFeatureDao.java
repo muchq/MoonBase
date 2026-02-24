@@ -8,6 +8,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.sql.Types;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -26,8 +27,8 @@ public class GameFeatureDao implements GameFeatureStore {
           white_elo, black_elo, time_class, eco, result, played_at, num_moves,
           has_pin, has_cross_pin, has_fork, has_skewer, has_discovered_attack,
           has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
-          motifs_json, pgn
-      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          indexed_at, motifs_json, pgn
+      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?, ?)
       """;
 
   private static final String PG_INSERT =
@@ -37,9 +38,11 @@ public class GameFeatureDao implements GameFeatureStore {
           white_elo, black_elo, time_class, eco, result, played_at, num_moves,
           has_pin, has_cross_pin, has_fork, has_skewer, has_discovered_attack,
           has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
-          motifs_json, pgn
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
-      ON CONFLICT (game_url) DO NOTHING
+          indexed_at, motifs_json, pgn
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?::jsonb, ?)
+      ON CONFLICT (game_url) DO UPDATE SET
+          indexed_at = EXCLUDED.indexed_at,
+          request_id = EXCLUDED.request_id
       """;
 
   private final DataSource dataSource;
@@ -83,6 +86,22 @@ public class GameFeatureDao implements GameFeatureStore {
     } catch (SQLException e) {
       LOG.error("Failed to insert game feature for game_url={}", row.gameUrl(), e);
       throw new RuntimeException("Failed to insert game feature", e);
+    }
+  }
+
+  @Override
+  public void deleteOlderThan(Instant threshold) {
+    String sql = "DELETE FROM game_features WHERE indexed_at < ?";
+    try (Connection conn = dataSource.getConnection();
+        PreparedStatement ps = conn.prepareStatement(sql)) {
+      ps.setTimestamp(1, Timestamp.from(threshold));
+      int deleted = ps.executeUpdate();
+      if (deleted > 0) {
+        LOG.info("Deleted {} games older than {}", deleted, threshold);
+      }
+    } catch (SQLException e) {
+      LOG.error("Failed to delete old games", e);
+      throw new RuntimeException("Failed to delete old games", e);
     }
   }
 
@@ -142,6 +161,7 @@ public class GameFeatureDao implements GameFeatureStore {
         rs.getBoolean("has_promotion"),
         rs.getBoolean("has_promotion_with_check"),
         rs.getBoolean("has_promotion_with_checkmate"),
+        rs.getTimestamp("indexed_at") != null ? rs.getTimestamp("indexed_at").toInstant() : null,
         rs.getString("motifs_json"),
         rs.getString("pgn"));
   }

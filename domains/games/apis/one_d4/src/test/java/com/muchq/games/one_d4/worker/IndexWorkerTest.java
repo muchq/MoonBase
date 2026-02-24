@@ -171,6 +171,9 @@ public class IndexWorkerTest {
     public void insert(GameFeature feature) {}
 
     @Override
+    public void deleteOlderThan(Instant threshold) {}
+
+    @Override
     public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
       return Collections.emptyList();
     }
