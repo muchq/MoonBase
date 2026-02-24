@@ -140,6 +140,19 @@ public class Migration {
     this.useH2 = useH2;
   }
 
+  private static final String ADD_CHECK_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_check BOOLEAN DEFAULT FALSE";
+  private static final String ADD_CHECKMATE_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_checkmate BOOLEAN DEFAULT FALSE";
+  private static final String ADD_PROMOTION_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_promotion BOOLEAN DEFAULT FALSE";
+  private static final String ADD_PROMOTION_WITH_CHECK_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_promotion_with_check BOOLEAN DEFAULT"
+          + " FALSE";
+  private static final String ADD_PROMOTION_WITH_CHECKMATE_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_promotion_with_checkmate BOOLEAN"
+          + " DEFAULT FALSE";
+
   public void run() {
     try (Connection conn = dataSource.getConnection();
         Statement stmt = conn.createStatement()) {
@@ -153,6 +166,12 @@ public class Migration {
         stmt.execute(PG_GAME_FEATURES);
         stmt.execute(PG_INDEXED_PERIODS);
       }
+
+      stmt.execute(ADD_CHECK_COLUMN);
+      stmt.execute(ADD_CHECKMATE_COLUMN);
+      stmt.execute(ADD_PROMOTION_COLUMN);
+      stmt.execute(ADD_PROMOTION_WITH_CHECK_COLUMN);
+      stmt.execute(ADD_PROMOTION_WITH_CHECKMATE_COLUMN);
 
       LOG.info("Database migration completed successfully (H2={})", useH2);
     } catch (SQLException e) {
