@@ -12,6 +12,26 @@ permissions:
   contents: read
 
 jobs:
+  format-check:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/muchq/moonbase/ci-base:latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory /__w/MoonBase/MoonBase
+
+      - uses: bazel-contrib/setup-bazel@0.18.0
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+
+      - name: bazel-format-check
+        run: |
+          bazel run //:format.check
+
   build-and-test:
     runs-on: ubuntu-latest
     container:
@@ -42,11 +62,6 @@ jobs:
           bazelrc: |
             build --local_resources=cpu=2
             build --local_resources=memory=4096
-      - name: bazel-format-check
-        run: |
-          bazel run //:format.check
-      # Dependencies are pre-installed in the Docker image
-      # No need to run setup-linux anymore!
       - name: Create bazel-diff output directory
         run: |
           mkdir -p bazel-diff-output
