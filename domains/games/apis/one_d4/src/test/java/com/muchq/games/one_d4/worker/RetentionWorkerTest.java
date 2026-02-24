@@ -7,8 +7,10 @@ import com.muchq.games.chessql.parser.Parser;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.db.DataSourceFactory;
 import com.muchq.games.one_d4.db.GameFeatureDao;
+import com.muchq.games.one_d4.db.IndexedPeriodDao;
 import com.muchq.games.one_d4.db.Migration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import javax.sql.DataSource;
@@ -17,6 +19,7 @@ import org.junit.Test;
 
 public class RetentionWorkerTest {
   private GameFeatureDao dao;
+  private IndexedPeriodDao periodDao;
   private RetentionWorker worker;
   private UUID requestId;
   private DataSource dataSource;
@@ -29,7 +32,8 @@ public class RetentionWorkerTest {
     migration.run();
 
     dao = new GameFeatureDao(dataSource, true);
-    worker = new RetentionWorker(dao);
+    periodDao = new IndexedPeriodDao(dataSource, true);
+    worker = new RetentionWorker(dao, periodDao);
     requestId = UUID.randomUUID();
 
     // Create a dummy indexing request to satisfy foreign key constraint
@@ -52,11 +56,8 @@ public class RetentionWorkerTest {
     dao.insert(fresh);
 
     // Insert an old game manually by bypassing DAO to set indexed_at
-    // Actually, DAO.insert sets it to now().
-    // I need to manually update it to be old.
     dao.insert(createGame("https://chess.com/old"));
-    updateIndexedAt(
-        "https://chess.com/old", Instant.now().minus(8, java.time.temporal.ChronoUnit.DAYS));
+    updateIndexedAt("https://chess.com/old", Instant.now().minus(8, ChronoUnit.DAYS));
 
     assertThat(countGames()).isEqualTo(2);
 
@@ -72,6 +73,21 @@ public class RetentionWorkerTest {
     assertThat(remaining.get(0).gameUrl()).isEqualTo("https://chess.com/fresh");
   }
 
+  @Test
+  public void runRetention_deletesOldPeriods() {
+    periodDao.upsertPeriod("p", "CHESS_COM", "2024-01", Instant.now(), true, 5);
+    periodDao.upsertPeriod("p", "CHESS_COM", "2024-02", Instant.now(), true, 5);
+    updatePeriodFetchedAt("2024-02", Instant.now().minus(8, ChronoUnit.DAYS));
+
+    assertThat(countPeriods()).isEqualTo(2);
+
+    worker.runRetention();
+
+    assertThat(countPeriods()).isEqualTo(1);
+    assertThat(periodDao.findCompletePeriod("p", "CHESS_COM", "2024-01")).isPresent();
+    assertThat(periodDao.findCompletePeriod("p", "CHESS_COM", "2024-02")).isEmpty();
+  }
+
   private void updateIndexedAt(String url, Instant indexedAt) {
     try (var conn = dataSource.getConnection();
         var ps =
@@ -84,9 +100,33 @@ public class RetentionWorkerTest {
     }
   }
 
+  private void updatePeriodFetchedAt(String month, Instant fetchedAt) {
+    try (var conn = dataSource.getConnection();
+        var ps =
+            conn.prepareStatement(
+                "UPDATE indexed_periods SET fetched_at = ? WHERE year_month = ?")) {
+      ps.setTimestamp(1, java.sql.Timestamp.from(fetchedAt));
+      ps.setString(2, month);
+      ps.executeUpdate();
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+  }
+
   private int countGames() {
     try (var conn = dataSource.getConnection();
         var ps = conn.prepareStatement("SELECT COUNT(*) FROM game_features");
+        var rs = ps.executeQuery()) {
+      rs.next();
+      return rs.getInt(1);
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  private int countPeriods() {
+    try (var conn = dataSource.getConnection();
+        var ps = conn.prepareStatement("SELECT COUNT(*) FROM indexed_periods");
         var rs = ps.executeQuery()) {
       rs.next();
       return rs.getInt(1);

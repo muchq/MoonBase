@@ -157,7 +157,8 @@ public class IndexerModule {
   }
 
   @Context
-  public RetentionWorker retentionWorker(GameFeatureStore gameFeatureStore) {
-    return new RetentionWorker(gameFeatureStore);
+  public RetentionWorker retentionWorker(
+      GameFeatureStore gameFeatureStore, IndexedPeriodStore indexedPeriodStore) {
+    return new RetentionWorker(gameFeatureStore, indexedPeriodStore);
   }
 }

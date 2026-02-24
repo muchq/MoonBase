@@ -205,5 +205,8 @@ public class IndexWorkerTest {
         Instant fetchedAt,
         boolean isComplete,
         int gamesCount) {}
+
+    @Override
+    public void deleteOlderThan(Instant threshold) {}
   }
 }

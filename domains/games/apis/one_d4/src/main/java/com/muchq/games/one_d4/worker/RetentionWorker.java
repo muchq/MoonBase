@@ -1,6 +1,7 @@
 package com.muchq.games.one_d4.worker;
 
 import com.muchq.games.one_d4.db.GameFeatureStore;
+import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import io.micronaut.scheduling.annotation.Scheduled;
 import java.time.Duration;
 import java.time.Instant;
@@ -12,9 +13,11 @@ public class RetentionWorker {
   private static final Duration RETENTION_PERIOD = Duration.ofDays(7);
 
   private final GameFeatureStore gameFeatureStore;
+  private final IndexedPeriodStore indexedPeriodStore;
 
-  public RetentionWorker(GameFeatureStore gameFeatureStore) {
+  public RetentionWorker(GameFeatureStore gameFeatureStore, IndexedPeriodStore indexedPeriodStore) {
     this.gameFeatureStore = gameFeatureStore;
+    this.indexedPeriodStore = indexedPeriodStore;
   }
 
   @Scheduled(fixedDelay = "1h", initialDelay = "1m")
@@ -23,6 +26,7 @@ public class RetentionWorker {
     Instant threshold = Instant.now().minus(RETENTION_PERIOD);
     try {
       gameFeatureStore.deleteOlderThan(threshold);
+      indexedPeriodStore.deleteOlderThan(threshold);
     } catch (Exception e) {
       LOG.error("Failed to run retention policy", e);
     }

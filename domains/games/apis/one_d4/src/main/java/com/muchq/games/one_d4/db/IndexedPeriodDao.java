@@ -37,12 +37,19 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
       WHERE player = ? AND platform = ? AND year_month = ? AND is_complete = true
       """;
 
+  private static final String DELETE_OLDER_THAN =
+      "DELETE FROM indexed_periods WHERE fetched_at < ?";
+
   private final DataSource dataSource;
   private final boolean useH2;
 
   public IndexedPeriodDao(DataSource dataSource, boolean useH2) {
     this.dataSource = dataSource;
     this.useH2 = useH2;
+  }
+
+  public DataSource getDataSource() {
+    return dataSource;
   }
 
   @Override
@@ -89,6 +96,21 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
           month,
           e);
       throw new RuntimeException("Failed to upsert indexed period", e);
+    }
+  }
+
+  @Override
+  public void deleteOlderThan(Instant threshold) {
+    try (Connection conn = dataSource.getConnection();
+        PreparedStatement ps = conn.prepareStatement(DELETE_OLDER_THAN)) {
+      ps.setTimestamp(1, Timestamp.from(threshold));
+      int deleted = ps.executeUpdate();
+      if (deleted > 0) {
+        LOG.info("Deleted {} indexed periods older than {}", deleted, threshold);
+      }
+    } catch (SQLException e) {
+      LOG.error("Failed to delete old indexed periods", e);
+      throw new RuntimeException("Failed to delete old indexed periods", e);
     }
   }
 
