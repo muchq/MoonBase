@@ -20,6 +20,13 @@ public enum TokenType {
   NOT,
   IN,
   MOTIF,
+  ORDER,
+  BY,
+  ASC,
+  DESC,
+  MOTIF_COUNT,
+  SEQUENCE,
+  THEN,
 
   // Delimiters
   LPAREN,

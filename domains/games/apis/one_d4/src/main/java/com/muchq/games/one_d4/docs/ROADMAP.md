@@ -528,6 +528,46 @@ public class GameFetcher {
 
 ## Phase 9 — Additional Motifs & Re-Analysis
 
+### Motif Detector Semantic Accuracy
+
+Several detectors rely solely on PGN move notation to determine whether a motif occurred,
+without verifying which piece is actually responsible for the check or attack. This produces
+correct results in the common case but mislabels some positions.
+
+**The concrete problem — `PROMOTION_WITH_CHECK`:**
+
+When a chess player says "promotion with check" they mean the promoted piece is the one giving
+check. The current detector fires on `contains("=") && endsWith("+")`, which also captures a
+different scenario: a pawn promotes (via an underpromotion or queen promotion to a square that
+doesn't directly attack the king) while simultaneously revealing a discovered check from a rook
+or bishop that was hiding behind the pawn. These are distinct tactical motifs:
+
+- `e8=Q+` where the queen on e8 delivers the check → `PROMOTION_WITH_CHECK` ✓
+- `e8=Q+` where a rook on e1 was unblocked by the pawn leaving e7 → `DISCOVERED_CHECK` + `PROMOTION`, not `PROMOTION_WITH_CHECK`
+
+The same ambiguity applies to `PROMOTION_WITH_CHECKMATE`.
+
+**The general problem — notation vs. position:**
+
+The `DISCOVERED_CHECK` and `DISCOVERED_ATTACK` detectors use FEN comparison (board before vs.
+after) to find vacated squares that reveal sliding piece attacks. This is more accurate, but
+still cannot determine whether the check (`+`) in the move notation came from the revealed piece
+or from the piece that actually moved.
+
+**The fix — use the chariot library for check attribution:**
+
+The `chariot` library (already on the classpath via the engine) can parse PGN and model the
+board. After replaying each position, query which pieces are giving check and whether those
+pieces moved on the current half-move. This gives precise semantics:
+
+- `PROMOTION_WITH_CHECK`: the piece that just promoted is in the set of checking pieces
+- `DISCOVERED_CHECK`: the checking piece did NOT move on this half-move
+- `DOUBLE_CHECK`: two pieces simultaneously give check (a specific form of discovered check)
+
+**Impact:** Detection logic changes only — schema, ChessQL motif names, and API DTOs are
+unaffected. All existing `game_features` rows can be reanalyzed via the re-analysis pipeline
+(Phase 9) once the corrected detectors are in place.
+
 ### New Motifs
 
 | Motif               | Detection Strategy                                    |
@@ -559,6 +599,28 @@ ALTER TABLE game_features_archive ADD COLUMN has_back_rank_mate BOOLEAN DEFAULT 
 ```
 
 Update `SqlCompiler.VALID_MOTIFS` and `VALID_COLUMNS` sets.
+
+### Phase Dependencies
+
+**Phase 5 (Security) — soft dependency for production use.**
+The re-analysis admin endpoint (`POST /admin/reanalyze`) should be covered by the `ApiKeyFilter`
+before it is exposed publicly. Phase 9 can be developed and tested locally without Phase 5, but
+should not be deployed to a production environment that is publicly accessible until admin
+endpoints are protected.
+
+**Phase 6 (Retention) — ordering dependency for full historical coverage.**
+The re-analysis pipeline reads PGN from the `game_features.pgn` column. Phase 6 eventually
+deletes rows from PostgreSQL once they reach cold storage (S3). Once a game is in cold storage
+its PGN is no longer directly accessible; re-analyzing it requires first running the
+`POST /admin/restore` endpoint to re-import it into the database.
+
+Practical consequence: **run re-analysis before Phase 6 begins archiving data** to avoid the
+restore step. If Phase 6 is already active when new motif detectors are added, the re-analysis
+pipeline should either (a) scope itself to games still in hot/warm storage, or (b) trigger a
+restore from cold storage for the affected time ranges before reanalyzing.
+
+The `ALTER TABLE game_features_archive` migration in the Schema Evolution section already assumes
+Phase 6's archive table exists — new motif columns must be added to both tables simultaneously.
 
 ---
 

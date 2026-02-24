@@ -21,9 +21,9 @@ public class PinDetector implements MotifDetector {
       String fen = ctx.fen();
       String placement = fen.split(" ")[0];
       if (detectPinFromFen(placement, ctx.whiteToMove())) {
-        occurrences.add(
-            new GameFeatures.MotifOccurrence(
-                ctx.moveNumber(), "Pin detected at move " + ctx.moveNumber()));
+        GameFeatures.MotifOccurrence occ =
+            GameFeatures.MotifOccurrence.from(ctx, "Pin detected at move " + ctx.moveNumber());
+        if (occ != null) occurrences.add(occ);
       }
     }
 

@@ -2,4 +2,5 @@ package com.muchq.games.chessql.compiler;
 
 import java.util.List;
 
-public record CompiledQuery(String sql, List<Object> parameters) {}
+/** A compiled ChessQL query: a full SELECT SQL statement and its bound parameters. */
+public record CompiledQuery(String selectSql, List<Object> parameters) {}

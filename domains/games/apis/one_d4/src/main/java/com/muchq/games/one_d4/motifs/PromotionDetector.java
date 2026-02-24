@@ -20,9 +20,9 @@ public class PromotionDetector implements MotifDetector {
     for (PositionContext ctx : positions) {
       String move = ctx.lastMove();
       if (move != null && move.contains("=")) {
-        occurrences.add(
-            new GameFeatures.MotifOccurrence(
-                ctx.moveNumber(), "Promotion at move " + ctx.moveNumber()));
+        GameFeatures.MotifOccurrence occ =
+            GameFeatures.MotifOccurrence.from(ctx, "Promotion at move " + ctx.moveNumber());
+        if (occ != null) occurrences.add(occ);
       }
     }
 

@@ -2,6 +2,109 @@
 
 The `one_d4` API provides endpoints for indexing and querying chess game features.
 
+## Architecture
+
+**High-level**
+
+```mermaid
+flowchart LR
+  Client["Clients"] --> API["REST API"]
+  API --> Index["Index pipeline"]
+  API --> Query["Query pipeline"]
+  Index --> DB[(Database)]
+  Query --> DB
+  Index -.-> Chess["Chess.com API"]
+```
+
+**Detailed component view**
+
+```mermaid
+flowchart TB
+  subgraph Client["Clients"]
+    HTTP["HTTP (curl / UI)"]
+  end
+
+  subgraph API["API Layer"]
+    IndexCtrl["IndexController\nPOST/GET /v1/index"]
+    QueryCtrl["QueryController\nPOST /v1/query"]
+    HealthCtrl["HealthController\nGET /health"]
+  end
+
+  subgraph Validation["Validation"]
+    QueryVal["QueryRequestValidator"]
+    IndexVal["IndexRequestValidator"]
+  end
+
+  subgraph IndexPath["Index Path"]
+    Queue["IndexQueue\n(InMemory)"]
+    Lifecycle["IndexWorkerLifecycle\n(poll every 5s)"]
+    Worker["IndexWorker"]
+    ChessClient["ChessClient"]
+    Extractor["FeatureExtractor"]
+    PgnParser["PgnParser"]
+    Replayer["GameReplayer"]
+    Detectors["MotifDetectors\n(pin, fork, check, ...)"]
+  end
+
+  subgraph QueryPath["Query Path"]
+    Parser["ChessQL Parser"]
+    Compiler["SqlCompiler"]
+  end
+
+  subgraph Retention["Retention"]
+    RetentionWorker["RetentionWorker\n@Scheduled 1h\n(7-day policy)"]
+  end
+
+  subgraph Store["Stores & DB"]
+    RequestStore["IndexingRequestStore"]
+    GameStore["GameFeatureStore"]
+    PeriodStore["IndexedPeriodStore"]
+    DB[(H2/PostgreSQL)]
+  end
+
+  subgraph External["External"]
+    ChessAPI["Chess.com API"]
+  end
+
+  HTTP --> IndexCtrl
+  HTTP --> QueryCtrl
+  HTTP --> HealthCtrl
+  IndexCtrl --> IndexVal
+  IndexCtrl --> RequestStore
+  IndexCtrl --> Queue
+  QueryCtrl --> QueryVal
+  QueryCtrl --> Parser
+  Parser --> Compiler
+  Compiler --> GameStore
+  QueryCtrl --> GameStore
+  GameStore --> DB
+  RequestStore --> DB
+  PeriodStore --> DB
+
+  Queue --> Lifecycle
+  Lifecycle --> Worker
+  Worker --> ChessClient
+  Worker --> RequestStore
+  Worker --> PeriodStore
+  Worker --> Extractor
+  Worker --> GameStore
+  ChessClient --> ChessAPI
+  Extractor --> PgnParser
+  Extractor --> Replayer
+  Extractor --> Detectors
+  Extractor --> GameStore
+  GameStore --> DB
+
+  RetentionWorker --> GameStore
+  RetentionWorker --> PeriodStore
+```
+
+**Index flow:** Client posts to `POST /v1/index` → request is stored and a message is enqueued. A background thread (IndexWorkerLifecycle) polls the queue; IndexWorker fetches games from Chess.com per month (skipping months already in IndexedPeriodStore), runs FeatureExtractor (PgnParser → GameReplayer → MotifDetectors) on each game, and writes to GameFeatureStore (game_features + motif_occurrences) and IndexedPeriodStore.
+
+**Query flow:** Client posts a ChessQL string to `POST /v1/query` → Parser and SqlCompiler produce SQL → GameFeatureStore runs the query and loads motif_occurrences for the result set → response returns GameFeatureRow list with per-game occurrences.
+
+**Retention:** RetentionWorker runs hourly and deletes game_features, motif_occurrences (via FK cascade), and indexed_periods older than 7 days.
+
 ## Endpoints
 
 ### Health Check
@@ -100,6 +203,7 @@ The indexer maintains a **7-day retention policy**. Games are automatically dele
 - `motif(fork)`
 - `motif(skewer)`
 - `motif(discovered_attack)`
+- `motif(discovered_check)`
 - `motif(check)`
 - `motif(checkmate)`
 - `motif(promotion)`

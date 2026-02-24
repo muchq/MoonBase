@@ -10,6 +10,8 @@ java_library(
         "src/main/java/com/muchq/games/chessql/ast/MotifExpr.java",
         "src/main/java/com/muchq/games/chessql/ast/NotExpr.java",
         "src/main/java/com/muchq/games/chessql/ast/OrExpr.java",
+        "src/main/java/com/muchq/games/chessql/ast/OrderByClause.java",
+        "src/main/java/com/muchq/games/chessql/ast/SequenceExpr.java",
     ],
     visibility = ["//visibility:public"],
 )
@@ -24,6 +26,7 @@ java_library(
     visibility = ["//visibility:public"],
     deps = [
         ":ast",
+        ":parser",
     ],
 )
 
@@ -41,6 +44,7 @@ java_library(
     name = "parser",
     srcs = [
         "src/main/java/com/muchq/games/chessql/parser/ParseException.java",
+        "src/main/java/com/muchq/games/chessql/parser/ParsedQuery.java",
         "src/main/java/com/muchq/games/chessql/parser/Parser.java",
     ],
     visibility = ["//visibility:public"],

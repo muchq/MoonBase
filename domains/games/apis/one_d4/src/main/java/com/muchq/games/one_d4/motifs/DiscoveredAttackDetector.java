@@ -33,13 +33,18 @@ public class DiscoveredAttackDetector implements MotifDetector {
       boolean moverIsWhite = after.whiteToMove() ? false : true;
 
       if (hasDiscoveredAttack(boardBefore, boardAfter, moverIsWhite)) {
-        occurrences.add(
-            new GameFeatures.MotifOccurrence(
-                after.moveNumber(), "Discovered attack at move " + after.moveNumber()));
+        GameFeatures.MotifOccurrence occ =
+            GameFeatures.MotifOccurrence.from(
+                after, "Discovered attack at move " + after.moveNumber());
+        if (occ != null) occurrences.add(occ);
       }
     }
 
     return occurrences;
+  }
+
+  boolean hasDiscoveredAttackPublic(int[][] before, int[][] after, boolean moverIsWhite) {
+    return hasDiscoveredAttack(before, after, moverIsWhite);
   }
 
   private boolean hasDiscoveredAttack(int[][] before, int[][] after, boolean moverIsWhite) {

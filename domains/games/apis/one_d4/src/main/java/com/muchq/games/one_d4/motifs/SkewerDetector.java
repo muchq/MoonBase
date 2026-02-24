@@ -24,9 +24,9 @@ public class SkewerDetector implements MotifDetector {
       // A skewer is the opposite of a pin: a more valuable piece is in front,
       // and when it moves, a less valuable piece behind is captured.
       if (hasSkewer(board, !ctx.whiteToMove())) {
-        occurrences.add(
-            new GameFeatures.MotifOccurrence(
-                ctx.moveNumber(), "Skewer detected at move " + ctx.moveNumber()));
+        GameFeatures.MotifOccurrence occ =
+            GameFeatures.MotifOccurrence.from(ctx, "Skewer detected at move " + ctx.moveNumber());
+        if (occ != null) occurrences.add(occ);
       }
     }
 

@@ -23,9 +23,9 @@ public class ForkDetector implements MotifDetector {
 
       // Check if any piece attacks two or more enemy pieces of significant value
       if (hasFork(board, !ctx.whiteToMove())) {
-        occurrences.add(
-            new GameFeatures.MotifOccurrence(
-                ctx.moveNumber(), "Fork detected at move " + ctx.moveNumber()));
+        GameFeatures.MotifOccurrence occ =
+            GameFeatures.MotifOccurrence.from(ctx, "Fork detected at move " + ctx.moveNumber());
+        if (occ != null) occurrences.add(occ);
       }
     }
 
