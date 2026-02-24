@@ -176,7 +176,7 @@ public class GameFeatureDao implements GameFeatureStore {
     if (gameUrls.isEmpty()) return Map.of();
     String placeholders = gameUrls.stream().map(u -> "?").collect(Collectors.joining(", "));
     String sql =
-        "SELECT game_url, motif, move_number, description FROM motif_occurrences"
+        "SELECT game_url, motif, move_number, side, description FROM motif_occurrences"
             + " WHERE game_url IN ("
             + placeholders
             + ") ORDER BY ply ASC";
@@ -193,11 +193,12 @@ public class GameFeatureDao implements GameFeatureStore {
           // Store motif key as lowercase to match ChessQL motif naming convention
           String motif = rs.getString("motif").toLowerCase();
           int moveNumber = rs.getInt("move_number");
+          String side = rs.getString("side");
           String description = rs.getString("description");
           result
               .computeIfAbsent(gameUrl, k -> new LinkedHashMap<>())
               .computeIfAbsent(motif, k -> new ArrayList<>())
-              .add(new OccurrenceRow(moveNumber, description));
+              .add(new OccurrenceRow(moveNumber, side, description));
         }
       }
     } catch (SQLException e) {

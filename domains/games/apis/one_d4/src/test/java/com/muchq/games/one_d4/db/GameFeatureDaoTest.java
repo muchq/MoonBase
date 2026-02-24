@@ -68,10 +68,11 @@ public class GameFeatureDaoTest {
     assertThat(result).containsKey(gameUrl);
     Map<String, List<OccurrenceRow>> byMotif = result.get(gameUrl);
     assertThat(byMotif).containsKey("pin");
-    assertThat(byMotif.get("pin")).containsExactly(new OccurrenceRow(3, "Knight pinned on c6"));
+    assertThat(byMotif.get("pin"))
+        .containsExactly(new OccurrenceRow(3, "white", "Knight pinned on c6"));
     assertThat(byMotif).containsKey("discovered_check");
     assertThat(byMotif.get("discovered_check"))
-        .containsExactly(new OccurrenceRow(6, "Discovered check"));
+        .containsExactly(new OccurrenceRow(6, "black", "Discovered check"));
   }
 
   @Test

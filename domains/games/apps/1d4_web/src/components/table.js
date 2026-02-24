@@ -18,6 +18,7 @@
  * @property {boolean} hasFork
  * @property {boolean} hasSkewer
  * @property {boolean} hasDiscoveredAttack
+ * @property {boolean} hasDiscoveredCheck
  * @property {boolean} hasCheck
  * @property {boolean} hasCheckmate
  * @property {boolean} hasPromotion

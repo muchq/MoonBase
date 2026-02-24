@@ -8,6 +8,7 @@ const MOTIF_KEYS = [
   ['hasFork', 'fork'],
   ['hasSkewer', 'skewer'],
   ['hasDiscoveredAttack', 'discovered_attack'],
+  ['hasDiscoveredCheck', 'discovered_check'],
   ['hasCheck', 'check'],
   ['hasCheckmate', 'checkmate'],
   ['hasPromotion', 'promotion'],
@@ -35,6 +36,12 @@ export function renderMotifs(game) {
     const badge = document.createElement('span');
     badge.className = 'motif-badge';
     badge.textContent = label.replace(/_/g, ' ');
+    const occs = game.occurrences?.[label];
+    if (occs && occs.length > 0) {
+      badge.title = occs
+        .map((o) => `Move ${o.moveNumber} (${o.side}): ${o.description}`)
+        .join('\n');
+    }
     span.appendChild(badge);
   }
   return span;
