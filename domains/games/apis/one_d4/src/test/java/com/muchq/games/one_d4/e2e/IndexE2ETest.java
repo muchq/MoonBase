@@ -2,9 +2,15 @@ package com.muchq.games.one_d4.e2e;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.muchq.games.chess_com_client.Accuracies;
+import com.muchq.games.chess_com_client.PlayedGame;
+import com.muchq.games.chess_com_client.PlayerResult;
+import com.muchq.games.chessql.compiler.CompiledQuery;
+import com.muchq.games.chessql.compiler.SqlCompiler;
+import com.muchq.games.chessql.parser.Parser;
 import com.muchq.games.one_d4.api.IndexController;
 import com.muchq.games.one_d4.api.IndexRequestValidator;
+import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.IndexRequest;
 import com.muchq.games.one_d4.api.dto.IndexResponse;
 import com.muchq.games.one_d4.db.DataSourceFactory;
@@ -15,8 +21,10 @@ import com.muchq.games.one_d4.db.Migration;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.GameReplayer;
 import com.muchq.games.one_d4.engine.PgnParser;
+import com.muchq.games.one_d4.motifs.CheckDetector;
 import com.muchq.games.one_d4.motifs.CrossPinDetector;
 import com.muchq.games.one_d4.motifs.DiscoveredAttackDetector;
+import com.muchq.games.one_d4.motifs.DiscoveredCheckDetector;
 import com.muchq.games.one_d4.motifs.ForkDetector;
 import com.muchq.games.one_d4.motifs.MotifDetector;
 import com.muchq.games.one_d4.motifs.PinDetector;
@@ -29,6 +37,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import javax.sql.DataSource;
 import org.junit.Before;
@@ -46,6 +55,7 @@ public class IndexE2ETest {
   private IndexController controller;
   private IndexQueue queue;
   private IndexWorker worker;
+  private GameFeatureStore gameFeatureStore;
   private FakeChessClient fakeChessClient;
   private IndexingRequestStore requestStore;
   private IndexedPeriodStore periodStore;
@@ -59,30 +69,25 @@ public class IndexE2ETest {
 
     requestStore = new com.muchq.games.one_d4.db.IndexingRequestDao(dataSource);
     periodStore = new com.muchq.games.one_d4.db.IndexedPeriodDao(dataSource, true);
-    GameFeatureStore gameFeatureStore =
-        new com.muchq.games.one_d4.db.GameFeatureDao(dataSource, true);
+    gameFeatureStore = new com.muchq.games.one_d4.db.GameFeatureDao(dataSource, true);
 
     queue = new InMemoryIndexQueue();
     fakeChessClient = new FakeChessClient();
 
     List<MotifDetector> detectors =
         List.of(
+            new CheckDetector(),
             new PinDetector(),
             new CrossPinDetector(),
             new ForkDetector(),
             new SkewerDetector(),
-            new DiscoveredAttackDetector());
+            new DiscoveredAttackDetector(),
+            new DiscoveredCheckDetector());
     FeatureExtractor featureExtractor =
         new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
-    ObjectMapper objectMapper = new ObjectMapper();
     worker =
         new IndexWorker(
-            fakeChessClient,
-            featureExtractor,
-            requestStore,
-            gameFeatureStore,
-            periodStore,
-            objectMapper);
+            fakeChessClient, featureExtractor, requestStore, gameFeatureStore, periodStore);
 
     controller = new IndexController(requestStore, queue, new IndexRequestValidator());
   }
@@ -203,6 +208,60 @@ public class IndexE2ETest {
     assertThat(completed).hasSize(1);
     assertThat(completed.get(0).status()).isEqualTo("COMPLETED");
     assertThat(completed.get(0).gamesIndexed()).isEqualTo(1);
+  }
+
+  @Test
+  public void createIndex_thenQuery_returnsGamesWithOccurrences() {
+    YearMonth month = YearMonth.of(2024, 6);
+    String gameUrl = "https://chess.com/game/query-occ-1";
+    // Scholar's mate: Qxf7# so CheckDetector fires and we get an occurrence
+    fakeChessClient.setGames(PLAYER, month, List.of(playedGameWithCheckPgn(gameUrl)));
+
+    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-06", "2024-06");
+    controller.createIndex(request);
+    processQueueUntilIdle();
+
+    CompiledQuery compiled = new SqlCompiler().compile(Parser.parse("motif(check)"));
+    List<GameFeature> rows = gameFeatureStore.query(compiled, 10, 0);
+    assertThat(rows).hasSize(1);
+    assertThat(rows.get(0).gameUrl()).isEqualTo(gameUrl);
+
+    List<String> gameUrls = rows.stream().map(GameFeature::gameUrl).toList();
+    Map<String, Map<String, List<com.muchq.games.one_d4.api.dto.OccurrenceRow>>> occurrences =
+        gameFeatureStore.queryOccurrences(gameUrls);
+    assertThat(occurrences).containsKey(gameUrl);
+    assertThat(occurrences.get(gameUrl)).containsKey("check");
+    assertThat(occurrences.get(gameUrl).get("check")).isNotEmpty();
+    assertThat(occurrences.get(gameUrl).get("check").get(0).moveNumber()).isPositive();
+  }
+
+  private static PlayedGame playedGameWithCheckPgn(String gameUrl) {
+    String pgn =
+        """
+        [Event "Live Chess"]
+        [Site "Chess.com"]
+        [White "White"]
+        [Black "Black"]
+        [Result "1-0"]
+        [ECO "C20"]
+
+        1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0
+        """;
+    return new PlayedGame(
+        gameUrl,
+        pgn,
+        Instant.EPOCH,
+        true,
+        new Accuracies(90.0, 85.0),
+        "",
+        "uuid-" + gameUrl.hashCode(),
+        "",
+        "",
+        "blitz",
+        "chess",
+        new PlayerResult(1500, "win", "https://chess.com/w", "White", "uuid-w"),
+        new PlayerResult(1500, "loss", "https://chess.com/b", "Black", "uuid-b"),
+        "C20");
   }
 
   private void processQueueUntilIdle() {

@@ -7,6 +7,9 @@ import com.muchq.games.chessql.ast.InExpr;
 import com.muchq.games.chessql.ast.MotifExpr;
 import com.muchq.games.chessql.ast.NotExpr;
 import com.muchq.games.chessql.ast.OrExpr;
+import com.muchq.games.chessql.ast.OrderByClause;
+import com.muchq.games.chessql.ast.SequenceExpr;
+import com.muchq.games.chessql.parser.ParsedQuery;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +38,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
           "fork",
           "skewer",
           "discovered_attack",
+          "discovered_check",
           "check",
           "checkmate",
           "promotion",
@@ -64,10 +68,40 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
           "platform",
           "game_url");
 
-  public CompiledQuery compile(Expr expr) {
-    List<Object> params = new ArrayList<>();
-    String sql = compileExpr(expr, params);
-    return new CompiledQuery(sql, params);
+  @Override
+  public CompiledQuery compile(ParsedQuery pq) {
+    List<Object> whereParams = new ArrayList<>();
+    String whereClause = compileExpr(pq.expr(), whereParams);
+
+    OrderByClause orderBy = pq.orderBy();
+    if (orderBy != null) {
+      String motifName = orderBy.motifName();
+      if (!VALID_MOTIFS.contains(motifName)) {
+        throw new IllegalArgumentException("Unknown motif in ORDER BY: " + motifName);
+      }
+      String motifDbValue = motifName.toUpperCase();
+      String direction = orderBy.ascending() ? "ASC" : "DESC";
+
+      // The LEFT JOIN subquery param must come before the WHERE params.
+      List<Object> allParams = new ArrayList<>();
+      allParams.add(motifDbValue);
+      allParams.addAll(whereParams);
+
+      String sql =
+          "SELECT g.* FROM game_features g"
+              + " LEFT JOIN (SELECT game_url, COUNT(*) AS c FROM motif_occurrences"
+              + " WHERE motif = ? GROUP BY game_url) cnt"
+              + " ON g.game_url = cnt.game_url"
+              + " WHERE "
+              + whereClause
+              + " ORDER BY COALESCE(cnt.c, 0) "
+              + direction;
+      return new CompiledQuery(sql, allParams);
+    } else {
+      String sql =
+          "SELECT g.* FROM game_features g WHERE " + whereClause + " ORDER BY g.played_at DESC";
+      return new CompiledQuery(sql, whereParams);
+    }
   }
 
   private String compileExpr(Expr expr, List<Object> params) {
@@ -84,6 +118,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       case ComparisonExpr cmp -> compileComparison(cmp, params);
       case InExpr in -> compileIn(in, params);
       case MotifExpr motif -> compileMotif(motif);
+      case SequenceExpr seq -> compileSequence(seq, params);
     };
   }
 
@@ -103,12 +138,12 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
   private String compileIn(InExpr in, List<Object> params) {
     String column = resolveColumn(in.field());
     params.addAll(in.values());
-    String placeholders = in.values().stream().map(v -> "?").collect(Collectors.joining(", "));
     if (STRING_COLUMNS.contains(column)) {
       String lowerPlaceholders =
           in.values().stream().map(v -> "LOWER(?)").collect(Collectors.joining(", "));
       return "LOWER(" + column + ") IN (" + lowerPlaceholders + ")";
     }
+    String placeholders = in.values().stream().map(v -> "?").collect(Collectors.joining(", "));
     return column + " IN (" + placeholders + ")";
   }
 
@@ -117,7 +152,43 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     if (!VALID_MOTIFS.contains(name)) {
       throw new IllegalArgumentException("Unknown motif: " + name);
     }
-    return "has_" + name + " = TRUE";
+    return "g.has_" + name + " = TRUE";
+  }
+
+  private String compileSequence(SequenceExpr seq, List<Object> params) {
+    List<String> names = seq.motifNames();
+    if (names.size() < 2) {
+      throw new IllegalArgumentException("sequence() requires at least 2 motifs");
+    }
+    for (String name : names) {
+      if (!VALID_MOTIFS.contains(name)) {
+        throw new IllegalArgumentException("Unknown motif in sequence: " + name);
+      }
+    }
+
+    // Build: EXISTS (SELECT 1 FROM motif_occurrences mo1
+    //   JOIN motif_occurrences mo2 ON mo2.game_url = mo1.game_url AND mo2.motif = ? AND mo2.ply =
+    // mo1.ply + 2
+    //   [ ... more JOINs for longer sequences ... ]
+    //   WHERE mo1.game_url = g.game_url AND mo1.motif = ?)
+    // Parameters: names[1].toUpperCase(), names[2].toUpperCase(), ..., names[0].toUpperCase()
+    StringBuilder sb = new StringBuilder("EXISTS (SELECT 1 FROM motif_occurrences mo1");
+
+    for (int i = 1; i < names.size(); i++) {
+      int prev = i;
+      int cur = i + 1;
+      sb.append(
+          String.format(
+              " JOIN motif_occurrences mo%d ON mo%d.game_url = mo1.game_url"
+                  + " AND mo%d.motif = ? AND mo%d.ply = mo%d.ply + 2",
+              cur, cur, cur, cur, prev));
+      params.add(names.get(i).toUpperCase());
+    }
+
+    sb.append(" WHERE mo1.game_url = g.game_url AND mo1.motif = ?)");
+    params.add(names.get(0).toUpperCase());
+
+    return sb.toString();
   }
 
   private String resolveColumn(String field) {

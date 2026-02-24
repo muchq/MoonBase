@@ -20,9 +20,10 @@ public class PromotionWithCheckmateDetector implements MotifDetector {
     for (PositionContext ctx : positions) {
       String move = ctx.lastMove();
       if (move != null && move.contains("=") && move.endsWith("#")) {
-        occurrences.add(
-            new GameFeatures.MotifOccurrence(
-                ctx.moveNumber(), "Promotion with checkmate at move " + ctx.moveNumber()));
+        GameFeatures.MotifOccurrence occ =
+            GameFeatures.MotifOccurrence.from(
+                ctx, "Promotion with checkmate at move " + ctx.moveNumber());
+        if (occ != null) occurrences.add(occ);
       }
     }
 

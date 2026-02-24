@@ -1,7 +1,5 @@
 package com.muchq.games.one_d4.worker;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.muchq.games.chess_com_client.ChessClient;
 import com.muchq.games.chess_com_client.GamesResponse;
 import com.muchq.games.chess_com_client.PlayedGame;
@@ -33,21 +31,18 @@ public class IndexWorker {
   private final IndexingRequestStore requestStore;
   private final GameFeatureStore gameFeatureStore;
   private final IndexedPeriodStore periodStore;
-  private final ObjectMapper objectMapper;
 
   public IndexWorker(
       ChessClient chessClient,
       FeatureExtractor featureExtractor,
       IndexingRequestStore requestStore,
       GameFeatureStore gameFeatureStore,
-      IndexedPeriodStore periodStore,
-      ObjectMapper objectMapper) {
+      IndexedPeriodStore periodStore) {
     this.chessClient = chessClient;
     this.featureExtractor = featureExtractor;
     this.requestStore = requestStore;
     this.gameFeatureStore = gameFeatureStore;
     this.periodStore = periodStore;
-    this.objectMapper = objectMapper;
   }
 
   public void process(IndexMessage message) {
@@ -120,13 +115,6 @@ public class IndexWorker {
   private void indexGame(IndexMessage message, PlayedGame game) {
     GameFeatures features = featureExtractor.extract(game.pgn());
 
-    String motifsJson;
-    try {
-      motifsJson = objectMapper.writeValueAsString(features.occurrences());
-    } catch (JsonProcessingException e) {
-      motifsJson = "{}";
-    }
-
     String result = determineResult(game);
 
     GameFeature row =
@@ -149,16 +137,17 @@ public class IndexWorker {
             features.hasMotif(Motif.FORK),
             features.hasMotif(Motif.SKEWER),
             features.hasMotif(Motif.DISCOVERED_ATTACK),
+            features.hasMotif(Motif.DISCOVERED_CHECK),
             features.hasMotif(Motif.CHECK),
             features.hasMotif(Motif.CHECKMATE),
             features.hasMotif(Motif.PROMOTION),
             features.hasMotif(Motif.PROMOTION_WITH_CHECK),
             features.hasMotif(Motif.PROMOTION_WITH_CHECKMATE),
             Instant.now(),
-            motifsJson,
             game.pgn());
 
     gameFeatureStore.insert(row);
+    gameFeatureStore.insertOccurrences(game.url(), features.occurrences());
   }
 
   private String determineResult(PlayedGame game) {

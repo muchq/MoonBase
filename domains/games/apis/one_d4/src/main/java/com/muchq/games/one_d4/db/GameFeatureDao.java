@@ -2,6 +2,9 @@ package com.muchq.games.one_d4.db;
 
 import com.muchq.games.chessql.compiler.CompiledQuery;
 import com.muchq.games.one_d4.api.dto.GameFeature;
+import com.muchq.games.one_d4.api.dto.OccurrenceRow;
+import com.muchq.games.one_d4.engine.model.GameFeatures;
+import com.muchq.games.one_d4.engine.model.Motif;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -10,8 +13,11 @@ import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import javax.sql.DataSource;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -25,10 +31,10 @@ public class GameFeatureDao implements GameFeatureStore {
       MERGE INTO game_features (
           request_id, game_url, platform, white_username, black_username,
           white_elo, black_elo, time_class, eco, result, played_at, num_moves,
-          has_pin, has_cross_pin, has_fork, has_skewer, has_discovered_attack,
+          has_pin, has_cross_pin, has_fork, has_skewer, has_discovered_attack, has_discovered_check,
           has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
-          indexed_at, motifs_json, pgn
-      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?, ?)
+          indexed_at, pgn
+      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
       """;
 
   private static final String PG_INSERT =
@@ -36,14 +42,18 @@ public class GameFeatureDao implements GameFeatureStore {
       INSERT INTO game_features (
           request_id, game_url, platform, white_username, black_username,
           white_elo, black_elo, time_class, eco, result, played_at, num_moves,
-          has_pin, has_cross_pin, has_fork, has_skewer, has_discovered_attack,
+          has_pin, has_cross_pin, has_fork, has_skewer, has_discovered_attack, has_discovered_check,
           has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
-          indexed_at, motifs_json, pgn
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?::jsonb, ?)
+          indexed_at, pgn
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
       ON CONFLICT (game_url) DO UPDATE SET
           indexed_at = EXCLUDED.indexed_at,
           request_id = EXCLUDED.request_id
       """;
+
+  private static final String INSERT_OCCURRENCE =
+      "INSERT INTO motif_occurrences (id, game_url, motif, ply, side, move_number, description)"
+          + " VALUES (?, ?, ?, ?, ?, ?, ?)";
 
   private final DataSource dataSource;
   private final boolean useH2;
@@ -75,12 +85,13 @@ public class GameFeatureDao implements GameFeatureStore {
       ps.setBoolean(15, row.hasFork());
       ps.setBoolean(16, row.hasSkewer());
       ps.setBoolean(17, row.hasDiscoveredAttack());
-      ps.setBoolean(18, row.hasCheck());
-      ps.setBoolean(19, row.hasCheckmate());
-      ps.setBoolean(20, row.hasPromotion());
-      ps.setBoolean(21, row.hasPromotionWithCheck());
-      ps.setBoolean(22, row.hasPromotionWithCheckmate());
-      ps.setString(23, row.motifsJson());
+      ps.setBoolean(18, row.hasDiscoveredCheck());
+      ps.setBoolean(19, row.hasCheck());
+      ps.setBoolean(20, row.hasCheckmate());
+      ps.setBoolean(21, row.hasPromotion());
+      ps.setBoolean(22, row.hasPromotionWithCheck());
+      ps.setBoolean(23, row.hasPromotionWithCheckmate());
+      // indexed_at set via now() in SQL — no parameter
       ps.setString(24, row.pgn());
       ps.executeUpdate();
     } catch (SQLException e) {
@@ -106,15 +117,39 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   @Override
+  public void insertOccurrences(
+      String gameUrl, Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences) {
+    if (occurrences.isEmpty()) return;
+    try (Connection conn = dataSource.getConnection();
+        PreparedStatement ps = conn.prepareStatement(INSERT_OCCURRENCE)) {
+      for (Map.Entry<Motif, List<GameFeatures.MotifOccurrence>> entry : occurrences.entrySet()) {
+        String motifName = entry.getKey().name();
+        for (GameFeatures.MotifOccurrence occ : entry.getValue()) {
+          if (occ.ply() <= 0) continue; // skip initial position occurrences
+          ps.setString(1, UUID.randomUUID().toString());
+          ps.setString(2, gameUrl);
+          ps.setString(3, motifName);
+          ps.setInt(4, occ.ply());
+          ps.setString(5, occ.side());
+          ps.setInt(6, occ.moveNumber());
+          ps.setString(7, occ.description());
+          ps.addBatch();
+        }
+      }
+      ps.executeBatch();
+    } catch (SQLException e) {
+      LOG.error("Failed to insert motif occurrences for game_url={}", gameUrl, e);
+      throw new RuntimeException("Failed to insert motif occurrences", e);
+    }
+  }
+
+  @Override
   public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
     if (!(compiledQuery instanceof CompiledQuery cq)) {
       throw new IllegalArgumentException(
           "Expected CompiledQuery, got: " + compiledQuery.getClass());
     }
-    String sql =
-        "SELECT * FROM game_features WHERE "
-            + cq.sql()
-            + " ORDER BY played_at DESC LIMIT ? OFFSET ?";
+    String sql = cq.selectSql() + " LIMIT ? OFFSET ?";
     try (Connection conn = dataSource.getConnection();
         PreparedStatement ps = conn.prepareStatement(sql)) {
       int idx = 1;
@@ -134,6 +169,41 @@ public class GameFeatureDao implements GameFeatureStore {
     } catch (SQLException e) {
       throw new RuntimeException("Failed to query game features", e);
     }
+  }
+
+  @Override
+  public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
+    if (gameUrls.isEmpty()) return Map.of();
+    String placeholders = gameUrls.stream().map(u -> "?").collect(Collectors.joining(", "));
+    String sql =
+        "SELECT game_url, motif, move_number, description FROM motif_occurrences"
+            + " WHERE game_url IN ("
+            + placeholders
+            + ") ORDER BY ply ASC";
+    Map<String, Map<String, List<OccurrenceRow>>> result = new LinkedHashMap<>();
+    try (Connection conn = dataSource.getConnection();
+        PreparedStatement ps = conn.prepareStatement(sql)) {
+      int idx = 1;
+      for (String url : gameUrls) {
+        ps.setString(idx++, url);
+      }
+      try (ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) {
+          String gameUrl = rs.getString("game_url");
+          // Store motif key as lowercase to match ChessQL motif naming convention
+          String motif = rs.getString("motif").toLowerCase();
+          int moveNumber = rs.getInt("move_number");
+          String description = rs.getString("description");
+          result
+              .computeIfAbsent(gameUrl, k -> new LinkedHashMap<>())
+              .computeIfAbsent(motif, k -> new ArrayList<>())
+              .add(new OccurrenceRow(moveNumber, description));
+        }
+      }
+    } catch (SQLException e) {
+      throw new RuntimeException("Failed to query motif occurrences", e);
+    }
+    return result;
   }
 
   private GameFeature mapRow(ResultSet rs) throws SQLException {
@@ -156,13 +226,13 @@ public class GameFeatureDao implements GameFeatureStore {
         rs.getBoolean("has_fork"),
         rs.getBoolean("has_skewer"),
         rs.getBoolean("has_discovered_attack"),
+        rs.getBoolean("has_discovered_check"),
         rs.getBoolean("has_check"),
         rs.getBoolean("has_checkmate"),
         rs.getBoolean("has_promotion"),
         rs.getBoolean("has_promotion_with_check"),
         rs.getBoolean("has_promotion_with_checkmate"),
         rs.getTimestamp("indexed_at") != null ? rs.getTimestamp("indexed_at").toInstant() : null,
-        rs.getString("motifs_json"),
         rs.getString("pgn"));
   }
 

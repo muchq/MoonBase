@@ -10,5 +10,17 @@ public record GameFeatures(
     return motifs.contains(motif);
   }
 
-  public record MotifOccurrence(int moveNumber, String description) {}
+  public record MotifOccurrence(int ply, int moveNumber, String side, String description) {
+    /**
+     * Factory: derives ply and side from the given PositionContext. Returns null if the context
+     * represents the initial position (no move has been made).
+     */
+    public static MotifOccurrence from(PositionContext ctx, String description) {
+      boolean movedWhite = !ctx.whiteToMove();
+      int ply = movedWhite ? 2 * ctx.moveNumber() - 1 : 2 * (ctx.moveNumber() - 1);
+      if (ply <= 0) return null; // initial position, no move made yet
+      String side = movedWhite ? "white" : "black";
+      return new MotifOccurrence(ply, ctx.moveNumber(), side, description);
+    }
+  }
 }

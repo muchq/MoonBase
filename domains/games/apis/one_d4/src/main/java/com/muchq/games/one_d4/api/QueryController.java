@@ -1,11 +1,12 @@
 package com.muchq.games.one_d4.api;
 
-import com.muchq.games.chessql.ast.Expr;
 import com.muchq.games.chessql.compiler.CompiledQuery;
 import com.muchq.games.chessql.compiler.QueryCompiler;
+import com.muchq.games.chessql.parser.ParsedQuery;
 import com.muchq.games.chessql.parser.Parser;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.GameFeatureRow;
+import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.api.dto.QueryRequest;
 import com.muchq.games.one_d4.api.dto.QueryResponse;
 import com.muchq.games.one_d4.db.GameFeatureStore;
@@ -16,6 +17,7 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import java.util.List;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,12 +51,22 @@ public class QueryController {
         request.limit(),
         request.offset());
 
-    Expr expr = Parser.parse(request.query());
-    CompiledQuery compiled = queryCompiler.compile(expr);
+    ParsedQuery parsed = Parser.parse(request.query());
+    CompiledQuery compiled = queryCompiler.compile(parsed);
 
     List<GameFeature> rows = gameFeatureStore.query(compiled, request.limit(), request.offset());
 
-    List<GameFeatureRow> dtos = rows.stream().map(GameFeatureRow::fromStore).toList();
+    List<String> gameUrls = rows.stream().map(GameFeature::gameUrl).toList();
+    Map<String, Map<String, List<OccurrenceRow>>> occurrences =
+        gameFeatureStore.queryOccurrences(gameUrls);
+
+    List<GameFeatureRow> dtos =
+        rows.stream()
+            .map(
+                row ->
+                    GameFeatureRow.fromStore(
+                        row, occurrences.getOrDefault(row.gameUrl(), Map.of())))
+            .toList();
 
     return new QueryResponse(dtos, dtos.size());
   }

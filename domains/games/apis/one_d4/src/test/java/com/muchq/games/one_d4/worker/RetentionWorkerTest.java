@@ -160,8 +160,8 @@ public class RetentionWorkerTest {
         false,
         false,
         false,
+        false,
         Instant.now(),
-        "{}",
         "pgn");
   }
 }

@@ -1,6 +1,8 @@
 package com.muchq.games.one_d4.api.dto;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 
 public record GameFeatureRow(
     String gameUrl,
@@ -20,12 +22,16 @@ public record GameFeatureRow(
     boolean hasFork,
     boolean hasSkewer,
     boolean hasDiscoveredAttack,
+    boolean hasDiscoveredCheck,
     boolean hasCheck,
     boolean hasCheckmate,
     boolean hasPromotion,
     boolean hasPromotionWithCheck,
-    boolean hasPromotionWithCheckmate) {
-  public static GameFeatureRow fromStore(GameFeature row) {
+    boolean hasPromotionWithCheckmate,
+    Map<String, List<OccurrenceRow>> occurrences) {
+
+  public static GameFeatureRow fromStore(
+      GameFeature row, Map<String, List<OccurrenceRow>> occurrences) {
     return new GameFeatureRow(
         row.gameUrl(),
         row.platform(),
@@ -44,10 +50,12 @@ public record GameFeatureRow(
         row.hasFork(),
         row.hasSkewer(),
         row.hasDiscoveredAttack(),
+        row.hasDiscoveredCheck(),
         row.hasCheck(),
         row.hasCheckmate(),
         row.hasPromotion(),
         row.hasPromotionWithCheck(),
-        row.hasPromotionWithCheckmate());
+        row.hasPromotionWithCheckmate(),
+        occurrences);
   }
 }

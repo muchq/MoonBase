@@ -15,6 +15,8 @@
     </filter>
   </appender>
 
+  <logger name="com.zaxxer.hikari" level="INFO"/>
+
   <root level="TRACE">
     <appender-ref ref="Sentry"/>
     <appender-ref ref="STDOUT" />

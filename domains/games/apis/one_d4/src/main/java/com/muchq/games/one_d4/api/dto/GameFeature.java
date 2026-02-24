@@ -22,11 +22,11 @@ public record GameFeature(
     boolean hasFork,
     boolean hasSkewer,
     boolean hasDiscoveredAttack,
+    boolean hasDiscoveredCheck,
     boolean hasCheck,
     boolean hasCheckmate,
     boolean hasPromotion,
     boolean hasPromotionWithCheck,
     boolean hasPromotionWithCheckmate,
     Instant indexedAt,
-    String motifsJson,
     String pgn) {}

@@ -53,7 +53,6 @@ public class Migration {
           has_promotion_with_check BOOLEAN DEFAULT FALSE,
           has_promotion_with_checkmate BOOLEAN DEFAULT FALSE,
           indexed_at    TIMESTAMP NOT NULL DEFAULT current_timestamp(),
-          motifs_json   TEXT,
           pgn           TEXT
       )
       """;
@@ -115,7 +114,6 @@ public class Migration {
           has_promotion_with_check BOOLEAN DEFAULT FALSE,
           has_promotion_with_checkmate BOOLEAN DEFAULT FALSE,
           indexed_at    TIMESTAMP NOT NULL DEFAULT now(),
-          motifs_json   JSONB,
           pgn           TEXT
       )
       """;
@@ -157,6 +155,33 @@ public class Migration {
   private static final String ADD_INDEXED_AT_COLUMN =
       "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS indexed_at TIMESTAMP NOT NULL DEFAULT"
           + " now()";
+  private static final String ADD_DISCOVERED_CHECK_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_discovered_check BOOLEAN DEFAULT"
+          + " FALSE";
+  private static final String DROP_MOTIFS_JSON_COLUMN_H2 =
+      "ALTER TABLE game_features DROP COLUMN IF EXISTS motifs_json";
+  private static final String DROP_MOTIFS_JSON_COLUMN_PG =
+      "ALTER TABLE game_features DROP COLUMN IF EXISTS motifs_json";
+
+  // motif_occurrences: one row per motif firing per game. Dialect-neutral (UUID stored as string).
+  private static final String CREATE_MOTIF_OCCURRENCES =
+      """
+      CREATE TABLE IF NOT EXISTS motif_occurrences (
+          id           VARCHAR(36) NOT NULL PRIMARY KEY,
+          game_url     VARCHAR(1024) NOT NULL REFERENCES game_features(game_url) ON DELETE CASCADE,
+          motif        VARCHAR(50) NOT NULL,
+          ply          INT NOT NULL,
+          side         VARCHAR(5) NOT NULL,
+          move_number  INT NOT NULL,
+          description  TEXT
+      )
+      """;
+  private static final String CREATE_IDX_MOTIF_OCC_GAME_URL =
+      "CREATE INDEX IF NOT EXISTS idx_motif_occ_game_url ON motif_occurrences(game_url)";
+  private static final String CREATE_IDX_MOTIF_OCC_MOTIF =
+      "CREATE INDEX IF NOT EXISTS idx_motif_occ_motif ON motif_occurrences(motif)";
+  private static final String CREATE_IDX_MOTIF_OCC_PLY =
+      "CREATE INDEX IF NOT EXISTS idx_motif_occ_ply ON motif_occurrences(game_url, ply)";
 
   public void run() {
     try (Connection conn = dataSource.getConnection();
@@ -178,6 +203,19 @@ public class Migration {
       stmt.execute(ADD_PROMOTION_WITH_CHECK_COLUMN);
       stmt.execute(ADD_PROMOTION_WITH_CHECKMATE_COLUMN);
       stmt.execute(ADD_INDEXED_AT_COLUMN);
+      stmt.execute(ADD_DISCOVERED_CHECK_COLUMN);
+
+      // Drop legacy motifs_json column (replaced by motif_occurrences table)
+      if (useH2) {
+        stmt.execute(DROP_MOTIFS_JSON_COLUMN_H2);
+      } else {
+        stmt.execute(DROP_MOTIFS_JSON_COLUMN_PG);
+      }
+
+      stmt.execute(CREATE_MOTIF_OCCURRENCES);
+      stmt.execute(CREATE_IDX_MOTIF_OCC_GAME_URL);
+      stmt.execute(CREATE_IDX_MOTIF_OCC_MOTIF);
+      stmt.execute(CREATE_IDX_MOTIF_OCC_PLY);
 
       LOG.info("Database migration completed successfully (H2={})", useH2);
     } catch (SQLException e) {
