@@ -29,5 +29,4 @@ public record GameFeature(
     boolean hasPromotionWithCheck,
     boolean hasPromotionWithCheckmate,
     Instant indexedAt,
-    String motifsJson,
     String pgn) {}

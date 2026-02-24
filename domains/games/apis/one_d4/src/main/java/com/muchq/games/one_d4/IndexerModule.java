@@ -147,10 +147,9 @@ public class IndexerModule {
       FeatureExtractor featureExtractor,
       IndexingRequestStore requestStore,
       GameFeatureStore gameFeatureStore,
-      IndexedPeriodStore periodStore,
-      ObjectMapper objectMapper) {
+      IndexedPeriodStore periodStore) {
     return new IndexWorker(
-        chessClient, featureExtractor, requestStore, gameFeatureStore, periodStore, objectMapper);
+        chessClient, featureExtractor, requestStore, gameFeatureStore, periodStore);
   }
 
   @Context

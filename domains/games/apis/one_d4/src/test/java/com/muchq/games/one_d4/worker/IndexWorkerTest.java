@@ -68,8 +68,7 @@ public class IndexWorkerTest {
             featureExtractor,
             requestStore,
             new NoOpGameFeatureStore(),
-            periodStore,
-            new ObjectMapper());
+            periodStore);
   }
 
   @Test
@@ -138,8 +137,7 @@ public class IndexWorkerTest {
             featureExtractor,
             requestStore,
             recordingStore,
-            periodStore,
-            new ObjectMapper());
+            periodStore);
 
     IndexMessage message = new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01");
     workerWithRecording.process(message);

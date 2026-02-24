@@ -121,7 +121,6 @@ public class QueryControllerTest {
         false,
         false,
         Instant.now(),
-        "{}",
         "pgn");
   }
 

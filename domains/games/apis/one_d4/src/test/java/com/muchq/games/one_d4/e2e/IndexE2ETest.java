@@ -2,7 +2,6 @@ package com.muchq.games.one_d4.e2e;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.muchq.games.chess_com_client.Accuracies;
 import com.muchq.games.chess_com_client.PlayedGame;
 import com.muchq.games.chess_com_client.PlayerResult;
@@ -86,15 +85,13 @@ public class IndexE2ETest {
             new DiscoveredCheckDetector());
     FeatureExtractor featureExtractor =
         new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
-    ObjectMapper objectMapper = new ObjectMapper();
     worker =
         new IndexWorker(
             fakeChessClient,
             featureExtractor,
             requestStore,
             gameFeatureStore,
-            periodStore,
-            objectMapper);
+            periodStore);
 
     controller = new IndexController(requestStore, queue, new IndexRequestValidator());
   }

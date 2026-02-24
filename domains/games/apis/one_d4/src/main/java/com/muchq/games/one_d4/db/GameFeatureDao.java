@@ -33,8 +33,8 @@ public class GameFeatureDao implements GameFeatureStore {
           white_elo, black_elo, time_class, eco, result, played_at, num_moves,
           has_pin, has_cross_pin, has_fork, has_skewer, has_discovered_attack, has_discovered_check,
           has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
-          indexed_at, motifs_json, pgn
-      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?, ?)
+          indexed_at, pgn
+      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
       """;
 
   private static final String PG_INSERT =
@@ -44,8 +44,8 @@ public class GameFeatureDao implements GameFeatureStore {
           white_elo, black_elo, time_class, eco, result, played_at, num_moves,
           has_pin, has_cross_pin, has_fork, has_skewer, has_discovered_attack, has_discovered_check,
           has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
-          indexed_at, motifs_json, pgn
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?::jsonb, ?)
+          indexed_at, pgn
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
       ON CONFLICT (game_url) DO UPDATE SET
           indexed_at = EXCLUDED.indexed_at,
           request_id = EXCLUDED.request_id
@@ -92,8 +92,7 @@ public class GameFeatureDao implements GameFeatureStore {
       ps.setBoolean(22, row.hasPromotionWithCheck());
       ps.setBoolean(23, row.hasPromotionWithCheckmate());
       // indexed_at set via now() in SQL — no parameter
-      ps.setString(24, row.motifsJson());
-      ps.setString(25, row.pgn());
+      ps.setString(24, row.pgn());
       ps.executeUpdate();
     } catch (SQLException e) {
       LOG.error("Failed to insert game feature for game_url={}", row.gameUrl(), e);
@@ -234,7 +233,6 @@ public class GameFeatureDao implements GameFeatureStore {
         rs.getBoolean("has_promotion_with_check"),
         rs.getBoolean("has_promotion_with_checkmate"),
         rs.getTimestamp("indexed_at") != null ? rs.getTimestamp("indexed_at").toInstant() : null,
-        rs.getString("motifs_json"),
         rs.getString("pgn"));
   }
 
