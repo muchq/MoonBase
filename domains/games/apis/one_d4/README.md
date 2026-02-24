@@ -95,6 +95,11 @@ curl -X POST http://localhost:8080/v1/query \
 - `motif(fork)`
 - `motif(skewer)`
 - `motif(discovered_attack)`
+- `motif(check)`
+- `motif(checkmate)`
+- `motif(promotion)`
+- `motif(promotion_with_check)`
+- `motif(promotion_with_checkmate)`
 
 ---
 

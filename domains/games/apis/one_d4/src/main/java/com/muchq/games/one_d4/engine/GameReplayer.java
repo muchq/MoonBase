@@ -16,7 +16,7 @@ public class GameReplayer {
     List<PositionContext> positions = new ArrayList<>();
     Board board = Board.ofStandard();
 
-    positions.add(new PositionContext(0, board.toFEN(), true));
+    positions.add(new PositionContext(0, board.toFEN(), true, null));
 
     List<String> moves = extractMoves(moveText);
     int moveNumber = 1;
@@ -28,7 +28,7 @@ public class GameReplayer {
         moveNumber++;
       }
       whiteToMove = !whiteToMove;
-      positions.add(new PositionContext(moveNumber, board.toFEN(), whiteToMove));
+      positions.add(new PositionContext(moveNumber, board.toFEN(), whiteToMove, move));
     }
 
     return positions;

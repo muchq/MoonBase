@@ -29,7 +29,17 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
           "played_at");
 
   private static final Set<String> VALID_MOTIFS =
-      Set.of("pin", "cross_pin", "fork", "skewer", "discovered_attack");
+      Set.of(
+          "pin",
+          "cross_pin",
+          "fork",
+          "skewer",
+          "discovered_attack",
+          "check",
+          "checkmate",
+          "promotion",
+          "promotion_with_check",
+          "promotion_with_checkmate");
 
   private static final Map<String, String> FIELD_MAP =
       Map.of(

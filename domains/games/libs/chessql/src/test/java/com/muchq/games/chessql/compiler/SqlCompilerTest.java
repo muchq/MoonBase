@@ -90,6 +90,41 @@ public class SqlCompilerTest {
   }
 
   @Test
+  public void testCheckMotif() {
+    CompiledQuery result = compile("motif(check)");
+    assertThat(result.sql()).isEqualTo("has_check = TRUE");
+    assertThat(result.parameters()).isEmpty();
+  }
+
+  @Test
+  public void testCheckmateMotif() {
+    CompiledQuery result = compile("motif(checkmate)");
+    assertThat(result.sql()).isEqualTo("has_checkmate = TRUE");
+    assertThat(result.parameters()).isEmpty();
+  }
+
+  @Test
+  public void testPromotionMotif() {
+    CompiledQuery result = compile("motif(promotion)");
+    assertThat(result.sql()).isEqualTo("has_promotion = TRUE");
+    assertThat(result.parameters()).isEmpty();
+  }
+
+  @Test
+  public void testPromotionWithCheckMotif() {
+    CompiledQuery result = compile("motif(promotion_with_check)");
+    assertThat(result.sql()).isEqualTo("has_promotion_with_check = TRUE");
+    assertThat(result.parameters()).isEmpty();
+  }
+
+  @Test
+  public void testPromotionWithCheckmateMotif() {
+    CompiledQuery result = compile("motif(promotion_with_checkmate)");
+    assertThat(result.sql()).isEqualTo("has_promotion_with_checkmate = TRUE");
+    assertThat(result.parameters()).isEmpty();
+  }
+
+  @Test
   public void testUnknownMotif() {
     assertThatThrownBy(() -> compile("motif(unknown)"))
         .isInstanceOf(IllegalArgumentException.class)

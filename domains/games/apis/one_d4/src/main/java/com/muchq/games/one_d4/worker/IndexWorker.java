@@ -149,6 +149,11 @@ public class IndexWorker {
             features.hasMotif(Motif.FORK),
             features.hasMotif(Motif.SKEWER),
             features.hasMotif(Motif.DISCOVERED_ATTACK),
+            features.hasMotif(Motif.CHECK),
+            features.hasMotif(Motif.CHECKMATE),
+            features.hasMotif(Motif.PROMOTION),
+            features.hasMotif(Motif.PROMOTION_WITH_CHECK),
+            features.hasMotif(Motif.PROMOTION_WITH_CHECKMATE),
             motifsJson,
             game.pgn());
 

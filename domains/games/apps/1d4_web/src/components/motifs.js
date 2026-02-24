@@ -8,6 +8,11 @@ const MOTIF_KEYS = [
   ['hasFork', 'fork'],
   ['hasSkewer', 'skewer'],
   ['hasDiscoveredAttack', 'discovered_attack'],
+  ['hasCheck', 'check'],
+  ['hasCheckmate', 'checkmate'],
+  ['hasPromotion', 'promotion'],
+  ['hasPromotionWithCheck', 'promotion_with_check'],
+  ['hasPromotionWithCheckmate', 'promotion_with_checkmate'],
 ];
 
 /**

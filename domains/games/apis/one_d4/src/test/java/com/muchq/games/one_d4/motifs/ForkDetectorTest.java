@@ -24,12 +24,12 @@ public class ForkDetectorTest {
     // White knight on e6 forks black king on g7 and black queen on c7
     // Position: 8/2q3k1/4N3/8/8/8/8/4K3 w - - 0 1
     String fen = "8/2q3k1/4N3/8/8/8/8/4K3 w - - 0 1";
-    List<PositionContext> positions = List.of(new PositionContext(10, fen, true));
+    List<PositionContext> positions = List.of(new PositionContext(10, fen, true, null));
 
     // After white's move, it's black to move, so attacker is white (!whiteToMove)
     // But ForkDetector checks for the side that just moved, which is white here
     // Let's set whiteToMove=false to indicate black is to move (white just moved)
-    positions = List.of(new PositionContext(10, fen, false));
+    positions = List.of(new PositionContext(10, fen, false, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
@@ -43,7 +43,7 @@ public class ForkDetectorTest {
     String fen = "8/8/5k2/3N4/1r6/8/8/4K3 b - - 0 1";
     List<PositionContext> positions =
         List.of(
-            new PositionContext(15, fen, false) // black to move, white just forked
+            new PositionContext(15, fen, false, null) // black to move, white just forked
             );
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
@@ -54,7 +54,7 @@ public class ForkDetectorTest {
   public void knightFork_attacksQueenAndRook() {
     // White knight on c6 forks black queen on e7 and black rook on a7
     String fen = "8/r3q3/2N5/8/8/8/8/4K2k b - - 0 1";
-    List<PositionContext> positions = List.of(new PositionContext(12, fen, false));
+    List<PositionContext> positions = List.of(new PositionContext(12, fen, false, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
@@ -66,7 +66,7 @@ public class ForkDetectorTest {
     String fen = "8/8/8/5Q2/3n4/8/4K3/7k w - - 0 1";
     List<PositionContext> positions =
         List.of(
-            new PositionContext(20, fen, true) // white to move, black just forked
+            new PositionContext(20, fen, true, null) // white to move, black just forked
             );
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
@@ -79,7 +79,7 @@ public class ForkDetectorTest {
   public void pawnFork_whitePawnForksBlackPieces() {
     // White pawn on d5 attacks black knights on c6 and e6
     String fen = "8/8/2n1n3/3P4/8/8/8/4K2k b - - 0 1";
-    List<PositionContext> positions = List.of(new PositionContext(8, fen, false));
+    List<PositionContext> positions = List.of(new PositionContext(8, fen, false, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
@@ -89,7 +89,7 @@ public class ForkDetectorTest {
   public void pawnFork_blackPawnForksWhitePieces() {
     // Black pawn on e4 attacks white bishop on d3 and white knight on f3
     String fen = "7k/8/8/8/4p3/3B1N2/8/4K3 w - - 0 1";
-    List<PositionContext> positions = List.of(new PositionContext(15, fen, true));
+    List<PositionContext> positions = List.of(new PositionContext(15, fen, true, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
@@ -101,7 +101,7 @@ public class ForkDetectorTest {
   public void queenFork_attacksKingAndRook() {
     // White queen on e5 forks black king on g7 and black rook on a5
     String fen = "8/6k1/8/r3Q3/8/8/8/4K3 b - - 0 1";
-    List<PositionContext> positions = List.of(new PositionContext(25, fen, false));
+    List<PositionContext> positions = List.of(new PositionContext(25, fen, false, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
@@ -113,7 +113,7 @@ public class ForkDetectorTest {
   public void bishopFork_attacksTwoRooks() {
     // White bishop on c4 attacks black rooks on a6 and f7
     String fen = "8/5r2/r7/8/2B5/8/8/4K2k b - - 0 1";
-    List<PositionContext> positions = List.of(new PositionContext(18, fen, false));
+    List<PositionContext> positions = List.of(new PositionContext(18, fen, false, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
@@ -125,7 +125,7 @@ public class ForkDetectorTest {
   public void noFork_onlyOnePieceAttacked() {
     // White knight on e4 attacks only black queen on f6
     String fen = "8/8/5q2/8/4N3/8/8/4K2k b - - 0 1";
-    List<PositionContext> positions = List.of(new PositionContext(10, fen, false));
+    List<PositionContext> positions = List.of(new PositionContext(10, fen, false, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).isEmpty();
@@ -135,7 +135,7 @@ public class ForkDetectorTest {
   public void noFork_attackingPawnsNotCounted() {
     // White knight attacks two black pawns - pawns are value 1, not counted as valuable
     String fen = "8/8/8/8/3N4/2p1p3/8/4K2k b - - 0 1";
-    List<PositionContext> positions = List.of(new PositionContext(10, fen, false));
+    List<PositionContext> positions = List.of(new PositionContext(10, fen, false, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).isEmpty();
@@ -145,7 +145,7 @@ public class ForkDetectorTest {
   public void noFork_emptyPosition() {
     // Starting position - no forks
     String fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-    List<PositionContext> positions = List.of(new PositionContext(1, fen, true));
+    List<PositionContext> positions = List.of(new PositionContext(1, fen, true, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).isEmpty();
@@ -165,11 +165,11 @@ public class ForkDetectorTest {
         List.of(
             // No fork
             new PositionContext(
-                1, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", true),
+                1, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", true, null),
             // Fork: knight on e6 forks king g7 and queen c7
-            new PositionContext(10, "8/2q3k1/4N3/8/8/8/8/4K3 b - - 0 1", false),
+            new PositionContext(10, "8/2q3k1/4N3/8/8/8/8/4K3 b - - 0 1", false, null),
             // No fork
-            new PositionContext(15, "8/8/8/8/8/8/8/4K2k w - - 0 1", true));
+            new PositionContext(15, "8/8/8/8/8/8/8/4K2k w - - 0 1", true, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
