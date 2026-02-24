@@ -22,5 +22,10 @@ public record GameFeature(
     boolean hasFork,
     boolean hasSkewer,
     boolean hasDiscoveredAttack,
+    boolean hasCheck,
+    boolean hasCheckmate,
+    boolean hasPromotion,
+    boolean hasPromotionWithCheck,
+    boolean hasPromotionWithCheckmate,
     String motifsJson,
     String pgn) {}

@@ -47,6 +47,11 @@ public class Migration {
           has_fork      BOOLEAN DEFAULT FALSE,
           has_skewer    BOOLEAN DEFAULT FALSE,
           has_discovered_attack BOOLEAN DEFAULT FALSE,
+          has_check     BOOLEAN DEFAULT FALSE,
+          has_checkmate BOOLEAN DEFAULT FALSE,
+          has_promotion BOOLEAN DEFAULT FALSE,
+          has_promotion_with_check BOOLEAN DEFAULT FALSE,
+          has_promotion_with_checkmate BOOLEAN DEFAULT FALSE,
           motifs_json   TEXT,
           pgn           TEXT
       )
@@ -103,6 +108,11 @@ public class Migration {
           has_fork      BOOLEAN DEFAULT FALSE,
           has_skewer    BOOLEAN DEFAULT FALSE,
           has_discovered_attack BOOLEAN DEFAULT FALSE,
+          has_check     BOOLEAN DEFAULT FALSE,
+          has_checkmate BOOLEAN DEFAULT FALSE,
+          has_promotion BOOLEAN DEFAULT FALSE,
+          has_promotion_with_check BOOLEAN DEFAULT FALSE,
+          has_promotion_with_checkmate BOOLEAN DEFAULT FALSE,
           motifs_json   JSONB,
           pgn           TEXT
       )

@@ -15,11 +15,16 @@ java_library(
 java_library(
     name = "motifs",
     srcs = [
+        "src/main/java/com/muchq/games/one_d4/motifs/CheckDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/CheckmateDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/CrossPinDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/DiscoveredAttackDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/ForkDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/MotifDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/PinDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/PromotionDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/PromotionWithCheckDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/PromotionWithCheckmateDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/SkewerDetector.java",
     ],
     visibility = ["//visibility:public"],
@@ -219,8 +224,13 @@ java_test_suite(
     name = "motifs_tests",
     size = "small",
     srcs = [
+        "src/test/java/com/muchq/games/one_d4/motifs/CheckDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/CheckmateDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/ForkDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/PinDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/PromotionDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/PromotionWithCheckDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/PromotionWithCheckmateDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/SkewerDetectorTest.java",
     ],
     deps = [

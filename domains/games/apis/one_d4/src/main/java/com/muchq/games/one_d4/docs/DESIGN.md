@@ -85,8 +85,8 @@ com.muchq.indexer/
   engine/model/
     ParsedGame.java                 Headers map + movetext string
     GameFeatures.java               Set<Motif>, numMoves, occurrence details
-    Motif.java                      Enum: PIN, CROSS_PIN, FORK, SKEWER, DISCOVERED_ATTACK
-    PositionContext.java            moveNumber, FEN, whiteToMove
+    Motif.java                      Enum: PIN, CROSS_PIN, FORK, SKEWER, DISCOVERED_ATTACK, CHECK, CHECKMATE, PROMOTION, PROMOTION_WITH_CHECK, PROMOTION_WITH_CHECKMATE
+    PositionContext.java            moveNumber, FEN, whiteToMove, lastMove
 
   motifs/
     MotifDetector.java              Interface: motif(), detect(positions)
@@ -95,6 +95,11 @@ com.muchq.indexer/
     ForkDetector.java               Piece attacking 2+ valuable enemy pieces
     SkewerDetector.java             Sliding attack through a more valuable piece
     DiscoveredAttackDetector.java   Piece moves to reveal sliding attacker behind it
+    CheckDetector.java              Move notation ends with '+'
+    CheckmateDetector.java          Move notation ends with '#'
+    PromotionDetector.java          Move notation contains '=' without check/mate
+    PromotionWithCheckDetector.java Move notation contains '=' and ends with '+'
+    PromotionWithCheckmateDetector.java Move notation contains '=' and ends with '#'
 
   chessql/
     lexer/   TokenType, Token, Lexer
@@ -164,6 +169,11 @@ com.muchq.indexer/
 | has_fork              | BOOLEAN       |                                        |
 | has_skewer            | BOOLEAN       |                                        |
 | has_discovered_attack | BOOLEAN       |                                        |
+| has_check             | BOOLEAN       |                                        |
+| has_checkmate         | BOOLEAN       |                                        |
+| has_promotion         | BOOLEAN       |                                        |
+| has_promotion_with_check | BOOLEAN    |                                        |
+| has_promotion_with_checkmate | BOOLEAN |                                       |
 | motifs_json           | JSONB         | Detailed occurrence data               |
 | pgn                   | TEXT          | Full PGN for re-analysis               |
 

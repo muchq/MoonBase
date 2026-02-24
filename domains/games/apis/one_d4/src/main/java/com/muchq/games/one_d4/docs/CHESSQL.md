@@ -64,6 +64,11 @@ The `motif()` function checks boolean columns for tactical pattern presence:
 | `motif(fork)`        | `has_fork = TRUE`            |
 | `motif(skewer)`      | `has_skewer = TRUE`          |
 | `motif(discovered_attack)` | `has_discovered_attack = TRUE` |
+| `motif(check)`       | `has_check = TRUE`           |
+| `motif(checkmate)`   | `has_checkmate = TRUE`       |
+| `motif(promotion)`   | `has_promotion = TRUE`       |
+| `motif(promotion_with_check)` | `has_promotion_with_check = TRUE` |
+| `motif(promotion_with_checkmate)` | `has_promotion_with_checkmate = TRUE` |
 
 ## Values
 

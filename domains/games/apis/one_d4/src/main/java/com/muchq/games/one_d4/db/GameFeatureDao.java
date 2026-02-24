@@ -25,8 +25,9 @@ public class GameFeatureDao implements GameFeatureStore {
           request_id, game_url, platform, white_username, black_username,
           white_elo, black_elo, time_class, eco, result, played_at, num_moves,
           has_pin, has_cross_pin, has_fork, has_skewer, has_discovered_attack,
+          has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
           motifs_json, pgn
-      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       """;
 
   private static final String PG_INSERT =
@@ -35,8 +36,9 @@ public class GameFeatureDao implements GameFeatureStore {
           request_id, game_url, platform, white_username, black_username,
           white_elo, black_elo, time_class, eco, result, played_at, num_moves,
           has_pin, has_cross_pin, has_fork, has_skewer, has_discovered_attack,
+          has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
           motifs_json, pgn
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
       ON CONFLICT (game_url) DO NOTHING
       """;
 
@@ -70,8 +72,13 @@ public class GameFeatureDao implements GameFeatureStore {
       ps.setBoolean(15, row.hasFork());
       ps.setBoolean(16, row.hasSkewer());
       ps.setBoolean(17, row.hasDiscoveredAttack());
-      ps.setString(18, row.motifsJson());
-      ps.setString(19, row.pgn());
+      ps.setBoolean(18, row.hasCheck());
+      ps.setBoolean(19, row.hasCheckmate());
+      ps.setBoolean(20, row.hasPromotion());
+      ps.setBoolean(21, row.hasPromotionWithCheck());
+      ps.setBoolean(22, row.hasPromotionWithCheckmate());
+      ps.setString(23, row.motifsJson());
+      ps.setString(24, row.pgn());
       ps.executeUpdate();
     } catch (SQLException e) {
       LOG.error("Failed to insert game feature for game_url={}", row.gameUrl(), e);
@@ -130,6 +137,11 @@ public class GameFeatureDao implements GameFeatureStore {
         rs.getBoolean("has_fork"),
         rs.getBoolean("has_skewer"),
         rs.getBoolean("has_discovered_attack"),
+        rs.getBoolean("has_check"),
+        rs.getBoolean("has_checkmate"),
+        rs.getBoolean("has_promotion"),
+        rs.getBoolean("has_promotion_with_check"),
+        rs.getBoolean("has_promotion_with_checkmate"),
         rs.getString("motifs_json"),
         rs.getString("pgn"));
   }

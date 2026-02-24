@@ -122,7 +122,12 @@ Search indexed games using ChessQL.
       "hasCrossPin": false,
       "hasFork": true,
       "hasSkewer": false,
-      "hasDiscoveredAttack": false
+      "hasDiscoveredAttack": false,
+      "hasCheck": true,
+      "hasCheckmate": false,
+      "hasPromotion": false,
+      "hasPromotionWithCheck": false,
+      "hasPromotionWithCheckmate": false
     }
   ],
   "count": 1

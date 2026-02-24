@@ -141,7 +141,7 @@ Search indexed games using ChessQL.
   "properties": {
     "query": {
       "type": "string",
-      "description": "A ChessQL query string. Examples: 'white.elo >= 2500 AND motif(fork)', 'motif(pin) OR motif(skewer)', 'eco = \"B90\" AND NOT motif(fork)'. Available motifs: pin, cross_pin, fork, skewer, discovered_attack. Available fields: white.elo, black.elo, white.username, black.username, time.class, eco, result, num.moves, platform."
+      "description": "A ChessQL query string. Examples: 'white.elo >= 2500 AND motif(fork)', 'motif(pin) OR motif(skewer)', 'eco = \"B90\" AND NOT motif(fork)'. Available motifs: pin, cross_pin, fork, skewer, discovered_attack, check, checkmate, promotion, promotion_with_check, promotion_with_checkmate. Available fields: white.elo, black.elo, white.username, black.username, time.class, eco, result, num.moves, platform."
     },
     "limit": {
       "type": "integer",
@@ -256,7 +256,8 @@ public class IndexGamesTool implements McpTool {
     public String getDescription() {
         return "Index a chess player's games for tactical motif detection. "
              + "Fetches games from chess.com, replays positions, and detects "
-             + "pins, forks, skewers, discovered attacks, and cross-pins. "
+             + "pins, forks, skewers, discovered attacks, cross-pins, checks, "
+             + "checkmates, and promotions (including promotion with check/checkmate). "
              + "Returns a request ID to check status with index_status.";
     }
 
