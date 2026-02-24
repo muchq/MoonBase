@@ -34,7 +34,7 @@ public class GameFeatureDao implements GameFeatureStore {
           has_pin, has_cross_pin, has_fork, has_skewer, has_discovered_attack, has_discovered_check,
           has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
           indexed_at, pgn
-      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
+      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
       """;
 
   private static final String PG_INSERT =

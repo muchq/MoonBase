@@ -87,11 +87,7 @@ public class IndexE2ETest {
         new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
     worker =
         new IndexWorker(
-            fakeChessClient,
-            featureExtractor,
-            requestStore,
-            gameFeatureStore,
-            periodStore);
+            fakeChessClient, featureExtractor, requestStore, gameFeatureStore, periodStore);
 
     controller = new IndexController(requestStore, queue, new IndexRequestValidator());
   }
