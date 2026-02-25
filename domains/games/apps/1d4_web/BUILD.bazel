@@ -1,27 +1,17 @@
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 
-# Static assets for 1d4_web (vanilla HTML/JS/CSS). Deploy to Cloudflare Workers.
+# React/TypeScript SPA built with Vite. Run `npm run build` before `bazel build`.
+# The dist/ directory is produced by `npm run build` in this package directory.
 filegroup(
     name = "static_assets",
-    srcs = [
-        "src/api.js",
-        "src/app.js",
-        "src/components/motifs.js",
-        "src/components/table.js",
-        "src/index.html",
-        "src/style.css",
-        "src/views/games.js",
-        "src/views/index.js",
-        "src/views/query.js",
-    ],
+    srcs = glob(["dist/**"]),
     visibility = ["//visibility:public"],
 )
 
-# Tar of static assets for deployment (e.g. upload to Workers or CI).
 pkg_tar(
     name = "1d4_web_assets",
     srcs = [":static_assets"],
-    package_dir = "src",
-    strip_prefix = "src/",
+    package_dir = "dist",
+    strip_prefix = "dist/",
     visibility = ["//visibility:public"],
 )

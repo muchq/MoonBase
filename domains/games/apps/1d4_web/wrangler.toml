@@ -6,6 +6,6 @@ compatibility_date = "2024-01-01"
 # routes = [{ pattern = "1d4.net", zone_name = "1d4.net" }]
 
 [assets]
-directory = "src"
+directory = "dist/client"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
