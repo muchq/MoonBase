@@ -32,7 +32,6 @@ import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.games.one_d4.queue.IndexQueue;
 import com.muchq.games.one_d4.worker.IndexWorker;
 import com.muchq.games.one_d4.worker.IndexWorkerLifecycle;
-import com.muchq.games.one_d4.worker.RetentionWorker;
 import com.muchq.platform.http_client.core.HttpClient;
 import com.muchq.platform.http_client.jdk.Jdk11HttpClient;
 import com.muchq.platform.json.JsonUtils;
@@ -155,11 +154,5 @@ public class IndexerModule {
   @Context
   public IndexWorkerLifecycle indexWorkerLifecycle(IndexQueue queue, IndexWorker worker) {
     return new IndexWorkerLifecycle(queue, worker);
-  }
-
-  @Context
-  public RetentionWorker retentionWorker(
-      GameFeatureStore gameFeatureStore, IndexedPeriodStore indexedPeriodStore) {
-    return new RetentionWorker(gameFeatureStore, indexedPeriodStore);
   }
 }

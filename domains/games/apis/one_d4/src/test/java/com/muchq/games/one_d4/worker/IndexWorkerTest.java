@@ -250,7 +250,9 @@ public class IndexWorkerTest {
     public void insert(GameFeature feature) {}
 
     @Override
-    public void deleteOlderThan(Instant threshold) {}
+    public int deleteOlderThan(Instant threshold) {
+      return 0;
+    }
 
     @Override
     public void insertOccurrences(
@@ -283,7 +285,9 @@ public class IndexWorkerTest {
     public void insert(GameFeature feature) {}
 
     @Override
-    public void deleteOlderThan(Instant threshold) {}
+    public int deleteOlderThan(Instant threshold) {
+      return 0;
+    }
 
     @Override
     public void insertOccurrences(
@@ -331,6 +335,8 @@ public class IndexWorkerTest {
         int gamesCount) {}
 
     @Override
-    public void deleteOlderThan(Instant threshold) {}
+    public int deleteOlderThan(Instant threshold) {
+      return 0;
+    }
   }
 }

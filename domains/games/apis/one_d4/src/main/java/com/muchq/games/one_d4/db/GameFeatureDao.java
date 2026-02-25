@@ -101,17 +101,17 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   @Override
-  public void deleteOlderThan(Instant threshold) {
+  public int deleteOlderThan(Instant threshold) {
     String sql = "DELETE FROM game_features WHERE indexed_at < ?";
     try (Connection conn = dataSource.getConnection();
         PreparedStatement ps = conn.prepareStatement(sql)) {
       ps.setTimestamp(1, Timestamp.from(threshold));
       int deleted = ps.executeUpdate();
       if (deleted > 0) {
-        LOG.info("Deleted {} games older than {}", deleted, threshold);
+        LOG.debug("Deleted {} games older than {}", deleted, threshold);
       }
+      return deleted;
     } catch (SQLException e) {
-      LOG.error("Failed to delete old games", e);
       throw new RuntimeException("Failed to delete old games", e);
     }
   }

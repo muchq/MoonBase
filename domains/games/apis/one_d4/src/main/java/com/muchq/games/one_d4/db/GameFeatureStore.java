@@ -11,7 +11,7 @@ import java.util.Map;
 public interface GameFeatureStore {
   void insert(GameFeature feature);
 
-  void deleteOlderThan(Instant threshold);
+  int deleteOlderThan(Instant threshold);
 
   void insertOccurrences(
       String gameUrl, Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences);
