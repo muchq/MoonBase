@@ -53,7 +53,7 @@ jobs:
 
       - name: Tag images with short SHA
         run: |
-          SHORT_SHA="${GITHUB_SHA::7}"
+          SHORT_SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
           repos=$(bazel query 'kind(oci_push, //...)' --output=build \
             | sed -n 's/.*repository = "\(ghcr\.io\/muchq\/[^"]*\)".*/\1/p')
           for repo in $repos; do
@@ -66,7 +66,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          SHORT_SHA="${GITHUB_SHA::7}"
+          SHORT_SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
 
           repos=$(bazel query 'kind(oci_push, //...)' --output=build \
             | sed -n 's/.*repository = "\(ghcr\.io\/muchq\/[^"]*\)".*/\1/p')
