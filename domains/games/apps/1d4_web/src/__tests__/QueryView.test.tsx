@@ -8,6 +8,11 @@ import * as api from '../api';
 import type { GameRow } from '../types';
 
 vi.mock('../api');
+vi.mock('react-chessboard', () => ({
+  Chessboard: ({ position }: { position: string }) => (
+    <div data-testid="chessboard" data-fen={position} />
+  ),
+}));
 
 const mockGame: GameRow = {
   gameUrl: 'https://chess.com/game/1',
@@ -100,6 +105,20 @@ describe('QueryView', () => {
       expect(screen.getByText('Showing 1 result(s).')).toBeInTheDocument()
     );
     expect(screen.getByText('Alice')).toBeInTheDocument();
+  });
+
+  it('opens game detail panel when a result row is clicked', async () => {
+    vi.mocked(api.query).mockResolvedValue({ games: [mockGame], count: 1 });
+    render(<QueryView />, { wrapper: makeWrapper() });
+    fireEvent.change(
+      screen.getByPlaceholderText('e.g. motif(fork) AND white.elo >= 2500'),
+      { target: { value: 'motif(fork)' } }
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
+    await waitFor(() => screen.getByText('Alice'));
+    const rows = screen.getAllByRole('row');
+    fireEvent.click(rows[1]);
+    expect(screen.getByText('Alice vs Bob')).toBeInTheDocument();
   });
 
   it('does not fire a query when Run query is clicked with empty text', async () => {
