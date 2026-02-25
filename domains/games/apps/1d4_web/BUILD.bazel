@@ -4,7 +4,10 @@ load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 # The dist/ directory is produced by `npm run build` in this package directory.
 filegroup(
     name = "static_assets",
-    srcs = glob(["dist/**"]),
+    srcs = glob(
+        ["dist/**"],
+        allow_empty = True,
+    ),
     visibility = ["//visibility:public"],
 )
 
