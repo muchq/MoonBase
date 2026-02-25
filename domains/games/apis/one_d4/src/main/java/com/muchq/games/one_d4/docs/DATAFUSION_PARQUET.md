@@ -648,7 +648,7 @@ Today's `IndexWorker` writes **one game at a time** to SQL:
 ```
 IndexWorker.process(message)
   for each month in [startMonth, endMonth]:
-    games = ChessClient.fetchGames(player, month)  // 10-100 games
+    games = ChessClient.fetchGames(player, month)  // 10-100 games per player-month
     for each game in games:
       features = FeatureExtractor.extract(game.pgn())
       GameFeatureDao.insert(row)                    // 1 INSERT per game
@@ -658,8 +658,29 @@ IndexWorker.process(message)
 This is fine for SQL — each INSERT is ~1ms, and the Chess.com API is the
 bottleneck (~200ms/request), not the database. But Parquet files are
 immutable and columnar: you can't append a single row to an existing
-`.parquet` file. Writing one file per game would produce thousands of
-tiny files, destroying scan performance.
+`.parquet` file. Writing one file per game would produce tens of thousands
+of tiny files, destroying scan performance.
+
+### Expected Write Throughput
+
+**Chess.com indexing: 10K-100K games/month** across all users and index
+requests. This is a low-to-moderate write rate:
+
+| Metric | Value |
+|--------|-------|
+| Games per month (total) | 10,000 - 100,000 |
+| Games per day (avg) | ~300 - 3,300 |
+| Games per player-month (from API) | 10 - 100 |
+| Index requests per day (estimated) | ~10 - 50 |
+| Motif occurrences per game (avg) | ~5 - 20 |
+
+This throughput is low enough that aggressive buffering is viable — we
+can hold an entire day's writes in memory (~3K games × ~50 bytes/column
+× ~25 columns ≈ ~4 MB) and flush infrequently. The bottleneck is the
+Chess.com API fetch rate, not the write path.
+
+For Lichess bulk ingest, throughput is much higher (~2M games per
+monthly dump), but that's a batch job that writes large files directly.
 
 ### The Parquet Write Problem
 
@@ -667,24 +688,34 @@ Parquet files are **write-once**. Unlike SQL rows, you can't INSERT INTO
 a Parquet file — you write the entire file at creation. This creates a
 tension between write latency and read performance:
 
-| Strategy | Write latency | File count | Scan performance | Complexity |
-|----------|--------------|------------|-----------------|------------|
-| 1 file per game | Immediate | Terrible (1000s) | Terrible | Low |
-| 1 file per month batch | Delayed until month done | Good (1 per month) | Good | Medium |
-| Buffer N rows, flush | Delayed (seconds-minutes) | Good (controlled) | Good | Medium |
-| Buffer + background compaction | Delayed + async merge | Good (starts many, converges) | Good after compaction | High |
+| Strategy | Write latency | File count (at 50K games/mo) | Scan perf | Complexity |
+|----------|--------------|------------------------------|-----------|------------|
+| 1 file per game | Immediate | 50,000 files/month | Terrible | Low |
+| 1 file per player-month batch | After API call | ~500-5,000/month | Poor | Low |
+| Buffer N rows, flush to 1 file | Minutes | ~1-10/month | Good | Medium |
+| Buffer + periodic compaction | Minutes + async | ~1-5/month (steady) | Good | Medium-High |
 
-### Recommended Approach: Buffered Writer + Compaction
+At 10K-100K games/month, a simple buffer with a generous flush threshold
+produces very few files — compaction is a nice-to-have, not critical.
+
+### Recommended Approach: Buffered Writer with Optional Compaction
 
 The `motif_query` Rust service owns the Parquet write path. The Java
 indexer sends batches to the write endpoint; the Rust service buffers
 rows and manages file lifecycle.
 
+At our expected throughput (10K-100K games/month), the buffer handles
+most of the work. A partition like `platform=chess.com/month=2024-03`
+might receive 5K-50K games total over the course of the month.
+A single buffer flush at 10,000 rows produces one well-sized file.
+Compaction is only needed if many partitions accumulate small tail
+flushes (the last few hundred games that don't reach the threshold).
+
 #### Write Path (motif_query writer.rs)
 
 ```
 Java IndexWorker
-  │ accumulate games for current month (10-100 games)
+  │ accumulate games for current player-month (10-100 games)
   │
   ▼
 POST /motif_query/v1/write
@@ -697,15 +728,22 @@ POST /motif_query/v1/write
 motif_query writer.rs
   │
   ├─ Append rows to in-memory buffer (keyed by partition)
+  │    Buffer memory: ~50 bytes/col × 25 cols × 10K rows ≈ 12 MB per partition
   │
-  ├─ IF buffer.len() >= FLUSH_THRESHOLD (e.g. 5000 rows)
+  ├─ IF buffer.len() >= FLUSH_THRESHOLD (10,000 rows)
   │   └─ Flush buffer → new Parquet file in partition dir
   │      /data/game_features/platform=chess.com/month=2024-03/part-NNNN.parquet
+  │      (~500 KB - 1 MB Snappy compressed)
   │
-  └─ IF time_since_last_flush >= FLUSH_INTERVAL (e.g. 60s)
+  └─ IF time_since_last_flush >= FLUSH_INTERVAL (5 min)
       └─ Flush current buffer regardless of size
-         (prevents data from sitting in memory indefinitely)
+         (prevents data loss on crash; produces smaller tail file)
 ```
+
+With 10K-100K games/month spread across ~12 month-partitions, most
+partitions flush 1-5 times total. The 5-minute time-based flush is a
+safety net — at ~300-3,300 games/day, the row threshold is the primary
+trigger for active months.
 
 #### Batch Accumulation in Java
 
@@ -754,59 +792,94 @@ compact later.
 
 #### Why Not One Big File per Partition?
 
-Rewriting the entire partition on every index request would mean reading
-back the existing file, appending new rows, and writing a new file. For
-a partition with 500K rows, that's ~15 MB of read+write for every 50-game
-batch. This is wasteful and creates a write amplification problem.
+At first glance, 10K-100K games/month seems small enough to maintain a
+single file per partition: just rewrite it on each flush. But:
 
-Better: let small files accumulate and merge them periodically.
+- Each index request adds 10-100 games. With ~10-50 requests/day, that's
+  10-50 read-merge-write cycles per day, each rewriting the growing file.
+- By month's end, the file is ~50K rows / ~2.5 MB. Rewriting 2.5 MB to
+  add 50 rows is ~50x write amplification.
+- If we batch properly (flush at 10K rows), we only write 1-5 times per
+  month per partition — but each write would still require reading back
+  the existing file to merge.
+
+The buffer approach is simpler: write a new file on each flush, let
+a few files coexist per partition. DataFusion handles multi-file
+partitions natively. Compact occasionally to clean up tail files.
 
 ### File Size Targets
 
-| Scenario | Rows per file | File size (Snappy) | Files per partition |
-|----------|--------------|-------------------|-------------------|
-| Chess.com index batch | 10-100 | ~5-50 KB | Many small files |
-| After motif_query buffer flush | 5,000 | ~250-500 KB | Moderate |
-| After compaction | 100,000-500,000 | ~5-25 MB | Few large files |
+| Scenario | Rows per file | File size (Snappy) | Files per partition-month |
+|----------|--------------|-------------------|--------------------------|
+| Chess.com batch (before buffer) | 10-100 | n/a (buffered) | n/a |
+| Buffer flush (threshold) | 10,000 | ~500 KB - 1 MB | 1-5 per month |
+| Buffer flush (time-based tail) | 100-2,000 | ~5-100 KB | 0-1 (tail flush) |
+| After compaction | 10,000-50,000 | ~500 KB - 2.5 MB | 1-2 per month |
 | Lichess monthly ingest | 500,000-2,000,000 | ~20-80 MB | 1-4 per month |
 
-Target steady-state: **5-25 MB per file after compaction.** This gives
-good row group pruning (1-2 row groups per file), efficient I/O (one
-read per file), and manageable file counts per partition.
+At 10K-100K Chess.com games/month, most partitions end up with 1-5
+well-sized files from threshold flushes, plus possibly one small tail
+file. This is already a good state — compaction primarily cleans up
+those tail files.
+
+Target steady-state: **500 KB - 2.5 MB per file for Chess.com data,
+20-80 MB per file for Lichess data.** The Chess.com files are smaller
+because the dataset is smaller (10K-100K vs 2M games/month), but
+that's fine — at these file counts, DataFusion scans all files in a
+partition in milliseconds regardless.
 
 ### Compaction Strategy
 
-Small files accumulate from Chess.com indexing (many users, many months,
-small batches). A background compaction job merges them:
+At 10K-100K games/month, compaction is **low priority** — the buffer
+handles most of the work, and partitions rarely accumulate more than a
+handful of files. Compaction exists to clean up tail flushes (the small
+file written when the time-based interval fires before the row threshold
+is reached) and to merge files after re-indexing or backfill operations.
 
 ```
-motif_query compaction.rs (background task, runs every N minutes)
+motif_query compaction.rs (background task, runs every 30 minutes)
 
 for each partition (platform, month):
   files = list_parquet_files(partition_dir)
-  if files.len() <= 1:
-    continue  // nothing to compact
-  if total_size(files) < TARGET_FILE_SIZE:
-    // Merge all small files into one
-    merged = read_all(files) → sort by played_at → write single file
-    atomic_swap(files, merged)  // rename new file in, delete old files
-  else:
-    // Multiple target-sized files: merge only the small ones
-    small = files.filter(|f| f.size < MIN_FILE_SIZE)  // e.g. < 1 MB
-    if small.len() >= 2:
-      merged = read_all(small) → write single file
-      atomic_swap(small, merged)
+  small = files.filter(|f| f.size < MIN_FILE_SIZE)  // e.g. < 100 KB
+  if small.len() < 2:
+    continue  // nothing worth compacting
+
+  // Merge all small files into one
+  merged = read_all(small) → sort by played_at → write single file
+  atomic_swap(small, merged)  // rename new file in, delete old files
 ```
+
+This is intentionally simple. At our throughput, a partition might have
+3-5 files total, with 1-2 being small tail flushes. The compactor merges
+those into a single file every 30 minutes. No complex tiered compaction
+or size-based bucketing needed.
 
 #### Compaction Tradeoffs
 
 | Concern | Approach | Rationale |
 |---------|----------|-----------|
-| **Write amplification** | Only compact files < 1 MB | Avoids rewriting large files |
+| **Write amplification** | Only compact files < 100 KB | At our volumes, small files are tail flushes (~5-100 KB). Threshold flushes (~500 KB-1 MB) are already well-sized. |
 | **Read during compaction** | Write new file first, then delete old | DataFusion's ListingTable re-scans on each query; new file is visible immediately |
-| **Concurrency** | Single compaction thread, file-level locking | No concurrent writes to same partition (writer and compactor coordinate via lock file) |
+| **Concurrency** | Single compaction thread, skip partitions with recent writes | Simpler than lock files; at 30-min intervals the writer has long since finished |
 | **Ordering** | Sort by `played_at` during merge | Better predicate pushdown on time-range queries |
-| **Trigger** | Timer-based (every 5 min) + file-count threshold | Don't compact constantly; don't let small files pile up |
+| **Frequency** | Every 30 min | Low throughput means files accumulate slowly; no need for aggressive compaction |
+
+#### When Compaction Becomes Important
+
+If throughput grows beyond 100K games/month (e.g. adding more platforms,
+increasing the user base), or if we add concurrent indexer workers, the
+write pattern shifts:
+
+| Throughput | Buffer flushes/month | Compaction need |
+|------------|---------------------|-----------------|
+| 10K games/month | 1-2 per partition | Minimal — tail cleanup only |
+| 50K games/month | 3-5 per partition | Low — occasional merge |
+| 100K games/month | 5-10 per partition | Moderate — periodic merge helps |
+| 500K+ games/month | 25-50+ per partition | High — consider Delta Lake |
+
+At 500K+ games/month we should evaluate Delta Lake or Iceberg for
+transactional writes rather than scaling up the custom compaction logic.
 
 #### Why Not Use Delta Lake / Iceberg?
 
@@ -1089,8 +1162,10 @@ Phase 5: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
 
 | Dataset | PostgreSQL | Parquet (Snappy) |
 |---------|-----------|-----------------|
-| 1M games + occurrences | ~800 MB | ~80-120 MB |
+| 1 month Chess.com (50K games) | ~40 MB | ~2.5-5 MB |
+| 12 months Chess.com (600K games) | ~480 MB | ~30-60 MB |
 | 12 months Lichess GM games (~20M) | ~16 GB | ~1.5-2.5 GB |
+| Combined (12 mo Chess.com + Lichess) | ~16.5 GB | ~1.6-2.6 GB |
 
 ### Query Performance (estimated, single-node)
 
