@@ -221,8 +221,6 @@ java_binary(
     visibility = ["//visibility:public"],
     runtime_deps = [
         "//domains/platform/libs/logging",
-        artifact("ch.qos.logback:logback-classic"),
-        artifact("io.sentry:sentry-logback"),
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
@@ -413,7 +411,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/ContentTypeHandlingTest.java",
     ],
     runtime_deps = [
-        artifact("ch.qos.logback:logback-classic"),
+        "//domains/platform/libs/logging",
         artifact("org.postgresql:postgresql"),
     ],
     deps = [

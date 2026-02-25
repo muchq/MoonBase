@@ -2,10 +2,11 @@ load("//bazel/rules:java.bzl", "artifact", "java_library")
 
 java_library(
     name = "logging",
+    srcs = ["Dummy.java"],
     resource_strip_prefix = "domains/platform/resources",
     resources = ["//domains/platform/resources:logback_config"],
     visibility = ["//visibility:public"],
-    runtime_deps = [
+    deps = [
         artifact("ch.qos.logback:logback-classic"),
         artifact("io.sentry:sentry-logback"),
         artifact("org.slf4j:slf4j-api"),
