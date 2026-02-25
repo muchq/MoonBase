@@ -6,8 +6,14 @@ Add a Rust service (`motif_query`) that uses Apache DataFusion to query
 Parquet files containing game features and motif occurrences. The Java
 indexing pipeline writes Parquet instead of (or in addition to) SQL rows.
 A pre-indexing pipeline bulk-loads GM games from the Lichess open database
-into the same Parquet format. ChessQL compiles to DataFusion SQL instead of
-PostgreSQL SQL.
+into the same Parquet format.
+
+**Query IR: Substrait.** ChessQL compiles to [Substrait](https://substrait.io/)
+relational algebra plans (protobuf) instead of SQL strings. A `QueryRouter`
+dispatches Substrait plans to either PostgreSQL (via `substrait-java`
+SQL conversion) or DataFusion (via `datafusion-substrait` plan consumer),
+based on a feature flag or cost-based routing. This gives us backend
+portability without maintaining dialect-specific SQL compilers.
 
 ## Why DataFusion + Parquet
 
@@ -45,35 +51,56 @@ plus metadata: a textbook columnar layout.
 └──────────┬───────────────────┘
            │ HTTP batch POST
            ▼
-┌──────────────────────────┐   index    ┌──────────────────────────┐
-│  one_d4 Java API         │ ─────────► │  motif_query (Rust)      │
-│  - /v1/index (Chess.com) │  HTTP POST │  - axum HTTP API         │
-│  - /v1/query (proxy)     │            │  - Parquet writer        │
-│  - GameReplayer (chariot)│            │  - DataFusion SessionCtx │
-│  - FeatureExtractor      │            │  - /v1/query (SQL exec)  │
-│  - all MotifDetectors    │            │  - /v1/write (ingest)    │
-└──────────────────────────┘            └──────────┬───────────────┘
-                                                   │ reads/writes
-                                                   ▼
-                                        ┌──────────────────────────┐
-                                        │  Parquet files on disk/S3│
-                                        │                          │
-                                        │  /data/games/            │
-                                        │    platform=chess.com/   │
-                                        │      month=2024-03/      │
-                                        │        part-0000.parquet │
-                                        │    platform=lichess/     │
-                                        │      month=2024-03/      │
-                                        │        part-0000.parquet │
-                                        └──────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│  one_d4 Java API                                                 │
+│                                                                   │
+│  /v1/index ─► GameReplayer + FeatureExtractor + MotifDetectors   │
+│                  └─► GameFeatureStore.insert() (SQL + Parquet)    │
+│                                                                   │
+│  /v1/query ─► Parser ─► SubstraitCompiler ─► Substrait Plan      │
+│                                                  │                │
+│                              ┌────────────────────┤               │
+│                              ▼                    ▼               │
+│                    ┌─────────────────┐  ┌────────────────────┐   │
+│                    │  QueryRouter    │  │  QueryRouter        │   │
+│                    │  (SQL backend)  │  │  (DataFusion)       │   │
+│                    └────────┬────────┘  └─────────┬──────────┘   │
+│                             │                     │               │
+└─────────────────────────────┼─────────────────────┼───────────────┘
+                              │                     │
+                              ▼                     ▼
+                   ┌────────────────┐    ┌──────────────────────────┐
+                   │  PostgreSQL/H2 │    │  motif_query (Rust)      │
+                   │  (game tables) │    │  - axum HTTP API         │
+                   └────────────────┘    │  - datafusion-substrait  │
+                                         │    (Plan → LogicalPlan)  │
+                                         │  - DataFusion execution  │
+                                         │  - Parquet writer        │
+                                         │  - /v1/write (ingest)    │
+                                         │  - /v1/query/substrait   │
+                                         └──────────┬───────────────┘
+                                                    │ reads/writes
+                                                    ▼
+                                         ┌──────────────────────────┐
+                                         │  Parquet files on disk/S3│
+                                         │                          │
+                                         │  /data/games/            │
+                                         │    platform=chess.com/   │
+                                         │      month=2024-03/      │
+                                         │        part-0000.parquet │
+                                         │    platform=lichess/     │
+                                         │      month=2024-03/      │
+                                         │        part-0000.parquet │
+                                         └──────────────────────────┘
 ```
 
 ### Component Responsibilities
 
 | Component | Language | Role |
 |-----------|----------|------|
-| `one_d4` (existing) | Java | REST API, indexing orchestration, Chess.com client, motif detection (chariot), request tracking |
-| `motif_query` (new) | Rust | DataFusion query engine, Parquet reads/writes, query execution |
+| `one_d4` (existing) | Java | REST API, indexing, motif detection (chariot), ChessQL parse + Substrait compile, query routing |
+| `chessql` (existing lib) | Java | Parser, AST, `SubstraitCompiler` (new), `SqlCompiler` (existing) |
+| `motif_query` (new) | Rust | DataFusion query engine via Substrait consumer, Parquet reads/writes |
 | `lichess_ingest` (new) | Java | Bulk PGN streaming, GM filtering, motif detection (reuses one_d4 detectors), batch POST to motif_query |
 
 ## Parquet Schema
@@ -158,49 +185,210 @@ partitions from `WHERE platform = 'lichess' AND month >= '2024-01'`.
 Target file size: ~50 MB uncompressed (~10-15 MB Snappy). This gives good
 row group pruning without too many small files.
 
-## ChessQL Compilation to DataFusion SQL
+## ChessQL Compilation via Substrait IR
 
-The current `SqlCompiler` generates PostgreSQL-dialect SQL. DataFusion
-speaks standard SQL with some differences:
+### The Problem
 
-| Feature | PostgreSQL | DataFusion |
-|---------|-----------|------------|
-| Case-insensitive compare | `LOWER(col) = LOWER(?)` | `LOWER(col) = LOWER(?)` (same) |
-| Boolean literals | `= TRUE` | `= TRUE` (same) |
-| Parameterized queries | `?` placeholders via JDBC | Inline literals (DataFusion `ParamValues`) or string interpolation |
-| Timestamp literals | `'2024-03-15'::timestamp` | `CAST('2024-03-15' AS TIMESTAMP)` |
-| COALESCE | supported | supported |
-| EXISTS subquery (sequence) | supported | supported |
+The current `SqlCompiler` compiles ChessQL AST → PostgreSQL SQL. Adding
+DataFusion requires a second compiler targeting DataFusion SQL dialect.
+While the dialects are similar, maintaining two SQL compilers creates
+drift, and tightly couples ChessQL to specific SQL dialects:
 
-The mapping is close enough that we can write a `DataFusionCompiler`
-implementing the same `QueryCompiler<T>` interface, producing a SQL string
-that DataFusion's `SessionContext::sql()` can execute. Since DataFusion
-supports parameterized queries (`ParamValues`), we can keep the
-bind-parameter approach.
+- PostgreSQL uses `?` bind parameters; DataFusion uses `ParamValues` or
+  inline literals
+- PostgreSQL uses `::timestamp` casts; DataFusion uses
+  `CAST(... AS TIMESTAMP)`
+- `sequence()` queries use correlated subqueries that differ in optimizer
+  behavior between backends
+- Adding a third backend (e.g. DuckDB, ClickHouse) would require yet
+  another SQL dialect compiler
 
-### Compiler Implementation (Rust)
+### Substrait as Query IR
 
-Rather than compiling in Java and sending SQL over the wire, the cleaner
-approach is:
+[Substrait](https://substrait.io/) is a cross-language specification for
+relational algebra plans. It defines a protobuf-based format for query
+plans that multiple engines can consume. The compilation pipeline becomes:
 
-1. The Java `one_d4` API receives a ChessQL query string.
-2. It forwards the raw ChessQL string to `motif_query` via HTTP.
-3. `motif_query` has its own ChessQL parser + DataFusion compiler in Rust.
-4. Results come back as JSON.
+```
+ChessQL string
+     │
+     ▼
+  Parser (Java) → ParsedQuery (AST)
+     │
+     ▼
+  SubstraitCompiler (Java) → Substrait Plan (protobuf)
+     │
+     ├──► PostgreSQL backend: substrait-java consumer → JDBC SQL
+     │         (current path, keeps working)
+     │
+     └──► DataFusion backend: datafusion-substrait consumer → LogicalPlan
+              (new path, Parquet query engine)
+```
 
-This means porting the ChessQL lexer/parser to Rust, which is
-straightforward — the grammar is small (the Java parser is ~200 lines).
-This keeps the query compilation and execution colocated, avoiding
-cross-process SQL string passing.
+This gives us:
 
-Alternatively, if porting ChessQL to Rust is deferred: the Java side
-compiles to SQL with a new `DataFusionCompiler` and sends the SQL string
-to `motif_query` which executes it directly. This is simpler to start with
-but couples the Java and Rust sides on SQL dialect.
+1. **Single compilation step.** ChessQL compiles to Substrait once. No
+   SQL dialect-specific compilers.
+2. **Backend portability.** The same Substrait plan executes on PostgreSQL,
+   DataFusion, or any future engine that consumes Substrait.
+3. **Feature flag / cost-based routing.** The `QueryController` can route
+   plans to SQL or DataFusion based on configuration, query complexity,
+   or data locality.
+4. **No ChessQL port to Rust.** The Java side owns parsing and compilation.
+   The Rust side only needs to consume Substrait plans, which DataFusion
+   already supports via the `datafusion-substrait` crate.
 
-**Recommendation:** Start with Option B (Java compiles SQL, Rust executes)
-for the initial implementation. Port ChessQL to Rust later when the Rust
-service stabilizes.
+### SubstraitCompiler Implementation
+
+New class: `SubstraitCompiler implements QueryCompiler<Plan>` where `Plan`
+is `io.substrait.proto.Plan` from the `substrait-java` library.
+
+The compiler walks the ChessQL AST and produces Substrait relational
+algebra nodes:
+
+| ChessQL construct | Substrait equivalent |
+|-------------------|---------------------|
+| `motif(fork)` | `Filter(ReadRel("game_features"), ScalarFunction(equal, FieldRef("has_fork"), BoolLiteral(true)))` |
+| `white.elo >= 2500` | `Filter(ReadRel, ScalarFunction(gte, FieldRef("white_elo"), I32Literal(2500)))` |
+| `AND` / `OR` / `NOT` | `ScalarFunction(and/or/not, ...)` |
+| `eco IN ["B90", "C65"]` | `ScalarFunction(or, equal(eco, "B90"), equal(eco, "C65"))` or `SingularOrList` |
+| `ORDER BY motif_count(fork) DESC` | `SortRel(AggregateRel(JoinRel(game_features, motif_occurrences), count), SortField(desc))` |
+| `sequence(fork THEN pin)` | `Filter(ReadRel, ExistsSubquery(JoinRel(motif_occurrences aliases, ply constraints)))` |
+| String case-insensitivity | `ScalarFunction(equal, ScalarFunction(lower, FieldRef), ScalarFunction(lower, Literal))` |
+
+The Substrait plan includes the full schema (named struct) for
+`game_features` and `motif_occurrences`, so consumers know the table
+layout without out-of-band schema exchange.
+
+```java
+public class SubstraitCompiler implements QueryCompiler<Plan> {
+
+  private final SubstraitSchema schema;  // table + column definitions
+
+  @Override
+  public Plan compile(ParsedQuery pq) {
+    Rel baseRel = namedScan("game_features", schema.gameFeaturesCols());
+    Expression filter = compileExpr(pq.expr());
+    Rel filtered = filterRel(baseRel, filter);
+
+    if (pq.orderBy() != null) {
+      // Join with motif_occurrences, aggregate count, sort
+      filtered = compileOrderBy(filtered, pq.orderBy());
+    } else {
+      filtered = sortRel(filtered, fieldRef("played_at"), DESCENDING);
+    }
+
+    return Plan.newBuilder()
+        .addRelations(PlanRel.newBuilder().setRoot(
+            RelRoot.newBuilder().setInput(filtered).build()
+        )).build();
+  }
+}
+```
+
+### Query Routing
+
+The `QueryController` chooses which backend executes the Substrait plan:
+
+```java
+@POST
+public QueryResponse query(QueryRequest request) {
+  ParsedQuery parsed = Parser.parse(request.query());
+  Plan plan = substraitCompiler.compile(parsed);
+
+  // Route based on configuration or query characteristics
+  List<GameFeature> rows = queryRouter.execute(plan, request.limit(), request.offset());
+  // ... format response
+}
+```
+
+The `QueryRouter` decides the backend:
+
+```java
+public interface QueryRouter {
+  List<GameFeature> execute(Plan plan, int limit, int offset);
+}
+```
+
+Implementations:
+
+| Strategy | Description |
+|----------|-------------|
+| `SqlQueryRouter` | Convert Substrait → SQL via `substrait-java` `SubstraitToSql`, execute on PostgreSQL/H2 via JDBC. Drop-in replacement for current `SqlCompiler` path. |
+| `DataFusionQueryRouter` | Serialize Substrait plan to protobuf bytes, POST to `motif_query/v1/query/substrait`. DataFusion deserializes and executes. |
+| `ConfigQueryRouter` | Feature flag: `QUERY_BACKEND=sql|datafusion`. Simple toggle for migration. |
+| `CostQueryRouter` | Inspect the plan: if it touches only `game_features` (boolean filter), route to DataFusion (fast columnar scan). If it has `sequence()` subqueries on small datasets, route to SQL (mature optimizer). |
+
+### How Substrait Flows to Each Backend
+
+**PostgreSQL path (existing, adapted):**
+
+```
+Plan (protobuf)
+  → substrait-java SqlConverter → SQL string + bind params
+  → JDBC PreparedStatement → PostgreSQL
+  → ResultSet → GameFeature list
+```
+
+The `substrait-java` library includes `SubstraitToSql` which converts
+plans to ANSI SQL. For PostgreSQL-specific syntax, we extend the converter
+or post-process the SQL. This replaces `SqlCompiler` — same output, but
+generated from Substrait rather than directly from the AST.
+
+**DataFusion path (new):**
+
+```
+Plan (protobuf bytes)
+  → HTTP POST to motif_query/v1/query/substrait
+  → datafusion-substrait::from_substrait_plan() → LogicalPlan
+  → DataFusion optimizer → PhysicalPlan
+  → execute over Parquet → RecordBatches
+  → JSON response
+```
+
+DataFusion's Substrait consumer is mature — it handles filters, projections,
+joins, aggregations, and sort. The `datafusion-substrait` crate translates
+directly to `LogicalPlan` without an intermediate SQL string, giving the
+optimizer full visibility.
+
+### Why Not Just Two SQL Compilers?
+
+The direct approach (write a `DataFusionSqlCompiler` alongside `SqlCompiler`)
+is simpler for the initial step. But:
+
+1. **Drift.** Every ChessQL feature (new motif, new field, new operator)
+   must be implemented in both compilers and tested independently.
+2. **SQL is lossy.** SQL strings discard semantic information that
+   optimizers could use. Substrait preserves the relational algebra
+   structure — DataFusion can optimize better from a `LogicalPlan` than
+   from re-parsing a SQL string.
+3. **Testing.** With Substrait, you test one compilation (ChessQL → plan)
+   and two consumers. With two SQL compilers, you test two compilations.
+4. **Future backends.** DuckDB, Velox, Acero all consume Substrait. SQL
+   compatibility varies per engine.
+
+### Dependencies
+
+**Java (substrait-java):**
+
+```
+maven_install:
+  io.substrait:core:0.42.0        # Substrait protobuf types + plan builder
+  io.substrait:isthmus:0.42.0     # SQL ↔ Substrait conversion (for SqlQueryRouter)
+```
+
+The `isthmus` module provides `SubstraitToSql` for the PostgreSQL path
+and `SqlToSubstrait` if we ever want to go the other direction.
+
+**Rust (datafusion-substrait):**
+
+```toml
+[dependencies]
+datafusion-substrait = { version = "46" }  # matches datafusion version
+```
+
+This crate provides `from_substrait_plan()` which converts a Substrait
+`Plan` protobuf into a DataFusion `LogicalPlan`.
 
 ## motif_query Service
 
@@ -227,7 +415,9 @@ ingest live in Java (see "Lichess Ingest Architecture" below).
 [dependencies]
 arrow = { version = "55" }
 datafusion = { version = "46" }
+datafusion-substrait = { version = "46" }  # Substrait plan → LogicalPlan
 parquet = { version = "55", features = ["snap"] }
+prost = "0.13"                              # protobuf deserialization
 axum = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -240,12 +430,10 @@ chrono = { workspace = true }
 ### API Endpoints
 
 ```
-POST /motif_query/v1/query
-  Body: { "sql": "SELECT ... FROM game_features WHERE ..." }
-  Response: { "rows": [...], "row_count": N }
-
-POST /motif_query/v1/query/chessql    # (phase 2, after Rust ChessQL port)
-  Body: { "query": "white.elo >= 2500 AND motif(fork)" }
+POST /motif_query/v1/query/substrait
+  Body: <Substrait Plan protobuf bytes>
+  Content-Type: application/x-substrait-plan
+  Query params: ?limit=50&offset=0
   Response: { "rows": [...], "row_count": N }
 
 POST /motif_query/v1/write
@@ -259,10 +447,17 @@ GET /health
   Response: 200 OK
 ```
 
-### DataFusion Setup
+Note: the `/v1/query` SQL endpoint is removed. The Java side compiles
+ChessQL → Substrait and sends the plan bytes directly. No SQL strings
+cross the wire.
+
+### DataFusion Setup + Substrait Execution
 
 ```rust
 use datafusion::prelude::*;
+use datafusion_substrait::logical_plan::consumer::from_substrait_plan;
+use substrait::proto::Plan;
+use prost::Message;
 
 async fn create_session(data_dir: &str) -> SessionContext {
     let ctx = SessionContext::new();
@@ -287,6 +482,23 @@ async fn create_session(data_dir: &str) -> SessionContext {
     // ...
 
     ctx
+}
+
+/// Execute a Substrait plan received from the Java SubstraitCompiler.
+async fn execute_substrait(
+    ctx: &SessionContext,
+    plan_bytes: &[u8],
+) -> datafusion::error::Result<Vec<RecordBatch>> {
+    // Deserialize protobuf → Substrait Plan
+    let plan = Plan::decode(plan_bytes)
+        .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+    // Convert Substrait → DataFusion LogicalPlan
+    let logical_plan = from_substrait_plan(ctx, &plan).await?;
+
+    // Execute (DataFusion optimizes → physical plan → Parquet scan)
+    let df = ctx.execute_logical_plan(logical_plan).await?;
+    df.collect().await
 }
 ```
 
@@ -449,23 +661,33 @@ IndexWorker.process()
 The write endpoint buffers rows and flushes to Parquet when a batch
 threshold is reached or on explicit flush.
 
-### Query Flow
+### Query Flow (Substrait-based)
 
 ```
 POST /v1/query { "query": "motif(fork) AND white.elo >= 2500" }
   ↓
 one_d4 QueryController
   ↓
-ChessQL Parser → SqlCompiler (new DataFusionCompiler) → SQL string
+Parser.parse() → ParsedQuery (AST)
   ↓
-POST motif_query/v1/query { "sql": "SELECT ... FROM game_features WHERE ..." }
+SubstraitCompiler.compile() → Substrait Plan (protobuf)
   ↓
-DataFusion executes over Parquet
-  ↓
-JSON results back to one_d4
+QueryRouter.execute(plan)
+  ├── SQL backend:
+  │     substrait-java SqlConverter → SQL string + bind params
+  │     → JDBC PreparedStatement → PostgreSQL → ResultSet
+  │
+  └── DataFusion backend:
+        plan.toByteArray() → POST motif_query/v1/query/substrait
+        → datafusion-substrait → LogicalPlan → Parquet scan
+        → JSON results back to one_d4
   ↓
 one_d4 formats response, returns to client
 ```
+
+The backend is selected by `QueryRouter` based on a feature flag
+(`QUERY_BACKEND=sql|datafusion`) or cost-based routing. During
+migration, both backends can run in shadow mode to compare results.
 
 ## Do We Keep H2/PostgreSQL?
 
@@ -507,19 +729,28 @@ reliable PGN export URL). This keeps the main game_features scans lean.
 ### Migration Path
 
 ```
-Phase 1: Parquet writer + DataFusion query service (motif_query)
-         Chess.com indexer dual-writes to both PostgreSQL and Parquet.
-         Queries still go to PostgreSQL.
+Phase 1: SubstraitCompiler + motif_query crate scaffold.
+         ChessQL compiles to Substrait. SqlQueryRouter converts
+         Substrait → SQL and executes on PostgreSQL (functionally
+         equivalent to today's SqlCompiler path). motif_query
+         Rust service accepts Substrait plans and writes Parquet.
+         Chess.com indexer dual-writes to PostgreSQL + Parquet.
+         Queries still execute on PostgreSQL (via SqlQueryRouter).
 
-Phase 2: Query switchover.
-         /v1/query routes to motif_query (DataFusion).
-         PostgreSQL game_features/motif_occurrences become write-only backup.
+Phase 2: Shadow mode.
+         QueryRouter runs both backends in parallel. SQL results
+         are returned to the client; DataFusion results are logged
+         and diffed. Alerts on mismatches.
 
-Phase 3: Drop PostgreSQL game tables.
+Phase 3: DataFusion primary.
+         QUERY_BACKEND=datafusion. PostgreSQL game tables become
+         write-only backup. Queries go to DataFusion.
+
+Phase 4: Drop PostgreSQL game tables.
          Only indexing_requests and indexed_periods remain in PostgreSQL.
          Retention = delete partition directories on a schedule.
 
-Phase 4: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
+Phase 5: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
          Run lichess_ingest Java CLI on historical Lichess dumps.
          All 18 motif detectors (11 existing + 7 new chariot-based)
          are included in bulk processing.
@@ -528,31 +759,66 @@ Phase 4: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
 
 ## Implementation Plan
 
-### Phase 1: motif_query crate scaffold (1-2 days)
+### Phase 1: SubstraitCompiler in chessql (2-3 days)
+
+- Add `io.substrait:core` and `io.substrait:isthmus` maven dependencies
+- New `SubstraitCompiler implements QueryCompiler<Plan>` in chessql library
+  - Walk ChessQL AST → Substrait `ReadRel`, `FilterRel`, `SortRel`,
+    `AggregateRel`, `JoinRel` nodes
+  - Handle `MotifExpr` → boolean column filter
+  - Handle `ComparisonExpr` / `InExpr` → scalar functions
+  - Handle `SequenceExpr` → join-based exists subquery
+  - Handle `OrderByClause` → aggregate + sort on motif_occurrences
+  - Include `NamedStruct` schema for `game_features` and
+    `motif_occurrences` tables in the plan
+- New `SqlQueryRouter` that consumes Substrait plans:
+  - Use `isthmus` `SubstraitToSql` to convert Plan → SQL + params
+  - Execute via JDBC (same as today's `GameFeatureDao.query()`)
+  - This replaces `SqlCompiler` as the production path, keeping
+    PostgreSQL as the query backend while compiling through Substrait
+- Unit tests:
+  - `SubstraitCompilerTest`: verify plan structure for each AST node type
+  - `SqlQueryRouterTest`: verify roundtrip ChessQL → Substrait → SQL
+    produces equivalent SQL to `SqlCompiler` output
+  - Keep `SqlCompilerTest` passing (existing compiler not yet removed)
+- Wire `SubstraitCompiler` + `SqlQueryRouter` into `QueryController`
+  behind a config flag (`USE_SUBSTRAIT=true|false`, default false)
+
+### Phase 2: motif_query crate scaffold (1-2 days)
 
 - Create `domains/games/apis/motif_query/` with Cargo.toml, BUILD.bazel
-- Add `datafusion`, `arrow`, `parquet` workspace dependencies
-- Implement `catalog.rs`: register Parquet listing tables with partition columns
-- Implement `query.rs`: accept SQL string, execute via DataFusion, return JSON
-- Implement `writer.rs`: accept JSON rows, buffer, flush to partitioned Parquet
-- axum server with `/v1/query`, `/v1/write`, `/health` endpoints
-- Unit tests with in-memory Parquet roundtrips
+- Add `datafusion`, `datafusion-substrait`, `arrow`, `parquet`, `prost`
+  workspace dependencies
+- Implement `catalog.rs`: register Parquet listing tables with partition
+  columns
+- Implement `query.rs`: accept Substrait plan bytes, decode protobuf,
+  call `from_substrait_plan()` → `LogicalPlan`, execute, return JSON
+- Implement `writer.rs`: accept JSON rows, buffer, flush to partitioned
+  Parquet
+- axum server with `/v1/query/substrait`, `/v1/write`, `/health` endpoints
+- Unit tests with in-memory Parquet roundtrips + a sample Substrait plan
 
-### Phase 2: DataFusionCompiler in Java (1 day)
+### Phase 3: DataFusionQueryRouter + dual-write (1-2 days)
 
-- New `DataFusionCompiler implements QueryCompiler<CompiledQuery>` in chessql
-- Differences from `SqlCompiler`: inline string literals (escape properly),
-  use DataFusion timestamp syntax, adjust sequence subquery if needed
-- Wire into `QueryController` behind a feature flag / config toggle
-- Tests mirroring `SqlCompilerTest`
+- New `DataFusionQueryRouter` in one_d4:
+  - Serialize `Plan` to protobuf bytes
+  - HTTP POST to `motif_query/v1/query/substrait`
+  - Deserialize JSON response → `GameFeature` list
+- New `ShadowQueryRouter` that runs both backends, compares results,
+  logs mismatches, returns SQL backend results
+- Dual-write from `IndexWorker`:
+  - POST batches to `motif_query/v1/write` in addition to SQL INSERT
+  - Config toggle: `MOTIF_QUERY_URL` (if set, dual-write is enabled)
 
-### Phase 3: Dual-write from IndexWorker (1 day)
+### Phase 4: Cost-based routing (optional, 1 day)
 
-- Add HTTP client in `IndexWorker` to POST batches to `motif_query/v1/write`
-- Continue writing to PostgreSQL for rollback safety
-- Add config toggle: `MOTIF_QUERY_URL` (if set, dual-write is enabled)
+- `CostQueryRouter` inspects the Substrait plan:
+  - Simple boolean filter on `game_features` → DataFusion (fast scan)
+  - `sequence()` with small expected result set → SQL (mature optimizer)
+  - Aggregate queries → DataFusion (columnar aggregation)
+- Configurable cost thresholds, with override via `QUERY_BACKEND` env var
 
-### Phase 4: Lichess ingest pipeline — Java (3-5 days)
+### Phase 5: Lichess ingest pipeline — Java (3-5 days)
 
 - New `lichess_ingest` binary target in `domains/games/apis/one_d4/`
 - Streaming PGN parser: read `.pgn.zst` via `zstd-jni`, extract headers
@@ -565,18 +831,14 @@ Phase 4: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
 - **Dependency:** Should run after Phase 9 (issue #1049) lands so that
   the 7 new chariot-based motifs are included in the bulk ingest
 
-### Phase 5: Query switchover + PostgreSQL game table removal (1 day)
+### Phase 6: Query switchover + PostgreSQL game table removal (1 day)
 
-- Route `/v1/query` to DataFusion path
-- Verify correctness against PostgreSQL results (shadow mode)
+- Set `QUERY_BACKEND=datafusion` as default
+- Verify correctness via shadow mode logs (Phase 3)
 - Remove `game_features` and `motif_occurrences` from Migration.java
-- Update `RetentionWorker` to delete old partition directories instead of SQL DELETE
-
-### Phase 6: ChessQL Rust port (optional, 2-3 days)
-
-- Port lexer, parser, AST to Rust
-- DataFusion-native compilation (produce `LogicalPlan` directly instead of SQL string)
-- Eliminates the Java→SQL→Rust→DataFusion hop
+- Update `RetentionWorker` to delete old partition directories instead
+  of SQL DELETE
+- Remove `SqlCompiler` (all compilation now goes through Substrait)
 
 ## Cost and Performance Estimates
 
@@ -640,3 +902,24 @@ Phase 4: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
    means two codepaths for Parquet writing (Java for ingest, Rust for
    query-time reads). The Rust write endpoint is simpler to keep
    consistent with the query schema.
+
+7. **Substrait coverage for `sequence()`?** The `sequence()` construct
+   compiles to a correlated EXISTS with self-joins on `motif_occurrences`.
+   Substrait's `SetPredicateRel` (EXISTS) and `JoinRel` should handle
+   this, but `datafusion-substrait` may not support all Substrait
+   relation types. If `sequence()` hits a gap, we can either:
+   (a) extend the DataFusion Substrait consumer,
+   (b) fall back to SQL for queries containing `sequence()`, or
+   (c) represent sequences differently (e.g. pre-materialized boolean
+   columns like `has_sequence_fork_then_pin`).
+
+8. **Substrait version pinning.** The `substrait-java` library and
+   `datafusion-substrait` crate must agree on the Substrait protobuf
+   spec version. Pin both to the same Substrait spec release (e.g.
+   v0.42.x). Mismatches cause deserialization failures.
+
+9. **When to remove `SqlCompiler`?** Once `SubstraitCompiler` +
+   `SqlQueryRouter` is verified (Phase 1), the direct `SqlCompiler`
+   is redundant — it produces the same SQL but without the Substrait
+   intermediate step. Keep it as a fallback during Phase 1-2, remove
+   in Phase 6 after DataFusion is primary.
