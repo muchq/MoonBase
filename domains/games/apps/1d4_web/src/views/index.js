@@ -19,112 +19,46 @@ export function renderIndex(container) {
   let requests = [];
   let pollTimer = null;
 
-  function loadRequests() {
-    return listIndexRequests()
-      .then((res) => {
-        requests = Array.isArray(res) ? res : [];
-        render();
-      })
-      .catch(() => {
-        render();
-      });
-  }
+  // --- Build static layout once ---
+  container.innerHTML = '';
 
-  function hasActive() {
-    return requests.some((r) => ['PENDING', 'PROCESSING'].includes(r.status));
-  }
+  const msgEl = document.createElement('div');
+  container.appendChild(msgEl);
 
-  function startPolling() {
-    if (pollTimer) return;
-    if (!hasActive()) return;
-    pollTimer = setInterval(() => {
-      loadRequests();
-    }, POLL_INTERVAL_MS);
-  }
+  const formPanel = document.createElement('div');
+  formPanel.className = 'panel';
+  formPanel.innerHTML = '<h2>Enqueue index request</h2>';
+  const form = document.createElement('form');
+  form.innerHTML = `
+    <div class="form-group">
+      <label for="player">Username</label>
+      <input id="player" name="player" type="text" placeholder="e.g. hikaru" required>
+    </div>
+    <div class="form-group">
+      <label for="platform">Platform</label>
+      <select id="platform" name="platform">
+        <option value="CHESS_COM">chess.com</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="startMonth">Start month (YYYY-MM)</label>
+      <input id="startMonth" name="startMonth" type="text" placeholder="2024-03" required>
+    </div>
+    <div class="form-group">
+      <label for="endMonth">End month (YYYY-MM)</label>
+      <input id="endMonth" name="endMonth" type="text" placeholder="2024-03" required>
+    </div>
+    <button type="submit" class="btn">Submit</button>
+  `;
+  formPanel.appendChild(form);
+  container.appendChild(formPanel);
 
-  function stopPolling() {
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
-  }
+  const statusPanel = document.createElement('div');
+  statusPanel.className = 'panel';
+  container.appendChild(statusPanel);
 
-  function render() {
-    if (!hasActive()) stopPolling();
-    else startPolling();
-
-    container.innerHTML = '';
-
-    const formPanel = document.createElement('div');
-    formPanel.className = 'panel';
-    formPanel.innerHTML = '<h2>Enqueue index request</h2>';
-    const form = document.createElement('form');
-    form.innerHTML = `
-      <div class="form-group">
-        <label for="player">Username</label>
-        <input id="player" name="player" type="text" placeholder="e.g. hikaru" required>
-      </div>
-      <div class="form-group">
-        <label for="platform">Platform</label>
-        <select id="platform" name="platform">
-          <option value="CHESS_COM">chess.com</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label for="startMonth">Start month (YYYY-MM)</label>
-        <input id="startMonth" name="startMonth" type="text" placeholder="2024-03" required>
-      </div>
-      <div class="form-group">
-        <label for="endMonth">End month (YYYY-MM)</label>
-        <input id="endMonth" name="endMonth" type="text" placeholder="2024-03" required>
-      </div>
-      <button type="submit" class="btn">Submit</button>
-    `;
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const fd = new FormData(form);
-      const player = String(fd.get('player') ?? '').trim();
-      const platform = String(fd.get('platform') ?? 'CHESS_COM').trim() || 'CHESS_COM';
-      const startMonth = normalizeMonth(String(fd.get('startMonth') ?? '').trim());
-      const endMonth = normalizeMonth(String(fd.get('endMonth') ?? '').trim());
-      if (!player || !startMonth || !endMonth) {
-        const msg = document.createElement('div');
-        msg.className = 'message error';
-        msg.textContent = 'Please fill in username and both months (YYYY-MM).';
-        container.insertBefore(msg, container.firstChild);
-        return;
-      }
-      createIndex({ player, platform, startMonth, endMonth })
-        .then(() => {
-          return loadRequests();
-        })
-        .then(() => {
-          const msg = document.createElement('div');
-          msg.className = 'message success';
-          msg.textContent = 'Request created.';
-          container.insertBefore(msg, container.firstChild);
-        })
-        .catch((err) => {
-          const msg = document.createElement('div');
-          msg.className = 'message error';
-          let text = err.message || 'Request failed';
-          if (err.body) {
-            try {
-              const parsed = JSON.parse(err.body);
-              text = parsed.message ?? parsed.error ?? err.body;
-            } catch {
-              text = err.body;
-            }
-          }
-          msg.textContent = text;
-          container.insertBefore(msg, container.firstChild);
-        });
-    });
-    formPanel.appendChild(form);
-    container.appendChild(formPanel);
-
-    const statusPanel = document.createElement('div');
-    statusPanel.className = 'panel';
+  // --- Status panel update (polling-safe, does not touch form) ---
+  function renderStatusPanel() {
     statusPanel.innerHTML = '<h2>Request status</h2>';
     if (requests.length === 0) {
       const p = document.createElement('p');
@@ -158,8 +92,74 @@ export function renderIndex(container) {
       }
       statusPanel.appendChild(table);
     }
-    container.appendChild(statusPanel);
   }
 
+  function showMessage(text, type) {
+    msgEl.innerHTML = '';
+    const msg = document.createElement('div');
+    msg.className = `message ${type}`;
+    msg.textContent = text;
+    msgEl.appendChild(msg);
+  }
+
+  function hasActive() {
+    return requests.some((r) => ['PENDING', 'PROCESSING'].includes(r.status));
+  }
+
+  function startPolling() {
+    if (pollTimer) return;
+    if (!hasActive()) return;
+    pollTimer = setInterval(loadRequests, POLL_INTERVAL_MS);
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function loadRequests() {
+    return listIndexRequests()
+      .then((res) => {
+        requests = Array.isArray(res) ? res : [];
+        renderStatusPanel();
+        if (!hasActive()) stopPolling();
+        else startPolling();
+      })
+      .catch(() => renderStatusPanel());
+  }
+
+  // --- Form submit ---
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    const player = String(fd.get('player') ?? '').trim();
+    const platform = String(fd.get('platform') ?? 'CHESS_COM').trim() || 'CHESS_COM';
+    const startMonth = normalizeMonth(String(fd.get('startMonth') ?? '').trim());
+    const endMonth = normalizeMonth(String(fd.get('endMonth') ?? '').trim());
+    if (!player || !startMonth || !endMonth) {
+      showMessage('Please fill in username and both months (YYYY-MM).', 'error');
+      return;
+    }
+    createIndex({ player, platform, startMonth, endMonth })
+      .then(() => loadRequests())
+      .then(() => showMessage('Request created.', 'success'))
+      .catch((err) => {
+        let text = err.message || 'Request failed';
+        if (err.body) {
+          try {
+            const parsed = JSON.parse(err.body);
+            text = parsed.message ?? parsed.error ?? err.body;
+          } catch {
+            text = err.body;
+          }
+        }
+        showMessage(text, 'error');
+      });
+  });
+
+  // --- Initial load ---
+  renderStatusPanel();
   loadRequests();
 }

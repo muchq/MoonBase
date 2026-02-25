@@ -153,10 +153,50 @@ java_library(
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
         artifact("io.micronaut:micronaut-http"),
+        artifact("io.micronaut:micronaut-http-server"),
         artifact("io.micronaut:micronaut-inject"),
         artifact("io.micronaut.jaxrs:micronaut-jaxrs-server"),
         artifact("jakarta.inject:jakarta-inject-api"),
         artifact("jakarta.ws.rs:jakarta-ws.rs-api"),
+        artifact("org.slf4j:slf4j-api"),
+    ],
+)
+
+java_library(
+    name = "module",
+    srcs = [
+        "src/main/java/com/muchq/games/one_d4/IndexerModule.java",
+    ],
+    plugins = [
+        "//bazel/rules:micronaut_type_element_visitor_processor",
+        "//bazel/rules:micronaut_aggregating_type_element_visitor_processor",
+        "//bazel/rules:micronaut_bean_definition_inject_processor",
+        "//bazel/rules:micronaut_package_element_visitor_processor",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":api",
+        ":db",
+        ":dto",
+        ":engine",
+        ":model",
+        ":motifs",
+        ":queue",
+        ":worker",
+        "//domains/games/libs/chess_com_client",
+        "//domains/games/libs/chessql:compiler",
+        "//domains/platform/libs/http_client:core",
+        "//domains/platform/libs/http_client:jdk11",
+        "//domains/platform/libs/json",
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("com.zaxxer:HikariCP"),
+        artifact("io.micronaut.jaxrs:micronaut-jaxrs-server"),
+        artifact("io.micronaut:micronaut-context"),
+        artifact("io.micronaut:micronaut-http-server-netty"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("io.micronaut:micronaut-jackson-databind"),
+        artifact("io.micronaut:micronaut-runtime"),
+        artifact("jakarta.inject:jakarta-inject-api"),
         artifact("org.slf4j:slf4j-api"),
     ],
 )
@@ -358,6 +398,27 @@ java_test_suite(
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_test_suite(
+    name = "http_integration_tests",
+    size = "medium",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/api/ContentTypeHandlingTest.java",
+    ],
+    runtime_deps = [
+        artifact("ch.qos.logback:logback-classic"),
+        artifact("org.postgresql:postgresql"),
+    ],
+    deps = [
+        ":module",
+        artifact("io.micronaut:micronaut-context"),
+        artifact("io.micronaut:micronaut-http-server-netty"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("io.micronaut:micronaut-runtime"),
         artifact("junit:junit"),
         artifact("org.assertj:assertj-core"),
     ],
