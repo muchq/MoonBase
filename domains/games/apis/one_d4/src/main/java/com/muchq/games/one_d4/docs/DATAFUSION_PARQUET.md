@@ -641,25 +641,268 @@ PGN stream can be partitioned by game boundaries.
 
 ## Integration with one_d4 Java API
 
-### Indexing Flow (Chess.com games)
+### Indexing Flow — Current State
 
-The existing Java pipeline continues to handle Chess.com indexing. After
-motif detection, instead of SQL INSERT, the worker calls `motif_query`'s
-write endpoint:
+Today's `IndexWorker` writes **one game at a time** to SQL:
+
+```
+IndexWorker.process(message)
+  for each month in [startMonth, endMonth]:
+    games = ChessClient.fetchGames(player, month)  // 10-100 games
+    for each game in games:
+      features = FeatureExtractor.extract(game.pgn())
+      GameFeatureDao.insert(row)                    // 1 INSERT per game
+      GameFeatureDao.insertOccurrences(...)          // 1 executeBatch per game
+```
+
+This is fine for SQL — each INSERT is ~1ms, and the Chess.com API is the
+bottleneck (~200ms/request), not the database. But Parquet files are
+immutable and columnar: you can't append a single row to an existing
+`.parquet` file. Writing one file per game would produce thousands of
+tiny files, destroying scan performance.
+
+### The Parquet Write Problem
+
+Parquet files are **write-once**. Unlike SQL rows, you can't INSERT INTO
+a Parquet file — you write the entire file at creation. This creates a
+tension between write latency and read performance:
+
+| Strategy | Write latency | File count | Scan performance | Complexity |
+|----------|--------------|------------|-----------------|------------|
+| 1 file per game | Immediate | Terrible (1000s) | Terrible | Low |
+| 1 file per month batch | Delayed until month done | Good (1 per month) | Good | Medium |
+| Buffer N rows, flush | Delayed (seconds-minutes) | Good (controlled) | Good | Medium |
+| Buffer + background compaction | Delayed + async merge | Good (starts many, converges) | Good after compaction | High |
+
+### Recommended Approach: Buffered Writer + Compaction
+
+The `motif_query` Rust service owns the Parquet write path. The Java
+indexer sends batches to the write endpoint; the Rust service buffers
+rows and manages file lifecycle.
+
+#### Write Path (motif_query writer.rs)
+
+```
+Java IndexWorker
+  │ accumulate games for current month (10-100 games)
+  │
+  ▼
+POST /motif_query/v1/write
+  { "table": "game_features",
+    "platform": "chess.com",
+    "month": "2024-03",
+    "rows": [ ... 10-100 GameFeatureRows ... ] }
+  │
+  ▼
+motif_query writer.rs
+  │
+  ├─ Append rows to in-memory buffer (keyed by partition)
+  │
+  ├─ IF buffer.len() >= FLUSH_THRESHOLD (e.g. 5000 rows)
+  │   └─ Flush buffer → new Parquet file in partition dir
+  │      /data/game_features/platform=chess.com/month=2024-03/part-NNNN.parquet
+  │
+  └─ IF time_since_last_flush >= FLUSH_INTERVAL (e.g. 60s)
+      └─ Flush current buffer regardless of size
+         (prevents data from sitting in memory indefinitely)
+```
+
+#### Batch Accumulation in Java
+
+The `IndexWorker` currently writes per-game. Modify it to buffer an
+entire month's games before POSTing to `motif_query`:
+
+```java
+// IndexWorker.process() — modified for Parquet batching
+for (YearMonth month = start; !month.isAfter(end); month = month.plusMonths(1)) {
+  GamesResponse response = chessClient.fetchGames(player, month);
+  List<GameFeatureRow> batch = new ArrayList<>();
+  List<OccurrenceBatch> occBatch = new ArrayList<>();
+
+  for (PlayedGame game : response.games()) {
+    GameFeatures features = featureExtractor.extract(game.pgn());
+    batch.add(toRow(message, game, features));
+    occBatch.add(toOccurrences(game.url(), features.occurrences()));
+  }
+
+  // One HTTP call per month, not per game
+  parquetClient.writeBatch("game_features", platform, monthStr, batch);
+  parquetClient.writeBatch("motif_occurrences", platform, monthStr, occBatch);
+
+  // SQL write continues in parallel during dual-write phase
+  for (GameFeatureRow row : batch) {
+    gameFeatureStore.insert(row);
+  }
+}
+```
+
+This is a natural batching boundary: Chess.com returns all games for a
+player-month in one API call (typically 10-100 games). The batch is
+already in memory — we just delay the write call until we have the
+full month.
+
+#### Why Not Append to Existing Files?
+
+Parquet files are **immutable by design**. The format stores column chunks
+with min/max statistics in the footer; appending rows would invalidate
+these statistics and require rewriting the footer. The Parquet spec has
+no append mode. Arrow's Parquet writer always creates new files.
+
+Some workarounds exist (Delta Lake, Iceberg) but they add table format
+complexity we don't need yet. The simple approach: write new files,
+compact later.
+
+#### Why Not One Big File per Partition?
+
+Rewriting the entire partition on every index request would mean reading
+back the existing file, appending new rows, and writing a new file. For
+a partition with 500K rows, that's ~15 MB of read+write for every 50-game
+batch. This is wasteful and creates a write amplification problem.
+
+Better: let small files accumulate and merge them periodically.
+
+### File Size Targets
+
+| Scenario | Rows per file | File size (Snappy) | Files per partition |
+|----------|--------------|-------------------|-------------------|
+| Chess.com index batch | 10-100 | ~5-50 KB | Many small files |
+| After motif_query buffer flush | 5,000 | ~250-500 KB | Moderate |
+| After compaction | 100,000-500,000 | ~5-25 MB | Few large files |
+| Lichess monthly ingest | 500,000-2,000,000 | ~20-80 MB | 1-4 per month |
+
+Target steady-state: **5-25 MB per file after compaction.** This gives
+good row group pruning (1-2 row groups per file), efficient I/O (one
+read per file), and manageable file counts per partition.
+
+### Compaction Strategy
+
+Small files accumulate from Chess.com indexing (many users, many months,
+small batches). A background compaction job merges them:
+
+```
+motif_query compaction.rs (background task, runs every N minutes)
+
+for each partition (platform, month):
+  files = list_parquet_files(partition_dir)
+  if files.len() <= 1:
+    continue  // nothing to compact
+  if total_size(files) < TARGET_FILE_SIZE:
+    // Merge all small files into one
+    merged = read_all(files) → sort by played_at → write single file
+    atomic_swap(files, merged)  // rename new file in, delete old files
+  else:
+    // Multiple target-sized files: merge only the small ones
+    small = files.filter(|f| f.size < MIN_FILE_SIZE)  // e.g. < 1 MB
+    if small.len() >= 2:
+      merged = read_all(small) → write single file
+      atomic_swap(small, merged)
+```
+
+#### Compaction Tradeoffs
+
+| Concern | Approach | Rationale |
+|---------|----------|-----------|
+| **Write amplification** | Only compact files < 1 MB | Avoids rewriting large files |
+| **Read during compaction** | Write new file first, then delete old | DataFusion's ListingTable re-scans on each query; new file is visible immediately |
+| **Concurrency** | Single compaction thread, file-level locking | No concurrent writes to same partition (writer and compactor coordinate via lock file) |
+| **Ordering** | Sort by `played_at` during merge | Better predicate pushdown on time-range queries |
+| **Trigger** | Timer-based (every 5 min) + file-count threshold | Don't compact constantly; don't let small files pile up |
+
+#### Why Not Use Delta Lake / Iceberg?
+
+These table formats add transactional semantics (ACID writes, time
+travel, schema evolution tracking) on top of Parquet. They're the right
+answer for multi-writer concurrent environments. But for our use case:
+
+- **Single writer** — only `motif_query` writes to the Parquet directory.
+  No concurrent write conflicts.
+- **Append-only** — we never update or delete individual rows (retention
+  deletes entire partition directories).
+- **Simple partition scheme** — Hive-style `platform=X/month=Y` is
+  sufficient. No need for partition evolution.
+- **DataFusion native** — DataFusion's `ListingTable` reads plain Parquet
+  natively. Delta/Iceberg require additional dependencies
+  (`deltalake-core`, `iceberg-rust`).
+
+If we later need multi-writer support (e.g. multiple indexer instances),
+transactional deletes, or time travel, Delta Lake is the natural upgrade.
+The Parquet files are compatible — Delta just adds a `_delta_log/`
+transaction log alongside them.
+
+### Dual-Write During Migration
+
+During Phase 3 (migration), the indexer writes to **both** backends:
 
 ```
 IndexWorker.process()
-  ├─ ChessClient.fetchGames()           # unchanged
-  ├─ FeatureExtractor.extract()          # unchanged
-  └─ POST motif_query/v1/write           # NEW: replaces GameFeatureDao.insert()
-       { "table": "game_features",
-         "platform": "chess.com",
-         "month": "2024-03",
-         "rows": [ ... batch of GameFeatureRows ... ] }
+  for each month:
+    games = fetchGames(player, month)
+    batch = detectMotifs(games)
+
+    // Write to both — SQL is source of truth until DataFusion is validated
+    gameFeatureStore.insert(batch)                    // SQL (existing)
+    parquetClient.writeBatch("game_features", batch)  // Parquet (new)
+
+    // If Parquet write fails, log warning but don't fail the request.
+    // SQL write is authoritative during migration.
 ```
 
-The write endpoint buffers rows and flushes to Parquet when a batch
-threshold is reached or on explicit flush.
+Dual-write ordering: **SQL first, Parquet second.** If the SQL write
+succeeds but Parquet fails, the game is still queryable via the SQL
+backend. The reverse (Parquet succeeds, SQL fails) would leave the
+SQL backend inconsistent during shadow mode validation.
+
+### motif_query Write Endpoint Detail
+
+```
+POST /motif_query/v1/write
+Content-Type: application/json
+
+{
+  "table": "game_features",
+  "platform": "chess.com",
+  "month": "2024-03",
+  "rows": [
+    {
+      "game_url": "https://chess.com/game/12345",
+      "white_username": "alice",
+      "black_username": "bob",
+      "white_elo": 1850,
+      "black_elo": 1920,
+      "time_class": "blitz",
+      "eco": "B90",
+      "result": "white",
+      "played_at": "2024-03-15T18:30:00Z",
+      "num_moves": 42,
+      "has_pin": true,
+      "has_fork": false,
+      ...
+    },
+    ...
+  ]
+}
+
+Response: { "buffered": 47, "flushed": false }
+  or:     { "buffered": 0, "flushed": true, "file": "part-0042.parquet", "rows_written": 5000 }
+```
+
+The response tells the caller whether rows were buffered or flushed. The
+caller doesn't need to care — the writer manages flush timing. But the
+response is useful for monitoring and debugging.
+
+### Flush Endpoint (Optional)
+
+```
+POST /motif_query/v1/flush
+  Body: { "table": "game_features", "platform": "chess.com", "month": "2024-03" }
+  Response: { "flushed": true, "file": "part-0043.parquet", "rows_written": 23 }
+```
+
+Forces an immediate flush of the buffer for a specific partition. Useful
+for:
+- End of an index request (flush remaining buffered rows)
+- Before running a query that needs to see just-written data
+- Graceful shutdown
 
 ### Query Flow (Substrait-based)
 
@@ -873,29 +1116,19 @@ Phase 5: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
    DataFusion supports `object_store` for S3/GCS — add it later when
    deploying to cloud.
 
-2. **Real-time vs batch for Chess.com games?** The write endpoint buffers
-   rows — how long before flushing? Options: flush every N rows (e.g. 1000),
-   flush every M seconds, or flush on explicit API call. Small Parquet files
-   hurt scan performance, so buffering is important.
-
-3. **Compaction?** Many small writes produce many small files. A background
-   compaction job should periodically merge small files into larger ones per
-   partition. DataFusion doesn't have built-in compaction, but it's
-   straightforward: read partition → write single large file → swap.
-
-4. **Do we need the motif_occurrences table at all in Parquet?** The
+2. **Do we need the motif_occurrences table at all in Parquet?** The
    `game_features` boolean flags handle most ChessQL queries. The
    occurrences table is only needed for `sequence()` queries and
    `ORDER BY motif_count()`. If those features are rarely used, we could
    defer the occurrences table and keep it in PostgreSQL temporarily.
 
-5. **Phase 9 before or after Lichess ingest?** Ideally Phase 9 (issue
+3. **Phase 9 before or after Lichess ingest?** Ideally Phase 9 (issue
    #1049 — 7 new chariot-based motifs) lands before the first Lichess
    bulk ingest, so all 18 motifs are captured in one pass. If Phase 9 is
    delayed, we could ingest with the current 11 detectors and re-analyze
    later via the admin endpoint, but that doubles the processing cost.
 
-6. **Java Parquet writer alternative?** Instead of HTTP POST to the Rust
+4. **Java Parquet writer alternative?** Instead of HTTP POST to the Rust
    motif_query service, the Java `lichess_ingest` CLI could write Parquet
    directly using `org.apache.parquet:parquet-avro` or
    `org.apache.arrow:arrow-dataset`. This eliminates the HTTP hop but
@@ -903,7 +1136,7 @@ Phase 5: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
    query-time reads). The Rust write endpoint is simpler to keep
    consistent with the query schema.
 
-7. **Substrait coverage for `sequence()`?** The `sequence()` construct
+5. **Substrait coverage for `sequence()`?** The `sequence()` construct
    compiles to a correlated EXISTS with self-joins on `motif_occurrences`.
    Substrait's `SetPredicateRel` (EXISTS) and `JoinRel` should handle
    this, but `datafusion-substrait` may not support all Substrait
@@ -913,13 +1146,30 @@ Phase 5: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
    (c) represent sequences differently (e.g. pre-materialized boolean
    columns like `has_sequence_fork_then_pin`).
 
-8. **Substrait version pinning.** The `substrait-java` library and
+6. **Substrait version pinning.** The `substrait-java` library and
    `datafusion-substrait` crate must agree on the Substrait protobuf
    spec version. Pin both to the same Substrait spec release (e.g.
    v0.42.x). Mismatches cause deserialization failures.
 
-9. **When to remove `SqlCompiler`?** Once `SubstraitCompiler` +
+7. **When to remove `SqlCompiler`?** Once `SubstraitCompiler` +
    `SqlQueryRouter` is verified (Phase 1), the direct `SqlCompiler`
    is redundant — it produces the same SQL but without the Substrait
    intermediate step. Keep it as a fallback during Phase 1-2, remove
    in Phase 6 after DataFusion is primary.
+
+8. **Compaction during active indexing?** If a user is actively indexing
+   a player while compaction runs on the same partition, we need to
+   ensure the compactor doesn't merge a file that the writer is about
+   to flush. The lock-file approach (writer holds lock during flush,
+   compactor holds lock during merge) is simple but could cause
+   contention. Alternative: compactor skips partitions with recent
+   writes (< 5 min since last file modification).
+
+9. **Read-your-writes consistency?** After the Java indexer POSTs a
+   batch to `motif_query/v1/write`, the rows are buffered in memory.
+   A subsequent query won't see them until the buffer flushes. Options:
+   (a) call `/v1/flush` after each index request completes,
+   (b) accept eventual consistency (queries may lag by up to
+   `FLUSH_INTERVAL`), or
+   (c) query the buffer alongside Parquet files (adds complexity to
+   the query path — DataFusion would need a `MemTable` union).
