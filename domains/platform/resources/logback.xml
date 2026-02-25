@@ -8,8 +8,10 @@
     </filter>
   </appender>
 
-  <appender name="Sentry" class="com.getsentry.raven.logback.SentryAppender">
-    <dsn>${SENTRY_DSN}</dsn>
+  <appender name="Sentry" class="io.sentry.logback.SentryAppender">
+    <options>
+      <dsn>${SENTRY_DSN}</dsn>
+    </options>
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
       <level>ERROR</level>
     </filter>
