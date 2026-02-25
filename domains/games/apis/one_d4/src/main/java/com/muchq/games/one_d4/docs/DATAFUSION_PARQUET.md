@@ -29,53 +29,52 @@ plus metadata: a textbook columnar layout.
 ## Architecture
 
 ```
-                                ┌──────────────────────┐
-                                │   Lichess PGN dump    │
-                                │  (monthly .zst file)  │
-                                └──────────┬───────────┘
-                                           │ offline bulk pipeline
-                                           ▼
-┌──────────────┐   index    ┌──────────────────────────┐
-│  one_d4 Java │ ────────►  │   Parquet writer (Rust)  │
-│  indexer     │  (gRPC)    │   arrow-rs + parquet-rs  │
-└──────────────┘            └──────────┬───────────────┘
-                                       │ writes
-                                       ▼
-                            ┌──────────────────────────┐
-                            │  Parquet files on disk/S3 │
-                            │                          │
-                            │  /data/games/            │
-                            │    platform=chess.com/    │
-                            │      month=2024-03/      │
-                            │        part-0000.parquet  │
-                            │    platform=lichess/     │
-                            │      month=2024-03/      │
-                            │        part-0000.parquet  │
-                            └──────────┬───────────────┘
-                                       │ reads
-                                       ▼
-                            ┌──────────────────────────┐
-                            │  motif_query (Rust)      │
-                            │  DataFusion SessionCtx   │
-                            │  + axum HTTP API         │
-                            └──────────┬───────────────┘
-                                       │
-                            ┌──────────┴───────────────┐
-                            │  one_d4 Java API         │
-                            │  (proxies /v1/query to   │
-                            │   motif_query, keeps     │
-                            │   /v1/index as-is)       │
-                            └──────────────────────────┘
+┌──────────────────────┐
+│   Lichess PGN dump   │
+│  (monthly .zst file) │
+└──────────┬───────────┘
+           │ offline batch (Java CLI)
+           ▼
+┌──────────────────────────────┐
+│  lichess_ingest (Java)       │
+│  - streaming PGN parse       │
+│  - GM/title filter           │
+│  - GameReplayer (chariot)    │
+│  - FeatureExtractor          │
+│  - all MotifDetectors        │
+└──────────┬───────────────────┘
+           │ HTTP batch POST
+           ▼
+┌──────────────────────────┐   index    ┌──────────────────────────┐
+│  one_d4 Java API         │ ─────────► │  motif_query (Rust)      │
+│  - /v1/index (Chess.com) │  HTTP POST │  - axum HTTP API         │
+│  - /v1/query (proxy)     │            │  - Parquet writer        │
+│  - GameReplayer (chariot)│            │  - DataFusion SessionCtx │
+│  - FeatureExtractor      │            │  - /v1/query (SQL exec)  │
+│  - all MotifDetectors    │            │  - /v1/write (ingest)    │
+└──────────────────────────┘            └──────────┬───────────────┘
+                                                   │ reads/writes
+                                                   ▼
+                                        ┌──────────────────────────┐
+                                        │  Parquet files on disk/S3│
+                                        │                          │
+                                        │  /data/games/            │
+                                        │    platform=chess.com/   │
+                                        │      month=2024-03/      │
+                                        │        part-0000.parquet │
+                                        │    platform=lichess/     │
+                                        │      month=2024-03/      │
+                                        │        part-0000.parquet │
+                                        └──────────────────────────┘
 ```
 
 ### Component Responsibilities
 
 | Component | Language | Role |
 |-----------|----------|------|
-| `one_d4` (existing) | Java | REST API, indexing orchestration, Chess.com client, motif detection, request tracking |
-| `motif_query` (new) | Rust | DataFusion query engine, Parquet reads, ChessQL-to-SQL compilation |
-| `parquet_writer` (lib in motif_query) | Rust | Arrow RecordBatch construction, Parquet file writing, partition management |
-| `lichess_ingest` (bin in motif_query) | Rust | Bulk PGN parsing, motif detection, Parquet generation from Lichess dumps |
+| `one_d4` (existing) | Java | REST API, indexing orchestration, Chess.com client, motif detection (chariot), request tracking |
+| `motif_query` (new) | Rust | DataFusion query engine, Parquet reads/writes, query execution |
+| `lichess_ingest` (new) | Java | Bulk PGN streaming, GM filtering, motif detection (reuses one_d4 detectors), batch POST to motif_query |
 
 ## Parquet Schema
 
@@ -105,6 +104,14 @@ has_checkmate:      Boolean
 has_promotion:      Boolean
 has_promotion_with_check:     Boolean
 has_promotion_with_checkmate: Boolean
+# Phase 9 motifs (issue #1049) — added after chariot integration:
+has_back_rank_mate: Boolean
+has_smothered_mate: Boolean
+has_sacrifice:      Boolean
+has_zugzwang:       Boolean
+has_double_check:   Boolean
+has_interference:   Boolean
+has_overloaded_piece: Boolean
 ```
 
 PGN text is **not** stored in the Parquet files — it bloats columnar scans
@@ -206,13 +213,13 @@ domains/games/apis/motif_query/
     main.rs              # axum server + DataFusion setup
     catalog.rs           # Table registration, partition discovery
     query.rs             # Query execution, result serialization
-    writer.rs            # Parquet file writing (used by ingest + index)
-    ingest/
-      mod.rs             # Lichess bulk ingest orchestrator
-      pgn.rs             # PGN stream parser (Lichess NDJSON/PGN format)
-      filter.rs          # GM game filtering (title, Elo threshold)
+    writer.rs            # Parquet file writing (accepts JSON batches from Java)
+    compaction.rs        # Background small-file merging
   BUILD.bazel
 ```
+
+Note: no chess logic or PGN parsing in Rust. Motif detection and Lichess
+ingest live in Java (see "Lichess Ingest Architecture" below).
 
 ### Dependencies
 
@@ -228,8 +235,6 @@ serde_json = { workspace = true }
 server_pal = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
-zstd = "0.13"             # Lichess dumps are .zst compressed
-pgn-reader = "0.26"       # PGN parsing (or custom, see below)
 ```
 
 ### API Endpoints
@@ -332,41 +337,95 @@ games/month), which is very manageable.
 9. Register new partition with DataFusion catalog
 ```
 
-### Motif Detection in Rust
+### Motif Detection — Java Only (chariot)
 
-The Java `FeatureExtractor` + `GameReplayer` + 11 `MotifDetector`
-implementations need Rust equivalents. Options:
+Motif detection stays in Java. The current detectors use chariot
+(`io.github.tors42:chariot`) via `GameReplayer` for board state and FEN
+generation. Issue #1049 (Phase 9) plans to deepen the chariot integration:
 
-**Option A: Pure Rust reimplementation.** Use an existing Rust chess library
-(`shakmaty` or `chess`) for move generation and board state. Port the
-detector logic. The detectors are straightforward ray-casting and attack
-checks — the Java implementations are each 30-80 lines.
+- **Check attribution**: distinguish promoted-piece check vs discovered
+  check vs double check, requiring chariot's board model to identify which
+  piece delivers the check.
+- **7 new motifs**: back rank mate, smothered mate, sacrifice, zugzwang,
+  double check, interference, overloaded piece — several of these need
+  full board state analysis that goes well beyond FEN string parsing.
+- **Re-analysis pipeline**: admin endpoint to reprocess existing games with
+  new/improved detectors.
 
-**Option B: Call into Java for detection.** Run the Lichess ingest as a
-batch job that calls `one_d4`'s feature extraction via HTTP. Simpler but
-slow for bulk processing (HTTP overhead per game).
+Porting detectors to Rust would mean duplicating all of this work against
+a different chess library (`shakmaty`), maintaining two implementations in
+lockstep, and losing the chariot-specific APIs that Phase 9 depends on.
+Not worth it.
 
-**Option C: Shared library.** Compile the Java detectors to a native
-library via GraalVM native-image and call from Rust via FFI.
+**The Lichess ingest pipeline therefore runs in Java**, not Rust. The Rust
+`motif_query` service handles only Parquet writes and DataFusion queries —
+no chess logic.
 
-**Recommendation: Option A.** The `shakmaty` crate is mature and fast
-(~10x faster than Java chess libs for move generation). The detector logic
-is simple enough that porting it is a few days of work and the result is a
-self-contained, high-performance pipeline. For 1M games/month with ~40
-moves/game, this is ~40M positions to analyze — Rust will handle this in
-minutes, not hours.
+### Lichess Ingest Architecture (Java)
 
-### CLI Interface
+The bulk ingest is a Java batch job, either as:
+
+- **Option A: Standalone CLI jar** — a new `lichess_ingest` binary target
+  in `domains/games/apis/one_d4/` that reuses `GameReplayer`,
+  `FeatureExtractor`, and all `MotifDetector` implementations. Streams
+  `.pgn.zst` files, filters to titled/high-Elo games, runs detection,
+  and writes results to `motif_query`'s Parquet write endpoint.
+
+- **Option B: Admin endpoint in one_d4** — `POST /admin/ingest/lichess`
+  accepts a URL or file path, streams + filters + detects in-process,
+  and writes Parquet batches. Simpler deployment but ties the batch
+  workload to the API server's resources.
+
+**Recommendation: Option A.** A standalone CLI jar keeps the long-running
+bulk workload isolated from the API server. It shares the same motif
+detection code via library targets. The CLI can run as a cron job or
+one-off invocation.
 
 ```
-motif_query ingest \
+java -jar lichess_ingest.jar \
   --input lichess_db_standard_rated_2024-01.pgn.zst \
-  --output /data/ \
+  --motif-query-url http://localhost:8081 \
   --min-elo 2200 \
   --titles GM,IM,WGM,WIM \
   --time-controls standard,rapid,blitz \
-  --batch-size 50000
+  --batch-size 1000
 ```
+
+### Ingest Pipeline Steps
+
+```
+1. Download/read .pgn.zst file (streaming via zstd-jni)
+     ↓
+2. Parse PGN headers (extract players, Elo, title, time control, result)
+     ↓
+3. Filter: does this game meet GM/titled criteria?
+     ↓  (skip ~97% of games here, before parsing moves)
+4. Parse movetext for qualifying games
+     ↓
+5. GameReplayer + FeatureExtractor + MotifDetectors (Java, chariot)
+     ↓
+6. Batch results (1000 games)
+     ↓
+7. POST batch to motif_query/v1/write → Parquet
+     ↓
+8. motif_query flushes to partitioned Parquet files
+```
+
+### Performance Considerations
+
+Java motif detection is slower than a hypothetical Rust implementation,
+but still fast enough for the filtered dataset:
+
+| Operation | Estimated throughput |
+|-----------|---------------------|
+| PGN header parse + filter (Java, streaming) | ~100-200K games/sec |
+| Full motif analysis (chariot + detectors) | ~2-5K games/sec |
+| HTTP batch write to motif_query | ~10K rows/sec |
+| End-to-end: 1 month Lichess (100M games, ~2M qualifying) | ~15-30 minutes |
+
+15-30 minutes per monthly dump is acceptable for a batch job. If it
+becomes a bottleneck, parallelize across multiple worker threads — the
+PGN stream can be partitioned by game boundaries.
 
 ## Integration with one_d4 Java API
 
@@ -460,8 +519,10 @@ Phase 3: Drop PostgreSQL game tables.
          Only indexing_requests and indexed_periods remain in PostgreSQL.
          Retention = delete partition directories on a schedule.
 
-Phase 4: Lichess bulk ingest.
-         Run motif_query ingest on historical Lichess dumps.
+Phase 4: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
+         Run lichess_ingest Java CLI on historical Lichess dumps.
+         All 18 motif detectors (11 existing + 7 new chariot-based)
+         are included in bulk processing.
          Monthly cron to ingest new dumps as they're published.
 ```
 
@@ -491,20 +552,18 @@ Phase 4: Lichess bulk ingest.
 - Continue writing to PostgreSQL for rollback safety
 - Add config toggle: `MOTIF_QUERY_URL` (if set, dual-write is enabled)
 
-### Phase 4: Lichess ingest pipeline (3-5 days)
+### Phase 4: Lichess ingest pipeline — Java (3-5 days)
 
-- PGN stream parser: read `.pgn.zst`, extract headers without full parse
+- New `lichess_ingest` binary target in `domains/games/apis/one_d4/`
+- Streaming PGN parser: read `.pgn.zst` via `zstd-jni`, extract headers
 - GM/title filter: parse `WhiteTitle`/`BlackTitle` headers, Elo thresholds
-- Port motif detectors to Rust using `shakmaty` crate:
-  - `PinDetector` (ray cast from king)
-  - `ForkDetector` (attack count on high-value targets)
-  - `SkewerDetector` (ray through more valuable piece)
-  - `DiscoveredAttackDetector` / `DiscoveredCheckDetector`
-  - `CheckDetector` / `CheckmateDetector` (from board state)
-  - `PromotionDetector` variants (from move type)
-- Batch writer: accumulate RecordBatches, flush at threshold
-- CLI binary: `motif_query ingest --input ... --output ...`
+- Reuse existing Java motif detectors (GameReplayer + FeatureExtractor +
+  all MotifDetector implementations — no porting needed)
+- HTTP client to batch-POST results to `motif_query/v1/write`
+- CLI interface: `java -jar lichess_ingest.jar --input ... --motif-query-url ...`
 - Test against a small Lichess sample file
+- **Dependency:** Should run after Phase 9 (issue #1049) lands so that
+  the 7 new chariot-based motifs are included in the bulk ingest
 
 ### Phase 5: Query switchover + PostgreSQL game table removal (1 day)
 
@@ -541,10 +600,10 @@ Phase 4: Lichess bulk ingest.
 
 | Operation | Estimated throughput |
 |-----------|---------------------|
-| Lichess PGN parse + filter (headers only) | ~500K games/sec |
-| Full motif analysis (shakmaty + detectors) | ~5K-10K games/sec |
-| Parquet write (50K row batches) | ~100K rows/sec |
-| End-to-end: 1 month Lichess (100M games, ~2M qualifying) | ~5-10 minutes |
+| Lichess PGN header parse + filter (Java, streaming) | ~100-200K games/sec |
+| Full motif analysis (chariot + Java detectors) | ~2-5K games/sec |
+| HTTP batch write to motif_query | ~10K rows/sec |
+| End-to-end: 1 month Lichess (100M games, ~2M qualifying) | ~15-30 minutes |
 
 ## Open Questions
 
@@ -567,3 +626,17 @@ Phase 4: Lichess bulk ingest.
    occurrences table is only needed for `sequence()` queries and
    `ORDER BY motif_count()`. If those features are rarely used, we could
    defer the occurrences table and keep it in PostgreSQL temporarily.
+
+5. **Phase 9 before or after Lichess ingest?** Ideally Phase 9 (issue
+   #1049 — 7 new chariot-based motifs) lands before the first Lichess
+   bulk ingest, so all 18 motifs are captured in one pass. If Phase 9 is
+   delayed, we could ingest with the current 11 detectors and re-analyze
+   later via the admin endpoint, but that doubles the processing cost.
+
+6. **Java Parquet writer alternative?** Instead of HTTP POST to the Rust
+   motif_query service, the Java `lichess_ingest` CLI could write Parquet
+   directly using `org.apache.parquet:parquet-avro` or
+   `org.apache.arrow:arrow-dataset`. This eliminates the HTTP hop but
+   means two codepaths for Parquet writing (Java for ingest, Rust for
+   query-time reads). The Rust write endpoint is simpler to keep
+   consistent with the query schema.
