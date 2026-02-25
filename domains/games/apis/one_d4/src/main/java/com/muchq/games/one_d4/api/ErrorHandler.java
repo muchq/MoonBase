@@ -3,8 +3,10 @@ package com.muchq.games.one_d4.api;
 import com.muchq.games.chessql.parser.ParseException;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpResponse;
+import io.micronaut.http.HttpStatus;
 import io.micronaut.http.annotation.Controller;
 import io.micronaut.http.annotation.Error;
+import io.micronaut.http.server.exceptions.UnsupportedMediaException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -34,6 +36,12 @@ public class ErrorHandler {
   public HttpResponse<Map<String, Object>> handleNotFound(
       HttpRequest<?> request, NoSuchElementException ex) {
     return HttpResponse.notFound(Map.of("error", ex.getMessage()));
+  }
+
+  @Error(global = true, exception = UnsupportedMediaException.class)
+  public HttpResponse<Map<String, Object>> handleUnsupportedMedia(
+      HttpRequest<?> request, UnsupportedMediaException ex) {
+    return HttpResponse.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
   }
 
   @Error(global = true, exception = Exception.class)
