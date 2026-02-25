@@ -140,7 +140,9 @@ public class QueryControllerTest {
     public void insert(GameFeature feature) {}
 
     @Override
-    public void deleteOlderThan(java.time.Instant threshold) {}
+    public int deleteOlderThan(java.time.Instant threshold) {
+      return 0;
+    }
 
     @Override
     public void insertOccurrences(

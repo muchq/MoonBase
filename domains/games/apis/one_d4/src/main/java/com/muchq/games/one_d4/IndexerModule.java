@@ -155,5 +155,4 @@ public class IndexerModule {
   public IndexWorkerLifecycle indexWorkerLifecycle(IndexQueue queue, IndexWorker worker) {
     return new IndexWorkerLifecycle(queue, worker);
   }
-
 }

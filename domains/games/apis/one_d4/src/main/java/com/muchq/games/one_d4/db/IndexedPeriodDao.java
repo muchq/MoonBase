@@ -100,16 +100,16 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
   }
 
   @Override
-  public void deleteOlderThan(Instant threshold) {
+  public int deleteOlderThan(Instant threshold) {
     try (Connection conn = dataSource.getConnection();
         PreparedStatement ps = conn.prepareStatement(DELETE_OLDER_THAN)) {
       ps.setTimestamp(1, Timestamp.from(threshold));
       int deleted = ps.executeUpdate();
       if (deleted > 0) {
-        LOG.info("Deleted {} indexed periods older than {}", deleted, threshold);
+        LOG.debug("Deleted {} indexed periods older than {}", deleted, threshold);
       }
+      return deleted;
     } catch (SQLException e) {
-      LOG.error("Failed to delete old indexed periods", e);
       throw new RuntimeException("Failed to delete old indexed periods", e);
     }
   }

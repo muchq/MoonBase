@@ -19,7 +19,7 @@ public interface IndexedPeriodStore {
       boolean isComplete,
       int gamesCount);
 
-  void deleteOlderThan(Instant threshold);
+  int deleteOlderThan(Instant threshold);
 
   /** Month is stored as "YYYY-MM" in column year_month. */
   record IndexedPeriod(

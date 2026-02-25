@@ -29,8 +29,9 @@ public class RetentionWorker {
     LOG.info("Running game retention policy ({} days)", RETENTION_PERIOD.toDays());
     Instant threshold = Instant.now().minus(RETENTION_PERIOD);
     try {
-      gameFeatureStore.deleteOlderThan(threshold);
-      indexedPeriodStore.deleteOlderThan(threshold);
+      int games = gameFeatureStore.deleteOlderThan(threshold);
+      int periods = indexedPeriodStore.deleteOlderThan(threshold);
+      LOG.info("Retention cleanup complete: deleted {} games, {} periods", games, periods);
     } catch (Exception e) {
       LOG.error("Failed to run retention policy", e);
     }
