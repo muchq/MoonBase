@@ -51,93 +51,11 @@ jobs:
         run: |
           bazel query 'kind(oci_push, //...)' | xargs -n1 bazel run
 
-      - name: Tag images with short SHA
+      - name: Tag images with commit SHA (for rollback)
         run: |
-          SHORT_SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
-          repos=$(bazel query 'kind(oci_push, //...)' --output=build \
-            | sed -n 's/.*repository = "\(ghcr\.io\/muchq\/[^"]*\)".*/\1/p')
+          repos=$(bazel query 'kind(oci_push, //...)' --output=build | sed -n 's/.*repository = "\(ghcr\.io\/muchq\/[^"]*\)".*/\1/p')
           for repo in $repos; do
             docker pull "$repo:latest"
-            docker tag "$repo:latest" "$repo:$SHORT_SHA"
-            docker push "$repo:$SHORT_SHA"
+            docker tag "$repo:latest" "$repo:${{ github.sha }}"
+            docker push "$repo:${{ github.sha }}"
           done
-
-      - name: Prepare release metadata
-        run: |
-          SHORT_SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
-          mkdir -p release-metadata
-          echo "$SHORT_SHA" > release-metadata/short_sha
-          repos=$(bazel query 'kind(oci_push, //...)' --output=build \
-            | sed -n 's/.*repository = "\(ghcr\.io\/muchq\/[^"]*\)".*/\1/p')
-          for repo in $repos; do
-            SERVICE="${repo##*/}"
-            NEW_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$repo:latest" \
-              | sed 's/.*@//')
-            echo "$repo $SERVICE $NEW_DIGEST" >> release-metadata/services.txt
-          done
-
-      - uses: actions/upload-artifact@v6
-        with:
-          name: release-metadata
-          path: release-metadata/
-
-  create-releases:
-    needs: test-and-publish
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v7
-        with:
-          name: release-metadata
-
-      - name: Create releases for changed services
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          SHORT_SHA=$(cat release-metadata/short_sha)
-          COMMIT_SHA="${{ github.sha }}"
-
-          while IFS= read -r line; do
-            [ -z "$line" ] && continue
-            repo="${line%% *}"
-            rest="${line#* }"
-            SERVICE="${rest%% *}"
-            NEW_DIGEST="${rest#* }"
-
-            echo "Checking $SERVICE..."
-
-            PREV_TAG=$(gh release list --limit 100 --json tagName,name \
-              -q ".[] | select(.tagName | startswith(\"${SERVICE}-\")) | .tagName" \
-              | head -1)
-
-            if [ -n "$PREV_TAG" ]; then
-              PREV_DIGEST=$(gh release view "$PREV_TAG" --json body -q '.body' \
-                | grep -oP '(?<=Digest:\*\* `)[^`]+' || echo "")
-            else
-              PREV_DIGEST=""
-            fi
-
-            if [ "$NEW_DIGEST" = "$PREV_DIGEST" ]; then
-              echo "  $SERVICE: unchanged, skipping"
-              continue
-            fi
-
-            TAG="${SERVICE}-${SHORT_SHA}"
-            echo "  $SERVICE: changed, creating release $TAG"
-
-            BODY="**Image:** \`${repo}:${SHORT_SHA}\`
-          **Digest:** \`${NEW_DIGEST}\`
-          **Commit:** ${COMMIT_SHA}"
-
-            if [ -n "$PREV_TAG" ]; then
-              gh release create "$TAG" \
-                --title "${SERVICE} ${SHORT_SHA}" \
-                --notes-start-tag "$PREV_TAG" \
-                --notes "$BODY"
-            else
-              gh release create "$TAG" \
-                --title "${SERVICE} ${SHORT_SHA}" \
-                --notes "$BODY"
-            fi
-
-            echo "  Created release: $TAG"
-          done < release-metadata/services.txt
