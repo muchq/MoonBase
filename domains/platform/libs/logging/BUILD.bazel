@@ -4,6 +4,7 @@ java_library(
     name = "logging",
     resource_strip_prefix = "domains/platform/resources",
     resources = ["//domains/platform/resources:logback_config"],
+    visibility = ["//visibility:public"],
     runtime_deps = [
         artifact("ch.qos.logback:logback-classic"),
         artifact("io.sentry:sentry-logback"),

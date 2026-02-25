@@ -216,12 +216,13 @@ java_binary(
     ],
     resource_strip_prefix = "domains/platform/resources",
     resources = [
-        "//domains/platform/resources:logback_config",
         "//domains/platform/resources:micronaut_config",
     ],
     visibility = ["//visibility:public"],
     runtime_deps = [
+        "//domains/platform/libs/logging",
         artifact("ch.qos.logback:logback-classic"),
+        artifact("io.sentry:sentry-logback"),
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
@@ -238,6 +239,7 @@ java_binary(
         "//domains/platform/libs/http_client:core",
         "//domains/platform/libs/http_client:jdk11",
         "//domains/platform/libs/json",
+        "//domains/platform/libs/logging",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("com.zaxxer:HikariCP"),
         artifact("io.micronaut.jaxrs:micronaut-jaxrs-server"),
