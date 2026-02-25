@@ -8,6 +8,11 @@ import * as api from '../api';
 import type { GameRow } from '../types';
 
 vi.mock('../api');
+vi.mock('react-chessboard', () => ({
+  Chessboard: ({ position }: { position: string }) => (
+    <div data-testid="chessboard" data-fen={position} />
+  ),
+}));
 
 const mockGame: GameRow = {
   gameUrl: 'https://chess.com/game/99',
@@ -78,6 +83,14 @@ describe('GamesView', () => {
         })
       )
     );
+  });
+
+  it('opens game detail panel when a row is clicked', async () => {
+    render(<GamesView />, { wrapper: makeWrapper() });
+    await waitFor(() => screen.getByText('_prior'));
+    const rows = screen.getAllByRole('row');
+    fireEvent.click(rows[1]); // first data row
+    expect(screen.getByText('_prior vs OpponentA')).toBeInTheDocument();
   });
 
   it('submits search on Enter key in the username input', async () => {

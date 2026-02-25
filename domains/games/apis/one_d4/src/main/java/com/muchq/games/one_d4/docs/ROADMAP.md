@@ -1,5 +1,7 @@
 # Chess Game Indexer — Roadmap
 
+**See also:** [Frontend Roadmap](../../../../../../../../../../../../apps/1d4_web/docs/ROADMAP.md) — React/TypeScript UI plans (game detail viewer, mobile, advanced query UX).
+
 ## Current State (Phase 1 — Delivered)
 
 - Indexing pipeline: chess.com → PGN parse → position replay → motif detection → PostgreSQL

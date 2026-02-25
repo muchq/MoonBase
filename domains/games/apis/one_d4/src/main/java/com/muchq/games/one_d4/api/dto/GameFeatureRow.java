@@ -28,6 +28,7 @@ public record GameFeatureRow(
     boolean hasPromotion,
     boolean hasPromotionWithCheck,
     boolean hasPromotionWithCheckmate,
+    String pgn,
     Map<String, List<OccurrenceRow>> occurrences) {
 
   public static GameFeatureRow fromStore(
@@ -56,6 +57,7 @@ public record GameFeatureRow(
         row.hasPromotion(),
         row.hasPromotionWithCheck(),
         row.hasPromotionWithCheckmate(),
+        row.pgn(),
         occurrences);
   }
 }

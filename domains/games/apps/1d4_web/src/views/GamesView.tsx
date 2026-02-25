@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { query as apiQuery } from '../api';
 import type { GameRow } from '../types';
 import GameTable from '../components/GameTable';
+import GameDetailPanel from '../components/GameDetailPanel';
 import Pagination from '../components/Pagination';
 
 const DEFAULT_QUERY = 'num.moves >= 0';
@@ -57,6 +58,7 @@ export default function GamesView() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [offset, setOffset] = useState(0);
   const [limit, setLimit] = useState(25);
+  const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
 
   const queryText = buildQuery(username);
   const { data, isLoading, error } = useQuery({
@@ -138,6 +140,7 @@ export default function GamesView() {
             sortBy={sortBy}
             sortDir={sortDir}
             onSort={handleSort}
+            onRowClick={(game) => setSelectedGame(game)}
           />
           <Pagination
             offset={offset}
@@ -152,6 +155,13 @@ export default function GamesView() {
               setOffset((o) => Math.min(o + limit, sorted.length - limit))
             }
           />
+          {selectedGame && (
+            <GameDetailPanel
+              key={selectedGame.gameUrl}
+              game={selectedGame}
+              onClose={() => setSelectedGame(null)}
+            />
+          )}
         </>
       )}
     </>

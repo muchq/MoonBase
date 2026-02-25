@@ -2,7 +2,6 @@ export interface OccurrenceRow {
   moveNumber: number;
   side: 'white' | 'black';
   description: string;
-  ply?: number; // populated in Phase 2 after backend adds it
 }
 
 export interface GameRow {
@@ -29,6 +28,7 @@ export interface GameRow {
   hasPromotion: boolean;
   hasPromotionWithCheck: boolean;
   hasPromotionWithCheckmate: boolean;
+  pgn?: string;
   occurrences?: Record<string, OccurrenceRow[]>;
 }
 
