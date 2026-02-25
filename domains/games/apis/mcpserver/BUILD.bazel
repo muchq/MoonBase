@@ -61,7 +61,11 @@ java_binary(
         "//bazel/rules:micronaut_bean_definition_inject_processor",
         "//bazel/rules:micronaut_package_element_visitor_processor",
     ],
-    resources = ["//domains/platform/resources:micronaut_config"],
+    resource_strip_prefix = "domains/platform/resources",
+    resources = [
+        "//domains/platform/resources:logback_config",
+        "//domains/platform/resources:micronaut_config",
+    ],
     visibility = ["//visibility:public"],
     runtime_deps = [
         artifact("ch.qos.logback:logback-classic"),

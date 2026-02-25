@@ -2,6 +2,7 @@ load("//bazel/rules:java.bzl", "artifact", "java_library")
 
 java_library(
     name = "logging",
+    resource_strip_prefix = "domains/platform/resources",
     resources = ["//domains/platform/resources:logback_config"],
     runtime_deps = [
         artifact("ch.qos.logback:logback-classic"),
