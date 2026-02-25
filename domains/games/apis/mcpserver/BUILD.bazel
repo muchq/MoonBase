@@ -68,8 +68,6 @@ java_binary(
     visibility = ["//visibility:public"],
     runtime_deps = [
         "//domains/platform/libs/logging",
-        artifact("ch.qos.logback:logback-classic"),
-        artifact("io.sentry:sentry-logback"),
     ],
     deps = [
         ":dtos",
