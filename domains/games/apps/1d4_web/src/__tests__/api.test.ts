@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createIndex, listIndexRequests, query } from '../api';
+import { createIndex, listIndexRequests, query, getServerInfo } from '../api';
 
 describe('api', () => {
   afterEach(() => {
@@ -58,6 +58,28 @@ describe('api', () => {
         'https://api.1d4.net/v1/query',
         expect.objectContaining({ method: 'POST' })
       );
+    });
+  });
+
+  describe('getServerInfo', () => {
+    it('sends GET to /v1/server-info', async () => {
+      const mock = mockFetch({ maintenanceWindows: [] });
+      await getServerInfo();
+      expect(mock).toHaveBeenCalledWith(
+        'https://api.1d4.net/v1/server-info',
+        expect.any(Object)
+      );
+      const call = mock.mock.calls[0][1] as RequestInit;
+      expect(call.method).toBeUndefined(); // GET by default
+    });
+
+    it('returns maintenanceWindows from response', async () => {
+      const windows = [
+        { message: 'Restart at midnight', scheduledAt: '2024-06-16T00:00:00Z' },
+      ];
+      mockFetch({ maintenanceWindows: windows });
+      const result = await getServerInfo();
+      expect(result.maintenanceWindows).toEqual(windows);
     });
   });
 

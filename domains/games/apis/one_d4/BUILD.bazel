@@ -119,9 +119,11 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/api/dto/GameFeatureRow.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/IndexRequest.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/IndexResponse.java",
+        "src/main/java/com/muchq/games/one_d4/api/dto/MaintenanceWindow.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/OccurrenceRow.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/QueryRequest.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/QueryResponse.java",
+        "src/main/java/com/muchq/games/one_d4/api/dto/ServerInfo.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -138,6 +140,7 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/api/IndexRequestValidator.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryController.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryRequestValidator.java",
+        "src/main/java/com/muchq/games/one_d4/api/ServerInfoController.java",
     ],
     plugins = [
         "//bazel/rules:micronaut_type_element_visitor_processor",
@@ -335,6 +338,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/IndexRequestValidatorTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryRequestValidatorTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/ServerInfoControllerTest.java",
     ],
     deps = [
         ":api",

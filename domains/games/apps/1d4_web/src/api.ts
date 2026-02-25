@@ -1,7 +1,7 @@
-import type { GameRow, IndexRequest, OccurrenceRow, QueryResponse } from './types';
+import type { GameRow, IndexRequest, OccurrenceRow, QueryResponse, ServerInfo } from './types';
 
 // re-export so consumers can import from one place
-export type { GameRow, IndexRequest, OccurrenceRow, QueryResponse };
+export type { GameRow, IndexRequest, OccurrenceRow, QueryResponse, ServerInfo };
 
 const API_BASE = 'https://api.1d4.net';
 
@@ -57,4 +57,8 @@ export async function query(body: {
   offset: number;
 }): Promise<QueryResponse> {
   return request('/v1/query', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function getServerInfo(): Promise<ServerInfo> {
+  return request('/v1/server-info');
 }

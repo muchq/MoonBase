@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Header from './components/Header';
+import ServerInfoBanner from './components/ServerInfoBanner';
 import GamesView from './views/GamesView';
 import IndexView from './views/IndexView';
 import QueryView from './views/QueryView';
@@ -17,6 +18,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/games" replace />} />
         </Routes>
       </main>
+      <ServerInfoBanner />
     </>
   );
 }

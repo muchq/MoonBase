@@ -47,3 +47,12 @@ export interface QueryResponse {
   games: GameRow[];
   count: number;
 }
+
+export interface MaintenanceWindow {
+  message: string;
+  scheduledAt: string;
+}
+
+export interface ServerInfo {
+  maintenanceWindows: MaintenanceWindow[];
+}
