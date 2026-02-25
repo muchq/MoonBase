@@ -214,6 +214,7 @@ java_binary(
         "//bazel/rules:micronaut_bean_definition_inject_processor",
         "//bazel/rules:micronaut_package_element_visitor_processor",
     ],
+    resource_strip_prefix = "domains/platform/resources",
     resources = [
         "//domains/platform/resources:logback_config",
         "//domains/platform/resources:micronaut_config",
