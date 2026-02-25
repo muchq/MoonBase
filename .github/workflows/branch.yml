@@ -92,6 +92,34 @@ jobs:
         working-directory: domains/ai/libs/microgpt
         run: cargo test --features metal -- test_metal
 
+  # 1d4_web uses npm/Vite; always run typecheck, tests, and build on every PR.
+  test-1d4-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: domains/games/apps/1d4_web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: domains/games/apps/1d4_web
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: domains/games/apps/1d4_web
+        run: npm run typecheck
+
+      - name: Run tests
+        working-directory: domains/games/apps/1d4_web
+        run: npm test
+
+      - name: Build
+        working-directory: domains/games/apps/1d4_web
+        run: npm run build
+
   # iOS targets can't build on Ubuntu; run Swift tests on macOS when relevant files change.
   test-ios:
     runs-on: macos-26
