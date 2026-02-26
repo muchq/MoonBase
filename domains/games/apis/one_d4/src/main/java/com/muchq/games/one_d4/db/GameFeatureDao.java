@@ -33,8 +33,10 @@ public class GameFeatureDao implements GameFeatureStore {
           white_elo, black_elo, time_class, eco, result, played_at, num_moves,
           has_pin, has_cross_pin, has_fork, has_skewer, has_discovered_attack, has_discovered_check,
           has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
+          has_back_rank_mate, has_smothered_mate, has_sacrifice, has_zugzwang,
+          has_double_check, has_interference, has_overloaded_piece,
           indexed_at, pgn
-      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
+      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
       """;
 
   private static final String PG_INSERT =
@@ -44,12 +46,33 @@ public class GameFeatureDao implements GameFeatureStore {
           white_elo, black_elo, time_class, eco, result, played_at, num_moves,
           has_pin, has_cross_pin, has_fork, has_skewer, has_discovered_attack, has_discovered_check,
           has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
+          has_back_rank_mate, has_smothered_mate, has_sacrifice, has_zugzwang,
+          has_double_check, has_interference, has_overloaded_piece,
           indexed_at, pgn
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
       ON CONFLICT (game_url) DO UPDATE SET
           indexed_at = EXCLUDED.indexed_at,
           request_id = EXCLUDED.request_id
       """;
+
+  private static final String UPDATE_MOTIFS =
+      """
+      UPDATE game_features SET
+          has_pin = ?, has_cross_pin = ?, has_fork = ?, has_skewer = ?,
+          has_discovered_attack = ?, has_discovered_check = ?,
+          has_check = ?, has_checkmate = ?, has_promotion = ?,
+          has_promotion_with_check = ?, has_promotion_with_checkmate = ?,
+          has_back_rank_mate = ?, has_smothered_mate = ?, has_sacrifice = ?, has_zugzwang = ?,
+          has_double_check = ?, has_interference = ?, has_overloaded_piece = ?,
+          indexed_at = now()
+      WHERE game_url = ?
+      """;
+
+  private static final String FETCH_FOR_REANALYSIS =
+      "SELECT request_id, game_url, pgn FROM game_features ORDER BY indexed_at LIMIT ? OFFSET ?";
+
+  private static final String DELETE_OCCURRENCES_BY_GAME_URL =
+      "DELETE FROM motif_occurrences WHERE game_url = ?";
 
   private static final String INSERT_OCCURRENCE =
       "INSERT INTO motif_occurrences (id, game_url, motif, ply, side, move_number, description)"
@@ -91,8 +114,15 @@ public class GameFeatureDao implements GameFeatureStore {
       ps.setBoolean(21, row.hasPromotion());
       ps.setBoolean(22, row.hasPromotionWithCheck());
       ps.setBoolean(23, row.hasPromotionWithCheckmate());
+      ps.setBoolean(24, row.hasBackRankMate());
+      ps.setBoolean(25, row.hasSmotheredMate());
+      ps.setBoolean(26, row.hasSacrifice());
+      ps.setBoolean(27, row.hasZugzwang());
+      ps.setBoolean(28, row.hasDoubleCheck());
+      ps.setBoolean(29, row.hasInterference());
+      ps.setBoolean(30, row.hasOverloadedPiece());
       // indexed_at set via now() in SQL — no parameter
-      ps.setString(24, row.pgn());
+      ps.setString(31, row.pgn());
       ps.executeUpdate();
     } catch (SQLException e) {
       LOG.error("Failed to insert game feature for game_url={}", row.gameUrl(), e);
@@ -233,8 +263,78 @@ public class GameFeatureDao implements GameFeatureStore {
         rs.getBoolean("has_promotion"),
         rs.getBoolean("has_promotion_with_check"),
         rs.getBoolean("has_promotion_with_checkmate"),
+        rs.getBoolean("has_back_rank_mate"),
+        rs.getBoolean("has_smothered_mate"),
+        rs.getBoolean("has_sacrifice"),
+        rs.getBoolean("has_zugzwang"),
+        rs.getBoolean("has_double_check"),
+        rs.getBoolean("has_interference"),
+        rs.getBoolean("has_overloaded_piece"),
         rs.getTimestamp("indexed_at") != null ? rs.getTimestamp("indexed_at").toInstant() : null,
         rs.getString("pgn"));
+  }
+
+  @Override
+  public void deleteOccurrencesByGameUrl(String gameUrl) {
+    try (Connection conn = dataSource.getConnection();
+        PreparedStatement ps = conn.prepareStatement(DELETE_OCCURRENCES_BY_GAME_URL)) {
+      ps.setString(1, gameUrl);
+      ps.executeUpdate();
+    } catch (SQLException e) {
+      LOG.error("Failed to delete occurrences for game_url={}", gameUrl, e);
+      throw new RuntimeException("Failed to delete occurrences", e);
+    }
+  }
+
+  @Override
+  public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
+    List<GameForReanalysis> results = new ArrayList<>();
+    try (Connection conn = dataSource.getConnection();
+        PreparedStatement ps = conn.prepareStatement(FETCH_FOR_REANALYSIS)) {
+      ps.setInt(1, limit);
+      ps.setInt(2, offset);
+      try (ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) {
+          UUID requestId = UUID.fromString(rs.getString("request_id"));
+          String gameUrl = rs.getString("game_url");
+          String pgn = rs.getString("pgn");
+          results.add(new GameForReanalysis(requestId, gameUrl, pgn));
+        }
+      }
+    } catch (SQLException e) {
+      throw new RuntimeException("Failed to fetch games for reanalysis", e);
+    }
+    return results;
+  }
+
+  @Override
+  public void updateMotifs(String gameUrl, GameFeatures features) {
+    try (Connection conn = dataSource.getConnection();
+        PreparedStatement ps = conn.prepareStatement(UPDATE_MOTIFS)) {
+      ps.setBoolean(1, features.hasMotif(Motif.PIN));
+      ps.setBoolean(2, features.hasMotif(Motif.CROSS_PIN));
+      ps.setBoolean(3, features.hasMotif(Motif.FORK));
+      ps.setBoolean(4, features.hasMotif(Motif.SKEWER));
+      ps.setBoolean(5, features.hasMotif(Motif.DISCOVERED_ATTACK));
+      ps.setBoolean(6, features.hasMotif(Motif.DISCOVERED_CHECK));
+      ps.setBoolean(7, features.hasMotif(Motif.CHECK));
+      ps.setBoolean(8, features.hasMotif(Motif.CHECKMATE));
+      ps.setBoolean(9, features.hasMotif(Motif.PROMOTION));
+      ps.setBoolean(10, features.hasMotif(Motif.PROMOTION_WITH_CHECK));
+      ps.setBoolean(11, features.hasMotif(Motif.PROMOTION_WITH_CHECKMATE));
+      ps.setBoolean(12, features.hasMotif(Motif.BACK_RANK_MATE));
+      ps.setBoolean(13, features.hasMotif(Motif.SMOTHERED_MATE));
+      ps.setBoolean(14, features.hasMotif(Motif.SACRIFICE));
+      ps.setBoolean(15, features.hasMotif(Motif.ZUGZWANG));
+      ps.setBoolean(16, features.hasMotif(Motif.DOUBLE_CHECK));
+      ps.setBoolean(17, features.hasMotif(Motif.INTERFERENCE));
+      ps.setBoolean(18, features.hasMotif(Motif.OVERLOADED_PIECE));
+      ps.setString(19, gameUrl);
+      ps.executeUpdate();
+    } catch (SQLException e) {
+      LOG.error("Failed to update motifs for game_url={}", gameUrl, e);
+      throw new RuntimeException("Failed to update motifs", e);
+    }
   }
 
   private static void setIntOrNull(PreparedStatement ps, int idx, Integer value)

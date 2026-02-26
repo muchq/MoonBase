@@ -28,5 +28,12 @@ public record GameFeature(
     boolean hasPromotion,
     boolean hasPromotionWithCheck,
     boolean hasPromotionWithCheckmate,
+    boolean hasBackRankMate,
+    boolean hasSmotheredMate,
+    boolean hasSacrifice,
+    boolean hasZugzwang,
+    boolean hasDoubleCheck,
+    boolean hasInterference,
+    boolean hasOverloadedPiece,
     Instant indexedAt,
     String pgn) {}

@@ -6,6 +6,11 @@ import com.muchq.games.one_d4.engine.model.PositionContext;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Detects PROMOTION_WITH_CHECKMATE: a pawn promotes and the promoted piece itself delivers
+ * checkmate. Like {@link PromotionWithCheckDetector}, uses board analysis to confirm the promoted
+ * piece (not a hidden sliding piece) is the one delivering the mating check.
+ */
 public class PromotionWithCheckmateDetector implements MotifDetector {
 
   @Override
@@ -19,7 +24,9 @@ public class PromotionWithCheckmateDetector implements MotifDetector {
 
     for (PositionContext ctx : positions) {
       String move = ctx.lastMove();
-      if (move != null && move.contains("=") && move.endsWith("#")) {
+      if (move == null || !move.contains("=") || !move.endsWith("#")) continue;
+
+      if (PromotionWithCheckDetector.promotedPieceDeliversCheck(ctx)) {
         GameFeatures.MotifOccurrence occ =
             GameFeatures.MotifOccurrence.from(
                 ctx, "Promotion with checkmate at move " + ctx.moveNumber());

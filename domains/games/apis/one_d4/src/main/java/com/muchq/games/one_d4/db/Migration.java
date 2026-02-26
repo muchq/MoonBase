@@ -163,6 +163,22 @@ public class Migration {
   private static final String DROP_MOTIFS_JSON_COLUMN_PG =
       "ALTER TABLE game_features DROP COLUMN IF EXISTS motifs_json";
 
+  // Phase 9: additional motif columns
+  private static final String ADD_BACK_RANK_MATE_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_back_rank_mate BOOLEAN DEFAULT FALSE";
+  private static final String ADD_SMOTHERED_MATE_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_smothered_mate BOOLEAN DEFAULT FALSE";
+  private static final String ADD_SACRIFICE_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_sacrifice BOOLEAN DEFAULT FALSE";
+  private static final String ADD_ZUGZWANG_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_zugzwang BOOLEAN DEFAULT FALSE";
+  private static final String ADD_DOUBLE_CHECK_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_double_check BOOLEAN DEFAULT FALSE";
+  private static final String ADD_INTERFERENCE_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_interference BOOLEAN DEFAULT FALSE";
+  private static final String ADD_OVERLOADED_PIECE_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_overloaded_piece BOOLEAN DEFAULT FALSE";
+
   // motif_occurrences: one row per motif firing per game. Dialect-neutral (UUID stored as string).
   private static final String CREATE_MOTIF_OCCURRENCES =
       """
@@ -216,6 +232,15 @@ public class Migration {
       stmt.execute(CREATE_IDX_MOTIF_OCC_GAME_URL);
       stmt.execute(CREATE_IDX_MOTIF_OCC_MOTIF);
       stmt.execute(CREATE_IDX_MOTIF_OCC_PLY);
+
+      // Phase 9 new motif columns
+      stmt.execute(ADD_BACK_RANK_MATE_COLUMN);
+      stmt.execute(ADD_SMOTHERED_MATE_COLUMN);
+      stmt.execute(ADD_SACRIFICE_COLUMN);
+      stmt.execute(ADD_ZUGZWANG_COLUMN);
+      stmt.execute(ADD_DOUBLE_CHECK_COLUMN);
+      stmt.execute(ADD_INTERFERENCE_COLUMN);
+      stmt.execute(ADD_OVERLOADED_PIECE_COLUMN);
 
       LOG.info("Database migration completed successfully (H2={})", useH2);
     } catch (SQLException e) {
