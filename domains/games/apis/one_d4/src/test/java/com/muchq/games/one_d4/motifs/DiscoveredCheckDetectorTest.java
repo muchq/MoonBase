@@ -32,8 +32,12 @@ public class DiscoveredCheckDetectorTest {
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(List.of(before, after));
 
     assertThat(occurrences).hasSize(1);
-    assertThat(occurrences.get(0).moveNumber()).isEqualTo(10);
-    assertThat(occurrences.get(0).side()).isEqualTo("white");
+    GameFeatures.MotifOccurrence occ = occurrences.get(0);
+    assertThat(occ.moveNumber()).isEqualTo(10);
+    assertThat(occ.side()).isEqualTo("white");
+    assertThat(occ.movedPiece()).isEqualTo("Be4->h7");
+    assertThat(occ.attacker()).isEqualTo("Re1");
+    assertThat(occ.target()).isEqualTo("ke8");
   }
 
   @Test

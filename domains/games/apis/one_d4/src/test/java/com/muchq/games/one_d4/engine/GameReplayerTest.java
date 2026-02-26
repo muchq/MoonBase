@@ -46,8 +46,8 @@ public class GameReplayerTest {
     assertThat(positions.get(1).moveNumber()).isEqualTo(1);
     assertThat(positions.get(1).whiteToMove()).isFalse();
 
-    // After 1... e5 - move 2 (incremented after black moves), white to move
-    assertThat(positions.get(2).moveNumber()).isEqualTo(2);
+    // After 1... e5 - still move 1, white to move
+    assertThat(positions.get(2).moveNumber()).isEqualTo(1);
     assertThat(positions.get(2).whiteToMove()).isTrue();
 
     // After 2. Nf3 - still move 2, black to move

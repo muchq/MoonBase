@@ -38,11 +38,11 @@ public class QueryControllerTest {
             gameUrl,
             Map.of(
                 "pin",
-                List.of(new OccurrenceRow(3, "white", "Knight pinned on c6")),
+                List.of(new OccurrenceRow(3, "white", "Knight pinned on c6", null, null, null)),
                 "fork",
                 List.of(
-                    new OccurrenceRow(10, "white", "Knight forks king and rook"),
-                    new OccurrenceRow(18, "black", "Queen forks two pieces")))));
+                    new OccurrenceRow(10, "white", "Knight forks king and rook", null, null, null),
+                    new OccurrenceRow(18, "black", "Queen forks two pieces", null, null, null)))));
 
     QueryResponse response = controller.query(new QueryRequest("motif(pin)", 10, 0));
 
@@ -51,7 +51,7 @@ public class QueryControllerTest {
     assertThat(row.gameUrl()).isEqualTo(gameUrl);
     assertThat(row.occurrences()).containsKey("pin");
     assertThat(row.occurrences().get("pin"))
-        .containsExactly(new OccurrenceRow(3, "white", "Knight pinned on c6"));
+        .containsExactly(new OccurrenceRow(3, "white", "Knight pinned on c6", null, null, null));
     assertThat(row.occurrences()).containsKey("fork");
     assertThat(row.occurrences().get("fork")).hasSize(2);
     assertThat(response.count()).isEqualTo(1);

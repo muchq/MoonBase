@@ -75,8 +75,8 @@ public class GameFeatureDao implements GameFeatureStore {
       "DELETE FROM motif_occurrences WHERE game_url = ?";
 
   private static final String INSERT_OCCURRENCE =
-      "INSERT INTO motif_occurrences (id, game_url, motif, ply, side, move_number, description)"
-          + " VALUES (?, ?, ?, ?, ?, ?, ?)";
+      "INSERT INTO motif_occurrences (id, game_url, motif, ply, side, move_number, description,"
+          + " moved_piece, attacker, target) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
   private final DataSource dataSource;
   private final boolean useH2;
@@ -163,6 +163,9 @@ public class GameFeatureDao implements GameFeatureStore {
           ps.setString(5, occ.side());
           ps.setInt(6, occ.moveNumber());
           ps.setString(7, occ.description());
+          ps.setString(8, occ.movedPiece());
+          ps.setString(9, occ.attacker());
+          ps.setString(10, occ.target());
           ps.addBatch();
         }
       }
@@ -206,8 +209,8 @@ public class GameFeatureDao implements GameFeatureStore {
     if (gameUrls.isEmpty()) return Map.of();
     String placeholders = gameUrls.stream().map(u -> "?").collect(Collectors.joining(", "));
     String sql =
-        "SELECT game_url, motif, move_number, side, description FROM motif_occurrences"
-            + " WHERE game_url IN ("
+        "SELECT game_url, motif, move_number, side, description, moved_piece, attacker, target"
+            + " FROM motif_occurrences WHERE game_url IN ("
             + placeholders
             + ") ORDER BY ply ASC";
     Map<String, Map<String, List<OccurrenceRow>>> result = new LinkedHashMap<>();
@@ -225,10 +228,13 @@ public class GameFeatureDao implements GameFeatureStore {
           int moveNumber = rs.getInt("move_number");
           String side = rs.getString("side");
           String description = rs.getString("description");
+          String movedPiece = rs.getString("moved_piece");
+          String attacker = rs.getString("attacker");
+          String target = rs.getString("target");
           result
               .computeIfAbsent(gameUrl, k -> new LinkedHashMap<>())
               .computeIfAbsent(motif, k -> new ArrayList<>())
-              .add(new OccurrenceRow(moveNumber, side, description));
+              .add(new OccurrenceRow(moveNumber, side, description, movedPiece, attacker, target));
         }
       }
     } catch (SQLException e) {

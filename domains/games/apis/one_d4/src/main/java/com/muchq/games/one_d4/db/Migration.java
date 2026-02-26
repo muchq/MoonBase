@@ -180,6 +180,14 @@ public class Migration {
       "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_overloaded_piece BOOLEAN DEFAULT"
           + " FALSE";
 
+  // Structured fields for discovered attack/check occurrences
+  private static final String ADD_OCC_MOVED_PIECE =
+      "ALTER TABLE motif_occurrences ADD COLUMN IF NOT EXISTS moved_piece VARCHAR(20)";
+  private static final String ADD_OCC_ATTACKER =
+      "ALTER TABLE motif_occurrences ADD COLUMN IF NOT EXISTS attacker VARCHAR(20)";
+  private static final String ADD_OCC_TARGET =
+      "ALTER TABLE motif_occurrences ADD COLUMN IF NOT EXISTS target VARCHAR(20)";
+
   // motif_occurrences: one row per motif firing per game. Dialect-neutral (UUID stored as string).
   private static final String CREATE_MOTIF_OCCURRENCES =
       """
@@ -242,6 +250,11 @@ public class Migration {
       stmt.execute(ADD_DOUBLE_CHECK_COLUMN);
       stmt.execute(ADD_INTERFERENCE_COLUMN);
       stmt.execute(ADD_OVERLOADED_PIECE_COLUMN);
+
+      // Structured fields on motif_occurrences for discovered attack/check
+      stmt.execute(ADD_OCC_MOVED_PIECE);
+      stmt.execute(ADD_OCC_ATTACKER);
+      stmt.execute(ADD_OCC_TARGET);
 
       LOG.info("Database migration completed successfully (H2={})", useH2);
     } catch (SQLException e) {

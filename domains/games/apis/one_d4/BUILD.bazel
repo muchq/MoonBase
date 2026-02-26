@@ -10,6 +10,9 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/engine/model/PositionContext.java",
     ],
     visibility = ["//visibility:public"],
+    deps = [
+        artifact("org.jspecify:jspecify"),
+    ],
 )
 
 java_library(
@@ -270,6 +273,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/motifs/BackRankMateDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/CheckDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/CheckmateDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/DiscoveredAttackDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/DiscoveredCheckDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/DoubleCheckDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/ForkDetectorTest.java",
@@ -285,6 +289,21 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/motifs/ZugzwangDetectorTest.java",
     ],
     deps = [
+        ":model",
+        ":motifs",
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_test_suite(
+    name = "full_motif_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/motifs/FullMotifDetectorTest.java",
+    ],
+    deps = [
+        ":engine",
         ":model",
         ":motifs",
         artifact("junit:junit"),

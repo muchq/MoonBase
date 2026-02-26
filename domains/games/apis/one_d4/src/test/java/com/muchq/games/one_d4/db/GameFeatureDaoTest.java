@@ -53,9 +53,10 @@ public class GameFeatureDaoTest {
     dao.insert(game);
 
     GameFeatures.MotifOccurrence occ1 =
-        new GameFeatures.MotifOccurrence(5, 3, "white", "Knight pinned on c6");
+        new GameFeatures.MotifOccurrence(5, 3, "white", "Knight pinned on c6", null, null, null);
     GameFeatures.MotifOccurrence occ2 =
-        new GameFeatures.MotifOccurrence(12, 6, "black", "Discovered check");
+        new GameFeatures.MotifOccurrence(
+            12, 6, "black", "Discovered check", "Nd5->f4", "Ba2", "kf7");
     Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences =
         Map.of(
             Motif.PIN, List.of(occ1),
@@ -69,10 +70,11 @@ public class GameFeatureDaoTest {
     Map<String, List<OccurrenceRow>> byMotif = result.get(gameUrl);
     assertThat(byMotif).containsKey("pin");
     assertThat(byMotif.get("pin"))
-        .containsExactly(new OccurrenceRow(3, "white", "Knight pinned on c6"));
+        .containsExactly(new OccurrenceRow(3, "white", "Knight pinned on c6", null, null, null));
     assertThat(byMotif).containsKey("discovered_check");
     assertThat(byMotif.get("discovered_check"))
-        .containsExactly(new OccurrenceRow(6, "black", "Discovered check"));
+        .containsExactly(
+            new OccurrenceRow(6, "black", "Discovered check", "Nd5->f4", "Ba2", "kf7"));
   }
 
   @Test
@@ -96,7 +98,7 @@ public class GameFeatureDaoTest {
     dao.insert(game);
 
     GameFeatures.MotifOccurrence atPlyZero =
-        new GameFeatures.MotifOccurrence(0, 0, "white", "initial");
+        new GameFeatures.MotifOccurrence(0, 0, "white", "initial", null, null, null);
     Map<Motif, List<GameFeatures.MotifOccurrence>> onlyPlyZero =
         Map.of(Motif.CHECK, List.of(atPlyZero));
 
