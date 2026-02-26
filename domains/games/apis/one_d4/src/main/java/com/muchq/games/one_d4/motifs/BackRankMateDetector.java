@@ -44,7 +44,8 @@ public class BackRankMateDetector implements MotifDetector {
       if (kingPos[0] == -1 || kingPos[0] != backRankRow) continue;
 
       // Check that at least one adjacent-rank escape square is blocked by own piece
-      int escapeRankRow = loserIsWhite ? 6 : 1; // rank 2 for white (row 6), rank 7 for black (row 1)
+      int escapeRankRow =
+          loserIsWhite ? 6 : 1; // rank 2 for white (row 6), rank 7 for black (row 1)
       boolean blockedByOwnPiece = false;
       for (int dc = -1; dc <= 1; dc++) {
         int ec = kingPos[1] + dc;

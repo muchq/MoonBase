@@ -11,8 +11,8 @@ import java.util.List;
  * any legal move worsens their position.
  *
  * <p>True zugzwang detection requires engine evaluation of all candidate moves. This implementation
- * uses a positional heuristic: a position is flagged as potential zugzwang when it is an endgame
- * (≤ 8 total pieces, no queens) AND the side to move has very limited mobility:
+ * uses a positional heuristic: a position is flagged as potential zugzwang when it is an endgame (≤
+ * 8 total pieces, no queens) AND the side to move has very limited mobility:
  *
  * <ul>
  *   <li>All pawns are blocked (the square directly in front is occupied by any piece).
@@ -68,8 +68,8 @@ public class ZugzwangDetector implements MotifDetector {
   }
 
   /**
-   * Returns true if the side to move ({@code toMove}) has very limited mobility: all pawns
-   * blocked, and no non-king piece can step to an empty square.
+   * Returns true if the side to move ({@code toMove}) has very limited mobility: all pawns blocked,
+   * and no non-king piece can step to an empty square.
    */
   private boolean isLikelyZugzwang(int[][] board, boolean toMove) {
     int pawnDir = toMove ? -1 : 1; // white pawns advance toward row 0, black toward row 7
@@ -99,9 +99,7 @@ public class ZugzwangDetector implements MotifDetector {
   private boolean canReachEmptySquare(int[][] board, int r, int c, int absPiece, boolean isWhite) {
     switch (absPiece) {
       case 2 -> { // Knight
-        int[][] offsets = {
-          {-2, -1}, {-2, 1}, {-1, -2}, {-1, 2}, {1, -2}, {1, 2}, {2, -1}, {2, 1}
-        };
+        int[][] offsets = {{-2, -1}, {-2, 1}, {-1, -2}, {-1, 2}, {1, -2}, {1, 2}, {2, -1}, {2, 1}};
         for (int[] off : offsets) {
           int nr = r + off[0], nc = c + off[1];
           if (nr >= 0 && nr < 8 && nc >= 0 && nc < 8 && board[nr][nc] == 0) return true;

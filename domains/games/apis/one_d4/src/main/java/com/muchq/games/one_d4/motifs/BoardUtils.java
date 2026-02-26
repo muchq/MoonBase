@@ -65,8 +65,8 @@ class BoardUtils {
   }
 
   /**
-   * Counts how many pieces of {@code attackerIsWhite} color attack the square (tr, tc). Ignores
-   * any piece that might be standing on (tr, tc) itself.
+   * Counts how many pieces of {@code attackerIsWhite} color attack the square (tr, tc). Ignores any
+   * piece that might be standing on (tr, tc) itself.
    */
   static int countAttackers(int[][] board, int tr, int tc, boolean attackerIsWhite) {
     int count = 0;

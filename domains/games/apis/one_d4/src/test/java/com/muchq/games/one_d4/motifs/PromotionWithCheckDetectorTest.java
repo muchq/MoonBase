@@ -80,8 +80,7 @@ public class PromotionWithCheckDetectorTest {
 
   @Test
   public void promotionWithCheck_doesNotDetectRegularCheck() {
-    List<PositionContext> positions =
-        List.of(new PositionContext(10, SOME_FEN, false, "Rd8+"));
+    List<PositionContext> positions = List.of(new PositionContext(10, SOME_FEN, false, "Rd8+"));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).isEmpty();
@@ -89,8 +88,7 @@ public class PromotionWithCheckDetectorTest {
 
   @Test
   public void promotionWithCheck_ignoresNullLastMove() {
-    List<PositionContext> positions =
-        List.of(new PositionContext(0, SOME_FEN, true, null));
+    List<PositionContext> positions = List.of(new PositionContext(0, SOME_FEN, true, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).isEmpty();

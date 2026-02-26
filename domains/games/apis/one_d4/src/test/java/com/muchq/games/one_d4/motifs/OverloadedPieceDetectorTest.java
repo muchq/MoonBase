@@ -51,8 +51,7 @@ public class OverloadedPieceDetectorTest {
 
   @Test
   public void overloadedPiece_ignoresNullLastMove() {
-    List<PositionContext> positions =
-        List.of(new PositionContext(0, SOME_FEN, true, null));
+    List<PositionContext> positions = List.of(new PositionContext(0, SOME_FEN, true, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).isEmpty();

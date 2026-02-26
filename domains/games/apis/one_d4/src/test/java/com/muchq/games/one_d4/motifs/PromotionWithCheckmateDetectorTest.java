@@ -65,8 +65,7 @@ public class PromotionWithCheckmateDetectorTest {
 
   @Test
   public void promotionWithCheckmate_doesNotDetectRegularCheckmate() {
-    List<PositionContext> positions =
-        List.of(new PositionContext(30, SOME_FEN, false, "Qh7#"));
+    List<PositionContext> positions = List.of(new PositionContext(30, SOME_FEN, false, "Qh7#"));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).isEmpty();
@@ -74,8 +73,7 @@ public class PromotionWithCheckmateDetectorTest {
 
   @Test
   public void promotionWithCheckmate_ignoresNullLastMove() {
-    List<PositionContext> positions =
-        List.of(new PositionContext(0, SOME_FEN, true, null));
+    List<PositionContext> positions = List.of(new PositionContext(0, SOME_FEN, true, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).isEmpty();

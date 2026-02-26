@@ -153,6 +153,7 @@ java_library(
     deps = [
         ":dto",
         ":engine",
+        ":model",
         "//domains/games/apis/one_d4:db",
         "//domains/games/apis/one_d4:queue",
         "//domains/games/libs/chessql:ast",

@@ -147,6 +147,13 @@ public class GameFeatureDaoTest {
         false,
         false,
         false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
         Instant.now(),
         "pgn");
   }

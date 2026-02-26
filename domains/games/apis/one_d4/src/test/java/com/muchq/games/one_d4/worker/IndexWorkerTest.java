@@ -267,6 +267,17 @@ public class IndexWorkerTest {
     public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
       return Map.of();
     }
+
+    @Override
+    public void deleteOccurrencesByGameUrl(String gameUrl) {}
+
+    @Override
+    public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
+      return Collections.emptyList();
+    }
+
+    @Override
+    public void updateMotifs(String gameUrl, GameFeatures features) {}
   }
 
   private static final class RecordingGameFeatureStore implements GameFeatureStore {
@@ -305,6 +316,17 @@ public class IndexWorkerTest {
     public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
       return Map.of();
     }
+
+    @Override
+    public void deleteOccurrencesByGameUrl(String gameUrl) {}
+
+    @Override
+    public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
+      return Collections.emptyList();
+    }
+
+    @Override
+    public void updateMotifs(String gameUrl, GameFeatures features) {}
   }
 
   private static final class StubPeriodStore implements IndexedPeriodStore {

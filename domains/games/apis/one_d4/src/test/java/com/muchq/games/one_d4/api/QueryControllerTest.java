@@ -120,6 +120,13 @@ public class QueryControllerTest {
         false,
         false,
         false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
         Instant.now(),
         "pgn");
   }
@@ -166,5 +173,17 @@ public class QueryControllerTest {
       }
       return out;
     }
+
+    @Override
+    public void deleteOccurrencesByGameUrl(String gameUrl) {}
+
+    @Override
+    public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
+      return List.of();
+    }
+
+    @Override
+    public void updateMotifs(
+        String gameUrl, com.muchq.games.one_d4.engine.model.GameFeatures features) {}
   }
 }

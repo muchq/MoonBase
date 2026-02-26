@@ -177,7 +177,8 @@ public class Migration {
   private static final String ADD_INTERFERENCE_COLUMN =
       "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_interference BOOLEAN DEFAULT FALSE";
   private static final String ADD_OVERLOADED_PIECE_COLUMN =
-      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_overloaded_piece BOOLEAN DEFAULT FALSE";
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_overloaded_piece BOOLEAN DEFAULT"
+          + " FALSE";
 
   // motif_occurrences: one row per motif firing per game. Dialect-neutral (UUID stored as string).
   private static final String CREATE_MOTIF_OCCURRENCES =

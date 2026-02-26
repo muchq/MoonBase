@@ -35,8 +35,7 @@ public class ZugzwangDetectorTest {
 
   @Test
   public void zugzwang_detectsEndgameWithAllPawnsBlocked() {
-    List<PositionContext> positions =
-        List.of(new PositionContext(50, ZUGZWANG_FEN, true, "Ke2"));
+    List<PositionContext> positions = List.of(new PositionContext(50, ZUGZWANG_FEN, true, "Ke2"));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
@@ -72,8 +71,7 @@ public class ZugzwangDetectorTest {
 
   @Test
   public void zugzwang_ignoresNullLastMove() {
-    List<PositionContext> positions =
-        List.of(new PositionContext(0, ZUGZWANG_FEN, true, null));
+    List<PositionContext> positions = List.of(new PositionContext(0, ZUGZWANG_FEN, true, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).isEmpty();

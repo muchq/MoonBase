@@ -13,22 +13,16 @@ public class SacrificeDetectorTest {
   // White queen (value=5) captures black pawn (value=1) at e4.
   // Before: white queen at e5 (row 3, col 4), black pawn at e4 (row 4, col 4).
   // After: white queen at e4.
-  private static final String BEFORE_Q_TAKES_P =
-      "4k3/8/8/4Q3/4p3/8/8/4K3 w - - 0 1";
-  private static final String AFTER_Q_TAKES_P =
-      "4k3/8/8/8/4Q3/8/8/4K3 b - - 0 1";
+  private static final String BEFORE_Q_TAKES_P = "4k3/8/8/4Q3/4p3/8/8/4K3 w - - 0 1";
+  private static final String AFTER_Q_TAKES_P = "4k3/8/8/8/4Q3/8/8/4K3 b - - 0 1";
 
   // White rook (value=4) captures black rook (value=4) at e5 — equal trade, not a sacrifice.
-  private static final String BEFORE_R_TAKES_R =
-      "4k3/8/8/4r3/4R3/8/8/4K3 w - - 0 1";
-  private static final String AFTER_R_TAKES_R =
-      "4k3/8/8/4R3/8/8/8/4K3 b - - 0 1";
+  private static final String BEFORE_R_TAKES_R = "4k3/8/8/4r3/4R3/8/8/4K3 w - - 0 1";
+  private static final String AFTER_R_TAKES_R = "4k3/8/8/4R3/8/8/8/4K3 b - - 0 1";
 
   // Pawn (value=1) captures queen (value=5) — pawn gains material, not a sacrifice.
-  private static final String BEFORE_P_TAKES_Q =
-      "4k3/8/8/4q3/5P2/8/8/4K3 w - - 0 1";
-  private static final String AFTER_P_TAKES_Q =
-      "4k3/8/8/4P3/8/8/8/4K3 b - - 0 1";
+  private static final String BEFORE_P_TAKES_Q = "4k3/8/8/4q3/5P2/8/8/4K3 w - - 0 1";
+  private static final String AFTER_P_TAKES_Q = "4k3/8/8/4P3/8/8/8/4K3 b - - 0 1";
 
   private final SacrificeDetector detector = new SacrificeDetector();
 

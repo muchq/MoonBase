@@ -38,8 +38,7 @@ public class OverloadedPieceDetector implements MotifDetector {
 
       if (hasOverloadedPiece(board, attackerIsWhite, defenderIsWhite)) {
         GameFeatures.MotifOccurrence occ =
-            GameFeatures.MotifOccurrence.from(
-                ctx, "Overloaded piece at move " + ctx.moveNumber());
+            GameFeatures.MotifOccurrence.from(ctx, "Overloaded piece at move " + ctx.moveNumber());
         if (occ != null) occurrences.add(occ);
       }
     }
@@ -47,7 +46,8 @@ public class OverloadedPieceDetector implements MotifDetector {
     return occurrences;
   }
 
-  private boolean hasOverloadedPiece(int[][] board, boolean attackerIsWhite, boolean defenderIsWhite) {
+  private boolean hasOverloadedPiece(
+      int[][] board, boolean attackerIsWhite, boolean defenderIsWhite) {
     // Collect squares with defending-side pieces that are under attack by the attacking side
     List<int[]> attackedDefendingSquares = new ArrayList<>();
     for (int r = 0; r < 8; r++) {

@@ -67,10 +67,11 @@ public class InterferenceDetector implements MotifDetector {
   }
 
   /**
-   * Returns true if any enemy sliding piece (Q/R/B) had a clear line of attack that passed
-   * through square (destR, destC) in the before-position.
+   * Returns true if any enemy sliding piece (Q/R/B) had a clear line of attack that passed through
+   * square (destR, destC) in the before-position.
    */
-  private boolean blocksEnemySlidingLine(int[][] before, int destR, int destC, boolean moverIsWhite) {
+  private boolean blocksEnemySlidingLine(
+      int[][] before, int destR, int destC, boolean moverIsWhite) {
     for (int r = 0; r < 8; r++) {
       for (int c = 0; c < 8; c++) {
         int piece = before[r][c];
@@ -92,8 +93,8 @@ public class InterferenceDetector implements MotifDetector {
   }
 
   /**
-   * Returns true if the sliding piece at (pr, pc) with type absPiece attacks THROUGH (destR,
-   * destC) — i.e. the line from (pr,pc) through (destR,destC) extends further on the board.
+   * Returns true if the sliding piece at (pr, pc) with type absPiece attacks THROUGH (destR, destC)
+   * — i.e. the line from (pr,pc) through (destR,destC) extends further on the board.
    */
   private boolean lineExtendsThrough(
       int[][] board, int pr, int pc, int destR, int destC, int absPiece) {
