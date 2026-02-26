@@ -32,7 +32,7 @@ public class DiscoveredAttackDetectorTest {
     GameFeatures.MotifOccurrence occ = occurrences.get(0);
     assertThat(occ.moveNumber()).isEqualTo(10);
     assertThat(occ.side()).isEqualTo("white");
-    assertThat(occ.movedPiece()).isEqualTo("Be4->h7");
+    assertThat(occ.movedPiece()).isEqualTo("Be4h7");
     assertThat(occ.attacker()).isEqualTo("Re1");
     assertThat(occ.target()).isEqualTo("qe8");
   }
@@ -50,7 +50,7 @@ public class DiscoveredAttackDetectorTest {
 
     assertThat(occurrences).hasSize(1);
     GameFeatures.MotifOccurrence occ = occurrences.get(0);
-    assertThat(occ.movedPiece()).isEqualTo("Nd5->f4");
+    assertThat(occ.movedPiece()).isEqualTo("Nd5f4");
     assertThat(occ.attacker()).isEqualTo("Ba2");
     assertThat(occ.target()).isEqualTo("rf7");
   }
@@ -68,7 +68,7 @@ public class DiscoveredAttackDetectorTest {
 
     assertThat(occurrences).hasSize(1);
     GameFeatures.MotifOccurrence occ = occurrences.get(0);
-    assertThat(occ.movedPiece()).isEqualTo("Ne4->c3");
+    assertThat(occ.movedPiece()).isEqualTo("Ne4c3");
     assertThat(occ.attacker()).isEqualTo("Re1");
     assertThat(occ.target()).isEqualTo("pe7");
   }
@@ -86,7 +86,7 @@ public class DiscoveredAttackDetectorTest {
 
     assertThat(occurrences).hasSize(1);
     GameFeatures.MotifOccurrence occ = occurrences.get(0);
-    assertThat(occ.movedPiece()).isEqualTo("Be4->h7");
+    assertThat(occ.movedPiece()).isEqualTo("Be4h7");
     assertThat(occ.attacker()).isEqualTo("Re1");
     assertThat(occ.target()).isEqualTo("ke8");
   }
@@ -105,7 +105,7 @@ public class DiscoveredAttackDetectorTest {
     assertThat(occurrences).hasSize(1);
     GameFeatures.MotifOccurrence occ = occurrences.get(0);
     assertThat(occ.side()).isEqualTo("black");
-    assertThat(occ.movedPiece()).isEqualTo("be5->h2");
+    assertThat(occ.movedPiece()).isEqualTo("be5h2");
     assertThat(occ.attacker()).isEqualTo("re8");
     assertThat(occ.target()).isEqualTo("Qe1");
   }

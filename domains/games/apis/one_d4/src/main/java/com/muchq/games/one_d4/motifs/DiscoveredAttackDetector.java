@@ -64,7 +64,7 @@ public class DiscoveredAttackDetector implements MotifDetector {
           boolean isWhite = pieceBefore > 0;
           if (isWhite == moverIsWhite) {
             String destSquare = findDestination(before, after, pieceBefore, r, c);
-            String movedPiece = pieceLetter(pieceBefore) + squareName(r, c) + "->" + destSquare;
+            String movedPiece = pieceLetter(pieceBefore) + squareName(r, c) + destSquare;
             result.addAll(revealsAttacks(after, r, c, moverIsWhite, movedPiece));
           }
         }

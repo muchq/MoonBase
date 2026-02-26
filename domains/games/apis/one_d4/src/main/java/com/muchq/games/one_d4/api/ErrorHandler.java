@@ -6,6 +6,7 @@ import io.micronaut.http.HttpResponse;
 import io.micronaut.http.HttpStatus;
 import io.micronaut.http.annotation.Controller;
 import io.micronaut.http.annotation.Error;
+import io.micronaut.http.server.exceptions.NotFoundException;
 import io.micronaut.http.server.exceptions.UnsupportedMediaException;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -36,6 +37,12 @@ public class ErrorHandler {
   public HttpResponse<Map<String, Object>> handleNotFound(
       HttpRequest<?> request, NoSuchElementException ex) {
     return HttpResponse.notFound(Map.of("error", ex.getMessage()));
+  }
+
+  @Error(global = true, exception = NotFoundException.class)
+  public HttpResponse<Map<String, Object>> handleRouteMiss(
+      HttpRequest<?> request, NotFoundException ex) {
+    return HttpResponse.notFound(Map.of("error", "Not found"));
   }
 
   @Error(global = true, exception = UnsupportedMediaException.class)

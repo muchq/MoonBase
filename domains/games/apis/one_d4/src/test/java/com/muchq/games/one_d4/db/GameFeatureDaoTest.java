@@ -55,8 +55,7 @@ public class GameFeatureDaoTest {
     GameFeatures.MotifOccurrence occ1 =
         new GameFeatures.MotifOccurrence(5, 3, "white", "Knight pinned on c6", null, null, null);
     GameFeatures.MotifOccurrence occ2 =
-        new GameFeatures.MotifOccurrence(
-            12, 6, "black", "Discovered check", "Nd5->f4", "Ba2", "kf7");
+        new GameFeatures.MotifOccurrence(12, 6, "black", "Discovered check", "Nd5f4", "Ba2", "kf7");
     Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences =
         Map.of(
             Motif.PIN, List.of(occ1),
@@ -73,8 +72,7 @@ public class GameFeatureDaoTest {
         .containsExactly(new OccurrenceRow(3, "white", "Knight pinned on c6", null, null, null));
     assertThat(byMotif).containsKey("discovered_check");
     assertThat(byMotif.get("discovered_check"))
-        .containsExactly(
-            new OccurrenceRow(6, "black", "Discovered check", "Nd5->f4", "Ba2", "kf7"));
+        .containsExactly(new OccurrenceRow(6, "black", "Discovered check", "Nd5f4", "Ba2", "kf7"));
   }
 
   @Test
