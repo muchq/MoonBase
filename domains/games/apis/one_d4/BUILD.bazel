@@ -139,12 +139,6 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/api/QueryController.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryRequestValidator.java",
     ],
-    plugins = [
-        "//bazel/rules:micronaut_type_element_visitor_processor",
-        "//bazel/rules:micronaut_aggregating_type_element_visitor_processor",
-        "//bazel/rules:micronaut_bean_definition_inject_processor",
-        "//bazel/rules:micronaut_package_element_visitor_processor",
-    ],
     visibility = ["//visibility:public"],
     deps = [
         ":dto",
@@ -167,12 +161,6 @@ java_library(
     name = "module",
     srcs = [
         "src/main/java/com/muchq/games/one_d4/IndexerModule.java",
-    ],
-    plugins = [
-        "//bazel/rules:micronaut_type_element_visitor_processor",
-        "//bazel/rules:micronaut_aggregating_type_element_visitor_processor",
-        "//bazel/rules:micronaut_bean_definition_inject_processor",
-        "//bazel/rules:micronaut_package_element_visitor_processor",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -209,12 +197,6 @@ java_binary(
         "src/main/java/com/muchq/games/one_d4/IndexerModule.java",
     ],
     main_class = "com.muchq.games.one_d4.App",
-    plugins = [
-        "//bazel/rules:micronaut_type_element_visitor_processor",
-        "//bazel/rules:micronaut_aggregating_type_element_visitor_processor",
-        "//bazel/rules:micronaut_bean_definition_inject_processor",
-        "//bazel/rules:micronaut_package_element_visitor_processor",
-    ],
     resource_strip_prefix = "domains/platform/resources",
     resources = [
         "//domains/platform/resources:micronaut_config",
