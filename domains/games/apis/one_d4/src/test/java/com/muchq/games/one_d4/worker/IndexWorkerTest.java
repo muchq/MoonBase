@@ -8,6 +8,7 @@ import com.muchq.games.chess_com_client.ChessClient;
 import com.muchq.games.chess_com_client.GamesResponse;
 import com.muchq.games.chess_com_client.PlayedGame;
 import com.muchq.games.chess_com_client.PlayerResult;
+import com.muchq.games.one_d4.api.dto.AttackOccurrenceRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.db.GameFeatureStore;
@@ -16,6 +17,7 @@ import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.GameReplayer;
 import com.muchq.games.one_d4.engine.PgnParser;
+import com.muchq.games.one_d4.engine.model.AttackOccurrence;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import com.muchq.games.one_d4.motifs.CheckDetector;
@@ -259,12 +261,23 @@ public class IndexWorkerTest {
         String gameUrl, Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences) {}
 
     @Override
+    public void insertAttackOccurrences(String gameUrl, List<AttackOccurrence> attacks) {}
+
+    @Override
+    public void deleteAttacksByGameUrl(String gameUrl) {}
+
+    @Override
     public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
       return Collections.emptyList();
     }
 
     @Override
     public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
+      return Map.of();
+    }
+
+    @Override
+    public Map<String, List<AttackOccurrenceRow>> queryAttackOccurrences(List<String> gameUrls) {
       return Map.of();
     }
 
@@ -308,12 +321,23 @@ public class IndexWorkerTest {
     }
 
     @Override
+    public void insertAttackOccurrences(String gameUrl, List<AttackOccurrence> attacks) {}
+
+    @Override
+    public void deleteAttacksByGameUrl(String gameUrl) {}
+
+    @Override
     public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
       return Collections.emptyList();
     }
 
     @Override
     public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
+      return Map.of();
+    }
+
+    @Override
+    public Map<String, List<AttackOccurrenceRow>> queryAttackOccurrences(List<String> gameUrls) {
       return Map.of();
     }
 

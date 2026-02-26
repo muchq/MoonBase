@@ -64,7 +64,9 @@ public class AdminController {
           GameFeatures features = featureExtractor.extract(game.pgn());
           gameFeatureStore.updateMotifs(game.gameUrl(), features);
           gameFeatureStore.deleteOccurrencesByGameUrl(game.gameUrl());
+          gameFeatureStore.deleteAttacksByGameUrl(game.gameUrl());
           gameFeatureStore.insertOccurrences(game.gameUrl(), features.occurrences());
+          gameFeatureStore.insertAttackOccurrences(game.gameUrl(), features.attackOccurrences());
           processed++;
         } catch (Exception e) {
           LOG.warn("Failed to reanalyze game {}", game.gameUrl(), e);

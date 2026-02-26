@@ -6,7 +6,10 @@ import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 public record GameFeatures(
-    Set<Motif> motifs, int numMoves, Map<Motif, List<MotifOccurrence>> occurrences) {
+    Set<Motif> motifs,
+    int numMoves,
+    Map<Motif, List<MotifOccurrence>> occurrences,
+    List<AttackOccurrence> attackOccurrences) {
   public boolean hasMotif(Motif motif) {
     return motifs.contains(motif);
   }

@@ -5,8 +5,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.muchq.games.chessql.compiler.CompiledQuery;
 import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.chessql.parser.Parser;
+import com.muchq.games.one_d4.api.dto.AttackOccurrenceRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
+import com.muchq.games.one_d4.engine.model.AttackOccurrence;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import java.time.Instant;
@@ -105,6 +107,35 @@ public class GameFeatureDaoTest {
     Map<String, Map<String, List<OccurrenceRow>>> result = dao.queryOccurrences(List.of(gameUrl));
     // No rows inserted (ply 0 skipped), so no occurrences for this game
     assertThat(result.getOrDefault(gameUrl, Map.of())).isEmpty();
+  }
+
+  @Test
+  public void insertAttackOccurrences_and_queryAttackOccurrences_roundTrip() {
+    String gameUrl = "https://chess.com/game/attack-1";
+    GameFeature game = createGame(gameUrl);
+    dao.insert(game);
+
+    List<AttackOccurrence> attacks =
+        List.of(
+            new AttackOccurrence(3, 2, "white", "Pe2", "Pe4", "ke8", false),
+            new AttackOccurrence(5, 3, "white", "Nf3", "Ng5", "ke8", true));
+    dao.insertAttackOccurrences(gameUrl, attacks);
+
+    Map<String, List<AttackOccurrenceRow>> result = dao.queryAttackOccurrences(List.of(gameUrl));
+
+    assertThat(result).containsKey(gameUrl);
+    List<AttackOccurrenceRow> rows = result.get(gameUrl);
+    assertThat(rows).hasSize(2);
+    assertThat(rows.get(0))
+        .isEqualTo(new AttackOccurrenceRow(2, "white", "Pe2", "Pe4", "ke8", false));
+    assertThat(rows.get(1))
+        .isEqualTo(new AttackOccurrenceRow(3, "white", "Nf3", "Ng5", "ke8", true));
+  }
+
+  @Test
+  public void queryAttackOccurrences_emptyList_returnsEmptyMap() {
+    Map<String, List<AttackOccurrenceRow>> result = dao.queryAttackOccurrences(List.of());
+    assertThat(result).isEmpty();
   }
 
   @Test

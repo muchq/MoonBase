@@ -92,7 +92,6 @@ public class FullMotifDetectorTest {
             Motif.FORK,
             Motif.SKEWER,
             Motif.DISCOVERED_ATTACK,
-            Motif.DISCOVERED_CHECK,
             Motif.CHECK,
             Motif.CHECKMATE,
             Motif.PROMOTION,
@@ -109,6 +108,7 @@ public class FullMotifDetectorTest {
     Set<Motif> absent =
         Set.of(
             Motif.CROSS_PIN,
+            Motif.DISCOVERED_CHECK,
             Motif.PROMOTION_WITH_CHECKMATE,
             Motif.BACK_RANK_MATE,
             Motif.SMOTHERED_MATE,
@@ -223,9 +223,8 @@ public class FullMotifDetectorTest {
     GameFeatures features = extractor.extract(PGN);
     // 9...Nd4 (nc6 vacates, bd7 attacks Bb5), 11.d3 (Pd2 vacates, Bc1 attacks rh6),
     // 16...hxg4 (ph5 vacates, rh7 attacks Ph4), 30.Kg2 (king vacates, Ra1 attacks rh1),
-    // 32...Qxf2+ (qc2 vacates, queen self-reveals and attacks Pb2),
-    // 38...Qxe5 (qf4 vacates, queen self-reveals and attacks Rg3),
     // 44.Ke4 (Kf4 vacates, Rf3 attacks qf8)
+    // Note: moves 32 and 38 are NOT discovered attacks — the moved piece IS the attacker.
     assertThat(features.occurrences().get(Motif.DISCOVERED_ATTACK))
         .extracting(
             GameFeatures.MotifOccurrence::moveNumber,
@@ -238,23 +237,14 @@ public class FullMotifDetectorTest {
             tuple(11, "white", "Pd2d3", "Bc1", "rh6"),
             tuple(16, "black", "ph5g4", "rh7", "Ph4"),
             tuple(30, "white", "Kg1g2", "Ra1", "rh1"),
-            tuple(32, "black", "qc2f2", "qf2", "Pb2"),
-            tuple(38, "black", "qf4e5", "qe5", "Rg3"),
             tuple(44, "white", "Kf4e4", "Rf3", "qf8"));
   }
 
   @Test
   public void extractFeatures_discoveredCheck_occurrences() {
     GameFeatures features = extractor.extract(PGN);
-    // 32...Qxf2+ — queen moves to f2 (check), revealing a discovered attack on Pb2
-    assertThat(features.occurrences().get(Motif.DISCOVERED_CHECK))
-        .extracting(
-            GameFeatures.MotifOccurrence::moveNumber,
-            GameFeatures.MotifOccurrence::side,
-            GameFeatures.MotifOccurrence::movedPiece,
-            GameFeatures.MotifOccurrence::attacker,
-            GameFeatures.MotifOccurrence::target)
-        .containsExactly(tuple(32, "black", "qc2f2", "qf2", "Pb2"));
+    // No true discovered checks in this game — all check moves are direct, not through a vacancy
+    assertThat(features.occurrences()).doesNotContainKey(Motif.DISCOVERED_CHECK);
   }
 
   @Test

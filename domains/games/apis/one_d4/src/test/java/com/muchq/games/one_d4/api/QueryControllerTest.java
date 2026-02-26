@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.muchq.games.chessql.compiler.SqlCompiler;
+import com.muchq.games.one_d4.api.dto.AttackOccurrenceRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.GameFeatureRow;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
@@ -160,6 +161,13 @@ public class QueryControllerTest {
             occurrences) {}
 
     @Override
+    public void insertAttackOccurrences(
+        String gameUrl, List<com.muchq.games.one_d4.engine.model.AttackOccurrence> attacks) {}
+
+    @Override
+    public void deleteAttacksByGameUrl(String gameUrl) {}
+
+    @Override
     public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
       return queryResult;
     }
@@ -172,6 +180,11 @@ public class QueryControllerTest {
         out.put(url, occurrencesResult.getOrDefault(url, Map.of()));
       }
       return out;
+    }
+
+    @Override
+    public Map<String, List<AttackOccurrenceRow>> queryAttackOccurrences(List<String> gameUrls) {
+      return Map.of();
     }
 
     @Override

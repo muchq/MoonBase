@@ -40,6 +40,9 @@ public class DiscoveredCheckDetector implements MotifDetector {
       List<DiscoveredAttackDetector.RevealedAttack> attacks =
           discoveredAttackDetector.findDiscoveredAttacks(boardBefore, boardAfter, moverIsWhite);
       for (DiscoveredAttackDetector.RevealedAttack ra : attacks) {
+        // Only count as discovered check if the revealed attack targets the king
+        char targetPiece = ra.target().isEmpty() ? '?' : ra.target().charAt(0);
+        if (targetPiece != 'k' && targetPiece != 'K') continue;
         GameFeatures.MotifOccurrence occ =
             GameFeatures.MotifOccurrence.discoveredAttack(
                 after,

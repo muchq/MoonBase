@@ -155,6 +155,7 @@ public class IndexWorker {
 
     gameFeatureStore.insert(row);
     gameFeatureStore.insertOccurrences(game.url(), features.occurrences());
+    gameFeatureStore.insertAttackOccurrences(game.url(), features.attackOccurrences());
   }
 
   private String determineResult(PlayedGame game) {

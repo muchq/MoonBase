@@ -1,9 +1,11 @@
 package com.muchq.games.one_d4.engine;
 
+import com.muchq.games.one_d4.engine.model.AttackOccurrence;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import com.muchq.games.one_d4.engine.model.ParsedGame;
 import com.muchq.games.one_d4.engine.model.PositionContext;
+import com.muchq.games.one_d4.motifs.AttackOccurrenceDetector;
 import com.muchq.games.one_d4.motifs.MotifDetector;
 import java.util.EnumMap;
 import java.util.EnumSet;
@@ -19,12 +21,14 @@ public class FeatureExtractor {
   private final PgnParser pgnParser;
   private final GameReplayer replayer;
   private final List<MotifDetector> detectors;
+  private final AttackOccurrenceDetector attackDetector;
 
   public FeatureExtractor(
       PgnParser pgnParser, GameReplayer replayer, List<MotifDetector> detectors) {
     this.pgnParser = pgnParser;
     this.replayer = replayer;
     this.detectors = detectors;
+    this.attackDetector = new AttackOccurrenceDetector();
   }
 
   public GameFeatures extract(String pgn) {
@@ -34,7 +38,7 @@ public class FeatureExtractor {
       positions = replayer.replay(parsed.moveText());
     } catch (Exception e) {
       LOG.warn("Failed to replay game, skipping motif detection", e);
-      return new GameFeatures(EnumSet.noneOf(Motif.class), 0, Map.of());
+      return new GameFeatures(EnumSet.noneOf(Motif.class), 0, Map.of(), List.of());
     }
 
     int numMoves = positions.isEmpty() ? 0 : positions.get(positions.size() - 1).moveNumber();
@@ -53,6 +57,13 @@ public class FeatureExtractor {
       }
     }
 
-    return new GameFeatures(foundMotifs, numMoves, allOccurrences);
+    List<AttackOccurrence> attackOccurrences = List.of();
+    try {
+      attackOccurrences = attackDetector.detect(positions);
+    } catch (Exception e) {
+      LOG.warn("Attack occurrence detector failed", e);
+    }
+
+    return new GameFeatures(foundMotifs, numMoves, allOccurrences, attackOccurrences);
   }
 }

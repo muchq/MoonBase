@@ -208,6 +208,26 @@ public class Migration {
   private static final String CREATE_IDX_MOTIF_OCC_PLY =
       "CREATE INDEX IF NOT EXISTS idx_motif_occ_ply ON motif_occurrences(game_url, ply)";
 
+  // attack_occurrences: one row per significant attack per ply
+  private static final String CREATE_ATTACK_OCCURRENCES =
+      """
+      CREATE TABLE IF NOT EXISTS attack_occurrences (
+          id           VARCHAR(36) NOT NULL PRIMARY KEY,
+          game_url     VARCHAR(1024) NOT NULL REFERENCES game_features(game_url) ON DELETE CASCADE,
+          ply          INT NOT NULL,
+          move_number  INT NOT NULL,
+          side         VARCHAR(5) NOT NULL,
+          piece_moved  VARCHAR(20) NOT NULL,
+          attacker     VARCHAR(20) NOT NULL,
+          attacked     VARCHAR(20) NOT NULL,
+          is_checkmate BOOLEAN NOT NULL DEFAULT FALSE
+      )
+      """;
+  private static final String CREATE_IDX_ATTACK_OCC_GAME_URL =
+      "CREATE INDEX IF NOT EXISTS idx_attack_occ_game_url ON attack_occurrences(game_url)";
+  private static final String CREATE_IDX_ATTACK_OCC_PLY =
+      "CREATE INDEX IF NOT EXISTS idx_attack_occ_ply ON attack_occurrences(game_url, ply)";
+
   public void run() {
     try (Connection conn = dataSource.getConnection();
         Statement stmt = conn.createStatement()) {
@@ -255,6 +275,11 @@ public class Migration {
       stmt.execute(ADD_OCC_MOVED_PIECE);
       stmt.execute(ADD_OCC_ATTACKER);
       stmt.execute(ADD_OCC_TARGET);
+
+      // attack_occurrences table
+      stmt.execute(CREATE_ATTACK_OCCURRENCES);
+      stmt.execute(CREATE_IDX_ATTACK_OCC_GAME_URL);
+      stmt.execute(CREATE_IDX_ATTACK_OCC_PLY);
 
       LOG.info("Database migration completed successfully (H2={})", useH2);
     } catch (SQLException e) {

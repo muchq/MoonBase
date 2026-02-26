@@ -63,9 +63,10 @@ public class DiscoveredAttackDetector implements MotifDetector {
         if (pieceBefore != 0 && pieceAfter == 0) {
           boolean isWhite = pieceBefore > 0;
           if (isWhite == moverIsWhite) {
-            String destSquare = findDestination(before, after, pieceBefore, r, c);
+            int[] dest = findDestinationCoords(before, after, pieceBefore, r, c);
+            String destSquare = dest != null ? squareName(dest[0], dest[1]) : "??";
             String movedPiece = pieceLetter(pieceBefore) + squareName(r, c) + destSquare;
-            result.addAll(revealsAttacks(after, r, c, moverIsWhite, movedPiece));
+            result.addAll(revealsAttacks(after, r, c, moverIsWhite, movedPiece, dest));
           }
         }
       }
@@ -74,7 +75,12 @@ public class DiscoveredAttackDetector implements MotifDetector {
   }
 
   private List<RevealedAttack> revealsAttacks(
-      int[][] board, int vacatedR, int vacatedC, boolean moverIsWhite, String movedPiece) {
+      int[][] board,
+      int vacatedR,
+      int vacatedC,
+      boolean moverIsWhite,
+      String movedPiece,
+      int[] dest) {
     int[][] directions = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
     List<RevealedAttack> attacks = new ArrayList<>();
 
@@ -83,6 +89,10 @@ public class DiscoveredAttackDetector implements MotifDetector {
       while (br >= 0 && br < 8 && bc >= 0 && bc < 8) {
         int piece = board[br][bc];
         if (piece != 0) {
+          // The moved piece at its destination is not a revealed attacker
+          if (dest != null && br == dest[0] && bc == dest[1]) {
+            break;
+          }
           boolean isWhite = piece > 0;
           if (isWhite == moverIsWhite && isSlidingAttacker(piece, dir)) {
             int fr = vacatedR + dir[0], fc = vacatedC + dir[1];
@@ -110,17 +120,17 @@ public class DiscoveredAttackDetector implements MotifDetector {
     return attacks;
   }
 
-  private String findDestination(int[][] before, int[][] after, int piece, int fromR, int fromC) {
+  private int[] findDestinationCoords(
+      int[][] before, int[][] after, int piece, int fromR, int fromC) {
     for (int r = 0; r < 8; r++) {
       for (int c = 0; c < 8; c++) {
         if (r == fromR && c == fromC) continue;
         if (after[r][c] == piece && before[r][c] != piece) {
-          return squareName(r, c);
+          return new int[] {r, c};
         }
       }
     }
-    // Fallback for promotions or complex cases
-    return "??";
+    return null; // promotions or complex cases
   }
 
   private boolean isSlidingAttacker(int piece, int[] dir) {

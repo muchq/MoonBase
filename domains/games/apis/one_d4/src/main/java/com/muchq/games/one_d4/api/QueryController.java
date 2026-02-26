@@ -4,6 +4,7 @@ import com.muchq.games.chessql.compiler.CompiledQuery;
 import com.muchq.games.chessql.compiler.QueryCompiler;
 import com.muchq.games.chessql.parser.ParsedQuery;
 import com.muchq.games.chessql.parser.Parser;
+import com.muchq.games.one_d4.api.dto.AttackOccurrenceRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.GameFeatureRow;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
@@ -59,13 +60,17 @@ public class QueryController {
     List<String> gameUrls = rows.stream().map(GameFeature::gameUrl).toList();
     Map<String, Map<String, List<OccurrenceRow>>> occurrences =
         gameFeatureStore.queryOccurrences(gameUrls);
+    Map<String, List<AttackOccurrenceRow>> attacks =
+        gameFeatureStore.queryAttackOccurrences(gameUrls);
 
     List<GameFeatureRow> dtos =
         rows.stream()
             .map(
                 row ->
                     GameFeatureRow.fromStore(
-                        row, occurrences.getOrDefault(row.gameUrl(), Map.of())))
+                        row,
+                        occurrences.getOrDefault(row.gameUrl(), Map.of()),
+                        attacks.getOrDefault(row.gameUrl(), List.of())))
             .toList();
 
     return new QueryResponse(dtos, dtos.size());

@@ -1,8 +1,10 @@
 package com.muchq.games.one_d4.db;
 
 import com.muchq.games.chessql.compiler.CompiledQuery;
+import com.muchq.games.one_d4.api.dto.AttackOccurrenceRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
+import com.muchq.games.one_d4.engine.model.AttackOccurrence;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import java.sql.Connection;
@@ -73,6 +75,14 @@ public class GameFeatureDao implements GameFeatureStore {
 
   private static final String DELETE_OCCURRENCES_BY_GAME_URL =
       "DELETE FROM motif_occurrences WHERE game_url = ?";
+
+  private static final String DELETE_ATTACKS_BY_GAME_URL =
+      "DELETE FROM attack_occurrences WHERE game_url = ?";
+
+  private static final String INSERT_ATTACK =
+      "INSERT INTO attack_occurrences"
+          + " (id, game_url, ply, move_number, side, piece_moved, attacker, attacked, is_checkmate)"
+          + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
   private static final String INSERT_OCCURRENCE =
       "INSERT INTO motif_occurrences (id, game_url, motif, ply, side, move_number, description,"
@@ -174,6 +184,80 @@ public class GameFeatureDao implements GameFeatureStore {
       LOG.error("Failed to insert motif occurrences for game_url={}", gameUrl, e);
       throw new RuntimeException("Failed to insert motif occurrences", e);
     }
+  }
+
+  @Override
+  public void insertAttackOccurrences(String gameUrl, List<AttackOccurrence> attacks) {
+    if (attacks.isEmpty()) return;
+    try (Connection conn = dataSource.getConnection();
+        PreparedStatement ps = conn.prepareStatement(INSERT_ATTACK)) {
+      for (AttackOccurrence a : attacks) {
+        if (a.ply() <= 0) continue;
+        ps.setString(1, UUID.randomUUID().toString());
+        ps.setString(2, gameUrl);
+        ps.setInt(3, a.ply());
+        ps.setInt(4, a.moveNumber());
+        ps.setString(5, a.side());
+        ps.setString(6, a.pieceMoved());
+        ps.setString(7, a.attacker());
+        ps.setString(8, a.attacked());
+        ps.setBoolean(9, a.isCheckmate());
+        ps.addBatch();
+      }
+      ps.executeBatch();
+    } catch (SQLException e) {
+      LOG.error("Failed to insert attack occurrences for game_url={}", gameUrl, e);
+      throw new RuntimeException("Failed to insert attack occurrences", e);
+    }
+  }
+
+  @Override
+  public void deleteAttacksByGameUrl(String gameUrl) {
+    try (Connection conn = dataSource.getConnection();
+        PreparedStatement ps = conn.prepareStatement(DELETE_ATTACKS_BY_GAME_URL)) {
+      ps.setString(1, gameUrl);
+      ps.executeUpdate();
+    } catch (SQLException e) {
+      LOG.error("Failed to delete attacks for game_url={}", gameUrl, e);
+      throw new RuntimeException("Failed to delete attacks", e);
+    }
+  }
+
+  @Override
+  public Map<String, List<AttackOccurrenceRow>> queryAttackOccurrences(List<String> gameUrls) {
+    if (gameUrls.isEmpty()) return Map.of();
+    String placeholders = gameUrls.stream().map(u -> "?").collect(Collectors.joining(", "));
+    String sql =
+        "SELECT game_url, move_number, side, piece_moved, attacker, attacked, is_checkmate"
+            + " FROM attack_occurrences WHERE game_url IN ("
+            + placeholders
+            + ") ORDER BY ply ASC";
+    Map<String, List<AttackOccurrenceRow>> result = new LinkedHashMap<>();
+    try (Connection conn = dataSource.getConnection();
+        PreparedStatement ps = conn.prepareStatement(sql)) {
+      int idx = 1;
+      for (String url : gameUrls) {
+        ps.setString(idx++, url);
+      }
+      try (ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) {
+          String gameUrl = rs.getString("game_url");
+          result
+              .computeIfAbsent(gameUrl, k -> new ArrayList<>())
+              .add(
+                  new AttackOccurrenceRow(
+                      rs.getInt("move_number"),
+                      rs.getString("side"),
+                      rs.getString("piece_moved"),
+                      rs.getString("attacker"),
+                      rs.getString("attacked"),
+                      rs.getBoolean("is_checkmate")));
+        }
+      }
+    } catch (SQLException e) {
+      throw new RuntimeException("Failed to query attack occurrences", e);
+    }
+    return result;
   }
 
   @Override
