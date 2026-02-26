@@ -4,16 +4,20 @@
 
 Add a Rust service (`motif_query`) that uses Apache DataFusion to query
 Parquet files containing game features and motif occurrences. The Java
-indexing pipeline writes Parquet instead of (or in addition to) SQL rows.
-A pre-indexing pipeline bulk-loads GM games from the Lichess open database
-into the same Parquet format.
+indexing pipeline continues to write to SQL as it does today. A periodic
+batch job (weekly or monthly) exports SQL game data to Parquet for
+analytical queries. Lichess bulk ingest writes directly to Parquet,
+bypassing SQL entirely. A metadata table tracks which storage backend
+holds each game's data, enabling the query router to dispatch to the
+right backend.
 
 **Query IR: Substrait.** ChessQL compiles to [Substrait](https://substrait.io/)
 relational algebra plans (protobuf) instead of SQL strings. A `QueryRouter`
 dispatches Substrait plans to either PostgreSQL (via `substrait-java`
 SQL conversion) or DataFusion (via `datafusion-substrait` plan consumer),
-based on a feature flag or cost-based routing. This gives us backend
-portability without maintaining dialect-specific SQL compilers.
+based on a feature flag, storage metadata, or cost-based routing. This
+gives us backend portability without maintaining dialect-specific SQL
+compilers.
 
 ## Why DataFusion + Parquet
 
@@ -45,62 +49,65 @@ plus metadata: a textbook columnar layout.
 │  lichess_ingest (Java)       │
 │  - streaming PGN parse       │
 │  - GM/title filter           │
-│  - GameReplayer (chariot)    │
-│  - FeatureExtractor          │
-│  - all MotifDetectors        │
-└──────────┬───────────────────┘
-           │ HTTP batch POST
-           ▼
-┌───────────────────────────────────────────────────────────────────┐
-│  one_d4 Java API                                                 │
-│                                                                   │
-│  /v1/index ─► GameReplayer + FeatureExtractor + MotifDetectors   │
-│                  └─► GameFeatureStore.insert() (SQL + Parquet)    │
-│                                                                   │
-│  /v1/query ─► Parser ─► SubstraitCompiler ─► Substrait Plan      │
-│                                                  │                │
-│                              ┌────────────────────┤               │
-│                              ▼                    ▼               │
-│                    ┌─────────────────┐  ┌────────────────────┐   │
-│                    │  QueryRouter    │  │  QueryRouter        │   │
-│                    │  (SQL backend)  │  │  (DataFusion)       │   │
-│                    └────────┬────────┘  └─────────┬──────────┘   │
-│                             │                     │               │
-└─────────────────────────────┼─────────────────────┼───────────────┘
-                              │                     │
-                              ▼                     ▼
-                   ┌────────────────┐    ┌──────────────────────────┐
-                   │  PostgreSQL/H2 │    │  motif_query (Rust)      │
-                   │  (game tables) │    │  - axum HTTP API         │
-                   └────────────────┘    │  - datafusion-substrait  │
-                                         │    (Plan → LogicalPlan)  │
-                                         │  - DataFusion execution  │
-                                         │  - Parquet writer        │
-                                         │  - /v1/write (ingest)    │
-                                         │  - /v1/query/substrait   │
-                                         └──────────┬───────────────┘
-                                                    │ reads/writes
-                                                    ▼
-                                         ┌──────────────────────────┐
-                                         │  Parquet files on disk/S3│
-                                         │                          │
-                                         │  /data/games/            │
-                                         │    platform=chess.com/   │
-                                         │      month=2024-03/      │
-                                         │        part-0000.parquet │
-                                         │    platform=lichess/     │
-                                         │      month=2024-03/      │
-                                         │        part-0000.parquet │
-                                         └──────────────────────────┘
+│  - GameReplayer (chariot)    │   HTTP batch POST
+│  - FeatureExtractor          │ ──────────────────┐
+│  - all MotifDetectors        │                    │
+└──────────────────────────────┘                    │
+                                                    │
+┌───────────────────────────────────────────────┐   │
+│  one_d4 Java API                              │   │
+│                                               │   │
+│  /v1/index ─► FeatureExtractor ─► SQL INSERT  │   │
+│                (unchanged — writes SQL only)   │   │
+│                                               │   │
+│  ParquetExportJob (weekly/monthly cron)        │   │
+│    SELECT from SQL ─────────────────────────┐ │   │
+│                                             │ │   │
+│  /v1/query ─► SubstraitCompiler ─► Plan     │ │   │
+│                    │                        │ │   │
+│    ┌───────────────┤                        │ │   │
+│    ▼               ▼                        │ │   │
+│  ┌──────────┐  ┌──────────────┐             │ │   │
+│  │ SQL      │  │ DataFusion   │             │ │   │
+│  │ Router   │  │ Router       │             │ │   │
+│  └────┬─────┘  └──────┬───────┘             │ │   │
+│       │               │                     │ │   │
+│  game_storage_backends table                │ │   │
+│  (tracks which backend has each partition)  │ │   │
+│                                             │ │   │
+└───────┼───────────────┼─────────────────────┼─┘   │
+        │               │                     │     │
+        ▼               ▼                     ▼     ▼
+┌────────────────┐   ┌──────────────────────────────────┐
+│  PostgreSQL/H2 │   │  motif_query (Rust)              │
+│  - game_features│   │  - /v1/query/substrait           │
+│  - motif_occ   │   │    (datafusion-substrait →       │
+│  - PGN text    │   │     LogicalPlan → Parquet scan)  │
+│  - index state │   │  - /v1/write                     │
+│  - storage meta│   │    (JSON batch → Parquet file)   │
+└────────────────┘   └───────────────┬──────────────────┘
+                                     │ reads/writes
+                                     ▼
+                     ┌──────────────────────────────────┐
+                     │  Parquet files on disk/S3        │
+                     │                                  │
+                     │  /data/games/                    │
+                     │    platform=chess.com/           │
+                     │      month=2024-03/             │
+                     │        part-0001.parquet         │
+                     │    platform=lichess/             │
+                     │      month=2024-01/             │
+                     │        part-0001.parquet         │
+                     └──────────────────────────────────┘
 ```
 
 ### Component Responsibilities
 
 | Component | Language | Role |
 |-----------|----------|------|
-| `one_d4` (existing) | Java | REST API, indexing, motif detection (chariot), ChessQL parse + Substrait compile, query routing |
+| `one_d4` (existing) | Java | REST API, indexing (SQL writes), motif detection (chariot), ChessQL parse + Substrait compile, query routing, Parquet export job |
 | `chessql` (existing lib) | Java | Parser, AST, `SubstraitCompiler` (new), `SqlCompiler` (existing) |
-| `motif_query` (new) | Rust | DataFusion query engine via Substrait consumer, Parquet reads/writes |
+| `motif_query` (new) | Rust | DataFusion query engine via Substrait consumer, Parquet file writes (batch, not streaming) |
 | `lichess_ingest` (new) | Java | Bulk PGN streaming, GM filtering, motif detection (reuses one_d4 detectors), batch POST to motif_query |
 
 ## Parquet Schema
@@ -401,13 +408,14 @@ domains/games/apis/motif_query/
     main.rs              # axum server + DataFusion setup
     catalog.rs           # Table registration, partition discovery
     query.rs             # Query execution, result serialization
-    writer.rs            # Parquet file writing (accepts JSON batches from Java)
-    compaction.rs        # Background small-file merging
+    writer.rs            # Parquet file writing (accepts complete batches)
   BUILD.bazel
 ```
 
-Note: no chess logic or PGN parsing in Rust. Motif detection and Lichess
-ingest live in Java (see "Lichess Ingest Architecture" below).
+Note: no chess logic, PGN parsing, buffering, or compaction in Rust.
+Motif detection and Lichess ingest live in Java. The write endpoint
+receives complete batches (from the export job or Lichess ingest) and
+writes one Parquet file per call — no in-memory buffer needed.
 
 ### Dependencies
 
@@ -437,8 +445,9 @@ POST /motif_query/v1/query/substrait
   Response: { "rows": [...], "row_count": N }
 
 POST /motif_query/v1/write
-  Body: { "table": "game_features", "rows": [...] }
-  Response: { "files_written": 1 }
+  Body: { "table": "game_features", "platform": "chess.com", "month": "2024-03", "rows": [...] }
+  Response: { "file": "part-0001.parquet", "rows_written": 8472 }
+  Note: writes one Parquet file per call — no buffering, caller sends complete batch
 
 GET /motif_query/v1/partitions
   Response: { "game_features": ["chess.com/2024-03", ...], "motif_occurrences": [...] }
@@ -641,9 +650,11 @@ PGN stream can be partitioned by game boundaries.
 
 ## Integration with one_d4 Java API
 
-### Indexing Flow — Current State
+### Indexing Flow — Unchanged
 
-Today's `IndexWorker` writes **one game at a time** to SQL:
+The `IndexWorker` continues to write to SQL exactly as it does today.
+**No changes to the index path.** Chess.com games flow through the
+existing pipeline:
 
 ```
 IndexWorker.process(message)
@@ -651,331 +662,197 @@ IndexWorker.process(message)
     games = ChessClient.fetchGames(player, month)  // 10-100 games per player-month
     for each game in games:
       features = FeatureExtractor.extract(game.pgn())
-      GameFeatureDao.insert(row)                    // 1 INSERT per game
-      GameFeatureDao.insertOccurrences(...)          // 1 executeBatch per game
+      GameFeatureDao.insert(row)                    // SQL INSERT — unchanged
+      GameFeatureDao.insertOccurrences(...)          // SQL batch — unchanged
 ```
 
-This is fine for SQL — each INSERT is ~1ms, and the Chess.com API is the
-bottleneck (~200ms/request), not the database. But Parquet files are
-immutable and columnar: you can't append a single row to an existing
-`.parquet` file. Writing one file per game would produce tens of thousands
-of tiny files, destroying scan performance.
+SQL handles this write rate trivially. At 10K-100K games/month
+(~300-3,300 games/day), each INSERT is ~1ms and the Chess.com API is
+the bottleneck (~200ms/request). No reason to complicate the write
+path with real-time Parquet writes, buffering, or dual-write logic.
 
 ### Expected Write Throughput
 
-**Chess.com indexing: 10K-100K games/month** across all users and index
-requests. This is a low-to-moderate write rate:
-
 | Metric | Value |
 |--------|-------|
-| Games per month (total) | 10,000 - 100,000 |
+| Games per month (total, Chess.com) | 10,000 - 100,000 |
 | Games per day (avg) | ~300 - 3,300 |
 | Games per player-month (from API) | 10 - 100 |
 | Index requests per day (estimated) | ~10 - 50 |
 | Motif occurrences per game (avg) | ~5 - 20 |
 
-This throughput is low enough that aggressive buffering is viable — we
-can hold an entire day's writes in memory (~3K games × ~50 bytes/column
-× ~25 columns ≈ ~4 MB) and flush infrequently. The bottleneck is the
-Chess.com API fetch rate, not the write path.
+### Two Write Paths, Not One
 
-For Lichess bulk ingest, throughput is much higher (~2M games per
-monthly dump), but that's a batch job that writes large files directly.
+Instead of making the indexer write to Parquet in real-time, we separate
+the write paths by data source:
 
-### The Parquet Write Problem
+| Data source | Write target | When | How |
+|-------------|-------------|------|-----|
+| Chess.com (index requests) | SQL | Real-time (on each index) | Existing `IndexWorker` — unchanged |
+| Chess.com (Parquet export) | Parquet | Periodic batch (weekly/monthly) | New export job: `SELECT` from SQL → write Parquet |
+| Lichess (bulk ingest) | Parquet | One-time + monthly cron | `lichess_ingest` Java CLI → `motif_query /v1/write` |
 
-Parquet files are **write-once**. Unlike SQL rows, you can't INSERT INTO
-a Parquet file — you write the entire file at creation. This creates a
-tension between write latency and read performance:
+This means:
 
-| Strategy | Write latency | File count (at 50K games/mo) | Scan perf | Complexity |
-|----------|--------------|------------------------------|-----------|------------|
-| 1 file per game | Immediate | 50,000 files/month | Terrible | Low |
-| 1 file per player-month batch | After API call | ~500-5,000/month | Poor | Low |
-| Buffer N rows, flush to 1 file | Minutes | ~1-10/month | Good | Medium |
-| Buffer + periodic compaction | Minutes + async | ~1-5/month (steady) | Good | Medium-High |
+1. **Fresh Chess.com games live in SQL first.** Queries against recently
+   indexed games hit PostgreSQL. This is the current behavior — no
+   regression.
+2. **A periodic batch job exports SQL → Parquet.** Once exported, those
+   games become queryable via DataFusion. The batch job produces clean,
+   well-sized Parquet files in a single pass — no buffering, no
+   compaction, no small-file problem.
+3. **Lichess games go straight to Parquet.** No SQL intermediate. The
+   bulk ingest job writes large files directly — the natural batch
+   boundary is one month of Lichess data.
 
-At 10K-100K games/month, a simple buffer with a generous flush threshold
-produces very few files — compaction is a nice-to-have, not critical.
+### Periodic Parquet Export Job
 
-### Recommended Approach: Buffered Writer with Optional Compaction
-
-The `motif_query` Rust service owns the Parquet write path. The Java
-indexer sends batches to the write endpoint; the Rust service buffers
-rows and manages file lifecycle.
-
-At our expected throughput (10K-100K games/month), the buffer handles
-most of the work. A partition like `platform=chess.com/month=2024-03`
-might receive 5K-50K games total over the course of the month.
-A single buffer flush at 10,000 rows produces one well-sized file.
-Compaction is only needed if many partitions accumulate small tail
-flushes (the last few hundred games that don't reach the threshold).
-
-#### Write Path (motif_query writer.rs)
+A batch job (cron or admin-triggered) exports Chess.com game data from
+SQL to Parquet:
 
 ```
-Java IndexWorker
-  │ accumulate games for current player-month (10-100 games)
-  │
-  ▼
-POST /motif_query/v1/write
-  { "table": "game_features",
-    "platform": "chess.com",
-    "month": "2024-03",
-    "rows": [ ... 10-100 GameFeatureRows ... ] }
-  │
-  ▼
-motif_query writer.rs
-  │
-  ├─ Append rows to in-memory buffer (keyed by partition)
-  │    Buffer memory: ~50 bytes/col × 25 cols × 10K rows ≈ 12 MB per partition
-  │
-  ├─ IF buffer.len() >= FLUSH_THRESHOLD (10,000 rows)
-  │   └─ Flush buffer → new Parquet file in partition dir
-  │      /data/game_features/platform=chess.com/month=2024-03/part-NNNN.parquet
-  │      (~500 KB - 1 MB Snappy compressed)
-  │
-  └─ IF time_since_last_flush >= FLUSH_INTERVAL (5 min)
-      └─ Flush current buffer regardless of size
-         (prevents data loss on crash; produces smaller tail file)
+ParquetExportJob (runs weekly or monthly)
+
+for each (platform, month) with unexported games:
+  rows = SELECT * FROM game_features
+         WHERE platform = ? AND month = ?
+         AND game_url NOT IN (already exported)
+  occurrences = SELECT * FROM motif_occurrences
+                WHERE game_url IN (row.game_url for row in rows)
+
+  POST motif_query/v1/write
+    { "table": "game_features", rows }
+  POST motif_query/v1/write
+    { "table": "motif_occurrences", occurrences }
+
+  UPDATE game_storage_backends
+    SET backend = 'both', parquet_exported_at = now()
+    WHERE platform = ? AND month = ?
 ```
 
-With 10K-100K games/month spread across ~12 month-partitions, most
-partitions flush 1-5 times total. The 5-minute time-based flush is a
-safety net — at ~300-3,300 games/day, the row threshold is the primary
-trigger for active months.
+#### Export Job Characteristics
 
-#### Batch Accumulation in Java
+| Property | Value |
+|----------|-------|
+| Frequency | Weekly or monthly (configurable) |
+| Batch size | All games for a (platform, month) partition |
+| Rows per export | 1K-10K per partition (10K-100K games/month ÷ ~12 months) |
+| Parquet file size | ~50 KB - 500 KB per partition (Snappy compressed) |
+| Files per partition | **Exactly 1** (full partition written in one pass) |
+| Duration | Seconds (SQL SELECT is fast, Parquet write is fast) |
+| Compaction needed | **No** — one file per partition, no small-file problem |
 
-The `IndexWorker` currently writes per-game. Modify it to buffer an
-entire month's games before POSTing to `motif_query`:
+This is the key advantage over real-time Parquet writes: the export job
+reads the complete partition in one SELECT and writes exactly one
+well-formed Parquet file. No buffering, no tail flushes, no compaction.
+
+#### Re-export After Re-analysis
+
+When new motif detectors are added (issue #1049 Phase 9), an admin
+endpoint triggers re-analysis of existing games. After re-analysis
+updates the SQL rows, the export job re-runs for affected partitions:
+
+```
+1. Admin triggers re-analysis → SQL rows updated with new motif flags
+2. Export job detects stale Parquet (SQL rows newer than parquet_exported_at)
+3. Re-export: read all rows for partition → overwrite Parquet file
+4. Update game_storage_backends.parquet_exported_at
+```
+
+Since we write one file per partition, re-export is a simple overwrite —
+no merge logic needed.
+
+### Storage Routing — `game_storage_backends` Table
+
+A metadata table in PostgreSQL tracks which backend holds motif data for
+each partition:
+
+```sql
+CREATE TABLE game_storage_backends (
+  platform          TEXT NOT NULL,
+  month             TEXT NOT NULL,      -- "2024-03"
+  backend           TEXT NOT NULL,      -- 'sql', 'parquet', 'both'
+  games_in_sql      INTEGER DEFAULT 0,
+  games_in_parquet  INTEGER DEFAULT 0,
+  parquet_exported_at TIMESTAMP,
+  PRIMARY KEY (platform, month)
+);
+```
+
+| `backend` value | Meaning | When |
+|-----------------|---------|------|
+| `sql` | Games only in SQL, not yet exported | After Chess.com indexing, before export |
+| `parquet` | Games only in Parquet | Lichess bulk ingest (never in SQL) |
+| `both` | Games in SQL and Parquet | After Chess.com export job runs |
+
+#### How the Query Router Uses This
 
 ```java
-// IndexWorker.process() — modified for Parquet batching
-for (YearMonth month = start; !month.isAfter(end); month = month.plusMonths(1)) {
-  GamesResponse response = chessClient.fetchGames(player, month);
-  List<GameFeatureRow> batch = new ArrayList<>();
-  List<OccurrenceBatch> occBatch = new ArrayList<>();
+public class StorageAwareQueryRouter implements QueryRouter {
 
-  for (PlayedGame game : response.games()) {
-    GameFeatures features = featureExtractor.extract(game.pgn());
-    batch.add(toRow(message, game, features));
-    occBatch.add(toOccurrences(game.url(), features.occurrences()));
-  }
+  List<GameFeature> execute(Plan plan, int limit, int offset) {
+    // Extract platform/month predicates from the Substrait plan
+    Set<PartitionKey> partitions = extractPartitions(plan);
 
-  // One HTTP call per month, not per game
-  parquetClient.writeBatch("game_features", platform, monthStr, batch);
-  parquetClient.writeBatch("motif_occurrences", platform, monthStr, occBatch);
+    Set<String> backends = partitions.stream()
+        .map(p -> storageBackendStore.getBackend(p.platform(), p.month()))
+        .collect(Collectors.toSet());
 
-  // SQL write continues in parallel during dual-write phase
-  for (GameFeatureRow row : batch) {
-    gameFeatureStore.insert(row);
+    if (backends.equals(Set.of("parquet")) || backends.equals(Set.of("both"))) {
+      // All partitions have Parquet data — use DataFusion
+      return dataFusionRouter.execute(plan, limit, offset);
+    } else if (backends.contains("sql") && !backends.contains("parquet")) {
+      // Some partitions only in SQL — use PostgreSQL
+      return sqlRouter.execute(plan, limit, offset);
+    } else {
+      // Mixed: some partitions in SQL only, some in Parquet only.
+      // Fan out to both backends, merge results.
+      return mergeResults(
+          sqlRouter.execute(restrictToPlatformMonths(plan, sqlOnlyPartitions), limit, offset),
+          dataFusionRouter.execute(restrictToPlatformMonths(plan, parquetPartitions), limit, offset),
+          limit, offset
+      );
+    }
   }
 }
 ```
 
-This is a natural batching boundary: Chess.com returns all games for a
-player-month in one API call (typically 10-100 games). The batch is
-already in memory — we just delay the write call until we have the
-full month.
+In practice, the mixed case is rare — it only happens for the current
+month (Chess.com games indexed but not yet exported) when combined with
+Lichess data. Most queries will hit either all-SQL (recent Chess.com
+only) or all-Parquet (historical data after export + Lichess).
 
-#### Why Not Append to Existing Files?
+#### Simpler Alternative: Time-Based Routing
 
-Parquet files are **immutable by design**. The format stores column chunks
-with min/max statistics in the footer; appending rows would invalidate
-these statistics and require rewriting the footer. The Parquet spec has
-no append mode. Arrow's Parquet writer always creates new files.
-
-Some workarounds exist (Delta Lake, Iceberg) but they add table format
-complexity we don't need yet. The simple approach: write new files,
-compact later.
-
-#### Why Not One Big File per Partition?
-
-At first glance, 10K-100K games/month seems small enough to maintain a
-single file per partition: just rewrite it on each flush. But:
-
-- Each index request adds 10-100 games. With ~10-50 requests/day, that's
-  10-50 read-merge-write cycles per day, each rewriting the growing file.
-- By month's end, the file is ~50K rows / ~2.5 MB. Rewriting 2.5 MB to
-  add 50 rows is ~50x write amplification.
-- If we batch properly (flush at 10K rows), we only write 1-5 times per
-  month per partition — but each write would still require reading back
-  the existing file to merge.
-
-The buffer approach is simpler: write a new file on each flush, let
-a few files coexist per partition. DataFusion handles multi-file
-partitions natively. Compact occasionally to clean up tail files.
-
-### File Size Targets
-
-| Scenario | Rows per file | File size (Snappy) | Files per partition-month |
-|----------|--------------|-------------------|--------------------------|
-| Chess.com batch (before buffer) | 10-100 | n/a (buffered) | n/a |
-| Buffer flush (threshold) | 10,000 | ~500 KB - 1 MB | 1-5 per month |
-| Buffer flush (time-based tail) | 100-2,000 | ~5-100 KB | 0-1 (tail flush) |
-| After compaction | 10,000-50,000 | ~500 KB - 2.5 MB | 1-2 per month |
-| Lichess monthly ingest | 500,000-2,000,000 | ~20-80 MB | 1-4 per month |
-
-At 10K-100K Chess.com games/month, most partitions end up with 1-5
-well-sized files from threshold flushes, plus possibly one small tail
-file. This is already a good state — compaction primarily cleans up
-those tail files.
-
-Target steady-state: **500 KB - 2.5 MB per file for Chess.com data,
-20-80 MB per file for Lichess data.** The Chess.com files are smaller
-because the dataset is smaller (10K-100K vs 2M games/month), but
-that's fine — at these file counts, DataFusion scans all files in a
-partition in milliseconds regardless.
-
-### Compaction Strategy
-
-At 10K-100K games/month, compaction is **low priority** — the buffer
-handles most of the work, and partitions rarely accumulate more than a
-handful of files. Compaction exists to clean up tail flushes (the small
-file written when the time-based interval fires before the row threshold
-is reached) and to merge files after re-indexing or backfill operations.
+If partition-level routing is too complex for Phase 1, use a simpler
+time-based rule:
 
 ```
-motif_query compaction.rs (background task, runs every 30 minutes)
-
-for each partition (platform, month):
-  files = list_parquet_files(partition_dir)
-  small = files.filter(|f| f.size < MIN_FILE_SIZE)  // e.g. < 100 KB
-  if small.len() < 2:
-    continue  // nothing worth compacting
-
-  // Merge all small files into one
-  merged = read_all(small) → sort by played_at → write single file
-  atomic_swap(small, merged)  // rename new file in, delete old files
+if query touches only months older than EXPORT_CUTOFF (e.g. last month):
+  → DataFusion (Parquet)  // all historical data is exported
+else:
+  → SQL (PostgreSQL)       // current month is still in SQL
 ```
 
-This is intentionally simple. At our throughput, a partition might have
-3-5 files total, with 1-2 being small tail flushes. The compactor merges
-those into a single file every 30 minutes. No complex tiered compaction
-or size-based bucketing needed.
+This works because the export job runs monthly. All completed months
+have Parquet data. Only the current (incomplete) month is SQL-only.
 
-#### Compaction Tradeoffs
+### PGN and Game Metadata — SQL Only
 
-| Concern | Approach | Rationale |
-|---------|----------|-----------|
-| **Write amplification** | Only compact files < 100 KB | At our volumes, small files are tail flushes (~5-100 KB). Threshold flushes (~500 KB-1 MB) are already well-sized. |
-| **Read during compaction** | Write new file first, then delete old | DataFusion's ListingTable re-scans on each query; new file is visible immediately |
-| **Concurrency** | Single compaction thread, skip partitions with recent writes | Simpler than lock files; at 30-min intervals the writer has long since finished |
-| **Ordering** | Sort by `played_at` during merge | Better predicate pushdown on time-range queries |
-| **Frequency** | Every 30 min | Low throughput means files accumulate slowly; no need for aggressive compaction |
+PGN text stays in PostgreSQL. It's large, variable-length, and only
+needed for game replay — not for motif search. The Parquet files contain
+only the columns needed for ChessQL analytical queries (motif flags,
+player info, Elo, time class, ECO, result).
 
-#### When Compaction Becomes Important
-
-If throughput grows beyond 100K games/month (e.g. adding more platforms,
-increasing the user base), or if we add concurrent indexer workers, the
-write pattern shifts:
-
-| Throughput | Buffer flushes/month | Compaction need |
-|------------|---------------------|-----------------|
-| 10K games/month | 1-2 per partition | Minimal — tail cleanup only |
-| 50K games/month | 3-5 per partition | Low — occasional merge |
-| 100K games/month | 5-10 per partition | Moderate — periodic merge helps |
-| 500K+ games/month | 25-50+ per partition | High — consider Delta Lake |
-
-At 500K+ games/month we should evaluate Delta Lake or Iceberg for
-transactional writes rather than scaling up the custom compaction logic.
-
-#### Why Not Use Delta Lake / Iceberg?
-
-These table formats add transactional semantics (ACID writes, time
-travel, schema evolution tracking) on top of Parquet. They're the right
-answer for multi-writer concurrent environments. But for our use case:
-
-- **Single writer** — only `motif_query` writes to the Parquet directory.
-  No concurrent write conflicts.
-- **Append-only** — we never update or delete individual rows (retention
-  deletes entire partition directories).
-- **Simple partition scheme** — Hive-style `platform=X/month=Y` is
-  sufficient. No need for partition evolution.
-- **DataFusion native** — DataFusion's `ListingTable` reads plain Parquet
-  natively. Delta/Iceberg require additional dependencies
-  (`deltalake-core`, `iceberg-rust`).
-
-If we later need multi-writer support (e.g. multiple indexer instances),
-transactional deletes, or time travel, Delta Lake is the natural upgrade.
-The Parquet files are compatible — Delta just adds a `_delta_log/`
-transaction log alongside them.
-
-### Dual-Write During Migration
-
-During Phase 3 (migration), the indexer writes to **both** backends:
-
-```
-IndexWorker.process()
-  for each month:
-    games = fetchGames(player, month)
-    batch = detectMotifs(games)
-
-    // Write to both — SQL is source of truth until DataFusion is validated
-    gameFeatureStore.insert(batch)                    // SQL (existing)
-    parquetClient.writeBatch("game_features", batch)  // Parquet (new)
-
-    // If Parquet write fails, log warning but don't fail the request.
-    // SQL write is authoritative during migration.
-```
-
-Dual-write ordering: **SQL first, Parquet second.** If the SQL write
-succeeds but Parquet fails, the game is still queryable via the SQL
-backend. The reverse (Parquet succeeds, SQL fails) would leave the
-SQL backend inconsistent during shadow mode validation.
-
-### motif_query Write Endpoint Detail
-
-```
-POST /motif_query/v1/write
-Content-Type: application/json
-
-{
-  "table": "game_features",
-  "platform": "chess.com",
-  "month": "2024-03",
-  "rows": [
-    {
-      "game_url": "https://chess.com/game/12345",
-      "white_username": "alice",
-      "black_username": "bob",
-      "white_elo": 1850,
-      "black_elo": 1920,
-      "time_class": "blitz",
-      "eco": "B90",
-      "result": "white",
-      "played_at": "2024-03-15T18:30:00Z",
-      "num_moves": 42,
-      "has_pin": true,
-      "has_fork": false,
-      ...
-    },
-    ...
-  ]
-}
-
-Response: { "buffered": 47, "flushed": false }
-  or:     { "buffered": 0, "flushed": true, "file": "part-0042.parquet", "rows_written": 5000 }
-```
-
-The response tells the caller whether rows were buffered or flushed. The
-caller doesn't need to care — the writer manages flush timing. But the
-response is useful for monitoring and debugging.
-
-### Flush Endpoint (Optional)
-
-```
-POST /motif_query/v1/flush
-  Body: { "table": "game_features", "platform": "chess.com", "month": "2024-03" }
-  Response: { "flushed": true, "file": "part-0043.parquet", "rows_written": 23 }
-```
-
-Forces an immediate flush of the buffer for a specific partition. Useful
-for:
-- End of an index request (flush remaining buffered rows)
-- Before running a query that needs to see just-written data
-- Graceful shutdown
+| Data | Storage | Reason |
+|------|---------|--------|
+| Motif flags (`has_pin`, `has_fork`, ...) | SQL + Parquet (after export) | Analytical queries |
+| Game metadata (Elo, ECO, result, ...) | SQL + Parquet (after export) | Needed for ChessQL filters |
+| PGN text | SQL only | Large, variable-length, not scanned by ChessQL |
+| Motif occurrences (ply, side, ...) | SQL + Parquet (after export) | Needed for `sequence()` and `ORDER BY motif_count()` |
+| `indexing_requests` | SQL only | Mutable operational state |
+| `indexed_periods` | SQL only | Mutable cache |
+| `game_storage_backends` | SQL only | Routing metadata |
 
 ### Query Flow (Substrait-based)
 
@@ -988,59 +865,79 @@ Parser.parse() → ParsedQuery (AST)
   ↓
 SubstraitCompiler.compile() → Substrait Plan (protobuf)
   ↓
-QueryRouter.execute(plan)
-  ├── SQL backend:
+StorageAwareQueryRouter.execute(plan)
+  │
+  ├─ Check game_storage_backends for queried partitions
+  │
+  ├── All partitions in Parquet → DataFusion backend:
+  │     plan.toByteArray() → POST motif_query/v1/query/substrait
+  │     → datafusion-substrait → LogicalPlan → Parquet scan
+  │     → JSON results back to one_d4
+  │
+  ├── All partitions in SQL only → SQL backend:
   │     substrait-java SqlConverter → SQL string + bind params
   │     → JDBC PreparedStatement → PostgreSQL → ResultSet
   │
-  └── DataFusion backend:
-        plan.toByteArray() → POST motif_query/v1/query/substrait
-        → datafusion-substrait → LogicalPlan → Parquet scan
-        → JSON results back to one_d4
+  └── Mixed → fan out to both, merge results
   ↓
 one_d4 formats response, returns to client
 ```
 
-The backend is selected by `QueryRouter` based on a feature flag
-(`QUERY_BACKEND=sql|datafusion`) or cost-based routing. During
-migration, both backends can run in shadow mode to compare results.
+### Why This Is Simpler Than Real-Time Parquet Writes
+
+| Concern | Real-time Parquet writes | SQL-first + periodic export |
+|---------|------------------------|---------------------------|
+| IndexWorker changes | New HTTP client, batching, error handling | **None** |
+| Parquet buffering | In-memory buffer, flush thresholds, crash recovery | **None** — export job writes complete files |
+| Small-file problem | Many small files from trickle writes | **None** — one file per partition per export |
+| Compaction | Background job to merge small files | **Not needed** |
+| Read-your-writes | Buffered rows invisible until flush | **Not an issue** — SQL is always current |
+| Dual-write consistency | SQL + Parquet must agree during migration | **Not an issue** — SQL is source of truth, Parquet is derived |
+| motif_query complexity | Buffer management, flush endpoint, compaction | **Query engine only** (+ simple write endpoint for Lichess) |
+| Data freshness in Parquet | Seconds-minutes (buffer flush lag) | Weekly/monthly (export schedule) |
+
+The only tradeoff is data freshness in Parquet — recently indexed
+Chess.com games are SQL-only until the next export runs. But this is
+fine: the SQL backend handles these queries today, and the export
+frequency is configurable. For users who just indexed their games,
+queries hit SQL immediately.
 
 ## Do We Keep H2/PostgreSQL?
 
-**Short answer: Yes, but only for operational state — not for game/motif data.**
+**Short answer: Yes — PostgreSQL is the primary write store for Chess.com
+games and keeps all data that Parquet doesn't need.**
 
-### What moves to Parquet (DataFusion)
+### What lives where
 
-- `game_features` — all game metadata and motif flags
-- `motif_occurrences` — all motif firing details
+| Data | PostgreSQL | Parquet | Notes |
+|------|-----------|---------|-------|
+| `game_features` (motif flags, metadata) | Always (source of truth for Chess.com) | After export job / Lichess ingest | Parquet is derived for Chess.com, primary for Lichess |
+| `motif_occurrences` | Always (source of truth for Chess.com) | After export job / Lichess ingest | Same as above |
+| PGN text | Always (Chess.com) | Never | Large, variable-length, not needed for analytical queries |
+| `indexing_requests` | Always | Never | Mutable operational state (PENDING → PROCESSING → COMPLETED) |
+| `indexed_periods` | Always | Never | Mutable cache of fetched (player, platform, month) combos |
+| `game_storage_backends` | Always | Never | Routing metadata — which backend has which partitions |
 
-These are the analytical query targets. Parquet is strictly better here:
-faster scans, cheaper storage, no index maintenance, trivial partitioned
-retention (delete a directory to drop a month).
+### PGN Storage
 
-### What stays in PostgreSQL/H2
+PGN text stays in PostgreSQL for Chess.com games. For Lichess games,
+link back to `https://lichess.org/game/export/{id}` — no need to store
+the PGN at all. This keeps Parquet files lean (only columns needed for
+ChessQL queries).
 
-| Table | Why it stays |
-|-------|-------------|
-| `indexing_requests` | Mutable operational state (PENDING → PROCESSING → COMPLETED). Parquet is append-only — you can't UPDATE a status field. This table is small (hundreds of rows), queried by primary key, and needs ACID transactions. |
-| `indexed_periods` | Mutable cache of which (player, platform, month) combos have been fetched. Updated with `is_complete` flag. Same argument: small, mutable, transactional. |
+### When Can We Drop SQL Game Tables?
 
-### What about PGN storage?
+In the previous (dual-write) design, the goal was to eventually drop
+`game_features` and `motif_occurrences` from PostgreSQL. With the
+SQL-first approach, **we don't drop them** — PostgreSQL remains the
+write store for Chess.com games and the source of PGN text. The tables
+stay, but the analytical query load shifts to DataFusion/Parquet for
+historical data.
 
-PGN text is large and variable-length — storing it in Parquet columnar
-files bloats every scan even when PGN isn't selected. Options:
-
-1. **Separate Parquet table** with just `(game_url, pgn)` — only read when
-   a user requests the actual PGN for a specific game.
-2. **Keep in PostgreSQL** in a `game_pgns` table — simple key-value lookup.
-3. **Object storage** — one file per game in S3, keyed by game_url hash.
-4. **Don't store it** — for Lichess games, link to
-   `https://lichess.org/game/export/{id}`. For Chess.com, link to the game
-   URL.
-
-**Recommendation: Option 4 for Lichess (link back), Option 1 for
-Chess.com** (separate Parquet table, since Chess.com doesn't have a
-reliable PGN export URL). This keeps the main game_features scans lean.
+If we later want to stop storing Chess.com game data in SQL (e.g. to
+reduce PostgreSQL storage), we'd need to solve PGN storage separately
+(object storage or a dedicated Parquet table). That's a future
+optimization, not a near-term goal.
 
 ### Migration Path
 
@@ -1048,29 +945,32 @@ reliable PGN export URL). This keeps the main game_features scans lean.
 Phase 1: SubstraitCompiler + motif_query crate scaffold.
          ChessQL compiles to Substrait. SqlQueryRouter converts
          Substrait → SQL and executes on PostgreSQL (functionally
-         equivalent to today's SqlCompiler path). motif_query
-         Rust service accepts Substrait plans and writes Parquet.
-         Chess.com indexer dual-writes to PostgreSQL + Parquet.
-         Queries still execute on PostgreSQL (via SqlQueryRouter).
+         equivalent to today's SqlCompiler path). motif_query Rust
+         service accepts Substrait plans over Parquet. IndexWorker
+         is unchanged — still writes to SQL.
 
-Phase 2: Shadow mode.
-         QueryRouter runs both backends in parallel. SQL results
-         are returned to the client; DataFusion results are logged
-         and diffed. Alerts on mismatches.
+Phase 2: Parquet export job + storage routing.
+         Export job runs weekly/monthly: SELECT from SQL → write
+         Parquet via motif_query/v1/write. game_storage_backends
+         tracks which partitions have Parquet data.
+         StorageAwareQueryRouter dispatches to SQL or DataFusion
+         based on storage metadata.
 
-Phase 3: DataFusion primary.
-         QUERY_BACKEND=datafusion. PostgreSQL game tables become
-         write-only backup. Queries go to DataFusion.
+Phase 3: Shadow mode validation.
+         For partitions in 'both' state, run queries on both
+         backends, compare results, log mismatches. SQL results
+         are returned to client.
 
-Phase 4: Drop PostgreSQL game tables.
-         Only indexing_requests and indexed_periods remain in PostgreSQL.
-         Retention = delete partition directories on a schedule.
+Phase 4: DataFusion primary for exported partitions.
+         Queries for partitions in 'both' or 'parquet' state go
+         to DataFusion. Only current-month (unexported) queries
+         hit SQL.
 
 Phase 5: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
          Run lichess_ingest Java CLI on historical Lichess dumps.
          All 18 motif detectors (11 existing + 7 new chariot-based)
-         are included in bulk processing.
-         Monthly cron to ingest new dumps as they're published.
+         are included in bulk processing. Lichess partitions are
+         'parquet' only.
 ```
 
 ## Implementation Plan
@@ -1109,32 +1009,32 @@ Phase 5: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
   columns
 - Implement `query.rs`: accept Substrait plan bytes, decode protobuf,
   call `from_substrait_plan()` → `LogicalPlan`, execute, return JSON
-- Implement `writer.rs`: accept JSON rows, buffer, flush to partitioned
-  Parquet
+- Implement `writer.rs`: accept JSON rows, write directly to partitioned
+  Parquet (no buffering needed — callers send complete batches)
 - axum server with `/v1/query/substrait`, `/v1/write`, `/health` endpoints
 - Unit tests with in-memory Parquet roundtrips + a sample Substrait plan
 
-### Phase 3: DataFusionQueryRouter + dual-write (1-2 days)
+### Phase 3: Parquet export job + storage routing (2-3 days)
 
-- New `DataFusionQueryRouter` in one_d4:
-  - Serialize `Plan` to protobuf bytes
-  - HTTP POST to `motif_query/v1/query/substrait`
-  - Deserialize JSON response → `GameFeature` list
-- New `ShadowQueryRouter` that runs both backends, compares results,
-  logs mismatches, returns SQL backend results
-- Dual-write from `IndexWorker`:
-  - POST batches to `motif_query/v1/write` in addition to SQL INSERT
-  - Config toggle: `MOTIF_QUERY_URL` (if set, dual-write is enabled)
+- New `game_storage_backends` SQL table + DAO
+- New `ParquetExportJob`:
+  - SELECT game_features + motif_occurrences for each (platform, month)
+    with games not yet exported
+  - POST complete partition to `motif_query/v1/write`
+  - UPDATE `game_storage_backends` to 'both'
+- Admin endpoint: `POST /admin/export/parquet?platform=X&month=Y`
+  (trigger export for specific partition)
+- Cron scheduling: weekly or monthly via config
+- `StorageAwareQueryRouter`:
+  - Check `game_storage_backends` to determine which backend has data
+  - Route to SQL, DataFusion, or fan-out to both
+  - Start with time-based routing (simpler): current month → SQL,
+    older months → DataFusion (if exported)
+- `DataFusionQueryRouter`: serialize Substrait plan → HTTP POST to
+  motif_query → deserialize JSON response
+- Shadow mode: for 'both' partitions, run both backends, compare, log
 
-### Phase 4: Cost-based routing (optional, 1 day)
-
-- `CostQueryRouter` inspects the Substrait plan:
-  - Simple boolean filter on `game_features` → DataFusion (fast scan)
-  - `sequence()` with small expected result set → SQL (mature optimizer)
-  - Aggregate queries → DataFusion (columnar aggregation)
-- Configurable cost thresholds, with override via `QUERY_BACKEND` env var
-
-### Phase 5: Lichess ingest pipeline — Java (3-5 days)
+### Phase 4: Lichess ingest pipeline — Java (3-5 days)
 
 - New `lichess_ingest` binary target in `domains/games/apis/one_d4/`
 - Streaming PGN parser: read `.pgn.zst` via `zstd-jni`, extract headers
@@ -1143,18 +1043,26 @@ Phase 5: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
   all MotifDetector implementations — no porting needed)
 - HTTP client to batch-POST results to `motif_query/v1/write`
 - CLI interface: `java -jar lichess_ingest.jar --input ... --motif-query-url ...`
+- Insert `game_storage_backends` rows with backend='parquet' for Lichess
+  partitions
 - Test against a small Lichess sample file
 - **Dependency:** Should run after Phase 9 (issue #1049) lands so that
   the 7 new chariot-based motifs are included in the bulk ingest
 
-### Phase 6: Query switchover + PostgreSQL game table removal (1 day)
+### Phase 5: Cost-based routing (optional, 1 day)
 
-- Set `QUERY_BACKEND=datafusion` as default
-- Verify correctness via shadow mode logs (Phase 3)
-- Remove `game_features` and `motif_occurrences` from Migration.java
-- Update `RetentionWorker` to delete old partition directories instead
-  of SQL DELETE
-- Remove `SqlCompiler` (all compilation now goes through Substrait)
+- `CostQueryRouter` inspects the Substrait plan:
+  - Simple boolean filter on `game_features` → DataFusion (fast scan)
+  - `sequence()` with small expected result set → SQL (mature optimizer)
+  - Aggregate queries → DataFusion (columnar aggregation)
+- Configurable cost thresholds, with override via `QUERY_BACKEND` env var
+
+### Phase 6: Remove `SqlCompiler` (1 day)
+
+- All compilation goes through Substrait
+- Remove `SqlCompiler`, `CompiledQuery`
+- Simplify `QueryController` — only uses `SubstraitCompiler`
+- Remove `USE_SUBSTRAIT` feature flag (always on)
 
 ## Cost and Performance Estimates
 
@@ -1195,7 +1103,8 @@ Phase 5: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
    `game_features` boolean flags handle most ChessQL queries. The
    occurrences table is only needed for `sequence()` queries and
    `ORDER BY motif_count()`. If those features are rarely used, we could
-   defer the occurrences table and keep it in PostgreSQL temporarily.
+   keep `sequence()` queries routed to SQL permanently and skip
+   exporting motif_occurrences to Parquet entirely.
 
 3. **Phase 9 before or after Lichess ingest?** Ideally Phase 9 (issue
    #1049 — 7 new chariot-based motifs) lands before the first Lichess
@@ -1204,12 +1113,12 @@ Phase 5: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
    later via the admin endpoint, but that doubles the processing cost.
 
 4. **Java Parquet writer alternative?** Instead of HTTP POST to the Rust
-   motif_query service, the Java `lichess_ingest` CLI could write Parquet
-   directly using `org.apache.parquet:parquet-avro` or
+   motif_query service, the export job and `lichess_ingest` CLI could
+   write Parquet directly using `org.apache.parquet:parquet-avro` or
    `org.apache.arrow:arrow-dataset`. This eliminates the HTTP hop but
-   means two codepaths for Parquet writing (Java for ingest, Rust for
-   query-time reads). The Rust write endpoint is simpler to keep
-   consistent with the query schema.
+   means two codepaths for Parquet writing (Java for writes, Rust for
+   reads). The Rust write endpoint is simpler to keep consistent with
+   the query schema.
 
 5. **Substrait coverage for `sequence()`?** The `sequence()` construct
    compiles to a correlated EXISTS with self-joins on `motif_occurrences`.
@@ -1217,7 +1126,7 @@ Phase 5: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
    this, but `datafusion-substrait` may not support all Substrait
    relation types. If `sequence()` hits a gap, we can either:
    (a) extend the DataFusion Substrait consumer,
-   (b) fall back to SQL for queries containing `sequence()`, or
+   (b) always route `sequence()` queries to SQL, or
    (c) represent sequences differently (e.g. pre-materialized boolean
    columns like `has_sequence_fork_then_pin`).
 
@@ -1226,25 +1135,24 @@ Phase 5: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
    spec version. Pin both to the same Substrait spec release (e.g.
    v0.42.x). Mismatches cause deserialization failures.
 
-7. **When to remove `SqlCompiler`?** Once `SubstraitCompiler` +
-   `SqlQueryRouter` is verified (Phase 1), the direct `SqlCompiler`
-   is redundant — it produces the same SQL but without the Substrait
-   intermediate step. Keep it as a fallback during Phase 1-2, remove
-   in Phase 6 after DataFusion is primary.
+7. **Export frequency — weekly vs monthly?** Weekly exports mean fresher
+   Parquet data and faster query routing to DataFusion for recent games.
+   Monthly exports are simpler and produce cleaner partition boundaries.
+   At 10K-100K games/month, the difference is small. Could also be
+   event-driven: export when a partition reaches N games or on admin
+   trigger.
 
-8. **Compaction during active indexing?** If a user is actively indexing
-   a player while compaction runs on the same partition, we need to
-   ensure the compactor doesn't merge a file that the writer is about
-   to flush. The lock-file approach (writer holds lock during flush,
-   compactor holds lock during merge) is simple but could cause
-   contention. Alternative: compactor skips partitions with recent
-   writes (< 5 min since last file modification).
+8. **Handling re-indexed games in export?** If a player is re-indexed
+   (e.g. after new motif detectors land), the SQL rows are updated but
+   the Parquet file for that partition is now stale. The export job
+   needs to detect this — either by comparing `indexed_at` timestamps
+   against `parquet_exported_at`, or by always re-exporting partitions
+   that have been touched since the last export.
 
-9. **Read-your-writes consistency?** After the Java indexer POSTs a
-   batch to `motif_query/v1/write`, the rows are buffered in memory.
-   A subsequent query won't see them until the buffer flushes. Options:
-   (a) call `/v1/flush` after each index request completes,
-   (b) accept eventual consistency (queries may lag by up to
-   `FLUSH_INTERVAL`), or
-   (c) query the buffer alongside Parquet files (adds complexity to
-   the query path — DataFusion would need a `MemTable` union).
+9. **Mixed-backend query merging.** When a query spans partitions in
+   different backends (e.g. current month in SQL, older months in
+   Parquet), the `StorageAwareQueryRouter` needs to merge results. For
+   simple queries this is concatenation + re-sort. For aggregates and
+   `ORDER BY motif_count()`, merging is more complex. The time-based
+   routing shortcut (current month → SQL, older → DataFusion) avoids
+   this for most queries.
