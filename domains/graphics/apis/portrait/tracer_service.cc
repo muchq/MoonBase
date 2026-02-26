@@ -2,8 +2,8 @@
 
 #include <vector>
 
-#include "domains/platform/libs/futility/base64/base64.h"
 #include "domains/graphics/libs/png_plusplus/png_plusplus.h"
+#include "domains/platform/libs/futility/base64/base64.h"
 
 namespace portrait {
 using futility::base64::Base64;

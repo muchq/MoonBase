@@ -3,8 +3,8 @@
 #include <grpcpp/grpcpp.h>
 
 #include "domains/games/libs/cards/card_proto_mapper.h"
-#include "domains/platform/libs/futility/status/status.h"
 #include "domains/games/protos/golf_grpc/golf.pb.h"
+#include "domains/platform/libs/futility/status/status.h"
 
 using futility::status::AbseilToGrpc;
 using grpc::ServerContext;

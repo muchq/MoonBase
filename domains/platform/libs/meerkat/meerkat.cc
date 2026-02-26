@@ -440,7 +440,8 @@ ResponseInterceptor metrics(std::shared_ptr<HttpMetricsManager> manager) {
     if (!manager) return;
 
     auto end_time = std::chrono::steady_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - ctx.start_time);
+    auto duration =
+        std::chrono::duration_cast<std::chrono::microseconds>(end_time - ctx.start_time);
 
     // Use the route pattern stored in context, fallback to URI if not set
     std::string route = ctx.route_pattern.empty() ? req.uri : ctx.route_pattern;
@@ -467,7 +468,8 @@ void HttpServer::disable_metrics() {
   metrics_enabled_ = false;
 }
 
-std::string HttpServer::ExtractRoutePattern(const std::string& uri, const std::string& method) const {
+std::string HttpServer::ExtractRoutePattern(const std::string& uri,
+                                            const std::string& method) const {
   // For now, use exact path matching since meerkat uses simple routes
   // Future enhancement: implement parameterized route pattern matching
 

@@ -42,7 +42,8 @@ public record GameFeatures(
       int ply = movedWhite ? 2 * ctx.moveNumber() - 1 : 2 * (ctx.moveNumber() - 1);
       if (ply <= 0) return null;
       String side = movedWhite ? "white" : "black";
-      return new MotifOccurrence(ply, ctx.moveNumber(), side, description, movedPiece, attacker, target);
+      return new MotifOccurrence(
+          ply, ctx.moveNumber(), side, description, movedPiece, attacker, target);
     }
   }
 }

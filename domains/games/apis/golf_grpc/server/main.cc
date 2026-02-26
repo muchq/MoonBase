@@ -1,9 +1,9 @@
 #include <string>
 
 #include "absl/strings/str_format.h"
+#include "domains/games/apis/golf_grpc/server/golf_grpc_service.h"
 #include "domains/games/libs/cards/golf/doc_db_game_store.h"
 #include "domains/platform/libs/doc_db_client/doc_db_client.h"
-#include "domains/games/apis/golf_grpc/server/golf_grpc_service.h"
 #include "domains/platform/libs/lakitu/lakitu.h"
 
 using lakitu::ReadPort;

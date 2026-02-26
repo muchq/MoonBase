@@ -6,8 +6,7 @@ namespace meerkat {
 
 HttpMetricsManager::HttpMetricsManager(const std::string& service_name)
     : service_name_(service_name),
-      recorder_(std::make_unique<futility::otel::MetricsRecorder>(service_name)) {
-}
+      recorder_(std::make_unique<futility::otel::MetricsRecorder>(service_name)) {}
 
 void HttpMetricsManager::RecordRequestStart(const std::string& route, const std::string& method) {
   if (!recorder_) return;
@@ -21,10 +20,9 @@ void HttpMetricsManager::RecordRequestStart(const std::string& route, const std:
   recorder_->RecordGauge("http_server_requests_active", 1, base_attrs);
 }
 
-void HttpMetricsManager::RecordRequestComplete(const std::string& route,
-                                             const std::string& method,
-                                             int status_code,
-                                             std::chrono::microseconds duration) {
+void HttpMetricsManager::RecordRequestComplete(const std::string& route, const std::string& method,
+                                               int status_code,
+                                               std::chrono::microseconds duration) {
   if (!recorder_) return;
 
   auto base_attrs = CreateBaseAttributes(route, method);
@@ -48,11 +46,7 @@ void HttpMetricsManager::RecordRequestComplete(const std::string& route,
 
 std::map<std::string, std::string> HttpMetricsManager::CreateBaseAttributes(
     const std::string& route, const std::string& method) const {
-  return {
-    {"service_name", service_name_},
-    {"route", route},
-    {"method", method}
-  };
+  return {{"service_name", service_name_}, {"route", route}, {"method", method}};
 }
 
 std::map<std::string, std::string> HttpMetricsManager::CreateRequestAttributes(

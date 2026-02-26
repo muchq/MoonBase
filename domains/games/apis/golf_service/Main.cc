@@ -3,9 +3,9 @@
 #include <iostream>
 
 #include "absl/log/initialize.h"
+#include "domains/games/apis/golf_service/router.h"
 #include "domains/games/libs/cards/golf/doc_db_game_store.h"
 #include "domains/platform/libs/doc_db_client/doc_db_client.h"
-#include "domains/games/apis/golf_service/router.h"
 #include "mongoose.h"
 
 namespace {
