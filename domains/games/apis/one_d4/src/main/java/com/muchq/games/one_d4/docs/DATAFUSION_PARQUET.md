@@ -762,6 +762,193 @@ updates the SQL rows, the export job re-runs for affected partitions:
 Since we write one file per partition, re-export is a simple overwrite —
 no merge logic needed.
 
+### Re-Analysis and Schema Evolution
+
+Adding new motifs or correcting existing detectors requires updating
+stored game data in both SQL and Parquet. This is a two-step process:
+first update SQL (source of truth for Chess.com games), then re-export
+to Parquet. Lichess-only games need a different path since they're never
+in SQL.
+
+#### Step 1: Schema Evolution
+
+New motif columns must be added to both stores:
+
+**SQL:**
+```sql
+ALTER TABLE game_features ADD COLUMN has_back_rank_mate BOOLEAN DEFAULT FALSE;
+ALTER TABLE game_features ADD COLUMN has_smothered_mate BOOLEAN DEFAULT FALSE;
+-- ... repeat for each new motif
+```
+
+**Parquet:** No migration needed. Parquet is schema-on-read — the next
+export/ingest writes files with the new columns. Old Parquet files
+missing the column return NULL, which DataFusion treats as FALSE for
+boolean filters. New Parquet files include the column with real values.
+
+This asymmetry is a strength: SQL requires `ALTER TABLE`, but Parquet
+files are simply rewritten with the updated schema on the next export.
+No downtime, no backfill-then-migrate sequencing.
+
+**Code changes:**
+- `GameFeatureDao` INSERT/MERGE statements: add new columns
+- `GameFeature` record: add new fields
+- `FeatureExtractor` / `MotifDetector`: add new detectors
+- `SqlCompiler.VALID_MOTIFS`: add new motif names
+- `SubstraitCompiler`: schema `NamedStruct` includes new columns
+- Parquet schema in `motif_query` `catalog.rs`: add new columns
+
+#### Step 2: Re-Analysis Pipeline (Chess.com games in SQL)
+
+The re-analysis pipeline from ROADMAP.md Phase 9:
+
+```
+POST /admin/reanalyze
+  Query params: ?motifs=back_rank_mate,smothered_mate
+                &platform=chess.com
+                &months=2024-01,2024-02,...  (optional, default=all)
+
+Pipeline:
+  for each (platform, month) in scope:
+    batch = SELECT game_url, pgn FROM game_features
+            WHERE platform = ? AND month = ?
+            ORDER BY played_at
+            LIMIT 1000 OFFSET ?
+
+    for each game in batch:
+      features = featureExtractor.extract(game.pgn())
+      // Only run specified detectors, or all if not specified
+      UPDATE game_features
+        SET has_back_rank_mate = ?,
+            has_smothered_mate = ?,
+            ...,
+            indexed_at = now()
+        WHERE game_url = ?
+
+      // Re-insert occurrences for new motifs
+      DELETE FROM motif_occurrences
+        WHERE game_url = ? AND motif IN ('BACK_RANK_MATE', 'SMOTHERED_MATE', ...)
+      INSERT INTO motif_occurrences ...
+
+    // Mark partition as needing re-export
+    UPDATE game_storage_backends
+      SET parquet_stale = true
+      WHERE platform = ? AND month = ?
+```
+
+Key point: **PGN is already in SQL** for Chess.com games. Re-analysis
+reads it, re-runs detection, and UPDATEs the rows in place. The existing
+`ON CONFLICT` upsert in `GameFeatureDao` only updates `indexed_at` and
+`request_id` — re-analysis needs a dedicated UPDATE path that sets
+motif columns.
+
+#### Step 3: Re-Export Stale Partitions
+
+After re-analysis updates SQL rows, the export job detects stale
+Parquet:
+
+```java
+// ParquetExportJob — modified to handle staleness
+List<StorageBackend> stale = storageBackendStore.findStalePartitions();
+// Returns partitions where parquet_stale = true
+// OR where parquet_exported_at < max(indexed_at) for games in partition
+
+for (StorageBackend sb : stale) {
+  exportPartition(sb.platform(), sb.month());  // SELECT → write Parquet
+  storageBackendStore.markExported(sb.platform(), sb.month());
+}
+```
+
+Since the export writes one complete file per partition (overwriting the
+old one), re-export is identical to first export. No incremental merge.
+
+#### Lichess Games — Parquet-Only Re-Analysis
+
+Lichess games are `backend='parquet'` — they were never in SQL and
+there's no PGN to re-read from the database. Re-analysis needs a
+different approach:
+
+**Option A: Re-ingest from Lichess dump.** Download the original
+`.pgn.zst` file for the month, re-run the `lichess_ingest` pipeline
+with updated detectors, overwrite the Parquet files. This is the
+cleanest path — same code as initial ingest, just with new detectors.
+Cost: ~15-30 minutes per monthly dump.
+
+**Option B: Store Lichess PGN in SQL for re-analysis.** During initial
+ingest, also INSERT the PGN into a `lichess_pgns` SQL table (or the
+existing `game_features.pgn` column). This makes Lichess games
+re-analyzable the same way as Chess.com games. Downside: 2M PGN
+strings/month in SQL (~2-4 GB/month, mostly PGN text). This defeats
+one of the benefits of the Parquet-only path.
+
+**Option C: Store Lichess PGN in a separate Parquet table.** A
+`game_pgns` Parquet table with just `(game_url, pgn)`. The re-analysis
+pipeline reads PGN from this table via DataFusion, re-runs detectors,
+and writes updated `game_features` Parquet files. This keeps PGN out
+of SQL while enabling re-analysis.
+
+**Recommendation: Option A for now, Option C if re-analysis frequency
+is high.** Re-analysis is a rare event (when new detectors are added).
+Re-ingesting from the Lichess dump is simple and doesn't require
+storing PGN. If re-analysis becomes frequent (e.g. detector accuracy
+improvements every month), storing PGN in a separate Parquet table is
+worth the storage cost.
+
+#### Update to `game_storage_backends`
+
+Add a `parquet_stale` flag to track when SQL data has been updated but
+Parquet hasn't been re-exported yet:
+
+```sql
+CREATE TABLE game_storage_backends (
+  platform            TEXT NOT NULL,
+  month               TEXT NOT NULL,
+  backend             TEXT NOT NULL,      -- 'sql', 'parquet', 'both'
+  games_in_sql        INTEGER DEFAULT 0,
+  games_in_parquet    INTEGER DEFAULT 0,
+  parquet_exported_at TIMESTAMP,
+  parquet_stale       BOOLEAN DEFAULT FALSE,  -- true after re-analysis
+  last_reanalyzed_at  TIMESTAMP,               -- when re-analysis last ran
+  PRIMARY KEY (platform, month)
+);
+```
+
+The query router uses `parquet_stale` to decide routing during the
+window between re-analysis and re-export:
+
+```
+if backend = 'both' AND parquet_stale = true:
+  → route to SQL (Parquet data is outdated)
+if backend = 'both' AND parquet_stale = false:
+  → route to DataFusion (Parquet is current)
+if backend = 'parquet' AND parquet_stale = true:
+  → route to DataFusion anyway (no SQL alternative),
+    but log warning — Lichess data needs re-ingest
+```
+
+#### Timeline: Re-Analysis → Re-Export
+
+```
+t=0:  Admin triggers POST /admin/reanalyze
+      Re-analysis begins processing games in SQL.
+      game_storage_backends.parquet_stale = true for affected partitions.
+      Query router falls back to SQL for stale partitions.
+
+t=N:  Re-analysis completes (minutes for 10K-100K games).
+      SQL rows now have updated motif flags.
+      Queries hitting SQL return correct results immediately.
+
+t=N+1: ParquetExportJob runs (next scheduled cron, or admin-triggered).
+       Reads updated SQL rows, writes new Parquet files.
+       game_storage_backends.parquet_stale = false.
+       Query router resumes routing to DataFusion.
+```
+
+For Lichess partitions (Option A), the window is longer — re-ingest
+takes 15-30 minutes per monthly dump, and must be triggered manually.
+During this window, queries against Lichess data return stale motif
+results for the new detectors (old detectors still correct).
+
 ### Storage Routing — `game_storage_backends` Table
 
 A metadata table in PostgreSQL tracks which backend holds motif data for
@@ -769,21 +956,25 @@ each partition:
 
 ```sql
 CREATE TABLE game_storage_backends (
-  platform          TEXT NOT NULL,
-  month             TEXT NOT NULL,      -- "2024-03"
-  backend           TEXT NOT NULL,      -- 'sql', 'parquet', 'both'
-  games_in_sql      INTEGER DEFAULT 0,
-  games_in_parquet  INTEGER DEFAULT 0,
+  platform            TEXT NOT NULL,
+  month               TEXT NOT NULL,      -- "2024-03"
+  backend             TEXT NOT NULL,      -- 'sql', 'parquet', 'both'
+  games_in_sql        INTEGER DEFAULT 0,
+  games_in_parquet    INTEGER DEFAULT 0,
   parquet_exported_at TIMESTAMP,
+  parquet_stale       BOOLEAN DEFAULT FALSE,  -- true after re-analysis
+  last_reanalyzed_at  TIMESTAMP,               -- when re-analysis last ran
   PRIMARY KEY (platform, month)
 );
 ```
 
-| `backend` value | Meaning | When |
-|-----------------|---------|------|
-| `sql` | Games only in SQL, not yet exported | After Chess.com indexing, before export |
-| `parquet` | Games only in Parquet | Lichess bulk ingest (never in SQL) |
-| `both` | Games in SQL and Parquet | After Chess.com export job runs |
+| `backend` value | `parquet_stale` | Meaning | Query route |
+|-----------------|-----------------|---------|-------------|
+| `sql` | n/a | Games only in SQL, not yet exported | SQL |
+| `parquet` | `false` | Lichess games, Parquet is current | DataFusion |
+| `parquet` | `true` | Lichess games, needs re-ingest | DataFusion (stale warning) |
+| `both` | `false` | Exported, Parquet is current | DataFusion |
+| `both` | `true` | Re-analyzed in SQL, Parquet outdated | SQL (until re-export) |
 
 #### How the Query Router Uses This
 
