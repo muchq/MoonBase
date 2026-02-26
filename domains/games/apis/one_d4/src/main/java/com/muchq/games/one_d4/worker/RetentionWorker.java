@@ -22,7 +22,8 @@ public class RetentionWorker {
   public RetentionWorker(GameFeatureStore gameFeatureStore, IndexedPeriodStore indexedPeriodStore) {
     this.gameFeatureStore = gameFeatureStore;
     this.indexedPeriodStore = indexedPeriodStore;
-    LOG.info("RetentionWorker initialized (retention={} days, interval=1h)", RETENTION_PERIOD.toDays());
+    LOG.info(
+        "RetentionWorker initialized (retention={} days, interval=1h)", RETENTION_PERIOD.toDays());
   }
 
   @Scheduled(fixedDelay = "1h", initialDelay = "1m")
