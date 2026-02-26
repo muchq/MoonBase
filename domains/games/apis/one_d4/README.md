@@ -99,11 +99,59 @@ flowchart TB
   RetentionWorker --> PeriodStore
 ```
 
-**Index flow:** Client posts to `POST /v1/index` → request is stored and a message is enqueued. A background thread (IndexWorkerLifecycle) polls the queue; IndexWorker fetches games from Chess.com per month (skipping months already in IndexedPeriodStore), runs FeatureExtractor (PgnParser → GameReplayer → MotifDetectors) on each game, and writes to GameFeatureStore (game_features + motif_occurrences) and IndexedPeriodStore.
+**Index flow:** Client posts to `POST /v1/index` → request is stored and a message is enqueued. A background thread (IndexWorkerLifecycle) polls the queue; IndexWorker fetches games from Chess.com per month (skipping months already in IndexedPeriodStore), runs FeatureExtractor (PgnParser → GameReplayer → MotifDetectors) on each game, and writes to GameFeatureStore (game_features + motif_occurrences + attack_occurrences) and IndexedPeriodStore.
 
-**Query flow:** Client posts a ChessQL string to `POST /v1/query` → Parser and SqlCompiler produce SQL → GameFeatureStore runs the query and loads motif_occurrences for the result set → response returns GameFeatureRow list with per-game occurrences.
+**Query flow:** Client posts a ChessQL string to `POST /v1/query` → Parser and SqlCompiler produce SQL → GameFeatureStore runs the query and loads motif_occurrences and attack_occurrences for the result set → response returns GameFeatureRow list with per-game occurrences.
 
-**Retention:** RetentionWorker runs hourly and deletes game_features, motif_occurrences (via FK cascade), and indexed_periods older than 7 days.
+**Retention:** RetentionWorker runs hourly and deletes game_features, motif_occurrences, attack_occurrences (via FK cascade), and indexed_periods older than 7 days.
+
+## Running Locally (in-memory)
+
+H2 in-memory is the default — no PostgreSQL or Docker required.
+
+```bash
+# Build and start (data lives only for the lifetime of the process)
+bazel run //domains/games/apis/one_d4:one_d4
+```
+
+To use a persistent H2 file instead of the default in-memory DB:
+
+```bash
+INDEXER_DB_URL="jdbc:h2:file:/tmp/indexer;DB_CLOSE_DELAY=-1" \
+  bazel run //domains/games/apis/one_d4:one_d4
+```
+
+To point at a PostgreSQL instance:
+
+```bash
+INDEXER_DB_URL="jdbc:postgresql://localhost:5432/indexer" \
+INDEXER_DB_USERNAME="indexer" \
+INDEXER_DB_PASSWORD="indexer" \
+  bazel run //domains/games/apis/one_d4:one_d4
+```
+
+The server starts on **port 8080**. Then index a player and query:
+
+```bash
+# Index one month of games
+curl -s -X POST http://localhost:8080/v1/index \
+  -H 'Content-Type: application/json' \
+  -d '{"player":"hikaru","platform":"CHESS_COM","startMonth":"2026-01","endMonth":"2026-01"}' \
+  | jq .
+
+# Poll until status is COMPLETE
+curl -s http://localhost:8080/v1/index/{id} | jq .
+
+# Query indexed games
+curl -s -X POST http://localhost:8080/v1/query \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"white_username = \"hikaru\"","limit":5,"offset":0}' \
+  | jq .
+```
+
+> **Note:** All data is lost when the process exits when using the default in-memory database.
+
+---
 
 ## Endpoints
 
@@ -233,4 +281,9 @@ On the deployed machine the indexer uses H2 file storage at `/data/indexer` insi
    - **H2 Console (jar):** `java -jar h2*.jar` → JDBC URL `jdbc:h2:file:/path/to/one_d4_data_backup/indexer`, user `sa`, password blank.
    - Or use any SQL client that supports H2 (e.g. DBeaver).
 
-Main tables: `indexing_requests` (id, player, platform, start_month, end_month, status, games_indexed, …), `game_features` (request_id, game_url, played_at, indexed_at, …), `indexed_periods` (player, platform, year_month, is_complete, games_count, …).
+Main tables:
+- `indexing_requests` — id, player, platform, start_month, end_month, status, games_indexed, …
+- `game_features` — request_id, game_url, played_at, indexed_at, motifs_json, …
+- `motif_occurrences` — game_url (FK), motif, move_number, ply, side, description, moved_piece, attacker, target
+- `attack_occurrences` — game_url (FK), ply, side, piece_moved, attacker, target, is_checkmate
+- `indexed_periods` — player, platform, year_month, is_complete, games_count, …
