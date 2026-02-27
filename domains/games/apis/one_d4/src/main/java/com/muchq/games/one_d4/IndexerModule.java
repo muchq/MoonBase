@@ -16,11 +16,11 @@ import com.muchq.games.one_d4.db.Migration;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.GameReplayer;
 import com.muchq.games.one_d4.engine.PgnParser;
+import com.muchq.games.one_d4.motifs.AttackDetector;
 import com.muchq.games.one_d4.motifs.BackRankMateDetector;
 import com.muchq.games.one_d4.motifs.CheckDetector;
 import com.muchq.games.one_d4.motifs.CheckmateDetector;
 import com.muchq.games.one_d4.motifs.CrossPinDetector;
-import com.muchq.games.one_d4.motifs.DiscoveredAttackDetector;
 import com.muchq.games.one_d4.motifs.DiscoveredCheckDetector;
 import com.muchq.games.one_d4.motifs.DoubleCheckDetector;
 import com.muchq.games.one_d4.motifs.ForkDetector;
@@ -122,7 +122,7 @@ public class IndexerModule {
         new CrossPinDetector(),
         new ForkDetector(),
         new SkewerDetector(),
-        new DiscoveredAttackDetector(),
+        new AttackDetector(),
         new DiscoveredCheckDetector(),
         new CheckDetector(),
         new CheckmateDetector(),

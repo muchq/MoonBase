@@ -5,10 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.muchq.games.chessql.compiler.CompiledQuery;
 import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.chessql.parser.Parser;
-import com.muchq.games.one_d4.api.dto.AttackOccurrenceRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
-import com.muchq.games.one_d4.engine.model.AttackOccurrence;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import java.time.Instant;
@@ -55,9 +53,11 @@ public class GameFeatureDaoTest {
     dao.insert(game);
 
     GameFeatures.MotifOccurrence occ1 =
-        new GameFeatures.MotifOccurrence(5, 3, "white", "Knight pinned on c6", null, null, null);
+        new GameFeatures.MotifOccurrence(
+            5, 3, "white", "Knight pinned on c6", null, null, null, false, false);
     GameFeatures.MotifOccurrence occ2 =
-        new GameFeatures.MotifOccurrence(12, 6, "black", "Discovered check", "Nd5f4", "Ba2", "kf7");
+        new GameFeatures.MotifOccurrence(
+            12, 6, "black", "Discovered check", "Nd5f4", "Ba2", "kf7", false, false);
     Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences =
         Map.of(
             Motif.PIN, List.of(occ1),
@@ -71,10 +71,12 @@ public class GameFeatureDaoTest {
     Map<String, List<OccurrenceRow>> byMotif = result.get(gameUrl);
     assertThat(byMotif).containsKey("pin");
     assertThat(byMotif.get("pin"))
-        .containsExactly(new OccurrenceRow(3, "white", "Knight pinned on c6", null, null, null));
+        .containsExactly(
+            new OccurrenceRow(3, "white", "Knight pinned on c6", null, null, null, false, false));
     assertThat(byMotif).containsKey("discovered_check");
     assertThat(byMotif.get("discovered_check"))
-        .containsExactly(new OccurrenceRow(6, "black", "Discovered check", "Nd5f4", "Ba2", "kf7"));
+        .containsExactly(
+            new OccurrenceRow(6, "black", "Discovered check", "Nd5f4", "Ba2", "kf7", false, false));
   }
 
   @Test
@@ -98,7 +100,7 @@ public class GameFeatureDaoTest {
     dao.insert(game);
 
     GameFeatures.MotifOccurrence atPlyZero =
-        new GameFeatures.MotifOccurrence(0, 0, "white", "initial", null, null, null);
+        new GameFeatures.MotifOccurrence(0, 0, "white", "initial", null, null, null, false, false);
     Map<Motif, List<GameFeatures.MotifOccurrence>> onlyPlyZero =
         Map.of(Motif.CHECK, List.of(atPlyZero));
 
@@ -110,32 +112,32 @@ public class GameFeatureDaoTest {
   }
 
   @Test
-  public void insertAttackOccurrences_and_queryAttackOccurrences_roundTrip() {
+  public void insertOccurrences_isDiscovered_and_isMate_roundTrip() {
     String gameUrl = "https://chess.com/game/attack-1";
     GameFeature game = createGame(gameUrl);
     dao.insert(game);
 
-    List<AttackOccurrence> attacks =
-        List.of(
-            new AttackOccurrence(3, 2, "white", "Pe2", "Pe4", "ke8", false),
-            new AttackOccurrence(5, 3, "white", "Nf3", "Ng5", "ke8", true));
-    dao.insertAttackOccurrences(gameUrl, attacks);
+    GameFeatures.MotifOccurrence discovered =
+        new GameFeatures.MotifOccurrence(
+            5, 3, "white", "Discovered attack at move 3", "Kg1g2", "Ra1", "rh1", true, false);
+    GameFeatures.MotifOccurrence mate =
+        new GameFeatures.MotifOccurrence(
+            7, 4, "white", "Attack at move 4", "Ra1a5", "Ra5", "ka8", false, true);
+    Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences =
+        Map.of(Motif.ATTACK, List.of(discovered, mate));
+    dao.insertOccurrences(gameUrl, occurrences);
 
-    Map<String, List<AttackOccurrenceRow>> result = dao.queryAttackOccurrences(List.of(gameUrl));
-
+    Map<String, Map<String, List<OccurrenceRow>>> result = dao.queryOccurrences(List.of(gameUrl));
     assertThat(result).containsKey(gameUrl);
-    List<AttackOccurrenceRow> rows = result.get(gameUrl);
+    List<OccurrenceRow> rows = result.get(gameUrl).get("attack");
     assertThat(rows).hasSize(2);
     assertThat(rows.get(0))
-        .isEqualTo(new AttackOccurrenceRow(2, "white", "Pe2", "Pe4", "ke8", false));
+        .isEqualTo(
+            new OccurrenceRow(
+                3, "white", "Discovered attack at move 3", "Kg1g2", "Ra1", "rh1", true, false));
     assertThat(rows.get(1))
-        .isEqualTo(new AttackOccurrenceRow(3, "white", "Nf3", "Ng5", "ke8", true));
-  }
-
-  @Test
-  public void queryAttackOccurrences_emptyList_returnsEmptyMap() {
-    Map<String, List<AttackOccurrenceRow>> result = dao.queryAttackOccurrences(List.of());
-    assertThat(result).isEmpty();
+        .isEqualTo(
+            new OccurrenceRow(4, "white", "Attack at move 4", "Ra1a5", "Ra5", "ka8", false, true));
   }
 
   @Test
@@ -167,24 +169,25 @@ public class GameFeatureDaoTest {
         "1-0",
         Instant.now(),
         20,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
+        false, // hasPin
+        false, // hasCrossPin
+        false, // hasFork
+        false, // hasSkewer
+        false, // hasDiscoveredAttack
+        false, // hasDiscoveredMate
+        false, // hasDiscoveredCheck
+        false, // hasCheck
+        false, // hasCheckmate
+        false, // hasPromotion
+        false, // hasPromotionWithCheck
+        false, // hasPromotionWithCheckmate
+        false, // hasBackRankMate
+        false, // hasSmotheredMate
+        false, // hasSacrifice
+        false, // hasZugzwang
+        false, // hasDoubleCheck
+        false, // hasInterference
+        false, // hasOverloadedPiece
         Instant.now(),
         "pgn");
   }

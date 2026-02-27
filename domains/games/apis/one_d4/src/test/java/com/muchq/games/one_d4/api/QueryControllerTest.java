@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.muchq.games.chessql.compiler.SqlCompiler;
-import com.muchq.games.one_d4.api.dto.AttackOccurrenceRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.GameFeatureRow;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
@@ -39,11 +38,15 @@ public class QueryControllerTest {
             gameUrl,
             Map.of(
                 "pin",
-                List.of(new OccurrenceRow(3, "white", "Knight pinned on c6", null, null, null)),
+                List.of(
+                    new OccurrenceRow(
+                        3, "white", "Knight pinned on c6", null, null, null, false, false)),
                 "fork",
                 List.of(
-                    new OccurrenceRow(10, "white", "Knight forks king and rook", null, null, null),
-                    new OccurrenceRow(18, "black", "Queen forks two pieces", null, null, null)))));
+                    new OccurrenceRow(
+                        10, "white", "Knight forks king and rook", null, null, null, false, false),
+                    new OccurrenceRow(
+                        18, "black", "Queen forks two pieces", null, null, null, false, false)))));
 
     QueryResponse response = controller.query(new QueryRequest("motif(pin)", 10, 0));
 
@@ -52,7 +55,8 @@ public class QueryControllerTest {
     assertThat(row.gameUrl()).isEqualTo(gameUrl);
     assertThat(row.occurrences()).containsKey("pin");
     assertThat(row.occurrences().get("pin"))
-        .containsExactly(new OccurrenceRow(3, "white", "Knight pinned on c6", null, null, null));
+        .containsExactly(
+            new OccurrenceRow(3, "white", "Knight pinned on c6", null, null, null, false, false));
     assertThat(row.occurrences()).containsKey("fork");
     assertThat(row.occurrences().get("fork")).hasSize(2);
     assertThat(response.count()).isEqualTo(1);
@@ -110,24 +114,25 @@ public class QueryControllerTest {
         "1-0",
         Instant.now(),
         30,
-        true,
-        false,
-        true,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
+        true, // hasPin
+        false, // hasCrossPin
+        true, // hasFork
+        false, // hasSkewer
+        false, // hasDiscoveredAttack
+        false, // hasDiscoveredMate
+        false, // hasDiscoveredCheck
+        false, // hasCheck
+        false, // hasCheckmate
+        false, // hasPromotion
+        false, // hasPromotionWithCheck
+        false, // hasPromotionWithCheckmate
+        false, // hasBackRankMate
+        false, // hasSmotheredMate
+        false, // hasSacrifice
+        false, // hasZugzwang
+        false, // hasDoubleCheck
+        false, // hasInterference
+        false, // hasOverloadedPiece
         Instant.now(),
         "pgn");
   }
@@ -161,13 +166,6 @@ public class QueryControllerTest {
             occurrences) {}
 
     @Override
-    public void insertAttackOccurrences(
-        String gameUrl, List<com.muchq.games.one_d4.engine.model.AttackOccurrence> attacks) {}
-
-    @Override
-    public void deleteAttacksByGameUrl(String gameUrl) {}
-
-    @Override
     public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
       return queryResult;
     }
@@ -180,11 +178,6 @@ public class QueryControllerTest {
         out.put(url, occurrencesResult.getOrDefault(url, Map.of()));
       }
       return out;
-    }
-
-    @Override
-    public Map<String, List<AttackOccurrenceRow>> queryAttackOccurrences(List<String> gameUrls) {
-      return Map.of();
     }
 
     @Override

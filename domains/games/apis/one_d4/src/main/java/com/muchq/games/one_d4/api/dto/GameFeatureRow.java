@@ -22,6 +22,7 @@ public record GameFeatureRow(
     boolean hasFork,
     boolean hasSkewer,
     boolean hasDiscoveredAttack,
+    boolean hasDiscoveredMate,
     boolean hasDiscoveredCheck,
     boolean hasCheck,
     boolean hasCheckmate,
@@ -29,13 +30,10 @@ public record GameFeatureRow(
     boolean hasPromotionWithCheck,
     boolean hasPromotionWithCheckmate,
     String pgn,
-    Map<String, List<OccurrenceRow>> occurrences,
-    List<AttackOccurrenceRow> attacks) {
+    Map<String, List<OccurrenceRow>> occurrences) {
 
   public static GameFeatureRow fromStore(
-      GameFeature row,
-      Map<String, List<OccurrenceRow>> occurrences,
-      List<AttackOccurrenceRow> attacks) {
+      GameFeature row, Map<String, List<OccurrenceRow>> occurrences) {
     return new GameFeatureRow(
         row.gameUrl(),
         row.platform(),
@@ -54,6 +52,7 @@ public record GameFeatureRow(
         row.hasFork(),
         row.hasSkewer(),
         row.hasDiscoveredAttack(),
+        row.hasDiscoveredMate(),
         row.hasDiscoveredCheck(),
         row.hasCheck(),
         row.hasCheckmate(),
@@ -61,7 +60,6 @@ public record GameFeatureRow(
         row.hasPromotionWithCheck(),
         row.hasPromotionWithCheckmate(),
         row.pgn(),
-        occurrences,
-        attacks);
+        occurrences);
   }
 }

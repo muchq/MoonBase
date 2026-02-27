@@ -8,4 +8,6 @@ public record OccurrenceRow(
     String description,
     @Nullable String movedPiece,
     @Nullable String attacker,
-    @Nullable String target) {}
+    @Nullable String target,
+    boolean isDiscovered,
+    boolean isMate) {}

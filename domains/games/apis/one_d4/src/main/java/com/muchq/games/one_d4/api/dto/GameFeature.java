@@ -22,6 +22,7 @@ public record GameFeature(
     boolean hasFork,
     boolean hasSkewer,
     boolean hasDiscoveredAttack,
+    boolean hasDiscoveredMate,
     boolean hasDiscoveredCheck,
     boolean hasCheck,
     boolean hasCheckmate,

@@ -142,6 +142,31 @@ public class SqlCompilerTest {
   }
 
   @Test
+  public void testDiscoveredAttackMotif() {
+    CompiledQuery result = compile("motif(discovered_attack)");
+    assertThat(result.selectSql())
+        .isEqualTo(
+            BASE_PREFIX
+                + "EXISTS (SELECT 1 FROM motif_occurrences mo"
+                + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK'"
+                + " AND mo.is_discovered = TRUE)"
+                + BASE_SUFFIX);
+    assertThat(result.parameters()).isEmpty();
+  }
+
+  @Test
+  public void testAttackMotif() {
+    CompiledQuery result = compile("motif(attack)");
+    assertThat(result.selectSql())
+        .isEqualTo(
+            BASE_PREFIX
+                + "EXISTS (SELECT 1 FROM motif_occurrences mo"
+                + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK')"
+                + BASE_SUFFIX);
+    assertThat(result.parameters()).isEmpty();
+  }
+
+  @Test
   public void testUnknownMotif() {
     assertThatThrownBy(() -> compile("motif(unknown)"))
         .isInstanceOf(IllegalArgumentException.class)

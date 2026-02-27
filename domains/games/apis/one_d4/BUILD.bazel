@@ -4,7 +4,6 @@ load("//bazel/rules:oci.bzl", "linux_oci_java")
 java_library(
     name = "model",
     srcs = [
-        "src/main/java/com/muchq/games/one_d4/engine/model/AttackOccurrence.java",
         "src/main/java/com/muchq/games/one_d4/engine/model/GameFeatures.java",
         "src/main/java/com/muchq/games/one_d4/engine/model/Motif.java",
         "src/main/java/com/muchq/games/one_d4/engine/model/ParsedGame.java",
@@ -19,7 +18,7 @@ java_library(
 java_library(
     name = "motifs",
     srcs = [
-        "src/main/java/com/muchq/games/one_d4/motifs/AttackOccurrenceDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/AttackDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/BackRankMateDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/BoardUtils.java",
         "src/main/java/com/muchq/games/one_d4/motifs/CheckDetector.java",
@@ -128,7 +127,6 @@ java_library(
 java_library(
     name = "dto",
     srcs = [
-        "src/main/java/com/muchq/games/one_d4/api/dto/AttackOccurrenceRow.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/GameFeature.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/GameFeatureRow.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/IndexRequest.java",
@@ -273,7 +271,7 @@ java_test_suite(
     name = "motifs_tests",
     size = "small",
     srcs = [
-        "src/test/java/com/muchq/games/one_d4/motifs/AttackOccurrenceDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/AttackDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/BackRankMateDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/CheckDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/CheckmateDetectorTest.java",

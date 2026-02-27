@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -115,6 +116,14 @@ public class IndexWorker {
   private void indexGame(IndexMessage message, PlayedGame game) {
     GameFeatures features = featureExtractor.extract(game.pgn());
 
+    // Derive attack-based booleans from ATTACK motif occurrences
+    List<GameFeatures.MotifOccurrence> attacks =
+        features.occurrences().getOrDefault(Motif.ATTACK, List.of());
+    boolean hasDiscoveredAttack =
+        attacks.stream().anyMatch(GameFeatures.MotifOccurrence::isDiscovered);
+    boolean hasDiscoveredMate = attacks.stream().anyMatch(o -> o.isDiscovered() && o.isMate());
+    boolean hasCheckmate = attacks.stream().anyMatch(GameFeatures.MotifOccurrence::isMate);
+
     String result = determineResult(game);
 
     GameFeature row =
@@ -136,10 +145,11 @@ public class IndexWorker {
             features.hasMotif(Motif.CROSS_PIN),
             features.hasMotif(Motif.FORK),
             features.hasMotif(Motif.SKEWER),
-            features.hasMotif(Motif.DISCOVERED_ATTACK),
+            hasDiscoveredAttack,
+            hasDiscoveredMate,
             features.hasMotif(Motif.DISCOVERED_CHECK),
             features.hasMotif(Motif.CHECK),
-            features.hasMotif(Motif.CHECKMATE),
+            hasCheckmate,
             features.hasMotif(Motif.PROMOTION),
             features.hasMotif(Motif.PROMOTION_WITH_CHECK),
             features.hasMotif(Motif.PROMOTION_WITH_CHECKMATE),
@@ -155,7 +165,6 @@ public class IndexWorker {
 
     gameFeatureStore.insert(row);
     gameFeatureStore.insertOccurrences(game.url(), features.occurrences());
-    gameFeatureStore.insertAttackOccurrences(game.url(), features.attackOccurrences());
   }
 
   private String determineResult(PlayedGame game) {

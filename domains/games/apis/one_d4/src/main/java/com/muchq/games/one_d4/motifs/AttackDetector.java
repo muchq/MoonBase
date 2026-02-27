@@ -1,35 +1,44 @@
 package com.muchq.games.one_d4.motifs;
 
-import com.muchq.games.one_d4.engine.model.AttackOccurrence;
+import com.muchq.games.one_d4.engine.model.GameFeatures;
+import com.muchq.games.one_d4.engine.model.Motif;
 import com.muchq.games.one_d4.engine.model.PositionContext;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Detects significant attacks after each move and emits {@link AttackOccurrence} rows.
+ * Detects significant attacks after each move and emits {@link GameFeatures.MotifOccurrence} rows
+ * with {@code motif = ATTACK}.
  *
- * <p>An attack is emitted when any of:
+ * <p>An occurrence is emitted when any of:
  *
  * <ul>
- *   <li>Attacked piece is a king (check / discovered check / checkmate)
+ *   <li>Attacked piece is a king (check / checkmate)
  *   <li>Attacked piece is a queen
  *   <li>Same attacker attacks 2+ pieces of value ≥ 2 at this ply (fork)
+ *   <li>A discovered attack is revealed (all targets, not just king/queen)
  * </ul>
  *
  * <p>Two categories are detected per move:
  *
  * <ul>
- *   <li><b>Direct</b>: the piece that moved is the attacker ({@code pieceMoved == attacker})
+ *   <li><b>Direct</b>: the piece that moved is the attacker ({@code isDiscovered = false})
  *   <li><b>Discovered</b>: a different piece moved, revealing a sliding piece attack ({@code
- *       pieceMoved != attacker}); only king/queen targets are emitted
+ *       isDiscovered = true})
  * </ul>
  */
-public class AttackOccurrenceDetector {
+public class AttackDetector implements MotifDetector {
 
   private final DiscoveredAttackDetector discoveredAttackDetector = new DiscoveredAttackDetector();
 
-  public List<AttackOccurrence> detect(List<PositionContext> positions) {
-    List<AttackOccurrence> result = new ArrayList<>();
+  @Override
+  public Motif motif() {
+    return Motif.ATTACK;
+  }
+
+  @Override
+  public List<GameFeatures.MotifOccurrence> detect(List<PositionContext> positions) {
+    List<GameFeatures.MotifOccurrence> result = new ArrayList<>();
 
     for (int i = 1; i < positions.size(); i++) {
       PositionContext before = positions.get(i - 1);
@@ -54,29 +63,30 @@ public class AttackOccurrenceDetector {
                 boardBefore, boardAfter, moverIsWhite, after.moveNumber(), ply, side, isCheckmate));
       }
 
-      // Part 2: discovered attacks revealed by the move (king/queen targets only)
+      // Part 2: all discovered attacks revealed by the move
       List<DiscoveredAttackDetector.RevealedAttack> revealed =
           discoveredAttackDetector.findDiscoveredAttacks(boardBefore, boardAfter, moverIsWhite);
       for (DiscoveredAttackDetector.RevealedAttack ra : revealed) {
-        if (isKingOrQueen(ra.target())) {
-          boolean isMate = isCheckmate && isKing(ra.target());
-          result.add(
-              new AttackOccurrence(
-                  ply,
-                  after.moveNumber(),
-                  side,
-                  ra.movedPiece(),
-                  ra.attacker(),
-                  ra.target(),
-                  isMate));
-        }
+        boolean isMate = isCheckmate && isKing(ra.target());
+        String desc = "Discovered attack at move " + after.moveNumber();
+        result.add(
+            GameFeatures.MotifOccurrence.attack(
+                ply,
+                after.moveNumber(),
+                side,
+                desc,
+                ra.movedPiece(),
+                ra.attacker(),
+                ra.target(),
+                true,
+                isMate));
       }
     }
 
     return result;
   }
 
-  private static List<AttackOccurrence> findDirectAttacks(
+  private static List<GameFeatures.MotifOccurrence> findDirectAttacks(
       int[][] boardBefore,
       int[][] boardAfter,
       boolean moverIsWhite,
@@ -91,16 +101,13 @@ public class AttackOccurrenceDetector {
     int[] dest = findDestSquare(boardBefore, boardAfter, moverIsWhite);
     if (dest == null) return List.of();
 
-    int pieceBeforeMove = boardBefore[vacated[0]][vacated[1]];
     int pieceAtDest = boardAfter[dest[0]][dest[1]];
     if (pieceAtDest == 0) return List.of();
 
     // Direct attack: pieceMoved == attacker (destination notation for both).
-    // This invariant distinguishes direct attacks from discovered ones (pieceMoved != attacker).
     String attackerNotation =
         DiscoveredAttackDetector.pieceLetter(pieceAtDest)
             + DiscoveredAttackDetector.squareName(dest[0], dest[1]);
-    String pieceMovedNotation = attackerNotation;
 
     // Collect all enemy pieces attacked by the piece at dest
     List<String> allTargets = new ArrayList<>();
@@ -116,10 +123,19 @@ public class AttackOccurrenceDetector {
     }
 
     List<String> significant = filterSignificant(allTargets);
-    String pm = pieceMovedNotation;
-    String att = attackerNotation;
     return significant.stream()
-        .map(t -> new AttackOccurrence(ply, moveNumber, side, pm, att, t, isCheckmate && isKing(t)))
+        .map(
+            t ->
+                GameFeatures.MotifOccurrence.attack(
+                    ply,
+                    moveNumber,
+                    side,
+                    "Attack at move " + moveNumber,
+                    attackerNotation,
+                    attackerNotation,
+                    t,
+                    false,
+                    isCheckmate && isKing(t)))
         .toList();
   }
 

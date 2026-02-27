@@ -5,6 +5,7 @@ public enum Motif {
   CROSS_PIN,
   FORK,
   SKEWER,
+  ATTACK,
   DISCOVERED_ATTACK,
   DISCOVERED_CHECK,
   CHECK,

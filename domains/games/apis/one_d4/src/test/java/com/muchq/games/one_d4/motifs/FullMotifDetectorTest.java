@@ -59,7 +59,7 @@ public class FullMotifDetectorTest {
             new CrossPinDetector(),
             new ForkDetector(),
             new SkewerDetector(),
-            new DiscoveredAttackDetector(),
+            new AttackDetector(),
             new DiscoveredCheckDetector(),
             new CheckDetector(),
             new CheckmateDetector(),
@@ -91,7 +91,7 @@ public class FullMotifDetectorTest {
             Motif.PIN,
             Motif.FORK,
             Motif.SKEWER,
-            Motif.DISCOVERED_ATTACK,
+            Motif.ATTACK,
             Motif.CHECK,
             Motif.CHECKMATE,
             Motif.PROMOTION,
@@ -108,6 +108,7 @@ public class FullMotifDetectorTest {
     Set<Motif> absent =
         Set.of(
             Motif.CROSS_PIN,
+            Motif.DISCOVERED_ATTACK,
             Motif.DISCOVERED_CHECK,
             Motif.PROMOTION_WITH_CHECKMATE,
             Motif.BACK_RANK_MATE,
@@ -219,13 +220,18 @@ public class FullMotifDetectorTest {
   }
 
   @Test
-  public void extractFeatures_discoveredAttack_occurrences() {
+  public void extractFeatures_attack_discoveredOccurrences() {
     GameFeatures features = extractor.extract(PGN);
+    // Discovered attacks within ATTACK occurrences (isDiscovered=true):
     // 9...Nd4 (nc6 vacates, bd7 attacks Bb5), 11.d3 (Pd2 vacates, Bc1 attacks rh6),
     // 16...hxg4 (ph5 vacates, rh7 attacks Ph4), 30.Kg2 (king vacates, Ra1 attacks rh1),
     // 44.Ke4 (Kf4 vacates, Rf3 attacks qf8)
     // Note: moves 32 and 38 are NOT discovered attacks — the moved piece IS the attacker.
-    assertThat(features.occurrences().get(Motif.DISCOVERED_ATTACK))
+    List<GameFeatures.MotifOccurrence> discoveredAttacks =
+        features.occurrences().get(Motif.ATTACK).stream()
+            .filter(GameFeatures.MotifOccurrence::isDiscovered)
+            .toList();
+    assertThat(discoveredAttacks)
         .extracting(
             GameFeatures.MotifOccurrence::moveNumber,
             GameFeatures.MotifOccurrence::side,
