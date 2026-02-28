@@ -44,7 +44,14 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
           "checkmate",
           "promotion",
           "promotion_with_check",
-          "promotion_with_checkmate");
+          "promotion_with_checkmate",
+          "back_rank_mate",
+          "smothered_mate",
+          "sacrifice",
+          "zugzwang",
+          "double_check",
+          "interference",
+          "overloaded_piece");
 
   private static final Map<String, String> FIELD_MAP =
       Map.of(

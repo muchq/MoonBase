@@ -25,7 +25,6 @@ import com.muchq.games.one_d4.motifs.AttackDetector;
 import com.muchq.games.one_d4.motifs.CheckDetector;
 import com.muchq.games.one_d4.motifs.CrossPinDetector;
 import com.muchq.games.one_d4.motifs.DiscoveredCheckDetector;
-import com.muchq.games.one_d4.motifs.ForkDetector;
 import com.muchq.games.one_d4.motifs.MotifDetector;
 import com.muchq.games.one_d4.motifs.PinDetector;
 import com.muchq.games.one_d4.motifs.SkewerDetector;
@@ -79,7 +78,6 @@ public class IndexE2ETest {
             new CheckDetector(),
             new PinDetector(),
             new CrossPinDetector(),
-            new ForkDetector(),
             new SkewerDetector(),
             new AttackDetector(),
             new DiscoveredCheckDetector());

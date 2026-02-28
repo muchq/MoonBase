@@ -41,8 +41,11 @@ public class DoubleCheckDetector implements MotifDetector {
       // Count how many enemy pieces attack the king
       int checkers = BoardUtils.countAttackers(board, kingPos[0], kingPos[1], !kingIsWhite);
       if (checkers >= 2) {
+        String target =
+            BoardUtils.pieceNotation(board[kingPos[0]][kingPos[1]], kingPos[0], kingPos[1]);
         GameFeatures.MotifOccurrence occ =
-            GameFeatures.MotifOccurrence.from(ctx, "Double check at move " + ctx.moveNumber());
+            GameFeatures.MotifOccurrence.withPiece(
+                ctx, "Double check at move " + ctx.moveNumber(), null, target);
         if (occ != null) occurrences.add(occ);
       }
     }

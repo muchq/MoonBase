@@ -37,9 +37,19 @@ public class InterferenceDetector implements MotifDetector {
 
       boolean moverIsWhite = !after.whiteToMove();
 
-      if (hasInterference(boardBefore, boardAfter, moverIsWhite)) {
+      int[] result = findInterference(boardBefore, boardAfter, moverIsWhite);
+      if (result != null) {
+        // result = {destR, destC, enemyR, enemyC}
+        int destR = result[0], destC = result[1];
+        int enemyR = result[2], enemyC = result[3];
+        // attacker = the interfering piece (mover's piece at destination)
+        String attacker = BoardUtils.pieceNotation(boardAfter[destR][destC], destR, destC);
+        // target = the blocked enemy sliding piece
+        String target = BoardUtils.pieceNotation(boardBefore[enemyR][enemyC], enemyR, enemyC);
+
         GameFeatures.MotifOccurrence occ =
-            GameFeatures.MotifOccurrence.from(after, "Interference at move " + after.moveNumber());
+            GameFeatures.MotifOccurrence.withPiece(
+                after, "Interference at move " + after.moveNumber(), attacker, target);
         if (occ != null) occurrences.add(occ);
       }
     }
@@ -47,7 +57,8 @@ public class InterferenceDetector implements MotifDetector {
     return occurrences;
   }
 
-  private boolean hasInterference(int[][] before, int[][] after, boolean moverIsWhite) {
+  /** Returns {destR, destC, enemyR, enemyC} for the first interference found, or null if none. */
+  private int[] findInterference(int[][] before, int[][] after, boolean moverIsWhite) {
     // Find the destination square: was empty before, has a mover's piece after
     for (int dr = 0; dr < 8; dr++) {
       for (int dc = 0; dc < 8; dc++) {
@@ -58,19 +69,20 @@ public class InterferenceDetector implements MotifDetector {
 
         // Found the destination square (dr, dc). Check if any enemy sliding piece
         // had a clear attack line THROUGH this square in the before-position.
-        if (blocksEnemySlidingLine(before, dr, dc, moverIsWhite)) {
-          return true;
+        int[] enemyPos = findBlockedEnemySlidingPiece(before, dr, dc, moverIsWhite);
+        if (enemyPos != null) {
+          return new int[] {dr, dc, enemyPos[0], enemyPos[1]};
         }
       }
     }
-    return false;
+    return null;
   }
 
   /**
-   * Returns true if any enemy sliding piece (Q/R/B) had a clear line of attack that passed through
-   * square (destR, destC) in the before-position.
+   * Returns {r, c} of the first enemy sliding piece whose line was blocked by (destR, destC), or
+   * null if none.
    */
-  private boolean blocksEnemySlidingLine(
+  private int[] findBlockedEnemySlidingPiece(
       int[][] before, int destR, int destC, boolean moverIsWhite) {
     for (int r = 0; r < 8; r++) {
       for (int c = 0; c < 8; c++) {
@@ -81,23 +93,20 @@ public class InterferenceDetector implements MotifDetector {
         if (absPiece != 3 && absPiece != 4 && absPiece != 5) continue; // sliding pieces only
 
         // Check if this sliding piece attacked through (destR, destC) in before-position.
-        // It attacks the square if the path from (r,c) to (destR,destC) was clear AND
-        // the line continues beyond (destR,destC) to at least one more square.
         if (BoardUtils.pieceAttacks(before, r, c, destR, destC)
-            && lineExtendsThrough(before, r, c, destR, destC, absPiece)) {
-          return true;
+            && lineExtendsThrough(before, r, c, destR, destC)) {
+          return new int[] {r, c};
         }
       }
     }
-    return false;
+    return null;
   }
 
   /**
-   * Returns true if the sliding piece at (pr, pc) with type absPiece attacks THROUGH (destR, destC)
-   * — i.e. the line from (pr,pc) through (destR,destC) extends further on the board.
+   * Returns true if the sliding piece at (pr, pc) attacks THROUGH (destR, destC) — i.e. the line
+   * from (pr,pc) through (destR,destC) extends further on the board.
    */
-  private boolean lineExtendsThrough(
-      int[][] board, int pr, int pc, int destR, int destC, int absPiece) {
+  private boolean lineExtendsThrough(int[][] board, int pr, int pc, int destR, int destC) {
     int dr = Integer.signum(destR - pr);
     int dc = Integer.signum(destC - pc);
     int nr = destR + dr, nc = destC + dc;

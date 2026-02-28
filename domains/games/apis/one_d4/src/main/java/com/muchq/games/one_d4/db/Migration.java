@@ -228,6 +228,8 @@ public class Migration {
   private static final String ADD_OCC_IS_MATE =
       "ALTER TABLE motif_occurrences ADD COLUMN IF NOT EXISTS is_mate BOOLEAN NOT NULL DEFAULT"
           + " FALSE";
+  private static final String ADD_OCC_PIN_TYPE =
+      "ALTER TABLE motif_occurrences ADD COLUMN IF NOT EXISTS pin_type VARCHAR(8)";
 
   public void run() {
     try (Connection conn = dataSource.getConnection();
@@ -281,6 +283,9 @@ public class Migration {
 
       // New game_features column
       stmt.execute(ADD_DISCOVERED_MATE_COLUMN);
+
+      // Pin type for motif_occurrences
+      stmt.execute(ADD_OCC_PIN_TYPE);
 
       LOG.info("Database migration completed successfully (H2={})", useH2);
     } catch (SQLException e) {

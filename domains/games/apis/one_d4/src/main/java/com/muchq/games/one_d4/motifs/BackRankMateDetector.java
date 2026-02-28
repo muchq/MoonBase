@@ -58,8 +58,18 @@ public class BackRankMateDetector implements MotifDetector {
       }
       if (!blockedByOwnPiece) continue;
 
+      boolean moverIsWhite = !ctx.whiteToMove();
+      int[] checker = BoardUtils.findCheckingPiece(board, moverIsWhite);
+      String attacker =
+          checker != null
+              ? BoardUtils.pieceNotation(board[checker[0]][checker[1]], checker[0], checker[1])
+              : null;
+      String target =
+          BoardUtils.pieceNotation(board[kingPos[0]][kingPos[1]], kingPos[0], kingPos[1]);
+
       GameFeatures.MotifOccurrence occ =
-          GameFeatures.MotifOccurrence.from(ctx, "Back rank mate at move " + ctx.moveNumber());
+          GameFeatures.MotifOccurrence.withMate(
+              ctx, "Back rank mate at move " + ctx.moveNumber(), attacker, target);
       if (occ != null) occurrences.add(occ);
     }
 

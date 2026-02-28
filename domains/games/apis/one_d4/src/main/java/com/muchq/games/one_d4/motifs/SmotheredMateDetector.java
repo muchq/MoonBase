@@ -44,11 +44,14 @@ public class SmotheredMateDetector implements MotifDetector {
       // Check that a knight of the mating side attacks the king
       boolean matedByKnight = false;
       int knightPiece = loserIsWhite ? -2 : 2; // enemy knight
+      int knightR = -1, knightC = -1;
       for (int r = 0; r < 8; r++) {
         for (int c = 0; c < 8; c++) {
           if (board[r][c] == knightPiece
               && BoardUtils.pieceAttacks(board, r, c, kingPos[0], kingPos[1])) {
             matedByKnight = true;
+            knightR = r;
+            knightC = c;
             break;
           }
         }
@@ -59,8 +62,12 @@ public class SmotheredMateDetector implements MotifDetector {
       // Confirm king is smothered: all 8 adjacent squares are off-board or own pieces
       if (!isSmothered(board, kingPos[0], kingPos[1], loserIsWhite)) continue;
 
+      String attacker = BoardUtils.pieceNotation(board[knightR][knightC], knightR, knightC);
+      String target =
+          BoardUtils.pieceNotation(board[kingPos[0]][kingPos[1]], kingPos[0], kingPos[1]);
       GameFeatures.MotifOccurrence occ =
-          GameFeatures.MotifOccurrence.from(ctx, "Smothered mate at move " + ctx.moveNumber());
+          GameFeatures.MotifOccurrence.withMate(
+              ctx, "Smothered mate at move " + ctx.moveNumber(), attacker, target);
       if (occ != null) occurrences.add(occ);
     }
 

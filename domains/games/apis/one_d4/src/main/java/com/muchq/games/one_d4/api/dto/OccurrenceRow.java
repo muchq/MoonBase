@@ -10,4 +10,5 @@ public record OccurrenceRow(
     @Nullable String attacker,
     @Nullable String target,
     boolean isDiscovered,
-    boolean isMate) {}
+    boolean isMate,
+    @Nullable String pinType) {}

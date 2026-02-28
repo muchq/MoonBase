@@ -82,6 +82,22 @@ public class DiscoveredCheckDetectorTest {
   }
 
   @Test
+  public void discoveredCheck_pawnVacatesDiagonalRevealingBishopCheck() {
+    // White pawn on d5 moves to d6+, vacating d5 and revealing Bc4 checking Kf7.
+    // This is the exact position from the e2e discovered-check game.
+    String beforeFen = "r1bq3r/ppp1nkpp/8/3Pp3/2B2n2/8/PPP2PPP/R2QK2R";
+    String afterFen = "r1bq3r/ppp1nkpp/3P4/4p3/2B2n2/8/PPP2PPP/R2QK2R";
+    PositionContext before = new PositionContext(9, beforeFen + " b - - 0 9", true, null);
+    PositionContext after = new PositionContext(9, afterFen + " b - - 0 9", false, "d6+");
+
+    List<GameFeatures.MotifOccurrence> occurrences = detector.detect(List.of(before, after));
+
+    assertThat(occurrences).hasSize(1);
+    assertThat(occurrences.get(0).attacker()).isEqualTo("Bc4");
+    assertThat(occurrences.get(0).target()).isEqualTo("kf7");
+  }
+
+  @Test
   public void discoveredCheck_doesNotFireForRegularDirectCheck() {
     // White bishop on f3 moves to d5, directly checking black king on c6.
     // No sliding piece is revealed behind f3, so this is a plain check, not a discovered check.

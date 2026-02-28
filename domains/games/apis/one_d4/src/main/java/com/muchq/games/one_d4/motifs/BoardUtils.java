@@ -101,6 +101,58 @@ class BoardUtils {
   }
 
   /**
+   * Converts board coordinates to algebraic square name. (row=7, col=4) → "e1"; (row=0, col=0) →
+   * "a8".
+   */
+  static String squareName(int row, int col) {
+    char file = (char) ('a' + col);
+    char rank = (char) ('8' - row);
+    return "" + file + rank;
+  }
+
+  /**
+   * Returns the piece-letter notation for a piece at a given square. White pieces use uppercase,
+   * black pieces lowercase. Example: pieceNotation(5, 7, 4) → "Qe1"; pieceNotation(-6, 0, 4) →
+   * "ke8".
+   */
+  static String pieceNotation(int piece, int row, int col) {
+    boolean white = piece > 0;
+    int abs = Math.abs(piece);
+    char letter =
+        switch (abs) {
+          case 1 -> 'P';
+          case 2 -> 'N';
+          case 3 -> 'B';
+          case 4 -> 'R';
+          case 5 -> 'Q';
+          case 6 -> 'K';
+          default -> '?';
+        };
+    char l = white ? letter : Character.toLowerCase(letter);
+    return l + squareName(row, col);
+  }
+
+  /**
+   * Scans all of the mover's pieces and returns {row, col} of the first one attacking the enemy
+   * king, or null if none found.
+   */
+  static int[] findCheckingPiece(int[][] board, boolean moverIsWhite) {
+    int[] kingPos = findKing(board, !moverIsWhite);
+    if (kingPos[0] == -1) return null;
+    for (int r = 0; r < 8; r++) {
+      for (int c = 0; c < 8; c++) {
+        int piece = board[r][c];
+        if (piece == 0) continue;
+        if ((piece > 0) != moverIsWhite) continue;
+        if (pieceAttacks(board, r, c, kingPos[0], kingPos[1])) {
+          return new int[] {r, c};
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
    * Parses the destination square from a promotion move like "e8=Q+" or "axb8=N#". Returns {row,
    * col} in board-array coordinates, or {-1,-1} on parse failure.
    */

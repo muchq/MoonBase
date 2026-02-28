@@ -20,7 +20,8 @@ public record GameFeatures(
       @Nullable String attacker,
       @Nullable String target,
       boolean isDiscovered,
-      boolean isMate) {
+      boolean isMate,
+      @Nullable String pinType) {
     /**
      * Factory: derives ply and side from the given PositionContext. Returns null if the context
      * represents the initial position (no move has been made).
@@ -31,7 +32,7 @@ public record GameFeatures(
       if (ply <= 0) return null; // initial position, no move made yet
       String side = movedWhite ? "white" : "black";
       return new MotifOccurrence(
-          ply, ctx.moveNumber(), side, description, null, null, null, false, false);
+          ply, ctx.moveNumber(), side, description, null, null, null, false, false, null);
     }
 
     /** Factory for discovered attack/check occurrences with structured piece data. */
@@ -46,7 +47,16 @@ public record GameFeatures(
       if (ply <= 0) return null;
       String side = movedWhite ? "white" : "black";
       return new MotifOccurrence(
-          ply, ctx.moveNumber(), side, description, movedPiece, attacker, target, false, false);
+          ply,
+          ctx.moveNumber(),
+          side,
+          description,
+          movedPiece,
+          attacker,
+          target,
+          false,
+          false,
+          null);
     }
 
     /**
@@ -65,7 +75,66 @@ public record GameFeatures(
         boolean isDiscovered,
         boolean isMate) {
       return new MotifOccurrence(
-          ply, moveNumber, side, description, movedPiece, attacker, target, isDiscovered, isMate);
+          ply,
+          moveNumber,
+          side,
+          description,
+          movedPiece,
+          attacker,
+          target,
+          isDiscovered,
+          isMate,
+          null);
+    }
+
+    /**
+     * Factory for motif occurrences with attacker/target but no movedPiece (e.g. check,
+     * interference, double check, overloaded piece).
+     */
+    public static MotifOccurrence withPiece(
+        PositionContext ctx,
+        String description,
+        @Nullable String attacker,
+        @Nullable String target) {
+      boolean movedWhite = !ctx.whiteToMove();
+      int ply = movedWhite ? 2 * ctx.moveNumber() - 1 : 2 * (ctx.moveNumber() - 1);
+      if (ply <= 0) return null;
+      String side = movedWhite ? "white" : "black";
+      return new MotifOccurrence(
+          ply, ctx.moveNumber(), side, description, null, attacker, target, false, false, null);
+    }
+
+    /**
+     * Factory for mate-delivering motif occurrences with attacker/target (e.g. checkmate, back-rank
+     * mate, smothered mate).
+     */
+    public static MotifOccurrence withMate(
+        PositionContext ctx,
+        String description,
+        @Nullable String attacker,
+        @Nullable String target) {
+      boolean movedWhite = !ctx.whiteToMove();
+      int ply = movedWhite ? 2 * ctx.moveNumber() - 1 : 2 * (ctx.moveNumber() - 1);
+      if (ply <= 0) return null;
+      String side = movedWhite ? "white" : "black";
+      return new MotifOccurrence(
+          ply, ctx.moveNumber(), side, description, null, attacker, target, false, true, null);
+    }
+
+    /**
+     * Factory for PIN occurrences with attacker, target and pin type.
+     *
+     * @param pinType "ABSOLUTE" when pinned to king, "RELATIVE" when pinned to another valuable
+     *     piece
+     */
+    public static MotifOccurrence pin(
+        PositionContext ctx, String description, String attacker, String target, String pinType) {
+      boolean movedWhite = !ctx.whiteToMove();
+      int ply = movedWhite ? 2 * ctx.moveNumber() - 1 : 2 * (ctx.moveNumber() - 1);
+      if (ply <= 0) return null;
+      String side = movedWhite ? "white" : "black";
+      return new MotifOccurrence(
+          ply, ctx.moveNumber(), side, description, null, attacker, target, false, false, pinType);
     }
   }
 }

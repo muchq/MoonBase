@@ -33,7 +33,15 @@ public class PromotionWithCheckmateDetectorTest {
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
-    assertThat(occurrences.get(0).moveNumber()).isEqualTo(45);
+    GameFeatures.MotifOccurrence occ = occurrences.get(0);
+    assertThat(occ.moveNumber()).isEqualTo(45);
+    assertThat(occ.side()).isEqualTo("white");
+    // Promoted queen at e8 mates black king at e7
+    assertThat(occ.attacker()).isEqualTo("Qe8");
+    assertThat(occ.target()).isEqualTo("ke7");
+    assertThat(occ.isMate()).isTrue();
+    assertThat(occ.isDiscovered()).isFalse();
+    assertThat(occ.pinType()).isNull();
   }
 
   @Test
@@ -43,6 +51,12 @@ public class PromotionWithCheckmateDetectorTest {
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
+    GameFeatures.MotifOccurrence occ = occurrences.get(0);
+    assertThat(occ.side()).isEqualTo("white");
+    // Promoted rook at e8 mates black king at a8
+    assertThat(occ.attacker()).isEqualTo("Re8");
+    assertThat(occ.target()).isEqualTo("ka8");
+    assertThat(occ.isMate()).isTrue();
   }
 
   @Test

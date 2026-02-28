@@ -42,7 +42,15 @@ public class BackRankMateDetectorTest {
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
-    assertThat(occurrences.get(0).moveNumber()).isEqualTo(30);
+    GameFeatures.MotifOccurrence occ = occurrences.get(0);
+    assertThat(occ.moveNumber()).isEqualTo(30);
+    assertThat(occ.side()).isEqualTo("white");
+    // White rook at a8 delivers mate to black king at g8
+    assertThat(occ.attacker()).isEqualTo("Ra8");
+    assertThat(occ.target()).isEqualTo("kg8");
+    assertThat(occ.isMate()).isTrue();
+    assertThat(occ.isDiscovered()).isFalse();
+    assertThat(occ.pinType()).isNull();
   }
 
   @Test
@@ -52,6 +60,14 @@ public class BackRankMateDetectorTest {
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
+    GameFeatures.MotifOccurrence occ = occurrences.get(0);
+    assertThat(occ.side()).isEqualTo("black");
+    // Black rook at a1 delivers mate to white king at g1
+    assertThat(occ.attacker()).isEqualTo("ra1");
+    assertThat(occ.target()).isEqualTo("Kg1");
+    assertThat(occ.isMate()).isTrue();
+    assertThat(occ.isDiscovered()).isFalse();
+    assertThat(occ.pinType()).isNull();
   }
 
   @Test

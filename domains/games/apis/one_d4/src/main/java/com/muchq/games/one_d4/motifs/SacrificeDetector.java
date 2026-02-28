@@ -38,17 +38,39 @@ public class SacrificeDetector implements MotifDetector {
 
       boolean moverIsWhite = !after.whiteToMove();
 
-      if (hasSacrifice(boardBefore, boardAfter, moverIsWhite)) {
+      int[] captureSquare = findSacrificeSquare(boardBefore, boardAfter, moverIsWhite);
+      if (captureSquare != null) {
+        int r = captureSquare[0], c = captureSquare[1];
+        // movedPiece = the capturing piece (at the capture square after the move)
+        String movedPiece = BoardUtils.pieceNotation(boardAfter[r][c], r, c);
+        // target = the captured piece (at the capture square before the move)
+        String target = BoardUtils.pieceNotation(boardBefore[r][c], r, c);
+
+        int ply = moverIsWhite ? 2 * after.moveNumber() - 1 : 2 * (after.moveNumber() - 1);
+        String side = moverIsWhite ? "white" : "black";
         GameFeatures.MotifOccurrence occ =
-            GameFeatures.MotifOccurrence.from(after, "Sacrifice at move " + after.moveNumber());
-        if (occ != null) occurrences.add(occ);
+            GameFeatures.MotifOccurrence.attack(
+                ply,
+                after.moveNumber(),
+                side,
+                "Sacrifice at move " + after.moveNumber(),
+                movedPiece,
+                null,
+                target,
+                false,
+                false);
+        if (occ.ply() > 0) occurrences.add(occ);
       }
     }
 
     return occurrences;
   }
 
-  private boolean hasSacrifice(int[][] before, int[][] after, boolean moverIsWhite) {
+  /**
+   * Returns {row, col} of the sacrifice square, or null if no sacrifice occurred. The sacrifice
+   * square is where a mover piece captured an enemy piece of lower value.
+   */
+  private int[] findSacrificeSquare(int[][] before, int[][] after, boolean moverIsWhite) {
     for (int r = 0; r < 8; r++) {
       for (int c = 0; c < 8; c++) {
         int pieceBefore = before[r][c];
@@ -65,10 +87,10 @@ public class SacrificeDetector implements MotifDetector {
 
         // Sacrifice: the capturing piece is worth more than what it captured
         if (capturerValue > capturedValue) {
-          return true;
+          return new int[] {r, c};
         }
       }
     }
-    return false;
+    return null;
   }
 }

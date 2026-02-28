@@ -79,8 +79,8 @@ public class GameFeatureDao implements GameFeatureStore {
   private static final String INSERT_OCCURRENCE =
       "INSERT INTO motif_occurrences"
           + " (id, game_url, motif, ply, side, move_number, description,"
-          + " moved_piece, attacker, target, is_discovered, is_mate)"
-          + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+          + " moved_piece, attacker, target, is_discovered, is_mate, pin_type)"
+          + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
   private final DataSource dataSource;
   private final boolean useH2;
@@ -173,6 +173,7 @@ public class GameFeatureDao implements GameFeatureStore {
           ps.setString(10, occ.target());
           ps.setBoolean(11, occ.isDiscovered());
           ps.setBoolean(12, occ.isMate());
+          ps.setString(13, occ.pinType());
           ps.addBatch();
         }
       }
@@ -217,7 +218,7 @@ public class GameFeatureDao implements GameFeatureStore {
     String placeholders = gameUrls.stream().map(u -> "?").collect(Collectors.joining(", "));
     String sql =
         "SELECT game_url, motif, move_number, side, description,"
-            + " moved_piece, attacker, target, is_discovered, is_mate"
+            + " moved_piece, attacker, target, is_discovered, is_mate, pin_type"
             + " FROM motif_occurrences WHERE game_url IN ("
             + placeholders
             + ") ORDER BY ply ASC";
@@ -241,6 +242,7 @@ public class GameFeatureDao implements GameFeatureStore {
           String target = rs.getString("target");
           boolean isDiscovered = rs.getBoolean("is_discovered");
           boolean isMate = rs.getBoolean("is_mate");
+          String pinType = rs.getString("pin_type");
           result
               .computeIfAbsent(gameUrl, k -> new LinkedHashMap<>())
               .computeIfAbsent(motif, k -> new ArrayList<>())
@@ -253,7 +255,8 @@ public class GameFeatureDao implements GameFeatureStore {
                       attacker,
                       target,
                       isDiscovered,
-                      isMate));
+                      isMate,
+                      pinType));
         }
       }
     } catch (SQLException e) {

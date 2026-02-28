@@ -41,7 +41,15 @@ public class SmotheredMateDetectorTest {
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
-    assertThat(occurrences.get(0).moveNumber()).isEqualTo(30);
+    GameFeatures.MotifOccurrence occ = occurrences.get(0);
+    assertThat(occ.moveNumber()).isEqualTo(30);
+    assertThat(occ.side()).isEqualTo("white");
+    // White knight at g6 delivers smothered mate to black king at h8
+    assertThat(occ.attacker()).isEqualTo("Ng6");
+    assertThat(occ.target()).isEqualTo("kh8");
+    assertThat(occ.isMate()).isTrue();
+    assertThat(occ.isDiscovered()).isFalse();
+    assertThat(occ.pinType()).isNull();
   }
 
   @Test

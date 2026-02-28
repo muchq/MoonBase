@@ -30,9 +30,24 @@ public class PromotionWithCheckDetector implements MotifDetector {
       if (move == null || !move.contains("=") || !move.endsWith("+")) continue;
 
       if (promotedPieceDeliversCheck(ctx)) {
+        String placement = ctx.fen().split(" ")[0];
+        int[][] board = PinDetector.parsePlacement(placement);
+        boolean moverIsWhite = !ctx.whiteToMove();
+        int[] dest = BoardUtils.parsePromotionDestination(move);
+        int[] kingPos = BoardUtils.findKing(board, !moverIsWhite);
+
+        String attacker =
+            dest[0] != -1
+                ? BoardUtils.pieceNotation(board[dest[0]][dest[1]], dest[0], dest[1])
+                : null;
+        String target =
+            kingPos[0] != -1
+                ? BoardUtils.pieceNotation(board[kingPos[0]][kingPos[1]], kingPos[0], kingPos[1])
+                : null;
+
         GameFeatures.MotifOccurrence occ =
-            GameFeatures.MotifOccurrence.from(
-                ctx, "Promotion with check at move " + ctx.moveNumber());
+            GameFeatures.MotifOccurrence.withPiece(
+                ctx, "Promotion with check at move " + ctx.moveNumber(), attacker, target);
         if (occ != null) occurrences.add(occ);
       }
     }

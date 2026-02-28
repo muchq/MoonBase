@@ -35,7 +35,15 @@ public class InterferenceDetectorTest {
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(List.of(before, after));
     assertThat(occurrences).hasSize(1);
-    assertThat(occurrences.get(0).moveNumber()).isEqualTo(21);
+    GameFeatures.MotifOccurrence occ = occurrences.get(0);
+    assertThat(occ.moveNumber()).isEqualTo(21);
+    assertThat(occ.side()).isEqualTo("white");
+    // White knight at a4 interferes with the black rook at a1
+    assertThat(occ.attacker()).isEqualTo("Na4");
+    assertThat(occ.target()).isEqualTo("ra1");
+    assertThat(occ.isMate()).isFalse();
+    assertThat(occ.isDiscovered()).isFalse();
+    assertThat(occ.pinType()).isNull();
   }
 
   @Test

@@ -37,7 +37,15 @@ public class OverloadedPieceDetectorTest {
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
-    assertThat(occurrences.get(0).moveNumber()).isEqualTo(25);
+    GameFeatures.MotifOccurrence occ = occurrences.get(0);
+    assertThat(occ.moveNumber()).isEqualTo(25);
+    assertThat(occ.side()).isEqualTo("white");
+    // Black rook at e5 is overloaded (defends both e6 and e4)
+    assertThat(occ.attacker()).isNull();
+    assertThat(occ.target()).isEqualTo("re5");
+    assertThat(occ.isMate()).isFalse();
+    assertThat(occ.isDiscovered()).isFalse();
+    assertThat(occ.pinType()).isNull();
   }
 
   @Test

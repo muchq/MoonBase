@@ -57,7 +57,6 @@ public class FullMotifDetectorTest {
         List.of(
             new PinDetector(),
             new CrossPinDetector(),
-            new ForkDetector(),
             new SkewerDetector(),
             new AttackDetector(),
             new DiscoveredCheckDetector(),
@@ -183,30 +182,56 @@ public class FullMotifDetectorTest {
   @Test
   public void extractFeatures_pin_occurrences() {
     GameFeatures features = extractor.extract(PGN);
-    // 4.Bb5 pins Nc6 to the king, plus queen/rook pins in the endgame
-    assertThat(features.occurrences().get(Motif.PIN))
+    List<GameFeatures.MotifOccurrence> pins = features.occurrences().get(Motif.PIN);
+    // 4.Bb5 pins Nc6 to the king; endgame queen/rook pins; also relative pins detected
+    assertThat(pins).isNotEmpty();
+
+    // Key known absolute pins are present
+    assertThat(pins)
         .extracting(GameFeatures.MotifOccurrence::moveNumber, GameFeatures.MotifOccurrence::side)
-        .containsExactly(
+        .contains(
             tuple(4, "white"),
             tuple(30, "black"),
             tuple(31, "black"),
             tuple(38, "black"),
             tuple(50, "black"),
             tuple(51, "black"));
+
+    // All pin occurrences have required structured fields
+    assertThat(pins).allMatch(o -> o.attacker() != null, "attacker non-null");
+    assertThat(pins).allMatch(o -> o.target() != null, "target non-null");
+    assertThat(pins).allMatch(o -> o.pinType() != null, "pinType non-null");
+    assertThat(pins)
+        .allMatch(
+            o -> o.pinType().equals("ABSOLUTE") || o.pinType().equals("RELATIVE"),
+            "pinType is ABSOLUTE or RELATIVE");
+    assertThat(pins).allMatch(o -> !o.isDiscovered(), "isDiscovered false");
+    assertThat(pins).allMatch(o -> !o.isMate(), "isMate false");
   }
 
   @Test
   public void extractFeatures_fork_occurrences() {
     GameFeatures features = extractor.extract(PGN);
-    // 8.Ng6 forks Rh6+Ke8, queen forks on 22/24/28 (white), 49...Qg4+ (black)
-    assertThat(features.occurrences().get(Motif.FORK))
-        .extracting(GameFeatures.MotifOccurrence::moveNumber, GameFeatures.MotifOccurrence::side)
-        .containsExactly(
-            tuple(8, "white"),
-            tuple(22, "white"),
-            tuple(24, "white"),
-            tuple(28, "white"),
-            tuple(49, "black"));
+    // FORK is derived from ATTACK: each fork produces one occurrence per target.
+    // 8.Ng6 forks Rh6+Ke8 → 2 occurrences; queen forks on 22/24/28; 49...Qg4+
+    List<GameFeatures.MotifOccurrence> forkOccs = features.occurrences().get(Motif.FORK);
+    assertThat(forkOccs).isNotEmpty();
+
+    // All fork occurrences have attacker/target populated and pinType null
+    assertThat(forkOccs).allMatch(o -> o.attacker() != null);
+    assertThat(forkOccs).allMatch(o -> o.target() != null);
+    assertThat(forkOccs).allMatch(o -> o.pinType() == null);
+
+    // Fork move numbers present (each fork position appears with ≥2 occurrences for the same
+    // attacker)
+    List<Integer> moveNumbers =
+        forkOccs.stream().map(GameFeatures.MotifOccurrence::moveNumber).toList();
+    assertThat(moveNumbers).contains(8, 22, 24, 28, 49);
+
+    // Sanity: move 8 fork by white (Ng6 attacks Rh6 and Ke8)
+    assertThat(forkOccs).anyMatch(o -> o.moveNumber() == 8 && "white".equals(o.side()));
+    // Sanity: move 49 fork by black
+    assertThat(forkOccs).anyMatch(o -> o.moveNumber() == 49 && "black".equals(o.side()));
   }
 
   @Test

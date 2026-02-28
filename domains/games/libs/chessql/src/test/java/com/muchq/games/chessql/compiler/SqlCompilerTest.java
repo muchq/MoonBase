@@ -167,6 +167,60 @@ public class SqlCompilerTest {
   }
 
   @Test
+  public void testBackRankMateMotif() {
+    CompiledQuery result = compile("motif(back_rank_mate)");
+    assertThat(result.selectSql())
+        .isEqualTo(BASE_PREFIX + "g.has_back_rank_mate = TRUE" + BASE_SUFFIX);
+    assertThat(result.parameters()).isEmpty();
+  }
+
+  @Test
+  public void testSmotheredMateMotif() {
+    CompiledQuery result = compile("motif(smothered_mate)");
+    assertThat(result.selectSql())
+        .isEqualTo(BASE_PREFIX + "g.has_smothered_mate = TRUE" + BASE_SUFFIX);
+    assertThat(result.parameters()).isEmpty();
+  }
+
+  @Test
+  public void testSacrificeMotif() {
+    CompiledQuery result = compile("motif(sacrifice)");
+    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + "g.has_sacrifice = TRUE" + BASE_SUFFIX);
+    assertThat(result.parameters()).isEmpty();
+  }
+
+  @Test
+  public void testZugzwangMotif() {
+    CompiledQuery result = compile("motif(zugzwang)");
+    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + "g.has_zugzwang = TRUE" + BASE_SUFFIX);
+    assertThat(result.parameters()).isEmpty();
+  }
+
+  @Test
+  public void testDoubleCheckMotif() {
+    CompiledQuery result = compile("motif(double_check)");
+    assertThat(result.selectSql())
+        .isEqualTo(BASE_PREFIX + "g.has_double_check = TRUE" + BASE_SUFFIX);
+    assertThat(result.parameters()).isEmpty();
+  }
+
+  @Test
+  public void testInterferenceMotif() {
+    CompiledQuery result = compile("motif(interference)");
+    assertThat(result.selectSql())
+        .isEqualTo(BASE_PREFIX + "g.has_interference = TRUE" + BASE_SUFFIX);
+    assertThat(result.parameters()).isEmpty();
+  }
+
+  @Test
+  public void testOverloadedPieceMotif() {
+    CompiledQuery result = compile("motif(overloaded_piece)");
+    assertThat(result.selectSql())
+        .isEqualTo(BASE_PREFIX + "g.has_overloaded_piece = TRUE" + BASE_SUFFIX);
+    assertThat(result.parameters()).isEmpty();
+  }
+
+  @Test
   public void testUnknownMotif() {
     assertThatThrownBy(() -> compile("motif(unknown)"))
         .isInstanceOf(IllegalArgumentException.class)

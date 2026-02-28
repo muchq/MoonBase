@@ -36,9 +36,13 @@ public class OverloadedPieceDetector implements MotifDetector {
       boolean attackerIsWhite = !ctx.whiteToMove();
       boolean defenderIsWhite = ctx.whiteToMove();
 
-      if (hasOverloadedPiece(board, attackerIsWhite, defenderIsWhite)) {
+      int[] overloaded = findOverloadedPiece(board, attackerIsWhite, defenderIsWhite);
+      if (overloaded != null) {
+        int r = overloaded[0], c = overloaded[1];
+        String target = BoardUtils.pieceNotation(board[r][c], r, c);
         GameFeatures.MotifOccurrence occ =
-            GameFeatures.MotifOccurrence.from(ctx, "Overloaded piece at move " + ctx.moveNumber());
+            GameFeatures.MotifOccurrence.withPiece(
+                ctx, "Overloaded piece at move " + ctx.moveNumber(), null, target);
         if (occ != null) occurrences.add(occ);
       }
     }
@@ -46,7 +50,11 @@ public class OverloadedPieceDetector implements MotifDetector {
     return occurrences;
   }
 
-  private boolean hasOverloadedPiece(
+  /**
+   * Returns {r, c} of the first overloaded defending piece found, or null if none. An overloaded
+   * piece defends 2+ squares that are each under attack.
+   */
+  private int[] findOverloadedPiece(
       int[][] board, boolean attackerIsWhite, boolean defenderIsWhite) {
     // Collect squares with defending-side pieces that are under attack by the attacking side
     List<int[]> attackedDefendingSquares = new ArrayList<>();
@@ -61,7 +69,7 @@ public class OverloadedPieceDetector implements MotifDetector {
       }
     }
 
-    if (attackedDefendingSquares.size() < 2) return false;
+    if (attackedDefendingSquares.size() < 2) return null;
 
     // For each defending piece, count how many attacked defending squares it can recapture on
     for (int r = 0; r < 8; r++) {
@@ -77,9 +85,9 @@ public class OverloadedPieceDetector implements MotifDetector {
             defended++;
           }
         }
-        if (defended >= 2) return true;
+        if (defended >= 2) return new int[] {r, c};
       }
     }
-    return false;
+    return null;
   }
 }

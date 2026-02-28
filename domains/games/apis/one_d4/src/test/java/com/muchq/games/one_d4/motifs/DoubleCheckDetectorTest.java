@@ -36,7 +36,15 @@ public class DoubleCheckDetectorTest {
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
-    assertThat(occurrences.get(0).moveNumber()).isEqualTo(25);
+    GameFeatures.MotifOccurrence occ = occurrences.get(0);
+    assertThat(occ.moveNumber()).isEqualTo(25);
+    assertThat(occ.side()).isEqualTo("white");
+    // attacker=null (two pieces give check), target=black king at a8
+    assertThat(occ.attacker()).isNull();
+    assertThat(occ.target()).isEqualTo("ka8");
+    assertThat(occ.isMate()).isFalse();
+    assertThat(occ.isDiscovered()).isFalse();
+    assertThat(occ.pinType()).isNull();
   }
 
   @Test
