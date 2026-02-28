@@ -1,16 +1,14 @@
-#include "domains/platform/libs/meerkat/meerkat.h"
-
 #include <gtest/gtest.h>
 
 #include <memory>
+
+#include "domains/platform/libs/meerkat/meerkat.h"
 
 namespace meerkat {
 
 class MeerkatMetricsTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    server_ = std::make_unique<HttpServer>();
-  }
+  void SetUp() override { server_ = std::make_unique<HttpServer>(); }
 
   void TearDown() override {
     if (server_->is_running()) {

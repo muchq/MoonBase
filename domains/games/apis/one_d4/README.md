@@ -99,11 +99,59 @@ flowchart TB
   RetentionWorker --> PeriodStore
 ```
 
-**Index flow:** Client posts to `POST /v1/index` → request is stored and a message is enqueued. A background thread (IndexWorkerLifecycle) polls the queue; IndexWorker fetches games from Chess.com per month (skipping months already in IndexedPeriodStore), runs FeatureExtractor (PgnParser → GameReplayer → MotifDetectors) on each game, and writes to GameFeatureStore (game_features + motif_occurrences) and IndexedPeriodStore.
+**Index flow:** Client posts to `POST /v1/index` → request is stored and a message is enqueued. A background thread (IndexWorkerLifecycle) polls the queue; IndexWorker fetches games from Chess.com per month (skipping months already in IndexedPeriodStore), runs FeatureExtractor (PgnParser → GameReplayer → MotifDetectors) on each game, and writes to GameFeatureStore (game_features + motif_occurrences) and IndexedPeriodStore. Fork occurrences are derived inside FeatureExtractor from ATTACK occurrences (same ply + attacker targeting 2+ pieces).
 
 **Query flow:** Client posts a ChessQL string to `POST /v1/query` → Parser and SqlCompiler produce SQL → GameFeatureStore runs the query and loads motif_occurrences for the result set → response returns GameFeatureRow list with per-game occurrences.
 
 **Retention:** RetentionWorker runs hourly and deletes game_features, motif_occurrences (via FK cascade), and indexed_periods older than 7 days.
+
+## Running Locally (in-memory)
+
+H2 in-memory is the default — no PostgreSQL or Docker required.
+
+```bash
+# Build and start (data lives only for the lifetime of the process)
+bazel run //domains/games/apis/one_d4:one_d4
+```
+
+To use a persistent H2 file instead of the default in-memory DB:
+
+```bash
+INDEXER_DB_URL="jdbc:h2:file:/tmp/indexer;DB_CLOSE_DELAY=-1" \
+  bazel run //domains/games/apis/one_d4:one_d4
+```
+
+To point at a PostgreSQL instance:
+
+```bash
+INDEXER_DB_URL="jdbc:postgresql://localhost:5432/indexer" \
+INDEXER_DB_USERNAME="indexer" \
+INDEXER_DB_PASSWORD="indexer" \
+  bazel run //domains/games/apis/one_d4:one_d4
+```
+
+The server starts on **port 8080**. Then index a player and query:
+
+```bash
+# Index one month of games
+curl -s -X POST http://localhost:8080/v1/index \
+  -H 'Content-Type: application/json' \
+  -d '{"player":"hikaru","platform":"CHESS_COM","startMonth":"2026-01","endMonth":"2026-01"}' \
+  | jq .
+
+# Poll until status is COMPLETE
+curl -s http://localhost:8080/v1/index/{id} | jq .
+
+# Query indexed games
+curl -s -X POST http://localhost:8080/v1/query \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"white_username = \"hikaru\"","limit":5,"offset":0}' \
+  | jq .
+```
+
+> **Note:** All data is lost when the process exits when using the default in-memory database.
+
+---
 
 ## Endpoints
 
@@ -196,19 +244,37 @@ The indexer maintains a **7-day retention policy**. Games are automatically dele
 - `played_at` (or `played.at`)
 - `indexed_at` (or `indexed.at`)
 
+### Re-analyze All Games
+
+Re-runs feature extraction on every stored game and updates motif columns and occurrences. Useful after deploying a new detector or enrichment.
+
+```bash
+curl -X POST http://localhost:8080/admin/reanalyze
+```
+
+Returns `{"gamesReanalyzed": N}`.
+
 ### Available Motifs
 
-- `motif(pin)`
-- `motif(cross_pin)`
-- `motif(fork)`
-- `motif(skewer)`
+- `motif(attack)`
 - `motif(discovered_attack)`
 - `motif(discovered_check)`
+- `motif(fork)`
+- `motif(pin)`
+- `motif(cross_pin)`
+- `motif(skewer)`
 - `motif(check)`
 - `motif(checkmate)`
+- `motif(double_check)`
+- `motif(back_rank_mate)`
+- `motif(smothered_mate)`
 - `motif(promotion)`
 - `motif(promotion_with_check)`
 - `motif(promotion_with_checkmate)`
+- `motif(sacrifice)`
+- `motif(interference)`
+- `motif(overloaded_piece)`
+- `motif(zugzwang)`
 
 ---
 
@@ -233,4 +299,8 @@ On the deployed machine the indexer uses H2 file storage at `/data/indexer` insi
    - **H2 Console (jar):** `java -jar h2*.jar` → JDBC URL `jdbc:h2:file:/path/to/one_d4_data_backup/indexer`, user `sa`, password blank.
    - Or use any SQL client that supports H2 (e.g. DBeaver).
 
-Main tables: `indexing_requests` (id, player, platform, start_month, end_month, status, games_indexed, …), `game_features` (request_id, game_url, played_at, indexed_at, …), `indexed_periods` (player, platform, year_month, is_complete, games_count, …).
+Main tables:
+- `indexing_requests` — id, player, platform, start_month, end_month, status, games_indexed, …
+- `game_features` — request_id, game_url, played_at, indexed_at, has_fork, has_pin, has_check, … (one boolean per motif)
+- `motif_occurrences` — game_url (FK), motif, move_number, ply, side, description, moved_piece, attacker, target, is_discovered, is_mate, pin_type
+- `indexed_periods` — player, platform, year_month, is_complete, games_count, …

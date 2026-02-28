@@ -32,8 +32,12 @@ public class DiscoveredCheckDetectorTest {
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(List.of(before, after));
 
     assertThat(occurrences).hasSize(1);
-    assertThat(occurrences.get(0).moveNumber()).isEqualTo(10);
-    assertThat(occurrences.get(0).side()).isEqualTo("white");
+    GameFeatures.MotifOccurrence occ = occurrences.get(0);
+    assertThat(occ.moveNumber()).isEqualTo(10);
+    assertThat(occ.side()).isEqualTo("white");
+    assertThat(occ.movedPiece()).isEqualTo("Be4h7");
+    assertThat(occ.attacker()).isEqualTo("Re1");
+    assertThat(occ.target()).isEqualTo("ke8");
   }
 
   @Test
@@ -75,6 +79,22 @@ public class DiscoveredCheckDetectorTest {
 
     assertThat(occurrences).hasSize(1);
     assertThat(occurrences.get(0).side()).isEqualTo("black");
+  }
+
+  @Test
+  public void discoveredCheck_pawnVacatesDiagonalRevealingBishopCheck() {
+    // White pawn on d5 moves to d6+, vacating d5 and revealing Bc4 checking Kf7.
+    // This is the exact position from the e2e discovered-check game.
+    String beforeFen = "r1bq3r/ppp1nkpp/8/3Pp3/2B2n2/8/PPP2PPP/R2QK2R";
+    String afterFen = "r1bq3r/ppp1nkpp/3P4/4p3/2B2n2/8/PPP2PPP/R2QK2R";
+    PositionContext before = new PositionContext(9, beforeFen + " b - - 0 9", true, null);
+    PositionContext after = new PositionContext(9, afterFen + " b - - 0 9", false, "d6+");
+
+    List<GameFeatures.MotifOccurrence> occurrences = detector.detect(List.of(before, after));
+
+    assertThat(occurrences).hasSize(1);
+    assertThat(occurrences.get(0).attacker()).isEqualTo("Bc4");
+    assertThat(occurrences.get(0).target()).isEqualTo("kf7");
   }
 
   @Test

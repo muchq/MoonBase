@@ -10,23 +10,34 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/engine/model/PositionContext.java",
     ],
     visibility = ["//visibility:public"],
+    deps = [
+        artifact("org.jspecify:jspecify"),
+    ],
 )
 
 java_library(
     name = "motifs",
     srcs = [
+        "src/main/java/com/muchq/games/one_d4/motifs/AttackDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/BackRankMateDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/BoardUtils.java",
         "src/main/java/com/muchq/games/one_d4/motifs/CheckDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/CheckmateDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/CrossPinDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/DiscoveredAttackDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/DiscoveredCheckDetector.java",
-        "src/main/java/com/muchq/games/one_d4/motifs/ForkDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/DoubleCheckDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/InterferenceDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/MotifDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/OverloadedPieceDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/PinDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/PromotionDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/PromotionWithCheckDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/PromotionWithCheckmateDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/SacrificeDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/SkewerDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/SmotheredMateDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/ZugzwangDetector.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -122,6 +133,7 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/api/dto/OccurrenceRow.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/QueryRequest.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/QueryResponse.java",
+        "src/main/java/com/muchq/games/one_d4/api/dto/ReanalysisResponse.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -132,6 +144,7 @@ java_library(
 java_library(
     name = "api",
     srcs = [
+        "src/main/java/com/muchq/games/one_d4/api/AdminController.java",
         "src/main/java/com/muchq/games/one_d4/api/ErrorHandler.java",
         "src/main/java/com/muchq/games/one_d4/api/HealthController.java",
         "src/main/java/com/muchq/games/one_d4/api/IndexController.java",
@@ -142,6 +155,8 @@ java_library(
     visibility = ["//visibility:public"],
     deps = [
         ":dto",
+        ":engine",
+        ":model",
         "//domains/games/apis/one_d4:db",
         "//domains/games/apis/one_d4:queue",
         "//domains/games/libs/chessql:ast",
@@ -240,12 +255,14 @@ java_test_suite(
     name = "engine_tests",
     size = "small",
     srcs = [
+        "src/test/java/com/muchq/games/one_d4/engine/FeatureExtractorTest.java",
         "src/test/java/com/muchq/games/one_d4/engine/GameReplayerTest.java",
         "src/test/java/com/muchq/games/one_d4/engine/PgnParserTest.java",
     ],
     deps = [
         ":engine",
         ":model",
+        ":motifs",
         artifact("junit:junit"),
         artifact("org.assertj:assertj-core"),
     ],
@@ -255,17 +272,40 @@ java_test_suite(
     name = "motifs_tests",
     size = "small",
     srcs = [
+        "src/test/java/com/muchq/games/one_d4/motifs/AttackDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/BackRankMateDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/CheckDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/CheckmateDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/DiscoveredAttackDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/DiscoveredCheckDetectorTest.java",
-        "src/test/java/com/muchq/games/one_d4/motifs/ForkDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/DoubleCheckDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/InterferenceDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/OverloadedPieceDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/PinDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/PromotionDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/PromotionWithCheckDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/PromotionWithCheckmateDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/SacrificeDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/SkewerDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/SmotheredMateDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/ZugzwangDetectorTest.java",
     ],
     deps = [
+        ":model",
+        ":motifs",
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_test_suite(
+    name = "full_motif_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/motifs/FullMotifDetectorTest.java",
+    ],
+    deps = [
+        ":engine",
         ":model",
         ":motifs",
         artifact("junit:junit"),
@@ -368,6 +408,7 @@ java_test_suite(
     size = "small",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/e2e/IndexE2ETest.java",
+        "src/test/java/com/muchq/games/one_d4/e2e/MotifE2ETest.java",
     ],
     deps = [
         ":api",

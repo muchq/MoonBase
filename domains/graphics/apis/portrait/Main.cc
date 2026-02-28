@@ -4,10 +4,10 @@
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
+#include "domains/graphics/apis/portrait/types.h"
 #include "domains/platform/libs/futility/otel/otel_provider.h"
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "domains/platform/libs/meerkat/meerkat.h"
-#include "domains/graphics/apis/portrait/types.h"
 #include "tracer_service.h"
 
 using namespace meerkat;
@@ -36,9 +36,9 @@ int main() {
       std::make_shared<futility::rate_limiter::SlidingWindowRateLimiter<std::string>>(config);
 
   // ray tracing endpoint
-  server.post("/portrait/v1/trace", wrap<TraceRequest, TraceResponse>([&tracer_service](TraceRequest& req) {
-                return tracer_service.trace(req);
-              }));
+  server.post("/portrait/v1/trace",
+              wrap<TraceRequest, TraceResponse>(
+                  [&tracer_service](TraceRequest& req) { return tracer_service.trace(req); }));
 
   server.enable_health_checks();
   server.enable_tracing();

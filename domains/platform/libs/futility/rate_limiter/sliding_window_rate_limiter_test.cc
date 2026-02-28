@@ -660,8 +660,8 @@ TEST_F(SlidingWindowRateLimiterTest, EvictionWithMaxKeysLimit) {
   MockClock::advance_time(std::chrono::milliseconds(60));
 
   // This should trigger cleanup, evicting key1 and key2 but keeping key3
-  EXPECT_TRUE(limiter.allow("key4"));  // Now allowed after eviction
-  EXPECT_TRUE(limiter.allow("key5"));  // Also allowed
+  EXPECT_TRUE(limiter.allow("key4"));   // Now allowed after eviction
+  EXPECT_TRUE(limiter.allow("key5"));   // Also allowed
   EXPECT_FALSE(limiter.allow("key6"));  // Rejected - max keys again (key3, key4, key5)
 }
 
@@ -788,7 +788,8 @@ TEST_F(SlidingWindowRateLimiterTest, HighKeyVolumeWithoutLimit) {
     std::string key = "key" + std::to_string(i);
     // Each key already has 1 request, should allow max_requests - 1 more
     for (int j = 1; j < max_requests; ++j) {
-      EXPECT_TRUE(limiter.allow(key)) << "Request " << j << " for key " << i << " should be allowed";
+      EXPECT_TRUE(limiter.allow(key))
+          << "Request " << j << " for key " << i << " should be allowed";
     }
     EXPECT_FALSE(limiter.allow(key)) << "Request over limit for key " << i << " should be rejected";
   }

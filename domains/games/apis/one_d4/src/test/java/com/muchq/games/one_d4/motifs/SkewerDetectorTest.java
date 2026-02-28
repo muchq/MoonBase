@@ -18,20 +18,21 @@ public class SkewerDetectorTest {
   }
 
   // === Skewer cases ===
-  // A skewer is when a more valuable piece is in front and a less valuable piece is behind
 
   @Test
   public void skewer_rookSkewersKingAndRook() {
     // White rook on a4 attacks black king on e4, with black rook on h4 behind
-    // King (6) > Rook (4), so this is a skewer
     String fen = "8/8/8/8/R3k2r/8/8/4K3 b - - 0 1";
-    List<PositionContext> positions =
-        List.of(
-            new PositionContext(15, fen, false, null) // black to move, white just skewered
-            );
+    List<PositionContext> positions = List.of(new PositionContext(15, fen, false, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
+    GameFeatures.MotifOccurrence occ = occurrences.get(0);
+    assertThat(occ.attacker()).isEqualTo("Ra4");
+    assertThat(occ.target()).isEqualTo("ke4");
+    assertThat(occ.pinType()).isNull();
+    assertThat(occ.isDiscovered()).isFalse();
+    assertThat(occ.isMate()).isFalse();
   }
 
   @Test
@@ -42,17 +43,20 @@ public class SkewerDetectorTest {
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
+    assertThat(occurrences.get(0).attacker()).isEqualTo("Qa1");
+    assertThat(occurrences.get(0).target()).isEqualTo("kd4");
   }
 
   @Test
   public void skewer_bishopSkewersQueenAndRook() {
     // White bishop on b1 attacks black queen on d3, with black rook on f5 behind
-    // Queen (5) > Rook (4), so this is a skewer
     String fen = "8/8/8/5r2/8/3q4/8/1B2K2k b - - 0 1";
     List<PositionContext> positions = List.of(new PositionContext(18, fen, false, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
+    assertThat(occurrences.get(0).attacker()).isEqualTo("Bb1");
+    assertThat(occurrences.get(0).target()).isEqualTo("qd3");
   }
 
   @Test
@@ -63,19 +67,21 @@ public class SkewerDetectorTest {
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
+    assertThat(occurrences.get(0).attacker()).isEqualTo("Ra5");
+    assertThat(occurrences.get(0).target()).isEqualTo("qd5");
   }
 
   @Test
   public void skewer_blackSkewersWhitePieces() {
     // Black rook on h4 attacks white king on e4, with white bishop on b4 behind
     String fen = "8/8/8/8/1B2K2r/8/8/7k w - - 0 1";
-    List<PositionContext> positions =
-        List.of(
-            new PositionContext(15, fen, true, null) // white to move, black just skewered
-            );
+    List<PositionContext> positions = List.of(new PositionContext(15, fen, true, null));
 
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).hasSize(1);
+    assertThat(occurrences.get(0).side()).isEqualTo("black");
+    assertThat(occurrences.get(0).attacker()).isEqualTo("rh4");
+    assertThat(occurrences.get(0).target()).isEqualTo("Ke4");
   }
 
   // === Not a skewer cases ===
@@ -83,11 +89,9 @@ public class SkewerDetectorTest {
   @Test
   public void notSkewer_lessValuableInFront() {
     // This is a PIN, not a skewer: knight in front, king behind
-    // White rook attacks black knight on e4, with black king on h4 behind
     String fen = "8/8/8/8/R3n2k/8/8/4K3 b - - 0 1";
     List<PositionContext> positions = List.of(new PositionContext(10, fen, false, null));
 
-    // Should NOT detect skewer (this would be detected as a pin)
     List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
     assertThat(occurrences).isEmpty();
   }

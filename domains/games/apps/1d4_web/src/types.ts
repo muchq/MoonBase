@@ -1,7 +1,15 @@
 export interface OccurrenceRow {
+  gameUrl: string;
+  motif: string;
   moveNumber: number;
   side: 'white' | 'black';
   description: string;
+  movedPiece?: string | null;
+  attacker?: string | null;
+  target?: string | null;
+  isDiscovered?: boolean | null;
+  isMate?: boolean | null;
+  pinType?: string | null;
 }
 
 export interface GameRow {
@@ -17,6 +25,7 @@ export interface GameRow {
   playedAt: string | number;
   indexedAt: string | number;
   numMoves: number;
+  hasAttack: boolean;
   hasPin: boolean;
   hasCrossPin: boolean;
   hasFork: boolean;
@@ -25,9 +34,16 @@ export interface GameRow {
   hasDiscoveredCheck: boolean;
   hasCheck: boolean;
   hasCheckmate: boolean;
+  hasDoubleCheck: boolean;
+  hasBackRankMate: boolean;
+  hasSmotheredMate: boolean;
   hasPromotion: boolean;
   hasPromotionWithCheck: boolean;
   hasPromotionWithCheckmate: boolean;
+  hasSacrifice: boolean;
+  hasInterference: boolean;
+  hasOverloadedPiece: boolean;
+  hasZugzwang: boolean;
   pgn?: string;
   occurrences?: Record<string, OccurrenceRow[]>;
 }

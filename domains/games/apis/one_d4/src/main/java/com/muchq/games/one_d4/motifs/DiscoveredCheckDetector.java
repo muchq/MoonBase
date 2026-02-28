@@ -37,11 +37,19 @@ public class DiscoveredCheckDetector implements MotifDetector {
       int[][] boardAfter = PinDetector.parsePlacement(afterPlacement);
       boolean moverIsWhite = !after.whiteToMove();
 
-      if (discoveredAttackDetector.hasDiscoveredAttackPublic(
-          boardBefore, boardAfter, moverIsWhite)) {
+      List<DiscoveredAttackDetector.RevealedAttack> attacks =
+          discoveredAttackDetector.findDiscoveredAttacks(boardBefore, boardAfter, moverIsWhite);
+      for (DiscoveredAttackDetector.RevealedAttack ra : attacks) {
+        // Only count as discovered check if the revealed attack targets the king
+        char targetPiece = ra.target().isEmpty() ? '?' : ra.target().charAt(0);
+        if (targetPiece != 'k' && targetPiece != 'K') continue;
         GameFeatures.MotifOccurrence occ =
-            GameFeatures.MotifOccurrence.from(
-                after, "Discovered check at move " + after.moveNumber());
+            GameFeatures.MotifOccurrence.discoveredAttack(
+                after,
+                "Discovered check at move " + after.moveNumber(),
+                ra.movedPiece(),
+                ra.attacker(),
+                ra.target());
         if (occ != null) occurrences.add(occ);
       }
     }

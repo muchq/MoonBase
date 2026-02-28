@@ -6,10 +6,10 @@
 #include <vector>
 
 #include "absl/status/statusor.h"
-#include "domains/games/libs/cards/golf/game_manager.h"
 #include "domains/games/apis/golf_service/game_state_mapper.h"
-#include "mongoose.h"
+#include "domains/games/libs/cards/golf/game_manager.h"
 #include "domains/games/protos/golf_ws/golf_ws.pb.h"
+#include "mongoose.h"
 
 namespace golf_service {
 using absl::StatusOr;

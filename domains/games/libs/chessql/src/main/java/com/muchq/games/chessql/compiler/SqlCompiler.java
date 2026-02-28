@@ -37,13 +37,21 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
           "cross_pin",
           "fork",
           "skewer",
+          "attack",
           "discovered_attack",
           "discovered_check",
           "check",
           "checkmate",
           "promotion",
           "promotion_with_check",
-          "promotion_with_checkmate");
+          "promotion_with_checkmate",
+          "back_rank_mate",
+          "smothered_mate",
+          "sacrifice",
+          "zugzwang",
+          "double_check",
+          "interference",
+          "overloaded_piece");
 
   private static final Map<String, String> FIELD_MAP =
       Map.of(
@@ -151,6 +159,14 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     String name = motif.motifName();
     if (!VALID_MOTIFS.contains(name)) {
       throw new IllegalArgumentException("Unknown motif: " + name);
+    }
+    if (name.equals("attack")) {
+      return "EXISTS (SELECT 1 FROM motif_occurrences mo"
+          + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK')";
+    }
+    if (name.equals("discovered_attack")) {
+      return "EXISTS (SELECT 1 FROM motif_occurrences mo"
+          + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK' AND mo.is_discovered = TRUE)";
     }
     return "g.has_" + name + " = TRUE";
   }

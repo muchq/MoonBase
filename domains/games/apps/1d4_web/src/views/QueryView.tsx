@@ -9,8 +9,9 @@ const EXAMPLE_QUERIES = [
   'motif(fork)',
   'white.elo >= 2500 AND motif(pin)',
   'eco = "B90"',
+  'motif(back_rank_mate) OR motif(smothered_mate)',
   'motif(skewer) OR motif(discovered_attack)',
-  'motif(checkmate)',
+  'motif(sacrifice) AND motif(checkmate)',
   'motif(promotion_with_check) OR motif(promotion_with_checkmate)',
   'time.class = "blitz"',
 ];
@@ -88,13 +89,16 @@ export default function QueryView() {
         <code>black.username</code>, <code>time.class</code>,{' '}
         <code>num.moves</code>, <code>eco</code>, <code>result</code>,{' '}
         <code>platform</code>, <code>game.url</code>, <code>played.at</code>.{' '}
-        Motifs: <code>motif(pin)</code>, <code>motif(cross_pin)</code>,{' '}
-        <code>motif(fork)</code>, <code>motif(skewer)</code>,{' '}
-        <code>motif(discovered_attack)</code>,{' '}
-        <code>motif(discovered_check)</code>, <code>motif(check)</code>,{' '}
-        <code>motif(checkmate)</code>, <code>motif(promotion)</code>,{' '}
-        <code>motif(promotion_with_check)</code>,{' '}
-        <code>motif(promotion_with_checkmate)</code>. Combine with{' '}
+        Motifs: <code>motif(attack)</code>, <code>motif(discovered_attack)</code>,{' '}
+        <code>motif(discovered_check)</code>, <code>motif(fork)</code>,{' '}
+        <code>motif(pin)</code>, <code>motif(cross_pin)</code>,{' '}
+        <code>motif(skewer)</code>, <code>motif(check)</code>,{' '}
+        <code>motif(checkmate)</code>, <code>motif(double_check)</code>,{' '}
+        <code>motif(back_rank_mate)</code>, <code>motif(smothered_mate)</code>,{' '}
+        <code>motif(promotion)</code>, <code>motif(promotion_with_check)</code>,{' '}
+        <code>motif(promotion_with_checkmate)</code>, <code>motif(sacrifice)</code>,{' '}
+        <code>motif(interference)</code>, <code>motif(overloaded_piece)</code>,{' '}
+        <code>motif(zugzwang)</code>. Combine with{' '}
         <code>AND</code>, <code>OR</code>, <code>NOT</code>. Strings in double
         quotes, e.g. <code>eco = &quot;B90&quot;</code>. Do not use SELECT or *.
       </div>

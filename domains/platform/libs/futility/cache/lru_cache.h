@@ -161,10 +161,10 @@ class LRUCache {
     m_list.erase(i);
   }
 
-  map_type m_map;                   ///< Hash map for O(1) key lookup
-  list_type m_list;                 ///< Doubly-linked list for recency ordering
-  size_t m_capacity;                ///< Maximum cache capacity
-  mutable std::shared_mutex mutex_; ///< Mutex for thread-safe access
+  map_type m_map;                    ///< Hash map for O(1) key lookup
+  list_type m_list;                  ///< Doubly-linked list for recency ordering
+  size_t m_capacity;                 ///< Maximum cache capacity
+  mutable std::shared_mutex mutex_;  ///< Mutex for thread-safe access
 };
 
 }  // namespace futility::cache

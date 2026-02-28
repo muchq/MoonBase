@@ -9,9 +9,7 @@ namespace meerkat {
 
 class HttpMetricsManagerTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    manager_ = std::make_unique<HttpMetricsManager>("test_service");
-  }
+  void SetUp() override { manager_ = std::make_unique<HttpMetricsManager>("test_service"); }
 
   std::unique_ptr<HttpMetricsManager> manager_;
 };

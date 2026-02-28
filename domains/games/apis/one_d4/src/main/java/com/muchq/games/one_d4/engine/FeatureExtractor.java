@@ -5,8 +5,10 @@ import com.muchq.games.one_d4.engine.model.Motif;
 import com.muchq.games.one_d4.engine.model.ParsedGame;
 import com.muchq.games.one_d4.engine.model.PositionContext;
 import com.muchq.games.one_d4.motifs.MotifDetector;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -53,6 +55,52 @@ public class FeatureExtractor {
       }
     }
 
+    // Post-process: derive FORK occurrences from ATTACK occurrences.
+    // A fork is when the same attacker at the same ply attacks 2+ targets.
+    deriveForkFromAttack(allOccurrences, foundMotifs);
+
     return new GameFeatures(foundMotifs, numMoves, allOccurrences);
+  }
+
+  /**
+   * Derives {@link Motif#FORK} occurrences from {@link Motif#ATTACK} occurrences. Groups ATTACK
+   * occurrences by (ply, attacker); groups with 2+ targets produce one FORK occurrence per target.
+   */
+  static void deriveForkFromAttack(
+      Map<Motif, List<GameFeatures.MotifOccurrence>> allOccurrences, Set<Motif> foundMotifs) {
+    List<GameFeatures.MotifOccurrence> attackOccs =
+        allOccurrences.getOrDefault(Motif.ATTACK, List.of());
+
+    // Group by "ply|attacker" — only direct (non-discovered) attacks with a non-null attacker
+    Map<String, List<GameFeatures.MotifOccurrence>> groups = new LinkedHashMap<>();
+    for (GameFeatures.MotifOccurrence occ : attackOccs) {
+      if (occ.attacker() == null || occ.isDiscovered()) continue;
+      String key = occ.ply() + "|" + occ.attacker();
+      groups.computeIfAbsent(key, k -> new ArrayList<>()).add(occ);
+    }
+
+    List<GameFeatures.MotifOccurrence> forkOccs = new ArrayList<>();
+    for (List<GameFeatures.MotifOccurrence> group : groups.values()) {
+      if (group.size() >= 2) {
+        for (GameFeatures.MotifOccurrence attackOcc : group) {
+          forkOccs.add(
+              GameFeatures.MotifOccurrence.attack(
+                  attackOcc.ply(),
+                  attackOcc.moveNumber(),
+                  attackOcc.side(),
+                  "Fork at move " + attackOcc.moveNumber(),
+                  attackOcc.movedPiece(),
+                  attackOcc.attacker(),
+                  attackOcc.target(),
+                  false,
+                  false));
+        }
+      }
+    }
+
+    if (!forkOccs.isEmpty()) {
+      foundMotifs.add(Motif.FORK);
+      allOccurrences.put(Motif.FORK, forkOccs);
+    }
   }
 }

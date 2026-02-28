@@ -6,9 +6,9 @@
 #include <grpcpp/server_builder.h>
 #include <gtest/gtest.h>
 
-#include "domains/games/libs/cards/golf/in_memory_game_store.h"
 #include "domains/games/apis/golf_grpc/client/golf_grpc_client.h"
 #include "domains/games/apis/golf_grpc/server/test_helpers.h"
+#include "domains/games/libs/cards/golf/in_memory_game_store.h"
 #include "domains/games/protos/golf_grpc/golf.grpc.pb.h"
 
 using golf_grpc::Golf;

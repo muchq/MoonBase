@@ -18,10 +18,9 @@ import com.muchq.games.one_d4.engine.GameReplayer;
 import com.muchq.games.one_d4.engine.PgnParser;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
+import com.muchq.games.one_d4.motifs.AttackDetector;
 import com.muchq.games.one_d4.motifs.CheckDetector;
 import com.muchq.games.one_d4.motifs.CrossPinDetector;
-import com.muchq.games.one_d4.motifs.DiscoveredAttackDetector;
-import com.muchq.games.one_d4.motifs.ForkDetector;
 import com.muchq.games.one_d4.motifs.MotifDetector;
 import com.muchq.games.one_d4.motifs.PinDetector;
 import com.muchq.games.one_d4.motifs.SkewerDetector;
@@ -55,11 +54,7 @@ public class IndexWorkerTest {
     periodStore = new StubPeriodStore();
     List<MotifDetector> detectors =
         List.of(
-            new PinDetector(),
-            new CrossPinDetector(),
-            new ForkDetector(),
-            new SkewerDetector(),
-            new DiscoveredAttackDetector());
+            new PinDetector(), new CrossPinDetector(), new SkewerDetector(), new AttackDetector());
     FeatureExtractor featureExtractor =
         new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
     worker =
@@ -126,9 +121,8 @@ public class IndexWorkerTest {
             new CheckDetector(),
             new PinDetector(),
             new CrossPinDetector(),
-            new ForkDetector(),
             new SkewerDetector(),
-            new DiscoveredAttackDetector());
+            new AttackDetector());
     FeatureExtractor featureExtractor =
         new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
     IndexWorker workerWithRecording =
@@ -267,6 +261,17 @@ public class IndexWorkerTest {
     public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
       return Map.of();
     }
+
+    @Override
+    public void deleteOccurrencesByGameUrl(String gameUrl) {}
+
+    @Override
+    public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
+      return Collections.emptyList();
+    }
+
+    @Override
+    public void updateMotifs(String gameUrl, GameFeatures features) {}
   }
 
   private static final class RecordingGameFeatureStore implements GameFeatureStore {
@@ -305,6 +310,17 @@ public class IndexWorkerTest {
     public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
       return Map.of();
     }
+
+    @Override
+    public void deleteOccurrencesByGameUrl(String gameUrl) {}
+
+    @Override
+    public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
+      return Collections.emptyList();
+    }
+
+    @Override
+    public void updateMotifs(String gameUrl, GameFeatures features) {}
   }
 
   private static final class StubPeriodStore implements IndexedPeriodStore {

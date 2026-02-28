@@ -4,10 +4,10 @@
 #include <vector>
 
 #include "absl/status/statusor.h"
-#include "domains/platform/libs/futility/cache/lru_cache.h"
-#include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/graphics/libs/image_core/image_core.h"
 #include "domains/graphics/libs/tracy_cpp/tracy.h"
+#include "domains/platform/libs/futility/cache/lru_cache.h"
+#include "domains/platform/libs/futility/otel/metrics.h"
 #include "types.h"
 
 namespace portrait {

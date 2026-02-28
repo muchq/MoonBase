@@ -47,6 +47,8 @@ public class Migration {
           has_fork      BOOLEAN DEFAULT FALSE,
           has_skewer    BOOLEAN DEFAULT FALSE,
           has_discovered_attack BOOLEAN DEFAULT FALSE,
+          has_discovered_mate   BOOLEAN DEFAULT FALSE,
+          has_discovered_check  BOOLEAN DEFAULT FALSE,
           has_check     BOOLEAN DEFAULT FALSE,
           has_checkmate BOOLEAN DEFAULT FALSE,
           has_promotion BOOLEAN DEFAULT FALSE,
@@ -108,6 +110,8 @@ public class Migration {
           has_fork      BOOLEAN DEFAULT FALSE,
           has_skewer    BOOLEAN DEFAULT FALSE,
           has_discovered_attack BOOLEAN DEFAULT FALSE,
+          has_discovered_mate   BOOLEAN DEFAULT FALSE,
+          has_discovered_check  BOOLEAN DEFAULT FALSE,
           has_check     BOOLEAN DEFAULT FALSE,
           has_checkmate BOOLEAN DEFAULT FALSE,
           has_promotion BOOLEAN DEFAULT FALSE,
@@ -140,6 +144,7 @@ public class Migration {
     this.useH2 = useH2;
   }
 
+  // Legacy column additions (idempotent ALTER TABLEs for existing deployments)
   private static final String ADD_CHECK_COLUMN =
       "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_check BOOLEAN DEFAULT FALSE";
   private static final String ADD_CHECKMATE_COLUMN =
@@ -163,6 +168,28 @@ public class Migration {
   private static final String DROP_MOTIFS_JSON_COLUMN_PG =
       "ALTER TABLE game_features DROP COLUMN IF EXISTS motifs_json";
 
+  // Phase 9: additional motif columns
+  private static final String ADD_BACK_RANK_MATE_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_back_rank_mate BOOLEAN DEFAULT FALSE";
+  private static final String ADD_SMOTHERED_MATE_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_smothered_mate BOOLEAN DEFAULT FALSE";
+  private static final String ADD_SACRIFICE_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_sacrifice BOOLEAN DEFAULT FALSE";
+  private static final String ADD_ZUGZWANG_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_zugzwang BOOLEAN DEFAULT FALSE";
+  private static final String ADD_DOUBLE_CHECK_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_double_check BOOLEAN DEFAULT FALSE";
+  private static final String ADD_INTERFERENCE_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_interference BOOLEAN DEFAULT FALSE";
+  private static final String ADD_OVERLOADED_PIECE_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_overloaded_piece BOOLEAN DEFAULT"
+          + " FALSE";
+
+  // New: discovered_mate boolean
+  private static final String ADD_DISCOVERED_MATE_COLUMN =
+      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_discovered_mate BOOLEAN DEFAULT"
+          + " FALSE";
+
   // motif_occurrences: one row per motif firing per game. Dialect-neutral (UUID stored as string).
   private static final String CREATE_MOTIF_OCCURRENCES =
       """
@@ -173,7 +200,12 @@ public class Migration {
           ply          INT NOT NULL,
           side         VARCHAR(5) NOT NULL,
           move_number  INT NOT NULL,
-          description  TEXT
+          description  TEXT,
+          moved_piece  VARCHAR(20),
+          attacker     VARCHAR(20),
+          target       VARCHAR(20),
+          is_discovered BOOLEAN NOT NULL DEFAULT FALSE,
+          is_mate       BOOLEAN NOT NULL DEFAULT FALSE
       )
       """;
   private static final String CREATE_IDX_MOTIF_OCC_GAME_URL =
@@ -182,6 +214,22 @@ public class Migration {
       "CREATE INDEX IF NOT EXISTS idx_motif_occ_motif ON motif_occurrences(motif)";
   private static final String CREATE_IDX_MOTIF_OCC_PLY =
       "CREATE INDEX IF NOT EXISTS idx_motif_occ_ply ON motif_occurrences(game_url, ply)";
+
+  // Structured fields for discovered attack/check occurrences (legacy ALTER TABLE)
+  private static final String ADD_OCC_MOVED_PIECE =
+      "ALTER TABLE motif_occurrences ADD COLUMN IF NOT EXISTS moved_piece VARCHAR(20)";
+  private static final String ADD_OCC_ATTACKER =
+      "ALTER TABLE motif_occurrences ADD COLUMN IF NOT EXISTS attacker VARCHAR(20)";
+  private static final String ADD_OCC_TARGET =
+      "ALTER TABLE motif_occurrences ADD COLUMN IF NOT EXISTS target VARCHAR(20)";
+  private static final String ADD_OCC_IS_DISCOVERED =
+      "ALTER TABLE motif_occurrences ADD COLUMN IF NOT EXISTS is_discovered BOOLEAN NOT NULL"
+          + " DEFAULT FALSE";
+  private static final String ADD_OCC_IS_MATE =
+      "ALTER TABLE motif_occurrences ADD COLUMN IF NOT EXISTS is_mate BOOLEAN NOT NULL DEFAULT"
+          + " FALSE";
+  private static final String ADD_OCC_PIN_TYPE =
+      "ALTER TABLE motif_occurrences ADD COLUMN IF NOT EXISTS pin_type VARCHAR(8)";
 
   public void run() {
     try (Connection conn = dataSource.getConnection();
@@ -216,6 +264,28 @@ public class Migration {
       stmt.execute(CREATE_IDX_MOTIF_OCC_GAME_URL);
       stmt.execute(CREATE_IDX_MOTIF_OCC_MOTIF);
       stmt.execute(CREATE_IDX_MOTIF_OCC_PLY);
+
+      // Phase 9 new motif columns
+      stmt.execute(ADD_BACK_RANK_MATE_COLUMN);
+      stmt.execute(ADD_SMOTHERED_MATE_COLUMN);
+      stmt.execute(ADD_SACRIFICE_COLUMN);
+      stmt.execute(ADD_ZUGZWANG_COLUMN);
+      stmt.execute(ADD_DOUBLE_CHECK_COLUMN);
+      stmt.execute(ADD_INTERFERENCE_COLUMN);
+      stmt.execute(ADD_OVERLOADED_PIECE_COLUMN);
+
+      // Structured fields on motif_occurrences
+      stmt.execute(ADD_OCC_MOVED_PIECE);
+      stmt.execute(ADD_OCC_ATTACKER);
+      stmt.execute(ADD_OCC_TARGET);
+      stmt.execute(ADD_OCC_IS_DISCOVERED);
+      stmt.execute(ADD_OCC_IS_MATE);
+
+      // New game_features column
+      stmt.execute(ADD_DISCOVERED_MATE_COLUMN);
+
+      // Pin type for motif_occurrences
+      stmt.execute(ADD_OCC_PIN_TYPE);
 
       LOG.info("Database migration completed successfully (H2={})", useH2);
     } catch (SQLException e) {

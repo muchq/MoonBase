@@ -24,11 +24,12 @@ public class GameReplayer {
 
     for (String move : moves) {
       board = board.play(move);
-      if (!whiteToMove) {
-        moveNumber++;
-      }
       whiteToMove = !whiteToMove;
       positions.add(new PositionContext(moveNumber, board.toFEN(), whiteToMove, move));
+      if (whiteToMove) {
+        // Black just played — advance move number for the next pair.
+        moveNumber++;
+      }
     }
 
     return positions;

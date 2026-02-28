@@ -17,6 +17,8 @@ describe('MotifBadge', () => {
   it('builds tooltip text from a single occurrence', () => {
     const occs = [
       {
+        gameUrl: 'https://chess.com/game/1',
+        motif: 'fork',
         moveNumber: 12,
         side: 'white' as const,
         description: 'Knight forks king and queen',
@@ -32,8 +34,8 @@ describe('MotifBadge', () => {
 
   it('joins multiple occurrences with newlines in tooltip', () => {
     const occs = [
-      { moveNumber: 5, side: 'white' as const, description: 'Pin on d-file' },
-      { moveNumber: 20, side: 'black' as const, description: 'Absolute pin' },
+      { gameUrl: 'https://chess.com/game/1', motif: 'pin', moveNumber: 5, side: 'white' as const, description: 'Pin on d-file' },
+      { gameUrl: 'https://chess.com/game/1', motif: 'pin', moveNumber: 20, side: 'black' as const, description: 'Absolute pin' },
     ];
     render(<MotifBadge label="pin" occurrences={occs} />);
     const badge = screen.getByText('pin');

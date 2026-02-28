@@ -16,18 +16,24 @@ import com.muchq.games.one_d4.db.Migration;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.GameReplayer;
 import com.muchq.games.one_d4.engine.PgnParser;
+import com.muchq.games.one_d4.motifs.AttackDetector;
+import com.muchq.games.one_d4.motifs.BackRankMateDetector;
 import com.muchq.games.one_d4.motifs.CheckDetector;
 import com.muchq.games.one_d4.motifs.CheckmateDetector;
 import com.muchq.games.one_d4.motifs.CrossPinDetector;
-import com.muchq.games.one_d4.motifs.DiscoveredAttackDetector;
 import com.muchq.games.one_d4.motifs.DiscoveredCheckDetector;
-import com.muchq.games.one_d4.motifs.ForkDetector;
+import com.muchq.games.one_d4.motifs.DoubleCheckDetector;
+import com.muchq.games.one_d4.motifs.InterferenceDetector;
 import com.muchq.games.one_d4.motifs.MotifDetector;
+import com.muchq.games.one_d4.motifs.OverloadedPieceDetector;
 import com.muchq.games.one_d4.motifs.PinDetector;
 import com.muchq.games.one_d4.motifs.PromotionDetector;
 import com.muchq.games.one_d4.motifs.PromotionWithCheckDetector;
 import com.muchq.games.one_d4.motifs.PromotionWithCheckmateDetector;
+import com.muchq.games.one_d4.motifs.SacrificeDetector;
 import com.muchq.games.one_d4.motifs.SkewerDetector;
+import com.muchq.games.one_d4.motifs.SmotheredMateDetector;
+import com.muchq.games.one_d4.motifs.ZugzwangDetector;
 import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.games.one_d4.queue.IndexQueue;
 import com.muchq.games.one_d4.worker.IndexWorker;
@@ -113,15 +119,21 @@ public class IndexerModule {
     return List.of(
         new PinDetector(),
         new CrossPinDetector(),
-        new ForkDetector(),
         new SkewerDetector(),
-        new DiscoveredAttackDetector(),
+        new AttackDetector(),
         new DiscoveredCheckDetector(),
         new CheckDetector(),
         new CheckmateDetector(),
         new PromotionDetector(),
         new PromotionWithCheckDetector(),
-        new PromotionWithCheckmateDetector());
+        new PromotionWithCheckmateDetector(),
+        new BackRankMateDetector(),
+        new SmotheredMateDetector(),
+        new SacrificeDetector(),
+        new ZugzwangDetector(),
+        new DoubleCheckDetector(),
+        new InterferenceDetector(),
+        new OverloadedPieceDetector());
   }
 
   @Context

@@ -38,11 +38,45 @@ public class QueryControllerTest {
             gameUrl,
             Map.of(
                 "pin",
-                List.of(new OccurrenceRow(3, "white", "Knight pinned on c6")),
+                List.of(
+                    new OccurrenceRow(
+                        gameUrl,
+                        "pin",
+                        3,
+                        "white",
+                        "Knight pinned on c6",
+                        null,
+                        null,
+                        null,
+                        false,
+                        false,
+                        null)),
                 "fork",
                 List.of(
-                    new OccurrenceRow(10, "white", "Knight forks king and rook"),
-                    new OccurrenceRow(18, "black", "Queen forks two pieces")))));
+                    new OccurrenceRow(
+                        gameUrl,
+                        "fork",
+                        10,
+                        "white",
+                        "Knight forks king and rook",
+                        null,
+                        null,
+                        null,
+                        false,
+                        false,
+                        null),
+                    new OccurrenceRow(
+                        gameUrl,
+                        "fork",
+                        18,
+                        "black",
+                        "Queen forks two pieces",
+                        null,
+                        null,
+                        null,
+                        false,
+                        false,
+                        null)))));
 
     QueryResponse response = controller.query(new QueryRequest("motif(pin)", 10, 0));
 
@@ -51,7 +85,19 @@ public class QueryControllerTest {
     assertThat(row.gameUrl()).isEqualTo(gameUrl);
     assertThat(row.occurrences()).containsKey("pin");
     assertThat(row.occurrences().get("pin"))
-        .containsExactly(new OccurrenceRow(3, "white", "Knight pinned on c6"));
+        .containsExactly(
+            new OccurrenceRow(
+                gameUrl,
+                "pin",
+                3,
+                "white",
+                "Knight pinned on c6",
+                null,
+                null,
+                null,
+                false,
+                false,
+                null));
     assertThat(row.occurrences()).containsKey("fork");
     assertThat(row.occurrences().get("fork")).hasSize(2);
     assertThat(response.count()).isEqualTo(1);
@@ -109,17 +155,25 @@ public class QueryControllerTest {
         "1-0",
         Instant.now(),
         30,
-        true,
-        false,
-        true,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
+        true, // hasPin
+        false, // hasCrossPin
+        true, // hasFork
+        false, // hasSkewer
+        false, // hasDiscoveredAttack
+        false, // hasDiscoveredMate
+        false, // hasDiscoveredCheck
+        false, // hasCheck
+        false, // hasCheckmate
+        false, // hasPromotion
+        false, // hasPromotionWithCheck
+        false, // hasPromotionWithCheckmate
+        false, // hasBackRankMate
+        false, // hasSmotheredMate
+        false, // hasSacrifice
+        false, // hasZugzwang
+        false, // hasDoubleCheck
+        false, // hasInterference
+        false, // hasOverloadedPiece
         Instant.now(),
         "pgn");
   }
@@ -166,5 +220,17 @@ public class QueryControllerTest {
       }
       return out;
     }
+
+    @Override
+    public void deleteOccurrencesByGameUrl(String gameUrl) {}
+
+    @Override
+    public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
+      return List.of();
+    }
+
+    @Override
+    public void updateMotifs(
+        String gameUrl, com.muchq.games.one_d4.engine.model.GameFeatures features) {}
   }
 }

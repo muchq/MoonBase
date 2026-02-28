@@ -42,9 +42,9 @@ namespace futility::rate_limiter {
 /// @brief Internal state for tracking a single key's rate limit window.
 /// @note This is an implementation detail and should not be used directly.
 struct WindowState {
-  std::mutex mutex;                                  ///< Per-key mutex for thread safety
-  long previous_count{0};                            ///< Request count from previous window
-  long current_count{0};                             ///< Request count in current window
+  std::mutex mutex;                                    ///< Per-key mutex for thread safety
+  long previous_count{0};                              ///< Request count from previous window
+  long current_count{0};                               ///< Request count in current window
   std::chrono::steady_clock::time_point window_start;  ///< Start time of current window
   std::chrono::steady_clock::time_point last_access;   ///< Last access time (for TTL eviction)
 
