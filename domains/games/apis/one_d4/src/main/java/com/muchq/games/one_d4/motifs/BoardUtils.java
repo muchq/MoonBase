@@ -10,73 +10,77 @@ class BoardUtils {
   private BoardUtils() {}
 
   /**
-   * Returns true if the piece at (pr, pc) attacks the square (tr, tc). Handles all piece types
-   * including path-clearing for sliding pieces.
+   * Returns true if the piece at (pieceRow, pieceCol) attacks the square (targetRow, targetCol).
+   * Handles all piece types including path-clearing for sliding pieces.
    */
-  static boolean pieceAttacks(int[][] board, int pr, int pc, int tr, int tc) {
-    int piece = board[pr][pc];
+  static boolean pieceAttacks(
+      int[][] board, int pieceRow, int pieceCol, int targetRow, int targetCol) {
+    int piece = board[pieceRow][pieceCol];
     if (piece == 0) return false;
-    int absPiece = Math.abs(piece);
+    int pieceType = Math.abs(piece);
     boolean pieceIsWhite = piece > 0;
 
-    int dr = tr - pr;
-    int dc = tc - pc;
+    int rowDelta = targetRow - pieceRow;
+    int colDelta = targetCol - pieceCol;
 
-    switch (absPiece) {
+    switch (pieceType) {
       case 1: // Pawn — attacks diagonally one step in the forward direction
         int pawnDir = pieceIsWhite ? -1 : 1;
-        return dr == pawnDir && Math.abs(dc) == 1;
+        return rowDelta == pawnDir && Math.abs(colDelta) == 1;
 
       case 2: // Knight — L-shape
-        int adr = Math.abs(dr), adc = Math.abs(dc);
-        return (adr == 2 && adc == 1) || (adr == 1 && adc == 2);
+        int absRowDelta = Math.abs(rowDelta), absColDelta = Math.abs(colDelta);
+        return (absRowDelta == 2 && absColDelta == 1) || (absRowDelta == 1 && absColDelta == 2);
 
       case 3: // Bishop — diagonal only
-        if (Math.abs(dr) != Math.abs(dc) || dr == 0) return false;
-        return isPathClear(board, pr, pc, tr, tc);
+        if (Math.abs(rowDelta) != Math.abs(colDelta) || rowDelta == 0) return false;
+        return isPathClear(board, pieceRow, pieceCol, targetRow, targetCol);
 
       case 4: // Rook — straight lines only
-        if (dr != 0 && dc != 0) return false;
-        return isPathClear(board, pr, pc, tr, tc);
+        if (rowDelta != 0 && colDelta != 0) return false;
+        return isPathClear(board, pieceRow, pieceCol, targetRow, targetCol);
 
       case 5: // Queen — any straight or diagonal
-        if (dr != 0 && dc != 0 && Math.abs(dr) != Math.abs(dc)) return false;
-        return isPathClear(board, pr, pc, tr, tc);
+        if (rowDelta != 0 && colDelta != 0 && Math.abs(rowDelta) != Math.abs(colDelta))
+          return false;
+        return isPathClear(board, pieceRow, pieceCol, targetRow, targetCol);
 
       case 6: // King — one step in any direction
-        return Math.abs(dr) <= 1 && Math.abs(dc) <= 1 && (dr != 0 || dc != 0);
+        return Math.abs(rowDelta) <= 1
+            && Math.abs(colDelta) <= 1
+            && (rowDelta != 0 || colDelta != 0);
 
       default:
         return false;
     }
   }
 
-  /** Returns true if all squares strictly between (fr,fc) and (tr,tc) are empty. */
-  static boolean isPathClear(int[][] board, int fr, int fc, int tr, int tc) {
-    int dr = Integer.signum(tr - fr);
-    int dc = Integer.signum(tc - fc);
-    int r = fr + dr, c = fc + dc;
-    while (r != tr || c != tc) {
-      if (board[r][c] != 0) return false;
-      r += dr;
-      c += dc;
+  /** Returns true if all squares strictly between (fromRow,fromCol) and (toRow,toCol) are empty. */
+  static boolean isPathClear(int[][] board, int fromRow, int fromCol, int toRow, int toCol) {
+    int rowStep = Integer.signum(toRow - fromRow);
+    int colStep = Integer.signum(toCol - fromCol);
+    int row = fromRow + rowStep, col = fromCol + colStep;
+    while (row != toRow || col != toCol) {
+      if (board[row][col] != 0) return false;
+      row += rowStep;
+      col += colStep;
     }
     return true;
   }
 
   /**
-   * Counts how many pieces of {@code attackerIsWhite} color attack the square (tr, tc). Ignores any
-   * piece that might be standing on (tr, tc) itself.
+   * Counts how many pieces of {@code attackerIsWhite} color attack the square (targetRow,
+   * targetCol). Ignores any piece that might be standing on (targetRow, targetCol) itself.
    */
-  static int countAttackers(int[][] board, int tr, int tc, boolean attackerIsWhite) {
+  static int countAttackers(int[][] board, int targetRow, int targetCol, boolean attackerIsWhite) {
     int count = 0;
-    for (int r = 0; r < 8; r++) {
-      for (int c = 0; c < 8; c++) {
-        if (r == tr && c == tc) continue;
-        int piece = board[r][c];
+    for (int row = 0; row < 8; row++) {
+      for (int col = 0; col < 8; col++) {
+        if (row == targetRow && col == targetCol) continue;
+        int piece = board[row][col];
         if (piece == 0) continue;
         if ((piece > 0) != attackerIsWhite) continue;
-        if (pieceAttacks(board, r, c, tr, tc)) {
+        if (pieceAttacks(board, row, col, targetRow, targetCol)) {
           count++;
         }
       }
