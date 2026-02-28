@@ -255,7 +255,7 @@ algebra nodes:
 
 | ChessQL construct | Substrait equivalent |
 |-------------------|---------------------|
-| `motif(fork)` | `Filter(ReadRel("game_features"), ScalarFunction(equal, FieldRef("has_fork"), BoolLiteral(true)))` |
+| `motif(fork)` | `Filter(ReadRel("game_features"), ExistsSubquery(Filter(ReadRel("motif_occurrences"), and(equal(FieldRef("motif"), "ATTACK"), equal(FieldRef("is_discovered"), false), isNotNull(FieldRef("attacker"))), GroupBy(ply, attacker), Having(gte(count, 2))))` |
 | `white.elo >= 2500` | `Filter(ReadRel, ScalarFunction(gte, FieldRef("white_elo"), I32Literal(2500)))` |
 | `AND` / `OR` / `NOT` | `ScalarFunction(and/or/not, ...)` |
 | `eco IN ["B90", "C65"]` | `ScalarFunction(or, equal(eco, "B90"), equal(eco, "C65"))` or `SingularOrList` |
@@ -324,7 +324,7 @@ Implementations:
 | `SqlQueryRouter` | Convert Substrait → SQL via `substrait-java` `SubstraitToSql`, execute on PostgreSQL/H2 via JDBC. Drop-in replacement for current `SqlCompiler` path. |
 | `DataFusionQueryRouter` | Serialize Substrait plan to protobuf bytes, POST to `motif_query/v1/query/substrait`. DataFusion deserializes and executes. |
 | `ConfigQueryRouter` | Feature flag: `QUERY_BACKEND=sql|datafusion`. Simple toggle for migration. |
-| `CostQueryRouter` | Inspect the plan: if it touches only `game_features` (boolean filter), route to DataFusion (fast columnar scan). If it has `sequence()` subqueries on small datasets, route to SQL (mature optimizer). |
+| `CostQueryRouter` | Inspect the plan: if it touches only `game_features` (metadata filters, no motif predicates), route to DataFusion (fast columnar scan). Motif predicates always join `motif_occurrences`; route `sequence()` and complex motif queries to SQL (mature optimizer) or DataFusion depending on dataset size. |
 
 ### How Substrait Flows to Each Backend
 
@@ -1172,7 +1172,7 @@ Phase 5: Lichess bulk ingest (after Phase 9 / issue #1049 lands).
 - New `SubstraitCompiler implements QueryCompiler<Plan>` in chessql library
   - Walk ChessQL AST → Substrait `ReadRel`, `FilterRel`, `SortRel`,
     `AggregateRel`, `JoinRel` nodes
-  - Handle `MotifExpr` → boolean column filter
+  - Handle `MotifExpr` → EXISTS subquery on `motif_occurrences` (most motifs by stored name; `fork`, `checkmate`, `discovered_attack`, `discovered_check`, `double_check` derived from `ATTACK` rows)
   - Handle `ComparisonExpr` / `InExpr` → scalar functions
   - Handle `SequenceExpr` → join-based exists subquery
   - Handle `OrderByClause` → aggregate + sort on motif_occurrences
