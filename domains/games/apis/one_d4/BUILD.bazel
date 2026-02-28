@@ -353,6 +353,7 @@ java_test_suite(
     name = "api_validation_tests",
     size = "small",
     srcs = [
+        "src/test/java/com/muchq/games/one_d4/api/AdminControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexRequestValidatorTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryControllerTest.java",
@@ -362,6 +363,7 @@ java_test_suite(
         ":api",
         ":db",
         ":dto",
+        ":engine",
         ":model",
         ":queue",
         "//domains/games/libs/chessql:compiler",
@@ -409,6 +411,7 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/games/one_d4/e2e/IndexE2ETest.java",
         "src/test/java/com/muchq/games/one_d4/e2e/MotifE2ETest.java",
+        "src/test/java/com/muchq/games/one_d4/e2e/ReanalysisE2ETest.java",
     ],
     deps = [
         ":api",
@@ -416,6 +419,7 @@ java_test_suite(
         ":dto",
         ":e2e_support",
         ":engine",
+        ":model",
         ":motifs",
         ":queue",
         ":worker",

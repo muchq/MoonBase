@@ -192,6 +192,59 @@ public class PinDetectorTest {
     assertThat(occurrences.get(0).isMate()).isFalse();
   }
 
+  // === King's Gambit game positions (move 4: 4.Bb5 pins Nc6 to ke8) ===
+  //
+  // FEN after 4.Bb5 (1.e4 e5 2.f4 d6 3.Nf3 Nc6 4.Bb5):
+  //   r1bqkbnr/ppp2ppp/2np4/1B2p3/4PP2/5N2/PPPP2PP/RNBQK2R b KQkq - 3 4
+  // Absolute pin: white Bb5 pins black Nc6 against black ke8 along the b5-e8 diagonal.
+
+  private static final String KINGS_GAMBIT_MOVE4_FEN =
+      "r1bqkbnr/ppp2ppp/2np4/1B2p3/4PP2/5N2/PPPP2PP/RNBQK2R";
+
+  @Test
+  public void absolutePin_kingsGambitMove4_Bb5PinsNc6ToKe8() {
+    // After 4.Bb5 it is black to move (whiteToMove=false); the last move was white's 4th.
+    String fen = KINGS_GAMBIT_MOVE4_FEN + " b KQkq - 3 4";
+    List<PositionContext> positions = List.of(new PositionContext(4, fen, false, null));
+
+    List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
+
+    // The occurrence is attributed to white (white made the move that created the pin).
+    assertThat(occurrences)
+        .anySatisfy(
+            o -> {
+              assertThat(o.attacker()).isEqualTo("Bb5");
+              assertThat(o.target()).isEqualTo("nc6");
+              assertThat(o.pinType()).isEqualTo("ABSOLUTE");
+              assertThat(o.moveNumber()).isEqualTo(4);
+              assertThat(o.side()).isEqualTo("white");
+            });
+  }
+
+  @Test
+  public void absolutePin_kingsGambitMove4_exactlyOnePinDetected() {
+    // Regression: verify the move-4 position produces no false-positive extra pins.
+    String fen = KINGS_GAMBIT_MOVE4_FEN + " b KQkq - 3 4";
+    List<PositionContext> positions = List.of(new PositionContext(4, fen, false, null));
+
+    List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
+
+    assertThat(occurrences).hasSize(1);
+    assertThat(occurrences.get(0).pinType()).isEqualTo("ABSOLUTE");
+  }
+
+  @Test
+  public void noPin_kingsGambit_noPieceBetweenBishopAndKing_noPinDetected() {
+    // After the Nc6 moves away (9...Nd4), nothing lies between Bb5 and ke8 — no pin.
+    // Minimal FEN: white Bb5, black ke8, white Ke1 (other pieces removed for clarity).
+    String fen = "4k3/8/8/1B6/8/8/8/4K3 b - - 0 10";
+    List<PositionContext> positions = List.of(new PositionContext(10, fen, false, null));
+
+    List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
+
+    assertThat(occurrences).isEmpty();
+  }
+
   // === Helper methods ===
 
   @Test
