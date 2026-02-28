@@ -4,6 +4,7 @@ import { Chessboard } from 'react-chessboard';
 import type { GameRow, OccurrenceRow } from '../types';
 
 const MOTIF_COLORS: Record<string, string> = {
+  attack: '#f6c90e',
   fork: '#f6c90e',
   pin: '#e84393',
   skewer: '#e84393',
@@ -12,9 +13,16 @@ const MOTIF_COLORS: Record<string, string> = {
   discovered_check: '#66b2ff',
   check: '#ff4444',
   checkmate: '#ff4444',
+  double_check: '#ff4444',
+  back_rank_mate: '#ff4444',
+  smothered_mate: '#ff4444',
   promotion: '#44cc44',
   promotion_with_check: '#44cc44',
   promotion_with_checkmate: '#44cc44',
+  sacrifice: '#ff9900',
+  interference: '#cc66ff',
+  overloaded_piece: '#cc66ff',
+  zugzwang: '#aaaaaa',
 };
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';

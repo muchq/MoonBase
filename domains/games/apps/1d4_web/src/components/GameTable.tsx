@@ -2,17 +2,25 @@ import type { GameRow } from '../types';
 import MotifBadge from './MotifBadge';
 
 const MOTIF_KEYS: [keyof GameRow, string][] = [
-  ['hasPin', 'pin'],
-  ['hasCrossPin', 'cross_pin'],
-  ['hasFork', 'fork'],
-  ['hasSkewer', 'skewer'],
+  ['hasAttack', 'attack'],
   ['hasDiscoveredAttack', 'discovered_attack'],
   ['hasDiscoveredCheck', 'discovered_check'],
+  ['hasFork', 'fork'],
+  ['hasPin', 'pin'],
+  ['hasCrossPin', 'cross_pin'],
+  ['hasSkewer', 'skewer'],
   ['hasCheck', 'check'],
   ['hasCheckmate', 'checkmate'],
+  ['hasDoubleCheck', 'double_check'],
+  ['hasBackRankMate', 'back_rank_mate'],
+  ['hasSmotheredMate', 'smothered_mate'],
   ['hasPromotion', 'promotion'],
   ['hasPromotionWithCheck', 'promotion_with_check'],
   ['hasPromotionWithCheckmate', 'promotion_with_checkmate'],
+  ['hasSacrifice', 'sacrifice'],
+  ['hasInterference', 'interference'],
+  ['hasOverloadedPiece', 'overloaded_piece'],
+  ['hasZugzwang', 'zugzwang'],
 ];
 
 const COLUMNS = [
