@@ -40,10 +40,22 @@ public class QueryControllerTest {
                 "pin",
                 List.of(
                     new OccurrenceRow(
-                        3, "white", "Knight pinned on c6", null, null, null, false, false, null)),
+                        gameUrl,
+                        "pin",
+                        3,
+                        "white",
+                        "Knight pinned on c6",
+                        null,
+                        null,
+                        null,
+                        false,
+                        false,
+                        null)),
                 "fork",
                 List.of(
                     new OccurrenceRow(
+                        gameUrl,
+                        "fork",
                         10,
                         "white",
                         "Knight forks king and rook",
@@ -54,6 +66,8 @@ public class QueryControllerTest {
                         false,
                         null),
                     new OccurrenceRow(
+                        gameUrl,
+                        "fork",
                         18,
                         "black",
                         "Queen forks two pieces",
@@ -73,7 +87,17 @@ public class QueryControllerTest {
     assertThat(row.occurrences().get("pin"))
         .containsExactly(
             new OccurrenceRow(
-                3, "white", "Knight pinned on c6", null, null, null, false, false, null));
+                gameUrl,
+                "pin",
+                3,
+                "white",
+                "Knight pinned on c6",
+                null,
+                null,
+                null,
+                false,
+                false,
+                null));
     assertThat(row.occurrences()).containsKey("fork");
     assertThat(row.occurrences().get("fork")).hasSize(2);
     assertThat(response.count()).isEqualTo(1);

@@ -248,6 +248,8 @@ public class GameFeatureDao implements GameFeatureStore {
               .computeIfAbsent(motif, k -> new ArrayList<>())
               .add(
                   new OccurrenceRow(
+                      gameUrl,
+                      motif,
                       moveNumber,
                       side,
                       description,

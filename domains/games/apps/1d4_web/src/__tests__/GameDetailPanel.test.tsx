@@ -14,6 +14,8 @@ vi.mock('react-chessboard', () => ({
 const TEST_PGN = '1. e4 e5 2. Nf3 Nc6';
 
 const forkOccurrence: OccurrenceRow = {
+  gameUrl: 'https://chess.com/game/1',
+  motif: 'fork',
   moveNumber: 2,
   side: 'white',
   description: 'Fork detected',
@@ -144,7 +146,7 @@ describe('GameDetailPanel', () => {
   });
 
   it('shows black occurrence move label with ellipsis', () => {
-    const blackOcc: OccurrenceRow = { moveNumber: 1, side: 'black', description: 'Pin' };
+    const blackOcc: OccurrenceRow = { gameUrl: 'https://chess.com/game/1', motif: 'pin', moveNumber: 1, side: 'black', description: 'Pin' };
     const game = { ...mockGame, occurrences: { pin: [blackOcc] } };
     render(<GameDetailPanel game={game} onClose={() => {}} />);
     expect(screen.getByText('1...')).toBeInTheDocument();

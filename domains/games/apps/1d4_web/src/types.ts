@@ -1,4 +1,6 @@
 export interface OccurrenceRow {
+  gameUrl: string;
+  motif: string;
   moveNumber: number;
   side: 'white' | 'black';
   description: string;

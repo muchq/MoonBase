@@ -73,12 +73,32 @@ public class GameFeatureDaoTest {
     assertThat(byMotif.get("pin"))
         .containsExactly(
             new OccurrenceRow(
-                3, "white", "Knight pinned on c6", null, null, null, false, false, null));
+                gameUrl,
+                "pin",
+                3,
+                "white",
+                "Knight pinned on c6",
+                null,
+                null,
+                null,
+                false,
+                false,
+                null));
     assertThat(byMotif).containsKey("discovered_check");
     assertThat(byMotif.get("discovered_check"))
         .containsExactly(
             new OccurrenceRow(
-                6, "black", "Discovered check", "Nd5f4", "Ba2", "kf7", false, false, null));
+                gameUrl,
+                "discovered_check",
+                6,
+                "black",
+                "Discovered check",
+                "Nd5f4",
+                "Ba2",
+                "kf7",
+                false,
+                false,
+                null));
   }
 
   @Test
@@ -137,6 +157,8 @@ public class GameFeatureDaoTest {
     assertThat(rows.get(0))
         .isEqualTo(
             new OccurrenceRow(
+                gameUrl,
+                "attack",
                 3,
                 "white",
                 "Discovered attack at move 3",
@@ -149,7 +171,17 @@ public class GameFeatureDaoTest {
     assertThat(rows.get(1))
         .isEqualTo(
             new OccurrenceRow(
-                4, "white", "Attack at move 4", "Ra1a5", "Ra5", "ka8", false, true, null));
+                gameUrl,
+                "attack",
+                4,
+                "white",
+                "Attack at move 4",
+                "Ra1a5",
+                "Ra5",
+                "ka8",
+                false,
+                true,
+                null));
   }
 
   @Test
