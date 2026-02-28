@@ -269,9 +269,6 @@ public class IndexWorkerTest {
     public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
       return Collections.emptyList();
     }
-
-    @Override
-    public void updateMotifs(String gameUrl, GameFeatures features) {}
   }
 
   private static final class RecordingGameFeatureStore implements GameFeatureStore {
@@ -318,9 +315,6 @@ public class IndexWorkerTest {
     public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
       return Collections.emptyList();
     }
-
-    @Override
-    public void updateMotifs(String gameUrl, GameFeatures features) {}
   }
 
   private static final class StubPeriodStore implements IndexedPeriodStore {

@@ -155,25 +155,6 @@ public class QueryControllerTest {
         "1-0",
         Instant.now(),
         30,
-        true, // hasPin
-        false, // hasCrossPin
-        true, // hasFork
-        false, // hasSkewer
-        false, // hasDiscoveredAttack
-        false, // hasDiscoveredMate
-        false, // hasDiscoveredCheck
-        false, // hasCheck
-        false, // hasCheckmate
-        false, // hasPromotion
-        false, // hasPromotionWithCheck
-        false, // hasPromotionWithCheckmate
-        false, // hasBackRankMate
-        false, // hasSmotheredMate
-        false, // hasSacrifice
-        false, // hasZugzwang
-        false, // hasDoubleCheck
-        false, // hasInterference
-        false, // hasOverloadedPiece
         Instant.now(),
         "pgn");
   }
@@ -228,9 +209,5 @@ public class QueryControllerTest {
     public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
       return List.of();
     }
-
-    @Override
-    public void updateMotifs(
-        String gameUrl, com.muchq.games.one_d4.engine.model.GameFeatures features) {}
   }
 }

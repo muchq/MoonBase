@@ -74,19 +74,6 @@ public class AdminControllerTest {
   }
 
   @Test
-  public void reanalyze_updateMotifsThrows_countsAsFailed() {
-    FakeGameFeatureStore store = new FakeGameFeatureStore();
-    store.addGame("https://chess.com/game/1", "valid pgn");
-    store.throwOnUpdateMotifs = true;
-    AdminController controller = new AdminController(store, noOpExtractor());
-
-    ReanalysisResponse response = controller.reanalyze();
-
-    assertThat(response.gamesProcessed()).isEqualTo(0);
-    assertThat(response.gamesFailed()).isEqualTo(1);
-  }
-
-  @Test
   public void reanalyze_exceptionOnOneGame_othersStillProcessed() {
     // Null PGN game is sandwiched between two valid games.
     FakeGameFeatureStore store = new FakeGameFeatureStore();
@@ -100,11 +87,11 @@ public class AdminControllerTest {
     assertThat(response.gamesProcessed()).isEqualTo(2);
     assertThat(response.gamesFailed()).isEqualTo(1);
     // Game 3 is processed even though game 2 failed.
-    assertThat(store.updateMotifsCount("https://chess.com/game/3")).isEqualTo(1);
+    assertThat(store.insertOccurrencesCount("https://chess.com/game/3")).isEqualTo(1);
   }
 
   @Test
-  public void reanalyze_validGame_callsUpdateDeleteInsert() {
+  public void reanalyze_validGame_callsDeleteAndInsert() {
     FakeGameFeatureStore store = new FakeGameFeatureStore();
     String url = "https://chess.com/game/1";
     store.addGame(url, "valid pgn");
@@ -112,13 +99,12 @@ public class AdminControllerTest {
 
     controller.reanalyze();
 
-    assertThat(store.updateMotifsCount(url)).isEqualTo(1);
     assertThat(store.deleteOccurrencesCount(url)).isEqualTo(1);
     assertThat(store.insertOccurrencesCount(url)).isEqualTo(1);
   }
 
   @Test
-  public void reanalyze_nullPgn_doesNotCallUpdateOrDelete() {
+  public void reanalyze_nullPgn_doesNotCallDeleteOrInsert() {
     FakeGameFeatureStore store = new FakeGameFeatureStore();
     String url = "https://chess.com/game/1";
     store.addGame(url, null);
@@ -126,7 +112,6 @@ public class AdminControllerTest {
 
     controller.reanalyze();
 
-    assertThat(store.updateMotifsCount(url)).isEqualTo(0);
     assertThat(store.deleteOccurrencesCount(url)).isEqualTo(0);
     assertThat(store.insertOccurrencesCount(url)).isEqualTo(0);
   }
@@ -171,17 +156,11 @@ public class AdminControllerTest {
 
   private static class FakeGameFeatureStore implements GameFeatureStore {
     private final List<GameForReanalysis> games = new ArrayList<>();
-    private final Map<String, Integer> updateMotifsCount = new HashMap<>();
     private final Map<String, Integer> deleteCount = new HashMap<>();
     private final Map<String, Integer> insertCount = new HashMap<>();
-    boolean throwOnUpdateMotifs = false;
 
     void addGame(String url, String pgn) {
       games.add(new GameForReanalysis(UUID.randomUUID(), url, pgn));
-    }
-
-    int updateMotifsCount(String url) {
-      return updateMotifsCount.getOrDefault(url, 0);
     }
 
     int deleteOccurrencesCount(String url) {
@@ -197,12 +176,6 @@ public class AdminControllerTest {
       int start = Math.min(offset, games.size());
       int end = Math.min(offset + limit, games.size());
       return new ArrayList<>(games.subList(start, end));
-    }
-
-    @Override
-    public void updateMotifs(String gameUrl, GameFeatures features) {
-      if (throwOnUpdateMotifs) throw new RuntimeException("store error");
-      updateMotifsCount.merge(gameUrl, 1, Integer::sum);
     }
 
     @Override

@@ -183,13 +183,13 @@ The document model uses nested paths instead of flat column names:
 
 Motif field mapping:
 
-| ChessQL              | PostgreSQL                  | MongoDB                      |
-|----------------------|-----------------------------|------------------------------|
-| `motif(pin)`         | `has_pin = TRUE`            | `motifs.pin = true`          |
-| `motif(cross_pin)`   | `has_cross_pin = TRUE`      | `motifs.crossPin = true`     |
-| `motif(fork)`        | `has_fork = TRUE`           | `motifs.fork = true`         |
-| `motif(skewer)`      | `has_skewer = TRUE`         | `motifs.skewer = true`       |
-| `motif(discovered_attack)` | `has_discovered_attack = TRUE` | `motifs.discoveredAttack = true` |
+| ChessQL              | PostgreSQL                                                    | MongoDB                      |
+|----------------------|---------------------------------------------------------------|------------------------------|
+| `motif(pin)`         | `EXISTS (SELECT 1 FROM motif_occurrences mo WHERE mo.game_url = g.game_url AND mo.motif = 'PIN')` | `motifs.pin = true`          |
+| `motif(cross_pin)`   | `EXISTS (... mo.motif = 'CROSS_PIN')`                        | `motifs.crossPin = true`     |
+| `motif(fork)`        | `EXISTS (... mo.motif = 'ATTACK' GROUP BY ply, attacker HAVING COUNT(*) >= 2)` | `motifs.fork = true`         |
+| `motif(skewer)`      | `EXISTS (... mo.motif = 'SKEWER')`                           | `motifs.skewer = true`       |
+| `motif(discovered_attack)` | `EXISTS (... mo.motif = 'ATTACK' AND mo.is_discovered = TRUE)` | `motifs.discoveredAttack = true` |
 
 The dotted ChessQL field syntax (`white.elo`) maps directly to MongoDB's dot-notation for nested documents. This is a natural fit — the ChessQL grammar was accidentally designed for document databases.
 
@@ -716,7 +716,7 @@ message Document {
 |-------------|----------------------|-----|
 | Store game documents | Partial — `bytes` field can hold serialized JSON | No native nested document support |
 | Query by numeric fields (`white.elo >= 2500`) | **No** — tags are string equality only | Cannot express range queries |
-| Query by motif booleans (`motif(fork)`) | Partial — could encode as tag `"has_fork": "true"` | String equality, not boolean |
+| Query by motif (`motif(fork)`) | Partial — could encode as tag `"has_fork": "true"` | String equality; no EXISTS subquery support |
 | Complex boolean queries (AND/OR/NOT) | **No** — `FindDoc` matches exact tag set | No boolean combinators |
 | Pagination (limit/offset) | **No** — returns single document | Cannot paginate results |
 | Batch queries | **No** — `find_one` only | No `find_many` |

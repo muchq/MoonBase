@@ -10,13 +10,9 @@ import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.db.GameFeatureStore.GameForReanalysis;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.junit.Before;
@@ -253,32 +249,28 @@ public class GameFeatureDaoTest {
     assertThat(results).isEmpty();
   }
 
-  // === updateMotifs ===
+  // === insertOccurrences and motif queries ===
 
   @Test
-  public void updateMotifs_updatesMotifColumnsForMatchingGame() {
-    String gameUrl = "https://chess.com/game/motif-update-1";
-    dao.insert(createGame(gameUrl)); // all motif columns initially false
+  public void insertOccurrences_enablesMotifQuery() {
+    String gameUrl = "https://chess.com/game/motif-query-1";
+    dao.insert(createGame(gameUrl));
 
-    // Verify initially not returned by a pin query
     CompiledQuery pinQuery = new SqlCompiler().compile(Parser.parse("motif(pin)"));
     assertThat(dao.query(pinQuery, 10, 0)).isEmpty();
 
-    GameFeatures features =
-        new GameFeatures(
-            Set.of(Motif.PIN, Motif.CHECK),
-            20,
-            Map.of(
-                Motif.PIN,
-                List.of(
-                    new GameFeatures.MotifOccurrence(
-                        7, 4, "white", "Pin", null, "Bb5", "nc6", false, false, "ABSOLUTE")),
-                Motif.CHECK,
-                List.of(
-                    new GameFeatures.MotifOccurrence(
-                        7, 4, "white", "Check", null, "Bb5", "ke8", false, false, null))));
+    Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences =
+        Map.of(
+            Motif.PIN,
+            List.of(
+                new GameFeatures.MotifOccurrence(
+                    7, 4, "white", "Pin", null, "Bb5", "nc6", false, false, "ABSOLUTE")),
+            Motif.CHECK,
+            List.of(
+                new GameFeatures.MotifOccurrence(
+                    7, 4, "white", "Check", null, "Bb5", "ke8", false, false, null)));
 
-    dao.updateMotifs(gameUrl, features);
+    dao.insertOccurrences(gameUrl, occurrences);
 
     assertThat(dao.query(pinQuery, 10, 0)).hasSize(1);
     CompiledQuery checkQuery = new SqlCompiler().compile(Parser.parse("motif(check)"));
@@ -288,129 +280,24 @@ public class GameFeatureDaoTest {
   }
 
   @Test
-  public void updateMotifs_doesNotAffectOtherGames() {
-    String url1 = "https://chess.com/game/motif-update-2a";
-    String url2 = "https://chess.com/game/motif-update-2b";
+  public void insertOccurrences_doesNotAffectOtherGames() {
+    String url1 = "https://chess.com/game/motif-isolation-1";
+    String url2 = "https://chess.com/game/motif-isolation-2";
     dao.insert(createGame(url1));
     dao.insert(createGame(url2));
 
-    GameFeatures features =
-        new GameFeatures(
-            Set.of(Motif.PIN),
-            10,
-            Map.of(
-                Motif.PIN,
-                List.of(
-                    new GameFeatures.MotifOccurrence(
-                        3, 2, "white", "Pin", null, "Bb5", "nc6", false, false, "ABSOLUTE"))));
-    dao.updateMotifs(url1, features);
+    Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences =
+        Map.of(
+            Motif.PIN,
+            List.of(
+                new GameFeatures.MotifOccurrence(
+                    3, 2, "white", "Pin", null, "Bb5", "nc6", false, false, "ABSOLUTE")));
+    dao.insertOccurrences(url1, occurrences);
 
     CompiledQuery pinQuery = new SqlCompiler().compile(Parser.parse("motif(pin)"));
     List<GameFeature> pinned = dao.query(pinQuery, 10, 0);
     assertThat(pinned).hasSize(1);
     assertThat(pinned.get(0).gameUrl()).isEqualTo(url1);
-  }
-
-  @Test
-  public void updateMotifs_derivesHasDiscoveredAttackFromAttackOccurrences() throws Exception {
-    String gameUrl = "https://chess.com/game/motif-update-3";
-    dao.insert(createGame(gameUrl));
-
-    // ATTACK occurrence with isDiscovered=true → has_discovered_attack should be set to true
-    GameFeatures.MotifOccurrence discoveredAttack =
-        new GameFeatures.MotifOccurrence(
-            9, 5, "black", "Discovered attack", "nc6d4", "bd7", "Bb5", true, false, null);
-    GameFeatures features =
-        new GameFeatures(Set.of(Motif.ATTACK), 10, Map.of(Motif.ATTACK, List.of(discoveredAttack)));
-
-    dao.updateMotifs(gameUrl, features);
-
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps =
-            conn.prepareStatement(
-                "SELECT has_discovered_attack FROM game_features WHERE game_url = ?")) {
-      ps.setString(1, gameUrl);
-      ResultSet rs = ps.executeQuery();
-      assertThat(rs.next()).isTrue();
-      assertThat(rs.getBoolean("has_discovered_attack")).isTrue();
-    }
-  }
-
-  @Test
-  public void updateMotifs_derivesHasCheckmateFromAttackOccurrencesWithIsMate() throws Exception {
-    String gameUrl = "https://chess.com/game/motif-update-4";
-    dao.insert(createGame(gameUrl));
-
-    // ATTACK occurrence with isMate=true → has_checkmate should be set to true
-    GameFeatures.MotifOccurrence mateAttack =
-        new GameFeatures.MotifOccurrence(
-            107, 54, "white", "Checkmate", "Ra1a5", "Ra5", "ka8", false, true, null);
-    GameFeatures features =
-        new GameFeatures(Set.of(Motif.ATTACK), 54, Map.of(Motif.ATTACK, List.of(mateAttack)));
-
-    dao.updateMotifs(gameUrl, features);
-
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps =
-            conn.prepareStatement("SELECT has_checkmate FROM game_features WHERE game_url = ?")) {
-      ps.setString(1, gameUrl);
-      ResultSet rs = ps.executeQuery();
-      assertThat(rs.next()).isTrue();
-      assertThat(rs.getBoolean("has_checkmate")).isTrue();
-    }
-  }
-
-  @Test
-  public void updateMotifs_derivesHasDiscoveredMateFromAttackOccurrencesWithBothFlags()
-      throws Exception {
-    String gameUrl = "https://chess.com/game/motif-update-5";
-    dao.insert(createGame(gameUrl));
-
-    // ATTACK occurrence with isDiscovered=true AND isMate=true → has_discovered_mate=true
-    GameFeatures.MotifOccurrence discoveredMate =
-        new GameFeatures.MotifOccurrence(
-            9, 5, "white", "Discovered mate", "Pe2e4", "Ra1", "ke8", true, true, null);
-    GameFeatures features =
-        new GameFeatures(Set.of(Motif.ATTACK), 10, Map.of(Motif.ATTACK, List.of(discoveredMate)));
-
-    dao.updateMotifs(gameUrl, features);
-
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps =
-            conn.prepareStatement(
-                "SELECT has_discovered_mate, has_checkmate FROM game_features WHERE game_url ="
-                    + " ?")) {
-      ps.setString(1, gameUrl);
-      ResultSet rs = ps.executeQuery();
-      assertThat(rs.next()).isTrue();
-      assertThat(rs.getBoolean("has_discovered_mate")).isTrue();
-      assertThat(rs.getBoolean("has_checkmate")).isTrue();
-    }
-  }
-
-  @Test
-  public void updateMotifs_noDiscoveredAttack_whenAllAttacksAreDirect() throws Exception {
-    String gameUrl = "https://chess.com/game/motif-update-6";
-    dao.insert(createGame(gameUrl));
-
-    // ATTACK occurrence with isDiscovered=false → has_discovered_attack stays false
-    GameFeatures.MotifOccurrence directAttack =
-        new GameFeatures.MotifOccurrence(
-            5, 3, "white", "Direct attack", "Ra1a8", "Ra8", "ke8", false, false, null);
-    GameFeatures features =
-        new GameFeatures(Set.of(Motif.ATTACK), 5, Map.of(Motif.ATTACK, List.of(directAttack)));
-
-    dao.updateMotifs(gameUrl, features);
-
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps =
-            conn.prepareStatement(
-                "SELECT has_discovered_attack FROM game_features WHERE game_url = ?")) {
-      ps.setString(1, gameUrl);
-      ResultSet rs = ps.executeQuery();
-      assertThat(rs.next()).isTrue();
-      assertThat(rs.getBoolean("has_discovered_attack")).isFalse();
-    }
   }
 
   private GameFeature createGame(String url) {
@@ -428,25 +315,6 @@ public class GameFeatureDaoTest {
         "1-0",
         Instant.now(),
         20,
-        false, // hasPin
-        false, // hasCrossPin
-        false, // hasFork
-        false, // hasSkewer
-        false, // hasDiscoveredAttack
-        false, // hasDiscoveredMate
-        false, // hasDiscoveredCheck
-        false, // hasCheck
-        false, // hasCheckmate
-        false, // hasPromotion
-        false, // hasPromotionWithCheck
-        false, // hasPromotionWithCheckmate
-        false, // hasBackRankMate
-        false, // hasSmotheredMate
-        false, // hasSacrifice
-        false, // hasZugzwang
-        false, // hasDoubleCheck
-        false, // hasInterference
-        false, // hasOverloadedPiece
         Instant.now(),
         "pgn");
   }

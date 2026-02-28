@@ -42,18 +42,6 @@ public class Migration {
           result        VARCHAR(20),
           played_at     TIMESTAMP,
           num_moves     INT,
-          has_pin       BOOLEAN DEFAULT FALSE,
-          has_cross_pin BOOLEAN DEFAULT FALSE,
-          has_fork      BOOLEAN DEFAULT FALSE,
-          has_skewer    BOOLEAN DEFAULT FALSE,
-          has_discovered_attack BOOLEAN DEFAULT FALSE,
-          has_discovered_mate   BOOLEAN DEFAULT FALSE,
-          has_discovered_check  BOOLEAN DEFAULT FALSE,
-          has_check     BOOLEAN DEFAULT FALSE,
-          has_checkmate BOOLEAN DEFAULT FALSE,
-          has_promotion BOOLEAN DEFAULT FALSE,
-          has_promotion_with_check BOOLEAN DEFAULT FALSE,
-          has_promotion_with_checkmate BOOLEAN DEFAULT FALSE,
           indexed_at    TIMESTAMP NOT NULL DEFAULT current_timestamp(),
           pgn           TEXT
       )
@@ -105,18 +93,6 @@ public class Migration {
           result        VARCHAR(20),
           played_at     TIMESTAMP,
           num_moves     INT,
-          has_pin       BOOLEAN DEFAULT FALSE,
-          has_cross_pin BOOLEAN DEFAULT FALSE,
-          has_fork      BOOLEAN DEFAULT FALSE,
-          has_skewer    BOOLEAN DEFAULT FALSE,
-          has_discovered_attack BOOLEAN DEFAULT FALSE,
-          has_discovered_mate   BOOLEAN DEFAULT FALSE,
-          has_discovered_check  BOOLEAN DEFAULT FALSE,
-          has_check     BOOLEAN DEFAULT FALSE,
-          has_checkmate BOOLEAN DEFAULT FALSE,
-          has_promotion BOOLEAN DEFAULT FALSE,
-          has_promotion_with_check BOOLEAN DEFAULT FALSE,
-          has_promotion_with_checkmate BOOLEAN DEFAULT FALSE,
           indexed_at    TIMESTAMP NOT NULL DEFAULT now(),
           pgn           TEXT
       )
@@ -144,51 +120,37 @@ public class Migration {
     this.useH2 = useH2;
   }
 
-  // Legacy column additions (idempotent ALTER TABLEs for existing deployments)
-  private static final String ADD_CHECK_COLUMN =
-      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_check BOOLEAN DEFAULT FALSE";
-  private static final String ADD_CHECKMATE_COLUMN =
-      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_checkmate BOOLEAN DEFAULT FALSE";
-  private static final String ADD_PROMOTION_COLUMN =
-      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_promotion BOOLEAN DEFAULT FALSE";
-  private static final String ADD_PROMOTION_WITH_CHECK_COLUMN =
-      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_promotion_with_check BOOLEAN DEFAULT"
-          + " FALSE";
-  private static final String ADD_PROMOTION_WITH_CHECKMATE_COLUMN =
-      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_promotion_with_checkmate BOOLEAN"
-          + " DEFAULT FALSE";
   private static final String ADD_INDEXED_AT_COLUMN =
       "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS indexed_at TIMESTAMP NOT NULL DEFAULT"
           + " now()";
-  private static final String ADD_DISCOVERED_CHECK_COLUMN =
-      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_discovered_check BOOLEAN DEFAULT"
-          + " FALSE";
   private static final String DROP_MOTIFS_JSON_COLUMN_H2 =
       "ALTER TABLE game_features DROP COLUMN IF EXISTS motifs_json";
   private static final String DROP_MOTIFS_JSON_COLUMN_PG =
       "ALTER TABLE game_features DROP COLUMN IF EXISTS motifs_json";
 
-  // Phase 9: additional motif columns
-  private static final String ADD_BACK_RANK_MATE_COLUMN =
-      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_back_rank_mate BOOLEAN DEFAULT FALSE";
-  private static final String ADD_SMOTHERED_MATE_COLUMN =
-      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_smothered_mate BOOLEAN DEFAULT FALSE";
-  private static final String ADD_SACRIFICE_COLUMN =
-      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_sacrifice BOOLEAN DEFAULT FALSE";
-  private static final String ADD_ZUGZWANG_COLUMN =
-      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_zugzwang BOOLEAN DEFAULT FALSE";
-  private static final String ADD_DOUBLE_CHECK_COLUMN =
-      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_double_check BOOLEAN DEFAULT FALSE";
-  private static final String ADD_INTERFERENCE_COLUMN =
-      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_interference BOOLEAN DEFAULT FALSE";
-  private static final String ADD_OVERLOADED_PIECE_COLUMN =
-      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_overloaded_piece BOOLEAN DEFAULT"
-          + " FALSE";
-
-  // New: discovered_mate boolean
-  private static final String ADD_DISCOVERED_MATE_COLUMN =
-      "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS has_discovered_mate BOOLEAN DEFAULT"
-          + " FALSE";
+  // Drop has_* boolean motif columns — queries now use motif_occurrences directly.
+  // Issued one per statement because H2 doesn't support comma-separated multi-column drops.
+  private static final String[] DROP_HAS_MOTIF_COLUMNS = {
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_pin",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_cross_pin",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_fork",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_skewer",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_discovered_attack",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_discovered_mate",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_discovered_check",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_check",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_checkmate",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_promotion",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_promotion_with_check",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_promotion_with_checkmate",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_back_rank_mate",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_smothered_mate",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_sacrifice",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_zugzwang",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_double_check",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_interference",
+    "ALTER TABLE game_features DROP COLUMN IF EXISTS has_overloaded_piece",
+  };
 
   // motif_occurrences: one row per motif firing per game. Dialect-neutral (UUID stored as string).
   private static final String CREATE_MOTIF_OCCURRENCES =
@@ -245,13 +207,7 @@ public class Migration {
         stmt.execute(PG_INDEXED_PERIODS);
       }
 
-      stmt.execute(ADD_CHECK_COLUMN);
-      stmt.execute(ADD_CHECKMATE_COLUMN);
-      stmt.execute(ADD_PROMOTION_COLUMN);
-      stmt.execute(ADD_PROMOTION_WITH_CHECK_COLUMN);
-      stmt.execute(ADD_PROMOTION_WITH_CHECKMATE_COLUMN);
       stmt.execute(ADD_INDEXED_AT_COLUMN);
-      stmt.execute(ADD_DISCOVERED_CHECK_COLUMN);
 
       // Drop legacy motifs_json column (replaced by motif_occurrences table)
       if (useH2) {
@@ -265,15 +221,6 @@ public class Migration {
       stmt.execute(CREATE_IDX_MOTIF_OCC_MOTIF);
       stmt.execute(CREATE_IDX_MOTIF_OCC_PLY);
 
-      // Phase 9 new motif columns
-      stmt.execute(ADD_BACK_RANK_MATE_COLUMN);
-      stmt.execute(ADD_SMOTHERED_MATE_COLUMN);
-      stmt.execute(ADD_SACRIFICE_COLUMN);
-      stmt.execute(ADD_ZUGZWANG_COLUMN);
-      stmt.execute(ADD_DOUBLE_CHECK_COLUMN);
-      stmt.execute(ADD_INTERFERENCE_COLUMN);
-      stmt.execute(ADD_OVERLOADED_PIECE_COLUMN);
-
       // Structured fields on motif_occurrences
       stmt.execute(ADD_OCC_MOVED_PIECE);
       stmt.execute(ADD_OCC_ATTACKER);
@@ -281,11 +228,13 @@ public class Migration {
       stmt.execute(ADD_OCC_IS_DISCOVERED);
       stmt.execute(ADD_OCC_IS_MATE);
 
-      // New game_features column
-      stmt.execute(ADD_DISCOVERED_MATE_COLUMN);
-
       // Pin type for motif_occurrences
       stmt.execute(ADD_OCC_PIN_TYPE);
+
+      // Drop has_* boolean motif columns — queries now target motif_occurrences directly.
+      for (String drop : DROP_HAS_MOTIF_COLUMNS) {
+        stmt.execute(drop);
+      }
 
       LOG.info("Database migration completed successfully (H2={})", useH2);
     } catch (SQLException e) {
