@@ -159,11 +159,45 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     if (!VALID_MOTIFS.contains(name)) {
       throw new IllegalArgumentException("Unknown motif: " + name);
     }
-    if (name.equals("discovered_attack")) {
-      return "EXISTS (SELECT 1 FROM motif_occurrences mo"
-          + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK' AND mo.is_discovered = TRUE)";
-    }
-    return "g.has_" + name + " = TRUE";
+    // Several motifs are derived from ATTACK occurrences rather than stored as their own rows.
+    return switch (name) {
+      // Derived: ATTACK where the revealing piece uncovers the attack (is_discovered flag)
+      case "discovered_attack" ->
+          "EXISTS (SELECT 1 FROM motif_occurrences mo"
+              + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK'"
+              + " AND mo.is_discovered = TRUE)";
+      // Derived: ATTACK that delivers checkmate (is_mate flag)
+      case "checkmate" ->
+          "EXISTS (SELECT 1 FROM motif_occurrences mo"
+              + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK'"
+              + " AND mo.is_mate = TRUE)";
+      // Derived: discovered ATTACK whose target is the king
+      case "discovered_check" ->
+          "EXISTS (SELECT 1 FROM motif_occurrences mo"
+              + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK'"
+              + " AND mo.is_discovered = TRUE"
+              + " AND (mo.target LIKE 'K%' OR mo.target LIKE 'k%'))";
+      // Derived: same attacker at same ply hits 2+ targets (non-discovered, attacker non-null)
+      case "fork" ->
+          "EXISTS (SELECT 1 FROM motif_occurrences mo"
+              + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK'"
+              + " AND mo.is_discovered = FALSE AND mo.attacker IS NOT NULL"
+              + " GROUP BY mo.ply, mo.attacker HAVING COUNT(*) >= 2)";
+      // Derived: 2+ ATTACK rows at the same ply each targeting the king
+      case "double_check" ->
+          "EXISTS (SELECT 1 FROM motif_occurrences mo"
+              + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK'"
+              + " AND (mo.target LIKE 'K%' OR mo.target LIKE 'k%')"
+              + " GROUP BY mo.ply HAVING COUNT(*) >= 2)";
+      // All other motifs are stored directly in motif_occurrences under their own name
+      default -> {
+        String motifDbValue = name.toUpperCase();
+        yield "EXISTS (SELECT 1 FROM motif_occurrences mo"
+            + " WHERE mo.game_url = g.game_url AND mo.motif = '"
+            + motifDbValue
+            + "')";
+      }
+    };
   }
 
   private String compileSequence(SequenceExpr seq, List<Object> params) {

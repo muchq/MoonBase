@@ -26,8 +26,5 @@ public interface GameFeatureStore {
   /** Returns a batch of game records (requestId, gameUrl, pgn) for re-analysis. */
   List<GameForReanalysis> fetchForReanalysis(int limit, int offset);
 
-  /** Updates all motif boolean columns for the given game URL. */
-  void updateMotifs(String gameUrl, GameFeatures features);
-
   record GameForReanalysis(UUID requestId, String gameUrl, String pgn) {}
 }

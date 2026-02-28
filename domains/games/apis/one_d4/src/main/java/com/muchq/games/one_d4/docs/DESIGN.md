@@ -164,20 +164,10 @@ com.muchq.indexer/
 | result                | VARCHAR(20)   | win, checkmated, stalemate, etc.       |
 | played_at             | TIMESTAMP     |                                        |
 | num_moves             | INT           |                                        |
-| has_pin               | BOOLEAN       | Indexed for fast query                 |
-| has_cross_pin         | BOOLEAN       |                                        |
-| has_fork              | BOOLEAN       |                                        |
-| has_skewer            | BOOLEAN       |                                        |
-| has_discovered_attack | BOOLEAN       |                                        |
-| has_check             | BOOLEAN       |                                        |
-| has_checkmate         | BOOLEAN       |                                        |
-| has_promotion         | BOOLEAN       |                                        |
-| has_promotion_with_check | BOOLEAN    |                                        |
-| has_promotion_with_checkmate | BOOLEAN |                                       |
-| motifs_json           | JSONB         | Detailed occurrence data               |
+| indexed_at            | TIMESTAMP     | When this record was indexed           |
 | pgn                   | TEXT          | Full PGN for re-analysis               |
 
-Boolean columns enable fast indexed queries. JSONB stores detailed motif occurrence data (move numbers, descriptions) for drill-down.
+Motif data is stored separately in `motif_occurrences` (see below) and queried via EXISTS subqueries.
 
 ## Configuration
 

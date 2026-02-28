@@ -150,25 +150,6 @@ public class RetentionWorkerTest {
         "1-0",
         Instant.now(),
         20,
-        false, // hasPin
-        false, // hasCrossPin
-        false, // hasFork
-        false, // hasSkewer
-        false, // hasDiscoveredAttack
-        false, // hasDiscoveredMate
-        false, // hasDiscoveredCheck
-        false, // hasCheck
-        false, // hasCheckmate
-        false, // hasPromotion
-        false, // hasPromotionWithCheck
-        false, // hasPromotionWithCheckmate
-        false, // hasBackRankMate
-        false, // hasSmotheredMate
-        false, // hasSacrifice
-        false, // hasZugzwang
-        false, // hasDoubleCheck
-        false, // hasInterference
-        false, // hasOverloadedPiece
         Instant.now(),
         "pgn");
   }

@@ -117,17 +117,7 @@ Search indexed games using ChessQL.
       "eco": "B90",
       "result": "1-0",
       "playedAt": 1710524400.0,
-      "numMoves": 42,
-      "hasPin": true,
-      "hasCrossPin": false,
-      "hasFork": true,
-      "hasSkewer": false,
-      "hasDiscoveredAttack": false,
-      "hasCheck": true,
-      "hasCheckmate": false,
-      "hasPromotion": false,
-      "hasPromotionWithCheck": false,
-      "hasPromotionWithCheckmate": false
+      "numMoves": 42
     }
   ],
   "count": 1

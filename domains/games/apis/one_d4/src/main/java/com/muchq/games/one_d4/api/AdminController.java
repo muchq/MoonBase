@@ -36,8 +36,8 @@ public class AdminController {
 
   /**
    * Re-analyzes all games currently stored in {@code game_features}, re-running all motif detectors
-   * against the stored PGN and updating every motif boolean column. Existing {@code
-   * motif_occurrences} rows for each game are replaced with the fresh results.
+   * against the stored PGN. Existing {@code motif_occurrences} rows for each game are replaced with
+   * the fresh results.
    *
    * <p>Games are processed in batches of {@value #BATCH_SIZE} to bound memory usage. The endpoint
    * is synchronous — it blocks until all games have been processed and returns a summary.
@@ -62,7 +62,6 @@ public class AdminController {
             continue;
           }
           GameFeatures features = featureExtractor.extract(game.pgn());
-          gameFeatureStore.updateMotifs(game.gameUrl(), features);
           gameFeatureStore.deleteOccurrencesByGameUrl(game.gameUrl());
           gameFeatureStore.insertOccurrences(game.gameUrl(), features.occurrences());
           processed++;
