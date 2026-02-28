@@ -279,6 +279,7 @@ public class GameFeatureDaoTest {
                         7, 4, "white", "Check", null, "Bb5", "ke8", false, false, null))));
 
     dao.updateMotifs(gameUrl, features);
+    dao.insertOccurrences(gameUrl, features.occurrences());
 
     assertThat(dao.query(pinQuery, 10, 0)).hasSize(1);
     CompiledQuery checkQuery = new SqlCompiler().compile(Parser.parse("motif(check)"));
@@ -304,6 +305,7 @@ public class GameFeatureDaoTest {
                     new GameFeatures.MotifOccurrence(
                         3, 2, "white", "Pin", null, "Bb5", "nc6", false, false, "ABSOLUTE"))));
     dao.updateMotifs(url1, features);
+    dao.insertOccurrences(url1, features.occurrences());
 
     CompiledQuery pinQuery = new SqlCompiler().compile(Parser.parse("motif(pin)"));
     List<GameFeature> pinned = dao.query(pinQuery, 10, 0);
