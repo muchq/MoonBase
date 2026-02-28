@@ -191,18 +191,6 @@ public class SqlCompilerTest {
   }
 
   @Test
-  public void testAttackMotif() {
-    CompiledQuery result = compile("motif(attack)");
-    assertThat(result.selectSql())
-        .isEqualTo(
-            BASE_PREFIX
-                + "EXISTS (SELECT 1 FROM motif_occurrences mo"
-                + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK')"
-                + BASE_SUFFIX);
-    assertThat(result.parameters()).isEmpty();
-  }
-
-  @Test
   public void testBackRankMateMotif() {
     CompiledQuery result = compile("motif(back_rank_mate)");
     assertThat(result.selectSql())
@@ -258,6 +246,13 @@ public class SqlCompilerTest {
   @Test
   public void testUnknownMotif() {
     assertThatThrownBy(() -> compile("motif(unknown)"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Unknown motif");
+  }
+
+  @Test
+  public void testAttackMotifIsRejected() {
+    assertThatThrownBy(() -> compile("motif(attack)"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Unknown motif");
   }

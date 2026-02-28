@@ -37,7 +37,6 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
           "cross_pin",
           "fork",
           "skewer",
-          "attack",
           "discovered_attack",
           "discovered_check",
           "check",
@@ -162,10 +161,6 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     }
     // Several motifs are derived from ATTACK occurrences rather than stored as their own rows.
     return switch (name) {
-      // Derived: any ATTACK occurrence
-      case "attack" ->
-          "EXISTS (SELECT 1 FROM motif_occurrences mo"
-              + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK')";
       // Derived: ATTACK where the revealing piece uncovers the attack (is_discovered flag)
       case "discovered_attack" ->
           "EXISTS (SELECT 1 FROM motif_occurrences mo"

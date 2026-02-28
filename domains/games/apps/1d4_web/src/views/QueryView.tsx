@@ -89,7 +89,7 @@ export default function QueryView() {
         <code>black.username</code>, <code>time.class</code>,{' '}
         <code>num.moves</code>, <code>eco</code>, <code>result</code>,{' '}
         <code>platform</code>, <code>game.url</code>, <code>played.at</code>.{' '}
-        Motifs: <code>motif(attack)</code>, <code>motif(discovered_attack)</code>,{' '}
+        Motifs: <code>motif(discovered_attack)</code>,{' '}
         <code>motif(discovered_check)</code>, <code>motif(fork)</code>,{' '}
         <code>motif(pin)</code>, <code>motif(cross_pin)</code>,{' '}
         <code>motif(skewer)</code>, <code>motif(check)</code>,{' '}
