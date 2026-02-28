@@ -7,6 +7,7 @@ import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.chessql.parser.Parser;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
+import com.muchq.games.one_d4.db.GameFeatureStore.GameForReanalysis;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import java.time.Instant;
@@ -198,6 +199,107 @@ public class GameFeatureDaoTest {
     assertThat(rows.stream().map(GameFeature::gameUrl)).containsExactlyInAnyOrder(url1, url2);
   }
 
+  // === fetchForReanalysis ===
+
+  @Test
+  public void fetchForReanalysis_emptyTable_returnsEmptyList() {
+    List<GameForReanalysis> results = dao.fetchForReanalysis(10, 0);
+    assertThat(results).isEmpty();
+  }
+
+  @Test
+  public void fetchForReanalysis_returnsGameUrlAndPgn() {
+    String gameUrl = "https://chess.com/game/reanalysis-1";
+    dao.insert(createGame(gameUrl));
+
+    List<GameForReanalysis> results = dao.fetchForReanalysis(10, 0);
+
+    assertThat(results).hasSize(1);
+    assertThat(results.get(0).gameUrl()).isEqualTo(gameUrl);
+    assertThat(results.get(0).pgn()).isEqualTo("pgn");
+    assertThat(results.get(0).requestId()).isEqualTo(requestId);
+  }
+
+  @Test
+  public void fetchForReanalysis_respectsLimitAndOffset() {
+    dao.insert(createGame("https://chess.com/game/r1"));
+    dao.insert(createGame("https://chess.com/game/r2"));
+    dao.insert(createGame("https://chess.com/game/r3"));
+
+    List<GameForReanalysis> firstTwo = dao.fetchForReanalysis(2, 0);
+    List<GameForReanalysis> lastOne = dao.fetchForReanalysis(2, 2);
+
+    assertThat(firstTwo).hasSize(2);
+    assertThat(lastOne).hasSize(1);
+
+    List<String> allUrls = new java.util.ArrayList<>();
+    firstTwo.stream().map(GameForReanalysis::gameUrl).forEach(allUrls::add);
+    lastOne.stream().map(GameForReanalysis::gameUrl).forEach(allUrls::add);
+    assertThat(allUrls)
+        .containsExactlyInAnyOrder(
+            "https://chess.com/game/r1", "https://chess.com/game/r2", "https://chess.com/game/r3");
+  }
+
+  @Test
+  public void fetchForReanalysis_offsetBeyondEnd_returnsEmptyList() {
+    dao.insert(createGame("https://chess.com/game/r1"));
+
+    List<GameForReanalysis> results = dao.fetchForReanalysis(10, 5);
+
+    assertThat(results).isEmpty();
+  }
+
+  // === insertOccurrences and motif queries ===
+
+  @Test
+  public void insertOccurrences_enablesMotifQuery() {
+    String gameUrl = "https://chess.com/game/motif-query-1";
+    dao.insert(createGame(gameUrl));
+
+    CompiledQuery pinQuery = new SqlCompiler().compile(Parser.parse("motif(pin)"));
+    assertThat(dao.query(pinQuery, 10, 0)).isEmpty();
+
+    Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences =
+        Map.of(
+            Motif.PIN,
+            List.of(
+                new GameFeatures.MotifOccurrence(
+                    7, 4, "white", "Pin", null, "Bb5", "nc6", false, false, "ABSOLUTE")),
+            Motif.CHECK,
+            List.of(
+                new GameFeatures.MotifOccurrence(
+                    7, 4, "white", "Check", null, "Bb5", "ke8", false, false, null)));
+
+    dao.insertOccurrences(gameUrl, occurrences);
+
+    assertThat(dao.query(pinQuery, 10, 0)).hasSize(1);
+    CompiledQuery checkQuery = new SqlCompiler().compile(Parser.parse("motif(check)"));
+    assertThat(dao.query(checkQuery, 10, 0)).hasSize(1);
+    CompiledQuery forkQuery = new SqlCompiler().compile(Parser.parse("motif(fork)"));
+    assertThat(dao.query(forkQuery, 10, 0)).isEmpty();
+  }
+
+  @Test
+  public void insertOccurrences_doesNotAffectOtherGames() {
+    String url1 = "https://chess.com/game/motif-isolation-1";
+    String url2 = "https://chess.com/game/motif-isolation-2";
+    dao.insert(createGame(url1));
+    dao.insert(createGame(url2));
+
+    Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences =
+        Map.of(
+            Motif.PIN,
+            List.of(
+                new GameFeatures.MotifOccurrence(
+                    3, 2, "white", "Pin", null, "Bb5", "nc6", false, false, "ABSOLUTE")));
+    dao.insertOccurrences(url1, occurrences);
+
+    CompiledQuery pinQuery = new SqlCompiler().compile(Parser.parse("motif(pin)"));
+    List<GameFeature> pinned = dao.query(pinQuery, 10, 0);
+    assertThat(pinned).hasSize(1);
+    assertThat(pinned.get(0).gameUrl()).isEqualTo(url1);
+  }
+
   private GameFeature createGame(String url) {
     return new GameFeature(
         null,
@@ -213,25 +315,6 @@ public class GameFeatureDaoTest {
         "1-0",
         Instant.now(),
         20,
-        false, // hasPin
-        false, // hasCrossPin
-        false, // hasFork
-        false, // hasSkewer
-        false, // hasDiscoveredAttack
-        false, // hasDiscoveredMate
-        false, // hasDiscoveredCheck
-        false, // hasCheck
-        false, // hasCheckmate
-        false, // hasPromotion
-        false, // hasPromotionWithCheck
-        false, // hasPromotionWithCheckmate
-        false, // hasBackRankMate
-        false, // hasSmotheredMate
-        false, // hasSacrifice
-        false, // hasZugzwang
-        false, // hasDoubleCheck
-        false, // hasInterference
-        false, // hasOverloadedPiece
         Instant.now(),
         "pgn");
   }

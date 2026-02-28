@@ -31,13 +31,8 @@ public class GameFeatureDao implements GameFeatureStore {
       MERGE INTO game_features (
           request_id, game_url, platform, white_username, black_username,
           white_elo, black_elo, time_class, eco, result, played_at, num_moves,
-          has_pin, has_cross_pin, has_fork, has_skewer,
-          has_discovered_attack, has_discovered_mate, has_discovered_check,
-          has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
-          has_back_rank_mate, has_smothered_mate, has_sacrifice, has_zugzwang,
-          has_double_check, has_interference, has_overloaded_piece,
           indexed_at, pgn
-      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
+      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
       """;
 
   private static final String PG_INSERT =
@@ -45,29 +40,11 @@ public class GameFeatureDao implements GameFeatureStore {
       INSERT INTO game_features (
           request_id, game_url, platform, white_username, black_username,
           white_elo, black_elo, time_class, eco, result, played_at, num_moves,
-          has_pin, has_cross_pin, has_fork, has_skewer,
-          has_discovered_attack, has_discovered_mate, has_discovered_check,
-          has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
-          has_back_rank_mate, has_smothered_mate, has_sacrifice, has_zugzwang,
-          has_double_check, has_interference, has_overloaded_piece,
           indexed_at, pgn
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
       ON CONFLICT (game_url) DO UPDATE SET
           indexed_at = EXCLUDED.indexed_at,
           request_id = EXCLUDED.request_id
-      """;
-
-  private static final String UPDATE_MOTIFS =
-      """
-      UPDATE game_features SET
-          has_pin = ?, has_cross_pin = ?, has_fork = ?, has_skewer = ?,
-          has_discovered_attack = ?, has_discovered_mate = ?, has_discovered_check = ?,
-          has_check = ?, has_checkmate = ?, has_promotion = ?,
-          has_promotion_with_check = ?, has_promotion_with_checkmate = ?,
-          has_back_rank_mate = ?, has_smothered_mate = ?, has_sacrifice = ?, has_zugzwang = ?,
-          has_double_check = ?, has_interference = ?, has_overloaded_piece = ?,
-          indexed_at = now()
-      WHERE game_url = ?
       """;
 
   private static final String FETCH_FOR_REANALYSIS =
@@ -107,27 +84,8 @@ public class GameFeatureDao implements GameFeatureStore {
       ps.setString(10, row.result());
       ps.setTimestamp(11, row.playedAt() != null ? Timestamp.from(row.playedAt()) : null);
       setIntOrNull(ps, 12, row.numMoves());
-      ps.setBoolean(13, row.hasPin());
-      ps.setBoolean(14, row.hasCrossPin());
-      ps.setBoolean(15, row.hasFork());
-      ps.setBoolean(16, row.hasSkewer());
-      ps.setBoolean(17, row.hasDiscoveredAttack());
-      ps.setBoolean(18, row.hasDiscoveredMate());
-      ps.setBoolean(19, row.hasDiscoveredCheck());
-      ps.setBoolean(20, row.hasCheck());
-      ps.setBoolean(21, row.hasCheckmate());
-      ps.setBoolean(22, row.hasPromotion());
-      ps.setBoolean(23, row.hasPromotionWithCheck());
-      ps.setBoolean(24, row.hasPromotionWithCheckmate());
-      ps.setBoolean(25, row.hasBackRankMate());
-      ps.setBoolean(26, row.hasSmotheredMate());
-      ps.setBoolean(27, row.hasSacrifice());
-      ps.setBoolean(28, row.hasZugzwang());
-      ps.setBoolean(29, row.hasDoubleCheck());
-      ps.setBoolean(30, row.hasInterference());
-      ps.setBoolean(31, row.hasOverloadedPiece());
       // indexed_at set via now() in SQL — no parameter
-      ps.setString(32, row.pgn());
+      ps.setString(13, row.pgn());
       ps.executeUpdate();
     } catch (SQLException e) {
       LOG.error("Failed to insert game feature for game_url={}", row.gameUrl(), e);
@@ -282,25 +240,6 @@ public class GameFeatureDao implements GameFeatureStore {
         rs.getString("result"),
         rs.getTimestamp("played_at").toInstant(),
         getIntOrNull(rs, "num_moves"),
-        rs.getBoolean("has_pin"),
-        rs.getBoolean("has_cross_pin"),
-        rs.getBoolean("has_fork"),
-        rs.getBoolean("has_skewer"),
-        rs.getBoolean("has_discovered_attack"),
-        rs.getBoolean("has_discovered_mate"),
-        rs.getBoolean("has_discovered_check"),
-        rs.getBoolean("has_check"),
-        rs.getBoolean("has_checkmate"),
-        rs.getBoolean("has_promotion"),
-        rs.getBoolean("has_promotion_with_check"),
-        rs.getBoolean("has_promotion_with_checkmate"),
-        rs.getBoolean("has_back_rank_mate"),
-        rs.getBoolean("has_smothered_mate"),
-        rs.getBoolean("has_sacrifice"),
-        rs.getBoolean("has_zugzwang"),
-        rs.getBoolean("has_double_check"),
-        rs.getBoolean("has_interference"),
-        rs.getBoolean("has_overloaded_piece"),
         rs.getTimestamp("indexed_at") != null ? rs.getTimestamp("indexed_at").toInstant() : null,
         rs.getString("pgn"));
   }
@@ -336,44 +275,6 @@ public class GameFeatureDao implements GameFeatureStore {
       throw new RuntimeException("Failed to fetch games for reanalysis", e);
     }
     return results;
-  }
-
-  @Override
-  public void updateMotifs(String gameUrl, GameFeatures features) {
-    List<GameFeatures.MotifOccurrence> attacks =
-        features.occurrences().getOrDefault(Motif.ATTACK, List.of());
-    boolean hasDiscoveredAttack =
-        attacks.stream().anyMatch(GameFeatures.MotifOccurrence::isDiscovered);
-    boolean hasDiscoveredMate = attacks.stream().anyMatch(o -> o.isDiscovered() && o.isMate());
-    boolean hasCheckmate = attacks.stream().anyMatch(GameFeatures.MotifOccurrence::isMate);
-
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps = conn.prepareStatement(UPDATE_MOTIFS)) {
-      ps.setBoolean(1, features.hasMotif(Motif.PIN));
-      ps.setBoolean(2, features.hasMotif(Motif.CROSS_PIN));
-      ps.setBoolean(3, features.hasMotif(Motif.FORK));
-      ps.setBoolean(4, features.hasMotif(Motif.SKEWER));
-      ps.setBoolean(5, hasDiscoveredAttack);
-      ps.setBoolean(6, hasDiscoveredMate);
-      ps.setBoolean(7, features.hasMotif(Motif.DISCOVERED_CHECK));
-      ps.setBoolean(8, features.hasMotif(Motif.CHECK));
-      ps.setBoolean(9, hasCheckmate);
-      ps.setBoolean(10, features.hasMotif(Motif.PROMOTION));
-      ps.setBoolean(11, features.hasMotif(Motif.PROMOTION_WITH_CHECK));
-      ps.setBoolean(12, features.hasMotif(Motif.PROMOTION_WITH_CHECKMATE));
-      ps.setBoolean(13, features.hasMotif(Motif.BACK_RANK_MATE));
-      ps.setBoolean(14, features.hasMotif(Motif.SMOTHERED_MATE));
-      ps.setBoolean(15, features.hasMotif(Motif.SACRIFICE));
-      ps.setBoolean(16, features.hasMotif(Motif.ZUGZWANG));
-      ps.setBoolean(17, features.hasMotif(Motif.DOUBLE_CHECK));
-      ps.setBoolean(18, features.hasMotif(Motif.INTERFERENCE));
-      ps.setBoolean(19, features.hasMotif(Motif.OVERLOADED_PIECE));
-      ps.setString(20, gameUrl);
-      ps.executeUpdate();
-    } catch (SQLException e) {
-      LOG.error("Failed to update motifs for game_url={}", gameUrl, e);
-      throw new RuntimeException("Failed to update motifs", e);
-    }
   }
 
   private static void setIntOrNull(PreparedStatement ps, int idx, Integer value)

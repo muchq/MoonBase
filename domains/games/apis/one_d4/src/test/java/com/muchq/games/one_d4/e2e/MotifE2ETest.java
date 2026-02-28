@@ -193,7 +193,6 @@ public class MotifE2ETest {
   @Test
   public void attack_motifDetected() {
     String url = indexGame(KINGS_GAMBIT_URL, KINGS_GAMBIT_PGN);
-    assertMotifDetected(url, "attack");
     assertThat(getOccurrences(url, "attack")).isNotEmpty();
   }
 

@@ -17,6 +17,36 @@ public class SqlCompilerTest {
   private static final String BASE_PREFIX = "SELECT g.* FROM game_features g WHERE ";
   private static final String BASE_SUFFIX = " ORDER BY g.played_at DESC";
 
+  private static String motifExists(String motif) {
+    return "EXISTS (SELECT 1 FROM motif_occurrences mo"
+        + " WHERE mo.game_url = g.game_url AND mo.motif = '"
+        + motif
+        + "')";
+  }
+
+  private static final String FORK_EXISTS =
+      "EXISTS (SELECT 1 FROM motif_occurrences mo"
+          + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK'"
+          + " AND mo.is_discovered = FALSE AND mo.attacker IS NOT NULL"
+          + " GROUP BY mo.ply, mo.attacker HAVING COUNT(*) >= 2)";
+
+  private static final String DOUBLE_CHECK_EXISTS =
+      "EXISTS (SELECT 1 FROM motif_occurrences mo"
+          + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK'"
+          + " AND (mo.target LIKE 'K%' OR mo.target LIKE 'k%')"
+          + " GROUP BY mo.ply HAVING COUNT(*) >= 2)";
+
+  private static final String DISCOVERED_CHECK_EXISTS =
+      "EXISTS (SELECT 1 FROM motif_occurrences mo"
+          + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK'"
+          + " AND mo.is_discovered = TRUE"
+          + " AND (mo.target LIKE 'K%' OR mo.target LIKE 'k%'))";
+
+  private static final String CHECKMATE_EXISTS =
+      "EXISTS (SELECT 1 FROM motif_occurrences mo"
+          + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK'"
+          + " AND mo.is_mate = TRUE)";
+
   @Test
   public void testSimpleComparison() {
     CompiledQuery result = compile("white.elo >= 2500");
@@ -27,7 +57,7 @@ public class SqlCompilerTest {
   @Test
   public void testMotif() {
     CompiledQuery result = compile("motif(fork)");
-    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + "g.has_fork = TRUE" + BASE_SUFFIX);
+    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + FORK_EXISTS + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
@@ -35,7 +65,7 @@ public class SqlCompilerTest {
   public void testAndExpression() {
     CompiledQuery result = compile("white.elo >= 2500 AND motif(fork)");
     assertThat(result.selectSql())
-        .isEqualTo(BASE_PREFIX + "(white_elo >= ? AND g.has_fork = TRUE)" + BASE_SUFFIX);
+        .isEqualTo(BASE_PREFIX + "(white_elo >= ? AND " + FORK_EXISTS + ")" + BASE_SUFFIX);
     assertThat(result.parameters()).isEqualTo(List.of(2500));
   }
 
@@ -43,14 +73,16 @@ public class SqlCompilerTest {
   public void testOrExpression() {
     CompiledQuery result = compile("motif(fork) OR motif(pin)");
     assertThat(result.selectSql())
-        .isEqualTo(BASE_PREFIX + "(g.has_fork = TRUE OR g.has_pin = TRUE)" + BASE_SUFFIX);
+        .isEqualTo(
+            BASE_PREFIX + "(" + FORK_EXISTS + " OR " + motifExists("PIN") + ")" + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
   @Test
   public void testNotExpression() {
     CompiledQuery result = compile("NOT motif(pin)");
-    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + "(NOT g.has_pin = TRUE)" + BASE_SUFFIX);
+    assertThat(result.selectSql())
+        .isEqualTo(BASE_PREFIX + "(NOT " + motifExists("PIN") + ")" + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
@@ -81,7 +113,8 @@ public class SqlCompilerTest {
   public void testComplexQuery() {
     CompiledQuery result = compile("white.elo >= 2500 AND motif(cross_pin)");
     assertThat(result.selectSql())
-        .isEqualTo(BASE_PREFIX + "(white_elo >= ? AND g.has_cross_pin = TRUE)" + BASE_SUFFIX);
+        .isEqualTo(
+            BASE_PREFIX + "(white_elo >= ? AND " + motifExists("CROSS_PIN") + ")" + BASE_SUFFIX);
     assertThat(result.parameters()).isEqualTo(List.of(2500));
   }
 
@@ -91,7 +124,11 @@ public class SqlCompilerTest {
     assertThat(result.selectSql())
         .isEqualTo(
             BASE_PREFIX
-                + "((g.has_fork = TRUE OR g.has_pin = TRUE) AND white_elo > ?)"
+                + "(("
+                + FORK_EXISTS
+                + " OR "
+                + motifExists("PIN")
+                + ") AND white_elo > ?)"
                 + BASE_SUFFIX);
     assertThat(result.parameters()).isEqualTo(List.of(2000));
   }
@@ -99,21 +136,21 @@ public class SqlCompilerTest {
   @Test
   public void testCheckMotif() {
     CompiledQuery result = compile("motif(check)");
-    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + "g.has_check = TRUE" + BASE_SUFFIX);
+    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + motifExists("CHECK") + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
   @Test
   public void testCheckmateMotif() {
     CompiledQuery result = compile("motif(checkmate)");
-    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + "g.has_checkmate = TRUE" + BASE_SUFFIX);
+    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + CHECKMATE_EXISTS + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
   @Test
   public void testPromotionMotif() {
     CompiledQuery result = compile("motif(promotion)");
-    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + "g.has_promotion = TRUE" + BASE_SUFFIX);
+    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + motifExists("PROMOTION") + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
@@ -121,7 +158,7 @@ public class SqlCompilerTest {
   public void testPromotionWithCheckMotif() {
     CompiledQuery result = compile("motif(promotion_with_check)");
     assertThat(result.selectSql())
-        .isEqualTo(BASE_PREFIX + "g.has_promotion_with_check = TRUE" + BASE_SUFFIX);
+        .isEqualTo(BASE_PREFIX + motifExists("PROMOTION_WITH_CHECK") + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
@@ -129,15 +166,14 @@ public class SqlCompilerTest {
   public void testPromotionWithCheckmateMotif() {
     CompiledQuery result = compile("motif(promotion_with_checkmate)");
     assertThat(result.selectSql())
-        .isEqualTo(BASE_PREFIX + "g.has_promotion_with_checkmate = TRUE" + BASE_SUFFIX);
+        .isEqualTo(BASE_PREFIX + motifExists("PROMOTION_WITH_CHECKMATE") + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
   @Test
   public void testDiscoveredCheckMotif() {
     CompiledQuery result = compile("motif(discovered_check)");
-    assertThat(result.selectSql())
-        .isEqualTo(BASE_PREFIX + "g.has_discovered_check = TRUE" + BASE_SUFFIX);
+    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + DISCOVERED_CHECK_EXISTS + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
@@ -155,22 +191,10 @@ public class SqlCompilerTest {
   }
 
   @Test
-  public void testAttackMotif() {
-    CompiledQuery result = compile("motif(attack)");
-    assertThat(result.selectSql())
-        .isEqualTo(
-            BASE_PREFIX
-                + "EXISTS (SELECT 1 FROM motif_occurrences mo"
-                + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK')"
-                + BASE_SUFFIX);
-    assertThat(result.parameters()).isEmpty();
-  }
-
-  @Test
   public void testBackRankMateMotif() {
     CompiledQuery result = compile("motif(back_rank_mate)");
     assertThat(result.selectSql())
-        .isEqualTo(BASE_PREFIX + "g.has_back_rank_mate = TRUE" + BASE_SUFFIX);
+        .isEqualTo(BASE_PREFIX + motifExists("BACK_RANK_MATE") + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
@@ -178,29 +202,28 @@ public class SqlCompilerTest {
   public void testSmotheredMateMotif() {
     CompiledQuery result = compile("motif(smothered_mate)");
     assertThat(result.selectSql())
-        .isEqualTo(BASE_PREFIX + "g.has_smothered_mate = TRUE" + BASE_SUFFIX);
+        .isEqualTo(BASE_PREFIX + motifExists("SMOTHERED_MATE") + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
   @Test
   public void testSacrificeMotif() {
     CompiledQuery result = compile("motif(sacrifice)");
-    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + "g.has_sacrifice = TRUE" + BASE_SUFFIX);
+    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + motifExists("SACRIFICE") + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
   @Test
   public void testZugzwangMotif() {
     CompiledQuery result = compile("motif(zugzwang)");
-    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + "g.has_zugzwang = TRUE" + BASE_SUFFIX);
+    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + motifExists("ZUGZWANG") + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
   @Test
   public void testDoubleCheckMotif() {
     CompiledQuery result = compile("motif(double_check)");
-    assertThat(result.selectSql())
-        .isEqualTo(BASE_PREFIX + "g.has_double_check = TRUE" + BASE_SUFFIX);
+    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + DOUBLE_CHECK_EXISTS + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
@@ -208,7 +231,7 @@ public class SqlCompilerTest {
   public void testInterferenceMotif() {
     CompiledQuery result = compile("motif(interference)");
     assertThat(result.selectSql())
-        .isEqualTo(BASE_PREFIX + "g.has_interference = TRUE" + BASE_SUFFIX);
+        .isEqualTo(BASE_PREFIX + motifExists("INTERFERENCE") + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
@@ -216,13 +239,20 @@ public class SqlCompilerTest {
   public void testOverloadedPieceMotif() {
     CompiledQuery result = compile("motif(overloaded_piece)");
     assertThat(result.selectSql())
-        .isEqualTo(BASE_PREFIX + "g.has_overloaded_piece = TRUE" + BASE_SUFFIX);
+        .isEqualTo(BASE_PREFIX + motifExists("OVERLOADED_PIECE") + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
   @Test
   public void testUnknownMotif() {
     assertThatThrownBy(() -> compile("motif(unknown)"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Unknown motif");
+  }
+
+  @Test
+  public void testAttackMotifIsRejected() {
+    assertThatThrownBy(() -> compile("motif(attack)"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Unknown motif");
   }
@@ -250,7 +280,8 @@ public class SqlCompilerTest {
                 + " LEFT JOIN (SELECT game_url, COUNT(*) AS c FROM motif_occurrences"
                 + " WHERE motif = ? GROUP BY game_url) cnt"
                 + " ON g.game_url = cnt.game_url"
-                + " WHERE g.has_promotion = TRUE"
+                + " WHERE "
+                + motifExists("PROMOTION")
                 + " ORDER BY COALESCE(cnt.c, 0) DESC");
     assertThat(result.parameters()).isEqualTo(List.of("CHECK"));
   }
@@ -264,7 +295,8 @@ public class SqlCompilerTest {
                 + " LEFT JOIN (SELECT game_url, COUNT(*) AS c FROM motif_occurrences"
                 + " WHERE motif = ? GROUP BY game_url) cnt"
                 + " ON g.game_url = cnt.game_url"
-                + " WHERE g.has_fork = TRUE"
+                + " WHERE "
+                + FORK_EXISTS
                 + " ORDER BY COALESCE(cnt.c, 0) ASC");
     assertThat(result.parameters()).isEqualTo(List.of("PIN"));
   }
