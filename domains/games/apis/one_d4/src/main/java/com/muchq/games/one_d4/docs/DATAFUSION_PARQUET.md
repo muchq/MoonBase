@@ -127,26 +127,11 @@ eco:                Utf8
 result:             Utf8
 played_at:          TimestampMillisecond
 num_moves:          Int32
-has_pin:            Boolean
-has_cross_pin:      Boolean
-has_fork:           Boolean
-has_skewer:         Boolean
-has_discovered_attack: Boolean
-has_discovered_check:  Boolean
-has_check:          Boolean
-has_checkmate:      Boolean
-has_promotion:      Boolean
-has_promotion_with_check:     Boolean
-has_promotion_with_checkmate: Boolean
-# Phase 9 motifs (issue #1049) — added after chariot integration:
-has_back_rank_mate: Boolean
-has_smothered_mate: Boolean
-has_sacrifice:      Boolean
-has_zugzwang:       Boolean
-has_double_check:   Boolean
-has_interference:   Boolean
-has_overloaded_piece: Boolean
+indexed_at:         TimestampMillisecond
+pgn:                Utf8
 ```
+
+Motif data is exported from `motif_occurrences` as a separate Parquet table and joined at query time.
 
 PGN text is **not** stored in the Parquet files — it bloats columnar scans
 and is only needed for game replay, not motif search. See "Where does PGN
@@ -1037,7 +1022,7 @@ player info, Elo, time class, ECO, result).
 
 | Data | Storage | Reason |
 |------|---------|--------|
-| Motif flags (`has_pin`, `has_fork`, ...) | SQL + Parquet (after export) | Analytical queries |
+| Motif queries (`motif(pin)`, `motif(fork)`, ...) | SQL EXISTS subqueries + Parquet join (after export) | Analytical queries |
 | Game metadata (Elo, ECO, result, ...) | SQL + Parquet (after export) | Needed for ChessQL filters |
 | PGN text | SQL only | Large, variable-length, not scanned by ChessQL |
 | Motif occurrences (ply, side, ...) | SQL + Parquet (after export) | Needed for `sequence()` and `ORDER BY motif_count()` |

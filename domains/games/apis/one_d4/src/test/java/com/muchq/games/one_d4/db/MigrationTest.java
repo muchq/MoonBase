@@ -22,7 +22,7 @@ public class MigrationTest {
   }
 
   @Test
-  public void run_createsMotifOccurrencesTableAndHasDiscoveredCheckColumn() throws Exception {
+  public void run_createsMotifOccurrencesTable_andDropsHasMotifColumns() throws Exception {
     Migration migration = new Migration(dataSource, true);
     migration.run();
 
@@ -33,11 +33,9 @@ public class MigrationTest {
         assertThat(tables.next()).as("motif_occurrences table should exist").isTrue();
       }
 
-      try (ResultSet columns =
-          meta.getColumns(null, null, "GAME_FEATURES", "HAS_DISCOVERED_CHECK")) {
-        assertThat(columns.next())
-            .as("game_features.has_discovered_check column should exist")
-            .isTrue();
+      // has_* boolean columns should not exist — motif queries use motif_occurrences directly
+      try (ResultSet columns = meta.getColumns(null, null, "GAME_FEATURES", "HAS_PIN")) {
+        assertThat(columns.next()).as("game_features.has_pin column should not exist").isFalse();
       }
     }
   }
