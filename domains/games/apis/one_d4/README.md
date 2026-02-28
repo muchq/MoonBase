@@ -99,11 +99,11 @@ flowchart TB
   RetentionWorker --> PeriodStore
 ```
 
-**Index flow:** Client posts to `POST /v1/index` → request is stored and a message is enqueued. A background thread (IndexWorkerLifecycle) polls the queue; IndexWorker fetches games from Chess.com per month (skipping months already in IndexedPeriodStore), runs FeatureExtractor (PgnParser → GameReplayer → MotifDetectors) on each game, and writes to GameFeatureStore (game_features + motif_occurrences + attack_occurrences) and IndexedPeriodStore.
+**Index flow:** Client posts to `POST /v1/index` → request is stored and a message is enqueued. A background thread (IndexWorkerLifecycle) polls the queue; IndexWorker fetches games from Chess.com per month (skipping months already in IndexedPeriodStore), runs FeatureExtractor (PgnParser → GameReplayer → MotifDetectors) on each game, and writes to GameFeatureStore (game_features + motif_occurrences) and IndexedPeriodStore. Fork occurrences are derived inside FeatureExtractor from ATTACK occurrences (same ply + attacker targeting 2+ pieces).
 
-**Query flow:** Client posts a ChessQL string to `POST /v1/query` → Parser and SqlCompiler produce SQL → GameFeatureStore runs the query and loads motif_occurrences and attack_occurrences for the result set → response returns GameFeatureRow list with per-game occurrences.
+**Query flow:** Client posts a ChessQL string to `POST /v1/query` → Parser and SqlCompiler produce SQL → GameFeatureStore runs the query and loads motif_occurrences for the result set → response returns GameFeatureRow list with per-game occurrences.
 
-**Retention:** RetentionWorker runs hourly and deletes game_features, motif_occurrences, attack_occurrences (via FK cascade), and indexed_periods older than 7 days.
+**Retention:** RetentionWorker runs hourly and deletes game_features, motif_occurrences (via FK cascade), and indexed_periods older than 7 days.
 
 ## Running Locally (in-memory)
 
@@ -244,19 +244,37 @@ The indexer maintains a **7-day retention policy**. Games are automatically dele
 - `played_at` (or `played.at`)
 - `indexed_at` (or `indexed.at`)
 
+### Re-analyze All Games
+
+Re-runs feature extraction on every stored game and updates motif columns and occurrences. Useful after deploying a new detector or enrichment.
+
+```bash
+curl -X POST http://localhost:8080/admin/reanalyze
+```
+
+Returns `{"gamesReanalyzed": N}`.
+
 ### Available Motifs
 
-- `motif(pin)`
-- `motif(cross_pin)`
-- `motif(fork)`
-- `motif(skewer)`
+- `motif(attack)`
 - `motif(discovered_attack)`
 - `motif(discovered_check)`
+- `motif(fork)`
+- `motif(pin)`
+- `motif(cross_pin)`
+- `motif(skewer)`
 - `motif(check)`
 - `motif(checkmate)`
+- `motif(double_check)`
+- `motif(back_rank_mate)`
+- `motif(smothered_mate)`
 - `motif(promotion)`
 - `motif(promotion_with_check)`
 - `motif(promotion_with_checkmate)`
+- `motif(sacrifice)`
+- `motif(interference)`
+- `motif(overloaded_piece)`
+- `motif(zugzwang)`
 
 ---
 
@@ -283,7 +301,6 @@ On the deployed machine the indexer uses H2 file storage at `/data/indexer` insi
 
 Main tables:
 - `indexing_requests` — id, player, platform, start_month, end_month, status, games_indexed, …
-- `game_features` — request_id, game_url, played_at, indexed_at, motifs_json, …
-- `motif_occurrences` — game_url (FK), motif, move_number, ply, side, description, moved_piece, attacker, target
-- `attack_occurrences` — game_url (FK), ply, side, piece_moved, attacker, target, is_checkmate
+- `game_features` — request_id, game_url, played_at, indexed_at, has_fork, has_pin, has_check, … (one boolean per motif)
+- `motif_occurrences` — game_url (FK), motif, move_number, ply, side, description, moved_piece, attacker, target, is_discovered, is_mate, pin_type
 - `indexed_periods` — player, platform, year_month, is_complete, games_count, …
