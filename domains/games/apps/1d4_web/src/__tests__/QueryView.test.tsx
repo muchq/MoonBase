@@ -38,7 +38,7 @@ const mockGame: GameRow = {
   hasPromotion: false,
   hasPromotionWithCheck: false,
   hasPromotionWithCheckmate: false,
-  hasAttack: false,
+
   hasDoubleCheck: false,
   hasBackRankMate: false,
   hasSmotheredMate: false,

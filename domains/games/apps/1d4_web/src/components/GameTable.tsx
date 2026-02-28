@@ -2,7 +2,6 @@ import type { GameRow } from '../types';
 import MotifBadge from './MotifBadge';
 
 const MOTIF_KEYS: [keyof GameRow, string][] = [
-  ['hasAttack', 'attack'],
   ['hasDiscoveredAttack', 'discovered_attack'],
   ['hasDiscoveredCheck', 'discovered_check'],
   ['hasFork', 'fork'],

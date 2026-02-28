@@ -37,7 +37,6 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
           "cross_pin",
           "fork",
           "skewer",
-          "attack",
           "discovered_attack",
           "discovered_check",
           "check",
@@ -159,10 +158,6 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     String name = motif.motifName();
     if (!VALID_MOTIFS.contains(name)) {
       throw new IllegalArgumentException("Unknown motif: " + name);
-    }
-    if (name.equals("attack")) {
-      return "EXISTS (SELECT 1 FROM motif_occurrences mo"
-          + " WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK')";
     }
     if (name.equals("discovered_attack")) {
       return "EXISTS (SELECT 1 FROM motif_occurrences mo"
