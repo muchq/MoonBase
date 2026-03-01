@@ -12,19 +12,19 @@ public class IndexRequestValidatorTest {
 
   @Test
   public void validRequest() {
-    var request = new IndexRequest("hikaru", "CHESS_COM", "2024-03", "2024-03");
+    var request = new IndexRequest("hikaru", "CHESS_COM", "2024-03", "2024-03", false);
     assertThatCode(() -> validator.validate(request)).doesNotThrowAnyException();
   }
 
   @Test
   public void validRequest_multipleMonths() {
-    var request = new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-12");
+    var request = new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-12", false);
     assertThatCode(() -> validator.validate(request)).doesNotThrowAnyException();
   }
 
   @Test
   public void rejectsNullPlayer() {
-    var request = new IndexRequest(null, "CHESS_COM", "2024-03", "2024-03");
+    var request = new IndexRequest(null, "CHESS_COM", "2024-03", "2024-03", false);
     assertThatThrownBy(() -> validator.validate(request))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("player is required");
@@ -32,7 +32,7 @@ public class IndexRequestValidatorTest {
 
   @Test
   public void rejectsBlankPlayer() {
-    var request = new IndexRequest("  ", "CHESS_COM", "2024-03", "2024-03");
+    var request = new IndexRequest("  ", "CHESS_COM", "2024-03", "2024-03", false);
     assertThatThrownBy(() -> validator.validate(request))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("player is required");
@@ -40,7 +40,7 @@ public class IndexRequestValidatorTest {
 
   @Test
   public void rejectsNullPlatform() {
-    var request = new IndexRequest("hikaru", null, "2024-03", "2024-03");
+    var request = new IndexRequest("hikaru", null, "2024-03", "2024-03", false);
     assertThatThrownBy(() -> validator.validate(request))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("platform is required");
@@ -48,7 +48,7 @@ public class IndexRequestValidatorTest {
 
   @Test
   public void rejectsUnsupportedPlatform() {
-    var request = new IndexRequest("hikaru", "LICHESS", "2024-03", "2024-03");
+    var request = new IndexRequest("hikaru", "LICHESS", "2024-03", "2024-03", false);
     assertThatThrownBy(() -> validator.validate(request))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Unsupported platform: LICHESS");
@@ -56,7 +56,7 @@ public class IndexRequestValidatorTest {
 
   @Test
   public void rejectsNullStartMonth() {
-    var request = new IndexRequest("hikaru", "CHESS_COM", null, "2024-03");
+    var request = new IndexRequest("hikaru", "CHESS_COM", null, "2024-03", false);
     assertThatThrownBy(() -> validator.validate(request))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("startMonth is required");
@@ -64,7 +64,7 @@ public class IndexRequestValidatorTest {
 
   @Test
   public void rejectsNullEndMonth() {
-    var request = new IndexRequest("hikaru", "CHESS_COM", "2024-03", null);
+    var request = new IndexRequest("hikaru", "CHESS_COM", "2024-03", null, false);
     assertThatThrownBy(() -> validator.validate(request))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("endMonth is required");
@@ -72,7 +72,7 @@ public class IndexRequestValidatorTest {
 
   @Test
   public void rejectsMalformedStartMonth() {
-    var request = new IndexRequest("hikaru", "CHESS_COM", "March", "2024-03");
+    var request = new IndexRequest("hikaru", "CHESS_COM", "March", "2024-03", false);
     assertThatThrownBy(() -> validator.validate(request))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("startMonth must be in YYYY-MM format");
@@ -80,7 +80,7 @@ public class IndexRequestValidatorTest {
 
   @Test
   public void rejectsMalformedEndMonth() {
-    var request = new IndexRequest("hikaru", "CHESS_COM", "2024-03", "2024-13");
+    var request = new IndexRequest("hikaru", "CHESS_COM", "2024-03", "2024-13", false);
     assertThatThrownBy(() -> validator.validate(request))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("endMonth must be in YYYY-MM format");
@@ -88,7 +88,7 @@ public class IndexRequestValidatorTest {
 
   @Test
   public void rejectsStartAfterEnd() {
-    var request = new IndexRequest("hikaru", "CHESS_COM", "2024-06", "2024-03");
+    var request = new IndexRequest("hikaru", "CHESS_COM", "2024-06", "2024-03", false);
     assertThatThrownBy(() -> validator.validate(request))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("startMonth must not be after endMonth");
@@ -96,7 +96,7 @@ public class IndexRequestValidatorTest {
 
   @Test
   public void rejectsRangeOver12Months() {
-    var request = new IndexRequest("hikaru", "CHESS_COM", "2023-01", "2024-02");
+    var request = new IndexRequest("hikaru", "CHESS_COM", "2023-01", "2024-02", false);
     assertThatThrownBy(() -> validator.validate(request))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Maximum range is 12 months, got 14");
@@ -104,7 +104,7 @@ public class IndexRequestValidatorTest {
 
   @Test
   public void accepts12MonthRange() {
-    var request = new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-12");
+    var request = new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-12", false);
     assertThatCode(() -> validator.validate(request)).doesNotThrowAnyException();
   }
 }

@@ -27,6 +27,23 @@ const mockGame: GameRow = {
   playedAt: 1700000000,
   indexedAt: 1700001000,
   numMoves: 40,
+  hasPin: false,
+  hasCrossPin: false,
+  hasFork: true,
+  hasSkewer: false,
+  hasDiscoveredAttack: false,
+  hasDiscoveredCheck: false,
+  hasCheck: false,
+  hasCheckmate: false,
+  hasPromotion: false,
+  hasPromotionWithCheck: false,
+  hasPromotionWithCheckmate: false,
+
+  hasDoubleCheck: false,
+  hasBackRankMate: false,
+  hasSmotheredMate: false,
+  hasOverloadedPiece: false,
+  hasZugzwang: false,
 };
 
 function makeWrapper() {

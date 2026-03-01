@@ -25,6 +25,22 @@ export interface GameRow {
   playedAt: string | number;
   indexedAt: string | number;
   numMoves: number;
+  hasPin: boolean;
+  hasCrossPin: boolean;
+  hasFork: boolean;
+  hasSkewer: boolean;
+  hasDiscoveredAttack: boolean;
+  hasDiscoveredCheck: boolean;
+  hasCheck: boolean;
+  hasCheckmate: boolean;
+  hasDoubleCheck: boolean;
+  hasBackRankMate: boolean;
+  hasSmotheredMate: boolean;
+  hasPromotion: boolean;
+  hasPromotionWithCheck: boolean;
+  hasPromotionWithCheckmate: boolean;
+  hasOverloadedPiece: boolean;
+  hasZugzwang: boolean;
   pgn?: string;
   occurrences?: Record<string, OccurrenceRow[]>;
 }

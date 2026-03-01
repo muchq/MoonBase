@@ -32,7 +32,7 @@ public class IndexControllerTest {
 
   @Test
   public void createIndex_createsAndEnqueuesWhenNoExistingRequest() {
-    IndexRequest request = new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-03");
+    IndexRequest request = new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-03", false);
     IndexResponse response = controller.createIndex(request);
 
     assertThat(response.id()).isNotNull();
@@ -66,7 +66,7 @@ public class IndexControllerTest {
             null,
             50));
 
-    IndexRequest request = new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-03");
+    IndexRequest request = new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-03", false);
     IndexResponse response = controller.createIndex(request);
 
     assertThat(response.id()).isEqualTo(existingId);
@@ -97,7 +97,8 @@ public class IndexControllerTest {
             0));
 
     IndexResponse response =
-        controller.createIndex(new IndexRequest("player", "CHESS_COM", "2024-06", "2024-06"));
+        controller.createIndex(
+            new IndexRequest("player", "CHESS_COM", "2024-06", "2024-06", false));
 
     assertThat(response.id()).isEqualTo(existingId);
     assertThat(response.player()).isEqualTo("player");

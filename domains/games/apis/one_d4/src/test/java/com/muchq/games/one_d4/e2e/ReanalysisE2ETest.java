@@ -253,7 +253,7 @@ public class ReanalysisE2ETest {
 
   private String indexGame(String url, String pgn) {
     fakeChessClient.setGames(PLAYER, MONTH, List.of(playedGame(url, pgn)));
-    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-07", "2024-07");
+    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-07", "2024-07", false);
     controller.createIndex(request);
     processQueueUntilIdle();
     return url;
@@ -262,7 +262,7 @@ public class ReanalysisE2ETest {
   /** Indexes multiple games in a single indexing request (same player+month batch). */
   private void indexGames(List<PlayedGame> games) {
     fakeChessClient.setGames(PLAYER, MONTH, games);
-    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-07", "2024-07");
+    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-07", "2024-07", false);
     controller.createIndex(request);
     processQueueUntilIdle();
   }

@@ -302,7 +302,7 @@ public class MotifE2ETest {
   /** Indexes a single game and returns its URL. */
   private String indexGame(String url, String pgn) {
     fakeChessClient.setGames(PLAYER, MONTH, List.of(playedGame(url, pgn)));
-    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-07", "2024-07");
+    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-07", "2024-07", false);
     controller.createIndex(request);
     processQueueUntilIdle();
     return url;
