@@ -16,8 +16,6 @@ const MOTIF_KEYS: [keyof GameRow, string][] = [
   ['hasPromotion', 'promotion'],
   ['hasPromotionWithCheck', 'promotion_with_check'],
   ['hasPromotionWithCheckmate', 'promotion_with_checkmate'],
-  ['hasSacrifice', 'sacrifice'],
-  ['hasInterference', 'interference'],
   ['hasOverloadedPiece', 'overloaded_piece'],
   ['hasZugzwang', 'zugzwang'],
 ];

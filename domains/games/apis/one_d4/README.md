@@ -271,8 +271,6 @@ Returns `{"gamesReanalyzed": N}`.
 - `motif(promotion)`
 - `motif(promotion_with_check)`
 - `motif(promotion_with_checkmate)`
-- `motif(sacrifice)`
-- `motif(interference)`
 - `motif(overloaded_piece)`
 - `motif(zugzwang)`
 

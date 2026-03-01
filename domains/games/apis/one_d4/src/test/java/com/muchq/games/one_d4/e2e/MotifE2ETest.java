@@ -25,14 +25,12 @@ import com.muchq.games.one_d4.motifs.AttackDetector;
 import com.muchq.games.one_d4.motifs.BackRankMateDetector;
 import com.muchq.games.one_d4.motifs.CheckDetector;
 import com.muchq.games.one_d4.motifs.CrossPinDetector;
-import com.muchq.games.one_d4.motifs.InterferenceDetector;
 import com.muchq.games.one_d4.motifs.MotifDetector;
 import com.muchq.games.one_d4.motifs.OverloadedPieceDetector;
 import com.muchq.games.one_d4.motifs.PinDetector;
 import com.muchq.games.one_d4.motifs.PromotionDetector;
 import com.muchq.games.one_d4.motifs.PromotionWithCheckDetector;
 import com.muchq.games.one_d4.motifs.PromotionWithCheckmateDetector;
-import com.muchq.games.one_d4.motifs.SacrificeDetector;
 import com.muchq.games.one_d4.motifs.SkewerDetector;
 import com.muchq.games.one_d4.motifs.SmotheredMateDetector;
 import com.muchq.games.one_d4.motifs.ZugzwangDetector;
@@ -58,7 +56,7 @@ import org.junit.Test;
  *
  * <ul>
  *   <li>King's Gambit (54 moves) — covers PIN, FORK, SKEWER, ATTACK, DISCOVERED_ATTACK, CHECK,
- *       CHECKMATE, PROMOTION, PROMOTION_WITH_CHECK, SACRIFICE, INTERFERENCE, OVERLOADED_PIECE.
+ *       CHECKMATE, PROMOTION, PROMOTION_WITH_CHECK, OVERLOADED_PIECE.
  *   <li>Opera Game (17 moves, Morphy 1858) — covers BACK_RANK_MATE (17.Rd8#).
  * </ul>
  *
@@ -73,7 +71,7 @@ public class MotifE2ETest {
 
   // King's Gambit: _prior vs zapblast, 2024-12-30 (from FullMotifDetectorTest).
   // Contains: PIN, FORK, SKEWER, ATTACK, DISCOVERED_ATTACK, CHECK, CHECKMATE, PROMOTION,
-  // PROMOTION_WITH_CHECK, SACRIFICE, INTERFERENCE, OVERLOADED_PIECE.
+  // PROMOTION_WITH_CHECK, OVERLOADED_PIECE.
   private static final String KINGS_GAMBIT_PGN =
       """
       [Event "Live Chess"]
@@ -143,9 +141,7 @@ public class MotifE2ETest {
             new PromotionWithCheckmateDetector(),
             new BackRankMateDetector(),
             new SmotheredMateDetector(),
-            new SacrificeDetector(),
             new ZugzwangDetector(),
-            new InterferenceDetector(),
             new OverloadedPieceDetector());
     FeatureExtractor featureExtractor =
         new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
@@ -249,15 +245,6 @@ public class MotifE2ETest {
     assertThat(occs.get(0).target()).isNotNull();
   }
 
-  // === SACRIFICE ===
-
-  @Test
-  public void sacrifice_motifDetected() {
-    String url = indexGame(KINGS_GAMBIT_URL, KINGS_GAMBIT_PGN);
-    assertMotifDetected(url, "sacrifice");
-    assertThat(getOccurrences(url, "sacrifice")).isNotEmpty();
-  }
-
   // === PROMOTION ===
 
   @Test
@@ -281,15 +268,6 @@ public class MotifE2ETest {
     assertThat(occs.get(0).moveNumber()).isEqualTo(53);
     assertThat(occs.get(0).attacker()).isNotNull();
     assertThat(occs.get(0).target()).isNotNull();
-  }
-
-  // === INTERFERENCE ===
-
-  @Test
-  public void interference_motifDetected() {
-    String url = indexGame(KINGS_GAMBIT_URL, KINGS_GAMBIT_PGN);
-    assertMotifDetected(url, "interference");
-    assertThat(getOccurrences(url, "interference")).isNotEmpty();
   }
 
   // === OVERLOADED_PIECE ===

@@ -552,8 +552,8 @@ generation. Issue #1049 (Phase 9) plans to deepen the chariot integration:
 - **Check attribution**: distinguish promoted-piece check vs discovered
   check vs double check, requiring chariot's board model to identify which
   piece delivers the check.
-- **7 new motifs**: back rank mate, smothered mate, sacrifice, zugzwang,
-  double check, interference, overloaded piece — several of these need
+- **5 new motifs**: back rank mate, smothered mate, zugzwang,
+  double check, overloaded piece — several of these need
   full board state analysis that goes well beyond FEN string parsing.
 - **Re-analysis pipeline**: admin endpoint to reprocess existing games with
   new/improved detectors.
