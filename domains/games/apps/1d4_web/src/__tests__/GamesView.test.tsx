@@ -27,23 +27,7 @@ const mockGame: GameRow = {
   playedAt: 1700000000,
   indexedAt: 1700001000,
   numMoves: 30,
-  hasPin: false,
-  hasCrossPin: false,
-  hasFork: true,
-  hasSkewer: false,
-  hasDiscoveredAttack: false,
-  hasDiscoveredCheck: false,
-  hasCheck: false,
-  hasCheckmate: false,
-  hasPromotion: false,
-  hasPromotionWithCheck: false,
-  hasPromotionWithCheckmate: false,
-
-  hasDoubleCheck: false,
-  hasBackRankMate: false,
-  hasSmotheredMate: false,
-  hasOverloadedPiece: false,
-  hasZugzwang: false,
+  occurrences: { fork: [{ gameUrl: 'https://chess.com/game/99', motif: 'fork', moveNumber: 10, side: 'white', description: 'Fork' }] },
 };
 
 function makeWrapper() {

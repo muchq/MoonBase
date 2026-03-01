@@ -1,24 +1,6 @@
 import type { GameRow } from '../types';
 import MotifBadge from './MotifBadge';
 
-const MOTIF_KEYS: [keyof GameRow, string][] = [
-  ['hasDiscoveredAttack', 'discovered_attack'],
-  ['hasDiscoveredCheck', 'discovered_check'],
-  ['hasFork', 'fork'],
-  ['hasPin', 'pin'],
-  ['hasCrossPin', 'cross_pin'],
-  ['hasSkewer', 'skewer'],
-  ['hasCheck', 'check'],
-  ['hasCheckmate', 'checkmate'],
-  ['hasDoubleCheck', 'double_check'],
-  ['hasBackRankMate', 'back_rank_mate'],
-  ['hasSmotheredMate', 'smothered_mate'],
-  ['hasPromotion', 'promotion'],
-  ['hasPromotionWithCheck', 'promotion_with_check'],
-  ['hasPromotionWithCheckmate', 'promotion_with_checkmate'],
-  ['hasOverloadedPiece', 'overloaded_piece'],
-  ['hasZugzwang', 'zugzwang'],
-];
 
 const COLUMNS = [
   { id: 'gameUrl', label: 'Game', sort: false },
@@ -68,7 +50,7 @@ function renderCell(
     case 'motifs':
       return (
         <span className="motifs">
-          {MOTIF_KEYS.filter(([key]) => game[key]).map(([, label]) => (
+          {Object.keys(game.occurrences ?? {}).map((label) => (
             <MotifBadge
               key={label}
               label={label}
