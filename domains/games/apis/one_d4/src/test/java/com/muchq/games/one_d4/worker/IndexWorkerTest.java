@@ -155,7 +155,8 @@ public class IndexWorkerTest {
         new IndexWorker(
             stubChessClient, featureExtractor, requestStore, recordingStore, periodStore);
 
-    IndexMessage message = new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false);
+    IndexMessage message =
+        new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false);
     workerWithRecording.process(message);
 
     // It should have skipped inserting anything for this game.

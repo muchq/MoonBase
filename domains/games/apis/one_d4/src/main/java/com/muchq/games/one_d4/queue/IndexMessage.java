@@ -8,9 +8,9 @@ public record IndexMessage(
     String platform,
     String startMonth,
     String endMonth,
-    boolean includeBullet
-) {
-    public IndexMessage(UUID requestId, String player, String platform, String startMonth, String endMonth) {
-        this(requestId, player, platform, startMonth, endMonth, false);
-    }
+    boolean includeBullet) {
+  public IndexMessage(
+      UUID requestId, String player, String platform, String startMonth, String endMonth) {
+    this(requestId, player, platform, startMonth, endMonth, false);
+  }
 }
