@@ -35,6 +35,7 @@ export interface IndexRequest {
   platform: string;
   startMonth: string;
   endMonth: string;
+  includeBullet?: boolean;
   status: string;
   gamesIndexed: number;
   errorMessage: string | null;

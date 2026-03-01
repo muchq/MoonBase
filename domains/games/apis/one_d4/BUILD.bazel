@@ -12,6 +12,7 @@ java_library(
     visibility = ["//visibility:public"],
     deps = [
         artifact("org.jspecify:jspecify"),
+        artifact("com.fasterxml.jackson.core:jackson-annotations"),
     ],
 )
 
@@ -133,6 +134,7 @@ java_library(
     visibility = ["//visibility:public"],
     deps = [
         artifact("org.jspecify:jspecify"),
+        artifact("com.fasterxml.jackson.core:jackson-annotations"),
     ],
 )
 

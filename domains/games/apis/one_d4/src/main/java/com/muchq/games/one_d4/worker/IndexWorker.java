@@ -83,6 +83,9 @@ public class IndexWorker {
 
         int monthCount = 0;
         for (PlayedGame game : response.get().games()) {
+          if (!message.includeBullet() && "bullet".equals(game.timeClass())) {
+            continue;
+          }
           try {
             indexGame(message, game);
             monthCount++;

@@ -142,8 +142,32 @@ public class IndexWorkerTest {
     assertThat(occurrences.get(Motif.CHECK).get(0).description()).isNotBlank();
   }
 
+  @Test
+  public void process_whenGameIsBulletAndIncludeBulletIsFalse_skipsGame() {
+    String gameUrl = "https://chess.com/game/bullet";
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1), List.of(playedGameWithCheckPgn(gameUrl, "bullet")));
+    RecordingGameFeatureStore recordingStore = new RecordingGameFeatureStore();
+    List<MotifDetector> detectors = List.of();
+    FeatureExtractor featureExtractor =
+        new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
+    IndexWorker workerWithRecording =
+        new IndexWorker(
+            stubChessClient, featureExtractor, requestStore, recordingStore, periodStore);
+
+    IndexMessage message = new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false);
+    workerWithRecording.process(message);
+
+    // It should have skipped inserting anything for this game.
+    assertThat(recordingStore.getLastInsertOccurrencesGameUrl()).isNull();
+  }
+
   /** Scholar's mate: ends with Qxf7# so CheckDetector fires. */
   private static PlayedGame playedGameWithCheckPgn(String gameUrl) {
+    return playedGameWithCheckPgn(gameUrl, "blitz");
+  }
+
+  private static PlayedGame playedGameWithCheckPgn(String gameUrl, String timeClass) {
     String pgn =
         """
         [Event "Live Chess"]
@@ -165,7 +189,7 @@ public class IndexWorkerTest {
         "uuid-" + gameUrl.hashCode(),
         "",
         "",
-        "blitz",
+        timeClass,
         "chess",
         new PlayerResult(1500, "win", "https://chess.com/w", "White", "uuid-w"),
         new PlayerResult(1500, "loss", "https://chess.com/b", "Black", "uuid-b"),

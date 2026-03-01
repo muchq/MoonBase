@@ -1,0 +1,20 @@
+
+> 1d4-web@0.0.0 preview
+> vite preview
+
+  ➜  Local:   http://localhost:4173/
+  ➜  Network: use --host to expose
+  ➜  Debug:   http://localhost:4173/__debug
+GET / 200 OK (16ms)
+GET /assets/index-DRjcKeeD.js 200 OK (6ms)
+GET /assets/index-B3nKd-Qy.css 200 OK (4ms)
+GET / 200 OK (2ms)
+GET /assets/index-DRjcKeeD.js 200 OK (3ms)
+GET /assets/index-B3nKd-Qy.css 200 OK (2ms)
+GET /index 307 Temporary Redirect (3ms)
+GET / 200 OK (2ms)
+GET /assets/index-DRjcKeeD.js 200 OK (3ms)
+GET /assets/index-B3nKd-Qy.css 200 OK (2ms)
+GET / 200 OK (2ms)
+GET /assets/index-DRjcKeeD.js 200 OK (3ms)
+GET /assets/index-B3nKd-Qy.css 200 OK (2ms)

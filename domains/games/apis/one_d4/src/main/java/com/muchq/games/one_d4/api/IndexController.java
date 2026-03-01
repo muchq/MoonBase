@@ -91,7 +91,12 @@ public class IndexController {
 
     queue.enqueue(
         new IndexMessage(
-            id, request.player(), request.platform(), request.startMonth(), request.endMonth()));
+            id,
+            request.player(),
+            request.platform(),
+            request.startMonth(),
+            request.endMonth(),
+            request.includeBullet() != null ? request.includeBullet() : false));
 
     return new IndexResponse(
         id,

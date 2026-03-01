@@ -80,6 +80,7 @@ describe('IndexView', () => {
         platform: 'CHESS_COM',
         startMonth: '2024-01',
         endMonth: '2024-03',
+        includeBullet: false,
       })
     );
   });

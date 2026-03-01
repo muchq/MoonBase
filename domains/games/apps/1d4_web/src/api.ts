@@ -39,6 +39,7 @@ export async function createIndex(body: {
   platform: string;
   startMonth: string;
   endMonth: string;
+  includeBullet?: boolean;
 }): Promise<IndexRequest> {
   return request('/v1/index', { method: 'POST', body: JSON.stringify(body) });
 }

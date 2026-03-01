@@ -21,6 +21,7 @@ export default function IndexView() {
   const [platform, setPlatform] = useState('CHESS_COM');
   const [startMonth, setStartMonth] = useState('');
   const [endMonth, setEndMonth] = useState('');
+  const [includeBullet, setIncludeBullet] = useState(false);
 
   const { data: requests = [] } = useQuery<IndexRequest[]>({
     queryKey: ['indexRequests'],
@@ -69,7 +70,7 @@ export default function IndexView() {
       return;
     }
     setMessage(null);
-    mutation.mutate({ player: p, platform, startMonth: sm, endMonth: em });
+    mutation.mutate({ player: p, platform, startMonth: sm, endMonth: em, includeBullet });
   }
 
   return (
@@ -123,6 +124,15 @@ export default function IndexView() {
               onChange={(e) => setEndMonth(e.target.value)}
               required
             />
+          </div>
+          <div className="form-group checkbox-group" style={{ flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>
+            <input
+              id="includeBullet"
+              type="checkbox"
+              checked={includeBullet}
+              onChange={(e) => setIncludeBullet(e.target.checked)}
+            />
+            <label htmlFor="includeBullet" style={{ marginBottom: 0 }}>Include bullet games</label>
           </div>
           <button type="submit" className="btn" disabled={mutation.isPending}>
             Submit
