@@ -24,10 +24,7 @@ import com.muchq.games.one_d4.engine.PgnParser;
 import com.muchq.games.one_d4.motifs.AttackDetector;
 import com.muchq.games.one_d4.motifs.BackRankMateDetector;
 import com.muchq.games.one_d4.motifs.CheckDetector;
-import com.muchq.games.one_d4.motifs.CheckmateDetector;
 import com.muchq.games.one_d4.motifs.CrossPinDetector;
-import com.muchq.games.one_d4.motifs.DiscoveredCheckDetector;
-import com.muchq.games.one_d4.motifs.DoubleCheckDetector;
 import com.muchq.games.one_d4.motifs.InterferenceDetector;
 import com.muchq.games.one_d4.motifs.MotifDetector;
 import com.muchq.games.one_d4.motifs.OverloadedPieceDetector;
@@ -65,8 +62,8 @@ import org.junit.Test;
  *   <li>Opera Game (17 moves, Morphy 1858) — covers BACK_RANK_MATE (17.Rd8#).
  * </ul>
  *
- * <p>DISCOVERED_CHECK is omitted from e2e tests; it is thoroughly covered by unit tests in
- * DiscoveredCheckDetectorTest.
+ * <p>DISCOVERED_CHECK, CHECKMATE, and DOUBLE_CHECK are derived at query/response time from ATTACK
+ * rows and are covered by GameFeatureDaoTest derivation tests.
  */
 public class MotifE2ETest {
 
@@ -140,9 +137,7 @@ public class MotifE2ETest {
             new CrossPinDetector(),
             new SkewerDetector(),
             new AttackDetector(),
-            new DiscoveredCheckDetector(),
             new CheckDetector(),
-            new CheckmateDetector(),
             new PromotionDetector(),
             new PromotionWithCheckDetector(),
             new PromotionWithCheckmateDetector(),
@@ -150,7 +145,6 @@ public class MotifE2ETest {
             new SmotheredMateDetector(),
             new SacrificeDetector(),
             new ZugzwangDetector(),
-            new DoubleCheckDetector(),
             new InterferenceDetector(),
             new OverloadedPieceDetector());
     FeatureExtractor featureExtractor =
