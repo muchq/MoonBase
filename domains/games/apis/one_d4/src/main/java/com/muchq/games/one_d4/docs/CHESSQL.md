@@ -56,17 +56,16 @@ Underscore-separated names also work directly: `white_elo >= 2500` is equivalent
 ## Motifs
 
 The `motif()` function checks for tactical pattern presence. Queries compile to `EXISTS` subqueries
-against the `motif_occurrences` table. Most motifs are stored directly as rows in that table;
-a few are derived from `ATTACK` rows using flag or grouping conditions.
+against the `motif_occurrences` table. 11 motifs are stored directly as rows in that table;
+5 are derived from `ATTACK` rows using flag or grouping conditions at query time.
 
-**Directly stored motifs** (one row per occurrence):
+**Directly stored motifs** (one row per occurrence, 11 total):
 
 | ChessQL                       | motif_occurrences filter        |
 |-------------------------------|---------------------------------|
 | `motif(pin)`                  | `motif = 'PIN'`                 |
 | `motif(cross_pin)`            | `motif = 'CROSS_PIN'`           |
 | `motif(skewer)`               | `motif = 'SKEWER'`              |
-| `motif(attack)`               | `motif = 'ATTACK'`              |
 | `motif(check)`                | `motif = 'CHECK'`               |
 | `motif(promotion)`            | `motif = 'PROMOTION'`           |
 | `motif(promotion_with_check)` | `motif = 'PROMOTION_WITH_CHECK'`|
@@ -76,7 +75,7 @@ a few are derived from `ATTACK` rows using flag or grouping conditions.
 | `motif(zugzwang)`             | `motif = 'ZUGZWANG'`            |
 | `motif(overloaded_piece)`     | `motif = 'OVERLOADED_PIECE'`    |
 
-**Derived motifs** (computed from `ATTACK` rows):
+**Derived motifs** (computed from `ATTACK` rows at query time, 5 total):
 
 | ChessQL                 | Derivation condition |
 |-------------------------|----------------------|
