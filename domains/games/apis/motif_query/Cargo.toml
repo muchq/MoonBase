@@ -1,0 +1,27 @@
+[package]
+name = "motif_query"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+description = "DataFusion/Parquet query service for ChessQL motif queries"
+
+[[bin]]
+name = "motif-query"
+path = "src/main.rs"
+
+[dependencies]
+arrow = { workspace = true }
+axum = { workspace = true }
+datafusion = { workspace = true }
+parquet = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+server_pal = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
