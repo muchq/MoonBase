@@ -56,13 +56,14 @@ public class GameFeatureDaoTest {
     GameFeatures.MotifOccurrence occ1 =
         new GameFeatures.MotifOccurrence(
             5, 3, "white", "Knight pinned on c6", null, null, null, false, false, null);
+    // Discovered attack targeting king — derived as both discovered_attack and discovered_check.
     GameFeatures.MotifOccurrence occ2 =
-        new GameFeatures.MotifOccurrence(
-            12, 6, "black", "Discovered check", "Nd5f4", "Ba2", "kf7", false, false, null);
+        GameFeatures.MotifOccurrence.attack(
+            12, 6, "black", "Discovered attack at move 6", "Nd5f4", "Ba2", "kf7", true, false);
     Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences =
         Map.of(
             Motif.PIN, List.of(occ1),
-            Motif.DISCOVERED_CHECK, List.of(occ2));
+            Motif.ATTACK, List.of(occ2));
 
     dao.insertOccurrences(gameUrl, occurrences);
 
@@ -93,11 +94,11 @@ public class GameFeatureDaoTest {
                 "discovered_check",
                 6,
                 "black",
-                "Discovered check",
+                "Discovered check at move 6",
                 "Nd5f4",
                 "Ba2",
                 "kf7",
-                false,
+                true,
                 false,
                 null));
   }
@@ -215,6 +216,155 @@ public class GameFeatureDaoTest {
 
     Map<String, Map<String, List<OccurrenceRow>>> result = dao.queryOccurrences(List.of(gameUrl));
     assertThat(result.getOrDefault(gameUrl, Map.of())).doesNotContainKey("fork");
+  }
+
+  @Test
+  public void discoveredAttack_derivedFromIsDiscoveredAttackRows() {
+    String gameUrl = "https://chess.com/game/disc-attack-1";
+    dao.insert(createGame(gameUrl));
+
+    // Discovered attack: Kg1g2 reveals Ra1 attacking rh1
+    GameFeatures.MotifOccurrence disc =
+        GameFeatures.MotifOccurrence.attack(
+            59, 30, "white", "Discovered attack at move 30", "Kg1g2", "Ra1", "rh1", true, false);
+    // Direct attack — not discovered
+    GameFeatures.MotifOccurrence direct =
+        GameFeatures.MotifOccurrence.attack(
+            59, 30, "white", "Attack at move 30", "Kg1g2", "Kg2", "qe5", false, false);
+    dao.insertOccurrences(gameUrl, Map.of(Motif.ATTACK, List.of(disc, direct)));
+
+    Map<String, Map<String, List<OccurrenceRow>>> result = dao.queryOccurrences(List.of(gameUrl));
+    Map<String, List<OccurrenceRow>> byMotif = result.get(gameUrl);
+    assertThat(byMotif).containsKey("discovered_attack");
+    assertThat(byMotif).doesNotContainKey("attack");
+    List<OccurrenceRow> occs = byMotif.get("discovered_attack");
+    assertThat(occs).hasSize(1);
+    assertThat(occs.get(0).moveNumber()).isEqualTo(30);
+    assertThat(occs.get(0).side()).isEqualTo("white");
+    assertThat(occs.get(0).attacker()).isEqualTo("Ra1");
+    assertThat(occs.get(0).target()).isEqualTo("rh1");
+    assertThat(occs.get(0).isDiscovered()).isTrue();
+  }
+
+  @Test
+  public void checkmate_derivedFromIsMateAttackRows() {
+    String gameUrl = "https://chess.com/game/checkmate-1";
+    dao.insert(createGame(gameUrl));
+
+    // Ra5 delivers checkmate to ka8 at move 54
+    GameFeatures.MotifOccurrence mateAttack =
+        GameFeatures.MotifOccurrence.attack(
+            107, 54, "white", "Attack at move 54", "Ra5", "Ra5", "ka8", false, true);
+    dao.insertOccurrences(gameUrl, Map.of(Motif.ATTACK, List.of(mateAttack)));
+
+    Map<String, Map<String, List<OccurrenceRow>>> result = dao.queryOccurrences(List.of(gameUrl));
+    Map<String, List<OccurrenceRow>> byMotif = result.get(gameUrl);
+    assertThat(byMotif).containsKey("checkmate");
+    assertThat(byMotif).doesNotContainKey("attack");
+    List<OccurrenceRow> occs = byMotif.get("checkmate");
+    assertThat(occs).hasSize(1);
+    assertThat(occs.get(0).moveNumber()).isEqualTo(54);
+    assertThat(occs.get(0).side()).isEqualTo("white");
+    assertThat(occs.get(0).attacker()).isEqualTo("Ra5");
+    assertThat(occs.get(0).target()).isEqualTo("ka8");
+    assertThat(occs.get(0).isMate()).isTrue();
+  }
+
+  @Test
+  public void discoveredCheck_derivedFromDiscoveredAttackTargetingKing() {
+    String gameUrl = "https://chess.com/game/disc-check-1";
+    dao.insert(createGame(gameUrl));
+
+    // Discovered check: Pf5 moves revealing Bg2 attacking ke8
+    GameFeatures.MotifOccurrence discCheck =
+        GameFeatures.MotifOccurrence.attack(
+            15, 8, "white", "Discovered attack at move 8", "Pf5", "Bg2", "ke8", true, false);
+    // Discovered attack targeting non-king — must NOT become discovered_check
+    GameFeatures.MotifOccurrence discNonKing =
+        GameFeatures.MotifOccurrence.attack(
+            15, 8, "white", "Discovered attack at move 8", "Pf5", "Bg2", "qd5", true, false);
+    dao.insertOccurrences(gameUrl, Map.of(Motif.ATTACK, List.of(discCheck, discNonKing)));
+
+    Map<String, Map<String, List<OccurrenceRow>>> result = dao.queryOccurrences(List.of(gameUrl));
+    Map<String, List<OccurrenceRow>> byMotif = result.get(gameUrl);
+    assertThat(byMotif).containsKey("discovered_check");
+    assertThat(byMotif).containsKey("discovered_attack");
+    // Only the king-targeting row becomes discovered_check
+    List<OccurrenceRow> occs = byMotif.get("discovered_check");
+    assertThat(occs).hasSize(1);
+    assertThat(occs.get(0).attacker()).isEqualTo("Bg2");
+    assertThat(occs.get(0).target()).isEqualTo("ke8");
+    assertThat(occs.get(0).isDiscovered()).isTrue();
+  }
+
+  @Test
+  public void doubleCheck_derivedWhenTwoAttackersTargetKingAtSamePly() {
+    String gameUrl = "https://chess.com/game/double-check-1";
+    dao.insert(createGame(gameUrl));
+
+    // Move 10: piece moves delivering check (direct) AND reveals discovered check — double check
+    GameFeatures.MotifOccurrence direct =
+        GameFeatures.MotifOccurrence.attack(
+            19, 10, "white", "Attack at move 10", "Bd3", "Bd3", "ke8", false, false);
+    GameFeatures.MotifOccurrence discovered =
+        GameFeatures.MotifOccurrence.attack(
+            19, 10, "white", "Discovered attack at move 10", "Bd3", "Rd1", "ke8", true, false);
+    dao.insertOccurrences(gameUrl, Map.of(Motif.ATTACK, List.of(direct, discovered)));
+
+    Map<String, Map<String, List<OccurrenceRow>>> result = dao.queryOccurrences(List.of(gameUrl));
+    Map<String, List<OccurrenceRow>> byMotif = result.get(gameUrl);
+    assertThat(byMotif).containsKey("double_check");
+    List<OccurrenceRow> occs = byMotif.get("double_check");
+    assertThat(occs).hasSize(1);
+    assertThat(occs.get(0).moveNumber()).isEqualTo(10);
+    assertThat(occs.get(0).side()).isEqualTo("white");
+    assertThat(occs.get(0).target()).isEqualTo("ke8");
+  }
+
+  @Test
+  public void doubleCheck_notDerivedWhenSingleAttackerTargetsKing() {
+    String gameUrl = "https://chess.com/game/no-double-check-1";
+    dao.insert(createGame(gameUrl));
+
+    GameFeatures.MotifOccurrence single =
+        GameFeatures.MotifOccurrence.attack(
+            19, 10, "white", "Attack at move 10", "Bd3", "Bd3", "ke8", false, false);
+    dao.insertOccurrences(gameUrl, Map.of(Motif.ATTACK, List.of(single)));
+
+    Map<String, Map<String, List<OccurrenceRow>>> result = dao.queryOccurrences(List.of(gameUrl));
+    assertThat(result.getOrDefault(gameUrl, Map.of())).doesNotContainKey("double_check");
+  }
+
+  @Test
+  public void staleStoredMotifs_filteredFromResults() {
+    // Stale CHECKMATE, DISCOVERED_CHECK, DOUBLE_CHECK, DISCOVERED_ATTACK rows from old index runs
+    // must be excluded from queryOccurrences (filtered in SQL) and re-derived from ATTACK rows.
+    String gameUrl = "https://chess.com/game/stale-derived-1";
+    dao.insert(createGame(gameUrl));
+
+    // Insert stale stored rows directly (simulating old indexed data)
+    try (var conn = dataSource.getConnection()) {
+      for (String staleMotif :
+          List.of("CHECKMATE", "DISCOVERED_CHECK", "DOUBLE_CHECK", "DISCOVERED_ATTACK", "FORK")) {
+        try (var ps =
+            conn.prepareStatement(
+                "INSERT INTO motif_occurrences (id, game_url, motif, ply, side, move_number,"
+                    + " description, moved_piece, attacker, target, is_discovered, is_mate,"
+                    + " pin_type) VALUES (?, ?, ?, 5, 'white', 3, 'stale', null, null, null,"
+                    + " false, false, null)")) {
+          ps.setString(1, java.util.UUID.randomUUID().toString());
+          ps.setString(2, gameUrl);
+          ps.setString(3, staleMotif);
+          ps.executeUpdate();
+        }
+      }
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+
+    Map<String, Map<String, List<OccurrenceRow>>> result = dao.queryOccurrences(List.of(gameUrl));
+    // No ATTACK rows → no derived motifs; stale stored rows are filtered out
+    assertThat(result.getOrDefault(gameUrl, Map.of())).isEmpty();
   }
 
   @Test

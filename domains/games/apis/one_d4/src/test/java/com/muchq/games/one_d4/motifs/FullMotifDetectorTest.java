@@ -59,9 +59,7 @@ public class FullMotifDetectorTest {
             new CrossPinDetector(),
             new SkewerDetector(),
             new AttackDetector(),
-            new DiscoveredCheckDetector(),
             new CheckDetector(),
-            new CheckmateDetector(),
             new PromotionDetector(),
             new PromotionWithCheckDetector(),
             new PromotionWithCheckmateDetector(),
@@ -69,7 +67,6 @@ public class FullMotifDetectorTest {
             new SmotheredMateDetector(),
             new SacrificeDetector(),
             new ZugzwangDetector(),
-            new DoubleCheckDetector(),
             new InterferenceDetector(),
             new OverloadedPieceDetector());
     extractor = new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
@@ -85,14 +82,14 @@ public class FullMotifDetectorTest {
   public void extractFeatures_detectsExactMotifSet() {
     GameFeatures features = extractor.extract(PGN);
 
-    // FORK is no longer materialized at index time — it is derived at query/response time.
+    // FORK, CHECKMATE, DISCOVERED_CHECK, DOUBLE_CHECK are derived at query/response time from
+    // ATTACK rows — they are not materialized at index time.
     assertThat(features.motifs())
         .containsExactlyInAnyOrder(
             Motif.PIN,
             Motif.SKEWER,
             Motif.ATTACK,
             Motif.CHECK,
-            Motif.CHECKMATE,
             Motif.PROMOTION,
             Motif.PROMOTION_WITH_CHECK,
             Motif.SACRIFICE,
@@ -104,11 +101,14 @@ public class FullMotifDetectorTest {
   public void extractFeatures_motifsNotPresent() {
     GameFeatures features = extractor.extract(PGN);
 
+    // CHECKMATE, DISCOVERED_CHECK, DOUBLE_CHECK are now derived at query/response time (not
+    // indexed)
     Set<Motif> absent =
         Set.of(
             Motif.CROSS_PIN,
             Motif.DISCOVERED_ATTACK,
             Motif.DISCOVERED_CHECK,
+            Motif.CHECKMATE,
             Motif.PROMOTION_WITH_CHECKMATE,
             Motif.BACK_RANK_MATE,
             Motif.SMOTHERED_MATE,
@@ -151,14 +151,6 @@ public class FullMotifDetectorTest {
             tuple(49, "black"),
             tuple(53, "white"),
             tuple(54, "white"));
-  }
-
-  @Test
-  public void extractFeatures_checkmate_Ra5() {
-    GameFeatures features = extractor.extract(PGN);
-    assertThat(features.occurrences().get(Motif.CHECKMATE))
-        .extracting(GameFeatures.MotifOccurrence::moveNumber, GameFeatures.MotifOccurrence::side)
-        .containsExactly(tuple(54, "white"));
   }
 
   @Test
@@ -259,7 +251,7 @@ public class FullMotifDetectorTest {
   @Test
   public void extractFeatures_discoveredCheck_occurrences() {
     GameFeatures features = extractor.extract(PGN);
-    // No true discovered checks in this game — all check moves are direct, not through a vacancy
+    // DISCOVERED_CHECK is derived at query/response time from ATTACK rows; not indexed.
     assertThat(features.occurrences()).doesNotContainKey(Motif.DISCOVERED_CHECK);
   }
 
