@@ -20,6 +20,7 @@ java_library(
     name = "compiler",
     srcs = [
         "src/main/java/com/muchq/games/chessql/compiler/CompiledQuery.java",
+        "src/main/java/com/muchq/games/chessql/compiler/DataFusionSqlCompiler.java",
         "src/main/java/com/muchq/games/chessql/compiler/QueryCompiler.java",
         "src/main/java/com/muchq/games/chessql/compiler/SqlCompiler.java",
     ],
@@ -58,6 +59,19 @@ java_test_suite(
     name = "compiler_test",
     size = "small",
     srcs = ["src/test/java/com/muchq/games/chessql/compiler/SqlCompilerTest.java"],
+    deps = [
+        ":ast",
+        ":compiler",
+        ":parser",
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_test_suite(
+    name = "datafusion_compiler_test",
+    size = "small",
+    srcs = ["src/test/java/com/muchq/games/chessql/compiler/DataFusionSqlCompilerTest.java"],
     deps = [
         ":ast",
         ":compiler",
