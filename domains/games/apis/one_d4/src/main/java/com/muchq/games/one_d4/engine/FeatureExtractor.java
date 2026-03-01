@@ -55,10 +55,6 @@ public class FeatureExtractor {
       }
     }
 
-    // Post-process: derive FORK occurrences from ATTACK occurrences.
-    // A fork is when the same attacker at the same ply attacks 2+ targets.
-    deriveForkFromAttack(allOccurrences, foundMotifs);
-
     return new GameFeatures(foundMotifs, numMoves, allOccurrences);
   }
 

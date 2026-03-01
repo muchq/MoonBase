@@ -191,9 +191,10 @@ public class MotifE2ETest {
   // === ATTACK ===
 
   @Test
-  public void attack_motifDetected() {
+  public void attack_notExposedInOccurrences() {
+    // ATTACK is an internal backend primitive and must not appear in the user-facing occurrences.
     String url = indexGame(KINGS_GAMBIT_URL, KINGS_GAMBIT_PGN);
-    assertThat(getOccurrences(url, "attack")).isNotEmpty();
+    assertThat(getOccurrences(url, "attack")).isEmpty();
   }
 
   // === DISCOVERED_ATTACK ===
@@ -204,9 +205,8 @@ public class MotifE2ETest {
     // King's Gambit has discovered attacks at moves 9, 11, 16, 30, 44.
     String url = indexGame(KINGS_GAMBIT_URL, KINGS_GAMBIT_PGN);
     assertMotifDetected(url, "discovered_attack");
-    // Attack occurrences with isDiscovered=true should be present
-    List<OccurrenceRow> attackOccs = getOccurrences(url, "attack");
-    assertThat(attackOccs.stream().anyMatch(OccurrenceRow::isDiscovered)).isTrue();
+    // ATTACK is internal and must not appear in user-facing occurrences
+    assertThat(getOccurrences(url, "attack")).isEmpty();
   }
 
   // === FORK ===

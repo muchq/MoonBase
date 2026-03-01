@@ -310,10 +310,90 @@ public class SqlCompilerTest {
   }
 
   @Test
+  public void testOrderByForkUsesAttackDerivedCountSubquery() {
+    CompiledQuery result = compile("motif(pin) ORDER BY motif_count(fork) DESC");
+    String forkCountSq =
+        "SELECT game_url, COUNT(*) AS c FROM ("
+            + "SELECT game_url FROM motif_occurrences"
+            + " WHERE motif = 'ATTACK' AND is_discovered = FALSE AND attacker IS NOT NULL"
+            + " GROUP BY game_url, ply, attacker HAVING COUNT(*) >= 2"
+            + ") forks GROUP BY game_url";
+    assertThat(result.selectSql())
+        .isEqualTo(
+            "SELECT g.* FROM game_features g"
+                + " LEFT JOIN ("
+                + forkCountSq
+                + ") cnt"
+                + " ON g.game_url = cnt.game_url"
+                + " WHERE "
+                + motifExists("PIN")
+                + " ORDER BY COALESCE(cnt.c, 0) DESC");
+    // No extra param for fork — ATTACK is inlined as a literal
+    assertThat(result.parameters()).isEmpty();
+  }
+
+  @Test
+  public void testOrderByForkWithWhereParams() {
+    CompiledQuery result =
+        compile("white.elo >= 2500 AND motif(fork) ORDER BY motif_count(fork) DESC");
+    // For derived ORDER BY, WHERE params come first (no JOIN param prepended)
+    assertThat(result.parameters()).isEqualTo(List.of(2500));
+  }
+
+  @Test
   public void testOrderByUnknownMotif() {
     assertThatThrownBy(() -> compile("motif(fork) ORDER BY motif_count(unknown) DESC"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Unknown motif in ORDER BY");
+  }
+
+  private static final String FORK_PLY_SQ =
+      "SELECT game_url, ply FROM motif_occurrences"
+          + " WHERE motif = 'ATTACK' AND is_discovered = FALSE AND attacker IS NOT NULL"
+          + " GROUP BY game_url, ply, attacker HAVING COUNT(*) >= 2";
+
+  private static final String CHECKMATE_PLY_SQ =
+      "SELECT game_url, ply FROM motif_occurrences WHERE motif = 'ATTACK' AND is_mate = TRUE";
+
+  private static final String DISCOVERED_CHECK_PLY_SQ =
+      "SELECT game_url, ply FROM motif_occurrences"
+          + " WHERE motif = 'ATTACK' AND is_discovered = TRUE"
+          + " AND (target LIKE 'K%' OR target LIKE 'k%')";
+
+  private static String storedPlySubquery(String upperMotif) {
+    return "SELECT game_url, ply FROM motif_occurrences WHERE motif = '" + upperMotif + "'";
+  }
+
+  private static String sequenceExists(String... sqFragments) {
+    StringBuilder sb = new StringBuilder("EXISTS (SELECT 1 FROM (");
+    sb.append(sqFragments[0]).append(") sq1");
+    for (int i = 1; i < sqFragments.length; i++) {
+      int sqNum = i + 1;
+      sb.append(" JOIN (")
+          .append(sqFragments[i])
+          .append(") sq")
+          .append(sqNum)
+          .append(" ON sq")
+          .append(sqNum)
+          .append(".game_url = sq1.game_url AND sq")
+          .append(sqNum)
+          .append(".ply = sq")
+          .append(i)
+          .append(".ply + 2");
+    }
+    sb.append(" WHERE sq1.game_url = g.game_url)");
+    return sb.toString();
+  }
+
+  @Test
+  public void testSequenceTwoStoredMotifs() {
+    CompiledQuery result = compile("sequence(pin THEN skewer)");
+    assertThat(result.selectSql())
+        .isEqualTo(
+            BASE_PREFIX
+                + sequenceExists(storedPlySubquery("PIN"), storedPlySubquery("SKEWER"))
+                + BASE_SUFFIX);
+    assertThat(result.parameters()).isEmpty();
   }
 
   @Test
@@ -321,13 +401,8 @@ public class SqlCompilerTest {
     CompiledQuery result = compile("sequence(discovered_check THEN checkmate)");
     assertThat(result.selectSql())
         .isEqualTo(
-            BASE_PREFIX
-                + "EXISTS (SELECT 1 FROM motif_occurrences mo1"
-                + " JOIN motif_occurrences mo2 ON mo2.game_url = mo1.game_url"
-                + " AND mo2.motif = ? AND mo2.ply = mo1.ply + 2"
-                + " WHERE mo1.game_url = g.game_url AND mo1.motif = ?)"
-                + BASE_SUFFIX);
-    assertThat(result.parameters()).isEqualTo(List.of("CHECKMATE", "DISCOVERED_CHECK"));
+            BASE_PREFIX + sequenceExists(DISCOVERED_CHECK_PLY_SQ, CHECKMATE_PLY_SQ) + BASE_SUFFIX);
+    assertThat(result.parameters()).isEmpty();
   }
 
   @Test
@@ -336,14 +411,9 @@ public class SqlCompilerTest {
     assertThat(result.selectSql())
         .isEqualTo(
             BASE_PREFIX
-                + "EXISTS (SELECT 1 FROM motif_occurrences mo1"
-                + " JOIN motif_occurrences mo2 ON mo2.game_url = mo1.game_url"
-                + " AND mo2.motif = ? AND mo2.ply = mo1.ply + 2"
-                + " JOIN motif_occurrences mo3 ON mo3.game_url = mo1.game_url"
-                + " AND mo3.motif = ? AND mo3.ply = mo2.ply + 2"
-                + " WHERE mo1.game_url = g.game_url AND mo1.motif = ?)"
+                + sequenceExists(FORK_PLY_SQ, storedPlySubquery("CHECK"), CHECKMATE_PLY_SQ)
                 + BASE_SUFFIX);
-    assertThat(result.parameters()).isEqualTo(List.of("CHECK", "CHECKMATE", "FORK"));
+    assertThat(result.parameters()).isEmpty();
   }
 
   @Test

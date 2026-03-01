@@ -169,8 +169,8 @@ public class FeatureExtractorTest {
   }
 
   @Test
-  public void featureExtractor_fullGame_forkDerivedFromAttack() {
-    // Use a real game via PgnParser + GameReplayer + AttackDetector
+  public void featureExtractor_fullGame_forkNotMaterializedAtIndexTime() {
+    // FORK is derived at query/response time from ATTACK rows; extract() must not produce FORK.
     String pgn =
         """
         [Event "Test"]
@@ -186,12 +186,9 @@ public class FeatureExtractorTest {
         new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
     GameFeatures features = extractor.extract(pgn);
 
-    // Nxf7 attacks Qd8 and Rh8 — this is a fork
-    assertThat(features.hasMotif(Motif.FORK)).isTrue();
-    List<GameFeatures.MotifOccurrence> forkOccs = features.occurrences().get(Motif.FORK);
-    assertThat(forkOccs).isNotEmpty();
-    assertThat(forkOccs).allMatch(o -> o.moveNumber() == 6);
-    assertThat(forkOccs).allMatch(o -> o.side().equals("white"));
-    assertThat(forkOccs).allMatch(o -> o.attacker() != null && o.attacker().startsWith("N"));
+    // ATTACK rows are stored; FORK is derived from them at response time, not here.
+    assertThat(features.hasMotif(Motif.FORK)).isFalse();
+    assertThat(features.occurrences()).doesNotContainKey(Motif.FORK);
+    assertThat(features.hasMotif(Motif.ATTACK)).isTrue();
   }
 }
