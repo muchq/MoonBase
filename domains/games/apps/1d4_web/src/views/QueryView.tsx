@@ -11,7 +11,6 @@ const EXAMPLE_QUERIES = [
   'eco = "B90"',
   'motif(back_rank_mate) OR motif(smothered_mate)',
   'motif(skewer) OR motif(discovered_attack)',
-  'motif(sacrifice) AND motif(checkmate)',
   'motif(promotion_with_check) OR motif(promotion_with_checkmate)',
   'time.class = "blitz"',
 ];
@@ -96,8 +95,7 @@ export default function QueryView() {
         <code>motif(checkmate)</code>, <code>motif(double_check)</code>,{' '}
         <code>motif(back_rank_mate)</code>, <code>motif(smothered_mate)</code>,{' '}
         <code>motif(promotion)</code>, <code>motif(promotion_with_check)</code>,{' '}
-        <code>motif(promotion_with_checkmate)</code>, <code>motif(sacrifice)</code>,{' '}
-        <code>motif(interference)</code>, <code>motif(overloaded_piece)</code>,{' '}
+        <code>motif(promotion_with_checkmate)</code>, <code>motif(overloaded_piece)</code>,{' '}
         <code>motif(zugzwang)</code>. Combine with{' '}
         <code>AND</code>, <code>OR</code>, <code>NOT</code>. Strings in double
         quotes, e.g. <code>eco = &quot;B90&quot;</code>. Do not use SELECT or *.

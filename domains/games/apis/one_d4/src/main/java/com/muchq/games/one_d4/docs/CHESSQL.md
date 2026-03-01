@@ -73,9 +73,7 @@ a few are derived from `ATTACK` rows using flag or grouping conditions.
 | `motif(promotion_with_checkmate)` | `motif = 'PROMOTION_WITH_CHECKMATE'` |
 | `motif(back_rank_mate)`       | `motif = 'BACK_RANK_MATE'`      |
 | `motif(smothered_mate)`       | `motif = 'SMOTHERED_MATE'`      |
-| `motif(sacrifice)`            | `motif = 'SACRIFICE'`           |
 | `motif(zugzwang)`             | `motif = 'ZUGZWANG'`            |
-| `motif(interference)`         | `motif = 'INTERFERENCE'`        |
 | `motif(overloaded_piece)`     | `motif = 'OVERLOADED_PIECE'`    |
 
 **Derived motifs** (computed from `ATTACK` rows):

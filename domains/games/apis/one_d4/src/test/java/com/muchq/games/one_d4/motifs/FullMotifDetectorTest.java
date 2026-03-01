@@ -65,9 +65,7 @@ public class FullMotifDetectorTest {
             new PromotionWithCheckmateDetector(),
             new BackRankMateDetector(),
             new SmotheredMateDetector(),
-            new SacrificeDetector(),
             new ZugzwangDetector(),
-            new InterferenceDetector(),
             new OverloadedPieceDetector());
     extractor = new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
   }
@@ -92,8 +90,6 @@ public class FullMotifDetectorTest {
             Motif.CHECK,
             Motif.PROMOTION,
             Motif.PROMOTION_WITH_CHECK,
-            Motif.SACRIFICE,
-            Motif.INTERFERENCE,
             Motif.OVERLOADED_PIECE);
   }
 
@@ -253,49 +249,6 @@ public class FullMotifDetectorTest {
     GameFeatures features = extractor.extract(PGN);
     // DISCOVERED_CHECK is derived at query/response time from ATTACK rows; not indexed.
     assertThat(features.occurrences()).doesNotContainKey(Motif.DISCOVERED_CHECK);
-  }
-
-  @Test
-  public void extractFeatures_sacrifice_occurrences() {
-    GameFeatures features = extractor.extract(PGN);
-    assertThat(features.occurrences().get(Motif.SACRIFICE))
-        .extracting(GameFeatures.MotifOccurrence::moveNumber, GameFeatures.MotifOccurrence::side)
-        .containsExactly(
-            tuple(10, "black"),
-            tuple(14, "black"),
-            tuple(17, "white"),
-            tuple(18, "white"),
-            tuple(20, "black"),
-            tuple(21, "black"),
-            tuple(22, "white"),
-            tuple(24, "white"),
-            tuple(26, "white"),
-            tuple(28, "white"),
-            tuple(31, "white"),
-            tuple(32, "white"),
-            tuple(32, "black"),
-            tuple(33, "black"),
-            tuple(38, "black"),
-            tuple(40, "black"),
-            tuple(42, "black"),
-            tuple(45, "white"));
-  }
-
-  @Test
-  public void extractFeatures_interference_occurrences() {
-    GameFeatures features = extractor.extract(PGN);
-    // All interference occurrences are by white
-    assertThat(features.occurrences().get(Motif.INTERFERENCE))
-        .extracting(GameFeatures.MotifOccurrence::moveNumber, GameFeatures.MotifOccurrence::side)
-        .containsExactly(
-            tuple(6, "white"),
-            tuple(20, "white"),
-            tuple(29, "white"),
-            tuple(38, "white"),
-            tuple(41, "white"),
-            tuple(47, "white"),
-            tuple(48, "white"),
-            tuple(50, "white"));
   }
 
   @Test

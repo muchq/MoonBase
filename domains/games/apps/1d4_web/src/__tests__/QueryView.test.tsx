@@ -42,8 +42,6 @@ const mockGame: GameRow = {
   hasDoubleCheck: false,
   hasBackRankMate: false,
   hasSmotheredMate: false,
-  hasSacrifice: false,
-  hasInterference: false,
   hasOverloadedPiece: false,
   hasZugzwang: false,
 };

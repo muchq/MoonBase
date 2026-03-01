@@ -207,13 +207,6 @@ public class SqlCompilerTest {
   }
 
   @Test
-  public void testSacrificeMotif() {
-    CompiledQuery result = compile("motif(sacrifice)");
-    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + motifExists("SACRIFICE") + BASE_SUFFIX);
-    assertThat(result.parameters()).isEmpty();
-  }
-
-  @Test
   public void testZugzwangMotif() {
     CompiledQuery result = compile("motif(zugzwang)");
     assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + motifExists("ZUGZWANG") + BASE_SUFFIX);
@@ -224,14 +217,6 @@ public class SqlCompilerTest {
   public void testDoubleCheckMotif() {
     CompiledQuery result = compile("motif(double_check)");
     assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + DOUBLE_CHECK_EXISTS + BASE_SUFFIX);
-    assertThat(result.parameters()).isEmpty();
-  }
-
-  @Test
-  public void testInterferenceMotif() {
-    CompiledQuery result = compile("motif(interference)");
-    assertThat(result.selectSql())
-        .isEqualTo(BASE_PREFIX + motifExists("INTERFERENCE") + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 

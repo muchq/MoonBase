@@ -89,7 +89,7 @@ public record GameFeatures(
 
     /**
      * Factory for motif occurrences with attacker/target but no movedPiece (e.g. check,
-     * interference, double check, overloaded piece).
+     * double check, overloaded piece).
      */
     public static MotifOccurrence withPiece(
         PositionContext ctx,

@@ -19,8 +19,6 @@ const MOTIF_COLORS: Record<string, string> = {
   promotion: '#44cc44',
   promotion_with_check: '#44cc44',
   promotion_with_checkmate: '#44cc44',
-  sacrifice: '#ff9900',
-  interference: '#cc66ff',
   overloaded_piece: '#cc66ff',
   zugzwang: '#aaaaaa',
 };
