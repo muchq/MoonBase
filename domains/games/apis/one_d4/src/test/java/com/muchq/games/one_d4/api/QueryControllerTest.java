@@ -155,6 +155,8 @@ public class QueryControllerTest {
         "1-0",
         Instant.now(),
         30,
+<<<<<<< Updated upstream
+=======
         true, // hasPin
         false, // hasCrossPin
         true, // hasFork
@@ -174,6 +176,7 @@ public class QueryControllerTest {
         false, // hasDoubleCheck
 
         false, // hasOverloadedPiece
+>>>>>>> Stashed changes
         Instant.now(),
         "pgn");
   }
@@ -228,9 +231,5 @@ public class QueryControllerTest {
     public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
       return List.of();
     }
-
-    @Override
-    public void updateMotifs(
-        String gameUrl, com.muchq.games.one_d4.engine.model.GameFeatures features) {}
   }
 }

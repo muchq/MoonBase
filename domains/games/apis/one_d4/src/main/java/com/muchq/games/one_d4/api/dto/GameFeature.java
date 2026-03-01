@@ -17,6 +17,8 @@ public record GameFeature(
     String result,
     Instant playedAt,
     Integer numMoves,
+<<<<<<< Updated upstream
+=======
     boolean hasPin,
     boolean hasCrossPin,
     boolean hasFork,
@@ -35,5 +37,6 @@ public record GameFeature(
     boolean hasZugzwang,
     boolean hasDoubleCheck,
     boolean hasOverloadedPiece,
+>>>>>>> Stashed changes
     Instant indexedAt,
     String pgn) {}

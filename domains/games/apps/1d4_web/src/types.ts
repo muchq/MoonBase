@@ -25,7 +25,6 @@ export interface GameRow {
   playedAt: string | number;
   indexedAt: string | number;
   numMoves: number;
-  hasAttack: boolean;
   hasPin: boolean;
   hasCrossPin: boolean;
   hasFork: boolean;

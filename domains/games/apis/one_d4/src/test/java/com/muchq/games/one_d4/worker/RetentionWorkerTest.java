@@ -150,6 +150,8 @@ public class RetentionWorkerTest {
         "1-0",
         Instant.now(),
         20,
+<<<<<<< Updated upstream
+=======
         false, // hasPin
         false, // hasCrossPin
         false, // hasFork
@@ -169,6 +171,7 @@ public class RetentionWorkerTest {
         false, // hasDoubleCheck
 
         false, // hasOverloadedPiece
+>>>>>>> Stashed changes
         Instant.now(),
         "pgn");
   }

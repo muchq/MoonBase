@@ -31,10 +31,13 @@ import com.muchq.games.one_d4.engine.model.Motif;
 import com.muchq.games.one_d4.motifs.AttackDetector;
 import com.muchq.games.one_d4.motifs.BackRankMateDetector;
 import com.muchq.games.one_d4.motifs.CheckDetector;
-import com.muchq.games.one_d4.motifs.CheckmateDetector;
 import com.muchq.games.one_d4.motifs.CrossPinDetector;
+<<<<<<< Updated upstream
+import com.muchq.games.one_d4.motifs.InterferenceDetector;
+=======
 import com.muchq.games.one_d4.motifs.DiscoveredCheckDetector;
 import com.muchq.games.one_d4.motifs.DoubleCheckDetector;
+>>>>>>> Stashed changes
 import com.muchq.games.one_d4.motifs.MotifDetector;
 import com.muchq.games.one_d4.motifs.OverloadedPieceDetector;
 import com.muchq.games.one_d4.motifs.PinDetector;
@@ -123,9 +126,7 @@ public class ReanalysisE2ETest {
             new CrossPinDetector(),
             new SkewerDetector(),
             new AttackDetector(),
-            new DiscoveredCheckDetector(),
             new CheckDetector(),
-            new CheckmateDetector(),
             new PromotionDetector(),
             new PromotionWithCheckDetector(),
             new PromotionWithCheckmateDetector(),
@@ -133,7 +134,11 @@ public class ReanalysisE2ETest {
             new SmotheredMateDetector(),
             new SacrificeDetector(),
             new ZugzwangDetector(),
+<<<<<<< Updated upstream
+            new InterferenceDetector(),
+=======
             new DoubleCheckDetector(),
+>>>>>>> Stashed changes
             new OverloadedPieceDetector());
     featureExtractor = new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
 

@@ -24,10 +24,13 @@ import com.muchq.games.one_d4.engine.PgnParser;
 import com.muchq.games.one_d4.motifs.AttackDetector;
 import com.muchq.games.one_d4.motifs.BackRankMateDetector;
 import com.muchq.games.one_d4.motifs.CheckDetector;
-import com.muchq.games.one_d4.motifs.CheckmateDetector;
 import com.muchq.games.one_d4.motifs.CrossPinDetector;
+<<<<<<< Updated upstream
+import com.muchq.games.one_d4.motifs.InterferenceDetector;
+=======
 import com.muchq.games.one_d4.motifs.DiscoveredCheckDetector;
 import com.muchq.games.one_d4.motifs.DoubleCheckDetector;
+>>>>>>> Stashed changes
 import com.muchq.games.one_d4.motifs.MotifDetector;
 import com.muchq.games.one_d4.motifs.OverloadedPieceDetector;
 import com.muchq.games.one_d4.motifs.PinDetector;
@@ -64,8 +67,8 @@ import org.junit.Test;
  *   <li>Opera Game (17 moves, Morphy 1858) — covers BACK_RANK_MATE (17.Rd8#).
  * </ul>
  *
- * <p>DISCOVERED_CHECK is omitted from e2e tests; it is thoroughly covered by unit tests in
- * DiscoveredCheckDetectorTest.
+ * <p>DISCOVERED_CHECK, CHECKMATE, and DOUBLE_CHECK are derived at query/response time from ATTACK
+ * rows and are covered by GameFeatureDaoTest derivation tests.
  */
 public class MotifE2ETest {
 
@@ -139,9 +142,7 @@ public class MotifE2ETest {
             new CrossPinDetector(),
             new SkewerDetector(),
             new AttackDetector(),
-            new DiscoveredCheckDetector(),
             new CheckDetector(),
-            new CheckmateDetector(),
             new PromotionDetector(),
             new PromotionWithCheckDetector(),
             new PromotionWithCheckmateDetector(),
@@ -149,7 +150,11 @@ public class MotifE2ETest {
             new SmotheredMateDetector(),
             new SacrificeDetector(),
             new ZugzwangDetector(),
+<<<<<<< Updated upstream
+            new InterferenceDetector(),
+=======
             new DoubleCheckDetector(),
+>>>>>>> Stashed changes
             new OverloadedPieceDetector());
     FeatureExtractor featureExtractor =
         new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
@@ -189,10 +194,10 @@ public class MotifE2ETest {
   // === ATTACK ===
 
   @Test
-  public void attack_motifDetected() {
+  public void attack_notExposedInOccurrences() {
+    // ATTACK is an internal backend primitive and must not appear in the user-facing occurrences.
     String url = indexGame(KINGS_GAMBIT_URL, KINGS_GAMBIT_PGN);
-    assertMotifDetected(url, "attack");
-    assertThat(getOccurrences(url, "attack")).isNotEmpty();
+    assertThat(getOccurrences(url, "attack")).isEmpty();
   }
 
   // === DISCOVERED_ATTACK ===
@@ -203,9 +208,8 @@ public class MotifE2ETest {
     // King's Gambit has discovered attacks at moves 9, 11, 16, 30, 44.
     String url = indexGame(KINGS_GAMBIT_URL, KINGS_GAMBIT_PGN);
     assertMotifDetected(url, "discovered_attack");
-    // Attack occurrences with isDiscovered=true should be present
-    List<OccurrenceRow> attackOccs = getOccurrences(url, "attack");
-    assertThat(attackOccs.stream().anyMatch(OccurrenceRow::isDiscovered)).isTrue();
+    // ATTACK is internal and must not appear in user-facing occurrences
+    assertThat(getOccurrences(url, "attack")).isEmpty();
   }
 
   // === FORK ===

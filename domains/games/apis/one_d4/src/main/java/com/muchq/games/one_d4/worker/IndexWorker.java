@@ -9,13 +9,11 @@ import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
-import com.muchq.games.one_d4.engine.model.Motif;
 import com.muchq.games.one_d4.queue.IndexMessage;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -116,14 +114,6 @@ public class IndexWorker {
   private void indexGame(IndexMessage message, PlayedGame game) {
     GameFeatures features = featureExtractor.extract(game.pgn());
 
-    // Derive attack-based booleans from ATTACK motif occurrences
-    List<GameFeatures.MotifOccurrence> attacks =
-        features.occurrences().getOrDefault(Motif.ATTACK, List.of());
-    boolean hasDiscoveredAttack =
-        attacks.stream().anyMatch(GameFeatures.MotifOccurrence::isDiscovered);
-    boolean hasDiscoveredMate = attacks.stream().anyMatch(o -> o.isDiscovered() && o.isMate());
-    boolean hasCheckmate = attacks.stream().anyMatch(GameFeatures.MotifOccurrence::isMate);
-
     String result = determineResult(game);
 
     GameFeature row =
@@ -141,6 +131,8 @@ public class IndexWorker {
             result,
             game.endTime(),
             features.numMoves(),
+<<<<<<< Updated upstream
+=======
             features.hasMotif(Motif.PIN),
             features.hasMotif(Motif.CROSS_PIN),
             features.hasMotif(Motif.FORK),
@@ -159,6 +151,7 @@ public class IndexWorker {
             features.hasMotif(Motif.ZUGZWANG),
             features.hasMotif(Motif.DOUBLE_CHECK),
             features.hasMotif(Motif.OVERLOADED_PIECE),
+>>>>>>> Stashed changes
             Instant.now(),
             game.pgn());
 

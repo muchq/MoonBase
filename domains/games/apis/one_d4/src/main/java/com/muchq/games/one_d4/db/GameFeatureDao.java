@@ -31,6 +31,10 @@ public class GameFeatureDao implements GameFeatureStore {
       MERGE INTO game_features (
           request_id, game_url, platform, white_username, black_username,
           white_elo, black_elo, time_class, eco, result, played_at, num_moves,
+<<<<<<< Updated upstream
+          indexed_at, pgn
+      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
+=======
           has_pin, has_cross_pin, has_fork, has_skewer,
           has_discovered_attack, has_discovered_mate, has_discovered_check,
           has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
@@ -38,6 +42,7 @@ public class GameFeatureDao implements GameFeatureStore {
           has_double_check, has_overloaded_piece,
           indexed_at, pgn
       ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
+>>>>>>> Stashed changes
       """;
 
   private static final String PG_INSERT =
@@ -45,6 +50,10 @@ public class GameFeatureDao implements GameFeatureStore {
       INSERT INTO game_features (
           request_id, game_url, platform, white_username, black_username,
           white_elo, black_elo, time_class, eco, result, played_at, num_moves,
+<<<<<<< Updated upstream
+          indexed_at, pgn
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
+=======
           has_pin, has_cross_pin, has_fork, has_skewer,
           has_discovered_attack, has_discovered_mate, has_discovered_check,
           has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
@@ -52,11 +61,14 @@ public class GameFeatureDao implements GameFeatureStore {
           has_double_check, has_overloaded_piece,
           indexed_at, pgn
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
+>>>>>>> Stashed changes
       ON CONFLICT (game_url) DO UPDATE SET
           indexed_at = EXCLUDED.indexed_at,
           request_id = EXCLUDED.request_id
       """;
 
+<<<<<<< Updated upstream
+=======
   private static final String UPDATE_MOTIFS =
       """
       UPDATE game_features SET
@@ -70,6 +82,7 @@ public class GameFeatureDao implements GameFeatureStore {
       WHERE game_url = ?
       """;
 
+>>>>>>> Stashed changes
   private static final String FETCH_FOR_REANALYSIS =
       "SELECT request_id, game_url, pgn FROM game_features ORDER BY indexed_at LIMIT ? OFFSET ?";
 
@@ -107,6 +120,10 @@ public class GameFeatureDao implements GameFeatureStore {
       ps.setString(10, row.result());
       ps.setTimestamp(11, row.playedAt() != null ? Timestamp.from(row.playedAt()) : null);
       setIntOrNull(ps, 12, row.numMoves());
+<<<<<<< Updated upstream
+      // indexed_at set via now() in SQL — no parameter
+      ps.setString(13, row.pgn());
+=======
       ps.setBoolean(13, row.hasPin());
       ps.setBoolean(14, row.hasCrossPin());
       ps.setBoolean(15, row.hasFork());
@@ -127,6 +144,7 @@ public class GameFeatureDao implements GameFeatureStore {
       ps.setBoolean(30, row.hasOverloadedPiece());
       // indexed_at set via now() in SQL — no parameter
       ps.setString(31, row.pgn());
+>>>>>>> Stashed changes
       ps.executeUpdate();
     } catch (SQLException e) {
       LOG.error("Failed to insert game feature for game_url={}", row.gameUrl(), e);
@@ -215,12 +233,16 @@ public class GameFeatureDao implements GameFeatureStore {
   public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
     if (gameUrls.isEmpty()) return Map.of();
     String placeholders = gameUrls.stream().map(u -> "?").collect(Collectors.joining(", "));
+    // Fetch all rows including ATTACK (needed for derivation) but excluding stale materialized
+    // rows for motifs now derived at response time. ATTACK itself is removed in post-processing.
     String sql =
         "SELECT game_url, motif, move_number, side, description,"
             + " moved_piece, attacker, target, is_discovered, is_mate, pin_type"
             + " FROM motif_occurrences WHERE game_url IN ("
             + placeholders
-            + ") ORDER BY ply ASC";
+            + ") AND motif NOT IN"
+            + " ('FORK', 'CHECKMATE', 'DISCOVERED_CHECK', 'DOUBLE_CHECK', 'DISCOVERED_ATTACK')"
+            + " ORDER BY ply ASC";
     Map<String, Map<String, List<OccurrenceRow>>> result = new LinkedHashMap<>();
     try (Connection conn = dataSource.getConnection();
         PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -263,7 +285,182 @@ public class GameFeatureDao implements GameFeatureStore {
     } catch (SQLException e) {
       throw new RuntimeException("Failed to query motif occurrences", e);
     }
+
+    // Post-process: derive all ATTACK-based motifs, then remove ATTACK (internal primitive).
+    for (Map.Entry<String, Map<String, List<OccurrenceRow>>> entry : result.entrySet()) {
+      Map<String, List<OccurrenceRow>> motifMap = entry.getValue();
+      String gameUrl = entry.getKey();
+      List<OccurrenceRow> attackOccs = motifMap.getOrDefault("attack", List.of());
+
+      addIfNonEmpty(motifMap, "fork", deriveForkOccurrences(gameUrl, attackOccs));
+      addIfNonEmpty(motifMap, "discovered_attack", deriveDiscoveredAttackOccurrences(attackOccs));
+      addIfNonEmpty(motifMap, "checkmate", deriveCheckmateOccurrences(gameUrl, attackOccs));
+      addIfNonEmpty(
+          motifMap, "discovered_check", deriveDiscoveredCheckOccurrences(gameUrl, attackOccs));
+      addIfNonEmpty(motifMap, "double_check", deriveDoubleCheckOccurrences(gameUrl, attackOccs));
+
+      motifMap.remove("attack");
+    }
+
     return result;
+  }
+
+  private static void addIfNonEmpty(
+      Map<String, List<OccurrenceRow>> motifMap, String key, List<OccurrenceRow> occs) {
+    if (!occs.isEmpty()) motifMap.put(key, occs);
+  }
+
+  /**
+   * Derives FORK occurrences from a game's ATTACK rows. Groups non-discovered ATTACK rows by
+   * (moveNumber, side, attacker); groups with 2+ distinct targets constitute a fork. Mirrors the
+   * SQL derivation in {@code SqlCompiler.compileMotif("fork")}.
+   */
+  private static List<OccurrenceRow> deriveForkOccurrences(
+      String gameUrl, List<OccurrenceRow> attackOccs) {
+    Map<String, List<OccurrenceRow>> groups = new LinkedHashMap<>();
+    for (OccurrenceRow occ : attackOccs) {
+      if (occ.attacker() == null || occ.isDiscovered()) continue;
+      String key = occ.moveNumber() + "|" + occ.side() + "|" + occ.attacker();
+      groups.computeIfAbsent(key, k -> new ArrayList<>()).add(occ);
+    }
+    List<OccurrenceRow> forkOccs = new ArrayList<>();
+    for (List<OccurrenceRow> group : groups.values()) {
+      if (group.size() >= 2) {
+        for (OccurrenceRow attackOcc : group) {
+          forkOccs.add(
+              new OccurrenceRow(
+                  gameUrl,
+                  "fork",
+                  attackOcc.moveNumber(),
+                  attackOcc.side(),
+                  "Fork at move " + attackOcc.moveNumber(),
+                  attackOcc.movedPiece(),
+                  attackOcc.attacker(),
+                  attackOcc.target(),
+                  false,
+                  false,
+                  null));
+        }
+      }
+    }
+    return forkOccs;
+  }
+
+  /** Derives DISCOVERED_ATTACK occurrences from ATTACK rows with {@code isDiscovered = true}. */
+  private static List<OccurrenceRow> deriveDiscoveredAttackOccurrences(
+      List<OccurrenceRow> attackOccs) {
+    List<OccurrenceRow> result = new ArrayList<>();
+    for (OccurrenceRow occ : attackOccs) {
+      if (occ.isDiscovered()) {
+        result.add(
+            new OccurrenceRow(
+                occ.gameUrl(),
+                "discovered_attack",
+                occ.moveNumber(),
+                occ.side(),
+                occ.description(),
+                occ.movedPiece(),
+                occ.attacker(),
+                occ.target(),
+                true,
+                occ.isMate(),
+                null));
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Derives CHECKMATE occurrences from ATTACK rows with {@code isMate = true}. Mirrors {@code
+   * SqlCompiler.compileMotif("checkmate")}.
+   */
+  private static List<OccurrenceRow> deriveCheckmateOccurrences(
+      String gameUrl, List<OccurrenceRow> attackOccs) {
+    List<OccurrenceRow> result = new ArrayList<>();
+    for (OccurrenceRow occ : attackOccs) {
+      if (occ.isMate()) {
+        result.add(
+            new OccurrenceRow(
+                gameUrl,
+                "checkmate",
+                occ.moveNumber(),
+                occ.side(),
+                "Checkmate at move " + occ.moveNumber(),
+                occ.movedPiece(),
+                occ.attacker(),
+                occ.target(),
+                false,
+                true,
+                null));
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Derives DISCOVERED_CHECK occurrences from discovered ATTACK rows whose target is the king.
+   * Mirrors {@code SqlCompiler.compileMotif("discovered_check")}.
+   */
+  private static List<OccurrenceRow> deriveDiscoveredCheckOccurrences(
+      String gameUrl, List<OccurrenceRow> attackOccs) {
+    List<OccurrenceRow> result = new ArrayList<>();
+    for (OccurrenceRow occ : attackOccs) {
+      if (occ.isDiscovered() && isKingTarget(occ.target())) {
+        result.add(
+            new OccurrenceRow(
+                gameUrl,
+                "discovered_check",
+                occ.moveNumber(),
+                occ.side(),
+                "Discovered check at move " + occ.moveNumber(),
+                occ.movedPiece(),
+                occ.attacker(),
+                occ.target(),
+                true,
+                occ.isMate(),
+                null));
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Derives DOUBLE_CHECK occurrences from positions where 2+ ATTACK rows target the king at the
+   * same (moveNumber, side). Mirrors {@code SqlCompiler.compileMotif("double_check")}.
+   */
+  private static List<OccurrenceRow> deriveDoubleCheckOccurrences(
+      String gameUrl, List<OccurrenceRow> attackOccs) {
+    Map<String, List<OccurrenceRow>> groups = new LinkedHashMap<>();
+    for (OccurrenceRow occ : attackOccs) {
+      if (isKingTarget(occ.target())) {
+        String key = occ.moveNumber() + "|" + occ.side();
+        groups.computeIfAbsent(key, k -> new ArrayList<>()).add(occ);
+      }
+    }
+    List<OccurrenceRow> result = new ArrayList<>();
+    for (List<OccurrenceRow> group : groups.values()) {
+      if (group.size() >= 2) {
+        OccurrenceRow rep = group.get(0);
+        result.add(
+            new OccurrenceRow(
+                gameUrl,
+                "double_check",
+                rep.moveNumber(),
+                rep.side(),
+                "Double check at move " + rep.moveNumber(),
+                null,
+                null,
+                rep.target(),
+                false,
+                false,
+                null));
+      }
+    }
+    return result;
+  }
+
+  private static boolean isKingTarget(@Nullable String target) {
+    return target != null && (target.startsWith("K") || target.startsWith("k"));
   }
 
   private GameFeature mapRow(ResultSet rs) throws SQLException {
@@ -281,6 +478,8 @@ public class GameFeatureDao implements GameFeatureStore {
         rs.getString("result"),
         rs.getTimestamp("played_at").toInstant(),
         getIntOrNull(rs, "num_moves"),
+<<<<<<< Updated upstream
+=======
         rs.getBoolean("has_pin"),
         rs.getBoolean("has_cross_pin"),
         rs.getBoolean("has_fork"),
@@ -299,6 +498,7 @@ public class GameFeatureDao implements GameFeatureStore {
         rs.getBoolean("has_zugzwang"),
         rs.getBoolean("has_double_check"),
         rs.getBoolean("has_overloaded_piece"),
+>>>>>>> Stashed changes
         rs.getTimestamp("indexed_at") != null ? rs.getTimestamp("indexed_at").toInstant() : null,
         rs.getString("pgn"));
   }
@@ -336,6 +536,8 @@ public class GameFeatureDao implements GameFeatureStore {
     return results;
   }
 
+<<<<<<< Updated upstream
+=======
   @Override
   public void updateMotifs(String gameUrl, GameFeatures features) {
     List<GameFeatures.MotifOccurrence> attacks =
@@ -373,6 +575,7 @@ public class GameFeatureDao implements GameFeatureStore {
     }
   }
 
+>>>>>>> Stashed changes
   private static void setIntOrNull(PreparedStatement ps, int idx, Integer value)
       throws SQLException {
     if (value != null) {

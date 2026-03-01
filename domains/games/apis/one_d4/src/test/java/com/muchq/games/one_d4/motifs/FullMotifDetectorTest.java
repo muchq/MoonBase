@@ -59,9 +59,7 @@ public class FullMotifDetectorTest {
             new CrossPinDetector(),
             new SkewerDetector(),
             new AttackDetector(),
-            new DiscoveredCheckDetector(),
             new CheckDetector(),
-            new CheckmateDetector(),
             new PromotionDetector(),
             new PromotionWithCheckDetector(),
             new PromotionWithCheckmateDetector(),
@@ -69,7 +67,11 @@ public class FullMotifDetectorTest {
             new SmotheredMateDetector(),
             new SacrificeDetector(),
             new ZugzwangDetector(),
+<<<<<<< Updated upstream
+            new InterferenceDetector(),
+=======
             new DoubleCheckDetector(),
+>>>>>>> Stashed changes
             new OverloadedPieceDetector());
     extractor = new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
   }
@@ -84,14 +86,14 @@ public class FullMotifDetectorTest {
   public void extractFeatures_detectsExactMotifSet() {
     GameFeatures features = extractor.extract(PGN);
 
+    // FORK, CHECKMATE, DISCOVERED_CHECK, DOUBLE_CHECK are derived at query/response time from
+    // ATTACK rows — they are not materialized at index time.
     assertThat(features.motifs())
         .containsExactlyInAnyOrder(
             Motif.PIN,
-            Motif.FORK,
             Motif.SKEWER,
             Motif.ATTACK,
             Motif.CHECK,
-            Motif.CHECKMATE,
             Motif.PROMOTION,
             Motif.PROMOTION_WITH_CHECK,
             Motif.SACRIFICE,
@@ -102,11 +104,14 @@ public class FullMotifDetectorTest {
   public void extractFeatures_motifsNotPresent() {
     GameFeatures features = extractor.extract(PGN);
 
+    // CHECKMATE, DISCOVERED_CHECK, DOUBLE_CHECK are now derived at query/response time (not
+    // indexed)
     Set<Motif> absent =
         Set.of(
             Motif.CROSS_PIN,
             Motif.DISCOVERED_ATTACK,
             Motif.DISCOVERED_CHECK,
+            Motif.CHECKMATE,
             Motif.PROMOTION_WITH_CHECKMATE,
             Motif.BACK_RANK_MATE,
             Motif.SMOTHERED_MATE,
@@ -149,14 +154,6 @@ public class FullMotifDetectorTest {
             tuple(49, "black"),
             tuple(53, "white"),
             tuple(54, "white"));
-  }
-
-  @Test
-  public void extractFeatures_checkmate_Ra5() {
-    GameFeatures features = extractor.extract(PGN);
-    assertThat(features.occurrences().get(Motif.CHECKMATE))
-        .extracting(GameFeatures.MotifOccurrence::moveNumber, GameFeatures.MotifOccurrence::side)
-        .containsExactly(tuple(54, "white"));
   }
 
   @Test
@@ -208,28 +205,13 @@ public class FullMotifDetectorTest {
   }
 
   @Test
-  public void extractFeatures_fork_occurrences() {
+  public void extractFeatures_fork_notMaterializedAtIndexTime() {
+    // FORK is derived at query/response time from ATTACK rows; extract() must not produce FORK.
+    // The underlying ATTACK rows that would constitute forks ARE present.
     GameFeatures features = extractor.extract(PGN);
-    // FORK is derived from ATTACK: each fork produces one occurrence per target.
-    // 8.Ng6 forks Rh6+Ke8 → 2 occurrences; queen forks on 22/24/28; 49...Qg4+
-    List<GameFeatures.MotifOccurrence> forkOccs = features.occurrences().get(Motif.FORK);
-    assertThat(forkOccs).isNotEmpty();
-
-    // All fork occurrences have attacker/target populated and pinType null
-    assertThat(forkOccs).allMatch(o -> o.attacker() != null);
-    assertThat(forkOccs).allMatch(o -> o.target() != null);
-    assertThat(forkOccs).allMatch(o -> o.pinType() == null);
-
-    // Fork move numbers present (each fork position appears with ≥2 occurrences for the same
-    // attacker)
-    List<Integer> moveNumbers =
-        forkOccs.stream().map(GameFeatures.MotifOccurrence::moveNumber).toList();
-    assertThat(moveNumbers).contains(8, 22, 24, 28, 49);
-
-    // Sanity: move 8 fork by white (Ng6 attacks Rh6 and Ke8)
-    assertThat(forkOccs).anyMatch(o -> o.moveNumber() == 8 && "white".equals(o.side()));
-    // Sanity: move 49 fork by black
-    assertThat(forkOccs).anyMatch(o -> o.moveNumber() == 49 && "black".equals(o.side()));
+    assertThat(features.occurrences()).doesNotContainKey(Motif.FORK);
+    assertThat(features.hasMotif(Motif.FORK)).isFalse();
+    assertThat(features.hasMotif(Motif.ATTACK)).isTrue();
   }
 
   @Test
@@ -272,7 +254,7 @@ public class FullMotifDetectorTest {
   @Test
   public void extractFeatures_discoveredCheck_occurrences() {
     GameFeatures features = extractor.extract(PGN);
-    // No true discovered checks in this game — all check moves are direct, not through a vacancy
+    // DISCOVERED_CHECK is derived at query/response time from ATTACK rows; not indexed.
     assertThat(features.occurrences()).doesNotContainKey(Motif.DISCOVERED_CHECK);
   }
 
