@@ -17,6 +17,18 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 public class SqlCompiler implements QueryCompiler<CompiledQuery> {
+
+  /**
+   * Motifs whose WHERE-clause detection is derived from ATTACK rows at query time. These motifs
+   * have no stored rows of their own in motif_occurrences.
+   *
+   * <p>Note: discovered_attack, checkmate, discovered_check, and double_check are ALSO expressed
+   * via ATTACK rows in compileMotif(), but they DO have stored rows from their dedicated detectors.
+   * ORDER BY and sequence() for those motifs use stored rows and work normally. See GitHub issue
+   * #1083 for the consistency follow-up on those motifs.
+   */
+  private static final Set<String> ATTACK_DERIVED_MOTIFS = Set.of("fork");
+
   private static final Set<String> VALID_COLUMNS =
       Set.of(
           "white_username",
@@ -86,18 +98,28 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       if (!VALID_MOTIFS.contains(motifName)) {
         throw new IllegalArgumentException("Unknown motif in ORDER BY: " + motifName);
       }
-      String motifDbValue = motifName.toUpperCase();
       String direction = orderBy.ascending() ? "ASC" : "DESC";
 
-      // The LEFT JOIN subquery param must come before the WHERE params.
+      String countSubquery;
       List<Object> allParams = new ArrayList<>();
-      allParams.add(motifDbValue);
-      allParams.addAll(whereParams);
+      if (ATTACK_DERIVED_MOTIFS.contains(motifName)) {
+        // Derived motifs: count distinct occurrences via ATTACK rows (no extra param needed)
+        countSubquery = forkCountSubquery();
+        allParams.addAll(whereParams);
+      } else {
+        // Stored motifs: count rows directly; param must come before WHERE params
+        allParams.add(motifName.toUpperCase());
+        allParams.addAll(whereParams);
+        countSubquery =
+            "SELECT game_url, COUNT(*) AS c FROM motif_occurrences WHERE motif = ? GROUP BY"
+                + " game_url";
+      }
 
       String sql =
           "SELECT g.* FROM game_features g"
-              + " LEFT JOIN (SELECT game_url, COUNT(*) AS c FROM motif_occurrences"
-              + " WHERE motif = ? GROUP BY game_url) cnt"
+              + " LEFT JOIN ("
+              + countSubquery
+              + ") cnt"
               + " ON g.game_url = cnt.game_url"
               + " WHERE "
               + whereClause
@@ -159,7 +181,6 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     if (!VALID_MOTIFS.contains(name)) {
       throw new IllegalArgumentException("Unknown motif: " + name);
     }
-    // Several motifs are derived from ATTACK occurrences rather than stored as their own rows.
     return switch (name) {
       // Derived: ATTACK where the revealing piece uncovers the attack (is_discovered flag)
       case "discovered_attack" ->
@@ -200,6 +221,15 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     };
   }
 
+  /**
+   * Compiles a sequence expression into a correlated EXISTS subquery. Every motif — stored or
+   * derived — is expressed as a {@code (game_url, ply)} subquery fragment via {@link
+   * #motifToPlySubquery}. The fragments are joined on consecutive plies (ply + 2 per step),
+   * anchored to the outer game via {@code sq1.game_url = g.game_url}.
+   *
+   * <p>No bind parameters are added: motif values are validated against {@link #VALID_MOTIFS} and
+   * inlined as SQL literals, which is safe against injection.
+   */
   private String compileSequence(SequenceExpr seq, List<Object> params) {
     List<String> names = seq.motifNames();
     if (names.size() < 2) {
@@ -211,29 +241,76 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       }
     }
 
-    // Build: EXISTS (SELECT 1 FROM motif_occurrences mo1
-    //   JOIN motif_occurrences mo2 ON mo2.game_url = mo1.game_url AND mo2.motif = ? AND mo2.ply =
-    // mo1.ply + 2
-    //   [ ... more JOINs for longer sequences ... ]
-    //   WHERE mo1.game_url = g.game_url AND mo1.motif = ?)
-    // Parameters: names[1].toUpperCase(), names[2].toUpperCase(), ..., names[0].toUpperCase()
-    StringBuilder sb = new StringBuilder("EXISTS (SELECT 1 FROM motif_occurrences mo1");
+    StringBuilder sb = new StringBuilder("EXISTS (SELECT 1");
+    sb.append(" FROM (").append(motifToPlySubquery(names.get(0))).append(") sq1");
 
     for (int i = 1; i < names.size(); i++) {
-      int prev = i;
-      int cur = i + 1;
-      sb.append(
-          String.format(
-              " JOIN motif_occurrences mo%d ON mo%d.game_url = mo1.game_url"
-                  + " AND mo%d.motif = ? AND mo%d.ply = mo%d.ply + 2",
-              cur, cur, cur, cur, prev));
-      params.add(names.get(i).toUpperCase());
+      int sqNum = i + 1;
+      int prevSqNum = i;
+      sb.append(" JOIN (")
+          .append(motifToPlySubquery(names.get(i)))
+          .append(") sq")
+          .append(sqNum)
+          .append(" ON sq")
+          .append(sqNum)
+          .append(".game_url = sq1.game_url AND sq")
+          .append(sqNum)
+          .append(".ply = sq")
+          .append(prevSqNum)
+          .append(".ply + 2");
     }
 
-    sb.append(" WHERE mo1.game_url = g.game_url AND mo1.motif = ?)");
-    params.add(names.get(0).toUpperCase());
-
+    sb.append(" WHERE sq1.game_url = g.game_url)");
     return sb.toString();
+  }
+
+  /**
+   * Returns a {@code SELECT game_url, ply FROM ...} SQL fragment for the given motif. The result
+   * has uniform shape regardless of whether the motif is stored directly or derived from ATTACK
+   * rows. Used by {@link #compileSequence} and conceptually equivalent to {@link #compileMotif} but
+   * returning occurrence positions rather than an existence predicate.
+   *
+   * <p>All motif name values are inlined as SQL literals; they are safe to inline because they are
+   * validated against {@link #VALID_MOTIFS} before this method is called.
+   */
+  private String motifToPlySubquery(String name) {
+    return switch (name) {
+      case "fork" ->
+          "SELECT game_url, ply FROM motif_occurrences"
+              + " WHERE motif = 'ATTACK' AND is_discovered = FALSE AND attacker IS NOT NULL"
+              + " GROUP BY game_url, ply, attacker HAVING COUNT(*) >= 2";
+      case "discovered_attack" ->
+          "SELECT game_url, ply FROM motif_occurrences"
+              + " WHERE motif = 'ATTACK' AND is_discovered = TRUE";
+      case "checkmate" ->
+          "SELECT game_url, ply FROM motif_occurrences"
+              + " WHERE motif = 'ATTACK' AND is_mate = TRUE";
+      case "discovered_check" ->
+          "SELECT game_url, ply FROM motif_occurrences"
+              + " WHERE motif = 'ATTACK' AND is_discovered = TRUE"
+              + " AND (target LIKE 'K%' OR target LIKE 'k%')";
+      case "double_check" ->
+          "SELECT game_url, ply FROM motif_occurrences"
+              + " WHERE motif = 'ATTACK' AND (target LIKE 'K%' OR target LIKE 'k%')"
+              + " GROUP BY game_url, ply HAVING COUNT(*) >= 2";
+      default -> {
+        // Stored motif: inline the validated name as an uppercase literal.
+        String dbValue = name.toUpperCase();
+        yield "SELECT game_url, ply FROM motif_occurrences WHERE motif = '" + dbValue + "'";
+      }
+    };
+  }
+
+  /**
+   * Returns a subquery that counts the number of distinct fork instances per game. A fork instance
+   * is a unique (ply, attacker) pair with 2+ non-discovered ATTACK targets at that ply.
+   */
+  private static String forkCountSubquery() {
+    return "SELECT game_url, COUNT(*) AS c FROM ("
+        + "SELECT game_url FROM motif_occurrences"
+        + " WHERE motif = 'ATTACK' AND is_discovered = FALSE AND attacker IS NOT NULL"
+        + " GROUP BY game_url, ply, attacker HAVING COUNT(*) >= 2"
+        + ") forks GROUP BY game_url";
   }
 
   private String resolveColumn(String field) {

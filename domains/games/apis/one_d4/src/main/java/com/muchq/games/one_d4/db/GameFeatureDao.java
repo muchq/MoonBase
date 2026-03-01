@@ -174,12 +174,14 @@ public class GameFeatureDao implements GameFeatureStore {
   public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
     if (gameUrls.isEmpty()) return Map.of();
     String placeholders = gameUrls.stream().map(u -> "?").collect(Collectors.joining(", "));
+    // Fetch all rows including ATTACK (needed for fork derivation) but excluding stale
+    // materialized FORK rows (derived motifs must not be double-counted).
     String sql =
         "SELECT game_url, motif, move_number, side, description,"
             + " moved_piece, attacker, target, is_discovered, is_mate, pin_type"
             + " FROM motif_occurrences WHERE game_url IN ("
             + placeholders
-            + ") ORDER BY ply ASC";
+            + ") AND motif != 'FORK' ORDER BY ply ASC";
     Map<String, Map<String, List<OccurrenceRow>>> result = new LinkedHashMap<>();
     try (Connection conn = dataSource.getConnection();
         PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -222,7 +224,55 @@ public class GameFeatureDao implements GameFeatureStore {
     } catch (SQLException e) {
       throw new RuntimeException("Failed to query motif occurrences", e);
     }
+
+    // Post-process: derive FORK from ATTACK rows, then remove ATTACK (internal primitive).
+    for (Map.Entry<String, Map<String, List<OccurrenceRow>>> entry : result.entrySet()) {
+      Map<String, List<OccurrenceRow>> motifMap = entry.getValue();
+      List<OccurrenceRow> attackOccs = motifMap.getOrDefault("attack", List.of());
+      List<OccurrenceRow> forkOccs = deriveForkOccurrences(entry.getKey(), attackOccs);
+      if (!forkOccs.isEmpty()) {
+        motifMap.put("fork", forkOccs);
+      }
+      motifMap.remove("attack");
+    }
+
     return result;
+  }
+
+  /**
+   * Derives FORK occurrences from a game's ATTACK rows. Groups non-discovered ATTACK rows by
+   * (moveNumber, side, attacker); groups with 2+ distinct targets constitute a fork. Mirrors the
+   * SQL derivation in {@code SqlCompiler.compileMotif("fork")}.
+   */
+  private static List<OccurrenceRow> deriveForkOccurrences(
+      String gameUrl, List<OccurrenceRow> attackOccs) {
+    Map<String, List<OccurrenceRow>> groups = new LinkedHashMap<>();
+    for (OccurrenceRow occ : attackOccs) {
+      if (occ.attacker() == null || occ.isDiscovered()) continue;
+      String key = occ.moveNumber() + "|" + occ.side() + "|" + occ.attacker();
+      groups.computeIfAbsent(key, k -> new ArrayList<>()).add(occ);
+    }
+    List<OccurrenceRow> forkOccs = new ArrayList<>();
+    for (List<OccurrenceRow> group : groups.values()) {
+      if (group.size() >= 2) {
+        for (OccurrenceRow attackOcc : group) {
+          forkOccs.add(
+              new OccurrenceRow(
+                  gameUrl,
+                  "fork",
+                  attackOcc.moveNumber(),
+                  attackOcc.side(),
+                  "Fork at move " + attackOcc.moveNumber(),
+                  attackOcc.movedPiece(),
+                  attackOcc.attacker(),
+                  attackOcc.target(),
+                  false,
+                  false,
+                  null));
+        }
+      }
+    }
+    return forkOccs;
   }
 
   private GameFeature mapRow(ResultSet rs) throws SQLException {
