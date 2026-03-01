@@ -41,7 +41,6 @@ export interface GameRow {
   hasPromotionWithCheck: boolean;
   hasPromotionWithCheckmate: boolean;
   hasSacrifice: boolean;
-  hasInterference: boolean;
   hasOverloadedPiece: boolean;
   hasZugzwang: boolean;
   pgn?: string;

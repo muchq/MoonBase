@@ -70,7 +70,6 @@ public class FullMotifDetectorTest {
             new SacrificeDetector(),
             new ZugzwangDetector(),
             new DoubleCheckDetector(),
-            new InterferenceDetector(),
             new OverloadedPieceDetector());
     extractor = new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
   }
@@ -96,7 +95,6 @@ public class FullMotifDetectorTest {
             Motif.PROMOTION,
             Motif.PROMOTION_WITH_CHECK,
             Motif.SACRIFICE,
-            Motif.INTERFERENCE,
             Motif.OVERLOADED_PIECE);
   }
 
@@ -302,23 +300,6 @@ public class FullMotifDetectorTest {
             tuple(40, "black"),
             tuple(42, "black"),
             tuple(45, "white"));
-  }
-
-  @Test
-  public void extractFeatures_interference_occurrences() {
-    GameFeatures features = extractor.extract(PGN);
-    // All interference occurrences are by white
-    assertThat(features.occurrences().get(Motif.INTERFERENCE))
-        .extracting(GameFeatures.MotifOccurrence::moveNumber, GameFeatures.MotifOccurrence::side)
-        .containsExactly(
-            tuple(6, "white"),
-            tuple(20, "white"),
-            tuple(29, "white"),
-            tuple(38, "white"),
-            tuple(41, "white"),
-            tuple(47, "white"),
-            tuple(48, "white"),
-            tuple(50, "white"));
   }
 
   @Test

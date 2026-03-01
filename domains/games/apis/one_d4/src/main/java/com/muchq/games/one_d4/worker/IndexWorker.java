@@ -158,7 +158,6 @@ public class IndexWorker {
             features.hasMotif(Motif.SACRIFICE),
             features.hasMotif(Motif.ZUGZWANG),
             features.hasMotif(Motif.DOUBLE_CHECK),
-            features.hasMotif(Motif.INTERFERENCE),
             features.hasMotif(Motif.OVERLOADED_PIECE),
             Instant.now(),
             game.pgn());

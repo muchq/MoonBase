@@ -97,7 +97,7 @@ export default function QueryView() {
         <code>motif(back_rank_mate)</code>, <code>motif(smothered_mate)</code>,{' '}
         <code>motif(promotion)</code>, <code>motif(promotion_with_check)</code>,{' '}
         <code>motif(promotion_with_checkmate)</code>, <code>motif(sacrifice)</code>,{' '}
-        <code>motif(interference)</code>, <code>motif(overloaded_piece)</code>,{' '}
+        <code>motif(overloaded_piece)</code>,{' '}
         <code>motif(zugzwang)</code>. Combine with{' '}
         <code>AND</code>, <code>OR</code>, <code>NOT</code>. Strings in double
         quotes, e.g. <code>eco = &quot;B90&quot;</code>. Do not use SELECT or *.

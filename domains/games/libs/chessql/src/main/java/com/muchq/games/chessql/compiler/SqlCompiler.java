@@ -50,7 +50,6 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
           "sacrifice",
           "zugzwang",
           "double_check",
-          "interference",
           "overloaded_piece");
 
   private static final Map<String, String> FIELD_MAP =

@@ -34,7 +34,6 @@ public record GameFeature(
     boolean hasSacrifice,
     boolean hasZugzwang,
     boolean hasDoubleCheck,
-    boolean hasInterference,
     boolean hasOverloadedPiece,
     Instant indexedAt,
     String pgn) {}

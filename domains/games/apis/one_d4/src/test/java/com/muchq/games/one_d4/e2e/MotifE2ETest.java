@@ -28,7 +28,6 @@ import com.muchq.games.one_d4.motifs.CheckmateDetector;
 import com.muchq.games.one_d4.motifs.CrossPinDetector;
 import com.muchq.games.one_d4.motifs.DiscoveredCheckDetector;
 import com.muchq.games.one_d4.motifs.DoubleCheckDetector;
-import com.muchq.games.one_d4.motifs.InterferenceDetector;
 import com.muchq.games.one_d4.motifs.MotifDetector;
 import com.muchq.games.one_d4.motifs.OverloadedPieceDetector;
 import com.muchq.games.one_d4.motifs.PinDetector;
@@ -151,7 +150,6 @@ public class MotifE2ETest {
             new SacrificeDetector(),
             new ZugzwangDetector(),
             new DoubleCheckDetector(),
-            new InterferenceDetector(),
             new OverloadedPieceDetector());
     FeatureExtractor featureExtractor =
         new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
@@ -288,15 +286,6 @@ public class MotifE2ETest {
     assertThat(occs.get(0).moveNumber()).isEqualTo(53);
     assertThat(occs.get(0).attacker()).isNotNull();
     assertThat(occs.get(0).target()).isNotNull();
-  }
-
-  // === INTERFERENCE ===
-
-  @Test
-  public void interference_motifDetected() {
-    String url = indexGame(KINGS_GAMBIT_URL, KINGS_GAMBIT_PGN);
-    assertMotifDetected(url, "interference");
-    assertThat(getOccurrences(url, "interference")).isNotEmpty();
   }
 
   // === OVERLOADED_PIECE ===

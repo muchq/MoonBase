@@ -205,14 +205,6 @@ public class SqlCompilerTest {
   }
 
   @Test
-  public void testInterferenceMotif() {
-    CompiledQuery result = compile("motif(interference)");
-    assertThat(result.selectSql())
-        .isEqualTo(BASE_PREFIX + "g.has_interference = TRUE" + BASE_SUFFIX);
-    assertThat(result.parameters()).isEmpty();
-  }
-
-  @Test
   public void testOverloadedPieceMotif() {
     CompiledQuery result = compile("motif(overloaded_piece)");
     assertThat(result.selectSql())

@@ -445,7 +445,7 @@ public class GameFeatureDaoTest {
         false, // hasSacrifice
         false, // hasZugzwang
         false, // hasDoubleCheck
-        false, // hasInterference
+
         false, // hasOverloadedPiece
         Instant.now(),
         "pgn");

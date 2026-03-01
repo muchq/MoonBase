@@ -167,7 +167,7 @@ public class RetentionWorkerTest {
         false, // hasSacrifice
         false, // hasZugzwang
         false, // hasDoubleCheck
-        false, // hasInterference
+
         false, // hasOverloadedPiece
         Instant.now(),
         "pgn");

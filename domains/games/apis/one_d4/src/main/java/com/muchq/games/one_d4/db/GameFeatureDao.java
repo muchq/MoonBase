@@ -35,9 +35,9 @@ public class GameFeatureDao implements GameFeatureStore {
           has_discovered_attack, has_discovered_mate, has_discovered_check,
           has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
           has_back_rank_mate, has_smothered_mate, has_sacrifice, has_zugzwang,
-          has_double_check, has_interference, has_overloaded_piece,
+          has_double_check, has_overloaded_piece,
           indexed_at, pgn
-      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
+      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
       """;
 
   private static final String PG_INSERT =
@@ -49,9 +49,9 @@ public class GameFeatureDao implements GameFeatureStore {
           has_discovered_attack, has_discovered_mate, has_discovered_check,
           has_check, has_checkmate, has_promotion, has_promotion_with_check, has_promotion_with_checkmate,
           has_back_rank_mate, has_smothered_mate, has_sacrifice, has_zugzwang,
-          has_double_check, has_interference, has_overloaded_piece,
+          has_double_check, has_overloaded_piece,
           indexed_at, pgn
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
       ON CONFLICT (game_url) DO UPDATE SET
           indexed_at = EXCLUDED.indexed_at,
           request_id = EXCLUDED.request_id
@@ -65,7 +65,7 @@ public class GameFeatureDao implements GameFeatureStore {
           has_check = ?, has_checkmate = ?, has_promotion = ?,
           has_promotion_with_check = ?, has_promotion_with_checkmate = ?,
           has_back_rank_mate = ?, has_smothered_mate = ?, has_sacrifice = ?, has_zugzwang = ?,
-          has_double_check = ?, has_interference = ?, has_overloaded_piece = ?,
+          has_double_check = ?, has_overloaded_piece = ?,
           indexed_at = now()
       WHERE game_url = ?
       """;
@@ -124,10 +124,9 @@ public class GameFeatureDao implements GameFeatureStore {
       ps.setBoolean(27, row.hasSacrifice());
       ps.setBoolean(28, row.hasZugzwang());
       ps.setBoolean(29, row.hasDoubleCheck());
-      ps.setBoolean(30, row.hasInterference());
-      ps.setBoolean(31, row.hasOverloadedPiece());
+      ps.setBoolean(30, row.hasOverloadedPiece());
       // indexed_at set via now() in SQL — no parameter
-      ps.setString(32, row.pgn());
+      ps.setString(31, row.pgn());
       ps.executeUpdate();
     } catch (SQLException e) {
       LOG.error("Failed to insert game feature for game_url={}", row.gameUrl(), e);
@@ -299,7 +298,6 @@ public class GameFeatureDao implements GameFeatureStore {
         rs.getBoolean("has_sacrifice"),
         rs.getBoolean("has_zugzwang"),
         rs.getBoolean("has_double_check"),
-        rs.getBoolean("has_interference"),
         rs.getBoolean("has_overloaded_piece"),
         rs.getTimestamp("indexed_at") != null ? rs.getTimestamp("indexed_at").toInstant() : null,
         rs.getString("pgn"));
@@ -366,9 +364,8 @@ public class GameFeatureDao implements GameFeatureStore {
       ps.setBoolean(15, features.hasMotif(Motif.SACRIFICE));
       ps.setBoolean(16, features.hasMotif(Motif.ZUGZWANG));
       ps.setBoolean(17, features.hasMotif(Motif.DOUBLE_CHECK));
-      ps.setBoolean(18, features.hasMotif(Motif.INTERFERENCE));
-      ps.setBoolean(19, features.hasMotif(Motif.OVERLOADED_PIECE));
-      ps.setString(20, gameUrl);
+      ps.setBoolean(18, features.hasMotif(Motif.OVERLOADED_PIECE));
+      ps.setString(19, gameUrl);
       ps.executeUpdate();
     } catch (SQLException e) {
       LOG.error("Failed to update motifs for game_url={}", gameUrl, e);
