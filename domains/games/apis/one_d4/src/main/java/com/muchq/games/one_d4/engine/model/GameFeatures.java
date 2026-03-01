@@ -88,8 +88,8 @@ public record GameFeatures(
     }
 
     /**
-     * Factory for motif occurrences with attacker/target but no movedPiece (e.g. check,
-     * double check, overloaded piece).
+     * Factory for motif occurrences with attacker/target but no movedPiece (e.g. check, double
+     * check, overloaded piece).
      */
     public static MotifOccurrence withPiece(
         PositionContext ctx,
