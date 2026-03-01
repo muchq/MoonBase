@@ -15,6 +15,7 @@ members = [
     "domains/games/apps/wordchains",
     "domains/platform/protos/example_grpc",
     "domains/platform/protos/doc_db",
+    "domains/games/apis/motif_query",
 ]
 
 [workspace.package]
@@ -69,3 +70,6 @@ rustyline = "17.0.2"
 tokenizers = { version = "0.22.2", default-features = false, features = ["fancy-regex"] }
 tower_governor = "0.8.0"
 wordchains = { path = "domains/games/libs/wordchains" }
+datafusion = "52"
+arrow = { version = "57", features = ["json"] }
+parquet = { version = "57", features = ["arrow"] }

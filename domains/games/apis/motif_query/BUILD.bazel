@@ -1,0 +1,30 @@
+load("@crates//:defs.bzl", "all_crate_deps", "crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
+
+rust_binary(
+    name = "motif-query",
+    srcs = [
+        "src/catalog.rs",
+        "src/main.rs",
+        "src/partitions.rs",
+        "src/query.rs",
+        "src/types.rs",
+        "src/writer.rs",
+    ],
+    crate_name = "motif_query",
+    deps = [
+        "//domains/platform/libs/server_pal",
+    ] + all_crate_deps(),
+)
+
+rust_test(
+    name = "test_motif_query",
+    size = "small",
+    crate = ":motif-query",
+    deps = crate_deps([
+        "tempfile",
+    ]),
+)
+
+linux_amd64_oci_binary(bin_name = "motif-query")
