@@ -148,7 +148,7 @@ mod tests {
         let model = TensorGpt::new(tok.vocab_size, 42, config, &device, DType::F32);
         let bytes = model.save_weights_st().unwrap();
         let model = InferenceGpt::load_safetensors(tok.vocab_size, &bytes, config).unwrap();
-        Arc::new(AppState { model, tokenizer: tok })
+        Arc::new(AppState { model, tokenizer: tok, metrics: crate::metrics::AppMetrics::new() })
     }
 
     fn test_app(state: Arc<AppState>) -> Router {
