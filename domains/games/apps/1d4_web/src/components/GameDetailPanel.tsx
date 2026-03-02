@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { Chess, type Move } from 'chess.js';
 import { Chessboard } from 'react-chessboard';
 import type { GameRow, OccurrenceRow } from '../types';
@@ -65,6 +65,7 @@ export default function GameDetailPanel({ game, onClose }: Props) {
   const [currentPly, setCurrentPly] = useState(0);
   const [orientation, setOrientation] = useState<'white' | 'black'>('white');
   const [activeOccurrence, setActiveOccurrence] = useState<OccurrenceRow | null>(null);
+  const motifListRef = useRef<HTMLUListElement>(null);
 
   const { fens, moves } = useMemo(
     () => (game.pgn ? parsePgn(game.pgn) : { fens: [START_FEN], moves: [] }),
@@ -75,11 +76,18 @@ export default function GameDetailPanel({ game, onClose }: Props) {
   const fen = fens[currentPly] ?? fens[fens.length - 1];
   const lastMove = currentPly > 0 ? moves[currentPly - 1] : null;
 
-  const activeMotifKey = activeOccurrence
-    ? Object.entries(game.occurrences ?? {}).find(([, occs]) =>
-        occs.includes(activeOccurrence)
-      )?.[0]
-    : null;
+  // Flatten and sort all occurrences by ply for ordered navigation and display
+  const sortedOccurrences = useMemo(() => {
+    return Object.entries(game.occurrences ?? {})
+      .flatMap(([motif, occs]) => occs.map((occ) => ({ motif, occ })))
+      .sort((a, b) => occurrencePly(a.occ) - occurrencePly(b.occ));
+  }, [game.occurrences]);
+
+  const activeIndex = activeOccurrence
+    ? sortedOccurrences.findIndex(({ occ }) => occ === activeOccurrence)
+    : -1;
+
+  const activeMotifKey = activeIndex >= 0 ? sortedOccurrences[activeIndex].motif : null;
   const motifColor = activeMotifKey != null ? (MOTIF_COLORS[activeMotifKey] ?? null) : null;
 
   const squareStyles: Record<string, React.CSSProperties> = {};
@@ -92,6 +100,13 @@ export default function GameDetailPanel({ game, onClose }: Props) {
     };
   }
 
+  // Auto-scroll the active motif into view in the list
+  useEffect(() => {
+    if (!activeOccurrence || !motifListRef.current) return;
+    const active = motifListRef.current.querySelector('[data-active="true"]') as HTMLElement;
+    active?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }, [activeOccurrence]);
+
   function seekTo(ply: number) {
     setCurrentPly(Math.max(0, Math.min(ply, totalPlies)));
   }
@@ -101,6 +116,19 @@ export default function GameDetailPanel({ game, onClose }: Props) {
     seekTo(occurrencePly(occ) + 1);
   }
 
+  function handlePrevMotif() {
+    if (sortedOccurrences.length === 0) return;
+    const idx = activeIndex <= 0 ? sortedOccurrences.length - 1 : activeIndex - 1;
+    handleOccurrenceClick(sortedOccurrences[idx].occ);
+  }
+
+  function handleNextMotif() {
+    if (sortedOccurrences.length === 0) return;
+    const idx =
+      activeIndex < 0 || activeIndex === sortedOccurrences.length - 1 ? 0 : activeIndex + 1;
+    handleOccurrenceClick(sortedOccurrences[idx].occ);
+  }
+
   const moveLabel =
     currentPly === 0
       ? 'Start'
@@ -108,7 +136,13 @@ export default function GameDetailPanel({ game, onClose }: Props) {
         ? 'End'
         : `Move ${Math.ceil(currentPly / 2)}${currentPly % 2 === 1 ? ' (W)' : ' (B)'}`;
 
-  const occurrenceEntries = Object.entries(game.occurrences ?? {});
+  const motifNavLabel =
+    activeIndex >= 0
+      ? `${activeIndex + 1} / ${sortedOccurrences.length}`
+      : `${sortedOccurrences.length} motif${sortedOccurrences.length !== 1 ? 's' : ''}`;
+
+  // Board is min(400px, 90vw) square; motif list matches that height + controls
+  const motifListMaxHeight = 'min(440px, 65vh)';
 
   return (
     <div className="panel" style={{ marginTop: '1rem' }}>
@@ -165,6 +199,7 @@ export default function GameDetailPanel({ game, onClose }: Props) {
                 arePiecesDraggable={false}
               />
             </div>
+            {/* Move navigation */}
             <div
               style={{
                 display: 'flex',
@@ -228,53 +263,96 @@ export default function GameDetailPanel({ game, onClose }: Props) {
                 ⇅
               </button>
             </div>
+            {/* Motif navigation */}
+            {sortedOccurrences.length > 0 && (
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '0.4rem',
+                  marginTop: '0.4rem',
+                  alignItems: 'center',
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={handlePrevMotif}
+                  aria-label="Previous motif"
+                  title="Previous motif"
+                >
+                  ‹ motif
+                </button>
+                <span
+                  style={{ fontSize: '0.875rem', minWidth: '6.5rem', textAlign: 'center' }}
+                >
+                  {motifNavLabel}
+                </span>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={handleNextMotif}
+                  aria-label="Next motif"
+                  title="Next motif"
+                >
+                  motif ›
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Occurrence list */}
-          {occurrenceEntries.length > 0 && (
-            <div style={{ flex: '1 1 200px' }}>
+          {sortedOccurrences.length > 0 && (
+            <div style={{ flex: '1 1 200px', minWidth: 0 }}>
               <h3 style={{ margin: '0 0 0.5rem', fontSize: '1rem' }}>Motifs</h3>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                {occurrenceEntries.flatMap(([motif, occs]) =>
-                  occs.map((occ, i) => {
-                    const color = MOTIF_COLORS[motif] ?? '#aaa';
-                    const isActive = activeOccurrence === occ;
-                    return (
-                      <li
-                        key={`${motif}-${i}`}
-                        onClick={() => handleOccurrenceClick(occ)}
+              <ul
+                ref={motifListRef}
+                style={{
+                  listStyle: 'none',
+                  padding: 0,
+                  margin: 0,
+                  maxHeight: motifListMaxHeight,
+                  overflowY: 'auto',
+                }}
+              >
+                {sortedOccurrences.map(({ motif, occ }, i) => {
+                  const color = MOTIF_COLORS[motif] ?? '#aaa';
+                  const isActive = activeOccurrence === occ;
+                  return (
+                    <li
+                      key={`${motif}-${i}`}
+                      data-active={isActive ? 'true' : 'false'}
+                      onClick={() => handleOccurrenceClick(occ)}
+                      style={{
+                        cursor: 'pointer',
+                        padding: '0.35rem 0.5rem',
+                        borderRadius: '4px',
+                        marginBottom: '0.25rem',
+                        borderLeft: `3px solid ${color}`,
+                        backgroundColor: isActive ? 'var(--bg-panel)' : 'transparent',
+                        display: 'flex',
+                        gap: '0.5rem',
+                        alignItems: 'baseline',
+                      }}
+                    >
+                      <span
+                        className="badge"
                         style={{
-                          cursor: 'pointer',
-                          padding: '0.35rem 0.5rem',
-                          borderRadius: '4px',
-                          marginBottom: '0.25rem',
-                          borderLeft: `3px solid ${color}`,
-                          backgroundColor: isActive ? 'var(--bg-panel)' : 'transparent',
-                          display: 'flex',
-                          gap: '0.5rem',
-                          alignItems: 'baseline',
+                          backgroundColor: color,
+                          color: '#000',
+                          fontSize: '0.7rem',
                         }}
                       >
-                        <span
-                          className="badge"
-                          style={{
-                            backgroundColor: color,
-                            color: '#000',
-                            fontSize: '0.7rem',
-                          }}
-                        >
-                          {motif.replace(/_/g, ' ')}
+                        {motif.replace(/_/g, ' ')}
+                      </span>
+                      <span style={{ fontSize: '0.875rem' }}>{formatMoveLabel(occ)}</span>
+                      {occ.description && (
+                        <span className="text-muted" style={{ fontSize: '0.8rem' }}>
+                          {occ.description}
                         </span>
-                        <span style={{ fontSize: '0.875rem' }}>{formatMoveLabel(occ)}</span>
-                        {occ.description && (
-                          <span className="text-muted" style={{ fontSize: '0.8rem' }}>
-                            {occ.description}
-                          </span>
-                        )}
-                      </li>
-                    );
-                  })
-                )}
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
