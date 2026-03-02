@@ -1,10 +1,14 @@
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use axum::Router;
-use axum::extract::{DefaultBodyLimit, State};
+use axum::extract::{DefaultBodyLimit, Request, State};
 use axum::http::{StatusCode, Uri};
+use axum::middleware::Next;
+use axum::response::Response;
 use axum::routing::{MethodRouter, get};
+use opentelemetry::KeyValue;
+use opentelemetry::metrics::{Counter, Histogram};
 use tokio::net::TcpListener;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
@@ -18,6 +22,57 @@ use tower_http::trace::TraceLayer;
 use tower_http::validate_request::ValidateRequestHeaderLayer;
 
 const DEFAULT_PORT: u16 = 8080;
+
+static HTTP_SUCCESS: OnceLock<Counter<u64>> = OnceLock::new();
+static HTTP_FAILURE: OnceLock<Counter<u64>> = OnceLock::new();
+static HTTP_DURATION: OnceLock<Histogram<f64>> = OnceLock::new();
+
+async fn http_metrics_middleware(req: Request, next: Next) -> Response {
+    let start = std::time::Instant::now();
+    let method = req.method().as_str().to_string();
+    let service_name = env::var("OTEL_SERVICE_NAME").unwrap_or_default();
+
+    let resp = next.run(req).await;
+
+    let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let status = resp.status().as_u16();
+    let attrs = [
+        KeyValue::new("http_method", method),
+        KeyValue::new("service_name", service_name),
+    ];
+
+    if status < 400 {
+        HTTP_SUCCESS
+            .get_or_init(|| {
+                opentelemetry::global::meter("http_server")
+                    .u64_counter("http_server_requests_success")
+                    .with_description("HTTP requests completed successfully (2xx–3xx)")
+                    .build()
+            })
+            .add(1, &attrs);
+    } else {
+        HTTP_FAILURE
+            .get_or_init(|| {
+                opentelemetry::global::meter("http_server")
+                    .u64_counter("http_server_requests_failure")
+                    .with_description("HTTP requests that returned 4xx or 5xx")
+                    .build()
+            })
+            .add(1, &attrs);
+    }
+
+    HTTP_DURATION
+        .get_or_init(|| {
+            opentelemetry::global::meter("http_server")
+                .f64_histogram("http_server_request_duration_ms")
+                .with_description("HTTP request duration in milliseconds")
+                .with_unit("ms")
+                .build()
+        })
+        .record(duration_ms, &attrs);
+
+    resp
+}
 
 pub struct RateLimit {
     pub per_second: u64,
@@ -82,7 +137,7 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
             ))
             .layer(CatchPanicLayer::new());
 
-        if let Some(RateLimit { per_second, burst }) = self.rate_limit {
+        let router = if let Some(RateLimit { per_second, burst }) = self.rate_limit {
             let config = Arc::new(
                 GovernorConfigBuilder::default()
                     .per_second(per_second)
@@ -93,7 +148,11 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
             router.layer(GovernorLayer::new(config))
         } else {
             router
-        }
+        };
+
+        // HTTP metrics middleware sits outside rate-limiting so rate-limited
+        // requests (429) are also counted as failures.
+        router.layer(axum::middleware::from_fn(http_metrics_middleware))
     }
 }
 

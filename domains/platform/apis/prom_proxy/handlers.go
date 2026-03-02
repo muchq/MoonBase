@@ -681,6 +681,177 @@ func (h *MetricsHandler) fetchContainerMetrics(ctx context.Context) (*ContainerM
 	return metrics, nil
 }
 
+func (h *MetricsHandler) GetMicrogptMetrics(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	metrics, err := h.fetchMicrogptMetrics(ctx)
+	if err != nil {
+		problem := mucks.NewServerError(500)
+		problem.Detail = "Failed to fetch microgpt metrics: " + err.Error()
+		mucks.JsonError(w, problem)
+		return
+	}
+
+	mucks.JsonOk(w, metrics)
+}
+
+func (h *MetricsHandler) GetMicrogptMetricsTimeSeries(w http.ResponseWriter, r *http.Request) {
+	timeRange := r.PathValue("range")
+
+	if !ValidTimeRange(timeRange) {
+		problem := mucks.NewBadRequest("Invalid time range. Valid options: 30m, 1d, 7d")
+		mucks.JsonError(w, problem)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	response, err := h.fetchMicrogptMetricsTimeSeries(ctx, TimeRange(timeRange))
+	if err != nil {
+		problem := mucks.NewServerError(500)
+		problem.Detail = "Failed to fetch microgpt metrics timeseries: " + err.Error()
+		mucks.JsonError(w, problem)
+		return
+	}
+
+	mucks.JsonOk(w, response)
+}
+
+func (h *MetricsHandler) fetchMicrogptMetrics(ctx context.Context) (*MicrogptMetrics, error) {
+	metrics := &MicrogptMetrics{
+		Timestamp: time.Now().UTC(),
+	}
+
+	// Request rate (requests/sec over last 5 min)
+	rateQuery := `rate(microgpt_requests_total[5m])`
+	rateResp, err := h.promClient.Query(ctx, rateQuery)
+	if err == nil {
+		for _, result := range rateResp.Data.Result {
+			if val, err := extractFloatValue(&result); err == nil {
+				metrics.Requests.RatePerSec += val
+			}
+		}
+	}
+
+	// Per-endpoint totals
+	generateTotalQuery := `microgpt_requests_total{endpoint="generate"}`
+	genResp, err := h.promClient.Query(ctx, generateTotalQuery)
+	if err == nil && len(genResp.Data.Result) > 0 {
+		if val, err := extractFloatValue(&genResp.Data.Result[0]); err == nil {
+			metrics.Requests.GenerateTotal = val
+		}
+	}
+
+	chatTotalQuery := `microgpt_requests_total{endpoint="chat"}`
+	chatResp, err := h.promClient.Query(ctx, chatTotalQuery)
+	if err == nil && len(chatResp.Data.Result) > 0 {
+		if val, err := extractFloatValue(&chatResp.Data.Result[0]); err == nil {
+			metrics.Requests.ChatTotal = val
+		}
+	}
+
+	// Success / failure counts over last 5 min (from server_pal HTTP layer)
+	successQuery := `increase(http_server_requests_success_total{service_name="microgpt-serve"}[5m])`
+	successResp, err := h.promClient.Query(ctx, successQuery)
+	if err == nil && len(successResp.Data.Result) > 0 {
+		if val, err := extractFloatValue(&successResp.Data.Result[0]); err == nil {
+			metrics.Requests.SuccessCount5m = val
+		}
+	}
+
+	failureQuery := `increase(http_server_requests_failure_total{service_name="microgpt-serve"}[5m])`
+	failureResp, err := h.promClient.Query(ctx, failureQuery)
+	if err == nil && len(failureResp.Data.Result) > 0 {
+		if val, err := extractFloatValue(&failureResp.Data.Result[0]); err == nil {
+			metrics.Requests.FailureCount5m = val
+		}
+	}
+
+	// Total tokens generated (lifetime counter)
+	tokensQuery := `microgpt_tokens_generated_total`
+	tokensResp, err := h.promClient.Query(ctx, tokensQuery)
+	if err == nil {
+		for _, result := range tokensResp.Data.Result {
+			if val, err := extractFloatValue(&result); err == nil {
+				metrics.Inference.TokensGeneratedTotal += val
+			}
+		}
+	}
+
+	// Tokens/sec derived from rate of the counter (5-min window)
+	tpsQuery := `rate(microgpt_tokens_generated_total[5m])`
+	tpsResp, err := h.promClient.Query(ctx, tpsQuery)
+	if err == nil {
+		for _, result := range tpsResp.Data.Result {
+			if val, err := extractFloatValue(&result); err == nil {
+				metrics.Inference.TokensPerSecondAvg += val
+			}
+		}
+	}
+
+	// Average request duration (5-min window)
+	durationQuery := `rate(microgpt_request_duration_ms_sum[5m]) / rate(microgpt_request_duration_ms_count[5m])`
+	durationResp, err := h.promClient.Query(ctx, durationQuery)
+	if err == nil && len(durationResp.Data.Result) > 0 {
+		if val, err := extractFloatValue(&durationResp.Data.Result[0]); err == nil {
+			metrics.Inference.AvgDurationMs = val
+		}
+	}
+
+	// Total conversations (chat requests lifetime)
+	convoQuery := `microgpt_conversations_total`
+	convoResp, err := h.promClient.Query(ctx, convoQuery)
+	if err == nil && len(convoResp.Data.Result) > 0 {
+		if val, err := extractFloatValue(&convoResp.Data.Result[0]); err == nil {
+			metrics.Inference.ConversationTotal = val
+		}
+	}
+
+	return metrics, nil
+}
+
+func (h *MetricsHandler) fetchMicrogptMetricsTimeSeries(ctx context.Context, timeRange TimeRange) (*TimeSeriesResponse, error) {
+	duration, step := GetTimeRangeConfig(timeRange)
+	endTime := time.Now().UTC()
+	startTime := endTime.Add(-duration)
+
+	response := &TimeSeriesResponse{
+		TimeRange: string(timeRange),
+		StartTime: startTime,
+		EndTime:   endTime,
+		Step:      step,
+		Series:    []TimeSeries{},
+	}
+
+	queries := map[string]string{
+		"request_rate":        `rate(microgpt_requests_total[5m])`,
+		"tokens_per_second":   `rate(microgpt_tokens_generated_total[5m])`,
+		"request_duration_ms": `rate(microgpt_request_duration_ms_sum[5m]) / rate(microgpt_request_duration_ms_count[5m])`,
+		"success_count":       `increase(http_server_requests_success_total{service_name="microgpt-serve"}[5m])`,
+		"failure_count":       `increase(http_server_requests_failure_total{service_name="microgpt-serve"}[5m])`,
+		"conversation_rate":   `rate(microgpt_conversations_total[5m])`,
+	}
+
+	for metricName, query := range queries {
+		resp, err := h.promClient.QueryRange(ctx, query, startTime, endTime, step)
+		if err != nil {
+			continue
+		}
+		for _, result := range resp.Data.Result {
+			ts, err := extractTimeSeries(&result)
+			if err != nil {
+				continue
+			}
+			ts.MetricName = metricName
+			response.Series = append(response.Series, ts)
+		}
+	}
+
+	return response, nil
+}
+
 func (h *MetricsHandler) fetchContainerMetricsTimeSeries(ctx context.Context, timeRange TimeRange) (*TimeSeriesResponse, error) {
 	duration, step := GetTimeRangeConfig(timeRange)
 	endTime := time.Now().UTC()

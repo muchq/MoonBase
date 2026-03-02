@@ -207,6 +207,9 @@ services:
     environment:
       - PORT=8087
       - MODEL_DIR=/etc/microgpt-serve/model
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
+      - OTEL_SERVICE_NAME=microgpt-serve
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=microgpt-serve,service.version=latest
     volumes:
       - /etc/microgpt-serve:/etc/microgpt-serve
     networks:

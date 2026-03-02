@@ -134,3 +134,24 @@ type ContainerStats struct {
 	NetworkRxBytes      float64 `json:"network_rx_bytes_per_sec"`
 	NetworkTxBytes      float64 `json:"network_tx_bytes_per_sec"`
 }
+
+type MicrogptMetrics struct {
+	Timestamp time.Time              `json:"timestamp"`
+	Requests  MicrogptRequestMetrics `json:"requests"`
+	Inference MicrogptInferenceMetrics `json:"inference"`
+}
+
+type MicrogptRequestMetrics struct {
+	RatePerSec      float64 `json:"rate_per_sec"`
+	GenerateTotal   float64 `json:"generate_total"`
+	ChatTotal       float64 `json:"chat_total"`
+	SuccessCount5m  float64 `json:"success_count_5m"`
+	FailureCount5m  float64 `json:"failure_count_5m"`
+}
+
+type MicrogptInferenceMetrics struct {
+	TokensGeneratedTotal float64 `json:"tokens_generated_total"`
+	TokensPerSecondAvg   float64 `json:"tokens_per_second_avg"`
+	AvgDurationMs        float64 `json:"avg_duration_ms"`
+	ConversationTotal    float64 `json:"conversation_total"`
+}
