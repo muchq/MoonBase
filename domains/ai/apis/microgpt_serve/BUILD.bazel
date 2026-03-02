@@ -6,6 +6,7 @@ rust_binary(
     name = "microgpt-serve",
     srcs = [
         "src/main.rs",
+        "src/metrics.rs",
         "src/service.rs",
         "src/types.rs",
     ],

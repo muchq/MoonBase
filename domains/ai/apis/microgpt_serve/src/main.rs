@@ -12,7 +12,7 @@ use std::time::Duration;
 use axum::routing::post;
 use microgpt::model::ModelMeta;
 use microgpt::{InferenceGpt, Tokenizer};
-use opentelemetry_otlp::MetricExporter;
+use opentelemetry_otlp::{MetricExporter, WithExportConfig};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use server_pal::{RateLimit, listen_addr_pal, router_builder, serve};
