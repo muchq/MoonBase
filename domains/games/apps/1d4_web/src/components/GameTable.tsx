@@ -1,5 +1,7 @@
+import { Fragment } from 'react';
 import type { GameRow } from '../types';
 import MotifBadge from './MotifBadge';
+import GameDetailPanel from './GameDetailPanel';
 
 
 const COLUMNS = [
@@ -76,9 +78,11 @@ interface Props {
   sortDir: 'asc' | 'desc';
   onSort: (col: string) => void;
   onRowClick?: (game: GameRow) => void;
+  selectedGame?: GameRow | null;
+  onClose?: () => void;
 }
 
-export default function GameTable({ games, sortBy, sortDir, onSort, onRowClick }: Props) {
+export default function GameTable({ games, sortBy, sortDir, onSort, onRowClick, selectedGame, onClose }: Props) {
   return (
     <div className="table-wrap">
       <table>
@@ -101,15 +105,27 @@ export default function GameTable({ games, sortBy, sortDir, onSort, onRowClick }
         </thead>
         <tbody>
           {games.map((game, i) => (
-            <tr
-              key={game.gameUrl || i}
-              onClick={onRowClick ? () => onRowClick(game) : undefined}
-              style={{ cursor: onRowClick ? 'pointer' : 'default' }}
-            >
-              {COLUMNS.map((col) => (
-                <td key={col.id}>{renderCell(col.id, game, onRowClick)}</td>
-              ))}
-            </tr>
+            <Fragment key={game.gameUrl || i}>
+              <tr
+                onClick={onRowClick ? () => onRowClick(game) : undefined}
+                style={{ cursor: onRowClick ? 'pointer' : 'default' }}
+                className={selectedGame?.gameUrl === game.gameUrl ? 'selected' : undefined}
+              >
+                {COLUMNS.map((col) => (
+                  <td key={col.id}>{renderCell(col.id, game, onRowClick)}</td>
+                ))}
+              </tr>
+              {selectedGame?.gameUrl === game.gameUrl && (
+                <tr>
+                  <td colSpan={COLUMNS.length} style={{ padding: 0 }}>
+                    <GameDetailPanel
+                      game={selectedGame}
+                      onClose={onClose ?? (() => {})}
+                    />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
         </tbody>
       </table>
