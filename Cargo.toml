@@ -62,7 +62,7 @@ tracing-subscriber = "0.3.22"
 uuid = { version = "1.21.0", features = ["v4", "fast-rng", "serde"]}
 chrono = { version = "0.4.43", features = ["serde"] }
 dirs = "6.0.0"
-rmcp = { version = "0.16.0", features = ["client", "server", "macros", "transport-child-process", "transport-io"] }
+rmcp = { version = "0.17.0", features = ["client", "server", "macros", "transport-child-process", "transport-io"] }
 schemars = "1.2.1"
 serde_yaml_ng = "0.10.0"
 microgpt = { path = "domains/ai/libs/microgpt" }
@@ -71,5 +71,5 @@ tokenizers = { version = "0.22.2", default-features = false, features = ["fancy-
 tower_governor = "0.8.0"
 wordchains = { path = "domains/games/libs/wordchains" }
 datafusion = "52"
-arrow = { version = "57", features = ["json"] }
-parquet = { version = "57", features = ["arrow"] }
+arrow = { version = "58", features = ["json"] }
+parquet = { version = "58", features = ["arrow"] }
