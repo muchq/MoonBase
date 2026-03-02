@@ -423,6 +423,23 @@ java_test_suite(
 )
 
 java_test_suite(
+    name = "contract_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/contract/DataFusionContractTest.java",
+    ],
+    deps = [
+        ":db",
+        ":dto",
+        ":model",
+        "//domains/games/libs/chessql:compiler",
+        "//domains/games/libs/chessql:parser",
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_test_suite(
     name = "http_integration_tests",
     size = "medium",
     srcs = [
