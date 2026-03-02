@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::Json;
 use axum::extract::State;
@@ -28,6 +29,7 @@ pub async fn generate_post(
     let num = req.num_samples.min(50);
     let tok = &state.tokenizer;
 
+    let start = Instant::now();
     let samples: Vec<String> = (0..num)
         .map(|i| {
             state.model.generate(
@@ -39,6 +41,11 @@ pub async fn generate_post(
             )
         })
         .collect();
+    let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    // Approximate token count: 1 token ≈ 4 chars is a common heuristic.
+    let approx_tokens = samples.iter().map(|s| (s.len() / 4).max(1)).sum::<usize>() as u64;
+    state.metrics.record_generate(approx_tokens, duration_ms);
 
     Json(GenerateResponse { samples }).into_response()
 }
@@ -84,6 +91,8 @@ pub async fn chat_post(
     let max_tokens = Some(req.max_tokens.unwrap_or(default_max));
     let stop_tokens = [special.end_turn];
     let suppress_tokens = [tok.bos, special.user, special.assistant];
+
+    let start = Instant::now();
     let output_tokens = state.model.generate_from_prompt(
         &prompt_tokens,
         &stop_tokens,
@@ -93,6 +102,9 @@ pub async fn chat_post(
         max_tokens,
         |_| {},
     );
+    let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    state.metrics.record_chat(output_tokens.len() as u64, duration_ms);
 
     let content = tok.decode_str(&output_tokens)
         .trim()
