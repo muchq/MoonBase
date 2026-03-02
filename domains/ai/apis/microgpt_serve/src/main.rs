@@ -14,7 +14,7 @@ use microgpt::model::ModelMeta;
 use microgpt::{InferenceGpt, Tokenizer};
 use opentelemetry_otlp::{MetricExporter, WithExportConfig};
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use server_pal::{RateLimit, listen_addr_pal, router_builder, serve};
 use tracing::{Level, event};
 
@@ -47,8 +47,9 @@ fn init_otel() -> Option<SdkMeterProvider> {
     // OTEL_RESOURCE_ATTRIBUTES via the built-in EnvResourceDetector.
     let resource = Resource::builder().build();
 
+    let reader = PeriodicReader::builder(exporter).build();
     let provider = SdkMeterProvider::builder()
-        .with_periodic_exporter(exporter)
+        .with_reader(reader)
         .with_resource(resource)
         .build();
 
