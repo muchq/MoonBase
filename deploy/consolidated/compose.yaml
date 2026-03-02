@@ -175,6 +175,30 @@ services:
       retries: 3
       start_period: 15s
 
+  motif-query:
+    image: ghcr.io/muchq/motif-query:latest
+    restart: always
+    ports:
+      - "8089:8089"
+    environment:
+      - PORT=8089
+      - PARQUET_DATA_DIR=/data/parquet
+    volumes:
+      - motif_query_data:/data
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "-H", "Accept: application/json", "http://localhost:8089/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   microgpt-serve:
     image: ghcr.io/muchq/microgpt-serve:latest
     restart: always
@@ -220,6 +244,7 @@ volumes:
   caddy_config:
   forgejo_data:
   one_d4_data:
+  motif_query_data:
 
 networks:
   app_network:
