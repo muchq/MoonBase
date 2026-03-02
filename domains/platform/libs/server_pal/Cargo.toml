@@ -7,6 +7,7 @@ readme.workspace = true
 
 [dependencies]
 axum = { workspace = true }
+opentelemetry = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
 tower_governor = { workspace = true }
 tower-http = { workspace = true, features = ["full"] }

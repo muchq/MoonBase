@@ -46,6 +46,10 @@ func main() {
 	router.HandleFunc("GET /metrics/v1/timeseries/system/{range}", metricsHandler.GetSystemMetricsTimeSeries)
 	router.HandleFunc("GET /metrics/v1/timeseries/portrait/{range}", metricsHandler.GetPortraitMetricsTimeSeries)
 	router.HandleFunc("GET /metrics/v1/timeseries/containers/{range}", metricsHandler.GetContainerMetricsTimeSeries)
+	router.HandleFunc("GET /metrics/v1/timeseries/microgpt/{range}", metricsHandler.GetMicrogptMetricsTimeSeries)
+
+	// MicroGPT endpoints
+	router.HandleFunc("GET /metrics/v1/scalar/microgpt", metricsHandler.GetMicrogptMetrics)
 
 	log.Printf("Starting Prometheus proxy server on port %s", port)
 	log.Printf("Prometheus backend: %s", prometheusURL)

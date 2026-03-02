@@ -73,3 +73,6 @@ wordchains = { path = "domains/games/libs/wordchains" }
 datafusion = "52"
 arrow = { version = "57", features = ["json"] }
 parquet = { version = "57", features = ["arrow"] }
+opentelemetry = { version = "0.31", features = ["metrics"] }
+opentelemetry_sdk = { version = "0.31", features = ["metrics", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.31", default-features = false, features = ["metrics", "http-proto", "reqwest-client"] }
