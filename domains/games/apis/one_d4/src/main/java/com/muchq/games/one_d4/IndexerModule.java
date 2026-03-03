@@ -21,14 +21,12 @@ import com.muchq.games.one_d4.motifs.BackRankMateDetector;
 import com.muchq.games.one_d4.motifs.CheckDetector;
 import com.muchq.games.one_d4.motifs.CrossPinDetector;
 import com.muchq.games.one_d4.motifs.MotifDetector;
-import com.muchq.games.one_d4.motifs.OverloadedPieceDetector;
 import com.muchq.games.one_d4.motifs.PinDetector;
 import com.muchq.games.one_d4.motifs.PromotionDetector;
 import com.muchq.games.one_d4.motifs.PromotionWithCheckDetector;
 import com.muchq.games.one_d4.motifs.PromotionWithCheckmateDetector;
 import com.muchq.games.one_d4.motifs.SkewerDetector;
 import com.muchq.games.one_d4.motifs.SmotheredMateDetector;
-import com.muchq.games.one_d4.motifs.ZugzwangDetector;
 import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.games.one_d4.queue.IndexQueue;
 import com.muchq.games.one_d4.worker.IndexWorker;
@@ -121,9 +119,7 @@ public class IndexerModule {
         new PromotionWithCheckDetector(),
         new PromotionWithCheckmateDetector(),
         new BackRankMateDetector(),
-        new SmotheredMateDetector(),
-        new ZugzwangDetector(),
-        new OverloadedPieceDetector());
+        new SmotheredMateDetector());
   }
 
   @Context

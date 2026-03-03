@@ -1,7 +1,5 @@
 package com.muchq.games.one_d4.e2e;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
 import com.muchq.games.chess_com_client.Accuracies;
 import com.muchq.games.chess_com_client.PlayedGame;
 import com.muchq.games.chess_com_client.PlayerResult;
@@ -26,27 +24,28 @@ import com.muchq.games.one_d4.motifs.BackRankMateDetector;
 import com.muchq.games.one_d4.motifs.CheckDetector;
 import com.muchq.games.one_d4.motifs.CrossPinDetector;
 import com.muchq.games.one_d4.motifs.MotifDetector;
-import com.muchq.games.one_d4.motifs.OverloadedPieceDetector;
 import com.muchq.games.one_d4.motifs.PinDetector;
 import com.muchq.games.one_d4.motifs.PromotionDetector;
 import com.muchq.games.one_d4.motifs.PromotionWithCheckDetector;
 import com.muchq.games.one_d4.motifs.PromotionWithCheckmateDetector;
 import com.muchq.games.one_d4.motifs.SkewerDetector;
 import com.muchq.games.one_d4.motifs.SmotheredMateDetector;
-import com.muchq.games.one_d4.motifs.ZugzwangDetector;
 import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.games.one_d4.queue.IndexMessage;
 import com.muchq.games.one_d4.queue.IndexQueue;
 import com.muchq.games.one_d4.worker.IndexWorker;
+import org.junit.Before;
+import org.junit.Test;
+
+import javax.sql.DataSource;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import javax.sql.DataSource;
-import org.junit.Before;
-import org.junit.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * End-to-end motif tests: each test indexes a real game, queries via ChessQL, and verifies that the
@@ -140,9 +139,7 @@ public class MotifE2ETest {
             new PromotionWithCheckDetector(),
             new PromotionWithCheckmateDetector(),
             new BackRankMateDetector(),
-            new SmotheredMateDetector(),
-            new ZugzwangDetector(),
-            new OverloadedPieceDetector());
+            new SmotheredMateDetector());
     FeatureExtractor featureExtractor =
         new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
     worker =
@@ -268,15 +265,6 @@ public class MotifE2ETest {
     assertThat(occs.get(0).moveNumber()).isEqualTo(53);
     assertThat(occs.get(0).attacker()).isNotNull();
     assertThat(occs.get(0).target()).isNotNull();
-  }
-
-  // === OVERLOADED_PIECE ===
-
-  @Test
-  public void overloadedPiece_motifDetected() {
-    String url = indexGame(KINGS_GAMBIT_URL, KINGS_GAMBIT_PGN);
-    assertMotifDetected(url, "overloaded_piece");
-    assertThat(getOccurrences(url, "overloaded_piece")).isNotEmpty();
   }
 
   // === BACK_RANK_MATE ===
