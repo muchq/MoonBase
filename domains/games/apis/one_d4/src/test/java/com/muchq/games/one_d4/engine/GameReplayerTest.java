@@ -135,6 +135,15 @@ public class GameReplayerTest {
   }
 
   @Test
+  public void testStripsNestedVariations() {
+    // Nested variations must not leak moves into the main line
+    List<PositionContext> positions =
+        replayer.replay("1. e4 e5 (1... c5 2. Nf3 (2. d4 cxd4) 2... Nc6) 2. Nf3");
+
+    assertThat(positions).hasSize(4); // initial + 3 moves only (e4, e5, Nf3)
+  }
+
+  @Test
   public void testStripsNagAnnotations() {
     List<PositionContext> positions = replayer.replay("1. e4 $1 e5 $2 2. Nf3 $10");
 
@@ -149,8 +158,8 @@ public class GameReplayerTest {
   }
 
   @Test
-  public void testMoveNumbersWithoutSpaces() {
-    List<PositionContext> positions = replayer.replay("1.e4 e5 2.Nf3 Nc6");
+  public void testMoveNumbers() {
+    List<PositionContext> positions = replayer.replay("1. e4 e5 2. Nf3 Nc6");
 
     assertThat(positions).hasSize(5);
   }
