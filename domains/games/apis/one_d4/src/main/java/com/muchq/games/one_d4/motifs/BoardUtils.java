@@ -157,6 +157,17 @@ class BoardUtils {
   }
 
   /**
+   * Extracts the destination square (e.g. "b5") from a SAN move string. Returns null for castling
+   * or unparseable moves.
+   */
+  static String destinationSquare(String lastMove) {
+    if (lastMove == null) return null;
+    if (lastMove.startsWith("O-O")) return null; // castling — king can't create a sliding tactic
+    String move = lastMove.replaceAll("[+#]|=[QRBN]", "");
+    return move.length() >= 2 ? move.substring(move.length() - 2) : null;
+  }
+
+  /**
    * Parses the destination square from a promotion move like "e8=Q+" or "axb8=N#". Returns {row,
    * col} in board-array coordinates, or {-1,-1} on parse failure.
    */

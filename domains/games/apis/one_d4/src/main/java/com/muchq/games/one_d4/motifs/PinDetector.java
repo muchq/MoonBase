@@ -25,7 +25,10 @@ public class PinDetector implements MotifDetector {
       // Detect absolute pins (to the king of side to move)
       // and relative pins (to another valuable piece)
       List<PinData> pins = detectPins(board, ctx.whiteToMove());
+      String dest = BoardUtils.destinationSquare(ctx.lastMove());
       for (PinData pin : pins) {
+        // Only fire if the pinning piece is the one that just moved.
+        if (dest == null || !pin.attacker().substring(1).equals(dest)) continue;
         String desc = "Pin detected at move " + ctx.moveNumber();
         GameFeatures.MotifOccurrence occ =
             GameFeatures.MotifOccurrence.pin(

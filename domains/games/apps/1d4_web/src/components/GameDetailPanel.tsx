@@ -19,8 +19,7 @@ const MOTIF_COLORS: Record<string, string> = {
   promotion: '#44cc44',
   promotion_with_check: '#44cc44',
   promotion_with_checkmate: '#44cc44',
-  overloaded_piece: '#cc66ff',
-  zugzwang: '#aaaaaa',
+
 };
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
@@ -82,6 +81,25 @@ export default function GameDetailPanel({ game, onClose }: Props) {
       .flatMap(([motif, occs]) => occs.map((occ) => ({ motif, occ })))
       .sort((a, b) => occurrencePly(a.occ) - occurrencePly(b.occ));
   }, [game.occurrences]);
+
+  // Group occurrences by ply so the list shows one row per move
+  const groupedOccurrences = useMemo(() => {
+    const groups: {
+      ply: number;
+      moveLabel: string;
+      items: { motif: string; occ: OccurrenceRow }[];
+    }[] = [];
+    for (const item of sortedOccurrences) {
+      const ply = occurrencePly(item.occ);
+      const last = groups[groups.length - 1];
+      if (last && last.ply === ply) {
+        last.items.push(item);
+      } else {
+        groups.push({ ply, moveLabel: formatMoveLabel(item.occ), items: [item] });
+      }
+    }
+    return groups;
+  }, [sortedOccurrences]);
 
   const activeIndex = activeOccurrence
     ? sortedOccurrences.findIndex(({ occ }) => occ === activeOccurrence)
@@ -264,7 +282,7 @@ export default function GameDetailPanel({ game, onClose }: Props) {
               </button>
             </div>
             {/* Motif navigation */}
-            {sortedOccurrences.length > 0 && (
+            {groupedOccurrences.length > 0 && (
               <div
                 style={{
                   display: 'flex',
@@ -300,8 +318,8 @@ export default function GameDetailPanel({ game, onClose }: Props) {
             )}
           </div>
 
-          {/* Occurrence list */}
-          {sortedOccurrences.length > 0 && (
+          {/* Occurrence list — one row per move, all motifs for that move as badges */}
+          {groupedOccurrences.length > 0 && (
             <div style={{ flex: '1 1 200px', minWidth: 0 }}>
               <h3 style={{ margin: '0 0 0.5rem', fontSize: '1rem' }}>Motifs</h3>
               <ul
@@ -314,42 +332,65 @@ export default function GameDetailPanel({ game, onClose }: Props) {
                   overflowY: 'auto',
                 }}
               >
-                {sortedOccurrences.map(({ motif, occ }, i) => {
-                  const color = MOTIF_COLORS[motif] ?? '#aaa';
-                  const isActive = activeOccurrence === occ;
+                {groupedOccurrences.map(({ ply, moveLabel, items }) => {
+                  const isGroupActive = items.some(({ occ }) => occ === activeOccurrence);
+                  // Accent color: use the active badge's color, or the first badge's color
+                  const accentMotif =
+                    (items.find(({ occ }) => occ === activeOccurrence) ?? items[0]).motif;
+                  const accentColor = MOTIF_COLORS[accentMotif] ?? '#aaa';
                   return (
                     <li
-                      key={`${motif}-${i}`}
-                      data-active={isActive ? 'true' : 'false'}
-                      onClick={() => handleOccurrenceClick(occ)}
+                      key={ply}
+                      data-active={isGroupActive ? 'true' : 'false'}
+                      onClick={() => handleOccurrenceClick(items[0].occ)}
                       style={{
                         cursor: 'pointer',
                         padding: '0.35rem 0.5rem',
                         borderRadius: '4px',
                         marginBottom: '0.25rem',
-                        borderLeft: `3px solid ${color}`,
-                        backgroundColor: isActive ? 'var(--bg-panel)' : 'transparent',
+                        borderLeft: `3px solid ${accentColor}`,
+                        backgroundColor: isGroupActive ? 'var(--bg-panel)' : 'transparent',
                         display: 'flex',
                         gap: '0.5rem',
-                        alignItems: 'baseline',
+                        alignItems: 'center',
                       }}
                     >
                       <span
-                        className="badge"
                         style={{
-                          backgroundColor: color,
-                          color: '#000',
-                          fontSize: '0.7rem',
+                          fontSize: '0.8rem',
+                          minWidth: '3rem',
+                          color: 'var(--text-muted)',
+                          flexShrink: 0,
                         }}
                       >
-                        {motif.replace(/_/g, ' ')}
+                        {moveLabel}
                       </span>
-                      <span style={{ fontSize: '0.875rem' }}>{formatMoveLabel(occ)}</span>
-                      {occ.description && (
-                        <span className="text-muted" style={{ fontSize: '0.8rem' }}>
-                          {occ.description}
-                        </span>
-                      )}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                        {items.map(({ motif, occ }, j) => {
+                          const color = MOTIF_COLORS[motif] ?? '#aaa';
+                          const isBadgeActive = occ === activeOccurrence;
+                          return (
+                            <span
+                              key={j}
+                              className="badge"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOccurrenceClick(occ);
+                              }}
+                              style={{
+                                backgroundColor: color,
+                                color: '#000',
+                                fontSize: '0.7rem',
+                                cursor: 'pointer',
+                                outline: isBadgeActive ? '2px solid var(--text)' : 'none',
+                                outlineOffset: '1px',
+                              }}
+                            >
+                              {motif.replace(/_/g, ' ')}
+                            </span>
+                          );
+                        })}
+                      </div>
                     </li>
                   );
                 })}
