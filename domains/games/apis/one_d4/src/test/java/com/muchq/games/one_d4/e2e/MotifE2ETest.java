@@ -1,5 +1,7 @@
 package com.muchq.games.one_d4.e2e;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import com.muchq.games.chess_com_client.Accuracies;
 import com.muchq.games.chess_com_client.PlayedGame;
 import com.muchq.games.chess_com_client.PlayerResult;
@@ -34,18 +36,15 @@ import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.games.one_d4.queue.IndexMessage;
 import com.muchq.games.one_d4.queue.IndexQueue;
 import com.muchq.games.one_d4.worker.IndexWorker;
-import org.junit.Before;
-import org.junit.Test;
-
-import javax.sql.DataSource;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-
-import static org.assertj.core.api.Assertions.assertThat;
+import javax.sql.DataSource;
+import org.junit.Before;
+import org.junit.Test;
 
 /**
  * End-to-end motif tests: each test indexes a real game, queries via ChessQL, and verifies that the
