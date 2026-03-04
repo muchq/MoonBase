@@ -51,8 +51,8 @@ if [ -s /tmp/impacted_targets.txt ]; then
     # Identify all tests that are not tagged 'manual' and not internal generated targets
     TESTS=$(bazel query "kind(test, set($TARGET_SET)) except attr(tags, 'manual', set($TARGET_SET)) except filter('.*__internal__.*', set($TARGET_SET))" 2>/dev/null || true)
 
-    # Identify all buildable targets that are NOT tests, NOT manual, and not internal generated targets
-    BUILDS=$(bazel query "set($TARGET_SET) except kind(test, set($TARGET_SET)) except attr(tags, 'manual', set($TARGET_SET)) except filter('.*__internal__.*', set($TARGET_SET))" 2>/dev/null || true)
+    # Identify all buildable rule targets that are NOT tests, NOT manual, and not internal generated targets
+    BUILDS=$(bazel query "kind(rule, set($TARGET_SET)) except kind(test, set($TARGET_SET)) except attr(tags, 'manual', set($TARGET_SET)) except filter('.*__internal__.*', set($TARGET_SET))" 2>/dev/null || true)
 
     [ -n "$BUILDS" ] && bazel build --skip_incompatible_explicit_targets $BUILDS
     [ -n "$TESTS" ] && bazel test --skip_incompatible_explicit_targets $TESTS
