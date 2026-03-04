@@ -4,10 +4,11 @@ import com.muchq.games.one_d4.queue.IndexMessage;
 import com.muchq.games.one_d4.queue.IndexQueue;
 import io.micronaut.context.event.ApplicationEventListener;
 import io.micronaut.runtime.server.event.ServerStartupEvent;
-import java.time.Duration;
-import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.time.Duration;
+import java.util.Optional;
 
 public class IndexWorkerLifecycle implements ApplicationEventListener<ServerStartupEvent> {
   private static final Logger LOG = LoggerFactory.getLogger(IndexWorkerLifecycle.class);
@@ -23,9 +24,9 @@ public class IndexWorkerLifecycle implements ApplicationEventListener<ServerStar
 
   @Override
   public void onApplicationEvent(ServerStartupEvent event) {
-    Thread workerThread = new Thread(this::pollLoop, "index-worker");
-    workerThread.setDaemon(true);
-    workerThread.start();
+    Thread pollerThread = Thread.ofVirtual().name("index-worker").unstarted(this::pollLoop);
+    pollerThread.setDaemon(true);
+    pollerThread.start();
     LOG.info("Index worker started");
   }
 

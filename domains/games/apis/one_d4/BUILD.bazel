@@ -420,7 +420,7 @@ java_test_suite(
 
 java_test_suite(
     name = "http_integration_tests",
-    size = "medium",
+    size = "small",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/api/ContentTypeHandlingTest.java",
     ],
