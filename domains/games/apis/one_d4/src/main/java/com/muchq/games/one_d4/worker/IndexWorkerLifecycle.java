@@ -23,9 +23,9 @@ public class IndexWorkerLifecycle implements ApplicationEventListener<ServerStar
 
   @Override
   public void onApplicationEvent(ServerStartupEvent event) {
-    Thread workerThread = new Thread(this::pollLoop, "index-worker");
-    workerThread.setDaemon(true);
-    workerThread.start();
+    Thread pollerThread = Thread.ofVirtual().name("index-worker").unstarted(this::pollLoop);
+    pollerThread.setDaemon(true);
+    pollerThread.start();
     LOG.info("Index worker started");
   }
 
