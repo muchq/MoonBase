@@ -4,11 +4,10 @@ import com.muchq.games.one_d4.queue.IndexMessage;
 import com.muchq.games.one_d4.queue.IndexQueue;
 import io.micronaut.context.event.ApplicationEventListener;
 import io.micronaut.runtime.server.event.ServerStartupEvent;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.time.Duration;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class IndexWorkerLifecycle implements ApplicationEventListener<ServerStartupEvent> {
   private static final Logger LOG = LoggerFactory.getLogger(IndexWorkerLifecycle.class);
