@@ -2,6 +2,7 @@
 set -euo pipefail
 
 BASE_REVISION=${1:-"origin/main"}
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 CURRENT_COMMIT=$(git rev-parse HEAD)
 
 # 1. Formatting Check (Keep this, it's good practice)
@@ -29,7 +30,7 @@ java -jar "$BAZEL_DIFF_JAR" generate-hashes \
     /tmp/starting_hashes.json
 
 # 4. Generate Hashes for Current
-git checkout "$CURRENT_COMMIT" --quiet --force
+git checkout "$CURRENT_BRANCH" --quiet --force
 java -jar "$BAZEL_DIFF_JAR" generate-hashes \
     -w "$WORKSPACE_ROOT" \
     -b "$(which bazel)" \
