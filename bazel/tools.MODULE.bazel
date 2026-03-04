@@ -16,11 +16,16 @@ bazel_dep(name = "bazel_features", version = "1.42.0")
 
 bazel_dep(name = "buildifier_prebuilt", version = "8.2.1.2", dev_dependency = True)
 
-bazel_dep(name = "bazel-diff", version = "15.0.4")
 bazel_dep(name = "rules_shell", version = "0.6.1")
 bazel_dep(name = "aspect_rules_lint", version = "2.1.0")
 
 http_jar = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_jar")
+
+http_jar(
+    name = "bazel-diff",
+    sha256 = "097c7c38c991698b957399b54deb64e9569d638694e79d0f89b0bf50b40d4e77",
+    url = "https://github.com/Tinder/bazel-diff/releases/download/17.0.2/bazel-diff_deploy.jar",
+)
 
 http_jar(
     name = "google-java-format",

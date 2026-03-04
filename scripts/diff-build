@@ -3,10 +3,14 @@ set -euo pipefail
 
 BASE_REVISION=${1:-"origin/main"}
 CURRENT_COMMIT=$(git rev-parse HEAD)
-WORKSPACE_ROOT=$(bazel info workspace)
 
 # 1. Formatting Check (Keep this, it's good practice)
 bazel test //:buildifier_test || { echo "Run bazel run //:buildifier_fix"; exit 1; }
+
+# Fetch the bazel-diff jar and resolve its path
+bazel build @bazel-diff//jar
+BAZEL_DIFF_JAR=$(bazel info output_base)/external/+http_jar+bazel-diff/jar/downloaded.jar
+WORKSPACE_ROOT=$(bazel info workspace)
 
 # 2. If Bazel config changed, bazel-diff isn't reliable; do full build and test
 BAZEL_CONFIG_CHANGES=$(git diff --name-only "$BASE_REVISION" HEAD -- .bazelversion .bazelrc 2>/dev/null || echo "")
@@ -18,23 +22,22 @@ if [ -n "$BAZEL_CONFIG_CHANGES" ]; then
 fi
 
 # 3. Generate Hashes for Base
-# Note: We no longer need to manually find EXTERNAL_REPOS.
-# Version 15 handles Bzlmod canonical names automatically.
 git checkout "$BASE_REVISION" --quiet --force
-bazel run @bazel-diff//:bazel-diff -- generate-hashes \
+java -jar "$BAZEL_DIFF_JAR" generate-hashes \
     -w "$WORKSPACE_ROOT" \
-    -b $(which bazel) \
+    -b "$(which bazel)" \
     /tmp/starting_hashes.json
 
 # 4. Generate Hashes for Current
 git checkout "$CURRENT_COMMIT" --quiet --force
-bazel run @bazel-diff//:bazel-diff -- generate-hashes \
+java -jar "$BAZEL_DIFF_JAR" generate-hashes \
     -w "$WORKSPACE_ROOT" \
-    -b $(which bazel) \
+    -b "$(which bazel)" \
     /tmp/final_hashes.json
 
 # 5. Get Impacted Targets
-bazel run @bazel-diff//:bazel-diff -- get-impacted-targets \
+java -jar "$BAZEL_DIFF_JAR" get-impacted-targets \
+    -w "$WORKSPACE_ROOT" \
     -sh /tmp/starting_hashes.json \
     -fh /tmp/final_hashes.json \
     -o /tmp/impacted_targets.txt
