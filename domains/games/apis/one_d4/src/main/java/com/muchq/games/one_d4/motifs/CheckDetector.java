@@ -36,9 +36,13 @@ public class CheckDetector implements MotifDetector {
                 ? BoardUtils.pieceNotation(board[king[0]][king[1]], king[0], king[1])
                 : null;
 
+        boolean isMate = move.endsWith("#");
         GameFeatures.MotifOccurrence occ =
-            GameFeatures.MotifOccurrence.withPiece(
-                ctx, "Check at move " + ctx.moveNumber(), attacker, target);
+            isMate
+                ? GameFeatures.MotifOccurrence.withMate(
+                    ctx, "Checkmate at move " + ctx.moveNumber(), attacker, target)
+                : GameFeatures.MotifOccurrence.withPiece(
+                    ctx, "Check at move " + ctx.moveNumber(), attacker, target);
         if (occ != null) occurrences.add(occ);
       }
     }

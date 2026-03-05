@@ -2,8 +2,10 @@
 set -euo pipefail
 
 BASE_REVISION=${1:-"origin/main"}
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 CURRENT_COMMIT=$(git rev-parse HEAD)
+# Use branch name when available; fall back to commit hash in detached HEAD (e.g. CI)
+CURRENT_REF=$(git rev-parse --abbrev-ref HEAD)
+[ "$CURRENT_REF" = "HEAD" ] && CURRENT_REF="$CURRENT_COMMIT"
 
 # 1. Formatting Check (Keep this, it's good practice)
 bazel test //:buildifier_test || { echo "Run bazel run //:buildifier_fix"; exit 1; }
@@ -30,7 +32,7 @@ java -jar "$BAZEL_DIFF_JAR" generate-hashes \
     /tmp/starting_hashes.json
 
 # 4. Generate Hashes for Current
-git checkout "$CURRENT_BRANCH" --quiet --force
+git checkout "$CURRENT_REF" --quiet --force
 java -jar "$BAZEL_DIFF_JAR" generate-hashes \
     -w "$WORKSPACE_ROOT" \
     -b "$(which bazel)" \
