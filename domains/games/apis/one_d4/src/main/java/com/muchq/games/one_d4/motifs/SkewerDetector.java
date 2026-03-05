@@ -19,7 +19,7 @@ public class SkewerDetector implements MotifDetector {
 
     for (PositionContext ctx : positions) {
       String placement = ctx.fen().split(" ")[0];
-      int[][] board = PinDetector.parsePlacement(placement);
+      int[][] board = BoardUtils.parsePlacement(placement);
 
       // A skewer is the opposite of a pin: a more valuable piece is in front,
       // and when it moves, a less valuable piece behind is captured.

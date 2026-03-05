@@ -35,7 +35,7 @@ public class SmotheredMateDetector implements MotifDetector {
       if (move == null || !move.endsWith("#")) continue;
 
       String placement = ctx.fen().split(" ")[0];
-      int[][] board = PinDetector.parsePlacement(placement);
+      int[][] board = BoardUtils.parsePlacement(placement);
 
       boolean loserIsWhite = ctx.whiteToMove();
       int[] kingPos = BoardUtils.findKing(board, loserIsWhite);

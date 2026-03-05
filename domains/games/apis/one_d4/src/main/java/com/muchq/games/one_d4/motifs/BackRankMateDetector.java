@@ -34,7 +34,7 @@ public class BackRankMateDetector implements MotifDetector {
       if (move == null || !move.endsWith("#")) continue;
 
       String placement = ctx.fen().split(" ")[0];
-      int[][] board = PinDetector.parsePlacement(placement);
+      int[][] board = BoardUtils.parsePlacement(placement);
 
       // The side that is checkmated is the side now to move (cannot escape)
       boolean loserIsWhite = ctx.whiteToMove();
