@@ -53,8 +53,8 @@ public class AttackDetector implements MotifDetector {
       if (ply <= 0) continue;
       String side = moverIsWhite ? "white" : "black";
 
-      int[][] boardBefore = PinDetector.parsePlacement(before.fen().split(" ")[0]);
-      int[][] boardAfter = PinDetector.parsePlacement(after.fen().split(" ")[0]);
+      int[][] boardBefore = BoardUtils.parsePlacement(before.fen().split(" ")[0]);
+      int[][] boardAfter = BoardUtils.parsePlacement(after.fen().split(" ")[0]);
 
       // Part 1: direct attacks by the piece that just moved (skip castling)
       if (!move.startsWith("O-")) {
@@ -178,10 +178,11 @@ public class AttackDetector implements MotifDetector {
     for (String t : targets) {
       if (isKingOrQueen(t)) result.add(t);
     }
-    long valuableCount = targets.stream().filter(t -> pieceValue(t.charAt(0)) >= 2).count();
+    long valuableCount =
+        targets.stream().filter(t -> Math.abs(BoardUtils.pieceValue(t.charAt(0))) >= 2).count();
     if (valuableCount >= 2) {
       for (String t : targets) {
-        if (!result.contains(t) && pieceValue(t.charAt(0)) >= 2) {
+        if (!result.contains(t) && Math.abs(BoardUtils.pieceValue(t.charAt(0))) >= 2) {
           result.add(t);
         }
       }
@@ -197,17 +198,5 @@ public class AttackDetector implements MotifDetector {
   static boolean isKing(String t) {
     char c = t.charAt(0);
     return c == 'K' || c == 'k';
-  }
-
-  static int pieceValue(char letter) {
-    return switch (Character.toUpperCase(letter)) {
-      case 'P' -> 1;
-      case 'N' -> 2;
-      case 'B' -> 3;
-      case 'R' -> 4;
-      case 'Q' -> 5;
-      case 'K' -> 6;
-      default -> 0;
-    };
   }
 }

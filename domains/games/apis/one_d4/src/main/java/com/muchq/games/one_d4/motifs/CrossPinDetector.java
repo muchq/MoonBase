@@ -19,7 +19,7 @@ public class CrossPinDetector implements MotifDetector {
 
     for (PositionContext ctx : positions) {
       String placement = ctx.fen().split(" ")[0];
-      int[][] board = PinDetector.parsePlacement(placement);
+      int[][] board = BoardUtils.parsePlacement(placement);
 
       // A cross-pin occurs when a piece is pinned along two different directions
       // simultaneously (e.g., pinned by a rook on a file AND a bishop on a diagonal).

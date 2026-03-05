@@ -3,6 +3,12 @@ import { describe, it, expect, vi } from 'vitest';
 import GameTable from '../components/GameTable';
 import type { GameRow } from '../types';
 
+vi.mock('react-chessboard', () => ({
+  Chessboard: ({ position }: { position: string }) => (
+    <div data-testid="chessboard" data-fen={position} />
+  ),
+}));
+
 const mockGames: GameRow[] = [
   {
     gameUrl: 'https://chess.com/game/1',
@@ -94,5 +100,24 @@ describe('GameTable', () => {
     // 1700000000 seconds = 2023-11-14 (both playedAt and indexedAt land on same day)
     const dateCells = screen.getAllByText('2023-11-14');
     expect(dateCells.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('shows game detail accordion inline when selectedGame matches a row', () => {
+    render(
+      <GameTable
+        games={mockGames}
+        sortBy=""
+        sortDir="asc"
+        onSort={() => {}}
+        selectedGame={mockGames[0]}
+        onClose={() => {}}
+      />
+    );
+    expect(screen.getByText('Alice vs Bob')).toBeInTheDocument();
+  });
+
+  it('does not show game detail accordion when no game is selected', () => {
+    render(<GameTable games={mockGames} sortBy="" sortDir="asc" onSort={() => {}} />);
+    expect(screen.queryByTestId('chessboard')).not.toBeInTheDocument();
   });
 });

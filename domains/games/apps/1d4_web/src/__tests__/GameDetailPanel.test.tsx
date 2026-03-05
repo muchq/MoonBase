@@ -109,18 +109,18 @@ describe('GameDetailPanel', () => {
     expect(screen.getByText('End')).toBeInTheDocument();
   });
 
-  it('lists motif occurrences with label and description', () => {
+  it('lists motif occurrences grouped by move: badge and move label shown', () => {
     render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    // Grouped view shows the motif badge and move label; descriptions are not rendered inline
     expect(screen.getByText('fork')).toBeInTheDocument();
     expect(screen.getByText('2.')).toBeInTheDocument();
-    expect(screen.getByText('Fork detected')).toBeInTheDocument();
   });
 
-  it('clicking an occurrence seeks to the motif position', () => {
+  it('clicking an occurrence row seeks to the motif position', () => {
     render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
     const startFen = screen.getByTestId('chessboard').getAttribute('data-fen');
-    // forkOccurrence: moveNumber=2, side=white → ply=2, seekTo(3)
-    fireEvent.click(screen.getByText('Fork detected'));
+    // forkOccurrence: moveNumber=2, side=white → ply=2, seekTo(3); click the move label
+    fireEvent.click(screen.getByText('2.'));
     const newFen = screen.getByTestId('chessboard').getAttribute('data-fen');
     expect(newFen).not.toBe(startFen);
     expect(screen.getByText('Move 2 (W)')).toBeInTheDocument();
@@ -136,5 +136,58 @@ describe('GameDetailPanel', () => {
   it('flip board button is present', () => {
     render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
     expect(screen.getByRole('button', { name: 'Flip board' })).toBeInTheDocument();
+  });
+
+  it('shows motif nav buttons when occurrences are present', () => {
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    expect(screen.getByRole('button', { name: 'Previous motif' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next motif' })).toBeInTheDocument();
+  });
+
+  it('does not show motif nav buttons when there are no occurrences', () => {
+    const game = { ...mockGame, occurrences: {} };
+    render(<GameDetailPanel game={game} onClose={() => {}} />);
+    expect(screen.queryByRole('button', { name: 'Previous motif' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Next motif' })).not.toBeInTheDocument();
+  });
+
+  it('next motif button seeks to first occurrence', () => {
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    const startFen = screen.getByTestId('chessboard').getAttribute('data-fen');
+    fireEvent.click(screen.getByRole('button', { name: 'Next motif' }));
+    const newFen = screen.getByTestId('chessboard').getAttribute('data-fen');
+    expect(newFen).not.toBe(startFen);
+    expect(screen.getByText('Move 2 (W)')).toBeInTheDocument();
+  });
+
+  it('prev motif button wraps to last occurrence from initial state', () => {
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    const startFen = screen.getByTestId('chessboard').getAttribute('data-fen');
+    fireEvent.click(screen.getByRole('button', { name: 'Previous motif' }));
+    const newFen = screen.getByTestId('chessboard').getAttribute('data-fen');
+    expect(newFen).not.toBe(startFen);
+  });
+
+  it('displays motif counter showing active index and total', () => {
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    // Before navigating: shows total motif count
+    expect(screen.getByText('1 motif')).toBeInTheDocument();
+    // After clicking next motif: shows index/total
+    fireEvent.click(screen.getByRole('button', { name: 'Next motif' }));
+    expect(screen.getByText('1 / 1')).toBeInTheDocument();
+  });
+
+  it('motif list is sorted by ply order', () => {
+    const occ1: OccurrenceRow = { gameUrl: 'https://chess.com/game/1', motif: 'pin', moveNumber: 1, side: 'white', description: 'early' };
+    const occ2: OccurrenceRow = { gameUrl: 'https://chess.com/game/1', motif: 'fork', moveNumber: 2, side: 'white', description: 'later' };
+    // provide fork before pin in the object to verify sort by ply
+    const game = { ...mockGame, occurrences: { fork: [occ2], pin: [occ1] } };
+    render(<GameDetailPanel game={game} onClose={() => {}} />);
+    const items = screen.getAllByRole('listitem');
+    // Each group row shows move label + badge; pin (move 1) before fork (move 2)
+    expect(items[0]).toHaveTextContent('1.');
+    expect(items[0]).toHaveTextContent('pin');
+    expect(items[1]).toHaveTextContent('2.');
+    expect(items[1]).toHaveTextContent('fork');
   });
 });

@@ -20,12 +20,15 @@ public class PinDetector implements MotifDetector {
     for (PositionContext ctx : positions) {
       String fen = ctx.fen();
       String placement = fen.split(" ")[0];
-      int[][] board = parsePlacement(placement);
+      int[][] board = BoardUtils.parsePlacement(placement);
 
       // Detect absolute pins (to the king of side to move)
       // and relative pins (to another valuable piece)
       List<PinData> pins = detectPins(board, ctx.whiteToMove());
+      String dest = BoardUtils.destinationSquare(ctx.lastMove());
       for (PinData pin : pins) {
+        // Only fire if the pinning piece is the one that just moved.
+        if (dest == null || !pin.attacker().substring(1).equals(dest)) continue;
         String desc = "Pin detected at move " + ctx.moveNumber();
         GameFeatures.MotifOccurrence occ =
             GameFeatures.MotifOccurrence.pin(
@@ -194,39 +197,4 @@ public class PinDetector implements MotifDetector {
   }
 
   record PinData(String attacker, String target, String pinType) {}
-
-  static int[][] parsePlacement(String placement) {
-    int[][] board = new int[8][8];
-    String[] ranks = placement.split("/");
-    for (int r = 0; r < 8; r++) {
-      int c = 0;
-      for (char ch : ranks[r].toCharArray()) {
-        if (Character.isDigit(ch)) {
-          c += ch - '0';
-        } else {
-          board[r][c] = pieceValue(ch);
-          c++;
-        }
-      }
-    }
-    return board;
-  }
-
-  static int pieceValue(char ch) {
-    return switch (ch) {
-      case 'K' -> 6;
-      case 'Q' -> 5;
-      case 'R' -> 4;
-      case 'B' -> 3;
-      case 'N' -> 2;
-      case 'P' -> 1;
-      case 'k' -> -6;
-      case 'q' -> -5;
-      case 'r' -> -4;
-      case 'b' -> -3;
-      case 'n' -> -2;
-      case 'p' -> -1;
-      default -> 0;
-    };
-  }
 }

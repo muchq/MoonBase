@@ -64,9 +64,7 @@ public class FullMotifDetectorTest {
             new PromotionWithCheckDetector(),
             new PromotionWithCheckmateDetector(),
             new BackRankMateDetector(),
-            new SmotheredMateDetector(),
-            new ZugzwangDetector(),
-            new OverloadedPieceDetector());
+            new SmotheredMateDetector());
     extractor = new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
   }
 
@@ -89,8 +87,7 @@ public class FullMotifDetectorTest {
             Motif.ATTACK,
             Motif.CHECK,
             Motif.PROMOTION,
-            Motif.PROMOTION_WITH_CHECK,
-            Motif.OVERLOADED_PIECE);
+            Motif.PROMOTION_WITH_CHECK);
   }
 
   @Test
@@ -109,6 +106,7 @@ public class FullMotifDetectorTest {
             Motif.BACK_RANK_MATE,
             Motif.SMOTHERED_MATE,
             Motif.ZUGZWANG,
+            Motif.OVERLOADED_PIECE,
             Motif.DOUBLE_CHECK);
     for (Motif m : absent) {
       assertThat(features.hasMotif(m)).as("expected %s absent", m).isFalse();
@@ -174,16 +172,11 @@ public class FullMotifDetectorTest {
     // 4.Bb5 pins Nc6 to the king; endgame queen/rook pins; also relative pins detected
     assertThat(pins).isNotEmpty();
 
-    // Key known absolute pins are present
+    // Only pins created by the piece that just moved fire.
     assertThat(pins)
         .extracting(GameFeatures.MotifOccurrence::moveNumber, GameFeatures.MotifOccurrence::side)
-        .contains(
-            tuple(4, "white"),
-            tuple(30, "black"),
-            tuple(31, "black"),
-            tuple(38, "black"),
-            tuple(50, "black"),
-            tuple(51, "black"));
+        .containsExactly(
+            tuple(4, "white"), tuple(17, "black"), tuple(38, "black"), tuple(42, "black"));
 
     // All pin occurrences have required structured fields
     assertThat(pins).allMatch(o -> o.attacker() != null, "attacker non-null");
@@ -249,24 +242,6 @@ public class FullMotifDetectorTest {
     GameFeatures features = extractor.extract(PGN);
     // DISCOVERED_CHECK is derived at query/response time from ATTACK rows; not indexed.
     assertThat(features.occurrences()).doesNotContainKey(Motif.DISCOVERED_CHECK);
-  }
-
-  @Test
-  public void extractFeatures_overloadedPiece_occurrences() {
-    GameFeatures features = extractor.extract(PGN);
-    assertThat(features.occurrences().get(Motif.OVERLOADED_PIECE))
-        .extracting(GameFeatures.MotifOccurrence::moveNumber, GameFeatures.MotifOccurrence::side)
-        .containsExactly(
-            tuple(8, "white"),
-            tuple(9, "white"),
-            tuple(10, "white"),
-            tuple(11, "white"),
-            tuple(12, "white"),
-            tuple(12, "black"),
-            tuple(13, "black"),
-            tuple(17, "black"),
-            tuple(18, "white"),
-            tuple(24, "white"));
   }
 
   @Test

@@ -25,14 +25,12 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/motifs/CrossPinDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/DiscoveredAttackDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/MotifDetector.java",
-        "src/main/java/com/muchq/games/one_d4/motifs/OverloadedPieceDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/PinDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/PromotionDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/PromotionWithCheckDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/PromotionWithCheckmateDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/SkewerDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/SmotheredMateDetector.java",
-        "src/main/java/com/muchq/games/one_d4/motifs/ZugzwangDetector.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -269,16 +267,15 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/games/one_d4/motifs/AttackDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/BackRankMateDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/BoardUtilsTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/CheckDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/DiscoveredAttackDetectorTest.java",
-        "src/test/java/com/muchq/games/one_d4/motifs/OverloadedPieceDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/PinDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/PromotionDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/PromotionWithCheckDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/PromotionWithCheckmateDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/SkewerDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/SmotheredMateDetectorTest.java",
-        "src/test/java/com/muchq/games/one_d4/motifs/ZugzwangDetectorTest.java",
     ],
     deps = [
         ":model",
@@ -441,7 +438,7 @@ java_test_suite(
 
 java_test_suite(
     name = "http_integration_tests",
-    size = "medium",
+    size = "small",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/api/ContentTypeHandlingTest.java",
     ],

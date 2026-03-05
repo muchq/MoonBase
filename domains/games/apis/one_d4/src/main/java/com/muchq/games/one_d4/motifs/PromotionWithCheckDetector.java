@@ -31,7 +31,7 @@ public class PromotionWithCheckDetector implements MotifDetector {
 
       if (promotedPieceDeliversCheck(ctx)) {
         String placement = ctx.fen().split(" ")[0];
-        int[][] board = PinDetector.parsePlacement(placement);
+        int[][] board = BoardUtils.parsePlacement(placement);
         boolean moverIsWhite = !ctx.whiteToMove();
         int[] dest = BoardUtils.parsePromotionDestination(move);
         int[] kingPos = BoardUtils.findKing(board, !moverIsWhite);
@@ -65,7 +65,7 @@ public class PromotionWithCheckDetector implements MotifDetector {
     if (dest[0] == -1) return false;
 
     String placement = ctx.fen().split(" ")[0];
-    int[][] board = PinDetector.parsePlacement(placement);
+    int[][] board = BoardUtils.parsePlacement(placement);
 
     // The side that just moved is the opposite of whose turn it now is
     boolean moverIsWhite = !ctx.whiteToMove();
