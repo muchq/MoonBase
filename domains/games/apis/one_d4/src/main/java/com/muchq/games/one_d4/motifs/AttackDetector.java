@@ -178,7 +178,8 @@ public class AttackDetector implements MotifDetector {
     for (String t : targets) {
       if (isKingOrQueen(t)) result.add(t);
     }
-    long valuableCount = targets.stream().filter(t -> Math.abs(BoardUtils.pieceValue(t.charAt(0))) >= 2).count();
+    long valuableCount =
+        targets.stream().filter(t -> Math.abs(BoardUtils.pieceValue(t.charAt(0))) >= 2).count();
     if (valuableCount >= 2) {
       for (String t : targets) {
         if (!result.contains(t) && Math.abs(BoardUtils.pieceValue(t.charAt(0))) >= 2) {

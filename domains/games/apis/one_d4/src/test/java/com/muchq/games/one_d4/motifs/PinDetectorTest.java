@@ -1,13 +1,12 @@
 package com.muchq.games.one_d4.motifs;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import com.muchq.games.one_d4.engine.model.PositionContext;
-import org.junit.Test;
-
 import java.util.List;
-
-import static org.assertj.core.api.Assertions.assertThat;
+import org.junit.Test;
 
 public class PinDetectorTest {
 
