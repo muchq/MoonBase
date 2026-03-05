@@ -267,6 +267,7 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/games/one_d4/motifs/AttackDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/BackRankMateDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/BoardUtilsTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/CheckDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/DiscoveredAttackDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/PinDetectorTest.java",

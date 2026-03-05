@@ -5,7 +5,7 @@ package com.muchq.games.one_d4.motifs;
  * convention where board[0][0] = a8 (rank 8, file a) and board[7][7] = h1 (rank 1, file h). Piece
  * values: P=1, N=2, B=3, R=4, Q=5, K=6; negative for black pieces.
  */
-class BoardUtils {
+public class BoardUtils {
 
   private BoardUtils() {}
 
@@ -55,6 +55,41 @@ class BoardUtils {
     }
   }
 
+  static int[][] parsePlacement(String placement) {
+    int[][] board = new int[8][8];
+    String[] ranks = placement.split("/");
+    for (int r = 0; r < 8; r++) {
+      int c = 0;
+      for (char ch : ranks[r].toCharArray()) {
+        if (Character.isDigit(ch)) {
+          c += ch - '0';
+        } else {
+          board[r][c] = pieceValue(ch);
+          c++;
+        }
+      }
+    }
+    return board;
+  }
+
+  static int pieceValue(char ch) {
+    return switch (ch) {
+      case 'K' -> 6;
+      case 'Q' -> 5;
+      case 'R' -> 4;
+      case 'B' -> 3;
+      case 'N' -> 2;
+      case 'P' -> 1;
+      case 'k' -> -6;
+      case 'q' -> -5;
+      case 'r' -> -4;
+      case 'b' -> -3;
+      case 'n' -> -2;
+      case 'p' -> -1;
+      default -> 0;
+    };
+  }
+
   /** Returns true if all squares strictly between (fromRow,fromCol) and (toRow,toCol) are empty. */
   static boolean isPathClear(int[][] board, int fromRow, int fromCol, int toRow, int toCol) {
     int rowStep = Integer.signum(toRow - fromRow);
@@ -66,26 +101,6 @@ class BoardUtils {
       col += colStep;
     }
     return true;
-  }
-
-  /**
-   * Counts how many pieces of {@code attackerIsWhite} color attack the square (targetRow,
-   * targetCol). Ignores any piece that might be standing on (targetRow, targetCol) itself.
-   */
-  static int countAttackers(int[][] board, int targetRow, int targetCol, boolean attackerIsWhite) {
-    int count = 0;
-    for (int row = 0; row < 8; row++) {
-      for (int col = 0; col < 8; col++) {
-        if (row == targetRow && col == targetCol) continue;
-        int piece = board[row][col];
-        if (piece == 0) continue;
-        if ((piece > 0) != attackerIsWhite) continue;
-        if (pieceAttacks(board, row, col, targetRow, targetCol)) {
-          count++;
-        }
-      }
-    }
-    return count;
   }
 
   /**

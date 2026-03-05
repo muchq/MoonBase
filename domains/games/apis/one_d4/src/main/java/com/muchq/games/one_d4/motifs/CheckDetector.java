@@ -22,7 +22,7 @@ public class CheckDetector implements MotifDetector {
       if (move != null && (move.endsWith("+") || move.endsWith("#"))) {
         boolean moverIsWhite = !ctx.whiteToMove();
         String placement = ctx.fen().split(" ")[0];
-        int[][] board = PinDetector.parsePlacement(placement);
+        int[][] board = BoardUtils.parsePlacement(placement);
 
         int[] checker = BoardUtils.findCheckingPiece(board, moverIsWhite);
         int[] king = BoardUtils.findKing(board, !moverIsWhite);

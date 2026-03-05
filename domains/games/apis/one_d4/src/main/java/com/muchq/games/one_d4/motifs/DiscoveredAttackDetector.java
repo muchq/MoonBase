@@ -26,8 +26,8 @@ public class DiscoveredAttackDetector implements MotifDetector {
 
       String beforePlacement = before.fen().split(" ")[0];
       String afterPlacement = after.fen().split(" ")[0];
-      int[][] boardBefore = PinDetector.parsePlacement(beforePlacement);
-      int[][] boardAfter = PinDetector.parsePlacement(afterPlacement);
+      int[][] boardBefore = BoardUtils.parsePlacement(beforePlacement);
+      int[][] boardAfter = BoardUtils.parsePlacement(afterPlacement);
 
       boolean moverIsWhite = !after.whiteToMove();
 

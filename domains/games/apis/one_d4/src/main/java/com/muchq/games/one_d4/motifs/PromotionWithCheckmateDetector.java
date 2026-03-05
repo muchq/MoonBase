@@ -28,7 +28,7 @@ public class PromotionWithCheckmateDetector implements MotifDetector {
 
       if (PromotionWithCheckDetector.promotedPieceDeliversCheck(ctx)) {
         String placement = ctx.fen().split(" ")[0];
-        int[][] board = PinDetector.parsePlacement(placement);
+        int[][] board = BoardUtils.parsePlacement(placement);
         boolean moverIsWhite = !ctx.whiteToMove();
         int[] dest = BoardUtils.parsePromotionDestination(move);
         int[] kingPos = BoardUtils.findKing(board, !moverIsWhite);
