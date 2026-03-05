@@ -71,6 +71,7 @@ public class CheckDetectorTest {
     assertThat(occurrences).hasSize(1);
     assertThat(occurrences.get(0).attacker()).isNotNull();
     assertThat(occurrences.get(0).target()).isNotNull();
+    assertThat(occurrences.get(0).isMate()).isTrue();
   }
 
   @Test
