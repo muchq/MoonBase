@@ -26,15 +26,15 @@ public class IndexingRequestDaoTest {
   @Test
   public void findExistingRequest_returnsEmptyWhenNoRequests() {
     Optional<IndexingRequestStore.IndexingRequest> result =
-        dao.findExistingRequest("player1", "CHESS_COM", "2024-01", "2024-01");
+        dao.findExistingRequest("player1", "CHESS_COM", "2024-01", "2024-01", false);
     assertThat(result).isEmpty();
   }
 
   @Test
   public void findExistingRequest_returnsPendingRequestWithMatchingParams() {
-    UUID id = dao.create("player1", "CHESS_COM", "2024-01", "2024-03");
+    UUID id = dao.create("player1", "CHESS_COM", "2024-01", "2024-03", false);
     Optional<IndexingRequestStore.IndexingRequest> result =
-        dao.findExistingRequest("player1", "CHESS_COM", "2024-01", "2024-03");
+        dao.findExistingRequest("player1", "CHESS_COM", "2024-01", "2024-03", false);
     assertThat(result).isPresent();
     assertThat(result.get().id()).isEqualTo(id);
     assertThat(result.get().status()).isEqualTo("PENDING");
@@ -46,10 +46,10 @@ public class IndexingRequestDaoTest {
 
   @Test
   public void findExistingRequest_returnsProcessingRequest() {
-    UUID id = dao.create("player2", "CHESS_COM", "2024-02", "2024-02");
+    UUID id = dao.create("player2", "CHESS_COM", "2024-02", "2024-02", false);
     dao.updateStatus(id, "PROCESSING", null, 5);
     Optional<IndexingRequestStore.IndexingRequest> result =
-        dao.findExistingRequest("player2", "CHESS_COM", "2024-02", "2024-02");
+        dao.findExistingRequest("player2", "CHESS_COM", "2024-02", "2024-02", false);
     assertThat(result).isPresent();
     assertThat(result.get().id()).isEqualTo(id);
     assertThat(result.get().status()).isEqualTo("PROCESSING");
@@ -58,28 +58,28 @@ public class IndexingRequestDaoTest {
 
   @Test
   public void findExistingRequest_ignoresCompletedRequest() {
-    UUID id = dao.create("player3", "CHESS_COM", "2024-03", "2024-03");
+    UUID id = dao.create("player3", "CHESS_COM", "2024-03", "2024-03", false);
     dao.updateStatus(id, "COMPLETED", null, 10);
     Optional<IndexingRequestStore.IndexingRequest> result =
-        dao.findExistingRequest("player3", "CHESS_COM", "2024-03", "2024-03");
+        dao.findExistingRequest("player3", "CHESS_COM", "2024-03", "2024-03", false);
     assertThat(result).isEmpty();
   }
 
   @Test
   public void findExistingRequest_ignoresFailedRequest() {
-    UUID id = dao.create("player4", "CHESS_COM", "2024-04", "2024-04");
+    UUID id = dao.create("player4", "CHESS_COM", "2024-04", "2024-04", false);
     dao.updateStatus(id, "FAILED", "Network error", 0);
     Optional<IndexingRequestStore.IndexingRequest> result =
-        dao.findExistingRequest("player4", "CHESS_COM", "2024-04", "2024-04");
+        dao.findExistingRequest("player4", "CHESS_COM", "2024-04", "2024-04", false);
     assertThat(result).isEmpty();
   }
 
   @Test
   public void findExistingRequest_returnsOldestWhenMultiplePending() {
-    UUID first = dao.create("same", "CHESS_COM", "2024-01", "2024-01");
-    dao.create("same", "CHESS_COM", "2024-01", "2024-01");
+    UUID first = dao.create("same", "CHESS_COM", "2024-01", "2024-01", false);
+    dao.create("same", "CHESS_COM", "2024-01", "2024-01", false);
     Optional<IndexingRequestStore.IndexingRequest> result =
-        dao.findExistingRequest("same", "CHESS_COM", "2024-01", "2024-01");
+        dao.findExistingRequest("same", "CHESS_COM", "2024-01", "2024-01", false);
     assertThat(result).isPresent();
     assertThat(result.get().id()).isEqualTo(first);
   }
@@ -92,9 +92,9 @@ public class IndexingRequestDaoTest {
 
   @Test
   public void listRecent_returnsRequestsOrderedByCreatedAtDesc() {
-    UUID first = dao.create("playerA", "CHESS_COM", "2024-01", "2024-01");
-    UUID second = dao.create("playerB", "CHESS_COM", "2024-02", "2024-02");
-    UUID third = dao.create("playerC", "CHESS_COM", "2024-03", "2024-03");
+    UUID first = dao.create("playerA", "CHESS_COM", "2024-01", "2024-01", false);
+    UUID second = dao.create("playerB", "CHESS_COM", "2024-02", "2024-02", false);
+    UUID third = dao.create("playerC", "CHESS_COM", "2024-03", "2024-03", false);
 
     List<IndexingRequestStore.IndexingRequest> results = dao.listRecent(10);
 
@@ -106,9 +106,9 @@ public class IndexingRequestDaoTest {
 
   @Test
   public void listRecent_respectsLimit() {
-    dao.create("playerA", "CHESS_COM", "2024-01", "2024-01");
-    dao.create("playerB", "CHESS_COM", "2024-02", "2024-02");
-    dao.create("playerC", "CHESS_COM", "2024-03", "2024-03");
+    dao.create("playerA", "CHESS_COM", "2024-01", "2024-01", false);
+    dao.create("playerB", "CHESS_COM", "2024-02", "2024-02", false);
+    dao.create("playerC", "CHESS_COM", "2024-03", "2024-03", false);
 
     List<IndexingRequestStore.IndexingRequest> results = dao.listRecent(2);
 
@@ -117,9 +117,26 @@ public class IndexingRequestDaoTest {
 
   @Test
   public void findExistingRequest_returnsEmptyWhenParamsDiffer() {
-    dao.create("player5", "CHESS_COM", "2024-01", "2024-01");
+    dao.create("player5", "CHESS_COM", "2024-01", "2024-01", false);
     Optional<IndexingRequestStore.IndexingRequest> result =
-        dao.findExistingRequest("player5", "CHESS_COM", "2024-02", "2024-02");
+        dao.findExistingRequest("player5", "CHESS_COM", "2024-02", "2024-02", false);
     assertThat(result).isEmpty();
+  }
+
+  @Test
+  public void findExistingRequest_distinguishesByExcludeBullet() {
+    UUID id = dao.create("player6", "CHESS_COM", "2024-05", "2024-05", true);
+
+    // Same params, same excludeBullet → match
+    Optional<IndexingRequestStore.IndexingRequest> match =
+        dao.findExistingRequest("player6", "CHESS_COM", "2024-05", "2024-05", true);
+    assertThat(match).isPresent();
+    assertThat(match.get().id()).isEqualTo(id);
+    assertThat(match.get().excludeBullet()).isTrue();
+
+    // Same params, different excludeBullet → no match
+    Optional<IndexingRequestStore.IndexingRequest> noMatch =
+        dao.findExistingRequest("player6", "CHESS_COM", "2024-05", "2024-05", false);
+    assertThat(noMatch).isEmpty();
   }
 }

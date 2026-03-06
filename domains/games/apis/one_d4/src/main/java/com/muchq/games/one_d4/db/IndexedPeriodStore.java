@@ -6,10 +6,12 @@ import java.util.Optional;
 public interface IndexedPeriodStore {
 
   /**
-   * Returns the indexed period for (player, platform, month) only if it is complete (fetched after
-   * the month ended). Used to skip re-fetching games for already-indexed periods.
+   * Returns the indexed period for (player, platform, month, excludeBullet) only if it is complete
+   * (fetched after the month ended). excludeBullet is part of the key so that a request with
+   * different filtering settings re-fetches rather than reusing an incompatible cached period.
    */
-  Optional<IndexedPeriod> findCompletePeriod(String player, String platform, String month);
+  Optional<IndexedPeriod> findCompletePeriod(
+      String player, String platform, String month, boolean excludeBullet);
 
   void upsertPeriod(
       String player,
@@ -17,7 +19,8 @@ public interface IndexedPeriodStore {
       String month,
       Instant fetchedAt,
       boolean isComplete,
-      int gamesCount);
+      int gamesCount,
+      boolean excludeBullet);
 
   int deleteOlderThan(Instant threshold);
 
@@ -28,5 +31,6 @@ public interface IndexedPeriodStore {
       String month,
       Instant fetchedAt,
       boolean isComplete,
-      int gamesCount) {}
+      int gamesCount,
+      boolean excludeBullet) {}
 }

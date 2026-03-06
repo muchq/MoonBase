@@ -51,7 +51,8 @@ public class IndexController {
                     row.endMonth(),
                     row.status(),
                     row.gamesIndexed(),
-                    row.errorMessage()))
+                    row.errorMessage(),
+                    row.excludeBullet()))
         .toList();
   }
 
@@ -61,16 +62,23 @@ public class IndexController {
   public IndexResponse createIndex(IndexRequest request) {
     validator.validate(request);
 
+    boolean excludeBullet = Boolean.TRUE.equals(request.excludeBullet());
+
     LOG.info(
-        "POST /v1/index player={} platform={} months={}-{}",
+        "POST /v1/index player={} platform={} months={}-{} excludeBullet={}",
         request.player(),
         request.platform(),
         request.startMonth(),
-        request.endMonth());
+        request.endMonth(),
+        excludeBullet);
 
     Optional<IndexingRequestStore.IndexingRequest> existing =
         requestDao.findExistingRequest(
-            request.player(), request.platform(), request.startMonth(), request.endMonth());
+            request.player(),
+            request.platform(),
+            request.startMonth(),
+            request.endMonth(),
+            excludeBullet);
     if (existing.isPresent()) {
       IndexingRequestStore.IndexingRequest row = existing.get();
       LOG.info("Returning existing index request {} (status={})", row.id(), row.status());
@@ -82,16 +90,26 @@ public class IndexController {
           row.endMonth(),
           row.status(),
           row.gamesIndexed(),
-          row.errorMessage());
+          row.errorMessage(),
+          row.excludeBullet());
     }
 
     UUID id =
         requestDao.create(
-            request.player(), request.platform(), request.startMonth(), request.endMonth());
+            request.player(),
+            request.platform(),
+            request.startMonth(),
+            request.endMonth(),
+            excludeBullet);
 
     queue.enqueue(
         new IndexMessage(
-            id, request.player(), request.platform(), request.startMonth(), request.endMonth()));
+            id,
+            request.player(),
+            request.platform(),
+            request.startMonth(),
+            request.endMonth(),
+            excludeBullet));
 
     return new IndexResponse(
         id,
@@ -101,7 +119,8 @@ public class IndexController {
         request.endMonth(),
         "PENDING",
         0,
-        null);
+        null,
+        excludeBullet);
   }
 
   @GET
@@ -121,7 +140,8 @@ public class IndexController {
                     row.endMonth(),
                     row.status(),
                     row.gamesIndexed(),
-                    row.errorMessage()))
+                    row.errorMessage(),
+                    row.excludeBullet()))
         .orElseThrow(() -> new NoSuchElementException("Indexing request not found: " + id));
   }
 }

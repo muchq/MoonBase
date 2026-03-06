@@ -38,6 +38,7 @@ export interface IndexRequest {
   status: string;
   gamesIndexed: number;
   errorMessage: string | null;
+  excludeBullet: boolean;
 }
 
 export interface QueryResponse {
