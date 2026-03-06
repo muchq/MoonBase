@@ -75,8 +75,8 @@ public class RetentionWorkerTest {
 
   @Test
   public void runRetention_deletesOldPeriods() {
-    periodDao.upsertPeriod("p", "CHESS_COM", "2024-01", Instant.now(), true, 5);
-    periodDao.upsertPeriod("p", "CHESS_COM", "2024-02", Instant.now(), true, 5);
+    periodDao.upsertPeriod("p", "CHESS_COM", "2024-01", Instant.now(), true, 5, false);
+    periodDao.upsertPeriod("p", "CHESS_COM", "2024-02", Instant.now(), true, 5, false);
     updatePeriodFetchedAt("2024-02", Instant.now().minus(8, ChronoUnit.DAYS));
 
     assertThat(countPeriods()).isEqualTo(2);
@@ -84,8 +84,8 @@ public class RetentionWorkerTest {
     worker.runRetention();
 
     assertThat(countPeriods()).isEqualTo(1);
-    assertThat(periodDao.findCompletePeriod("p", "CHESS_COM", "2024-01")).isPresent();
-    assertThat(periodDao.findCompletePeriod("p", "CHESS_COM", "2024-02")).isEmpty();
+    assertThat(periodDao.findCompletePeriod("p", "CHESS_COM", "2024-01", false)).isPresent();
+    assertThat(periodDao.findCompletePeriod("p", "CHESS_COM", "2024-02", false)).isEmpty();
   }
 
   private void updateIndexedAt(String url, Instant indexedAt) {

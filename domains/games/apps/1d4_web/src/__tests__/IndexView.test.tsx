@@ -18,6 +18,7 @@ const completedRequest: IndexRequest = {
   status: 'COMPLETED',
   gamesIndexed: 42,
   errorMessage: null,
+  excludeBullet: true,
 };
 
 function makeWrapper() {
@@ -80,6 +81,33 @@ describe('IndexView', () => {
         platform: 'CHESS_COM',
         startMonth: '2024-01',
         endMonth: '2024-03',
+        excludeBullet: true,
+      })
+    );
+  });
+
+  it('sends excludeBullet: false when checkbox is unchecked', async () => {
+    render(<IndexView />, { wrapper: makeWrapper() });
+
+    fireEvent.change(screen.getByLabelText('Username'), {
+      target: { value: 'hikaru' },
+    });
+    fireEvent.change(screen.getByLabelText('Start month (YYYY-MM)'), {
+      target: { value: '2024-01' },
+    });
+    fireEvent.change(screen.getByLabelText('End month (YYYY-MM)'), {
+      target: { value: '2024-03' },
+    });
+    fireEvent.click(screen.getByLabelText('Exclude bullet games'));
+    submitForm();
+
+    await waitFor(() =>
+      expect(api.createIndex).toHaveBeenCalledWith({
+        player: 'hikaru',
+        platform: 'CHESS_COM',
+        startMonth: '2024-01',
+        endMonth: '2024-03',
+        excludeBullet: false,
       })
     );
   });

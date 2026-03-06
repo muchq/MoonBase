@@ -46,6 +46,7 @@ public class IndexWorkerTest {
   private RecordingRequestStore requestStore;
   private StubPeriodStore periodStore;
   private IndexWorker worker;
+  private FeatureExtractor featureExtractor;
 
   @Before
   public void setUp() {
@@ -55,8 +56,7 @@ public class IndexWorkerTest {
     List<MotifDetector> detectors =
         List.of(
             new PinDetector(), new CrossPinDetector(), new SkewerDetector(), new AttackDetector());
-    FeatureExtractor featureExtractor =
-        new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
+    featureExtractor = new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
     worker =
         new IndexWorker(
             stubChessClient,
@@ -72,8 +72,10 @@ public class IndexWorkerTest {
         PLAYER,
         PLATFORM,
         "2024-01",
-        new IndexedPeriodStore.IndexedPeriod(PLAYER, PLATFORM, "2024-01", Instant.EPOCH, true, 7));
-    IndexMessage message = new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-02");
+        new IndexedPeriodStore.IndexedPeriod(
+            PLAYER, PLATFORM, "2024-01", Instant.EPOCH, true, 7, false));
+    IndexMessage message =
+        new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-02", false);
 
     worker.process(message);
 
@@ -84,7 +86,8 @@ public class IndexWorkerTest {
 
   @Test
   public void process_fetchesWhenNoCachedPeriod() {
-    IndexMessage message = new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01");
+    IndexMessage message =
+        new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false);
 
     worker.process(message);
 
@@ -98,8 +101,10 @@ public class IndexWorkerTest {
         PLAYER,
         PLATFORM,
         "2024-02",
-        new IndexedPeriodStore.IndexedPeriod(PLAYER, PLATFORM, "2024-02", Instant.EPOCH, true, 5));
-    IndexMessage message = new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-03");
+        new IndexedPeriodStore.IndexedPeriod(
+            PLAYER, PLATFORM, "2024-02", Instant.EPOCH, true, 5, false));
+    IndexMessage message =
+        new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-03", false);
 
     worker.process(message);
 
@@ -129,7 +134,8 @@ public class IndexWorkerTest {
         new IndexWorker(
             stubChessClient, featureExtractor, requestStore, recordingStore, periodStore);
 
-    IndexMessage message = new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01");
+    IndexMessage message =
+        new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false);
     workerWithRecording.process(message);
 
     assertThat(recordingStore.getLastInsertOccurrencesGameUrl()).isEqualTo(gameUrl);
@@ -140,6 +146,67 @@ public class IndexWorkerTest {
     assertThat(occurrences.get(Motif.CHECK)).isNotEmpty();
     assertThat(occurrences.get(Motif.CHECK).get(0).moveNumber()).isPositive();
     assertThat(occurrences.get(Motif.CHECK).get(0).description()).isNotBlank();
+  }
+
+  @Test
+  public void process_bulletGamesNotSkippedWhenExcludeBulletFalse() {
+    String gameUrl = "https://chess.com/game/bullet-keep";
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1), List.of(bulletPlayedGame(gameUrl)));
+    RecordingGameFeatureStore recordingStore = new RecordingGameFeatureStore();
+    IndexWorker w =
+        new IndexWorker(
+            stubChessClient, featureExtractor, requestStore, recordingStore, periodStore);
+
+    w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    assertThat(recordingStore.getInsertCount()).isEqualTo(1);
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+  }
+
+  @Test
+  public void process_bulletGamesSkippedWhenExcludeBulletTrue() {
+    String gameUrl = "https://chess.com/game/bullet-skip";
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1), List.of(bulletPlayedGame(gameUrl)));
+    RecordingGameFeatureStore recordingStore = new RecordingGameFeatureStore();
+    IndexWorker w =
+        new IndexWorker(
+            stubChessClient, featureExtractor, requestStore, recordingStore, periodStore);
+
+    w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", true));
+
+    assertThat(recordingStore.getInsertCount()).isEqualTo(0);
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+  }
+
+  private static PlayedGame bulletPlayedGame(String gameUrl) {
+    String pgn =
+        """
+        [Event "Live Chess"]
+        [Site "Chess.com"]
+        [White "White"]
+        [Black "Black"]
+        [Result "1-0"]
+        [ECO "C20"]
+
+        1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 1-0
+        """;
+    return new PlayedGame(
+        gameUrl,
+        pgn,
+        Instant.EPOCH,
+        true,
+        new Accuracies(90.0, 85.0),
+        "",
+        "uuid-" + gameUrl.hashCode(),
+        "",
+        "",
+        "bullet",
+        "chess",
+        new PlayerResult(1500, "win", "https://chess.com/w", "White", "uuid-w"),
+        new PlayerResult(1500, "loss", "https://chess.com/b", "Black", "uuid-b"),
+        "C20");
   }
 
   /** Scholar's mate: ends with Qxf7# so CheckDetector fires. */
@@ -212,7 +279,8 @@ public class IndexWorkerTest {
     }
 
     @Override
-    public UUID create(String player, String platform, String startMonth, String endMonth) {
+    public UUID create(
+        String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
       return UUID.randomUUID();
     }
 
@@ -234,7 +302,7 @@ public class IndexWorkerTest {
 
     @Override
     public Optional<IndexingRequestStore.IndexingRequest> findExistingRequest(
-        String player, String platform, String startMonth, String endMonth) {
+        String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
       return Optional.empty();
     }
   }
@@ -274,6 +342,7 @@ public class IndexWorkerTest {
   private static final class RecordingGameFeatureStore implements GameFeatureStore {
     private String lastInsertOccurrencesGameUrl;
     private Map<Motif, List<GameFeatures.MotifOccurrence>> lastInsertOccurrences;
+    private int insertCount = 0;
 
     String getLastInsertOccurrencesGameUrl() {
       return lastInsertOccurrencesGameUrl;
@@ -283,8 +352,14 @@ public class IndexWorkerTest {
       return lastInsertOccurrences;
     }
 
+    int getInsertCount() {
+      return insertCount;
+    }
+
     @Override
-    public void insert(GameFeature feature) {}
+    public void insert(GameFeature feature) {
+      insertCount++;
+    }
 
     @Override
     public int deleteOlderThan(Instant threshold) {
@@ -322,17 +397,17 @@ public class IndexWorkerTest {
 
     void setCachedPeriod(
         String player, String platform, String month, IndexedPeriodStore.IndexedPeriod period) {
-      cachedPeriods.put(key(player, platform, month), period);
+      cachedPeriods.put(key(player, platform, month, period.excludeBullet()), period);
     }
 
-    private static String key(String player, String platform, String month) {
-      return player + "|" + platform + "|" + month;
+    private static String key(String player, String platform, String month, boolean excludeBullet) {
+      return player + "|" + platform + "|" + month + "|" + excludeBullet;
     }
 
     @Override
     public Optional<IndexedPeriod> findCompletePeriod(
-        String player, String platform, String month) {
-      return Optional.ofNullable(cachedPeriods.get(key(player, platform, month)));
+        String player, String platform, String month, boolean excludeBullet) {
+      return Optional.ofNullable(cachedPeriods.get(key(player, platform, month, excludeBullet)));
     }
 
     @Override
@@ -342,7 +417,8 @@ public class IndexWorkerTest {
         String month,
         Instant fetchedAt,
         boolean isComplete,
-        int gamesCount) {}
+        int gamesCount,
+        boolean excludeBullet) {}
 
     @Override
     public int deleteOlderThan(Instant threshold) {

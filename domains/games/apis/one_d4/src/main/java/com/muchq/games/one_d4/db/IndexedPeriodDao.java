@@ -16,25 +16,28 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
 
   private static final String H2_UPSERT =
       """
-      MERGE INTO indexed_periods (player, platform, year_month, fetched_at, is_complete, games_count)
-      KEY (player, platform, year_month)
-      VALUES (?, ?, ?, ?, ?, ?)
+      MERGE INTO indexed_periods
+          (player, platform, year_month, fetched_at, is_complete, games_count, exclude_bullet)
+      KEY (player, platform, year_month, exclude_bullet)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       """;
 
   private static final String PG_UPSERT =
       """
-      INSERT INTO indexed_periods (player, platform, year_month, fetched_at, is_complete, games_count)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT (player, platform, year_month)
+      INSERT INTO indexed_periods
+          (player, platform, year_month, fetched_at, is_complete, games_count, exclude_bullet)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (player, platform, year_month, exclude_bullet)
       DO UPDATE SET fetched_at = EXCLUDED.fetched_at, is_complete = EXCLUDED.is_complete,
                     games_count = EXCLUDED.games_count
       """;
 
   private static final String FIND_COMPLETE =
       """
-      SELECT player, platform, year_month, fetched_at, is_complete, games_count
+      SELECT player, platform, year_month, fetched_at, is_complete, games_count, exclude_bullet
       FROM indexed_periods
-      WHERE player = ? AND platform = ? AND year_month = ? AND is_complete = true
+      WHERE player = ? AND platform = ? AND year_month = ? AND exclude_bullet = ?
+        AND is_complete = true
       """;
 
   private static final String DELETE_OLDER_THAN =
@@ -53,12 +56,14 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
   }
 
   @Override
-  public Optional<IndexedPeriod> findCompletePeriod(String player, String platform, String month) {
+  public Optional<IndexedPeriod> findCompletePeriod(
+      String player, String platform, String month, boolean excludeBullet) {
     try (Connection conn = dataSource.getConnection();
         PreparedStatement ps = conn.prepareStatement(FIND_COMPLETE)) {
       ps.setString(1, player);
       ps.setString(2, platform);
       ps.setString(3, month);
+      ps.setBoolean(4, excludeBullet);
       try (ResultSet rs = ps.executeQuery()) {
         if (rs.next()) {
           return Optional.of(mapRow(rs));
@@ -77,7 +82,8 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
       String month,
       Instant fetchedAt,
       boolean isComplete,
-      int gamesCount) {
+      int gamesCount,
+      boolean excludeBullet) {
     String sql = useH2 ? H2_UPSERT : PG_UPSERT;
     try (Connection conn = dataSource.getConnection();
         PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -87,6 +93,7 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
       ps.setTimestamp(4, Timestamp.from(fetchedAt));
       ps.setBoolean(5, isComplete);
       ps.setInt(6, gamesCount);
+      ps.setBoolean(7, excludeBullet);
       ps.executeUpdate();
     } catch (SQLException e) {
       LOG.error(
@@ -121,6 +128,7 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
         rs.getString("year_month"),
         rs.getTimestamp("fetched_at").toInstant(),
         rs.getBoolean("is_complete"),
-        rs.getInt("games_count"));
+        rs.getInt("games_count"),
+        rs.getBoolean("exclude_bullet"));
   }
 }

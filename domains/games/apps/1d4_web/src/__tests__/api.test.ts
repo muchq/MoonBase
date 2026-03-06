@@ -25,6 +25,7 @@ describe('api', () => {
         platform: 'CHESS_COM',
         startMonth: '2024-01',
         endMonth: '2024-03',
+        excludeBullet: true,
       };
       const mock = mockFetch({ id: '123', status: 'PENDING', gamesIndexed: 0, errorMessage: null });
       await createIndex(body);

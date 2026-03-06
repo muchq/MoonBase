@@ -94,7 +94,7 @@ public class IndexE2ETest {
     fakeChessClient.addGame(PLAYER, month, "https://chess.com/game/e2e-1");
     fakeChessClient.addGame(PLAYER, month, "https://chess.com/game/e2e-2");
 
-    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-03", "2024-03");
+    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-03", "2024-03", null);
     IndexResponse created = controller.createIndex(request);
 
     assertThat(created.id()).isNotNull();
@@ -120,7 +120,7 @@ public class IndexE2ETest {
     YearMonth month = YearMonth.of(2024, 4);
     fakeChessClient.addGame(PLAYER, month, "https://chess.com/game/dup-1");
 
-    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-04", "2024-04");
+    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-04", "2024-04", null);
     IndexResponse first = controller.createIndex(request);
     assertThat(first.status()).isEqualTo("PENDING");
     assertThat(queue.size()).isEqualTo(1);
@@ -141,12 +141,12 @@ public class IndexE2ETest {
     YearMonth jan = YearMonth.of(2024, 1);
     YearMonth feb = YearMonth.of(2024, 2);
     periodStore.upsertPeriod(
-        PLAYER, PLATFORM, "2024-01", Instant.parse("2024-02-01T00:00:00Z"), true, 3);
+        PLAYER, PLATFORM, "2024-01", Instant.parse("2024-02-01T00:00:00Z"), true, 3, false);
 
     fakeChessClient.setNoGames(PLAYER, jan);
     fakeChessClient.addGame(PLAYER, feb, "https://chess.com/game/feb-1");
 
-    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-01", "2024-02");
+    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-01", "2024-02", null);
     IndexResponse created = controller.createIndex(request);
     processQueueUntilIdle();
 
@@ -164,14 +164,14 @@ public class IndexE2ETest {
     YearMonth feb = YearMonth.of(2024, 2);
     YearMonth mar = YearMonth.of(2024, 3);
     periodStore.upsertPeriod(
-        PLAYER, PLATFORM, "2024-02", Instant.parse("2024-03-01T00:00:00Z"), true, 5);
+        PLAYER, PLATFORM, "2024-02", Instant.parse("2024-03-01T00:00:00Z"), true, 5, false);
 
     fakeChessClient.addGame(PLAYER, jan, "https://chess.com/game/jan-1");
     fakeChessClient.addGame(PLAYER, jan, "https://chess.com/game/jan-2");
     fakeChessClient.setNoGames(PLAYER, feb);
     fakeChessClient.addGame(PLAYER, mar, "https://chess.com/game/mar-1");
 
-    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-01", "2024-03");
+    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-01", "2024-03", null);
     IndexResponse created = controller.createIndex(request);
     processQueueUntilIdle();
 
@@ -190,7 +190,7 @@ public class IndexE2ETest {
     YearMonth month = YearMonth.of(2024, 5);
     fakeChessClient.addGame(PLAYER, month, "https://chess.com/game/list-1");
 
-    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-05", "2024-05");
+    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-05", "2024-05", null);
     IndexResponse created = controller.createIndex(request);
 
     List<IndexResponse> pending = controller.listRequests();
@@ -213,7 +213,7 @@ public class IndexE2ETest {
     // Scholar's mate: Qxf7# so CheckDetector fires and we get an occurrence
     fakeChessClient.setGames(PLAYER, month, List.of(playedGameWithCheckPgn(gameUrl)));
 
-    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-06", "2024-06");
+    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-06", "2024-06", null);
     controller.createIndex(request);
     processQueueUntilIdle();
 
@@ -258,6 +258,29 @@ public class IndexE2ETest {
         new PlayerResult(1500, "win", "https://chess.com/w", "White", "uuid-w"),
         new PlayerResult(1500, "loss", "https://chess.com/b", "Black", "uuid-b"),
         "C20");
+  }
+
+  @Test
+  public void createIndex_withExcludeBullet_filtersBulletGames() {
+    YearMonth month = YearMonth.of(2024, 7);
+    fakeChessClient.addGame(PLAYER, month, "https://chess.com/game/blitz-e2e-1");
+    fakeChessClient.setGames(
+        PLAYER,
+        month,
+        List.of(
+            FakeChessClient.minimalPlayedGame("https://chess.com/game/blitz-e2e-1"),
+            FakeChessClient.bulletPlayedGame("https://chess.com/game/bullet-e2e-1")));
+
+    IndexRequest request = new IndexRequest(PLAYER, PLATFORM, "2024-07", "2024-07", true);
+    IndexResponse created = controller.createIndex(request);
+    assertThat(created.excludeBullet()).isTrue();
+
+    processQueueUntilIdle();
+
+    IndexResponse after = controller.getIndex(created.id());
+    assertThat(after.status()).isEqualTo("COMPLETED");
+    assertThat(after.gamesIndexed()).isEqualTo(1); // bullet game excluded
+    assertThat(after.excludeBullet()).isTrue();
   }
 
   private void processQueueUntilIdle() {

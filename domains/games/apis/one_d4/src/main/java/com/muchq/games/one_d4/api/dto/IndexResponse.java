@@ -11,4 +11,5 @@ public record IndexResponse(
     String endMonth,
     String status,
     int gamesIndexed,
-    @Nullable String errorMessage) {}
+    @Nullable String errorMessage,
+    boolean excludeBullet) {}
