@@ -62,16 +62,21 @@ echo "--- [diff-build] impacted targets: $(wc -l < /tmp/impacted_targets.txt) ta
 # Instead of complex bash loops, we use Bazel's own query engine to
 # categorize the targets into "tests" and "not tests".
 if [ -s /tmp/impacted_targets.txt ]; then
-    TARGET_SET=$(tr '\n' ' ' < /tmp/impacted_targets.txt)
+    # Filter to first-party targets only — bazel-diff may include external targets
+    # (e.g. @@rules_cc++//:foo) which are not valid in bazel query set() expressions.
+    grep '^//' /tmp/impacted_targets.txt > /tmp/impacted_targets_filtered.txt || true
+    echo "--- [diff-build] first-party impacted targets: $(wc -l < /tmp/impacted_targets_filtered.txt)"
+
+    TARGET_SET=$(tr '\n' ' ' < /tmp/impacted_targets_filtered.txt)
 
     # Identify all tests that are not tagged 'manual' and not internal generated targets
     echo "--- [diff-build] querying for tests..."
-    TESTS=$(bazel query "kind(test, set($TARGET_SET)) except attr(tags, 'manual', set($TARGET_SET)) except filter('.*__internal__.*', set($TARGET_SET))" 2>/dev/null || true)
+    TESTS=$(bazel query "kind(test, set($TARGET_SET)) except attr(tags, 'manual', set($TARGET_SET)) except filter('.*__internal__.*', set($TARGET_SET))" 2>&1 | tee /dev/stderr | grep '^//' || true)
     echo "--- [diff-build] tests to run: $(echo "$TESTS" | grep -c . || echo 0)"
 
     # Identify all buildable rule targets that are NOT tests, NOT manual, and not internal generated targets
     echo "--- [diff-build] querying for build targets..."
-    BUILDS=$(bazel query "kind(rule, set($TARGET_SET)) except kind(test, set($TARGET_SET)) except attr(tags, 'manual', set($TARGET_SET)) except filter('.*__internal__.*', set($TARGET_SET))" 2>/dev/null || true)
+    BUILDS=$(bazel query "kind(rule, set($TARGET_SET)) except kind(test, set($TARGET_SET)) except attr(tags, 'manual', set($TARGET_SET)) except filter('.*__internal__.*', set($TARGET_SET))" 2>&1 | tee /dev/stderr | grep '^//' || true)
     echo "--- [diff-build] targets to build: $(echo "$BUILDS" | grep -c . || echo 0)"
 
     if [ -n "$BUILDS" ]; then
