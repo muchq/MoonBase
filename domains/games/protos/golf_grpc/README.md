@@ -1,6 +1,3 @@
-> [!WARNING]
-> **Builds disabled.** This package is commented out until gRPC supports prebuilt protoc and Bazel 9.
-
 # Golf gRPC Protos
 
 This directory contains the protobuf definitions for the golf gRPC service, along with generated C++ proto and gRPC stub targets.

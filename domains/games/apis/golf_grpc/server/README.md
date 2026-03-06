@@ -1,6 +1,3 @@
-> [!WARNING]
-> **Builds disabled.** This package is commented out until gRPC supports prebuilt protoc and Bazel 9.
-
 # Golf GRPC Service
 
 ### Build

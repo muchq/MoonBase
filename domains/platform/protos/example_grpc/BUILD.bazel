@@ -1,4 +1,4 @@
-# load("@com_github_grpc_grpc//bazel:cc_grpc_library.bzl", "cc_grpc_library")
+load("@com_github_grpc_grpc//bazel:cc_grpc_library.bzl", "cc_grpc_library")
 load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 load("@io_bazel_rules_go//go:def.bzl", "go_library")
 load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
@@ -29,14 +29,14 @@ cc_proto_library(
     deps = [":hello_proto"],
 )
 
-# cc_grpc_library(
-#     name = "example_grpc_cc_grpc",
-#     srcs = [":hello_proto"],
-#     generate_mocks = True,
-#     grpc_only = True,
-#     deps = [":example_grpc_cc_proto"],
-# )
-#
+cc_grpc_library(
+    name = "example_grpc_cc_grpc",
+    srcs = [":hello_proto"],
+    generate_mocks = True,
+    grpc_only = True,
+    deps = [":example_grpc_cc_proto"],
+)
+
 # gazelle:ignore
 go_proto_library(
     name = "example_service_go_proto",

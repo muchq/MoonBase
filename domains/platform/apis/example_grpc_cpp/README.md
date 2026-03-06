@@ -1,6 +1,3 @@
-> [!WARNING]
-> **Builds disabled.** This package is commented out until gRPC supports prebuilt protoc and Bazel 9.
-
 # Example Service - C++ Implementation
 
 This directory contains a C++ implementation of an example service. It serves as a reference implementation for building C++ services in this repository.
