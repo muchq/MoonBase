@@ -1,3 +1,6 @@
+> [!WARNING]
+> **Builds disabled.** This package is commented out until gRPC supports prebuilt protoc and Bazel 9.
+
 # Golf Service - C++ Implementation
 
 This directory contains the core C++ implementation of the golf service. It provides the backend functionality for golf game management and scoring.

@@ -21,32 +21,33 @@ public class PromotionWithCheckmateDetector implements MotifDetector {
   @Override
   public List<GameFeatures.MotifOccurrence> detect(List<PositionContext> positions) {
     List<GameFeatures.MotifOccurrence> occurrences = new ArrayList<>();
+    if (positions.isEmpty()) return occurrences;
 
-    for (PositionContext ctx : positions) {
-      String move = ctx.lastMove();
-      if (move == null || !move.contains("=") || !move.endsWith("#")) continue;
+    // Checkmate is always the last move of a game.
+    PositionContext ctx = positions.get(positions.size() - 1);
+    String move = ctx.lastMove();
+    if (move == null || !move.contains("=") || !move.endsWith("#")) return occurrences;
 
-      if (PromotionWithCheckDetector.promotedPieceDeliversCheck(ctx)) {
-        String placement = ctx.fen().split(" ")[0];
-        int[][] board = BoardUtils.parsePlacement(placement);
-        boolean moverIsWhite = !ctx.whiteToMove();
-        int[] dest = BoardUtils.parsePromotionDestination(move);
-        int[] kingPos = BoardUtils.findKing(board, !moverIsWhite);
+    if (PromotionWithCheckDetector.promotedPieceDeliversCheck(ctx)) {
+      String placement = ctx.fen().split(" ")[0];
+      int[][] board = BoardUtils.parsePlacement(placement);
+      boolean moverIsWhite = !ctx.whiteToMove();
+      int[] dest = BoardUtils.parsePromotionDestination(move);
+      int[] kingPos = BoardUtils.findKing(board, !moverIsWhite);
 
-        String attacker =
-            dest[0] != -1
-                ? BoardUtils.pieceNotation(board[dest[0]][dest[1]], dest[0], dest[1])
-                : null;
-        String target =
-            kingPos[0] != -1
-                ? BoardUtils.pieceNotation(board[kingPos[0]][kingPos[1]], kingPos[0], kingPos[1])
-                : null;
+      String attacker =
+          dest[0] != -1
+              ? BoardUtils.pieceNotation(board[dest[0]][dest[1]], dest[0], dest[1])
+              : null;
+      String target =
+          kingPos[0] != -1
+              ? BoardUtils.pieceNotation(board[kingPos[0]][kingPos[1]], kingPos[0], kingPos[1])
+              : null;
 
-        GameFeatures.MotifOccurrence occ =
-            GameFeatures.MotifOccurrence.withMate(
-                ctx, "Promotion with checkmate at move " + ctx.moveNumber(), attacker, target);
-        if (occ != null) occurrences.add(occ);
-      }
+      GameFeatures.MotifOccurrence occ =
+          GameFeatures.MotifOccurrence.withMate(
+              ctx, "Promotion with checkmate at move " + ctx.moveNumber(), attacker, target);
+      if (occ != null) occurrences.add(occ);
     }
 
     return occurrences;

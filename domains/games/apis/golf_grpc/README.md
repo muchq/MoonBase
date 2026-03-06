@@ -1,3 +1,6 @@
+> [!WARNING]
+> **Builds disabled.** This package is commented out until gRPC supports prebuilt protoc and Bazel 9.
+
 # Golf gRPC Service - C++ Implementation
 
 This directory contains the gRPC service implementation for the golf application. It provides the remote procedure call interface for clients to interact with the golf service.
