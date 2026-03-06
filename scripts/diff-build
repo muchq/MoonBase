@@ -10,9 +10,13 @@ CURRENT_REF=$(git rev-parse --abbrev-ref HEAD)
 # 1. Formatting Check (Keep this, it's good practice)
 bazel test //:buildifier_test || { echo "Run bazel run //:buildifier_fix"; exit 1; }
 
-# Fetch the bazel-diff jar and resolve its path
-bazel build @bazel-diff//jar
-BAZEL_DIFF_JAR=$(bazel info output_base)/external/+http_jar+bazel-diff/jar/downloaded.jar
+# Download bazel-diff jar if not already cached
+BAZEL_DIFF_VERSION="17.0.2"
+BAZEL_DIFF_JAR="/tmp/bazel-diff-${BAZEL_DIFF_VERSION}.jar"
+if [ ! -f "$BAZEL_DIFF_JAR" ]; then
+  curl -fsSL -o "$BAZEL_DIFF_JAR" \
+    "https://github.com/Tinder/bazel-diff/releases/download/${BAZEL_DIFF_VERSION}/bazel-diff_deploy.jar"
+fi
 WORKSPACE_ROOT=$(bazel info workspace)
 
 # 2. If Bazel config changed, bazel-diff isn't reliable; do full build and test
