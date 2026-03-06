@@ -10,14 +10,17 @@ CURRENT_REF=$(git rev-parse --abbrev-ref HEAD)
 # 1. Formatting Check (Keep this, it's good practice)
 bazel test //:buildifier_test || { echo "Run bazel run //:buildifier_fix"; exit 1; }
 
-# Download bazel-diff jar if not already cached
-BAZEL_DIFF_VERSION="17.0.2"
-BAZEL_DIFF_JAR="/tmp/bazel-diff-${BAZEL_DIFF_VERSION}.jar"
-if [ ! -f "$BAZEL_DIFF_JAR" ]; then
-  curl -fsSL -o "$BAZEL_DIFF_JAR" \
-    "https://github.com/Tinder/bazel-diff/releases/download/${BAZEL_DIFF_VERSION}/bazel-diff_deploy.jar"
-fi
+# Fetch the bazel-diff jar and resolve its path
+echo "--- [diff-build] fetching bazel-diff jar..."
+bazel build @bazel-diff//jar
+BAZEL_DIFF_JAR=$(bazel info output_base)/external/+http_jar+bazel-diff/jar/downloaded.jar
+echo "--- [diff-build] BAZEL_DIFF_JAR=$BAZEL_DIFF_JAR"
+ls -lh "$BAZEL_DIFF_JAR" || { echo "ERROR: jar not found at $BAZEL_DIFF_JAR"; exit 1; }
+
 WORKSPACE_ROOT=$(bazel info workspace)
+echo "--- [diff-build] WORKSPACE_ROOT=$WORKSPACE_ROOT"
+echo "--- [diff-build] BASE_REVISION=$BASE_REVISION  CURRENT_REF=$CURRENT_REF"
+echo "--- [diff-build] java=$(which java 2>/dev/null || echo 'NOT FOUND')  version=$(java -version 2>&1 | head -1 || echo 'N/A')"
 
 # 2. If Bazel config changed, bazel-diff isn't reliable; do full build and test
 BAZEL_CONFIG_CHANGES=$(git diff --name-only "$BASE_REVISION" HEAD -- .bazelversion .bazelrc 2>/dev/null || echo "")
@@ -29,25 +32,31 @@ if [ -n "$BAZEL_CONFIG_CHANGES" ]; then
 fi
 
 # 3. Generate Hashes for Base
+echo "--- [diff-build] generating hashes for base ($BASE_REVISION)..."
 git checkout "$BASE_REVISION" --quiet --force
 java -jar "$BAZEL_DIFF_JAR" generate-hashes \
     -w "$WORKSPACE_ROOT" \
     -b "$(which bazel)" \
     /tmp/starting_hashes.json
+echo "--- [diff-build] base hashes done ($(wc -c < /tmp/starting_hashes.json) bytes)"
 
 # 4. Generate Hashes for Current
+echo "--- [diff-build] generating hashes for current ($CURRENT_REF)..."
 git checkout "$CURRENT_REF" --quiet --force
 java -jar "$BAZEL_DIFF_JAR" generate-hashes \
     -w "$WORKSPACE_ROOT" \
     -b "$(which bazel)" \
     /tmp/final_hashes.json
+echo "--- [diff-build] current hashes done ($(wc -c < /tmp/final_hashes.json) bytes)"
 
 # 5. Get Impacted Targets
+echo "--- [diff-build] computing impacted targets..."
 java -jar "$BAZEL_DIFF_JAR" get-impacted-targets \
     -w "$WORKSPACE_ROOT" \
     -sh /tmp/starting_hashes.json \
     -fh /tmp/final_hashes.json \
     -o /tmp/impacted_targets.txt
+echo "--- [diff-build] impacted targets: $(wc -l < /tmp/impacted_targets.txt) targets"
 
 # 6. Smart Build/Test using Bazel Query
 # Instead of complex bash loops, we use Bazel's own query engine to
@@ -56,13 +65,24 @@ if [ -s /tmp/impacted_targets.txt ]; then
     TARGET_SET=$(tr '\n' ' ' < /tmp/impacted_targets.txt)
 
     # Identify all tests that are not tagged 'manual' and not internal generated targets
+    echo "--- [diff-build] querying for tests..."
     TESTS=$(bazel query "kind(test, set($TARGET_SET)) except attr(tags, 'manual', set($TARGET_SET)) except filter('.*__internal__.*', set($TARGET_SET))" 2>/dev/null || true)
+    echo "--- [diff-build] tests to run: $(echo "$TESTS" | grep -c . || echo 0)"
 
     # Identify all buildable rule targets that are NOT tests, NOT manual, and not internal generated targets
+    echo "--- [diff-build] querying for build targets..."
     BUILDS=$(bazel query "kind(rule, set($TARGET_SET)) except kind(test, set($TARGET_SET)) except attr(tags, 'manual', set($TARGET_SET)) except filter('.*__internal__.*', set($TARGET_SET))" 2>/dev/null || true)
+    echo "--- [diff-build] targets to build: $(echo "$BUILDS" | grep -c . || echo 0)"
 
-    [ -n "$BUILDS" ] && bazel build --skip_incompatible_explicit_targets $BUILDS
-    [ -n "$TESTS" ] && bazel test --skip_incompatible_explicit_targets $TESTS
+    if [ -n "$BUILDS" ]; then
+      echo "--- [diff-build] running bazel build..."
+      bazel build --skip_incompatible_explicit_targets $BUILDS
+    fi
+    if [ -n "$TESTS" ]; then
+      echo "--- [diff-build] running bazel test..."
+      bazel test --skip_incompatible_explicit_targets $TESTS
+    fi
 else
     echo "No changes detected."
 fi
+echo "--- [diff-build] done."
