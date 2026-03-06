@@ -28,11 +28,14 @@ public class BackRankMateDetector implements MotifDetector {
   @Override
   public List<GameFeatures.MotifOccurrence> detect(List<PositionContext> positions) {
     List<GameFeatures.MotifOccurrence> occurrences = new ArrayList<>();
+    if (positions.isEmpty()) return occurrences;
 
-    for (PositionContext ctx : positions) {
-      String move = ctx.lastMove();
-      if (move == null || !move.endsWith("#")) continue;
+    // Checkmate is always the last move of a game.
+    PositionContext ctx = positions.get(positions.size() - 1);
+    String move = ctx.lastMove();
+    if (move == null || !move.endsWith("#")) return occurrences;
 
+    {
       String placement = ctx.fen().split(" ")[0];
       int[][] board = BoardUtils.parsePlacement(placement);
 
@@ -41,7 +44,7 @@ public class BackRankMateDetector implements MotifDetector {
       int backRankRow = loserIsWhite ? 7 : 0; // rank 1 for white (row 7), rank 8 for black (row 0)
 
       int[] kingPos = BoardUtils.findKing(board, loserIsWhite);
-      if (kingPos[0] == -1 || kingPos[0] != backRankRow) continue;
+      if (kingPos[0] == -1 || kingPos[0] != backRankRow) return occurrences;
 
       // Check that at least one adjacent-rank escape square is blocked by own piece
       int escapeRankRow =
@@ -56,7 +59,7 @@ public class BackRankMateDetector implements MotifDetector {
           break;
         }
       }
-      if (!blockedByOwnPiece) continue;
+      if (!blockedByOwnPiece) return occurrences;
 
       boolean moverIsWhite = !ctx.whiteToMove();
       int[] checker = BoardUtils.findCheckingPiece(board, moverIsWhite);

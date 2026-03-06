@@ -1,3 +1,6 @@
+> [!WARNING]
+> **Builds disabled.** This package is commented out until gRPC supports prebuilt protoc and Bazel 9.
+
 # Document Database Client - C++ Implementation
 
 This directory contains a C++ client implementation for interacting with the document database system. It provides a high-performance interface for C++ applications to access the document database.

@@ -29,17 +29,20 @@ public class SmotheredMateDetector implements MotifDetector {
   @Override
   public List<GameFeatures.MotifOccurrence> detect(List<PositionContext> positions) {
     List<GameFeatures.MotifOccurrence> occurrences = new ArrayList<>();
+    if (positions.isEmpty()) return occurrences;
 
-    for (PositionContext ctx : positions) {
-      String move = ctx.lastMove();
-      if (move == null || !move.endsWith("#")) continue;
+    // Checkmate is always the last move of a game.
+    PositionContext ctx = positions.get(positions.size() - 1);
+    String move = ctx.lastMove();
+    if (move == null || !move.endsWith("#")) return occurrences;
 
+    {
       String placement = ctx.fen().split(" ")[0];
       int[][] board = BoardUtils.parsePlacement(placement);
 
       boolean loserIsWhite = ctx.whiteToMove();
       int[] kingPos = BoardUtils.findKing(board, loserIsWhite);
-      if (kingPos[0] == -1) continue;
+      if (kingPos[0] == -1) return occurrences;
 
       // Check that a knight of the mating side attacks the king
       boolean matedByKnight = false;
@@ -57,10 +60,10 @@ public class SmotheredMateDetector implements MotifDetector {
         }
         if (matedByKnight) break;
       }
-      if (!matedByKnight) continue;
+      if (!matedByKnight) return occurrences;
 
       // Confirm king is smothered: all 8 adjacent squares are off-board or own pieces
-      if (!isSmothered(board, kingPos[0], kingPos[1], loserIsWhite)) continue;
+      if (!isSmothered(board, kingPos[0], kingPos[1], loserIsWhite)) return occurrences;
 
       String attacker = BoardUtils.pieceNotation(board[knightR][knightC], knightR, knightC);
       String target =

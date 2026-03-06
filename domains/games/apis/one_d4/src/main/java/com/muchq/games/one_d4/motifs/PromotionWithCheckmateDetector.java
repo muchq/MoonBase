@@ -21,12 +21,14 @@ public class PromotionWithCheckmateDetector implements MotifDetector {
   @Override
   public List<GameFeatures.MotifOccurrence> detect(List<PositionContext> positions) {
     List<GameFeatures.MotifOccurrence> occurrences = new ArrayList<>();
+    if (positions.isEmpty()) return occurrences;
 
-    for (PositionContext ctx : positions) {
-      String move = ctx.lastMove();
-      if (move == null || !move.contains("=") || !move.endsWith("#")) continue;
+    // Checkmate is always the last move of a game.
+    PositionContext ctx = positions.get(positions.size() - 1);
+    String move = ctx.lastMove();
+    if (move == null || !move.contains("=") || !move.endsWith("#")) return occurrences;
 
-      if (PromotionWithCheckDetector.promotedPieceDeliversCheck(ctx)) {
+    if (PromotionWithCheckDetector.promotedPieceDeliversCheck(ctx)) {
         String placement = ctx.fen().split(" ")[0];
         int[][] board = BoardUtils.parsePlacement(placement);
         boolean moverIsWhite = !ctx.whiteToMove();
@@ -46,7 +48,6 @@ public class PromotionWithCheckmateDetector implements MotifDetector {
             GameFeatures.MotifOccurrence.withMate(
                 ctx, "Promotion with checkmate at move " + ctx.moveNumber(), attacker, target);
         if (occ != null) occurrences.add(occ);
-      }
     }
 
     return occurrences;
