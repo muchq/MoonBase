@@ -29,25 +29,25 @@ public class PromotionWithCheckmateDetector implements MotifDetector {
     if (move == null || !move.contains("=") || !move.endsWith("#")) return occurrences;
 
     if (PromotionWithCheckDetector.promotedPieceDeliversCheck(ctx)) {
-        String placement = ctx.fen().split(" ")[0];
-        int[][] board = BoardUtils.parsePlacement(placement);
-        boolean moverIsWhite = !ctx.whiteToMove();
-        int[] dest = BoardUtils.parsePromotionDestination(move);
-        int[] kingPos = BoardUtils.findKing(board, !moverIsWhite);
+      String placement = ctx.fen().split(" ")[0];
+      int[][] board = BoardUtils.parsePlacement(placement);
+      boolean moverIsWhite = !ctx.whiteToMove();
+      int[] dest = BoardUtils.parsePromotionDestination(move);
+      int[] kingPos = BoardUtils.findKing(board, !moverIsWhite);
 
-        String attacker =
-            dest[0] != -1
-                ? BoardUtils.pieceNotation(board[dest[0]][dest[1]], dest[0], dest[1])
-                : null;
-        String target =
-            kingPos[0] != -1
-                ? BoardUtils.pieceNotation(board[kingPos[0]][kingPos[1]], kingPos[0], kingPos[1])
-                : null;
+      String attacker =
+          dest[0] != -1
+              ? BoardUtils.pieceNotation(board[dest[0]][dest[1]], dest[0], dest[1])
+              : null;
+      String target =
+          kingPos[0] != -1
+              ? BoardUtils.pieceNotation(board[kingPos[0]][kingPos[1]], kingPos[0], kingPos[1])
+              : null;
 
-        GameFeatures.MotifOccurrence occ =
-            GameFeatures.MotifOccurrence.withMate(
-                ctx, "Promotion with checkmate at move " + ctx.moveNumber(), attacker, target);
-        if (occ != null) occurrences.add(occ);
+      GameFeatures.MotifOccurrence occ =
+          GameFeatures.MotifOccurrence.withMate(
+              ctx, "Promotion with checkmate at move " + ctx.moveNumber(), attacker, target);
+      if (occ != null) occurrences.add(occ);
     }
 
     return occurrences;
