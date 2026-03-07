@@ -33,10 +33,12 @@ jobs:
         run: |
           GJF_JAR="/tmp/google-java-format.jar"
           JAVA_FILES=$(find . -name "*.java" -not -path "*/bazel-*" | sort)
+          FILE_COUNT=$(echo "$JAVA_FILES" | grep -c . || echo 0)
           if [ -z "$JAVA_FILES" ]; then
             echo "No Java files found."
             exit 0
           fi
+          echo "Checking $FILE_COUNT Java files..."
           java \
             --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED \
             --add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED \
@@ -44,6 +46,7 @@ jobs:
             --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED \
             --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED \
             -jar "$GJF_JAR" --dry-run --set-exit-if-changed $JAVA_FILES
+          echo "All $FILE_COUNT files correctly formatted."
 
   build-and-test:
     runs-on: ubuntu-latest
