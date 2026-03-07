@@ -46,8 +46,8 @@ public class GameReplayerTest {
     assertThat(positions.get(1).moveNumber()).isEqualTo(1);
     assertThat(positions.get(1).whiteToMove()).isFalse();
 
-    // After 1... e5 - still move 1, white to move
-    assertThat(positions.get(2).moveNumber()).isEqualTo(1);
+    // After 1... e5 - move 2 (incremented after black moves), white to move
+    assertThat(positions.get(2).moveNumber()).isEqualTo(2);
     assertThat(positions.get(2).whiteToMove()).isTrue();
 
     // After 2. Nf3 - still move 2, black to move
@@ -135,15 +135,6 @@ public class GameReplayerTest {
   }
 
   @Test
-  public void testStripsNestedVariations() {
-    // Nested variations must not leak moves into the main line
-    List<PositionContext> positions =
-        replayer.replay("1. e4 e5 (1... c5 2. Nf3 (2. d4 cxd4) 2... Nc6) 2. Nf3");
-
-    assertThat(positions).hasSize(4); // initial + 3 moves only (e4, e5, Nf3)
-  }
-
-  @Test
   public void testStripsNagAnnotations() {
     List<PositionContext> positions = replayer.replay("1. e4 $1 e5 $2 2. Nf3 $10");
 
@@ -158,8 +149,8 @@ public class GameReplayerTest {
   }
 
   @Test
-  public void testMoveNumbers() {
-    List<PositionContext> positions = replayer.replay("1. e4 e5 2. Nf3 Nc6");
+  public void testMoveNumbersWithoutSpaces() {
+    List<PositionContext> positions = replayer.replay("1.e4 e5 2.Nf3 Nc6");
 
     assertThat(positions).hasSize(5);
   }

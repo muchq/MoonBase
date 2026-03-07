@@ -7,8 +7,6 @@ import com.muchq.games.chessql.ast.InExpr;
 import com.muchq.games.chessql.ast.MotifExpr;
 import com.muchq.games.chessql.ast.NotExpr;
 import com.muchq.games.chessql.ast.OrExpr;
-import com.muchq.games.chessql.ast.OrderByClause;
-import com.muchq.games.chessql.ast.SequenceExpr;
 import com.muchq.games.chessql.lexer.Lexer;
 import com.muchq.games.chessql.lexer.Token;
 import com.muchq.games.chessql.lexer.TokenType;
@@ -24,18 +22,12 @@ public class Parser {
     this.pos = 0;
   }
 
-  public static ParsedQuery parse(String input) {
+  public static Expr parse(String input) {
     List<Token> tokens = new Lexer(input).tokenize();
     Parser parser = new Parser(tokens);
     Expr expr = parser.parseExpr();
-    OrderByClause orderBy = null;
-    if (parser.check(TokenType.ORDER)) {
-      parser.advance();
-      parser.expect(TokenType.BY);
-      orderBy = parser.parseOrderByClause();
-    }
     parser.expect(TokenType.EOF);
-    return new ParsedQuery(expr, orderBy);
+    return expr;
   }
 
   public Expr parseExpr() {
@@ -88,10 +80,6 @@ public class Parser {
       return parseMotif();
     }
 
-    if (check(TokenType.SEQUENCE)) {
-      return parseSequence();
-    }
-
     if (check(TokenType.IDENTIFIER)) {
       return parseFieldExpr();
     }
@@ -105,34 +93,6 @@ public class Parser {
     Token name = expect(TokenType.IDENTIFIER);
     expect(TokenType.RPAREN);
     return new MotifExpr(name.value());
-  }
-
-  private Expr parseSequence() {
-    advance(); // consume 'sequence'
-    expect(TokenType.LPAREN);
-    List<String> names = new ArrayList<>();
-    names.add(expect(TokenType.IDENTIFIER).value());
-    while (check(TokenType.THEN)) {
-      advance();
-      names.add(expect(TokenType.IDENTIFIER).value());
-    }
-    expect(TokenType.RPAREN);
-    return new SequenceExpr(names);
-  }
-
-  private OrderByClause parseOrderByClause() {
-    expect(TokenType.MOTIF_COUNT);
-    expect(TokenType.LPAREN);
-    Token name = expect(TokenType.IDENTIFIER);
-    expect(TokenType.RPAREN);
-    boolean ascending = true;
-    if (check(TokenType.DESC)) {
-      advance();
-      ascending = false;
-    } else if (check(TokenType.ASC)) {
-      advance();
-    }
-    return new OrderByClause(name.value(), ascending);
   }
 
   private Expr parseFieldExpr() {

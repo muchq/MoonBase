@@ -13,7 +13,7 @@ public class InMemoryIndexQueueTest {
   public void testEnqueueAndPoll() {
     InMemoryIndexQueue queue = new InMemoryIndexQueue();
     IndexMessage message =
-        new IndexMessage(UUID.randomUUID(), "hikaru", "chess.com", "2024-01", "2024-01", false);
+        new IndexMessage(UUID.randomUUID(), "hikaru", "chess.com", "2024-01", "2024-01");
 
     queue.enqueue(message);
     assertThat(queue.size()).isEqualTo(1);
@@ -36,10 +36,8 @@ public class InMemoryIndexQueueTest {
     InMemoryIndexQueue queue = new InMemoryIndexQueue();
     assertThat(queue.size()).isEqualTo(0);
 
-    queue.enqueue(
-        new IndexMessage(UUID.randomUUID(), "a", "chess.com", "2024-01", "2024-01", false));
-    queue.enqueue(
-        new IndexMessage(UUID.randomUUID(), "b", "chess.com", "2024-01", "2024-01", false));
+    queue.enqueue(new IndexMessage(UUID.randomUUID(), "a", "chess.com", "2024-01", "2024-01"));
+    queue.enqueue(new IndexMessage(UUID.randomUUID(), "b", "chess.com", "2024-01", "2024-01"));
     assertThat(queue.size()).isEqualTo(2);
   }
 }

@@ -1,4 +1,4 @@
-use rmcp::model::{CallToolRequestParams, Content, RawContent};
+use rmcp::model::{CallToolRequestParam, Content, RawContent};
 use rmcp::service::RunningService;
 use rmcp::transport::TokioChildProcess;
 use rmcp::{RoleClient, ServiceExt};
@@ -52,11 +52,10 @@ impl McpClient {
         name: &str,
         arguments: serde_json::Value,
     ) -> Result<String, McpError> {
-        let params = CallToolRequestParams {
+        let params = CallToolRequestParam {
             name: name.to_string().into(),
             arguments: arguments.as_object().cloned(),
             task: None,
-            meta: None,
         };
 
         let result = self

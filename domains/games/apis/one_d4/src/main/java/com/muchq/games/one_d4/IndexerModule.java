@@ -8,25 +8,18 @@ import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.one_d4.db.DataSourceFactory;
 import com.muchq.games.one_d4.db.GameFeatureDao;
 import com.muchq.games.one_d4.db.GameFeatureStore;
-import com.muchq.games.one_d4.db.IndexedPeriodDao;
-import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestDao;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.db.Migration;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.GameReplayer;
 import com.muchq.games.one_d4.engine.PgnParser;
-import com.muchq.games.one_d4.motifs.AttackDetector;
-import com.muchq.games.one_d4.motifs.BackRankMateDetector;
-import com.muchq.games.one_d4.motifs.CheckDetector;
 import com.muchq.games.one_d4.motifs.CrossPinDetector;
+import com.muchq.games.one_d4.motifs.DiscoveredAttackDetector;
+import com.muchq.games.one_d4.motifs.ForkDetector;
 import com.muchq.games.one_d4.motifs.MotifDetector;
 import com.muchq.games.one_d4.motifs.PinDetector;
-import com.muchq.games.one_d4.motifs.PromotionDetector;
-import com.muchq.games.one_d4.motifs.PromotionWithCheckDetector;
-import com.muchq.games.one_d4.motifs.PromotionWithCheckmateDetector;
 import com.muchq.games.one_d4.motifs.SkewerDetector;
-import com.muchq.games.one_d4.motifs.SmotheredMateDetector;
 import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.games.one_d4.queue.IndexQueue;
 import com.muchq.games.one_d4.worker.IndexWorker;
@@ -90,14 +83,6 @@ public class IndexerModule {
   }
 
   @Context
-  public IndexedPeriodStore indexedPeriodStore(
-      DataSource dataSource,
-      @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl) {
-    boolean useH2 = jdbcUrl.contains(":h2:");
-    return new IndexedPeriodDao(dataSource, useH2);
-  }
-
-  @Context
   public IndexQueue indexQueue() {
     return new InMemoryIndexQueue();
   }
@@ -112,14 +97,9 @@ public class IndexerModule {
     return List.of(
         new PinDetector(),
         new CrossPinDetector(),
+        new ForkDetector(),
         new SkewerDetector(),
-        new AttackDetector(),
-        new CheckDetector(),
-        new PromotionDetector(),
-        new PromotionWithCheckDetector(),
-        new PromotionWithCheckmateDetector(),
-        new BackRankMateDetector(),
-        new SmotheredMateDetector());
+        new DiscoveredAttackDetector());
   }
 
   @Context
@@ -144,9 +124,9 @@ public class IndexerModule {
       FeatureExtractor featureExtractor,
       IndexingRequestStore requestStore,
       GameFeatureStore gameFeatureStore,
-      IndexedPeriodStore periodStore) {
+      ObjectMapper objectMapper) {
     return new IndexWorker(
-        chessClient, featureExtractor, requestStore, gameFeatureStore, periodStore);
+        chessClient, featureExtractor, requestStore, gameFeatureStore, objectMapper);
   }
 
   @Context

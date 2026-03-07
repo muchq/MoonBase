@@ -48,8 +48,8 @@ MCP tools call the indexer's REST API over HTTP. The indexer runs as a separate 
 ```
 ┌────────────────────┐       HTTP        ┌──────────────────┐
 │    mcpserver       │ ────────────────► │    indexer        │
-│  IndexGamesTool ───┤  POST /v1/index  │  IndexController  │
-│  QueryGamesTool ───┤  POST /v1/query  │  QueryController  │
+│  IndexGamesTool ───┤  POST /index      │  IndexController  │
+│  QueryGamesTool ───┤  POST /query      │  QueryController  │
 └────────────────────┘                   └──────────────────┘
 ```
 
@@ -141,7 +141,7 @@ Search indexed games using ChessQL.
   "properties": {
     "query": {
       "type": "string",
-      "description": "A ChessQL query string. Examples: 'white.elo >= 2500 AND motif(fork)', 'motif(pin) OR motif(skewer)', 'eco = \"B90\" AND NOT motif(fork)'. Available motifs: pin, cross_pin, fork, skewer, discovered_attack, check, checkmate, promotion, promotion_with_check, promotion_with_checkmate. Available fields: white.elo, black.elo, white.username, black.username, time.class, eco, result, num.moves, platform."
+      "description": "A ChessQL query string. Examples: 'white.elo >= 2500 AND motif(fork)', 'motif(pin) OR motif(skewer)', 'eco = \"B90\" AND NOT motif(fork)'. Available motifs: pin, cross_pin, fork, skewer, discovered_attack. Available fields: white.elo, black.elo, white.username, black.username, time.class, eco, result, num.moves, platform."
     },
     "limit": {
       "type": "integer",
@@ -256,8 +256,7 @@ public class IndexGamesTool implements McpTool {
     public String getDescription() {
         return "Index a chess player's games for tactical motif detection. "
              + "Fetches games from chess.com, replays positions, and detects "
-             + "pins, forks, skewers, discovered attacks, cross-pins, checks, "
-             + "checkmates, and promotions (including promotion with check/checkmate). "
+             + "pins, forks, skewers, discovered attacks, and cross-pins. "
              + "Returns a request ID to check status with index_status.";
     }
 
@@ -357,16 +356,16 @@ public class IndexerHttpClient {
     private final String baseUrl; // e.g. http://localhost:8080
 
     public IndexResult index(String player, String platform, String startMonth, String endMonth) {
-        // POST http://localhost:8080/v1/index
+        // POST http://localhost:8080/index
         // Body: {"player":"...","platform":"...","startMonth":"...","endMonth":"..."}
     }
 
     public IndexResult getStatus(UUID requestId) {
-        // GET http://localhost:8080/v1/index/{id}
+        // GET http://localhost:8080/index/{id}
     }
 
     public QueryResult query(String chessql, int limit) {
-        // POST http://localhost:8080/v1/query
+        // POST http://localhost:8080/query
         // Body: {"query":"...","limit":N,"offset":0}
     }
 }

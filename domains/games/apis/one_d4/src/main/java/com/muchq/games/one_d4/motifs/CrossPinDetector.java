@@ -19,15 +19,14 @@ public class CrossPinDetector implements MotifDetector {
 
     for (PositionContext ctx : positions) {
       String placement = ctx.fen().split(" ")[0];
-      int[][] board = BoardUtils.parsePlacement(placement);
+      int[][] board = PinDetector.parsePlacement(placement);
 
       // A cross-pin occurs when a piece is pinned along two different directions
       // simultaneously (e.g., pinned by a rook on a file AND a bishop on a diagonal).
       if (hasCrossPin(board, ctx.whiteToMove())) {
-        GameFeatures.MotifOccurrence occ =
-            GameFeatures.MotifOccurrence.from(
-                ctx, "Cross-pin detected at move " + ctx.moveNumber());
-        if (occ != null) occurrences.add(occ);
+        occurrences.add(
+            new GameFeatures.MotifOccurrence(
+                ctx.moveNumber(), "Cross-pin detected at move " + ctx.moveNumber()));
       }
     }
 

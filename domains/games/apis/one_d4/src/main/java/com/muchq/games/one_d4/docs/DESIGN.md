@@ -52,12 +52,12 @@ com.muchq.indexer/
   IndexerModule.java                @Factory — wires all beans
 
   api/
-    IndexController.java            POST /v1/index, GET /v1/index/{id}
-    QueryController.java            POST /v1/query
+    IndexController.java            POST /index, GET /index/{id}
+    QueryController.java            POST /query
 
   api/dto/
     IndexRequest.java               Inbound: player, platform, month range
-    IndexResponse.java              Outbound: id, player, platform, startMonth, endMonth, status, gamesIndexed, errorMessage
+    IndexResponse.java              Outbound: id, status, gamesIndexed, error
     QueryRequest.java               Inbound: ChessQL query string, limit, offset
     QueryResponse.java              Outbound: list of GameFeatureRow, count
     GameFeatureRow.java             Projection of game_features for API consumers
@@ -85,8 +85,8 @@ com.muchq.indexer/
   engine/model/
     ParsedGame.java                 Headers map + movetext string
     GameFeatures.java               Set<Motif>, numMoves, occurrence details
-    Motif.java                      Enum: PIN, CROSS_PIN, FORK, SKEWER, DISCOVERED_ATTACK, CHECK, CHECKMATE, PROMOTION, PROMOTION_WITH_CHECK, PROMOTION_WITH_CHECKMATE
-    PositionContext.java            moveNumber, FEN, whiteToMove, lastMove
+    Motif.java                      Enum: PIN, CROSS_PIN, FORK, SKEWER, DISCOVERED_ATTACK
+    PositionContext.java            moveNumber, FEN, whiteToMove
 
   motifs/
     MotifDetector.java              Interface: motif(), detect(positions)
@@ -95,11 +95,6 @@ com.muchq.indexer/
     ForkDetector.java               Piece attacking 2+ valuable enemy pieces
     SkewerDetector.java             Sliding attack through a more valuable piece
     DiscoveredAttackDetector.java   Piece moves to reveal sliding attacker behind it
-    CheckDetector.java              Move notation ends with '+'
-    CheckmateDetector.java          Move notation ends with '#'
-    PromotionDetector.java          Move notation contains '=' without check/mate
-    PromotionWithCheckDetector.java Move notation contains '=' and ends with '+'
-    PromotionWithCheckmateDetector.java Move notation contains '=' and ends with '#'
 
   chessql/
     lexer/   TokenType, Token, Lexer
@@ -112,7 +107,7 @@ com.muchq.indexer/
 
 ### Indexing
 
-1. Client sends `POST /v1/index` with player, platform, month range
+1. Client sends `POST /index` with player, platform, month range
 2. `IndexController` creates a row in `indexing_requests` (status=PENDING), enqueues an `IndexMessage`
 3. `IndexWorkerLifecycle` daemon thread polls the queue
 4. `IndexWorker.process()`:
@@ -125,7 +120,7 @@ com.muchq.indexer/
 
 ### Querying
 
-1. Client sends `POST /v1/query` with a ChessQL string, limit, offset
+1. Client sends `POST /query` with a ChessQL string, limit, offset
 2. `QueryController` parses ChessQL → AST → compiles to parameterized SQL
 3. `GameFeatureDao.query()` executes the SQL against `game_features`
 4. Results mapped to API DTOs and returned
@@ -164,10 +159,15 @@ com.muchq.indexer/
 | result                | VARCHAR(20)   | win, checkmated, stalemate, etc.       |
 | played_at             | TIMESTAMP     |                                        |
 | num_moves             | INT           |                                        |
-| indexed_at            | TIMESTAMP     | When this record was indexed           |
+| has_pin               | BOOLEAN       | Indexed for fast query                 |
+| has_cross_pin         | BOOLEAN       |                                        |
+| has_fork              | BOOLEAN       |                                        |
+| has_skewer            | BOOLEAN       |                                        |
+| has_discovered_attack | BOOLEAN       |                                        |
+| motifs_json           | JSONB         | Detailed occurrence data               |
 | pgn                   | TEXT          | Full PGN for re-analysis               |
 
-Motif data is stored separately in `motif_occurrences` (see below) and queried via EXISTS subqueries.
+Boolean columns enable fast indexed queries. JSONB stores detailed motif occurrence data (move numbers, descriptions) for drill-down.
 
 ## Configuration
 

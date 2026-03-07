@@ -4,8 +4,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
@@ -22,13 +20,12 @@ public class IndexingRequestDao implements IndexingRequestStore {
   }
 
   @Override
-  public UUID create(
-      String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
+  public UUID create(String player, String platform, String startMonth, String endMonth) {
     UUID id = UUID.randomUUID();
     String sql =
         """
-        INSERT INTO indexing_requests (id, player, platform, start_month, end_month, exclude_bullet)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO indexing_requests (id, player, platform, start_month, end_month)
+        VALUES (?, ?, ?, ?, ?)
         """;
     try (Connection conn = dataSource.getConnection();
         PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -37,7 +34,6 @@ public class IndexingRequestDao implements IndexingRequestStore {
       ps.setString(3, platform);
       ps.setString(4, startMonth);
       ps.setString(5, endMonth);
-      ps.setBoolean(6, excludeBullet);
       ps.executeUpdate();
       return id;
     } catch (SQLException e) {
@@ -59,54 +55,6 @@ public class IndexingRequestDao implements IndexingRequestStore {
       }
     } catch (SQLException e) {
       throw new RuntimeException("Failed to find indexing request", e);
-    }
-  }
-
-  @Override
-  public Optional<IndexingRequest> findExistingRequest(
-      String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
-    String sql =
-        """
-        SELECT * FROM indexing_requests
-        WHERE player = ? AND platform = ? AND start_month = ? AND end_month = ?
-          AND exclude_bullet = ?
-          AND status IN ('PENDING', 'PROCESSING')
-        ORDER BY created_at ASC
-        LIMIT 1
-        """;
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps = conn.prepareStatement(sql)) {
-      ps.setString(1, player);
-      ps.setString(2, platform);
-      ps.setString(3, startMonth);
-      ps.setString(4, endMonth);
-      ps.setBoolean(5, excludeBullet);
-      try (ResultSet rs = ps.executeQuery()) {
-        if (rs.next()) {
-          return Optional.of(mapRow(rs));
-        }
-        return Optional.empty();
-      }
-    } catch (SQLException e) {
-      throw new RuntimeException("Failed to find existing indexing request", e);
-    }
-  }
-
-  @Override
-  public List<IndexingRequest> listRecent(int limit) {
-    String sql = "SELECT * FROM indexing_requests ORDER BY created_at DESC LIMIT ?";
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps = conn.prepareStatement(sql)) {
-      ps.setInt(1, limit);
-      try (ResultSet rs = ps.executeQuery()) {
-        List<IndexingRequest> results = new ArrayList<>();
-        while (rs.next()) {
-          results.add(mapRow(rs));
-        }
-        return results;
-      }
-    } catch (SQLException e) {
-      throw new RuntimeException("Failed to list indexing requests", e);
     }
   }
 
@@ -141,7 +89,6 @@ public class IndexingRequestDao implements IndexingRequestStore {
         rs.getTimestamp("created_at").toInstant(),
         rs.getTimestamp("updated_at").toInstant(),
         rs.getString("error_message"),
-        rs.getInt("games_indexed"),
-        rs.getBoolean("exclude_bullet"));
+        rs.getInt("games_indexed"));
   }
 }

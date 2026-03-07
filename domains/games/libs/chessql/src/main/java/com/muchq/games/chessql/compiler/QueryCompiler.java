@@ -1,7 +1,7 @@
 package com.muchq.games.chessql.compiler;
 
-import com.muchq.games.chessql.parser.ParsedQuery;
+import com.muchq.games.chessql.ast.Expr;
 
 public interface QueryCompiler<T> {
-  T compile(ParsedQuery query);
+  T compile(Expr expr);
 }

@@ -164,6 +164,7 @@ class ExampleMeerkatIntegrationTest : public ::testing::Test {
 
     // Add logging middleware
     server_->use_response_interceptor(interceptors::response::logging());
+
   }
 
   void StartServerAsync() {
@@ -394,6 +395,7 @@ TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationDeleteUserNotFound) {
   EXPECT_TRUE(response_json.contains("error"));
   EXPECT_EQ(response_json["error"], "User not found");
 }
+
 
 TEST_F(ExampleMeerkatIntegrationTest, HttpIntegrationCreateUserWorkflow) {
   // Test complete create -> retrieve -> delete workflow

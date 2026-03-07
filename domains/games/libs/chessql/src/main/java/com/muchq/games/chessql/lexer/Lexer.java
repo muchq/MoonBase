@@ -6,19 +6,12 @@ import java.util.Map;
 
 public class Lexer {
   private static final Map<String, TokenType> KEYWORDS =
-      Map.ofEntries(
-          Map.entry("AND", TokenType.AND),
-          Map.entry("OR", TokenType.OR),
-          Map.entry("NOT", TokenType.NOT),
-          Map.entry("IN", TokenType.IN),
-          Map.entry("motif", TokenType.MOTIF),
-          Map.entry("ORDER", TokenType.ORDER),
-          Map.entry("BY", TokenType.BY),
-          Map.entry("ASC", TokenType.ASC),
-          Map.entry("DESC", TokenType.DESC),
-          Map.entry("motif_count", TokenType.MOTIF_COUNT),
-          Map.entry("sequence", TokenType.SEQUENCE),
-          Map.entry("THEN", TokenType.THEN));
+      Map.of(
+          "AND", TokenType.AND,
+          "OR", TokenType.OR,
+          "NOT", TokenType.NOT,
+          "IN", TokenType.IN,
+          "motif", TokenType.MOTIF);
 
   private final String input;
   private int pos;
