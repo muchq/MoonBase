@@ -1000,6 +1000,9 @@ func (h *GolfHub) handleHideCards(client *hub.Client) {
 // Utility functions
 
 func getClientID(client *hub.Client) string {
+	if client.ID != "" {
+		return client.ID
+	}
 	if client.Conn != nil {
 		return client.Conn.RemoteAddr().String()
 	}
