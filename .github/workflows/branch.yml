@@ -20,17 +20,30 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Configure git safe directory
-        run: git config --global --add safe.directory /__w/MoonBase/MoonBase
-
-      - uses: bazel-contrib/setup-bazel@0.18.0
-        with:
-          bazelisk-cache: true
-          repository-cache: true
-
-      - name: bazel-format-check
+      - name: Download google-java-format
         run: |
-          bazel run //:format.check
+          GJF_SHA256=$(awk '/name = "google-java-format"/{f=1} f && /sha256/{gsub(/.*sha256 = "|".*/, ""); print; exit}' bazel/tools.MODULE.bazel)
+          GJF_URL=$(awk '/name = "google-java-format"/{f=1} f && /url =/{gsub(/.*url = "|".*/, ""); print; exit}' bazel/tools.MODULE.bazel)
+          GJF_JAR="/tmp/google-java-format.jar"
+          echo "Downloading $GJF_URL"
+          curl -fsSL -o "$GJF_JAR" "$GJF_URL"
+          echo "$GJF_SHA256  $GJF_JAR" | sha256sum -c -
+
+      - name: Check Java formatting
+        run: |
+          GJF_JAR="/tmp/google-java-format.jar"
+          JAVA_FILES=$(find . -name "*.java" -not -path "*/bazel-*" | sort)
+          if [ -z "$JAVA_FILES" ]; then
+            echo "No Java files found."
+            exit 0
+          fi
+          java \
+            --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED \
+            --add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED \
+            --add-exports jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED \
+            --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED \
+            --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED \
+            -jar "$GJF_JAR" --dry-run --set-exit-if-changed $JAVA_FILES
 
   build-and-test:
     runs-on: ubuntu-latest
