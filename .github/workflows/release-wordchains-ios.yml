@@ -169,7 +169,7 @@ jobs:
           echo "IPA_FILE=WordChains-${VERSION}-${BUILD}.ipa" >> "$GITHUB_ENV"
           echo "SHA_FILE=WordChains-${VERSION}-${BUILD}.sha256.txt" >> "$GITHUB_ENV"
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: wordchains-ios-ipa
           path: |
@@ -183,7 +183,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
 
