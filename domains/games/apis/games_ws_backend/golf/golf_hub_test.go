@@ -1519,3 +1519,34 @@ func TestHub_JoinRoomTwice(t *testing.T) {
 
 	client1.close()
 }
+
+// TestGetClientID_UsesIDFieldOverRemoteAddr verifies that when clients connect
+// through a proxy, their server-assigned UUID is used for identification rather
+// than RemoteAddr. Without this, two clients sharing the same proxy IP would
+// collide and be treated as the same player.
+func TestGetClientID_UsesIDFieldOverRemoteAddr(t *testing.T) {
+	t.Run("prefers ID field when set", func(t *testing.T) {
+		client := &hub.Client{ID: "server-assigned-uuid", Send: make(chan []byte, 1)}
+		if got := getClientID(client); got != "server-assigned-uuid" {
+			t.Errorf("expected server-assigned-uuid, got %s", got)
+		}
+	})
+
+	t.Run("two clients with same RemoteAddr get distinct IDs via ID field", func(t *testing.T) {
+		// Simulates the proxy collision scenario: both clients have nil Conn
+		// but differ only by their server-assigned ID.
+		client1 := &hub.Client{ID: "uuid-1", Send: make(chan []byte, 1)}
+		client2 := &hub.Client{ID: "uuid-2", Send: make(chan []byte, 1)}
+		if getClientID(client1) == getClientID(client2) {
+			t.Error("clients with different IDs must not share a client ID")
+		}
+	})
+
+	t.Run("falls back to test-client pointer when ID and Conn are both unset", func(t *testing.T) {
+		client := &hub.Client{Send: make(chan []byte, 1)}
+		id := getClientID(client)
+		if id == "" {
+			t.Error("expected non-empty fallback ID for test client")
+		}
+	})
+}
