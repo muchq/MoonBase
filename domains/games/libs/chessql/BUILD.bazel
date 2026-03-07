@@ -10,8 +10,6 @@ java_library(
         "src/main/java/com/muchq/games/chessql/ast/MotifExpr.java",
         "src/main/java/com/muchq/games/chessql/ast/NotExpr.java",
         "src/main/java/com/muchq/games/chessql/ast/OrExpr.java",
-        "src/main/java/com/muchq/games/chessql/ast/OrderByClause.java",
-        "src/main/java/com/muchq/games/chessql/ast/SequenceExpr.java",
     ],
     visibility = ["//visibility:public"],
 )
@@ -20,14 +18,12 @@ java_library(
     name = "compiler",
     srcs = [
         "src/main/java/com/muchq/games/chessql/compiler/CompiledQuery.java",
-        "src/main/java/com/muchq/games/chessql/compiler/DataFusionSqlCompiler.java",
         "src/main/java/com/muchq/games/chessql/compiler/QueryCompiler.java",
         "src/main/java/com/muchq/games/chessql/compiler/SqlCompiler.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":ast",
-        ":parser",
     ],
 )
 
@@ -45,7 +41,6 @@ java_library(
     name = "parser",
     srcs = [
         "src/main/java/com/muchq/games/chessql/parser/ParseException.java",
-        "src/main/java/com/muchq/games/chessql/parser/ParsedQuery.java",
         "src/main/java/com/muchq/games/chessql/parser/Parser.java",
     ],
     visibility = ["//visibility:public"],
@@ -59,19 +54,6 @@ java_test_suite(
     name = "compiler_test",
     size = "small",
     srcs = ["src/test/java/com/muchq/games/chessql/compiler/SqlCompilerTest.java"],
-    deps = [
-        ":ast",
-        ":compiler",
-        ":parser",
-        artifact("junit:junit"),
-        artifact("org.assertj:assertj-core"),
-    ],
-)
-
-java_test_suite(
-    name = "datafusion_compiler_test",
-    size = "small",
-    srcs = ["src/test/java/com/muchq/games/chessql/compiler/DataFusionSqlCompilerTest.java"],
     deps = [
         ":ast",
         ":compiler",

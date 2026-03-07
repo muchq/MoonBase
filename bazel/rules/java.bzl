@@ -14,6 +14,12 @@ Usage:
         srcs = ["MyClass.java"],
     )
 
+To disable Micronaut processors for a specific target, set micronaut = False:
+    java_library(
+        name = "my_lib",
+        srcs = ["MyClass.java"],
+        micronaut = False,
+    )
 """
 
 load("@contrib_rules_jvm//java:defs.bzl", _java_test_suite = "java_test_suite")
@@ -24,13 +30,6 @@ artifact = _artifact
 java_test_suite = _java_test_suite
 
 _NULLAWAY_PLUGIN = "//bazel/rules:nullaway"
-
-_MICRONAUT_PLUGINS = [
-    "//bazel/rules:micronaut_type_element_visitor_processor",
-    "//bazel/rules:micronaut_aggregating_type_element_visitor_processor",
-    "//bazel/rules:micronaut_bean_definition_inject_processor",
-    "//bazel/rules:micronaut_package_element_visitor_processor",
-]
 
 _JAVACOPTS = [
     "-XDcompilePolicy=simple",
@@ -64,10 +63,6 @@ def java_library(
         if _NULLAWAY_PLUGIN not in plugins:
             plugins.append(_NULLAWAY_PLUGIN)
 
-        for p in _MICRONAUT_PLUGINS:
-            if p not in plugins:
-                plugins.append(p)
-
         for opt in _JAVACOPTS:
             if opt not in javacopts:
                 javacopts.append(opt)
@@ -88,7 +83,7 @@ def java_binary(
         plugins = None,
         javacopts = None,
         **kwargs):
-    """java_binary with NullAway and Micronaut processors enabled by default.
+    """java_binary with NullAway support.
 
     Args:
         name: Target name.
@@ -106,10 +101,6 @@ def java_binary(
     if srcs:
         if _NULLAWAY_PLUGIN not in plugins:
             plugins.append(_NULLAWAY_PLUGIN)
-
-        for p in _MICRONAUT_PLUGINS:
-            if p not in plugins:
-                plugins.append(p)
 
         for opt in _JAVACOPTS:
             if opt not in javacopts:

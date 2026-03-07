@@ -1,7 +1,5 @@
 # Chess Game Indexer — Roadmap
 
-**See also:** [Frontend Roadmap](../../../../../../../../../../../../apps/1d4_web/docs/ROADMAP.md) — React/TypeScript UI plans (game detail viewer, mobile, advanced query UX).
-
 ## Current State (Phase 1 — Delivered)
 
 - Indexing pipeline: chess.com → PGN parse → position replay → motif detection → PostgreSQL
@@ -114,65 +112,6 @@ CREATE TABLE indexed_periods (
 **Edge cases:**
 - Player changes username → old username's cache is stale (detect via player ID if API provides it)
 - Games added retroactively by chess.com (rare) → accept minor staleness or add TTL
-
-### Skip-cache
-
-Allow forcing a full re-fetch and re-index for periods that would otherwise be served from `indexed_periods`, for example when the user knows data changed or for debugging.
-
-**Per-request skip:** Add an optional `skipCache` (or `forceRefresh`) flag to the index request:
-
-- `POST /v1/index` body: `{ "player": "...", "platform": "...", "startMonth": "...", "endMonth": "...", "skipCache": true }`
-- When `skipCache` is true, the worker does not use `findCompletePeriod` for that request; it fetches every month in the range from the API and re-indexes, then upserts `indexed_periods` as usual. Existing `game_features` rows for those games may be updated or deduped by `game_url` depending on current insert/merge behavior.
-
-**Admin invalidation:** Optional endpoint to clear or invalidate cached periods so that future requests re-fetch:
-
-- `DELETE /admin/indexed-periods?player=X&platform=Y&yearMonth=2024-01` (or body with a list of (player, platform, year_month)) to delete specific rows from `indexed_periods`.
-- Or a “soft” invalidate (e.g. set `is_complete = false` or bump a version) so the next index request for that period refetches.
-
-**Implementation notes:**
-- Index request DTO and validation: add optional `Boolean skipCache` (default false).
-- IndexWorker: when processing a message, if the request has skipCache, do not call `periodStore.findCompletePeriod` for any month in the range; always fetch. Either pass the flag on `IndexMessage` or look up the request row and read a `skip_cache` column.
-
-### Disk cap
-
-Avoid filling disk when using file-based storage (e.g. H2 file in Docker with `one_d4_data` volume). Neither H2 nor the current Compose config impose a size limit; the volume can grow until the host runs out of space.
-
-**App-level cap (optional):**
-
-- Config: `indexer.disk.maxBytes` (or `INDEXER_DISK_MAX_BYTES`) — maximum allowed size for the data directory (or H2 DB files). Default: 0 or unset = no cap.
-- Before accepting a new index request (or before the worker processes the next month): check total size of the data path (e.g. `/data` or the directory containing the H2 `.mv.db` file). If at or over the cap, refuse new work:
-  - `POST /v1/index` → 503 or 429 with a clear message (“disk cap reached”).
-  - Worker: skip processing or mark request failed with “disk cap reached” and do not fetch/index more data until below cap.
-- Optionally expose status: e.g. `GET /health` or a simple admin endpoint that reports current usage and cap so operators can monitor.
-
-**Deployment / volume:**
-
-- Document that production deployments should put the indexer data volume on a quota-backed filesystem or use a volume driver that supports a size limit where available.
-- Compose does not support a max size on named volumes directly; document recommended host-level limits or quota setup for `one_d4_data`.
-
-**Note:** Once the indexer uses PostgreSQL (e.g. Neon) instead of H2 file storage, this is less of a concern: the database runs in a managed service with its own storage limits and scaling; the app no longer owns the data directory on disk.
-
-### Fanout by player+year_month
-
-**Current:** One queue message per API request (one `IndexMessage` per player, platform, startMonth, endMonth). The worker iterates months inside `process()`. Overlapping requests (e.g. 2024-01–03 and 2024-02–04) do not dedupe at the queue level; we only skip re-fetching months that are already complete in `indexed_periods`.
-
-**Proposed:** Fan out so that work is enqueued and deduped at (player, platform, year_month) granularity.
-
-1. **Work units:** When `POST /v1/index` is received for a range (e.g. 2024-01 to 2024-03), instead of enqueueing a single message for the range, enqueue one work unit per month in the range (e.g. three units: 2024-01, 2024-02, 2024-03). Each unit is keyed by (player, platform, year_month).
-
-2. **Deduplication:** Before enqueueing a (player, platform, year_month) unit:
-   - If that period is already complete in `indexed_periods`, skip (no message).
-   - If that unit is already in the queue or currently being processed (e.g. from another request), skip or coalesce so each (player, platform, year_month) is processed at most once.
-
-3. **Request identity:** The API still returns a single request ID for the range. Options:
-   - Each work unit carries the request ID(s) that “need” that month; when the unit completes, update progress for all associated requests.
-   - Or: one parent “request” row plus a separate table of (request_id, player, platform, year_month) rows; workers process per-month units and update the parent request’s status/count as months complete.
-
-4. **Benefits:** Overlapping requests (e.g. 2024-01–03 and 2024-02–04) automatically share work for 2024-02 and 2024-03; no duplicate fetch or index for the same player+month.
-
-**Implementation notes:**
-- `IndexMessage` (or a new per-month message type) would be (requestId, player, platform, year_month) or equivalent; the worker processes one month per message.
-- Queue implementation (in-memory, SQS, etc.) may need to support “enqueue if not already present” for (player, platform, year_month), or a separate “pending months” store that the worker claims from.
 
 ### Estimated Changes
 
@@ -315,11 +254,11 @@ public class ApiKeyFilter implements HttpServerFilter {
 ### Authorization
 
 Phase 1: Single-tier (any valid key has full access).
-Phase 2: Role-based — `admin` keys can access /admin/*, `user` keys can access /v1/index and /v1/query.
+Phase 2: Role-based — `admin` keys can access /admin/*, `user` keys can access /index and /query.
 
 ### Rate Limiting
 
-Per-key rate limiting on the /v1/query endpoint:
+Per-key rate limiting on the /query endpoint:
 - 100 queries/minute per API key
 - 429 response with `Retry-After` header
 - In-memory counter with sliding window (Guava `Cache<String, AtomicInteger>`)
@@ -530,46 +469,6 @@ public class GameFetcher {
 
 ## Phase 9 — Additional Motifs & Re-Analysis
 
-### Motif Detector Semantic Accuracy
-
-Several detectors rely solely on PGN move notation to determine whether a motif occurred,
-without verifying which piece is actually responsible for the check or attack. This produces
-correct results in the common case but mislabels some positions.
-
-**The concrete problem — `PROMOTION_WITH_CHECK`:**
-
-When a chess player says "promotion with check" they mean the promoted piece is the one giving
-check. The current detector fires on `contains("=") && endsWith("+")`, which also captures a
-different scenario: a pawn promotes (via an underpromotion or queen promotion to a square that
-doesn't directly attack the king) while simultaneously revealing a discovered check from a rook
-or bishop that was hiding behind the pawn. These are distinct tactical motifs:
-
-- `e8=Q+` where the queen on e8 delivers the check → `PROMOTION_WITH_CHECK` ✓
-- `e8=Q+` where a rook on e1 was unblocked by the pawn leaving e7 → `DISCOVERED_CHECK` + `PROMOTION`, not `PROMOTION_WITH_CHECK`
-
-The same ambiguity applies to `PROMOTION_WITH_CHECKMATE`.
-
-**The general problem — notation vs. position:**
-
-The `DISCOVERED_CHECK` and `DISCOVERED_ATTACK` detectors use FEN comparison (board before vs.
-after) to find vacated squares that reveal sliding piece attacks. This is more accurate, but
-still cannot determine whether the check (`+`) in the move notation came from the revealed piece
-or from the piece that actually moved.
-
-**The fix — use the chariot library for check attribution:**
-
-The `chariot` library (already on the classpath via the engine) can parse PGN and model the
-board. After replaying each position, query which pieces are giving check and whether those
-pieces moved on the current half-move. This gives precise semantics:
-
-- `PROMOTION_WITH_CHECK`: the piece that just promoted is in the set of checking pieces
-- `DISCOVERED_CHECK`: the checking piece did NOT move on this half-move
-- `DOUBLE_CHECK`: two pieces simultaneously give check (a specific form of discovered check)
-
-**Impact:** Detection logic changes only — schema, ChessQL motif names, and API DTOs are
-unaffected. All existing `game_features` rows can be reanalyzed via the re-analysis pipeline
-(Phase 9) once the corrected detectors are in place.
-
 ### New Motifs
 
 | Motif               | Detection Strategy                                    |
@@ -601,28 +500,6 @@ ALTER TABLE game_features_archive ADD COLUMN has_back_rank_mate BOOLEAN DEFAULT 
 ```
 
 Update `SqlCompiler.VALID_MOTIFS` and `VALID_COLUMNS` sets.
-
-### Phase Dependencies
-
-**Phase 5 (Security) — soft dependency for production use.**
-The re-analysis admin endpoint (`POST /admin/reanalyze`) should be covered by the `ApiKeyFilter`
-before it is exposed publicly. Phase 9 can be developed and tested locally without Phase 5, but
-should not be deployed to a production environment that is publicly accessible until admin
-endpoints are protected.
-
-**Phase 6 (Retention) — ordering dependency for full historical coverage.**
-The re-analysis pipeline reads PGN from the `game_features.pgn` column. Phase 6 eventually
-deletes rows from PostgreSQL once they reach cold storage (S3). Once a game is in cold storage
-its PGN is no longer directly accessible; re-analyzing it requires first running the
-`POST /admin/restore` endpoint to re-import it into the database.
-
-Practical consequence: **run re-analysis before Phase 6 begins archiving data** to avoid the
-restore step. If Phase 6 is already active when new motif detectors are added, the re-analysis
-pipeline should either (a) scope itself to games still in hot/warm storage, or (b) trigger a
-restore from cold storage for the affected time ranges before reanalyzing.
-
-The `ALTER TABLE game_features_archive` migration in the Schema Evolution section already assumes
-Phase 6's archive table exists — new motif columns must be added to both tables simultaneously.
 
 ---
 

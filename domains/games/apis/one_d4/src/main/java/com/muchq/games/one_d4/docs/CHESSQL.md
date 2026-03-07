@@ -55,35 +55,15 @@ Underscore-separated names also work directly: `white_elo >= 2500` is equivalent
 
 ## Motifs
 
-The `motif()` function checks for tactical pattern presence. Queries compile to `EXISTS` subqueries
-against the `motif_occurrences` table. 11 motifs are stored directly as rows in that table;
-5 are derived from `ATTACK` rows using flag or grouping conditions at query time.
+The `motif()` function checks boolean columns for tactical pattern presence:
 
-**Directly stored motifs** (one row per occurrence, 11 total):
-
-| ChessQL                       | motif_occurrences filter        |
-|-------------------------------|---------------------------------|
-| `motif(pin)`                  | `motif = 'PIN'`                 |
-| `motif(cross_pin)`            | `motif = 'CROSS_PIN'`           |
-| `motif(skewer)`               | `motif = 'SKEWER'`              |
-| `motif(check)`                | `motif = 'CHECK'`               |
-| `motif(promotion)`            | `motif = 'PROMOTION'`           |
-| `motif(promotion_with_check)` | `motif = 'PROMOTION_WITH_CHECK'`|
-| `motif(promotion_with_checkmate)` | `motif = 'PROMOTION_WITH_CHECKMATE'` |
-| `motif(back_rank_mate)`       | `motif = 'BACK_RANK_MATE'`      |
-| `motif(smothered_mate)`       | `motif = 'SMOTHERED_MATE'`      |
-| `motif(zugzwang)`             | `motif = 'ZUGZWANG'`            |
-| `motif(overloaded_piece)`     | `motif = 'OVERLOADED_PIECE'`    |
-
-**Derived motifs** (computed from `ATTACK` rows at query time, 5 total):
-
-| ChessQL                 | Derivation condition |
-|-------------------------|----------------------|
-| `motif(discovered_attack)` | `motif = 'ATTACK' AND is_discovered = TRUE` |
-| `motif(checkmate)`      | `motif = 'ATTACK' AND is_mate = TRUE` |
-| `motif(discovered_check)` | `motif = 'ATTACK' AND is_discovered = TRUE AND target LIKE 'K%' OR 'k%'` |
-| `motif(fork)`           | `motif = 'ATTACK' AND is_discovered = FALSE AND attacker IS NOT NULL`, grouped by `(ply, attacker)` with `HAVING COUNT(*) >= 2` |
-| `motif(double_check)`   | `motif = 'ATTACK' AND target IS king`, grouped by `ply` with `HAVING COUNT(*) >= 2` |
+| ChessQL              | SQL                          |
+|----------------------|------------------------------|
+| `motif(pin)`         | `has_pin = TRUE`             |
+| `motif(cross_pin)`   | `has_cross_pin = TRUE`       |
+| `motif(fork)`        | `has_fork = TRUE`            |
+| `motif(skewer)`      | `has_skewer = TRUE`          |
+| `motif(discovered_attack)` | `has_discovered_attack = TRUE` |
 
 ## Values
 
@@ -133,14 +113,15 @@ platform IN ["chess.com"] AND black.elo > 2700 AND motif(discovered_attack)
 
 ## Compilation Examples
 
-| ChessQL Input | SQL Output (WHERE clause fragment) | Parameters |
-|---------------|-----------------------------------|------------|
+| ChessQL Input | SQL Output | Parameters |
+|---------------|-----------|------------|
 | `white.elo >= 2500` | `white_elo >= ?` | `[2500]` |
-| `motif(pin)` | `EXISTS (SELECT 1 FROM motif_occurrences mo WHERE mo.game_url = g.game_url AND mo.motif = 'PIN')` | `[]` |
-| `motif(checkmate)` | `EXISTS (SELECT 1 FROM motif_occurrences mo WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK' AND mo.is_mate = TRUE)` | `[]` |
-| `white.elo >= 2500 AND motif(pin)` | `(white_elo >= ? AND EXISTS (...motif = 'PIN'...))` | `[2500]` |
-| `NOT motif(pin)` | `(NOT EXISTS (...motif = 'PIN'...))` | `[]` |
-| `platform IN ["lichess", "chess.com"]` | `LOWER(platform) IN (LOWER(?), LOWER(?))` | `["lichess", "chess.com"]` |
+| `motif(fork)` | `has_fork = TRUE` | `[]` |
+| `white.elo >= 2500 AND motif(fork)` | `(white_elo >= ? AND has_fork = TRUE)` | `[2500]` |
+| `motif(fork) OR motif(pin)` | `(has_fork = TRUE OR has_pin = TRUE)` | `[]` |
+| `NOT motif(pin)` | `(NOT has_pin = TRUE)` | `[]` |
+| `platform IN ["lichess", "chess.com"]` | `platform IN (?, ?)` | `["lichess", "chess.com"]` |
+| `(motif(fork) OR motif(pin)) AND white.elo > 2000` | `((has_fork = TRUE OR has_pin = TRUE) AND white_elo > ?)` | `[2000]` |
 
 ## Error Handling
 

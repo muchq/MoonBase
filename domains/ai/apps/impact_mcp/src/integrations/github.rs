@@ -27,7 +27,7 @@ impl Connector for GithubConnector {
         self.token.is_some()
     }
 
-    fn pull(&self) -> Pin<Box<dyn Future<Output = Result<(Vec<EvidenceCard>, Vec<String>), ConnectorError>> + Send + '_>> {
+    fn pull(&self) -> Pin<Box<dyn Future<Output = Result<Vec<EvidenceCard>, ConnectorError>> + Send + '_>> {
         Box::pin(async move {
             if !self.is_configured() {
                 return Err(ConnectorError::NotConfigured(
@@ -41,11 +41,10 @@ impl Connector for GithubConnector {
             // - Cross-repo contributions
             // - Release participation
             tracing::info!("GitHub connector: pull not yet implemented (POC stub)");
-            let cards = vec![EvidenceCard::new(
+            Ok(vec![EvidenceCard::new(
                 EvidenceSource::Github,
                 "[stub] example GitHub evidence card",
-            )];
-            Ok((cards, vec![]))
+            )])
         })
     }
 }

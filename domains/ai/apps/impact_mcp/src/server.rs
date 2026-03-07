@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    GetPromptRequestParams, GetPromptResult, Implementation, ListPromptsResult,
-    PaginatedRequestParams, Prompt, PromptMessage, PromptMessageRole, ServerCapabilities,
+    GetPromptRequestParam, GetPromptResult, Implementation, ListPromptsResult,
+    PaginatedRequestParam, Prompt, PromptMessage, PromptMessageRole, ServerCapabilities,
     ServerInfo,
 };
 use rmcp::service::RequestContext;
@@ -15,7 +15,6 @@ use uuid::Uuid;
 
 use crate::archetype::{Archetype, ArchetypeProfile};
 use crate::evidence::{EvidenceCard, EvidenceSource, EvidenceStore};
-use crate::projects::ProjectStore;
 use crate::readiness::{CoverageLevel, ReadinessMap};
 use crate::rubric::Rubric;
 
@@ -101,10 +100,6 @@ impl ImpactServer {
 
     fn open_store(&self) -> Result<EvidenceStore, String> {
         EvidenceStore::open(&self.data_dir).map_err(|e| format!("Failed to open store: {e}"))
-    }
-
-    fn open_project_store(&self) -> Result<ProjectStore, String> {
-        ProjectStore::open(&self.data_dir).map_err(|e| format!("Failed to open project store: {e}"))
     }
 }
 
@@ -302,20 +297,6 @@ impl ImpactServer {
         };
 
         let mut out = String::new();
-
-        // Project check
-        match self.open_project_store() {
-            Ok(pstore) => {
-                if pstore.all().is_empty() {
-                    out.push_str("  [warn] No projects configured. Use `impact-mcp projects add` to track your work.\n\n");
-                }
-            }
-            Err(e) => {
-                 // Log error but continue
-                 tracing::warn!("Failed to open project store: {}", e);
-            }
-        }
-
         let mut total = 0;
         for connector in &connectors {
             if !connector.is_configured() {
@@ -323,7 +304,7 @@ impl ImpactServer {
                 continue;
             }
             match connector.pull().await {
-                Ok((cards, warnings)) => {
+                Ok(cards) => {
                     let n = cards.len();
                     for card in cards {
                         if let Err(e) = store.insert(card) {
@@ -331,9 +312,6 @@ impl ImpactServer {
                         }
                     }
                     out.push_str(&format!("  [ok]   {} — {n} card(s) pulled\n", connector.name()));
-                    for warning in warnings {
-                        out.push_str(&format!("         ⚠️ {}\n", warning));
-                    }
                     total += n;
                 }
                 Err(e) => {
@@ -372,18 +350,14 @@ impl ImpactServer {
         };
 
         match connector.pull().await {
-            Ok((cards, warnings)) => {
+            Ok(cards) => {
                 let n = cards.len();
                 for card in cards {
                     if let Err(e) = store.insert(card) {
                         return format!("Error storing card: {e}");
                     }
                 }
-                let mut output = format!("{} — {n} card(s) pulled\n", connector.name());
-                for warning in warnings {
-                    output.push_str(&format!("⚠️ {}\n", warning));
-                }
-                output
+                format!("{} — {n} card(s) pulled", connector.name())
             }
             Err(e) => format!("Error: {e}"),
         }
@@ -397,7 +371,6 @@ impl ServerHandler for ImpactServer {
             server_info: Implementation {
                 name: "impact-mcp".into(),
                 version: env!("CARGO_PKG_VERSION").into(),
-                description: Some("impact-mcp server".into()),
                 title: None,
                 icons: None,
                 website_url: None,
@@ -413,7 +386,7 @@ impl ServerHandler for ImpactServer {
 
     async fn list_prompts(
         &self,
-        _params: Option<PaginatedRequestParams>,
+        _params: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, ErrorData> {
         Ok(ListPromptsResult {
@@ -467,7 +440,7 @@ impl ServerHandler for ImpactServer {
 
     async fn get_prompt(
         &self,
-        params: GetPromptRequestParams,
+        params: GetPromptRequestParam,
         _context: RequestContext<RoleServer>,
     ) -> Result<GetPromptResult, ErrorData> {
         let store = self

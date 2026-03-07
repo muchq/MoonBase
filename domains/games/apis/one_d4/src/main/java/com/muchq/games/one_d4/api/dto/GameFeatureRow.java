@@ -1,8 +1,6 @@
 package com.muchq.games.one_d4.api.dto;
 
 import java.time.Instant;
-import java.util.List;
-import java.util.Map;
 
 public record GameFeatureRow(
     String gameUrl,
@@ -15,13 +13,13 @@ public record GameFeatureRow(
     String eco,
     String result,
     Instant playedAt,
-    Instant indexedAt,
     Integer numMoves,
-    String pgn,
-    Map<String, List<OccurrenceRow>> occurrences) {
-
-  public static GameFeatureRow fromStore(
-      GameFeature row, Map<String, List<OccurrenceRow>> occurrences) {
+    boolean hasPin,
+    boolean hasCrossPin,
+    boolean hasFork,
+    boolean hasSkewer,
+    boolean hasDiscoveredAttack) {
+  public static GameFeatureRow fromStore(GameFeature row) {
     return new GameFeatureRow(
         row.gameUrl(),
         row.platform(),
@@ -33,9 +31,11 @@ public record GameFeatureRow(
         row.eco(),
         row.result(),
         row.playedAt(),
-        row.indexedAt(),
         row.numMoves(),
-        row.pgn(),
-        occurrences);
+        row.hasPin(),
+        row.hasCrossPin(),
+        row.hasFork(),
+        row.hasSkewer(),
+        row.hasDiscoveredAttack());
   }
 }

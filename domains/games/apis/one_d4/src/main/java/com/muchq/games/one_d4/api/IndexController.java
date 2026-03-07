@@ -13,135 +13,55 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
-import java.util.List;
-import java.util.NoSuchElementException;
-import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Singleton
-@Path("/v1/index")
+@Path("/index")
 public class IndexController {
   private static final Logger LOG = LoggerFactory.getLogger(IndexController.class);
 
   private final IndexingRequestStore requestDao;
   private final IndexQueue queue;
-  private final IndexRequestValidator validator;
 
-  public IndexController(
-      IndexingRequestStore requestDao, IndexQueue queue, IndexRequestValidator validator) {
+  public IndexController(IndexingRequestStore requestDao, IndexQueue queue) {
     this.requestDao = requestDao;
     this.queue = queue;
-    this.validator = validator;
-  }
-
-  @GET
-  @Produces(MediaType.APPLICATION_JSON)
-  public List<IndexResponse> listRequests() {
-    LOG.info("GET /v1/index");
-    return requestDao.listRecent(50).stream()
-        .map(
-            row ->
-                new IndexResponse(
-                    row.id(),
-                    row.player(),
-                    row.platform(),
-                    row.startMonth(),
-                    row.endMonth(),
-                    row.status(),
-                    row.gamesIndexed(),
-                    row.errorMessage(),
-                    row.excludeBullet()))
-        .toList();
   }
 
   @POST
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   public IndexResponse createIndex(IndexRequest request) {
-    validator.validate(request);
-
-    boolean excludeBullet = Boolean.TRUE.equals(request.excludeBullet());
-
     LOG.info(
-        "POST /v1/index player={} platform={} months={}-{} excludeBullet={}",
+        "POST /index player={} platform={} months={}-{}",
         request.player(),
         request.platform(),
         request.startMonth(),
-        request.endMonth(),
-        excludeBullet);
-
-    Optional<IndexingRequestStore.IndexingRequest> existing =
-        requestDao.findExistingRequest(
-            request.player(),
-            request.platform(),
-            request.startMonth(),
-            request.endMonth(),
-            excludeBullet);
-    if (existing.isPresent()) {
-      IndexingRequestStore.IndexingRequest row = existing.get();
-      LOG.info("Returning existing index request {} (status={})", row.id(), row.status());
-      return new IndexResponse(
-          row.id(),
-          row.player(),
-          row.platform(),
-          row.startMonth(),
-          row.endMonth(),
-          row.status(),
-          row.gamesIndexed(),
-          row.errorMessage(),
-          row.excludeBullet());
-    }
+        request.endMonth());
 
     UUID id =
         requestDao.create(
-            request.player(),
-            request.platform(),
-            request.startMonth(),
-            request.endMonth(),
-            excludeBullet);
+            request.player(), request.platform(), request.startMonth(), request.endMonth());
 
     queue.enqueue(
         new IndexMessage(
-            id,
-            request.player(),
-            request.platform(),
-            request.startMonth(),
-            request.endMonth(),
-            excludeBullet));
+            id, request.player(), request.platform(), request.startMonth(), request.endMonth()));
 
-    return new IndexResponse(
-        id,
-        request.player(),
-        request.platform(),
-        request.startMonth(),
-        request.endMonth(),
-        "PENDING",
-        0,
-        null,
-        excludeBullet);
+    return new IndexResponse(id, "PENDING", 0, null);
   }
 
   @GET
   @Path("/{id}")
   @Produces(MediaType.APPLICATION_JSON)
   public IndexResponse getIndex(@PathParam("id") UUID id) {
-    LOG.info("GET /v1/index/{}", id);
+    LOG.info("GET /index/{}", id);
     return requestDao
         .findById(id)
         .map(
             row ->
-                new IndexResponse(
-                    row.id(),
-                    row.player(),
-                    row.platform(),
-                    row.startMonth(),
-                    row.endMonth(),
-                    row.status(),
-                    row.gamesIndexed(),
-                    row.errorMessage(),
-                    row.excludeBullet()))
-        .orElseThrow(() -> new NoSuchElementException("Indexing request not found: " + id));
+                new IndexResponse(row.id(), row.status(), row.gamesIndexed(), row.errorMessage()))
+        .orElseThrow(() -> new RuntimeException("Indexing request not found: " + id));
   }
 }

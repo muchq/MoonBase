@@ -19,34 +19,22 @@ public class SkewerDetector implements MotifDetector {
 
     for (PositionContext ctx : positions) {
       String placement = ctx.fen().split(" ")[0];
-      int[][] board = BoardUtils.parsePlacement(placement);
+      int[][] board = PinDetector.parsePlacement(placement);
 
       // A skewer is the opposite of a pin: a more valuable piece is in front,
       // and when it moves, a less valuable piece behind is captured.
-      List<int[]> skewers = findSkewers(board, !ctx.whiteToMove());
-      String dest = BoardUtils.destinationSquare(ctx.lastMove());
-      for (int[] skewer : skewers) {
-        // skewer = {attackerR, attackerC, frontR, frontC}
-        int ar = skewer[0], ac = skewer[1];
-        // Only fire if the skewering piece is the one that just moved.
-        if (dest == null || !BoardUtils.squareName(ar, ac).equals(dest)) continue;
-        int fr = skewer[2], fc = skewer[3];
-        String attacker = BoardUtils.pieceNotation(board[ar][ac], ar, ac);
-        String target = BoardUtils.pieceNotation(board[fr][fc], fr, fc);
-        GameFeatures.MotifOccurrence occ =
-            GameFeatures.MotifOccurrence.withPiece(
-                ctx, "Skewer detected at move " + ctx.moveNumber(), attacker, target);
-        if (occ != null) occurrences.add(occ);
+      if (hasSkewer(board, !ctx.whiteToMove())) {
+        occurrences.add(
+            new GameFeatures.MotifOccurrence(
+                ctx.moveNumber(), "Skewer detected at move " + ctx.moveNumber()));
       }
     }
 
     return occurrences;
   }
 
-  /** Returns a list of {attackerR, attackerC, frontPieceR, frontPieceC} for each skewer found. */
-  private List<int[]> findSkewers(int[][] board, boolean attackerIsWhite) {
+  private boolean hasSkewer(int[][] board, boolean attackerIsWhite) {
     int[][] directions = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
-    List<int[]> result = new ArrayList<>();
 
     for (int r = 0; r < 8; r++) {
       for (int c = 0; c < 8; c++) {
@@ -61,14 +49,13 @@ public class SkewerDetector implements MotifDetector {
 
         for (int[] dir : directions) {
           if (!canAttackDirection(absPiece, dir)) continue;
-          int[] skewer = findSkewerAlongRay(board, r, c, dir[0], dir[1], attackerIsWhite);
-          if (skewer != null) {
-            result.add(new int[] {r, c, skewer[0], skewer[1]});
+          if (isSkewerAlongRay(board, r, c, dir[0], dir[1], attackerIsWhite)) {
+            return true;
           }
         }
       }
     }
-    return result;
+    return false;
   }
 
   private boolean canAttackDirection(int absPiece, int[] dir) {
@@ -80,38 +67,28 @@ public class SkewerDetector implements MotifDetector {
     return false;
   }
 
-  /**
-   * Returns {frontPieceR, frontPieceC} if there's a skewer along the ray, or null. A skewer exists
-   * when the front piece is more valuable than the piece behind it.
-   */
-  private int[] findSkewerAlongRay(
+  private boolean isSkewerAlongRay(
       int[][] board, int ar, int ac, int dr, int dc, boolean attackerIsWhite) {
     int r = ar + dr, c = ac + dc;
     int firstValue = -1;
-    int firstR = -1, firstC = -1;
 
     while (r >= 0 && r < 8 && c >= 0 && c < 8) {
       int piece = board[r][c];
       if (piece != 0) {
         boolean isWhite = piece > 0;
-        if (isWhite == attackerIsWhite) return null; // friendly piece blocks
+        if (isWhite == attackerIsWhite) return false; // friendly piece blocks
 
         int value = Math.abs(piece);
         if (firstValue == -1) {
           firstValue = value;
-          firstR = r;
-          firstC = c;
         } else {
           // Skewer: first piece (in front) is more valuable than second
-          if (firstValue > value && value >= 2) {
-            return new int[] {firstR, firstC};
-          }
-          return null;
+          return firstValue > value && value >= 2;
         }
       }
       r += dr;
       c += dc;
     }
-    return null;
+    return false;
   }
 }

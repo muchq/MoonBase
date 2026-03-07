@@ -55,13 +55,16 @@ java_binary(
         "src/main/java/com/muchq/games/mcpserver/McpRequestHandler.java",
     ],
     main_class = "com.muchq.games.mcpserver.App",
-    resource_strip_prefix = "domains/platform/resources",
-    resources = [
-        "//domains/platform/resources:micronaut_config",
+    plugins = [
+        "//bazel/rules:micronaut_type_element_visitor_processor",
+        "//bazel/rules:micronaut_aggregating_type_element_visitor_processor",
+        "//bazel/rules:micronaut_bean_definition_inject_processor",
+        "//bazel/rules:micronaut_package_element_visitor_processor",
     ],
+    resources = ["//domains/platform/resources:micronaut_config"],
     visibility = ["//visibility:public"],
     runtime_deps = [
-        "//domains/platform/libs/logging",
+        artifact("ch.qos.logback:logback-classic"),
     ],
     deps = [
         ":dtos",
@@ -70,7 +73,6 @@ java_binary(
         "//domains/platform/libs/http_client:core",
         "//domains/platform/libs/http_client:jdk11",
         "//domains/platform/libs/json",
-        "//domains/platform/libs/logging",
         artifact("com.fasterxml.jackson.core:jackson-annotations"),
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("io.micronaut:micronaut-context"),

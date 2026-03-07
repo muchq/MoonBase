@@ -17,5 +17,10 @@ public record GameFeature(
     String result,
     Instant playedAt,
     Integer numMoves,
-    Instant indexedAt,
+    boolean hasPin,
+    boolean hasCrossPin,
+    boolean hasFork,
+    boolean hasSkewer,
+    boolean hasDiscoveredAttack,
+    String motifsJson,
     String pgn) {}

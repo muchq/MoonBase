@@ -2,5 +2,4 @@
 
 set -e
 
-# scalafmt-native .
-echo "scalafmt disabled"
+scalafmt-native .
