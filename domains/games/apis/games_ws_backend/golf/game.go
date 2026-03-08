@@ -710,6 +710,25 @@ func (g *Game) ShouldShowCards(clientID string) bool {
 	return false
 }
 
+// ReplaceClient swaps the client ID for a player, used when a player reconnects
+// with a new WebSocket connection.
+func (g *Game) ReplaceClient(oldClientID, newClientID string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	player, exists := g.playersByClient[oldClientID]
+	if !exists {
+		return fmt.Errorf("player not found for client %s", oldClientID)
+	}
+
+	delete(g.playersByClient, oldClientID)
+	player.ClientID = newClientID
+	player.IsConnected = true
+	g.playersByClient[newClientID] = player
+
+	return nil
+}
+
 // GetRoomID returns the room ID this game belongs to
 func (g *Game) GetRoomID() string {
 	g.mu.RLock()

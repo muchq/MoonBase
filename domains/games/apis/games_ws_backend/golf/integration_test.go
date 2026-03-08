@@ -108,35 +108,81 @@ type TestEnvironment struct {
 	hub        *GolfHub
 	clients    map[string]*TestClient
 	hubClients map[string]*hub.Client
-	running    bool
-	mu         sync.RWMutex
+	// sessionTokens maps client id → JWT session token for reconnection testing
+	sessionTokens map[string]string
+	running       bool
+	mu            sync.RWMutex
 }
-
 
 func NewTestEnvironment() *TestEnvironment {
 	env := &TestEnvironment{
-		hub:        NewGolfHub(&players.DeterministicIDGenerator{}).(*GolfHub),
-		clients:    make(map[string]*TestClient),
-		hubClients: make(map[string]*hub.Client),
+		hub:           NewGolfHub(&players.DeterministicIDGenerator{}).(*GolfHub),
+		clients:       make(map[string]*TestClient),
+		hubClients:    make(map[string]*hub.Client),
+		sessionTokens: make(map[string]string),
 	}
 	go env.hub.Run()
 	env.running = true
 	return env
 }
 
+// CreateClient creates a new client and authenticates it.
+// This handles the authenticate handshake automatically.
 func (env *TestEnvironment) CreateClient(id string) *TestClient {
+	return env.createClientWithToken(id, "")
+}
+
+// CreateReconnectingClient creates a new client that authenticates with an existing session token.
+func (env *TestEnvironment) CreateReconnectingClient(id string, token string) *TestClient {
+	return env.createClientWithToken(id, token)
+}
+
+func (env *TestEnvironment) createClientWithToken(id string, token string) *TestClient {
 	env.mu.Lock()
-	defer env.mu.Unlock()
-	
+
 	testClient := NewTestClient(id)
 	testClient.StartCollecting()
-	
+
 	hubClient := &hub.Client{Hub: env.hub, Send: testClient.send}
 	env.hub.Register(hubClient)
-	
+
 	env.clients[id] = testClient
 	env.hubClients[id] = hubClient
+	env.mu.Unlock()
+
+	// Send authenticate message
+	authMsg := fmt.Sprintf(`{"type":"authenticate","sessionToken":"%s"}`, token)
+	env.hub.GameMessage(hub.GameMessageData{
+		Message: []byte(authMsg),
+		Sender:  hubClient,
+	})
+
+	// Wait for authenticated response
+	testClient.WaitForMessages(1, 200*time.Millisecond)
+
+	// Extract and store session token
+	if authResp, found := testClient.FindMessageByType("authenticated"); found {
+		var parsed map[string]interface{}
+		if err := json.Unmarshal(authResp, &parsed); err == nil {
+			if tok, ok := parsed["sessionToken"].(string); ok {
+				env.mu.Lock()
+				env.sessionTokens[id] = tok
+				env.mu.Unlock()
+			}
+		}
+	}
+
+	// Clear the authenticated message so tests start clean
+	testClient.ClearMessages()
+
 	return testClient
+}
+
+// GetSessionToken returns the stored session token for a client.
+func (env *TestEnvironment) GetSessionToken(id string) string {
+	env.mu.RLock()
+	defer env.mu.RUnlock()
+	return env.sessionTokens[id]
 }
 
 func (env *TestEnvironment) SendMessage(clientID string, message string) error {
@@ -159,12 +205,13 @@ func (env *TestEnvironment) SendMessage(clientID string, message string) error {
 func (env *TestEnvironment) Cleanup() {
 	env.mu.Lock()
 	defer env.mu.Unlock()
-	
+
 	for _, client := range env.clients {
 		client.Close() // Close() is now idempotent
 	}
 	env.clients = make(map[string]*TestClient)
 	env.hubClients = make(map[string]*hub.Client)
+	env.sessionTokens = make(map[string]string)
 }
 
 func (env *TestEnvironment) WaitForStabilization() {
@@ -879,92 +926,149 @@ func TestIntegration_StateValidationEdgeCases(t *testing.T) {
 }
 
 func TestIntegration_PlayerReconnection(t *testing.T) {
-	// NOTE: This test currently validates the behavior where disconnected players 
-	// are removed from rooms and get new player IDs when they reconnect. 
-	// This behavior should be updated once we implement proper reconnect support
-	// that maintains player identity and game state across disconnections.
-	
+	// This test validates JWT-based reconnection: a player disconnects and
+	// reconnects using their stored session token, preserving their identity
+	// and room membership.
+
 	env := NewTestEnvironment()
 	defer env.Cleanup()
-	
+
 	alice := env.CreateClient("alice")
 	bob := env.CreateClient("bob")
-	
-	// Create room and game
+
+	// Save Bob's session token for reconnection
+	bobToken := env.GetSessionToken("bob")
+	if bobToken == "" {
+		t.Fatal("Bob should have a session token after authentication")
+	}
+
+	// Get Bob's player ID
+	env.hub.mu.RLock()
+	var bobPlayerID string
+	for _, ctx := range env.hub.clientContexts {
+		if ctx.PlayerID != "" {
+			// DeterministicIDGenerator produces "player-1", "player-2", etc.
+			// Bob is the second client created
+		}
+	}
+	bobHubClient := env.hubClients["bob"]
+	if bobHubClient != nil {
+		if ctx, ok := env.hub.clientContexts[bobHubClient]; ok {
+			bobPlayerID = ctx.PlayerID
+		}
+	}
+	env.hub.mu.RUnlock()
+
+	t.Logf("Bob's playerID: %s, token: %s...", bobPlayerID, bobToken[:20])
+
+	// Create room
 	env.SendMessage(alice.id, `{"type": "createRoom"}`)
 	alice.WaitForMessages(1, 100*time.Millisecond)
-	
+
 	msg, _ := alice.FindMessageByType("roomJoined")
 	var roomJoined RoomJoinedMessage
 	json.Unmarshal(msg, &roomJoined)
 	roomID := roomJoined.RoomState.ID
-	
+
+	// Bob joins room
 	env.SendMessage(bob.id, fmt.Sprintf(`{"type": "joinRoom", "roomId": "%s"}`, roomID))
 	env.WaitForStabilization()
-	
-	// Bob disconnects - let the hub handle the channel closure
-	env.mu.RLock()
-	bobHubClient, exists := env.hubClients["bob"]
-	env.mu.RUnlock()
-	
-	if exists {
-		// Mark the client as closed but don't close the channel manually
-		bob.mu.Lock()
-		bob.closed = true
-		bob.mu.Unlock()
-		
-		// Let the hub handle the unregistration and channel closure
-		env.hub.Unregister(bobHubClient)
-	}
-	env.WaitForStabilization()
-	
-	// Validate room state after disconnect
+
+	// Validate room state before disconnect
 	if err := env.ValidateRoomState(roomID); err != nil {
-		t.Fatalf("Invalid room state after disconnect: %v", err)
+		t.Fatalf("Invalid room state before disconnect: %v", err)
 	}
-	
-	// Check the room state after disconnect - the behavior may vary
+
 	env.hub.mu.RLock()
 	room := env.hub.rooms[roomID]
-	playerCount := len(room.Players)
+	playerCountBefore := len(room.Players)
 	env.hub.mu.RUnlock()
-	
-	t.Logf("Room has %d players after Bob's disconnect", playerCount)
-	if playerCount < 1 {
-		t.Errorf("Room should have at least Alice after Bob disconnects, got %d players", playerCount)
+	t.Logf("Room has %d players before Bob disconnects", playerCountBefore)
+
+	// Bob disconnects
+	env.mu.RLock()
+	bobClient := env.hubClients["bob"]
+	env.mu.RUnlock()
+
+	bob.mu.Lock()
+	bob.closed = true
+	bob.mu.Unlock()
+
+	env.hub.Unregister(bobClient)
+	env.WaitForStabilization()
+
+	// Check that Bob's session is preserved
+	env.hub.mu.RLock()
+	_, hasDisconnectedSession := env.hub.disconnectedSessions[bobPlayerID]
+	env.hub.mu.RUnlock()
+
+	if !hasDisconnectedSession {
+		t.Fatal("Bob should have a disconnected session after disconnect")
 	}
-	
-	// Bob "reconnects" (rejoins same room)
-	bob2 := env.CreateClient("bob")
-	env.SendMessage(bob2.id, fmt.Sprintf(`{"type": "joinRoom", "roomId": "%s"}`, roomID))
-	if !bob2.WaitForMessages(1, 100*time.Millisecond) {
-		t.Fatal("Bob didn't receive reconnection response")
+
+	// Bob reconnects with his stored token
+	bob2 := env.CreateReconnectingClient("bob2", bobToken)
+
+	// Bob should receive roomJoined and be back in his room
+	if !bob2.WaitForMessages(1, 500*time.Millisecond) {
+		t.Fatal("Bob didn't receive reconnection state")
 	}
-	
-	// Validate final state
-	if err := env.ValidateRoomState(roomID); err != nil {
-		t.Fatalf("Invalid room state after reconnection: %v", err)
+
+	// Check for roomJoined message
+	roomMsg, found := bob2.FindMessageByType("roomJoined")
+	if !found {
+		t.Fatal("Bob should receive roomJoined on reconnect")
 	}
-	
+
+	var reconnectRoomJoined RoomJoinedMessage
+	json.Unmarshal(roomMsg, &reconnectRoomJoined)
+
+	// Verify Bob has the same player ID
+	if reconnectRoomJoined.PlayerID != bobPlayerID {
+		t.Errorf("Expected Bob's playerID %s after reconnect, got %s",
+			bobPlayerID, reconnectRoomJoined.PlayerID)
+	}
+
+	// Verify Bob is back in the same room
+	if reconnectRoomJoined.RoomState.ID != roomID {
+		t.Errorf("Expected room %s after reconnect, got %s",
+			roomID, reconnectRoomJoined.RoomState.ID)
+	}
+
+	// Validate room state after reconnect
+	env.WaitForStabilization()
+
 	env.hub.mu.RLock()
 	room = env.hub.rooms[roomID]
-	bobPlayerAfter := room.GetPlayerByClientID("bob")
 	finalPlayerCount := len(room.Players)
+
+	// Find Bob's player by playerID
+	var bobPlayerAfter *Player
+	for _, p := range room.Players {
+		if p.ID == bobPlayerID {
+			bobPlayerAfter = p
+			break
+		}
+	}
 	env.hub.mu.RUnlock()
-	
+
 	t.Logf("Room has %d players after Bob's reconnection", finalPlayerCount)
-	
-	// Bob should be found as a player (either the old Bob or a new Bob)
+
 	if bobPlayerAfter == nil {
-		// Check if there's any player that might be Bob by checking the final count
-		if finalPlayerCount < 2 {
-			t.Errorf("Expected at least 2 players after Bob rejoins, got %d", finalPlayerCount)
-		}
-	} else {
-		// If we found Bob, check that he's connected
-		if !bobPlayerAfter.IsConnected {
-			t.Error("Bob should be marked as connected after reconnection")
-		}
+		t.Fatal("Bob's player not found in room after reconnection")
+	}
+
+	if !bobPlayerAfter.IsConnected {
+		t.Error("Bob should be marked as connected after reconnection")
+	}
+
+	// Verify disconnected session was cleaned up
+	env.hub.mu.RLock()
+	_, stillDisconnected := env.hub.disconnectedSessions[bobPlayerID]
+	env.hub.mu.RUnlock()
+
+	if stillDisconnected {
+		t.Error("Bob's disconnected session should be cleaned up after reconnect")
 	}
 }
 
