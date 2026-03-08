@@ -1,14 +1,11 @@
 package golf
 
 import (
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // TokenManager handles JWT creation and validation for player authentication.
@@ -31,105 +28,39 @@ func NewTokenManagerWithSecret(secret []byte) *TokenManager {
 	return &TokenManager{secret: secret}
 }
 
-type jwtHeader struct {
-	Alg string `json:"alg"`
-	Typ string `json:"typ"`
-}
-
-type jwtClaims struct {
-	Sub string `json:"sub"` // playerID
-	Exp int64  `json:"exp"` // expiry unix timestamp
-	Iat int64  `json:"iat"` // issued at unix timestamp
-}
-
 // CreateToken generates a JWT containing the playerID with the given TTL.
 func (tm *TokenManager) CreateToken(playerID string, ttl time.Duration) (string, error) {
-	header := jwtHeader{Alg: "HS256", Typ: "JWT"}
-	claims := jwtClaims{
-		Sub: playerID,
-		Exp: time.Now().Add(ttl).Unix(),
-		Iat: time.Now().Unix(),
+	claims := jwt.RegisteredClaims{
+		Subject:   playerID,
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(ttl)),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
 	}
 
-	headerJSON, err := json.Marshal(header)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal header: %w", err)
-	}
-
-	claimsJSON, err := json.Marshal(claims)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal claims: %w", err)
-	}
-
-	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
-	claimsB64 := base64.RawURLEncoding.EncodeToString(claimsJSON)
-
-	signingInput := headerB64 + "." + claimsB64
-	signature := tm.sign([]byte(signingInput))
-	signatureB64 := base64.RawURLEncoding.EncodeToString(signature)
-
-	return signingInput + "." + signatureB64, nil
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(tm.secret)
 }
 
 // ValidateToken verifies the JWT signature, checks expiry, and returns the playerID.
-// Strictly validates that the algorithm is HS256 to prevent algorithm confusion attacks.
-func (tm *TokenManager) ValidateToken(token string) (string, error) {
-	parts := strings.SplitN(token, ".", 3)
-	if len(parts) != 3 {
-		return "", fmt.Errorf("invalid token format")
-	}
-
-	// Decode and validate header - enforce HS256 algorithm
-	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+// Strictly validates that the signing method is HMAC to prevent algorithm confusion attacks.
+func (tm *TokenManager) ValidateToken(tokenString string) (string, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unsupported signing method: %v", token.Header["alg"])
+		}
+		return tm.secret, nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("invalid header encoding: %w", err)
+		return "", fmt.Errorf("invalid token: %w", err)
 	}
 
-	var header jwtHeader
-	if err := json.Unmarshal(headerJSON, &header); err != nil {
-		return "", fmt.Errorf("invalid header: %w", err)
+	claims, ok := token.Claims.(*jwt.RegisteredClaims)
+	if !ok {
+		return "", fmt.Errorf("invalid token claims")
 	}
 
-	if header.Alg != "HS256" {
-		return "", fmt.Errorf("unsupported algorithm: %s (only HS256 is accepted)", header.Alg)
-	}
-
-	// Verify signature
-	signingInput := parts[0] + "." + parts[1]
-	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		return "", fmt.Errorf("invalid signature encoding: %w", err)
-	}
-
-	expectedSig := tm.sign([]byte(signingInput))
-	if !hmac.Equal(signature, expectedSig) {
-		return "", fmt.Errorf("invalid signature")
-	}
-
-	// Decode claims
-	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", fmt.Errorf("invalid claims encoding: %w", err)
-	}
-
-	var claims jwtClaims
-	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
-		return "", fmt.Errorf("invalid claims: %w", err)
-	}
-
-	if time.Now().Unix() > claims.Exp {
-		return "", fmt.Errorf("token expired")
-	}
-
-	if claims.Sub == "" {
+	if claims.Subject == "" {
 		return "", fmt.Errorf("token missing subject")
 	}
 
-	return claims.Sub, nil
-}
-
-func (tm *TokenManager) sign(data []byte) []byte {
-	mac := hmac.New(sha256.New, tm.secret)
-	mac.Write(data)
-	return mac.Sum(nil)
+	return claims.Subject, nil
 }
