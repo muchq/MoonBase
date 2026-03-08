@@ -13,16 +13,17 @@ public class Migration {
   private static final String H2_INDEXING_REQUESTS =
       """
       CREATE TABLE IF NOT EXISTS indexing_requests (
-          id            UUID DEFAULT random_uuid() PRIMARY KEY,
-          player        VARCHAR(255) NOT NULL,
-          platform      VARCHAR(50) NOT NULL,
-          start_month   VARCHAR(7) NOT NULL,
-          end_month     VARCHAR(7) NOT NULL,
-          status        VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-          created_at    TIMESTAMP NOT NULL DEFAULT current_timestamp(),
-          updated_at    TIMESTAMP NOT NULL DEFAULT current_timestamp(),
-          error_message TEXT,
-          games_indexed INT DEFAULT 0
+          id             UUID DEFAULT random_uuid() PRIMARY KEY,
+          player         VARCHAR(255) NOT NULL,
+          platform       VARCHAR(50) NOT NULL,
+          start_month    VARCHAR(7) NOT NULL,
+          end_month      VARCHAR(7) NOT NULL,
+          status         VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+          created_at     TIMESTAMP NOT NULL DEFAULT current_timestamp(),
+          updated_at     TIMESTAMP NOT NULL DEFAULT current_timestamp(),
+          error_message  TEXT,
+          games_indexed  INT DEFAULT 0,
+          exclude_bullet BOOLEAN NOT NULL DEFAULT FALSE
       )
       """;
 
@@ -50,30 +51,32 @@ public class Migration {
   private static final String H2_INDEXED_PERIODS =
       """
       CREATE TABLE IF NOT EXISTS indexed_periods (
-          id            UUID DEFAULT random_uuid() PRIMARY KEY,
-          player        VARCHAR(255) NOT NULL,
-          platform      VARCHAR(50) NOT NULL,
-          year_month    VARCHAR(7) NOT NULL,
-          fetched_at    TIMESTAMP NOT NULL,
-          is_complete   BOOLEAN NOT NULL,
-          games_count   INT NOT NULL,
-          UNIQUE (player, platform, year_month)
+          id             UUID DEFAULT random_uuid() PRIMARY KEY,
+          player         VARCHAR(255) NOT NULL,
+          platform       VARCHAR(50) NOT NULL,
+          year_month     VARCHAR(7) NOT NULL,
+          fetched_at     TIMESTAMP NOT NULL,
+          is_complete    BOOLEAN NOT NULL,
+          games_count    INT NOT NULL,
+          exclude_bullet BOOLEAN NOT NULL DEFAULT FALSE,
+          CONSTRAINT indexed_periods_unique UNIQUE (player, platform, year_month, exclude_bullet)
       )
       """;
 
   private static final String PG_INDEXING_REQUESTS =
       """
       CREATE TABLE IF NOT EXISTS indexing_requests (
-          id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          player        VARCHAR(255) NOT NULL,
-          platform      VARCHAR(50) NOT NULL,
-          start_month   VARCHAR(7) NOT NULL,
-          end_month     VARCHAR(7) NOT NULL,
-          status        VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-          created_at    TIMESTAMP NOT NULL DEFAULT now(),
-          updated_at    TIMESTAMP NOT NULL DEFAULT now(),
-          error_message TEXT,
-          games_indexed INT DEFAULT 0
+          id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          player         VARCHAR(255) NOT NULL,
+          platform       VARCHAR(50) NOT NULL,
+          start_month    VARCHAR(7) NOT NULL,
+          end_month      VARCHAR(7) NOT NULL,
+          status         VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+          created_at     TIMESTAMP NOT NULL DEFAULT now(),
+          updated_at     TIMESTAMP NOT NULL DEFAULT now(),
+          error_message  TEXT,
+          games_indexed  INT DEFAULT 0,
+          exclude_bullet BOOLEAN NOT NULL DEFAULT FALSE
       )
       """;
 
@@ -101,14 +104,15 @@ public class Migration {
   private static final String PG_INDEXED_PERIODS =
       """
       CREATE TABLE IF NOT EXISTS indexed_periods (
-          id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          player        VARCHAR(255) NOT NULL,
-          platform      VARCHAR(50) NOT NULL,
-          year_month    VARCHAR(7) NOT NULL,
-          fetched_at    TIMESTAMP NOT NULL,
-          is_complete   BOOLEAN NOT NULL,
-          games_count   INT NOT NULL,
-          UNIQUE (player, platform, year_month)
+          id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          player         VARCHAR(255) NOT NULL,
+          platform       VARCHAR(50) NOT NULL,
+          year_month     VARCHAR(7) NOT NULL,
+          fetched_at     TIMESTAMP NOT NULL,
+          is_complete    BOOLEAN NOT NULL,
+          games_count    INT NOT NULL,
+          exclude_bullet BOOLEAN NOT NULL DEFAULT FALSE,
+          CONSTRAINT indexed_periods_unique UNIQUE (player, platform, year_month, exclude_bullet)
       )
       """;
 
@@ -119,6 +123,25 @@ public class Migration {
     this.dataSource = dataSource;
     this.useH2 = useH2;
   }
+
+  private static final String ADD_EXCLUDE_BULLET_COLUMN =
+      "ALTER TABLE indexing_requests ADD COLUMN IF NOT EXISTS exclude_bullet BOOLEAN NOT NULL"
+          + " DEFAULT FALSE";
+
+  // Add exclude_bullet to indexed_periods and update the unique constraint so the period cache
+  // is keyed by (player, platform, year_month, exclude_bullet). Existing rows get false (bullet
+  // games included), matching pre-existing behavior. On PG we must drop the old 3-column
+  // constraint before adding the 4-column one; on H2 (tests) the table is always created fresh
+  // with the correct DDL so only the ADD CONSTRAINT IF NOT EXISTS is needed.
+  private static final String ADD_INDEXED_PERIODS_EXCLUDE_BULLET_COLUMN =
+      "ALTER TABLE indexed_periods ADD COLUMN IF NOT EXISTS exclude_bullet BOOLEAN NOT NULL"
+          + " DEFAULT FALSE";
+  private static final String DROP_INDEXED_PERIODS_OLD_UNIQUE_PG =
+      "ALTER TABLE indexed_periods DROP CONSTRAINT IF EXISTS"
+          + " indexed_periods_player_platform_year_month_key";
+  private static final String ADD_INDEXED_PERIODS_UNIQUE =
+      "ALTER TABLE indexed_periods ADD CONSTRAINT IF NOT EXISTS indexed_periods_unique"
+          + " UNIQUE (player, platform, year_month, exclude_bullet)";
 
   private static final String ADD_INDEXED_AT_COLUMN =
       "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS indexed_at TIMESTAMP NOT NULL DEFAULT"
@@ -207,6 +230,12 @@ public class Migration {
         stmt.execute(PG_INDEXED_PERIODS);
       }
 
+      stmt.execute(ADD_EXCLUDE_BULLET_COLUMN);
+      stmt.execute(ADD_INDEXED_PERIODS_EXCLUDE_BULLET_COLUMN);
+      if (!useH2) {
+        stmt.execute(DROP_INDEXED_PERIODS_OLD_UNIQUE_PG);
+      }
+      stmt.execute(ADD_INDEXED_PERIODS_UNIQUE);
       stmt.execute(ADD_INDEXED_AT_COLUMN);
 
       // Drop legacy motifs_json column (replaced by motif_occurrences table)

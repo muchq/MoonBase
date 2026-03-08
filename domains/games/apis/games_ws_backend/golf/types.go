@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/rand"
 	"time"
+
+	"github.com/muchq/moonbase/domains/games/apis/games_ws_backend/hub"
 )
 
 // Room represents a persistent room where multiple games can be played
@@ -240,12 +242,33 @@ type GameListUpdateMessage struct {
 	GameID string `json:"gameId"`
 }
 
+// Authentication message types
+type AuthenticatedMessage struct {
+	Type         string `json:"type"`
+	SessionToken string `json:"sessionToken"`
+	PlayerID     string `json:"playerId"`
+	Reconnected  bool   `json:"reconnected"`
+}
+
+// PlayerSession tracks a player's persistent session state across connections.
+type PlayerSession struct {
+	PlayerID       string
+	Client         *hub.Client // current client, nil when disconnected
+	ClientID       string      // getClientID(Client) cached for game lookups
+	RoomID         string
+	GameID         string
+	DisconnectedAt *time.Time // nil when connected
+	JoinedAt       time.Time
+	LastAction     time.Time
+}
+
 // Generic message for parsing
 type IncomingMessage struct {
-	Type      string `json:"type"`
-	RoomID    string `json:"roomId,omitempty"`
-	GameID    string `json:"gameId,omitempty"`
-	CardIndex int    `json:"cardIndex,omitempty"`
+	Type         string `json:"type"`
+	RoomID       string `json:"roomId,omitempty"`
+	GameID       string `json:"gameId,omitempty"`
+	CardIndex    int    `json:"cardIndex,omitempty"`
+	SessionToken string `json:"sessionToken,omitempty"`
 }
 
 // Card constants

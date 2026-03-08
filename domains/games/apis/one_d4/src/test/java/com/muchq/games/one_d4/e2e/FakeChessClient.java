@@ -97,5 +97,25 @@ public final class FakeChessClient extends ChessClient {
         "B20");
   }
 
+  public static PlayedGame bulletPlayedGame(String gameUrl) {
+    return new PlayedGame(
+        gameUrl,
+        MINIMAL_PGN,
+        Instant.EPOCH,
+        true,
+        new com.muchq.games.chess_com_client.Accuracies(90.0, 85.0),
+        "",
+        "uuid-" + gameUrl.hashCode(),
+        "",
+        "",
+        "bullet",
+        "chess",
+        new com.muchq.games.chess_com_client.PlayerResult(
+            1500, "win", "https://chess.com/white", "White", "uuid-w"),
+        new com.muchq.games.chess_com_client.PlayerResult(
+            1500, "loss", "https://chess.com/black", "Black", "uuid-b"),
+        "B20");
+  }
+
   public record FetchCall(String player, YearMonth month) {}
 }

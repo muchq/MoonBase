@@ -32,7 +32,7 @@ public class IndexControllerTest {
 
   @Test
   public void createIndex_createsAndEnqueuesWhenNoExistingRequest() {
-    IndexRequest request = new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-03");
+    IndexRequest request = new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-03", null);
     IndexResponse response = controller.createIndex(request);
 
     assertThat(response.id()).isNotNull();
@@ -42,12 +42,23 @@ public class IndexControllerTest {
     assertThat(response.endMonth()).isEqualTo("2024-03");
     assertThat(response.status()).isEqualTo("PENDING");
     assertThat(response.gamesIndexed()).isEqualTo(0);
+    assertThat(response.excludeBullet()).isFalse();
     assertThat(requestStore.createCallCount()).isEqualTo(1);
     assertThat(queue.enqueued()).hasSize(1);
     assertThat(queue.enqueued().get(0).player()).isEqualTo("hikaru");
     assertThat(queue.enqueued().get(0).platform()).isEqualTo("CHESS_COM");
     assertThat(queue.enqueued().get(0).startMonth()).isEqualTo("2024-01");
     assertThat(queue.enqueued().get(0).endMonth()).isEqualTo("2024-03");
+    assertThat(queue.enqueued().get(0).excludeBullet()).isFalse();
+  }
+
+  @Test
+  public void createIndex_withExcludeBulletTrue_propagatesFlag() {
+    IndexRequest request = new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-03", true);
+    IndexResponse response = controller.createIndex(request);
+
+    assertThat(response.excludeBullet()).isTrue();
+    assertThat(queue.enqueued().get(0).excludeBullet()).isTrue();
   }
 
   @Test
@@ -64,9 +75,10 @@ public class IndexControllerTest {
             Instant.now(),
             Instant.now(),
             null,
-            50));
+            50,
+            false));
 
-    IndexRequest request = new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-03");
+    IndexRequest request = new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-03", null);
     IndexResponse response = controller.createIndex(request);
 
     assertThat(response.id()).isEqualTo(existingId);
@@ -94,10 +106,11 @@ public class IndexControllerTest {
             Instant.now(),
             Instant.now(),
             null,
-            0));
+            0,
+            false));
 
     IndexResponse response =
-        controller.createIndex(new IndexRequest("player", "CHESS_COM", "2024-06", "2024-06"));
+        controller.createIndex(new IndexRequest("player", "CHESS_COM", "2024-06", "2024-06", null));
 
     assertThat(response.id()).isEqualTo(existingId);
     assertThat(response.player()).isEqualTo("player");
@@ -126,7 +139,8 @@ public class IndexControllerTest {
                         Instant.now(),
                         Instant.now(),
                         null,
-                        10)));
+                        10,
+                        false)));
 
     List<IndexResponse> responses = controller.listRequests();
 
@@ -146,7 +160,8 @@ public class IndexControllerTest {
             Instant.now(),
             Instant.now(),
             null,
-            42);
+            42,
+            false);
     requestStore.setExistingRequest(stored);
     requestStore.setFindByIdResponse(stored);
 
@@ -184,7 +199,8 @@ public class IndexControllerTest {
     }
 
     @Override
-    public UUID create(String player, String platform, String startMonth, String endMonth) {
+    public UUID create(
+        String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
       createCallCount++;
       return UUID.randomUUID();
     }
@@ -204,13 +220,14 @@ public class IndexControllerTest {
 
     @Override
     public Optional<IndexingRequestStore.IndexingRequest> findExistingRequest(
-        String player, String platform, String startMonth, String endMonth) {
+        String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
       return existingRequest.filter(
           r ->
               r.player().equals(player)
                   && r.platform().equals(platform)
                   && r.startMonth().equals(startMonth)
-                  && r.endMonth().equals(endMonth));
+                  && r.endMonth().equals(endMonth)
+                  && r.excludeBullet() == excludeBullet);
     }
   }
 

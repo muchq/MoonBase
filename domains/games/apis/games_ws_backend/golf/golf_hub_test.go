@@ -60,6 +60,17 @@ func (m *mockClient) close() {
 	close(m.send)
 }
 
+// authenticateMockClient sends an authenticate message and clears the response.
+// Must be called after Register and before any other game messages.
+func authenticateMockClient(golfHub hub.Hub, hubClient *hub.Client, mockCli *mockClient) {
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type":"authenticate","sessionToken":""}`),
+		Sender:  hubClient,
+	})
+	time.Sleep(10 * time.Millisecond)
+	mockCli.clearMessages()
+}
+
 func TestParseIncomingMessage(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -109,6 +120,212 @@ func TestParseIncomingMessage(t *testing.T) {
 	}
 }
 
+// Auth Tests
+
+func TestHub_AuthenticationRequired(t *testing.T) {
+	golfHub := NewGolfHub(&players.DeterministicIDGenerator{})
+	go golfHub.Run()
+
+	client1 := newMockClient("client1")
+	client1.collectMessages()
+	hubClient1 := &hub.Client{Hub: golfHub, Send: client1.send}
+
+	golfHub.Register(hubClient1)
+	time.Sleep(10 * time.Millisecond)
+
+	// Try to create room without authenticating
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type": "createRoom"}`),
+		Sender:  hubClient1,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	messages := client1.getMessages()
+	if len(messages) != 1 {
+		t.Fatalf("Expected 1 message, got %d", len(messages))
+	}
+
+	var errMsg ErrorMessage
+	json.Unmarshal(messages[0], &errMsg)
+	if errMsg.Type != "error" || errMsg.Message != "Must authenticate first" {
+		t.Errorf("Expected 'Must authenticate first' error, got: %s", errMsg.Message)
+	}
+
+	client1.close()
+}
+
+func TestHub_AuthenticationFlow(t *testing.T) {
+	golfHub := NewGolfHub(&players.DeterministicIDGenerator{})
+	go golfHub.Run()
+
+	client1 := newMockClient("client1")
+	client1.collectMessages()
+	hubClient1 := &hub.Client{Hub: golfHub, Send: client1.send}
+
+	golfHub.Register(hubClient1)
+	time.Sleep(10 * time.Millisecond)
+
+	// Authenticate with empty token (new session)
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type":"authenticate","sessionToken":""}`),
+		Sender:  hubClient1,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	messages := client1.getMessages()
+	if len(messages) != 1 {
+		t.Fatalf("Expected 1 message, got %d", len(messages))
+	}
+
+	var authMsg AuthenticatedMessage
+	json.Unmarshal(messages[0], &authMsg)
+
+	if authMsg.Type != "authenticated" {
+		t.Errorf("Expected authenticated message, got %s", authMsg.Type)
+	}
+	if authMsg.SessionToken == "" {
+		t.Error("Session token should not be empty")
+	}
+	if authMsg.PlayerID == "" {
+		t.Error("Player ID should not be empty")
+	}
+	if authMsg.Reconnected {
+		t.Error("Should not be a reconnection")
+	}
+
+	client1.close()
+}
+
+func TestHub_TokenReconnection(t *testing.T) {
+	golfHub := NewGolfHub(&players.DeterministicIDGenerator{})
+	go golfHub.Run()
+
+	// First client connects and authenticates
+	client1 := newMockClient("client1")
+	client1.collectMessages()
+	hubClient1 := &hub.Client{Hub: golfHub, Send: client1.send}
+
+	golfHub.Register(hubClient1)
+	time.Sleep(10 * time.Millisecond)
+
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type":"authenticate","sessionToken":""}`),
+		Sender:  hubClient1,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Extract token and playerID
+	messages := client1.getMessages()
+	var authMsg AuthenticatedMessage
+	json.Unmarshal(messages[0], &authMsg)
+	token := authMsg.SessionToken
+	playerID := authMsg.PlayerID
+
+	client1.clearMessages()
+
+	// Create a room
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type":"createRoom"}`),
+		Sender:  hubClient1,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	messages = client1.getMessages()
+	var roomJoined RoomJoinedMessage
+	json.Unmarshal(messages[0], &roomJoined)
+	roomID := roomJoined.RoomState.ID
+
+	// Disconnect
+	client1.mu.Lock()
+	client1.closed = true
+	client1.mu.Unlock()
+	golfHub.Unregister(hubClient1)
+	time.Sleep(50 * time.Millisecond)
+
+	// Reconnect with stored token
+	client2 := newMockClient("client2")
+	client2.collectMessages()
+	hubClient2 := &hub.Client{Hub: golfHub, Send: client2.send}
+
+	golfHub.Register(hubClient2)
+	time.Sleep(10 * time.Millisecond)
+
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type":"authenticate","sessionToken":"` + token + `"}`),
+		Sender:  hubClient2,
+	})
+	time.Sleep(100 * time.Millisecond) // Extra time for async state restoration
+
+	messages2 := client2.getMessages()
+	if len(messages2) < 1 {
+		t.Fatal("Expected at least 1 message on reconnect")
+	}
+
+	// First message should be authenticated with reconnected=true
+	var reconnectAuth AuthenticatedMessage
+	json.Unmarshal(messages2[0], &reconnectAuth)
+
+	if reconnectAuth.Type != "authenticated" {
+		t.Errorf("Expected authenticated message, got %s", reconnectAuth.Type)
+	}
+	if !reconnectAuth.Reconnected {
+		t.Error("Should be marked as reconnection")
+	}
+	if reconnectAuth.PlayerID != playerID {
+		t.Errorf("Expected playerID %s, got %s", playerID, reconnectAuth.PlayerID)
+	}
+
+	// Should also receive roomJoined with same room
+	foundRoom := false
+	for _, msg := range messages2 {
+		var parsed map[string]interface{}
+		json.Unmarshal(msg, &parsed)
+		if parsed["type"] == "roomJoined" {
+			if rs, ok := parsed["roomState"].(map[string]interface{}); ok {
+				if rs["id"] == roomID {
+					foundRoom = true
+				}
+			}
+		}
+	}
+	if !foundRoom {
+		t.Errorf("Expected to be restored to room %s on reconnect", roomID)
+	}
+
+	client2.close()
+}
+
+func TestHub_AlgValidation(t *testing.T) {
+	tm := NewTokenManagerWithSecret([]byte("test-secret"))
+
+	token, err := tm.CreateToken("player-1", 24*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create token: %v", err)
+	}
+
+	// Valid token should work
+	playerID, err := tm.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("Valid token should validate: %v", err)
+	}
+	if playerID != "player-1" {
+		t.Errorf("Expected player-1, got %s", playerID)
+	}
+
+	// Tampered token should fail
+	_, err = tm.ValidateToken(token + "tampered")
+	if err == nil {
+		t.Error("Tampered token should fail validation")
+	}
+
+	// Token from different secret should fail
+	tm2 := NewTokenManagerWithSecret([]byte("other-secret"))
+	_, err = tm2.ValidateToken(token)
+	if err == nil {
+		t.Error("Token from different secret should fail")
+	}
+}
+
 // Hub Integration Tests
 
 func TestHub_CreateAndJoinRoom(t *testing.T) {
@@ -129,6 +346,8 @@ func TestHub_CreateAndJoinRoom(t *testing.T) {
 	golfHub.Register(hubClient1)
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
+	authenticateMockClient(golfHub, hubClient1, client1)
+	authenticateMockClient(golfHub, hubClient2, client2)
 
 	// Client 1 creates room
 	createMsg := `{"type": "createRoom"}`
@@ -212,6 +431,8 @@ func TestHub_CreateAndJoinGame(t *testing.T) {
 	golfHub.Register(hubClient1)
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
+	authenticateMockClient(golfHub, hubClient1, client1)
+	authenticateMockClient(golfHub, hubClient2, client2)
 
 	// Client 1 creates room
 	createRoomMsg := `{"type": "createRoom"}`
@@ -363,6 +584,8 @@ func TestHub_StartGame(t *testing.T) {
 	golfHub.Register(hubClient1)
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
+	authenticateMockClient(golfHub, hubClient1, client1)
+	authenticateMockClient(golfHub, hubClient2, client2)
 
 	// Player 1 creates room (automatically joins)
 	golfHub.GameMessage(hub.GameMessageData{
@@ -504,6 +727,8 @@ func TestHub_PeekCard(t *testing.T) {
 	golfHub.Register(hubClient1)
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
+	authenticateMockClient(golfHub, hubClient1, client1)
+	authenticateMockClient(golfHub, hubClient2, client2)
 
 	// Player 1 creates room (automatically joins)
 	golfHub.GameMessage(hub.GameMessageData{
@@ -621,6 +846,8 @@ func TestHub_GameFlow(t *testing.T) {
 	golfHub.Register(hubClient1)
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
+	authenticateMockClient(golfHub, hubClient1, client1)
+	authenticateMockClient(golfHub, hubClient2, client2)
 
 	// Player 1 creates room (automatically joins)
 	golfHub.GameMessage(hub.GameMessageData{
@@ -741,6 +968,8 @@ func TestHub_PlayerDisconnect(t *testing.T) {
 	golfHub.Register(hubClient1)
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
+	authenticateMockClient(golfHub, hubClient1, client1)
+	authenticateMockClient(golfHub, hubClient2, client2)
 
 	// Player 1 creates room (automatically joins)
 	golfHub.GameMessage(hub.GameMessageData{
@@ -831,6 +1060,7 @@ func TestHub_InvalidMessages(t *testing.T) {
 
 	golfHub.Register(hubClient1)
 	time.Sleep(10 * time.Millisecond)
+	authenticateMockClient(golfHub, hubClient1, client1)
 
 	tests := []struct {
 		name string
@@ -911,6 +1141,9 @@ func TestHub_MultiGameSupport(t *testing.T) {
 	golfHub.Register(hubClient2)
 	golfHub.Register(hubClient3)
 	time.Sleep(10 * time.Millisecond)
+	authenticateMockClient(golfHub, hubClient1, client1)
+	authenticateMockClient(golfHub, hubClient2, client2)
+	authenticateMockClient(golfHub, hubClient3, client3)
 
 	// Client 1 creates a room
 	createMsg := `{"type": "createRoom"}`
@@ -1040,6 +1273,10 @@ func TestHub_GameIsolation(t *testing.T) {
 	golfHub.Register(hubClient3)
 	golfHub.Register(hubClient4)
 	time.Sleep(10 * time.Millisecond)
+	authenticateMockClient(golfHub, hubClient1, client1)
+	authenticateMockClient(golfHub, hubClient2, client2)
+	authenticateMockClient(golfHub, hubClient3, client3)
+	authenticateMockClient(golfHub, hubClient4, client4)
 
 	// Client 1 creates a room
 	createMsg := `{"type": "createRoom"}`
@@ -1169,6 +1406,8 @@ func TestHub_RequiredGameID(t *testing.T) {
 	golfHub.Register(hubClient1)
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
+	authenticateMockClient(golfHub, hubClient1, client1)
+	authenticateMockClient(golfHub, hubClient2, client2)
 
 	// Client 1 creates room
 	createMsg := `{"type": "createRoom"}`
@@ -1231,6 +1470,8 @@ func TestHub_GameCleanup(t *testing.T) {
 	golfHub.Register(hubClient1)
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
+	authenticateMockClient(golfHub, hubClient1, client1)
+	authenticateMockClient(golfHub, hubClient2, client2)
 
 	// Player 1 creates room (automatically joins)
 	createMsg := `{"type": "createRoom"}`
@@ -1338,6 +1579,8 @@ func TestHub_JoinGameTwice(t *testing.T) {
 	golfHub.Register(hubClient1)
 	golfHub.Register(hubClient2)
 	time.Sleep(10 * time.Millisecond)
+	authenticateMockClient(golfHub, hubClient1, client1)
+	authenticateMockClient(golfHub, hubClient2, client2)
 
 	// Client 1 creates room
 	createMsg := `{"type": "createRoom"}`
@@ -1457,6 +1700,7 @@ func TestHub_JoinRoomTwice(t *testing.T) {
 
 	golfHub.Register(hubClient1)
 	time.Sleep(10 * time.Millisecond)
+	authenticateMockClient(golfHub, hubClient1, client1)
 
 	// Client 1 creates room (automatically joins)
 	createMsg := `{"type": "createRoom"}`
@@ -1518,4 +1762,35 @@ func TestHub_JoinRoomTwice(t *testing.T) {
 	hub.mu.RUnlock()
 
 	client1.close()
+}
+
+// TestGetClientID_UsesIDFieldOverRemoteAddr verifies that when clients connect
+// through a proxy, their server-assigned UUID is used for identification rather
+// than RemoteAddr. Without this, two clients sharing the same proxy IP would
+// collide and be treated as the same player.
+func TestGetClientID_UsesIDFieldOverRemoteAddr(t *testing.T) {
+	t.Run("prefers ID field when set", func(t *testing.T) {
+		client := &hub.Client{ID: "server-assigned-uuid", Send: make(chan []byte, 1)}
+		if got := getClientID(client); got != "server-assigned-uuid" {
+			t.Errorf("expected server-assigned-uuid, got %s", got)
+		}
+	})
+
+	t.Run("two clients with same RemoteAddr get distinct IDs via ID field", func(t *testing.T) {
+		// Simulates the proxy collision scenario: both clients have nil Conn
+		// but differ only by their server-assigned ID.
+		client1 := &hub.Client{ID: "uuid-1", Send: make(chan []byte, 1)}
+		client2 := &hub.Client{ID: "uuid-2", Send: make(chan []byte, 1)}
+		if getClientID(client1) == getClientID(client2) {
+			t.Error("clients with different IDs must not share a client ID")
+		}
+	})
+
+	t.Run("falls back to test-client pointer when ID and Conn are both unset", func(t *testing.T) {
+		client := &hub.Client{Send: make(chan []byte, 1)}
+		id := getClientID(client)
+		if id == "" {
+			t.Error("expected non-empty fallback ID for test client")
+		}
+	})
 }

@@ -61,7 +61,8 @@ public class IndexWorker {
       for (YearMonth month = start; !month.isAfter(end); month = month.plusMonths(1)) {
         String monthStr = month.format(MONTH_FORMAT);
         Optional<IndexedPeriodStore.IndexedPeriod> cached =
-            periodStore.findCompletePeriod(message.player(), message.platform(), monthStr);
+            periodStore.findCompletePeriod(
+                message.player(), message.platform(), monthStr, message.excludeBullet());
         if (cached.isPresent()) {
           int count = cached.get().gamesCount();
           totalIndexed += count;
@@ -83,6 +84,9 @@ public class IndexWorker {
 
         int monthCount = 0;
         for (PlayedGame game : response.get().games()) {
+          if (message.excludeBullet() && "bullet".equals(game.timeClass())) {
+            continue;
+          }
           try {
             indexGame(message, game);
             monthCount++;
@@ -99,7 +103,13 @@ public class IndexWorker {
             month.plusMonths(1).atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant();
         boolean isComplete = !fetchedAt.isBefore(firstDayNextMonth);
         periodStore.upsertPeriod(
-            message.player(), message.platform(), monthStr, fetchedAt, isComplete, monthCount);
+            message.player(),
+            message.platform(),
+            monthStr,
+            fetchedAt,
+            isComplete,
+            monthCount,
+            message.excludeBullet());
         requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
       }
 

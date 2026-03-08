@@ -1,196 +1,130 @@
-# Golf Card Game WebSocket Backend
+# Golf Card Game
 
-This package implements the WebSocket backend for the 4-card Golf card game with a **room-based multi-game architecture**.
-
-## Features
-
-- **Multi-Game Rooms**: Multiple concurrent games within the same room
-- **Room-Based Chat Ready**: Players can join rooms without joining games (perfect for future chat features)
-- **Game Isolation**: Complete isolation between concurrent games
-- **Flexible Player Movement**: Players can join different games within the same room
-- **Automatic Game Cleanup**: Completed games are automatically removed after stats collection
-- **Multi-player support** (2-4 players per game)
-- **Real-time game state synchronization**
-- **Persistent room statistics** tracking across multiple games
-- **Thread-safe game state management**
-- **Full implementation of 4-card golf rules**
+WebSocket backend for 4-card golf with rooms, JWT authentication, and session reconnection.
 
 ## Game Rules
 
-- Each player receives 4 cards in a 2x2 grid
-- Players can peek at exactly 2 cards at the start
-- On each turn, players can:
-  - Draw from deck or take from discard pile
-  - Swap with one of their cards or discard the drawn card
-- Players can knock to trigger the final round
+- Each player receives 4 face-down cards in a 2x2 grid
+- Players peek at exactly 2 cards at the start
+- On each turn: draw from deck or take from discard, then swap with one of your cards or discard
+- A player can knock to trigger the final round
 - Lowest total score wins
 
-## Architecture Overview
+### Card Values
+
+| Card | Value |
+|------|-------|
+| A    | 1     |
+| 2-10 | Face value |
+| J    | 0     |
+| Q, K | 10    |
+
+## Architecture
 
 ### Room-Based Multi-Game System
 
 ```
-Room (6-character ID)
-├── Players[] (persistent across games)
-├── Games{} (multiple concurrent games)
-│   ├── GAME1 (players A, B)
-│   └── GAME2 (players C, D)  
-├── GameHistory[] (completed games)
-└── Room Statistics (total scores, wins)
+Room (6-char ID, e.g. "ABC123")
+├── Players[] — persistent across games, track wins/scores
+├── Games{}   — concurrent game instances
+│   ├── GAME1 (players A, B playing)
+│   └── GAME2 (players C, D playing)
+└── GameHistory[] — completed game results
 ```
 
-**Key Concepts:**
-- **Rooms**: Persistent containers with player membership and game history
-- **Games**: Individual match instances with unique IDs within rooms
-- **Game Context**: Players can be in a room without being in a specific game
-- **Game Isolation**: Players in different games don't see each other's messages
+- **Rooms** are persistent containers with player membership and cumulative stats
+- **Games** are isolated match instances within rooms (2-4 players each)
+- Players can be in a room without being in a specific game
 
-### Room Lifecycle
+### Authentication and Reconnection
 
-1. **Room Creation**: `{"type": "createGame"}` creates a room with the player in it
-2. **Room Joining**: Players join rooms and can chat/coordinate before joining games
-3. **Game Joining**: `{"type": "joinGame", "roomId": "ABC123", "gameId": "GAME1"}` 
-4. **Game Playing**: Standard golf game mechanics within isolated games
-5. **Game Completion**: Games are cleaned up, stats added to room history
+Players authenticate via JWT on every WebSocket connection:
 
-## WebSocket Endpoints
+1. Client connects and sends `authenticate` with a stored session token (or empty for new session)
+2. Server validates the token and either restores the existing session or creates a new one
+3. Server responds with `authenticated` containing a session token for the client to store
+4. If reconnecting, server automatically restores the player to their room and game
 
-The golf game is served at `/games/v1/golf-ws` on the games backend server.
+Disconnected players have a **5-minute grace period** during which their session is preserved. If they reconnect within that window, they resume with the same player ID and game state. After the grace period, the session is cleaned up and the player is removed from their game/room.
+
+Tokens use HMAC-SHA256 with a random secret generated at server startup. The signing method is strictly validated to prevent algorithm confusion attacks.
+
+**Limitation:** The JWT secret is generated randomly on each server start, so all existing session tokens are invalidated on restart or deploy. Players will need to re-authenticate as new sessions. A future improvement is to load the secret from a file or environment variable so tokens survive restarts.
+
+### Concurrency Model
+
+`GolfHub` runs a single-goroutine event loop processing channels for register, unregister, game messages, and session cleanup. Game instances (`Game`) use mutex-based locking for state access. This means the hub never blocks on game operations, and games are safe to access from broadcast goroutines.
 
 ## Message Protocol
 
-### Client to Server:
+### Connection Lifecycle
 
-#### Room Management
-- `createGame` - Create a new room (returns room with empty games)
-- `joinGame` - **REQUIRES both roomId AND gameId**: `{"type": "joinGame", "roomId": "ABC123", "gameId": "GAME1"}`
-- `startNewGame` - Create a new game within current room
-- `getRoomState` - Get current room state with all games
-
-#### Game Actions  
-- `startGame` - Start specific game (requires 2+ players)
-- `peekCard` - Peek at one of your cards
-- `drawCard` - Draw from deck  
-- `takeFromDiscard` - Take top discard card
-- `swapCard` - Swap drawn card with your card
-- `discardDrawn` - Discard the drawn card
-- `knock` - Signal final round
-- `hideCards` - Hide peeked cards after timeout
-
-#### Future Chat Support (Ready for Implementation)
-- `listGames` - List all games in current room
-- `createGameInRoom` - Create new game in current room  
-- `leaveGame` - Leave current game but stay in room
-
-### Server to Client:
-
-#### Room Messages
-- `roomJoined` - Confirmation with player ID and room state
-- `roomStateUpdate` - Updated room state (players, games, history)
-- `newGameStarted` - New game created in room
-
-#### Game Messages  
-- `gameJoined` - Confirmation with player ID and game state
-- `gameState` - Full game state update (personalized per player)
-- `gameStarted` - Game has begun
-- `turnChanged` - Turn changed to new player  
-- `playerKnocked` - Player has knocked
-- `gameEnded` - Game over with winner and scores
-
-#### System Messages
-- `error` - Error message
-- `gameListUpdate` - Games added/removed from room (future)
-
-## Examples
-
-### Creating a Room and Starting a Game
-
-```javascript
-// 1. Create room
-ws.send(JSON.stringify({"type": "createGame"}));
-// Response: {"type": "roomJoined", "playerId": "player_ABC123_1", "roomState": {...}}
-
-// 2. Other player joins room and specific game
-ws.send(JSON.stringify({
-  "type": "joinGame", 
-  "roomId": "ABC123", 
-  "gameId": "GAME1"
-}));
-
-// 3. First player also joins the same game
-ws.send(JSON.stringify({
-  "type": "joinGame",
-  "roomId": "ABC123", 
-  "gameId": "GAME1"  
-}));
-
-// 4. Start the game
-ws.send(JSON.stringify({"type": "startGame"}));
+```
+Client                          Server
+  |--- WebSocket connect -------->|
+  |--- authenticate ------------->|  (with sessionToken or empty)
+  |<-- authenticated -------------|  (sessionToken, playerId, reconnected)
+  |--- createGame / joinGame ---->|  (room + game operations)
+  |<-- roomJoined ----------------|  (playerId, roomState)
+  |--- startGame ---------------->|
+  |<-- gameStarted ---------------|
+  |<-- gameState -----------------|  (personalized per player)
+  |    ... game play ...          |
+  |<-- gameEnded -----------------|  (winner, finalScores)
 ```
 
-### Multiple Games in Same Room
+### Client to Server
 
-```javascript
-// Players can create/join different games within the same room:
-// - Players A, B join GAME1
-// - Players C, D join GAME2  
-// - Both games run concurrently with complete isolation
+| Message | Fields | Description |
+|---------|--------|-------------|
+| `authenticate` | `sessionToken?` | First message after connect; empty token for new session |
+| `createGame` | | Create a new room with the player in it |
+| `joinGame` | `roomId`, `gameId` | Join a specific game in a room (creates game if needed) |
+| `startGame` | | Start the current game (requires 2+ players) |
+| `peekCard` | `cardIndex` | Peek at one of your cards (during peeking phase) |
+| `drawCard` | | Draw from deck |
+| `takeFromDiscard` | | Take the top discard pile card |
+| `swapCard` | `cardIndex` | Swap drawn card with one of yours |
+| `discardDrawn` | | Discard the drawn card |
+| `knock` | | Signal final round |
+| `hideCards` | | Hide peeked cards |
+| `startNewGame` | | Start a new game in the current room |
 
-ws.send(JSON.stringify({
-  "type": "joinGame",
-  "roomId": "ABC123",
-  "gameId": "GAME2"  // Different game ID
-}));
-```
+### Server to Client
 
-## Implementation Status
+| Message | Fields | Description |
+|---------|--------|-------------|
+| `authenticated` | `sessionToken`, `playerId`, `reconnected` | Auth confirmation |
+| `roomJoined` | `playerId`, `roomState` | Joined room confirmation |
+| `roomStateUpdate` | `roomState` | Room state changed |
+| `gameJoined` | `playerId`, `gameState` | Joined game confirmation |
+| `gameState` | `gameState` | Game state update (cards personalized per player) |
+| `gameStarted` | | Game has begun |
+| `turnChanged` | `playerName` | Turn passed to next player |
+| `playerKnocked` | `playerName` | A player knocked |
+| `gameEnded` | `winner`, `finalScores` | Game over |
+| `newGameStarted` | `gameId`, `previousGameId?` | New game created in room |
+| `error` | `message` | Error message |
 
-### ✅ Phase 1 Complete (Current)
-- ✅ Multiple concurrent games per room
-- ✅ Game isolation and independent state  
-- ✅ Required gameId for all game operations
-- ✅ Automatic game cleanup
-- ✅ Room-level player management
-- ✅ Comprehensive test coverage
+## Code Layout
 
-### 🚧 Phase 2 (Future)
-- [ ] `listGames` message for game discovery
-- [ ] `createGameInRoom` message
-- [ ] `leaveGame` message (stay in room)
-- [ ] Room-based chat system
-- [ ] Game spectator mode
-
-### 🔮 Phase 3+ (Future)  
-- [ ] Tournament bracket support
-- [ ] Room-specific game variants
-- [ ] Advanced room management features
+| File | Description |
+|------|-------------|
+| `golf_hub.go` | Hub event loop: register/unregister, message routing, auth, reconnection, session cleanup |
+| `game.go` | Game instance: state machine, turn logic, scoring, player management |
+| `auth.go` | JWT token creation and validation (HMAC-SHA256 via `golang-jwt/jwt/v5`) |
+| `types.go` | All message types, game state structs, card utilities |
+| `state_validation.go` | Game phase transition validators |
 
 ## Development
 
-Run all tests:
 ```bash
-bazel test //domains/games/apis/games_ws_backend/golf:all
+# Run all tests
+bazel test //domains/games/apis/games_ws_backend/golf:golf_test
+
+# Run specific tests
+bazel test //domains/games/apis/games_ws_backend/golf:golf_test --test_filter="TestHub_Auth"
+bazel test //domains/games/apis/games_ws_backend/golf:golf_test --test_filter="TestIntegration"
 ```
 
-Run specific test categories:
-```bash
-# Test new multi-game functionality
-bazel test //domains/games/apis/games_ws_backend/golf:all --test_filter="TestHub_Multi"
-
-# Test game isolation
-bazel test //domains/games/apis/games_ws_backend/golf:all --test_filter="TestHub_GameIsolation"
-```
-
-Build:
-```bash
-bazel build //domains/games/apis/games_ws_backend:games_ws_backend
-```
-
-## Architecture Notes
-
-- **No Backward Compatibility**: Clean break from single-game model per STEPS.md
-- **Explicit Game Targeting**: All operations require gameId specification  
-- **State Isolation**: Each game maintains completely separate state
-- **Room as Coordinator**: Rooms manage multiple games and player assignments
-- **Aggressive Cleanup**: Completed games are removed immediately after stats collection
-- **Chat-Ready**: Architecture supports room-level chat without any game context
+See [EXAMPLE_GOLF.md](EXAMPLE_GOLF.md) for a complete annotated message flow walkthrough.

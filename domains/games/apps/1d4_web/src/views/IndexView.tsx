@@ -21,6 +21,7 @@ export default function IndexView() {
   const [platform, setPlatform] = useState('CHESS_COM');
   const [startMonth, setStartMonth] = useState('');
   const [endMonth, setEndMonth] = useState('');
+  const [excludeBullet, setExcludeBullet] = useState(true);
 
   const { data: requests = [] } = useQuery<IndexRequest[]>({
     queryKey: ['indexRequests'],
@@ -69,7 +70,7 @@ export default function IndexView() {
       return;
     }
     setMessage(null);
-    mutation.mutate({ player: p, platform, startMonth: sm, endMonth: em });
+    mutation.mutate({ player: p, platform, startMonth: sm, endMonth: em, excludeBullet });
   }
 
   return (
@@ -123,6 +124,16 @@ export default function IndexView() {
               onChange={(e) => setEndMonth(e.target.value)}
               required
             />
+          </div>
+          <div className="form-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={excludeBullet}
+                onChange={(e) => setExcludeBullet(e.target.checked)}
+              />{' '}
+              Exclude bullet games
+            </label>
           </div>
           <button type="submit" className="btn" disabled={mutation.isPending}>
             Submit

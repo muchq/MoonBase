@@ -3,6 +3,7 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "golf",
     srcs = [
+        "auth.go",
         "game.go",
         "golf_hub.go",
         "state_validation.go",
@@ -13,6 +14,7 @@ go_library(
     deps = [
         "//domains/games/apis/games_ws_backend/hub",
         "//domains/games/apis/games_ws_backend/players",
+        "@com_github_golang_jwt_jwt_v5//:jwt",
     ],
 )
 
