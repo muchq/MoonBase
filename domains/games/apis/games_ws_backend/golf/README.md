@@ -49,6 +49,8 @@ Disconnected players have a **5-minute grace period** during which their session
 
 Tokens use HMAC-SHA256 with a random secret generated at server startup. The signing method is strictly validated to prevent algorithm confusion attacks.
 
+**Limitation:** The JWT secret is generated randomly on each server start, so all existing session tokens are invalidated on restart or deploy. Players will need to re-authenticate as new sessions. A future improvement is to load the secret from a file or environment variable so tokens survive restarts.
+
 ### Concurrency Model
 
 `GolfHub` runs a single-goroutine event loop processing channels for register, unregister, game messages, and session cleanup. Game instances (`Game`) use mutex-based locking for state access. This means the hub never blocks on game operations, and games are safe to access from broadcast goroutines.
