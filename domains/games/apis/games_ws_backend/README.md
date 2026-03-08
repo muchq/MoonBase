@@ -1,63 +1,73 @@
 # Game Server
 
-A real-time multiplayer, multitenant WebSocket game server
+A real-time multiplayer, multitenant WebSocket game server.
 
 ## Overview
-This server handles real-time player interactions for
-- **[Thoughts](../thoughts)**, a pretty chill 3D vibe you can play [here](https://muchq.com/thoughts)
-- **[Golf](golf/)**, a 4-card golf game with room-based multi-game architecture
-- Some other games someday
 
-### Core Components
-- **Hub** (`hub.go`): Central message broker that manages all active clients and game state
-- **Main** (`main.go`): HTTP server setup and WebSocket upgrade handling
-- **Games**: individual games can implement the Hub interface and be registered on a dedicated path in main
+This server hosts multiple game backends on a single process, each on its own WebSocket endpoint:
 
-## Running the Server
+- **[Golf](golf/)** (`/games/v1/golf-ws`) — a 4-card golf card game with rooms, JWT authentication, and session reconnection
+- **[Thoughts](thoughts/)** (`/games/v1/thoughts-ws`) — a chill 3D multiplayer vibe, playable at [muchq.com/thoughts](https://muchq.com/thoughts)
 
-### Build
-```bash
-bazel build //domains/games/apis/games_ws_backend
+## Architecture
+
+```
+main.go
+├── hub/             # Shared WebSocket hub: client lifecycle, ping/pong, origin checks
+├── players/         # Player ID generators (whimsical for prod, deterministic for tests)
+├── golf/            # Golf game hub + game logic + JWT auth
+└── thoughts/        # Thoughts game hub + game logic
 ```
 
-### Development Mode
+Each game implements the `hub.Hub` interface and is registered on a dedicated HTTP path in `main.go`. The shared `hub` package handles WebSocket upgrades, client read/write pumps, and origin validation.
+
+### Hub Interface
+
+```go
+type Hub interface {
+    Register(c *Client)
+    Unregister(c *Client)
+    GameMessage(data GameMessageData)
+    Run()
+}
+```
+
+Games receive raw messages via `GameMessage`, manage their own state, and send responses through `client.Send` channels.
+
+### Client Identity
+
+Each WebSocket connection gets a UUID (`hub.Client.ID`) assigned at upgrade time. Games build their own identity layer on top — golf uses JWT-based player sessions that persist across reconnections.
+
+## Running
+
 ```bash
+# Development (debug logging, all origins allowed)
 DEV_MODE=1 bazel run //domains/games/apis/games_ws_backend
-```
 
-### Deploy
-This is now deployed as part of the consolidated deploy in
-```bash
-deploy/consolidated/deploy.sh
+# Build
+bazel build //domains/games/apis/games_ws_backend
+
+# Test everything
+bazel test //domains/games/apis/games_ws_backend/...
 ```
 
 ### Configuration
 
-- `DEV_MODE`: Enables debug logging and allows all WebSocket origins
-- `-addr`: Server address (default: `:8080`)
+| Variable   | Description |
+|------------|-------------|
+| `DEV_MODE` | Enables debug logging and allows all WebSocket origins |
+| `-addr`    | Server listen address (default `:8080`) |
+
+## Deployment
+
+Deployed via the consolidated deploy script:
+
+```bash
+deploy/consolidated/deploy.sh
+```
 
 ## Security
 
-- **Origin Validation**: Only allows connections from `thoughts.muchq.com`, `muchq.com`, and `www.muchq.com` in production
-- **HTTPS Enforcement**: Rejects non-HTTPS origins in production
-
-## Game Implementations
-
-### Golf (`/games/v1/golf-ws`)
-4-card golf game with advanced room-based multi-game architecture:
-- **Multiple concurrent games** within the same room
-- **Room-based player management** with persistent statistics
-- **Chat-ready architecture** - players can join rooms without joining games
-- **Game isolation** - complete separation between concurrent games
-- **Automatic cleanup** of completed games
-
-See [golf/README.md](golf/README.md) for detailed documentation.
-
-### Future Enhancements to Consider
-- [ ] **Chat**: Room-based chat system (architecture ready in golf)
-- [ ] **Rate Limiting**: Implement per-player rate limiting for actions
-- [ ] **Persistence**: Add database support for player progress and game history
-- [ ] **Metrics**: Implement Prometheus metrics for monitoring
-- [ ] **Anti-Cheat**: Server-side physics validation and anomaly detection
-- [ ] **Replay System**: Record game sessions for debugging and spectating
-
+- **Origin validation**: Production only allows `muchq.com`, `www.muchq.com`, and `thoughts.muchq.com` over HTTPS
+- **JWT authentication** (golf): HMAC-SHA256 tokens with algorithm validation to prevent confusion attacks
+- **Server-assigned IDs**: Player IDs are generated server-side, never accepted from clients
