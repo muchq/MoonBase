@@ -12,7 +12,7 @@ require (
 	github.com/prometheus/common v0.67.5
 	github.com/stretchr/testify v1.11.1
 	gonum.org/v1/gonum v0.17.0
-	google.golang.org/grpc v1.79.1
+	google.golang.org/grpc v1.79.2
 )
 
 require (
