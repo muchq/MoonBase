@@ -5,8 +5,8 @@ import GameDetailPanel from '../components/GameDetailPanel';
 import type { GameRow, OccurrenceRow } from '../types';
 
 vi.mock('react-chessboard', () => ({
-  Chessboard: ({ position }: { position: string }) => (
-    <div data-testid="chessboard" data-fen={position} />
+  Chessboard: ({ options }: { options: { position: string } }) => (
+    <div data-testid="chessboard" data-fen={options?.position} />
   ),
 }));
 

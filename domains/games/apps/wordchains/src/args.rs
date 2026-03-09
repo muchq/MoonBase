@@ -3,7 +3,7 @@ use clap::{Command, Arg, arg, value_parser};
 pub fn get_cmd() -> Command {
     Command::new("wordchains")
         .bin_name("wordchains")
-        .version("0.1.1")
+        .version("0.1.2")
         .subcommand_required(false)
         .arg(
             Arg::new("start")

@@ -76,7 +76,7 @@ mod tests {
     use super::*;
     use datafusion::arrow::array::{Array, BooleanArray, Int32Array, StringArray};
     use datafusion::arrow::record_batch::RecordBatch;
-    use parquet::arrow::ArrowWriter;
+    use datafusion::parquet::arrow::ArrowWriter;
     use std::fs;
     use tempfile::TempDir;
 

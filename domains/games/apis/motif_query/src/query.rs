@@ -1,4 +1,4 @@
-use arrow::json::ArrayWriter;
+use datafusion::arrow::json::ArrayWriter;
 use axum::{extract::State, http::StatusCode, response::Json};
 use std::sync::Arc;
 use tracing::error;
@@ -36,7 +36,7 @@ pub async fn query_handler(
         let batch_refs: Vec<&datafusion::arrow::record_batch::RecordBatch> =
             batches.iter().collect();
         writer
-            .write_batches(&batch_refs)
+            .write_batches(batch_refs.as_slice())
             .map_err(|e| app_error(&e.to_string()))?;
         writer.finish().map_err(|e| app_error(&e.to_string()))?;
     }

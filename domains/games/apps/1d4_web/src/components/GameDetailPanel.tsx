@@ -211,10 +211,12 @@ export default function GameDetailPanel({ game, onClose }: Props) {
           <div style={{ flex: '0 0 auto' }}>
             <div style={{ width: 'min(400px, 90vw)' }}>
               <Chessboard
-                position={fen}
-                boardOrientation={orientation}
-                customSquareStyles={squareStyles}
-                arePiecesDraggable={false}
+                options={{
+                  position: fen,
+                  boardOrientation: orientation,
+                  squareStyles: squareStyles,
+                  allowDragging: false,
+                }}
               />
             </div>
             {/* Move navigation */}

@@ -20,7 +20,7 @@
     "com.h2database:h2": 867138720,
     "com.uber.nullaway:nullaway": -99678960,
     "com.zaxxer:HikariCP": 173962819,
-    "io.github.tors42:chariot": 69234999,
+    "io.github.tors42:chariot": -1058161094,
     "io.micronaut.jaxrs:micronaut-jaxrs-bom": -1899878931,
     "io.micronaut.jaxrs:micronaut-jaxrs-processor": -1554586820,
     "io.micronaut.jaxrs:micronaut-jaxrs-server": -831028121,
@@ -39,7 +39,7 @@
     "io.netty:netty-common": 1498958496,
     "io.netty:netty-handler": 1278819283,
     "io.netty:netty-transport": 320927026,
-    "io.sentry:sentry-logback": 1081529458,
+    "io.sentry:sentry-logback": 1772090932,
     "jakarta.annotation:jakarta.annotation-api": -906475446,
     "junit:junit": -744267592,
     "org.assertj:assertj-core": -1145412507,
@@ -85,7 +85,7 @@
     "com.zaxxer:HikariCP": -121743357,
     "io.github.eisop:dataflow-errorprone": 1875600084,
     "io.github.java-diff-utils:java-diff-utils": -1540151507,
-    "io.github.tors42:chariot": -2097918040,
+    "io.github.tors42:chariot": -1775298447,
     "io.micronaut.jaxrs:micronaut-jaxrs-common": -1387798556,
     "io.micronaut.jaxrs:micronaut-jaxrs-processor": -472124482,
     "io.micronaut.jaxrs:micronaut-jaxrs-server": -250450910,
@@ -133,8 +133,8 @@
     "io.netty:netty-transport": 1613607013,
     "io.netty:netty-transport-native-unix-common": -523123782,
     "io.projectreactor:reactor-core": 1846691143,
-    "io.sentry:sentry": -1430066259,
-    "io.sentry:sentry-logback": 1270216697,
+    "io.sentry:sentry": 1782941553,
+    "io.sentry:sentry-logback": 1174554607,
     "jakarta.annotation:jakarta.annotation-api": 196616042,
     "jakarta.inject:jakarta.inject-api": 188991469,
     "jakarta.validation:jakarta.validation-api": -1708329466,
@@ -405,9 +405,9 @@
     },
     "io.github.tors42:chariot": {
       "shasums": {
-        "jar": "e80ca3c2482e39a6dab5f12807e1d9afc669409f4a9a0a70f59bc71b65875280"
+        "jar": "74754787674560b1f799153e5f0462496a2e1c0c2c8b638e88e4c2235cd3664f"
       },
-      "version": "0.2.6"
+      "version": "0.2.9"
     },
     "io.micronaut.jaxrs:micronaut-jaxrs-common": {
       "shasums": {
@@ -693,15 +693,15 @@
     },
     "io.sentry:sentry": {
       "shasums": {
-        "jar": "2699281b94fbdf8e109406f8f3a73fd6577d8d05c2c711eece8c76c0b04ce99a"
+        "jar": "ce86a763d44133f74989d56bd863eb698a770a1607a9062c7164489a6f66ffae"
       },
-      "version": "8.33.0"
+      "version": "8.34.1"
     },
     "io.sentry:sentry-logback": {
       "shasums": {
-        "jar": "2127c5cf82ad763ae017ce1566996c9b3abecf56189c0396938a71fe4f904607"
+        "jar": "cae5ce0263b795760792e58717443ff4d1d18d1afff61ad91a5f316614232180"
       },
-      "version": "8.33.0"
+      "version": "8.34.1"
     },
     "jakarta.annotation:jakarta.annotation-api": {
       "shasums": {
@@ -2394,7 +2394,6 @@
       "io.sentry.transport",
       "io.sentry.util",
       "io.sentry.util.network",
-      "io.sentry.util.runtime",
       "io.sentry.util.thread",
       "io.sentry.vendor",
       "io.sentry.vendor.gson.internal.bind.util",

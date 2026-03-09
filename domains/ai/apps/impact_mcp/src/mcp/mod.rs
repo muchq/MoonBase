@@ -52,12 +52,10 @@ impl McpClient {
         name: &str,
         arguments: serde_json::Value,
     ) -> Result<String, McpError> {
-        let params = CallToolRequestParams {
-            name: name.to_string().into(),
-            arguments: arguments.as_object().cloned(),
-            task: None,
-            meta: None,
-        };
+        let mut params = CallToolRequestParams::new(name.to_string());
+        if let Some(args) = arguments.as_object().cloned() {
+            params = params.with_arguments(args);
+        }
 
         let result = self
             .service
