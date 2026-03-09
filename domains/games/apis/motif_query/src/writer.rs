@@ -1,6 +1,6 @@
-use arrow::json::ReaderBuilder;
+use datafusion::arrow::json::ReaderBuilder;
 use axum::{extract::State, http::StatusCode, response::Json};
-use parquet::arrow::ArrowWriter;
+use datafusion::parquet::arrow::ArrowWriter;
 use std::fs;
 use std::io::Cursor;
 use std::sync::Arc;

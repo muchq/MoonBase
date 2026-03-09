@@ -393,22 +393,16 @@ impl ImpactServer {
 #[tool_handler]
 impl ServerHandler for ImpactServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            server_info: Implementation {
-                name: "impact-mcp".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-                description: Some("impact-mcp server".into()),
-                title: None,
-                icons: None,
-                website_url: None,
-            },
-            capabilities: ServerCapabilities {
-                tools: Some(Default::default()),
-                prompts: Some(Default::default()),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_prompts()
+                .build(),
+        )
+        .with_server_info(
+            Implementation::new("impact-mcp", env!("CARGO_PKG_VERSION"))
+                .with_description("impact-mcp server"),
+        )
     }
 
     async fn list_prompts(
@@ -418,48 +412,31 @@ impl ServerHandler for ImpactServer {
     ) -> Result<ListPromptsResult, ErrorData> {
         Ok(ListPromptsResult {
             prompts: vec![
-                Prompt {
-                    name: "weekly_status".into(),
-                    title: None,
-                    description: Some("Draft a weekly status update from recent evidence".into()),
-                    arguments: None,
-                    icons: None,
-                    meta: None,
-                },
-                Prompt {
-                    name: "packet_draft".into(),
-                    title: None,
-                    description: Some(
-                        "Generate a promotion packet from all evidence and rubric".into(),
-                    ),
-                    arguments: None,
-                    icons: None,
-                    meta: None,
-                },
-                Prompt {
-                    name: "gap_analysis".into(),
-                    title: None,
-                    description: Some("Analyze readiness gaps and suggest priorities".into()),
-                    arguments: None,
-                    icons: None,
-                    meta: None,
-                },
-                Prompt {
-                    name: "archetype_review".into(),
-                    title: None,
-                    description: Some("Review archetype strengths and provide coaching".into()),
-                    arguments: None,
-                    icons: None,
-                    meta: None,
-                },
-                Prompt {
-                    name: "readiness_check".into(),
-                    title: None,
-                    description: Some("Detailed readiness breakdown with scoring".into()),
-                    arguments: None,
-                    icons: None,
-                    meta: None,
-                },
+                Prompt::new(
+                    "weekly_status",
+                    Some("Draft a weekly status update from recent evidence"),
+                    None,
+                ),
+                Prompt::new(
+                    "packet_draft",
+                    Some("Generate a promotion packet from all evidence and rubric"),
+                    None,
+                ),
+                Prompt::new(
+                    "gap_analysis",
+                    Some("Analyze readiness gaps and suggest priorities"),
+                    None,
+                ),
+                Prompt::new(
+                    "archetype_review",
+                    Some("Review archetype strengths and provide coaching"),
+                    None,
+                ),
+                Prompt::new(
+                    "readiness_check",
+                    Some("Detailed readiness breakdown with scoring"),
+                    None,
+                ),
             ],
             ..Default::default()
         })
@@ -714,15 +691,10 @@ impl ServerHandler for ImpactServer {
             }
         };
 
-        Ok(GetPromptResult {
-            description: None,
-            messages: vec![PromptMessage {
-                role: PromptMessageRole::User,
-                content: rmcp::model::PromptMessageContent::Text {
-                    text: content,
-                },
-            }],
-        })
+        Ok(GetPromptResult::new(vec![PromptMessage::new_text(
+            PromptMessageRole::User,
+            content,
+        )]))
     }
 }
 
