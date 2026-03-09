@@ -38,6 +38,7 @@
     "https://bcr.bazel.build/modules/apple_support/1.24.2/MODULE.bazel": "0e62471818affb9f0b26f128831d5c40b074d32e6dda5a0d3852847215a41ca4",
     "https://bcr.bazel.build/modules/apple_support/2.3.0/MODULE.bazel": "d48f824ae8eeea5f837eb3038cef3615075d996d3e82eb9187192c2820605a81",
     "https://bcr.bazel.build/modules/apple_support/2.3.0/source.json": "d99b0a50918c4484856d773026b2fd60a694668c70fc0e19d592786dc7e5e469",
+    "https://bcr.bazel.build/modules/aspect_bazel_lib/1.28.0/MODULE.bazel": "d793416e81c34d137d75ef84fe622df6c550826772a7f06e3b98a0d1c347fe1c",
     "https://bcr.bazel.build/modules/aspect_bazel_lib/1.31.2/MODULE.bazel": "7bee702b4862612f29333590f4b658a5832d433d6f8e4395f090e8f4e85d442f",
     "https://bcr.bazel.build/modules/aspect_bazel_lib/1.38.0/MODULE.bazel": "6307fec451ba9962c1c969eb516ebfe1e46528f7fa92e1c9ac8646bef4cdaa3f",
     "https://bcr.bazel.build/modules/aspect_bazel_lib/1.40.3/MODULE.bazel": "668e6bcb4d957fc0e284316dba546b705c8d43c857f87119619ee83c4555b859",
@@ -132,6 +133,8 @@
     "https://bcr.bazel.build/modules/check/0.15.2.bcr.1/source.json": "dc81d335b44f70c17d8ba6dbff9c7f196594f38835981bbf7e6a6d363130d682",
     "https://bcr.bazel.build/modules/civetweb/1.16/MODULE.bazel": "46a38f9daeb57392e3827fce7d40926be0c802bd23cdd6bfd3a96c804de42fae",
     "https://bcr.bazel.build/modules/civetweb/1.16/source.json": "ba8b9585adb8355cb51b999d57172fd05e7a762c56b8d4bac6db42c99de3beb7",
+    "https://bcr.bazel.build/modules/container_structure_test/1.22.1/MODULE.bazel": "da58a98f9f6d47e702532fdfec0431bd60e417d3f004471f409a4543cae0e61e",
+    "https://bcr.bazel.build/modules/container_structure_test/1.22.1/source.json": "75873f230014ff7a6f30e9f81b9e31ee4593c71353ffa8d5f8fe4ad4aba21160",
     "https://bcr.bazel.build/modules/contrib_rules_jvm/0.32.0/MODULE.bazel": "0a51c56b2fc0d8ce6184f19513c78ce2a8a56119bc2adbc1859ff84c30724c29",
     "https://bcr.bazel.build/modules/contrib_rules_jvm/0.32.0/source.json": "55b30b443561e3cce13001197961c732661ceb8e0e573b6e734d2bb6e52b3c1b",
     "https://bcr.bazel.build/modules/curl/8.12.0/MODULE.bazel": "8e97a0826fb408d76ac391b4ed4dfa62561d865b60984ca3b1be07a78bffd533",
@@ -720,6 +723,106 @@
         }
       }
     },
+    "@@container_structure_test+//:repositories.bzl%extension": {
+      "general": {
+        "bzlTransitiveDigest": "zX0SmkSElrDGH4VSTz90w8J+UjkzBoG6mFfxR67OSSg=",
+        "usagesDigest": "uXk1ym4ketE3OMAHoR5fUuuv8pOmi0aSyCe28koTwfA=",
+        "recordedInputs": [
+          "REPO_MAPPING:aspect_bazel_lib+,bazel_tools bazel_tools",
+          "REPO_MAPPING:container_structure_test+,aspect_bazel_lib aspect_bazel_lib+"
+        ],
+        "generatedRepoSpecs": {
+          "jq_darwin_amd64": {
+            "repoRuleId": "@@aspect_bazel_lib+//lib/private:jq_toolchain.bzl%jq_platform_repo",
+            "attributes": {
+              "platform": "darwin_amd64",
+              "version": "1.7"
+            }
+          },
+          "jq_darwin_arm64": {
+            "repoRuleId": "@@aspect_bazel_lib+//lib/private:jq_toolchain.bzl%jq_platform_repo",
+            "attributes": {
+              "platform": "darwin_arm64",
+              "version": "1.7"
+            }
+          },
+          "jq_linux_amd64": {
+            "repoRuleId": "@@aspect_bazel_lib+//lib/private:jq_toolchain.bzl%jq_platform_repo",
+            "attributes": {
+              "platform": "linux_amd64",
+              "version": "1.7"
+            }
+          },
+          "jq_linux_arm64": {
+            "repoRuleId": "@@aspect_bazel_lib+//lib/private:jq_toolchain.bzl%jq_platform_repo",
+            "attributes": {
+              "platform": "linux_arm64",
+              "version": "1.7"
+            }
+          },
+          "jq_windows_amd64": {
+            "repoRuleId": "@@aspect_bazel_lib+//lib/private:jq_toolchain.bzl%jq_platform_repo",
+            "attributes": {
+              "platform": "windows_amd64",
+              "version": "1.7"
+            }
+          },
+          "jq": {
+            "repoRuleId": "@@aspect_bazel_lib+//lib/private:jq_toolchain.bzl%jq_host_alias_repo",
+            "attributes": {}
+          },
+          "jq_toolchains": {
+            "repoRuleId": "@@aspect_bazel_lib+//lib/private:jq_toolchain.bzl%jq_toolchains_repo",
+            "attributes": {
+              "user_repository_name": "jq"
+            }
+          },
+          "structure_test_st_darwin_amd64": {
+            "repoRuleId": "@@container_structure_test+//:repositories.bzl%structure_test_repositories",
+            "attributes": {
+              "platform": "darwin_amd64"
+            }
+          },
+          "structure_test_st_darwin_arm64": {
+            "repoRuleId": "@@container_structure_test+//:repositories.bzl%structure_test_repositories",
+            "attributes": {
+              "platform": "darwin_arm64"
+            }
+          },
+          "structure_test_st_linux_arm64": {
+            "repoRuleId": "@@container_structure_test+//:repositories.bzl%structure_test_repositories",
+            "attributes": {
+              "platform": "linux_arm64"
+            }
+          },
+          "structure_test_st_linux_s390x": {
+            "repoRuleId": "@@container_structure_test+//:repositories.bzl%structure_test_repositories",
+            "attributes": {
+              "platform": "linux_s390x"
+            }
+          },
+          "structure_test_st_linux_amd64": {
+            "repoRuleId": "@@container_structure_test+//:repositories.bzl%structure_test_repositories",
+            "attributes": {
+              "platform": "linux_amd64"
+            }
+          },
+          "structure_test_st_windows_amd64": {
+            "repoRuleId": "@@container_structure_test+//:repositories.bzl%structure_test_repositories",
+            "attributes": {
+              "platform": "windows_amd64"
+            }
+          },
+          "structure_test_toolchains": {
+            "repoRuleId": "@@container_structure_test+//bazel:toolchains_repo.bzl%toolchains_repo",
+            "attributes": {
+              "toolchain_type": "@container_structure_test//bazel:structure_test_toolchain_type",
+              "toolchain": "@structure_test_st_{platform}//:structure_test_toolchain"
+            }
+          }
+        }
+      }
+    },
     "@@envoy_api+//bazel:repositories.bzl%non_module_deps": {
       "general": {
         "bzlTransitiveDigest": "DITA13hLUg1ghuzFJXkoidwLUcSUZ8eP36QseHw3oQ4=",
@@ -1114,7 +1217,7 @@
     "@@rules_oci+//oci:extensions.bzl%oci": {
       "general": {
         "bzlTransitiveDigest": "6BVnMG/SRKYFfNYrWwf+tXBdCs0pbb6tgYNZgqCyc/Q=",
-        "usagesDigest": "YGpFg+39EomXoedU4gZaNzIJyUfcz+yIM4sLHdtPo20=",
+        "usagesDigest": "12vN3yfsrlzLtWJn6nV3GwRJjCdr9khgOlVvY1WW68c=",
         "recordedInputs": [
           "REPO_MAPPING:aspect_bazel_lib+,bazel_tools bazel_tools",
           "REPO_MAPPING:bazel_features+,bazel_tools bazel_tools",
@@ -1173,7 +1276,7 @@
               "scheme": "https",
               "registry": "index.docker.io",
               "repository": "azul/zulu-openjdk",
-              "identifier": "sha256:c7cd0d4c77551589b550d74bdd04f71ee4853dfce1c676d627bab88d40224523",
+              "identifier": "sha256:e7585cf598c00a9a7a6a9fc478aea5eb869eacb0bf25ded479c2fab2ee51163a",
               "platform": "linux/amd64",
               "target_name": "java_base_linux_amd64",
               "bazel_tags": []
@@ -1186,7 +1289,7 @@
               "scheme": "https",
               "registry": "index.docker.io",
               "repository": "azul/zulu-openjdk",
-              "identifier": "sha256:c7cd0d4c77551589b550d74bdd04f71ee4853dfce1c676d627bab88d40224523",
+              "identifier": "sha256:e7585cf598c00a9a7a6a9fc478aea5eb869eacb0bf25ded479c2fab2ee51163a",
               "platform": "linux/arm64/v8",
               "target_name": "java_base_linux_arm64_v8",
               "bazel_tags": []
@@ -1200,7 +1303,7 @@
               "scheme": "https",
               "registry": "index.docker.io",
               "repository": "azul/zulu-openjdk",
-              "identifier": "sha256:c7cd0d4c77551589b550d74bdd04f71ee4853dfce1c676d627bab88d40224523",
+              "identifier": "sha256:e7585cf598c00a9a7a6a9fc478aea5eb869eacb0bf25ded479c2fab2ee51163a",
               "platforms": {
                 "@@platforms//cpu:x86_64": "@java_base_linux_amd64",
                 "@@platforms//cpu:arm64": "@java_base_linux_arm64_v8"
@@ -1503,7 +1606,7 @@
           "REPO_MAPPING:rules_rust+,bazel_tools bazel_tools",
           "REPO_MAPPING:rules_rust+,rules_cc rules_cc+",
           "REPO_MAPPING:rules_rust+,rules_rust rules_rust+",
-          "FILE:@@//Cargo.lock fc4b88a1aea7c975e1baffcc7954f48266cfb17054235e4942511e1723e05e70",
+          "FILE:@@//Cargo.lock 8b43ce6fc9c8bbaad6701a918a2c64f72a6c10b684c84e533ef3ab0bfa301119",
           "FILE:@@//Cargo.toml f0122cdae87c48c86227a04e78d61fc5e20afa5f3b8e99c6cbdc16872ee109ea",
           "FILE:@@//domains/ai/apps/impact_mcp/Cargo.toml cb8ce51e9dff830e9569f81f8c9ee8bc0fb4c2cf084967314b4a123f85b3f962",
           "FILE:@@//domains/ai/apps/microgpt_cli/Cargo.toml ae46b29167da1b1337f0f00ffe83d7273dcfef1858e28ce9e47bc5c75a9aa7e8",

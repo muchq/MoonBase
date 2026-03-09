@@ -1,7 +1,7 @@
 bazel_dep(name = "rules_pkg", version = "1.2.0")
 bazel_dep(name = "rules_oci", version = "2.2.7")
+bazel_dep(name = "container_structure_test", version = "1.22.1")
 
-# For testing, check out https://registry.bazel.build/modules/container_structure_test
 oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
 oci.pull(
     name = "docker_lib_ubuntu",
@@ -20,6 +20,7 @@ oci.pull(
         "linux/amd64",
         "linux/arm64/v8",
     ],
+    tag = "25",
 )
 oci.pull(
     name = "distroless_base",
