@@ -1,5 +1,6 @@
 "Dockerization helpers"
 
+load("@container_structure_test//:defs.bzl", "container_structure_test")
 load("@io_bazel_rules_go//go:def.bzl", "go_cross_binary")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
@@ -113,3 +114,10 @@ def linux_oci_java(bin_name):
     )
 
     _push_and_load(image_name = image_name, bin_name = bin_name)
+
+    container_structure_test(
+        name = bin_name + "_image_test",
+        configs = ["//bazel/rules:java_image_test.yaml"],
+        image = ":" + image_name,
+        tags = ["manual"],
+    )

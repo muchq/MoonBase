@@ -1,0 +1,6 @@
+schemaVersion: 2.0.0
+commandTests:
+  - name: "JDK version is 25"
+    command: "java"
+    args: ["--version"]
+    expectedOutput: ["openjdk 25"]

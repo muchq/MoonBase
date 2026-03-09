@@ -1,5 +1,7 @@
 load("@rules_java//java:defs.bzl", "java_plugin")
 
+exports_files(["java_image_test.yaml"])
+
 java_plugin(
     name = "error_prone",
     processor_class = "com.google.errorprone.ErrorProneJavaCompiler",
