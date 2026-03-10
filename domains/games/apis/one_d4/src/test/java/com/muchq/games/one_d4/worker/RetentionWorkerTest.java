@@ -5,16 +5,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.chessql.parser.Parser;
 import com.muchq.games.one_d4.api.dto.GameFeature;
-import com.muchq.games.one_d4.db.DataSourceFactory;
 import com.muchq.games.one_d4.db.GameFeatureDao;
 import com.muchq.games.one_d4.db.IndexedPeriodDao;
-import com.muchq.games.one_d4.db.Migration;
+import com.muchq.games.one_d4.db.TestDb;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import javax.sql.DataSource;
-import org.jdbi.v3.core.Jdbi;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -27,14 +25,11 @@ public class RetentionWorkerTest {
 
   @Before
   public void setUp() {
-    String jdbcUrl = "jdbc:h2:mem:retention_" + System.currentTimeMillis() + ";DB_CLOSE_DELAY=-1";
-    dataSource = DataSourceFactory.create(jdbcUrl, "sa", "");
-    Migration migration = new Migration(dataSource, true);
-    migration.run();
+    TestDb testDb = TestDb.create("retention");
+    dataSource = testDb.dataSource();
 
-    Jdbi jdbi = Jdbi.create(dataSource);
-    dao = new GameFeatureDao(jdbi, true);
-    periodDao = new IndexedPeriodDao(jdbi, true);
+    dao = new GameFeatureDao(testDb.jdbi(), true);
+    periodDao = new IndexedPeriodDao(testDb.jdbi(), true);
     worker = new RetentionWorker(dao, periodDao);
     requestId = UUID.randomUUID();
 

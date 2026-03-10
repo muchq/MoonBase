@@ -7,9 +7,8 @@ import com.muchq.games.chessql.compiler.DataFusionSqlCompiler;
 import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.chessql.parser.Parser;
 import com.muchq.games.one_d4.api.dto.GameFeature;
-import com.muchq.games.one_d4.db.DataSourceFactory;
 import com.muchq.games.one_d4.db.GameFeatureDao;
-import com.muchq.games.one_d4.db.Migration;
+import com.muchq.games.one_d4.db.TestDb;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import java.time.Instant;
@@ -17,8 +16,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import javax.sql.DataSource;
-import org.jdbi.v3.core.Jdbi;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -39,12 +36,10 @@ public class DataFusionContractTest {
 
   @Before
   public void setUp() {
-    String jdbcUrl = "jdbc:h2:mem:df_contract_" + System.currentTimeMillis() + ";DB_CLOSE_DELAY=-1";
-    DataSource dataSource = DataSourceFactory.create(jdbcUrl, "sa", "");
-    new Migration(dataSource, true).run();
+    TestDb testDb = TestDb.create("df_contract");
 
     requestId = UUID.randomUUID();
-    try (var conn = dataSource.getConnection();
+    try (var conn = testDb.dataSource().getConnection();
         var stmt =
             conn.prepareStatement(
                 "INSERT INTO indexing_requests (id, player, platform, start_month, end_month,"
@@ -55,7 +50,7 @@ public class DataFusionContractTest {
       throw new RuntimeException(e);
     }
 
-    dao = new GameFeatureDao(Jdbi.create(dataSource), true);
+    dao = new GameFeatureDao(testDb.jdbi(), true);
     seedData();
   }
 

@@ -13,11 +13,10 @@ import com.muchq.games.one_d4.api.IndexRequestValidator;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.IndexRequest;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
-import com.muchq.games.one_d4.db.DataSourceFactory;
 import com.muchq.games.one_d4.db.GameFeatureStore;
 import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
-import com.muchq.games.one_d4.db.Migration;
+import com.muchq.games.one_d4.db.TestDb;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.GameReplayer;
 import com.muchq.games.one_d4.engine.PgnParser;
@@ -42,8 +41,6 @@ import java.time.YearMonth;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import javax.sql.DataSource;
-import org.jdbi.v3.core.Jdbi;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -116,15 +113,11 @@ public class MotifE2ETest {
 
   @Before
   public void setUp() {
-    String jdbcUrl = "jdbc:h2:mem:motife2e_" + System.currentTimeMillis() + ";DB_CLOSE_DELAY=-1";
-    DataSource dataSource = DataSourceFactory.create(jdbcUrl, "sa", "");
-    Migration migration = new Migration(dataSource, true);
-    migration.run();
+    TestDb testDb = TestDb.create("motife2e");
 
-    Jdbi jdbi = Jdbi.create(dataSource);
-    requestStore = new com.muchq.games.one_d4.db.IndexingRequestDao(jdbi);
-    periodStore = new com.muchq.games.one_d4.db.IndexedPeriodDao(jdbi, true);
-    gameFeatureStore = new com.muchq.games.one_d4.db.GameFeatureDao(jdbi, true);
+    requestStore = new com.muchq.games.one_d4.db.IndexingRequestDao(testDb.jdbi());
+    periodStore = new com.muchq.games.one_d4.db.IndexedPeriodDao(testDb.jdbi(), true);
+    gameFeatureStore = new com.muchq.games.one_d4.db.GameFeatureDao(testDb.jdbi(), true);
 
     queue = new InMemoryIndexQueue();
     fakeChessClient = new FakeChessClient();

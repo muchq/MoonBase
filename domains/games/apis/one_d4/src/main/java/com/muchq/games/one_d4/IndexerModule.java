@@ -68,10 +68,13 @@ public class IndexerModule {
   }
 
   @Context
-  public Migration migration(
-      DataSource dataSource,
+  public Boolean useH2(
       @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl) {
-    boolean useH2 = jdbcUrl.contains(":h2:");
+    return jdbcUrl.contains(":h2:");
+  }
+
+  @Context
+  public Migration migration(DataSource dataSource, Boolean useH2) {
     Migration migration = new Migration(dataSource, useH2);
     migration.run();
     return migration;
@@ -88,16 +91,12 @@ public class IndexerModule {
   }
 
   @Context
-  public GameFeatureStore gameFeatureStore(
-      Jdbi jdbi, @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl) {
-    boolean useH2 = jdbcUrl.contains(":h2:");
+  public GameFeatureStore gameFeatureStore(Jdbi jdbi, Boolean useH2) {
     return new GameFeatureDao(jdbi, useH2);
   }
 
   @Context
-  public IndexedPeriodStore indexedPeriodStore(
-      Jdbi jdbi, @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl) {
-    boolean useH2 = jdbcUrl.contains(":h2:");
+  public IndexedPeriodStore indexedPeriodStore(Jdbi jdbi, Boolean useH2) {
     return new IndexedPeriodDao(jdbi, useH2);
   }
 

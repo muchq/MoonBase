@@ -5,8 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import javax.sql.DataSource;
-import org.jdbi.v3.core.Jdbi;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -16,12 +14,7 @@ public class IndexingRequestDaoTest {
 
   @Before
   public void setUp() {
-    String jdbcUrl =
-        "jdbc:h2:mem:index_req_test_" + System.currentTimeMillis() + ";DB_CLOSE_DELAY=-1";
-    DataSource dataSource = DataSourceFactory.create(jdbcUrl, "sa", "");
-    Migration migration = new Migration(dataSource, true);
-    migration.run();
-    dao = new IndexingRequestDao(Jdbi.create(dataSource));
+    dao = new IndexingRequestDao(TestDb.create("index_req_test").jdbi());
   }
 
   @Test
