@@ -385,10 +385,41 @@ java_library(
     testonly = True,
     srcs = [
         "src/test/java/com/muchq/games/one_d4/e2e/FakeChessClient.java",
+        "src/test/java/com/muchq/games/one_d4/e2e/LatchIndexedPeriodDao.java",
     ],
     deps = [
+        ":db",
         "//domains/games/libs/chess_com_client",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("io.micronaut:micronaut-context"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("jakarta.inject:jakarta-inject-api"),
+    ],
+)
+
+java_test_suite(
+    name = "concurrent_e2e_tests",
+    size = "medium",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/e2e/ConcurrentIndexE2ETest.java",
+    ],
+    runtime_deps = [
+        "//domains/platform/libs/logging",
+        artifact("org.postgresql:postgresql"),
+    ],
+    deps = [
+        ":db",
+        ":e2e_support",
+        ":module",
+        ":worker",
+        "//domains/games/libs/chess_com_client",
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("io.micronaut:micronaut-context"),
+        artifact("io.micronaut:micronaut-http-server-netty"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("io.micronaut:micronaut-runtime"),
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
     ],
 )
 
