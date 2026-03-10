@@ -48,7 +48,8 @@ public class GameFeatureDao implements GameFeatureStore {
       """;
 
   private static final String FETCH_FOR_REANALYSIS =
-      "SELECT request_id, game_url, pgn FROM game_features ORDER BY indexed_at LIMIT ? OFFSET ?";
+      "SELECT request_id, game_url, pgn FROM game_features ORDER BY indexed_at, game_url LIMIT ?"
+          + " OFFSET ?";
 
   private static final String DELETE_OCCURRENCES_BY_GAME_URL =
       "DELETE FROM motif_occurrences WHERE game_url = ?";
