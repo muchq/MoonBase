@@ -39,6 +39,7 @@ import io.micronaut.context.annotation.Factory;
 import io.micronaut.context.annotation.Value;
 import java.util.List;
 import javax.sql.DataSource;
+import org.jdbi.v3.core.Jdbi;
 
 @Factory
 public class IndexerModule {
@@ -67,34 +68,36 @@ public class IndexerModule {
   }
 
   @Context
-  public Migration migration(
-      DataSource dataSource,
+  public Boolean useH2(
       @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl) {
-    boolean useH2 = jdbcUrl.contains(":h2:");
+    return jdbcUrl.contains(":h2:");
+  }
+
+  @Context
+  public Migration migration(DataSource dataSource, Boolean useH2) {
     Migration migration = new Migration(dataSource, useH2);
     migration.run();
     return migration;
   }
 
   @Context
-  public IndexingRequestStore indexingRequestStore(DataSource dataSource) {
-    return new IndexingRequestDao(dataSource);
+  public Jdbi jdbi(DataSource dataSource) {
+    return Jdbi.create(dataSource);
   }
 
   @Context
-  public GameFeatureStore gameFeatureStore(
-      DataSource dataSource,
-      @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl) {
-    boolean useH2 = jdbcUrl.contains(":h2:");
-    return new GameFeatureDao(dataSource, useH2);
+  public IndexingRequestStore indexingRequestStore(Jdbi jdbi) {
+    return new IndexingRequestDao(jdbi);
   }
 
   @Context
-  public IndexedPeriodStore indexedPeriodStore(
-      DataSource dataSource,
-      @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl) {
-    boolean useH2 = jdbcUrl.contains(":h2:");
-    return new IndexedPeriodDao(dataSource, useH2);
+  public GameFeatureStore gameFeatureStore(Jdbi jdbi, Boolean useH2) {
+    return new GameFeatureDao(jdbi, useH2);
+  }
+
+  @Context
+  public IndexedPeriodStore indexedPeriodStore(Jdbi jdbi, Boolean useH2) {
+    return new IndexedPeriodDao(jdbi, useH2);
   }
 
   @Context

@@ -5,20 +5,17 @@ import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
-import java.sql.Types;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
-import javax.sql.DataSource;
+import org.jdbi.v3.core.Jdbi;
+import org.jdbi.v3.core.mapper.RowMapper;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,11 +57,47 @@ public class GameFeatureDao implements GameFeatureStore {
           + " moved_piece, attacker, target, is_discovered, is_mate, pin_type)"
           + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
-  private final DataSource dataSource;
+  private static final String QUERY_OCCURRENCES =
+      "SELECT game_url, motif, move_number, side, description,"
+          + " moved_piece, attacker, target, is_discovered, is_mate, pin_type"
+          + " FROM motif_occurrences WHERE game_url IN (<urls>)"
+          + " AND motif NOT IN"
+          + " ('FORK', 'CHECKMATE', 'DISCOVERED_CHECK', 'DOUBLE_CHECK', 'DISCOVERED_ATTACK')"
+          + " ORDER BY ply ASC";
+
+  private static final RowMapper<GameFeature> GAME_FEATURE_MAPPER =
+      (rs, ctx) ->
+          new GameFeature(
+              UUID.fromString(rs.getString("id")),
+              UUID.fromString(rs.getString("request_id")),
+              rs.getString("game_url"),
+              rs.getString("platform"),
+              rs.getString("white_username"),
+              rs.getString("black_username"),
+              getIntOrNull(rs, "white_elo"),
+              getIntOrNull(rs, "black_elo"),
+              rs.getString("time_class"),
+              rs.getString("eco"),
+              rs.getString("result"),
+              rs.getTimestamp("played_at").toInstant(),
+              getIntOrNull(rs, "num_moves"),
+              rs.getTimestamp("indexed_at") != null
+                  ? rs.getTimestamp("indexed_at").toInstant()
+                  : null,
+              rs.getString("pgn"));
+
+  private static final RowMapper<GameForReanalysis> REANALYSIS_MAPPER =
+      (rs, ctx) ->
+          new GameForReanalysis(
+              UUID.fromString(rs.getString("request_id")),
+              rs.getString("game_url"),
+              rs.getString("pgn"));
+
+  private final Jdbi jdbi;
   private final boolean useH2;
 
-  public GameFeatureDao(DataSource dataSource, boolean useH2) {
-    this.dataSource = dataSource;
+  public GameFeatureDao(Jdbi jdbi, boolean useH2) {
+    this.jdbi = jdbi;
     this.useH2 = useH2;
   }
 
@@ -72,83 +105,78 @@ public class GameFeatureDao implements GameFeatureStore {
   public void insertBatch(List<GameFeature> features) {
     if (features.isEmpty()) return;
     String sql = useH2 ? H2_INSERT : PG_INSERT;
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps = conn.prepareStatement(sql)) {
-      for (GameFeature row : features) {
-        ps.setObject(1, row.requestId());
-        ps.setString(2, row.gameUrl());
-        ps.setString(3, row.platform());
-        ps.setString(4, row.whiteUsername());
-        ps.setString(5, row.blackUsername());
-        setIntOrNull(ps, 6, row.whiteElo());
-        setIntOrNull(ps, 7, row.blackElo());
-        ps.setString(8, row.timeClass());
-        ps.setString(9, row.eco());
-        ps.setString(10, row.result());
-        ps.setTimestamp(11, row.playedAt() != null ? Timestamp.from(row.playedAt()) : null);
-        setIntOrNull(ps, 12, row.numMoves());
-        ps.setString(13, row.pgn());
-        ps.addBatch();
-      }
-      ps.executeBatch();
-    } catch (SQLException e) {
-      LOG.error("Failed to batch insert {} game features", features.size(), e);
-      throw new RuntimeException("Failed to batch insert game features", e);
-    }
+    jdbi.useHandle(
+        h -> {
+          var batch = h.prepareBatch(sql);
+          for (GameFeature row : features) {
+            batch
+                .bind(0, row.requestId())
+                .bind(1, row.gameUrl())
+                .bind(2, row.platform())
+                .bind(3, row.whiteUsername())
+                .bind(4, row.blackUsername())
+                .bind(5, (Integer) row.whiteElo())
+                .bind(6, (Integer) row.blackElo())
+                .bind(7, row.timeClass())
+                .bind(8, row.eco())
+                .bind(9, row.result())
+                .bind(10, row.playedAt() != null ? Timestamp.from(row.playedAt()) : null)
+                .bind(11, (Integer) row.numMoves())
+                .bind(12, row.pgn())
+                .add();
+          }
+          batch.execute();
+        });
   }
 
   @Override
   public int deleteOlderThan(Instant threshold) {
-    String sql = "DELETE FROM game_features WHERE indexed_at < ?";
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps = conn.prepareStatement(sql)) {
-      ps.setTimestamp(1, Timestamp.from(threshold));
-      int deleted = ps.executeUpdate();
-      if (deleted > 0) {
-        LOG.debug("Deleted {} games older than {}", deleted, threshold);
-      }
-      return deleted;
-    } catch (SQLException e) {
-      throw new RuntimeException("Failed to delete old games", e);
-    }
+    return jdbi.withHandle(
+        h -> {
+          int deleted =
+              h.createUpdate("DELETE FROM game_features WHERE indexed_at < ?")
+                  .bind(0, Timestamp.from(threshold))
+                  .execute();
+          if (deleted > 0) {
+            LOG.debug("Deleted {} games older than {}", deleted, threshold);
+          }
+          return deleted;
+        });
   }
 
   @Override
   public void insertOccurrencesBatch(
       Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
     if (occurrencesByGame.isEmpty()) return;
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps = conn.prepareStatement(INSERT_OCCURRENCE)) {
-      for (Map.Entry<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> gameEntry :
-          occurrencesByGame.entrySet()) {
-        String gameUrl = gameEntry.getKey();
-        for (Map.Entry<Motif, List<GameFeatures.MotifOccurrence>> motifEntry :
-            gameEntry.getValue().entrySet()) {
-          String motifName = motifEntry.getKey().name();
-          for (GameFeatures.MotifOccurrence occ : motifEntry.getValue()) {
-            if (occ.ply() <= 0) continue;
-            ps.setString(1, UUID.randomUUID().toString());
-            ps.setString(2, gameUrl);
-            ps.setString(3, motifName);
-            ps.setInt(4, occ.ply());
-            ps.setString(5, occ.side());
-            ps.setInt(6, occ.moveNumber());
-            ps.setString(7, occ.description());
-            ps.setString(8, occ.movedPiece());
-            ps.setString(9, occ.attacker());
-            ps.setString(10, occ.target());
-            ps.setBoolean(11, occ.isDiscovered());
-            ps.setBoolean(12, occ.isMate());
-            ps.setString(13, occ.pinType());
-            ps.addBatch();
+    jdbi.useHandle(
+        h -> {
+          var batch = h.prepareBatch(INSERT_OCCURRENCE);
+          for (var gameEntry : occurrencesByGame.entrySet()) {
+            String gameUrl = gameEntry.getKey();
+            for (var motifEntry : gameEntry.getValue().entrySet()) {
+              String motifName = motifEntry.getKey().name();
+              for (GameFeatures.MotifOccurrence occ : motifEntry.getValue()) {
+                if (occ.ply() <= 0) continue;
+                batch
+                    .bind(0, UUID.randomUUID().toString())
+                    .bind(1, gameUrl)
+                    .bind(2, motifName)
+                    .bind(3, occ.ply())
+                    .bind(4, occ.side())
+                    .bind(5, occ.moveNumber())
+                    .bind(6, occ.description())
+                    .bind(7, occ.movedPiece())
+                    .bind(8, occ.attacker())
+                    .bind(9, occ.target())
+                    .bind(10, occ.isDiscovered())
+                    .bind(11, occ.isMate())
+                    .bind(12, occ.pinType())
+                    .add();
+              }
+            }
           }
-        }
-      }
-      ps.executeBatch();
-    } catch (SQLException e) {
-      LOG.error("Failed to batch insert occurrences for {} games", occurrencesByGame.size(), e);
-      throw new RuntimeException("Failed to batch insert occurrences", e);
-    }
+          batch.execute();
+        });
   }
 
   @Override
@@ -158,83 +186,58 @@ public class GameFeatureDao implements GameFeatureStore {
           "Expected CompiledQuery, got: " + compiledQuery.getClass());
     }
     String sql = cq.selectSql() + " LIMIT ? OFFSET ?";
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps = conn.prepareStatement(sql)) {
-      int idx = 1;
-      for (Object param : cq.parameters()) {
-        ps.setObject(idx++, param);
-      }
-      ps.setInt(idx++, limit);
-      ps.setInt(idx, offset);
-
-      try (ResultSet rs = ps.executeQuery()) {
-        List<GameFeature> results = new ArrayList<>();
-        while (rs.next()) {
-          results.add(mapRow(rs));
-        }
-        return results;
-      }
-    } catch (SQLException e) {
-      throw new RuntimeException("Failed to query game features", e);
-    }
+    return jdbi.withHandle(
+        h -> {
+          var query = h.createQuery(sql);
+          int idx = 0;
+          for (Object param : cq.parameters()) {
+            query.bind(idx++, param);
+          }
+          query.bind(idx++, limit);
+          query.bind(idx, offset);
+          return query.map(GAME_FEATURE_MAPPER).list();
+        });
   }
 
   @Override
   public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
     if (gameUrls.isEmpty()) return Map.of();
-    String placeholders = gameUrls.stream().map(u -> "?").collect(Collectors.joining(", "));
     // Fetch all rows including ATTACK (needed for derivation) but excluding stale materialized
     // rows for motifs now derived at response time. ATTACK itself is removed in post-processing.
-    String sql =
-        "SELECT game_url, motif, move_number, side, description,"
-            + " moved_piece, attacker, target, is_discovered, is_mate, pin_type"
-            + " FROM motif_occurrences WHERE game_url IN ("
-            + placeholders
-            + ") AND motif NOT IN"
-            + " ('FORK', 'CHECKMATE', 'DISCOVERED_CHECK', 'DOUBLE_CHECK', 'DISCOVERED_ATTACK')"
-            + " ORDER BY ply ASC";
-    Map<String, Map<String, List<OccurrenceRow>>> result = new LinkedHashMap<>();
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps = conn.prepareStatement(sql)) {
-      int idx = 1;
-      for (String url : gameUrls) {
-        ps.setString(idx++, url);
-      }
-      try (ResultSet rs = ps.executeQuery()) {
-        while (rs.next()) {
-          String gameUrl = rs.getString("game_url");
-          // Store motif key as lowercase to match ChessQL motif naming convention
-          String motif = rs.getString("motif").toLowerCase();
-          int moveNumber = rs.getInt("move_number");
-          String side = rs.getString("side");
-          String description = rs.getString("description");
-          String movedPiece = rs.getString("moved_piece");
-          String attacker = rs.getString("attacker");
-          String target = rs.getString("target");
-          boolean isDiscovered = rs.getBoolean("is_discovered");
-          boolean isMate = rs.getBoolean("is_mate");
-          String pinType = rs.getString("pin_type");
-          result
-              .computeIfAbsent(gameUrl, k -> new LinkedHashMap<>())
-              .computeIfAbsent(motif, k -> new ArrayList<>())
-              .add(
-                  new OccurrenceRow(
-                      gameUrl,
-                      motif,
-                      moveNumber,
-                      side,
-                      description,
-                      movedPiece,
-                      attacker,
-                      target,
-                      isDiscovered,
-                      isMate,
-                      pinType));
-        }
-      }
-    } catch (SQLException e) {
-      throw new RuntimeException("Failed to query motif occurrences", e);
-    }
+    Map<String, Map<String, List<OccurrenceRow>>> result =
+        jdbi.withHandle(
+            h -> {
+              var rows =
+                  h.createQuery(QUERY_OCCURRENCES)
+                      .bindList("urls", gameUrls)
+                      .map(
+                          (rs, ctx) -> {
+                            String gameUrl = rs.getString("game_url");
+                            // Store motif key as lowercase to match ChessQL motif naming convention
+                            String motif = rs.getString("motif").toLowerCase();
+                            return new OccurrenceRow(
+                                gameUrl,
+                                motif,
+                                rs.getInt("move_number"),
+                                rs.getString("side"),
+                                rs.getString("description"),
+                                rs.getString("moved_piece"),
+                                rs.getString("attacker"),
+                                rs.getString("target"),
+                                rs.getBoolean("is_discovered"),
+                                rs.getBoolean("is_mate"),
+                                rs.getString("pin_type"));
+                          })
+                      .list();
+              Map<String, Map<String, List<OccurrenceRow>>> grouped = new LinkedHashMap<>();
+              for (OccurrenceRow row : rows) {
+                grouped
+                    .computeIfAbsent(row.gameUrl(), k -> new LinkedHashMap<>())
+                    .computeIfAbsent(row.motif(), k -> new ArrayList<>())
+                    .add(row);
+              }
+              return grouped;
+            });
 
     // Post-process: derive all ATTACK-based motifs, then remove ATTACK (internal primitive).
     for (Map.Entry<String, Map<String, List<OccurrenceRow>>> entry : result.entrySet()) {
@@ -414,69 +417,28 @@ public class GameFeatureDao implements GameFeatureStore {
     return target != null && (target.startsWith("K") || target.startsWith("k"));
   }
 
-  private GameFeature mapRow(ResultSet rs) throws SQLException {
-    return new GameFeature(
-        UUID.fromString(rs.getString("id")),
-        UUID.fromString(rs.getString("request_id")),
-        rs.getString("game_url"),
-        rs.getString("platform"),
-        rs.getString("white_username"),
-        rs.getString("black_username"),
-        getIntOrNull(rs, "white_elo"),
-        getIntOrNull(rs, "black_elo"),
-        rs.getString("time_class"),
-        rs.getString("eco"),
-        rs.getString("result"),
-        rs.getTimestamp("played_at").toInstant(),
-        getIntOrNull(rs, "num_moves"),
-        rs.getTimestamp("indexed_at") != null ? rs.getTimestamp("indexed_at").toInstant() : null,
-        rs.getString("pgn"));
-  }
-
   @Override
   public void deleteOccurrencesByGameUrls(List<String> gameUrls) {
     if (gameUrls.isEmpty()) return;
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps = conn.prepareStatement(DELETE_OCCURRENCES_BY_GAME_URL)) {
-      for (String gameUrl : gameUrls) {
-        ps.setString(1, gameUrl);
-        ps.addBatch();
-      }
-      ps.executeBatch();
-    } catch (SQLException e) {
-      LOG.error("Failed to batch delete occurrences for {} games", gameUrls.size(), e);
-      throw new RuntimeException("Failed to batch delete occurrences", e);
-    }
+    jdbi.useHandle(
+        h -> {
+          var batch = h.prepareBatch(DELETE_OCCURRENCES_BY_GAME_URL);
+          for (String gameUrl : gameUrls) {
+            batch.bind(0, gameUrl).add();
+          }
+          batch.execute();
+        });
   }
 
   @Override
   public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
-    List<GameForReanalysis> results = new ArrayList<>();
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps = conn.prepareStatement(FETCH_FOR_REANALYSIS)) {
-      ps.setInt(1, limit);
-      ps.setInt(2, offset);
-      try (ResultSet rs = ps.executeQuery()) {
-        while (rs.next()) {
-          UUID requestId = UUID.fromString(rs.getString("request_id"));
-          String gameUrl = rs.getString("game_url");
-          String pgn = rs.getString("pgn");
-          results.add(new GameForReanalysis(requestId, gameUrl, pgn));
-        }
-      }
-    } catch (SQLException e) {
-      throw new RuntimeException("Failed to fetch games for reanalysis", e);
-    }
-    return results;
-  }
-
-  private static void setIntOrNull(PreparedStatement ps, int idx, Integer value)
-      throws SQLException {
-    if (value != null) {
-      ps.setInt(idx, value);
-    } else {
-      ps.setNull(idx, Types.INTEGER);
-    }
+    return jdbi.withHandle(
+        h ->
+            h.createQuery(FETCH_FOR_REANALYSIS)
+                .bind(0, limit)
+                .bind(1, offset)
+                .map(REANALYSIS_MAPPER)
+                .list());
   }
 
   private static @Nullable Integer getIntOrNull(ResultSet rs, String column) throws SQLException {

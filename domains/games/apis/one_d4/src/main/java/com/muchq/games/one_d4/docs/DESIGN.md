@@ -4,7 +4,7 @@
 
 A Micronaut service that indexes chess games from chess.com (lichess planned), extracts tactical motifs via position replay, and exposes a custom query language (ChessQL) for searching indexed games.
 
-**Stack**: Java 21, Micronaut 4.x, Bazel, PostgreSQL, chariot (chess library), HikariCP
+**Stack**: Java 21, Micronaut 4.x, Bazel, PostgreSQL, chariot (chess library), JDBI3, HikariCP
 
 ## Architecture
 
@@ -74,8 +74,12 @@ com.muchq.indexer/
   db/
     DataSourceFactory.java          HikariCP DataSource builder
     Migration.java                  DDL bootstrap (CREATE TABLE IF NOT EXISTS)
-    IndexingRequestDao.java         CRUD for indexing_requests
-    GameFeatureDao.java             Insert + parameterized query for game_features
+    IndexingRequestDao.java         CRUD for indexing_requests (JDBI3 fluent API)
+    IndexingRequestStore.java       Store interface for indexing_requests
+    GameFeatureDao.java             Insert + parameterized query for game_features (JDBI3 fluent API)
+    GameFeatureStore.java           Store interface for game_features
+    IndexedPeriodDao.java           Period cache upserts (JDBI3 fluent API)
+    IndexedPeriodStore.java         Store interface for indexed_periods
 
   engine/
     PgnParser.java                  Extracts headers + movetext from PGN strings

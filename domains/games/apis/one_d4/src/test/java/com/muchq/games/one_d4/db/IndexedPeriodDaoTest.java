@@ -3,7 +3,6 @@ package com.muchq.games.one_d4.db;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Instant;
-import javax.sql.DataSource;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -13,11 +12,7 @@ public class IndexedPeriodDaoTest {
 
   @Before
   public void setUp() {
-    String jdbcUrl = "jdbc:h2:mem:period_test;DB_CLOSE_DELAY=-1";
-    DataSource dataSource = DataSourceFactory.create(jdbcUrl, "sa", "");
-    Migration migration = new Migration(dataSource, true);
-    migration.run();
-    dao = new IndexedPeriodDao(dataSource, true);
+    dao = new IndexedPeriodDao(TestDb.create("period_test").jdbi(), true);
   }
 
   @Test

@@ -82,6 +82,7 @@ java_library(
         ":dto",
         ":model",
         "//domains/games/libs/chessql:compiler",
+        artifact("org.jdbi:jdbi3-core"),
         artifact("org.jspecify:jspecify"),
         artifact("com.h2database:h2"),
         artifact("com.zaxxer:HikariCP"),
@@ -187,6 +188,7 @@ java_library(
         "//domains/platform/libs/json",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("com.zaxxer:HikariCP"),
+        artifact("org.jdbi:jdbi3-core"),
         artifact("io.micronaut.jaxrs:micronaut-jaxrs-server"),
         artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-http-server-netty"),
@@ -231,6 +233,7 @@ java_binary(
         "//domains/platform/libs/logging",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("com.zaxxer:HikariCP"),
+        artifact("org.jdbi:jdbi3-core"),
         artifact("io.micronaut.jaxrs:micronaut-jaxrs-server"),
         artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-http-server-netty"),
@@ -326,6 +329,7 @@ java_test_suite(
         ":model",
         ":motifs",
         ":queue",
+        ":test_db",
         ":worker",
         "//domains/games/libs/chess_com_client",
         "//domains/games/libs/chessql:compiler",
@@ -333,6 +337,7 @@ java_test_suite(
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("junit:junit"),
         artifact("org.assertj:assertj-core"),
+        artifact("org.jdbi:jdbi3-core"),
     ],
 )
 
@@ -373,10 +378,25 @@ java_test_suite(
         ":db",
         ":dto",
         ":model",
+        ":test_db",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
         artifact("junit:junit"),
         artifact("org.assertj:assertj-core"),
+        artifact("org.jdbi:jdbi3-core"),
+    ],
+)
+
+java_library(
+    name = "test_db",
+    testonly = True,
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/db/TestDb.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":db",
+        artifact("org.jdbi:jdbi3-core"),
     ],
 )
 
@@ -409,6 +429,7 @@ java_test_suite(
         ":model",
         ":motifs",
         ":queue",
+        ":test_db",
         ":worker",
         "//domains/games/libs/chess_com_client",
         "//domains/games/libs/chessql:compiler",
@@ -416,6 +437,7 @@ java_test_suite(
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("junit:junit"),
         artifact("org.assertj:assertj-core"),
+        artifact("org.jdbi:jdbi3-core"),
     ],
 )
 
@@ -429,10 +451,12 @@ java_test_suite(
         ":db",
         ":dto",
         ":model",
+        ":test_db",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
         artifact("junit:junit"),
         artifact("org.assertj:assertj-core"),
+        artifact("org.jdbi:jdbi3-core"),
     ],
 )
 

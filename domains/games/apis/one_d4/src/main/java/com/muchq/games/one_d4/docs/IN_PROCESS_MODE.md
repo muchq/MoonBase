@@ -289,28 +289,27 @@ In-process mode makes integration tests trivial:
 
 ```java
 public class IntegrationTest {
-    private DataSource ds;
     private GameFeatureDao dao;
     private SqlCompiler compiler;
 
     @Before
     public void setUp() {
-        ds = DataSourceFactory.createInMemory();
-        new Migration(ds).run();
-        dao = new GameFeatureDao(ds);
+        DataSource ds = DataSourceFactory.createInMemory();
+        new Migration(ds, true).run();
+        Jdbi jdbi = Jdbi.create(ds);
+        dao = new GameFeatureDao(jdbi, true);
         compiler = new SqlCompiler();
     }
 
     @Test
     public void testEndToEndQuery() {
         // Insert test data directly
-        dao.insert(testRow("game1", 2500, 2400, true, false, false, false, false));
-        dao.insert(testRow("game2", 2100, 2000, false, true, false, false, false));
+        dao.insertBatch(List.of(testFeature("game1", 2500, 2400)));
 
         // Query via ChessQL
-        Expr expr = Parser.parse("white.elo >= 2500 AND motif(pin)");
+        Expr expr = Parser.parse("white.elo >= 2500");
         CompiledQuery cq = compiler.compile(expr);
-        List<GameFeatureDao.GameFeatureRow> results = dao.query(cq, 10, 0);
+        List<GameFeature> results = dao.query(cq, 10, 0);
 
         assertThat(results).hasSize(1);
         assertThat(results.get(0).whiteElo()).isEqualTo(2500);

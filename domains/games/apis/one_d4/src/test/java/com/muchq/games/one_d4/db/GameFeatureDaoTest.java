@@ -16,28 +16,22 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import javax.sql.DataSource;
 import org.junit.Before;
 import org.junit.Test;
 
 public class GameFeatureDaoTest {
 
+  private TestDb testDb;
   private GameFeatureDao dao;
-  private DataSource dataSource;
   private UUID requestId;
 
   @Before
   public void setUp() {
-    String jdbcUrl =
-        "jdbc:h2:mem:gamefeaturedao_" + System.currentTimeMillis() + ";DB_CLOSE_DELAY=-1";
-    dataSource = DataSourceFactory.create(jdbcUrl, "sa", "");
-    Migration migration = new Migration(dataSource, true);
-    migration.run();
-
-    dao = new GameFeatureDao(dataSource, true);
+    testDb = TestDb.create("gamefeaturedao");
+    dao = new GameFeatureDao(testDb.jdbi(), true);
     requestId = UUID.randomUUID();
 
-    try (var conn = dataSource.getConnection();
+    try (var conn = testDb.dataSource().getConnection();
         var stmt =
             conn.prepareStatement(
                 "INSERT INTO indexing_requests (id, player, platform, start_month, end_month,"
@@ -398,7 +392,7 @@ public class GameFeatureDaoTest {
     dao.insertBatch(List.of(createGame(gameUrl)));
 
     // Insert stale stored rows directly (simulating old indexed data)
-    try (var conn = dataSource.getConnection()) {
+    try (var conn = testDb.dataSource().getConnection()) {
       for (String staleMotif :
           List.of("CHECKMATE", "DISCOVERED_CHECK", "DOUBLE_CHECK", "DISCOVERED_ATTACK", "FORK")) {
         try (var ps =
