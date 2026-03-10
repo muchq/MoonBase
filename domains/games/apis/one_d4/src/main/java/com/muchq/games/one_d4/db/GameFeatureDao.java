@@ -242,7 +242,8 @@ public class GameFeatureDao implements GameFeatureStore {
       List<OccurrenceRow> attackOccs = motifMap.getOrDefault("attack", List.of());
 
       addIfNonEmpty(motifMap, "fork", deriveForkOccurrences(gameUrl, attackOccs));
-      addIfNonEmpty(motifMap, "discovered_attack", deriveDiscoveredAttackOccurrences(attackOccs));
+      addIfNonEmpty(
+          motifMap, "discovered_attack", deriveDiscoveredAttackOccurrences(gameUrl, attackOccs));
       addIfNonEmpty(motifMap, "checkmate", deriveCheckmateOccurrences(gameUrl, attackOccs));
       addIfNonEmpty(
           motifMap, "discovered_check", deriveDiscoveredCheckOccurrences(gameUrl, attackOccs));
@@ -297,13 +298,13 @@ public class GameFeatureDao implements GameFeatureStore {
 
   /** Derives DISCOVERED_ATTACK occurrences from ATTACK rows with {@code isDiscovered = true}. */
   private static List<OccurrenceRow> deriveDiscoveredAttackOccurrences(
-      List<OccurrenceRow> attackOccs) {
+      String gameUrl, List<OccurrenceRow> attackOccs) {
     List<OccurrenceRow> result = new ArrayList<>();
     for (OccurrenceRow occ : attackOccs) {
       if (occ.isDiscovered()) {
         result.add(
             new OccurrenceRow(
-                occ.gameUrl(),
+                gameUrl,
                 "discovered_attack",
                 occ.moveNumber(),
                 occ.side(),

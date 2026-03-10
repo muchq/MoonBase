@@ -10,7 +10,10 @@ import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.api.dto.QueryRequest;
 import com.muchq.games.one_d4.api.dto.QueryResponse;
 import com.muchq.games.one_d4.db.GameFeatureStore;
+import com.muchq.games.one_d4.engine.model.GameFeatures;
+import com.muchq.games.one_d4.engine.model.Motif;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -175,18 +178,13 @@ public class QueryControllerTest {
     public void insertBatch(List<GameFeature> features) {}
 
     @Override
-    public int deleteOlderThan(java.time.Instant threshold) {
+    public int deleteOlderThan(Instant threshold) {
       return 0;
     }
 
     @Override
     public void insertOccurrencesBatch(
-        java.util.Map<
-                String,
-                java.util.Map<
-                    com.muchq.games.one_d4.engine.model.Motif,
-                    List<com.muchq.games.one_d4.engine.model.GameFeatures.MotifOccurrence>>>
-            occurrencesByGame) {}
+        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {}
 
     @Override
     public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
@@ -196,7 +194,7 @@ public class QueryControllerTest {
     @Override
     public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
       if (gameUrls.isEmpty()) return Map.of();
-      java.util.Map<String, Map<String, List<OccurrenceRow>>> out = new java.util.LinkedHashMap<>();
+      Map<String, Map<String, List<OccurrenceRow>>> out = new LinkedHashMap<>();
       for (String url : gameUrls) {
         out.put(url, occurrencesResult.getOrDefault(url, Map.of()));
       }

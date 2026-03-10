@@ -11,6 +11,8 @@ import com.muchq.games.one_d4.db.GameFeatureStore.GameForReanalysis;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -80,8 +82,7 @@ public class GameFeatureDaoTest {
         new GameFeatures.MotifOccurrence(
             7, 4, "black", "Check at move 4", null, "Qd8", "Ke1", false, false, null);
 
-    Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> batch =
-        new java.util.LinkedHashMap<>();
+    Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> batch = new LinkedHashMap<>();
     batch.put(url1, Map.of(Motif.PIN, List.of(pin)));
     batch.put(url2, Map.of(Motif.CHECK, List.of(check)));
     dao.insertOccurrencesBatch(batch);
@@ -406,7 +407,7 @@ public class GameFeatureDaoTest {
                     + " description, moved_piece, attacker, target, is_discovered, is_mate,"
                     + " pin_type) VALUES (?, ?, ?, 5, 'white', 3, 'stale', null, null, null,"
                     + " false, false, null)")) {
-          ps.setString(1, java.util.UUID.randomUUID().toString());
+          ps.setString(1, UUID.randomUUID().toString());
           ps.setString(2, gameUrl);
           ps.setString(3, staleMotif);
           ps.executeUpdate();
@@ -469,7 +470,7 @@ public class GameFeatureDaoTest {
     assertThat(firstTwo).hasSize(2);
     assertThat(lastOne).hasSize(1);
 
-    List<String> allUrls = new java.util.ArrayList<>();
+    List<String> allUrls = new ArrayList<>();
     firstTwo.stream().map(GameForReanalysis::gameUrl).forEach(allUrls::add);
     lastOne.stream().map(GameForReanalysis::gameUrl).forEach(allUrls::add);
     assertThat(allUrls)
