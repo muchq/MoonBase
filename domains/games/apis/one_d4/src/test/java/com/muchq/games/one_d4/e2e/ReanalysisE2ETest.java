@@ -50,6 +50,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import javax.sql.DataSource;
+import org.jdbi.v3.core.Jdbi;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -104,9 +105,10 @@ public class ReanalysisE2ETest {
     Migration migration = new Migration(dataSource, true);
     migration.run();
 
-    requestStore = new IndexingRequestDao(dataSource);
-    periodStore = new IndexedPeriodDao(dataSource, true);
-    gameFeatureStore = new GameFeatureDao(dataSource, true);
+    Jdbi jdbi = Jdbi.create(dataSource);
+    requestStore = new IndexingRequestDao(jdbi);
+    periodStore = new IndexedPeriodDao(jdbi, true);
+    gameFeatureStore = new GameFeatureDao(jdbi, true);
 
     queue = new InMemoryIndexQueue();
     fakeChessClient = new FakeChessClient();

@@ -14,6 +14,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import javax.sql.DataSource;
+import org.jdbi.v3.core.Jdbi;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -31,8 +32,9 @@ public class RetentionWorkerTest {
     Migration migration = new Migration(dataSource, true);
     migration.run();
 
-    dao = new GameFeatureDao(dataSource, true);
-    periodDao = new IndexedPeriodDao(dataSource, true);
+    Jdbi jdbi = Jdbi.create(dataSource);
+    dao = new GameFeatureDao(jdbi, true);
+    periodDao = new IndexedPeriodDao(jdbi, true);
     worker = new RetentionWorker(dao, periodDao);
     requestId = UUID.randomUUID();
 

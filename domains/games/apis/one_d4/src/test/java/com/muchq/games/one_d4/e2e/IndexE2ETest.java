@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import javax.sql.DataSource;
+import org.jdbi.v3.core.Jdbi;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -65,9 +66,10 @@ public class IndexE2ETest {
     Migration migration = new Migration(dataSource, true);
     migration.run();
 
-    requestStore = new com.muchq.games.one_d4.db.IndexingRequestDao(dataSource);
-    periodStore = new com.muchq.games.one_d4.db.IndexedPeriodDao(dataSource, true);
-    gameFeatureStore = new com.muchq.games.one_d4.db.GameFeatureDao(dataSource, true);
+    Jdbi jdbi = Jdbi.create(dataSource);
+    requestStore = new com.muchq.games.one_d4.db.IndexingRequestDao(jdbi);
+    periodStore = new com.muchq.games.one_d4.db.IndexedPeriodDao(jdbi, true);
+    gameFeatureStore = new com.muchq.games.one_d4.db.GameFeatureDao(jdbi, true);
 
     queue = new InMemoryIndexQueue();
     fakeChessClient = new FakeChessClient();

@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import javax.sql.DataSource;
+import org.jdbi.v3.core.Jdbi;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -54,7 +55,7 @@ public class DataFusionContractTest {
       throw new RuntimeException(e);
     }
 
-    dao = new GameFeatureDao(dataSource, true);
+    dao = new GameFeatureDao(Jdbi.create(dataSource), true);
     seedData();
   }
 

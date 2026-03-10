@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
+import org.jdbi.v3.core.Jdbi;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -20,7 +21,7 @@ public class IndexingRequestDaoTest {
     DataSource dataSource = DataSourceFactory.create(jdbcUrl, "sa", "");
     Migration migration = new Migration(dataSource, true);
     migration.run();
-    dao = new IndexingRequestDao(dataSource);
+    dao = new IndexingRequestDao(Jdbi.create(dataSource));
   }
 
   @Test

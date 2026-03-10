@@ -299,6 +299,6 @@ On the deployed machine the indexer uses H2 file storage at `/data/indexer` insi
 
 Main tables:
 - `indexing_requests` — id, player, platform, start_month, end_month, status, games_indexed, …
-- `game_features` — request_id, game_url, played_at, indexed_at, has_fork, has_pin, has_check, … (one boolean per motif)
+- `game_features` — request_id, game_url, played_at, indexed_at, pgn, elo, eco, etc.
 - `motif_occurrences` — game_url (FK), motif, move_number, ply, side, description, moved_piece, attacker, target, is_discovered, is_mate, pin_type
 - `indexed_periods` — player, platform, year_month, is_complete, games_count, …

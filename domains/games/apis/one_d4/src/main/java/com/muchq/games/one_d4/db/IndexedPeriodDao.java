@@ -1,18 +1,26 @@
 package com.muchq.games.one_d4.db;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Optional;
-import javax.sql.DataSource;
+import org.jdbi.v3.core.Jdbi;
+import org.jdbi.v3.core.mapper.RowMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class IndexedPeriodDao implements IndexedPeriodStore {
   private static final Logger LOG = LoggerFactory.getLogger(IndexedPeriodDao.class);
+
+  private static final RowMapper<IndexedPeriod> ROW_MAPPER =
+      (rs, ctx) ->
+          new IndexedPeriod(
+              rs.getString("player"),
+              rs.getString("platform"),
+              rs.getString("year_month"),
+              rs.getTimestamp("fetched_at").toInstant(),
+              rs.getBoolean("is_complete"),
+              rs.getInt("games_count"),
+              rs.getBoolean("exclude_bullet"));
 
   private static final String H2_UPSERT =
       """
@@ -43,36 +51,26 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
   private static final String DELETE_OLDER_THAN =
       "DELETE FROM indexed_periods WHERE fetched_at < ?";
 
-  private final DataSource dataSource;
+  private final Jdbi jdbi;
   private final boolean useH2;
 
-  public IndexedPeriodDao(DataSource dataSource, boolean useH2) {
-    this.dataSource = dataSource;
+  public IndexedPeriodDao(Jdbi jdbi, boolean useH2) {
+    this.jdbi = jdbi;
     this.useH2 = useH2;
-  }
-
-  public DataSource getDataSource() {
-    return dataSource;
   }
 
   @Override
   public Optional<IndexedPeriod> findCompletePeriod(
       String player, String platform, String month, boolean excludeBullet) {
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps = conn.prepareStatement(FIND_COMPLETE)) {
-      ps.setString(1, player);
-      ps.setString(2, platform);
-      ps.setString(3, month);
-      ps.setBoolean(4, excludeBullet);
-      try (ResultSet rs = ps.executeQuery()) {
-        if (rs.next()) {
-          return Optional.of(mapRow(rs));
-        }
-        return Optional.empty();
-      }
-    } catch (SQLException e) {
-      throw new RuntimeException("Failed to find complete period", e);
-    }
+    return jdbi.withHandle(
+        h ->
+            h.createQuery(FIND_COMPLETE)
+                .bind(0, player)
+                .bind(1, platform)
+                .bind(2, month)
+                .bind(3, excludeBullet)
+                .map(ROW_MAPPER)
+                .findFirst());
   }
 
   @Override
@@ -85,50 +83,29 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
       int gamesCount,
       boolean excludeBullet) {
     String sql = useH2 ? H2_UPSERT : PG_UPSERT;
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps = conn.prepareStatement(sql)) {
-      ps.setString(1, player);
-      ps.setString(2, platform);
-      ps.setString(3, month);
-      ps.setTimestamp(4, Timestamp.from(fetchedAt));
-      ps.setBoolean(5, isComplete);
-      ps.setInt(6, gamesCount);
-      ps.setBoolean(7, excludeBullet);
-      ps.executeUpdate();
-    } catch (SQLException e) {
-      LOG.error(
-          "Failed to upsert indexed period player={} platform={} month={}",
-          player,
-          platform,
-          month,
-          e);
-      throw new RuntimeException("Failed to upsert indexed period", e);
-    }
+    jdbi.useHandle(
+        h ->
+            h.createUpdate(sql)
+                .bind(0, player)
+                .bind(1, platform)
+                .bind(2, month)
+                .bind(3, Timestamp.from(fetchedAt))
+                .bind(4, isComplete)
+                .bind(5, gamesCount)
+                .bind(6, excludeBullet)
+                .execute());
   }
 
   @Override
   public int deleteOlderThan(Instant threshold) {
-    try (Connection conn = dataSource.getConnection();
-        PreparedStatement ps = conn.prepareStatement(DELETE_OLDER_THAN)) {
-      ps.setTimestamp(1, Timestamp.from(threshold));
-      int deleted = ps.executeUpdate();
-      if (deleted > 0) {
-        LOG.debug("Deleted {} indexed periods older than {}", deleted, threshold);
-      }
-      return deleted;
-    } catch (SQLException e) {
-      throw new RuntimeException("Failed to delete old indexed periods", e);
-    }
-  }
-
-  private static IndexedPeriod mapRow(ResultSet rs) throws SQLException {
-    return new IndexedPeriod(
-        rs.getString("player"),
-        rs.getString("platform"),
-        rs.getString("year_month"),
-        rs.getTimestamp("fetched_at").toInstant(),
-        rs.getBoolean("is_complete"),
-        rs.getInt("games_count"),
-        rs.getBoolean("exclude_bullet"));
+    return jdbi.withHandle(
+        h -> {
+          int deleted =
+              h.createUpdate(DELETE_OLDER_THAN).bind(0, Timestamp.from(threshold)).execute();
+          if (deleted > 0) {
+            LOG.debug("Deleted {} indexed periods older than {}", deleted, threshold);
+          }
+          return deleted;
+        });
   }
 }

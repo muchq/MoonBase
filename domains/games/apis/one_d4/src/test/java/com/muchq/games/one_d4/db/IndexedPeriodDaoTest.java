@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Instant;
 import javax.sql.DataSource;
+import org.jdbi.v3.core.Jdbi;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -17,7 +18,7 @@ public class IndexedPeriodDaoTest {
     DataSource dataSource = DataSourceFactory.create(jdbcUrl, "sa", "");
     Migration migration = new Migration(dataSource, true);
     migration.run();
-    dao = new IndexedPeriodDao(dataSource, true);
+    dao = new IndexedPeriodDao(Jdbi.create(dataSource), true);
   }
 
   @Test
