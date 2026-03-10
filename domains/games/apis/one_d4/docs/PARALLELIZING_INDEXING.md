@@ -39,9 +39,16 @@ Currently indexing is **strictly sequential**: one worker thread, one index requ
 
 ### Suggested order of work (Java, before or without a rewrite)
 
-1. **Batch inserts** — Implement `GameFeatureStore.insertBatch` (and batch motif occurrences) and have the worker collect a batch (e.g. 100 games) before writing. Low risk, immediate win.
+1. ~~**Batch inserts**~~ ✓ — `GameFeatureStore.insertBatch` and `insertOccurrencesBatch` implemented; `IndexWorker` collects batches of 100 games before flushing.
 2. **Parallel games within a month** — Fixed thread pool (e.g. 4–8), submit each game to the pool, collect `GameFeature` + occurrences, then batch insert when a batch is full or the month is done. Keeps a single "logical" worker and request ordering; only the CPU part is parallel.
 3. **Multiple worker threads** — If a single request is still slow, run 2–4 index-worker threads so multiple index requests are processed concurrently. Tune pool size and DB/API limits.
+
+**6. Unify indexing and reanalysis paths**
+
+- Currently, `IndexWorker` and `AdminController.reanalyze()` each run motif extraction independently. Indexing does fetch → extract → insert features + occurrences in one pass; reanalysis reads stored PGNs → extract → replace occurrences.
+- These could be unified by splitting indexing into two phases: **(a)** fetch from Chess.com and insert `game_features` rows (metadata + PGN only, no motif extraction), then **(b)** run the reanalysis path over the just-inserted games to populate `motif_occurrences`.
+- **Benefits:** Single motif-extraction code path eliminates drift between the two flows; reanalysis improvements (e.g. parallelism, new detectors) automatically apply to fresh indexing too.
+- **Tradeoff:** Extra DB read (fetching PGNs back out right after inserting them). This is likely negligible compared to Chess.com API latency and PGN replay cost.
 
 ### Constraints to keep in mind
 

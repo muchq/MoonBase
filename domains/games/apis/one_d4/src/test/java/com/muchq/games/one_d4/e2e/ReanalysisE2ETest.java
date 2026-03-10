@@ -179,7 +179,8 @@ public class ReanalysisE2ETest {
     GameFeatures.MotifOccurrence fakeOcc =
         new GameFeatures.MotifOccurrence(
             999, 500, "white", "Fake stale pin", null, "Qa1", "kb8", false, false, "ABSOLUTE");
-    gameFeatureStore.insertOccurrences(KINGS_GAMBIT_URL, Map.of(Motif.PIN, List.of(fakeOcc)));
+    gameFeatureStore.insertOccurrencesBatch(
+        Map.of(KINGS_GAMBIT_URL, Map.of(Motif.PIN, List.of(fakeOcc))));
 
     // Before reanalysis: the fake occurrence at ply 999 is in the DB.
     List<OccurrenceRow> pinsBefore = getOccurrences(KINGS_GAMBIT_URL, "pin");

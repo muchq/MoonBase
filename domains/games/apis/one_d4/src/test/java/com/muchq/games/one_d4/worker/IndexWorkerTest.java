@@ -119,7 +119,7 @@ public class IndexWorkerTest {
     // PGN with checkmate (Qxf7#) so CheckDetector fires on last move
     String gameUrl = "https://chess.com/game/with-check";
     stubChessClient.setResponse(
-        java.time.YearMonth.of(2024, 1), List.of(playedGameWithCheckPgn(gameUrl)));
+        java.time.YearMonth.of(2024, 1), List.of(playedGame(gameUrl, SCHOLARS_MATE_PGN, "blitz")));
     RecordingGameFeatureStore recordingStore = new RecordingGameFeatureStore();
     List<MotifDetector> detectors =
         List.of(
@@ -138,10 +138,10 @@ public class IndexWorkerTest {
         new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false);
     workerWithRecording.process(message);
 
-    assertThat(recordingStore.getLastInsertOccurrencesGameUrl()).isEqualTo(gameUrl);
-    Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences =
-        recordingStore.getLastInsertOccurrences();
-    assertThat(occurrences).isNotNull();
+    Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> allOccurrences =
+        recordingStore.getAllInsertedOccurrences();
+    assertThat(allOccurrences).containsKey(gameUrl);
+    Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences = allOccurrences.get(gameUrl);
     assertThat(occurrences).containsKey(Motif.CHECK);
     assertThat(occurrences.get(Motif.CHECK)).isNotEmpty();
     assertThat(occurrences.get(Motif.CHECK).get(0).moveNumber()).isPositive();
@@ -152,7 +152,7 @@ public class IndexWorkerTest {
   public void process_bulletGamesNotSkippedWhenExcludeBulletFalse() {
     String gameUrl = "https://chess.com/game/bullet-keep";
     stubChessClient.setResponse(
-        java.time.YearMonth.of(2024, 1), List.of(bulletPlayedGame(gameUrl)));
+        java.time.YearMonth.of(2024, 1), List.of(playedGame(gameUrl, MINIMAL_PGN, "bullet")));
     RecordingGameFeatureStore recordingStore = new RecordingGameFeatureStore();
     IndexWorker w =
         new IndexWorker(
@@ -168,7 +168,7 @@ public class IndexWorkerTest {
   public void process_bulletGamesSkippedWhenExcludeBulletTrue() {
     String gameUrl = "https://chess.com/game/bullet-skip";
     stubChessClient.setResponse(
-        java.time.YearMonth.of(2024, 1), List.of(bulletPlayedGame(gameUrl)));
+        java.time.YearMonth.of(2024, 1), List.of(playedGame(gameUrl, MINIMAL_PGN, "bullet")));
     RecordingGameFeatureStore recordingStore = new RecordingGameFeatureStore();
     IndexWorker w =
         new IndexWorker(
@@ -180,18 +180,7 @@ public class IndexWorkerTest {
     assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
   }
 
-  private static PlayedGame bulletPlayedGame(String gameUrl) {
-    String pgn =
-        """
-        [Event "Live Chess"]
-        [Site "Chess.com"]
-        [White "White"]
-        [Black "Black"]
-        [Result "1-0"]
-        [ECO "C20"]
-
-        1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 1-0
-        """;
+  private static PlayedGame playedGame(String gameUrl, String pgn, String timeClass) {
     return new PlayedGame(
         gameUrl,
         pgn,
@@ -202,42 +191,37 @@ public class IndexWorkerTest {
         "uuid-" + gameUrl.hashCode(),
         "",
         "",
-        "bullet",
+        timeClass,
         "chess",
         new PlayerResult(1500, "win", "https://chess.com/w", "White", "uuid-w"),
         new PlayerResult(1500, "loss", "https://chess.com/b", "Black", "uuid-b"),
         "C20");
   }
+
+  private static final String MINIMAL_PGN =
+      """
+      [Event "Live Chess"]
+      [Site "Chess.com"]
+      [White "White"]
+      [Black "Black"]
+      [Result "1-0"]
+      [ECO "C20"]
+
+      1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 1-0
+      """;
 
   /** Scholar's mate: ends with Qxf7# so CheckDetector fires. */
-  private static PlayedGame playedGameWithCheckPgn(String gameUrl) {
-    String pgn =
-        """
-        [Event "Live Chess"]
-        [Site "Chess.com"]
-        [White "White"]
-        [Black "Black"]
-        [Result "1-0"]
-        [ECO "C20"]
+  private static final String SCHOLARS_MATE_PGN =
+      """
+      [Event "Live Chess"]
+      [Site "Chess.com"]
+      [White "White"]
+      [Black "Black"]
+      [Result "1-0"]
+      [ECO "C20"]
 
-        1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0
-        """;
-    return new PlayedGame(
-        gameUrl,
-        pgn,
-        Instant.EPOCH,
-        true,
-        new Accuracies(90.0, 85.0),
-        "",
-        "uuid-" + gameUrl.hashCode(),
-        "",
-        "",
-        "blitz",
-        "chess",
-        new PlayerResult(1500, "win", "https://chess.com/w", "White", "uuid-w"),
-        new PlayerResult(1500, "loss", "https://chess.com/b", "Black", "uuid-b"),
-        "C20");
-  }
+      1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0
+      """;
 
   private static final class StubChessClient extends ChessClient {
     private final List<java.time.YearMonth> fetchCalls = new ArrayList<>();
@@ -307,9 +291,9 @@ public class IndexWorkerTest {
     }
   }
 
-  private static final class NoOpGameFeatureStore implements GameFeatureStore {
+  private static class NoOpGameFeatureStore implements GameFeatureStore {
     @Override
-    public void insert(GameFeature feature) {}
+    public void insertBatch(List<GameFeature> features) {}
 
     @Override
     public int deleteOlderThan(Instant threshold) {
@@ -317,8 +301,8 @@ public class IndexWorkerTest {
     }
 
     @Override
-    public void insertOccurrences(
-        String gameUrl, Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences) {}
+    public void insertOccurrencesBatch(
+        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {}
 
     @Override
     public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
@@ -331,7 +315,7 @@ public class IndexWorkerTest {
     }
 
     @Override
-    public void deleteOccurrencesByGameUrl(String gameUrl) {}
+    public void deleteOccurrencesByGameUrls(List<String> gameUrls) {}
 
     @Override
     public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
@@ -339,17 +323,13 @@ public class IndexWorkerTest {
     }
   }
 
-  private static final class RecordingGameFeatureStore implements GameFeatureStore {
-    private String lastInsertOccurrencesGameUrl;
-    private Map<Motif, List<GameFeatures.MotifOccurrence>> lastInsertOccurrences;
+  private static final class RecordingGameFeatureStore extends NoOpGameFeatureStore {
+    private final Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>>
+        allInsertedOccurrences = new HashMap<>();
     private int insertCount = 0;
 
-    String getLastInsertOccurrencesGameUrl() {
-      return lastInsertOccurrencesGameUrl;
-    }
-
-    Map<Motif, List<GameFeatures.MotifOccurrence>> getLastInsertOccurrences() {
-      return lastInsertOccurrences;
+    Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> getAllInsertedOccurrences() {
+      return allInsertedOccurrences;
     }
 
     int getInsertCount() {
@@ -357,38 +337,14 @@ public class IndexWorkerTest {
     }
 
     @Override
-    public void insert(GameFeature feature) {
-      insertCount++;
+    public void insertBatch(List<GameFeature> features) {
+      insertCount += features.size();
     }
 
     @Override
-    public int deleteOlderThan(Instant threshold) {
-      return 0;
-    }
-
-    @Override
-    public void insertOccurrences(
-        String gameUrl, Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences) {
-      this.lastInsertOccurrencesGameUrl = gameUrl;
-      this.lastInsertOccurrences = occurrences != null ? new HashMap<>(occurrences) : null;
-    }
-
-    @Override
-    public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
-      return Collections.emptyList();
-    }
-
-    @Override
-    public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
-      return Map.of();
-    }
-
-    @Override
-    public void deleteOccurrencesByGameUrl(String gameUrl) {}
-
-    @Override
-    public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
-      return Collections.emptyList();
+    public void insertOccurrencesBatch(
+        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
+      allInsertedOccurrences.putAll(occurrencesByGame);
     }
   }
 

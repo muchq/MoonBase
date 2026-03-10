@@ -5,12 +5,16 @@ import com.muchq.games.one_d4.db.GameFeatureStore;
 import com.muchq.games.one_d4.db.GameFeatureStore.GameForReanalysis;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
+import com.muchq.games.one_d4.engine.model.Motif;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,6 +58,11 @@ public class AdminController {
     List<GameForReanalysis> batch;
     do {
       batch = gameFeatureStore.fetchForReanalysis(BATCH_SIZE, offset);
+
+      List<String> gameUrlsToDelete = new ArrayList<>();
+      Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesBatch =
+          new LinkedHashMap<>();
+
       for (GameForReanalysis game : batch) {
         try {
           if (game.pgn() == null || game.pgn().isBlank()) {
@@ -62,14 +71,18 @@ public class AdminController {
             continue;
           }
           GameFeatures features = featureExtractor.extract(game.pgn());
-          gameFeatureStore.deleteOccurrencesByGameUrl(game.gameUrl());
-          gameFeatureStore.insertOccurrences(game.gameUrl(), features.occurrences());
+          gameUrlsToDelete.add(game.gameUrl());
+          occurrencesBatch.put(game.gameUrl(), features.occurrences());
           processed++;
         } catch (Exception e) {
           LOG.warn("Failed to reanalyze game {}", game.gameUrl(), e);
           failed++;
         }
       }
+
+      gameFeatureStore.deleteOccurrencesByGameUrls(gameUrlsToDelete);
+      gameFeatureStore.insertOccurrencesBatch(occurrencesBatch);
+
       offset += BATCH_SIZE;
       LOG.debug(
           "Re-analysis progress: processed={} failed={} offset={}", processed, failed, offset);

@@ -68,28 +68,31 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   @Override
-  public void insert(GameFeature row) {
+  public void insertBatch(List<GameFeature> features) {
+    if (features.isEmpty()) return;
     String sql = useH2 ? H2_INSERT : PG_INSERT;
     try (Connection conn = dataSource.getConnection();
         PreparedStatement ps = conn.prepareStatement(sql)) {
-      ps.setObject(1, row.requestId());
-      ps.setString(2, row.gameUrl());
-      ps.setString(3, row.platform());
-      ps.setString(4, row.whiteUsername());
-      ps.setString(5, row.blackUsername());
-      setIntOrNull(ps, 6, row.whiteElo());
-      setIntOrNull(ps, 7, row.blackElo());
-      ps.setString(8, row.timeClass());
-      ps.setString(9, row.eco());
-      ps.setString(10, row.result());
-      ps.setTimestamp(11, row.playedAt() != null ? Timestamp.from(row.playedAt()) : null);
-      setIntOrNull(ps, 12, row.numMoves());
-      // indexed_at set via now() in SQL — no parameter
-      ps.setString(13, row.pgn());
-      ps.executeUpdate();
+      for (GameFeature row : features) {
+        ps.setObject(1, row.requestId());
+        ps.setString(2, row.gameUrl());
+        ps.setString(3, row.platform());
+        ps.setString(4, row.whiteUsername());
+        ps.setString(5, row.blackUsername());
+        setIntOrNull(ps, 6, row.whiteElo());
+        setIntOrNull(ps, 7, row.blackElo());
+        ps.setString(8, row.timeClass());
+        ps.setString(9, row.eco());
+        ps.setString(10, row.result());
+        ps.setTimestamp(11, row.playedAt() != null ? Timestamp.from(row.playedAt()) : null);
+        setIntOrNull(ps, 12, row.numMoves());
+        ps.setString(13, row.pgn());
+        ps.addBatch();
+      }
+      ps.executeBatch();
     } catch (SQLException e) {
-      LOG.error("Failed to insert game feature for game_url={}", row.gameUrl(), e);
-      throw new RuntimeException("Failed to insert game feature", e);
+      LOG.error("Failed to batch insert {} game features", features.size(), e);
+      throw new RuntimeException("Failed to batch insert game features", e);
     }
   }
 
@@ -110,35 +113,40 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   @Override
-  public void insertOccurrences(
-      String gameUrl, Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences) {
-    if (occurrences.isEmpty()) return;
+  public void insertOccurrencesBatch(
+      Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
+    if (occurrencesByGame.isEmpty()) return;
     try (Connection conn = dataSource.getConnection();
         PreparedStatement ps = conn.prepareStatement(INSERT_OCCURRENCE)) {
-      for (Map.Entry<Motif, List<GameFeatures.MotifOccurrence>> entry : occurrences.entrySet()) {
-        String motifName = entry.getKey().name();
-        for (GameFeatures.MotifOccurrence occ : entry.getValue()) {
-          if (occ.ply() <= 0) continue;
-          ps.setString(1, UUID.randomUUID().toString());
-          ps.setString(2, gameUrl);
-          ps.setString(3, motifName);
-          ps.setInt(4, occ.ply());
-          ps.setString(5, occ.side());
-          ps.setInt(6, occ.moveNumber());
-          ps.setString(7, occ.description());
-          ps.setString(8, occ.movedPiece());
-          ps.setString(9, occ.attacker());
-          ps.setString(10, occ.target());
-          ps.setBoolean(11, occ.isDiscovered());
-          ps.setBoolean(12, occ.isMate());
-          ps.setString(13, occ.pinType());
-          ps.addBatch();
+      for (Map.Entry<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> gameEntry :
+          occurrencesByGame.entrySet()) {
+        String gameUrl = gameEntry.getKey();
+        for (Map.Entry<Motif, List<GameFeatures.MotifOccurrence>> motifEntry :
+            gameEntry.getValue().entrySet()) {
+          String motifName = motifEntry.getKey().name();
+          for (GameFeatures.MotifOccurrence occ : motifEntry.getValue()) {
+            if (occ.ply() <= 0) continue;
+            ps.setString(1, UUID.randomUUID().toString());
+            ps.setString(2, gameUrl);
+            ps.setString(3, motifName);
+            ps.setInt(4, occ.ply());
+            ps.setString(5, occ.side());
+            ps.setInt(6, occ.moveNumber());
+            ps.setString(7, occ.description());
+            ps.setString(8, occ.movedPiece());
+            ps.setString(9, occ.attacker());
+            ps.setString(10, occ.target());
+            ps.setBoolean(11, occ.isDiscovered());
+            ps.setBoolean(12, occ.isMate());
+            ps.setString(13, occ.pinType());
+            ps.addBatch();
+          }
         }
       }
       ps.executeBatch();
     } catch (SQLException e) {
-      LOG.error("Failed to insert motif occurrences for game_url={}", gameUrl, e);
-      throw new RuntimeException("Failed to insert motif occurrences", e);
+      LOG.error("Failed to batch insert occurrences for {} games", occurrencesByGame.size(), e);
+      throw new RuntimeException("Failed to batch insert occurrences", e);
     }
   }
 
@@ -234,7 +242,8 @@ public class GameFeatureDao implements GameFeatureStore {
       List<OccurrenceRow> attackOccs = motifMap.getOrDefault("attack", List.of());
 
       addIfNonEmpty(motifMap, "fork", deriveForkOccurrences(gameUrl, attackOccs));
-      addIfNonEmpty(motifMap, "discovered_attack", deriveDiscoveredAttackOccurrences(attackOccs));
+      addIfNonEmpty(
+          motifMap, "discovered_attack", deriveDiscoveredAttackOccurrences(gameUrl, attackOccs));
       addIfNonEmpty(motifMap, "checkmate", deriveCheckmateOccurrences(gameUrl, attackOccs));
       addIfNonEmpty(
           motifMap, "discovered_check", deriveDiscoveredCheckOccurrences(gameUrl, attackOccs));
@@ -289,13 +298,13 @@ public class GameFeatureDao implements GameFeatureStore {
 
   /** Derives DISCOVERED_ATTACK occurrences from ATTACK rows with {@code isDiscovered = true}. */
   private static List<OccurrenceRow> deriveDiscoveredAttackOccurrences(
-      List<OccurrenceRow> attackOccs) {
+      String gameUrl, List<OccurrenceRow> attackOccs) {
     List<OccurrenceRow> result = new ArrayList<>();
     for (OccurrenceRow occ : attackOccs) {
       if (occ.isDiscovered()) {
         result.add(
             new OccurrenceRow(
-                occ.gameUrl(),
+                gameUrl,
                 "discovered_attack",
                 occ.moveNumber(),
                 occ.side(),
@@ -424,14 +433,18 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   @Override
-  public void deleteOccurrencesByGameUrl(String gameUrl) {
+  public void deleteOccurrencesByGameUrls(List<String> gameUrls) {
+    if (gameUrls.isEmpty()) return;
     try (Connection conn = dataSource.getConnection();
         PreparedStatement ps = conn.prepareStatement(DELETE_OCCURRENCES_BY_GAME_URL)) {
-      ps.setString(1, gameUrl);
-      ps.executeUpdate();
+      for (String gameUrl : gameUrls) {
+        ps.setString(1, gameUrl);
+        ps.addBatch();
+      }
+      ps.executeBatch();
     } catch (SQLException e) {
-      LOG.error("Failed to delete occurrences for game_url={}", gameUrl, e);
-      throw new RuntimeException("Failed to delete occurrences", e);
+      LOG.error("Failed to batch delete occurrences for {} games", gameUrls.size(), e);
+      throw new RuntimeException("Failed to batch delete occurrences", e);
     }
   }
 
