@@ -158,6 +158,7 @@ services:
       - INDEXER_DB_URL=jdbc:h2:file:/data/indexer;DB_CLOSE_DELAY=-1
       - INDEXER_DB_USERNAME=sa
       - INDEXER_DB_PASSWORD=
+      - SENTRY_DSN=${ONE_D4_SENTRY_DSN}
     volumes:
       - /etc/one_d4:/etc/one_d4
       - one_d4_data:/data
