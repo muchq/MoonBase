@@ -10,14 +10,14 @@ import java.util.Map;
 import java.util.UUID;
 
 public interface GameFeatureStore {
-  void insert(GameFeature feature);
+  void insertBatch(List<GameFeature> features);
 
   int deleteOlderThan(Instant threshold);
 
-  void insertOccurrences(
-      String gameUrl, Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences);
+  void insertOccurrencesBatch(
+      Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame);
 
-  void deleteOccurrencesByGameUrl(String gameUrl);
+  void deleteOccurrencesByGameUrls(List<String> gameUrls);
 
   List<GameFeature> query(Object compiledQuery, int limit, int offset);
 

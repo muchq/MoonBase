@@ -179,22 +179,26 @@ public class AdminControllerTest {
     }
 
     @Override
-    public void deleteOccurrencesByGameUrl(String gameUrl) {
-      deleteCount.merge(gameUrl, 1, Integer::sum);
+    public void deleteOccurrencesByGameUrls(List<String> gameUrls) {
+      for (String url : gameUrls) {
+        deleteCount.merge(url, 1, Integer::sum);
+      }
     }
 
     @Override
-    public void insertOccurrences(
-        String gameUrl, Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences) {
-      insertCount.merge(gameUrl, 1, Integer::sum);
-    }
-
-    @Override
-    public void insert(GameFeature feature) {}
+    public void insertBatch(List<GameFeature> features) {}
 
     @Override
     public int deleteOlderThan(Instant threshold) {
       return 0;
+    }
+
+    @Override
+    public void insertOccurrencesBatch(
+        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
+      for (String url : occurrencesByGame.keySet()) {
+        insertCount.merge(url, 1, Integer::sum);
+      }
     }
 
     @Override

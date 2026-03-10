@@ -172,7 +172,7 @@ public class QueryControllerTest {
     }
 
     @Override
-    public void insert(GameFeature feature) {}
+    public void insertBatch(List<GameFeature> features) {}
 
     @Override
     public int deleteOlderThan(java.time.Instant threshold) {
@@ -180,12 +180,13 @@ public class QueryControllerTest {
     }
 
     @Override
-    public void insertOccurrences(
-        String gameUrl,
+    public void insertOccurrencesBatch(
         java.util.Map<
-                com.muchq.games.one_d4.engine.model.Motif,
-                List<com.muchq.games.one_d4.engine.model.GameFeatures.MotifOccurrence>>
-            occurrences) {}
+                String,
+                java.util.Map<
+                    com.muchq.games.one_d4.engine.model.Motif,
+                    List<com.muchq.games.one_d4.engine.model.GameFeatures.MotifOccurrence>>>
+            occurrencesByGame) {}
 
     @Override
     public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
@@ -203,7 +204,7 @@ public class QueryControllerTest {
     }
 
     @Override
-    public void deleteOccurrencesByGameUrl(String gameUrl) {}
+    public void deleteOccurrencesByGameUrls(List<String> gameUrls) {}
 
     @Override
     public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {

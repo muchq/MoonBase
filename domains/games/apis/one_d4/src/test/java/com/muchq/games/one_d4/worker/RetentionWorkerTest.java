@@ -51,12 +51,10 @@ public class RetentionWorkerTest {
 
   @Test
   public void runRetention_deletesOldGames() {
-    // Insert a fresh game
+    // Insert a fresh game and an old game
     GameFeature fresh = createGame("https://chess.com/fresh");
-    dao.insert(fresh);
-
-    // Insert an old game manually by bypassing DAO to set indexed_at
-    dao.insert(createGame("https://chess.com/old"));
+    GameFeature old = createGame("https://chess.com/old");
+    dao.insertBatch(List.of(fresh, old));
     updateIndexedAt("https://chess.com/old", Instant.now().minus(8, ChronoUnit.DAYS));
 
     assertThat(countGames()).isEqualTo(2);

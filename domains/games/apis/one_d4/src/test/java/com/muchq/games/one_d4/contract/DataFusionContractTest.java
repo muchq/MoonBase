@@ -295,9 +295,9 @@ public class DataFusionContractTest {
             30,
             Instant.now(),
             "pgn");
-    dao.insert(game);
+    dao.insertBatch(List.of(game));
     if (!occurrences.isEmpty()) {
-      dao.insertOccurrences(gameUrl, occurrences);
+      dao.insertOccurrencesBatch(Map.of(gameUrl, occurrences));
     }
   }
 

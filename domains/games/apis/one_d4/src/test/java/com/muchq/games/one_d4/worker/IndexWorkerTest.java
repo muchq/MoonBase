@@ -309,7 +309,7 @@ public class IndexWorkerTest {
 
   private static final class NoOpGameFeatureStore implements GameFeatureStore {
     @Override
-    public void insert(GameFeature feature) {}
+    public void insertBatch(List<GameFeature> features) {}
 
     @Override
     public int deleteOlderThan(Instant threshold) {
@@ -317,8 +317,8 @@ public class IndexWorkerTest {
     }
 
     @Override
-    public void insertOccurrences(
-        String gameUrl, Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences) {}
+    public void insertOccurrencesBatch(
+        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {}
 
     @Override
     public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
@@ -331,7 +331,7 @@ public class IndexWorkerTest {
     }
 
     @Override
-    public void deleteOccurrencesByGameUrl(String gameUrl) {}
+    public void deleteOccurrencesByGameUrls(List<String> gameUrls) {}
 
     @Override
     public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
@@ -340,16 +340,22 @@ public class IndexWorkerTest {
   }
 
   private static final class RecordingGameFeatureStore implements GameFeatureStore {
-    private String lastInsertOccurrencesGameUrl;
-    private Map<Motif, List<GameFeatures.MotifOccurrence>> lastInsertOccurrences;
+    private final Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>>
+        allInsertedOccurrences = new HashMap<>();
     private int insertCount = 0;
 
     String getLastInsertOccurrencesGameUrl() {
-      return lastInsertOccurrencesGameUrl;
+      // Return last key from inserted occurrences
+      String last = null;
+      for (String key : allInsertedOccurrences.keySet()) {
+        last = key;
+      }
+      return last;
     }
 
     Map<Motif, List<GameFeatures.MotifOccurrence>> getLastInsertOccurrences() {
-      return lastInsertOccurrences;
+      String lastUrl = getLastInsertOccurrencesGameUrl();
+      return lastUrl != null ? allInsertedOccurrences.get(lastUrl) : null;
     }
 
     int getInsertCount() {
@@ -357,8 +363,8 @@ public class IndexWorkerTest {
     }
 
     @Override
-    public void insert(GameFeature feature) {
-      insertCount++;
+    public void insertBatch(List<GameFeature> features) {
+      insertCount += features.size();
     }
 
     @Override
@@ -367,10 +373,9 @@ public class IndexWorkerTest {
     }
 
     @Override
-    public void insertOccurrences(
-        String gameUrl, Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences) {
-      this.lastInsertOccurrencesGameUrl = gameUrl;
-      this.lastInsertOccurrences = occurrences != null ? new HashMap<>(occurrences) : null;
+    public void insertOccurrencesBatch(
+        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
+      allInsertedOccurrences.putAll(occurrencesByGame);
     }
 
     @Override
@@ -384,7 +389,7 @@ public class IndexWorkerTest {
     }
 
     @Override
-    public void deleteOccurrencesByGameUrl(String gameUrl) {}
+    public void deleteOccurrencesByGameUrls(List<String> gameUrls) {}
 
     @Override
     public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
