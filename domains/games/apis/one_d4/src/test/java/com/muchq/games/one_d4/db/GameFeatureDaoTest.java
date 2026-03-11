@@ -536,10 +536,10 @@ public class GameFeatureDaoTest {
     // Insert games with different played_at values
     Instant older = Instant.parse("2024-01-01T00:00:00Z");
     Instant newer = Instant.parse("2024-06-01T00:00:00Z");
-    dao.insertBatch(List.of(
-        createGameAt("https://chess.com/game/order-a", older),
-        createGameAt("https://chess.com/game/order-b", newer)
-    ));
+    dao.insertBatch(
+        List.of(
+            createGameAt("https://chess.com/game/order-a", older),
+            createGameAt("https://chess.com/game/order-b", newer)));
 
     CompiledQuery allGames = new SqlCompiler().compile(Parser.parse("white_elo >= 1000"));
     List<GameFeature> page1 = dao.query(allGames, 1, 0);
@@ -556,10 +556,10 @@ public class GameFeatureDaoTest {
   public void query_paginatesStablyWhenPlayedAtIsEqual() {
     // Insert two games with identical played_at; game_url tiebreaker determines order
     Instant sameTime = Instant.parse("2024-03-01T12:00:00Z");
-    dao.insertBatch(List.of(
-        createGameAt("https://chess.com/game/zzz-last", sameTime),
-        createGameAt("https://chess.com/game/aaa-first", sameTime)
-    ));
+    dao.insertBatch(
+        List.of(
+            createGameAt("https://chess.com/game/zzz-last", sameTime),
+            createGameAt("https://chess.com/game/aaa-first", sameTime)));
 
     CompiledQuery allGames = new SqlCompiler().compile(Parser.parse("white_elo >= 1000"));
     List<GameFeature> page1 = dao.query(allGames, 1, 0);
