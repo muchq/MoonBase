@@ -1,4 +1,9 @@
-import type { GameRow, IndexRequest, OccurrenceRow, QueryResponse } from './types';
+import type {
+  GameRow,
+  IndexRequest,
+  OccurrenceRow,
+  QueryResponse,
+} from './types';
 
 // re-export so consumers can import from one place
 export type { GameRow, IndexRequest, OccurrenceRow, QueryResponse };
@@ -23,7 +28,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     let body: string | null = null;
     try {
       body = await res.text();
-    } catch (_) {
+    } catch {
       // ignore
     }
     const err = new Error(body || res.statusText) as ApiError;
@@ -56,6 +61,15 @@ export async function query(body: {
   query: string;
   limit: number;
   offset: number;
+  includePgn?: boolean;
+  includeOccurrences?: boolean;
 }): Promise<QueryResponse> {
   return request('/v1/query', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function getGameDetail(gameUrl: string): Promise<GameRow> {
+  return request('/v1/games/detail', {
+    method: 'POST',
+    body: JSON.stringify({ gameUrl }),
+  });
 }

@@ -31,7 +31,7 @@ function formatDate(val: string | number | null | undefined): string {
 function renderCell(
   colId: string,
   game: GameRow,
-  onRowClick?: (g: GameRow) => void
+  _onRowClick?: (g: GameRow) => void
 ): React.ReactNode {
   const g = game as unknown as Record<string, unknown>;
   switch (colId) {

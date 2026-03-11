@@ -1,6 +1,8 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo, useRef, useEffect, type CSSProperties } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Chess, type Move } from 'chess.js';
 import { Chessboard } from 'react-chessboard';
+import { getGameDetail } from '../api';
 import type { GameRow, OccurrenceRow } from '../types';
 
 const MOTIF_COLORS: Record<string, string> = {
@@ -60,15 +62,29 @@ interface Props {
   onClose: () => void;
 }
 
+const needsDetail = (g: GameRow): boolean =>
+  g.gameUrl != null && (g.pgn === undefined || g.occurrences === undefined);
+
 export default function GameDetailPanel({ game, onClose }: Props) {
   const [currentPly, setCurrentPly] = useState(0);
   const [orientation, setOrientation] = useState<'white' | 'black'>('white');
   const [activeOccurrence, setActiveOccurrence] = useState<OccurrenceRow | null>(null);
   const motifListRef = useRef<HTMLUListElement>(null);
 
+  const { data: detailGame, isLoading: detailLoading } = useQuery({
+    queryKey: ['gameDetail', game.gameUrl],
+    queryFn: () => getGameDetail(game.gameUrl!),
+    enabled: needsDetail(game),
+  });
+
+  const displayGame = detailGame ?? game;
+
   const { fens, moves } = useMemo(
-    () => (game.pgn ? parsePgn(game.pgn) : { fens: [START_FEN], moves: [] }),
-    [game.pgn]
+    () =>
+      displayGame.pgn
+        ? parsePgn(displayGame.pgn)
+        : { fens: [START_FEN], moves: [] },
+    [displayGame.pgn]
   );
 
   const totalPlies = moves.length;
@@ -77,10 +93,11 @@ export default function GameDetailPanel({ game, onClose }: Props) {
 
   // Flatten and sort all occurrences by ply for ordered navigation and display
   const sortedOccurrences = useMemo(() => {
-    return Object.entries(game.occurrences ?? {})
-      .flatMap(([motif, occs]) => occs.map((occ) => ({ motif, occ })))
-      .sort((a, b) => occurrencePly(a.occ) - occurrencePly(b.occ));
-  }, [game.occurrences]);
+    return Object.entries(displayGame.occurrences ?? {}).flatMap(
+      ([motif, occs]: [string, OccurrenceRow[]]) =>
+        occs.map((occ: OccurrenceRow) => ({ motif, occ }))
+    ).sort((a, b) => occurrencePly(a.occ) - occurrencePly(b.occ));
+  }, [displayGame.occurrences]);
 
   // Group occurrences by ply so the list shows one row per move
   const groupedOccurrences = useMemo(() => {
@@ -108,7 +125,7 @@ export default function GameDetailPanel({ game, onClose }: Props) {
   const activeMotifKey = activeIndex >= 0 ? sortedOccurrences[activeIndex].motif : null;
   const motifColor = activeMotifKey != null ? (MOTIF_COLORS[activeMotifKey] ?? null) : null;
 
-  const squareStyles: Record<string, React.CSSProperties> = {};
+  const squareStyles: Record<string, CSSProperties> = {};
   if (lastMove) {
     squareStyles[lastMove.from] = {
       backgroundColor: motifColor ? motifColor + '66' : 'rgba(255,255,0,0.3)',
@@ -162,6 +179,41 @@ export default function GameDetailPanel({ game, onClose }: Props) {
   // Board is min(400px, 90vw) square; motif list matches that height + controls
   const motifListMaxHeight = 'min(440px, 65vh)';
 
+  if (needsDetail(game) && detailLoading) {
+    return (
+      <div className="panel" style={{ marginTop: '1rem' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+          }}
+        >
+          <div>
+            <strong>
+              {game.whiteUsername} vs {game.blackUsername}
+            </strong>
+            <span className="text-muted" style={{ marginLeft: '0.75rem', fontSize: '0.875rem' }}>
+              {game.result} · {game.timeClass} · {game.eco}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn"
+            onClick={onClose}
+            aria-label="Close panel"
+            style={{ padding: '0 0.5rem' }}
+          >
+            ×
+          </button>
+        </div>
+        <div className="loading" style={{ marginTop: '0.75rem' }}>
+          Loading game…
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="panel" style={{ marginTop: '1rem' }}>
       <div
@@ -169,15 +221,15 @@ export default function GameDetailPanel({ game, onClose }: Props) {
       >
         <div>
           <strong>
-            {game.whiteUsername} vs {game.blackUsername}
+            {displayGame.whiteUsername} vs {displayGame.blackUsername}
           </strong>
-          {game.playedAt && (
+          {displayGame.playedAt && (
             <span className="text-muted" style={{ marginLeft: '0.75rem', fontSize: '0.875rem' }}>
-              {formatDate(game.playedAt)}
+              {formatDate(displayGame.playedAt)}
             </span>
           )}
           <span className="text-muted" style={{ marginLeft: '0.75rem', fontSize: '0.875rem' }}>
-            {game.result} · {game.timeClass} · {game.eco}
+            {displayGame.result} · {displayGame.timeClass} · {displayGame.eco}
           </span>
         </div>
         <button
@@ -191,13 +243,13 @@ export default function GameDetailPanel({ game, onClose }: Props) {
         </button>
       </div>
 
-      {!game.pgn && (
+      {!displayGame.pgn && (
         <p className="text-muted" style={{ marginTop: '0.75rem' }}>
           PGN not available for this game.
         </p>
       )}
 
-      {game.pgn && (
+      {displayGame.pgn && (
         <div
           style={{
             display: 'flex',

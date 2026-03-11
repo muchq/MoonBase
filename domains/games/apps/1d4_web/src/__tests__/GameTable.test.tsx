@@ -1,8 +1,11 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import GameTable from '../components/GameTable';
 import type { GameRow } from '../types';
+import * as api from '../api';
 
+vi.mock('../api', () => ({ getGameDetail: vi.fn() }));
 vi.mock('react-chessboard', () => ({
   Chessboard: ({ position }: { position: string }) => (
     <div data-testid="chessboard" data-fen={position} />
@@ -102,18 +105,26 @@ describe('GameTable', () => {
     expect(dateCells.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('shows game detail accordion inline when selectedGame matches a row', () => {
+  it('shows game detail accordion inline when selectedGame matches a row', async () => {
+    vi.mocked(api.getGameDetail).mockResolvedValue({
+      ...mockGames[0],
+      pgn: '1. e4 e5',
+      occurrences: mockGames[0].occurrences ?? {},
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
-      <GameTable
-        games={mockGames}
-        sortBy=""
-        sortDir="asc"
-        onSort={() => {}}
-        selectedGame={mockGames[0]}
-        onClose={() => {}}
-      />
+      <QueryClientProvider client={qc}>
+        <GameTable
+          games={mockGames}
+          sortBy=""
+          sortDir="asc"
+          onSort={() => {}}
+          selectedGame={mockGames[0]}
+          onClose={() => {}}
+        />
+      </QueryClientProvider>
     );
-    expect(screen.getByText('Alice vs Bob')).toBeInTheDocument();
+    await screen.findByText('Alice vs Bob');
   });
 
   it('does not show game detail accordion when no game is selected', () => {

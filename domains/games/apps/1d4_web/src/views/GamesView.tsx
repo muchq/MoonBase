@@ -60,17 +60,26 @@ export default function GamesView() {
   const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
 
   const queryText = buildQuery(username);
+  const pageSize = limit;
   const { data, isLoading, error } = useQuery({
-    queryKey: ['games', queryText],
-    queryFn: () => apiQuery({ query: queryText, limit: 500, offset: 0 }),
+    queryKey: ['games', queryText, offset, pageSize],
+    queryFn: () =>
+      apiQuery({
+        query: queryText,
+        limit: pageSize,
+        offset,
+        includePgn: false,
+        includeOccurrences: false,
+      }),
   });
 
-  const games = data?.games ?? [];
+  const games = useMemo(() => data?.games ?? [], [data?.games]);
+  const totalCount = data?.count ?? 0;
   const sorted = useMemo(
     () => sortGames(games, sortBy, sortDir),
     [games, sortBy, sortDir]
   );
-  const page = sorted.slice(offset, offset + limit);
+  const page = sorted;
 
   function handleSort(col: string) {
     if (sortBy === col) {
@@ -150,14 +159,14 @@ export default function GamesView() {
           <Pagination
             offset={offset}
             limit={limit}
-            total={sorted.length}
+            total={totalCount}
             onLimitChange={(n) => {
               setLimit(n);
               setOffset(0);
             }}
             onPrev={() => setOffset((o) => Math.max(0, o - limit))}
             onNext={() =>
-              setOffset((o) => Math.min(o + limit, sorted.length - limit))
+              setOffset((o) => Math.min(o + limit, Math.max(0, totalCount - limit)))
             }
           />
         </>

@@ -46,19 +46,25 @@ public class QueryController {
     validator.validate(request);
 
     LOG.info(
-        "POST /v1/query query={} limit={} offset={}",
+        "POST /v1/query query={} limit={} offset={} includePgn={} includeOccurrences={}",
         request.query(),
         request.limit(),
-        request.offset());
+        request.offset(),
+        request.includePgnOrDefault(),
+        request.includeOccurrencesOrDefault());
 
     ParsedQuery parsed = Parser.parse(request.query());
     CompiledQuery compiled = queryCompiler.compile(parsed);
 
-    List<GameFeature> rows = gameFeatureStore.query(compiled, request.limit(), request.offset());
+    List<GameFeature> rows =
+        gameFeatureStore.query(
+            compiled, request.limit(), request.offset(), request.includePgnOrDefault());
 
     List<String> gameUrls = rows.stream().map(GameFeature::gameUrl).toList();
     Map<String, Map<String, List<OccurrenceRow>>> occurrences =
-        gameFeatureStore.queryOccurrences(gameUrls);
+        request.includeOccurrencesOrDefault()
+            ? gameFeatureStore.queryOccurrences(gameUrls)
+            : Map.of();
 
     List<GameFeatureRow> dtos =
         rows.stream()
@@ -68,6 +74,7 @@ public class QueryController {
                         row, occurrences.getOrDefault(row.gameUrl(), Map.of())))
             .toList();
 
-    return new QueryResponse(dtos, dtos.size());
+    int totalCount = gameFeatureStore.count(compiled);
+    return new QueryResponse(dtos, totalCount);
   }
 }
