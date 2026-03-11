@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.muchq.games.chess_com_client.ChessClient;
 import com.muchq.games.chess_com_client.GamesResponse;
 import com.muchq.games.chess_com_client.PlayedGame;
+import io.micronaut.context.annotation.Replaces;
+import jakarta.inject.Singleton;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.ArrayList;
@@ -15,8 +17,13 @@ import java.util.Optional;
 /**
  * Fake chess.com API client for local e2e tests. Returns configurable game lists per (player,
  * month) and records all fetchGames calls for assertions.
+ *
+ * <p>Annotated with {@code @Replaces} so Micronaut uses this instead of the real ChessClient
+ * produced by IndexerModule in full-stack tests.
  */
-public final class FakeChessClient extends ChessClient {
+@Singleton
+@Replaces(ChessClient.class)
+public class FakeChessClient extends ChessClient {
 
   private static final String MINIMAL_PGN =
       """
