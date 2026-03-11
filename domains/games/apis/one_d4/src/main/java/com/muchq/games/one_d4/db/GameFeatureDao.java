@@ -260,10 +260,8 @@ public class GameFeatureDao implements GameFeatureStore {
     String selectSql = cq.selectSql();
     // Strip the outer ORDER BY (use lastIndexOf in case ORDER BY appears in a subquery).
     int orderByIndex = selectSql.lastIndexOf(" ORDER BY ");
-    String sqlWithoutOrder =
-        orderByIndex >= 0 ? selectSql.substring(0, orderByIndex) : selectSql;
-    String countSql =
-        sqlWithoutOrder.replaceFirst("SELECT g\\.\\* FROM", "SELECT COUNT(*) FROM");
+    String sqlWithoutOrder = orderByIndex >= 0 ? selectSql.substring(0, orderByIndex) : selectSql;
+    String countSql = sqlWithoutOrder.replaceFirst("SELECT g\\.\\* FROM", "SELECT COUNT(*) FROM");
     return jdbi.withHandle(
         h -> {
           var query = h.createQuery(countSql);

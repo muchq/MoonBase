@@ -13,6 +13,7 @@ import java.util.UUID;
 public interface GameFeatureStore {
   /** Fetches a single game by URL with full PGN, for detail view. */
   Optional<GameFeature> findByGameUrl(String gameUrl);
+
   void insertBatch(List<GameFeature> features);
 
   int deleteOlderThan(Instant threshold);

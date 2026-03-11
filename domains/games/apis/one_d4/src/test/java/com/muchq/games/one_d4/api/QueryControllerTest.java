@@ -83,8 +83,7 @@ public class QueryControllerTest {
                         false,
                         null)))));
 
-    QueryResponse response =
-        controller.query(new QueryRequest("motif(pin)", 10, 0, null, null));
+    QueryResponse response = controller.query(new QueryRequest("motif(pin)", 10, 0, null, null));
 
     assertThat(response.games()).hasSize(1);
     GameFeatureRow row = response.games().get(0);
@@ -142,8 +141,7 @@ public class QueryControllerTest {
     store.setCountResult(0);
     store.setOccurrencesResult(Map.of());
 
-    QueryResponse response =
-        controller.query(new QueryRequest("motif(fork)", 10, 0, null, null));
+    QueryResponse response = controller.query(new QueryRequest("motif(fork)", 10, 0, null, null));
 
     assertThat(response.games()).isEmpty();
     assertThat(response.count()).isEqualTo(0);
@@ -164,16 +162,14 @@ public class QueryControllerTest {
 
   @Test
   public void query_blankQuery_throws() {
-    assertThatThrownBy(
-            () -> controller.query(new QueryRequest("  ", 10, 0, null, null)))
+    assertThatThrownBy(() -> controller.query(new QueryRequest("  ", 10, 0, null, null)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("query is required");
   }
 
   @Test
   public void query_nullQuery_throws() {
-    assertThatThrownBy(
-            () -> controller.query(new QueryRequest(null, 10, 0, null, null)))
+    assertThatThrownBy(() -> controller.query(new QueryRequest(null, 10, 0, null, null)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("query is required");
   }

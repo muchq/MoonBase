@@ -19,7 +19,9 @@ public record QueryRequest(
     return includePgn == null || includePgn;
   }
 
-  /** True if occurrences should be included; defaults to true when null (backward compatibility). */
+  /**
+   * True if occurrences should be included; defaults to true when null (backward compatibility).
+   */
   public boolean includeOccurrencesOrDefault() {
     return includeOccurrences == null || includeOccurrences;
   }

@@ -43,7 +43,9 @@ public class GameController {
         .map(
             feature -> {
               Map<String, List<OccurrenceRow>> occurrences =
-                  gameFeatureStore.queryOccurrences(List.of(gameUrl)).getOrDefault(gameUrl, Map.of());
+                  gameFeatureStore
+                      .queryOccurrences(List.of(gameUrl))
+                      .getOrDefault(gameUrl, Map.of());
               GameFeatureRow row = GameFeatureRow.fromStore(feature, occurrences);
               return Response.ok(row).build();
             })
