@@ -206,8 +206,10 @@ public class IndexWorker {
         String state = sql.getSQLState();
         int errorCode = sql.getErrorCode();
         // PostgreSQL: 40001 = serialization failure, 40P01 = deadlock
-        // H2: error code 50200 = lock timeout (SQL state is "HYT00", not "50200")
-        if ("40001".equals(state) || "40P01".equals(state) || errorCode == 50200) {
+        // H2: 50200 = lock timeout (wraps 90131 via filterConcurrentUpdate);
+        //     90131 = concurrent update (MVCC write-write conflict, directly retryable)
+        if ("40001".equals(state) || "40P01".equals(state)
+            || errorCode == 50200 || errorCode == 90131) {
           return true;
         }
       }
