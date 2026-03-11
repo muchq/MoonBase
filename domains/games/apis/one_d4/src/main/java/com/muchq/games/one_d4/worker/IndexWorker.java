@@ -11,6 +11,10 @@ import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import com.muchq.games.one_d4.queue.IndexMessage;
+import dev.failsafe.Failsafe;
+import dev.failsafe.RetryPolicy;
+import java.sql.SQLException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
@@ -30,6 +34,17 @@ public class IndexWorker {
   private static final DateTimeFormatter MONTH_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM");
   private static final Pattern ECO_PATTERN = Pattern.compile("\\[ECO\\s+\"([^\"]+)\"\\]");
   static final int BATCH_SIZE = 100;
+
+  private static final RetryPolicy<Void> UPSERT_RETRY =
+      RetryPolicy.<Void>builder()
+          .handleIf(IndexWorker::isLockConflict)
+          .withBackoff(Duration.ofMillis(100), Duration.ofSeconds(1))
+          .withMaxAttempts(3)
+          .onRetry(
+              e ->
+                  LOG.warn(
+                      "Lock conflict on upsertPeriod, retrying (attempt {})", e.getAttemptCount()))
+          .build();
 
   private final ChessClient chessClient;
   private final FeatureExtractor featureExtractor;
@@ -119,14 +134,18 @@ public class IndexWorker {
         Instant firstDayNextMonth =
             month.plusMonths(1).atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant();
         boolean isComplete = !fetchedAt.isBefore(firstDayNextMonth);
-        periodStore.upsertPeriod(
-            message.player(),
-            message.platform(),
-            monthStr,
-            fetchedAt,
-            isComplete,
-            monthCount,
-            message.excludeBullet());
+        int finalMonthCount = monthCount;
+        Failsafe.with(UPSERT_RETRY)
+            .run(
+                () ->
+                    periodStore.upsertPeriod(
+                        message.player(),
+                        message.platform(),
+                        monthStr,
+                        fetchedAt,
+                        isComplete,
+                        finalMonthCount,
+                        message.excludeBullet()));
         requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
       }
 
@@ -178,5 +197,22 @@ public class IndexWorker {
   private String extractEcoFromPgn(String pgn) {
     Matcher m = ECO_PATTERN.matcher(pgn);
     return m.find() ? m.group(1) : null;
+  }
+
+  private static boolean isLockConflict(Throwable e) {
+    Throwable cause = e;
+    while (cause != null) {
+      if (cause instanceof SQLException sql) {
+        String state = sql.getSQLState();
+        int errorCode = sql.getErrorCode();
+        // PostgreSQL: 40001 = serialization failure, 40P01 = deadlock
+        // H2: error code 50200 = lock timeout (SQL state is "HYT00", not "50200")
+        if ("40001".equals(state) || "40P01".equals(state) || errorCode == 50200) {
+          return true;
+        }
+      }
+      cause = cause.getCause();
+    }
+    return false;
   }
 }

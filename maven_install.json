@@ -20,6 +20,7 @@
     "com.h2database:h2": 867138720,
     "com.uber.nullaway:nullaway": -99678960,
     "com.zaxxer:HikariCP": 173962819,
+    "dev.failsafe:failsafe": -1314791755,
     "io.github.tors42:chariot": -1058161094,
     "io.micronaut.jaxrs:micronaut-jaxrs-bom": -1899878931,
     "io.micronaut.jaxrs:micronaut-jaxrs-processor": -1554586820,
@@ -84,6 +85,7 @@
     "com.thoughtworks.paranamer:paranamer": -1233040102,
     "com.uber.nullaway:nullaway": 360235481,
     "com.zaxxer:HikariCP": -121743357,
+    "dev.failsafe:failsafe": -253921025,
     "io.github.eisop:dataflow-errorprone": 1875600084,
     "io.github.java-diff-utils:java-diff-utils": -1540151507,
     "io.github.tors42:chariot": -1775298447,
@@ -393,6 +395,12 @@
         "jar": "f1e612fa27345be3107a85431e8a8aeb205c15364ab2f2d411e40a9d7bb08095"
       },
       "version": "7.0.2"
+    },
+    "dev.failsafe:failsafe": {
+      "shasums": {
+        "jar": "2c5dc879a6dac7ea3a7b29d795e27bd49b8e7908b05c2f3e56053c19d79850f5"
+      },
+      "version": "3.3.2"
     },
     "io.github.eisop:dataflow-errorprone": {
       "shasums": {
@@ -1833,6 +1841,14 @@
       "com.zaxxer.hikari.pool",
       "com.zaxxer.hikari.util"
     ],
+    "dev.failsafe:failsafe": [
+      "dev.failsafe",
+      "dev.failsafe.event",
+      "dev.failsafe.function",
+      "dev.failsafe.internal",
+      "dev.failsafe.internal.util",
+      "dev.failsafe.spi"
+    ],
     "io.github.eisop:dataflow-errorprone": [
       "org.checkerframework.dataflow.qual",
       "org.checkerframework.errorprone.checker.builder.qual",
@@ -2905,6 +2921,7 @@
       "com.thoughtworks.paranamer:paranamer",
       "com.uber.nullaway:nullaway",
       "com.zaxxer:HikariCP",
+      "dev.failsafe:failsafe",
       "io.github.eisop:dataflow-errorprone",
       "io.github.java-diff-utils:java-diff-utils",
       "io.github.tors42:chariot",
