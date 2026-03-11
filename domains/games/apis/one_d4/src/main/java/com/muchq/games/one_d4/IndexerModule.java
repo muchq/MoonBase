@@ -36,13 +36,41 @@ import com.muchq.platform.http_client.jdk.Jdk11HttpClient;
 import com.muchq.platform.json.JsonUtils;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.context.annotation.Factory;
-import io.micronaut.context.annotation.Value;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import javax.sql.DataSource;
 import org.jdbi.v3.core.Jdbi;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Factory
 public class IndexerModule {
+  private static final Logger LOG = LoggerFactory.getLogger(IndexerModule.class);
+  private static final String DEFAULT_JDBC_URL = "jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1";
+  private static final Path DB_CONFIG_PATH = Path.of("/etc/one_d4/db_config");
+
+  /**
+   * Resolves the JDBC URL. Priority: 1. INDEXER_DB_URL environment variable 2.
+   * /etc/one_d4/db_config file (plain text, single line) 3. H2 in-memory (local dev default)
+   */
+  static String readJdbcUrl() {
+    String envUrl = System.getenv("INDEXER_DB_URL");
+    if (envUrl != null && !envUrl.isBlank()) {
+      return envUrl.strip();
+    }
+    try {
+      String fileUrl = Files.readString(DB_CONFIG_PATH).strip();
+      if (!fileUrl.isEmpty()) {
+        LOG.info("Loaded JDBC URL from {}", DB_CONFIG_PATH);
+        return fileUrl;
+      }
+    } catch (IOException ignored) {
+    }
+    LOG.info("No DB config found; falling back to H2 in-memory");
+    return DEFAULT_JDBC_URL;
+  }
 
   @Context
   public ObjectMapper objectMapper() {
@@ -60,17 +88,13 @@ public class IndexerModule {
   }
 
   @Context
-  public DataSource dataSource(
-      @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl,
-      @Value("${indexer.db.username:sa}") String username,
-      @Value("${indexer.db.password:}") String password) {
-    return DataSourceFactory.create(jdbcUrl, username, password);
+  public DataSource dataSource() {
+    return DataSourceFactory.create(readJdbcUrl());
   }
 
   @Context
-  public Boolean useH2(
-      @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl) {
-    return jdbcUrl.contains(":h2:");
+  public Boolean useH2() {
+    return readJdbcUrl().contains(":h2:");
   }
 
   @Context
