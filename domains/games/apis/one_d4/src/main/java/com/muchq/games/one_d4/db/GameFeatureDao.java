@@ -185,7 +185,7 @@ public class GameFeatureDao implements GameFeatureStore {
       throw new IllegalArgumentException(
           "Expected CompiledQuery, got: " + compiledQuery.getClass());
     }
-    String sql = cq.selectSql() + " LIMIT ? OFFSET ?";
+    String sql = cq.selectSql() + ", game_url ASC LIMIT ? OFFSET ?";
     return jdbi.withHandle(
         h -> {
           var query = h.createQuery(sql);
