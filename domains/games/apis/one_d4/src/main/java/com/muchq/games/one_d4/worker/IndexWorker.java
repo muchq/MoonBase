@@ -134,7 +134,8 @@ public class IndexWorker {
       LOG.info("Completed indexing request {} with {} games", message.requestId(), totalIndexed);
     } catch (Exception e) {
       LOG.error("Failed to process index request {}", message.requestId(), e);
-      requestStore.updateStatus(message.requestId(), "FAILED", e.getMessage(), 0);
+      requestStore.updateStatus(
+          message.requestId(), "FAILED", "Indexing failed due to an internal error", 0);
     }
   }
 

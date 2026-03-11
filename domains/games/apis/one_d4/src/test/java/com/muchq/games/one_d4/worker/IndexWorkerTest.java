@@ -165,6 +165,22 @@ public class IndexWorkerTest {
   }
 
   @Test
+  public void process_onUnhandledException_storesOpaqueErrorMessage() {
+    stubChessClient.setThrowOnFetch(
+        new RuntimeException("MERGE INTO indexed_periods ... SQL details"));
+    IndexMessage message =
+        new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false);
+
+    worker.process(message);
+
+    assertThat(requestStore.getLastStatus()).isEqualTo("FAILED");
+    assertThat(requestStore.getLastErrorMessage())
+        .doesNotContain("MERGE")
+        .doesNotContain("SQL")
+        .isEqualTo("Indexing failed due to an internal error");
+  }
+
+  @Test
   public void process_bulletGamesSkippedWhenExcludeBulletTrue() {
     String gameUrl = "https://chess.com/game/bullet-skip";
     stubChessClient.setResponse(
@@ -226,6 +242,7 @@ public class IndexWorkerTest {
   private static final class StubChessClient extends ChessClient {
     private final List<java.time.YearMonth> fetchCalls = new ArrayList<>();
     private final Map<java.time.YearMonth, List<PlayedGame>> responseByMonth = new HashMap<>();
+    private RuntimeException throwOnFetch = null;
 
     StubChessClient() {
       super(null, new ObjectMapper());
@@ -235,9 +252,16 @@ public class IndexWorkerTest {
       responseByMonth.put(month, new ArrayList<>(games));
     }
 
+    void setThrowOnFetch(RuntimeException ex) {
+      this.throwOnFetch = ex;
+    }
+
     @Override
     public Optional<GamesResponse> fetchGames(String player, java.time.YearMonth yearMonth) {
       fetchCalls.add(yearMonth);
+      if (throwOnFetch != null) {
+        throw throwOnFetch;
+      }
       List<PlayedGame> games = responseByMonth.get(yearMonth);
       if (games != null) {
         return Optional.of(new GamesResponse(games));
@@ -252,10 +276,15 @@ public class IndexWorkerTest {
 
   private static final class RecordingRequestStore implements IndexingRequestStore {
     private String lastStatus;
+    private String lastErrorMessage;
     private int lastGamesIndexed;
 
     String getLastStatus() {
       return lastStatus;
+    }
+
+    String getLastErrorMessage() {
+      return lastErrorMessage;
     }
 
     int getLastGamesIndexed() {
@@ -276,6 +305,7 @@ public class IndexWorkerTest {
     @Override
     public void updateStatus(UUID id, String status, String errorMessage, int gamesIndexed) {
       this.lastStatus = status;
+      this.lastErrorMessage = errorMessage;
       this.lastGamesIndexed = gamesIndexed;
     }
 
