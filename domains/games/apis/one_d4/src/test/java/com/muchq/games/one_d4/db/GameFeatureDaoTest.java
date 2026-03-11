@@ -552,6 +552,26 @@ public class GameFeatureDaoTest {
     assertThat(page2.get(0).gameUrl()).isEqualTo("https://chess.com/game/order-a");
   }
 
+  @Test
+  public void query_paginatesStablyWhenPlayedAtIsEqual() {
+    // Insert two games with identical played_at; game_url tiebreaker determines order
+    Instant sameTime = Instant.parse("2024-03-01T12:00:00Z");
+    dao.insertBatch(List.of(
+        createGameAt("https://chess.com/game/zzz-last", sameTime),
+        createGameAt("https://chess.com/game/aaa-first", sameTime)
+    ));
+
+    CompiledQuery allGames = new SqlCompiler().compile(Parser.parse("white_elo >= 1000"));
+    List<GameFeature> page1 = dao.query(allGames, 1, 0);
+    List<GameFeature> page2 = dao.query(allGames, 1, 1);
+
+    assertThat(page1).hasSize(1);
+    assertThat(page2).hasSize(1);
+    // game_url ASC tiebreaker: "aaa-first" < "zzz-last"
+    assertThat(page1.get(0).gameUrl()).isEqualTo("https://chess.com/game/aaa-first");
+    assertThat(page2.get(0).gameUrl()).isEqualTo("https://chess.com/game/zzz-last");
+  }
+
   private GameFeature createGame(String url) {
     return new GameFeature(
         null,
