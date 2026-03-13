@@ -66,10 +66,12 @@ public class IndexerModule {
         LOG.info("Loaded JDBC URL from {}", DB_CONFIG_PATH);
         return fileUrl;
       }
-    } catch (IOException e) {
+      LOG.info("Empty DB config file found; falling back to H2 in-memory");
+    } catch (NoSuchFileException nsfe) {
+      LOG.info("No DB config file found; falling back to H2 in-memory");
+    } catch (IOException ioe) {
       throw new UncheckedIOException(ioe);
     }
-    LOG.info("No DB config found; falling back to H2 in-memory");
     return DEFAULT_JDBC_URL;
   }
 
