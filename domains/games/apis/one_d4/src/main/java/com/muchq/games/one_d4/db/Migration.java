@@ -131,17 +131,25 @@ public class Migration {
   // Add exclude_bullet to indexed_periods and update the unique constraint so the period cache
   // is keyed by (player, platform, year_month, exclude_bullet). Existing rows get false (bullet
   // games included), matching pre-existing behavior. On PG we must drop the old 3-column
-  // constraint before adding the 4-column one; on H2 (tests) the table is always created fresh
-  // with the correct DDL so only the ADD CONSTRAINT IF NOT EXISTS is needed.
+  // constraint before adding the 4-column one; H2 supports ADD CONSTRAINT IF NOT EXISTS but
+  // PG does not, so PG uses a DO block with EXCEPTION handling instead.
   private static final String ADD_INDEXED_PERIODS_EXCLUDE_BULLET_COLUMN =
       "ALTER TABLE indexed_periods ADD COLUMN IF NOT EXISTS exclude_bullet BOOLEAN NOT NULL"
           + " DEFAULT FALSE";
   private static final String DROP_INDEXED_PERIODS_OLD_UNIQUE_PG =
       "ALTER TABLE indexed_periods DROP CONSTRAINT IF EXISTS"
           + " indexed_periods_player_platform_year_month_key";
-  private static final String ADD_INDEXED_PERIODS_UNIQUE =
+  private static final String ADD_INDEXED_PERIODS_UNIQUE_H2 =
       "ALTER TABLE indexed_periods ADD CONSTRAINT IF NOT EXISTS indexed_periods_unique"
           + " UNIQUE (player, platform, year_month, exclude_bullet)";
+  private static final String ADD_INDEXED_PERIODS_UNIQUE_PG =
+      """
+      DO $$ BEGIN
+        ALTER TABLE indexed_periods ADD CONSTRAINT indexed_periods_unique
+          UNIQUE (player, platform, year_month, exclude_bullet);
+      EXCEPTION WHEN duplicate_table OR duplicate_object THEN NULL;
+      END $$\
+      """;
 
   private static final String ADD_INDEXED_AT_COLUMN =
       "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS indexed_at TIMESTAMP NOT NULL DEFAULT"
@@ -235,7 +243,7 @@ public class Migration {
       if (!useH2) {
         stmt.execute(DROP_INDEXED_PERIODS_OLD_UNIQUE_PG);
       }
-      stmt.execute(ADD_INDEXED_PERIODS_UNIQUE);
+      stmt.execute(useH2 ? ADD_INDEXED_PERIODS_UNIQUE_H2 : ADD_INDEXED_PERIODS_UNIQUE_PG);
       stmt.execute(ADD_INDEXED_AT_COLUMN);
 
       // Drop legacy motifs_json column (replaced by motif_occurrences table)

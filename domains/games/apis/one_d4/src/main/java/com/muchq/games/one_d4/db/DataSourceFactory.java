@@ -5,15 +5,18 @@ import com.zaxxer.hikari.HikariDataSource;
 import javax.sql.DataSource;
 
 public class DataSourceFactory {
-  private DataSourceFactory() {}
+  private DataSourceFactory() {
+    throw new RuntimeException();
+  }
 
-  public static DataSource create(String jdbcUrl, String username, String password) {
+  public static DataSource create(String jdbcUrl) {
     HikariConfig config = new HikariConfig();
     config.setJdbcUrl(jdbcUrl);
-    config.setUsername(username);
-    config.setPassword(password);
-    config.setMaximumPoolSize(10);
-    config.setMinimumIdle(2);
+    config.setMaximumPoolSize(5);
+    config.setMinimumIdle(1);
+    config.setKeepaliveTime(60_000);
+    config.setConnectionTestQuery("SELECT 1");
+    config.setConnectionTimeout(10_000);
     return new HikariDataSource(config);
   }
 }
