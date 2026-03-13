@@ -148,6 +148,29 @@ services:
           cpus: '0.5'
           memory: 512M
 
+  one_d4_postgres:
+    image: postgres:18
+    restart: always
+    environment:
+      - POSTGRES_DB=one_d4
+      - POSTGRES_USER=one_d4
+      - POSTGRES_PASSWORD=${ONE_D4_DB_PASSWORD}
+    volumes:
+      - one_d4_pgdata:/var/lib/postgresql/data
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U one_d4"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   one_d4:
     image: ghcr.io/muchq/one_d4:latest
     restart: always
@@ -161,6 +184,9 @@ services:
       - one_d4_data:/data
     networks:
       - app_network
+    depends_on:
+      one_d4_postgres:
+        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -245,6 +271,7 @@ volumes:
   caddy_config:
   forgejo_data:
   one_d4_data:
+  one_d4_pgdata:
   motif_query_data:
 
 networks:
