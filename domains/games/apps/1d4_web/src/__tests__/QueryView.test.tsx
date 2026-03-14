@@ -110,6 +110,20 @@ describe('QueryView', () => {
     expect(screen.getByText('Alice vs Bob')).toBeInTheDocument();
   });
 
+  it('shows no-results message when api response omits games field', async () => {
+    // Simulate backend that omits empty collections (e.g. { count: 0 } with no "games" key)
+    vi.mocked(api.query).mockResolvedValue({ count: 0 } as never);
+    render(<QueryView />, { wrapper: makeWrapper() });
+    fireEvent.change(
+      screen.getByPlaceholderText('e.g. motif(fork) AND white.elo >= 2500'),
+      { target: { value: 'eco = "Z99"' } }
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
+    await waitFor(() =>
+      expect(screen.getByText(/No results/)).toBeInTheDocument()
+    );
+  });
+
   it('does not fire a query when Run query is clicked with empty text', async () => {
     render(<QueryView />, { wrapper: makeWrapper() });
     fireEvent.click(screen.getByRole('button', { name: 'Run query' }));

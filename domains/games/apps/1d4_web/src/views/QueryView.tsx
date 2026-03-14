@@ -29,6 +29,8 @@ export default function QueryView() {
     enabled: committedQuery.trim().length > 0,
   });
 
+  const games = data?.games ?? [];
+
   function handleRun() {
     const q = queryText.trim();
     if (!q) return;
@@ -105,17 +107,17 @@ export default function QueryView() {
       )}
       {isLoading && <div className="loading">Loading…</div>}
 
-      {!isLoading && !error && data && data.games.length > 0 && (
+      {!isLoading && !error && games.length > 0 && (
         <>
           <GameTable
-            games={data.games}
+            games={games}
             sortBy=""
             sortDir="asc"
             onSort={() => {}}
             onRowClick={(game) => setSelectedGame(game)}
           />
           <p className="empty" style={{ textAlign: 'left' }}>
-            Showing {data.games.length} result(s).
+            Showing {games.length} result(s).
           </p>
           {selectedGame && (
             <GameDetailPanel
@@ -126,7 +128,7 @@ export default function QueryView() {
           )}
         </>
       )}
-      {!isLoading && !error && committedQuery && data?.games.length === 0 && (
+      {!isLoading && !error && committedQuery && data && games.length === 0 && (
         <p className="empty">
           No results. Try another query or increase the limit.
         </p>
