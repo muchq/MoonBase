@@ -15,7 +15,7 @@ public class SqlCompilerTest {
   private final SqlCompiler compiler = new SqlCompiler();
 
   private static final String BASE_PREFIX = "SELECT g.* FROM game_features g WHERE ";
-  private static final String BASE_SUFFIX = " ORDER BY g.played_at DESC";
+  private static final String BASE_SUFFIX = " ORDER BY g.played_at DESC, g.game_url ASC";
 
   private static String motifExists(String motif) {
     return "EXISTS (SELECT 1 FROM motif_occurrences mo"
@@ -267,7 +267,7 @@ public class SqlCompilerTest {
                 + " ON g.game_url = cnt.game_url"
                 + " WHERE "
                 + motifExists("PROMOTION")
-                + " ORDER BY COALESCE(cnt.c, 0) DESC");
+                + " ORDER BY COALESCE(cnt.c, 0) DESC, g.game_url ASC");
     assertThat(result.parameters()).isEqualTo(List.of("CHECK"));
   }
 
@@ -282,7 +282,7 @@ public class SqlCompilerTest {
                 + " ON g.game_url = cnt.game_url"
                 + " WHERE "
                 + FORK_EXISTS
-                + " ORDER BY COALESCE(cnt.c, 0) ASC");
+                + " ORDER BY COALESCE(cnt.c, 0) ASC, g.game_url ASC");
     assertThat(result.parameters()).isEqualTo(List.of("PIN"));
   }
 
@@ -312,7 +312,7 @@ public class SqlCompilerTest {
                 + " ON g.game_url = cnt.game_url"
                 + " WHERE "
                 + motifExists("PIN")
-                + " ORDER BY COALESCE(cnt.c, 0) DESC");
+                + " ORDER BY COALESCE(cnt.c, 0) DESC, g.game_url ASC");
     // No extra param for fork — ATTACK is inlined as a literal
     assertThat(result.parameters()).isEmpty();
   }

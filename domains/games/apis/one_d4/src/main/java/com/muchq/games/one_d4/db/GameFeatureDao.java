@@ -185,9 +185,7 @@ public class GameFeatureDao implements GameFeatureStore {
       throw new IllegalArgumentException(
           "Expected CompiledQuery, got: " + compiledQuery.getClass());
     }
-    // selectSql() always ends with "ORDER BY ... [direction]"; append game_url as a stable
-    // tiebreaker.
-    String sql = cq.selectSql() + ", game_url ASC LIMIT ? OFFSET ?";
+    String sql = cq.selectSql() + " LIMIT ? OFFSET ?";
     return jdbi.withHandle(
         h -> {
           var query = h.createQuery(sql);
