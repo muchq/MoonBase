@@ -156,7 +156,7 @@ services:
       - POSTGRES_USER=one_d4
       - POSTGRES_PASSWORD=${ONE_D4_DB_PASSWORD}
     volumes:
-      - one_d4_pgdata:/var/lib/postgresql/data
+      - one_d4_pgdata:/var/lib/postgresql
     networks:
       - app_network
     deploy:
@@ -181,7 +181,6 @@ services:
       - SENTRY_DSN=${ONE_D4_SENTRY_DSN}
     volumes:
       - /etc/one_d4:/etc/one_d4
-      - one_d4_data:/data
     networks:
       - app_network
     depends_on:
@@ -270,7 +269,6 @@ volumes:
   caddy_data:
   caddy_config:
   forgejo_data:
-  one_d4_data:
   one_d4_pgdata:
   motif_query_data:
 
