@@ -27,6 +27,7 @@ const mockGame: GameRow = {
   playedAt: 1700000000,
   indexedAt: 1700001000,
   numMoves: 40,
+  occurrences: {},
 };
 
 function makeWrapper() {

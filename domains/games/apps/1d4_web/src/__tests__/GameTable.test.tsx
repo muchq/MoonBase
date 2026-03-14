@@ -120,4 +120,10 @@ describe('GameTable', () => {
     render(<GameTable games={mockGames} sortBy="" sortDir="asc" onSort={() => {}} />);
     expect(screen.queryByTestId('chessboard')).not.toBeInTheDocument();
   });
+
+  it('renders correctly when sort props are omitted (uses defaults)', () => {
+    render(<GameTable games={mockGames} />);
+    expect(screen.getByText('Alice')).toBeInTheDocument();
+    expect(screen.getByText('Carol')).toBeInTheDocument();
+  });
 });
