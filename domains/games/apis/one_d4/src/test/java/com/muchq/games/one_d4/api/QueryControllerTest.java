@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.Before;
 import org.junit.Test;
@@ -36,6 +37,7 @@ public class QueryControllerTest {
     String gameUrl = "https://chess.com/game/with-motifs";
     GameFeature feature = createGameFeature(gameUrl);
     store.setQueryResult(List.of(feature));
+    store.setCountResult(1);
     store.setOccurrencesResult(
         Map.of(
             gameUrl,
@@ -81,7 +83,7 @@ public class QueryControllerTest {
                         false,
                         null)))));
 
-    QueryResponse response = controller.query(new QueryRequest("motif(pin)", 10, 0));
+    QueryResponse response = controller.query(new QueryRequest("motif(pin)", 10, 0, null, null));
 
     assertThat(response.games()).hasSize(1);
     GameFeatureRow row = response.games().get(0);
@@ -107,12 +109,27 @@ public class QueryControllerTest {
   }
 
   @Test
+  public void query_whenIncludeOccurrencesFalse_returnsEmptyOccurrencesMapPerGame() {
+    String gameUrl = "https://chess.com/game/no-motifs";
+    store.setQueryResult(List.of(createGameFeature(gameUrl)));
+    store.setOccurrencesResult(Map.of(gameUrl, Map.of("pin", List.of())));
+
+    QueryResponse response =
+        controller.query(new QueryRequest("white_elo >= 2000", 10, 0, true, false));
+
+    assertThat(response.games()).hasSize(1);
+    assertThat(response.games().get(0).occurrences()).isEmpty();
+  }
+
+  @Test
   public void query_whenNoOccurrences_returnsEmptyOccurrencesMapPerGame() {
     String gameUrl = "https://chess.com/game/no-motifs";
     store.setQueryResult(List.of(createGameFeature(gameUrl)));
+    store.setCountResult(1);
     store.setOccurrencesResult(Map.of(gameUrl, Map.of()));
 
-    QueryResponse response = controller.query(new QueryRequest("white_elo >= 2000", 10, 0));
+    QueryResponse response =
+        controller.query(new QueryRequest("white_elo >= 2000", 10, 0, null, null));
 
     assertThat(response.games()).hasSize(1);
     assertThat(response.games().get(0).occurrences()).isEmpty();
@@ -121,24 +138,38 @@ public class QueryControllerTest {
   @Test
   public void query_whenStoreReturnsEmptyList_returnsEmptyResponse() {
     store.setQueryResult(List.of());
+    store.setCountResult(0);
     store.setOccurrencesResult(Map.of());
 
-    QueryResponse response = controller.query(new QueryRequest("motif(fork)", 10, 0));
+    QueryResponse response = controller.query(new QueryRequest("motif(fork)", 10, 0, null, null));
 
     assertThat(response.games()).isEmpty();
     assertThat(response.count()).isEqualTo(0);
   }
 
   @Test
+  public void query_returnsTotalCountNotPageSize() {
+    store.setQueryResult(List.of(createGameFeature("url1"), createGameFeature("url2")));
+    store.setOccurrencesResult(Map.of());
+    store.setCountResult(100);
+
+    QueryResponse response =
+        controller.query(new QueryRequest("num.moves >= 0", 10, 0, null, null));
+
+    assertThat(response.games()).hasSize(2);
+    assertThat(response.count()).isEqualTo(100);
+  }
+
+  @Test
   public void query_blankQuery_throws() {
-    assertThatThrownBy(() -> controller.query(new QueryRequest("  ", 10, 0)))
+    assertThatThrownBy(() -> controller.query(new QueryRequest("  ", 10, 0, null, null)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("query is required");
   }
 
   @Test
   public void query_nullQuery_throws() {
-    assertThatThrownBy(() -> controller.query(new QueryRequest(null, 10, 0)))
+    assertThatThrownBy(() -> controller.query(new QueryRequest(null, 10, 0, null, null)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("query is required");
   }
@@ -165,6 +196,7 @@ public class QueryControllerTest {
   private static final class FakeGameFeatureStore implements GameFeatureStore {
     private List<GameFeature> queryResult = List.of();
     private Map<String, Map<String, List<OccurrenceRow>>> occurrencesResult = Map.of();
+    private int countResult = 0;
 
     void setQueryResult(List<GameFeature> result) {
       this.queryResult = result;
@@ -172,6 +204,10 @@ public class QueryControllerTest {
 
     void setOccurrencesResult(Map<String, Map<String, List<OccurrenceRow>>> result) {
       this.occurrencesResult = result == null ? Map.of() : result;
+    }
+
+    void setCountResult(int count) {
+      this.countResult = count;
     }
 
     @Override
@@ -187,8 +223,14 @@ public class QueryControllerTest {
         Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {}
 
     @Override
-    public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
+    public List<GameFeature> query(
+        Object compiledQuery, int limit, int offset, boolean includePgn) {
       return queryResult;
+    }
+
+    @Override
+    public int count(Object compiledQuery) {
+      return countResult;
     }
 
     @Override
@@ -199,6 +241,11 @@ public class QueryControllerTest {
         out.put(url, occurrencesResult.getOrDefault(url, Map.of()));
       }
       return out;
+    }
+
+    @Override
+    public Optional<GameFeature> findByGameUrl(String gameUrl) {
+      return queryResult.stream().filter(g -> g.gameUrl().equals(gameUrl)).findFirst();
     }
 
     @Override

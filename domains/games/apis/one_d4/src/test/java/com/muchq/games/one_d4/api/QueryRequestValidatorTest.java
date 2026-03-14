@@ -12,13 +12,13 @@ public class QueryRequestValidatorTest {
 
   @Test
   public void validQuery() {
-    var request = new QueryRequest("motif(fork)", 10, 0);
+    var request = new QueryRequest("motif(fork)", 10, 0, null, null);
     assertThatCode(() -> validator.validate(request)).doesNotThrowAnyException();
   }
 
   @Test
   public void rejectsNullQuery() {
-    var request = new QueryRequest(null, 10, 0);
+    var request = new QueryRequest(null, 10, 0, null, null);
     assertThatThrownBy(() -> validator.validate(request))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("query is required");
@@ -26,7 +26,7 @@ public class QueryRequestValidatorTest {
 
   @Test
   public void rejectsBlankQuery() {
-    var request = new QueryRequest("   ", 10, 0);
+    var request = new QueryRequest("   ", 10, 0, null, null);
     assertThatThrownBy(() -> validator.validate(request))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("query is required");
@@ -35,7 +35,7 @@ public class QueryRequestValidatorTest {
   @Test
   public void rejectsQueryOverMaxLength() {
     var longQuery = "a".repeat(4097);
-    var request = new QueryRequest(longQuery, 10, 0);
+    var request = new QueryRequest(longQuery, 10, 0, null, null);
     assertThatThrownBy(() -> validator.validate(request))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("query exceeds maximum length");
@@ -44,7 +44,7 @@ public class QueryRequestValidatorTest {
   @Test
   public void acceptsQueryAtMaxLength() {
     var query = "a".repeat(4096);
-    var request = new QueryRequest(query, 10, 0);
+    var request = new QueryRequest(query, 10, 0, null, null);
     assertThatCode(() -> validator.validate(request)).doesNotThrowAnyException();
   }
 }

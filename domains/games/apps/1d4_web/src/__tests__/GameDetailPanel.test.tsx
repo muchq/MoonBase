@@ -1,14 +1,23 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import GameDetailPanel from '../components/GameDetailPanel';
 import type { GameRow, OccurrenceRow } from '../types';
+import * as api from '../api';
+
+vi.mock('../api', () => ({ getGameDetail: vi.fn() }));
 
 vi.mock('react-chessboard', () => ({
   Chessboard: ({ options }: { options: { position: string } }) => (
     <div data-testid="chessboard" data-fen={options?.position} />
   ),
 }));
+
+function wrapper({ children }: { children: React.ReactNode }) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+}
 
 // 1. e4 e5 2. Nf3 Nc6 — 4 half-moves
 const TEST_PGN = '1. e4 e5 2. Nf3 Nc6';
@@ -39,43 +48,52 @@ const mockGame: GameRow = {
 };
 
 describe('GameDetailPanel', () => {
+  beforeEach(() => {
+    vi.mocked(api.getGameDetail).mockResolvedValue(mockGame as GameRow);
+  });
+
   it('renders player names and game info', () => {
-    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />, {
+      wrapper,
+    });
     expect(screen.getByText('Alice vs Bob')).toBeInTheDocument();
     expect(screen.getByText(/1-0/)).toBeInTheDocument();
   });
 
   it('calls onClose when close button is clicked', () => {
     const onClose = vi.fn();
-    render(<GameDetailPanel game={mockGame} onClose={onClose} />);
+    render(<GameDetailPanel game={mockGame} onClose={onClose} />, {
+      wrapper,
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Close panel' }));
     expect(onClose).toHaveBeenCalledOnce();
   });
 
   it('shows chessboard when pgn is present', () => {
-    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />, { wrapper });
     expect(screen.getByTestId('chessboard')).toBeInTheDocument();
   });
 
-  it('shows PGN not available message when pgn is absent', () => {
+  it('shows PGN not available message when pgn is absent', async () => {
     const game = { ...mockGame, pgn: undefined };
-    render(<GameDetailPanel game={game} onClose={() => {}} />);
-    expect(screen.getByText(/PGN not available/)).toBeInTheDocument();
+    vi.mocked(api.getGameDetail).mockResolvedValueOnce({ ...game, occurrences: {} });
+    render(<GameDetailPanel game={game} onClose={() => {}} />, { wrapper });
+    await screen.findByText(/PGN not available/);
     expect(screen.queryByTestId('chessboard')).not.toBeInTheDocument();
   });
 
   it('shows start position initially', () => {
-    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />, { wrapper });
     expect(screen.getByText('Start')).toBeInTheDocument();
   });
 
   it('prev button is disabled at start', () => {
-    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />, { wrapper });
     expect(screen.getByRole('button', { name: 'Previous move' })).toBeDisabled();
   });
 
   it('advances to next move and updates position', () => {
-    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />, { wrapper });
     const initialFen = screen.getByTestId('chessboard').getAttribute('data-fen');
     fireEvent.click(screen.getByRole('button', { name: 'Next move' }));
     const newFen = screen.getByTestId('chessboard').getAttribute('data-fen');
@@ -84,7 +102,7 @@ describe('GameDetailPanel', () => {
   });
 
   it('next button is disabled at end', () => {
-    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />, { wrapper });
     const nextBtn = screen.getByRole('button', { name: 'Next move' });
     // Advance through all 4 half-moves
     fireEvent.click(nextBtn);
@@ -96,7 +114,7 @@ describe('GameDetailPanel', () => {
   });
 
   it('go-to-start resets to initial position', () => {
-    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />, { wrapper });
     fireEvent.click(screen.getByRole('button', { name: 'Next move' }));
     fireEvent.click(screen.getByRole('button', { name: 'Next move' }));
     fireEvent.click(screen.getByRole('button', { name: 'Go to start' }));
@@ -104,20 +122,20 @@ describe('GameDetailPanel', () => {
   });
 
   it('go-to-end seeks to last position', () => {
-    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />, { wrapper });
     fireEvent.click(screen.getByRole('button', { name: 'Go to end' }));
     expect(screen.getByText('End')).toBeInTheDocument();
   });
 
   it('lists motif occurrences grouped by move: badge and move label shown', () => {
-    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />, { wrapper });
     // Grouped view shows the motif badge and move label; descriptions are not rendered inline
     expect(screen.getByText('fork')).toBeInTheDocument();
     expect(screen.getByText('2.')).toBeInTheDocument();
   });
 
   it('clicking an occurrence row seeks to the motif position', () => {
-    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />, { wrapper });
     const startFen = screen.getByTestId('chessboard').getAttribute('data-fen');
     // forkOccurrence: moveNumber=2, side=white → ply=2, seekTo(3); click the move label
     fireEvent.click(screen.getByText('2.'));
@@ -129,30 +147,30 @@ describe('GameDetailPanel', () => {
   it('shows black occurrence move label with ellipsis', () => {
     const blackOcc: OccurrenceRow = { gameUrl: 'https://chess.com/game/1', motif: 'pin', moveNumber: 1, side: 'black', description: 'Pin' };
     const game = { ...mockGame, occurrences: { pin: [blackOcc] } };
-    render(<GameDetailPanel game={game} onClose={() => {}} />);
+    render(<GameDetailPanel game={game} onClose={() => {}} />, { wrapper });
     expect(screen.getByText('1...')).toBeInTheDocument();
   });
 
   it('flip board button is present', () => {
-    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />, { wrapper });
     expect(screen.getByRole('button', { name: 'Flip board' })).toBeInTheDocument();
   });
 
   it('shows motif nav buttons when occurrences are present', () => {
-    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />, { wrapper });
     expect(screen.getByRole('button', { name: 'Previous motif' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Next motif' })).toBeInTheDocument();
   });
 
   it('does not show motif nav buttons when there are no occurrences', () => {
     const game = { ...mockGame, occurrences: {} };
-    render(<GameDetailPanel game={game} onClose={() => {}} />);
+    render(<GameDetailPanel game={game} onClose={() => {}} />, { wrapper });
     expect(screen.queryByRole('button', { name: 'Previous motif' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Next motif' })).not.toBeInTheDocument();
   });
 
   it('next motif button seeks to first occurrence', () => {
-    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />, { wrapper });
     const startFen = screen.getByTestId('chessboard').getAttribute('data-fen');
     fireEvent.click(screen.getByRole('button', { name: 'Next motif' }));
     const newFen = screen.getByTestId('chessboard').getAttribute('data-fen');
@@ -161,7 +179,7 @@ describe('GameDetailPanel', () => {
   });
 
   it('prev motif button wraps to last occurrence from initial state', () => {
-    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />, { wrapper });
     const startFen = screen.getByTestId('chessboard').getAttribute('data-fen');
     fireEvent.click(screen.getByRole('button', { name: 'Previous motif' }));
     const newFen = screen.getByTestId('chessboard').getAttribute('data-fen');
@@ -169,7 +187,7 @@ describe('GameDetailPanel', () => {
   });
 
   it('displays motif counter showing active index and total', () => {
-    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />, { wrapper });
     // Before navigating: shows total motif count
     expect(screen.getByText('1 motif')).toBeInTheDocument();
     // After clicking next motif: shows index/total
@@ -182,7 +200,7 @@ describe('GameDetailPanel', () => {
     const occ2: OccurrenceRow = { gameUrl: 'https://chess.com/game/1', motif: 'fork', moveNumber: 2, side: 'white', description: 'later' };
     // provide fork before pin in the object to verify sort by ply
     const game = { ...mockGame, occurrences: { fork: [occ2], pin: [occ1] } };
-    render(<GameDetailPanel game={game} onClose={() => {}} />);
+    render(<GameDetailPanel game={game} onClose={() => {}} />, { wrapper });
     const items = screen.getAllByRole('listitem');
     // Each group row shows move label + badge; pin (move 1) before fork (move 2)
     expect(items[0]).toHaveTextContent('1.');

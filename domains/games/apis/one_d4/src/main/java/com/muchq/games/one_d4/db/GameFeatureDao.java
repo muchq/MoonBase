@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.jdbi.v3.core.Jdbi;
 import org.jdbi.v3.core.mapper.RowMapper;
@@ -65,6 +66,12 @@ public class GameFeatureDao implements GameFeatureStore {
           + " ('FORK', 'CHECKMATE', 'DISCOVERED_CHECK', 'DOUBLE_CHECK', 'DISCOVERED_ATTACK')"
           + " ORDER BY ply ASC";
 
+  /** Column list for list queries that omit PGN to reduce payload and DB read. */
+  private static final String LIST_COLUMNS_NO_PGN =
+      "g.id, g.request_id, g.game_url, g.platform, g.white_username, g.black_username,"
+          + " g.white_elo, g.black_elo, g.time_class, g.eco, g.result, g.played_at, g.num_moves,"
+          + " g.indexed_at";
+
   private static final RowMapper<GameFeature> GAME_FEATURE_MAPPER =
       (rs, ctx) ->
           new GameFeature(
@@ -86,6 +93,27 @@ public class GameFeatureDao implements GameFeatureStore {
                   : null,
               rs.getString("pgn"));
 
+  private static final RowMapper<GameFeature> GAME_FEATURE_MAPPER_NO_PGN =
+      (rs, ctx) ->
+          new GameFeature(
+              UUID.fromString(rs.getString("id")),
+              UUID.fromString(rs.getString("request_id")),
+              rs.getString("game_url"),
+              rs.getString("platform"),
+              rs.getString("white_username"),
+              rs.getString("black_username"),
+              getIntOrNull(rs, "white_elo"),
+              getIntOrNull(rs, "black_elo"),
+              rs.getString("time_class"),
+              rs.getString("eco"),
+              rs.getString("result"),
+              rs.getTimestamp("played_at").toInstant(),
+              getIntOrNull(rs, "num_moves"),
+              rs.getTimestamp("indexed_at") != null
+                  ? rs.getTimestamp("indexed_at").toInstant()
+                  : null,
+              null);
+
   private static final RowMapper<GameForReanalysis> REANALYSIS_MAPPER =
       (rs, ctx) ->
           new GameForReanalysis(
@@ -93,12 +121,25 @@ public class GameFeatureDao implements GameFeatureStore {
               rs.getString("game_url"),
               rs.getString("pgn"));
 
+  private static final String FIND_BY_GAME_URL =
+      "SELECT id, request_id, game_url, platform, white_username, black_username,"
+          + " white_elo, black_elo, time_class, eco, result, played_at, num_moves, indexed_at, pgn"
+          + " FROM game_features WHERE game_url = ?";
+
   private final Jdbi jdbi;
   private final boolean useH2;
 
   public GameFeatureDao(Jdbi jdbi, boolean useH2) {
     this.jdbi = jdbi;
     this.useH2 = useH2;
+  }
+
+  @Override
+  public Optional<GameFeature> findByGameUrl(String gameUrl) {
+    List<GameFeature> list =
+        jdbi.withHandle(
+            h -> h.createQuery(FIND_BY_GAME_URL).bind(0, gameUrl).map(GAME_FEATURE_MAPPER).list());
+    return list.isEmpty() ? Optional.empty() : Optional.of(list.get(0));
   }
 
   @Override
@@ -180,22 +221,55 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   @Override
-  public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
+  public List<GameFeature> query(Object compiledQuery, int limit, int offset, boolean includePgn) {
     if (!(compiledQuery instanceof CompiledQuery cq)) {
       throw new IllegalArgumentException(
           "Expected CompiledQuery, got: " + compiledQuery.getClass());
     }
-    String sql = cq.selectSql() + " LIMIT ? OFFSET ?";
+    String selectSql = cq.selectSql();
+    String listSql;
+    RowMapper<GameFeature> mapper;
+    if (includePgn) {
+      listSql = selectSql + " LIMIT ? OFFSET ?";
+      mapper = GAME_FEATURE_MAPPER;
+    } else {
+      listSql =
+          selectSql.replace("SELECT g.* FROM", "SELECT " + LIST_COLUMNS_NO_PGN + " FROM")
+              + " LIMIT ? OFFSET ?";
+      mapper = GAME_FEATURE_MAPPER_NO_PGN;
+    }
     return jdbi.withHandle(
         h -> {
-          var query = h.createQuery(sql);
+          var query = h.createQuery(listSql);
           int idx = 0;
           for (Object param : cq.parameters()) {
             query.bind(idx++, param);
           }
           query.bind(idx++, limit);
           query.bind(idx, offset);
-          return query.map(GAME_FEATURE_MAPPER).list();
+          return query.map(mapper).list();
+        });
+  }
+
+  @Override
+  public int count(Object compiledQuery) {
+    if (!(compiledQuery instanceof CompiledQuery cq)) {
+      throw new IllegalArgumentException(
+          "Expected CompiledQuery, got: " + compiledQuery.getClass());
+    }
+    String selectSql = cq.selectSql();
+    // Strip the outer ORDER BY (use lastIndexOf in case ORDER BY appears in a subquery).
+    int orderByIndex = selectSql.lastIndexOf(" ORDER BY ");
+    String sqlWithoutOrder = orderByIndex >= 0 ? selectSql.substring(0, orderByIndex) : selectSql;
+    String countSql = sqlWithoutOrder.replaceFirst("SELECT g\\.\\* FROM", "SELECT COUNT(*) FROM");
+    return jdbi.withHandle(
+        h -> {
+          var query = h.createQuery(countSql);
+          int idx = 0;
+          for (Object param : cq.parameters()) {
+            query.bind(idx++, param);
+          }
+          return query.mapTo(Integer.class).one();
         });
   }
 

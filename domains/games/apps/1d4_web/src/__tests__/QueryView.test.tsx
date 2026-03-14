@@ -91,13 +91,18 @@ describe('QueryView', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
     await waitFor(() =>
-      expect(screen.getByText('Showing 1 result(s).')).toBeInTheDocument()
+      expect(screen.getByText('Showing 1 of 1 result(s).')).toBeInTheDocument()
     );
     expect(screen.getByText('Alice')).toBeInTheDocument();
   });
 
   it('opens game detail panel when a result row is clicked', async () => {
     vi.mocked(api.query).mockResolvedValue({ games: [mockGame], count: 1 });
+    vi.mocked(api.getGameDetail).mockResolvedValue({
+      ...mockGame,
+      pgn: '1. e4 e5',
+      occurrences: {},
+    });
     render(<QueryView />, { wrapper: makeWrapper() });
     fireEvent.change(
       screen.getByPlaceholderText('e.g. motif(fork) AND white.elo >= 2500'),

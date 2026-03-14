@@ -17,10 +17,11 @@ npm run dev        # Vite dev server with Cloudflare Workers runtime
 
 The app calls `https://api.1d4.net`. CORS on that API allows `localhost` in development.
 
-## Test & typecheck
+## Test, lint & typecheck
 
 ```bash
-npm test           # Vitest (30 tests)
+npm test           # Vitest
+npm run lint       # ESLint (src)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -41,9 +42,11 @@ npx wrangler deploy --config dist/1d4_web/wrangler.json
 ```
 
 Cloudflare CI is configured in the Workers dashboard:
-- **Build command:** `npm ci && npm run build`
+- **Build command:** `npm ci && npm run build` (add `&& npm run lint` before `build` to fail deploys on lint errors)
 - **Deploy command:** `npx wrangler deploy --config dist/1d4_web/wrangler.json`
-- **Root directory:** `/domains/games/apps/1d4_web`
+- **Root directory:** `domains/games/apps/1d4_web`
+
+GitHub Actions (branch workflow) runs lint, typecheck, tests, and build on every PR, so lint is enforced in CI even if not in the Cloudflare build command.
 
 ## Build (Bazel)
 

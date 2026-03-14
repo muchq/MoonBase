@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createIndex, listIndexRequests, query } from '../api';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { createIndex, getGameDetail, listIndexRequests, query } from '../api';
 
 describe('api', () => {
   afterEach(() => {
@@ -59,6 +59,27 @@ describe('api', () => {
         'https://api.1d4.net/v1/query',
         expect.objectContaining({ method: 'POST' })
       );
+    });
+  });
+
+  describe('getGameDetail', () => {
+    it('sends POST to /v1/games/detail with gameUrl', async () => {
+      const mock = mockFetch({
+        gameUrl: 'https://example.com/game/1',
+        whiteUsername: 'a',
+        blackUsername: 'b',
+      });
+      await getGameDetail('https://example.com/game/1');
+      expect(mock).toHaveBeenCalledWith(
+        'https://api.1d4.net/v1/games/detail',
+        expect.objectContaining({
+          method: 'POST',
+        })
+      );
+      const call = mock.mock.calls[0][1] as RequestInit;
+      expect(JSON.parse(call.body as string)).toEqual({
+        gameUrl: 'https://example.com/game/1',
+      });
     });
   });
 

@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.Test;
@@ -202,13 +203,24 @@ public class AdminControllerTest {
     }
 
     @Override
-    public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
+    public List<GameFeature> query(
+        Object compiledQuery, int limit, int offset, boolean includePgn) {
       return List.of();
+    }
+
+    @Override
+    public int count(Object compiledQuery) {
+      return 0;
     }
 
     @Override
     public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
       return Map.of();
+    }
+
+    @Override
+    public Optional<GameFeature> findByGameUrl(String gameUrl) {
+      return Optional.empty();
     }
   }
 }

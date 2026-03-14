@@ -323,6 +323,11 @@ public class IndexWorkerTest {
 
   private static class NoOpGameFeatureStore implements GameFeatureStore {
     @Override
+    public Optional<GameFeature> findByGameUrl(String gameUrl) {
+      return Optional.empty();
+    }
+
+    @Override
     public void insertBatch(List<GameFeature> features) {}
 
     @Override
@@ -335,8 +340,14 @@ public class IndexWorkerTest {
         Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {}
 
     @Override
-    public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
+    public List<GameFeature> query(
+        Object compiledQuery, int limit, int offset, boolean includePgn) {
       return Collections.emptyList();
+    }
+
+    @Override
+    public int count(Object compiledQuery) {
+      return 0;
     }
 
     @Override

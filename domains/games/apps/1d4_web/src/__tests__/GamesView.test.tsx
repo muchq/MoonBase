@@ -44,6 +44,11 @@ function makeWrapper() {
 describe('GamesView', () => {
   beforeEach(() => {
     vi.mocked(api.query).mockResolvedValue({ games: [mockGame], count: 1 });
+    vi.mocked(api.getGameDetail).mockResolvedValue({
+      ...mockGame,
+      pgn: '1. e4 e5',
+      occurrences: mockGame.occurrences ?? {},
+    });
   });
 
   it('shows loading state then renders game rows', async () => {

@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { query as apiQuery } from '../api';
 import type { GameRow } from '../types';
 import GameTable from '../components/GameTable';
-import GameDetailPanel from '../components/GameDetailPanel';
+import Pagination from '../components/Pagination';
 
 const EXAMPLE_QUERIES = [
   'motif(fork)',
@@ -20,12 +20,20 @@ const LIMIT_OPTIONS = [10, 25, 50, 100, 250, 500];
 export default function QueryView() {
   const [queryText, setQueryText] = useState('');
   const [committedQuery, setCommittedQuery] = useState('');
-  const [limit, setLimit] = useState(50);
+  const [limit, setLimit] = useState(25);
+  const [offset, setOffset] = useState(0);
   const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['query', committedQuery, limit],
-    queryFn: () => apiQuery({ query: committedQuery, limit, offset: 0 }),
+    queryKey: ['query', committedQuery, limit, offset],
+    queryFn: () =>
+      apiQuery({
+        query: committedQuery,
+        limit,
+        offset,
+        includePgn: false,
+        includeOccurrences: false,
+      }),
     enabled: committedQuery.trim().length > 0,
   });
 
@@ -36,8 +44,11 @@ export default function QueryView() {
       void refetch();
     } else {
       setCommittedQuery(q);
+      setOffset(0);
     }
   }
+
+  const totalCount = data?.count ?? 0;
 
   return (
     <>
@@ -113,17 +124,29 @@ export default function QueryView() {
             sortDir="asc"
             onSort={() => {}}
             onRowClick={(game) => setSelectedGame(game)}
+            selectedGame={selectedGame}
+            onClose={() => setSelectedGame(null)}
           />
-          <p className="empty" style={{ textAlign: 'left' }}>
-            Showing {data.games.length} result(s).
-          </p>
-          {selectedGame && (
-            <GameDetailPanel
-              key={selectedGame.gameUrl}
-              game={selectedGame}
-              onClose={() => setSelectedGame(null)}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem' }}>
+            <p className="empty" style={{ textAlign: 'left', margin: 0 }}>
+              Showing {data.games.length} of {totalCount} result(s).
+            </p>
+            <Pagination
+              offset={offset}
+              limit={limit}
+              total={totalCount}
+              onLimitChange={(n) => {
+                setLimit(n);
+                setOffset(0);
+              }}
+              onPrev={() => setOffset((o) => Math.max(0, o - limit))}
+              onNext={() =>
+                setOffset((o) =>
+                  Math.min(o + limit, Math.max(0, totalCount - limit))
+                )
+              }
             />
-          )}
+          </div>
         </>
       )}
       {!isLoading && !error && committedQuery && data?.games.length === 0 && (

@@ -121,6 +121,7 @@ java_library(
 java_library(
     name = "dto",
     srcs = [
+        "src/main/java/com/muchq/games/one_d4/api/dto/GameDetailRequest.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/GameFeature.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/GameFeatureRow.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/IndexRequest.java",
@@ -141,6 +142,7 @@ java_library(
     srcs = [
         "src/main/java/com/muchq/games/one_d4/api/AdminController.java",
         "src/main/java/com/muchq/games/one_d4/api/ErrorHandler.java",
+        "src/main/java/com/muchq/games/one_d4/api/GameController.java",
         "src/main/java/com/muchq/games/one_d4/api/HealthController.java",
         "src/main/java/com/muchq/games/one_d4/api/IndexController.java",
         "src/main/java/com/muchq/games/one_d4/api/IndexRequestValidator.java",
