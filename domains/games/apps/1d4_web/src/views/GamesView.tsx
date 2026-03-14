@@ -1,10 +1,11 @@
-import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useMemo, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { query as apiQuery } from '../api';
 import type { GameRow } from '../types';
 import GameTable from '../components/GameTable';
 import Pagination from '../components/Pagination';
 
+const DEFAULT_PAGE_SIZE = 25;
 const DEFAULT_QUERY = 'num.moves >= 0';
 
 function escapeChessQLString(s: string): string {
@@ -55,22 +56,36 @@ export default function GamesView() {
   const [username, setUsername] = useState('');
   const [sortBy, setSortBy] = useState('playedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  const [offset, setOffset] = useState(0);
-  const [limit, setLimit] = useState(25);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
 
+  const queryClient = useQueryClient();
   const queryText = buildQuery(username);
+  const offset = page * pageSize;
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ['games', queryText],
-    queryFn: () => apiQuery({ query: queryText, limit: 500, offset: 0 }),
+    queryKey: ['games', queryText, page, pageSize],
+    queryFn: () => apiQuery({ query: queryText, limit: pageSize, offset }),
   });
 
   const games = data?.games ?? [];
+  const hasMore = games.length === pageSize;
+
+  // Prefetch the next page while the user is reading the current one
+  useEffect(() => {
+    if (!hasMore) return;
+    queryClient.prefetchQuery({
+      queryKey: ['games', queryText, page + 1, pageSize],
+      queryFn: () =>
+        apiQuery({ query: queryText, limit: pageSize, offset: offset + pageSize }),
+    });
+  }, [queryClient, queryText, page, pageSize, offset, hasMore]);
+
   const sorted = useMemo(
     () => sortGames(games, sortBy, sortDir),
     [games, sortBy, sortDir]
   );
-  const page = sorted.slice(offset, offset + limit);
 
   function handleSort(col: string) {
     if (sortBy === col) {
@@ -83,7 +98,7 @@ export default function GamesView() {
 
   function handleSearch() {
     setUsername(usernameInput);
-    setOffset(0);
+    setPage(0);
   }
 
   return (
@@ -135,7 +150,7 @@ export default function GamesView() {
       {!isLoading && !error && (
         <>
           <GameTable
-            games={page}
+            games={sorted}
             sortBy={sortBy}
             sortDir={sortDir}
             onSort={handleSort}
@@ -149,16 +164,15 @@ export default function GamesView() {
           />
           <Pagination
             offset={offset}
-            limit={limit}
-            total={sorted.length}
+            limit={pageSize}
+            total={offset + sorted.length}
+            hasMore={hasMore}
             onLimitChange={(n) => {
-              setLimit(n);
-              setOffset(0);
+              setPageSize(n);
+              setPage(0);
             }}
-            onPrev={() => setOffset((o) => Math.max(0, o - limit))}
-            onNext={() =>
-              setOffset((o) => Math.min(o + limit, sorted.length - limit))
-            }
+            onPrev={() => setPage((p) => Math.max(0, p - 1))}
+            onNext={() => setPage((p) => p + 1)}
           />
         </>
       )}

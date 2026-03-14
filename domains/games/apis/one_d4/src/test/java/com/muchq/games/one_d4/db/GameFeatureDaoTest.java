@@ -531,6 +531,47 @@ public class GameFeatureDaoTest {
     assertThat(pinned.get(0).gameUrl()).isEqualTo(url1);
   }
 
+  @Test
+  public void query_returnsGamesInStableDescendingPlayedAtOrder() {
+    // Insert games with different played_at values
+    Instant older = Instant.parse("2024-01-01T00:00:00Z");
+    Instant newer = Instant.parse("2024-06-01T00:00:00Z");
+    dao.insertBatch(
+        List.of(
+            createGameAt("https://chess.com/game/order-a", older),
+            createGameAt("https://chess.com/game/order-b", newer)));
+
+    CompiledQuery allGames = new SqlCompiler().compile(Parser.parse("white_elo >= 1000"));
+    List<GameFeature> page1 = dao.query(allGames, 1, 0);
+    List<GameFeature> page2 = dao.query(allGames, 1, 1);
+
+    assertThat(page1).hasSize(1);
+    assertThat(page2).hasSize(1);
+    // Newer game comes first (DESC), older game is on page 2
+    assertThat(page1.get(0).gameUrl()).isEqualTo("https://chess.com/game/order-b");
+    assertThat(page2.get(0).gameUrl()).isEqualTo("https://chess.com/game/order-a");
+  }
+
+  @Test
+  public void query_paginatesStablyWhenPlayedAtIsEqual() {
+    // Insert two games with identical played_at; game_url tiebreaker determines order
+    Instant sameTime = Instant.parse("2024-03-01T12:00:00Z");
+    dao.insertBatch(
+        List.of(
+            createGameAt("https://chess.com/game/zzz-last", sameTime),
+            createGameAt("https://chess.com/game/aaa-first", sameTime)));
+
+    CompiledQuery allGames = new SqlCompiler().compile(Parser.parse("white_elo >= 1000"));
+    List<GameFeature> page1 = dao.query(allGames, 1, 0);
+    List<GameFeature> page2 = dao.query(allGames, 1, 1);
+
+    assertThat(page1).hasSize(1);
+    assertThat(page2).hasSize(1);
+    // game_url ASC tiebreaker: "aaa-first" < "zzz-last"
+    assertThat(page1.get(0).gameUrl()).isEqualTo("https://chess.com/game/aaa-first");
+    assertThat(page2.get(0).gameUrl()).isEqualTo("https://chess.com/game/zzz-last");
+  }
+
   private GameFeature createGame(String url) {
     return new GameFeature(
         null,
@@ -548,5 +589,24 @@ public class GameFeatureDaoTest {
         20,
         Instant.now(),
         "pgn");
+  }
+
+  private GameFeature createGameAt(String url, Instant playedAt) {
+    return new GameFeature(
+        null,
+        requestId,
+        url,
+        "chess.com",
+        "white",
+        "black",
+        1500,
+        1480,
+        "blitz",
+        "A00",
+        "1-0",
+        playedAt,
+        30,
+        Instant.now(),
+        "1. e4 e5 *");
   }
 }

@@ -8,6 +8,7 @@ interface Props {
   onPrev: () => void;
   onNext: () => void;
   pageSizes?: number[];
+  hasMore?: boolean;
 }
 
 export default function Pagination({
@@ -18,9 +19,11 @@ export default function Pagination({
   onPrev,
   onNext,
   pageSizes = DEFAULT_PAGE_SIZES,
+  hasMore,
 }: Props) {
   const start = total === 0 ? 0 : Math.min(offset + 1, total);
   const end = Math.min(offset + limit, total);
+  const nextDisabled = hasMore !== undefined ? !hasMore : offset + limit >= total;
 
   return (
     <div className="pagination">
@@ -39,7 +42,7 @@ export default function Pagination({
       </button>
       <button
         className="btn"
-        disabled={offset + limit >= total}
+        disabled={nextDisabled}
         onClick={onNext}
       >
         Next

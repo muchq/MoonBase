@@ -1,11 +1,14 @@
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
+import { cleanup } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import GamesView from '../views/GamesView';
 import * as api from '../api';
 import type { GameRow } from '../types';
+
+afterEach(cleanup);
 
 vi.mock('../api');
 vi.mock('react-chessboard', () => ({
@@ -75,11 +78,21 @@ describe('GamesView', () => {
     );
   });
 
+  it('fetches with correct limit and offset on initial load', async () => {
+    render(<GamesView />, { wrapper: makeWrapper() });
+    await waitFor(() => screen.getByText('_prior'));
+
+    // Initial load: page 0, pageSize 25 → offset 0, limit 25
+    expect(api.query).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 25, offset: 0 })
+    );
+  });
+
   it('opens game detail panel when a row is clicked', async () => {
     render(<GamesView />, { wrapper: makeWrapper() });
     await waitFor(() => screen.getByText('_prior'));
     const rows = screen.getAllByRole('row');
-    fireEvent.click(rows[1]); // first data row
+    fireEvent.click(rows[1]);
     expect(screen.getByText('_prior vs OpponentA')).toBeInTheDocument();
   });
 
@@ -94,6 +107,25 @@ describe('GamesView', () => {
     await waitFor(() =>
       expect(api.query).toHaveBeenCalledWith(
         expect.objectContaining({ query: expect.stringContaining('Hikaru') })
+      )
+    );
+  });
+
+  it('prefetches next page after initial load when page is full', async () => {
+    // Return full page (25 games) to trigger hasMore=true and prefetch
+    const fullPage = Array.from({ length: 25 }, (_, i) => ({
+      ...mockGame,
+      gameUrl: `https://chess.com/game/${i}`,
+    }));
+    vi.mocked(api.query).mockResolvedValue({ games: fullPage, count: 25 });
+
+    render(<GamesView />, { wrapper: makeWrapper() });
+    await waitFor(() => screen.getAllByRole('row').length > 1);
+
+    // Prefetch fires a second query call for offset=25
+    await waitFor(() =>
+      expect(api.query).toHaveBeenCalledWith(
+        expect.objectContaining({ limit: 25, offset: 25 })
       )
     );
   });

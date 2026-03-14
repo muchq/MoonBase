@@ -122,11 +122,14 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
               + " WHERE "
               + whereClause
               + " ORDER BY COALESCE(cnt.c, 0) "
-              + direction;
+              + direction
+              + ", g.game_url ASC";
       return new CompiledQuery(sql, allParams);
     } else {
       String sql =
-          "SELECT g.* FROM game_features g WHERE " + whereClause + " ORDER BY g.played_at DESC";
+          "SELECT g.* FROM game_features g WHERE "
+              + whereClause
+              + " ORDER BY g.played_at DESC, g.game_url ASC";
       return new CompiledQuery(sql, whereParams);
     }
   }
