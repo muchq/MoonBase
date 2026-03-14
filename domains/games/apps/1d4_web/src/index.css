@@ -305,7 +305,7 @@ td a.external:hover {
   max-width: none;
 }
 
-.enqueue-username { flex: 1 1 160px; }
+.enqueue-username { flex: 0 1 200px; }
 .enqueue-platform { flex: 0 0 130px; }
 .enqueue-month    { flex: 0 0 120px; }
 
