@@ -121,13 +121,23 @@ INDEXER_DB_URL="jdbc:h2:file:/tmp/indexer;DB_CLOSE_DELAY=-1" \
   bazel run //domains/games/apis/one_d4:one_d4
 ```
 
-To point at a PostgreSQL instance:
+To point at a PostgreSQL or Neon instance, embed credentials in the URL:
 
 ```bash
-INDEXER_DB_URL="jdbc:postgresql://localhost:5432/indexer" \
-INDEXER_DB_USERNAME="indexer" \
-INDEXER_DB_PASSWORD="indexer" \
+INDEXER_DB_URL="jdbc:postgresql://localhost:5432/indexer?user=indexer&password=indexer" \
   bazel run //domains/games/apis/one_d4:one_d4
+```
+
+On a deployed server, place the JDBC URL in `/etc/one_d4/db_config` (plain text, one
+line) instead of using an environment variable. The app resolves config in this order:
+
+1. `INDEXER_DB_URL` environment variable
+2. `/etc/one_d4/db_config` file
+3. H2 in-memory (local dev fallback)
+
+For Neon, the URL looks like:
+```
+jdbc:postgresql://ep-xxx.us-east-2.aws.neon.tech/dbname?user=xxx&password=xxx&sslmode=require
 ```
 
 The server starts on **port 8080**. Then index a player and query:

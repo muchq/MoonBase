@@ -17,7 +17,7 @@ public final class TestDb {
   public static TestDb create(String name) {
     String jdbcUrl =
         "jdbc:h2:mem:" + name + "_" + System.currentTimeMillis() + ";DB_CLOSE_DELAY=-1";
-    DataSource dataSource = DataSourceFactory.create(jdbcUrl, "sa", "");
+    DataSource dataSource = DataSourceFactory.create(jdbcUrl);
     new Migration(dataSource, true).run();
     return new TestDb(dataSource, Jdbi.create(dataSource));
   }

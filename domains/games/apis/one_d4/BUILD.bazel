@@ -367,6 +367,19 @@ java_test_suite(
 )
 
 java_test_suite(
+    name = "module_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/IndexerModuleTest.java",
+    ],
+    deps = [
+        ":module",
+        artifact("junit:junit"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_test_suite(
     name = "db_tests",
     size = "small",
     srcs = [

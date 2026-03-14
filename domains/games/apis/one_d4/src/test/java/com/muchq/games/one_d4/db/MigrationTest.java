@@ -18,7 +18,7 @@ public class MigrationTest {
   @Before
   public void setUp() {
     String jdbcUrl = "jdbc:h2:mem:migration_" + System.currentTimeMillis() + ";DB_CLOSE_DELAY=-1";
-    dataSource = DataSourceFactory.create(jdbcUrl, "sa", "");
+    dataSource = DataSourceFactory.create(jdbcUrl);
   }
 
   @Test

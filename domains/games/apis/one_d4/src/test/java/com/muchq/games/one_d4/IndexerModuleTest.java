@@ -1,0 +1,82 @@
+package com.muchq.games.one_d4;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+
+public class IndexerModuleTest {
+
+  @Rule public TemporaryFolder tmp = new TemporaryFolder();
+
+  @Test
+  public void readJdbcUrl_returnsEnvVar_whenSet() {
+    String result = IndexerModule.readJdbcUrl("jdbc:postgresql://prod:5432/db", missingPath());
+    assertThat(result).isEqualTo("jdbc:postgresql://prod:5432/db");
+  }
+
+  @Test
+  public void readJdbcUrl_stripsEnvVar() {
+    String result = IndexerModule.readJdbcUrl("  jdbc:postgresql://host/db  ", missingPath());
+    assertThat(result).isEqualTo("jdbc:postgresql://host/db");
+  }
+
+  @Test
+  public void readJdbcUrl_ignoresBlankEnvVar() {
+    String result = IndexerModule.readJdbcUrl("   ", missingPath());
+    assertThat(result).isEqualTo("jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1");
+  }
+
+  @Test
+  public void readJdbcUrl_ignoresNullEnvVar_andReadsFile() throws IOException {
+    Path configFile = tmp.newFile("db_config").toPath();
+    Files.writeString(configFile, "jdbc:postgresql://file-host:5432/chess\n");
+
+    String result = IndexerModule.readJdbcUrl(null, configFile);
+    assertThat(result).isEqualTo("jdbc:postgresql://file-host:5432/chess");
+  }
+
+  @Test
+  public void readJdbcUrl_returnsDefault_whenFileIsMissing() {
+    String result = IndexerModule.readJdbcUrl(null, missingPath());
+    assertThat(result).isEqualTo("jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1");
+  }
+
+  @Test
+  public void readJdbcUrl_returnsDefault_whenFileIsEmpty() throws IOException {
+    Path configFile = tmp.newFile("db_config_empty").toPath();
+    Files.writeString(configFile, "   ");
+
+    String result = IndexerModule.readJdbcUrl(null, configFile);
+    assertThat(result).isEqualTo("jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1");
+  }
+
+  @Test
+  public void readJdbcUrl_envVarTakesPrecedenceOverFile() throws IOException {
+    Path configFile = tmp.newFile("db_config_precedence").toPath();
+    Files.writeString(configFile, "jdbc:postgresql://file-host/db");
+
+    String result = IndexerModule.readJdbcUrl("jdbc:postgresql://env-host/db", configFile);
+    assertThat(result).isEqualTo("jdbc:postgresql://env-host/db");
+  }
+
+  @Test
+  public void readJdbcUrl_throwsUncheckedIOException_onNonFileNotFoundIOError() {
+    // A directory path will cause an IOException (not NoSuchFileException) when read as a file
+    Path dirPath = tmp.getRoot().toPath();
+
+    assertThatThrownBy(() -> IndexerModule.readJdbcUrl(null, dirPath))
+        .isInstanceOf(UncheckedIOException.class)
+        .hasCauseInstanceOf(IOException.class);
+  }
+
+  private Path missingPath() {
+    return tmp.getRoot().toPath().resolve("nonexistent_db_config");
+  }
+}
