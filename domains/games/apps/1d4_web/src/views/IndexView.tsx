@@ -75,70 +75,73 @@ export default function IndexView() {
 
   return (
     <>
-      {message && (
-        <div className={`message ${message.type}`}>{message.text}</div>
-      )}
-
       <div className="panel">
         <h2>Enqueue index request</h2>
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="player">Username</label>
-            <input
-              id="player"
-              type="text"
-              placeholder="e.g. hikaru"
-              value={player}
-              onChange={(e) => setPlayer(e.target.value)}
-              required
-            />
+        <form onSubmit={handleSubmit} className="enqueue-form">
+          <div className="enqueue-form-row">
+            <div className="form-group enqueue-username">
+              <label htmlFor="player">Username</label>
+              <input
+                id="player"
+                type="text"
+                placeholder="e.g. hikaru"
+                value={player}
+                onChange={(e) => setPlayer(e.target.value)}
+                required
+              />
+            </div>
+            <div className="form-group enqueue-platform">
+              <label htmlFor="platform">Platform</label>
+              <select
+                id="platform"
+                value={platform}
+                onChange={(e) => setPlatform(e.target.value)}
+              >
+                <option value="CHESS_COM">chess.com</option>
+              </select>
+            </div>
           </div>
-          <div className="form-group">
-            <label htmlFor="platform">Platform</label>
-            <select
-              id="platform"
-              value={platform}
-              onChange={(e) => setPlatform(e.target.value)}
-            >
-              <option value="CHESS_COM">chess.com</option>
-            </select>
-          </div>
-          <div className="form-group">
-            <label htmlFor="startMonth">Start month (YYYY-MM)</label>
-            <input
-              id="startMonth"
-              type="text"
-              placeholder="2024-03"
-              value={startMonth}
-              onChange={(e) => setStartMonth(e.target.value)}
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label htmlFor="endMonth">End month (YYYY-MM)</label>
-            <input
-              id="endMonth"
-              type="text"
-              placeholder="2024-03"
-              value={endMonth}
-              onChange={(e) => setEndMonth(e.target.value)}
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label>
+          <div className="enqueue-form-row">
+            <div className="form-group enqueue-month">
+              <label htmlFor="startMonth">Start month</label>
+              <input
+                id="startMonth"
+                type="text"
+                placeholder="YYYY-MM"
+                value={startMonth}
+                onChange={(e) => setStartMonth(e.target.value)}
+                required
+              />
+            </div>
+            <div className="form-group enqueue-month">
+              <label htmlFor="endMonth">End month</label>
+              <input
+                id="endMonth"
+                type="text"
+                placeholder="YYYY-MM"
+                value={endMonth}
+                onChange={(e) => setEndMonth(e.target.value)}
+                required
+              />
+            </div>
+            <label className="enqueue-checkbox">
               <input
                 type="checkbox"
                 checked={excludeBullet}
                 onChange={(e) => setExcludeBullet(e.target.checked)}
-              />{' '}
+              />
               Exclude bullet games
             </label>
+            <div className="enqueue-submit">
+              <button type="submit" className="btn" disabled={mutation.isPending}>
+                {mutation.isPending ? 'Enqueueing…' : 'Enqueue'}
+              </button>
+            </div>
           </div>
-          <button type="submit" className="btn" disabled={mutation.isPending}>
-            Submit
-          </button>
         </form>
+        {message && (
+          <div className={`enqueue-message ${message.type}`}>{message.text}</div>
+        )}
       </div>
 
       <div className="panel">

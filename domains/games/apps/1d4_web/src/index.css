@@ -282,6 +282,73 @@ td a.external:hover {
   color: var(--success);
 }
 
+/* IndexView: inline enqueue form */
+.enqueue-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.enqueue-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.enqueue-form-row .form-group {
+  margin-bottom: 0;
+}
+
+.enqueue-form-row .form-group input,
+.enqueue-form-row .form-group select {
+  max-width: none;
+}
+
+.enqueue-username { flex: 0 1 200px; }
+.enqueue-platform { flex: 0 0 130px; }
+.enqueue-month    { flex: 0 0 120px; }
+
+.enqueue-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  padding-bottom: 0.5rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.enqueue-checkbox input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+}
+
+.enqueue-submit {
+  padding-bottom: 0.125rem;
+}
+
+.enqueue-message {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+}
+
+.enqueue-message.error {
+  background: rgba(248, 113, 113, 0.12);
+  color: var(--error);
+  border: 1px solid rgba(248, 113, 113, 0.25);
+}
+
+.enqueue-message.success {
+  background: rgba(74, 222, 128, 0.1);
+  color: var(--success);
+  border: 1px solid rgba(74, 222, 128, 0.2);
+}
+
 /* Pagination */
 .pagination {
   display: flex;
