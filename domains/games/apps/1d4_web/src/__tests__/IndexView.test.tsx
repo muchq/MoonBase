@@ -67,10 +67,10 @@ describe('IndexView', () => {
     fireEvent.change(screen.getByLabelText('Username'), {
       target: { value: 'hikaru' },
     });
-    fireEvent.change(screen.getByLabelText('Start month (YYYY-MM)'), {
+    fireEvent.change(screen.getByLabelText('Start month'), {
       target: { value: '2024-01' },
     });
-    fireEvent.change(screen.getByLabelText('End month (YYYY-MM)'), {
+    fireEvent.change(screen.getByLabelText('End month'), {
       target: { value: '2024-03' },
     });
     submitForm();
@@ -92,10 +92,10 @@ describe('IndexView', () => {
     fireEvent.change(screen.getByLabelText('Username'), {
       target: { value: 'hikaru' },
     });
-    fireEvent.change(screen.getByLabelText('Start month (YYYY-MM)'), {
+    fireEvent.change(screen.getByLabelText('Start month'), {
       target: { value: '2024-01' },
     });
-    fireEvent.change(screen.getByLabelText('End month (YYYY-MM)'), {
+    fireEvent.change(screen.getByLabelText('End month'), {
       target: { value: '2024-03' },
     });
     fireEvent.click(screen.getByLabelText('Exclude bullet games'));
@@ -117,10 +117,10 @@ describe('IndexView', () => {
     fireEvent.change(screen.getByLabelText('Username'), {
       target: { value: 'hikaru' },
     });
-    fireEvent.change(screen.getByLabelText('Start month (YYYY-MM)'), {
+    fireEvent.change(screen.getByLabelText('Start month'), {
       target: { value: '2024-01' },
     });
-    fireEvent.change(screen.getByLabelText('End month (YYYY-MM)'), {
+    fireEvent.change(screen.getByLabelText('End month'), {
       target: { value: '2024-03' },
     });
     submitForm();

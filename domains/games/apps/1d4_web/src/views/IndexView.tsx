@@ -103,22 +103,22 @@ export default function IndexView() {
           </div>
           <div className="enqueue-form-row">
             <div className="form-group enqueue-month">
-              <label htmlFor="startMonth">Start month (YYYY-MM)</label>
+              <label htmlFor="startMonth">Start month</label>
               <input
                 id="startMonth"
                 type="text"
-                placeholder="2024-01"
+                placeholder="YYYY-MM"
                 value={startMonth}
                 onChange={(e) => setStartMonth(e.target.value)}
                 required
               />
             </div>
             <div className="form-group enqueue-month">
-              <label htmlFor="endMonth">End month (YYYY-MM)</label>
+              <label htmlFor="endMonth">End month</label>
               <input
                 id="endMonth"
                 type="text"
-                placeholder="2024-12"
+                placeholder="YYYY-MM"
                 value={endMonth}
                 onChange={(e) => setEndMonth(e.target.value)}
                 required
