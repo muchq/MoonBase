@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { query as apiQuery } from '../api';
 import type { GameRow } from '../types';
-import GameTable from '../components/GameTable';
+import GameResultsTable from '../components/GameResultsTable';
 import Pagination from '../components/Pagination';
 
 const DEFAULT_PAGE_SIZE = 25;
@@ -58,7 +58,6 @@ export default function GamesView() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
 
   const queryClient = useQueryClient();
   const queryText = buildQuery(username);
@@ -149,18 +148,11 @@ export default function GamesView() {
 
       {!isLoading && !error && (
         <>
-          <GameTable
+          <GameResultsTable
             games={sorted}
             sortBy={sortBy}
             sortDir={sortDir}
             onSort={handleSort}
-            onRowClick={(game) =>
-              setSelectedGame((prev) =>
-                prev?.gameUrl === game.gameUrl ? null : game
-              )
-            }
-            selectedGame={selectedGame}
-            onClose={() => setSelectedGame(null)}
           />
           <Pagination
             offset={offset}
