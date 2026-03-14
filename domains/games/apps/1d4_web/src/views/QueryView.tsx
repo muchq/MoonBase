@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { query as apiQuery } from '../api';
 import type { GameRow } from '../types';
-import GameTable from '../components/GameTable';
-import GameDetailPanel from '../components/GameDetailPanel';
+import GameResultsTable from '../components/GameResultsTable';
 
 const EXAMPLE_QUERIES = [
   'motif(fork)',
@@ -21,7 +20,6 @@ export default function QueryView() {
   const [queryText, setQueryText] = useState('');
   const [committedQuery, setCommittedQuery] = useState('');
   const [limit, setLimit] = useState(50);
-  const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['query', committedQuery, limit],
@@ -109,23 +107,10 @@ export default function QueryView() {
 
       {!isLoading && !error && games.length > 0 && (
         <>
-          <GameTable
-            games={games}
-            sortBy=""
-            sortDir="asc"
-            onSort={() => {}}
-            onRowClick={(game) => setSelectedGame(game)}
-          />
+          <GameResultsTable games={games} />
           <p className="empty" style={{ textAlign: 'left' }}>
             Showing {games.length} result(s).
           </p>
-          {selectedGame && (
-            <GameDetailPanel
-              key={selectedGame.gameUrl}
-              game={selectedGame}
-              onClose={() => setSelectedGame(null)}
-            />
-          )}
         </>
       )}
       {!isLoading && !error && committedQuery && data && games.length === 0 && (
