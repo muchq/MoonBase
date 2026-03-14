@@ -37,7 +37,9 @@ import com.muchq.platform.json.JsonUtils;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.context.annotation.Factory;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.List;
 import javax.sql.DataSource;
@@ -56,19 +58,25 @@ public class IndexerModule {
    * /etc/one_d4/db_config file (plain text, single line) 3. H2 in-memory (local dev default)
    */
   static String readJdbcUrl() {
-    String envUrl = System.getenv("INDEXER_DB_URL");
+    return readJdbcUrl(System.getenv("INDEXER_DB_URL"), DB_CONFIG_PATH);
+  }
+
+  static String readJdbcUrl(String envUrl, Path configPath) {
     if (envUrl != null && !envUrl.isBlank()) {
       return envUrl.strip();
     }
     try {
-      String fileUrl = Files.readString(DB_CONFIG_PATH).strip();
+      String fileUrl = Files.readString(configPath).strip();
       if (!fileUrl.isEmpty()) {
-        LOG.info("Loaded JDBC URL from {}", DB_CONFIG_PATH);
+        LOG.info("Loaded JDBC URL from {}", configPath);
         return fileUrl;
       }
-    } catch (IOException ignored) {
+      LOG.info("Empty DB config file found; falling back to H2 in-memory");
+    } catch (NoSuchFileException nsfe) {
+      LOG.info("No DB config file found; falling back to H2 in-memory");
+    } catch (IOException ioe) {
+      throw new UncheckedIOException(ioe);
     }
-    LOG.info("No DB config found; falling back to H2 in-memory");
     return DEFAULT_JDBC_URL;
   }
 
