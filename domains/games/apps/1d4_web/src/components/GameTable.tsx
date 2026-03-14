@@ -74,15 +74,23 @@ function renderCell(
 
 interface Props {
   games: GameRow[];
-  sortBy: string;
-  sortDir: 'asc' | 'desc';
-  onSort: (col: string) => void;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
+  onSort?: (col: string) => void;
   onRowClick?: (game: GameRow) => void;
   selectedGame?: GameRow | null;
   onClose?: () => void;
 }
 
-export default function GameTable({ games, sortBy, sortDir, onSort, onRowClick, selectedGame, onClose }: Props) {
+export default function GameTable({
+  games,
+  sortBy = '',
+  sortDir = 'asc',
+  onSort = () => {},
+  onRowClick,
+  selectedGame,
+  onClose,
+}: Props) {
   return (
     <div className="table-wrap">
       <table>
