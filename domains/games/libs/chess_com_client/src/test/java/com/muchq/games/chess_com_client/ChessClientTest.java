@@ -100,6 +100,39 @@ public class ChessClientTest {
   }
 
   @Test
+  public void testFetchPlayer_normalizesUsernameToLowercase() {
+    CapturingHttpClient httpClient = new CapturingHttpClient(404, "");
+    ChessClient client = new ChessClient(httpClient, MAPPER);
+
+    client.fetchPlayer("Hikaru");
+
+    assertThat(httpClient.lastUrl).contains("/hikaru");
+    assertThat(httpClient.lastUrl).doesNotContain("/Hikaru");
+  }
+
+  @Test
+  public void testFetchStats_normalizesUsernameToLowercase() {
+    CapturingHttpClient httpClient = new CapturingHttpClient(404, "");
+    ChessClient client = new ChessClient(httpClient, MAPPER);
+
+    client.fetchStats("Hikaru");
+
+    assertThat(httpClient.lastUrl).contains("/hikaru/stats");
+    assertThat(httpClient.lastUrl).doesNotContain("/Hikaru");
+  }
+
+  @Test
+  public void testFetchGames_normalizesUsernameToLowercase() {
+    CapturingHttpClient httpClient = new CapturingHttpClient(404, "");
+    ChessClient client = new ChessClient(httpClient, MAPPER);
+
+    client.fetchGames("Hikaru", YearMonth.of(2024, 1));
+
+    assertThat(httpClient.lastUrl).contains("/hikaru/games/");
+    assertThat(httpClient.lastUrl).doesNotContain("/Hikaru");
+  }
+
+  @Test
   public void testFetchPlayer_success() {
     String playerJson =
         """
@@ -221,5 +254,19 @@ public class ChessClientTest {
     Optional<GamesResponse> result = client.fetchGames("hikaru", YearMonth.of(2024, 1));
 
     assertThat(result).isEmpty();
+  }
+
+  private static class CapturingHttpClient extends StubHttpClient {
+    String lastUrl;
+
+    public CapturingHttpClient(int statusCode, String responseBody) {
+      super(statusCode, responseBody);
+    }
+
+    @Override
+    public HttpResponse execute(HttpRequest request) {
+      lastUrl = request.getUrl().toString();
+      return super.execute(request);
+    }
   }
 }
