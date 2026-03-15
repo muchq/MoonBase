@@ -26,17 +26,18 @@ public class ChessClient {
   }
 
   public Optional<Player> fetchPlayer(String player) {
-    String url = BASE_URL + "/" + player;
+    String url = BASE_URL + "/" + player.toLowerCase();
     return getAs(url, Player.class);
   }
 
   public Optional<StatsResponse> fetchStats(String player) {
-    String url = BASE_URL + "/" + player + "/stats";
+    String url = BASE_URL + "/" + player.toLowerCase() + "/stats";
     return getAs(url, StatsResponse.class);
   }
 
   public Optional<GamesResponse> fetchGames(String player, YearMonth yearMonth) {
-    String url = BASE_URL + "/" + player + "/games/" + yearMonth.format(YEAR_MONTH_FORMATTER);
+    String url =
+        BASE_URL + "/" + player.toLowerCase() + "/games/" + yearMonth.format(YEAR_MONTH_FORMATTER);
     return getAs(url, GamesResponse.class);
   }
 
