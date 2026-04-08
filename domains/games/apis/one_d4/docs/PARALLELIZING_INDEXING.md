@@ -40,7 +40,7 @@ Currently indexing is **strictly sequential**: one worker thread, one index requ
 ### Suggested order of work (Java, before or without a rewrite)
 
 1. ~~**Batch inserts**~~ ✓ — `GameFeatureStore.insertBatch` and `insertOccurrencesBatch` implemented; `IndexWorker` collects batches of 100 games before flushing.
-2. **Parallel games within a month** — Fixed thread pool (e.g. 4–8), submit each game to the pool, collect `GameFeature` + occurrences, then batch insert when a batch is full or the month is done. Keeps a single "logical" worker and request ordering; only the CPU part is parallel.
+2. ~~**Parallel games within a month**~~ ✓ — `IndexWorker` now submits each game's extraction to an injected `ExecutorService` (default 4 threads, env `INDEXER_EXTRACTION_THREADS`) and drains futures into the existing batch buffer; DB writes remain single-threaded and batched.
 3. **Multiple worker threads** — If a single request is still slow, run 2–4 index-worker threads so multiple index requests are processed concurrently. Tune pool size and DB/API limits.
 
 **6. Unify indexing and reanalysis paths**
