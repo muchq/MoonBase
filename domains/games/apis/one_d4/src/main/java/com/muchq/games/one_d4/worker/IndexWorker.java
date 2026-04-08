@@ -15,6 +15,7 @@ import dev.failsafe.Failsafe;
 import dev.failsafe.RetryPolicy;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.util.concurrent.ExecutorService;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
@@ -51,18 +52,21 @@ public class IndexWorker {
   private final IndexingRequestStore requestStore;
   private final GameFeatureStore gameFeatureStore;
   private final IndexedPeriodStore periodStore;
+  private final ExecutorService extractionExecutor;
 
   public IndexWorker(
       ChessClient chessClient,
       FeatureExtractor featureExtractor,
       IndexingRequestStore requestStore,
       GameFeatureStore gameFeatureStore,
-      IndexedPeriodStore periodStore) {
+      IndexedPeriodStore periodStore,
+      ExecutorService extractionExecutor) {
     this.chessClient = chessClient;
     this.featureExtractor = featureExtractor;
     this.requestStore = requestStore;
     this.gameFeatureStore = gameFeatureStore;
     this.periodStore = periodStore;
+    this.extractionExecutor = extractionExecutor;
   }
 
   public void process(IndexMessage message) {

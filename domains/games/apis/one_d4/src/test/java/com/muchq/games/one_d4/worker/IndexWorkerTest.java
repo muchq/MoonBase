@@ -33,6 +33,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -47,12 +50,14 @@ public class IndexWorkerTest {
   private StubPeriodStore periodStore;
   private IndexWorker worker;
   private FeatureExtractor featureExtractor;
+  private ExecutorService extractionExecutor;
 
   @Before
   public void setUp() {
     stubChessClient = new StubChessClient();
     requestStore = new RecordingRequestStore();
     periodStore = new StubPeriodStore();
+    extractionExecutor = Executors.newFixedThreadPool(4);
     List<MotifDetector> detectors =
         List.of(
             new PinDetector(), new CrossPinDetector(), new SkewerDetector(), new AttackDetector());
@@ -63,7 +68,13 @@ public class IndexWorkerTest {
             featureExtractor,
             requestStore,
             new NoOpGameFeatureStore(),
-            periodStore);
+            periodStore,
+            extractionExecutor);
+  }
+
+  @After
+  public void tearDown() {
+    extractionExecutor.shutdownNow();
   }
 
   @Test
@@ -132,7 +143,8 @@ public class IndexWorkerTest {
         new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
     IndexWorker workerWithRecording =
         new IndexWorker(
-            stubChessClient, featureExtractor, requestStore, recordingStore, periodStore);
+            stubChessClient, featureExtractor, requestStore, recordingStore, periodStore,
+            extractionExecutor);
 
     IndexMessage message =
         new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false);
@@ -156,7 +168,8 @@ public class IndexWorkerTest {
     RecordingGameFeatureStore recordingStore = new RecordingGameFeatureStore();
     IndexWorker w =
         new IndexWorker(
-            stubChessClient, featureExtractor, requestStore, recordingStore, periodStore);
+            stubChessClient, featureExtractor, requestStore, recordingStore, periodStore,
+            extractionExecutor);
 
     w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
 
@@ -188,7 +201,8 @@ public class IndexWorkerTest {
     RecordingGameFeatureStore recordingStore = new RecordingGameFeatureStore();
     IndexWorker w =
         new IndexWorker(
-            stubChessClient, featureExtractor, requestStore, recordingStore, periodStore);
+            stubChessClient, featureExtractor, requestStore, recordingStore, periodStore,
+            extractionExecutor);
 
     w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", true));
 
