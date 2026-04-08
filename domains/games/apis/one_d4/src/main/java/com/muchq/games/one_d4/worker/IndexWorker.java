@@ -122,9 +122,17 @@ public class IndexWorker {
           futures.add(
               extractionExecutor.submit(
                   () -> {
-                    GameFeatures features = featureExtractor.extract(game.pgn());
-                    GameFeature row = buildGameFeature(message, game, features);
-                    return new ExtractResult(row, game.url(), features.occurrences());
+                    try {
+                      GameFeatures features = featureExtractor.extract(game.pgn());
+                      GameFeature row = buildGameFeature(message, game, features);
+                      return new ExtractResult(row, game.url(), features.occurrences());
+                    } catch (Exception e) {
+                      // TODO: pair futures with their game URLs in the drain loop instead of
+                      // smuggling the URL through an exception message — the wrapper is only
+                      // here so the warn log below can identify which game failed.
+                      throw new RuntimeException(
+                          "Failed to extract features for game " + game.url(), e);
+                    }
                   }));
         }
 
@@ -134,7 +142,7 @@ public class IndexWorker {
           try {
             result = future.get();
           } catch (ExecutionException e) {
-            LOG.warn("Failed to index game", e.getCause());
+            LOG.warn("{}", e.getCause().getMessage(), e.getCause());
             continue;
           } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
