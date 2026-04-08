@@ -193,6 +193,53 @@ public class IndexWorkerTest {
         .isEqualTo("Indexing failed due to an internal error");
   }
 
+  @Test(timeout = 5000)
+  public void process_runsExtractionsConcurrently_acrossPoolThreads() throws Exception {
+    // Two games in one month. Each extract() decrements a 2-latch then awaits it.
+    // If extract() runs sequentially, the second call never starts and the latch
+    // never reaches zero -> the test times out. With a pool size >= 2, both
+    // games are in flight at once and the latch releases immediately.
+    java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(2);
+    FeatureExtractor latchExtractor =
+        new FeatureExtractor(new PgnParser(), new GameReplayer(), List.of()) {
+          @Override
+          public GameFeatures extract(String pgn) {
+            latch.countDown();
+            try {
+              // No timeout: if the loop is sequential the second game never starts,
+              // so the latch never reaches 0 and this blocks forever -> JUnit timeout fires.
+              latch.await();
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+              throw new RuntimeException(e);
+            }
+            return new GameFeatures(
+                java.util.EnumSet.noneOf(Motif.class), 0, java.util.Map.of());
+          }
+        };
+
+    ExecutorService pool = Executors.newFixedThreadPool(2);
+    try {
+      RecordingGameFeatureStore store = new RecordingGameFeatureStore();
+      IndexWorker concurrentWorker =
+          new IndexWorker(
+              stubChessClient, latchExtractor, requestStore, store, periodStore, pool);
+      stubChessClient.setResponse(
+          java.time.YearMonth.of(2024, 1),
+          List.of(
+              playedGame("https://chess.com/g/1", MINIMAL_PGN, "blitz"),
+              playedGame("https://chess.com/g/2", MINIMAL_PGN, "blitz")));
+
+      concurrentWorker.process(
+          new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+      assertThat(store.getInsertCount()).isEqualTo(2);
+      assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+    } finally {
+      pool.shutdownNow();
+    }
+  }
+
   @Test
   public void process_bulletGamesSkippedWhenExcludeBulletTrue() {
     String gameUrl = "https://chess.com/game/bullet-skip";
