@@ -302,6 +302,31 @@ public class IndexWorkerTest {
     assertThat(requestStore.getLastGamesIndexed()).isEqualTo(2);
   }
 
+  @Test
+  public void process_allGamesLandInBatch_regardlessOfOrder() {
+    List<String> urls =
+        List.of(
+            "https://chess.com/g/a",
+            "https://chess.com/g/b",
+            "https://chess.com/g/c",
+            "https://chess.com/g/d");
+    List<PlayedGame> games = new ArrayList<>();
+    for (String u : urls) {
+      games.add(playedGame(u, MINIMAL_PGN, "blitz"));
+    }
+    stubChessClient.setResponse(java.time.YearMonth.of(2024, 1), games);
+
+    RecordingGameFeatureStore store = new RecordingGameFeatureStore();
+    IndexWorker w =
+        new IndexWorker(
+            stubChessClient, featureExtractor, requestStore, store, periodStore, extractionExecutor);
+
+    w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    assertThat(store.getInsertedUrls()).containsExactlyInAnyOrderElementsOf(urls);
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+  }
+
   private static PlayedGame playedGame(String gameUrl, String pgn, String timeClass) {
     return new PlayedGame(
         gameUrl,
@@ -462,6 +487,8 @@ public class IndexWorkerTest {
   private static final class RecordingGameFeatureStore extends NoOpGameFeatureStore {
     private final Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>>
         allInsertedOccurrences = new HashMap<>();
+    private final List<String> insertedUrls =
+        java.util.Collections.synchronizedList(new ArrayList<>());
     private int insertCount = 0;
 
     Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> getAllInsertedOccurrences() {
@@ -472,9 +499,16 @@ public class IndexWorkerTest {
       return insertCount;
     }
 
+    List<String> getInsertedUrls() {
+      return new ArrayList<>(insertedUrls);
+    }
+
     @Override
     public void insertBatch(List<GameFeature> features) {
       insertCount += features.size();
+      for (GameFeature f : features) {
+        insertedUrls.add(f.gameUrl());
+      }
     }
 
     @Override
