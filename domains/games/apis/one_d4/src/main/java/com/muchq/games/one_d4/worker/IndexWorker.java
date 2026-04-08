@@ -214,6 +214,7 @@ public class IndexWorker {
       Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesBatch) {
     if (featureBatch.isEmpty()) return;
     gameFeatureStore.insertBatch(featureBatch);
+    gameFeatureStore.deleteOccurrencesByGameUrls(new ArrayList<>(occurrencesBatch.keySet()));
     gameFeatureStore.insertOccurrencesBatch(occurrencesBatch);
     featureBatch.clear();
     occurrencesBatch.clear();
