@@ -34,6 +34,7 @@ import com.muchq.games.one_d4.worker.IndexWorkerLifecycle;
 import com.muchq.platform.http_client.core.HttpClient;
 import com.muchq.platform.http_client.jdk.Jdk11HttpClient;
 import com.muchq.platform.json.JsonUtils;
+import io.micronaut.context.annotation.Bean;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.context.annotation.Factory;
 import java.io.IOException;
@@ -42,6 +43,10 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.sql.DataSource;
 import org.jdbi.v3.core.Jdbi;
 import org.slf4j.Logger;
@@ -173,15 +178,56 @@ public class IndexerModule {
     return new FeatureExtractor(pgnParser, replayer, detectors);
   }
 
+  private static final AtomicInteger EXTRACT_THREAD_COUNTER = new AtomicInteger();
+
+  static int parseThreads(String raw, int defaultValue) {
+    if (raw == null || raw.isBlank()) {
+      return defaultValue;
+    }
+    try {
+      int parsed = Integer.parseInt(raw.strip());
+      if (parsed <= 0) {
+        LOG.warn("Invalid INDEXER_EXTRACTION_THREADS={}; falling back to {}", raw, defaultValue);
+        return defaultValue;
+      }
+      return parsed;
+    } catch (NumberFormatException e) {
+      LOG.warn("Unparseable INDEXER_EXTRACTION_THREADS={}; falling back to {}", raw, defaultValue);
+      return defaultValue;
+    }
+  }
+
+  @Context
+  @Bean(preDestroy = "shutdown")
+  @jakarta.inject.Named("indexExtraction")
+  public ExecutorService indexExtractionExecutor() {
+    int threads = parseThreads(System.getenv("INDEXER_EXTRACTION_THREADS"), 4);
+    ThreadFactory tf =
+        r -> {
+          Thread t = new Thread(r);
+          t.setName("index-extract-" + EXTRACT_THREAD_COUNTER.incrementAndGet());
+          t.setDaemon(true);
+          return t;
+        };
+    LOG.info("Index extraction executor: fixed pool of {} threads", threads);
+    return Executors.newFixedThreadPool(threads, tf);
+  }
+
   @Context
   public IndexWorker indexWorker(
       ChessClient chessClient,
       FeatureExtractor featureExtractor,
       IndexingRequestStore requestStore,
       GameFeatureStore gameFeatureStore,
-      IndexedPeriodStore periodStore) {
+      IndexedPeriodStore periodStore,
+      @jakarta.inject.Named("indexExtraction") ExecutorService indexExtractionExecutor) {
     return new IndexWorker(
-        chessClient, featureExtractor, requestStore, gameFeatureStore, periodStore);
+        chessClient,
+        featureExtractor,
+        requestStore,
+        gameFeatureStore,
+        periodStore,
+        indexExtractionExecutor);
   }
 
   @Context

@@ -33,6 +33,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -47,12 +50,14 @@ public class IndexWorkerTest {
   private StubPeriodStore periodStore;
   private IndexWorker worker;
   private FeatureExtractor featureExtractor;
+  private ExecutorService extractionExecutor;
 
   @Before
   public void setUp() {
     stubChessClient = new StubChessClient();
     requestStore = new RecordingRequestStore();
     periodStore = new StubPeriodStore();
+    extractionExecutor = Executors.newFixedThreadPool(4);
     List<MotifDetector> detectors =
         List.of(
             new PinDetector(), new CrossPinDetector(), new SkewerDetector(), new AttackDetector());
@@ -63,7 +68,13 @@ public class IndexWorkerTest {
             featureExtractor,
             requestStore,
             new NoOpGameFeatureStore(),
-            periodStore);
+            periodStore,
+            extractionExecutor);
+  }
+
+  @After
+  public void tearDown() {
+    extractionExecutor.shutdownNow();
   }
 
   @Test
@@ -132,7 +143,12 @@ public class IndexWorkerTest {
         new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
     IndexWorker workerWithRecording =
         new IndexWorker(
-            stubChessClient, featureExtractor, requestStore, recordingStore, periodStore);
+            stubChessClient,
+            featureExtractor,
+            requestStore,
+            recordingStore,
+            periodStore,
+            extractionExecutor);
 
     IndexMessage message =
         new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false);
@@ -156,7 +172,12 @@ public class IndexWorkerTest {
     RecordingGameFeatureStore recordingStore = new RecordingGameFeatureStore();
     IndexWorker w =
         new IndexWorker(
-            stubChessClient, featureExtractor, requestStore, recordingStore, periodStore);
+            stubChessClient,
+            featureExtractor,
+            requestStore,
+            recordingStore,
+            periodStore,
+            extractionExecutor);
 
     w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
 
@@ -180,6 +201,51 @@ public class IndexWorkerTest {
         .isEqualTo("Indexing failed due to an internal error");
   }
 
+  @Test(timeout = 5000)
+  public void process_runsExtractionsConcurrently_acrossPoolThreads() throws Exception {
+    // Two games in one month. Each extract() decrements a 2-latch then awaits it.
+    // If extract() runs sequentially, the second call never starts and the latch
+    // never reaches zero -> the test times out. With a pool size >= 2, both
+    // games are in flight at once and the latch releases immediately.
+    java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(2);
+    FeatureExtractor latchExtractor =
+        new FeatureExtractor(new PgnParser(), new GameReplayer(), List.of()) {
+          @Override
+          public GameFeatures extract(String pgn) {
+            latch.countDown();
+            try {
+              // No timeout: if the loop is sequential the second game never starts,
+              // so the latch never reaches 0 and this blocks forever -> JUnit timeout fires.
+              latch.await();
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+              throw new RuntimeException(e);
+            }
+            return new GameFeatures(java.util.EnumSet.noneOf(Motif.class), 0, java.util.Map.of());
+          }
+        };
+
+    ExecutorService pool = Executors.newFixedThreadPool(2);
+    try {
+      RecordingGameFeatureStore store = new RecordingGameFeatureStore();
+      IndexWorker concurrentWorker =
+          new IndexWorker(stubChessClient, latchExtractor, requestStore, store, periodStore, pool);
+      stubChessClient.setResponse(
+          java.time.YearMonth.of(2024, 1),
+          List.of(
+              playedGame("https://chess.com/g/1", MINIMAL_PGN, "blitz"),
+              playedGame("https://chess.com/g/2", MINIMAL_PGN, "blitz")));
+
+      concurrentWorker.process(
+          new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+      assertThat(store.getInsertCount()).isEqualTo(2);
+      assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+    } finally {
+      pool.shutdownNow();
+    }
+  }
+
   @Test
   public void process_bulletGamesSkippedWhenExcludeBulletTrue() {
     String gameUrl = "https://chess.com/game/bullet-skip";
@@ -188,11 +254,95 @@ public class IndexWorkerTest {
     RecordingGameFeatureStore recordingStore = new RecordingGameFeatureStore();
     IndexWorker w =
         new IndexWorker(
-            stubChessClient, featureExtractor, requestStore, recordingStore, periodStore);
+            stubChessClient,
+            featureExtractor,
+            requestStore,
+            recordingStore,
+            periodStore,
+            extractionExecutor);
 
     w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", true));
 
     assertThat(recordingStore.getInsertCount()).isEqualTo(0);
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+  }
+
+  @Test
+  public void process_oneFailingExtraction_doesNotPreventOthers() {
+    String poisonUrl = "https://chess.com/g/poison";
+    FeatureExtractor selectivelyFailing =
+        new FeatureExtractor(new PgnParser(), new GameReplayer(), List.of()) {
+          @Override
+          public GameFeatures extract(String pgn) {
+            if (pgn.contains("POISON")) {
+              throw new RuntimeException("boom");
+            }
+            return new GameFeatures(java.util.EnumSet.noneOf(Motif.class), 0, java.util.Map.of());
+          }
+        };
+
+    String poisonPgn =
+        """
+        [Event "POISON"]
+        [Site "Chess.com"]
+        [White "W"]
+        [Black "B"]
+        [Result "1-0"]
+        [ECO "C20"]
+
+        1. e4 e5 1-0
+        """;
+
+    RecordingGameFeatureStore store = new RecordingGameFeatureStore();
+    IndexWorker w =
+        new IndexWorker(
+            stubChessClient,
+            selectivelyFailing,
+            requestStore,
+            store,
+            periodStore,
+            extractionExecutor);
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(
+            playedGame("https://chess.com/g/ok1", MINIMAL_PGN, "blitz"),
+            playedGame(poisonUrl, poisonPgn, "blitz"),
+            playedGame("https://chess.com/g/ok2", MINIMAL_PGN, "blitz")));
+
+    w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    assertThat(store.getInsertCount()).isEqualTo(2);
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+    assertThat(requestStore.getLastGamesIndexed()).isEqualTo(2);
+  }
+
+  @Test
+  public void process_allGamesLandInBatch_regardlessOfOrder() {
+    List<String> urls =
+        List.of(
+            "https://chess.com/g/a",
+            "https://chess.com/g/b",
+            "https://chess.com/g/c",
+            "https://chess.com/g/d");
+    List<PlayedGame> games = new ArrayList<>();
+    for (String u : urls) {
+      games.add(playedGame(u, MINIMAL_PGN, "blitz"));
+    }
+    stubChessClient.setResponse(java.time.YearMonth.of(2024, 1), games);
+
+    RecordingGameFeatureStore store = new RecordingGameFeatureStore();
+    IndexWorker w =
+        new IndexWorker(
+            stubChessClient,
+            featureExtractor,
+            requestStore,
+            store,
+            periodStore,
+            extractionExecutor);
+
+    w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    assertThat(store.getInsertedUrls()).containsExactlyInAnyOrderElementsOf(urls);
     assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
   }
 
@@ -356,6 +506,7 @@ public class IndexWorkerTest {
   private static final class RecordingGameFeatureStore extends NoOpGameFeatureStore {
     private final Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>>
         allInsertedOccurrences = new HashMap<>();
+    private final List<String> insertedUrls = new ArrayList<>();
     private int insertCount = 0;
 
     Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> getAllInsertedOccurrences() {
@@ -366,9 +517,16 @@ public class IndexWorkerTest {
       return insertCount;
     }
 
+    List<String> getInsertedUrls() {
+      return insertedUrls;
+    }
+
     @Override
     public void insertBatch(List<GameFeature> features) {
       insertCount += features.size();
+      for (GameFeature f : features) {
+        insertedUrls.add(f.gameUrl());
+      }
     }
 
     @Override

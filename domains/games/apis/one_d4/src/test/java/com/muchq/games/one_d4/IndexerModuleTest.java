@@ -76,6 +76,33 @@ public class IndexerModuleTest {
         .hasCauseInstanceOf(IOException.class);
   }
 
+  @Test
+  public void parseThreads_returnsDefault_whenNull() {
+    assertThat(IndexerModule.parseThreads(null, 4)).isEqualTo(4);
+  }
+
+  @Test
+  public void parseThreads_returnsDefault_whenBlank() {
+    assertThat(IndexerModule.parseThreads("   ", 4)).isEqualTo(4);
+  }
+
+  @Test
+  public void parseThreads_returnsDefault_whenUnparseable() {
+    assertThat(IndexerModule.parseThreads("abc", 4)).isEqualTo(4);
+  }
+
+  @Test
+  public void parseThreads_returnsDefault_whenNonPositive() {
+    assertThat(IndexerModule.parseThreads("0", 4)).isEqualTo(4);
+    assertThat(IndexerModule.parseThreads("-3", 4)).isEqualTo(4);
+  }
+
+  @Test
+  public void parseThreads_respectsValidValue() {
+    assertThat(IndexerModule.parseThreads("8", 4)).isEqualTo(8);
+    assertThat(IndexerModule.parseThreads(" 16 ", 4)).isEqualTo(16);
+  }
+
   private Path missingPath() {
     return tmp.getRoot().toPath().resolve("nonexistent_db_config");
   }
