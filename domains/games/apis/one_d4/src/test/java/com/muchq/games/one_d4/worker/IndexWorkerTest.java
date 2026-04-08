@@ -506,8 +506,7 @@ public class IndexWorkerTest {
   private static final class RecordingGameFeatureStore extends NoOpGameFeatureStore {
     private final Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>>
         allInsertedOccurrences = new HashMap<>();
-    private final List<String> insertedUrls =
-        java.util.Collections.synchronizedList(new ArrayList<>());
+    private final List<String> insertedUrls = new ArrayList<>();
     private int insertCount = 0;
 
     Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> getAllInsertedOccurrences() {
@@ -519,7 +518,7 @@ public class IndexWorkerTest {
     }
 
     List<String> getInsertedUrls() {
-      return new ArrayList<>(insertedUrls);
+      return insertedUrls;
     }
 
     @Override
