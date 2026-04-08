@@ -257,6 +257,51 @@ public class IndexWorkerTest {
     assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
   }
 
+  @Test
+  public void process_oneFailingExtraction_doesNotPreventOthers() {
+    String poisonUrl = "https://chess.com/g/poison";
+    FeatureExtractor selectivelyFailing =
+        new FeatureExtractor(new PgnParser(), new GameReplayer(), List.of()) {
+          @Override
+          public GameFeatures extract(String pgn) {
+            if (pgn.contains("POISON")) {
+              throw new RuntimeException("boom");
+            }
+            return new GameFeatures(
+                java.util.EnumSet.noneOf(Motif.class), 0, java.util.Map.of());
+          }
+        };
+
+    String poisonPgn =
+        """
+        [Event "POISON"]
+        [Site "Chess.com"]
+        [White "W"]
+        [Black "B"]
+        [Result "1-0"]
+        [ECO "C20"]
+
+        1. e4 e5 1-0
+        """;
+
+    RecordingGameFeatureStore store = new RecordingGameFeatureStore();
+    IndexWorker w =
+        new IndexWorker(
+            stubChessClient, selectivelyFailing, requestStore, store, periodStore, extractionExecutor);
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(
+            playedGame("https://chess.com/g/ok1", MINIMAL_PGN, "blitz"),
+            playedGame(poisonUrl, poisonPgn, "blitz"),
+            playedGame("https://chess.com/g/ok2", MINIMAL_PGN, "blitz")));
+
+    w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    assertThat(store.getInsertCount()).isEqualTo(2);
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+    assertThat(requestStore.getLastGamesIndexed()).isEqualTo(2);
+  }
+
   private static PlayedGame playedGame(String gameUrl, String pgn, String timeClass) {
     return new PlayedGame(
         gameUrl,
