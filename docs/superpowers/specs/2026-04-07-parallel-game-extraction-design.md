@@ -8,7 +8,7 @@
 
 `IndexWorker.process()` currently walks each month's games strictly sequentially: for each `PlayedGame`, it calls `FeatureExtractor.extract(pgn)`, builds a row, and appends to a batch that is flushed at `BATCH_SIZE = 100`. The CPU-bound cost is dominated by `extract()` (PGN replay + motif detectors). DB writes are already batched.
 
-This design parallelizes **only** the `extract()` step across a bounded pool. The DB write path and all observable semantics (batch size, flush boundaries, per-month period upsert, progress updates, source ordering in `insertBatch`) remain identical.
+This design parallelizes **only** the `extract()` step across a bounded pool. The DB write path and all observable semantics (batch size, flush boundaries, per-month period upsert, progress updates) remain identical.
 
 ## Non-goals
 
@@ -80,7 +80,7 @@ flush remaining
 
 Key properties:
 - **Bounded in-flight work:** at most `threads` extractions running + one in-progress batch buffered.
-- **Order preservation:** draining futures in submission order guarantees `insertBatch` sees rows in the same order as today.
+- **In-order drain (not a correctness requirement):** futures are drained in submission order purely because it's the simplest possible drain loop. Row order in `insertBatch` is not load-bearing — `game_features` rows are keyed by URL, IDs are DB-assigned, and the occurrences map is keyed by URL too. An `ExecutorCompletionService`-based drain would be valid but more code for no observable win at this scope (we still flush at month-end either way).
 - **Failure isolation:** an extraction that throws is logged and skipped; other games still land. Mirrors the current per-game `try/catch`.
 - **Batching untouched:** `BATCH_SIZE = 100`, flush-at-boundary, flush-at-month-end, and `requestStore.updateStatus` after each flush all remain.
 - **No executor shutdown inside `process()`** — the pool is shared across requests and owned by the DI container.
@@ -98,11 +98,9 @@ Built inside the submitted task so that `buildGameFeature(...)` also runs on the
 
 ### Thread-safety audit (implementation step)
 
-`FeatureExtractor.extract()` creates local `positions`, `foundMotifs`, and `allOccurrences` per call, but its injected collaborators — `PgnParser`, `GameReplayer`, and `List<MotifDetector>` — are shared across threads. Before the first green concurrency test, verify each of these is stateless (no mutable instance fields touched inside `extract()` / `replay()` / `detect()`). If any holds mutable state, options are:
+`FeatureExtractor.extract()` creates local `positions`, `foundMotifs`, and `allOccurrences` per call, but its injected collaborators — `PgnParser`, `GameReplayer`, and `List<MotifDetector>` — are shared across threads. Before the first green concurrency test, verify each of these is stateless (no mutable instance fields touched inside `extract()` / `replay()` / `detect()`).
 
-1. Make it stateless (preferred).
-2. Construct a per-task instance (acceptable if construction is cheap).
-3. Use `ThreadLocal<MotifDetector>` (last resort).
+`MotifDetector` implementations are required to be stateless by contract. If the audit finds one that isn't, that is a design bug to fix at the source — not something to paper over with `ThreadLocal` or per-task construction. `PgnParser` and `GameReplayer` are held to the same standard.
 
 This audit is a discrete step in the plan and blocks the concurrency test from being marked green.
 
@@ -116,8 +114,8 @@ All new tests live in `IndexWorkerTest`, constructing `IndexWorker` directly wit
 2. **Failure isolation**
    Mock `extract()` to throw on one specific PGN; assert all other games in the month land in `insertBatch` and `updateStatus`'s `totalIndexed` reflects survivors only.
 
-3. **Ordering preserved**
-   Mock returns distinguishable features per game; assert that the `List<GameFeature>` passed to `insertBatch` is in the same order as `response.games()`.
+3. **All games land (set, not order)**
+   Mock returns distinguishable features per game; assert that the union of `List<GameFeature>` arguments passed to `insertBatch` across all flushes equals the input set. Order is not asserted — the drain is in-order today, but that's an implementation detail, not a contract.
 
 4. **Existing tests stay green**
    Update the existing `IndexWorkerTest` setup to construct the worker with a fixed pool (e.g. size 4). No assertion changes needed — this is the behavior-preservation bar.
@@ -132,7 +130,7 @@ All new tests live in `IndexWorkerTest`, constructing `IndexWorker` directly wit
 3. Thread-safety audit of `FeatureExtractor` collaborators.
 4. Rewrite inner loop (submit + drain) → concurrency test green.
 5. Failure-isolation test → red → passes once exception handling in the drain loop is wired.
-6. Ordering test → should be green immediately after step 4.
+6. "All games land" test → should be green immediately after step 4.
 7. Module wiring test.
 8. `./scripts/format-all` + `bazel test //...` before pushing.
 
@@ -141,8 +139,7 @@ All new tests live in `IndexWorkerTest`, constructing `IndexWorker` directly wit
 - **Memory:** ~20 MB per concurrent replay per `IN_PROCESS_MODE.md`. At default `threads=4` that is ~80 MB of transient replay state, well within headroom. Documenting the cap so ops knows not to set it to 32.
 - **Chess.com rate limits:** Unaffected — fetching is still one HTTP call per month.
 - **DB writes:** Unaffected — still single-threaded, still batched at 100.
-- **Determinism:** Order of rows in `insertBatch` is preserved, so any tests or downstream consumers that rely on source order keep working.
-- **Thread safety of `FeatureExtractor` collaborators:** the audit step is blocking; if a detector turns out to hold mutable state, the rewrite must also fix that before the concurrency test can pass.
+- **Thread safety of `FeatureExtractor` collaborators:** the audit step is blocking. `MotifDetector`, `PgnParser`, and `GameReplayer` are required to be stateless; any violation found during the audit is fixed at the source as part of this change, not worked around.
 
 ## Out of scope / follow-ups
 
