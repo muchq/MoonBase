@@ -143,7 +143,11 @@ public class IndexWorkerTest {
         new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
     IndexWorker workerWithRecording =
         new IndexWorker(
-            stubChessClient, featureExtractor, requestStore, recordingStore, periodStore,
+            stubChessClient,
+            featureExtractor,
+            requestStore,
+            recordingStore,
+            periodStore,
             extractionExecutor);
 
     IndexMessage message =
@@ -168,7 +172,11 @@ public class IndexWorkerTest {
     RecordingGameFeatureStore recordingStore = new RecordingGameFeatureStore();
     IndexWorker w =
         new IndexWorker(
-            stubChessClient, featureExtractor, requestStore, recordingStore, periodStore,
+            stubChessClient,
+            featureExtractor,
+            requestStore,
+            recordingStore,
+            periodStore,
             extractionExecutor);
 
     w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
@@ -213,8 +221,7 @@ public class IndexWorkerTest {
               Thread.currentThread().interrupt();
               throw new RuntimeException(e);
             }
-            return new GameFeatures(
-                java.util.EnumSet.noneOf(Motif.class), 0, java.util.Map.of());
+            return new GameFeatures(java.util.EnumSet.noneOf(Motif.class), 0, java.util.Map.of());
           }
         };
 
@@ -222,8 +229,7 @@ public class IndexWorkerTest {
     try {
       RecordingGameFeatureStore store = new RecordingGameFeatureStore();
       IndexWorker concurrentWorker =
-          new IndexWorker(
-              stubChessClient, latchExtractor, requestStore, store, periodStore, pool);
+          new IndexWorker(stubChessClient, latchExtractor, requestStore, store, periodStore, pool);
       stubChessClient.setResponse(
           java.time.YearMonth.of(2024, 1),
           List.of(
@@ -248,7 +254,11 @@ public class IndexWorkerTest {
     RecordingGameFeatureStore recordingStore = new RecordingGameFeatureStore();
     IndexWorker w =
         new IndexWorker(
-            stubChessClient, featureExtractor, requestStore, recordingStore, periodStore,
+            stubChessClient,
+            featureExtractor,
+            requestStore,
+            recordingStore,
+            periodStore,
             extractionExecutor);
 
     w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", true));
@@ -267,8 +277,7 @@ public class IndexWorkerTest {
             if (pgn.contains("POISON")) {
               throw new RuntimeException("boom");
             }
-            return new GameFeatures(
-                java.util.EnumSet.noneOf(Motif.class), 0, java.util.Map.of());
+            return new GameFeatures(java.util.EnumSet.noneOf(Motif.class), 0, java.util.Map.of());
           }
         };
 
@@ -287,7 +296,12 @@ public class IndexWorkerTest {
     RecordingGameFeatureStore store = new RecordingGameFeatureStore();
     IndexWorker w =
         new IndexWorker(
-            stubChessClient, selectivelyFailing, requestStore, store, periodStore, extractionExecutor);
+            stubChessClient,
+            selectivelyFailing,
+            requestStore,
+            store,
+            periodStore,
+            extractionExecutor);
     stubChessClient.setResponse(
         java.time.YearMonth.of(2024, 1),
         List.of(
@@ -319,7 +333,12 @@ public class IndexWorkerTest {
     RecordingGameFeatureStore store = new RecordingGameFeatureStore();
     IndexWorker w =
         new IndexWorker(
-            stubChessClient, featureExtractor, requestStore, store, periodStore, extractionExecutor);
+            stubChessClient,
+            featureExtractor,
+            requestStore,
+            store,
+            periodStore,
+            extractionExecutor);
 
     w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
 

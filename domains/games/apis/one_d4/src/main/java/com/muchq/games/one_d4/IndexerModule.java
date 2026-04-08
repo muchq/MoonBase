@@ -199,6 +199,7 @@ public class IndexerModule {
 
   @Context
   @Bean(preDestroy = "shutdown")
+  @jakarta.inject.Named("indexExtraction")
   public ExecutorService indexExtractionExecutor() {
     int threads = parseThreads(System.getenv("INDEXER_EXTRACTION_THREADS"), 4);
     ThreadFactory tf =
@@ -219,7 +220,7 @@ public class IndexerModule {
       IndexingRequestStore requestStore,
       GameFeatureStore gameFeatureStore,
       IndexedPeriodStore periodStore,
-      ExecutorService indexExtractionExecutor) {
+      @jakarta.inject.Named("indexExtraction") ExecutorService indexExtractionExecutor) {
     return new IndexWorker(
         chessClient,
         featureExtractor,

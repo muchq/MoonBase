@@ -93,6 +93,12 @@ public class ReanalysisE2ETest {
   private IndexingRequestStore requestStore;
   private IndexedPeriodStore periodStore;
   private FeatureExtractor featureExtractor;
+  private java.util.concurrent.ExecutorService extractionExecutor;
+
+  @org.junit.After
+  public void tearDownExecutor() {
+    if (extractionExecutor != null) extractionExecutor.shutdownNow();
+  }
 
   @Before
   public void setUp() {
@@ -119,9 +125,15 @@ public class ReanalysisE2ETest {
             new SmotheredMateDetector());
     featureExtractor = new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
 
+    extractionExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
     worker =
         new IndexWorker(
-            fakeChessClient, featureExtractor, requestStore, gameFeatureStore, periodStore);
+            fakeChessClient,
+            featureExtractor,
+            requestStore,
+            gameFeatureStore,
+            periodStore,
+            extractionExecutor);
     controller = new IndexController(requestStore, queue, new IndexRequestValidator());
     adminController = new AdminController(gameFeatureStore, featureExtractor);
   }

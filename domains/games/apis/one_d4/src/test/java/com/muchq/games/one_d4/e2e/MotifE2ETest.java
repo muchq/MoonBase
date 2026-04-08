@@ -110,6 +110,12 @@ public class MotifE2ETest {
   private FakeChessClient fakeChessClient;
   private IndexingRequestStore requestStore;
   private IndexedPeriodStore periodStore;
+  private java.util.concurrent.ExecutorService extractionExecutor;
+
+  @org.junit.After
+  public void tearDownExecutor() {
+    if (extractionExecutor != null) extractionExecutor.shutdownNow();
+  }
 
   @Before
   public void setUp() {
@@ -136,9 +142,15 @@ public class MotifE2ETest {
             new SmotheredMateDetector());
     FeatureExtractor featureExtractor =
         new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
+    extractionExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
     worker =
         new IndexWorker(
-            fakeChessClient, featureExtractor, requestStore, gameFeatureStore, periodStore);
+            fakeChessClient,
+            featureExtractor,
+            requestStore,
+            gameFeatureStore,
+            periodStore,
+            extractionExecutor);
     controller = new IndexController(requestStore, queue, new IndexRequestValidator());
   }
 
