@@ -15,7 +15,9 @@ import dev.failsafe.Failsafe;
 import dev.failsafe.RetryPolicy;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
@@ -111,26 +113,43 @@ public class IndexWorker {
         Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesBatch =
             new LinkedHashMap<>();
 
-        int monthCount = 0;
+        // Submit each surviving game to the extraction pool, preserving source order.
+        List<Future<ExtractResult>> futures = new ArrayList<>();
         for (PlayedGame game : response.get().games()) {
           if (message.excludeBullet() && "bullet".equals(game.timeClass())) {
             continue;
           }
+          futures.add(
+              extractionExecutor.submit(
+                  () -> {
+                    GameFeatures features = featureExtractor.extract(game.pgn());
+                    GameFeature row = buildGameFeature(message, game, features);
+                    return new ExtractResult(row, game.url(), features.occurrences());
+                  }));
+        }
+
+        int monthCount = 0;
+        for (Future<ExtractResult> future : futures) {
+          ExtractResult result;
           try {
-            GameFeatures features = featureExtractor.extract(game.pgn());
-            GameFeature row = buildGameFeature(message, game, features);
-            featureBatch.add(row);
-            if (!features.occurrences().isEmpty()) {
-              occurrencesBatch.put(game.url(), features.occurrences());
-            }
-            monthCount++;
-            totalIndexed++;
-            if (featureBatch.size() >= BATCH_SIZE) {
-              flushBatch(featureBatch, occurrencesBatch);
-              requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
-            }
-          } catch (Exception e) {
-            LOG.warn("Failed to index game {}", game.url(), e);
+            result = future.get();
+          } catch (ExecutionException e) {
+            LOG.warn("Failed to index game", e.getCause());
+            continue;
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.warn("Interrupted while draining extraction futures", e);
+            break;
+          }
+          featureBatch.add(result.row());
+          if (!result.occurrences().isEmpty()) {
+            occurrencesBatch.put(result.gameUrl(), result.occurrences());
+          }
+          monthCount++;
+          totalIndexed++;
+          if (featureBatch.size() >= BATCH_SIZE) {
+            flushBatch(featureBatch, occurrencesBatch);
+            requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
           }
         }
         flushBatch(featureBatch, occurrencesBatch);
@@ -202,6 +221,11 @@ public class IndexWorker {
     Matcher m = ECO_PATTERN.matcher(pgn);
     return m.find() ? m.group(1) : null;
   }
+
+  private record ExtractResult(
+      GameFeature row,
+      String gameUrl,
+      Map<Motif, List<GameFeatures.MotifOccurrence>> occurrences) {}
 
   private static boolean isLockConflict(Throwable e) {
     Throwable cause = e;
