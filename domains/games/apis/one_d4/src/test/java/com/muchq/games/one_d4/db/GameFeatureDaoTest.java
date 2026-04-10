@@ -572,6 +572,29 @@ public class GameFeatureDaoTest {
     assertThat(page2.get(0).gameUrl()).isEqualTo("https://chess.com/game/zzz-last");
   }
 
+  @Test
+  public void deleteOccurrencesByGameUrls_thenReinsert_doesNotDuplicate() {
+    // Regression test: re-indexing a partial month must not accumulate duplicate occurrences.
+    // The fix is in IndexWorker.flushBatch: delete occurrences for each game_url before inserting.
+    String gameUrl = "https://chess.com/game/reindex-dedup";
+    dao.insertBatch(List.of(createGame(gameUrl)));
+
+    GameFeatures.MotifOccurrence pin =
+        new GameFeatures.MotifOccurrence(
+            5, 3, "white", "Pin on c6", null, "Bb5", "nc6", false, false, "ABSOLUTE");
+    Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrences =
+        Map.of(gameUrl, Map.of(Motif.PIN, List.of(pin)));
+
+    // First index run
+    dao.insertOccurrencesBatch(occurrences);
+    // Simulate re-index: delete then re-insert (what flushBatch now does)
+    dao.deleteOccurrencesByGameUrls(List.of(gameUrl));
+    dao.insertOccurrencesBatch(occurrences);
+
+    Map<String, Map<String, List<OccurrenceRow>>> result = dao.queryOccurrences(List.of(gameUrl));
+    assertThat(result.get(gameUrl).get("pin")).hasSize(1);
+  }
+
   private GameFeature createGame(String url) {
     return new GameFeature(
         null,
