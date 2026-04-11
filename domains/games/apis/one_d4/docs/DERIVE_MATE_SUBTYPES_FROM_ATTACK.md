@@ -213,7 +213,7 @@ flowchart LR
 
 ### 4. ChessQL / Query Layer
 
-- **SqlCompiler** (and DataFusionSqlCompiler) already treat these motifs as first-class (e.g. `motif(back_rank_mate)`). No change needed if the API returns derived occurrences under those names.
+- **SqlCompiler** already treats these motifs as first-class (e.g. `motif(back_rank_mate)`). No change needed if the API returns derived occurrences under those names.
 - **QueryController** / response mapping: ensure that when we return occurrences by motif name, the derived lists for back_rank_mate, smothered_mate, promotion_with_checkmate are included (they will be, if we put them in the same map returned by `queryOccurrences`).
 
 ### 5. Backfill and Cleanup
