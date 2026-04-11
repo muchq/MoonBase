@@ -20,12 +20,6 @@ libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev \
 libegl1-mesa-dev libdbus-1-dev libibus-1.0-dev libudev-dev libxinerama-dev \
 libpipewire-0.3-dev libwayland-dev libdecor-0-dev liburing-dev libx11-dev \
 
-# SFML deps
-echo "[setup-linux] >> installing SFML deps"
-apt-get install -y libfreetype6-dev libx11-dev libxrandr-dev libgl1-mesa-dev \
-libudev-dev libopenal-dev libflac-dev libogg-dev libvorbis-dev libxcursor-dev \
-libxi-dev libxinerama-dev
-
 echo "[setup-linux] >> installing clang format"
 ln -s "$(which clang-format-18)" /usr/local/bin/clang-format
 

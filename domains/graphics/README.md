@@ -13,7 +13,6 @@ Computer graphics, image processing, and rendering.
 - [**Tubing**](apps/tubing): Graphics demonstration.
 - [**Tracy Demo**](apps/tracy_demo): Demo for the Tracy ray tracer.
 - [**Sobel CLI**](apps/sobel_cli): Command-line tool for Sobel edge detection.
-- [**SFML Example**](apps/sfml_example): Basic SFML usage example.
 - [**Raylib Example**](apps/raylib_example): Basic Raylib usage example.
 
 ## Libraries
