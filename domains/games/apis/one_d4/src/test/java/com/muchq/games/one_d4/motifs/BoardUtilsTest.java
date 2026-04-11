@@ -2,7 +2,7 @@ package com.muchq.games.one_d4.motifs;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class BoardUtilsTest {
 

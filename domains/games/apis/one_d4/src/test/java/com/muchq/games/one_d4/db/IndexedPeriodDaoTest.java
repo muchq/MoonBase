@@ -3,14 +3,14 @@ package com.muchq.games.one_d4.db;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Instant;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class IndexedPeriodDaoTest {
 
   private IndexedPeriodDao dao;
 
-  @Before
+  @BeforeEach
   public void setUp() {
     dao = new IndexedPeriodDao(TestDb.create("period_test").jdbi(), true);
   }

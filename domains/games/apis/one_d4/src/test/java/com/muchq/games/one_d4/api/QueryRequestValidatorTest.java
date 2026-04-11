@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.muchq.games.one_d4.api.dto.QueryRequest;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class QueryRequestValidatorTest {
 

@@ -35,9 +35,11 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 public class IndexWorkerTest {
 
@@ -52,7 +54,7 @@ public class IndexWorkerTest {
   private FeatureExtractor featureExtractor;
   private ExecutorService extractionExecutor;
 
-  @Before
+  @BeforeEach
   public void setUp() {
     stubChessClient = new StubChessClient();
     requestStore = new RecordingRequestStore();
@@ -72,7 +74,7 @@ public class IndexWorkerTest {
             extractionExecutor);
   }
 
-  @After
+  @AfterEach
   public void tearDown() {
     extractionExecutor.shutdownNow();
   }
@@ -201,7 +203,8 @@ public class IndexWorkerTest {
         .isEqualTo("Indexing failed due to an internal error");
   }
 
-  @Test(timeout = 5000)
+  @Test
+  @Timeout(value = 5, unit = TimeUnit.SECONDS)
   public void process_runsExtractionsConcurrently_acrossPoolThreads() throws Exception {
     // Two games in one month. Each extract() decrements a 2-latch then awaits it.
     // If extract() runs sequentially, the second call never starts and the latch

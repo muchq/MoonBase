@@ -13,8 +13,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import javax.sql.DataSource;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class RetentionWorkerTest {
   private GameFeatureDao dao;
@@ -23,7 +23,7 @@ public class RetentionWorkerTest {
   private UUID requestId;
   private DataSource dataSource;
 
-  @Before
+  @BeforeEach
   public void setUp() {
     TestDb testDb = TestDb.create("retention");
     dataSource = testDb.dataSource();

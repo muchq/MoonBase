@@ -36,7 +36,7 @@ java_test_suite(
         ":chess_com_client",
         "//domains/platform/libs/http_client:core",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
 )

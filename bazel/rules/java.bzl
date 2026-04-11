@@ -21,7 +21,28 @@ load("@rules_java//java:defs.bzl", _java_binary = "java_binary", _java_library =
 load("@rules_jvm_external//:defs.bzl", _artifact = "artifact")
 
 artifact = _artifact
-java_test_suite = _java_test_suite
+
+_JUNIT_RUNTIME_DEPS = [
+    _artifact("org.junit.jupiter:junit-jupiter-engine"),
+    _artifact("org.junit.platform:junit-platform-launcher"),
+    _artifact("org.junit.platform:junit-platform-reporting"),
+]
+
+def java_test_suite(runner = "junit5", runtime_deps = [], **kwargs):
+    """java_test_suite defaulting to JUnit 5 (Jupiter).
+
+    Automatically adds JUnit Jupiter engine and platform runtime deps.
+
+    Args:
+        runner: Test runner to use. Defaults to "junit5".
+        runtime_deps: Additional runtime dependencies.
+        **kwargs: Arguments passed to java_test_suite.
+    """
+    _java_test_suite(
+        runner = runner,
+        runtime_deps = runtime_deps + _JUNIT_RUNTIME_DEPS,
+        **kwargs
+    )
 
 _NULLAWAY_PLUGIN = "//bazel/rules:nullaway"
 

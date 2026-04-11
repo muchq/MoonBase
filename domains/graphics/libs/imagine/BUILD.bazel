@@ -17,7 +17,7 @@ java_test_suite(
     data = ["//domains/graphics/data:marbles"],
     deps = [
         ":imagine",
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
 )

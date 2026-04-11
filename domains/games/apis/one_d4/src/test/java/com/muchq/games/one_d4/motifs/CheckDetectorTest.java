@@ -6,7 +6,7 @@ import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import com.muchq.games.one_d4.engine.model.PositionContext;
 import java.util.List;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class CheckDetectorTest {
 

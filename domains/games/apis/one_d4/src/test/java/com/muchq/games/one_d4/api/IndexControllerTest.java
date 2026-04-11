@@ -14,8 +14,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.IntStream;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class IndexControllerTest {
 
@@ -23,7 +23,7 @@ public class IndexControllerTest {
   private FakeIndexingRequestStore requestStore;
   private FakeIndexQueue queue;
 
-  @Before
+  @BeforeEach
   public void setUp() {
     requestStore = new FakeIndexingRequestStore();
     queue = new FakeIndexQueue();

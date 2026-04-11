@@ -12,7 +12,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 /**
  * Unit tests for FeatureExtractor, focusing on the fork-derivation post-processing step. Full

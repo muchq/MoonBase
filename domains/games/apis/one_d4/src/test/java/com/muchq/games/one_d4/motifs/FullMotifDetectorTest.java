@@ -10,8 +10,8 @@ import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import java.util.List;
 import java.util.Set;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * Integration test that runs all motif detectors against a real game PGN and verifies the exact set
@@ -51,7 +51,7 @@ public class FullMotifDetectorTest {
 
   private FeatureExtractor extractor;
 
-  @Before
+  @BeforeEach
   public void setUp() {
     List<MotifDetector> detectors =
         List.of(

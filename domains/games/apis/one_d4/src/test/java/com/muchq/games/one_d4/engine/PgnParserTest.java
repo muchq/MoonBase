@@ -3,7 +3,7 @@ package com.muchq.games.one_d4.engine;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.muchq.games.one_d4.engine.model.ParsedGame;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class PgnParserTest {
 

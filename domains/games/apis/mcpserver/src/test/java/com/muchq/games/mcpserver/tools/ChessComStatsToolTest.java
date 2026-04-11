@@ -7,7 +7,7 @@ import com.muchq.games.chess_com_client.StatsResponse;
 import com.muchq.platform.json.JsonUtils;
 import java.util.Map;
 import java.util.Optional;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class ChessComStatsToolTest {
 

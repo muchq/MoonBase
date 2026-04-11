@@ -63,7 +63,7 @@ java_test_suite(
         ":ast",
         ":compiler",
         ":parser",
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
 )
@@ -76,7 +76,7 @@ java_test_suite(
         ":ast",
         ":compiler",
         ":parser",
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
 )
@@ -87,7 +87,7 @@ java_test_suite(
     srcs = ["src/test/java/com/muchq/games/chessql/lexer/LexerTest.java"],
     deps = [
         ":lexer",
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
 )
@@ -99,7 +99,7 @@ java_test_suite(
     deps = [
         ":ast",
         ":parser",
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
 )

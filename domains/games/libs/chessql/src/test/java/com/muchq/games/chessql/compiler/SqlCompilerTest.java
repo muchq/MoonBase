@@ -8,7 +8,7 @@ import com.muchq.games.chessql.ast.SequenceExpr;
 import com.muchq.games.chessql.parser.ParsedQuery;
 import com.muchq.games.chessql.parser.Parser;
 import java.util.List;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class SqlCompilerTest {
 
