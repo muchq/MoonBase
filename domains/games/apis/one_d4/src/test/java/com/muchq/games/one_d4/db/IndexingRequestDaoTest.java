@@ -5,14 +5,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class IndexingRequestDaoTest {
 
   private IndexingRequestDao dao;
 
-  @Before
+  @BeforeEach
   public void setUp() {
     dao = new IndexingRequestDao(TestDb.create("index_req_test").jdbi());
   }

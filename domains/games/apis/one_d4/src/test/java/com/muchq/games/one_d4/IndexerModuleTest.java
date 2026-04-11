@@ -7,13 +7,12 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 public class IndexerModuleTest {
 
-  @Rule public TemporaryFolder tmp = new TemporaryFolder();
+  @TempDir Path tmp;
 
   @Test
   public void readJdbcUrl_returnsEnvVar_whenSet() {
@@ -35,7 +34,7 @@ public class IndexerModuleTest {
 
   @Test
   public void readJdbcUrl_ignoresNullEnvVar_andReadsFile() throws IOException {
-    Path configFile = tmp.newFile("db_config").toPath();
+    Path configFile = Files.createFile(tmp.resolve("db_config"));
     Files.writeString(configFile, "jdbc:postgresql://file-host:5432/chess\n");
 
     String result = IndexerModule.readJdbcUrl(null, configFile);
@@ -50,7 +49,7 @@ public class IndexerModuleTest {
 
   @Test
   public void readJdbcUrl_returnsDefault_whenFileIsEmpty() throws IOException {
-    Path configFile = tmp.newFile("db_config_empty").toPath();
+    Path configFile = Files.createFile(tmp.resolve("db_config_empty"));
     Files.writeString(configFile, "   ");
 
     String result = IndexerModule.readJdbcUrl(null, configFile);
@@ -59,7 +58,7 @@ public class IndexerModuleTest {
 
   @Test
   public void readJdbcUrl_envVarTakesPrecedenceOverFile() throws IOException {
-    Path configFile = tmp.newFile("db_config_precedence").toPath();
+    Path configFile = Files.createFile(tmp.resolve("db_config_precedence"));
     Files.writeString(configFile, "jdbc:postgresql://file-host/db");
 
     String result = IndexerModule.readJdbcUrl("jdbc:postgresql://env-host/db", configFile);
@@ -69,7 +68,7 @@ public class IndexerModuleTest {
   @Test
   public void readJdbcUrl_throwsUncheckedIOException_onNonFileNotFoundIOError() {
     // A directory path will cause an IOException (not NoSuchFileException) when read as a file
-    Path dirPath = tmp.getRoot().toPath();
+    Path dirPath = tmp;
 
     assertThatThrownBy(() -> IndexerModule.readJdbcUrl(null, dirPath))
         .isInstanceOf(UncheckedIOException.class)
@@ -104,6 +103,6 @@ public class IndexerModuleTest {
   }
 
   private Path missingPath() {
-    return tmp.getRoot().toPath().resolve("nonexistent_db_config");
+    return tmp.resolve("nonexistent_db_config");
   }
 }

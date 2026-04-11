@@ -48,8 +48,8 @@ import java.time.YearMonth;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * End-to-end tests for the POST /admin/reanalyze endpoint. Each test indexes one or more games,
@@ -100,7 +100,7 @@ public class ReanalysisE2ETest {
     if (extractionExecutor != null) extractionExecutor.shutdownNow();
   }
 
-  @Before
+  @BeforeEach
   public void setUp() {
     TestDb testDb = TestDb.create("reanalysis_e2e");
 

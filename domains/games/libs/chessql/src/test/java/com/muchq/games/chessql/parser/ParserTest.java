@@ -13,7 +13,7 @@ import com.muchq.games.chessql.ast.OrExpr;
 import com.muchq.games.chessql.ast.OrderByClause;
 import com.muchq.games.chessql.ast.SequenceExpr;
 import java.util.List;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class ParserTest {
 

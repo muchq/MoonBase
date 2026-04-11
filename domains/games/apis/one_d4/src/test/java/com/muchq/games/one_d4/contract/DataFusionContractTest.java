@@ -16,8 +16,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * Contract test: verifies that {@link DataFusionSqlCompiler} produces SQL that returns the same
@@ -34,7 +34,7 @@ public class DataFusionContractTest {
   private final DataFusionSqlCompiler dfCompiler = new DataFusionSqlCompiler();
   private UUID requestId;
 
-  @Before
+  @BeforeEach
   public void setUp() {
     TestDb testDb = TestDb.create("df_contract");
 

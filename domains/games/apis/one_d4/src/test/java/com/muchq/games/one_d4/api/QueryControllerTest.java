@@ -17,15 +17,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class QueryControllerTest {
 
   private QueryController controller;
   private FakeGameFeatureStore store;
 
-  @Before
+  @BeforeEach
   public void setUp() {
     store = new FakeGameFeatureStore();
     controller = new QueryController(store, new SqlCompiler(), new QueryRequestValidator());

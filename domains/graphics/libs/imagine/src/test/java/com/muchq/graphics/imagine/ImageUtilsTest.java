@@ -3,7 +3,7 @@ package com.muchq.graphics.imagine;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import javax.imageio.ImageIO;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class ImageUtilsTest {
   @Test

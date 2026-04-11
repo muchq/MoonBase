@@ -36,8 +36,8 @@ import java.time.YearMonth;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * Local e2e tests: real in-memory H2, real IndexController, IndexWorker, and stores; only the
@@ -62,7 +62,7 @@ public class IndexE2ETest {
     if (extractionExecutor != null) extractionExecutor.shutdownNow();
   }
 
-  @Before
+  @BeforeEach
   public void setUp() {
     TestDb testDb = TestDb.create("e2e");
 

@@ -6,7 +6,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.Map;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class ServerTimeToolTest {
   private static final Instant FIXED_INSTANT = Instant.parse("2024-01-15T10:30:45.123Z");

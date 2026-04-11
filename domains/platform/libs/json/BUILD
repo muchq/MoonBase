@@ -26,7 +26,7 @@ java_test_suite(
         artifact("com.fasterxml.jackson.core:jackson-annotations"),
         artifact("com.fasterxml.jackson.core:jackson-core"),
         artifact("com.fasterxml.jackson.core:jackson-databind"),
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("com.google.guava:guava"),
         artifact("org.assertj:assertj-core"),
     ],

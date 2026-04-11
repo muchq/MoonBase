@@ -8,14 +8,14 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.UUID;
 import javax.sql.DataSource;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class MigrationTest {
 
   private DataSource dataSource;
 
-  @Before
+  @BeforeEach
   public void setUp() {
     String jdbcUrl = "jdbc:h2:mem:migration_" + System.currentTimeMillis() + ";DB_CLOSE_DELAY=-1";
     dataSource = DataSourceFactory.create(jdbcUrl);

@@ -102,7 +102,7 @@ java_test_suite(
         ":tools",
         "//domains/games/libs/chess_com_client",
         "//domains/platform/libs/json",
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
 )

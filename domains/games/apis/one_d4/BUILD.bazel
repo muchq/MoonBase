@@ -260,7 +260,7 @@ java_test_suite(
         ":engine",
         ":model",
         ":motifs",
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
 )
@@ -284,7 +284,7 @@ java_test_suite(
     deps = [
         ":model",
         ":motifs",
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
 )
@@ -299,7 +299,7 @@ java_test_suite(
         ":engine",
         ":model",
         ":motifs",
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
 )
@@ -310,7 +310,7 @@ java_test_suite(
     srcs = ["src/test/java/com/muchq/games/one_d4/queue/InMemoryIndexQueueTest.java"],
     deps = [
         ":queue",
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
 )
@@ -336,7 +336,7 @@ java_test_suite(
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
         artifact("org.jdbi:jdbi3-core"),
     ],
@@ -361,7 +361,7 @@ java_test_suite(
         ":queue",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
 )
@@ -374,7 +374,7 @@ java_test_suite(
     ],
     deps = [
         ":module",
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
 )
@@ -395,7 +395,7 @@ java_test_suite(
         ":test_db",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
         artifact("org.jdbi:jdbi3-core"),
     ],
@@ -453,7 +453,7 @@ java_test_suite(
         artifact("io.micronaut:micronaut-http-server-netty"),
         artifact("io.micronaut:micronaut-inject"),
         artifact("io.micronaut:micronaut-runtime"),
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
 )
@@ -481,7 +481,7 @@ java_test_suite(
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
         artifact("org.jdbi:jdbi3-core"),
     ],
@@ -500,7 +500,7 @@ java_test_suite(
         ":test_db",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
         artifact("org.jdbi:jdbi3-core"),
     ],
@@ -522,7 +522,7 @@ java_test_suite(
         artifact("io.micronaut:micronaut-http-server-netty"),
         artifact("io.micronaut:micronaut-inject"),
         artifact("io.micronaut:micronaut-runtime"),
-        artifact("junit:junit"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
 )

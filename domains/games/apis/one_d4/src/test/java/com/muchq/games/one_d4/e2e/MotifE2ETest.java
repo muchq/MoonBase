@@ -41,8 +41,8 @@ import java.time.YearMonth;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * End-to-end motif tests: each test indexes a real game, queries via ChessQL, and verifies that the
@@ -117,7 +117,7 @@ public class MotifE2ETest {
     if (extractionExecutor != null) extractionExecutor.shutdownNow();
   }
 
-  @Before
+  @BeforeEach
   public void setUp() {
     TestDb testDb = TestDb.create("motife2e");
 

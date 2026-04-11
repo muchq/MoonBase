@@ -19,9 +19,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import javax.sql.DataSource;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * Full-stack regression test for H2 "Concurrent update in table INDEXED_PERIODS" ([90131]).
@@ -52,7 +52,7 @@ public class ConcurrentIndexE2ETest {
   private FakeChessClient fakeClient;
   private LatchIndexedPeriodDao latchPeriodStore;
 
-  @Before
+  @BeforeEach
   public void setUp() {
     ctx =
         ApplicationContext.builder()
@@ -76,7 +76,7 @@ public class ConcurrentIndexE2ETest {
     baseUrl = "http://localhost:" + server.getPort();
   }
 
-  @After
+  @AfterEach
   public void tearDown() {
     if (server != null) server.stop();
     if (ctx != null) ctx.stop();

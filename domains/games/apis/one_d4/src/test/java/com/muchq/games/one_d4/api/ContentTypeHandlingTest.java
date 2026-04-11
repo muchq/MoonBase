@@ -9,9 +9,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.Map;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class ContentTypeHandlingTest {
 
@@ -19,7 +19,7 @@ public class ContentTypeHandlingTest {
   private HttpClient client;
   private String baseUrl;
 
-  @Before
+  @BeforeEach
   public void setUp() {
     server =
         ApplicationContext.run(
@@ -33,7 +33,7 @@ public class ContentTypeHandlingTest {
     baseUrl = "http://localhost:" + server.getPort();
   }
 
-  @After
+  @AfterEach
   public void tearDown() {
     server.stop();
   }
