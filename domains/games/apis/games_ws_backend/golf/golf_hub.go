@@ -276,6 +276,8 @@ func (h *GolfHub) handleGameMessage(msgData hub.GameMessageData) {
 		h.handleKnock(msgData.Sender)
 	case "hideCards":
 		h.handleHideCards(msgData.Sender)
+	case "leaveGame":
+		h.handleLeaveGame(msgData.Sender)
 	default:
 		h.sendError(msgData.Sender, "Unknown message type: "+msg.Type)
 	}
@@ -687,6 +689,70 @@ func (h *GolfHub) handleLeaveRoom(client *hub.Client, roomID string) {
 
 	slog.Info("Player left room",
 		"roomID", roomID,
+		"clientAddr", getClientAddr(client))
+}
+
+// handleLeaveGame removes a player from their current game but keeps them in the room.
+// If the game was in progress and fewer than 2 players remain, the game ends.
+func (h *GolfHub) handleLeaveGame(client *hub.Client) {
+	var room *Room
+	var game *Game
+	var gameEnded bool
+
+	func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+
+		ctx := h.clientContexts[client]
+		if ctx == nil || ctx.GameID == "" {
+			h.sendError(client, "Not in a game")
+			return
+		}
+
+		room = h.rooms[ctx.RoomID]
+		if room == nil {
+			h.sendError(client, "Room not found")
+			return
+		}
+
+		var exists bool
+		game, exists = room.Games[ctx.GameID]
+		if !exists {
+			// Game already gone — just clear context
+			ctx.GameID = ""
+			return
+		}
+
+		clientID := getClientID(client)
+		phaseBefore := game.state.GamePhase
+
+		if err := game.RemovePlayer(clientID); err != nil {
+			h.sendError(client, err.Error())
+			game = nil
+			return
+		}
+
+		gameEnded = phaseBefore != "ended" && phaseBefore != "waiting" && game.state.GamePhase == "ended"
+
+		ctx.GameID = ""
+		room.LastActivity = time.Now()
+	}()
+
+	if game == nil {
+		return
+	}
+
+	if gameEnded {
+		h.handleGameEnded(game)
+	} else {
+		h.broadcastGameState(game)
+	}
+
+	if room != nil {
+		h.broadcastRoomState(room)
+	}
+
+	slog.Info("Player left game",
 		"clientAddr", getClientAddr(client))
 }
 

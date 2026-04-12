@@ -125,7 +125,8 @@ func (g *Game) AddPlayer(clientID string, playerID string, playerName string) (*
 	return player, nil
 }
 
-// RemovePlayer removes a player from the game
+// RemovePlayer removes a player from the game.
+// If the game is in progress and fewer than 2 players remain, the game ends.
 func (g *Game) RemovePlayer(clientID string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -145,9 +146,15 @@ func (g *Game) RemovePlayer(clientID string) error {
 
 	delete(g.playersByClient, clientID)
 
-	// If game is in progress and it's this player's turn, advance to next player
-	if g.state.GamePhase == "playing" && len(g.state.Players) > 0 {
-		g.state.CurrentPlayerIndex = g.state.CurrentPlayerIndex % len(g.state.Players)
+	// If game is in progress, handle the reduced player count
+	if g.state.GamePhase == "playing" || g.state.GamePhase == "knocked" || g.state.GamePhase == "peeking" {
+		if len(g.state.Players) < 2 {
+			// Not enough players to continue — end the game
+			g.state.GamePhase = "ended"
+			g.calculateFinalScores()
+		} else {
+			g.state.CurrentPlayerIndex = g.state.CurrentPlayerIndex % len(g.state.Players)
+		}
 	}
 
 	return nil
