@@ -479,6 +479,126 @@ func TestRemovePlayer(t *testing.T) {
 	}
 }
 
+func TestRemovePlayerEndsGameWhenTooFewPlayers(t *testing.T) {
+	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+	game.StartGame()
+
+	if game.state.GamePhase != "playing" {
+		t.Fatalf("Expected playing phase, got %s", game.state.GamePhase)
+	}
+
+	// Remove a player during an active game — should end it
+	err := game.RemovePlayer("client2")
+	if err != nil {
+		t.Fatalf("Failed to remove player: %v", err)
+	}
+
+	if game.state.GamePhase != "ended" {
+		t.Errorf("Expected ended phase after removal left <2 players, got %s", game.state.GamePhase)
+	}
+
+	// Remaining player should have final scores calculated
+	if len(game.state.Players) != 1 {
+		t.Fatalf("Expected 1 player remaining, got %d", len(game.state.Players))
+	}
+	if len(game.state.Players[0].RevealedCards) != 4 {
+		t.Errorf("Expected all 4 cards revealed, got %d", len(game.state.Players[0].RevealedCards))
+	}
+}
+
+func TestRemovePlayerDuringKnockedPhaseEndsGame(t *testing.T) {
+	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+	addTestPlayerToGame(game, "client3")
+	game.StartGame()
+
+	// Complete peek phase for all players, then hide to return to playing
+	game.PeekCard("client1", 0)
+	game.PeekCard("client1", 1)
+	game.PeekCard("client2", 0)
+	game.PeekCard("client2", 1)
+	game.PeekCard("client3", 0)
+	game.PeekCard("client3", 1)
+	game.HidePeekedCards()
+
+	// Player 1 knocks (must be at start of turn, before drawing)
+	if err := game.Knock("client1"); err != nil {
+		t.Fatalf("Failed to knock: %v", err)
+	}
+
+	if game.state.GamePhase != "knocked" {
+		t.Fatalf("Expected knocked phase, got %s", game.state.GamePhase)
+	}
+
+	// Remove both non-knocking players — should end the game
+	game.RemovePlayer("client2")
+	if game.state.GamePhase != "knocked" {
+		t.Fatalf("Expected still knocked with 2 players, got %s", game.state.GamePhase)
+	}
+
+	game.RemovePlayer("client3")
+	if game.state.GamePhase != "ended" {
+		t.Errorf("Expected ended phase after removal left <2 players, got %s", game.state.GamePhase)
+	}
+}
+
+func TestRemovePlayerDuringWaitingDoesNotEnd(t *testing.T) {
+	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+
+	// Remove during waiting — game hasn't started, shouldn't transition to ended
+	err := game.RemovePlayer("client2")
+	if err != nil {
+		t.Fatalf("Failed to remove player: %v", err)
+	}
+
+	if game.state.GamePhase != "waiting" {
+		t.Errorf("Expected waiting phase, got %s", game.state.GamePhase)
+	}
+}
+
+func TestRemoveCurrentPlayerAdvancesTurn(t *testing.T) {
+	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+	addTestPlayerToGame(game, "client3")
+	game.StartGame()
+
+	// Complete peek phase for all players, then hide to return to playing
+	game.PeekCard("client1", 0)
+	game.PeekCard("client1", 1)
+	game.PeekCard("client2", 0)
+	game.PeekCard("client2", 1)
+	game.PeekCard("client3", 0)
+	game.PeekCard("client3", 1)
+	game.HidePeekedCards()
+
+	// It's client1's turn (index 0). Remove client1.
+	if game.state.CurrentPlayerIndex != 0 {
+		t.Fatalf("Expected current player index 0, got %d", game.state.CurrentPlayerIndex)
+	}
+
+	game.RemovePlayer("client1")
+
+	// Game should still be playing with 2 players
+	if game.state.GamePhase != "playing" {
+		t.Fatalf("Expected playing phase, got %s", game.state.GamePhase)
+	}
+	if len(game.state.Players) != 2 {
+		t.Fatalf("Expected 2 players, got %d", len(game.state.Players))
+	}
+
+	// CurrentPlayerIndex should be valid (0, pointing to what was client2)
+	if game.state.CurrentPlayerIndex >= len(game.state.Players) {
+		t.Errorf("CurrentPlayerIndex %d out of bounds for %d players",
+			game.state.CurrentPlayerIndex, len(game.state.Players))
+	}
+}
+
 func TestValidateCardIndex(t *testing.T) {
 	tests := []struct {
 		index   int

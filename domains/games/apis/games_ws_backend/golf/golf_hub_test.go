@@ -1794,3 +1794,184 @@ func TestGetClientID_UsesIDFieldOverRemoteAddr(t *testing.T) {
 		}
 	})
 }
+
+func TestHub_LeaveGame(t *testing.T) {
+	golfHub := NewGolfHub(&players.DeterministicIDGenerator{})
+	go golfHub.Run()
+
+	// Create 3 clients
+	client1 := newMockClient("c1")
+	client1.collectMessages()
+	client2 := newMockClient("c2")
+	client2.collectMessages()
+	client3 := newMockClient("c3")
+	client3.collectMessages()
+
+	hubClient1 := &hub.Client{Hub: golfHub, Send: client1.send}
+	hubClient2 := &hub.Client{Hub: golfHub, Send: client2.send}
+	hubClient3 := &hub.Client{Hub: golfHub, Send: client3.send}
+
+	golfHub.Register(hubClient1)
+	golfHub.Register(hubClient2)
+	golfHub.Register(hubClient3)
+	time.Sleep(10 * time.Millisecond)
+	authenticateMockClient(golfHub, hubClient1, client1)
+	authenticateMockClient(golfHub, hubClient2, client2)
+	authenticateMockClient(golfHub, hubClient3, client3)
+
+	// Client 1 creates room
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type":"createRoom"}`),
+		Sender:  hubClient1,
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	msgs := client1.getMessages()
+	var roomMsg RoomJoinedMessage
+	json.Unmarshal(msgs[0], &roomMsg)
+	roomID := roomMsg.RoomState.ID
+	client1.clearMessages()
+
+	// Clients 2 and 3 join room
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type":"joinRoom","roomId":"` + roomID + `"}`),
+		Sender:  hubClient2,
+	})
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type":"joinRoom","roomId":"` + roomID + `"}`),
+		Sender:  hubClient3,
+	})
+	time.Sleep(10 * time.Millisecond)
+	client1.clearMessages()
+	client2.clearMessages()
+	client3.clearMessages()
+
+	// Client 1 creates game
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type":"createGame","roomId":"` + roomID + `"}`),
+		Sender:  hubClient1,
+	})
+	time.Sleep(100 * time.Millisecond)
+
+	msgs = client1.getMessages()
+	var gameMsg GameJoinedMessage
+	for _, m := range msgs {
+		if json.Unmarshal(m, &gameMsg) == nil && gameMsg.Type == "gameJoined" {
+			break
+		}
+	}
+	gameID := gameMsg.GameState.ID
+	client1.clearMessages()
+	client2.clearMessages()
+	client3.clearMessages()
+
+	// Clients 2 and 3 join game
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type":"joinGame","roomId":"` + roomID + `","gameId":"` + gameID + `"}`),
+		Sender:  hubClient2,
+	})
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type":"joinGame","roomId":"` + roomID + `","gameId":"` + gameID + `"}`),
+		Sender:  hubClient3,
+	})
+	time.Sleep(100 * time.Millisecond)
+	client1.clearMessages()
+	client2.clearMessages()
+	client3.clearMessages()
+
+	// Start game
+	golfHub.GameMessage(hub.GameMessageData{
+		Message: []byte(`{"type":"startGame"}`),
+		Sender:  hubClient1,
+	})
+	time.Sleep(10 * time.Millisecond)
+	client1.clearMessages()
+	client2.clearMessages()
+	client3.clearMessages()
+
+	t.Run("leave game returns player to room", func(t *testing.T) {
+		// Client 3 leaves the game
+		golfHub.GameMessage(hub.GameMessageData{
+			Message: []byte(`{"type":"leaveGame"}`),
+			Sender:  hubClient3,
+		})
+		time.Sleep(100 * time.Millisecond)
+
+		// Client 3's context should have no game
+		golfHub.(*GolfHub).mu.RLock()
+		ctx3 := golfHub.(*GolfHub).clientContexts[hubClient3]
+		golfHub.(*GolfHub).mu.RUnlock()
+
+		if ctx3 == nil {
+			t.Fatal("Expected client3 context to still exist")
+		}
+		if ctx3.GameID != "" {
+			t.Errorf("Expected empty GameID after leaving, got %s", ctx3.GameID)
+		}
+		if ctx3.RoomID != roomID {
+			t.Errorf("Expected RoomID %s, got %s", roomID, ctx3.RoomID)
+		}
+	})
+
+	t.Run("game still active with 2 players", func(t *testing.T) {
+		golfHub.(*GolfHub).mu.RLock()
+		room := golfHub.(*GolfHub).rooms[roomID]
+		game := room.Games[gameID]
+		golfHub.(*GolfHub).mu.RUnlock()
+
+		if game == nil {
+			t.Fatal("Expected game to still exist")
+		}
+		if game.state.GamePhase == "ended" {
+			t.Error("Game should not have ended — still 2 players")
+		}
+	})
+
+	t.Run("leave game ends game when fewer than 2 players remain", func(t *testing.T) {
+		client1.clearMessages()
+		client2.clearMessages()
+
+		// Client 2 leaves — only 1 player left, game should end
+		golfHub.GameMessage(hub.GameMessageData{
+			Message: []byte(`{"type":"leaveGame"}`),
+			Sender:  hubClient2,
+		})
+		time.Sleep(100 * time.Millisecond)
+
+		// Check that client 1 received a gameEnded message
+		msgs := client1.getMessages()
+		foundGameEnded := false
+		for _, m := range msgs {
+			var parsed map[string]interface{}
+			if json.Unmarshal(m, &parsed) == nil && parsed["type"] == "gameEnded" {
+				foundGameEnded = true
+				break
+			}
+		}
+		if !foundGameEnded {
+			t.Error("Expected client1 to receive gameEnded message")
+		}
+	})
+
+	t.Run("leave game when not in a game returns error", func(t *testing.T) {
+		client3.clearMessages()
+		golfHub.GameMessage(hub.GameMessageData{
+			Message: []byte(`{"type":"leaveGame"}`),
+			Sender:  hubClient3,
+		})
+		time.Sleep(10 * time.Millisecond)
+
+		msgs := client3.getMessages()
+		foundError := false
+		for _, m := range msgs {
+			var parsed map[string]interface{}
+			if json.Unmarshal(m, &parsed) == nil && parsed["type"] == "error" {
+				foundError = true
+				break
+			}
+		}
+		if !foundError {
+			t.Error("Expected error when leaving game while not in one")
+		}
+	})
+}
