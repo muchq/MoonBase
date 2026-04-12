@@ -287,79 +287,108 @@ func (h *GolfHub) handleGameMessage(msgData hub.GameMessageData) {
 // With a valid token: reconnects to existing session.
 // Without a token (or invalid): creates a new session.
 func (h *GolfHub) handleAuthenticate(client *hub.Client, sessionToken string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	// If client is already authenticated, it's a no-op
-	if _, alreadyAuth := h.clientContexts[client]; alreadyAuth {
-		slog.Info("Client already authenticated, ignoring duplicate authenticate")
-		return
+	// Phase 1: state mutation under lock, collect messages to send
+	type pendingMessages struct {
+		auth      *AuthenticatedMessage
+		reconnect *reconnectResult
+		playerID  string
 	}
+	var pending pendingMessages
 
-	// Try to validate existing token for reconnection
-	if sessionToken != "" {
-		playerID, err := h.tokenManager.ValidateToken(sessionToken)
-		if err == nil {
-			// Valid token - try to reconnect
-			if h.reconnectPlayer(client, playerID) {
-				// Reconnection successful - reuse existing token
-				h.sendJSON(client, &AuthenticatedMessage{
+	func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+
+		// If client is already authenticated, it's a no-op
+		if _, alreadyAuth := h.clientContexts[client]; alreadyAuth {
+			slog.Info("Client already authenticated, ignoring duplicate authenticate")
+			return
+		}
+
+		// Try to validate existing token for reconnection
+		if sessionToken != "" {
+			playerID, err := h.tokenManager.ValidateToken(sessionToken)
+			if err == nil {
+				// Valid token - try to reconnect
+				result := h.reconnectPlayer(client, playerID)
+				if result.ok {
+					pending.auth = &AuthenticatedMessage{
+						Type:         "authenticated",
+						SessionToken: sessionToken,
+						PlayerID:     playerID,
+						Reconnected:  true,
+					}
+					pending.reconnect = &result
+					pending.playerID = playerID
+					slog.Info("Player reconnected",
+						"playerID", playerID,
+						"clientAddr", getClientAddr(client))
+					return
+				}
+				// Token valid but no session to reconnect to - fall through to new session
+				// but reuse the same playerID to maintain identity
+				h.createNewSession(client, playerID)
+				token, err := h.tokenManager.CreateToken(playerID, defaultTokenTTL)
+				if err != nil {
+					slog.Error("Failed to create token", "error", err)
+					h.sendError(client, "Authentication failed")
+					return
+				}
+				pending.auth = &AuthenticatedMessage{
 					Type:         "authenticated",
-					SessionToken: sessionToken,
+					SessionToken: token,
 					PlayerID:     playerID,
-					Reconnected:  true,
-				})
-				slog.Info("Player reconnected",
+					Reconnected:  false,
+				}
+				pending.playerID = playerID
+				slog.Info("Player re-authenticated with existing identity (no active session)",
 					"playerID", playerID,
 					"clientAddr", getClientAddr(client))
 				return
 			}
-			// Token valid but no session to reconnect to - fall through to new session
-			// but reuse the same playerID to maintain identity
-			h.createNewSession(client, playerID)
-			token, err := h.tokenManager.CreateToken(playerID, defaultTokenTTL)
-			if err != nil {
-				slog.Error("Failed to create token", "error", err)
-				h.sendError(client, "Authentication failed")
-				return
-			}
-			h.sendJSON(client, &AuthenticatedMessage{
-				Type:         "authenticated",
-				SessionToken: token,
-				PlayerID:     playerID,
-				Reconnected:  false,
-			})
-			slog.Info("Player re-authenticated with existing identity (no active session)",
-				"playerID", playerID,
+			slog.Info("Token validation failed, creating new session",
+				"error", err,
 				"clientAddr", getClientAddr(client))
+		}
+
+		// No token or invalid token - create new session
+		playerID := h.idGenerator.GenerateID()
+		h.createNewSession(client, playerID)
+
+		token, err := h.tokenManager.CreateToken(playerID, defaultTokenTTL)
+		if err != nil {
+			slog.Error("Failed to create token", "error", err)
+			h.sendError(client, "Authentication failed")
 			return
 		}
-		slog.Info("Token validation failed, creating new session",
-			"error", err,
+		pending.auth = &AuthenticatedMessage{
+			Type:         "authenticated",
+			SessionToken: token,
+			PlayerID:     playerID,
+			Reconnected:  false,
+		}
+		pending.playerID = playerID
+		slog.Info("New player authenticated",
+			"playerID", playerID,
 			"clientAddr", getClientAddr(client))
-	}
+	}()
 
-	// No token or invalid token - create new session
-	playerID := h.idGenerator.GenerateID()
-	h.createNewSession(client, playerID)
-
-	token, err := h.tokenManager.CreateToken(playerID, defaultTokenTTL)
-	if err != nil {
-		slog.Error("Failed to create token", "error", err)
-		h.sendError(client, "Authentication failed")
+	// Phase 2: send messages without holding the lock.
+	// Order matters: authenticated first, then room/game restore.
+	if pending.auth == nil {
 		return
 	}
+	h.sendJSON(client, pending.auth)
 
-	h.sendJSON(client, &AuthenticatedMessage{
-		Type:         "authenticated",
-		SessionToken: token,
-		PlayerID:     playerID,
-		Reconnected:  false,
-	})
-
-	slog.Info("New player authenticated",
-		"playerID", playerID,
-		"clientAddr", getClientAddr(client))
+	if pending.reconnect != nil {
+		if pending.reconnect.room != nil {
+			h.sendRoomJoined(client, pending.playerID, pending.reconnect.room)
+			if pending.reconnect.gameState != nil {
+				h.sendGameJoined(client, pending.playerID, pending.reconnect.gameState)
+			}
+			h.broadcastRoomState(pending.reconnect.room)
+		}
+	}
 }
 
 // createNewSession sets up a fresh session for a client.
@@ -374,12 +403,21 @@ func (h *GolfHub) createNewSession(client *hub.Client, playerID string) {
 	h.playerToClient[playerID] = client
 }
 
+// reconnectResult holds the data needed to send restore messages after
+// the hub lock is released.
+type reconnectResult struct {
+	ok        bool
+	room      *Room
+	gameState *GameState
+}
+
 // reconnectPlayer restores a disconnected player's session to a new client.
-// Must be called with h.mu held. Returns true if reconnection succeeded.
-func (h *GolfHub) reconnectPlayer(client *hub.Client, playerID string) bool {
+// Must be called with h.mu held. Returns the data needed to send restore
+// messages; the caller is responsible for sending them after releasing the lock.
+func (h *GolfHub) reconnectPlayer(client *hub.Client, playerID string) reconnectResult {
 	session, exists := h.disconnectedSessions[playerID]
 	if !exists {
-		return false
+		return reconnectResult{}
 	}
 
 	newClientID := getClientID(client)
@@ -404,6 +442,8 @@ func (h *GolfHub) reconnectPlayer(client *hub.Client, playerID string) bool {
 	}
 	h.playerToClient[playerID] = client
 
+	result := reconnectResult{ok: true}
+
 	// Update room player's ClientID and mark as connected
 	if session.RoomID != "" {
 		if room, roomExists := h.rooms[session.RoomID]; roomExists {
@@ -415,6 +455,8 @@ func (h *GolfHub) reconnectPlayer(client *hub.Client, playerID string) bool {
 				}
 			}
 
+			result.room = room
+
 			// Update game player's ClientID
 			if session.GameID != "" {
 				if game, gameExists := room.Games[session.GameID]; gameExists {
@@ -425,40 +467,14 @@ func (h *GolfHub) reconnectPlayer(client *hub.Client, playerID string) bool {
 							"gameID", session.GameID)
 						// Clear game from context since we couldn't restore it
 						h.clientContexts[client].GameID = ""
+					} else {
+						result.gameState = game.GetStateForPlayer(newClientID)
 					}
 				} else {
 					// Game no longer exists
 					h.clientContexts[client].GameID = ""
 				}
 			}
-
-			// Send room state to reconnected client (outside lock, so schedule it)
-			go func() {
-				// Small delay to ensure the authenticated message is sent first
-				time.Sleep(10 * time.Millisecond)
-				h.sendRoomJoined(client, playerID, room)
-
-				// If in a game, also send game state
-				h.mu.RLock()
-				ctx := h.clientContexts[client]
-				h.mu.RUnlock()
-				if ctx != nil && ctx.GameID != "" {
-					h.mu.RLock()
-					if room, ok := h.rooms[ctx.RoomID]; ok {
-						if game, ok := room.Games[ctx.GameID]; ok {
-							gameState := game.GetStateForPlayer(newClientID)
-							h.mu.RUnlock()
-							h.sendGameJoined(client, playerID, gameState)
-						} else {
-							h.mu.RUnlock()
-						}
-					} else {
-						h.mu.RUnlock()
-					}
-				}
-
-				h.broadcastRoomState(room)
-			}()
 		} else {
 			// Room no longer exists
 			h.clientContexts[client].RoomID = ""
@@ -466,7 +482,7 @@ func (h *GolfHub) reconnectPlayer(client *hub.Client, playerID string) bool {
 		}
 	}
 
-	return true
+	return result
 }
 
 // handleCleanupSession removes an expired disconnected session.
