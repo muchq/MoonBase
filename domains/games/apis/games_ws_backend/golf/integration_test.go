@@ -57,6 +57,20 @@ func (tc *TestClient) ClearMessages() {
 	tc.messages = nil
 }
 
+func (tc *TestClient) RemoveMessagesByType(msgType string) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	filtered := make([][]byte, 0, len(tc.messages))
+	for _, msg := range tc.messages {
+		var parsed map[string]interface{}
+		if json.Unmarshal(msg, &parsed) == nil && parsed["type"] == msgType {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	tc.messages = filtered
+}
+
 func (tc *TestClient) Close() {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
@@ -157,8 +171,11 @@ func (env *TestEnvironment) createClientWithToken(id string, token string) *Test
 		Sender:  hubClient,
 	})
 
-	// Wait for authenticated response
+	// Wait for authenticated response (and any reconnect restore messages
+	// that now arrive synchronously with it)
 	testClient.WaitForMessages(1, 200*time.Millisecond)
+	// Brief pause to let any additional synchronous messages arrive
+	time.Sleep(20 * time.Millisecond)
 
 	// Extract and store session token
 	if authResp, found := testClient.FindMessageByType("authenticated"); found {
@@ -172,8 +189,9 @@ func (env *TestEnvironment) createClientWithToken(id string, token string) *Test
 		}
 	}
 
-	// Clear the authenticated message so tests start clean
-	testClient.ClearMessages()
+	// Remove only the authenticated message, preserving any reconnect
+	// restore messages (roomJoined, gameJoined) for the test to inspect.
+	testClient.RemoveMessagesByType("authenticated")
 
 	return testClient
 }
