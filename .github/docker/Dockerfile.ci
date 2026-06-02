@@ -1,4 +1,4 @@
-FROM ubuntu:latest
+FROM ubuntu:24.04
 
 # Set up UTF-8 locale to handle files with special characters
 ENV LANG=C.UTF-8
