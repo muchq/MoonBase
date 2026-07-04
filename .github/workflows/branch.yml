@@ -173,8 +173,11 @@ jobs:
             --ios_minimum_os=17.0 \
             --apple_platform_type=ios
 
+      # swift.enable_testing is needed for @testable imports because the repo
+      # builds -c opt, where rules_swift disables testability by default.
       - name: Run iOS unit tests with bazel
         if: steps.filter.outputs.changed == 'true'
         run: |
           bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
-            --ios_minimum_os=17.0
+            --ios_minimum_os=17.0 \
+            --features=swift.enable_testing
