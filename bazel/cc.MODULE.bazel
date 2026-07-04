@@ -10,6 +10,7 @@ single_version_override(
     patch_strip = 1,
     patches = ["//bazel/patches:grpc_bazel9_native_rules.patch"],
 )
+
 bazel_dep(name = "abseil-cpp", version = "20250814.2", repo_name = "com_google_absl")
 bazel_dep(name = "check", version = "0.15.2.bcr.1")
 bazel_dep(name = "googletest", version = "1.17.0.bcr.2")
