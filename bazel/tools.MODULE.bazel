@@ -12,12 +12,12 @@ use_repo(llvm, "llvm_toolchain")
 
 register_toolchains("@llvm_toolchain//:all")
 
-bazel_dep(name = "bazel_features", version = "1.47.1")
+bazel_dep(name = "bazel_features", version = "1.50.0")
 
 bazel_dep(name = "buildifier_prebuilt", version = "8.5.1.2", dev_dependency = True)
 
 bazel_dep(name = "rules_shell", version = "0.8.0")
-bazel_dep(name = "aspect_rules_lint", version = "2.6.0")
+bazel_dep(name = "aspect_rules_lint", version = "2.7.2")
 
 http_jar = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_jar")
 

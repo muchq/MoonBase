@@ -41,7 +41,7 @@ jobs:
       version: ${{ steps.version_check.outputs.current_version }}
       should_release: ${{ steps.version_check.outputs.changed }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.workflow_run_sha }}
           fetch-depth: 2
@@ -128,7 +128,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
 
@@ -143,7 +143,7 @@ jobs:
           fi
           echo "Version verification passed: $VERSION"
 
-      - uses: bazel-contrib/setup-bazel@0.18.0
+      - uses: bazel-contrib/setup-bazel@0.19.0
         with:
           bazelisk-cache: true
           disk-cache: release-${{ inputs.tool_name }}-${{ matrix.target }}
@@ -180,7 +180,7 @@ jobs:
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/download-artifact@v8
         with:
