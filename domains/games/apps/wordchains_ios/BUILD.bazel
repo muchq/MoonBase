@@ -15,7 +15,7 @@ swift_library(
         ":word_graph_json",
     ],
     module_name = "WordChains",
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = ["@platforms//os:ios"],
 )
 
 ios_application(
@@ -30,7 +30,7 @@ ios_application(
     resources = [
         ":word_graph_json",
     ] + glob(["Sources/Resources/**"]),
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = ["@platforms//os:ios"],
     visibility = ["//visibility:public"],
     deps = [":WordChainsLib"],
 )
@@ -39,13 +39,13 @@ swift_library(
     name = "WordChainsTestLib",
     testonly = True,
     srcs = glob(["Tests/**/*.swift"]),
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = ["@platforms//os:ios"],
     deps = [":WordChainsLib"],
 )
 
 ios_unit_test(
     name = "WordChainsTests",
     minimum_os_version = "17.0",
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = ["@platforms//os:ios"],
     deps = [":WordChainsTestLib"],
 )
