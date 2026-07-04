@@ -1,6 +1,8 @@
+diff --git a/bazel/grpc_build_system.bzl b/bazel/grpc_build_system.bzl
+index 1563b4d..e3ce5e6 100644
 --- a/bazel/grpc_build_system.bzl
 +++ b/bazel/grpc_build_system.bzl
-@@ -36,6 +36,7 @@
+@@ -36,6 +36,7 @@ load("@com_google_protobuf//bazel:upb_proto_reflection_library.bzl", "upb_proto_
  load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
  load("@rules_cc//cc:cc_library.bzl", "cc_library")
  load("@rules_cc//cc:cc_test.bzl", "cc_test")
@@ -8,7 +10,7 @@
  load("@rules_proto//proto:defs.bzl", "proto_library")
  load("@rules_python//python:defs.bzl", "py_binary")
  load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
-@@ -303,7 +304,7 @@
+@@ -303,7 +304,7 @@ def ios_cc_test(
          device_type = "iPhone X",
      )
      if not any([t for t in tags if t.startswith("no_test_ios")]):
@@ -17,7 +19,7 @@
              name = test_lib_ios,
              srcs = kwargs.get("srcs"),
              deps = kwargs.get("deps"),
-@@ -873,7 +874,7 @@
+@@ -873,7 +874,7 @@ def grpc_objc_library(
          visibility: visibility, default to public
      """
  
@@ -26,6 +28,8 @@
          name = name,
          hdrs = hdrs,
          srcs = srcs,
+diff --git a/third_party/address_sorting/address_sorting.bzl b/third_party/address_sorting/address_sorting.bzl
+index 05b4c6d..c774a80 100644
 --- a/third_party/address_sorting/address_sorting.bzl
 +++ b/third_party/address_sorting/address_sorting.bzl
 @@ -28,8 +28,10 @@
@@ -40,6 +44,8 @@
          name = name,
          srcs = srcs,
          hdrs = hdrs,
+diff --git a/third_party/xxhash/BUILD b/third_party/xxhash/BUILD
+index 91d7bd0..8c32e0b 100644
 --- a/third_party/xxhash/BUILD
 +++ b/third_party/xxhash/BUILD
 @@ -1,3 +1,5 @@
