@@ -6,9 +6,13 @@ The iOS release pipeline mirrors the wordchains CLI release process:
 
 1. **Version detection** — CI watches `Info.plist` for `CFBundleShortVersionString` changes
 2. **Tagging** — auto-creates `wordchains-ios-v<VERSION>` git tags
-3. **Build** — Bazel builds the iOS app on macOS runners (`rules_apple` + `rules_swift`)
-4. **Release** — creates a GitHub Release with the IPA artifact
-5. **App Store upload** — pushes the IPA to App Store Connect via `xcrun altool`
+3. **Build** — Bazel builds the iOS app on macOS runners (`rules_apple` + `rules_swift`).
+   With the code-signing secrets configured, this is a signed **device (arm64)** build;
+   without them it falls back to an unsigned simulator build (not App Store uploadable)
+4. **Release** — creates a GitHub Release with the Bazel-produced IPA artifact
+5. **App Store upload** — pushes the IPA to App Store Connect (TestFlight) via
+   `fastlane pilot` using the App Store Connect API key (skipped with a warning
+   until the secrets are configured)
 
 ## Testing Before Publication
 
@@ -46,18 +50,24 @@ In Xcode:
 
 ### Build with Bazel
 
-The canonical build uses Bazel. `rules_apple` does not yet support Bazel 9,
-so iOS builds must use Bazel 8 LTS via bazelisk:
+The canonical build uses Bazel (the repo's pinned version, currently 9.x —
+`rules_apple` 4.5+ supports Bazel 9). These are the same commands the
+`test-ios` CI job runs:
 
 ```sh
 # Build the iOS app (simulator):
-USE_BAZEL_VERSION=8.2.1 bazel build //domains/games/apps/wordchains_ios:WordChains \
+bazel build //domains/games/apps/wordchains_ios:WordChains \
   --ios_minimum_os=17.0 \
   --apple_platform_type=ios
 
 # Run the Bazel-based unit tests:
-USE_BAZEL_VERSION=8.2.1 bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
-  --ios_minimum_os=17.0
+# (swift.enable_testing is needed for @testable imports because the repo
+# defaults to -c opt; the explicit simulator device avoids the runner
+# pairing an ancient device type with the newest iOS runtime.)
+bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
+  --ios_minimum_os=17.0 \
+  --features=swift.enable_testing \
+  --ios_simulator_device="iPhone 16"
 ```
 
 > **Simulator runtime:** The build requires an iOS simulator runtime matching
@@ -81,20 +91,28 @@ Before submitting to the App Store, verify these scenarios:
 ## Build
 
 ```sh
-# Build (requires Bazel 8 LTS):
-USE_BAZEL_VERSION=8.2.1 bazel build //domains/games/apps/wordchains_ios:WordChains \
+# Simulator build (what CI's test-ios job does):
+bazel build //domains/games/apps/wordchains_ios:WordChains \
   --ios_minimum_os=17.0 \
   --apple_platform_type=ios
+
+# Signed device build for the App Store (what the release workflow does;
+# requires the distribution cert in a keychain and the provisioning profile
+# at domains/games/apps/wordchains_ios/WordChains.mobileprovision):
+bazel build //domains/games/apps/wordchains_ios:WordChains \
+  --ios_minimum_os=17.0 \
+  --ios_multi_cpus=arm64 \
+  --define=ios_release_signing=true
 ```
 
 ## Known Issues
 
-- **Bazel 9 incompatibility:** `rules_apple` (latest: 4.3.3) does not support
-  Bazel 9 yet. All targets in `BUILD.bazel` are tagged `manual` so they are
-  excluded from `bazel build //...` and `bazel test //...`. Build them
-  explicitly with `USE_BAZEL_VERSION=8.2.1`. Tracking issues:
-  - [bazelbuild/rules_apple#2863 — Support Bazel 9+](https://github.com/bazelbuild/rules_apple/issues/2863)
-  - [bazelbuild/rules_apple#2857 — multi_arch_platform removed in Bazel 9](https://github.com/bazelbuild/rules_apple/issues/2857)
+- **`manual` tags on the Apple bundling targets:** `ios_application` and
+  `ios_unit_test` transition to an iOS target platform before
+  `target_compatible_with` is evaluated, so constraints alone can't keep
+  Linux CI off them (Linux analysis fails resolving an Apple C++ toolchain
+  instead of skipping). They are tagged `manual` and built by explicit label
+  in the `test-ios` CI job and the release workflow.
 
 ## Setup TODOs
 
@@ -147,7 +165,17 @@ This is required for automated uploads from GitHub Actions.
 | `IOS_DISTRIBUTION_CERT_PASSWORD` | Password for the .p12 file |
 | `IOS_PROVISIONING_PROFILE` | Base64-encoded .mobileprovision file |
 
-- [ ] Update the BUILD.bazel `ios_application` rule with the provisioning profile once created
+The CI wiring already exists: when the secrets are present, the release
+workflow imports the certificate into a throwaway keychain, decodes the
+profile to `domains/games/apps/wordchains_ios/WordChains.mobileprovision`
+(gitignored), and builds a signed device IPA with
+`--ios_multi_cpus=arm64 --define=ios_release_signing=true`. Until then it
+falls back to an unsigned simulator build and skips the App Store upload.
+
+> **First-release check:** entitlements are derived from the provisioning
+> profile by `rules_apple`. If the first signed build fails codesigning or
+> upload validation, an explicit `entitlements` attribute on the
+> `ios_application` may be needed.
 
 ### 5. App Icon
 
@@ -172,9 +200,11 @@ To release a new version:
 
 1. Bump `CFBundleShortVersionString` in `Info.plist`
 2. Merge to `main`
-3. CI auto-tags and builds
-4. IPA uploads to App Store Connect (once secrets are configured)
-5. Submit for review in App Store Connect
+3. CI auto-tags and builds a signed device IPA
+4. IPA uploads to App Store Connect / TestFlight via `fastlane pilot`
+   (once secrets are configured)
+5. Submit for review in App Store Connect (still manual; automatable later
+   with `fastlane deliver` or the App Store Connect API)
 
 ## Manual Release (Tag Push)
 

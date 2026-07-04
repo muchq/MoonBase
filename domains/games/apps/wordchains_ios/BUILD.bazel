@@ -18,6 +18,23 @@ swift_library(
     target_compatible_with = ["@platforms//os:ios"],
 )
 
+# App Store signing: build with --define=ios_release_signing=true and place
+# the distribution provisioning profile at WordChains.mobileprovision in this
+# package (CI decodes it from the IOS_PROVISIONING_PROFILE secret; the file is
+# gitignored). Default builds (simulator CI tests) stay unsigned.
+config_setting(
+    name = "release_signing",
+    define_values = {"ios_release_signing": "true"},
+)
+
+filegroup(
+    name = "provisioning_profile",
+    srcs = glob(
+        ["*.mobileprovision"],
+        allow_empty = True,
+    ),
+)
+
 # The Apple bundling rules transition to an iOS target platform before
 # target_compatible_with is evaluated, so os:ios can't keep Linux CI off
 # them — Linux analysis fails resolving an Apple C++ toolchain instead of
@@ -32,6 +49,10 @@ ios_application(
     ],
     infoplists = [":Info.plist"],
     minimum_os_version = "17.0",
+    provisioning_profile = select({
+        ":release_signing": ":provisioning_profile",
+        "//conditions:default": None,
+    }),
     resources = [
         ":word_graph_json",
     ] + glob(["Sources/Resources/**"]),
