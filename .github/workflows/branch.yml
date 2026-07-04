@@ -158,3 +158,23 @@ jobs:
         if: steps.filter.outputs.changed == 'true'
         working-directory: domains/games/apps/wordchains_ios
         run: swift test
+
+      - uses: bazel-contrib/setup-bazel@0.18.0
+        if: steps.filter.outputs.changed == 'true'
+        with:
+          bazelisk-cache: true
+          disk-cache: test-ios
+          repository-cache: true
+
+      - name: Build iOS app with bazel
+        if: steps.filter.outputs.changed == 'true'
+        run: |
+          bazel build //domains/games/apps/wordchains_ios:WordChains \
+            --ios_minimum_os=17.0 \
+            --apple_platform_type=ios
+
+      - name: Run iOS unit tests with bazel
+        if: steps.filter.outputs.changed == 'true'
+        run: |
+          bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
+            --ios_minimum_os=17.0

@@ -143,11 +143,7 @@ jobs:
           disk-cache: release-wordchains-ios
           repository-cache: true
 
-      # rules_apple doesn't support Bazel 9 yet; pin to Bazel 8 LTS for iOS builds.
-      # Track: https://github.com/bazelbuild/rules_apple/issues
       - name: Build iOS app
-        env:
-          USE_BAZEL_VERSION: 8.2.1
         run: |
           bazel build //domains/games/apps/wordchains_ios:WordChains \
             --ios_minimum_os=17.0 \
