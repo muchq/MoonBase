@@ -49,10 +49,13 @@ swift_library(
     deps = [":WordChainsLib"],
 )
 
+# Unlike ios_application, the test rule stays in the host configuration
+# (only its deps transition to iOS), so it must be compatible with the
+# macOS host that runs the simulator.
 ios_unit_test(
     name = "WordChainsTests",
     minimum_os_version = "17.0",
     tags = ["manual"],
-    target_compatible_with = ["@platforms//os:ios"],
+    target_compatible_with = ["@platforms//os:macos"],
     deps = [":WordChainsTestLib"],
 )
