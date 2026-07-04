@@ -15,13 +15,14 @@ swift_library(
         ":word_graph_json",
     ],
     module_name = "WordChains",
-    tags = ["manual"],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = ["@platforms//os:ios"],
 )
 
-# Tagged manual: rules_apple doesn't support Bazel 9 yet.
-# https://github.com/bazelbuild/rules_apple/issues/2863
-# Build with: USE_BAZEL_VERSION=8.2.1 bazel build //domains/games/apps/wordchains_ios:WordChains
+# The Apple bundling rules transition to an iOS target platform before
+# target_compatible_with is evaluated, so os:ios can't keep Linux CI off
+# them — Linux analysis fails resolving an Apple C++ toolchain instead of
+# skipping. Tag them manual; the test-ios job and the release workflow
+# request them by explicit label, which builds manual targets.
 ios_application(
     name = "WordChains",
     bundle_id = "com.muchq.wordchains",
@@ -35,7 +36,7 @@ ios_application(
         ":word_graph_json",
     ] + glob(["Sources/Resources/**"]),
     tags = ["manual"],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = ["@platforms//os:ios"],
     visibility = ["//visibility:public"],
     deps = [":WordChainsLib"],
 )
@@ -44,11 +45,13 @@ swift_library(
     name = "WordChainsTestLib",
     testonly = True,
     srcs = glob(["Tests/**/*.swift"]),
-    tags = ["manual"],
-    target_compatible_with = ["@platforms//os:macos"],
+    target_compatible_with = ["@platforms//os:ios"],
     deps = [":WordChainsLib"],
 )
 
+# Unlike ios_application, the test rule stays in the host configuration
+# (only its deps transition to iOS), so it must be compatible with the
+# macOS host that runs the simulator.
 ios_unit_test(
     name = "WordChainsTests",
     minimum_os_version = "17.0",
