@@ -1,5 +1,15 @@
 bazel_dep(name = "rules_cc", version = "0.2.17")
 bazel_dep(name = "grpc", version = "1.82.0-pre1", repo_name = "com_github_grpc_grpc")
+
+# grpc 1.82.0-pre1 ships in the BCR without patches, and a few of its build
+# files still reference native rules that Bazel 9 removed (cc_library in
+# third_party, objc_library in grpc_build_system.bzl). Drop this override once
+# a grpc release (or .bcr.N revision) with upstream Bazel 9 fixes is published.
+single_version_override(
+    module_name = "grpc",
+    patch_strip = 1,
+    patches = ["//bazel/patches:grpc_bazel9_native_rules.patch"],
+)
 bazel_dep(name = "abseil-cpp", version = "20250814.2", repo_name = "com_google_absl")
 bazel_dep(name = "check", version = "0.15.2.bcr.1")
 bazel_dep(name = "googletest", version = "1.17.0.bcr.2")

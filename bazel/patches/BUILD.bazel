@@ -1,0 +1,1 @@
+exports_files(["grpc_bazel9_native_rules.patch"])
