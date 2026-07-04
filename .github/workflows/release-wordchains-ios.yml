@@ -24,7 +24,7 @@ jobs:
       version: ${{ steps.version_check.outputs.current_version }}
       should_release: ${{ steps.version_check.outputs.changed }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 2
@@ -111,9 +111,9 @@ jobs:
   build:
     needs: [prepare]
     if: always() && needs.prepare.result == 'success'
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
 
@@ -137,7 +137,7 @@ jobs:
         working-directory: domains/games/apps/wordchains_ios
         run: swift test
 
-      - uses: bazel-contrib/setup-bazel@0.18.0
+      - uses: bazel-contrib/setup-bazel@0.19.0
         with:
           bazelisk-cache: true
           disk-cache: release-wordchains-ios
@@ -224,9 +224,9 @@ jobs:
   release:
     needs: [prepare, build]
     if: always() && needs.build.result == 'success'
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/download-artifact@v8
         with:

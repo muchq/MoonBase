@@ -1,4 +1,4 @@
-bazel_dep(name = "rules_cc", version = "0.2.17")
+bazel_dep(name = "rules_cc", version = "0.2.21")
 bazel_dep(name = "grpc", version = "1.82.0-pre1", repo_name = "com_github_grpc_grpc")
 
 # grpc 1.82.0-pre1 ships in the BCR without patches, and a few of its build
@@ -12,13 +12,13 @@ single_version_override(
 )
 
 bazel_dep(name = "abseil-cpp", version = "20250814.2", repo_name = "com_google_absl")
-bazel_dep(name = "check", version = "0.15.2.bcr.1")
+bazel_dep(name = "check", version = "0.15.2.bcr.2")
 bazel_dep(name = "googletest", version = "1.17.0.bcr.2")
 bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
 bazel_dep(name = "libpng", version = "1.6.54")
 bazel_dep(name = "nlohmann_json", version = "3.12.0.bcr.1")
-bazel_dep(name = "opentelemetry-cpp", version = "1.24.0.bcr.1")
-bazel_dep(name = "curl", version = "8.12.0")
+bazel_dep(name = "opentelemetry-cpp", version = "1.27.0")
+bazel_dep(name = "curl", version = "8.12.0.bcr.1")
 
 mongoose_ext = use_extension("//bazel/extensions:mongoose.bzl", "mongoose")
 use_repo(mongoose_ext, "mongoose_cc")
