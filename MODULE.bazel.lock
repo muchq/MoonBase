@@ -20,7 +20,6 @@
     "https://bcr.bazel.build/modules/abseil-cpp/20250512.1/MODULE.bazel": "d209fdb6f36ffaf61c509fcc81b19e81b411a999a934a032e10cd009a0226215",
     "https://bcr.bazel.build/modules/abseil-cpp/20250814.0/MODULE.bazel": "c43c16ca2c432566cdb78913964497259903ebe8fb7d9b57b38e9f1425b427b8",
     "https://bcr.bazel.build/modules/abseil-cpp/20250814.1/MODULE.bazel": "51f2312901470cdab0dbdf3b88c40cd21c62a7ed58a3de45b365ddc5b11bcab2",
-    "https://bcr.bazel.build/modules/abseil-cpp/20250814.2/MODULE.bazel": "17b900597f44dfec6fe502fc3b123a57d86ad7aafe815f9ef4f99d85452a3104",
     "https://bcr.bazel.build/modules/abseil-cpp/20260107.1/MODULE.bazel": "e33b3801443f5fd64465262084534115db76363df13d2168a42bbfacc747be81",
     "https://bcr.bazel.build/modules/abseil-cpp/20260107.1/source.json": "7a9a88969b1e79268cf613728ca8ff8fa4bc4b1a9abee9ec1fb5f113ca751971",
     "https://bcr.bazel.build/modules/abseil-py/2.1.0/MODULE.bazel": "5ebe5bf853769c65707e5c28f216798f7a4b1042015e6a36e6d03094d94bec8a",
@@ -224,8 +223,8 @@
     "https://bcr.bazel.build/modules/grpc/1.74.1/MODULE.bazel": "09523be10ba2bfd999683671d0f8f22fb5b20ec77ad89b05ef58ff19a1b65c82",
     "https://bcr.bazel.build/modules/grpc/1.76.0.bcr.1/MODULE.bazel": "09b252536112acccdc7547cdfe16526a46408f570263f71491c813315f2efc45",
     "https://bcr.bazel.build/modules/grpc/1.80.0/MODULE.bazel": "35ef253a0a31055c8a2495640516224647545b51673b0ccb956b116ee92ef554",
-    "https://bcr.bazel.build/modules/grpc/1.82.0-pre1/MODULE.bazel": "cc7ac0603f7615d189e87a288f4b77a42b55e1e01ed98d06c7594335eab4ac9f",
-    "https://bcr.bazel.build/modules/grpc/1.82.0-pre1/source.json": "0afcf09f4c869dff3d18311e5ea9faeb04578397a76e0ff6b9bc58abdc8dde91",
+    "https://bcr.bazel.build/modules/grpc/1.82.0/MODULE.bazel": "42ef206e15c69b2fc3f3c6d14f285962f6a30faaed68436eb82132083a881d6d",
+    "https://bcr.bazel.build/modules/grpc/1.82.0/source.json": "459a30fc244c7a06bb34ce3ee7ea7f4a4cf682801523fcf1a4b88097eda7fe48",
     "https://bcr.bazel.build/modules/helly25_bzl/0.3.1/MODULE.bazel": "3a4be20f6fc13be32ad44643b8252ef5af09eee936f1d943cd4fd7867fa92826",
     "https://bcr.bazel.build/modules/helly25_bzl/0.3.1/source.json": "b129ab1828492de2c163785bbeb4065c166de52d932524b4317beb5b7f917994",
     "https://bcr.bazel.build/modules/jq.bzl/0.1.0/MODULE.bazel": "2ce69b1af49952cd4121a9c3055faa679e748ce774c7f1fda9657f936cae902f",
@@ -855,9 +854,26 @@
         "generatedRepoSpecs": {}
       }
     },
+    "@@grpc+//bazel:extensions.bzl%exec_properties": {
+      "general": {
+        "bzlTransitiveDigest": "tdXJDtOnvTse7uoYV1eSKHW4jguoFr52HSAV6fIOAeI=",
+        "usagesDigest": "LTob+vzpUdbuZax6T6djPjF/swcwTbW0Hdsm0gXoYG8=",
+        "recordedInputs": [
+          "REPO_MAPPING:grpc+,bazel_toolchains grpc++http_archive+bazel_toolchains"
+        ],
+        "generatedRepoSpecs": {
+          "grpc_custom_exec_properties": {
+            "repoRuleId": "@@grpc++http_archive+bazel_toolchains//rules/exec_properties:exec_properties.bzl%_exec_property_sets_repository",
+            "attributes": {
+              "constants_bzl_content": "LARGE_MACHINE = {\"label:os\": \"ubuntu\", \"label:machine_size\": \"large\"}\n"
+            }
+          }
+        }
+      }
+    },
     "@@rules_android+//bzlmod_extensions:apksig.bzl%apksig_extension": {
       "general": {
-        "bzlTransitiveDigest": "QzE5n3a0ZNwDIAfX/Q++VwbTWQIY01JPBzCwBrUscn0=",
+        "bzlTransitiveDigest": "eYxUKP6jh5Ixolg9KdkZ/OBudos9hU2RBV+5XdqppZ4=",
         "usagesDigest": "zr/niBQ/s2fHozWAsg4vI70wAxcuFjG+QtM15qGkq9o=",
         "recordedInputs": [
           "REPO_MAPPING:rules_android+,bazel_tools bazel_tools"
@@ -875,7 +891,7 @@
     },
     "@@rules_android+//bzlmod_extensions:com_android_dex.bzl%com_android_dex_extension": {
       "general": {
-        "bzlTransitiveDigest": "W9wAo4mHGeY9AuYu7VXzxhBl3ZO/Q7hdw7wafzxshwg=",
+        "bzlTransitiveDigest": "gy5TiFZm16I25Ieuw8gSwq8vLHlpWECIMp0gWY9YynI=",
         "usagesDigest": "c1Y/KGGjUYCyd8zNIVTUh1bynVXRFz6xGKaSCBpQANM=",
         "recordedInputs": [
           "REPO_MAPPING:rules_android+,bazel_tools bazel_tools"
@@ -1490,7 +1506,7 @@
     },
     "@@rules_perl+//perl:extensions.bzl%perl_repositories": {
       "general": {
-        "bzlTransitiveDigest": "K8OybB84tBcly/FCawLeUWEaEGko6fQHirIx59UasjQ=",
+        "bzlTransitiveDigest": "kNKYG2Q4r+exUypJYjau+ehY90be7nvRR1ffN6loz7w=",
         "usagesDigest": "qSSNDdCNVxNhY36wMndEAFacdhR0ooLTmumfad0km9s=",
         "recordedInputs": [
           "REPO_MAPPING:rules_perl+,bazel_tools bazel_tools",
