@@ -9,13 +9,13 @@ single_version_override(
 
 maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 
-JETTY_VERSION = "11.0.23"
+JETTY_VERSION = "11.0.26"
 
-LOGBACK_VERSION = "1.5.6"
+LOGBACK_VERSION = "1.5.37"
 
-NULLAWAY_VERSION = "0.13.1"
+NULLAWAY_VERSION = "0.13.7"
 
-ERROR_PRONE_VERSION = "2.46.0"
+ERROR_PRONE_VERSION = "2.50.0"
 
 maven.install(
     artifacts = [
@@ -26,17 +26,17 @@ maven.install(
         "com.fasterxml.jackson.core:jackson-databind",
         "com.google.errorprone:error_prone_core:%s" % ERROR_PRONE_VERSION,
         "com.uber.nullaway:nullaway:%s" % NULLAWAY_VERSION,
-        "com.zaxxer:HikariCP:7.0.2",
+        "com.zaxxer:HikariCP:7.1.0",
         "dev.failsafe:failsafe:3.3.2",
-        "io.github.tors42:chariot:0.2.9",
+        "io.github.tors42:chariot:0.2.10",
         "com.h2database:h2:2.4.240",
-        "org.jdbi:jdbi3-core:3.51.0",
-        "org.postgresql:postgresql:42.7.10",
+        "org.jdbi:jdbi3-core:3.54.0",
+        "org.postgresql:postgresql:42.7.13",
         "com.fasterxml.jackson.datatype:jackson-datatype-guava",
         "com.fasterxml.jackson.datatype:jackson-datatype-jdk8",
         "com.fasterxml.jackson.datatype:jackson-datatype-jsr310",
         "com.fasterxml.jackson.module:jackson-module-scala_2.13",
-        "com.google.guava:guava:33.5.0-jre",
+        "com.google.guava:guava:33.6.0-jre",
         "io.micronaut:micronaut-inject",
         "io.micronaut:micronaut-inject-java",
         "io.micronaut.validation:micronaut-validation",
@@ -51,7 +51,7 @@ maven.install(
         "io.netty:netty-codec",
         "io.netty:netty-handler",
         "io.netty:netty-transport",
-        "io.sentry:sentry-logback:8.34.1",
+        "io.sentry:sentry-logback:8.47.0",
         "jakarta.annotation:jakarta.annotation-api:3.0.0",
         "org.junit.jupiter:junit-jupiter-api",
         "org.junit.jupiter:junit-jupiter-engine",
@@ -62,15 +62,15 @@ maven.install(
         "org.eclipse.jetty:jetty-server:%s" % JETTY_VERSION,
         "org.eclipse.jetty.websocket:websocket-jetty-server:%s" % JETTY_VERSION,
         "org.jspecify:jspecify:1.0.0",
-        "org.slf4j:slf4j-api:2.0.17",
+        "org.slf4j:slf4j-api:2.0.18",
     ],
     boms = [
-        "io.netty:netty-bom:4.2.9.Final",
-        "io.micronaut:micronaut-core-bom:4.10.12",
+        "io.netty:netty-bom:4.2.16.Final",
+        "io.micronaut:micronaut-core-bom:4.10.25",
         "io.micronaut.jaxrs:micronaut-jaxrs-bom:4.10.0",
         "io.micronaut.validation:micronaut-validation-bom:4.12.0",
-        "com.fasterxml.jackson:jackson-bom:2.21.0",
-        "org.junit:junit-bom:6.0.3",
+        "com.fasterxml.jackson:jackson-bom:2.22.0",
+        "org.junit:junit-bom:6.1.1",
     ],
     generate_compat_repositories = True,
     known_contributing_modules = [
