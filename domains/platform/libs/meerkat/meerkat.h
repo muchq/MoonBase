@@ -180,7 +180,11 @@ ResponseInterceptor metrics(std::shared_ptr<HttpMetricsManager> manager);
 
 template <typename REQ, typename RESP>
 std::function<HttpResponse(HttpRequest)> wrap(std::function<absl::StatusOr<RESP>(REQ&)> handler) {
-  return [&handler](const HttpRequest& req) -> HttpResponse {
+  // The returned lambda outlives this call, so it must own the handler: a
+  // reference capture of the by-value parameter dangles as soon as wrap
+  // returns (undefined behavior that Main.cc-style callers survived by stack
+  // luck and portrait_parity_test crashed on).
+  return [handler = std::move(handler)](const HttpRequest& req) -> HttpResponse {
     absl::StatusOr<REQ> status_or_request = requests::read_request<REQ>(req);
     if (!status_or_request.ok()) {
       return responses::bad_request(
