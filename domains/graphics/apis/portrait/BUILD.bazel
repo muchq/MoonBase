@@ -1,4 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
 cc_library(
@@ -53,6 +54,45 @@ cc_test(
         ":types",
         "@com_google_absl//absl/status",
         "@googletest//:gtest_main",
+    ],
+)
+
+# Phase 1 of the smithy-cpp rewrite (#1168): the API modeled in Smithy,
+# generated alongside the running meerkat service. The service switches to
+# these targets in Phase 2.
+smithy_cpp_server_library(
+    name = "portrait_smithy_server",
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/portrait.smithy",
+    ],
+    namespace = "moonbase::portrait",
+    service = "moonbase.portrait#Portrait",
+)
+
+smithy_cpp_client_library(
+    name = "portrait_smithy_client",
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/portrait.smithy",
+    ],
+    namespace = "moonbase::portrait",
+    service = "moonbase.portrait#Portrait",
+)
+
+cc_test(
+    name = "portrait_smithy_wire_test",
+    size = "small",
+    srcs = ["portrait_smithy_wire_test.cc"],
+    deps = [
+        ":portrait_smithy_client",
+        ":portrait_smithy_server",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+        "@smithy_cpp//runtime:client",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:server",
     ],
 )
 
