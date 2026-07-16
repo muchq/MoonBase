@@ -1,0 +1,56 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_test")
+load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
+load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
+
+# Phase 0 spike for the portrait-on-smithy-cpp evaluation:
+# https://github.com/muchq/MoonBase/issues/1168
+# The protocol is chosen by the model's protocol trait (the simpleRestJson
+# overlay in model/bindings/), not by a rule attribute.
+
+smithy_cpp_server_library(
+    name = "greeter_server",
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/greeter.smithy",
+    ],
+    namespace = "moonbase::greeter",
+    service = "moonbase.greeter#Greeter",
+)
+
+smithy_cpp_client_library(
+    name = "greeter_client",
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/greeter.smithy",
+    ],
+    namespace = "moonbase::greeter",
+    service = "moonbase.greeter#Greeter",
+)
+
+cc_binary(
+    name = "example_smithy_cpp",
+    srcs = ["main.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":greeter_server",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:http_beast",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
+cc_test(
+    name = "greeter_integration_test",
+    size = "small",
+    srcs = ["greeter_integration_test.cc"],
+    deps = [
+        ":greeter_client",
+        ":greeter_server",
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:client",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
+linux_amd64_oci_binary(bin_name = "example_smithy_cpp")
