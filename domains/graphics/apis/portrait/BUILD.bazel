@@ -122,6 +122,7 @@ cc_test(
         ":portrait_smithy_client",
         ":portrait_smithy_server",
         ":smithy_handler",
+        "//domains/graphics/libs/png_plusplus",
         "@googletest//:gtest_main",
         "@smithy_cpp//runtime:client",
         "@smithy_cpp//runtime:core",

@@ -473,6 +473,17 @@ class MemoryPngReader {
   size_t read_pos_;
 };
 
+// True when the buffer starts with the 8-byte PNG file signature.
+inline bool isPng(const unsigned char* data, size_t size) {
+  static constexpr unsigned char kPngSignature[] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+  return size >= sizeof(kPngSignature) &&
+         std::memcmp(data, kPngSignature, sizeof(kPngSignature)) == 0;
+}
+
+inline bool isPng(const std::vector<unsigned char>& buffer) {
+  return isPng(buffer.data(), buffer.size());
+}
+
 // Convenience functions for Image<RGB_Double> conversion
 inline std::vector<unsigned char> imageToPng(const image_core::Image<image_core::RGB_Double>& image,
                                              int compression_level = -1) {

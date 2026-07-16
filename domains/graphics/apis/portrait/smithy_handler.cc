@@ -42,10 +42,12 @@ LightType toLightType(const gen::LightType& lightType) {
 
 TraceRequest toLegacyRequest(const gen::TraceInput& input) {
   TraceRequest request;
-  request.scene.backgroundColor = input.scene.backgroundColor.has_value()
-                                      ? toColor(*input.scene.backgroundColor)
-                                      : Color{0, 0, 0};
+  // Absent backgroundColor keeps Scene's own {0, 0, 0} default member value.
+  if (input.scene.backgroundColor.has_value()) {
+    request.scene.backgroundColor = toColor(*input.scene.backgroundColor);
+  }
   request.scene.backgroundStarProbability = input.scene.backgroundStarProbability;
+  request.scene.spheres.reserve(input.scene.spheres.size());
   for (const auto& sphere : input.scene.spheres) {
     request.scene.spheres.push_back(Sphere{.center = toVec3(sphere.center),
                                            .radius = sphere.radius,
@@ -53,6 +55,7 @@ TraceRequest toLegacyRequest(const gen::TraceInput& input) {
                                            .specular = sphere.specular,
                                            .reflective = sphere.reflective});
   }
+  request.scene.lights.reserve(input.scene.lights.size());
   for (const auto& light : input.scene.lights) {
     request.scene.lights.push_back(Light{.lightType = toLightType(light.lightType),
                                          .intensity = light.intensity,

@@ -11,13 +11,13 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include "domains/graphics/libs/png_plusplus/png_plusplus.h"
 #include "moonbase/portrait/client.h"
 #include "moonbase/portrait/server.h"
 #include "smithy/client/config.h"
@@ -33,8 +33,6 @@ using moonbase::portrait::PortraitServer;
 using moonbase::portrait::Sphere;
 using moonbase::portrait::TraceInput;
 using portrait::SmithyTracerHandler;
-
-constexpr uint8_t kPngSignature[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
 
 // A minimal valid scene: deterministic (no background stars) and cheap to
 // render (the 20x20 minimum output size).
@@ -61,13 +59,7 @@ TraceInput ValidInput(double sphere_x = 0.0) {
   return input;
 }
 
-bool LooksLikePng(const smithy::Blob& blob) {
-  if (blob.size() < sizeof(kPngSignature)) return false;
-  for (size_t i = 0; i < sizeof(kPngSignature); ++i) {
-    if (blob.bytes()[i] != kPngSignature[i]) return false;
-  }
-  return true;
-}
+bool LooksLikePng(const smithy::Blob& blob) { return pngpp::isPng(blob.data(), blob.size()); }
 
 class SmithyHandlerTest : public ::testing::Test {
  protected:
