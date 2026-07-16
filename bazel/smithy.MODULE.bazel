@@ -6,6 +6,6 @@ bazel_dep(name = "smithy_cpp", version = "0.0.0")
 # Evaluation: https://github.com/muchq/MoonBase/issues/1168
 git_override(
     module_name = "smithy_cpp",
-    commit = "cfd82998f4992443bc79728a945fcdb4feeaf932",
+    commit = "79667d232a102cf53edb2be27a3cc182a15696c2",
     remote = "https://github.com/aaylward/smithy-cpp.git",
 )
