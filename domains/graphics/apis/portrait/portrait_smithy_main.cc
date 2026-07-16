@@ -1,7 +1,8 @@
 // The portrait server (https://github.com/muchq/MoonBase/issues/1168): the
 // generated Smithy Portrait API on the Beast transport with meerkat-parity
-// middleware. The pre-migration meerkat binary remains buildable as
-// :portrait_meerkat for one release as the rollback path.
+// middleware. Rollback is the pre-cutover image tag; the meerkat binary
+// stays buildable as :portrait_meerkat as the pre-cutover reference during
+// the soak.
 //
 //   bazel run //domains/graphics/apis/portrait
 //   curl localhost:8080/portrait/v1/trace -H 'content-type: application/json' -d @scene.json

@@ -131,9 +131,10 @@ cc_test(
 )
 
 # Phase 3-4 (#1168): meerkat-parity middleware and the cutover. :portrait
-# (and the ghcr.io/muchq/portrait image) now ship the smithy-cpp server;
-# :portrait_meerkat keeps the old binary buildable for one release as the
-# rollback path, then gets deleted along with the meerkat serving code.
+# (and the ghcr.io/muchq/portrait image) now ship the smithy-cpp server.
+# Rollback is the pre-cutover ghcr.io/muchq/portrait:<sha> image tag;
+# :portrait_meerkat only keeps the old Main.cc compiling as the pre-cutover
+# reference during the soak, then gets deleted with the meerkat serving code.
 # Package-private until a second smithy-cpp service needs meerkat parity;
 # hoist to a shared platform lib at that point.
 cc_library(

@@ -33,7 +33,7 @@ Alternatively, run services individually:
 PORT=8084 bazel run //rust/posterize
 
 # Terminal 2: run portrait
-PORT=8081 bazel run //cpp/portrait
+PORT=8081 bazel run //domains/graphics/apis/portrait
 
 # ... other services as desired
 

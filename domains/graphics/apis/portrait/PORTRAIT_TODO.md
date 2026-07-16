@@ -17,12 +17,16 @@ validation, multi-threaded serving, and the tracy::Tracer RNG race.
 
 - [ ] Delete the meerkat path: `:portrait_meerkat`, `Main.cc`, the nlohmann
       serde + hand validation in `types.{h,cc}` that the Smithy model
-      replaced (`tracer_service` keeps its own request types until then)
+      replaced (`tracer_service` keeps its own request types until then),
+      and `portrait_parity_test` — its differential purpose ends with the
+      meerkat stack
 - [ ] Have `TracerService` hand back raw PNG bytes and cache those — kills
       the base64 encode→decode→re-encode round-trip in `smithy_handler.cc`
       and the manual `imageToBase64` step
-- [ ] Consolidate the loopback test harness + valid-scene fixture shared by
-      the three portrait smithy test files
+- [ ] Consolidate the valid-scene fixtures and test harnesses now spread
+      across the four portrait test files, and extract the production
+      middleware chain from `portrait_smithy_main.cc` into a shared builder
+      so tests exercise the real wiring instead of simplified copies
 - [ ] Revisit `meerkat::HttpMetricsManager` as a portrait dep — rehome the
       instruments (e.g. under futility) once meerkat has no other consumers
 
