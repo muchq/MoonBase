@@ -1,0 +1,11 @@
+bazel_dep(name = "smithy_cpp", version = "0.0.0")
+
+# smithy_cpp is not published to the Bazel Central Registry yet, so the module
+# version above is a placeholder and the source comes from this pinned commit.
+# Bump the pin deliberately; there are no tagged releases to track.
+# Evaluation: https://github.com/muchq/MoonBase/issues/1168
+git_override(
+    module_name = "smithy_cpp",
+    commit = "708d78e6d1eed731ae43e1e19c4fbf5a7d50319b",
+    remote = "https://github.com/aaylward/smithy-cpp.git",
+)
