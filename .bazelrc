@@ -56,6 +56,13 @@ build --experimental_java_classpath=bazel
 # this is weird because :protobuf hdrs glob **/*.h which includes json_util.h
 # build --features=layering_check
 
+# parse_headers compiles each header standalone to validate self-containment.
+# boost.context 1.90 (in smithy-cpp's Beast transport dep closure) ships
+# headers that reference std::result_of, removed in C++20 and absent from
+# this toolchain's libc++, so the validation can never pass for third-party
+# boost. Same third-party-headers problem as layering_check above.
+common --features=-parse_headers
+
 common --test_verbose_timeout_warnings
 common --test_output=errors
 

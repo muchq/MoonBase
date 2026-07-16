@@ -1,0 +1,17 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+cc_library(
+    name = "env",
+    hdrs = ["env.h"],
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "env_test",
+    size = "small",
+    srcs = ["env_test.cc"],
+    deps = [
+        ":env",
+        "@googletest//:gtest_main",
+    ],
+)
