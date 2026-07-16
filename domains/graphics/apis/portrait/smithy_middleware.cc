@@ -23,32 +23,50 @@ std::string TraceIdFor(const smithy::http::HttpRequest& request) {
   return std::to_string(dis(gen));
 }
 
-}  // namespace
-
-smithy::server::Middleware MeerkatParityObservability(std::shared_ptr<HttpMetricsSink> metrics) {
-  return [metrics = std::move(metrics)](smithy::http::RequestHandler next) {
-    return [metrics, next = std::move(next)](
+// x-trace-id propagation and meerkat's access-log line. Kept separate from
+// Observe because the log needs raw header access (X-Forwarded-For, inbound
+// x-trace-id), which Observe deliberately doesn't expose; it measures its
+// own duration for the log line only.
+smithy::server::Middleware TraceIdAndAccessLog() {
+  return [](smithy::http::RequestHandler next) {
+    return [next = std::move(next)](
                const smithy::http::HttpRequest& request) -> smithy::http::HttpResponse {
       const auto start = std::chrono::steady_clock::now();
-      const std::string route = RouteOf(request.target);
-      metrics->RecordRequestStart(route, request.method);
       const std::string trace_id = TraceIdFor(request);
 
       smithy::http::HttpResponse response = next(request);
 
-      const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+      const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
           std::chrono::steady_clock::now() - start);
-      metrics->RecordRequestComplete(route, request.method, response.status, duration);
       if (!response.headers.Has("x-trace-id")) {
         response.headers.Set("x-trace-id", trace_id);
       }
       LOG(INFO) << "[" << request.method << " " << request.target
                 << "]: X-Forwarded-For=" << request.headers.Get("X-Forwarded-For").value_or("")
                 << " trace_id=" << trace_id << " status=" << response.status
-                << " res.body.bytes=" << response.body.size() << " duration_ms="
-                << std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
+                << " res.body.bytes=" << response.body.size()
+                << " duration_ms=" << duration_ms.count();
       return response;
     };
+  };
+}
+
+}  // namespace
+
+smithy::server::Middleware MeerkatParityObservability(std::shared_ptr<HttpMetricsSink> metrics) {
+  return [metrics = std::move(metrics)](smithy::http::RequestHandler next) {
+    // Metrics ride the runtime's Observe: microsecond durations (as of
+    // smithy-cpp cfd8299) and start/complete guaranteed to pair even when
+    // dispatch throws.
+    smithy::server::Middleware observe = smithy::server::Observe(
+        [metrics](const smithy::server::RequestObservation& observation) {
+          metrics->RecordRequestComplete(RouteOf(observation.target), observation.method,
+                                         observation.status, observation.duration);
+        },
+        [metrics](const smithy::server::RequestStart& start) {
+          metrics->RecordRequestStart(RouteOf(start.target), start.method);
+        });
+    return observe(TraceIdAndAccessLog()(std::move(next)));
   };
 }
 
