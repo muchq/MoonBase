@@ -1,13 +1,33 @@
 #include "domains/graphics/apis/portrait/smithy_middleware.h"
 
+#include <chrono>
 #include <climits>
 #include <random>
+#include <utility>
 
 #include "absl/log/log.h"
+#include "domains/platform/libs/meerkat/metrics_manager.h"
 #include "smithy/http/transport.h"
 
 namespace portrait {
 namespace {
+
+class MeerkatMetricsSink final : public HttpMetricsSink {
+ public:
+  explicit MeerkatMetricsSink(std::shared_ptr<meerkat::HttpMetricsManager> metrics)
+      : metrics_(std::move(metrics)) {}
+
+  void RecordRequestStart(const std::string& route, const std::string& method) override {
+    metrics_->RecordRequestStart(route, method);
+  }
+  void RecordRequestComplete(const std::string& route, const std::string& method, int status_code,
+                             std::chrono::microseconds duration) override {
+    metrics_->RecordRequestComplete(route, method, status_code, duration);
+  }
+
+ private:
+  std::shared_ptr<meerkat::HttpMetricsManager> metrics_;
+};
 
 std::string RouteOf(const std::string& target) { return target.substr(0, target.find('?')); }
 
@@ -52,6 +72,11 @@ smithy::server::Middleware TraceIdAndAccessLog() {
 }
 
 }  // namespace
+
+std::shared_ptr<HttpMetricsSink> MakeMeerkatMetricsSink(
+    std::shared_ptr<meerkat::HttpMetricsManager> metrics) {
+  return std::make_shared<MeerkatMetricsSink>(std::move(metrics));
+}
 
 smithy::server::Middleware MeerkatParityObservability(std::shared_ptr<HttpMetricsSink> metrics) {
   return [metrics = std::move(metrics)](smithy::http::RequestHandler next) {

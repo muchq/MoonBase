@@ -4,17 +4,19 @@
 #include <chrono>
 #include <memory>
 #include <string>
-#include <utility>
 
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
-#include "domains/platform/libs/meerkat/metrics_manager.h"
 #include "smithy/server/middleware.h"
+
+namespace meerkat {
+class HttpMetricsManager;
+}  // namespace meerkat
 
 namespace portrait {
 
 /// The two calls meerkat::HttpMetricsManager exposes, as a virtual seam so
-/// tests can observe middleware invocations. MeerkatMetricsSink is the
-/// production implementation.
+/// tests can observe middleware invocations. MakeMeerkatMetricsSink builds
+/// the production implementation.
 class HttpMetricsSink {
  public:
   virtual ~HttpMetricsSink() = default;
@@ -23,27 +25,15 @@ class HttpMetricsSink {
                                      int status_code, std::chrono::microseconds duration) = 0;
 };
 
-/// Forwards to meerkat::HttpMetricsManager, so the exported instrument names
-/// and labels (http_server_requests, http_server_requests_active_gauge,
+/// A sink forwarding to meerkat::HttpMetricsManager, so the exported
+/// instrument names and labels (http_server_requests,
+/// http_server_requests_active_gauge,
 /// http_server_request_duration_microseconds, http_server_requests_success /
 /// _failure) stay identical to the meerkat service and existing dashboards
-/// keep working across the migration.
-class MeerkatMetricsSink final : public HttpMetricsSink {
- public:
-  explicit MeerkatMetricsSink(std::shared_ptr<meerkat::HttpMetricsManager> metrics)
-      : metrics_(std::move(metrics)) {}
-
-  void RecordRequestStart(const std::string& route, const std::string& method) override {
-    metrics_->RecordRequestStart(route, method);
-  }
-  void RecordRequestComplete(const std::string& route, const std::string& method, int status_code,
-                             std::chrono::microseconds duration) override {
-    metrics_->RecordRequestComplete(route, method, status_code, duration);
-  }
-
- private:
-  std::shared_ptr<meerkat::HttpMetricsManager> metrics_;
-};
+/// keep working across the migration. Defined in the .cc so only the
+/// production wiring compiles against meerkat.
+std::shared_ptr<HttpMetricsSink> MakeMeerkatMetricsSink(
+    std::shared_ptr<meerkat::HttpMetricsManager> metrics);
 
 /// Meerkat-parity observability, composed outermost so health probes and
 /// rate-limited requests are observed exactly as meerkat's interceptors saw

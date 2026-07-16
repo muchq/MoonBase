@@ -10,7 +10,6 @@
 
 #include <chrono>
 #include <csignal>
-#include <cstdlib>
 #include <memory>
 #include <string>
 
@@ -19,21 +18,13 @@
 #include "absl/log/log.h"
 #include "domains/graphics/apis/portrait/smithy_handler.h"
 #include "domains/graphics/apis/portrait/smithy_middleware.h"
+#include "domains/platform/libs/futility/env/env.h"
 #include "domains/platform/libs/futility/otel/otel_provider.h"
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "domains/platform/libs/meerkat/metrics_manager.h"
 #include "moonbase/portrait/server.h"
 #include "smithy/http/beast_transport.h"
 #include "smithy/server/middleware.h"
-
-namespace {
-
-int read_port(int default_port) {
-  const char* env = std::getenv("PORT");
-  return env != nullptr ? std::atoi(env) : default_port;
-}
-
-}  // namespace
 
 int main() {
   absl::InitializeLog();
@@ -53,8 +44,8 @@ int main() {
 
   moonbase::portrait::PortraitServer server(std::make_shared<portrait::SmithyTracerHandler>());
 
-  auto metrics = std::make_shared<portrait::MeerkatMetricsSink>(
-      std::make_shared<meerkat::HttpMetricsManager>("portrait"));
+  auto metrics =
+      portrait::MakeMeerkatMetricsSink(std::make_shared<meerkat::HttpMetricsManager>("portrait"));
 
   // Same limiter config as the meerkat Main.cc.
   futility::rate_limiter::SlidingWindowRateLimiterConfig limiter_config{
@@ -78,7 +69,7 @@ int main() {
 
   smithy::http::BeastServerTransport::Options options;
   options.address = "0.0.0.0";
-  options.port = read_port(8080);
+  options.port = futility::env::ReadPort(8080);
   // Trace scenes are small JSON (at most 10 spheres); the 64 MiB transport
   // default is far more than this service ever needs.
   options.max_body_bytes = std::size_t{1} * 1024 * 1024;

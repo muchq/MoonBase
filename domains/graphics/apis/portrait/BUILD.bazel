@@ -134,11 +134,12 @@ cc_test(
 # portrait_smithy binary runs alongside :portrait until the phase 4 cutover;
 # OCI image wiring moves over then (linux_amd64_oci_binary instantiates
 # fixed-name push/load targets, so one image per package).
+# Package-private until a second smithy-cpp service needs meerkat parity;
+# hoist to a shared platform lib at that point.
 cc_library(
     name = "smithy_middleware",
     srcs = ["smithy_middleware.cc"],
     hdrs = ["smithy_middleware.h"],
-    visibility = ["//visibility:public"],
     deps = [
         "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
         "//domains/platform/libs/meerkat:metrics_manager",
@@ -174,13 +175,13 @@ cc_binary(
         ":portrait_smithy_server",
         ":smithy_handler",
         ":smithy_middleware",
+        "//domains/platform/libs/futility/env",
         "//domains/platform/libs/futility/otel:otel_provider",
         "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
         "//domains/platform/libs/meerkat:metrics_manager",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:globals",
         "@com_google_absl//absl/log:initialize",
-        "@smithy_cpp//runtime:core",
         "@smithy_cpp//runtime:http_beast",
         "@smithy_cpp//runtime:server",
     ],

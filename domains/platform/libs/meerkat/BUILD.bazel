@@ -80,7 +80,7 @@ cc_test(
     size = "small",
     srcs = ["metrics_manager_test.cc"],
     deps = [
-        ":meerkat",
+        ":metrics_manager",
         "@googletest//:gtest_main",
     ],
 )
