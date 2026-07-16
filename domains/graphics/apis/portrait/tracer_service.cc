@@ -69,7 +69,10 @@ Image<RGB_Double> TracerService::do_trace(Scene& scene, Perspective& perspective
   auto [x, y, z] = perspective.cameraPosition;
   const tracy::Vec3 cameraPosition{x, y, z};
 
-  tracer_.drawScene(tracyScene, image, cameraPosition);
+  // tracy::Tracer holds unsynchronized RNG state, and trace() runs
+  // concurrently under thread-pool transports; each render gets its own.
+  tracy::Tracer tracer;
+  tracer.drawScene(tracyScene, image, cameraPosition);
   return image;
 }
 

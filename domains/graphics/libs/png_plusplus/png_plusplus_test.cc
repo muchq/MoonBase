@@ -472,12 +472,7 @@ TEST_F(PngPlusPlusTest, MemoryPngWriterBasicFunctionality) {
   EXPECT_EQ(writer.getWidth(), width);
   EXPECT_EQ(writer.getHeight(), height);
 
-  // Verify PNG signature (first 8 bytes should be PNG signature)
-  EXPECT_GE(buffer.size(), 8);
-  const unsigned char png_signature[] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-  for (int i = 0; i < 8; ++i) {
-    EXPECT_EQ(buffer[i], png_signature[i]) << "PNG signature mismatch at byte " << i;
-  }
+  EXPECT_TRUE(pngpp::isPng(buffer));
 }
 
 TEST_F(PngPlusPlusTest, MemoryPngReaderBasicFunctionality) {
@@ -620,13 +615,9 @@ TEST_F(PngPlusPlusTest, CompressionLevelSupport) {
   EXPECT_GT(default_compression.size(), 0);
   EXPECT_GT(best_compression.size(), 0);
 
-  // Verify PNG signatures
-  const unsigned char png_signature[] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-  for (int i = 0; i < 8; ++i) {
-    EXPECT_EQ(no_compression[i], png_signature[i]);
-    EXPECT_EQ(default_compression[i], png_signature[i]);
-    EXPECT_EQ(best_compression[i], png_signature[i]);
-  }
+  EXPECT_TRUE(pngpp::isPng(no_compression));
+  EXPECT_TRUE(pngpp::isPng(default_compression));
+  EXPECT_TRUE(pngpp::isPng(best_compression));
 
   // Best compression should generally produce smaller files than no compression
   // Note: For small images, overhead might make this not always true, so we just verify they're

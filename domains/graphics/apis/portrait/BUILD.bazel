@@ -96,6 +96,40 @@ cc_test(
     ],
 )
 
+# Phase 2 (#1168): TracerService behind the generated PortraitHandler.
+# Main.cc switches to this handler (plus middleware parity) in phase 3.
+cc_library(
+    name = "smithy_handler",
+    srcs = ["smithy_handler.cc"],
+    hdrs = ["smithy_handler.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":portrait_smithy_server",
+        ":tracer_service",
+        ":types",
+        "//domains/platform/libs/futility/base64",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@smithy_cpp//runtime:core",
+    ],
+)
+
+cc_test(
+    name = "smithy_handler_test",
+    size = "small",
+    srcs = ["smithy_handler_test.cc"],
+    deps = [
+        ":portrait_smithy_client",
+        ":portrait_smithy_server",
+        ":smithy_handler",
+        "//domains/graphics/libs/png_plusplus",
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:client",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:http",
+    ],
+)
+
 cc_binary(
     name = "portrait",
     srcs = ["Main.cc"],

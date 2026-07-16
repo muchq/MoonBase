@@ -32,7 +32,6 @@ class TracerService {
   std::string imageToBase64(const image_core::Image<image_core::RGB_Double>& image);
   TraceResponse toResponse(const Output& output, std::string& base64);
 
-  tracy::Tracer tracer_;
   futility::cache::LRUCache<TraceRequest, std::string> cache_;
   futility::otel::MetricsRecorder metrics_;
 };
