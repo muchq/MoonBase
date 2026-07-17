@@ -263,10 +263,9 @@ TEST_F(SmithyMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   ASSERT_TRUE(traced.ok()) << traced.error().message();
   EXPECT_EQ(traced->width, 20);
 
-  // An oversized body is rejected at the transport before it can reach the
-  // router: depending on timing the client sees a clean 413 or an aborted
-  // connection (Beast may close while the client is still sending). Either
-  // way the request must never reach the middleware chain.
+  // A declared Content-Length over max_body_bytes is rejected at the
+  // transport with a readable 413 (smithy-cpp 79667d2: 413 + bounded
+  // lingering close), and the request never reaches the middleware chain.
   const auto completes_before = sink_->completes().size();
   smithy::http::SocketHttpClient raw("127.0.0.1", transport.port());
   smithy::http::HttpRequest oversized;
@@ -275,9 +274,8 @@ TEST_F(SmithyMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   oversized.headers.Set("content-type", "application/json");
   oversized.body = std::string(4096, 'x');
   const auto rejected = raw.Send(oversized);
-  if (rejected.ok()) {
-    EXPECT_GE(rejected->status, 400);
-  }
+  ASSERT_TRUE(rejected.ok()) << rejected.error().message();
+  EXPECT_EQ(rejected->status, 413);
   EXPECT_EQ(sink_->completes().size(), completes_before);
 
   transport.Stop();

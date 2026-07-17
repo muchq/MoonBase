@@ -1,9 +1,10 @@
-// Phase 3 cutover binary (https://github.com/muchq/MoonBase/issues/1168):
-// the generated Smithy Portrait API on the Beast transport with
-// meerkat-parity middleware. Runs alongside the meerkat `portrait` binary
-// until the phase 4 cutover; OCI image wiring moves over then too.
+// The portrait server (https://github.com/muchq/MoonBase/issues/1168): the
+// generated Smithy Portrait API on the Beast transport with meerkat-parity
+// middleware. Rollback is the pre-cutover image tag; the meerkat binary
+// stays buildable as :portrait_meerkat as the pre-cutover reference during
+// the soak.
 //
-//   bazel run //domains/graphics/apis/portrait:portrait_smithy
+//   bazel run //domains/graphics/apis/portrait
 //   curl localhost:8080/portrait/v1/trace -H 'content-type: application/json' -d @scene.json
 //   curl localhost:8080/health
 //   kill -TERM <pid>   # drains in-flight requests, then exits 0

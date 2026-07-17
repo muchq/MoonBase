@@ -1,78 +1,45 @@
-# Portrait Ray Tracer PNG Download Support - Task List
+# Portrait — remaining work
 
-## Overview
-This document outlines the remaining tasks for the ray tracer output PNG download support in the cpp/portrait service.
+The smithy-cpp migration (https://github.com/muchq/MoonBase/issues/1168) is
+through phase 4: `:portrait` (and the `ghcr.io/muchq/portrait` image) now ship
+the smithy-cpp server, guarded by golden wire fixtures
+(`portrait_smithy_wire_test`), real-render handler tests
+(`smithy_handler_test`), middleware tests (`smithy_middleware_test`), and the
+old-vs-new differential replay (`portrait_parity_test`).
 
-## Remaining Tasks
+Resolved along the way, from the old list here: per-IP rate limiting with
+429 + Retry-After, request timeouts and body-size limits (Beast transport),
+drained SIGTERM shutdown, machine-readable API spec (the Smithy model at
+`model/portrait.smithy`), a generated typed client, real 0-255 color
+validation, multi-threaded serving, and the tracy::Tracer RNG race.
 
-### 1. HTTP Endpoint Enhancements
-- [ ] Add optional `format` parameter (png/base64/raw)
-- [ ] Add size information to response
+## Post-soak cleanup (after one release on the smithy binary)
 
-### 2. Rate Limiting (PRIORITY)
-- [ ] Implement per-IP rate limiting for /v1/trace endpoint
-- [ ] Add configurable rate limit (e.g., 10 requests per minute)
-- [ ] Return 429 Too Many Requests with retry-after header
-- [ ] Consider using token bucket or sliding window algorithm
-- [ ] Add rate limit headers (X-RateLimit-Limit, X-RateLimit-Remaining)
-- [ ] Implement bypass mechanism for authenticated/premium users
+- [ ] Delete the meerkat path: `:portrait_meerkat`, `Main.cc`, the nlohmann
+      serde + hand validation in `types.{h,cc}` that the Smithy model
+      replaced (`tracer_service` keeps its own request types until then),
+      and `portrait_parity_test` — its differential purpose ends with the
+      meerkat stack
+- [ ] Have `TracerService` hand back raw PNG bytes and cache those — kills
+      the base64 encode→decode→re-encode round-trip in `smithy_handler.cc`
+      and the manual `imageToBase64` step
+- [ ] Consolidate the valid-scene fixtures and test harnesses now spread
+      across the four portrait test files, and extract the production
+      middleware chain from `portrait_smithy_main.cc` into a shared builder
+      so tests exercise the real wiring instead of simplified copies
+- [ ] Revisit `meerkat::HttpMetricsManager` as a portrait dep — rehome the
+      instruments (e.g. under futility) once meerkat has no other consumers
 
-### 3. Error Handling Improvements
-- [ ] Handle out-of-memory conditions for large images
-- [ ] Implement timeout for long-running ray traces
-- [ ] Add graceful degradation for unsupported features
+## Feature backlog (pre-migration items still open)
 
-### 4. Performance Optimization
-- [ ] Add multi-threading support for ray tracing
-- [ ] Implement progressive rendering with status updates
-- [ ] Profile and optimize hot paths
-
-### 5. API Documentation
-- [ ] Document request/response formats
-- [ ] Add example JSON payloads
-- [ ] Create OpenAPI/Swagger specification
-- [ ] Document performance characteristics
-
-### 6. Client Integration Support
-- [ ] Provide JavaScript example for consuming base64 PNG
-- [ ] Create sample HTML page with download functionality
-- [ ] Support streaming for large images
-
-### 7. Monitoring and Logging
-- [ ] Add metrics for render time per request
-- [ ] Log scene complexity statistics
-- [ ] Track PNG generation performance
-- [ ] Monitor memory usage during rendering
-
-### 8. Configuration and Tuning
-- [ ] Add config for maximum image dimensions
-- [ ] Configure ray tracing recursion depth
-- [ ] Set memory limits for rendering
-- [ ] Add quality vs. performance trade-off settings
-
-## Immediate Next Steps (Priority Order)
-
-1. **Implement Rate Limiting** - Protect service from abuse
-   - Add per-IP rate limiting with configurable limits
-   - Implement proper 429 responses with retry-after
-   - Add rate limit headers for client awareness
-   
-2. **Enhance Response Format Options** - Add flexibility to output formats
-   - Add optional `format` parameter to `/v1/trace` (png/base64/raw)
-   - Include file size information in response
-   - Add render_time_ms to TraceResponse
-
-3. **Error handling improvements** - Add validation and timeout handling
-   - Memory limits for large images
-   - Timeout for long ray traces
-   - Proper error responses with details
-
-## Performance Considerations
-- Ray tracing is CPU-intensive; consider parallelization
-- Large images require significant memory
-- Base64 encoding increases payload size by ~33%
-- Consider implementing progressive rendering for UX
-
-## Security Considerations
-- Implement request rate limiting (HIGH PRIORITY)
-- Monitor and log suspicious activity
+- [ ] Optional `format` parameter (png/base64/raw) and size/render-time
+      fields in the response — an API change; model it in portrait.smithy
+- [ ] X-RateLimit-Limit / X-RateLimit-Remaining response headers
+- [ ] W3C traceparent adoption (smithy-cpp ships the helpers; decide what
+      happens to x-trace-id log correlation)
+- [ ] Rate-limit bypass for authenticated clients (`@httpApiKeyAuth` +
+      `RequireApiKeyHeader` exist upstream)
+- [ ] Progressive rendering / streaming — blocked on smithy-cpp `@streaming`
+      support (upstream phase 8)
+- [ ] Scene-complexity limits beyond the current constraint traits (memory
+      caps for large renders)

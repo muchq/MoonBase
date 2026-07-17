@@ -130,10 +130,11 @@ cc_test(
     ],
 )
 
-# Phase 3 (#1168): meerkat-parity middleware and the cutover binary. The
-# portrait_smithy binary runs alongside :portrait until the phase 4 cutover;
-# OCI image wiring moves over then (linux_amd64_oci_binary instantiates
-# fixed-name push/load targets, so one image per package).
+# Phase 3-4 (#1168): meerkat-parity middleware and the cutover. :portrait
+# (and the ghcr.io/muchq/portrait image) now ship the smithy-cpp server.
+# Rollback is the pre-cutover ghcr.io/muchq/portrait:<sha> image tag;
+# :portrait_meerkat only keeps the old Main.cc compiling as the pre-cutover
+# reference during the soak, then gets deleted with the meerkat serving code.
 # Package-private until a second smithy-cpp service needs meerkat parity;
 # hoist to a shared platform lib at that point.
 cc_library(
@@ -167,8 +168,28 @@ cc_test(
     ],
 )
 
+# Phase 4 gate: the meerkat and smithy stacks serve the same corpus side by
+# side; every divergence must be on the documented intentional list.
+cc_test(
+    name = "portrait_parity_test",
+    size = "small",
+    srcs = ["portrait_parity_test.cc"],
+    deps = [
+        ":portrait_smithy_server",
+        ":smithy_handler",
+        ":tracer_service",
+        ":types",
+        "//domains/platform/libs/meerkat",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:http_beast",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
 cc_binary(
-    name = "portrait_smithy",
+    name = "portrait",
     srcs = ["portrait_smithy_main.cc"],
     visibility = ["//visibility:public"],
     deps = [
@@ -188,7 +209,7 @@ cc_binary(
 )
 
 cc_binary(
-    name = "portrait",
+    name = "portrait_meerkat",
     srcs = ["Main.cc"],
     visibility = ["//visibility:public"],
     deps = [
