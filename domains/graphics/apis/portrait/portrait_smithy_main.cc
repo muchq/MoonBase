@@ -74,6 +74,8 @@ int main() {
   // Trace scenes are small JSON (at most 10 spheres); the 64 MiB transport
   // default is far more than this service ever needs.
   options.max_body_bytes = std::size_t{1} * 1024 * 1024;
+  // 413/431s the transport writes itself land in the same instruments.
+  options.on_rejected = portrait::RejectionMetrics(metrics);
   smithy::http::BeastServerTransport transport(options);
 
   smithy::Outcome<smithy::Unit> started = transport.Start(handler);

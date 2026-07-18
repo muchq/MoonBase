@@ -5,6 +5,7 @@
 
 #include "domains/graphics/apis/portrait/smithy_middleware.h"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <chrono>
@@ -14,6 +15,8 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/log_severity.h"
+#include "absl/log/scoped_mock_log.h"
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "moonbase/portrait/client.h"
 #include "moonbase/portrait/server.h"
@@ -48,7 +51,8 @@ constexpr char kValidTraceBody[] = R"({
 // No rendering here — middleware behavior is the subject under test.
 class StubHandler final : public PortraitHandler {
  public:
-  smithy::Outcome<TraceOutput> Trace(const TraceInput& input) override {
+  smithy::Outcome<TraceOutput> Trace(const TraceInput& input,
+                                     const smithy::server::RequestContext& /*context*/) override {
     TraceOutput output;
     output.base64_png = smithy::Blob::FromString("png");
     output.width = input.output.width;
@@ -140,6 +144,19 @@ class SmithyMiddlewareTest : public ::testing::Test {
     return *response;
   }
 
+  // Sends one trace request through the chain and returns the access-log
+  // line it produced.
+  std::string AccessLogLineFor(const std::vector<std::pair<std::string, std::string>>& headers) {
+    std::string line;
+    absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+    EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, testing::_, testing::HasSubstr("trace_id=")))
+        .WillOnce(testing::SaveArg<2>(&line));
+    log.StartCapturingLogs();
+    EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, headers).status, 200);
+    log.StopCapturingLogs();
+    return line;
+  }
+
   std::shared_ptr<RecordingSink> sink_;
   std::shared_ptr<SlidingWindowRateLimiter<std::string>> limiter_;
   std::unique_ptr<PortraitServer> server_;
@@ -216,18 +233,49 @@ TEST_F(SmithyMiddlewareTest, HealthIsNeverRateLimited) {
   }
 }
 
-TEST_F(SmithyMiddlewareTest, InboundTraceIdIsEchoed) {
-  const auto response =
-      Send("POST", "/portrait/v1/trace", kValidTraceBody, {{"x-trace-id", "abc123"}});
-  EXPECT_EQ(response.headers.Get("x-trace-id").value_or(""), "abc123");
+// The portrait-owned slice of trace identity is the access-log line's
+// trace_id= field, parsed from the traceparent the transport guard mints or
+// joins at ingress. The mint/join/replace mechanics themselves are
+// upstream-tested (smithy-cpp ADR-0011); these tests pin what portrait logs.
+std::string TraceIdIn(const std::string& log_line) {
+  constexpr char kKey[] = "trace_id=";
+  const auto pos = log_line.find(kKey);
+  if (pos == std::string::npos) return "";
+  const auto start = pos + sizeof(kKey) - 1;
+  return log_line.substr(start, log_line.find(' ', start) - start);
 }
 
-TEST_F(SmithyMiddlewareTest, MissingTraceIdIsGenerated) {
-  const auto response = Send("POST", "/portrait/v1/trace", kValidTraceBody);
-  const std::string trace_id = response.headers.Get("x-trace-id").value_or("");
-  ASSERT_FALSE(trace_id.empty());
-  // Meerkat generates a random positive long rendered as digits.
-  EXPECT_EQ(trace_id.find_first_not_of("0123456789"), std::string::npos);
+bool IsLowercaseHex32(const std::string& value) {
+  if (value.size() != 32) return false;
+  for (const char c : value) {
+    if (!(('0' <= c && c <= '9') || ('a' <= c && c <= 'f'))) return false;
+  }
+  return true;
+}
+
+TEST_F(SmithyMiddlewareTest, AccessLogJoinsInboundTraceIdentity) {
+  constexpr char kInbound[] = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+  EXPECT_EQ(TraceIdIn(AccessLogLineFor({{"traceparent", kInbound}})),
+            "4bf92f3577b34da6a3ce929d0e0e4736");
+}
+
+TEST_F(SmithyMiddlewareTest, AccessLogCarriesMintedTraceIdWhenInboundIsAbsentOrMalformed) {
+  const std::string minted = TraceIdIn(AccessLogLineFor({}));
+  EXPECT_TRUE(IsLowercaseHex32(minted)) << "minted: " << minted;
+  const std::string replaced = TraceIdIn(AccessLogLineFor({{"traceparent", "garbage"}}));
+  EXPECT_TRUE(IsLowercaseHex32(replaced)) << "replaced: " << replaced;
+}
+
+// A 431 can fire before Beast parses the method or target; the adapter maps
+// those to a stable label instead of empty strings dashboards would drop.
+TEST(RejectionMetricsTest, UnparsedRejectionLandsOnStableLabels) {
+  auto sink = std::make_shared<RecordingSink>();
+  portrait::RejectionMetrics(sink)({.status = 431});
+  const auto completes = sink->completes();
+  ASSERT_EQ(completes.size(), 1u);
+  EXPECT_EQ(completes[0].route, "(unparsed)");
+  EXPECT_EQ(completes[0].method, "(unparsed)");
+  EXPECT_EQ(completes[0].status, 431);
 }
 
 // One pass over the real Beast transport, shaped like portrait_smithy_main:
@@ -238,6 +286,7 @@ TEST_F(SmithyMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   options.address = "127.0.0.1";
   options.port = 0;
   options.max_body_bytes = 2048;
+  options.on_rejected = portrait::RejectionMetrics(sink_);
   smithy::http::BeastServerTransport transport(options);
   ASSERT_TRUE(transport.Start(handler_).ok());
 
@@ -265,7 +314,8 @@ TEST_F(SmithyMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
 
   // A declared Content-Length over max_body_bytes is rejected at the
   // transport with a readable 413 (smithy-cpp 79667d2: 413 + bounded
-  // lingering close), and the request never reaches the middleware chain.
+  // lingering close). The request never reaches the middleware chain, but the
+  // on_rejected hook records it in the same instruments (smithy-cpp #102).
   const auto completes_before = sink_->completes().size();
   smithy::http::SocketHttpClient raw("127.0.0.1", transport.port());
   smithy::http::HttpRequest oversized;
@@ -276,7 +326,10 @@ TEST_F(SmithyMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   const auto rejected = raw.Send(oversized);
   ASSERT_TRUE(rejected.ok()) << rejected.error().message();
   EXPECT_EQ(rejected->status, 413);
-  EXPECT_EQ(sink_->completes().size(), completes_before);
+  const auto completes = sink_->completes();
+  ASSERT_EQ(completes.size(), completes_before + 1);
+  EXPECT_EQ(completes.back().route, "/portrait/v1/trace");
+  EXPECT_EQ(completes.back().status, 413);
 
   transport.Stop();
 }

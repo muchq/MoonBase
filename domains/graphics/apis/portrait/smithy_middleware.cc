@@ -1,12 +1,11 @@
 #include "domains/graphics/apis/portrait/smithy_middleware.h"
 
 #include <chrono>
-#include <climits>
-#include <random>
 #include <utility>
 
 #include "absl/log/log.h"
 #include "domains/platform/libs/meerkat/metrics_manager.h"
+#include "smithy/http/trace_context.h"
 #include "smithy/http/transport.h"
 
 namespace portrait {
@@ -31,36 +30,27 @@ class MeerkatMetricsSink final : public HttpMetricsSink {
 
 std::string RouteOf(const std::string& target) { return target.substr(0, target.find('?')); }
 
-std::string TraceIdFor(const smithy::http::HttpRequest& request) {
-  if (const auto inbound = request.headers.Get("x-trace-id");
-      inbound.has_value() && !inbound->empty()) {
-    return *inbound;
-  }
-  // Same id shape as meerkat's interceptors::request::trace_id().
-  static std::random_device rd;
-  thread_local std::mt19937_64 gen(rd());
-  std::uniform_int_distribution<long> dis(1, LONG_MAX);
-  return std::to_string(dis(gen));
-}
-
-// x-trace-id propagation and meerkat's access-log line. Kept separate from
-// Observe because the log needs raw header access (X-Forwarded-For, inbound
-// x-trace-id), which Observe deliberately doesn't expose; it measures its
-// own duration for the log line only.
-smithy::server::Middleware TraceIdAndAccessLog() {
+// Meerkat's access-log line shape. Kept separate from Observe because the
+// log line needs X-Forwarded-For and the response body size, which
+// RequestObservation doesn't carry; it measures its own duration for the
+// log line only. The trace_id= field is the W3C trace id parsed from the
+// request's traceparent — the transport guard mints or joins it at ingress
+// (smithy-cpp ADR-0011), so on transport-served requests it always parses.
+// Empty only for hand-driven handler chains in tests.
+smithy::server::Middleware AccessLog() {
   return [](smithy::http::RequestHandler next) {
     return [next = std::move(next)](
                const smithy::http::HttpRequest& request) -> smithy::http::HttpResponse {
       const auto start = std::chrono::steady_clock::now();
-      const std::string trace_id = TraceIdFor(request);
 
       smithy::http::HttpResponse response = next(request);
 
       const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
           std::chrono::steady_clock::now() - start);
-      if (!response.headers.Has("x-trace-id")) {
-        response.headers.Set("x-trace-id", trace_id);
-      }
+      const std::string trace_id =
+          smithy::http::ParseTraceparent(request.headers.Get("traceparent").value_or(""))
+              .value_or(smithy::http::TraceContext{})
+              .trace_id;
       LOG(INFO) << "[" << request.method << " " << request.target
                 << "]: X-Forwarded-For=" << request.headers.Get("X-Forwarded-For").value_or("")
                 << " trace_id=" << trace_id << " status=" << response.status
@@ -91,7 +81,23 @@ smithy::server::Middleware MeerkatParityObservability(std::shared_ptr<HttpMetric
         [metrics](const smithy::server::RequestStart& start) {
           metrics->RecordRequestStart(RouteOf(start.target), start.method);
         });
-    return observe(TraceIdAndAccessLog()(std::move(next)));
+    return observe(AccessLog()(std::move(next)));
+  };
+}
+
+std::function<void(const smithy::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(
+    std::shared_ptr<HttpMetricsSink> metrics) {
+  return [metrics = std::move(metrics)](
+             const smithy::http::BeastServerTransport::RejectedRequest& rejected) {
+    // method/target may be empty when the request never parsed that far (a
+    // 431 can fire mid-headers); keep those series on a stable label rather
+    // than an empty string dashboards would drop or misgroup.
+    const std::string route = rejected.target.empty() ? "(unparsed)" : RouteOf(rejected.target);
+    const std::string method = rejected.method.empty() ? "(unparsed)" : rejected.method;
+    // Start + complete keeps the request counter and active gauge symmetric;
+    // the rejection happens at parse time, so zero duration is accurate.
+    metrics->RecordRequestStart(route, method);
+    metrics->RecordRequestComplete(route, method, rejected.status, std::chrono::microseconds{0});
   };
 }
 

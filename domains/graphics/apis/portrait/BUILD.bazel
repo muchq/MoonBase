@@ -146,6 +146,7 @@ cc_library(
         "//domains/platform/libs/meerkat:metrics_manager",
         "@com_google_absl//absl/log",
         "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:http_beast",
         "@smithy_cpp//runtime:server",
     ],
 )
@@ -159,6 +160,8 @@ cc_test(
         ":portrait_smithy_server",
         ":smithy_middleware",
         "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
+        "@com_google_absl//absl/base:log_severity",
+        "@com_google_absl//absl/log:scoped_mock_log",
         "@googletest//:gtest_main",
         "@smithy_cpp//runtime:client",
         "@smithy_cpp//runtime:core",
