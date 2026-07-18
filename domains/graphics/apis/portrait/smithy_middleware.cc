@@ -31,12 +31,12 @@ class MeerkatMetricsSink final : public HttpMetricsSink {
 std::string RouteOf(const std::string& target) { return target.substr(0, target.find('?')); }
 
 // Meerkat's access-log line shape. Kept separate from Observe because the
-// log needs raw header access (X-Forwarded-For, traceparent), which Observe
-// deliberately doesn't expose; it measures its own duration for the log line
-// only. The trace_id= field carries the W3C trace id: the transport guard
-// mints or joins the request's traceparent at ingress (smithy-cpp ADR-0011),
-// so on transport-served requests the header always parses. Empty only for
-// hand-driven handler chains in tests.
+// log line needs X-Forwarded-For and the response body size, which
+// RequestObservation doesn't carry; it measures its own duration for the
+// log line only. The trace_id= field is the W3C trace id parsed from the
+// request's traceparent — the transport guard mints or joins it at ingress
+// (smithy-cpp ADR-0011), so on transport-served requests it always parses.
+// Empty only for hand-driven handler chains in tests.
 smithy::server::Middleware AccessLog() {
   return [](smithy::http::RequestHandler next) {
     return [next = std::move(next)](
@@ -47,12 +47,10 @@ smithy::server::Middleware AccessLog() {
 
       const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
           std::chrono::steady_clock::now() - start);
-      std::string trace_id;
-      if (const auto context =
-              smithy::http::ParseTraceparent(request.headers.Get("traceparent").value_or(""));
-          context.has_value()) {
-        trace_id = context->trace_id;
-      }
+      const std::string trace_id =
+          smithy::http::ParseTraceparent(request.headers.Get("traceparent").value_or(""))
+              .value_or(smithy::http::TraceContext{})
+              .trace_id;
       LOG(INFO) << "[" << request.method << " " << request.target
                 << "]: X-Forwarded-For=" << request.headers.Get("X-Forwarded-For").value_or("")
                 << " trace_id=" << trace_id << " status=" << response.status
@@ -91,12 +89,15 @@ std::function<void(const smithy::http::BeastServerTransport::RejectedRequest&)> 
     std::shared_ptr<HttpMetricsSink> metrics) {
   return [metrics = std::move(metrics)](
              const smithy::http::BeastServerTransport::RejectedRequest& rejected) {
-    const std::string route = RouteOf(rejected.target);
+    // method/target may be empty when the request never parsed that far (a
+    // 431 can fire mid-headers); keep those series on a stable label rather
+    // than an empty string dashboards would drop or misgroup.
+    const std::string route = rejected.target.empty() ? "(unparsed)" : RouteOf(rejected.target);
+    const std::string method = rejected.method.empty() ? "(unparsed)" : rejected.method;
     // Start + complete keeps the request counter and active gauge symmetric;
     // the rejection happens at parse time, so zero duration is accurate.
-    metrics->RecordRequestStart(route, rejected.method);
-    metrics->RecordRequestComplete(route, rejected.method, rejected.status,
-                                   std::chrono::microseconds{0});
+    metrics->RecordRequestStart(route, method);
+    metrics->RecordRequestComplete(route, method, rejected.status, std::chrono::microseconds{0});
   };
 }
 

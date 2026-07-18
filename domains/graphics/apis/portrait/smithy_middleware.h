@@ -42,10 +42,9 @@ std::shared_ptr<HttpMetricsSink> MakeMeerkatMetricsSink(
 /// them:
 ///   - metrics start/complete with route (path sans query string) and method
 ///     labels, microsecond durations
-///   - meerkat's access-log line shape, with trace_id now carrying the W3C
-///     trace id (the transport guard mints or joins the request's
-///     traceparent at ingress per smithy-cpp ADR-0011; no response header —
-///     the old custom x-trace-id echo is gone):
+///   - meerkat's access-log line shape, with trace_id carrying the W3C
+///     trace id parsed from the request's traceparent (minted or joined at
+///     transport ingress, smithy-cpp ADR-0011):
 ///     [METHOD URI]: X-Forwarded-For=<ip> trace_id=<32hex> status=<code>
 ///     res.body.bytes=<n> duration_ms=<ms>
 smithy::server::Middleware MeerkatParityObservability(std::shared_ptr<HttpMetricsSink> metrics);

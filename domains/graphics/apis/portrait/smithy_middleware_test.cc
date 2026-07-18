@@ -5,6 +5,7 @@
 
 #include "domains/graphics/apis/portrait/smithy_middleware.h"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <chrono>
@@ -14,6 +15,8 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/log_severity.h"
+#include "absl/log/scoped_mock_log.h"
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "moonbase/portrait/client.h"
 #include "moonbase/portrait/server.h"
@@ -22,7 +25,6 @@
 #include "smithy/http/beast_transport.h"
 #include "smithy/http/loopback.h"
 #include "smithy/http/socket_transport.h"
-#include "smithy/http/trace_context.h"
 #include "smithy/server/middleware.h"
 
 namespace {
@@ -142,6 +144,19 @@ class SmithyMiddlewareTest : public ::testing::Test {
     return *response;
   }
 
+  // Sends one trace request through the chain and returns the access-log
+  // line it produced.
+  std::string AccessLogLineFor(const std::vector<std::pair<std::string, std::string>>& headers) {
+    std::string line;
+    absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+    EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, testing::_, testing::HasSubstr("trace_id=")))
+        .WillOnce(testing::SaveArg<2>(&line));
+    log.StartCapturingLogs();
+    EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, headers).status, 200);
+    log.StopCapturingLogs();
+    return line;
+  }
+
   std::shared_ptr<RecordingSink> sink_;
   std::shared_ptr<SlidingWindowRateLimiter<std::string>> limiter_;
   std::unique_ptr<PortraitServer> server_;
@@ -218,58 +233,49 @@ TEST_F(SmithyMiddlewareTest, HealthIsNeverRateLimited) {
   }
 }
 
-// Captures the traceparent the chain sees, one middleware in from the top —
-// i.e. after the transport guard's ingress mint (smithy-cpp ADR-0011).
-smithy::server::Middleware CaptureTraceparent(std::string* out) {
-  return [out](smithy::http::RequestHandler next) {
-    return [out, next = std::move(next)](const smithy::http::HttpRequest& request) {
-      *out = request.headers.Get("traceparent").value_or("");
-      return next(request);
-    };
-  };
+// The portrait-owned slice of trace identity is the access-log line's
+// trace_id= field, parsed from the traceparent the transport guard mints or
+// joins at ingress. The mint/join/replace mechanics themselves are
+// upstream-tested (smithy-cpp ADR-0011); these tests pin what portrait logs.
+std::string TraceIdIn(const std::string& log_line) {
+  constexpr char kKey[] = "trace_id=";
+  const auto pos = log_line.find(kKey);
+  if (pos == std::string::npos) return "";
+  const auto start = pos + sizeof(kKey) - 1;
+  return log_line.substr(start, log_line.find(' ', start) - start);
 }
 
-TEST_F(SmithyMiddlewareTest, ValidInboundTraceparentJoinsVerbatim) {
+bool IsLowercaseHex32(const std::string& value) {
+  if (value.size() != 32) return false;
+  for (const char c : value) {
+    if (!(('0' <= c && c <= '9') || ('a' <= c && c <= 'f'))) return false;
+  }
+  return true;
+}
+
+TEST_F(SmithyMiddlewareTest, AccessLogJoinsInboundTraceIdentity) {
   constexpr char kInbound[] = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
-  std::string seen;
-  auto handler = smithy::server::Chain(
-      {portrait::MeerkatParityObservability(sink_), CaptureTraceparent(&seen)}, server_->Handler());
-  auto loopback = std::make_shared<smithy::http::Loopback>();
-  ASSERT_TRUE(loopback->Start(handler).ok());
-
-  smithy::http::HttpRequest request;
-  request.method = "POST";
-  request.target = "/portrait/v1/trace";
-  request.headers.Set("content-type", "application/json");
-  request.headers.Set("traceparent", kInbound);
-  request.body = kValidTraceBody;
-  const auto response = loopback->Send(request);
-  ASSERT_TRUE(response.ok());
-  EXPECT_EQ(seen, kInbound);
-  // The custom x-trace-id echo is gone; trace identity lives in the request's
-  // traceparent and the access log, not a response header.
-  EXPECT_FALSE(response->headers.Has("x-trace-id"));
+  EXPECT_EQ(TraceIdIn(AccessLogLineFor({{"traceparent", kInbound}})),
+            "4bf92f3577b34da6a3ce929d0e0e4736");
 }
 
-TEST_F(SmithyMiddlewareTest, MissingOrMalformedTraceparentIsMintedAtIngress) {
-  std::string seen;
-  auto handler = smithy::server::Chain(
-      {portrait::MeerkatParityObservability(sink_), CaptureTraceparent(&seen)}, server_->Handler());
-  auto loopback = std::make_shared<smithy::http::Loopback>();
-  ASSERT_TRUE(loopback->Start(handler).ok());
+TEST_F(SmithyMiddlewareTest, AccessLogCarriesMintedTraceIdWhenInboundIsAbsentOrMalformed) {
+  const std::string minted = TraceIdIn(AccessLogLineFor({}));
+  EXPECT_TRUE(IsLowercaseHex32(minted)) << "minted: " << minted;
+  const std::string replaced = TraceIdIn(AccessLogLineFor({{"traceparent", "garbage"}}));
+  EXPECT_TRUE(IsLowercaseHex32(replaced)) << "replaced: " << replaced;
+}
 
-  smithy::http::HttpRequest request;
-  request.method = "POST";
-  request.target = "/portrait/v1/trace";
-  request.headers.Set("content-type", "application/json");
-  request.body = kValidTraceBody;
-  ASSERT_TRUE(loopback->Send(request).ok());
-  ASSERT_TRUE(smithy::http::ParseTraceparent(seen).has_value()) << seen;
-
-  request.headers.Set("traceparent", "garbage");
-  ASSERT_TRUE(loopback->Send(request).ok());
-  EXPECT_NE(seen, "garbage");
-  ASSERT_TRUE(smithy::http::ParseTraceparent(seen).has_value()) << seen;
+// A 431 can fire before Beast parses the method or target; the adapter maps
+// those to a stable label instead of empty strings dashboards would drop.
+TEST(RejectionMetricsTest, UnparsedRejectionLandsOnStableLabels) {
+  auto sink = std::make_shared<RecordingSink>();
+  portrait::RejectionMetrics(sink)({.status = 431});
+  const auto completes = sink->completes();
+  ASSERT_EQ(completes.size(), 1u);
+  EXPECT_EQ(completes[0].route, "(unparsed)");
+  EXPECT_EQ(completes[0].method, "(unparsed)");
+  EXPECT_EQ(completes[0].status, 431);
 }
 
 // One pass over the real Beast transport, shaped like portrait_smithy_main:
