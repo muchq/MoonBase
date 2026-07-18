@@ -46,7 +46,8 @@ constexpr char kFakePngBase64[] = "bm90LXJlYWxseS1hLXBuZw==";
 // assert both directions of the wire without any rendering.
 class RecordingHandler final : public PortraitHandler {
  public:
-  smithy::Outcome<TraceOutput> Trace(const TraceInput& input) override {
+  smithy::Outcome<TraceOutput> Trace(const TraceInput& input,
+                                     const smithy::server::RequestContext& /*context*/) override {
     const std::lock_guard<std::mutex> lock(mu_);
     last_input_ = input;
     if (reject_scene_) {

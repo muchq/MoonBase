@@ -22,6 +22,7 @@
 #include "smithy/http/beast_transport.h"
 #include "smithy/http/loopback.h"
 #include "smithy/http/socket_transport.h"
+#include "smithy/http/trace_context.h"
 #include "smithy/server/middleware.h"
 
 namespace {
@@ -48,7 +49,8 @@ constexpr char kValidTraceBody[] = R"({
 // No rendering here — middleware behavior is the subject under test.
 class StubHandler final : public PortraitHandler {
  public:
-  smithy::Outcome<TraceOutput> Trace(const TraceInput& input) override {
+  smithy::Outcome<TraceOutput> Trace(const TraceInput& input,
+                                     const smithy::server::RequestContext& /*context*/) override {
     TraceOutput output;
     output.base64_png = smithy::Blob::FromString("png");
     output.width = input.output.width;
@@ -216,18 +218,58 @@ TEST_F(SmithyMiddlewareTest, HealthIsNeverRateLimited) {
   }
 }
 
-TEST_F(SmithyMiddlewareTest, InboundTraceIdIsEchoed) {
-  const auto response =
-      Send("POST", "/portrait/v1/trace", kValidTraceBody, {{"x-trace-id", "abc123"}});
-  EXPECT_EQ(response.headers.Get("x-trace-id").value_or(""), "abc123");
+// Captures the traceparent the chain sees, one middleware in from the top —
+// i.e. after the transport guard's ingress mint (smithy-cpp ADR-0011).
+smithy::server::Middleware CaptureTraceparent(std::string* out) {
+  return [out](smithy::http::RequestHandler next) {
+    return [out, next = std::move(next)](const smithy::http::HttpRequest& request) {
+      *out = request.headers.Get("traceparent").value_or("");
+      return next(request);
+    };
+  };
 }
 
-TEST_F(SmithyMiddlewareTest, MissingTraceIdIsGenerated) {
-  const auto response = Send("POST", "/portrait/v1/trace", kValidTraceBody);
-  const std::string trace_id = response.headers.Get("x-trace-id").value_or("");
-  ASSERT_FALSE(trace_id.empty());
-  // Meerkat generates a random positive long rendered as digits.
-  EXPECT_EQ(trace_id.find_first_not_of("0123456789"), std::string::npos);
+TEST_F(SmithyMiddlewareTest, ValidInboundTraceparentJoinsVerbatim) {
+  constexpr char kInbound[] = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+  std::string seen;
+  auto handler = smithy::server::Chain(
+      {portrait::MeerkatParityObservability(sink_), CaptureTraceparent(&seen)}, server_->Handler());
+  auto loopback = std::make_shared<smithy::http::Loopback>();
+  ASSERT_TRUE(loopback->Start(handler).ok());
+
+  smithy::http::HttpRequest request;
+  request.method = "POST";
+  request.target = "/portrait/v1/trace";
+  request.headers.Set("content-type", "application/json");
+  request.headers.Set("traceparent", kInbound);
+  request.body = kValidTraceBody;
+  const auto response = loopback->Send(request);
+  ASSERT_TRUE(response.ok());
+  EXPECT_EQ(seen, kInbound);
+  // The custom x-trace-id echo is gone; trace identity lives in the request's
+  // traceparent and the access log, not a response header.
+  EXPECT_FALSE(response->headers.Has("x-trace-id"));
+}
+
+TEST_F(SmithyMiddlewareTest, MissingOrMalformedTraceparentIsMintedAtIngress) {
+  std::string seen;
+  auto handler = smithy::server::Chain(
+      {portrait::MeerkatParityObservability(sink_), CaptureTraceparent(&seen)}, server_->Handler());
+  auto loopback = std::make_shared<smithy::http::Loopback>();
+  ASSERT_TRUE(loopback->Start(handler).ok());
+
+  smithy::http::HttpRequest request;
+  request.method = "POST";
+  request.target = "/portrait/v1/trace";
+  request.headers.Set("content-type", "application/json");
+  request.body = kValidTraceBody;
+  ASSERT_TRUE(loopback->Send(request).ok());
+  ASSERT_TRUE(smithy::http::ParseTraceparent(seen).has_value()) << seen;
+
+  request.headers.Set("traceparent", "garbage");
+  ASSERT_TRUE(loopback->Send(request).ok());
+  EXPECT_NE(seen, "garbage");
+  ASSERT_TRUE(smithy::http::ParseTraceparent(seen).has_value()) << seen;
 }
 
 // One pass over the real Beast transport, shaped like portrait_smithy_main:
@@ -238,6 +280,7 @@ TEST_F(SmithyMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   options.address = "127.0.0.1";
   options.port = 0;
   options.max_body_bytes = 2048;
+  options.on_rejected = portrait::RejectionMetrics(sink_);
   smithy::http::BeastServerTransport transport(options);
   ASSERT_TRUE(transport.Start(handler_).ok());
 
@@ -265,7 +308,8 @@ TEST_F(SmithyMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
 
   // A declared Content-Length over max_body_bytes is rejected at the
   // transport with a readable 413 (smithy-cpp 79667d2: 413 + bounded
-  // lingering close), and the request never reaches the middleware chain.
+  // lingering close). The request never reaches the middleware chain, but the
+  // on_rejected hook records it in the same instruments (smithy-cpp #102).
   const auto completes_before = sink_->completes().size();
   smithy::http::SocketHttpClient raw("127.0.0.1", transport.port());
   smithy::http::HttpRequest oversized;
@@ -276,7 +320,10 @@ TEST_F(SmithyMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   const auto rejected = raw.Send(oversized);
   ASSERT_TRUE(rejected.ok()) << rejected.error().message();
   EXPECT_EQ(rejected->status, 413);
-  EXPECT_EQ(sink_->completes().size(), completes_before);
+  const auto completes = sink_->completes();
+  ASSERT_EQ(completes.size(), completes_before + 1);
+  EXPECT_EQ(completes.back().route, "/portrait/v1/trace");
+  EXPECT_EQ(completes.back().status, 413);
 
   transport.Stop();
 }

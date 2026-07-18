@@ -70,7 +70,8 @@ TraceRequest toLegacyRequest(const gen::TraceInput& input) {
 
 }  // namespace
 
-smithy::Outcome<gen::TraceOutput> SmithyTracerHandler::Trace(const gen::TraceInput& input) {
+smithy::Outcome<gen::TraceOutput> SmithyTracerHandler::Trace(
+    const gen::TraceInput& input, const smithy::server::RequestContext& /*context*/) {
   TraceRequest request = toLegacyRequest(input);
   absl::StatusOr<TraceResponse> response = tracer_service_.trace(request);
   if (!response.ok()) {

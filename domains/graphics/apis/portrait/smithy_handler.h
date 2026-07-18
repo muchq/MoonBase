@@ -6,6 +6,7 @@
 #include "domains/graphics/apis/portrait/tracer_service.h"
 #include "moonbase/portrait/server.h"
 #include "smithy/core/outcome.h"
+#include "smithy/server/router.h"
 
 namespace portrait {
 
@@ -25,7 +26,8 @@ class SmithyTracerHandler final : public moonbase::portrait::PortraitHandler {
   explicit SmithyTracerHandler(uint16_t cache_size) : tracer_service_(cache_size) {}
 
   smithy::Outcome<moonbase::portrait::TraceOutput> Trace(
-      const moonbase::portrait::TraceInput& input) override;
+      const moonbase::portrait::TraceInput& input,
+      const smithy::server::RequestContext& context) override;
 
  private:
   TracerService tracer_service_;

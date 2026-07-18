@@ -2,10 +2,12 @@
 #define CPP_PORTRAIT_SMITHY_MIDDLEWARE_H
 
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <string>
 
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
+#include "smithy/http/beast_transport.h"
 #include "smithy/server/middleware.h"
 
 namespace meerkat {
@@ -35,18 +37,25 @@ class HttpMetricsSink {
 std::shared_ptr<HttpMetricsSink> MakeMeerkatMetricsSink(
     std::shared_ptr<meerkat::HttpMetricsManager> metrics);
 
-/// Meerkat-parity observability, composed outermost so health probes and
+/// Serving observability, composed outermost so health probes and
 /// rate-limited requests are observed exactly as meerkat's interceptors saw
 /// them:
 ///   - metrics start/complete with route (path sans query string) and method
 ///     labels, microsecond durations
-///   - x-trace-id propagation: an inbound header is reused, else a random
-///     positive long is generated; set on the response unless the handler
-///     already set one
-///   - meerkat's access-log line, byte-for-byte:
-///     [METHOD URI]: X-Forwarded-For=<ip> trace_id=<id> status=<code>
+///   - meerkat's access-log line shape, with trace_id now carrying the W3C
+///     trace id (the transport guard mints or joins the request's
+///     traceparent at ingress per smithy-cpp ADR-0011; no response header —
+///     the old custom x-trace-id echo is gone):
+///     [METHOD URI]: X-Forwarded-For=<ip> trace_id=<32hex> status=<code>
 ///     res.body.bytes=<n> duration_ms=<ms>
 smithy::server::Middleware MeerkatParityObservability(std::shared_ptr<HttpMetricsSink> metrics);
+
+/// Sink callback for BeastServerTransport::Options::on_rejected, so the
+/// 413/431 rejections the transport writes before any handler chain exists
+/// land in the same instruments as everything else (an over-limit flood was
+/// previously invisible to metrics — a capability meerkat never had).
+std::function<void(const smithy::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(
+    std::shared_ptr<HttpMetricsSink> metrics);
 
 /// Per-client admission control keyed on X-Forwarded-For (clients without
 /// the header share the empty-string bucket, as under meerkat), rejecting

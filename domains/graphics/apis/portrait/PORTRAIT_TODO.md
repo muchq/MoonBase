@@ -35,8 +35,6 @@ validation, multi-threaded serving, and the tracy::Tracer RNG race.
 - [ ] Optional `format` parameter (png/base64/raw) and size/render-time
       fields in the response — an API change; model it in portrait.smithy
 - [ ] X-RateLimit-Limit / X-RateLimit-Remaining response headers
-- [ ] W3C traceparent adoption (smithy-cpp ships the helpers; decide what
-      happens to x-trace-id log correlation)
 - [ ] Rate-limit bypass for authenticated clients (`@httpApiKeyAuth` +
       `RequireApiKeyHeader` exist upstream)
 - [ ] Progressive rendering / streaming — blocked on smithy-cpp `@streaming`
