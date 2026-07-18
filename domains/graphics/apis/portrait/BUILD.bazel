@@ -206,6 +206,7 @@ cc_binary(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:globals",
         "@com_google_absl//absl/log:initialize",
+        "@smithy_cpp//runtime:http",
         "@smithy_cpp//runtime:http_beast",
         "@smithy_cpp//runtime:server",
     ],

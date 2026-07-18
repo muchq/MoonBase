@@ -8,6 +8,7 @@
 
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "smithy/http/beast_transport.h"
+#include "smithy/http/forwarded.h"
 #include "smithy/server/middleware.h"
 
 namespace meerkat {
@@ -56,14 +57,18 @@ smithy::server::Middleware MeerkatParityObservability(std::shared_ptr<HttpMetric
 std::function<void(const smithy::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(
     std::shared_ptr<HttpMetricsSink> metrics);
 
-/// Per-client admission control keyed on X-Forwarded-For (clients without
-/// the header share the empty-string bucket, as under meerkat), rejecting
-/// with 429 {"error":"Too many requests"} plus Retry-After. Compose inside
-/// MeerkatParityObservability (so 429s are counted) and after HealthEndpoint
-/// (so probes are never rate limited).
-smithy::server::Middleware RateLimitByForwardedFor(
+/// Per-client admission control keyed on the derived client address
+/// (smithy/http/forwarded.h, ADR-0012): x-forwarded-for counts only when
+/// appended through the trusted proxy tier, so a direct client cannot forge
+/// its key — it keys as its TCP peer, and spoofed headers are ignored.
+/// Rejects with 429 {"error":"Too many requests"} plus Retry-After. Compose
+/// inside MeerkatParityObservability (so 429s are counted) and after
+/// HealthEndpoint (so probes are never rate limited). Over Loopback there is
+/// no peer to derive from: every request shares the one empty key unless the
+/// test stamps HttpRequest::peer_address.
+smithy::server::Middleware RateLimitByClientAddress(
     std::shared_ptr<futility::rate_limiter::SlidingWindowRateLimiter<std::string>> limiter,
-    std::chrono::seconds retry_after);
+    smithy::http::TrustedProxies trusted, std::chrono::seconds retry_after);
 
 }  // namespace portrait
 

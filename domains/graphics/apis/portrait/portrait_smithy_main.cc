@@ -12,6 +12,7 @@
 #include <chrono>
 #include <csignal>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 #include "absl/log/globals.h"
@@ -25,6 +26,7 @@
 #include "domains/platform/libs/meerkat/metrics_manager.h"
 #include "moonbase/portrait/server.h"
 #include "smithy/http/beast_transport.h"
+#include "smithy/http/forwarded.h"
 #include "smithy/server/middleware.h"
 
 int main() {
@@ -59,13 +61,27 @@ int main() {
       std::make_shared<futility::rate_limiter::SlidingWindowRateLimiter<std::string>>(
           limiter_config);
 
+  // The reverse-proxy trust boundary (smithy-cpp ADR-0012): x-forwarded-for
+  // entries count toward client-address derivation only when appended by
+  // these addresses — deploy/consolidated/compose.yaml pins Caddy's address
+  // and passes it here. Unset trusts nothing: the header is ignored and
+  // every client keys as its TCP peer. A malformed entry must fail
+  // deployment, not silently widen or narrow the boundary.
+  smithy::http::TrustedProxies trusted_proxies;
+  try {
+    trusted_proxies = smithy::http::TrustedProxies(futility::env::ReadList("TRUSTED_PROXY_CIDRS"));
+  } catch (const std::invalid_argument& error) {
+    LOG(ERROR) << "Invalid TRUSTED_PROXY_CIDRS: " << error.what();
+    return 1;
+  }
+
   // Observability outermost: health probes and 429s are counted and logged,
   // as they were under meerkat's interceptors. Health sits before the guard
   // so probes are never rate limited — the one deliberate ordering change
   // from meerkat, where /health shared the empty X-Forwarded-For bucket.
   auto handler = smithy::server::Chain(
       {portrait::MeerkatParityObservability(metrics), smithy::server::HealthEndpoint("/health"),
-       portrait::RateLimitByForwardedFor(rate_limiter, std::chrono::seconds(60))},
+       portrait::RateLimitByClientAddress(rate_limiter, trusted_proxies, std::chrono::seconds(60))},
       server.Handler());
 
   smithy::http::BeastServerTransport::Options options;

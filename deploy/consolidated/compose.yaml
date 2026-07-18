@@ -21,7 +21,10 @@ services:
       - r3dr
       - mcpserver
     networks:
-      - app_network
+      # Static address so services can name Caddy — and only Caddy — as
+      # their x-forwarded-for trust boundary (smithy-cpp ADR-0012).
+      app_network:
+        ipv4_address: 172.28.0.2
     deploy:
       resources:
         limits:
@@ -50,6 +53,9 @@ services:
       - "8081:8081"
     environment:
       - PORT=8081
+      # x-forwarded-for counts only from Caddy's pinned address; requests
+      # reaching portrait any other way key as their TCP peer.
+      - TRUSTED_PROXY_CIDRS=172.28.0.2
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=portrait
       - OTEL_RESOURCE_ATTRIBUTES=service.name=portrait,service.version=latest
@@ -251,3 +257,10 @@ networks:
   app_network:
     name: muchq_network
     driver: bridge
+    # Pinned so Caddy's static address (and the trust boundary derived from
+    # it) survives network recreation. Changing an existing network's subnet
+    # needs `docker compose down && docker compose up -d` once.
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+          gateway: 172.28.0.1

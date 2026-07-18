@@ -1,7 +1,8 @@
 // Phase 3 middleware tests (https://github.com/muchq/MoonBase/issues/1168):
 // the production middleware chain — meerkat-parity observability, health,
-// X-Forwarded-For rate limiting — composed around the generated server,
-// driven over loopback plus one pass over the real Beast socket transport.
+// per-client rate limiting keyed on the derived client address — composed
+// around the generated server, driven over loopback plus one pass over the
+// real Beast socket transport.
 
 #include "domains/graphics/apis/portrait/smithy_middleware.h"
 
@@ -23,6 +24,7 @@
 #include "smithy/client/config.h"
 #include "smithy/core/blob.h"
 #include "smithy/http/beast_transport.h"
+#include "smithy/http/forwarded.h"
 #include "smithy/http/loopback.h"
 #include "smithy/http/socket_transport.h"
 #include "smithy/server/middleware.h"
@@ -101,10 +103,16 @@ class RecordingSink final : public portrait::HttpMetricsSink {
 };
 
 // The production chain shape from portrait_smithy_main.cc, with a small
-// rate-limit budget so tests can exhaust it quickly.
+// rate-limit budget so tests can exhaust it quickly. The rate limiter keys
+// on the ADR-0012 derived client address anchored at peer_address, which
+// Loopback lets tests stamp directly (a real transport stamps it from the
+// connection).
 class SmithyMiddlewareTest : public ::testing::Test {
  protected:
   static constexpr int kMaxRequestsPerKey = 3;
+  // The trusted reverse-proxy tier, standing in for compose's pinned Caddy
+  // address. x-forwarded-for entries count only through this peer.
+  static constexpr char kProxy[] = "10.0.0.2";
 
   void SetUp() override {
     sink_ = std::make_shared<RecordingSink>();
@@ -117,7 +125,8 @@ class SmithyMiddlewareTest : public ::testing::Test {
     server_ = std::make_unique<PortraitServer>(std::make_shared<StubHandler>());
     handler_ = smithy::server::Chain(
         {portrait::MeerkatParityObservability(sink_), smithy::server::HealthEndpoint("/health"),
-         portrait::RateLimitByForwardedFor(limiter_, std::chrono::seconds(60))},
+         portrait::RateLimitByClientAddress(limiter_, smithy::http::TrustedProxies({kProxy}),
+                                            std::chrono::seconds(60))},
         server_->Handler());
     loopback_ = std::make_shared<smithy::http::Loopback>();
     ASSERT_TRUE(loopback_->Start(handler_).ok());
@@ -125,10 +134,12 @@ class SmithyMiddlewareTest : public ::testing::Test {
 
   smithy::http::HttpResponse Send(
       const std::string& method, const std::string& target, const std::string& body = "",
-      const std::vector<std::pair<std::string, std::string>>& headers = {}) {
+      const std::vector<std::pair<std::string, std::string>>& headers = {},
+      const std::string& peer = "") {
     smithy::http::HttpRequest request;
     request.method = method;
     request.target = target;
+    request.peer_address = peer;
     if (!body.empty()) {
       request.headers.Set("content-type", "application/json");
       request.body = body;
@@ -198,19 +209,17 @@ TEST_F(SmithyMiddlewareTest, QueryStringStrippedFromRouteLabel) {
   EXPECT_EQ(starts[0].route, "/health");
 }
 
-TEST_F(SmithyMiddlewareTest, RateLimitsPerForwardedForKeyWithRetryAfter) {
-  const std::vector<std::pair<std::string, std::string>> alice = {{"X-Forwarded-For", "1.2.3.4"}};
+TEST_F(SmithyMiddlewareTest, RateLimitsPerClientAddressWithRetryAfter) {
   for (int i = 0; i < kMaxRequestsPerKey; ++i) {
-    EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, alice).status, 200);
+    EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, {}, "203.0.113.4").status, 200);
   }
-  const auto limited = Send("POST", "/portrait/v1/trace", kValidTraceBody, alice);
+  const auto limited = Send("POST", "/portrait/v1/trace", kValidTraceBody, {}, "203.0.113.4");
   EXPECT_EQ(limited.status, 429);
   EXPECT_EQ(limited.headers.Get("retry-after").value_or(""), "60");
   EXPECT_NE(limited.body.find("Too many requests"), std::string::npos);
 
-  // A different client key is still admitted.
-  const std::vector<std::pair<std::string, std::string>> bob = {{"X-Forwarded-For", "5.6.7.8"}};
-  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, bob).status, 200);
+  // A different client is still admitted.
+  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, {}, "203.0.113.8").status, 200);
 
   // Rate-limited requests are observed (meerkat counted 429s with
   // error_type=rate_limited; the sink sees the status that drives it).
@@ -221,15 +230,33 @@ TEST_F(SmithyMiddlewareTest, RateLimitsPerForwardedForKeyWithRetryAfter) {
   EXPECT_TRUE(saw_429);
 }
 
-TEST_F(SmithyMiddlewareTest, HealthIsNeverRateLimited) {
-  const std::vector<std::pair<std::string, std::string>> key = {{"X-Forwarded-For", "9.9.9.9"}};
+// ADR-0012 keying through the production chain shape: behind the trusted
+// proxy the forwarded client is the key; a direct client writing the same
+// header keys as its own peer, so spoofing cannot drain another client's
+// bucket (or mint fresh buckets to evade its own).
+TEST_F(SmithyMiddlewareTest, SpoofedForwardedForCannotReachAnotherClientsBucket) {
+  const std::vector<std::pair<std::string, std::string>> forwarded = {
+      {"X-Forwarded-For", "203.0.113.9"}};
   for (int i = 0; i < kMaxRequestsPerKey; ++i) {
-    Send("POST", "/portrait/v1/trace", kValidTraceBody, key);
+    EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, forwarded, kProxy).status, 200);
   }
-  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, key).status, 429);
+  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, forwarded, kProxy).status, 429);
+
+  // Same header from an untrusted peer: client-authored noise. The request
+  // keys as the peer itself and is admitted despite the exhausted bucket
+  // its header names.
+  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, forwarded, "198.51.100.7").status,
+            200);
+}
+
+TEST_F(SmithyMiddlewareTest, HealthIsNeverRateLimited) {
+  for (int i = 0; i < kMaxRequestsPerKey; ++i) {
+    Send("POST", "/portrait/v1/trace", kValidTraceBody, {}, "203.0.113.7");
+  }
+  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, {}, "203.0.113.7").status, 429);
   // Deliberate change from meerkat: probes sit before the guard in the chain.
   for (int i = 0; i < 5; ++i) {
-    EXPECT_EQ(Send("GET", "/health", "", key).status, 200);
+    EXPECT_EQ(Send("GET", "/health", "", {}, "203.0.113.7").status, 200);
   }
 }
 
