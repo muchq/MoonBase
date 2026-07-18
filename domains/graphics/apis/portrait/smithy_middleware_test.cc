@@ -132,14 +132,18 @@ class SmithyMiddlewareTest : public ::testing::Test {
     ASSERT_TRUE(loopback_->Start(handler_).ok());
   }
 
+  // peer is the L4 identity the client-address derivation anchors on. An
+  // unnamed peer gets a fresh TEST-NET address per send, so sends that don't
+  // exercise keying never share a rate-limit bucket; pass an explicit peer
+  // to exercise it.
   smithy::http::HttpResponse Send(
       const std::string& method, const std::string& target, const std::string& body = "",
-      const std::vector<std::pair<std::string, std::string>>& headers = {},
-      const std::string& peer = "") {
+      const std::string& peer = "",
+      const std::vector<std::pair<std::string, std::string>>& headers = {}) {
     smithy::http::HttpRequest request;
     request.method = method;
     request.target = target;
-    request.peer_address = peer;
+    request.peer_address = peer.empty() ? "192.0.2." + std::to_string(++next_default_peer_) : peer;
     if (!body.empty()) {
       request.headers.Set("content-type", "application/json");
       request.body = body;
@@ -163,7 +167,7 @@ class SmithyMiddlewareTest : public ::testing::Test {
     EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, testing::_, testing::HasSubstr("trace_id=")))
         .WillOnce(testing::SaveArg<2>(&line));
     log.StartCapturingLogs();
-    EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, headers).status, 200);
+    EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, "", headers).status, 200);
     log.StopCapturingLogs();
     return line;
   }
@@ -173,6 +177,7 @@ class SmithyMiddlewareTest : public ::testing::Test {
   std::unique_ptr<PortraitServer> server_;
   smithy::http::RequestHandler handler_;
   std::shared_ptr<smithy::http::Loopback> loopback_;
+  int next_default_peer_ = 0;
 };
 
 TEST_F(SmithyMiddlewareTest, HealthServedAndObserved) {
@@ -211,15 +216,15 @@ TEST_F(SmithyMiddlewareTest, QueryStringStrippedFromRouteLabel) {
 
 TEST_F(SmithyMiddlewareTest, RateLimitsPerClientAddressWithRetryAfter) {
   for (int i = 0; i < kMaxRequestsPerKey; ++i) {
-    EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, {}, "203.0.113.4").status, 200);
+    EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, "203.0.113.4").status, 200);
   }
-  const auto limited = Send("POST", "/portrait/v1/trace", kValidTraceBody, {}, "203.0.113.4");
+  const auto limited = Send("POST", "/portrait/v1/trace", kValidTraceBody, "203.0.113.4");
   EXPECT_EQ(limited.status, 429);
   EXPECT_EQ(limited.headers.Get("retry-after").value_or(""), "60");
   EXPECT_NE(limited.body.find("Too many requests"), std::string::npos);
 
   // A different client is still admitted.
-  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, {}, "203.0.113.8").status, 200);
+  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, "203.0.113.8").status, 200);
 
   // Rate-limited requests are observed (meerkat counted 429s with
   // error_type=rate_limited; the sink sees the status that drives it).
@@ -238,25 +243,34 @@ TEST_F(SmithyMiddlewareTest, SpoofedForwardedForCannotReachAnotherClientsBucket)
   const std::vector<std::pair<std::string, std::string>> forwarded = {
       {"X-Forwarded-For", "203.0.113.9"}};
   for (int i = 0; i < kMaxRequestsPerKey; ++i) {
-    EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, forwarded, kProxy).status, 200);
+    EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, kProxy, forwarded).status, 200);
   }
-  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, forwarded, kProxy).status, 429);
+  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, kProxy, forwarded).status, 429);
+
+  // A different client behind the same trusted proxy has its own budget:
+  // the key is the forwarded client, not the proxy peer. (This is the
+  // assertion that fails if the trust-set walk is dropped and all Caddy
+  // traffic collapses into one bucket.)
+  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, kProxy,
+                 {{"X-Forwarded-For", "203.0.113.50"}})
+                .status,
+            200);
 
   // Same header from an untrusted peer: client-authored noise. The request
   // keys as the peer itself and is admitted despite the exhausted bucket
   // its header names.
-  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, forwarded, "198.51.100.7").status,
+  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, "198.51.100.7", forwarded).status,
             200);
 }
 
 TEST_F(SmithyMiddlewareTest, HealthIsNeverRateLimited) {
   for (int i = 0; i < kMaxRequestsPerKey; ++i) {
-    Send("POST", "/portrait/v1/trace", kValidTraceBody, {}, "203.0.113.7");
+    Send("POST", "/portrait/v1/trace", kValidTraceBody, "203.0.113.7");
   }
-  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, {}, "203.0.113.7").status, 429);
+  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, "203.0.113.7").status, 429);
   // Deliberate change from meerkat: probes sit before the guard in the chain.
   for (int i = 0; i < 5; ++i) {
-    EXPECT_EQ(Send("GET", "/health", "", {}, "203.0.113.7").status, 200);
+    EXPECT_EQ(Send("GET", "/health", "", "203.0.113.7").status, 200);
   }
 }
 

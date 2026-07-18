@@ -61,12 +61,10 @@ int main() {
       std::make_shared<futility::rate_limiter::SlidingWindowRateLimiter<std::string>>(
           limiter_config);
 
-  // The reverse-proxy trust boundary (smithy-cpp ADR-0012): x-forwarded-for
-  // entries count toward client-address derivation only when appended by
-  // these addresses — deploy/consolidated/compose.yaml pins Caddy's address
-  // and passes it here. Unset trusts nothing: the header is ignored and
-  // every client keys as its TCP peer. A malformed entry must fail
-  // deployment, not silently widen or narrow the boundary.
+  // The reverse-proxy trust boundary (smithy-cpp ADR-0012, contract in
+  // smithy/http/forwarded.h): deploy/consolidated/compose.yaml pins Caddy's
+  // address and passes it here; unset means no proxy tier and every client
+  // keys as its TCP peer. Malformed entries fail startup by design.
   smithy::http::TrustedProxies trusted_proxies;
   try {
     trusted_proxies = smithy::http::TrustedProxies(futility::env::ReadList("TRUSTED_PROXY_CIDRS"));
@@ -81,7 +79,8 @@ int main() {
   // from meerkat, where /health shared the empty X-Forwarded-For bucket.
   auto handler = smithy::server::Chain(
       {portrait::MeerkatParityObservability(metrics), smithy::server::HealthEndpoint("/health"),
-       portrait::RateLimitByClientAddress(rate_limiter, trusted_proxies, std::chrono::seconds(60))},
+       portrait::RateLimitByClientAddress(rate_limiter, std::move(trusted_proxies),
+                                          std::chrono::seconds(60))},
       server.Handler());
 
   smithy::http::BeastServerTransport::Options options;

@@ -22,9 +22,10 @@ services:
       - mcpserver
     networks:
       # Static address so services can name Caddy — and only Caddy — as
-      # their x-forwarded-for trust boundary (smithy-cpp ADR-0012).
+      # their x-forwarded-for trust boundary (smithy-cpp ADR-0012). The
+      # anchor is the single source; consumers alias it as *caddy_ip.
       app_network:
-        ipv4_address: 172.28.0.2
+        ipv4_address: &caddy_ip 172.28.0.2
     deploy:
       resources:
         limits:
@@ -52,13 +53,13 @@ services:
     ports:
       - "8081:8081"
     environment:
-      - PORT=8081
+      PORT: "8081"
       # x-forwarded-for counts only from Caddy's pinned address; requests
       # reaching portrait any other way key as their TCP peer.
-      - TRUSTED_PROXY_CIDRS=172.28.0.2
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
-      - OTEL_SERVICE_NAME=portrait
-      - OTEL_RESOURCE_ATTRIBUTES=service.name=portrait,service.version=latest
+      TRUSTED_PROXY_CIDRS: *caddy_ip
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
+      OTEL_SERVICE_NAME: portrait
+      OTEL_RESOURCE_ATTRIBUTES: service.name=portrait,service.version=latest
     volumes:
       - /etc/portrait:/etc/portrait
     networks:
@@ -258,8 +259,8 @@ networks:
     name: muchq_network
     driver: bridge
     # Pinned so Caddy's static address (and the trust boundary derived from
-    # it) survives network recreation. Changing an existing network's subnet
-    # needs `docker compose down && docker compose up -d` once.
+    # it) survives network recreation. Compose can't change a live network's
+    # subnet in place: apply subnet edits with `docker compose down && up`.
     ipam:
       config:
         - subnet: 172.28.0.0/16

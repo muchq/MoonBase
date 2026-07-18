@@ -37,6 +37,12 @@ std::string RouteOf(const std::string& target) { return target.substr(0, target.
 // request's traceparent — the transport guard mints or joins it at ingress
 // (smithy-cpp ADR-0011), so on transport-served requests it always parses.
 // Empty only for hand-driven handler chains in tests.
+//
+// X-Forwarded-For= is deliberately the raw header (the line shape meerkat's
+// dashboards parse), which since ADR-0012 is NOT the identity the rate
+// limiter keys on — a 429's actual bucket (the derived client address) is
+// not on this line. Logging the derived client is a post-soak TODO once the
+// meerkat line-shape constraint lifts (PORTRAIT_TODO.md).
 smithy::server::Middleware AccessLog() {
   return [](smithy::http::RequestHandler next) {
     return [next = std::move(next)](

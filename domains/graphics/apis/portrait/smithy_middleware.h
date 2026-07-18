@@ -63,9 +63,7 @@ std::function<void(const smithy::http::BeastServerTransport::RejectedRequest&)> 
 /// its key — it keys as its TCP peer, and spoofed headers are ignored.
 /// Rejects with 429 {"error":"Too many requests"} plus Retry-After. Compose
 /// inside MeerkatParityObservability (so 429s are counted) and after
-/// HealthEndpoint (so probes are never rate limited). Over Loopback there is
-/// no peer to derive from: every request shares the one empty key unless the
-/// test stamps HttpRequest::peer_address.
+/// HealthEndpoint (so probes are never rate limited).
 smithy::server::Middleware RateLimitByClientAddress(
     std::shared_ptr<futility::rate_limiter::SlidingWindowRateLimiter<std::string>> limiter,
     smithy::http::TrustedProxies trusted, std::chrono::seconds retry_after);

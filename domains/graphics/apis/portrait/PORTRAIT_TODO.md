@@ -29,6 +29,10 @@ validation, multi-threaded serving, and the tracy::Tracer RNG race.
       so tests exercise the real wiring instead of simplified copies
 - [ ] Revisit `meerkat::HttpMetricsManager` as a portrait dep — rehome the
       instruments (e.g. under futility) once meerkat has no other consumers
+- [ ] Log the derived client address (ADR-0012) in the access log once the
+      meerkat line-shape constraint lifts — since the limiter keys on it,
+      a 429's actual bucket is currently not reconstructible from the line,
+      which logs only the raw X-Forwarded-For
 
 ## Feature backlog (pre-migration items still open)
 
