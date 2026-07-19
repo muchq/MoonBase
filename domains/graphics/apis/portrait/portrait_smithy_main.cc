@@ -102,6 +102,9 @@ int main() {
   options.max_body_bytes = std::size_t{1} * 1024 * 1024;
   // 413/431s the transport writes itself land in the same instruments.
   options.on_rejected = portrait::RejectionMetrics(metrics);
+  // Connections the transport terminates without a response — framing
+  // garbage, slowloris stalls, drops — get a WARNING line (ADR-0013).
+  options.on_connection_event = portrait::ConnectionEventLog();
   smithy::http::BeastServerTransport transport(options);
 
   smithy::Outcome<smithy::Unit> started = transport.Start(handler);

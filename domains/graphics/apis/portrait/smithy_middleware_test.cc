@@ -308,6 +308,32 @@ TEST_F(SmithyMiddlewareTest, AccessLogCarriesMintedTraceIdWhenInboundIsAbsentOrM
   EXPECT_TRUE(IsLowercaseHex32(replaced)) << "replaced: " << replaced;
 }
 
+// ADR-0013 connection events are log-only (connections, not requests — the
+// request-shaped instruments would miscount them); pin the WARNING line an
+// operator greps for during an incident. Transport-to-hook delivery is
+// upstream-tested; the mapping is portrait's.
+TEST(ConnectionEventLogTest, LogsKindPeerDetailAndElapsed) {
+  smithy::http::BeastServerTransport::ConnectionEvent event;
+  event.kind = smithy::http::BeastServerTransport::ConnectionEvent::Kind::kFramingError;
+  event.peer_address = "203.0.113.9:4711";
+  event.detail = "bad method";
+  event.elapsed = std::chrono::milliseconds(250);
+
+  std::string line;
+  absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+  EXPECT_CALL(log,
+              Log(absl::LogSeverity::kWarning, testing::_, testing::HasSubstr("connection_event")))
+      .WillOnce(testing::SaveArg<2>(&line));
+  log.StartCapturingLogs();
+  portrait::ConnectionEventLog()(event);
+  log.StopCapturingLogs();
+
+  EXPECT_NE(line.find("kind=framing_error"), std::string::npos) << line;
+  EXPECT_NE(line.find("peer=203.0.113.9:4711"), std::string::npos) << line;
+  EXPECT_NE(line.find("detail=bad method"), std::string::npos) << line;
+  EXPECT_NE(line.find("elapsed_ms=250"), std::string::npos) << line;
+}
+
 // A 431 can fire before Beast parses the method or target; the adapter maps
 // those to a stable label instead of empty strings dashboards would drop.
 TEST(RejectionMetricsTest, UnparsedRejectionLandsOnStableLabels) {
@@ -329,6 +355,7 @@ TEST_F(SmithyMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   options.port = 0;
   options.max_body_bytes = 2048;
   options.on_rejected = portrait::RejectionMetrics(sink_);
+  options.on_connection_event = portrait::ConnectionEventLog();
   smithy::http::BeastServerTransport transport(options);
   ASSERT_TRUE(transport.Start(handler_).ok());
 

@@ -30,6 +30,21 @@ class MeerkatMetricsSink final : public HttpMetricsSink {
 
 std::string RouteOf(const std::string& target) { return target.substr(0, target.find('?')); }
 
+const char* KindName(smithy::http::BeastServerTransport::ConnectionEvent::Kind kind) {
+  using Kind = smithy::http::BeastServerTransport::ConnectionEvent::Kind;
+  switch (kind) {
+    case Kind::kTlsHandshakeFailure:
+      return "tls_handshake_failure";
+    case Kind::kFramingError:
+      return "framing_error";
+    case Kind::kReadTimeout:
+      return "read_timeout";
+    case Kind::kDropped:
+      return "dropped";
+  }
+  return "unknown";
+}
+
 // Meerkat's access-log line shape. Kept separate from Observe because the
 // log line needs X-Forwarded-For and the response body size, which
 // RequestObservation doesn't carry; it measures its own duration for the
@@ -104,6 +119,17 @@ std::function<void(const smithy::http::BeastServerTransport::RejectedRequest&)> 
     // the rejection happens at parse time, so zero duration is accurate.
     metrics->RecordRequestStart(route, method);
     metrics->RecordRequestComplete(route, method, rejected.status, std::chrono::microseconds{0});
+  };
+}
+
+std::function<void(const smithy::http::BeastServerTransport::ConnectionEvent&)>
+ConnectionEventLog() {
+  return [](const smithy::http::BeastServerTransport::ConnectionEvent& event) {
+    // Runs on the transport's io thread; one line, no locks beyond the
+    // logger's own.
+    LOG(WARNING) << "connection_event kind=" << KindName(event.kind)
+                 << " peer=" << event.peer_address << " detail=" << event.detail << " elapsed_ms="
+                 << std::chrono::duration_cast<std::chrono::milliseconds>(event.elapsed).count();
   };
 }
 
