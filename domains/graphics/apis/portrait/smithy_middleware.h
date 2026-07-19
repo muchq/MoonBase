@@ -55,6 +55,16 @@ smithy::server::Middleware MeerkatParityObservability(std::shared_ptr<HttpMetric
 std::function<void(const smithy::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(
     std::shared_ptr<HttpMetricsSink> metrics);
 
+/// Log-only observer for BeastServerTransport::Options::on_connection_event
+/// (smithy-cpp ADR-0013, kinds in beast_transport.h): each connection the
+/// transport terminates without delivering a response gets one WARNING
+/// line. Log-only because these are connections, not requests — mapping
+/// them into the request-shaped meerkat instruments would distort request
+/// counts. Kind counters are a post-soak instrument decision
+/// (PORTRAIT_TODO.md).
+std::function<void(const smithy::http::BeastServerTransport::ConnectionEvent&)>
+ConnectionEventLog();
+
 }  // namespace portrait
 
 #endif

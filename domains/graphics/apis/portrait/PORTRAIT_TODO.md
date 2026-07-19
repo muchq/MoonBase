@@ -36,7 +36,9 @@ validation, multi-threaded serving, and the tracy::Tracer RNG race.
 - [ ] Put the `DeriveClient` source distribution on a dashboard (the
       trust-boundary drift signal: ~100% kUntrustedHeaderIgnored behind
       Caddy means the trust set no longer matches the topology — recipe in
-      smithy-cpp docs/production-guide.md). Needs an instrument outside the
+      smithy-cpp docs/production-guide.md). Same decision for ADR-0013
+      connection-event kind counters, currently log-only WARNING lines
+      (`ConnectionEventLog`). Both need instruments outside the
       meerkat-parity set, so decide naming with the metrics rehoming above
 
 ## Feature backlog (pre-migration items still open)

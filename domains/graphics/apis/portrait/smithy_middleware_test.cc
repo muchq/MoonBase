@@ -308,6 +308,24 @@ TEST_F(SmithyMiddlewareTest, AccessLogCarriesMintedTraceIdWhenInboundIsAbsentOrM
   EXPECT_TRUE(IsLowercaseHex32(replaced)) << "replaced: " << replaced;
 }
 
+// Pin the WARNING line an operator greps for during an incident.
+// Transport-to-hook delivery is upstream-tested; the mapping is portrait's.
+TEST(ConnectionEventLogTest, LogsKindPeerDetailAndElapsed) {
+  smithy::http::BeastServerTransport::ConnectionEvent event;
+  event.kind = smithy::http::BeastServerTransport::ConnectionEvent::Kind::kFramingError;
+  event.peer_address = "203.0.113.9:4711";
+  event.detail = "bad method";
+  event.elapsed = std::chrono::milliseconds(250);
+
+  absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+  EXPECT_CALL(log, Log(absl::LogSeverity::kWarning, testing::_,
+                       "connection_event kind=framing_error peer=203.0.113.9:4711 "
+                       "detail=bad method elapsed_ms=250"));
+  log.StartCapturingLogs();
+  portrait::ConnectionEventLog()(event);
+  log.StopCapturingLogs();
+}
+
 // A 431 can fire before Beast parses the method or target; the adapter maps
 // those to a stable label instead of empty strings dashboards would drop.
 TEST(RejectionMetricsTest, UnparsedRejectionLandsOnStableLabels) {
@@ -329,6 +347,9 @@ TEST_F(SmithyMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   options.port = 0;
   options.max_body_bytes = 2048;
   options.on_rejected = portrait::RejectionMetrics(sink_);
+  // Production-shaped options; no event can fire in this test (the 413 is
+  // on_rejected-only by design).
+  options.on_connection_event = portrait::ConnectionEventLog();
   smithy::http::BeastServerTransport transport(options);
   ASSERT_TRUE(transport.Start(handler_).ok());
 
