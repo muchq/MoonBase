@@ -37,6 +37,12 @@ std::string RouteOf(const std::string& target) { return target.substr(0, target.
 // request's traceparent — the transport guard mints or joins it at ingress
 // (smithy-cpp ADR-0011), so on transport-served requests it always parses.
 // Empty only for hand-driven handler chains in tests.
+//
+// X-Forwarded-For= is deliberately the raw header (the line shape meerkat's
+// dashboards parse), which since ADR-0012 is NOT the identity the rate
+// limiter keys on — a 429's actual bucket (the derived client address) is
+// not on this line. Logging the derived client is a post-soak TODO once the
+// meerkat line-shape constraint lifts (PORTRAIT_TODO.md).
 smithy::server::Middleware AccessLog() {
   return [](smithy::http::RequestHandler next) {
     return [next = std::move(next)](
@@ -101,12 +107,13 @@ std::function<void(const smithy::http::BeastServerTransport::RejectedRequest&)> 
   };
 }
 
-smithy::server::Middleware RateLimitByForwardedFor(
+smithy::server::Middleware RateLimitByClientAddress(
     std::shared_ptr<futility::rate_limiter::SlidingWindowRateLimiter<std::string>> limiter,
-    std::chrono::seconds retry_after) {
+    smithy::http::TrustedProxies trusted, std::chrono::seconds retry_after) {
   return smithy::server::Guard(
-      [limiter = std::move(limiter)](const smithy::http::HttpRequest& request) {
-        return limiter->allow(request.headers.Get("X-Forwarded-For").value_or(""));
+      [limiter = std::move(limiter),
+       trusted = std::move(trusted)](const smithy::http::HttpRequest& request) {
+        return limiter->allow(smithy::http::ClientAddress(request, trusted));
       },
       smithy::server::TooManyRequests(retry_after));
 }
