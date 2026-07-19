@@ -142,7 +142,6 @@ cc_library(
     srcs = ["smithy_middleware.cc"],
     hdrs = ["smithy_middleware.h"],
     deps = [
-        "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
         "//domains/platform/libs/meerkat:metrics_manager",
         "@com_google_absl//absl/log",
         "@smithy_cpp//runtime:http",

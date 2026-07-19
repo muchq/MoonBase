@@ -107,15 +107,4 @@ std::function<void(const smithy::http::BeastServerTransport::RejectedRequest&)> 
   };
 }
 
-smithy::server::Middleware RateLimitByClientAddress(
-    std::shared_ptr<futility::rate_limiter::SlidingWindowRateLimiter<std::string>> limiter,
-    smithy::http::TrustedProxies trusted, std::chrono::seconds retry_after) {
-  return smithy::server::Guard(
-      [limiter = std::move(limiter),
-       trusted = std::move(trusted)](const smithy::http::HttpRequest& request) {
-        return limiter->allow(smithy::http::ClientAddress(request, trusted));
-      },
-      smithy::server::TooManyRequests(retry_after));
-}
-
 }  // namespace portrait

@@ -125,8 +125,9 @@ class SmithyMiddlewareTest : public ::testing::Test {
     server_ = std::make_unique<PortraitServer>(std::make_shared<StubHandler>());
     handler_ = smithy::server::Chain(
         {portrait::MeerkatParityObservability(sink_), smithy::server::HealthEndpoint("/health"),
-         portrait::RateLimitByClientAddress(limiter_, smithy::http::TrustedProxies({kProxy}),
-                                            std::chrono::seconds(60))},
+         smithy::server::PerClientRateLimit(
+             [limiter = limiter_](const std::string& client) { return limiter->allow(client); },
+             smithy::http::TrustedProxies({kProxy}), std::chrono::seconds(60))},
         server_->Handler());
     loopback_ = std::make_shared<smithy::http::Loopback>();
     ASSERT_TRUE(loopback_->Start(handler_).ok());

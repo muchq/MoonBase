@@ -11,9 +11,11 @@
 
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
@@ -63,14 +65,22 @@ int main() {
 
   // The reverse-proxy trust boundary (smithy-cpp ADR-0012, contract in
   // smithy/http/forwarded.h): deploy/consolidated/compose.yaml pins Caddy's
-  // address and passes it here; unset means no proxy tier and every client
-  // keys as its TCP peer. Malformed entries fail startup by design.
-  smithy::http::TrustedProxies trusted_proxies;
-  try {
-    trusted_proxies = smithy::http::TrustedProxies(futility::env::ReadList("TRUSTED_PROXY_CIDRS"));
-  } catch (const std::invalid_argument& error) {
-    LOG(ERROR) << "Invalid TRUSTED_PROXY_CIDRS: " << error.what();
-    return 1;
+  // address and passes it here. Unset is the deliberate direct-connect
+  // statement (TrustedProxies::None()); set-but-empty or malformed fails
+  // startup rather than silently collapsing proxied traffic onto one key.
+  smithy::http::TrustedProxies trusted_proxies = smithy::http::TrustedProxies::None();
+  if (std::getenv("TRUSTED_PROXY_CIDRS") != nullptr) {
+    const std::vector<std::string> cidrs = futility::env::ReadList("TRUSTED_PROXY_CIDRS");
+    if (cidrs.empty()) {
+      LOG(ERROR) << "TRUSTED_PROXY_CIDRS is set but empty; unset it to serve direct-connect";
+      return 1;
+    }
+    try {
+      trusted_proxies = smithy::http::TrustedProxies(cidrs);
+    } catch (const std::invalid_argument& error) {
+      LOG(ERROR) << "Invalid TRUSTED_PROXY_CIDRS: " << error.what();
+      return 1;
+    }
   }
 
   // Observability outermost: health probes and 429s are counted and logged,
@@ -79,8 +89,9 @@ int main() {
   // from meerkat, where /health shared the empty X-Forwarded-For bucket.
   auto handler = smithy::server::Chain(
       {portrait::MeerkatParityObservability(metrics), smithy::server::HealthEndpoint("/health"),
-       portrait::RateLimitByClientAddress(rate_limiter, std::move(trusted_proxies),
-                                          std::chrono::seconds(60))},
+       smithy::server::PerClientRateLimit(
+           [rate_limiter](const std::string& client) { return rate_limiter->allow(client); },
+           std::move(trusted_proxies), std::chrono::seconds(60))},
       server.Handler());
 
   smithy::http::BeastServerTransport::Options options;

@@ -33,6 +33,11 @@ validation, multi-threaded serving, and the tracy::Tracer RNG race.
       meerkat line-shape constraint lifts — since the limiter keys on it,
       a 429's actual bucket is currently not reconstructible from the line,
       which logs only the raw X-Forwarded-For
+- [ ] Put the `DeriveClient` source distribution on a dashboard (the
+      trust-boundary drift signal: ~100% kUntrustedHeaderIgnored behind
+      Caddy means the trust set no longer matches the topology — recipe in
+      smithy-cpp docs/production-guide.md). Needs an instrument outside the
+      meerkat-parity set, so decide naming with the metrics rehoming above
 
 ## Feature backlog (pre-migration items still open)
 
