@@ -46,9 +46,20 @@ if [ -f ".env" ]; then
   export $(cat .env | grep -v '^#' | xargs)
 fi
 
-# Create the shared network if it doesn't exist
-echo "Creating docker network..."
-docker network create muchq_network 2>/dev/null || true
+# Ensure the shared network exists with the pinned subnet AND an ip-range that
+# keeps the dynamic pool off Caddy's static 172.28.0.2 (smithy-cpp ADR-0012).
+# The observability compose file marks this network `external: true`, so Compose
+# won't create it and ignores the ipam block — we own it here.
+echo "Ensuring docker network..."
+if ! docker network inspect muchq_network >/dev/null 2>&1; then
+  docker network create --subnet 172.28.0.0/16 --ip-range 172.28.1.0/24 --gateway 172.28.0.1 muchq_network
+elif ! docker network inspect muchq_network \
+      --format '{{range .IPAM.Config}}{{.Subnet}}|{{.IPRange}}{{end}}' | grep -q '172.28.0.0/16|172.28.1.0/24'; then
+  echo "muchq_network has the wrong subnet/ip-range; recreating..."
+  docker compose -f compose.yaml -f docker-compose.observability.yml down
+  docker network rm muchq_network
+  docker network create --subnet 172.28.0.0/16 --ip-range 172.28.1.0/24 --gateway 172.28.0.1 muchq_network
+fi
 
 # Pull only the published images (skip prom_proxy for now)
 echo "Pulling published images..."
