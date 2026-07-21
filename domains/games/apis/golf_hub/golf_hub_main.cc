@@ -1,0 +1,134 @@
+// The Golf hub server, phase 1 (https://github.com/muchq/MoonBase/issues/1168
+// was portrait's; the hub's tracking issue lands with its plan): session
+// minting plus room lifecycle on smithy-cpp's streaming stack — generated
+// async handlers (ADR-0021), SessionRegistry fan-out with reconnect grace
+// (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018).
+//
+//   bazel run //domains/games/apis/golf_hub
+//   curl -X POST localhost:8080/golf/v1/session -H 'content-type: application/json' -d '{}'
+//   # browser: new WebSocket("ws://localhost:8080/golf/v1/play?ticket=<t>",
+//   #                        "smithy.eventstream.v1+json")
+//   kill -TERM <pid>   # drains sessions, then exits 0
+
+#include <chrono>
+#include <csignal>
+#include <cstddef>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "absl/log/globals.h"
+#include "absl/log/initialize.h"
+#include "absl/log/log.h"
+#include "domains/games/apis/golf_hub/hub_handler.h"
+#include "domains/games/apis/golf_hub/ticket_vault.h"
+#include "domains/platform/libs/futility/env/env.h"
+#include "moonbase/golf/server.h"
+#include "smithy/http/beast_transport.h"
+#include "smithy/http/message.h"
+#include "smithy/server/middleware.h"
+#include "smithy/server/origin_gate.h"
+
+namespace {
+
+// The ticket query member, pre-101 (ADR-0018's blessed pattern): presence
+// and vault freshness checked at the gate; the handler's SpendTicket stays
+// the single-use authority.
+std::optional<std::string> ExtractQueryParam(std::string_view target, std::string_view name) {
+  const auto question = target.find('?');
+  if (question == std::string_view::npos) return std::nullopt;
+  std::string_view query = target.substr(question + 1);
+  while (!query.empty()) {
+    const auto amp = query.find('&');
+    const std::string_view pair = query.substr(0, amp);
+    query = amp == std::string_view::npos ? std::string_view{} : query.substr(amp + 1);
+    const auto eq = pair.find('=');
+    if (eq != std::string_view::npos && pair.substr(0, eq) == name) {
+      return std::string(pair.substr(eq + 1));
+    }
+  }
+  return std::nullopt;
+}
+
+}  // namespace
+
+int main() {
+  absl::InitializeLog();
+  absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
+
+  auto vault = std::make_shared<golf_hub::TicketVault>(
+      /*ticket_ttl=*/std::chrono::seconds(30), /*resume_ttl=*/std::chrono::hours(24));
+  auto handler = std::make_shared<golf_hub::HubHandler>(vault);
+
+  // Block shutdown signals before the transport spawns its thread pool.
+  sigset_t shutdown_signals;
+  sigemptyset(&shutdown_signals);
+  sigaddset(&shutdown_signals, SIGINT);
+  sigaddset(&shutdown_signals, SIGTERM);
+  pthread_sigmask(SIG_BLOCK, &shutdown_signals, nullptr);
+
+  moonbase::golf::GolfHubServer server(handler);
+
+  // Unary neighbors (GetSession, health) on the ordinary handler chain.
+  // TODO(post-scaffold): observability parity — hoist portrait's
+  // middleware adapters instead of growing a third copy here.
+  auto unary = smithy::server::Chain({smithy::server::HealthEndpoint("/health")}, server.Handler());
+
+  // Gate chain: origin allowlist (browser CSWSH defense; unset
+  // ALLOWED_ORIGINS admits all origins — dev parity with the Go hub's
+  // DEV_MODE) -> ticket freshness -> the stream router's own refusals.
+  const std::vector<std::string> allowed_origins = futility::env::ReadList("ALLOWED_ORIGINS");
+  auto origin_gate = allowed_origins.empty()
+                         ? std::function<std::optional<smithy::http::HttpResponse>(
+                               const smithy::http::HttpRequest&)>()
+                         : smithy::server::RequireOrigin(allowed_origins);
+  auto router_gate = server.StreamRouter()->Gate();
+  smithy::http::BeastServerTransport::Options options;
+  options.websocket_gate =
+      [origin_gate = std::move(origin_gate), router_gate = std::move(router_gate), vault](
+          const smithy::http::HttpRequest& request) -> std::optional<smithy::http::HttpResponse> {
+    if (origin_gate) {
+      if (auto refusal = origin_gate(request)) return refusal;
+    }
+    const auto ticket = ExtractQueryParam(request.target, "ticket");
+    if (!ticket.has_value() || !vault->PeekTicket(*ticket)) {
+      smithy::http::HttpResponse refusal;
+      refusal.status = 401;
+      refusal.headers.Set("content-type", "application/json");
+      refusal.body = R"({"message":"mint a ticket via POST /golf/v1/session"})";
+      return refusal;
+    }
+    return router_gate(request);
+  };
+  options.on_websocket_session = server.StreamRouter()->ServeSession();
+  options.websocket_accept_json_frames = true;  // the browser wire (ADR-0018)
+
+  options.address = "0.0.0.0";
+  options.port = futility::env::ReadPort(8080);
+  // Sessions hold no threads (ADR-0021); this pool serves launch points
+  // and unary requests only.
+  options.handler_threads = 4;
+  // GetSession bodies are tiny; nothing here needs big payloads.
+  options.max_body_bytes = std::size_t{64} * 1024;
+  smithy::http::BeastServerTransport transport(options);
+
+  smithy::Outcome<smithy::Unit> started = transport.Start(unary);
+  if (!started.ok()) {
+    LOG(ERROR) << "Failed to start golf hub on " << options.address << ":" << options.port << ": "
+               << started.error().message();
+    return 1;
+  }
+
+  LOG(INFO) << "Golf hub running on http://" << options.address << ":" << transport.port();
+  LOG(INFO) << "  POST http://localhost:" << transport.port() << "/golf/v1/session";
+  LOG(INFO) << "  WS   ws://localhost:" << transport.port() << "/golf/v1/play?ticket=<ticket>";
+
+  int signal_number = 0;
+  sigwait(&shutdown_signals, &signal_number);
+  LOG(INFO) << "Signal " << signal_number << " received; draining sessions";
+  handler->registry().Drain(std::chrono::seconds(5));
+  transport.Stop();
+  return 0;
+}

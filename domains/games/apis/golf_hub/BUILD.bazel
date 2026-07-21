@@ -1,0 +1,88 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
+
+# Phase 1 of the Golf hub rebuild on smithy-cpp event streams (see
+# README.md): session minting + room lifecycle. Game rules and their wire
+# vocabulary land in phase 2, after the rules-variant decision.
+smithy_cpp_server_library(
+    name = "golf_hub_smithy_server",
+    srcs = ["model/golf_hub.smithy"],
+    namespace = "moonbase::golf",
+    service = "moonbase.golf#GolfHub",
+)
+
+smithy_cpp_client_library(
+    name = "golf_hub_smithy_client",
+    srcs = ["model/golf_hub.smithy"],
+    namespace = "moonbase::golf",
+    service = "moonbase.golf#GolfHub",
+)
+
+cc_library(
+    name = "ticket_vault",
+    srcs = ["ticket_vault.cc"],
+    hdrs = ["ticket_vault.h"],
+    deps = [
+        "@com_google_absl//absl/random",
+        "@com_google_absl//absl/random:distributions",
+    ],
+)
+
+cc_test(
+    name = "ticket_vault_test",
+    size = "small",
+    srcs = ["ticket_vault_test.cc"],
+    deps = [
+        ":ticket_vault",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "hub_handler",
+    srcs = ["hub_handler.cc"],
+    hdrs = ["hub_handler.h"],
+    deps = [
+        ":golf_hub_smithy_server",
+        ":ticket_vault",
+        "@smithy_cpp//runtime:eventstream",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
+cc_test(
+    name = "hub_e2e_test",
+    size = "small",
+    srcs = [
+        "hub_e2e_test.cc",
+        "stream_test_fixture.h",
+    ],
+    deps = [
+        ":golf_hub_smithy_client",
+        ":golf_hub_smithy_server",
+        ":hub_handler",
+        ":ticket_vault",
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:client",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:http",
+    ],
+)
+
+cc_binary(
+    name = "golf_hub",
+    srcs = ["golf_hub_main.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":golf_hub_smithy_server",
+        ":hub_handler",
+        ":ticket_vault",
+        "//domains/platform/libs/futility/env",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:globals",
+        "@com_google_absl//absl/log:initialize",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:http_beast",
+        "@smithy_cpp//runtime:server",
+    ],
+)
