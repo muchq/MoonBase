@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 #[command(
     name = "impact-mcp",
     about = "impact-mcp — amplify your impact and make it visible",
-    version = "0.0.10",
+    version = "0.0.11",
     long_about = "A local-first AI toolkit that helps engineers capture evidence of impact, \
                    understand role expectations, close gaps, and communicate contributions \
                    clearly — for better project results and growth in your career."
