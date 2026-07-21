@@ -91,7 +91,7 @@ TEST_F(GolfHubStreamFixture, CreateJoinAndLeaveBroadcastRoomState) {
   ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
   ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
 
-  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateRoom(moonbase::golf::CreateRoom{})).ok());
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
   auto created = ReceiveCase(alice->stream, "roomState");
   ASSERT_TRUE(created.has_value());
   const auto* room = created->as_roomState_or_null();
@@ -102,7 +102,7 @@ TEST_F(GolfHubStreamFixture, CreateJoinAndLeaveBroadcastRoomState) {
 
   moonbase::golf::JoinRoom join;
   join.roomId = room_id;
-  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinRoom(join)).ok());
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
   auto bob_view = ReceiveCase(bob->stream, "roomState");
   ASSERT_TRUE(bob_view.has_value());
   EXPECT_EQ(bob_view->as_roomState_or_null()->players.size(), 2u);
@@ -111,7 +111,7 @@ TEST_F(GolfHubStreamFixture, CreateJoinAndLeaveBroadcastRoomState) {
   EXPECT_EQ(alice_view->as_roomState_or_null()->players.size(), 2u);
 
   // Bob leaves deliberately: he gets the ack, Alice sees the shrink.
-  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromLeaveRoom(moonbase::golf::LeaveRoom{})).ok());
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromLeaveroom(moonbase::golf::LeaveRoom{})).ok());
   auto ack = ReceiveCase(bob->stream, "roomLeft");
   ASSERT_TRUE(ack.has_value());
   EXPECT_EQ(ack->as_roomLeft_or_null()->roomId, room_id);
@@ -127,19 +127,19 @@ TEST_F(GolfHubStreamFixture, CommandsOutsideARoomAreRejectedInBand) {
   ASSERT_TRUE(ReceiveCase(seat->stream, "sessionReady").has_value());
 
   ASSERT_TRUE(
-      seat->stream.Send(GolfCommands::FromGetRoomState(moonbase::golf::GetRoomState{})).ok());
+      seat->stream.Send(GolfCommands::FromGetroomstate(moonbase::golf::GetRoomState{})).ok());
   auto rejected = ReceiveCase(seat->stream, "commandRejected");
   ASSERT_TRUE(rejected.has_value());
   EXPECT_EQ(rejected->as_commandRejected_or_null()->reason, "not in a room");
 
   moonbase::golf::JoinRoom join;
   join.roomId = "r-nope";
-  ASSERT_TRUE(seat->stream.Send(GolfCommands::FromJoinRoom(join)).ok());
+  ASSERT_TRUE(seat->stream.Send(GolfCommands::FromJoinroom(join)).ok());
   auto unknown = ReceiveCase(seat->stream, "commandRejected");
   ASSERT_TRUE(unknown.has_value());
 
   // The stream survived both rejections.
-  ASSERT_TRUE(seat->stream.Send(GolfCommands::FromCreateRoom(moonbase::golf::CreateRoom{})).ok());
+  ASSERT_TRUE(seat->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
   EXPECT_TRUE(ReceiveCase(seat->stream, "roomState").has_value());
 }
 
@@ -150,12 +150,12 @@ TEST_F(GolfHubStreamFixture, CleanCloseFreesTheRoomSlotAndNotifies) {
   ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
   ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
 
-  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateRoom(moonbase::golf::CreateRoom{})).ok());
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
   auto created = ReceiveCase(alice->stream, "roomState");
   ASSERT_TRUE(created.has_value());
   moonbase::golf::JoinRoom join;
   join.roomId = created->as_roomState_or_null()->roomId;
-  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinRoom(join)).ok());
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
   ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
 

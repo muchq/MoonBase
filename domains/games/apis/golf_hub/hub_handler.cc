@@ -63,7 +63,7 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
   ready.playerId = player_id;
   ready.resumed = resumed;
   if (room.has_value()) ready.roomId = *room;
-  registry_.SendTo(player_id, GolfEvents::FromSessionReady(std::move(ready)));
+  registry_.SendTo(player_id, GolfEvents::FromSessionready(std::move(ready)));
   // A resumed seat's room sees the connected flip (and the resumer gets
   // the current snapshot it missed).
   if (room.has_value()) BroadcastRoom(*room);
@@ -138,7 +138,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
     }
     moonbase::golf::RoomLeft ack;
     ack.roomId = *left;
-    registry_.SendTo(player_id, GolfEvents::FromRoomLeft(std::move(ack)));
+    registry_.SendTo(player_id, GolfEvents::FromRoomleft(std::move(ack)));
     BroadcastRoom(*left);
     return;
   }
@@ -151,7 +151,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
       if (it != player_room_.end()) snapshot = SnapshotLocked(it->second);
     }
     if (snapshot.has_value()) {
-      registry_.SendTo(player_id, GolfEvents::FromRoomState(snapshot->state));
+      registry_.SendTo(player_id, GolfEvents::FromRoomstate(snapshot->state));
     } else {
       Reject(player_id, "not in a room");
     }
@@ -205,14 +205,14 @@ void HubHandler::BroadcastRoom(const std::string& room_id) {
   // Per-recipient construction (identical today; phase 2's per-viewer
   // redaction slots into this callback and nowhere else).
   registry_.Broadcast(snapshot->member_ids, [&snapshot](const std::string& /*recipient*/) {
-    return GolfEvents::FromRoomState(snapshot->state);
+    return GolfEvents::FromRoomstate(snapshot->state);
   });
 }
 
 void HubHandler::Reject(const std::string& player_id, std::string reason) {
   moonbase::golf::CommandRejected rejected;
   rejected.reason = std::move(reason);
-  registry_.SendTo(player_id, GolfEvents::FromCommandRejected(std::move(rejected)));
+  registry_.SendTo(player_id, GolfEvents::FromCommandrejected(std::move(rejected)));
 }
 
 void HubHandler::OnExpired(const std::string& player_id) {
