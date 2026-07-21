@@ -5,8 +5,8 @@
 // (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018).
 //
 //   bazel run //domains/games/apis/golf_hub
-//   curl -X POST localhost:8080/golf/v1/session -H 'content-type: application/json' -d '{}'
-//   # browser: new WebSocket("ws://localhost:8080/golf/v1/play?ticket=<t>",
+//   curl -X POST localhost:8080/games/v2/golf/session -H 'content-type: application/json' -d '{}'
+//   # browser: new WebSocket("ws://localhost:8080/games/v2/golf/play?ticket=<t>",
 //   #                        "smithy.eventstream.v1+json")
 //   kill -TERM <pid>   # drains sessions, then exits 0
 
@@ -97,7 +97,7 @@ int main() {
       smithy::http::HttpResponse refusal;
       refusal.status = 401;
       refusal.headers.Set("content-type", "application/json");
-      refusal.body = R"({"message":"mint a ticket via POST /golf/v1/session"})";
+      refusal.body = R"({"message":"mint a ticket via POST /games/v2/golf/session"})";
       return refusal;
     }
     return router_gate(request);
@@ -122,8 +122,9 @@ int main() {
   }
 
   LOG(INFO) << "Golf hub running on http://" << options.address << ":" << transport.port();
-  LOG(INFO) << "  POST http://localhost:" << transport.port() << "/golf/v1/session";
-  LOG(INFO) << "  WS   ws://localhost:" << transport.port() << "/golf/v1/play?ticket=<ticket>";
+  LOG(INFO) << "  POST http://localhost:" << transport.port() << "/games/v2/golf/session";
+  LOG(INFO) << "  WS   ws://localhost:" << transport.port()
+            << "/games/v2/golf/play?ticket=<ticket>";
 
   int signal_number = 0;
   sigwait(&shutdown_signals, &signal_number);

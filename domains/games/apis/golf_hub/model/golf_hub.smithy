@@ -21,7 +21,7 @@ service GolfHub {
 /// upgrade, and a multi-use resume token a reconnect exchanges for a fresh
 /// ticket (same playerId back). No resumeToken, or an expired one, mints a
 /// fresh player.
-@http(method: "POST", uri: "/golf/v1/session")
+@http(method: "POST", uri: "/games/v2/golf/session")
 operation GetSession {
     input := {
         resumeToken: String
@@ -43,7 +43,7 @@ operation GetSession {
 /// upgrade headers); the gate checks it pre-101 and the handler spends it
 /// (single use). Invalid moves never end the stream — they come back as
 /// commandRejected events; the modeled errors below are terminal.
-@http(method: "POST", uri: "/golf/v1/play")
+@http(method: "POST", uri: "/games/v2/golf/play")
 operation Play {
     input := {
         @required
