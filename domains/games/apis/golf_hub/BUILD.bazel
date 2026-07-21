@@ -66,6 +66,10 @@ cc_test(
         "@smithy_cpp//runtime:client",
         "@smithy_cpp//runtime:core",
         "@smithy_cpp//runtime:http",
+        # The generated streaming client names BeastWebSocketClient::Dialer()
+        # unconditionally, even under an injected dialer (documented ADR-0016
+        # cost) — the symbol must link from somewhere.
+        "@smithy_cpp//runtime:http_beast",
     ],
 )
 
