@@ -76,8 +76,11 @@ jobs:
           disk-cache: ${{ github.workflow }}
           repository-cache: true
           bazelrc: |
-            build --local_resources=cpu=2
-            build --local_resources=memory=4096
+            # Public-repo ubuntu-latest runners are 4 vCPU / 16 GB; leave
+            # headroom below that so concurrent -c opt compiles of the
+            # heaviest TUs (protobuf, otel, beast) don't OOM the runner.
+            build --local_resources=cpu=4
+            build --local_resources=memory=12288
       - name: Create bazel-diff output directory
         run: |
           mkdir -p bazel-diff-output

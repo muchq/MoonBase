@@ -144,35 +144,19 @@ cc_test(
     ],
 )
 
-# Serving middleware and the ProductionChain builder shared by main.cc and
-# the middleware tests, so tests exercise the deployed wiring.
-# Package-private, and queued to hoist into //domains/platform/libs/aura so
-# golf_hub can adopt the same chain (#1184).
-cc_library(
-    name = "smithy_middleware",
-    srcs = ["smithy_middleware.cc"],
-    hdrs = ["smithy_middleware.h"],
-    deps = [
-        "//domains/platform/libs/futility/otel:http_metrics",
-        "@com_google_absl//absl/log",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:http_beast",
-        "@smithy_cpp//runtime:server",
-    ],
-)
-
+# Portrait's wiring of the shared aura serving chain (#1184): chain
+# behavior in isolation is aura's own test suite; this pins the end-to-end
+# composition around the generated Portrait server.
 cc_test(
-    name = "smithy_middleware_test",
+    name = "production_chain_test",
     size = "small",
-    srcs = ["smithy_middleware_test.cc"],
+    srcs = ["production_chain_test.cc"],
     deps = [
         ":portrait_smithy_client",
         ":portrait_smithy_server",
-        ":smithy_middleware",
         ":test_support",
+        "//domains/platform/libs/aura",
         "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
-        "@com_google_absl//absl/base:log_severity",
-        "@com_google_absl//absl/log:scoped_mock_log",
         "@googletest//:gtest_main",
         "@smithy_cpp//runtime:client",
         "@smithy_cpp//runtime:core",
@@ -189,7 +173,7 @@ cc_binary(
     deps = [
         ":portrait_smithy_server",
         ":smithy_handler",
-        ":smithy_middleware",
+        "//domains/platform/libs/aura",
         "//domains/platform/libs/futility/env",
         "//domains/platform/libs/futility/otel:http_metrics",
         "//domains/platform/libs/futility/otel:otel_provider",
