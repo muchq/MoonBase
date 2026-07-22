@@ -1,5 +1,10 @@
-#ifndef CPP_PORTRAIT_SMITHY_MIDDLEWARE_H
-#define CPP_PORTRAIT_SMITHY_MIDDLEWARE_H
+#ifndef DOMAINS_PLATFORM_LIBS_AURA_MIDDLEWARE_H
+#define DOMAINS_PLATFORM_LIBS_AURA_MIDDLEWARE_H
+
+// aura: the serving chain for smithy-cpp services — observability (the
+// shared http_server_* instruments plus an access log), health, and
+// optional per-client rate limiting, composed the same way in production
+// and in tests.
 
 #include <chrono>
 #include <functional>
@@ -14,7 +19,7 @@ namespace futility::otel {
 class HttpMetricsManager;
 }  // namespace futility::otel
 
-namespace portrait {
+namespace aura {
 
 /// The two calls futility::otel::HttpMetricsManager exposes, as a virtual
 /// seam so tests can observe middleware invocations. MakeHttpMetricsSink
@@ -48,12 +53,13 @@ std::shared_ptr<HttpMetricsSink> MakeHttpMetricsSink(
 ///     res.body.bytes=<n> duration_ms=<ms>
 smithy::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> metrics);
 
-/// The production middleware chain around the generated server's handler,
-/// shared between main and the middleware tests so they exercise the same
-/// wiring. Observability sits outermost; health before the rate-limit guard
-/// so probes are never rate limited; the guard keys on the ADR-0012 derived
-/// client address (trust boundary from `trusted_proxies`) and answers 429
-/// with Retry-After.
+/// The production middleware chain around a generated server's handler,
+/// shared between service mains and their middleware tests so both exercise
+/// the same wiring. Observability sits outermost; health before the
+/// rate-limit guard so probes are never rate limited; the guard keys on the
+/// ADR-0012 derived client address (trust boundary from `trusted_proxies`)
+/// and answers 429 with Retry-After. Leave `allow_request` unset for
+/// services without a rate limiter — the guard is skipped entirely.
 struct ChainOptions {
   std::shared_ptr<HttpMetricsSink> metrics;
   std::function<bool(const std::string& client)> allow_request;
@@ -75,10 +81,9 @@ std::function<void(const smithy::http::BeastServerTransport::RejectedRequest&)> 
 /// transport terminates without delivering a response gets one WARNING
 /// line. Log-only because these are connections, not requests — mapping
 /// them into the request-shaped instruments would distort request counts.
-/// Kind counters are a pending instrument decision (PORTRAIT_TODO.md).
 std::function<void(const smithy::http::BeastServerTransport::ConnectionEvent&)>
 ConnectionEventLog();
 
-}  // namespace portrait
+}  // namespace aura
 
 #endif

@@ -3,8 +3,9 @@
 `:portrait` serves the Smithy-modeled API (`model/portrait.smithy`) on
 smithy-cpp's Beast transport, guarded by golden wire fixtures
 (`portrait_smithy_wire_test`), real-render handler tests
-(`smithy_handler_test`), and middleware tests over the production chain
-builder (`smithy_middleware_test`).
+(`smithy_handler_test`), and an end-to-end pass over the shared aura
+serving chain (`production_chain_test`; the chain's own behavior is tested
+in `//domains/platform/libs/aura`).
 
 ## Feature backlog
 

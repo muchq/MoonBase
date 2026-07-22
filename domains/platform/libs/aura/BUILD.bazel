@@ -1,0 +1,35 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+# aura: the serving chain for smithy-cpp services — observability over the
+# shared futility/otel HTTP instruments (plus the access log), health, and
+# optional per-client rate limiting, composed identically in production and
+# in tests (https://github.com/muchq/MoonBase/issues/1184).
+cc_library(
+    name = "aura",
+    srcs = ["middleware.cc"],
+    hdrs = ["middleware.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/platform/libs/futility/otel:http_metrics",
+        "@com_google_absl//absl/log",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:http_beast",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
+cc_test(
+    name = "middleware_test",
+    size = "small",
+    srcs = ["middleware_test.cc"],
+    deps = [
+        ":aura",
+        "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
+        "@com_google_absl//absl/base:log_severity",
+        "@com_google_absl//absl/log:scoped_mock_log",
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:http_beast",
+        "@smithy_cpp//runtime:server",
+    ],
+)

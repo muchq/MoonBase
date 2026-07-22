@@ -1,6 +1,6 @@
 // The portrait server: the generated Smithy Portrait API on the Beast
 // transport, with observability, health, and per-client rate limiting
-// composed by the shared ProductionChain builder (smithy_middleware.h).
+// composed by the shared aura ProductionChain builder (platform/libs/aura).
 //
 //   bazel run //domains/graphics/apis/portrait
 //   curl localhost:8080/portrait/v1/trace -H 'content-type: application/json' -d @scene.json
@@ -19,7 +19,7 @@
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
 #include "domains/graphics/apis/portrait/smithy_handler.h"
-#include "domains/graphics/apis/portrait/smithy_middleware.h"
+#include "domains/platform/libs/aura/middleware.h"
 #include "domains/platform/libs/futility/env/env.h"
 #include "domains/platform/libs/futility/otel/http_metrics.h"
 #include "domains/platform/libs/futility/otel/otel_provider.h"
@@ -47,8 +47,8 @@ int main() {
 
   moonbase::portrait::PortraitServer server(std::make_shared<portrait::SmithyTracerHandler>());
 
-  auto metrics = portrait::MakeHttpMetricsSink(
-      std::make_shared<futility::otel::HttpMetricsManager>("portrait"));
+  auto metrics =
+      aura::MakeHttpMetricsSink(std::make_shared<futility::otel::HttpMetricsManager>("portrait"));
 
   futility::rate_limiter::SlidingWindowRateLimiterConfig limiter_config{
       .max_requests_per_key = 20,
@@ -80,8 +80,8 @@ int main() {
     }
   }
 
-  auto handler = portrait::ProductionChain(
-      portrait::ChainOptions{
+  auto handler = aura::ProductionChain(
+      aura::ChainOptions{
           .metrics = metrics,
           .allow_request =
               [rate_limiter](const std::string& client) { return rate_limiter->allow(client); },
@@ -96,10 +96,10 @@ int main() {
   // default is far more than this service ever needs.
   options.max_body_bytes = std::size_t{1} * 1024 * 1024;
   // 413/431s the transport writes itself land in the same instruments.
-  options.on_rejected = portrait::RejectionMetrics(metrics);
+  options.on_rejected = aura::RejectionMetrics(metrics);
   // Connections the transport terminates without a response get a WARNING
   // line (ADR-0013).
-  options.on_connection_event = portrait::ConnectionEventLog();
+  options.on_connection_event = aura::ConnectionEventLog();
   smithy::http::BeastServerTransport transport(options);
 
   smithy::Outcome<smithy::Unit> started = transport.Start(handler);

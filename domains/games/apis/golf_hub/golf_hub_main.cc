@@ -24,11 +24,13 @@
 #include "absl/log/log.h"
 #include "domains/games/apis/golf_hub/hub_handler.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
+#include "domains/platform/libs/aura/middleware.h"
 #include "domains/platform/libs/futility/env/env.h"
+#include "domains/platform/libs/futility/otel/http_metrics.h"
+#include "domains/platform/libs/futility/otel/otel_provider.h"
 #include "moonbase/golf/server.h"
 #include "smithy/http/beast_transport.h"
 #include "smithy/http/message.h"
-#include "smithy/server/middleware.h"
 #include "smithy/server/origin_gate.h"
 
 namespace {
@@ -58,6 +60,10 @@ int main() {
   absl::InitializeLog();
   absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
 
+  // OTel setup: OTLP push, service "golf_hub".
+  futility::otel::OtelConfig otel_config{.service_name = "golf_hub", .service_version = "1.0.0"};
+  futility::otel::OtelProvider otel_provider(otel_config);
+
   auto vault = std::make_shared<golf_hub::TicketVault>(
       /*ticket_ttl=*/std::chrono::seconds(30), /*resume_ttl=*/std::chrono::hours(24));
   auto handler = std::make_shared<golf_hub::HubHandler>(vault);
@@ -71,10 +77,13 @@ int main() {
 
   moonbase::golf::GolfHubServer server(handler);
 
-  // Unary neighbors (GetSession, health) on the ordinary handler chain.
-  // TODO(post-scaffold): observability parity — hoist portrait's
-  // middleware adapters instead of growing a third copy here.
-  auto unary = smithy::server::Chain({smithy::server::HealthEndpoint("/health")}, server.Handler());
+  // Unary neighbors (GetSession, health) on the shared aura chain:
+  // http_server_* instruments + access log outermost, then health. No rate
+  // limiter yet — session minting is already gated by the ticket vault, and
+  // a per-client budget can slot into ChainOptions when it earns its keep.
+  auto metrics =
+      aura::MakeHttpMetricsSink(std::make_shared<futility::otel::HttpMetricsManager>("golf_hub"));
+  auto unary = aura::ProductionChain(aura::ChainOptions{.metrics = metrics}, server.Handler());
 
   // Gate chain: origin allowlist (browser CSWSH defense; unset
   // ALLOWED_ORIGINS admits all origins — dev parity with the Go hub's
@@ -112,6 +121,11 @@ int main() {
   options.handler_threads = 4;
   // GetSession bodies are tiny; nothing here needs big payloads.
   options.max_body_bytes = std::size_t{64} * 1024;
+  // 413/431s the transport writes itself land in the same instruments;
+  // connections it terminates without a response get a WARNING line
+  // (ADR-0013).
+  options.on_rejected = aura::RejectionMetrics(metrics);
+  options.on_connection_event = aura::ConnectionEventLog();
   smithy::http::BeastServerTransport transport(options);
 
   smithy::Outcome<smithy::Unit> started = transport.Start(unary);

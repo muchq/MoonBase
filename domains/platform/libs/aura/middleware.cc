@@ -1,4 +1,4 @@
-#include "domains/graphics/apis/portrait/smithy_middleware.h"
+#include "domains/platform/libs/aura/middleware.h"
 
 #include <chrono>
 #include <utility>
@@ -9,7 +9,7 @@
 #include "smithy/http/trace_context.h"
 #include "smithy/http/transport.h"
 
-namespace portrait {
+namespace aura {
 namespace {
 
 class OtelHttpMetricsSink final : public HttpMetricsSink {
@@ -59,8 +59,7 @@ std::string KindName(smithy::http::BeastServerTransport::ConnectionEvent::Kind k
 //
 // X-Forwarded-For= is the raw header, which since ADR-0012 is NOT the
 // identity the rate limiter keys on — a 429's actual bucket (the derived
-// client address) is not on this line. Logging the derived client is a
-// pending TODO (PORTRAIT_TODO.md).
+// client address) is not on this line.
 smithy::server::Middleware AccessLog() {
   return [](smithy::http::RequestHandler next) {
     return [next = std::move(next)](
@@ -111,11 +110,13 @@ smithy::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink>
 
 smithy::http::RequestHandler ProductionChain(ChainOptions options,
                                              smithy::http::RequestHandler handler) {
-  return smithy::server::Chain(
-      {ServingObservability(std::move(options.metrics)), smithy::server::HealthEndpoint("/health"),
-       smithy::server::PerClientRateLimit(std::move(options.allow_request),
-                                          std::move(options.trusted_proxies), options.retry_after)},
-      std::move(handler));
+  std::vector<smithy::server::Middleware> chain = {ServingObservability(std::move(options.metrics)),
+                                                   smithy::server::HealthEndpoint("/health")};
+  if (options.allow_request) {
+    chain.push_back(smithy::server::PerClientRateLimit(
+        std::move(options.allow_request), std::move(options.trusted_proxies), options.retry_after));
+  }
+  return smithy::server::Chain(std::move(chain), std::move(handler));
 }
 
 std::function<void(const smithy::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(
@@ -144,4 +145,4 @@ ConnectionEventLog() {
   };
 }
 
-}  // namespace portrait
+}  // namespace aura
