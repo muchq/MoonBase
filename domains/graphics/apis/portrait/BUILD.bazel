@@ -146,8 +146,8 @@ cc_test(
 
 # Serving middleware and the ProductionChain builder shared by main.cc and
 # the middleware tests, so tests exercise the deployed wiring.
-# Package-private until a second smithy-cpp service wants the same chain;
-# hoist to a shared platform lib at that point (golf_hub has a TODO on it).
+# Package-private, and queued to hoist into //domains/platform/libs/aura so
+# golf_hub can adopt the same chain (#1184).
 cc_library(
     name = "smithy_middleware",
     srcs = ["smithy_middleware.cc"],
