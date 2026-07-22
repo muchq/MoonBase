@@ -1,25 +1,12 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
-# The HTTP metrics instruments stand alone so services on other transports
-# (e.g. portrait's smithy-cpp server) can emit the exact same instrument
-# names and labels without linking meerkat's mongoose server.
-cc_library(
-    name = "metrics_manager",
-    srcs = ["metrics_manager.cc"],
-    hdrs = ["metrics_manager.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//domains/platform/libs/futility/otel:metrics",
-    ],
-)
-
 cc_library(
     name = "meerkat",
     srcs = ["meerkat.cc"],
     hdrs = ["meerkat.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":metrics_manager",
+        "//domains/platform/libs/futility/otel:http_metrics",
         "//domains/platform/libs/futility/otel:metrics",
         "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
         "@com_google_absl//absl/log",
@@ -71,16 +58,6 @@ cc_test(
     deps = [
         ":http_client",
         ":meerkat",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "metrics_manager_test",
-    size = "small",
-    srcs = ["metrics_manager_test.cc"],
-    deps = [
-        ":metrics_manager",
         "@googletest//:gtest_main",
     ],
 )

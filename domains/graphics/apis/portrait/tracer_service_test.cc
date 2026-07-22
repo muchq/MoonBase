@@ -6,6 +6,7 @@
 
 #include "absl/status/status.h"
 #include "domains/graphics/apis/portrait/types.h"
+#include "domains/graphics/libs/png_plusplus/png_plusplus.h"
 
 namespace portrait {
 namespace {
@@ -59,7 +60,9 @@ TEST_F(TracerServiceTest, TraceValidRequest) {
   ASSERT_TRUE(result.ok()) << result.status().message();
 
   const TraceResponse& response = result.value();
-  EXPECT_FALSE(response.base64_png.empty());
+  // Raw PNG bytes, not base64: the handler wraps these in the wire Blob
+  // directly.
+  EXPECT_TRUE(pngpp::isPng(response.png_bytes));
   EXPECT_EQ(response.width, 100);
   EXPECT_EQ(response.height, 100);
 }
@@ -71,15 +74,15 @@ TEST_F(TracerServiceTest, TraceWithCache) {
   // First call - should generate image
   auto result1 = service.trace(request);
   ASSERT_TRUE(result1.ok());
-  const std::string& base64_1 = result1.value().base64_png;
+  const auto& png_1 = result1.value().png_bytes;
 
   // Second call with same request - should return cached result
   auto result2 = service.trace(request);
   ASSERT_TRUE(result2.ok());
-  const std::string& base64_2 = result2.value().base64_png;
+  const auto& png_2 = result2.value().png_bytes;
 
   // Cached results should be identical
-  EXPECT_EQ(base64_1, base64_2);
+  EXPECT_EQ(png_1, png_2);
 }
 
 TEST_F(TracerServiceTest, TraceInvalidRequestEmptyScene) {
@@ -110,7 +113,7 @@ TEST_F(TracerServiceTest, TraceDifferentScenes) {
   TraceRequest request1{basic_scene_, basic_perspective_, basic_output_};
   auto result1 = service.trace(request1);
   ASSERT_TRUE(result1.ok());
-  const std::string& base64_1 = result1.value().base64_png;
+  const auto& png_1 = result1.value().png_bytes;
 
   // Modify scene for second request
   Scene modified_scene = basic_scene_;
@@ -118,10 +121,10 @@ TEST_F(TracerServiceTest, TraceDifferentScenes) {
   TraceRequest request2{modified_scene, basic_perspective_, basic_output_};
   auto result2 = service.trace(request2);
   ASSERT_TRUE(result2.ok());
-  const std::string& base64_2 = result2.value().base64_png;
+  const auto& png_2 = result2.value().png_bytes;
 
   // Different scenes should produce different images
-  EXPECT_NE(base64_1, base64_2);
+  EXPECT_NE(png_1, png_2);
 }
 
 TEST_F(TracerServiceTest, TraceDifferentPerspectives) {
@@ -131,7 +134,7 @@ TEST_F(TracerServiceTest, TraceDifferentPerspectives) {
   TraceRequest request1{basic_scene_, basic_perspective_, basic_output_};
   auto result1 = service.trace(request1);
   ASSERT_TRUE(result1.ok());
-  const std::string& base64_1 = result1.value().base64_png;
+  const auto& png_1 = result1.value().png_bytes;
 
   // Modify perspective for second request
   Perspective modified_perspective = basic_perspective_;
@@ -139,10 +142,10 @@ TEST_F(TracerServiceTest, TraceDifferentPerspectives) {
   TraceRequest request2{basic_scene_, modified_perspective, basic_output_};
   auto result2 = service.trace(request2);
   ASSERT_TRUE(result2.ok());
-  const std::string& base64_2 = result2.value().base64_png;
+  const auto& png_2 = result2.value().png_bytes;
 
   // Different perspectives should produce different images
-  EXPECT_NE(base64_1, base64_2);
+  EXPECT_NE(png_1, png_2);
 }
 
 TEST_F(TracerServiceTest, TraceDifferentOutputSizes) {
@@ -164,7 +167,7 @@ TEST_F(TracerServiceTest, TraceDifferentOutputSizes) {
   EXPECT_EQ(result2.value().height, 150);
 
   // Different output sizes should produce different images
-  EXPECT_NE(result1.value().base64_png, result2.value().base64_png);
+  EXPECT_NE(result1.value().png_bytes, result2.value().png_bytes);
 }
 
 TEST_F(TracerServiceTest, TraceMultipleSpheres) {
@@ -192,7 +195,7 @@ TEST_F(TracerServiceTest, TraceMultipleSpheres) {
   TraceRequest request{multi_sphere_scene, basic_perspective_, basic_output_};
   auto result = service.trace(request);
   ASSERT_TRUE(result.ok());
-  EXPECT_FALSE(result.value().base64_png.empty());
+  EXPECT_FALSE(result.value().png_bytes.empty());
 }
 
 TEST_F(TracerServiceTest, TraceWithStarBackground) {
@@ -204,7 +207,7 @@ TEST_F(TracerServiceTest, TraceWithStarBackground) {
   TraceRequest request{starry_scene, basic_perspective_, basic_output_};
   auto result = service.trace(request);
   ASSERT_TRUE(result.ok());
-  EXPECT_FALSE(result.value().base64_png.empty());
+  EXPECT_FALSE(result.value().png_bytes.empty());
 }
 
 TEST_F(TracerServiceTest, TraceWithDirectionalLight) {
@@ -220,7 +223,7 @@ TEST_F(TracerServiceTest, TraceWithDirectionalLight) {
   TraceRequest request{directional_light_scene, basic_perspective_, basic_output_};
   auto result = service.trace(request);
   ASSERT_TRUE(result.ok());
-  EXPECT_FALSE(result.value().base64_png.empty());
+  EXPECT_FALSE(result.value().png_bytes.empty());
 }
 
 TEST_F(TracerServiceTest, TraceLargeCacheSize) {
@@ -230,7 +233,7 @@ TEST_F(TracerServiceTest, TraceLargeCacheSize) {
   TraceRequest request{basic_scene_, basic_perspective_, basic_output_};
   auto result = service.trace(request);
   ASSERT_TRUE(result.ok());
-  EXPECT_FALSE(result.value().base64_png.empty());
+  EXPECT_FALSE(result.value().png_bytes.empty());
 }
 
 TEST_F(TracerServiceTest, TraceDefaultConstructor) {
@@ -239,7 +242,7 @@ TEST_F(TracerServiceTest, TraceDefaultConstructor) {
   TraceRequest request{basic_scene_, basic_perspective_, basic_output_};
   auto result = service.trace(request);
   ASSERT_TRUE(result.ok());
-  EXPECT_FALSE(result.value().base64_png.empty());
+  EXPECT_FALSE(result.value().png_bytes.empty());
 }
 
 TEST_F(TracerServiceTest, TraceCacheEviction) {
@@ -272,11 +275,11 @@ TEST_F(TracerServiceTest, TraceCacheEviction) {
   // Request2 and request3 should still be cached
   auto cached_result2 = service.trace(request2);
   ASSERT_TRUE(cached_result2.ok());
-  EXPECT_EQ(result2.value().base64_png, cached_result2.value().base64_png);
+  EXPECT_EQ(result2.value().png_bytes, cached_result2.value().png_bytes);
 
   auto cached_result3 = service.trace(request3);
   ASSERT_TRUE(cached_result3.ok());
-  EXPECT_EQ(result3.value().base64_png, cached_result3.value().base64_png);
+  EXPECT_EQ(result3.value().png_bytes, cached_result3.value().png_bytes);
 }
 
 TEST_F(TracerServiceTest, TraceHighReflectiveSphere) {
@@ -288,7 +291,7 @@ TEST_F(TracerServiceTest, TraceHighReflectiveSphere) {
   TraceRequest request{reflective_scene, basic_perspective_, basic_output_};
   auto result = service.trace(request);
   ASSERT_TRUE(result.ok());
-  EXPECT_FALSE(result.value().base64_png.empty());
+  EXPECT_FALSE(result.value().png_bytes.empty());
 }
 
 TEST_F(TracerServiceTest, TraceHighSpecularSphere) {
@@ -300,7 +303,7 @@ TEST_F(TracerServiceTest, TraceHighSpecularSphere) {
   TraceRequest request{specular_scene, basic_perspective_, basic_output_};
   auto result = service.trace(request);
   ASSERT_TRUE(result.ok());
-  EXPECT_FALSE(result.value().base64_png.empty());
+  EXPECT_FALSE(result.value().png_bytes.empty());
 }
 
 }  // namespace

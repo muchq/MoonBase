@@ -1,11 +1,11 @@
-#include "domains/platform/libs/meerkat/metrics_manager.h"
+#include "domains/platform/libs/futility/otel/http_metrics.h"
 
 #include <chrono>
 #include <memory>
 
 #include "gtest/gtest.h"
 
-namespace meerkat {
+namespace futility::otel {
 
 class HttpMetricsManagerTest : public ::testing::Test {
  protected:
@@ -105,4 +105,4 @@ TEST_F(HttpMetricsManagerTest, HandlesVariousHttpMethods) {
   EXPECT_NO_THROW(manager_->RecordRequestComplete("/test", "PATCH", 200, duration));
 }
 
-}  // namespace meerkat
+}  // namespace futility::otel

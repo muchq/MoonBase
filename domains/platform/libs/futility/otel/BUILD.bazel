@@ -1,4 +1,4 @@
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
 cc_library(
     name = "otel_provider",
@@ -22,5 +22,27 @@ cc_library(
         ":otel_provider",
         "@com_google_absl//absl/strings",
         "@opentelemetry-cpp//api",
+    ],
+)
+
+# The shared HTTP serving instruments; transport-agnostic so every HTTP
+# service exports the same names and labels regardless of server framework.
+cc_library(
+    name = "http_metrics",
+    srcs = ["http_metrics.cc"],
+    hdrs = ["http_metrics.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":metrics",
+    ],
+)
+
+cc_test(
+    name = "http_metrics_test",
+    size = "small",
+    srcs = ["http_metrics_test.cc"],
+    deps = [
+        ":http_metrics",
+        "@googletest//:gtest_main",
     ],
 )

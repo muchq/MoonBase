@@ -8,6 +8,11 @@ This module provides:
 
 - **OtelProvider**: Initializes OpenTelemetry with OTLP HTTP export
 - **MetricsRecorder**: High-level API for recording metrics
+- **HttpMetricsManager**: The shared HTTP serving instruments
+  (`http_server_requests`, `http_server_requests_active`,
+  `http_server_request_duration`, `http_server_requests_success` /
+  `_failure`), transport-agnostic so every service exports the same names
+  and labels
 
 ## Quick Start
 
@@ -149,11 +154,28 @@ Metrics are exported via OTLP HTTP to a collector. Common setups:
 
 Example collector endpoint: `http://otel-collector:4318/v1/metrics`
 
+### HttpMetricsManager
+
+Per-request HTTP serving metrics with `service_name`/`route`/`method` labels
+(plus `status_code`, `result`, and `error_type` on completions). Call
+`RecordRequestStart` at ingress and `RecordRequestComplete` when the response
+is written; the pair keeps the request counter and active gauge symmetric.
+
+```cpp
+#include "domains/platform/libs/futility/otel/http_metrics.h"
+
+futility::otel::HttpMetricsManager http_metrics("my-service");
+http_metrics.RecordRequestStart("/api/users", "GET");
+// ... serve ...
+http_metrics.RecordRequestComplete("/api/users", "GET", 200, duration_us);
+```
+
 ## Bazel Targets
 
 ```python
 deps = [
     "//cpp/futility/otel:otel_provider",
     "//cpp/futility/otel:metrics",
+    "//cpp/futility/otel:http_metrics",
 ]
 ```

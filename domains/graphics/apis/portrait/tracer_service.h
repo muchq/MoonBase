@@ -1,6 +1,7 @@
 #ifndef CPP_PORTRAIT_TRACER_SERVICE_H
 #define CPP_PORTRAIT_TRACER_SERVICE_H
 
+#include <cstdint>
 #include <vector>
 
 #include "absl/status/statusor.h"
@@ -15,10 +16,10 @@ namespace portrait {
 class TracerService {
  public:
   /// Constructs a TracerService with default cache size of 50.
-  explicit TracerService() : cache_(50), metrics_("portrait") {};
+  explicit TracerService() : cache_(50), metrics_("portrait"){};
   /// Constructs a TracerService with a specified cache size.
-  explicit TracerService(uint16_t _cache_size) : cache_(_cache_size), metrics_("portrait") {};
-  /// Traces a scene and returns a base64-encoded PNG image.
+  explicit TracerService(uint16_t _cache_size) : cache_(_cache_size), metrics_("portrait"){};
+  /// Traces a scene and returns the encoded PNG bytes plus dimensions.
   absl::StatusOr<TraceResponse> trace(TraceRequest& trace_request);
 
  private:
@@ -29,10 +30,9 @@ class TracerService {
   std::vector<tracy::Light> tracify(const std::vector<Light>& lights);
   tracy::Vec3 tracify(const Vec3& v);
   tracy::LightType tracify(const LightType& lightType);
-  std::string imageToBase64(const image_core::Image<image_core::RGB_Double>& image);
-  TraceResponse toResponse(const Output& output, std::string& base64);
+  TraceResponse toResponse(const Output& output, const std::vector<std::uint8_t>& png_bytes);
 
-  futility::cache::LRUCache<TraceRequest, std::string> cache_;
+  futility::cache::LRUCache<TraceRequest, std::vector<std::uint8_t>> cache_;
   futility::otel::MetricsRecorder metrics_;
 };
 }  // namespace portrait

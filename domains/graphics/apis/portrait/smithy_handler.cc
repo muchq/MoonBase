@@ -7,7 +7,6 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "domains/graphics/apis/portrait/types.h"
-#include "domains/platform/libs/futility/base64/base64.h"
 #include "smithy/core/blob.h"
 #include "smithy/core/error.h"
 
@@ -40,7 +39,7 @@ LightType toLightType(const gen::LightType& lightType) {
   }
 }
 
-TraceRequest toLegacyRequest(const gen::TraceInput& input) {
+TraceRequest toDomainRequest(const gen::TraceInput& input) {
   TraceRequest request;
   // Absent backgroundColor keeps Scene's own {0, 0, 0} default member value.
   if (input.scene.backgroundColor.has_value()) {
@@ -72,7 +71,7 @@ TraceRequest toLegacyRequest(const gen::TraceInput& input) {
 
 smithy::Outcome<gen::TraceOutput> SmithyTracerHandler::Trace(
     const gen::TraceInput& input, const smithy::server::RequestContext& /*context*/) {
-  TraceRequest request = toLegacyRequest(input);
+  TraceRequest request = toDomainRequest(input);
   absl::StatusOr<TraceResponse> response = tracer_service_.trace(request);
   if (!response.ok()) {
     const std::string message(response.status().message());
@@ -85,10 +84,7 @@ smithy::Outcome<gen::TraceOutput> SmithyTracerHandler::Trace(
   }
 
   gen::TraceOutput output;
-  // TraceResponse carries the PNG already base64-encoded (it predates the
-  // Blob-typed API); decode so the generated serde re-encodes it identically
-  // on the wire. Phase 4 cleanup can have TracerService hand back raw bytes.
-  output.base64_png = smithy::Blob(futility::base64::Base64::decode(response->base64_png));
+  output.base64_png = smithy::Blob(std::move(response->png_bytes));
   output.width = response->width;
   output.height = response->height;
   return output;

@@ -2,18 +2,19 @@
 
 #include <chrono>
 #include <utility>
+#include <vector>
 
 #include "absl/log/log.h"
-#include "domains/platform/libs/meerkat/metrics_manager.h"
+#include "domains/platform/libs/futility/otel/http_metrics.h"
 #include "smithy/http/trace_context.h"
 #include "smithy/http/transport.h"
 
 namespace portrait {
 namespace {
 
-class MeerkatMetricsSink final : public HttpMetricsSink {
+class OtelHttpMetricsSink final : public HttpMetricsSink {
  public:
-  explicit MeerkatMetricsSink(std::shared_ptr<meerkat::HttpMetricsManager> metrics)
+  explicit OtelHttpMetricsSink(std::shared_ptr<futility::otel::HttpMetricsManager> metrics)
       : metrics_(std::move(metrics)) {}
 
   void RecordRequestStart(const std::string& route, const std::string& method) override {
@@ -25,7 +26,7 @@ class MeerkatMetricsSink final : public HttpMetricsSink {
   }
 
  private:
-  std::shared_ptr<meerkat::HttpMetricsManager> metrics_;
+  std::shared_ptr<futility::otel::HttpMetricsManager> metrics_;
 };
 
 std::string RouteOf(const std::string& target) { return target.substr(0, target.find('?')); }
@@ -48,19 +49,20 @@ std::string KindName(smithy::http::BeastServerTransport::ConnectionEvent::Kind k
   return "unknown(" + std::to_string(static_cast<int>(kind)) + ")";
 }
 
-// Meerkat's access-log line shape. Kept separate from Observe because the
-// log line needs X-Forwarded-For and the response body size, which
-// RequestObservation doesn't carry; it measures its own duration for the
-// log line only. The trace_id= field is the W3C trace id parsed from the
-// request's traceparent — the transport guard mints or joins it at ingress
-// (smithy-cpp ADR-0011), so on transport-served requests it always parses.
-// Empty only for hand-driven handler chains in tests.
+// The access-log line shape carried over from the pre-migration service.
+// Kept separate from Observe because the log line needs X-Forwarded-For and
+// the response body size, which RequestObservation doesn't carry; it
+// measures its own duration for the log line only. The trace_id= field is
+// the W3C trace id parsed from the request's traceparent — the transport
+// guard mints or joins it at ingress (smithy-cpp ADR-0011), so on
+// transport-served requests it always parses. Empty only for hand-driven
+// handler chains in tests.
 //
-// X-Forwarded-For= is deliberately the raw header (the line shape meerkat's
-// dashboards parse), which since ADR-0012 is NOT the identity the rate
-// limiter keys on — a 429's actual bucket (the derived client address) is
-// not on this line. Logging the derived client is a post-soak TODO once the
-// meerkat line-shape constraint lifts (PORTRAIT_TODO.md).
+// X-Forwarded-For= is deliberately the raw header (the line shape the
+// existing dashboards parse), which since ADR-0012 is NOT the identity the
+// rate limiter keys on — a 429's actual bucket (the derived client address)
+// is not on this line. Logging the derived client is a pending TODO now that
+// the line-shape compatibility constraint has lifted (PORTRAIT_TODO.md).
 smithy::server::Middleware AccessLog() {
   return [](smithy::http::RequestHandler next) {
     return [next = std::move(next)](
@@ -87,12 +89,12 @@ smithy::server::Middleware AccessLog() {
 
 }  // namespace
 
-std::shared_ptr<HttpMetricsSink> MakeMeerkatMetricsSink(
-    std::shared_ptr<meerkat::HttpMetricsManager> metrics) {
-  return std::make_shared<MeerkatMetricsSink>(std::move(metrics));
+std::shared_ptr<HttpMetricsSink> MakeHttpMetricsSink(
+    std::shared_ptr<futility::otel::HttpMetricsManager> metrics) {
+  return std::make_shared<OtelHttpMetricsSink>(std::move(metrics));
 }
 
-smithy::server::Middleware MeerkatParityObservability(std::shared_ptr<HttpMetricsSink> metrics) {
+smithy::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> metrics) {
   return [metrics = std::move(metrics)](smithy::http::RequestHandler next) {
     // Metrics ride the runtime's Observe: microsecond durations (as of
     // smithy-cpp cfd8299) and start/complete guaranteed to pair even when
@@ -107,6 +109,15 @@ smithy::server::Middleware MeerkatParityObservability(std::shared_ptr<HttpMetric
         });
     return observe(AccessLog()(std::move(next)));
   };
+}
+
+smithy::http::RequestHandler ProductionChain(ChainOptions options,
+                                             smithy::http::RequestHandler handler) {
+  return smithy::server::Chain(
+      {ServingObservability(std::move(options.metrics)), smithy::server::HealthEndpoint("/health"),
+       smithy::server::PerClientRateLimit(std::move(options.allow_request),
+                                          std::move(options.trusted_proxies), options.retry_after)},
+      std::move(handler));
 }
 
 std::function<void(const smithy::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(

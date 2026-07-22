@@ -1,8 +1,8 @@
-// Phase 3 middleware tests (https://github.com/muchq/MoonBase/issues/1168):
-// the production middleware chain — meerkat-parity observability, health,
-// per-client rate limiting keyed on the derived client address — composed
-// around the generated server, driven over loopback plus one pass over the
-// real Beast socket transport.
+// Middleware tests: the production middleware chain (ProductionChain, the
+// same builder main.cc uses) — serving observability, health, per-client
+// rate limiting keyed on the derived client address — composed around the
+// generated server, driven over loopback plus one pass over the real Beast
+// socket transport.
 
 #include "domains/graphics/apis/portrait/smithy_middleware.h"
 
@@ -18,6 +18,7 @@
 
 #include "absl/base/log_severity.h"
 #include "absl/log/scoped_mock_log.h"
+#include "domains/graphics/apis/portrait/test_support.h"
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "moonbase/portrait/client.h"
 #include "moonbase/portrait/server.h"
@@ -25,9 +26,7 @@
 #include "smithy/core/blob.h"
 #include "smithy/http/beast_transport.h"
 #include "smithy/http/forwarded.h"
-#include "smithy/http/loopback.h"
 #include "smithy/http/socket_transport.h"
-#include "smithy/server/middleware.h"
 
 namespace {
 
@@ -35,20 +34,11 @@ using futility::rate_limiter::SlidingWindowRateLimiter;
 using futility::rate_limiter::SlidingWindowRateLimiterConfig;
 using moonbase::portrait::PortraitClient;
 using moonbase::portrait::PortraitHandler;
-using moonbase::portrait::PortraitServer;
 using moonbase::portrait::TraceInput;
 using moonbase::portrait::TraceOutput;
-
-constexpr char kValidTraceBody[] = R"({
-  "scene": {
-    "spheres": [
-      {"center": [0.0, -1.0, 3.0], "radius": 1.0, "color": [255, 0, 0],
-       "specular": 500.0, "reflective": 0.2}
-    ]
-  },
-  "perspective": {"cameraPosition": [0.0, 0.0, -1.0], "cameraFocus": [0.0, 0.0, 0.0]},
-  "output": {"width": 20, "height": 20}
-})";
+using portrait::test_support::LoopbackHarness;
+using portrait::test_support::ValidTraceInput;
+using portrait::test_support::ValidTraceJson;
 
 // No rendering here — middleware behavior is the subject under test.
 class StubHandler final : public PortraitHandler {
@@ -102,10 +92,10 @@ class RecordingSink final : public portrait::HttpMetricsSink {
   std::vector<CompleteCall> completes_;
 };
 
-// The production chain shape from portrait_smithy_main.cc, with a small
-// rate-limit budget so tests can exhaust it quickly. The rate limiter keys
-// on the ADR-0012 derived client address anchored at peer_address, which
-// Loopback lets tests stamp directly (a real transport stamps it from the
+// The production chain via the shared builder, with a small rate-limit
+// budget so tests can exhaust it quickly. The rate limiter keys on the
+// ADR-0012 derived client address anchored at peer_address, which Loopback
+// lets tests stamp directly (a real transport stamps it from the
 // connection).
 class SmithyMiddlewareTest : public ::testing::Test {
  protected:
@@ -114,24 +104,25 @@ class SmithyMiddlewareTest : public ::testing::Test {
   // address. x-forwarded-for entries count only through this peer.
   static constexpr char kProxy[] = "10.0.0.2";
 
-  void SetUp() override {
-    sink_ = std::make_shared<RecordingSink>();
-    SlidingWindowRateLimiterConfig config{.max_requests_per_key = kMaxRequestsPerKey,
-                                          .window_size = std::chrono::seconds(60),
-                                          .ttl = std::chrono::minutes(5),
-                                          .cleanup_interval = std::chrono::seconds(30),
-                                          .max_keys = 100};
-    limiter_ = std::make_shared<SlidingWindowRateLimiter<std::string>>(config);
-    server_ = std::make_unique<PortraitServer>(std::make_shared<StubHandler>());
-    handler_ = smithy::server::Chain(
-        {portrait::MeerkatParityObservability(sink_), smithy::server::HealthEndpoint("/health"),
-         smithy::server::PerClientRateLimit(
-             [limiter = limiter_](const std::string& client) { return limiter->allow(client); },
-             smithy::http::TrustedProxies({kProxy}), std::chrono::seconds(60))},
-        server_->Handler());
-    loopback_ = std::make_shared<smithy::http::Loopback>();
-    ASSERT_TRUE(loopback_->Start(handler_).ok());
-  }
+  SmithyMiddlewareTest()
+      : sink_(std::make_shared<RecordingSink>()),
+        limiter_(std::make_shared<SlidingWindowRateLimiter<std::string>>(
+            SlidingWindowRateLimiterConfig{.max_requests_per_key = kMaxRequestsPerKey,
+                                           .window_size = std::chrono::seconds(60),
+                                           .ttl = std::chrono::minutes(5),
+                                           .cleanup_interval = std::chrono::seconds(30),
+                                           .max_keys = 100})),
+        harness_(std::make_shared<StubHandler>(), [this](smithy::http::RequestHandler inner) {
+          return portrait::ProductionChain(
+              portrait::ChainOptions{.metrics = sink_,
+                                     .allow_request =
+                                         [limiter = limiter_](const std::string& client) {
+                                           return limiter->allow(client);
+                                         },
+                                     .trusted_proxies = smithy::http::TrustedProxies({kProxy}),
+                                     .retry_after = std::chrono::seconds(60)},
+              std::move(inner));
+        }) {}
 
   // peer is the L4 identity the client-address derivation anchors on. An
   // unnamed peer gets a fresh TEST-NET address per send, so sends that don't
@@ -152,12 +143,7 @@ class SmithyMiddlewareTest : public ::testing::Test {
     for (const auto& [name, value] : headers) {
       request.headers.Set(name, value);
     }
-    auto response = loopback_->Send(request);
-    if (!response.ok()) {
-      ADD_FAILURE() << "loopback send failed: " << response.error().message();
-      return {};
-    }
-    return *response;
+    return harness_.Send(std::move(request));
   }
 
   // Sends one trace request through the chain and returns the access-log
@@ -168,16 +154,14 @@ class SmithyMiddlewareTest : public ::testing::Test {
     EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, testing::_, testing::HasSubstr("trace_id=")))
         .WillOnce(testing::SaveArg<2>(&line));
     log.StartCapturingLogs();
-    EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, "", headers).status, 200);
+    EXPECT_EQ(Send("POST", "/portrait/v1/trace", ValidTraceJson(), "", headers).status, 200);
     log.StopCapturingLogs();
     return line;
   }
 
   std::shared_ptr<RecordingSink> sink_;
   std::shared_ptr<SlidingWindowRateLimiter<std::string>> limiter_;
-  std::unique_ptr<PortraitServer> server_;
-  smithy::http::RequestHandler handler_;
-  std::shared_ptr<smithy::http::Loopback> loopback_;
+  LoopbackHarness harness_;
   int next_default_peer_ = 0;
 };
 
@@ -186,7 +170,7 @@ TEST_F(SmithyMiddlewareTest, HealthServedAndObserved) {
   EXPECT_EQ(response.status, 200);
   EXPECT_EQ(response.body, R"({"status":"healthy"})");
 
-  // Meerkat's metrics interceptor counted health probes; parity keeps that.
+  // Health probes count in the serving instruments, as they always have.
   const auto starts = sink_->starts();
   const auto completes = sink_->completes();
   ASSERT_EQ(starts.size(), 1u);
@@ -197,7 +181,7 @@ TEST_F(SmithyMiddlewareTest, HealthServedAndObserved) {
 }
 
 TEST_F(SmithyMiddlewareTest, TraceObservedWithRouteMethodAndStatus) {
-  const auto response = Send("POST", "/portrait/v1/trace", kValidTraceBody);
+  const auto response = Send("POST", "/portrait/v1/trace", ValidTraceJson());
   ASSERT_EQ(response.status, 200) << response.body;
 
   const auto completes = sink_->completes();
@@ -217,18 +201,18 @@ TEST_F(SmithyMiddlewareTest, QueryStringStrippedFromRouteLabel) {
 
 TEST_F(SmithyMiddlewareTest, RateLimitsPerClientAddressWithRetryAfter) {
   for (int i = 0; i < kMaxRequestsPerKey; ++i) {
-    EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, "203.0.113.4").status, 200);
+    EXPECT_EQ(Send("POST", "/portrait/v1/trace", ValidTraceJson(), "203.0.113.4").status, 200);
   }
-  const auto limited = Send("POST", "/portrait/v1/trace", kValidTraceBody, "203.0.113.4");
+  const auto limited = Send("POST", "/portrait/v1/trace", ValidTraceJson(), "203.0.113.4");
   EXPECT_EQ(limited.status, 429);
   EXPECT_EQ(limited.headers.Get("retry-after").value_or(""), "60");
   EXPECT_NE(limited.body.find("Too many requests"), std::string::npos);
 
   // A different client is still admitted.
-  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, "203.0.113.8").status, 200);
+  EXPECT_EQ(Send("POST", "/portrait/v1/trace", ValidTraceJson(), "203.0.113.8").status, 200);
 
-  // Rate-limited requests are observed (meerkat counted 429s with
-  // error_type=rate_limited; the sink sees the status that drives it).
+  // Rate-limited requests are observed (429s carry error_type=rate_limited
+  // in the failure counter; the sink sees the status that drives it).
   bool saw_429 = false;
   for (const auto& complete : sink_->completes()) {
     if (complete.status == 429) saw_429 = true;
@@ -244,15 +228,15 @@ TEST_F(SmithyMiddlewareTest, SpoofedForwardedForCannotReachAnotherClientsBucket)
   const std::vector<std::pair<std::string, std::string>> forwarded = {
       {"X-Forwarded-For", "203.0.113.9"}};
   for (int i = 0; i < kMaxRequestsPerKey; ++i) {
-    EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, kProxy, forwarded).status, 200);
+    EXPECT_EQ(Send("POST", "/portrait/v1/trace", ValidTraceJson(), kProxy, forwarded).status, 200);
   }
-  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, kProxy, forwarded).status, 429);
+  EXPECT_EQ(Send("POST", "/portrait/v1/trace", ValidTraceJson(), kProxy, forwarded).status, 429);
 
   // A different client behind the same trusted proxy has its own budget:
   // the key is the forwarded client, not the proxy peer. (This is the
   // assertion that fails if the trust-set walk is dropped and all Caddy
   // traffic collapses into one bucket.)
-  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, kProxy,
+  EXPECT_EQ(Send("POST", "/portrait/v1/trace", ValidTraceJson(), kProxy,
                  {{"X-Forwarded-For", "203.0.113.50"}})
                 .status,
             200);
@@ -260,16 +244,16 @@ TEST_F(SmithyMiddlewareTest, SpoofedForwardedForCannotReachAnotherClientsBucket)
   // Same header from an untrusted peer: client-authored noise. The request
   // keys as the peer itself and is admitted despite the exhausted bucket
   // its header names.
-  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, "198.51.100.7", forwarded).status,
+  EXPECT_EQ(Send("POST", "/portrait/v1/trace", ValidTraceJson(), "198.51.100.7", forwarded).status,
             200);
 }
 
 TEST_F(SmithyMiddlewareTest, HealthIsNeverRateLimited) {
   for (int i = 0; i < kMaxRequestsPerKey; ++i) {
-    Send("POST", "/portrait/v1/trace", kValidTraceBody, "203.0.113.7");
+    Send("POST", "/portrait/v1/trace", ValidTraceJson(), "203.0.113.7");
   }
-  EXPECT_EQ(Send("POST", "/portrait/v1/trace", kValidTraceBody, "203.0.113.7").status, 429);
-  // Deliberate change from meerkat: probes sit before the guard in the chain.
+  EXPECT_EQ(Send("POST", "/portrait/v1/trace", ValidTraceJson(), "203.0.113.7").status, 429);
+  // Probes sit before the guard in the chain, deliberately.
   for (int i = 0; i < 5; ++i) {
     EXPECT_EQ(Send("GET", "/health", "", "203.0.113.7").status, 200);
   }
@@ -338,9 +322,9 @@ TEST(RejectionMetricsTest, UnparsedRejectionLandsOnStableLabels) {
   EXPECT_EQ(completes[0].status, 431);
 }
 
-// One pass over the real Beast transport, shaped like portrait_smithy_main:
-// the generated client round-trips through a real socket, and the shrunken
-// body limit rejects oversized payloads at the transport.
+// One pass over the real Beast transport, shaped like main.cc: the
+// generated client round-trips through a real socket, and the shrunken body
+// limit rejects oversized payloads at the transport.
 TEST_F(SmithyMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   smithy::http::BeastServerTransport::Options options;
   options.address = "127.0.0.1";
@@ -351,7 +335,7 @@ TEST_F(SmithyMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   // on_rejected-only by design).
   options.on_connection_event = portrait::ConnectionEventLog();
   smithy::http::BeastServerTransport transport(options);
-  ASSERT_TRUE(transport.Start(handler_).ok());
+  ASSERT_TRUE(transport.Start(harness_.handler()).ok());
 
   smithy::ClientConfig config;
   config.endpoint = "http://127.0.0.1:" + std::to_string(transport.port());
@@ -359,19 +343,7 @@ TEST_F(SmithyMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   ASSERT_TRUE(created.ok()) << created.error().message();
   PortraitClient client = std::move(*created);
 
-  TraceInput input;
-  moonbase::portrait::Sphere sphere;
-  sphere.center = {0.0, -1.0, 3.0};
-  sphere.radius = 1.0;
-  sphere.color = {255, 0, 0};
-  sphere.specular = 500.0;
-  sphere.reflective = 0.2;
-  input.scene.spheres = {sphere};
-  input.perspective.cameraPosition = {0.0, 0.0, -1.0};
-  input.perspective.cameraFocus = {0.0, 0.0, 0.0};
-  input.output.width = 20;
-  input.output.height = 20;
-  const auto traced = client.Trace(input);
+  const auto traced = client.Trace(ValidTraceInput());
   ASSERT_TRUE(traced.ok()) << traced.error().message();
   EXPECT_EQ(traced->width, 20);
 
