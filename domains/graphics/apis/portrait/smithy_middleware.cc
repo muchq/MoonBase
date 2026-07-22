@@ -49,20 +49,18 @@ std::string KindName(smithy::http::BeastServerTransport::ConnectionEvent::Kind k
   return "unknown(" + std::to_string(static_cast<int>(kind)) + ")";
 }
 
-// The access-log line shape carried over from the pre-migration service.
-// Kept separate from Observe because the log line needs X-Forwarded-For and
-// the response body size, which RequestObservation doesn't carry; it
-// measures its own duration for the log line only. The trace_id= field is
-// the W3C trace id parsed from the request's traceparent — the transport
-// guard mints or joins it at ingress (smithy-cpp ADR-0011), so on
-// transport-served requests it always parses. Empty only for hand-driven
-// handler chains in tests.
+// One access-log line per request. Kept separate from Observe because the
+// log line needs X-Forwarded-For and the response body size, which
+// RequestObservation doesn't carry; it measures its own duration for the
+// log line only. The trace_id= field is the W3C trace id parsed from the
+// request's traceparent — the transport guard mints or joins it at ingress
+// (smithy-cpp ADR-0011), so on transport-served requests it always parses.
+// Empty only for hand-driven handler chains in tests.
 //
-// X-Forwarded-For= is deliberately the raw header (the line shape the
-// existing dashboards parse), which since ADR-0012 is NOT the identity the
-// rate limiter keys on — a 429's actual bucket (the derived client address)
-// is not on this line. Logging the derived client is a pending TODO now that
-// the line-shape compatibility constraint has lifted (PORTRAIT_TODO.md).
+// X-Forwarded-For= is the raw header, which since ADR-0012 is NOT the
+// identity the rate limiter keys on — a 429's actual bucket (the derived
+// client address) is not on this line. Logging the derived client is a
+// pending TODO (PORTRAIT_TODO.md).
 smithy::server::Middleware AccessLog() {
   return [](smithy::http::RequestHandler next) {
     return [next = std::move(next)](

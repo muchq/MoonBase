@@ -41,10 +41,9 @@ std::shared_ptr<HttpMetricsSink> MakeHttpMetricsSink(
 /// rate-limited requests are observed too:
 ///   - metrics start/complete with route (path sans query string) and method
 ///     labels, microsecond durations
-///   - the access-log line shape the pre-migration dashboards parse, with
-///     trace_id carrying the W3C trace id parsed from the request's
-///     traceparent (minted or joined at transport ingress, smithy-cpp
-///     ADR-0011):
+///   - one access-log line per request, with trace_id carrying the W3C
+///     trace id parsed from the request's traceparent (minted or joined at
+///     transport ingress, smithy-cpp ADR-0011):
 ///     [METHOD URI]: X-Forwarded-For=<ip> trace_id=<32hex> status=<code>
 ///     res.body.bytes=<n> duration_ms=<ms>
 smithy::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> metrics);

@@ -2,9 +2,8 @@ $version: "2.0"
 
 namespace moonbase.portrait
 
-/// The Portrait API (https://github.com/muchq/MoonBase/issues/1168),
-/// wire-compatible with the pre-migration service — same URI, same field
-/// names, tuples as JSON arrays, base64 PNG payload.
+/// The Portrait API: ray-traced scene rendering. Tuples serialize as JSON
+/// arrays; the rendered PNG returns as base64.
 ///
 /// Constraint mapping from types.cc validate* rules:
 ///   - spheres count 1..10            -> @length on SphereList
@@ -12,10 +11,7 @@ namespace moonbase.portrait
 ///     intensity, starProbability,
 ///     width/height ranges            -> @range on the members
 ///   - Vec3/Color exactly 3 elements  -> @length on the list shapes
-///   - color channel 0..255           -> @range on ColorChannel (improvement:
-///                                       the pre-migration service silently
-///                                       wrapped values > 255 through
-///                                       unsigned char)
+///   - color channel 0..255           -> @range on ColorChannel
 ///   - light type membership          -> LightType enum validation
 ///   - NaN/Inf checks                 -> unreachable over standard JSON;
 ///                                       dropped
