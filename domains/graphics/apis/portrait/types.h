@@ -1,16 +1,20 @@
 #ifndef CPP_PORTRAIT_TYPES_H
 #define CPP_PORTRAIT_TYPES_H
 
-#include <nlohmann/json.hpp>
+#include <cstdint>
 #include <string>
 #include <tuple>
+#include <vector>
 
 #include "absl/hash/hash.h"
 #include "absl/status/status.h"
-#include "domains/graphics/libs/tracy_cpp/tracy.h"
+
+// TracerService's domain layer: the plain structs the renderer and its LRU
+// cache key on, plus the cross-field validation rules the Smithy constraint
+// traits can't express. Wire parsing belongs to the generated server
+// (moonbase/portrait); the handler converts generated inputs to these types.
 
 namespace portrait {
-using namespace nlohmann::literals;
 
 using Vec3 = std::tuple<double, double, double>;
 using Color = std::tuple<unsigned char, unsigned char, unsigned char>;
@@ -27,7 +31,6 @@ struct Sphere {
            specular == other.specular && reflective == other.reflective;
   }
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Sphere, center, radius, color, specular, reflective)
 
 template <typename H>
 H AbslHashValue(H h, const Sphere& s) {
@@ -35,12 +38,6 @@ H AbslHashValue(H h, const Sphere& s) {
 }
 
 enum LightType { AMBIENT, POINT, DIRECTIONAL, UNKNOWN };
-NLOHMANN_JSON_SERIALIZE_ENUM(LightType, {
-                                            {UNKNOWN, nullptr},
-                                            {AMBIENT, "ambient"},
-                                            {POINT, "point"},
-                                            {DIRECTIONAL, "directional"},
-                                        })
 
 struct Light {
   LightType lightType;
@@ -52,7 +49,6 @@ struct Light {
            position == other.position;
   }
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Light, lightType, intensity, position)
 
 template <typename H>
 H AbslHashValue(H h, const Light& l) {
@@ -67,7 +63,6 @@ struct Perspective {
     return cameraPosition == other.cameraPosition && cameraFocus == other.cameraFocus;
   }
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Perspective, cameraPosition, cameraFocus)
 
 template <typename H>
 H AbslHashValue(H h, const Perspective& p) {
@@ -86,8 +81,6 @@ struct Scene {
            spheres == other.spheres && lights == other.lights;
   }
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Scene, backgroundColor, backgroundStarProbability,
-                                                spheres, lights)
 
 template <typename H>
 H AbslHashValue(H h, const Scene& s) {
@@ -103,7 +96,6 @@ struct Output {
     return width == other.width && height == other.height;
   }
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Output, width, height)
 
 template <typename H>
 H AbslHashValue(H h, const Output& o) {
@@ -119,7 +111,6 @@ struct TraceRequest {
     return scene == other.scene && perspective == other.perspective && output == other.output;
   }
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(TraceRequest, scene, perspective, output)
 
 template <typename H>
 H AbslHashValue(H h, const TraceRequest& tr) {
@@ -127,11 +118,10 @@ H AbslHashValue(H h, const TraceRequest& tr) {
 }
 
 struct TraceResponse {
-  std::string base64_png;
+  std::vector<std::uint8_t> png_bytes;
   int width;
   int height;
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(TraceResponse, base64_png, width, height)
 
 absl::Status validateVec3(Vec3& vec3);
 absl::Status validatePerspective(Perspective& perspective);

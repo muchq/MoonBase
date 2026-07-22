@@ -1,8 +1,6 @@
-// The portrait server (https://github.com/muchq/MoonBase/issues/1168): the
-// generated Smithy Portrait API on the Beast transport with meerkat-parity
-// middleware. Rollback is the pre-cutover image tag; the meerkat binary
-// stays buildable as :portrait_meerkat as the pre-cutover reference during
-// the soak.
+// The portrait server: the generated Smithy Portrait API on the Beast
+// transport, with observability, health, and per-client rate limiting
+// composed by the shared ProductionChain builder (smithy_middleware.h).
 //
 //   bazel run //domains/graphics/apis/portrait
 //   curl localhost:8080/portrait/v1/trace -H 'content-type: application/json' -d @scene.json
@@ -23,9 +21,9 @@
 #include "domains/graphics/apis/portrait/smithy_handler.h"
 #include "domains/graphics/apis/portrait/smithy_middleware.h"
 #include "domains/platform/libs/futility/env/env.h"
+#include "domains/platform/libs/futility/otel/http_metrics.h"
 #include "domains/platform/libs/futility/otel/otel_provider.h"
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
-#include "domains/platform/libs/meerkat/metrics_manager.h"
 #include "moonbase/portrait/server.h"
 #include "smithy/http/beast_transport.h"
 #include "smithy/http/forwarded.h"
@@ -35,7 +33,7 @@ int main() {
   absl::InitializeLog();
   absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
 
-  // Same OTel setup as the meerkat binary: OTLP push, service "portrait".
+  // OTel setup: OTLP push, service "portrait".
   futility::otel::OtelConfig otel_config{.service_name = "portrait", .service_version = "1.0.0"};
   futility::otel::OtelProvider otel_provider(otel_config);
 
@@ -49,10 +47,9 @@ int main() {
 
   moonbase::portrait::PortraitServer server(std::make_shared<portrait::SmithyTracerHandler>());
 
-  auto metrics =
-      portrait::MakeMeerkatMetricsSink(std::make_shared<meerkat::HttpMetricsManager>("portrait"));
+  auto metrics = portrait::MakeHttpMetricsSink(
+      std::make_shared<futility::otel::HttpMetricsManager>("portrait"));
 
-  // Same limiter config as the meerkat Main.cc.
   futility::rate_limiter::SlidingWindowRateLimiterConfig limiter_config{
       .max_requests_per_key = 20,
       .window_size = std::chrono::seconds(60),
@@ -83,15 +80,13 @@ int main() {
     }
   }
 
-  // Observability outermost: health probes and 429s are counted and logged,
-  // as they were under meerkat's interceptors. Health sits before the guard
-  // so probes are never rate limited — the one deliberate ordering change
-  // from meerkat, where /health shared the empty X-Forwarded-For bucket.
-  auto handler = smithy::server::Chain(
-      {portrait::MeerkatParityObservability(metrics), smithy::server::HealthEndpoint("/health"),
-       smithy::server::PerClientRateLimit(
-           [rate_limiter](const std::string& client) { return rate_limiter->allow(client); },
-           std::move(trusted_proxies), std::chrono::seconds(60))},
+  auto handler = portrait::ProductionChain(
+      portrait::ChainOptions{
+          .metrics = metrics,
+          .allow_request =
+              [rate_limiter](const std::string& client) { return rate_limiter->allow(client); },
+          .trusted_proxies = std::move(trusted_proxies),
+          .retry_after = std::chrono::seconds(60)},
       server.Handler());
 
   smithy::http::BeastServerTransport::Options options;
@@ -114,7 +109,7 @@ int main() {
     return 1;
   }
 
-  LOG(INFO) << "Portrait (smithy) running on http://" << options.address << ":" << transport.port();
+  LOG(INFO) << "Portrait running on http://" << options.address << ":" << transport.port();
   LOG(INFO) << "Serving:";
   LOG(INFO) << "  GET  http://localhost:" << transport.port() << "/health";
   LOG(INFO) << "  POST http://localhost:" << transport.port() << "/portrait/v1/trace";

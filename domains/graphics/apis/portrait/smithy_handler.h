@@ -10,12 +10,11 @@
 
 namespace portrait {
 
-/// Serves the generated Smithy Portrait API by wrapping TracerService
-/// (phase 2 of https://github.com/muchq/MoonBase/issues/1168): generated
-/// inputs convert to the legacy portrait types, so TracerService keeps its
-/// validation, response cache, and metrics unchanged. Cross-field rules the
-/// constraint traits can't express (camera != focus, aspect ratio, strictly
-/// positive radius) surface as the modeled InvalidSceneError.
+/// Serves the generated Smithy Portrait API by wrapping TracerService:
+/// generated inputs convert to the portrait domain types, so TracerService
+/// keeps its validation, response cache, and metrics unchanged. Cross-field
+/// rules the constraint traits can't express (camera != focus, aspect ratio,
+/// strictly positive radius) surface as the modeled InvalidSceneError.
 ///
 /// Must be thread-safe: transports dispatch one handler instance across a
 /// thread pool. TracerService's cache and metrics are mutex-guarded/atomic,

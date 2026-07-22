@@ -9,14 +9,19 @@
 
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "domains/platform/libs/futility/otel/http_metrics.h"
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
-#include "domains/platform/libs/meerkat/metrics_manager.h"
 #include "mongoose.h"
 #include "nlohmann/json.hpp"
 
 namespace meerkat {
 
 using json = nlohmann::json;
+
+// The HTTP serving instruments moved to futility/otel when portrait left
+// meerkat (https://github.com/muchq/MoonBase/issues/1174); the alias keeps
+// meerkat's interceptor API unchanged.
+using HttpMetricsManager = futility::otel::HttpMetricsManager;
 
 struct Context {
   std::chrono::steady_clock::time_point start_time;

@@ -1,5 +1,13 @@
-#ifndef DOMAINS_API_PLATFORM_LIBS_MEERKAT_METRICS_MANAGER_H
-#define DOMAINS_API_PLATFORM_LIBS_MEERKAT_METRICS_MANAGER_H
+#pragma once
+
+/// @file http_metrics.h
+/// @brief The shared HTTP serving instruments (http_server_requests,
+/// http_server_requests_active, http_server_request_duration,
+/// http_server_requests_success / _failure) with service_name/route/method
+/// labels, so services on any transport emit the same names and existing
+/// dashboards keep working. Originally meerkat's metrics interceptor state;
+/// rehomed here when portrait moved to smithy-cpp
+/// (https://github.com/muchq/MoonBase/issues/1174).
 
 #include <chrono>
 #include <map>
@@ -8,7 +16,7 @@
 
 #include "domains/platform/libs/futility/otel/metrics.h"
 
-namespace meerkat {
+namespace futility::otel {
 
 class HttpMetricsManager {
  public:
@@ -24,7 +32,7 @@ class HttpMetricsManager {
 
  private:
   std::string service_name_;
-  std::unique_ptr<futility::otel::MetricsRecorder> recorder_;
+  std::unique_ptr<MetricsRecorder> recorder_;
 
   // Helper methods
   std::map<std::string, std::string> CreateBaseAttributes(const std::string& route,
@@ -39,6 +47,4 @@ class HttpMetricsManager {
   bool IsSuccess(int status_code) const;
 };
 
-}  // namespace meerkat
-
-#endif  // DOMAINS_API_PLATFORM_LIBS_MEERKAT_METRICS_MANAGER_H
+}  // namespace futility::otel

@@ -3,10 +3,8 @@
 #include <vector>
 
 #include "domains/graphics/libs/png_plusplus/png_plusplus.h"
-#include "domains/platform/libs/futility/base64/base64.h"
 
 namespace portrait {
-using futility::base64::Base64;
 using image_core::Image;
 using image_core::RGB_Double;
 using std::vector;
@@ -23,15 +21,14 @@ absl::StatusOr<TraceResponse> TracerService::trace(TraceRequest& trace_request) 
     return validation_status;
   }
 
-  auto cached_image = cache_.get(trace_request);
-  if (cached_image.has_value()) {
-    auto b64Png = cached_image.value();
+  auto cached_png = cache_.get(trace_request);
+  if (cached_png.has_value()) {
     auto duration = std::chrono::steady_clock::now() - start_time;
     metrics_.RecordLatency("trace_request_duration",
                            std::chrono::duration_cast<std::chrono::microseconds>(duration),
                            {{"cache_hit", "true"}});
     metrics_.RecordCounter("trace_cache_hits");
-    return toResponse(trace_request.output, b64Png);
+    return toResponse(trace_request.output, *cached_png);
   }
 
   metrics_.RecordCounter("trace_cache_misses");
@@ -44,9 +41,9 @@ absl::StatusOr<TraceResponse> TracerService::trace(TraceRequest& trace_request) 
     metrics_.RecordGauge("scene_light_count", static_cast<double>(scene.lights.size()));
 
     auto image = do_trace(scene, perspective, output);
-    auto b64Png = imageToBase64(image);
-    auto traceResponse = toResponse(output, b64Png);
-    cache_.insert(trace_request, std::move(b64Png));
+    auto png_bytes = pngpp::imageToPng(image);
+    auto traceResponse = toResponse(output, png_bytes);
+    cache_.insert(trace_request, std::move(png_bytes));
 
     auto duration = std::chrono::steady_clock::now() - start_time;
     metrics_.RecordLatency("trace_request_duration",
@@ -124,14 +121,10 @@ tracy::LightType TracerService::tracify(const LightType& lightType) {
   return static_cast<tracy::LightType>(lightType);
 }
 
-std::string TracerService::imageToBase64(const Image<RGB_Double>& image) {
-  const std::vector<unsigned char> png_bytes = pngpp::imageToPng(image);
-  return Base64::encode(png_bytes);
-}
-
-TraceResponse TracerService::toResponse(const Output& output, std::string& base64) {
+TraceResponse TracerService::toResponse(const Output& output,
+                                        const std::vector<std::uint8_t>& png_bytes) {
   return TraceResponse{
-      .base64_png = base64,
+      .png_bytes = png_bytes,
       .width = output.width,
       .height = output.height,
   };

@@ -1,14 +1,13 @@
-// Phase 1 wire-compatibility tests for the portrait-on-smithy-cpp rewrite
-// (https://github.com/muchq/MoonBase/issues/1168). Golden JSON fixtures
-// mirroring the current meerkat service's wire format are driven through the
-// generated server over the loopback transport:
+// Wire-compatibility tests: golden JSON fixtures pinning the service's wire
+// format are driven through the generated server over the loopback
+// transport:
 //   - the golden request parses into the generated typed input,
-//   - the response body matches the current service's shape exactly,
+//   - the response body matches the deployed service's shape exactly,
 //   - omitted optional scene fields fill their defaults,
 //   - every trait-expressible validate* rule from types.cc rejects with 400,
 //   - the generated client round-trips, including the modeled error.
-// Cross-field rules (camera != focus, aspect ratio, radius > 0) belong to the
-// Phase 2 handler and are not tested here.
+// Cross-field rules (camera != focus, aspect ratio, radius > 0) belong to
+// the handler and are tested in smithy_handler_test.
 
 #include <gtest/gtest.h>
 
@@ -20,11 +19,10 @@
 #include <utility>
 #include <vector>
 
+#include "domains/graphics/apis/portrait/test_support.h"
 #include "moonbase/portrait/client.h"
 #include "moonbase/portrait/server.h"
-#include "smithy/client/config.h"
 #include "smithy/core/blob.h"
-#include "smithy/http/loopback.h"
 
 namespace {
 
@@ -34,10 +32,10 @@ using moonbase::portrait::Light;
 using moonbase::portrait::LightType;
 using moonbase::portrait::PortraitClient;
 using moonbase::portrait::PortraitHandler;
-using moonbase::portrait::PortraitServer;
 using moonbase::portrait::Sphere;
 using moonbase::portrait::TraceInput;
 using moonbase::portrait::TraceOutput;
+using portrait::test_support::LoopbackHarness;
 
 constexpr char kFakePng[] = "not-really-a-png";
 constexpr char kFakePngBase64[] = "bm90LXJlYWxseS1hLXBuZw==";
@@ -79,8 +77,9 @@ class RecordingHandler final : public PortraitHandler {
   bool reject_scene_ = false;
 };
 
-// The wire format the meerkat service accepts today (see portrait/types.h:
-// tuples as JSON arrays, camelCase field names).
+// The golden wire format (tuples as JSON arrays, camelCase field names),
+// richer than the canonical test_support scene so optional fields are
+// pinned too.
 json GoldenRequest() {
   return json::parse(R"({
     "scene": {
@@ -107,35 +106,12 @@ json GoldenRequest() {
 
 class PortraitWireTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    handler_ = std::make_shared<RecordingHandler>();
-    server_ = std::make_unique<PortraitServer>(handler_);
-    loopback_ = std::make_shared<smithy::http::Loopback>();
-    ASSERT_TRUE(loopback_->Start(server_->Handler()).ok());
-  }
-
-  smithy::http::HttpResponse Post(const std::string& body,
-                                  const std::string& content_type = "application/json") {
-    smithy::http::HttpRequest request;
-    request.method = "POST";
-    request.target = "/portrait/v1/trace";
-    request.headers.Set("content-type", content_type);
-    request.body = body;
-    auto response = loopback_->Send(request);
-    if (!response.ok()) {
-      ADD_FAILURE() << "loopback send failed: " << response.error().message();
-      return {};
-    }
-    return *response;
-  }
-
-  std::shared_ptr<RecordingHandler> handler_;
-  std::unique_ptr<PortraitServer> server_;
-  std::shared_ptr<smithy::http::Loopback> loopback_;
+  std::shared_ptr<RecordingHandler> handler_ = std::make_shared<RecordingHandler>();
+  LoopbackHarness harness_{handler_};
 };
 
 TEST_F(PortraitWireTest, GoldenRequestParsesIntoTypedInput) {
-  const auto response = Post(GoldenRequest().dump());
+  const auto response = harness_.PostTrace(GoldenRequest().dump());
   ASSERT_EQ(response.status, 200) << response.body;
 
   const auto input = handler_->last_input();
@@ -166,12 +142,12 @@ TEST_F(PortraitWireTest, GoldenRequestParsesIntoTypedInput) {
 }
 
 TEST_F(PortraitWireTest, ResponseMatchesCurrentWireShape) {
-  const auto response = Post(GoldenRequest().dump());
+  const auto response = harness_.PostTrace(GoldenRequest().dump());
   ASSERT_EQ(response.status, 200) << response.body;
   EXPECT_EQ(response.headers.Get("content-type").value_or(""), "application/json");
 
-  // Field names and value encodings must match what the meerkat service
-  // emits today: base64_png as standard base64, plain integer dimensions.
+  // Field names and value encodings must match what the service emits
+  // today: base64_png as standard base64, plain integer dimensions.
   const json expected = {{"base64_png", kFakePngBase64}, {"width", 320}, {"height", 240}};
   EXPECT_EQ(json::parse(response.body), expected);
 }
@@ -182,7 +158,7 @@ TEST_F(PortraitWireTest, OmittedOptionalSceneFieldsFillDefaults) {
   request["scene"].erase("backgroundStarProbability");
   request["scene"].erase("lights");
 
-  const auto response = Post(request.dump());
+  const auto response = harness_.PostTrace(request.dump());
   ASSERT_EQ(response.status, 200) << response.body;
 
   const auto input = handler_->last_input();
@@ -193,8 +169,7 @@ TEST_F(PortraitWireTest, OmittedOptionalSceneFieldsFillDefaults) {
 }
 
 // Every trait-expressible rule from portrait/types.cc, as a table of golden
-// mutations. The current service answers 400 {"error": ...}; the generated
-// server answers 400 ValidationException — same status, richer body.
+// mutations: 400 ValidationException with the offending member named.
 struct ConstraintCase {
   const char* name;
   void (*mutate)(json&);
@@ -208,7 +183,7 @@ TEST_P(PortraitConstraintTest, RejectsWith400) {
   json request = GoldenRequest();
   GetParam().mutate(request);
 
-  const auto response = Post(request.dump());
+  const auto response = harness_.PostTrace(request.dump());
   EXPECT_EQ(response.status, 400) << response.body;
   EXPECT_EQ(response.headers.Get("x-error-type").value_or("<missing>"), "ValidationException")
       << response.body;
@@ -254,18 +229,12 @@ INSTANTIATE_TEST_SUITE_P(
     [](const auto& info) { return info.param.name; });
 
 TEST_F(PortraitWireTest, NonJsonContentTypeRejected) {
-  // Behavior change vs meerkat (which ignored content-type): documented in
-  // the migration issue as an acceptable break.
-  const auto response = Post(GoldenRequest().dump(), "text/plain");
+  const auto response = harness_.PostTrace(GoldenRequest().dump(), "text/plain");
   EXPECT_EQ(response.status, 415) << response.body;
 }
 
 TEST_F(PortraitWireTest, GeneratedClientRoundTrips) {
-  smithy::ClientConfig config;
-  config.http_client = loopback_;
-  auto created = PortraitClient::Create(std::move(config));
-  ASSERT_TRUE(created.ok()) << created.error().message();
-  PortraitClient client = std::move(*created);
+  PortraitClient client = harness_.MakeClient();
 
   Sphere sphere;
   sphere.center = {0.0, -1.0, 3.0};
@@ -302,11 +271,7 @@ TEST_F(PortraitWireTest, GeneratedClientRoundTrips) {
 TEST_F(PortraitWireTest, ModeledErrorSurfacesTyped) {
   handler_->reject_scene(true);
 
-  smithy::ClientConfig config;
-  config.http_client = loopback_;
-  auto created = PortraitClient::Create(std::move(config));
-  ASSERT_TRUE(created.ok()) << created.error().message();
-  PortraitClient client = std::move(*created);
+  PortraitClient client = harness_.MakeClient();
 
   TraceInput input;
   Sphere sphere;

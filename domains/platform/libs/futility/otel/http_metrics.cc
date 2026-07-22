@@ -1,12 +1,11 @@
-#include "domains/platform/libs/meerkat/metrics_manager.h"
+#include "domains/platform/libs/futility/otel/http_metrics.h"
 
 #include <string>
 
-namespace meerkat {
+namespace futility::otel {
 
 HttpMetricsManager::HttpMetricsManager(const std::string& service_name)
-    : service_name_(service_name),
-      recorder_(std::make_unique<futility::otel::MetricsRecorder>(service_name)) {}
+    : service_name_(service_name), recorder_(std::make_unique<MetricsRecorder>(service_name)) {}
 
 void HttpMetricsManager::RecordRequestStart(const std::string& route, const std::string& method) {
   if (!recorder_) return;
@@ -72,4 +71,4 @@ bool HttpMetricsManager::IsSuccess(int status_code) const {
   return status_code >= 200 && status_code < 400;
 }
 
-}  // namespace meerkat
+}  // namespace futility::otel

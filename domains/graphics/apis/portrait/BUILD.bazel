@@ -2,16 +2,17 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
+# TracerService's domain layer: plain structs (the render cache key) and the
+# cross-field validation the Smithy constraint traits can't express. Wire
+# serde lives in the generated targets below.
 cc_library(
     name = "types",
     srcs = ["types.cc"],
     hdrs = ["types.h"],
     visibility = ["//visibility:public"],
     deps = [
-        "//domains/graphics/libs/tracy_cpp:tracy",
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/status",
-        "@nlohmann_json//:json",
     ],
 )
 
@@ -23,7 +24,6 @@ cc_test(
         ":types",
         "@com_google_absl//absl/status",
         "@googletest//:gtest_main",
-        "@nlohmann_json//:json",
     ],
 )
 
@@ -37,10 +37,8 @@ cc_library(
         "//domains/graphics/libs/image_core",
         "//domains/graphics/libs/png_plusplus",
         "//domains/graphics/libs/tracy_cpp:tracy",
-        "//domains/platform/libs/futility/base64",
         "//domains/platform/libs/futility/cache",
         "//domains/platform/libs/futility/otel:metrics",
-        "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
         "@com_google_absl//absl/status:statusor",
     ],
 )
@@ -52,14 +50,15 @@ cc_test(
     deps = [
         ":tracer_service",
         ":types",
+        "//domains/graphics/libs/png_plusplus",
         "@com_google_absl//absl/status",
         "@googletest//:gtest_main",
     ],
 )
 
-# Phase 1 of the smithy-cpp rewrite (#1168): the API modeled in Smithy,
-# generated alongside the running meerkat service. The service switches to
-# these targets in Phase 2.
+# The API modeled in Smithy (https://github.com/muchq/MoonBase/issues/1168);
+# the generated server parses and constraint-validates the wire, the
+# generated client is the typed consumer surface.
 smithy_cpp_server_library(
     name = "portrait_smithy_server",
     srcs = [
@@ -80,6 +79,24 @@ smithy_cpp_client_library(
     service = "moonbase.portrait#Portrait",
 )
 
+# Shared fixtures (canonical valid scene, typed + JSON) and the loopback
+# harness for the test files below.
+cc_library(
+    name = "test_support",
+    testonly = True,
+    srcs = ["test_support.cc"],
+    hdrs = ["test_support.h"],
+    deps = [
+        ":portrait_smithy_client",
+        ":portrait_smithy_server",
+        "@googletest//:gtest",
+        "@smithy_cpp//runtime:client",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
 cc_test(
     name = "portrait_smithy_wire_test",
     size = "small",
@@ -87,6 +104,7 @@ cc_test(
     deps = [
         ":portrait_smithy_client",
         ":portrait_smithy_server",
+        ":test_support",
         "@googletest//:gtest_main",
         "@nlohmann_json//:json",
         "@smithy_cpp//runtime:client",
@@ -96,8 +114,6 @@ cc_test(
     ],
 )
 
-# Phase 2 (#1168): TracerService behind the generated PortraitHandler.
-# Main.cc switches to this handler (plus middleware parity) in phase 3.
 cc_library(
     name = "smithy_handler",
     srcs = ["smithy_handler.cc"],
@@ -107,7 +123,6 @@ cc_library(
         ":portrait_smithy_server",
         ":tracer_service",
         ":types",
-        "//domains/platform/libs/futility/base64",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@smithy_cpp//runtime:core",
@@ -120,29 +135,25 @@ cc_test(
     srcs = ["smithy_handler_test.cc"],
     deps = [
         ":portrait_smithy_client",
-        ":portrait_smithy_server",
         ":smithy_handler",
+        ":test_support",
         "//domains/graphics/libs/png_plusplus",
         "@googletest//:gtest_main",
-        "@smithy_cpp//runtime:client",
         "@smithy_cpp//runtime:core",
         "@smithy_cpp//runtime:http",
     ],
 )
 
-# Phase 3-4 (#1168): meerkat-parity middleware and the cutover. :portrait
-# (and the ghcr.io/muchq/portrait image) now ship the smithy-cpp server.
-# Rollback is the pre-cutover ghcr.io/muchq/portrait:<sha> image tag;
-# :portrait_meerkat only keeps the old Main.cc compiling as the pre-cutover
-# reference during the soak, then gets deleted with the meerkat serving code.
-# Package-private until a second smithy-cpp service needs meerkat parity;
-# hoist to a shared platform lib at that point.
+# Serving middleware and the ProductionChain builder shared by main.cc and
+# the middleware tests, so tests exercise the deployed wiring.
+# Package-private, and queued to hoist into //domains/platform/libs/aura so
+# golf_hub can adopt the same chain (#1184).
 cc_library(
     name = "smithy_middleware",
     srcs = ["smithy_middleware.cc"],
     hdrs = ["smithy_middleware.h"],
     deps = [
-        "//domains/platform/libs/meerkat:metrics_manager",
+        "//domains/platform/libs/futility/otel:http_metrics",
         "@com_google_absl//absl/log",
         "@smithy_cpp//runtime:http",
         "@smithy_cpp//runtime:http_beast",
@@ -158,6 +169,7 @@ cc_test(
         ":portrait_smithy_client",
         ":portrait_smithy_server",
         ":smithy_middleware",
+        ":test_support",
         "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
         "@com_google_absl//absl/base:log_severity",
         "@com_google_absl//absl/log:scoped_mock_log",
@@ -170,59 +182,24 @@ cc_test(
     ],
 )
 
-# Phase 4 gate: the meerkat and smithy stacks serve the same corpus side by
-# side; every divergence must be on the documented intentional list.
-cc_test(
-    name = "portrait_parity_test",
-    size = "small",
-    srcs = ["portrait_parity_test.cc"],
-    deps = [
-        ":portrait_smithy_server",
-        ":smithy_handler",
-        ":tracer_service",
-        ":types",
-        "//domains/platform/libs/meerkat",
-        "@googletest//:gtest_main",
-        "@nlohmann_json//:json",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:http_beast",
-        "@smithy_cpp//runtime:server",
-    ],
-)
-
 cc_binary(
     name = "portrait",
-    srcs = ["portrait_smithy_main.cc"],
+    srcs = ["main.cc"],
     visibility = ["//visibility:public"],
     deps = [
         ":portrait_smithy_server",
         ":smithy_handler",
         ":smithy_middleware",
         "//domains/platform/libs/futility/env",
+        "//domains/platform/libs/futility/otel:http_metrics",
         "//domains/platform/libs/futility/otel:otel_provider",
         "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
-        "//domains/platform/libs/meerkat:metrics_manager",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:globals",
         "@com_google_absl//absl/log:initialize",
         "@smithy_cpp//runtime:http",
         "@smithy_cpp//runtime:http_beast",
         "@smithy_cpp//runtime:server",
-    ],
-)
-
-cc_binary(
-    name = "portrait_meerkat",
-    srcs = ["Main.cc"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":tracer_service",
-        ":types",
-        "//domains/platform/libs/futility/otel:otel_provider",
-        "//domains/platform/libs/meerkat",
-        "@com_google_absl//absl/log",
-        "@com_google_absl//absl/log:globals",
-        "@com_google_absl//absl/log:initialize",
     ],
 )
 
