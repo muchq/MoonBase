@@ -32,8 +32,8 @@ Services in the consolidated deploy:
 - Enforce query range and step caps (protect Prometheus backend).
 
 ### portrait (C++)
-- Add request size limits in `meerkat` server.
-- Add request/response timeouts in `meerkat`.
+- ~~Add request size limits.~~ Done: body-size limit at the smithy-cpp Beast transport.
+- ~~Add request/response timeouts.~~ Done: transport read/write deadlines (smithy-cpp).
 - Make rate limiter configuration env-driven (max keys, window, ttl, cleanup).
 
 ### mithril (Rust)
@@ -109,6 +109,6 @@ For each deployed service:
 1. Add timeouts and size limits in Go services.
 2. Fix Go rate limiting library memory leak and wire into services.
 3. Configure Micronaut limits and timeouts for `mcpserver`.
-4. Add request limits/timeouts in C++ `meerkat`.
+4. ~~Add request limits/timeouts for C++ `portrait`.~~ Done via the smithy-cpp migration.
 5. Add rate limiting in Rust `server_pal` and services.
 6. Expand tests and documentation across services.
