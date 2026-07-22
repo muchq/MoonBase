@@ -6,7 +6,6 @@ Core infrastructure, shared services, and foundational libraries.
 
 - [**DocDB**](apis/doc_db): Document database system with implementations in Rust and Go.
 - [**Prom Proxy**](apis/prom_proxy): Proxy service for Prometheus metrics.
-- [**Example Meerkat**](apis/example_meerkat): Demonstration of the Meerkat HTTP server.
 - [**Example gRPC**](apis/example_grpc_cpp): Sample gRPC services in C++ and Go.
 
 ## Apps
@@ -15,7 +14,7 @@ Core infrastructure, shared services, and foundational libraries.
 
 ## Libraries
 
-- [**Meerkat**](libs/meerkat): Modern C++ HTTP server wrapper built on Mongoose.
+- [**Aura**](libs/aura): Serving chain for C++ smithy-cpp services (observability, health, rate limiting).
 - [**Futility**](libs/futility): Collection of C++ utility libraries (Rate Limiter, Cache, Otel, etc.).
 - [**Mucks**](libs/mucks): Lightweight HTTP router wrapper for Go with middleware support.
 - [**Resilience4g**](libs/resilience4g): Fault tolerance library for Go (Rate Limiting, Circuit Breakers).

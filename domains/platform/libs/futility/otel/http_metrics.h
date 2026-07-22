@@ -5,9 +5,7 @@
 /// http_server_requests_active, http_server_request_duration,
 /// http_server_requests_success / _failure) with service_name/route/method
 /// labels, so services on any transport emit the same names and existing
-/// dashboards keep working. Originally meerkat's metrics interceptor state;
-/// rehomed here when portrait moved to smithy-cpp
-/// (https://github.com/muchq/MoonBase/issues/1174).
+/// dashboards keep working (https://github.com/muchq/MoonBase/issues/1174).
 
 #include <chrono>
 #include <map>
