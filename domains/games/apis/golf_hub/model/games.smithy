@@ -127,3 +127,38 @@ structure CommandRejected {
     @required
     reason: String
 }
+
+/// Game lifecycle within a room — create/join/start/leave and their
+/// announcements carry no game-specific content, so any game reuses them.
+/// Creates a game in the current room and seats the creator.
+structure CreateGame {}
+
+structure JoinGame {
+    @required
+    gameId: String
+}
+
+structure StartGame {}
+
+structure LeaveGame {}
+
+/// A game was created and is open to join. Distinct from gameStarted,
+/// which fires when play actually begins.
+structure GameCreated {
+    @required
+    gameId: String
+}
+
+/// Play has begun: seats are locked and the game's opening is dealt.
+structure GameStarted {}
+
+structure TurnChanged {
+    @required
+    playerId: String
+}
+
+/// Ack for a deliberate leaveGame; remaining players see a state update.
+structure GameLeft {
+    @required
+    gameId: String
+}

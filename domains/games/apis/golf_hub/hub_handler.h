@@ -61,10 +61,12 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   };
 
   /// A game is a pre-start roster until startGame swaps in engine state.
+  /// Once started, roster membership mirrors the engine's seats — every
+  /// join/leave updates both, or a seat would stop receiving views.
   struct GameEntry {
     std::vector<std::string> roster;
     std::optional<golf::GameState> state;
-    [[nodiscard]] bool live() const { return state.has_value(); }
+    [[nodiscard]] bool started() const { return state.has_value(); }
   };
 
   struct Room {
@@ -72,7 +74,9 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
     std::map<std::string, GameEntry> games;
   };
 
-  /// Events staged under the lock, delivered outside it.
+  /// Events staged under the lock, delivered outside it. Delivery
+  /// preserves staged order per recipient — callers stage in the order
+  /// clients must observe (e.g. final views before gameEnded).
   struct Outbox {
     std::vector<std::pair<std::string, moonbase::golf::GolfEvents>> events;
     void To(const std::string& player_id, moonbase::golf::GolfEvents event) {
@@ -88,14 +92,28 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
     bool peek_fanout = false;     // views to all only once the countdown starts
   };
 
+  /// A player's room, game, and game entry resolved together; fields are
+  /// non-null/engaged only as far as the player is actually placed.
+  struct GameRef {
+    std::string room_id;
+    Room* room = nullptr;
+    std::string game_id;
+    GameEntry* entry = nullptr;
+  };
+
   void HandleCommand(const std::string& player_id, const moonbase::golf::GolfCommands& command);
   void HandleMove(const std::string& player_id, const moonbase::golf::GolfMove& move);
+  void CreateGameMove(const std::string& player_id);
+  void JoinGameMove(const std::string& player_id, const std::string& game_id);
+  void StartGameMove(const std::string& player_id);
   /// The shared shape of every in-game engine move: transition, then
   /// stage the fan-out (views, turn change, game end) the result implies.
   void EngineMove(const std::string& player_id, const MoveFn& move, MoveEffects effects);
 
   void SetConnected(const std::string& player_id, bool connected);
   std::optional<std::string> CurrentRoom(const std::string& player_id);
+  Room* FindRoomLocked(const std::string& player_id);
+  std::optional<GameRef> FindGameLocked(const std::string& player_id);
   /// Removes the player from their game and room (deliberate leave, clean
   /// close, or grace expiry) and stages every notification that implies.
   void LeaveEverywhere(const std::string& player_id, Outbox& outbox);

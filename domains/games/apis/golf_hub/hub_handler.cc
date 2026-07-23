@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "absl/strings/str_join.h"
+#include "domains/games/libs/cards/card_mapper.h"
 #include "domains/games/libs/cards/golf/player.h"
 
 namespace golf_hub {
@@ -20,22 +21,9 @@ namespace {
 constexpr std::size_t kMaxSeats = 4;
 constexpr std::size_t kMaxChatLength = 500;
 
-// The v1 wire's card language, which the UI already renders.
-std::string RankString(cards::Rank rank) {
-  switch (rank) {
-    case cards::Rank::Ace:
-      return "A";
-    case cards::Rank::Jack:
-      return "J";
-    case cards::Rank::Queen:
-      return "Q";
-    case cards::Rank::King:
-      return "K";
-    default:
-      return std::to_string(static_cast<int>(rank) + 2);
-  }
-}
-
+// The v1 wire's card language, which the UI already renders. Ranks come
+// from the canonical CardMapper table; suits are the wire's glyphs
+// (CardMapper's letters are a different representation).
 std::string SuitString(cards::Suit suit) {
   switch (suit) {
     case cards::Suit::Spades:
@@ -52,7 +40,7 @@ std::string SuitString(cards::Suit suit) {
 
 moonbase::golf::Card WireCard(const cards::Card& card) {
   moonbase::golf::Card wire;
-  wire.rank = RankString(card.getRank());
+  wire.rank = cards::CardMapper::rankToString(card.getRank());
   wire.suit = SuitString(card.getSuit());
   return wire;
 }
@@ -64,7 +52,8 @@ std::string PhaseString(const golf::GameState& state) {
   return "playing";
 }
 
-std::string SeatName(const golf::GameState& state, int seat) {
+// Seats are integer indexes; the occupant's identity is the player id.
+std::string PlayerIdAt(const golf::GameState& state, int seat) {
   return state.getPlayer(seat).getName().value_or("");
 }
 
@@ -131,17 +120,10 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
     const auto room_it = player_room_.find(player_id);
     if (room_it != player_room_.end()) room = room_it->second;
     // A resumed seat mid-game gets its current view back immediately.
-    const auto game_it = player_game_.find(player_id);
-    if (room.has_value() && game_it != player_game_.end()) {
-      const auto room_entry = rooms_.find(*room);
-      if (room_entry != rooms_.end()) {
-        const auto game = room_entry->second.games.find(game_it->second);
-        if (game != room_entry->second.games.end()) {
-          moonbase::golf::GameJoined joined;
-          joined.view = ViewLocked(game->first, game->second, player_id);
-          resync.To(player_id, GolfUpdateEvent(GolfUpdate::FromGamejoined(std::move(joined))));
-        }
-      }
+    if (auto ref = FindGameLocked(player_id)) {
+      moonbase::golf::GameJoined joined;
+      joined.view = ViewLocked(ref->game_id, *ref->entry, player_id);
+      resync.To(player_id, GolfUpdateEvent(GolfUpdate::FromGamejoined(std::move(joined))));
     }
   }
   moonbase::golf::SessionReady ready;
@@ -275,23 +257,23 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
       return;
     }
     Outbox outbox;
+    bool in_room = false;
     {
       const std::lock_guard<std::mutex> lock(mu_);
-      const auto it = player_room_.find(player_id);
-      const auto room = it != player_room_.end() ? rooms_.find(it->second) : rooms_.end();
-      if (room != rooms_.end()) {
+      if (Room* room = FindRoomLocked(player_id); room != nullptr) {
+        in_room = true;
         moonbase::golf::ChatMessage message;
         message.playerId = player_id;
         message.text = chat->text;
-        for (const auto& member : room->second.members) {
+        for (const auto& member : room->members) {
           outbox.To(member.first, GolfEvents::FromRoomchat(message));
         }
       }
     }
-    if (outbox.events.empty()) {
-      Reject(player_id, "not in a room");
-    } else {
+    if (in_room) {
       Deliver(outbox);
+    } else {
+      Reject(player_id, "not in a room");
     }
     return;
   }
@@ -306,144 +288,17 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
 
 void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) {
   if (move.as_createGame_or_null() != nullptr) {
-    Outbox outbox;
-    std::string reason;
-    {
-      const std::lock_guard<std::mutex> lock(mu_);
-      const auto room_it = player_room_.find(player_id);
-      const auto room = room_it != player_room_.end() ? rooms_.find(room_it->second) : rooms_.end();
-      if (room == rooms_.end()) {
-        reason = "not in a room";
-      } else if (player_game_.contains(player_id)) {
-        reason = "leave your current game first";
-      } else {
-        std::string game_id = GameCode();
-        while (room->second.games.contains(game_id)) game_id = GameCode();
-        GameEntry& entry = room->second.games[game_id];
-        entry.roster.push_back(player_id);
-        player_game_[player_id] = game_id;
-
-        moonbase::golf::NewGameStarted announcement;
-        announcement.gameId = game_id;
-        for (const auto& member : room->second.members) {
-          outbox.To(member.first, GolfUpdateEvent(GolfUpdate::FromNewgamestarted(announcement)));
-        }
-        moonbase::golf::GameJoined joined;
-        joined.view = ViewLocked(game_id, entry, player_id);
-        outbox.To(player_id, GolfUpdateEvent(GolfUpdate::FromGamejoined(std::move(joined))));
-        StageRoomStateLocked(room_it->second, outbox);
-      }
-    }
-    if (!reason.empty()) {
-      Reject(player_id, std::move(reason));
-    } else {
-      Deliver(outbox);
-    }
+    CreateGameMove(player_id);
     return;
   }
-
   if (const auto* join = move.as_joinGame_or_null()) {
-    Outbox outbox;
-    std::string reason;
-    {
-      const std::lock_guard<std::mutex> lock(mu_);
-      const auto room_it = player_room_.find(player_id);
-      const auto room = room_it != player_room_.end() ? rooms_.find(room_it->second) : rooms_.end();
-      if (room == rooms_.end()) {
-        reason = "not in a room";
-      } else if (player_game_.contains(player_id)) {
-        reason = "leave your current game first";
-      } else {
-        const auto game = room->second.games.find(join->gameId);
-        if (game == room->second.games.end()) {
-          reason = "game not found";
-        } else if (game->second.live()) {
-          reason = "game already started";
-        } else if (game->second.roster.size() >= kMaxSeats) {
-          reason = "game is full";
-        } else {
-          game->second.roster.push_back(player_id);
-          player_game_[player_id] = join->gameId;
-
-          moonbase::golf::GameJoined joined;
-          joined.view = ViewLocked(game->first, game->second, player_id);
-          outbox.To(player_id, GolfUpdateEvent(GolfUpdate::FromGamejoined(std::move(joined))));
-          for (const std::string& seat_id : game->second.roster) {
-            if (seat_id == player_id) continue;
-            moonbase::golf::GameStateUpdate update;
-            update.view = ViewLocked(game->first, game->second, seat_id);
-            outbox.To(seat_id, GolfUpdateEvent(GolfUpdate::FromGamestate(std::move(update))));
-          }
-          StageRoomStateLocked(room_it->second, outbox);
-        }
-      }
-    }
-    if (!reason.empty()) {
-      Reject(player_id, std::move(reason));
-    } else {
-      Deliver(outbox);
-    }
+    JoinGameMove(player_id, join->gameId);
     return;
   }
-
   if (move.as_startGame_or_null() != nullptr) {
-    Outbox outbox;
-    std::string reason;
-    {
-      const std::lock_guard<std::mutex> lock(mu_);
-      const auto room_it = player_room_.find(player_id);
-      const auto game_it = player_game_.find(player_id);
-      const auto room = room_it != player_room_.end() ? rooms_.find(room_it->second) : rooms_.end();
-      if (room == rooms_.end() || game_it == player_game_.end()) {
-        reason = "not in a game";
-      } else {
-        const auto game = room->second.games.find(game_it->second);
-        if (game == room->second.games.end()) {
-          reason = "game not found";
-        } else if (game->second.live()) {
-          reason = "game already started";
-        } else if (game->second.roster.size() < 2) {
-          reason = "need at least 2 players to start";
-        } else {
-          // Deal like the Go hub: shuffled deck, four cards a seat, one
-          // seeding the discard.
-          std::deque<cards::Card> deck = dealer_->DealNewUnshuffledDeck();
-          dealer_->ShuffleDeck(deck);
-          std::vector<golf::Player> players;
-          for (const std::string& seat_id : game->second.roster) {
-            const cards::Card tl = deck.back();
-            deck.pop_back();
-            const cards::Card tr = deck.back();
-            deck.pop_back();
-            const cards::Card bl = deck.back();
-            deck.pop_back();
-            const cards::Card br = deck.back();
-            deck.pop_back();
-            players.emplace_back(seat_id, tl, tr, bl, br);
-          }
-          std::deque<cards::Card> discard{deck.back()};
-          deck.pop_back();
-          game->second.state.emplace(std::move(deck), std::move(discard), std::move(players),
-                                     /*_peekedAtDrawPile=*/false, /*_whoseTurn=*/0,
-                                     /*_whoKnocked=*/-1, game->first, "");
-
-          for (const std::string& seat_id : game->second.roster) {
-            outbox.To(seat_id,
-                      GolfUpdateEvent(GolfUpdate::FromGamestarted(moonbase::golf::GameStarted{})));
-          }
-          StageGameViewsLocked(game->first, game->second, outbox);
-          StageRoomStateLocked(room_it->second, outbox);
-        }
-      }
-    }
-    if (!reason.empty()) {
-      Reject(player_id, std::move(reason));
-    } else {
-      Deliver(outbox);
-    }
+    StartGameMove(player_id);
     return;
   }
-
   if (move.as_leaveGame_or_null() != nullptr) {
     Outbox outbox;
     bool in_game = false;
@@ -483,6 +338,8 @@ void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) 
   }
 
   if (move.as_drawCard_or_null() != nullptr) {
+    // The wire's drawCard is the engine's draw-pile peek — unrelated to
+    // peekCard, which is the opening own-card reveal.
     EngineMove(
         player_id,
         [](const golf::GameState& state, int seat) { return state.peekAtDrawPile(seat); },
@@ -538,27 +395,131 @@ void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) 
   Reject(player_id, "unknown move");
 }
 
+void HubHandler::CreateGameMove(const std::string& player_id) {
+  Outbox outbox;
+  std::string reason;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    Room* room = FindRoomLocked(player_id);
+    if (room == nullptr) {
+      reason = "not in a room";
+    } else if (player_game_.contains(player_id)) {
+      reason = "leave your current game first";
+    } else {
+      std::string game_id = GameCode();
+      while (room->games.contains(game_id)) game_id = GameCode();
+      GameEntry& entry = room->games[game_id];
+      entry.roster.push_back(player_id);
+      player_game_[player_id] = game_id;
+
+      moonbase::golf::GameCreated announcement;
+      announcement.gameId = game_id;
+      for (const auto& member : room->members) {
+        outbox.To(member.first, GolfUpdateEvent(GolfUpdate::FromGamecreated(announcement)));
+      }
+      moonbase::golf::GameJoined joined;
+      joined.view = ViewLocked(game_id, entry, player_id);
+      outbox.To(player_id, GolfUpdateEvent(GolfUpdate::FromGamejoined(std::move(joined))));
+      StageRoomStateLocked(player_room_.at(player_id), outbox);
+    }
+  }
+  if (!reason.empty()) {
+    Reject(player_id, std::move(reason));
+  } else {
+    Deliver(outbox);
+  }
+}
+
+void HubHandler::JoinGameMove(const std::string& player_id, const std::string& game_id) {
+  Outbox outbox;
+  std::string reason;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    Room* room = FindRoomLocked(player_id);
+    if (room == nullptr) {
+      reason = "not in a room";
+    } else if (player_game_.contains(player_id)) {
+      reason = "leave your current game first";
+    } else {
+      const auto game = room->games.find(game_id);
+      if (game == room->games.end()) {
+        reason = "game not found";
+      } else if (game->second.started()) {
+        reason = "game already started";
+      } else if (game->second.roster.size() >= kMaxSeats) {
+        reason = "game is full";
+      } else {
+        game->second.roster.push_back(player_id);
+        player_game_[player_id] = game_id;
+
+        moonbase::golf::GameJoined joined;
+        joined.view = ViewLocked(game_id, game->second, player_id);
+        outbox.To(player_id, GolfUpdateEvent(GolfUpdate::FromGamejoined(std::move(joined))));
+        for (const std::string& recipient : game->second.roster) {
+          if (recipient == player_id) continue;
+          moonbase::golf::GameStateUpdate update;
+          update.view = ViewLocked(game_id, game->second, recipient);
+          outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromGamestate(std::move(update))));
+        }
+        StageRoomStateLocked(player_room_.at(player_id), outbox);
+      }
+    }
+  }
+  if (!reason.empty()) {
+    Reject(player_id, std::move(reason));
+  } else {
+    Deliver(outbox);
+  }
+}
+
+void HubHandler::StartGameMove(const std::string& player_id) {
+  Outbox outbox;
+  std::string reason;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    auto ref = FindGameLocked(player_id);
+    if (!ref.has_value()) {
+      reason = "not in a game";
+    } else if (ref->entry->started()) {
+      reason = "game already started";
+    } else if (ref->entry->roster.size() < 2) {
+      reason = "need at least 2 players to start";
+    } else {
+      std::deque<cards::Card> deck = dealer_->DealNewUnshuffledDeck();
+      dealer_->ShuffleDeck(deck);
+      auto dealt = golf::dealGolfGame(ref->game_id, ref->entry->roster, std::move(deck));
+      if (!dealt.ok()) {
+        reason = std::string(dealt.status().message());
+      } else {
+        ref->entry->state.emplace(std::move(*dealt));
+        for (const std::string& recipient : ref->entry->roster) {
+          outbox.To(recipient,
+                    GolfUpdateEvent(GolfUpdate::FromGamestarted(moonbase::golf::GameStarted{})));
+        }
+        StageGameViewsLocked(ref->game_id, *ref->entry, outbox);
+        StageRoomStateLocked(ref->room_id, outbox);
+      }
+    }
+  }
+  if (!reason.empty()) {
+    Reject(player_id, std::move(reason));
+  } else {
+    Deliver(outbox);
+  }
+}
+
 void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, MoveEffects effects) {
   Outbox outbox;
   std::string reason;
   {
     const std::lock_guard<std::mutex> lock(mu_);
-    const auto room_it = player_room_.find(player_id);
-    const auto game_it = player_game_.find(player_id);
-    Room* room = nullptr;
-    if (room_it != player_room_.end()) {
-      const auto found = rooms_.find(room_it->second);
-      if (found != rooms_.end()) room = &found->second;
-    }
-    const auto game = room != nullptr && game_it != player_game_.end()
-                          ? room->games.find(game_it->second)
-                          : std::map<std::string, GameEntry>::iterator{};
-    if (room == nullptr || game_it == player_game_.end() || game == room->games.end()) {
+    auto ref = FindGameLocked(player_id);
+    if (!ref.has_value()) {
       reason = "not in a game";
-    } else if (!game->second.live()) {
+    } else if (!ref->entry->started()) {
       reason = "game not started";
     } else {
-      const golf::GameState& state = *game->second.state;
+      const golf::GameState& state = *ref->entry->state;
       const int seat = state.playerIndex(player_id);
       if (seat < 0) {
         reason = "not seated in this game";
@@ -568,37 +529,42 @@ void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, Mo
           reason = std::string(next.status().message());
         } else {
           const bool was_countdown = state.revealCountdownActive();
-          const std::string previous_turn = SeatName(state, state.getWhoseTurn());
-          game->second.state.emplace(std::move(*next));
-          const golf::GameState& updated = *game->second.state;
+          // Compare occupant ids, not seat indexes — a mid-round leave
+          // renumbers seats.
+          const std::string previous_turn =
+              effects.announce_turn ? PlayerIdAt(state, state.getWhoseTurn()) : std::string();
+          ref->entry->state.emplace(std::move(*next));
+          const golf::GameState& updated = *ref->entry->state;
 
           if (effects.announce_knock) {
             moonbase::golf::PlayerKnocked knocked;
             knocked.playerId = player_id;
-            for (const std::string& seat_id : game->second.roster) {
-              outbox.To(seat_id, GolfUpdateEvent(GolfUpdate::FromPlayerknocked(knocked)));
+            for (const std::string& recipient : ref->entry->roster) {
+              outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromPlayerknocked(knocked)));
             }
           }
 
-          const bool countdown_started = !was_countdown && updated.revealCountdownActive();
-          if (effects.peek_fanout && !countdown_started) {
-            // A quiet peek: only the peeker's view changed.
-            moonbase::golf::GameStateUpdate update;
-            update.view = ViewLocked(game->first, game->second, player_id);
-            outbox.To(player_id, GolfUpdateEvent(GolfUpdate::FromGamestate(std::move(update))));
-          } else {
-            StageGameViewsLocked(game->first, game->second, outbox);
-          }
-
           if (updated.isOver()) {
-            FinalizeGameLocked(room_it->second, *room, game->first, outbox);
-          } else if (effects.announce_turn) {
-            const std::string current_turn = SeatName(updated, updated.getWhoseTurn());
-            if (current_turn != previous_turn) {
-              moonbase::golf::TurnChanged turn;
-              turn.playerId = current_turn;
-              for (const std::string& seat_id : game->second.roster) {
-                outbox.To(seat_id, GolfUpdateEvent(GolfUpdate::FromTurnchanged(turn)));
+            // Finalize stages the definitive face-up views itself.
+            FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox);
+          } else {
+            const bool countdown_started = !was_countdown && updated.revealCountdownActive();
+            if (effects.peek_fanout && !countdown_started) {
+              // A quiet peek: only the peeker's view changed.
+              moonbase::golf::GameStateUpdate update;
+              update.view = ViewLocked(ref->game_id, *ref->entry, player_id);
+              outbox.To(player_id, GolfUpdateEvent(GolfUpdate::FromGamestate(std::move(update))));
+            } else {
+              StageGameViewsLocked(ref->game_id, *ref->entry, outbox);
+            }
+            if (effects.announce_turn) {
+              const std::string current_turn = PlayerIdAt(updated, updated.getWhoseTurn());
+              if (current_turn != previous_turn) {
+                moonbase::golf::TurnChanged turn;
+                turn.playerId = current_turn;
+                for (const std::string& recipient : ref->entry->roster) {
+                  outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromTurnchanged(turn)));
+                }
               }
             }
           }
@@ -630,6 +596,24 @@ std::optional<std::string> HubHandler::CurrentRoom(const std::string& player_id)
   return it->second;
 }
 
+HubHandler::Room* HubHandler::FindRoomLocked(const std::string& player_id) {
+  const auto room_it = player_room_.find(player_id);
+  if (room_it == player_room_.end()) return nullptr;
+  const auto room = rooms_.find(room_it->second);
+  return room != rooms_.end() ? &room->second : nullptr;
+}
+
+std::optional<HubHandler::GameRef> HubHandler::FindGameLocked(const std::string& player_id) {
+  const auto room_it = player_room_.find(player_id);
+  const auto game_it = player_game_.find(player_id);
+  if (room_it == player_room_.end() || game_it == player_game_.end()) return std::nullopt;
+  const auto room = rooms_.find(room_it->second);
+  if (room == rooms_.end()) return std::nullopt;
+  const auto game = room->second.games.find(game_it->second);
+  if (game == room->second.games.end()) return std::nullopt;
+  return GameRef{room_it->second, &room->second, game_it->second, &game->second};
+}
+
 void HubHandler::LeaveEverywhere(const std::string& player_id, Outbox& outbox) {
   LeaveGameLocked(player_id, outbox);
 
@@ -648,50 +632,40 @@ void HubHandler::LeaveEverywhere(const std::string& player_id, Outbox& outbox) {
 }
 
 void HubHandler::LeaveGameLocked(const std::string& player_id, Outbox& outbox) {
-  const auto game_it = player_game_.find(player_id);
-  if (game_it == player_game_.end()) return;
-  const std::string game_id = game_it->second;
-  player_game_.erase(game_it);
-
-  const auto room_it = player_room_.find(player_id);
-  const auto room = room_it != player_room_.end() ? rooms_.find(room_it->second) : rooms_.end();
-  if (room == rooms_.end()) return;
-  const auto game = room->second.games.find(game_id);
-  if (game == room->second.games.end()) return;
+  auto ref = FindGameLocked(player_id);
+  player_game_.erase(player_id);
+  if (!ref.has_value()) return;
 
   moonbase::golf::GameLeft ack;
-  ack.gameId = game_id;
+  ack.gameId = ref->game_id;
   outbox.To(player_id, GolfUpdateEvent(GolfUpdate::FromGameleft(std::move(ack))));
 
-  auto& roster = game->second.roster;
+  auto& roster = ref->entry->roster;
   roster.erase(std::remove(roster.begin(), roster.end(), player_id), roster.end());
 
-  if (!game->second.live()) {
+  if (!ref->entry->started()) {
     if (roster.empty()) {
-      room->second.games.erase(game);
+      ref->room->games.erase(ref->game_id);
     } else {
-      for (const std::string& seat_id : roster) {
-        moonbase::golf::GameStateUpdate update;
-        update.view = ViewLocked(game_id, game->second, seat_id);
-        outbox.To(seat_id, GolfUpdateEvent(GolfUpdate::FromGamestate(std::move(update))));
-      }
+      StageGameViewsLocked(ref->game_id, *ref->entry, outbox);
     }
-    StageRoomStateLocked(room_it->second, outbox);
+    StageRoomStateLocked(ref->room_id, outbox);
     return;
   }
 
-  const golf::GameState& state = *game->second.state;
+  const golf::GameState& state = *ref->entry->state;
   const int seat = state.playerIndex(player_id);
   if (seat >= 0) {
     auto next = state.removePlayer(seat);
-    if (next.ok()) game->second.state.emplace(std::move(*next));
+    if (next.ok()) ref->entry->state.emplace(std::move(*next));
   }
-  if (game->second.state->isOver()) {
-    FinalizeGameLocked(room_it->second, room->second, game_id, outbox);
+  if (ref->entry->state->isOver()) {
+    // Finalize stages the final views and the room's refreshed stats.
+    FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox);
   } else {
-    StageGameViewsLocked(game_id, game->second, outbox);
+    StageGameViewsLocked(ref->game_id, *ref->entry, outbox);
+    StageRoomStateLocked(ref->room_id, outbox);
   }
-  StageRoomStateLocked(room_it->second, outbox);
 }
 
 void HubHandler::BroadcastRoom(const std::string& room_id) {
@@ -743,7 +717,7 @@ moonbase::golf::RoomState HubHandler::RoomStateLocked(const std::string& room_id
   for (const auto& [game_id, entry] : room.games) {
     moonbase::golf::GameSummary summary;
     summary.gameId = game_id;
-    summary.status = entry.live() ? PhaseString(*entry.state) : "waiting";
+    summary.status = entry.started() ? PhaseString(*entry.state) : "waiting";
     summary.playerCount = static_cast<int>(entry.roster.size());
     state.games.push_back(std::move(summary));
   }
@@ -764,14 +738,14 @@ moonbase::golf::GameView HubHandler::ViewLocked(const std::string& game_id, cons
   moonbase::golf::GameView view;
   view.gameId = game_id;
 
-  if (!entry.live()) {
+  if (!entry.started()) {
     view.phase = "waiting";
     view.drawPileCount = 0;
     view.discardCount = 0;
     view.allPlayersPeeked = false;
-    for (const std::string& seat_id : entry.roster) {
+    for (const std::string& roster_id : entry.roster) {
       moonbase::golf::GamePlayer player;
-      player.playerId = seat_id;
+      player.playerId = roster_id;
       player.cards.resize(4);
       player.hasPeeked = false;
       view.players.push_back(std::move(player));
@@ -782,22 +756,22 @@ moonbase::golf::GameView HubHandler::ViewLocked(const std::string& game_id, cons
   const golf::GameState& state = *entry.state;
   const bool ended = state.isOver();
   view.phase = PhaseString(state);
-  if (!ended) view.currentPlayerId = SeatName(state, state.getWhoseTurn());
+  if (!ended) view.currentPlayerId = PlayerIdAt(state, state.getWhoseTurn());
   view.drawPileCount = static_cast<int>(state.getDrawPile().size());
   view.discardCount = static_cast<int>(state.getDiscardPile().size());
   if (!state.getDiscardPile().empty()) view.discardTop = WireCard(state.getDiscardPile().back());
-  if (state.getWhoKnocked() != -1) view.knockedPlayerId = SeatName(state, state.getWhoKnocked());
+  if (state.getWhoKnocked() != -1) view.knockedPlayerId = PlayerIdAt(state, state.getWhoKnocked());
   view.allPlayersPeeked = state.allPlayersPeeked();
   // The drawn card rides only to the player who is looking at it.
-  if (state.getPeekedAtDrawPile() && !ended && SeatName(state, state.getWhoseTurn()) == viewer_id &&
-      !state.getDrawPile().empty()) {
+  if (state.getPeekedAtDrawPile() && !ended &&
+      PlayerIdAt(state, state.getWhoseTurn()) == viewer_id && !state.getDrawPile().empty()) {
     view.drawnCard = WireCard(state.getDrawPile().back());
   }
 
   for (const golf::Player& seat : state.getPlayers()) {
-    const std::string seat_id = seat.getName().value_or("");
+    const std::string occupant = seat.getName().value_or("");
     moonbase::golf::GamePlayer player;
-    player.playerId = seat_id;
+    player.playerId = occupant;
     player.cards.resize(4);
     player.hasPeeked = seat.hasCompletedPeeks();
     if (ended) {
@@ -807,7 +781,7 @@ moonbase::golf::GameView HubHandler::ViewLocked(const std::string& game_id, cons
         player.revealedIndexes.push_back(i);
       }
       player.score = seat.score();
-    } else if (seat_id == viewer_id) {
+    } else if (occupant == viewer_id) {
       for (const golf::Position position : seat.getPeeked()) {
         const int index = golf::indexOfPosition(position);
         player.cards[static_cast<std::size_t>(index)].card = WireCard(seat.cardAt(position));
@@ -821,17 +795,17 @@ moonbase::golf::GameView HubHandler::ViewLocked(const std::string& game_id, cons
 
 void HubHandler::StageGameViewsLocked(const std::string& game_id, const GameEntry& entry,
                                       Outbox& outbox) const {
-  for (const std::string& seat_id : entry.roster) {
+  for (const std::string& recipient : entry.roster) {
     moonbase::golf::GameStateUpdate update;
-    update.view = ViewLocked(game_id, entry, seat_id);
-    outbox.To(seat_id, GolfUpdateEvent(GolfUpdate::FromGamestate(std::move(update))));
+    update.view = ViewLocked(game_id, entry, recipient);
+    outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromGamestate(std::move(update))));
   }
 }
 
 void HubHandler::FinalizeGameLocked(const std::string& room_id, Room& room,
                                     const std::string& game_id, Outbox& outbox) {
   const auto game = room.games.find(game_id);
-  if (game == room.games.end() || !game->second.live()) return;
+  if (game == room.games.end() || !game->second.started()) return;
   const golf::GameState& state = *game->second.state;
 
   // Seat order, so the display string is stable.
@@ -855,12 +829,12 @@ void HubHandler::FinalizeGameLocked(const std::string& room_id, Room& room,
 
   // Room-scoped running stats: every seat played, every winner won.
   for (const golf::Player& seat : state.getPlayers()) {
-    const std::string seat_id = seat.getName().value_or("");
-    const auto member = room.members.find(seat_id);
+    const std::string occupant = seat.getName().value_or("");
+    const auto member = room.members.find(occupant);
     if (member == room.members.end()) continue;
     member->second.games_played++;
     member->second.total_score += seat.score();
-    if (std::find(winner_ids.begin(), winner_ids.end(), seat_id) != winner_ids.end()) {
+    if (std::find(winner_ids.begin(), winner_ids.end(), occupant) != winner_ids.end()) {
       member->second.games_won++;
     }
   }
@@ -868,9 +842,9 @@ void HubHandler::FinalizeGameLocked(const std::string& room_id, Room& room,
   // Final views (everything face up), then the result, then the room's
   // refreshed stats; the game itself is done and gone.
   StageGameViewsLocked(game_id, game->second, outbox);
-  for (const std::string& seat_id : game->second.roster) {
-    outbox.To(seat_id, GolfUpdateEvent(GolfUpdate::FromGameended(ended)));
-    player_game_.erase(seat_id);
+  for (const std::string& recipient : game->second.roster) {
+    outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromGameended(ended)));
+    player_game_.erase(recipient);
   }
   room.games.erase(game);
   StageRoomStateLocked(room_id, outbox);

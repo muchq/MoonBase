@@ -6,15 +6,23 @@ use alloy#simpleRestJson
 use moonbase.games#Chat
 use moonbase.games#ChatMessage
 use moonbase.games#CommandRejected
+use moonbase.games#CreateGame
 use moonbase.games#CreateRoom
+use moonbase.games#GameCreated
+use moonbase.games#GameLeft
+use moonbase.games#GameStarted
+use moonbase.games#JoinGame
 use moonbase.games#GetRoomState
 use moonbase.games#JoinRoom
+use moonbase.games#LeaveGame
 use moonbase.games#LeaveRoom
+use moonbase.games#StartGame
 use moonbase.games#RoomLeft
 use moonbase.games#RoomState
 use moonbase.games#SessionCredentials
 use moonbase.games#SessionReady
 use moonbase.games#SessionRequest
+use moonbase.games#TurnChanged
 
 /// The Golf hub, phase 2 (#1187): the room layer from moonbase.games plus
 /// golf's own vocabulary, nested under one `golf` member per direction so
@@ -87,19 +95,6 @@ union GolfMove {
     hideCards: HideCards
 }
 
-/// Creates a game in the current room and seats the creator. Replaces the
-/// v1 startNewGame as well — the room hears newGameStarted either way.
-structure CreateGame {}
-
-structure JoinGame {
-    @required
-    gameId: String
-}
-
-structure StartGame {}
-
-structure LeaveGame {}
-
 /// Reveal one of your own four cards to yourself; two peeks per player,
 /// then the hub flips the game to its reveal countdown.
 structure PeekCard {
@@ -151,11 +146,11 @@ structure GolfEvent {
 union GolfUpdate {
     gameJoined: GameJoined
     gameState: GameStateUpdate
+    gameCreated: GameCreated
     gameStarted: GameStarted
     turnChanged: TurnChanged
     playerKnocked: PlayerKnocked
     gameEnded: GameEnded
-    newGameStarted: NewGameStarted
     gameLeft: GameLeft
 }
 
@@ -167,13 +162,6 @@ structure GameJoined {
 structure GameStateUpdate {
     @required
     view: GameView
-}
-
-structure GameStarted {}
-
-structure TurnChanged {
-    @required
-    playerId: String
 }
 
 structure PlayerKnocked {
@@ -192,16 +180,6 @@ structure GameEnded {
 
     @required
     finalScores: FinalScores
-}
-
-structure NewGameStarted {
-    @required
-    gameId: String
-}
-
-structure GameLeft {
-    @required
-    gameId: String
 }
 
 list PlayerIds {

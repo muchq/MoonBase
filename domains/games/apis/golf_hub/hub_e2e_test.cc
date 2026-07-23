@@ -406,6 +406,13 @@ TEST_F(GolfGameFixture, ChatReachesTheRoom) {
   moonbase::golf::Chat empty;
   ASSERT_TRUE(table->alice.stream.Send(GolfCommands::FromChat(empty)).ok());
   EXPECT_TRUE(ReceiveCase(table->alice.stream, "commandRejected").has_value());
+
+  moonbase::golf::Chat oversized;
+  oversized.text = std::string(501, 'x');
+  ASSERT_TRUE(table->alice.stream.Send(GolfCommands::FromChat(oversized)).ok());
+  auto too_long = ReceiveCase(table->alice.stream, "commandRejected");
+  ASSERT_TRUE(too_long.has_value());
+  EXPECT_EQ(too_long->as_commandRejected_or_null()->reason, "chat message too long");
 }
 
 TEST_F(GolfGameFixture, AbandoningALiveGameResolvesIt) {
@@ -461,6 +468,108 @@ TEST_F(GolfGameFixture, IllegalMovesRejectInBandAndTheGameContinues) {
   ASSERT_TRUE(
       table->alice.stream.Send(Move(GolfMove::FromDrawcard(moonbase::golf::DrawCard{}))).ok());
   EXPECT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
+}
+
+TEST_F(GolfGameFixture, PendingGameLifecycleAndLobbySummaries) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  moonbase::golf::JoinRoom join_room;
+  join_room.roomId = created->as_roomState_or_null()->roomId;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join_room)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+
+  // A solo game cannot start.
+  ASSERT_TRUE(
+      alice->stream.Send(Move(GolfMove::FromCreategame(moonbase::golf::CreateGame{}))).ok());
+  auto joined = ReceiveGolf(alice->stream, "gameJoined");
+  ASSERT_TRUE(joined.has_value());
+  EXPECT_EQ(joined->as_gameJoined_or_null()->view.phase, "waiting");
+  ASSERT_TRUE(alice->stream.Send(Move(GolfMove::FromStartgame(moonbase::golf::StartGame{}))).ok());
+  auto lonely = ReceiveCase(alice->stream, "commandRejected");
+  ASSERT_TRUE(lonely.has_value());
+  EXPECT_EQ(lonely->as_commandRejected_or_null()->reason, "need at least 2 players to start");
+
+  // One game per player at a time.
+  ASSERT_TRUE(
+      alice->stream.Send(Move(GolfMove::FromCreategame(moonbase::golf::CreateGame{}))).ok());
+  auto second = ReceiveCase(alice->stream, "commandRejected");
+  ASSERT_TRUE(second.has_value());
+  EXPECT_EQ(second->as_commandRejected_or_null()->reason, "leave your current game first");
+
+  // The lobby sees the pending game: waiting, one seat filled.
+  ASSERT_TRUE(
+      bob->stream.Send(GolfCommands::FromGetroomstate(moonbase::golf::GetRoomState{})).ok());
+  auto lobby = ReceiveCase(bob->stream, "roomState");
+  ASSERT_TRUE(lobby.has_value());
+  {
+    const auto* room = lobby->as_roomState_or_null();
+    ASSERT_EQ(room->games.size(), 1u);
+    EXPECT_EQ(room->games[0].status, "waiting");
+    EXPECT_EQ(room->games[0].playerCount, 1);
+  }
+
+  // Leaving a pending game as its last member dissolves it.
+  ASSERT_TRUE(alice->stream.Send(Move(GolfMove::FromLeavegame(moonbase::golf::LeaveGame{}))).ok());
+  auto ack = ReceiveGolf(alice->stream, "gameLeft");
+  ASSERT_TRUE(ack.has_value());
+  auto after = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(after.has_value());
+  EXPECT_TRUE(after->as_roomState_or_null()->games.empty());
+}
+
+TEST_F(GolfGameFixture, RoomStatsAccumulateAcrossGames) {
+  auto table = SeatedTable();
+  ASSERT_TRUE(table.has_value());
+
+  // Quickest legal game: alice knocks unseen, bob takes his final turn.
+  const auto play_out = [](Seat& alice, Seat& bob) {
+    if (!alice.stream.Send(Move(GolfMove::FromKnock(moonbase::golf::Knock{}))).ok()) return false;
+    if (!ReceiveGolf(bob.stream, "playerKnocked").has_value()) return false;
+    if (!bob.stream.Send(Move(GolfMove::FromDrawcard(moonbase::golf::DrawCard{}))).ok()) {
+      return false;
+    }
+    if (!ReceiveGolf(bob.stream, "gameState").has_value()) return false;
+    if (!bob.stream.Send(Move(GolfMove::FromDiscarddrawn(moonbase::golf::DiscardDrawn{}))).ok()) {
+      return false;
+    }
+    return ReceiveGolf(alice.stream, "gameEnded").has_value() &&
+           ReceiveGolf(bob.stream, "gameEnded").has_value();
+  };
+  ASSERT_TRUE(play_out(table->alice, table->bob));
+
+  // Round two in the same room.
+  ASSERT_TRUE(
+      table->alice.stream.Send(Move(GolfMove::FromCreategame(moonbase::golf::CreateGame{}))).ok());
+  auto joined = ReceiveGolf(table->alice.stream, "gameJoined");
+  ASSERT_TRUE(joined.has_value());
+  moonbase::golf::JoinGame join;
+  join.gameId = joined->as_gameJoined_or_null()->view.gameId;
+  ASSERT_TRUE(table->bob.stream.Send(Move(GolfMove::FromJoingame(join))).ok());
+  ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameJoined").has_value());
+  ASSERT_TRUE(
+      table->alice.stream.Send(Move(GolfMove::FromStartgame(moonbase::golf::StartGame{}))).ok());
+  ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameStarted").has_value());
+  ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameStarted").has_value());
+  ASSERT_TRUE(play_out(table->alice, table->bob));
+
+  // Running totals: two games played, both won solo by alice the knocker
+  // (identical zero-scoring deals; the knocker takes the tie).
+  ASSERT_TRUE(
+      table->alice.stream.Send(GolfCommands::FromGetroomstate(moonbase::golf::GetRoomState{}))
+          .ok());
+  auto lobby = ReceiveCase(table->alice.stream, "roomState");
+  ASSERT_TRUE(lobby.has_value());
+  for (const auto& player : lobby->as_roomState_or_null()->players) {
+    EXPECT_EQ(player.gamesPlayed, 2);
+    EXPECT_EQ(player.totalScore, 0);
+    EXPECT_EQ(player.gamesWon, player.playerId == table->alice.player_id ? 2 : 0);
+  }
 }
 
 }  // namespace

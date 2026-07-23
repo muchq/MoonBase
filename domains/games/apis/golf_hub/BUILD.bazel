@@ -52,6 +52,7 @@ cc_library(
         ":golf_hub_smithy_server",
         ":ticket_vault",
         "//domains/games/libs/cards",
+        "//domains/games/libs/cards:card_mapper",
         "//domains/games/libs/cards:dealer",
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/golf:player",
