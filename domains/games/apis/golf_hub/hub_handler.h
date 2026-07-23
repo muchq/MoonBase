@@ -16,6 +16,7 @@
 #include "domains/games/apis/golf_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/golf/game_state.h"
+#include "domains/platform/libs/futility/otel/metrics.h"
 #include "moonbase/golf/server.h"
 #include "smithy/server/session_registry.h"
 
@@ -38,7 +39,8 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   explicit HubHandler(std::shared_ptr<TicketVault> vault,
                       std::shared_ptr<cards::Dealer> dealer = std::make_shared<cards::Dealer>(),
                       std::shared_ptr<IdGenerator> ids = std::make_shared<WhimsicalIdGenerator>(),
-                      std::chrono::seconds grace_period = std::chrono::minutes(5));
+                      std::chrono::seconds grace_period = std::chrono::minutes(5),
+                      std::shared_ptr<futility::otel::MetricsRecorder> metrics = nullptr);
 
   // Note: operation IO generates as <Op>Input/<Op>Output regardless of
   // the named shapes bound in the model, and moonbase.games shapes land
@@ -112,6 +114,16 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// stage the fan-out (views, turn change, game end) the result implies.
   void EngineMove(const std::string& player_id, const MoveFn& move, MoveEffects effects);
 
+  /// Stream-side observability (#1187 phase 4): the aura chain instruments
+  /// only unary requests, so admissions, live-session count, disconnects,
+  /// and the command/event flow are counted here. All no-ops when no
+  /// recorder is injected.
+  void Count(const char* name, const std::map<std::string, std::string>& attributes = {});
+  void TrackActive(int delta);
+  void CountCommand(const moonbase::golf::GolfCommands& command);
+  /// Every event leaves through here so stream_events sees each send.
+  void Send(const std::string& player_id, moonbase::golf::GolfEvents event);
+
   void SetConnected(const std::string& player_id, bool connected);
   std::optional<std::string> CurrentRoom(const std::string& player_id);
   Room* FindRoomLocked(const std::string& player_id);
@@ -138,6 +150,7 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   const std::shared_ptr<TicketVault> vault_;
   const std::shared_ptr<cards::Dealer> dealer_;
   const std::shared_ptr<IdGenerator> ids_;
+  const std::shared_ptr<futility::otel::MetricsRecorder> metrics_;
   std::mutex mu_;
   std::unordered_map<std::string, Room> rooms_;
   std::unordered_map<std::string, std::string> player_room_;

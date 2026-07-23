@@ -67,6 +67,15 @@ api.muchq.com {
 		path /games/v1/golf-ws
 	}
 
+	@post_golf_v2_session {
+		method POST
+		path /games/v2/session
+	}
+
+	@ws_golf_v2 {
+		path /games/v2/golf/play
+	}
+
 	@options {
 		method OPTIONS
 	}
@@ -90,6 +99,8 @@ api.muchq.com {
 
 	reverse_proxy @ws_thoughts games_ws_backend:8080
 	reverse_proxy @ws_golf games_ws_backend:8080
+	reverse_proxy @post_golf_v2_session golf_hub:8089
+	reverse_proxy @ws_golf_v2 golf_hub:8089
 	reverse_proxy @post_portrait portrait:8081
 	reverse_proxy @get_timeseries prom_proxy:8082
 	reverse_proxy @get_metrics prom_proxy:8082

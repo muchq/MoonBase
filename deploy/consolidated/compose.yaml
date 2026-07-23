@@ -13,6 +13,7 @@ services:
       - /var/www/r3dr:/var/www/r3dr
     depends_on:
       - games_ws_backend
+      - golf_hub
       - microgpt-serve
       - mithril
       - one_d4
@@ -46,6 +47,30 @@ services:
         limits:
           cpus: '0.25'
           memory: 256M
+
+  # The smithy event-stream golf service (/games/v2/*, MoonBase#1187);
+  # serves the v2 beta while games_ws_backend keeps serving v1.
+  golf_hub:
+    image: ghcr.io/muchq/golf_hub:latest
+    restart: always
+    ports:
+      - "8089:8089"
+    environment:
+      PORT: "8089"
+      # CSWSH defense: the play socket admits only the deployed UI's
+      # origins (parity with the Go hub's allowlist).
+      ALLOWED_ORIGINS: https://muchq.com,https://www.muchq.com
+      TRUSTED_PROXY_CIDRS: *caddy_ip
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
+      OTEL_SERVICE_NAME: golf_hub
+      OTEL_RESOURCE_ATTRIBUTES: service.name=golf_hub,service.version=latest
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
 
   portrait:
     image: ghcr.io/muchq/portrait:latest

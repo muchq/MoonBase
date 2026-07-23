@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "domains/games/libs/cards/card_mapper.h"
 #include "domains/games/libs/cards/golf/player.h"
@@ -66,10 +67,12 @@ GolfEvents GolfUpdateEvent(GolfUpdate update) {
 }  // namespace
 
 HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::Dealer> dealer,
-                       std::shared_ptr<IdGenerator> ids, std::chrono::seconds grace_period)
+                       std::shared_ptr<IdGenerator> ids, std::chrono::seconds grace_period,
+                       std::shared_ptr<futility::otel::MetricsRecorder> metrics)
     : vault_(std::move(vault)),
       dealer_(std::move(dealer)),
       ids_(std::move(ids)),
+      metrics_(std::move(metrics)),
       registry_([this, grace_period] {
         Registry::Options options;
         options.async_delivery = true;  // chains, not writer threads (ADR-0019)
@@ -102,6 +105,7 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
                                                  moonbase::golf::PlayAsyncServerStream& stream) {
   auto player = vault_->SpendTicket(input.ticket);
   if (!player.has_value()) {
+    Count("stream_admissions_refused", {{"reason", "bad_ticket"}});
     co_return smithy::Error::Modeled("Unauthenticated", "ticket expired or already spent");
   }
   const std::string player_id = *player;
@@ -111,9 +115,12 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
   const auto admission = registry_.ResumeOrAdd(
       player_id, [&stream] { return stream.Share(); }, std::chrono::seconds(1));
   if (admission == Registry::Admission::kRefused) {
+    Count("stream_admissions_refused", {{"reason", "seat_conflict"}});
     co_return smithy::Error::Modeled("SeatConflict", "player already has a live connection");
   }
   const bool resumed = admission == Registry::Admission::kResumed;
+  Count("stream_sessions", {{"resumed", resumed ? "true" : "false"}});
+  TrackActive(+1);
 
   std::optional<std::string> room;
   Outbox resync;
@@ -133,7 +140,7 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
   ready.playerId = player_id;
   ready.resumed = resumed;
   if (room.has_value()) ready.roomId = *room;
-  registry_.SendTo(player_id, GolfEvents::FromSessionready(std::move(ready)));
+  Send(player_id, GolfEvents::FromSessionready(std::move(ready)));
   // A resumed seat's room sees the connected flip (and the resumer gets
   // the current snapshot it missed).
   if (room.has_value()) BroadcastRoom(*room);
@@ -146,6 +153,8 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
       // the grace window (ADR-0020); expiry reaps it. Detach fails only
       // when the entry is already gone — nothing left to do then.
       if (registry_.Detach(player_id)) {
+        TrackActive(-1);
+        Count("stream_disconnects", {{"kind", "abrupt"}});
         SetConnected(player_id, false);
         if (auto current = CurrentRoom(player_id)) BroadcastRoom(*current);
       }
@@ -154,6 +163,8 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
     if (!received->has_value()) {
       // Clean close: a deliberate leave. Free the seat, game, and room.
       registry_.Remove(player_id);
+      TrackActive(-1);
+      Count("stream_disconnects", {{"kind", "clean"}});
       Outbox outbox;
       {
         const std::lock_guard<std::mutex> lock(mu_);
@@ -167,6 +178,7 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
 }
 
 void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands& command) {
+  CountCommand(command);
   if (command.as_createRoom_or_null() != nullptr) {
     std::string room_id;
     Outbox outbox;
@@ -682,14 +694,16 @@ void HubHandler::BroadcastRoom(const std::string& room_id) {
 }
 
 void HubHandler::Reject(const std::string& player_id, std::string reason) {
+  Count("stream_rejections", {{"reason", reason}});
   moonbase::golf::CommandRejected rejected;
   rejected.reason = std::move(reason);
-  registry_.SendTo(player_id, GolfEvents::FromCommandrejected(std::move(rejected)));
+  Send(player_id, GolfEvents::FromCommandrejected(std::move(rejected)));
 }
 
 void HubHandler::OnExpired(const std::string& player_id) {
   // Grace ran out (ADR-0020): the seat is gone; free the room and game
   // slots and tell whoever remains. Runs on the registry's expiry thread.
+  Count("stream_seats_expired");
   Outbox outbox;
   {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -700,9 +714,38 @@ void HubHandler::OnExpired(const std::string& player_id) {
 
 void HubHandler::Deliver(Outbox& outbox) {
   for (auto& [player_id, event] : outbox.events) {
-    registry_.SendTo(player_id, std::move(event));
+    Send(player_id, std::move(event));
   }
   outbox.events.clear();
+}
+
+void HubHandler::Count(const char* name, const std::map<std::string, std::string>& attributes) {
+  if (metrics_) metrics_->RecordCounter(name, 1, attributes);
+}
+
+void HubHandler::TrackActive(int delta) {
+  // Delta form, matching http_server_requests_active: the collector sums
+  // an up-down counter into the live-session count.
+  if (metrics_) metrics_->RecordGauge("stream_sessions_active", delta);
+}
+
+void HubHandler::CountCommand(const GolfCommands& command) {
+  if (!metrics_) return;
+  const auto* envelope = command.as_golf_or_null();
+  const std::string name = envelope != nullptr ? absl::StrCat("golf.", envelope->move.case_name())
+                                               : std::string(command.case_name());
+  metrics_->RecordCounter("stream_commands", 1, {{"command", name}});
+}
+
+void HubHandler::Send(const std::string& player_id, GolfEvents event) {
+  if (metrics_) {
+    const auto* envelope = event.as_golf_or_null();
+    const std::string name = envelope != nullptr
+                                 ? absl::StrCat("golf.", envelope->update.case_name())
+                                 : std::string(event.case_name());
+    metrics_->RecordCounter("stream_events", 1, {{"event", name}});
+  }
+  registry_.SendTo(player_id, std::move(event));
 }
 
 moonbase::golf::RoomState HubHandler::RoomStateLocked(const std::string& room_id,

@@ -12,8 +12,10 @@
 #include <chrono>
 #include <csignal>
 #include <cstddef>
+#include <cstdlib>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -22,13 +24,17 @@
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
 #include "domains/games/apis/golf_hub/hub_handler.h"
+#include "domains/games/apis/golf_hub/id_generator.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
+#include "domains/games/libs/cards/dealer.h"
 #include "domains/platform/libs/aura/middleware.h"
 #include "domains/platform/libs/futility/env/env.h"
 #include "domains/platform/libs/futility/otel/http_metrics.h"
+#include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/futility/otel/otel_provider.h"
 #include "moonbase/golf/server.h"
 #include "smithy/http/beast_transport.h"
+#include "smithy/http/forwarded.h"
 #include "smithy/http/message.h"
 #include "smithy/server/origin_gate.h"
 
@@ -65,7 +71,12 @@ int main() {
 
   auto vault = std::make_shared<golf_hub::TicketVault>(
       /*ticket_ttl=*/std::chrono::seconds(30), /*resume_ttl=*/std::chrono::hours(24));
-  auto handler = std::make_shared<golf_hub::HubHandler>(vault);
+  // Stream-side instruments (sessions, commands, events) ride the same
+  // meter the aura chain's unary instruments use.
+  auto handler = std::make_shared<golf_hub::HubHandler>(
+      vault, std::make_shared<cards::Dealer>(), std::make_shared<golf_hub::WhimsicalIdGenerator>(),
+      /*grace_period=*/std::chrono::minutes(5),
+      std::make_shared<futility::otel::MetricsRecorder>("golf_hub"));
 
   // Block shutdown signals before the transport spawns its thread pool.
   sigset_t shutdown_signals;
@@ -82,7 +93,30 @@ int main() {
   // a per-client budget can slot into ChainOptions when it earns its keep.
   auto metrics =
       aura::MakeHttpMetricsSink(std::make_shared<futility::otel::HttpMetricsManager>("golf_hub"));
-  auto unary = aura::ProductionChain(aura::ChainOptions{.metrics = metrics}, server.Handler());
+
+  // The reverse-proxy trust boundary (smithy-cpp ADR-0012, contract in
+  // smithy/http/forwarded.h): deploy/consolidated/compose.yaml pins Caddy's
+  // address and passes it here. Unset is the deliberate direct-connect
+  // statement (TrustedProxies::None()); set-but-empty or malformed fails
+  // startup rather than silently collapsing proxied traffic onto one key.
+  smithy::http::TrustedProxies trusted_proxies = smithy::http::TrustedProxies::None();
+  if (std::getenv("TRUSTED_PROXY_CIDRS") != nullptr) {
+    const std::vector<std::string> cidrs = futility::env::ReadList("TRUSTED_PROXY_CIDRS");
+    if (cidrs.empty()) {
+      LOG(ERROR) << "TRUSTED_PROXY_CIDRS is set but empty; unset it to serve direct-connect";
+      return 1;
+    }
+    try {
+      trusted_proxies = smithy::http::TrustedProxies(cidrs);
+    } catch (const std::invalid_argument& error) {
+      LOG(ERROR) << "Invalid TRUSTED_PROXY_CIDRS: " << error.what();
+      return 1;
+    }
+  }
+
+  auto unary = aura::ProductionChain(
+      aura::ChainOptions{.metrics = metrics, .trusted_proxies = std::move(trusted_proxies)},
+      server.Handler());
 
   // Gate chain: origin allowlist (browser CSWSH defense; unset
   // ALLOWED_ORIGINS admits all origins — dev parity with the Go hub's
