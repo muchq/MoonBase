@@ -423,14 +423,9 @@ void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) 
           }
           std::deque<cards::Card> discard{deck.back()};
           deck.pop_back();
-          game->second.state.emplace(golf::GameState{std::move(deck),
-                                               std::move(discard),
-                                               std::move(players),
-                                               false,
-                                               0,
-                                               -1,
-                                               game->first,
-                                               ""};
+          game->second.state.emplace(std::move(deck), std::move(discard), std::move(players),
+                                     /*_peekedAtDrawPile=*/false, /*_whoseTurn=*/0,
+                                     /*_whoKnocked=*/-1, game->first, "");
 
           for (const std::string& seat_id : game->second.roster) {
             outbox.To(seat_id,
