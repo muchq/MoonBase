@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "domains/games/apis/golf_hub/id_generator.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/golf/game_state.h"
@@ -36,6 +37,7 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
 
   explicit HubHandler(std::shared_ptr<TicketVault> vault,
                       std::shared_ptr<cards::Dealer> dealer = std::make_shared<cards::Dealer>(),
+                      std::shared_ptr<IdGenerator> ids = std::make_shared<WhimsicalIdGenerator>(),
                       std::chrono::seconds grace_period = std::chrono::minutes(5));
 
   // Note: operation IO generates as <Op>Input/<Op>Output regardless of
@@ -135,6 +137,7 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
 
   const std::shared_ptr<TicketVault> vault_;
   const std::shared_ptr<cards::Dealer> dealer_;
+  const std::shared_ptr<IdGenerator> ids_;
   std::mutex mu_;
   std::unordered_map<std::string, Room> rooms_;
   std::unordered_map<std::string, std::string> player_room_;

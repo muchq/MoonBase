@@ -66,8 +66,11 @@ GolfEvents GolfUpdateEvent(GolfUpdate update) {
 }  // namespace
 
 HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::Dealer> dealer,
-                       std::chrono::seconds grace_period)
-    : vault_(std::move(vault)), dealer_(std::move(dealer)), registry_([this, grace_period] {
+                       std::shared_ptr<IdGenerator> ids, std::chrono::seconds grace_period)
+    : vault_(std::move(vault)),
+      dealer_(std::move(dealer)),
+      ids_(std::move(ids)),
+      registry_([this, grace_period] {
         Registry::Options options;
         options.async_delivery = true;  // chains, not writer threads (ADR-0019)
         options.grace_period = grace_period;
@@ -86,7 +89,7 @@ smithy::Outcome<moonbase::golf::GetSessionOutput> HubHandler::GetSession(
       token_valid = true;
     }
   }
-  if (player_id.empty()) player_id = WhimsicalId();
+  if (player_id.empty()) player_id = ids_->PlayerId();
 
   moonbase::golf::GetSessionOutput output;
   output.playerId = player_id;
@@ -170,7 +173,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
     {
       const std::lock_guard<std::mutex> lock(mu_);
       if (!player_room_.contains(player_id)) {
-        room_id = RandomId("r");
+        room_id = ids_->RoomId();
         rooms_[room_id].members.emplace(player_id, Member{});
         player_room_[player_id] = room_id;
         StageRoomStateLocked(room_id, outbox);
@@ -406,8 +409,8 @@ void HubHandler::CreateGameMove(const std::string& player_id) {
     } else if (player_game_.contains(player_id)) {
       reason = "leave your current game first";
     } else {
-      std::string game_id = GameCode();
-      while (room->games.contains(game_id)) game_id = GameCode();
+      std::string game_id = ids_->GameCode();
+      while (room->games.contains(game_id)) game_id = ids_->GameCode();
       GameEntry& entry = room->games[game_id];
       entry.roster.push_back(player_id);
       player_game_[player_id] = game_id;

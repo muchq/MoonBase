@@ -25,6 +25,18 @@ smithy_cpp_client_library(
 )
 
 cc_library(
+    name = "id_generator",
+    srcs = ["id_generator.cc"],
+    hdrs = ["id_generator.h"],
+    deps = [
+        ":ticket_vault",
+        "@com_google_absl//absl/random",
+        "@com_google_absl//absl/random:distributions",
+        "@com_google_absl//absl/strings:str_format",
+    ],
+)
+
+cc_library(
     name = "ticket_vault",
     srcs = ["ticket_vault.cc"],
     hdrs = ["ticket_vault.h"],
@@ -50,6 +62,7 @@ cc_library(
     hdrs = ["hub_handler.h"],
     deps = [
         ":golf_hub_smithy_server",
+        ":id_generator",
         ":ticket_vault",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards:card_mapper",
@@ -73,6 +86,7 @@ cc_test(
         ":golf_hub_smithy_client",
         ":golf_hub_smithy_server",
         ":hub_handler",
+        ":id_generator",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
         "@googletest//:gtest_main",

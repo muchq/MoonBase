@@ -572,5 +572,51 @@ TEST_F(GolfGameFixture, RoomStatsAccumulateAcrossGames) {
   }
 }
 
+// The id seam at work: a generator that hands out the same game code
+// twice, forcing the create path's collision loop to roll again.
+class CollidingIds final : public IdGenerator {
+ public:
+  std::string PlayerId() override { return "player-" + std::to_string(++players_); }
+  std::string RoomId() override { return "room-" + std::to_string(++rooms_); }
+  std::string GameCode() override { return ++codes_ <= 2 ? "DUPLIC" : "FRESH1"; }
+
+ private:
+  int players_ = 0;
+  int rooms_ = 0;
+  int codes_ = 0;
+};
+
+class CollidingIdsFixture : public GolfGameFixture {
+ protected:
+  CollidingIdsFixture() { ids_ = std::make_shared<CollidingIds>(); }
+};
+
+TEST_F(CollidingIdsFixture, GameCodeCollisionRollsAgain) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  moonbase::golf::JoinRoom join_room;
+  join_room.roomId = created->as_roomState_or_null()->roomId;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join_room)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+
+  ASSERT_TRUE(
+      alice->stream.Send(Move(GolfMove::FromCreategame(moonbase::golf::CreateGame{}))).ok());
+  auto first = ReceiveGolf(alice->stream, "gameJoined");
+  ASSERT_TRUE(first.has_value());
+  EXPECT_EQ(first->as_gameJoined_or_null()->view.gameId, "DUPLIC");
+
+  // Bob's create draws "DUPLIC" again; the hub rolls until it's fresh.
+  ASSERT_TRUE(bob->stream.Send(Move(GolfMove::FromCreategame(moonbase::golf::CreateGame{}))).ok());
+  auto second = ReceiveGolf(bob->stream, "gameJoined");
+  ASSERT_TRUE(second.has_value());
+  EXPECT_EQ(second->as_gameJoined_or_null()->view.gameId, "FRESH1");
+}
+
 }  // namespace
 }  // namespace golf_hub
