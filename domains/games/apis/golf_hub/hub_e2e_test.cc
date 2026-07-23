@@ -484,12 +484,23 @@ TEST_F(GolfGameFixture, PendingGameLifecycleAndLobbySummaries) {
   ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join_room)).ok());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
 
-  // A solo game cannot start.
+  // The whole room hears the creation attributed to its creator; the
+  // creator's client relies on createdBy to recognize its own echo.
   ASSERT_TRUE(
       alice->stream.Send(Move(GolfMove::FromCreategame(moonbase::golf::CreateGame{}))).ok());
+  auto echo = ReceiveGolf(alice->stream, "gameCreated");
+  ASSERT_TRUE(echo.has_value());
+  EXPECT_EQ(echo->as_gameCreated_or_null()->createdBy, alice->player_id);
+  auto announced = ReceiveGolf(bob->stream, "gameCreated");
+  ASSERT_TRUE(announced.has_value());
+  EXPECT_EQ(announced->as_gameCreated_or_null()->createdBy, alice->player_id);
   auto joined = ReceiveGolf(alice->stream, "gameJoined");
   ASSERT_TRUE(joined.has_value());
   EXPECT_EQ(joined->as_gameJoined_or_null()->view.phase, "waiting");
+  EXPECT_EQ(announced->as_gameCreated_or_null()->gameId,
+            joined->as_gameJoined_or_null()->view.gameId);
+
+  // A solo game cannot start.
   ASSERT_TRUE(alice->stream.Send(Move(GolfMove::FromStartgame(moonbase::golf::StartGame{}))).ok());
   auto lonely = ReceiveCase(alice->stream, "commandRejected");
   ASSERT_TRUE(lonely.has_value());
