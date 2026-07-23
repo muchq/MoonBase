@@ -30,10 +30,19 @@ cc_library(
     srcs = ["id_generator.cc"],
     hdrs = ["id_generator.h"],
     deps = [
-        ":ticket_vault",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/random:distributions",
         "@com_google_absl//absl/strings:str_format",
+    ],
+)
+
+cc_test(
+    name = "id_generator_test",
+    size = "small",
+    srcs = ["id_generator_test.cc"],
+    deps = [
+        ":id_generator",
+        "@googletest//:gtest_main",
     ],
 )
 

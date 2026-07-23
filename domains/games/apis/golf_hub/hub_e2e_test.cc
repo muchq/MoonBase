@@ -583,12 +583,13 @@ TEST_F(GolfGameFixture, RoomStatsAccumulateAcrossGames) {
   }
 }
 
-// The id seam at work: a generator that hands out the same game code
-// twice, forcing the create path's collision loop to roll again.
+// The id seam at work: a generator that hands out the same room id or
+// game code twice, forcing the create paths' collision loops to roll
+// again.
 class CollidingIds final : public IdGenerator {
  public:
   std::string PlayerId() override { return "player-" + std::to_string(++players_); }
-  std::string RoomId() override { return "room-" + std::to_string(++rooms_); }
+  std::string RoomId() override { return ++rooms_ <= 2 ? "SAMERM" : "ROOM2X"; }
   std::string GameCode() override { return ++codes_ <= 2 ? "DUPLIC" : "FRESH1"; }
 
  private:
@@ -627,6 +628,24 @@ TEST_F(CollidingIdsFixture, GameCodeCollisionRollsAgain) {
   auto second = ReceiveGolf(bob->stream, "gameJoined");
   ASSERT_TRUE(second.has_value());
   EXPECT_EQ(second->as_gameJoined_or_null()->view.gameId, "FRESH1");
+}
+
+TEST_F(CollidingIdsFixture, RoomCodeCollisionRollsAgain) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
+  auto first = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(first.has_value());
+  EXPECT_EQ(first->as_roomState_or_null()->roomId, "SAMERM");
+
+  // Bob's create draws "SAMERM" again; the hub rolls until it's fresh.
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
+  auto second = ReceiveCase(bob->stream, "roomState");
+  ASSERT_TRUE(second.has_value());
+  EXPECT_EQ(second->as_roomState_or_null()->roomId, "ROOM2X");
 }
 
 }  // namespace

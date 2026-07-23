@@ -16,7 +16,9 @@ class IdGenerator {
   /// A player id; doubles as the display name.
   virtual std::string PlayerId() = 0;
 
-  /// An opaque room id.
+  /// A 6-char uppercase alphanumeric room code: rooms are the shareable
+  /// unit (joining a friend's game means joining their room first), so
+  /// the id must survive a permalink and a "type this code" exchange.
   virtual std::string RoomId() = 0;
 
   /// A 6-char uppercase alphanumeric game code — the Go hub's format,
@@ -26,7 +28,7 @@ class IdGenerator {
 
 /// Production ids: whimsical player names ("bouncy-coral-quokka-x9k2",
 /// the Go hub's word lists, so beta players never see opaque ids),
-/// "r-<hex>" rooms, random game codes.
+/// short codes for rooms and games.
 class WhimsicalIdGenerator final : public IdGenerator {
  public:
   std::string PlayerId() override;
