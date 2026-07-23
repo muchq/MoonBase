@@ -68,8 +68,8 @@ TEST(GameState, SwapForDrawPile) {
   const std::deque<Card> emptyDiscardPile;
   const std::vector<Player> players{p0, p1};
 
-  // should swap p1's top left card for Ace of Clubs
-  const GameState g1{nonEmptyDrawPile, emptyDiscardPile, players, false, 1, -1, "foo", "bar"};
+  // p1 has drawn (peeked at the pile top) and swaps it for their top left
+  const GameState g1{nonEmptyDrawPile, emptyDiscardPile, players, true, 1, -1, "foo", "bar"};
   auto g2 = g1.swapForDrawPile(1, Position::TopLeft);
   EXPECT_TRUE(g2.ok());
 
@@ -480,4 +480,88 @@ TEST(GameState, RemoveToBelowTwoPlayersEndsTheGame) {
   EXPECT_TRUE(lone->isOver());
   const std::unordered_set<int> expected{0};
   EXPECT_EQ(lone->winners(), expected);
+}
+
+// Validation negatives for the corrected rules (#1187): no blind moves,
+// one draw per turn, and misuse dies typed instead of undefined.
+
+TEST(GameState, BlindMovesAreRejected) {
+  const GameState game = freshTwoPlayerGame();
+
+  // Neither the swap nor the discard works without drawing first.
+  auto blind_swap = game.swapForDrawPile(0, Position::TopLeft);
+  EXPECT_FALSE(blind_swap.ok());
+  EXPECT_EQ(blind_swap.status().message(), "no drawn card to swap");
+
+  auto blind_discard = game.swapDrawForDiscardPile(0);
+  EXPECT_FALSE(blind_discard.ok());
+  EXPECT_EQ(blind_discard.status().message(), "no drawn card to discard");
+
+  // After a draw, both are legal moves.
+  auto drawn = game.peekAtDrawPile(0);
+  ASSERT_TRUE(drawn.ok());
+  EXPECT_TRUE(drawn->swapForDrawPile(0, Position::TopLeft).ok());
+  EXPECT_TRUE(drawn->swapDrawForDiscardPile(0).ok());
+}
+
+TEST(GameState, OneDrawPerTurn) {
+  const GameState game = freshTwoPlayerGame();
+  auto drawn = game.peekAtDrawPile(0);
+  ASSERT_TRUE(drawn.ok());
+  auto again = drawn->peekAtDrawPile(0);
+  EXPECT_FALSE(again.ok());
+  EXPECT_EQ(again.status().message(), "you can only peek once per turn");
+}
+
+TEST(GameState, NoDiscardTakeAfterDrawing) {
+  const GameState game = freshTwoPlayerGame();
+  auto drawn = game.peekAtDrawPile(0);
+  ASSERT_TRUE(drawn.ok());
+  auto take = drawn->swapForDiscardPile(0, Position::TopLeft);
+  EXPECT_FALSE(take.ok());
+  EXPECT_EQ(take.status().message(), "cannot swap for discard after peeking");
+}
+
+TEST(GameState, EmptyDiscardPileRejectsTheTake) {
+  const Player p0{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
+                  Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
+  const Player p1{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
+                  Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
+  const std::deque<Card> drawPile{Card{Suit::Diamonds, Rank::Ten}};
+  const std::deque<Card> emptyDiscardPile;
+
+  const GameState game{drawPile, emptyDiscardPile, {p0, p1}, false, 0, -1, "foo", "bar"};
+  auto take = game.swapForDiscardPile(0, Position::TopLeft);
+  EXPECT_FALSE(take.ok());
+  EXPECT_EQ(take.status().message(), "discard pile is empty");
+}
+
+TEST(GameState, PeekValidationNegatives) {
+  const GameState game = freshTwoPlayerGame();
+
+  // Out-of-range seats are typed errors on every entry point.
+  EXPECT_EQ(game.peekOwnCard(7, Position::TopLeft).status().message(), "no such player");
+  EXPECT_EQ(game.hideCards(7).status().message(), "no such player");
+
+  // No peeking once the game has ended.
+  const std::deque<Card> emptyDrawPile;
+  const std::deque<Card> discardPile{Card{Suit::Hearts, Rank::Four}};
+  const GameState over{emptyDrawPile, discardPile, game.getPlayers(), false, 0, -1, "foo", "bar"};
+  ASSERT_TRUE(over.isOver());
+  EXPECT_EQ(over.peekOwnCard(0, Position::TopLeft).status().message(), "game is over");
+}
+
+TEST(GameState, CountdownGatesTheDrawnDiscardToo) {
+  const GameState peeked = allPeeked(freshTwoPlayerGame());
+  ASSERT_TRUE(peeked.revealCountdownActive());
+  auto gated = peeked.swapDrawForDiscardPile(0);
+  EXPECT_FALSE(gated.ok());
+  EXPECT_EQ(gated.status().message(), "waiting for peeked cards to be hidden");
+
+  // Once hidden, the countdown is spent: a second hide is a typed error.
+  auto hidden = peeked.hideCards(0);
+  ASSERT_TRUE(hidden.ok());
+  auto again = hidden->hideCards(0);
+  EXPECT_FALSE(again.ok());
+  EXPECT_EQ(again.status().message(), "no reveal countdown to end");
 }

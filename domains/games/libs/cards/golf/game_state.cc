@@ -151,6 +151,11 @@ StatusOr<GameState> GameState::swapDrawForDiscardPile(int player) const {
   if (whoseTurn != player) {
     return FailedPreconditionError("not your turn");
   }
+  if (!peekedAtDrawPile) {
+    // The corrected rules (#1187) have no blind moves: you discard the
+    // card you drew, not the unseen pile top.
+    return FailedPreconditionError("no drawn card to discard");
+  }
 
   // update draw pile
   deque<Card> updatedDrawPile{drawPile};
@@ -188,6 +193,11 @@ StatusOr<GameState> GameState::swapForDrawPile(int player, Position position) co
   }
   if (whoseTurn != player) {
     return FailedPreconditionError("not your turn");
+  }
+  if (!peekedAtDrawPile) {
+    // The corrected rules (#1187) have no blind moves: you swap in the
+    // card you drew, not the unseen pile top.
+    return FailedPreconditionError("no drawn card to swap");
   }
 
   // update draw pile
@@ -246,6 +256,9 @@ absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Position pos
   }
   if (peekedAtDrawPile) {
     return FailedPreconditionError("cannot swap for discard after peeking");
+  }
+  if (discardPile.empty()) {
+    return FailedPreconditionError("discard pile is empty");
   }
 
   // remove top card from discard pile

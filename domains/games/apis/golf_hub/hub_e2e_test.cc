@@ -449,6 +449,14 @@ TEST_F(GolfGameFixture, IllegalMovesRejectInBandAndTheGameContinues) {
   ASSERT_TRUE(bad_index.has_value());
   EXPECT_EQ(bad_index->as_commandRejected_or_null()->reason, "invalid card index");
 
+  // No blind moves: swapping without drawing is refused in-band.
+  moonbase::golf::SwapCard blind;
+  blind.cardIndex = 0;
+  ASSERT_TRUE(table->alice.stream.Send(Move(GolfMove::FromSwapcard(blind))).ok());
+  auto blind_swap = ReceiveCase(table->alice.stream, "commandRejected");
+  ASSERT_TRUE(blind_swap.has_value());
+  EXPECT_EQ(blind_swap->as_commandRejected_or_null()->reason, "no drawn card to swap");
+
   // The stream survived: a legal move still lands.
   ASSERT_TRUE(
       table->alice.stream.Send(Move(GolfMove::FromDrawcard(moonbase::golf::DrawCard{}))).ok());
