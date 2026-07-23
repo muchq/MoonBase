@@ -12,10 +12,19 @@
 
 namespace golf_hub {
 
-/// A fresh "<prefix>-<12 hex>" identifier (player ids, room ids, tokens).
+/// A fresh "<prefix>-<12 hex>" identifier (room ids, tokens).
 /// absl::BitGen randomness — unguessable enough for a game hub's opaque
 /// ids; not a cryptographic claim.
 std::string RandomId(std::string_view prefix);
+
+/// A whimsical player id ("bouncy-coral-quokka-x9k2") — the Go hub's
+/// user-visible naming, ported so beta players never see opaque ids.
+/// Doubles as the display name.
+std::string WhimsicalId();
+
+/// A 6-char uppercase alphanumeric code — the Go hub's room/game id
+/// format, kept for permalink compatibility.
+std::string GameCode();
 
 /// Single-process store for the hub's two credentials (smithy-cpp
 /// ADR-0018's ticket pattern): tickets are single-use and short-lived —

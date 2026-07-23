@@ -3,12 +3,23 @@ $version: "2.0"
 namespace moonbase.golf
 
 use alloy#simpleRestJson
+use moonbase.games#Chat
+use moonbase.games#ChatMessage
+use moonbase.games#CommandRejected
+use moonbase.games#CreateRoom
+use moonbase.games#GetRoomState
+use moonbase.games#JoinRoom
+use moonbase.games#LeaveRoom
+use moonbase.games#RoomLeft
+use moonbase.games#RoomState
+use moonbase.games#SessionCredentials
+use moonbase.games#SessionReady
+use moonbase.games#SessionRequest
 
-/// The Golf hub, phase 1 (session + room lifecycle): the smithy-cpp
-/// event-stream rebuild of games_ws_backend's golf hub. Game rules and
-/// their wire vocabulary land in phase 2, after the rules-variant decision
-/// (Go hub semantics vs libs/cards/golf) — this model deliberately stops
-/// at rooms so no game shape freezes before that call.
+/// The Golf hub, phase 2 (#1187): the room layer from moonbase.games plus
+/// golf's own vocabulary, nested under one `golf` member per direction so
+/// a second game is one new member per union and the room layer never
+/// changes shape (#79).
 @simpleRestJson
 @title("Golf Hub")
 service GolfHub {
@@ -16,26 +27,12 @@ service GolfHub {
     operations: [GetSession, Play]
 }
 
-/// Mints identity plus the two credentials of smithy-cpp ADR-0018's
-/// blessed browser auth: a single-use short-lived ticket spent on the Play
-/// upgrade, and a multi-use resume token a reconnect exchanges for a fresh
-/// ticket (same playerId back). No resumeToken, or an expired one, mints a
-/// fresh player.
-@http(method: "POST", uri: "/games/v2/golf/session")
+/// Session identity is game-agnostic (#79): the route carries no game
+/// segment, and the minted credentials work for any hub in this family.
+@http(method: "POST", uri: "/games/v2/session")
 operation GetSession {
-    input := {
-        resumeToken: String
-    }
-    output := {
-        @required
-        playerId: String
-
-        @required
-        ticket: String
-
-        @required
-        resumeToken: String
-    }
+    input: SessionRequest
+    output: SessionCredentials
 }
 
 /// The one WebSocket session per player: commands up, events down. The
@@ -66,71 +63,241 @@ union GolfCommands {
     joinRoom: JoinRoom
     leaveRoom: LeaveRoom
     getRoomState: GetRoomState
+    chat: Chat
+    golf: GolfCommand
 }
 
-structure CreateRoom {}
-
-structure JoinRoom {
+/// The game-specific envelope: exactly one move.
+structure GolfCommand {
     @required
-    roomId: String
+    move: GolfMove
 }
 
-structure LeaveRoom {}
+union GolfMove {
+    createGame: CreateGame
+    joinGame: JoinGame
+    startGame: StartGame
+    leaveGame: LeaveGame
+    peekCard: PeekCard
+    drawCard: DrawCard
+    takeFromDiscard: TakeFromDiscard
+    swapCard: SwapCard
+    discardDrawn: DiscardDrawn
+    knock: Knock
+    hideCards: HideCards
+}
 
-structure GetRoomState {}
+/// Creates a game in the current room and seats the creator. Replaces the
+/// v1 startNewGame as well — the room hears newGameStarted either way.
+structure CreateGame {}
+
+structure JoinGame {
+    @required
+    gameId: String
+}
+
+structure StartGame {}
+
+structure LeaveGame {}
+
+/// Reveal one of your own four cards to yourself; two peeks per player,
+/// then the hub flips the game to its reveal countdown.
+structure PeekCard {
+    @required
+    cardIndex: Integer
+}
+
+/// Look at the top of the draw pile; commits you to swapCard or
+/// discardDrawn this turn.
+structure DrawCard {}
+
+/// Take the (public) discard top straight into a slot — one step, since
+/// no information is revealed by holding it first.
+structure TakeFromDiscard {
+    @required
+    cardIndex: Integer
+}
+
+/// Swap the drawn card into a slot; the old card goes to the discard.
+structure SwapCard {
+    @required
+    cardIndex: Integer
+}
+
+/// Reject the drawn card onto the discard pile.
+structure DiscardDrawn {}
+
+structure Knock {}
+
+/// Ends the post-peek reveal countdown for the whole game.
+structure HideCards {}
 
 @streaming
 union GolfEvents {
     sessionReady: SessionReady
     roomState: RoomState
     roomLeft: RoomLeft
+    roomChat: ChatMessage
     commandRejected: CommandRejected
+    golf: GolfEvent
 }
 
-/// First event on every stream: who you are, whether this seat resumed a
-/// parked session (ADR-0020 grace), and the room you are still in if so.
-structure SessionReady {
+/// The game-specific envelope: exactly one update.
+structure GolfEvent {
+    @required
+    update: GolfUpdate
+}
+
+union GolfUpdate {
+    gameJoined: GameJoined
+    gameState: GameStateUpdate
+    gameStarted: GameStarted
+    turnChanged: TurnChanged
+    playerKnocked: PlayerKnocked
+    gameEnded: GameEnded
+    newGameStarted: NewGameStarted
+    gameLeft: GameLeft
+}
+
+structure GameJoined {
+    @required
+    view: GameView
+}
+
+structure GameStateUpdate {
+    @required
+    view: GameView
+}
+
+structure GameStarted {}
+
+structure TurnChanged {
+    @required
+    playerId: String
+}
+
+structure PlayerKnocked {
+    @required
+    playerId: String
+}
+
+/// winners is the typed list (ties are shared wins); winner is the joined
+/// display string ("a & b") for anything that only shows one line.
+structure GameEnded {
+    @required
+    winner: String
+
+    @required
+    winners: PlayerIds
+
+    @required
+    finalScores: FinalScores
+}
+
+structure NewGameStarted {
+    @required
+    gameId: String
+}
+
+structure GameLeft {
+    @required
+    gameId: String
+}
+
+list PlayerIds {
+    member: String
+}
+
+list FinalScores {
+    member: FinalScore
+}
+
+structure FinalScore {
     @required
     playerId: String
 
     @required
-    resumed: Boolean
-
-    roomId: String
+    score: Integer
 }
 
-structure RoomState {
+/// One player's redacted view of a game. Own card faces appear only at
+/// the revealed indexes (and everything at game end); other hands are
+/// always nulls; the drawn card rides only to its holder. The server
+/// never sends a fact the viewer is not entitled to — tighter than v1,
+/// which shipped the whole hand to its owner during peek windows.
+structure GameView {
     @required
-    roomId: String
+    gameId: String
+
+    /// waiting | playing | peeking | knocked | ended
+    @required
+    phase: String
 
     @required
-    players: PlayerInfos
+    players: GamePlayers
+
+    currentPlayerId: String
+
+    @required
+    drawPileCount: Integer
+
+    @required
+    discardCount: Integer
+
+    discardTop: Card
+
+    drawnCard: Card
+
+    knockedPlayerId: String
+
+    @required
+    allPlayersPeeked: Boolean
 }
 
-list PlayerInfos {
-    member: PlayerInfo
+list GamePlayers {
+    member: GamePlayer
 }
 
-structure PlayerInfo {
+structure GamePlayer {
     @required
     playerId: String
 
+    /// Always 4 entries; a slot without a card is face down for this
+    /// viewer.
     @required
-    connected: Boolean
+    cards: CardSlots
+
+    /// The viewer's own revealed indexes; empty for everyone else.
+    @required
+    revealedIndexes: CardIndexes
+
+    @required
+    hasPeeked: Boolean
+
+    /// Absent until the game ends.
+    score: Integer
 }
 
-/// Ack for a deliberate leaveRoom; the remaining members see roomState.
-structure RoomLeft {
-    @required
-    roomId: String
+list CardSlots {
+    member: CardSlot
 }
 
-/// A command the hub declined — wrong state, unknown room, and later
-/// illegal moves. In-band and non-fatal, matching the Go hub's error
-/// messages; the stream continues.
-structure CommandRejected {
+structure CardSlot {
+    card: Card
+}
+
+list CardIndexes {
+    member: Integer
+}
+
+/// Ranks A 2..10 J Q K, suits ♠ ♥ ♦ ♣ — the v1 wire's card language,
+/// which the UI already renders.
+structure Card {
     @required
-    reason: String
+    rank: String
+
+    @required
+    suit: String
 }
 
 /// The ticket did not spend: expired, already used, or never minted. The

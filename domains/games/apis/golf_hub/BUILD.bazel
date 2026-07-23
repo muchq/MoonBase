@@ -1,19 +1,25 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
 
-# Phase 1 of the Golf hub rebuild on smithy-cpp event streams (see
-# README.md): session minting + room lifecycle. Game rules and their wire
-# vocabulary land in phase 2, after the rules-variant decision.
+# Phase 2 of the Golf hub rebuild on smithy-cpp event streams (#1187):
+# the game-agnostic room layer (model/games.smithy, per #79) plus golf's
+# game vocabulary, on the reshaped libs/cards/golf engine.
 smithy_cpp_server_library(
     name = "golf_hub_smithy_server",
-    srcs = ["model/golf_hub.smithy"],
+    srcs = [
+        "model/games.smithy",
+        "model/golf_hub.smithy",
+    ],
     namespace = "moonbase::golf",
     service = "moonbase.golf#GolfHub",
 )
 
 smithy_cpp_client_library(
     name = "golf_hub_smithy_client",
-    srcs = ["model/golf_hub.smithy"],
+    srcs = [
+        "model/games.smithy",
+        "model/golf_hub.smithy",
+    ],
     namespace = "moonbase::golf",
     service = "moonbase.golf#GolfHub",
 )
@@ -45,6 +51,11 @@ cc_library(
     deps = [
         ":golf_hub_smithy_server",
         ":ticket_vault",
+        "//domains/games/libs/cards",
+        "//domains/games/libs/cards:dealer",
+        "//domains/games/libs/cards/golf:game_state",
+        "//domains/games/libs/cards/golf:player",
+        "@com_google_absl//absl/strings",
         "@smithy_cpp//runtime:eventstream",
         "@smithy_cpp//runtime:server",
     ],
@@ -62,6 +73,7 @@ cc_test(
         ":golf_hub_smithy_server",
         ":hub_handler",
         ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
         "@googletest//:gtest_main",
         "@smithy_cpp//runtime:client",
         "@smithy_cpp//runtime:core",
