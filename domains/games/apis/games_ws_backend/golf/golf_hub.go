@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -1303,14 +1304,19 @@ func (h *GolfHub) broadcastTurnChanged(game *Game) {
 }
 
 func (h *GolfHub) broadcastGameEnded(game *Game) {
-	winner := game.GetWinner()
-	if winner == nil {
+	winners := game.GetWinners()
+	if len(winners) == 0 {
 		return
+	}
+	names := make([]string, len(winners))
+	for i, winner := range winners {
+		names[i] = winner.Name
 	}
 
 	msg := &GameEndedMessage{
 		Type:        "gameEnded",
-		Winner:      winner.Name,
+		Winner:      strings.Join(names, " & "),
+		Winners:     names,
 		FinalScores: game.GetFinalScores(),
 	}
 	h.broadcastToGameLocked(game, msg)
@@ -1561,13 +1567,19 @@ func (h *GolfHub) completeGameInRoom(roomID string, gameID string) error {
 	room.GameHistory = append(room.GameHistory, gameResult)
 	room.LastActivity = time.Now()
 
-	// Update player statistics
+	// Update player statistics. Winners is the typed list — on a shared win
+	// (non-knocker tie, issue #1187 phase 0) every winner gets the credit,
+	// and Winner is just the joined display string.
+	winnerSet := make(map[string]bool, len(gameResult.Winners))
+	for _, name := range gameResult.Winners {
+		winnerSet[name] = true
+	}
 	for _, finalScore := range gameResult.FinalScores {
 		for _, roomPlayer := range room.Players {
 			if roomPlayer.Name == finalScore.PlayerName {
 				roomPlayer.TotalScore += finalScore.Score
 				roomPlayer.GamesPlayed++
-				if finalScore.PlayerName == gameResult.Winner {
+				if winnerSet[finalScore.PlayerName] {
 					roomPlayer.GamesWon++
 				}
 				break

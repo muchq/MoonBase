@@ -688,7 +688,7 @@ func TestMaxPlayers(t *testing.T) {
 
 	// Add 4 players (max)
 	for i := 0; i < 4; i++ {
-		_, err := addTestPlayerToGame(game, string(rune('a' + i)))
+		_, err := addTestPlayerToGame(game, string(rune('a'+i)))
 		if err != nil {
 			t.Fatalf("Failed to add player %d: %v", i+1, err)
 		}
@@ -1233,5 +1233,416 @@ func TestAddPlayerTwiceAfterGameStarted(t *testing.T) {
 
 	if err.Error() != "game already started" {
 		t.Errorf("Expected 'game already started' error, got: %s", err.Error())
+	}
+}
+
+// Phase 0 rules fixes (issue #1187): pair scoring counts exactly one card of
+// an odd-remainder rank, an exhausted deck ends the game with normal scoring,
+// and non-knocker ties are shared wins.
+
+func TestFinalScorePairCancellation(t *testing.T) {
+	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
+
+	cases := []struct {
+		name     string
+		cards    []*Card
+		expected int
+	}{
+		{
+			name: "three of a kind scores exactly one card",
+			cards: []*Card{
+				{Rank: "K", Suit: "♠"},
+				{Rank: "K", Suit: "♥"},
+				{Rank: "K", Suit: "♦"},
+				{Rank: "A", Suit: "♣"},
+			},
+			expected: 11, // one K (pair cancelled) + A
+		},
+		{
+			name: "two pairs cancel to zero",
+			cards: []*Card{
+				{Rank: "5", Suit: "♠"},
+				{Rank: "5", Suit: "♥"},
+				{Rank: "9", Suit: "♦"},
+				{Rank: "9", Suit: "♣"},
+			},
+			expected: 0,
+		},
+		{
+			name: "one pair cancels, rest count",
+			cards: []*Card{
+				{Rank: "7", Suit: "♠"},
+				{Rank: "7", Suit: "♥"},
+				{Rank: "3", Suit: "♦"},
+				{Rank: "Q", Suit: "♣"},
+			},
+			expected: 13, // 3 + Q
+		},
+		{
+			name: "no pairs, everything counts",
+			cards: []*Card{
+				{Rank: "2", Suit: "♠"},
+				{Rank: "4", Suit: "♥"},
+				{Rank: "6", Suit: "♦"},
+				{Rank: "8", Suit: "♣"},
+			},
+			expected: 20,
+		},
+		{
+			name: "four of a kind cancels to zero",
+			cards: []*Card{
+				{Rank: "Q", Suit: "♠"},
+				{Rank: "Q", Suit: "♥"},
+				{Rank: "Q", Suit: "♦"},
+				{Rank: "Q", Suit: "♣"},
+			},
+			expected: 0,
+		},
+		{
+			name: "three of a kind with a jack",
+			cards: []*Card{
+				{Rank: "K", Suit: "♠"},
+				{Rank: "K", Suit: "♥"},
+				{Rank: "K", Suit: "♦"},
+				{Rank: "J", Suit: "♣"},
+			},
+			expected: 10, // one K; the jack is worth 0
+		},
+		{
+			name: "unpaired jacks are worth zero",
+			cards: []*Card{
+				{Rank: "J", Suit: "♠"},
+				{Rank: "2", Suit: "♥"},
+				{Rank: "3", Suit: "♦"},
+				{Rank: "A", Suit: "♣"},
+			},
+			expected: 6, // 2 + 3 + A
+		},
+		{
+			name: "nil card slot is skipped, pair still cancels",
+			cards: []*Card{
+				{Rank: "K", Suit: "♠"},
+				{Rank: "K", Suit: "♥"},
+				nil,
+				{Rank: "5", Suit: "♣"},
+			},
+			expected: 5,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			player := &Player{Cards: tc.cards}
+			if got := game.calculatePlayerFinalScore(player); got != tc.expected {
+				t.Errorf("Expected score %d, got %d", tc.expected, got)
+			}
+		})
+	}
+}
+
+func TestEmptyDeckEndsGame(t *testing.T) {
+	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+	if err := game.StartGame(); err != nil {
+		t.Fatalf("Failed to start game: %v", err)
+	}
+
+	// Leave exactly one card so player 1's draw exhausts the deck.
+	game.deck = game.deck[:1]
+
+	if err := game.DrawCard("client1"); err != nil {
+		t.Fatalf("Failed to draw last card: %v", err)
+	}
+	if err := game.DiscardDrawn("client1"); err != nil {
+		t.Fatalf("Failed to discard: %v", err)
+	}
+
+	if game.state.GamePhase != "ended" {
+		t.Fatalf("Expected empty deck to end the game, got phase %s", game.state.GamePhase)
+	}
+
+	// Scoring ran: all cards revealed and winners determined without a knock.
+	for _, player := range game.state.Players {
+		if len(player.RevealedCards) != 4 {
+			t.Errorf("Expected all 4 cards revealed for %s, got %d",
+				player.Name, len(player.RevealedCards))
+		}
+	}
+	if len(game.GetWinners()) == 0 {
+		t.Error("Expected winners after empty-deck game end")
+	}
+}
+
+func TestSharedWinOnNonKnockerTie(t *testing.T) {
+	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+	addTestPlayerToGame(game, "client3")
+	game.StartGame()
+
+	// Players 1 and 2 tie at zero; player 3 knocked but scores higher.
+	game.state.Players[0].Cards = []*Card{
+		{Rank: "A", Suit: "♠"}, {Rank: "A", Suit: "♥"},
+		{Rank: "3", Suit: "♦"}, {Rank: "3", Suit: "♣"},
+	}
+	game.state.Players[1].Cards = []*Card{
+		{Rank: "5", Suit: "♠"}, {Rank: "5", Suit: "♥"},
+		{Rank: "9", Suit: "♦"}, {Rank: "9", Suit: "♣"},
+	}
+	game.state.Players[2].Cards = []*Card{
+		{Rank: "K", Suit: "♠"}, {Rank: "Q", Suit: "♥"},
+		{Rank: "8", Suit: "♦"}, {Rank: "2", Suit: "♣"},
+	}
+	game.state.KnockedPlayerID = &game.state.Players[2].ID
+	game.state.GamePhase = "ended"
+	game.calculateFinalScores()
+
+	winners := game.GetWinners()
+	if len(winners) != 2 {
+		t.Fatalf("Expected 2 shared winners, got %d", len(winners))
+	}
+	if winners[0].Name != "TestPlayerclient1" || winners[1].Name != "TestPlayerclient2" {
+		t.Errorf("Expected players 1 and 2 to share the win, got %s and %s",
+			winners[0].Name, winners[1].Name)
+	}
+
+	result := game.GetGameResult()
+	if result == nil {
+		t.Fatal("Expected a game result")
+	}
+	if result.Winner != "TestPlayerclient1 & TestPlayerclient2" {
+		t.Errorf("Expected joined display winner, got %q", result.Winner)
+	}
+	if len(result.Winners) != 2 {
+		t.Errorf("Expected 2 entries in Winners, got %d", len(result.Winners))
+	}
+}
+
+func TestKnockerAmongTiedWinsAlone(t *testing.T) {
+	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+	game.StartGame()
+
+	// Both players tie at zero, but player 2 knocked and takes the win solo.
+	game.state.Players[0].Cards = []*Card{
+		{Rank: "A", Suit: "♠"}, {Rank: "A", Suit: "♥"},
+		{Rank: "3", Suit: "♦"}, {Rank: "3", Suit: "♣"},
+	}
+	game.state.Players[1].Cards = []*Card{
+		{Rank: "5", Suit: "♠"}, {Rank: "5", Suit: "♥"},
+		{Rank: "9", Suit: "♦"}, {Rank: "9", Suit: "♣"},
+	}
+	game.state.KnockedPlayerID = &game.state.Players[1].ID
+	game.state.GamePhase = "ended"
+	game.calculateFinalScores()
+
+	winners := game.GetWinners()
+	if len(winners) != 1 {
+		t.Fatalf("Expected knocker to win alone, got %d winners", len(winners))
+	}
+	if winners[0].Name != "TestPlayerclient2" {
+		t.Errorf("Expected TestPlayerclient2 (knocker) to win, got %s", winners[0].Name)
+	}
+
+	result := game.GetGameResult()
+	if result.Winner != "TestPlayerclient2" {
+		t.Errorf("Expected single-name display winner, got %q", result.Winner)
+	}
+	if len(result.Winners) != 1 {
+		t.Errorf("Expected 1 entry in Winners, got %d", len(result.Winners))
+	}
+}
+
+func TestGetPublicStateRedactsInProgressGame(t *testing.T) {
+	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+	game.StartGame()
+	if err := game.DrawCard("client1"); err != nil {
+		t.Fatalf("Failed to draw: %v", err)
+	}
+
+	public := game.GetPublicState()
+	if public.DrawnCard != nil {
+		t.Error("Public state must not expose the held drawn card")
+	}
+	for _, player := range public.Players {
+		for i, card := range player.Cards {
+			if card != nil {
+				t.Errorf("Public state must not expose %s's card %d", player.Name, i)
+			}
+		}
+		if len(player.RevealedCards) != 0 {
+			t.Errorf("Public state must not expose %s's revealed indexes", player.Name)
+		}
+	}
+
+	// After the game ends everything is public again.
+	game.state.GamePhase = "ended"
+	game.calculateFinalScores()
+	ended := game.GetPublicState()
+	for _, player := range ended.Players {
+		for i, card := range player.Cards {
+			if card == nil {
+				t.Errorf("Ended game should expose %s's card %d", player.Name, i)
+			}
+		}
+	}
+}
+
+func TestDeckNotEmptyDoesNotEndGame(t *testing.T) {
+	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+	if err := game.StartGame(); err != nil {
+		t.Fatalf("Failed to start game: %v", err)
+	}
+
+	// Two cards left: the draw leaves one, which must NOT end the game.
+	game.deck = game.deck[:2]
+
+	if err := game.DrawCard("client1"); err != nil {
+		t.Fatalf("Failed to draw: %v", err)
+	}
+	if err := game.DiscardDrawn("client1"); err != nil {
+		t.Fatalf("Failed to discard: %v", err)
+	}
+
+	if game.state.GamePhase != "playing" {
+		t.Errorf("Game must continue with cards in the deck, got phase %s", game.state.GamePhase)
+	}
+	if game.state.CurrentPlayerIndex != 1 {
+		t.Errorf("Turn should advance to player 2, got index %d", game.state.CurrentPlayerIndex)
+	}
+	if game.GetWinners() != nil {
+		t.Error("No winners while the game is still in progress")
+	}
+}
+
+func TestEmptyDeckEndsGameViaDiscardPath(t *testing.T) {
+	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+	if err := game.StartGame(); err != nil {
+		t.Fatalf("Failed to start game: %v", err)
+	}
+
+	// Deck already exhausted; the turn ends via take-from-discard + swap,
+	// which must also trigger the empty-deck game end.
+	game.deck = nil
+
+	if err := game.TakeFromDiscard("client1"); err != nil {
+		t.Fatalf("Failed to take from discard: %v", err)
+	}
+	if err := game.SwapCard("client1", 0); err != nil {
+		t.Fatalf("Failed to swap: %v", err)
+	}
+
+	if game.state.GamePhase != "ended" {
+		t.Fatalf("Expected empty deck to end the game after swap, got phase %s", game.state.GamePhase)
+	}
+	if len(game.GetWinners()) == 0 {
+		t.Error("Expected winners after empty-deck game end")
+	}
+}
+
+func TestEmptyDeckDuringKnockedPhaseEndsEarly(t *testing.T) {
+	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+	addTestPlayerToGame(game, "client3")
+	if err := game.StartGame(); err != nil {
+		t.Fatalf("Failed to start game: %v", err)
+	}
+
+	// Player 1 knocks; player 2 draws the last card. The game ends on deck
+	// exhaustion even though player 3 never got a final turn.
+	if err := game.Knock("client1"); err != nil {
+		t.Fatalf("Failed to knock: %v", err)
+	}
+	game.deck = game.deck[:1]
+
+	if err := game.DrawCard("client2"); err != nil {
+		t.Fatalf("Failed to draw: %v", err)
+	}
+	if err := game.DiscardDrawn("client2"); err != nil {
+		t.Fatalf("Failed to discard: %v", err)
+	}
+
+	if game.state.GamePhase != "ended" {
+		t.Fatalf("Expected game to end when the deck ran out mid final round, got phase %s",
+			game.state.GamePhase)
+	}
+	if len(game.GetWinners()) == 0 {
+		t.Error("Expected winners after the deck ran out")
+	}
+}
+
+func TestNoWinnersOrResultBeforeGameEnds(t *testing.T) {
+	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
+
+	// Waiting phase: no players dealt, nothing to win.
+	if game.GetWinners() != nil {
+		t.Error("GetWinners must be nil in waiting phase")
+	}
+	if game.GetWinner() != nil {
+		t.Error("GetWinner must be nil in waiting phase")
+	}
+	if game.GetGameResult() != nil {
+		t.Error("GetGameResult must be nil in waiting phase")
+	}
+
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+	game.StartGame()
+
+	// Playing phase: still nothing.
+	if game.GetWinners() != nil {
+		t.Error("GetWinners must be nil while the game is in progress")
+	}
+	if game.GetGameResult() != nil {
+		t.Error("GetGameResult must be nil while the game is in progress")
+	}
+}
+
+func TestSoloWinnerIsNotShared(t *testing.T) {
+	game := NewGame("TEST123", &players.DeterministicIDGenerator{})
+	addTestPlayerToGame(game, "client1")
+	addTestPlayerToGame(game, "client2")
+	addTestPlayerToGame(game, "client3")
+	game.StartGame()
+
+	// Distinct scores: exactly one winner, no spurious sharing.
+	game.state.Players[0].Cards = []*Card{
+		{Rank: "A", Suit: "♠"}, {Rank: "2", Suit: "♥"},
+		{Rank: "3", Suit: "♦"}, {Rank: "4", Suit: "♣"}, // 10
+	}
+	game.state.Players[1].Cards = []*Card{
+		{Rank: "5", Suit: "♠"}, {Rank: "6", Suit: "♥"},
+		{Rank: "7", Suit: "♦"}, {Rank: "8", Suit: "♣"}, // 26
+	}
+	game.state.Players[2].Cards = []*Card{
+		{Rank: "K", Suit: "♠"}, {Rank: "Q", Suit: "♥"},
+		{Rank: "10", Suit: "♦"}, {Rank: "9", Suit: "♣"}, // 39
+	}
+	game.state.GamePhase = "ended"
+	game.calculateFinalScores()
+
+	winners := game.GetWinners()
+	if len(winners) != 1 {
+		t.Fatalf("Expected exactly 1 winner, got %d", len(winners))
+	}
+	if winners[0].Name != "TestPlayerclient1" {
+		t.Errorf("Expected TestPlayerclient1 to win, got %s", winners[0].Name)
+	}
+
+	result := game.GetGameResult()
+	if result.Winner != "TestPlayerclient1" {
+		t.Errorf("Solo win must not be a joined string, got %q", result.Winner)
+	}
+	if len(result.Winners) != 1 || result.Winners[0] != "TestPlayerclient1" {
+		t.Errorf("Expected Winners == [TestPlayerclient1], got %v", result.Winners)
 	}
 }
