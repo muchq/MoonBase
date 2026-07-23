@@ -896,3 +896,117 @@ func (h *MetricsHandler) fetchContainerMetricsTimeSeries(ctx context.Context, ti
 
 	return response, nil
 }
+
+func (h *MetricsHandler) GetGolfMetrics(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	metrics, err := h.fetchGolfMetrics(ctx)
+	if err != nil {
+		problem := mucks.NewServerError(500)
+		problem.Detail = "Failed to fetch golf metrics: " + err.Error()
+		mucks.JsonError(w, problem)
+		return
+	}
+
+	mucks.JsonOk(w, metrics)
+}
+
+func (h *MetricsHandler) GetGolfMetricsTimeSeries(w http.ResponseWriter, r *http.Request) {
+	timeRange := r.PathValue("range")
+
+	if !ValidTimeRange(timeRange) {
+		problem := mucks.NewBadRequest("Invalid time range. Valid options: 30m, 1d, 7d")
+		mucks.JsonError(w, problem)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	response, err := h.fetchGolfMetricsTimeSeries(ctx, TimeRange(timeRange))
+	if err != nil {
+		problem := mucks.NewServerError(500)
+		problem.Detail = "Failed to fetch golf metrics timeseries: " + err.Error()
+		mucks.JsonError(w, problem)
+		return
+	}
+
+	mucks.JsonOk(w, response)
+}
+
+// The golf_hub stream instruments (MoonBase#1187 phase 4). Counters carry
+// label splits (resumed, kind, command, event, reason), so scalars sum
+// across them; the OTel collector exports the up-down session counter as
+// stream_sessions_active_gauge.
+func (h *MetricsHandler) fetchGolfMetrics(ctx context.Context) (*GolfMetrics, error) {
+	metrics := &GolfMetrics{
+		Timestamp: time.Now().UTC(),
+	}
+
+	scalars := []struct {
+		query string
+		field *float64
+	}{
+		{`sum(stream_sessions_active_gauge)`, &metrics.Sessions.Active},
+		{`sum(stream_sessions_total)`, &metrics.Sessions.StartedTotal},
+		{`sum(stream_sessions_total{resumed="true"})`, &metrics.Sessions.ResumedTotal},
+		{`sum(stream_admissions_refused_total)`, &metrics.Sessions.RefusedTotal},
+		{`sum(stream_disconnects_total)`, &metrics.Sessions.DisconnectsTotal},
+		{`sum(stream_seats_expired_total)`, &metrics.Sessions.SeatsExpiredTotal},
+		{`sum(rate(stream_commands_total[5m]))`, &metrics.Activity.CommandsPerSec},
+		{`sum(rate(stream_events_total[5m]))`, &metrics.Activity.EventsPerSec},
+		{`sum(rate(stream_rejections_total[5m]))`, &metrics.Activity.RejectionsPerSec},
+	}
+	for _, s := range scalars {
+		resp, err := h.promClient.Query(ctx, s.query)
+		if err == nil && len(resp.Data.Result) > 0 {
+			if val, err := extractFloatValue(&resp.Data.Result[0]); err == nil {
+				*s.field = val
+			}
+		}
+	}
+
+	return metrics, nil
+}
+
+func (h *MetricsHandler) fetchGolfMetricsTimeSeries(ctx context.Context, timeRange TimeRange) (*TimeSeriesResponse, error) {
+	duration, step := GetTimeRangeConfig(timeRange)
+	endTime := time.Now().UTC()
+	startTime := endTime.Add(-duration)
+
+	response := &TimeSeriesResponse{
+		TimeRange: string(timeRange),
+		StartTime: startTime,
+		EndTime:   endTime,
+		Step:      step,
+		Series:    []TimeSeries{},
+	}
+
+	queries := map[string]string{
+		"sessions_active": `sum(stream_sessions_active_gauge)`,
+		"session_starts":  `sum(increase(stream_sessions_total[5m]))`,
+		"command_rate":    `sum(rate(stream_commands_total[5m]))`,
+		"event_rate":      `sum(rate(stream_events_total[5m]))`,
+		"rejection_rate":  `sum(rate(stream_rejections_total[5m]))`,
+		"disconnect_rate": `sum(rate(stream_disconnects_total[5m]))`,
+	}
+
+	for metricName, query := range queries {
+		resp, err := h.promClient.QueryRange(ctx, query, startTime, endTime, step)
+		if err != nil {
+			continue
+		}
+
+		for _, result := range resp.Data.Result {
+			ts, err := extractTimeSeries(&result)
+			if err != nil {
+				continue
+			}
+			ts.MetricName = metricName
+			response.Series = append(response.Series, ts)
+		}
+	}
+
+	return response, nil
+}

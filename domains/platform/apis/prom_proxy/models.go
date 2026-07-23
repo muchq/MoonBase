@@ -155,3 +155,23 @@ type MicrogptInferenceMetrics struct {
 	AvgDurationMs        float64 `json:"avg_duration_ms"`
 	ConversationTotal    float64 `json:"conversation_total"`
 }
+type GolfMetrics struct {
+	Timestamp time.Time           `json:"timestamp"`
+	Sessions  GolfSessionMetrics  `json:"sessions"`
+	Activity  GolfActivityMetrics `json:"activity"`
+}
+
+type GolfSessionMetrics struct {
+	Active            float64 `json:"active"`
+	StartedTotal      float64 `json:"started_total"`
+	ResumedTotal      float64 `json:"resumed_total"`
+	RefusedTotal      float64 `json:"refused_total"`
+	DisconnectsTotal  float64 `json:"disconnects_total"`
+	SeatsExpiredTotal float64 `json:"seats_expired_total"`
+}
+
+type GolfActivityMetrics struct {
+	CommandsPerSec   float64 `json:"commands_per_sec"`
+	EventsPerSec     float64 `json:"events_per_sec"`
+	RejectionsPerSec float64 `json:"rejections_per_sec"`
+}
