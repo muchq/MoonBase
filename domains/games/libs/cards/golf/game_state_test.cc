@@ -322,12 +322,17 @@ GameState freshTwoPlayerGame() {
 }
 
 GameState allPeeked(const GameState& game) {
-  auto s = game.peekOwnCard(0, Position::TopLeft);
-  s = s->peekOwnCard(0, Position::TopRight);
-  s = s->peekOwnCard(1, Position::BottomLeft);
-  s = s->peekOwnCard(1, Position::BottomRight);
-  EXPECT_TRUE(s.ok()) << s.status();
-  return *s;
+  // StatusOr<GameState> is not assignable (const members), so chain
+  // through fresh values.
+  auto first = game.peekOwnCard(0, Position::TopLeft);
+  EXPECT_TRUE(first.ok()) << first.status();
+  auto second = first->peekOwnCard(0, Position::TopRight);
+  EXPECT_TRUE(second.ok()) << second.status();
+  auto third = second->peekOwnCard(1, Position::BottomLeft);
+  EXPECT_TRUE(third.ok()) << third.status();
+  auto fourth = third->peekOwnCard(1, Position::BottomRight);
+  EXPECT_TRUE(fourth.ok()) << fourth.status();
+  return *fourth;
 }
 
 }  // namespace
