@@ -41,12 +41,14 @@ func main() {
 	router.HandleFunc("GET /metrics/v1/scalar/portrait", metricsHandler.GetPortraitMetrics)
 	router.HandleFunc("GET /metrics/v1/scalar/containers", metricsHandler.GetContainerMetrics)
 	router.HandleFunc("GET /metrics/v1/scalar/summary", metricsHandler.GetSummaryMetrics)
+	router.HandleFunc("GET /metrics/v1/scalar/golf", metricsHandler.GetGolfMetrics)
 
 	// Timeseries endpoints - historical data with time ranges
 	router.HandleFunc("GET /metrics/v1/timeseries/system/{range}", metricsHandler.GetSystemMetricsTimeSeries)
 	router.HandleFunc("GET /metrics/v1/timeseries/portrait/{range}", metricsHandler.GetPortraitMetricsTimeSeries)
 	router.HandleFunc("GET /metrics/v1/timeseries/containers/{range}", metricsHandler.GetContainerMetricsTimeSeries)
 	router.HandleFunc("GET /metrics/v1/timeseries/microgpt/{range}", metricsHandler.GetMicrogptMetricsTimeSeries)
+	router.HandleFunc("GET /metrics/v1/timeseries/golf/{range}", metricsHandler.GetGolfMetricsTimeSeries)
 
 	// MicroGPT endpoints
 	router.HandleFunc("GET /metrics/v1/scalar/microgpt", metricsHandler.GetMicrogptMetrics)
