@@ -38,11 +38,12 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
                       std::shared_ptr<cards::Dealer> dealer = std::make_shared<cards::Dealer>(),
                       std::chrono::seconds grace_period = std::chrono::minutes(5));
 
-  // Note: shapes modeled in moonbase.games still generate into the
-  // moonbase::golf C++ namespace — codegen flattens the model into the
-  // one namespace the BUILD rule names.
-  smithy::Outcome<moonbase::golf::SessionCredentials> GetSession(
-      const moonbase::golf::SessionRequest& input,
+  // Note: operation IO generates as <Op>Input/<Op>Output regardless of
+  // the named shapes bound in the model, and moonbase.games shapes land
+  // in the moonbase::golf C++ namespace (codegen flattens the model into
+  // the one namespace the BUILD rule names).
+  smithy::Outcome<moonbase::golf::GetSessionOutput> GetSession(
+      const moonbase::golf::GetSessionInput& input,
       const smithy::server::RequestContext& context) override;
 
   smithy::eventstream::StreamTask Play(moonbase::golf::PlayInput input,

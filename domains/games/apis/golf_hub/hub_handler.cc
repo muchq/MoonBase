@@ -86,8 +86,8 @@ HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards
         return options;
       }()) {}
 
-smithy::Outcome<moonbase::golf::SessionCredentials> HubHandler::GetSession(
-    const moonbase::golf::SessionRequest& input,
+smithy::Outcome<moonbase::golf::GetSessionOutput> HubHandler::GetSession(
+    const moonbase::golf::GetSessionInput& input,
     const smithy::server::RequestContext& /*context*/) {
   std::string player_id;
   bool token_valid = false;
@@ -99,7 +99,7 @@ smithy::Outcome<moonbase::golf::SessionCredentials> HubHandler::GetSession(
   }
   if (player_id.empty()) player_id = WhimsicalId();
 
-  moonbase::golf::SessionCredentials output;
+  moonbase::golf::GetSessionOutput output;
   output.playerId = player_id;
   output.ticket = vault_->IssueTicket(player_id);
   output.resumeToken = token_valid ? *input.resumeToken : vault_->IssueResumeToken(player_id);
@@ -423,7 +423,7 @@ void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) 
           }
           std::deque<cards::Card> discard{deck.back()};
           deck.pop_back();
-          game->second.state = golf::GameState{std::move(deck),
+          game->second.state.emplace(golf::GameState{std::move(deck),
                                                std::move(discard),
                                                std::move(players),
                                                false,
@@ -574,7 +574,7 @@ void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, Mo
         } else {
           const bool was_countdown = state.revealCountdownActive();
           const std::string previous_turn = SeatName(state, state.getWhoseTurn());
-          game->second.state = std::move(*next);
+          game->second.state.emplace(std::move(*next));
           const golf::GameState& updated = *game->second.state;
 
           if (effects.announce_knock) {
@@ -689,7 +689,7 @@ void HubHandler::LeaveGameLocked(const std::string& player_id, Outbox& outbox) {
   const int seat = state.playerIndex(player_id);
   if (seat >= 0) {
     auto next = state.removePlayer(seat);
-    if (next.ok()) game->second.state = std::move(*next);
+    if (next.ok()) game->second.state.emplace(std::move(*next));
   }
   if (game->second.state->isOver()) {
     FinalizeGameLocked(room_it->second, room->second, game_id, outbox);
