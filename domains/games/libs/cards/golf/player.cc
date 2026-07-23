@@ -10,6 +10,35 @@
 namespace golf {
 using namespace cards;
 
+std::optional<Position> positionFromIndex(int index) {
+  switch (index) {
+    case 0:
+      return Position::TopLeft;
+    case 1:
+      return Position::TopRight;
+    case 2:
+      return Position::BottomLeft;
+    case 3:
+      return Position::BottomRight;
+    default:
+      return std::nullopt;
+  }
+}
+
+int indexOfPosition(Position position) {
+  switch (position) {
+    case Position::TopLeft:
+      return 0;
+    case Position::TopRight:
+      return 1;
+    case Position::BottomLeft:
+      return 2;
+    case Position::BottomRight:
+      return 3;
+  }
+  return 0;
+}
+
 const std::optional<std::string>& Player::getName() const { return name; }
 
 int Player::score() const {
@@ -33,7 +62,7 @@ absl::StatusOr<Player> Player::claimHand(const std::string& username) const {
   if (isPresent()) {
     return absl::FailedPreconditionError("already claimed");
   }
-  return Player{username, topLeft, topRight, bottomLeft, bottomRight};
+  return Player{username, topLeft, topRight, bottomLeft, bottomRight, peeked, donePeeking};
 }
 
 std::vector<Card> Player::allCards() const { return {topLeft, topRight, bottomLeft, bottomRight}; }
@@ -85,14 +114,33 @@ const Card& Player::cardAt(Position position) const {
 
 Player Player::swapCard(Card toSwap, Position position) const {
   if (position == Position::TopLeft) {
-    return Player{name, toSwap, topRight, bottomLeft, bottomRight};
+    return Player{name, toSwap, topRight, bottomLeft, bottomRight, peeked, donePeeking};
   } else if (position == Position::TopRight) {
-    return Player{name, topLeft, toSwap, bottomLeft, bottomRight};
+    return Player{name, topLeft, toSwap, bottomLeft, bottomRight, peeked, donePeeking};
   } else if (position == Position::BottomLeft) {
-    return Player{name, topLeft, topRight, toSwap, bottomRight};
+    return Player{name, topLeft, topRight, toSwap, bottomRight, peeked, donePeeking};
   } else {
-    return Player{name, topLeft, topRight, bottomLeft, toSwap};
+    return Player{name, topLeft, topRight, bottomLeft, toSwap, peeked, donePeeking};
   }
+}
+
+absl::StatusOr<Player> Player::addPeek(Position position) const {
+  if (donePeeking) {
+    return absl::FailedPreconditionError("already peeked at 2 cards");
+  }
+  for (const Position& seen : peeked) {
+    if (seen == position) {
+      return absl::FailedPreconditionError("already peeked at this card");
+    }
+  }
+  std::vector<Position> updated{peeked};
+  updated.push_back(position);
+  const bool done = updated.size() == 2;
+  return Player{name, topLeft, topRight, bottomLeft, bottomRight, std::move(updated), done};
+}
+
+Player Player::clearPeeks() const {
+  return Player{name, topLeft, topRight, bottomLeft, bottomRight, {}, donePeeking};
 }
 
 bool Player::nameMatches(const std::string& username) const { return name == username; }
