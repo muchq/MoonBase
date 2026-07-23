@@ -459,3 +459,61 @@ var _ interface {
 	Query(ctx context.Context, query string) (*QueryResponse, error)
 	QueryRange(ctx context.Context, query string, start, end time.Time, step string) (*QueryResponse, error)
 } = (*mockPrometheusClient)(nil)
+func TestMetricsHandler_GetGolfMetrics_Success(t *testing.T) {
+	mockClient := &mockPrometheusClient{
+		queryResponse: &QueryResponse{
+			Status: "success",
+			Data: struct {
+				ResultType string   `json:"resultType"`
+				Result     []Result `json:"result"`
+			}{
+				ResultType: "vector",
+				Result: []Result{
+					{
+						Metric: map[string]string{},
+						Value:  []interface{}{1609459200.0, "3"},
+					},
+				},
+			},
+		},
+		queryError: nil,
+	}
+
+	handler := &MetricsHandler{promClient: mockClient}
+
+	req := httptest.NewRequest("GET", "/metrics/v1/scalar/golf", nil)
+	w := httptest.NewRecorder()
+
+	handler.GetGolfMetrics(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response GolfMetrics
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+
+	// Every scalar rides the same mocked query result.
+	assert.Equal(t, float64(3), response.Sessions.Active)
+	assert.Equal(t, float64(3), response.Sessions.StartedTotal)
+	assert.Equal(t, float64(3), response.Activity.CommandsPerSec)
+	assert.WithinDuration(t, time.Now(), response.Timestamp, 5*time.Second)
+}
+
+func TestMetricsHandler_GetGolfMetricsTimeSeries_InvalidRange(t *testing.T) {
+	handler := &MetricsHandler{}
+
+	req := httptest.NewRequest("GET", "/metrics/v1/timeseries/golf/invalid", nil)
+	req.SetPathValue("range", "invalid")
+	w := httptest.NewRecorder()
+
+	handler.GetGolfMetricsTimeSeries(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+
+	assert.Equal(t, float64(400), response["status"])
+	assert.Contains(t, response["detail"], "Invalid time range")
+}
