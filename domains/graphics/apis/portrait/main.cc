@@ -9,11 +9,8 @@
 
 #include <chrono>
 #include <csignal>
-#include <cstdlib>
 #include <memory>
-#include <stdexcept>
 #include <string>
-#include <vector>
 
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
@@ -26,7 +23,6 @@
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "moonbase/portrait/server.h"
 #include "smithy/http/beast_transport.h"
-#include "smithy/http/forwarded.h"
 #include "smithy/server/middleware.h"
 
 int main() {
@@ -60,32 +56,18 @@ int main() {
       std::make_shared<futility::rate_limiter::SlidingWindowRateLimiter<std::string>>(
           limiter_config);
 
-  // The reverse-proxy trust boundary (smithy-cpp ADR-0012, contract in
-  // smithy/http/forwarded.h): deploy/consolidated/compose.yaml pins Caddy's
-  // address and passes it here. Unset is the deliberate direct-connect
-  // statement (TrustedProxies::None()); set-but-empty or malformed fails
-  // startup rather than silently collapsing proxied traffic onto one key.
-  smithy::http::TrustedProxies trusted_proxies = smithy::http::TrustedProxies::None();
-  if (std::getenv("TRUSTED_PROXY_CIDRS") != nullptr) {
-    const std::vector<std::string> cidrs = futility::env::ReadList("TRUSTED_PROXY_CIDRS");
-    if (cidrs.empty()) {
-      LOG(ERROR) << "TRUSTED_PROXY_CIDRS is set but empty; unset it to serve direct-connect";
-      return 1;
-    }
-    try {
-      trusted_proxies = smithy::http::TrustedProxies(cidrs);
-    } catch (const std::invalid_argument& error) {
-      LOG(ERROR) << "Invalid TRUSTED_PROXY_CIDRS: " << error.what();
-      return 1;
-    }
-  }
+  // The reverse-proxy trust boundary (smithy-cpp ADR-0012):
+  // deploy/consolidated/compose.yaml pins Caddy's address into
+  // TRUSTED_PROXY_CIDRS. A refused value already logged why.
+  auto trusted_proxies = aura::TrustedProxiesFromEnv();
+  if (!trusted_proxies.has_value()) return 1;
 
   auto handler = aura::ProductionChain(
       aura::ChainOptions{
           .metrics = metrics,
           .allow_request =
               [rate_limiter](const std::string& client) { return rate_limiter->allow(client); },
-          .trusted_proxies = std::move(trusted_proxies),
+          .trusted_proxies = std::move(*trusted_proxies),
           .retry_after = std::chrono::seconds(60)},
       server.Handler());
 

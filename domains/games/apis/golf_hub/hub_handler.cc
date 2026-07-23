@@ -255,7 +255,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
       }
     }
     if (snapshot.has_value()) {
-      registry_.SendTo(player_id, std::move(*snapshot));
+      Send(player_id, std::move(*snapshot));
     } else {
       Reject(player_id, "not in a room");
     }

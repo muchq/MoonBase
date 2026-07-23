@@ -12,10 +12,8 @@
 #include <chrono>
 #include <csignal>
 #include <cstddef>
-#include <cstdlib>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -34,7 +32,6 @@
 #include "domains/platform/libs/futility/otel/otel_provider.h"
 #include "moonbase/golf/server.h"
 #include "smithy/http/beast_transport.h"
-#include "smithy/http/forwarded.h"
 #include "smithy/http/message.h"
 #include "smithy/server/origin_gate.h"
 
@@ -94,28 +91,14 @@ int main() {
   auto metrics =
       aura::MakeHttpMetricsSink(std::make_shared<futility::otel::HttpMetricsManager>("golf_hub"));
 
-  // The reverse-proxy trust boundary (smithy-cpp ADR-0012, contract in
-  // smithy/http/forwarded.h): deploy/consolidated/compose.yaml pins Caddy's
-  // address and passes it here. Unset is the deliberate direct-connect
-  // statement (TrustedProxies::None()); set-but-empty or malformed fails
-  // startup rather than silently collapsing proxied traffic onto one key.
-  smithy::http::TrustedProxies trusted_proxies = smithy::http::TrustedProxies::None();
-  if (std::getenv("TRUSTED_PROXY_CIDRS") != nullptr) {
-    const std::vector<std::string> cidrs = futility::env::ReadList("TRUSTED_PROXY_CIDRS");
-    if (cidrs.empty()) {
-      LOG(ERROR) << "TRUSTED_PROXY_CIDRS is set but empty; unset it to serve direct-connect";
-      return 1;
-    }
-    try {
-      trusted_proxies = smithy::http::TrustedProxies(cidrs);
-    } catch (const std::invalid_argument& error) {
-      LOG(ERROR) << "Invalid TRUSTED_PROXY_CIDRS: " << error.what();
-      return 1;
-    }
-  }
+  // The reverse-proxy trust boundary (smithy-cpp ADR-0012):
+  // deploy/consolidated/compose.yaml pins Caddy's address into
+  // TRUSTED_PROXY_CIDRS. A refused value already logged why.
+  auto trusted_proxies = aura::TrustedProxiesFromEnv();
+  if (!trusted_proxies.has_value()) return 1;
 
   auto unary = aura::ProductionChain(
-      aura::ChainOptions{.metrics = metrics, .trusted_proxies = std::move(trusted_proxies)},
+      aura::ChainOptions{.metrics = metrics, .trusted_proxies = std::move(*trusted_proxies)},
       server.Handler());
 
   // Gate chain: origin allowlist (browser CSWSH defense; unset

@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -377,6 +378,25 @@ TEST_F(AuraMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   EXPECT_EQ(completes.back().status, 413);
 
   transport.Stop();
+}
+
+// The env contract every service main relies on: unset serves
+// direct-connect, a parseable list is accepted, and set-but-empty or
+// malformed is a refusal (nullopt) rather than a silent None().
+TEST(TrustedProxiesFromEnvTest, UnsetEmptyValidAndMalformed) {
+  unsetenv("TRUSTED_PROXY_CIDRS");
+  EXPECT_TRUE(aura::TrustedProxiesFromEnv().has_value());
+
+  setenv("TRUSTED_PROXY_CIDRS", " , ", 1);
+  EXPECT_FALSE(aura::TrustedProxiesFromEnv().has_value());
+
+  setenv("TRUSTED_PROXY_CIDRS", "172.28.0.2,10.0.0.0/8", 1);
+  EXPECT_TRUE(aura::TrustedProxiesFromEnv().has_value());
+
+  setenv("TRUSTED_PROXY_CIDRS", "not-a-cidr", 1);
+  EXPECT_FALSE(aura::TrustedProxiesFromEnv().has_value());
+
+  unsetenv("TRUSTED_PROXY_CIDRS");
 }
 
 }  // namespace
