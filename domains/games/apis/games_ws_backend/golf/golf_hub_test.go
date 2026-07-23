@@ -516,7 +516,7 @@ func TestHub_CreateAndJoinGame(t *testing.T) {
 			break
 		}
 	}
-	
+
 	if !foundGameJoined {
 		t.Fatal("Expected to find gameJoined message")
 	}
@@ -635,7 +635,7 @@ func TestHub_StartGame(t *testing.T) {
 	player2Messages := client2.getMessages()
 	foundGameJoined := false
 	var player2GameJoinedMsg GameJoinedMessage
-	
+
 	for _, msg := range player2Messages {
 		var testMsg struct {
 			Type string `json:"type"`
@@ -647,19 +647,19 @@ func TestHub_StartGame(t *testing.T) {
 			}
 		}
 	}
-	
+
 	if !foundGameJoined {
 		t.Fatal("Player 2 should have received gameJoined message when joining the game")
 	}
-	
+
 	if player2GameJoinedMsg.Type != "gameJoined" {
 		t.Errorf("Expected gameJoined message for player 2, got %s", player2GameJoinedMsg.Type)
 	}
-	
+
 	if player2GameJoinedMsg.GameState.ID != gameID {
 		t.Errorf("Expected game ID %s in gameJoined message, got %s", gameID, player2GameJoinedMsg.GameState.ID)
 	}
-	
+
 	if len(player2GameJoinedMsg.GameState.Players) != 2 {
 		t.Errorf("Expected 2 players in game state, got %d", len(player2GameJoinedMsg.GameState.Players))
 	}
@@ -1173,7 +1173,7 @@ func TestHub_MultiGameSupport(t *testing.T) {
 	})
 	time.Sleep(10 * time.Millisecond)
 
-	// Client 3 joins the room first  
+	// Client 3 joins the room first
 	joinRoomMsg3 := `{"type": "joinRoom", "roomId": "` + roomID + `"}`
 	golfHub.GameMessage(hub.GameMessageData{
 		Message: []byte(joinRoomMsg3),
@@ -1189,7 +1189,7 @@ func TestHub_MultiGameSupport(t *testing.T) {
 	})
 	time.Sleep(10 * time.Millisecond)
 
-	// Client 3 creates game "GAME2"  
+	// Client 3 creates game "GAME2"
 	createGame2Msg := `{"type": "createGame", "roomId": "` + roomID + `"}`
 	golfHub.GameMessage(hub.GameMessageData{
 		Message: []byte(createGame2Msg),
@@ -1974,4 +1974,169 @@ func TestHub_LeaveGame(t *testing.T) {
 			t.Error("Expected error when leaving game while not in one")
 		}
 	})
+}
+
+// Stats credit for shared wins (issue #1187 phase 0): every tied winner's
+// GamesWon increments. Under the old exact-match against the display string
+// ("Alice & Bob"), nobody got credit on a tie.
+func TestCompleteGameInRoom_SharedWinStats(t *testing.T) {
+	golfHub := NewGolfHub(&players.DeterministicIDGenerator{}).(*GolfHub)
+
+	game := NewGame("GAME01", &players.DeterministicIDGenerator{})
+	game.AddPlayer("client1", "p1", "Alice")
+	game.AddPlayer("client2", "p2", "Bob")
+	game.AddPlayer("client3", "p3", "Carol")
+	if err := game.StartGame(); err != nil {
+		t.Fatalf("Failed to start game: %v", err)
+	}
+
+	// Alice and Bob tie at zero; Carol scores 39. Nobody knocked.
+	game.state.Players[0].Cards = []*Card{
+		{Rank: "A", Suit: "♠"}, {Rank: "A", Suit: "♥"},
+		{Rank: "3", Suit: "♦"}, {Rank: "3", Suit: "♣"},
+	}
+	game.state.Players[1].Cards = []*Card{
+		{Rank: "5", Suit: "♠"}, {Rank: "5", Suit: "♥"},
+		{Rank: "9", Suit: "♦"}, {Rank: "9", Suit: "♣"},
+	}
+	game.state.Players[2].Cards = []*Card{
+		{Rank: "K", Suit: "♠"}, {Rank: "Q", Suit: "♥"},
+		{Rank: "10", Suit: "♦"}, {Rank: "9", Suit: "♣"},
+	}
+	game.state.GamePhase = "ended"
+	game.calculateFinalScores()
+
+	alice := &Player{Name: "Alice"}
+	bob := &Player{Name: "Bob"}
+	carol := &Player{Name: "Carol"}
+	room := &Room{
+		ID:      "ROOM01",
+		Players: []*Player{alice, bob, carol},
+		Games:   map[string]*Game{"GAME01": game},
+	}
+	golfHub.rooms["ROOM01"] = room
+
+	if err := golfHub.completeGameInRoom("ROOM01", "GAME01"); err != nil {
+		t.Fatalf("completeGameInRoom failed: %v", err)
+	}
+
+	if alice.GamesWon != 1 || bob.GamesWon != 1 {
+		t.Errorf("Both shared winners must get credit, got Alice=%d Bob=%d",
+			alice.GamesWon, bob.GamesWon)
+	}
+	if carol.GamesWon != 0 {
+		t.Errorf("Loser must not get win credit, got %d", carol.GamesWon)
+	}
+	for _, p := range []*Player{alice, bob, carol} {
+		if p.GamesPlayed != 1 {
+			t.Errorf("Expected GamesPlayed 1 for %s, got %d", p.Name, p.GamesPlayed)
+		}
+	}
+	if carol.TotalScore != 39 {
+		t.Errorf("Expected Carol's total score 39, got %d", carol.TotalScore)
+	}
+
+	if len(room.GameHistory) != 1 {
+		t.Fatalf("Expected 1 game in history, got %d", len(room.GameHistory))
+	}
+	result := room.GameHistory[0]
+	if result.Winner != "Alice & Bob" {
+		t.Errorf("Expected display winner 'Alice & Bob', got %q", result.Winner)
+	}
+	if len(result.Winners) != 2 || result.Winners[0] != "Alice" || result.Winners[1] != "Bob" {
+		t.Errorf("Expected Winners == [Alice Bob], got %v", result.Winners)
+	}
+	if len(room.Games) != 0 {
+		t.Errorf("Expected game removed from active games, got %d", len(room.Games))
+	}
+}
+
+// The knocker-alone rule at the stats layer: a knocker who ties keeps the
+// sole credit, and the tied non-knocker gets none.
+func TestCompleteGameInRoom_KnockerTieSoloCredit(t *testing.T) {
+	golfHub := NewGolfHub(&players.DeterministicIDGenerator{}).(*GolfHub)
+
+	game := NewGame("GAME01", &players.DeterministicIDGenerator{})
+	game.AddPlayer("client1", "p1", "Alice")
+	game.AddPlayer("client2", "p2", "Bob")
+	if err := game.StartGame(); err != nil {
+		t.Fatalf("Failed to start game: %v", err)
+	}
+
+	game.state.Players[0].Cards = []*Card{
+		{Rank: "A", Suit: "♠"}, {Rank: "A", Suit: "♥"},
+		{Rank: "3", Suit: "♦"}, {Rank: "3", Suit: "♣"},
+	}
+	game.state.Players[1].Cards = []*Card{
+		{Rank: "5", Suit: "♠"}, {Rank: "5", Suit: "♥"},
+		{Rank: "9", Suit: "♦"}, {Rank: "9", Suit: "♣"},
+	}
+	game.state.KnockedPlayerID = &game.state.Players[1].ID
+	game.state.GamePhase = "ended"
+	game.calculateFinalScores()
+
+	alice := &Player{Name: "Alice"}
+	bob := &Player{Name: "Bob"}
+	room := &Room{
+		ID:      "ROOM01",
+		Players: []*Player{alice, bob},
+		Games:   map[string]*Game{"GAME01": game},
+	}
+	golfHub.rooms["ROOM01"] = room
+
+	if err := golfHub.completeGameInRoom("ROOM01", "GAME01"); err != nil {
+		t.Fatalf("completeGameInRoom failed: %v", err)
+	}
+
+	if bob.GamesWon != 1 {
+		t.Errorf("Knocker must get the sole credit, got %d", bob.GamesWon)
+	}
+	if alice.GamesWon != 0 {
+		t.Errorf("Tied non-knocker must not get credit when the knocker ties, got %d", alice.GamesWon)
+	}
+	if result := room.GameHistory[0]; result.Winner != "Bob" || len(result.Winners) != 1 {
+		t.Errorf("Expected solo winner Bob, got %q / %v", result.Winner, result.Winners)
+	}
+}
+
+// Negative paths: unknown room, unknown game, and a game still in progress
+// must all error without touching stats or history.
+func TestCompleteGameInRoom_Errors(t *testing.T) {
+	golfHub := NewGolfHub(&players.DeterministicIDGenerator{}).(*GolfHub)
+
+	game := NewGame("GAME01", &players.DeterministicIDGenerator{})
+	game.AddPlayer("client1", "p1", "Alice")
+	game.AddPlayer("client2", "p2", "Bob")
+	if err := game.StartGame(); err != nil {
+		t.Fatalf("Failed to start game: %v", err)
+	}
+
+	alice := &Player{Name: "Alice"}
+	bob := &Player{Name: "Bob"}
+	room := &Room{
+		ID:      "ROOM01",
+		Players: []*Player{alice, bob},
+		Games:   map[string]*Game{"GAME01": game},
+	}
+	golfHub.rooms["ROOM01"] = room
+
+	if err := golfHub.completeGameInRoom("NOROOM", "GAME01"); err == nil {
+		t.Error("Expected error for unknown room")
+	}
+	if err := golfHub.completeGameInRoom("ROOM01", "NOGAME"); err == nil {
+		t.Error("Expected error for unknown game")
+	}
+	if err := golfHub.completeGameInRoom("ROOM01", "GAME01"); err == nil {
+		t.Error("Expected error for a game still in progress")
+	}
+
+	if alice.GamesPlayed != 0 || bob.GamesPlayed != 0 || alice.GamesWon != 0 || bob.GamesWon != 0 {
+		t.Error("Failed completion must not touch player stats")
+	}
+	if len(room.GameHistory) != 0 {
+		t.Errorf("Failed completion must not append history, got %d entries", len(room.GameHistory))
+	}
+	if len(room.Games) != 1 {
+		t.Errorf("Failed completion must not remove the game, got %d games", len(room.Games))
+	}
 }

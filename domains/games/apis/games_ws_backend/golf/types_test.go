@@ -586,3 +586,137 @@ func TestRoomMarshalRedactsInProgressGames(t *testing.T) {
 		}
 	}
 }
+
+// The redaction must not eat the fields the lobby renders: game IDs, phase,
+// player counts and names, and the public discard pile.
+func TestRoomMarshalKeepsPublicGameFields(t *testing.T) {
+	game := NewGame("GAME01", &players.DeterministicIDGenerator{})
+	game.AddPlayer("client1", "p1", "Alice")
+	game.AddPlayer("client2", "p2", "Bob")
+	if err := game.StartGame(); err != nil {
+		t.Fatalf("Failed to start game: %v", err)
+	}
+
+	room := &Room{
+		ID:    "ROOM01",
+		Games: map[string]*Game{"GAME01": game},
+	}
+	data, err := json.Marshal(room)
+	if err != nil {
+		t.Fatalf("Failed to marshal room: %v", err)
+	}
+
+	var parsed struct {
+		Games map[string]*GameState `json:"games"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Failed to unmarshal room: %v", err)
+	}
+	state := parsed.Games["GAME01"]
+	if state == nil {
+		t.Fatal("Expected game GAME01 in serialized room")
+	}
+	if state.GamePhase != "playing" {
+		t.Errorf("Expected gamePhase 'playing', got %q", state.GamePhase)
+	}
+	if len(state.Players) != 2 {
+		t.Fatalf("Expected 2 players, got %d", len(state.Players))
+	}
+	if state.Players[0].Name != "Alice" || state.Players[1].Name != "Bob" {
+		t.Errorf("Expected player names preserved, got %q and %q",
+			state.Players[0].Name, state.Players[1].Name)
+	}
+	if len(state.DiscardPile) != 1 {
+		t.Errorf("Expected the public discard pile intact, got %d cards", len(state.DiscardPile))
+	}
+	if state.DrawPile == 0 {
+		t.Error("Expected the draw pile count preserved")
+	}
+}
+
+// Once a game ends everything is public: the room serialization must keep
+// card faces and scores (no over-redaction).
+func TestRoomMarshalEndedGameKeepsCards(t *testing.T) {
+	game := NewGame("GAME01", &players.DeterministicIDGenerator{})
+	game.AddPlayer("client1", "p1", "Alice")
+	game.AddPlayer("client2", "p2", "Bob")
+	if err := game.StartGame(); err != nil {
+		t.Fatalf("Failed to start game: %v", err)
+	}
+	game.state.GamePhase = "ended"
+	game.calculateFinalScores()
+
+	room := &Room{
+		ID:    "ROOM01",
+		Games: map[string]*Game{"GAME01": game},
+	}
+	data, err := json.Marshal(room)
+	if err != nil {
+		t.Fatalf("Failed to marshal room: %v", err)
+	}
+
+	var parsed struct {
+		Games map[string]*GameState `json:"games"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Failed to unmarshal room: %v", err)
+	}
+	state := parsed.Games["GAME01"]
+	if state == nil {
+		t.Fatal("Expected game GAME01 in serialized room")
+	}
+	for _, player := range state.Players {
+		for i, card := range player.Cards {
+			if card == nil || card.Rank == "" {
+				t.Errorf("Ended game should serialize %s's card %d", player.Name, i)
+			}
+		}
+		if len(player.RevealedCards) != 4 {
+			t.Errorf("Ended game should serialize %s's revealed indexes, got %d",
+				player.Name, len(player.RevealedCards))
+		}
+	}
+}
+
+// gameEnded on a shared win: winner is the joined display string for legacy
+// clients, winners is the typed list.
+func TestGameEndedMessageSharedWin(t *testing.T) {
+	msg := GameEndedMessage{
+		Type:    "gameEnded",
+		Winner:  "Alice & Bob",
+		Winners: []string{"Alice", "Bob"},
+		FinalScores: []*FinalScore{
+			{PlayerName: "Alice", Score: 5},
+			{PlayerName: "Bob", Score: 5},
+			{PlayerName: "Carol", Score: 12},
+		},
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("Failed to marshal GameEndedMessage: %v", err)
+	}
+
+	// The raw wire must carry both fields.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Failed to unmarshal raw message: %v", err)
+	}
+	if _, ok := raw["winner"]; !ok {
+		t.Error("Wire message must keep the legacy winner field")
+	}
+	if _, ok := raw["winners"]; !ok {
+		t.Error("Wire message must carry the typed winners field")
+	}
+
+	var parsed GameEndedMessage
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Failed to unmarshal GameEndedMessage: %v", err)
+	}
+	if parsed.Winner != "Alice & Bob" {
+		t.Errorf("Expected joined display winner, got %q", parsed.Winner)
+	}
+	if len(parsed.Winners) != 2 || parsed.Winners[0] != "Alice" || parsed.Winners[1] != "Bob" {
+		t.Errorf("Expected Winners == [Alice Bob], got %v", parsed.Winners)
+	}
+}
