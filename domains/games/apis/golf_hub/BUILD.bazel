@@ -1,5 +1,6 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
+load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
 # Phase 2 of the Golf hub rebuild on smithy-cpp event streams (#1187):
 # the game-agnostic room layer (model/games.smithy, per #79) plus golf's
@@ -69,6 +70,7 @@ cc_library(
         "//domains/games/libs/cards:dealer",
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/golf:player",
+        "//domains/platform/libs/futility/otel:metrics",
         "@com_google_absl//absl/strings",
         "@smithy_cpp//runtime:eventstream",
         "@smithy_cpp//runtime:server",
@@ -89,6 +91,7 @@ cc_test(
         ":id_generator",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:metrics",
         "@googletest//:gtest_main",
         "@smithy_cpp//runtime:client",
         "@smithy_cpp//runtime:core",
@@ -107,10 +110,13 @@ cc_binary(
     deps = [
         ":golf_hub_smithy_server",
         ":hub_handler",
+        ":id_generator",
         ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/aura",
         "//domains/platform/libs/futility/env",
         "//domains/platform/libs/futility/otel:http_metrics",
+        "//domains/platform/libs/futility/otel:metrics",
         "//domains/platform/libs/futility/otel:otel_provider",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:globals",
@@ -120,3 +126,5 @@ cc_binary(
         "@smithy_cpp//runtime:server",
     ],
 )
+
+linux_amd64_oci_binary(bin_name = "golf_hub")

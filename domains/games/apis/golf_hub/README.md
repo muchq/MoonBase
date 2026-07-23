@@ -47,9 +47,11 @@ lobby-safe summaries only.
 - Player ids are whimsical (`bouncy-coral-quokka-x9k2`, the Go
   generator's word lists) and double as display names. Room and game ids
   are 6-char uppercase codes for permalink compatibility.
-- Observability: unary requests ride the shared aura chain (#1185);
-  stream-level instruments are a later addition.
+- Observability: unary requests ride the shared aura chain (#1185); the
+  stream side counts admissions, live sessions, disconnects, grace
+  expiries, and the command/event flow (`stream_*`, phase 4).
 - `ALLOWED_ORIGINS` unset admits all origins (dev parity with the Go
   hub's DEV_MODE); production sets the allowlist.
-- Next phases (#1187): UI v2 client behind a beta opt-in (phase 3),
-  deploy + soak (phase 4), default flip + retirements (phase 5).
+- Deployed behind Caddy at `/games/v2/*` (phase 4,
+  `deploy/consolidated`); the UI's v2 beta switch is `?golf=v2` (phase
+  3). Next (#1187): default flip + retirements (phase 5).

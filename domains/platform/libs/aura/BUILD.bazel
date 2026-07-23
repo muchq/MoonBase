@@ -10,6 +10,7 @@ cc_library(
     hdrs = ["middleware.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "//domains/platform/libs/futility/env",
         "//domains/platform/libs/futility/otel:http_metrics",
         "@com_google_absl//absl/log",
         "@smithy_cpp//runtime:http",

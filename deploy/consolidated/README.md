@@ -7,6 +7,7 @@ This directory contains the consolidated deployment configuration for multiple s
 - **api.muchq.com** - API backend services
   - [`games_ws_backend`](../../domains/games/apis/games_ws_backend) (port 8080)
   - [`portrait`](../../domains/graphics/apis/portrait) (port 8081)
+  - [`golf_hub`](../../domains/games/apis/golf_hub) (port 8089, `/games/v2/*`)
   - [`prom_proxy`](../../domains/platform/apis/prom_proxy) (port 8082)
   - [`mithril`](../../domains/games/apis/mithril) (port 8083)
   - [`posterize`](../../domains/graphics/apis/posterize) (port 8084)

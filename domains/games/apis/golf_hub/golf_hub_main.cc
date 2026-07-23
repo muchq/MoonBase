@@ -22,10 +22,13 @@
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
 #include "domains/games/apis/golf_hub/hub_handler.h"
+#include "domains/games/apis/golf_hub/id_generator.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
+#include "domains/games/libs/cards/dealer.h"
 #include "domains/platform/libs/aura/middleware.h"
 #include "domains/platform/libs/futility/env/env.h"
 #include "domains/platform/libs/futility/otel/http_metrics.h"
+#include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/futility/otel/otel_provider.h"
 #include "moonbase/golf/server.h"
 #include "smithy/http/beast_transport.h"
@@ -65,7 +68,12 @@ int main() {
 
   auto vault = std::make_shared<golf_hub::TicketVault>(
       /*ticket_ttl=*/std::chrono::seconds(30), /*resume_ttl=*/std::chrono::hours(24));
-  auto handler = std::make_shared<golf_hub::HubHandler>(vault);
+  // Stream-side instruments (sessions, commands, events) ride the same
+  // meter the aura chain's unary instruments use.
+  auto handler = std::make_shared<golf_hub::HubHandler>(
+      vault, std::make_shared<cards::Dealer>(), std::make_shared<golf_hub::WhimsicalIdGenerator>(),
+      /*grace_period=*/std::chrono::minutes(5),
+      std::make_shared<futility::otel::MetricsRecorder>("golf_hub"));
 
   // Block shutdown signals before the transport spawns its thread pool.
   sigset_t shutdown_signals;
@@ -82,7 +90,16 @@ int main() {
   // a per-client budget can slot into ChainOptions when it earns its keep.
   auto metrics =
       aura::MakeHttpMetricsSink(std::make_shared<futility::otel::HttpMetricsManager>("golf_hub"));
-  auto unary = aura::ProductionChain(aura::ChainOptions{.metrics = metrics}, server.Handler());
+
+  // The reverse-proxy trust boundary (smithy-cpp ADR-0012):
+  // deploy/consolidated/compose.yaml pins Caddy's address into
+  // TRUSTED_PROXY_CIDRS. A refused value already logged why.
+  auto trusted_proxies = aura::TrustedProxiesFromEnv();
+  if (!trusted_proxies.has_value()) return 1;
+
+  auto unary = aura::ProductionChain(
+      aura::ChainOptions{.metrics = metrics, .trusted_proxies = std::move(*trusted_proxies)},
+      server.Handler());
 
   // Gate chain: origin allowlist (browser CSWSH defense; unset
   // ALLOWED_ORIGINS admits all origins — dev parity with the Go hub's

@@ -1,10 +1,13 @@
 #include "domains/platform/libs/aura/middleware.h"
 
 #include <chrono>
+#include <cstdlib>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
 #include "absl/log/log.h"
+#include "domains/platform/libs/futility/env/env.h"
 #include "domains/platform/libs/futility/otel/http_metrics.h"
 #include "smithy/http/trace_context.h"
 #include "smithy/http/transport.h"
@@ -143,6 +146,23 @@ ConnectionEventLog() {
                  << " peer=" << event.peer_address << " detail=" << event.detail << " elapsed_ms="
                  << std::chrono::duration_cast<std::chrono::milliseconds>(event.elapsed).count();
   };
+}
+
+std::optional<smithy::http::TrustedProxies> TrustedProxiesFromEnv() {
+  if (std::getenv("TRUSTED_PROXY_CIDRS") == nullptr) {
+    return smithy::http::TrustedProxies::None();
+  }
+  const std::vector<std::string> cidrs = futility::env::ReadList("TRUSTED_PROXY_CIDRS");
+  if (cidrs.empty()) {
+    LOG(ERROR) << "TRUSTED_PROXY_CIDRS is set but empty; unset it to serve direct-connect";
+    return std::nullopt;
+  }
+  try {
+    return smithy::http::TrustedProxies(cidrs);
+  } catch (const std::invalid_argument& error) {
+    LOG(ERROR) << "Invalid TRUSTED_PROXY_CIDRS: " << error.what();
+    return std::nullopt;
+  }
 }
 
 }  // namespace aura

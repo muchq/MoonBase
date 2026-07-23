@@ -21,6 +21,7 @@
 #include "domains/games/apis/golf_hub/id_generator.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
+#include "domains/platform/libs/futility/otel/metrics.h"
 #include "moonbase/golf/client.h"
 #include "moonbase/golf/server.h"
 #include "smithy/client/config.h"
@@ -40,8 +41,12 @@ class GolfHubStreamFixture : public testing::Test {
     // NoShuffleDealer: hands are dealt from the back of the pristine deck,
     // so every card in every test is known (first seat gets the aces).
     // Sequential ids keep players and game codes readable in failures.
-    handler_ = std::make_shared<HubHandler>(vault_, std::make_shared<cards::NoShuffleDealer>(),
-                                            ids_, /*grace_period=*/std::chrono::seconds(60));
+    // The recorder rides the global (no-op) meter here — values go nowhere,
+    // but every counting path runs under the e2e suite.
+    handler_ = std::make_shared<HubHandler>(
+        vault_, std::make_shared<cards::NoShuffleDealer>(), ids_,
+        /*grace_period=*/std::chrono::seconds(60),
+        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"));
     server_ = std::make_unique<moonbase::golf::GolfHubServer>(handler_);
 
     auto loopback = std::make_shared<smithy::http::Loopback>();

@@ -9,6 +9,7 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "smithy/http/beast_transport.h"
@@ -68,6 +69,15 @@ struct ChainOptions {
 };
 smithy::http::RequestHandler ProductionChain(ChainOptions options,
                                              smithy::http::RequestHandler handler);
+
+/// ChainOptions::trusted_proxies from TRUSTED_PROXY_CIDRS, single-sourced
+/// because every service behind the same Caddy must read the trust
+/// boundary identically (smithy-cpp ADR-0012; the deployment pins Caddy's
+/// address in deploy/consolidated/compose.yaml). Unset is the deliberate
+/// direct-connect statement (TrustedProxies::None()); set-but-empty or
+/// malformed logs the refusal and returns nullopt — fail startup rather
+/// than silently collapsing proxied traffic onto one client key.
+std::optional<smithy::http::TrustedProxies> TrustedProxiesFromEnv();
 
 /// Sink callback for BeastServerTransport::Options::on_rejected, so the
 /// 413/431 rejections the transport writes before any handler chain exists

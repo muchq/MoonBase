@@ -37,6 +37,15 @@
 		path /games/v1/golf-ws
 	}
 
+	@post_golf_v2_session {
+		method POST
+		path /games/v2/session
+	}
+
+	@ws_golf_v2 {
+		path /games/v2/golf/play
+	}
+
 	@options {
 		method OPTIONS
 	}
@@ -60,6 +69,8 @@
 
 	reverse_proxy @ws_thoughts localhost:8080
 	reverse_proxy @ws_golf localhost:8080
+	reverse_proxy @post_golf_v2_session localhost:8089
+	reverse_proxy @ws_golf_v2 localhost:8089
 	reverse_proxy @post_portrait localhost:8081
 	reverse_proxy @post_mithril localhost:8083
 	reverse_proxy @post_posterize_blur localhost:8084
