@@ -3,6 +3,8 @@ package golf
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/muchq/moonbase/domains/games/apis/games_ws_backend/players"
 )
 
 // Message Creation and Serialization Tests
@@ -11,17 +13,17 @@ func TestCreateGameMessage(t *testing.T) {
 	msg := CreateGameMessage{
 		Type: "createGame",
 	}
-	
+
 	data, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatalf("Failed to marshal CreateGameMessage: %v", err)
 	}
-	
+
 	var parsed CreateGameMessage
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("Failed to unmarshal CreateGameMessage: %v", err)
 	}
-	
+
 	if parsed.Type != "createGame" {
 		t.Errorf("Expected type 'createGame', got %s", parsed.Type)
 	}
@@ -32,17 +34,17 @@ func TestJoinGameMessage(t *testing.T) {
 		Type:   "joinGame",
 		GameID: "ABC123",
 	}
-	
+
 	data, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatalf("Failed to marshal JoinGameMessage: %v", err)
 	}
-	
+
 	var parsed JoinGameMessage
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("Failed to unmarshal JoinGameMessage: %v", err)
 	}
-	
+
 	if parsed.Type != "joinGame" {
 		t.Errorf("Expected type 'joinGame', got %s", parsed.Type)
 	}
@@ -71,23 +73,23 @@ func TestGameJoinedMessage(t *testing.T) {
 		KnockedPlayerID:    nil,
 		DrawnCard:          nil,
 	}
-	
+
 	msg := GameJoinedMessage{
 		Type:      "gameJoined",
 		PlayerID:  "player1",
 		GameState: gameState,
 	}
-	
+
 	data, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatalf("Failed to marshal GameJoinedMessage: %v", err)
 	}
-	
+
 	var parsed GameJoinedMessage
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("Failed to unmarshal GameJoinedMessage: %v", err)
 	}
-	
+
 	if parsed.Type != "gameJoined" {
 		t.Errorf("Expected type 'gameJoined', got %s", parsed.Type)
 	}
@@ -104,17 +106,17 @@ func TestErrorMessage(t *testing.T) {
 		Type:    "error",
 		Message: "Not your turn",
 	}
-	
+
 	data, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatalf("Failed to marshal ErrorMessage: %v", err)
 	}
-	
+
 	var parsed ErrorMessage
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("Failed to unmarshal ErrorMessage: %v", err)
 	}
-	
+
 	if parsed.Type != "error" {
 		t.Errorf("Expected type 'error', got %s", parsed.Type)
 	}
@@ -128,17 +130,17 @@ func TestTurnChangedMessage(t *testing.T) {
 		Type:       "turnChanged",
 		PlayerName: "Player 2",
 	}
-	
+
 	data, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatalf("Failed to marshal TurnChangedMessage: %v", err)
 	}
-	
+
 	var parsed TurnChangedMessage
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("Failed to unmarshal TurnChangedMessage: %v", err)
 	}
-	
+
 	if parsed.Type != "turnChanged" {
 		t.Errorf("Expected type 'turnChanged', got %s", parsed.Type)
 	}
@@ -156,17 +158,17 @@ func TestGameEndedMessage(t *testing.T) {
 			{PlayerName: "Player 2", Score: 15},
 		},
 	}
-	
+
 	data, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatalf("Failed to marshal GameEndedMessage: %v", err)
 	}
-	
+
 	var parsed GameEndedMessage
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("Failed to unmarshal GameEndedMessage: %v", err)
 	}
-	
+
 	if parsed.Type != "gameEnded" {
 		t.Errorf("Expected type 'gameEnded', got %s", parsed.Type)
 	}
@@ -186,17 +188,17 @@ func TestCardSerialization(t *testing.T) {
 		Rank: "K",
 		Suit: "♠",
 	}
-	
+
 	data, err := json.Marshal(card)
 	if err != nil {
 		t.Fatalf("Failed to marshal Card: %v", err)
 	}
-	
+
 	var parsed Card
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("Failed to unmarshal Card: %v", err)
 	}
-	
+
 	if parsed.Rank != "K" {
 		t.Errorf("Expected rank 'K', got %s", parsed.Rank)
 	}
@@ -219,17 +221,17 @@ func TestPlayerSerialization(t *testing.T) {
 		RevealedCards: []int{0, 1},
 		IsReady:       true,
 	}
-	
+
 	data, err := json.Marshal(player)
 	if err != nil {
 		t.Fatalf("Failed to marshal Player: %v", err)
 	}
-	
+
 	var parsed Player
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("Failed to unmarshal Player: %v", err)
 	}
-	
+
 	if parsed.ID != "player123" {
 		t.Errorf("Expected ID 'player123', got %s", parsed.ID)
 	}
@@ -281,17 +283,17 @@ func TestGameStateSerialization(t *testing.T) {
 		KnockedPlayerID: &knockedID,
 		DrawnCard:       &Card{Rank: "5", Suit: "♠"},
 	}
-	
+
 	data, err := json.Marshal(gameState)
 	if err != nil {
 		t.Fatalf("Failed to marshal GameState: %v", err)
 	}
-	
+
 	var parsed GameState
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("Failed to unmarshal GameState: %v", err)
 	}
-	
+
 	if parsed.ID != "GAME123" {
 		t.Errorf("Expected ID 'GAME123', got %s", parsed.ID)
 	}
@@ -356,7 +358,7 @@ func TestMessageRoundTrip(t *testing.T) {
 			typ:  "knock",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Marshal to JSON
@@ -364,13 +366,13 @@ func TestMessageRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to marshal message: %v", err)
 			}
-			
+
 			// Parse as incoming message
 			parsed, err := ParseIncomingMessage(data)
 			if err != nil {
 				t.Fatalf("Failed to parse message: %v", err)
 			}
-			
+
 			if parsed.Type != tt.typ {
 				t.Errorf("Expected type %s, got %s", tt.typ, parsed.Type)
 			}
@@ -380,11 +382,11 @@ func TestMessageRoundTrip(t *testing.T) {
 
 func TestCreateDeck(t *testing.T) {
 	deck := CreateDeck()
-	
+
 	if len(deck) != 52 {
 		t.Errorf("Expected 52 cards, got %d", len(deck))
 	}
-	
+
 	// Check for duplicates
 	cardMap := make(map[string]bool)
 	for _, card := range deck {
@@ -394,22 +396,22 @@ func TestCreateDeck(t *testing.T) {
 		}
 		cardMap[key] = true
 	}
-	
+
 	// Check all suits and ranks are present
 	suitCount := make(map[string]int)
 	rankCount := make(map[string]int)
-	
+
 	for _, card := range deck {
 		suitCount[card.Suit]++
 		rankCount[card.Rank]++
 	}
-	
+
 	for _, suit := range Suits {
 		if suitCount[suit] != 13 {
 			t.Errorf("Expected 13 cards of suit %s, got %d", suit, suitCount[suit])
 		}
 	}
-	
+
 	for _, rank := range Ranks {
 		if rankCount[rank] != 4 {
 			t.Errorf("Expected 4 cards of rank %s, got %d", rank, rankCount[rank])
@@ -420,18 +422,18 @@ func TestCreateDeck(t *testing.T) {
 func TestShuffleDeck(t *testing.T) {
 	deck1 := CreateDeck()
 	deck2 := CreateDeck()
-	
+
 	// Create copies for comparison
 	original := make([]*Card, 52)
 	copy(original, deck1)
-	
+
 	ShuffleDeck(deck1)
 	ShuffleDeck(deck2)
-	
+
 	// Check that deck is shuffled (extremely unlikely to be in same order)
 	sameOrder1 := true
 	sameOrder2 := true
-	
+
 	for i := 0; i < 52; i++ {
 		if original[i].Rank != deck1[i].Rank || original[i].Suit != deck1[i].Suit {
 			sameOrder1 = false
@@ -440,15 +442,15 @@ func TestShuffleDeck(t *testing.T) {
 			sameOrder2 = false
 		}
 	}
-	
+
 	if sameOrder1 {
 		t.Error("Deck was not shuffled (same as original)")
 	}
-	
+
 	if !sameOrder2 {
 		// Good - two shuffles produced different results
 	}
-	
+
 	// Verify all cards still present
 	if len(deck1) != 52 {
 		t.Errorf("Shuffled deck has wrong size: %d", len(deck1))
@@ -466,11 +468,11 @@ func TestGeneratePlayerName(t *testing.T) {
 		{4, "Player 4"},
 		{100, "Player 100"},
 	}
-	
+
 	for _, tt := range tests {
 		name := GeneratePlayerName(tt.playerNum)
 		if name != tt.expected {
-			t.Errorf("GeneratePlayerName(%d) = %s, expected %s", 
+			t.Errorf("GeneratePlayerName(%d) = %s, expected %s",
 				tt.playerNum, name, tt.expected)
 		}
 	}
@@ -479,26 +481,26 @@ func TestGeneratePlayerName(t *testing.T) {
 func TestCalculatePlayerScore(t *testing.T) {
 	player := &Player{
 		Cards: []*Card{
-			{Rank: "A", Suit: "♠"},  // 1
-			{Rank: "5", Suit: "♥"},  // 5
-			{Rank: "K", Suit: "♦"},  // 10
-			{Rank: "7", Suit: "♣"},  // 7
+			{Rank: "A", Suit: "♠"}, // 1
+			{Rank: "5", Suit: "♥"}, // 5
+			{Rank: "K", Suit: "♦"}, // 10
+			{Rank: "7", Suit: "♣"}, // 7
 		},
 		RevealedCards: []int{0, 1, 2}, // Total: 1 + 5 + 10 = 16
 	}
-	
+
 	score := CalculatePlayerScore(player)
 	if score != 16 {
 		t.Errorf("Expected score 16, got %d", score)
 	}
-	
+
 	// Test with no revealed cards
 	player.RevealedCards = []int{}
 	score = CalculatePlayerScore(player)
 	if score != 0 {
 		t.Errorf("Expected score 0 with no revealed cards, got %d", score)
 	}
-	
+
 	// Test with nil cards
 	player.Cards[1] = nil
 	player.RevealedCards = []int{0, 1, 2}
@@ -516,20 +518,71 @@ func TestNilHandling(t *testing.T) {
 		Cards: []*Card{nil, nil, nil, nil},
 		Score: 0,
 	}
-	
+
 	data, err := json.Marshal(player)
 	if err != nil {
 		t.Fatalf("Failed to marshal player with nil cards: %v", err)
 	}
-	
+
 	var parsed Player
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("Failed to unmarshal player with nil cards: %v", err)
 	}
-	
+
 	for i, card := range parsed.Cards {
 		if card != nil {
 			t.Errorf("Expected nil card at index %d", i)
+		}
+	}
+}
+
+// Room serialization reaches every room member, so in-progress games must be
+// redacted (issue #1187 phase 0 — the room-state leak).
+func TestRoomMarshalRedactsInProgressGames(t *testing.T) {
+	game := NewGame("GAME01", &players.DeterministicIDGenerator{})
+	if _, err := game.AddPlayer("client1", "p1", "Alice"); err != nil {
+		t.Fatalf("Failed to add player: %v", err)
+	}
+	if _, err := game.AddPlayer("client2", "p2", "Bob"); err != nil {
+		t.Fatalf("Failed to add player: %v", err)
+	}
+	if err := game.StartGame(); err != nil {
+		t.Fatalf("Failed to start game: %v", err)
+	}
+	if err := game.DrawCard("client1"); err != nil {
+		t.Fatalf("Failed to draw: %v", err)
+	}
+
+	room := &Room{
+		ID:    "ROOM01",
+		Games: map[string]*Game{"GAME01": game},
+	}
+	data, err := json.Marshal(room)
+	if err != nil {
+		t.Fatalf("Failed to marshal room: %v", err)
+	}
+
+	var parsed struct {
+		Games map[string]*GameState `json:"games"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Failed to unmarshal room: %v", err)
+	}
+	state, ok := parsed.Games["GAME01"]
+	if !ok {
+		t.Fatal("Expected game GAME01 in serialized room")
+	}
+	if state.DrawnCard != nil {
+		t.Error("Serialized room must not expose the held drawn card")
+	}
+	for _, player := range state.Players {
+		for i, card := range player.Cards {
+			if card != nil {
+				t.Errorf("Serialized room must not expose %s's card %d", player.Name, i)
+			}
+		}
+		if len(player.RevealedCards) != 0 {
+			t.Errorf("Serialized room must not expose %s's revealed indexes", player.Name)
 		}
 	}
 }

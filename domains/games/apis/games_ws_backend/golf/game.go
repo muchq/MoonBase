@@ -2,6 +2,7 @@ package golf
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,7 +17,7 @@ type Game struct {
 	playersByClient  map[string]*Player // client ID -> player
 	finalRoundPlayed map[string]bool    // track who has played their final turn
 	idGenerator      players.PlayerIDGenerator
-	roomID           string             // ID of the room this game belongs to
+	roomID           string // ID of the room this game belongs to
 }
 
 // NewGame creates a new game instance
@@ -45,7 +46,7 @@ func NewGameInRoom(gameID string, roomID string, roomPlayers []*Player, idGenera
 	// Create game players from room players with reset game-specific state
 	gamePlayers := make([]*Player, len(roomPlayers))
 	playersByClient := make(map[string]*Player)
-	
+
 	for i, roomPlayer := range roomPlayers {
 		gamePlayer := &Player{
 			// Copy persistent room data
@@ -57,7 +58,7 @@ func NewGameInRoom(gameID string, roomID string, roomPlayers []*Player, idGenera
 			GamesWon:    roomPlayer.GamesWon,
 			IsConnected: roomPlayer.IsConnected,
 			JoinedAt:    roomPlayer.JoinedAt,
-			
+
 			// Reset game-specific state
 			Cards:         CreateHiddenCards(),
 			Score:         0,
@@ -68,7 +69,7 @@ func NewGameInRoom(gameID string, roomID string, roomPlayers []*Player, idGenera
 		gamePlayers[i] = gamePlayer
 		playersByClient[roomPlayer.ClientID] = gamePlayer
 	}
-	
+
 	return &Game{
 		state: &GameState{
 			ID:                 gameID,
@@ -449,6 +450,23 @@ func (g *Game) GetState() *GameState {
 	return stateCopy
 }
 
+// GetPublicState is GetState redacted for an audience with no seat at the
+// table (room broadcasts — issue #1187 phase 0): no card faces, no revealed
+// indexes, and no held drawn card until the game has ended, at which point
+// everything is public anyway.
+func (g *Game) GetPublicState() *GameState {
+	state := g.GetState()
+	if state.GamePhase == "ended" {
+		return state
+	}
+	state.DrawnCard = nil
+	for _, player := range state.Players {
+		player.Cards = make([]*Card, 4)
+		player.RevealedCards = nil
+	}
+	return state
+}
+
 // GetPlayerByClientID returns the player associated with a client ID
 func (g *Game) GetPlayerByClientID(clientID string) *Player {
 	g.mu.RLock()
@@ -565,6 +583,14 @@ func (g *Game) endTurn(clientID string) error {
 		}
 	}
 
+	// An exhausted draw pile ends the game with normal scoring instead of
+	// wedging the next player on "deck is empty". Issue #1187 phase 0.
+	if len(g.deck) == 0 {
+		g.state.GamePhase = "ended"
+		g.calculateFinalScores()
+		return nil
+	}
+
 	// Reset peeked state for next turn
 	g.state.PeekedAtDrawPile = false
 
@@ -593,27 +619,28 @@ func (g *Game) calculatePlayerFinalScore(player *Player) int {
 		}
 	}
 
-	// Calculate score with pairs canceling out
+	// Pairwise cancellation: each pair of a rank cancels, so only an odd
+	// remainder scores — and exactly one card of it (three of a kind = one
+	// pair cancelled + one card counted). Issue #1187 phase 0.
 	score := 0
+	counted := make(map[string]bool)
 	for i := 0; i < 4; i++ {
 		if player.Cards[i] != nil {
 			rank := player.Cards[i].Rank
-			// Only count cards that don't have a pair
-			if rankCounts[rank] == 1 || rankCounts[rank] == 3 {
+			if rankCounts[rank]%2 == 1 && !counted[rank] {
 				score += GetCardValue(player.Cards[i])
+				counted[rank] = true
 			}
-			// If there are 2 or 4 of the same rank, they cancel out
 		}
 	}
 
 	return score
 }
 
-// GetWinner returns the player with the lowest score
-func (g *Game) GetWinner() *Player {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
+// winnersLocked returns every winner: the knocker alone if the knocker is
+// among the lowest scores, otherwise all tied lowest scorers (shared win —
+// issue #1187 phase 0). Caller must hold g.mu.
+func (g *Game) winnersLocked() []*Player {
 	if g.state.GamePhase != "ended" || len(g.state.Players) == 0 {
 		return nil
 	}
@@ -638,17 +665,29 @@ func (g *Game) GetWinner() *Player {
 	if g.state.KnockedPlayerID != nil {
 		for _, winner := range winners {
 			if winner.ID == *g.state.KnockedPlayerID {
-				return winner
+				return []*Player{winner}
 			}
 		}
 	}
 
-	// Otherwise, return the first winner (or handle ties differently if needed)
-	if len(winners) > 0 {
-		return winners[0]
-	}
+	return winners
+}
 
-	return nil
+// GetWinners returns all winners (ties are shared wins).
+func (g *Game) GetWinners() []*Player {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.winnersLocked()
+}
+
+// GetWinner returns the first winner, or nil. Kept for callers that only
+// display a single name; GetWinners is the authority on ties.
+func (g *Game) GetWinner() *Player {
+	winners := g.GetWinners()
+	if len(winners) == 0 {
+		return nil
+	}
+	return winners[0]
 }
 
 // GetFinalScores returns the final scores of all players
@@ -745,21 +784,22 @@ func (g *Game) GetRoomID() string {
 
 // GetGameResult returns the result of this game for room tracking
 func (g *Game) GetGameResult() *GameResult {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	
-	if g.state.GamePhase != "ended" {
+	winners := g.GetWinners()
+	if len(winners) == 0 {
 		return nil
 	}
-	
-	winner := g.GetWinner()
-	if winner == nil {
-		return nil
+	names := make([]string, len(winners))
+	for i, winner := range winners {
+		names[i] = winner.Name
 	}
-	
+
 	return &GameResult{
-		GameID:      g.state.ID,
-		Winner:      winner.Name,
+		GameID: g.state.ID,
+		// Winner stays the display string ("A & B" on a shared win) so
+		// existing consumers render ties without changes; Winners is the
+		// typed list.
+		Winner:      strings.Join(names, " & "),
+		Winners:     names,
 		FinalScores: g.GetFinalScores(),
 		CompletedAt: time.Now(),
 	}

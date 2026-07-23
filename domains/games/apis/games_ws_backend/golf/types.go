@@ -11,12 +11,12 @@ import (
 
 // Room represents a persistent room where multiple games can be played
 type Room struct {
-	ID              string                 `json:"id"`
-	Players         []*Player              `json:"players"`
-	Games           map[string]*Game       `json:"games"` // Active games mapped by game ID
-	GameHistory     []*GameResult          `json:"gameHistory"`
-	CreatedAt       time.Time              `json:"createdAt"`
-	LastActivity    time.Time              `json:"lastActivity"`
+	ID           string           `json:"id"`
+	Players      []*Player        `json:"players"`
+	Games        map[string]*Game `json:"games"` // Active games mapped by game ID
+	GameHistory  []*GameResult    `json:"gameHistory"`
+	CreatedAt    time.Time        `json:"createdAt"`
+	LastActivity time.Time        `json:"lastActivity"`
 }
 
 // MarshalJSON implements custom JSON marshaling for Room
@@ -24,15 +24,19 @@ type Room struct {
 func (r *Room) MarshalJSON() ([]byte, error) {
 	// Create a temporary struct for JSON serialization
 	type Alias Room
-	
-	// Convert Games map to GameState map
+
+	// Convert Games map to GameState map. Room serialization reaches every
+	// room member (and any future spectator), so it must carry NO private
+	// state: GetPublicState strips card faces, revealed indexes, and the
+	// held drawn card for in-progress games (issue #1187 phase 0 — the
+	// room-state redaction leak).
 	gameStates := make(map[string]*GameState)
 	for gameID, game := range r.Games {
 		if game != nil {
-			gameStates[gameID] = game.GetState()
+			gameStates[gameID] = game.GetPublicState()
 		}
 	}
-	
+
 	// Create the JSON representation
 	return json.Marshal(&struct {
 		*Alias
@@ -52,12 +56,15 @@ type ClientContext struct {
 	LastAction time.Time `json:"lastAction"` // Last action timestamp
 }
 
-// GameResult stores the outcome of a completed game
+// GameResult stores the outcome of a completed game. Winner is the display
+// string ("A & B" on a shared win); Winners is the typed list (issue #1187
+// phase 0 — non-knocker ties are shared wins).
 type GameResult struct {
-	GameID          string        `json:"gameId"`
-	Winner          string        `json:"winner"`
-	FinalScores     []*FinalScore `json:"finalScores"`
-	CompletedAt     time.Time     `json:"completedAt"`
+	GameID      string        `json:"gameId"`
+	Winner      string        `json:"winner"`
+	Winners     []string      `json:"winners"`
+	FinalScores []*FinalScore `json:"finalScores"`
+	CompletedAt time.Time     `json:"completedAt"`
 }
 
 // Card represents a playing card
@@ -76,14 +83,14 @@ type Player struct {
 	RevealedCards []int   `json:"revealedCards"`
 	IsReady       bool    `json:"isReady"`
 	HasPeeked     bool    `json:"hasPeeked"`
-	
+
 	// Room/persistence fields
-	ClientID      string    `json:"clientId"`
-	TotalScore    int       `json:"totalScore"`    // Running total across all games
-	GamesPlayed   int       `json:"gamesPlayed"`
-	GamesWon      int       `json:"gamesWon"`
-	IsConnected   bool      `json:"isConnected"`
-	JoinedAt      time.Time `json:"joinedAt"`
+	ClientID    string    `json:"clientId"`
+	TotalScore  int       `json:"totalScore"` // Running total across all games
+	GamesPlayed int       `json:"gamesPlayed"`
+	GamesWon    int       `json:"gamesWon"`
+	IsConnected bool      `json:"isConnected"`
+	JoinedAt    time.Time `json:"joinedAt"`
 }
 
 // GameState represents the full game state
@@ -207,16 +214,20 @@ type FinalScore struct {
 	Score      int    `json:"score"`
 }
 
+// GameEndedMessage announces the end of a game. Winner is the display
+// string ("A & B" on a shared win) so existing clients render ties
+// unchanged; Winners is the typed list.
 type GameEndedMessage struct {
 	Type        string        `json:"type"`
 	Winner      string        `json:"winner"`
+	Winners     []string      `json:"winners"`
 	FinalScores []*FinalScore `json:"finalScores"`
 }
 
 type RoomJoinedMessage struct {
-	Type      string     `json:"type"`
-	PlayerID  string     `json:"playerId"`
-	RoomState *Room      `json:"roomState"`
+	Type      string `json:"type"`
+	PlayerID  string `json:"playerId"`
+	RoomState *Room  `json:"roomState"`
 }
 
 type RoomStateUpdateMessage struct {
@@ -232,8 +243,8 @@ type NewGameStartedMessage struct {
 
 // Server-to-client message types for multi-game support
 type GameListMessage struct {
-	Type  string            `json:"type"`
-	Games map[string]*Game  `json:"games"` // Games in current room
+	Type  string           `json:"type"`
+	Games map[string]*Game `json:"games"` // Games in current room
 }
 
 type GameListUpdateMessage struct {
