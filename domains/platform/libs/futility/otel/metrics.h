@@ -31,6 +31,7 @@
 #include <chrono>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 
@@ -88,9 +89,18 @@ class MetricsRecorder {
                    const std::map<std::string, std::string>& attributes = {});
 
  private:
+  /// The cached instrument, created under mu_ on first use. Element
+  /// pointers survive rehash and instruments record thread-safely, so
+  /// callers record outside the lock.
+  template <typename Instrument, typename Factory>
+  Instrument* FindOrCreate(std::unordered_map<std::string, std::unique_ptr<Instrument>>& cache,
+                           const std::string& metric_name, const Factory& make);
+
   std::shared_ptr<opentelemetry::metrics::Meter> meter_;
 
-  // Cache metric instruments to avoid recreating them
+  // Cache metric instruments to avoid recreating them. Recorders are
+  // called from arbitrary threads; mu_ guards the caches.
+  std::mutex mu_;
   std::unordered_map<std::string, std::unique_ptr<opentelemetry::metrics::Counter<uint64_t>>>
       counters_;
   std::unordered_map<std::string, std::unique_ptr<opentelemetry::metrics::Histogram<uint64_t>>>
