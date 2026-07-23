@@ -417,6 +417,7 @@ void HubHandler::CreateGameMove(const std::string& player_id) {
 
       moonbase::golf::GameCreated announcement;
       announcement.gameId = game_id;
+      announcement.createdBy = player_id;
       for (const auto& member : room->members) {
         outbox.To(member.first, GolfUpdateEvent(GolfUpdate::FromGamecreated(announcement)));
       }

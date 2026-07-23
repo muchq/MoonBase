@@ -143,10 +143,14 @@ structure StartGame {}
 structure LeaveGame {}
 
 /// A game was created and is open to join. Distinct from gameStarted,
-/// which fires when play actually begins.
+/// which fires when play actually begins. createdBy lets the creator's
+/// client tell its own echo apart from other players' creations.
 structure GameCreated {
     @required
     gameId: String
+
+    @required
+    createdBy: String
 }
 
 /// Play has begun: seats are locked and the game's opening is dealt.
