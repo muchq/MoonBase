@@ -18,7 +18,9 @@
 #include <vector>
 
 #include "domains/games/apis/golf_hub/hub_handler.h"
+#include "domains/games/apis/golf_hub/id_generator.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
+#include "domains/games/libs/cards/dealer.h"
 #include "moonbase/golf/client.h"
 #include "moonbase/golf/server.h"
 #include "smithy/client/config.h"
@@ -35,7 +37,11 @@ class GolfHubStreamFixture : public testing::Test {
   void SetUp() override {
     vault_ = std::make_shared<TicketVault>(/*ticket_ttl=*/std::chrono::seconds(60),
                                            /*resume_ttl=*/std::chrono::seconds(60));
-    handler_ = std::make_shared<HubHandler>(vault_, /*grace_period=*/std::chrono::seconds(60));
+    // NoShuffleDealer: hands are dealt from the back of the pristine deck,
+    // so every card in every test is known (first seat gets the aces).
+    // Sequential ids keep players and game codes readable in failures.
+    handler_ = std::make_shared<HubHandler>(vault_, std::make_shared<cards::NoShuffleDealer>(),
+                                            ids_, /*grace_period=*/std::chrono::seconds(60));
     server_ = std::make_unique<moonbase::golf::GolfHubServer>(handler_);
 
     auto loopback = std::make_shared<smithy::http::Loopback>();
@@ -91,6 +97,7 @@ class GolfHubStreamFixture : public testing::Test {
   }
 
   std::shared_ptr<TicketVault> vault_;
+  std::shared_ptr<IdGenerator> ids_ = std::make_shared<SequentialIdGenerator>();
   std::shared_ptr<HubHandler> handler_;
   std::unique_ptr<moonbase::golf::GolfHubServer> server_;
   std::unique_ptr<moonbase::golf::GolfHubClient> client_;

@@ -20,10 +20,71 @@ using std::unordered_map;
 using std::unordered_set;
 using std::vector;
 
+absl::StatusOr<GameState> dealGolfGame(const string& game_id, const std::vector<string>& player_ids,
+                                       std::deque<Card> shuffled_deck) {
+  if (player_ids.size() < 2 || player_ids.size() > 4) {
+    return absl::InvalidArgumentError("2 to 4 players");
+  }
+  if (shuffled_deck.size() < player_ids.size() * 4 + 1) {
+    return absl::InvalidArgumentError("deck too small");
+  }
+
+  vector<Player> players;
+  players.reserve(player_ids.size());
+  for (const string& player_id : player_ids) {
+    const Card tl = shuffled_deck.back();
+    shuffled_deck.pop_back();
+    const Card tr = shuffled_deck.back();
+    shuffled_deck.pop_back();
+    const Card bl = shuffled_deck.back();
+    shuffled_deck.pop_back();
+    const Card br = shuffled_deck.back();
+    shuffled_deck.pop_back();
+    players.emplace_back(player_id, tl, tr, bl, br);
+  }
+  deque<Card> discardPile{shuffled_deck.back()};
+  shuffled_deck.pop_back();
+
+  return GameState{std::move(shuffled_deck),
+                   std::move(discardPile),
+                   std::move(players),
+                   /*_peekedAtDrawPile=*/false,
+                   /*_whoseTurn=*/0,
+                   /*_whoKnocked=*/-1,
+                   game_id,
+                   ""};
+}
+
 bool GameState::isOver() const { return drawPile.empty() || whoseTurn == whoKnocked; }
+
+// The preamble every turn move shares; per-move checks stay at the sites.
+absl::Status GameState::ensurePlayableTurn(int player) const {
+  if (isOver()) {
+    return FailedPreconditionError("game is over");
+  }
+  if (!allPlayersPresent()) {
+    return FailedPreconditionError("not all players have joined");
+  }
+  if (revealCountdownActive()) {
+    return FailedPreconditionError("waiting for peeked cards to be hidden");
+  }
+  if (whoseTurn != player) {
+    return FailedPreconditionError("not your turn");
+  }
+  return absl::OkStatus();
+}
 
 bool GameState::allPlayersPresent() const {
   return std::all_of(players.begin(), players.end(), [](const Player& p) { return p.isPresent(); });
+}
+
+bool GameState::allPlayersPeeked() const {
+  return std::all_of(players.begin(), players.end(),
+                     [](const Player& p) { return p.hasCompletedPeeks(); });
+}
+
+bool GameState::revealCountdownActive() const {
+  return !peeksHidden && !isOver() && allPlayersPeeked();
 }
 
 unordered_set<int> GameState::winners() const {
@@ -50,32 +111,84 @@ unordered_set<int> GameState::winners() const {
   return winningPlayers;
 }
 
-StatusOr<GameState> GameState::peekAtDrawPile(int player) const {
+StatusOr<GameState> GameState::peekOwnCard(int player, Position position) const {
   if (isOver()) {
     return FailedPreconditionError("game is over");
   }
   if (!allPlayersPresent()) {
     return FailedPreconditionError("not all players have joined");
   }
-  if (whoseTurn != player) {
-    return FailedPreconditionError("not your turn");
+  if (player < 0 || player >= static_cast<int>(players.size())) {
+    return FailedPreconditionError("no such player");
+  }
+  if (whoKnocked != -1) {
+    return FailedPreconditionError("cannot peek after a knock");
+  }
+
+  auto updatedPlayer = players.at(player).addPeek(position);
+  if (!updatedPlayer.ok()) {
+    return updatedPlayer.status();
+  }
+
+  vector<Player> updatedPlayers;
+  for (size_t i = 0; i < players.size(); i++) {
+    if (static_cast<int>(i) == player) {
+      updatedPlayers.push_back(*updatedPlayer);
+    } else {
+      updatedPlayers.push_back(players.at(i));
+    }
+  }
+
+  return GameState{drawPile,         discardPile, std::move(updatedPlayers),
+                   peekedAtDrawPile, whoseTurn,   whoKnocked,
+                   peeksHidden,      gameId,      version_id};
+}
+
+StatusOr<GameState> GameState::hideCards(int player) const {
+  if (player < 0 || player >= static_cast<int>(players.size())) {
+    return FailedPreconditionError("no such player");
+  }
+  if (!revealCountdownActive()) {
+    return FailedPreconditionError("no reveal countdown to end");
+  }
+
+  vector<Player> updatedPlayers;
+  updatedPlayers.reserve(players.size());
+  for (const Player& p : players) {
+    updatedPlayers.push_back(p.clearPeeks());
+  }
+
+  return GameState{drawPile,
+                   discardPile,
+                   std::move(updatedPlayers),
+                   peekedAtDrawPile,
+                   whoseTurn,
+                   whoKnocked,
+                   /*_peeksHidden=*/true,
+                   gameId,
+                   version_id};
+}
+
+StatusOr<GameState> GameState::peekAtDrawPile(int player) const {
+  if (auto turn = ensurePlayableTurn(player); !turn.ok()) {
+    return turn;
   }
   if (peekedAtDrawPile) {
     return FailedPreconditionError("you can only peek once per turn");
   }
 
-  return GameState{drawPile, discardPile, players, true, whoseTurn, whoKnocked, gameId, version_id};
+  return GameState{drawPile,  discardPile, players,     /*_peekedAtDrawPile=*/true,
+                   whoseTurn, whoKnocked,  peeksHidden, gameId,
+                   version_id};
 }
 
 StatusOr<GameState> GameState::swapDrawForDiscardPile(int player) const {
-  if (isOver()) {
-    return FailedPreconditionError("game is over");
+  if (auto turn = ensurePlayableTurn(player); !turn.ok()) {
+    return turn;
   }
-  if (!allPlayersPresent()) {
-    return FailedPreconditionError("not all players have joined");
-  }
-  if (whoseTurn != player) {
-    return FailedPreconditionError("not your turn");
+  if (!peekedAtDrawPile) {
+    // No blind moves: you discard the card you drew, never the unseen top.
+    return FailedPreconditionError("no drawn card to discard");
   }
 
   // update draw pile
@@ -97,19 +210,18 @@ StatusOr<GameState> GameState::swapDrawForDiscardPile(int player) const {
                    false,
                    newWhoseTurn,
                    whoKnocked,
+                   peeksHidden,
                    gameId,
                    version_id};
 }
 
 StatusOr<GameState> GameState::swapForDrawPile(int player, Position position) const {
-  if (isOver()) {
-    return FailedPreconditionError("game is over");
+  if (auto turn = ensurePlayableTurn(player); !turn.ok()) {
+    return turn;
   }
-  if (!allPlayersPresent()) {
-    return FailedPreconditionError("not all players have joined");
-  }
-  if (whoseTurn != player) {
-    return FailedPreconditionError("not your turn");
+  if (!peekedAtDrawPile) {
+    // No blind moves: you swap in the card you drew, never the unseen top.
+    return FailedPreconditionError("no drawn card to swap");
   }
 
   // update draw pile
@@ -148,28 +260,25 @@ StatusOr<GameState> GameState::swapForDrawPile(int player, Position position) co
                    false,
                    newWhoseTurn,
                    whoKnocked,
+                   peeksHidden,
                    gameId,
                    version_id};
 }
 
 absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Position position) const {
-  if (isOver()) {
-    return FailedPreconditionError("game is over");
-  }
-  if (!allPlayersPresent()) {
-    return FailedPreconditionError("not all players have joined");
-  }
-  if (whoseTurn != player) {
-    return FailedPreconditionError("not your turn");
+  if (auto turn = ensurePlayableTurn(player); !turn.ok()) {
+    return turn;
   }
   if (peekedAtDrawPile) {
     return FailedPreconditionError("cannot swap for discard after peeking");
+  }
+  if (discardPile.empty()) {
+    return FailedPreconditionError("discard pile is empty");
   }
 
   // remove top card from discard pile
   deque<Card> mutableDiscardPile{discardPile};
 
-  // TODO: how should we enforce looking at the card once?
   Card toSwampIntoHand = mutableDiscardPile.back();
   mutableDiscardPile.pop_back();
 
@@ -202,19 +311,14 @@ absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Position pos
                    false,
                    newWhoseTurn,
                    whoKnocked,
+                   peeksHidden,
                    gameId,
                    version_id};
 }
 
 StatusOr<GameState> GameState::knock(int player) const {
-  if (isOver()) {
-    return FailedPreconditionError("game is over");
-  }
-  if (!allPlayersPresent()) {
-    return FailedPreconditionError("not all players have joined");
-  }
-  if (whoseTurn != player) {
-    return FailedPreconditionError("not your turn");
+  if (auto turn = ensurePlayableTurn(player); !turn.ok()) {
+    return turn;
   }
   if (peekedAtDrawPile) {
     return FailedPreconditionError("cannot knock after peeking");
@@ -226,18 +330,60 @@ StatusOr<GameState> GameState::knock(int player) const {
   // update whose turn it is
   int newWhoseTurn = (whoseTurn + 1) % players.size();
 
-  return GameState{drawPile, discardPile, players, false, newWhoseTurn, player, gameId, version_id};
+  return GameState{drawPile, discardPile, players, false,     newWhoseTurn,
+                   player,   peeksHidden, gameId,  version_id};
+}
+
+absl::StatusOr<GameState> GameState::removePlayer(int player) const {
+  if (player < 0 || player >= static_cast<int>(players.size())) {
+    return FailedPreconditionError("no such player");
+  }
+
+  vector<Player> updatedPlayers;
+  for (size_t i = 0; i < players.size(); i++) {
+    if (static_cast<int>(i) != player) {
+      updatedPlayers.push_back(players.at(i));
+    }
+  }
+
+  int newWhoseTurn = whoseTurn;
+  if (player < newWhoseTurn) {
+    newWhoseTurn--;
+  }
+  if (!updatedPlayers.empty()) {
+    newWhoseTurn = newWhoseTurn % static_cast<int>(updatedPlayers.size());
+  } else {
+    newWhoseTurn = 0;
+  }
+
+  int newWhoKnocked = whoKnocked;
+  if (player == newWhoKnocked) {
+    newWhoKnocked = -1;  // the knocker fled; the knock is void
+  } else if (newWhoKnocked != -1 && player < newWhoKnocked) {
+    newWhoKnocked--;
+  }
+
+  // Below two players there is no game left to play: force isOver so the
+  // remaining seat's win resolves through the ordinary scoring path.
+  if (updatedPlayers.size() < 2) {
+    newWhoKnocked = newWhoseTurn;
+  }
+
+  return GameState{drawPile,    discardPile,  std::move(updatedPlayers),
+                   false,       newWhoseTurn, newWhoKnocked,
+                   peeksHidden, gameId,       version_id};
 }
 
 GameState GameState::withPlayers(vector<Player> newPlayers) const {
-  return GameState{drawPile, discardPile, std::move(newPlayers), false, whoseTurn, whoKnocked,
-                   gameId,   version_id};
+  return GameState{drawPile,    discardPile, std::move(newPlayers),
+                   false,       whoseTurn,   whoKnocked,
+                   peeksHidden, gameId,      version_id};
 }
 
 GameState GameState::withIdAndVersion(const std::string& _game_id,
                                       const std::string& _version_id) const {
-  return GameState{drawPile,  discardPile, players,  peekedAtDrawPile,
-                   whoseTurn, whoKnocked,  _game_id, _version_id};
+  return GameState{drawPile,   discardPile, players,  peekedAtDrawPile, whoseTurn,
+                   whoKnocked, peeksHidden, _game_id, _version_id};
 }
 
 }  // namespace golf

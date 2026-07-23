@@ -1,54 +1,55 @@
 # golf_hub — the Golf game hub on smithy-cpp event streams
 
 The rebuild of `games_ws_backend`'s golf hub (the deployed Go WebSocket
-service) on smithy-cpp's Phase 8 streaming stack: a modeled protocol
-(`model/golf_hub.smithy`) with generated async handlers (ADR-0021),
-`SessionRegistry` fan-out with reconnect grace (ADR-0017/0020/0022), the
-JSON-text browser wire (ADR-0018), and ticket auth ahead of the 101.
+service) on smithy-cpp's Phase 8 streaming stack: a modeled protocol with
+generated async handlers (ADR-0021), `SessionRegistry` fan-out with
+reconnect grace (ADR-0017/0020/0022), the JSON-text browser wire
+(ADR-0018), and ticket auth ahead of the 101. Tracking issue:
+MoonBase#1187.
 
-## Phases
+## The model (two namespaces, per #79)
 
-- **Phase 1 (this)** — session + room lifecycle: `GetSession` mints
-  identity, a single-use ticket, and a resume token; `Play` is the one
-  WebSocket stream per player (commands up, events down). Rooms are
-  create/join/leave/state with per-recipient broadcast; abrupt losses park
-  the seat for a 5-minute grace and reconnects resume it (`ResumeOrAdd`);
-  invalid commands come back in-band as `commandRejected`, never ending
-  the stream. In-memory e2e over the generated client.
-- **Phase 2** — game rules + game wire vocabulary. **Gated on an open
-  decision** (below).
-- **Phase 3** — real-socket parity vs the Go hub (its test corpus as the
-  behavioral reference), browser client switch
-  (`new WebSocket(url, "smithy.eventstream.v1+json")`), deploy wiring
-  (compose + Caddy), soak, then Go-hub golf retirement.
+- `model/games.smithy` — `moonbase.games`: the game-agnostic room layer.
+  Session identity (`POST /games/v2/session`), rooms, chat, player info
+  with room-scoped stats. Nothing here knows which game a room hosts; a
+  future game reuses these shapes verbatim.
+- `model/golf_hub.smithy` — `moonbase.golf`: the service, the `Play`
+  stream (`/games/v2/golf/play`), and golf's vocabulary nested under one
+  `golf` member in each streaming union. Adding a second game later is
+  one new member per union; the room layer never changes shape.
 
-## The open phase-2 decision: which Golf variant?
+## The rules (resolved in #1187)
 
-The two existing implementations play **different games**:
+Go-hub semantics with the three corrections where `libs/cards/golf` had
+the better rule — an exhausted draw pile ends the game, three of a kind
+scores exactly one card, non-knocker ties are shared wins (knocker still
+takes ties alone). The engine is `libs/cards/golf`'s immutable
+`GameState`, reshaped in place: it gained the Go opening (two own-card
+peeks per player, a table-wide reveal countdown, `hideCards`),
+`removePlayer` for abandoned seats, and kept its draw mechanic — which is
+gameplay-equivalent to the Go hub's draw-then-decide (a draw is a peek at
+the pile top; take-from-discard commits to a slot in one step because the
+discard top is public).
 
-- `games_ws_backend/golf` (deployed; the web UI speaks it): 4 cards
-  indexed 0-3, pre-play peek of exactly 2 own cards, draw/take-discard/
-  swap/discard-drawn, knock gives every *other* player one final turn,
-  pair-cancellation scoring, ties favor the knocker.
-- `libs/cards/golf` (the immutable C++ core golf_service/golf_grpc
-  share): position-named cards (TL/TR/BL/BR), peek-at-draw-pile mechanic
-  with post-peek restrictions, knock ends when the turn returns to the
-  knocker, only bottom two cards ever shown.
+## Redaction
 
-Phase 2 either ports the Go rules onto a new engine (web-UI compatible,
-Go test corpus transfers) or adopts `libs/cards/golf` (better-engineered
-core, but changes the deployed game). This model deliberately stops at
-rooms so no game wire shape freezes before that call.
+Every game broadcast is per-recipient (`ViewLocked`): own card faces only
+at the viewer's peeked indexes, the drawn card only to its holder, other
+hands always null slots, scores only at game end — tighter than v1, which
+shipped a player their whole hand during peek windows. Room state carries
+lobby-safe summaries only.
 
 ## Scaffold notes / deferred
 
 - Tokens are an in-memory `TicketVault` (restart forgets everything —
   matching the Go hub, whose JWT secret rotated on restart). Signed
   tokens are a later hardening if restart-survival ever matters.
-- Player ids are `p-<hex>`; the Go hub's whimsical names
-  (`bouncy-coral-quokka-x9k2`) are a phase-3 product decision.
-- No metrics yet: observability parity waits on hoisting portrait's
-  middleware adapters rather than growing a third copy
-  (domains/graphics/apis/portrait/PORTRAIT_TODO.md tracks the rehoming).
+- Player ids are whimsical (`bouncy-coral-quokka-x9k2`, the Go
+  generator's word lists) and double as display names. Room and game ids
+  are 6-char uppercase codes for permalink compatibility.
+- Observability: unary requests ride the shared aura chain (#1185);
+  stream-level instruments are a later addition.
 - `ALLOWED_ORIGINS` unset admits all origins (dev parity with the Go
   hub's DEV_MODE); production sets the allowlist.
+- Next phases (#1187): UI v2 client behind a beta opt-in (phase 3),
+  deploy + soak (phase 4), default flip + retirements (phase 5).

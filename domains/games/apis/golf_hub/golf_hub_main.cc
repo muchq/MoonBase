@@ -1,11 +1,10 @@
-// The Golf hub server, phase 1 (https://github.com/muchq/MoonBase/issues/1168
-// was portrait's; the hub's tracking issue lands with its plan): session
-// minting plus room lifecycle on smithy-cpp's streaming stack — generated
-// async handlers (ADR-0021), SessionRegistry fan-out with reconnect grace
+// The Golf hub server, phase 2 (#1187): sessions, rooms, chat, and the
+// golf game layer on smithy-cpp's streaming stack — generated async
+// handlers (ADR-0021), SessionRegistry fan-out with reconnect grace
 // (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018).
 //
 //   bazel run //domains/games/apis/golf_hub
-//   curl -X POST localhost:8080/games/v2/golf/session -H 'content-type: application/json' -d '{}'
+//   curl -X POST localhost:8080/games/v2/session -H 'content-type: application/json' -d '{}'
 //   # browser: new WebSocket("ws://localhost:8080/games/v2/golf/play?ticket=<t>",
 //   #                        "smithy.eventstream.v1+json")
 //   kill -TERM <pid>   # drains sessions, then exits 0
@@ -106,7 +105,7 @@ int main() {
       smithy::http::HttpResponse refusal;
       refusal.status = 401;
       refusal.headers.Set("content-type", "application/json");
-      refusal.body = R"({"message":"mint a ticket via POST /games/v2/golf/session"})";
+      refusal.body = R"({"message":"mint a ticket via POST /games/v2/session"})";
       return refusal;
     }
     return router_gate(request);
@@ -136,7 +135,7 @@ int main() {
   }
 
   LOG(INFO) << "Golf hub running on http://" << options.address << ":" << transport.port();
-  LOG(INFO) << "  POST http://localhost:" << transport.port() << "/games/v2/golf/session";
+  LOG(INFO) << "  POST http://localhost:" << transport.port() << "/games/v2/session";
   LOG(INFO) << "  WS   ws://localhost:" << transport.port()
             << "/games/v2/golf/play?ticket=<ticket>";
 

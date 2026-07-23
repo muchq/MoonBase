@@ -20,13 +20,14 @@ static const std::unordered_map<Suit, std::string> SUIT_TO_STRING{
     {Suit::Spades, "S"},
 };
 
+std::string CardMapper::rankToString(const Rank& rank) {
+  const auto found = RANK_TO_STRING.find(rank);
+  return found != RANK_TO_STRING.end() ? found->second : "unknown_rank";
+}
+
 std::string CardMapper::cardToString(const Card& c) const {
   std::string repr;
-  if (RANK_TO_STRING.find(c.getRank()) != RANK_TO_STRING.end()) {
-    repr.append(RANK_TO_STRING.at(c.getRank()));
-  } else {
-    repr.append("unknown_rank");
-  }
+  repr.append(rankToString(c.getRank()));
   repr.append("_");
   if (SUIT_TO_STRING.find(c.getSuit()) != SUIT_TO_STRING.end()) {
     repr.append(SUIT_TO_STRING.at(c.getSuit()));

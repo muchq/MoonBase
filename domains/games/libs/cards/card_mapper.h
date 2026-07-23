@@ -11,6 +11,9 @@ namespace cards {
 
 class CardMapper {
  public:
+  /// The canonical rank display strings: A 2..10 J Q K.
+  static std::string rankToString(const Rank& rank);
+
   std::string cardToString(const Card& c) const;
   std::string cardsToString(const std::vector<Card>& cards) const;
 
