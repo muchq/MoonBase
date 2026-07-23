@@ -293,9 +293,19 @@ type mockPrometheusClient struct {
 	queryRangeResponse *QueryResponse
 	queryError         error
 	queryRangeError    error
+	// When set, responses are looked up by exact query string — a miss
+	// returns an empty result, so a mis-wired query reads as zero instead
+	// of borrowing another query's value.
+	queryResponses map[string]*QueryResponse
 }
 
 func (m *mockPrometheusClient) Query(ctx context.Context, query string) (*QueryResponse, error) {
+	if m.queryResponses != nil {
+		if resp, ok := m.queryResponses[query]; ok {
+			return resp, nil
+		}
+		return &QueryResponse{}, nil
+	}
 	return m.queryResponse, m.queryError
 }
 
@@ -459,24 +469,39 @@ var _ interface {
 	Query(ctx context.Context, query string) (*QueryResponse, error)
 	QueryRange(ctx context.Context, query string, start, end time.Time, step string) (*QueryResponse, error)
 } = (*mockPrometheusClient)(nil)
-func TestMetricsHandler_GetGolfMetrics_Success(t *testing.T) {
-	mockClient := &mockPrometheusClient{
-		queryResponse: &QueryResponse{
-			Status: "success",
-			Data: struct {
-				ResultType string   `json:"resultType"`
-				Result     []Result `json:"result"`
-			}{
-				ResultType: "vector",
-				Result: []Result{
-					{
-						Metric: map[string]string{},
-						Value:  []interface{}{1609459200.0, "3"},
-					},
+
+func golfScalarResponse(value string) *QueryResponse {
+	return &QueryResponse{
+		Status: "success",
+		Data: struct {
+			ResultType string   `json:"resultType"`
+			Result     []Result `json:"result"`
+		}{
+			ResultType: "vector",
+			Result: []Result{
+				{
+					Metric: map[string]string{},
+					Value:  []interface{}{1609459200.0, value},
 				},
 			},
 		},
-		queryError: nil,
+	}
+}
+
+func TestMetricsHandler_GetGolfMetrics_Success(t *testing.T) {
+	// Distinct value per query, so a query wired to the wrong field fails.
+	mockClient := &mockPrometheusClient{
+		queryResponses: map[string]*QueryResponse{
+			`sum(stream_sessions_active_gauge)`:           golfScalarResponse("3"),
+			`sum(stream_sessions_total)`:                  golfScalarResponse("10"),
+			`sum(stream_sessions_total{resumed="true"})`:  golfScalarResponse("4"),
+			`sum(stream_admissions_refused_total)`:        golfScalarResponse("2"),
+			`sum(stream_disconnects_total)`:               golfScalarResponse("7"),
+			`sum(stream_seats_expired_total)`:             golfScalarResponse("1"),
+			`sum(rate(stream_commands_total[5m]))`:        golfScalarResponse("0.5"),
+			`sum(rate(stream_events_total[5m]))`:          golfScalarResponse("2.5"),
+			`sum(rate(stream_rejections_total[5m]))`:      golfScalarResponse("0.25"),
+		},
 	}
 
 	handler := &MetricsHandler{promClient: mockClient}
@@ -492,11 +517,41 @@ func TestMetricsHandler_GetGolfMetrics_Success(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 
-	// Every scalar rides the same mocked query result.
 	assert.Equal(t, float64(3), response.Sessions.Active)
-	assert.Equal(t, float64(3), response.Sessions.StartedTotal)
-	assert.Equal(t, float64(3), response.Activity.CommandsPerSec)
+	assert.Equal(t, float64(10), response.Sessions.StartedTotal)
+	assert.Equal(t, float64(4), response.Sessions.ResumedTotal)
+	assert.Equal(t, float64(2), response.Sessions.RefusedTotal)
+	assert.Equal(t, float64(7), response.Sessions.DisconnectsTotal)
+	assert.Equal(t, float64(1), response.Sessions.SeatsExpiredTotal)
+	assert.Equal(t, 0.5, response.Activity.CommandsPerSec)
+	assert.Equal(t, 2.5, response.Activity.EventsPerSec)
+	assert.Equal(t, 0.25, response.Activity.RejectionsPerSec)
 	assert.WithinDuration(t, time.Now(), response.Timestamp, 5*time.Second)
+}
+
+func TestMetricsHandler_GetGolfMetrics_PrometheusError(t *testing.T) {
+	mockClient := &mockPrometheusClient{
+		queryError: assert.AnError,
+	}
+
+	handler := &MetricsHandler{promClient: mockClient}
+
+	req := httptest.NewRequest("GET", "/metrics/v1/scalar/golf", nil)
+	w := httptest.NewRecorder()
+
+	handler.GetGolfMetrics(w, req)
+
+	// Same resilience contract as the other endpoints: query failures
+	// yield zeroed metrics with 200, never a 500.
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response GolfMetrics
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+
+	assert.Equal(t, 0.0, response.Sessions.Active)
+	assert.Equal(t, 0.0, response.Sessions.StartedTotal)
+	assert.Equal(t, 0.0, response.Activity.CommandsPerSec)
 }
 
 func TestMetricsHandler_GetGolfMetricsTimeSeries_InvalidRange(t *testing.T) {

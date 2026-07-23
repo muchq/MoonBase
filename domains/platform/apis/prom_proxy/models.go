@@ -155,6 +155,7 @@ type MicrogptInferenceMetrics struct {
 	AvgDurationMs        float64 `json:"avg_duration_ms"`
 	ConversationTotal    float64 `json:"conversation_total"`
 }
+
 type GolfMetrics struct {
 	Timestamp time.Time           `json:"timestamp"`
 	Sessions  GolfSessionMetrics  `json:"sessions"`
