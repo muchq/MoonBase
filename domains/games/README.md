@@ -8,8 +8,7 @@ Game engines, services, and libraries.
 
 ## APIs
 
-- [**Golf Service**](apis/golf_service): C++ backend for a golf-themed game.
-- [**Golf gRPC**](apis/golf_grpc): gRPC interface for golf game services.
+- [**Golf Hub**](apis/golf_hub): smithy-cpp event-stream backend for the golf card game (v2).
 - [**Games WS Backend**](apis/games_ws_backend): WebSocket-based backend for real-time multiplayer games.
 - [**Mithril**](apis/mithril): Rust-based game service.
 - [**1d4.net**](apis/one_d4): Chess analysis service.
