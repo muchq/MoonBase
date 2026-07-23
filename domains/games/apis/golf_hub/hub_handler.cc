@@ -186,6 +186,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
       const std::lock_guard<std::mutex> lock(mu_);
       if (!player_room_.contains(player_id)) {
         room_id = ids_->RoomId();
+        while (rooms_.contains(room_id)) room_id = ids_->RoomId();
         rooms_[room_id].members.emplace(player_id, Member{});
         player_room_[player_id] = room_id;
         StageRoomStateLocked(room_id, outbox);

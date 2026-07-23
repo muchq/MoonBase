@@ -30,7 +30,6 @@ cc_library(
     srcs = ["id_generator.cc"],
     hdrs = ["id_generator.h"],
     deps = [
-        ":ticket_vault",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/random:distributions",
         "@com_google_absl//absl/strings:str_format",

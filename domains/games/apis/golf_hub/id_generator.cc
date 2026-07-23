@@ -6,7 +6,6 @@
 #include "absl/random/distributions.h"
 #include "absl/random/random.h"
 #include "absl/strings/str_format.h"
-#include "domains/games/apis/golf_hub/ticket_vault.h"
 
 namespace golf_hub {
 
@@ -31,6 +30,18 @@ std::string_view Pick(absl::BitGen& gen, const std::string_view (&words)[N]) {
   return words[absl::Uniform<std::size_t>(gen, 0u, N)];
 }
 
+// The shareable-code alphabet for rooms and games: strictly alphanumeric
+// so the UI's permalink validation accepts it verbatim.
+std::string Code6() {
+  thread_local absl::BitGen gen;
+  constexpr char kCode[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  std::string code;
+  for (int i = 0; i < 6; ++i) {
+    code.push_back(kCode[absl::Uniform<std::size_t>(gen, 0u, sizeof(kCode) - 1)]);
+  }
+  return code;
+}
+
 }  // namespace
 
 std::string WhimsicalIdGenerator::PlayerId() {
@@ -49,17 +60,9 @@ std::string WhimsicalIdGenerator::PlayerId() {
   return id;
 }
 
-std::string WhimsicalIdGenerator::RoomId() { return RandomId("r"); }
+std::string WhimsicalIdGenerator::RoomId() { return Code6(); }
 
-std::string WhimsicalIdGenerator::GameCode() {
-  thread_local absl::BitGen gen;
-  constexpr char kCode[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  std::string code;
-  for (int i = 0; i < 6; ++i) {
-    code.push_back(kCode[absl::Uniform<std::size_t>(gen, 0u, sizeof(kCode) - 1)]);
-  }
-  return code;
-}
+std::string WhimsicalIdGenerator::GameCode() { return Code6(); }
 
 std::string SequentialIdGenerator::PlayerId() { return absl::StrFormat("player-%d", ++players_); }
 
