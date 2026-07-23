@@ -570,3 +570,29 @@ TEST(GameState, CountdownGatesTheDrawnDiscardToo) {
   EXPECT_FALSE(again.ok());
   EXPECT_EQ(again.status().message(), "no reveal countdown to end");
 }
+
+TEST(GameState, DealGolfGameValidatesAndDeals) {
+  std::deque<Card> deck;
+  for (int i = 0; i < 52; i++) {
+    deck.emplace_back(i);
+  }
+
+  EXPECT_FALSE(dealGolfGame("G", {"solo"}, deck).ok());
+  EXPECT_FALSE(dealGolfGame("G", {"a", "b", "c", "d", "e"}, deck).ok());
+  EXPECT_FALSE(dealGolfGame("G", {"a", "b"}, std::deque<Card>{Card{0}}).ok());
+
+  auto dealt = dealGolfGame("G", {"alice", "bob"}, deck);
+  ASSERT_TRUE(dealt.ok());
+  EXPECT_EQ(dealt->getPlayers().size(), 2);
+  EXPECT_EQ(*dealt->getPlayer(0).getName(), "alice");
+  // Cards come off the back of the deck: alice gets 51..48.
+  EXPECT_EQ(dealt->getPlayer(0).cardAt(Position::TopLeft), Card{51});
+  EXPECT_EQ(dealt->getPlayer(1).cardAt(Position::TopLeft), Card{47});
+  EXPECT_EQ(dealt->getDiscardPile().size(), 1);
+  EXPECT_EQ(dealt->getDiscardPile().back(), Card{43});
+  EXPECT_EQ(dealt->getDrawPile().size(), 52 - 8 - 1);
+  EXPECT_EQ(dealt->getWhoseTurn(), 0);
+  EXPECT_EQ(dealt->getWhoKnocked(), -1);
+  EXPECT_FALSE(dealt->isOver());
+  EXPECT_FALSE(dealt->getPeeksHidden());
+}

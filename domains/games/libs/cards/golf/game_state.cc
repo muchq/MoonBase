@@ -20,7 +20,59 @@ using std::unordered_map;
 using std::unordered_set;
 using std::vector;
 
+absl::StatusOr<GameState> dealGolfGame(const string& game_id, const std::vector<string>& player_ids,
+                                       std::deque<Card> shuffled_deck) {
+  if (player_ids.size() < 2 || player_ids.size() > 4) {
+    return absl::InvalidArgumentError("2 to 4 players");
+  }
+  if (shuffled_deck.size() < player_ids.size() * 4 + 1) {
+    return absl::InvalidArgumentError("deck too small");
+  }
+
+  vector<Player> players;
+  players.reserve(player_ids.size());
+  for (const string& player_id : player_ids) {
+    const Card tl = shuffled_deck.back();
+    shuffled_deck.pop_back();
+    const Card tr = shuffled_deck.back();
+    shuffled_deck.pop_back();
+    const Card bl = shuffled_deck.back();
+    shuffled_deck.pop_back();
+    const Card br = shuffled_deck.back();
+    shuffled_deck.pop_back();
+    players.emplace_back(player_id, tl, tr, bl, br);
+  }
+  deque<Card> discardPile{shuffled_deck.back()};
+  shuffled_deck.pop_back();
+
+  return GameState{std::move(shuffled_deck),
+                   std::move(discardPile),
+                   std::move(players),
+                   /*_peekedAtDrawPile=*/false,
+                   /*_whoseTurn=*/0,
+                   /*_whoKnocked=*/-1,
+                   game_id,
+                   ""};
+}
+
 bool GameState::isOver() const { return drawPile.empty() || whoseTurn == whoKnocked; }
+
+// The preamble every turn move shares; per-move checks stay at the sites.
+absl::Status GameState::ensurePlayableTurn(int player) const {
+  if (isOver()) {
+    return FailedPreconditionError("game is over");
+  }
+  if (!allPlayersPresent()) {
+    return FailedPreconditionError("not all players have joined");
+  }
+  if (revealCountdownActive()) {
+    return FailedPreconditionError("waiting for peeked cards to be hidden");
+  }
+  if (whoseTurn != player) {
+    return FailedPreconditionError("not your turn");
+  }
+  return absl::OkStatus();
+}
 
 bool GameState::allPlayersPresent() const {
   return std::all_of(players.begin(), players.end(), [](const Player& p) { return p.isPresent(); });
@@ -112,48 +164,30 @@ StatusOr<GameState> GameState::hideCards(int player) const {
                    peekedAtDrawPile,
                    whoseTurn,
                    whoKnocked,
-                   true,
+                   /*_peeksHidden=*/true,
                    gameId,
                    version_id};
 }
 
 StatusOr<GameState> GameState::peekAtDrawPile(int player) const {
-  if (isOver()) {
-    return FailedPreconditionError("game is over");
-  }
-  if (!allPlayersPresent()) {
-    return FailedPreconditionError("not all players have joined");
-  }
-  if (revealCountdownActive()) {
-    return FailedPreconditionError("waiting for peeked cards to be hidden");
-  }
-  if (whoseTurn != player) {
-    return FailedPreconditionError("not your turn");
+  if (auto turn = ensurePlayableTurn(player); !turn.ok()) {
+    return turn;
   }
   if (peekedAtDrawPile) {
     return FailedPreconditionError("you can only peek once per turn");
   }
 
-  return GameState{drawPile,   discardPile, players, true,      whoseTurn,
-                   whoKnocked, peeksHidden, gameId,  version_id};
+  return GameState{drawPile,  discardPile, players,     /*_peekedAtDrawPile=*/true,
+                   whoseTurn, whoKnocked,  peeksHidden, gameId,
+                   version_id};
 }
 
 StatusOr<GameState> GameState::swapDrawForDiscardPile(int player) const {
-  if (isOver()) {
-    return FailedPreconditionError("game is over");
-  }
-  if (!allPlayersPresent()) {
-    return FailedPreconditionError("not all players have joined");
-  }
-  if (revealCountdownActive()) {
-    return FailedPreconditionError("waiting for peeked cards to be hidden");
-  }
-  if (whoseTurn != player) {
-    return FailedPreconditionError("not your turn");
+  if (auto turn = ensurePlayableTurn(player); !turn.ok()) {
+    return turn;
   }
   if (!peekedAtDrawPile) {
-    // The corrected rules (#1187) have no blind moves: you discard the
-    // card you drew, not the unseen pile top.
+    // No blind moves: you discard the card you drew, never the unseen top.
     return FailedPreconditionError("no drawn card to discard");
   }
 
@@ -182,21 +216,11 @@ StatusOr<GameState> GameState::swapDrawForDiscardPile(int player) const {
 }
 
 StatusOr<GameState> GameState::swapForDrawPile(int player, Position position) const {
-  if (isOver()) {
-    return FailedPreconditionError("game is over");
-  }
-  if (!allPlayersPresent()) {
-    return FailedPreconditionError("not all players have joined");
-  }
-  if (revealCountdownActive()) {
-    return FailedPreconditionError("waiting for peeked cards to be hidden");
-  }
-  if (whoseTurn != player) {
-    return FailedPreconditionError("not your turn");
+  if (auto turn = ensurePlayableTurn(player); !turn.ok()) {
+    return turn;
   }
   if (!peekedAtDrawPile) {
-    // The corrected rules (#1187) have no blind moves: you swap in the
-    // card you drew, not the unseen pile top.
+    // No blind moves: you swap in the card you drew, never the unseen top.
     return FailedPreconditionError("no drawn card to swap");
   }
 
@@ -242,17 +266,8 @@ StatusOr<GameState> GameState::swapForDrawPile(int player, Position position) co
 }
 
 absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Position position) const {
-  if (isOver()) {
-    return FailedPreconditionError("game is over");
-  }
-  if (!allPlayersPresent()) {
-    return FailedPreconditionError("not all players have joined");
-  }
-  if (revealCountdownActive()) {
-    return FailedPreconditionError("waiting for peeked cards to be hidden");
-  }
-  if (whoseTurn != player) {
-    return FailedPreconditionError("not your turn");
+  if (auto turn = ensurePlayableTurn(player); !turn.ok()) {
+    return turn;
   }
   if (peekedAtDrawPile) {
     return FailedPreconditionError("cannot swap for discard after peeking");
@@ -302,17 +317,8 @@ absl::StatusOr<GameState> GameState::swapForDiscardPile(int player, Position pos
 }
 
 StatusOr<GameState> GameState::knock(int player) const {
-  if (isOver()) {
-    return FailedPreconditionError("game is over");
-  }
-  if (!allPlayersPresent()) {
-    return FailedPreconditionError("not all players have joined");
-  }
-  if (revealCountdownActive()) {
-    return FailedPreconditionError("waiting for peeked cards to be hidden");
-  }
-  if (whoseTurn != player) {
-    return FailedPreconditionError("not your turn");
+  if (auto turn = ensurePlayableTurn(player); !turn.ok()) {
+    return turn;
   }
   if (peekedAtDrawPile) {
     return FailedPreconditionError("cannot knock after peeking");
