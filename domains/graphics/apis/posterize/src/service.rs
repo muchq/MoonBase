@@ -177,4 +177,51 @@ mod tests {
         // handler runs, which axum surfaces as 422 Unprocessable Entity.
         assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
+
+    #[tokio::test]
+    async fn blur_rejects_non_positive_sigma() {
+        for sigma in ["0.0", "-1.5"] {
+            let body = format!(
+                r#"{{"b64_png":"{}","gray":false,"sigma":{}}}"#,
+                b64_image(ImageFormat::Png),
+                sigma
+            );
+            let resp = app().oneshot(json_request("/blur", body)).await.unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "sigma={}",
+                sigma
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn blur_rejects_missing_image_field() {
+        let body = r#"{"gray":false,"sigma":3.0}"#.to_string();
+        let resp = app().oneshot(json_request("/blur", body)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn blur_rejects_malformed_json() {
+        let body = r#"{"b64_png": "#.to_string();
+        let resp = app().oneshot(json_request("/blur", body)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn edges_rejects_invalid_base64() {
+        let body = r#"{"b64_png":"not valid base64 !!!"}"#.to_string();
+        let resp = app().oneshot(json_request("/edges", body)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn edges_rejects_non_image_payload() {
+        let junk = general_purpose::STANDARD.encode("still not an image");
+        let body = format!(r#"{{"b64_png":"{}"}}"#, junk);
+        let resp = app().oneshot(json_request("/edges", body)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
 }

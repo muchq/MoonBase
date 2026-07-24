@@ -238,4 +238,35 @@ mod tests {
         let err = read_image_from_b64_string(&junk).unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
     }
+
+    #[test]
+    fn rejects_truncated_image() {
+        // A valid PNG signature makes `guess_format` succeed, but a truncated
+        // body makes the *decode* step fail — a different error path than the
+        // unrecognized-format case above.
+        let full = general_purpose::STANDARD
+            .decode(b64_image(ImageFormat::Png))
+            .unwrap();
+        let truncated = general_purpose::STANDARD.encode(&full[..16]);
+        let err = read_image_from_b64_string(&truncated).unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn rejects_empty_input() {
+        let err = read_image_from_b64_string("").unwrap_err();
+        // Empty base64 decodes to zero bytes, which `guess_format` can't
+        // identify.
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn rejects_format_mismatched_bytes() {
+        // JPEG bytes labelled as anything still decode fine, but bytes whose
+        // magic doesn't match any enabled decoder are rejected. Here we hand a
+        // PDF-like header (`%PDF`) that `guess_format` does not recognize.
+        let not_an_image = general_purpose::STANDARD.encode(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3");
+        let err = read_image_from_b64_string(&not_an_image).unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    }
 }

@@ -68,3 +68,62 @@ pub struct EdgesResponse {
 pub struct ErrorResponse {
     pub(crate) error: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blur_request_accepts_valid_payload() {
+        let json = r#"{"b64_png":"aGVsbG8=","gray":true,"sigma":4.0}"#;
+        let req: BlurRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.b64_png, "aGVsbG8=");
+        assert_eq!(req.sigma, Some(4.0));
+        assert!(req.gray);
+    }
+
+    #[test]
+    fn blur_request_allows_null_sigma() {
+        let json = r#"{"b64_png":"aGVsbG8=","gray":false,"sigma":null}"#;
+        let req: BlurRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.sigma, None);
+    }
+
+    #[test]
+    fn blur_request_rejects_empty_image() {
+        let json = r#"{"b64_png":"","gray":false,"sigma":1.0}"#;
+        assert!(serde_json::from_str::<BlurRequest>(json).is_err());
+    }
+
+    #[test]
+    fn blur_request_rejects_oversized_image() {
+        // One byte past the 5 MB base64 cap enforced by `validate_image`.
+        let big = "A".repeat(5_000_001);
+        let json = format!(r#"{{"b64_png":"{}","gray":false,"sigma":1.0}}"#, big);
+        assert!(serde_json::from_str::<BlurRequest>(&json).is_err());
+    }
+
+    #[test]
+    fn blur_request_rejects_non_positive_sigma() {
+        for sigma in ["0.0", "-2.5"] {
+            let json = format!(r#"{{"b64_png":"aGVsbG8=","gray":false,"sigma":{}}}"#, sigma);
+            assert!(
+                serde_json::from_str::<BlurRequest>(&json).is_err(),
+                "sigma={}",
+                sigma
+            );
+        }
+    }
+
+    #[test]
+    fn blur_request_requires_image_field() {
+        let json = r#"{"gray":false,"sigma":1.0}"#;
+        assert!(serde_json::from_str::<BlurRequest>(json).is_err());
+    }
+
+    #[test]
+    fn edges_request_rejects_empty_image() {
+        let json = r#"{"b64_png":""}"#;
+        assert!(serde_json::from_str::<EdgesRequest>(json).is_err());
+    }
+}
