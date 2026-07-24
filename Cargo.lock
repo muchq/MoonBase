@@ -4085,7 +4085,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tower_governor",
- "webpki-roots",
+ "webpki-root-certs",
 ]
 
 [[package]]

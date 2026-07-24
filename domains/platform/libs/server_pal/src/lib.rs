@@ -41,28 +41,27 @@ pub fn init_otel() -> Option<SdkMeterProvider> {
     let endpoint = env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok()?;
 
     // reqwest is pinned with rustls-no-provider (workspace Cargo.toml), so
-    // no default CryptoProvider is compiled in; installing one lets us build
-    // a rustls ClientConfig below. Idempotent — Err means already installed.
+    // no default CryptoProvider is compiled in; installing one lets reqwest
+    // build its TLS client below. Idempotent — Err means already installed.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    // reqwest 0.13 dropped the webpki-roots feature and forces
+    // reqwest 0.13 dropped its webpki-roots feature and forces
     // rustls-platform-verifier, which reads the system trust store — absent
     // in our minimal container images. Left to its own devices the OTLP
     // exporter builds a default reqwest client that fails ("No CA
     // certificates were loaded from the system") and panics. Build the
-    // client ourselves with Mozilla's roots bundled into the binary, so it
-    // needs nothing from the host.
+    // client ourselves with Mozilla's roots bundled into the binary
+    // (tls_certs_only, reqwest's stable roots API), so it needs nothing from
+    // the host.
     // The blocking client spins up its own runtime, so it must be built off
     // the async main thread (opentelemetry-otlp's default path does the same).
     let http_client = match std::thread::spawn(|| {
-        let mut roots = rustls::RootCertStore::empty();
-        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        let tls = rustls::ClientConfig::builder()
-            .with_root_certificates(roots)
-            .with_no_client_auth();
+        let roots = webpki_root_certs::TLS_SERVER_ROOT_CERTS
+            .iter()
+            .filter_map(|der| reqwest::Certificate::from_der(der).ok());
         reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(5))
-            .use_preconfigured_tls(tls)
+            .tls_certs_only(roots)
             .build()
     })
     .join()
