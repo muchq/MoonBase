@@ -8,7 +8,10 @@ use axum::middleware::Next;
 use axum::response::Response;
 use axum::routing::{MethodRouter, get};
 use opentelemetry::KeyValue;
-use opentelemetry::metrics::{Counter, Histogram};
+use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
+use opentelemetry_otlp::{MetricExporter, WithExportConfig};
+use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use tokio::net::TcpListener;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
@@ -23,53 +26,131 @@ use tower_http::validate_request::ValidateRequestHeaderLayer;
 
 const DEFAULT_PORT: u16 = 8080;
 
+static HTTP_REQUESTS: OnceLock<Counter<u64>> = OnceLock::new();
 static HTTP_SUCCESS: OnceLock<Counter<u64>> = OnceLock::new();
 static HTTP_FAILURE: OnceLock<Counter<u64>> = OnceLock::new();
+static HTTP_ACTIVE: OnceLock<UpDownCounter<i64>> = OnceLock::new();
 static HTTP_DURATION: OnceLock<Histogram<f64>> = OnceLock::new();
 
+/// Initialise the global OTel meter provider when
+/// OTEL_EXPORTER_OTLP_ENDPOINT is set; a no-op None otherwise. Callers
+/// keep the returned provider alive for the process lifetime — dropping
+/// it shuts down the exporter. Shared by every server_pal service so the
+/// http_server_* instruments actually export.
+pub fn init_otel() -> Option<SdkMeterProvider> {
+    let endpoint = env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok()?;
+
+    let exporter = match MetricExporter::builder()
+        .with_http()
+        .with_endpoint(format!("{}/v1/metrics", endpoint))
+        .with_timeout(Duration::from_secs(5))
+        .build()
+    {
+        Ok(exporter) => exporter,
+        Err(e) => {
+            eprintln!("warning: failed to create OTLP metric exporter: {e}; metrics disabled");
+            return None;
+        }
+    };
+
+    // Resource::builder() picks up OTEL_SERVICE_NAME and
+    // OTEL_RESOURCE_ATTRIBUTES via the built-in EnvResourceDetector.
+    let provider = SdkMeterProvider::builder()
+        .with_reader(PeriodicReader::builder(exporter).build())
+        .with_resource(Resource::builder().build())
+        .build();
+
+    opentelemetry::global::set_meter_provider(provider.clone());
+    eprintln!("OTel metrics initialised (endpoint: {endpoint})");
+    Some(provider)
+}
+
+fn http_counter(
+    cell: &'static OnceLock<Counter<u64>>,
+    name: &'static str,
+    desc: &'static str,
+) -> &'static Counter<u64> {
+    cell.get_or_init(|| {
+        opentelemetry::global::meter("http_server")
+            .u64_counter(name)
+            .with_description(desc)
+            .build()
+    })
+}
+
+/// In-flight gauge as a drop guard: a manual decrement after the await
+/// never runs when the request future is cancelled (client disconnect),
+/// and the gauge would drift upward forever.
+struct ActiveRequest {
+    attrs: [KeyValue; 2],
+}
+
+impl ActiveRequest {
+    fn start(attrs: [KeyValue; 2]) -> Self {
+        Self::counter().add(1, &attrs);
+        Self { attrs }
+    }
+
+    fn counter() -> &'static UpDownCounter<i64> {
+        HTTP_ACTIVE.get_or_init(|| {
+            opentelemetry::global::meter("http_server")
+                .i64_up_down_counter("http_server_requests_active_gauge")
+                .with_description("HTTP requests currently in flight")
+                .build()
+        })
+    }
+}
+
+impl Drop for ActiveRequest {
+    fn drop(&mut self) {
+        Self::counter().add(-1, &self.attrs);
+    }
+}
+
+// Instrument names mirror the C++ aura/futility http_server_* family
+// (requests, success/failure, active gauge, microseconds histogram), so
+// prom_proxy's standard service block reads every language the same way.
 async fn http_metrics_middleware(req: Request, next: Next) -> Response {
     let start = std::time::Instant::now();
     let method = req.method().as_str().to_string();
     let service_name = env::var("OTEL_SERVICE_NAME").unwrap_or_default();
-
-    let resp = next.run(req).await;
-
-    let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
-    let status = resp.status().as_u16();
     let attrs = [
         KeyValue::new("http_method", method),
         KeyValue::new("service_name", service_name),
     ];
 
+    http_counter(&HTTP_REQUESTS, "http_server_requests", "HTTP requests received").add(1, &attrs);
+    let _active = ActiveRequest::start(attrs.clone());
+
+    let resp = next.run(req).await;
+
+    let duration_us = start.elapsed().as_micros() as f64;
+    let status = resp.status().as_u16();
+
     if status < 400 {
-        HTTP_SUCCESS
-            .get_or_init(|| {
-                opentelemetry::global::meter("http_server")
-                    .u64_counter("http_server_requests_success")
-                    .with_description("HTTP requests completed successfully (2xx–3xx)")
-                    .build()
-            })
-            .add(1, &attrs);
+        http_counter(
+            &HTTP_SUCCESS,
+            "http_server_requests_success",
+            "HTTP requests completed successfully (2xx–3xx)",
+        )
+        .add(1, &attrs);
     } else {
-        HTTP_FAILURE
-            .get_or_init(|| {
-                opentelemetry::global::meter("http_server")
-                    .u64_counter("http_server_requests_failure")
-                    .with_description("HTTP requests that returned 4xx or 5xx")
-                    .build()
-            })
-            .add(1, &attrs);
+        http_counter(
+            &HTTP_FAILURE,
+            "http_server_requests_failure",
+            "HTTP requests that returned 4xx or 5xx",
+        )
+        .add(1, &attrs);
     }
 
     HTTP_DURATION
         .get_or_init(|| {
             opentelemetry::global::meter("http_server")
-                .f64_histogram("http_server_request_duration_ms")
-                .with_description("HTTP request duration in milliseconds")
-                .with_unit("ms")
+                .f64_histogram("http_server_request_duration_microseconds")
+                .with_description("HTTP request duration in microseconds")
                 .build()
         })
-        .record(duration_ms, &attrs);
+        .record(duration_us, &attrs);
 
     resp
 }
