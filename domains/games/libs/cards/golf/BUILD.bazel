@@ -1,8 +1,7 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
 # The golf rules engine: immutable GameState/Player value types serving
-# golf_hub (#1187). The v1-era store/manager layers retired with
-# golf_service and golf_grpc.
+# golf_hub (#1187).
 
 cc_library(
     name = "game_state",
