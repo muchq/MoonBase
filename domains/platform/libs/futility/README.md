@@ -63,18 +63,6 @@ metrics.RecordCounter("requests_total", 1, {{"method", "GET"}});
 metrics.RecordLatency("latency_us", duration);
 ```
 
-### Status Conversion
-
-```cpp
-#include "cpp/futility/status/status.h"
-
-// In gRPC service implementation
-grpc::Status MyService::DoWork(...) {
-    absl::Status result = InternalLogic();
-    return futility::status::AbseilToGrpc(result);
-}
-```
-
 ### Base64
 
 ```cpp
@@ -94,7 +82,6 @@ deps = [
     "//cpp/futility/cache:lru_cache",
     "//cpp/futility/otel:otel_provider",
     "//cpp/futility/otel:metrics",
-    "//cpp/futility/status",
     "//cpp/futility/base64",
 ]
 ```
