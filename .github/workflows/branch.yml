@@ -12,6 +12,22 @@ permissions:
   contents: read
 
 jobs:
+  test-deploy:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/muchq/moonbase/ci-base:latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory /__w/MoonBase/MoonBase
+
+      # Runs deploy.sh end to end against a fake host — no ssh, docker, or
+      # network. Nothing else in CI executes this script.
+      - name: Test deploy.sh
+        run: ./scripts/test-deploy
+
   format-check:
     runs-on: ubuntu-latest
     container:
