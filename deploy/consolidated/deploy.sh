@@ -159,16 +159,32 @@ host_pin() { printf '%s\n' "$host_env" | sed -n "s/^$1=//p" | tail -1; }
 # What the host records is only the intent; the containers are the fact. They
 # diverge when a container wasn't recreated, so read them rather than infer.
 if [ "$SHOW_STATUS" -eq 1 ]; then
-  running=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" \
-    "sudo docker ps -a --filter label=com.docker.compose.service \
-       --format '{{.Label \"com.docker.compose.service\"}}|{{.Image}}|{{.Status}}'" 2>/dev/null)
+  # Two views in one connection: ps for the human status string (which already
+  # carries the exit code, e.g. "Restarting (101)"), inspect for the restart
+  # count, which ps can't report. RestartCount resets when a container is
+  # recreated, so it reads as restarts since the last deploy of that service.
+  running=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "
+    sudo docker ps -a --filter label=com.docker.compose.service \
+      --format 'S|{{.Label \"com.docker.compose.service\"}}|{{.Image}}|{{.Status}}'
+    sudo docker ps -aq --filter label=com.docker.compose.service |
+      xargs -r sudo docker inspect \
+        --format 'R|{{index .Config.Labels \"com.docker.compose.service\"}}|{{.RestartCount}}'
+  " 2>/dev/null)
   if [ -z "$running" ]; then
     echo "Error: could not read container state from $HOST" >&2
     exit 1
   fi
-  printf '%-18s  %-9s  %s\n' "SERVICE" "VERSION" "STATE"
+
+  declare -A restarts=()
+  while IFS='|' read -r kind svc count; do
+    [ "$kind" = "R" ] && [ -n "$svc" ] && restarts[$svc]=$count
+  done <<< "$running"
+
+  printf '%-18s  %-9s  %-8s  %s\n' "SERVICE" "VERSION" "RESTARTS" "STATE"
   drifted=0
-  while IFS='|' read -r svc image state; do
+  unhealthy=0
+  while IFS='|' read -r kind svc image state; do
+    [ "$kind" = "S" ] || continue
     [ -n "$svc" ] || continue
     tag=${image##*:}
     shown=$tag
@@ -187,12 +203,25 @@ if [ "$SHOW_STATUS" -eq 1 ]; then
         fi
         ;;
     esac
-    printf '%-18s  %-9s  %s%s\n' "$svc" "$shown" "$state" "$note"
+    # Anything not "Up ..." is down, restarting, or crash-looping; the status
+    # string carries the exit code, and the restart count says how hard.
+    case "$state" in
+      Up*) ;;
+      *) unhealthy=$((unhealthy + 1)) ;;
+    esac
+    printf '%-18s  %-9s  %-8s  %s%s\n' "$svc" "$shown" "${restarts[$svc]:-?}" "$state" "$note"
   done <<< "$(printf '%s\n' "$running" | sort)"
-  if [ "$drifted" -gt 0 ]; then
+
+  if [ "$drifted" -gt 0 ] || [ "$unhealthy" -gt 0 ]; then
     echo
-    echo "$drifted container(s) are not running the recorded revision — a deploy" >&2
-    echo "may not have recreated them. A full deploy re-converges the stack." >&2
+    [ "$drifted" -gt 0 ] && {
+      echo "$drifted container(s) are not running the recorded revision — a deploy" >&2
+      echo "may not have recreated them. A full deploy re-converges the stack." >&2
+    }
+    [ "$unhealthy" -gt 0 ] && {
+      echo "$unhealthy container(s) are not up. A climbing restart count with a" >&2
+      echo "low uptime is a crash loop; the exit code is in the state above." >&2
+    }
     exit 1
   fi
   exit 0

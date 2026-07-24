@@ -85,23 +85,38 @@ STUB
   # beating the .env file becomes observable.
   cat > "$STUBS/docker" <<'STUB'
 #!/bin/bash
-case "$1 $2" in
-  "manifest inspect")
+case "$1" in
+  manifest)
     for missing in $FAKE_MISSING_IMAGES; do
       case "$3" in "$missing":*) exit 1 ;; esac
     done
     exit 0
     ;;
-  "network inspect")
+  network)
     # Report the expected subnet so the script doesn't tear the network down.
-    [ "$3" = "--format" ] || [ "$4" = "--format" ] && echo "172.28.0.0/16|172.28.1.0/24"
+    echo "172.28.0.0/16|172.28.1.0/24"
     exit 0
     ;;
-  "ps -a")
-    printf '%s\n' "$FAKE_PS"
+  ps)
+    # -aq is asked for ids; the rest of the stub uses service names as ids.
+    case "$*" in
+      *-aq*) printf '%s\n' "$FAKE_PS" | sed 's/|.*//' ;;
+      *) printf '%s\n' "$FAKE_PS" | sed 's/^/S|/' ;;
+    esac
+    exit 0
+    ;;
+  inspect)
+    shift 3 # past `inspect --format <template>`
+    for svc in "$@"; do
+      count=$(printf '%s\n' "$FAKE_RESTARTS" | sed -n "s/^$svc|//p")
+      echo "R|$svc|${count:-0}"
+    done
     exit 0
     ;;
 esac
+# Records what compose would have been invoked with, including the pin
+# variables visible in its environment — that's how a stale exported pin
+# beating the .env file becomes observable.
 pins=$(env | grep -E '^([A-Z0-9_]+_SHA)=' | sort | tr '\n' ' ')
 echo "docker $* || env: $pins" >> "$DOCKER_LOG"
 exit 0
@@ -172,6 +187,7 @@ deploy() { # deploy <args...> -> exit code, output in $WORK/out.txt
     cd "$TESTROOT" || exit 1
     PATH="$STUBS:$PATH" FAKE_HOST="$HOSTDIR" DOCKER_LOG="$DOCKER_LOG" \
       FAKE_MISSING_IMAGES="${FAKE_MISSING_IMAGES:-}" FAKE_PS="${FAKE_PS:-}" \
+      FAKE_RESTARTS="${FAKE_RESTARTS:-}" \
       bash deploy/consolidated/deploy.sh "$@"
   ) > "$WORK/out.txt" 2>&1
 }
@@ -250,9 +266,12 @@ echo "status"
 reset_host "DEPLOY_SHA=$SHA" "POSTERIZE_SHA=posterizepin"
 FAKE_PS="golf_hub|ghcr.io/muchq/golf_hub:$SHA|Up 2 hours
 posterize|ghcr.io/muchq/posterize:posterizepin|Up 5 minutes
-caddy|caddy:2-alpine|Up 2 hours" deploy --status
+caddy|caddy:2-alpine|Up 2 hours" \
+  FAKE_RESTARTS="golf_hub|0
+posterize|0
+caddy|0" deploy --status
 rc=$?
-check "exits 0 when everything matches" test $rc -eq 0
+check "exits 0 when everything is healthy and matching" test $rc -eq 0
 check "reports the running revision" grep -q "golf_hub .*${SHA:0:7}" "$WORK/out.txt"
 check "honours a per-service pin" grep -q "posterize .*posterizepin" "$WORK/out.txt"
 check "includes third-party containers" grep -q "caddy .*2-alpine" "$WORK/out.txt"
@@ -261,11 +280,27 @@ check "includes third-party containers" grep -q "caddy .*2-alpine" "$WORK/out.tx
 # the new one — the divergence --status exists to surface.
 reset_host "DEPLOY_SHA=$SHA"
 FAKE_PS="golf_hub|ghcr.io/muchq/golf_hub:$SHA|Up 2 hours
-mithril|ghcr.io/muchq/mithril:$OLD_SHA|Up 3 days" deploy --status
+mithril|ghcr.io/muchq/mithril:$OLD_SHA|Up 3 days" \
+  FAKE_RESTARTS="golf_hub|0
+mithril|0" deploy --status
 rc=$?
 check "fails when a container drifted from .env" test $rc -ne 0
 check "names the drifted service" grep -q "mithril" "$WORK/out.txt"
 check "shows what .env expected" grep -q "\.env says ${SHA:0:7}" "$WORK/out.txt"
+
+# The shape of the incident this all came from: right revision, but the
+# container can't stay up. A climbing restart count is the tell.
+reset_host "DEPLOY_SHA=$SHA"
+FAKE_PS="golf_hub|ghcr.io/muchq/golf_hub:$SHA|Up 2 hours
+posterize|ghcr.io/muchq/posterize:$SHA|Restarting (101) 8 seconds ago" \
+  FAKE_RESTARTS="golf_hub|0
+posterize|47" deploy --status
+rc=$?
+check "fails when a container is not up" test $rc -ne 0
+check "shows the restart count" grep -qE "posterize .*47" "$WORK/out.txt"
+check "surfaces the exit code from the state" grep -q "Restarting (101)" "$WORK/out.txt"
+check "calls out the crash loop" grep -q "crash loop" "$WORK/out.txt"
+check "reports a healthy peer as 0 restarts" grep -qE "golf_hub .*0 " "$WORK/out.txt"
 
 echo "argument handling"
 deploy --service nope -y

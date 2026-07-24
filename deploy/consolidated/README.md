@@ -140,18 +140,24 @@ container, not to everything the script touches.
 ```
 
 ```
-SERVICE             VERSION    STATE
-caddy               2-alpine   Up 3 hours
-golf_hub            7faca68    Up 3 hours
-mithril             1694f01    Up 12 minutes
-posterize           dac0383    Restarting (101) 8 seconds ago  <- .env says 7faca68
-prom_proxy          7faca68    Up 3 hours
+SERVICE             VERSION    RESTARTS  STATE
+caddy               2-alpine   0         Up 3 hours
+golf_hub            7faca68    0         Up 3 hours
+mithril             1694f01    0         Up 12 minutes
+posterize           7faca68    47        Restarting (101) 8 seconds ago
 ```
 
 This reads the containers themselves rather than the recorded pins, so it shows
-the *fact* rather than the intent. The two diverge when a deploy didn't recreate
-a container, and `--status` exits non-zero when they do — which is also how you
-confirm a deploy actually took effect. A full deploy re-converges the stack.
+the *fact* rather than the intent. It exits non-zero when a container is not up,
+or when its revision doesn't match the recorded pin — the latter meaning a
+deploy didn't recreate it, which is also how you confirm a deploy took effect.
+A full deploy re-converges the stack.
+
+`RESTARTS` is Docker's restart count, which resets when a container is
+recreated — so it reads as restarts *since that service was last deployed*. A
+climbing count next to a low uptime is a crash loop, and the exit code is in the
+state (`Restarting (101)` above is a Rust panic). Docker has no windowed rate;
+for restarts-over-time across the fleet, that's the dashboard's job (#1208).
 
 ## Rollback
 
