@@ -36,6 +36,15 @@ func main() {
 	// Health endpoint
 	router.HandleFunc("GET /health", metricsHandler.HealthHandler)
 
+	// Dashboard overhaul (#1199): catalog, merged host page, and generic
+	// per-service pages. The per-service scalar/timeseries routes below
+	// are legacy and retire once the UI cutover deploys.
+	router.HandleFunc("GET /metrics/v1/services", metricsHandler.GetServiceCatalog)
+	router.HandleFunc("GET /metrics/v1/host", metricsHandler.GetHostMetrics)
+	router.HandleFunc("GET /metrics/v1/host/timeseries/{range}", metricsHandler.GetHostMetricsTimeSeries)
+	router.HandleFunc("GET /metrics/v1/service/{name}", metricsHandler.GetServiceMetrics)
+	router.HandleFunc("GET /metrics/v1/service/{name}/timeseries/{range}", metricsHandler.GetServiceMetricsTimeSeries)
+
 	// Metrics endpoints - current point-in-time data
 	router.HandleFunc("GET /metrics/v1/scalar/system", metricsHandler.GetSystemMetrics)
 	router.HandleFunc("GET /metrics/v1/scalar/portrait", metricsHandler.GetPortraitMetrics)

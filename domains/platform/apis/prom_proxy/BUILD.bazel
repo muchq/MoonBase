@@ -7,6 +7,8 @@ go_library(
         "handlers.go",
         "models.go",
         "prometheus_client.go",
+        "registry.go",
+        "service_handlers.go",
     ],
     importpath = "github.com/muchq/moonbase/domains/platform/apis/prom_proxy",
     visibility = ["//visibility:public"],
@@ -25,6 +27,7 @@ go_test(
         "handlers_test.go",
         "models_test.go",
         "prometheus_client_test.go",
+        "service_handlers_test.go",
     ],
     embed = [":prom_proxy_lib"],
     deps = [
