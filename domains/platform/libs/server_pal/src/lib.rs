@@ -40,6 +40,12 @@ static HTTP_DURATION: OnceLock<Histogram<f64>> = OnceLock::new();
 pub fn init_otel() -> Option<SdkMeterProvider> {
     let endpoint = env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok()?;
 
+    // reqwest is pinned with rustls-no-provider (workspace Cargo.toml), so
+    // no default CryptoProvider is compiled in; the OTLP exporter's reqwest
+    // client panics on its first export unless the process installs one.
+    // Idempotent — Err means another caller already installed it.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let exporter = match MetricExporter::builder()
         .with_http()
         .with_endpoint(format!("{}/v1/metrics", endpoint))

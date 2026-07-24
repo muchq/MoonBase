@@ -8,6 +8,7 @@ readme.workspace = true
 [dependencies]
 axum = { workspace = true }
 opentelemetry = { workspace = true }
+rustls = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
