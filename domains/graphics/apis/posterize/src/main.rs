@@ -10,6 +10,9 @@ use tracing::{Level, event};
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
+    // Keeps the exporter alive for the process lifetime; without this the
+    // http_server_* instruments record into the no-op global meter.
+    let _otel_provider = server_pal::init_otel();
 
     let listen_address = listen_addr_pal();
 

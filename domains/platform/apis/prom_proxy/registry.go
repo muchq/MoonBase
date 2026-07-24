@@ -20,7 +20,7 @@ type serviceEntry struct {
 }
 
 // Catalog order doubles as the UI's tab order.
-var serviceOrder = []string{"golf_hub", "microgpt-serve", "mithril", "portrait"}
+var serviceOrder = []string{"golf_hub", "microgpt-serve", "mithril", "portrait", "posterize"}
 
 var serviceRegistry = map[string]serviceEntry{
 	"golf_hub": {
@@ -60,6 +60,8 @@ var serviceRegistry = map[string]serviceEntry{
 	},
 	// Wordchains: server_pal's standard instruments only, no custom set.
 	"mithril": {},
+	// Image blur/edges: server_pal's standard instruments only.
+	"posterize": {},
 	"portrait": {
 		CustomScalars: []customScalarDef{
 			{"Render cache", "hit_rate_percent", "%", `rate(trace_cache_hits_total[5m])/(rate(trace_cache_hits_total[5m])+rate(trace_cache_misses_total[5m]))*100`},
