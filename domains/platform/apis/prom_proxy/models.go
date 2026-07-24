@@ -176,3 +176,47 @@ type GolfActivityMetrics struct {
 	EventsPerSec     float64 `json:"events_per_sec"`
 	RejectionsPerSec float64 `json:"rejections_per_sec"`
 }
+
+type ServiceCatalogEntry struct {
+	Name      string `json:"name"`
+	HasCustom bool   `json:"has_custom"`
+}
+
+type ServiceCatalog struct {
+	Services []ServiceCatalogEntry `json:"services"`
+}
+
+type HostMetricsResponse struct {
+	Timestamp  time.Time        `json:"timestamp"`
+	System     *SystemMetrics   `json:"system"`
+	Containers []ContainerStats `json:"containers"`
+}
+
+type StandardMetrics struct {
+	RequestsTotal     float64 `json:"requests_total"`
+	RatePerSec        float64 `json:"rate_per_sec"`
+	SuccessCount5m    float64 `json:"success_count_5m"`
+	FailureCount5m    float64 `json:"failure_count_5m"`
+	ErrorRatePercent  float64 `json:"error_rate_percent"`
+	AvgDurationMicros float64 `json:"avg_duration_microseconds"`
+	P95DurationMicros float64 `json:"p95_duration_microseconds"`
+	ActiveRequests    float64 `json:"active_requests"`
+}
+
+type CustomMetricValue struct {
+	Label string  `json:"label"`
+	Value float64 `json:"value"`
+	Unit  string  `json:"unit"`
+}
+
+type CustomMetricGroup struct {
+	Title   string              `json:"title"`
+	Metrics []CustomMetricValue `json:"metrics"`
+}
+
+type ServiceMetricsResponse struct {
+	Timestamp time.Time           `json:"timestamp"`
+	Service   string              `json:"service"`
+	Standard  StandardMetrics     `json:"standard"`
+	Custom    []CustomMetricGroup `json:"custom"`
+}
