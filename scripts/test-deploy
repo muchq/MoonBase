@@ -70,6 +70,16 @@ esac
 cp -r "${args[@]}" "$target" 2>/dev/null || true
 STUB
 
+  # The remote payload targets the Linux host, so it uses GNU `xargs -r`. The
+  # stub ssh runs that payload locally, and BSD xargs rejects -r — drop the
+  # flag rather than weaken the command that actually ships.
+  cat > "$STUBS/xargs" <<'STUB'
+#!/bin/bash
+args=()
+for a in "$@"; do [ "$a" = "-r" ] || args+=("$a"); done
+exec /usr/bin/xargs "${args[@]}"
+STUB
+
   # Only docker is really run; mkdir/cp/chown against absolute host paths
   # (/var/www, /etc/forgejo) are neutralised so a test can't touch this machine.
   cat > "$STUBS/sudo" <<'STUB'
