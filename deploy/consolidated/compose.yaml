@@ -34,7 +34,7 @@ services:
           memory: 256M
 
   games_ws_backend:
-    image: ghcr.io/muchq/games_ws_backend:latest
+    image: ghcr.io/muchq/games_ws_backend:${DEPLOY_SHA:-latest}
     restart: always
     ports:
       - "8080:8080"
@@ -51,7 +51,7 @@ services:
   # The smithy event-stream golf service (/games/v2/*, MoonBase#1187);
   # serves the v2 beta while games_ws_backend keeps serving v1.
   golf_hub:
-    image: ghcr.io/muchq/golf_hub:latest
+    image: ghcr.io/muchq/golf_hub:${DEPLOY_SHA:-latest}
     restart: always
     ports:
       - "8089:8089"
@@ -63,7 +63,7 @@ services:
       TRUSTED_PROXY_CIDRS: *caddy_ip
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
       OTEL_SERVICE_NAME: golf_hub
-      OTEL_RESOURCE_ATTRIBUTES: service.name=golf_hub,service.version=latest
+      OTEL_RESOURCE_ATTRIBUTES: service.name=golf_hub,service.version=${DEPLOY_SHA:-latest}
     networks:
       - app_network
     deploy:
@@ -73,7 +73,7 @@ services:
           memory: 512M
 
   portrait:
-    image: ghcr.io/muchq/portrait:latest
+    image: ghcr.io/muchq/portrait:${DEPLOY_SHA:-latest}
     restart: always
     ports:
       - "8081:8081"
@@ -84,7 +84,7 @@ services:
       TRUSTED_PROXY_CIDRS: *caddy_ip
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
       OTEL_SERVICE_NAME: portrait
-      OTEL_RESOURCE_ATTRIBUTES: service.name=portrait,service.version=latest
+      OTEL_RESOURCE_ATTRIBUTES: service.name=portrait,service.version=${DEPLOY_SHA:-latest}
     volumes:
       - /etc/portrait:/etc/portrait
     networks:
@@ -96,7 +96,7 @@ services:
           memory: 512M
 
   prom_proxy:
-    image: ghcr.io/muchq/prom_proxy:latest
+    image: ghcr.io/muchq/prom_proxy:${DEPLOY_SHA:-latest}
     restart: always
     ports:
       - "8082:8082"
@@ -114,7 +114,7 @@ services:
           memory: 256M
 
   mithril:
-    image: ghcr.io/muchq/mithril:latest
+    image: ghcr.io/muchq/mithril:${DEPLOY_SHA:-latest}
     restart: always
     ports:
       - "8083:8083"
@@ -122,7 +122,7 @@ services:
       - PORT=8083
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=mithril
-      - OTEL_RESOURCE_ATTRIBUTES=service.name=mithril,service.version=latest
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=mithril,service.version=${DEPLOY_SHA:-latest}
     volumes:
       - /etc/mithril:/etc/mithril
     networks:
@@ -134,7 +134,7 @@ services:
           memory: 512M
 
   posterize:
-    image: ghcr.io/muchq/posterize:latest
+    image: ghcr.io/muchq/posterize:${DEPLOY_SHA:-latest}
     restart: always
     ports:
       - "8084:8084"
@@ -142,7 +142,7 @@ services:
       - PORT=8084
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=posterize
-      - OTEL_RESOURCE_ATTRIBUTES=service.name=posterize,service.version=latest
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=posterize,service.version=${DEPLOY_SHA:-latest}
     volumes:
       - /etc/posterize:/etc/posterize
     networks:
@@ -154,7 +154,7 @@ services:
           memory: 512M
 
   r3dr:
-    image: ghcr.io/muchq/r3dr:latest
+    image: ghcr.io/muchq/r3dr:${DEPLOY_SHA:-latest}
     restart: always
     ports:
       - "8085:8080"
@@ -169,7 +169,7 @@ services:
           memory: 256M
 
   mcpserver:
-    image: ghcr.io/muchq/mcpserver:latest
+    image: ghcr.io/muchq/mcpserver:${DEPLOY_SHA:-latest}
     restart: always
     ports:
       - "8086:8080"
@@ -210,7 +210,7 @@ services:
       start_period: 10s
 
   one_d4:
-    image: ghcr.io/muchq/one_d4:latest
+    image: ghcr.io/muchq/one_d4:${DEPLOY_SHA:-latest}
     restart: always
     ports:
       - "8088:8080"
@@ -237,7 +237,7 @@ services:
       start_period: 15s
 
   microgpt-serve:
-    image: ghcr.io/muchq/microgpt-serve:latest
+    image: ghcr.io/muchq/microgpt-serve:${DEPLOY_SHA:-latest}
     restart: always
     ports:
       - "8087:8087"
@@ -246,7 +246,7 @@ services:
       - MODEL_DIR=/etc/microgpt-serve/model
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=microgpt-serve
-      - OTEL_RESOURCE_ATTRIBUTES=service.name=microgpt-serve,service.version=latest
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=microgpt-serve,service.version=${DEPLOY_SHA:-latest}
     volumes:
       - /etc/microgpt-serve:/etc/microgpt-serve
     networks:

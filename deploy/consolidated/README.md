@@ -56,28 +56,56 @@ After initialization, you may need to reboot the instance.
 
 ## Deploying
 
-To deploy or update services:
+To deploy the latest commit on `main`:
 
 ```bash
 ./deploy/consolidated/deploy.sh
 ```
 
-This will:
+It shows the commit you're about to deploy and asks to confirm:
+
+```
+Deploying 1694f01  posterize: accept common image formats and preserve them on output (#1207)
+Replacing 891973a  server_pal: bundle webpki roots into the OTLP client (#1205)
+Proceed? [y/N]
+```
+
+Every image is pinned to that commit's SHA (`compose.yaml` reads `DEPLOY_SHA`),
+so a deploy is reproducible and the running version is whatever you confirmed.
+Images are published per-commit by `publish.yml`, so a commit is only
+deployable once its build has finished — `deploy.sh` verifies the images exist
+before touching the host.
+
+To see what's available, with the deployed revision marked:
+
+```bash
+./deploy/consolidated/deploy.sh --list      # last 10 commits
+./deploy/consolidated/deploy.sh --list 25
+```
+
+```
+COMMIT     DATE        SUBJECT
+1694f01    2026-07-24  posterize: accept common image formats and preserve them on output (#1207)
+891973a    2026-07-24  server_pal: bundle webpki roots into the OTLP client (#1205)  <- deployed
+```
+
+Add `-y` to skip the confirmation. The deploy itself will:
 1. Copy deployment files to the host
 2. Copy r3dr static assets
 3. Copy observability configuration
-4. Pull latest Docker images
+4. Pull the images for that commit
 5. Restart all services
 
 ## Rollback
 
-Images are pushed with both a `latest` tag and the Git commit SHA (e.g. `abc1234`). To roll back, pin the service to a known-good commit in `compose.yaml`:
+Deploy an earlier commit — pick one with `--list`, then:
 
-```yaml
-image: ghcr.io/muchq/portrait:abc1234   # instead of :latest
+```bash
+./deploy/consolidated/deploy.sh --sha abc1234
 ```
 
-Then run `deploy.sh` again so the host pulls the pinned image.
+The whole stack moves together, so a rollback returns every service to a known
+state rather than leaving a hand-edited pin behind.
 
 ## Configuration Requirements
 
