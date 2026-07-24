@@ -303,3 +303,71 @@ func scalarResponse(value string) *QueryResponse {
 		},
 	}
 }
+
+func TestIsCrashLooping(t *testing.T) {
+	tests := []struct {
+		name     string
+		restarts float64
+		uptime   float64
+		want     bool
+	}{
+		// The shape of the OTEL crash-loop: restarting constantly, never up
+		// long enough to serve a request, so its app metrics stay flat.
+		{"restarting and never up", 47, 8, true},
+		{"at the threshold", crashLoopMinRestarts, crashLoopMaxUptime - 1, true},
+		// A fresh deploy is young but stable; a rough hour it recovered from
+		// has the restarts without the youth. Neither is a crash loop now.
+		{"just deployed", 1, 5, false},
+		{"recovered after a bad patch", 12, crashLoopMaxUptime + 1, false},
+		{"healthy and long lived", 0, 86400, false},
+		// Prometheus returns nothing for a container it has never seen, which
+		// arrives here as zeroes; absence must not read as failure.
+		{"no data", 0, 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isCrashLooping(tt.restarts, tt.uptime))
+		})
+	}
+}
+
+func TestFetchContainerMetrics_SurfacesCrashLoop(t *testing.T) {
+	mock := &mockPrometheusClient{queryResponses: map[string]*QueryResponse{
+		`count by (name) (container_last_seen)`: {
+			Status: "success",
+			Data: struct {
+				ResultType string   `json:"resultType"`
+				Result     []Result `json:"result"`
+			}{
+				ResultType: "vector",
+				Result: []Result{
+					{Metric: map[string]string{"name": "posterize"}, Value: []interface{}{1609459200.0, "1"}},
+					{Metric: map[string]string{"name": "golf_hub"}, Value: []interface{}{1609459200.0, "1"}},
+				},
+			},
+		},
+		`changes(container_start_time_seconds{name="posterize"}[1h])`: scalarResponse("47"),
+		`time()-container_start_time_seconds{name="posterize"}`:       scalarResponse("8"),
+		`changes(container_start_time_seconds{name="golf_hub"}[1h])`:  scalarResponse("0"),
+		`time()-container_start_time_seconds{name="golf_hub"}`:        scalarResponse("86400"),
+	}}
+	handler := NewMetricsHandler(mock)
+
+	metrics, err := handler.fetchContainerMetrics(context.Background())
+	require.NoError(t, err)
+	require.Len(t, metrics.Containers, 2)
+
+	byName := map[string]ContainerStats{}
+	for _, c := range metrics.Containers {
+		byName[c.Name] = c
+	}
+
+	// Crash-looping: restarting constantly, never up long enough to serve.
+	assert.Equal(t, 47.0, byName["posterize"].RestartsLastHour)
+	assert.Equal(t, 8.0, byName["posterize"].UptimeSeconds)
+	assert.True(t, byName["posterize"].CrashLooping)
+
+	// A healthy neighbour must not be tarred by it.
+	assert.Equal(t, 0.0, byName["golf_hub"].RestartsLastHour)
+	assert.False(t, byName["golf_hub"].CrashLooping)
+}

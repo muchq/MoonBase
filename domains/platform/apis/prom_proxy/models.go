@@ -107,6 +107,12 @@ type ContainerStats struct {
 	MemoryUsagePercent  float64 `json:"memory_usage_percent"`
 	NetworkRxBytes      float64 `json:"network_rx_bytes_per_sec"`
 	NetworkTxBytes      float64 `json:"network_tx_bytes_per_sec"`
+	// Restart churn and how long the current run has lasted. A container that
+	// dies on startup emits no app metrics at all, so these are the only
+	// signal that separates "crash-looping" from "idle" on a service page.
+	RestartsLastHour float64 `json:"restarts_last_hour"`
+	UptimeSeconds    float64 `json:"uptime_seconds"`
+	CrashLooping     bool    `json:"crash_looping"`
 }
 
 type ServiceCatalogEntry struct {
