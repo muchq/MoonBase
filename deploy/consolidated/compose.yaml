@@ -140,6 +140,9 @@ services:
       - "8084:8084"
     environment:
       - PORT=8084
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
+      - OTEL_SERVICE_NAME=posterize
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=posterize,service.version=latest
     volumes:
       - /etc/posterize:/etc/posterize
     networks:
