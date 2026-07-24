@@ -57,8 +57,9 @@ STUB
 #!/bin/bash
 args=()
 for a in "$@"; do [ "$a" = "-r" ] || args+=("$a"); done
-dest=${args[-1]}
-unset 'args[-1]'
+last=$((${#args[@]} - 1))   # not ${args[-1]}; bash 3.2 has no negative indices
+dest=${args[$last]}
+unset "args[$last]"
 path=${dest#*:}   # host:~/foo -> ~/foo
 path=${path#\~/}
 target="$FAKE_HOST/$path"
@@ -67,6 +68,16 @@ case "$dest" in
   *) mkdir -p "$(dirname "$target")" ;;
 esac
 cp -r "${args[@]}" "$target" 2>/dev/null || true
+STUB
+
+  # The remote payload targets the Linux host, so it uses GNU `xargs -r`. The
+  # stub ssh runs that payload locally, and BSD xargs rejects -r — drop the
+  # flag rather than weaken the command that actually ships.
+  cat > "$STUBS/xargs" <<'STUB'
+#!/bin/bash
+args=()
+for a in "$@"; do [ "$a" = "-r" ] || args+=("$a"); done
+exec /usr/bin/xargs "${args[@]}"
 STUB
 
   # Only docker is really run; mkdir/cp/chown against absolute host paths
@@ -301,6 +312,16 @@ check "shows the restart count" grep -qE "posterize .*47" "$WORK/out.txt"
 check "surfaces the exit code from the state" grep -q "Restarting (101)" "$WORK/out.txt"
 check "calls out the crash loop" grep -q "crash loop" "$WORK/out.txt"
 check "reports a healthy peer as 0 restarts" grep -qE "golf_hub .*0 " "$WORK/out.txt"
+
+echo "portability"
+# deploy.sh runs from a developer machine, and macOS still ships bash 3.2 as
+# /bin/bash — no associative arrays, no case-conversion expansions, no negative
+# array indices. CI runs bash 5, so only a static check catches this.
+# Comments are stripped first so prose about these constructs doesn't trip it.
+bash4_only=$(sed 's/#.*//' "$REPO/deploy/consolidated/deploy.sh" |
+  grep -nE 'declare -A|\$\{[A-Za-z_][A-Za-z0-9_]*\^\^|\$\{[A-Za-z_][A-Za-z0-9_]*,,|\bmapfile\b|\breadarray\b|\[-1\]' || true)
+check "no bash 4+ only syntax" test -z "$bash4_only"
+[ -n "$bash4_only" ] && printf '%s\n' "$bash4_only" | sed 's/^/          /'
 
 echo "argument handling"
 deploy --service nope -y

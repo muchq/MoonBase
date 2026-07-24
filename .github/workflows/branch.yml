@@ -28,6 +28,35 @@ jobs:
       - name: Test deploy.sh
         run: ./scripts/test-deploy
 
+  # deploy.sh runs from a developer machine, and macOS ships bash 3.2 as
+  # /bin/bash — no associative arrays or case-conversion expansions. The Linux
+  # job above runs bash 5 and cannot reproduce that, so run the same suite on a
+  # mac against /bin/bash explicitly.
+  test-deploy-macos:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for deploy changes
+        id: filter
+        run: |
+          CHANGED=$(git diff --name-only origin/main...HEAD -- deploy/ scripts/test-deploy)
+          if [ -n "$CHANGED" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Explicitly /bin/bash: the runner may have a newer bash earlier in PATH,
+      # which would defeat the point of running here at all.
+      - name: Test deploy.sh under system bash
+        if: steps.filter.outputs.changed == 'true'
+        run: |
+          /bin/bash --version | head -1
+          /bin/bash scripts/test-deploy
+
   format-check:
     runs-on: ubuntu-latest
     container:

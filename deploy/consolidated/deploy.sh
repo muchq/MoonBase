@@ -62,10 +62,11 @@ service_table() {
   ' "$COMPOSE_FILE"
 }
 
-# golf_hub -> GOLF_HUB_SHA, microgpt-serve -> MICROGPT_SERVE_SHA
+# golf_hub -> GOLF_HUB_SHA, microgpt-serve -> MICROGPT_SERVE_SHA.
+# tr rather than ${name^^}: macOS still ships bash 3.2, which has neither
+# case-conversion expansions nor associative arrays.
 sha_var_for() {
-  local name=${1//-/_}
-  echo "${name^^}_SHA"
+  echo "$1" | tr 'a-z-' 'A-Z_' | sed 's/$/_SHA/'
 }
 
 describe() { # describe <sha> -> "subject", or a placeholder when not local
@@ -175,10 +176,8 @@ if [ "$SHOW_STATUS" -eq 1 ]; then
     exit 1
   fi
 
-  declare -A restarts=()
-  while IFS='|' read -r kind svc count; do
-    [ "$kind" = "R" ] && [ -n "$svc" ] && restarts[$svc]=$count
-  done <<< "$running"
+  # A lookup rather than an associative array, which bash 3.2 lacks.
+  restarts_for() { printf '%s\n' "$running" | sed -n "s/^R|$1|//p" | tail -1; }
 
   printf '%-18s  %-9s  %-8s  %s\n' "SERVICE" "VERSION" "RESTARTS" "STATE"
   drifted=0
@@ -209,7 +208,8 @@ if [ "$SHOW_STATUS" -eq 1 ]; then
       Up*) ;;
       *) unhealthy=$((unhealthy + 1)) ;;
     esac
-    printf '%-18s  %-9s  %-8s  %s%s\n' "$svc" "$shown" "${restarts[$svc]:-?}" "$state" "$note"
+    count=$(restarts_for "$svc")
+    printf '%-18s  %-9s  %-8s  %s%s\n' "$svc" "$shown" "${count:-?}" "$state" "$note"
   done <<< "$(printf '%s\n' "$running" | sort)"
 
   if [ "$drifted" -gt 0 ] || [ "$unhealthy" -gt 0 ]; then
