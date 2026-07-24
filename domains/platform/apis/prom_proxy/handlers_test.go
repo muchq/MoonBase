@@ -333,7 +333,7 @@ func TestIsCrashLooping(t *testing.T) {
 
 func TestFetchContainerMetrics_SurfacesCrashLoop(t *testing.T) {
 	mock := &mockPrometheusClient{queryResponses: map[string]*QueryResponse{
-		`count by (name) (container_last_seen)`: {
+		`count by (name, image) (container_last_seen)`: {
 			Status: "success",
 			Data: struct {
 				ResultType string   `json:"resultType"`

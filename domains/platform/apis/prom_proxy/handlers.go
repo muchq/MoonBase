@@ -313,16 +313,18 @@ func (h *MetricsHandler) fetchContainerMetrics(ctx context.Context) (*ContainerM
 	}
 
 	// Get list of containers
-	containerQuery := `count by (name) (container_last_seen)`
+	containerQuery := `count by (name, image) (container_last_seen)`
 	containerResp, err := h.promClient.Query(ctx, containerQuery)
 	if err != nil {
 		return nil, err
 	}
 
 	containerNames := []string{}
+	images := map[string]string{}
 	for _, result := range containerResp.Data.Result {
 		if name, exists := result.Metric["name"]; exists && name != "" {
 			containerNames = append(containerNames, name)
+			images[name] = result.Metric["image"]
 		}
 	}
 
@@ -409,6 +411,8 @@ func (h *MetricsHandler) fetchContainerMetrics(ctx context.Context) (*ContainerM
 		}
 
 		stats.CrashLooping = isCrashLooping(stats.RestartsLastHour, stats.UptimeSeconds)
+		stats.Image = images[name]
+		stats.Version = imageTag(stats.Image)
 
 		metrics.Containers = append(metrics.Containers, stats)
 	}

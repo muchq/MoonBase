@@ -113,6 +113,11 @@ type ContainerStats struct {
 	RestartsLastHour float64 `json:"restarts_last_hour"`
 	UptimeSeconds    float64 `json:"uptime_seconds"`
 	CrashLooping     bool    `json:"crash_looping"`
+	// The image the container is actually running, and its tag. Deploys pin
+	// every image to a commit SHA (MoonBase#1210), so the tag is the running
+	// revision — the fact, as opposed to what the host recorded it should be.
+	Image   string `json:"image"`
+	Version string `json:"version"`
 }
 
 type ServiceCatalogEntry struct {
