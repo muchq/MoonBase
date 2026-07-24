@@ -1,0 +1,259 @@
+#!/bin/bash
+# Exercises deploy.sh end to end without a host, a docker daemon, or a network.
+#
+# The remote half of a deploy is just a string handed to ssh, so a stub `ssh`
+# that *executes* what it receives — against a throwaway HOME and a stub
+# `docker` — runs the real code path, including the heredoc. That's the half
+# local testing otherwise can't reach, and where the bugs have been.
+set -uo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+STUBS=$WORK/bin
+TESTROOT=$WORK/repo
+ORIGIN=$WORK/origin.git
+HOSTDIR=$WORK/host
+DOCKER_LOG=$WORK/docker.log
+
+FAILURES=0
+pass() { echo "  ok    $1"; }
+fail() {
+  echo "  FAIL  $1"
+  FAILURES=$((FAILURES + 1))
+}
+check() { # check <description> <condition-as-args>
+  local desc=$1
+  shift
+  if "$@"; then pass "$desc"; else fail "$desc"; fi
+}
+host_env_has() { grep -qx "$1" "$HOSTDIR/.env"; }
+host_env_lacks() { ! grep -q "^$1=" "$HOSTDIR/.env"; }
+
+# ---------------------------------------------------------------- stubs
+
+make_stubs() {
+  mkdir -p "$STUBS"
+
+  # Runs the received command (or heredoc on stdin) against the fake host.
+  # `~` resolves through HOME, so the script's ~/.env manipulation lands there.
+  cat > "$STUBS/ssh" <<'STUB'
+#!/bin/bash
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) shift 2 ;;
+    -*) shift ;;
+    *) break ;;
+  esac
+done
+shift # host
+export HOME="$FAKE_HOST"
+cd "$FAKE_HOST" || exit 1
+if [ $# -gt 0 ]; then bash -c "$*"; else bash -s; fi
+STUB
+
+  cat > "$STUBS/scp" <<'STUB'
+#!/bin/bash
+args=()
+for a in "$@"; do [ "$a" = "-r" ] || args+=("$a"); done
+dest=${args[-1]}
+unset 'args[-1]'
+path=${dest#*:}   # host:~/foo -> ~/foo
+path=${path#\~/}
+target="$FAKE_HOST/$path"
+case "$dest" in
+  */) mkdir -p "$target" ;;
+  *) mkdir -p "$(dirname "$target")" ;;
+esac
+cp -r "${args[@]}" "$target" 2>/dev/null || true
+STUB
+
+  # Only docker is really run; mkdir/cp/chown against absolute host paths
+  # (/var/www, /etc/forgejo) are neutralised so a test can't touch this machine.
+  cat > "$STUBS/sudo" <<'STUB'
+#!/bin/bash
+[ "$1" = "-E" ] && shift
+case "$1" in
+  docker) exec "$@" ;;
+  *) exit 0 ;;
+esac
+STUB
+
+  # Records what compose would have been invoked with, including the pin
+  # variables visible in its environment — that's how a stale exported pin
+  # beating the .env file becomes observable.
+  cat > "$STUBS/docker" <<'STUB'
+#!/bin/bash
+case "$1 $2" in
+  "manifest inspect")
+    for missing in $FAKE_MISSING_IMAGES; do
+      case "$3" in "$missing":*) exit 1 ;; esac
+    done
+    exit 0
+    ;;
+  "network inspect")
+    # Report the expected subnet so the script doesn't tear the network down.
+    [ "$3" = "--format" ] || [ "$4" = "--format" ] && echo "172.28.0.0/16|172.28.1.0/24"
+    exit 0
+    ;;
+esac
+pins=$(env | grep -E '^([A-Z0-9_]+_SHA)=' | sort | tr '\n' ' ')
+echo "docker $* || env: $pins" >> "$DOCKER_LOG"
+exit 0
+STUB
+
+  chmod +x "$STUBS"/*
+}
+
+# ---------------------------------------------------------------- fixture
+
+# A throwaway repo so deploy.sh's real git calls work offline: it self-locates
+# to its ../.. and resolves targets against origin/main.
+make_repo() {
+  rm -rf "$TESTROOT" "$ORIGIN"
+  mkdir -p "$TESTROOT/deploy/consolidated/o11y" \
+    "$TESTROOT/deploy/consolidated/forgejo" \
+    "$TESTROOT/domains/r3dr/apps/r3dr_web"
+  cp "$REPO/deploy/consolidated/deploy.sh" "$TESTROOT/deploy/consolidated/"
+  cp "$REPO/deploy/consolidated/compose.yaml" "$TESTROOT/deploy/consolidated/"
+  cp "$REPO/deploy/consolidated/docker-compose.observability.yml" "$TESTROOT/deploy/consolidated/"
+  cp "$REPO/deploy/consolidated/o11y/"* "$TESTROOT/deploy/consolidated/o11y/"
+  echo "# caddy" > "$TESTROOT/deploy/consolidated/Caddyfile"
+  echo "[server]" > "$TESTROOT/deploy/consolidated/forgejo/app.ini"
+  echo "<html></html>" > "$TESTROOT/domains/r3dr/apps/r3dr_web/index.html"
+
+  git -C "$TESTROOT" init -q -b main
+  local g="git -C $TESTROOT -c user.email=t@example.com -c user.name=test"
+  $g add -A
+  $g commit -qm "older change (#1001)"
+  echo "x" > "$TESTROOT/domains/r3dr/apps/r3dr_web/v2.txt"
+  $g add -A
+  $g commit -qm "middle change (#1002)"
+  echo "y" >> "$TESTROOT/domains/r3dr/apps/r3dr_web/v2.txt"
+  $g add -A
+  $g commit -qm "newest change (#1003)"
+
+  git init -q --bare "$ORIGIN"
+  git -C "$TESTROOT" remote add origin "$ORIGIN"
+  git -C "$TESTROOT" push -q origin main
+  git -C "$TESTROOT" fetch -q origin main
+
+  # Untracked, like the real one (.gitignore'd) and holding secrets only. Its
+  # presence matters: deploy.sh copies it over the host's ~/.env, which is
+  # what made a targeted deploy drop the pins the host was relying on.
+  {
+    echo "ONE_D4_DB_PASSWORD=supersecret"
+    echo "ONE_D4_SENTRY_DSN=https://sentry.example"
+  } > "$TESTROOT/.env"
+}
+
+# Fake host carrying secrets plus whatever pins a scenario starts from.
+reset_host() {
+  rm -rf "$HOSTDIR"
+  mkdir -p "$HOSTDIR"
+  : > "$DOCKER_LOG"
+  {
+    echo "ONE_D4_DB_PASSWORD=supersecret"
+    echo "ONE_D4_SENTRY_DSN=https://sentry.example"
+    for line in "$@"; do echo "$line"; done
+  } > "$HOSTDIR/.env"
+  chmod 600 "$HOSTDIR/.env"
+}
+
+deploy() { # deploy <args...> -> exit code, output in $WORK/out.txt
+  # Run from the fixture so the script under test can't reach the real repo,
+  # whether or not it self-locates.
+  (
+    cd "$TESTROOT" || exit 1
+    PATH="$STUBS:$PATH" FAKE_HOST="$HOSTDIR" DOCKER_LOG="$DOCKER_LOG" \
+      FAKE_MISSING_IMAGES="${FAKE_MISSING_IMAGES:-}" \
+      bash deploy/consolidated/deploy.sh "$@"
+  ) > "$WORK/out.txt" 2>&1
+}
+
+# ---------------------------------------------------------------- cases
+
+make_stubs
+make_repo
+SHA=$(git -C "$TESTROOT" rev-parse origin/main)
+OLD_SHA=$(git -C "$TESTROOT" rev-parse "origin/main~2")
+
+echo "full deploy"
+reset_host "DEPLOY_SHA=previoussha"
+deploy -y
+rc=$?
+check "exits 0" test $rc -eq 0
+check "pins DEPLOY_SHA to the target commit" host_env_has "DEPLOY_SHA=$SHA"
+check "keeps secrets" host_env_has "ONE_D4_DB_PASSWORD=supersecret"
+check "pulls and ups every service" \
+  grep -q -- "up -d --remove-orphans" "$DOCKER_LOG"
+check "keeps .env at mode 600" \
+  test "$(stat -c '%a' "$HOSTDIR/.env" 2>/dev/null || stat -f '%Lp' "$HOSTDIR/.env")" = 600
+
+echo "targeted deploy"
+reset_host "DEPLOY_SHA=stackwidesha" "POSTERIZE_SHA=posterizepin"
+deploy --service mithril -y
+rc=$?
+check "exits 0" test $rc -eq 0
+check "pins the named service" host_env_has "MITHRIL_SHA=$SHA"
+# The regression: scp of the local .env drops the pins, so an unrestored
+# DEPLOY_SHA left every other service resolving to :latest after a reboot.
+check "preserves the stack-wide pin" host_env_has "DEPLOY_SHA=stackwidesha"
+check "preserves another service's pin" host_env_has "POSTERIZE_SHA=posterizepin"
+check "does not reap other services" \
+  bash -c '! grep -q -- "--remove-orphans" "$0"' "$DOCKER_LOG"
+
+echo "full deploy clears per-service pins"
+reset_host "DEPLOY_SHA=stackwidesha" "POSTERIZE_SHA=posterizepin"
+deploy -y
+check "removes the per-service pin from .env" host_env_lacks POSTERIZE_SHA
+# Guard the next check against passing vacuously: if the deploy died before
+# compose ran, an empty log would satisfy the absence assertion below.
+check "reaches compose" test -s "$DOCKER_LOG"
+# export cannot unset, so exporting .env before the rewrite left a cleared pin
+# in the environment, where compose prefers it over the file.
+check "cleared pin is absent from compose's environment" \
+  bash -c '! grep -q "POSTERIZE_SHA=posterizepin" "$0"' "$DOCKER_LOG"
+
+echo "unpublished commit"
+reset_host "DEPLOY_SHA=stackwidesha"
+FAKE_MISSING_IMAGES="ghcr.io/muchq/mithril" deploy -y
+rc=$?
+check "refuses to deploy" test $rc -ne 0
+check "names the missing image" grep -q "ghcr.io/muchq/mithril" "$WORK/out.txt"
+check "leaves the host untouched" host_env_has "DEPLOY_SHA=stackwidesha"
+check "runs no compose commands" test ! -s "$DOCKER_LOG"
+
+echo "rollback to an older commit"
+reset_host "DEPLOY_SHA=$SHA"
+deploy --sha "$OLD_SHA" -y
+check "pins to the older commit" host_env_has "DEPLOY_SHA=$OLD_SHA"
+
+echo "listings"
+reset_host "DEPLOY_SHA=$SHA"
+deploy --list 3
+check "lists the requested number of commits" \
+  test "$(tail -n +2 "$WORK/out.txt" | wc -l)" -eq 3
+check "shows PR numbers from commit subjects" grep -q "(#1003)" "$WORK/out.txt"
+check "marks the deployed commit" grep -q -- "<- deployed" "$WORK/out.txt"
+deploy --services
+check "lists every pinned service" \
+  test "$(tail -n +2 "$WORK/out.txt" | wc -l)" -eq \
+  "$(grep -c 'image: ghcr.io/muchq/' "$REPO/deploy/consolidated/compose.yaml")"
+
+echo "argument handling"
+deploy --service nope -y
+check "rejects an unknown service" test $? -ne 0
+deploy --sha definitelynotacommit -y
+check "rejects an unknown commit" test $? -ne 0
+deploy --bogus
+check "rejects an unknown flag" test $? -ne 0
+
+echo
+if [ "$FAILURES" -eq 0 ]; then
+  echo "all deploy.sh checks passed"
+else
+  echo "$FAILURES check(s) failed"
+fi
+exit $((FAILURES > 0))
