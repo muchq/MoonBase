@@ -326,7 +326,9 @@ func (h *MetricsHandler) fetchContainerMetrics(ctx context.Context) (*ContainerM
 		}
 	}
 
-	// Fetch metrics for each container
+	// Fetch metrics for each container, including the restart churn that is a
+	// crash-looping service's only trace — it dies before serving anything, so
+	// its app metrics stay flat and look exactly like an idle service.
 	for _, name := range containerNames {
 		stats := ContainerStats{Name: name}
 
@@ -387,10 +389,43 @@ func (h *MetricsHandler) fetchContainerMetrics(ctx context.Context) (*ContainerM
 			}
 		}
 
+		// Restarts. cAdvisor exposes no restart counter, so count the steps in
+		// the container's start time: each restart re-stamps it.
+		restartQuery := fmt.Sprintf(`changes(container_start_time_seconds{name="%s"}[1h])`, name)
+		restartResp, err := h.promClient.Query(ctx, restartQuery)
+		if err == nil && len(restartResp.Data.Result) > 0 {
+			if val, err := extractFloatValue(&restartResp.Data.Result[0]); err == nil {
+				stats.RestartsLastHour = val
+			}
+		}
+
+		// How long the current run has lasted.
+		uptimeQuery := fmt.Sprintf(`time()-container_start_time_seconds{name="%s"}`, name)
+		uptimeResp, err := h.promClient.Query(ctx, uptimeQuery)
+		if err == nil && len(uptimeResp.Data.Result) > 0 {
+			if val, err := extractFloatValue(&uptimeResp.Data.Result[0]); err == nil {
+				stats.UptimeSeconds = val
+			}
+		}
+
+		stats.CrashLooping = isCrashLooping(stats.RestartsLastHour, stats.UptimeSeconds)
+
 		metrics.Containers = append(metrics.Containers, stats)
 	}
 
 	return metrics, nil
+}
+
+// A container is crash-looping when it keeps restarting and never stays up:
+// repeated restarts alone could be one bad hour it recovered from, and a young
+// container alone is just a fresh deploy. Together they mean it can't start.
+const (
+	crashLoopMinRestarts = 3
+	crashLoopMaxUptime   = 300 // seconds
+)
+
+func isCrashLooping(restartsLastHour, uptimeSeconds float64) bool {
+	return restartsLastHour >= crashLoopMinRestarts && uptimeSeconds < crashLoopMaxUptime
 }
 
 func (h *MetricsHandler) fetchContainerMetricsTimeSeries(ctx context.Context, timeRange TimeRange) (*TimeSeriesResponse, error) {
@@ -414,6 +449,9 @@ func (h *MetricsHandler) fetchContainerMetricsTimeSeries(ctx context.Context, ti
 		"memory_usage_percent": `(container_memory_usage_bytes/container_spec_memory_limit_bytes)*100`,
 		"network_rx":          `rate(container_network_receive_bytes_total[5m])`,
 		"network_tx":          `rate(container_network_transmit_bytes_total[5m])`,
+		// The history a point-in-time check can't give: restarts over the
+		// window, so a crash loop that resolved overnight is still visible.
+		"restarts": `changes(container_start_time_seconds[5m])`,
 	}
 
 	// Execute each query as a range query
