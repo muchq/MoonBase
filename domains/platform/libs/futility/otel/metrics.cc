@@ -67,6 +67,27 @@ void MetricsRecorder::RecordLatency(const std::string& metric_name,
   }
 }
 
+void MetricsRecorder::RecordDistribution(const std::string& metric_name, double value,
+                                         const std::map<std::string, std::string>& attributes) {
+  if (!meter_) return;
+
+  auto* histogram = FindOrCreate(histograms_, metric_name,
+                                 [&] { return meter_->CreateUInt64Histogram(metric_name); });
+  if (histogram != nullptr) {
+    auto context = opentelemetry::context::Context{};
+    if (attributes.empty()) {
+      histogram->Record(static_cast<uint64_t>(value), context);
+    } else {
+      // Convert attributes to OpenTelemetry format
+      std::vector<std::pair<std::string, std::string>> attr_vec(attributes.begin(),
+                                                                attributes.end());
+      auto kv_iterable = opentelemetry::common::KeyValueIterableView<
+          std::vector<std::pair<std::string, std::string>>>(attr_vec);
+      histogram->Record(static_cast<uint64_t>(value), kv_iterable, context);
+    }
+  }
+}
+
 void MetricsRecorder::RecordGauge(const std::string& metric_name, double value,
                                   const std::map<std::string, std::string>& attributes) {
   if (!meter_) return;

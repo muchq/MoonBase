@@ -37,8 +37,10 @@ absl::StatusOr<TraceResponse> TracerService::trace(TraceRequest& trace_request) 
     auto [scene, perspective, output] = trace_request;
 
     // Record scene complexity metrics
-    metrics_.RecordGauge("scene_sphere_count", static_cast<double>(scene.spheres.size()));
-    metrics_.RecordGauge("scene_light_count", static_cast<double>(scene.lights.size()));
+    // Distributions, not gauges: RecordGauge is an up-down delta, so
+    // feeding it absolute counts accumulated a lifetime sum.
+    metrics_.RecordDistribution("scene_sphere_count", static_cast<double>(scene.spheres.size()));
+    metrics_.RecordDistribution("scene_light_count", static_cast<double>(scene.lights.size()));
 
     auto image = do_trace(scene, perspective, output);
     auto png_bytes = pngpp::imageToPng(image);

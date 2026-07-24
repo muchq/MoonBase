@@ -20,7 +20,7 @@ type serviceEntry struct {
 }
 
 // Catalog order doubles as the UI's tab order.
-var serviceOrder = []string{"golf_hub", "microgpt-serve", "portrait"}
+var serviceOrder = []string{"golf_hub", "microgpt-serve", "mithril", "portrait"}
 
 var serviceRegistry = map[string]serviceEntry{
 	"golf_hub": {
@@ -58,18 +58,20 @@ var serviceRegistry = map[string]serviceEntry{
 			"avg_duration_ms":   `sum(rate(microgpt_request_duration_ms_sum[5m]))/sum(rate(microgpt_request_duration_ms_count[5m]))`,
 		},
 	},
+	// Wordchains: server_pal's standard instruments only, no custom set.
+	"mithril": {},
 	"portrait": {
 		CustomScalars: []customScalarDef{
 			{"Render cache", "hit_rate_percent", "%", `rate(trace_cache_hits_total[5m])/(rate(trace_cache_hits_total[5m])+rate(trace_cache_misses_total[5m]))*100`},
 			{"Render cache", "operations_per_sec", "/s", `rate(trace_cache_hits_total[5m])+rate(trace_cache_misses_total[5m])`},
-			{"Scene complexity", "avg_spheres_1h", "spheres", `avg_over_time(scene_sphere_count_gauge[1h])`},
-			{"Scene complexity", "avg_lights_1h", "lights", `avg_over_time(scene_light_count_gauge[1h])`},
+			{"Scene complexity", "avg_spheres_1h", "spheres", `sum(rate(scene_sphere_count_sum[1h]))/sum(rate(scene_sphere_count_count[1h]))`},
+			{"Scene complexity", "avg_lights_1h", "lights", `sum(rate(scene_light_count_sum[1h]))/sum(rate(scene_light_count_count[1h]))`},
 		},
 		CustomTimeseries: map[string]string{
 			"cache_hit_rate":        `rate(trace_cache_hits_total[5m])/(rate(trace_cache_hits_total[5m])+rate(trace_cache_misses_total[5m]))*100`,
 			"cache_operations_rate": `rate(trace_cache_hits_total[5m])+rate(trace_cache_misses_total[5m])`,
-			"scene_sphere_count":    `scene_sphere_count_gauge`,
-			"scene_light_count":     `scene_light_count_gauge`,
+			"scene_sphere_count":    `sum(rate(scene_sphere_count_sum[5m]))/sum(rate(scene_sphere_count_count[5m]))`,
+			"scene_light_count":     `sum(rate(scene_light_count_sum[5m]))/sum(rate(scene_light_count_count[5m]))`,
 		},
 	},
 }

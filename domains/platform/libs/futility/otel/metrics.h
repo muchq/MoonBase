@@ -77,6 +77,19 @@ class MetricsRecorder {
   void RecordLatency(const std::string& metric_name, std::chrono::microseconds duration,
                      const std::map<std::string, std::string>& attributes = {});
 
+  /// @brief Records one observation of a per-event quantity.
+  ///
+  /// Use for distributions of request-scoped values (payload sizes, scene
+  /// complexity). The histogram keeps the name as given; query the
+  /// windowed average as rate(<name>_sum)/rate(<name>_count). Not for
+  /// point-in-time levels — that is RecordGauge's delta form.
+  ///
+  /// @param metric_name The metric name (e.g., "scene_sphere_count").
+  /// @param value The observed value.
+  /// @param attributes Optional key-value labels for the metric.
+  void RecordDistribution(const std::string& metric_name, double value,
+                          const std::map<std::string, std::string>& attributes = {});
+
   /// @brief Records a gauge metric (point-in-time value).
   ///
   /// Use for current state: active connections, queue depth, memory usage, etc.

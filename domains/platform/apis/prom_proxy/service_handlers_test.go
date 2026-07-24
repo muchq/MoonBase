@@ -55,12 +55,13 @@ func TestMetricsHandler_GetServiceCatalog(t *testing.T) {
 	var catalog ServiceCatalog
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &catalog))
 
-	require.Len(t, catalog.Services, 3)
+	require.Len(t, catalog.Services, 4)
 	assert.Equal(t, "golf_hub", catalog.Services[0].Name)
 	assert.Equal(t, "microgpt-serve", catalog.Services[1].Name)
-	assert.Equal(t, "portrait", catalog.Services[2].Name)
+	assert.Equal(t, "mithril", catalog.Services[2].Name)
+	assert.Equal(t, "portrait", catalog.Services[3].Name)
 	for _, entry := range catalog.Services {
-		assert.True(t, entry.HasCustom, entry.Name)
+		assert.Equal(t, entry.Name != "mithril", entry.HasCustom, entry.Name)
 	}
 
 	// The wire field names are the UI contract.
