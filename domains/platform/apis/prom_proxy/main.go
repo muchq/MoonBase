@@ -36,31 +36,13 @@ func main() {
 	// Health endpoint
 	router.HandleFunc("GET /health", metricsHandler.HealthHandler)
 
-	// Dashboard overhaul (#1199): catalog, merged host page, and generic
-	// per-service pages. The per-service scalar/timeseries routes below
-	// are legacy and retire once the UI cutover deploys.
+	// Dashboard routes (#1199): catalog, merged host page, and generic
+	// per-service pages driven by the registry.
 	router.HandleFunc("GET /metrics/v1/services", metricsHandler.GetServiceCatalog)
 	router.HandleFunc("GET /metrics/v1/host", metricsHandler.GetHostMetrics)
 	router.HandleFunc("GET /metrics/v1/host/timeseries/{range}", metricsHandler.GetHostMetricsTimeSeries)
 	router.HandleFunc("GET /metrics/v1/service/{name}", metricsHandler.GetServiceMetrics)
 	router.HandleFunc("GET /metrics/v1/service/{name}/timeseries/{range}", metricsHandler.GetServiceMetricsTimeSeries)
-
-	// Metrics endpoints - current point-in-time data
-	router.HandleFunc("GET /metrics/v1/scalar/system", metricsHandler.GetSystemMetrics)
-	router.HandleFunc("GET /metrics/v1/scalar/portrait", metricsHandler.GetPortraitMetrics)
-	router.HandleFunc("GET /metrics/v1/scalar/containers", metricsHandler.GetContainerMetrics)
-	router.HandleFunc("GET /metrics/v1/scalar/summary", metricsHandler.GetSummaryMetrics)
-	router.HandleFunc("GET /metrics/v1/scalar/golf", metricsHandler.GetGolfMetrics)
-
-	// Timeseries endpoints - historical data with time ranges
-	router.HandleFunc("GET /metrics/v1/timeseries/system/{range}", metricsHandler.GetSystemMetricsTimeSeries)
-	router.HandleFunc("GET /metrics/v1/timeseries/portrait/{range}", metricsHandler.GetPortraitMetricsTimeSeries)
-	router.HandleFunc("GET /metrics/v1/timeseries/containers/{range}", metricsHandler.GetContainerMetricsTimeSeries)
-	router.HandleFunc("GET /metrics/v1/timeseries/microgpt/{range}", metricsHandler.GetMicrogptMetricsTimeSeries)
-	router.HandleFunc("GET /metrics/v1/timeseries/golf/{range}", metricsHandler.GetGolfMetricsTimeSeries)
-
-	// MicroGPT endpoints
-	router.HandleFunc("GET /metrics/v1/scalar/microgpt", metricsHandler.GetMicrogptMetrics)
 
 	log.Printf("Starting Prometheus proxy server on port %s", port)
 	log.Printf("Prometheus backend: %s", prometheusURL)

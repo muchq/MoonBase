@@ -95,7 +95,7 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	responses := map[string]*QueryResponse{}
 	standard := standardScalarQueries("golf_hub")
 	for i, q := range standard {
-		responses[q.Query] = golfScalarResponse(fmt.Sprintf("%d", 100+i))
+		responses[q.Query] = scalarResponse(fmt.Sprintf("%d", 100+i))
 	}
 	entry := serviceRegistry["golf_hub"]
 	omitted := entry.CustomScalars[len(entry.CustomScalars)-1]
@@ -103,7 +103,7 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 		if def == omitted {
 			continue
 		}
-		responses[def.Query] = golfScalarResponse(fmt.Sprintf("%d", 200+i))
+		responses[def.Query] = scalarResponse(fmt.Sprintf("%d", 200+i))
 	}
 
 	handler := &MetricsHandler{promClient: &mockPrometheusClient{queryResponses: responses}}
@@ -151,7 +151,7 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 func TestMetricsHandler_GetServiceMetrics_NoCustomServiceKeepsEmptyArray(t *testing.T) {
 	mockClient := &mockPrometheusClient{
 		queryResponses: map[string]*QueryResponse{
-			`sum(rate(http_server_requests_total{service_name="mithril"}[5m]))`: golfScalarResponse("2.5"),
+			`sum(rate(http_server_requests_total{service_name="mithril"}[5m]))`: scalarResponse("2.5"),
 		},
 	}
 
