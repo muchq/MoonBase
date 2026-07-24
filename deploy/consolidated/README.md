@@ -4,6 +4,9 @@ This directory contains the consolidated deployment configuration for multiple s
 
 ## Services Deployed
 
+`deploy.sh --services` lists these from `compose.yaml`, which is the source of
+truth for what's deployable.
+
 - **api.muchq.com** - API backend services
   - [`games_ws_backend`](../../domains/games/apis/games_ws_backend) (port 8080)
   - [`portrait`](../../domains/graphics/apis/portrait) (port 8081)
@@ -12,6 +15,8 @@ This directory contains the consolidated deployment configuration for multiple s
   - [`mithril`](../../domains/games/apis/mithril) (port 8083)
   - [`posterize`](../../domains/graphics/apis/posterize) (port 8084)
   - [`mcpserver`](../../domains/games/apis/mcpserver) (port 8086)
+  - [`microgpt-serve`](../../domains/ai/apis/microgpt_serve) (port 8087)
+  - [`one_d4`](../../domains/games/apis/one_d4) (port 8088)
 
 - **r3dr.net** - URL shortener service
   - [`r3dr`](../../domains/r3dr/apis/r3dr) (port 8085)
@@ -65,7 +70,7 @@ To deploy the latest commit on `main`:
 It shows the commit you're about to deploy and asks to confirm:
 
 ```
-Deploying 1694f01  posterize: accept common image formats and preserve them on output (#1207)
+Deploying all services at 1694f01  posterize: accept common image formats and preserve them on output (#1207)
 Replacing 891973a  server_pal: bundle webpki roots into the OTLP client (#1205)
 Proceed? [y/N]
 ```
