@@ -17,6 +17,7 @@ so what runs is reproducible and a rollback is just --sha.
 Options:
   -l, --list [COUNT]     Show the last COUNT commits (default 10) and exit
       --services         Show the deployable services and exit
+      --status           Show what each container is actually running, and exit
   -s, --sha SHA          Deploy a specific commit; default is the latest on main
       --latest           Deploy the latest commit on main (the default)
       --service NAME     Deploy only NAME, leaving the rest of the stack alone
@@ -73,6 +74,7 @@ describe() { # describe <sha> -> "subject", or a placeholder when not local
 
 LIST_COUNT=""
 LIST_SERVICES=0
+SHOW_STATUS=0
 TARGET_REF=""
 TARGET_SERVICE=""
 ASSUME_YES=0
@@ -91,6 +93,10 @@ while [ $# -gt 0 ]; do
       ;;
     --services)
       LIST_SERVICES=1
+      shift
+      ;;
+    --status)
+      SHOW_STATUS=1
       shift
       ;;
     -s | --sha)
@@ -146,13 +152,55 @@ if [ -n "$TARGET_SERVICE" ] && ! service_names | grep -qx "$TARGET_SERVICE"; the
   exit 1
 fi
 
-# Deploy targets are commits on main that CI has already published, so resolve
-# against the remote rather than whatever the local checkout happens to be on.
-git fetch --quiet origin main
-
 # One round trip; the host's .env is both the pin store and the secrets file.
 host_env=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'cat ~/.env' 2>/dev/null || true)
 host_pin() { printf '%s\n' "$host_env" | sed -n "s/^$1=//p" | tail -1; }
+
+# What the host records is only the intent; the containers are the fact. They
+# diverge when a container wasn't recreated, so read them rather than infer.
+if [ "$SHOW_STATUS" -eq 1 ]; then
+  running=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" \
+    "sudo docker ps -a --filter label=com.docker.compose.service \
+       --format '{{.Label \"com.docker.compose.service\"}}|{{.Image}}|{{.Status}}'" 2>/dev/null)
+  if [ -z "$running" ]; then
+    echo "Error: could not read container state from $HOST" >&2
+    exit 1
+  fi
+  printf '%-18s  %-9s  %s\n' "SERVICE" "VERSION" "STATE"
+  drifted=0
+  while IFS='|' read -r svc image state; do
+    [ -n "$svc" ] || continue
+    tag=${image##*:}
+    shown=$tag
+    case "$tag" in
+      # Show a revision the way --list does; leave third-party tags alone.
+      [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) shown=${tag:0:7} ;;
+    esac
+    note=""
+    case "$image" in
+      ghcr.io/muchq/*)
+        expected=$(host_pin "$(sha_var_for "$svc")")
+        [ -n "$expected" ] || expected=$(host_pin DEPLOY_SHA)
+        if [ -n "$expected" ] && [ "$tag" != "$expected" ]; then
+          note="  <- .env says ${expected:0:7}"
+          drifted=$((drifted + 1))
+        fi
+        ;;
+    esac
+    printf '%-18s  %-9s  %s%s\n' "$svc" "$shown" "$state" "$note"
+  done <<< "$(printf '%s\n' "$running" | sort)"
+  if [ "$drifted" -gt 0 ]; then
+    echo
+    echo "$drifted container(s) are not running the recorded revision — a deploy" >&2
+    echo "may not have recreated them. A full deploy re-converges the stack." >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+# Deploy targets are commits on main that CI has already published, so resolve
+# against the remote rather than whatever the local checkout happens to be on.
+git fetch --quiet origin main
 
 if [ -n "$TARGET_SERVICE" ]; then
   deployed_sha=$(host_pin "$(sha_var_for "$TARGET_SERVICE")")

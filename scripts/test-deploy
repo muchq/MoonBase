@@ -97,6 +97,10 @@ case "$1 $2" in
     [ "$3" = "--format" ] || [ "$4" = "--format" ] && echo "172.28.0.0/16|172.28.1.0/24"
     exit 0
     ;;
+  "ps -a")
+    printf '%s\n' "$FAKE_PS"
+    exit 0
+    ;;
 esac
 pins=$(env | grep -E '^([A-Z0-9_]+_SHA)=' | sort | tr '\n' ' ')
 echo "docker $* || env: $pins" >> "$DOCKER_LOG"
@@ -167,7 +171,7 @@ deploy() { # deploy <args...> -> exit code, output in $WORK/out.txt
   (
     cd "$TESTROOT" || exit 1
     PATH="$STUBS:$PATH" FAKE_HOST="$HOSTDIR" DOCKER_LOG="$DOCKER_LOG" \
-      FAKE_MISSING_IMAGES="${FAKE_MISSING_IMAGES:-}" \
+      FAKE_MISSING_IMAGES="${FAKE_MISSING_IMAGES:-}" FAKE_PS="${FAKE_PS:-}" \
       bash deploy/consolidated/deploy.sh "$@"
   ) > "$WORK/out.txt" 2>&1
 }
@@ -241,6 +245,27 @@ deploy --services
 check "lists every pinned service" \
   test "$(tail -n +2 "$WORK/out.txt" | wc -l)" -eq \
   "$(grep -c 'image: ghcr.io/muchq/' "$REPO/deploy/consolidated/compose.yaml")"
+
+echo "status"
+reset_host "DEPLOY_SHA=$SHA" "POSTERIZE_SHA=posterizepin"
+FAKE_PS="golf_hub|ghcr.io/muchq/golf_hub:$SHA|Up 2 hours
+posterize|ghcr.io/muchq/posterize:posterizepin|Up 5 minutes
+caddy|caddy:2-alpine|Up 2 hours" deploy --status
+rc=$?
+check "exits 0 when everything matches" test $rc -eq 0
+check "reports the running revision" grep -q "golf_hub .*${SHA:0:7}" "$WORK/out.txt"
+check "honours a per-service pin" grep -q "posterize .*posterizepin" "$WORK/out.txt"
+check "includes third-party containers" grep -q "caddy .*2-alpine" "$WORK/out.txt"
+
+# A container the deploy didn't recreate keeps its old image while .env claims
+# the new one — the divergence --status exists to surface.
+reset_host "DEPLOY_SHA=$SHA"
+FAKE_PS="golf_hub|ghcr.io/muchq/golf_hub:$SHA|Up 2 hours
+mithril|ghcr.io/muchq/mithril:$OLD_SHA|Up 3 days" deploy --status
+rc=$?
+check "fails when a container drifted from .env" test $rc -ne 0
+check "names the drifted service" grep -q "mithril" "$WORK/out.txt"
+check "shows what .env expected" grep -q "\.env says ${SHA:0:7}" "$WORK/out.txt"
 
 echo "argument handling"
 deploy --service nope -y

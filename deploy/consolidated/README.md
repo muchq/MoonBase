@@ -133,6 +133,26 @@ Only the named container is recreated, but config files are still synced and
 Caddy is still reloaded, exactly as in a full deploy — "targeted" refers to the
 container, not to everything the script touches.
 
+### Checking what's actually running
+
+```bash
+./deploy/consolidated/deploy.sh --status
+```
+
+```
+SERVICE             VERSION    STATE
+caddy               2-alpine   Up 3 hours
+golf_hub            7faca68    Up 3 hours
+mithril             1694f01    Up 12 minutes
+posterize           dac0383    Restarting (101) 8 seconds ago  <- .env says 7faca68
+prom_proxy          7faca68    Up 3 hours
+```
+
+This reads the containers themselves rather than the recorded pins, so it shows
+the *fact* rather than the intent. The two diverge when a deploy didn't recreate
+a container, and `--status` exits non-zero when they do — which is also how you
+confirm a deploy actually took effect. A full deploy re-converges the stack.
+
 ## Rollback
 
 Deploy an earlier commit — pick one with `--list`, then:
