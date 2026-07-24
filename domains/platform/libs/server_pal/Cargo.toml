@@ -9,6 +9,8 @@ readme.workspace = true
 axum = { workspace = true }
 opentelemetry = { workspace = true }
 rustls = { workspace = true }
+reqwest = { workspace = true, features = ["blocking"] }
+webpki-roots = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 tokio = { workspace = true, features = ["net"] }

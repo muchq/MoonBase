@@ -9,14 +9,14 @@ use axum::response::Response;
 use axum::routing::{MethodRouter, get};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
-use opentelemetry_otlp::{MetricExporter, WithExportConfig};
+use opentelemetry_otlp::{MetricExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
+use std::env;
+use std::time::Duration;
 use tokio::net::TcpListener;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
-use std::env;
-use std::time::Duration;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -41,13 +41,46 @@ pub fn init_otel() -> Option<SdkMeterProvider> {
     let endpoint = env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok()?;
 
     // reqwest is pinned with rustls-no-provider (workspace Cargo.toml), so
-    // no default CryptoProvider is compiled in; the OTLP exporter's reqwest
-    // client panics on its first export unless the process installs one.
-    // Idempotent — Err means another caller already installed it.
+    // no default CryptoProvider is compiled in; installing one lets us build
+    // a rustls ClientConfig below. Idempotent — Err means already installed.
     let _ = rustls::crypto::ring::default_provider().install_default();
+
+    // reqwest 0.13 dropped the webpki-roots feature and forces
+    // rustls-platform-verifier, which reads the system trust store — absent
+    // in our minimal container images. Left to its own devices the OTLP
+    // exporter builds a default reqwest client that fails ("No CA
+    // certificates were loaded from the system") and panics. Build the
+    // client ourselves with Mozilla's roots bundled into the binary, so it
+    // needs nothing from the host.
+    // The blocking client spins up its own runtime, so it must be built off
+    // the async main thread (opentelemetry-otlp's default path does the same).
+    let http_client = match std::thread::spawn(|| {
+        let mut roots = rustls::RootCertStore::empty();
+        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let tls = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .use_preconfigured_tls(tls)
+            .build()
+    })
+    .join()
+    {
+        Ok(Ok(client)) => client,
+        Ok(Err(e)) => {
+            eprintln!("warning: failed to build OTLP http client: {e}; metrics disabled");
+            return None;
+        }
+        Err(_) => {
+            eprintln!("warning: OTLP http client build panicked; metrics disabled");
+            return None;
+        }
+    };
 
     let exporter = match MetricExporter::builder()
         .with_http()
+        .with_http_client(http_client)
         .with_endpoint(format!("{}/v1/metrics", endpoint))
         .with_timeout(Duration::from_secs(5))
         .build()
@@ -125,7 +158,12 @@ async fn http_metrics_middleware(req: Request, next: Next) -> Response {
         KeyValue::new("service_name", service_name),
     ];
 
-    http_counter(&HTTP_REQUESTS, "http_server_requests", "HTTP requests received").add(1, &attrs);
+    http_counter(
+        &HTTP_REQUESTS,
+        "http_server_requests",
+        "HTTP requests received",
+    )
+    .add(1, &attrs);
     let _active = ActiveRequest::start(attrs.clone());
 
     let resp = next.run(req).await;
@@ -282,7 +320,10 @@ mod tests {
     async fn rate_limiter_blocks_after_burst() {
         // 1 req/s per IP, burst of 2
         let app = router_builder::<NoState>()
-            .rate_limit(Some(RateLimit { per_second: 1, burst: 2 }))
+            .rate_limit(Some(RateLimit {
+                per_second: 1,
+                burst: 2,
+            }))
             .build()
             .with_state(NoState);
 
