@@ -61,6 +61,9 @@ async fn wordchain_post(
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
+    // Keeps the exporter alive for the process lifetime; without this the
+    // http_server_* instruments record into the no-op global meter.
+    let _otel_provider = server_pal::init_otel();
 
     let data_dir = "mithril.runfiles/_main/domains/games/apis/mithril/data";
     let path = format!("{}/words.txt", data_dir);

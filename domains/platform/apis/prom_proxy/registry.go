@@ -64,6 +64,8 @@ var serviceRegistry = map[string]serviceEntry{
 		CustomScalars: []customScalarDef{
 			{"Render cache", "hit_rate_percent", "%", `rate(trace_cache_hits_total[5m])/(rate(trace_cache_hits_total[5m])+rate(trace_cache_misses_total[5m]))*100`},
 			{"Render cache", "operations_per_sec", "/s", `rate(trace_cache_hits_total[5m])+rate(trace_cache_misses_total[5m])`},
+			// Windowed averages over RecordDistribution histograms:
+			// rate(sum)/rate(count) = mean per request in the window.
 			{"Scene complexity", "avg_spheres_1h", "spheres", `sum(rate(scene_sphere_count_sum[1h]))/sum(rate(scene_sphere_count_count[1h]))`},
 			{"Scene complexity", "avg_lights_1h", "lights", `sum(rate(scene_light_count_sum[1h]))/sum(rate(scene_light_count_count[1h]))`},
 		},

@@ -431,8 +431,8 @@ func (h *MetricsHandler) fetchPortraitMetricsTimeSeries(ctx context.Context, tim
 		"request_duration_avg":   `rate(trace_request_duration_microseconds_sum[5m])/rate(trace_request_duration_microseconds_count[5m])`,
 		"cache_hit_rate":         `rate(trace_cache_hits_total[5m])/(rate(trace_cache_hits_total[5m])+rate(trace_cache_misses_total[5m]))*100`,
 		"cache_operations_rate":  `rate(trace_cache_hits_total[5m])+rate(trace_cache_misses_total[5m])`,
-		"scene_sphere_count":     `scene_sphere_count_gauge`,
-		"scene_light_count":      `scene_light_count_gauge`,
+		"scene_sphere_count":     `sum(rate(scene_sphere_count_sum[5m]))/sum(rate(scene_sphere_count_count[5m]))`,
+		"scene_light_count":      `sum(rate(scene_light_count_sum[5m]))/sum(rate(scene_light_count_count[5m]))`,
 		"request_success_count":  `increase(http_server_requests_success_total{service_name="portrait"}[5m])`,
 		"request_failure_count":  `increase(http_server_requests_failure_total{service_name="portrait"}[5m])`,
 	}
@@ -537,7 +537,7 @@ func (h *MetricsHandler) fetchPortraitMetrics(ctx context.Context) (*PortraitMet
 	}
 	
 	// Fetch scene complexity metrics
-	sphereCountQuery := `avg_over_time(scene_sphere_count_gauge[1h])`
+	sphereCountQuery := `sum(rate(scene_sphere_count_sum[1h]))/sum(rate(scene_sphere_count_count[1h]))`
 	sphereResp, err := h.promClient.Query(ctx, sphereCountQuery)
 	if err == nil && len(sphereResp.Data.Result) > 0 {
 		if val, err := extractFloatValue(&sphereResp.Data.Result[0]); err == nil {
@@ -545,7 +545,7 @@ func (h *MetricsHandler) fetchPortraitMetrics(ctx context.Context) (*PortraitMet
 		}
 	}
 	
-	lightCountQuery := `avg_over_time(scene_light_count_gauge[1h])`
+	lightCountQuery := `sum(rate(scene_light_count_sum[1h]))/sum(rate(scene_light_count_count[1h]))`
 	lightResp, err := h.promClient.Query(ctx, lightCountQuery)
 	if err == nil && len(lightResp.Data.Result) > 0 {
 		if val, err := extractFloatValue(&lightResp.Data.Result[0]); err == nil {

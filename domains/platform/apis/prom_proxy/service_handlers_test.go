@@ -55,13 +55,19 @@ func TestMetricsHandler_GetServiceCatalog(t *testing.T) {
 	var catalog ServiceCatalog
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &catalog))
 
-	require.Len(t, catalog.Services, 4)
-	assert.Equal(t, "golf_hub", catalog.Services[0].Name)
-	assert.Equal(t, "microgpt-serve", catalog.Services[1].Name)
-	assert.Equal(t, "mithril", catalog.Services[2].Name)
-	assert.Equal(t, "portrait", catalog.Services[3].Name)
-	for _, entry := range catalog.Services {
-		assert.Equal(t, entry.Name != "mithril", entry.HasCustom, entry.Name)
+	wantCustom := []struct {
+		name      string
+		hasCustom bool
+	}{
+		{"golf_hub", true},
+		{"microgpt-serve", true},
+		{"mithril", false},
+		{"portrait", true},
+	}
+	require.Len(t, catalog.Services, len(wantCustom))
+	for i, want := range wantCustom {
+		assert.Equal(t, want.name, catalog.Services[i].Name)
+		assert.Equal(t, want.hasCustom, catalog.Services[i].HasCustom, want.name)
 	}
 
 	// The wire field names are the UI contract.
@@ -140,6 +146,33 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	last := response.Custom[1].Metrics[2]
 	assert.Equal(t, omitted.Label, last.Label)
 	assert.Equal(t, 0.0, last.Value)
+}
+
+func TestMetricsHandler_GetServiceMetrics_NoCustomServiceKeepsEmptyArray(t *testing.T) {
+	mockClient := &mockPrometheusClient{
+		queryResponses: map[string]*QueryResponse{
+			`sum(rate(http_server_requests_total{service_name="mithril"}[5m]))`: golfScalarResponse("2.5"),
+		},
+	}
+
+	handler := &MetricsHandler{promClient: mockClient}
+
+	req := httptest.NewRequest("GET", "/metrics/v1/service/mithril", nil)
+	req.SetPathValue("name", "mithril")
+	w := httptest.NewRecorder()
+
+	handler.GetServiceMetrics(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// The UI iterates custom unconditionally: the wire value must be [],
+	// never null. Assert on the raw body — unmarshalling erases the
+	// distinction.
+	assert.Contains(t, w.Body.String(), `"custom":[]`)
+
+	var response ServiceMetricsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Equal(t, 2.5, response.Standard.RatePerSec)
 }
 
 func TestMetricsHandler_GetServiceMetrics_PrometheusError(t *testing.T) {

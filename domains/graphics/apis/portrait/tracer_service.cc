@@ -37,8 +37,8 @@ absl::StatusOr<TraceResponse> TracerService::trace(TraceRequest& trace_request) 
     auto [scene, perspective, output] = trace_request;
 
     // Record scene complexity metrics
-    // Distributions, not gauges: RecordGauge is an up-down delta, so
-    // feeding it absolute counts accumulated a lifetime sum.
+    // Distributions, not gauges: RecordGauge is an up-down delta;
+    // absolute per-request counts belong in a histogram.
     metrics_.RecordDistribution("scene_sphere_count", static_cast<double>(scene.spheres.size()));
     metrics_.RecordDistribution("scene_light_count", static_cast<double>(scene.lights.size()));
 

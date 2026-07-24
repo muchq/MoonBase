@@ -7,14 +7,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::routing::post;
 use microgpt::model::ModelMeta;
 use microgpt::{InferenceGpt, Tokenizer};
-use opentelemetry_otlp::{MetricExporter, WithExportConfig};
-use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use server_pal::{RateLimit, listen_addr_pal, router_builder, serve};
 use tracing::{Level, event};
 
@@ -27,44 +23,13 @@ pub struct AppState {
     pub metrics: AppMetrics,
 }
 
-/// Initialise the global OTel meter provider if OTEL_EXPORTER_OTLP_ENDPOINT is
-/// set.  Returns the provider so the caller can keep it alive for the lifetime
-/// of the process (dropping it shuts down the exporter).
-fn init_otel() -> Option<SdkMeterProvider> {
-    let endpoint = env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok()?;
-
-    let exporter = MetricExporter::builder()
-        .with_http()
-        .with_endpoint(format!("{}/v1/metrics", endpoint))
-        .with_timeout(Duration::from_secs(5))
-        .build()
-        .unwrap_or_else(|e| {
-            eprintln!("warning: failed to create OTLP metric exporter: {e}");
-            process::exit(1);
-        });
-
-    // Resource::builder() automatically picks up OTEL_SERVICE_NAME and
-    // OTEL_RESOURCE_ATTRIBUTES via the built-in EnvResourceDetector.
-    let resource = Resource::builder().build();
-
-    let reader = PeriodicReader::builder(exporter).build();
-    let provider = SdkMeterProvider::builder()
-        .with_reader(reader)
-        .with_resource(resource)
-        .build();
-
-    opentelemetry::global::set_meter_provider(provider.clone());
-    event!(Level::INFO, "OTel metrics initialised (endpoint: {})", endpoint);
-    Some(provider)
-}
-
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
     // Must be initialised before AppMetrics::new() so the global provider is
     // in place when OTel instruments are created.
-    let _otel_provider = init_otel();
+    let _otel_provider = server_pal::init_otel();
 
     let model_dir = env::var("MODEL_DIR")
         .map(PathBuf::from)
