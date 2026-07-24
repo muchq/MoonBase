@@ -93,32 +93,6 @@ type NetworkMetrics struct {
 	Errors    float64 `json:"errors_per_sec"`
 }
 
-type PortraitMetrics struct {
-	Timestamp       time.Time       `json:"timestamp"`
-	Requests        RequestMetrics  `json:"requests"`
-	Cache          CacheMetrics    `json:"cache"`
-	SceneComplexity SceneMetrics   `json:"scene_complexity"`
-}
-
-type RequestMetrics struct {
-	Total           float64 `json:"total"`
-	Rate            float64 `json:"rate_per_sec"`
-	SuccessRate     float64 `json:"success_rate_percent"`
-	AverageDuration float64 `json:"avg_duration_microseconds"`
-	SuccessCount    float64 `json:"success_count"`
-	FailureCount    float64 `json:"failure_count"`
-}
-
-type CacheMetrics struct {
-	HitRate         float64 `json:"hit_rate_percent"`
-	OperationsRate  float64 `json:"operations_per_sec"`
-}
-
-type SceneMetrics struct {
-	AverageSpheres float64 `json:"avg_spheres"`
-	AverageLights  float64 `json:"avg_lights"`
-}
-
 type ContainerMetrics struct {
 	Timestamp  time.Time             `json:"timestamp"`
 	Containers []ContainerStats      `json:"containers"`
@@ -133,48 +107,6 @@ type ContainerStats struct {
 	MemoryUsagePercent  float64 `json:"memory_usage_percent"`
 	NetworkRxBytes      float64 `json:"network_rx_bytes_per_sec"`
 	NetworkTxBytes      float64 `json:"network_tx_bytes_per_sec"`
-}
-
-type MicrogptMetrics struct {
-	Timestamp time.Time              `json:"timestamp"`
-	Requests  MicrogptRequestMetrics `json:"requests"`
-	Inference MicrogptInferenceMetrics `json:"inference"`
-}
-
-type MicrogptRequestMetrics struct {
-	RatePerSec      float64 `json:"rate_per_sec"`
-	GenerateTotal   float64 `json:"generate_total"`
-	ChatTotal       float64 `json:"chat_total"`
-	SuccessCount5m  float64 `json:"success_count_5m"`
-	FailureCount5m  float64 `json:"failure_count_5m"`
-}
-
-type MicrogptInferenceMetrics struct {
-	TokensGeneratedTotal float64 `json:"tokens_generated_total"`
-	TokensPerSecondAvg   float64 `json:"tokens_per_second_avg"`
-	AvgDurationMs        float64 `json:"avg_duration_ms"`
-	ConversationTotal    float64 `json:"conversation_total"`
-}
-
-type GolfMetrics struct {
-	Timestamp time.Time           `json:"timestamp"`
-	Sessions  GolfSessionMetrics  `json:"sessions"`
-	Activity  GolfActivityMetrics `json:"activity"`
-}
-
-type GolfSessionMetrics struct {
-	Active            float64 `json:"active"`
-	StartedTotal      float64 `json:"started_total"`
-	ResumedTotal      float64 `json:"resumed_total"`
-	RefusedTotal      float64 `json:"refused_total"`
-	DisconnectsTotal  float64 `json:"disconnects_total"`
-	SeatsExpiredTotal float64 `json:"seats_expired_total"`
-}
-
-type GolfActivityMetrics struct {
-	CommandsPerSec   float64 `json:"commands_per_sec"`
-	EventsPerSec     float64 `json:"events_per_sec"`
-	RejectionsPerSec float64 `json:"rejections_per_sec"`
 }
 
 type ServiceCatalogEntry struct {

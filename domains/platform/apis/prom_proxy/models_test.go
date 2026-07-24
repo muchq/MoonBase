@@ -200,34 +200,3 @@ func TestSystemMetricsStruct(t *testing.T) {
 	assert.Len(t, metrics.Network, 1)
 	assert.Equal(t, "eth0", metrics.Network[0].Interface)
 }
-
-func TestPortraitMetricsStruct(t *testing.T) {
-	now := time.Now()
-	metrics := PortraitMetrics{
-		Timestamp: now,
-		Requests: RequestMetrics{
-			Total:           1000,
-			Rate:            10.5,
-			SuccessRate:     99.5,
-			AverageDuration: 150_000,
-		},
-		Cache: CacheMetrics{
-			HitRate:        85.5,
-			OperationsRate: 50.0,
-		},
-		SceneComplexity: SceneMetrics{
-			AverageSpheres: 25.0,
-			AverageLights:  3.0,
-		},
-	}
-	
-	assert.Equal(t, now, metrics.Timestamp)
-	assert.Equal(t, 1000.0, metrics.Requests.Total)
-	assert.Equal(t, 10.5, metrics.Requests.Rate)
-	assert.Equal(t, 99.5, metrics.Requests.SuccessRate)
-	assert.Equal(t, 150_000.0, metrics.Requests.AverageDuration)
-	assert.Equal(t, 85.5, metrics.Cache.HitRate)
-	assert.Equal(t, 50.0, metrics.Cache.OperationsRate)
-	assert.Equal(t, 25.0, metrics.SceneComplexity.AverageSpheres)
-	assert.Equal(t, 3.0, metrics.SceneComplexity.AverageLights)
-}
