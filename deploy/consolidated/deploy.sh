@@ -12,20 +12,49 @@ Deploys the consolidated stack. Every image is pinned to a commit SHA, so what
 runs is reproducible and a rollback is just --sha.
 
 Options:
-  -l, --list [COUNT]   Show the last COUNT commits (default 10) and exit
-  -s, --sha SHA        Deploy a specific commit; default is the latest on main
-      --latest         Deploy the latest commit on main (the default)
-  -y, --yes            Skip the confirmation prompt
-  -h, --help           Show this help
+  -l, --list [COUNT]     Show the last COUNT commits (default 10) and exit
+      --services         Show the deployable services and exit
+  -s, --sha SHA          Deploy a specific commit; default is the latest on main
+      --latest           Deploy the latest commit on main (the default)
+      --service NAME     Deploy only NAME, leaving the rest of the stack alone
+  -y, --yes              Skip the confirmation prompt
+  -h, --help             Show this help
 
 Images are published per-commit by .github/workflows/publish.yml, so a commit
 can only be deployed once its build has finished. The images are verified to
 exist before anything on the host is touched.
+
+A full deploy moves every service to one revision and clears any per-service
+pins. --service pins just that service, so a hotfix survives a reboot without
+dragging the rest of the stack along.
 USAGE
 }
 
+# Service name -> description, read from the compose file so it stays the one
+# source of truth (the labels also land on the containers).
+service_table() {
+  awk '
+    /^services:/ { in_services = 1; next }
+    /^[a-z]/     { in_services = 0 }
+    in_services && /^  [a-z0-9_-]+:$/ { svc = $1; sub(/:$/, "", svc); next }
+    in_services && /^      com\.muchq\.description:/ {
+      sub(/^ *com\.muchq\.description: */, "")
+      gsub(/^"|"$/, "")
+      if (svc != "") print svc "|" $0
+      svc = ""
+    }
+  ' "$COMPOSE_FILE"
+}
+
+service_names() { service_table | cut -d'|' -f1; }
+
+# golf_hub -> GOLF_HUB_SHA, microgpt-serve -> MICROGPT_SERVE_SHA
+sha_var_for() { echo "$1" | tr 'a-z-' 'A-Z_' | sed 's/$/_SHA/'; }
+
 LIST_COUNT=""
+LIST_SERVICES=0
 TARGET_REF=""
+TARGET_SERVICE=""
 ASSUME_YES=0
 
 while [ $# -gt 0 ]; do
@@ -40,6 +69,10 @@ while [ $# -gt 0 ]; do
       esac
       shift
       ;;
+    --services)
+      LIST_SERVICES=1
+      shift
+      ;;
     -s | --sha)
       if [ -z "${2:-}" ]; then
         echo "Error: --sha needs a commit" >&2
@@ -51,6 +84,14 @@ while [ $# -gt 0 ]; do
     --latest)
       TARGET_REF=""
       shift
+      ;;
+    --service)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --service needs a service name" >&2
+        exit 1
+      fi
+      TARGET_SERVICE=$2
+      shift 2
       ;;
     -y | --yes)
       ASSUME_YES=1
@@ -68,14 +109,38 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+if [ "$LIST_SERVICES" -eq 1 ]; then
+  printf '%-18s  %s\n' "SERVICE" "DESCRIPTION"
+  service_table | while IFS='|' read -r svc desc; do
+    printf '%-18s  %s\n' "$svc" "$desc"
+  done
+  exit 0
+fi
+
+if [ -n "$TARGET_SERVICE" ] && ! service_names | grep -qx "$TARGET_SERVICE"; then
+  echo "Error: unknown service '$TARGET_SERVICE'" >&2
+  echo "Run 'deploy.sh --services' to see what's deployable." >&2
+  exit 1
+fi
+
 # Deploy targets are commits on main that CI has already published, so resolve
 # against the remote rather than whatever the local checkout happens to be on.
 git fetch --quiet origin main
 
 # Best-effort: the host records what it last deployed, which labels the table
 # and gives the confirmation prompt a before/after.
+if [ -n "$TARGET_SERVICE" ]; then
+  deployed_var=$(sha_var_for "$TARGET_SERVICE")
+else
+  deployed_var=DEPLOY_SHA
+fi
 deployed_sha=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" \
-  "grep -s '^DEPLOY_SHA=' ~/.env | cut -d= -f2" 2>/dev/null || true)
+  "grep -s '^${deployed_var}=' ~/.env | cut -d= -f2" 2>/dev/null || true)
+# A service with no pin of its own is running the stack-wide revision.
+if [ -z "$deployed_sha" ] && [ -n "$TARGET_SERVICE" ]; then
+  deployed_sha=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" \
+    "grep -s '^DEPLOY_SHA=' ~/.env | cut -d= -f2" 2>/dev/null || true)
+fi
 
 describe() { # describe <sha> -> "subject", or a placeholder when not local
   git log -1 --pretty=%s "$1" 2>/dev/null || echo "(unknown commit)"
@@ -106,7 +171,11 @@ fi
 export DEPLOY_SHA
 short_sha=$(git rev-parse --short "$DEPLOY_SHA")
 
-echo "Deploying $short_sha  $(describe "$DEPLOY_SHA")"
+if [ -n "$TARGET_SERVICE" ]; then
+  echo "Deploying $TARGET_SERVICE at $short_sha  $(describe "$DEPLOY_SHA")"
+else
+  echo "Deploying all services at $short_sha  $(describe "$DEPLOY_SHA")"
+fi
 if [ -n "$deployed_sha" ] && [ "$deployed_sha" != "$DEPLOY_SHA" ]; then
   echo "Replacing $(git rev-parse --short "$deployed_sha" 2>/dev/null || echo "$deployed_sha")  $(describe "$deployed_sha")"
 elif [ "$deployed_sha" = "$DEPLOY_SHA" ]; then
@@ -128,7 +197,11 @@ fi
 # Fail before touching the host: a SHA whose publish build is still running (or
 # failed) has no images, and finding that out at `compose pull` would leave the
 # host half-updated.
-images=$(grep -o 'ghcr\.io/muchq/[a-z0-9_-]*' "$COMPOSE_FILE" | sort -u)
+if [ -n "$TARGET_SERVICE" ]; then
+  images="ghcr.io/muchq/$TARGET_SERVICE"
+else
+  images=$(grep -o 'ghcr\.io/muchq/[a-z0-9_-]*' "$COMPOSE_FILE" | sort -u)
+fi
 echo "Verifying published images for $short_sha..."
 missing=$(ssh "$HOST" "for img in $images; do sudo docker manifest inspect \$img:$DEPLOY_SHA >/dev/null 2>&1 || echo \$img; done")
 if [ -n "$missing" ]; then
@@ -136,6 +209,19 @@ if [ -n "$missing" ]; then
   echo "$missing" | sed 's/^/  /' >&2
   echo "Its publish build may still be running or may have failed." >&2
   exit 1
+fi
+
+# A full deploy converges the stack on one revision, so it also clears the
+# per-service pins; --service sets just its own.
+if [ -n "$TARGET_SERVICE" ]; then
+  stale_vars=$(sha_var_for "$TARGET_SERVICE")
+  env_line="$(sha_var_for "$TARGET_SERVICE")=$DEPLOY_SHA"
+  # Scoped to one service, so nothing here should reap the others.
+  up_flags=""
+else
+  stale_vars="DEPLOY_SHA $(service_names | while read -r s; do sha_var_for "$s"; done | tr '\n' ' ')"
+  env_line="DEPLOY_SHA=$DEPLOY_SHA"
+  up_flags="--remove-orphans"
 fi
 
 # Copy deployment files
@@ -195,17 +281,21 @@ ssh "$HOST" << EOF
     sudo docker network create --subnet 172.28.0.0/16 --ip-range 172.28.1.0/24 --gateway 172.28.0.1 muchq_network
   fi
 
-  # Record the revision being deployed. compose.yaml reads DEPLOY_SHA to pin
-  # every image tag, so this file is what the stack comes back up on after an
-  # unattended \`compose up\` (a reboot, a manual restart).
+  # Record the revision being deployed. compose.yaml reads these to pin image
+  # tags, so the file is what the stack comes back up on after an unattended
+  # \`compose up\` (a reboot, a manual restart).
   touch ~/.env
-  grep -v '^DEPLOY_SHA=' ~/.env > ~/.env.tmp || true
-  echo "DEPLOY_SHA=${DEPLOY_SHA}" >> ~/.env.tmp
+  cp ~/.env ~/.env.tmp
+  for var in ${stale_vars}; do
+    grep -v "^\${var}=" ~/.env.tmp > ~/.env.next || true
+    mv ~/.env.next ~/.env.tmp
+  done
+  echo "${env_line}" >> ~/.env.tmp
   mv ~/.env.tmp ~/.env
-  export DEPLOY_SHA=${DEPLOY_SHA}
+  export \$(cat ~/.env | grep -v '^#' | xargs)
 
-  sudo -E docker compose -f compose.yaml -f docker-compose.observability.yml pull
-  sudo -E docker compose -f compose.yaml -f docker-compose.observability.yml up -d --remove-orphans
+  sudo -E docker compose -f compose.yaml -f docker-compose.observability.yml pull ${TARGET_SERVICE}
+  sudo -E docker compose -f compose.yaml -f docker-compose.observability.yml up -d ${up_flags} ${TARGET_SERVICE}
 
   # Reload Caddy configuration. Target the admin API on IPv4 explicitly: inside
   # the container \`localhost\` resolves to ::1 first, but Caddy's admin endpoint
@@ -213,4 +303,8 @@ ssh "$HOST" << EOF
   sudo docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --address 127.0.0.1:2019
 EOF
 
-echo "Deployment complete! Running $short_sha"
+if [ -n "$TARGET_SERVICE" ]; then
+  echo "Deployment complete! $TARGET_SERVICE running $short_sha"
+else
+  echo "Deployment complete! Running $short_sha"
+fi

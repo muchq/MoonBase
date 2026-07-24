@@ -96,6 +96,32 @@ Add `-y` to skip the confirmation. The deploy itself will:
 4. Pull the images for that commit
 5. Restart all services
 
+### Deploying one service
+
+To ship a change without restarting the whole stack:
+
+```bash
+./deploy/consolidated/deploy.sh --services            # what can be deployed
+./deploy/consolidated/deploy.sh --service posterize
+```
+
+```
+SERVICE             DESCRIPTION
+games_ws_backend    Websocket backend for v1 games
+golf_hub            Golf v2 hub on smithy event streams (/games/v2/*)
+portrait            Ray-traced scene renderer
+...
+```
+
+Descriptions come from each service's `com.muchq.description` label in
+`compose.yaml`, so that file stays the source of truth (the labels also land on
+the containers).
+
+A targeted deploy pins **only** that service, recorded as its own variable
+(`POSTERIZE_SHA`) so the pin survives a reboot without dragging the rest of the
+stack to a new revision. A full deploy clears every per-service pin, so the
+stack converges back on a single revision.
+
 ## Rollback
 
 Deploy an earlier commit — pick one with `--list`, then:
