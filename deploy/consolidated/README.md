@@ -4,8 +4,9 @@ This directory contains the consolidated deployment configuration for multiple s
 
 ## Services Deployed
 
-`deploy.sh --services` lists these from `compose.yaml`, which is the source of
-truth for what's deployable.
+`deploy.sh --services` lists the application services below, read from
+`compose.yaml`. Caddy and the observability stack are deployed too but aren't
+individually targetable.
 
 - **api.muchq.com** - API backend services
   - [`games_ws_backend`](../../domains/games/apis/games_ws_backend) (port 8080)
@@ -95,11 +96,12 @@ COMMIT     DATE        SUBJECT
 ```
 
 Add `-y` to skip the confirmation. The deploy itself will:
-1. Copy deployment files to the host
-2. Copy r3dr static assets
-3. Copy observability configuration
-4. Pull the images for that commit
-5. Restart all services
+1. Verify every image exists at that commit, before touching the host
+2. Copy deployment files to the host
+3. Copy r3dr static assets
+4. Copy observability configuration
+5. Pull the images for that commit
+6. Restart the affected services
 
 ### Deploying one service
 
@@ -127,6 +129,10 @@ A targeted deploy pins **only** that service, recorded as its own variable
 stack to a new revision. A full deploy clears every per-service pin, so the
 stack converges back on a single revision.
 
+Only the named container is recreated, but config files are still synced and
+Caddy is still reloaded, exactly as in a full deploy — "targeted" refers to the
+container, not to everything the script touches.
+
 ## Rollback
 
 Deploy an earlier commit — pick one with `--list`, then:
@@ -135,8 +141,18 @@ Deploy an earlier commit — pick one with `--list`, then:
 ./deploy/consolidated/deploy.sh --sha abc1234
 ```
 
-The whole stack moves together, so a rollback returns every service to a known
-state rather than leaving a hand-edited pin behind.
+The whole stack moves together rather than leaving a hand-edited pin behind.
+
+Note this rolls back **images only**. Config — `compose.yaml`, the `Caddyfile`,
+`o11y/*`, and r3dr's static assets — is always copied from your working tree,
+so it stays at whatever you have checked out. Deploy from a clean checkout of
+`main`, and be aware that rolling images back past a config change (a new env
+var, a new route) leaves the newer config in front of an older binary.
+
+Rolling back further than the newest service is also rejected: the pre-flight
+check requires an image at that commit for every service, and a service that
+didn't exist yet has none. Use `--service` to roll back one service past that
+point.
 
 ## Configuration Requirements
 
@@ -149,6 +165,8 @@ Services require configuration files in their respective `/etc` directories on t
 - `/etc/mithril/` - Mithril service configuration
 - `/etc/posterize/` - Posterize service configuration
 - `/etc/mcpserver/` - MCP server configuration
+- `/etc/microgpt-serve/` - microgpt config, including the model in `model/`
+- `/etc/one_d4/` - one_d4 service configuration
 
 ## Network
 

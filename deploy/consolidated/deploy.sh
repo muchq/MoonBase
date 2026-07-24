@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Paths below are repo-relative; self-locate so this works from any directory.
+cd "$(dirname "$0")/../.." || exit 1
+
 HOST=ubuntu@consolidated.cmptr.info
 COMPOSE_FILE=deploy/consolidated/compose.yaml
 
@@ -8,8 +11,8 @@ usage() {
   cat <<'USAGE'
 Usage: deploy.sh [OPTIONS]
 
-Deploys the consolidated stack. Every image is pinned to a commit SHA, so what
-runs is reproducible and a rollback is just --sha.
+Deploys the consolidated stack. Every service image is pinned to a commit SHA,
+so what runs is reproducible and a rollback is just --sha.
 
 Options:
   -l, --list [COUNT]     Show the last COUNT commits (default 10) and exit
@@ -30,14 +33,26 @@ dragging the rest of the stack along.
 USAGE
 }
 
-# Service name -> description, read from the compose file so it stays the one
-# source of truth (the labels also land on the containers).
+# The services that carry a pinned image, from the image lines themselves so
+# this can't drift from what compose actually deploys.
+service_names() {
+  grep -o 'ghcr\.io/muchq/[a-z0-9_-]*' "$COMPOSE_FILE" | sed 's|.*/||' | sort -u
+}
+
+# Every pin variable compose.yaml reads, taken from the file that consumes
+# them. Load-bearing: these are the vars a deploy rewrites on the host.
+pin_vars() {
+  grep -o '\${[A-Z0-9_]*_SHA' "$COMPOSE_FILE" | tr -d '${' | sort -u
+}
+
+# Descriptions for --services. Display only — a missing or reformatted label
+# costs a row in the listing, it can't affect what gets deployed.
 service_table() {
   awk '
     /^services:/ { in_services = 1; next }
     /^[a-z]/     { in_services = 0 }
     in_services && /^  [a-z0-9_-]+:$/ { svc = $1; sub(/:$/, "", svc); next }
-    in_services && /^      com\.muchq\.description:/ {
+    in_services && /com\.muchq\.description:/ {
       sub(/^ *com\.muchq\.description: */, "")
       gsub(/^"|"$/, "")
       if (svc != "") print svc "|" $0
@@ -46,10 +61,15 @@ service_table() {
   ' "$COMPOSE_FILE"
 }
 
-service_names() { service_table | cut -d'|' -f1; }
-
 # golf_hub -> GOLF_HUB_SHA, microgpt-serve -> MICROGPT_SERVE_SHA
-sha_var_for() { echo "$1" | tr 'a-z-' 'A-Z_' | sed 's/$/_SHA/'; }
+sha_var_for() {
+  local name=${1//-/_}
+  echo "${name^^}_SHA"
+}
+
+describe() { # describe <sha> -> "subject", or a placeholder when not local
+  git log -1 --pretty=%s "$1" 2>/dev/null || echo "(unknown commit)"
+}
 
 LIST_COUNT=""
 LIST_SERVICES=0
@@ -114,6 +134,9 @@ if [ "$LIST_SERVICES" -eq 1 ]; then
   service_table | while IFS='|' read -r svc desc; do
     printf '%-18s  %s\n' "$svc" "$desc"
   done
+  if [ "$(service_table | wc -l)" -ne "$(service_names | wc -l)" ]; then
+    echo "(note: some services have no com.muchq.description label)" >&2
+  fi
   exit 0
 fi
 
@@ -127,24 +150,17 @@ fi
 # against the remote rather than whatever the local checkout happens to be on.
 git fetch --quiet origin main
 
-# Best-effort: the host records what it last deployed, which labels the table
-# and gives the confirmation prompt a before/after.
-if [ -n "$TARGET_SERVICE" ]; then
-  deployed_var=$(sha_var_for "$TARGET_SERVICE")
-else
-  deployed_var=DEPLOY_SHA
-fi
-deployed_sha=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" \
-  "grep -s '^${deployed_var}=' ~/.env | cut -d= -f2" 2>/dev/null || true)
-# A service with no pin of its own is running the stack-wide revision.
-if [ -z "$deployed_sha" ] && [ -n "$TARGET_SERVICE" ]; then
-  deployed_sha=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" \
-    "grep -s '^DEPLOY_SHA=' ~/.env | cut -d= -f2" 2>/dev/null || true)
-fi
+# One round trip; the host's .env is both the pin store and the secrets file.
+host_env=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'cat ~/.env' 2>/dev/null || true)
+host_pin() { printf '%s\n' "$host_env" | sed -n "s/^$1=//p" | tail -1; }
 
-describe() { # describe <sha> -> "subject", or a placeholder when not local
-  git log -1 --pretty=%s "$1" 2>/dev/null || echo "(unknown commit)"
-}
+if [ -n "$TARGET_SERVICE" ]; then
+  deployed_sha=$(host_pin "$(sha_var_for "$TARGET_SERVICE")")
+  # A service with no pin of its own is running the stack-wide revision.
+  [ -n "$deployed_sha" ] || deployed_sha=$(host_pin DEPLOY_SHA)
+else
+  deployed_sha=$(host_pin DEPLOY_SHA)
+fi
 
 if [ -n "$LIST_COUNT" ]; then
   printf '%-9s  %-10s  %s\n' "COMMIT" "DATE" "SUBJECT"
@@ -170,12 +186,9 @@ else
 fi
 export DEPLOY_SHA
 short_sha=$(git rev-parse --short "$DEPLOY_SHA")
+target_desc=${TARGET_SERVICE:-all services}
 
-if [ -n "$TARGET_SERVICE" ]; then
-  echo "Deploying $TARGET_SERVICE at $short_sha  $(describe "$DEPLOY_SHA")"
-else
-  echo "Deploying all services at $short_sha  $(describe "$DEPLOY_SHA")"
-fi
+echo "Deploying $target_desc at $short_sha  $(describe "$DEPLOY_SHA")"
 if [ -n "$deployed_sha" ] && [ "$deployed_sha" != "$DEPLOY_SHA" ]; then
   echo "Replacing $(git rev-parse --short "$deployed_sha" 2>/dev/null || echo "$deployed_sha")  $(describe "$deployed_sha")"
 elif [ "$deployed_sha" = "$DEPLOY_SHA" ]; then
@@ -184,7 +197,7 @@ fi
 
 if [ "$ASSUME_YES" -ne 1 ]; then
   printf 'Proceed? [y/N] '
-  read -r reply
+  read -r reply || reply=""
   case "$reply" in
     [yY] | [yY][eE][sS]) ;;
     *)
@@ -196,33 +209,49 @@ fi
 
 # Fail before touching the host: a SHA whose publish build is still running (or
 # failed) has no images, and finding that out at `compose pull` would leave the
-# host half-updated.
+# host half-updated. Space-separated — this list is expanded into a remote `for`
+# loop, where a newline would end the loop header instead of separating words.
 if [ -n "$TARGET_SERVICE" ]; then
   images="ghcr.io/muchq/$TARGET_SERVICE"
 else
-  images=$(grep -o 'ghcr\.io/muchq/[a-z0-9_-]*' "$COMPOSE_FILE" | sort -u)
+  images=$(grep -o 'ghcr\.io/muchq/[a-z0-9_-]*' "$COMPOSE_FILE" | sort -u | tr '\n' ' ')
 fi
 echo "Verifying published images for $short_sha..."
 missing=$(ssh "$HOST" "for img in $images; do sudo docker manifest inspect \$img:$DEPLOY_SHA >/dev/null 2>&1 || echo \$img; done")
 if [ -n "$missing" ]; then
   echo "Error: no image published at $short_sha for:" >&2
   echo "$missing" | sed 's/^/  /' >&2
-  echo "Its publish build may still be running or may have failed." >&2
+  echo "Either that commit's publish build is unfinished or failed, or the" >&2
+  echo "service did not exist yet at that commit." >&2
   exit 1
 fi
 
 # A full deploy converges the stack on one revision, so it also clears the
 # per-service pins; --service sets just its own.
+all_pin_vars=$(pin_vars | tr '\n' ' ')
 if [ -n "$TARGET_SERVICE" ]; then
-  stale_vars=$(sha_var_for "$TARGET_SERVICE")
-  env_line="$(sha_var_for "$TARGET_SERVICE")=$DEPLOY_SHA"
+  replaced_vars=$(sha_var_for "$TARGET_SERVICE")
+  env_line="$replaced_vars=$DEPLOY_SHA"
   # Scoped to one service, so nothing here should reap the others.
   up_flags=""
 else
-  stale_vars="DEPLOY_SHA $(service_names | while read -r s; do sha_var_for "$s"; done | tr '\n' ' ')"
+  replaced_vars=$all_pin_vars
   env_line="DEPLOY_SHA=$DEPLOY_SHA"
   up_flags="--remove-orphans"
 fi
+
+# The scp below replaces the host's ~/.env wholesale, and the local copy holds
+# secrets only — so carry over the pins this deploy isn't replacing. Without
+# this a --service run drops DEPLOY_SHA, and every other service would come
+# back on :latest at the next reboot.
+preserved_pins=""
+for var in $all_pin_vars; do
+  case " $replaced_vars " in
+    *" $var "*) continue ;;
+  esac
+  val=$(host_pin "$var")
+  [ -n "$val" ] && preserved_pins="$preserved_pins $var=$val"
+done
 
 # Copy deployment files
 echo "Copying deployment files..."
@@ -253,11 +282,6 @@ fi
 # Pull images and restart services
 echo "Pulling images and restarting services..."
 ssh "$HOST" << EOF
-  # Export environment variables if .env exists
-  if [ -f ".env" ]; then
-    export \$(cat .env | grep -v '^#' | xargs)
-  fi
-
   # Move r3dr static assets to web root
   sudo mkdir -p /var/www/r3dr
   sudo cp -r ~/r3dr-assets/* /var/www/r3dr/
@@ -282,16 +306,23 @@ ssh "$HOST" << EOF
   fi
 
   # Record the revision being deployed. compose.yaml reads these to pin image
-  # tags, so the file is what the stack comes back up on after an unattended
-  # \`compose up\` (a reboot, a manual restart).
+  # tags, so this file is what the stack comes back up on after an unattended
+  # \`compose up\` (a reboot, a manual restart). Rewritten after the scp above,
+  # which would otherwise have dropped the pins.
   touch ~/.env
   cp ~/.env ~/.env.tmp
-  for var in ${stale_vars}; do
+  for var in ${all_pin_vars}; do
     grep -v "^\${var}=" ~/.env.tmp > ~/.env.next || true
     mv ~/.env.next ~/.env.tmp
   done
+  for pin in ${preserved_pins}; do
+    echo "\$pin" >> ~/.env.tmp
+  done
   echo "${env_line}" >> ~/.env.tmp
   mv ~/.env.tmp ~/.env
+  chmod 600 ~/.env
+  # Export only after the rewrite: exporting the old file first would leave a
+  # replaced pin in the environment, where it outranks the .env file.
   export \$(cat ~/.env | grep -v '^#' | xargs)
 
   sudo -E docker compose -f compose.yaml -f docker-compose.observability.yml pull ${TARGET_SERVICE}
@@ -300,11 +331,7 @@ ssh "$HOST" << EOF
   # Reload Caddy configuration. Target the admin API on IPv4 explicitly: inside
   # the container \`localhost\` resolves to ::1 first, but Caddy's admin endpoint
   # listens only on 127.0.0.1:2019, so the default localhost reload is refused.
-  sudo docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --address 127.0.0.1:2019
+  sudo -E docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --address 127.0.0.1:2019
 EOF
 
-if [ -n "$TARGET_SERVICE" ]; then
-  echo "Deployment complete! $TARGET_SERVICE running $short_sha"
-else
-  echo "Deployment complete! Running $short_sha"
-fi
+echo "Deployment complete! $target_desc running $short_sha"
