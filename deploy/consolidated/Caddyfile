@@ -29,14 +29,9 @@ api.muchq.com {
 		path /microgpt/v1/chat
 	}
 
-	@get_timeseries {
-		method GET
-		path /metrics/v1/timeseries/*
-	}
-
 	@get_metrics {
 		method GET
-		path /metrics/v1/scalar/*
+		path /metrics/v1/*
 	}
 
 	@get_1d4_health {
@@ -102,7 +97,6 @@ api.muchq.com {
 	reverse_proxy @post_golf_v2_session golf_hub:8089
 	reverse_proxy @ws_golf_v2 golf_hub:8089
 	reverse_proxy @post_portrait portrait:8081
-	reverse_proxy @get_timeseries prom_proxy:8082
 	reverse_proxy @get_metrics prom_proxy:8082
 	reverse_proxy @post_mithril mithril:8083
 	reverse_proxy @post_posterize_blur posterize:8084

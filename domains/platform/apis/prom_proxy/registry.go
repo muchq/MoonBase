@@ -54,7 +54,6 @@ var serviceRegistry = map[string]serviceEntry{
 			{"Inference", "conversations_total", "", `sum(microgpt_conversations_total)`},
 		},
 		CustomTimeseries: map[string]string{
-			"request_rate":      `sum(rate(microgpt_requests_total[5m]))`,
 			"tokens_per_second": `sum(rate(microgpt_tokens_generated_total[5m]))`,
 			"avg_duration_ms":   `sum(rate(microgpt_request_duration_ms_sum[5m]))/sum(rate(microgpt_request_duration_ms_count[5m]))`,
 		},
@@ -107,6 +106,10 @@ func standardScalarQueries(service string) []struct {
 	}
 }
 
+// Keys are mirrored by STANDARD_SERIES in the UI's ServiceDashboard
+// (muchq.github.io); keep them in sync, and keep CustomTimeseries keys
+// from colliding with them — a colliding custom series is classified as
+// standard by the UI and silently never charts.
 func standardTimeseriesQueries(service string) map[string]string {
 	s := fmt.Sprintf("%q", service)
 	return map[string]string{

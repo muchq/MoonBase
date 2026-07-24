@@ -19,14 +19,9 @@
 		path /imagine/v1/edges
 	}
 
-	@get_timeseries {
-		method GET
-		path /metrics/v1/timeseries/*
-	}
-
 	@get_metrics {
 		method GET
-		path /metrics/v1/scalar/*
+		path /metrics/v1/*
 	}
 
 	@ws_thoughts {
@@ -72,6 +67,7 @@
 	reverse_proxy @post_golf_v2_session localhost:8089
 	reverse_proxy @ws_golf_v2 localhost:8089
 	reverse_proxy @post_portrait localhost:8081
+	reverse_proxy @get_metrics localhost:8082
 	reverse_proxy @post_mithril localhost:8083
 	reverse_proxy @post_posterize_blur localhost:8084
 	reverse_proxy @post_posterize_edges localhost:8084
