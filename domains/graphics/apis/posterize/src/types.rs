@@ -1,19 +1,19 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
-fn validate_png<'de, D>(deserializer: D) -> Result<String, D::Error>
+fn validate_image<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let b64_png = String::deserialize(deserializer)?;
+    let b64_image = String::deserialize(deserializer)?;
 
-    if b64_png.is_empty() {
-        return Err(serde::de::Error::custom("png cannot be empty"));
+    if b64_image.is_empty() {
+        return Err(serde::de::Error::custom("image cannot be empty"));
     }
 
-    if b64_png.len() > 5_000_000 {
-        return Err(serde::de::Error::custom("b64 png must be at most 5MiB"));
+    if b64_image.len() > 5_000_000 {
+        return Err(serde::de::Error::custom("b64 image must be at most 5MiB"));
     }
-    Ok(b64_png)
+    Ok(b64_image)
 }
 
 fn validate_sigma<'de, D>(deserializer: D) -> Result<Option<f32>, D::Error>
@@ -33,7 +33,7 @@ where
 
 #[derive(Deserialize)]
 pub struct BlurRequest {
-    #[serde(deserialize_with = "validate_png")]
+    #[serde(deserialize_with = "validate_image")]
     pub(crate) b64_png: String,
     #[serde(deserialize_with = "validate_sigma")]
     pub(crate) sigma: Option<f32>,
@@ -51,7 +51,7 @@ pub struct BlurResponse {
 
 #[derive(Deserialize)]
 pub struct EdgesRequest {
-    #[serde(deserialize_with = "validate_png")]
+    #[serde(deserialize_with = "validate_image")]
     pub(crate) b64_png: String,
 }
 
