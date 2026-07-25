@@ -53,10 +53,12 @@ class Client {
   Client(const Client&) = delete;
   Client& operator=(const Client&) = delete;
 
-  /// Runs one statement. params bind as $1..$N, text format. A statement
-  /// retried after a connection-level failure may execute twice on the
-  /// server — callers' statements should tolerate that (all of #1194's
-  /// single-row writes do).
+  /// Runs one statement. params bind as $1..$N, text format. After a
+  /// connection-level failure Exec reconnects and retries once, so a
+  /// statement may execute twice on the server. Callers must judge that
+  /// risk per statement: a non-idempotent write whose first execution
+  /// landed reports its retry's result (e.g. a DELETE that already
+  /// deleted reports zero rows).
   absl::StatusOr<Result> Exec(const std::string& sql, const std::vector<std::string>& params = {});
 
  private:

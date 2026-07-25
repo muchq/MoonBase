@@ -21,6 +21,7 @@ cc_test(
     name = "pg_test",
     size = "small",
     srcs = ["pg_test.cc"],
+    env_inherit = ["PG_TEST_DB_URL"],
     deps = [
         ":pg",
         "@com_google_absl//absl/status",

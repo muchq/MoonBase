@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <memory>
 
+#include "absl/status/status.h"
 #include "domains/games/apis/golf_hub/migrations.h"
 #include "domains/platform/libs/pg/pg.h"
 #include "gtest/gtest.h"
@@ -117,6 +118,23 @@ TEST_F(PgTicketVaultTest, StoresOnlyHashesAtRest) {
       db_->Exec("SELECT count(*) FROM resume_tokens WHERE token_hash = $1", {*token});
   ASSERT_TRUE(leaked_tokens.ok());
   EXPECT_EQ(leaked_tokens->Get(0, 0).value_or(""), "0");
+  auto hashed_token = db_->Exec(
+      "SELECT count(*) FROM resume_tokens"
+      " WHERE token_hash = encode(sha256(convert_to($1, 'UTF8')), 'hex')",
+      {*token});
+  ASSERT_TRUE(hashed_token.ok());
+  EXPECT_EQ(hashed_token->Get(0, 0).value_or(""), "1");
+}
+
+// The property future schema steps depend on: re-running migrations must
+// never disturb existing rows.
+TEST_F(PgTicketVaultTest, MigrationsPreserveExistingRows) {
+  auto vault = MakeVault();
+  const auto ticket = vault.IssueTicket("p-1");
+  ASSERT_TRUE(ticket.ok());
+  ASSERT_TRUE(golf_hub::RunMigrations(*db_).ok());
+  EXPECT_EQ(CountRows("tickets"), 1);
+  EXPECT_TRUE(vault.PeekTicket(*ticket));
 }
 
 TEST_F(PgTicketVaultTest, MintPurgesExpiredRows) {
@@ -134,11 +152,14 @@ TEST_F(PgTicketVaultTest, MintPurgesExpiredRows) {
   EXPECT_EQ(CountRows("resume_tokens"), 1);
 }
 
-TEST_F(PgTicketVaultTest, UnavailableDatabaseFailsClosed) {
+// Outside the fixture on purpose: fail-closed needs no database (the URL
+// points at a refusing port), so this one runs even where the gated
+// suite skips — CI included.
+TEST(PgTicketVaultOutageTest, UnavailableDatabaseFailsClosed) {
   auto dead_db = std::make_shared<pg::Client>("postgresql://127.0.0.1:1/nope?connect_timeout=2");
   golf_hub::PgTicketVault vault(dead_db, std::chrono::seconds(60), std::chrono::seconds(60));
-  EXPECT_FALSE(vault.IssueTicket("p-1").ok());
-  EXPECT_FALSE(vault.IssueResumeToken("p-1").ok());
+  EXPECT_EQ(vault.IssueTicket("p-1").status().code(), absl::StatusCode::kUnavailable);
+  EXPECT_EQ(vault.IssueResumeToken("p-1").status().code(), absl::StatusCode::kUnavailable);
   EXPECT_FALSE(vault.PeekTicket("t-x"));
   EXPECT_FALSE(vault.SpendTicket("t-x").has_value());
   EXPECT_FALSE(vault.ResolveResumeToken("rt-x").has_value());

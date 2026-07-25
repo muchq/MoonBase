@@ -118,6 +118,9 @@ TEST_F(GolfHubStreamFixture, SessionMintsDistinctPlayersAndResumeTokenRoundTrips
   ASSERT_TRUE(resumed.ok());
   EXPECT_EQ(resumed->playerId, first->playerId);
   EXPECT_NE(resumed->ticket, first->ticket);
+  // A valid token is echoed back, not replaced — the client's long-lived
+  // credential must not churn on every reconnect.
+  EXPECT_EQ(resumed->resumeToken, first->resumeToken);
 }
 
 TEST_F(GolfHubStreamFixture, BadTicketFailsTypedBeforeAnyEvent) {

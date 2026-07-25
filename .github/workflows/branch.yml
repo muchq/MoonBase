@@ -98,6 +98,26 @@ jobs:
     container:
       image: ghcr.io/muchq/moonbase/ci-base:latest
 
+    # A real postgres for the DB-gated suites (pg_test, pg_ticket_vault_test):
+    # without it they skip silently and none of the SQL is exercised on main.
+    # Image tracks the deployed postgres:18 (deploy/consolidated/compose.yaml).
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: moonbase_test
+          POSTGRES_PASSWORD: moonbase_test
+          POSTGRES_DB: moonbase_test
+        options: >-
+          --health-cmd "pg_isready -U moonbase_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      GOLF_HUB_TEST_DB_URL: postgresql://moonbase_test:moonbase_test@postgres:5432/moonbase_test
+      PG_TEST_DB_URL: postgresql://moonbase_test:moonbase_test@postgres:5432/moonbase_test
+
     steps:
       - uses: actions/checkout@v7
         with:
