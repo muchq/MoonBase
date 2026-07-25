@@ -426,6 +426,21 @@ func (h *MetricsHandler) containerStats(ctx context.Context, ref containerRef) C
 	uptime, reporting := scalar(fmt.Sprintf(`time()-container_start_time_seconds{name="%s"}`, name))
 	stats.UptimeSeconds = uptime
 
+	// How stale cAdvisor's view of this container is. Unlike uptime, this keeps
+	// answering after a container stops — the series lingers until retention
+	// drops it — which is what lets a dead container stay on the page instead
+	// of vanishing from it.
+	if val, ok := scalar(fmt.Sprintf(`time()-container_last_seen{name="%s"}`, name)); ok {
+		stats.LastSeenAgoSeconds = val
+	}
+
+	// Only where cAdvisor ships the counter; a build without it leaves zero,
+	// which reads the same as no kills. Not part of the reporting signal for
+	// that reason.
+	if val, ok := scalar(fmt.Sprintf(`increase(container_oom_events_total{name="%s"}[1h])`, name)); ok {
+		stats.OOMEventsLastHour = val
+	}
+
 	// Uptime is the liveness signal: a running container always has one. Its
 	// absence means the query failed or cAdvisor has nothing, and claiming
 	// crash_looping=false there would report a container we can't see as

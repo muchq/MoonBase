@@ -116,6 +116,18 @@ type ContainerStats struct {
 	RestartsLastHour float64 `json:"restarts_last_hour"`
 	UptimeSeconds    float64 `json:"uptime_seconds"`
 	CrashLooping     bool    `json:"crash_looping"`
+	// Seconds since cAdvisor last observed this container. A running container
+	// has its stamp refreshed every scrape, so this stays near zero; a stopped
+	// one keeps its series until retention drops it, with the age growing.
+	// That is what keeps "deployed but down" visible rather than silently
+	// absent — the container is still listed, just increasingly stale.
+	LastSeenAgoSeconds float64 `json:"last_seen_ago_seconds"`
+	// OOM kills in the last hour, where cAdvisor exposes the counter at all.
+	// Restart churn says a container is flapping; this says whether memory is
+	// why. Absent on cAdvisor builds without the metric, which leaves it zero
+	// — indistinguishable from no kills, so treat it as corroboration for a
+	// restart count rather than as evidence of its own.
+	OOMEventsLastHour float64 `json:"oom_events_last_hour"`
 	// The image the container is actually running, and its tag. Deploys pin
 	// every image to a commit SHA (MoonBase#1210), so the tag is the running
 	// revision — the fact, as opposed to what the host recorded it should be.
