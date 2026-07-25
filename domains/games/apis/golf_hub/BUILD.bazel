@@ -97,6 +97,8 @@ cc_library(
     srcs = ["pg_hub_store.cc"],
     hdrs = ["pg_hub_store.h"],
     deps = [
+        "//domains/games/libs/cards/golf:game_state",
+        "//domains/games/libs/cards/golf:game_state_serde",
         "//domains/platform/libs/pg",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
@@ -119,6 +121,9 @@ cc_test(
     deps = [
         ":pg_hub_store",
         ":pg_ticket_vault",
+        "//domains/games/libs/cards",
+        "//domains/games/libs/cards/golf:game_state",
+        "//domains/games/libs/cards/golf:game_state_serde",
         "//domains/platform/libs/pg",
         "@googletest//:gtest_main",
     ],
@@ -177,7 +182,6 @@ cc_library(
         "//domains/games/libs/cards:card_mapper",
         "//domains/games/libs/cards:dealer",
         "//domains/games/libs/cards/golf:game_state",
-        "//domains/games/libs/cards/golf:game_state_serde",
         "//domains/games/libs/cards/golf:player",
         "//domains/platform/libs/futility/otel:metrics",
         "@com_google_absl//absl/log",

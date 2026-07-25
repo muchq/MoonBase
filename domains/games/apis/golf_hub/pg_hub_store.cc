@@ -5,7 +5,7 @@
 
 #include "absl/log/log.h"
 #include "absl/status/status.h"
-#include "absl/strings/str_cat.h"
+#include "domains/games/libs/cards/golf/game_state_serde.h"
 
 namespace golf_hub {
 namespace {
@@ -24,8 +24,10 @@ constexpr char kUpsertMember[] = R"sql(
           games_won = EXCLUDED.games_won, total_score = EXCLUDED.total_score)sql";
 constexpr char kDeleteMember[] = "DELETE FROM room_members WHERE room_id = $1 AND player_id = $2";
 // The conditional save: an UPDATE lands only when the row holds the
-// previous version. Zero rows back means the DB diverged from the only
-// writer — Apply logs that and repairs last-writer-wins.
+// previous version, and the RETURNING is load-bearing — rows() is the
+// divergence probe. kRepairGame is the same write unconditioned; the
+// pair stays duplicated because sharing the prefix would cost the
+// RETURNING or need string assembly.
 constexpr char kSaveGame[] = R"sql(
     INSERT INTO games (room_id, game_id, roster, state, version)
     VALUES ($1, $2, $3::jsonb, NULLIF($4, '')::jsonb, $5::bigint)
@@ -41,9 +43,9 @@ constexpr char kRepairGame[] = R"sql(
 constexpr char kDeleteGame[] = "DELETE FROM games WHERE room_id = $1 AND game_id = $2";
 
 std::string RosterJson(const std::vector<std::string>& roster) {
-  json codes = json::array();
-  for (const std::string& player_id : roster) codes.push_back(player_id);
-  return codes.dump();
+  json names = json::array();
+  for (const std::string& player_id : roster) names.push_back(player_id);
+  return names.dump();
 }
 
 }  // namespace
@@ -91,53 +93,45 @@ void PgHubStore::WriterLoop() {
   }
 }
 
+std::optional<int> PgHubStore::ExecOrWarn(const char* what, const char* sql,
+                                          const std::vector<std::string>& params) {
+  auto result = db_->Exec(sql, params);
+  if (!result.ok()) {
+    LOG(WARNING) << "hub write-through " << what << " failed: " << result.status();
+    return std::nullopt;
+  }
+  return result->rows();
+}
+
 void PgHubStore::Apply(const Op& op) {
-  const auto warn = [](const char* what, const absl::Status& status) {
-    // Memory stays authoritative in step 2: a failed write is degraded
-    // durability, not a gameplay error.
-    LOG(WARNING) << "hub write-through " << what << " failed: " << status;
-  };
   if (const auto* upsert = std::get_if<UpsertRoom>(&op)) {
-    if (auto result = db_->Exec(kUpsertRoom, {upsert->room_id}); !result.ok()) {
-      warn("UpsertRoom", result.status());
-    }
+    ExecOrWarn("UpsertRoom", kUpsertRoom, {upsert->room_id});
   } else if (const auto* erase = std::get_if<DeleteRoom>(&op)) {
-    if (auto result = db_->Exec(kDeleteRoom, {erase->room_id}); !result.ok()) {
-      warn("DeleteRoom", result.status());
-    }
+    ExecOrWarn("DeleteRoom", kDeleteRoom, {erase->room_id});
   } else if (const auto* upsert = std::get_if<UpsertMember>(&op)) {
     const MemberRow& row = upsert->row;
-    if (auto result = db_->Exec(kUpsertMember,
-                                {row.room_id, row.player_id, row.connected ? "true" : "false",
-                                 std::to_string(row.games_played), std::to_string(row.games_won),
-                                 std::to_string(row.total_score)});
-        !result.ok()) {
-      warn("UpsertMember", result.status());
-    }
+    ExecOrWarn("UpsertMember", kUpsertMember,
+               {row.room_id, row.player_id, row.connected ? "true" : "false",
+                std::to_string(row.games_played), std::to_string(row.games_won),
+                std::to_string(row.total_score)});
   } else if (const auto* erase = std::get_if<DeleteMember>(&op)) {
-    if (auto result = db_->Exec(kDeleteMember, {erase->room_id, erase->player_id}); !result.ok()) {
-      warn("DeleteMember", result.status());
-    }
+    ExecOrWarn("DeleteMember", kDeleteMember, {erase->room_id, erase->player_id});
   } else if (const auto* save = std::get_if<SaveGame>(&op)) {
     const GameRow& row = save->row;
-    const std::vector<std::string> params = {row.room_id, row.game_id, RosterJson(row.roster),
-                                             row.state_json, std::to_string(row.version)};
-    auto result = db_->Exec(kSaveGame, params);
-    if (!result.ok()) {
-      warn("SaveGame", result.status());
-    } else if (result->rows() == 0) {
+    const std::vector<std::string> params = {
+        row.room_id, row.game_id, RosterJson(row.roster),
+        row.state.has_value() ? golf::serializeGameState(*row.state) : "",
+        std::to_string(row.version)};
+    // nullopt != 0, so a failed Exec skips the repair.
+    if (ExecOrWarn("SaveGame", kSaveGame, params) == 0) {
       // Single-writer invariant broken (or a retry raced its own first
       // execution). Loud, then last-writer-wins: memory is the truth.
       LOG(ERROR) << "game " << row.room_id << "/" << row.game_id << " version " << row.version
                  << " did not follow the stored row; repairing";
-      if (auto repair = db_->Exec(kRepairGame, params); !repair.ok()) {
-        warn("RepairGame", repair.status());
-      }
+      ExecOrWarn("RepairGame", kRepairGame, params);
     }
   } else if (const auto* erase = std::get_if<DeleteGame>(&op)) {
-    if (auto result = db_->Exec(kDeleteGame, {erase->room_id, erase->game_id}); !result.ok()) {
-      warn("DeleteGame", result.status());
-    }
+    ExecOrWarn("DeleteGame", kDeleteGame, {erase->room_id, erase->game_id});
   }
 }
 
@@ -171,21 +165,37 @@ absl::StatusOr<PgHubStore::Snapshot> PgHubStore::LoadSnapshot() {
     GameRow row;
     row.room_id = games->Get(i, 0).value_or("");
     row.game_id = games->Get(i, 1).value_or("");
+    row.version = std::atoll(games->Get(i, 4).value_or("0").c_str());
+
+    // Undecodable rows cost their game, not the boot — the same blast
+    // radius whichever column is bad.
     const json roster = json::parse(games->Get(i, 2).value_or("[]"), /*cb=*/nullptr,
                                     /*allow_exceptions=*/false);
-    if (!roster.is_array()) {
-      return absl::InternalError(
-          absl::StrCat("game ", row.room_id, "/", row.game_id, " roster is not an array"));
-    }
-    for (const json& entry : roster) {
-      if (!entry.is_string()) {
-        return absl::InternalError(
-            absl::StrCat("game ", row.room_id, "/", row.game_id, " roster entry is not a string"));
+    bool roster_ok = roster.is_array();
+    if (roster_ok) {
+      for (const json& entry : roster) {
+        if (!entry.is_string()) {
+          roster_ok = false;
+          break;
+        }
+        row.roster.push_back(entry.get<std::string>());
       }
-      row.roster.push_back(entry.get<std::string>());
     }
-    row.state_json = games->Get(i, 3).value_or("");
-    row.version = std::atoll(games->Get(i, 4).value_or("0").c_str());
+    if (!roster_ok) {
+      LOG(ERROR) << "dropping game " << row.room_id << "/" << row.game_id
+                 << ": roster is not an array of player ids";
+      continue;
+    }
+    const std::string state_json = games->Get(i, 3).value_or("");
+    if (!state_json.empty()) {
+      auto state = golf::deserializeGameState(state_json);
+      if (!state.ok()) {
+        LOG(ERROR) << "dropping game " << row.room_id << "/" << row.game_id
+                   << ": unreadable state: " << state.status();
+        continue;
+      }
+      row.state.emplace(*std::move(state));
+    }
     snapshot.games.push_back(std::move(row));
   }
   return snapshot;

@@ -1,17 +1,33 @@
 #include "domains/games/apis/golf_hub/pg_hub_store.h"
 
 #include <cstdlib>
+#include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "domains/games/apis/golf_hub/migrations.h"
+#include "domains/games/libs/cards/card.h"
+#include "domains/games/libs/cards/golf/game_state.h"
+#include "domains/games/libs/cards/golf/game_state_serde.h"
 #include "domains/platform/libs/pg/pg.h"
 #include "gtest/gtest.h"
 
 namespace {
 
 using golf_hub::PgHubStore;
+
+// A real engine state for the started-game rows — the store owns the
+// serde end to end now, so round-trip fidelity is asserted by canonical
+// re-serialization.
+golf::GameState DealtState() {
+  std::deque<cards::Card> deck;
+  for (int i = 0; i < 52; ++i) deck.emplace_back(i);
+  auto dealt = golf::dealGolfGame("G2", {"alice", "bob"}, std::move(deck));
+  EXPECT_TRUE(dealt.ok());
+  return *std::move(dealt);
+}
 
 // Step-2 slice of the persistence integration suite (#1194): the
 // write-through ops against the real tables. GOLF_HUB_TEST_DB_URL gates
@@ -36,8 +52,9 @@ class PgHubStoreTest : public ::testing::Test {
 TEST_F(PgHubStoreTest, OpsRoundTripThroughSnapshot) {
   PgHubStore::MemberRow alice{"R1", "alice", true, 2, 1, 9};
   PgHubStore::MemberRow bob{"R1", "bob", false, 2, 0, 14};
-  PgHubStore::GameRow waiting{"R1", "G1", {"alice"}, "", 1};
-  PgHubStore::GameRow started{"R1", "G2", {"alice", "bob"}, R"({"note":"stand-in state"})", 1};
+  const golf::GameState state = DealtState();
+  PgHubStore::GameRow waiting{"R1", "G1", {"alice"}, std::nullopt, 1};
+  PgHubStore::GameRow started{"R1", "G2", {"alice", "bob"}, state, 1};
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"}, PgHubStore::UpsertMember{alice},
                    PgHubStore::UpsertMember{bob}, PgHubStore::SaveGame{waiting},
                    PgHubStore::SaveGame{started}});
@@ -51,11 +68,14 @@ TEST_F(PgHubStoreTest, OpsRoundTripThroughSnapshot) {
   ASSERT_EQ(snapshot->games.size(), 2u);
   for (const auto& game : snapshot->games) {
     if (game.game_id == "G1") {
-      EXPECT_TRUE(game.state_json.empty());
+      EXPECT_FALSE(game.state.has_value());
       EXPECT_EQ(game.roster, (std::vector<std::string>{"alice"}));
+      EXPECT_EQ(game.version, 1);
     } else {
       EXPECT_EQ(game.game_id, "G2");
-      EXPECT_FALSE(game.state_json.empty());
+      ASSERT_TRUE(game.state.has_value());
+      // Canonical re-serialization is state equality.
+      EXPECT_EQ(golf::serializeGameState(*game.state), golf::serializeGameState(state));
       EXPECT_EQ(game.version, 1);
     }
   }
@@ -77,8 +97,8 @@ TEST_F(PgHubStoreTest, OpsRoundTripThroughSnapshot) {
 
 TEST_F(PgHubStoreTest, ConditionalSaveAdvancesAndRepairsOnDivergence) {
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"},
-                   PgHubStore::SaveGame{{"R1", "G1", {"alice"}, "", 1}},
-                   PgHubStore::SaveGame{{"R1", "G1", {"alice"}, R"({"v":"two"})", 2}}});
+                   PgHubStore::SaveGame{{"R1", "G1", {"alice"}, std::nullopt, 1}},
+                   PgHubStore::SaveGame{{"R1", "G1", {"alice", "bob"}, std::nullopt, 2}}});
   store_->Flush();
   auto snapshot = store_->LoadSnapshot();
   ASSERT_TRUE(snapshot.ok());
@@ -87,19 +107,20 @@ TEST_F(PgHubStoreTest, ConditionalSaveAdvancesAndRepairsOnDivergence) {
 
   // A save that skips a version means the DB diverged from the only
   // writer: it must still land (last-writer-wins repair), loudly.
-  store_->Enqueue({PgHubStore::SaveGame{{"R1", "G1", {"alice"}, R"({"v":"five"})", 5}}});
+  store_->Enqueue({PgHubStore::SaveGame{{"R1", "G1", {"alice", "carol"}, std::nullopt, 5}}});
   store_->Flush();
   snapshot = store_->LoadSnapshot();
   ASSERT_TRUE(snapshot.ok());
   ASSERT_EQ(snapshot->games.size(), 1u);
   EXPECT_EQ(snapshot->games[0].version, 5);
-  EXPECT_NE(snapshot->games[0].state_json.find("five"), std::string::npos);
+  EXPECT_EQ(snapshot->games[0].roster, (std::vector<std::string>{"alice", "carol"}));
 }
 
 TEST_F(PgHubStoreTest, DeleteRoomCascades) {
-  store_->Enqueue(
-      {PgHubStore::UpsertRoom{"R1"}, PgHubStore::UpsertMember{{"R1", "alice", true, 0, 0, 0}},
-       PgHubStore::SaveGame{{"R1", "G1", {"alice"}, "", 1}}, PgHubStore::DeleteRoom{"R1"}});
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"},
+                   PgHubStore::UpsertMember{{"R1", "alice", true, 0, 0, 0}},
+                   PgHubStore::SaveGame{{"R1", "G1", {"alice"}, std::nullopt, 1}},
+                   PgHubStore::DeleteRoom{"R1"}});
   store_->Flush();
   auto snapshot = store_->LoadSnapshot();
   ASSERT_TRUE(snapshot.ok());

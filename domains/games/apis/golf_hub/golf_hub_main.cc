@@ -100,6 +100,12 @@ int main() {
       vault, std::make_shared<cards::Dealer>(), std::make_shared<golf_hub::WhimsicalIdGenerator>(),
       /*grace_period=*/std::chrono::minutes(5),
       std::make_shared<futility::otel::MetricsRecorder>("golf_hub"), store);
+  // Same policy as the migration above: a database we can't read at boot
+  // is a reason to let the supervisor retry, not to serve amnesiac.
+  if (absl::Status restored = handler->RestoreFromStore(); !restored.ok()) {
+    LOG(ERROR) << "Failed to restore golf hub state: " << restored;
+    return 1;
+  }
 
   // Block shutdown signals before the transport spawns its thread pool.
   sigset_t shutdown_signals;

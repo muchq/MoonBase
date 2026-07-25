@@ -19,89 +19,9 @@ using moonbase::golf::GolfEvents;
 using moonbase::golf::GolfMove;
 using moonbase::golf::GolfUpdate;
 
-// Receives until an event of the wanted case arrives (skipping others),
-// failing after a few frames so a wrong stream can't hang the test.
-std::optional<GolfEvents> ReceiveCase(moonbase::golf::PlayClientStream& stream,
-                                      const std::string& wanted) {
-  for (int i = 0; i < 8; ++i) {
-    auto received = stream.Receive();
-    if (!received.ok() || !received->has_value()) return std::nullopt;
-    if (wanted == (*received)->case_name()) return **received;
-  }
-  return std::nullopt;
-}
-
-// Same, but tunnels into the golf envelope: returns the first GolfUpdate
-// of the wanted case, skipping room noise and other updates in between.
-std::optional<GolfUpdate> ReceiveGolf(moonbase::golf::PlayClientStream& stream,
-                                      const std::string& wanted) {
-  for (int i = 0; i < 16; ++i) {
-    auto received = stream.Receive();
-    if (!received.ok() || !received->has_value()) return std::nullopt;
-    const auto* envelope = (*received)->as_golf_or_null();
-    if (envelope == nullptr) continue;
-    if (wanted == envelope->update.case_name()) return envelope->update;
-  }
-  return std::nullopt;
-}
-
-GolfCommands Move(GolfMove move) {
-  moonbase::golf::GolfCommand command;
-  command.move = std::move(move);
-  return GolfCommands::FromGolf(std::move(command));
-}
-
 }  // namespace
 
-class GolfGameFixture : public GolfHubStreamFixture {
- protected:
-  // Room with alice and bob seated in a started game: the NoShuffleDealer
-  // deals alice four aces and bob four kings with Q♠ seeding the discard.
-  struct Table {
-    Seat alice;
-    Seat bob;
-    std::string room_id;
-    std::string game_id;
-  };
-
-  std::optional<Table> SeatedTable() {
-    auto alice = OpenSeat();
-    auto bob = OpenSeat();
-    if (!alice.has_value() || !bob.has_value()) return std::nullopt;
-    if (!ReceiveCase(alice->stream, "sessionReady").has_value()) return std::nullopt;
-    if (!ReceiveCase(bob->stream, "sessionReady").has_value()) return std::nullopt;
-
-    if (!alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok()) {
-      return std::nullopt;
-    }
-    auto created = ReceiveCase(alice->stream, "roomState");
-    if (!created.has_value()) return std::nullopt;
-    const std::string room_id = created->as_roomState_or_null()->roomId;
-    moonbase::golf::JoinRoom join_room;
-    join_room.roomId = room_id;
-    if (!bob->stream.Send(GolfCommands::FromJoinroom(join_room)).ok()) return std::nullopt;
-    if (!ReceiveCase(bob->stream, "roomState").has_value()) return std::nullopt;
-
-    if (!alice->stream.Send(Move(GolfMove::FromCreategame(moonbase::golf::CreateGame{}))).ok()) {
-      return std::nullopt;
-    }
-    auto joined = ReceiveGolf(alice->stream, "gameJoined");
-    if (!joined.has_value()) return std::nullopt;
-    const std::string game_id = joined->as_gameJoined_or_null()->view.gameId;
-
-    moonbase::golf::JoinGame join_game;
-    join_game.gameId = game_id;
-    if (!bob->stream.Send(Move(GolfMove::FromJoingame(join_game))).ok()) return std::nullopt;
-    if (!ReceiveGolf(bob->stream, "gameJoined").has_value()) return std::nullopt;
-
-    if (!alice->stream.Send(Move(GolfMove::FromStartgame(moonbase::golf::StartGame{}))).ok()) {
-      return std::nullopt;
-    }
-    if (!ReceiveGolf(alice->stream, "gameStarted").has_value()) return std::nullopt;
-    if (!ReceiveGolf(bob->stream, "gameStarted").has_value()) return std::nullopt;
-    return Table{std::move(*alice), std::move(*bob), room_id, game_id};
-  }
-};
+class GolfGameFixture : public GolfHubStreamFixture {};
 
 namespace {
 
@@ -649,6 +569,33 @@ TEST_F(CollidingIdsFixture, RoomCodeCollisionRollsAgain) {
   auto second = ReceiveCase(bob->stream, "roomState");
   ASSERT_TRUE(second.has_value());
   EXPECT_EQ(second->as_roomState_or_null()->roomId, "ROOM2X");
+}
+
+// A vault whose store is down: GetSession must fail closed with a
+// non-leaking error, never mint a credential nothing recorded.
+class FailingVault final : public TicketVault {
+ public:
+  absl::StatusOr<std::string> IssueTicket(const std::string&) override {
+    return absl::UnavailableError("vault down");
+  }
+  absl::StatusOr<std::string> IssueResumeToken(const std::string&) override {
+    return absl::UnavailableError("vault down");
+  }
+  bool PeekTicket(const std::string&) const override { return false; }
+  std::optional<std::string> SpendTicket(const std::string&) override { return std::nullopt; }
+  std::optional<std::string> ResolveResumeToken(const std::string&) const override {
+    return std::nullopt;
+  }
+};
+
+class FailingVaultFixture : public GolfHubStreamFixture {
+ protected:
+  std::shared_ptr<TicketVault> MakeVault() override { return std::make_shared<FailingVault>(); }
+};
+
+TEST_F(FailingVaultFixture, GetSessionFailsClosedWhenTheVaultIsDown) {
+  const auto session = client_->GetSession(moonbase::golf::GetSessionInput{});
+  ASSERT_FALSE(session.ok());
 }
 
 }  // namespace
