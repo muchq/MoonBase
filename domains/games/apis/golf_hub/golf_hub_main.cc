@@ -24,6 +24,7 @@
 #include "domains/games/apis/golf_hub/hub_handler.h"
 #include "domains/games/apis/golf_hub/id_generator.h"
 #include "domains/games/apis/golf_hub/migrations.h"
+#include "domains/games/apis/golf_hub/pg_hub_store.h"
 #include "domains/games/apis/golf_hub/pg_ticket_vault.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
@@ -69,12 +70,16 @@ int main() {
   futility::otel::OtelConfig otel_config{.service_name = "golf_hub", .service_version = "1.0.0"};
   futility::otel::OtelProvider otel_provider(otel_config);
 
-  // Credentials go to postgres when GOLF_HUB_DB_URL is set (#1194 step 1:
-  // tickets survive restarts and instances); unset falls back to the
-  // in-memory vault — dev parity, same pattern as ALLOWED_ORIGINS below.
+  // Persistence when GOLF_HUB_DB_URL is set (#1194): credentials (step 1)
+  // and the rooms/games write-through + boot restore (step 2) — tickets,
+  // resume tokens, rooms, and live games survive deploys. Unset falls
+  // back to all-in-memory — dev parity, same pattern as ALLOWED_ORIGINS
+  // below. The vault and the store get their own connections so a slow
+  // write-through never queues behind a credential check.
   constexpr auto kTicketTtl = std::chrono::seconds(30);
   constexpr auto kResumeTtl = std::chrono::hours(24);
   std::shared_ptr<golf_hub::TicketVault> vault;
+  std::shared_ptr<golf_hub::PgHubStore> store;
   const char* db_url = std::getenv("GOLF_HUB_DB_URL");
   if (db_url != nullptr && *db_url != '\0') {
     auto db = std::make_shared<pg::Client>(db_url);
@@ -83,17 +88,18 @@ int main() {
       return 1;
     }
     vault = std::make_shared<golf_hub::PgTicketVault>(std::move(db), kTicketTtl, kResumeTtl);
-    LOG(INFO) << "Ticket vault: postgres";
+    store = std::make_shared<golf_hub::PgHubStore>(std::make_shared<pg::Client>(db_url));
+    LOG(INFO) << "Persistence: postgres (credentials + rooms/games write-through)";
   } else {
     vault = std::make_shared<golf_hub::InMemoryTicketVault>(kTicketTtl, kResumeTtl);
-    LOG(INFO) << "Ticket vault: in-memory (GOLF_HUB_DB_URL unset; restarts forget credentials)";
+    LOG(INFO) << "Persistence: in-memory (GOLF_HUB_DB_URL unset; restarts forget everything)";
   }
   // Stream-side instruments (sessions, commands, events) ride the same
   // meter the aura chain's unary instruments use.
   auto handler = std::make_shared<golf_hub::HubHandler>(
       vault, std::make_shared<cards::Dealer>(), std::make_shared<golf_hub::WhimsicalIdGenerator>(),
       /*grace_period=*/std::chrono::minutes(5),
-      std::make_shared<futility::otel::MetricsRecorder>("golf_hub"));
+      std::make_shared<futility::otel::MetricsRecorder>("golf_hub"), store);
 
   // Block shutdown signals before the transport spawns its thread pool.
   sigset_t shutdown_signals;

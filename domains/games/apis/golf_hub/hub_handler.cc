@@ -5,9 +5,11 @@
 #include <utility>
 #include <vector>
 
+#include "absl/log/log.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "domains/games/libs/cards/card_mapper.h"
+#include "domains/games/libs/cards/golf/game_state_serde.h"
 #include "domains/games/libs/cards/golf/player.h"
 
 namespace golf_hub {
@@ -68,18 +70,101 @@ GolfEvents GolfUpdateEvent(GolfUpdate update) {
 
 HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::Dealer> dealer,
                        std::shared_ptr<IdGenerator> ids, std::chrono::seconds grace_period,
-                       std::shared_ptr<futility::otel::MetricsRecorder> metrics)
+                       std::shared_ptr<futility::otel::MetricsRecorder> metrics,
+                       std::shared_ptr<PgHubStore> store)
     : vault_(std::move(vault)),
       dealer_(std::move(dealer)),
       ids_(std::move(ids)),
       metrics_(std::move(metrics)),
+      store_(std::move(store)),
       registry_([this, grace_period] {
         Registry::Options options;
         options.async_delivery = true;  // chains, not writer threads (ADR-0019)
         options.grace_period = grace_period;
         options.on_expired = [this](const std::string& id) { OnExpired(id); };
         return options;
-      }()) {}
+      }()) {
+  if (store_ != nullptr) RestoreFromStore();
+}
+
+void HubHandler::RestoreFromStore() {
+  auto snapshot = store_->LoadSnapshot();
+  if (!snapshot.ok()) {
+    // Boot with what we have (nothing): the service coming up empty is
+    // the pre-persistence status quo, not a reason to stay down.
+    LOG(ERROR) << "hub restore failed; starting empty: " << snapshot.status();
+    return;
+  }
+  const std::lock_guard<std::mutex> lock(mu_);
+  for (const std::string& room_id : snapshot->rooms) rooms_[room_id];
+  for (const PgHubStore::MemberRow& row : snapshot->members) {
+    // Sockets did not survive the restart: everyone restores
+    // disconnected and flips back on resume.
+    Member member;
+    member.connected = false;
+    member.games_played = row.games_played;
+    member.games_won = row.games_won;
+    member.total_score = row.total_score;
+    rooms_[row.room_id].members.emplace(row.player_id, member);
+    player_room_[row.player_id] = row.room_id;
+  }
+  int restored_games = 0;
+  for (const PgHubStore::GameRow& row : snapshot->games) {
+    GameEntry entry;
+    entry.roster = row.roster;
+    entry.version = row.version;
+    if (!row.state_json.empty()) {
+      auto state = golf::deserializeGameState(row.state_json);
+      if (!state.ok()) {
+        // The lobby survives; the unreadable game does not.
+        LOG(ERROR) << "dropping unreadable game " << row.room_id << "/" << row.game_id << ": "
+                   << state.status();
+        continue;
+      }
+      entry.state.emplace(*std::move(state));
+    }
+    for (const std::string& member_id : entry.roster) player_game_[member_id] = row.game_id;
+    rooms_[row.room_id].games.emplace(row.game_id, std::move(entry));
+    ++restored_games;
+  }
+  LOG(INFO) << "hub restored " << snapshot->rooms.size() << " rooms, " << snapshot->members.size()
+            << " members, " << restored_games << " games";
+}
+
+void HubHandler::Persist(Writes& writes) {
+  if (store_ != nullptr && !writes.empty()) store_->Enqueue(std::move(writes));
+  writes.clear();
+}
+
+void HubHandler::StageMemberLocked(const std::string& room_id, const std::string& player_id,
+                                   Writes& writes) const {
+  if (store_ == nullptr) return;
+  const auto room = rooms_.find(room_id);
+  if (room == rooms_.end()) return;
+  const auto member = room->second.members.find(player_id);
+  if (member == room->second.members.end()) return;
+  PgHubStore::MemberRow row;
+  row.room_id = room_id;
+  row.player_id = player_id;
+  row.connected = member->second.connected;
+  row.games_played = member->second.games_played;
+  row.games_won = member->second.games_won;
+  row.total_score = member->second.total_score;
+  writes.push_back(PgHubStore::UpsertMember{std::move(row)});
+}
+
+void HubHandler::StageGameLocked(const std::string& room_id, const std::string& game_id,
+                                 GameEntry& entry, Writes& writes) const {
+  if (store_ == nullptr) return;
+  ++entry.version;
+  PgHubStore::GameRow row;
+  row.room_id = room_id;
+  row.game_id = game_id;
+  row.roster = entry.roster;
+  if (entry.started()) row.state_json = golf::serializeGameState(*entry.state);
+  row.version = entry.version;
+  writes.push_back(PgHubStore::SaveGame{std::move(row)});
+}
 
 smithy::Outcome<moonbase::golf::GetSessionOutput> HubHandler::GetSession(
     const moonbase::golf::GetSessionInput& input,
@@ -129,14 +214,17 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
     Count("stream_admissions_refused", {{"reason", "seat_conflict"}});
     co_return smithy::Error::Modeled("SeatConflict", "player already has a live connection");
   }
-  const bool resumed = admission == Registry::Admission::kResumed;
-  Count("stream_sessions", {{"resumed", resumed ? "true" : "false"}});
+  Count("stream_sessions",
+        {{"resumed", admission == Registry::Admission::kResumed ? "true" : "false"}});
   TrackActive(+1);
 
+  // Membership decides the resync, not the registry: a player restored
+  // from the store (#1194 step 2) admits as new — their old process's
+  // registry died — but their room and game are right here.
   std::optional<std::string> room;
   Outbox resync;
-  if (resumed) {
-    SetConnected(player_id, true);
+  SetConnected(player_id, true);
+  {
     const std::lock_guard<std::mutex> lock(mu_);
     const auto room_it = player_room_.find(player_id);
     if (room_it != player_room_.end()) room = room_it->second;
@@ -147,6 +235,7 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
       resync.To(player_id, GolfUpdateEvent(GolfUpdate::FromGamejoined(std::move(joined))));
     }
   }
+  const bool resumed = admission == Registry::Admission::kResumed || room.has_value();
   moonbase::golf::SessionReady ready;
   ready.playerId = player_id;
   ready.resumed = resumed;
@@ -177,10 +266,12 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
       TrackActive(-1);
       Count("stream_disconnects", {{"kind", "clean"}});
       Outbox outbox;
+      Writes writes;
       {
         const std::lock_guard<std::mutex> lock(mu_);
-        LeaveEverywhere(player_id, outbox);
+        LeaveEverywhere(player_id, outbox, writes);
       }
+      Persist(writes);
       Deliver(outbox);
       co_return smithy::Unit{};
     }
@@ -193,6 +284,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
   if (command.as_createRoom_or_null() != nullptr) {
     std::string room_id;
     Outbox outbox;
+    Writes writes;
     {
       const std::lock_guard<std::mutex> lock(mu_);
       if (!player_room_.contains(player_id)) {
@@ -200,12 +292,15 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
         while (rooms_.contains(room_id)) room_id = ids_->RoomId();
         rooms_[room_id].members.emplace(player_id, Member{});
         player_room_[player_id] = room_id;
+        if (store_ != nullptr) writes.push_back(PgHubStore::UpsertRoom{room_id});
+        StageMemberLocked(room_id, player_id, writes);
         StageRoomStateLocked(room_id, outbox);
       }
     }
     if (room_id.empty()) {
       Reject(player_id, "already in a room");
     } else {
+      Persist(writes);
       Deliver(outbox);
     }
     return;
@@ -213,6 +308,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
 
   if (const auto* join = command.as_joinRoom_or_null()) {
     Outbox outbox;
+    Writes writes;
     bool joined = false;
     {
       const std::lock_guard<std::mutex> lock(mu_);
@@ -220,11 +316,13 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
       if (room != rooms_.end() && !player_room_.contains(player_id)) {
         room->second.members.emplace(player_id, Member{});
         player_room_[player_id] = join->roomId;
+        StageMemberLocked(join->roomId, player_id, writes);
         StageRoomStateLocked(join->roomId, outbox);
         joined = true;
       }
     }
     if (joined) {
+      Persist(writes);
       Deliver(outbox);
     } else {
       Reject(player_id, "room unavailable or already in a room");
@@ -234,6 +332,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
 
   if (command.as_leaveRoom_or_null() != nullptr) {
     Outbox outbox;
+    Writes writes;
     bool left = false;
     {
       const std::lock_guard<std::mutex> lock(mu_);
@@ -242,11 +341,12 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
         moonbase::golf::RoomLeft ack;
         ack.roomId = it->second;
         outbox.To(player_id, GolfEvents::FromRoomleft(std::move(ack)));
-        LeaveEverywhere(player_id, outbox);
+        LeaveEverywhere(player_id, outbox, writes);
         left = true;
       }
     }
     if (left) {
+      Persist(writes);
       Deliver(outbox);
     } else {
       Reject(player_id, "not in a room");
@@ -328,13 +428,15 @@ void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) 
   }
   if (move.as_leaveGame_or_null() != nullptr) {
     Outbox outbox;
+    Writes writes;
     bool in_game = false;
     {
       const std::lock_guard<std::mutex> lock(mu_);
       in_game = player_game_.contains(player_id);
-      if (in_game) LeaveGameLocked(player_id, outbox);
+      if (in_game) LeaveGameLocked(player_id, outbox, writes);
     }
     if (in_game) {
+      Persist(writes);
       Deliver(outbox);
     } else {
       Reject(player_id, "not in a game");
@@ -424,6 +526,7 @@ void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) 
 
 void HubHandler::CreateGameMove(const std::string& player_id) {
   Outbox outbox;
+  Writes writes;
   std::string reason;
   {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -438,6 +541,7 @@ void HubHandler::CreateGameMove(const std::string& player_id) {
       GameEntry& entry = room->games[game_id];
       entry.roster.push_back(player_id);
       player_game_[player_id] = game_id;
+      StageGameLocked(player_room_.at(player_id), game_id, entry, writes);
 
       moonbase::golf::GameCreated announcement;
       announcement.gameId = game_id;
@@ -454,12 +558,14 @@ void HubHandler::CreateGameMove(const std::string& player_id) {
   if (!reason.empty()) {
     Reject(player_id, std::move(reason));
   } else {
+    Persist(writes);
     Deliver(outbox);
   }
 }
 
 void HubHandler::JoinGameMove(const std::string& player_id, const std::string& game_id) {
   Outbox outbox;
+  Writes writes;
   std::string reason;
   {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -479,6 +585,7 @@ void HubHandler::JoinGameMove(const std::string& player_id, const std::string& g
       } else {
         game->second.roster.push_back(player_id);
         player_game_[player_id] = game_id;
+        StageGameLocked(player_room_.at(player_id), game_id, game->second, writes);
 
         moonbase::golf::GameJoined joined;
         joined.view = ViewLocked(game_id, game->second, player_id);
@@ -496,12 +603,14 @@ void HubHandler::JoinGameMove(const std::string& player_id, const std::string& g
   if (!reason.empty()) {
     Reject(player_id, std::move(reason));
   } else {
+    Persist(writes);
     Deliver(outbox);
   }
 }
 
 void HubHandler::StartGameMove(const std::string& player_id) {
   Outbox outbox;
+  Writes writes;
   std::string reason;
   {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -520,6 +629,7 @@ void HubHandler::StartGameMove(const std::string& player_id) {
         reason = std::string(dealt.status().message());
       } else {
         ref->entry->state.emplace(std::move(*dealt));
+        StageGameLocked(ref->room_id, ref->game_id, *ref->entry, writes);
         for (const std::string& recipient : ref->entry->roster) {
           outbox.To(recipient,
                     GolfUpdateEvent(GolfUpdate::FromGamestarted(moonbase::golf::GameStarted{})));
@@ -532,12 +642,14 @@ void HubHandler::StartGameMove(const std::string& player_id) {
   if (!reason.empty()) {
     Reject(player_id, std::move(reason));
   } else {
+    Persist(writes);
     Deliver(outbox);
   }
 }
 
 void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, MoveEffects effects) {
   Outbox outbox;
+  Writes writes;
   std::string reason;
   {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -574,8 +686,9 @@ void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, Mo
 
           if (updated.isOver()) {
             // Finalize stages the definitive face-up views itself.
-            FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox);
+            FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox, writes);
           } else {
+            StageGameLocked(ref->room_id, ref->game_id, *ref->entry, writes);
             const bool countdown_started = !was_countdown && updated.revealCountdownActive();
             if (effects.peek_fanout && !countdown_started) {
               // A quiet peek: only the peeker's view changed.
@@ -603,18 +716,25 @@ void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, Mo
   if (!reason.empty()) {
     Reject(player_id, std::move(reason));
   } else {
+    Persist(writes);
     Deliver(outbox);
   }
 }
 
 void HubHandler::SetConnected(const std::string& player_id, bool connected) {
-  const std::lock_guard<std::mutex> lock(mu_);
-  const auto it = player_room_.find(player_id);
-  if (it == player_room_.end()) return;
-  const auto room = rooms_.find(it->second);
-  if (room == rooms_.end()) return;
-  const auto member = room->second.members.find(player_id);
-  if (member != room->second.members.end()) member->second.connected = connected;
+  Writes writes;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    const auto it = player_room_.find(player_id);
+    if (it == player_room_.end()) return;
+    const auto room = rooms_.find(it->second);
+    if (room == rooms_.end()) return;
+    const auto member = room->second.members.find(player_id);
+    if (member == room->second.members.end()) return;
+    member->second.connected = connected;
+    StageMemberLocked(it->second, player_id, writes);
+  }
+  Persist(writes);
 }
 
 std::optional<std::string> HubHandler::CurrentRoom(const std::string& player_id) {
@@ -642,8 +762,8 @@ std::optional<HubHandler::GameRef> HubHandler::FindGameLocked(const std::string&
   return GameRef{room_it->second, &room->second, game_it->second, &game->second};
 }
 
-void HubHandler::LeaveEverywhere(const std::string& player_id, Outbox& outbox) {
-  LeaveGameLocked(player_id, outbox);
+void HubHandler::LeaveEverywhere(const std::string& player_id, Outbox& outbox, Writes& writes) {
+  LeaveGameLocked(player_id, outbox, writes);
 
   const auto it = player_room_.find(player_id);
   if (it == player_room_.end()) return;
@@ -654,12 +774,15 @@ void HubHandler::LeaveEverywhere(const std::string& player_id, Outbox& outbox) {
   room->second.members.erase(player_id);
   if (room->second.members.empty()) {
     rooms_.erase(room);
+    // One DeleteRoom; the row's cascade takes members and games with it.
+    if (store_ != nullptr) writes.push_back(PgHubStore::DeleteRoom{room_id});
     return;  // nobody left to tell
   }
+  if (store_ != nullptr) writes.push_back(PgHubStore::DeleteMember{room_id, player_id});
   StageRoomStateLocked(room_id, outbox);
 }
 
-void HubHandler::LeaveGameLocked(const std::string& player_id, Outbox& outbox) {
+void HubHandler::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writes& writes) {
   auto ref = FindGameLocked(player_id);
   player_game_.erase(player_id);
   if (!ref.has_value()) return;
@@ -674,7 +797,9 @@ void HubHandler::LeaveGameLocked(const std::string& player_id, Outbox& outbox) {
   if (!ref->entry->started()) {
     if (roster.empty()) {
       ref->room->games.erase(ref->game_id);
+      if (store_ != nullptr) writes.push_back(PgHubStore::DeleteGame{ref->room_id, ref->game_id});
     } else {
+      StageGameLocked(ref->room_id, ref->game_id, *ref->entry, writes);
       StageGameViewsLocked(ref->game_id, *ref->entry, outbox);
     }
     StageRoomStateLocked(ref->room_id, outbox);
@@ -689,8 +814,9 @@ void HubHandler::LeaveGameLocked(const std::string& player_id, Outbox& outbox) {
   }
   if (ref->entry->state->isOver()) {
     // Finalize stages the final views and the room's refreshed stats.
-    FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox);
+    FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox, writes);
   } else {
+    StageGameLocked(ref->room_id, ref->game_id, *ref->entry, writes);
     StageGameViewsLocked(ref->game_id, *ref->entry, outbox);
     StageRoomStateLocked(ref->room_id, outbox);
   }
@@ -717,10 +843,12 @@ void HubHandler::OnExpired(const std::string& player_id) {
   // slots and tell whoever remains. Runs on the registry's expiry thread.
   Count("stream_seats_expired");
   Outbox outbox;
+  Writes writes;
   {
     const std::lock_guard<std::mutex> lock(mu_);
-    LeaveEverywhere(player_id, outbox);
+    LeaveEverywhere(player_id, outbox, writes);
   }
+  Persist(writes);
   Deliver(outbox);
 }
 
@@ -862,7 +990,7 @@ void HubHandler::StageGameViewsLocked(const std::string& game_id, const GameEntr
 }
 
 void HubHandler::FinalizeGameLocked(const std::string& room_id, Room& room,
-                                    const std::string& game_id, Outbox& outbox) {
+                                    const std::string& game_id, Outbox& outbox, Writes& writes) {
   const auto game = room.games.find(game_id);
   if (game == room.games.end() || !game->second.started()) return;
   const golf::GameState& state = *game->second.state;
@@ -896,6 +1024,7 @@ void HubHandler::FinalizeGameLocked(const std::string& room_id, Room& room,
     if (std::find(winner_ids.begin(), winner_ids.end(), occupant) != winner_ids.end()) {
       member->second.games_won++;
     }
+    StageMemberLocked(room_id, occupant, writes);
   }
 
   // Final views (everything face up), then the result, then the room's
@@ -906,6 +1035,7 @@ void HubHandler::FinalizeGameLocked(const std::string& room_id, Room& room,
     player_game_.erase(recipient);
   }
   room.games.erase(game);
+  if (store_ != nullptr) writes.push_back(PgHubStore::DeleteGame{room_id, game_id});
   StageRoomStateLocked(room_id, outbox);
 }
 

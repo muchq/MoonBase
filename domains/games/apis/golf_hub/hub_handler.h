@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "domains/games/apis/golf_hub/id_generator.h"
+#include "domains/games/apis/golf_hub/pg_hub_store.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/golf/game_state.h"
@@ -36,11 +37,16 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
  public:
   using Registry = smithy::server::SessionRegistry<moonbase::golf::GolfEvents>;
 
+  /// store non-null turns on the #1194 step-2 write-through: every
+  /// rooms/members/games mutation is staged under mu_ and applied by the
+  /// store's writer, and construction restores the previous process's
+  /// rooms, members (disconnected until they resume), and games.
   explicit HubHandler(std::shared_ptr<TicketVault> vault,
                       std::shared_ptr<cards::Dealer> dealer = std::make_shared<cards::Dealer>(),
                       std::shared_ptr<IdGenerator> ids = std::make_shared<WhimsicalIdGenerator>(),
                       std::chrono::seconds grace_period = std::chrono::minutes(5),
-                      std::shared_ptr<futility::otel::MetricsRecorder> metrics = nullptr);
+                      std::shared_ptr<futility::otel::MetricsRecorder> metrics = nullptr,
+                      std::shared_ptr<PgHubStore> store = nullptr);
 
   // Note: operation IO generates as <Op>Input/<Op>Output regardless of
   // the named shapes bound in the model, and moonbase.games shapes land
@@ -67,9 +73,13 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// A game is a pre-start roster until startGame swaps in engine state.
   /// Once started, roster membership mirrors the engine's seats — every
   /// join/leave updates both, or a seat would stop receiving views.
+  /// version counts saves (memory owns it in step 2): each staged
+  /// write-through increments it, and the store's conditional UPDATE
+  /// verifies the row followed.
   struct GameEntry {
     std::vector<std::string> roster;
     std::optional<golf::GameState> state;
+    int64_t version = 0;
     [[nodiscard]] bool started() const { return state.has_value(); }
   };
 
@@ -87,6 +97,11 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
       events.emplace_back(player_id, std::move(event));
     }
   };
+
+  /// Write-through ops staged under mu_ (like Outbox for events) and
+  /// handed to the store after unlock — staging order is the truth's
+  /// order, and the store's single writer preserves it.
+  using Writes = std::vector<PgHubStore::Op>;
 
   using MoveFn = std::function<absl::StatusOr<golf::GameState>(const golf::GameState&, int seat)>;
   /// What a successful engine move announces beyond the state views.
@@ -130,12 +145,24 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   std::optional<GameRef> FindGameLocked(const std::string& player_id);
   /// Removes the player from their game and room (deliberate leave, clean
   /// close, or grace expiry) and stages every notification that implies.
-  void LeaveEverywhere(const std::string& player_id, Outbox& outbox);
-  void LeaveGameLocked(const std::string& player_id, Outbox& outbox);
+  void LeaveEverywhere(const std::string& player_id, Outbox& outbox, Writes& writes);
+  void LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writes& writes);
   void BroadcastRoom(const std::string& room_id);
   void Reject(const std::string& player_id, std::string reason);
   void OnExpired(const std::string& player_id);
   void Deliver(Outbox& outbox);
+  /// Hands staged write-through ops to the store; no-op without one.
+  void Persist(Writes& writes);
+
+  /// Write-through staging; callers hold mu_. StageGameLocked increments
+  /// the entry's version — call it once per mutation of the entry.
+  void StageMemberLocked(const std::string& room_id, const std::string& player_id,
+                         Writes& writes) const;
+  void StageGameLocked(const std::string& room_id, const std::string& game_id, GameEntry& entry,
+                       Writes& writes) const;
+  /// Boot-time restore of the previous process's rooms/members/games;
+  /// runs before the transport serves, everyone restored disconnected.
+  void RestoreFromStore();
 
   /// Builders; callers hold mu_.
   moonbase::golf::RoomState RoomStateLocked(const std::string& room_id, const Room& room) const;
@@ -145,12 +172,13 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   void StageGameViewsLocked(const std::string& game_id, const GameEntry& entry,
                             Outbox& outbox) const;
   void FinalizeGameLocked(const std::string& room_id, Room& room, const std::string& game_id,
-                          Outbox& outbox);
+                          Outbox& outbox, Writes& writes);
 
   const std::shared_ptr<TicketVault> vault_;
   const std::shared_ptr<cards::Dealer> dealer_;
   const std::shared_ptr<IdGenerator> ids_;
   const std::shared_ptr<futility::otel::MetricsRecorder> metrics_;
+  const std::shared_ptr<PgHubStore> store_;
   std::mutex mu_;
   std::unordered_map<std::string, Room> rooms_;
   std::unordered_map<std::string, std::string> player_room_;
