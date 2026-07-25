@@ -13,12 +13,14 @@
 
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "domains/games/apis/golf_hub/hub_handler.h"
 #include "domains/games/apis/golf_hub/id_generator.h"
+#include "domains/games/apis/golf_hub/pg_hub_store.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
@@ -33,11 +35,54 @@
 
 namespace golf_hub {
 
+// Receives until an event of the wanted case arrives (skipping others),
+// failing after a few frames so a wrong stream can't hang the test.
+inline std::optional<moonbase::golf::GolfEvents> ReceiveCase(
+    moonbase::golf::PlayClientStream& stream, const std::string& wanted) {
+  for (int i = 0; i < 8; ++i) {
+    auto received = stream.Receive();
+    if (!received.ok() || !received->has_value()) return std::nullopt;
+    if (wanted == (*received)->case_name()) return **received;
+  }
+  return std::nullopt;
+}
+
+// Same, but tunnels into the golf envelope: returns the first GolfUpdate
+// of the wanted case, skipping room noise and other updates in between.
+inline std::optional<moonbase::golf::GolfUpdate> ReceiveGolf(
+    moonbase::golf::PlayClientStream& stream, const std::string& wanted) {
+  for (int i = 0; i < 16; ++i) {
+    auto received = stream.Receive();
+    if (!received.ok() || !received->has_value()) return std::nullopt;
+    const auto* envelope = (*received)->as_golf_or_null();
+    if (envelope == nullptr) continue;
+    if (wanted == envelope->update.case_name()) return envelope->update;
+  }
+  return std::nullopt;
+}
+
+inline moonbase::golf::GolfCommands Move(moonbase::golf::GolfMove move) {
+  moonbase::golf::GolfCommand command;
+  command.move = std::move(move);
+  return moonbase::golf::GolfCommands::FromGolf(std::move(command));
+}
+
 class GolfHubStreamFixture : public testing::Test {
  protected:
-  void SetUp() override {
-    vault_ = std::make_shared<InMemoryTicketVault>(/*ticket_ttl=*/std::chrono::seconds(60),
-                                                   /*resume_ttl=*/std::chrono::seconds(60));
+  // The persistence seams (#1194): the default fixture stays the blessed
+  // all-in-memory hub; the pg e2e suite overrides both to run the same
+  // flows with durable credentials and the rooms/games write-through.
+  virtual std::shared_ptr<TicketVault> MakeVault() {
+    return std::make_shared<InMemoryTicketVault>(/*ticket_ttl=*/std::chrono::seconds(60),
+                                                 /*resume_ttl=*/std::chrono::seconds(60));
+  }
+  virtual std::shared_ptr<PgHubStore> MakeStore() { return nullptr; }
+
+  void SetUp() override { BuildHub(); }
+
+  void BuildHub() {
+    vault_ = MakeVault();
+    store_ = MakeStore();
     // NoShuffleDealer: hands are dealt from the back of the pristine deck,
     // so every card in every test is known (first seat gets the aces).
     // Sequential ids keep players and game codes readable in failures.
@@ -46,7 +91,11 @@ class GolfHubStreamFixture : public testing::Test {
     handler_ = std::make_shared<HubHandler>(
         vault_, std::make_shared<cards::NoShuffleDealer>(), ids_,
         /*grace_period=*/std::chrono::seconds(60),
-        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"));
+        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"), store_);
+    if (store_ != nullptr) {
+      const absl::Status restored = handler_->RestoreFromStore();
+      ASSERT_TRUE(restored.ok()) << restored;
+    }
     server_ = std::make_unique<moonbase::golf::GolfHubServer>(handler_);
 
     auto loopback = std::make_shared<smithy::http::Loopback>();
@@ -101,7 +150,64 @@ class GolfHubStreamFixture : public testing::Test {
     return Seat{session->playerId, session->resumeToken, std::move(*stream)};
   }
 
+  // Room with two seats in a started game: with the NoShuffleDealer the
+  // first seat holds the aces and the second the kings, Q♠ seeding the
+  // discard. Returns nullopt (with an ADD_FAILURE already recorded by the
+  // failing step where possible) when any step misbehaves.
+  struct Table {
+    Seat alice;
+    Seat bob;
+    std::string room_id;
+    std::string game_id;
+  };
+  std::optional<Table> SeatedTable() {
+    auto alice = OpenSeat();
+    auto bob = OpenSeat();
+    if (!alice.has_value() || !bob.has_value()) return std::nullopt;
+    if (!ReceiveCase(alice->stream, "sessionReady").has_value()) return std::nullopt;
+    if (!ReceiveCase(bob->stream, "sessionReady").has_value()) return std::nullopt;
+
+    if (!alice->stream
+             .Send(moonbase::golf::GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{}))
+             .ok()) {
+      return std::nullopt;
+    }
+    auto created = ReceiveCase(alice->stream, "roomState");
+    if (!created.has_value()) return std::nullopt;
+    const std::string room_id = created->as_roomState_or_null()->roomId;
+    moonbase::golf::JoinRoom join_room;
+    join_room.roomId = room_id;
+    if (!bob->stream.Send(moonbase::golf::GolfCommands::FromJoinroom(join_room)).ok())
+      return std::nullopt;
+    if (!ReceiveCase(bob->stream, "roomState").has_value()) return std::nullopt;
+
+    if (!alice->stream
+             .Send(Move(moonbase::golf::GolfMove::FromCreategame(moonbase::golf::CreateGame{})))
+             .ok()) {
+      return std::nullopt;
+    }
+    auto joined = ReceiveGolf(alice->stream, "gameJoined");
+    if (!joined.has_value()) return std::nullopt;
+    const std::string game_id = joined->as_gameJoined_or_null()->view.gameId;
+
+    moonbase::golf::JoinGame join_game;
+    join_game.gameId = game_id;
+    if (!bob->stream.Send(Move(moonbase::golf::GolfMove::FromJoingame(join_game))).ok())
+      return std::nullopt;
+    if (!ReceiveGolf(bob->stream, "gameJoined").has_value()) return std::nullopt;
+
+    if (!alice->stream
+             .Send(Move(moonbase::golf::GolfMove::FromStartgame(moonbase::golf::StartGame{})))
+             .ok()) {
+      return std::nullopt;
+    }
+    if (!ReceiveGolf(alice->stream, "gameStarted").has_value()) return std::nullopt;
+    if (!ReceiveGolf(bob->stream, "gameStarted").has_value()) return std::nullopt;
+    return Table{std::move(*alice), std::move(*bob), room_id, game_id};
+  }
+
   std::shared_ptr<TicketVault> vault_;
+  std::shared_ptr<PgHubStore> store_;
   std::shared_ptr<IdGenerator> ids_ = std::make_shared<SequentialIdGenerator>();
   std::shared_ptr<HubHandler> handler_;
   std::unique_ptr<moonbase::golf::GolfHubServer> server_;

@@ -41,12 +41,16 @@ lobby-safe summaries only.
 
 ## Scaffold notes / deferred
 
-- Credentials live in postgres when `GOLF_HUB_DB_URL` is set (#1194
-  step 1: `PgTicketVault`, hashed at rest, spend = single-row
-  `DELETE ... RETURNING`), so tickets and resume tokens survive deploys
-  and don't care which instance minted them. Unset falls back to the
-  in-memory `InMemoryTicketVault` — dev mode and the test harness.
-  Rooms, games, and fan-out are still in-process (later #1194 steps).
+- Persistence rides `GOLF_HUB_DB_URL` (#1194). Step 1: credentials in
+  postgres (`PgTicketVault`, hashed at rest, spend = single-row
+  `DELETE ... RETURNING`) — tickets and resume tokens survive deploys.
+  Step 2: rooms, membership stats, and live games write through
+  (`PgHubStore` — ops staged under the hub lock, applied FIFO by one
+  writer; games save serialized `GameState` with a version counter) and
+  restore at boot, so a deploy no longer kills games: players resume by
+  token into their seat. Memory stays authoritative single-instance;
+  fan-out is still process-local (step 3). Unset falls back to
+  all-in-memory — dev mode and the test harness.
 - Player ids are whimsical (`bouncy-coral-quokka-x9k2`, the Go
   generator's word lists) and double as display names. Room and game ids
   are 6-char uppercase codes for permalink compatibility.

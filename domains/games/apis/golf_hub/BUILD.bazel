@@ -87,6 +87,48 @@ cc_library(
     ],
 )
 
+# The rooms/members/games write-through (#1194 step 2): staged by the hub
+# under its lock, applied FIFO by one writer thread; boot restore reads
+# the snapshot back. Concrete postgres component, injected optionally —
+# no interface (the issue's design note), and nullptr keeps the
+# all-in-memory hub as the test mode.
+cc_library(
+    name = "pg_hub_store",
+    srcs = ["pg_hub_store.cc"],
+    hdrs = ["pg_hub_store.h"],
+    deps = [
+        "//domains/games/libs/cards/golf:game_state",
+        "//domains/games/libs/cards/golf:game_state_serde",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@nlohmann_json//:json",
+    ],
+)
+
+# Step-2 slice of the persistence integration suite (#1194): real
+# postgres via GOLF_HUB_TEST_DB_URL; skips otherwise.
+cc_test(
+    name = "pg_hub_store_test",
+    size = "small",
+    srcs = ["pg_hub_store_test.cc"],
+    env_inherit = ["GOLF_HUB_TEST_DB_URL"],
+    # One shared scratch database: concurrent DB tests truncate each
+    # other mid-flight.
+    tags = ["exclusive"],
+    deps = [
+        ":pg_hub_store",
+        ":pg_ticket_vault",
+        "//domains/games/libs/cards",
+        "//domains/games/libs/cards/golf:game_state",
+        "//domains/games/libs/cards/golf:game_state_serde",
+        "//domains/platform/libs/pg",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # Phase-0 slice of the persistence integration suite (#1194): serialized
 # engine states must survive the step-2 storage target (jsonb normalizes
 # keys and spacing, and refuses escaped NULs). Real postgres via
@@ -96,6 +138,9 @@ cc_test(
     size = "small",
     srcs = ["game_state_jsonb_test.cc"],
     env_inherit = ["GOLF_HUB_TEST_DB_URL"],
+    # One shared scratch database: concurrent DB tests truncate each
+    # other mid-flight.
+    tags = ["exclusive"],
     deps = [
         "//domains/games/libs/cards",
         "//domains/games/libs/cards/golf:game_state",
@@ -113,6 +158,9 @@ cc_test(
     size = "small",
     srcs = ["pg_ticket_vault_test.cc"],
     env_inherit = ["GOLF_HUB_TEST_DB_URL"],
+    # One shared scratch database: concurrent DB tests truncate each
+    # other mid-flight.
+    tags = ["exclusive"],
     deps = [
         ":pg_ticket_vault",
         "//domains/platform/libs/pg",
@@ -128,6 +176,7 @@ cc_library(
     deps = [
         ":golf_hub_smithy_server",
         ":id_generator",
+        ":pg_hub_store",
         ":ticket_vault",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards:card_mapper",
@@ -135,9 +184,43 @@ cc_library(
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/golf:player",
         "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings",
         "@smithy_cpp//runtime:eventstream",
         "@smithy_cpp//runtime:server",
+    ],
+)
+
+# The step-2 restart-survival e2e (#1194): same client flows, durable
+# hub, RestartHub between them. Real postgres via GOLF_HUB_TEST_DB_URL;
+# skips otherwise.
+cc_test(
+    name = "pg_hub_e2e_test",
+    size = "small",
+    srcs = [
+        "pg_hub_e2e_test.cc",
+        "stream_test_fixture.h",
+    ],
+    env_inherit = ["GOLF_HUB_TEST_DB_URL"],
+    # One shared scratch database: concurrent DB tests truncate each
+    # other mid-flight.
+    tags = ["exclusive"],
+    deps = [
+        ":golf_hub_smithy_client",
+        ":golf_hub_smithy_server",
+        ":hub_handler",
+        ":id_generator",
+        ":pg_hub_store",
+        ":pg_ticket_vault",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:metrics",
+        "//domains/platform/libs/pg",
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:client",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:http_beast",
     ],
 )
 
@@ -175,6 +258,7 @@ cc_binary(
         ":golf_hub_smithy_server",
         ":hub_handler",
         ":id_generator",
+        ":pg_hub_store",
         ":pg_ticket_vault",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
