@@ -4,6 +4,7 @@ load("//bazel/rules:oci.bzl", "linux_oci_go")
 go_library(
     name = "prom_proxy_lib",
     srcs = [
+        "container_handlers.go",
         "handlers.go",
         "models.go",
         "prometheus_client.go",
@@ -24,6 +25,7 @@ go_test(
     name = "prom_proxy_test",
     size = "small",
     srcs = [
+        "container_handlers_test.go",
         "handlers_test.go",
         "models_test.go",
         "prometheus_client_test.go",

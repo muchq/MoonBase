@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -15,18 +16,18 @@ func extractFloatValue(result *Result) (float64, error) {
 	if len(result.Value) < 2 {
 		return 0, fmt.Errorf("invalid prometheus result format")
 	}
-	
+
 	valueStr, ok := result.Value[1].(string)
 	if !ok {
 		return 0, fmt.Errorf("value is not a string")
 	}
-	
+
 	// Handle NaN, +Inf, -Inf values gracefully
 	switch valueStr {
 	case "NaN", "+Inf", "-Inf":
 		return 0, nil // Return 0 for invalid mathematical results
 	}
-	
+
 	return strconv.ParseFloat(valueStr, 64)
 }
 
@@ -36,33 +37,33 @@ func extractTimeSeries(result *Result) (TimeSeries, error) {
 		Labels: result.Metric,
 		Values: make([]DataPoint, 0, len(result.Values)),
 	}
-	
+
 	// Set metric name from __name__ label or construct from labels
 	if name, exists := result.Metric["__name__"]; exists {
 		ts.MetricName = name
 	} else {
 		ts.MetricName = "unnamed_metric"
 	}
-	
+
 	// Process each timestamp-value pair
 	for _, valueArray := range result.Values {
 		if len(valueArray) != 2 {
 			continue
 		}
-		
+
 		// Extract timestamp
 		timestampFloat, ok := valueArray[0].(float64)
 		if !ok {
 			continue
 		}
 		timestamp := time.Unix(int64(timestampFloat), 0)
-		
+
 		// Extract value
 		valueStr, ok := valueArray[1].(string)
 		if !ok {
 			continue
 		}
-		
+
 		// Handle NaN, +Inf, -Inf values gracefully
 		var value float64
 		switch valueStr {
@@ -75,13 +76,13 @@ func extractTimeSeries(result *Result) (TimeSeries, error) {
 				continue
 			}
 		}
-		
+
 		ts.Values = append(ts.Values, DataPoint{
 			Timestamp: timestamp,
 			Value:     value,
 		})
 	}
-	
+
 	return ts, nil
 }
 
@@ -103,8 +104,8 @@ func NewMetricsHandler(promClient PrometheusQuerier) *MetricsHandler {
 
 func (h *MetricsHandler) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	response := map[string]string{
-		"status": "healthy",
-		"service": "prometheus-proxy",
+		"status":    "healthy",
+		"service":   "prometheus-proxy",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
 	mucks.JsonOk(w, response)
@@ -117,7 +118,7 @@ func (h *MetricsHandler) fetchSystemMetrics(ctx context.Context) (*SystemMetrics
 		Disk:      []DiskMetrics{},
 		Network:   []NetworkMetrics{},
 	}
-	
+
 	// Fetch CPU utilization
 	cpuQuery := `100-avg(rate(system_cpu_time_seconds_total{state="idle"}[5m]))*100`
 	cpuResp, err := h.promClient.Query(ctx, cpuQuery)
@@ -126,7 +127,7 @@ func (h *MetricsHandler) fetchSystemMetrics(ctx context.Context) (*SystemMetrics
 			metrics.CPU.Utilization = val
 		}
 	}
-	
+
 	// Fetch CPU by core
 	cpuCoreQuery := `rate(system_cpu_time_seconds_total[5m])*100`
 	cpuCoreResp, err := h.promClient.Query(ctx, cpuCoreQuery)
@@ -139,7 +140,7 @@ func (h *MetricsHandler) fetchSystemMetrics(ctx context.Context) (*SystemMetrics
 			}
 		}
 	}
-	
+
 	// Fetch memory metrics
 	memoryUsedQuery := `system_memory_usage_bytes{state="used"}`
 	memUsedResp, err := h.promClient.Query(ctx, memoryUsedQuery)
@@ -148,7 +149,7 @@ func (h *MetricsHandler) fetchSystemMetrics(ctx context.Context) (*SystemMetrics
 			metrics.Memory.Used = val
 		}
 	}
-	
+
 	memoryFreeQuery := `system_memory_usage_bytes{state="free"}`
 	memFreeResp, err := h.promClient.Query(ctx, memoryFreeQuery)
 	if err == nil && len(memFreeResp.Data.Result) > 0 {
@@ -156,7 +157,7 @@ func (h *MetricsHandler) fetchSystemMetrics(ctx context.Context) (*SystemMetrics
 			metrics.Memory.Free = val
 		}
 	}
-	
+
 	memoryCachedQuery := `system_memory_usage_bytes{state="cached"}`
 	memCachedResp, err := h.promClient.Query(ctx, memoryCachedQuery)
 	if err == nil && len(memCachedResp.Data.Result) > 0 {
@@ -164,25 +165,25 @@ func (h *MetricsHandler) fetchSystemMetrics(ctx context.Context) (*SystemMetrics
 			metrics.Memory.Cached = val
 		}
 	}
-	
+
 	// Calculate total and utilization
 	metrics.Memory.Total = metrics.Memory.Used + metrics.Memory.Free + metrics.Memory.Cached
 	if metrics.Memory.Total > 0 {
 		metrics.Memory.Utilization = (metrics.Memory.Used / metrics.Memory.Total) * 100
 	}
-	
+
 	// Fetch disk metrics
 	diskUsageQuery := `system_filesystem_usage_bytes`
 	diskResp, err := h.promClient.Query(ctx, diskUsageQuery)
 	if err == nil {
 		deviceMap := make(map[string]*DiskMetrics)
-		
+
 		for _, result := range diskResp.Data.Result {
 			if device, exists := result.Metric["device"]; exists {
 				if _, exists := deviceMap[device]; !exists {
 					deviceMap[device] = &DiskMetrics{Device: device}
 				}
-				
+
 				if val, err := extractFloatValue(&result); err == nil {
 					if state, exists := result.Metric["state"]; exists {
 						switch state {
@@ -195,7 +196,7 @@ func (h *MetricsHandler) fetchSystemMetrics(ctx context.Context) (*SystemMetrics
 				}
 			}
 		}
-		
+
 		// Convert map to slice and calculate utilization
 		for _, disk := range deviceMap {
 			disk.Total += disk.Used
@@ -205,13 +206,13 @@ func (h *MetricsHandler) fetchSystemMetrics(ctx context.Context) (*SystemMetrics
 			metrics.Disk = append(metrics.Disk, *disk)
 		}
 	}
-	
+
 	// Fetch disk I/O rates
 	diskIOQuery := `rate(system_disk_io_bytes_total[5m])`
 	diskIOResp, err := h.promClient.Query(ctx, diskIOQuery)
 	if err == nil {
 		deviceIOMap := make(map[string]float64)
-		
+
 		for _, result := range diskIOResp.Data.Result {
 			if device, exists := result.Metric["device"]; exists {
 				if val, err := extractFloatValue(&result); err == nil {
@@ -219,7 +220,7 @@ func (h *MetricsHandler) fetchSystemMetrics(ctx context.Context) (*SystemMetrics
 				}
 			}
 		}
-		
+
 		// Update disk metrics with I/O rates
 		for i := range metrics.Disk {
 			if ioRate, exists := deviceIOMap[metrics.Disk[i].Device]; exists {
@@ -227,19 +228,19 @@ func (h *MetricsHandler) fetchSystemMetrics(ctx context.Context) (*SystemMetrics
 			}
 		}
 	}
-	
+
 	// Fetch network metrics
 	networkIOQuery := `rate(system_network_io_bytes_total[5m])`
 	netIOResp, err := h.promClient.Query(ctx, networkIOQuery)
 	if err == nil {
 		interfaceMap := make(map[string]*NetworkMetrics)
-		
+
 		for _, result := range netIOResp.Data.Result {
 			if iface, exists := result.Metric["device"]; exists {
 				if _, exists := interfaceMap[iface]; !exists {
 					interfaceMap[iface] = &NetworkMetrics{Interface: iface}
 				}
-				
+
 				if val, err := extractFloatValue(&result); err == nil {
 					if direction, exists := result.Metric["direction"]; exists {
 						switch direction {
@@ -252,13 +253,13 @@ func (h *MetricsHandler) fetchSystemMetrics(ctx context.Context) (*SystemMetrics
 				}
 			}
 		}
-		
+
 		// Convert map to slice
 		for _, netMetric := range interfaceMap {
 			metrics.Network = append(metrics.Network, *netMetric)
 		}
 	}
-	
+
 	return metrics, nil
 }
 
@@ -266,7 +267,7 @@ func (h *MetricsHandler) fetchSystemMetricsTimeSeries(ctx context.Context, timeR
 	duration, step := GetTimeRangeConfig(timeRange)
 	endTime := time.Now().UTC()
 	startTime := endTime.Add(-duration)
-	
+
 	response := &TimeSeriesResponse{
 		TimeRange: string(timeRange),
 		StartTime: startTime,
@@ -274,7 +275,7 @@ func (h *MetricsHandler) fetchSystemMetricsTimeSeries(ctx context.Context, timeR
 		Step:      step,
 		Series:    []TimeSeries{},
 	}
-	
+
 	// Define key system metrics queries
 	queries := map[string]string{
 		"cpu_utilization":    `100-avg(rate(system_cpu_time_seconds_total{state="idle"}[5m]))*100`,
@@ -283,7 +284,7 @@ func (h *MetricsHandler) fetchSystemMetricsTimeSeries(ctx context.Context, timeR
 		"network_rx_rate":    `rate(system_network_io_bytes_total{direction="receive"}[5m])`,
 		"network_tx_rate":    `rate(system_network_io_bytes_total{direction="transmit"}[5m])`,
 	}
-	
+
 	// Execute each query as a range query
 	for metricName, query := range queries {
 		resp, err := h.promClient.QueryRange(ctx, query, startTime, endTime, step)
@@ -291,7 +292,7 @@ func (h *MetricsHandler) fetchSystemMetricsTimeSeries(ctx context.Context, timeR
 			// Log error but continue with other metrics
 			continue
 		}
-		
+
 		// Process results and add to response
 		for _, result := range resp.Data.Result {
 			ts, err := extractTimeSeries(&result)
@@ -302,117 +303,151 @@ func (h *MetricsHandler) fetchSystemMetricsTimeSeries(ctx context.Context, timeR
 			response.Series = append(response.Series, ts)
 		}
 	}
-	
+
 	return response, nil
 }
 
-func (h *MetricsHandler) fetchContainerMetrics(ctx context.Context) (*ContainerMetrics, error) {
-	metrics := &ContainerMetrics{
-		Timestamp:  time.Now().UTC(),
-		Containers: []ContainerStats{},
-	}
+// containerRef is one row of the container listing: the cAdvisor name, the
+// compose service behind it, and the image it is running.
+type containerRef struct {
+	name    string
+	service string
+	image   string
+}
 
-	// Get list of containers
-	containerQuery := `count by (name) (container_last_seen)`
-	containerResp, err := h.promClient.Query(ctx, containerQuery)
+// listContainers is a single query, so callers that only need to resolve a
+// name don't pay for the whole per-container fan-out.
+//
+// max() rather than count() so the value is the last-seen timestamp. Grouping
+// by image means one container can yield two rows: for a few minutes after a
+// redeploy the replaced container is still inside Prometheus's lookback
+// window alongside its replacement. Keeping the newer sample per name is what
+// stops the dashboard reporting the previous revision as the running one,
+// right when someone is watching a deploy.
+func (h *MetricsHandler) listContainers(ctx context.Context) ([]containerRef, error) {
+	const query = `max by (name, image, container_label_com_docker_compose_service) (container_last_seen)`
+	resp, err := h.promClient.Query(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 
-	containerNames := []string{}
-	for _, result := range containerResp.Data.Result {
-		if name, exists := result.Metric["name"]; exists && name != "" {
-			containerNames = append(containerNames, name)
+	newest := map[string]float64{}
+	byName := map[string]containerRef{}
+	for i := range resp.Data.Result {
+		result := &resp.Data.Result[i]
+		name := result.Metric["name"]
+		if name == "" {
+			continue
 		}
+		lastSeen, err := extractFloatValue(result)
+		if err != nil {
+			lastSeen = 0
+		}
+		if prev, seen := newest[name]; seen && lastSeen <= prev {
+			continue
+		}
+		newest[name] = lastSeen
+
+		// Compose stamps the service on the container; the label is exact
+		// where parsing the name is a guess about the project prefix, which
+		// differs between the deployed host and local_deploy.sh.
+		service := result.Metric["container_label_com_docker_compose_service"]
+		if service == "" {
+			service = containerDisplayName(name)
+		}
+		byName[name] = containerRef{name: name, service: service, image: result.Metric["image"]}
 	}
 
-	// Fetch metrics for each container, including the restart churn that is a
-	// crash-looping service's only trace — it dies before serving anything, so
-	// its app metrics stay flat and look exactly like an idle service.
-	for _, name := range containerNames {
-		stats := ContainerStats{Name: name}
+	// Sorted so first-match resolution is deterministic rather than dependent
+	// on Prometheus's vector order.
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 
-		// CPU usage (percentage)
-		cpuQuery := fmt.Sprintf(`rate(container_cpu_usage_seconds_total{name="%s"}[5m])*100`, name)
-		cpuResp, err := h.promClient.Query(ctx, cpuQuery)
-		if err == nil && len(cpuResp.Data.Result) > 0 {
-			if val, err := extractFloatValue(&cpuResp.Data.Result[0]); err == nil {
-				stats.CPUUsagePercent = val
-			}
+	refs := make([]containerRef, 0, len(names))
+	for _, name := range names {
+		refs = append(refs, byName[name])
+	}
+	return refs, nil
+}
+
+// containerStats runs the per-container queries for one container, so a
+// single-container request doesn't fan out across the whole stack.
+func (h *MetricsHandler) containerStats(ctx context.Context, ref containerRef) ContainerStats {
+	stats := ContainerStats{
+		Name:    ref.name,
+		Service: ref.service,
+		Image:   ref.image,
+		Version: imageTag(ref.image),
+	}
+	name := ref.name
+
+	scalar := func(query string) (float64, bool) {
+		resp, err := h.promClient.Query(ctx, query)
+		if err != nil || len(resp.Data.Result) == 0 {
+			return 0, false
 		}
-
-		// CPU throttling
-		throttleQuery := fmt.Sprintf(`rate(container_cpu_cfs_throttled_seconds_total{name="%s"}[5m])`, name)
-		throttleResp, err := h.promClient.Query(ctx, throttleQuery)
-		if err == nil && len(throttleResp.Data.Result) > 0 {
-			if val, err := extractFloatValue(&throttleResp.Data.Result[0]); err == nil {
-				stats.CPUThrottledSeconds = val
-			}
+		val, err := extractFloatValue(&resp.Data.Result[0])
+		if err != nil {
+			return 0, false
 		}
-
-		// Memory usage
-		memQuery := fmt.Sprintf(`container_memory_usage_bytes{name="%s"}`, name)
-		memResp, err := h.promClient.Query(ctx, memQuery)
-		if err == nil && len(memResp.Data.Result) > 0 {
-			if val, err := extractFloatValue(&memResp.Data.Result[0]); err == nil {
-				stats.MemoryUsageBytes = val
-			}
-		}
-
-		// Memory limit
-		memLimitQuery := fmt.Sprintf(`container_spec_memory_limit_bytes{name="%s"}`, name)
-		memLimitResp, err := h.promClient.Query(ctx, memLimitQuery)
-		if err == nil && len(memLimitResp.Data.Result) > 0 {
-			if val, err := extractFloatValue(&memLimitResp.Data.Result[0]); err == nil {
-				stats.MemoryLimitBytes = val
-				if stats.MemoryUsageBytes > 0 && val > 0 {
-					stats.MemoryUsagePercent = (stats.MemoryUsageBytes / val) * 100
-				}
-			}
-		}
-
-		// Network RX
-		netRxQuery := fmt.Sprintf(`rate(container_network_receive_bytes_total{name="%s"}[5m])`, name)
-		netRxResp, err := h.promClient.Query(ctx, netRxQuery)
-		if err == nil && len(netRxResp.Data.Result) > 0 {
-			if val, err := extractFloatValue(&netRxResp.Data.Result[0]); err == nil {
-				stats.NetworkRxBytes = val
-			}
-		}
-
-		// Network TX
-		netTxQuery := fmt.Sprintf(`rate(container_network_transmit_bytes_total{name="%s"}[5m])`, name)
-		netTxResp, err := h.promClient.Query(ctx, netTxQuery)
-		if err == nil && len(netTxResp.Data.Result) > 0 {
-			if val, err := extractFloatValue(&netTxResp.Data.Result[0]); err == nil {
-				stats.NetworkTxBytes = val
-			}
-		}
-
-		// Restarts. cAdvisor exposes no restart counter, so count the steps in
-		// the container's start time: each restart re-stamps it.
-		restartQuery := fmt.Sprintf(`changes(container_start_time_seconds{name="%s"}[1h])`, name)
-		restartResp, err := h.promClient.Query(ctx, restartQuery)
-		if err == nil && len(restartResp.Data.Result) > 0 {
-			if val, err := extractFloatValue(&restartResp.Data.Result[0]); err == nil {
-				stats.RestartsLastHour = val
-			}
-		}
-
-		// How long the current run has lasted.
-		uptimeQuery := fmt.Sprintf(`time()-container_start_time_seconds{name="%s"}`, name)
-		uptimeResp, err := h.promClient.Query(ctx, uptimeQuery)
-		if err == nil && len(uptimeResp.Data.Result) > 0 {
-			if val, err := extractFloatValue(&uptimeResp.Data.Result[0]); err == nil {
-				stats.UptimeSeconds = val
-			}
-		}
-
-		stats.CrashLooping = isCrashLooping(stats.RestartsLastHour, stats.UptimeSeconds)
-
-		metrics.Containers = append(metrics.Containers, stats)
+		return val, true
 	}
 
+	if val, ok := scalar(fmt.Sprintf(`rate(container_cpu_usage_seconds_total{name="%s"}[5m])*100`, name)); ok {
+		stats.CPUUsagePercent = val
+	}
+	if val, ok := scalar(fmt.Sprintf(`rate(container_cpu_cfs_throttled_seconds_total{name="%s"}[5m])`, name)); ok {
+		stats.CPUThrottledSeconds = val
+	}
+	if val, ok := scalar(fmt.Sprintf(`container_memory_usage_bytes{name="%s"}`, name)); ok {
+		stats.MemoryUsageBytes = val
+	}
+	if val, ok := scalar(fmt.Sprintf(`container_spec_memory_limit_bytes{name="%s"}`, name)); ok {
+		stats.MemoryLimitBytes = val
+		if stats.MemoryUsageBytes > 0 && val > 0 {
+			stats.MemoryUsagePercent = (stats.MemoryUsageBytes / val) * 100
+		}
+	}
+	if val, ok := scalar(fmt.Sprintf(`sum(rate(container_network_receive_bytes_total{name="%s"}[5m]))`, name)); ok {
+		stats.NetworkRxBytes = val
+	}
+	if val, ok := scalar(fmt.Sprintf(`sum(rate(container_network_transmit_bytes_total{name="%s"}[5m]))`, name)); ok {
+		stats.NetworkTxBytes = val
+	}
+
+	// cAdvisor exposes no restart counter, so count the steps in the
+	// container's start time: each restart re-stamps it.
+	if val, ok := scalar(fmt.Sprintf(`changes(container_start_time_seconds{name="%s"}[1h])`, name)); ok {
+		stats.RestartsLastHour = val
+	}
+	uptime, reporting := scalar(fmt.Sprintf(`time()-container_start_time_seconds{name="%s"}`, name))
+	stats.UptimeSeconds = uptime
+
+	// Uptime is the liveness signal: a running container always has one. Its
+	// absence means the query failed or cAdvisor has nothing, and claiming
+	// crash_looping=false there would report a container we can't see as
+	// healthy — the exact false negative these fields exist to prevent.
+	stats.Reporting = reporting
+	stats.CrashLooping = reporting && isCrashLooping(stats.RestartsLastHour, stats.UptimeSeconds)
+	return stats
+}
+
+func (h *MetricsHandler) fetchContainerMetrics(ctx context.Context) (*ContainerMetrics, error) {
+	refs, err := h.listContainers(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	metrics := &ContainerMetrics{
+		Timestamp:  time.Now().UTC(),
+		Containers: []ContainerStats{},
+	}
+	for _, ref := range refs {
+		metrics.Containers = append(metrics.Containers, h.containerStats(ctx, ref))
+	}
 	return metrics, nil
 }
 
@@ -443,15 +478,15 @@ func (h *MetricsHandler) fetchContainerMetricsTimeSeries(ctx context.Context, ti
 
 	// Define key container metrics queries
 	queries := map[string]string{
-		"cpu_usage":           `rate(container_cpu_usage_seconds_total[5m])*100`,
-		"cpu_throttled":       `rate(container_cpu_cfs_throttled_seconds_total[5m])`,
-		"memory_usage":        `container_memory_usage_bytes`,
+		"cpu_usage":            `rate(container_cpu_usage_seconds_total[5m])*100`,
+		"cpu_throttled":        `rate(container_cpu_cfs_throttled_seconds_total[5m])`,
+		"memory_usage":         `container_memory_usage_bytes`,
 		"memory_usage_percent": `(container_memory_usage_bytes/container_spec_memory_limit_bytes)*100`,
-		"network_rx":          `rate(container_network_receive_bytes_total[5m])`,
-		"network_tx":          `rate(container_network_transmit_bytes_total[5m])`,
+		"network_rx":           `rate(container_network_receive_bytes_total[5m])`,
+		"network_tx":           `rate(container_network_transmit_bytes_total[5m])`,
 		// The history a point-in-time check can't give: restarts over the
 		// window, so a crash loop that resolved overnight is still visible.
-		"restarts": `changes(container_start_time_seconds[5m])`,
+		"restarts": fmt.Sprintf(`changes(container_start_time_seconds[%s])`, step),
 	}
 
 	// Execute each query as a range query

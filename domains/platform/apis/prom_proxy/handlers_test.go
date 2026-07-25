@@ -255,6 +255,12 @@ type mockPrometheusClient struct {
 	// returns an empty result, so a mis-wired query reads as zero instead
 	// of borrowing another query's value.
 	queryResponses map[string]*QueryResponse
+	// Same for range queries. Without this a handler can build the wrong
+	// query — or none at all — and every assertion still passes.
+	queryRangeResponses map[string]*QueryResponse
+	// Queries with no fixture entry, so a test can prove nothing was
+	// silently answered with an empty result.
+	misses []string
 }
 
 func (m *mockPrometheusClient) Query(ctx context.Context, query string) (*QueryResponse, error) {
@@ -262,12 +268,20 @@ func (m *mockPrometheusClient) Query(ctx context.Context, query string) (*QueryR
 		if resp, ok := m.queryResponses[query]; ok {
 			return resp, nil
 		}
+		m.misses = append(m.misses, query)
 		return &QueryResponse{}, nil
 	}
 	return m.queryResponse, m.queryError
 }
 
 func (m *mockPrometheusClient) QueryRange(ctx context.Context, query string, start, end time.Time, step string) (*QueryResponse, error) {
+	if m.queryRangeResponses != nil {
+		if resp, ok := m.queryRangeResponses[query]; ok {
+			return resp, nil
+		}
+		m.misses = append(m.misses, query)
+		return &QueryResponse{}, nil
+	}
 	return m.queryRangeResponse, m.queryRangeError
 }
 
@@ -333,7 +347,7 @@ func TestIsCrashLooping(t *testing.T) {
 
 func TestFetchContainerMetrics_SurfacesCrashLoop(t *testing.T) {
 	mock := &mockPrometheusClient{queryResponses: map[string]*QueryResponse{
-		`count by (name) (container_last_seen)`: {
+		`max by (name, image, container_label_com_docker_compose_service) (container_last_seen)`: {
 			Status: "success",
 			Data: struct {
 				ResultType string   `json:"resultType"`

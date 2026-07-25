@@ -41,6 +41,11 @@ func main() {
 	router.HandleFunc("GET /metrics/v1/services", metricsHandler.GetServiceCatalog)
 	router.HandleFunc("GET /metrics/v1/host", metricsHandler.GetHostMetrics)
 	router.HandleFunc("GET /metrics/v1/host/timeseries/{range}", metricsHandler.GetHostMetricsTimeSeries)
+	// Container endpoints (#1208): health for every container, including the
+	// infrastructure ones that emit no app metrics and so have no service page.
+	router.HandleFunc("GET /metrics/v1/containers", metricsHandler.GetContainers)
+	router.HandleFunc("GET /metrics/v1/container/{name}", metricsHandler.GetContainerDetail)
+	router.HandleFunc("GET /metrics/v1/container/{name}/timeseries/{range}", metricsHandler.GetContainerTimeSeries)
 	router.HandleFunc("GET /metrics/v1/service/{name}", metricsHandler.GetServiceMetrics)
 	router.HandleFunc("GET /metrics/v1/service/{name}/timeseries/{range}", metricsHandler.GetServiceMetricsTimeSeries)
 
