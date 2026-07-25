@@ -469,3 +469,67 @@ func TestGetContainers_PartialDataIsNotAVerdict(t *testing.T) {
 	assert.False(t, response.Containers[0].CrashLooping, "no verdict without uptime")
 	assert.Equal(t, 47.0, response.Containers[0].RestartsLastHour, "what we did measure is still reported")
 }
+
+// cAdvisor keeps answering for a container after it stops — the series lingers
+// until retention drops it — so the age of the last_seen stamp is what
+// separates "running" from "gone", in the window where uptime has nothing to
+// say because there is no current run to measure.
+func TestGetContainers_LastSeenAge(t *testing.T) {
+	mock := containerFixture()
+	mock.queryResponses[listQuery] = listResponse(
+		listResult("ubuntu-mithril-1", "mithril", "ghcr.io/muchq/mithril:abc123", 100),
+	)
+	mock.queryResponses[`time()-container_last_seen{name="ubuntu-mithril-1"}`] = scalarResponse("240")
+
+	handler := NewMetricsHandler(mock)
+	w := httptest.NewRecorder()
+	handler.GetContainers(w, httptest.NewRequest(http.MethodGet, "/metrics/v1/containers", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var response ContainerMetrics
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Len(t, response.Containers, 1)
+	assert.Equal(t, 240.0, response.Containers[0].LastSeenAgoSeconds)
+}
+
+func TestGetContainers_OOMEvents(t *testing.T) {
+	mock := containerFixture()
+	mock.queryResponses[listQuery] = listResponse(
+		listResult("ubuntu-mithril-1", "mithril", "ghcr.io/muchq/mithril:abc123", 100),
+	)
+	mock.queryResponses[`time()-container_start_time_seconds{name="ubuntu-mithril-1"}`] = scalarResponse("3600")
+	mock.queryResponses[`increase(container_oom_events_total{name="ubuntu-mithril-1"}[1h])`] = scalarResponse("2")
+
+	handler := NewMetricsHandler(mock)
+	w := httptest.NewRecorder()
+	handler.GetContainers(w, httptest.NewRequest(http.MethodGet, "/metrics/v1/containers", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var response ContainerMetrics
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Len(t, response.Containers, 1)
+	assert.Equal(t, 2.0, response.Containers[0].OOMEventsLastHour)
+}
+
+// Some cAdvisor builds ship no OOM counter at all. Its absence leaves the field
+// zero, which reads identically to "no kills" — so it must not touch Reporting,
+// which is the field that does carry a verdict about visibility.
+func TestGetContainers_OOMCounterAbsentIsNotAVerdict(t *testing.T) {
+	mock := containerFixture()
+	mock.queryResponses[listQuery] = listResponse(
+		listResult("ubuntu-mithril-1", "mithril", "ghcr.io/muchq/mithril:abc123", 100),
+	)
+	mock.queryResponses[`time()-container_start_time_seconds{name="ubuntu-mithril-1"}`] = scalarResponse("3600")
+	// OOM query deliberately absent
+
+	handler := NewMetricsHandler(mock)
+	w := httptest.NewRecorder()
+	handler.GetContainers(w, httptest.NewRequest(http.MethodGet, "/metrics/v1/containers", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var response ContainerMetrics
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Len(t, response.Containers, 1)
+	assert.Zero(t, response.Containers[0].OOMEventsLastHour)
+	assert.True(t, response.Containers[0].Reporting, "a missing OOM counter says nothing about visibility")
+}
