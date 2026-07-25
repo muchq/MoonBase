@@ -23,6 +23,8 @@
 #include "absl/log/log.h"
 #include "domains/games/apis/golf_hub/hub_handler.h"
 #include "domains/games/apis/golf_hub/id_generator.h"
+#include "domains/games/apis/golf_hub/migrations.h"
+#include "domains/games/apis/golf_hub/pg_ticket_vault.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/platform/libs/aura/middleware.h"
@@ -30,6 +32,7 @@
 #include "domains/platform/libs/futility/otel/http_metrics.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/futility/otel/otel_provider.h"
+#include "domains/platform/libs/pg/pg.h"
 #include "moonbase/golf/server.h"
 #include "smithy/http/beast_transport.h"
 #include "smithy/http/message.h"
@@ -66,8 +69,25 @@ int main() {
   futility::otel::OtelConfig otel_config{.service_name = "golf_hub", .service_version = "1.0.0"};
   futility::otel::OtelProvider otel_provider(otel_config);
 
-  auto vault = std::make_shared<golf_hub::TicketVault>(
-      /*ticket_ttl=*/std::chrono::seconds(30), /*resume_ttl=*/std::chrono::hours(24));
+  // Credentials go to postgres when GOLF_HUB_DB_URL is set (#1194 step 1:
+  // tickets survive restarts and instances); unset falls back to the
+  // in-memory vault — dev parity, same pattern as ALLOWED_ORIGINS below.
+  constexpr auto kTicketTtl = std::chrono::seconds(30);
+  constexpr auto kResumeTtl = std::chrono::hours(24);
+  std::shared_ptr<golf_hub::TicketVault> vault;
+  const char* db_url = std::getenv("GOLF_HUB_DB_URL");
+  if (db_url != nullptr && *db_url != '\0') {
+    auto db = std::make_shared<pg::Client>(db_url);
+    if (absl::Status migrated = golf_hub::RunMigrations(*db); !migrated.ok()) {
+      LOG(ERROR) << "Failed to migrate golf hub database: " << migrated;
+      return 1;
+    }
+    vault = std::make_shared<golf_hub::PgTicketVault>(std::move(db), kTicketTtl, kResumeTtl);
+    LOG(INFO) << "Ticket vault: postgres";
+  } else {
+    vault = std::make_shared<golf_hub::InMemoryTicketVault>(kTicketTtl, kResumeTtl);
+    LOG(INFO) << "Ticket vault: in-memory (GOLF_HUB_DB_URL unset; restarts forget credentials)";
+  }
   // Stream-side instruments (sessions, commands, events) ride the same
   // meter the aura chain's unary instruments use.
   auto handler = std::make_shared<golf_hub::HubHandler>(

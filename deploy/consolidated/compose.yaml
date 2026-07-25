@@ -65,11 +65,18 @@ services:
       # origins (parity with the Go hub's allowlist).
       ALLOWED_ORIGINS: https://muchq.com,https://www.muchq.com
       TRUSTED_PROXY_CIDRS: *caddy_ip
+      # Credentials live in the hub's own database on the shared postgres
+      # instance (MoonBase#1194 step 1): tickets and resume tokens survive
+      # deploys. golf_hub_db_init provisions the role + database.
+      GOLF_HUB_DB_URL: postgresql://golf_hub:${GOLF_HUB_DB_PASSWORD}@one_d4_postgres:5432/golf_hub
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
       OTEL_SERVICE_NAME: golf_hub
       OTEL_RESOURCE_ATTRIBUTES: service.name=golf_hub,service.version=${GOLF_HUB_SHA:-${DEPLOY_SHA:-latest}}
     networks:
       - app_network
+    depends_on:
+      golf_hub_db_init:
+        condition: service_completed_successfully
     deploy:
       resources:
         limits:
@@ -224,6 +231,33 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # One-shot provisioning of golf_hub's own database and role on the shared
+  # postgres instance (MoonBase#1194). Idempotent — safe on every deploy —
+  # and runs as the instance's bootstrap superuser. The docker-entrypoint
+  # initdb.d hook can't do this: it only fires on a fresh data volume.
+  golf_hub_db_init:
+    image: postgres:18
+    restart: "no"
+    environment:
+      PGHOST: one_d4_postgres
+      PGUSER: one_d4
+      PGDATABASE: one_d4
+      PGPASSWORD: ${ONE_D4_DB_PASSWORD}
+      GOLF_HUB_DB_PASSWORD: ${GOLF_HUB_DB_PASSWORD}
+    entrypoint: ["/bin/bash", "-ec"]
+    command:
+      - |
+        psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'golf_hub'" | grep -q 1 \
+          || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE golf_hub LOGIN"
+        psql -v ON_ERROR_STOP=1 -c "ALTER ROLE golf_hub WITH LOGIN PASSWORD '$${GOLF_HUB_DB_PASSWORD}'"
+        psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname = 'golf_hub'" | grep -q 1 \
+          || psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE golf_hub OWNER golf_hub"
+    networks:
+      - app_network
+    depends_on:
+      one_d4_postgres:
+        condition: service_healthy
 
   one_d4:
     image: ghcr.io/muchq/one_d4:${ONE_D4_SHA:-${DEPLOY_SHA:-latest}}

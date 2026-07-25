@@ -53,6 +53,7 @@ cc_library(
     deps = [
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/random:distributions",
+        "@com_google_absl//absl/status:statusor",
     ],
 )
 
@@ -62,6 +63,41 @@ cc_test(
     srcs = ["ticket_vault_test.cc"],
     deps = [
         ":ticket_vault",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# The postgres-backed vault and the hub's schema (#1194 step 1).
+cc_library(
+    name = "pg_ticket_vault",
+    srcs = [
+        "migrations.cc",
+        "pg_ticket_vault.cc",
+    ],
+    hdrs = [
+        "migrations.h",
+        "pg_ticket_vault.h",
+    ],
+    deps = [
+        ":ticket_vault",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+# Runs against a real postgres when GOLF_HUB_TEST_DB_URL is set (the SQL
+# is the risky code — no in-memory double); skips otherwise.
+cc_test(
+    name = "pg_ticket_vault_test",
+    size = "small",
+    srcs = ["pg_ticket_vault_test.cc"],
+    env_inherit = ["GOLF_HUB_TEST_DB_URL"],
+    deps = [
+        ":pg_ticket_vault",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/status",
         "@googletest//:gtest_main",
     ],
 )
@@ -120,6 +156,7 @@ cc_binary(
         ":golf_hub_smithy_server",
         ":hub_handler",
         ":id_generator",
+        ":pg_ticket_vault",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/aura",
@@ -127,6 +164,7 @@ cc_binary(
         "//domains/platform/libs/futility/otel:http_metrics",
         "//domains/platform/libs/futility/otel:metrics",
         "//domains/platform/libs/futility/otel:otel_provider",
+        "//domains/platform/libs/pg",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:globals",
         "@com_google_absl//absl/log:initialize",
