@@ -2,8 +2,10 @@ package prom_proxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -18,16 +20,21 @@ func TestImageTag(t *testing.T) {
 		image string
 		want  string
 	}{
-		{"pinned image", "ghcr.io/muchq/mithril:abc123", "abc123"},
+		{"pinned image", "ghcr.io/muchq/mithril:" + strings.Repeat("a", 40), strings.Repeat("a", 40)},
 		{"latest", "ghcr.io/muchq/mithril:latest", "latest"},
-		{"third party with version", "caddy:2-alpine", "2-alpine"},
-		// Negative: nothing to report rather than something wrong.
+		{"third party with version", "postgres:18", "18"},
+		{"tag with dots", "otel/opentelemetry-collector-contrib:0.155.0", "0.155.0"},
+		// Negatives: report nothing rather than something wrong.
 		{"untagged", "ghcr.io/muchq/mithril", ""},
 		{"empty", "", ""},
+		{"trailing colon", "img:", ""},
 		// A registry port is a colon that is not a tag; reading it as one
 		// would report "5000" as the running revision.
 		{"registry port, no tag", "registry.local:5000/mithril", ""},
 		{"registry port with tag", "registry.local:5000/mithril:abc123", "abc123"},
+		// A digest is not a tag. 64 hex chars in a "version" field would be
+		// indistinguishable from a commit SHA — a wrong answer that looks right.
+		{"digest", "ghcr.io/muchq/mithril@sha256:" + strings.Repeat("e", 64), ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -44,12 +51,12 @@ func TestContainerDisplayName(t *testing.T) {
 	}{
 		{"compose naming", "ubuntu-golf_hub-1", "golf_hub"},
 		{"hyphenated service", "ubuntu-microgpt-serve-1", "microgpt-serve"},
-		// Double-digit replicas: a bare "-1" strip would turn this into
-		// "svc0" rather than "svc".
+		{"underscored service", "ubuntu-one_d4_postgres-1", "one_d4_postgres"},
+		{"infrastructure container", "ubuntu-cadvisor-1", "cadvisor"},
+		// A bare "-1" strip would turn this into "svc0".
 		{"double digit index", "ubuntu-svc-10", "svc"},
 		{"no project prefix", "mithril-1", "mithril"},
 		{"no index", "cadvisor", "cadvisor"},
-		// Negative: a trailing segment that isn't an index must survive.
 		{"non numeric suffix", "ubuntu-one_d4-postgres", "one_d4-postgres"},
 		{"empty", "", ""},
 	}
@@ -60,40 +67,76 @@ func TestContainerDisplayName(t *testing.T) {
 	}
 }
 
-func TestMatchesContainer(t *testing.T) {
-	assert.True(t, matchesContainer("ubuntu-mithril-1", "mithril"), "by service name")
-	assert.True(t, matchesContainer("ubuntu-mithril-1", "ubuntu-mithril-1"), "by container name")
-	assert.False(t, matchesContainer("ubuntu-mithril-1", "posterize"), "different service")
+func TestResolveContainer(t *testing.T) {
+	refs := []containerRef{
+		{name: "ubuntu-mithril-1", service: "mithril"},
+		{name: "ubuntu-one_d4-1", service: "one_d4"},
+		{name: "mithril", service: "something_else"},
+	}
+
+	got, found := resolveContainer(refs, "one_d4")
+	require.True(t, found)
+	assert.Equal(t, "ubuntu-one_d4-1", got.name, "by service")
+
+	// An exact container name must win over another container whose service
+	// happens to match, or a request resolves to the wrong container.
+	got, found = resolveContainer(refs, "mithril")
+	require.True(t, found)
+	assert.Equal(t, "mithril", got.name, "exact name beats service match")
+
+	_, found = resolveContainer(refs, "nope")
+	assert.False(t, found)
 	// Substring must not match, or "d4" would resolve to one_d4.
-	assert.False(t, matchesContainer("ubuntu-one_d4-1", "d4"), "substring")
+	_, found = resolveContainer(refs, "d4")
+	assert.False(t, found)
 }
 
-// ---------------------------------------------------------------- integration
+// ---------------------------------------------------------------- fixtures
+
+const listQuery = `max by (name, image, container_label_com_docker_compose_service) (container_last_seen)`
+
+// listResult builds one row of the container listing. lastSeen is the sample
+// timestamp, which is how duplicate rows for one name are ordered.
+func listResult(name, service, image string, lastSeen float64) Result {
+	return Result{
+		Metric: map[string]string{
+			"name":  name,
+			"image": image,
+			"container_label_com_docker_compose_service": service,
+		},
+		Value: []interface{}{1609459200.0, fmt.Sprintf("%g", lastSeen)},
+	}
+}
+
+func listResponse(results ...Result) *QueryResponse {
+	return &QueryResponse{
+		Status: "success",
+		Data: struct {
+			ResultType string   `json:"resultType"`
+			Result     []Result `json:"result"`
+		}{ResultType: "vector", Result: results},
+	}
+}
 
 // A host whose posterize is crash-looping on the current revision while
 // golf_hub is healthy — the shape of the incident these endpoints exist for.
+// caddy is listed but has no per-container samples, standing in for a
+// container cAdvisor isn't reporting on.
 func containerFixture() *mockPrometheusClient {
 	return &mockPrometheusClient{queryResponses: map[string]*QueryResponse{
-		`count by (name, image) (container_last_seen)`: {
-			Status: "success",
-			Data: struct {
-				ResultType string   `json:"resultType"`
-				Result     []Result `json:"result"`
-			}{
-				ResultType: "vector",
-				Result: []Result{
-					{Metric: map[string]string{"name": "ubuntu-posterize-1", "image": "ghcr.io/muchq/posterize:abc123"}, Value: []interface{}{1609459200.0, "1"}},
-					{Metric: map[string]string{"name": "ubuntu-golf_hub-1", "image": "ghcr.io/muchq/golf_hub:abc123"}, Value: []interface{}{1609459200.0, "1"}},
-					{Metric: map[string]string{"name": "caddy", "image": "caddy:2-alpine"}, Value: []interface{}{1609459200.0, "1"}},
-				},
-			},
-		},
+		listQuery: listResponse(
+			listResult("ubuntu-posterize-1", "posterize", "ghcr.io/muchq/posterize:abc123", 100),
+			listResult("ubuntu-golf_hub-1", "golf_hub", "ghcr.io/muchq/golf_hub:abc123", 100),
+			listResult("ubuntu-caddy-1", "caddy", "caddy:2-alpine", 100),
+		),
 		`changes(container_start_time_seconds{name="ubuntu-posterize-1"}[1h])`: scalarResponse("47"),
 		`time()-container_start_time_seconds{name="ubuntu-posterize-1"}`:       scalarResponse("8"),
 		`changes(container_start_time_seconds{name="ubuntu-golf_hub-1"}[1h])`:  scalarResponse("0"),
 		`time()-container_start_time_seconds{name="ubuntu-golf_hub-1"}`:        scalarResponse("86400"),
 	}}
 }
+
+// ---------------------------------------------------------------- listing
 
 func TestGetContainers(t *testing.T) {
 	handler := NewMetricsHandler(containerFixture())
@@ -113,20 +156,98 @@ func TestGetContainers(t *testing.T) {
 	posterize := byName["ubuntu-posterize-1"]
 	assert.True(t, posterize.CrashLooping)
 	assert.Equal(t, 47.0, posterize.RestartsLastHour)
+	assert.Equal(t, 8.0, posterize.UptimeSeconds)
+	assert.True(t, posterize.Reporting)
+	assert.Equal(t, "ghcr.io/muchq/posterize:abc123", posterize.Image)
 	assert.Equal(t, "abc123", posterize.Version, "running revision from the image tag")
+	assert.Equal(t, "posterize", posterize.Service, "clients link to the service page with this")
 
-	assert.False(t, byName["ubuntu-golf_hub-1"].CrashLooping, "healthy peer unaffected")
+	golfHub := byName["ubuntu-golf_hub-1"]
+	assert.False(t, golfHub.CrashLooping, "healthy peer unaffected")
+	assert.Equal(t, 86400.0, golfHub.UptimeSeconds)
+
 	// Infrastructure containers emit no app metrics, so this listing is the
 	// only place they appear at all.
-	assert.Equal(t, "2-alpine", byName["caddy"].Version)
+	caddy := byName["ubuntu-caddy-1"]
+	assert.Equal(t, "2-alpine", caddy.Version)
+	// No samples for it: it must read as "not reporting", never as healthy.
+	assert.False(t, caddy.Reporting)
+	assert.False(t, caddy.CrashLooping)
+	assert.Zero(t, caddy.UptimeSeconds)
 }
 
+// Grouping the listing by image lets one container yield two rows while a
+// replaced container is still inside Prometheus's lookback window. Without
+// dedup the dashboard shows it twice, and can report the old revision as the
+// running one — during a deploy, which is exactly when someone is watching.
+func TestGetContainers_DeduplicatesByName(t *testing.T) {
+	mock := containerFixture()
+	// Newest first, so "keep the last row" would pick the stale one — the
+	// order that makes this assertion discriminating.
+	mock.queryResponses[listQuery] = listResponse(
+		listResult("ubuntu-mithril-1", "mithril", "ghcr.io/muchq/mithril:NEWSHA", 200),
+		listResult("ubuntu-mithril-1", "mithril", "ghcr.io/muchq/mithril:OLDSHA", 100),
+	)
+	handler := NewMetricsHandler(mock)
+	w := httptest.NewRecorder()
+	handler.GetContainers(w, httptest.NewRequest(http.MethodGet, "/metrics/v1/containers", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var response ContainerMetrics
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Len(t, response.Containers, 1, "one container, not one per image")
+	assert.Equal(t, "NEWSHA", response.Containers[0].Version, "the newer sample is what's running")
+}
+
+// The compose project name is the directory compose runs from: `ubuntu` on the
+// deployed host, `local_docker` under local_deploy.sh. Parsing the name would
+// resolve one and 404 the other, so the service comes from the label.
+func TestGetContainers_ServiceFromComposeLabel(t *testing.T) {
+	mock := containerFixture()
+	mock.queryResponses[listQuery] = listResponse(
+		listResult("local_docker-mithril-1", "mithril", "ghcr.io/muchq/mithril:abc123", 100),
+	)
+	handler := NewMetricsHandler(mock)
+	w := httptest.NewRecorder()
+	handler.GetContainers(w, httptest.NewRequest(http.MethodGet, "/metrics/v1/containers", nil))
+
+	var response ContainerMetrics
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Len(t, response.Containers, 1)
+	assert.Equal(t, "mithril", response.Containers[0].Service)
+}
+
+// Falls back to parsing when cAdvisor isn't storing container labels.
+func TestGetContainers_ServiceFallsBackToName(t *testing.T) {
+	mock := containerFixture()
+	mock.queryResponses[listQuery] = listResponse(
+		Result{
+			Metric: map[string]string{"name": "ubuntu-mithril-1", "image": "ghcr.io/muchq/mithril:abc123"},
+			Value:  []interface{}{1609459200.0, "100"},
+		},
+	)
+	handler := NewMetricsHandler(mock)
+	w := httptest.NewRecorder()
+	handler.GetContainers(w, httptest.NewRequest(http.MethodGet, "/metrics/v1/containers", nil))
+
+	var response ContainerMetrics
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Len(t, response.Containers, 1)
+	assert.Equal(t, "mithril", response.Containers[0].Service)
+}
+
+// House contract: a failing scrape source yields an empty section with 200, so
+// the page shape stays stable. `reporting` is what keeps that unambiguous.
 func TestGetContainers_PrometheusDown(t *testing.T) {
 	handler := NewMetricsHandler(&mockPrometheusClient{queryError: assert.AnError})
 	w := httptest.NewRecorder()
 	handler.GetContainers(w, httptest.NewRequest(http.MethodGet, "/metrics/v1/containers", nil))
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"containers":[]`, "empty slice, not null")
 }
+
+// ---------------------------------------------------------------- detail
 
 func TestGetContainerDetail(t *testing.T) {
 	tests := []struct {
@@ -137,7 +258,7 @@ func TestGetContainerDetail(t *testing.T) {
 	}{
 		{"by service name", "posterize", http.StatusOK, "ubuntu-posterize-1"},
 		{"by container name", "ubuntu-posterize-1", http.StatusOK, "ubuntu-posterize-1"},
-		{"infrastructure container", "caddy", http.StatusOK, "caddy"},
+		{"infrastructure container", "caddy", http.StatusOK, "ubuntu-caddy-1"},
 		{"unknown", "nope", http.StatusNotFound, ""},
 		{"substring of a real one", "d4", http.StatusNotFound, ""},
 	}
@@ -153,12 +274,56 @@ func TestGetContainerDetail(t *testing.T) {
 			if tt.wantStatus != http.StatusOK {
 				return
 			}
-			var got ContainerStats
+			var got ContainerDetail
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
-			assert.Equal(t, tt.wantName, got.Name)
+			assert.Equal(t, tt.wantName, got.Container.Name)
+			assert.False(t, got.Timestamp.IsZero(), "point-in-time payloads carry a timestamp")
 		})
 	}
 }
+
+// The payload, not just the name: returning the right name attached to another
+// container's stats would otherwise pass.
+func TestGetContainerDetail_Payload(t *testing.T) {
+	handler := NewMetricsHandler(containerFixture())
+	req := httptest.NewRequest(http.MethodGet, "/metrics/v1/container/posterize", nil)
+	req.SetPathValue("name", "posterize")
+	w := httptest.NewRecorder()
+	handler.GetContainerDetail(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var got ContainerDetail
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.True(t, got.Container.CrashLooping)
+	assert.Equal(t, 47.0, got.Container.RestartsLastHour)
+	assert.Equal(t, 8.0, got.Container.UptimeSeconds)
+	assert.Equal(t, "abc123", got.Container.Version)
+	assert.Equal(t, "posterize", got.Container.Service)
+
+	// A healthy neighbour must not inherit any of that.
+	req = httptest.NewRequest(http.MethodGet, "/metrics/v1/container/caddy", nil)
+	req.SetPathValue("name", "caddy")
+	w = httptest.NewRecorder()
+	handler.GetContainerDetail(w, req)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.False(t, got.Container.CrashLooping)
+	assert.Equal(t, "2-alpine", got.Container.Version)
+	assert.Zero(t, got.Container.RestartsLastHour)
+}
+
+// A single-resource lookup can't degrade to an empty answer: without the
+// listing there's no way to tell a missing container from an unknown one, and
+// answering 404 would claim it doesn't exist.
+func TestGetContainerDetail_PrometheusDown(t *testing.T) {
+	handler := NewMetricsHandler(&mockPrometheusClient{queryError: assert.AnError})
+	req := httptest.NewRequest(http.MethodGet, "/metrics/v1/container/posterize", nil)
+	req.SetPathValue("name", "posterize")
+	w := httptest.NewRecorder()
+	handler.GetContainerDetail(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+// ---------------------------------------------------------------- timeseries
 
 func TestGetContainerTimeSeries(t *testing.T) {
 	tests := []struct {
@@ -191,8 +356,116 @@ func TestGetContainerTimeSeries(t *testing.T) {
 				var response TimeSeriesResponse
 				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 				assert.Equal(t, tt.timeRange, response.TimeRange)
-				assert.NotNil(t, response.Series, "series is [] not null")
+			}
+			if tt.wantStatus != http.StatusOK {
+				assert.NotContains(t, w.Body.String(), `"series"`)
 			}
 		})
 	}
+}
+
+// Keyed on the exact queries the handler should issue, so building them from
+// the requested name instead of the resolved one — or dropping a series
+// entirely — fails here rather than shipping empty charts.
+func TestGetContainerTimeSeries_QueriesResolvedName(t *testing.T) {
+	name := "ubuntu-posterize-1"
+	mock := containerFixture()
+	mock.queryRangeResponses = map[string]*QueryResponse{
+		fmt.Sprintf(`rate(container_cpu_usage_seconds_total{name="%s"}[5m])*100`, name):       rangeResponse("x"),
+		fmt.Sprintf(`container_memory_usage_bytes{name="%s"}`, name):                          rangeResponse("x"),
+		fmt.Sprintf(`sum(rate(container_network_receive_bytes_total{name="%s"}[5m]))`, name):  rangeResponse("x"),
+		fmt.Sprintf(`sum(rate(container_network_transmit_bytes_total{name="%s"}[5m]))`, name): rangeResponse("x"),
+		// 1d -> step 5m, and the restart window must match the step.
+		fmt.Sprintf(`changes(container_start_time_seconds{name="%s"}[5m])`, name): rangeResponse("x"),
+		fmt.Sprintf(`time()-container_start_time_seconds{name="%s"}`, name):       rangeResponse("x"),
+	}
+	handler := NewMetricsHandler(mock)
+
+	// Addressed by service; every query must still use the container name.
+	req := httptest.NewRequest(http.MethodGet, "/metrics/v1/container/posterize/timeseries/1d", nil)
+	req.SetPathValue("name", "posterize")
+	req.SetPathValue("range", "1d")
+	w := httptest.NewRecorder()
+	handler.GetContainerTimeSeries(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var response TimeSeriesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+	assert.Empty(t, mock.misses, "every range query should have matched a fixture entry")
+	assert.Len(t, response.Series, 6)
+	names := map[string]bool{}
+	for _, s := range response.Series {
+		names[s.MetricName] = true
+		assert.NotEmpty(t, s.Values, "points actually flowed through")
+	}
+	assert.True(t, names["restarts"], "the series this endpoint exists for")
+	assert.True(t, names["uptime_seconds"])
+	assert.True(t, names["cpu_usage"])
+	assert.Equal(t, "5m", response.Step)
+	assert.True(t, response.EndTime.After(response.StartTime))
+}
+
+// At 7d the step is 1h, so a fixed [5m] window would inspect only the last 5
+// minutes of each hour and drop most restarts — the overnight crash loop this
+// endpoint is meant to reveal.
+func TestGetContainerTimeSeries_RestartWindowTracksStep(t *testing.T) {
+	name := "ubuntu-posterize-1"
+	mock := containerFixture()
+	mock.queryRangeResponses = map[string]*QueryResponse{
+		fmt.Sprintf(`changes(container_start_time_seconds{name="%s"}[1h])`, name): rangeResponse("x"),
+	}
+	handler := NewMetricsHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/metrics/v1/container/posterize/timeseries/7d", nil)
+	req.SetPathValue("name", "posterize")
+	req.SetPathValue("range", "7d")
+	w := httptest.NewRecorder()
+	handler.GetContainerTimeSeries(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var response TimeSeriesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Equal(t, "1h", response.Step)
+	found := false
+	for _, s := range response.Series {
+		if s.MetricName == "restarts" {
+			found = true
+		}
+	}
+	assert.True(t, found, "restarts queried with a [1h] window at the 1h step")
+}
+
+func TestGetContainerTimeSeries_PrometheusDown(t *testing.T) {
+	handler := NewMetricsHandler(&mockPrometheusClient{queryError: assert.AnError})
+	req := httptest.NewRequest(http.MethodGet, "/metrics/v1/container/posterize/timeseries/1d", nil)
+	req.SetPathValue("name", "posterize")
+	req.SetPathValue("range", "1d")
+	w := httptest.NewRecorder()
+	handler.GetContainerTimeSeries(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+// Partial failure is where the reporting guard earns its keep: restarts came
+// back but uptime didn't, so isCrashLooping(47, 0) would say "crash looping"
+// off a zero we never actually measured. Claiming either state from
+// half the data is worse than saying we don't know.
+func TestGetContainers_PartialDataIsNotAVerdict(t *testing.T) {
+	mock := containerFixture()
+	mock.queryResponses[listQuery] = listResponse(
+		listResult("ubuntu-mithril-1", "mithril", "ghcr.io/muchq/mithril:abc123", 100),
+	)
+	mock.queryResponses[`changes(container_start_time_seconds{name="ubuntu-mithril-1"}[1h])`] = scalarResponse("47")
+	// uptime deliberately absent
+
+	handler := NewMetricsHandler(mock)
+	w := httptest.NewRecorder()
+	handler.GetContainers(w, httptest.NewRequest(http.MethodGet, "/metrics/v1/containers", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var response ContainerMetrics
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Len(t, response.Containers, 1)
+	assert.False(t, response.Containers[0].Reporting)
+	assert.False(t, response.Containers[0].CrashLooping, "no verdict without uptime")
+	assert.Equal(t, 47.0, response.Containers[0].RestartsLastHour, "what we did measure is still reported")
 }

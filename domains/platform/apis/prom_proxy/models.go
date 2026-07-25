@@ -7,15 +7,15 @@ type TimeRange string
 
 const (
 	Last30Minutes TimeRange = "30m"
-	LastDay       TimeRange = "1d" 
+	LastDay       TimeRange = "1d"
 	LastWeek      TimeRange = "7d"
 )
 
 // TimeSeries represents a single metric with timestamps
 type TimeSeries struct {
-	MetricName string      `json:"metric_name"`
+	MetricName string            `json:"metric_name"`
 	Labels     map[string]string `json:"labels,omitempty"`
-	Values     []DataPoint `json:"values"`
+	Values     []DataPoint       `json:"values"`
 }
 
 // DataPoint represents a single timestamped value
@@ -58,10 +58,10 @@ func ValidTimeRange(tr string) bool {
 }
 
 type SystemMetrics struct {
-	Timestamp time.Time      `json:"timestamp"`
-	CPU       CPUMetrics     `json:"cpu"`
-	Memory    MemoryMetrics  `json:"memory"`
-	Disk      []DiskMetrics  `json:"disk"`
+	Timestamp time.Time        `json:"timestamp"`
+	CPU       CPUMetrics       `json:"cpu"`
+	Memory    MemoryMetrics    `json:"memory"`
+	Disk      []DiskMetrics    `json:"disk"`
 	Network   []NetworkMetrics `json:"network"`
 }
 
@@ -94,12 +94,15 @@ type NetworkMetrics struct {
 }
 
 type ContainerMetrics struct {
-	Timestamp  time.Time             `json:"timestamp"`
-	Containers []ContainerStats      `json:"containers"`
+	Timestamp  time.Time        `json:"timestamp"`
+	Containers []ContainerStats `json:"containers"`
 }
 
 type ContainerStats struct {
-	Name                string  `json:"name"`
+	Name string `json:"name"`
+	// The compose service behind the container. Clients link a container to
+	// its service page with this rather than re-deriving it from the name.
+	Service             string  `json:"service"`
 	CPUUsagePercent     float64 `json:"cpu_usage_percent"`
 	CPUThrottledSeconds float64 `json:"cpu_throttled_seconds"`
 	MemoryUsageBytes    float64 `json:"memory_usage_bytes"`
@@ -118,6 +121,10 @@ type ContainerStats struct {
 	// revision — the fact, as opposed to what the host recorded it should be.
 	Image   string `json:"image"`
 	Version string `json:"version"`
+	// False when cAdvisor returned nothing for this container. Without it a
+	// failed or timed-out query leaves zeros, and zero restarts with zero
+	// uptime is indistinguishable from a healthy container.
+	Reporting bool `json:"reporting"`
 }
 
 type ServiceCatalogEntry struct {
@@ -162,4 +169,11 @@ type ServiceMetricsResponse struct {
 	Service   string              `json:"service"`
 	Standard  StandardMetrics     `json:"standard"`
 	Custom    []CustomMetricGroup `json:"custom"`
+}
+
+// ContainerDetail wraps a single container so the point-in-time endpoints all
+// carry a timestamp, like the host and service responses.
+type ContainerDetail struct {
+	Timestamp time.Time      `json:"timestamp"`
+	Container ContainerStats `json:"container"`
 }
