@@ -1,0 +1,130 @@
+#!/bin/bash
+# Break the code on purpose and check the tests notice.
+#
+# A green suite proves the tests ran, not that they'd catch anything. Tests
+# routinely assert on values that are correct and also the default — a zero
+# that means "healthy" and also "the query failed", a name that's right whether
+# or not the payload beside it is. Those pass against a broken implementation.
+#
+# This applies each mutation, runs the tests, and reports the ones that did NOT
+# fail. A surviving mutation is a bug the suite would ship.
+set -uo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: mutation-check -f FILE -t TEST_CMD MUTATION [MUTATION...]
+
+Applies each MUTATION (a sed expression) to FILE, runs TEST_CMD, and reports
+which mutations survived — i.e. which real bugs the tests fail to catch.
+
+Options:
+  -f, --file FILE     File to mutate; restored afterwards, including on Ctrl-C
+  -t, --test CMD      Test command; must pass before mutating
+  -h, --help          Show this help
+
+Examples:
+  # Does the suite notice if a boundary is wrong?
+  scripts/mutation-check -f domains/platform/apis/prom_proxy/handlers.go \
+    -t 'go test $(ls domains/platform/apis/prom_proxy/*.go | grep -v /main.go)' \
+    's/restartsLastHour >= crashLoopMinRestarts/restartsLastHour > crashLoopMinRestarts/' \
+    's/stats.CrashLooping = reporting \&\& isCrashLooping/stats.CrashLooping = isCrashLooping/'
+
+  # Shell works too — the file just has to be text and the command a test run.
+  scripts/mutation-check -f deploy/consolidated/deploy.sh -t ./scripts/test-deploy \
+    's/--remove-orphans//'
+
+Mutate the behaviour, not the syntax: a change that won't compile is caught by
+the compiler and tells you nothing about the tests. Aim at the decisions —
+boundaries, guards, which variable feeds a call, an omitted field.
+USAGE
+}
+
+FILE=""
+TEST_CMD=""
+MUTATIONS=()
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -f | --file)
+      FILE=${2:-}
+      shift 2
+      ;;
+    -t | --test)
+      TEST_CMD=${2:-}
+      shift 2
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+    *)
+      MUTATIONS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ -z "$FILE" ] || [ -z "$TEST_CMD" ] || [ ${#MUTATIONS[@]} -eq 0 ]; then
+  usage >&2
+  exit 1
+fi
+if [ ! -f "$FILE" ]; then
+  echo "Error: no such file: $FILE" >&2
+  exit 1
+fi
+
+BACKUP=$(mktemp)
+cp "$FILE" "$BACKUP"
+restore() { cp "$BACKUP" "$FILE"; }
+# Restore on interrupt too: leaving a mutated source behind would be worse
+# than the bug being looked for.
+trap 'restore; rm -f "$BACKUP"; exit 130' INT TERM
+trap 'restore; rm -f "$BACKUP"' EXIT
+
+# Baseline. Without this a suite that's already red makes every mutation look
+# caught, which is the most flattering possible wrong answer.
+echo "baseline..."
+if ! eval "$TEST_CMD" > /dev/null 2>&1; then
+  echo "Error: tests fail before any mutation — fix that first, or every" >&2
+  echo "mutation will look caught." >&2
+  exit 1
+fi
+echo "  ok, suite is green"
+echo
+
+SURVIVED=0
+for mutation in "${MUTATIONS[@]}"; do
+  restore
+  sed -i.bak "$mutation" "$FILE" 2>/dev/null
+  rm -f "$FILE.bak"
+
+  # A sed that matched nothing leaves the code intact, so the suite passes and
+  # the mutation looks like a survivor. That's a broken experiment, not a
+  # finding — say so instead of reporting a false bug.
+  if cmp -s "$FILE" "$BACKUP"; then
+    echo "  SKIPPED  $mutation"
+    echo "           (matched nothing — check the expression)"
+    continue
+  fi
+
+  if eval "$TEST_CMD" > /dev/null 2>&1; then
+    echo "  SURVIVED $mutation"
+    SURVIVED=$((SURVIVED + 1))
+  else
+    echo "  killed   $mutation"
+  fi
+done
+
+restore
+echo
+if [ "$SURVIVED" -gt 0 ]; then
+  echo "$SURVIVED mutation(s) survived: the tests would ship those bugs."
+  echo "Add an assertion that fails on each, then re-run."
+  exit 1
+fi
+echo "all mutations killed"
