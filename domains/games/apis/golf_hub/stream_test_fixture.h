@@ -127,27 +127,33 @@ class GolfHubStreamFixture : public testing::Test {
   }
 
   // Mint a session and open its Play stream; fails the test on any step.
+  // The client-parameterized form serves multi-instance suites (#1194
+  // step 3), where each hub instance has its own client.
   struct Seat {
     std::string player_id;
     std::string resume_token;
     moonbase::golf::PlayClientStream stream;
   };
-  std::optional<Seat> OpenSeat(const std::optional<std::string>& resume_token = std::nullopt) {
+  std::optional<Seat> OpenSeatVia(moonbase::golf::GolfHubClient& client,
+                                  const std::optional<std::string>& resume_token = std::nullopt) {
     moonbase::golf::GetSessionInput session_input;
     if (resume_token.has_value()) session_input.resumeToken = *resume_token;
-    auto session = client_->GetSession(session_input);
+    auto session = client.GetSession(session_input);
     if (!session.ok()) {
       ADD_FAILURE() << "GetSession failed: " << session.error().message();
       return std::nullopt;
     }
     moonbase::golf::PlayInput play_input;
     play_input.ticket = session->ticket;
-    auto stream = client_->Play(play_input);
+    auto stream = client.Play(play_input);
     if (!stream.ok()) {
       ADD_FAILURE() << "Play dial failed: " << stream.error().message();
       return std::nullopt;
     }
     return Seat{session->playerId, session->resumeToken, std::move(*stream)};
+  }
+  std::optional<Seat> OpenSeat(const std::optional<std::string>& resume_token = std::nullopt) {
+    return OpenSeatVia(*client_, resume_token);
   }
 
   // Room with two seats in a started game: with the NoShuffleDealer the

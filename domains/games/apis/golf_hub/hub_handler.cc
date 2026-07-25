@@ -2,10 +2,14 @@
 
 #include <algorithm>
 #include <deque>
+#include <set>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "absl/log/log.h"
+#include "absl/random/random.h"
+#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "domains/games/libs/cards/card_mapper.h"
@@ -65,6 +69,34 @@ GolfEvents GolfUpdateEvent(GolfUpdate update) {
   return GolfEvents::FromGolf(std::move(event));
 }
 
+// Bounded rebase-retry for the conditional commits: each miss adopts the
+// stored truth, so giving up leaves a consistent hub and a client who
+// can simply resend.
+constexpr int kMaxCommitAttempts = 3;
+
+std::string InstanceId() {
+  absl::BitGen gen;
+  return absl::StrCat("hub-", absl::Hex(absl::Uniform<uint64_t>(gen), absl::kZeroPad16));
+}
+
+// The per-seat stat deltas a finished game applies — the payload of
+// CommitGameFinish, and the same numbers FinalizeGameLocked mirrors into
+// the local member rows.
+std::vector<golf_hub::PgHubStore::StatsDelta> StatsDeltas(const golf::GameState& state) {
+  const auto winner_indexes = state.winners();
+  std::vector<golf_hub::PgHubStore::StatsDelta> deltas;
+  for (std::size_t i = 0; i < state.getPlayers().size(); ++i) {
+    const golf::Player& seat = state.getPlayer(static_cast<int>(i));
+    golf_hub::PgHubStore::StatsDelta delta;
+    delta.player_id = seat.getName().value_or("");
+    delta.played = 1;
+    delta.won = winner_indexes.contains(static_cast<int>(i)) ? 1 : 0;
+    delta.score = seat.score();
+    deltas.push_back(std::move(delta));
+  }
+  return deltas;
+}
+
 }  // namespace
 
 HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::Dealer> dealer,
@@ -76,6 +108,7 @@ HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards
       ids_(std::move(ids)),
       metrics_(std::move(metrics)),
       store_(std::move(store)),
+      instance_id_(InstanceId()),
       registry_([this, grace_period] {
         Registry::Options options;
         options.async_delivery = true;  // chains, not writer threads (ADR-0019)
@@ -101,7 +134,14 @@ absl::Status HubHandler::RestoreFromStore() {
     rooms_[row.room_id].members.emplace(row.player_id, member);
     player_room_[row.player_id] = row.room_id;
   }
+  Writes cleanup;
   for (PgHubStore::GameRow& row : snapshot->games) {
+    if (row.state.has_value() && row.state->isOver()) {
+      // A crash landed between a finish commit and its deferred row
+      // delete: the ceremony already happened — finish the cleanup.
+      cleanup.push_back(PgHubStore::DeleteGame{row.room_id, row.game_id});
+      continue;
+    }
     GameEntry entry;
     entry.roster = row.roster;
     entry.version = row.version;
@@ -109,6 +149,7 @@ absl::Status HubHandler::RestoreFromStore() {
     for (const std::string& member_id : entry.roster) player_game_[member_id] = row.game_id;
     rooms_[row.room_id].games.emplace(row.game_id, std::move(entry));
   }
+  EnqueueWritesLocked(cleanup);
   LOG(INFO) << "hub restored " << snapshot->rooms.size() << " rooms, " << snapshot->members.size()
             << " members, " << snapshot->games.size() << " games";
   return absl::OkStatus();
@@ -136,17 +177,207 @@ void HubHandler::StageMemberLocked(const std::string& room_id, const std::string
   writes.push_back(PgHubStore::UpsertMember{std::move(row)});
 }
 
-void HubHandler::StageGameLocked(const std::string& room_id, const std::string& game_id,
-                                 GameEntry& entry, Writes& writes) {
-  ++entry.version;
+void HubHandler::StageWakeLocked(const std::string& room_id, Writes& writes) const {
+  StageLocked(writes, PgHubStore::Notify{RoomChannel(room_id), instance_id_});
+}
+
+HubHandler::Commit HubHandler::CommitEntryLocked(
+    const std::string& room_id, const std::string& game_id, GameEntry& entry,
+    const std::vector<std::string>& roster, const std::optional<golf::GameState>& state,
+    const std::vector<PgHubStore::StatsDelta>* finish) {
+  const int64_t version = entry.version + 1;
+  if (store_ != nullptr) {
+    // The async outbox may still hold rows this commit depends on — the
+    // room behind the insert's FK, the membership behind the finish's
+    // stat deltas. Drain it so the synchronous write never outruns the
+    // queued ones. (The writer needs no lock we hold.)
+    store_->Flush();
+    PgHubStore::GameRow row;
+    row.room_id = room_id;
+    row.game_id = game_id;
+    row.roster = roster;
+    if (state.has_value()) row.state.emplace(*state);
+    row.version = version;
+    const auto landed = finish != nullptr ? store_->CommitGameFinish(row, *finish, instance_id_)
+                                          : store_->CommitGameSave(row, instance_id_);
+    if (!landed.ok()) {
+      LOG(WARNING) << "game " << room_id << "/" << game_id
+                   << " commit unavailable: " << landed.status();
+      return Commit::kUnavailable;
+    }
+    if (!*landed) {
+      auto stored = store_->LoadGame(room_id, game_id);
+      if (!stored.ok()) {
+        LOG(WARNING) << "game " << room_id << "/" << game_id
+                     << " rebase read failed: " << stored.status();
+        return Commit::kUnavailable;
+      }
+      if (!stored->has_value()) return Commit::kGone;
+      entry.roster = (*stored)->roster;
+      entry.version = (*stored)->version;
+      if ((*stored)->state.has_value()) entry.state.emplace(*std::move((*stored)->state));
+      return Commit::kRebased;
+    }
+  }
+  entry.roster = roster;
+  if (state.has_value()) entry.state.emplace(*state);
+  entry.version = version;
+  return Commit::kCommitted;
+}
+
+void HubHandler::AttachListener(pg::Listener* listener) {
+  const std::lock_guard<std::mutex> lock(mu_);
+  listener_ = listener;
+  if (listener_ == nullptr) return;
+  for (const auto& [room_id, room] : rooms_) listener_->Listen(RoomChannel(room_id));
+}
+
+void HubHandler::OnNotify(const std::string& channel, const std::string& payload) {
+  if (payload == instance_id_) return;  // our own commit; locals already heard it
+  constexpr std::string_view kPrefix = "room_";
+  if (!absl::StartsWith(channel, kPrefix)) return;
+  const std::string room_id = channel.substr(kPrefix.size());
+  Outbox outbox;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    // Only rooms we hold: a stale wake for a dropped room must not
+    // resurrect it (join is the one path that materializes rooms).
+    if (!rooms_.contains(room_id)) return;
+    RefreshRoomLocked(room_id, outbox);
+  }
+  Deliver(outbox);
+}
+
+void HubHandler::RefreshRoomLocked(const std::string& room_id, Outbox& outbox) {
   if (store_ == nullptr) return;
-  PgHubStore::GameRow row;
-  row.room_id = room_id;
-  row.game_id = game_id;
-  row.roster = entry.roster;
-  if (entry.started()) row.state.emplace(*entry.state);
-  row.version = entry.version;
-  writes.push_back(PgHubStore::SaveGame{std::move(row)});
+  // The flush means this read can never be older than our own truth;
+  // holding mu_ across it means nothing local moves in between. The
+  // writer thread needs no lock we hold, so it drains freely.
+  store_->Flush();
+  auto rows = store_->LoadRoom(room_id);
+  if (!rows.ok()) {
+    // A missed wake is fine by protocol: the next read heals.
+    LOG(WARNING) << "room " << room_id << " refresh failed: " << rows.status();
+    return;
+  }
+  ReconcileRoomLocked(room_id, *rows, outbox);
+}
+
+void HubHandler::ReconcileRoomLocked(const std::string& room_id, const PgHubStore::RoomRows& rows,
+                                     Outbox& outbox) {
+  if (!rows.exists) {
+    // Deleted by another instance; nothing local can outrank that.
+    const auto room = rooms_.find(room_id);
+    if (room == rooms_.end()) return;
+    for (const auto& [member_id, member] : room->second.members) {
+      if (auto it = player_room_.find(member_id);
+          it != player_room_.end() && it->second == room_id) {
+        player_room_.erase(it);
+        player_game_.erase(member_id);
+      }
+    }
+    rooms_.erase(room);
+    UnlistenRoomLocked(room_id);
+    return;
+  }
+
+  Room& room = rooms_[room_id];
+  ListenRoomLocked(room_id);  // idempotent; covers a room just materialized
+
+  // Members mirror the rows: every instance writes its own players'
+  // rows, and the refresh flush made ours current.
+  std::map<std::string, Member> members;
+  for (const PgHubStore::MemberRow& row : rows.members) {
+    Member member;
+    member.connected = row.connected;
+    member.games_played = row.games_played;
+    member.games_won = row.games_won;
+    member.total_score = row.total_score;
+    members.emplace(row.player_id, member);
+    player_room_[row.player_id] = room_id;
+  }
+  for (const auto& [member_id, member] : room.members) {
+    if (members.contains(member_id)) continue;
+    if (auto it = player_room_.find(member_id); it != player_room_.end() && it->second == room_id) {
+      player_room_.erase(it);
+      player_game_.erase(member_id);
+    }
+  }
+  room.members = std::move(members);
+
+  // Games: adopt rows that moved past us. A row that ended while we
+  // hold the game is a remote finish — ceremony here, then it is gone
+  // locally (the finisher owns the deferred row delete); an ended row
+  // for a game we no longer hold is that delete still pending.
+  std::set<std::string> stored_ids;
+  for (const PgHubStore::GameRow& row : rows.games) {
+    stored_ids.insert(row.game_id);
+    const bool over = row.state.has_value() && row.state->isOver();
+    const auto game = room.games.find(row.game_id);
+    if (game == room.games.end()) {
+      if (over) continue;
+      GameEntry entry;
+      entry.roster = row.roster;
+      entry.version = row.version;
+      if (row.state.has_value()) entry.state.emplace(*row.state);
+      for (const std::string& member_id : entry.roster) player_game_[member_id] = row.game_id;
+      room.games.emplace(row.game_id, std::move(entry));
+      continue;
+    }
+    GameEntry& entry = game->second;
+    if (row.version <= entry.version) continue;  // ours is current
+    for (const std::string& member_id : entry.roster) {
+      // A member the new roster dropped left the game remotely.
+      if (std::find(row.roster.begin(), row.roster.end(), member_id) == row.roster.end()) {
+        if (auto it = player_game_.find(member_id);
+            it != player_game_.end() && it->second == row.game_id) {
+          player_game_.erase(it);
+        }
+      }
+    }
+    entry.roster = row.roster;
+    entry.version = row.version;
+    if (row.state.has_value()) entry.state.emplace(*row.state);
+    for (const std::string& member_id : entry.roster) player_game_[member_id] = row.game_id;
+    if (over) StageGameOverLocked(room_id, room, row.game_id, outbox);
+  }
+  for (auto game = room.games.begin(); game != room.games.end();) {
+    if (stored_ids.contains(game->first)) {
+      ++game;
+      continue;
+    }
+    // Deleted remotely: a disbanded lobby or a finished game's cleanup.
+    for (const std::string& member_id : game->second.roster) {
+      if (auto it = player_game_.find(member_id);
+          it != player_game_.end() && it->second == game->first) {
+        player_game_.erase(it);
+      }
+    }
+    game = room.games.erase(game);
+  }
+
+  // The wake contract: re-read, then re-project — local viewers get
+  // current views whether or not anything above changed.
+  for (const auto& [game_id, entry] : room.games) StageGameViewsLocked(game_id, entry, outbox);
+  StageRoomStateLocked(room_id, outbox);
+}
+
+void HubHandler::DropGameLocked(const GameRef& ref) {
+  for (const std::string& member_id : ref.entry->roster) {
+    if (auto it = player_game_.find(member_id);
+        it != player_game_.end() && it->second == ref.game_id) {
+      player_game_.erase(it);
+    }
+  }
+  ref.room->games.erase(ref.game_id);
+}
+
+void HubHandler::ListenRoomLocked(const std::string& room_id) {
+  if (listener_ != nullptr) listener_->Listen(RoomChannel(room_id));
+}
+
+void HubHandler::UnlistenRoomLocked(const std::string& room_id) {
+  if (listener_ != nullptr) listener_->Unlisten(RoomChannel(room_id));
 }
 
 smithy::Outcome<moonbase::golf::GetSessionOutput> HubHandler::GetSession(
@@ -275,6 +506,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
         while (rooms_.contains(room_id)) room_id = ids_->RoomId();
         const auto [member, inserted] = rooms_[room_id].members.emplace(player_id, Member{});
         player_room_[player_id] = room_id;
+        ListenRoomLocked(room_id);
         StageLocked(writes, PgHubStore::UpsertRoom{room_id});
         StageMemberLocked(room_id, player_id, member->second, writes);
         StageRoomStateLocked(room_id, outbox);
@@ -295,14 +527,20 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
     bool joined = false;
     {
       const std::lock_guard<std::mutex> lock(mu_);
-      const auto room = rooms_.find(join->roomId);
-      if (room != rooms_.end() && !player_room_.contains(player_id)) {
-        const auto [member, inserted] = room->second.members.emplace(player_id, Member{});
-        player_room_[player_id] = join->roomId;
-        StageMemberLocked(join->roomId, player_id, member->second, writes);
-        StageRoomStateLocked(join->roomId, outbox);
-        EnqueueWritesLocked(writes);
-        joined = true;
+      if (!player_room_.contains(player_id)) {
+        // The room may live on another instance (#1194 step 3): one
+        // synchronous read materializes it here before refusing.
+        if (!rooms_.contains(join->roomId)) RefreshRoomLocked(join->roomId, outbox);
+        const auto room = rooms_.find(join->roomId);
+        if (room != rooms_.end()) {
+          const auto [member, inserted] = room->second.members.emplace(player_id, Member{});
+          player_room_[player_id] = join->roomId;
+          StageMemberLocked(join->roomId, player_id, member->second, writes);
+          StageWakeLocked(join->roomId, writes);
+          StageRoomStateLocked(join->roomId, outbox);
+          EnqueueWritesLocked(writes);
+          joined = true;
+        }
       }
     }
     if (joined) {
@@ -509,7 +747,6 @@ void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) 
 
 void HubHandler::CreateGameMove(const std::string& player_id) {
   Outbox outbox;
-  Writes writes;
   std::string reason;
   {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -519,25 +756,44 @@ void HubHandler::CreateGameMove(const std::string& player_id) {
     } else if (player_game_.contains(player_id)) {
       reason = "leave your current game first";
     } else {
-      std::string game_id = ids_->GameCode();
-      while (room->games.contains(game_id)) game_id = ids_->GameCode();
-      GameEntry& entry = room->games[game_id];
-      entry.roster.push_back(player_id);
-      player_game_[player_id] = game_id;
-      StageGameLocked(player_room_.at(player_id), game_id, entry, writes);
+      const std::string room_id = player_room_.at(player_id);
+      for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
+        std::string game_id = ids_->GameCode();
+        while (room->games.contains(game_id)) game_id = ids_->GameCode();
+        GameEntry& entry = room->games[game_id];
+        const Commit commit =
+            CommitEntryLocked(room_id, game_id, entry, {player_id}, std::nullopt, nullptr);
+        if (commit == Commit::kRebased)
+          continue;  // code taken remotely; the
+                     // adopted game is real — keep
+                     // it and roll another code
+        if (commit == Commit::kGone) {
+          room->games.erase(game_id);
+          continue;
+        }
+        if (commit == Commit::kUnavailable) {
+          room->games.erase(game_id);
+          reason = "storage unavailable; try again";
+          break;
+        }
+        player_game_[player_id] = game_id;
 
-      moonbase::golf::GameCreated announcement;
-      announcement.gameId = game_id;
-      announcement.createdBy = player_id;
-      for (const auto& member : room->members) {
-        outbox.To(member.first, GolfUpdateEvent(GolfUpdate::FromGamecreated(announcement)));
+        moonbase::golf::GameCreated announcement;
+        announcement.gameId = game_id;
+        announcement.createdBy = player_id;
+        for (const auto& member : room->members) {
+          outbox.To(member.first, GolfUpdateEvent(GolfUpdate::FromGamecreated(announcement)));
+        }
+        moonbase::golf::GameJoined joined;
+        joined.view = ViewLocked(game_id, entry, player_id);
+        outbox.To(player_id, GolfUpdateEvent(GolfUpdate::FromGamejoined(std::move(joined))));
+        StageRoomStateLocked(room_id, outbox);
+        break;
       }
-      moonbase::golf::GameJoined joined;
-      joined.view = ViewLocked(game_id, entry, player_id);
-      outbox.To(player_id, GolfUpdateEvent(GolfUpdate::FromGamejoined(std::move(joined))));
-      StageRoomStateLocked(player_room_.at(player_id), outbox);
+      if (reason.empty() && !player_game_.contains(player_id)) {
+        reason = "could not allocate a game code; try again";
+      }
     }
-    EnqueueWritesLocked(writes);
   }
   if (!reason.empty()) {
     Reject(player_id, std::move(reason));
@@ -548,7 +804,6 @@ void HubHandler::CreateGameMove(const std::string& player_id) {
 
 void HubHandler::JoinGameMove(const std::string& player_id, const std::string& game_id) {
   Outbox outbox;
-  Writes writes;
   std::string reason;
   {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -558,31 +813,58 @@ void HubHandler::JoinGameMove(const std::string& player_id, const std::string& g
     } else if (player_game_.contains(player_id)) {
       reason = "leave your current game first";
     } else {
-      const auto game = room->games.find(game_id);
-      if (game == room->games.end()) {
+      const std::string room_id = player_room_.at(player_id);
+      if (store_ != nullptr && !room->games.contains(game_id)) {
+        // Another instance may have created it since our last wake.
+        RefreshRoomLocked(room_id, outbox);
+        room = FindRoomLocked(player_id);  // the refresh can drop us or the room
+      }
+      if (room == nullptr || !room->games.contains(game_id)) {
         reason = "game not found";
-      } else if (game->second.started()) {
-        reason = "game already started";
-      } else if (game->second.roster.size() >= kMaxSeats) {
-        reason = "game is full";
       } else {
-        game->second.roster.push_back(player_id);
-        player_game_[player_id] = game_id;
-        StageGameLocked(player_room_.at(player_id), game_id, game->second, writes);
+        for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
+          GameEntry& entry = room->games.at(game_id);
+          if (entry.started()) {
+            reason = "game already started";
+            break;
+          }
+          if (entry.roster.size() >= kMaxSeats) {
+            reason = "game is full";
+            break;
+          }
+          std::vector<std::string> roster = entry.roster;
+          roster.push_back(player_id);
+          const Commit commit =
+              CommitEntryLocked(room_id, game_id, entry, roster, std::nullopt, nullptr);
+          if (commit == Commit::kRebased) continue;
+          if (commit == Commit::kGone) {
+            room->games.erase(game_id);
+            reason = "game not found";
+            break;
+          }
+          if (commit == Commit::kUnavailable) {
+            reason = "storage unavailable; try again";
+            break;
+          }
+          player_game_[player_id] = game_id;
 
-        moonbase::golf::GameJoined joined;
-        joined.view = ViewLocked(game_id, game->second, player_id);
-        outbox.To(player_id, GolfUpdateEvent(GolfUpdate::FromGamejoined(std::move(joined))));
-        for (const std::string& recipient : game->second.roster) {
-          if (recipient == player_id) continue;
-          moonbase::golf::GameStateUpdate update;
-          update.view = ViewLocked(game_id, game->second, recipient);
-          outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromGamestate(std::move(update))));
+          moonbase::golf::GameJoined joined;
+          joined.view = ViewLocked(game_id, entry, player_id);
+          outbox.To(player_id, GolfUpdateEvent(GolfUpdate::FromGamejoined(std::move(joined))));
+          for (const std::string& recipient : entry.roster) {
+            if (recipient == player_id) continue;
+            moonbase::golf::GameStateUpdate update;
+            update.view = ViewLocked(game_id, entry, recipient);
+            outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromGamestate(std::move(update))));
+          }
+          StageRoomStateLocked(room_id, outbox);
+          break;
         }
-        StageRoomStateLocked(player_room_.at(player_id), outbox);
+        if (reason.empty() && !player_game_.contains(player_id)) {
+          reason = "game changed; try again";
+        }
       }
     }
-    EnqueueWritesLocked(writes);
   }
   if (!reason.empty()) {
     Reject(player_id, std::move(reason));
@@ -593,35 +875,54 @@ void HubHandler::JoinGameMove(const std::string& player_id, const std::string& g
 
 void HubHandler::StartGameMove(const std::string& player_id) {
   Outbox outbox;
-  Writes writes;
   std::string reason;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     auto ref = FindGameLocked(player_id);
     if (!ref.has_value()) {
       reason = "not in a game";
-    } else if (ref->entry->started()) {
-      reason = "game already started";
-    } else if (ref->entry->roster.size() < 2) {
-      reason = "need at least 2 players to start";
     } else {
-      std::deque<cards::Card> deck = dealer_->DealNewUnshuffledDeck();
-      dealer_->ShuffleDeck(deck);
-      auto dealt = golf::dealGolfGame(ref->game_id, ref->entry->roster, std::move(deck));
-      if (!dealt.ok()) {
-        reason = std::string(dealt.status().message());
-      } else {
-        ref->entry->state.emplace(std::move(*dealt));
-        StageGameLocked(ref->room_id, ref->game_id, *ref->entry, writes);
+      bool started = false;
+      for (int attempt = 0; attempt < kMaxCommitAttempts && reason.empty(); ++attempt) {
+        if (ref->entry->started()) {
+          reason = "game already started";
+          break;
+        }
+        if (ref->entry->roster.size() < 2) {
+          reason = "need at least 2 players to start";
+          break;
+        }
+        std::deque<cards::Card> deck = dealer_->DealNewUnshuffledDeck();
+        dealer_->ShuffleDeck(deck);
+        auto dealt = golf::dealGolfGame(ref->game_id, ref->entry->roster, std::move(deck));
+        if (!dealt.ok()) {
+          reason = std::string(dealt.status().message());
+          break;
+        }
+        const Commit commit = CommitEntryLocked(ref->room_id, ref->game_id, *ref->entry,
+                                                ref->entry->roster, *std::move(dealt), nullptr);
+        if (commit == Commit::kRebased) continue;  // the roster (or starter) raced us; redeal
+        if (commit == Commit::kGone) {
+          DropGameLocked(*ref);
+          StageRoomStateLocked(ref->room_id, outbox);
+          reason = "game no longer exists";
+          break;
+        }
+        if (commit == Commit::kUnavailable) {
+          reason = "storage unavailable; try again";
+          break;
+        }
+        started = true;
         for (const std::string& recipient : ref->entry->roster) {
           outbox.To(recipient,
                     GolfUpdateEvent(GolfUpdate::FromGamestarted(moonbase::golf::GameStarted{})));
         }
         StageGameViewsLocked(ref->game_id, *ref->entry, outbox);
         StageRoomStateLocked(ref->room_id, outbox);
+        break;
       }
+      if (reason.empty() && !started) reason = "game changed; try again";
     }
-    EnqueueWritesLocked(writes);
   }
   if (!reason.empty()) {
     Reject(player_id, std::move(reason));
@@ -642,58 +943,82 @@ void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, Mo
     } else if (!ref->entry->started()) {
       reason = "game not started";
     } else {
-      const golf::GameState& state = *ref->entry->state;
-      const int seat = state.playerIndex(player_id);
-      if (seat < 0) {
-        reason = "not seated in this game";
-      } else {
+      bool landed = false;
+      // The issue's move loop: pure transition off the entry, then the
+      // conditional commit; a miss adopts the stored truth and replays
+      // the transition against it.
+      for (int attempt = 0; attempt < kMaxCommitAttempts && reason.empty(); ++attempt) {
+        const golf::GameState& state = *ref->entry->state;
+        const int seat = state.playerIndex(player_id);
+        if (seat < 0) {
+          reason = "not seated in this game";
+          break;
+        }
         auto next = move(state, seat);
         if (!next.ok()) {
           reason = std::string(next.status().message());
-        } else {
-          const bool was_countdown = state.revealCountdownActive();
-          // Compare occupant ids, not seat indexes — a mid-round leave
-          // renumbers seats.
-          const std::string previous_turn =
-              effects.announce_turn ? PlayerIdAt(state, state.getWhoseTurn()) : std::string();
-          ref->entry->state.emplace(std::move(*next));
-          const golf::GameState& updated = *ref->entry->state;
+          break;
+        }
+        const bool was_countdown = state.revealCountdownActive();
+        // Compare occupant ids, not seat indexes — a mid-round leave
+        // renumbers seats.
+        const std::string previous_turn =
+            effects.announce_turn ? PlayerIdAt(state, state.getWhoseTurn()) : std::string();
+        const bool over = next->isOver();
+        std::vector<PgHubStore::StatsDelta> deltas;
+        if (over) deltas = StatsDeltas(*next);
+        const Commit commit =
+            CommitEntryLocked(ref->room_id, ref->game_id, *ref->entry, ref->entry->roster,
+                              *std::move(next), over ? &deltas : nullptr);
+        if (commit == Commit::kRebased) continue;  // another instance moved first
+        if (commit == Commit::kGone) {
+          DropGameLocked(*ref);
+          StageRoomStateLocked(ref->room_id, outbox);
+          reason = "game no longer exists";
+          break;
+        }
+        if (commit == Commit::kUnavailable) {
+          reason = "storage unavailable; try again";
+          break;
+        }
+        landed = true;
+        const golf::GameState& updated = *ref->entry->state;
 
-          if (effects.announce_knock) {
-            moonbase::golf::PlayerKnocked knocked;
-            knocked.playerId = player_id;
-            for (const std::string& recipient : ref->entry->roster) {
-              outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromPlayerknocked(knocked)));
-            }
+        if (effects.announce_knock) {
+          moonbase::golf::PlayerKnocked knocked;
+          knocked.playerId = player_id;
+          for (const std::string& recipient : ref->entry->roster) {
+            outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromPlayerknocked(knocked)));
           }
+        }
 
-          if (updated.isOver()) {
-            // Finalize stages the definitive face-up views itself.
-            FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox, writes);
+        if (over) {
+          // Finalize stages the definitive face-up views itself.
+          FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox, writes);
+        } else {
+          const bool countdown_started = !was_countdown && updated.revealCountdownActive();
+          if (effects.peek_fanout && !countdown_started) {
+            // A quiet peek: only the peeker's view changed.
+            moonbase::golf::GameStateUpdate update;
+            update.view = ViewLocked(ref->game_id, *ref->entry, player_id);
+            outbox.To(player_id, GolfUpdateEvent(GolfUpdate::FromGamestate(std::move(update))));
           } else {
-            StageGameLocked(ref->room_id, ref->game_id, *ref->entry, writes);
-            const bool countdown_started = !was_countdown && updated.revealCountdownActive();
-            if (effects.peek_fanout && !countdown_started) {
-              // A quiet peek: only the peeker's view changed.
-              moonbase::golf::GameStateUpdate update;
-              update.view = ViewLocked(ref->game_id, *ref->entry, player_id);
-              outbox.To(player_id, GolfUpdateEvent(GolfUpdate::FromGamestate(std::move(update))));
-            } else {
-              StageGameViewsLocked(ref->game_id, *ref->entry, outbox);
-            }
-            if (effects.announce_turn) {
-              const std::string current_turn = PlayerIdAt(updated, updated.getWhoseTurn());
-              if (current_turn != previous_turn) {
-                moonbase::golf::TurnChanged turn;
-                turn.playerId = current_turn;
-                for (const std::string& recipient : ref->entry->roster) {
-                  outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromTurnchanged(turn)));
-                }
+            StageGameViewsLocked(ref->game_id, *ref->entry, outbox);
+          }
+          if (effects.announce_turn) {
+            const std::string current_turn = PlayerIdAt(updated, updated.getWhoseTurn());
+            if (current_turn != previous_turn) {
+              moonbase::golf::TurnChanged turn;
+              turn.playerId = current_turn;
+              for (const std::string& recipient : ref->entry->roster) {
+                outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromTurnchanged(turn)));
               }
             }
           }
         }
+        break;
       }
+      if (reason.empty() && !landed) reason = "game changed; try again";
     }
     EnqueueWritesLocked(writes);
   }
@@ -716,6 +1041,7 @@ void HubHandler::SetConnected(const std::string& player_id, bool connected) {
     if (member == room->second.members.end()) return;
     member->second.connected = connected;
     StageMemberLocked(it->second, player_id, member->second, writes);
+    StageWakeLocked(it->second, writes);
     EnqueueWritesLocked(writes);
   }
 }
@@ -758,10 +1084,15 @@ void HubHandler::LeaveEverywhere(const std::string& player_id, Outbox& outbox, W
   if (room->second.members.empty()) {
     rooms_.erase(room);
     // One DeleteRoom; the row's cascade takes members and games with it.
+    // The wake rider tells any instance that still holds the room (a
+    // race, not the norm — an emptied room has no members anywhere).
     StageLocked(writes, PgHubStore::DeleteRoom{room_id});
+    StageWakeLocked(room_id, writes);
+    UnlistenRoomLocked(room_id);
     return;  // nobody left to tell
   }
   StageLocked(writes, PgHubStore::DeleteMember{room_id, player_id});
+  StageWakeLocked(room_id, writes);
   StageRoomStateLocked(room_id, outbox);
 }
 
@@ -774,35 +1105,69 @@ void HubHandler::LeaveGameLocked(const std::string& player_id, Outbox& outbox, W
   ack.gameId = ref->game_id;
   outbox.To(player_id, GolfUpdateEvent(GolfUpdate::FromGameleft(std::move(ack))));
 
-  auto& roster = ref->entry->roster;
-  roster.erase(std::remove(roster.begin(), roster.end(), player_id), roster.end());
+  for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
+    GameEntry& entry = *ref->entry;
+    if (std::find(entry.roster.begin(), entry.roster.end(), player_id) == entry.roster.end()) {
+      // A rebase says we are already out (another instance's view of the
+      // roster caught up first); nothing left to commit.
+      StageRoomStateLocked(ref->room_id, outbox);
+      return;
+    }
+    std::vector<std::string> roster = entry.roster;
+    roster.erase(std::remove(roster.begin(), roster.end(), player_id), roster.end());
 
-  if (!ref->entry->started()) {
-    if (roster.empty()) {
+    if (!entry.started() && roster.empty()) {
       ref->room->games.erase(ref->game_id);
       StageLocked(writes, PgHubStore::DeleteGame{ref->room_id, ref->game_id});
-    } else {
-      StageGameLocked(ref->room_id, ref->game_id, *ref->entry, writes);
-      StageGameViewsLocked(ref->game_id, *ref->entry, outbox);
+      StageWakeLocked(ref->room_id, writes);
+      StageRoomStateLocked(ref->room_id, outbox);
+      return;
     }
-    StageRoomStateLocked(ref->room_id, outbox);
+
+    std::optional<golf::GameState> state;
+    if (entry.started()) {
+      const int seat = entry.state->playerIndex(player_id);
+      if (seat >= 0) {
+        auto next = entry.state->removePlayer(seat);
+        state.emplace(next.ok() ? *std::move(next) : *entry.state);
+      } else {
+        state.emplace(*entry.state);
+      }
+    }
+    const bool over = state.has_value() && state->isOver();
+    std::vector<PgHubStore::StatsDelta> deltas;
+    if (over) deltas = StatsDeltas(*state);
+    const Commit commit = CommitEntryLocked(ref->room_id, ref->game_id, entry, roster, state,
+                                            over ? &deltas : nullptr);
+    if (commit == Commit::kRebased) continue;
+    if (commit == Commit::kGone) {
+      DropGameLocked(*ref);
+      StageRoomStateLocked(ref->room_id, outbox);
+      return;
+    }
+    if (commit == Commit::kUnavailable) {
+      // A disconnect cannot be refused: the seat empties either way.
+      // Adopt locally and let the next successful commit's rebase heal
+      // the divergence. Loud — rosters disagree until then.
+      LOG(ERROR) << "game " << ref->room_id << "/" << ref->game_id
+                 << ": leave did not commit; applying locally only";
+      entry.roster = roster;
+      if (state.has_value()) entry.state.emplace(*state);
+      ++entry.version;
+    }
+    if (over) {
+      // Finalize stages the final views and the room's refreshed stats.
+      FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox, writes);
+    } else {
+      StageGameViewsLocked(ref->game_id, entry, outbox);
+      StageRoomStateLocked(ref->room_id, outbox);
+    }
     return;
   }
-
-  const golf::GameState& state = *ref->entry->state;
-  const int seat = state.playerIndex(player_id);
-  if (seat >= 0) {
-    auto next = state.removePlayer(seat);
-    if (next.ok()) ref->entry->state.emplace(std::move(*next));
-  }
-  if (ref->entry->state->isOver()) {
-    // Finalize stages the final views and the room's refreshed stats.
-    FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox, writes);
-  } else {
-    StageGameLocked(ref->room_id, ref->game_id, *ref->entry, writes);
-    StageGameViewsLocked(ref->game_id, *ref->entry, outbox);
-    StageRoomStateLocked(ref->room_id, outbox);
-  }
+  // Three straight rebases: the entry now mirrors the store; the caller
+  // (disconnect or a retried leave) comes around again.
+  LOG(WARNING) << "game " << ref->room_id << "/" << ref->game_id
+               << ": leave lost every commit race";
 }
 
 void HubHandler::BroadcastRoom(const std::string& room_id) {
@@ -829,8 +1194,23 @@ void HubHandler::OnExpired(const std::string& player_id) {
   Writes writes;
   {
     const std::lock_guard<std::mutex> lock(mu_);
-    LeaveEverywhere(player_id, outbox, writes);
-    EnqueueWritesLocked(writes);
+    // Cross-instance grace (#1194 step 3): the player may have resumed
+    // on another instance while parked here. One fresh read decides —
+    // a member row back at connected belongs to its new instance.
+    bool resumed_elsewhere = false;
+    if (store_ != nullptr) {
+      if (const auto room_it = player_room_.find(player_id); room_it != player_room_.end()) {
+        RefreshRoomLocked(room_it->second, outbox);
+        if (Room* room = FindRoomLocked(player_id); room != nullptr) {
+          const auto member = room->members.find(player_id);
+          resumed_elsewhere = member != room->members.end() && member->second.connected;
+        }
+      }
+    }
+    if (!resumed_elsewhere) {
+      LeaveEverywhere(player_id, outbox, writes);
+      EnqueueWritesLocked(writes);
+    }
   }
   Deliver(outbox);
 }
@@ -972,8 +1352,8 @@ void HubHandler::StageGameViewsLocked(const std::string& game_id, const GameEntr
   }
 }
 
-void HubHandler::FinalizeGameLocked(const std::string& room_id, Room& room,
-                                    const std::string& game_id, Outbox& outbox, Writes& writes) {
+void HubHandler::StageGameOverLocked(const std::string& room_id, Room& room,
+                                     const std::string& game_id, Outbox& outbox) {
   const auto game = room.games.find(game_id);
   if (game == room.games.end() || !game->second.started()) return;
   const golf::GameState& state = *game->second.state;
@@ -997,28 +1377,40 @@ void HubHandler::FinalizeGameLocked(const std::string& room_id, Room& room,
     ended.finalScores.push_back(std::move(score));
   }
 
-  // Room-scoped running stats: every seat played, every winner won.
-  for (const golf::Player& seat : state.getPlayers()) {
-    const std::string occupant = seat.getName().value_or("");
-    const auto member = room.members.find(occupant);
-    if (member == room.members.end()) continue;
-    member->second.games_played++;
-    member->second.total_score += seat.score();
-    if (std::find(winner_ids.begin(), winner_ids.end(), occupant) != winner_ids.end()) {
-      member->second.games_won++;
-    }
-    StageMemberLocked(room_id, occupant, member->second, writes);
-  }
-
-  // Final views (everything face up), then the result, then the room's
-  // refreshed stats; the game itself is done and gone.
+  // Final views (everything face up), then the result; the game itself
+  // is done and gone locally.
   StageGameViewsLocked(game_id, game->second, outbox);
   for (const std::string& recipient : game->second.roster) {
     outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromGameended(ended)));
     player_game_.erase(recipient);
   }
   room.games.erase(game);
+}
+
+void HubHandler::FinalizeGameLocked(const std::string& room_id, Room& room,
+                                    const std::string& game_id, Outbox& outbox, Writes& writes) {
+  const auto game = room.games.find(game_id);
+  if (game == room.games.end() || !game->second.started()) return;
+  const golf::GameState& state = *game->second.state;
+
+  // Room-scoped running stats: every seat played, every winner won.
+  // With a store these same deltas already rode the finish commit; this
+  // mirrors them into the local rows (and IS the update in-memory).
+  const auto winner_indexes = state.winners();
+  for (std::size_t i = 0; i < state.getPlayers().size(); ++i) {
+    const golf::Player& seat = state.getPlayer(static_cast<int>(i));
+    const auto member = room.members.find(seat.getName().value_or(""));
+    if (member == room.members.end()) continue;
+    member->second.games_played++;
+    member->second.total_score += seat.score();
+    if (winner_indexes.contains(static_cast<int>(i))) member->second.games_won++;
+  }
+
+  StageGameOverLocked(room_id, room, game_id, outbox);
+  // The ended row outlives the ceremony so other instances can hold
+  // theirs off it; the deferred delete (with its wake) cleans it up.
   StageLocked(writes, PgHubStore::DeleteGame{room_id, game_id});
+  StageWakeLocked(room_id, writes);
   StageRoomStateLocked(room_id, outbox);
 }
 

@@ -18,25 +18,31 @@
 
 namespace golf_hub {
 
-/// The hub's rooms/members/games write-through (#1194 step 2): a durable-
-/// write outbox, not a repository — the load→transition→commit loop the
-/// issue's Apply(game_id, transition) seam will own still lives in the
-/// hub, and gets carved out (with this queue behind it) when step 3 flips
-/// authority to the database. Not an interface either — the issue's
-/// design note rejects a store seam ahead of the backend; this is the
-/// concrete postgres component, injected optionally (nullptr keeps the
-/// all-in-memory hub, which stays the test mode).
+/// The fan-out channel names (#1194 step 3). Every instance LISTENs on
+/// kRoomsChannel for room lifecycle — nobody can subscribe a room's
+/// channel before learning the room exists — and on RoomChannel(id) for
+/// each room it holds. Payloads are wake-ups, not deltas: a woken
+/// instance re-reads current state, so a missed notify heals on the
+/// next read.
+inline constexpr char kRoomsChannel[] = "golf_rooms";
+inline std::string RoomChannel(const std::string& room_id) { return "room_" + room_id; }
+
+/// The hub's postgres component (#1194 steps 2-3), with two write paths
+/// matching what each kind of state can afford. Rooms and members ride
+/// the step-2 outbox: ops staged under the hub's lock and handed over
+/// while still holding it — so queue order is the truth's order — then
+/// applied FIFO by one writer thread; a failed write degrades
+/// durability, never gameplay (each player's rows have one writer, so
+/// there is nothing to conflict with). Games are the multi-instance
+/// contended state, and step 3 makes the database their authority:
+/// CommitGameSave/CommitGameFinish run synchronously, conditional on
+/// version-1, with the NOTIFY riding the same statement. Not an
+/// interface — the issue's design note rejects a store seam ahead of
+/// the backend; this is the concrete component, injected optionally
+/// (nullptr keeps the all-in-memory hub, which stays the test mode).
 ///
-/// Memory is authoritative in step 2. The hub stages ops and hands them
-/// over while still holding its lock — so queue order is the truth's
-/// order — and a single writer thread applies them FIFO, one statement
-/// each: no DB latency inside the hub's lock, no transactions (a batch
-/// can land partially), and a failed write degrades durability, never
-/// gameplay. This component owns the row encodings end to end: game
-/// state serializes through the step-0 serde on the writer thread and
-/// deserializes in LoadSnapshot. Game saves are conditional on
-/// version-1; a miss means the DB diverged from the only writer, which
-/// is logged loudly and repaired last-writer-wins.
+/// This component owns the row encodings end to end: game state
+/// serializes through the step-0 serde and deserializes in the loads.
 class PgHubStore {
  public:
   struct MemberRow {
@@ -74,14 +80,17 @@ class PgHubStore {
     std::string room_id;
     std::string player_id;
   };
-  struct SaveGame {
-    GameRow row;
-  };
   struct DeleteGame {
     std::string room_id;
     std::string game_id;
   };
-  using Op = std::variant<UpsertRoom, DeleteRoom, UpsertMember, DeleteMember, SaveGame, DeleteGame>;
+  /// A wake-up rider for the async queue: FIFO order means it fires
+  /// after the writes it announces have landed.
+  struct Notify {
+    std::string channel;
+    std::string payload;
+  };
+  using Op = std::variant<UpsertRoom, DeleteRoom, UpsertMember, DeleteMember, DeleteGame, Notify>;
 
   explicit PgHubStore(std::shared_ptr<pg::Client> db);
   /// Drains the queue, then joins the writer.
@@ -100,6 +109,44 @@ class PgHubStore {
   /// bad game costs that game, not the boot.
   absl::StatusOr<Snapshot> LoadSnapshot();
 
+  /// The step-3 synchronous commit path (#1194: load -> pure transition
+  /// -> conditional update, retry on miss; NOTIFY rides the same
+  /// commit). Returns whether the conditional write landed; false means
+  /// the stored row didn't hold version-1 (or, for version 1, the code
+  /// is already taken) — the caller reloads via LoadGame to tell a
+  /// conflict from a vanished game and rebases. row.version == 1 inserts
+  /// a fresh row; anything later updates the existing one only. On
+  /// success the payload lands on RoomChannel(row.room_id) in the same
+  /// statement; a miss notifies nobody.
+  absl::StatusOr<bool> CommitGameSave(const GameRow& row, const std::string& notify_payload);
+
+  /// The finishing commit: final state, per-member stat deltas, and the
+  /// notify, all in one transaction. The ended row stays (remote
+  /// instances read it for the game-over ceremony); the caller enqueues
+  /// its deferred DeleteGame.
+  struct StatsDelta {
+    std::string player_id;
+    int played = 0;
+    int won = 0;
+    int score = 0;
+  };
+  absl::StatusOr<bool> CommitGameFinish(const GameRow& row, const std::vector<StatsDelta>& stats,
+                                        const std::string& notify_payload);
+
+  /// Rebase read after a conditional miss; nullopt = the game is gone.
+  /// An undecodable row also reads as gone (logged loudly) — the same
+  /// one-bad-row-costs-one-game policy as LoadSnapshot.
+  absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
+                                                  const std::string& game_id);
+
+  /// One room's rows, for notify-driven refresh and join-miss lookups.
+  struct RoomRows {
+    bool exists = false;
+    std::vector<MemberRow> members;
+    std::vector<GameRow> games;
+  };
+  absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id);
+
  private:
   void WriterLoop();
   void Apply(const Op& op);
@@ -108,6 +155,9 @@ class PgHubStore {
   /// not a gameplay error).
   std::optional<int> ExecOrWarn(const char* what, const char* sql,
                                 const std::vector<std::string>& params);
+  absl::StatusOr<GameRow> RowFromColumns(const std::string& room_id, const std::string& game_id,
+                                         const std::string& roster_json,
+                                         const std::string& state_json, int64_t version);
 
   const std::shared_ptr<pg::Client> db_;
   std::mutex mu_;

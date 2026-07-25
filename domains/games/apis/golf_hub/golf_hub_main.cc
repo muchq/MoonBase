@@ -33,6 +33,7 @@
 #include "domains/platform/libs/futility/otel/http_metrics.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/futility/otel/otel_provider.h"
+#include "domains/platform/libs/pg/listener.h"
 #include "domains/platform/libs/pg/pg.h"
 #include "moonbase/golf/server.h"
 #include "smithy/http/beast_transport.h"
@@ -105,6 +106,18 @@ int main() {
   if (absl::Status restored = handler->RestoreFromStore(); !restored.ok()) {
     LOG(ERROR) << "Failed to restore golf hub state: " << restored;
     return 1;
+  }
+  // The fan-out's LISTEN side (#1194 step 3): commits on other instances
+  // wake this one to re-read and re-broadcast. Declared after handler so
+  // it is destroyed (thread joined) first; the detach at shutdown keeps
+  // the handler's teardown from touching it.
+  std::unique_ptr<pg::Listener> listener;
+  if (store != nullptr) {
+    listener = std::make_unique<pg::Listener>(
+        db_url, [&handler](const std::string& channel, const std::string& payload) {
+          handler->OnNotify(channel, payload);
+        });
+    handler->AttachListener(listener.get());
   }
 
   // Block shutdown signals before the transport spawns its thread pool.
@@ -191,6 +204,8 @@ int main() {
   int signal_number = 0;
   sigwait(&shutdown_signals, &signal_number);
   LOG(INFO) << "Signal " << signal_number << " received; draining sessions";
+  handler->AttachListener(nullptr);
+  listener.reset();
   handler->registry().Drain(std::chrono::seconds(5));
   transport.Stop();
   return 0;

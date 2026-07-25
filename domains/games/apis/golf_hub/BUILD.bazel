@@ -108,7 +108,8 @@ cc_library(
     ],
 )
 
-# Step-2 slice of the persistence integration suite (#1194): real
+# Step-2/3 slice of the persistence integration suite (#1194): the
+# write-through ops and the synchronous commit+NOTIFY path against real
 # postgres via GOLF_HUB_TEST_DB_URL; skips otherwise.
 cc_test(
     name = "pg_hub_store_test",
@@ -125,6 +126,7 @@ cc_test(
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/golf:game_state_serde",
         "//domains/platform/libs/pg",
+        "//domains/platform/libs/pg:listener",
         "@googletest//:gtest_main",
     ],
 )
@@ -184,7 +186,9 @@ cc_library(
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/golf:player",
         "//domains/platform/libs/futility/otel:metrics",
+        "//domains/platform/libs/pg:listener",
         "@com_google_absl//absl/log",
+        "@com_google_absl//absl/random",
         "@com_google_absl//absl/strings",
         "@smithy_cpp//runtime:eventstream",
         "@smithy_cpp//runtime:server",
@@ -216,6 +220,7 @@ cc_test(
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/futility/otel:metrics",
         "//domains/platform/libs/pg",
+        "//domains/platform/libs/pg:listener",
         "@googletest//:gtest_main",
         "@smithy_cpp//runtime:client",
         "@smithy_cpp//runtime:core",
@@ -268,6 +273,7 @@ cc_binary(
         "//domains/platform/libs/futility/otel:metrics",
         "//domains/platform/libs/futility/otel:otel_provider",
         "//domains/platform/libs/pg",
+        "//domains/platform/libs/pg:listener",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:globals",
         "@com_google_absl//absl/log:initialize",

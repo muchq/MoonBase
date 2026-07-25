@@ -18,6 +18,7 @@
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
+#include "domains/platform/libs/pg/listener.h"
 #include "moonbase/golf/server.h"
 #include "smithy/server/session_registry.h"
 
@@ -33,6 +34,18 @@ namespace golf_hub {
 /// per-recipient Broadcast(ids, make) form with views built by ViewLocked
 /// — per-viewer state (own peeks, the held draw) has exactly one place to
 /// land and no identical-bytes path can leak it.
+///
+/// With a store attached, instances are interchangeable (#1194 step 3):
+/// the database is every game's authority. A move loads nothing extra —
+/// the local entry mirrors the stored row — but its result only counts
+/// once the conditional commit lands; a miss rebases the entry from the
+/// stored truth and retries the transition. Each commit's NOTIFY wakes
+/// the other instances holding that room; a woken instance re-reads the
+/// rows and re-projects views for its local players (redaction stays
+/// local — only wake-ups cross the wire). Rooms and members keep the
+/// step-2 async write-through (single writer per row, nothing to
+/// conflict with), with notify riders so remote rosters converge. Chat
+/// stays instance-local: transient, lossy by protocol.
 class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
  public:
   using Registry = smithy::server::SessionRegistry<moonbase::golf::GolfEvents>;
@@ -70,6 +83,19 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// snapshot itself couldn't be read.
   absl::Status RestoreFromStore();
 
+  /// Wires the fan-out's LISTEN side (#1194 step 3): subscribes every
+  /// room the hub holds and follows rooms as they come and go. Call
+  /// after RestoreFromStore, before serving, with a listener whose
+  /// callback forwards to OnNotify. The caller owns the listener and
+  /// must detach (attach nullptr) before destroying either object.
+  void AttachListener(pg::Listener* listener);
+
+  /// The listener callback target; runs on the listener's thread. A
+  /// wake-up for a held room re-reads its rows and re-projects views to
+  /// local players; payloads carrying our own instance id are skipped
+  /// (locals already heard the local fan-out).
+  void OnNotify(const std::string& channel, const std::string& payload);
+
  private:
   struct Member {
     bool connected = true;
@@ -81,9 +107,10 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// A game is a pre-start roster until startGame swaps in engine state.
   /// Once started, roster membership mirrors the engine's seats — every
   /// join/leave updates both, or a seat would stop receiving views.
-  /// version is the entry's revision: every mutation bumps it (store or
-  /// not — it's a domain property staging merely reads), and the store's
-  /// conditional UPDATE verifies each saved row followed its predecessor.
+  /// version is the entry's revision: every mutation bumps it through
+  /// CommitEntryLocked (store or not), and with a store the commit only
+  /// lands when the stored row holds the predecessor — that condition
+  /// is what serializes instances.
   struct GameEntry {
     std::vector<std::string> roster;
     std::optional<golf::GameState> state;
@@ -166,14 +193,40 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// lands. No-op without a store; always leaves writes empty.
   void EnqueueWritesLocked(Writes& writes);
 
-  /// Write-through staging; callers hold mu_. StageGameLocked bumps the
-  /// entry's revision (with or without a store) — call it once per
-  /// mutation of the entry.
+  /// Write-through staging; callers hold mu_.
   void StageLocked(Writes& writes, PgHubStore::Op op) const;
   void StageMemberLocked(const std::string& room_id, const std::string& player_id,
                          const Member& member, Writes& writes) const;
-  void StageGameLocked(const std::string& room_id, const std::string& game_id, GameEntry& entry,
-                       Writes& writes);
+  /// The async batch's wake-up rider: remote instances holding the room
+  /// refresh once the writes staged before it have landed.
+  void StageWakeLocked(const std::string& room_id, Writes& writes) const;
+
+  /// One synchronous conditional commit of the entry's next revision
+  /// (#1194 step 3). kCommitted adopts the candidate roster/state at
+  /// version+1 (without a store this is the whole operation — memory
+  /// stays the authority in single-instance mode). kRebased means
+  /// another instance committed first: the entry now holds the stored
+  /// truth — revalidate and retry. kGone: the game vanished remotely
+  /// (the entry is untouched; the caller drops it). kUnavailable: the
+  /// commit's fate is unknown; nothing was adopted.
+  enum class Commit { kCommitted, kRebased, kGone, kUnavailable };
+  Commit CommitEntryLocked(const std::string& room_id, const std::string& game_id, GameEntry& entry,
+                           const std::vector<std::string>& roster,
+                           const std::optional<golf::GameState>& state,
+                           const std::vector<PgHubStore::StatsDelta>* finish);
+
+  /// The wake handler's body: flush our own queue (so the read is never
+  /// older than local truth), re-read the room's rows, reconcile, and
+  /// re-project views to local members. Also the join path's fallback —
+  /// it materializes a room another instance created. Callers hold mu_.
+  void RefreshRoomLocked(const std::string& room_id, Outbox& outbox);
+  void ReconcileRoomLocked(const std::string& room_id, const PgHubStore::RoomRows& rows,
+                           Outbox& outbox);
+  /// Erases the game and its player mappings without any events — for
+  /// games the database says no longer exist.
+  void DropGameLocked(const GameRef& ref);
+  void ListenRoomLocked(const std::string& room_id);
+  void UnlistenRoomLocked(const std::string& room_id);
 
   /// Builders; callers hold mu_.
   moonbase::golf::RoomState RoomStateLocked(const std::string& room_id, const Room& room) const;
@@ -182,6 +235,14 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
                                       const std::string& viewer_id) const;
   void StageGameViewsLocked(const std::string& game_id, const GameEntry& entry,
                             Outbox& outbox) const;
+  /// The game-over ceremony: final face-up views, then gameEnded, then
+  /// the game is erased locally. Shared by the local finisher and the
+  /// refresh path (a game another instance finished).
+  void StageGameOverLocked(const std::string& room_id, Room& room, const std::string& game_id,
+                           Outbox& outbox);
+  /// The local finisher: mirrors the stat deltas the finish commit
+  /// already applied (or, without a store, applies them — same code),
+  /// runs the ceremony, and stages the deferred row delete.
   void FinalizeGameLocked(const std::string& room_id, Room& room, const std::string& game_id,
                           Outbox& outbox, Writes& writes);
 
@@ -190,7 +251,11 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   const std::shared_ptr<IdGenerator> ids_;
   const std::shared_ptr<futility::otel::MetricsRecorder> metrics_;
   const std::shared_ptr<PgHubStore> store_;
+  /// Rides every commit and rider as the notify payload, so an instance
+  /// can tell its own wake-ups from the ones that carry news.
+  const std::string instance_id_;
   std::mutex mu_;
+  pg::Listener* listener_ = nullptr;  // owned by the caller; guarded by mu_
   std::unordered_map<std::string, Room> rooms_;
   std::unordered_map<std::string, std::string> player_room_;
   std::unordered_map<std::string, std::string> player_game_;
