@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 #include "absl/random/random.h"
+#include "absl/status/statusor.h"
 
 namespace golf_hub {
 
@@ -17,32 +18,50 @@ namespace golf_hub {
 /// ids; not a cryptographic claim.
 std::string RandomId(std::string_view prefix);
 
-/// Single-process store for the hub's two credentials (smithy-cpp
-/// ADR-0018's ticket pattern): tickets are single-use and short-lived —
-/// minted by GetSession, checked by the gate pre-101 (PeekTicket), spent
-/// exactly once by the Play handler (SpendTicket). Resume tokens are
-/// multi-use and long-lived — a reconnect exchanges one for a fresh
-/// ticket and gets the same playerId back. All state is in-memory: a
-/// restart forgets every credential, which matches the Go hub it
-/// replaces (its JWT secret rotated on restart).
+/// Store for the hub's two credentials (smithy-cpp ADR-0018's ticket
+/// pattern): tickets are single-use and short-lived — minted by
+/// GetSession, checked by the gate pre-101 (PeekTicket), spent exactly
+/// once by the Play handler (SpendTicket). Resume tokens are multi-use
+/// and long-lived — a reconnect exchanges one for a fresh ticket and gets
+/// the same playerId back.
 ///
-/// Thread-safe; expired entries are purged lazily on mints.
+/// Issue* can fail: a vault backed by a store (PgTicketVault, #1194) can
+/// be unavailable, and minting must say so rather than hand out a
+/// credential nothing recorded. Lookups fail closed instead — an
+/// unavailable store reads as "no such credential" (logged where it
+/// happens), which a client handles the same way as an expired one.
 class TicketVault {
  public:
-  TicketVault(std::chrono::seconds ticket_ttl, std::chrono::seconds resume_ttl);
+  virtual ~TicketVault() = default;
 
-  std::string IssueTicket(const std::string& player_id);
-  std::string IssueResumeToken(const std::string& player_id);
+  virtual absl::StatusOr<std::string> IssueTicket(const std::string& player_id) = 0;
+  virtual absl::StatusOr<std::string> IssueResumeToken(const std::string& player_id) = 0;
 
   /// Unexpired and unspent. Read-only — the gate's pre-101 check;
   /// SpendTicket remains the single-use authority.
-  bool PeekTicket(const std::string& ticket) const;
+  virtual bool PeekTicket(const std::string& ticket) const = 0;
 
   /// At most one caller ever receives the player id.
-  std::optional<std::string> SpendTicket(const std::string& ticket);
+  virtual std::optional<std::string> SpendTicket(const std::string& ticket) = 0;
 
   /// Multi-use until expiry.
-  std::optional<std::string> ResolveResumeToken(const std::string& token) const;
+  virtual std::optional<std::string> ResolveResumeToken(const std::string& token) const = 0;
+};
+
+/// Single-process vault: all state in-memory, so a restart forgets every
+/// credential. The default when GOLF_HUB_DB_URL is unset, and the test
+/// mode — the all-in-memory hub is the blessed harness (#1194).
+///
+/// Thread-safe; expired entries are purged lazily on mints.
+class InMemoryTicketVault final : public TicketVault {
+ public:
+  InMemoryTicketVault(std::chrono::seconds ticket_ttl, std::chrono::seconds resume_ttl);
+
+  absl::StatusOr<std::string> IssueTicket(const std::string& player_id) override;
+  absl::StatusOr<std::string> IssueResumeToken(const std::string& player_id) override;
+  bool PeekTicket(const std::string& ticket) const override;
+  std::optional<std::string> SpendTicket(const std::string& ticket) override;
+  std::optional<std::string> ResolveResumeToken(const std::string& token) const override;
 
  private:
   struct Entry {

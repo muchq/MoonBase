@@ -36,8 +36,8 @@ namespace golf_hub {
 class GolfHubStreamFixture : public testing::Test {
  protected:
   void SetUp() override {
-    vault_ = std::make_shared<TicketVault>(/*ticket_ttl=*/std::chrono::seconds(60),
-                                           /*resume_ttl=*/std::chrono::seconds(60));
+    vault_ = std::make_shared<InMemoryTicketVault>(/*ticket_ttl=*/std::chrono::seconds(60),
+                                                   /*resume_ttl=*/std::chrono::seconds(60));
     // NoShuffleDealer: hands are dealt from the back of the pristine deck,
     // so every card in every test is known (first seat gets the aces).
     // Sequential ids keep players and game codes readable in failures.

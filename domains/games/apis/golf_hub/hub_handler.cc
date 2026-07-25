@@ -94,10 +94,21 @@ smithy::Outcome<moonbase::golf::GetSessionOutput> HubHandler::GetSession(
   }
   if (player_id.empty()) player_id = ids_->PlayerId();
 
+  // A vault backed by a store can be down; a mint nothing recorded must
+  // not reach the client. Unknown -> a non-leaking 500.
+  absl::StatusOr<std::string> ticket = vault_->IssueTicket(player_id);
+  if (!ticket.ok()) return smithy::Error::Unknown("credential store unavailable");
+
   moonbase::golf::GetSessionOutput output;
   output.playerId = player_id;
-  output.ticket = vault_->IssueTicket(player_id);
-  output.resumeToken = token_valid ? *input.resumeToken : vault_->IssueResumeToken(player_id);
+  output.ticket = *std::move(ticket);
+  if (token_valid) {
+    output.resumeToken = *input.resumeToken;
+  } else {
+    absl::StatusOr<std::string> resume = vault_->IssueResumeToken(player_id);
+    if (!resume.ok()) return smithy::Error::Unknown("credential store unavailable");
+    output.resumeToken = *std::move(resume);
+  }
   return output;
 }
 

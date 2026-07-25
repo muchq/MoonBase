@@ -35,6 +35,11 @@ common --remote_cache_compression
 
 common --cxxopt='-std=c++20'
 common --host_cxxopt='-std=c++20'
+
+# libpq (@postgres, #1194) defaults to openssl, but binaries here already
+# link boringssl via the curl/otel closure — two SSL libs in one link step
+# collide. Point libpq at the same boringssl.
+common --@postgres//:with_ssl=boringssl
 # common --action_env=BAZEL_CXXOPTS="-std=c++20"
 
 build:debug -c dbg

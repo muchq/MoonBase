@@ -41,9 +41,12 @@ lobby-safe summaries only.
 
 ## Scaffold notes / deferred
 
-- Tokens are an in-memory `TicketVault` (restart forgets everything —
-  matching the Go hub, whose JWT secret rotated on restart). Signed
-  tokens are a later hardening if restart-survival ever matters.
+- Credentials live in postgres when `GOLF_HUB_DB_URL` is set (#1194
+  step 1: `PgTicketVault`, hashed at rest, spend = single-row
+  `DELETE ... RETURNING`), so tickets and resume tokens survive deploys
+  and don't care which instance minted them. Unset falls back to the
+  in-memory `InMemoryTicketVault` — dev mode and the test harness.
+  Rooms, games, and fan-out are still in-process (later #1194 steps).
 - Player ids are whimsical (`bouncy-coral-quokka-x9k2`, the Go
   generator's word lists) and double as display names. Room and game ids
   are 6-char uppercase codes for permalink compatibility.

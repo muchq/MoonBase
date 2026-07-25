@@ -1,0 +1,29 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+# pg: the owned libpq wrapper for services persisting to the shared
+# postgres instance (https://github.com/muchq/MoonBase/issues/1194).
+# One blocking connection behind a mutex — pooling, async I/O, and
+# LISTEN/NOTIFY arrive when the fan-out step needs them.
+cc_library(
+    name = "pg",
+    srcs = ["pg.cc"],
+    hdrs = ["pg.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@postgres//:libpq",
+    ],
+)
+
+cc_test(
+    name = "pg_test",
+    size = "small",
+    srcs = ["pg_test.cc"],
+    deps = [
+        ":pg",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+    ],
+)
