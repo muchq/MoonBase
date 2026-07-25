@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <deque>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <vector>
@@ -13,6 +14,7 @@
 
 using namespace cards;
 using namespace golf;
+using nlohmann::json;
 
 namespace {
 
@@ -24,6 +26,22 @@ std::deque<Card> pristineDeck() {
   return deck;
 }
 
+// A known-good serialized game as an editable payload; negative tests
+// corrupt exactly the field they name and nothing else.
+json dealtPayload() {
+  const auto dealt = dealGolfGame("g", {"a", "b"}, pristineDeck());
+  EXPECT_TRUE(dealt.ok()) << dealt.status();
+  return json::parse(serializeGameState(*dealt));
+}
+
+void expectRejected(const json& payload) {
+  const auto restored = deserializeGameState(payload.dump());
+  ASSERT_FALSE(restored.ok()) << "accepted: " << payload.dump();
+  EXPECT_EQ(restored.status().code(), absl::StatusCode::kInvalidArgument);
+}
+
+// Engine truth only: identity is the storage row's business, so the
+// serde returns it empty and the comparison excludes it.
 void expectStatesEqual(const GameState& a, const GameState& b) {
   EXPECT_EQ(a.getDrawPile(), b.getDrawPile());
   EXPECT_EQ(a.getDiscardPile(), b.getDiscardPile());
@@ -32,8 +50,6 @@ void expectStatesEqual(const GameState& a, const GameState& b) {
   EXPECT_EQ(a.getWhoseTurn(), b.getWhoseTurn());
   EXPECT_EQ(a.getWhoKnocked(), b.getWhoKnocked());
   EXPECT_EQ(a.getPeeksHidden(), b.getPeeksHidden());
-  EXPECT_EQ(a.getGameId(), b.getGameId());
-  EXPECT_EQ(a.getVersionId(), b.getVersionId());
 }
 
 // Serialize -> deserialize -> compare, and serialize again: the second
@@ -43,6 +59,8 @@ void expectRoundTrips(const GameState& state) {
   const auto restored = deserializeGameState(serialized);
   ASSERT_TRUE(restored.ok()) << restored.status();
   expectStatesEqual(state, *restored);
+  EXPECT_TRUE(restored->getGameId().empty());
+  EXPECT_TRUE(restored->getVersionId().empty());
   EXPECT_EQ(serializeGameState(*restored), serialized);
 }
 
@@ -71,21 +89,21 @@ TEST(GameStateSerde, RoundTripsEveryStateOfADeterministicGame) {
   // one hide ends the countdown for the table.
   for (const int player : {0, 1}) {
     for (const Position position : {Position::TopLeft, Position::BottomRight}) {
-      advance(state->peekOwnCard(player, position));
+      ASSERT_NO_FATAL_FAILURE(advance(state->peekOwnCard(player, position)));
     }
   }
-  advance(state->hideCards(0));
+  ASSERT_NO_FATAL_FAILURE(advance(state->hideCards(0)));
 
   // Turn play, every mechanic once. Draw-pile moves are draw-then-decide:
   // peekAtDrawPile is the draw, then the swap either keeps or declines it.
-  advance(state->peekAtDrawPile(0));
-  advance(state->swapForDrawPile(0, Position::TopLeft));
-  advance(state->swapForDiscardPile(1, Position::BottomLeft));
-  advance(state->peekAtDrawPile(0));
-  advance(state->swapDrawForDiscardPile(0));
-  advance(state->knock(1));
-  advance(state->peekAtDrawPile(0));
-  advance(state->swapForDrawPile(0, Position::TopRight));
+  ASSERT_NO_FATAL_FAILURE(advance(state->peekAtDrawPile(0)));
+  ASSERT_NO_FATAL_FAILURE(advance(state->swapForDrawPile(0, Position::TopLeft)));
+  ASSERT_NO_FATAL_FAILURE(advance(state->swapForDiscardPile(1, Position::BottomLeft)));
+  ASSERT_NO_FATAL_FAILURE(advance(state->peekAtDrawPile(0)));
+  ASSERT_NO_FATAL_FAILURE(advance(state->swapDrawForDiscardPile(0)));
+  ASSERT_NO_FATAL_FAILURE(advance(state->knock(1)));
+  ASSERT_NO_FATAL_FAILURE(advance(state->peekAtDrawPile(0)));
+  ASSERT_NO_FATAL_FAILURE(advance(state->swapForDrawPile(0, Position::TopRight)));
   ASSERT_TRUE(state->isOver());
 }
 
@@ -105,25 +123,49 @@ TEST(GameStateSerde, RoundTripsAnAbandonedSeatAndEmptyPiles) {
   expectRoundTrips(state);
 }
 
+// The frozen shape of a stored row. Everything else in this suite
+// generates its bytes with the code under test, so only this test can
+// catch a simultaneous serialize+deserialize change that would orphan —
+// or worse, silently permute — rows already written. Do not regenerate
+// this literal from the code; schema changes mean a version bump.
+TEST(GameStateSerde, ParsesAFrozenV1Payload) {
+  constexpr char kRow[] =
+      R"({"discardPile":[43],"drawPile":[0,1],"peekedAtDrawPile":false,"peeksHidden":true,)"
+      R"("players":[{"cards":[51,50,49,48],"donePeeking":true,"name":"a","peeked":[]},)"
+      R"({"cards":[47,46,45,44],"donePeeking":true,"name":null,"peeked":[2]}],)"
+      R"("v":1,"whoKnocked":1,"whoseTurn":1})";
+  const auto restored = deserializeGameState(kRow);
+  ASSERT_TRUE(restored.ok()) << restored.status();
+  // Hand order is [tl, tr, bl, br]; a permutation here would round-trip
+  // green everywhere else while scrambling every stored hand.
+  EXPECT_EQ(restored->getPlayer(0).cardAt(Position::TopLeft), Card(51));
+  EXPECT_EQ(restored->getPlayer(0).cardAt(Position::BottomRight), Card(48));
+  EXPECT_EQ(restored->getDrawPile(), (std::deque<Card>{Card(0), Card(1)}));
+  EXPECT_EQ(restored->getPlayer(1).getPeeked(), (std::vector<Position>{Position::BottomLeft}));
+  EXPECT_FALSE(restored->getPlayer(1).getName().has_value());
+  EXPECT_TRUE(restored->getGameId().empty());
+  // Byte-for-byte re-serialization pins field names, sorted key order,
+  // and compact formatting all at once.
+  EXPECT_EQ(serializeGameState(*restored), kRow);
+}
+
 TEST(GameStateSerde, RejectsUnknownSchemaVersion) {
-  const auto dealt = dealGolfGame("g", {"a", "b"}, pristineDeck());
-  ASSERT_TRUE(dealt.ok());
-  std::string serialized = serializeGameState(*dealt);
-  const auto bumped = serialized.replace(serialized.find("\"v\":1"), 5, "\"v\":2");
-  const auto restored = deserializeGameState(bumped);
-  ASSERT_FALSE(restored.ok());
-  EXPECT_EQ(restored.status().code(), absl::StatusCode::kInvalidArgument);
+  json payload = dealtPayload();
+  payload["v"] = 2;
+  expectRejected(payload);
 }
 
 TEST(GameStateSerde, RejectsMalformedInput) {
-  // None of these may crash, and all must read as invalid-argument: the
-  // bytes come from a database row, not from code we trust.
+  // Raw bytes on purpose — this is the one test where the string layer
+  // itself is under test. All must read as invalid-argument, none may
+  // crash: the bytes come from a database row, not from code we trust.
   const std::vector<std::string> bad = {
       "",                 // not JSON
       "not json at all",  // not JSON
       "[]",               // wrong top-level shape
       R"({"v":1})",       // missing everything else
       R"({"v":"1"})",     // version of the wrong type
+      R"({"v":1.0})",     // floats are not versions
   };
   for (const std::string& input : bad) {
     const auto restored = deserializeGameState(input);
@@ -132,55 +174,125 @@ TEST(GameStateSerde, RejectsMalformedInput) {
   }
 }
 
-TEST(GameStateSerde, RejectsOutOfRangeValues) {
-  const auto dealt = dealGolfGame("g", {"a", "b"}, pristineDeck());
-  ASSERT_TRUE(dealt.ok());
-  const std::string serialized = serializeGameState(*dealt);
+// get<int>() alone is a static_cast: 2^32+1 would wrap to 1 and pass the
+// version gate, and 2^32 would wrap to card 0. The reads must reject
+// before narrowing.
+TEST(GameStateSerde, RejectsIntegersThatWouldWrapToValidValues) {
+  json payload = dealtPayload();
+  payload["v"] = int64_t{4294967297};
+  expectRejected(payload);
 
-  struct Break {
-    std::string find;
-    std::string replace;
-  };
-  // Each corruption targets a range the engine indexes by: card codes
-  // must stay 0..51, peek positions 0..3, seats within the roster.
-  const std::vector<Break> breaks = {
-      {"\"drawPile\":[", "\"drawPile\":[52,"},
-      {"\"drawPile\":[", "\"drawPile\":[-1,"},
-      {"\"whoseTurn\":0", "\"whoseTurn\":7"},
-      {"\"whoKnocked\":-1", "\"whoKnocked\":-3"},
-  };
-  for (const auto& corruption : breaks) {
-    std::string corrupted = serialized;
-    const auto at = corrupted.find(corruption.find);
-    ASSERT_NE(at, std::string::npos) << corruption.find;
-    corrupted.replace(at, corruption.find.size(), corruption.replace);
-    const auto restored = deserializeGameState(corrupted);
-    ASSERT_FALSE(restored.ok()) << "accepted: " << corruption.replace;
-    EXPECT_EQ(restored.status().code(), absl::StatusCode::kInvalidArgument);
+  payload = dealtPayload();
+  payload["drawPile"][0] = int64_t{4294967296};
+  expectRejected(payload);
+
+  payload = dealtPayload();
+  payload["whoseTurn"] = int64_t{4294967296};
+  expectRejected(payload);
+}
+
+TEST(GameStateSerde, RejectsEachFieldMissingOrMistyped) {
+  const json good = dealtPayload();
+  for (const auto& [key, value] : good.items()) {
+    json without = good;
+    without.erase(key);
+    ASSERT_NO_FATAL_FAILURE(expectRejected(without)) << "missing " << key;
+    json mistyped = good;
+    mistyped[key] = json::object();
+    ASSERT_NO_FATAL_FAILURE(expectRejected(mistyped)) << "mistyped " << key;
   }
+  for (const auto& [key, value] : good["players"][0].items()) {
+    json without = good;
+    without["players"][0].erase(key);
+    ASSERT_NO_FATAL_FAILURE(expectRejected(without)) << "missing player " << key;
+    json mistyped = good;
+    mistyped["players"][0][key] = json::object();
+    ASSERT_NO_FATAL_FAILURE(expectRejected(mistyped)) << "mistyped player " << key;
+  }
+  json bare_player = good;
+  bare_player["players"][0] = 5;
+  expectRejected(bare_player);
+}
 
-  // A peek position outside 0..3 in a hand-built payload.
-  std::string bad_peek = serialized;
-  const auto players_at = bad_peek.find("\"peeked\":[]");
-  ASSERT_NE(players_at, std::string::npos);
-  bad_peek.replace(players_at, 11, "\"peeked\":[4]");
-  const auto restored = deserializeGameState(bad_peek);
-  ASSERT_FALSE(restored.ok());
-  EXPECT_EQ(restored.status().code(), absl::StatusCode::kInvalidArgument);
+TEST(GameStateSerde, RejectsOutOfRangeValues) {
+  json payload = dealtPayload();
+  payload["drawPile"][0] = 52;
+  expectRejected(payload);
+
+  payload = dealtPayload();
+  payload["drawPile"][0] = -1;
+  expectRejected(payload);
+
+  payload = dealtPayload();
+  payload["players"][0]["peeked"] = json::array({4});
+  expectRejected(payload);
+}
+
+// The exact reject boundary: a two-seat game admits seats 0 and 1, so 2
+// must fail — a loose value here would let an off-by-one in the range
+// check send players.at() out of bounds in the engine.
+TEST(GameStateSerde, RejectsSeatIndexAtTheBoundary) {
+  json payload = dealtPayload();
+  payload["whoseTurn"] = 2;
+  expectRejected(payload);
+
+  payload = dealtPayload();
+  payload["whoKnocked"] = 2;
+  expectRejected(payload);
+
+  payload = dealtPayload();
+  payload["whoKnocked"] = -2;
+  expectRejected(payload);
+
+  // An empty roster has no seat 0, and the engine's turn arithmetic
+  // divides by the roster size.
+  payload = dealtPayload();
+  payload["players"] = json::array();
+  payload["whoseTurn"] = 0;
+  expectRejected(payload);
 }
 
 TEST(GameStateSerde, RejectsWrongHandSize) {
-  const auto dealt = dealGolfGame("g", {"a", "b"}, pristineDeck());
-  ASSERT_TRUE(dealt.ok());
-  std::string serialized = serializeGameState(*dealt);
-  // A hand is exactly four cards; drop one.
-  const auto at = serialized.find("\"cards\":[");
-  ASSERT_NE(at, std::string::npos);
-  const auto comma = serialized.find(',', at + 9);
-  serialized.erase(at + 9, comma - (at + 9) + 1);
+  json payload = dealtPayload();
+  payload["players"][0]["cards"] = json::array({1, 2, 3});
+  expectRejected(payload);
+
+  payload = dealtPayload();
+  payload["players"][0]["cards"] = json::array({1, 2, 3, 4, 5});
+  expectRejected(payload);
+}
+
+// Pinned leniency, not oversight: serde polices only what the engine
+// would index out of range; game legality (card uniqueness, peek caps)
+// stays the engine's business, and unknown fields are tolerated on read
+// so a rolled-back binary can load rows a newer one annotated — at the
+// cost that re-serializing drops the extras.
+TEST(GameStateSerde, ToleratesEngineLegalityAndUnknownFieldsByDesign) {
+  json payload = dealtPayload();
+  payload["players"][0]["cards"] = payload["players"][1]["cards"];  // duplicate cards
+  EXPECT_TRUE(deserializeGameState(payload.dump()).ok());
+
+  payload = dealtPayload();
+  payload["players"][0]["peeked"] = json::array({0, 0, 1, 2});  // beyond the engine's peek cap
+  EXPECT_TRUE(deserializeGameState(payload.dump()).ok());
+
+  payload = dealtPayload();
+  payload["annotation"] = "from-the-future";
+  const auto restored = deserializeGameState(payload.dump());
+  ASSERT_TRUE(restored.ok());
+  EXPECT_EQ(serializeGameState(*restored), dealtPayload().dump());
+}
+
+// Names are player-supplied; a byte sequence that is not UTF-8 must not
+// take down the write path. Replacement changes the name's bytes, and
+// the replaced form round-trips stably.
+TEST(GameStateSerde, SerializesANameThatIsNotValidUtf8) {
+  const Player mangled{std::string("bad\xff"), Card(0), Card(1), Card(2), Card(3)};
+  const GameState state{{Card(4)}, {Card(5)}, {mangled, mangled}, false, 0, -1, false, "g", "v"};
+  const std::string serialized = serializeGameState(state);
   const auto restored = deserializeGameState(serialized);
-  ASSERT_FALSE(restored.ok());
-  EXPECT_EQ(restored.status().code(), absl::StatusCode::kInvalidArgument);
+  ASSERT_TRUE(restored.ok()) << restored.status();
+  EXPECT_EQ(serializeGameState(*restored), serialized);
 }
 
 }  // namespace

@@ -75,5 +75,6 @@ cc_test(
         ":player",
         "//domains/games/libs/cards",
         "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
     ],
 )
