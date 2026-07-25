@@ -37,7 +37,8 @@ namespace golf {
 /// dropped on re-serialize), and game legality (card uniqueness, peek
 /// caps) stays the engine's business — serde polices only what it would
 /// otherwise let the engine index out of range. A player name that is
-/// not valid UTF-8 serializes with U+FFFD replacement rather than
+/// not valid UTF-8 — or that contains a NUL byte, which postgres jsonb
+/// refuses to store — serializes with U+FFFD replacement rather than
 /// failing the write path.
 [[nodiscard]] std::string serializeGameState(const GameState& state);
 [[nodiscard]] absl::StatusOr<GameState> deserializeGameState(const std::string& serialized);

@@ -295,4 +295,21 @@ TEST(GameStateSerde, SerializesANameThatIsNotValidUtf8) {
   EXPECT_EQ(serializeGameState(*restored), serialized);
 }
 
+// A NUL byte is valid JSON but postgres jsonb (the step-2 storage
+// column) refuses to store escaped NULs, so serialize replaces it
+// like invalid UTF-8 — the bytes must never contain the escape.
+TEST(GameStateSerde, SerializesANameContainingNulWithoutTheEscape) {
+  const std::string nul_name("a\0b", 3);
+  const Player mangled{nul_name, Card(0), Card(1), Card(2), Card(3)};
+  const GameState state{{Card(4)}, {Card(5)}, {mangled, mangled}, false, 0, -1, false, "g", "v"};
+  const std::string serialized = serializeGameState(state);
+  EXPECT_EQ(serialized.find("\\u0000"), std::string::npos);
+  const auto restored = deserializeGameState(serialized);
+  ASSERT_TRUE(restored.ok()) << restored.status();
+  EXPECT_EQ(restored->getPlayer(0).getName().value_or(""),
+            "a\xEF\xBF\xBD"
+            "b");
+  EXPECT_EQ(serializeGameState(*restored), serialized);
+}
+
 }  // namespace

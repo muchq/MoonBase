@@ -87,6 +87,25 @@ cc_library(
     ],
 )
 
+# Phase-0 slice of the persistence integration suite (#1194): serialized
+# engine states must survive the step-2 storage target (jsonb normalizes
+# keys and spacing, and refuses escaped NULs). Real postgres via
+# GOLF_HUB_TEST_DB_URL; skips otherwise.
+cc_test(
+    name = "game_state_jsonb_test",
+    size = "small",
+    srcs = ["game_state_jsonb_test.cc"],
+    env_inherit = ["GOLF_HUB_TEST_DB_URL"],
+    deps = [
+        "//domains/games/libs/cards",
+        "//domains/games/libs/cards/golf:game_state",
+        "//domains/games/libs/cards/golf:game_state_serde",
+        "//domains/games/libs/cards/golf:player",
+        "//domains/platform/libs/pg",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # Runs against a real postgres when GOLF_HUB_TEST_DB_URL is set (the SQL
 # is the risky code — no in-memory double); skips otherwise.
 cc_test(

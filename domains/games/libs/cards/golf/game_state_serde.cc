@@ -25,11 +25,28 @@ json cardsToJson(const Cards& cards) {
   return codes;
 }
 
+// A NUL byte is valid JSON (escapes to \u0000) but postgres jsonb — the
+// step-2 storage column — rejects it, so a NUL in a player-supplied name
+// gets the same treatment as invalid UTF-8: U+FFFD, and the write path
+// outlives the weirdest name.
+std::optional<std::string> sanitizedName(const std::optional<std::string>& name) {
+  if (!name.has_value()) return std::nullopt;
+  std::string safe;
+  for (const char c : *name) {
+    if (c == '\0') {
+      safe += "\xEF\xBF\xBD";  // U+FFFD
+    } else {
+      safe += c;
+    }
+  }
+  return safe;
+}
+
 json playerToJson(const Player& player) {
   json peeked = json::array();
   for (const Position position : player.getPeeked()) peeked.push_back(indexOfPosition(position));
   return json{
-      {"name", player.getName()},
+      {"name", sanitizedName(player.getName())},
       {"cards", cardsToJson(player.allCards())},
       {"peeked", std::move(peeked)},
       {"donePeeking", player.hasCompletedPeeks()},
