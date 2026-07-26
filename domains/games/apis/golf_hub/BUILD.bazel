@@ -93,7 +93,10 @@ cc_library(
     name = "chat_store",
     srcs = ["chat_store.cc"],
     hdrs = ["chat_store.h"],
-    deps = ["@com_google_absl//absl/status:statusor"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+    ],
 )
 
 cc_test(
@@ -102,6 +105,7 @@ cc_test(
     srcs = ["chat_store_test.cc"],
     deps = [
         ":chat_store",
+        "@com_google_absl//absl/status",
         "@googletest//:gtest_main",
     ],
 )

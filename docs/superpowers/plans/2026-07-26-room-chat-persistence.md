@@ -12,8 +12,10 @@
 
 - Retain at most the latest 100 committed messages per room.
 - Delete chat only with its room; deleting a member preserves prior messages.
-- Keep messages immutable plain text and reject empty/whitespace-only or more than 500 UTF-8 bytes.
-- Use server-assigned monotonic IDs and server time; delivery is at-least-once and consumers deduplicate by ID.
+- Keep messages immutable plain text and reject empty/whitespace-only or more than 500 UTF-8 bytes. Handlers reject so clients see a protocol error; stores re-check through `ValidateChatText` so retention stays bounded regardless of the caller.
+- Use server-assigned monotonic IDs and server time; delivery is at-least-once and consumers deduplicate by ID. `message_id` is the only ordering key — `sent_at_unix_millis` is wall-clock and display-only.
+- Retention can prune rows a lagging cursor never read. `LoadAfter` returns the oldest row still retained above the cursor and does not report the gap, so catch-up is bounded by the 100-row window, not by the cursor. A consumer more than 100 messages behind loses the difference by design.
+- `DropRoom` means different things per implementation: `MemoryChatStore` reclaims memory only through it, while PostgreSQL cascades from the room row and no-ops. Any handler path that deletes a room must call it, and that call needs its own coverage since PostgreSQL tests cannot catch a missing one.
 - Never log or emit metrics containing message text.
 - Every blocking concurrency test must have a bounded deadline.
 - Do not commit or push implementation checkpoints unless the user explicitly requests it.
@@ -35,6 +37,7 @@
   - `ChatStore::LoadRecent(room_id, limit) -> StatusOr<vector<ChatRow>>`
   - `ChatStore::LoadAfter(room_id, after_message_id, limit) -> StatusOr<vector<ChatRow>>`
   - `ChatStore::DropRoom(room_id)`
+  - `ValidateChatText(text) -> Status`, shared by handlers and every store
 
 - [x] **Step 1: Write failing memory-store tests**
 
@@ -235,6 +238,8 @@ Use two handlers, a shared gated store, condition variables, and bounded receive
 - [ ] **Step 4: Implement cursor catch-up**
 
 Subscribe `ChatChannel` with `RoomChannel`; on chat wake or active callback, load pages after the cursor in ascending order and deliver only rows whose IDs exceed it. Remove cursor state when the room drops.
+
+`ChatChannel` yields `chat_<room_id>` to match `RoomChannel`'s `room_<room_id>`. `LISTEN` cannot take a bind parameter, so quote the channel name as an identifier there and confirm room IDs stay inside PostgreSQL's 63-byte identifier limit; `NOTIFY` goes through `pg_notify($1, $2)`.
 
 - [ ] **Step 5: Add PostgreSQL two-instance tests**
 

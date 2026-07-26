@@ -2,14 +2,25 @@
 
 #include <algorithm>
 #include <chrono>
-#include <utility>
 
 namespace golf_hub {
+
+absl::Status ValidateChatText(const std::string& text) {
+  if (text.find_first_not_of(" \t\n\r\f\v") == std::string::npos) {
+    return absl::InvalidArgumentError("chat text is empty");
+  }
+  if (text.size() > kChatTextByteLimit) {
+    return absl::InvalidArgumentError("chat text is too long");
+  }
+  return absl::OkStatus();
+}
 
 absl::StatusOr<ChatRow> MemoryChatStore::Append(const std::string& room_id,
                                                 const std::string& player_id,
                                                 const std::string& text,
                                                 const std::string& /*notify_payload*/) {
+  if (const absl::Status valid = ValidateChatText(text); !valid.ok()) return valid;
+
   const std::lock_guard<std::mutex> lock(mu_);
   ChatRow row;
   row.message_id = next_message_id_++;
