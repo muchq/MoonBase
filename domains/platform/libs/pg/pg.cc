@@ -100,4 +100,11 @@ absl::StatusOr<Result> Client::Exec(const std::string& sql,
   return ExecLocked(sql, params);
 }
 
+absl::StatusOr<Result> Client::ExecOnce(const std::string& sql,
+                                        const std::vector<std::string>& params) {
+  const std::lock_guard<std::mutex> lock(mu_);
+  if (absl::Status connected = EnsureConnectedLocked(); !connected.ok()) return connected;
+  return ExecLocked(sql, params);
+}
+
 }  // namespace pg

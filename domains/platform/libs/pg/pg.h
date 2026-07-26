@@ -61,6 +61,18 @@ class Client {
   /// deleted reports zero rows).
   absl::StatusOr<Result> Exec(const std::string& sql, const std::vector<std::string>& params = {});
 
+  /// Exec without the retry: the statement reaches the server at most
+  /// once, and a connection-level failure is reported rather than
+  /// retried. Connecting is still automatic — only re-running a
+  /// statement whose outcome is unknown is what this gives up.
+  ///
+  /// Use it for a write whose second execution would be visible. A
+  /// conditional write (games) is safe to retry because the condition
+  /// misses the second time; an unconditional append is not, and a
+  /// duplicate row carrying a fresh id is one no consumer can dedupe.
+  absl::StatusOr<Result> ExecOnce(const std::string& sql,
+                                  const std::vector<std::string>& params = {});
+
  private:
   absl::Status EnsureConnectedLocked();
   absl::StatusOr<Result> ExecLocked(const std::string& sql, const std::vector<std::string>& params);

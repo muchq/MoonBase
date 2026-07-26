@@ -150,6 +150,22 @@ cc_library(
     ],
 )
 
+# PostgreSQL implementation of ChatStore (#1226). Append is one
+# CTE-chained statement holding the room's row lock, so membership,
+# insert, prune, and NOTIFY commit together and per-room message_id
+# order is also commit order.
+cc_library(
+    name = "pg_chat_store",
+    srcs = ["pg_chat_store.cc"],
+    hdrs = ["pg_chat_store.h"],
+    deps = [
+        ":chat_store",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
 # Step-2/3 slice of the persistence integration suite (#1194): the
 # write-through ops and the synchronous commit+NOTIFY path against real
 # postgres via GOLF_HUB_TEST_DB_URL; skips otherwise.

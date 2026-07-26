@@ -47,6 +47,22 @@ absl::Status RunMigrations(pg::Client& db) {
           version bigint NOT NULL,
           PRIMARY KEY (room_id, game_id)
       ))sql",
+      // Room chat (#1226). message_id is the ordering key and the
+      // identity is global, not per-room, so one sequence orders every
+      // room's history; sent_at is for display. Bodies are bounded here
+      // as well as in ValidateChatText because retention counts rows,
+      // not bytes. Chat dies with its room and survives its author
+      // leaving, so the cascade hangs off rooms and there is no
+      // reference to room_members.
+      R"sql(CREATE TABLE IF NOT EXISTS room_chat_messages (
+          message_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+          room_id    text NOT NULL REFERENCES rooms (room_id) ON DELETE CASCADE,
+          player_id  text NOT NULL,
+          body       text NOT NULL CHECK (octet_length(body) BETWEEN 1 AND 500),
+          sent_at    timestamptz NOT NULL DEFAULT now()
+      ))sql",
+      R"sql(CREATE INDEX IF NOT EXISTS idx_room_chat_messages_room
+          ON room_chat_messages (room_id, message_id))sql",
   };
   for (const char* statement : kStatements) {
     if (auto result = db.Exec(statement); !result.ok()) return result.status();
