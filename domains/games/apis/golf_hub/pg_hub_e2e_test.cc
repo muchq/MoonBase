@@ -196,6 +196,23 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
     return ReceiveCase(seat.stream, "roomState").has_value();
   }
 
+  bool WaitForListenerCount(const std::string& room_id, int count) {
+    pg::Client db(url_);
+    const std::string statement = "LISTEN \"" + RoomChannel(room_id) + "\"";
+    for (int i = 0; i < 50; ++i) {
+      auto result = db.Exec(
+          "SELECT count(*) FROM pg_stat_activity"
+          " WHERE datname = current_database() AND query = $1",
+          {statement});
+      if (result.ok() && result->Get(0, 0).has_value() &&
+          std::atoi(result->Get(0, 0)->c_str()) >= count) {
+        return true;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return false;
+  }
+
   // alice on the primary instance, bob on `remote`, one room and one
   // started game between them. Every cross-instance step waits on the
   // events that prove the other instance caught up, so the flow is
@@ -436,15 +453,39 @@ TEST_F(PgGolfHubFixture, StatsSurviveARestart) {
   const std::string alice_token = table->alice.resume_token;
   RestartHub();
 
+  // Restart ignores terminal rows in memory but must not delete the
+  // durable handoff another live instance may still need.
+  {
+    auto rows = Rows();
+    ASSERT_EQ(rows.games.size(), 1u);
+    ASSERT_TRUE(rows.games[0].state.has_value());
+    EXPECT_TRUE(rows.games[0].state->isOver());
+  }
+
   auto alice_back = OpenSeat(alice_token);
   ASSERT_TRUE(alice_back.has_value());
   ASSERT_TRUE(ReceiveCase(alice_back->stream, "sessionReady").has_value());
+  auto restored = alice_back->stream.Receive();
+  ASSERT_TRUE(restored.ok());
+  ASSERT_TRUE(restored->has_value());
+  ASSERT_EQ((*restored)->case_name(), "roomState");
+  const auto* restored_lobby = (*restored)->as_roomState_or_null();
+  ASSERT_NE(restored_lobby, nullptr);
+  EXPECT_TRUE(restored_lobby->games.empty());
+
   ASSERT_TRUE(
       alice_back->stream.Send(GolfCommands::FromGetroomstate(moonbase::golf::GetRoomState{})).ok());
-  auto lobby = ReceiveCase(alice_back->stream, "roomState");
-  ASSERT_TRUE(lobby.has_value());
+  // After the automatic resume snapshot, the next frame is the requested
+  // lobby itself: no restored game resync or ceremony was queued.
+  auto lobby = alice_back->stream.Receive();
+  ASSERT_TRUE(lobby.ok());
+  ASSERT_TRUE(lobby->has_value());
+  ASSERT_EQ((*lobby)->case_name(), "roomState");
+  const auto* lobby_state = (*lobby)->as_roomState_or_null();
+  ASSERT_NE(lobby_state, nullptr);
+  EXPECT_TRUE(lobby_state->games.empty());
   // Identical zero-scoring deals; the knocker takes the tie alone.
-  for (const auto& player : lobby->as_roomState_or_null()->players) {
+  for (const auto& player : lobby_state->players) {
     EXPECT_EQ(player.gamesPlayed, 1);
     EXPECT_EQ(player.totalScore, 0);
     EXPECT_EQ(player.gamesWon, player.playerId == alice_back->player_id ? 1 : 0);
@@ -468,18 +509,29 @@ TEST_F(PgGolfHubFixture, PendingGameLifecycleWritesThrough) {
 
   {
     auto rows = Rows();
-    ASSERT_EQ(rows.games.size(), 1u);  // the started game ended when bob left
-    EXPECT_EQ(rows.games[0].game_id, pending_id);
-    EXPECT_FALSE(rows.games[0].state.has_value());
-    EXPECT_EQ(rows.games[0].roster, (std::vector<std::string>{table->bob.player_id}));
+    ASSERT_EQ(rows.games.size(), 2u);
+    for (const auto& row : rows.games) {
+      if (row.game_id == pending_id) {
+        EXPECT_FALSE(row.state.has_value());
+        EXPECT_EQ(row.roster, (std::vector<std::string>{table->bob.player_id}));
+      } else {
+        EXPECT_EQ(row.game_id, table->game_id);
+        ASSERT_TRUE(row.state.has_value());
+        EXPECT_TRUE(row.state->isOver());
+      }
+    }
   }
 
-  // Abandoning the pending game deletes its row and nothing else.
+  // Abandoning the pending game deletes only its row; the completed
+  // game's terminal handoff remains with the room.
   ASSERT_TRUE(
       table->bob.stream.Send(Move(GolfMove::FromLeavegame(moonbase::golf::LeaveGame{}))).ok());
   ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameLeft").has_value());
   auto rows = Rows();
-  EXPECT_TRUE(rows.games.empty());
+  ASSERT_EQ(rows.games.size(), 1u);
+  EXPECT_EQ(rows.games[0].game_id, table->game_id);
+  ASSERT_TRUE(rows.games[0].state.has_value());
+  EXPECT_TRUE(rows.games[0].state->isOver());
   EXPECT_EQ(rows.rooms.size(), 1u);
   EXPECT_EQ(rows.members.size(), 2u);
 }
@@ -619,6 +671,10 @@ TEST_F(PgGolfHubFixture, RemoteFinishRunsOneCeremonyEverywhere) {
   ASSERT_TRUE(AwaitGameView(bob.stream, [&](const moonbase::golf::GameView& view) {
                 return view.knockedPlayerId == alice.player_id;
               }).has_value());
+  // Hold Alice's listener behind the finish and the finishing instance's
+  // writer drain. This makes the lost-handoff race deterministic.
+  handler_->AttachListener(nullptr);
+  listener_.reset();
   // bob's final turn finishes the game on the other instance.
   ASSERT_TRUE(bob.stream.Send(Move(GolfMove::FromDrawcard(moonbase::golf::DrawCard{}))).ok());
   ASSERT_TRUE(
@@ -626,16 +682,31 @@ TEST_F(PgGolfHubFixture, RemoteFinishRunsOneCeremonyEverywhere) {
 
   auto bob_ended = ReceiveGolf(bob.stream, "gameEnded");
   ASSERT_TRUE(bob_ended.has_value());
+  // The terminal row is the durable ceremony handoff. Even if the
+  // finishing instance drains its writer before the other listener
+  // handles the wake, the other instance must still be able to read it.
+  remote->store->Flush();
+  auto rows = Rows();
+  ASSERT_EQ(rows.games.size(), 1u);
+  ASSERT_TRUE(rows.games[0].state.has_value());
+  EXPECT_TRUE(rows.games[0].state->isOver());
+
+  // Reattach after the terminal write is fully settled. Wait until both
+  // instances have issued LISTEN before poking the primary.
+  listener_ = MakeListener(handler_);
+  ASSERT_TRUE(WaitForListenerCount(table->room_id, 2));
+  pg::Client db(url_);
+  ASSERT_TRUE(
+      db.Exec("SELECT pg_notify($1, 'finish-sync')", {RoomChannel(table->room_id)}).ok());
   auto alice_ended = ReceiveGolf(alice.stream, "gameEnded");
   ASSERT_TRUE(alice_ended.has_value());
   // Identical zero-scoring deals; the knocker takes the tie alone.
   EXPECT_EQ(alice_ended->as_gameEnded_or_null()->winner, alice.player_id);
 
-  // Stats applied exactly once, and the ended row's deferred delete
-  // leaves only the lobby behind.
-  remote->store->Flush();
-  auto rows = Rows();
-  EXPECT_TRUE(rows.games.empty());
+  // Stats applied exactly once. The terminal row remains as a tombstone
+  // until the room is deleted, when the foreign-key cascade removes it.
+  rows = Rows();
+  EXPECT_EQ(rows.games.size(), 1u);
   ASSERT_EQ(rows.members.size(), 2u);
   for (const auto& member : rows.members) {
     EXPECT_EQ(member.games_played, 1);

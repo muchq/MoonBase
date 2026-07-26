@@ -134,12 +134,12 @@ absl::Status HubHandler::RestoreFromStore() {
     rooms_[row.room_id].members.emplace(row.player_id, member);
     player_room_[row.player_id] = row.room_id;
   }
-  Writes cleanup;
   for (PgHubStore::GameRow& row : snapshot->games) {
     if (row.state.has_value() && row.state->isOver()) {
-      // A crash landed between a finish commit and its deferred row
-      // delete: the ceremony already happened — finish the cleanup.
-      cleanup.push_back(PgHubStore::DeleteGame{row.room_id, row.game_id});
+      // Terminal rows are durable handoffs for live instances that may
+      // not have processed the finish wake yet. A restart ignores them
+      // locally so ceremonies do not replay, but room deletion owns
+      // their eventual cleanup through the foreign-key cascade.
       continue;
     }
     GameEntry entry;
@@ -149,7 +149,6 @@ absl::Status HubHandler::RestoreFromStore() {
     for (const std::string& member_id : entry.roster) player_game_[member_id] = row.game_id;
     rooms_[row.room_id].games.emplace(row.game_id, std::move(entry));
   }
-  EnqueueWritesLocked(cleanup);
   LOG(INFO) << "hub restored " << snapshot->rooms.size() << " rooms, " << snapshot->members.size()
             << " members, " << snapshot->games.size() << " games";
   return absl::OkStatus();
@@ -994,7 +993,7 @@ void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, Mo
 
         if (over) {
           // Finalize stages the definitive face-up views itself.
-          FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox, writes);
+          FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox);
         } else {
           const bool countdown_started = !was_countdown && updated.revealCountdownActive();
           if (effects.peek_fanout && !countdown_started) {
@@ -1157,7 +1156,7 @@ void HubHandler::LeaveGameLocked(const std::string& player_id, Outbox& outbox, W
     }
     if (over) {
       // Finalize stages the final views and the room's refreshed stats.
-      FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox, writes);
+      FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox);
     } else {
       StageGameViewsLocked(ref->game_id, entry, outbox);
       StageRoomStateLocked(ref->room_id, outbox);
@@ -1388,7 +1387,7 @@ void HubHandler::StageGameOverLocked(const std::string& room_id, Room& room,
 }
 
 void HubHandler::FinalizeGameLocked(const std::string& room_id, Room& room,
-                                    const std::string& game_id, Outbox& outbox, Writes& writes) {
+                                    const std::string& game_id, Outbox& outbox) {
   const auto game = room.games.find(game_id);
   if (game == room.games.end() || !game->second.started()) return;
   const golf::GameState& state = *game->second.state;
@@ -1407,10 +1406,10 @@ void HubHandler::FinalizeGameLocked(const std::string& room_id, Room& room,
   }
 
   StageGameOverLocked(room_id, room, game_id, outbox);
-  // The ended row outlives the ceremony so other instances can hold
-  // theirs off it; the deferred delete (with its wake) cleans it up.
-  StageLocked(writes, PgHubStore::DeleteGame{room_id, game_id});
-  StageWakeLocked(room_id, writes);
+  // The terminal row is the durable handoff to other instances. It
+  // remains until the room is deleted and its foreign-key cascade runs;
+  // deleting it here can outrun a listener that has not handled the
+  // finish wake yet.
   StageRoomStateLocked(room_id, outbox);
 }
 

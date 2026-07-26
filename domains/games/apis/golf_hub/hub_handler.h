@@ -241,10 +241,10 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   void StageGameOverLocked(const std::string& room_id, Room& room, const std::string& game_id,
                            Outbox& outbox);
   /// The local finisher: mirrors the stat deltas the finish commit
-  /// already applied (or, without a store, applies them — same code),
-  /// runs the ceremony, and stages the deferred row delete.
+  /// already applied (or, without a store, applies them — same code)
+  /// and runs the ceremony.
   void FinalizeGameLocked(const std::string& room_id, Room& room, const std::string& game_id,
-                          Outbox& outbox, Writes& writes);
+                          Outbox& outbox);
 
   const std::shared_ptr<TicketVault> vault_;
   const std::shared_ptr<cards::Dealer> dealer_;
