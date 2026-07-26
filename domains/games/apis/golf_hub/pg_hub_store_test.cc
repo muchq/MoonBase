@@ -227,7 +227,7 @@ TEST_F(PgHubStoreTest, FinishCommitAppliesStatsExactlyOnce) {
   expect_stats();
 
   // The ended row stays: remote instances read it for the game-over
-  // ceremony before the deferred delete.
+  // ceremony, and room deletion owns its eventual cleanup.
   auto row = store_->LoadGame("R1", "G1");
   ASSERT_TRUE(row.ok());
   ASSERT_TRUE(row->has_value());

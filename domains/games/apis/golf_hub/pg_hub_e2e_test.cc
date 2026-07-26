@@ -99,7 +99,7 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
                                            /*ticket_ttl=*/std::chrono::seconds(60),
                                            /*resume_ttl=*/std::chrono::seconds(60));
   }
-  std::shared_ptr<PgHubStore> MakeStore() override {
+  std::shared_ptr<HubStore> MakeStore() override {
     return std::make_shared<PgHubStore>(std::make_shared<pg::Client>(url_));
   }
 
@@ -134,7 +134,7 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
   // the members unwind (listener before handler, by declaration order).
   struct Instance {
     std::shared_ptr<HubHandler> handler;
-    std::shared_ptr<PgHubStore> store;
+    std::shared_ptr<HubStore> store;
     std::unique_ptr<moonbase::golf::GolfHubServer> server;
     std::unique_ptr<moonbase::golf::GolfHubClient> client;
     std::unique_ptr<pg::Listener> listener;
@@ -303,11 +303,11 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
   }
 
   // A store-side view of the rows, flushed first so staged writes are in.
-  PgHubStore::Snapshot Rows() {
+  HubStore::Snapshot Rows() {
     store_->Flush();
     auto snapshot = store_->LoadSnapshot();
     EXPECT_TRUE(snapshot.ok()) << snapshot.status();
-    return snapshot.value_or(PgHubStore::Snapshot{});
+    return snapshot.value_or(HubStore::Snapshot{});
   }
 
   const char* url_ = nullptr;
@@ -317,7 +317,7 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
     std::unique_ptr<moonbase::golf::GolfHubServer> server;
     std::unique_ptr<moonbase::golf::GolfHubClient> client;
     std::shared_ptr<HubHandler> handler;
-    std::shared_ptr<PgHubStore> store;
+    std::shared_ptr<HubStore> store;
   };
   std::vector<Generation> retired_;
 };
@@ -696,8 +696,7 @@ TEST_F(PgGolfHubFixture, RemoteFinishRunsOneCeremonyEverywhere) {
   listener_ = MakeListener(handler_);
   ASSERT_TRUE(WaitForListenerCount(table->room_id, 2));
   pg::Client db(url_);
-  ASSERT_TRUE(
-      db.Exec("SELECT pg_notify($1, 'finish-sync')", {RoomChannel(table->room_id)}).ok());
+  ASSERT_TRUE(db.Exec("SELECT pg_notify($1, 'finish-sync')", {RoomChannel(table->room_id)}).ok());
   auto alice_ended = ReceiveGolf(alice.stream, "gameEnded");
   ASSERT_TRUE(alice_ended.has_value());
   // Identical zero-scoring deals; the knocker takes the tie alone.

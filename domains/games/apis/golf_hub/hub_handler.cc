@@ -82,12 +82,12 @@ std::string InstanceId() {
 // The per-seat stat deltas a finished game applies — the payload of
 // CommitGameFinish, and the same numbers FinalizeGameLocked mirrors into
 // the local member rows.
-std::vector<golf_hub::PgHubStore::StatsDelta> StatsDeltas(const golf::GameState& state) {
+std::vector<golf_hub::HubStore::StatsDelta> StatsDeltas(const golf::GameState& state) {
   const auto winner_indexes = state.winners();
-  std::vector<golf_hub::PgHubStore::StatsDelta> deltas;
+  std::vector<golf_hub::HubStore::StatsDelta> deltas;
   for (std::size_t i = 0; i < state.getPlayers().size(); ++i) {
     const golf::Player& seat = state.getPlayer(static_cast<int>(i));
-    golf_hub::PgHubStore::StatsDelta delta;
+    golf_hub::HubStore::StatsDelta delta;
     delta.player_id = seat.getName().value_or("");
     delta.played = 1;
     delta.won = winner_indexes.contains(static_cast<int>(i)) ? 1 : 0;
@@ -102,12 +102,12 @@ std::vector<golf_hub::PgHubStore::StatsDelta> StatsDeltas(const golf::GameState&
 HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::Dealer> dealer,
                        std::shared_ptr<IdGenerator> ids, std::chrono::seconds grace_period,
                        std::shared_ptr<futility::otel::MetricsRecorder> metrics,
-                       std::shared_ptr<PgHubStore> store)
+                       std::shared_ptr<HubStore> store)
     : vault_(std::move(vault)),
       dealer_(std::move(dealer)),
       ids_(std::move(ids)),
       metrics_(std::move(metrics)),
-      store_(std::move(store)),
+      store_(store != nullptr ? std::move(store) : std::make_shared<MemoryHubStore>()),
       instance_id_(InstanceId()),
       registry_([this, grace_period] {
         Registry::Options options;
@@ -118,12 +118,11 @@ HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards
       }()) {}
 
 absl::Status HubHandler::RestoreFromStore() {
-  if (store_ == nullptr) return absl::OkStatus();
   auto snapshot = store_->LoadSnapshot();
   if (!snapshot.ok()) return snapshot.status();
   const std::lock_guard<std::mutex> lock(mu_);
   for (const std::string& room_id : snapshot->rooms) rooms_[room_id];
-  for (const PgHubStore::MemberRow& row : snapshot->members) {
+  for (const HubStore::MemberRow& row : snapshot->members) {
     // Sockets did not survive the restart: everyone restores
     // disconnected and flips back on resume.
     Member member;
@@ -134,7 +133,7 @@ absl::Status HubHandler::RestoreFromStore() {
     rooms_[row.room_id].members.emplace(row.player_id, member);
     player_room_[row.player_id] = row.room_id;
   }
-  for (PgHubStore::GameRow& row : snapshot->games) {
+  for (HubStore::GameRow& row : snapshot->games) {
     if (row.state.has_value() && row.state->isOver()) {
       // Terminal rows are durable handoffs for live instances that may
       // not have processed the finish wake yet. A restart ignores them
@@ -155,68 +154,66 @@ absl::Status HubHandler::RestoreFromStore() {
 }
 
 void HubHandler::EnqueueWritesLocked(Writes& writes) {
-  if (store_ != nullptr && !writes.empty()) store_->Enqueue(std::move(writes));
+  if (!writes.empty()) store_->Enqueue(std::move(writes));
   writes.clear();
 }
 
-void HubHandler::StageLocked(Writes& writes, PgHubStore::Op op) const {
-  if (store_ != nullptr) writes.push_back(std::move(op));
+void HubHandler::StageLocked(Writes& writes, HubStore::Op op) const {
+  writes.push_back(std::move(op));
 }
 
 void HubHandler::StageMemberLocked(const std::string& room_id, const std::string& player_id,
                                    const Member& member, Writes& writes) const {
-  if (store_ == nullptr) return;
-  PgHubStore::MemberRow row;
+  HubStore::MemberRow row;
   row.room_id = room_id;
   row.player_id = player_id;
   row.connected = member.connected;
   row.games_played = member.games_played;
   row.games_won = member.games_won;
   row.total_score = member.total_score;
-  writes.push_back(PgHubStore::UpsertMember{std::move(row)});
+  writes.push_back(HubStore::UpsertMember{std::move(row)});
 }
 
 void HubHandler::StageWakeLocked(const std::string& room_id, Writes& writes) const {
-  StageLocked(writes, PgHubStore::Notify{RoomChannel(room_id), instance_id_});
+  StageLocked(writes, HubStore::Notify{RoomChannel(room_id), instance_id_});
 }
 
-HubHandler::Commit HubHandler::CommitEntryLocked(
-    const std::string& room_id, const std::string& game_id, GameEntry& entry,
-    const std::vector<std::string>& roster, const std::optional<golf::GameState>& state,
-    const std::vector<PgHubStore::StatsDelta>* finish) {
+HubHandler::Commit HubHandler::CommitEntryLocked(const std::string& room_id,
+                                                 const std::string& game_id, GameEntry& entry,
+                                                 const std::vector<std::string>& roster,
+                                                 const std::optional<golf::GameState>& state,
+                                                 const std::vector<HubStore::StatsDelta>* finish) {
   const int64_t version = entry.version + 1;
-  if (store_ != nullptr) {
-    // The async outbox may still hold rows this commit depends on — the
-    // room behind the insert's FK, the membership behind the finish's
-    // stat deltas. Drain it so the synchronous write never outruns the
-    // queued ones. (The writer needs no lock we hold.)
-    store_->Flush();
-    PgHubStore::GameRow row;
-    row.room_id = room_id;
-    row.game_id = game_id;
-    row.roster = roster;
-    if (state.has_value()) row.state.emplace(*state);
-    row.version = version;
-    const auto landed = finish != nullptr ? store_->CommitGameFinish(row, *finish, instance_id_)
-                                          : store_->CommitGameSave(row, instance_id_);
-    if (!landed.ok()) {
+  // The async outbox may still hold rows this commit depends on — the
+  // room behind the insert's FK, the membership behind the finish's
+  // stat deltas. Drain it so the synchronous write never outruns the
+  // queued ones. (The writer needs no lock we hold.)
+  store_->Flush();
+  HubStore::GameRow row;
+  row.room_id = room_id;
+  row.game_id = game_id;
+  row.roster = roster;
+  if (state.has_value()) row.state.emplace(*state);
+  row.version = version;
+  const auto landed = finish != nullptr ? store_->CommitGameFinish(row, *finish, instance_id_)
+                                        : store_->CommitGameSave(row, instance_id_);
+  if (!landed.ok()) {
+    LOG(WARNING) << "game " << room_id << "/" << game_id
+                 << " commit unavailable: " << landed.status();
+    return Commit::kUnavailable;
+  }
+  if (!*landed) {
+    auto stored = store_->LoadGame(room_id, game_id);
+    if (!stored.ok()) {
       LOG(WARNING) << "game " << room_id << "/" << game_id
-                   << " commit unavailable: " << landed.status();
+                   << " rebase read failed: " << stored.status();
       return Commit::kUnavailable;
     }
-    if (!*landed) {
-      auto stored = store_->LoadGame(room_id, game_id);
-      if (!stored.ok()) {
-        LOG(WARNING) << "game " << room_id << "/" << game_id
-                     << " rebase read failed: " << stored.status();
-        return Commit::kUnavailable;
-      }
-      if (!stored->has_value()) return Commit::kGone;
-      entry.roster = (*stored)->roster;
-      entry.version = (*stored)->version;
-      if ((*stored)->state.has_value()) entry.state.emplace(*std::move((*stored)->state));
-      return Commit::kRebased;
-    }
+    if (!stored->has_value()) return Commit::kGone;
+    entry.roster = (*stored)->roster;
+    entry.version = (*stored)->version;
+    if ((*stored)->state.has_value()) entry.state.emplace(*std::move((*stored)->state));
+    return Commit::kRebased;
   }
   entry.roster = roster;
   if (state.has_value()) entry.state.emplace(*state);
@@ -248,7 +245,6 @@ void HubHandler::OnNotify(const std::string& channel, const std::string& payload
 }
 
 void HubHandler::RefreshRoomLocked(const std::string& room_id, Outbox& outbox) {
-  if (store_ == nullptr) return;
   // The flush means this read can never be older than our own truth;
   // holding mu_ across it means nothing local moves in between. The
   // writer thread needs no lock we hold, so it drains freely.
@@ -262,7 +258,7 @@ void HubHandler::RefreshRoomLocked(const std::string& room_id, Outbox& outbox) {
   ReconcileRoomLocked(room_id, *rows, outbox);
 }
 
-void HubHandler::ReconcileRoomLocked(const std::string& room_id, const PgHubStore::RoomRows& rows,
+void HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore::RoomRows& rows,
                                      Outbox& outbox) {
   if (!rows.exists) {
     // Deleted by another instance; nothing local can outrank that.
@@ -286,7 +282,7 @@ void HubHandler::ReconcileRoomLocked(const std::string& room_id, const PgHubStor
   // Members mirror the rows: every instance writes its own players'
   // rows, and the refresh flush made ours current.
   std::map<std::string, Member> members;
-  for (const PgHubStore::MemberRow& row : rows.members) {
+  for (const HubStore::MemberRow& row : rows.members) {
     Member member;
     member.connected = row.connected;
     member.games_played = row.games_played;
@@ -309,7 +305,7 @@ void HubHandler::ReconcileRoomLocked(const std::string& room_id, const PgHubStor
   // locally (the finisher owns the deferred row delete); an ended row
   // for a game we no longer hold is that delete still pending.
   std::set<std::string> stored_ids;
-  for (const PgHubStore::GameRow& row : rows.games) {
+  for (const HubStore::GameRow& row : rows.games) {
     stored_ids.insert(row.game_id);
     const bool over = row.state.has_value() && row.state->isOver();
     const auto game = room.games.find(row.game_id);
@@ -506,7 +502,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
         const auto [member, inserted] = rooms_[room_id].members.emplace(player_id, Member{});
         player_room_[player_id] = room_id;
         ListenRoomLocked(room_id);
-        StageLocked(writes, PgHubStore::UpsertRoom{room_id});
+        StageLocked(writes, HubStore::UpsertRoom{room_id});
         StageMemberLocked(room_id, player_id, member->second, writes);
         StageRoomStateLocked(room_id, outbox);
         EnqueueWritesLocked(writes);
@@ -813,7 +809,7 @@ void HubHandler::JoinGameMove(const std::string& player_id, const std::string& g
       reason = "leave your current game first";
     } else {
       const std::string room_id = player_room_.at(player_id);
-      if (store_ != nullptr && !room->games.contains(game_id)) {
+      if (!room->games.contains(game_id)) {
         // Another instance may have created it since our last wake.
         RefreshRoomLocked(room_id, outbox);
         room = FindRoomLocked(player_id);  // the refresh can drop us or the room
@@ -964,7 +960,7 @@ void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, Mo
         const std::string previous_turn =
             effects.announce_turn ? PlayerIdAt(state, state.getWhoseTurn()) : std::string();
         const bool over = next->isOver();
-        std::vector<PgHubStore::StatsDelta> deltas;
+        std::vector<HubStore::StatsDelta> deltas;
         if (over) deltas = StatsDeltas(*next);
         const Commit commit =
             CommitEntryLocked(ref->room_id, ref->game_id, *ref->entry, ref->entry->roster,
@@ -1085,12 +1081,12 @@ void HubHandler::LeaveEverywhere(const std::string& player_id, Outbox& outbox, W
     // One DeleteRoom; the row's cascade takes members and games with it.
     // The wake rider tells any instance that still holds the room (a
     // race, not the norm — an emptied room has no members anywhere).
-    StageLocked(writes, PgHubStore::DeleteRoom{room_id});
+    StageLocked(writes, HubStore::DeleteRoom{room_id});
     StageWakeLocked(room_id, writes);
     UnlistenRoomLocked(room_id);
     return;  // nobody left to tell
   }
-  StageLocked(writes, PgHubStore::DeleteMember{room_id, player_id});
+  StageLocked(writes, HubStore::DeleteMember{room_id, player_id});
   StageWakeLocked(room_id, writes);
   StageRoomStateLocked(room_id, outbox);
 }
@@ -1117,7 +1113,7 @@ void HubHandler::LeaveGameLocked(const std::string& player_id, Outbox& outbox, W
 
     if (!entry.started() && roster.empty()) {
       ref->room->games.erase(ref->game_id);
-      StageLocked(writes, PgHubStore::DeleteGame{ref->room_id, ref->game_id});
+      StageLocked(writes, HubStore::DeleteGame{ref->room_id, ref->game_id});
       StageWakeLocked(ref->room_id, writes);
       StageRoomStateLocked(ref->room_id, outbox);
       return;
@@ -1134,7 +1130,7 @@ void HubHandler::LeaveGameLocked(const std::string& player_id, Outbox& outbox, W
       }
     }
     const bool over = state.has_value() && state->isOver();
-    std::vector<PgHubStore::StatsDelta> deltas;
+    std::vector<HubStore::StatsDelta> deltas;
     if (over) deltas = StatsDeltas(*state);
     const Commit commit = CommitEntryLocked(ref->room_id, ref->game_id, entry, roster, state,
                                             over ? &deltas : nullptr);
@@ -1197,13 +1193,11 @@ void HubHandler::OnExpired(const std::string& player_id) {
     // on another instance while parked here. One fresh read decides —
     // a member row back at connected belongs to its new instance.
     bool resumed_elsewhere = false;
-    if (store_ != nullptr) {
-      if (const auto room_it = player_room_.find(player_id); room_it != player_room_.end()) {
-        RefreshRoomLocked(room_it->second, outbox);
-        if (Room* room = FindRoomLocked(player_id); room != nullptr) {
-          const auto member = room->members.find(player_id);
-          resumed_elsewhere = member != room->members.end() && member->second.connected;
-        }
+    if (const auto room_it = player_room_.find(player_id); room_it != player_room_.end()) {
+      RefreshRoomLocked(room_it->second, outbox);
+      if (Room* room = FindRoomLocked(player_id); room != nullptr) {
+        const auto member = room->members.find(player_id);
+        resumed_elsewhere = member != room->members.end() && member->second.connected;
       }
     }
     if (!resumed_elsewhere) {

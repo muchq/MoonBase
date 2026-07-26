@@ -12,8 +12,8 @@
 #include <utility>
 #include <vector>
 
+#include "domains/games/apis/golf_hub/hub_store.h"
 #include "domains/games/apis/golf_hub/id_generator.h"
-#include "domains/games/apis/golf_hub/pg_hub_store.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/golf/game_state.h"
@@ -50,17 +50,16 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
  public:
   using Registry = smithy::server::SessionRegistry<moonbase::golf::GolfEvents>;
 
-  /// store non-null turns on the #1194 step-2 write-through: every
-  /// rooms/members/games mutation is staged under mu_ and applied by the
-  /// store's writer. Call RestoreFromStore before serving to rebuild the
-  /// previous process's rooms, members, and games — whether its failure
-  /// is fatal is the caller's policy, next to the migration decision.
+  /// Every rooms/members/games mutation goes through HubStore. A null
+  /// argument selects the production MemoryHubStore; PostgreSQL callers
+  /// inject PgHubStore. Call RestoreFromStore before serving to rebuild
+  /// rooms, members, and games.
   explicit HubHandler(std::shared_ptr<TicketVault> vault,
                       std::shared_ptr<cards::Dealer> dealer = std::make_shared<cards::Dealer>(),
                       std::shared_ptr<IdGenerator> ids = std::make_shared<WhimsicalIdGenerator>(),
                       std::chrono::seconds grace_period = std::chrono::minutes(5),
                       std::shared_ptr<futility::otel::MetricsRecorder> metrics = nullptr,
-                      std::shared_ptr<PgHubStore> store = nullptr);
+                      std::shared_ptr<HubStore> store = nullptr);
 
   // Note: operation IO generates as <Op>Input/<Op>Output regardless of
   // the named shapes bound in the model, and moonbase.games shapes land
@@ -138,7 +137,7 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// while still holding mu_ (Enqueue is a queue append, no I/O). That
   /// asymmetry is load-bearing: it is what makes queue order the truth's
   /// order when two mutations race.
-  using Writes = std::vector<PgHubStore::Op>;
+  using Writes = std::vector<HubStore::Op>;
 
   using MoveFn = std::function<absl::StatusOr<golf::GameState>(const golf::GameState&, int seat)>;
   /// What a successful engine move announces beyond the state views.
@@ -194,7 +193,7 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   void EnqueueWritesLocked(Writes& writes);
 
   /// Write-through staging; callers hold mu_.
-  void StageLocked(Writes& writes, PgHubStore::Op op) const;
+  void StageLocked(Writes& writes, HubStore::Op op) const;
   void StageMemberLocked(const std::string& room_id, const std::string& player_id,
                          const Member& member, Writes& writes) const;
   /// The async batch's wake-up rider: remote instances holding the room
@@ -213,14 +212,14 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   Commit CommitEntryLocked(const std::string& room_id, const std::string& game_id, GameEntry& entry,
                            const std::vector<std::string>& roster,
                            const std::optional<golf::GameState>& state,
-                           const std::vector<PgHubStore::StatsDelta>* finish);
+                           const std::vector<HubStore::StatsDelta>* finish);
 
   /// The wake handler's body: flush our own queue (so the read is never
   /// older than local truth), re-read the room's rows, reconcile, and
   /// re-project views to local members. Also the join path's fallback —
   /// it materializes a room another instance created. Callers hold mu_.
   void RefreshRoomLocked(const std::string& room_id, Outbox& outbox);
-  void ReconcileRoomLocked(const std::string& room_id, const PgHubStore::RoomRows& rows,
+  void ReconcileRoomLocked(const std::string& room_id, const HubStore::RoomRows& rows,
                            Outbox& outbox);
   /// Erases the game and its player mappings without any events — for
   /// games the database says no longer exist.
@@ -250,7 +249,7 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   const std::shared_ptr<cards::Dealer> dealer_;
   const std::shared_ptr<IdGenerator> ids_;
   const std::shared_ptr<futility::otel::MetricsRecorder> metrics_;
-  const std::shared_ptr<PgHubStore> store_;
+  const std::shared_ptr<HubStore> store_;
   /// Rides every commit and rider as the notify payload, so an instance
   /// can tell its own wake-ups from the ones that carry news.
   const std::string instance_id_;

@@ -13,19 +13,10 @@
 #include <vector>
 
 #include "absl/status/statusor.h"
-#include "domains/games/libs/cards/golf/game_state.h"
+#include "domains/games/apis/golf_hub/hub_store.h"
 #include "domains/platform/libs/pg/pg.h"
 
 namespace golf_hub {
-
-/// The fan-out channel names (#1194 step 3). Every instance LISTENs on
-/// kRoomsChannel for room lifecycle — nobody can subscribe a room's
-/// channel before learning the room exists — and on RoomChannel(id) for
-/// each room it holds. Payloads are wake-ups, not deltas: a woken
-/// instance re-reads current state, so a missed notify heals on the
-/// next read.
-inline constexpr char kRoomsChannel[] = "golf_rooms";
-inline std::string RoomChannel(const std::string& room_id) { return "room_" + room_id; }
 
 /// The hub's postgres component (#1194 steps 2-3), with two write paths
 /// matching what each kind of state can afford. Rooms and members ride
@@ -34,80 +25,30 @@ inline std::string RoomChannel(const std::string& room_id) { return "room_" + ro
 /// applied FIFO by one writer thread; a failed write degrades
 /// durability, never gameplay (each player's rows have one writer, so
 /// there is nothing to conflict with). Games are the multi-instance
-/// contended state, and step 3 makes the database their authority:
+/// contended state, and step 3 makes PostgreSQL their authority:
 /// CommitGameSave/CommitGameFinish run synchronously, conditional on
-/// version-1, with the NOTIFY riding the same statement. Not an
-/// interface — the issue's design note rejects a store seam ahead of
-/// the backend; this is the concrete component, injected optionally
-/// (nullptr keeps the all-in-memory hub, which stays the test mode).
+/// version-1, with the NOTIFY riding the same statement.
 ///
 /// This component owns the row encodings end to end: game state
 /// serializes through the step-0 serde and deserializes in the loads.
-class PgHubStore {
+class PgHubStore final : public HubStore {
  public:
-  struct MemberRow {
-    std::string room_id;
-    std::string player_id;
-    bool connected = false;
-    int games_played = 0;
-    int games_won = 0;
-    int total_score = 0;
-  };
-  /// state disengaged = not started (NULL in the column).
-  struct GameRow {
-    std::string room_id;
-    std::string game_id;
-    std::vector<std::string> roster;
-    std::optional<golf::GameState> state;
-    int64_t version = 0;
-  };
-  struct Snapshot {
-    std::vector<std::string> rooms;
-    std::vector<MemberRow> members;
-    std::vector<GameRow> games;
-  };
-
-  struct UpsertRoom {
-    std::string room_id;
-  };
-  struct DeleteRoom {
-    std::string room_id;
-  };
-  struct UpsertMember {
-    MemberRow row;
-  };
-  struct DeleteMember {
-    std::string room_id;
-    std::string player_id;
-  };
-  struct DeleteGame {
-    std::string room_id;
-    std::string game_id;
-  };
-  /// A wake-up rider for the async queue: FIFO order means it fires
-  /// after the writes it announces have landed.
-  struct Notify {
-    std::string channel;
-    std::string payload;
-  };
-  using Op = std::variant<UpsertRoom, DeleteRoom, UpsertMember, DeleteMember, DeleteGame, Notify>;
-
   explicit PgHubStore(std::shared_ptr<pg::Client> db);
   /// Drains the queue, then joins the writer.
-  ~PgHubStore();
+  ~PgHubStore() override;
   PgHubStore(const PgHubStore&) = delete;
   PgHubStore& operator=(const PgHubStore&) = delete;
 
   /// Appends ops to the writer's queue under one lock acquisition; the
   /// writer applies them FIFO. Not a transaction.
-  void Enqueue(std::vector<Op> ops);
+  void Enqueue(std::vector<Op> ops) override;
   /// Blocks until everything enqueued so far has been applied.
-  void Flush();
+  void Flush() override;
 
   /// The boot-time restore read. Synchronous; call before serving. A row
   /// whose stored bytes don't decode is dropped with a loud log — one
   /// bad game costs that game, not the boot.
-  absl::StatusOr<Snapshot> LoadSnapshot();
+  absl::StatusOr<Snapshot> LoadSnapshot() override;
 
   /// The step-3 synchronous commit path (#1194: load -> pure transition
   /// -> conditional update, retry on miss; NOTIFY rides the same
@@ -118,34 +59,24 @@ class PgHubStore {
   /// a fresh row; anything later updates the existing one only. On
   /// success the payload lands on RoomChannel(row.room_id) in the same
   /// statement; a miss notifies nobody.
-  absl::StatusOr<bool> CommitGameSave(const GameRow& row, const std::string& notify_payload);
+  absl::StatusOr<bool> CommitGameSave(const GameRow& row,
+                                      const std::string& notify_payload) override;
 
   /// The finishing commit: final state, per-member stat deltas, and the
   /// notify, all in one transaction. The ended row stays (remote
-  /// instances read it for the game-over ceremony); the caller enqueues
-  /// its deferred DeleteGame.
-  struct StatsDelta {
-    std::string player_id;
-    int played = 0;
-    int won = 0;
-    int score = 0;
-  };
+  /// instances read it for the game-over ceremony) until room deletion
+  /// removes it through the foreign-key cascade.
   absl::StatusOr<bool> CommitGameFinish(const GameRow& row, const std::vector<StatsDelta>& stats,
-                                        const std::string& notify_payload);
+                                        const std::string& notify_payload) override;
 
   /// Rebase read after a conditional miss; nullopt = the game is gone.
   /// An undecodable row also reads as gone (logged loudly) — the same
   /// one-bad-row-costs-one-game policy as LoadSnapshot.
   absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
-                                                  const std::string& game_id);
+                                                  const std::string& game_id) override;
 
   /// One room's rows, for notify-driven refresh and join-miss lookups.
-  struct RoomRows {
-    bool exists = false;
-    std::vector<MemberRow> members;
-    std::vector<GameRow> games;
-  };
-  absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id);
+  absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id) override;
 
  private:
   void WriterLoop();
