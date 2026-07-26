@@ -89,6 +89,27 @@ cc_test(
     ],
 )
 
+cc_library(
+    name = "chat_store",
+    srcs = ["chat_store.cc"],
+    hdrs = ["chat_store.h"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_test(
+    name = "chat_store_test",
+    size = "small",
+    srcs = ["chat_store_test.cc"],
+    deps = [
+        ":chat_store",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # The postgres-backed vault and the hub's schema (#1194 step 1).
 cc_library(
     name = "pg_ticket_vault",
