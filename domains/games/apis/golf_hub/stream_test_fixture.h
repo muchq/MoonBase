@@ -19,8 +19,8 @@
 #include <vector>
 
 #include "domains/games/apis/golf_hub/hub_handler.h"
+#include "domains/games/apis/golf_hub/hub_store.h"
 #include "domains/games/apis/golf_hub/id_generator.h"
-#include "domains/games/apis/golf_hub/pg_hub_store.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
@@ -69,14 +69,13 @@ inline moonbase::golf::GolfCommands Move(moonbase::golf::GolfMove move) {
 
 class GolfHubStreamFixture : public testing::Test {
  protected:
-  // The persistence seams (#1194): the default fixture stays the blessed
-  // all-in-memory hub; the pg e2e suite overrides both to run the same
-  // flows with durable credentials and the rooms/games write-through.
+  // The default fixture uses the production memory implementations; the
+  // pg e2e suite overrides both to run the same flows against PostgreSQL.
   virtual std::shared_ptr<TicketVault> MakeVault() {
     return std::make_shared<InMemoryTicketVault>(/*ticket_ttl=*/std::chrono::seconds(60),
                                                  /*resume_ttl=*/std::chrono::seconds(60));
   }
-  virtual std::shared_ptr<PgHubStore> MakeStore() { return nullptr; }
+  virtual std::shared_ptr<HubStore> MakeStore() { return std::make_shared<MemoryHubStore>(); }
 
   void SetUp() override { BuildHub(); }
 
@@ -92,10 +91,8 @@ class GolfHubStreamFixture : public testing::Test {
         vault_, std::make_shared<cards::NoShuffleDealer>(), ids_,
         /*grace_period=*/std::chrono::seconds(60),
         std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"), store_);
-    if (store_ != nullptr) {
-      const absl::Status restored = handler_->RestoreFromStore();
-      ASSERT_TRUE(restored.ok()) << restored;
-    }
+    const absl::Status restored = handler_->RestoreFromStore();
+    ASSERT_TRUE(restored.ok()) << restored;
     server_ = std::make_unique<moonbase::golf::GolfHubServer>(handler_);
 
     auto loopback = std::make_shared<smithy::http::Loopback>();
@@ -127,27 +124,33 @@ class GolfHubStreamFixture : public testing::Test {
   }
 
   // Mint a session and open its Play stream; fails the test on any step.
+  // The client-parameterized form serves multi-instance suites (#1194
+  // step 3), where each hub instance has its own client.
   struct Seat {
     std::string player_id;
     std::string resume_token;
     moonbase::golf::PlayClientStream stream;
   };
-  std::optional<Seat> OpenSeat(const std::optional<std::string>& resume_token = std::nullopt) {
+  std::optional<Seat> OpenSeatVia(moonbase::golf::GolfHubClient& client,
+                                  const std::optional<std::string>& resume_token = std::nullopt) {
     moonbase::golf::GetSessionInput session_input;
     if (resume_token.has_value()) session_input.resumeToken = *resume_token;
-    auto session = client_->GetSession(session_input);
+    auto session = client.GetSession(session_input);
     if (!session.ok()) {
       ADD_FAILURE() << "GetSession failed: " << session.error().message();
       return std::nullopt;
     }
     moonbase::golf::PlayInput play_input;
     play_input.ticket = session->ticket;
-    auto stream = client_->Play(play_input);
+    auto stream = client.Play(play_input);
     if (!stream.ok()) {
       ADD_FAILURE() << "Play dial failed: " << stream.error().message();
       return std::nullopt;
     }
     return Seat{session->playerId, session->resumeToken, std::move(*stream)};
+  }
+  std::optional<Seat> OpenSeat(const std::optional<std::string>& resume_token = std::nullopt) {
+    return OpenSeatVia(*client_, resume_token);
   }
 
   // Room with two seats in a started game: with the NoShuffleDealer the
@@ -207,7 +210,7 @@ class GolfHubStreamFixture : public testing::Test {
   }
 
   std::shared_ptr<TicketVault> vault_;
-  std::shared_ptr<PgHubStore> store_;
+  std::shared_ptr<HubStore> store_;
   std::shared_ptr<IdGenerator> ids_ = std::make_shared<SequentialIdGenerator>();
   std::shared_ptr<HubHandler> handler_;
   std::unique_ptr<moonbase::golf::GolfHubServer> server_;

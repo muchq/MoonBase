@@ -2,8 +2,8 @@ load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
 # pg: the owned libpq wrapper for services persisting to the shared
 # postgres instance (https://github.com/muchq/MoonBase/issues/1194).
-# One blocking connection behind a mutex — pooling, async I/O, and
-# LISTEN/NOTIFY arrive when the fan-out step needs them.
+# One blocking connection behind a mutex — pooling and async I/O arrive
+# when a service needs them; the fan-out's LISTEN side is :listener.
 cc_library(
     name = "pg",
     srcs = ["pg.cc"],
@@ -14,6 +14,32 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@postgres//:libpq",
+    ],
+)
+
+# The LISTEN side of #1194 step-3 fan-out: a dedicated notification
+# connection with runtime channel churn and reconnect+re-LISTEN healing.
+cc_library(
+    name = "listener",
+    srcs = ["listener.cc"],
+    hdrs = ["listener.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/strings",
+        "@postgres//:libpq",
+    ],
+)
+
+cc_test(
+    name = "listener_test",
+    size = "small",
+    srcs = ["listener_test.cc"],
+    env_inherit = ["PG_TEST_DB_URL"],
+    deps = [
+        ":listener",
+        ":pg",
+        "@googletest//:gtest_main",
     ],
 )
 

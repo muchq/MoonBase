@@ -22,6 +22,7 @@
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
 #include "domains/games/apis/golf_hub/hub_handler.h"
+#include "domains/games/apis/golf_hub/hub_store.h"
 #include "domains/games/apis/golf_hub/id_generator.h"
 #include "domains/games/apis/golf_hub/migrations.h"
 #include "domains/games/apis/golf_hub/pg_hub_store.h"
@@ -33,6 +34,7 @@
 #include "domains/platform/libs/futility/otel/http_metrics.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/futility/otel/otel_provider.h"
+#include "domains/platform/libs/pg/listener.h"
 #include "domains/platform/libs/pg/pg.h"
 #include "moonbase/golf/server.h"
 #include "smithy/http/beast_transport.h"
@@ -79,7 +81,7 @@ int main() {
   constexpr auto kTicketTtl = std::chrono::seconds(30);
   constexpr auto kResumeTtl = std::chrono::hours(24);
   std::shared_ptr<golf_hub::TicketVault> vault;
-  std::shared_ptr<golf_hub::PgHubStore> store;
+  std::shared_ptr<golf_hub::HubStore> store;
   const char* db_url = std::getenv("GOLF_HUB_DB_URL");
   if (db_url != nullptr && *db_url != '\0') {
     auto db = std::make_shared<pg::Client>(db_url);
@@ -92,6 +94,7 @@ int main() {
     LOG(INFO) << "Persistence: postgres (credentials + rooms/games write-through)";
   } else {
     vault = std::make_shared<golf_hub::InMemoryTicketVault>(kTicketTtl, kResumeTtl);
+    store = std::make_shared<golf_hub::MemoryHubStore>();
     LOG(INFO) << "Persistence: in-memory (GOLF_HUB_DB_URL unset; restarts forget everything)";
   }
   // Stream-side instruments (sessions, commands, events) ride the same
@@ -105,6 +108,18 @@ int main() {
   if (absl::Status restored = handler->RestoreFromStore(); !restored.ok()) {
     LOG(ERROR) << "Failed to restore golf hub state: " << restored;
     return 1;
+  }
+  // The fan-out's LISTEN side (#1194 step 3): commits on other instances
+  // wake this one to re-read and re-broadcast. Declared after handler so
+  // it is destroyed (thread joined) first; the detach at shutdown keeps
+  // the handler's teardown from touching it.
+  std::unique_ptr<pg::Listener> listener;
+  if (db_url != nullptr && *db_url != '\0') {
+    listener = std::make_unique<pg::Listener>(
+        db_url, [&handler](const std::string& channel, const std::string& payload) {
+          handler->OnNotify(channel, payload);
+        });
+    handler->AttachListener(listener.get());
   }
 
   // Block shutdown signals before the transport spawns its thread pool.
@@ -191,6 +206,8 @@ int main() {
   int signal_number = 0;
   sigwait(&shutdown_signals, &signal_number);
   LOG(INFO) << "Signal " << signal_number << " received; draining sessions";
+  handler->AttachListener(nullptr);
+  listener.reset();
   handler->registry().Drain(std::chrono::seconds(5));
   transport.Stop();
   return 0;
