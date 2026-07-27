@@ -25,6 +25,7 @@
 #include "domains/games/apis/golf_hub/hub_store.h"
 #include "domains/games/apis/golf_hub/id_generator.h"
 #include "domains/games/apis/golf_hub/migrations.h"
+#include "domains/games/apis/golf_hub/pg_chat_store.h"
 #include "domains/games/apis/golf_hub/pg_hub_store.h"
 #include "domains/games/apis/golf_hub/pg_ticket_vault.h"
 #include "domains/games/apis/golf_hub/protocol_input.h"
@@ -83,6 +84,7 @@ int main() {
   constexpr auto kResumeTtl = std::chrono::hours(24);
   std::shared_ptr<golf_hub::TicketVault> vault;
   std::shared_ptr<golf_hub::HubStore> store;
+  std::shared_ptr<golf_hub::ChatStore> chat_store;
   const char* db_url = std::getenv("GOLF_HUB_DB_URL");
   if (db_url != nullptr && *db_url != '\0') {
     auto db = std::make_shared<pg::Client>(db_url);
@@ -92,10 +94,15 @@ int main() {
     }
     vault = std::make_shared<golf_hub::PgTicketVault>(std::move(db), kTicketTtl, kResumeTtl);
     store = std::make_shared<golf_hub::PgHubStore>(std::make_shared<pg::Client>(db_url));
-    LOG(INFO) << "Persistence: postgres (credentials + rooms/games write-through)";
+    // Chat gets its own connection too (#1226): appends are synchronous
+    // in the command path and must not queue behind the write-through.
+    chat_store = std::make_shared<golf_hub::PgChatStore>(std::make_shared<pg::Client>(db_url));
+    LOG(INFO) << "Persistence: postgres (credentials + rooms/games write-through + chat)";
   } else {
     vault = std::make_shared<golf_hub::InMemoryTicketVault>(kTicketTtl, kResumeTtl);
     store = std::make_shared<golf_hub::MemoryHubStore>();
+    // chat_store stays null: the handler builds its own MemoryChatStore
+    // wired to its membership guard.
     LOG(INFO) << "Persistence: in-memory (GOLF_HUB_DB_URL unset; restarts forget everything)";
   }
   // Stream-side instruments (sessions, commands, events) ride the same
@@ -103,7 +110,7 @@ int main() {
   auto handler = std::make_shared<golf_hub::HubHandler>(
       vault, std::make_shared<cards::Dealer>(), std::make_shared<golf_hub::WhimsicalIdGenerator>(),
       /*grace_period=*/std::chrono::minutes(5),
-      std::make_shared<futility::otel::MetricsRecorder>("golf_hub"), store);
+      std::make_shared<futility::otel::MetricsRecorder>("golf_hub"), store, chat_store);
   // Same policy as the migration above: a database we can't read at boot
   // is a reason to let the supervisor retry, not to serve amnesiac.
   if (absl::Status restored = handler->RestoreFromStore(); !restored.ok()) {
@@ -117,9 +124,11 @@ int main() {
   std::unique_ptr<pg::Listener> listener;
   if (db_url != nullptr && *db_url != '\0') {
     listener = std::make_unique<pg::Listener>(
-        db_url, [&handler](const std::string& channel, const std::string& payload) {
+        db_url,
+        [&handler](const std::string& channel, const std::string& payload) {
           handler->OnNotify(channel, payload);
-        });
+        },
+        [&handler](const std::string& channel) { handler->OnChannelActive(channel); });
     handler->AttachListener(listener.get());
   }
 

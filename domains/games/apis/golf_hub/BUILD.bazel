@@ -303,6 +303,7 @@ cc_test(
         ":hub_handler",
         ":hub_store",
         ":id_generator",
+        ":pg_chat_store",
         ":pg_hub_store",
         ":pg_ticket_vault",
         ":ticket_vault",
@@ -345,6 +346,35 @@ cc_test(
     ],
 )
 
+# The chat pump's cross-instance behavior, pinned deterministically over
+# shared memory stores with hand-delivered wakes — the orderings the pg
+# e2e suite's real NOTIFY wire won't schedule on demand.
+cc_test(
+    name = "hub_chat_race_test",
+    size = "small",
+    srcs = [
+        "hub_chat_race_test.cc",
+        "stream_test_fixture.h",
+    ],
+    deps = [
+        ":chat_store",
+        ":golf_hub_smithy_client",
+        ":golf_hub_smithy_server",
+        ":hub_handler",
+        ":hub_store",
+        ":id_generator",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/strings",
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:client",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:http_beast",
+    ],
+)
+
 cc_test(
     name = "hub_store_race_test",
     size = "small",
@@ -378,6 +408,7 @@ cc_binary(
         ":hub_handler",
         ":hub_store",
         ":id_generator",
+        ":pg_chat_store",
         ":pg_hub_store",
         ":pg_ticket_vault",
         ":protocol_input",

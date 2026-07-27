@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "domains/games/apis/golf_hub/migrations.h"
+#include "domains/games/apis/golf_hub/pg_chat_store.h"
 #include "domains/games/apis/golf_hub/pg_hub_store.h"
 #include "domains/games/apis/golf_hub/pg_ticket_vault.h"
 #include "domains/games/apis/golf_hub/stream_test_fixture.h"
@@ -102,12 +103,19 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
   std::shared_ptr<HubStore> MakeStore() override {
     return std::make_shared<PgHubStore>(std::make_shared<pg::Client>(url_));
   }
+  std::shared_ptr<ChatStore> MakeChatStore() override {
+    return std::make_shared<PgChatStore>(std::make_shared<pg::Client>(url_));
+  }
 
   std::unique_ptr<pg::Listener> MakeListener(const std::shared_ptr<HubHandler>& handler) {
     auto listener = std::make_unique<pg::Listener>(
-        url_, [handler](const std::string& channel, const std::string& payload) {
+        url_,
+        [handler](const std::string& channel, const std::string& payload) {
           handler->OnNotify(channel, payload);
-        });
+        },
+        // The active signal is chat's catch-up trigger: rows committed
+        // before a (re)LISTEN landed never notified this instance.
+        [handler](const std::string& channel) { handler->OnChannelActive(channel); });
     handler->AttachListener(listener.get());
     return listener;
   }
@@ -152,7 +160,8 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
         MakeVault(), std::make_shared<cards::NoShuffleDealer>(),
         std::make_shared<RemoteIdGenerator>(),
         /*grace_period=*/std::chrono::seconds(60),
-        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"), instance->store);
+        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"), instance->store,
+        MakeChatStore());
     const absl::Status restored = instance->handler->RestoreFromStore();
     EXPECT_TRUE(restored.ok()) << restored;
     instance->listener = MakeListener(instance->handler);
@@ -719,12 +728,133 @@ TEST_F(PgGolfHubFixture, RemoteFinishRunsOneCeremonyEverywhere) {
   }
 }
 
+// Chat across the real wire (#1226 task 5): a message committed on one
+// instance reaches the other's members via its NOTIFY — or, when the
+// commit raced the receiving side's LISTEN, via the channel-active
+// catch-up read. Which path fired is deliberately invisible: delivery
+// is bounded either way, which is the whole at-least-once claim.
+TEST_F(PgGolfHubFixture, ChatCrossesInstancesBothWays) {
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  auto bob = OpenSeatVia(*remote->client);
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
+  // Room and membership rows are written through asynchronously; the
+  // remote's join needs the room row, and each sender's append
+  // authorizes against their member row.
+  store_->Flush();
+
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomChatHistory").has_value());
+  remote->store->Flush();
+
+  moonbase::golf::Chat chat;
+  chat.text = "hello from remote";
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromChat(chat)).ok());
+  auto bob_echo = ReceiveCase(bob->stream, "roomChat");
+  ASSERT_TRUE(bob_echo.has_value());
+  auto to_alice = ReceiveCase(alice->stream, "roomChat");
+  ASSERT_TRUE(to_alice.has_value());
+  EXPECT_EQ(to_alice->as_roomChat_or_null()->text, "hello from remote");
+  EXPECT_EQ(to_alice->as_roomChat_or_null()->messageId, bob_echo->as_roomChat_or_null()->messageId);
+
+  chat.text = "hello from primary";
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
+  auto to_bob = ReceiveCase(bob->stream, "roomChat");
+  ASSERT_TRUE(to_bob.has_value());
+  EXPECT_EQ(to_bob->as_roomChat_or_null()->text, "hello from primary");
+  EXPECT_GT(to_bob->as_roomChat_or_null()->messageId, bob_echo->as_roomChat_or_null()->messageId);
+
+  // A later joiner replays both messages from the database, in id order,
+  // regardless of which instance stored them.
+  auto charlie = OpenSeatVia(*remote->client);
+  ASSERT_TRUE(charlie.has_value());
+  ASSERT_TRUE(ReceiveCase(charlie->stream, "sessionReady").has_value());
+  ASSERT_TRUE(charlie->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(charlie->stream, "roomState").has_value());
+  auto replay = ReceiveCase(charlie->stream, "roomChatHistory");
+  ASSERT_TRUE(replay.has_value());
+  const auto* history = replay->as_roomChatHistory_or_null();
+  ASSERT_EQ(history->messages.size(), 2u);
+  EXPECT_EQ(history->messages[0].text, "hello from remote");
+  EXPECT_EQ(history->messages[1].text, "hello from primary");
+}
+
+// LISTEN/NOTIFY has no replay: a notify fired while a listener's
+// connection is down reaches no one, ever. What makes chat delivery
+// at-least-once anyway is the reconnect: the re-LISTEN's channel-active
+// signal triggers a catch-up read of everything the cursor missed.
+TEST_F(PgGolfHubFixture, ChatCommittedDuringListenerOutageArrivesAfterReconnect) {
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  auto bob = OpenSeatVia(*remote->client);
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
+  store_->Flush();
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomChatHistory").has_value());
+  remote->store->Flush();
+
+  // One exchanged message proves live delivery is up before the outage.
+  moonbase::golf::Chat chat;
+  chat.text = "before";
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomChat").has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
+
+  // Kill every listener backend; the poll threads reconnect on their own.
+  pg::Client db(url_);
+  ASSERT_TRUE(db.Exec("SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
+                      " WHERE query LIKE 'LISTEN%' AND pid <> pg_backend_pid()")
+                  .ok());
+
+  // Committed while (most likely) nobody was subscribed. The sender's
+  // own echo needs no listener — the local pump runs off the append —
+  // but alice's instance can only learn of the row from a wake, and if
+  // its notify fired into the gap, only the catch-up read remains.
+  chat.text = "during outage";
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomChat").has_value());
+  auto healed = ReceiveCase(alice->stream, "roomChat");
+  ASSERT_TRUE(healed.has_value());
+  EXPECT_EQ(healed->as_roomChat_or_null()->text, "during outage");
+}
+
 TEST_F(PgGolfHubFixture, EmptiedRoomVanishesFromTheDatabase) {
   auto alice = OpenSeat();
   ASSERT_TRUE(alice.has_value());
   ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
   ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
   ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
+  // A stored message, so the vanishing below has chat to take with it.
+  store_->Flush();
+  moonbase::golf::Chat chat;
+  chat.text = "soon gone";
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
   ASSERT_TRUE(alice->stream.Send(GolfCommands::FromLeaveroom(moonbase::golf::LeaveRoom{})).ok());
   ASSERT_TRUE(ReceiveCase(alice->stream, "roomLeft").has_value());
 
@@ -732,6 +862,13 @@ TEST_F(PgGolfHubFixture, EmptiedRoomVanishesFromTheDatabase) {
   EXPECT_TRUE(rows.rooms.empty());
   EXPECT_TRUE(rows.members.empty());
   EXPECT_TRUE(rows.games.empty());
+  // The room row's deletion cascades to its chat: nothing retains a
+  // message for a room that no longer exists.
+  pg::Client db(url_);
+  auto chat_rows = db.Exec("SELECT count(*) FROM room_chat_messages");
+  ASSERT_TRUE(chat_rows.ok());
+  ASSERT_TRUE(chat_rows->Get(0, 0).has_value());
+  EXPECT_EQ(*chat_rows->Get(0, 0), "0");
 }
 
 }  // namespace

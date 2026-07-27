@@ -248,10 +248,21 @@ void HubHandler::AttachListener(pg::Listener* listener) {
   const std::lock_guard<std::mutex> lock(mu_);
   listener_ = listener;
   if (listener_ == nullptr) return;
-  for (const auto& [room_id, room] : rooms_) listener_->Listen(RoomChannel(room_id));
+  for (const auto& [room_id, room] : rooms_) {
+    listener_->Listen(RoomChannel(room_id));
+    listener_->Listen(ChatChannel(room_id));
+  }
 }
 
 void HubHandler::OnNotify(const std::string& channel, const std::string& payload) {
+  constexpr std::string_view kChatPrefix = "chat_";
+  if (absl::StartsWith(channel, kChatPrefix)) {
+    // Own wakes pump too, deliberately: the cursor makes it a no-op in
+    // the common case, and it is what recovers an append whose
+    // connection died between COMMIT and the reply.
+    PumpChat(std::string(channel.substr(kChatPrefix.size())));
+    return;
+  }
   if (payload == instance_id_) return;  // our own commit; locals already heard it
   constexpr std::string_view kPrefix = "room_";
   if (!absl::StartsWith(channel, kPrefix)) return;
@@ -265,6 +276,16 @@ void HubHandler::OnNotify(const std::string& channel, const std::string& payload
     RefreshRoomLocked(room_id, outbox);
   }
   Deliver(outbox);
+}
+
+void HubHandler::OnChannelActive(const std::string& channel) {
+  // Only chat needs the signal: a room wake re-reads everything anyway,
+  // but chat delivery is cursor-driven, and rows committed while we were
+  // not subscribed queued no notification for us.
+  constexpr std::string_view kChatPrefix = "chat_";
+  if (absl::StartsWith(channel, kChatPrefix)) {
+    PumpChat(std::string(channel.substr(kChatPrefix.size())));
+  }
 }
 
 void HubHandler::RefreshRoomLocked(const std::string& room_id, Outbox& outbox) {
@@ -299,6 +320,7 @@ void HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore:
     // whole of an append, so no append can be mid-flight here and land a
     // message after the drop.
     chat_store_->DropRoom(room_id);
+    chat_cursors_.erase(room_id);
     UnlistenRoomLocked(room_id);
     return;
   }
@@ -395,11 +417,15 @@ void HubHandler::DropGameLocked(const GameRef& ref) {
 }
 
 void HubHandler::ListenRoomLocked(const std::string& room_id) {
-  if (listener_ != nullptr) listener_->Listen(RoomChannel(room_id));
+  if (listener_ == nullptr) return;
+  listener_->Listen(RoomChannel(room_id));
+  listener_->Listen(ChatChannel(room_id));
 }
 
 void HubHandler::UnlistenRoomLocked(const std::string& room_id) {
-  if (listener_ != nullptr) listener_->Unlisten(RoomChannel(room_id));
+  if (listener_ == nullptr) return;
+  listener_->Unlisten(RoomChannel(room_id));
+  listener_->Unlisten(ChatChannel(room_id));
 }
 
 smithy::Outcome<moonbase::golf::GetSessionOutput> HubHandler::GetSession(
@@ -537,6 +563,9 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
         room_id = ids_->RoomId();
         while (rooms_.contains(room_id)) room_id = ids_->RoomId();
         const auto [member, inserted] = rooms_[room_id].members.emplace(player_id, Member{});
+        // Born at zero with its room: the creator's first message must
+        // pump from the very beginning, not adopt-past its own append.
+        chat_cursors_.emplace(room_id, ChatCursor{});
         player_room_[player_id] = room_id;
         ListenRoomLocked(room_id);
         StageLocked(writes, HubStore::UpsertRoom{room_id});
@@ -670,19 +699,12 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
       return;
     }
 
-    Outbox outbox;
-    {
-      const std::lock_guard<std::mutex> lock(mu_);
-      // Whoever is in the room now: the roster can have moved while the
-      // append ran, and a member who left has no claim on the message.
-      if (const auto room = rooms_.find(room_id); room != rooms_.end()) {
-        const moonbase::golf::ChatMessage message = ChatEvent(*appended);
-        for (const auto& member : room->second.members) {
-          outbox.To(member.first, GolfEvents::FromRoomchat(message));
-        }
-      }
-    }
-    Deliver(outbox);
+    // The committed row reaches locals through the pump, like every
+    // other row. That is not indirection for its own sake: a remote
+    // append our commit raced past holds a lower id, and the pump's
+    // cursor walk delivers it before ours — staging just our own row
+    // and advancing the cursor over it would skip it for good.
+    PumpChat(room_id);
     return;
   }
 
@@ -1162,6 +1184,7 @@ void HubHandler::LeaveEverywhere(const std::string& player_id, Outbox& outbox, W
     // it is what production runs today — without this an emptied room
     // keeps its last hundred messages for the life of the process.
     chat_store_->DropRoom(room_id);
+    chat_cursors_.erase(room_id);
     // One DeleteRoom; the row's cascade takes members and games with it.
     // The wake rider tells any instance that still holds the room (a
     // race, not the norm — an emptied room has no members anywhere).
@@ -1299,6 +1322,76 @@ void HubHandler::Deliver(Outbox& outbox) {
   outbox.events.clear();
 }
 
+void HubHandler::PumpChat(const std::string& room_id) {
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    if (!rooms_.contains(room_id)) return;  // stale wake; nothing to resurrect
+    const auto [cursor, inserted] = chat_cursors_.try_emplace(room_id);
+    if (inserted) cursor->second.adopt = true;  // first contact: seed, don't replay
+    if (cursor->second.pumping) {
+      // One drain at a time; the drainer loops once more for us.
+      cursor->second.again = true;
+      return;
+    }
+    cursor->second.pumping = true;
+  }
+
+  bool more = true;
+  while (more) {
+    int64_t after = 0;
+    bool adopt = false;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      const auto cursor = chat_cursors_.find(room_id);
+      if (cursor == chat_cursors_.end()) return;  // room dropped mid-pump
+      after = cursor->second.delivered;
+      adopt = cursor->second.adopt;
+    }
+
+    // Outside mu_: the load may reach a database. Adoption reads one row
+    // (the newest) instead of a page — history replay owns the past, so
+    // a cursor meeting a room for the first time starts at now.
+    auto rows = adopt ? chat_store_->LoadRecent(room_id, 1)
+                      : chat_store_->LoadAfter(room_id, after, kChatCatchUpPage);
+
+    Outbox outbox;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      const auto cursor = chat_cursors_.find(room_id);
+      const auto room = rooms_.find(room_id);
+      if (cursor == chat_cursors_.end() || room == rooms_.end()) return;
+      if (!rows.ok()) {
+        Count("chat_catch_up_failures");
+        LOG(WARNING) << "chat catch-up load failed: " << rows.status();
+        cursor->second.pumping = false;
+        cursor->second.again = false;  // the next wake retries
+        return;
+      }
+      if (adopt) {
+        if (!rows->empty()) {
+          cursor->second.delivered = std::max(cursor->second.delivered, rows->back().message_id);
+        }
+        cursor->second.adopt = false;
+        more = true;  // now drain anything above the adopted point
+        continue;
+      }
+      for (const ChatRow& row : *rows) {
+        if (row.message_id <= cursor->second.delivered) continue;
+        const GolfEvents event = GolfEvents::FromRoomchat(ChatEvent(row));
+        for (const auto& member : room->second.members) outbox.To(member.first, event);
+        cursor->second.delivered = row.message_id;
+      }
+      more = rows->size() == kChatCatchUpPage;
+      if (!more && cursor->second.again) {
+        cursor->second.again = false;
+        more = true;
+      }
+      if (!more) cursor->second.pumping = false;
+    }
+    Deliver(outbox);
+  }
+}
+
 void HubHandler::SendChatHistory(const std::string& room_id, const std::string& player_id) {
   auto rows = chat_store_->LoadRecent(room_id, kChatHistoryLimit);
   if (!rows.ok()) {
@@ -1307,6 +1400,15 @@ void HubHandler::SendChatHistory(const std::string& room_id, const std::string& 
     Count("chat_history_load_failures");
     LOG(WARNING) << "chat history load failed for a joining stream: " << rows.status();
     return;
+  }
+  {
+    // Seed the room's live cursor where this replay ends. try_emplace:
+    // if the pump already owns a cursor for this room, its progression
+    // wins — a slightly stale replay just overlaps, which is legal.
+    const std::lock_guard<std::mutex> lock(mu_);
+    ChatCursor seeded;
+    seeded.delivered = rows->empty() ? 0 : rows->back().message_id;
+    chat_cursors_.try_emplace(room_id, seeded);
   }
   // Sent even when empty: a stream that entered a room always hears one
   // history event, so the client has a deterministic signal rather than

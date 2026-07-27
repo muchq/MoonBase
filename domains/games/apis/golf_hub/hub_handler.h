@@ -118,8 +118,18 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// The listener callback target; runs on the listener's thread. A
   /// wake-up for a held room re-reads its rows and re-projects views to
   /// local players; payloads carrying our own instance id are skipped
-  /// (locals already heard the local fan-out).
+  /// (locals already heard the local fan-out). Chat wake-ups instead run
+  /// the chat pump — including our own, which the cursor makes idempotent
+  /// and which closes the ambiguous-commit path (an append whose
+  /// connection died after COMMIT still reaches everyone).
   void OnNotify(const std::string& channel, const std::string& payload);
+
+  /// The listener's channel-active target; runs on the listener's
+  /// thread. A chat channel becoming active (first LISTEN, or re-LISTEN
+  /// after a reconnect) pumps that room: anything committed while we
+  /// were not subscribed never queued a notification, so the cursor
+  /// read is the only thing that closes the gap.
+  void OnChannelActive(const std::string& channel);
 
  private:
   struct Member {
@@ -207,7 +217,25 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// stream's roomState, the order the model documents. A failed load is
   /// counted and skipped rather than failing the join: live delivery
   /// catches the client up from here, and overlap is legal anyway.
+  /// Also seeds the room's chat cursor at the newest loaded id, so live
+  /// delivery starts where the replay ended.
   void SendChatHistory(const std::string& room_id, const std::string& player_id);
+
+  /// The one path every live chat row takes to local members: load pages
+  /// above the room's cursor, stage rows to current members, advance,
+  /// repeat while pages come back full. Local appends call this after
+  /// their commit instead of staging directly, which is what makes a
+  /// remote commit our append raced past (a lower id committed just
+  /// before ours) reach locals in id order — a blind "deliver mine,
+  /// advance cursor" would step over it. Remote wakes, our own wakes,
+  /// duplicate wakes, and channel-active signals all funnel here too;
+  /// the cursor makes every redundant call a cheap no-op, and a per-room
+  /// in-flight flag collapses concurrent pumps into one.
+  ///
+  /// Call outside mu_ (it takes mu_ itself, and reads may reach a
+  /// database). A pump for a room this instance no longer holds delivers
+  /// nothing and resurrects nothing.
+  void PumpChat(const std::string& room_id);
 
   void SetConnected(const std::string& player_id, bool connected);
   std::optional<std::string> CurrentRoom(const std::string& player_id);
@@ -291,6 +319,22 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   std::mutex mu_;
   pg::Listener* listener_ = nullptr;  // owned by the caller; guarded by mu_
   std::unordered_map<std::string, Room> rooms_;
+
+  /// Where live chat delivery stands for one held room. `delivered` is
+  /// the highest message id every current local member has been staged
+  /// (a cursor is born at 0 only when its room is born; any other first
+  /// contact adopts the newest retained id without delivering, since
+  /// history replay owns the past). `pumping`/`again` collapse
+  /// concurrent PumpChat calls into one drain. The entry dies with the
+  /// room.
+  struct ChatCursor {
+    int64_t delivered = 0;
+    bool adopt = false;  // first contact: seed from newest, deliver nothing
+    bool pumping = false;
+    bool again = false;
+  };
+  std::map<std::string, ChatCursor> chat_cursors_;
+
   std::unordered_map<std::string, std::string> player_room_;
   std::unordered_map<std::string, std::string> player_game_;
   // Declared last: destroyed first, joining registry threads before the
