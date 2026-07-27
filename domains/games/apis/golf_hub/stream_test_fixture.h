@@ -87,10 +87,22 @@ class GolfHubStreamFixture : public testing::Test {
     // Sequential ids keep players and game codes readable in failures.
     // The recorder rides the global (no-op) meter here — values go nowhere,
     // but every counting path runs under the e2e suite.
+    // The same MemoryChatStore the handler would build for itself, but
+    // held here so tests can see what chat actually stored. The guard is
+    // filled in after construction because it calls the handler that
+    // does not exist yet; nothing appends before then.
+    auto guard = std::make_shared<MemberGuard>();
+    chat_store_ = std::make_shared<MemoryChatStore>(
+        [guard](const std::string& room_id, const std::string& player_id,
+                const MemberAction& action) { return (*guard)(room_id, player_id, action); });
     handler_ = std::make_shared<HubHandler>(
         vault_, std::make_shared<cards::NoShuffleDealer>(), ids_,
         /*grace_period=*/std::chrono::seconds(60),
-        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"), store_);
+        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"), store_, chat_store_);
+    *guard = [handler = handler_.get()](const std::string& room_id, const std::string& player_id,
+                                        const MemberAction& action) {
+      return handler->WithMember(room_id, player_id, action);
+    };
     const absl::Status restored = handler_->RestoreFromStore();
     ASSERT_TRUE(restored.ok()) << restored;
     server_ = std::make_unique<moonbase::golf::GolfHubServer>(handler_);
@@ -211,6 +223,7 @@ class GolfHubStreamFixture : public testing::Test {
 
   std::shared_ptr<TicketVault> vault_;
   std::shared_ptr<HubStore> store_;
+  std::shared_ptr<MemoryChatStore> chat_store_;
   std::shared_ptr<IdGenerator> ids_ = std::make_shared<SequentialIdGenerator>();
   std::shared_ptr<HubHandler> handler_;
   std::unique_ptr<moonbase::golf::GolfHubServer> server_;

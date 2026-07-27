@@ -447,6 +447,37 @@ TEST_F(GolfGameFixture, ChatReachesTheRoom) {
   EXPECT_EQ(sanitized->as_roomChat_or_null()->text, "hi\xEF\xBF\xBD");
 }
 
+// Chat dies with its room. PostgreSQL gets that from the cascade, but
+// MemoryChatStore — which is what production runs today — reclaims only
+// when the handler calls DropRoom, so a missed call is a leak of up to a
+// hundred messages per emptied room, invisible from the wire.
+TEST_F(GolfHubStreamFixture, LastMemberLeavingDropsTheRoomsChatHistory) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
+
+  moonbase::golf::Chat chat;
+  chat.text = "anyone here?";
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
+  const auto stored = chat_store_->LoadRecent(room_id, 100);
+  ASSERT_TRUE(stored.ok());
+  ASSERT_EQ(stored->size(), 1u);
+
+  // Alice is the only member, so leaving deletes the room.
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromLeaveroom(moonbase::golf::LeaveRoom{})).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomLeft").has_value());
+
+  const auto remaining = chat_store_->LoadRecent(room_id, 100);
+  ASSERT_TRUE(remaining.ok());
+  EXPECT_TRUE(remaining->empty()) << "the room is gone; its history must be too";
+}
+
 // The membership guard, exercised through the handler that owns it
 // rather than a test double. MemoryChatStore authorizes every append
 // through this, so what it answers is what decides whether a message

@@ -295,6 +295,10 @@ void HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore:
       }
     }
     rooms_.erase(room);
+    // Under mu_ on purpose. The membership guard holds this lock for the
+    // whole of an append, so no append can be mid-flight here and land a
+    // message after the drop.
+    chat_store_->DropRoom(room_id);
     UnlistenRoomLocked(room_id);
     return;
   }
@@ -1143,6 +1147,11 @@ void HubHandler::LeaveEverywhere(const std::string& player_id, Outbox& outbox, W
   room->second.members.erase(player_id);
   if (room->second.members.empty()) {
     rooms_.erase(room);
+    // Chat dies with its room. PostgreSQL gets this from the cascade on
+    // the DeleteRoom below, but MemoryChatStore reclaims only here, and
+    // it is what production runs today — without this an emptied room
+    // keeps its last hundred messages for the life of the process.
+    chat_store_->DropRoom(room_id);
     // One DeleteRoom; the row's cascade takes members and games with it.
     // The wake rider tells any instance that still holds the room (a
     // race, not the norm — an emptied room has no members anywhere).

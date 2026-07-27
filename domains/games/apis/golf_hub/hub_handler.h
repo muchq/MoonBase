@@ -60,9 +60,11 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   ///
   /// Chat has its own store because its write path shares nothing with
   /// the others. A null chat_store selects a MemoryChatStore authorized
-  /// through WithMember below; PostgreSQL callers inject PgChatStore,
-  /// which authorizes against room_members in its own transaction and
-  /// needs nothing from this handler.
+  /// through WithMember below, which is what production runs today —
+  /// chat is process-local until #1226 wires PgChatStore into main, so
+  /// it neither survives a restart nor reaches another instance. A
+  /// PgChatStore passed here authorizes against room_members in its own
+  /// transaction and needs nothing from this handler.
   explicit HubHandler(std::shared_ptr<TicketVault> vault,
                       std::shared_ptr<cards::Dealer> dealer = std::make_shared<cards::Dealer>(),
                       std::shared_ptr<IdGenerator> ids = std::make_shared<WhimsicalIdGenerator>(),
