@@ -36,6 +36,13 @@ namespace golf_hub {
 /// — per-viewer state (own peeks, the held draw) has exactly one place to
 /// land and no identical-bytes path can leak it.
 ///
+/// Chat observability (#1226): chat_appends{result}, chat_rows_delivered,
+/// chat_catch_up_rows (a per-drain distribution — one observation's size
+/// is how far behind its wake found this instance, the lag signal),
+/// chat_history_replays, and chat_failures{stage}. Counts and stages
+/// only: room ids, player ids, and message text never reach a metric
+/// name or label, and the e2e suite sweeps for exactly that.
+///
 /// With a store attached, instances are interchangeable (#1194 step 3):
 /// the database is every game's authority. A move loads nothing extra —
 /// the local entry mirrors the stored row — but its result only counts

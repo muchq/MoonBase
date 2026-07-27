@@ -282,15 +282,27 @@ Then repeat the deterministic race target 100 times. Expected: no duplicates, lo
 - Modify: comments in `domains/games/apis/golf_hub/hub_handler.h`
 - Modify: comments in `domains/games/apis/golf_hub/chat_store.h`
 
-- [ ] **Step 1: Add metric assertions**
+- [x] **Step 1: Add metric assertions**
 
 Assert append success/failure, catch-up rows, and history-load failures are counted without room IDs or message text.
 
-- [ ] **Step 2: Implement counters and update contracts**
+Asserted through a `CapturingMetricsRecorder` in the e2e fixture (the
+`MetricsRecorder` record methods became virtual to make that possible),
+including a sweep that no metric name or label carries the room id,
+player ids, or message text.
+
+- [x] **Step 2: Implement counters and update contracts**
 
 Document retention, ordering, at-least-once delivery, listener recovery, and the process-local limitation of `MemoryChatStore`.
 
-- [ ] **Step 3: Run the backend regression suite**
+Counters: `chat_appends{result}`, `chat_rows_delivered`,
+`chat_catch_up_rows` (per-drain distribution; observation size = rows a
+wake found this instance behind, the lag signal), `chat_history_replays`,
+`chat_failures{stage}` (history_load / catch_up / cursor_seed, replacing
+the three separate failure counters). Surfaced on the dashboard via a
+`Chat` group and four timeseries in prom_proxy's golf_hub registry entry.
+
+- [x] **Step 3: Run the backend regression suite**
 
 ```bash
 bazel test //domains/games/apis/golf_hub/... //domains/platform/libs/pg/...

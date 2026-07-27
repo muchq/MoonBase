@@ -54,7 +54,12 @@ class MetricsRecorder {
   /// @brief Creates a metrics recorder for the given service.
   /// @param service_name The service name used to create the meter.
   explicit MetricsRecorder(const std::string& service_name);
-  ~MetricsRecorder() = default;
+  virtual ~MetricsRecorder() = default;
+
+  // The record methods are virtual for exactly one reason: tests wrap a
+  // recorder that captures what a service counts — names, values, and
+  // labels — and assert on it (including what must never appear in a
+  // label). Production code always uses this class directly.
 
   /// @brief Records a counter metric (monotonically increasing).
   ///
@@ -63,8 +68,8 @@ class MetricsRecorder {
   /// @param metric_name The metric name (e.g., "http_requests_total").
   /// @param value The amount to increment (default: 1).
   /// @param attributes Optional key-value labels for the metric.
-  void RecordCounter(const std::string& metric_name, int64_t value = 1,
-                     const std::map<std::string, std::string>& attributes = {});
+  virtual void RecordCounter(const std::string& metric_name, int64_t value = 1,
+                             const std::map<std::string, std::string>& attributes = {});
 
   /// @brief Records a histogram metric for latency/duration measurements.
   ///
@@ -74,8 +79,8 @@ class MetricsRecorder {
   /// @param metric_name The metric name (e.g., "request_duration_us").
   /// @param duration The duration to record.
   /// @param attributes Optional key-value labels for the metric.
-  void RecordLatency(const std::string& metric_name, std::chrono::microseconds duration,
-                     const std::map<std::string, std::string>& attributes = {});
+  virtual void RecordLatency(const std::string& metric_name, std::chrono::microseconds duration,
+                             const std::map<std::string, std::string>& attributes = {});
 
   /// @brief Records one observation of a per-event quantity.
   ///
@@ -87,8 +92,8 @@ class MetricsRecorder {
   /// @param metric_name The metric name (e.g., "scene_sphere_count").
   /// @param value The observed value.
   /// @param attributes Optional key-value labels for the metric.
-  void RecordDistribution(const std::string& metric_name, double value,
-                          const std::map<std::string, std::string>& attributes = {});
+  virtual void RecordDistribution(const std::string& metric_name, double value,
+                                  const std::map<std::string, std::string>& attributes = {});
 
   /// @brief Records a gauge metric (point-in-time value).
   ///
@@ -98,8 +103,8 @@ class MetricsRecorder {
   /// @param metric_name The metric name (e.g., "connections_active").
   /// @param value The current value to record.
   /// @param attributes Optional key-value labels for the metric.
-  void RecordGauge(const std::string& metric_name, double value,
-                   const std::map<std::string, std::string>& attributes = {});
+  virtual void RecordGauge(const std::string& metric_name, double value,
+                           const std::map<std::string, std::string>& attributes = {});
 
  private:
   /// The cached instrument, created under mu_ on first use. Element

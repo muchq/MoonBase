@@ -42,6 +42,20 @@ func TestRegistry_OrderAndEntriesAgree(t *testing.T) {
 	}
 }
 
+// The UI classifies series by name: anything in its STANDARD_SERIES
+// mirror renders on the standard charts, so a custom key that collides
+// is silently reclassified and never charts. The registry comment asks
+// authors to avoid this; this pins it.
+func TestRegistry_CustomTimeseriesKeysDoNotShadowStandardSeries(t *testing.T) {
+	for _, name := range serviceOrder {
+		standard := standardTimeseriesQueries(name)
+		for key := range serviceRegistry[name].CustomTimeseries {
+			_, shadows := standard[key]
+			assert.False(t, shadows, "service %q custom series %q shadows a standard series", name, key)
+		}
+	}
+}
+
 func TestMetricsHandler_GetServiceCatalog(t *testing.T) {
 	handler := &MetricsHandler{}
 
@@ -133,18 +147,25 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Equal(t, 107.0, response.Standard.ActiveRequests)
 
 	// Custom groups keep registry order and every descriptor is present.
-	require.Len(t, response.Custom, 2)
+	require.Len(t, response.Custom, 3)
 	assert.Equal(t, "Sessions", response.Custom[0].Title)
 	assert.Equal(t, "Activity", response.Custom[1].Title)
+	assert.Equal(t, "Chat", response.Custom[2].Title)
 	assert.Len(t, response.Custom[0].Metrics, 6)
-	require.Len(t, response.Custom[1].Metrics, 3)
+	assert.Len(t, response.Custom[1].Metrics, 3)
+	require.Len(t, response.Custom[2].Metrics, 6)
 
 	assert.Equal(t, CustomMetricValue{Label: "active", Value: 200.0, Unit: "sessions"},
 		response.Custom[0].Metrics[0])
 	assert.Equal(t, CustomMetricValue{Label: "commands_per_sec", Value: 206.0, Unit: "/s"},
 		response.Custom[1].Metrics[0])
+	assert.Equal(t, CustomMetricValue{Label: "rejections_per_sec", Value: 208.0, Unit: "/s"},
+		response.Custom[1].Metrics[2])
+	// Chat starts at CustomScalars index 9, so its first value is 200+9.
+	assert.Equal(t, CustomMetricValue{Label: "messages_per_sec", Value: 209.0, Unit: "/s"},
+		response.Custom[2].Metrics[0])
 	// The omitted query's descriptor survives with a zero value.
-	last := response.Custom[1].Metrics[2]
+	last := response.Custom[2].Metrics[5]
 	assert.Equal(t, omitted.Label, last.Label)
 	assert.Equal(t, 0.0, last.Value)
 }
@@ -257,15 +278,22 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_StandardPlusCustom(t *testin
 	assert.Equal(t, "30m", response.TimeRange)
 
 	names := map[string]bool{}
+	previous := ""
 	for _, series := range response.Series {
 		names[series.MetricName] = true
+		// Deterministic payload order: the UI renders custom series in
+		// payload order, so a map-iteration shuffle would reshuffle its
+		// charts on every refresh.
+		assert.GreaterOrEqual(t, series.MetricName, previous)
+		previous = series.MetricName
 	}
-	// The five standard series plus golf's six custom series.
+	// The five standard series plus golf's ten custom series.
 	expected := []string{
 		"request_rate", "error_rate_percent", "avg_duration_us", "p95_duration_us",
 		"active_requests",
 		"sessions_active", "session_starts", "command_rate", "event_rate",
 		"rejection_rate", "disconnect_rate",
+		"chat_message_rate", "chat_delivery_rate", "chat_failure_rate", "chat_catch_up_rows",
 	}
 	assert.Len(t, names, len(expected))
 	for _, name := range expected {

@@ -188,7 +188,7 @@ void HubHandler::SeedChatCursorLocked(const std::string& room_id) {
     // Fail toward duplication, never loss: a cursor left at 0 re-delivers
     // retained rows, which clients dedupe by id; guessing high would
     // swallow messages.
-    Count("chat_cursor_seed_failures");
+    Count("chat_failures", {{"stage", "cursor_seed"}});
     LOG(WARNING) << "chat cursor seed failed: " << rows.status();
   }
   chat_cursors_.try_emplace(room_id, cursor);
@@ -716,11 +716,12 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
     if (!appended.ok()) {
       // Nothing was stored, so nothing is echoed: the sender is told no
       // rather than shown a message no one else will ever receive.
-      Reject(player_id, appended.status().code() == absl::StatusCode::kFailedPrecondition
-                            ? "not in a room"
-                            : "chat is unavailable");
+      const bool stale = appended.status().code() == absl::StatusCode::kFailedPrecondition;
+      Count("chat_appends", {{"result", stale ? "rejected" : "unavailable"}});
+      Reject(player_id, stale ? "not in a room" : "chat is unavailable");
       return;
     }
+    Count("chat_appends", {{"result", "stored"}});
 
     // The committed row reaches locals through the pump, like every
     // other row. That is not indirection for its own sake: a remote
@@ -1361,6 +1362,12 @@ void HubHandler::PumpChat(const std::string& room_id) {
   }
 
   bool more = true;
+  // Rows this drain staged, across pages and again-loops. Recorded as
+  // one distribution observation per drain when the drain ends: the
+  // count is delivery volume, and the size of any one observation is
+  // how far behind its wake found this instance — the lag signal the
+  // dashboard wants, with no room id attached.
+  int64_t drained = 0;
   while (more) {
     int64_t after = 0;
     {
@@ -1380,7 +1387,7 @@ void HubHandler::PumpChat(const std::string& room_id) {
       const auto room = rooms_.find(room_id);
       if (cursor == chat_cursors_.end() || room == rooms_.end()) return;
       if (!rows.ok()) {
-        Count("chat_catch_up_failures");
+        Count("chat_failures", {{"stage", "catch_up"}});
         LOG(WARNING) << "chat catch-up load failed: " << rows.status();
         if (cursor->second.again) {
           // A wake landed while this load was failing. That signal may
@@ -1392,13 +1399,14 @@ void HubHandler::PumpChat(const std::string& room_id) {
           continue;
         }
         cursor->second.pumping = false;
-        return;
+        break;  // ends the drain; the per-drain observation below still records
       }
       for (const ChatRow& row : *rows) {
         if (row.message_id <= cursor->second.delivered) continue;
         const GolfEvents event = GolfEvents::FromRoomchat(ChatEvent(row));
         for (const auto& member : room->second.members) outbox.To(member.first, event);
         cursor->second.delivered = row.message_id;
+        ++drained;
       }
       more = rows->size() == kChatCatchUpPage;
       if (!more && cursor->second.again) {
@@ -1409,6 +1417,10 @@ void HubHandler::PumpChat(const std::string& room_id) {
     }
     Deliver(outbox);
   }
+  if (metrics_ != nullptr) {
+    if (drained > 0) metrics_->RecordCounter("chat_rows_delivered", drained);
+    metrics_->RecordDistribution("chat_catch_up_rows", static_cast<double>(drained));
+  }
 }
 
 void HubHandler::SendChatHistory(const std::string& room_id, const std::string& player_id) {
@@ -1416,7 +1428,7 @@ void HubHandler::SendChatHistory(const std::string& room_id, const std::string& 
   if (!rows.ok()) {
     // The admission already succeeded; chat history is not worth failing
     // it over. No room id or text in the log — the status is enough.
-    Count("chat_history_load_failures");
+    Count("chat_failures", {{"stage", "history_load"}});
     LOG(WARNING) << "chat history load failed for a joining stream: " << rows.status();
     return;
   }
@@ -1430,6 +1442,7 @@ void HubHandler::SendChatHistory(const std::string& room_id, const std::string& 
   history.messages.reserve(rows->size());
   for (const ChatRow& row : *rows) history.messages.push_back(ChatEvent(row));
   Send(player_id, GolfEvents::FromRoomchathistory(std::move(history)));
+  Count("chat_history_replays");
 }
 
 void HubHandler::Count(const char* name, const std::map<std::string, std::string>& attributes) {
