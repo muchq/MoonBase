@@ -433,14 +433,18 @@ TEST_F(GolfGameFixture, ChatReachesTheRoom) {
   ASSERT_TRUE(too_long.has_value());
   EXPECT_EQ(too_long->as_commandRejected_or_null()->reason, "chat text is too long");
 
-  // Ill-formed UTF-8 is refused at the edge rather than reaching a store
-  // that would refuse it less politely.
+  // Ill-formed UTF-8 never reaches the hub as such: the JSON-text wire
+  // replaces the stray byte with U+FFFD before the handler sees it, so a
+  // client cannot drive the edge's UTF-8 rejection over this transport.
+  // The message is accepted and echoed with the replacement in place.
+  // ValidateChatText's rejection of ill-formed UTF-8 is exercised
+  // directly against the store in chat_store_test.
   moonbase::golf::Chat mangled;
   mangled.text = "hi\xC3";
   ASSERT_TRUE(table->alice.stream.Send(GolfCommands::FromChat(mangled)).ok());
-  auto not_utf8 = ReceiveCase(table->alice.stream, "commandRejected");
-  ASSERT_TRUE(not_utf8.has_value());
-  EXPECT_EQ(not_utf8->as_commandRejected_or_null()->reason, "chat text is not valid UTF-8");
+  auto sanitized = ReceiveCase(table->alice.stream, "roomChat");
+  ASSERT_TRUE(sanitized.has_value());
+  EXPECT_EQ(sanitized->as_roomChat_or_null()->text, "hi\xEF\xBF\xBD");
 }
 
 // The membership guard, exercised through the handler that owns it
