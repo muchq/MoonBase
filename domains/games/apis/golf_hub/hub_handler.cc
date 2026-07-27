@@ -14,6 +14,7 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
+#include "domains/games/apis/golf_hub/protocol_input.h"
 #include "domains/games/libs/cards/card_mapper.h"
 #include "domains/games/libs/cards/golf/player.h"
 
@@ -402,7 +403,7 @@ smithy::Outcome<moonbase::golf::GetSessionOutput> HubHandler::GetSession(
     const smithy::server::RequestContext& /*context*/) {
   std::string player_id;
   bool token_valid = false;
-  if (input.resumeToken.has_value()) {
+  if (input.resumeToken.has_value() && !HasEmbeddedNul(*input.resumeToken)) {
     if (auto resolved = vault_->ResolveResumeToken(*input.resumeToken)) {
       player_id = std::move(*resolved);
       token_valid = true;
@@ -430,6 +431,10 @@ smithy::Outcome<moonbase::golf::GetSessionOutput> HubHandler::GetSession(
 
 smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input,
                                                  moonbase::golf::PlayAsyncServerStream& stream) {
+  if (HasEmbeddedNul(input.ticket)) {
+    Count("stream_admissions_refused", {{"reason", "bad_ticket"}});
+    co_return smithy::Error::Modeled("Unauthenticated", "ticket expired or already spent");
+  }
   auto player = vault_->SpendTicket(input.ticket);
   if (!player.has_value()) {
     Count("stream_admissions_refused", {{"reason", "bad_ticket"}});
@@ -539,6 +544,10 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
   }
 
   if (const auto* join = command.as_joinRoom_or_null()) {
+    if (HasEmbeddedNul(join->roomId)) {
+      Reject(player_id, "invalid room id");
+      return;
+    }
     Outbox outbox;
     Writes writes;
     bool joined = false;
@@ -840,6 +849,10 @@ void HubHandler::CreateGameMove(const std::string& player_id) {
 }
 
 void HubHandler::JoinGameMove(const std::string& player_id, const std::string& game_id) {
+  if (HasEmbeddedNul(game_id)) {
+    Reject(player_id, "invalid game id");
+    return;
+  }
   Outbox outbox;
   std::string reason;
   {

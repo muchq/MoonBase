@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <optional>
 #include <string>
 
@@ -18,6 +19,12 @@ using moonbase::golf::GolfEvents;
 
 using moonbase::golf::GolfMove;
 using moonbase::golf::GolfUpdate;
+
+std::string WithNul(std::string prefix, std::string suffix) {
+  prefix.push_back('\0');
+  prefix.append(suffix);
+  return prefix;
+}
 
 }  // namespace
 
@@ -41,6 +48,66 @@ TEST_F(GolfHubStreamFixture, SessionMintsDistinctPlayersAndResumeTokenRoundTrips
   // A valid token is echoed back, not replaced — the client's long-lived
   // credential must not churn on every reconnect.
   EXPECT_EQ(resumed->resumeToken, first->resumeToken);
+}
+
+class RecordingVault final : public TicketVault {
+ public:
+  RecordingVault()
+      : delegate_(/*ticket_ttl=*/std::chrono::seconds(60),
+                  /*resume_ttl=*/std::chrono::seconds(60)) {}
+
+  absl::StatusOr<std::string> IssueTicket(const std::string& player_id) override {
+    return delegate_.IssueTicket(player_id);
+  }
+  absl::StatusOr<std::string> IssueResumeToken(const std::string& player_id) override {
+    return delegate_.IssueResumeToken(player_id);
+  }
+  bool PeekTicket(const std::string& ticket) const override {
+    ++peek_calls;
+    return delegate_.PeekTicket(ticket);
+  }
+  std::optional<std::string> SpendTicket(const std::string& ticket) override {
+    ++spend_calls;
+    return delegate_.SpendTicket(ticket);
+  }
+  std::optional<std::string> ResolveResumeToken(const std::string& token) const override {
+    ++resolve_calls;
+    return delegate_.ResolveResumeToken(token);
+  }
+
+  mutable std::atomic<int> peek_calls = 0;
+  std::atomic<int> spend_calls = 0;
+  mutable std::atomic<int> resolve_calls = 0;
+
+ private:
+  InMemoryTicketVault delegate_;
+};
+
+class ProtocolBoundaryFixture : public GolfHubStreamFixture {
+ protected:
+  std::shared_ptr<TicketVault> MakeVault() override {
+    recording_vault_ = std::make_shared<RecordingVault>();
+    return recording_vault_;
+  }
+
+  std::shared_ptr<RecordingVault> recording_vault_;
+};
+
+TEST_F(ProtocolBoundaryFixture, NulBearingCredentialsNeverReachTheVault) {
+  moonbase::golf::GetSessionInput session;
+  session.resumeToken = WithNul("rt-bogus", "suffix");
+  const auto minted = client_->GetSession(session);
+  ASSERT_TRUE(minted.ok());
+  EXPECT_EQ(recording_vault_->resolve_calls.load(), 0);
+
+  moonbase::golf::PlayInput play;
+  play.ticket = WithNul("t-bogus", "suffix");
+  auto stream = client_->Play(play);
+  ASSERT_TRUE(stream.ok());
+  const auto first = stream->Receive();
+  ASSERT_FALSE(first.ok());
+  EXPECT_EQ(first.error().code(), "Unauthenticated");
+  EXPECT_EQ(recording_vault_->spend_calls.load(), 0);
 }
 
 TEST_F(GolfHubStreamFixture, BadTicketFailsTypedBeforeAnyEvent) {
@@ -137,6 +204,13 @@ TEST_F(GolfHubStreamFixture, CommandsOutsideARoomAreRejectedInBand) {
   ASSERT_TRUE(seat->stream.Send(GolfCommands::FromJoinroom(join)).ok());
   auto unknown = ReceiveCase(seat->stream, "commandRejected");
   ASSERT_TRUE(unknown.has_value());
+
+  moonbase::golf::JoinRoom nul_join;
+  nul_join.roomId = WithNul("r-nope", "alias");
+  ASSERT_TRUE(seat->stream.Send(GolfCommands::FromJoinroom(nul_join)).ok());
+  auto invalid = ReceiveCase(seat->stream, "commandRejected");
+  ASSERT_TRUE(invalid.has_value());
+  EXPECT_EQ(invalid->as_commandRejected_or_null()->reason, "invalid room id");
 
   // The stream survived both rejections.
   ASSERT_TRUE(seat->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
@@ -500,6 +574,13 @@ TEST_F(GolfGameFixture, PendingGameLifecycleAndLobbySummaries) {
   EXPECT_EQ(joined->as_gameJoined_or_null()->view.phase, "waiting");
   EXPECT_EQ(announced->as_gameCreated_or_null()->gameId,
             joined->as_gameJoined_or_null()->view.gameId);
+
+  moonbase::golf::JoinGame nul_join;
+  nul_join.gameId = WithNul(joined->as_gameJoined_or_null()->view.gameId, "alias");
+  ASSERT_TRUE(bob->stream.Send(Move(GolfMove::FromJoingame(nul_join))).ok());
+  auto invalid_game = ReceiveCase(bob->stream, "commandRejected");
+  ASSERT_TRUE(invalid_game.has_value());
+  EXPECT_EQ(invalid_game->as_commandRejected_or_null()->reason, "invalid game id");
 
   // A solo game cannot start.
   ASSERT_TRUE(alice->stream.Send(Move(GolfMove::FromStartgame(moonbase::golf::StartGame{}))).ok());

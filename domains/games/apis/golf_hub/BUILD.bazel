@@ -26,6 +26,11 @@ smithy_cpp_client_library(
 )
 
 cc_library(
+    name = "protocol_input",
+    hdrs = ["protocol_input.h"],
+)
+
+cc_library(
     name = "id_generator",
     srcs = ["id_generator.cc"],
     hdrs = ["id_generator.h"],
@@ -261,6 +266,7 @@ cc_library(
         ":golf_hub_smithy_server",
         ":hub_store",
         ":id_generator",
+        ":protocol_input",
         ":ticket_vault",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards:card_mapper",
@@ -374,6 +380,7 @@ cc_binary(
         ":id_generator",
         ":pg_hub_store",
         ":pg_ticket_vault",
+        ":protocol_input",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/aura",
