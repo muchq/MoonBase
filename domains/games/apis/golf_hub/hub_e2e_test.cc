@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -370,7 +371,7 @@ TEST_F(GolfHubStreamFixture, CommandsOutsideARoomAreRejectedInBand) {
   EXPECT_TRUE(ReceiveCase(seat->stream, "roomState").has_value());
 }
 
-TEST_F(GolfHubStreamFixture, CleanCloseFreesTheRoomSlotAndNotifies) {
+TEST_F(GolfHubStreamFixture, CleanCloseParksTheSeatAndResumeReclaimsIt) {
   auto alice = OpenSeat();
   auto bob = OpenSeat();
   ASSERT_TRUE(alice.has_value() && bob.has_value());
@@ -380,17 +381,45 @@ TEST_F(GolfHubStreamFixture, CleanCloseFreesTheRoomSlotAndNotifies) {
   ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
   auto created = ReceiveCase(alice->stream, "roomState");
   ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
   moonbase::golf::JoinRoom join;
-  join.roomId = created->as_roomState_or_null()->roomId;
+  join.roomId = room_id;
   ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
   ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
 
+  // A closed tab is a clean websocket close, byte-identical to any other
+  // deliberate-looking exit the browser makes on the way out (#1236).
+  // Close carries no leave intent — only the explicit leaveRoom command
+  // does — so the seat parks for the grace window instead of emptying.
   bob->stream.Close();
-  auto shrunk = ReceiveCase(alice->stream, "roomState");
-  ASSERT_TRUE(shrunk.has_value());
-  ASSERT_EQ(shrunk->as_roomState_or_null()->players.size(), 1u);
-  EXPECT_EQ(shrunk->as_roomState_or_null()->players[0].playerId, alice->player_id);
+  auto parked = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(parked.has_value());
+  {
+    const auto* room = parked->as_roomState_or_null();
+    ASSERT_EQ(room->players.size(), 2u);
+    for (const auto& player : room->players) {
+      EXPECT_EQ(player.connected, player.playerId == alice->player_id);
+    }
+  }
+
+  // The resume token reclaims the parked seat, and the room sees the
+  // connected flag flip back.
+  auto resumed = OpenSeat(bob->resume_token);
+  ASSERT_TRUE(resumed.has_value());
+  EXPECT_EQ(resumed->player_id, bob->player_id);
+  auto ready = ReceiveCase(resumed->stream, "sessionReady");
+  ASSERT_TRUE(ready.has_value());
+  EXPECT_TRUE(ready->as_sessionReady_or_null()->resumed);
+  ASSERT_TRUE(ready->as_sessionReady_or_null()->roomId.has_value());
+  EXPECT_EQ(*ready->as_sessionReady_or_null()->roomId, room_id);
+  auto rejoined = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(rejoined.has_value());
+  {
+    const auto* room = rejoined->as_roomState_or_null();
+    ASSERT_EQ(room->players.size(), 2u);
+    for (const auto& player : room->players) EXPECT_TRUE(player.connected);
+  }
 }
 
 TEST_F(GolfGameFixture, FullGameKnockerTieWinsAlone) {
@@ -1076,6 +1105,10 @@ TEST_F(GolfHubStreamFixture, WithMemberRunsOnlyForCurrentMembers) {
 TEST_F(GolfGameFixture, AbandoningALiveGameResolvesIt) {
   auto table = SeatedTable();
   ASSERT_TRUE(table.has_value());
+  // Drain the opening deals so the next gameState each seat sees is the
+  // finish ceremony's.
+  ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
 
   ASSERT_TRUE(
       table->bob.stream.Send(Move(GolfMove::FromLeavegame(moonbase::golf::LeaveGame{}))).ok());
@@ -1084,15 +1117,142 @@ TEST_F(GolfGameFixture, AbandoningALiveGameResolvesIt) {
   EXPECT_EQ(ack->as_gameLeft_or_null()->gameId, table->game_id);
 
   // Alice is the last seat standing: the game resolves in her favor and
-  // leaves the room's game list empty.
+  // leaves the room's game list empty. The final view and the summary
+  // still carry bob's seat — his name, his cards face up, and the score
+  // they stood at — not just the survivor's (#1236).
+  auto final_view = ReceiveGolf(table->alice.stream, "gameState");
+  ASSERT_TRUE(final_view.has_value());
+  {
+    const auto& view = final_view->as_gameState_or_null()->view;
+    EXPECT_EQ(view.phase, "ended");
+    ASSERT_EQ(view.players.size(), 2u);
+    for (const auto& player : view.players) {
+      EXPECT_EQ(player.revealedIndexes.size(), 4u) << player.playerId;
+      EXPECT_TRUE(player.score.has_value()) << player.playerId;
+    }
+  }
   auto ended = ReceiveGolf(table->alice.stream, "gameEnded");
   ASSERT_TRUE(ended.has_value());
-  ASSERT_EQ(ended->as_gameEnded_or_null()->winners.size(), 1u);
-  EXPECT_EQ(ended->as_gameEnded_or_null()->winners[0], table->alice.player_id);
+  const auto* result = ended->as_gameEnded_or_null();
+  ASSERT_EQ(result->winners.size(), 1u);
+  EXPECT_EQ(result->winners[0], table->alice.player_id);
+  ASSERT_EQ(result->finalScores.size(), 2u);
+  std::set<std::string> scored;
+  for (const auto& score : result->finalScores) scored.insert(score.playerId);
+  EXPECT_TRUE(scored.contains(table->alice.player_id));
+  EXPECT_TRUE(scored.contains(table->bob.player_id));
 
   auto room = ReceiveCase(table->alice.stream, "roomState");
   ASSERT_TRUE(room.has_value());
   EXPECT_TRUE(room->as_roomState_or_null()->games.empty());
+}
+
+// The reported bug (#1236): an accidental browser close mid-game arrives
+// as a clean websocket close, which used to resolve the game against the
+// absent player within seconds. A close parks the seat instead: the
+// table sees the disconnect, nothing ends, and the resume token reclaims
+// the seat with the game intact.
+TEST_F(GolfGameFixture, MidGameBrowserCloseParksTheSeatAndTheGameSurvives) {
+  auto table = SeatedTable();
+  ASSERT_TRUE(table.has_value());
+  auto& alice = table->alice;
+  ASSERT_TRUE(ReceiveGolf(alice.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
+
+  table->bob.stream.Close();
+
+  // Alice hears the disconnect — and nothing that ends the game.
+  bool bob_disconnected = false;
+  for (int i = 0; i < 8 && !bob_disconnected; ++i) {
+    auto event = NextEvent(alice.stream);
+    ASSERT_TRUE(event.has_value());
+    if (const auto* envelope = event->as_golf_or_null()) {
+      EXPECT_EQ(envelope->update.as_gameEnded_or_null(), nullptr)
+          << "a parked seat must not resolve the game";
+      continue;
+    }
+    const auto* room = event->as_roomState_or_null();
+    if (room == nullptr) continue;
+    ASSERT_EQ(room->players.size(), 2u);
+    for (const auto& player : room->players) {
+      if (player.playerId == table->bob.player_id) bob_disconnected = !player.connected;
+    }
+  }
+  ASSERT_TRUE(bob_disconnected);
+  // And then silence: no verdict follows the park.
+  EXPECT_FALSE(alice.stream.Receive(std::chrono::milliseconds(300)).ok());
+
+  // The resume token reclaims the seat with the game still going.
+  auto resumed = OpenSeat(table->bob.resume_token);
+  ASSERT_TRUE(resumed.has_value());
+  EXPECT_EQ(resumed->player_id, table->bob.player_id);
+  auto ready = ReceiveCase(resumed->stream, "sessionReady");
+  ASSERT_TRUE(ready.has_value());
+  EXPECT_TRUE(ready->as_sessionReady_or_null()->resumed);
+  auto rejoined = ReceiveGolf(resumed->stream, "gameJoined");
+  ASSERT_TRUE(rejoined.has_value());
+  {
+    const auto& view = rejoined->as_gameJoined_or_null()->view;
+    EXPECT_EQ(view.gameId, table->game_id);
+    EXPECT_NE(view.phase, "ended");
+    ASSERT_EQ(view.players.size(), 2u);
+  }
+  // The reclaimed seat still plays: an opening peek comes back revealed.
+  moonbase::golf::PeekCard peek;
+  peek.cardIndex = 0;
+  ASSERT_TRUE(resumed->stream.Send(Move(GolfMove::FromPeekcard(peek))).ok());
+  auto peeked = ReceiveGolf(resumed->stream, "gameState");
+  ASSERT_TRUE(peeked.has_value());
+  {
+    const auto& view = peeked->as_gameState_or_null()->view;
+    ASSERT_EQ(view.players.size(), 2u);
+    for (const auto& player : view.players) {
+      if (player.playerId != table->bob.player_id) continue;
+      EXPECT_EQ(player.revealedIndexes, std::vector<int>{0});
+    }
+  }
+}
+
+// Grace expiry is the deliberate end of a disconnect (#1236): only after
+// the window runs out does the absence resolve the game — in the
+// survivor's favor, with every seat still on the scorecard.
+class ShortGraceFixture : public GolfGameFixture {
+ protected:
+  std::chrono::seconds GracePeriod() override { return std::chrono::seconds(1); }
+};
+
+TEST_F(ShortGraceFixture, GraceExpiryResolvesTheGameWithEverySeatScored) {
+  auto table = SeatedTable();
+  ASSERT_TRUE(table.has_value());
+  auto& alice = table->alice;
+  ASSERT_TRUE(ReceiveGolf(alice.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
+
+  table->bob.stream.Close();
+
+  // The window runs out with bob still gone: alice takes the game, and
+  // the summary keeps bob's seat — name and standing score — next to
+  // hers.
+  auto ended = ReceiveGolf(alice.stream, "gameEnded");
+  ASSERT_TRUE(ended.has_value());
+  const auto* result = ended->as_gameEnded_or_null();
+  EXPECT_EQ(result->winner, alice.player_id);
+  ASSERT_EQ(result->winners.size(), 1u);
+  EXPECT_EQ(result->winners[0], alice.player_id);
+  ASSERT_EQ(result->finalScores.size(), 2u);
+  std::set<std::string> scored;
+  for (const auto& score : result->finalScores) scored.insert(score.playerId);
+  EXPECT_TRUE(scored.contains(alice.player_id));
+  EXPECT_TRUE(scored.contains(table->bob.player_id));
+
+  // The reaped seat leaves the room: alice ends up alone.
+  bool alone = false;
+  for (int i = 0; i < 4 && !alone; ++i) {
+    auto room = ReceiveCase(alice.stream, "roomState");
+    ASSERT_TRUE(room.has_value());
+    alone = room->as_roomState_or_null()->players.size() == 1;
+  }
+  EXPECT_TRUE(alone);
 }
 
 TEST_F(GolfGameFixture, IllegalMovesRejectInBandAndTheGameContinues) {

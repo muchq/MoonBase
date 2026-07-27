@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <deque>
+#include <limits>
 #include <set>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -93,16 +95,49 @@ std::string InstanceId() {
   return absl::StrCat("hub-", absl::Hex(absl::Uniform<uint64_t>(gen), absl::kZeroPad16));
 }
 
+// winners() restricted to the seats the roster still names. A final
+// state can carry a seat its roster has dropped — an abandonment that
+// ended the game keeps the departed hand so its cards and score reach
+// the scorecard (#1236) — and such a seat cannot win: the game resolved
+// against it. For an ordinary finish the roster names every seat and
+// this is exactly the engine's rule, knocker-takes-ties included.
+std::unordered_set<int> WinnersAmong(const golf::GameState& state,
+                                     const std::vector<std::string>& roster) {
+  std::unordered_set<int> winning;
+  int min_score = std::numeric_limits<int>::max();
+  for (std::size_t i = 0; i < state.getPlayers().size(); ++i) {
+    const golf::Player& seat = state.getPlayer(static_cast<int>(i));
+    const std::string occupant = seat.getName().value_or("");
+    if (std::find(roster.begin(), roster.end(), occupant) == roster.end()) continue;
+    const int score = seat.score();
+    if (score < min_score) {
+      min_score = score;
+      winning.clear();
+    }
+    if (score == min_score) winning.insert(static_cast<int>(i));
+  }
+  // The knocker takes ties alone — when still in contention.
+  if (winning.contains(state.getWhoKnocked())) {
+    winning.clear();
+    winning.insert(state.getWhoKnocked());
+  }
+  return winning;
+}
+
 // The per-seat stat deltas a finished game applies — the payload of
 // CommitGameFinish, and the same numbers FinalizeGameLocked mirrors into
-// the local member rows.
-std::vector<golf_hub::HubStore::StatsDelta> StatsDeltas(const golf::GameState& state) {
-  const auto winner_indexes = state.winners();
+// the local member rows. Roster seats only: an abandoned seat shows on
+// the scorecard but tallies nothing.
+std::vector<golf_hub::HubStore::StatsDelta> StatsDeltas(const golf::GameState& state,
+                                                        const std::vector<std::string>& roster) {
+  const auto winner_indexes = WinnersAmong(state, roster);
   std::vector<golf_hub::HubStore::StatsDelta> deltas;
   for (std::size_t i = 0; i < state.getPlayers().size(); ++i) {
     const golf::Player& seat = state.getPlayer(static_cast<int>(i));
+    const std::string occupant = seat.getName().value_or("");
+    if (std::find(roster.begin(), roster.end(), occupant) == roster.end()) continue;
     golf_hub::HubStore::StatsDelta delta;
-    delta.player_id = seat.getName().value_or("");
+    delta.player_id = occupant;
     delta.played = 1;
     delta.won = winner_indexes.contains(static_cast<int>(i)) ? 1 : 0;
     delta.score = seat.score();
@@ -543,31 +578,19 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
 
   while (true) {
     auto received = co_await stream.Receive();
-    if (!received.ok()) {
-      // Abrupt loss (or our own slow-consumer close): park the seat for
-      // the grace window (ADR-0020); expiry reaps it. Detach fails only
-      // when the entry is already gone — nothing left to do then.
+    if (!received.ok() || !received->has_value()) {
+      // Any close parks the seat for the grace window (ADR-0020) —
+      // expiry reaps it, a resume reclaims it. A clean close carries no
+      // leave intent: a closed tab sends the same close frame (#1236),
+      // and the deliberate exit is the explicit leaveRoom command.
+      // Detach fails only when the entry is already gone — nothing left
+      // to do then.
       if (registry_.Detach(player_id)) {
         TrackActive(-1);
-        Count("stream_disconnects", {{"kind", "abrupt"}});
+        Count("stream_disconnects", {{"kind", received.ok() ? "clean" : "abrupt"}});
         SetConnected(player_id, false);
         if (auto current = CurrentRoom(player_id)) BroadcastRoom(*current);
       }
-      co_return smithy::Unit{};
-    }
-    if (!received->has_value()) {
-      // Clean close: a deliberate leave. Free the seat, game, and room.
-      registry_.Remove(player_id);
-      TrackActive(-1);
-      Count("stream_disconnects", {{"kind", "clean"}});
-      Outbox outbox;
-      Writes writes;
-      {
-        const std::lock_guard<std::mutex> lock(mu_);
-        LeaveEverywhere(player_id, outbox, writes);
-        EnqueueWritesLocked(writes);
-      }
-      Deliver(outbox);
       co_return smithy::Unit{};
     }
     HandleCommand(player_id, **received);
@@ -1076,7 +1099,7 @@ void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, Mo
             effects.announce_turn ? PlayerIdAt(state, state.getWhoseTurn()) : std::string();
         const bool over = next->isOver();
         std::vector<HubStore::StatsDelta> deltas;
-        if (over) deltas = StatsDeltas(*next);
+        if (over) deltas = StatsDeltas(*next, ref->entry->roster);
         const Commit commit =
             CommitEntryLocked(ref->room_id, ref->game_id, *ref->entry, ref->entry->roster,
                               *std::move(next), over ? &deltas : nullptr);
@@ -1254,6 +1277,10 @@ void HubHandler::LeaveGameLocked(const std::string& player_id, Outbox& outbox, W
     if (entry.started()) {
       const int seat = entry.state->playerIndex(player_id);
       if (seat >= 0) {
+        // With seats to spare the game continues compacted; at two the
+        // engine keeps every seat and ends the game, so the departed
+        // hand still reaches the scorecard (#1236). The shrunken roster
+        // is what records who left — and who can still win.
         auto next = entry.state->removePlayer(seat);
         state.emplace(next.ok() ? *std::move(next) : *entry.state);
       } else {
@@ -1262,7 +1289,7 @@ void HubHandler::LeaveGameLocked(const std::string& player_id, Outbox& outbox, W
     }
     const bool over = state.has_value() && state->isOver();
     std::vector<HubStore::StatsDelta> deltas;
-    if (over) deltas = StatsDeltas(*state);
+    if (over) deltas = StatsDeltas(*state, roster);
     const Commit commit = CommitEntryLocked(ref->room_id, ref->game_id, entry, roster, state,
                                             over ? &deltas : nullptr);
     if (commit == Commit::kRebased) continue;
@@ -1581,8 +1608,9 @@ void HubHandler::StageGameOverLocked(const std::string& room_id, Room& room,
   if (game == room.games.end() || !game->second.started()) return;
   const golf::GameState& state = *game->second.state;
 
-  // Seat order, so the display string is stable.
-  const auto winner_indexes = state.winners();
+  // Seat order, so the display string is stable. Winners come from the
+  // roster's seats; the scores keep every seat, abandoned or not.
+  const auto winner_indexes = WinnersAmong(state, game->second.roster);
   std::vector<std::string> winner_ids;
   for (std::size_t i = 0; i < state.getPlayers().size(); ++i) {
     if (winner_indexes.contains(static_cast<int>(i))) {
@@ -1616,17 +1644,15 @@ void HubHandler::FinalizeGameLocked(const std::string& room_id, Room& room,
   if (game == room.games.end() || !game->second.started()) return;
   const golf::GameState& state = *game->second.state;
 
-  // Room-scoped running stats: every seat played, every winner won.
-  // With a store these same deltas already rode the finish commit; this
-  // mirrors them into the local rows (and IS the update in-memory).
-  const auto winner_indexes = state.winners();
-  for (std::size_t i = 0; i < state.getPlayers().size(); ++i) {
-    const golf::Player& seat = state.getPlayer(static_cast<int>(i));
-    const auto member = room.members.find(seat.getName().value_or(""));
+  // Room-scoped running stats: every roster seat played, every winner
+  // won. With a store these same deltas already rode the finish commit;
+  // this mirrors them into the local rows (and IS the update in-memory).
+  for (const HubStore::StatsDelta& delta : StatsDeltas(state, game->second.roster)) {
+    const auto member = room.members.find(delta.player_id);
     if (member == room.members.end()) continue;
-    member->second.games_played++;
-    member->second.total_score += seat.score();
-    if (winner_indexes.contains(static_cast<int>(i))) member->second.games_won++;
+    member->second.games_played += delta.played;
+    member->second.games_won += delta.won;
+    member->second.total_score += delta.score;
   }
 
   StageGameOverLocked(room_id, room, game_id, outbox);

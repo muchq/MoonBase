@@ -260,8 +260,9 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   std::optional<std::string> CurrentRoom(const std::string& player_id);
   Room* FindRoomLocked(const std::string& player_id);
   std::optional<GameRef> FindGameLocked(const std::string& player_id);
-  /// Removes the player from their game and room (deliberate leave, clean
-  /// close, or grace expiry) and stages every notification that implies.
+  /// Removes the player from their game and room (deliberate leave or
+  /// grace expiry — never a mere close, which only parks the seat) and
+  /// stages every notification that implies.
   void LeaveEverywhere(const std::string& player_id, Outbox& outbox, Writes& writes);
   void LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writes& writes);
   void BroadcastRoom(const std::string& room_id);

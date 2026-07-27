@@ -339,6 +339,15 @@ absl::StatusOr<GameState> GameState::removePlayer(int player) const {
     return FailedPreconditionError("no such player");
   }
 
+  // Below two remaining seats there is no game left to play: every seat
+  // stays — the abandoned hand's cards and score stand for the final
+  // tally, and the caller's own roster records who left — with isOver
+  // forced so the finish resolves through the ordinary scoring path.
+  if (players.size() <= 2) {
+    return GameState{drawPile,  discardPile, players, false,     whoseTurn,
+                     whoseTurn, peeksHidden, gameId,  version_id};
+  }
+
   vector<Player> updatedPlayers;
   for (size_t i = 0; i < players.size(); i++) {
     if (static_cast<int>(i) != player) {
@@ -350,23 +359,13 @@ absl::StatusOr<GameState> GameState::removePlayer(int player) const {
   if (player < newWhoseTurn) {
     newWhoseTurn--;
   }
-  if (!updatedPlayers.empty()) {
-    newWhoseTurn = newWhoseTurn % static_cast<int>(updatedPlayers.size());
-  } else {
-    newWhoseTurn = 0;
-  }
+  newWhoseTurn = newWhoseTurn % static_cast<int>(updatedPlayers.size());
 
   int newWhoKnocked = whoKnocked;
   if (player == newWhoKnocked) {
     newWhoKnocked = -1;  // the knocker fled; the knock is void
   } else if (newWhoKnocked != -1 && player < newWhoKnocked) {
     newWhoKnocked--;
-  }
-
-  // Below two players there is no game left to play: force isOver so the
-  // remaining seat's win resolves through the ordinary scoring path.
-  if (updatedPlayers.size() < 2) {
-    newWhoKnocked = newWhoseTurn;
   }
 
   return GameState{drawPile,    discardPile,  std::move(updatedPlayers),

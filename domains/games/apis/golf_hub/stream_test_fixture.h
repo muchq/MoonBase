@@ -197,6 +197,10 @@ class GolfHubStreamFixture : public testing::Test {
   /// overrides with PgChatStore, which authorizes in its own transaction
   /// and needs nothing from the handler.
   virtual std::shared_ptr<ChatStore> MakeChatStore() { return nullptr; }
+  /// ADR-0020 reconnect grace — long enough that no test sees an expiry
+  /// by accident; the expiry suites override it down to something a
+  /// receive budget can wait out.
+  virtual std::chrono::seconds GracePeriod() { return std::chrono::seconds(60); }
 
   void SetUp() override { BuildHub(); }
 
@@ -220,9 +224,9 @@ class GolfHubStreamFixture : public testing::Test {
           [guard](const std::string& room_id, const std::string& player_id,
                   const MemberAction& action) { return (*guard)(room_id, player_id, action); });
     }
-    handler_ = std::make_shared<HubHandler>(
-        vault_, std::make_shared<cards::NoShuffleDealer>(), ids_,
-        /*grace_period=*/std::chrono::seconds(60), metrics_, store_, chat_store_);
+    handler_ =
+        std::make_shared<HubHandler>(vault_, std::make_shared<cards::NoShuffleDealer>(), ids_,
+                                     /*grace_period=*/GracePeriod(), metrics_, store_, chat_store_);
     if (default_memory_chat) {
       *guard = [handler = handler_.get()](const std::string& room_id, const std::string& player_id,
                                           const MemberAction& action) {
