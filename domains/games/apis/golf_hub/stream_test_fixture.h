@@ -35,13 +35,41 @@
 
 namespace golf_hub {
 
+// How long a receive helper waits in total for the event it wants. The
+// frame counts below bound the wrong-events case; this bounds the case
+// they cannot see — an expectation for an event the hub never sends,
+// which without a deadline blocks inside Receive() forever and burns the
+// test's whole timeout with nothing to show for it.
+inline constexpr std::chrono::milliseconds kReceiveBudget{5000};
+
+// Spends what is left of `budget` on one receive, or reports the timeout
+// itself when the budget is gone. Feeding the remainder to each call
+// keeps the helper's total wait bounded no matter how many frames arrive.
+inline auto ReceiveWithin(moonbase::golf::PlayClientStream& stream,
+                          std::chrono::steady_clock::time_point deadline) {
+  const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+      deadline - std::chrono::steady_clock::now());
+  // A non-positive deadline polls rather than blocks, which is what we
+  // want on the last look: take an event already in hand, else time out.
+  return stream.Receive(remaining);
+}
+
 // Receives until an event of the wanted case arrives (skipping others),
-// failing after a few frames so a wrong stream can't hang the test.
+// giving up after a few frames so a wrong stream can't hang the test, or
+// after kReceiveBudget so a silent one can't either.
 inline std::optional<moonbase::golf::GolfEvents> ReceiveCase(
-    moonbase::golf::PlayClientStream& stream, const std::string& wanted) {
+    moonbase::golf::PlayClientStream& stream, const std::string& wanted,
+    std::chrono::milliseconds budget = kReceiveBudget) {
+  const auto deadline = std::chrono::steady_clock::now() + budget;
   for (int i = 0; i < 8; ++i) {
-    auto received = stream.Receive();
-    if (!received.ok() || !received->has_value()) return std::nullopt;
+    auto received = ReceiveWithin(stream, deadline);
+    if (!received.ok()) {
+      // Name the event nobody sent: the whole point of the deadline is a
+      // test that says what it was waiting for instead of hanging.
+      ADD_FAILURE() << "gave up waiting for " << wanted << ": " << received.error().message();
+      return std::nullopt;
+    }
+    if (!received->has_value()) return std::nullopt;
     if (wanted == (*received)->case_name()) return **received;
   }
   return std::nullopt;
@@ -50,10 +78,16 @@ inline std::optional<moonbase::golf::GolfEvents> ReceiveCase(
 // Same, but tunnels into the golf envelope: returns the first GolfUpdate
 // of the wanted case, skipping room noise and other updates in between.
 inline std::optional<moonbase::golf::GolfUpdate> ReceiveGolf(
-    moonbase::golf::PlayClientStream& stream, const std::string& wanted) {
+    moonbase::golf::PlayClientStream& stream, const std::string& wanted,
+    std::chrono::milliseconds budget = kReceiveBudget) {
+  const auto deadline = std::chrono::steady_clock::now() + budget;
   for (int i = 0; i < 16; ++i) {
-    auto received = stream.Receive();
-    if (!received.ok() || !received->has_value()) return std::nullopt;
+    auto received = ReceiveWithin(stream, deadline);
+    if (!received.ok()) {
+      ADD_FAILURE() << "gave up waiting for golf " << wanted << ": " << received.error().message();
+      return std::nullopt;
+    }
+    if (!received->has_value()) return std::nullopt;
     const auto* envelope = (*received)->as_golf_or_null();
     if (envelope == nullptr) continue;
     if (wanted == envelope->update.case_name()) return envelope->update;
