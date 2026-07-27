@@ -13,22 +13,25 @@
 
 namespace golf_hub {
 
-/// The durable ChatStore (#1226). Every append is one CTE-chained
-/// statement — the same idiom PgHubStore uses for game commits — so the
-/// membership check, the insert, the prune, and the NOTIFY either all
-/// land or none do without an explicit transaction.
+/// The durable ChatStore (#1226). An append locks the room, inserts,
+/// prunes to the retention window, and notifies, all in one
+/// transaction, so either every part lands or none does.
 ///
-/// The statement takes a FOR UPDATE lock on the room row, which is what
-/// makes cursor catch-up sound: appends to one room serialize, so
-/// message_id order is also commit order and a reader that has seen id N
-/// can never be shown an id below N afterwards. Without it two appends
-/// racing in the same room could commit out of sequence and a reader
-/// polling LoadAfter would step over the slower one. Rooms don't
-/// contend with each other, only with their own deletion.
+/// Two properties come out of that lock, and they need different
+/// mechanisms. Ordering comes from the lock itself: appends to a room
+/// serialize from lock to commit, so message_id order is also commit
+/// order and a cursor that has seen id N is never later shown an id
+/// below it. Retention comes from the statement split: a query takes
+/// its snapshot before it waits on a lock, so a single CTE-chained
+/// statement would prune against a view of the room from before the
+/// previous append committed and leave the room one row over the
+/// window. Statements issued after the lock is held take fresh
+/// snapshots and see everything committed ahead of them.
 ///
-/// Appends run through pg::Client::ExecOnce, so a connection lost
-/// mid-statement is reported instead of retried: a chat line duplicated
-/// under a second id is worse than one reported as failed.
+/// Nothing is retried. pg::Client heals a dropped connection by
+/// re-running a statement, which is safe for a conditional write but
+/// not for an append: the second run would post the same message again
+/// under a new id, and no consumer can dedupe that.
 class PgChatStore final : public ChatStore {
  public:
   explicit PgChatStore(std::shared_ptr<pg::Client> db);

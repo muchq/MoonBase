@@ -1,6 +1,11 @@
 #include "domains/platform/libs/pg/pg.h"
 
+#include <chrono>
+#include <condition_variable>
 #include <cstdlib>
+#include <memory>
+#include <mutex>
+#include <thread>
 
 #include "absl/status/status.h"
 #include "gtest/gtest.h"
@@ -38,6 +43,132 @@ TEST(PgClientTest, ExecHealsAfterConnectionIsKilled) {
   const auto after = client.Exec("SELECT pg_backend_pid()");
   ASSERT_TRUE(after.ok());
   EXPECT_NE(after->Get(0, 0), before->Get(0, 0));
+}
+
+class PgTransactionTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    url_ = std::getenv("PG_TEST_DB_URL");
+    if (url_ == nullptr || *url_ == '\0') GTEST_SKIP() << "PG_TEST_DB_URL unset";
+    client_ = std::make_unique<pg::Client>(url_);
+    ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS pg_txn_test").ok());
+    ASSERT_TRUE(client_->Exec("CREATE TABLE pg_txn_test (n integer)").ok());
+  }
+
+  int Count() {
+    auto result = client_->Exec("SELECT 1 FROM pg_txn_test");
+    EXPECT_TRUE(result.ok()) << result.status();
+    return result.ok() ? result->rows() : -1;
+  }
+
+  const char* url_ = nullptr;
+  std::unique_ptr<pg::Client> client_;
+};
+
+TEST_F(PgTransactionTest, CommitsWhenTheBodySucceeds) {
+  const absl::Status status = client_->InTransaction([](pg::Transaction& txn) -> absl::Status {
+    if (auto first = txn.Exec("INSERT INTO pg_txn_test VALUES (1)"); !first.ok()) {
+      return first.status();
+    }
+    return txn.Exec("INSERT INTO pg_txn_test VALUES (2)").status();
+  });
+  ASSERT_TRUE(status.ok()) << status;
+  EXPECT_EQ(Count(), 2);
+}
+
+TEST_F(PgTransactionTest, RollsBackWhenTheBodyReturnsAnError) {
+  const absl::Status status = client_->InTransaction([](pg::Transaction& txn) -> absl::Status {
+    if (auto wrote = txn.Exec("INSERT INTO pg_txn_test VALUES (1)"); !wrote.ok()) {
+      return wrote.status();
+    }
+    // The body changed its mind after writing — nothing may survive.
+    return absl::AbortedError("caller declined to commit");
+  });
+  EXPECT_EQ(status.code(), absl::StatusCode::kAborted);
+  EXPECT_EQ(Count(), 0);
+
+  // A failing statement rolls back just the same, and leaves the client
+  // usable rather than stuck in an aborted transaction.
+  const absl::Status failed = client_->InTransaction([](pg::Transaction& txn) -> absl::Status {
+    if (auto wrote = txn.Exec("INSERT INTO pg_txn_test VALUES (3)"); !wrote.ok()) {
+      return wrote.status();
+    }
+    return txn.Exec("SELECT no_such_function()").status();
+  });
+  EXPECT_FALSE(failed.ok());
+  EXPECT_EQ(Count(), 0);
+  EXPECT_TRUE(client_->Exec("SELECT 1").ok()) << "the connection must still be usable";
+}
+
+// The property the chat append depends on: a statement issued after the
+// transaction's lock is held takes a fresh snapshot, so it sees rows
+// another writer committed while this one was waiting. A CTE-chained
+// single statement would still be reading its pre-wait snapshot here.
+TEST_F(PgTransactionTest, StatementsAfterALockSeeConcurrentCommits) {
+  ASSERT_TRUE(
+      client_->Exec("CREATE TABLE IF NOT EXISTS pg_txn_lock (id integer PRIMARY KEY)").ok());
+  ASSERT_TRUE(client_->Exec("TRUNCATE pg_txn_lock").ok());
+  ASSERT_TRUE(client_->Exec("INSERT INTO pg_txn_lock VALUES (1)").ok());
+
+  // Holder takes the lock and inserts a row, uncommitted.
+  pg::Client holder(url_);
+  ASSERT_TRUE(holder.Exec("BEGIN").ok());
+  ASSERT_TRUE(holder.Exec("SELECT 1 FROM pg_txn_lock WHERE id = 1 FOR UPDATE").ok());
+  ASSERT_TRUE(holder.Exec("INSERT INTO pg_txn_test VALUES (99)").ok());
+
+  pg::Client waiter(url_);
+  int seen = -1;
+  std::thread thread([&] {
+    const absl::Status status = waiter.InTransaction([&](pg::Transaction& txn) -> absl::Status {
+      auto locked = txn.Exec("SELECT 1 FROM pg_txn_lock WHERE id = 1 FOR UPDATE");
+      if (!locked.ok()) return locked.status();
+      auto rows = txn.Exec("SELECT 1 FROM pg_txn_test");
+      if (!rows.ok()) return rows.status();
+      seen = rows->rows();
+      return absl::OkStatus();
+    });
+    EXPECT_TRUE(status.ok()) << status;
+  });
+
+  ASSERT_TRUE(holder.Exec("COMMIT").ok());
+  thread.join();
+  EXPECT_EQ(seen, 1) << "the post-lock read must see the row committed while it waited";
+}
+
+// Exclusive ownership: the connection is held for the whole callback,
+// so another caller's statement cannot land in the middle of one.
+TEST_F(PgTransactionTest, OtherCallersCannotInterleaveOnTheSameConnection) {
+  std::mutex mu;
+  std::condition_variable cv;
+  bool inside = false;
+  bool outsider_finished = false;
+
+  std::thread outsider;
+  const absl::Status status = client_->InTransaction([&](pg::Transaction& txn) -> absl::Status {
+    if (auto wrote = txn.Exec("INSERT INTO pg_txn_test VALUES (1)"); !wrote.ok()) {
+      return wrote.status();
+    }
+    outsider = std::thread([&] {
+      EXPECT_TRUE(client_->Exec("INSERT INTO pg_txn_test VALUES (2)").ok());
+      const std::lock_guard<std::mutex> lock(mu);
+      outsider_finished = true;
+      cv.notify_all();
+    });
+    {
+      std::unique_lock<std::mutex> lock(mu);
+      inside = true;
+      // Bounded: if the outsider ever did slip in, this returns early
+      // and the assertion below fails instead of hanging the suite.
+      cv.wait_for(lock, std::chrono::seconds(2), [&] { return outsider_finished; });
+      EXPECT_FALSE(outsider_finished) << "an outside Exec ran inside the transaction";
+    }
+    return absl::OkStatus();
+  });
+
+  ASSERT_TRUE(status.ok()) << status;
+  EXPECT_TRUE(inside);
+  outsider.join();
+  EXPECT_EQ(Count(), 2) << "the outsider's write lands once the transaction releases";
 }
 
 }  // namespace

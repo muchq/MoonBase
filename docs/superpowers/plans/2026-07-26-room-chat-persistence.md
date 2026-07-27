@@ -12,7 +12,8 @@
 
 - Retain at most the latest 100 committed messages per room.
 - Delete chat only with its room; deleting a member preserves prior messages.
-- Keep messages immutable plain text and reject empty/whitespace-only or more than 500 UTF-8 bytes. Handlers reject so clients see a protocol error; stores re-check through `ValidateChatText` so retention stays bounded regardless of the caller.
+- Keep messages immutable plain text and reject empty/whitespace-only, more than 500 bytes, ill-formed UTF-8, or an embedded NUL (libpq sends text parameters as C strings, so a NUL would silently truncate). The limit counts bytes, and text that would split a character is rejected rather than truncated. Handlers reject so clients see a protocol error; stores re-check through `ValidateChatText` so retention stays bounded regardless of the caller.
+- Appends are authorized against room membership in the store, not only the handler, so a membership row that vanishes mid-send rejects the message. `PgChatStore` reads `room_members` inside the transaction; `MemoryChatStore` takes an injected `MemberCheck` and relies on the handler's re-check under `mu_` for the remaining window.
 - Use server-assigned monotonic IDs and server time; delivery is at-least-once and consumers deduplicate by ID. `message_id` is the only ordering key — `sent_at_unix_millis` is wall-clock and display-only.
 - Retention can prune rows a lagging cursor never read. `LoadAfter` returns the oldest row still retained above the cursor and does not report the gap, so catch-up is bounded by the 100-row window, not by the cursor. A consumer more than 100 messages behind loses the difference by design.
 - `DropRoom` means different things per implementation: `MemoryChatStore` reclaims memory only through it, while PostgreSQL cascades from the room row and no-ops. Any handler path that deletes a room must call it, and that call needs its own coverage since PostgreSQL tests cannot catch a missing one.
@@ -38,6 +39,8 @@
   - `ChatStore::LoadAfter(room_id, after_message_id, limit) -> StatusOr<vector<ChatRow>>`
   - `ChatStore::DropRoom(room_id)`
   - `ValidateChatText(text) -> Status`, shared by handlers and every store
+  - `NotAMemberError()`, the one rejection both stores return for a non-member or missing room
+  - `MemberCheck`, the membership predicate `MemoryChatStore` is constructed with
 
 - [x] **Step 1: Write failing memory-store tests**
 
@@ -94,11 +97,11 @@ Observed: `chat_store_test` and the unchanged `hub_store_test` pass.
 - Consumes: Task 1 `ChatStore` interface.
 - Produces: a `pg::Client` transaction surface that holds the connection mutex from `BEGIN` through `COMMIT`/`ROLLBACK`, and an independent `PgChatStore`.
 
-- [ ] **Step 1: Write failing PostgreSQL tests**
+- [x] **Step 1: Write failing PostgreSQL tests**
 
 Cover migration idempotence, append/notify, ascending recent/after reads, missing member, member deletion preserving history, room cascade, 101-to-100 pruning, two-store concurrent appends, and rollback emitting neither row nor notify.
 
-- [ ] **Step 2: Verify RED against the local PostgreSQL test database**
+- [x] **Step 2: Verify RED against the local PostgreSQL test database**
 
 Run:
 
@@ -109,19 +112,21 @@ GOLF_HUB_TEST_DB_URL='postgresql://moonbase_test:moonbase_test@127.0.0.1:55432/m
 
 Expected: compile/schema failures for missing chat support.
 
-- [ ] **Step 3: Add transaction ownership to `pg::Client`**
+- [x] **Step 3: Add transaction ownership to `pg::Client`**
 
 Expose a callback transaction API whose transaction object calls `ExecLocked`, rolls back on callback failure, and does not reconnect/retry after `BEGIN`. Add unit/integration coverage proving another `Client` caller cannot interleave statements on the same connection.
 
-- [ ] **Step 4: Add the schema**
+Observed: a CTE-chained single statement was tried first and is **not** an adequate substitute, despite the issue leaving that door open. In READ COMMITTED a statement takes its snapshot before it blocks on `FOR UPDATE`, so a waiting append prunes against a view of the room from before the lock holder committed and leaves 101 rows. Verified directly: two concurrent appends to a room already holding 100 messages ended at 101. Separate statements issued *after* the lock is held take fresh snapshots and see the prior commit, which is what makes retention hold — the reason the transaction is load-bearing rather than stylistic. `PgTransactionTest.StatementsAfterALockSeeConcurrentCommits` pins the property.
+
+- [x] **Step 4: Add the schema**
 
 Create `room_chat_messages(message_id bigint GENERATED ALWAYS AS IDENTITY, room_id text REFERENCES rooms ON DELETE CASCADE, player_id text, body text, sent_at timestamptz)` with byte-length checks and `(room_id, message_id)` index.
 
-- [ ] **Step 5: Implement atomic append**
+- [x] **Step 5: Implement atomic append**
 
 Within one transaction: lock and verify the room/member, insert and return ID/time, prune rows older than the newest 100, notify `ChatChannel(room_id)`, then commit. Return `FailedPrecondition` when membership vanished and a failed status for database errors.
 
-- [ ] **Step 6: Implement bounded reads and verify GREEN**
+- [x] **Step 6: Implement bounded reads and verify GREEN**
 
 Recent reads select newest `LIMIT n` in a subquery and return ascending; cursor reads select `message_id > $2 ORDER BY message_id LIMIT $3`.
 

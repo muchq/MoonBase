@@ -1,6 +1,7 @@
 #ifndef DOMAINS_PLATFORM_LIBS_PG_PG_H
 #define DOMAINS_PLATFORM_LIBS_PG_PG_H
 
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -35,6 +36,33 @@ class Result {
   pg_result* result_;
 };
 
+class Client;
+
+/// Statement access inside Client::InTransaction. Every call runs on the
+/// connection the transaction owns, in order, with no reconnect and no
+/// retry: re-running a statement after BEGIN would execute it against a
+/// transaction the server has already aborted.
+///
+/// Each statement takes its own snapshot, which is the reason to reach
+/// for this over a CTE-chained single statement. A statement that waits
+/// on a row lock still reads the snapshot it took before waiting, so
+/// anything the lock holder commits meanwhile stays invisible to it. Do
+/// the locking in one statement and the work that must see current rows
+/// in the next.
+class Transaction {
+ public:
+  Transaction(const Transaction&) = delete;
+  Transaction& operator=(const Transaction&) = delete;
+
+  absl::StatusOr<Result> Exec(const std::string& sql, const std::vector<std::string>& params = {});
+
+ private:
+  friend class Client;
+  explicit Transaction(Client& client) : client_(client) {}
+
+  Client& client_;
+};
+
 /// The owned libpq wrapper (#1194: "libpq behind a small owned wrapper —
 /// same instinct as the rest of the platform libs"). One blocking
 /// connection, serialized by a mutex, text-format parameters: what
@@ -61,19 +89,22 @@ class Client {
   /// deleted reports zero rows).
   absl::StatusOr<Result> Exec(const std::string& sql, const std::vector<std::string>& params = {});
 
-  /// Exec without the retry: the statement reaches the server at most
-  /// once, and a connection-level failure is reported rather than
-  /// retried. Connecting is still automatic — only re-running a
-  /// statement whose outcome is unknown is what this gives up.
+  /// Runs `body` between BEGIN and COMMIT, holding the connection for
+  /// the whole callback so no other caller can interleave a statement.
+  /// A non-ok return from `body`, or a failed BEGIN/COMMIT, rolls back.
   ///
-  /// Use it for a write whose second execution would be visible. A
-  /// conditional write (games) is safe to retry because the condition
-  /// misses the second time; an unconditional append is not, and a
-  /// duplicate row carrying a fresh id is one no consumer can dedupe.
-  absl::StatusOr<Result> ExecOnce(const std::string& sql,
-                                  const std::vector<std::string>& params = {});
+  /// Nothing is retried: a transaction whose COMMIT was sent but never
+  /// acknowledged may or may not have landed, and re-running it would
+  /// double any write it contains. Callers that need a result out of
+  /// the callback capture it by reference.
+  ///
+  /// `body` must not touch this Client — Exec would deadlock on the
+  /// connection lock this call already holds. Use the Transaction.
+  absl::Status InTransaction(const std::function<absl::Status(Transaction&)>& body);
 
  private:
+  friend class Transaction;
+
   absl::Status EnsureConnectedLocked();
   absl::StatusOr<Result> ExecLocked(const std::string& sql, const std::vector<std::string>& params);
 
