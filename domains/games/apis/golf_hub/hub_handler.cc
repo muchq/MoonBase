@@ -1382,8 +1382,16 @@ void HubHandler::PumpChat(const std::string& room_id) {
       if (!rows.ok()) {
         Count("chat_catch_up_failures");
         LOG(WARNING) << "chat catch-up load failed: " << rows.status();
+        if (cursor->second.again) {
+          // A wake landed while this load was failing. That signal may
+          // be the only one an already-committed append gets — its own
+          // pump call already came and coalesced — so it buys one
+          // immediate retry instead of being thrown away. Bounded: each
+          // retry consumes a signal, so a persistent outage still exits.
+          cursor->second.again = false;
+          continue;
+        }
         cursor->second.pumping = false;
-        cursor->second.again = false;  // the next wake retries
         return;
       }
       for (const ChatRow& row : *rows) {

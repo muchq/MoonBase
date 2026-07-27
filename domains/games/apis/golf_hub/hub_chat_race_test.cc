@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "domains/games/apis/golf_hub/chat_store.h"
 #include "domains/games/apis/golf_hub/hub_store.h"
@@ -63,9 +64,10 @@ class TestGate {
 };
 
 // Forwards everything; when armed, the next load (either kind) announces
-// itself and blocks until released. That parks a pump mid-drain at a
-// chosen point — the only way to deterministically land an append or a
-// second wake while a load is in flight.
+// itself and blocks until released — and, when asked, fails after the
+// release instead of forwarding. That parks a pump mid-drain at a chosen
+// point, the only way to deterministically land an append, a second
+// wake, or a transient store failure while a load is in flight.
 class GatedChatStore final : public ChatStore {
  public:
   explicit GatedChatStore(std::shared_ptr<ChatStore> delegate) : delegate_(std::move(delegate)) {}
@@ -77,31 +79,36 @@ class GatedChatStore final : public ChatStore {
   }
   absl::StatusOr<std::vector<ChatRow>> LoadRecent(const std::string& room_id,
                                                   std::size_t limit) override {
-    Gate();
+    if (Gate()) return absl::UnavailableError("gated load failure");
     return delegate_->LoadRecent(room_id, limit);
   }
   absl::StatusOr<std::vector<ChatRow>> LoadAfter(const std::string& room_id,
                                                  int64_t after_message_id,
                                                  std::size_t limit) override {
-    Gate();
+    if (Gate()) return absl::UnavailableError("gated load failure");
     return delegate_->LoadAfter(room_id, after_message_id, limit);
   }
   void DropRoom(const std::string& room_id) override { delegate_->DropRoom(room_id); }
 
   void ArmGate() { armed_ = true; }
+  void FailOnRelease() { fail_on_release_ = true; }
   bool WaitForEntry(std::chrono::milliseconds timeout) { return entered_.WaitFor(timeout); }
   void Release() { released_.Open(); }
 
  private:
-  void Gate() {
+  // Returns true when the gated call should fail instead of forwarding.
+  bool Gate() {
     if (armed_.exchange(false)) {
       entered_.Open();
       released_.Wait();
+      return fail_on_release_.exchange(false);
     }
+    return false;
   }
 
   std::shared_ptr<ChatStore> delegate_;
   std::atomic<bool> armed_ = false;
+  std::atomic<bool> fail_on_release_ = false;
   TestGate entered_;
   TestGate released_;
 };
@@ -477,6 +484,33 @@ TEST_F(HubChatRaceFixture, AppendCommittingDuringAnInFlightWakeLoadIsStillDelive
   ASSERT_GT(ExpectNextChat(*alice, "sentinel"), 0);
   restored->handler->OnNotify(ChatChannel(room_id), "primary");
   ASSERT_GT(ExpectNextChat(*resumed, "sentinel"), 0);
+}
+
+// A transient store failure must not eat a wake that coalesced into the
+// failing drain: that signal may be the only one an already-committed
+// append gets (its own pump call already came and coalesced), so the
+// drain spends it on one immediate retry. The gate parks the remote's
+// catch-up load, lands the second wake, then fails the parked load on
+// release — with no further wakes, the retry is bob's only path.
+TEST_F(HubChatRaceFixture, WakeCoalescedIntoAFailingLoadStillDelivers) {
+  auto pair = SplitRoom();
+  ASSERT_TRUE(pair.has_value());
+
+  ASSERT_TRUE(SendChat(pair->alice, "storm"));
+  ASSERT_GT(ExpectNextChat(pair->alice, "storm"), 0);
+
+  gated_->ArmGate();
+  gated_->FailOnRelease();
+  std::thread wake([&] { remote_->handler->OnNotify(ChatChannel(pair->room_id), "primary"); });
+  const bool entered = gated_->WaitForEntry(std::chrono::seconds(5));
+  EXPECT_TRUE(entered);
+  if (entered) {
+    remote_->handler->OnNotify(ChatChannel(pair->room_id), "primary");  // coalesces
+  }
+  gated_->Release();
+  wake.join();
+
+  ASSERT_GT(ExpectNextChat(pair->bob, "storm"), 0);
 }
 
 // A wake that lands while a drain is already running must neither start

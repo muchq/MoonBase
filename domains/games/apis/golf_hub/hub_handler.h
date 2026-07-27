@@ -343,7 +343,7 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
     bool pumping = false;
     bool again = false;
   };
-  std::map<std::string, ChatCursor> chat_cursors_;
+  std::unordered_map<std::string, ChatCursor> chat_cursors_;
 
   std::unordered_map<std::string, std::string> player_room_;
   std::unordered_map<std::string, std::string> player_game_;

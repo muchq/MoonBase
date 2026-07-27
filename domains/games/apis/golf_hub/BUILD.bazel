@@ -366,6 +366,7 @@ cc_test(
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@googletest//:gtest_main",
         "@smithy_cpp//runtime:client",
