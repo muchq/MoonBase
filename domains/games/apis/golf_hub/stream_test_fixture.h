@@ -75,6 +75,22 @@ inline std::optional<moonbase::golf::GolfEvents> ReceiveCase(
   return std::nullopt;
 }
 
+// One frame, bounded, no skipping — for asserting exact event order.
+// ReceiveCase would silently step over an event that must not be there.
+inline std::optional<moonbase::golf::GolfEvents> NextEvent(
+    moonbase::golf::PlayClientStream& stream, std::chrono::milliseconds budget = kReceiveBudget) {
+  auto received = stream.Receive(budget);
+  if (!received.ok()) {
+    ADD_FAILURE() << "receive failed mid-sequence: " << received.error().message();
+    return std::nullopt;
+  }
+  if (!received->has_value()) {
+    ADD_FAILURE() << "stream closed mid-sequence";
+    return std::nullopt;
+  }
+  return **received;
+}
+
 // Same, but tunnels into the golf envelope: returns the first GolfUpdate
 // of the wanted case, skipping room noise and other updates in between.
 inline std::optional<moonbase::golf::GolfUpdate> ReceiveGolf(
@@ -197,6 +213,25 @@ class GolfHubStreamFixture : public testing::Test {
   }
   std::optional<Seat> OpenSeat(const std::optional<std::string>& resume_token = std::nullopt) {
     return OpenSeatVia(*client_, resume_token);
+  }
+
+  // The create-room preamble a dozen tests otherwise spell out: sends
+  // CreateRoom from an already-ready seat, receives the creator's
+  // roomState, and returns the room id — empty (with a failure already
+  // recorded) when any step misbehaves.
+  std::string CreateRoomFor(Seat& seat) {
+    if (!seat.stream
+             .Send(moonbase::golf::GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{}))
+             .ok()) {
+      ADD_FAILURE() << "CreateRoom send failed";
+      return "";
+    }
+    auto created = ReceiveCase(seat.stream, "roomState");
+    if (!created.has_value()) {
+      ADD_FAILURE() << "no roomState after CreateRoom";
+      return "";
+    }
+    return created->as_roomState_or_null()->roomId;
   }
 
   // Room with two seats in a started game: with the NoShuffleDealer the

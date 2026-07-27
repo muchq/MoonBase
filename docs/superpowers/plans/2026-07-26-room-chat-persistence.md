@@ -186,19 +186,23 @@ Expected: both targets build.
 - Consumes: Tasks 1-3 chat-store/protocol types.
 - Produces: persisted local chat delivery and join/resume history replay.
 
-- [ ] **Step 1: Add failing e2e tests**
+- [x] **Step 1: Add failing e2e tests**
 
 Test whitespace rejection, durable append before echo, latest-100 history on join, history on resume, no replay to existing members, and store failure producing `commandRejected` without `roomChat`.
 
-- [ ] **Step 2: Verify RED**
+Observed: whitespace rejection, durable-append-before-echo, and store-failure-rejects landed with Task 3 (#1229). History-on-join (frame-order asserted), empty-history-on-join, no-replay-to-existing-members, and history-on-resume landed with this task. Resume is exercised through a second handler instance sharing the first's vault and stores — the store-restart shape of resume — rather than by simulating a wire failure, which the in-memory transport does not model. The latest-100 boundary stays pinned at the store layer (both stores); the e2e pins the wiring, ordering, and audience.
+
+- [x] **Step 2: Verify RED**
 
 Run the focused `hub_e2e_test`; expected failures show the current local-only fan-out and absent history.
 
-- [ ] **Step 3: Replace local-only chat**
+Observed: not runnable in the restricted-egress sandbox (`boost.beast`, see `docs/BUILD_AND_IDE.md`); the new tests fail by construction against a handler with no history path, and the GREEN half of the loop runs locally.
+
+- [x] **Step 3: Replace local-only chat** (landed with Task 3, #1229)
 
 Resolve room ID under `mu_`, release the lock for `ChatStore::Append`, reacquire to stage the returned row to current local members, advance the room cursor, then deliver outside the lock. Inject `std::shared_ptr<ChatStore>` separately from `HubStore`, defaulting to `MemoryChatStore`; its `MemberGuard` reacquires `mu_`, verifies membership, and invokes the memory append before releasing that lock.
 
-- [ ] **Step 4: Replay history**
+- [x] **Step 4: Replay history**
 
 Load recent rows outside `mu_` during join/resume and send one `roomChatHistory` only to the admitted stream after `roomState`. Convert every row through one `ChatEvent` helper shared with live delivery.
 

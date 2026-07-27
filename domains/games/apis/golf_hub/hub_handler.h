@@ -201,6 +201,14 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// Every event leaves through here so stream_events sees each send.
   void Send(const std::string& player_id, moonbase::golf::GolfEvents event);
 
+  /// Loads the room's retained history and sends one roomChatHistory to
+  /// the just-admitted player — nobody else; the room already has it.
+  /// Call outside mu_ (the load may reach a database) and after the
+  /// stream's roomState, the order the model documents. A failed load is
+  /// counted and skipped rather than failing the join: live delivery
+  /// catches the client up from here, and overlap is legal anyway.
+  void SendChatHistory(const std::string& room_id, const std::string& player_id);
+
   void SetConnected(const std::string& player_id, bool connected);
   std::optional<std::string> CurrentRoom(const std::string& player_id);
   Room* FindRoomLocked(const std::string& player_id);
