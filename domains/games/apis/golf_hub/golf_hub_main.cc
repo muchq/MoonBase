@@ -27,6 +27,7 @@
 #include "domains/games/apis/golf_hub/migrations.h"
 #include "domains/games/apis/golf_hub/pg_hub_store.h"
 #include "domains/games/apis/golf_hub/pg_ticket_vault.h"
+#include "domains/games/apis/golf_hub/protocol_input.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/platform/libs/aura/middleware.h"
@@ -165,7 +166,7 @@ int main() {
       if (auto refusal = origin_gate(request)) return refusal;
     }
     const auto ticket = ExtractQueryParam(request.target, "ticket");
-    if (!ticket.has_value() || !vault->PeekTicket(*ticket)) {
+    if (!ticket.has_value() || golf_hub::HasEmbeddedNul(*ticket) || !vault->PeekTicket(*ticket)) {
       smithy::http::HttpResponse refusal;
       refusal.status = 401;
       refusal.headers.Set("content-type", "application/json");

@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "domains/games/apis/golf_hub/chat_store.h"
 #include "domains/games/apis/golf_hub/hub_store.h"
 #include "domains/games/apis/golf_hub/id_generator.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
@@ -45,7 +46,9 @@ namespace golf_hub {
 /// local — only wake-ups cross the wire). Rooms and members keep the
 /// step-2 async write-through (single writer per row, nothing to
 /// conflict with), with notify riders so remote rosters converge. Chat
-/// stays instance-local: transient, lossy by protocol.
+/// commits to its own ChatStore before it is echoed, so a message its
+/// sender sees is a message that was stored; cross-instance chat
+/// fan-out and join-time history replay are still to come (#1226).
 class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
  public:
   using Registry = smithy::server::SessionRegistry<moonbase::golf::GolfEvents>;
@@ -54,12 +57,35 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// argument selects the production MemoryHubStore; PostgreSQL callers
   /// inject PgHubStore. Call RestoreFromStore before serving to rebuild
   /// rooms, members, and games.
+  ///
+  /// Chat has its own store because its write path shares nothing with
+  /// the others. A null chat_store selects a MemoryChatStore authorized
+  /// through WithMember below, which is what production runs today —
+  /// chat is process-local until #1226 wires PgChatStore into main, so
+  /// it neither survives a restart nor reaches another instance. A
+  /// PgChatStore passed here authorizes against room_members in its own
+  /// transaction and needs nothing from this handler.
   explicit HubHandler(std::shared_ptr<TicketVault> vault,
                       std::shared_ptr<cards::Dealer> dealer = std::make_shared<cards::Dealer>(),
                       std::shared_ptr<IdGenerator> ids = std::make_shared<WhimsicalIdGenerator>(),
                       std::chrono::seconds grace_period = std::chrono::minutes(5),
                       std::shared_ptr<futility::otel::MetricsRecorder> metrics = nullptr,
-                      std::shared_ptr<HubStore> store = nullptr);
+                      std::shared_ptr<HubStore> store = nullptr,
+                      std::shared_ptr<ChatStore> chat_store = nullptr);
+
+  /// Runs `action` while mu_ holds (room_id, player_id) to be a current
+  /// member, or returns false without running it. Membership cannot
+  /// change while the action runs, which is what lets a caller act on a
+  /// seat it just checked instead of one that may already be gone.
+  ///
+  /// Nothing about this is chat-specific; chat is only its first caller.
+  ///
+  /// Callers must not already hold mu_ — it is not recursive, so calling
+  /// this from under the lock deadlocks rather than blocking. That is
+  /// why the chat path resolves the room, drops the lock, and lets the
+  /// store re-take it through here.
+  bool WithMember(const std::string& room_id, const std::string& player_id,
+                  const MemberAction& action);
 
   // Note: operation IO generates as <Op>Input/<Op>Output regardless of
   // the named shapes bound in the model, and moonbase.games shapes land
@@ -250,6 +276,7 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   const std::shared_ptr<IdGenerator> ids_;
   const std::shared_ptr<futility::otel::MetricsRecorder> metrics_;
   const std::shared_ptr<HubStore> store_;
+  const std::shared_ptr<ChatStore> chat_store_;
   /// Rides every commit and rider as the notify payload, so an instance
   /// can tell its own wake-ups from the ones that carry news.
   const std::string instance_id_;
