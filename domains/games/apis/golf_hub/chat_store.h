@@ -17,6 +17,10 @@ namespace golf_hub {
 
 inline constexpr std::size_t kChatHistoryLimit = 100;
 inline constexpr std::size_t kChatTextByteLimit = 500;
+/// One LoadAfter page during live catch-up. Small enough that a drain
+/// yields the lock between pages, large enough that draining the whole
+/// retention window is a handful of reads.
+inline constexpr std::size_t kChatCatchUpPage = 16;
 inline std::string ChatChannel(const std::string& room_id) { return "chat_" + room_id; }
 
 /// Rejects text a room cannot store: empty or whitespace-only, over

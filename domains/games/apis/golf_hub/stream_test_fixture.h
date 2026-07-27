@@ -126,6 +126,11 @@ class GolfHubStreamFixture : public testing::Test {
                                                  /*resume_ttl=*/std::chrono::seconds(60));
   }
   virtual std::shared_ptr<HubStore> MakeStore() { return std::make_shared<MemoryHubStore>(); }
+  /// Null selects the default: a MemoryChatStore authorized through the
+  /// handler's membership guard, wired up two-phase below. The pg suite
+  /// overrides with PgChatStore, which authorizes in its own transaction
+  /// and needs nothing from the handler.
+  virtual std::shared_ptr<ChatStore> MakeChatStore() { return nullptr; }
 
   void SetUp() override { BuildHub(); }
 
@@ -142,17 +147,23 @@ class GolfHubStreamFixture : public testing::Test {
     // filled in after construction because it calls the handler that
     // does not exist yet; nothing appends before then.
     auto guard = std::make_shared<MemberGuard>();
-    chat_store_ = std::make_shared<MemoryChatStore>(
-        [guard](const std::string& room_id, const std::string& player_id,
-                const MemberAction& action) { return (*guard)(room_id, player_id, action); });
+    chat_store_ = MakeChatStore();
+    const bool default_memory_chat = chat_store_ == nullptr;
+    if (default_memory_chat) {
+      chat_store_ = std::make_shared<MemoryChatStore>(
+          [guard](const std::string& room_id, const std::string& player_id,
+                  const MemberAction& action) { return (*guard)(room_id, player_id, action); });
+    }
     handler_ = std::make_shared<HubHandler>(
         vault_, std::make_shared<cards::NoShuffleDealer>(), ids_,
         /*grace_period=*/std::chrono::seconds(60),
         std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"), store_, chat_store_);
-    *guard = [handler = handler_.get()](const std::string& room_id, const std::string& player_id,
-                                        const MemberAction& action) {
-      return handler->WithMember(room_id, player_id, action);
-    };
+    if (default_memory_chat) {
+      *guard = [handler = handler_.get()](const std::string& room_id, const std::string& player_id,
+                                          const MemberAction& action) {
+        return handler->WithMember(room_id, player_id, action);
+      };
+    }
     const absl::Status restored = handler_->RestoreFromStore();
     ASSERT_TRUE(restored.ok()) << restored;
     server_ = std::make_unique<moonbase::golf::GolfHubServer>(handler_);
@@ -292,7 +303,7 @@ class GolfHubStreamFixture : public testing::Test {
 
   std::shared_ptr<TicketVault> vault_;
   std::shared_ptr<HubStore> store_;
-  std::shared_ptr<MemoryChatStore> chat_store_;
+  std::shared_ptr<ChatStore> chat_store_;
   std::shared_ptr<IdGenerator> ids_ = std::make_shared<SequentialIdGenerator>();
   std::shared_ptr<HubHandler> handler_;
   std::unique_ptr<moonbase::golf::GolfHubServer> server_;

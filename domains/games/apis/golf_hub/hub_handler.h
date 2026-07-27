@@ -118,8 +118,18 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// The listener callback target; runs on the listener's thread. A
   /// wake-up for a held room re-reads its rows and re-projects views to
   /// local players; payloads carrying our own instance id are skipped
-  /// (locals already heard the local fan-out).
+  /// (locals already heard the local fan-out). Chat wake-ups instead run
+  /// the chat pump — including our own, which the cursor makes idempotent
+  /// and which closes the ambiguous-commit path (an append whose
+  /// connection died after COMMIT still reaches everyone).
   void OnNotify(const std::string& channel, const std::string& payload);
+
+  /// The listener's channel-active target; runs on the listener's
+  /// thread. A chat channel becoming active (first LISTEN, or re-LISTEN
+  /// after a reconnect) pumps that room: anything committed while we
+  /// were not subscribed never queued a notification, so the cursor
+  /// read is the only thing that closes the gap.
+  void OnChannelActive(const std::string& channel);
 
  private:
   struct Member {
@@ -209,6 +219,36 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// catches the client up from here, and overlap is legal anyway.
   void SendChatHistory(const std::string& room_id, const std::string& player_id);
 
+  /// Births the room's chat cursor at the newest retained message id,
+  /// inside the same mu_ hold that makes the room held — the reason no
+  /// message can ever be skipped: an append cannot commit "behind" a
+  /// cursor whose seed read shares the critical section that made its
+  /// sender's membership visible, and everything at or below the seed
+  /// predates every local member's history replay. A failed seed read
+  /// leaves the cursor at 0, which fails toward re-delivering retained
+  /// rows (clients dedupe by id) — never toward losing one. createRoom
+  /// births its cursor directly at 0 instead: the room provably has no
+  /// rows, and its creator's first append must not be read as the past.
+  void SeedChatCursorLocked(const std::string& room_id);
+
+  /// The one path every live chat row takes to local members: load pages
+  /// above the room's cursor, stage rows to current members, advance,
+  /// repeat while pages come back full. Local appends call this after
+  /// their commit instead of staging directly, which is what makes a
+  /// remote commit our append raced past (a lower id committed just
+  /// before ours) reach locals in id order — a blind "deliver mine,
+  /// advance cursor" would step over it. Remote wakes, our own wakes,
+  /// duplicate wakes, and channel-active signals all funnel here too;
+  /// the cursor makes every redundant call a cheap no-op, and a per-room
+  /// in-flight flag collapses concurrent pumps into one. Cursors are
+  /// only ever read here, never created: SeedChatCursorLocked births
+  /// them with the room, so a missing cursor means a stale wake.
+  ///
+  /// Call outside mu_ (it takes mu_ itself, and reads may reach a
+  /// database). A pump for a room this instance no longer holds delivers
+  /// nothing and resurrects nothing.
+  void PumpChat(const std::string& room_id);
+
   void SetConnected(const std::string& player_id, bool connected);
   std::optional<std::string> CurrentRoom(const std::string& player_id);
   Room* FindRoomLocked(const std::string& player_id);
@@ -291,6 +331,20 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   std::mutex mu_;
   pg::Listener* listener_ = nullptr;  // owned by the caller; guarded by mu_
   std::unordered_map<std::string, Room> rooms_;
+
+  /// Where live chat delivery stands for one held room. `delivered` is
+  /// the highest message id every current local member has been staged.
+  /// A cursor is born in the same mu_ critical section that makes its
+  /// room held — SeedChatCursorLocked — and dies with the room, so every
+  /// held room has one and PumpChat never creates them. `pumping`/`again`
+  /// collapse concurrent PumpChat calls into one drain.
+  struct ChatCursor {
+    int64_t delivered = 0;
+    bool pumping = false;
+    bool again = false;
+  };
+  std::unordered_map<std::string, ChatCursor> chat_cursors_;
+
   std::unordered_map<std::string, std::string> player_room_;
   std::unordered_map<std::string, std::string> player_game_;
   // Declared last: destroyed first, joining registry threads before the

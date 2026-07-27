@@ -18,14 +18,20 @@ namespace pg {
 /// channel. Dropped notifications during the gap are fine by protocol:
 /// a notify is only a wake-up, and every wake re-reads current state.
 ///
-/// The callback runs on the listener's thread. It may call Listen and
+/// The callbacks run on the listener's thread. They may call Listen and
 /// Unlisten (they only flag work for the poll thread), but must not
-/// block for long — nothing else is delivered while it runs.
+/// block for long — nothing else is delivered while they run.
 class Listener {
  public:
   using Callback = std::function<void(const std::string& channel, const std::string& payload)>;
+  /// Fired after a channel's LISTEN succeeds on a connection — on first
+  /// subscription and again after every reconnect's re-LISTEN. This is
+  /// the "you may have missed notifications" signal: anything committed
+  /// before this point never queued for us, so an owner that needs
+  /// at-least-once delivery does a catch-up read when it fires.
+  using ActiveCallback = std::function<void(const std::string& channel)>;
 
-  Listener(std::string conninfo, Callback on_notify);
+  Listener(std::string conninfo, Callback on_notify, ActiveCallback on_active = nullptr);
   ~Listener();
   Listener(const Listener&) = delete;
   Listener& operator=(const Listener&) = delete;
@@ -45,6 +51,7 @@ class Listener {
 
   const std::string conninfo_;
   const Callback on_notify_;
+  const ActiveCallback on_active_;
   int wake_read_ = -1;
   int wake_write_ = -1;
   std::mutex mu_;

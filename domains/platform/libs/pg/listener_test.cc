@@ -84,6 +84,44 @@ TEST_F(ListenerTest, DeliversNotificationsAndChannelChurn) {
   }
 }
 
+// The active callback removes the "retry until the LISTEN lands" dance:
+// once it fires, the server-side LISTEN is in place, so a single notify
+// is enough — this test sends each notify exactly once, no loops.
+TEST_F(ListenerTest, ActiveFiresOnSubscribeAndAgainAfterReconnect) {
+  Received notified;
+  Received active;
+  pg::Listener listener(
+      url_,
+      [&](const std::string& channel, const std::string& payload) {
+        notified.Add(channel, payload);
+      },
+      [&](const std::string& channel) { active.Add(channel, ""); });
+  listener.Listen("sync");
+
+  ASSERT_TRUE(active.WaitForCount(1, std::chrono::seconds(10)));
+  EXPECT_EQ(active.events[0].first, "sync");
+
+  pg::Client client(url_);
+  ASSERT_TRUE(client.Exec("SELECT pg_notify('sync', 'one')").ok());
+  ASSERT_TRUE(notified.WaitForCount(1, std::chrono::seconds(10)));
+  EXPECT_EQ(notified.events[0].first, "sync");
+  EXPECT_EQ(notified.events[0].second, "one");
+
+  // Kill the backend. The reconnect's re-LISTEN must announce the channel
+  // active again — that second signal is what tells an owner it may have
+  // missed notifications and should catch up.
+  ASSERT_TRUE(client
+                  .Exec("SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
+                        " WHERE query LIKE 'LISTEN%' AND pid <> pg_backend_pid()")
+                  .ok());
+  ASSERT_TRUE(active.WaitForCount(2, std::chrono::seconds(10)));
+  EXPECT_EQ(active.events[1].first, "sync");
+
+  ASSERT_TRUE(client.Exec("SELECT pg_notify('sync', 'two')").ok());
+  ASSERT_TRUE(notified.WaitForCount(2, std::chrono::seconds(10)));
+  EXPECT_EQ(notified.events[1].second, "two");
+}
+
 TEST_F(ListenerTest, ReconnectsAndReListensAfterConnectionLoss) {
   Received received;
   pg::Listener listener(url_, [&](const std::string& channel, const std::string& payload) {

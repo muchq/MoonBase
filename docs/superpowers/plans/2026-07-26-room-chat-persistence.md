@@ -232,29 +232,38 @@ Expected: pass.
 **Interfaces:**
 - Produces: `ChatChannel(room_id)`, listener active/re-subscribed callback, per-room highest delivered ID, and paged catch-up.
 
-- [ ] **Step 1: Write failing listener synchronization test**
+- [x] **Step 1: Write failing listener synchronization test**
 
 Subscribe once, wait on a condition variable for an active-channel callback, then send exactly one notification. Terminate the backend, assert a second active callback after re-LISTEN, and send exactly one post-reconnect notification.
 
-- [ ] **Step 2: Implement listener active signaling**
+- [x] **Step 2: Implement listener active signaling**
 
 Make `LISTEN` report success, update `active_` only for successful statements, and invoke the optional callback after a channel first becomes active on a connection. Never hold the listener mutex while invoking owner code.
 
-- [ ] **Step 3: Write deterministic no-PostgreSQL handler race tests**
+- [x] **Step 3: Write deterministic no-PostgreSQL handler race tests**
 
 Use two handlers, a shared gated store, condition variables, and bounded receives. Cover delayed/coalesced/duplicate/own wakes, paging, room drop, and history/live overlap.
 
-- [ ] **Step 4: Implement cursor catch-up**
+- [x] **Step 4: Implement cursor catch-up**
 
 Subscribe `ChatChannel` with `RoomChannel`; on chat wake or active callback, load pages after the cursor in ascending order and deliver only rows whose IDs exceed it. Remove cursor state when the room drops.
 
 `ChatChannel` yields `chat_<room_id>` to match `RoomChannel`'s `room_<room_id>`. `LISTEN` cannot take a bind parameter, so quote the channel name as an identifier there and confirm room IDs stay inside PostgreSQL's 63-byte identifier limit; `NOTIFY` goes through `pg_notify($1, $2)`.
 
-- [ ] **Step 5: Add PostgreSQL two-instance tests**
+- [x] **Step 5: Add PostgreSQL two-instance tests**
 
 Split clients across instances, exchange messages both ways, kill/reconnect a listener during a send, join a third client for history, and verify room deletion cascades.
 
-- [ ] **Step 6: Verify GREEN and stress**
+The two-instance exchange test earned its keep immediately: it flaked
+1-in-10 against wake-time cursor adoption (an append committing while
+the adoption's off-lock read was in flight got consumed as "the past"
+and was never delivered locally). Cursors are now born in the same
+critical section that makes a room held — createRoom at zero,
+materialization and restore seeded from the newest retained id — and
+the schedule is pinned by a deterministic latch test
+(`AppendCommittingDuringAnInFlightWakeLoadIsStillDelivered`).
+
+- [x] **Step 6: Verify GREEN and stress**
 
 Run:
 
