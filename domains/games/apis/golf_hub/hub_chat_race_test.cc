@@ -62,10 +62,10 @@ class TestGate {
   bool open_ = false;
 };
 
-// Forwards everything; when armed, the next LoadAfter announces itself
-// and blocks until released. That parks a pump mid-drain at a chosen
-// point — the only way to deterministically land a second wake while the
-// first is still draining.
+// Forwards everything; when armed, the next load (either kind) announces
+// itself and blocks until released. That parks a pump mid-drain at a
+// chosen point — the only way to deterministically land an append or a
+// second wake while a load is in flight.
 class GatedChatStore final : public ChatStore {
  public:
   explicit GatedChatStore(std::shared_ptr<ChatStore> delegate) : delegate_(std::move(delegate)) {}
@@ -77,15 +77,13 @@ class GatedChatStore final : public ChatStore {
   }
   absl::StatusOr<std::vector<ChatRow>> LoadRecent(const std::string& room_id,
                                                   std::size_t limit) override {
+    Gate();
     return delegate_->LoadRecent(room_id, limit);
   }
   absl::StatusOr<std::vector<ChatRow>> LoadAfter(const std::string& room_id,
                                                  int64_t after_message_id,
                                                  std::size_t limit) override {
-    if (armed_.exchange(false)) {
-      entered_.Open();
-      released_.Wait();
-    }
+    Gate();
     return delegate_->LoadAfter(room_id, after_message_id, limit);
   }
   void DropRoom(const std::string& room_id) override { delegate_->DropRoom(room_id); }
@@ -95,6 +93,13 @@ class GatedChatStore final : public ChatStore {
   void Release() { released_.Open(); }
 
  private:
+  void Gate() {
+    if (armed_.exchange(false)) {
+      entered_.Open();
+      released_.Wait();
+    }
+  }
+
   std::shared_ptr<ChatStore> delegate_;
   std::atomic<bool> armed_ = false;
   TestGate entered_;
@@ -352,14 +357,14 @@ TEST_F(HubChatRaceFixture, WakesForUnheldRoomsAreIgnored) {
 }
 
 // An instance that restores a room from the store (a restart, from the
-// store's point of view) meets its chat with no cursor. First contact
-// adopts the newest retained id and replays nothing live — history
-// replay owns the past. The adopted cursor also stands where adoption
-// left it, so a row committed between adoption and a member's resume is
+// store's point of view) seeds the room's cursor at the newest retained
+// id during the restore itself, so the past is never replayed live —
+// history replay owns it. The seed then stands where the restore left
+// it, so a row committed between the restore and a member's resume is
 // heard twice: once in the resume's replay and once live. That overlap
 // is the model's documented contract — at-least-once, dedupe by id —
 // and this pins it on purpose.
-TEST_F(HubChatRaceFixture, RestoredInstanceAdoptsTheCursorInsteadOfReplayingThePast) {
+TEST_F(HubChatRaceFixture, RestoredInstanceSeedsTheCursorInsteadOfReplayingThePast) {
   auto alice = OpenSeat();
   auto bob = OpenSeat();
   ASSERT_TRUE(alice.has_value() && bob.has_value());
@@ -378,8 +383,8 @@ TEST_F(HubChatRaceFixture, RestoredInstanceAdoptsTheCursorInsteadOfReplayingTheP
   ASSERT_GT(ExpectNextChat(*alice, "old"), 0);
   ASSERT_GT(ExpectNextChat(*bob, "old"), 0);
 
-  // A third instance restores the room, then hears its first chat wake:
-  // adoption. Nothing to observe yet — its members are all disconnected —
+  // A third instance restores the room, cursor seeded at "old". A chat
+  // wake right after delivers nothing — its members are all disconnected —
   // which is the point: the past is not replayed at anyone.
   auto restored = BuildInstance();
   ASSERT_NE(restored, nullptr);
@@ -406,14 +411,72 @@ TEST_F(HubChatRaceFixture, RestoredInstanceAdoptsTheCursorInsteadOfReplayingTheP
   ASSERT_GT(ExpectNextChat(*alice, "new"), 0);
   ASSERT_GT(ExpectNextChat(*bob, "new"), 0);
 
-  // One wake after the resume: live delivery starts at the adopted
-  // cursor, so "mid" overlaps the replay and "old" — behind the cursor —
+  // One wake after the resume: live delivery starts at the restore's
+  // seed, so "mid" overlaps the replay and "old" — behind the cursor —
   // does not repeat.
   restored->handler->OnNotify(ChatChannel(room_id), "wake");
   const int64_t mid_id = ExpectNextChat(*resumed, "mid");
   const int64_t new_id = ExpectNextChat(*resumed, "new");
   ASSERT_GT(mid_id, 0);
   EXPECT_GT(new_id, mid_id);
+}
+
+// The regression drill for the seed-at-birth rule, in the schedule the
+// pg suite once caught by chance (~1 in 10): a chat wake's store load is
+// in flight on an instance at the moment a local member's append
+// commits. Wake-time cursor creation used to adopt "the newest retained
+// id" from that off-lock read, which classified the raced append as the
+// past — consumed without delivery, so its sender never saw their own
+// message. With cursors born with the room, the parked drain reads
+// pages above the seed and must deliver the append when it resumes.
+TEST_F(HubChatRaceFixture, AppendCommittingDuringAnInFlightWakeLoadIsStillDelivered) {
+  // The room and both memberships predate the third instance; bob's
+  // seat arrives there by resume, the shape the pg flake had.
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomChatHistory").has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
+
+  auto restored = BuildInstance();
+  ASSERT_NE(restored, nullptr);
+
+  // Park the wake's load before bob's seat exists on this instance, so
+  // the pump's view of the room predates everything that follows.
+  gated_->ArmGate();
+  std::thread wake([&] { restored->handler->OnChannelActive(ChatChannel(room_id)); });
+  const bool entered = gated_->WaitForEntry(std::chrono::seconds(5));
+  EXPECT_TRUE(entered);
+
+  auto resumed = OpenSeatVia(*restored->client, bob->resume_token);
+  ASSERT_TRUE(resumed.has_value());
+  ASSERT_TRUE(ReceiveCase(resumed->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(resumed->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(resumed->stream, "roomChatHistory").has_value());
+
+  // Commits while the wake's load is parked; the append's own pump
+  // coalesces into the parked drain rather than starting a second one.
+  ASSERT_TRUE(SendChat(*resumed, "raced"));
+
+  gated_->Release();
+  wake.join();
+
+  // The resumed drain hands bob his own message — exactly once, which
+  // the sentinel's arrival as the very next frame then proves.
+  ASSERT_GT(ExpectNextChat(*resumed, "raced"), 0);
+  ASSERT_TRUE(SendChat(*alice, "sentinel"));
+  ASSERT_GT(ExpectNextChat(*alice, "raced"), 0);  // primary catches up off its own pump
+  ASSERT_GT(ExpectNextChat(*alice, "sentinel"), 0);
+  restored->handler->OnNotify(ChatChannel(room_id), "primary");
+  ASSERT_GT(ExpectNextChat(*resumed, "sentinel"), 0);
 }
 
 // A wake that lands while a drain is already running must neither start
