@@ -100,6 +100,22 @@ TEST_F(PgTransactionTest, RollsBackWhenTheBodyReturnsAnError) {
   EXPECT_TRUE(client_->Exec("SELECT 1").ok()) << "the connection must still be usable";
 }
 
+TEST_F(PgTransactionTest, CannotCommitAfterAnIgnoredStatementFailure) {
+  const absl::Status status = client_->InTransaction([](pg::Transaction& txn) -> absl::Status {
+    auto wrote = txn.Exec("INSERT INTO pg_txn_test VALUES (1)");
+    if (!wrote.ok()) return wrote.status();
+    // A callback can accidentally ignore a failed statement. PostgreSQL
+    // answers the later COMMIT with command tag ROLLBACK, which still has
+    // PGRES_COMMAND_OK; InTransaction must remember the earlier failure.
+    txn.Exec("SELECT no_such_function()").IgnoreError();
+    return absl::OkStatus();
+  });
+
+  EXPECT_FALSE(status.ok());
+  EXPECT_EQ(Count(), 0);
+  EXPECT_TRUE(client_->Exec("SELECT 1").ok()) << "the connection must still be usable";
+}
+
 // The property the chat append depends on: a statement issued after the
 // transaction's lock is held takes a fresh snapshot, so it sees rows
 // another writer committed while this one was waiting. A CTE-chained

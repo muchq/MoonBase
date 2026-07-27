@@ -36,10 +36,15 @@ absl::Status ValidateChatText(const std::string& text);
 /// from an outage, so both implementations must return the same thing.
 absl::Status NotAMemberError();
 
-/// Answers whether a player is a current member of a room. Chat appends
-/// are authorized through this, so a store enforces membership without
-/// knowing how rooms are stored.
-using MemberCheck = std::function<bool(const std::string& room_id, const std::string& player_id)>;
+/// Work to execute while the membership owner's lock proves the sender
+/// still belongs to the room.
+using MemberAction = std::function<void()>;
+
+/// Atomically checks membership and, only for a current member, invokes
+/// `action` before releasing the membership owner's lock. This composes
+/// chat with room state without copying membership into MemoryChatStore.
+using MemberGuard = std::function<bool(const std::string& room_id, const std::string& player_id,
+                                       const MemberAction& action)>;
 
 /// One committed message. message_id is the only ordering key: timestamps
 /// come from the wall clock and can move backwards across an adjustment, so
@@ -92,17 +97,15 @@ class ChatStore {
 /// History does not survive a restart and does not reach other instances,
 /// and rooms accumulate until DropRoom erases them.
 ///
-/// Membership comes from the injected check, which runs before the
-/// store's own lock is taken — so the room state it consults may use a
-/// lock of its own without an ordering hazard. That leaves a window
-/// between the check and the insert; single-instance mode closes it the
-/// same way it always has, by re-checking under the handler's lock
-/// before delivering. PostgreSQL closes it with a row lock instead.
+/// Membership comes from the injected guard. It holds the room-state
+/// lock while invoking the append action, so leave/delete cannot
+/// linearize between authorization and storage. The action takes the
+/// chat lock second; callers must preserve that room-then-chat order.
 class MemoryChatStore final : public ChatStore {
  public:
-  /// There is no default: a store that cannot answer "is this player in
-  /// this room?" would accept messages nobody is authorized to send.
-  explicit MemoryChatStore(MemberCheck is_member);
+  /// There is no default: a store that cannot atomically authorize the
+  /// append would accept messages nobody is authorized to send.
+  explicit MemoryChatStore(MemberGuard with_member);
 
   absl::StatusOr<ChatRow> Append(const std::string& room_id, const std::string& player_id,
                                  const std::string& text,
@@ -115,7 +118,7 @@ class MemoryChatStore final : public ChatStore {
   void DropRoom(const std::string& room_id) override;
 
  private:
-  const MemberCheck is_member_;
+  const MemberGuard with_member_;
   std::mutex mu_;
   std::map<std::string, std::deque<ChatRow>> chats_;
   int64_t next_message_id_ = 1;

@@ -98,6 +98,20 @@ class PgChatStoreTest : public ::testing::Test {
     ASSERT_TRUE(live) << "LISTEN on " << channel << " never became live";
   }
 
+  bool WaitForBlockedQuery(const std::string& marker, std::chrono::milliseconds timeout) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+      auto blocked = db_->Exec(
+          "SELECT 1 FROM pg_stat_activity"
+          " WHERE pid <> pg_backend_pid() AND query LIKE '%' || $1 || '%'"
+          " AND wait_event_type = 'Lock'",
+          {marker});
+      if (blocked.ok() && blocked->rows() > 0) return true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+  }
+
   const char* url_ = nullptr;
   std::shared_ptr<pg::Client> db_;
   std::unique_ptr<PgChatStore> store_;
@@ -126,6 +140,14 @@ TEST_F(PgChatStoreTest, MigrationIsIdempotentAndDefinesTheContract) {
   ASSERT_TRUE(index.ok()) << index.status();
   EXPECT_EQ(index->Get(0, 0).value_or("0"), "1")
       << "cursor reads need the (room_id, message_id) index";
+
+  auto timestamp_default = db_->Exec(
+      "SELECT column_default FROM information_schema.columns"
+      " WHERE table_name = 'room_chat_messages' AND column_name = 'sent_at'");
+  ASSERT_TRUE(timestamp_default.ok()) << timestamp_default.status();
+  ASSERT_EQ(timestamp_default->rows(), 1);
+  EXPECT_EQ(timestamp_default->Get(0, 0).value_or(""), "clock_timestamp()")
+      << "chat display time must be assigned when the row is inserted, not before a lock wait";
 }
 
 TEST_F(PgChatStoreTest, AppendCommitsARowAndNotifiesItsChatChannel) {
@@ -235,6 +257,72 @@ TEST_F(PgChatStoreTest, LeavingKeepsOldMessagesAndStopsNewOnes) {
   ASSERT_TRUE(recent.ok()) << recent.status();
   ASSERT_EQ(recent->size(), 1u);
   EXPECT_EQ(recent->front().text, "before leaving");
+}
+
+TEST_F(PgChatStoreTest, AppendLocksMembershipUntilTheMessageCommits) {
+  // Hold the append inside its INSERT after its authorization query has
+  // completed. That makes the member-delete race deterministic.
+  ASSERT_TRUE(db_->Exec(R"sql(
+                      CREATE OR REPLACE FUNCTION block_chat_insert() RETURNS trigger AS $$
+                      BEGIN
+                        PERFORM pg_advisory_xact_lock(1228);
+                        RETURN NEW;
+                      END;
+                      $$ LANGUAGE plpgsql)sql")
+                  .ok());
+  ASSERT_TRUE(db_->Exec("CREATE TRIGGER block_chat_insert BEFORE INSERT ON room_chat_messages"
+                        " FOR EACH ROW EXECUTE FUNCTION block_chat_insert()")
+                  .ok());
+
+  pg::Client advisory_holder(url_);
+  ASSERT_TRUE(advisory_holder.Exec("SELECT pg_advisory_lock(1228)").ok());
+
+  auto appender_client = std::make_shared<pg::Client>(url_);
+  ASSERT_TRUE(appender_client->Exec("SET statement_timeout = '10s'").ok());
+  PgChatStore appender_store(appender_client);
+  pg::Client member_deleter(url_);
+  ASSERT_TRUE(member_deleter.Exec("SET statement_timeout = '10s'").ok());
+  absl::StatusOr<ChatRow> appended = absl::UnknownError("append did not run");
+  std::thread appender(
+      [&] { appended = appender_store.Append("R1", "alice", "linearized before leave", "p"); });
+
+  const bool insert_blocked =
+      WaitForBlockedQuery("INSERT INTO room_chat_messages", std::chrono::seconds(2));
+  EXPECT_TRUE(insert_blocked);
+  if (!insert_blocked) {
+    advisory_holder.Exec("SELECT pg_advisory_unlock(1228)").IgnoreError();
+    appender.join();
+    db_->Exec("DROP TRIGGER block_chat_insert ON room_chat_messages").IgnoreError();
+    db_->Exec("DROP FUNCTION block_chat_insert()").IgnoreError();
+    return;
+  }
+
+  absl::StatusOr<pg::Result> deleted = absl::UnknownError("delete did not run");
+  std::thread deleter([&] {
+    deleted = member_deleter.Exec(
+        "/* member-delete-race */ DELETE FROM room_members"
+        " WHERE room_id = 'R1' AND player_id = 'alice'");
+  });
+
+  // Deleting the membership must wait for the append that authorized
+  // against it. Locking only the room row lets this DELETE commit early.
+  const bool delete_blocked = WaitForBlockedQuery("member-delete-race", std::chrono::seconds(2));
+  EXPECT_TRUE(delete_blocked);
+
+  const auto unlocked = advisory_holder.Exec("SELECT pg_advisory_unlock(1228)");
+  EXPECT_TRUE(unlocked.ok()) << unlocked.status();
+  appender.join();
+  deleter.join();
+  ASSERT_TRUE(appended.ok()) << appended.status();
+  ASSERT_TRUE(deleted.ok()) << deleted.status();
+
+  const auto recent = store_->LoadRecent("R1", 100);
+  ASSERT_TRUE(recent.ok()) << recent.status();
+  ASSERT_EQ(recent->size(), 1u);
+  EXPECT_EQ(recent->front().text, "linearized before leave");
+
+  ASSERT_TRUE(db_->Exec("DROP TRIGGER block_chat_insert ON room_chat_messages").ok());
+  ASSERT_TRUE(db_->Exec("DROP FUNCTION block_chat_insert()").ok());
 }
 
 TEST_F(PgChatStoreTest, DeletingTheRoomCascadesItsChat) {

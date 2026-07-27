@@ -150,10 +150,9 @@ cc_library(
     ],
 )
 
-# PostgreSQL implementation of ChatStore (#1226). Append is one
-# CTE-chained statement holding the room's row lock, so membership,
-# insert, prune, and NOTIFY commit together and per-room message_id
-# order is also commit order.
+# PostgreSQL implementation of ChatStore (#1226). Append holds room and
+# membership locks across insert, prune, and NOTIFY so authorization,
+# retention, and per-room message ordering commit together.
 cc_library(
     name = "pg_chat_store",
     srcs = ["pg_chat_store.cc"],

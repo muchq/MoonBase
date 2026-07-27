@@ -39,7 +39,7 @@ class PgChatStore final : public ChatStore {
   PgChatStore& operator=(const PgChatStore&) = delete;
 
   /// Commits one message and notifies ChatChannel(room_id) with
-  /// notify_payload in the same statement. FailedPrecondition means the
+  /// notify_payload in the same transaction. FailedPrecondition means the
   /// room is gone or the sender is not one of its members — the check
   /// is the durable room_members row, not the caller's word.
   absl::StatusOr<ChatRow> Append(const std::string& room_id, const std::string& player_id,

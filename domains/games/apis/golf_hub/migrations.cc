@@ -59,8 +59,10 @@ absl::Status RunMigrations(pg::Client& db) {
           room_id    text NOT NULL REFERENCES rooms (room_id) ON DELETE CASCADE,
           player_id  text NOT NULL,
           body       text NOT NULL CHECK (octet_length(body) BETWEEN 1 AND 500),
-          sent_at    timestamptz NOT NULL DEFAULT now()
+          sent_at    timestamptz NOT NULL DEFAULT clock_timestamp()
       ))sql",
+      R"sql(ALTER TABLE room_chat_messages
+          ALTER COLUMN sent_at SET DEFAULT clock_timestamp())sql",
       R"sql(CREATE INDEX IF NOT EXISTS idx_room_chat_messages_room
           ON room_chat_messages (room_id, message_id))sql",
   };

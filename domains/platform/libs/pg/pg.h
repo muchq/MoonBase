@@ -42,6 +42,9 @@ class Client;
 /// connection the transaction owns, in order, with no reconnect and no
 /// retry: re-running a statement after BEGIN would execute it against a
 /// transaction the server has already aborted.
+/// The first failed Exec poisons the transaction; later calls return the
+/// same failure, and InTransaction cannot report success even if the
+/// callback accidentally ignores it.
 ///
 /// Each statement takes its own snapshot, which is the reason to reach
 /// for this over a CTE-chained single statement. A statement that waits
@@ -61,6 +64,7 @@ class Transaction {
   explicit Transaction(Client& client) : client_(client) {}
 
   Client& client_;
+  absl::Status failure_;
 };
 
 /// The owned libpq wrapper (#1194: "libpq behind a small owned wrapper —
@@ -91,7 +95,8 @@ class Client {
 
   /// Runs `body` between BEGIN and COMMIT, holding the connection for
   /// the whole callback so no other caller can interleave a statement.
-  /// A non-ok return from `body`, or a failed BEGIN/COMMIT, rolls back.
+  /// A non-ok return from `body`, a failed transaction statement, or a
+  /// failed BEGIN/COMMIT rolls back.
   ///
   /// Nothing is retried: a transaction whose COMMIT was sent but never
   /// acknowledged may or may not have landed, and re-running it would

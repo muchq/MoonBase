@@ -103,7 +103,10 @@ absl::StatusOr<Result> Client::Exec(const std::string& sql,
 absl::StatusOr<Result> Transaction::Exec(const std::string& sql,
                                          const std::vector<std::string>& params) {
   // No lock: InTransaction holds it for the whole callback.
-  return client_.ExecLocked(sql, params);
+  if (!failure_.ok()) return failure_;
+  absl::StatusOr<Result> result = client_.ExecLocked(sql, params);
+  if (!result.ok()) failure_ = result.status();
+  return result;
 }
 
 absl::Status Client::InTransaction(const std::function<absl::Status(Transaction&)>& body) {
@@ -113,6 +116,7 @@ absl::Status Client::InTransaction(const std::function<absl::Status(Transaction&
 
   Transaction transaction(*this);
   absl::Status result = body(transaction);
+  if (result.ok() && !transaction.failure_.ok()) result = transaction.failure_;
   if (result.ok()) {
     absl::StatusOr<Result> committed = ExecLocked("COMMIT", {});
     if (committed.ok()) return absl::OkStatus();

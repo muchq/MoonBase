@@ -3,8 +3,11 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <future>
 #include <mutex>
 #include <set>
 #include <string>
@@ -23,27 +26,67 @@ namespace {
 class Rooms {
  public:
   void Join(std::string room_id, std::string player_id) {
+    const std::lock_guard<std::mutex> lock(mu_);
     members_.emplace(std::move(room_id), std::move(player_id));
   }
   void Leave(const std::string& room_id, const std::string& player_id) {
+    const std::lock_guard<std::mutex> lock(mu_);
     members_.erase({room_id, player_id});
   }
   void Delete(const std::string& room_id) {
+    const std::lock_guard<std::mutex> lock(mu_);
     std::erase_if(members_, [&](const auto& member) { return member.first == room_id; });
   }
-  MemberCheck Check() {
-    return [this](const std::string& room_id, const std::string& player_id) {
-      return members_.count({room_id, player_id}) > 0;
+  MemberGuard Guard() {
+    return [this](const std::string& room_id, const std::string& player_id,
+                  const MemberAction& action) {
+      const std::lock_guard<std::mutex> lock(mu_);
+      if (members_.count({room_id, player_id}) == 0) return false;
+      {
+        std::unique_lock<std::mutex> gate_lock(gate_mu_);
+        if (pause_next_) {
+          guard_entered_ = true;
+          gate_cv_.notify_all();
+          gate_cv_.wait(gate_lock, [this] { return release_guard_; });
+          pause_next_ = false;
+        }
+      }
+      action();
+      return true;
     };
   }
 
+  void PauseNextGuard() {
+    const std::lock_guard<std::mutex> lock(gate_mu_);
+    pause_next_ = true;
+    guard_entered_ = false;
+    release_guard_ = false;
+  }
+  bool WaitForGuard(std::chrono::milliseconds timeout) {
+    std::unique_lock<std::mutex> lock(gate_mu_);
+    return gate_cv_.wait_for(lock, timeout, [this] { return guard_entered_; });
+  }
+  void ReleaseGuard() {
+    {
+      const std::lock_guard<std::mutex> lock(gate_mu_);
+      release_guard_ = true;
+    }
+    gate_cv_.notify_all();
+  }
+
  private:
+  std::mutex mu_;
   std::set<std::pair<std::string, std::string>> members_;
+  std::mutex gate_mu_;
+  std::condition_variable gate_cv_;
+  bool pause_next_ = false;
+  bool guard_entered_ = false;
+  bool release_guard_ = false;
 };
 
 class MemoryChatStoreTest : public ::testing::Test {
  protected:
-  MemoryChatStoreTest() : store_(rooms_.Check()) {
+  MemoryChatStoreTest() : store_(rooms_.Guard()) {
     rooms_.Join("R1", "alice");
     rooms_.Join("R1", "bob");
     rooms_.Join("R2", "bob");
@@ -193,6 +236,44 @@ TEST_F(MemoryChatStoreTest, LeavingKeepsOldMessagesAndStopsNewOnes) {
   const auto erased = store_.LoadRecent("R1", 100);
   ASSERT_TRUE(erased.ok());
   EXPECT_TRUE(erased->empty());
+}
+
+TEST_F(MemoryChatStoreTest, AppendAndLeaveLinearizeThroughTheMembershipGuard) {
+  rooms_.PauseNextGuard();
+  absl::StatusOr<ChatRow> appended = absl::UnknownError("append did not run");
+  std::thread appender([&] { appended = store_.Append("R1", "alice", "during leave", "ignored"); });
+  const bool entered = rooms_.WaitForGuard(std::chrono::seconds(1));
+  EXPECT_TRUE(entered);
+  if (!entered) {
+    rooms_.ReleaseGuard();
+    appender.join();
+    return;
+  }
+
+  std::promise<void> leave_started;
+  std::promise<void> leave_finished;
+  std::future<void> finished = leave_finished.get_future();
+  std::thread leaver([&] {
+    leave_started.set_value();
+    rooms_.Leave("R1", "alice");
+    leave_finished.set_value();
+  });
+  leave_started.get_future().wait();
+
+  // The guard still owns the membership lock while it commits the chat
+  // action, so leave cannot linearize between authorization and storage.
+  EXPECT_EQ(finished.wait_for(std::chrono::milliseconds(100)), std::future_status::timeout);
+  rooms_.ReleaseGuard();
+  appender.join();
+  leaver.join();
+
+  ASSERT_TRUE(appended.ok()) << appended.status();
+  EXPECT_EQ(store_.Append("R1", "alice", "after leave", "ignored").status().code(),
+            absl::StatusCode::kFailedPrecondition);
+  const auto recent = store_.LoadRecent("R1", 100);
+  ASSERT_TRUE(recent.ok());
+  ASSERT_EQ(recent->size(), 1u);
+  EXPECT_EQ(recent->front().text, "during leave");
 }
 
 TEST_F(MemoryChatStoreTest, RejectsTextARoomCannotStore) {

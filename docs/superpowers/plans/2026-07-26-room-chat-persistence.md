@@ -13,7 +13,7 @@
 - Retain at most the latest 100 committed messages per room.
 - Delete chat only with its room; deleting a member preserves prior messages.
 - Keep messages immutable plain text and reject empty/whitespace-only, more than 500 bytes, ill-formed UTF-8, or an embedded NUL (libpq sends text parameters as C strings, so a NUL would silently truncate). The limit counts bytes, and text that would split a character is rejected rather than truncated. Handlers reject so clients see a protocol error; stores re-check through `ValidateChatText` so retention stays bounded regardless of the caller.
-- Appends are authorized against room membership in the store, not only the handler, so a membership row that vanishes mid-send rejects the message. `PgChatStore` reads `room_members` inside the transaction; `MemoryChatStore` takes an injected `MemberCheck` and relies on the handler's re-check under `mu_` for the remaining window.
+- Appends are authorized against room membership in the store, not only the handler, so a membership row that vanishes mid-send rejects the message. `PgChatStore` locks `room_members` inside the transaction; `MemoryChatStore` takes an injected `MemberGuard` that holds the room-state lock while executing the append action.
 - Use server-assigned monotonic IDs and server time; delivery is at-least-once and consumers deduplicate by ID. `message_id` is the only ordering key — `sent_at_unix_millis` is wall-clock and display-only.
 - Retention can prune rows a lagging cursor never read. `LoadAfter` returns the oldest row still retained above the cursor and does not report the gap, so catch-up is bounded by the 100-row window, not by the cursor. A consumer more than 100 messages behind loses the difference by design.
 - `DropRoom` means different things per implementation: `MemoryChatStore` reclaims memory only through it, while PostgreSQL cascades from the room row and no-ops. Any handler path that deletes a room must call it, and that call needs its own coverage since PostgreSQL tests cannot catch a missing one.
@@ -40,7 +40,7 @@
   - `ChatStore::DropRoom(room_id)`
   - `ValidateChatText(text) -> Status`, shared by handlers and every store
   - `NotAMemberError()`, the one rejection both stores return for a non-member or missing room
-  - `MemberCheck`, the membership predicate `MemoryChatStore` is constructed with
+  - `MemberGuard`, the atomic membership-and-action callback `MemoryChatStore` is constructed with
 
 - [x] **Step 1: Write failing memory-store tests**
 
@@ -196,7 +196,7 @@ Run the focused `hub_e2e_test`; expected failures show the current local-only fa
 
 - [ ] **Step 3: Replace local-only chat**
 
-Resolve room ID under `mu_`, release the lock for `ChatStore::Append`, reacquire to ensure the sender still belongs to that room, stage the returned row to current local members, advance the room cursor, then deliver outside the lock. Inject `std::shared_ptr<ChatStore>` separately from `HubStore`, defaulting to `MemoryChatStore`.
+Resolve room ID under `mu_`, release the lock for `ChatStore::Append`, reacquire to stage the returned row to current local members, advance the room cursor, then deliver outside the lock. Inject `std::shared_ptr<ChatStore>` separately from `HubStore`, defaulting to `MemoryChatStore`; its `MemberGuard` reacquires `mu_`, verifies membership, and invokes the memory append before releasing that lock.
 
 - [ ] **Step 4: Replay history**
 

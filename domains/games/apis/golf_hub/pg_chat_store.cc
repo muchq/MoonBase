@@ -16,17 +16,17 @@ namespace {
 // the room keeps 101 rows. Separate statements after the lock each take
 // a fresh snapshot, so the prune sees every committed message.
 
-// Locks the room and authorizes in one round trip. FOR UPDATE OF r
-// locks only the room row: appends to a room serialize from here until
-// commit, which is what makes message_id order match commit order, so a
-// cursor that has seen id N is never later shown something below it.
-// Membership is read from the durable row, not taken on the caller's
-// word, and a non-member simply finds nothing to lock.
+// Locks the room and membership in one round trip. The room's UPDATE
+// lock serializes appends until commit, which makes message_id order
+// match commit order. The member's KEY SHARE lock lets ordinary stats
+// updates proceed but makes leave/delete wait, so authorization remains
+// true through the insert. A non-member simply finds nothing to lock.
 constexpr char kLockRoomForMember[] = R"sql(
     SELECT 1 FROM rooms r
     JOIN room_members m ON m.room_id = r.room_id
     WHERE r.room_id = $1 AND m.player_id = $2
-    FOR UPDATE OF r)sql";
+    FOR UPDATE OF r
+    FOR KEY SHARE OF m)sql";
 
 constexpr char kInsert[] = R"sql(
     INSERT INTO room_chat_messages (room_id, player_id, body) VALUES ($1, $2, $3)
