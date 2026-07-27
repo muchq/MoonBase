@@ -485,6 +485,13 @@ TEST(GameState, RemoveToBelowTwoPlayersEndsTheGame) {
   EXPECT_TRUE(lone->isOver());
   const std::unordered_set<int> expected{0};
   EXPECT_EQ(lone->winners(), expected);
+
+  // Every seat stays on the final scorecard: the abandoned hand keeps
+  // its cards and score. Who actually left lives in the caller's roster,
+  // not the state.
+  ASSERT_EQ(lone->getPlayers().size(), 2u);
+  EXPECT_EQ(*lone->getPlayer(1).getName(), "Mercy");
+  EXPECT_EQ(lone->getPlayer(1).score(), 0);  // four threes pair-cancel
 }
 
 // Validation negatives for the corrected rules (#1187): no blind moves,

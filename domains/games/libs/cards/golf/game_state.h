@@ -82,9 +82,12 @@ class GameState {
   [[nodiscard]] bool revealCountdownActive() const;
   [[nodiscard]] bool getPeeksHidden() const { return peeksHidden; }
 
-  /// A seat abandoned mid-game: the seat disappears and indices compact.
-  /// A departing knocker voids the knock; below two players the game is
-  /// over and scores stand.
+  /// A seat abandoned mid-game. With three or more seats the abandoned
+  /// seat disappears and indices compact (a departing knocker voids the
+  /// knock). Below two remaining seats the game is over with every seat
+  /// kept — cards and scores stand for the final tally; only the
+  /// caller's own roster records who left, so winners() alone cannot
+  /// exclude the abandoner.
   [[nodiscard]] absl::StatusOr<GameState> removePlayer(int player) const;
 
   [[nodiscard]] GameState withPlayers(std::vector<Player> newPlayers) const;
