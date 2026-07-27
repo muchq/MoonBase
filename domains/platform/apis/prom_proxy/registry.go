@@ -34,14 +34,28 @@ var serviceRegistry = map[string]serviceEntry{
 			{"Activity", "commands_per_sec", "/s", `sum(rate(stream_commands_total[5m]))`},
 			{"Activity", "events_per_sec", "/s", `sum(rate(stream_events_total[5m]))`},
 			{"Activity", "rejections_per_sec", "/s", `sum(rate(stream_rejections_total[5m]))`},
+			// Room chat (#1226): outcome counts and stages only — the emitter
+			// never labels by room, player, or text. catch_up_rows is a
+			// per-drain distribution, so its windowed average is how far
+			// behind a wake found an instance (the lag signal).
+			{"Chat", "messages_per_sec", "/s", `sum(rate(chat_appends_total{result="stored"}[5m]))`},
+			{"Chat", "stored_total", "", `sum(chat_appends_total{result="stored"})`},
+			{"Chat", "delivered_rows_per_sec", "/s", `sum(rate(chat_rows_delivered_total[5m]))`},
+			{"Chat", "catch_up_rows_avg_5m", "rows", `sum(rate(chat_catch_up_rows_sum[5m]))/sum(rate(chat_catch_up_rows_count[5m]))`},
+			{"Chat", "history_replays_total", "", `sum(chat_history_replays_total)`},
+			{"Chat", "failures_total", "", `sum(chat_failures_total)`},
 		},
 		CustomTimeseries: map[string]string{
-			"sessions_active": `sum(stream_sessions_active_gauge)`,
-			"session_starts":  `sum(increase(stream_sessions_total[5m]))`,
-			"command_rate":    `sum(rate(stream_commands_total[5m]))`,
-			"event_rate":      `sum(rate(stream_events_total[5m]))`,
-			"rejection_rate":  `sum(rate(stream_rejections_total[5m]))`,
-			"disconnect_rate": `sum(rate(stream_disconnects_total[5m]))`,
+			"sessions_active":    `sum(stream_sessions_active_gauge)`,
+			"session_starts":     `sum(increase(stream_sessions_total[5m]))`,
+			"command_rate":       `sum(rate(stream_commands_total[5m]))`,
+			"event_rate":         `sum(rate(stream_events_total[5m]))`,
+			"rejection_rate":     `sum(rate(stream_rejections_total[5m]))`,
+			"disconnect_rate":    `sum(rate(stream_disconnects_total[5m]))`,
+			"chat_message_rate":  `sum(rate(chat_appends_total{result="stored"}[5m]))`,
+			"chat_delivery_rate": `sum(rate(chat_rows_delivered_total[5m]))`,
+			"chat_failure_rate":  `sum(rate(chat_failures_total[5m]))`,
+			"chat_catch_up_rows": `sum(rate(chat_catch_up_rows_sum[5m]))/sum(rate(chat_catch_up_rows_count[5m]))`,
 		},
 	},
 	"microgpt-serve": {

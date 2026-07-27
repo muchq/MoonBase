@@ -85,15 +85,45 @@ class FailingHistoryChatStore final : public ChatStore {
   std::shared_ptr<ChatStore> delegate_;
 };
 
-std::unique_ptr<SecondInstance> BuildSecondInstance(std::shared_ptr<TicketVault> vault,
-                                                    std::shared_ptr<HubStore> store,
-                                                    std::shared_ptr<ChatStore> chat_store) {
+// Forwards everything except Append, which always fails as if the
+// database were unreachable — the only way to reach the handler's
+// unavailable-append branch, since MemoryChatStore cannot fail to
+// reach itself.
+class FailingAppendChatStore final : public ChatStore {
+ public:
+  explicit FailingAppendChatStore(std::shared_ptr<ChatStore> delegate)
+      : delegate_(std::move(delegate)) {}
+
+  absl::StatusOr<ChatRow> Append(const std::string& room_id, const std::string& player_id,
+                                 const std::string& text,
+                                 const std::string& notify_payload) override {
+    return absl::UnavailableError("chat store unreachable");
+  }
+  absl::StatusOr<std::vector<ChatRow>> LoadRecent(const std::string& room_id,
+                                                  std::size_t limit) override {
+    return delegate_->LoadRecent(room_id, limit);
+  }
+  absl::StatusOr<std::vector<ChatRow>> LoadAfter(const std::string& room_id,
+                                                 int64_t after_message_id,
+                                                 std::size_t limit) override {
+    return delegate_->LoadAfter(room_id, after_message_id, limit);
+  }
+  void DropRoom(const std::string& room_id) override { delegate_->DropRoom(room_id); }
+
+ private:
+  std::shared_ptr<ChatStore> delegate_;
+};
+
+std::unique_ptr<SecondInstance> BuildSecondInstance(
+    std::shared_ptr<TicketVault> vault, std::shared_ptr<HubStore> store,
+    std::shared_ptr<ChatStore> chat_store,
+    std::shared_ptr<futility::otel::MetricsRecorder> metrics =
+        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test")) {
   auto instance = std::make_unique<SecondInstance>();
   instance->handler = std::make_shared<HubHandler>(
       std::move(vault), std::make_shared<cards::NoShuffleDealer>(),
-      std::make_shared<SequentialIdGenerator>(), std::chrono::seconds(60),
-      std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"), std::move(store),
-      std::move(chat_store));
+      std::make_shared<SequentialIdGenerator>(), std::chrono::seconds(60), std::move(metrics),
+      std::move(store), std::move(chat_store));
   EXPECT_TRUE(instance->handler->RestoreFromStore().ok());
   instance->server = std::make_unique<moonbase::golf::GolfHubServer>(instance->handler);
 
@@ -783,8 +813,9 @@ TEST_F(GolfHubStreamFixture, AFailedHistoryLoadDoesNotFailTheResume) {
   // History is best-effort: when the load fails, the resume still lands
   // (sessionReady, roomState) and the stream simply hears no history
   // event — the model's documented absence case.
-  auto instance =
-      BuildSecondInstance(vault_, store_, std::make_shared<FailingHistoryChatStore>(chat_store_));
+  auto capture = std::make_shared<CapturingMetricsRecorder>();
+  auto instance = BuildSecondInstance(
+      vault_, store_, std::make_shared<FailingHistoryChatStore>(chat_store_), capture);
   ASSERT_NE(instance, nullptr);
   auto resumed = OpenSeatVia(*instance->client, bob->resume_token);
   ASSERT_TRUE(resumed.has_value());
@@ -801,6 +832,87 @@ TEST_F(GolfHubStreamFixture, AFailedHistoryLoadDoesNotFailTheResume) {
   // client. The bounded receive times out on a live, usable stream.
   auto nothing = resumed->stream.Receive(std::chrono::milliseconds(300));
   EXPECT_FALSE(nothing.ok()) << "a failed history load must send nothing, not something";
+
+  // Both failures were counted by stage: the resume's history load, and
+  // the restore's cursor seed read that went through the same failing
+  // store — which failed open to a zero cursor rather than a loss.
+  EXPECT_EQ(capture->CounterTotal("chat_failures", {{"stage", "history_load"}}), 1);
+  EXPECT_EQ(capture->CounterTotal("chat_failures", {{"stage", "cursor_seed"}}), 1);
+}
+
+// What the chat paths count (#1226 item 10), asserted through the
+// capturing recorder — including the rule the epic states outright:
+// no room id, player id, or message text may reach a metric name or
+// label. Counts and stages only.
+TEST_F(GolfHubStreamFixture, ChatMetricsCountOutcomesWithoutIdentifiers) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomChatHistory").has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
+
+  moonbase::golf::Chat chat;
+  chat.text = "counted, never labeled";
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomChat").has_value());
+
+  // One stored append, one drain that delivered its one row, one
+  // history replay (bob's join; createRoom sends none).
+  EXPECT_EQ(metrics_->CounterTotal("chat_appends", {{"result", "stored"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("chat_rows_delivered"), 1);
+  EXPECT_EQ(metrics_->CounterTotal("chat_history_replays"), 1);
+  bool saw_drain = false;
+  for (const auto& entry : metrics_->Entries()) {
+    if (entry.name == "chat_catch_up_rows" && entry.value == 1.0) saw_drain = true;
+  }
+  EXPECT_TRUE(saw_drain) << "the drain's row count feeds the lag distribution";
+
+  // The sweep: nothing recorded anywhere carries the identifiers.
+  for (const auto& entry : metrics_->Entries()) {
+    for (const std::string& secret :
+         {room_id, alice->player_id, bob->player_id, std::string(chat.text)}) {
+      EXPECT_EQ(entry.name.find(secret), std::string::npos) << entry.name;
+      for (const auto& [key, value] : entry.attributes) {
+        EXPECT_EQ(key.find(secret), std::string::npos) << key;
+        EXPECT_EQ(value.find(secret), std::string::npos) << value;
+      }
+    }
+  }
+}
+
+// The unavailable side of the append counter: the store cannot be
+// reached, the sender is told so, and nothing counts as stored or
+// delivered.
+TEST_F(GolfHubStreamFixture, AnUnreachableStoreCountsTheAppendAsUnavailable) {
+  auto capture = std::make_shared<CapturingMetricsRecorder>();
+  auto instance = BuildSecondInstance(
+      vault_, store_, std::make_shared<FailingAppendChatStore>(chat_store_), capture);
+  ASSERT_NE(instance, nullptr);
+  auto alice = OpenSeatVia(*instance->client);
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+
+  moonbase::golf::Chat chat;
+  chat.text = "never stored";
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromChat(chat)).ok());
+  auto rejected = ReceiveCase(alice->stream, "commandRejected");
+  ASSERT_TRUE(rejected.has_value());
+  EXPECT_EQ(rejected->as_commandRejected_or_null()->reason, "chat is unavailable");
+
+  EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "unavailable"}}), 1);
+  EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "stored"}}), 0);
+  EXPECT_EQ(capture->CounterTotal("chat_rows_delivered"), 0);
 }
 
 // The membership guard, exercised through the handler that owns it

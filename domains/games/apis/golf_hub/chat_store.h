@@ -68,6 +68,10 @@ struct ChatRow {
 /// handler, so a membership row that vanishes while a send is in flight
 /// rejects the message instead of storing it. Where that check is atomic
 /// with the insert differs by implementation; that it happens does not.
+///
+/// Implementations and callers keep message text and identifiers out of
+/// logs and metrics alike: failures are described by status and counted
+/// by stage, never by content (#1226).
 class ChatStore {
  public:
   virtual ~ChatStore() = default;
