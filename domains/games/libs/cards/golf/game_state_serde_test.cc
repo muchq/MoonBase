@@ -123,6 +123,24 @@ TEST(GameStateSerde, RoundTripsAnAbandonedSeatAndEmptyPiles) {
   expectRoundTrips(state);
 }
 
+TEST(GameStateSerde, RoundTripsAGameOverByAbandonment) {
+  // The terminal shape a below-two-seats abandonment commits (#1236):
+  // whoKnocked carries the kAbandoned sentinel, every seat kept.
+  const Player stayed{"andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Three),
+                      Card(Suit::Hearts, Rank::Four), Card(Suit::Spades, Rank::Five)};
+  const Player left{"mercy", Card(Suit::Clubs, Rank::Six), Card(Suit::Diamonds, Rank::Seven),
+                    Card(Suit::Hearts, Rank::Eight), Card(Suit::Spades, Rank::Nine)};
+  const GameState state{{Card(0), Card(1)},    {Card(2)}, {stayed, left}, false, 0,
+                        GameState::kAbandoned, true,      "g-forfeit",    "v-1"};
+  ASSERT_TRUE(state.isOver());
+  expectRoundTrips(state);
+
+  const auto restored = deserializeGameState(serializeGameState(state));
+  ASSERT_TRUE(restored.ok()) << restored.status();
+  EXPECT_TRUE(restored->isOver());
+  EXPECT_EQ(restored->getWhoKnocked(), GameState::kAbandoned);
+}
+
 // The frozen shape of a stored row. Everything else in this suite
 // generates its bytes with the code under test, so only this test can
 // catch a simultaneous serialize+deserialize change that would orphan —
@@ -240,8 +258,10 @@ TEST(GameStateSerde, RejectsSeatIndexAtTheBoundary) {
   payload["whoKnocked"] = 2;
   expectRejected(payload);
 
+  // kAbandoned (-2) is the one legal value below "no knock"; the range
+  // ends right after it.
   payload = dealtPayload();
-  payload["whoKnocked"] = -2;
+  payload["whoKnocked"] = -3;
   expectRejected(payload);
 
   // An empty roster has no seat 0, and the engine's turn arithmetic

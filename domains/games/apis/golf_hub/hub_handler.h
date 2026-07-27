@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -24,6 +25,16 @@
 #include "smithy/server/session_registry.h"
 
 namespace golf_hub {
+
+/// winners() restricted to the seats the roster still names — the
+/// forfeit rule. A final state can carry a seat its roster has dropped:
+/// an abandonment that ended the game keeps the departed hand so its
+/// cards and score reach the scorecard (#1236), and such a seat cannot
+/// win — however good its standing score, the game resolved against it.
+/// For an ordinary finish the roster names every seat and this is
+/// exactly the engine's rule, knocker-takes-ties included.
+[[nodiscard]] std::unordered_set<int> WinnersAmong(const golf::GameState& state,
+                                                   const std::vector<std::string>& roster);
 
 /// The hub, phase 2 (#1187): session admission, rooms, chat, and the
 /// game layer on the reshaped libs/cards/golf engine. One SessionRegistry

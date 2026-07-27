@@ -483,8 +483,13 @@ TEST(GameState, RemoveToBelowTwoPlayersEndsTheGame) {
   auto lone = game.removePlayer(1);
   ASSERT_TRUE(lone.ok());
   EXPECT_TRUE(lone->isOver());
-  const std::unordered_set<int> expected{0};
-  EXPECT_EQ(lone->winners(), expected);
+  // The finish is marked as abandonment, not as a knock nobody made.
+  EXPECT_EQ(lone->getWhoKnocked(), GameState::kAbandoned);
+  // Both hands pair-cancel to zero and the tie stands: with no knocker
+  // in the state, winners() has no one to hand the tie to. Excluding
+  // the abandoner is the caller's job — its roster knows who left.
+  const std::unordered_set<int> tied{0, 1};
+  EXPECT_EQ(lone->winners(), tied);
 
   // Every seat stays on the final scorecard: the abandoned hand keeps
   // its cards and score. Who actually left lives in the caller's roster,
@@ -492,6 +497,28 @@ TEST(GameState, RemoveToBelowTwoPlayersEndsTheGame) {
   ASSERT_EQ(lone->getPlayers().size(), 2u);
   EXPECT_EQ(*lone->getPlayer(1).getName(), "Mercy");
   EXPECT_EQ(lone->getPlayer(1).score(), 0);  // four threes pair-cancel
+}
+
+TEST(GameState, AbandonedGameCannotExcludeTheAbandonerByScore) {
+  // The abandoner leaves holding the better hand: four threes cancel to
+  // zero against the survivor's unpaired 2+3+4+5. The engine's tally
+  // crowns the departed seat — by design it cannot know who left, so
+  // the forfeit (survivor wins regardless) must come from the caller's
+  // roster, which is what the hub's WinnersAmong pins.
+  const Player survivor{"Andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Three),
+                        Card(Suit::Hearts, Rank::Four), Card(Suit::Spades, Rank::Five)};
+  const Player abandoner{"Mercy", Card(Suit::Clubs, Rank::Three), Card(Suit::Diamonds, Rank::Three),
+                         Card(Suit::Hearts, Rank::Three), Card(Suit::Spades, Rank::Three)};
+  const std::deque<Card> drawPile{Card{Suit::Diamonds, Rank::Ten}};
+  const std::deque<Card> discardPile{Card{Suit::Hearts, Rank::Four}};
+
+  const GameState game{drawPile, discardPile, {survivor, abandoner}, false, 0, -1, "foo", "bar"};
+  auto lone = game.removePlayer(1);
+  ASSERT_TRUE(lone.ok());
+  EXPECT_TRUE(lone->isOver());
+  EXPECT_LT(lone->getPlayer(1).score(), lone->getPlayer(0).score());
+  const std::unordered_set<int> engine_pick{1};
+  EXPECT_EQ(lone->winners(), engine_pick);
 }
 
 // Validation negatives for the corrected rules (#1187): no blind moves,

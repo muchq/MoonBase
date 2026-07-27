@@ -13,6 +13,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -34,6 +35,64 @@ std::string WithNul(std::string prefix, std::string suffix) {
   prefix.push_back('\0');
   prefix.append(suffix);
   return prefix;
+}
+
+// The forfeit rule, pinned directly: an abandonment end is scored among
+// roster seats only, so the departed hand loses however well it stands.
+TEST(WinnersAmong, AbandonerWithTheBetterScoreStillLoses) {
+  using cards::Card;
+  using cards::Rank;
+  using cards::Suit;
+  // The abandoner's four threes pair-cancel to zero; the survivor holds
+  // an unpaired 2+3+4+5. The engine's own tally crowns the departed
+  // seat — it cannot know who left.
+  const golf::Player survivor{"andy", Card(Suit::Clubs, Rank::Two),
+                              Card(Suit::Diamonds, Rank::Three), Card(Suit::Hearts, Rank::Four),
+                              Card(Suit::Spades, Rank::Five)};
+  const golf::Player abandoner{"mercy", Card(Suit::Clubs, Rank::Three),
+                               Card(Suit::Diamonds, Rank::Three), Card(Suit::Hearts, Rank::Three),
+                               Card(Suit::Spades, Rank::Three)};
+  const golf::GameState state{{Card{Suit::Diamonds, Rank::Ten}},
+                              {Card{Suit::Hearts, Rank::Four}},
+                              {survivor, abandoner},
+                              false,
+                              /*_whoseTurn=*/0,
+                              golf::GameState::kAbandoned,
+                              "game",
+                              "v"};
+  ASSERT_TRUE(state.isOver());
+  ASSERT_LT(state.getPlayer(1).score(), state.getPlayer(0).score());
+  EXPECT_EQ(state.winners(), (std::unordered_set<int>{1}));
+
+  // The roster no longer names the abandoner: the survivor wins the
+  // forfeit despite the worse hand.
+  EXPECT_EQ(WinnersAmong(state, {"andy"}), (std::unordered_set<int>{0}));
+}
+
+// With every seat still on the roster this is exactly the engine's
+// rule — the knocker takes ties alone.
+TEST(WinnersAmong, OrdinaryFinishMatchesTheEngineKnockerTiesIncluded) {
+  using cards::Card;
+  using cards::Rank;
+  using cards::Suit;
+  const golf::Player andy{"andy", Card(Suit::Clubs, Rank::Two), Card(Suit::Diamonds, Rank::Two),
+                          Card(Suit::Hearts, Rank::Two), Card(Suit::Spades, Rank::Two)};
+  const golf::Player mercy{"mercy", Card(Suit::Clubs, Rank::Three),
+                           Card(Suit::Diamonds, Rank::Three), Card(Suit::Hearts, Rank::Three),
+                           Card(Suit::Spades, Rank::Three)};
+  // Both hands cancel to zero; mercy knocked and the turn came back
+  // around, ending the game with the tie hers alone.
+  const golf::GameState state{{Card{Suit::Diamonds, Rank::Ten}},
+                              {Card{Suit::Hearts, Rank::Four}},
+                              {andy, mercy},
+                              false,
+                              /*_whoseTurn=*/1,
+                              /*_whoKnocked=*/1,
+                              "game",
+                              "v"};
+  ASSERT_TRUE(state.isOver());
+  EXPECT_EQ(WinnersAmong(state, {"andy", "mercy"}), state.winners());
+  EXPECT_EQ(WinnersAmong(state, {"andy", "mercy"}), (std::unordered_set<int>{1}));
 }
 
 // A whole second hub sharing the first one's durable pieces — the
@@ -1230,9 +1289,21 @@ TEST_F(ShortGraceFixture, GraceExpiryResolvesTheGameWithEverySeatScored) {
 
   table->bob.stream.Close();
 
-  // The window runs out with bob still gone: alice takes the game, and
-  // the summary keeps bob's seat — name and standing score — next to
-  // hers.
+  // The window runs out with bob still gone. The ceremony's terminal
+  // view precedes the result — and a forfeit is not a knock, so it
+  // names no knocker.
+  std::optional<moonbase::golf::GameView> ended_view;
+  for (int i = 0; i < 4 && !ended_view.has_value(); ++i) {
+    auto view_update = ReceiveGolf(alice.stream, "gameState");
+    ASSERT_TRUE(view_update.has_value());
+    const auto& view = view_update->as_gameState_or_null()->view;
+    if (view.phase == "ended") ended_view = view;
+  }
+  ASSERT_TRUE(ended_view.has_value());
+  EXPECT_FALSE(ended_view->knockedPlayerId.has_value());
+
+  // Alice takes the game, and the summary keeps bob's seat — name and
+  // standing score — next to hers.
   auto ended = ReceiveGolf(alice.stream, "gameEnded");
   ASSERT_TRUE(ended.has_value());
   const auto* result = ended->as_gameEnded_or_null();
