@@ -72,6 +72,17 @@ class PgChatStoreTest : public ::testing::Test {
     Join("R2", "bob");
   }
 
+  // Runs even when a test returns early on a failed assertion. The
+  // append-blocking trigger has to go back whatever happened: postgres
+  // has no CREATE TRIGGER IF NOT EXISTS, so one leaked trigger would
+  // fail every later run against this database at its CREATE, turning a
+  // single flake into a permanently wedged scratch database.
+  void TearDown() override {
+    if (db_ == nullptr) return;
+    db_->Exec("DROP TRIGGER IF EXISTS block_chat_insert ON room_chat_messages").IgnoreError();
+    db_->Exec("DROP FUNCTION IF EXISTS block_chat_insert()").IgnoreError();
+  }
+
   void Join(const std::string& room_id, const std::string& player_id) {
     ASSERT_TRUE(
         db_->Exec("INSERT INTO rooms (room_id) VALUES ($1) ON CONFLICT DO NOTHING", {room_id})
@@ -290,10 +301,10 @@ TEST_F(PgChatStoreTest, AppendLocksMembershipUntilTheMessageCommits) {
       WaitForBlockedQuery("INSERT INTO room_chat_messages", std::chrono::seconds(2));
   EXPECT_TRUE(insert_blocked);
   if (!insert_blocked) {
+    // The trigger comes back in TearDown; only the append still needs
+    // releasing before this thread can be joined.
     advisory_holder.Exec("SELECT pg_advisory_unlock(1228)").IgnoreError();
     appender.join();
-    db_->Exec("DROP TRIGGER block_chat_insert ON room_chat_messages").IgnoreError();
-    db_->Exec("DROP FUNCTION block_chat_insert()").IgnoreError();
     return;
   }
 
@@ -320,9 +331,6 @@ TEST_F(PgChatStoreTest, AppendLocksMembershipUntilTheMessageCommits) {
   ASSERT_TRUE(recent.ok()) << recent.status();
   ASSERT_EQ(recent->size(), 1u);
   EXPECT_EQ(recent->front().text, "linearized before leave");
-
-  ASSERT_TRUE(db_->Exec("DROP TRIGGER block_chat_insert ON room_chat_messages").ok());
-  ASSERT_TRUE(db_->Exec("DROP FUNCTION block_chat_insert()").ok());
 }
 
 TEST_F(PgChatStoreTest, DeletingTheRoomCascadesItsChat) {
