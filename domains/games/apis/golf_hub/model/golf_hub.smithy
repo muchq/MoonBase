@@ -4,6 +4,7 @@ namespace moonbase.golf
 
 use alloy#simpleRestJson
 use moonbase.games#Chat
+use moonbase.games#ChatHistory
 use moonbase.games#ChatMessage
 use moonbase.games#CommandRejected
 use moonbase.games#CreateGame
@@ -133,6 +134,7 @@ union GolfEvents {
     roomState: RoomState
     roomLeft: RoomLeft
     roomChat: ChatMessage
+    roomChatHistory: ChatHistory
     commandRejected: CommandRejected
     golf: GolfEvent
 }

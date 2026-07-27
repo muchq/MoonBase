@@ -323,11 +323,33 @@ TEST_F(GolfGameFixture, ChatReachesTheRoom) {
   ASSERT_TRUE(to_bob.has_value());
   EXPECT_EQ(to_bob->as_roomChat_or_null()->playerId, table->alice.player_id);
   EXPECT_EQ(to_bob->as_roomChat_or_null()->text, "good luck!");
+  // The message is stored before it is echoed, so the wire carries the
+  // server's id and clock rather than anything the sender chose.
+  EXPECT_GT(to_bob->as_roomChat_or_null()->messageId, 0);
+  EXPECT_GT(to_bob->as_roomChat_or_null()->sentAtUnixMillis, 0);
+
   auto echo = ReceiveCase(table->alice.stream, "roomChat");
   ASSERT_TRUE(echo.has_value());
+  // Both members are told about one message, so both see one id.
+  EXPECT_EQ(echo->as_roomChat_or_null()->messageId, to_bob->as_roomChat_or_null()->messageId);
+
+  moonbase::golf::Chat second;
+  second.text = "and again";
+  ASSERT_TRUE(table->alice.stream.Send(GolfCommands::FromChat(second)).ok());
+  auto next = ReceiveCase(table->bob.stream, "roomChat");
+  ASSERT_TRUE(next.has_value());
+  EXPECT_GT(next->as_roomChat_or_null()->messageId, to_bob->as_roomChat_or_null()->messageId)
+      << "ids must rise with send order so a client can dedupe and sort by them";
 
   moonbase::golf::Chat empty;
   ASSERT_TRUE(table->alice.stream.Send(GolfCommands::FromChat(empty)).ok());
+  EXPECT_TRUE(ReceiveCase(table->alice.stream, "commandRejected").has_value());
+
+  // Whitespace-only is empty as far as a room is concerned; the handler
+  // and the stores agree because they run the same rule.
+  moonbase::golf::Chat blank;
+  blank.text = "   \t\n";
+  ASSERT_TRUE(table->alice.stream.Send(GolfCommands::FromChat(blank)).ok());
   EXPECT_TRUE(ReceiveCase(table->alice.stream, "commandRejected").has_value());
 
   moonbase::golf::Chat oversized;
@@ -335,7 +357,63 @@ TEST_F(GolfGameFixture, ChatReachesTheRoom) {
   ASSERT_TRUE(table->alice.stream.Send(GolfCommands::FromChat(oversized)).ok());
   auto too_long = ReceiveCase(table->alice.stream, "commandRejected");
   ASSERT_TRUE(too_long.has_value());
-  EXPECT_EQ(too_long->as_commandRejected_or_null()->reason, "chat message too long");
+  EXPECT_EQ(too_long->as_commandRejected_or_null()->reason, "chat text is too long");
+
+  // Ill-formed UTF-8 is refused at the edge rather than reaching a store
+  // that would refuse it less politely.
+  moonbase::golf::Chat mangled;
+  mangled.text = "hi\xC3";
+  ASSERT_TRUE(table->alice.stream.Send(GolfCommands::FromChat(mangled)).ok());
+  auto not_utf8 = ReceiveCase(table->alice.stream, "commandRejected");
+  ASSERT_TRUE(not_utf8.has_value());
+  EXPECT_EQ(not_utf8->as_commandRejected_or_null()->reason, "chat text is not valid UTF-8");
+}
+
+// The membership guard, exercised through the handler that owns it
+// rather than a test double. MemoryChatStore authorizes every append
+// through this, so what it answers is what decides whether a message
+// can be stored.
+TEST_F(GolfHubStreamFixture, WithMemberRunsOnlyForCurrentMembers) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
+
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
+
+  bool ran = false;
+  EXPECT_TRUE(handler_->WithMember(room_id, alice->player_id, [&] { ran = true; }));
+  EXPECT_TRUE(ran);
+
+  ran = false;
+  EXPECT_FALSE(handler_->WithMember(room_id, "nobody", [&] { ran = true; }));
+  EXPECT_FALSE(handler_->WithMember("no-such-room", alice->player_id, [&] { ran = true; }));
+  EXPECT_FALSE(ran) << "the action must not run when the seat is not there";
+
+  // Leaving revokes it, which is what keeps a chat append off a seat
+  // that is already gone.
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromLeaveroom(moonbase::golf::LeaveRoom{})).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomLeft").has_value());
+  EXPECT_FALSE(handler_->WithMember(room_id, bob->player_id, [&] { ran = true; }));
+  EXPECT_FALSE(ran);
+
+  // And a message from the revoked seat is refused rather than echoed.
+  moonbase::golf::Chat chat;
+  chat.text = "still here?";
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromChat(chat)).ok());
+  auto rejected = ReceiveCase(bob->stream, "commandRejected");
+  ASSERT_TRUE(rejected.has_value());
+  EXPECT_EQ(rejected->as_commandRejected_or_null()->reason, "not in a room");
 }
 
 TEST_F(GolfGameFixture, AbandoningALiveGameResolvesIt) {

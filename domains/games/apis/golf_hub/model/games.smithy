@@ -113,12 +113,39 @@ structure RoomLeft {
     roomId: String
 }
 
+/// One committed chat message. messageId is assigned by the server and
+/// rises with commit order within a room; it is the only ordering key,
+/// and sentAtUnixMillis is display time that may not agree with it.
+///
+/// Delivery is at-least-once, so the same message can arrive more than
+/// once — through a redelivery, or through roomChatHistory overlapping
+/// live events on join. Consumers deduplicate by messageId rather than
+/// treating an overlap as an error.
 structure ChatMessage {
+    @required
+    messageId: Long
+
     @required
     playerId: String
 
     @required
     text: String
+
+    @required
+    sentAtUnixMillis: Long
+}
+
+list ChatMessages {
+    member: ChatMessage
+}
+
+/// The bounded replay a joining or resuming stream receives, ascending
+/// by messageId and capped at the room's retained history. It goes only
+/// to the stream that just arrived, after that stream's roomState, and
+/// never to members already in the room.
+structure ChatHistory {
+    @required
+    messages: ChatMessages
 }
 
 /// A command the hub declined — wrong state, unknown room, illegal move.

@@ -9,6 +9,8 @@
 
 #include "absl/log/log.h"
 #include "absl/random/random.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
@@ -25,7 +27,18 @@ using moonbase::golf::GolfUpdate;
 namespace {
 
 constexpr std::size_t kMaxSeats = 4;
-constexpr std::size_t kMaxChatLength = 500;
+
+// The one place a stored row becomes a wire message. Live delivery and
+// (once #1226 lands it) history replay share it, so the two can never
+// describe the same message differently.
+moonbase::golf::ChatMessage ChatEvent(const ChatRow& row) {
+  moonbase::golf::ChatMessage message;
+  message.messageId = row.message_id;
+  message.playerId = row.player_id;
+  message.text = row.text;
+  message.sentAtUnixMillis = row.sent_at_unix_millis;
+  return message;
+}
 
 // The v1 wire's card language, which the UI already renders. Ranks come
 // from the canonical CardMapper table; suits are the wire's glyphs
@@ -102,12 +115,21 @@ std::vector<golf_hub::HubStore::StatsDelta> StatsDeltas(const golf::GameState& s
 HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::Dealer> dealer,
                        std::shared_ptr<IdGenerator> ids, std::chrono::seconds grace_period,
                        std::shared_ptr<futility::otel::MetricsRecorder> metrics,
-                       std::shared_ptr<HubStore> store)
+                       std::shared_ptr<HubStore> store, std::shared_ptr<ChatStore> chat_store)
     : vault_(std::move(vault)),
       dealer_(std::move(dealer)),
       ids_(std::move(ids)),
       metrics_(std::move(metrics)),
       store_(store != nullptr ? std::move(store) : std::make_shared<MemoryHubStore>()),
+      // Capturing this is safe: the guard is stored, not called, and
+      // nothing appends chat before the handler is serving.
+      chat_store_(chat_store != nullptr
+                      ? std::move(chat_store)
+                      : std::make_shared<MemoryChatStore>([this](const std::string& room_id,
+                                                                 const std::string& player_id,
+                                                                 const MemberAction& action) {
+                          return WithMember(room_id, player_id, action);
+                        })),
       instance_id_(InstanceId()),
       registry_([this, grace_period] {
         Registry::Options options;
@@ -591,33 +613,53 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
   }
 
   if (const auto* chat = command.as_chat_or_null()) {
-    if (chat->text.empty()) {
-      Reject(player_id, "empty chat message");
+    // One validation rule for the protocol edge and the stores, so a
+    // client is told no for exactly the text a store would refuse.
+    if (const absl::Status valid = ValidateChatText(chat->text); !valid.ok()) {
+      Reject(player_id, std::string(valid.message()));
       return;
     }
-    if (chat->text.size() > kMaxChatLength) {
-      Reject(player_id, "chat message too long");
-      return;
-    }
-    Outbox outbox;
-    bool in_room = false;
+
+    // Resolve the room, then drop the lock: MemoryChatStore re-takes it
+    // through WithMember, and mu_ is not recursive. Membership is not
+    // re-checked here either — the store's guard is that check, and it
+    // holds the lock across the append so the answer cannot go stale.
+    std::string room_id;
     {
       const std::lock_guard<std::mutex> lock(mu_);
-      if (Room* room = FindRoomLocked(player_id); room != nullptr) {
-        in_room = true;
-        moonbase::golf::ChatMessage message;
-        message.playerId = player_id;
-        message.text = chat->text;
-        for (const auto& member : room->members) {
+      if (const auto room = player_room_.find(player_id); room != player_room_.end()) {
+        room_id = room->second;
+      }
+    }
+    if (room_id.empty()) {
+      Reject(player_id, "not in a room");
+      return;
+    }
+
+    const absl::StatusOr<ChatRow> appended =
+        chat_store_->Append(room_id, player_id, chat->text, instance_id_);
+    if (!appended.ok()) {
+      // Nothing was stored, so nothing is echoed: the sender is told no
+      // rather than shown a message no one else will ever receive.
+      Reject(player_id, appended.status().code() == absl::StatusCode::kFailedPrecondition
+                            ? "not in a room"
+                            : "chat is unavailable");
+      return;
+    }
+
+    Outbox outbox;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      // Whoever is in the room now: the roster can have moved while the
+      // append ran, and a member who left has no claim on the message.
+      if (const auto room = rooms_.find(room_id); room != rooms_.end()) {
+        const moonbase::golf::ChatMessage message = ChatEvent(*appended);
+        for (const auto& member : room->second.members) {
           outbox.To(member.first, GolfEvents::FromRoomchat(message));
         }
       }
     }
-    if (in_room) {
-      Deliver(outbox);
-    } else {
-      Reject(player_id, "not in a room");
-    }
+    Deliver(outbox);
     return;
   }
 
@@ -1046,6 +1088,16 @@ std::optional<std::string> HubHandler::CurrentRoom(const std::string& player_id)
   const auto it = player_room_.find(player_id);
   if (it == player_room_.end()) return std::nullopt;
   return it->second;
+}
+
+bool HubHandler::WithMember(const std::string& room_id, const std::string& player_id,
+                            const MemberAction& action) {
+  const std::lock_guard<std::mutex> lock(mu_);
+  const auto room = rooms_.find(room_id);
+  if (room == rooms_.end()) return false;
+  if (room->second.members.count(player_id) == 0) return false;
+  action();
+  return true;
 }
 
 HubHandler::Room* HubHandler::FindRoomLocked(const std::string& player_id) {

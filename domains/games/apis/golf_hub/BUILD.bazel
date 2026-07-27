@@ -257,6 +257,7 @@ cc_library(
     srcs = ["hub_handler.cc"],
     hdrs = ["hub_handler.h"],
     deps = [
+        ":chat_store",
         ":golf_hub_smithy_server",
         ":hub_store",
         ":id_generator",
