@@ -465,23 +465,28 @@ TEST_F(PgGolfHubFixture, StatsSurviveARestart) {
   auto alice_back = OpenSeat(alice_token);
   ASSERT_TRUE(alice_back.has_value());
   ASSERT_TRUE(ReceiveCase(alice_back->stream, "sessionReady").has_value());
-  auto restored = alice_back->stream.Receive();
-  ASSERT_TRUE(restored.ok());
-  ASSERT_TRUE(restored->has_value());
-  ASSERT_EQ((*restored)->case_name(), "roomState");
-  const auto* restored_lobby = (*restored)->as_roomState_or_null();
+  auto restored = NextEvent(alice_back->stream);
+  ASSERT_TRUE(restored.has_value());
+  ASSERT_EQ(std::string(restored->case_name()), "roomState");
+  const auto* restored_lobby = restored->as_roomState_or_null();
   ASSERT_NE(restored_lobby, nullptr);
   EXPECT_TRUE(restored_lobby->games.empty());
 
+  // A resume also replays the room's chat (#1226) — one history event
+  // after the snapshot, empty here since nobody said anything.
+  auto replay = NextEvent(alice_back->stream);
+  ASSERT_TRUE(replay.has_value());
+  ASSERT_EQ(std::string(replay->case_name()), "roomChatHistory");
+  EXPECT_TRUE(replay->as_roomChatHistory_or_null()->messages.empty());
+
   ASSERT_TRUE(
       alice_back->stream.Send(GolfCommands::FromGetroomstate(moonbase::golf::GetRoomState{})).ok());
-  // After the automatic resume snapshot, the next frame is the requested
-  // lobby itself: no restored game resync or ceremony was queued.
-  auto lobby = alice_back->stream.Receive();
-  ASSERT_TRUE(lobby.ok());
-  ASSERT_TRUE(lobby->has_value());
-  ASSERT_EQ((*lobby)->case_name(), "roomState");
-  const auto* lobby_state = (*lobby)->as_roomState_or_null();
+  // After the resume snapshot and its chat replay, the next frame is the
+  // requested lobby itself: no restored game resync or ceremony queued.
+  auto lobby = NextEvent(alice_back->stream);
+  ASSERT_TRUE(lobby.has_value());
+  ASSERT_EQ(std::string(lobby->case_name()), "roomState");
+  const auto* lobby_state = lobby->as_roomState_or_null();
   ASSERT_NE(lobby_state, nullptr);
   EXPECT_TRUE(lobby_state->games.empty());
   // Identical zero-scoring deals; the knocker takes the tie alone.
