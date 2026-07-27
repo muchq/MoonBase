@@ -3,6 +3,7 @@ package prom_proxy
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -181,6 +182,13 @@ func (h *MetricsHandler) GetServiceMetricsTimeSeries(w http.ResponseWriter, r *h
 			response.Series = append(response.Series, ts)
 		}
 	}
+	// The map iteration above would otherwise put the series in a fresh
+	// random order every request, and the UI's generic Trends grid renders
+	// custom series in payload order with position-indexed colors — charts
+	// would swap places and recolor on every refresh poll.
+	sort.Slice(response.Series, func(i, j int) bool {
+		return response.Series[i].MetricName < response.Series[j].MetricName
+	})
 
 	mucks.JsonOk(w, response)
 }

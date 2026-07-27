@@ -273,8 +273,14 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_StandardPlusCustom(t *testin
 	assert.Equal(t, "30m", response.TimeRange)
 
 	names := map[string]bool{}
+	previous := ""
 	for _, series := range response.Series {
 		names[series.MetricName] = true
+		// Deterministic payload order: the UI renders custom series in
+		// payload order, so a map-iteration shuffle would reshuffle its
+		// charts on every refresh.
+		assert.GreaterOrEqual(t, series.MetricName, previous)
+		previous = series.MetricName
 	}
 	// The five standard series plus golf's ten custom series.
 	expected := []string{
