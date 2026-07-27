@@ -224,9 +224,9 @@ class GolfHubStreamFixture : public testing::Test {
           [guard](const std::string& room_id, const std::string& player_id,
                   const MemberAction& action) { return (*guard)(room_id, player_id, action); });
     }
-    handler_ = std::make_shared<HubHandler>(
-        vault_, std::make_shared<cards::NoShuffleDealer>(), ids_,
-        /*grace_period=*/GracePeriod(), metrics_, store_, chat_store_);
+    handler_ =
+        std::make_shared<HubHandler>(vault_, std::make_shared<cards::NoShuffleDealer>(), ids_,
+                                     /*grace_period=*/GracePeriod(), metrics_, store_, chat_store_);
     if (default_memory_chat) {
       *guard = [handler = handler_.get()](const std::string& room_id, const std::string& player_id,
                                           const MemberAction& action) {

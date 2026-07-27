@@ -344,9 +344,8 @@ absl::StatusOr<GameState> GameState::removePlayer(int player) const {
   // tally, and the caller's own roster records who left — with isOver
   // forced so the finish resolves through the ordinary scoring path.
   if (players.size() <= 2) {
-    return GameState{drawPile,    discardPile, players,
-                     false,       whoseTurn,   whoseTurn,
-                     peeksHidden, gameId,      version_id};
+    return GameState{drawPile,  discardPile, players, false,     whoseTurn,
+                     whoseTurn, peeksHidden, gameId,  version_id};
   }
 
   vector<Player> updatedPlayers;
