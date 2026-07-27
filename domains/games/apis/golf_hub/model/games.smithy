@@ -143,6 +143,14 @@ list ChatMessages {
 /// by messageId and capped at the room's retained history. It goes only
 /// to the stream that just arrived, after that stream's roomState, and
 /// never to members already in the room.
+///
+/// It is sent exactly once per join or resume, even when the room has no
+/// messages — an empty list means "history loaded, and it is empty", so
+/// clients need not infer emptiness from silence. Two exceptions: a
+/// freshly created room sends nothing (no history exists, and creating
+/// is not joining), and a failed history load sends nothing (delivery is
+/// best-effort; live messages catch the client up). A client must
+/// therefore tolerate absence, but may treat arrival as authoritative.
 structure ChatHistory {
     @required
     messages: ChatMessages

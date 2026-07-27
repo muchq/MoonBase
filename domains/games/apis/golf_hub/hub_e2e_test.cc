@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -14,6 +15,9 @@
 #include <utility>
 #include <vector>
 
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "domains/games/apis/golf_hub/chat_store.h"
 #include "domains/games/apis/golf_hub/stream_test_fixture.h"
 
 namespace golf_hub {
@@ -31,26 +35,17 @@ std::string WithNul(std::string prefix, std::string suffix) {
   return prefix;
 }
 
-// One frame, bounded, no skipping — for asserting exact event order.
-// ReceiveCase would silently step over an event that must not be there.
-std::optional<moonbase::golf::GolfEvents> NextEvent(moonbase::golf::PlayClientStream& stream) {
-  auto received = stream.Receive(std::chrono::seconds(5));
-  if (!received.ok()) {
-    ADD_FAILURE() << "receive failed mid-sequence: " << received.error().message();
-    return std::nullopt;
-  }
-  if (!received->has_value()) {
-    ADD_FAILURE() << "stream closed mid-sequence";
-    return std::nullopt;
-  }
-  return **received;
-}
-
 // A whole second hub sharing the first one's durable pieces — the
 // hub_store_race_test pattern. Restoring from the shared store is what a
 // process restart looks like from the store's side, so resuming here
 // exercises the membership-decides-the-resync branch of Play() without
 // simulating a wire failure.
+//
+// One trap: the shared MemoryChatStore's member guard was wired to the
+// FIRST handler in the fixture's SetUp, so appends through this instance
+// authorize against instance one's membership. Reads (history) are
+// unguarded and safe; treat this instance as read-only for chat unless
+// the guard is rewired.
 struct SecondInstance {
   std::shared_ptr<HubHandler> handler;
   std::unique_ptr<moonbase::golf::GolfHubServer> server;
@@ -60,6 +55,34 @@ struct SecondInstance {
   ~SecondInstance() {
     for (auto& session : sessions) session->Close();
   }
+};
+
+// Forwards everything except LoadRecent, which always fails — the only
+// way to reach the handler's failed-history-load branch, since
+// MemoryChatStore's own LoadRecent cannot return a non-ok status.
+class FailingHistoryChatStore final : public ChatStore {
+ public:
+  explicit FailingHistoryChatStore(std::shared_ptr<ChatStore> delegate)
+      : delegate_(std::move(delegate)) {}
+
+  absl::StatusOr<ChatRow> Append(const std::string& room_id, const std::string& player_id,
+                                 const std::string& text,
+                                 const std::string& notify_payload) override {
+    return delegate_->Append(room_id, player_id, text, notify_payload);
+  }
+  absl::StatusOr<std::vector<ChatRow>> LoadRecent(const std::string& room_id,
+                                                  std::size_t limit) override {
+    return absl::InternalError("chat database unavailable");
+  }
+  absl::StatusOr<std::vector<ChatRow>> LoadAfter(const std::string& room_id,
+                                                 int64_t after_message_id,
+                                                 std::size_t limit) override {
+    return delegate_->LoadAfter(room_id, after_message_id, limit);
+  }
+  void DropRoom(const std::string& room_id) override { delegate_->DropRoom(room_id); }
+
+ private:
+  std::shared_ptr<ChatStore> delegate_;
 };
 
 std::unique_ptr<SecondInstance> BuildSecondInstance(std::shared_ptr<TicketVault> vault,
@@ -554,10 +577,8 @@ TEST_F(GolfHubStreamFixture, JoiningReplaysChatHistoryAfterRoomState) {
   auto alice = OpenSeat();
   ASSERT_TRUE(alice.has_value());
   ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
-  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
-  auto created = ReceiveCase(alice->stream, "roomState");
-  ASSERT_TRUE(created.has_value());
-  const std::string room_id = created->as_roomState_or_null()->roomId;
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
 
   std::vector<int64_t> sent_ids;
   for (const char* text : {"one", "two", "three"}) {
@@ -622,12 +643,11 @@ TEST_F(GolfHubStreamFixture, JoiningAChatlessRoomHearsAnEmptyHistory) {
   ASSERT_TRUE(alice.has_value() && bob.has_value());
   ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
   ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
-  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
-  auto created = ReceiveCase(alice->stream, "roomState");
-  ASSERT_TRUE(created.has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
 
   moonbase::golf::JoinRoom join;
-  join.roomId = created->as_roomState_or_null()->roomId;
+  join.roomId = room_id;
   ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
 
   // The event arrives even with nothing to replay, so a client learns
@@ -639,6 +659,13 @@ TEST_F(GolfHubStreamFixture, JoiningAChatlessRoomHearsAnEmptyHistory) {
   ASSERT_TRUE(history.has_value());
   ASSERT_EQ(std::string(history->case_name()), "roomChatHistory");
   EXPECT_TRUE(history->as_roomChatHistory_or_null()->messages.empty());
+
+  // The creator hears no history at all — creating is not joining. Her
+  // next frame after her create-roomState is bob's join broadcast; a
+  // stray replay to her would land here and fail the case check.
+  auto alice_next = NextEvent(alice->stream);
+  ASSERT_TRUE(alice_next.has_value());
+  EXPECT_EQ(std::string(alice_next->case_name()), "roomState");
 }
 
 TEST_F(GolfHubStreamFixture, ResumingOnAFreshInstanceReplaysChatHistory) {
@@ -647,10 +674,8 @@ TEST_F(GolfHubStreamFixture, ResumingOnAFreshInstanceReplaysChatHistory) {
   ASSERT_TRUE(alice.has_value() && bob.has_value());
   ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
   ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
-  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
-  auto created = ReceiveCase(alice->stream, "roomState");
-  ASSERT_TRUE(created.has_value());
-  const std::string room_id = created->as_roomState_or_null()->roomId;
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
   moonbase::golf::JoinRoom join;
   join.roomId = room_id;
   ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
@@ -699,6 +724,83 @@ TEST_F(GolfHubStreamFixture, ResumingOnAFreshInstanceReplaysChatHistory) {
   EXPECT_EQ(history->messages[1].text, "hi back");
   EXPECT_EQ(history->messages[1].playerId, bob->player_id);
   EXPECT_GT(history->messages[1].messageId, history->messages[0].messageId);
+}
+
+TEST_F(GolfHubStreamFixture, JoinHistoryIsCappedAtTheRetentionLimit) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+
+  // One over the retention window, so the replay must both cap at the
+  // limit and hold the newest end — a hardcoded smaller LoadRecent limit
+  // or an off-by-one prune fails here, where the 3-message test cannot.
+  for (std::size_t i = 1; i <= kChatHistoryLimit + 1; ++i) {
+    moonbase::golf::Chat chat;
+    chat.text = "m-" + std::to_string(i);
+    ASSERT_TRUE(alice->stream.Send(GolfCommands::FromChat(chat)).ok());
+    ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
+  }
+
+  auto bob = OpenSeat();
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+
+  auto replay = NextEvent(bob->stream);
+  ASSERT_TRUE(replay.has_value());
+  ASSERT_EQ(std::string(replay->case_name()), "roomChatHistory");
+  const auto* history = replay->as_roomChatHistory_or_null();
+  ASSERT_EQ(history->messages.size(), kChatHistoryLimit);
+  EXPECT_EQ(history->messages.front().text, "m-2") << "the oldest message fell to retention";
+  EXPECT_EQ(history->messages.back().text, "m-" + std::to_string(kChatHistoryLimit + 1));
+}
+
+TEST_F(GolfHubStreamFixture, AFailedHistoryLoadDoesNotFailTheResume) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
+
+  moonbase::golf::Chat chat;
+  chat.text = "stored fine";
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomChat").has_value());
+
+  // History is best-effort: when the load fails, the resume still lands
+  // (sessionReady, roomState) and the stream simply hears no history
+  // event — the model's documented absence case.
+  auto instance =
+      BuildSecondInstance(vault_, store_, std::make_shared<FailingHistoryChatStore>(chat_store_));
+  ASSERT_NE(instance, nullptr);
+  auto resumed = OpenSeatVia(*instance->client, bob->resume_token);
+  ASSERT_TRUE(resumed.has_value());
+
+  auto ready = NextEvent(resumed->stream);
+  ASSERT_TRUE(ready.has_value());
+  ASSERT_EQ(std::string(ready->case_name()), "sessionReady");
+  EXPECT_TRUE(ready->as_sessionReady_or_null()->resumed);
+  auto state = NextEvent(resumed->stream);
+  ASSERT_TRUE(state.has_value());
+  EXPECT_EQ(std::string(state->case_name()), "roomState");
+
+  // Nothing further: no history event, and no failure surfaced to the
+  // client. The bounded receive times out on a live, usable stream.
+  auto nothing = resumed->stream.Receive(std::chrono::milliseconds(300));
+  EXPECT_FALSE(nothing.ok()) << "a failed history load must send nothing, not something";
 }
 
 // The membership guard, exercised through the handler that owns it

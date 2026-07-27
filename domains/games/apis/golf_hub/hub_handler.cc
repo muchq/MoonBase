@@ -30,8 +30,8 @@ namespace {
 constexpr std::size_t kMaxSeats = 4;
 
 // The one place a stored row becomes a wire message. Live delivery and
-// (once #1226 lands it) history replay share it, so the two can never
-// describe the same message differently.
+// history replay share it, so the two can never describe the same
+// message differently.
 moonbase::golf::ChatMessage ChatEvent(const ChatRow& row) {
   moonbase::golf::ChatMessage message;
   message.messageId = row.message_id;
@@ -483,7 +483,9 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
   Send(player_id, GolfEvents::FromSessionready(std::move(ready)));
   // A resumed seat's room sees the connected flip (and the resumer gets
   // the current snapshot it missed) — then the chat it missed, after its
-  // roomState per the documented order, and only to this stream.
+  // roomState per the documented order, and only to this stream. The
+  // resync game view goes last, deliberately: it is delivered after the
+  // history load, whether or not that load succeeds.
   if (room.has_value()) {
     BroadcastRoom(*room);
     SendChatHistory(*room, player_id);
