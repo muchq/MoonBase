@@ -482,8 +482,12 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
   if (room.has_value()) ready.roomId = *room;
   Send(player_id, GolfEvents::FromSessionready(std::move(ready)));
   // A resumed seat's room sees the connected flip (and the resumer gets
-  // the current snapshot it missed).
-  if (room.has_value()) BroadcastRoom(*room);
+  // the current snapshot it missed) — then the chat it missed, after its
+  // roomState per the documented order, and only to this stream.
+  if (room.has_value()) {
+    BroadcastRoom(*room);
+    SendChatHistory(*room, player_id);
+  }
   Deliver(resync);
 
   while (true) {
@@ -575,6 +579,10 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
     }
     if (joined) {
       Deliver(outbox);
+      // After the joiner's roomState, the chat they missed. Loaded
+      // outside mu_; a message committing right now may appear in both
+      // history and live delivery, which the model declares legal.
+      SendChatHistory(join->roomId, player_id);
     } else {
       Reject(player_id, "room unavailable or already in a room");
     }
@@ -1287,6 +1295,24 @@ void HubHandler::Deliver(Outbox& outbox) {
     Send(player_id, std::move(event));
   }
   outbox.events.clear();
+}
+
+void HubHandler::SendChatHistory(const std::string& room_id, const std::string& player_id) {
+  auto rows = chat_store_->LoadRecent(room_id, kChatHistoryLimit);
+  if (!rows.ok()) {
+    // The admission already succeeded; chat history is not worth failing
+    // it over. No room id or text in the log — the status is enough.
+    Count("chat_history_load_failures");
+    LOG(WARNING) << "chat history load failed for a joining stream: " << rows.status();
+    return;
+  }
+  // Sent even when empty: a stream that entered a room always hears one
+  // history event, so the client has a deterministic signal rather than
+  // inferring emptiness from absence.
+  moonbase::golf::ChatHistory history;
+  history.messages.reserve(rows->size());
+  for (const ChatRow& row : *rows) history.messages.push_back(ChatEvent(row));
+  Send(player_id, GolfEvents::FromRoomchathistory(std::move(history)));
 }
 
 void HubHandler::Count(const char* name, const std::map<std::string, std::string>& attributes) {

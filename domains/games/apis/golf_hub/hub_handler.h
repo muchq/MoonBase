@@ -195,6 +195,14 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// only unary requests, so admissions, live-session count, disconnects,
   /// and the command/event flow are counted here. All no-ops when no
   /// recorder is injected.
+  /// Loads the room's retained history and sends one roomChatHistory to
+  /// the just-admitted player — nobody else; the room already has it.
+  /// Call outside mu_ (the load may reach a database) and after the
+  /// stream's roomState, the order the model documents. A failed load is
+  /// counted and skipped rather than failing the join: live delivery
+  /// catches the client up from here, and overlap is legal anyway.
+  void SendChatHistory(const std::string& room_id, const std::string& player_id);
+
   void Count(const char* name, const std::map<std::string, std::string>& attributes = {});
   void TrackActive(int delta);
   void CountCommand(const moonbase::golf::GolfCommands& command);

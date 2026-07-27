@@ -6,8 +6,13 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "domains/games/apis/golf_hub/stream_test_fixture.h"
 
@@ -24,6 +29,73 @@ std::string WithNul(std::string prefix, std::string suffix) {
   prefix.push_back('\0');
   prefix.append(suffix);
   return prefix;
+}
+
+// One frame, bounded, no skipping — for asserting exact event order.
+// ReceiveCase would silently step over an event that must not be there.
+std::optional<moonbase::golf::GolfEvents> NextEvent(moonbase::golf::PlayClientStream& stream) {
+  auto received = stream.Receive(std::chrono::seconds(5));
+  if (!received.ok()) {
+    ADD_FAILURE() << "receive failed mid-sequence: " << received.error().message();
+    return std::nullopt;
+  }
+  if (!received->has_value()) {
+    ADD_FAILURE() << "stream closed mid-sequence";
+    return std::nullopt;
+  }
+  return **received;
+}
+
+// A whole second hub sharing the first one's durable pieces — the
+// hub_store_race_test pattern. Restoring from the shared store is what a
+// process restart looks like from the store's side, so resuming here
+// exercises the membership-decides-the-resync branch of Play() without
+// simulating a wire failure.
+struct SecondInstance {
+  std::shared_ptr<HubHandler> handler;
+  std::unique_ptr<moonbase::golf::GolfHubServer> server;
+  std::unique_ptr<moonbase::golf::GolfHubClient> client;
+  std::vector<std::shared_ptr<smithy::http::WebSocket>> sessions;
+
+  ~SecondInstance() {
+    for (auto& session : sessions) session->Close();
+  }
+};
+
+std::unique_ptr<SecondInstance> BuildSecondInstance(std::shared_ptr<TicketVault> vault,
+                                                    std::shared_ptr<HubStore> store,
+                                                    std::shared_ptr<ChatStore> chat_store) {
+  auto instance = std::make_unique<SecondInstance>();
+  instance->handler = std::make_shared<HubHandler>(
+      std::move(vault), std::make_shared<cards::NoShuffleDealer>(),
+      std::make_shared<SequentialIdGenerator>(), std::chrono::seconds(60),
+      std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"), std::move(store),
+      std::move(chat_store));
+  EXPECT_TRUE(instance->handler->RestoreFromStore().ok());
+  instance->server = std::make_unique<moonbase::golf::GolfHubServer>(instance->handler);
+
+  auto loopback = std::make_shared<smithy::http::Loopback>();
+  EXPECT_TRUE(loopback->Start(instance->server->Handler()).ok());
+  smithy::ClientConfig config;
+  config.retry.max_attempts = 1;
+  config.http_client = loopback;
+  SecondInstance* raw = instance.get();
+  config.websocket_dialer = [raw](const smithy::http::WebSocketDialRequest& request)
+      -> smithy::Outcome<std::shared_ptr<smithy::http::WebSocket>> {
+    auto [near, far] = smithy::http::InMemoryWebSocketPair::Create();
+    smithy::http::HttpRequest upgrade;
+    upgrade.method = "GET";
+    upgrade.target = request.target;
+    upgrade.headers = request.headers;
+    raw->sessions.push_back(far);
+    raw->server->StreamRouter()->ServeSession()(upgrade, far);
+    return near;
+  };
+  auto client = moonbase::golf::GolfHubClient::Create(std::move(config));
+  EXPECT_TRUE(client.ok());
+  if (!client.ok()) return nullptr;
+  instance->client = std::make_unique<moonbase::golf::GolfHubClient>(std::move(*client));
+  return instance;
 }
 
 }  // namespace
@@ -476,6 +548,157 @@ TEST_F(GolfHubStreamFixture, LastMemberLeavingDropsTheRoomsChatHistory) {
   const auto remaining = chat_store_->LoadRecent(room_id, 100);
   ASSERT_TRUE(remaining.ok());
   EXPECT_TRUE(remaining->empty()) << "the room is gone; its history must be too";
+}
+
+TEST_F(GolfHubStreamFixture, JoiningReplaysChatHistoryAfterRoomState) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
+
+  std::vector<int64_t> sent_ids;
+  for (const char* text : {"one", "two", "three"}) {
+    moonbase::golf::Chat chat;
+    chat.text = text;
+    ASSERT_TRUE(alice->stream.Send(GolfCommands::FromChat(chat)).ok());
+    auto echo = ReceiveCase(alice->stream, "roomChat");
+    ASSERT_TRUE(echo.has_value());
+    sent_ids.push_back(echo->as_roomChat_or_null()->messageId);
+  }
+
+  auto bob = OpenSeat();
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+
+  // Frame by frame: the room snapshot first, then exactly one history
+  // event carrying the retained messages — the ids and order the live
+  // echoes already reported, so history and live describe one sequence.
+  auto first = NextEvent(bob->stream);
+  ASSERT_TRUE(first.has_value());
+  EXPECT_EQ(std::string(first->case_name()), "roomState");
+  auto second = NextEvent(bob->stream);
+  ASSERT_TRUE(second.has_value());
+  ASSERT_EQ(std::string(second->case_name()), "roomChatHistory");
+  const auto* history = second->as_roomChatHistory_or_null();
+  ASSERT_EQ(history->messages.size(), 3u);
+  EXPECT_EQ(history->messages[0].text, "one");
+  EXPECT_EQ(history->messages[1].text, "two");
+  EXPECT_EQ(history->messages[2].text, "three");
+  for (std::size_t i = 0; i < sent_ids.size(); ++i) {
+    EXPECT_EQ(history->messages[i].messageId, sent_ids[i]);
+    EXPECT_EQ(history->messages[i].playerId, alice->player_id);
+    EXPECT_GT(history->messages[i].sentAtUnixMillis, 0);
+  }
+
+  // Alice was already in the room, so no replay for her: her next frames
+  // are bob's join broadcast and then live chat, nothing in between.
+  // NextEvent (not ReceiveCase) because a skipped stray event would pass.
+  moonbase::golf::Chat live;
+  live.text = "welcome";
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromChat(live)).ok());
+  auto alice_first = NextEvent(alice->stream);
+  ASSERT_TRUE(alice_first.has_value());
+  EXPECT_EQ(std::string(alice_first->case_name()), "roomState");
+  auto alice_second = NextEvent(alice->stream);
+  ASSERT_TRUE(alice_second.has_value());
+  EXPECT_EQ(std::string(alice_second->case_name()), "roomChat");
+
+  // The live message continues the id sequence the history reported.
+  auto bob_live = ReceiveCase(bob->stream, "roomChat");
+  ASSERT_TRUE(bob_live.has_value());
+  EXPECT_EQ(bob_live->as_roomChat_or_null()->text, "welcome");
+  EXPECT_GT(bob_live->as_roomChat_or_null()->messageId, sent_ids.back());
+}
+
+TEST_F(GolfHubStreamFixture, JoiningAChatlessRoomHearsAnEmptyHistory) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+
+  moonbase::golf::JoinRoom join;
+  join.roomId = created->as_roomState_or_null()->roomId;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+
+  // The event arrives even with nothing to replay, so a client learns
+  // "history loaded, and it is empty" instead of inferring from silence.
+  auto state = NextEvent(bob->stream);
+  ASSERT_TRUE(state.has_value());
+  EXPECT_EQ(std::string(state->case_name()), "roomState");
+  auto history = NextEvent(bob->stream);
+  ASSERT_TRUE(history.has_value());
+  ASSERT_EQ(std::string(history->case_name()), "roomChatHistory");
+  EXPECT_TRUE(history->as_roomChatHistory_or_null()->messages.empty());
+}
+
+TEST_F(GolfHubStreamFixture, ResumingOnAFreshInstanceReplaysChatHistory) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
+
+  moonbase::golf::Chat chat;
+  chat.text = "hello";
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomChat").has_value());
+  chat.text = "hi back";
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomChat").has_value());
+
+  // A second hub restores rooms and members from the shared store; its
+  // registry has never seen bob, so his resume admits as new with his
+  // membership intact — the store-restart shape of resume, no wire
+  // failure needed. His live seat on the first instance is irrelevant
+  // here: registries are per-instance.
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  auto resumed = OpenSeatVia(*instance->client, bob->resume_token);
+  ASSERT_TRUE(resumed.has_value());
+  EXPECT_EQ(resumed->player_id, bob->player_id);
+
+  auto ready = NextEvent(resumed->stream);
+  ASSERT_TRUE(ready.has_value());
+  ASSERT_EQ(std::string(ready->case_name()), "sessionReady");
+  EXPECT_TRUE(ready->as_sessionReady_or_null()->resumed);
+  ASSERT_TRUE(ready->as_sessionReady_or_null()->roomId.has_value());
+  EXPECT_EQ(*ready->as_sessionReady_or_null()->roomId, room_id);
+
+  // The snapshot he missed, then the chat he missed, in that order.
+  auto state = NextEvent(resumed->stream);
+  ASSERT_TRUE(state.has_value());
+  EXPECT_EQ(std::string(state->case_name()), "roomState");
+  auto replay = NextEvent(resumed->stream);
+  ASSERT_TRUE(replay.has_value());
+  ASSERT_EQ(std::string(replay->case_name()), "roomChatHistory");
+  const auto* history = replay->as_roomChatHistory_or_null();
+  ASSERT_EQ(history->messages.size(), 2u);
+  EXPECT_EQ(history->messages[0].text, "hello");
+  EXPECT_EQ(history->messages[0].playerId, alice->player_id);
+  EXPECT_EQ(history->messages[1].text, "hi back");
+  EXPECT_EQ(history->messages[1].playerId, bob->player_id);
+  EXPECT_GT(history->messages[1].messageId, history->messages[0].messageId);
 }
 
 // The membership guard, exercised through the handler that owns it
