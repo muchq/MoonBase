@@ -42,6 +42,20 @@ func TestRegistry_OrderAndEntriesAgree(t *testing.T) {
 	}
 }
 
+// The UI classifies series by name: anything in its STANDARD_SERIES
+// mirror renders on the standard charts, so a custom key that collides
+// is silently reclassified and never charts. The registry comment asks
+// authors to avoid this; this pins it.
+func TestRegistry_CustomTimeseriesKeysDoNotShadowStandardSeries(t *testing.T) {
+	for _, name := range serviceOrder {
+		standard := standardTimeseriesQueries(name)
+		for key := range serviceRegistry[name].CustomTimeseries {
+			_, shadows := standard[key]
+			assert.False(t, shadows, "service %q custom series %q shadows a standard series", name, key)
+		}
+	}
+}
+
 func TestMetricsHandler_GetServiceCatalog(t *testing.T) {
 	handler := &MetricsHandler{}
 
