@@ -114,6 +114,34 @@ class FailingAppendChatStore final : public ChatStore {
   std::shared_ptr<ChatStore> delegate_;
 };
 
+// Forwards everything except Append, which reports the sender as no
+// longer a member — the store-level stale-membership rejection that the
+// in-process guard can never produce on its own instance.
+class NotAMemberChatStore final : public ChatStore {
+ public:
+  explicit NotAMemberChatStore(std::shared_ptr<ChatStore> delegate)
+      : delegate_(std::move(delegate)) {}
+
+  absl::StatusOr<ChatRow> Append(const std::string& room_id, const std::string& player_id,
+                                 const std::string& text,
+                                 const std::string& notify_payload) override {
+    return NotAMemberError();
+  }
+  absl::StatusOr<std::vector<ChatRow>> LoadRecent(const std::string& room_id,
+                                                  std::size_t limit) override {
+    return delegate_->LoadRecent(room_id, limit);
+  }
+  absl::StatusOr<std::vector<ChatRow>> LoadAfter(const std::string& room_id,
+                                                 int64_t after_message_id,
+                                                 std::size_t limit) override {
+    return delegate_->LoadAfter(room_id, after_message_id, limit);
+  }
+  void DropRoom(const std::string& room_id) override { delegate_->DropRoom(room_id); }
+
+ private:
+  std::shared_ptr<ChatStore> delegate_;
+};
+
 std::unique_ptr<SecondInstance> BuildSecondInstance(
     std::shared_ptr<TicketVault> vault, std::shared_ptr<HubStore> store,
     std::shared_ptr<ChatStore> chat_store,
@@ -913,6 +941,89 @@ TEST_F(GolfHubStreamFixture, AnUnreachableStoreCountsTheAppendAsUnavailable) {
   EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "unavailable"}}), 1);
   EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "stored"}}), 0);
   EXPECT_EQ(capture->CounterTotal("chat_rows_delivered"), 0);
+}
+
+// The rejected side of the same counter: the store says the sender's
+// membership vanished mid-send (the race store-level authorization
+// exists for), the client hears the same "not in a room" a pre-store
+// reject uses, and the outcome counts as rejected — an authorization
+// answer, not an outage.
+TEST_F(GolfHubStreamFixture, AStaleMembershipCountsTheAppendAsRejected) {
+  auto capture = std::make_shared<CapturingMetricsRecorder>();
+  auto instance = BuildSecondInstance(vault_, store_,
+                                      std::make_shared<NotAMemberChatStore>(chat_store_), capture);
+  ASSERT_NE(instance, nullptr);
+  auto alice = OpenSeatVia(*instance->client);
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+
+  moonbase::golf::Chat chat;
+  chat.text = "membership just vanished";
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromChat(chat)).ok());
+  auto rejected = ReceiveCase(alice->stream, "commandRejected");
+  ASSERT_TRUE(rejected.has_value());
+  EXPECT_EQ(rejected->as_commandRejected_or_null()->reason, "not in a room");
+
+  EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "rejected"}}), 1);
+  EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "unavailable"}}), 0);
+  EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "stored"}}), 0);
+}
+
+// Drain metrics at batch grain: one wake that finds two committed rows
+// delivers them as one drain — the counter grows by the batch and the
+// distribution takes a single observation of the batch size, which is
+// what makes an observation's size read as "rows behind at the wake".
+// A redundant wake then records the zero that keeps the dashboard's
+// windowed average honest, and delivers nothing.
+TEST_F(GolfHubStreamFixture, DrainMetricsCountBatchesAndZeroWakes) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomChatHistory").has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
+
+  // Two rows land behind the hub's back — committed straight through the
+  // store, the shape of another instance's appends.
+  ASSERT_TRUE(chat_store_->Append(room_id, alice->player_id, "first behind", "remote").ok());
+  ASSERT_TRUE(chat_store_->Append(room_id, alice->player_id, "second behind", "remote").ok());
+
+  const auto observations = [&] {
+    std::vector<double> values;
+    for (const auto& entry : metrics_->Entries()) {
+      if (entry.name == "chat_catch_up_rows") values.push_back(entry.value);
+    }
+    return values;
+  };
+  const double delivered_before = metrics_->CounterTotal("chat_rows_delivered");
+  const std::size_t drains_before = observations().size();
+
+  handler_->OnNotify(ChatChannel(room_id), "remote-instance");
+  for (auto* seat : {&*alice, &*bob}) {
+    ASSERT_TRUE(ReceiveCase(seat->stream, "roomChat").has_value());
+    ASSERT_TRUE(ReceiveCase(seat->stream, "roomChat").has_value());
+  }
+  EXPECT_EQ(metrics_->CounterTotal("chat_rows_delivered") - delivered_before, 2);
+  auto after_drain = observations();
+  ASSERT_EQ(after_drain.size(), drains_before + 1);
+  EXPECT_EQ(after_drain.back(), 2.0);
+
+  // Redundant wake: nothing new, one zero observation, nothing counted
+  // as delivered. OnNotify pumps synchronously, so no waiting.
+  handler_->OnNotify(ChatChannel(room_id), "remote-instance");
+  EXPECT_EQ(metrics_->CounterTotal("chat_rows_delivered") - delivered_before, 2);
+  auto after_redundant = observations();
+  ASSERT_EQ(after_redundant.size(), drains_before + 2);
+  EXPECT_EQ(after_redundant.back(), 0.0);
 }
 
 // The membership guard, exercised through the handler that owns it

@@ -1399,18 +1399,15 @@ void HubHandler::PumpChat(const std::string& room_id) {
           continue;
         }
         cursor->second.pumping = false;
-        more = false;
-        break;
+        break;  // ends the drain; the per-drain observation below still records
       }
-      int64_t staged = 0;
       for (const ChatRow& row : *rows) {
         if (row.message_id <= cursor->second.delivered) continue;
         const GolfEvents event = GolfEvents::FromRoomchat(ChatEvent(row));
         for (const auto& member : room->second.members) outbox.To(member.first, event);
         cursor->second.delivered = row.message_id;
-        ++staged;
+        ++drained;
       }
-      drained += staged;
       more = rows->size() == kChatCatchUpPage;
       if (!more && cursor->second.again) {
         cursor->second.again = false;

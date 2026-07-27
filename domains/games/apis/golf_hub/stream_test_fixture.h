@@ -139,6 +139,11 @@ class CapturingMetricsRecorder final : public futility::otel::MetricsRecorder {
     Add(name, static_cast<double>(value), attributes);
     futility::otel::MetricsRecorder::RecordCounter(name, value, attributes);
   }
+  void RecordLatency(const std::string& name, std::chrono::microseconds duration,
+                     const std::map<std::string, std::string>& attributes) override {
+    Add(name, static_cast<double>(duration.count()), attributes);
+    futility::otel::MetricsRecorder::RecordLatency(name, duration, attributes);
+  }
   void RecordDistribution(const std::string& name, double value,
                           const std::map<std::string, std::string>& attributes) override {
     Add(name, value, attributes);

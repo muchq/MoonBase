@@ -159,6 +159,11 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 		response.Custom[0].Metrics[0])
 	assert.Equal(t, CustomMetricValue{Label: "commands_per_sec", Value: 206.0, Unit: "/s"},
 		response.Custom[1].Metrics[0])
+	assert.Equal(t, CustomMetricValue{Label: "rejections_per_sec", Value: 208.0, Unit: "/s"},
+		response.Custom[1].Metrics[2])
+	// Chat starts at CustomScalars index 9, so its first value is 200+9.
+	assert.Equal(t, CustomMetricValue{Label: "messages_per_sec", Value: 209.0, Unit: "/s"},
+		response.Custom[2].Metrics[0])
 	// The omitted query's descriptor survives with a zero value.
 	last := response.Custom[2].Metrics[5]
 	assert.Equal(t, omitted.Label, last.Label)
