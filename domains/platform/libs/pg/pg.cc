@@ -100,4 +100,32 @@ absl::StatusOr<Result> Client::Exec(const std::string& sql,
   return ExecLocked(sql, params);
 }
 
+absl::StatusOr<Result> Transaction::Exec(const std::string& sql,
+                                         const std::vector<std::string>& params) {
+  // No lock: InTransaction holds it for the whole callback.
+  if (!failure_.ok()) return failure_;
+  absl::StatusOr<Result> result = client_.ExecLocked(sql, params);
+  if (!result.ok()) failure_ = result.status();
+  return result;
+}
+
+absl::Status Client::InTransaction(const std::function<absl::Status(Transaction&)>& body) {
+  const std::lock_guard<std::mutex> lock(mu_);
+  if (absl::Status connected = EnsureConnectedLocked(); !connected.ok()) return connected;
+  if (absl::StatusOr<Result> begun = ExecLocked("BEGIN", {}); !begun.ok()) return begun.status();
+
+  Transaction transaction(*this);
+  absl::Status result = body(transaction);
+  if (result.ok() && !transaction.failure_.ok()) result = transaction.failure_;
+  if (result.ok()) {
+    absl::StatusOr<Result> committed = ExecLocked("COMMIT", {});
+    if (committed.ok()) return absl::OkStatus();
+    result = committed.status();
+  }
+  // Best effort: a rollback that fails because the connection died has
+  // already happened server-side.
+  ExecLocked("ROLLBACK", {}).IgnoreError();
+  return result;
+}
+
 }  // namespace pg
