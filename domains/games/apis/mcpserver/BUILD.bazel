@@ -61,6 +61,7 @@ java_binary(
     ],
     visibility = ["//visibility:public"],
     runtime_deps = [
+        "//domains/platform/libs/yodel:micronaut",
         "//domains/platform/libs/logging",
     ],
     deps = [

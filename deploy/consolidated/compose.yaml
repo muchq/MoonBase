@@ -199,6 +199,9 @@ services:
     environment:
       - PORT=8080
       - APP_NAME=mcpserver
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
+      - OTEL_SERVICE_NAME=mcpserver
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=mcpserver,service.version=${MCPSERVER_SHA:-${DEPLOY_SHA:-latest}}
     volumes:
       - /etc/mcpserver:/etc/mcpserver
     networks:
@@ -269,6 +272,9 @@ services:
     environment:
       - PORT=8080
       - SENTRY_DSN=${ONE_D4_SENTRY_DSN}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
+      - OTEL_SERVICE_NAME=one_d4
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=one_d4,service.version=${ONE_D4_SHA:-${DEPLOY_SHA:-latest}}
     volumes:
       - /etc/one_d4:/etc/one_d4
     networks:

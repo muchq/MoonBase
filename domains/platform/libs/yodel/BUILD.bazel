@@ -1,0 +1,95 @@
+load("//bazel/rules:java.bzl", "artifact", "java_library", "java_test_suite")
+
+java_library(
+    name = "yodel",
+    srcs = [
+        "src/main/java/com/muchq/platform/yodel/HttpMetricsPipeline.java",
+        "src/main/java/com/muchq/platform/yodel/HttpServerMetrics.java",
+        "src/main/java/com/muchq/platform/yodel/OtlpHttpMetricsExporter.java",
+        "src/main/java/com/muchq/platform/yodel/OtlpJsonEncoder.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        artifact("com.fasterxml.jackson.core:jackson-core"),
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("org.jspecify:jspecify"),
+        artifact("org.slf4j:slf4j-api"),
+    ],
+)
+
+# Dropping this on a Micronaut service's runtime classpath is the whole
+# integration: the filter registers itself and the http_server_* family
+# exports whenever OTEL_EXPORTER_OTLP_ENDPOINT is set.
+java_library(
+    name = "micronaut",
+    srcs = [
+        "src/main/java/com/muchq/platform/yodel/micronaut/HttpServerMetricsFilter.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":yodel",
+        artifact("io.micronaut:micronaut-core"),
+        artifact("io.micronaut:micronaut-http"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("io.projectreactor:reactor-core"),
+        artifact("jakarta.annotation:jakarta.annotation-api"),
+        artifact("jakarta.inject:jakarta-inject-api"),
+        artifact("org.reactivestreams:reactive-streams"),
+    ],
+)
+
+java_test_suite(
+    name = "yodel_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/platform/yodel/HttpMetricsPipelineTest.java",
+        "src/test/java/com/muchq/platform/yodel/HttpServerMetricsTest.java",
+        "src/test/java/com/muchq/platform/yodel/OtlpHttpMetricsExporterTest.java",
+        "src/test/java/com/muchq/platform/yodel/OtlpJsonEncoderTest.java",
+    ],
+    deps = [
+        ":yodel",
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+# The controller lives in its own java_library (not the suite srcs) because
+# only java_library targets run the Micronaut annotation processors that
+# generate its bean definition.
+java_library(
+    name = "filter_test_app",
+    testonly = True,
+    srcs = [
+        "src/test/java/com/muchq/platform/yodel/micronaut/TestEndpointController.java",
+    ],
+    deps = [
+        artifact("io.micronaut:micronaut-core"),
+        artifact("io.micronaut:micronaut-http"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("jakarta.inject:jakarta-inject-api"),
+    ],
+)
+
+java_test_suite(
+    name = "micronaut_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/platform/yodel/micronaut/HttpServerMetricsFilterTest.java",
+    ],
+    runtime_deps = [
+        ":filter_test_app",
+        artifact("io.micronaut:micronaut-jackson-databind"),
+    ],
+    deps = [
+        ":yodel",
+        ":micronaut",
+        artifact("io.micronaut:micronaut-context"),
+        artifact("io.micronaut:micronaut-http-server-netty"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("io.micronaut:micronaut-runtime"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
