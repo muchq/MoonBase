@@ -16,6 +16,7 @@
 #include "domains/games/apis/golf_hub/chat_store.h"
 #include "domains/games/apis/golf_hub/hub_store.h"
 #include "domains/games/apis/golf_hub/id_generator.h"
+#include "domains/games/apis/golf_hub/rate_limiter.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/golf/game_state.h"
@@ -83,13 +84,15 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// it neither survives a restart nor reaches another instance. A
   /// PgChatStore passed here authorizes against room_members in its own
   /// transaction and needs nothing from this handler.
+  /// `limits` are the per-session stream budgets (#1240); the defaults
+  /// serve production and tests inject extremes to pin the behavior.
   explicit HubHandler(std::shared_ptr<TicketVault> vault,
                       std::shared_ptr<cards::Dealer> dealer = std::make_shared<cards::Dealer>(),
                       std::shared_ptr<IdGenerator> ids = std::make_shared<WhimsicalIdGenerator>(),
                       std::chrono::seconds grace_period = std::chrono::minutes(5),
                       std::shared_ptr<futility::otel::MetricsRecorder> metrics = nullptr,
                       std::shared_ptr<HubStore> store = nullptr,
-                      std::shared_ptr<ChatStore> chat_store = nullptr);
+                      std::shared_ptr<ChatStore> chat_store = nullptr, RateLimits limits = {});
 
   /// Runs `action` while mu_ holds (room_id, player_id) to be a current
   /// member, or returns false without running it. Membership cannot
@@ -344,6 +347,7 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   const std::shared_ptr<futility::otel::MetricsRecorder> metrics_;
   const std::shared_ptr<HubStore> store_;
   const std::shared_ptr<ChatStore> chat_store_;
+  const RateLimits limits_;
   /// Rides every commit and rider as the notify payload, so an instance
   /// can tell its own wake-ups from the ones that carry news.
   const std::string instance_id_;

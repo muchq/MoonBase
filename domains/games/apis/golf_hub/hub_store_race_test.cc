@@ -130,7 +130,8 @@ class HubStoreRaceFixture : public GolfHubStreamFixture {
         std::make_shared<InMemoryTicketVault>(std::chrono::seconds(60), std::chrono::seconds(60)),
         std::make_shared<cards::NoShuffleDealer>(), std::make_shared<RemoteIdGenerator>(),
         std::chrono::seconds(60),
-        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"), gated_store_);
+        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"), gated_store_,
+        /*chat_store=*/nullptr, UnlimitedRateLimits());
     EXPECT_TRUE(instance->handler->RestoreFromStore().ok());
     instance->server = std::make_unique<moonbase::golf::GolfHubServer>(instance->handler);
 

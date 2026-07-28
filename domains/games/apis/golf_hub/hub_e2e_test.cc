@@ -211,7 +211,7 @@ std::unique_ptr<SecondInstance> BuildSecondInstance(
   instance->handler = std::make_shared<HubHandler>(
       std::move(vault), std::make_shared<cards::NoShuffleDealer>(),
       std::make_shared<SequentialIdGenerator>(), std::chrono::seconds(60), std::move(metrics),
-      std::move(store), std::move(chat_store));
+      std::move(store), std::move(chat_store), UnlimitedRateLimits());
   EXPECT_TRUE(instance->handler->RestoreFromStore().ok());
   instance->server = std::make_unique<moonbase::golf::GolfHubServer>(instance->handler);
 
@@ -1569,6 +1569,82 @@ class FailingVaultFixture : public GolfHubStreamFixture {
 TEST_F(FailingVaultFixture, GetSessionFailsClosedWhenTheVaultIsDown) {
   const auto session = client_->GetSession(moonbase::golf::GetSessionInput{});
   ASSERT_FALSE(session.ok());
+}
+
+// Per-session stream budgets (#1240), pinned with tiny buckets whose
+// refills are effectively never — nothing a test does can accidentally
+// earn a token back, so the refusal path is deterministic.
+class RateLimitedStreamFixture : public GolfHubStreamFixture {
+ protected:
+  RateLimits MakeRateLimits() override {
+    RateLimits limits;
+    limits.command_burst = 6;
+    limits.command_refill_per_sec = 0.0001;
+    limits.chat_burst = 2;
+    limits.chat_refill_per_sec = 0.0001;
+    return limits;
+  }
+};
+
+// The chat sub-limit: the burst stores and echoes, the message after it
+// is refused before any locked work — told "slow down", counted by
+// kind, and never stored. The session stays usable.
+TEST_F(RateLimitedStreamFixture, AChatFloodStoresTheBurstAndRejectsTheRest) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+
+  moonbase::golf::Chat chat;
+  for (const char* text : {"one", "two"}) {
+    chat.text = text;
+    ASSERT_TRUE(alice->stream.Send(GolfCommands::FromChat(chat)).ok());
+    auto echo = NextEvent(alice->stream);
+    ASSERT_TRUE(echo.has_value());
+    ASSERT_NE(echo->as_roomChat_or_null(), nullptr);
+    EXPECT_EQ(echo->as_roomChat_or_null()->text, text);
+  }
+
+  chat.text = "three is a flood";
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromChat(chat)).ok());
+  auto refused = NextEvent(alice->stream);
+  ASSERT_TRUE(refused.has_value());
+  ASSERT_NE(refused->as_commandRejected_or_null(), nullptr);
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "slow down");
+
+  EXPECT_EQ(metrics_->CounterTotal("chat_appends", {{"result", "stored"}}), 2);
+  EXPECT_EQ(metrics_->CounterTotal("stream_rate_limited", {{"kind", "chat"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("stream_rate_limited", {{"kind", "command"}}), 0);
+}
+
+// The command budget guards everything, including frames that only ever
+// earn rejections — the flood costs the hub almost nothing and honest
+// commands resume once the client backs off (here: never, the refill is
+// frozen, which is what makes the boundary exact).
+TEST_F(RateLimitedStreamFixture, ACommandFloodIsRefusedAfterTheBurst) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+
+  // Six lobby-less getRoomState frames spend the burst; each earns the
+  // ordinary rejection, proving real handling happened.
+  for (int i = 0; i < 6; ++i) {
+    ASSERT_TRUE(
+        alice->stream.Send(GolfCommands::FromGetroomstate(moonbase::golf::GetRoomState{})).ok());
+    auto rejected = NextEvent(alice->stream);
+    ASSERT_TRUE(rejected.has_value());
+    ASSERT_NE(rejected->as_commandRejected_or_null(), nullptr);
+    EXPECT_EQ(rejected->as_commandRejected_or_null()->reason, "not in a room");
+  }
+
+  ASSERT_TRUE(
+      alice->stream.Send(GolfCommands::FromGetroomstate(moonbase::golf::GetRoomState{})).ok());
+  auto limited = NextEvent(alice->stream);
+  ASSERT_TRUE(limited.has_value());
+  ASSERT_NE(limited->as_commandRejected_or_null(), nullptr);
+  EXPECT_EQ(limited->as_commandRejected_or_null()->reason, "slow down");
+  EXPECT_EQ(metrics_->CounterTotal("stream_rate_limited", {{"kind", "command"}}), 1);
 }
 
 }  // namespace

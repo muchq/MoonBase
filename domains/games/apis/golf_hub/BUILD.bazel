@@ -257,6 +257,23 @@ cc_test(
     ],
 )
 
+# Per-session stream budgets (#1240): a coroutine-frame token bucket —
+# deliberately lock-free because frames are sequential per session.
+cc_library(
+    name = "rate_limiter",
+    hdrs = ["rate_limiter.h"],
+)
+
+cc_test(
+    name = "rate_limiter_test",
+    size = "small",
+    srcs = ["rate_limiter_test.cc"],
+    deps = [
+        ":rate_limiter",
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_library(
     name = "hub_handler",
     srcs = ["hub_handler.cc"],
@@ -267,6 +284,7 @@ cc_library(
         ":hub_store",
         ":id_generator",
         ":protocol_input",
+        ":rate_limiter",
         ":ticket_vault",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards:card_mapper",
@@ -288,7 +306,13 @@ cc_library(
 # skips otherwise.
 cc_test(
     name = "pg_hub_e2e_test",
-    size = "small",
+    # Medium: a multi-instance database e2e suite that has grown with
+    # every epic (restart, cross-instance games, chat, forfeits). The
+    # small 60s ceiling covers the whole binary, and a contended CI
+    # runner against the postgres service can exhaust it mid-suite with
+    # nothing wrong (observed on #1241: timeout after six green tests,
+    # no assertion failure; every case passes locally in ~1s).
+    size = "medium",
     srcs = [
         "pg_hub_e2e_test.cc",
         "stream_test_fixture.h",

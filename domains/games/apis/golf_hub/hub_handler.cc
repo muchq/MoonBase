@@ -146,7 +146,8 @@ std::vector<golf_hub::HubStore::StatsDelta> StatsDeltas(const golf::GameState& s
 HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::Dealer> dealer,
                        std::shared_ptr<IdGenerator> ids, std::chrono::seconds grace_period,
                        std::shared_ptr<futility::otel::MetricsRecorder> metrics,
-                       std::shared_ptr<HubStore> store, std::shared_ptr<ChatStore> chat_store)
+                       std::shared_ptr<HubStore> store, std::shared_ptr<ChatStore> chat_store,
+                       RateLimits limits)
     : vault_(std::move(vault)),
       dealer_(std::move(dealer)),
       ids_(std::move(ids)),
@@ -161,6 +162,7 @@ HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards
                                                                  const MemberAction& action) {
                           return WithMember(room_id, player_id, action);
                         })),
+      limits_(limits),
       instance_id_(InstanceId()),
       registry_([this, grace_period] {
         Registry::Options options;
@@ -571,6 +573,14 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
   }
   Deliver(resync);
 
+  // Per-session budgets (#1240), owned by this coroutine frame: frames
+  // are handled sequentially per session, so no locking, and the state
+  // dies with the connection. Every frame draws from the command
+  // bucket; chat draws from its own tighter bucket too, because each
+  // message is a durable database transaction plus fleet-wide fan-out.
+  TokenBucket command_budget(limits_.command_burst, limits_.command_refill_per_sec);
+  TokenBucket chat_budget(limits_.chat_burst, limits_.chat_refill_per_sec);
+
   while (true) {
     auto received = co_await stream.Receive();
     if (!received.ok() || !received->has_value()) {
@@ -587,6 +597,21 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
         if (auto current = CurrentRoom(player_id)) BroadcastRoom(*current);
       }
       co_return smithy::Unit{};
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (!command_budget.Admit(now)) {
+      // Refused before any locked work: the whole point is that a flood
+      // costs the hub almost nothing. The session stays open — the
+      // buckets already bound the damage, and closing floods just
+      // converts them into reconnect load.
+      Count("stream_rate_limited", {{"kind", "command"}});
+      Reject(player_id, "slow down");
+      continue;
+    }
+    if ((*received)->as_chat_or_null() != nullptr && !chat_budget.Admit(now)) {
+      Count("stream_rate_limited", {{"kind", "chat"}});
+      Reject(player_id, "slow down");
+      continue;
     }
     HandleCommand(player_id, **received);
   }
