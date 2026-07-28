@@ -34,6 +34,7 @@ var serviceRegistry = map[string]serviceEntry{
 			{"Activity", "commands_per_sec", "/s", `sum(rate(stream_commands_total[5m]))`},
 			{"Activity", "events_per_sec", "/s", `sum(rate(stream_events_total[5m]))`},
 			{"Activity", "rejections_per_sec", "/s", `sum(rate(stream_rejections_total[5m]))`},
+			{"Activity", "rate_limited_per_sec", "/s", `sum(rate(stream_rate_limited_total[5m]))`},
 			// Room chat (#1226): outcome counts and stages only — the emitter
 			// never labels by room, player, or text. catch_up_rows is a
 			// per-drain distribution, so its windowed average is how far
@@ -52,6 +53,7 @@ var serviceRegistry = map[string]serviceEntry{
 			"event_rate":         `sum(rate(stream_events_total[5m]))`,
 			"rejection_rate":     `sum(rate(stream_rejections_total[5m]))`,
 			"disconnect_rate":    `sum(rate(stream_disconnects_total[5m]))`,
+			"rate_limited_rate":  `sum(rate(stream_rate_limited_total[5m]))`,
 			"chat_message_rate":  `sum(rate(chat_appends_total{result="stored"}[5m]))`,
 			"chat_delivery_rate": `sum(rate(chat_rows_delivered_total[5m]))`,
 			"chat_failure_rate":  `sum(rate(chat_failures_total[5m]))`,

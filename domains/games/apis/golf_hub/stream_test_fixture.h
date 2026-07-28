@@ -197,6 +197,10 @@ class GolfHubStreamFixture : public testing::Test {
   /// overrides with PgChatStore, which authorizes in its own transaction
   /// and needs nothing from the handler.
   virtual std::shared_ptr<ChatStore> MakeChatStore() { return nullptr; }
+  /// The stream budgets (#1240). Defaults are far above anything a test
+  /// sends; rate-limit tests override with tiny buckets to pin the
+  /// refusal behavior without racing wall-clock refills.
+  virtual RateLimits MakeRateLimits() { return {}; }
   /// ADR-0020 reconnect grace — long enough that no test sees an expiry
   /// by accident; the expiry suites override it down to something a
   /// receive budget can wait out.
@@ -224,9 +228,9 @@ class GolfHubStreamFixture : public testing::Test {
           [guard](const std::string& room_id, const std::string& player_id,
                   const MemberAction& action) { return (*guard)(room_id, player_id, action); });
     }
-    handler_ =
-        std::make_shared<HubHandler>(vault_, std::make_shared<cards::NoShuffleDealer>(), ids_,
-                                     /*grace_period=*/GracePeriod(), metrics_, store_, chat_store_);
+    handler_ = std::make_shared<HubHandler>(
+        vault_, std::make_shared<cards::NoShuffleDealer>(), ids_,
+        /*grace_period=*/GracePeriod(), metrics_, store_, chat_store_, MakeRateLimits());
     if (default_memory_chat) {
       *guard = [handler = handler_.get()](const std::string& room_id, const std::string& player_id,
                                           const MemberAction& action) {

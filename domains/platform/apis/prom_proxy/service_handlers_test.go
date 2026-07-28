@@ -152,7 +152,7 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Equal(t, "Activity", response.Custom[1].Title)
 	assert.Equal(t, "Chat", response.Custom[2].Title)
 	assert.Len(t, response.Custom[0].Metrics, 6)
-	assert.Len(t, response.Custom[1].Metrics, 3)
+	assert.Len(t, response.Custom[1].Metrics, 4)
 	require.Len(t, response.Custom[2].Metrics, 6)
 
 	assert.Equal(t, CustomMetricValue{Label: "active", Value: 200.0, Unit: "sessions"},
@@ -161,8 +161,8 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 		response.Custom[1].Metrics[0])
 	assert.Equal(t, CustomMetricValue{Label: "rejections_per_sec", Value: 208.0, Unit: "/s"},
 		response.Custom[1].Metrics[2])
-	// Chat starts at CustomScalars index 9, so its first value is 200+9.
-	assert.Equal(t, CustomMetricValue{Label: "messages_per_sec", Value: 209.0, Unit: "/s"},
+	// Chat starts at CustomScalars index 10, so its first value is 200+10.
+	assert.Equal(t, CustomMetricValue{Label: "messages_per_sec", Value: 210.0, Unit: "/s"},
 		response.Custom[2].Metrics[0])
 	// The omitted query's descriptor survives with a zero value.
 	last := response.Custom[2].Metrics[5]
@@ -294,6 +294,7 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_StandardPlusCustom(t *testin
 		"sessions_active", "session_starts", "command_rate", "event_rate",
 		"rejection_rate", "disconnect_rate",
 		"chat_message_rate", "chat_delivery_rate", "chat_failure_rate", "chat_catch_up_rows",
+		"rate_limited_rate",
 	}
 	assert.Len(t, names, len(expected))
 	for _, name := range expected {

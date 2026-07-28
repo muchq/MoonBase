@@ -257,6 +257,23 @@ cc_test(
     ],
 )
 
+# Per-session stream budgets (#1240): a coroutine-frame token bucket —
+# deliberately lock-free because frames are sequential per session.
+cc_library(
+    name = "rate_limiter",
+    hdrs = ["rate_limiter.h"],
+)
+
+cc_test(
+    name = "rate_limiter_test",
+    size = "small",
+    srcs = ["rate_limiter_test.cc"],
+    deps = [
+        ":rate_limiter",
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_library(
     name = "hub_handler",
     srcs = ["hub_handler.cc"],
@@ -267,6 +284,7 @@ cc_library(
         ":hub_store",
         ":id_generator",
         ":protocol_input",
+        ":rate_limiter",
         ":ticket_vault",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards:card_mapper",
