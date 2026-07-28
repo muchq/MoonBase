@@ -20,6 +20,24 @@ cc_test(
 )
 
 cc_library(
+    name = "token_bucket",
+    srcs = [],
+    hdrs = ["token_bucket.h"],
+    visibility = ["//visibility:public"],
+    deps = [],
+)
+
+cc_test(
+    name = "token_bucket_test",
+    size = "small",
+    srcs = ["token_bucket_test.cc"],
+    deps = [
+        ":token_bucket",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
     name = "sliding_window_rate_limiter",
     srcs = [],
     hdrs = ["sliding_window_rate_limiter.h"],

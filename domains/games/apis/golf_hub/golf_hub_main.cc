@@ -36,6 +36,7 @@
 #include "domains/platform/libs/futility/otel/http_metrics.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/futility/otel/otel_provider.h"
+#include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "domains/platform/libs/pg/pg.h"
 #include "moonbase/golf/server.h"
@@ -142,11 +143,25 @@ int main() {
   moonbase::golf::GolfHubServer server(handler);
 
   // Unary neighbors (GetSession, health) on the shared aura chain:
-  // http_server_* instruments + access log outermost, then health. No rate
-  // limiter yet — session minting is already gated by the ticket vault, and
-  // a per-client budget can slot into ChainOptions when it earns its keep.
+  // http_server_* instruments + access log outermost, then health, then
+  // the per-client guard.
   auto metrics =
       aura::MakeHttpMetricsSink(std::make_shared<futility::otel::HttpMetricsManager>("golf_hub"));
+
+  // The unary half of #1240: the stream budgets cannot see GetSession,
+  // and every mint writes a ticket row — the flood a reconnect loop or
+  // a scripted client would otherwise run for free. Keyed by the
+  // ADR-0012 client address; 20/min absorbs a full reconnect cycle
+  // (10 attempts, 2s apart) with headroom, same shape as portrait's.
+  futility::rate_limiter::SlidingWindowRateLimiterConfig session_limiter_config{
+      .max_requests_per_key = 20,
+      .window_size = std::chrono::seconds(60),
+      .ttl = std::chrono::minutes(5),
+      .cleanup_interval = std::chrono::seconds(30),
+      .max_keys = 1000};
+  auto session_limiter =
+      std::make_shared<futility::rate_limiter::SlidingWindowRateLimiter<std::string>>(
+          session_limiter_config);
 
   // The reverse-proxy trust boundary (smithy-cpp ADR-0012):
   // deploy/consolidated/compose.yaml pins Caddy's address into
@@ -154,9 +169,14 @@ int main() {
   auto trusted_proxies = aura::TrustedProxiesFromEnv();
   if (!trusted_proxies.has_value()) return 1;
 
-  auto unary = aura::ProductionChain(
-      aura::ChainOptions{.metrics = metrics, .trusted_proxies = std::move(*trusted_proxies)},
-      server.Handler());
+  auto unary =
+      aura::ProductionChain(aura::ChainOptions{.metrics = metrics,
+                                               .allow_request =
+                                                   [session_limiter](const std::string& client) {
+                                                     return session_limiter->allow(client);
+                                                   },
+                                               .trusted_proxies = std::move(*trusted_proxies)},
+                            server.Handler());
 
   // Gate chain: origin allowlist (browser CSWSH defense; unset
   // ALLOWED_ORIGINS admits all origins — dev parity with the Go hub's
