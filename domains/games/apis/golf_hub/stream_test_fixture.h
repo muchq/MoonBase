@@ -113,6 +113,19 @@ inline std::optional<moonbase::golf::GolfUpdate> ReceiveGolf(
   return std::nullopt;
 }
 
+// Effectively-unlimited stream budgets (#1240) for suites whose flows
+// send at test speed, not human speed. Every direct HubHandler
+// construction in a test should pass this unless the test is about the
+// limiter itself.
+inline RateLimits UnlimitedRateLimits() {
+  RateLimits limits;
+  limits.command_burst = 1e9;
+  limits.command_refill_per_sec = 1e9;
+  limits.chat_burst = 1e9;
+  limits.chat_refill_per_sec = 1e9;
+  return limits;
+}
+
 inline moonbase::golf::GolfCommands Move(moonbase::golf::GolfMove move) {
   moonbase::golf::GolfCommand command;
   command.move = std::move(move);
@@ -197,10 +210,11 @@ class GolfHubStreamFixture : public testing::Test {
   /// overrides with PgChatStore, which authorizes in its own transaction
   /// and needs nothing from the handler.
   virtual std::shared_ptr<ChatStore> MakeChatStore() { return nullptr; }
-  /// The stream budgets (#1240). Defaults are far above anything a test
-  /// sends; rate-limit tests override with tiny buckets to pin the
-  /// refusal behavior without racing wall-clock refills.
-  virtual RateLimits MakeRateLimits() { return {}; }
+  /// The stream budgets (#1240). Tests get effectively-unlimited
+  /// buckets: e2e flows blast frames far faster than any human, and only
+  /// the rate-limit suite wants refusals — it overrides with tiny
+  /// buckets whose refills are frozen.
+  virtual RateLimits MakeRateLimits() { return UnlimitedRateLimits(); }
   /// ADR-0020 reconnect grace — long enough that no test sees an expiry
   /// by accident; the expiry suites override it down to something a
   /// receive budget can wait out.

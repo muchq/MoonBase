@@ -211,7 +211,7 @@ std::unique_ptr<SecondInstance> BuildSecondInstance(
   instance->handler = std::make_shared<HubHandler>(
       std::move(vault), std::make_shared<cards::NoShuffleDealer>(),
       std::make_shared<SequentialIdGenerator>(), std::chrono::seconds(60), std::move(metrics),
-      std::move(store), std::move(chat_store));
+      std::move(store), std::move(chat_store), UnlimitedRateLimits());
   EXPECT_TRUE(instance->handler->RestoreFromStore().ok());
   instance->server = std::make_unique<moonbase::golf::GolfHubServer>(instance->handler);
 

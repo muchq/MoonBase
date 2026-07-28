@@ -161,7 +161,7 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
         std::make_shared<RemoteIdGenerator>(),
         /*grace_period=*/std::chrono::seconds(60),
         std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"), instance->store,
-        MakeChatStore());
+        MakeChatStore(), UnlimitedRateLimits());
     const absl::Status restored = instance->handler->RestoreFromStore();
     EXPECT_TRUE(restored.ok()) << restored;
     instance->listener = MakeListener(instance->handler);
