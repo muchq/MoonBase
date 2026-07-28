@@ -74,8 +74,10 @@ func TestMetricsHandler_GetServiceCatalog(t *testing.T) {
 		hasCustom bool
 	}{
 		{"golf_hub", true},
+		{"mcpserver", false},
 		{"microgpt-serve", true},
 		{"mithril", false},
+		{"one_d4", false},
 		{"portrait", true},
 		{"posterize", false},
 	}

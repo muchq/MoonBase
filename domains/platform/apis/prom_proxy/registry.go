@@ -20,7 +20,7 @@ type serviceEntry struct {
 }
 
 // Catalog order doubles as the UI's tab order.
-var serviceOrder = []string{"golf_hub", "microgpt-serve", "mithril", "portrait", "posterize"}
+var serviceOrder = []string{"golf_hub", "mcpserver", "microgpt-serve", "mithril", "one_d4", "portrait", "posterize"}
 
 var serviceRegistry = map[string]serviceEntry{
 	"golf_hub": {
@@ -74,6 +74,10 @@ var serviceRegistry = map[string]serviceEntry{
 			"avg_duration_ms":   `sum(rate(microgpt_request_duration_ms_sum[5m]))/sum(rate(microgpt_request_duration_ms_count[5m]))`,
 		},
 	},
+	// The Java services (#1212): yodel's standard instruments only, no
+	// custom set yet.
+	"mcpserver": {},
+	"one_d4":    {},
 	// Wordchains: server_pal's standard instruments only, no custom set.
 	"mithril": {},
 	// Image blur/edges: server_pal's standard instruments only.
