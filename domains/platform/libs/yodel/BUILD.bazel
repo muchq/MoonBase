@@ -83,8 +83,8 @@ java_test_suite(
         artifact("io.micronaut:micronaut-jackson-databind"),
     ],
     deps = [
-        ":yodel",
         ":micronaut",
+        ":yodel",
         artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-http-server-netty"),
         artifact("io.micronaut:micronaut-inject"),
