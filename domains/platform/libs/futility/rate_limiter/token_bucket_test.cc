@@ -1,10 +1,10 @@
-#include "domains/games/apis/golf_hub/rate_limiter.h"
+#include "domains/platform/libs/futility/rate_limiter/token_bucket.h"
 
 #include <gtest/gtest.h>
 
 #include <chrono>
 
-namespace golf_hub {
+namespace futility::rate_limiter {
 namespace {
 
 using std::chrono::milliseconds;
@@ -67,4 +67,4 @@ TEST(TokenBucketTest, TimeMovingBackwardsRefillsNothing) {
 }
 
 }  // namespace
-}  // namespace golf_hub
+}  // namespace futility::rate_limiter

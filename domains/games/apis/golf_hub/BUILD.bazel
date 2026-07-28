@@ -257,21 +257,12 @@ cc_test(
     ],
 )
 
-# Per-session stream budgets (#1240): a coroutine-frame token bucket —
-# deliberately lock-free because frames are sequential per session.
+# Per-session stream budget policy (#1240); the bucket mechanism lives
+# in //domains/platform/libs/futility/rate_limiter, tested there.
 cc_library(
     name = "rate_limiter",
     hdrs = ["rate_limiter.h"],
-)
-
-cc_test(
-    name = "rate_limiter_test",
-    size = "small",
-    srcs = ["rate_limiter_test.cc"],
-    deps = [
-        ":rate_limiter",
-        "@googletest//:gtest_main",
-    ],
+    deps = ["//domains/platform/libs/futility/rate_limiter:token_bucket"],
 )
 
 cc_library(
@@ -306,13 +297,11 @@ cc_library(
 # skips otherwise.
 cc_test(
     name = "pg_hub_e2e_test",
-    # Medium: a multi-instance database e2e suite that has grown with
-    # every epic (restart, cross-instance games, chat, forfeits). The
-    # small 60s ceiling covers the whole binary, and a contended CI
-    # runner against the postgres service can exhaust it mid-suite with
-    # nothing wrong (observed on #1241: timeout after six green tests,
-    # no assertion failure; every case passes locally in ~1s).
-    size = "medium",
+    # Small on purpose, even after the one-off 60s stall observed on
+    # #1241 (never reproduced across 40 local runs on postgres 16 and
+    # 18; the whole suite runs in ~2s): the tight ceiling is what turns
+    # a recurrence into a loud red instead of a quietly slow pass.
+    size = "small",
     srcs = [
         "pg_hub_e2e_test.cc",
         "stream_test_fixture.h",
@@ -442,6 +431,7 @@ cc_binary(
         "//domains/platform/libs/aura",
         "//domains/platform/libs/futility/env",
         "//domains/platform/libs/futility/otel:http_metrics",
+        "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
         "//domains/platform/libs/futility/otel:metrics",
         "//domains/platform/libs/futility/otel:otel_provider",
         "//domains/platform/libs/pg",

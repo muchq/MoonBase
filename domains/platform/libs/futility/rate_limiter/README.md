@@ -4,12 +4,13 @@ Thread-safe rate limiting implementations for controlling request rates in C++ s
 
 ## Overview
 
-This module provides two rate limiting algorithms:
+This module provides three rate limiting implementations:
 
-| Algorithm | Use Case | Per-Key | Burst Handling |
-|-----------|----------|---------|----------------|
-| **Sliding Window** | Per-client/IP limiting | Yes | Smooth (no boundary bursts) |
-| **Token Bucket** | Global rate limiting | No | Allows controlled bursts |
+| Implementation | Use Case | Per-Key | Thread-Safe | Clock |
+|----------------|----------|---------|-------------|-------|
+| **Sliding Window** | Per-client/IP limiting | Yes | Yes | Internal |
+| **Token Bucket (global)** | Global rate limiting | No | Yes | Internal |
+| **TokenBucket (single-owner)** | One budget owned by one execution context | No | No — by design | Injected |
 
 ## Sliding Window Rate Limiter
 
@@ -100,19 +101,50 @@ if (!limiter.allow(1)) {
 }
 ```
 
+## Single-Owner TokenBucket
+
+`token_bucket.h` is the third shape: one bucket, no lock, and the caller
+supplies every clock reading. It exists for budgets owned by exactly one
+execution context — the motivating case is golf_hub's per-session stream
+budgets (MoonBase#1240), which live in the session's coroutine frame where
+frames are handled sequentially and a mutex or clock call per admit would
+be pure overhead. Injected time is also what makes refill behavior
+testable with fabricated clocks instead of sleeps.
+
+### Usage
+
+```cpp
+#include "domains/platform/libs/futility/rate_limiter/token_bucket.h"
+
+// Burst of 10, sustained 5/s. Starts full.
+futility::rate_limiter::TokenBucket budget(10, 5);
+
+// The owner reads the clock once and passes it in.
+if (!budget.Admit(std::chrono::steady_clock::now())) {
+    Reject("slow down");
+}
+```
+
+Tokens are fractional, so slow refills (e.g. 0.5/s) grant eventually
+rather than never; a clock reading at or before the last one refills
+nothing and never moves the watermark backwards.
+
 ## Choosing an Algorithm
 
 | Scenario | Recommended |
 |----------|-------------|
 | Rate limit by IP address | Sliding Window |
 | Rate limit by API key | Sliding Window |
-| Global service-wide limit | Token Bucket |
-| Need to allow temporary bursts | Token Bucket |
+| Global service-wide limit | Token Bucket (global) |
+| Need to allow temporary bursts | Either token bucket |
 | Memory-constrained environment | Sliding Window with max_keys |
+| One budget per session/connection, owner-confined | TokenBucket (single-owner) |
 
 ## Testing
 
-Both limiters accept a Clock template parameter for deterministic testing:
+The keyed and global limiters accept a Clock template parameter for
+deterministic testing; the single-owner TokenBucket needs no mock at all —
+its owner passes time in, so tests just fabricate readings:
 
 ```cpp
 class MockClock {
@@ -135,6 +167,7 @@ MockClock::advance(std::chrono::seconds(60));  // Simulate time passing
 ## Bazel Targets
 
 ```python
-deps = ["//cpp/futility/rate_limiter:sliding_window_rate_limiter"]
-deps = ["//cpp/futility/rate_limiter:token_bucket_rate_limiter"]
+deps = ["//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter"]
+deps = ["//domains/platform/libs/futility/rate_limiter:token_bucket_rate_limiter"]
+deps = ["//domains/platform/libs/futility/rate_limiter:token_bucket"]
 ```
