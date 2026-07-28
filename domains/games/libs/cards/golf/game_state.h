@@ -28,6 +28,13 @@ class GameState;
 
 class GameState {
  public:
+  /// whoKnocked values outside the seat range: no knock yet, and a game
+  /// over by abandonment. The sentinel keeps a forced finish out of the
+  /// knock fields — views and the knocker-takes-ties rule only honor a
+  /// real seat — while isOver() still reads it as terminal.
+  static constexpr int kNoKnock = -1;
+  static constexpr int kAbandoned = -2;
+
   GameState(std::deque<Card> _drawPile, std::deque<Card> _discardPile, std::vector<Player> _players,
             bool _peekedAtDrawPile, int _whoseTurn, int _whoKnocked)
       : drawPile(std::move(_drawPile)),
@@ -84,10 +91,11 @@ class GameState {
 
   /// A seat abandoned mid-game. With three or more seats the abandoned
   /// seat disappears and indices compact (a departing knocker voids the
-  /// knock). Below two remaining seats the game is over with every seat
-  /// kept — cards and scores stand for the final tally; only the
-  /// caller's own roster records who left, so winners() alone cannot
-  /// exclude the abandoner.
+  /// knock). Below two remaining seats the game is over by abandonment
+  /// (whoKnocked becomes kAbandoned — any earlier knock is superseded)
+  /// with every seat kept — cards and scores stand for the final tally;
+  /// only the caller's own roster records who left, so winners() alone
+  /// cannot exclude the abandoner.
   [[nodiscard]] absl::StatusOr<GameState> removePlayer(int player) const;
 
   [[nodiscard]] GameState withPlayers(std::vector<Player> newPlayers) const;

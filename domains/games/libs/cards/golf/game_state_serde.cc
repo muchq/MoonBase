@@ -183,7 +183,9 @@ absl::StatusOr<GameState> deserializeGameState(const std::string& serialized) {
   const int64_t seats = static_cast<int64_t>(players.size());
   auto whose_turn = readIntInRange(parsed, "whoseTurn", 0, seats - 1);
   if (!whose_turn.ok()) return whose_turn.status();
-  auto who_knocked = readIntInRange(parsed, "whoKnocked", -1, seats - 1);
+  // kAbandoned marks a game over by abandonment; rows older than the
+  // sentinel carry a synthetic knock on a real seat and still parse.
+  auto who_knocked = readIntInRange(parsed, "whoKnocked", GameState::kAbandoned, seats - 1);
   if (!who_knocked.ok()) return who_knocked.status();
 
   return GameState{*std::move(draw_pile),

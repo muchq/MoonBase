@@ -55,7 +55,9 @@ absl::StatusOr<GameState> dealGolfGame(const string& game_id, const std::vector<
                    ""};
 }
 
-bool GameState::isOver() const { return drawPile.empty() || whoseTurn == whoKnocked; }
+bool GameState::isOver() const {
+  return drawPile.empty() || whoKnocked == kAbandoned || whoseTurn == whoKnocked;
+}
 
 // The preamble every turn move shares; per-move checks stay at the sites.
 absl::Status GameState::ensurePlayableTurn(int player) const {
@@ -341,11 +343,12 @@ absl::StatusOr<GameState> GameState::removePlayer(int player) const {
 
   // Below two remaining seats there is no game left to play: every seat
   // stays — the abandoned hand's cards and score stand for the final
-  // tally, and the caller's own roster records who left — with isOver
-  // forced so the finish resolves through the ordinary scoring path.
+  // tally, and the caller's own roster records who left — with the
+  // abandonment sentinel forcing isOver, so the finish scores like any
+  // other without inventing a knock nobody made.
   if (players.size() <= 2) {
-    return GameState{drawPile,  discardPile, players, false,     whoseTurn,
-                     whoseTurn, peeksHidden, gameId,  version_id};
+    return GameState{drawPile,   discardPile, players, false,     whoseTurn,
+                     kAbandoned, peeksHidden, gameId,  version_id};
   }
 
   vector<Player> updatedPlayers;

@@ -27,6 +27,30 @@ using moonbase::golf::GolfEvents;
 using moonbase::golf::GolfMove;
 using moonbase::golf::GolfUpdate;
 
+std::unordered_set<int> WinnersAmong(const golf::GameState& state,
+                                     const std::vector<std::string>& roster) {
+  std::unordered_set<int> winning;
+  int min_score = std::numeric_limits<int>::max();
+  for (std::size_t i = 0; i < state.getPlayers().size(); ++i) {
+    const golf::Player& seat = state.getPlayer(static_cast<int>(i));
+    const std::string occupant = seat.getName().value_or("");
+    if (std::find(roster.begin(), roster.end(), occupant) == roster.end()) continue;
+    const int score = seat.score();
+    if (score < min_score) {
+      min_score = score;
+      winning.clear();
+    }
+    if (score == min_score) winning.insert(static_cast<int>(i));
+  }
+  // The knocker takes ties alone — when still in contention. An
+  // abandonment end carries no knocker (kAbandoned is never a seat).
+  if (winning.contains(state.getWhoKnocked())) {
+    winning.clear();
+    winning.insert(state.getWhoKnocked());
+  }
+  return winning;
+}
+
 namespace {
 
 constexpr std::size_t kMaxSeats = 4;
@@ -70,7 +94,7 @@ moonbase::golf::Card WireCard(const cards::Card& card) {
 std::string PhaseString(const golf::GameState& state) {
   if (state.isOver()) return "ended";
   if (state.revealCountdownActive()) return "peeking";
-  if (state.getWhoKnocked() != -1) return "knocked";
+  if (state.getWhoKnocked() >= 0) return "knocked";
   return "playing";
 }
 
@@ -93,35 +117,6 @@ constexpr int kMaxCommitAttempts = 3;
 std::string InstanceId() {
   absl::BitGen gen;
   return absl::StrCat("hub-", absl::Hex(absl::Uniform<uint64_t>(gen), absl::kZeroPad16));
-}
-
-// winners() restricted to the seats the roster still names. A final
-// state can carry a seat its roster has dropped — an abandonment that
-// ended the game keeps the departed hand so its cards and score reach
-// the scorecard (#1236) — and such a seat cannot win: the game resolved
-// against it. For an ordinary finish the roster names every seat and
-// this is exactly the engine's rule, knocker-takes-ties included.
-std::unordered_set<int> WinnersAmong(const golf::GameState& state,
-                                     const std::vector<std::string>& roster) {
-  std::unordered_set<int> winning;
-  int min_score = std::numeric_limits<int>::max();
-  for (std::size_t i = 0; i < state.getPlayers().size(); ++i) {
-    const golf::Player& seat = state.getPlayer(static_cast<int>(i));
-    const std::string occupant = seat.getName().value_or("");
-    if (std::find(roster.begin(), roster.end(), occupant) == roster.end()) continue;
-    const int score = seat.score();
-    if (score < min_score) {
-      min_score = score;
-      winning.clear();
-    }
-    if (score == min_score) winning.insert(static_cast<int>(i));
-  }
-  // The knocker takes ties alone — when still in contention.
-  if (winning.contains(state.getWhoKnocked())) {
-    winning.clear();
-    winning.insert(state.getWhoKnocked());
-  }
-  return winning;
 }
 
 // The per-seat stat deltas a finished game applies — the payload of
@@ -1560,7 +1555,9 @@ moonbase::golf::GameView HubHandler::ViewLocked(const std::string& game_id, cons
   view.drawPileCount = static_cast<int>(state.getDrawPile().size());
   view.discardCount = static_cast<int>(state.getDiscardPile().size());
   if (!state.getDiscardPile().empty()) view.discardTop = WireCard(state.getDiscardPile().back());
-  if (state.getWhoKnocked() != -1) view.knockedPlayerId = PlayerIdAt(state, state.getWhoKnocked());
+  // Only a real seat's knock is advertised: an abandonment end carries
+  // the kAbandoned sentinel, not a knock somebody would be blamed for.
+  if (state.getWhoKnocked() >= 0) view.knockedPlayerId = PlayerIdAt(state, state.getWhoKnocked());
   view.allPlayersPeeked = state.allPlayersPeeked();
   // The drawn card rides only to the player who is looking at it.
   if (state.getPeekedAtDrawPile() && !ended &&
