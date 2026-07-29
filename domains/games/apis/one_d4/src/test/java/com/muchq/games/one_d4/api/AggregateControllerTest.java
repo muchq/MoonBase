@@ -1,0 +1,122 @@
+package com.muchq.games.one_d4.api;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.muchq.games.chessql.compiler.CompiledQuery;
+import com.muchq.games.chessql.compiler.SqlCompiler;
+import com.muchq.games.one_d4.api.dto.AggregateRequest;
+import com.muchq.games.one_d4.api.dto.AggregateResponse;
+import com.muchq.games.one_d4.api.dto.AggregateRow;
+import com.muchq.games.one_d4.api.dto.GameFeature;
+import com.muchq.games.one_d4.api.dto.OccurrenceRow;
+import com.muchq.games.one_d4.db.GameFeatureStore;
+import com.muchq.games.one_d4.engine.model.GameFeatures;
+import com.muchq.games.one_d4.engine.model.Motif;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import org.junit.jupiter.api.Test;
+
+public class AggregateControllerTest {
+
+  private final RecordingStore store = new RecordingStore();
+  private final AggregateController controller =
+      new AggregateController(store, new SqlCompiler(), new AggregateRequestValidator());
+
+  @Test
+  public void aggregate_compilesQueryAndMapsGroups() {
+    store.rows =
+        List.of(
+            new AggregateRow(Map.of("opening_family", "Caro Kann Defense"), 42),
+            new AggregateRow(Map.of("opening_family", "Sicilian Defense"), 17));
+
+    AggregateResponse response =
+        controller.aggregate(
+            new AggregateRequest(
+                "white.username = \"hikaru\" AND time.class = \"blitz\"",
+                List.of("opening.family"),
+                "count",
+                20));
+
+    assertThat(response.count()).isEqualTo(2);
+    assertThat(response.groups().get(0).group())
+        .containsEntry("opening_family", "Caro Kann Defense");
+    assertThat(response.groups().get(0).count()).isEqualTo(42);
+
+    // The store received the compiled aggregate with canonical group columns and the limit
+    assertThat(store.lastGroupColumns).containsExactly("opening_family");
+    assertThat(store.lastLimit).isEqualTo(20);
+    assertThat(store.lastCompiled).isInstanceOf(CompiledQuery.class);
+    CompiledQuery compiled = (CompiledQuery) store.lastCompiled;
+    assertThat(compiled.selectSql())
+        .contains("COUNT(*) AS group_count")
+        .contains("GROUP BY opening_family");
+    assertThat(compiled.parameters()).isEqualTo(List.of("hikaru", "blitz"));
+  }
+
+  @Test
+  public void aggregate_invalidRequestRejectedBeforeStoreCall() {
+    assertThatThrownBy(
+            () -> controller.aggregate(new AggregateRequest("white.elo > 1", List.of(), null, 20)))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThat(store.lastCompiled).isNull();
+  }
+
+  @Test
+  public void aggregate_unknownGroupByFieldRejected() {
+    assertThatThrownBy(
+            () ->
+                controller.aggregate(
+                    new AggregateRequest("white.elo > 1", List.of("pgn"), null, 20)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Unknown field");
+    assertThat(store.lastCompiled).isNull();
+  }
+
+  private static final class RecordingStore implements GameFeatureStore {
+    List<AggregateRow> rows = List.of();
+    Object lastCompiled;
+    List<String> lastGroupColumns;
+    int lastLimit;
+
+    @Override
+    public List<AggregateRow> aggregate(
+        Object compiledQuery, List<String> groupColumns, int limit) {
+      this.lastCompiled = compiledQuery;
+      this.lastGroupColumns = groupColumns;
+      this.lastLimit = limit;
+      return rows;
+    }
+
+    @Override
+    public void insertBatch(List<GameFeature> features) {}
+
+    @Override
+    public int deleteOlderThan(Instant threshold) {
+      return 0;
+    }
+
+    @Override
+    public void insertOccurrencesBatch(
+        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {}
+
+    @Override
+    public void deleteOccurrencesByGameUrls(List<String> gameUrls) {}
+
+    @Override
+    public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
+      return List.of();
+    }
+
+    @Override
+    public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
+      return Map.of();
+    }
+
+    @Override
+    public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
+      return List.of();
+    }
+  }
+}

@@ -431,6 +431,110 @@ public class SqlCompilerTest {
     assertThat(pq.orderBy()).isNull();
   }
 
+  @Test
+  public void testTitleFieldsCompileToCaseInsensitiveComparison() {
+    CompiledQuery white = compile("white.title = \"GM\"");
+    assertThat(white.selectSql())
+        .isEqualTo(BASE_PREFIX + "LOWER(white_title) = LOWER(?)" + BASE_SUFFIX);
+    assertThat(white.parameters()).isEqualTo(List.of("GM"));
+
+    CompiledQuery black = compile("black.title != \"GM\"");
+    assertThat(black.selectSql())
+        .isEqualTo(BASE_PREFIX + "LOWER(black_title) != LOWER(?)" + BASE_SUFFIX);
+  }
+
+  @Test
+  public void testTitleFieldSupportsIn() {
+    CompiledQuery result = compile("black.title IN [\"GM\", \"IM\"]");
+    assertThat(result.selectSql())
+        .isEqualTo(BASE_PREFIX + "LOWER(black_title) IN (LOWER(?), LOWER(?))" + BASE_SUFFIX);
+    assertThat(result.parameters()).isEqualTo(List.of("GM", "IM"));
+  }
+
+  @Test
+  public void testOpeningFieldsCompileToCaseInsensitiveComparison() {
+    CompiledQuery family = compile("opening.family = \"Caro Kann Defense\"");
+    assertThat(family.selectSql())
+        .isEqualTo(BASE_PREFIX + "LOWER(opening_family) = LOWER(?)" + BASE_SUFFIX);
+    assertThat(family.parameters()).isEqualTo(List.of("Caro Kann Defense"));
+
+    CompiledQuery name = compile("opening.name = \"English Opening Agincourt Defense\"");
+    assertThat(name.selectSql())
+        .isEqualTo(BASE_PREFIX + "LOWER(opening_name) = LOWER(?)" + BASE_SUFFIX);
+  }
+
+  @Test
+  public void testOpeningFieldsUnderscoreFormAccepted() {
+    CompiledQuery result = compile("opening_family = \"Sicilian Defense\"");
+    assertThat(result.selectSql())
+        .isEqualTo(BASE_PREFIX + "LOWER(opening_family) = LOWER(?)" + BASE_SUFFIX);
+  }
+
+  @Test
+  public void testCompileAggregateSingleGroupBy() {
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("white.username = \"hikaru\" AND time.class = \"blitz\""),
+            List.of("opening_family"));
+
+    assertThat(result.selectSql())
+        .isEqualTo(
+            "SELECT opening_family, COUNT(*) AS group_count FROM game_features g"
+                + " WHERE (LOWER(white_username) = LOWER(?) AND LOWER(time_class) = LOWER(?))"
+                + " GROUP BY opening_family"
+                + " ORDER BY group_count DESC, opening_family ASC");
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "blitz"));
+  }
+
+  @Test
+  public void testCompileAggregateMultipleGroupByDedupesAndResolvesDottedFields() {
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("white.elo >= 2500"),
+            List.of("opening.family", "black.title", "opening_family"));
+
+    assertThat(result.selectSql())
+        .isEqualTo(
+            "SELECT opening_family, black_title, COUNT(*) AS group_count FROM game_features g"
+                + " WHERE white_elo >= ?"
+                + " GROUP BY opening_family, black_title"
+                + " ORDER BY group_count DESC, opening_family ASC, black_title ASC");
+  }
+
+  @Test
+  public void testCompileAggregateSupportsMotifPredicates() {
+    CompiledQuery result =
+        compiler.compileAggregate(Parser.parse("motif(fork)"), List.of("time_class"));
+    assertThat(result.selectSql()).contains(FORK_EXISTS).contains("GROUP BY time_class");
+  }
+
+  @Test
+  public void testCompileAggregateRejectsUnknownGroupByField() {
+    assertThatThrownBy(
+            () -> compiler.compileAggregate(Parser.parse("white.elo >= 2500"), List.of("pgn")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Unknown field");
+  }
+
+  @Test
+  public void testCompileAggregateRejectsEmptyGroupBy() {
+    assertThatThrownBy(
+            () -> compiler.compileAggregate(Parser.parse("white.elo >= 2500"), List.of()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("groupBy requires at least one field");
+  }
+
+  @Test
+  public void testCompileAggregateRejectsOrderByMotifCount() {
+    assertThatThrownBy(
+            () ->
+                compiler.compileAggregate(
+                    Parser.parse("motif(check) ORDER BY motif_count(checkmate) DESC"),
+                    List.of("time_class")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("not supported in aggregate");
+  }
+
   private CompiledQuery compile(String input) {
     return compiler.compile(Parser.parse(input));
   }

@@ -123,6 +123,50 @@ public class IndexControllerTest {
   }
 
   @Test
+  public void createIndex_normalizesPlayerToLowercase() {
+    IndexResponse response =
+        controller.createIndex(new IndexRequest("Hikaru", "CHESS_COM", "2024-01", "2024-01", null));
+
+    // Dedupe and the indexed-period cache key on the player string, so case must not split them
+    assertThat(response.player()).isEqualTo("hikaru");
+    assertThat(queue.enqueued().get(0).player()).isEqualTo("hikaru");
+  }
+
+  @Test
+  public void createIndex_skipCachePropagatesAndBypassesDedupe() {
+    UUID existingId = UUID.randomUUID();
+    requestStore.setExistingRequest(
+        new IndexingRequestStore.IndexingRequest(
+            existingId,
+            "hikaru",
+            "CHESS_COM",
+            "2024-01",
+            "2024-01",
+            "PENDING",
+            Instant.now(),
+            Instant.now(),
+            null,
+            0,
+            false));
+
+    IndexResponse response =
+        controller.createIndex(
+            new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-01", null, true));
+
+    // skip_cache means "force a refetch" — reusing the existing request would defeat that
+    assertThat(response.id()).isNotEqualTo(existingId);
+    assertThat(requestStore.createCallCount()).isEqualTo(1);
+    assertThat(queue.enqueued()).hasSize(1);
+    assertThat(queue.enqueued().get(0).skipCache()).isTrue();
+  }
+
+  @Test
+  public void createIndex_defaultsToRespectingCache() {
+    controller.createIndex(new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-01", null));
+    assertThat(queue.enqueued().get(0).skipCache()).isFalse();
+  }
+
+  @Test
   public void listRequests_returnsAllStoredRequests() {
     int count = 3;
     IntStream.range(0, count)

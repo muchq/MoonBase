@@ -6,6 +6,7 @@ java_library(
         "src/main/java/com/muchq/games/chess_com_client/Accuracies.java",
         "src/main/java/com/muchq/games/chess_com_client/Best.java",
         "src/main/java/com/muchq/games/chess_com_client/ChessClient.java",
+        "src/main/java/com/muchq/games/chess_com_client/ChessComApiException.java",
         "src/main/java/com/muchq/games/chess_com_client/GamesResponse.java",
         "src/main/java/com/muchq/games/chess_com_client/InstantRating.java",
         "src/main/java/com/muchq/games/chess_com_client/Last.java",

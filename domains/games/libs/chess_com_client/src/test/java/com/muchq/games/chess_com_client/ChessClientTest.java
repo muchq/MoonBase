@@ -1,6 +1,7 @@
 package com.muchq.games.chess_com_client;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.muchq.platform.http_client.core.HttpClient;
@@ -157,6 +158,82 @@ public class ChessClientTest {
     assertThat(result).isPresent();
     assertThat(result.get().username()).isEqualTo("hikaru");
     assertThat(result.get().streamer()).isTrue();
+  }
+
+  @Test
+  public void testFetchPlayer_mapsTitleLocationAndFide() {
+    String playerJson =
+        """
+        {
+          "player_id": 41,
+          "url": "https://www.chess.com/member/rpragchess",
+          "username": "rpragchess",
+          "title": "GM",
+          "location": "Chennai",
+          "fide": 2758,
+          "last_online": 1234567890,
+          "joined": 1234567890,
+          "status": "premium",
+          "is_streamer": false
+        }
+        """;
+
+    HttpClient httpClient = new StubHttpClient(200, playerJson);
+    ChessClient client = new ChessClient(httpClient, MAPPER);
+
+    Optional<Player> result = client.fetchPlayer("rpragchess");
+
+    assertThat(result).isPresent();
+    assertThat(result.get().title()).isEqualTo("GM");
+    assertThat(result.get().location()).isEqualTo("Chennai");
+    assertThat(result.get().fideRating()).isEqualTo(2758);
+  }
+
+  @Test
+  public void testFetchPlayer_untitledPlayerHasNullTitleAndFide() {
+    String playerJson =
+        """
+        {
+          "player_id": 42,
+          "url": "https://www.chess.com/member/someuser",
+          "username": "someuser",
+          "last_online": 1234567890,
+          "joined": 1234567890,
+          "status": "basic",
+          "is_streamer": false
+        }
+        """;
+
+    HttpClient httpClient = new StubHttpClient(200, playerJson);
+    ChessClient client = new ChessClient(httpClient, MAPPER);
+
+    Optional<Player> result = client.fetchPlayer("someuser");
+
+    assertThat(result).isPresent();
+    assertThat(result.get().title()).isNull();
+    assertThat(result.get().location()).isNull();
+    assertThat(result.get().fideRating()).isNull();
+  }
+
+  @Test
+  public void testFetchPlayer_rateLimitedThrowsWithStatusCode() {
+    HttpClient httpClient = new StubHttpClient(429, "slow down");
+    ChessClient client = new ChessClient(httpClient, MAPPER);
+
+    assertThatThrownBy(() -> client.fetchPlayer("hikaru"))
+        .isInstanceOf(ChessComApiException.class)
+        .satisfies(e -> assertThat(((ChessComApiException) e).statusCode()).isEqualTo(429))
+        .hasMessageContaining("429");
+  }
+
+  @Test
+  public void testFetchGames_serverErrorThrowsWithStatusCode() {
+    HttpClient httpClient = new StubHttpClient(503, "unavailable");
+    ChessClient client = new ChessClient(httpClient, MAPPER);
+
+    assertThatThrownBy(() -> client.fetchGames("hikaru", YearMonth.of(2024, 1)))
+        .isInstanceOf(ChessComApiException.class)
+        .satisfies(e -> assertThat(((ChessComApiException) e).statusCode()).isEqualTo(503));
   }
 
   @Test

@@ -7,6 +7,7 @@ import com.muchq.games.chess_com_client.Accuracies;
 import com.muchq.games.chess_com_client.ChessClient;
 import com.muchq.games.chess_com_client.GamesResponse;
 import com.muchq.games.chess_com_client.PlayedGame;
+import com.muchq.games.chess_com_client.Player;
 import com.muchq.games.chess_com_client.PlayerResult;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
@@ -349,6 +350,168 @@ public class IndexWorkerTest {
     assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
   }
 
+  @Test
+  public void process_enrichesTitlesAndOpeningColumns() {
+    stubChessClient.setTitle("hikaru", "GM");
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(
+            playedGame(
+                "https://chess.com/g/opening",
+                MINIMAL_PGN,
+                "blitz",
+                "Hikaru",
+                "someuser",
+                "https://www.chess.com/openings/Caro-Kann-Defense-Two-Knights-Attack")));
+    RecordingGameFeatureStore store = new RecordingGameFeatureStore();
+    IndexWorker w =
+        new IndexWorker(
+            stubChessClient,
+            featureExtractor,
+            requestStore,
+            store,
+            periodStore,
+            extractionExecutor);
+
+    w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    assertThat(store.getInsertedFeatures()).hasSize(1);
+    GameFeature feature = store.getInsertedFeatures().get(0);
+    assertThat(feature.whiteTitle()).isEqualTo("GM");
+    assertThat(feature.blackTitle()).isNull();
+    assertThat(feature.eco()).isEqualTo("C20");
+    assertThat(feature.openingName()).isEqualTo("Caro Kann Defense Two Knights Attack");
+    assertThat(feature.openingFamily()).isEqualTo("Caro Kann Defense");
+  }
+
+  @Test
+  public void process_fetchesEachDistinctPlayerProfileOnce() {
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(
+            playedGame("https://chess.com/g/1", MINIMAL_PGN, "blitz", "Hikaru", "opp1", "C20"),
+            playedGame("https://chess.com/g/2", MINIMAL_PGN, "blitz", "opp1", "Hikaru", "C20")));
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 2),
+        List.of(
+            playedGame("https://chess.com/g/3", MINIMAL_PGN, "blitz", "Hikaru", "opp2", "C20")));
+
+    worker.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-02", false));
+
+    // hikaru and opp1 are looked up once in January (concurrently, so order within the month is
+    // not guaranteed) and reused in February; opp2 is new
+    assertThat(stubChessClient.getPlayerFetchCalls())
+        .containsExactlyInAnyOrder("hikaru", "opp1", "opp2");
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+  }
+
+  @Test
+  public void process_skipCacheBypassesCachedPeriodAndRefetches() {
+    periodStore.setCachedPeriod(
+        PLAYER,
+        PLATFORM,
+        "2024-01",
+        new IndexedPeriodStore.IndexedPeriod(
+            PLAYER, PLATFORM, "2024-01", Instant.EPOCH, true, 7, false));
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/g/refetch", MINIMAL_PGN, "blitz")));
+    RecordingGameFeatureStore store = new RecordingGameFeatureStore();
+    IndexWorker w =
+        new IndexWorker(
+            stubChessClient,
+            featureExtractor,
+            requestStore,
+            store,
+            periodStore,
+            extractionExecutor);
+
+    w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false, true));
+
+    // The cached period is ignored: the month is fetched and the row rewritten
+    assertThat(stubChessClient.getFetchCalls()).containsExactly(java.time.YearMonth.of(2024, 1));
+    assertThat(store.getInsertCount()).isEqualTo(1);
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+  }
+
+  @Test
+  public void process_titleLookupErrorStoresPeriodIncompleteForRefetch() {
+    stubChessClient.setThrowOnFetchPlayer(new RuntimeException("chess.com API returned HTTP 429"));
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/g/degraded", MINIMAL_PGN, "blitz")));
+
+    worker.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    // Games are still indexed, but the period must not be cached as complete — otherwise the
+    // null titles would be frozen until someone manually clears indexed_periods.
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+    assertThat(periodStore.getUpserts())
+        .containsExactly(new StubPeriodStore.Upsert("2024-01", false, 1));
+  }
+
+  @Test
+  public void process_cleanTitleLookupsStorePeriodComplete() {
+    stubChessClient.setTitle("white", "GM");
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/g/clean", MINIMAL_PGN, "blitz")));
+
+    worker.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    // "black" resolves to not-found (untitled) — a successful lookup, so the period stays
+    // complete; only API errors degrade it.
+    assertThat(periodStore.getUpserts())
+        .containsExactly(new StubPeriodStore.Upsert("2024-01", true, 1));
+  }
+
+  @Test
+  public void process_titleLookupFailureDoesNotFailIndexing() {
+    stubChessClient.setThrowOnFetchPlayer(new RuntimeException("chess.com API returned HTTP 429"));
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/g/1", MINIMAL_PGN, "blitz")));
+    RecordingGameFeatureStore store = new RecordingGameFeatureStore();
+    IndexWorker w =
+        new IndexWorker(
+            stubChessClient,
+            featureExtractor,
+            requestStore,
+            store,
+            periodStore,
+            extractionExecutor);
+
+    w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    assertThat(store.getInsertCount()).isEqualTo(1);
+    assertThat(store.getInsertedFeatures().get(0).whiteTitle()).isNull();
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+  }
+
+  private static PlayedGame playedGame(
+      String gameUrl,
+      String pgn,
+      String timeClass,
+      String whiteUser,
+      String blackUser,
+      String eco) {
+    return new PlayedGame(
+        gameUrl,
+        pgn,
+        Instant.EPOCH,
+        true,
+        new Accuracies(90.0, 85.0),
+        "",
+        "uuid-" + gameUrl.hashCode(),
+        "",
+        "",
+        timeClass,
+        "chess",
+        new PlayerResult(1500, "win", "https://chess.com/w", whiteUser, "uuid-w"),
+        new PlayerResult(1500, "loss", "https://chess.com/b", blackUser, "uuid-b"),
+        eco);
+  }
+
   private static PlayedGame playedGame(String gameUrl, String pgn, String timeClass) {
     return new PlayedGame(
         gameUrl,
@@ -395,7 +558,11 @@ public class IndexWorkerTest {
   private static final class StubChessClient extends ChessClient {
     private final List<java.time.YearMonth> fetchCalls = new ArrayList<>();
     private final Map<java.time.YearMonth, List<PlayedGame>> responseByMonth = new HashMap<>();
+    private final Map<String, String> titlesByPlayer = new HashMap<>();
+    // Title lookups run on the extraction pool, so record them thread-safely
+    private final List<String> playerFetchCalls = Collections.synchronizedList(new ArrayList<>());
     private RuntimeException throwOnFetch = null;
+    private RuntimeException throwOnFetchPlayer = null;
 
     StubChessClient() {
       super(null, new ObjectMapper());
@@ -407,6 +574,14 @@ public class IndexWorkerTest {
 
     void setThrowOnFetch(RuntimeException ex) {
       this.throwOnFetch = ex;
+    }
+
+    void setTitle(String player, String title) {
+      titlesByPlayer.put(player.toLowerCase(), title);
+    }
+
+    void setThrowOnFetchPlayer(RuntimeException ex) {
+      this.throwOnFetchPlayer = ex;
     }
 
     @Override
@@ -422,8 +597,43 @@ public class IndexWorkerTest {
       return Optional.empty();
     }
 
+    @Override
+    public Optional<Player> fetchPlayer(String player) {
+      playerFetchCalls.add(player.toLowerCase());
+      if (throwOnFetchPlayer != null) {
+        throw throwOnFetchPlayer;
+      }
+      String title = titlesByPlayer.get(player.toLowerCase());
+      if (title == null) {
+        return Optional.empty();
+      }
+      return Optional.of(
+          new Player(
+              0,
+              null,
+              null,
+              null,
+              player,
+              0,
+              null,
+              Instant.EPOCH,
+              Instant.EPOCH,
+              null,
+              false,
+              false,
+              null,
+              List.of(),
+              title,
+              null,
+              null));
+    }
+
     List<java.time.YearMonth> getFetchCalls() {
       return new ArrayList<>(fetchCalls);
+    }
+
+    List<String> getPlayerFetchCalls() {
+      return new ArrayList<>(playerFetchCalls);
     }
   }
 
@@ -493,6 +703,12 @@ public class IndexWorkerTest {
     }
 
     @Override
+    public List<com.muchq.games.one_d4.api.dto.AggregateRow> aggregate(
+        Object compiledQuery, List<String> groupColumns, int limit) {
+      return Collections.emptyList();
+    }
+
+    @Override
     public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
       return Map.of();
     }
@@ -510,7 +726,12 @@ public class IndexWorkerTest {
     private final Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>>
         allInsertedOccurrences = new HashMap<>();
     private final List<String> insertedUrls = new ArrayList<>();
+    private final List<GameFeature> insertedFeatures = new ArrayList<>();
     private int insertCount = 0;
+
+    List<GameFeature> getInsertedFeatures() {
+      return new ArrayList<>(insertedFeatures);
+    }
 
     Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> getAllInsertedOccurrences() {
       return allInsertedOccurrences;
@@ -529,6 +750,7 @@ public class IndexWorkerTest {
       insertCount += features.size();
       for (GameFeature f : features) {
         insertedUrls.add(f.gameUrl());
+        insertedFeatures.add(f);
       }
     }
 
@@ -541,10 +763,17 @@ public class IndexWorkerTest {
 
   private static final class StubPeriodStore implements IndexedPeriodStore {
     private final Map<String, IndexedPeriodStore.IndexedPeriod> cachedPeriods = new HashMap<>();
+    private final List<Upsert> upserts = new ArrayList<>();
+
+    record Upsert(String month, boolean isComplete, int gamesCount) {}
 
     void setCachedPeriod(
         String player, String platform, String month, IndexedPeriodStore.IndexedPeriod period) {
       cachedPeriods.put(key(player, platform, month, period.excludeBullet()), period);
+    }
+
+    List<Upsert> getUpserts() {
+      return new ArrayList<>(upserts);
     }
 
     private static String key(String player, String platform, String month, boolean excludeBullet) {
@@ -565,7 +794,9 @@ public class IndexWorkerTest {
         Instant fetchedAt,
         boolean isComplete,
         int gamesCount,
-        boolean excludeBullet) {}
+        boolean excludeBullet) {
+      upserts.add(new Upsert(month, isComplete, gamesCount));
+    }
 
     @Override
     public int deleteOlderThan(Instant threshold) {

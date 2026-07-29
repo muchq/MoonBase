@@ -23,6 +23,7 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/motifs/BoardUtils.java",
         "src/main/java/com/muchq/games/one_d4/motifs/CheckDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/CrossPinDetector.java",
+        "src/main/java/com/muchq/games/one_d4/motifs/Detectors.java",
         "src/main/java/com/muchq/games/one_d4/motifs/DiscoveredAttackDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/MotifDetector.java",
         "src/main/java/com/muchq/games/one_d4/motifs/PinDetector.java",
@@ -95,6 +96,7 @@ java_library(
     srcs = [
         "src/main/java/com/muchq/games/one_d4/worker/IndexWorker.java",
         "src/main/java/com/muchq/games/one_d4/worker/IndexWorkerLifecycle.java",
+        "src/main/java/com/muchq/games/one_d4/worker/Openings.java",
         "src/main/java/com/muchq/games/one_d4/worker/ResultMapper.java",
         "src/main/java/com/muchq/games/one_d4/worker/RetentionWorker.java",
     ],
@@ -114,6 +116,7 @@ java_library(
         artifact("io.micronaut:micronaut-inject"),
         artifact("io.micronaut:micronaut-runtime"),
         artifact("jakarta.inject:jakarta-inject-api"),
+        artifact("org.jspecify:jspecify"),
         artifact("org.slf4j:slf4j-api"),
     ],
 )
@@ -121,6 +124,9 @@ java_library(
 java_library(
     name = "dto",
     srcs = [
+        "src/main/java/com/muchq/games/one_d4/api/dto/AggregateRequest.java",
+        "src/main/java/com/muchq/games/one_d4/api/dto/AggregateResponse.java",
+        "src/main/java/com/muchq/games/one_d4/api/dto/AggregateRow.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/GameFeature.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/GameFeatureRow.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/IndexRequest.java",
@@ -140,6 +146,8 @@ java_library(
     name = "api",
     srcs = [
         "src/main/java/com/muchq/games/one_d4/api/AdminController.java",
+        "src/main/java/com/muchq/games/one_d4/api/AggregateController.java",
+        "src/main/java/com/muchq/games/one_d4/api/AggregateRequestValidator.java",
         "src/main/java/com/muchq/games/one_d4/api/ErrorHandler.java",
         "src/main/java/com/muchq/games/one_d4/api/HealthController.java",
         "src/main/java/com/muchq/games/one_d4/api/IndexController.java",
@@ -274,6 +282,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/motifs/BackRankMateDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/BoardUtilsTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/CheckDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/DetectorsTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/DiscoveredAttackDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/PinDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/PromotionDetectorTest.java",
@@ -321,6 +330,7 @@ java_test_suite(
     size = "small",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/worker/IndexWorkerTest.java",
+        "src/test/java/com/muchq/games/one_d4/worker/OpeningsTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/ResultMapperTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/RetentionWorkerTest.java",
     ],
@@ -348,6 +358,8 @@ java_test_suite(
     size = "small",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/api/AdminControllerTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/AggregateControllerTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/AggregateRequestValidatorTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexRequestValidatorTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryControllerTest.java",

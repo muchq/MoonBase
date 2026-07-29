@@ -38,8 +38,12 @@ public class Migration {
           black_username VARCHAR(255),
           white_elo     INT,
           black_elo     INT,
+          white_title   VARCHAR(10),
+          black_title   VARCHAR(10),
           time_class    VARCHAR(50),
           eco           VARCHAR(10),
+          opening_name  VARCHAR(255),
+          opening_family VARCHAR(255),
           result        VARCHAR(20),
           played_at     TIMESTAMP,
           num_moves     INT,
@@ -91,8 +95,12 @@ public class Migration {
           black_username VARCHAR(255),
           white_elo     INT,
           black_elo     INT,
+          white_title   VARCHAR(10),
+          black_title   VARCHAR(10),
           time_class    VARCHAR(50),
           eco           VARCHAR(10),
+          opening_name  VARCHAR(255),
+          opening_family VARCHAR(255),
           result        VARCHAR(20),
           played_at     TIMESTAMP,
           num_moves     INT,
@@ -224,6 +232,15 @@ public class Migration {
   private static final String ADD_OCC_PIN_TYPE =
       "ALTER TABLE motif_occurrences ADD COLUMN IF NOT EXISTS pin_type VARCHAR(8)";
 
+  // Opening name/family (derived from the chess.com ECOUrl) and player titles. Existing rows get
+  // NULL until the affected periods are reindexed.
+  private static final String[] ADD_OPENING_AND_TITLE_COLUMNS = {
+    "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS white_title VARCHAR(10)",
+    "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS black_title VARCHAR(10)",
+    "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS opening_name VARCHAR(255)",
+    "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS opening_family VARCHAR(255)",
+  };
+
   public void run() {
     try (Connection conn = dataSource.getConnection();
         Statement stmt = conn.createStatement()) {
@@ -267,6 +284,11 @@ public class Migration {
 
       // Pin type for motif_occurrences
       stmt.execute(ADD_OCC_PIN_TYPE);
+
+      // Opening name/family and player title columns
+      for (String add : ADD_OPENING_AND_TITLE_COLUMNS) {
+        stmt.execute(add);
+      }
 
       // Drop has_* boolean motif columns — queries now target motif_occurrences directly.
       for (String drop : DROP_HAS_MOTIF_COLUMNS) {

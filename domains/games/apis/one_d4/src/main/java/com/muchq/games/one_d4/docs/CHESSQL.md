@@ -43,15 +43,28 @@ Dotted field names are mapped to database columns:
 | `black.elo`      | `black_elo`      | INT     |
 | `white.username` | `white_username` | VARCHAR |
 | `black.username` | `black_username` | VARCHAR |
+| `white.title`    | `white_title`    | VARCHAR |
+| `black.title`    | `black_title`    | VARCHAR |
 | `time.class`     | `time_class`     | VARCHAR |
 | `num.moves`      | `num_moves`      | INT     |
 | `game.url`       | `game_url`       | VARCHAR |
 | `played.at`      | `played_at`      | TIMESTAMP |
 | `eco`            | `eco`            | VARCHAR |
+| `opening.name`   | `opening_name`   | VARCHAR |
+| `opening.family` | `opening_family` | VARCHAR |
 | `result`         | `result`         | VARCHAR |
 | `platform`       | `platform`       | VARCHAR |
 
 Underscore-separated names also work directly: `white_elo >= 2500` is equivalent to `white.elo >= 2500`.
+
+`white.title` / `black.title` hold chess.com titles (`GM`, `IM`, `WGM`, ...) fetched from player
+profiles at index time; untitled players are NULL. `opening.name` is the human-readable opening
+line derived from the chess.com `ECOUrl` (e.g. `Caro Kann Defense Two Knights Attack 3...dxe4`);
+`opening.family` is its leading family segment (e.g. `Caro Kann Defense`) — the level most
+questions are asked at, e.g. `white.username = "hikaru" AND opening.family = "Caro Kann Defense"`.
+Rows indexed before these columns existed hold NULL until reindexed with `skipCache: true` on
+`POST /v1/index` (or `skip_cache` on the `index_chess_games` MCP tool) — a plain re-request is
+served from the indexed-period cache and does not refetch.
 
 ## Motifs
 

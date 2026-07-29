@@ -153,8 +153,12 @@ public class QueryControllerTest {
         "black",
         2000,
         1900,
+        null,
+        "GM",
         "blitz",
         "B90",
+        "Sicilian Defense Najdorf Variation",
+        "Sicilian Defense",
         "1-0",
         Instant.now(),
         30,
@@ -189,6 +193,12 @@ public class QueryControllerTest {
     @Override
     public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
       return queryResult;
+    }
+
+    @Override
+    public List<com.muchq.games.one_d4.api.dto.AggregateRow> aggregate(
+        Object compiledQuery, List<String> groupColumns, int limit) {
+      return List.of();
     }
 
     @Override

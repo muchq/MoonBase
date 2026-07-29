@@ -35,8 +35,12 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
           "black_username",
           "white_elo",
           "black_elo",
+          "white_title",
+          "black_title",
           "time_class",
           "eco",
+          "opening_name",
+          "opening_family",
           "result",
           "num_moves",
           "platform",
@@ -63,15 +67,19 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
           "overloaded_piece");
 
   private static final Map<String, String> FIELD_MAP =
-      Map.of(
-          "white.elo", "white_elo",
-          "black.elo", "black_elo",
-          "white.username", "white_username",
-          "black.username", "black_username",
-          "time.class", "time_class",
-          "num.moves", "num_moves",
-          "game.url", "game_url",
-          "played.at", "played_at");
+      Map.ofEntries(
+          Map.entry("white.elo", "white_elo"),
+          Map.entry("black.elo", "black_elo"),
+          Map.entry("white.username", "white_username"),
+          Map.entry("black.username", "black_username"),
+          Map.entry("white.title", "white_title"),
+          Map.entry("black.title", "black_title"),
+          Map.entry("time.class", "time_class"),
+          Map.entry("num.moves", "num_moves"),
+          Map.entry("game.url", "game_url"),
+          Map.entry("played.at", "played_at"),
+          Map.entry("opening.name", "opening_name"),
+          Map.entry("opening.family", "opening_family"));
 
   private static final Set<String> VALID_OPS = Set.of("=", "!=", "<", "<=", ">", ">=");
 
@@ -79,8 +87,12 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       Set.of(
           "white_username",
           "black_username",
+          "white_title",
+          "black_title",
           "time_class",
           "eco",
+          "opening_name",
+          "opening_family",
           "result",
           "platform",
           "game_url");
@@ -132,6 +144,54 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
               + " ORDER BY g.played_at DESC, g.game_url ASC";
       return new CompiledQuery(sql, whereParams);
     }
+  }
+
+  /**
+   * Compiles a ChessQL filter into a grouped count query: {@code SELECT <cols>, COUNT(*) AS
+   * group_count ... GROUP BY <cols> ORDER BY group_count DESC}. Group columns are validated against
+   * the same column whitelist as comparisons, so this adds no injection surface; the caller appends
+   * LIMIT via a bind parameter.
+   */
+  public CompiledQuery compileAggregate(ParsedQuery pq, List<String> groupByFields) {
+    if (pq.orderBy() != null) {
+      throw new IllegalArgumentException(
+          "ORDER BY motif_count is not supported in aggregate queries");
+    }
+    List<String> columns = resolveGroupByColumns(groupByFields);
+
+    List<Object> params = new ArrayList<>();
+    String whereClause = compileExpr(pq.expr(), params);
+
+    String cols = String.join(", ", columns);
+    String tiebreak = columns.stream().map(c -> c + " ASC").collect(Collectors.joining(", "));
+    String sql =
+        "SELECT "
+            + cols
+            + ", COUNT(*) AS group_count FROM game_features g WHERE "
+            + whereClause
+            + " GROUP BY "
+            + cols
+            + " ORDER BY group_count DESC, "
+            + tiebreak;
+    return new CompiledQuery(sql, params);
+  }
+
+  /**
+   * Resolves group-by fields (dotted or underscore form) to their canonical column names,
+   * deduplicating while preserving order. Throws on unknown fields.
+   */
+  public List<String> resolveGroupByColumns(List<String> groupByFields) {
+    if (groupByFields == null || groupByFields.isEmpty()) {
+      throw new IllegalArgumentException("groupBy requires at least one field");
+    }
+    List<String> columns = new ArrayList<>();
+    for (String field : groupByFields) {
+      String column = resolveColumn(field);
+      if (!columns.contains(column)) {
+        columns.add(column);
+      }
+    }
+    return columns;
   }
 
   private String compileExpr(Expr expr, List<Object> params) {
