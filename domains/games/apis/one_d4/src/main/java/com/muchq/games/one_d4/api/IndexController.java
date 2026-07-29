@@ -3,8 +3,7 @@ package com.muchq.games.one_d4.api;
 import com.muchq.games.one_d4.api.dto.IndexRequest;
 import com.muchq.games.one_d4.api.dto.IndexResponse;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
-import com.muchq.games.one_d4.queue.IndexMessage;
-import com.muchq.games.one_d4.queue.IndexQueue;
+import com.muchq.games.one_d4.service.IndexRequestService;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
@@ -15,112 +14,52 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/** Thin HTTP adapter over {@link IndexRequestService}, which owns the request lifecycle. */
 @Singleton
 @Path("/v1/index")
 public class IndexController {
   private static final Logger LOG = LoggerFactory.getLogger(IndexController.class);
 
+  private final IndexRequestService indexRequestService;
   private final IndexingRequestStore requestDao;
-  private final IndexQueue queue;
-  private final IndexRequestValidator validator;
 
-  public IndexController(
-      IndexingRequestStore requestDao, IndexQueue queue, IndexRequestValidator validator) {
+  public IndexController(IndexRequestService indexRequestService, IndexingRequestStore requestDao) {
+    this.indexRequestService = indexRequestService;
     this.requestDao = requestDao;
-    this.queue = queue;
-    this.validator = validator;
   }
 
   @GET
   @Produces(MediaType.APPLICATION_JSON)
   public List<IndexResponse> listRequests() {
     LOG.info("GET /v1/index");
-    return requestDao.listRecent(50).stream()
-        .map(
-            row ->
-                new IndexResponse(
-                    row.id(),
-                    row.player(),
-                    row.platform(),
-                    row.startMonth(),
-                    row.endMonth(),
-                    row.status(),
-                    row.gamesIndexed(),
-                    row.errorMessage(),
-                    row.excludeBullet()))
-        .toList();
+    return requestDao.listRecent(50).stream().map(IndexRequestService::toResponse).toList();
   }
 
   @POST
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   public IndexResponse createIndex(IndexRequest request) {
-    validator.validate(request);
-
-    boolean excludeBullet = Boolean.TRUE.equals(request.excludeBullet());
-    boolean skipCache = Boolean.TRUE.equals(request.skipCache());
-    // Request dedupe and the indexed-period cache are keyed by the player string as given, so
-    // normalize case here — "Hikaru" and "hikaru" must not index twice.
-    String player = request.player().strip().toLowerCase(java.util.Locale.ROOT);
-
     LOG.info(
         "POST /v1/index player={} platform={} months={}-{} excludeBullet={} skipCache={}",
-        player,
+        request.player(),
         request.platform(),
         request.startMonth(),
         request.endMonth(),
-        excludeBullet,
-        skipCache);
+        request.excludeBullet(),
+        request.skipCache());
 
-    if (!skipCache) {
-      Optional<IndexingRequestStore.IndexingRequest> existing =
-          requestDao.findExistingRequest(
-              player, request.platform(), request.startMonth(), request.endMonth(), excludeBullet);
-      if (existing.isPresent()) {
-        IndexingRequestStore.IndexingRequest row = existing.get();
-        LOG.info("Returning existing index request {} (status={})", row.id(), row.status());
-        return new IndexResponse(
-            row.id(),
-            row.player(),
-            row.platform(),
-            row.startMonth(),
-            row.endMonth(),
-            row.status(),
-            row.gamesIndexed(),
-            row.errorMessage(),
-            row.excludeBullet());
-      }
-    }
-
-    UUID id =
-        requestDao.create(
-            player, request.platform(), request.startMonth(), request.endMonth(), excludeBullet);
-
-    queue.enqueue(
-        new IndexMessage(
-            id,
-            player,
+    return indexRequestService.submit(
+        new IndexRequestService.Submission(
+            request.player(),
             request.platform(),
             request.startMonth(),
             request.endMonth(),
-            excludeBullet,
-            skipCache));
-
-    return new IndexResponse(
-        id,
-        player,
-        request.platform(),
-        request.startMonth(),
-        request.endMonth(),
-        "PENDING",
-        0,
-        null,
-        excludeBullet);
+            Boolean.TRUE.equals(request.excludeBullet()),
+            Boolean.TRUE.equals(request.skipCache())));
   }
 
   @GET
@@ -128,20 +67,8 @@ public class IndexController {
   @Produces(MediaType.APPLICATION_JSON)
   public IndexResponse getIndex(@PathParam("id") UUID id) {
     LOG.info("GET /v1/index/{}", id);
-    return requestDao
-        .findById(id)
-        .map(
-            row ->
-                new IndexResponse(
-                    row.id(),
-                    row.player(),
-                    row.platform(),
-                    row.startMonth(),
-                    row.endMonth(),
-                    row.status(),
-                    row.gamesIndexed(),
-                    row.errorMessage(),
-                    row.excludeBullet()))
+    return indexRequestService
+        .status(id)
         .orElseThrow(() -> new NoSuchElementException("Indexing request not found: " + id));
   }
 }

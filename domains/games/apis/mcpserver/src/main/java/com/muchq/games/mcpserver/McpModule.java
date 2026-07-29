@@ -30,6 +30,7 @@ import com.muchq.games.one_d4.engine.PgnParser;
 import com.muchq.games.one_d4.motifs.Detectors;
 import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.games.one_d4.queue.IndexQueue;
+import com.muchq.games.one_d4.service.IndexRequestService;
 import com.muchq.games.one_d4.worker.IndexWorker;
 import com.muchq.games.one_d4.worker.IndexWorkerLifecycle;
 import com.muchq.platform.http_client.core.HttpClient;
@@ -183,15 +184,18 @@ public class McpModule {
   }
 
   @Context
+  public IndexRequestService indexRequestService(
+      IndexingRequestStore requestStore, IndexQueue queue, IndexWorker worker) {
+    return new IndexRequestService(requestStore, queue, worker::process);
+  }
+
+  @Context
   public IndexerFacade indexerFacade(
-      IndexingRequestStore requestStore,
+      IndexRequestService indexRequestService,
       GameFeatureStore gameFeatureStore,
-      IndexQueue queue,
-      IndexWorker worker,
       FeatureExtractor featureExtractor,
       SqlCompiler sqlCompiler) {
-    return new IndexerFacade(
-        requestStore, gameFeatureStore, queue, worker, featureExtractor, sqlCompiler);
+    return new IndexerFacade(indexRequestService, gameFeatureStore, featureExtractor, sqlCompiler);
   }
 
   @Context

@@ -55,7 +55,8 @@ public class AggregateController {
 
     ParsedQuery parsed = Parser.parse(request.query());
     List<String> groupColumns = sqlCompiler.resolveGroupByColumns(request.groupBy());
-    CompiledQuery compiled = sqlCompiler.compileAggregate(parsed, request.groupBy());
+    CompiledQuery compiled =
+        sqlCompiler.compileAggregate(parsed, request.groupBy(), request.player());
 
     List<AggregateRow> groups = gameFeatureStore.aggregate(compiled, groupColumns, request.limit());
     return new AggregateResponse(groups, groups.size());

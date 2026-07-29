@@ -102,6 +102,7 @@ Search indexed games using ChessQL.
 | query  | string | yes      | —       | —    | ChessQL query string            |
 | limit  | int    | no       | 50      | 1000 | Max results to return           |
 | offset | int    | no       | 0       | —    | Pagination offset               |
+| player | string | no       | —       | —    | Username that perspective fields (`me.*`, `opponent.*`, `outcome`) are resolved against; required when the query uses them (see CHESSQL.md) |
 
 ### Response (200)
 
@@ -153,10 +154,11 @@ matching row and group client-side.
 
 | Field   | Type     | Required | Default | Max  | Description                                       |
 |---------|----------|----------|---------|------|---------------------------------------------------|
-| query   | string   | yes      | —       | —    | ChessQL filter                                    |
-| groupBy | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form)    |
+| query   | string   | yes      | —       | —    | ChessQL filter (may use perspective fields when `player` is set) |
+| groupBy | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form; physical columns only) |
 | orderBy | string   | no       | "count" | —    | Only "count" is supported (descending)            |
 | limit   | int      | no       | 50      | 1000 | Max groups to return                              |
+| player  | string   | no       | —       | —    | Username that perspective fields in the filter are resolved against |
 
 Group-by fields validate against the same column whitelist as ChessQL comparisons.
 

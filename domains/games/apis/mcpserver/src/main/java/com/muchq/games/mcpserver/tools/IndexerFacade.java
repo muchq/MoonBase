@@ -10,16 +10,10 @@ import com.muchq.games.one_d4.api.dto.GameFeatureRow;
 import com.muchq.games.one_d4.api.dto.IndexResponse;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.db.GameFeatureStore;
-import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
-import com.muchq.games.one_d4.queue.IndexMessage;
-import com.muchq.games.one_d4.queue.IndexQueue;
-import com.muchq.games.one_d4.worker.IndexWorker;
-import java.time.YearMonth;
-import java.time.format.DateTimeParseException;
-import java.time.temporal.ChronoUnit;
+import com.muchq.games.one_d4.service.IndexRequestService;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,36 +28,27 @@ import java.util.UUID;
  */
 public class IndexerFacade {
 
-  static final int MAX_MONTH_SPAN = 12;
-
-  private final IndexingRequestStore requestStore;
+  private final IndexRequestService indexRequestService;
   private final GameFeatureStore gameFeatureStore;
-  private final IndexQueue queue;
-  private final IndexWorker worker;
   private final FeatureExtractor featureExtractor;
   private final SqlCompiler sqlCompiler;
 
   public IndexerFacade(
-      IndexingRequestStore requestStore,
+      IndexRequestService indexRequestService,
       GameFeatureStore gameFeatureStore,
-      IndexQueue queue,
-      IndexWorker worker,
       FeatureExtractor featureExtractor,
       SqlCompiler sqlCompiler) {
-    this.requestStore = requestStore;
+    this.indexRequestService = indexRequestService;
     this.gameFeatureStore = gameFeatureStore;
-    this.queue = queue;
-    this.worker = worker;
     this.featureExtractor = featureExtractor;
     this.sqlCompiler = sqlCompiler;
   }
 
   /**
-   * Starts (or reuses) an indexing request. Single-month requests run synchronously so the caller
-   * gets a final status in one round trip; multi-month requests are enqueued and can be polled via
-   * {@link #status}. With {@code skipCache} the indexed-period cache is bypassed and every month in
-   * the range is refetched — this is how rows indexed before newer columns existed (titles, opening
-   * name/family) get backfilled.
+   * Starts (or reuses) an indexing request via {@link IndexRequestService}, which owns the
+   * lifecycle for both this facade and the one_d4 REST API. Single-month requests run inline so the
+   * caller gets a final status in one round trip; multi-month requests are enqueued and can be
+   * polled via {@link #status}.
    */
   public IndexResponse index(
       String player,
@@ -72,78 +57,22 @@ public class IndexerFacade {
       String endMonth,
       boolean excludeBullet,
       boolean skipCache) {
-    if (player == null || player.isBlank()) {
-      throw new IllegalArgumentException("username is required");
-    }
-    // Request dedupe and the indexed-period cache are keyed by the player string as given, so
-    // normalize case here — "Hikaru" and "hikaru" must not index twice.
-    String canonicalPlayer = player.strip().toLowerCase(Locale.ROOT);
-    String canonicalPlatform = canonicalPlatform(platform);
-    YearMonth start = parseMonth(startMonth, "start_month");
-    YearMonth end = parseMonth(endMonth, "end_month");
-    if (start.isAfter(end)) {
-      throw new IllegalArgumentException("start_month must not be after end_month");
-    }
-    long monthSpan = start.until(end, ChronoUnit.MONTHS) + 1;
-    if (monthSpan > MAX_MONTH_SPAN) {
-      throw new IllegalArgumentException(
-          "Maximum range is " + MAX_MONTH_SPAN + " months, got " + monthSpan);
-    }
-
-    if (!skipCache) {
-      Optional<IndexingRequestStore.IndexingRequest> existing =
-          requestStore.findExistingRequest(
-              canonicalPlayer, canonicalPlatform, startMonth, endMonth, excludeBullet);
-      if (existing.isPresent()) {
-        return toResponse(existing.get());
-      }
-    }
-
-    UUID id =
-        requestStore.create(
-            canonicalPlayer, canonicalPlatform, startMonth, endMonth, excludeBullet);
-    IndexMessage message =
-        new IndexMessage(
-            id, canonicalPlayer, canonicalPlatform, startMonth, endMonth, excludeBullet, skipCache);
-
-    if (monthSpan <= 1) {
-      // Small request: process inline (typically well under a minute) and return final status.
-      worker.process(message);
-      return status(id)
-          .orElse(
-              new IndexResponse(
-                  id,
-                  canonicalPlayer,
-                  canonicalPlatform,
-                  startMonth,
-                  endMonth,
-                  "UNKNOWN",
-                  0,
-                  null,
-                  excludeBullet));
-    }
-
-    queue.enqueue(message);
-    return new IndexResponse(
-        id,
-        canonicalPlayer,
-        canonicalPlatform,
-        startMonth,
-        endMonth,
-        "PENDING",
-        0,
-        null,
-        excludeBullet);
+    return indexRequestService.submitHybrid(
+        new IndexRequestService.Submission(
+            player, platform, startMonth, endMonth, excludeBullet, skipCache));
   }
 
   public Optional<IndexResponse> status(UUID requestId) {
-    return requestStore.findById(requestId).map(IndexerFacade::toResponse);
+    return indexRequestService.status(requestId);
   }
 
-  /** Runs a ChessQL query over indexed games and returns rows with their motif occurrences. */
-  public List<GameFeatureRow> query(String chessql, int limit) {
+  /**
+   * Runs a ChessQL query over indexed games and returns rows with their motif occurrences.
+   * Perspective fields (me.*, opponent.*, outcome) are resolved against {@code player}.
+   */
+  public List<GameFeatureRow> query(String chessql, String player, int limit) {
     ParsedQuery parsed = Parser.parse(chessql);
-    CompiledQuery compiled = sqlCompiler.compile(parsed);
+    CompiledQuery compiled = sqlCompiler.compile(parsed, player);
     List<GameFeature> rows = gameFeatureStore.query(compiled, limit, 0);
 
     List<String> gameUrls = rows.stream().map(GameFeature::gameUrl).toList();
@@ -156,11 +85,15 @@ public class IndexerFacade {
         .toList();
   }
 
-  /** Counts indexed games matching a ChessQL filter, grouped by the given fields. */
-  public List<AggregateRow> aggregate(String chessql, List<String> groupBy, int limit) {
+  /**
+   * Counts indexed games matching a ChessQL filter, grouped by the given fields. Perspective fields
+   * in the filter are resolved against {@code player}; group-by fields must be physical columns.
+   */
+  public List<AggregateRow> aggregate(
+      String chessql, List<String> groupBy, String player, int limit) {
     ParsedQuery parsed = Parser.parse(chessql);
     List<String> groupColumns = sqlCompiler.resolveGroupByColumns(groupBy);
-    CompiledQuery compiled = sqlCompiler.compileAggregate(parsed, groupBy);
+    CompiledQuery compiled = sqlCompiler.compileAggregate(parsed, groupBy, player);
     return gameFeatureStore.aggregate(compiled, groupColumns, limit);
   }
 
@@ -255,41 +188,5 @@ public class IndexerFacade {
 
   private static boolean isKingTarget(String target) {
     return target != null && (target.startsWith("K") || target.startsWith("k"));
-  }
-
-  private static IndexResponse toResponse(IndexingRequestStore.IndexingRequest row) {
-    return new IndexResponse(
-        row.id(),
-        row.player(),
-        row.platform(),
-        row.startMonth(),
-        row.endMonth(),
-        row.status(),
-        row.gamesIndexed(),
-        row.errorMessage(),
-        row.excludeBullet());
-  }
-
-  private static String canonicalPlatform(String platform) {
-    if (platform == null || platform.isBlank()) {
-      throw new IllegalArgumentException("platform is required");
-    }
-    String normalized = platform.strip().toUpperCase(Locale.ROOT).replace('.', '_');
-    if (!"CHESS_COM".equals(normalized)) {
-      throw new IllegalArgumentException(
-          "Unsupported platform: " + platform + ". Supported: chess.com");
-    }
-    return "CHESS_COM";
-  }
-
-  private static YearMonth parseMonth(String value, String fieldName) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(fieldName + " is required");
-    }
-    try {
-      return YearMonth.parse(value);
-    } catch (DateTimeParseException e) {
-      throw new IllegalArgumentException(fieldName + " must be in YYYY-MM format, got: " + value);
-    }
   }
 }

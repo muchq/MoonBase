@@ -130,6 +130,24 @@ public class QueryControllerTest {
   }
 
   @Test
+  public void query_perspectiveFieldWithoutPlayer_throws() {
+    assertThatThrownBy(() -> controller.query(new QueryRequest("outcome = \"win\"", 10, 0)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("requires a player");
+  }
+
+  @Test
+  public void query_perspectiveFieldWithPlayer_succeeds() {
+    store.setQueryResult(List.of());
+    store.setOccurrencesResult(Map.of());
+
+    QueryResponse response =
+        controller.query(new QueryRequest("outcome = \"win\"", 10, 0, "hikaru"));
+
+    assertThat(response.count()).isZero();
+  }
+
+  @Test
   public void query_blankQuery_throws() {
     assertThatThrownBy(() -> controller.query(new QueryRequest("  ", 10, 0)))
         .isInstanceOf(IllegalArgumentException.class)

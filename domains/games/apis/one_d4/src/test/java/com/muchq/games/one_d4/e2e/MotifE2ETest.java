@@ -9,7 +9,6 @@ import com.muchq.games.chessql.compiler.CompiledQuery;
 import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.chessql.parser.Parser;
 import com.muchq.games.one_d4.api.IndexController;
-import com.muchq.games.one_d4.api.IndexRequestValidator;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.IndexRequest;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
@@ -34,6 +33,7 @@ import com.muchq.games.one_d4.motifs.SmotheredMateDetector;
 import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.games.one_d4.queue.IndexMessage;
 import com.muchq.games.one_d4.queue.IndexQueue;
+import com.muchq.games.one_d4.service.IndexRequestService;
 import com.muchq.games.one_d4.worker.IndexWorker;
 import java.time.Duration;
 import java.time.Instant;
@@ -151,7 +151,9 @@ public class MotifE2ETest {
             gameFeatureStore,
             periodStore,
             extractionExecutor);
-    controller = new IndexController(requestStore, queue, new IndexRequestValidator());
+    controller =
+        new IndexController(
+            new IndexRequestService(requestStore, queue, worker::process), requestStore);
   }
 
   // === CHECK ===

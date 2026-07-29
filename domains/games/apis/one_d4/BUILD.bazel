@@ -143,6 +143,19 @@ java_library(
 )
 
 java_library(
+    name = "service",
+    srcs = [
+        "src/main/java/com/muchq/games/one_d4/service/IndexRequestService.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":db",
+        ":dto",
+        ":queue",
+    ],
+)
+
+java_library(
     name = "api",
     srcs = [
         "src/main/java/com/muchq/games/one_d4/api/AdminController.java",
@@ -151,7 +164,6 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/api/ErrorHandler.java",
         "src/main/java/com/muchq/games/one_d4/api/HealthController.java",
         "src/main/java/com/muchq/games/one_d4/api/IndexController.java",
-        "src/main/java/com/muchq/games/one_d4/api/IndexRequestValidator.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryController.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryRequestValidator.java",
     ],
@@ -160,6 +172,7 @@ java_library(
         ":dto",
         ":engine",
         ":model",
+        ":service",
         "//domains/games/apis/one_d4:db",
         "//domains/games/apis/one_d4:queue",
         "//domains/games/libs/chessql:ast",
@@ -189,6 +202,7 @@ java_library(
         ":model",
         ":motifs",
         ":queue",
+        ":service",
         ":worker",
         "//domains/games/libs/chess_com_client",
         "//domains/games/libs/chessql:compiler",
@@ -234,6 +248,7 @@ java_binary(
         ":model",
         ":motifs",
         ":queue",
+        ":service",
         ":worker",
         "//domains/games/libs/chess_com_client",
         "//domains/games/libs/chessql:compiler",
@@ -361,7 +376,6 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/AggregateControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/AggregateRequestValidatorTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexControllerTest.java",
-        "src/test/java/com/muchq/games/one_d4/api/IndexRequestValidatorTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryRequestValidatorTest.java",
     ],
@@ -372,8 +386,25 @@ java_test_suite(
         ":engine",
         ":model",
         ":queue",
+        ":service",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
+        artifact("org.junit.jupiter:junit-jupiter-api"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_test_suite(
+    name = "service_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/service/IndexRequestServiceTest.java",
+    ],
+    deps = [
+        ":db",
+        ":dto",
+        ":queue",
+        ":service",
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
@@ -488,6 +519,7 @@ java_test_suite(
         ":model",
         ":motifs",
         ":queue",
+        ":service",
         ":test_db",
         ":worker",
         "//domains/games/libs/chess_com_client",

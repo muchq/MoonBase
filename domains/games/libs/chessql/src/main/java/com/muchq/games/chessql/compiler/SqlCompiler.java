@@ -83,6 +83,57 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
 
   private static final Set<String> VALID_OPS = Set.of("=", "!=", "<", "<=", ">", ">=");
 
+  /**
+   * Perspective fields resolve the white/black columns relative to a player supplied at compile
+   * time, so "hikaru's results regardless of color" is one predicate instead of a hand-written
+   * union. Whenever a query uses one, the compiled WHERE clause is additionally guarded by a
+   * participation predicate (the player is one of the two sides), because the CASE expressions
+   * treat "not white" as "black".
+   */
+  private record PerspectiveField(String sql, int playerParams) {}
+
+  private static final String ME_IS_WHITE = "LOWER(white_username) = LOWER(?)";
+
+  private static final Map<String, PerspectiveField> PERSPECTIVE_FIELDS =
+      Map.of(
+          "me.color",
+          new PerspectiveField("CASE WHEN " + ME_IS_WHITE + " THEN 'white' ELSE 'black' END", 1),
+          "me.elo",
+          new PerspectiveField(
+              "CASE WHEN " + ME_IS_WHITE + " THEN white_elo ELSE black_elo END", 1),
+          "me.title",
+          new PerspectiveField(
+              "CASE WHEN " + ME_IS_WHITE + " THEN white_title ELSE black_title END", 1),
+          "opponent.username",
+          new PerspectiveField(
+              "CASE WHEN " + ME_IS_WHITE + " THEN black_username ELSE white_username END", 1),
+          "opponent.elo",
+          new PerspectiveField(
+              "CASE WHEN " + ME_IS_WHITE + " THEN black_elo ELSE white_elo END", 1),
+          "opponent.title",
+          new PerspectiveField(
+              "CASE WHEN " + ME_IS_WHITE + " THEN black_title ELSE white_title END", 1),
+          "outcome",
+          new PerspectiveField(
+              "CASE WHEN result = '1/2-1/2' THEN 'draw'"
+                  + " WHEN (result = '1-0' AND LOWER(white_username) = LOWER(?))"
+                  + " OR (result = '0-1' AND LOWER(black_username) = LOWER(?)) THEN 'win'"
+                  + " WHEN result IN ('1-0', '0-1') THEN 'loss' ELSE 'unknown' END",
+              2));
+
+  private static final Set<String> STRING_PERSPECTIVE_FIELDS =
+      Set.of("me.color", "me.title", "opponent.username", "opponent.title", "outcome");
+
+  /** Mutable compile-scope state: the player (if any) and whether a perspective field was used. */
+  private static final class Perspective {
+    private final String player;
+    private boolean used;
+
+    private Perspective(String player) {
+      this.player = player == null || player.isBlank() ? null : player.strip();
+    }
+  }
+
   private static final Set<String> STRING_COLUMNS =
       Set.of(
           "white_username",
@@ -99,8 +150,18 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
 
   @Override
   public CompiledQuery compile(ParsedQuery pq) {
+    return compile(pq, null);
+  }
+
+  /**
+   * Compiles with an optional perspective player, which perspective fields (me.*, opponent.*,
+   * outcome) are resolved against. Queries that use perspective fields require a non-blank player.
+   */
+  public CompiledQuery compile(ParsedQuery pq, String player) {
+    Perspective perspective = new Perspective(player);
     List<Object> whereParams = new ArrayList<>();
-    String whereClause = compileExpr(pq.expr(), whereParams);
+    String whereClause = compileExpr(pq.expr(), whereParams, perspective);
+    whereClause = guardParticipation(whereClause, whereParams, perspective);
 
     OrderByClause orderBy = pq.orderBy();
     if (orderBy != null) {
@@ -153,14 +214,24 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    * LIMIT via a bind parameter.
    */
   public CompiledQuery compileAggregate(ParsedQuery pq, List<String> groupByFields) {
+    return compileAggregate(pq, groupByFields, null);
+  }
+
+  /**
+   * Aggregate variant of {@link #compile(ParsedQuery, String)}: the filter may use perspective
+   * fields (resolved against {@code player}); group-by fields must be physical columns.
+   */
+  public CompiledQuery compileAggregate(ParsedQuery pq, List<String> groupByFields, String player) {
     if (pq.orderBy() != null) {
       throw new IllegalArgumentException(
           "ORDER BY motif_count is not supported in aggregate queries");
     }
     List<String> columns = resolveGroupByColumns(groupByFields);
 
+    Perspective perspective = new Perspective(player);
     List<Object> params = new ArrayList<>();
-    String whereClause = compileExpr(pq.expr(), params);
+    String whereClause = compileExpr(pq.expr(), params, perspective);
+    whereClause = guardParticipation(whereClause, params, perspective);
 
     String cols = String.join(", ", columns);
     String tiebreak = columns.stream().map(c -> c + " ASC").collect(Collectors.joining(", "));
@@ -186,6 +257,10 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     }
     List<String> columns = new ArrayList<>();
     for (String field : groupByFields) {
+      if (PERSPECTIVE_FIELDS.containsKey(field)) {
+        throw new IllegalArgumentException(
+            "Perspective fields are not supported in groupBy: " + field);
+      }
       String column = resolveColumn(field);
       if (!columns.contains(column)) {
         columns.add(column);
@@ -194,30 +269,58 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     return columns;
   }
 
-  private String compileExpr(Expr expr, List<Object> params) {
+  /**
+   * When any perspective field was used, restricts the WHERE clause to games the player actually
+   * participated in (prepending the two player bind params so placeholder order matches the SQL).
+   */
+  private static String guardParticipation(
+      String whereClause, List<Object> params, Perspective perspective) {
+    if (!perspective.used) {
+      return whereClause;
+    }
+    params.add(0, perspective.player);
+    params.add(1, perspective.player);
+    return "((LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?)) AND "
+        + whereClause
+        + ")";
+  }
+
+  private String compileExpr(Expr expr, List<Object> params, Perspective perspective) {
     return switch (expr) {
       case OrExpr or ->
           or.operands().stream()
-              .map(e -> compileExpr(e, params))
+              .map(e -> compileExpr(e, params, perspective))
               .collect(Collectors.joining(" OR ", "(", ")"));
       case AndExpr and ->
           and.operands().stream()
-              .map(e -> compileExpr(e, params))
+              .map(e -> compileExpr(e, params, perspective))
               .collect(Collectors.joining(" AND ", "(", ")"));
-      case NotExpr not -> "(NOT " + compileExpr(not.operand(), params) + ")";
-      case ComparisonExpr cmp -> compileComparison(cmp, params);
-      case InExpr in -> compileIn(in, params);
+      case NotExpr not -> "(NOT " + compileExpr(not.operand(), params, perspective) + ")";
+      case ComparisonExpr cmp -> compileComparison(cmp, params, perspective);
+      case InExpr in -> compileIn(in, params, perspective);
       case MotifExpr motif -> compileMotif(motif);
       case SequenceExpr seq -> compileSequence(seq, params);
     };
   }
 
-  private String compileComparison(ComparisonExpr cmp, List<Object> params) {
-    String column = resolveColumn(cmp.field());
+  private String compileComparison(
+      ComparisonExpr cmp, List<Object> params, Perspective perspective) {
     String op = cmp.operator();
     if (!VALID_OPS.contains(op)) {
       throw new IllegalArgumentException("Invalid operator: " + op);
     }
+
+    PerspectiveField perspectiveField = PERSPECTIVE_FIELDS.get(cmp.field());
+    if (perspectiveField != null) {
+      String expr = perspectiveExpr(cmp.field(), perspectiveField, perspective, params);
+      params.add(cmp.value());
+      if (STRING_PERSPECTIVE_FIELDS.contains(cmp.field()) && (op.equals("=") || op.equals("!="))) {
+        return "LOWER" + expr + " " + op + " LOWER(?)";
+      }
+      return expr + " " + op + " ?";
+    }
+
+    String column = resolveColumn(cmp.field());
     params.add(cmp.value());
     if (STRING_COLUMNS.contains(column) && (op.equals("=") || op.equals("!="))) {
       return "LOWER(" + column + ") " + op + " LOWER(?)";
@@ -225,7 +328,20 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     return column + " " + op + " ?";
   }
 
-  private String compileIn(InExpr in, List<Object> params) {
+  private String compileIn(InExpr in, List<Object> params, Perspective perspective) {
+    PerspectiveField perspectiveField = PERSPECTIVE_FIELDS.get(in.field());
+    if (perspectiveField != null) {
+      String expr = perspectiveExpr(in.field(), perspectiveField, perspective, params);
+      params.addAll(in.values());
+      if (STRING_PERSPECTIVE_FIELDS.contains(in.field())) {
+        String lowerPlaceholders =
+            in.values().stream().map(v -> "LOWER(?)").collect(Collectors.joining(", "));
+        return "LOWER" + expr + " IN (" + lowerPlaceholders + ")";
+      }
+      String placeholders = in.values().stream().map(v -> "?").collect(Collectors.joining(", "));
+      return expr + " IN (" + placeholders + ")";
+    }
+
     String column = resolveColumn(in.field());
     params.addAll(in.values());
     if (STRING_COLUMNS.contains(column)) {
@@ -235,6 +351,26 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     }
     String placeholders = in.values().stream().map(v -> "?").collect(Collectors.joining(", "));
     return column + " IN (" + placeholders + ")";
+  }
+
+  /** Renders a perspective field's CASE expression, binding its player param(s) in SQL order. */
+  private static String perspectiveExpr(
+      String field,
+      PerspectiveField perspectiveField,
+      Perspective perspective,
+      List<Object> params) {
+    if (perspective.player == null) {
+      throw new IllegalArgumentException(
+          "Field '"
+              + field
+              + "' is perspective-relative (me.*, opponent.*, outcome) and requires a player"
+              + " parameter on the request");
+    }
+    perspective.used = true;
+    for (int i = 0; i < perspectiveField.playerParams(); i++) {
+      params.add(perspective.player);
+    }
+    return "(" + perspectiveField.sql() + ")";
   }
 
   private String compileMotif(MotifExpr motif) {

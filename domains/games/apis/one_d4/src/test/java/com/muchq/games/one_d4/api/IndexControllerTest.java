@@ -7,6 +7,7 @@ import com.muchq.games.one_d4.api.dto.IndexResponse;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.queue.IndexMessage;
 import com.muchq.games.one_d4.queue.IndexQueue;
+import com.muchq.games.one_d4.service.IndexRequestService;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -27,7 +28,9 @@ public class IndexControllerTest {
   public void setUp() {
     requestStore = new FakeIndexingRequestStore();
     queue = new FakeIndexQueue();
-    controller = new IndexController(requestStore, queue, new IndexRequestValidator());
+    controller =
+        new IndexController(
+            new IndexRequestService(requestStore, queue, message -> {}), requestStore);
   }
 
   @Test

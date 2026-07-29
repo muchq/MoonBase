@@ -21,6 +21,7 @@ import com.muchq.games.one_d4.motifs.AttackDetector;
 import com.muchq.games.one_d4.motifs.CheckDetector;
 import com.muchq.games.one_d4.motifs.PinDetector;
 import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
+import com.muchq.games.one_d4.service.IndexRequestService;
 import com.muchq.games.one_d4.worker.IndexWorker;
 import com.muchq.platform.json.JsonUtils;
 import java.time.Instant;
@@ -90,8 +91,9 @@ public class IndexerToolsTest {
             gameFeatureDao,
             new IndexedPeriodDao(testDb.jdbi(), true),
             executor);
-    facade =
-        new IndexerFacade(requestDao, gameFeatureDao, queue, worker, extractor, new SqlCompiler());
+    IndexRequestService indexRequestService =
+        new IndexRequestService(requestDao, queue, worker::process);
+    facade = new IndexerFacade(indexRequestService, gameFeatureDao, extractor, new SqlCompiler());
 
     indexTool = new IndexGamesTool(facade, mapper);
     statusTool = new IndexStatusTool(facade, mapper);
@@ -259,6 +261,37 @@ public class IndexerToolsTest {
                     "end_month", "2026-03")));
     assertThat(result.get("status").asText()).isEqualTo("PENDING");
     assertThat(queue.size()).isEqualTo(1);
+  }
+
+  @Test
+  public void perspectiveFieldsResolveAgainstPlayerParam() {
+    givenIndexedMonth();
+
+    // hikaru wins game/1 as white (1-0) and loses game/2 as black (1-0)
+    JsonNode wins =
+        parse(
+            queryTool.execute(
+                Map.of("query", "outcome = \"win\"", "player", "hikaru", "limit", 10)));
+    assertThat(wins.get("count").asInt()).isEqualTo(1);
+    assertThat(wins.get("games").get(0).get("gameUrl").asText())
+        .isEqualTo("https://chess.com/game/1");
+
+    JsonNode lossesByFamily =
+        parse(
+            aggregateTool.execute(
+                Map.of(
+                    "query",
+                    "outcome = \"loss\"",
+                    "player",
+                    "hikaru",
+                    "group_by",
+                    List.of("opening_family"))));
+    assertThat(lossesByFamily.get("count").asInt()).isEqualTo(1);
+    assertThat(lossesByFamily.get("groups").get(0).get("group").get("opening_family").asText())
+        .isEqualTo("Caro Kann Defense");
+
+    JsonNode missingPlayer = parse(queryTool.execute(Map.of("query", "outcome = \"win\"")));
+    assertThat(missingPlayer.get("error").asText()).contains("requires a player");
   }
 
   @Test

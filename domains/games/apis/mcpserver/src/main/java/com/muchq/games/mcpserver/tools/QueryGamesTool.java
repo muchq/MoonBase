@@ -35,15 +35,27 @@ public class QueryGamesTool implements McpTool {
         + " opening.family = \"Caro Kann Defense\"', 'eco = \"B90\" AND NOT motif(pin)'."
         + " Available fields: white.elo, black.elo, white.username, black.username, white.title,"
         + " black.title, time.class, eco, opening.name, opening.family, result, num.moves,"
-        + " platform. Available motifs: pin, cross_pin, fork, skewer, discovered_attack,"
-        + " discovered_check, check, checkmate, promotion, promotion_with_check,"
-        + " promotion_with_checkmate, back_rank_mate, smothered_mate, double_check.";
+        + " platform. With the player parameter, perspective fields work regardless of color:"
+        + " me.color, me.elo, me.title, opponent.username, opponent.elo, opponent.title, and"
+        + " outcome (win/loss/draw) — e.g. player: hikaru with 'outcome = \"win\" AND"
+        + " opponent.title = \"GM\"'. Available motifs: pin, cross_pin, fork, skewer,"
+        + " discovered_attack, discovered_check, check, checkmate, promotion,"
+        + " promotion_with_check, promotion_with_checkmate, back_rank_mate, smothered_mate,"
+        + " double_check.";
   }
 
   @Override
   public Map<String, Object> getInputSchema() {
     Map<String, Object> properties = new LinkedHashMap<>();
     properties.put("query", Map.of("type", "string", "description", "A ChessQL query string"));
+    properties.put(
+        "player",
+        Map.of(
+            "type",
+            "string",
+            "description",
+            "chess.com username that perspective fields (me.*, opponent.*, outcome) are resolved"
+                + " against; required when the query uses them"));
     properties.put(
         "limit",
         Map.of(
@@ -69,10 +81,12 @@ public class QueryGamesTool implements McpTool {
     }
     int limit = clampLimit(arguments.get("limit"));
     boolean includePgn = Boolean.parseBoolean(String.valueOf(arguments.get("include_pgn")));
+    Object rawPlayer = arguments.get("player");
+    String player = rawPlayer == null ? null : rawPlayer.toString();
 
     List<GameFeatureRow> games;
     try {
-      games = facade.query(rawQuery.toString(), limit);
+      games = facade.query(rawQuery.toString(), player, limit);
     } catch (ParseException | IllegalArgumentException e) {
       return ToolResponses.error(mapper, e.getMessage());
     }
