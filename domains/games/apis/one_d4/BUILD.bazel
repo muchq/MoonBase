@@ -95,6 +95,7 @@ java_library(
     srcs = [
         "src/main/java/com/muchq/games/one_d4/worker/IndexWorker.java",
         "src/main/java/com/muchq/games/one_d4/worker/IndexWorkerLifecycle.java",
+        "src/main/java/com/muchq/games/one_d4/worker/Openings.java",
         "src/main/java/com/muchq/games/one_d4/worker/ResultMapper.java",
         "src/main/java/com/muchq/games/one_d4/worker/RetentionWorker.java",
     ],
@@ -114,6 +115,7 @@ java_library(
         artifact("io.micronaut:micronaut-inject"),
         artifact("io.micronaut:micronaut-runtime"),
         artifact("jakarta.inject:jakarta-inject-api"),
+        artifact("org.jspecify:jspecify"),
         artifact("org.slf4j:slf4j-api"),
     ],
 )
@@ -321,6 +323,7 @@ java_test_suite(
     size = "small",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/worker/IndexWorkerTest.java",
+        "src/test/java/com/muchq/games/one_d4/worker/OpeningsTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/ResultMapperTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/RetentionWorkerTest.java",
     ],

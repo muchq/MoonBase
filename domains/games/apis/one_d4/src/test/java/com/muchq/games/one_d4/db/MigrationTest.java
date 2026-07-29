@@ -41,6 +41,22 @@ public class MigrationTest {
   }
 
   @Test
+  public void run_addsTitleAndOpeningColumns() throws Exception {
+    Migration migration = new Migration(dataSource, true);
+    migration.run();
+
+    try (Connection conn = dataSource.getConnection()) {
+      DatabaseMetaData meta = conn.getMetaData();
+      for (String column :
+          new String[] {"WHITE_TITLE", "BLACK_TITLE", "OPENING_NAME", "OPENING_FAMILY"}) {
+        try (ResultSet columns = meta.getColumns(null, null, "GAME_FEATURES", column)) {
+          assertThat(columns.next()).as("game_features.%s column should exist", column).isTrue();
+        }
+      }
+    }
+  }
+
+  @Test
   public void run_motifOccurrencesTableAcceptsInsertAndSelect() throws Exception {
     Migration migration = new Migration(dataSource, true);
     migration.run();

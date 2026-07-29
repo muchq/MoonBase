@@ -35,8 +35,12 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
           "black_username",
           "white_elo",
           "black_elo",
+          "white_title",
+          "black_title",
           "time_class",
           "eco",
+          "opening_name",
+          "opening_family",
           "result",
           "num_moves",
           "platform",
@@ -63,15 +67,19 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
           "overloaded_piece");
 
   private static final Map<String, String> FIELD_MAP =
-      Map.of(
-          "white.elo", "white_elo",
-          "black.elo", "black_elo",
-          "white.username", "white_username",
-          "black.username", "black_username",
-          "time.class", "time_class",
-          "num.moves", "num_moves",
-          "game.url", "game_url",
-          "played.at", "played_at");
+      Map.ofEntries(
+          Map.entry("white.elo", "white_elo"),
+          Map.entry("black.elo", "black_elo"),
+          Map.entry("white.username", "white_username"),
+          Map.entry("black.username", "black_username"),
+          Map.entry("white.title", "white_title"),
+          Map.entry("black.title", "black_title"),
+          Map.entry("time.class", "time_class"),
+          Map.entry("num.moves", "num_moves"),
+          Map.entry("game.url", "game_url"),
+          Map.entry("played.at", "played_at"),
+          Map.entry("opening.name", "opening_name"),
+          Map.entry("opening.family", "opening_family"));
 
   private static final Set<String> VALID_OPS = Set.of("=", "!=", "<", "<=", ">", ">=");
 
@@ -79,8 +87,12 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       Set.of(
           "white_username",
           "black_username",
+          "white_title",
+          "black_title",
           "time_class",
           "eco",
+          "opening_name",
+          "opening_family",
           "result",
           "platform",
           "game_url");

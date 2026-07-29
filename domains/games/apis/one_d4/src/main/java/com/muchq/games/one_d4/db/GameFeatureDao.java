@@ -27,21 +27,29 @@ public class GameFeatureDao implements GameFeatureStore {
       """
       MERGE INTO game_features (
           request_id, game_url, platform, white_username, black_username,
-          white_elo, black_elo, time_class, eco, result, played_at, num_moves,
+          white_elo, black_elo, white_title, black_title, time_class, eco,
+          opening_name, opening_family, result, played_at, num_moves,
           indexed_at, pgn
-      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
+      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
       """;
 
+  // On conflict, refresh the derived/enriched columns too so that reindexing a period backfills
+  // titles and opening names on rows indexed before those columns existed.
   private static final String PG_INSERT =
       """
       INSERT INTO game_features (
           request_id, game_url, platform, white_username, black_username,
-          white_elo, black_elo, time_class, eco, result, played_at, num_moves,
+          white_elo, black_elo, white_title, black_title, time_class, eco,
+          opening_name, opening_family, result, played_at, num_moves,
           indexed_at, pgn
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
       ON CONFLICT (game_url) DO UPDATE SET
           indexed_at = EXCLUDED.indexed_at,
-          request_id = EXCLUDED.request_id
+          request_id = EXCLUDED.request_id,
+          white_title = EXCLUDED.white_title,
+          black_title = EXCLUDED.black_title,
+          opening_name = EXCLUDED.opening_name,
+          opening_family = EXCLUDED.opening_family
       """;
 
   private static final String FETCH_FOR_REANALYSIS =
@@ -76,8 +84,12 @@ public class GameFeatureDao implements GameFeatureStore {
               rs.getString("black_username"),
               getIntOrNull(rs, "white_elo"),
               getIntOrNull(rs, "black_elo"),
+              rs.getString("white_title"),
+              rs.getString("black_title"),
               rs.getString("time_class"),
               rs.getString("eco"),
+              rs.getString("opening_name"),
+              rs.getString("opening_family"),
               rs.getString("result"),
               rs.getTimestamp("played_at").toInstant(),
               getIntOrNull(rs, "num_moves"),
@@ -117,12 +129,16 @@ public class GameFeatureDao implements GameFeatureStore {
                 .bind(4, row.blackUsername())
                 .bind(5, (Integer) row.whiteElo())
                 .bind(6, (Integer) row.blackElo())
-                .bind(7, row.timeClass())
-                .bind(8, row.eco())
-                .bind(9, row.result())
-                .bind(10, row.playedAt() != null ? Timestamp.from(row.playedAt()) : null)
-                .bind(11, (Integer) row.numMoves())
-                .bind(12, row.pgn())
+                .bind(7, row.whiteTitle())
+                .bind(8, row.blackTitle())
+                .bind(9, row.timeClass())
+                .bind(10, row.eco())
+                .bind(11, row.openingName())
+                .bind(12, row.openingFamily())
+                .bind(13, row.result())
+                .bind(14, row.playedAt() != null ? Timestamp.from(row.playedAt()) : null)
+                .bind(15, (Integer) row.numMoves())
+                .bind(16, row.pgn())
                 .add();
           }
           batch.execute();

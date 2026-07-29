@@ -605,8 +605,12 @@ public class GameFeatureDaoTest {
         "b",
         1500,
         1500,
+        null,
+        null,
         "blitz",
         "B00",
+        null,
+        null,
         "1-0",
         Instant.now(),
         20,
@@ -624,12 +628,55 @@ public class GameFeatureDaoTest {
         "black",
         1500,
         1480,
+        null,
+        null,
         "blitz",
         "A00",
+        null,
+        null,
         "1-0",
         playedAt,
         30,
         Instant.now(),
         "1. e4 e5 *");
+  }
+
+  @Test
+  public void insertBatch_roundTripsTitleAndOpeningColumns() {
+    GameFeature game =
+        new GameFeature(
+            null,
+            requestId,
+            "https://chess.com/game/titled",
+            "CHESS_COM",
+            "hikaru",
+            "rpragchess",
+            2800,
+            2750,
+            "GM",
+            "GM",
+            "blitz",
+            "B10",
+            "Caro Kann Defense Two Knights Attack",
+            "Caro Kann Defense",
+            "1-0",
+            Instant.now(),
+            40,
+            Instant.now(),
+            "pgn");
+    dao.insertBatch(List.of(game));
+
+    CompiledQuery byTitleAndFamily =
+        new SqlCompiler()
+            .compile(
+                Parser.parse("black.title = \"GM\" AND opening.family = \"caro kann defense\""));
+    List<GameFeature> rows = dao.query(byTitleAndFamily, 10, 0);
+
+    assertThat(rows).hasSize(1);
+    GameFeature row = rows.get(0);
+    assertThat(row.whiteTitle()).isEqualTo("GM");
+    assertThat(row.blackTitle()).isEqualTo("GM");
+    assertThat(row.openingName()).isEqualTo("Caro Kann Defense Two Knights Attack");
+    assertThat(row.openingFamily()).isEqualTo("Caro Kann Defense");
   }
 }

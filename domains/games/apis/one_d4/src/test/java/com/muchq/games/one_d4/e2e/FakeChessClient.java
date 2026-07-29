@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.muchq.games.chess_com_client.ChessClient;
 import com.muchq.games.chess_com_client.GamesResponse;
 import com.muchq.games.chess_com_client.PlayedGame;
+import com.muchq.games.chess_com_client.Player;
 import io.micronaut.context.annotation.Replaces;
 import jakarta.inject.Singleton;
 import java.time.Instant;
@@ -39,6 +40,7 @@ public class FakeChessClient extends ChessClient {
 
   private final Map<String, List<PlayedGame>> responsesByKey = new HashMap<>();
   private final List<FetchCall> fetchCalls = new ArrayList<>();
+  private final Map<String, String> titlesByPlayer = new HashMap<>();
 
   public FakeChessClient() {
     super(null, new ObjectMapper());
@@ -70,6 +72,38 @@ public class FakeChessClient extends ChessClient {
       return Optional.empty();
     }
     return Optional.of(new GamesResponse(games));
+  }
+
+  /** Registers a title returned via fetchPlayer for title enrichment during indexing. */
+  public void setTitle(String player, String title) {
+    titlesByPlayer.put(player.toLowerCase(), title);
+  }
+
+  @Override
+  public Optional<Player> fetchPlayer(String player) {
+    String title = titlesByPlayer.get(player.toLowerCase());
+    if (title == null) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        new Player(
+            0,
+            null,
+            null,
+            null,
+            player,
+            0,
+            null,
+            Instant.EPOCH,
+            Instant.EPOCH,
+            null,
+            false,
+            false,
+            null,
+            List.of(),
+            title,
+            null,
+            null));
   }
 
   public List<FetchCall> getFetchCalls() {

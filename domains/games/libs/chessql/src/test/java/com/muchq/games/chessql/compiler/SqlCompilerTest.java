@@ -431,6 +431,45 @@ public class SqlCompilerTest {
     assertThat(pq.orderBy()).isNull();
   }
 
+  @Test
+  public void testTitleFieldsCompileToCaseInsensitiveComparison() {
+    CompiledQuery white = compile("white.title = \"GM\"");
+    assertThat(white.selectSql())
+        .isEqualTo(BASE_PREFIX + "LOWER(white_title) = LOWER(?)" + BASE_SUFFIX);
+    assertThat(white.parameters()).isEqualTo(List.of("GM"));
+
+    CompiledQuery black = compile("black.title != \"GM\"");
+    assertThat(black.selectSql())
+        .isEqualTo(BASE_PREFIX + "LOWER(black_title) != LOWER(?)" + BASE_SUFFIX);
+  }
+
+  @Test
+  public void testTitleFieldSupportsIn() {
+    CompiledQuery result = compile("black.title IN [\"GM\", \"IM\"]");
+    assertThat(result.selectSql())
+        .isEqualTo(BASE_PREFIX + "LOWER(black_title) IN (LOWER(?), LOWER(?))" + BASE_SUFFIX);
+    assertThat(result.parameters()).isEqualTo(List.of("GM", "IM"));
+  }
+
+  @Test
+  public void testOpeningFieldsCompileToCaseInsensitiveComparison() {
+    CompiledQuery family = compile("opening.family = \"Caro Kann Defense\"");
+    assertThat(family.selectSql())
+        .isEqualTo(BASE_PREFIX + "LOWER(opening_family) = LOWER(?)" + BASE_SUFFIX);
+    assertThat(family.parameters()).isEqualTo(List.of("Caro Kann Defense"));
+
+    CompiledQuery name = compile("opening.name = \"English Opening Agincourt Defense\"");
+    assertThat(name.selectSql())
+        .isEqualTo(BASE_PREFIX + "LOWER(opening_name) = LOWER(?)" + BASE_SUFFIX);
+  }
+
+  @Test
+  public void testOpeningFieldsUnderscoreFormAccepted() {
+    CompiledQuery result = compile("opening_family = \"Sicilian Defense\"");
+    assertThat(result.selectSql())
+        .isEqualTo(BASE_PREFIX + "LOWER(opening_family) = LOWER(?)" + BASE_SUFFIX);
+  }
+
   private CompiledQuery compile(String input) {
     return compiler.compile(Parser.parse(input));
   }

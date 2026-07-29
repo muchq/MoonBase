@@ -7,6 +7,7 @@ import com.muchq.games.chess_com_client.Accuracies;
 import com.muchq.games.chess_com_client.ChessClient;
 import com.muchq.games.chess_com_client.GamesResponse;
 import com.muchq.games.chess_com_client.PlayedGame;
+import com.muchq.games.chess_com_client.Player;
 import com.muchq.games.chess_com_client.PlayerResult;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
@@ -349,6 +350,106 @@ public class IndexWorkerTest {
     assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
   }
 
+  @Test
+  public void process_enrichesTitlesAndOpeningColumns() {
+    stubChessClient.setTitle("hikaru", "GM");
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(
+            playedGame(
+                "https://chess.com/g/opening",
+                MINIMAL_PGN,
+                "blitz",
+                "Hikaru",
+                "someuser",
+                "https://www.chess.com/openings/Caro-Kann-Defense-Two-Knights-Attack")));
+    RecordingGameFeatureStore store = new RecordingGameFeatureStore();
+    IndexWorker w =
+        new IndexWorker(
+            stubChessClient,
+            featureExtractor,
+            requestStore,
+            store,
+            periodStore,
+            extractionExecutor);
+
+    w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    assertThat(store.getInsertedFeatures()).hasSize(1);
+    GameFeature feature = store.getInsertedFeatures().get(0);
+    assertThat(feature.whiteTitle()).isEqualTo("GM");
+    assertThat(feature.blackTitle()).isNull();
+    assertThat(feature.eco()).isEqualTo("C20");
+    assertThat(feature.openingName()).isEqualTo("Caro Kann Defense Two Knights Attack");
+    assertThat(feature.openingFamily()).isEqualTo("Caro Kann Defense");
+  }
+
+  @Test
+  public void process_fetchesEachDistinctPlayerProfileOnce() {
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(
+            playedGame("https://chess.com/g/1", MINIMAL_PGN, "blitz", "Hikaru", "opp1", "C20"),
+            playedGame("https://chess.com/g/2", MINIMAL_PGN, "blitz", "opp1", "Hikaru", "C20")));
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 2),
+        List.of(
+            playedGame("https://chess.com/g/3", MINIMAL_PGN, "blitz", "Hikaru", "opp2", "C20")));
+
+    worker.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-02", false));
+
+    // hikaru and opp1 are looked up once in January and reused in February; opp2 is new
+    assertThat(stubChessClient.getPlayerFetchCalls()).containsExactly("hikaru", "opp1", "opp2");
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+  }
+
+  @Test
+  public void process_titleLookupFailureDoesNotFailIndexing() {
+    stubChessClient.setThrowOnFetchPlayer(new RuntimeException("chess.com API returned HTTP 429"));
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/g/1", MINIMAL_PGN, "blitz")));
+    RecordingGameFeatureStore store = new RecordingGameFeatureStore();
+    IndexWorker w =
+        new IndexWorker(
+            stubChessClient,
+            featureExtractor,
+            requestStore,
+            store,
+            periodStore,
+            extractionExecutor);
+
+    w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    assertThat(store.getInsertCount()).isEqualTo(1);
+    assertThat(store.getInsertedFeatures().get(0).whiteTitle()).isNull();
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+  }
+
+  private static PlayedGame playedGame(
+      String gameUrl,
+      String pgn,
+      String timeClass,
+      String whiteUser,
+      String blackUser,
+      String eco) {
+    return new PlayedGame(
+        gameUrl,
+        pgn,
+        Instant.EPOCH,
+        true,
+        new Accuracies(90.0, 85.0),
+        "",
+        "uuid-" + gameUrl.hashCode(),
+        "",
+        "",
+        timeClass,
+        "chess",
+        new PlayerResult(1500, "win", "https://chess.com/w", whiteUser, "uuid-w"),
+        new PlayerResult(1500, "loss", "https://chess.com/b", blackUser, "uuid-b"),
+        eco);
+  }
+
   private static PlayedGame playedGame(String gameUrl, String pgn, String timeClass) {
     return new PlayedGame(
         gameUrl,
@@ -395,7 +496,10 @@ public class IndexWorkerTest {
   private static final class StubChessClient extends ChessClient {
     private final List<java.time.YearMonth> fetchCalls = new ArrayList<>();
     private final Map<java.time.YearMonth, List<PlayedGame>> responseByMonth = new HashMap<>();
+    private final Map<String, String> titlesByPlayer = new HashMap<>();
+    private final List<String> playerFetchCalls = new ArrayList<>();
     private RuntimeException throwOnFetch = null;
+    private RuntimeException throwOnFetchPlayer = null;
 
     StubChessClient() {
       super(null, new ObjectMapper());
@@ -407,6 +511,14 @@ public class IndexWorkerTest {
 
     void setThrowOnFetch(RuntimeException ex) {
       this.throwOnFetch = ex;
+    }
+
+    void setTitle(String player, String title) {
+      titlesByPlayer.put(player.toLowerCase(), title);
+    }
+
+    void setThrowOnFetchPlayer(RuntimeException ex) {
+      this.throwOnFetchPlayer = ex;
     }
 
     @Override
@@ -422,8 +534,43 @@ public class IndexWorkerTest {
       return Optional.empty();
     }
 
+    @Override
+    public Optional<Player> fetchPlayer(String player) {
+      playerFetchCalls.add(player.toLowerCase());
+      if (throwOnFetchPlayer != null) {
+        throw throwOnFetchPlayer;
+      }
+      String title = titlesByPlayer.get(player.toLowerCase());
+      if (title == null) {
+        return Optional.empty();
+      }
+      return Optional.of(
+          new Player(
+              0,
+              null,
+              null,
+              null,
+              player,
+              0,
+              null,
+              Instant.EPOCH,
+              Instant.EPOCH,
+              null,
+              false,
+              false,
+              null,
+              List.of(),
+              title,
+              null,
+              null));
+    }
+
     List<java.time.YearMonth> getFetchCalls() {
       return new ArrayList<>(fetchCalls);
+    }
+
+    List<String> getPlayerFetchCalls() {
+      return new ArrayList<>(playerFetchCalls);
     }
   }
 
@@ -510,7 +657,12 @@ public class IndexWorkerTest {
     private final Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>>
         allInsertedOccurrences = new HashMap<>();
     private final List<String> insertedUrls = new ArrayList<>();
+    private final List<GameFeature> insertedFeatures = new ArrayList<>();
     private int insertCount = 0;
+
+    List<GameFeature> getInsertedFeatures() {
+      return new ArrayList<>(insertedFeatures);
+    }
 
     Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> getAllInsertedOccurrences() {
       return allInsertedOccurrences;
@@ -529,6 +681,7 @@ public class IndexWorkerTest {
       insertCount += features.size();
       for (GameFeature f : features) {
         insertedUrls.add(f.gameUrl());
+        insertedFeatures.add(f);
       }
     }
 
