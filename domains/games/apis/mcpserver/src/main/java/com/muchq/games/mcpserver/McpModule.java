@@ -27,17 +27,7 @@ import com.muchq.games.one_d4.db.Migration;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.GameReplayer;
 import com.muchq.games.one_d4.engine.PgnParser;
-import com.muchq.games.one_d4.motifs.AttackDetector;
-import com.muchq.games.one_d4.motifs.BackRankMateDetector;
-import com.muchq.games.one_d4.motifs.CheckDetector;
-import com.muchq.games.one_d4.motifs.CrossPinDetector;
-import com.muchq.games.one_d4.motifs.MotifDetector;
-import com.muchq.games.one_d4.motifs.PinDetector;
-import com.muchq.games.one_d4.motifs.PromotionDetector;
-import com.muchq.games.one_d4.motifs.PromotionWithCheckDetector;
-import com.muchq.games.one_d4.motifs.PromotionWithCheckmateDetector;
-import com.muchq.games.one_d4.motifs.SkewerDetector;
-import com.muchq.games.one_d4.motifs.SmotheredMateDetector;
+import com.muchq.games.one_d4.motifs.Detectors;
 import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.games.one_d4.queue.IndexQueue;
 import com.muchq.games.one_d4.worker.IndexWorker;
@@ -133,19 +123,8 @@ public class McpModule {
 
   @Context
   public FeatureExtractor featureExtractor() {
-    List<MotifDetector> detectors =
-        List.of(
-            new PinDetector(),
-            new CrossPinDetector(),
-            new SkewerDetector(),
-            new AttackDetector(),
-            new CheckDetector(),
-            new PromotionDetector(),
-            new PromotionWithCheckDetector(),
-            new PromotionWithCheckmateDetector(),
-            new BackRankMateDetector(),
-            new SmotheredMateDetector());
-    return new FeatureExtractor(new PgnParser(), new GameReplayer(), detectors);
+    // Same detector set as one_d4's IndexerModule — indexes built by either process must agree
+    return new FeatureExtractor(new PgnParser(), new GameReplayer(), Detectors.defaultDetectors());
   }
 
   private static final AtomicInteger EXTRACT_THREAD_COUNTER = new AtomicInteger();
