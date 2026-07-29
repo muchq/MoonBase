@@ -66,15 +66,13 @@ public class ChessComPlayersToolTest {
 
   @Test
   public void testGetName() {
-    var tool = new ChessComPlayersTool(new StubChessClient(Map.of(), Map.of()),
-        JsonUtils.mapper());
+    var tool = new ChessComPlayersTool(new StubChessClient(Map.of(), Map.of()), JsonUtils.mapper());
     assertThat(tool.getName()).isEqualTo("chess_com_players");
   }
 
   @Test
   public void testGetInputSchema() {
-    var tool = new ChessComPlayersTool(new StubChessClient(Map.of(), Map.of()),
-        JsonUtils.mapper());
+    var tool = new ChessComPlayersTool(new StubChessClient(Map.of(), Map.of()), JsonUtils.mapper());
     Map<String, Object> schema = tool.getInputSchema();
     @SuppressWarnings("unchecked")
     Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
@@ -111,9 +109,7 @@ public class ChessComPlayersToolTest {
 
   @Test
   public void testApiErrorForOneUsernameKeepsPartialResults() {
-    var stub =
-        new StubChessClient(
-            Map.of("hikaru", player("hikaru", "GM")), Map.of("flaky", 429));
+    var stub = new StubChessClient(Map.of("hikaru", player("hikaru", "GM")), Map.of("flaky", 429));
     var tool = new ChessComPlayersTool(stub, JsonUtils.mapper());
 
     JsonNode result = parse(tool.execute(Map.of("usernames", List.of("hikaru", "flaky"))));
@@ -124,8 +120,7 @@ public class ChessComPlayersToolTest {
 
   @Test
   public void testTooManyUsernamesRejected() {
-    var tool = new ChessComPlayersTool(new StubChessClient(Map.of(), Map.of()),
-        JsonUtils.mapper());
+    var tool = new ChessComPlayersTool(new StubChessClient(Map.of(), Map.of()), JsonUtils.mapper());
     List<String> usernames =
         IntStream.rangeClosed(1, ChessComPlayersTool.MAX_USERNAMES + 1)
             .mapToObj(i -> "user" + i)
@@ -138,8 +133,7 @@ public class ChessComPlayersToolTest {
 
   @Test
   public void testEmptyOrMissingUsernamesRejected() {
-    var tool = new ChessComPlayersTool(new StubChessClient(Map.of(), Map.of()),
-        JsonUtils.mapper());
+    var tool = new ChessComPlayersTool(new StubChessClient(Map.of(), Map.of()), JsonUtils.mapper());
     assertThat(parse(tool.execute(Map.of())).has("error")).isTrue();
     assertThat(parse(tool.execute(Map.of("usernames", List.of()))).has("error")).isTrue();
   }

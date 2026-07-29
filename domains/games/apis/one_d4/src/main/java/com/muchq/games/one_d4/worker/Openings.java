@@ -39,9 +39,7 @@ public final class Openings {
     }
     String slug = trimmed.substring(trimmed.lastIndexOf('/') + 1);
     // "openings" is the bare path directory (https://www.chess.com/openings/) — no slug present.
-    if (slug.isBlank()
-        || slug.equalsIgnoreCase("openings")
-        || ECO_CODE.matcher(slug).matches()) {
+    if (slug.isBlank() || slug.equalsIgnoreCase("openings") || ECO_CODE.matcher(slug).matches()) {
       return null;
     }
     String name = slug.replace('-', ' ').strip();
