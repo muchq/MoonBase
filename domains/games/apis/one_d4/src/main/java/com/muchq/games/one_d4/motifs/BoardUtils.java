@@ -13,7 +13,7 @@ public class BoardUtils {
    * Returns true if the piece at (pieceRow, pieceCol) attacks the square (targetRow, targetCol).
    * Handles all piece types including path-clearing for sliding pieces.
    */
-  static boolean pieceAttacks(
+  public static boolean pieceAttacks(
       int[][] board, int pieceRow, int pieceCol, int targetRow, int targetCol) {
     int piece = board[pieceRow][pieceCol];
     if (piece == 0) return false;
@@ -55,7 +55,7 @@ public class BoardUtils {
     }
   }
 
-  static int[][] parsePlacement(String placement) {
+  public static int[][] parsePlacement(String placement) {
     int[][] board = new int[8][8];
     String[] ranks = placement.split("/");
     for (int r = 0; r < 8; r++) {
@@ -91,7 +91,7 @@ public class BoardUtils {
   }
 
   /** Returns true if all squares strictly between (fromRow,fromCol) and (toRow,toCol) are empty. */
-  static boolean isPathClear(int[][] board, int fromRow, int fromCol, int toRow, int toCol) {
+  public static boolean isPathClear(int[][] board, int fromRow, int fromCol, int toRow, int toCol) {
     int rowStep = Integer.signum(toRow - fromRow);
     int colStep = Integer.signum(toCol - fromCol);
     int row = fromRow + rowStep, col = fromCol + colStep;
@@ -107,7 +107,7 @@ public class BoardUtils {
    * Finds the row of the king of the given color. Returns -1 if not found. Stores the result in a
    * two-element array {row, col}.
    */
-  static int[] findKing(int[][] board, boolean kingIsWhite) {
+  public static int[] findKing(int[][] board, boolean kingIsWhite) {
     int kingPiece = kingIsWhite ? 6 : -6;
     for (int r = 0; r < 8; r++) {
       for (int c = 0; c < 8; c++) {
