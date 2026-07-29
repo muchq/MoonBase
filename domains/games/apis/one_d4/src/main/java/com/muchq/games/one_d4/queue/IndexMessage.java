@@ -8,4 +8,17 @@ public record IndexMessage(
     String platform,
     String startMonth,
     String endMonth,
-    boolean excludeBullet) {}
+    boolean excludeBullet,
+    boolean skipCache) {
+
+  /** Convenience constructor for the common case of cache-respecting requests. */
+  public IndexMessage(
+      UUID requestId,
+      String player,
+      String platform,
+      String startMonth,
+      String endMonth,
+      boolean excludeBullet) {
+    this(requestId, player, platform, startMonth, endMonth, excludeBullet, false);
+  }
+}

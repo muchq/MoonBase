@@ -63,57 +63,57 @@ public class IndexController {
     validator.validate(request);
 
     boolean excludeBullet = Boolean.TRUE.equals(request.excludeBullet());
+    boolean skipCache = Boolean.TRUE.equals(request.skipCache());
+    // Request dedupe and the indexed-period cache are keyed by the player string as given, so
+    // normalize case here — "Hikaru" and "hikaru" must not index twice.
+    String player = request.player().strip().toLowerCase(java.util.Locale.ROOT);
 
     LOG.info(
-        "POST /v1/index player={} platform={} months={}-{} excludeBullet={}",
-        request.player(),
+        "POST /v1/index player={} platform={} months={}-{} excludeBullet={} skipCache={}",
+        player,
         request.platform(),
         request.startMonth(),
         request.endMonth(),
-        excludeBullet);
+        excludeBullet,
+        skipCache);
 
-    Optional<IndexingRequestStore.IndexingRequest> existing =
-        requestDao.findExistingRequest(
-            request.player(),
-            request.platform(),
-            request.startMonth(),
-            request.endMonth(),
-            excludeBullet);
-    if (existing.isPresent()) {
-      IndexingRequestStore.IndexingRequest row = existing.get();
-      LOG.info("Returning existing index request {} (status={})", row.id(), row.status());
-      return new IndexResponse(
-          row.id(),
-          row.player(),
-          row.platform(),
-          row.startMonth(),
-          row.endMonth(),
-          row.status(),
-          row.gamesIndexed(),
-          row.errorMessage(),
-          row.excludeBullet());
+    if (!skipCache) {
+      Optional<IndexingRequestStore.IndexingRequest> existing =
+          requestDao.findExistingRequest(
+              player, request.platform(), request.startMonth(), request.endMonth(), excludeBullet);
+      if (existing.isPresent()) {
+        IndexingRequestStore.IndexingRequest row = existing.get();
+        LOG.info("Returning existing index request {} (status={})", row.id(), row.status());
+        return new IndexResponse(
+            row.id(),
+            row.player(),
+            row.platform(),
+            row.startMonth(),
+            row.endMonth(),
+            row.status(),
+            row.gamesIndexed(),
+            row.errorMessage(),
+            row.excludeBullet());
+      }
     }
 
     UUID id =
         requestDao.create(
-            request.player(),
-            request.platform(),
-            request.startMonth(),
-            request.endMonth(),
-            excludeBullet);
+            player, request.platform(), request.startMonth(), request.endMonth(), excludeBullet);
 
     queue.enqueue(
         new IndexMessage(
             id,
-            request.player(),
+            player,
             request.platform(),
             request.startMonth(),
             request.endMonth(),
-            excludeBullet));
+            excludeBullet,
+            skipCache));
 
     return new IndexResponse(
         id,
-        request.player(),
+        player,
         request.platform(),
         request.startMonth(),
         request.endMonth(),

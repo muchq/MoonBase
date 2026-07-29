@@ -398,9 +398,71 @@ public class IndexWorkerTest {
 
     worker.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-02", false));
 
-    // hikaru and opp1 are looked up once in January and reused in February; opp2 is new
-    assertThat(stubChessClient.getPlayerFetchCalls()).containsExactly("hikaru", "opp1", "opp2");
+    // hikaru and opp1 are looked up once in January (concurrently, so order within the month is
+    // not guaranteed) and reused in February; opp2 is new
+    assertThat(stubChessClient.getPlayerFetchCalls())
+        .containsExactlyInAnyOrder("hikaru", "opp1", "opp2");
     assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+  }
+
+  @Test
+  public void process_skipCacheBypassesCachedPeriodAndRefetches() {
+    periodStore.setCachedPeriod(
+        PLAYER,
+        PLATFORM,
+        "2024-01",
+        new IndexedPeriodStore.IndexedPeriod(
+            PLAYER, PLATFORM, "2024-01", Instant.EPOCH, true, 7, false));
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/g/refetch", MINIMAL_PGN, "blitz")));
+    RecordingGameFeatureStore store = new RecordingGameFeatureStore();
+    IndexWorker w =
+        new IndexWorker(
+            stubChessClient,
+            featureExtractor,
+            requestStore,
+            store,
+            periodStore,
+            extractionExecutor);
+
+    w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false, true));
+
+    // The cached period is ignored: the month is fetched and the row rewritten
+    assertThat(stubChessClient.getFetchCalls()).containsExactly(java.time.YearMonth.of(2024, 1));
+    assertThat(store.getInsertCount()).isEqualTo(1);
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+  }
+
+  @Test
+  public void process_titleLookupErrorStoresPeriodIncompleteForRefetch() {
+    stubChessClient.setThrowOnFetchPlayer(new RuntimeException("chess.com API returned HTTP 429"));
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/g/degraded", MINIMAL_PGN, "blitz")));
+
+    worker.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    // Games are still indexed, but the period must not be cached as complete — otherwise the
+    // null titles would be frozen until someone manually clears indexed_periods.
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+    assertThat(periodStore.getUpserts())
+        .containsExactly(new StubPeriodStore.Upsert("2024-01", false, 1));
+  }
+
+  @Test
+  public void process_cleanTitleLookupsStorePeriodComplete() {
+    stubChessClient.setTitle("white", "GM");
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/g/clean", MINIMAL_PGN, "blitz")));
+
+    worker.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    // "black" resolves to not-found (untitled) — a successful lookup, so the period stays
+    // complete; only API errors degrade it.
+    assertThat(periodStore.getUpserts())
+        .containsExactly(new StubPeriodStore.Upsert("2024-01", true, 1));
   }
 
   @Test
@@ -497,7 +559,8 @@ public class IndexWorkerTest {
     private final List<java.time.YearMonth> fetchCalls = new ArrayList<>();
     private final Map<java.time.YearMonth, List<PlayedGame>> responseByMonth = new HashMap<>();
     private final Map<String, String> titlesByPlayer = new HashMap<>();
-    private final List<String> playerFetchCalls = new ArrayList<>();
+    // Title lookups run on the extraction pool, so record them thread-safely
+    private final List<String> playerFetchCalls = Collections.synchronizedList(new ArrayList<>());
     private RuntimeException throwOnFetch = null;
     private RuntimeException throwOnFetchPlayer = null;
 
@@ -700,10 +763,17 @@ public class IndexWorkerTest {
 
   private static final class StubPeriodStore implements IndexedPeriodStore {
     private final Map<String, IndexedPeriodStore.IndexedPeriod> cachedPeriods = new HashMap<>();
+    private final List<Upsert> upserts = new ArrayList<>();
+
+    record Upsert(String month, boolean isComplete, int gamesCount) {}
 
     void setCachedPeriod(
         String player, String platform, String month, IndexedPeriodStore.IndexedPeriod period) {
       cachedPeriods.put(key(player, platform, month, period.excludeBullet()), period);
+    }
+
+    List<Upsert> getUpserts() {
+      return new ArrayList<>(upserts);
     }
 
     private static String key(String player, String platform, String month, boolean excludeBullet) {
@@ -724,7 +794,9 @@ public class IndexWorkerTest {
         Instant fetchedAt,
         boolean isComplete,
         int gamesCount,
-        boolean excludeBullet) {}
+        boolean excludeBullet) {
+      upserts.add(new Upsert(month, isComplete, gamesCount));
+    }
 
     @Override
     public int deleteOlderThan(Instant threshold) {

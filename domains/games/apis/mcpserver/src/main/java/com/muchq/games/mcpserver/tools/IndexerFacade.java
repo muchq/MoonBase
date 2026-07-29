@@ -61,13 +61,23 @@ public class IndexerFacade {
   /**
    * Starts (or reuses) an indexing request. Single-month requests run synchronously so the caller
    * gets a final status in one round trip; multi-month requests are enqueued and can be polled via
-   * {@link #status}.
+   * {@link #status}. With {@code skipCache} the indexed-period cache is bypassed and every month in
+   * the range is refetched — this is how rows indexed before newer columns existed (titles, opening
+   * name/family) get backfilled.
    */
   public IndexResponse index(
-      String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
+      String player,
+      String platform,
+      String startMonth,
+      String endMonth,
+      boolean excludeBullet,
+      boolean skipCache) {
     if (player == null || player.isBlank()) {
       throw new IllegalArgumentException("username is required");
     }
+    // Request dedupe and the indexed-period cache are keyed by the player string as given, so
+    // normalize case here — "Hikaru" and "hikaru" must not index twice.
+    String canonicalPlayer = player.strip().toLowerCase(Locale.ROOT);
     String canonicalPlatform = canonicalPlatform(platform);
     YearMonth start = parseMonth(startMonth, "start_month");
     YearMonth end = parseMonth(endMonth, "end_month");
@@ -80,16 +90,21 @@ public class IndexerFacade {
           "Maximum range is " + MAX_MONTH_SPAN + " months, got " + monthSpan);
     }
 
-    Optional<IndexingRequestStore.IndexingRequest> existing =
-        requestStore.findExistingRequest(
-            player, canonicalPlatform, startMonth, endMonth, excludeBullet);
-    if (existing.isPresent()) {
-      return toResponse(existing.get());
+    if (!skipCache) {
+      Optional<IndexingRequestStore.IndexingRequest> existing =
+          requestStore.findExistingRequest(
+              canonicalPlayer, canonicalPlatform, startMonth, endMonth, excludeBullet);
+      if (existing.isPresent()) {
+        return toResponse(existing.get());
+      }
     }
 
-    UUID id = requestStore.create(player, canonicalPlatform, startMonth, endMonth, excludeBullet);
+    UUID id =
+        requestStore.create(
+            canonicalPlayer, canonicalPlatform, startMonth, endMonth, excludeBullet);
     IndexMessage message =
-        new IndexMessage(id, player, canonicalPlatform, startMonth, endMonth, excludeBullet);
+        new IndexMessage(
+            id, canonicalPlayer, canonicalPlatform, startMonth, endMonth, excludeBullet, skipCache);
 
     if (monthSpan <= 1) {
       // Small request: process inline (typically well under a minute) and return final status.
@@ -98,7 +113,7 @@ public class IndexerFacade {
           .orElse(
               new IndexResponse(
                   id,
-                  player,
+                  canonicalPlayer,
                   canonicalPlatform,
                   startMonth,
                   endMonth,
@@ -110,7 +125,15 @@ public class IndexerFacade {
 
     queue.enqueue(message);
     return new IndexResponse(
-        id, player, canonicalPlatform, startMonth, endMonth, "PENDING", 0, null, excludeBullet);
+        id,
+        canonicalPlayer,
+        canonicalPlatform,
+        startMonth,
+        endMonth,
+        "PENDING",
+        0,
+        null,
+        excludeBullet);
   }
 
   public Optional<IndexResponse> status(UUID requestId) {

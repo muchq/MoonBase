@@ -62,7 +62,9 @@ profiles at index time; untitled players are NULL. `opening.name` is the human-r
 line derived from the chess.com `ECOUrl` (e.g. `Caro Kann Defense Two Knights Attack 3...dxe4`);
 `opening.family` is its leading family segment (e.g. `Caro Kann Defense`) — the level most
 questions are asked at, e.g. `white.username = "hikaru" AND opening.family = "Caro Kann Defense"`.
-Rows indexed before these columns existed hold NULL until their periods are reindexed.
+Rows indexed before these columns existed hold NULL until reindexed with `skipCache: true` on
+`POST /v1/index` (or `skip_cache` on the `index_chess_games` MCP tool) — a plain re-request is
+served from the indexed-period cache and does not refetch.
 
 ## Motifs
 

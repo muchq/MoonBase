@@ -8,14 +8,28 @@ import com.muchq.games.chess_com_client.ChessComApiException;
 import com.muchq.games.chess_com_client.Player;
 import com.muchq.platform.json.JsonUtils;
 import java.time.Instant;
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.IntStream;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 
 public class ChessComPlayersToolTest {
+
+  private static final ExecutorService LOOKUP_EXECUTOR = Executors.newFixedThreadPool(4);
+
+  @AfterAll
+  static void shutDownExecutor() {
+    LOOKUP_EXECUTOR.shutdownNow();
+  }
+
+  private static ChessComPlayersTool newTool(ChessClient client) {
+    return new ChessComPlayersTool(client, JsonUtils.mapper(), LOOKUP_EXECUTOR);
+  }
 
   private static Player player(String username, String title) {
     return new Player(
@@ -40,7 +54,9 @@ public class ChessComPlayersToolTest {
 
   private static class StubChessClient extends ChessClient {
     private final Map<String, Player> players;
-    private final List<String> requested = new ArrayList<>();
+    // fetchPlayer runs on pool threads now, so record calls in a synchronized list
+    private final List<String> requested =
+        Collections.synchronizedList(new java.util.ArrayList<>());
     private final Map<String, Integer> failures;
 
     StubChessClient(Map<String, Player> players, Map<String, Integer> failures) {
@@ -66,13 +82,13 @@ public class ChessComPlayersToolTest {
 
   @Test
   public void testGetName() {
-    var tool = new ChessComPlayersTool(new StubChessClient(Map.of(), Map.of()), JsonUtils.mapper());
+    var tool = newTool(new StubChessClient(Map.of(), Map.of()));
     assertThat(tool.getName()).isEqualTo("chess_com_players");
   }
 
   @Test
   public void testGetInputSchema() {
-    var tool = new ChessComPlayersTool(new StubChessClient(Map.of(), Map.of()), JsonUtils.mapper());
+    var tool = newTool(new StubChessClient(Map.of(), Map.of()));
     Map<String, Object> schema = tool.getInputSchema();
     @SuppressWarnings("unchecked")
     Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
@@ -85,7 +101,7 @@ public class ChessComPlayersToolTest {
         new StubChessClient(
             Map.of("hikaru", player("hikaru", "GM"), "rpragchess", player("rpragchess", "GM")),
             Map.of());
-    var tool = new ChessComPlayersTool(stub, JsonUtils.mapper());
+    var tool = newTool(stub);
 
     JsonNode result =
         parse(tool.execute(Map.of("usernames", List.of("Hikaru", "RPRAGCHESS", "ghost"))));
@@ -100,7 +116,7 @@ public class ChessComPlayersToolTest {
   @Test
   public void testDuplicatesAreDeduplicated() {
     var stub = new StubChessClient(Map.of("hikaru", player("hikaru", "GM")), Map.of());
-    var tool = new ChessComPlayersTool(stub, JsonUtils.mapper());
+    var tool = newTool(stub);
 
     tool.execute(Map.of("usernames", List.of("hikaru", "Hikaru", "HIKARU")));
 
@@ -110,7 +126,7 @@ public class ChessComPlayersToolTest {
   @Test
   public void testApiErrorForOneUsernameKeepsPartialResults() {
     var stub = new StubChessClient(Map.of("hikaru", player("hikaru", "GM")), Map.of("flaky", 429));
-    var tool = new ChessComPlayersTool(stub, JsonUtils.mapper());
+    var tool = newTool(stub);
 
     JsonNode result = parse(tool.execute(Map.of("usernames", List.of("hikaru", "flaky"))));
 
@@ -120,7 +136,7 @@ public class ChessComPlayersToolTest {
 
   @Test
   public void testTooManyUsernamesRejected() {
-    var tool = new ChessComPlayersTool(new StubChessClient(Map.of(), Map.of()), JsonUtils.mapper());
+    var tool = newTool(new StubChessClient(Map.of(), Map.of()));
     List<String> usernames =
         IntStream.rangeClosed(1, ChessComPlayersTool.MAX_USERNAMES + 1)
             .mapToObj(i -> "user" + i)
@@ -133,7 +149,7 @@ public class ChessComPlayersToolTest {
 
   @Test
   public void testEmptyOrMissingUsernamesRejected() {
-    var tool = new ChessComPlayersTool(new StubChessClient(Map.of(), Map.of()), JsonUtils.mapper());
+    var tool = newTool(new StubChessClient(Map.of(), Map.of()));
     assertThat(parse(tool.execute(Map.of())).has("error")).isTrue();
     assertThat(parse(tool.execute(Map.of("usernames", List.of()))).has("error")).isTrue();
   }

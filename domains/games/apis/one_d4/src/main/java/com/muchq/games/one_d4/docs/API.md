@@ -25,12 +25,14 @@ Start indexing games for a player over a month range.
 }
 ```
 
-| Field       | Type   | Required | Description                            |
-|-------------|--------|----------|----------------------------------------|
-| player      | string | yes      | Username on the chess platform          |
-| platform    | string | yes      | `"CHESS_COM"` (lichess planned)        |
-| startMonth  | string | yes      | Start month inclusive, format `YYYY-MM` |
-| endMonth    | string | yes      | End month inclusive, format `YYYY-MM`   |
+| Field         | Type   | Required | Description                            |
+|---------------|--------|----------|----------------------------------------|
+| player        | string | yes      | Username on the chess platform (normalized to lowercase) |
+| platform      | string | yes      | `"CHESS_COM"` (lichess planned)        |
+| startMonth    | string | yes      | Start month inclusive, format `YYYY-MM` |
+| endMonth      | string | yes      | End month inclusive, format `YYYY-MM`   |
+| excludeBullet | bool   | no       | Skip bullet games (default false)       |
+| skipCache     | bool   | no       | Refetch every month in the range even if already indexed, refreshing stored rows — e.g. to backfill titles and opening names on rows indexed before those columns existed (default false) |
 
 ### Response (201)
 

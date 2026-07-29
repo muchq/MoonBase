@@ -215,6 +215,39 @@ public class IndexerToolsTest {
   }
 
   @Test
+  public void skipCacheForcesRefetchAndCaseInsensitiveDedupe() {
+    givenIndexedMonth();
+    assertThat(chessClient.getFetchGamesCalls()).isEqualTo(1);
+
+    // Without skip_cache, a re-request (any username case) is served from the period cache
+    JsonNode cached =
+        parse(
+            indexTool.execute(
+                Map.of(
+                    "username", "HIKARU",
+                    "platform", "chess.com",
+                    "start_month", "2026-06",
+                    "end_month", "2026-06")));
+    assertThat(cached.get("player").asText()).isEqualTo("hikaru");
+    assertThat(cached.get("status").asText()).isEqualTo("COMPLETED");
+    assertThat(chessClient.getFetchGamesCalls()).isEqualTo(1);
+
+    // With skip_cache, the month is refetched and rows rewritten
+    JsonNode refetched =
+        parse(
+            indexTool.execute(
+                Map.of(
+                    "username", "hikaru",
+                    "platform", "chess.com",
+                    "start_month", "2026-06",
+                    "end_month", "2026-06",
+                    "skip_cache", true)));
+    assertThat(refetched.get("status").asText()).isEqualTo("COMPLETED");
+    assertThat(refetched.get("gamesIndexed").asInt()).isEqualTo(2);
+    assertThat(chessClient.getFetchGamesCalls()).isEqualTo(2);
+  }
+
+  @Test
   public void multiMonthIndexIsEnqueuedAsPending() {
     JsonNode result =
         parse(
@@ -321,6 +354,7 @@ public class IndexerToolsTest {
   private static final class StubChessClient extends ChessClient {
     private final Map<YearMonth, List<PlayedGame>> gamesByMonth = new HashMap<>();
     private final Map<String, String> titles = new HashMap<>();
+    private int fetchGamesCalls = 0;
 
     StubChessClient() {
       super(null, new ObjectMapper());
@@ -334,8 +368,13 @@ public class IndexerToolsTest {
       titles.put(username.toLowerCase(), title);
     }
 
+    int getFetchGamesCalls() {
+      return fetchGamesCalls;
+    }
+
     @Override
     public Optional<GamesResponse> fetchGames(String player, YearMonth yearMonth) {
+      fetchGamesCalls++;
       List<PlayedGame> games = gamesByMonth.get(yearMonth);
       return games == null
           ? Optional.of(new GamesResponse(List.of()))

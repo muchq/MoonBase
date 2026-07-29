@@ -6,16 +6,21 @@ import com.muchq.games.chess_com_client.ChessClient;
 import com.muchq.games.chess_com_client.ChessComApiException;
 import com.muchq.games.chess_com_client.Player;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 
 /**
  * Batch player lookup: one call resolves profiles (including title) for up to {@link
- * #MAX_USERNAMES} usernames, instead of one MCP round trip per player. Lookups run sequentially so
- * a single call cannot fan out an unbounded number of concurrent chess.com requests.
+ * #MAX_USERNAMES} usernames, instead of one MCP round trip per player. Lookups run concurrently on
+ * a small shared pool, so fan-out against chess.com is bounded by the pool size rather than
+ * unbounded per call.
  */
 public class ChessComPlayersTool implements McpTool {
 
@@ -23,10 +28,13 @@ public class ChessComPlayersTool implements McpTool {
 
   private final ChessClient chessClient;
   private final ObjectMapper mapper;
+  private final ExecutorService lookupExecutor;
 
-  public ChessComPlayersTool(ChessClient chessClient, ObjectMapper mapper) {
+  public ChessComPlayersTool(
+      ChessClient chessClient, ObjectMapper mapper, ExecutorService lookupExecutor) {
     this.chessClient = chessClient;
     this.mapper = mapper;
+    this.lookupExecutor = lookupExecutor;
   }
 
   @Override
@@ -81,23 +89,36 @@ public class ChessComPlayersTool implements McpTool {
           "too many usernames: " + usernames.size() + " (max " + MAX_USERNAMES + " per call)");
     }
 
+    List<String> ordered = new ArrayList<>(usernames);
+    List<Future<Lookup>> futures = new ArrayList<>(ordered.size());
+    for (String username : ordered) {
+      futures.add(lookupExecutor.submit(() -> lookup(username)));
+    }
+
     ObjectNode result = mapper.createObjectNode();
     ObjectNode players = result.putObject("players");
     var notFound = result.putArray("not_found");
     ObjectNode errors = mapper.createObjectNode();
 
-    for (String username : usernames) {
+    for (int i = 0; i < futures.size(); i++) {
+      String username = ordered.get(i);
+      Lookup lookup;
       try {
-        Optional<Player> player = chessClient.fetchPlayer(username);
-        if (player.isPresent()) {
-          players.set(username, mapper.valueToTree(player.get()));
-        } else {
-          notFound.add(username);
-        }
-      } catch (ChessComApiException e) {
-        // Keep the partial batch usable: record the failure per username instead of discarding
-        // everything already fetched.
-        errors.put(username, "HTTP " + e.statusCode());
+        lookup = futures.get(i).get();
+      } catch (ExecutionException e) {
+        errors.put(username, String.valueOf(e.getCause()));
+        continue;
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        errors.put(username, "interrupted");
+        break;
+      }
+      if (lookup.error() != null) {
+        errors.put(username, lookup.error());
+      } else if (lookup.player() == null) {
+        notFound.add(username);
+      } else {
+        players.set(username, mapper.valueToTree(lookup.player()));
       }
     }
 
@@ -111,4 +132,19 @@ public class ChessComPlayersTool implements McpTool {
       throw new RuntimeException(e);
     }
   }
+
+  /**
+   * Resolves one username. API failures are captured per username so a single 429 keeps the partial
+   * batch usable instead of discarding everything already fetched.
+   */
+  private Lookup lookup(String username) {
+    try {
+      Optional<Player> player = chessClient.fetchPlayer(username);
+      return new Lookup(player.orElse(null), null);
+    } catch (ChessComApiException e) {
+      return new Lookup(null, "HTTP " + e.statusCode());
+    }
+  }
+
+  private record Lookup(Player player, String error) {}
 }

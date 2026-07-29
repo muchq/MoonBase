@@ -64,6 +64,11 @@ public class McpModule {
   // external database via INDEXER_DB_URL for durable indexes.
   private static final String DEFAULT_JDBC_URL = "jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1";
 
+  // Tool payloads are serialized with this mapper rather than an injected bean: Micronaut's own
+  // ObjectMapper (used for the HTTP layer) carries different inclusion defaults, and which bean
+  // wins injection must not decide the shape of tool responses. Tests use JsonUtils.mapper() too.
+  private static final ObjectMapper TOOL_MAPPER = JsonUtils.mapper();
+
   static String indexerJdbcUrl() {
     String env = System.getenv("INDEXER_DB_URL");
     return env != null && !env.isBlank() ? env.strip() : DEFAULT_JDBC_URL;
@@ -80,13 +85,8 @@ public class McpModule {
   }
 
   @Context
-  public ChessClient chessClient(HttpClient httpClient, ObjectMapper objectMapper) {
-    return new ChessClient(httpClient, objectMapper);
-  }
-
-  @Context
-  public ObjectMapper objectMapper() {
-    return JsonUtils.mapper();
+  public ChessClient chessClient(HttpClient httpClient) {
+    return new ChessClient(httpClient, TOOL_MAPPER);
   }
 
   @Context
@@ -149,6 +149,7 @@ public class McpModule {
   }
 
   private static final AtomicInteger EXTRACT_THREAD_COUNTER = new AtomicInteger();
+  private static final AtomicInteger LOOKUP_THREAD_COUNTER = new AtomicInteger();
 
   @Context
   @Bean(preDestroy = "shutdown")
@@ -158,6 +159,22 @@ public class McpModule {
         r -> {
           Thread t = new Thread(r);
           t.setName("index-extract-" + EXTRACT_THREAD_COUNTER.incrementAndGet());
+          t.setDaemon(true);
+          return t;
+        };
+    return Executors.newFixedThreadPool(4, tf);
+  }
+
+  // Bounded pool for chess.com profile lookups from chess_com_players: batch calls run
+  // concurrently but total fan-out against chess.com is capped at the pool size.
+  @Context
+  @Bean(preDestroy = "shutdown")
+  @jakarta.inject.Named("chessComLookup")
+  public ExecutorService chessComLookupExecutor() {
+    ThreadFactory tf =
+        r -> {
+          Thread t = new Thread(r);
+          t.setName("chess-lookup-" + LOOKUP_THREAD_COUNTER.incrementAndGet());
           t.setDaemon(true);
           return t;
         };
@@ -202,19 +219,19 @@ public class McpModule {
   public List<McpTool> mcpTools(
       Clock clock,
       ChessClient chessClient,
-      ObjectMapper objectMapper,
-      IndexerFacade indexerFacade) {
+      IndexerFacade indexerFacade,
+      @jakarta.inject.Named("chessComLookup") ExecutorService lookupExecutor) {
     return List.of(
-        new ChessComGamesTool(chessClient, objectMapper),
-        new ChessComPlayerTool(chessClient, objectMapper),
-        new ChessComPlayersTool(chessClient, objectMapper),
-        new ChessComStatsTool(chessClient, objectMapper),
+        new ChessComGamesTool(chessClient, TOOL_MAPPER),
+        new ChessComPlayerTool(chessClient, TOOL_MAPPER),
+        new ChessComPlayersTool(chessClient, TOOL_MAPPER, lookupExecutor),
+        new ChessComStatsTool(chessClient, TOOL_MAPPER),
         new ServerTimeTool(clock),
-        new IndexGamesTool(indexerFacade, objectMapper),
-        new IndexStatusTool(indexerFacade, objectMapper),
-        new QueryGamesTool(indexerFacade, objectMapper),
-        new AggregateGamesTool(indexerFacade, objectMapper),
-        new AnalyzePositionTool(indexerFacade, objectMapper));
+        new IndexGamesTool(indexerFacade, TOOL_MAPPER),
+        new IndexStatusTool(indexerFacade, TOOL_MAPPER),
+        new QueryGamesTool(indexerFacade, TOOL_MAPPER),
+        new AggregateGamesTool(indexerFacade, TOOL_MAPPER),
+        new AnalyzePositionTool(indexerFacade, TOOL_MAPPER));
   }
 
   @Context

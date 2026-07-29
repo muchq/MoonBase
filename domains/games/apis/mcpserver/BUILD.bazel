@@ -61,13 +61,38 @@ java_library(
     ],
 )
 
+java_library(
+    name = "module",
+    srcs = [
+        "src/main/java/com/muchq/games/mcpserver/McpModule.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":tools",
+        "//domains/games/apis/one_d4:db",
+        "//domains/games/apis/one_d4:engine",
+        "//domains/games/apis/one_d4:motifs",
+        "//domains/games/apis/one_d4:queue",
+        "//domains/games/apis/one_d4:worker",
+        "//domains/games/libs/chess_com_client",
+        "//domains/games/libs/chessql:compiler",
+        "//domains/platform/libs/http_client:core",
+        "//domains/platform/libs/http_client:jdk11",
+        "//domains/platform/libs/json",
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("io.micronaut:micronaut-context"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("jakarta.inject:jakarta-inject-api"),
+        artifact("org.jdbi:jdbi3-core"),
+    ],
+)
+
 java_binary(
     name = "mcpserver",
     srcs = [
         "src/main/java/com/muchq/games/mcpserver/App.java",
         "src/main/java/com/muchq/games/mcpserver/McpAuthenticationFilter.java",
         "src/main/java/com/muchq/games/mcpserver/McpController.java",
-        "src/main/java/com/muchq/games/mcpserver/McpModule.java",
         "src/main/java/com/muchq/games/mcpserver/McpRequestHandler.java",
     ],
     main_class = "com.muchq.games.mcpserver.App",
@@ -77,6 +102,7 @@ java_binary(
     ],
     visibility = ["//visibility:public"],
     runtime_deps = [
+        ":module",
         "//domains/platform/libs/logging",
         "//domains/platform/libs/yodel:micronaut",
         artifact("org.postgresql:postgresql"),
@@ -84,18 +110,6 @@ java_binary(
     deps = [
         ":dtos",
         ":tools",
-        "//domains/games/apis/one_d4:db",
-        "//domains/games/apis/one_d4:dto",
-        "//domains/games/apis/one_d4:engine",
-        "//domains/games/apis/one_d4:model",
-        "//domains/games/apis/one_d4:motifs",
-        "//domains/games/apis/one_d4:queue",
-        "//domains/games/apis/one_d4:worker",
-        "//domains/games/libs/chess_com_client",
-        "//domains/games/libs/chessql:compiler",
-        "//domains/platform/libs/http_client:core",
-        "//domains/platform/libs/http_client:jdk11",
-        "//domains/platform/libs/json",
         "//domains/platform/libs/logging",
         artifact("com.fasterxml.jackson.core:jackson-annotations"),
         artifact("com.fasterxml.jackson.core:jackson-databind"),
@@ -108,7 +122,6 @@ java_binary(
         artifact("io.micronaut:micronaut-runtime"),
         artifact("io.projectreactor:reactor-core"),
         artifact("jakarta.inject:jakarta-inject-api"),
-        artifact("org.jdbi:jdbi3-core"),
         artifact("org.reactivestreams:reactive-streams"),
         artifact("org.slf4j:slf4j-api"),
     ],
@@ -141,6 +154,26 @@ java_test_suite(
         "//domains/games/libs/chessql:compiler",
         "//domains/platform/libs/json",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_test_suite(
+    name = "module_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/mcpserver/McpModuleTest.java",
+    ],
+    runtime_deps = [
+        "//domains/platform/libs/logging",
+    ],
+    deps = [
+        ":dtos",
+        ":module",
+        ":tools",
+        artifact("io.micronaut:micronaut-context"),
+        artifact("io.micronaut:micronaut-inject"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],

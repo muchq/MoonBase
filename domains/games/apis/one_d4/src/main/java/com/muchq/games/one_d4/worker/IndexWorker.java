@@ -25,9 +25,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -89,26 +91,29 @@ public class IndexWorker {
       YearMonth end = YearMonth.parse(message.endMonth(), MONTH_FORMAT);
       int totalIndexed = 0;
 
-      // Player titles fetched once per distinct username per request (lowercased key). A missing
-      // or failed lookup is cached as null so one flaky profile doesn't get re-fetched per month.
+      // Player titles fetched once per distinct username per request (lowercased key). Confirmed
+      // lookups — including not-found/untitled — are cached; API errors are not, so they retry on
+      // a later month and mark the affected period incomplete for refetch.
       Map<String, String> titleCache = new HashMap<>();
 
       for (YearMonth month = start; !month.isAfter(end); month = month.plusMonths(1)) {
         String monthStr = month.format(MONTH_FORMAT);
-        Optional<IndexedPeriodStore.IndexedPeriod> cached =
-            periodStore.findCompletePeriod(
-                message.player(), message.platform(), monthStr, message.excludeBullet());
-        if (cached.isPresent()) {
-          int count = cached.get().gamesCount();
-          totalIndexed += count;
-          LOG.debug(
-              "Skipping fetch for player={} platform={} month={} (cached, games={})",
-              message.player(),
-              message.platform(),
-              monthStr,
-              count);
-          requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
-          continue;
+        if (!message.skipCache()) {
+          Optional<IndexedPeriodStore.IndexedPeriod> cached =
+              periodStore.findCompletePeriod(
+                  message.player(), message.platform(), monthStr, message.excludeBullet());
+          if (cached.isPresent()) {
+            int count = cached.get().gamesCount();
+            totalIndexed += count;
+            LOG.debug(
+                "Skipping fetch for player={} platform={} month={} (cached, games={})",
+                message.player(),
+                message.platform(),
+                monthStr,
+                count);
+            requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
+            continue;
+          }
         }
 
         Optional<GamesResponse> response = chessClient.fetchGames(message.player(), month);
@@ -129,9 +134,10 @@ public class IndexWorker {
           games.add(game);
         }
 
-        // Resolve titles on the worker thread (sequential, deduped) before fanning extraction out
-        // to the pool, so profile lookups never run concurrently against chess.com.
-        Map<String, String> titles = resolveTitles(games, titleCache);
+        // Resolve titles (deduped, bounded by the extraction pool size) before extraction work is
+        // submitted, so the pool is otherwise idle and total chess.com concurrency stays capped.
+        TitleResolution titleResolution = resolveTitles(games, titleCache);
+        Map<String, String> titles = titleResolution.titles();
 
         // Submit each surviving game to the extraction pool, preserving source order.
         List<Future<ExtractResult>> futures = new ArrayList<>();
@@ -181,7 +187,15 @@ public class IndexWorker {
         Instant fetchedAt = Instant.now();
         Instant firstDayNextMonth =
             month.plusMonths(1).atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant();
-        boolean isComplete = !fetchedAt.isBefore(firstDayNextMonth);
+        // A month whose title lookups saw API errors is stored incomplete so the next request for
+        // this period refetches it (upserting titles via ON CONFLICT) instead of freezing nulls.
+        boolean isComplete = !fetchedAt.isBefore(firstDayNextMonth) && !titleResolution.degraded();
+        if (titleResolution.degraded()) {
+          LOG.warn(
+              "Title enrichment degraded for player={} month={}; period stored incomplete",
+              message.player(),
+              monthStr);
+        }
         int finalMonthCount = monthCount;
         Failsafe.with(UPSERT_RETRY)
             .run(
@@ -235,40 +249,73 @@ public class IndexWorker {
 
   /**
    * Ensures every distinct username in {@code games} has a title entry in {@code cache}, fetching
-   * missing profiles sequentially. Returns an immutable snapshot safe to read from extraction
-   * threads.
+   * missing profiles concurrently on the extraction pool (which bounds fan-out against chess.com).
+   * Successful lookups — including confirmed not-found/untitled players — are cached; API errors
+   * are NOT cached (so a later month or request retries them) and mark the resolution degraded.
+   * Returns an immutable snapshot safe to read from extraction threads.
    */
-  private Map<String, String> resolveTitles(List<PlayedGame> games, Map<String, String> cache) {
+  private TitleResolution resolveTitles(List<PlayedGame> games, Map<String, String> cache) {
+    Set<String> missing = new LinkedHashSet<>();
     for (PlayedGame game : games) {
-      cacheTitle(game.whiteResult(), cache);
-      cacheTitle(game.blackResult(), cache);
+      collectMissingUsername(game.whiteResult(), cache, missing);
+      collectMissingUsername(game.blackResult(), cache, missing);
     }
-    return Collections.unmodifiableMap(new HashMap<>(cache));
+
+    boolean degraded = false;
+    List<Future<TitleFetch>> futures = new ArrayList<>();
+    for (String username : missing) {
+      futures.add(extractionExecutor.submit(() -> fetchTitle(username)));
+    }
+    for (Future<TitleFetch> future : futures) {
+      try {
+        TitleFetch fetch = future.get();
+        if (fetch.failed()) {
+          degraded = true;
+        } else {
+          cache.put(fetch.username(), fetch.title());
+        }
+      } catch (ExecutionException e) {
+        // fetchTitle catches its own errors; this is a safety net.
+        LOG.warn("Title lookup task failed", e.getCause());
+        degraded = true;
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        LOG.warn("Interrupted while resolving player titles", e);
+        degraded = true;
+        break;
+      }
+    }
+    return new TitleResolution(Collections.unmodifiableMap(new HashMap<>(cache)), degraded);
   }
 
-  private void cacheTitle(PlayerResult playerResult, Map<String, String> cache) {
+  private static void collectMissingUsername(
+      PlayerResult playerResult, Map<String, String> cache, Set<String> missing) {
     if (playerResult == null || playerResult.username() == null) {
       return;
     }
     String key = playerResult.username().toLowerCase();
-    if (cache.containsKey(key)) {
-      return;
+    if (!cache.containsKey(key)) {
+      missing.add(key);
     }
-    cache.put(key, fetchTitle(key));
   }
 
   /**
    * Fetches a player's title from their profile. Title enrichment must never fail indexing, so any
-   * lookup error (429, outage, etc.) logs and yields null for this request.
+   * lookup error (429, outage, etc.) logs and reports a failed fetch instead of throwing.
    */
-  private String fetchTitle(String username) {
+  private TitleFetch fetchTitle(String username) {
     try {
-      return chessClient.fetchPlayer(username).map(Player::title).orElse(null);
+      return new TitleFetch(
+          username, chessClient.fetchPlayer(username).map(Player::title).orElse(null), false);
     } catch (RuntimeException e) {
       LOG.warn("Failed to fetch profile for {} while enriching titles: {}", username, e.toString());
-      return null;
+      return new TitleFetch(username, null, true);
     }
   }
+
+  private record TitleFetch(String username, String title, boolean failed) {}
+
+  private record TitleResolution(Map<String, String> titles, boolean degraded) {}
 
   private static String titleFor(Map<String, String> titles, PlayerResult playerResult) {
     if (playerResult == null || playerResult.username() == null) {

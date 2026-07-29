@@ -54,6 +54,15 @@ public class IndexGamesTool implements McpTool {
     properties.put(
         "exclude_bullet",
         Map.of("type", "boolean", "description", "Skip bullet games. Default false"));
+    properties.put(
+        "skip_cache",
+        Map.of(
+            "type",
+            "boolean",
+            "description",
+            "Refetch every month in the range even if it was already indexed, refreshing stored"
+                + " rows (e.g. to backfill titles and opening names on games indexed before those"
+                + " columns existed). Default false"));
     return Map.of(
         "type",
         "object",
@@ -70,9 +79,11 @@ public class IndexGamesTool implements McpTool {
     String startMonth = str(arguments, "start_month");
     String endMonth = str(arguments, "end_month");
     boolean excludeBullet = Boolean.parseBoolean(String.valueOf(arguments.get("exclude_bullet")));
+    boolean skipCache = Boolean.parseBoolean(String.valueOf(arguments.get("skip_cache")));
 
     try {
-      IndexResponse result = facade.index(username, platform, startMonth, endMonth, excludeBullet);
+      IndexResponse result =
+          facade.index(username, platform, startMonth, endMonth, excludeBullet, skipCache);
       return mapper.writeValueAsString(result);
     } catch (IllegalArgumentException e) {
       return ToolResponses.error(mapper, e.getMessage());

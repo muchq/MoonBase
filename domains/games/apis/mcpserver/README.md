@@ -243,7 +243,8 @@ curl -X POST http://localhost:8080/mcp \
 - `chess_com_player` — a player's profile, including `title` (GM/IM/...), `location`, and
   `fideRating` when present.
 - `chess_com_players` — batch profile lookup: `usernames` (array, max 50). Returns a map keyed
-  by lowercased username plus `not_found` and per-username `errors`.
+  by lowercased username plus `not_found` and per-username `errors`. Lookups run concurrently on
+  a small pool, so fan-out against chess.com stays bounded.
 - `chess_com_stats` — a player's rating stats.
 - `server_time` — current UTC time.
 
@@ -254,9 +255,10 @@ The indexer engine, database, and worker are embedded in this process (Option A 
 `INDEXER_DB_URL` to point at a durable database.
 
 - `index_chess_games` — index a player's games. Required: `username`, `platform`
-  (`chess.com`), `start_month`/`end_month` (YYYY-MM). Optional: `exclude_bullet`.
-  Single-month requests complete synchronously; longer ranges return `PENDING` and run in the
-  background.
+  (`chess.com`), `start_month`/`end_month` (YYYY-MM). Optional: `exclude_bullet`, and
+  `skip_cache` to refetch already-indexed months (refreshing stored rows, e.g. backfilling
+  titles/opening names on rows indexed before those columns existed). Single-month requests
+  complete synchronously; longer ranges return `PENDING` and run in the background.
 - `index_status` — poll an indexing request by `request_id`.
 - `query_chess_games` — ChessQL search over indexed games: `query`, optional `limit`
   (default 10, max 50) and `include_pgn` (default false).
