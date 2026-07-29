@@ -40,6 +40,11 @@ public class GameReplayerParityTest {
   private static final String KNIGHT_DISAMBIGUATION =
       "1. Nf3 Nc6 2. e3 e5 3. d4 exd4 4. exd4 d5 5. Bd3 Bd6 6. Nbd2 Nce7";
 
+  // Exercises the black-side halves in one line: black en passant capture (dxc3), black
+  // capture-underpromotion (bxa1=N), and the a1-corner castling-rights row when the rook falls.
+  private static final String BLACK_EP_AND_UNDERPROMOTION =
+      "1. Nf3 d5 2. e4 d4 3. c4 dxc3 4. d4 cxb2 5. Bd2 bxa1=N";
+
   @Test
   public void kingsGambitGameMatchesChariotAtEveryPly() {
     assertParity(KINGS_GAMBIT);
@@ -63,6 +68,11 @@ public class GameReplayerParityTest {
   @Test
   public void knightDisambiguationGameMatchesChariotAtEveryPly() {
     assertParity(KNIGHT_DISAMBIGUATION);
+  }
+
+  @Test
+  public void blackEnPassantAndUnderpromotionGameMatchesChariotAtEveryPly() {
+    assertParity(BLACK_EP_AND_UNDERPROMOTION);
   }
 
   private static void assertParity(String moveText) {

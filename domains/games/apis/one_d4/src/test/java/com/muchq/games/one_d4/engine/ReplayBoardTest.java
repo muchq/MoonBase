@@ -87,6 +87,83 @@ public class ReplayBoardTest {
   }
 
   @Test
+  public void blackPinnedPieceResolvesImplicitDisambiguation() {
+    // Mirror of the white pin test: the e3 knight is pinned to the e1 king by the e8 rook.
+    ReplayBoard board = ReplayBoard.fromFen("K3R3/8/8/8/1n6/4n3/8/4k3 b - - 0 1");
+    board.play("Nd5");
+    assertThat(placement(board)).isEqualTo("K3R3/8/8/3n4/8/4n3/8/4k3");
+  }
+
+  @Test
+  public void blackRankDisambiguation() {
+    ReplayBoard rooks = ReplayBoard.fromFen("K7/8/8/4r3/8/8/8/4r2k b - - 0 1");
+    rooks.play("R1e2");
+    assertThat(placement(rooks)).isEqualTo("K7/8/8/4r3/8/8/4r3/7k");
+  }
+
+  @Test
+  public void ambiguousMoveWithoutHintThrows() {
+    // Both knights can legally reach d5 and no hint is given — malformed SAN, not first-wins.
+    ReplayBoard board = ReplayBoard.fromFen("k7/8/8/8/1N3N2/8/8/K7 w - - 0 1");
+    assertThatThrownBy(() -> board.play("Nd5"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Ambiguous");
+  }
+
+  @Test
+  public void enPassantSquareClearedByPieceMoveAndCastling() {
+    // A piece move after a double push must clear the ep field; chariot rarely prints ep, so
+    // the parity test's lenient comparison would not catch a stale square here.
+    ReplayBoard board = afterMoves("e4", "Nf6");
+    assertThat(board.toFEN().split(" ")[3]).isEqualTo("-");
+
+    ReplayBoard castled = afterMoves("e4", "e5", "Nf3", "Nf6", "Bc4", "d5", "O-O");
+    assertThat(castled.toFEN().split(" ")[3]).isEqualTo("-");
+  }
+
+  @Test
+  public void whiteQueensideRookMoveClearsCastlingRight() {
+    ReplayBoard board = afterMoves("a4", "h5", "Ra3", "Rh6");
+    assertThat(board.toFEN().split(" ")[2]).isEqualTo("Kq");
+  }
+
+  @Test
+  public void pawnCaptureToEmptySquareWithoutEnPassantThrows() {
+    // Not en passant: d5 is empty and no pawn just double-pushed past — must throw, not
+    // phantom-capture.
+    ReplayBoard board = afterMoves("e4", "Nf6");
+    assertThatThrownBy(() -> board.play("exd5")).isInstanceOf(IllegalArgumentException.class);
+
+    // The en-passant removal must only ever remove an enemy pawn, never another piece.
+    ReplayBoard knightOnEpSquare = ReplayBoard.fromFen("k7/8/8/3nP3/8/8/8/K7 w - - 0 1");
+    assertThatThrownBy(() -> knightOnEpSquare.play("exd6"))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThat(placement(knightOnEpSquare)).isEqualTo("k7/8/8/3nP3/8/8/8/K7");
+  }
+
+  @Test
+  public void doublePushFromNonHomeRankThrows() {
+    ReplayBoard board = ReplayBoard.fromFen("k7/8/8/8/8/4P3/8/K7 w - - 0 1");
+    assertThatThrownBy(() -> board.play("e5")).isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  public void blockedDoublePushThrows() {
+    ReplayBoard board = ReplayBoard.fromFen("k7/8/8/8/8/4N3/4P3/K7 w - - 0 1");
+    assertThatThrownBy(() -> board.play("e4"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Blocked");
+  }
+
+  @Test
+  public void promotionWithoutEqualsSignAccepted() {
+    // chess.com SAN normally writes e8=Q, but the bare e8Q form appears in the wild.
+    ReplayBoard board = ReplayBoard.fromFen("k7/4P3/8/8/8/8/8/K7 w - - 0 1");
+    board.play("e8Q");
+    assertThat(placement(board).split("/")[0]).isEqualTo("k3Q3");
+  }
+
+  @Test
   public void rookMovesAndCapturesUpdateCastlingRights() {
     ReplayBoard board = afterMoves("h4", "a5", "Rh3", "Ra6");
     assertThat(board.toFEN().split(" ")[2]).isEqualTo("Qk");

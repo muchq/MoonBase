@@ -18,7 +18,20 @@ public class GameReplayer {
     boolean whiteToMove = true;
 
     for (String move : moves) {
-      board.play(move);
+      try {
+        board.play(move);
+      } catch (RuntimeException e) {
+        // The board's own message has no game context; production logs need the ply and position
+        // to debug a bad PGN.
+        throw new IllegalArgumentException(
+            "Failed at move "
+                + moveNumber
+                + (whiteToMove ? ". " : "... ")
+                + move
+                + " from "
+                + positions.get(positions.size() - 1).fen(),
+            e);
+      }
       whiteToMove = !whiteToMove;
       positions.add(new PositionContext(moveNumber, board.toFEN(), whiteToMove, move));
       if (whiteToMove) {

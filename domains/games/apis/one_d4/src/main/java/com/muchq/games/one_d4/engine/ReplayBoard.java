@@ -9,18 +9,21 @@ import java.util.regex.Pattern;
 /**
  * A minimal mutable board that applies SAN moves and emits FEN, sharing movement rules with the
  * motif detectors via {@link BoardUtils}. It exists purely for replay speed: chariot's immutable
- * {@code Board.play(san)} costs ~0.8ms per move — 99% of feature-extraction CPU — while this
- * implementation applies a move in microseconds. Chariot remains the correctness oracle in tests
- * (see GameReplayerParityTest).
+ * {@code Board.play(san)} costs ~0.8ms per move — 99% of feature-extraction CPU as measured at
+ * introduction — while this implementation applies a move in microseconds. Chariot remains the
+ * correctness oracle in tests (see GameReplayerParityTest).
  *
- * <p>Assumes legal SAN input (chess.com PGNs). Disambiguation follows SAN semantics: when several
- * pseudo-legal candidates remain after any file/rank hint, the one whose move does not leave its
- * own king in check is chosen.
+ * <p>Assumes legal SAN input (chess.com PGNs), with guards that throw rather than corrupt the
+ * position when the input is malformed. Disambiguation follows SAN semantics: when several
+ * pseudo-legal candidates remain after any file/rank hint, the single one whose move does not leave
+ * its own king in check is chosen.
  */
 final class ReplayBoard {
 
+  // Core SAN plus any trailing check/mate/annotation suffixes and the optional "e.p." marker.
   private static final Pattern SAN =
-      Pattern.compile("^([KQRBN])?([a-h])?([1-8])?(x)?([a-h][1-8])(?:=?([QRBN]))?$");
+      Pattern.compile(
+          "^([KQRBN])?([a-h])?([1-8])?(x)?([a-h][1-8])(?:=?([QRBN]))?(?:\\s*e\\.p\\.|[+#!?])*$");
 
   // board[0][0] = a8, board[7][7] = h1; piece values per BoardUtils (P=1..K=6, negative = black)
   private final int[][] board;
@@ -68,18 +71,17 @@ final class ReplayBoard {
 
   /** Applies one SAN move for the side to move. */
   void play(String san) {
-    String move = san.replace("e.p.", "").replaceAll("[+#!?]", "");
     boolean white = whiteToMove;
     boolean resetClock;
 
-    if (move.startsWith("O-O-O")) {
+    if (san.startsWith("O-O-O")) {
       castle(white, false);
       resetClock = false;
-    } else if (move.startsWith("O-O")) {
+    } else if (san.startsWith("O-O")) {
       castle(white, true);
       resetClock = false;
     } else {
-      Matcher m = SAN.matcher(move);
+      Matcher m = SAN.matcher(san);
       if (!m.matches()) {
         throw new IllegalArgumentException("Unparseable SAN: " + san);
       }
@@ -97,15 +99,14 @@ final class ReplayBoard {
         playPawnMove(white, fileHint, capture, toRow, toCol, promotion);
         resetClock = true;
       } else {
-        boolean captured = board[toRow][toCol] != 0;
-        playPieceMove(
-            white,
-            pieceType(pieceLetter.charAt(0)),
-            rankHint == null ? -1 : 8 - (rankHint.charAt(0) - '0'),
-            fileHint == null ? -1 : fileHint.charAt(0) - 'a',
-            toRow,
-            toCol);
-        resetClock = captured;
+        resetClock =
+            playPieceMove(
+                white,
+                BoardUtils.pieceValue(pieceLetter.charAt(0)),
+                rankHint == null ? -1 : 8 - (rankHint.charAt(0) - '0'),
+                fileHint == null ? -1 : fileHint.charAt(0) - 'a',
+                toRow,
+                toCol);
       }
     }
 
@@ -150,7 +151,7 @@ final class ReplayBoard {
     }
     sb.append(' ');
     if (epRow >= 0) {
-      sb.append((char) ('a' + epCol)).append((char) ('0' + (8 - epRow)));
+      sb.append((char) ('a' + epCol)).append((char) ('8' - epRow));
     } else {
       sb.append('-');
     }
@@ -178,8 +179,10 @@ final class ReplayBoard {
   private void playPawnMove(
       boolean white, String fileHint, boolean capture, int toRow, int toCol, String promotion) {
     int pawn = white ? 1 : -1;
-    // White pawns move toward row 0 (rank 8), so their origin is one row BELOW in array terms
-    int dir = white ? 1 : -1;
+    // White pawns move toward row 0 (rank 8), so the origin square is one row BELOW the
+    // destination in array terms. Note: opposite sign of BoardUtils.pieceAttacks' pawnDir, which
+    // points in the forward direction.
+    int originRowOffset = white ? 1 : -1;
     int fromRow;
     int fromCol;
     boolean doublePush = false;
@@ -187,45 +190,57 @@ final class ReplayBoard {
     if (capture) {
       if (fileHint == null) {
         throw new IllegalArgumentException(
-            "Pawn capture without file: " + squareName(toRow, toCol));
+            "Pawn capture without file: " + BoardUtils.squareName(toRow, toCol));
       }
       fromCol = fileHint.charAt(0) - 'a';
-      fromRow = toRow + dir;
+      fromRow = toRow + originRowOffset;
       if (board[toRow][toCol] == 0) {
         // en passant: the captured pawn sits on the origin row, destination file
+        if (board[fromRow][toCol] != -pawn) {
+          throw new IllegalArgumentException(
+              "No piece to capture on " + BoardUtils.squareName(toRow, toCol));
+        }
         board[fromRow][toCol] = 0;
       } else {
-        updateRookRightsOnCapture(toRow, toCol);
+        clearRookRights(toRow, toCol);
       }
     } else {
       fromCol = toCol;
-      if (board[toRow + dir][toCol] == pawn) {
-        fromRow = toRow + dir;
+      if (board[toRow + originRowOffset][toCol] == pawn) {
+        fromRow = toRow + originRowOffset;
       } else {
-        fromRow = toRow + 2 * dir;
-        if (board[toRow + dir][toCol] != 0) {
-          throw new IllegalArgumentException("Blocked pawn push to " + squareName(toRow, toCol));
+        if (board[toRow + originRowOffset][toCol] != 0) {
+          throw new IllegalArgumentException(
+              "Blocked pawn push to " + BoardUtils.squareName(toRow, toCol));
+        }
+        fromRow = toRow + 2 * originRowOffset;
+        // A double push can only originate from the pawn's home rank
+        if (fromRow != (white ? 6 : 1)) {
+          throw new IllegalArgumentException(
+              "No pawn found for move to " + BoardUtils.squareName(toRow, toCol));
         }
         doublePush = true;
       }
     }
     if (board[fromRow][fromCol] != pawn) {
-      throw new IllegalArgumentException("No pawn found for move to " + squareName(toRow, toCol));
+      throw new IllegalArgumentException(
+          "No pawn found for move to " + BoardUtils.squareName(toRow, toCol));
     }
 
     board[toRow][toCol] =
-        promotion == null ? pawn : (white ? 1 : -1) * pieceType(promotion.charAt(0));
+        promotion == null ? pawn : pawn * BoardUtils.pieceValue(promotion.charAt(0));
     board[fromRow][fromCol] = 0;
 
     if (doublePush) {
-      epRow = toRow + dir;
+      epRow = toRow + originRowOffset;
       epCol = toCol;
     } else {
       clearEnPassant();
     }
   }
 
-  private void playPieceMove(
+  /** Returns true when the move captured a piece (the caller resets the halfmove clock). */
+  private boolean playPieceMove(
       boolean white, int pieceType, int fromRowHint, int fromColHint, int toRow, int toCol) {
     int piece = white ? pieceType : -pieceType;
     List<int[]> candidates = new ArrayList<>(2);
@@ -244,31 +259,37 @@ final class ReplayBoard {
     if (candidates.size() == 1) {
       from = candidates.get(0);
     } else {
-      // SAN omits disambiguation when only one candidate is legal (e.g. the other is pinned)
+      // SAN omits disambiguation when only one candidate is legal (e.g. the other is pinned);
+      // two legal candidates without a resolving hint is malformed input.
       for (int[] candidate : candidates) {
         if (isLegal(candidate[0], candidate[1], toRow, toCol, white)) {
+          if (from != null) {
+            throw new IllegalArgumentException(
+                "Ambiguous move to " + BoardUtils.squareName(toRow, toCol));
+          }
           from = candidate;
-          break;
         }
       }
     }
     if (from == null) {
       throw new IllegalArgumentException(
-          "No candidate found for move to " + squareName(toRow, toCol));
+          "No candidate found for move to " + BoardUtils.squareName(toRow, toCol));
     }
 
-    if (board[toRow][toCol] != 0) {
-      updateRookRightsOnCapture(toRow, toCol);
+    boolean captured = board[toRow][toCol] != 0;
+    if (captured) {
+      clearRookRights(toRow, toCol);
     }
     board[toRow][toCol] = piece;
     board[from[0]][from[1]] = 0;
 
-    if (pieceType == 6) {
+    if (pieceType == 6) { // a king move forfeits both castling rights
       clearCastlingRights(white);
-    } else if (pieceType == 4) {
-      updateRookRightsOnMove(white, from[0], from[1]);
+    } else if (pieceType == 4) { // a rook leaving its home square forfeits that wing's right
+      clearRookRights(from[0], from[1]);
     }
     clearEnPassant();
+    return captured;
   }
 
   /** True when moving (fromRow,fromCol) → (toRow,toCol) leaves the mover's king unattacked. */
@@ -278,20 +299,7 @@ final class ReplayBoard {
     board[toRow][toCol] = moved;
     board[fromRow][fromCol] = 0;
     try {
-      int[] king = BoardUtils.findKing(board, white);
-      if (king[0] == -1) {
-        return true;
-      }
-      for (int r = 0; r < 8; r++) {
-        for (int c = 0; c < 8; c++) {
-          int piece = board[r][c];
-          if (piece == 0 || (piece > 0) == white) continue;
-          if (BoardUtils.pieceAttacks(board, r, c, king[0], king[1])) {
-            return false;
-          }
-        }
-      }
-      return true;
+      return BoardUtils.findCheckingPiece(board, !white) == null;
     } finally {
       board[fromRow][fromCol] = moved;
       board[toRow][toCol] = captured;
@@ -313,30 +321,16 @@ final class ReplayBoard {
     }
   }
 
-  private void updateRookRightsOnMove(boolean white, int fromRow, int fromCol) {
-    if (white && fromRow == 7 && fromCol == 0) whiteQueenside = false;
-    if (white && fromRow == 7 && fromCol == 7) whiteKingside = false;
-    if (!white && fromRow == 0 && fromCol == 0) blackQueenside = false;
-    if (!white && fromRow == 0 && fromCol == 7) blackKingside = false;
-  }
-
-  /** A capture on a rook's home square removes that side's castling right. */
-  private void updateRookRightsOnCapture(int toRow, int toCol) {
-    if (toRow == 7 && toCol == 0) whiteQueenside = false;
-    if (toRow == 7 && toCol == 7) whiteKingside = false;
-    if (toRow == 0 && toCol == 0) blackQueenside = false;
-    if (toRow == 0 && toCol == 7) blackKingside = false;
-  }
-
-  private static int pieceType(char letter) {
-    return switch (letter) {
-      case 'K' -> 6;
-      case 'Q' -> 5;
-      case 'R' -> 4;
-      case 'B' -> 3;
-      case 'N' -> 2;
-      default -> 1;
-    };
+  /**
+   * Clears the castling right whose rook home square is (row, col); no-op for other squares. Safe
+   * for any move touching a corner: if the original rook already left it, that right is already
+   * gone.
+   */
+  private void clearRookRights(int row, int col) {
+    if (row == 7 && col == 0) whiteQueenside = false;
+    if (row == 7 && col == 7) whiteKingside = false;
+    if (row == 0 && col == 0) blackQueenside = false;
+    if (row == 0 && col == 7) blackKingside = false;
   }
 
   private static char pieceChar(int piece) {
@@ -351,9 +345,5 @@ final class ReplayBoard {
           default -> '?';
         };
     return piece > 0 ? Character.toUpperCase(c) : c;
-  }
-
-  private static String squareName(int row, int col) {
-    return "" + (char) ('a' + col) + (char) ('0' + (8 - row));
   }
 }

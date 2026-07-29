@@ -83,7 +83,8 @@ com.muchq.indexer/
 
   engine/
     PgnParser.java                  Extracts headers + movetext from PGN strings
-    GameReplayer.java               Uses chariot to replay moves → List<PositionContext>
+    GameReplayer.java               Replays SAN moves on ReplayBoard → List<PositionContext>
+    ReplayBoard.java                Internal mutable board: SAN application + FEN emission
     FeatureExtractor.java           Orchestrates replay + all motif detectors
 
   engine/model/

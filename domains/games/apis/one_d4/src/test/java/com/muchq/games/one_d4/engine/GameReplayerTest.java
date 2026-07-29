@@ -1,6 +1,7 @@
 package com.muchq.games.one_d4.engine;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.muchq.games.one_d4.engine.model.PositionContext;
 import java.util.List;
@@ -57,7 +58,7 @@ public class GameReplayerTest {
     // After 3. Bb5 (Ruy Lopez) - move 3, black to move
     assertThat(positions.get(5).moveNumber()).isEqualTo(3);
     assertThat(positions.get(5).whiteToMove()).isFalse();
-    assertThat(positions.get(5).fen()).contains("B"); // bishop on b5
+    assertThat(positions.get(5).fen()).contains("1B2p3"); // rank 5: bishop on b5, pawn on e5
   }
 
   @Test
@@ -97,7 +98,18 @@ public class GameReplayerTest {
         replayer.replay("1. e4 d5 2. e5 d4 3. e6 d3 4. exf7+ Kd7 5. fxg8=Q");
 
     PositionContext afterPromotion = positions.get(positions.size() - 1);
-    assertThat(afterPromotion.fen()).contains("Q"); // promoted queen
+    // Rank 8 after fxg8=Q: original knight replaced by the promoted white queen, king on d7
+    assertThat(afterPromotion.fen()).contains("rnbq1bQr");
+  }
+
+  @Test
+  public void testReplayFailureIncludesMoveContext() {
+    // The wrapped exception must carry the ply, the SAN, and the position it failed from —
+    // that message is all production logs get when a PGN fails to replay.
+    assertThatThrownBy(() -> replayer.replay("1. e4 e4"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("1... e4")
+        .hasMessageContaining("rnbqkbnr/pppppppp/8/8/4P3");
   }
 
   @Test
