@@ -42,7 +42,10 @@ public class ChessComPlayerToolTest {
           false,
           false,
           "bronze",
-          List.of());
+          List.of(),
+          "GM",
+          "Somewhere",
+          2650);
   private final ChessClient stubClient = new StubChessClient(Optional.of(emptyPlayer));
   private final ChessComPlayerTool tool = new ChessComPlayerTool(stubClient, JsonUtils.mapper());
 
@@ -74,6 +77,7 @@ public class ChessComPlayerToolTest {
     String result = tool.execute(arguments);
     assertThat(result).isNotNull();
     assertThat(result).contains("testuser");
+    assertThat(result).contains("\"title\":\"GM\"");
   }
 
   @Test
@@ -90,6 +94,6 @@ public class ChessComPlayerToolTest {
 
     Map<String, Object> arguments = Map.of("username", "nonexistent");
     String result = notFoundTool.execute(arguments);
-    assertThat(result).isEqualTo("player not found");
+    assertThat(result).isEqualTo("{\"error\":\"player not found\"}");
   }
 }

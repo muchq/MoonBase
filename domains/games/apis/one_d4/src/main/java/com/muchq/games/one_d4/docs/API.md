@@ -129,7 +129,6 @@ Search indexed games using ChessQL.
 - `0-1` — Black wins
 - `1/2-1/2` — Draw (stalemate, repetition, agreement, etc.)
 - `unknown` — Result could not be determined
-```
 
 ### Error Responses
 

@@ -73,6 +73,6 @@ public class ChessComStatsToolTest {
 
     Map<String, Object> arguments = Map.of("username", "nonexistent");
     String result = notFoundTool.execute(arguments);
-    assertThat(result).isEqualTo("player not found");
+    assertThat(result).isEqualTo("{\"error\":\"player not found\"}");
   }
 }

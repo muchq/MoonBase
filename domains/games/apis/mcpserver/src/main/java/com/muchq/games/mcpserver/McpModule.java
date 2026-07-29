@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.muchq.games.chess_com_client.ChessClient;
 import com.muchq.games.mcpserver.tools.ChessComGamesTool;
 import com.muchq.games.mcpserver.tools.ChessComPlayerTool;
+import com.muchq.games.mcpserver.tools.ChessComPlayersTool;
 import com.muchq.games.mcpserver.tools.ChessComStatsTool;
 import com.muchq.games.mcpserver.tools.McpTool;
 import com.muchq.games.mcpserver.tools.ServerTimeTool;
@@ -44,6 +45,7 @@ public class McpModule {
     return List.of(
         new ChessComGamesTool(chessClient, objectMapper),
         new ChessComPlayerTool(chessClient, objectMapper),
+        new ChessComPlayersTool(chessClient, objectMapper),
         new ChessComStatsTool(chessClient, objectMapper),
         new ServerTimeTool(clock));
   }

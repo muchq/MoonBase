@@ -5,7 +5,6 @@ import com.muchq.games.chess_com_client.ChessClient;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 public class ChessComPlayerTool implements McpTool {
 
@@ -41,10 +40,12 @@ public class ChessComPlayerTool implements McpTool {
   @Override
   public String execute(Map<String, Object> arguments) {
     String player = (String) arguments.get("username");
-    Objects.requireNonNull(player, "username cannot be be null");
+    if (player == null || player.isBlank()) {
+      return ToolResponses.error(mapper, "username is required");
+    }
     var playerMaybe = chessClient.fetchPlayer(player);
     if (playerMaybe.isEmpty()) {
-      return "player not found";
+      return ToolResponses.error(mapper, "player not found");
     }
 
     try {
