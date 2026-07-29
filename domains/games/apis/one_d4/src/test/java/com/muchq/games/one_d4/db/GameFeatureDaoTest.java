@@ -724,6 +724,77 @@ public class GameFeatureDaoTest {
     }
   }
 
+  @Test
+  public void perspectiveOutcomeUnknownAndOrGuard_onH2() {
+    dao.insertBatch(
+        List.of(
+            // aborted game — result "*" must classify as unknown, not loss
+            perspectiveGame(
+                "https://chess.com/game/u1",
+                "hikaru",
+                "opp1",
+                null,
+                null,
+                "*",
+                "Caro Kann Defense"),
+            // hikaru wins as white
+            perspectiveGame(
+                "https://chess.com/game/u2",
+                "hikaru",
+                "opp2",
+                null,
+                null,
+                "1-0",
+                "Sicilian Defense"),
+            // a 2900-elo game hikaru did not play: matches the white.elo OR-branch below but must
+            // be excluded by the participation guard
+            new GameFeature(
+                null,
+                requestId,
+                "https://chess.com/game/u3",
+                "CHESS_COM",
+                "someone",
+                "else",
+                2900,
+                2850,
+                null,
+                null,
+                "blitz",
+                "B10",
+                "English Opening Some Line",
+                "English Opening",
+                "1-0",
+                Instant.now(),
+                20,
+                Instant.now(),
+                "pgn")));
+
+    SqlCompiler compiler = new SqlCompiler();
+
+    List<GameFeature> unknown =
+        dao.query(compiler.compile(Parser.parse("outcome = \"unknown\""), "hikaru"), 10, 0);
+    assertThat(unknown.stream().map(GameFeature::gameUrl))
+        .containsExactly("https://chess.com/game/u1");
+
+    for (String outcome : List.of("win", "loss", "draw")) {
+      List<GameFeature> rows =
+          dao.query(
+              compiler.compile(Parser.parse("outcome = \"" + outcome + "\""), "hikaru"), 10, 0);
+      assertThat(rows.stream().map(GameFeature::gameUrl))
+          .as("outcome = %s must not include the aborted game", outcome)
+          .doesNotContain("https://chess.com/game/u1");
+    }
+
+    // OR with a non-perspective branch: u3 matches white.elo > 2800 but hikaru didn't play it
+    List<GameFeature> winsOrHighElo =
+        dao.query(
+            compiler.compile(Parser.parse("outcome = \"win\" OR white.elo > 2800"), "hikaru"),
+            10,
+            0);
+    assertThat(winsOrHighElo.stream().map(GameFeature::gameUrl))
+        .containsExactly("https://chess.com/game/u2");
+  }
+
   private GameFeature perspectiveGame(
       String url,
       String white,

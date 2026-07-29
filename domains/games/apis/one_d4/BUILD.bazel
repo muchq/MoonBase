@@ -378,6 +378,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/IndexControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryRequestValidatorTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/dto/DtoJsonCompatTest.java",
     ],
     deps = [
         ":api",
@@ -389,6 +390,7 @@ java_test_suite(
         ":service",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],

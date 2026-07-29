@@ -96,6 +96,12 @@ with `player: "hikaru"`. Perspective fields compile to `CASE` expressions over t
 `black_*` columns plus a participation guard; they are predicates only — `groupBy` on
 `/v1/aggregate` accepts physical columns, not perspective fields.
 
+Like the physical `*.title` / `*.elo` columns they resolve to, `me.title`, `opponent.title`,
+`me.elo`, and `opponent.elo` follow SQL NULL semantics: untitled players (and rows indexed before
+these columns existed) hold NULL, and NULL never matches a comparison — so
+`opponent.title != "GM"` returns only games against *titled* non-GM opponents, not games against
+untitled ones.
+
 ## Motifs
 
 The `motif()` function checks for tactical pattern presence. Queries compile to `EXISTS` subqueries

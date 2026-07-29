@@ -57,9 +57,28 @@ public class IndexerFacade {
       String endMonth,
       boolean excludeBullet,
       boolean skipCache) {
-    return indexRequestService.submitHybrid(
-        new IndexRequestService.Submission(
-            player, platform, startMonth, endMonth, excludeBullet, skipCache));
+    try {
+      return indexRequestService.submitHybrid(
+          new IndexRequestService.Submission(
+              player, platform, startMonth, endMonth, excludeBullet, skipCache));
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException(toToolFieldNames(e.getMessage()), e);
+    }
+  }
+
+  /**
+   * IndexRequestService reports validation errors using the REST field names (player, startMonth,
+   * endMonth), but the index_chess_games tool's arguments are username/start_month/end_month.
+   * Translate so MCP clients are pointed at arguments that actually exist on the tool.
+   */
+  private static String toToolFieldNames(String message) {
+    if (message == null) {
+      return null;
+    }
+    return message
+        .replaceAll("\\bplayer\\b", "username")
+        .replaceAll("\\bstartMonth\\b", "start_month")
+        .replaceAll("\\bendMonth\\b", "end_month");
   }
 
   public Optional<IndexResponse> status(UUID requestId) {

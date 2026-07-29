@@ -109,6 +109,109 @@ public class IndexRequestServiceTest {
   }
 
   @Test
+  public void submit_acceptsFullTwelveMonthRange() {
+    IndexResponse response =
+        service.submit(
+            new IndexRequestService.Submission(
+                "hikaru", "CHESS_COM", "2024-01", "2024-12", false, false));
+
+    assertThat(response.status()).isEqualTo("PENDING");
+    assertThat(queue.enqueued).hasSize(1);
+  }
+
+  @Test
+  public void submitHybrid_dedupeHitReturnsExistingWithoutRunningInline() {
+    IndexResponse first =
+        service.submit(
+            new IndexRequestService.Submission(
+                "hikaru", "CHESS_COM", "2024-01", "2024-01", false, false));
+
+    IndexResponse second =
+        service.submitHybrid(
+            new IndexRequestService.Submission(
+                "hikaru", "CHESS_COM", "2024-01", "2024-01", false, false));
+
+    assertThat(second.id()).isEqualTo(first.id());
+    assertThat(inlineProcessed).isEmpty();
+    assertThat(queue.enqueued).hasSize(1); // only the original submit's message
+  }
+
+  @Test
+  public void submitHybrid_inlineFailurePropagatesFailedStatusAndError() {
+    IndexRequestService failing =
+        new IndexRequestService(
+            requestStore,
+            queue,
+            message ->
+                requestStore.updateStatus(message.requestId(), "FAILED", "chess.com 429", 0));
+
+    IndexResponse response =
+        failing.submitHybrid(
+            new IndexRequestService.Submission(
+                "hikaru", "CHESS_COM", "2024-01", "2024-01", false, false));
+
+    assertThat(response.status()).isEqualTo("FAILED");
+    assertThat(response.errorMessage()).isEqualTo("chess.com 429");
+  }
+
+  @Test
+  public void submitHybrid_inlineProcessorThrowingPropagatesAndLeavesRowPending() {
+    // Pins current behavior: an exception escaping the inline processor reaches the caller and the
+    // row stays PENDING (dedupe will keep matching it — tracked as a known gap in the service).
+    IndexRequestService throwing =
+        new IndexRequestService(
+            requestStore,
+            queue,
+            message -> {
+              throw new RuntimeException("boom");
+            });
+
+    assertThatThrownBy(
+            () ->
+                throwing.submitHybrid(
+                    new IndexRequestService.Submission(
+                        "hikaru", "CHESS_COM", "2024-01", "2024-01", false, false)))
+        .isInstanceOf(RuntimeException.class)
+        .hasMessage("boom");
+
+    Optional<IndexingRequestStore.IndexingRequest> row =
+        requestStore.findExistingRequest("hikaru", "CHESS_COM", "2024-01", "2024-01", false);
+    assertThat(row).isPresent();
+    assertThat(row.get().status()).isEqualTo("PENDING");
+  }
+
+  @Test
+  public void validationRejectsNullFields() {
+    assertThatThrownBy(() -> service.submit(submission(null, "CHESS_COM")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("player is required");
+    assertThatThrownBy(() -> service.submit(submission("x", null)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("platform is required");
+    assertThatThrownBy(
+            () ->
+                service.submit(
+                    new IndexRequestService.Submission(
+                        "x", "CHESS_COM", null, "2024-01", false, false)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("startMonth is required");
+    assertThatThrownBy(
+            () ->
+                service.submit(
+                    new IndexRequestService.Submission(
+                        "x", "CHESS_COM", "2024-01", null, false, false)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("endMonth is required");
+    assertThatThrownBy(
+            () ->
+                service.submit(
+                    new IndexRequestService.Submission(
+                        "x", "CHESS_COM", "2024-01", "June", false, false)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("endMonth must be in YYYY-MM format");
+  }
+
+  @Test
   public void validationRejectsBadInput() {
     assertThatThrownBy(() -> service.submit(submission(" ", "CHESS_COM")))
         .isInstanceOf(IllegalArgumentException.class)

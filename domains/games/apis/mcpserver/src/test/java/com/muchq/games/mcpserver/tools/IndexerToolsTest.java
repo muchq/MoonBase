@@ -322,6 +322,8 @@ public class IndexerToolsTest {
 
   @Test
   public void invalidMonthReturnsJsonError() {
+    // Exact messages: validation errors must reference the tool's argument names
+    // (username/start_month/end_month), not the REST field names the shared service uses.
     JsonNode result =
         parse(
             indexTool.execute(
@@ -330,7 +332,33 @@ public class IndexerToolsTest {
                     "platform", "chess.com",
                     "start_month", "June",
                     "end_month", "2026-06")));
-    assertThat(result.get("error").asText()).contains("YYYY-MM");
+    assertThat(result.get("error").asText())
+        .isEqualTo("start_month must be in YYYY-MM format, got: June");
+  }
+
+  @Test
+  public void missingUsernameErrorUsesToolArgumentNames() {
+    JsonNode result =
+        parse(
+            indexTool.execute(
+                Map.of(
+                    "platform", "chess.com",
+                    "start_month", "2026-06",
+                    "end_month", "2026-06")));
+    assertThat(result.get("error").asText()).isEqualTo("username is required");
+  }
+
+  @Test
+  public void startAfterEndErrorUsesToolArgumentNames() {
+    JsonNode result =
+        parse(
+            indexTool.execute(
+                Map.of(
+                    "username", "hikaru",
+                    "platform", "chess.com",
+                    "start_month", "2026-06",
+                    "end_month", "2026-01")));
+    assertThat(result.get("error").asText()).isEqualTo("start_month must not be after end_month");
   }
 
   @Test

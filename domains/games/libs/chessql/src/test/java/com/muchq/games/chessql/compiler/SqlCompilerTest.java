@@ -603,6 +603,38 @@ public class SqlCompilerTest {
   }
 
   @Test
+  public void testPerspectiveWithTopLevelOrGuardsWholeExpression() {
+    // The participation guard must wrap the entire disjunction: a non-perspective OR-branch may
+    // not leak games the player didn't participate in.
+    CompiledQuery result =
+        compiler.compile(Parser.parse("outcome = \"win\" OR white.elo > 2800"), "hikaru");
+
+    assertThat(result.selectSql())
+        .isEqualTo(
+            BASE_PREFIX
+                + "("
+                + PARTICIPATION_GUARD
+                + " AND (LOWER(CASE WHEN result = '1/2-1/2' THEN 'draw'"
+                + " WHEN (result = '1-0' AND LOWER(white_username) = LOWER(?))"
+                + " OR (result = '0-1' AND LOWER(black_username) = LOWER(?)) THEN 'win'"
+                + " WHEN result IN ('1-0', '0-1') THEN 'loss' ELSE 'unknown' END) = LOWER(?)"
+                + " OR white_elo > ?))"
+                + BASE_SUFFIX);
+    assertThat(result.parameters())
+        .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", "win", 2800));
+  }
+
+  @Test
+  public void testPerspectiveOutcomeSupportsIn() {
+    CompiledQuery result =
+        compiler.compile(Parser.parse("outcome IN [\"win\", \"draw\"]"), "hikaru");
+    assertThat(result.selectSql()).contains("END) IN (LOWER(?), LOWER(?))");
+    // Guard's two, the outcome CASE's two, then the IN values
+    assertThat(result.parameters())
+        .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", "win", "draw"));
+  }
+
+  @Test
   public void testPerspectiveFieldWithoutPlayerRejected() {
     assertThatThrownBy(() -> compile("outcome = \"win\""))
         .isInstanceOf(IllegalArgumentException.class)
