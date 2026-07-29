@@ -123,6 +123,9 @@ java_library(
 java_library(
     name = "dto",
     srcs = [
+        "src/main/java/com/muchq/games/one_d4/api/dto/AggregateRequest.java",
+        "src/main/java/com/muchq/games/one_d4/api/dto/AggregateResponse.java",
+        "src/main/java/com/muchq/games/one_d4/api/dto/AggregateRow.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/GameFeature.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/GameFeatureRow.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/IndexRequest.java",
@@ -142,6 +145,8 @@ java_library(
     name = "api",
     srcs = [
         "src/main/java/com/muchq/games/one_d4/api/AdminController.java",
+        "src/main/java/com/muchq/games/one_d4/api/AggregateController.java",
+        "src/main/java/com/muchq/games/one_d4/api/AggregateRequestValidator.java",
         "src/main/java/com/muchq/games/one_d4/api/ErrorHandler.java",
         "src/main/java/com/muchq/games/one_d4/api/HealthController.java",
         "src/main/java/com/muchq/games/one_d4/api/IndexController.java",
@@ -351,6 +356,8 @@ java_test_suite(
     size = "small",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/api/AdminControllerTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/AggregateControllerTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/AggregateRequestValidatorTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexRequestValidatorTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryControllerTest.java",

@@ -146,6 +146,54 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     }
   }
 
+  /**
+   * Compiles a ChessQL filter into a grouped count query: {@code SELECT <cols>, COUNT(*) AS
+   * group_count ... GROUP BY <cols> ORDER BY group_count DESC}. Group columns are validated against
+   * the same column whitelist as comparisons, so this adds no injection surface; the caller appends
+   * LIMIT via a bind parameter.
+   */
+  public CompiledQuery compileAggregate(ParsedQuery pq, List<String> groupByFields) {
+    if (pq.orderBy() != null) {
+      throw new IllegalArgumentException(
+          "ORDER BY motif_count is not supported in aggregate queries");
+    }
+    List<String> columns = resolveGroupByColumns(groupByFields);
+
+    List<Object> params = new ArrayList<>();
+    String whereClause = compileExpr(pq.expr(), params);
+
+    String cols = String.join(", ", columns);
+    String tiebreak = columns.stream().map(c -> c + " ASC").collect(Collectors.joining(", "));
+    String sql =
+        "SELECT "
+            + cols
+            + ", COUNT(*) AS group_count FROM game_features g WHERE "
+            + whereClause
+            + " GROUP BY "
+            + cols
+            + " ORDER BY group_count DESC, "
+            + tiebreak;
+    return new CompiledQuery(sql, params);
+  }
+
+  /**
+   * Resolves group-by fields (dotted or underscore form) to their canonical column names,
+   * deduplicating while preserving order. Throws on unknown fields.
+   */
+  public List<String> resolveGroupByColumns(List<String> groupByFields) {
+    if (groupByFields == null || groupByFields.isEmpty()) {
+      throw new IllegalArgumentException("groupBy requires at least one field");
+    }
+    List<String> columns = new ArrayList<>();
+    for (String field : groupByFields) {
+      String column = resolveColumn(field);
+      if (!columns.contains(column)) {
+        columns.add(column);
+      }
+    }
+    return columns;
+  }
+
   private String compileExpr(Expr expr, List<Object> params) {
     return switch (expr) {
       case OrExpr or ->

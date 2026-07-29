@@ -196,6 +196,12 @@ public class QueryControllerTest {
     }
 
     @Override
+    public List<com.muchq.games.one_d4.api.dto.AggregateRow> aggregate(
+        Object compiledQuery, List<String> groupColumns, int limit) {
+      return List.of();
+    }
+
+    @Override
     public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
       if (gameUrls.isEmpty()) return Map.of();
       Map<String, Map<String, List<OccurrenceRow>>> out = new LinkedHashMap<>();

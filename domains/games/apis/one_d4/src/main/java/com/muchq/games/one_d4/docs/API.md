@@ -130,6 +130,59 @@ Search indexed games using ChessQL.
 - `1/2-1/2` — Draw (stalemate, repetition, agreement, etc.)
 - `unknown` — Result could not be determined
 
+---
+
+## POST /v1/aggregate
+
+Count indexed games grouped by one or more fields, filtered by a ChessQL query. This is the
+endpoint behind "most popular opening" style questions — without it, callers would page out every
+matching row and group client-side.
+
+### Request
+
+```json
+{
+  "query": "white.username = \"hikaru\" AND time.class = \"blitz\"",
+  "groupBy": ["opening_family"],
+  "orderBy": "count",
+  "limit": 20
+}
+```
+
+| Field   | Type     | Required | Default | Max  | Description                                       |
+|---------|----------|----------|---------|------|---------------------------------------------------|
+| query   | string   | yes      | —       | —    | ChessQL filter                                    |
+| groupBy | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form)    |
+| orderBy | string   | no       | "count" | —    | Only "count" is supported (descending)            |
+| limit   | int      | no       | 50      | 1000 | Max groups to return                              |
+
+Group-by fields validate against the same column whitelist as ChessQL comparisons.
+
+### Response (200)
+
+```json
+{
+  "groups": [
+    { "group": { "opening_family": "Caro Kann Defense" }, "count": 42 },
+    { "group": { "opening_family": "Sicilian Defense" }, "count": 17 }
+  ],
+  "count": 2
+}
+```
+
+Group keys are canonical column names (e.g. `opening_family`, even when requested as
+`opening.family`). Groups are ordered by count descending, then by group values ascending.
+
+### Error Responses
+
+| Condition             | HTTP Status |
+|-----------------------|-------------|
+| Bad ChessQL syntax    | 400         |
+| Unknown group-by field| 400         |
+| Missing query/groupBy | 400         |
+
+---
+
 ### Error Responses
 
 | Condition          | HTTP Status | Cause                                |

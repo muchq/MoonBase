@@ -640,6 +640,12 @@ public class IndexWorkerTest {
     }
 
     @Override
+    public List<com.muchq.games.one_d4.api.dto.AggregateRow> aggregate(
+        Object compiledQuery, List<String> groupColumns, int limit) {
+      return Collections.emptyList();
+    }
+
+    @Override
     public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
       return Map.of();
     }

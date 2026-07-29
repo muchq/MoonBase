@@ -1,6 +1,7 @@
 package com.muchq.games.one_d4.db;
 
 import com.muchq.games.chessql.compiler.CompiledQuery;
+import com.muchq.games.one_d4.api.dto.AggregateRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
@@ -212,6 +213,34 @@ public class GameFeatureDao implements GameFeatureStore {
           query.bind(idx++, limit);
           query.bind(idx, offset);
           return query.map(GAME_FEATURE_MAPPER).list();
+        });
+  }
+
+  @Override
+  public List<AggregateRow> aggregate(Object compiledQuery, List<String> groupColumns, int limit) {
+    if (!(compiledQuery instanceof CompiledQuery cq)) {
+      throw new IllegalArgumentException(
+          "Expected CompiledQuery, got: " + compiledQuery.getClass());
+    }
+    String sql = cq.selectSql() + " LIMIT ?";
+    return jdbi.withHandle(
+        h -> {
+          var query = h.createQuery(sql);
+          int idx = 0;
+          for (Object param : cq.parameters()) {
+            query.bind(idx++, param);
+          }
+          query.bind(idx, limit);
+          return query
+              .map(
+                  (rs, ctx) -> {
+                    Map<String, Object> group = new LinkedHashMap<>();
+                    for (String column : groupColumns) {
+                      group.put(column, rs.getObject(column));
+                    }
+                    return new AggregateRow(group, rs.getLong("group_count"));
+                  })
+              .list();
         });
   }
 

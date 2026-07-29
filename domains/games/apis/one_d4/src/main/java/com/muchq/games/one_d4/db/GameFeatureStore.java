@@ -1,5 +1,6 @@
 package com.muchq.games.one_d4.db;
 
+import com.muchq.games.one_d4.api.dto.AggregateRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
@@ -20,6 +21,12 @@ public interface GameFeatureStore {
   void deleteOccurrencesByGameUrls(List<String> gameUrls);
 
   List<GameFeature> query(Object compiledQuery, int limit, int offset);
+
+  /**
+   * Runs a compiled aggregate query (see SqlCompiler.compileAggregate) and maps each group row
+   * using the given canonical group column names.
+   */
+  List<AggregateRow> aggregate(Object compiledQuery, List<String> groupColumns, int limit);
 
   Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls);
 

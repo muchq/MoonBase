@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.muchq.games.chessql.compiler.CompiledQuery;
 import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.chessql.parser.Parser;
+import com.muchq.games.one_d4.api.dto.AggregateRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.db.GameFeatureStore.GameForReanalysis;
@@ -593,6 +594,67 @@ public class GameFeatureDaoTest {
 
     Map<String, Map<String, List<OccurrenceRow>>> result = dao.queryOccurrences(List.of(gameUrl));
     assertThat(result.get(gameUrl).get("pin")).hasSize(1);
+  }
+
+  @Test
+  public void aggregate_countsGamesPerGroupOrderedByCountDesc() {
+    dao.insertBatch(
+        List.of(
+            gameWithOpening("https://chess.com/game/agg-1", "Caro Kann Defense", "blitz"),
+            gameWithOpening("https://chess.com/game/agg-2", "Caro Kann Defense", "blitz"),
+            gameWithOpening("https://chess.com/game/agg-3", "Sicilian Defense", "blitz"),
+            gameWithOpening("https://chess.com/game/agg-4", "Sicilian Defense", "rapid")));
+
+    SqlCompiler compiler = new SqlCompiler();
+    CompiledQuery compiled =
+        compiler.compileAggregate(
+            Parser.parse("time.class = \"blitz\""), List.of("opening.family"));
+    List<AggregateRow> groups = dao.aggregate(compiled, List.of("opening_family"), 10);
+
+    assertThat(groups).hasSize(2);
+    assertThat(groups.get(0).group()).containsEntry("opening_family", "Caro Kann Defense");
+    assertThat(groups.get(0).count()).isEqualTo(2);
+    assertThat(groups.get(1).group()).containsEntry("opening_family", "Sicilian Defense");
+    assertThat(groups.get(1).count()).isEqualTo(1);
+  }
+
+  @Test
+  public void aggregate_respectsLimit() {
+    dao.insertBatch(
+        List.of(
+            gameWithOpening("https://chess.com/game/lim-1", "Caro Kann Defense", "blitz"),
+            gameWithOpening("https://chess.com/game/lim-2", "Sicilian Defense", "blitz"),
+            gameWithOpening("https://chess.com/game/lim-3", "English Opening", "blitz")));
+
+    SqlCompiler compiler = new SqlCompiler();
+    CompiledQuery compiled =
+        compiler.compileAggregate(Parser.parse("white_elo >= 1000"), List.of("opening_family"));
+    List<AggregateRow> groups = dao.aggregate(compiled, List.of("opening_family"), 2);
+
+    assertThat(groups).hasSize(2);
+  }
+
+  private GameFeature gameWithOpening(String url, String openingFamily, String timeClass) {
+    return new GameFeature(
+        null,
+        requestId,
+        url,
+        "CHESS_COM",
+        "w",
+        "b",
+        1500,
+        1500,
+        null,
+        null,
+        timeClass,
+        "B10",
+        openingFamily + " Some Line",
+        openingFamily,
+        "1-0",
+        Instant.now(),
+        20,
+        Instant.now(),
+        "pgn");
   }
 
   private GameFeature createGame(String url) {

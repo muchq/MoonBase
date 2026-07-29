@@ -143,8 +143,13 @@ public class IndexerModule {
   }
 
   @Context
-  public QueryCompiler<CompiledQuery> queryCompiler() {
+  public SqlCompiler sqlCompiler() {
     return new SqlCompiler();
+  }
+
+  @Context
+  public QueryCompiler<CompiledQuery> queryCompiler(SqlCompiler sqlCompiler) {
+    return sqlCompiler;
   }
 
   @Context
