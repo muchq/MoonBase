@@ -1,5 +1,11 @@
 # Chess Game Indexer — MCP Server Integration
 
+> **Status: implemented (Option A, in-process).** `mcpserver` embeds the indexer engine,
+> database access, and queue, and registers `index_chess_games`, `index_status`,
+> `query_chess_games`, `analyze_position`, plus an `aggregate_chess_games` tool over
+> `SqlCompiler.compileAggregate`. See `mcpserver/tools/IndexerFacade.java` and
+> `mcpserver/McpModule.java`. The rest of this document is the original design.
+
 ## Overview
 
 Expose the indexer's capabilities as MCP (Model Context Protocol) tool calls, so that LLM agents connected to the existing `mcpserver` can index chess games and query them using ChessQL — all through natural language.

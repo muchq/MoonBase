@@ -13,10 +13,17 @@ The Model Context Protocol (MCP) is an open protocol that enables seamless integ
 - **Tool Discovery**: Clients can list all available tools via `tools/list`
 - **Tool Execution**: Execute tools remotely via `tools/call`
 - **Built-in Tools**:
-  - `echo` - Echoes back a message
-  - `add` - Adds two numbers
-  - `get_timestamp` - Returns current UTC timestamp
-  - `random` - Generates random number between min and max
+  - `chess_com_games` - A player's games for a month, with filters (time_class, color, rated,
+    rules, opponent) and projection (pgn/tcn omitted unless requested)
+  - `chess_com_player` - A player's profile (including title, if any)
+  - `chess_com_players` - Batch profile lookup for up to 50 usernames
+  - `chess_com_stats` - A player's rating stats
+  - `server_time` - Current UTC time
+  - `index_chess_games` - Index a player's games into the in-process indexer (one_d4)
+  - `index_status` - Poll an indexing request
+  - `query_chess_games` - ChessQL search over indexed games
+  - `aggregate_chess_games` - Grouped counts over indexed games ("most popular openings")
+  - `analyze_position` - Motif detection for a single PGN without indexing
 
 ## Build the Java binary
 
@@ -226,50 +233,36 @@ curl -X POST http://localhost:8080/mcp \
 
 ## Available Tools
 
-### echo
-Echoes back the provided message.
+### chess.com passthrough tools
 
-**Arguments:**
-- `message` (string, required): The message to echo
+- `chess_com_games` — a player's games for a month. Required: `username`, `year` (yyyy),
+  `month` (MM). Optional filters: `time_class` (blitz/bullet/rapid/daily), `color`
+  (white/black), `rated` (bool), `rules` (default `chess`; a variant name, or `all`),
+  `opponent`. Optional projection/paging: `include_pgn` and `include_tcn` (default false),
+  `limit` (default 100), `offset`.
+- `chess_com_player` — a player's profile, including `title` (GM/IM/...), `location`, and
+  `fideRating` when present.
+- `chess_com_players` — batch profile lookup: `usernames` (array, max 50). Returns a map keyed
+  by lowercased username plus `not_found` and per-username `errors`.
+- `chess_com_stats` — a player's rating stats.
+- `server_time` — current UTC time.
 
-**Example:**
-```json
-{"name": "echo", "arguments": {"message": "Hello!"}}
-```
+### Indexer tools (in-process one_d4)
 
-### add
-Adds two numbers together.
+The indexer engine, database, and worker are embedded in this process (Option A in
+`one_d4/.../docs/MCP_INTEGRATION.md`). By default the index lives in in-memory H2; set
+`INDEXER_DB_URL` to point at a durable database.
 
-**Arguments:**
-- `a` (number, required): First number
-- `b` (number, required): Second number
-
-**Example:**
-```json
-{"name": "add", "arguments": {"a": 10, "b": 5}}
-```
-
-### get_timestamp
-Returns the current UTC timestamp.
-
-**Arguments:** None
-
-**Example:**
-```json
-{"name": "get_timestamp", "arguments": {}}
-```
-
-### random
-Generates a random number between min and max (inclusive).
-
-**Arguments:**
-- `min` (integer, required): Minimum value
-- `max` (integer, required): Maximum value
-
-**Example:**
-```json
-{"name": "random", "arguments": {"min": 1, "max": 100}}
-```
+- `index_chess_games` — index a player's games. Required: `username`, `platform`
+  (`chess.com`), `start_month`/`end_month` (YYYY-MM). Optional: `exclude_bullet`.
+  Single-month requests complete synchronously; longer ranges return `PENDING` and run in the
+  background.
+- `index_status` — poll an indexing request by `request_id`.
+- `query_chess_games` — ChessQL search over indexed games: `query`, optional `limit`
+  (default 10, max 50) and `include_pgn` (default false).
+- `aggregate_chess_games` — grouped counts over indexed games: `query`, `group_by` (e.g.
+  `["opening_family"]`), optional `limit`. Answers "most popular openings" in one call.
+- `analyze_position` — detect motifs in a single `pgn` without indexing it.
 
 ## Configuration
 
@@ -277,6 +270,7 @@ Environment variables:
 - **PORT**: Server port (default: 8080)
 - **APP_NAME**: Application name (default: mcp-server)
 - **MCP_AUTH_TOKEN**: Bearer token for authentication (optional, no auth if not set)
+- **INDEXER_DB_URL**: JDBC URL for the in-process indexer (default: in-memory H2)
 
 ## HTTP Endpoint
 
