@@ -50,10 +50,12 @@ public class ChessClient {
       return Optional.empty();
     }
 
-    // TODO: Failsafe-ify, 429, etc
+    // TODO: Failsafe-ify (retry with backoff on 429/5xx)
     if (response.getStatusCode() != 200) {
       LOG.debug(response.toString());
-      throw new RuntimeException("api error");
+      throw new ChessComApiException(
+          response.getStatusCode(),
+          "chess.com API returned HTTP " + response.getStatusCode() + " for " + url);
     }
 
     try {

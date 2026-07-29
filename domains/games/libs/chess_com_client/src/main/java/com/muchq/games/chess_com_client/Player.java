@@ -19,7 +19,10 @@ public record Player(
     boolean streamer,
     boolean verified,
     String league,
-    List<StreamingPlatform> streamingPlatforms) {
+    List<StreamingPlatform> streamingPlatforms,
+    String title,
+    String location,
+    Integer fideRating) {
   @JsonCreator
   public static Player create(
       @JsonProperty("player_id") int playerId,
@@ -35,7 +38,10 @@ public record Player(
       @JsonProperty("is_streamer") boolean streamer,
       @JsonProperty("verified") boolean verified,
       @JsonProperty("league") String league,
-      @JsonProperty("streaming_platforms") List<StreamingPlatform> streamingPlatforms) {
+      @JsonProperty("streaming_platforms") List<StreamingPlatform> streamingPlatforms,
+      @JsonProperty("title") String title,
+      @JsonProperty("location") String location,
+      @JsonProperty("fide") Integer fideRating) {
     return new Player(
         playerId,
         playerApiUrl,
@@ -50,6 +56,10 @@ public record Player(
         streamer,
         verified,
         league,
-        streamingPlatforms);
+        streamingPlatforms,
+        // title is absent for untitled players; location and fide are optional profile fields
+        title,
+        location,
+        fideRating);
   }
 }
