@@ -535,6 +535,146 @@ public class SqlCompilerTest {
         .hasMessageContaining("not supported in aggregate");
   }
 
+  private static final String PARTICIPATION_GUARD =
+      "(LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))";
+
+  @Test
+  public void testPerspectiveOutcomeCompilesWithParticipationGuard() {
+    CompiledQuery result = compiler.compile(Parser.parse("outcome = \"win\""), "hikaru");
+
+    assertThat(result.selectSql())
+        .isEqualTo(
+            BASE_PREFIX
+                + "("
+                + PARTICIPATION_GUARD
+                + " AND LOWER(CASE WHEN result = '1/2-1/2' THEN 'draw'"
+                + " WHEN (result = '1-0' AND LOWER(white_username) = LOWER(?))"
+                + " OR (result = '0-1' AND LOWER(black_username) = LOWER(?)) THEN 'win'"
+                + " WHEN result IN ('1-0', '0-1') THEN 'loss' ELSE 'unknown' END) = LOWER(?))"
+                + BASE_SUFFIX);
+    // Guard params first (they appear first in the SQL), then the outcome's two, then the value
+    assertThat(result.parameters())
+        .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", "win"));
+  }
+
+  @Test
+  public void testPerspectiveMeColorAndOpponentTitle() {
+    CompiledQuery result =
+        compiler.compile(
+            Parser.parse("me.color = \"white\" AND opponent.title = \"GM\""), "hikaru");
+
+    assertThat(result.selectSql())
+        .contains(PARTICIPATION_GUARD)
+        .contains(
+            "LOWER(CASE WHEN LOWER(white_username) = LOWER(?) THEN 'white' ELSE 'black' END) ="
+                + " LOWER(?)")
+        .contains(
+            "LOWER(CASE WHEN LOWER(white_username) = LOWER(?) THEN black_title ELSE white_title"
+                + " END) = LOWER(?)");
+    assertThat(result.parameters())
+        .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "white", "hikaru", "GM"));
+  }
+
+  @Test
+  public void testPerspectiveEloIsNumericComparison() {
+    CompiledQuery result = compiler.compile(Parser.parse("opponent.elo >= 2500"), "hikaru");
+    assertThat(result.selectSql())
+        .contains(
+            "(CASE WHEN LOWER(white_username) = LOWER(?) THEN black_elo ELSE white_elo END) >= ?");
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", 2500));
+  }
+
+  @Test
+  public void testPerspectiveFieldSupportsIn() {
+    CompiledQuery result =
+        compiler.compile(Parser.parse("opponent.title IN [\"GM\", \"IM\"]"), "hikaru");
+    assertThat(result.selectSql()).contains("END) IN (LOWER(?), LOWER(?))");
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", "GM", "IM"));
+  }
+
+  @Test
+  public void testPerspectiveWithMotifCountOrderByKeepsParamOrder() {
+    CompiledQuery result =
+        compiler.compile(
+            Parser.parse("outcome = \"win\" ORDER BY motif_count(pin) DESC"), "hikaru");
+    // LEFT JOIN subquery param (motif name) precedes the guarded WHERE params
+    assertThat(result.parameters())
+        .isEqualTo(List.of("PIN", "hikaru", "hikaru", "hikaru", "hikaru", "win"));
+  }
+
+  @Test
+  public void testPerspectiveWithTopLevelOrGuardsWholeExpression() {
+    // The participation guard must wrap the entire disjunction: a non-perspective OR-branch may
+    // not leak games the player didn't participate in.
+    CompiledQuery result =
+        compiler.compile(Parser.parse("outcome = \"win\" OR white.elo > 2800"), "hikaru");
+
+    assertThat(result.selectSql())
+        .isEqualTo(
+            BASE_PREFIX
+                + "("
+                + PARTICIPATION_GUARD
+                + " AND (LOWER(CASE WHEN result = '1/2-1/2' THEN 'draw'"
+                + " WHEN (result = '1-0' AND LOWER(white_username) = LOWER(?))"
+                + " OR (result = '0-1' AND LOWER(black_username) = LOWER(?)) THEN 'win'"
+                + " WHEN result IN ('1-0', '0-1') THEN 'loss' ELSE 'unknown' END) = LOWER(?)"
+                + " OR white_elo > ?))"
+                + BASE_SUFFIX);
+    assertThat(result.parameters())
+        .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", "win", 2800));
+  }
+
+  @Test
+  public void testPerspectiveOutcomeSupportsIn() {
+    CompiledQuery result =
+        compiler.compile(Parser.parse("outcome IN [\"win\", \"draw\"]"), "hikaru");
+    assertThat(result.selectSql()).contains("END) IN (LOWER(?), LOWER(?))");
+    // Guard's two, the outcome CASE's two, then the IN values
+    assertThat(result.parameters())
+        .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", "win", "draw"));
+  }
+
+  @Test
+  public void testPerspectiveFieldWithoutPlayerRejected() {
+    assertThatThrownBy(() -> compile("outcome = \"win\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("requires a player");
+    assertThatThrownBy(() -> compiler.compile(Parser.parse("me.elo > 2000"), "  "))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("requires a player");
+  }
+
+  @Test
+  public void testNonPerspectiveQueryIgnoresPlayerParam() {
+    CompiledQuery result = compiler.compile(Parser.parse("white.elo >= 2500"), "hikaru");
+    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + "white_elo >= ?" + BASE_SUFFIX);
+    assertThat(result.parameters()).isEqualTo(List.of(2500));
+  }
+
+  @Test
+  public void testCompileAggregateSupportsPerspectiveFilter() {
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("outcome = \"loss\" AND time.class = \"blitz\""),
+            List.of("opening_family"),
+            "hikaru");
+    assertThat(result.selectSql())
+        .contains(PARTICIPATION_GUARD)
+        .contains("GROUP BY opening_family");
+    assertThat(result.parameters())
+        .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", "loss", "blitz"));
+  }
+
+  @Test
+  public void testCompileAggregateRejectsPerspectiveGroupBy() {
+    assertThatThrownBy(
+            () ->
+                compiler.compileAggregate(
+                    Parser.parse("white.elo > 1"), List.of("opponent.title"), "hikaru"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Perspective fields are not supported in groupBy");
+  }
+
   private CompiledQuery compile(String input) {
     return compiler.compile(Parser.parse(input));
   }

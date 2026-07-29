@@ -1,7 +1,7 @@
 package com.muchq.games.one_d4.api;
 
 import com.muchq.games.chessql.compiler.CompiledQuery;
-import com.muchq.games.chessql.compiler.QueryCompiler;
+import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.chessql.parser.ParsedQuery;
 import com.muchq.games.chessql.parser.Parser;
 import com.muchq.games.one_d4.api.dto.GameFeature;
@@ -27,12 +27,12 @@ public class QueryController {
   private static final Logger LOG = LoggerFactory.getLogger(QueryController.class);
 
   private final GameFeatureStore gameFeatureStore;
-  private final QueryCompiler<CompiledQuery> queryCompiler;
+  private final SqlCompiler queryCompiler;
   private final QueryRequestValidator validator;
 
   public QueryController(
       GameFeatureStore gameFeatureStore,
-      QueryCompiler<CompiledQuery> queryCompiler,
+      SqlCompiler queryCompiler,
       QueryRequestValidator validator) {
     this.gameFeatureStore = gameFeatureStore;
     this.queryCompiler = queryCompiler;
@@ -46,13 +46,14 @@ public class QueryController {
     validator.validate(request);
 
     LOG.info(
-        "POST /v1/query query={} limit={} offset={}",
+        "POST /v1/query query={} limit={} offset={} player={}",
         request.query(),
         request.limit(),
-        request.offset());
+        request.offset(),
+        request.player());
 
     ParsedQuery parsed = Parser.parse(request.query());
-    CompiledQuery compiled = queryCompiler.compile(parsed);
+    CompiledQuery compiled = queryCompiler.compile(parsed, request.player());
 
     List<GameFeature> rows = gameFeatureStore.query(compiled, request.limit(), request.offset());
 

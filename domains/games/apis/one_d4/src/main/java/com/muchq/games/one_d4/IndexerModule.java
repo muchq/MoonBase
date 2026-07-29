@@ -2,8 +2,6 @@ package com.muchq.games.one_d4;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.muchq.games.chess_com_client.ChessClient;
-import com.muchq.games.chessql.compiler.CompiledQuery;
-import com.muchq.games.chessql.compiler.QueryCompiler;
 import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.one_d4.db.DataSourceFactory;
 import com.muchq.games.one_d4.db.GameFeatureDao;
@@ -20,6 +18,7 @@ import com.muchq.games.one_d4.motifs.Detectors;
 import com.muchq.games.one_d4.motifs.MotifDetector;
 import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.games.one_d4.queue.IndexQueue;
+import com.muchq.games.one_d4.service.IndexRequestService;
 import com.muchq.games.one_d4.worker.IndexWorker;
 import com.muchq.games.one_d4.worker.IndexWorkerLifecycle;
 import com.muchq.platform.http_client.core.HttpClient;
@@ -139,8 +138,9 @@ public class IndexerModule {
   }
 
   @Context
-  public QueryCompiler<CompiledQuery> queryCompiler(SqlCompiler sqlCompiler) {
-    return sqlCompiler;
+  public IndexRequestService indexRequestService(
+      IndexingRequestStore requestStore, IndexQueue queue, IndexWorker worker) {
+    return new IndexRequestService(requestStore, queue, worker::process);
   }
 
   @Context

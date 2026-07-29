@@ -33,15 +33,25 @@ public class AggregateGamesTool implements McpTool {
     return "Count indexed games grouped by one or more fields, filtered by a ChessQL query"
         + " (index first with index_chess_games). This answers questions like 'most popular"
         + " openings' in one call: query 'white.username = \"hikaru\" AND time.class ="
-        + " \"blitz\"' with group_by [\"opening_family\"]. Groupable fields: opening_family,"
-        + " opening_name, eco, result, time_class, white_title, black_title, white_username,"
-        + " black_username, platform.";
+        + " \"blitz\"' with group_by [\"opening_family\"]. With the player parameter the filter"
+        + " may use perspective fields (me.*, opponent.*, outcome) — e.g. player: hikaru with"
+        + " query 'me.color = \"white\" AND opponent.title = \"GM\"'. Groupable fields (physical"
+        + " columns only): opening_family, opening_name, eco, result, time_class, white_title,"
+        + " black_title, white_username, black_username, platform.";
   }
 
   @Override
   public Map<String, Object> getInputSchema() {
     Map<String, Object> properties = new LinkedHashMap<>();
     properties.put("query", Map.of("type", "string", "description", "A ChessQL filter"));
+    properties.put(
+        "player",
+        Map.of(
+            "type",
+            "string",
+            "description",
+            "chess.com username that perspective fields (me.*, opponent.*, outcome) in the"
+                + " filter are resolved against; required when the filter uses them"));
     properties.put(
         "group_by",
         Map.of(
@@ -74,10 +84,12 @@ public class AggregateGamesTool implements McpTool {
     }
     List<String> groupBy = groupByList.stream().map(String::valueOf).toList();
     int limit = clampLimit(arguments.get("limit"));
+    Object rawPlayer = arguments.get("player");
+    String player = rawPlayer == null ? null : rawPlayer.toString();
 
     List<AggregateRow> groups;
     try {
-      groups = facade.aggregate(rawQuery.toString(), groupBy, limit);
+      groups = facade.aggregate(rawQuery.toString(), groupBy, player, limit);
     } catch (ParseException | IllegalArgumentException e) {
       return ToolResponses.error(mapper, e.getMessage());
     }

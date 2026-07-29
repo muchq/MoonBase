@@ -66,6 +66,42 @@ Rows indexed before these columns existed hold NULL until reindexed with `skipCa
 `POST /v1/index` (or `skip_cache` on the `index_chess_games` MCP tool) — a plain re-request is
 served from the indexed-period cache and does not refetch.
 
+### Perspective fields
+
+Every physical field is absolute (`white.*` / `black.*`), so "hikaru as White" is expressible but
+"hikaru's results regardless of color" would require writing and unioning two queries. Perspective
+fields close that gap: they are resolved at compile time against a `player` supplied on the
+request (`player` on `POST /v1/query` / `POST /v1/aggregate`, or the `player` argument on the
+`query_chess_games` / `aggregate_chess_games` MCP tools).
+
+| Field               | Meaning                                                    |
+|---------------------|------------------------------------------------------------|
+| `me.color`          | `white` or `black` — the side the player played            |
+| `me.elo`            | The player's rating in that game                           |
+| `me.title`          | The player's title in that game                            |
+| `opponent.username` | The other side's username                                  |
+| `opponent.elo`      | The other side's rating                                    |
+| `opponent.title`    | The other side's title                                     |
+| `outcome`           | `win` / `loss` / `draw` / `unknown`, relative to the player |
+
+A query that uses any perspective field requires the `player` parameter and is implicitly
+restricted to games the player participated in. Example — "hikaru's blitz wins against GMs,
+regardless of color":
+
+```
+outcome = "win" AND opponent.title = "GM" AND time.class = "blitz"
+```
+
+with `player: "hikaru"`. Perspective fields compile to `CASE` expressions over the `white_*` /
+`black_*` columns plus a participation guard; they are predicates only — `groupBy` on
+`/v1/aggregate` accepts physical columns, not perspective fields.
+
+Like the physical `*.title` / `*.elo` columns they resolve to, `me.title`, `opponent.title`,
+`me.elo`, and `opponent.elo` follow SQL NULL semantics: untitled players (and rows indexed before
+these columns existed) hold NULL, and NULL never matches a comparison — so
+`opponent.title != "GM"` returns only games against *titled* non-GM opponents, not games against
+untitled ones.
+
 ## Motifs
 
 The `motif()` function checks for tactical pattern presence. Queries compile to `EXISTS` subqueries

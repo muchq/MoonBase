@@ -56,6 +56,33 @@ public class AggregateControllerTest {
   }
 
   @Test
+  public void aggregate_forwardsPlayerForPerspectiveFilters() {
+    store.rows = List.of(new AggregateRow(Map.of("opening_family", "Caro Kann Defense"), 3));
+
+    AggregateResponse response =
+        controller.aggregate(
+            new AggregateRequest(
+                "outcome = \"win\"", List.of("opening_family"), "count", 20, "hikaru"));
+
+    assertThat(response.count()).isEqualTo(1);
+    CompiledQuery compiled = (CompiledQuery) store.lastCompiled;
+    // Participation guard params first, then the outcome CASE's two, then the value
+    assertThat(compiled.parameters())
+        .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", "win"));
+  }
+
+  @Test
+  public void aggregate_perspectiveFilterWithoutPlayerRejected() {
+    assertThatThrownBy(
+            () ->
+                controller.aggregate(
+                    new AggregateRequest("outcome = \"win\"", List.of("opening_family"), null, 20)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("requires a player");
+    assertThat(store.lastCompiled).isNull();
+  }
+
+  @Test
   public void aggregate_invalidRequestRejectedBeforeStoreCall() {
     assertThatThrownBy(
             () -> controller.aggregate(new AggregateRequest("white.elo > 1", List.of(), null, 20)))

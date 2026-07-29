@@ -260,10 +260,12 @@ The indexer engine, database, and worker are embedded in this process (Option A 
   titles/opening names on rows indexed before those columns existed). Single-month requests
   complete synchronously; longer ranges return `PENDING` and run in the background.
 - `index_status` — poll an indexing request by `request_id`.
-- `query_chess_games` — ChessQL search over indexed games: `query`, optional `limit`
-  (default 10, max 50) and `include_pgn` (default false).
+- `query_chess_games` — ChessQL search over indexed games: `query`, optional `player` (resolves
+  perspective fields `me.*`, `opponent.*`, `outcome`), `limit` (default 10, max 50), and
+  `include_pgn` (default false).
 - `aggregate_chess_games` — grouped counts over indexed games: `query`, `group_by` (e.g.
-  `["opening_family"]`), optional `limit`. Answers "most popular openings" in one call.
+  `["opening_family"]`), optional `player` and `limit`. Answers "most popular openings" — or
+  "hikaru's win rate by opening against GMs" via perspective fields — in one call.
 - `analyze_position` — detect motifs in a single `pgn` without indexing it.
 
 ## Configuration

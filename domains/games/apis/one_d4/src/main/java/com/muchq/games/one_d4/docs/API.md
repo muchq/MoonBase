@@ -28,13 +28,13 @@ Start indexing games for a player over a month range.
 | Field         | Type   | Required | Description                            |
 |---------------|--------|----------|----------------------------------------|
 | player        | string | yes      | Username on the chess platform (normalized to lowercase) |
-| platform      | string | yes      | `"CHESS_COM"` (lichess planned)        |
+| platform      | string | yes      | `"chess.com"` or `"CHESS_COM"`, case-insensitive; echoed back as `"CHESS_COM"` (lichess planned) |
 | startMonth    | string | yes      | Start month inclusive, format `YYYY-MM` |
 | endMonth      | string | yes      | End month inclusive, format `YYYY-MM`   |
 | excludeBullet | bool   | no       | Skip bullet games (default false)       |
 | skipCache     | bool   | no       | Refetch every month in the range even if already indexed, refreshing stored rows — e.g. to backfill titles and opening names on rows indexed before those columns existed (default false) |
 
-### Response (201)
+### Response (200)
 
 ```json
 {
@@ -77,7 +77,7 @@ Poll the status of an indexing request.
 }
 ```
 
-### Response (404 — via RuntimeException, needs error mapping)
+### Response (404)
 
 Returned when the ID does not match any indexing request.
 
@@ -102,6 +102,7 @@ Search indexed games using ChessQL.
 | query  | string | yes      | —       | —    | ChessQL query string            |
 | limit  | int    | no       | 50      | 1000 | Max results to return           |
 | offset | int    | no       | 0       | —    | Pagination offset               |
+| player | string | no       | —       | —    | Username that perspective fields (`me.*`, `opponent.*`, `outcome`) are resolved against; required when the query uses them (see CHESSQL.md) |
 
 ### Response (200)
 
@@ -153,10 +154,11 @@ matching row and group client-side.
 
 | Field   | Type     | Required | Default | Max  | Description                                       |
 |---------|----------|----------|---------|------|---------------------------------------------------|
-| query   | string   | yes      | —       | —    | ChessQL filter                                    |
-| groupBy | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form)    |
+| query   | string   | yes      | —       | —    | ChessQL filter (may use perspective fields when `player` is set) |
+| groupBy | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form; physical columns only) |
 | orderBy | string   | no       | "count" | —    | Only "count" is supported (descending)            |
 | limit   | int      | no       | 50      | 1000 | Max groups to return                              |
+| player  | string   | no       | —       | —    | Username that perspective fields in the filter are resolved against |
 
 Group-by fields validate against the same column whitelist as ChessQL comparisons.
 
@@ -189,11 +191,10 @@ Group keys are canonical column names (e.g. `opening_family`, even when requeste
 
 | Condition          | HTTP Status | Cause                                |
 |--------------------|-------------|--------------------------------------|
-| Bad ChessQL syntax | 500         | `ParseException` (needs error mapping) |
-| Unknown field      | 500         | `IllegalArgumentException`           |
-| Unknown motif      | 500         | `IllegalArgumentException`           |
-
-> **Note**: Error mapping to proper 400 responses is a planned improvement. See ROADMAP.md Phase 2.
+| Bad ChessQL syntax | 400         | `ParseException` (body includes `position`) |
+| Unknown field      | 400         | `IllegalArgumentException`           |
+| Unknown motif      | 400         | `IllegalArgumentException`           |
+| Unknown request ID | 404         | `NoSuchElementException`             |
 
 ---
 

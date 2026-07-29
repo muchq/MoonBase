@@ -634,6 +634,197 @@ public class GameFeatureDaoTest {
     assertThat(groups).hasSize(2);
   }
 
+  @Test
+  public void perspectiveFields_resolveAgainstPlayerOnH2() {
+    dao.insertBatch(
+        List.of(
+            // hikaru wins as white; untitled opponent
+            perspectiveGame(
+                "https://chess.com/game/p1",
+                "hikaru",
+                "opp1",
+                null,
+                null,
+                "1-0",
+                "Caro Kann Defense"),
+            // hikaru wins as black against a GM
+            perspectiveGame(
+                "https://chess.com/game/p2",
+                "opp2",
+                "hikaru",
+                "GM",
+                null,
+                "0-1",
+                "Sicilian Defense"),
+            // hikaru loses as black
+            perspectiveGame(
+                "https://chess.com/game/p3",
+                "opp3",
+                "hikaru",
+                null,
+                null,
+                "1-0",
+                "Caro Kann Defense"),
+            // draw as white
+            perspectiveGame(
+                "https://chess.com/game/p4",
+                "hikaru",
+                "opp4",
+                null,
+                null,
+                "1/2-1/2",
+                "English Opening"),
+            // a game hikaru did not play — must be excluded by the participation guard
+            perspectiveGame(
+                "https://chess.com/game/p5",
+                "someone",
+                "else",
+                null,
+                null,
+                "1-0",
+                "Caro Kann Defense")));
+
+    SqlCompiler compiler = new SqlCompiler();
+
+    List<GameFeature> wins =
+        dao.query(compiler.compile(Parser.parse("outcome = \"win\""), "Hikaru"), 10, 0);
+    assertThat(wins.stream().map(GameFeature::gameUrl))
+        .containsExactlyInAnyOrder("https://chess.com/game/p1", "https://chess.com/game/p2");
+
+    List<GameFeature> losses =
+        dao.query(compiler.compile(Parser.parse("outcome = \"loss\""), "hikaru"), 10, 0);
+    assertThat(losses.stream().map(GameFeature::gameUrl))
+        .containsExactly("https://chess.com/game/p3");
+
+    List<GameFeature> draws =
+        dao.query(compiler.compile(Parser.parse("outcome = \"draw\""), "hikaru"), 10, 0);
+    assertThat(draws.stream().map(GameFeature::gameUrl))
+        .containsExactly("https://chess.com/game/p4");
+
+    List<GameFeature> asWhite =
+        dao.query(compiler.compile(Parser.parse("me.color = \"white\""), "hikaru"), 10, 0);
+    assertThat(asWhite.stream().map(GameFeature::gameUrl))
+        .containsExactlyInAnyOrder("https://chess.com/game/p1", "https://chess.com/game/p4");
+
+    List<GameFeature> vsGm =
+        dao.query(compiler.compile(Parser.parse("opponent.title = \"GM\""), "hikaru"), 10, 0);
+    assertThat(vsGm.stream().map(GameFeature::gameUrl))
+        .containsExactly("https://chess.com/game/p2");
+
+    List<AggregateRow> winsByFamily =
+        dao.aggregate(
+            compiler.compileAggregate(
+                Parser.parse("outcome = \"win\""), List.of("opening_family"), "hikaru"),
+            List.of("opening_family"),
+            10);
+    assertThat(winsByFamily).hasSize(2);
+    for (AggregateRow row : winsByFamily) {
+      assertThat(row.group().get("opening_family")).isIn("Caro Kann Defense", "Sicilian Defense");
+      assertThat(row.count()).isEqualTo(1);
+    }
+  }
+
+  @Test
+  public void perspectiveOutcomeUnknownAndOrGuard_onH2() {
+    dao.insertBatch(
+        List.of(
+            // aborted game — result "*" must classify as unknown, not loss
+            perspectiveGame(
+                "https://chess.com/game/u1",
+                "hikaru",
+                "opp1",
+                null,
+                null,
+                "*",
+                "Caro Kann Defense"),
+            // hikaru wins as white
+            perspectiveGame(
+                "https://chess.com/game/u2",
+                "hikaru",
+                "opp2",
+                null,
+                null,
+                "1-0",
+                "Sicilian Defense"),
+            // a 2900-elo game hikaru did not play: matches the white.elo OR-branch below but must
+            // be excluded by the participation guard
+            new GameFeature(
+                null,
+                requestId,
+                "https://chess.com/game/u3",
+                "CHESS_COM",
+                "someone",
+                "else",
+                2900,
+                2850,
+                null,
+                null,
+                "blitz",
+                "B10",
+                "English Opening Some Line",
+                "English Opening",
+                "1-0",
+                Instant.now(),
+                20,
+                Instant.now(),
+                "pgn")));
+
+    SqlCompiler compiler = new SqlCompiler();
+
+    List<GameFeature> unknown =
+        dao.query(compiler.compile(Parser.parse("outcome = \"unknown\""), "hikaru"), 10, 0);
+    assertThat(unknown.stream().map(GameFeature::gameUrl))
+        .containsExactly("https://chess.com/game/u1");
+
+    for (String outcome : List.of("win", "loss", "draw")) {
+      List<GameFeature> rows =
+          dao.query(
+              compiler.compile(Parser.parse("outcome = \"" + outcome + "\""), "hikaru"), 10, 0);
+      assertThat(rows.stream().map(GameFeature::gameUrl))
+          .as("outcome = %s must not include the aborted game", outcome)
+          .doesNotContain("https://chess.com/game/u1");
+    }
+
+    // OR with a non-perspective branch: u3 matches white.elo > 2800 but hikaru didn't play it
+    List<GameFeature> winsOrHighElo =
+        dao.query(
+            compiler.compile(Parser.parse("outcome = \"win\" OR white.elo > 2800"), "hikaru"),
+            10,
+            0);
+    assertThat(winsOrHighElo.stream().map(GameFeature::gameUrl))
+        .containsExactly("https://chess.com/game/u2");
+  }
+
+  private GameFeature perspectiveGame(
+      String url,
+      String white,
+      String black,
+      String whiteTitle,
+      String blackTitle,
+      String result,
+      String openingFamily) {
+    return new GameFeature(
+        null,
+        requestId,
+        url,
+        "CHESS_COM",
+        white,
+        black,
+        1500,
+        1500,
+        whiteTitle,
+        blackTitle,
+        "blitz",
+        "B10",
+        openingFamily + " Some Line",
+        openingFamily,
+        result,
+        Instant.now(),
+        20,
+        Instant.now(),
+        "pgn");
+  }
+
   private GameFeature gameWithOpening(String url, String openingFamily, String timeClass) {
     return new GameFeature(
         null,
