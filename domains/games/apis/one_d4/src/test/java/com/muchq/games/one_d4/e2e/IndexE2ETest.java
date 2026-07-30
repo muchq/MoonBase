@@ -15,6 +15,7 @@ import com.muchq.games.one_d4.api.dto.IndexResponse;
 import com.muchq.games.one_d4.db.GameFeatureStore;
 import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
+import com.muchq.games.one_d4.db.RetentionPolicy;
 import com.muchq.games.one_d4.db.TestDb;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.GameReplayer;
@@ -28,6 +29,7 @@ import com.muchq.games.one_d4.motifs.SkewerDetector;
 import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.games.one_d4.queue.IndexMessage;
 import com.muchq.games.one_d4.queue.IndexQueue;
+import com.muchq.games.one_d4.service.DataAvailabilityResolver;
 import com.muchq.games.one_d4.service.IndexRequestService;
 import com.muchq.games.one_d4.worker.IndexWorker;
 import java.time.Duration;
@@ -94,7 +96,9 @@ public class IndexE2ETest {
 
     controller =
         new IndexController(
-            new IndexRequestService(requestStore, queue, worker::process), requestStore);
+            new IndexRequestService(requestStore, queue, worker::process),
+            requestStore,
+            new DataAvailabilityResolver(periodStore));
   }
 
   @Test
@@ -121,6 +125,51 @@ public class IndexE2ETest {
     assertThat(after.endMonth()).isEqualTo("2024-03");
     assertThat(fakeChessClient.getFetchCalls())
         .containsExactly(new FakeChessClient.FetchCall(PLAYER, month));
+  }
+
+  /**
+   * The request row survives retention; its games do not. This drives the real sweep against real
+   * H2 and pins that the reported status follows the data rather than the stale request row.
+   */
+  @Test
+  public void completedRequest_reportsDataAvailableUntilRetentionSweepsIt() {
+    YearMonth month = YearMonth.of(2024, 3);
+    fakeChessClient.addGame(PLAYER, month, "https://chess.com/game/retention-1");
+    fakeChessClient.addGame(PLAYER, month, "https://chess.com/game/retention-2");
+
+    IndexResponse created =
+        controller.createIndex(new IndexRequest(PLAYER, PLATFORM, "2024-03", "2024-03", null));
+    processQueueUntilIdle();
+
+    IndexResponse fresh = controller.getIndex(created.id());
+    assertThat(fresh.status()).isEqualTo("COMPLETED");
+    assertThat(fresh.gamesIndexed()).isEqualTo(2);
+    assertThat(fresh.data()).isNotNull();
+    assertThat(fresh.data().status()).isEqualTo("AVAILABLE");
+    assertThat(fresh.data().monthsAvailable()).isEqualTo(1);
+    assertThat(fresh.data().monthsTotal()).isEqualTo(1);
+    assertThat(fresh.data().expiresAt())
+        .isNotNull()
+        .isAfter(Instant.now().plus(RetentionPolicy.PERIOD).minus(Duration.ofMinutes(5)));
+
+    // Sweep everything, exactly as RetentionWorker does once the period has aged out.
+    Instant threshold = Instant.now().plus(Duration.ofDays(1));
+    assertThat(gameFeatureStore.deleteOlderThan(threshold)).isEqualTo(2);
+    assertThat(periodStore.deleteOlderThan(threshold)).isEqualTo(1);
+
+    IndexResponse swept = controller.getIndex(created.id());
+    // The request row is untouched — which is exactly why it needs the extra signal.
+    assertThat(swept.status()).isEqualTo("COMPLETED");
+    assertThat(swept.gamesIndexed()).isEqualTo(2);
+    assertThat(swept.data()).isNotNull();
+    assertThat(swept.data().status()).isEqualTo("EXPIRED");
+    assertThat(swept.data().monthsAvailable()).isZero();
+    assertThat(swept.data().expiresAt()).isNull();
+
+    assertThat(controller.listRequests())
+        .filteredOn(r -> r.id().equals(created.id()))
+        .singleElement()
+        .satisfies(r -> assertThat(r.data().status()).isEqualTo("EXPIRED"));
   }
 
   @Test

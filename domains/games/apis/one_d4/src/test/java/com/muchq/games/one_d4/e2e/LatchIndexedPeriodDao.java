@@ -6,6 +6,8 @@ import io.micronaut.context.annotation.Replaces;
 import io.micronaut.context.annotation.Value;
 import jakarta.inject.Singleton;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import org.jdbi.v3.core.Jdbi;
@@ -92,6 +94,11 @@ public class LatchIndexedPeriodDao implements IndexedPeriodStore {
   public Optional<IndexedPeriod> findCompletePeriod(
       String player, String platform, String month, boolean excludeBullet) {
     return delegate.findCompletePeriod(player, platform, month, excludeBullet);
+  }
+
+  @Override
+  public List<IndexedPeriod> findPeriodsForPlayers(Collection<String> players) {
+    return delegate.findPeriodsForPlayers(players);
   }
 
   @Override

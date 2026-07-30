@@ -1,8 +1,10 @@
 package com.muchq.games.one_d4.api;
 
+import com.muchq.games.one_d4.api.dto.DataAvailability;
 import com.muchq.games.one_d4.api.dto.IndexRequest;
 import com.muchq.games.one_d4.api.dto.IndexResponse;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
+import com.muchq.games.one_d4.service.DataAvailabilityResolver;
 import com.muchq.games.one_d4.service.IndexRequestService;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
@@ -13,6 +15,7 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -26,17 +29,28 @@ public class IndexController {
 
   private final IndexRequestService indexRequestService;
   private final IndexingRequestStore requestDao;
+  private final DataAvailabilityResolver dataAvailability;
 
-  public IndexController(IndexRequestService indexRequestService, IndexingRequestStore requestDao) {
+  public IndexController(
+      IndexRequestService indexRequestService,
+      IndexingRequestStore requestDao,
+      DataAvailabilityResolver dataAvailability) {
     this.indexRequestService = indexRequestService;
     this.requestDao = requestDao;
+    this.dataAvailability = dataAvailability;
   }
 
   @GET
   @Produces(MediaType.APPLICATION_JSON)
   public List<IndexResponse> listRequests() {
     LOG.info("GET /v1/index");
-    return requestDao.listRecent(50).stream().map(IndexRequestService::toResponse).toList();
+    List<IndexingRequestStore.IndexingRequest> rows = requestDao.listRecent(50);
+    // One storage lookup for the whole page: request rows outlive their games, so without this
+    // a swept request is indistinguishable from a fresh one.
+    Map<UUID, DataAvailability> availability = dataAvailability.resolveAll(rows);
+    return rows.stream()
+        .map(row -> IndexRequestService.toResponse(row).withData(availability.get(row.id())))
+        .toList();
   }
 
   @POST
@@ -67,8 +81,10 @@ public class IndexController {
   @Produces(MediaType.APPLICATION_JSON)
   public IndexResponse getIndex(@PathParam("id") UUID id) {
     LOG.info("GET /v1/index/{}", id);
-    return indexRequestService
-        .status(id)
-        .orElseThrow(() -> new NoSuchElementException("Indexing request not found: " + id));
+    IndexingRequestStore.IndexingRequest row =
+        requestDao
+            .findById(id)
+            .orElseThrow(() -> new NoSuchElementException("Indexing request not found: " + id));
+    return IndexRequestService.toResponse(row).withData(dataAvailability.resolve(row).orElse(null));
   }
 }

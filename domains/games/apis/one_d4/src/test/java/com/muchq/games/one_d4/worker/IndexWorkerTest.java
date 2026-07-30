@@ -28,6 +28,7 @@ import com.muchq.games.one_d4.motifs.SkewerDetector;
 import com.muchq.games.one_d4.queue.IndexMessage;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -801,6 +802,11 @@ public class IndexWorkerTest {
         int gamesCount,
         boolean excludeBullet) {
       upserts.add(new Upsert(month, isComplete, gamesCount));
+    }
+
+    @Override
+    public List<IndexedPeriod> findPeriodsForPlayers(Collection<String> players) {
+      return List.of();
     }
 
     @Override

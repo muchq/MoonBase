@@ -2,9 +2,13 @@ package com.muchq.games.one_d4.api.dto;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -20,6 +24,10 @@ import org.junit.jupiter.api.Test;
 public class DtoJsonCompatTest {
 
   private final ObjectMapper mapper = new ObjectMapper();
+
+  /** Instant needs JSR-310 registered, the same way the service's mapper has it. */
+  private final ObjectMapper timeAwareMapper =
+      new ObjectMapper().registerModule(new JavaTimeModule());
 
   @Test
   public void queryRequestWithoutPlayerDeserializes() throws Exception {
@@ -126,5 +134,93 @@ public class DtoJsonCompatTest {
         mapper.readValue(mapper.writeValueAsString(original), AggregateResponse.class);
 
     assertThat(roundTripped).isEqualTo(original);
+  }
+
+  @Test
+  public void indexResponseSerializesDataAvailabilityUnderDocumentedNames() throws Exception {
+    IndexResponse response =
+        new IndexResponse(
+                UUID.fromString("a1b2c3d4-e5f6-7890-abcd-ef1234567890"),
+                "hikaru",
+                "CHESS_COM",
+                "2026-06",
+                "2026-07",
+                "COMPLETED",
+                325,
+                null,
+                true)
+            .withData(new DataAvailability("PARTIAL", 1, 2, Instant.parse("2026-08-01T00:00:00Z")));
+
+    JsonNode json = timeAwareMapper.readTree(timeAwareMapper.writeValueAsString(response));
+
+    // Every key API.md publishes, and nothing extra: renaming one is a breaking change.
+    assertThat(json.properties())
+        .extracting(Map.Entry::getKey)
+        .containsExactlyInAnyOrder(
+            "id",
+            "player",
+            "platform",
+            "startMonth",
+            "endMonth",
+            "status",
+            "gamesIndexed",
+            "errorMessage",
+            "excludeBullet",
+            "data");
+    assertThat(json.get("status").asText()).isEqualTo("COMPLETED");
+    assertThat(json.get("gamesIndexed").asInt()).isEqualTo(325);
+
+    JsonNode data = json.get("data");
+    assertThat(data.properties())
+        .extracting(Map.Entry::getKey)
+        .containsExactlyInAnyOrder("status", "monthsAvailable", "monthsTotal", "expiresAt");
+    assertThat(data.get("status").asText()).isEqualTo("PARTIAL");
+    assertThat(data.get("monthsAvailable").asInt()).isEqualTo(1);
+    assertThat(data.get("monthsTotal").asInt()).isEqualTo(2);
+    // The instant's exact encoding is the server mapper's business — playedAt already rides the
+    // same setting — so assert it survives the trip rather than pinning a numeric literal here.
+    assertThat(
+            timeAwareMapper
+                .readValue(timeAwareMapper.writeValueAsString(response), IndexResponse.class)
+                .data()
+                .expiresAt())
+        .isEqualTo(Instant.parse("2026-08-01T00:00:00Z"));
+  }
+
+  @Test
+  public void indexResponseWithoutDataStillBinds() throws Exception {
+    // A body produced before `data` existed, and the shape still sent for a PENDING request.
+    IndexResponse response =
+        mapper.readValue(
+            "{\"id\":\"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\"player\":\"hikaru\","
+                + "\"platform\":\"CHESS_COM\",\"startMonth\":\"2026-06\",\"endMonth\":\"2026-06\","
+                + "\"status\":\"PENDING\",\"gamesIndexed\":0,\"errorMessage\":null,"
+                + "\"excludeBullet\":false}",
+            IndexResponse.class);
+
+    assertThat(response.status()).isEqualTo("PENDING");
+    assertThat(response.gamesIndexed()).isZero();
+    assertThat(response.data()).isNull();
+  }
+
+  @Test
+  public void indexResponseWithDataRoundTrips() throws Exception {
+    IndexResponse original =
+        new IndexResponse(
+                UUID.randomUUID(),
+                "drawlya",
+                "CHESS_COM",
+                "2026-07",
+                "2026-07",
+                "COMPLETED",
+                130,
+                null,
+                false)
+            .withData(new DataAvailability("EXPIRED", 0, 1, null));
+
+    assertThat(
+            timeAwareMapper.readValue(
+                timeAwareMapper.writeValueAsString(original), IndexResponse.class))
+        .isEqualTo(original);
   }
 }

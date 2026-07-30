@@ -18,6 +18,7 @@ import com.muchq.games.one_d4.motifs.Detectors;
 import com.muchq.games.one_d4.motifs.MotifDetector;
 import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.games.one_d4.queue.IndexQueue;
+import com.muchq.games.one_d4.service.DataAvailabilityResolver;
 import com.muchq.games.one_d4.service.IndexRequestService;
 import com.muchq.games.one_d4.worker.IndexWorker;
 import com.muchq.games.one_d4.worker.IndexWorkerLifecycle;
@@ -141,6 +142,11 @@ public class IndexerModule {
   public IndexRequestService indexRequestService(
       IndexingRequestStore requestStore, IndexQueue queue, IndexWorker worker) {
     return new IndexRequestService(requestStore, queue, worker::process);
+  }
+
+  @Context
+  public DataAvailabilityResolver dataAvailabilityResolver(IndexedPeriodStore periodStore) {
+    return new DataAvailabilityResolver(periodStore);
   }
 
   @Context

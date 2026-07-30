@@ -2,6 +2,7 @@ package com.muchq.games.one_d4.worker;
 
 import com.muchq.games.one_d4.db.GameFeatureStore;
 import com.muchq.games.one_d4.db.IndexedPeriodStore;
+import com.muchq.games.one_d4.db.RetentionPolicy;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.scheduling.annotation.Scheduled;
 import jakarta.inject.Inject;
@@ -13,7 +14,7 @@ import org.slf4j.LoggerFactory;
 @Context
 public class RetentionWorker {
   private static final Logger LOG = LoggerFactory.getLogger(RetentionWorker.class);
-  private static final Duration RETENTION_PERIOD = Duration.ofDays(7);
+  private static final Duration RETENTION_PERIOD = RetentionPolicy.PERIOD;
 
   private final GameFeatureStore gameFeatureStore;
   private final IndexedPeriodStore indexedPeriodStore;

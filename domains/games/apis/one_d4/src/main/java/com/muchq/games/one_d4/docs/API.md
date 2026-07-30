@@ -58,6 +58,13 @@ PENDING → PROCESSING → COMPLETED
 
 ---
 
+## GET /v1/index
+
+List the 50 most recent indexing requests, newest first. Each entry has the same shape as
+`GET /v1/index/{id}`.
+
+---
+
 ## GET /v1/index/{id}
 
 Poll the status of an indexing request.
@@ -73,9 +80,48 @@ Poll the status of an indexing request.
   "endMonth": "2024-03",
   "status": "COMPLETED",
   "gamesIndexed": 147,
-  "errorMessage": null
+  "errorMessage": null,
+  "excludeBullet": false,
+  "data": {
+    "status": "AVAILABLE",
+    "monthsAvailable": 1,
+    "monthsTotal": 1,
+    "expiresAt": 1712000000.0
+  }
 }
 ```
+
+### The `data` object — is the indexed data still there?
+
+Request rows are kept forever; the games they produced are not. The retention worker deletes
+games and indexed periods once they are older than **7 days**, but never touches
+`indexing_requests` — so without `data`, a request from two weeks ago is indistinguishable from
+one indexed an hour ago. Both say `"status": "COMPLETED", "gamesIndexed": 147`; only one of them
+still has games to query.
+
+`data` is null until the request reaches COMPLETED.
+
+| Field           | Type        | Description                                                     |
+|-----------------|-------------|-----------------------------------------------------------------|
+| status          | string      | `AVAILABLE`, `PARTIAL`, `EXPIRED`, or `UNKNOWN` (see below)      |
+| monthsAvailable | int         | Months in the request's range that are still indexed             |
+| monthsTotal     | int         | Months the request covers                                        |
+| expiresAt       | float\|null | When the first remaining month is due to be swept; null once none remain. Epoch seconds, same encoding as `playedAt` |
+
+- `AVAILABLE` — every month in the range is still indexed.
+- `PARTIAL` — some months have been swept. Common on multi-month ranges, whose earlier months
+  age out first.
+- `EXPIRED` — nothing is left. Re-run the request to index the games again.
+- `UNKNOWN` — the stored month range could not be parsed, so coverage could not be checked.
+
+Availability is computed against `indexed_periods`, keyed by (player, platform, month,
+excludeBullet) — the same rows the indexer's cache consults, swept on the same clock as the
+games. Counting surviving `game_features` by `request_id` would report differently: reindexing a
+period reassigns those rows to the newer request, so an older request would read `EXPIRED` while
+its games are in fact still stored.
+
+`expiresAt` tracks the **earliest**-fetched surviving month, which is when the request stops
+being whole rather than when its last month disappears.
 
 ### Response (404)
 

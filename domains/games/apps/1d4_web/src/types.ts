@@ -29,6 +29,20 @@ export interface GameRow {
   occurrences?: Record<string, OccurrenceRow[]>;
 }
 
+/**
+ * Whether a request's indexed games are still stored. Request rows outlive the
+ * games they produced — the retention worker sweeps games and indexed periods
+ * on a 7-day clock but never touches `indexing_requests` — so "COMPLETED, 325
+ * games" keeps rendering long after querying it would return nothing.
+ */
+export interface DataAvailability {
+  status: 'AVAILABLE' | 'PARTIAL' | 'EXPIRED' | 'UNKNOWN';
+  monthsAvailable: number;
+  monthsTotal: number;
+  /** Epoch seconds; null once nothing is left to expire. */
+  expiresAt: number | null;
+}
+
 export interface IndexRequest {
   id: string;
   player: string;
@@ -39,6 +53,8 @@ export interface IndexRequest {
   gamesIndexed: number;
   errorMessage: string | null;
   excludeBullet: boolean;
+  /** Absent until the request COMPLETEs. */
+  data?: DataAvailability | null;
 }
 
 export interface QueryResponse {
