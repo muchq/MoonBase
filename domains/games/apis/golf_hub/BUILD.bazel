@@ -54,7 +54,8 @@ cc_test(
 # Beyoncé Rule contract tests (hub tier; platform tier lives in
 # //domains/platform/libs/aura:smithy_contract_test): the smithy-cpp
 # behaviors the hub depends on — RequireOrigin, the in-memory socket pair,
-# and SessionRegistry admission/grace/fan-out — pinned so a pin bump that
+# SessionRegistry admission/grace/fan-out, and the ADR-0018 JSON
+# text-frame codec production browsers ride — pinned so a pin bump that
 # changes one fails with a named contract. Non-Beast deps only.
 cc_test(
     name = "smithy_contract_test",
@@ -64,6 +65,7 @@ cc_test(
         "@googletest//:gtest_main",
         "@smithy_cpp//runtime:core",
         "@smithy_cpp//runtime:eventstream",
+        "@smithy_cpp//runtime:eventstream_json",
         "@smithy_cpp//runtime:http",
         "@smithy_cpp//runtime:server",
     ],
@@ -347,6 +349,35 @@ cc_test(
         "@smithy_cpp//runtime:core",
         "@smithy_cpp//runtime:http",
         "@smithy_cpp//runtime:http_beast",
+    ],
+)
+
+# Beyoncé Rule wire-contract tests (consumer tier): the raw HTTP bytes and
+# eventstream frames the golf web client depends on, pinned as golden
+# fixtures driven through the generated server WITHOUT the generated
+# client — a regeneration that renames what the web client reads (the
+# session bodies, the room-layer events and their ordering, the golf
+# command/update envelopes and GameView, the terminal exception frames)
+# fails here even though the typed e2e suites (which regenerate with it)
+# still pass. Non-Beast deps only, so it runs in restricted-egress
+# sandboxes.
+cc_test(
+    name = "golf_hub_wire_test",
+    size = "small",
+    srcs = ["golf_hub_wire_test.cc"],
+    deps = [
+        ":golf_hub_smithy_server",
+        ":hub_handler",
+        ":id_generator",
+        ":rate_limiter",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:eventstream",
+        "@smithy_cpp//runtime:http",
     ],
 )
 

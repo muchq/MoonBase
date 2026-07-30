@@ -23,6 +23,7 @@
 #include "moonbase/portrait/client.h"
 #include "moonbase/portrait/server.h"
 #include "smithy/core/blob.h"
+#include "smithy/http/message.h"
 
 namespace {
 
@@ -231,6 +232,35 @@ INSTANTIATE_TEST_SUITE_P(
 TEST_F(PortraitWireTest, NonJsonContentTypeRejected) {
   const auto response = harness_.PostTrace(GoldenRequest().dump(), "text/plain");
   EXPECT_EQ(response.status, 415) << response.body;
+}
+
+// Consumer-visible router behavior: a request for a path the service
+// never modeled is a 404 with the runtime's {"code","message"} envelope.
+// Clients (and their monitoring) key off this exact shape to tell "wrong
+// URL" apart from an application error.
+TEST_F(PortraitWireTest, UnknownRouteReturns404WithCodeEnvelope) {
+  smithy::http::HttpRequest request;
+  request.method = "POST";
+  request.target = "/portrait/v1/nope";
+  request.headers.Set("content-type", "application/json");
+  request.body = "{}";
+  const auto response = harness_.Send(std::move(request));
+  EXPECT_EQ(response.status, 404) << response.body;
+  EXPECT_EQ(response.headers.Get("content-type").value_or(""), "application/json");
+  EXPECT_EQ(response.body, R"({"code":"NotFound","message":"no route matches the request"})");
+}
+
+// Consumer-visible router behavior: the right path with the wrong method
+// is a 405 whose Allow header lists the methods the route does serve —
+// the generated router's promise, distinct from the 404 above.
+TEST_F(PortraitWireTest, WrongMethodReturns405WithAllowHeader) {
+  smithy::http::HttpRequest request;
+  request.method = "GET";
+  request.target = "/portrait/v1/trace";
+  const auto response = harness_.Send(std::move(request));
+  EXPECT_EQ(response.status, 405) << response.body;
+  EXPECT_EQ(response.headers.Get("allow").value_or(""), "POST");
+  EXPECT_EQ(response.body, R"({"code":"MethodNotAllowed","message":"method not allowed"})");
 }
 
 TEST_F(PortraitWireTest, GeneratedClientRoundTrips) {
