@@ -292,6 +292,31 @@ java_test_suite(
     ],
 )
 
+java_library(
+    name = "hikaru_corpus",
+    testonly = True,
+    resources = ["src/test/resources/hikaru_corpus.pgn"],
+    resource_strip_prefix = "domains/games/apis/one_d4/src/test/resources",
+)
+
+# 500 real chess.com games replayed against chariot per ply — the wide-net regression bank for
+# the internal ReplayBoard. Kept out of engine_tests so the small suite stays fast.
+java_test_suite(
+    name = "corpus_tests",
+    size = "medium",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/engine/HikaruCorpusParityTest.java",
+    ],
+    deps = [
+        ":engine",
+        ":hikaru_corpus",
+        ":model",
+        artifact("io.github.tors42:chariot"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
 java_test_suite(
     name = "motifs_tests",
     size = "small",
