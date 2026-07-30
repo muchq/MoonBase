@@ -10,8 +10,6 @@ embedded-graph = []
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
 log = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 simplelog = { workspace = true }
-tracing = { workspace = true }
 wordchains = { workspace = true }

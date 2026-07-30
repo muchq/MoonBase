@@ -14,8 +14,6 @@ rust_binary(
         "clap",
         "log",
         "simplelog",
-        "tracing",
-        "serde",
         "serde_json",
     ]) + ["//domains/games/libs/wordchains"],
 )
@@ -60,8 +58,6 @@ rust_binary(
         "clap",
         "log",
         "simplelog",
-        "tracing",
-        "serde",
         "serde_json",
     ]) + ["//domains/games/libs/wordchains"],
 )

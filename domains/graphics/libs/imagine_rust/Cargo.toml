@@ -7,4 +7,3 @@ readme.workspace = true
 
 [dependencies]
 image = { workspace = true }
-tracing = { workspace = true }
