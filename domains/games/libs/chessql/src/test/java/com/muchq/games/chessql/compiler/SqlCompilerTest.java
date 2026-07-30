@@ -1029,27 +1029,13 @@ public class SqlCompilerTest {
     assertThat(groups.parameters())
         .isEqualTo(
             List.of(
-                "hikaru",
-                "hikaru",
-                "hikaru",
-                "hikaru",
-                "hikaru",
-                "win",
-                julyStart,
-                julyStart,
+                "hikaru", "hikaru", "hikaru", "hikaru", "hikaru", "win", julyStart, julyStart,
                 augStart));
     // totals: same WHERE params in the same order, with the me.color CASE param moved to the end
     assertThat(totals.parameters())
         .isEqualTo(
             List.of(
-                "hikaru",
-                "hikaru",
-                "hikaru",
-                "hikaru",
-                "win",
-                julyStart,
-                julyStart,
-                augStart,
+                "hikaru", "hikaru", "hikaru", "hikaru", "win", julyStart, julyStart, augStart,
                 "hikaru"));
     assertThat(groups.parameters())
         .containsExactlyInAnyOrderElementsOf(totals.parameters())
@@ -1076,13 +1062,7 @@ public class SqlCompilerTest {
     assertThat(result.parameters())
         .isEqualTo(
             List.of(
-                "PIN",
-                "hikaru",
-                "hikaru",
-                "hikaru",
-                "hikaru",
-                "win",
-                utc("2026-07-01T00:00:00Z")));
+                "PIN", "hikaru", "hikaru", "hikaru", "hikaru", "win", utc("2026-07-01T00:00:00Z")));
     assertThat(countPlaceholders(result.selectSql())).isEqualTo(result.parameters().size());
   }
 

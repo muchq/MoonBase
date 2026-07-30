@@ -74,7 +74,7 @@ public class PlayedAtTimeZoneTest {
             gameAt("juneEnd", Instant.parse("2026-06-30T23:59:59.999Z")),
             // 2026-07-01T14:00 local — the first instant of UTC July
             gameAt("julyStart", Instant.parse("2026-07-01T00:00:00.000Z")),
-            gameAt("julyMid", Instant.parse("2026-07-15T12:00:00.000Z")));
+            gameAt("julyMid", Instant.parse("2026-07-15T12:00:00.000Z"))));
 
     assertThat(urlsMatching("month = \"2026-06\"")).containsExactly("juneEnd");
     assertThat(urlsMatching("month = \"2026-07\"")).containsExactly("julyMid", "julyStart");
@@ -84,7 +84,8 @@ public class PlayedAtTimeZoneTest {
     assertThat(urlsMatching("date > \"2026-06-30\"")).containsExactly("julyMid", "julyStart");
     assertThat(urlsMatching("date < \"2026-07-01\"")).containsExactly("juneEnd");
     assertThat(urlsMatching("date >= \"2026-07-01\"")).containsExactly("julyMid", "julyStart");
-    assertThat(urlsMatching("date != \"2026-07-01\"")).containsExactly("juneEnd", "julyMid");
+    assertThat(urlsMatching("date != \"2026-07-01\""))
+        .containsExactlyInAnyOrder("juneEnd", "julyMid");
   }
 
   /** played_at must survive the round trip as the same instant, not shifted by the zone offset. */
@@ -113,7 +114,8 @@ public class PlayedAtTimeZoneTest {
     var groups =
         dao.aggregate(
             compiler.compileAggregate(parsed, List.of("time_class")), List.of("time_class"), 10);
-    var totals = dao.aggregateTotals(compiler.compileAggregateTotals(parsed, List.of("time_class")));
+    var totals =
+        dao.aggregateTotals(compiler.compileAggregateTotals(parsed, List.of("time_class")));
 
     assertThat(groups).hasSize(1);
     assertThat(groups.get(0).count()).isEqualTo(2);

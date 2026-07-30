@@ -741,7 +741,8 @@ public class GameFeatureDaoTest {
             // played_at is a nullable column and insertBatch binds null for it
             createGameAt("noPlayedAt", null)));
 
-    assertThat(urlsMatching("date = \"2026-06-15\"")).containsExactly("dayEnd", "dayMid", "dayStart");
+    assertThat(urlsMatching("date = \"2026-06-15\""))
+        .containsExactly("dayEnd", "dayMid", "dayStart");
     assertThat(urlsMatching("date != \"2026-06-15\"")).containsExactly("nextStart", "prevEnd");
     assertThat(urlsMatching("date < \"2026-06-15\"")).containsExactly("prevEnd");
     assertThat(urlsMatching("date <= \"2026-06-15\""))
