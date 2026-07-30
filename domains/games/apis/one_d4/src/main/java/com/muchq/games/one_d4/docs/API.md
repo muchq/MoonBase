@@ -181,17 +181,27 @@ and `outcome` are the only perspective fields allowed, and only with `player` (s
 Group keys are canonical column names (e.g. `opening_family`, even when requested as
 `opening.family`; perspective group keys use the underscore form `me_color` / `outcome`). Groups
 are ordered by count descending, then by group values ascending. `count` is the number of groups
-returned; `totalGames` and `totalGroups` are computed over the untruncated result, and
-`truncated` is true when `limit` cut off groups — important for `opening_family`, whose
-ECO-URL-derived values fragment into long tails of small groups.
+returned — not a game count, which is what `totalGames` reports. `totalGames` and `totalGroups`
+are computed over the untruncated result, and `truncated` is true when `limit` cut off groups —
+important for `opening_family`, whose ECO-URL-derived values fragment into long tails of small
+groups. When fewer groups come back than `limit` allowed, nothing was cut off and the totals are
+derived from the returned rows rather than from a second query.
+
+A `date` / `month` filter scopes the indexed corpus only. A period that was never indexed returns
+zero groups rather than an error, which is indistinguishable from "played no games then" — index
+it first via `POST /v1/index`.
 
 ### Error Responses
 
-| Condition             | HTTP Status |
-|-----------------------|-------------|
-| Bad ChessQL syntax    | 400         |
-| Unknown group-by field| 400         |
-| Missing query/groupBy | 400         |
+| Condition                                        | HTTP Status |
+|--------------------------------------------------|-------------|
+| Bad ChessQL syntax                                | 400         |
+| Unknown group-by field                            | 400         |
+| Missing query/groupBy                             | 400         |
+| Filter-only field in groupBy (`date`, `month`)    | 400         |
+| Perspective field in groupBy other than `me.color` / `outcome` | 400 |
+| `me.color` / `outcome` in groupBy without `player` | 400        |
+| Perspective field in the filter without `player`  | 400         |
 
 ---
 

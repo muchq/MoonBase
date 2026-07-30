@@ -115,8 +115,18 @@ public class IndexerFacade {
     ParsedQuery parsed = Parser.parse(chessql);
     List<String> groupColumns = sqlCompiler.resolveGroupByColumns(groupBy);
     CompiledQuery compiled = sqlCompiler.compileAggregate(parsed, groupBy, player);
-    CompiledQuery totalsQuery = sqlCompiler.compileAggregateTotals(parsed, groupBy, player);
     List<AggregateRow> groups = gameFeatureStore.aggregate(compiled, groupColumns, limit);
+
+    // Fewer groups came back than the limit allowed, so nothing was cut off and the totals are
+    // already in hand: every matching group is present, and their counts sum to every matching
+    // game. Only a result that filled the limit could be hiding a tail worth a second
+    // COUNT-over-groups scan.
+    if (groups.size() < limit) {
+      long totalGames = groups.stream().mapToLong(AggregateRow::count).sum();
+      return new AggregateResult(groups, totalGames, groups.size());
+    }
+
+    CompiledQuery totalsQuery = sqlCompiler.compileAggregateTotals(parsed, groupBy, player);
     GameFeatureStore.AggregateTotals totals = gameFeatureStore.aggregateTotals(totalsQuery);
     return new AggregateResult(groups, totals.totalGames(), totals.totalGroups());
   }

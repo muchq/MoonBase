@@ -32,13 +32,15 @@ public class AggregateControllerTest {
             new AggregateRow(Map.of("opening_family", "Sicilian Defense"), 17));
     store.totals = new GameFeatureStore.AggregateTotals(59, 2);
 
+    // limit == the number of groups returned, so the result could be truncated and the totals
+    // query runs; see aggregate_underLimitDerivesTotalsWithoutSecondQuery for the other branch.
     AggregateResponse response =
         controller.aggregate(
             new AggregateRequest(
                 "white.username = \"hikaru\" AND time.class = \"blitz\"",
                 List.of("opening.family"),
                 "count",
-                20));
+                2));
 
     assertThat(response.count()).isEqualTo(2);
     assertThat(response.groups().get(0).group())
@@ -50,7 +52,7 @@ public class AggregateControllerTest {
 
     // The store received the compiled aggregate with canonical group columns and the limit
     assertThat(store.lastGroupColumns).containsExactly("opening_family");
-    assertThat(store.lastLimit).isEqualTo(20);
+    assertThat(store.lastLimit).isEqualTo(2);
     assertThat(store.lastCompiled).isInstanceOf(CompiledQuery.class);
     CompiledQuery compiled = (CompiledQuery) store.lastCompiled;
     assertThat(compiled.selectSql())
@@ -66,6 +68,41 @@ public class AggregateControllerTest {
         .contains("COALESCE(SUM(group_count), 0) AS total_games")
         .contains("GROUP BY opening_family");
     assertThat(totals.parameters()).isEqualTo(List.of("hikaru", "blitz"));
+  }
+
+  /**
+   * The totals query is a second COUNT-over-groups scan of the same corpus, and it can only tell
+   * the caller something new when the group limit was actually reached. Under the limit the answer
+   * is already in the returned rows, so the query is skipped — and must produce the same response
+   * it would have produced.
+   */
+  @Test
+  public void aggregate_underLimitDerivesTotalsWithoutSecondQuery() {
+    store.rows =
+        List.of(
+            new AggregateRow(Map.of("opening_family", "Caro Kann Defense"), 42),
+            new AggregateRow(Map.of("opening_family", "Sicilian Defense"), 17));
+    // What the skipped query would have returned, so the two branches are directly comparable.
+    store.totals = new GameFeatureStore.AggregateTotals(59, 2);
+
+    AggregateResponse underLimit =
+        controller.aggregate(
+            new AggregateRequest("white.elo >= 1", List.of("opening_family"), "count", 20));
+
+    assertThat(store.totalsCalls).isZero();
+    assertThat(store.lastTotalsCompiled).isNull();
+
+    AggregateResponse atLimit =
+        controller.aggregate(
+            new AggregateRequest("white.elo >= 1", List.of("opening_family"), "count", 2));
+
+    assertThat(store.totalsCalls).isEqualTo(1);
+    assertThat(store.lastTotalsCompiled).isNotNull();
+
+    assertThat(underLimit.totalGames()).isEqualTo(atLimit.totalGames()).isEqualTo(59);
+    assertThat(underLimit.totalGroups()).isEqualTo(atLimit.totalGroups()).isEqualTo(2);
+    assertThat(underLimit.truncated()).isEqualTo(atLimit.truncated()).isFalse();
+    assertThat(underLimit.count()).isEqualTo(atLimit.count()).isEqualTo(2);
   }
 
   @Test
@@ -185,6 +222,7 @@ public class AggregateControllerTest {
     Object lastTotalsCompiled;
     List<String> lastGroupColumns;
     int lastLimit;
+    int totalsCalls;
 
     @Override
     public List<AggregateRow> aggregate(
@@ -198,6 +236,7 @@ public class AggregateControllerTest {
     @Override
     public AggregateTotals aggregateTotals(Object compiledQuery) {
       this.lastTotalsCompiled = compiledQuery;
+      this.totalsCalls++;
       return totals;
     }
 

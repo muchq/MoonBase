@@ -10,11 +10,9 @@ import com.muchq.games.chessql.ast.OrExpr;
 import com.muchq.games.chessql.ast.OrderByClause;
 import com.muchq.games.chessql.ast.SequenceExpr;
 import com.muchq.games.chessql.parser.ParsedQuery;
-import java.sql.Timestamp;
-import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.YearMonth;
-import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
@@ -92,8 +90,8 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
   /**
    * Virtual date-scoping fields compiled against the played_at TIMESTAMP column. Values are
    * validated ISO strings ({@code date = "YYYY-MM-DD"}, {@code month = "YYYY-MM"}); every operator
-   * is rewritten to plain played_at comparisons against UTC day/month boundaries bound as
-   * timestamps, which behaves identically on H2 and Postgres (no dialect date functions).
+   * is rewritten to plain played_at comparisons against day/month boundaries bound as {@link
+   * LocalDateTime}, which behaves identically on H2 and Postgres (no dialect date functions).
    */
   private static final String DATE_FIELD = "date";
 
@@ -464,44 +462,49 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    * Compiles a {@code date} / {@code month} comparison to played_at range predicates. Day and month
    * values cover a half-open timestamp interval, so operators are rewritten against the interval's
    * boundaries: {@code date = "D"} means "played on day D", {@code date <= "D"} includes all of day
-   * D, and so on. Boundaries are UTC and bound as timestamps.
+   * D, and so on.
+   *
+   * <p>played_at is TIMESTAMP WITHOUT TIME ZONE, i.e. a wall clock, and the wall clock stored there
+   * is UTC by convention — so the right parameter is a zone-free {@link LocalDateTime} taken
+   * straight from the calendar boundary. Nothing converts between an instant and a wall clock here,
+   * so there is no zone for a caller's JVM default to get wrong.
    */
   private static String compileDateComparison(ComparisonExpr cmp, List<Object> params) {
-    Instant start;
-    Instant end;
+    LocalDateTime start;
+    LocalDateTime end;
     if (MONTH_FIELD.equals(cmp.field())) {
       if (!cmp.operator().equals("=")) {
         throw new IllegalArgumentException(
             "month supports only '=' (use date for range comparisons), got: " + cmp.operator());
       }
       YearMonth month = parseMonthValue(cmp.value());
-      start = month.atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant();
-      end = month.plusMonths(1).atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+      start = month.atDay(1).atStartOfDay();
+      end = month.plusMonths(1).atDay(1).atStartOfDay();
     } else {
       LocalDate day = parseDateValue(cmp.value());
-      start = day.atStartOfDay(ZoneOffset.UTC).toInstant();
-      end = day.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+      start = day.atStartOfDay();
+      end = day.plusDays(1).atStartOfDay();
     }
     switch (cmp.operator()) {
       case "=":
-        params.add(Timestamp.from(start));
-        params.add(Timestamp.from(end));
+        params.add(start);
+        params.add(end);
         return "(played_at >= ? AND played_at < ?)";
       case "!=":
-        params.add(Timestamp.from(start));
-        params.add(Timestamp.from(end));
+        params.add(start);
+        params.add(end);
         return "(played_at < ? OR played_at >= ?)";
       case "<":
-        params.add(Timestamp.from(start));
+        params.add(start);
         return "played_at < ?";
       case ">=":
-        params.add(Timestamp.from(start));
+        params.add(start);
         return "played_at >= ?";
       case "<=":
-        params.add(Timestamp.from(end));
+        params.add(end);
         return "played_at < ?";
       case ">":
-        params.add(Timestamp.from(end));
+        params.add(end);
         return "played_at >= ?";
       default:
         throw new IllegalArgumentException("Invalid operator: " + cmp.operator());

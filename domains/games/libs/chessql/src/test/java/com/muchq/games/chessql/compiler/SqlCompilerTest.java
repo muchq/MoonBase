@@ -7,8 +7,9 @@ import com.muchq.games.chessql.ast.OrderByClause;
 import com.muchq.games.chessql.ast.SequenceExpr;
 import com.muchq.games.chessql.parser.ParsedQuery;
 import com.muchq.games.chessql.parser.Parser;
-import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -474,8 +475,13 @@ public class SqlCompilerTest {
 
   // === date / month scoping ===
 
-  private static Timestamp utc(String instant) {
-    return Timestamp.from(Instant.parse(instant));
+  /**
+   * The boundary a date/month rewrite binds: played_at is a zone-free TIMESTAMP holding a UTC wall
+   * clock, so the parameter is the {@link LocalDateTime} that instant reads as in UTC. Spelled as
+   * an instant here so the expectation states the UTC intent rather than a bare wall clock.
+   */
+  private static LocalDateTime utc(String instant) {
+    return Instant.parse(instant).atOffset(ZoneOffset.UTC).toLocalDateTime();
   }
 
   @Test
@@ -1023,8 +1029,8 @@ public class SqlCompilerTest {
     CompiledQuery groups = compiler.compileAggregate(parsed, groupBy, "hikaru");
     CompiledQuery totals = compiler.compileAggregateTotals(parsed, groupBy, "hikaru");
 
-    Timestamp julyStart = utc("2026-07-01T00:00:00Z");
-    Timestamp augStart = utc("2026-08-01T00:00:00Z");
+    LocalDateTime julyStart = utc("2026-07-01T00:00:00Z");
+    LocalDateTime augStart = utc("2026-08-01T00:00:00Z");
     // groups: me.color CASE (1), guard (2), outcome CASE (2), "win", date bound, month bounds
     assertThat(groups.parameters())
         .isEqualTo(

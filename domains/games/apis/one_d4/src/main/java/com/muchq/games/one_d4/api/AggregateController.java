@@ -57,10 +57,19 @@ public class AggregateController {
     List<String> groupColumns = sqlCompiler.resolveGroupByColumns(request.groupBy());
     CompiledQuery compiled =
         sqlCompiler.compileAggregate(parsed, request.groupBy(), request.player());
-    CompiledQuery totalsQuery =
-        sqlCompiler.compileAggregateTotals(parsed, request.groupBy(), request.player());
 
     List<AggregateRow> groups = gameFeatureStore.aggregate(compiled, groupColumns, request.limit());
+
+    // Fewer groups came back than the limit allowed, so nothing was cut off and the totals are
+    // already in hand: every matching group is present, and their counts sum to every matching
+    // game. Only a result that filled the limit could be hiding a tail worth a second
+    // COUNT-over-groups scan.
+    if (groups.size() < request.limit()) {
+      return new AggregateResponse(groups, groups.size(), sumCounts(groups), groups.size(), false);
+    }
+
+    CompiledQuery totalsQuery =
+        sqlCompiler.compileAggregateTotals(parsed, request.groupBy(), request.player());
     GameFeatureStore.AggregateTotals totals = gameFeatureStore.aggregateTotals(totalsQuery);
     return new AggregateResponse(
         groups,
@@ -68,5 +77,9 @@ public class AggregateController {
         totals.totalGames(),
         totals.totalGroups(),
         totals.totalGroups() > groups.size());
+  }
+
+  private static long sumCounts(List<AggregateRow> groups) {
+    return groups.stream().mapToLong(AggregateRow::count).sum();
   }
 }

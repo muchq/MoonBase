@@ -10,6 +10,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -92,7 +94,7 @@ public class GameFeatureDao implements GameFeatureStore {
               rs.getString("opening_name"),
               rs.getString("opening_family"),
               rs.getString("result"),
-              rs.getTimestamp("played_at").toInstant(),
+              playedAtToInstant(rs.getObject("played_at", LocalDateTime.class)),
               getIntOrNull(rs, "num_moves"),
               rs.getTimestamp("indexed_at") != null
                   ? rs.getTimestamp("indexed_at").toInstant()
@@ -114,6 +116,32 @@ public class GameFeatureDao implements GameFeatureStore {
     this.useH2 = useH2;
   }
 
+  /**
+   * played_at is TIMESTAMP WITHOUT TIME ZONE on both H2 and Postgres, so the column holds a wall
+   * clock rather than an instant — and {@link LocalDateTime} is exactly that type. Binding and
+   * reading it as a LocalDateTime is a straight JDBC 4.2 mapping onto the column: no zone
+   * conversion happens on either side, so there is no zone to get wrong and nothing for a caller to
+   * remember to pass. Modelling it as an {@link Instant} instead would drag the JVM default zone
+   * into every bind, making the stored value depend on where the process happened to run — a game
+   * written under UTC and read back under America/Los_Angeles would land on the wrong calendar day
+   * and drop out of {@code month = "2026-06"}.
+   *
+   * <p>These two helpers encode the one convention the type cannot: the stored wall clock is UTC.
+   * ChessQL's date/month rewrite emits its day and month boundaries as zone-free LocalDateTimes on
+   * that same convention, so filters compare like against like — and because both sides are already
+   * the column's own type, nothing has to be threaded through the bind sites to keep them agreeing.
+   * Under a UTC JVM this is a no-op against the older Calendar-based binding — the conversion that
+   * forced was already the identity — so existing rows keep their exact stored values.
+   */
+  private static @Nullable LocalDateTime playedAtFromInstant(@Nullable Instant instant) {
+    return instant == null ? null : instant.atOffset(ZoneOffset.UTC).toLocalDateTime();
+  }
+
+  /** Inverse of {@link #playedAtFromInstant}: a stored UTC wall clock read back as an instant. */
+  private static @Nullable Instant playedAtToInstant(@Nullable LocalDateTime wallClock) {
+    return wallClock == null ? null : wallClock.toInstant(ZoneOffset.UTC);
+  }
+
   @Override
   public void insertBatch(List<GameFeature> features) {
     if (features.isEmpty()) return;
@@ -122,6 +150,9 @@ public class GameFeatureDao implements GameFeatureStore {
         h -> {
           var batch = h.prepareBatch(sql);
           for (GameFeature row : features) {
+            // bindByType, not bind: played_at is nullable, and only the typed form carries
+            // Types.TIMESTAMP into setNull. Plain bind() would fall back to JDBI's untyped-null
+            // default (Types.OTHER) — accepted by both drivers today, but not the column's type.
             batch
                 .bind(0, row.requestId())
                 .bind(1, row.gameUrl())
@@ -137,7 +168,7 @@ public class GameFeatureDao implements GameFeatureStore {
                 .bind(11, row.openingName())
                 .bind(12, row.openingFamily())
                 .bind(13, row.result())
-                .bind(14, row.playedAt() != null ? Timestamp.from(row.playedAt()) : null)
+                .bindByType(14, playedAtFromInstant(row.playedAt()), LocalDateTime.class)
                 .bind(15, (Integer) row.numMoves())
                 .bind(16, row.pgn())
                 .add();
@@ -146,6 +177,16 @@ public class GameFeatureDao implements GameFeatureStore {
         });
   }
 
+  /**
+   * Deliberately binds the threshold as a plain {@link Timestamp}, converting through the JVM
+   * default zone, rather than as the UTC wall clock played_at uses. This compares against
+   * indexed_at, which is written by the database's own {@code now()} / {@code current_timestamp()}
+   * rather than by the JVM, so its stored wall clock is the database server's zone. Pinning the
+   * threshold to UTC would only be right when the server also runs UTC; making retention
+   * zone-independent means changing how indexed_at is *written* (a dialect-specific SQL change that
+   * reinterprets every existing row), which is a separate concern from played_at and is not
+   * attempted here.
+   */
   @Override
   public int deleteOlderThan(Instant threshold) {
     return jdbi.withHandle(

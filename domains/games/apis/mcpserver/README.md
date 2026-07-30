@@ -262,15 +262,22 @@ The indexer engine, database, and worker are embedded in this process (Option A 
 - `index_status` — poll an indexing request by `request_id`.
 - `query_chess_games` — ChessQL search over indexed games: `query`, optional `player` (resolves
   perspective fields `me.*`, `opponent.*`, `outcome`), `limit` (default 10, max 50), and
-  `include_pgn` (default false).
+  `include_pgn` (default false). The query can scope time with `date` (ISO comparisons, e.g.
+  `date >= "2026-07-01"`) or `month` (`month = "2026-07"`, equality only).
 - `aggregate_chess_games` — grouped counts over indexed games: `query`, `group_by` (e.g.
   `["opening_family"]`; with `player` also `me.color` / `outcome`, keyed `me_color`/`outcome` in
   the output), optional `player` and `limit`. Answers "most popular openings" — or "hikaru's win
-  rate by opening against GMs" via perspective fields — in one call. The output includes
-  `totalGames`/`totalGroups` over the untruncated result and `truncated` when the group limit cut
-  off a long tail (common with `opening_family`, whose chess.com ECO-URL-derived values are not
-  normalized: "Closed Sicilian" and "Closed Sicilian Defense" are distinct groups).
+  rate by opening against GMs" via perspective fields — in one call. The output's `count` is the
+  number of groups returned, not games; `totalGames`/`totalGroups` cover the untruncated result
+  and `truncated` says the group limit cut off a long tail (common with `opening_family`, whose
+  chess.com ECO-URL-derived values are not normalized: "Closed Sicilian" and "Closed Sicilian
+  Defense" are distinct groups).
 - `analyze_position` — detect motifs in a single `pgn` without indexing it.
+
+Both query tools see only what has been indexed, and neither reports which periods those are. A
+`date` / `month` filter over a never-indexed period returns an empty result rather than an error,
+which reads exactly like "played no games then" — run `index_chess_games` for the period before
+concluding anything from an empty date-scoped result.
 
 ## Configuration
 
