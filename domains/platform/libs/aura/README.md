@@ -1,6 +1,6 @@
 # Aura
 
-The serving chain for C++ services on [smithy-cpp](https://github.com/aaylward/smithy-cpp):
+The serving chain for C++ services on [smithy-cpp](https://github.com/muchq/smithy-cpp):
 observability, health, and optional per-client rate limiting, composed the
 same way in production and in tests.
 
