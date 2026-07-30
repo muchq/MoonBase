@@ -14,19 +14,19 @@ import org.junit.jupiter.api.Test;
 
 /**
  * ChessQL's {@code date} / {@code month} fields compile to played_at comparisons against UTC
- * day/month boundaries bound as {@link java.sql.Timestamp}. played_at is a TIMESTAMP column with no
- * zone on both H2 and Postgres, and {@code setTimestamp} without an explicit Calendar converts
- * through the JVM's default zone — so the whole feature is only correct if the write side and the
- * query side agree on that zone. This suite runs the end-to-end path under a deliberately extreme
- * non-UTC default zone (Pacific/Kiritimati, UTC+14) to prove the day boundaries stay UTC days
- * rather than sliding with the JVM.
+ * day/month boundaries. played_at is a TIMESTAMP column with no zone on both H2 and Postgres, so
+ * any binding that routes through an instant converts via the JVM's default zone — and the whole
+ * feature is then only correct if the write side and the query side agree on that zone. This suite
+ * runs the end-to-end path under a deliberately extreme non-UTC default zone (Pacific/Kiritimati,
+ * UTC+14) to prove the day boundaries stay UTC days rather than sliding with the JVM.
  *
  * <p>Agreeing on the JVM zone is not enough, which is why {@link
  * #storedWallClockIsUtcNotJvmLocal()} asserts the wall clock actually on disk rather than a round
  * trip: a symmetric write/read pair cancels the offset out within one process, so a query issued
  * from a JVM in a different zone than the one that indexed the row would still miss it. {@link
- * GameFeatureDao} binds played_at through an explicit UTC calendar on both sides to make the stored
- * value zone-independent.
+ * GameFeatureDao} binds played_at as a zone-free {@link java.time.LocalDateTime} on both sides —
+ * the column's own type, so no conversion happens at all — which is what makes the stored value
+ * zone-independent.
  *
  * <p>The zone comes from the Bazel target's {@code env = {"TZ": ...}} rather than {@code
  * TimeZone.setDefault} in a {@code @BeforeEach}: H2 caches the default zone globally the first time
