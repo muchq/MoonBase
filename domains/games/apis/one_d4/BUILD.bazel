@@ -295,8 +295,8 @@ java_test_suite(
 java_library(
     name = "hikaru_corpus",
     testonly = True,
-    resources = ["src/test/resources/hikaru_corpus.pgn"],
     resource_strip_prefix = "domains/games/apis/one_d4/src/test/resources",
+    resources = ["src/test/resources/hikaru_corpus.pgn"],
 )
 
 # 500 real chess.com games replayed against chariot per ply — the wide-net regression bank for
