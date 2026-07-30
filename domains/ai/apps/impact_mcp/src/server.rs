@@ -1,11 +1,9 @@
 use std::path::PathBuf;
 
-use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    GetPromptRequestParams, GetPromptResult, Implementation, ListPromptsResult,
-    PaginatedRequestParams, Prompt, PromptMessage, PromptMessageRole, ServerCapabilities,
-    ServerInfo,
+    GetPromptRequestParams, GetPromptResponse, GetPromptResult, Implementation, ListPromptsResult,
+    PaginatedRequestParams, Prompt, PromptMessage, Role, ServerCapabilities, ServerInfo,
 };
 use rmcp::service::RequestContext;
 use rmcp::{tool, tool_handler, tool_router, ErrorData, RoleServer, ServerHandler};
@@ -23,7 +21,6 @@ use crate::rubric::Rubric;
 #[derive(Clone)]
 pub struct ImpactServer {
     data_dir: PathBuf,
-    tool_router: ToolRouter<Self>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -84,10 +81,7 @@ pub struct PullSourceRequest {
 
 impl ImpactServer {
     pub fn new(data_dir: PathBuf) -> Self {
-        Self {
-            data_dir,
-            tool_router: Self::tool_router(),
-        }
+        Self { data_dir }
     }
 
     fn load_rubric(&self) -> Rubric {
@@ -446,7 +440,7 @@ impl ServerHandler for ImpactServer {
         &self,
         params: GetPromptRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<GetPromptResult, ErrorData> {
+    ) -> Result<GetPromptResponse, ErrorData> {
         let store = self
             .open_store()
             .map_err(|e| ErrorData::internal_error(e, None))?;
@@ -692,9 +686,10 @@ impl ServerHandler for ImpactServer {
         };
 
         Ok(GetPromptResult::new(vec![PromptMessage::new_text(
-            PromptMessageRole::User,
+            Role::User,
             content,
-        )]))
+        )])
+        .into())
     }
 }
 

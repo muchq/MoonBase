@@ -1,10 +1,17 @@
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 use tokenizers::models::bpe::{BpeTrainer, BPE};
 use tokenizers::pre_tokenizers::byte_level::ByteLevel;
 use tokenizers::AddedToken;
+
+/// Distinguishes concurrent `train_bpe` corpus files within a process. The
+/// timestamp and pid alone are not enough: threads racing into `train_bpe`
+/// share a pid and can read the same coarse clock tick, which previously let
+/// them collide on one path and truncate each other's corpus.
+static CORPUS_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Special token IDs for chat-style conversations.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -72,7 +79,11 @@ impl Tokenizer {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let tmp_path = tmp_dir.join(format!("corpus_{unique}_{}.txt", std::process::id()));
+        let seq = CORPUS_SEQ.fetch_add(1, Ordering::Relaxed);
+        let tmp_path = tmp_dir.join(format!(
+            "corpus_{unique}_{}_{seq}.txt",
+            std::process::id()
+        ));
         fs::write(&tmp_path, corpus).expect("failed to write corpus to temp file");
 
         typed

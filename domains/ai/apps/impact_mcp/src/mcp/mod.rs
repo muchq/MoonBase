@@ -1,4 +1,4 @@
-use rmcp::model::{CallToolRequestParams, Content, RawContent};
+use rmcp::model::{CallToolRequestParams, ContentBlock};
 use rmcp::service::RunningService;
 use rmcp::transport::TokioChildProcess;
 use rmcp::{RoleClient, ServiceExt};
@@ -66,7 +66,7 @@ impl McpClient {
         // Extract text content from the response
         let mut text_parts = Vec::new();
         for content in &result.content {
-            if let Content { raw: RawContent::Text(text), .. } = content {
+            if let ContentBlock::Text(text) = content {
                 text_parts.push(text.text.clone());
             }
         }
