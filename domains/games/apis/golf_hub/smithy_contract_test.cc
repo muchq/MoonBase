@@ -10,6 +10,9 @@
 //   SessionRegistry         hub_handler.cc: ResumeOrAdd admission
 //                           (ADR-0022), Detach + grace + on_expired
 //                           (ADR-0020/0021), SendTo fan-out
+//   Encode/DecodeJsonFrame  golf_hub_main.cc websocket_accept_json_frames
+//                           (ADR-0018): the JSON text-frame codec every
+//                           production browser session rides
 //
 // Deliberately non-Beast so it runs in restricted-egress sandboxes; the
 // full transport path is covered by the hub e2e suites in CI.
@@ -24,8 +27,11 @@
 #include <thread>
 #include <utility>
 
+#include "smithy/core/error.h"
+#include "smithy/eventstream/envelope.h"
 #include "smithy/eventstream/event_stream.h"
 #include "smithy/eventstream/frame.h"
+#include "smithy/eventstream/json_frame.h"
 #include "smithy/http/message.h"
 #include "smithy/http/websocket.h"
 #include "smithy/http/websocket_pair.h"
@@ -99,6 +105,62 @@ TEST(WebSocketPairContract, DeliversBothDirectionsAndCloseEndsCleanly) {
   auto ended = b->Receive();
   ASSERT_TRUE(ended.ok());
   EXPECT_FALSE(ended.value().has_value());
+}
+
+// --- Encode/DecodeJsonFrame: the ADR-0018 browser text wire. -------------
+// golf_hub_main.cc sets websocket_accept_json_frames = true, so every
+// production browser session's frames pass through this codec inside the
+// transport. The hub's own wire tests drive the in-memory pair, which
+// skips it — these pins are the only MoonBase-side coverage of the text
+// bytes browsers actually parse.
+
+TEST(JsonFrameContract, EventFramesRenderTheEnvelopeTextAndRoundTrip) {
+  // Byte-pinned with a golf frame: this is the exact text a browser's
+  // onmessage receives for the hub's first event. The codec's JSON output
+  // is deterministic (compact, sorted keys), so string equality is wire
+  // equality.
+  const smithy::eventstream::Message ready = smithy::eventstream::MakeEventMessage(
+      "sessionReady", "application/json",
+      smithy::Blob::FromString(R"({"playerId":"player-1","resumed":false})"));
+  const auto text = smithy::eventstream::EncodeJsonFrame(ready);
+  ASSERT_TRUE(text.ok()) << text.error().message();
+  EXPECT_EQ(*text, R"({"event":"sessionReady","payload":{"playerId":"player-1","resumed":false}})");
+
+  // Decode gives back the Message the binary wire would have carried, so
+  // everything above the socket is oblivious to the wire mode.
+  const auto decoded = smithy::eventstream::DecodeJsonFrame(*text);
+  ASSERT_TRUE(decoded.ok()) << decoded.error().message();
+  EXPECT_EQ(*decoded, ready);
+}
+
+TEST(JsonFrameContract, ExceptionFramesRenderTheExceptionMember) {
+  // The terminal error arm — what a browser sees when a dial is refused
+  // (golf_hub_wire_test pins the same refusal's binary framing).
+  const smithy::eventstream::Message refusal = smithy::eventstream::MakeExceptionMessage(
+      "Unauthenticated", "application/json",
+      smithy::Blob::FromString(R"({"message":"ticket expired or already spent"})"));
+  const auto text = smithy::eventstream::EncodeJsonFrame(refusal);
+  ASSERT_TRUE(text.ok()) << text.error().message();
+  EXPECT_EQ(*text, R"({"exception":"Unauthenticated",)"
+                   R"("payload":{"message":"ticket expired or already spent"}})");
+
+  const auto decoded = smithy::eventstream::DecodeJsonFrame(*text);
+  ASSERT_TRUE(decoded.ok()) << decoded.error().message();
+  EXPECT_EQ(*decoded, refusal);
+}
+
+TEST(JsonFrameContract, HeadersBeyondTheEnvelopeAreRefusedNotDropped) {
+  // The JSON envelope has no header channel. A message carrying any header
+  // beyond the envelope trio must be REFUSED (Error::Validation, session
+  // untouched) rather than encoded with the header silently dropped — the
+  // refusal is what keeps a future hub from leaking a header-borne fact
+  // into thin air on the production browser wire.
+  smithy::eventstream::Message extra = smithy::eventstream::MakeEventMessage(
+      "sessionReady", "application/json", smithy::Blob::FromString("{}"));
+  extra.headers.push_back({"x-hub-extra", std::string("boom")});
+  const auto text = smithy::eventstream::EncodeJsonFrame(extra);
+  ASSERT_FALSE(text.ok());
+  EXPECT_EQ(text.error().kind(), smithy::ErrorKind::kValidation);
 }
 
 // --- SessionRegistry: admission, grace, and fan-out (ADR-0020/21/22). ----
