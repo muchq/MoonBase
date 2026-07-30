@@ -51,6 +51,24 @@ cc_test(
     ],
 )
 
+# Beyoncé Rule contract tests (hub tier; platform tier lives in
+# //domains/platform/libs/aura:smithy_contract_test): the smithy-cpp
+# behaviors the hub depends on — RequireOrigin, the in-memory socket pair,
+# and SessionRegistry admission/grace/fan-out — pinned so a pin bump that
+# changes one fails with a named contract. Non-Beast deps only.
+cc_test(
+    name = "smithy_contract_test",
+    size = "small",
+    srcs = ["smithy_contract_test.cc"],
+    deps = [
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:eventstream",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
 cc_library(
     name = "ticket_vault",
     srcs = ["ticket_vault.cc"],
