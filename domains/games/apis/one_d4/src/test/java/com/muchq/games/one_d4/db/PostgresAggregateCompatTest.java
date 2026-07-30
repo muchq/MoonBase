@@ -4,14 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.muchq.games.chessql.compiler.SqlCompiler;
-import com.muchq.games.chessql.parser.Parser;
 import com.muchq.games.chessql.parser.ParsedQuery;
+import com.muchq.games.chessql.parser.Parser;
 import com.muchq.games.one_d4.api.dto.AggregateRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import java.io.Closeable;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
@@ -27,8 +27,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The aggregate SQL is the part of the compiler where H2 and Postgres can legitimately disagree,
- * and Postgres is the deployment target while every other DAO test runs on H2. Two constructs
- * carry real dialect risk:
+ * and Postgres is the deployment target while every other DAO test runs on H2. Two constructs carry
+ * real dialect risk:
  *
  * <ul>
  *   <li>GROUP BY (and the ORDER BY tiebreak) referencing a SELECT-list <em>alias</em> rather than
@@ -133,8 +133,7 @@ public class PostgresAggregateCompatTest {
         .containsEntry("me_color", "black")
         .containsEntry("outcome", "win");
 
-    var totals =
-        dao.aggregateTotals(compiler.compileAggregateTotals(parsed, groupBy, "hikaru"));
+    var totals = dao.aggregateTotals(compiler.compileAggregateTotals(parsed, groupBy, "hikaru"));
     assertThat(totals.totalGames()).isEqualTo(4);
     assertThat(totals.totalGroups()).isEqualTo(3);
   }
