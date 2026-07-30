@@ -136,6 +136,22 @@ public class PostgresAggregateCompatTest {
     var totals = dao.aggregateTotals(compiler.compileAggregateTotals(parsed, groupBy, "hikaru"));
     assertThat(totals.totalGames()).isEqualTo(4);
     assertThat(totals.totalGroups()).isEqualTo(3);
+
+    // Mixing an output alias with an input column in one GROUP BY / ORDER BY is where the
+    // resolution rules would bite if they differed per term.
+    List<String> mixed = List.of("me.color", "opening_family");
+    List<AggregateRow> mixedGroups =
+        dao.aggregate(
+            compiler.compileAggregate(parsed, mixed, "hikaru"),
+            compiler.resolveGroupByColumns(mixed),
+            10);
+    assertThat(
+            mixedGroups.stream()
+                .map(g -> g.group().get("me_color") + "/" + g.group().get("opening_family")))
+        .containsExactlyInAnyOrder("white/Caro Kann", "white/Sicilian", "black/English");
+    var mixedTotals = dao.aggregateTotals(compiler.compileAggregateTotals(parsed, mixed, "hikaru"));
+    assertThat(mixedTotals.totalGames()).isEqualTo(4);
+    assertThat(mixedTotals.totalGroups()).isEqualTo(3);
   }
 
   /**
