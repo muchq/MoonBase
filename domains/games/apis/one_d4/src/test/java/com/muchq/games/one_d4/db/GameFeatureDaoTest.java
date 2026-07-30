@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.muchq.games.chessql.compiler.CompiledQuery;
 import com.muchq.games.chessql.compiler.SqlCompiler;
+import com.muchq.games.chessql.parser.ParsedQuery;
 import com.muchq.games.chessql.parser.Parser;
 import com.muchq.games.one_d4.api.dto.AggregateRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
@@ -721,6 +722,112 @@ public class GameFeatureDaoTest {
             0);
     assertThat(juneRange.stream().map(GameFeature::gameUrl))
         .containsExactly("https://chess.com/game/june");
+  }
+
+  /**
+   * Every {@code date} operator against rows sitting exactly on the day's half-open boundaries. An
+   * off-by-a-day in the rewrite (e.g. {@code <=} binding start-of-day instead of start-of-next-day)
+   * puts one of these rows on the wrong side, which the equality assertions below catch.
+   */
+  @Test
+  public void dateOperators_boundaryInstantsOnH2() {
+    dao.insertBatch(
+        List.of(
+            createGameAt("prevEnd", Instant.parse("2026-06-14T23:59:59.999Z")),
+            createGameAt("dayStart", Instant.parse("2026-06-15T00:00:00.000Z")),
+            createGameAt("dayMid", Instant.parse("2026-06-15T12:00:00.000Z")),
+            createGameAt("dayEnd", Instant.parse("2026-06-15T23:59:59.999Z")),
+            createGameAt("nextStart", Instant.parse("2026-06-16T00:00:00.000Z")),
+            // played_at is a nullable column and insertBatch binds null for it
+            createGameAt("noPlayedAt", null)));
+
+    assertThat(urlsMatching("date = \"2026-06-15\"")).containsExactly("dayEnd", "dayMid", "dayStart");
+    assertThat(urlsMatching("date != \"2026-06-15\"")).containsExactly("nextStart", "prevEnd");
+    assertThat(urlsMatching("date < \"2026-06-15\"")).containsExactly("prevEnd");
+    assertThat(urlsMatching("date <= \"2026-06-15\""))
+        .containsExactly("dayEnd", "dayMid", "dayStart", "prevEnd");
+    assertThat(urlsMatching("date > \"2026-06-15\"")).containsExactly("nextStart");
+    assertThat(urlsMatching("date >= \"2026-06-15\""))
+        .containsExactly("dayEnd", "dayMid", "dayStart", "nextStart");
+    assertThat(urlsMatching("month = \"2026-06\""))
+        .containsExactly("dayEnd", "dayMid", "dayStart", "nextStart", "prevEnd");
+
+    // The row is really there — it is only invisible to date predicates. SQL three-valued logic
+    // means NULL played_at satisfies neither `date = D` nor `date != D`, so a game with no
+    // timestamp silently drops out of any date-scoped query, including the negated one.
+    SqlCompiler compiler = new SqlCompiler();
+    assertThat(
+            dao.aggregateTotals(
+                    compiler.compileAggregateTotals(
+                        Parser.parse("white_elo >= 1000"), List.of("platform")))
+                .totalGames())
+        .isEqualTo(6);
+  }
+
+  /**
+   * totalGames is SUM(group_count) over the inner grouped query, so it must equal the number of
+   * rows matching the filter — including rows whose group column is NULL (SQL groups those into one
+   * NULL group rather than dropping them) and excluding rows the filter rejects.
+   */
+  @Test
+  public void aggregateTotals_countNullGroupValuesAndExcludeFilteredRows() {
+    dao.insertBatch(
+        List.of(
+            gameWithOpening("https://chess.com/game/nt-1", "Caro Kann Defense", "blitz"),
+            gameWithOpening("https://chess.com/game/nt-2", "Caro Kann Defense", "blitz"),
+            gameWithOpening("https://chess.com/game/nt-3", "Sicilian Defense", "blitz"),
+            // opening_family is NULL on these two: they form one additional group, not zero
+            createGame("https://chess.com/game/nt-4"),
+            createGame("https://chess.com/game/nt-5"),
+            // filtered out by time_class, so it must not reach either total
+            gameWithOpening("https://chess.com/game/nt-6", "English Opening", "bullet")));
+
+    SqlCompiler compiler = new SqlCompiler();
+    ParsedQuery parsed = Parser.parse("time.class = \"blitz\"");
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(parsed, List.of("opening_family")),
+            List.of("opening_family"),
+            10);
+    GameFeatureStore.AggregateTotals totals =
+        dao.aggregateTotals(compiler.compileAggregateTotals(parsed, List.of("opening_family")));
+
+    assertThat(groups.stream().map(g -> g.group().get("opening_family")))
+        .containsExactlyInAnyOrder("Caro Kann Defense", "Sicilian Defense", null);
+    assertThat(groups.stream().mapToLong(AggregateRow::count).sum()).isEqualTo(5);
+    assertThat(totals.totalGames()).isEqualTo(5);
+    assertThat(totals.totalGroups()).isEqualTo(3);
+  }
+
+  /**
+   * compileAggregate puts perspective group expressions in the SELECT list and has GROUP BY / ORDER
+   * BY reference the alias. H2 and Postgres resolve such a name differently when a physical column
+   * shares it: H2 binds it to the SELECT alias, Postgres binds it to the input column and then
+   * fails with "must appear in the GROUP BY clause". So the aliases must not collide with any
+   * game_features column — this pins that, and fires if a column named outcome or me_color is ever
+   * added to the schema.
+   */
+  @Test
+  public void perspectiveGroupByAliases_doNotCollideWithPhysicalColumns() throws Exception {
+    List<String> aliases = new SqlCompiler().resolveGroupByColumns(List.of("me.color", "outcome"));
+    assertThat(aliases).containsExactly("me_color", "outcome");
+
+    List<String> columns = new ArrayList<>();
+    try (var conn = testDb.dataSource().getConnection();
+        var rs = conn.getMetaData().getColumns(null, null, "GAME_FEATURES", null)) {
+      while (rs.next()) {
+        columns.add(rs.getString("COLUMN_NAME").toLowerCase());
+      }
+    }
+    assertThat(columns).isNotEmpty().doesNotContainAnyElementsOf(aliases);
+  }
+
+  /** Game URLs matching a ChessQL filter, sorted so assertions read as a set. */
+  private List<String> urlsMatching(String chessql) {
+    return dao.query(new SqlCompiler().compile(Parser.parse(chessql)), 50, 0).stream()
+        .map(GameFeature::gameUrl)
+        .sorted()
+        .toList();
   }
 
   @Test
