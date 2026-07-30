@@ -164,17 +164,24 @@ if [ "$SHOW_STATUS" -eq 1 ]; then
   # carries the exit code, e.g. "Restarting (101)"), inspect for the restart
   # count, which ps can't report. RestartCount resets when a container is
   # recreated, so it reads as restarts since the last deploy of that service.
+  ssh_err=$(mktemp)
   running=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "
     sudo docker ps -a --filter label=com.docker.compose.service \
       --format 'S|{{.Label \"com.docker.compose.service\"}}|{{.Image}}|{{.Status}}'
     sudo docker ps -aq --filter label=com.docker.compose.service |
       xargs -r sudo docker inspect \
         --format 'R|{{index .Config.Labels \"com.docker.compose.service\"}}|{{.RestartCount}}'
-  " 2>/dev/null)
-  if [ -z "$running" ]; then
-    echo "Error: could not read container state from $HOST" >&2
+  " 2>"$ssh_err") && ssh_rc=0 || ssh_rc=$?
+  # Split from the assignment: under `set -e` a bare `running=$(ssh ...)` exits
+  # here with ssh's status, so the checks below never run and the failure is
+  # silent. ssh's stderr is kept for the same reason — it names the cause.
+  if [ "$ssh_rc" -ne 0 ] || [ -z "$running" ]; then
+    echo "Error: could not read container state from $HOST (ssh exit $ssh_rc)" >&2
+    [ -s "$ssh_err" ] && sed 's/^/  /' "$ssh_err" >&2
+    rm -f "$ssh_err"
     exit 1
   fi
+  rm -f "$ssh_err"
 
   # A lookup rather than an associative array, which bash 3.2 lacks.
   restarts_for() { printf '%s\n' "$running" | sed -n "s/^R|$1|//p" | tail -1; }
