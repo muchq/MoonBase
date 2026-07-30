@@ -423,7 +423,10 @@ java_test_suite(
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
-        artifact("com.fasterxml.jackson.datatype:jackson-datatype-jsr310"),
+        artifact("io.micronaut:micronaut-context"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("io.micronaut:micronaut-jackson-databind"),
+        artifact("io.micronaut:micronaut-runtime"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
@@ -626,6 +629,7 @@ java_test_suite(
     size = "small",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/api/ContentTypeHandlingTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/IndexResponseWireTest.java",
     ],
     runtime_deps = [
         "//domains/platform/libs/logging",

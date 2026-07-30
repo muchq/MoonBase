@@ -45,9 +45,12 @@ Start indexing games for a player over a month range.
   "endMonth": "2024-03",
   "status": "PENDING",
   "gamesIndexed": 0,
-  "errorMessage": null
+  "excludeBullet": false
 }
 ```
+
+Null fields are omitted rather than serialized as `null`, so a fresh request carries no
+`errorMessage` and no `data` key at all. Read them as absent, not null.
 
 ### Status Lifecycle
 
@@ -80,16 +83,17 @@ Poll the status of an indexing request.
   "endMonth": "2024-03",
   "status": "COMPLETED",
   "gamesIndexed": 147,
-  "errorMessage": null,
   "excludeBullet": false,
   "data": {
     "status": "AVAILABLE",
     "monthsAvailable": 1,
     "monthsTotal": 1,
-    "expiresAt": 1712000000.0
+    "expiresAt": 1785542400.000000000
   }
 }
 ```
+
+`errorMessage` is absent here because it is null; a FAILED request carries it.
 
 ### The `data` object — is the indexed data still there?
 
@@ -99,7 +103,7 @@ games and indexed periods once they are older than **7 days**, but never touches
 one indexed an hour ago. Both say `"status": "COMPLETED", "gamesIndexed": 147`; only one of them
 still has games to query.
 
-`data` is null until the request reaches COMPLETED.
+The key is **absent** until the request reaches COMPLETED — never `"data": null`.
 
 | Field           | Type        | Description                                                     |
 |-----------------|-------------|-----------------------------------------------------------------|
