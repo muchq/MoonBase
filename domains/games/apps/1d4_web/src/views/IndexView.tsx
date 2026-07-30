@@ -1,15 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { listIndexRequests, createIndex } from '../api';
+import MonthPicker, { currentMonth } from '../components/MonthPicker';
 import type { IndexRequest } from '../types';
-
-function normalizeMonth(value: string): string {
-  const m = value.match(/^(\d{4})-(\d{1,2})$/);
-  if (!m) return value;
-  const month = m[2].padStart(2, '0');
-  if (parseInt(month, 10) > 12) return value;
-  return `${m[1]}-${month}`;
-}
 
 export default function IndexView() {
   const queryClient = useQueryClient();
@@ -19,8 +12,9 @@ export default function IndexView() {
   } | null>(null);
   const [player, setPlayer] = useState('');
   const [platform, setPlatform] = useState('CHESS_COM');
-  const [startMonth, setStartMonth] = useState('');
-  const [endMonth, setEndMonth] = useState('');
+  const [thisMonth] = useState(currentMonth);
+  const [startMonth, setStartMonth] = useState(thisMonth);
+  const [endMonth, setEndMonth] = useState(thisMonth);
   const [excludeBullet, setExcludeBullet] = useState(true);
 
   const { data: requests = [] } = useQuery<IndexRequest[]>({
@@ -60,17 +54,27 @@ export default function IndexView() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const p = player.trim();
-    const sm = normalizeMonth(startMonth.trim());
-    const em = normalizeMonth(endMonth.trim());
-    if (!p || !sm || !em) {
-      setMessage({
-        text: 'Please fill in username and both months (YYYY-MM).',
-        type: 'error',
-      });
+    if (!p) {
+      setMessage({ text: 'Please enter a username.', type: 'error' });
       return;
     }
     setMessage(null);
-    mutation.mutate({ player: p, platform, startMonth: sm, endMonth: em, excludeBullet });
+    // Both months come from MonthPicker, so they are always canonical YYYY-MM
+    // and start is never after end.
+    mutation.mutate({
+      player: p,
+      platform,
+      startMonth,
+      endMonth,
+      excludeBullet,
+    });
+  }
+
+  function handleStartMonthChange(value: string) {
+    setStartMonth(value);
+    // Dragging start past end would leave an empty range; carry end along
+    // rather than blocking the choice the user just made.
+    if (value > endMonth) setEndMonth(value);
   }
 
   return (
@@ -102,28 +106,24 @@ export default function IndexView() {
             </div>
           </div>
           <div className="enqueue-form-row">
-            <div className="form-group enqueue-month">
-              <label htmlFor="startMonth">Start month</label>
-              <input
-                id="startMonth"
-                type="text"
-                placeholder="YYYY-MM"
-                value={startMonth}
-                onChange={(e) => setStartMonth(e.target.value)}
-                required
-              />
-            </div>
-            <div className="form-group enqueue-month">
-              <label htmlFor="endMonth">End month</label>
-              <input
-                id="endMonth"
-                type="text"
-                placeholder="YYYY-MM"
-                value={endMonth}
-                onChange={(e) => setEndMonth(e.target.value)}
-                required
-              />
-            </div>
+            <MonthPicker
+              id="startMonth"
+              label="Start month"
+              value={startMonth}
+              onChange={handleStartMonthChange}
+              max={thisMonth}
+              className="enqueue-month"
+            />
+            <MonthPicker
+              id="endMonth"
+              label="End month"
+              value={endMonth}
+              onChange={setEndMonth}
+              min={startMonth}
+              max={thisMonth}
+              className="enqueue-month"
+            />
+
             <label className="enqueue-checkbox">
               <input
                 type="checkbox"

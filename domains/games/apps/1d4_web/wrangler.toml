@@ -1,6 +1,9 @@
 name = "1d4-web"
 main = "worker/index.js"
-compatibility_date = "2024-01-01"
+# @cloudflare/vite-plugin's dev/preview runner reaches the worker over RPC,
+# which workerd only enables from this date on. The worker itself just proxies
+# to env.ASSETS, so none of the behaviour gated behind the bump applies to it.
+compatibility_date = "2024-04-03"
 
 # Domain: 1d4.net (api.1d4.net is backend, mcp.1d4.net is MCP server)
 # routes = [{ pattern = "1d4.net", zone_name = "1d4.net" }]
@@ -9,3 +12,7 @@ compatibility_date = "2024-01-01"
 directory = "dist/client"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# Default html_handling would 307 /index to / because index.html exists, so the
+# /index route never reached the router. Let every non-asset path fall through
+# to the single-page-application fallback instead.
+html_handling = "none"
