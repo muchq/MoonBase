@@ -307,7 +307,117 @@ td a.external:hover {
 
 .enqueue-username { flex: 0 1 200px; }
 .enqueue-platform { flex: 0 0 130px; }
-.enqueue-month    { flex: 0 0 120px; }
+.enqueue-month    { flex: 0 0 130px; }
+
+/* Month picker: trigger styled as an input, popover with a year stepper */
+.month-picker {
+  position: relative;
+}
+
+.month-picker-trigger {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.9375rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.month-picker-trigger:hover {
+  border-color: var(--accent-dim);
+}
+
+.month-picker-trigger:focus-visible,
+.month-picker-trigger[aria-expanded="true"] {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.month-picker-popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  width: 15rem;
+  padding: 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.month-picker-years {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.month-picker-year {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.month-picker-step {
+  width: 1.75rem;
+  height: 1.75rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.month-picker-step:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.month-picker-step:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.month-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.25rem;
+}
+
+.month-picker-month {
+  padding: 0.35rem 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.month-picker-month:hover:not(:disabled) {
+  background: var(--bg);
+  border-color: var(--border);
+}
+
+.month-picker-month:disabled {
+  color: var(--text-muted);
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.month-picker-month[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
 
 .enqueue-checkbox {
   display: flex;
