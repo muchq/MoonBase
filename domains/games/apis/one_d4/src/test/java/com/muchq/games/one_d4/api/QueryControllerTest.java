@@ -220,6 +220,11 @@ public class QueryControllerTest {
     }
 
     @Override
+    public AggregateTotals aggregateTotals(Object compiledQuery) {
+      return new AggregateTotals(0, 0);
+    }
+
+    @Override
     public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
       if (gameUrls.isEmpty()) return Map.of();
       Map<String, Map<String, List<OccurrenceRow>>> out = new LinkedHashMap<>();

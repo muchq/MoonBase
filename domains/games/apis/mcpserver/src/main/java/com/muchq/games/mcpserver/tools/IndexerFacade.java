@@ -106,15 +106,23 @@ public class IndexerFacade {
 
   /**
    * Counts indexed games matching a ChessQL filter, grouped by the given fields. Perspective fields
-   * in the filter are resolved against {@code player}; group-by fields must be physical columns.
+   * in the filter are resolved against {@code player}; group-by fields must be physical columns,
+   * except me.color and outcome, which are groupable when {@code player} is supplied. Alongside the
+   * (limit-truncated) groups, the result carries untruncated totals so callers can tell when a long
+   * tail of groups was cut off.
    */
-  public List<AggregateRow> aggregate(
-      String chessql, List<String> groupBy, String player, int limit) {
+  public AggregateResult aggregate(String chessql, List<String> groupBy, String player, int limit) {
     ParsedQuery parsed = Parser.parse(chessql);
     List<String> groupColumns = sqlCompiler.resolveGroupByColumns(groupBy);
     CompiledQuery compiled = sqlCompiler.compileAggregate(parsed, groupBy, player);
-    return gameFeatureStore.aggregate(compiled, groupColumns, limit);
+    CompiledQuery totalsQuery = sqlCompiler.compileAggregateTotals(parsed, groupBy, player);
+    List<AggregateRow> groups = gameFeatureStore.aggregate(compiled, groupColumns, limit);
+    GameFeatureStore.AggregateTotals totals = gameFeatureStore.aggregateTotals(totalsQuery);
+    return new AggregateResult(groups, totals.totalGames(), totals.totalGroups());
   }
+
+  /** Aggregate result: the (possibly limit-truncated) groups plus the untruncated totals. */
+  public record AggregateResult(List<AggregateRow> groups, long totalGames, long totalGroups) {}
 
   /** Detects motifs in a single PGN without indexing it. */
   public AnalysisResult analyze(String pgn) {

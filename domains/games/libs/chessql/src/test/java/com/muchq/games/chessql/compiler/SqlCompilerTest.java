@@ -7,6 +7,8 @@ import com.muchq.games.chessql.ast.OrderByClause;
 import com.muchq.games.chessql.ast.SequenceExpr;
 import com.muchq.games.chessql.parser.ParsedQuery;
 import com.muchq.games.chessql.parser.Parser;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -470,6 +472,214 @@ public class SqlCompilerTest {
         .isEqualTo(BASE_PREFIX + "LOWER(opening_family) = LOWER(?)" + BASE_SUFFIX);
   }
 
+  // === date / month scoping ===
+
+  private static Timestamp utc(String instant) {
+    return Timestamp.from(Instant.parse(instant));
+  }
+
+  @Test
+  public void testDateGreaterOrEqualBindsStartOfDay() {
+    CompiledQuery result = compile("date >= \"2026-07-01\"");
+    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + "played_at >= ?" + BASE_SUFFIX);
+    assertThat(result.parameters()).isEqualTo(List.of(utc("2026-07-01T00:00:00Z")));
+  }
+
+  @Test
+  public void testDateLessThanBindsStartOfDay() {
+    CompiledQuery result = compile("date < \"2026-07-01\"");
+    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + "played_at < ?" + BASE_SUFFIX);
+    assertThat(result.parameters()).isEqualTo(List.of(utc("2026-07-01T00:00:00Z")));
+  }
+
+  @Test
+  public void testDateInclusiveUpperBoundCoversWholeDay() {
+    CompiledQuery lte = compile("date <= \"2026-07-01\"");
+    assertThat(lte.selectSql()).isEqualTo(BASE_PREFIX + "played_at < ?" + BASE_SUFFIX);
+    assertThat(lte.parameters()).isEqualTo(List.of(utc("2026-07-02T00:00:00Z")));
+
+    CompiledQuery gt = compile("date > \"2026-07-01\"");
+    assertThat(gt.selectSql()).isEqualTo(BASE_PREFIX + "played_at >= ?" + BASE_SUFFIX);
+    assertThat(gt.parameters()).isEqualTo(List.of(utc("2026-07-02T00:00:00Z")));
+  }
+
+  @Test
+  public void testDateEqualityCompilesToDayRange() {
+    CompiledQuery result = compile("date = \"2026-07-01\"");
+    assertThat(result.selectSql())
+        .isEqualTo(BASE_PREFIX + "(played_at >= ? AND played_at < ?)" + BASE_SUFFIX);
+    assertThat(result.parameters())
+        .isEqualTo(List.of(utc("2026-07-01T00:00:00Z"), utc("2026-07-02T00:00:00Z")));
+  }
+
+  @Test
+  public void testDateInequalityExcludesDayRange() {
+    CompiledQuery result = compile("date != \"2026-07-01\"");
+    assertThat(result.selectSql())
+        .isEqualTo(BASE_PREFIX + "(played_at < ? OR played_at >= ?)" + BASE_SUFFIX);
+    assertThat(result.parameters())
+        .isEqualTo(List.of(utc("2026-07-01T00:00:00Z"), utc("2026-07-02T00:00:00Z")));
+  }
+
+  @Test
+  public void testMonthEqualityCompilesToMonthRange() {
+    CompiledQuery result = compile("month = \"2026-07\"");
+    assertThat(result.selectSql())
+        .isEqualTo(BASE_PREFIX + "(played_at >= ? AND played_at < ?)" + BASE_SUFFIX);
+    assertThat(result.parameters())
+        .isEqualTo(List.of(utc("2026-07-01T00:00:00Z"), utc("2026-08-01T00:00:00Z")));
+  }
+
+  @Test
+  public void testMonthRejectsNonEqualityOperators() {
+    assertThatThrownBy(() -> compile("month >= \"2026-07\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("month supports only '='");
+  }
+
+  // Error strings on these paths are the UI an LLM caller reads, so they are pinned exactly:
+  // each must name the offending field, the accepted format, and the value that was rejected.
+
+  @Test
+  public void testDateRejectsMalformedValues() {
+    assertThatThrownBy(() -> compile("date >= \"July 1, 2026\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("date requires an ISO date string (\"YYYY-MM-DD\"), got: July 1, 2026");
+    // Zero-padding is required: "2026-7-1" is not ISO
+    assertThatThrownBy(() -> compile("date = \"2026-7-1\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("date requires an ISO date string (\"YYYY-MM-DD\"), got: 2026-7-1");
+    // A bare number is not a date
+    assertThatThrownBy(() -> compile("date >= 20260701"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("date requires an ISO date string (\"YYYY-MM-DD\"), got: 20260701");
+    // A bare month is not a date
+    assertThatThrownBy(() -> compile("date >= \"2026-07\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("date requires an ISO date string (\"YYYY-MM-DD\"), got: 2026-07");
+    // Well-formed but non-existent calendar days are rejected too
+    assertThatThrownBy(() -> compile("date = \"2026-02-30\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("date requires an ISO date string (\"YYYY-MM-DD\"), got: 2026-02-30");
+  }
+
+  @Test
+  public void testMonthRejectsMalformedValues() {
+    assertThatThrownBy(() -> compile("month = \"2026-7\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("month requires a \"YYYY-MM\" string, got: 2026-7");
+    assertThatThrownBy(() -> compile("month = \"2026-07-01\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("month requires a \"YYYY-MM\" string, got: 2026-07-01");
+    assertThatThrownBy(() -> compile("month = \"July\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("month requires a \"YYYY-MM\" string, got: July");
+    assertThatThrownBy(() -> compile("month = 202607"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("month requires a \"YYYY-MM\" string, got: 202607");
+  }
+
+  @Test
+  public void testMonthRejectsNonEqualityOperatorsWithExactMessage() {
+    assertThatThrownBy(() -> compile("month > \"2026-07\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("month supports only '=' (use date for range comparisons), got: >");
+  }
+
+  @Test
+  public void testDateAndMonthRejectIn() {
+    // The suggested alternative is field-specific: an LLM told "use comparisons" on month would
+    // otherwise retry with month >= ... and hit a second error.
+    assertThatThrownBy(() -> compile("date IN [\"2026-07-01\", \"2026-07-02\"]"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "date does not support IN; use comparisons instead (date >= \"2026-07-01\", or a"
+                + " range like date >= \"2026-07-01\" AND date < \"2026-09-01\")");
+    assertThatThrownBy(() -> compile("month IN [\"2026-06\", \"2026-07\"]"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "month does not support IN; use comparisons instead (month = \"2026-07\", or a"
+                + " range like date >= \"2026-07-01\" AND date < \"2026-09-01\")");
+  }
+
+  @Test
+  public void testDateCombinedWithPerspectiveFieldKeepsParamOrder() {
+    CompiledQuery result =
+        compiler.compile(Parser.parse("outcome = \"win\" AND date >= \"2026-07-01\""), "hikaru");
+
+    assertThat(result.selectSql())
+        .isEqualTo(
+            BASE_PREFIX
+                + "("
+                + PARTICIPATION_GUARD
+                + " AND (LOWER(CASE WHEN result = '1/2-1/2' THEN 'draw'"
+                + " WHEN (result = '1-0' AND LOWER(white_username) = LOWER(?))"
+                + " OR (result = '0-1' AND LOWER(black_username) = LOWER(?)) THEN 'win'"
+                + " WHEN result IN ('1-0', '0-1') THEN 'loss' ELSE 'unknown' END) = LOWER(?)"
+                + " AND played_at >= ?))"
+                + BASE_SUFFIX);
+    // Guard params, the outcome CASE's two, the outcome value, then the date bound
+    assertThat(result.parameters())
+        .isEqualTo(
+            List.of("hikaru", "hikaru", "hikaru", "hikaru", "win", utc("2026-07-01T00:00:00Z")));
+  }
+
+  @Test
+  public void testDateWithMotifCountOrderByKeepsParamOrder() {
+    CompiledQuery result = compile("date >= \"2026-07-01\" ORDER BY motif_count(check) DESC");
+    // The LEFT JOIN subquery param (motif name) precedes the WHERE param
+    assertThat(result.parameters()).isEqualTo(List.of("CHECK", utc("2026-07-01T00:00:00Z")));
+  }
+
+  @Test
+  public void testDateAndMonthRejectedInGroupBy() {
+    assertThatThrownBy(
+            () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("date")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "'date' is a filter-only field and is not supported in groupBy; use it in the query"
+                + " filter instead (e.g. date >= \"2026-07-01\")");
+    assertThatThrownBy(
+            () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("month")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "'month' is a filter-only field and is not supported in groupBy; use it in the query"
+                + " filter instead (e.g. month = \"2026-07\")");
+    // The totals companion validates groupBy identically, so the caller sees the same message
+    assertThatThrownBy(
+            () -> compiler.compileAggregateTotals(Parser.parse("white.elo > 1"), List.of("month")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "'month' is a filter-only field and is not supported in groupBy; use it in the query"
+                + " filter instead (e.g. month = \"2026-07\")");
+  }
+
+  @Test
+  public void testGroupByPerspectiveErrorMessagesAreExact() {
+    // me.elo is perspective-relative but not groupable, even with a player
+    assertThatThrownBy(
+            () ->
+                compiler.compileAggregate(
+                    Parser.parse("white.elo > 1"), List.of("me.elo"), "hikaru"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "Perspective fields are not supported in groupBy: me.elo (only me.color and outcome"
+                + " are groupable, with a player)");
+    // me.color IS groupable, but only with a player — same voice as the filter-side message
+    assertThatThrownBy(
+            () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("me.color")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "Field 'me.color' is perspective-relative (me.*, opponent.*, outcome) and requires a"
+                + " player parameter on the request");
+    assertThatThrownBy(
+            () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("outcome")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "Field 'outcome' is perspective-relative (me.*, opponent.*, outcome) and requires a"
+                + " player parameter on the request");
+  }
+
   @Test
   public void testCompileAggregateSingleGroupBy() {
     CompiledQuery result =
@@ -673,6 +883,202 @@ public class SqlCompilerTest {
                     Parser.parse("white.elo > 1"), List.of("opponent.title"), "hikaru"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Perspective fields are not supported in groupBy");
+    assertThatThrownBy(
+            () ->
+                compiler.compileAggregate(
+                    Parser.parse("white.elo > 1"), List.of("me.elo"), "hikaru"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Perspective fields are not supported in groupBy");
+  }
+
+  @Test
+  public void testCompileAggregateGroupByMeColor() {
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("time.class = \"blitz\""), List.of("me.color"), "hikaru");
+
+    // The CASE renders in the SELECT list (aliased to the underscore key); GROUP BY and the
+    // tiebreak reference the alias so both dialects match the grouped expression.
+    assertThat(result.selectSql())
+        .isEqualTo(
+            "SELECT (CASE WHEN LOWER(white_username) = LOWER(?) THEN 'white' ELSE 'black' END)"
+                + " AS me_color, COUNT(*) AS group_count FROM game_features g WHERE"
+                + " ((LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))"
+                + " AND LOWER(time_class) = LOWER(?))"
+                + " GROUP BY me_color"
+                + " ORDER BY group_count DESC, me_color ASC");
+    // SELECT CASE param first, then the participation guard's two, then the filter value
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", "blitz"));
+  }
+
+  @Test
+  public void testCompileAggregateGroupByOutcome() {
+    CompiledQuery result =
+        compiler.compileAggregate(Parser.parse("white.elo >= 2500"), List.of("outcome"), "hikaru");
+
+    assertThat(result.selectSql())
+        .isEqualTo(
+            "SELECT (CASE WHEN result = '1/2-1/2' THEN 'draw'"
+                + " WHEN (result = '1-0' AND LOWER(white_username) = LOWER(?))"
+                + " OR (result = '0-1' AND LOWER(black_username) = LOWER(?)) THEN 'win'"
+                + " WHEN result IN ('1-0', '0-1') THEN 'loss' ELSE 'unknown' END) AS outcome,"
+                + " COUNT(*) AS group_count FROM game_features g WHERE"
+                + " ((LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))"
+                + " AND white_elo >= ?)"
+                + " GROUP BY outcome"
+                + " ORDER BY group_count DESC, outcome ASC");
+    // The outcome CASE's two params, then the guard's two, then the filter value
+    assertThat(result.parameters())
+        .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", 2500));
+  }
+
+  @Test
+  public void testCompileAggregateGroupByPerspectiveAcceptsUnderscoreFormAndDedupes() {
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("white.elo >= 2500"),
+            List.of("me_color", "me.color", "opening.family"),
+            "hikaru");
+
+    assertThat(result.selectSql())
+        .contains("END) AS me_color")
+        .contains("GROUP BY me_color, opening_family")
+        .contains("ORDER BY group_count DESC, me_color ASC, opening_family ASC");
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", 2500));
+  }
+
+  @Test
+  public void testCompileAggregatePerspectiveGroupByWithoutPlayerRejected() {
+    assertThatThrownBy(
+            () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("me.color")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("requires a player");
+    assertThatThrownBy(
+            () ->
+                compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("outcome"), "  "))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("requires a player");
+  }
+
+  @Test
+  public void testResolveGroupByColumnsMapsPerspectiveFieldsToUnderscoreKeys() {
+    assertThat(compiler.resolveGroupByColumns(List.of("me.color", "outcome", "opening.family")))
+        .containsExactly("me_color", "outcome", "opening_family");
+  }
+
+  @Test
+  public void testCompileAggregateTotals() {
+    CompiledQuery result =
+        compiler.compileAggregateTotals(
+            Parser.parse("white.username = \"hikaru\" AND time.class = \"blitz\""),
+            List.of("opening_family"));
+
+    assertThat(result.selectSql())
+        .isEqualTo(
+            "SELECT COUNT(*) AS total_groups, COALESCE(SUM(group_count), 0) AS total_games FROM"
+                + " (SELECT COUNT(*) AS group_count FROM game_features g WHERE"
+                + " (LOWER(white_username) = LOWER(?) AND LOWER(time_class) = LOWER(?))"
+                + " GROUP BY opening_family) grp");
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "blitz"));
+  }
+
+  @Test
+  public void testCompileAggregateTotalsWithPerspectiveFilterAndGroupBy() {
+    CompiledQuery result =
+        compiler.compileAggregateTotals(
+            Parser.parse("outcome = \"win\""), List.of("me.color"), "hikaru");
+
+    // The inner query has no SELECT-list group expressions, so the me.color CASE inlines
+    // directly in GROUP BY, binding its player param after the WHERE params.
+    assertThat(result.selectSql())
+        .isEqualTo(
+            "SELECT COUNT(*) AS total_groups, COALESCE(SUM(group_count), 0) AS total_games FROM"
+                + " (SELECT COUNT(*) AS group_count FROM game_features g WHERE"
+                + " ("
+                + PARTICIPATION_GUARD
+                + " AND LOWER(CASE WHEN result = '1/2-1/2' THEN 'draw'"
+                + " WHEN (result = '1-0' AND LOWER(white_username) = LOWER(?))"
+                + " OR (result = '0-1' AND LOWER(black_username) = LOWER(?)) THEN 'win'"
+                + " WHEN result IN ('1-0', '0-1') THEN 'loss' ELSE 'unknown' END) = LOWER(?))"
+                + " GROUP BY (CASE WHEN LOWER(white_username) = LOWER(?) THEN 'white' ELSE"
+                + " 'black' END)) grp");
+    assertThat(result.parameters())
+        .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", "win", "hikaru"));
+  }
+
+  /**
+   * compileAggregate and compileAggregateTotals must describe the same filter and the same
+   * grouping, so any divergence in what they bind is a silently-wrong totals bug (no error, just a
+   * different denominator than the groups). The two lay their placeholders out differently by
+   * necessity — the groups query renders the CASE in the SELECT list (params first), the totals
+   * query inlines it in GROUP BY (params last) — so the invariant is that each list matches its own
+   * SQL and the two agree as multisets.
+   */
+  @Test
+  public void testAggregateAndTotalsBindTheSameParamsForTheSameQuery() {
+    ParsedQuery parsed =
+        Parser.parse("outcome = \"win\" AND date >= \"2026-07-01\" AND month = \"2026-07\"");
+    List<String> groupBy = List.of("me.color", "opening.family");
+
+    CompiledQuery groups = compiler.compileAggregate(parsed, groupBy, "hikaru");
+    CompiledQuery totals = compiler.compileAggregateTotals(parsed, groupBy, "hikaru");
+
+    Timestamp julyStart = utc("2026-07-01T00:00:00Z");
+    Timestamp augStart = utc("2026-08-01T00:00:00Z");
+    // groups: me.color CASE (1), guard (2), outcome CASE (2), "win", date bound, month bounds
+    assertThat(groups.parameters())
+        .isEqualTo(
+            List.of(
+                "hikaru", "hikaru", "hikaru", "hikaru", "hikaru", "win", julyStart, julyStart,
+                augStart));
+    // totals: same WHERE params in the same order, with the me.color CASE param moved to the end
+    assertThat(totals.parameters())
+        .isEqualTo(
+            List.of(
+                "hikaru", "hikaru", "hikaru", "hikaru", "win", julyStart, julyStart, augStart,
+                "hikaru"));
+    assertThat(groups.parameters())
+        .containsExactlyInAnyOrderElementsOf(totals.parameters())
+        .hasSameSizeAs(totals.parameters());
+    // Every placeholder in each statement is accounted for by exactly one bound param.
+    assertThat(countPlaceholders(groups.selectSql())).isEqualTo(groups.parameters().size());
+    assertThat(countPlaceholders(totals.selectSql())).isEqualTo(totals.parameters().size());
+  }
+
+  /**
+   * The ORDER BY motif_count LEFT JOIN binds the motif name before the WHERE clause, and the
+   * participation guard prepends two player params to the WHERE clause. Both are prefixes, so a
+   * query using all three plus a date bound must still line up placeholder-for-param.
+   */
+  @Test
+  public void testMotifCountOrderByWithPerspectiveAndDateKeepsParamOrder() {
+    CompiledQuery result =
+        compiler.compile(
+            Parser.parse(
+                "outcome = \"win\" AND date >= \"2026-07-01\" ORDER BY motif_count(pin) DESC"),
+            "hikaru");
+
+    // motif name (JOIN), guard x2, outcome CASE x2, the outcome value, then the date bound
+    assertThat(result.parameters())
+        .isEqualTo(
+            List.of(
+                "PIN", "hikaru", "hikaru", "hikaru", "hikaru", "win", utc("2026-07-01T00:00:00Z")));
+    assertThat(countPlaceholders(result.selectSql())).isEqualTo(result.parameters().size());
+  }
+
+  private static int countPlaceholders(String sql) {
+    return (int) sql.chars().filter(c -> c == '?').count();
+  }
+
+  @Test
+  public void testCompileAggregateTotalsRejectsOrderByMotifCount() {
+    assertThatThrownBy(
+            () ->
+                compiler.compileAggregateTotals(
+                    Parser.parse("motif(check) ORDER BY motif_count(checkmate) DESC"),
+                    List.of("time_class")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("not supported in aggregate");
   }
 
   private CompiledQuery compile(String input) {

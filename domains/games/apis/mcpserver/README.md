@@ -264,8 +264,12 @@ The indexer engine, database, and worker are embedded in this process (Option A 
   perspective fields `me.*`, `opponent.*`, `outcome`), `limit` (default 10, max 50), and
   `include_pgn` (default false).
 - `aggregate_chess_games` — grouped counts over indexed games: `query`, `group_by` (e.g.
-  `["opening_family"]`), optional `player` and `limit`. Answers "most popular openings" — or
-  "hikaru's win rate by opening against GMs" via perspective fields — in one call.
+  `["opening_family"]`; with `player` also `me.color` / `outcome`, keyed `me_color`/`outcome` in
+  the output), optional `player` and `limit`. Answers "most popular openings" — or "hikaru's win
+  rate by opening against GMs" via perspective fields — in one call. The output includes
+  `totalGames`/`totalGroups` over the untruncated result and `truncated` when the group limit cut
+  off a long tail (common with `opening_family`, whose chess.com ECO-URL-derived values are not
+  normalized: "Closed Sicilian" and "Closed Sicilian Defense" are distinct groups).
 - `analyze_position` — detect motifs in a single `pgn` without indexing it.
 
 ## Configuration

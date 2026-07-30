@@ -30,6 +30,7 @@ public class AggregateControllerTest {
         List.of(
             new AggregateRow(Map.of("opening_family", "Caro Kann Defense"), 42),
             new AggregateRow(Map.of("opening_family", "Sicilian Defense"), 17));
+    store.totals = new GameFeatureStore.AggregateTotals(59, 2);
 
     AggregateResponse response =
         controller.aggregate(
@@ -43,6 +44,9 @@ public class AggregateControllerTest {
     assertThat(response.groups().get(0).group())
         .containsEntry("opening_family", "Caro Kann Defense");
     assertThat(response.groups().get(0).count()).isEqualTo(42);
+    assertThat(response.totalGames()).isEqualTo(59);
+    assertThat(response.totalGroups()).isEqualTo(2);
+    assertThat(response.truncated()).isFalse();
 
     // The store received the compiled aggregate with canonical group columns and the limit
     assertThat(store.lastGroupColumns).containsExactly("opening_family");
@@ -53,6 +57,79 @@ public class AggregateControllerTest {
         .contains("COUNT(*) AS group_count")
         .contains("GROUP BY opening_family");
     assertThat(compiled.parameters()).isEqualTo(List.of("hikaru", "blitz"));
+
+    // The totals query reuses the same filter and grouping
+    assertThat(store.lastTotalsCompiled).isInstanceOf(CompiledQuery.class);
+    CompiledQuery totals = (CompiledQuery) store.lastTotalsCompiled;
+    assertThat(totals.selectSql())
+        .contains("COUNT(*) AS total_groups")
+        .contains("COALESCE(SUM(group_count), 0) AS total_games")
+        .contains("GROUP BY opening_family");
+    assertThat(totals.parameters()).isEqualTo(List.of("hikaru", "blitz"));
+  }
+
+  @Test
+  public void aggregate_reportsTruncationWhenTotalsExceedReturnedGroups() {
+    store.rows = List.of(new AggregateRow(Map.of("opening_family", "Caro Kann Defense"), 103));
+    store.totals = new GameFeatureStore.AggregateTotals(104, 2);
+
+    AggregateResponse response =
+        controller.aggregate(
+            new AggregateRequest("white.elo >= 1", List.of("opening_family"), "count", 1));
+
+    assertThat(response.count()).isEqualTo(1);
+    assertThat(response.totalGames()).isEqualTo(104);
+    assertThat(response.totalGroups()).isEqualTo(2);
+    assertThat(response.truncated()).isTrue();
+  }
+
+  @Test
+  public void aggregate_perspectiveGroupByUsesUnderscoreKeysAndAliasedCase() {
+    store.rows =
+        List.of(
+            new AggregateRow(Map.of("me_color", "white", "outcome", "win"), 3),
+            new AggregateRow(Map.of("me_color", "black", "outcome", "loss"), 2));
+    store.totals = new GameFeatureStore.AggregateTotals(5, 2);
+
+    AggregateResponse response =
+        controller.aggregate(
+            new AggregateRequest(
+                "time.class = \"blitz\"", List.of("me.color", "outcome"), "count", 20, "hikaru"));
+
+    assertThat(response.count()).isEqualTo(2);
+    assertThat(response.groups().get(0).group()).containsEntry("me_color", "white");
+    // Row-mapping keys are the underscore form of the perspective fields
+    assertThat(store.lastGroupColumns).containsExactly("me_color", "outcome");
+    CompiledQuery compiled = (CompiledQuery) store.lastCompiled;
+    assertThat(compiled.selectSql())
+        .contains("END) AS me_color")
+        .contains("END) AS outcome")
+        .contains("GROUP BY me_color, outcome");
+    // SELECT CASE params (1 + 2), participation guard (2), then the filter value
+    assertThat(compiled.parameters())
+        .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", "hikaru", "blitz"));
+  }
+
+  @Test
+  public void aggregate_perspectiveGroupByWithoutPlayerRejected() {
+    assertThatThrownBy(
+            () ->
+                controller.aggregate(
+                    new AggregateRequest("white.elo > 1", List.of("me.color"), null, 20)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("requires a player");
+    assertThat(store.lastCompiled).isNull();
+  }
+
+  @Test
+  public void aggregate_otherPerspectiveFieldsStillRejectedInGroupBy() {
+    assertThatThrownBy(
+            () ->
+                controller.aggregate(
+                    new AggregateRequest("white.elo > 1", List.of("me.elo"), null, 20, "hikaru")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Perspective fields are not supported in groupBy");
+    assertThat(store.lastCompiled).isNull();
   }
 
   @Test
@@ -103,7 +180,9 @@ public class AggregateControllerTest {
 
   private static final class RecordingStore implements GameFeatureStore {
     List<AggregateRow> rows = List.of();
+    AggregateTotals totals = new AggregateTotals(0, 0);
     Object lastCompiled;
+    Object lastTotalsCompiled;
     List<String> lastGroupColumns;
     int lastLimit;
 
@@ -114,6 +193,12 @@ public class AggregateControllerTest {
       this.lastGroupColumns = groupColumns;
       this.lastLimit = limit;
       return rows;
+    }
+
+    @Override
+    public AggregateTotals aggregateTotals(Object compiledQuery) {
+      this.lastTotalsCompiled = compiledQuery;
+      return totals;
     }
 
     @Override

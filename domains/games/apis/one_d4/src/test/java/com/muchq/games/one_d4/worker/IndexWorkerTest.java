@@ -709,6 +709,11 @@ public class IndexWorkerTest {
     }
 
     @Override
+    public AggregateTotals aggregateTotals(Object compiledQuery) {
+      return new AggregateTotals(0, 0);
+    }
+
+    @Override
     public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
       return Map.of();
     }

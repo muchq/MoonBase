@@ -198,6 +198,197 @@ public class IndexerToolsTest {
           .isIn("Kings Pawn Opening", "Caro Kann Defense");
       assertThat(group.get("count").asInt()).isEqualTo(1);
     }
+    // Untruncated totals are always reported alongside the groups
+    assertThat(result.get("totalGames").asLong()).isEqualTo(2);
+    assertThat(result.get("totalGroups").asLong()).isEqualTo(2);
+    assertThat(result.get("truncated").asBoolean()).isFalse();
+  }
+
+  @Test
+  public void aggregateReportsTruncationWhenLimitCutsGroups() {
+    givenIndexedMonth();
+
+    JsonNode result =
+        parse(
+            aggregateTool.execute(
+                Map.of(
+                    "query",
+                    "white.username = \"hikaru\" OR black.username = \"hikaru\"",
+                    "group_by",
+                    List.of("opening_family"),
+                    "limit",
+                    1)));
+
+    // One of two groups was cut off; totals expose the full picture
+    assertThat(result.get("count").asInt()).isEqualTo(1);
+    assertThat(result.get("totalGames").asLong()).isEqualTo(2);
+    assertThat(result.get("totalGroups").asLong()).isEqualTo(2);
+    assertThat(result.get("truncated").asBoolean()).isTrue();
+
+    // Boundary: a limit exactly equal to the group count is NOT truncation — nothing was cut off,
+    // so an LLM must not be told to re-query with a larger limit.
+    JsonNode exact =
+        parse(
+            aggregateTool.execute(
+                Map.of(
+                    "query",
+                    "white.username = \"hikaru\" OR black.username = \"hikaru\"",
+                    "group_by",
+                    List.of("opening_family"),
+                    "limit",
+                    2)));
+    assertThat(exact.get("count").asInt()).isEqualTo(2);
+    assertThat(exact.get("totalGroups").asLong()).isEqualTo(2);
+    assertThat(exact.get("truncated").asBoolean()).isFalse();
+  }
+
+  @Test
+  public void aggregateGroupsByPerspectiveColorAndOutcome() {
+    givenIndexedMonth();
+
+    // hikaru wins game/1 as white and loses game/2 as black
+    JsonNode result =
+        parse(
+            aggregateTool.execute(
+                Map.of(
+                    "query",
+                    "time.class = \"blitz\"",
+                    "player",
+                    "hikaru",
+                    "group_by",
+                    List.of("me.color", "outcome"))));
+
+    assertThat(result.get("count").asInt()).isEqualTo(2);
+    // Group keys use the underscore form; tiebreak orders black before white
+    JsonNode first = result.get("groups").get(0).get("group");
+    assertThat(first.get("me_color").asText()).isEqualTo("black");
+    assertThat(first.get("outcome").asText()).isEqualTo("loss");
+    JsonNode second = result.get("groups").get(1).get("group");
+    assertThat(second.get("me_color").asText()).isEqualTo("white");
+    assertThat(second.get("outcome").asText()).isEqualTo("win");
+    assertThat(result.get("totalGames").asLong()).isEqualTo(2);
+    assertThat(result.get("totalGroups").asLong()).isEqualTo(2);
+    assertThat(result.get("truncated").asBoolean()).isFalse();
+
+    JsonNode missingPlayer =
+        parse(
+            aggregateTool.execute(
+                Map.of("query", "time.class = \"blitz\"", "group_by", List.of("me.color"))));
+    assertThat(missingPlayer.get("error").asText())
+        .isEqualTo(
+            "Field 'me.color' is perspective-relative (me.*, opponent.*, outcome) and requires a"
+                + " player parameter on the request");
+
+    JsonNode unsupported =
+        parse(
+            aggregateTool.execute(
+                Map.of(
+                    "query",
+                    "time.class = \"blitz\"",
+                    "player",
+                    "hikaru",
+                    "group_by",
+                    List.of("me.elo"))));
+    assertThat(unsupported.get("error").asText())
+        .isEqualTo(
+            "Perspective fields are not supported in groupBy: me.elo (only me.color and outcome"
+                + " are groupable, with a player)");
+  }
+
+  @Test
+  public void dateAndMonthScopingWorkThroughTheQueryTool() {
+    // The stub's games are played 2025-06-15T15:06:40Z
+    givenIndexedMonth();
+
+    assertThat(
+            parse(queryTool.execute(Map.of("query", "month = \"2025-06\""))).get("count").asInt())
+        .isEqualTo(2);
+    assertThat(
+            parse(queryTool.execute(Map.of("query", "date = \"2025-06-15\""))).get("count").asInt())
+        .isEqualTo(2);
+    assertThat(
+            parse(
+                    queryTool.execute(
+                        Map.of("query", "date >= \"2025-06-01\" AND date < \"2025-06-15\"")))
+                .get("count")
+                .asInt())
+        .isZero();
+
+    // A month that was never indexed is indistinguishable from a month with no games: the tool
+    // returns an empty result, not an error. Callers must not read this as "played nothing".
+    JsonNode neverIndexed = parse(queryTool.execute(Map.of("query", "month = \"2020-01\"")));
+    assertThat(neverIndexed.has("error")).isFalse();
+    assertThat(neverIndexed.get("count").asInt()).isZero();
+  }
+
+  @Test
+  public void dateScopingWorksThroughTheAggregateTool() {
+    givenIndexedMonth();
+
+    JsonNode inMonth =
+        parse(
+            aggregateTool.execute(
+                Map.of("query", "month = \"2025-06\"", "group_by", List.of("opening_family"))));
+    assertThat(inMonth.get("count").asInt()).isEqualTo(2);
+    assertThat(inMonth.get("totalGames").asLong()).isEqualTo(2);
+
+    // Same empty-not-error contract on the aggregate side
+    JsonNode neverIndexed =
+        parse(
+            aggregateTool.execute(
+                Map.of("query", "month = \"2020-01\"", "group_by", List.of("opening_family"))));
+    assertThat(neverIndexed.has("error")).isFalse();
+    assertThat(neverIndexed.get("count").asInt()).isZero();
+    assertThat(neverIndexed.get("totalGames").asLong()).isZero();
+    assertThat(neverIndexed.get("totalGroups").asLong()).isZero();
+    assertThat(neverIndexed.get("truncated").asBoolean()).isFalse();
+  }
+
+  /**
+   * The tool layer surfaces compiler IllegalArgumentExceptions verbatim as {@code {"error": ...}},
+   * and those strings are the only feedback an LLM caller gets. Each must name the offending field
+   * and the accepted form, so they are pinned exactly here rather than by substring.
+   */
+  @Test
+  public void dateAndMonthFailurePathsReturnActionableToolErrors() {
+    givenIndexedMonth();
+
+    assertThat(errorFrom(queryTool, Map.of("query", "date = \"2026-7-1\"")))
+        .isEqualTo("date requires an ISO date string (\"YYYY-MM-DD\"), got: 2026-7-1");
+    assertThat(errorFrom(queryTool, Map.of("query", "date >= \"July\"")))
+        .isEqualTo("date requires an ISO date string (\"YYYY-MM-DD\"), got: July");
+    assertThat(errorFrom(queryTool, Map.of("query", "date = 20260701")))
+        .isEqualTo("date requires an ISO date string (\"YYYY-MM-DD\"), got: 20260701");
+    assertThat(errorFrom(queryTool, Map.of("query", "month = \"2026-7\"")))
+        .isEqualTo("month requires a \"YYYY-MM\" string, got: 2026-7");
+    assertThat(errorFrom(queryTool, Map.of("query", "month >= \"2026-07\"")))
+        .isEqualTo("month supports only '=' (use date for range comparisons), got: >=");
+    assertThat(errorFrom(queryTool, Map.of("query", "date IN [\"2026-07-01\"]")))
+        .isEqualTo(
+            "date does not support IN; use comparisons instead (date >= \"2026-07-01\", or a"
+                + " range like date >= \"2026-07-01\" AND date < \"2026-09-01\")");
+    assertThat(errorFrom(queryTool, Map.of("query", "month IN [\"2026-07\"]")))
+        .isEqualTo(
+            "month does not support IN; use comparisons instead (month = \"2026-07\", or a"
+                + " range like date >= \"2026-07-01\" AND date < \"2026-09-01\")");
+
+    assertThat(
+            errorFrom(aggregateTool, Map.of("query", "white.elo > 1", "group_by", List.of("date"))))
+        .isEqualTo(
+            "'date' is a filter-only field and is not supported in groupBy; use it in the query"
+                + " filter instead (e.g. date >= \"2026-07-01\")");
+    assertThat(
+            errorFrom(
+                aggregateTool, Map.of("query", "white.elo > 1", "group_by", List.of("month"))))
+        .isEqualTo(
+            "'month' is a filter-only field and is not supported in groupBy; use it in the query"
+                + " filter instead (e.g. month = \"2026-07\")");
+  }
+
+  private String errorFrom(McpTool tool, Map<String, Object> arguments) {
+    JsonNode result = parse(tool.execute(arguments));
+    assertThat(result.has("error")).as("expected an error for %s", arguments).isTrue();
+    return result.get("error").asText();
   }
 
   @Test
@@ -307,6 +498,9 @@ public class IndexerToolsTest {
     assertThat(result.get("groups").isArray()).isTrue();
     assertThat(result.get("groups")).isEmpty();
     assertThat(result.get("count").asInt()).isZero();
+    assertThat(result.get("totalGames").asLong()).isZero();
+    assertThat(result.get("totalGroups").asLong()).isZero();
+    assertThat(result.get("truncated").asBoolean()).isFalse();
   }
 
   @Test
