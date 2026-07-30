@@ -635,6 +635,141 @@ public class GameFeatureDaoTest {
   }
 
   @Test
+  public void aggregateTotals_reportsUntruncatedCounts() {
+    dao.insertBatch(
+        List.of(
+            gameWithOpening("https://chess.com/game/tot-1", "Caro Kann Defense", "blitz"),
+            gameWithOpening("https://chess.com/game/tot-2", "Caro Kann Defense", "blitz"),
+            gameWithOpening("https://chess.com/game/tot-3", "Sicilian Defense", "blitz"),
+            gameWithOpening("https://chess.com/game/tot-4", "English Opening", "blitz")));
+
+    SqlCompiler compiler = new SqlCompiler();
+    CompiledQuery compiled =
+        compiler.compileAggregate(Parser.parse("white_elo >= 1000"), List.of("opening_family"));
+    CompiledQuery totalsQuery =
+        compiler.compileAggregateTotals(
+            Parser.parse("white_elo >= 1000"), List.of("opening_family"));
+
+    // A limit of 2 truncates one group; the totals still see all 3 groups / 4 games
+    List<AggregateRow> groups = dao.aggregate(compiled, List.of("opening_family"), 2);
+    GameFeatureStore.AggregateTotals totals = dao.aggregateTotals(totalsQuery);
+
+    assertThat(groups).hasSize(2);
+    assertThat(totals.totalGames()).isEqualTo(4);
+    assertThat(totals.totalGroups()).isEqualTo(3);
+  }
+
+  @Test
+  public void aggregateTotals_zeroWhenNoGamesMatch() {
+    SqlCompiler compiler = new SqlCompiler();
+    GameFeatureStore.AggregateTotals totals =
+        dao.aggregateTotals(
+            compiler.compileAggregateTotals(
+                Parser.parse("white.username = \"nobody\""), List.of("opening_family")));
+
+    assertThat(totals.totalGames()).isZero();
+    assertThat(totals.totalGroups()).isZero();
+  }
+
+  @Test
+  public void dateAndMonthScoping_filterByPlayedAtOnH2() {
+    Instant june = Instant.parse("2026-06-15T12:00:00Z");
+    // Exactly midnight on the month boundary — belongs to July, not June
+    Instant julyBoundary = Instant.parse("2026-07-01T00:00:00Z");
+    dao.insertBatch(
+        List.of(
+            createGameAt("https://chess.com/game/june", june),
+            createGameAt("https://chess.com/game/july", julyBoundary)));
+
+    SqlCompiler compiler = new SqlCompiler();
+
+    List<GameFeature> juneGames =
+        dao.query(compiler.compile(Parser.parse("month = \"2026-06\"")), 10, 0);
+    assertThat(juneGames.stream().map(GameFeature::gameUrl))
+        .containsExactly("https://chess.com/game/june");
+
+    List<GameFeature> julyGames =
+        dao.query(compiler.compile(Parser.parse("month = \"2026-07\"")), 10, 0);
+    assertThat(julyGames.stream().map(GameFeature::gameUrl))
+        .containsExactly("https://chess.com/game/july");
+
+    List<GameFeature> fromJuly =
+        dao.query(compiler.compile(Parser.parse("date >= \"2026-07-01\"")), 10, 0);
+    assertThat(fromJuly.stream().map(GameFeature::gameUrl))
+        .containsExactly("https://chess.com/game/july");
+
+    // Inclusive upper bound covers the entire day
+    List<GameFeature> throughJune15 =
+        dao.query(compiler.compile(Parser.parse("date <= \"2026-06-15\"")), 10, 0);
+    assertThat(throughJune15.stream().map(GameFeature::gameUrl))
+        .containsExactly("https://chess.com/game/june");
+
+    List<GameFeature> onJune15 =
+        dao.query(compiler.compile(Parser.parse("date = \"2026-06-15\"")), 10, 0);
+    assertThat(onJune15.stream().map(GameFeature::gameUrl))
+        .containsExactly("https://chess.com/game/june");
+
+    List<GameFeature> notJune15 =
+        dao.query(compiler.compile(Parser.parse("date != \"2026-06-15\"")), 10, 0);
+    assertThat(notJune15.stream().map(GameFeature::gameUrl))
+        .containsExactly("https://chess.com/game/july");
+
+    List<GameFeature> juneRange =
+        dao.query(
+            compiler.compile(Parser.parse("date >= \"2026-06-01\" AND date < \"2026-07-01\"")),
+            10,
+            0);
+    assertThat(juneRange.stream().map(GameFeature::gameUrl))
+        .containsExactly("https://chess.com/game/june");
+  }
+
+  @Test
+  public void aggregate_groupByMeColorAndOutcome_splitsWinLossByColorOnH2() {
+    dao.insertBatch(
+        List.of(
+            // hikaru as white: two wins
+            perspectiveGame(
+                "https://chess.com/game/gc1", "hikaru", "a", null, null, "1-0", "Caro Kann"),
+            perspectiveGame(
+                "https://chess.com/game/gc2", "hikaru", "b", null, null, "1-0", "Sicilian"),
+            // hikaru as black: one win, one loss
+            perspectiveGame(
+                "https://chess.com/game/gc3", "c", "hikaru", null, null, "0-1", "English"),
+            perspectiveGame(
+                "https://chess.com/game/gc4", "d", "hikaru", null, null, "1-0", "English"),
+            // not hikaru's game — excluded by the participation guard
+            perspectiveGame("https://chess.com/game/gc5", "x", "y", null, null, "1-0", "English")));
+
+    SqlCompiler compiler = new SqlCompiler();
+    CompiledQuery compiled =
+        compiler.compileAggregate(
+            Parser.parse("time.class = \"blitz\""), List.of("me.color", "outcome"), "hikaru");
+    List<AggregateRow> groups = dao.aggregate(compiled, List.of("me_color", "outcome"), 10);
+
+    // (white, win, 2) leads on count; the single-count groups tiebreak on me_color/outcome ASC
+    assertThat(groups).hasSize(3);
+    assertThat(groups.get(0).group())
+        .containsEntry("me_color", "white")
+        .containsEntry("outcome", "win");
+    assertThat(groups.get(0).count()).isEqualTo(2);
+    assertThat(groups.get(1).group())
+        .containsEntry("me_color", "black")
+        .containsEntry("outcome", "loss");
+    assertThat(groups.get(1).count()).isEqualTo(1);
+    assertThat(groups.get(2).group())
+        .containsEntry("me_color", "black")
+        .containsEntry("outcome", "win");
+    assertThat(groups.get(2).count()).isEqualTo(1);
+
+    GameFeatureStore.AggregateTotals totals =
+        dao.aggregateTotals(
+            compiler.compileAggregateTotals(
+                Parser.parse("time.class = \"blitz\""), List.of("me.color", "outcome"), "hikaru"));
+    assertThat(totals.totalGames()).isEqualTo(4);
+    assertThat(totals.totalGroups()).isEqualTo(3);
+  }
+
+  @Test
   public void perspectiveFields_resolveAgainstPlayerOnH2() {
     dao.insertBatch(
         List.of(

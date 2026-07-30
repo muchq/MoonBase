@@ -245,6 +245,27 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   @Override
+  public AggregateTotals aggregateTotals(Object compiledQuery) {
+    if (!(compiledQuery instanceof CompiledQuery cq)) {
+      throw new IllegalArgumentException(
+          "Expected CompiledQuery, got: " + compiledQuery.getClass());
+    }
+    return jdbi.withHandle(
+        h -> {
+          var query = h.createQuery(cq.selectSql());
+          int idx = 0;
+          for (Object param : cq.parameters()) {
+            query.bind(idx++, param);
+          }
+          return query
+              .map(
+                  (rs, ctx) ->
+                      new AggregateTotals(rs.getLong("total_games"), rs.getLong("total_groups")))
+              .one();
+        });
+  }
+
+  @Override
   public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
     if (gameUrls.isEmpty()) return Map.of();
     // Fetch all rows including ATTACK (needed for derivation) but excluding stale materialized

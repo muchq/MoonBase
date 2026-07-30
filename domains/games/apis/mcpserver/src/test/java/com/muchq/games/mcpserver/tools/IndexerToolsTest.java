@@ -198,6 +198,80 @@ public class IndexerToolsTest {
           .isIn("Kings Pawn Opening", "Caro Kann Defense");
       assertThat(group.get("count").asInt()).isEqualTo(1);
     }
+    // Untruncated totals are always reported alongside the groups
+    assertThat(result.get("totalGames").asLong()).isEqualTo(2);
+    assertThat(result.get("totalGroups").asLong()).isEqualTo(2);
+    assertThat(result.get("truncated").asBoolean()).isFalse();
+  }
+
+  @Test
+  public void aggregateReportsTruncationWhenLimitCutsGroups() {
+    givenIndexedMonth();
+
+    JsonNode result =
+        parse(
+            aggregateTool.execute(
+                Map.of(
+                    "query",
+                    "white.username = \"hikaru\" OR black.username = \"hikaru\"",
+                    "group_by",
+                    List.of("opening_family"),
+                    "limit",
+                    1)));
+
+    // One of two groups was cut off; totals expose the full picture
+    assertThat(result.get("count").asInt()).isEqualTo(1);
+    assertThat(result.get("totalGames").asLong()).isEqualTo(2);
+    assertThat(result.get("totalGroups").asLong()).isEqualTo(2);
+    assertThat(result.get("truncated").asBoolean()).isTrue();
+  }
+
+  @Test
+  public void aggregateGroupsByPerspectiveColorAndOutcome() {
+    givenIndexedMonth();
+
+    // hikaru wins game/1 as white and loses game/2 as black
+    JsonNode result =
+        parse(
+            aggregateTool.execute(
+                Map.of(
+                    "query",
+                    "time.class = \"blitz\"",
+                    "player",
+                    "hikaru",
+                    "group_by",
+                    List.of("me.color", "outcome"))));
+
+    assertThat(result.get("count").asInt()).isEqualTo(2);
+    // Group keys use the underscore form; tiebreak orders black before white
+    JsonNode first = result.get("groups").get(0).get("group");
+    assertThat(first.get("me_color").asText()).isEqualTo("black");
+    assertThat(first.get("outcome").asText()).isEqualTo("loss");
+    JsonNode second = result.get("groups").get(1).get("group");
+    assertThat(second.get("me_color").asText()).isEqualTo("white");
+    assertThat(second.get("outcome").asText()).isEqualTo("win");
+    assertThat(result.get("totalGames").asLong()).isEqualTo(2);
+    assertThat(result.get("totalGroups").asLong()).isEqualTo(2);
+    assertThat(result.get("truncated").asBoolean()).isFalse();
+
+    JsonNode missingPlayer =
+        parse(
+            aggregateTool.execute(
+                Map.of("query", "time.class = \"blitz\"", "group_by", List.of("me.color"))));
+    assertThat(missingPlayer.get("error").asText()).contains("requires a player");
+
+    JsonNode unsupported =
+        parse(
+            aggregateTool.execute(
+                Map.of(
+                    "query",
+                    "time.class = \"blitz\"",
+                    "player",
+                    "hikaru",
+                    "group_by",
+                    List.of("me.elo"))));
+    assertThat(unsupported.get("error").asText())
+        .contains("Perspective fields are not supported in groupBy");
   }
 
   @Test
@@ -307,6 +381,9 @@ public class IndexerToolsTest {
     assertThat(result.get("groups").isArray()).isTrue();
     assertThat(result.get("groups")).isEmpty();
     assertThat(result.get("count").asInt()).isZero();
+    assertThat(result.get("totalGames").asLong()).isZero();
+    assertThat(result.get("totalGroups").asLong()).isZero();
+    assertThat(result.get("truncated").asBoolean()).isFalse();
   }
 
   @Test

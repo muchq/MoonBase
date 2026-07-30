@@ -33,11 +33,17 @@ public class AggregateGamesTool implements McpTool {
     return "Count indexed games grouped by one or more fields, filtered by a ChessQL query"
         + " (index first with index_chess_games). This answers questions like 'most popular"
         + " openings' in one call: query 'white.username = \"hikaru\" AND time.class ="
-        + " \"blitz\"' with group_by [\"opening_family\"]. With the player parameter the filter"
-        + " may use perspective fields (me.*, opponent.*, outcome) — e.g. player: hikaru with"
-        + " query 'me.color = \"white\" AND opponent.title = \"GM\"'. Groupable fields (physical"
-        + " columns only): opening_family, opening_name, eco, result, time_class, white_title,"
-        + " black_title, white_username, black_username, platform.";
+        + " \"blitz\"' with group_by [\"opening_family\"]. The filter may scope time with date"
+        + " comparisons ('date >= \"2026-07-01\"') or 'month = \"2026-07\"'. With the player"
+        + " parameter the filter may use perspective fields (me.*, opponent.*, outcome) — e.g."
+        + " player: hikaru with query 'me.color = \"white\" AND opponent.title = \"GM\"'."
+        + " Groupable fields: opening_family, opening_name, eco, result, time_class, white_title,"
+        + " black_title, white_username, black_username, platform — plus me.color and outcome"
+        + " when player is set (group keys me_color/outcome), which separates your repertoire"
+        + " from what opponents play. Note: opening_family is derived from chess.com ECO-URL"
+        + " strings, not a normalized taxonomy — 'Closed Sicilian' and 'Closed Sicilian Defense'"
+        + " are distinct groups. The output's totalGames/totalGroups cover the untruncated"
+        + " result; truncated=true means the group limit cut off a long tail.";
   }
 
   @Override
@@ -87,9 +93,9 @@ public class AggregateGamesTool implements McpTool {
     Object rawPlayer = arguments.get("player");
     String player = rawPlayer == null ? null : rawPlayer.toString();
 
-    List<AggregateRow> groups;
+    IndexerFacade.AggregateResult aggregate;
     try {
-      groups = facade.aggregate(rawQuery.toString(), groupBy, player, limit);
+      aggregate = facade.aggregate(rawQuery.toString(), groupBy, player, limit);
     } catch (ParseException | IllegalArgumentException e) {
       return ToolResponses.error(mapper, e.getMessage());
     }
@@ -98,10 +104,15 @@ public class AggregateGamesTool implements McpTool {
     // serialization-inclusion configuration.
     ObjectNode result = mapper.createObjectNode();
     ArrayNode groupsNode = result.putArray("groups");
-    for (AggregateRow group : groups) {
+    for (AggregateRow group : aggregate.groups()) {
       groupsNode.add(mapper.<ObjectNode>valueToTree(group));
     }
-    result.put("count", groups.size());
+    result.put("count", aggregate.groups().size());
+    // Untruncated totals: the group limit silently cutting off a long tail (e.g. 103 of 104
+    // games) is otherwise invisible to callers.
+    result.put("totalGames", aggregate.totalGames());
+    result.put("totalGroups", aggregate.totalGroups());
+    result.put("truncated", aggregate.totalGroups() > aggregate.groups().size());
     try {
       return mapper.writeValueAsString(result);
     } catch (IOException e) {

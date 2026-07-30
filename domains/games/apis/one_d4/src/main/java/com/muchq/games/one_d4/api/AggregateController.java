@@ -57,8 +57,16 @@ public class AggregateController {
     List<String> groupColumns = sqlCompiler.resolveGroupByColumns(request.groupBy());
     CompiledQuery compiled =
         sqlCompiler.compileAggregate(parsed, request.groupBy(), request.player());
+    CompiledQuery totalsQuery =
+        sqlCompiler.compileAggregateTotals(parsed, request.groupBy(), request.player());
 
     List<AggregateRow> groups = gameFeatureStore.aggregate(compiled, groupColumns, request.limit());
-    return new AggregateResponse(groups, groups.size());
+    GameFeatureStore.AggregateTotals totals = gameFeatureStore.aggregateTotals(totalsQuery);
+    return new AggregateResponse(
+        groups,
+        groups.size(),
+        totals.totalGames(),
+        totals.totalGroups(),
+        totals.totalGroups() > groups.size());
   }
 }

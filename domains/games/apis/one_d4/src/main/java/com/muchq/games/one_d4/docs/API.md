@@ -155,12 +155,13 @@ matching row and group client-side.
 | Field   | Type     | Required | Default | Max  | Description                                       |
 |---------|----------|----------|---------|------|---------------------------------------------------|
 | query   | string   | yes      | —       | —    | ChessQL filter (may use perspective fields when `player` is set) |
-| groupBy | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form; physical columns only) |
+| groupBy | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form; physical columns, plus `me.color` / `outcome` when `player` is set) |
 | orderBy | string   | no       | "count" | —    | Only "count" is supported (descending)            |
 | limit   | int      | no       | 50      | 1000 | Max groups to return                              |
-| player  | string   | no       | —       | —    | Username that perspective fields in the filter are resolved against |
+| player  | string   | no       | —       | —    | Username that perspective fields in the filter and groupBy are resolved against |
 
-Group-by fields validate against the same column whitelist as ChessQL comparisons.
+Group-by fields validate against the same column whitelist as ChessQL comparisons; `me.color`
+and `outcome` are the only perspective fields allowed, and only with `player` (see CHESSQL.md).
 
 ### Response (200)
 
@@ -170,12 +171,19 @@ Group-by fields validate against the same column whitelist as ChessQL comparison
     { "group": { "opening_family": "Caro Kann Defense" }, "count": 42 },
     { "group": { "opening_family": "Sicilian Defense" }, "count": 17 }
   ],
-  "count": 2
+  "count": 2,
+  "totalGames": 59,
+  "totalGroups": 2,
+  "truncated": false
 }
 ```
 
 Group keys are canonical column names (e.g. `opening_family`, even when requested as
-`opening.family`). Groups are ordered by count descending, then by group values ascending.
+`opening.family`; perspective group keys use the underscore form `me_color` / `outcome`). Groups
+are ordered by count descending, then by group values ascending. `count` is the number of groups
+returned; `totalGames` and `totalGroups` are computed over the untruncated result, and
+`truncated` is true when `limit` cut off groups — important for `opening_family`, whose
+ECO-URL-derived values fragment into long tails of small groups.
 
 ### Error Responses
 

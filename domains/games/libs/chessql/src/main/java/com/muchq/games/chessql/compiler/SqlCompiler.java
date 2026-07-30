@@ -10,6 +10,12 @@ import com.muchq.games.chessql.ast.OrExpr;
 import com.muchq.games.chessql.ast.OrderByClause;
 import com.muchq.games.chessql.ast.SequenceExpr;
 import com.muchq.games.chessql.parser.ParsedQuery;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -82,6 +88,16 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
           Map.entry("opening.family", "opening_family"));
 
   private static final Set<String> VALID_OPS = Set.of("=", "!=", "<", "<=", ">", ">=");
+
+  /**
+   * Virtual date-scoping fields compiled against the played_at TIMESTAMP column. Values are
+   * validated ISO strings ({@code date = "YYYY-MM-DD"}, {@code month = "YYYY-MM"}); every operator
+   * is rewritten to plain played_at comparisons against UTC day/month boundaries bound as
+   * timestamps, which behaves identically on H2 and Postgres (no dialect date functions).
+   */
+  private static final String DATE_FIELD = "date";
+
+  private static final String MONTH_FIELD = "month";
 
   /**
    * Perspective fields resolve the white/black columns relative to a player supplied at compile
@@ -219,54 +235,161 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
 
   /**
    * Aggregate variant of {@link #compile(ParsedQuery, String)}: the filter may use perspective
-   * fields (resolved against {@code player}); group-by fields must be physical columns.
+   * fields (resolved against {@code player}); group-by fields must be physical columns, except for
+   * {@code me.color} and {@code outcome}, which are groupable when a player is supplied.
    */
   public CompiledQuery compileAggregate(ParsedQuery pq, List<String> groupByFields, String player) {
     if (pq.orderBy() != null) {
       throw new IllegalArgumentException(
           "ORDER BY motif_count is not supported in aggregate queries");
     }
-    List<String> columns = resolveGroupByColumns(groupByFields);
-
+    List<GroupByTerm> terms = resolveGroupByTerms(groupByFields);
     Perspective perspective = new Perspective(player);
-    List<Object> params = new ArrayList<>();
-    String whereClause = compileExpr(pq.expr(), params, perspective);
-    whereClause = guardParticipation(whereClause, params, perspective);
 
-    String cols = String.join(", ", columns);
-    String tiebreak = columns.stream().map(c -> c + " ASC").collect(Collectors.joining(", "));
+    // SELECT-list group expressions render (and bind their player params) before the WHERE clause.
+    List<Object> selectParams = new ArrayList<>();
+    List<String> selectExprs = new ArrayList<>();
+    for (GroupByTerm term : terms) {
+      if (term.perspectiveField() == null) {
+        selectExprs.add(term.key());
+      } else {
+        String expr =
+            perspectiveExpr(
+                term.perspectiveField(),
+                PERSPECTIVE_FIELDS.get(term.perspectiveField()),
+                perspective,
+                selectParams);
+        selectExprs.add(expr + " AS " + term.key());
+      }
+    }
+
+    List<Object> whereParams = new ArrayList<>();
+    String whereClause = compileExpr(pq.expr(), whereParams, perspective);
+    whereClause = guardParticipation(whereClause, whereParams, perspective);
+
+    // GROUP BY references the term keys: the column itself for physical fields, the SELECT alias
+    // for perspective fields. Repeating the CASE expression instead would not be portable —
+    // Postgres matches SELECT expressions to GROUP BY expressions structurally, and a second
+    // rendering carries different bind-placeholder positions.
+    String keys = terms.stream().map(GroupByTerm::key).collect(Collectors.joining(", "));
+    String tiebreak = terms.stream().map(t -> t.key() + " ASC").collect(Collectors.joining(", "));
     String sql =
         "SELECT "
-            + cols
+            + String.join(", ", selectExprs)
             + ", COUNT(*) AS group_count FROM game_features g WHERE "
             + whereClause
             + " GROUP BY "
-            + cols
+            + keys
             + " ORDER BY group_count DESC, "
             + tiebreak;
+    List<Object> params = new ArrayList<>(selectParams);
+    params.addAll(whereParams);
+    return new CompiledQuery(sql, params);
+  }
+
+  /** Totals variant of {@link #compileAggregateTotals(ParsedQuery, List, String)} sans player. */
+  public CompiledQuery compileAggregateTotals(ParsedQuery pq, List<String> groupByFields) {
+    return compileAggregateTotals(pq, groupByFields, null);
+  }
+
+  /**
+   * Companion to {@link #compileAggregate(ParsedQuery, List, String)}: compiles the same filter and
+   * grouping into a single-row totals query ({@code total_groups}, {@code total_games}) over the
+   * untruncated result, so callers applying a group limit can report how much was cut off.
+   */
+  public CompiledQuery compileAggregateTotals(
+      ParsedQuery pq, List<String> groupByFields, String player) {
+    if (pq.orderBy() != null) {
+      throw new IllegalArgumentException(
+          "ORDER BY motif_count is not supported in aggregate queries");
+    }
+    List<GroupByTerm> terms = resolveGroupByTerms(groupByFields);
+    Perspective perspective = new Perspective(player);
+
+    List<Object> whereParams = new ArrayList<>();
+    String whereClause = compileExpr(pq.expr(), whereParams, perspective);
+
+    // The inner query has no SELECT-list group expressions to match, so perspective terms can
+    // inline their CASE expression directly in GROUP BY (params bind after the WHERE clause).
+    List<Object> groupParams = new ArrayList<>();
+    List<String> groupExprs = new ArrayList<>();
+    for (GroupByTerm term : terms) {
+      if (term.perspectiveField() == null) {
+        groupExprs.add(term.key());
+      } else {
+        groupExprs.add(
+            perspectiveExpr(
+                term.perspectiveField(),
+                PERSPECTIVE_FIELDS.get(term.perspectiveField()),
+                perspective,
+                groupParams));
+      }
+    }
+    whereClause = guardParticipation(whereClause, whereParams, perspective);
+
+    String sql =
+        "SELECT COUNT(*) AS total_groups, COALESCE(SUM(group_count), 0) AS total_games FROM ("
+            + "SELECT COUNT(*) AS group_count FROM game_features g WHERE "
+            + whereClause
+            + " GROUP BY "
+            + String.join(", ", groupExprs)
+            + ") grp";
+    List<Object> params = new ArrayList<>(whereParams);
+    params.addAll(groupParams);
     return new CompiledQuery(sql, params);
   }
 
   /**
-   * Resolves group-by fields (dotted or underscore form) to their canonical column names,
-   * deduplicating while preserving order. Throws on unknown fields.
+   * Resolves group-by fields (dotted or underscore form) to their canonical group keys,
+   * deduplicating while preserving order. Physical columns resolve to their column name; groupable
+   * perspective fields resolve to their underscore form ({@code me_color}, {@code outcome}), which
+   * is also the SELECT alias aggregate rows are keyed by. Throws on unknown fields.
    */
   public List<String> resolveGroupByColumns(List<String> groupByFields) {
+    return resolveGroupByTerms(groupByFields).stream().map(GroupByTerm::key).toList();
+  }
+
+  /**
+   * One resolved groupBy term: the group key (canonical column name, or underscore perspective name
+   * used as the SELECT alias) and, for perspective terms, the dotted field to render the CASE
+   * expression from ({@code null} for physical columns).
+   */
+  private record GroupByTerm(String key, String perspectiveField) {}
+
+  /** Perspective fields allowed in groupBy, keyed by every accepted spelling. */
+  private static final Map<String, String> GROUPABLE_PERSPECTIVE_FIELDS =
+      Map.of("me.color", "me.color", "me_color", "me.color", "outcome", "outcome");
+
+  private List<GroupByTerm> resolveGroupByTerms(List<String> groupByFields) {
     if (groupByFields == null || groupByFields.isEmpty()) {
       throw new IllegalArgumentException("groupBy requires at least one field");
     }
-    List<String> columns = new ArrayList<>();
+    List<GroupByTerm> terms = new ArrayList<>();
     for (String field : groupByFields) {
-      if (PERSPECTIVE_FIELDS.containsKey(field)) {
-        throw new IllegalArgumentException(
-            "Perspective fields are not supported in groupBy: " + field);
-      }
-      String column = resolveColumn(field);
-      if (!columns.contains(column)) {
-        columns.add(column);
+      GroupByTerm term = resolveGroupByTerm(field);
+      if (terms.stream().noneMatch(t -> t.key().equals(term.key()))) {
+        terms.add(term);
       }
     }
-    return columns;
+    return terms;
+  }
+
+  private GroupByTerm resolveGroupByTerm(String field) {
+    String perspectiveField = GROUPABLE_PERSPECTIVE_FIELDS.get(field);
+    if (perspectiveField != null) {
+      return new GroupByTerm(perspectiveField.replace('.', '_'), perspectiveField);
+    }
+    if (PERSPECTIVE_FIELDS.containsKey(field)) {
+      throw new IllegalArgumentException(
+          "Perspective fields are not supported in groupBy: "
+              + field
+              + " (only me.color and outcome are groupable, with a player)");
+    }
+    if (DATE_FIELD.equals(field) || MONTH_FIELD.equals(field)) {
+      throw new IllegalArgumentException(
+          "'" + field + "' is a filter-only field and is not supported in groupBy");
+    }
+    return new GroupByTerm(resolveColumn(field), null);
   }
 
   /**
@@ -310,6 +433,10 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       throw new IllegalArgumentException("Invalid operator: " + op);
     }
 
+    if (DATE_FIELD.equals(cmp.field()) || MONTH_FIELD.equals(cmp.field())) {
+      return compileDateComparison(cmp, params);
+    }
+
     PerspectiveField perspectiveField = PERSPECTIVE_FIELDS.get(cmp.field());
     if (perspectiveField != null) {
       String expr = perspectiveExpr(cmp.field(), perspectiveField, perspective, params);
@@ -328,7 +455,82 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     return column + " " + op + " ?";
   }
 
+  /**
+   * Compiles a {@code date} / {@code month} comparison to played_at range predicates. Day and month
+   * values cover a half-open timestamp interval, so operators are rewritten against the interval's
+   * boundaries: {@code date = "D"} means "played on day D", {@code date <= "D"} includes all of day
+   * D, and so on. Boundaries are UTC and bound as timestamps.
+   */
+  private static String compileDateComparison(ComparisonExpr cmp, List<Object> params) {
+    Instant start;
+    Instant end;
+    if (MONTH_FIELD.equals(cmp.field())) {
+      if (!cmp.operator().equals("=")) {
+        throw new IllegalArgumentException(
+            "month supports only '=' (use date for range comparisons), got: " + cmp.operator());
+      }
+      YearMonth month = parseMonthValue(cmp.value());
+      start = month.atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+      end = month.plusMonths(1).atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+    } else {
+      LocalDate day = parseDateValue(cmp.value());
+      start = day.atStartOfDay(ZoneOffset.UTC).toInstant();
+      end = day.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+    }
+    switch (cmp.operator()) {
+      case "=":
+        params.add(Timestamp.from(start));
+        params.add(Timestamp.from(end));
+        return "(played_at >= ? AND played_at < ?)";
+      case "!=":
+        params.add(Timestamp.from(start));
+        params.add(Timestamp.from(end));
+        return "(played_at < ? OR played_at >= ?)";
+      case "<":
+        params.add(Timestamp.from(start));
+        return "played_at < ?";
+      case ">=":
+        params.add(Timestamp.from(start));
+        return "played_at >= ?";
+      case "<=":
+        params.add(Timestamp.from(end));
+        return "played_at < ?";
+      case ">":
+        params.add(Timestamp.from(end));
+        return "played_at >= ?";
+      default:
+        throw new IllegalArgumentException("Invalid operator: " + cmp.operator());
+    }
+  }
+
+  private static LocalDate parseDateValue(Object value) {
+    if (value instanceof String s) {
+      try {
+        return LocalDate.parse(s);
+      } catch (DateTimeParseException e) {
+        // fall through to the shared error below
+      }
+    }
+    throw new IllegalArgumentException(
+        "date requires an ISO date string (\"YYYY-MM-DD\"), got: " + value);
+  }
+
+  private static YearMonth parseMonthValue(Object value) {
+    if (value instanceof String s) {
+      try {
+        return YearMonth.parse(s);
+      } catch (DateTimeParseException e) {
+        // fall through to the shared error below
+      }
+    }
+    throw new IllegalArgumentException("month requires a \"YYYY-MM\" string, got: " + value);
+  }
+
   private String compileIn(InExpr in, List<Object> params, Perspective perspective) {
+    if (DATE_FIELD.equals(in.field()) || MONTH_FIELD.equals(in.field())) {
+      throw new IllegalArgumentException(
+          in.field() + " does not support IN; use comparisons (e.g. date >= \"2026-07-01\")");
+    }
     PerspectiveField perspectiveField = PERSPECTIVE_FIELDS.get(in.field());
     if (perspectiveField != null) {
       String expr = perspectiveExpr(in.field(), perspectiveField, perspective, params);

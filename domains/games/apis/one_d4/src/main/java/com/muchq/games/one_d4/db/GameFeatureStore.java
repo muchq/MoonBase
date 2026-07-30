@@ -28,10 +28,19 @@ public interface GameFeatureStore {
    */
   List<AggregateRow> aggregate(Object compiledQuery, List<String> groupColumns, int limit);
 
+  /**
+   * Runs a compiled aggregate totals query (see SqlCompiler.compileAggregateTotals) and returns the
+   * untruncated group/game counts behind an aggregate, so callers can report truncation.
+   */
+  AggregateTotals aggregateTotals(Object compiledQuery);
+
   Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls);
 
   /** Returns a batch of game records (requestId, gameUrl, pgn) for re-analysis. */
   List<GameForReanalysis> fetchForReanalysis(int limit, int offset);
 
   record GameForReanalysis(UUID requestId, String gameUrl, String pgn) {}
+
+  /** Untruncated totals for an aggregate: all games matching the filter, and all groups. */
+  record AggregateTotals(long totalGames, long totalGroups) {}
 }
