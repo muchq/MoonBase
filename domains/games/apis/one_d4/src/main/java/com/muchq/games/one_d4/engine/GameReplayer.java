@@ -1,6 +1,5 @@
 package com.muchq.games.one_d4.engine;
 
-import chariot.chess.Board;
 import chariot.model.PGN;
 import com.muchq.games.one_d4.engine.model.PositionContext;
 import java.util.ArrayList;
@@ -10,7 +9,7 @@ public class GameReplayer {
 
   public List<PositionContext> replay(String moveText) {
     List<PositionContext> positions = new ArrayList<>();
-    Board board = Board.ofStandard();
+    ReplayBoard board = ReplayBoard.standard();
 
     positions.add(new PositionContext(0, board.toFEN(), true, null));
 
@@ -19,7 +18,20 @@ public class GameReplayer {
     boolean whiteToMove = true;
 
     for (String move : moves) {
-      board = board.play(move);
+      try {
+        board.play(move);
+      } catch (RuntimeException e) {
+        // The board's own message has no game context; production logs need the ply and position
+        // to debug a bad PGN.
+        throw new IllegalArgumentException(
+            "Failed at move "
+                + moveNumber
+                + (whiteToMove ? ". " : "... ")
+                + move
+                + " from "
+                + positions.get(positions.size() - 1).fen(),
+            e);
+      }
       whiteToMove = !whiteToMove;
       positions.add(new PositionContext(moveNumber, board.toFEN(), whiteToMove, move));
       if (whiteToMove) {

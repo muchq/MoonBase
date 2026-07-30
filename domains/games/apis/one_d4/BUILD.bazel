@@ -36,7 +36,6 @@ java_library(
     visibility = ["//visibility:public"],
     deps = [
         ":model",
-        artifact("io.github.tors42:chariot"),
     ],
 )
 
@@ -46,6 +45,7 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/engine/FeatureExtractor.java",
         "src/main/java/com/muchq/games/one_d4/engine/GameReplayer.java",
         "src/main/java/com/muchq/games/one_d4/engine/PgnParser.java",
+        "src/main/java/com/muchq/games/one_d4/engine/ReplayBoard.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -277,13 +277,41 @@ java_test_suite(
     size = "small",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/engine/FeatureExtractorTest.java",
+        "src/test/java/com/muchq/games/one_d4/engine/GameReplayerParityTest.java",
         "src/test/java/com/muchq/games/one_d4/engine/GameReplayerTest.java",
         "src/test/java/com/muchq/games/one_d4/engine/PgnParserTest.java",
+        "src/test/java/com/muchq/games/one_d4/engine/ReplayBoardTest.java",
     ],
     deps = [
         ":engine",
         ":model",
         ":motifs",
+        artifact("io.github.tors42:chariot"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_library(
+    name = "hikaru_corpus",
+    testonly = True,
+    resource_strip_prefix = "domains/games/apis/one_d4/src/test/resources",
+    resources = ["src/test/resources/hikaru_corpus.pgn"],
+)
+
+# 500 real chess.com games replayed against chariot per ply — the wide-net regression bank for
+# the internal ReplayBoard. Kept out of engine_tests so the small suite stays fast.
+java_test_suite(
+    name = "corpus_tests",
+    size = "medium",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/engine/HikaruCorpusParityTest.java",
+    ],
+    deps = [
+        ":engine",
+        ":hikaru_corpus",
+        ":model",
+        artifact("io.github.tors42:chariot"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
