@@ -19,6 +19,23 @@ cc_library(
     ],
 )
 
+# Beyoncé Rule contract tests (platform tier): every smithy-cpp behavior the
+# aura chain — and through it every C++ service — depends on, pinned here so
+# a pin bump that changes one fails with a named contract. Non-Beast deps
+# only, so this runs in restricted-egress sandboxes where :http_beast can't
+# fetch boost.
+cc_test(
+    name = "smithy_contract_test",
+    size = "small",
+    srcs = ["smithy_contract_test.cc"],
+    deps = [
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
 cc_test(
     name = "middleware_test",
     size = "small",

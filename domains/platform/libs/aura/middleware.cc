@@ -157,12 +157,12 @@ std::optional<smithy::http::TrustedProxies> TrustedProxiesFromEnv() {
     LOG(ERROR) << "TRUSTED_PROXY_CIDRS is set but empty; unset it to serve direct-connect";
     return std::nullopt;
   }
-  try {
-    return smithy::http::TrustedProxies(cidrs);
-  } catch (const std::invalid_argument& error) {
-    LOG(ERROR) << "Invalid TRUSTED_PROXY_CIDRS: " << error.what();
+  auto parsed = smithy::http::TrustedProxies::Parse(cidrs);
+  if (!parsed.ok()) {
+    LOG(ERROR) << "Invalid TRUSTED_PROXY_CIDRS: " << parsed.error().message();
     return std::nullopt;
   }
+  return std::move(parsed).value();
 }
 
 }  // namespace aura

@@ -106,7 +106,7 @@ class AuraMiddlewareTest : public ::testing::Test {
             .metrics = sink_,
             .allow_request =
                 [limiter = limiter_](const std::string& client) { return limiter->allow(client); },
-            .trusted_proxies = smithy::http::TrustedProxies({kProxy}),
+            .trusted_proxies = smithy::http::TrustedProxies::Parse({kProxy}).value(),
             .retry_after = std::chrono::seconds(60)},
         EchoHandler());
     loopback_ = std::make_shared<smithy::http::Loopback>();
