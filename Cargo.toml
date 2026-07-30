@@ -6,7 +6,6 @@ members = [
     "domains/ai/apps/microgpt_cli",
     "domains/ai/apis/microgpt_serve",
     "domains/ai/libs/microgpt",
-    "domains/platform/apis/doc_db",
     "domains/graphics/libs/imagine_rust",
     "domains/games/apis/mithril",
     "domains/graphics/apis/posterize",
@@ -14,7 +13,6 @@ members = [
     "domains/games/libs/wordchains",
     "domains/games/apps/wordchains",
     "domains/platform/protos/example_grpc",
-    "domains/platform/protos/doc_db",
 ]
 
 [workspace.package]
@@ -30,11 +28,9 @@ candle-core = "0.9.2"
 candle-nn = "0.9.2"
 base64ct = { version = "1.8.3", features = ["alloc"] }
 clap = { version = "4.5.60", features = ["cargo"] }
-doc_db_proto = { path = "domains/platform/protos/doc_db" }
 image = { version = "0.25.9", default-features = false, features = ["png", "jpeg"] }
 imagine = { path = "domains/graphics/libs/imagine_rust" }
 log = "0.4.29"
-mongodb = "3.5.1"
 prost = { version = "0.14.3" }
 prost-types = { version = "0.14.3", default-features = false }
 half = "2.7.1"

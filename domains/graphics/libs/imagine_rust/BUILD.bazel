@@ -13,7 +13,6 @@ rust_library(
     visibility = ["//visibility:public"],
     deps = crate_deps([
         "image",
-        "tracing",
     ]),
 )
 
