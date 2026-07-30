@@ -537,41 +537,69 @@ public class SqlCompilerTest {
         .hasMessageContaining("month supports only '='");
   }
 
+  // Error strings on these paths are the UI an LLM caller reads, so they are pinned exactly:
+  // each must name the offending field, the accepted format, and the value that was rejected.
+
   @Test
   public void testDateRejectsMalformedValues() {
     assertThatThrownBy(() -> compile("date >= \"July 1, 2026\""))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("ISO date string");
+        .hasMessage("date requires an ISO date string (\"YYYY-MM-DD\"), got: July 1, 2026");
+    // Zero-padding is required: "2026-7-1" is not ISO
+    assertThatThrownBy(() -> compile("date = \"2026-7-1\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("date requires an ISO date string (\"YYYY-MM-DD\"), got: 2026-7-1");
+    // A bare number is not a date
     assertThatThrownBy(() -> compile("date >= 20260701"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("ISO date string");
-    // A bare month is not a date; the error should steer to the month field's format
+        .hasMessage("date requires an ISO date string (\"YYYY-MM-DD\"), got: 20260701");
+    // A bare month is not a date
     assertThatThrownBy(() -> compile("date >= \"2026-07\""))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("ISO date string");
+        .hasMessage("date requires an ISO date string (\"YYYY-MM-DD\"), got: 2026-07");
+    // Well-formed but non-existent calendar days are rejected too
+    assertThatThrownBy(() -> compile("date = \"2026-02-30\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("date requires an ISO date string (\"YYYY-MM-DD\"), got: 2026-02-30");
   }
 
   @Test
   public void testMonthRejectsMalformedValues() {
     assertThatThrownBy(() -> compile("month = \"2026-7\""))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("YYYY-MM");
+        .hasMessage("month requires a \"YYYY-MM\" string, got: 2026-7");
     assertThatThrownBy(() -> compile("month = \"2026-07-01\""))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("YYYY-MM");
+        .hasMessage("month requires a \"YYYY-MM\" string, got: 2026-07-01");
+    assertThatThrownBy(() -> compile("month = \"July\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("month requires a \"YYYY-MM\" string, got: July");
     assertThatThrownBy(() -> compile("month = 202607"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("YYYY-MM");
+        .hasMessage("month requires a \"YYYY-MM\" string, got: 202607");
+  }
+
+  @Test
+  public void testMonthRejectsNonEqualityOperatorsWithExactMessage() {
+    assertThatThrownBy(() -> compile("month > \"2026-07\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("month supports only '=' (use date for range comparisons), got: >");
   }
 
   @Test
   public void testDateAndMonthRejectIn() {
+    // The suggested alternative is field-specific: an LLM told "use comparisons" on month would
+    // otherwise retry with month >= ... and hit a second error.
     assertThatThrownBy(() -> compile("date IN [\"2026-07-01\", \"2026-07-02\"]"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("does not support IN");
+        .hasMessage(
+            "date does not support IN; use comparisons instead (date >= \"2026-07-01\", or a"
+                + " range like date >= \"2026-07-01\" AND date < \"2026-09-01\")");
     assertThatThrownBy(() -> compile("month IN [\"2026-06\", \"2026-07\"]"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("does not support IN");
+        .hasMessage(
+            "month does not support IN; use comparisons instead (month = \"2026-07\", or a"
+                + " range like date >= \"2026-07-01\" AND date < \"2026-09-01\")");
   }
 
   @Test
@@ -608,11 +636,48 @@ public class SqlCompilerTest {
     assertThatThrownBy(
             () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("date")))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("not supported in groupBy");
+        .hasMessage(
+            "'date' is a filter-only field and is not supported in groupBy; use it in the query"
+                + " filter instead (e.g. date >= \"2026-07-01\")");
     assertThatThrownBy(
             () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("month")))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("not supported in groupBy");
+        .hasMessage(
+            "'month' is a filter-only field and is not supported in groupBy; use it in the query"
+                + " filter instead (e.g. month = \"2026-07\")");
+    // The totals companion validates groupBy identically, so the caller sees the same message
+    assertThatThrownBy(
+            () -> compiler.compileAggregateTotals(Parser.parse("white.elo > 1"), List.of("month")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "'month' is a filter-only field and is not supported in groupBy; use it in the query"
+                + " filter instead (e.g. month = \"2026-07\")");
+  }
+
+  @Test
+  public void testGroupByPerspectiveErrorMessagesAreExact() {
+    // me.elo is perspective-relative but not groupable, even with a player
+    assertThatThrownBy(
+            () ->
+                compiler.compileAggregate(
+                    Parser.parse("white.elo > 1"), List.of("me.elo"), "hikaru"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "Perspective fields are not supported in groupBy: me.elo (only me.color and outcome"
+                + " are groupable, with a player)");
+    // me.color IS groupable, but only with a player — same voice as the filter-side message
+    assertThatThrownBy(
+            () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("me.color")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "Field 'me.color' is perspective-relative (me.*, opponent.*, outcome) and requires a"
+                + " player parameter on the request");
+    assertThatThrownBy(
+            () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("outcome")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "Field 'outcome' is perspective-relative (me.*, opponent.*, outcome) and requires a"
+                + " player parameter on the request");
   }
 
   @Test
@@ -939,6 +1004,90 @@ public class SqlCompilerTest {
                 + " 'black' END)) grp");
     assertThat(result.parameters())
         .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", "win", "hikaru"));
+  }
+
+  /**
+   * compileAggregate and compileAggregateTotals must describe the same filter and the same
+   * grouping, so any divergence in what they bind is a silently-wrong totals bug (no error, just a
+   * different denominator than the groups). The two lay their placeholders out differently by
+   * necessity — the groups query renders the CASE in the SELECT list (params first), the totals
+   * query inlines it in GROUP BY (params last) — so the invariant is that each list matches its own
+   * SQL and the two agree as multisets.
+   */
+  @Test
+  public void testAggregateAndTotalsBindTheSameParamsForTheSameQuery() {
+    ParsedQuery parsed =
+        Parser.parse("outcome = \"win\" AND date >= \"2026-07-01\" AND month = \"2026-07\"");
+    List<String> groupBy = List.of("me.color", "opening.family");
+
+    CompiledQuery groups = compiler.compileAggregate(parsed, groupBy, "hikaru");
+    CompiledQuery totals = compiler.compileAggregateTotals(parsed, groupBy, "hikaru");
+
+    Timestamp julyStart = utc("2026-07-01T00:00:00Z");
+    Timestamp augStart = utc("2026-08-01T00:00:00Z");
+    // groups: me.color CASE (1), guard (2), outcome CASE (2), "win", date bound, month bounds
+    assertThat(groups.parameters())
+        .isEqualTo(
+            List.of(
+                "hikaru",
+                "hikaru",
+                "hikaru",
+                "hikaru",
+                "hikaru",
+                "win",
+                julyStart,
+                julyStart,
+                augStart));
+    // totals: same WHERE params in the same order, with the me.color CASE param moved to the end
+    assertThat(totals.parameters())
+        .isEqualTo(
+            List.of(
+                "hikaru",
+                "hikaru",
+                "hikaru",
+                "hikaru",
+                "win",
+                julyStart,
+                julyStart,
+                augStart,
+                "hikaru"));
+    assertThat(groups.parameters())
+        .containsExactlyInAnyOrderElementsOf(totals.parameters())
+        .hasSameSizeAs(totals.parameters());
+    // Every placeholder in each statement is accounted for by exactly one bound param.
+    assertThat(countPlaceholders(groups.selectSql())).isEqualTo(groups.parameters().size());
+    assertThat(countPlaceholders(totals.selectSql())).isEqualTo(totals.parameters().size());
+  }
+
+  /**
+   * The ORDER BY motif_count LEFT JOIN binds the motif name before the WHERE clause, and the
+   * participation guard prepends two player params to the WHERE clause. Both are prefixes, so a
+   * query using all three plus a date bound must still line up placeholder-for-param.
+   */
+  @Test
+  public void testMotifCountOrderByWithPerspectiveAndDateKeepsParamOrder() {
+    CompiledQuery result =
+        compiler.compile(
+            Parser.parse(
+                "outcome = \"win\" AND date >= \"2026-07-01\" ORDER BY motif_count(pin) DESC"),
+            "hikaru");
+
+    // motif name (JOIN), guard x2, outcome CASE x2, the outcome value, then the date bound
+    assertThat(result.parameters())
+        .isEqualTo(
+            List.of(
+                "PIN",
+                "hikaru",
+                "hikaru",
+                "hikaru",
+                "hikaru",
+                "win",
+                utc("2026-07-01T00:00:00Z")));
+    assertThat(countPlaceholders(result.selectSql())).isEqualTo(result.parameters().size());
+  }
+
+  private static int countPlaceholders(String sql) {
+    return (int) sql.chars().filter(c -> c == '?').count();
   }
 
   @Test

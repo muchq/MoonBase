@@ -387,7 +387,12 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     }
     if (DATE_FIELD.equals(field) || MONTH_FIELD.equals(field)) {
       throw new IllegalArgumentException(
-          "'" + field + "' is a filter-only field and is not supported in groupBy");
+          "'"
+              + field
+              + "' is a filter-only field and is not supported in groupBy; use it in the query"
+              + " filter instead (e.g. "
+              + dateFieldExample(field)
+              + ")");
     }
     return new GroupByTerm(resolveColumn(field), null);
   }
@@ -526,10 +531,18 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     throw new IllegalArgumentException("month requires a \"YYYY-MM\" string, got: " + value);
   }
 
+  /** The canonical single-value example for a date-scoping field, used in error messages. */
+  private static String dateFieldExample(String field) {
+    return MONTH_FIELD.equals(field) ? "month = \"2026-07\"" : "date >= \"2026-07-01\"";
+  }
+
   private String compileIn(InExpr in, List<Object> params, Perspective perspective) {
     if (DATE_FIELD.equals(in.field()) || MONTH_FIELD.equals(in.field())) {
       throw new IllegalArgumentException(
-          in.field() + " does not support IN; use comparisons (e.g. date >= \"2026-07-01\")");
+          in.field()
+              + " does not support IN; use comparisons instead ("
+              + dateFieldExample(in.field())
+              + ", or a range like date >= \"2026-07-01\" AND date < \"2026-09-01\")");
     }
     PerspectiveField perspectiveField = PERSPECTIVE_FIELDS.get(in.field());
     if (perspectiveField != null) {
