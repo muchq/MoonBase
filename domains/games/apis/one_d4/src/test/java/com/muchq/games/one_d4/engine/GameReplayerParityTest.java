@@ -101,9 +101,10 @@ public class GameReplayerParityTest {
     assertThat(actual[0]).as("placement %s", where).isEqualTo(oracle[0]);
     assertThat(actual[1]).as("side to move %s", where).isEqualTo(oracle[1]);
     assertThat(actual[2]).as("castling rights %s", where).isEqualTo(oracle[2]);
-    // Chariot only prints an ep square when an ep capture is actually possible; we print it after
-    // every double push (the traditional FEN convention). Only compare when both print a square.
-    if (!"-".equals(actual[3]) && !"-".equals(oracle[3])) {
+    // Chariot prints an ep square only when an ep capture is actually legal; we print one after
+    // every double push (the traditional FEN convention). So an oracle square must always be
+    // matched, and only an oracle "-" is inconclusive.
+    if (!"-".equals(oracle[3])) {
       assertThat(actual[3]).as("en passant square %s", where).isEqualTo(oracle[3]);
     }
     assertThat(actual[4]).as("halfmove clock %s", where).isEqualTo(oracle[4]);

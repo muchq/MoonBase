@@ -156,6 +156,26 @@ public class ReplayBoardTest {
   }
 
   @Test
+  public void castlingWithPiecesOutOfPlaceThrows() {
+    // Path blocked on the untouched starting board
+    ReplayBoard blocked = ReplayBoard.standard();
+    assertThatThrownBy(() -> blocked.play("O-O")).isInstanceOf(IllegalArgumentException.class);
+
+    // Rook missing from its corner
+    ReplayBoard noRook = ReplayBoard.fromFen("k7/8/8/8/8/8/8/4K3 w - - 0 1");
+    assertThatThrownBy(() -> noRook.play("O-O-O")).isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  public void doubleDisambiguationResolvesAmongThreeQueens() {
+    // Queens on a1, a5, and e1 all attack e5: the file hint alone matches a1/a5 and the rank
+    // hint alone matches a1/e1, so SAN needs both — Qa1e5.
+    ReplayBoard board = ReplayBoard.fromFen("k7/8/8/Q7/8/8/8/Q3Q2K w - - 0 1");
+    board.play("Qa1e5");
+    assertThat(placement(board)).isEqualTo("k7/8/8/Q3Q3/8/8/8/4Q2K");
+  }
+
+  @Test
   public void promotionWithoutEqualsSignAccepted() {
     // chess.com SAN normally writes e8=Q, but the bare e8Q form appears in the wild.
     ReplayBoard board = ReplayBoard.fromFen("k7/4P3/8/8/8/8/8/K7 w - - 0 1");

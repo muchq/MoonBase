@@ -161,6 +161,18 @@ final class ReplayBoard {
 
   private void castle(boolean white, boolean kingside) {
     int row = white ? 7 : 0;
+    int king = white ? 6 : -6;
+    int rook = white ? 4 : -4;
+    // Guard like every other mutation path: corrupt input (e.g. a castling token reached with
+    // the wrong side to move) must throw, not silently rewrite four squares.
+    if (board[row][4] != king
+        || board[row][kingside ? 7 : 0] != rook
+        || board[row][kingside ? 5 : 3] != 0
+        || board[row][kingside ? 6 : 2] != 0
+        || (!kingside && board[row][1] != 0)) {
+      throw new IllegalArgumentException(
+          "Cannot castle " + (kingside ? "kingside" : "queenside") + ": pieces not in place");
+    }
     if (kingside) {
       board[row][6] = board[row][4]; // king e→g
       board[row][5] = board[row][7]; // rook h→f
@@ -195,8 +207,9 @@ final class ReplayBoard {
       fromCol = fileHint.charAt(0) - 'a';
       fromRow = toRow + originRowOffset;
       if (board[toRow][toCol] == 0) {
-        // en passant: the captured pawn sits on the origin row, destination file
-        if (board[fromRow][toCol] != -pawn) {
+        // en passant: only onto the tracked ep square, removing the bypassed enemy pawn from the
+        // origin row, destination file
+        if (toRow != epRow || toCol != epCol || board[fromRow][toCol] != -pawn) {
           throw new IllegalArgumentException(
               "No piece to capture on " + BoardUtils.squareName(toRow, toCol));
         }
