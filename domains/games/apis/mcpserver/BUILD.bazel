@@ -137,6 +137,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/mcpserver/tools/ChessComPlayerToolTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/ChessComPlayersToolTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/ChessComStatsToolTest.java",
+        "src/test/java/com/muchq/games/mcpserver/tools/IndexerFacadeAggregateTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/IndexerToolsTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/ServerTimeToolTest.java",
     ],

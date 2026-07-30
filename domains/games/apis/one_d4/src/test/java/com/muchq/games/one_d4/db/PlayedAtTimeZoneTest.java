@@ -21,6 +21,13 @@ import org.junit.jupiter.api.Test;
  * non-UTC default zone (Pacific/Kiritimati, UTC+14) to prove the day boundaries stay UTC days
  * rather than sliding with the JVM.
  *
+ * <p>Agreeing on the JVM zone is not enough, which is why {@link
+ * #storedWallClockIsUtcNotJvmLocal()} asserts the wall clock actually on disk rather than a round
+ * trip: a symmetric write/read pair cancels the offset out within one process, so a query issued
+ * from a JVM in a different zone than the one that indexed the row would still miss it. {@link
+ * GameFeatureDao} binds played_at through an explicit UTC calendar on both sides to make the stored
+ * value zone-independent.
+ *
  * <p>The zone comes from the Bazel target's {@code env = {"TZ": ...}} rather than {@code
  * TimeZone.setDefault} in a {@code @BeforeEach}: H2 caches the default zone globally the first time
  * it converts a value, so a zone changed mid-JVM would not reach the driver and the test would pass
@@ -86,6 +93,46 @@ public class PlayedAtTimeZoneTest {
     assertThat(urlsMatching("date >= \"2026-07-01\"")).containsExactly("julyMid", "julyStart");
     assertThat(urlsMatching("date != \"2026-07-01\""))
         .containsExactlyInAnyOrder("juneEnd", "julyMid");
+  }
+
+  /**
+   * The storage-level assertion the round-trip tests cannot make. played_at holds a wall clock, so
+   * the only zone-independent thing to store is the UTC one; reading it back as text goes straight
+   * to the stored value with no driver-side Calendar conversion to cancel a zone error out.
+   *
+   * <p>Under UTC+14 a JVM-local bind would write {@code 2026-07-01 14:00:00} for these instants —
+   * self-consistent for this process, and unreadable by a query from any other zone. The
+   * millisecond-before instant is included because it is the one that decides which month the game
+   * belongs to: stored as local, it reads back as July.
+   */
+  @Test
+  public void storedWallClockIsUtcNotJvmLocal() {
+    dao.insertBatch(
+        List.of(
+            gameAt("julyStart", Instant.parse("2026-07-01T00:00:00Z")),
+            gameAt("juneEnd", Instant.parse("2026-06-30T23:59:59.999Z"))));
+
+    assertThat(storedPlayedAt("julyStart")).isEqualTo("2026-07-01 00:00:00");
+    assertThat(storedPlayedAt("juneEnd")).isEqualTo("2026-06-30 23:59:59.999");
+  }
+
+  /**
+   * The stored wall clock as text. {@code CAST(... AS VARCHAR)} renders the column server-side, so
+   * neither the JVM's zone nor the driver's Calendar handling can touch the answer.
+   */
+  private String storedPlayedAt(String gameUrl) {
+    try (var conn = testDb.dataSource().getConnection();
+        var stmt =
+            conn.prepareStatement(
+                "SELECT CAST(played_at AS VARCHAR) FROM game_features WHERE game_url = ?")) {
+      stmt.setString(1, gameUrl);
+      try (var rs = stmt.executeQuery()) {
+        assertThat(rs.next()).isTrue();
+        return rs.getString(1);
+      }
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
   }
 
   /** played_at must survive the round trip as the same instant, not shifted by the zone offset. */

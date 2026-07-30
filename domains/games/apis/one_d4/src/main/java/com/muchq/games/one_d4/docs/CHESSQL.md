@@ -54,8 +54,13 @@ Dotted field names are mapped to database columns:
 | `opening.family` | `opening_family` | VARCHAR |
 | `result`         | `result`         | VARCHAR |
 | `platform`       | `platform`       | VARCHAR |
+| `date`           | *(virtual — `played_at` range)* | ISO date string, filter-only |
+| `month`          | *(virtual — `played_at` range)* | `"YYYY-MM"` string, filter-only |
 
 Underscore-separated names also work directly: `white_elo >= 2500` is equivalent to `white.elo >= 2500`.
+
+`date` and `month` have no column of their own: they compile to `played_at` ranges and are
+filter-only, rejected in `IN` lists and in `groupBy`. See [Date scoping](#date-scoping) below.
 
 `white.title` / `black.title` hold chess.com titles (`GM`, `IM`, `WGM`, ...) fetched from player
 profiles at index time; untitled players are NULL. `opening.name` is the human-readable opening
@@ -69,8 +74,9 @@ served from the indexed-period cache and does not refetch.
 > **Caveat — `opening.family` is not a normalized taxonomy.** Both opening fields are string
 > slices of chess.com's ECO-URL, so near-identical spellings form distinct values and distinct
 > aggregation groups: `Closed Sicilian` and `Closed Sicilian Defense` do not merge. When
-> aggregating by `opening_family`, compare the response's `totalGames` against the sum of the
-> returned group counts to detect a long tail of small variant groups cut off by the group limit.
+> aggregating by `opening_family`, check the response's `truncated` flag: it is true when the
+> group limit cut off a long tail of small variant groups, and `totalGroups` says how many there
+> really were.
 
 ### Date scoping
 
@@ -87,6 +93,12 @@ Because a day covers a range of timestamps, operators are rewritten against day 
 and `date >= "2026-07-01" AND date < "2026-08-01"` is equivalent to `month = "2026-07"`. Values
 are validated at compile time; malformed strings (or numbers) are rejected. `date` and `month`
 are filter-only: they are not allowed in `IN` lists or in `groupBy` on `/v1/aggregate`.
+
+> **A date filter scopes the indexed corpus, not your whole game history.** Nothing reports which
+> periods have been indexed, and a `date` / `month` filter over a period that was never indexed
+> returns zero rows — not an error. That result is indistinguishable from "played no games then",
+> so do not read it as one: index the period first (`POST /v1/index`, or `index_chess_games` on
+> the MCP server) and re-run the query.
 
 ```
 month = "2026-07" AND outcome = "loss"

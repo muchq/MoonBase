@@ -36,7 +36,10 @@ import org.junit.jupiter.api.Test;
  *       input columns first and output column names second, so this only works because no
  *       game_features column shares the alias.
  *   <li>date/month bounds bound as {@link java.sql.Timestamp} against a TIMESTAMP-without-zone
- *       column, where pgjdbc converts through the JVM default zone on both the write and the read.
+ *       column. {@link GameFeatureDao} passes an explicit UTC {@link java.util.Calendar} on both
+ *       the write and the read so pgjdbc stores a UTC wall clock instead of converting through the
+ *       JVM default zone; {@link PlayedAtTimeZoneTest} pins that under a non-UTC JVM on H2, and
+ *       this suite checks pgjdbc honours it the same way.
  * </ul>
  *
  * <p>Runs against the real postgres that CI's build-and-test job provides via {@code

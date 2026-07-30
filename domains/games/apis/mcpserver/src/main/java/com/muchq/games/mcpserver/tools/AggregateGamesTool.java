@@ -34,7 +34,10 @@ public class AggregateGamesTool implements McpTool {
         + " (index first with index_chess_games). This answers questions like 'most popular"
         + " openings' in one call: query 'white.username = \"hikaru\" AND time.class ="
         + " \"blitz\"' with group_by [\"opening_family\"]. The filter may scope time with date"
-        + " comparisons ('date >= \"2026-07-01\"') or 'month = \"2026-07\"'. With the player"
+        + " comparisons ('date >= \"2026-07-01\"') or 'month = \"2026-07\"'; date and month"
+        + " filter the indexed corpus only, so a period that was never indexed comes back with"
+        + " zero groups rather than an error — indistinguishable from 'played no games then'"
+        + " unless you index that period first with index_chess_games. With the player"
         + " parameter the filter may use perspective fields (me.*, opponent.*, outcome) — e.g."
         + " player: hikaru with query 'me.color = \"white\" AND opponent.title = \"GM\"'."
         + " Groupable fields: opening_family, opening_name, eco, result, time_class, white_title,"
@@ -42,8 +45,9 @@ public class AggregateGamesTool implements McpTool {
         + " when player is set (group keys me_color/outcome), which separates your repertoire"
         + " from what opponents play. Note: opening_family is derived from chess.com ECO-URL"
         + " strings, not a normalized taxonomy — 'Closed Sicilian' and 'Closed Sicilian Defense'"
-        + " are distinct groups. The output's totalGames/totalGroups cover the untruncated"
-        + " result; truncated=true means the group limit cut off a long tail.";
+        + " are distinct groups. In the output, count is how many groups were returned, not how"
+        + " many games; totalGames/totalGroups cover the untruncated result, and truncated=true"
+        + " means the group limit cut off a long tail.";
   }
 
   @Override
@@ -56,8 +60,9 @@ public class AggregateGamesTool implements McpTool {
             "type",
             "string",
             "description",
-            "chess.com username that perspective fields (me.*, opponent.*, outcome) in the"
-                + " filter are resolved against; required when the filter uses them"));
+            "chess.com username that perspective fields (me.*, opponent.*, outcome) are resolved"
+                + " against; required when the filter uses them, and when group_by uses me.color"
+                + " or outcome"));
     properties.put(
         "group_by",
         Map.of(
@@ -66,7 +71,11 @@ public class AggregateGamesTool implements McpTool {
             "items",
             Map.of("type", "string"),
             "description",
-            "Fields to group by, e.g. [\"opening_family\"]"));
+            "Fields to group by, e.g. [\"opening_family\"]. Groupable: opening_family,"
+                + " opening_name, eco, result, time_class, white_title, black_title,"
+                + " white_username, black_username, platform — plus me.color and outcome when"
+                + " player is set, keyed me_color/outcome in the output. date and month are"
+                + " filter-only and rejected here."));
     properties.put(
         "limit",
         Map.of(

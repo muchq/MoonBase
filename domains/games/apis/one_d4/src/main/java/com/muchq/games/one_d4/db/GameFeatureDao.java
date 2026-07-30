@@ -9,14 +9,19 @@ import com.muchq.games.one_d4.engine.model.Motif;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.UUID;
 import org.jdbi.v3.core.Jdbi;
+import org.jdbi.v3.core.argument.Argument;
 import org.jdbi.v3.core.mapper.RowMapper;
+import org.jdbi.v3.core.statement.SqlStatement;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -92,7 +97,7 @@ public class GameFeatureDao implements GameFeatureStore {
               rs.getString("opening_name"),
               rs.getString("opening_family"),
               rs.getString("result"),
-              rs.getTimestamp("played_at").toInstant(),
+              rs.getTimestamp("played_at", utcCalendar()).toInstant(),
               getIntOrNull(rs, "num_moves"),
               rs.getTimestamp("indexed_at") != null
                   ? rs.getTimestamp("indexed_at").toInstant()
@@ -112,6 +117,47 @@ public class GameFeatureDao implements GameFeatureStore {
   public GameFeatureDao(Jdbi jdbi, boolean useH2) {
     this.jdbi = jdbi;
     this.useH2 = useH2;
+  }
+
+  /**
+   * played_at is TIMESTAMP WITHOUT TIME ZONE on both H2 and Postgres, so what the driver stores is
+   * a wall clock, not an instant. {@code setTimestamp}/{@code getTimestamp} with no Calendar
+   * convert through the JVM's default zone, which would make the stored value depend on where the
+   * process happened to run: a game written under UTC and read back under America/Los_Angeles would
+   * land on the wrong calendar day, dropping it out of {@code month = "2026-06"}. Every played_at
+   * write, filter bound, and read therefore goes through this UTC calendar, so the stored wall
+   * clock is UTC and the ChessQL date/month rewrite (which computes UTC boundaries) compares like
+   * against like. Under a UTC JVM this is a no-op — the implicit conversion already uses UTC — so
+   * existing rows keep their exact stored values.
+   *
+   * <p>A fresh instance per call: {@link Calendar} is mutable and the driver may mutate it.
+   */
+  private static Calendar utcCalendar() {
+    return Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+  }
+
+  /** Binds an instant as a played_at wall clock in UTC (see {@link #utcCalendar()}). */
+  private static Argument utcTimestamp(@Nullable Instant instant) {
+    return (position, stmt, ctx) -> {
+      if (instant == null) {
+        stmt.setNull(position, Types.TIMESTAMP);
+      } else {
+        stmt.setTimestamp(position, Timestamp.from(instant), utcCalendar());
+      }
+    };
+  }
+
+  /**
+   * Binds one compiled-query parameter. A {@link Timestamp} in a compiled query is always a
+   * played_at boundary produced by SqlCompiler's date/month rewrite, so it has to be bound through
+   * the same UTC calendar the write side uses; anything else binds by its normal argument factory.
+   */
+  private static void bindParam(SqlStatement<?> statement, int index, Object param) {
+    if (param instanceof Timestamp ts) {
+      statement.bind(index, utcTimestamp(ts.toInstant()));
+    } else {
+      statement.bind(index, param);
+    }
   }
 
   @Override
@@ -137,7 +183,7 @@ public class GameFeatureDao implements GameFeatureStore {
                 .bind(11, row.openingName())
                 .bind(12, row.openingFamily())
                 .bind(13, row.result())
-                .bind(14, row.playedAt() != null ? Timestamp.from(row.playedAt()) : null)
+                .bind(14, utcTimestamp(row.playedAt()))
                 .bind(15, (Integer) row.numMoves())
                 .bind(16, row.pgn())
                 .add();
@@ -146,6 +192,15 @@ public class GameFeatureDao implements GameFeatureStore {
         });
   }
 
+  /**
+   * Deliberately binds the threshold with no Calendar, unlike every played_at bind above. This
+   * compares against indexed_at, which is written by the database's own {@code now()} / {@code
+   * current_timestamp()} rather than by the JVM, so its stored wall clock is the database server's
+   * zone. Forcing the threshold to UTC would only be right when the server also runs UTC; making
+   * retention zone-independent means changing how indexed_at is *written* (a dialect-specific SQL
+   * change that reinterprets every existing row), which is a separate concern from played_at and is
+   * not attempted here.
+   */
   @Override
   public int deleteOlderThan(Instant threshold) {
     return jdbi.withHandle(
@@ -208,7 +263,7 @@ public class GameFeatureDao implements GameFeatureStore {
           var query = h.createQuery(sql);
           int idx = 0;
           for (Object param : cq.parameters()) {
-            query.bind(idx++, param);
+            bindParam(query, idx++, param);
           }
           query.bind(idx++, limit);
           query.bind(idx, offset);
@@ -228,7 +283,7 @@ public class GameFeatureDao implements GameFeatureStore {
           var query = h.createQuery(sql);
           int idx = 0;
           for (Object param : cq.parameters()) {
-            query.bind(idx++, param);
+            bindParam(query, idx++, param);
           }
           query.bind(idx, limit);
           return query
@@ -255,7 +310,7 @@ public class GameFeatureDao implements GameFeatureStore {
           var query = h.createQuery(cq.selectSql());
           int idx = 0;
           for (Object param : cq.parameters()) {
-            query.bind(idx++, param);
+            bindParam(query, idx++, param);
           }
           return query
               .map(
