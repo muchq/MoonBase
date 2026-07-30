@@ -350,6 +350,32 @@ cc_test(
     ],
 )
 
+# Beyoncé Rule wire-contract tests (consumer tier): the raw HTTP bytes and
+# eventstream frames the golf web client depends on, pinned as golden
+# fixtures driven through the generated server WITHOUT the generated
+# client — a regeneration that renames anything on the wire fails here
+# even though the typed e2e suites (which regenerate with it) still pass.
+# Non-Beast deps only, so it runs in restricted-egress sandboxes.
+cc_test(
+    name = "golf_hub_wire_test",
+    size = "small",
+    srcs = ["golf_hub_wire_test.cc"],
+    deps = [
+        ":golf_hub_smithy_server",
+        ":hub_handler",
+        ":id_generator",
+        ":rate_limiter",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:eventstream",
+        "@smithy_cpp//runtime:http",
+    ],
+)
+
 cc_test(
     name = "hub_e2e_test",
     size = "small",
