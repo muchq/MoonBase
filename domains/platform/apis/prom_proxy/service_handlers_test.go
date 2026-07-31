@@ -57,9 +57,14 @@ func TestRegistry_CustomTimeseriesKeysDoNotShadowStandardSeries(t *testing.T) {
 	}
 }
 
-// One reference to a standard cache counter, with whatever label selector
-// follows it.
-var cacheSelectorPattern = regexp.MustCompile(`cache_(?:hits|misses)_total(\{[^}]*\})?`)
+// Any reference to a cache metric, with whatever label selector follows it.
+//
+// Deliberately broader than cache_hits_total|cache_misses_total: a selector
+// the pattern does not match is a selector that escapes the label checks
+// below entirely, so a half-finished rename (cache_misses, or a
+// cache_evictions_total nobody emits) would slip through unexamined rather
+// than being flagged.
+var cacheSelectorPattern = regexp.MustCompile(`\bcache_[a-z_]+\b(\{[^}]*\})?`)
 
 // Portrait's cache queries follow the emitter: aura::Cache emits the
 // standard cache family labeled by service and cache, so the bespoke
@@ -82,7 +87,7 @@ func TestRegistry_PortraitCacheQueriesUseTheStandardFamily(t *testing.T) {
 	}
 	require.NotEmpty(t, queries)
 
-	selectors := 0
+	seen := map[string]int{}
 	for _, query := range queries {
 		assert.NotContains(t, query, "trace_cache_",
 			"query still reads the deleted bespoke series: %s", query)
@@ -92,7 +97,8 @@ func TestRegistry_PortraitCacheQueriesUseTheStandardFamily(t *testing.T) {
 		// either half of it is unscoped — and an unscoped half silently sums
 		// every service's caches into portrait's panel.
 		for _, match := range cacheSelectorPattern.FindAllStringSubmatch(query, -1) {
-			selectors++
+			name := strings.SplitN(match[0], "{", 2)[0]
+			seen[name]++
 			labels := match[1]
 			assert.Contains(t, labels, `service_name="portrait"`,
 				"selector %q is not scoped to portrait, in %s", match[0], query)
@@ -100,7 +106,52 @@ func TestRegistry_PortraitCacheQueriesUseTheStandardFamily(t *testing.T) {
 				"selector %q does not name which cache, in %s", match[0], query)
 		}
 	}
-	assert.NotZero(t, selectors, "portrait no longer queries the standard cache family at all")
+
+	// Both halves by name, not a bare count: the hit-rate panel divides one
+	// by the sum of both, so a rename that left only the hits selector
+	// standing would keep the count non-zero while the panel silently read a
+	// series nothing writes.
+	assert.NotZero(t, seen["cache_hits_total"], "nothing queries cache_hits_total")
+	assert.NotZero(t, seen["cache_misses_total"], "nothing queries cache_misses_total")
+	assert.Empty(t, mapKeysExcept(seen, "cache_hits_total", "cache_misses_total"),
+		"portrait queries a cache series outside the standard family")
+}
+
+// Every cache selector in the whole registry has to name a service, not just
+// portrait's. registry.go anticipates a second emitter, and an unscoped
+// selector added by one sums every service's caches into that service's
+// panel.
+func TestRegistry_EveryCacheQueryNamesItsService(t *testing.T) {
+	for _, name := range serviceOrder {
+		entry := serviceRegistry[name]
+		queries := make([]string, 0, len(entry.CustomScalars)+len(entry.CustomTimeseries))
+		for _, def := range entry.CustomScalars {
+			queries = append(queries, def.Query)
+		}
+		for _, query := range entry.CustomTimeseries {
+			queries = append(queries, query)
+		}
+		for _, query := range queries {
+			for _, match := range cacheSelectorPattern.FindAllStringSubmatch(query, -1) {
+				assert.Contains(t, match[1], "service_name=",
+					"service %q has an unscoped cache selector %q", name, match[0])
+			}
+		}
+	}
+}
+
+func mapKeysExcept(m map[string]int, except ...string) []string {
+	skip := map[string]bool{}
+	for _, key := range except {
+		skip[key] = true
+	}
+	var rest []string
+	for key := range m {
+		if !skip[key] {
+			rest = append(rest, key)
+		}
+	}
+	return rest
 }
 
 func TestMetricsHandler_GetServiceCatalog(t *testing.T) {

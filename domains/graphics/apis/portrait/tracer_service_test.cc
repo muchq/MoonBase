@@ -529,13 +529,19 @@ TEST_F(TracerServiceTest, SubclassingAloneDoesNotBreakTheRender) {
 // the real service, with portrait's labels, rather than only through the
 // wrapper's own unit tests.
 
+/// The service these cache tests speak for. The cache reads its
+/// service_name label off the recorder, so a recorder built for some other
+/// name would emit some other label — which is the property that keeps the
+/// two from drifting, and the reason this is one constant here too.
+constexpr const char* kService = "portrait";
+
 /// The labels every portrait cache series carries.
 std::map<std::string, std::string> TraceCacheLabels() {
-  return {{"service_name", "portrait"}, {"cache", "trace"}};
+  return {{"service_name", kService}, {"cache", "trace"}};
 }
 
 TEST_F(TracerServiceTest, TheFirstRenderIsAMissAndTheRepeatIsAHit) {
-  auto metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>("portrait_test");
+  auto metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>(kService);
   TracerService service(10, metrics);
   TraceRequest request{basic_scene_, basic_perspective_, basic_output_};
 
@@ -550,7 +556,7 @@ TEST_F(TracerServiceTest, TheFirstRenderIsAMissAndTheRepeatIsAHit) {
 }
 
 TEST_F(TracerServiceTest, ADifferentSceneMissesRatherThanReusingTheLastRender) {
-  auto metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>("portrait_test");
+  auto metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>(kService);
   TracerService service(10, metrics);
   TraceRequest first{basic_scene_, basic_perspective_, basic_output_};
 
@@ -566,7 +572,7 @@ TEST_F(TracerServiceTest, ADifferentSceneMissesRatherThanReusingTheLastRender) {
 }
 
 TEST_F(TracerServiceTest, TheBespokeTraceCacheCountersAreGone) {
-  auto metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>("portrait_test");
+  auto metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>(kService);
   TracerService service(10, metrics);
   TraceRequest request{basic_scene_, basic_perspective_, basic_output_};
 
@@ -576,8 +582,16 @@ TEST_F(TracerServiceTest, TheBespokeTraceCacheCountersAreGone) {
   // prom_proxy now queries the standard family. A migration that emitted
   // both names would satisfy the assertions above while leaving the old
   // series to rot, so the absence is its own assertion.
-  EXPECT_EQ(metrics->CounterTotal("trace_cache_hits"), 0);
-  EXPECT_EQ(metrics->CounterTotal("trace_cache_misses"), 0);
+  //
+  // Scanned by name over every entry rather than through CounterTotal:
+  // CounterTotal matches attributes exactly, so asking it for the bare
+  // "trace_cache_hits" says nothing about a resurrected counter that carries
+  // any label at all. That is not hypothetical — it is the form the counter
+  // would take if it came back beside the new one.
+  for (const futility::otel::CapturingMetricsRecorder::Entry& entry : metrics->Entries()) {
+    EXPECT_EQ(entry.name.find("trace_cache_"), std::string::npos)
+        << "the bespoke counter is back, labelled: " << entry.name;
+  }
 }
 
 }  // namespace

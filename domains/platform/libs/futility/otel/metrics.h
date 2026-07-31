@@ -56,6 +56,14 @@ class MetricsRecorder {
   explicit MetricsRecorder(const std::string& service_name);
   virtual ~MetricsRecorder() = default;
 
+  /// @brief The service this recorder was built for.
+  ///
+  /// Metric families that are labeled by service — the standard http_server_*
+  /// and cache_* blocks — read it from here rather than being handed the name
+  /// a second time, so a series' label cannot disagree with the meter it was
+  /// recorded through.
+  const std::string& service_name() const { return service_name_; }
+
   // The record methods are virtual for exactly one reason: tests wrap a
   // recorder that captures what a service counts — names, values, and
   // labels — and assert on it (including what must never appear in a
@@ -114,6 +122,7 @@ class MetricsRecorder {
   Instrument* FindOrCreate(std::unordered_map<std::string, std::unique_ptr<Instrument>>& cache,
                            const std::string& metric_name, const Factory& make);
 
+  const std::string service_name_;
   std::shared_ptr<opentelemetry::metrics::Meter> meter_;
 
   // Cache metric instruments to avoid recreating them. Recorders are

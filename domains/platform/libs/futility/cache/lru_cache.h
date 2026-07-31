@@ -105,17 +105,35 @@ class LRUCache {
     }
 
     // Stage the recency node in a list of its own. Both allocations below
-    // can throw, and until the splice at the end neither container has been
-    // touched — so a failure unwinds `staged` and leaves the cache exactly
-    // as it was, rather than half-updated. splice does not allocate and
-    // cannot throw, which is what makes it a commit point.
+    // can throw, and until the splice neither container has been touched —
+    // so a failure unwinds `staged` and leaves the cache exactly as it was,
+    // rather than half-updated. splice does not allocate and cannot throw,
+    // which is what makes it the commit point.
     list_type staged;
     staged.push_front(key);
     m_map.emplace(key, std::make_pair(value, staged.begin()));
+    m_list.splice(m_list.begin(), staged);
+
+    // Only now evict, because eviction is not a non-throwing operation: it
+    // erases by key, which runs the key's hash and equality. Evicting while
+    // the map still pointed into `staged` meant a throw from either left a
+    // map entry referring to a node that unwinding was about to free. The
+    // containers agree from the splice onward, so the worst a throw here can
+    // do is leave the cache one entry over capacity, permanently but
+    // boundedly, since each later insert still evicts one.
+    //
+    // Deliberately an `if` and not a `while`. A loop would drain that
+    // overshoot — but it would equally drain a recency node that no map
+    // entry points at, and that is the visible symptom of every way the two
+    // containers can fall out of step. Measured, not assumed: with a loop
+    // here, deleting the duplicate-key guard above survives the whole suite,
+    // including the 20-thread stress test that otherwise catches it at 98
+    // entries in a cache of 50. A bounded overshoot after an
+    // all-but-unreachable throw is worth less than keeping that class of bug
+    // loud.
     if (m_map.size() > m_capacity) {
       evict();
     }
-    m_list.splice(m_list.begin(), staged);
   }
 
   /// @brief Retrieves a value from the cache.
@@ -133,10 +151,14 @@ class LRUCache {
 
     // splice relinks the existing node: no allocation, no copy of the key,
     // and the stored iterator stays valid and keeps pointing at the same
-    // element. Since nothing here can throw, there is no window where the
-    // map holds an iterator into a node the list has already freed.
-    // Splicing an element in front of itself is defined as a no-op, so the
-    // already-at-front case needs no branch of its own.
+    // element. Splicing an element in front of itself is defined as a no-op,
+    // so the already-at-front case needs no branch of its own.
+    //
+    // Copying the value into the returned optional still can throw — that is
+    // the whole point of #1271, the values here are large. What matters is
+    // that it throws *after* the relink, with both containers already
+    // consistent, so there is no window where the map holds an iterator into
+    // a node the list has freed.
     m_list.splice(m_list.begin(), m_list, i->second.second);
     return i->second.first;
   }

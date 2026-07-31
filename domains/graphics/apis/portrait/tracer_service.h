@@ -19,28 +19,23 @@ namespace portrait {
 /// Service for rendering 3D ray-traced scenes with result caching.
 class TracerService {
  public:
-  /// The service_name label on every instrument this service emits. Shared
-  /// by the recorder and the cache so the two cannot drift apart.
-  static constexpr std::string_view kServiceName = "portrait";
-
   /// Constructs a TracerService with default cache size of 50.
   explicit TracerService() : TracerService(50) {}
   /// Constructs a TracerService with a specified cache size.
   explicit TracerService(uint16_t _cache_size)
-      : TracerService(_cache_size, std::make_shared<futility::otel::MetricsRecorder>(
-                                       std::string(kServiceName))) {}
+      : TracerService(_cache_size, std::make_shared<futility::otel::MetricsRecorder>("portrait")) {}
   /// Takes the recorder so a test can assert what was counted. The failure
   /// counters carry the only label distinguishing an out-of-memory render
   /// from any other, and a label nothing asserts on is one that can silently
   /// become wrong.
   ///
-  /// The cache shares that recorder rather than holding one of its own, so
-  /// its hit/miss series carry the same service_name as everything else.
-  /// Both members copy it: moving into one of them would make correctness
-  /// depend on the order the members happen to be declared in.
+  /// The cache shares that recorder rather than holding one of its own. That
+  /// is also where its `service_name` label comes from, so it names whatever
+  /// service this was built for instead of restating it here and hoping the
+  /// two stay equal. Both members copy the pointer: moving into one of them
+  /// would make correctness depend on the order they happen to be declared.
   TracerService(uint16_t _cache_size, std::shared_ptr<futility::otel::MetricsRecorder> metrics)
-      : cache_({.service_name = std::string(kServiceName), .cache = "trace"}, _cache_size, metrics),
-        metrics_(metrics) {}
+      : cache_("trace", _cache_size, metrics), metrics_(metrics) {}
   virtual ~TracerService() = default;
 
   /// Traces a scene and returns the encoded PNG bytes plus dimensions.

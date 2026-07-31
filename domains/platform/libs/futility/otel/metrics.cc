@@ -28,7 +28,7 @@ void RecordWithAttributes(const std::map<std::string, std::string>& attributes, 
 
 }  // namespace
 
-MetricsRecorder::MetricsRecorder(const std::string& service_name) {
+MetricsRecorder::MetricsRecorder(const std::string& service_name) : service_name_(service_name) {
   auto provider = opentelemetry::v1::metrics::Provider::GetMeterProvider();
   meter_ = provider->GetMeter(service_name, "1.0.0");
 }

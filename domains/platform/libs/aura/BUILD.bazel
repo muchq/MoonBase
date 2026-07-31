@@ -21,8 +21,11 @@ cc_library(
 
 # The instrumented cache. Deliberately a separate target from :aura, which
 # pulls the Beast transport in: a service wanting a cache should not inherit
-# a transport, and its tests should not need scripts/make-git-overrides.sh to
-# have been run before they can build.
+# an HTTP transport, and neither should its tests. That keeps Boost out of
+# this target's dep closure, not the sandbox out of the picture entirely —
+# :cache still reaches opentelemetry-cpp through futility/otel, so behind a
+# proxy that 403s GitHub archives it needs scripts/make-git-overrides.sh
+# just like most of the graph.
 cc_library(
     name = "cache",
     hdrs = ["cache.h"],

@@ -38,10 +38,14 @@ struct ProbeKey {
   static inline int copies = 0;
   /// The copy ordinal that throws; 0 means no copy ever throws.
   static inline int throw_on_copy = 0;
+  /// Hashing the key with this id throws; -1 disables. Erasing by key runs
+  /// the hash, which is how eviction can fail without allocating anything.
+  static inline int throw_on_hash_of = -1;
 
   static void Reset() {
     copies = 0;
     throw_on_copy = 0;
+    throw_on_hash_of = -1;
   }
   /// Arms the very next copy, whenever it happens, to fail.
   static void FailOnNextCopy() { throw_on_copy = copies + 1; }
@@ -55,8 +59,16 @@ struct ProbeKey {
 };
 
 template <>
+// Deliberately not noexcept: unordered_map does not require it, and a
+// throwing hash is the only way to make erase-by-key — and so eviction —
+// fail without involving the allocator.
 struct std::hash<ProbeKey> {
-  std::size_t operator()(const ProbeKey& key) const noexcept { return std::hash<int>{}(key.id); }
+  std::size_t operator()(const ProbeKey& key) const {
+    if (key.id == ProbeKey::throw_on_hash_of) {
+      throw std::runtime_error("ProbeKey hash failed");
+    }
+    return std::hash<int>{}(key.id);
+  }
 };
 
 TEST(LRUCache, EmptyCacheReturnsOptionalEmpty) {
@@ -231,6 +243,28 @@ TEST(LRUCache, InsertOnAnExistingKeyKeepsTheStoredValue) {
   EXPECT_EQ(cache.get(1), "first");
 }
 
+// The two tests either side of this one both pass against an insert() with
+// its duplicate-key guard removed: m_map.emplace no-ops on a key already
+// present, so the stored value and the recency order stay right. What the
+// guard also prevents is a second recency node for the same key, and that is
+// only visible later — evicting the orphan frees nothing from the map, so
+// the cache creeps past its capacity. Before this test the contract was
+// pinned only by the 20-thread stress test noticing size 98 against a
+// capacity of 50.
+TEST(LRUCache, ARepeatedInsertAddsNoSecondRecencyNode) {
+  LRUCache<int, std::string> cache(2);
+  cache.insert(1, "one");
+  cache.insert(2, "two");
+  cache.insert(1, "one again");
+
+  ASSERT_EQ(cache.size(), 2u);
+
+  for (int key = 3; key < 10; ++key) {
+    cache.insert(key, "v" + std::to_string(key));
+    EXPECT_LE(cache.size(), cache.capacity()) << "after inserting key " << key;
+  }
+}
+
 TEST(LRUCache, InsertOnAnExistingKeyDoesNotPromoteIt) {
   LRUCache<int, std::string> cache(2);
   cache.insert(1, "one");
@@ -370,6 +404,49 @@ TEST(LRUCacheExceptionSafety, AFailedInsertEvictsNothing) {
   EXPECT_EQ(cache.get(ProbeKey(1)), 10);
   EXPECT_EQ(cache.get(ProbeKey(2)), 20);
   EXPECT_FALSE(cache.get(ProbeKey(3)).has_value());
+}
+
+// Eviction is not an allocation-free path to safety: it erases by key, which
+// runs the key's hash and equality. Evicting while the map still pointed at
+// the staged node meant a throw from either left a map entry referring to a
+// node that unwinding was about to free.
+//
+// Honest about what this pins: that corruption is a use-after-free rather
+// than a wrong answer, and .bazelrc configures no sanitizer, so this test
+// cannot see it directly — an ASAN run is what demonstrated it. What is
+// deterministic, and what this asserts, is the shape of the recovery: the
+// entry commits before the eviction is attempted, the overshoot is temporary
+// rather than a permanent rise in effective capacity, and the cache keeps
+// answering correctly afterward.
+TEST(LRUCacheExceptionSafety, AThrowWhileEvictingLeavesTheCacheUsable) {
+  ProbeKey::Reset();
+  LRUCache<ProbeKey, int> cache(2);
+  cache.insert(ProbeKey(1), 10);
+  cache.insert(ProbeKey(2), 20);
+
+  // Key 1 is the least recently used, so it is the one eviction will erase.
+  ProbeKey::throw_on_hash_of = 1;
+  EXPECT_THROW(cache.insert(ProbeKey(3), 30), std::runtime_error);
+  ProbeKey::Reset();
+
+  // The new entry was committed before the eviction that failed. This also
+  // keeps the test from going quietly vacuous: if the throw had come from
+  // somewhere earlier — a rehash inside emplace, say — key 3 would be absent
+  // and the eviction path would never have been reached.
+  EXPECT_TRUE(cache.contains(ProbeKey(3))) << "the insert never reached the eviction";
+
+  // The skipped eviction is not made up later — each subsequent insert still
+  // evicts exactly one — so the cache runs one over capacity from here on.
+  // That is the deliberate trade: draining the overshoot would mean looping
+  // the eviction, and that same loop would quietly absorb orphaned recency
+  // nodes, which is how every list/map disagreement makes itself visible.
+  // Bounded at one, and the cache keeps answering correctly.
+  for (int id = 4; id < 10; ++id) {
+    cache.insert(ProbeKey(id), id * 10);
+  }
+  EXPECT_EQ(cache.size(), cache.capacity() + 1) << "the overshoot is one entry, and stays one";
+  EXPECT_EQ(cache.get(ProbeKey(9)), 90);
+  EXPECT_EQ(cache.get(ProbeKey(8)), 80);
 }
 
 TEST(LRUCacheExceptionSafety, AFailedInsertLeavesNoOrphanedRecencyNode) {

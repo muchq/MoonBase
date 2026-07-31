@@ -2,9 +2,8 @@
 
 The serving-tier components for C++ services on
 [smithy-cpp](https://github.com/muchq/smithy-cpp): observability, health,
-per-client rate limiting, and caching — each one wrapping a `futility`
-primitive so that *using* it emits the standard metric family, instead of
-every service hand-rolling its own counter names.
+per-client rate limiting, and caching, composed the same way in production
+and in tests.
 
 Two targets, deliberately separate:
 
@@ -13,8 +12,10 @@ Two targets, deliberately separate:
 | `:aura` | the serving chain (`middleware.h`) | yes |
 | `:cache` | `aura::Cache` (`cache.h`) | no |
 
-A library that wants a cache should not inherit an HTTP transport, and its
-tests should not need `scripts/make-git-overrides.sh` to have been run first.
+A library that wants a cache should not inherit an HTTP transport. That is
+the whole of the split — `:cache` still reaches opentelemetry-cpp via
+`futility/otel`, so it is not a target you can build behind a blocking proxy
+without `scripts/make-git-overrides.sh`.
 
 ## What the chain gives you
 
@@ -70,14 +71,14 @@ type rather than by remembering to count in each branch of a lookup.
 ```cpp
 #include "domains/platform/libs/aura/cache.h"
 
-aura::Cache<TraceRequest, std::vector<std::uint8_t>> cache_{
-    {.service_name = "portrait", .cache = "trace"}, 50, metrics};
+aura::Cache<TraceRequest, std::vector<std::uint8_t>> cache_{"trace", 50, metrics};
 
 if (auto hit = cache_.get(request)) return *hit;   // counted either way
 ```
 
-Share the service's `MetricsRecorder` so cache series carry the same
-`service_name` as its other instruments. Capacity 0 stores nothing and reports
+The `service_name` label comes from the `MetricsRecorder` you pass, not from a
+second argument, so a cache series cannot be labeled for a different service
+than the meter it was recorded through. Capacity 0 stores nothing and reports
 every lookup as a miss, which turns the cache off without disturbing its call
 sites or leaving a hole in the dashboard.
 

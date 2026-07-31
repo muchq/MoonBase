@@ -44,8 +44,7 @@ cc_library(
         "//domains/graphics/libs/png_plusplus",
         "//domains/graphics/libs/tracy_cpp:tracy",
         # :cache, not :aura — the latter pulls the Beast transport, which
-        # this library has no use for and whose tests would then need
-        # sandbox setup to build.
+        # this library has no use for.
         "//domains/platform/libs/aura:cache",
         "//domains/platform/libs/futility/otel:metrics",
         "@com_google_absl//absl/log",

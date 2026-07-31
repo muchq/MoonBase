@@ -65,16 +65,27 @@ key, so a second insert has nothing new to say.
 
 ## Exception safety
 
-`get` moves the existing recency node rather than rebuilding it, so promoting a
-key allocates nothing and cannot fail. `insert` stages its allocations and
-commits them with a non-throwing splice, so a failed insert leaves the cache
-exactly as it was — nothing evicted, no entry half-added. This matters where
-the values are large enough that allocation failure is a real path rather than
-a theoretical one ([#1271](https://github.com/muchq/MoonBase/issues/1271)).
+`get` moves the existing recency node rather than rebuilding it, so the
+promotion itself allocates nothing and cannot fail. (Copying the value into the
+returned `std::optional` still can — but that happens after the relink, with
+both containers already consistent.)
+
+`insert` stages its allocations and commits them with a non-throwing splice, so
+an allocation failure leaves the cache exactly as it was: nothing evicted, no
+entry half-added. Eviction runs after that commit point, because erasing by key
+runs the key's hash and equality and so is not itself non-throwing; a throw
+from there leaves the cache consistent but holding one entry over capacity, for
+good. That overshoot is deliberate rather than drained — see the comment on
+`insert`, since looping the eviction to reclaim it would also hide the symptom
+that makes an inconsistent cache detectable at all.
+
+This matters where the values are large enough that allocation failure is a
+real path rather than a theoretical one
+([#1271](https://github.com/muchq/MoonBase/issues/1271)).
 
 ## Thread Safety
 
-This implementation is **thread-safe**. It uses `std::shared_mutex` internally to allow concurrent read operations while serializing writes.
+This implementation is **thread-safe**. It uses `std::shared_mutex` internally: the observers below share the lock, while anything that mutates state serializes. Note that `get()` is a writer — it updates recency — so concurrent `get()`s on the same cache do not proceed in parallel. `contains()` is the read-only lookup.
 
 | Method | Lock Type | Reason |
 |--------|-----------|--------|

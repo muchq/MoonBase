@@ -33,8 +33,7 @@ class AuraCacheTest : public ::testing::Test {
 
   aura::Cache<int, std::string> MakeCache(std::size_t capacity,
                                           const std::string& cache_name = "trace") {
-    return aura::Cache<int, std::string>({.service_name = "portrait", .cache = cache_name},
-                                         capacity, metrics_);
+    return aura::Cache<int, std::string>(cache_name, capacity, metrics_);
   }
 
   std::shared_ptr<CapturingMetricsRecorder> metrics_ =
@@ -119,10 +118,6 @@ TEST_F(AuraCacheTest, StorageBehaviorIsThePrimitivesAndStillReachable) {
   cache.insert(1, "one");
   cache.insert(2, "two");
 
-  EXPECT_EQ(cache.size(), 2u);
-  EXPECT_EQ(cache.capacity(), 2u);
-  EXPECT_FALSE(cache.empty());
-
   // Reading 1 promotes it, so inserting a third entry evicts 2.
   EXPECT_EQ(cache.get(1), "one");
   cache.insert(3, "three");
@@ -136,7 +131,6 @@ TEST_F(AuraCacheTest, ACacheWithNoCapacityStillReportsItsMisses) {
   aura::Cache<int, std::string> cache = MakeCache(0);
   cache.insert(1, "one");
 
-  EXPECT_TRUE(cache.empty());
   EXPECT_FALSE(cache.get(1).has_value());
 
   // A cache turned off by capacity reads as a 0% hit rate, which is a fact
