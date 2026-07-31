@@ -26,40 +26,48 @@ bazel run //path/to/target
 Some sandboxes and CI runners sit behind a proxy that allows the Bazel
 Central Registry, GitHub release assets, and git, but blocks GitHub
 *source archives* — `https://github.com/<org>/<repo>/archive/...` — with
-a 403. Two transitive dependencies fetch that way, and each one stops the
-build before anything compiles:
+a 403. That is how most BCR modules fetch their sources, so a great deal
+of the build stops before anything compiles: every modular Boost archive
+(and so every Beast-transport target), `libpng` (and so all of
+`domains/graphics`), `opentelemetry-cpp`, and `cel-spec` — which gazelle
+pulls in, which means even `bazel run //:buildifier` and
+`scripts/format-all` fail.
 
-- `container_structure_test`, loaded by `//bazel/rules:oci.bzl`, so it
-  breaks loading any package whose `BUILD` file uses the OCI rules — even
-  for an unrelated `cc_library` in that package.
-- `bats-core`, registered as a toolchain by `aspect_bazel_lib`, so it
-  breaks analysis regardless of which target you asked for.
-
-Neither is reachable another way, but both clone fine over git, so
-[`scripts/bazel_restricted_egress.sh`](../scripts/bazel_restricted_egress.sh)
-points Bazel at local substitutes and passes everything else through:
+Run [`scripts/make-git-overrides.sh`](../scripts/make-git-overrides.sh)
+once, then import its output:
 
 ```bash
-scripts/bazel_restricted_egress.sh test //domains/games/apis/golf_hub:chat_store_test
+scripts/make-git-overrides.sh          # builds ~/bazel-overrides (idempotent)
+cat >> .bazelrc.user <<'RC'
+common --lockfile_mode=off
+import /root/bazel-overrides/overrides.bazelrc
+RC
 ```
 
-It changes nothing in the repo and uses no network path the proxy
-refused.
+`.bazelrc.user` is gitignored and `try-import`ed by `.bazelrc`, so this
+stays out of version control. After it, `bazel build --nobuild //...`
+analyses all 463 targets clean — every fetch resolves, with no exclusion
+list — and Beast, libpng, otel, and buildifier targets build and test
+normally.
 
-This gets you from "nothing builds" to "most things build", not to a
-green `//...`. Individual libraries fetched from the blocked endpoint
-still fail, and each surfaces only once the previous one is resolved:
-`opentelemetry-cpp` (and then `opentelemetry-proto`) for anything using
-the otel metrics recorder, and `boost.beast` for anything using the
-smithy-cpp Beast transport. In practice that rules out the service
-handlers and the streaming e2e tests, while pure C++/Abseil targets and
-the Smithy codegen targets build and test normally — enough to typecheck
-a `.smithy` change and run store-level tests.
+The script finds every module in `MODULE.bazel.lock` whose source URL is
+a blocked archive endpoint, clones each at its pinned tag (git works
+where the archive download does not), replays the BCR's patches, overlay
+files, and registry `MODULE.bazel` from `bcr.bazel.build` — registry
+metadata is not blocked — and writes one `--override_module` line per
+module. It also stubs the `bats` toolchain, which arrives via a module
+extension rather than the registry and so isn't in the lockfile scan.
 
-The script's header documents how to add an override for a blocked
-library whose upstream repository is Bazel-native. Libraries that get
-their `BUILD` files from a Bazel Central Registry overlay (`boost.*` and
-most non-Bazel C++ libraries) cannot be overridden from a bare clone.
+`--lockfile_mode=off` is required: overridden modules drop out of
+lockfile verification, and without it every run dirties the checked-in
+`MODULE.bazel.lock`. Re-run the script after a dep bump. A 403 on a
+module it didn't cover means the module is toolchain-fetched and absent
+from the lockfile — add it to `EXTRA_MODULES` and re-run.
+
+The approach is lifted from smithy-cpp's `bazel/make-git-overrides.sh`
+(its `docs/development.md`, "Sandboxed sessions").
+[`scripts/bazel_restricted_egress.sh`](../scripts/bazel_restricted_egress.sh)
+predates it and covers a strict subset; prefer this.
 
 On a machine with normal egress, ignore all of this and run `bazel`.
 

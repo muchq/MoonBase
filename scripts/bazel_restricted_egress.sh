@@ -18,6 +18,11 @@
 #
 # This wrapper clears both. It does not clear everything: see LIMITS.
 #
+# SUPERSEDED — prefer scripts/make-git-overrides.sh, which covers every
+# blocked module rather than these two and gets the whole graph building.
+# This script is kept because it needs no setup step, which is convenient
+# for a one-off build of a target that only needs the two repos below.
+#
 # Usage:
 #   scripts/bazel_restricted_egress.sh test //domains/games/apis/golf_hub:chat_store_test
 #   scripts/bazel_restricted_egress.sh build //domains/games/apis/golf_hub:golf_hub_smithy_server
@@ -30,23 +35,21 @@
 #
 #   opentelemetry-cpp -> opentelemetry-proto -> ...  (//domains/platform/libs/futility/otel)
 #   boost.beast -> boost.*                           (smithy_cpp//runtime:http_beast)
+#   libpng                                           (//domains/graphics/libs/png_plusplus)
+#   cel-spec -> gazelle                              (//:buildifier, scripts/format-all)
 #
 # That rules out anything depending on the otel metrics recorder or on
-# the Beast websocket transport — which in practice means the hub handler
-# and the streaming e2e tests. Pure C++/Abseil targets and the Smithy
-# codegen targets do build, which is enough to typecheck a model change
-# and run store-level tests.
+# the Beast websocket transport, most of domains/graphics, and the Bazel
+# formatter. Pure C++/Abseil targets and the Smithy codegen targets do
+# build, which is enough to typecheck a model change and run store-level
+# tests.
 #
-# For a blocked library whose upstream repository is Bazel-native, add it
-# yourself rather than editing this script:
-#
-#   git clone --depth 1 --branch <tag> https://github.com/<org>/<repo> /some/path
-#   BAZEL_EGRESS_EXTRA_OVERRIDES="--override_repository=<module_name>=/some/path" \
-#     scripts/bazel_restricted_egress.sh build //your:target
-#
-# Repositories that get their BUILD files from a Bazel Central Registry
-# overlay (boost.*, most non-Bazel C++ libraries) cannot be overridden
-# from a bare clone — the overlay is not in the clone.
+# All of the above is what scripts/make-git-overrides.sh exists to fix.
+# A BCR-overlay library (boost.*, libpng, most non-Bazel C++ libraries)
+# cannot be overridden from a *bare* clone, because the overlay is not in
+# the clone — but the overlay is served by bcr.bazel.build, which the
+# proxy does not block, so fetching it onto the clone works. That is what
+# make-git-overrides.sh does, for every such module at once.
 #
 # On a machine with unrestricted egress this script is unnecessary; run
 # bazel directly.

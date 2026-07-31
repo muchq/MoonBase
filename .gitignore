@@ -23,6 +23,9 @@ local_docs
 
 node_modules
 web/build_pal/dist
+
+# Machine-specific bazel flags (try-import'd by .bazelrc); scripts/make-git-overrides.sh
+.bazelrc.user
 .build
 .swiftpm
 *.mobileprovision
