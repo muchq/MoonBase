@@ -57,11 +57,8 @@ absl::StatusOr<TraceResponse> TracerService::trace(TraceRequest& trace_request) 
       metrics_->RecordLatency("trace_request_duration",
                               std::chrono::duration_cast<std::chrono::microseconds>(duration),
                               {{"cache_hit", "true"}});
-      metrics_->RecordCounter("trace_cache_hits");
       return toResponse(trace_request.output, *cached_png);
     }
-
-    metrics_->RecordCounter("trace_cache_misses");
 
     auto [scene, perspective, output] = trace_request;
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,52 @@ func TestRegistry_CustomTimeseriesKeysDoNotShadowStandardSeries(t *testing.T) {
 			assert.False(t, shadows, "service %q custom series %q shadows a standard series", name, key)
 		}
 	}
+}
+
+// One reference to a standard cache counter, with whatever label selector
+// follows it.
+var cacheSelectorPattern = regexp.MustCompile(`cache_(?:hits|misses)_total(\{[^}]*\})?`)
+
+// Portrait's cache queries follow the emitter: aura::Cache emits the
+// standard cache family labeled by service and cache, so the bespoke
+// trace_cache_* series no longer exist to be queried. A rename on one side
+// only leaves the dashboard reading a metric nothing writes — which looks
+// exactly like a cache that is never used.
+func TestRegistry_PortraitCacheQueriesUseTheStandardFamily(t *testing.T) {
+	portrait := serviceRegistry["portrait"]
+
+	// The panels the UI renders by key.
+	require.Contains(t, portrait.CustomTimeseries, "cache_hit_rate")
+	require.Contains(t, portrait.CustomTimeseries, "cache_operations_rate")
+
+	var queries []string
+	for _, def := range portrait.CustomScalars {
+		queries = append(queries, def.Query)
+	}
+	for _, query := range portrait.CustomTimeseries {
+		queries = append(queries, query)
+	}
+	require.NotEmpty(t, queries)
+
+	selectors := 0
+	for _, query := range queries {
+		assert.NotContains(t, query, "trace_cache_",
+			"query still reads the deleted bespoke series: %s", query)
+
+		// Per selector, not per query. A hit-rate query names both counters,
+		// so asserting the query as a whole contains the labels passes while
+		// either half of it is unscoped — and an unscoped half silently sums
+		// every service's caches into portrait's panel.
+		for _, match := range cacheSelectorPattern.FindAllStringSubmatch(query, -1) {
+			selectors++
+			labels := match[1]
+			assert.Contains(t, labels, `service_name="portrait"`,
+				"selector %q is not scoped to portrait, in %s", match[0], query)
+			assert.Contains(t, labels, `cache="trace"`,
+				"selector %q does not name which cache, in %s", match[0], query)
+		}
+	}
+	assert.NotZero(t, selectors, "portrait no longer queries the standard cache family at all")
 }
 
 func TestMetricsHandler_GetServiceCatalog(t *testing.T) {

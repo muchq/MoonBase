@@ -4,13 +4,14 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/status/statusor.h"
 #include "domains/graphics/libs/image_core/image_core.h"
 #include "domains/graphics/libs/tracy_cpp/tracy.h"
-#include "domains/platform/libs/futility/cache/lru_cache.h"
+#include "domains/platform/libs/aura/cache.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "types.h"
 
@@ -18,17 +19,28 @@ namespace portrait {
 /// Service for rendering 3D ray-traced scenes with result caching.
 class TracerService {
  public:
+  /// The service_name label on every instrument this service emits. Shared
+  /// by the recorder and the cache so the two cannot drift apart.
+  static constexpr std::string_view kServiceName = "portrait";
+
   /// Constructs a TracerService with default cache size of 50.
   explicit TracerService() : TracerService(50) {}
   /// Constructs a TracerService with a specified cache size.
   explicit TracerService(uint16_t _cache_size)
-      : TracerService(_cache_size, std::make_shared<futility::otel::MetricsRecorder>("portrait")) {}
+      : TracerService(_cache_size, std::make_shared<futility::otel::MetricsRecorder>(
+                                       std::string(kServiceName))) {}
   /// Takes the recorder so a test can assert what was counted. The failure
   /// counters carry the only label distinguishing an out-of-memory render
   /// from any other, and a label nothing asserts on is one that can silently
   /// become wrong.
+  ///
+  /// The cache shares that recorder rather than holding one of its own, so
+  /// its hit/miss series carry the same service_name as everything else.
+  /// Both members copy it: moving into one of them would make correctness
+  /// depend on the order the members happen to be declared in.
   TracerService(uint16_t _cache_size, std::shared_ptr<futility::otel::MetricsRecorder> metrics)
-      : cache_(_cache_size), metrics_(std::move(metrics)) {}
+      : cache_({.service_name = std::string(kServiceName), .cache = "trace"}, _cache_size, metrics),
+        metrics_(metrics) {}
   virtual ~TracerService() = default;
 
   /// Traces a scene and returns the encoded PNG bytes plus dimensions.
@@ -70,7 +82,7 @@ class TracerService {
   tracy::LightType tracify(const LightType& lightType);
   TraceResponse toResponse(const Output& output, const std::vector<std::uint8_t>& png_bytes);
 
-  futility::cache::LRUCache<TraceRequest, std::vector<std::uint8_t>> cache_;
+  aura::Cache<TraceRequest, std::vector<std::uint8_t>> cache_;
   std::shared_ptr<futility::otel::MetricsRecorder> metrics_;
 };
 }  // namespace portrait

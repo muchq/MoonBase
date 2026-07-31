@@ -19,6 +19,24 @@ type serviceEntry struct {
 	CustomTimeseries map[string]string
 }
 
+// Portrait's render cache emits the standard cache family (#1209) from
+// aura::Cache rather than bespoke trace_cache_* counters, so its queries
+// select on both labels: which service, and which cache within it. Named
+// here because every cache query below is built from the same two rates.
+//
+// These stay in portrait's custom block for now: generalizing them into a
+// standard cache block parameterized by service_name — the way the
+// http_server_* block already works — is the prom_proxy half of #1209, and
+// wants a second emitter to generalize against.
+const (
+	portraitCacheHitRate  = `rate(cache_hits_total{service_name="portrait",cache="trace"}[5m])`
+	portraitCacheMissRate = `rate(cache_misses_total{service_name="portrait",cache="trace"}[5m])`
+
+	portraitCacheHitPercent = portraitCacheHitRate + `/(` + portraitCacheHitRate + `+` +
+		portraitCacheMissRate + `)*100`
+	portraitCacheOpsRate = portraitCacheHitRate + `+` + portraitCacheMissRate
+)
+
 // Catalog order doubles as the UI's tab order.
 var serviceOrder = []string{"golf_hub", "mcpserver", "microgpt-serve", "mithril", "one_d4", "portrait", "posterize"}
 
@@ -84,16 +102,16 @@ var serviceRegistry = map[string]serviceEntry{
 	"posterize": {},
 	"portrait": {
 		CustomScalars: []customScalarDef{
-			{"Render cache", "hit_rate_percent", "%", `rate(trace_cache_hits_total[5m])/(rate(trace_cache_hits_total[5m])+rate(trace_cache_misses_total[5m]))*100`},
-			{"Render cache", "operations_per_sec", "/s", `rate(trace_cache_hits_total[5m])+rate(trace_cache_misses_total[5m])`},
+			{"Render cache", "hit_rate_percent", "%", portraitCacheHitPercent},
+			{"Render cache", "operations_per_sec", "/s", portraitCacheOpsRate},
 			// Windowed averages over RecordDistribution histograms:
 			// rate(sum)/rate(count) = mean per request in the window.
 			{"Scene complexity", "avg_spheres_1h", "spheres", `sum(rate(scene_sphere_count_sum[1h]))/sum(rate(scene_sphere_count_count[1h]))`},
 			{"Scene complexity", "avg_lights_1h", "lights", `sum(rate(scene_light_count_sum[1h]))/sum(rate(scene_light_count_count[1h]))`},
 		},
 		CustomTimeseries: map[string]string{
-			"cache_hit_rate":        `rate(trace_cache_hits_total[5m])/(rate(trace_cache_hits_total[5m])+rate(trace_cache_misses_total[5m]))*100`,
-			"cache_operations_rate": `rate(trace_cache_hits_total[5m])+rate(trace_cache_misses_total[5m])`,
+			"cache_hit_rate":        portraitCacheHitPercent,
+			"cache_operations_rate": portraitCacheOpsRate,
 			"scene_sphere_count":    `sum(rate(scene_sphere_count_sum[5m]))/sum(rate(scene_sphere_count_count[5m]))`,
 			"scene_light_count":     `sum(rate(scene_light_count_sum[5m]))/sum(rate(scene_light_count_count[5m]))`,
 		},

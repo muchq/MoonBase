@@ -523,5 +523,62 @@ TEST_F(TracerServiceTest, SubclassingAloneDoesNotBreakTheRender) {
   EXPECT_TRUE(pngpp::isPng(result->png_bytes));
 }
 
+// --- Cache metrics (#1211) ---------------------------------------------
+// The service no longer counts its own cache outcomes; it gets them by
+// holding an aura::Cache. These assert the standard family arrives through
+// the real service, with portrait's labels, rather than only through the
+// wrapper's own unit tests.
+
+/// The labels every portrait cache series carries.
+std::map<std::string, std::string> TraceCacheLabels() {
+  return {{"service_name", "portrait"}, {"cache", "trace"}};
+}
+
+TEST_F(TracerServiceTest, TheFirstRenderIsAMissAndTheRepeatIsAHit) {
+  auto metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>("portrait_test");
+  TracerService service(10, metrics);
+  TraceRequest request{basic_scene_, basic_perspective_, basic_output_};
+
+  ASSERT_TRUE(service.trace(request).ok());
+  EXPECT_EQ(metrics->CounterTotal("cache_misses", TraceCacheLabels()), 1);
+  EXPECT_EQ(metrics->CounterTotal("cache_hits", TraceCacheLabels()), 0);
+
+  ASSERT_TRUE(service.trace(request).ok());
+  EXPECT_EQ(metrics->CounterTotal("cache_hits", TraceCacheLabels()), 1);
+  EXPECT_EQ(metrics->CounterTotal("cache_misses", TraceCacheLabels()), 1)
+      << "the second, identical request missed";
+}
+
+TEST_F(TracerServiceTest, ADifferentSceneMissesRatherThanReusingTheLastRender) {
+  auto metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>("portrait_test");
+  TracerService service(10, metrics);
+  TraceRequest first{basic_scene_, basic_perspective_, basic_output_};
+
+  Scene other_scene = basic_scene_;
+  other_scene.spheres[0].center = {1.0, 0.0, 5.0};
+  TraceRequest second{other_scene, basic_perspective_, basic_output_};
+
+  ASSERT_TRUE(service.trace(first).ok());
+  ASSERT_TRUE(service.trace(second).ok());
+
+  EXPECT_EQ(metrics->CounterTotal("cache_misses", TraceCacheLabels()), 2);
+  EXPECT_EQ(metrics->CounterTotal("cache_hits", TraceCacheLabels()), 0);
+}
+
+TEST_F(TracerServiceTest, TheBespokeTraceCacheCountersAreGone) {
+  auto metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>("portrait_test");
+  TracerService service(10, metrics);
+  TraceRequest request{basic_scene_, basic_perspective_, basic_output_};
+
+  ASSERT_TRUE(service.trace(request).ok());
+  ASSERT_TRUE(service.trace(request).ok());
+
+  // prom_proxy now queries the standard family. A migration that emitted
+  // both names would satisfy the assertions above while leaving the old
+  // series to rot, so the absence is its own assertion.
+  EXPECT_EQ(metrics->CounterTotal("trace_cache_hits"), 0);
+  EXPECT_EQ(metrics->CounterTotal("trace_cache_misses"), 0);
+}
+
 }  // namespace
 }  // namespace portrait
