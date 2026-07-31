@@ -2,9 +2,11 @@ package com.muchq.games.one_d4.worker;
 
 import com.muchq.games.one_d4.db.GameFeatureStore;
 import com.muchq.games.one_d4.db.IndexedPeriodStore;
+import com.muchq.games.one_d4.db.RetentionPolicy;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.scheduling.annotation.Scheduled;
 import jakarta.inject.Inject;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import org.slf4j.Logger;
@@ -13,15 +15,28 @@ import org.slf4j.LoggerFactory;
 @Context
 public class RetentionWorker {
   private static final Logger LOG = LoggerFactory.getLogger(RetentionWorker.class);
-  private static final Duration RETENTION_PERIOD = Duration.ofDays(7);
+  private static final Duration RETENTION_PERIOD = RetentionPolicy.PERIOD;
 
   private final GameFeatureStore gameFeatureStore;
   private final IndexedPeriodStore indexedPeriodStore;
+  private final Clock clock;
 
-  @Inject
   public RetentionWorker(GameFeatureStore gameFeatureStore, IndexedPeriodStore indexedPeriodStore) {
+    this(gameFeatureStore, indexedPeriodStore, Clock.systemUTC());
+  }
+
+  /**
+   * @param clock injected so a test can advance past the retention boundary and exercise the
+   *     threshold arithmetic itself. Backdating rows instead only ever tests {@code
+   *     deleteOlderThan} — with rows at the epoch, any positive retention period passes, so the
+   *     window could be changed to 700 days without a single failure.
+   */
+  @Inject
+  public RetentionWorker(
+      GameFeatureStore gameFeatureStore, IndexedPeriodStore indexedPeriodStore, Clock clock) {
     this.gameFeatureStore = gameFeatureStore;
     this.indexedPeriodStore = indexedPeriodStore;
+    this.clock = clock;
     LOG.info(
         "RetentionWorker initialized (retention={} days, interval=1h)", RETENTION_PERIOD.toDays());
   }
@@ -29,7 +44,7 @@ public class RetentionWorker {
   @Scheduled(fixedDelay = "1h", initialDelay = "1m")
   public void runRetention() {
     LOG.info("Running game retention policy ({} days)", RETENTION_PERIOD.toDays());
-    Instant threshold = Instant.now().minus(RETENTION_PERIOD);
+    Instant threshold = clock.instant().minus(RETENTION_PERIOD);
     try {
       int games = gameFeatureStore.deleteOlderThan(threshold);
       int periods = indexedPeriodStore.deleteOlderThan(threshold);

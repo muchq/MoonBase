@@ -18,6 +18,7 @@ import com.muchq.games.one_d4.motifs.Detectors;
 import com.muchq.games.one_d4.motifs.MotifDetector;
 import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.games.one_d4.queue.IndexQueue;
+import com.muchq.games.one_d4.service.DataAvailabilityResolver;
 import com.muchq.games.one_d4.service.IndexRequestService;
 import com.muchq.games.one_d4.worker.IndexWorker;
 import com.muchq.games.one_d4.worker.IndexWorkerLifecycle;
@@ -27,11 +28,13 @@ import com.muchq.platform.json.JsonUtils;
 import io.micronaut.context.annotation.Bean;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.context.annotation.Factory;
+import io.micronaut.context.annotation.Value;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -39,6 +42,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.sql.DataSource;
 import org.jdbi.v3.core.Jdbi;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -75,6 +79,12 @@ public class IndexerModule {
     return DEFAULT_JDBC_URL;
   }
 
+  /** One clock for everything that stamps or compares retention timestamps. */
+  @Context
+  public Clock clock() {
+    return Clock.systemUTC();
+  }
+
   @Context
   public ObjectMapper objectMapper() {
     return JsonUtils.mapper();
@@ -90,14 +100,25 @@ public class IndexerModule {
     return new ChessClient(httpClient, objectMapper);
   }
 
+  /**
+   * @param configuredUrl the {@code indexer.db.url} property. Tests set it to give each
+   *     ApplicationContext its own in-memory database; nothing sets it in production, where the URL
+   *     comes from {@code $INDEXER_DB_URL} or {@code /etc/one_d4/db_config}. Before this existed
+   *     the property was silently ignored, so every context that thought it had an isolated
+   *     database was sharing {@code jdbc:h2:mem:indexer}.
+   */
   @Context
-  public DataSource dataSource() {
-    return DataSourceFactory.create(readJdbcUrl());
+  public DataSource dataSource(@Value("${indexer.db.url:}") String configuredUrl) {
+    return DataSourceFactory.create(jdbcUrl(configuredUrl));
   }
 
   @Context
-  public Boolean useH2() {
-    return readJdbcUrl().contains(":h2:");
+  public Boolean useH2(@Value("${indexer.db.url:}") String configuredUrl) {
+    return jdbcUrl(configuredUrl).contains(":h2:");
+  }
+
+  private static String jdbcUrl(@Nullable String configuredUrl) {
+    return configuredUrl == null || configuredUrl.isBlank() ? readJdbcUrl() : configuredUrl.strip();
   }
 
   @Context
@@ -139,8 +160,16 @@ public class IndexerModule {
 
   @Context
   public IndexRequestService indexRequestService(
-      IndexingRequestStore requestStore, IndexQueue queue, IndexWorker worker) {
-    return new IndexRequestService(requestStore, queue, worker::process);
+      IndexingRequestStore requestStore,
+      IndexQueue queue,
+      IndexWorker worker,
+      DataAvailabilityResolver dataAvailability) {
+    return new IndexRequestService(requestStore, queue, worker::process, dataAvailability);
+  }
+
+  @Context
+  public DataAvailabilityResolver dataAvailabilityResolver(IndexedPeriodStore periodStore) {
+    return new DataAvailabilityResolver(periodStore);
   }
 
   @Context

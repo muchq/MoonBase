@@ -33,6 +33,7 @@ import com.muchq.games.one_d4.motifs.SmotheredMateDetector;
 import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.games.one_d4.queue.IndexMessage;
 import com.muchq.games.one_d4.queue.IndexQueue;
+import com.muchq.games.one_d4.service.DataAvailabilityResolver;
 import com.muchq.games.one_d4.service.IndexRequestService;
 import com.muchq.games.one_d4.worker.IndexWorker;
 import java.time.Duration;
@@ -153,7 +154,10 @@ public class MotifE2ETest {
             extractionExecutor);
     controller =
         new IndexController(
-            new IndexRequestService(requestStore, queue, worker::process), requestStore);
+            new IndexRequestService(
+                requestStore, queue, worker::process, new DataAvailabilityResolver(periodStore)),
+            requestStore,
+            new DataAvailabilityResolver(periodStore));
   }
 
   // === CHECK ===

@@ -4,12 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.muchq.games.one_d4.api.dto.IndexResponse;
+import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.queue.IndexMessage;
 import com.muchq.games.one_d4.queue.IndexQueue;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,7 +39,40 @@ public class IndexRequestServiceTest {
             message -> {
               inlineProcessed.add(message);
               requestStore.updateStatus(message.requestId(), "COMPLETED", null, 42);
-            });
+            },
+            noPeriods());
+  }
+
+  /** No period rows: availability resolves to EXPIRED, which these tests don't assert on. */
+  private static DataAvailabilityResolver noPeriods() {
+    return new DataAvailabilityResolver(
+        new IndexedPeriodStore() {
+          @Override
+          public List<IndexedPeriod> findPeriodsForPlayers(Collection<String> players) {
+            return List.of();
+          }
+
+          @Override
+          public Optional<IndexedPeriod> findCompletePeriod(
+              String player, String platform, String month, boolean excludeBullet) {
+            return Optional.empty();
+          }
+
+          @Override
+          public void upsertPeriod(
+              String player,
+              String platform,
+              String month,
+              Instant fetchedAt,
+              boolean isComplete,
+              int gamesCount,
+              boolean excludeBullet) {}
+
+          @Override
+          public int deleteOlderThan(Instant threshold) {
+            return 0;
+          }
+        });
   }
 
   private static IndexRequestService.Submission submission(String player, String platform) {
@@ -142,8 +177,8 @@ public class IndexRequestServiceTest {
         new IndexRequestService(
             requestStore,
             queue,
-            message ->
-                requestStore.updateStatus(message.requestId(), "FAILED", "chess.com 429", 0));
+            message -> requestStore.updateStatus(message.requestId(), "FAILED", "chess.com 429", 0),
+            noPeriods());
 
     IndexResponse response =
         failing.submitHybrid(
@@ -164,7 +199,8 @@ public class IndexRequestServiceTest {
             queue,
             message -> {
               throw new RuntimeException("boom");
-            });
+            },
+            noPeriods());
 
     assertThatThrownBy(
             () ->

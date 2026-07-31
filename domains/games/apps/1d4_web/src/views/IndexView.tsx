@@ -1,8 +1,21 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { listIndexRequests, createIndex } from '../api';
-import MonthPicker, { currentMonth } from '../components/MonthPicker';
+import DataBadge from '../components/DataBadge';
+import MonthPicker, { currentMonth, formatMonth } from '../components/MonthPicker';
 import type { IndexRequest } from '../types';
+
+/**
+ * "Jul 2026" for a single month, "Jan – Mar 2026" within one year, otherwise
+ * both years. The raw `2026-07 – 2026-07` wrapped to three lines on a phone.
+ */
+function formatMonthRange(row: IndexRequest): string {
+  if (row.startMonth === row.endMonth) return formatMonth(row.startMonth);
+  const start = formatMonth(row.startMonth);
+  const end = formatMonth(row.endMonth);
+  const sameYear = row.startMonth.slice(0, 4) === row.endMonth.slice(0, 4);
+  return sameYear ? `${start.split(' ')[0]} – ${end}` : `${start} – ${end}`;
+}
 
 export default function IndexView() {
   const queryClient = useQueryClient();
@@ -149,34 +162,54 @@ export default function IndexView() {
         {requests.length === 0 ? (
           <p className="empty">No recent requests. Submit a request above.</p>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Player</th>
-                <th>Months</th>
-                <th>Status</th>
-                <th>Games</th>
-                <th>Error</th>
-              </tr>
-            </thead>
-            <tbody>
-              {requests.map((row) => (
-                <tr key={row.id}>
-                  <td>{row.player}</td>
-                  <td>
-                    {row.startMonth} – {row.endMonth}
-                  </td>
-                  <td
-                    className={`status-${(row.status || '').toLowerCase()}`}
-                  >
-                    {row.status || '—'}
-                  </td>
-                  <td>{row.gamesIndexed ?? 0}</td>
-                  <td>{row.errorMessage || '—'}</td>
+          <div className="table-wrap">
+            <table className="request-status-table">
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th>Months</th>
+                  <th>Status</th>
+                  <th>Games</th>
+                  <th>Data</th>
+                  <th>Error</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {/* data-label drives the stacked card layout under 640px, where
+                    six columns cannot fit across and the header row is hidden. */}
+                {requests.map((row) => (
+                  <tr key={row.id}>
+                    <td data-label="Player">{row.player}</td>
+                    <td data-label="Months" className="nowrap">
+                      {formatMonthRange(row)}
+                    </td>
+                    <td
+                      data-label="Status"
+                      className={`nowrap status-${(row.status || '').toLowerCase()}`}
+                    >
+                      {row.status || '—'}
+                    </td>
+                    <td data-label="Games">{row.gamesIndexed ?? 0}</td>
+                    <td data-label="Data" className="nowrap">
+                      <DataBadge data={row.data} />
+                    </td>
+                    <td
+                      data-label="Error"
+                      className={row.errorMessage ? '' : 'is-empty'}
+                    >
+                      {row.errorMessage || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {requests.length > 0 && (
+          <p className="panel-note">
+            Indexed games are kept for 7 days, then deleted. A request stays in this list
+            after that, marked <strong>Pruned</strong> — re-run it to index the games again.
+          </p>
         )}
       </div>
     </>

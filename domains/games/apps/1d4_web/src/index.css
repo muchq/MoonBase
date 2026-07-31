@@ -459,6 +459,162 @@ td a.external:hover {
   border: 1px solid rgba(74, 222, 128, 0.2);
 }
 
+/* IndexView: request status table */
+.nowrap {
+  white-space: nowrap;
+}
+
+/* Headers here aren't sortable, unlike the game tables the global rule targets. */
+.request-status-table th {
+  cursor: default;
+}
+
+.request-status-table th:hover {
+  color: var(--text-muted);
+}
+
+.panel-note {
+  margin: 0.75rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.data-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.data-badge-note {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.data-badge.available {
+  background: rgba(74, 222, 128, 0.1);
+  border-color: rgba(74, 222, 128, 0.25);
+  color: var(--success);
+}
+
+.data-badge.partial {
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.25);
+  color: var(--warning);
+}
+
+.data-badge.expired {
+  background: rgba(139, 139, 154, 0.12);
+  border-color: rgba(139, 139, 154, 0.25);
+  color: var(--text-muted);
+}
+
+.data-badge.unknown {
+  background: rgba(139, 139, 154, 0.12);
+  border-color: rgba(139, 139, 154, 0.25);
+  color: var(--text-muted);
+}
+
+/* Phones: the enqueue row stops being a row, and table cells stop padding wide */
+@media (max-width: 640px) {
+  .main {
+    padding: 1rem 0.75rem;
+  }
+
+  .panel {
+    padding: 1rem 0.85rem;
+  }
+
+  .enqueue-form-row {
+    gap: 0.6rem;
+  }
+
+  .enqueue-username {
+    flex: 1 1 100%;
+  }
+
+  .enqueue-platform,
+  .enqueue-month {
+    flex: 1 1 45%;
+  }
+
+  .enqueue-submit {
+    flex: 1 1 100%;
+  }
+
+  .enqueue-submit .btn {
+    width: 100%;
+  }
+
+  /* The popover is wider than its 45%-width trigger; keep it inside the panel. */
+  .month-picker-popover {
+    width: min(15rem, calc(100vw - 3rem));
+  }
+
+  /* The second picker sits in the right half of the row, so its popover has to
+     hang left of its trigger or it pushes the viewport wider. Adjacent-sibling,
+     not :last-of-type — the row's last div is the submit button. */
+  .enqueue-month + .enqueue-month .month-picker-popover {
+    left: auto;
+    right: 0;
+  }
+
+  th,
+  td {
+    padding: 0.5rem 0.5rem;
+  }
+
+  /* Six columns don't fit across a phone, and the Data column — the whole point
+     of the status table — would end up behind a horizontal scroll. Stack each
+     request into a labelled card instead. */
+  .request-status-table,
+  .request-status-table tbody,
+  .request-status-table tr,
+  .request-status-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .request-status-table thead {
+    display: none;
+  }
+
+  .request-status-table tr {
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+
+  .request-status-table tr + tr {
+    margin-top: 0.6rem;
+  }
+
+  .request-status-table td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.15rem 0;
+    border: none;
+  }
+
+  .request-status-table td::before {
+    content: attr(data-label);
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+  }
+
+  /* A card per request already reads long; an "Error —" line on every healthy
+     one is noise. The cell stays in the DOM for the desktop grid. */
+  .request-status-table td.is-empty {
+    display: none;
+  }
+}
+
 /* Pagination */
 .pagination {
   display: flex;

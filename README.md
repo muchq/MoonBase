@@ -30,6 +30,7 @@ The repository is organized into **domains**, each containing its own libraries,
 
 - [**Build & IDE Instructions**](docs/BUILD_AND_IDE.md): How to build the project and set up your development environment.
 - [**Importing Projects**](docs/IMPORTING.md): Guidelines for adding new projects to MoonBase.
+- [**Working Agreement**](docs/WORKING_AGREEMENT.md): How work gets picked up, reviewed, verified, and shipped — the review panel, the testing bar, and what CI does and doesn't gate.
 - [**Testing Notes**](docs/TESTING.md): Checking that tests can actually fail, and the traps that only show up in CI or on another platform.
 
 

@@ -2,6 +2,8 @@ package com.muchq.games.one_d4.db;
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import org.jdbi.v3.core.Jdbi;
 import org.jdbi.v3.core.mapper.RowMapper;
@@ -46,6 +48,13 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
       FROM indexed_periods
       WHERE player = ? AND platform = ? AND year_month = ? AND exclude_bullet = ?
         AND is_complete = true
+      """;
+
+  private static final String FIND_FOR_PLAYERS =
+      """
+      SELECT player, platform, year_month, fetched_at, is_complete, games_count, exclude_bullet
+      FROM indexed_periods
+      WHERE player IN (<players>)
       """;
 
   private static final String DELETE_OLDER_THAN =
@@ -94,6 +103,17 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
                 .bind(5, gamesCount)
                 .bind(6, excludeBullet)
                 .execute());
+  }
+
+  @Override
+  public List<IndexedPeriod> findPeriodsForPlayers(Collection<String> players) {
+    if (players.isEmpty()) return List.of();
+    return jdbi.withHandle(
+        h ->
+            h.createQuery(FIND_FOR_PLAYERS)
+                .bindList("players", List.copyOf(players))
+                .map(ROW_MAPPER)
+                .list());
   }
 
   @Override

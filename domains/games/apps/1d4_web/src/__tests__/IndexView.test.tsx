@@ -95,7 +95,112 @@ describe('IndexView', () => {
     setup();
     await waitFor(() => expect(screen.getByText('hikaru')).toBeInTheDocument());
     expect(screen.getByText('42')).toBeInTheDocument();
-    expect(screen.getByText('2024-01 – 2024-03')).toBeInTheDocument();
+    // Not "2024-01 – 2024-03": the raw form wrapped to three lines on a phone.
+    expect(screen.getByText('Jan – Mar 2024')).toBeInTheDocument();
+  });
+
+  it('collapses a single-month range and keeps both years across a boundary', async () => {
+    vi.mocked(api.listIndexRequests).mockResolvedValue([
+      { ...completedRequest, id: 'a', startMonth: '2024-03', endMonth: '2024-03' },
+      { ...completedRequest, id: 'b', startMonth: '2025-11', endMonth: '2026-02' },
+    ]);
+    setup();
+
+    await waitFor(() => expect(screen.getByText('Mar 2024')).toBeInTheDocument());
+    expect(screen.getByText('Nov 2025 – Feb 2026')).toBeInTheDocument();
+  });
+
+  it('says whether each request\'s data survived retention', async () => {
+    vi.mocked(api.listIndexRequests).mockResolvedValue([
+      {
+        ...completedRequest,
+        id: 'live',
+        player: 'live',
+        data: {
+          status: 'AVAILABLE',
+          monthsAvailable: 3,
+          monthsTotal: 3,
+          expiresAt: Math.floor(TODAY.getTime() / 1000) + 3 * 86400,
+        },
+      },
+      {
+        ...completedRequest,
+        id: 'gone',
+        player: 'gone',
+        data: {
+          status: 'EXPIRED',
+          monthsAvailable: 0,
+          monthsTotal: 3,
+          // Omitted, matching the wire: the API drops nulls.
+        },
+      },
+      // Older API, or a request that hasn't completed: no signal to show.
+      { ...completedRequest, id: 'silent', player: 'silent', status: 'PENDING' },
+    ]);
+    setup();
+
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+    // Scoped to the table: the explanatory note below it also says "Pruned".
+    const table = within(screen.getByRole('table'));
+    expect(table.getByText('Indexed')).toBeInTheDocument();
+    expect(table.getByText('3d left')).toBeInTheDocument();
+    expect(table.getByText('Pruned')).toBeInTheDocument();
+
+    const silentRow = screen.getByText('silent').closest('tr') as HTMLTableRowElement;
+    // Data column is 5th; Error is 6th and also renders a dash, so index precisely.
+    expect(silentRow.cells[4]).toHaveTextContent('—');
+    expect(silentRow.cells[4].querySelector('.data-badge')).toBeNull();
+  });
+
+  it('explains the retention window so a pruned row is not a mystery', async () => {
+    setup();
+    await waitFor(() =>
+      expect(screen.getByText(/kept for 7 days/)).toBeInTheDocument()
+    );
+  });
+
+  it('lets a wide status table scroll instead of overflowing the panel', async () => {
+    setup();
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+    // Without this wrapper the Error column ran off the right edge on a phone.
+    expect(screen.getByRole('table').closest('.table-wrap')).not.toBeNull();
+  });
+
+  it('labels every cell so the narrow-screen card layout can name it', async () => {
+    setup();
+    await waitFor(() => expect(screen.getByText('hikaru')).toBeInTheDocument());
+
+    const row = screen.getByText('hikaru').closest('tr') as HTMLTableRowElement;
+    // Under 640px the header row is hidden and each cell renders data-label
+    // via ::before, so a missing label silently drops a field's name on mobile.
+    expect(Array.from(row.cells).map((c) => c.dataset.label)).toEqual([
+      'Player',
+      'Months',
+      'Status',
+      'Games',
+      'Data',
+      'Error',
+    ]);
+    // Headers and labels have to agree, or the card view contradicts the table.
+    expect(
+      Array.from(screen.getByRole('table').querySelectorAll('thead th')).map(
+        (th) => th.textContent
+      )
+    ).toEqual(['Player', 'Months', 'Status', 'Games', 'Data', 'Error']);
+  });
+
+  it('marks an empty error cell so the card layout can drop the line', async () => {
+    vi.mocked(api.listIndexRequests).mockResolvedValue([
+      { ...completedRequest, id: 'ok', player: 'ok', errorMessage: null },
+      { ...completedRequest, id: 'bad', player: 'bad', errorMessage: 'boom' },
+    ]);
+    setup();
+    await waitFor(() => expect(screen.getByText('boom')).toBeInTheDocument());
+
+    const okRow = screen.getByText('ok').closest('tr') as HTMLTableRowElement;
+    const badRow = screen.getByText('bad').closest('tr') as HTMLTableRowElement;
+    expect(okRow.cells[5]).toHaveClass('is-empty');
+    expect(badRow.cells[5]).not.toHaveClass('is-empty');
   });
 
   it('shows empty state when no requests', async () => {

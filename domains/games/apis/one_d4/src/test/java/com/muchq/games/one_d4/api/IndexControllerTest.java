@@ -4,13 +4,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.muchq.games.one_d4.api.dto.IndexRequest;
 import com.muchq.games.one_d4.api.dto.IndexResponse;
+import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.queue.IndexMessage;
 import com.muchq.games.one_d4.queue.IndexQueue;
+import com.muchq.games.one_d4.service.DataAvailabilityResolver;
 import com.muchq.games.one_d4.service.IndexRequestService;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -23,14 +26,19 @@ public class IndexControllerTest {
   private IndexController controller;
   private FakeIndexingRequestStore requestStore;
   private FakeIndexQueue queue;
+  private FakePeriodStore periodStore;
 
   @BeforeEach
   public void setUp() {
     requestStore = new FakeIndexingRequestStore();
     queue = new FakeIndexQueue();
+    periodStore = new FakePeriodStore();
     controller =
         new IndexController(
-            new IndexRequestService(requestStore, queue, message -> {}), requestStore);
+            new IndexRequestService(
+                requestStore, queue, message -> {}, new DataAvailabilityResolver(periodStore)),
+            requestStore,
+            new DataAvailabilityResolver(periodStore));
   }
 
   @Test
@@ -221,6 +229,123 @@ public class IndexControllerTest {
     assertThat(response.endMonth()).isEqualTo("2026-02");
     assertThat(response.status()).isEqualTo("COMPLETED");
     assertThat(response.gamesIndexed()).isEqualTo(42);
+  }
+
+  @Test
+  public void listRequests_reportsWhetherEachRequestsDataSurvives() {
+    IndexingRequestStore.IndexingRequest intact = completed("intact", "2026-01", "2026-02");
+    IndexingRequestStore.IndexingRequest swept = completed("swept", "2026-01", "2026-02");
+    requestStore.addRequest(intact);
+    requestStore.addRequest(swept);
+    periodStore.add("intact", "CHESS_COM", "2026-01", false, Instant.parse("2026-03-01T00:00:00Z"));
+    periodStore.add("intact", "CHESS_COM", "2026-02", false, Instant.parse("2026-03-02T00:00:00Z"));
+
+    List<IndexResponse> responses = controller.listRequests();
+
+    IndexResponse intactResponse = byPlayer(responses, "intact");
+    assertThat(intactResponse.data()).isNotNull();
+    assertThat(intactResponse.data().status()).isEqualTo("AVAILABLE");
+    assertThat(intactResponse.data().monthsAvailable()).isEqualTo(2);
+    assertThat(intactResponse.data().monthsTotal()).isEqualTo(2);
+
+    IndexResponse sweptResponse = byPlayer(responses, "swept");
+    assertThat(sweptResponse.data()).isNotNull();
+    assertThat(sweptResponse.data().status()).isEqualTo("EXPIRED");
+    assertThat(sweptResponse.data().monthsAvailable()).isZero();
+    assertThat(sweptResponse.data().monthsTotal()).isEqualTo(2);
+    assertThat(sweptResponse.data().expiresAt()).isNull();
+
+    // The whole page is answered by one storage lookup, not one per row.
+    assertThat(periodStore.lookupCount()).isEqualTo(1);
+  }
+
+  @Test
+  public void getIndex_reportsDataAvailability() {
+    IndexingRequestStore.IndexingRequest stored = completed("drawlya", "2026-01", "2026-02");
+    requestStore.setFindByIdResponse(stored);
+    periodStore.add(
+        "drawlya", "CHESS_COM", "2026-01", false, Instant.parse("2026-03-01T00:00:00Z"));
+
+    IndexResponse response = controller.getIndex(stored.id());
+
+    assertThat(response.data()).isNotNull();
+    assertThat(response.data().status()).isEqualTo("PARTIAL");
+    assertThat(response.data().monthsAvailable()).isEqualTo(1);
+    assertThat(response.data().monthsTotal()).isEqualTo(2);
+  }
+
+  @Test
+  public void createIndex_reportsNoAvailabilityForAFreshRequest() {
+    IndexResponse response =
+        controller.createIndex(new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-01", null));
+
+    // A PENDING request has produced nothing yet, which is not the same as having been swept.
+    assertThat(response.status()).isEqualTo("PENDING");
+    assertThat(response.data()).isNull();
+  }
+
+  private static IndexingRequestStore.IndexingRequest completed(
+      String player, String startMonth, String endMonth) {
+    return new IndexingRequestStore.IndexingRequest(
+        UUID.randomUUID(),
+        player,
+        "CHESS_COM",
+        startMonth,
+        endMonth,
+        "COMPLETED",
+        Instant.now(),
+        Instant.now(),
+        null,
+        42,
+        false);
+  }
+
+  private static IndexResponse byPlayer(List<IndexResponse> responses, String player) {
+    return responses.stream()
+        .filter(r -> player.equals(r.player()))
+        .findFirst()
+        .orElseThrow(() -> new AssertionError("no response for " + player));
+  }
+
+  private static final class FakePeriodStore implements IndexedPeriodStore {
+    private final List<IndexedPeriod> periods = new ArrayList<>();
+    private int lookupCount = 0;
+
+    void add(
+        String player, String platform, String month, boolean excludeBullet, Instant fetchedAt) {
+      periods.add(new IndexedPeriod(player, platform, month, fetchedAt, true, 1, excludeBullet));
+    }
+
+    int lookupCount() {
+      return lookupCount;
+    }
+
+    @Override
+    public List<IndexedPeriod> findPeriodsForPlayers(Collection<String> players) {
+      lookupCount++;
+      return periods.stream().filter(p -> players.contains(p.player())).toList();
+    }
+
+    @Override
+    public Optional<IndexedPeriod> findCompletePeriod(
+        String player, String platform, String month, boolean excludeBullet) {
+      return Optional.empty();
+    }
+
+    @Override
+    public void upsertPeriod(
+        String player,
+        String platform,
+        String month,
+        Instant fetchedAt,
+        boolean isComplete,
+        int gamesCount,
+        boolean excludeBullet) {}
+
+    @Override
+    public int deleteOlderThan(Instant threshold) {
+      return 0;
+    }
   }
 
   private static final class FakeIndexingRequestStore implements IndexingRequestStore {
