@@ -38,31 +38,44 @@ once, then import its output:
 
 ```bash
 scripts/make-git-overrides.sh          # builds ~/bazel-overrides (idempotent)
-cat >> .bazelrc.user <<'RC'
+cat >> .bazelrc.user <<RC
 common --lockfile_mode=off
-import /root/bazel-overrides/overrides.bazelrc
+import $HOME/bazel-overrides/overrides.bazelrc
 RC
 ```
 
+The heredoc is deliberately unquoted so `$HOME` expands as the file is
+written: a bazelrc `import` takes a literal path, expanding neither `~`
+nor environment variables, so the absolute path has to be baked in. (If
+you passed a dest-dir argument to the script, import from there instead —
+it prints the path it wrote.)
+
 `.bazelrc.user` is gitignored and `try-import`ed by `.bazelrc`, so this
 stays out of version control. After it, `bazel build --nobuild //...`
-analyses all 463 targets clean — every fetch resolves, with no exclusion
-list — and Beast, libpng, otel, and buildifier targets build and test
-normally.
+analyses clean — every fetch resolves, with no exclusion list — and
+Beast, libpng, otel, and buildifier targets build and test normally.
 
 The script finds every module in `MODULE.bazel.lock` whose source URL is
 a blocked archive endpoint, clones each at its pinned tag (git works
 where the archive download does not), replays the BCR's patches, overlay
 files, and registry `MODULE.bazel` from `bcr.bazel.build` — registry
 metadata is not blocked — and writes one `--override_module` line per
-module. It also stubs the `bats` toolchain, which arrives via a module
-extension rather than the registry and so isn't in the lockfile scan.
+module. It then handles the two repos that come from module extensions
+rather than the registry, and so never appear in that scan: the `bats`
+toolchain gets an empty stub, and `raylib` gets a clone plus this repo's
+own `bazel/3p/raylib.BUILD`.
 
 `--lockfile_mode=off` is required: overridden modules drop out of
 lockfile verification, and without it every run dirties the checked-in
-`MODULE.bazel.lock`. Re-run the script after a dep bump. A 403 on a
-module it didn't cover means the module is toolchain-fetched and absent
-from the lockfile — add it to `EXTRA_MODULES` and re-run.
+`MODULE.bazel.lock`. Re-run the script after a dep bump.
+
+If a build still 403s on something the script didn't cover, which of the
+two lists it belongs in depends on where it came from. A registry module
+that toolchain registration fetches without the lockfile recording it
+goes in `EXTRA_MODULES`. A repo created by a module extension needs an
+`--override_repository` against its canonical name — take that name from
+the error Bazel printed, and follow the `bats`/`raylib` cases at the
+bottom of the script.
 
 The approach is lifted from smithy-cpp's `bazel/make-git-overrides.sh`
 (its `docs/development.md`, "Sandboxed sessions").

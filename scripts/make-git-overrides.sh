@@ -24,10 +24,14 @@
 # <dest>/overrides.bazelrc.
 #
 # Usage:   scripts/make-git-overrides.sh [dest-dir]   # default ~/bazel-overrides
-# Then:    cat >> .bazelrc.user <<'RC'
+# Then:    cat >> .bazelrc.user <<RC
 #          common --lockfile_mode=off
-#          import /root/bazel-overrides/overrides.bazelrc
+#          import $HOME/bazel-overrides/overrides.bazelrc
 #          RC
+#
+# The heredoc is unquoted on purpose: a bazelrc `import` takes a literal path
+# and expands neither ~ nor environment variables, so $HOME has to be
+# expanded as the file is written.
 #
 # --lockfile_mode=off is required: overridden modules drop out of lockfile
 # verification, and without it every run dirties the checked-in
