@@ -80,9 +80,11 @@ suite reported green on:
   never ran (#1274). All 22 tests in that suite passed; the leak report came
   after them.
 
-The CI `sanitize` job runs ASan and UBSan over the first-party C++ tests whose
-dependency closure is also first-party — a build-cost boundary, not a
-compatibility one. Running a heavier target locally is just the flag above.
+The CI `sanitize` job runs all three, one matrix leg each, over the first-party
+C++ tests whose dependency closure is also first-party — a build-cost boundary,
+not a compatibility one. Running a heavier target locally is just the flag
+above. The legs don't fail fast, because one sanitizer's finding shouldn't hide
+the other two, and ASan and TSan can't be linked into the same binary anyway.
 
 When a finding has an issue but no fix yet, its target carries
 `tags = ["no-sanitize"]` with the issue number at the tag; the config filters

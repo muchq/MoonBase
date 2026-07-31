@@ -168,12 +168,22 @@ jobs:
   # Beast, opentelemetry-cpp and Postgres targets do build and pass under
   # ASan; they just add a full instrumented -c dbg rebuild of boost and otel
   # to a runner that has to free disk before it can build at all. Widening
-  # this, and adding the tsan config that already exists in .bazelrc, are
-  # runner-budget calls rather than technical ones.
+  # that is a runner-budget call rather than a technical one.
+  #
+  # A matrix rather than three steps in one job, for two reasons. The three
+  # configs share no build output — each is a distinct object tree, so
+  # sequential steps would serialize three full builds for nothing — and
+  # fail-fast is off so one sanitizer's finding does not hide the other two.
+  # ASan and TSan are mutually exclusive at link time anyway.
   sanitize:
+    name: sanitize (${{ matrix.sanitizer }})
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/muchq/moonbase/ci-base:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [asan, ubsan, tsan]
 
     steps:
       - uses: actions/checkout@v7
@@ -190,10 +200,11 @@ jobs:
       - uses: bazel-contrib/setup-bazel@0.19.0
         with:
           bazelisk-cache: true
-          # Its own disk-cache key: these are -c dbg and instrumented, so
-          # sharing build-and-test's cache would evict the opt artifacts that
-          # job depends on for every one of these it stores.
-          disk-cache: ${{ github.workflow }}-sanitize
+          # A key per sanitizer. Separate from build-and-test's because these
+          # are -c dbg and instrumented, and separate from each other's
+          # because the three configs share no object tree — one key would
+          # just have them evicting each other on every run.
+          disk-cache: ${{ github.workflow }}-sanitize-${{ matrix.sanitizer }}
           repository-cache: true
           bazelrc: |
             build --local_resources=cpu=4
@@ -215,11 +226,8 @@ jobs:
           echo "targets=$TARGETS" >> "$GITHUB_OUTPUT"
           echo "Sanitizing: $TARGETS"
 
-      - name: AddressSanitizer
-        run: bazel test --config=asan ${{ steps.targets.outputs.targets }}
-
-      - name: UndefinedBehaviorSanitizer
-        run: bazel test --config=ubsan ${{ steps.targets.outputs.targets }}
+      - name: Test under ${{ matrix.sanitizer }}
+        run: bazel test --config=${{ matrix.sanitizer }} ${{ steps.targets.outputs.targets }}
 
   # Metal GPU training requires macOS; run microgpt tests on Apple Silicon when relevant files change.
   test-microgpt-metal:
