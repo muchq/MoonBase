@@ -34,6 +34,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -76,6 +77,12 @@ public class IndexerModule {
       throw new UncheckedIOException(ioe);
     }
     return DEFAULT_JDBC_URL;
+  }
+
+  /** One clock for everything that stamps or compares retention timestamps. */
+  @Context
+  public Clock clock() {
+    return Clock.systemUTC();
   }
 
   @Context
@@ -153,8 +160,11 @@ public class IndexerModule {
 
   @Context
   public IndexRequestService indexRequestService(
-      IndexingRequestStore requestStore, IndexQueue queue, IndexWorker worker) {
-    return new IndexRequestService(requestStore, queue, worker::process);
+      IndexingRequestStore requestStore,
+      IndexQueue queue,
+      IndexWorker worker,
+      DataAvailabilityResolver dataAvailability) {
+    return new IndexRequestService(requestStore, queue, worker::process, dataAvailability);
   }
 
   @Context

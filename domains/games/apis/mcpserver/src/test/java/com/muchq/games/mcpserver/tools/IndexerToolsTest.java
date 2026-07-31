@@ -21,6 +21,7 @@ import com.muchq.games.one_d4.motifs.AttackDetector;
 import com.muchq.games.one_d4.motifs.CheckDetector;
 import com.muchq.games.one_d4.motifs.PinDetector;
 import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
+import com.muchq.games.one_d4.service.DataAvailabilityResolver;
 import com.muchq.games.one_d4.service.IndexRequestService;
 import com.muchq.games.one_d4.worker.IndexWorker;
 import com.muchq.platform.json.JsonUtils;
@@ -83,16 +84,12 @@ public class IndexerToolsTest {
             List.of(new PinDetector(), new CheckDetector(), new AttackDetector()));
     IndexingRequestDao requestDao = new IndexingRequestDao(testDb.jdbi());
     GameFeatureDao gameFeatureDao = new GameFeatureDao(testDb.jdbi(), true);
+    IndexedPeriodDao periodDao = new IndexedPeriodDao(testDb.jdbi(), true);
     IndexWorker worker =
-        new IndexWorker(
-            chessClient,
-            extractor,
-            requestDao,
-            gameFeatureDao,
-            new IndexedPeriodDao(testDb.jdbi(), true),
-            executor);
+        new IndexWorker(chessClient, extractor, requestDao, gameFeatureDao, periodDao, executor);
     IndexRequestService indexRequestService =
-        new IndexRequestService(requestDao, queue, worker::process);
+        new IndexRequestService(
+            requestDao, queue, worker::process, new DataAvailabilityResolver(periodDao));
     facade = new IndexerFacade(indexRequestService, gameFeatureDao, extractor, new SqlCompiler());
 
     indexTool = new IndexGamesTool(facade, mapper);
@@ -405,6 +402,31 @@ public class IndexerToolsTest {
                     "end_month", "2026-06")));
     JsonNode status = parse(statusTool.execute(Map.of("request_id", result.get("id").asText())));
     assertThat(status.get("status").asText()).isEqualTo("COMPLETED");
+  }
+
+  /**
+   * An agent polling index_status has to be able to tell a queryable corpus from one retention has
+   * already deleted. When only the REST controller enriched the response, this tool reported
+   * "COMPLETED, N games" about data that was gone, and the two entry points disagreed about the
+   * same row — which is exactly what IndexRequestService exists to prevent.
+   */
+  @Test
+  public void indexStatusReportsWhetherTheDataStillExists() {
+    JsonNode result =
+        parse(
+            indexTool.execute(
+                Map.of(
+                    "username", "hikaru",
+                    "platform", "chess.com",
+                    "start_month", "2026-06",
+                    "end_month", "2026-06")));
+    JsonNode status = parse(statusTool.execute(Map.of("request_id", result.get("id").asText())));
+
+    assertThat(status.get("status").asText()).isEqualTo("COMPLETED");
+    assertThat(status.has("data")).isTrue();
+    assertThat(status.get("data").get("status").asText()).isEqualTo("AVAILABLE");
+    assertThat(status.get("data").get("monthsAvailable").asInt()).isEqualTo(1);
+    assertThat(status.get("data").get("monthsTotal").asInt()).isEqualTo(1);
   }
 
   @Test

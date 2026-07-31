@@ -137,7 +137,8 @@ public class ReanalysisE2ETest {
             extractionExecutor);
     controller =
         new IndexController(
-            new IndexRequestService(requestStore, queue, worker::process),
+            new IndexRequestService(
+                requestStore, queue, worker::process, new DataAvailabilityResolver(periodStore)),
             requestStore,
             new DataAvailabilityResolver(periodStore));
     adminController = new AdminController(gameFeatureStore, featureExtractor);

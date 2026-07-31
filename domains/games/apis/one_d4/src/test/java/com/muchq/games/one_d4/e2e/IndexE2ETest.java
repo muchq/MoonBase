@@ -32,6 +32,7 @@ import com.muchq.games.one_d4.queue.IndexQueue;
 import com.muchq.games.one_d4.service.DataAvailabilityResolver;
 import com.muchq.games.one_d4.service.IndexRequestService;
 import com.muchq.games.one_d4.worker.IndexWorker;
+import com.muchq.games.one_d4.worker.RetentionWorker;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.YearMonth;
@@ -96,7 +97,8 @@ public class IndexE2ETest {
 
     controller =
         new IndexController(
-            new IndexRequestService(requestStore, queue, worker::process),
+            new IndexRequestService(
+                requestStore, queue, worker::process, new DataAvailabilityResolver(periodStore)),
             requestStore,
             new DataAvailabilityResolver(periodStore));
   }
@@ -152,10 +154,12 @@ public class IndexE2ETest {
         .isNotNull()
         .isAfter(Instant.now().plus(RetentionPolicy.PERIOD).minus(Duration.ofMinutes(5)));
 
-    // Sweep everything, exactly as RetentionWorker does once the period has aged out.
-    Instant threshold = Instant.now().plus(Duration.ofDays(1));
-    assertThat(gameFeatureStore.deleteOlderThan(threshold)).isEqualTo(2);
-    assertThat(periodStore.deleteOlderThan(threshold)).isEqualTo(1);
+    // Run the real worker, having advanced past the retention boundary. Calling
+    // deleteOlderThan with a hand-made threshold would only test the DELETE; this exercises
+    // RetentionWorker's own `clock.instant().minus(RETENTION_PERIOD)` arithmetic, so changing
+    // RetentionPolicy.PERIOD now breaks a test instead of silently changing behaviour.
+    new RetentionWorker(gameFeatureStore, periodStore, clockOffsetBy(RETENTION_PLUS_MARGIN))
+        .runRetention();
 
     IndexResponse swept = controller.getIndex(created.id());
     // The request row is untouched — which is exactly why it needs the extra signal.
@@ -170,6 +174,93 @@ public class IndexE2ETest {
         .filteredOn(r -> r.id().equals(created.id()))
         .singleElement()
         .satisfies(r -> assertThat(r.data().status()).isEqualTo("EXPIRED"));
+  }
+
+  /**
+   * One minute short of the window, nothing goes. The control for the sweep above: without it, a
+   * RetentionWorker that deleted unconditionally would pass that test just as well.
+   */
+  @Test
+  public void retentionLeavesDataAloneUntilTheWindowActuallyElapses() {
+    YearMonth month = YearMonth.of(2024, 3);
+    fakeChessClient.addGame(PLAYER, month, "https://chess.com/game/not-yet-1");
+
+    IndexResponse created =
+        controller.createIndex(new IndexRequest(PLAYER, PLATFORM, "2024-03", "2024-03", null));
+    processQueueUntilIdle();
+
+    new RetentionWorker(gameFeatureStore, periodStore, clockOffsetBy(RETENTION_MINUS_MARGIN))
+        .runRetention();
+
+    assertThat(controller.getIndex(created.id()).data().status()).isEqualTo("AVAILABLE");
+  }
+
+  /**
+   * A period must never outlive the games it vouches for. game_features.indexed_at is stamped by
+   * the database as each batch lands; indexed_periods.fetched_at is taken before the month's work
+   * begins, so the period is the older row and retention removes it first. Stamping it afterwards
+   * would leave a window reporting AVAILABLE over games that are already gone.
+   */
+  @Test
+  public void aPeriodIsNeverNewerThanTheGamesItVouchesFor() {
+    YearMonth month = YearMonth.of(2024, 3);
+    for (int i = 0; i < 3; i++) {
+      fakeChessClient.addGame(PLAYER, month, "https://chess.com/game/skew-" + i);
+    }
+
+    controller.createIndex(new IndexRequest(PLAYER, PLATFORM, "2024-03", "2024-03", null));
+    processQueueUntilIdle();
+
+    Instant fetchedAt =
+        periodStore
+            .findCompletePeriod(PLAYER, PLATFORM, "2024-03", false)
+            .orElseThrow()
+            .fetchedAt();
+    Instant earliestGame =
+        gameFeatureStore
+            .query(new SqlCompiler().compile(Parser.parse("num.moves >= 0")), 100, 0)
+            .stream()
+            .map(GameFeature::indexedAt)
+            .min(Instant::compareTo)
+            .orElseThrow();
+
+    assertThat(fetchedAt).isBeforeOrEqualTo(earliestGame);
+  }
+
+  private static final Duration MARGIN = Duration.ofMinutes(5);
+
+  /**
+   * Stated as a literal, deliberately. Deriving these offsets from {@link RetentionPolicy#PERIOD}
+   * makes the boundary tests move with the constant, so changing 7 days to 700 leaves them green —
+   * a test that pins a value to itself. The literal is the test's independent claim about what the
+   * window is; {@link #retentionWindowIsSevenDays} is what reports the mismatch legibly when
+   * someone changes it on purpose.
+   */
+  private static final Duration SEVEN_DAYS = Duration.ofDays(7);
+
+  /** Threshold lands MARGIN *after* the rows just written, so they are old enough to sweep. */
+  private static final Duration RETENTION_PLUS_MARGIN = SEVEN_DAYS.plus(MARGIN);
+
+  /** Threshold lands MARGIN *before* them, so the window has not elapsed yet. */
+  private static final Duration RETENTION_MINUS_MARGIN = SEVEN_DAYS.minus(MARGIN);
+
+  /**
+   * The window is published to users in two places nothing else gates — API.md's "**7 days**" and
+   * the web app's "kept for 7 days" panel note. Changing the constant has to fail here so those get
+   * updated with it.
+   */
+  @Test
+  public void retentionWindowIsSevenDays() {
+    assertThat(RetentionPolicy.PERIOD).isEqualTo(SEVEN_DAYS);
+  }
+
+  /**
+   * A clock parked {@code offset} into the future. RetentionWorker subtracts RetentionPolicy.PERIOD
+   * from it, so the resulting threshold sits {@code offset - PERIOD} either side of "now" — which
+   * is what puts the rows just written on one side of the boundary or the other.
+   */
+  private static java.time.Clock clockOffsetBy(Duration offset) {
+    return java.time.Clock.fixed(Instant.now().plus(offset), java.time.ZoneOffset.UTC);
   }
 
   @Test

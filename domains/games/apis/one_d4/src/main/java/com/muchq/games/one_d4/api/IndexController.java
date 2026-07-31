@@ -81,10 +81,8 @@ public class IndexController {
   @Produces(MediaType.APPLICATION_JSON)
   public IndexResponse getIndex(@PathParam("id") UUID id) {
     LOG.info("GET /v1/index/{}", id);
-    IndexingRequestStore.IndexingRequest row =
-        requestDao
-            .findById(id)
-            .orElseThrow(() -> new NoSuchElementException("Indexing request not found: " + id));
-    return IndexRequestService.toResponse(row).withData(dataAvailability.resolve(row).orElse(null));
+    return indexRequestService
+        .status(id)
+        .orElseThrow(() -> new NoSuchElementException("Indexing request not found: " + id));
   }
 }

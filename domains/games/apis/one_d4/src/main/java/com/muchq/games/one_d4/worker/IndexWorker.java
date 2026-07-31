@@ -16,6 +16,7 @@ import com.muchq.games.one_d4.queue.IndexMessage;
 import dev.failsafe.Failsafe;
 import dev.failsafe.RetryPolicy;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.YearMonth;
@@ -61,6 +62,7 @@ public class IndexWorker {
   private final GameFeatureStore gameFeatureStore;
   private final IndexedPeriodStore periodStore;
   private final ExecutorService extractionExecutor;
+  private final Clock clock;
 
   public IndexWorker(
       ChessClient chessClient,
@@ -69,12 +71,37 @@ public class IndexWorker {
       GameFeatureStore gameFeatureStore,
       IndexedPeriodStore periodStore,
       ExecutorService extractionExecutor) {
+    this(
+        chessClient,
+        featureExtractor,
+        requestStore,
+        gameFeatureStore,
+        periodStore,
+        extractionExecutor,
+        Clock.systemUTC());
+  }
+
+  /**
+   * @param clock the source for {@code indexed_periods.fetched_at}, which retention compares
+   *     against. Injected so a test can advance time across the retention boundary instead of
+   *     backdating rows, which only ever exercises {@code deleteOlderThan} and never the window
+   *     arithmetic that decides what "old" means.
+   */
+  public IndexWorker(
+      ChessClient chessClient,
+      FeatureExtractor featureExtractor,
+      IndexingRequestStore requestStore,
+      GameFeatureStore gameFeatureStore,
+      IndexedPeriodStore periodStore,
+      ExecutorService extractionExecutor,
+      Clock clock) {
     this.chessClient = chessClient;
     this.featureExtractor = featureExtractor;
     this.requestStore = requestStore;
     this.gameFeatureStore = gameFeatureStore;
     this.periodStore = periodStore;
     this.extractionExecutor = extractionExecutor;
+    this.clock = clock;
   }
 
   public void process(IndexMessage message) {
@@ -98,6 +125,13 @@ public class IndexWorker {
 
       for (YearMonth month = start; !month.isAfter(end); month = month.plusMonths(1)) {
         String monthStr = month.format(MONTH_FORMAT);
+        // Stamped before the month's games are written, not after. game_features.indexed_at comes
+        // from the database as each batch lands, so a period stamped afterwards is strictly newer
+        // than the games it vouches for — and retention, comparing both against one threshold,
+        // would delete the games first and leave the period claiming they are still there. Taking
+        // the timestamp up front inverts that: the period expires at or before its games, so the
+        // reported status can be pessimistic but never a lie.
+        Instant fetchedAt = clock.instant();
         if (!message.skipCache()) {
           Optional<IndexedPeriodStore.IndexedPeriod> cached =
               periodStore.findCompletePeriod(
@@ -124,7 +158,7 @@ public class IndexWorker {
           // swept (DataAvailabilityResolver reads a missing row as "gone"), and would make the
           // period cache miss forever, refetching an empty archive on every request.
           LOG.warn("No games found for player={} month={}", message.player(), month);
-          upsertPeriod(message, monthStr, month, 0, false);
+          upsertPeriod(message, monthStr, month, fetchedAt, 0, false);
           requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
           continue;
         }
@@ -197,7 +231,7 @@ public class IndexWorker {
               message.player(),
               monthStr);
         }
-        upsertPeriod(message, monthStr, month, monthCount, titleResolution.degraded());
+        upsertPeriod(message, monthStr, month, fetchedAt, monthCount, titleResolution.degraded());
         requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
       }
 
@@ -221,8 +255,12 @@ public class IndexWorker {
    * request refetches it (upserting titles via ON CONFLICT) instead of freezing nulls.
    */
   private void upsertPeriod(
-      IndexMessage message, String monthStr, YearMonth month, int gamesCount, boolean degraded) {
-    Instant fetchedAt = Instant.now();
+      IndexMessage message,
+      String monthStr,
+      YearMonth month,
+      Instant fetchedAt,
+      int gamesCount,
+      boolean degraded) {
     Instant firstDayNextMonth =
         month.plusMonths(1).atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant();
     boolean isComplete = !fetchedAt.isBefore(firstDayNextMonth) && !degraded;
@@ -262,7 +300,7 @@ public class IndexWorker {
         determineResult(game),
         game.endTime(),
         features.numMoves(),
-        Instant.now(),
+        clock.instant(),
         game.pgn());
   }
 

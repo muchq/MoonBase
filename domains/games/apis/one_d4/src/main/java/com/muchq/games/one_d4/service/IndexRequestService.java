@@ -25,16 +25,25 @@ public class IndexRequestService {
   private final IndexingRequestStore requestStore;
   private final IndexQueue queue;
   private final Consumer<IndexMessage> inlineProcessor;
+  private final DataAvailabilityResolver dataAvailability;
 
   /**
    * @param inlineProcessor runs a message to completion on the calling thread; used by {@link
    *     #submitHybrid} for single-month ranges (bind IndexWorker::process)
+   * @param dataAvailability required, not optional, so neither entry point can report a COMPLETED
+   *     request without saying whether its games still exist. When only the REST controller
+   *     enriched the response, the MCP {@code index_status} tool told agents "COMPLETED, 325 games"
+   *     about a corpus retention had already deleted.
    */
   public IndexRequestService(
-      IndexingRequestStore requestStore, IndexQueue queue, Consumer<IndexMessage> inlineProcessor) {
+      IndexingRequestStore requestStore,
+      IndexQueue queue,
+      Consumer<IndexMessage> inlineProcessor,
+      DataAvailabilityResolver dataAvailability) {
     this.requestStore = requestStore;
     this.queue = queue;
     this.inlineProcessor = inlineProcessor;
+    this.dataAvailability = dataAvailability;
   }
 
   /**
@@ -64,7 +73,12 @@ public class IndexRequestService {
   }
 
   public Optional<IndexResponse> status(UUID requestId) {
-    return requestStore.findById(requestId).map(IndexRequestService::toResponse);
+    return requestStore.findById(requestId).map(this::toEnrichedResponse);
+  }
+
+  /** The request's stored fields plus whether the data it produced is still on disk. */
+  public IndexResponse toEnrichedResponse(IndexingRequestStore.IndexingRequest row) {
+    return toResponse(row).withData(dataAvailability.resolve(row).orElse(null));
   }
 
   private IndexResponse start(Submission submission, boolean inlineSingleMonth) {

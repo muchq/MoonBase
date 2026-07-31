@@ -35,7 +35,8 @@ public class IndexControllerTest {
     periodStore = new FakePeriodStore();
     controller =
         new IndexController(
-            new IndexRequestService(requestStore, queue, message -> {}),
+            new IndexRequestService(
+                requestStore, queue, message -> {}, new DataAvailabilityResolver(periodStore)),
             requestStore,
             new DataAvailabilityResolver(periodStore));
   }
