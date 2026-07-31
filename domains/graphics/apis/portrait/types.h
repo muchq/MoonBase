@@ -2,7 +2,9 @@
 #define CPP_PORTRAIT_TYPES_H
 
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -17,6 +19,12 @@
 namespace portrait {
 
 using Vec3 = std::tuple<double, double, double>;
+
+/// Channels are unsigned char, so 0..255 is enforced by the type and an
+/// out-of-range value wraps rather than arriving detectably — there is
+/// nothing for a validate* rule to check, which is why none exists. The
+/// generated server rejects the out-of-range case at the wire (@range on
+/// ColorChannel) before it can wrap.
 using Color = std::tuple<unsigned char, unsigned char, unsigned char>;
 
 struct Sphere {
@@ -123,7 +131,22 @@ struct TraceResponse {
   int height;
 };
 
-absl::Status validateVec3(Vec3& vec3);
+/// Payload key carrying the offending member's JSON-pointer path on an
+/// InvalidArgument status ("/scene/spheres/0/radius"). The path form matches
+/// the one the generated server's ValidationException uses for the
+/// trait-expressible constraints, so a client sees one convention whichever
+/// layer rejected the scene. The handler lifts it onto
+/// InvalidSceneError::field.
+inline constexpr std::string_view kInvalidFieldPayloadUrl = "type.moonbase.portrait/invalid-field";
+
+/// The offending member's path, when the rule that failed named one. Absent
+/// for rules that span members and for any status that isn't a validation
+/// failure.
+std::optional<std::string> invalidField(const absl::Status& status);
+
+/// `field` is the JSON-pointer path this Vec3 occupies in the request, for
+/// the payload above; empty when the caller reports its own path instead.
+absl::Status validateVec3(const Vec3& vec3, std::string_view field = {});
 absl::Status validatePerspective(Perspective& perspective);
 absl::Status validateScene(const Scene& scene);
 absl::Status validateOutput(const Output& output);

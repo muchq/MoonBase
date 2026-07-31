@@ -22,8 +22,9 @@ cc_library(
 # Beyoncé Rule contract tests (platform tier): every smithy-cpp behavior the
 # aura chain — and through it every C++ service — depends on, pinned here so
 # a pin bump that changes one fails with a named contract. Non-Beast deps
-# only, so this runs in restricted-egress sandboxes where :http_beast can't
-# fetch boost.
+# only, so this runs with no sandbox setup at all — behind a proxy that 403s
+# GitHub source archives, :http_beast needs scripts/make-git-overrides.sh to
+# have been run first and this should not.
 cc_test(
     name = "smithy_contract_test",
     size = "small",

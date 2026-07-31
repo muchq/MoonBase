@@ -341,6 +341,7 @@ cc_test(
         ":pg_ticket_vault",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
         "//domains/platform/libs/pg",
         "//domains/platform/libs/pg:listener",
@@ -359,8 +360,8 @@ cc_test(
 # session bodies, the room-layer events and their ordering, the golf
 # command/update envelopes and GameView, the terminal exception frames)
 # fails here even though the typed e2e suites (which regenerate with it)
-# still pass. Non-Beast deps only, so it runs in restricted-egress
-# sandboxes.
+# still pass. Non-Beast deps only, so it runs with no sandbox setup at all
+# (behind a blocking proxy, Beast needs scripts/make-git-overrides.sh first).
 cc_test(
     name = "golf_hub_wire_test",
     size = "small",
@@ -372,6 +373,7 @@ cc_test(
         ":rate_limiter",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
         "@googletest//:gtest_main",
         "@nlohmann_json//:json",
@@ -396,6 +398,7 @@ cc_test(
         ":id_generator",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
         "@googletest//:gtest_main",
         "@smithy_cpp//runtime:client",
@@ -427,6 +430,7 @@ cc_test(
         ":id_generator",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
@@ -453,6 +457,7 @@ cc_test(
         ":id_generator",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
         "@googletest//:gtest_main",
         "@smithy_cpp//runtime:client",

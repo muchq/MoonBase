@@ -5,9 +5,13 @@
 //   - the response body matches the deployed service's shape exactly,
 //   - omitted optional scene fields fill their defaults,
 //   - every trait-expressible validate* rule from types.cc rejects with 400,
-//   - the generated client round-trips, including the modeled error.
+//   - the generated client round-trips, including the modeled error,
+//   - each branch of the error space puts the right JSON on the wire, and
+//     the server-fault branches put nothing internal there.
 // Cross-field rules (camera != focus, aspect ratio, radius > 0) belong to
-// the handler and are tested in smithy_handler_test.
+// the handler and are tested in smithy_handler_test, which asserts the typed
+// values a generated client recovers; the error cases here pin the JSON a
+// consumer that isn't using the generated client actually receives.
 
 #include <gtest/gtest.h>
 
@@ -15,6 +19,7 @@
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,7 +28,10 @@
 #include "moonbase/portrait/client.h"
 #include "moonbase/portrait/server.h"
 #include "smithy/core/blob.h"
+#include "smithy/core/error.h"
+#include "smithy/core/outcome.h"
 #include "smithy/http/message.h"
+#include "smithy/server/router.h"
 
 namespace {
 
@@ -33,6 +41,7 @@ using moonbase::portrait::Light;
 using moonbase::portrait::LightType;
 using moonbase::portrait::PortraitClient;
 using moonbase::portrait::PortraitHandler;
+using moonbase::portrait::RenderCapacityError;
 using moonbase::portrait::Sphere;
 using moonbase::portrait::TraceInput;
 using moonbase::portrait::TraceOutput;
@@ -175,6 +184,12 @@ struct ConstraintCase {
   const char* name;
   void (*mutate)(json&);
   const char* expect_in_body;
+  // The exact JSON-pointer path the fieldList entry must carry. Asserted
+  // separately from expect_in_body because every member name also appears
+  // in its own message text — so a substring check passes even if the
+  // "path" key is renamed, retyped, or dropped entirely, which is the
+  // half of the "one convention" claim that was going unpinned.
+  const char* expected_path;
 };
 
 class PortraitConstraintTest : public PortraitWireTest,
@@ -191,6 +206,12 @@ TEST_P(PortraitConstraintTest, RejectsWith400) {
   // The fieldList entries name the offending member in their path/message.
   EXPECT_NE(response.body.find(GetParam().expect_in_body), std::string::npos) << response.body;
 
+  const json body = json::parse(response.body);
+  ASSERT_TRUE(body.contains("fieldList")) << response.body;
+  ASSERT_FALSE(body["fieldList"].empty()) << response.body;
+  EXPECT_EQ(body["fieldList"][0].value("path", "<missing>"), GetParam().expected_path)
+      << response.body;
+
   // The handler must never see a request that fails constraint validation.
   EXPECT_FALSE(handler_->last_input().has_value());
 }
@@ -199,34 +220,43 @@ INSTANTIATE_TEST_SUITE_P(
     TypesCcRules, PortraitConstraintTest,
     ::testing::Values(
         ConstraintCase{"EmptyScene", [](json& r) { r["scene"]["spheres"] = json::array(); },
-                       "spheres"},
+                       "spheres", "/scene/spheres"},
         ConstraintCase{"TooManySpheres",
                        [](json& r) {
                          const json sphere = r["scene"]["spheres"][0];
                          for (int i = 0; i < 11; ++i) r["scene"]["spheres"][i] = sphere;
                        },
-                       "spheres"},
+                       "spheres", "/scene/spheres"},
         ConstraintCase{"RadiusTooLarge",
-                       [](json& r) { r["scene"]["spheres"][0]["radius"] = 20000.0; }, "radius"},
+                       [](json& r) { r["scene"]["spheres"][0]["radius"] = 20000.0; }, "radius",
+                       "/scene/spheres/0/radius"},
         ConstraintCase{"SpecularNegative",
-                       [](json& r) { r["scene"]["spheres"][0]["specular"] = -1.0; }, "specular"},
+                       [](json& r) { r["scene"]["spheres"][0]["specular"] = -1.0; }, "specular",
+                       "/scene/spheres/0/specular"},
         ConstraintCase{"ReflectiveAboveOne",
-                       [](json& r) { r["scene"]["spheres"][0]["reflective"] = 1.5; }, "reflective"},
+                       [](json& r) { r["scene"]["spheres"][0]["reflective"] = 1.5; }, "reflective",
+                       "/scene/spheres/0/reflective"},
         ConstraintCase{"ColorChannelAbove255",
-                       [](json& r) { r["scene"]["spheres"][0]["color"][0] = 300; }, "color"},
+                       [](json& r) { r["scene"]["spheres"][0]["color"][0] = 300; }, "color",
+                       "/scene/spheres/0/color/0"},
         ConstraintCase{"CenterNotThreeElements",
-                       [](json& r) { r["scene"]["spheres"][0]["center"] = {1.0, 2.0}; }, "center"},
+                       [](json& r) { r["scene"]["spheres"][0]["center"] = {1.0, 2.0}; }, "center",
+                       "/scene/spheres/0/center"},
         ConstraintCase{"UnknownLightType",
-                       [](json& r) { r["scene"]["lights"][0]["lightType"] = "spot"; }, "lightType"},
+                       [](json& r) { r["scene"]["lights"][0]["lightType"] = "spot"; }, "lightType",
+                       "/scene/lights/0/lightType"},
         ConstraintCase{"IntensityTooHigh",
-                       [](json& r) { r["scene"]["lights"][0]["intensity"] = 11.0; }, "intensity"},
+                       [](json& r) { r["scene"]["lights"][0]["intensity"] = 11.0; }, "intensity",
+                       "/scene/lights/0/intensity"},
         ConstraintCase{"StarProbabilityAboveOne",
                        [](json& r) { r["scene"]["backgroundStarProbability"] = 1.5; },
-                       "backgroundStarProbability"},
-        ConstraintCase{"WidthTooSmall", [](json& r) { r["output"]["width"] = 10; }, "width"},
-        ConstraintCase{"HeightTooLarge", [](json& r) { r["output"]["height"] = 5000; }, "height"},
-        ConstraintCase{"MissingPerspective", [](json& r) { r.erase("perspective"); },
-                       "perspective"}),
+                       "backgroundStarProbability", "/scene/backgroundStarProbability"},
+        ConstraintCase{"WidthTooSmall", [](json& r) { r["output"]["width"] = 10; }, "width",
+                       "/output/width"},
+        ConstraintCase{"HeightTooLarge", [](json& r) { r["output"]["height"] = 5000; }, "height",
+                       "/output/height"},
+        ConstraintCase{"MissingPerspective", [](json& r) { r.erase("perspective"); }, "perspective",
+                       "/perspective"}),
     [](const auto& info) { return info.param.name; });
 
 TEST_F(PortraitWireTest, NonJsonContentTypeRejected) {
@@ -322,6 +352,148 @@ TEST_F(PortraitWireTest, ModeledErrorSurfacesTyped) {
   ASSERT_NE(denied.error().detail<InvalidSceneError>(), nullptr);
   EXPECT_EQ(denied.error().detail<InvalidSceneError>()->message,
             "camera position and focus cannot be the same");
+}
+
+// ---------------------------------------------------------------------------
+// The error wire shapes (#1267). The handler tests assert the typed values a
+// generated client recovers; these pin the JSON a consumer that isn't using
+// the generated client actually receives.
+
+// Emits whatever error a test hands it, so the wire shape of each branch of
+// the handler's error space can be pinned without a renderer.
+class ErroringHandler final : public PortraitHandler {
+ public:
+  explicit ErroringHandler(smithy::Error error) : error_(std::move(error)) {}
+
+  smithy::Outcome<TraceOutput> Trace(const TraceInput& /*input*/,
+                                     const smithy::server::RequestContext& /*context*/) override {
+    return error_;
+  }
+
+ private:
+  smithy::Error error_;
+};
+
+TEST(PortraitErrorWireTest, InvalidSceneErrorCarriesTheOffendingFieldPath) {
+  smithy::Error error =
+      smithy::Error::Modeled("InvalidSceneError", "Sphere radius must be positive");
+  error.set_detail(InvalidSceneError{.message = "Sphere radius must be positive",
+                                     .field = "/scene/spheres/0/radius"});
+  LoopbackHarness harness{std::make_shared<ErroringHandler>(std::move(error))};
+
+  const auto response = harness.PostTrace(GoldenRequest().dump());
+
+  ASSERT_EQ(response.status, 400) << response.body;
+  EXPECT_EQ(response.headers.Get("x-error-type").value_or("<missing>"), "InvalidSceneError");
+  // The member name is the contract, not just its presence: a client keys off
+  // "field" to locate the problem, and the path form matches the "/member"
+  // paths ValidationException uses for the trait-expressible constraints.
+  EXPECT_EQ(json::parse(response.body), json({{"message", "Sphere radius must be positive"},
+                                              {"field", "/scene/spheres/0/radius"}}));
+}
+
+TEST(PortraitErrorWireTest, InvalidSceneErrorOmitsFieldWhenNoSingleMemberIsAtFault) {
+  smithy::Error error =
+      smithy::Error::Modeled("InvalidSceneError", "Camera position and focus cannot be the same");
+  error.set_detail(InvalidSceneError{.message = "Camera position and focus cannot be the same"});
+  LoopbackHarness harness{std::make_shared<ErroringHandler>(std::move(error))};
+
+  const auto response = harness.PostTrace(GoldenRequest().dump());
+
+  ASSERT_EQ(response.status, 400) << response.body;
+  // Absent, not null or empty — a client can test presence.
+  EXPECT_FALSE(json::parse(response.body).contains("field")) << response.body;
+}
+
+TEST(PortraitErrorWireTest, RenderCapacityErrorIsA503) {
+  smithy::Error error = smithy::Error::Modeled(
+      "RenderCapacityError", "render exceeded available memory; try a smaller output",
+      /*retryable=*/true);
+  error.set_detail(
+      RenderCapacityError{.message = "render exceeded available memory; try a smaller output"});
+  LoopbackHarness harness{std::make_shared<ErroringHandler>(std::move(error))};
+
+  const auto response = harness.PostTrace(GoldenRequest().dump());
+
+  EXPECT_EQ(response.status, 503) << response.body;
+  EXPECT_EQ(response.headers.Get("x-error-type").value_or("<missing>"), "RenderCapacityError");
+  EXPECT_EQ(json::parse(response.body),
+            json({{"message", "render exceeded available memory; try a smaller output"}}));
+}
+
+// The property smithy_handler.cc's "undeclared -> non-leaking 500" comment
+// claims. It is the generated server that makes it true — it drops
+// error.message() on the kUnknown path — so the test has to exercise the
+// server, not the handler.
+TEST(PortraitErrorWireTest, AnUnknownErrorsMessageNeverReachesTheClient) {
+  constexpr char kSecret[] = "postgres://portrait:hunter2@10.0.0.5/scenes";
+  LoopbackHarness harness{
+      std::make_shared<ErroringHandler>(smithy::Error::Unknown(std::string(kSecret)))};
+
+  const auto response = harness.PostTrace(GoldenRequest().dump());
+
+  EXPECT_EQ(response.status, 500) << response.body;
+  EXPECT_EQ(response.body.find(kSecret), std::string::npos) << response.body;
+  EXPECT_EQ(response.body, R"({"__type":"InternalFailure","message":"internal failure"})");
+  for (const auto& [name, value] : response.headers.entries()) {
+    EXPECT_EQ(value.find(kSecret), std::string::npos) << name << ": " << value;
+  }
+}
+
+// A modeled code that matches no declared shape does NOT fail loudly: the
+// generated ErrorToResponse falls through to a 400 carrying error.message()
+// verbatim. So a typo in a code string is simultaneously the wrong status and
+// the leak the test above guards against, and the compiler cannot catch it.
+//
+// Pinned here so the trap is visible in the suite rather than discovered in
+// production, and so the "recover it as a typed detail" assertion the other
+// error tests make is understood as the thing that rules it out.
+TEST(PortraitErrorWireTest, AMisspelledModeledCodeFallsThroughToA400) {
+  LoopbackHarness harness{std::make_shared<ErroringHandler>(
+      smithy::Error::Modeled("InvalidScenError", "internal detail"))};
+
+  const auto response = harness.PostTrace(GoldenRequest().dump());
+
+  EXPECT_EQ(response.status, 400) << response.body;
+  EXPECT_NE(response.body.find("internal detail"), std::string::npos) << response.body;
+}
+
+// What the transport does when a handler throws rather than returning an
+// error (#1267 finding 1). MoonBase compiles with exceptions enabled, and
+// every smithy-cpp server transport — Beast, socket, and the loopback used
+// here — routes the handler through InvokeHandlerGuarded, which contains the
+// throw as a correlated 500 rather than letting it unwind out of the I/O
+// thread and take the process down.
+//
+// TracerService no longer throws, so nothing in portrait depends on this
+// today. It is pinned because the alternative is a crash: if a smithy-cpp
+// bump ever removed the guard, the first evidence would otherwise be a
+// production restart under load.
+class ThrowingHandler final : public PortraitHandler {
+ public:
+  static constexpr char kSecret[] = "/srv/portrait/oops";
+
+  smithy::Outcome<TraceOutput> Trace(const TraceInput& /*input*/,
+                                     const smithy::server::RequestContext& /*context*/) override {
+    throw std::runtime_error(kSecret);
+  }
+};
+
+TEST(PortraitErrorWireTest, AThrowingHandlerIsContainedAsACorrelated500) {
+  LoopbackHarness harness{std::make_shared<ThrowingHandler>()};
+
+  const auto response = harness.PostTrace(GoldenRequest().dump());
+
+  EXPECT_EQ(response.status, 500) << response.body;
+  EXPECT_EQ(response.body.find(ThrowingHandler::kSecret), std::string::npos) << response.body;
+
+  // The correlation id ties the client's 500 to the server's log line; the
+  // guard writes what() to std::clog against the same id.
+  const std::string correlation_id = response.headers.Get("x-correlation-id").value_or("");
+  EXPECT_FALSE(correlation_id.empty());
+  const json body = json::parse(response.body);
+  EXPECT_EQ(body.value("message", ""), "internal error");
+  EXPECT_EQ(body.value("correlationId", ""), correlation_id);
 }
 
 }  // namespace

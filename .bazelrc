@@ -79,3 +79,8 @@ build:macos --features=-module_maps
 
 # Auto-detect platform
 build --enable_platform_specific_config
+
+# Machine-specific flags, gitignored. This is where the output of
+# scripts/make-git-overrides.sh gets imported on a machine behind a proxy
+# that blocks GitHub source archives; nothing here depends on it existing.
+try-import %workspace%/.bazelrc.user

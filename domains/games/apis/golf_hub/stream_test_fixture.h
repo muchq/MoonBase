@@ -25,6 +25,7 @@
 #include "domains/games/apis/golf_hub/id_generator.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
+#include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "moonbase/golf/client.h"
 #include "moonbase/golf/server.h"
@@ -135,66 +136,13 @@ inline moonbase::golf::GolfCommands Move(moonbase::golf::GolfMove move) {
 // Captures every metric the hub records so tests can assert what is
 // counted — and, just as important, what never appears in a name or
 // label (room ids, player ids, message text; the model forbids them).
-// Extends the production recorder, so the real instrument paths still
-// run underneath against the no-op global meter.
-class CapturingMetricsRecorder final : public futility::otel::MetricsRecorder {
- public:
-  CapturingMetricsRecorder() : futility::otel::MetricsRecorder("golf_hub_test") {}
+// The recorder itself is shared platform tooling; only the service name
+// is the hub's.
+using futility::otel::CapturingMetricsRecorder;
 
-  struct Entry {
-    std::string name;
-    double value;
-    std::map<std::string, std::string> attributes;
-  };
-
-  void RecordCounter(const std::string& name, int64_t value,
-                     const std::map<std::string, std::string>& attributes) override {
-    Add(name, static_cast<double>(value), attributes);
-    futility::otel::MetricsRecorder::RecordCounter(name, value, attributes);
-  }
-  void RecordLatency(const std::string& name, std::chrono::microseconds duration,
-                     const std::map<std::string, std::string>& attributes) override {
-    Add(name, static_cast<double>(duration.count()), attributes);
-    futility::otel::MetricsRecorder::RecordLatency(name, duration, attributes);
-  }
-  void RecordDistribution(const std::string& name, double value,
-                          const std::map<std::string, std::string>& attributes) override {
-    Add(name, value, attributes);
-    futility::otel::MetricsRecorder::RecordDistribution(name, value, attributes);
-  }
-  void RecordGauge(const std::string& name, double value,
-                   const std::map<std::string, std::string>& attributes) override {
-    Add(name, value, attributes);
-    futility::otel::MetricsRecorder::RecordGauge(name, value, attributes);
-  }
-
-  // Sum of increments recorded for the counter under exactly these
-  // attributes; 0 when it never fired.
-  double CounterTotal(const std::string& name,
-                      const std::map<std::string, std::string>& attributes = {}) const {
-    const std::lock_guard<std::mutex> lock(mu_);
-    double total = 0;
-    for (const Entry& entry : entries_) {
-      if (entry.name == name && entry.attributes == attributes) total += entry.value;
-    }
-    return total;
-  }
-
-  std::vector<Entry> Entries() const {
-    const std::lock_guard<std::mutex> lock(mu_);
-    return entries_;
-  }
-
- private:
-  void Add(const std::string& name, double value,
-           const std::map<std::string, std::string>& attributes) {
-    const std::lock_guard<std::mutex> lock(mu_);
-    entries_.push_back({name, value, attributes});
-  }
-
-  mutable std::mutex mu_;
-  std::vector<Entry> entries_;
-};
+inline std::shared_ptr<CapturingMetricsRecorder> MakeCapturingMetricsRecorder() {
+  return std::make_shared<CapturingMetricsRecorder>("golf_hub_test");
+}
 
 class GolfHubStreamFixture : public testing::Test {
  protected:
@@ -393,7 +341,7 @@ class GolfHubStreamFixture : public testing::Test {
   std::shared_ptr<ChatStore> chat_store_;
   // Every suite gets capture; only the metrics tests assert on it. The
   // no-op meter underneath means values still go nowhere.
-  std::shared_ptr<CapturingMetricsRecorder> metrics_ = std::make_shared<CapturingMetricsRecorder>();
+  std::shared_ptr<CapturingMetricsRecorder> metrics_ = MakeCapturingMetricsRecorder();
   std::shared_ptr<IdGenerator> ids_ = std::make_shared<SequentialIdGenerator>();
   std::shared_ptr<HubHandler> handler_;
   std::unique_ptr<moonbase::golf::GolfHubServer> server_;

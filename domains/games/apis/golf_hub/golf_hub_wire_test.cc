@@ -27,7 +27,9 @@
 // through StreamRouter()->ServeSession() over an InMemoryWebSocketPair
 // whose near end this test holds and drives with hand-built frames.
 //
-// Deliberately non-Beast so it runs in restricted-egress sandboxes.
+// Deliberately non-Beast so it runs with no sandbox setup at all
+// (scripts/make-git-overrides.sh unblocks Beast behind a blocking proxy,
+// but this file should not need anyone to have run it).
 
 #include <gtest/gtest.h>
 

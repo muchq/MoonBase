@@ -43,7 +43,12 @@ Bazel formatting do.
 - **Postgres-gated suites skip silently** without `PG_TEST_DB_URL` /
   `GOLF_HUB_TEST_DB_URL`. CI supplies them from a `postgres:18` service; a
   local green run may have exercised no SQL at all.
-- **Beast-transport targets can't build in the sandbox** — boost archive
-  fetches are egress-blocked (`scripts/bazel_restricted_egress.sh`). CI builds
-  them. Say so rather than reporting a skipped target as passing.
-- **Never commit `MODULE.bazel.lock` churn** from the restricted-egress stub.
+- **Behind a proxy that 403s GitHub source archives** (cloud sandboxes, some CI
+  runners), run `scripts/make-git-overrides.sh` once and import its output from
+  `.bazelrc.user` — see [`docs/BUILD_AND_IDE.md`](docs/BUILD_AND_IDE.md). That
+  gets the whole graph building, Beast and libpng and buildifier included.
+  Without it every Beast-transport target fails to fetch, along with portrait
+  and tracy_demo (the only libpng consumers); say so rather than reporting a
+  skipped target as passing.
+- **Never commit `MODULE.bazel.lock` churn** from the sandbox overrides — they
+  run under `--lockfile_mode=off` for exactly this reason.

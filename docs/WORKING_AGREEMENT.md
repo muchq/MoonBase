@@ -245,12 +245,13 @@ Two subtrees glob instead — `domains/chat/libs/yochat_lib` and
 listed doesn't compile and its tests don't run, while a local `go test ./...`
 or `npm test` passes because neither reads `BUILD.bazel`.
 
-**Be explicit about what couldn't be verified locally, and why.** The sandbox
-blocks the boost archive fetches (`boost.beast`, `boost.asio`) and some GitHub
-source archives, so Beast-transport targets — aura's middleware test, the
-golf_hub and portrait service binaries and their e2e suites — cannot build
-here. See `scripts/bazel_restricted_egress.sh`. CI compiles them natively. When
-you hit a limitation like that, prove it's pre-existing by reproducing it with
+**Be explicit about what couldn't be verified locally, and why.** The sandbox's
+proxy 403s GitHub source archives, which is how most BCR modules fetch — boost
+(so every Beast-transport target), libpng, opentelemetry-cpp, cel-spec (so
+`bazel run //:buildifier`, so `scripts/format-all`). `scripts/make-git-overrides.sh`
+rebuilds those modules from git clones and gets the whole graph building; run it
+before concluding a target is unbuildable here. When something genuinely can't
+be verified locally, prove the limitation is pre-existing by reproducing it with
 your changes stashed, then say so in the PR body.
 
 ## Docs
@@ -319,5 +320,5 @@ build, so nothing would have caught it. Run the app, not just its tests.
   directly, leaving the PR object open with phantom conflicts. Before believing
   a conflict, check whether the PR head is already an ancestor of
   `origin/main`; a push to the branch un-wedges it.
-- **Never commit `MODULE.bazel.lock` churn** produced by the sandbox's
-  restricted-egress stub.
+- **Never commit `MODULE.bazel.lock` churn** produced by the sandbox module
+  overrides — they run under `--lockfile_mode=off` for exactly this reason.

@@ -2,11 +2,20 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
+#include <new>
+#include <optional>
+#include <string_view>
 #include <vector>
 
+#include "absl/base/log_severity.h"
+#include "absl/log/scoped_mock_log.h"
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "domains/graphics/apis/portrait/types.h"
+#include "domains/graphics/libs/image_core/image_core.h"
 #include "domains/graphics/libs/png_plusplus/png_plusplus.h"
+#include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
 
 namespace portrait {
 namespace {
@@ -304,6 +313,214 @@ TEST_F(TracerServiceTest, TraceHighSpecularSphere) {
   auto result = service.trace(request);
   ASSERT_TRUE(result.ok());
   EXPECT_FALSE(result.value().png_bytes.empty());
+}
+
+// The render path throws for real — pngpp::imageToPng raises PngException
+// from libpng's error handler, and a 1200x1200 Image<RGB_Double> is ~34 MB
+// before toRGB() copies it, so std::bad_alloc is reachable under a
+// thread-pool transport. trace() used to record a counter and rethrow, which
+// left the transport's InvokeHandlerGuarded to answer with a generic 500 the
+// handler never got to shape (#1267).
+//
+// do_trace is the seam because it shares one catch with the PNG encode and
+// the cache insert: whichever of them throws takes the same path out. What
+// these pin is that no exception escapes trace() and that the status
+// distinguishes "ask for less" from "the server broke".
+template <typename Thrower>
+class ThrowingTracerService : public TracerService {
+ public:
+  using TracerService::TracerService;
+
+ protected:
+  image_core::Image<image_core::RGB_Double> do_trace(Scene&, Perspective&, const Output&) override {
+    Thrower::Throw();
+    return image_core::Image<image_core::RGB_Double>(1, 1);  // unreachable
+  }
+};
+
+/// Fails the cache *store*, which runs after the response is already built —
+/// a failure mode throwing from do_trace cannot reach.
+class FailingCacheWriteService : public TracerService {
+ public:
+  using TracerService::TracerService;
+
+  int attempts = 0;
+
+ protected:
+  void storeInCache(const TraceRequest&, const std::vector<std::uint8_t>&) override {
+    ++attempts;
+    throw std::bad_alloc();
+  }
+};
+
+/// Fails the cache *lookup*, which runs before the render and outside what
+/// the original try block covered.
+class FailingCacheReadService : public TracerService {
+ public:
+  using TracerService::TracerService;
+
+ protected:
+  std::optional<std::vector<std::uint8_t>> lookupCache(const TraceRequest&) override {
+    throw std::bad_alloc();
+  }
+};
+
+struct ThrowBadAlloc {
+  static void Throw() { throw std::bad_alloc(); }
+};
+struct ThrowPngException {
+  static void Throw() { throw pngpp::PngException("PNG Error: /srv/secret/path is unreadable"); }
+};
+struct ThrowNonStdException {
+  // Not derived from std::exception: only catch(...) sees this one.
+  static void Throw() { throw 42; }
+};
+
+TEST_F(TracerServiceTest, OutOfMemoryIsResourceExhaustedRatherThanAThrow) {
+  ThrowingTracerService<ThrowBadAlloc> service;
+  TraceRequest request{basic_scene_, basic_perspective_, basic_output_};
+
+  absl::StatusOr<TraceResponse> result = service.trace(request);
+
+  ASSERT_FALSE(result.ok());
+  // kResourceExhausted, specifically: it is the one render failure the caller
+  // can act on, and the handler maps it to a retryable 503 rather than a 500.
+  EXPECT_EQ(result.status().code(), absl::StatusCode::kResourceExhausted);
+  EXPECT_EQ(result.status().message(), "render exceeded available memory; try a smaller output");
+}
+
+TEST_F(TracerServiceTest, RenderExceptionIsInternalRatherThanAThrow) {
+  ThrowingTracerService<ThrowPngException> service;
+  TraceRequest request{basic_scene_, basic_perspective_, basic_output_};
+
+  absl::StatusOr<TraceResponse> result = service.trace(request);
+
+  ASSERT_FALSE(result.ok());
+  EXPECT_EQ(result.status().code(), absl::StatusCode::kInternal);
+  // what() goes to the log, not into the status: the status message is the
+  // handler's raw material, and this one carries a filesystem path.
+  EXPECT_EQ(result.status().message(), "render failed");
+  EXPECT_EQ(result.status().message().find("/srv/secret/path"), std::string_view::npos);
+}
+
+TEST_F(TracerServiceTest, NonStdExceptionIsContainedToo) {
+  ThrowingTracerService<ThrowNonStdException> service;
+  TraceRequest request{basic_scene_, basic_perspective_, basic_output_};
+
+  absl::StatusOr<TraceResponse> result = service.trace(request);
+
+  ASSERT_FALSE(result.ok());
+  EXPECT_EQ(result.status().code(), absl::StatusCode::kInternal);
+}
+
+// A failed render must not be cached: the next identical request has to try
+// again rather than being served the failure forever.
+TEST_F(TracerServiceTest, AFailedRenderIsNotCached) {
+  ThrowingTracerService<ThrowBadAlloc> service;
+  TraceRequest request{basic_scene_, basic_perspective_, basic_output_};
+
+  ASSERT_FALSE(service.trace(request).ok());
+  absl::StatusOr<TraceResponse> second = service.trace(request);
+
+  // Still an error rather than a cache hit — and still the same error, which
+  // is what distinguishes "retried and failed" from "served a stale entry".
+  ASSERT_FALSE(second.ok());
+  EXPECT_EQ(second.status().code(), absl::StatusCode::kResourceExhausted);
+}
+
+// A render that succeeded must be returned even if storing it fails. The
+// cache is an optimization; reporting "out of memory, try a smaller output"
+// here would be a lie about work that already completed, and the smaller
+// retry would re-run a render that never needed to.
+//
+// This is the peak-allocation instant of the whole call — image, png_bytes,
+// the response's copy and the cache's copy are all live — so it is the most
+// likely allocation in trace() to fail, not a corner case.
+TEST_F(TracerServiceTest, ACacheWriteFailureDoesNotDiscardTheRender) {
+  FailingCacheWriteService service;
+  TraceRequest request{basic_scene_, basic_perspective_, basic_output_};
+
+  absl::StatusOr<TraceResponse> result = service.trace(request);
+
+  ASSERT_TRUE(result.ok()) << result.status().message();
+  EXPECT_TRUE(pngpp::isPng(result->png_bytes));
+  // And it really did try to store — otherwise this passes because the code
+  // stopped caching altogether.
+  EXPECT_EQ(service.attempts, 1);
+}
+
+// The cache lookup copies the stored PNG, so the cheap path allocates too.
+// Before the guard covered the whole body this unwound out of trace(),
+// past the handler, and reached the transport — a different 500 than the one
+// the handler shapes, with neither failure counter incremented.
+TEST_F(TracerServiceTest, ACacheReadFailureIsAStatusRatherThanAThrow) {
+  auto metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>("portrait_test");
+  FailingCacheReadService service(50, metrics);
+  TraceRequest request{basic_scene_, basic_perspective_, basic_output_};
+
+  absl::StatusOr<TraceResponse> result = service.trace(request);
+
+  ASSERT_FALSE(result.ok());
+  EXPECT_EQ(result.status().code(), absl::StatusCode::kResourceExhausted);
+  EXPECT_EQ(metrics->CounterTotal("trace_requests_failed", {{"error", "out_of_memory"}}), 1);
+}
+
+// The label is the operator's only way to tell an out-of-memory render from
+// any other failure, so it needs an assertion that fails when it is wrong —
+// including the negative half, or "both branches record the same label"
+// passes.
+TEST_F(TracerServiceTest, OutOfMemoryAndOtherFailuresAreCountedApart) {
+  auto oom_metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>("portrait_test");
+  ThrowingTracerService<ThrowBadAlloc> oom(50, oom_metrics);
+  TraceRequest request{basic_scene_, basic_perspective_, basic_output_};
+  ASSERT_FALSE(oom.trace(request).ok());
+
+  EXPECT_EQ(oom_metrics->CounterTotal("trace_requests_failed", {{"error", "out_of_memory"}}), 1);
+  EXPECT_EQ(oom_metrics->CounterTotal("trace_requests_failed", {{"error", "rendering_failed"}}), 0);
+
+  auto png_metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>("portrait_test");
+  ThrowingTracerService<ThrowPngException> failed(50, png_metrics);
+  ASSERT_FALSE(failed.trace(request).ok());
+
+  EXPECT_EQ(png_metrics->CounterTotal("trace_requests_failed", {{"error", "rendering_failed"}}), 1);
+  EXPECT_EQ(png_metrics->CounterTotal("trace_requests_failed", {{"error", "out_of_memory"}}), 0);
+}
+
+// The positive twin of the leak tests. Those pin that what() never reaches
+// the status or the wire; this pins that it still reaches the operator.
+// Without it, deleting `<< e.what()` leaves the suite green while erasing
+// the only diagnostic for every non-OOM render failure.
+TEST_F(TracerServiceTest, TheCauseOfARenderFailureIsLogged) {
+  ThrowingTracerService<ThrowPngException> service;
+  TraceRequest request{basic_scene_, basic_perspective_, basic_output_};
+
+  absl::ScopedMockLog log;
+  EXPECT_CALL(log,
+              Log(absl::LogSeverity::kError, testing::_, testing::HasSubstr("/srv/secret/path")))
+      .Times(1);
+  log.StartCapturingLogs();
+  ASSERT_FALSE(service.trace(request).ok());
+  log.StopCapturingLogs();
+}
+
+// The control for the three tests above: the same subclass mechanism with a
+// renderer that does not throw still succeeds. Without this, a
+// ThrowingTracerService that silently failed to override do_trace — or a
+// trace() that returned an error before ever reaching the try block — would
+// make all of them pass for the wrong reason.
+class PlainSubclassTracerService : public TracerService {
+ public:
+  using TracerService::TracerService;
+};
+
+TEST_F(TracerServiceTest, SubclassingAloneDoesNotBreakTheRender) {
+  PlainSubclassTracerService service;
+  TraceRequest request{basic_scene_, basic_perspective_, basic_output_};
+
+  absl::StatusOr<TraceResponse> result = service.trace(request);
+
+  ASSERT_TRUE(result.ok()) << result.status().message();
+  EXPECT_TRUE(pngpp::isPng(result->png_bytes));
 }
 
 }  // namespace
