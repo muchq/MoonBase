@@ -51,6 +51,43 @@ Two real examples from `prom_proxy`:
   and "keep the last row" gave the same answer. It passed against an
   implementation that had no dedup logic at all.
 
+## Some bugs have no wrong answer to assert on
+
+Mutation checking assumes the bug produces an observable difference. A whole
+class of C++ defect doesn't: use-after-free, leaks, signed overflow, misaligned
+access. The program is wrong and the assertions still pass — or it crashes
+somewhere unrelated and you go looking in the wrong file.
+
+```bash
+bazel test --config=asan  //some/cc:target   # use-after-free, leaks
+bazel test --config=ubsan //some/cc:target   # overflow, shifts, alignment
+bazel test --config=tsan  //some/cc:target   # data races
+```
+
+These override the repo-wide `-c opt` with `-c dbg`, because a report whose
+stack has been inlined away names the wrong function.
+
+Two findings from the day these configs landed, both of which the ordinary
+suite reported green on:
+
+- `LRUCache::insert` mutated its map before its commit point, so a throw out
+  of eviction left a map entry pointing into a freed list node (#1272). With
+  the fix reverted, the ordinary build **segfaults with no gtest verdict at
+  all**; ASan names it `heap-use-after-free` with both stacks, UBSan calls it
+  a misaligned access.
+- `png_plusplus` leaked the libpng struct on every failed encode, because its
+  error handler threw across libpng's C frames and the constructor's cleanup
+  never ran (#1274). All 22 tests in that suite passed; the leak report came
+  after them.
+
+The CI `sanitize` job runs ASan and UBSan over the first-party C++ tests whose
+dependency closure is also first-party — a build-cost boundary, not a
+compatibility one. Running a heavier target locally is just the flag above.
+
+When a finding has an issue but no fix yet, its target carries
+`tags = ["no-sanitize"]` with the issue number at the tag; the config filters
+those out, and removing the tag is that issue's acceptance test.
+
 ## Bazel `srcs` are explicit
 
 `BUILD.bazel` lists sources by name rather than globbing, and CI runs bazel

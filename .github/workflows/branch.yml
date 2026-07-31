@@ -153,6 +153,74 @@ jobs:
         run: |
           ./scripts/diff-build origin/main
 
+  # Sanitizers (#1273). The class of bug these catch — use-after-free, leaks,
+  # signed overflow — has no symptom an assertion can see, so before this job
+  # existed CI was blind to all of it. #1272 shipped a use-after-free fix
+  # whose test could only pin the recovery shape, and #1274 was a leak on
+  # portrait's render path that 22 green tests walked straight past.
+  #
+  # Its own job rather than more flags on build-and-test: that one is already
+  # the long pole, and a sanitized build is a separate configuration with its
+  # own object tree, not an extra flag on an existing one.
+  #
+  # Scope is the first-party C++ tests whose dependency closure is also
+  # first-party. That is a build-cost line, not a compatibility one — the
+  # Beast, opentelemetry-cpp and Postgres targets do build and pass under
+  # ASan; they just add a full instrumented -c dbg rebuild of boost and otel
+  # to a runner that has to free disk before it can build at all. Widening
+  # this, and adding the tsan config that already exists in .bazelrc, are
+  # runner-budget calls rather than technical ones.
+  sanitize:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/muchq/moonbase/ci-base:latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Free up disk space
+        run: |
+          df -h
+          rm -rf /usr/share/dotnet
+          rm -rf /opt/ghc
+          rm -rf "/usr/local/share/boost"
+          rm -rf "$AGENT_TOOLSDIRECTORY"
+          df -h
+
+      - uses: bazel-contrib/setup-bazel@0.19.0
+        with:
+          bazelisk-cache: true
+          # Its own disk-cache key: these are -c dbg and instrumented, so
+          # sharing build-and-test's cache would evict the opt artifacts that
+          # job depends on for every one of these it stores.
+          disk-cache: ${{ github.workflow }}-sanitize
+          repository-cache: true
+          bazelrc: |
+            build --local_resources=cpu=4
+            build --local_resources=memory=12288
+
+      - name: Resolve target set
+        id: targets
+        run: |
+          TARGETS=$(bazel query 'kind(cc_test, //domains/...) except (
+            //domains/games/apis/golf_hub/... union
+            //domains/platform/libs/pg/... union
+            //domains/platform/libs/aura/... union
+            //domains/platform/libs/futility/otel/... union
+            //domains/graphics/apis/portrait/...)' | tr '\n' ' ')
+          if [ -z "$TARGETS" ]; then
+            echo "target query matched nothing; refusing to report a vacuous pass"
+            exit 1
+          fi
+          echo "targets=$TARGETS" >> "$GITHUB_OUTPUT"
+          echo "Sanitizing: $TARGETS"
+
+      - name: AddressSanitizer
+        run: bazel test --config=asan ${{ steps.targets.outputs.targets }}
+
+      - name: UndefinedBehaviorSanitizer
+        run: bazel test --config=ubsan ${{ steps.targets.outputs.targets }}
+
   # Metal GPU training requires macOS; run microgpt tests on Apple Silicon when relevant files change.
   test-microgpt-metal:
     runs-on: macos-26

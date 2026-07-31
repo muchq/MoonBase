@@ -435,6 +435,15 @@ TEST(LRUCacheExceptionSafety, AThrowWhileEvictingLeavesTheCacheUsable) {
   // and the eviction path would never have been reached.
   EXPECT_TRUE(cache.contains(ProbeKey(3))) << "the insert never reached the eviction";
 
+  // Reading it back is the assertion that needs a sanitizer to mean
+  // anything. contains() only looks in the map; get() follows the stored
+  // iterator into the recency list, which is the pointer the older
+  // evict-before-commit ordering left dangling. Under --config=asan this
+  // line is a heap-use-after-free against that ordering; in an ordinary
+  // build it quietly returns the right answer anyway, which is exactly why
+  // #1273 exists.
+  EXPECT_EQ(cache.get(ProbeKey(3)), 30);
+
   // The skipped eviction is not made up later — each subsequent insert still
   // evicts exactly one — so the cache runs one over capacity from here on.
   // That is the deliberate trade: draining the overshoot would mean looping
