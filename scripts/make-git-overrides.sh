@@ -59,19 +59,25 @@ command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
 # whole run. Retry rather than restart.
 fetch() { curl -fsS --retry 4 --retry-all-errors --retry-delay 2 "$@"; }
 
-# Modules that toolchain registration fetches during analysis without the
-# lockfile ever recording a source.json for them (rules_perl arrives via
-# the openssl module's toolchains). The lockfile scan below cannot see
-# these, so they are pinned here; if a build still 403s on a module this
-# script didn't cover, add it and re-run.
-EXTRA_MODULES="rules_perl/0.5.0"
-
-# Every module version the lockfile consulted a source.json for, plus the
-# extras above.
+# Every module version the lockfile consulted a source.json for.
+#
+# No hand-maintained extras list. smithy-cpp's version carries
+# EXTRA_MODULES="rules_perl/0.5.0" for a module its lockfile does not
+# record; ours does record rules_perl, at 1.1.0, whose BCR source is a
+# release asset the proxy allows — so the scan rightly skips it and no
+# override is wanted. Adding one is actively harmful: --override_module
+# forces the *version*, so pinning 0.5.0 downgrades the graph under
+# @openssl (reached via curl, boost.asio, and postgres), which then fails
+# to load with "no such attribute 'perlopt' in 'perl_binary' rule" and
+# takes every `bazel query` touching it down with it.
+#
+# So: if a build 403s on a module this scan missed, find out *why* it is
+# missing before pinning anything. A version written here overrides
+# whatever MVS resolved, and `bazel mod show_repo <name>` is how you check
+# what that was.
 modules=$(
-  { grep -oE '"https://bcr\.bazel\.build/modules/[^"]+/source\.json"' "$LOCKFILE" |
-      sed 's|.*/modules/||; s|/source\.json"||'
-    printf '%s\n' $EXTRA_MODULES; } | sort -u)
+  grep -oE '"https://bcr\.bazel\.build/modules/[^"]+/source\.json"' "$LOCKFILE" |
+    sed 's|.*/modules/||; s|/source\.json"||' | sort -u)
 
 for mod in $modules; do
   name="${mod%%/*}" version="${mod#*/}"
@@ -161,10 +167,21 @@ done
 # raylib: //bazel/extensions:raylib.bzl fetches the archive and supplies the
 # BUILD file from this repo (bazel/3p/raylib.BUILD). An override does not
 # carry that over, so the clone gets it copied in as its own BUILD.bazel.
-RAYLIB="$DEST/raylib-5.5"
+#
+# The tag is read out of the extension rather than written here. A hardcoded
+# pin plus a "keep in sync" comment is what the old wrapper did, and it fails
+# silently in the worst direction: --override_repository wins, so a bumped
+# raylib would keep building the stale sources against the new BUILD file
+# with nothing reporting a mismatch.
+RAYLIB_BZL="$(dirname "$0")/../bazel/extensions/raylib.bzl"
+RAYLIB_TAG="$(grep -oE 'raylib/archive/refs/tags/[^"]+' "$RAYLIB_BZL" | head -1)"
+RAYLIB_TAG="${RAYLIB_TAG##*/}"
+RAYLIB_TAG="${RAYLIB_TAG%.zip}"
+[ -n "$RAYLIB_TAG" ] || { echo "could not read the raylib tag from $RAYLIB_BZL" >&2; exit 1; }
+RAYLIB="$DEST/raylib-$RAYLIB_TAG"
 if [ ! -d "$RAYLIB" ]; then
-  echo ">> raylib/5.5  <-  raysan5/raylib @ 5.5"
-  git -c advice.detachedHead=false clone -q --depth 1 --branch 5.5 \
+  echo ">> raylib/$RAYLIB_TAG  <-  raysan5/raylib @ $RAYLIB_TAG"
+  git -c advice.detachedHead=false clone -q --depth 1 --branch "$RAYLIB_TAG" \
     https://github.com/raysan5/raylib.git "$RAYLIB.tmp"
   rm -rf "$RAYLIB.tmp/.git"
   cp "$(dirname "$0")/../bazel/3p/raylib.BUILD" "$RAYLIB.tmp/BUILD.bazel"

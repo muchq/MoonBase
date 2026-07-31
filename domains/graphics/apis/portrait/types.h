@@ -19,6 +19,12 @@
 namespace portrait {
 
 using Vec3 = std::tuple<double, double, double>;
+
+/// Channels are unsigned char, so 0..255 is enforced by the type and an
+/// out-of-range value wraps rather than arriving detectably — there is
+/// nothing for a validate* rule to check, which is why none exists. The
+/// generated server rejects the out-of-range case at the wire (@range on
+/// ColorChannel) before it can wrap.
 using Color = std::tuple<unsigned char, unsigned char, unsigned char>;
 
 struct Sphere {
@@ -140,7 +146,7 @@ std::optional<std::string> invalidField(const absl::Status& status);
 
 /// `field` is the JSON-pointer path this Vec3 occupies in the request, for
 /// the payload above; empty when the caller reports its own path instead.
-absl::Status validateVec3(Vec3& vec3, std::string_view field = {});
+absl::Status validateVec3(const Vec3& vec3, std::string_view field = {});
 absl::Status validatePerspective(Perspective& perspective);
 absl::Status validateScene(const Scene& scene);
 absl::Status validateOutput(const Output& output);

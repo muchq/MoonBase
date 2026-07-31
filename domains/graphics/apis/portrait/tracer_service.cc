@@ -1,7 +1,9 @@
 #include "domains/graphics/apis/portrait/tracer_service.h"
 
 #include <exception>
+#include <memory>
 #include <new>
+#include <optional>
 #include <vector>
 
 #include "absl/log/log.h"
@@ -13,70 +15,94 @@ using image_core::Image;
 using image_core::RGB_Double;
 using std::vector;
 
+std::optional<std::vector<std::uint8_t>> TracerService::lookupCache(const TraceRequest& request) {
+  return cache_.get(request);
+}
+
+void TracerService::storeInCache(const TraceRequest& request,
+                                 const std::vector<std::uint8_t>& png_bytes) {
+  cache_.insert(request, png_bytes);
+}
+
 absl::StatusOr<TraceResponse> TracerService::trace(TraceRequest& trace_request) {
   auto start_time = std::chrono::steady_clock::now();
 
-  // Record request counter
-  metrics_.RecordCounter("trace_requests_total");
-
-  auto validation_status = validateTraceRequest(trace_request);
-  if (!validation_status.ok()) {
-    metrics_.RecordCounter("trace_requests_failed", 1, {{"error", "validation_failed"}});
-    return validation_status;
-  }
-
-  auto cached_png = cache_.get(trace_request);
-  if (cached_png.has_value()) {
-    auto duration = std::chrono::steady_clock::now() - start_time;
-    metrics_.RecordLatency("trace_request_duration",
-                           std::chrono::duration_cast<std::chrono::microseconds>(duration),
-                           {{"cache_hit", "true"}});
-    metrics_.RecordCounter("trace_cache_hits");
-    return toResponse(trace_request.output, *cached_png);
-  }
-
-  metrics_.RecordCounter("trace_cache_misses");
-
   try {
+    // Record request counter
+    metrics_->RecordCounter("trace_requests_total");
+
+    auto validation_status = validateTraceRequest(trace_request);
+    if (!validation_status.ok()) {
+      metrics_->RecordCounter("trace_requests_failed", 1, {{"error", "validation_failed"}});
+      return validation_status;
+    }
+
+    auto cached_png = lookupCache(trace_request);
+    if (cached_png.has_value()) {
+      auto duration = std::chrono::steady_clock::now() - start_time;
+      metrics_->RecordLatency("trace_request_duration",
+                              std::chrono::duration_cast<std::chrono::microseconds>(duration),
+                              {{"cache_hit", "true"}});
+      metrics_->RecordCounter("trace_cache_hits");
+      return toResponse(trace_request.output, *cached_png);
+    }
+
+    metrics_->RecordCounter("trace_cache_misses");
+
     auto [scene, perspective, output] = trace_request;
 
     // Record scene complexity metrics
     // Distributions, not gauges: RecordGauge is an up-down delta;
     // absolute per-request counts belong in a histogram.
-    metrics_.RecordDistribution("scene_sphere_count", static_cast<double>(scene.spheres.size()));
-    metrics_.RecordDistribution("scene_light_count", static_cast<double>(scene.lights.size()));
+    metrics_->RecordDistribution("scene_sphere_count", static_cast<double>(scene.spheres.size()));
+    metrics_->RecordDistribution("scene_light_count", static_cast<double>(scene.lights.size()));
 
     auto image = do_trace(scene, perspective, output);
     auto png_bytes = pngpp::imageToPng(image);
     auto traceResponse = toResponse(output, png_bytes);
-    cache_.insert(trace_request, std::move(png_bytes));
+
+    // The render is done and the response is built; the cache is only an
+    // optimization from here. Storing it copies the PNG again — the peak
+    // allocation of the whole call — so a failure here is plausible, and it
+    // must not discard an image that already succeeded. Reporting one as
+    // "out of memory, try a smaller output" would be actively misleading:
+    // the smaller retry re-runs a render that never needed to.
+    try {
+      storeInCache(trace_request, png_bytes);
+    } catch (const std::exception& e) {
+      LOG(WARNING) << "portrait: could not cache a completed render: " << e.what();
+    }
 
     auto duration = std::chrono::steady_clock::now() - start_time;
-    metrics_.RecordLatency("trace_request_duration",
-                           std::chrono::duration_cast<std::chrono::microseconds>(duration),
-                           {{"cache_hit", "false"}});
+    metrics_->RecordLatency("trace_request_duration",
+                            std::chrono::duration_cast<std::chrono::microseconds>(duration),
+                            {{"cache_hit", "false"}});
 
-    metrics_.RecordCounter("trace_requests_completed");
+    metrics_->RecordCounter("trace_requests_completed");
     return traceResponse;
 
   } catch (const std::bad_alloc&) {
     // The one render failure a caller can act on: the same scene at a smaller
     // output size may fit. The message goes on the wire as
     // RenderCapacityError::message, so it says only that.
-    metrics_.RecordCounter("trace_requests_failed", 1, {{"error", "out_of_memory"}});
+    //
+    // Log before the counter: RecordCounter allocates a map and two strings
+    // and may mint an instrument, so under genuine exhaustion it is the more
+    // likely of the two to throw, and losing the line would leave nothing.
     LOG(ERROR) << "portrait: render ran out of memory at " << trace_request.output.width << "x"
                << trace_request.output.height;
+    metrics_->RecordCounter("trace_requests_failed", 1, {{"error", "out_of_memory"}});
     return absl::ResourceExhaustedError("render exceeded available memory; try a smaller output");
   } catch (const std::exception& e) {
     // what() is for the operator, not the caller: the handler maps kInternal
     // to an unmodeled 500 whose body the generated server fixes at
     // "internal failure", so this line is the only record of the cause.
-    metrics_.RecordCounter("trace_requests_failed", 1, {{"error", "rendering_failed"}});
     LOG(ERROR) << "portrait: render failed: " << e.what();
+    metrics_->RecordCounter("trace_requests_failed", 1, {{"error", "rendering_failed"}});
     return absl::InternalError("render failed");
   } catch (...) {
-    metrics_.RecordCounter("trace_requests_failed", 1, {{"error", "rendering_failed"}});
     LOG(ERROR) << "portrait: render failed with a non-std exception";
+    metrics_->RecordCounter("trace_requests_failed", 1, {{"error", "rendering_failed"}});
     return absl::InternalError("render failed");
   }
 }

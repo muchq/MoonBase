@@ -21,10 +21,15 @@ namespace portrait {
 /// {"__type":"InternalFailure","message":"internal failure"}.
 ///
 /// Exhaustive by test rather than by compiler. absl::StatusCode is an open
-/// enum, so a switch here needs a default whatever we do; what stops a newly
-/// returned status from becoming a silent 500 is the table in
-/// smithy_handler_test.cc, which pins the outcome for every enumerator.
-/// Adding a status to TracerService therefore means editing a visible row.
+/// enum, so a switch here needs a default whatever we do; the table in
+/// smithy_handler_test.cc pins the outcome for every enumerator, so the
+/// mapping cannot change unnoticed.
+///
+/// What the table does NOT do is notice a new *source*. A status this
+/// function has never been handed already has a green row saying
+/// "UnknownError", so TracerService returning, say, kDeadlineExceeded for
+/// the first time is still a silent 500 — the row is documentation of the
+/// consequence, not an alarm. Whoever adds a status has to come here.
 ///
 /// Free function rather than a private method so that table can exercise
 /// codes the renderer cannot currently produce.
@@ -55,7 +60,9 @@ class SmithyTracerHandler final : public moonbase::portrait::PortraitHandler {
       const smithy::server::RequestContext& context) override;
 
  private:
-  std::unique_ptr<TracerService> tracer_service_;
+  /// const because never reassigning it after construction is what makes
+  /// concurrent Trace calls safe, per the thread-safety note above.
+  const std::unique_ptr<TracerService> tracer_service_;
 };
 
 }  // namespace portrait

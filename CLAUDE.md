@@ -47,7 +47,8 @@ Bazel formatting do.
   runners), run `scripts/make-git-overrides.sh` once and import its output from
   `.bazelrc.user` — see [`docs/BUILD_AND_IDE.md`](docs/BUILD_AND_IDE.md). That
   gets the whole graph building, Beast and libpng and buildifier included.
-  Without it most of `domains/graphics` and every Beast-transport target fails
-  to fetch; say so rather than reporting a skipped target as passing.
+  Without it every Beast-transport target fails to fetch, along with portrait
+  and tracy_demo (the only libpng consumers); say so rather than reporting a
+  skipped target as passing.
 - **Never commit `MODULE.bazel.lock` churn** from the sandbox overrides — they
   run under `--lockfile_mode=off` for exactly this reason.

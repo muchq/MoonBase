@@ -175,6 +175,14 @@ structure InvalidSceneError {
 /// 503 rather than 500: the condition is a property of the server's capacity
 /// at this moment, not of the request, so the same request may well succeed
 /// later. @retryable makes generated clients treat it that way.
+///
+/// Consequence for callers: the generated client maps *any* 503 to this
+/// error's code, so a 503 from Caddy or a load balancer arrives as
+/// code() == "RenderCapacityError" with no typed detail. Branch on
+/// detail<RenderCapacityError>() != nullptr, not on code(), to tell "the
+/// renderer ran out of memory" from "something in front of it was down".
+/// No Retry-After is sent: memory pressure has no knowable duration, and
+/// inventing a number would be worse than the bare 503.
 @error("server")
 @httpError(503)
 @retryable

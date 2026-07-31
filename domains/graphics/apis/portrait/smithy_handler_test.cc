@@ -14,6 +14,7 @@
 #include <iterator>
 #include <memory>
 #include <new>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <thread>
 #include <utility>
@@ -128,19 +129,21 @@ INSTANTIATE_TEST_SUITE_P(
 //
 // absl::StatusCode is an open enum, so ToSmithyError needs a default whatever
 // we do and the compiler cannot flag a newly returned status. This table is
-// the substitute contract: every canonical code has a row, so adding one to
-// TracerService means editing something visible rather than discovering a
-// silent 500 in production. EveryStatusCodeHasARow below is what keeps the
-// table honest.
+// the substitute contract: every canonical code has a row, and
+// EveryStatusCodeHasARow keeps it that way.
+//
+// What it does NOT do — worth being blunt, because the wording used to
+// overclaim it — is notice a new *source*. A status TracerService returns
+// for the first time already has a green row reading "UnknownError", so
+// nothing here fails; the row documents the consequence rather than
+// alarming on it.
 struct MappingCase {
   absl::StatusCode code;
   const char* expected_error_code;
   smithy::ErrorKind expected_kind;
 };
 
-// The 16 canonical (non-Ok) codes. The set is fixed by the gRPC canonical
-// code list that absl::StatusCode mirrors; it has not changed since absl
-// adopted it and is not versioned to grow.
+// The canonical (non-Ok) codes, mirroring gRPC's list.
 constexpr MappingCase kMappingCases[] = {
     {absl::StatusCode::kCancelled, "UnknownError", smithy::ErrorKind::kUnknown},
     {absl::StatusCode::kUnknown, "UnknownError", smithy::ErrorKind::kUnknown},
@@ -263,6 +266,9 @@ TEST(SmithyHandlerFailureTest, OutOfMemoryIsARetryable503WithTypedDetail) {
   const auto denied = client.Trace(ValidTraceInput());
   ASSERT_FALSE(denied.ok());
   EXPECT_EQ(denied.error().code(), "RenderCapacityError");
+  // Note this asserts the model's @retryable trait, which the generated
+  // client hardcodes — not the flag ToSmithyError sets. The handler's own
+  // flag is pinned by ResourceExhaustedIsRetryableAndCarriesItsTypedDetail.
   EXPECT_TRUE(denied.error().retryable());
   ASSERT_NE(denied.error().detail<RenderCapacityError>(), nullptr);
   EXPECT_EQ(denied.error().detail<RenderCapacityError>()->message,
@@ -280,6 +286,38 @@ TEST(SmithyHandlerFailureTest, AnyOtherRenderFailureIsA500ThatLeaksNothing) {
   // The whole body, pinned: asserting only the absence of today's secret
   // would still pass if some other internal text took its place.
   EXPECT_EQ(response.body, R"({"__type":"InternalFailure","message":"internal failure"})");
+}
+
+// The claim types.h and portrait.smithy both make — that a client sees one
+// path convention whichever layer rejected the scene — as its own test.
+//
+// Nothing else asserts it. The handler side pins InvalidSceneError::field and
+// the server side pins ValidationException's fieldList path, but both could
+// drift to different conventions and stay green, which is the point of
+// making the agreement the subject rather than a consequence.
+//
+// Same member, same sphere, two rejecting layers: radius 0 is a cross-field
+// rule only the handler can express (@range is inclusive of 0), radius 20000
+// exceeds the trait bound and never reaches the handler at all.
+TEST(SmithyHandlerCrossLayerTest, BothLayersNameTheOffendingMemberIdentically) {
+  LoopbackHarness harness(std::make_shared<SmithyTracerHandler>());
+
+  nlohmann::json zero_radius = nlohmann::json::parse(ValidTraceJson());
+  zero_radius["scene"]["spheres"][0]["radius"] = 0.0;
+  const auto from_handler = harness.PostTrace(zero_radius.dump());
+  ASSERT_EQ(from_handler.status, 400) << from_handler.body;
+  const std::string handler_path =
+      nlohmann::json::parse(from_handler.body).value("field", "<missing>");
+
+  nlohmann::json huge_radius = nlohmann::json::parse(ValidTraceJson());
+  huge_radius["scene"]["spheres"][0]["radius"] = 20000.0;
+  const auto from_server = harness.PostTrace(huge_radius.dump());
+  ASSERT_EQ(from_server.status, 400) << from_server.body;
+  const std::string server_path =
+      nlohmann::json::parse(from_server.body)["fieldList"][0].value("path", "<missing>");
+
+  EXPECT_EQ(handler_path, "/scene/spheres/0/radius");
+  EXPECT_EQ(handler_path, server_path);
 }
 
 // The control. Both tests above assert on failures, so a harness that failed

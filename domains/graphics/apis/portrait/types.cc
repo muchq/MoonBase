@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "absl/status/status.h"
+#include "absl/strings/cord.h"
 #include "absl/strings/str_cat.h"
 
 namespace portrait {
@@ -20,21 +21,18 @@ namespace {
 absl::Status invalidScene(std::string_view field, std::string_view message) {
   absl::Status status(absl::StatusCode::kInvalidArgument, message);
   if (!field.empty()) {
-    status.SetPayload(std::string(kInvalidFieldPayloadUrl), absl::Cord(field));
+    status.SetPayload(kInvalidFieldPayloadUrl, absl::Cord(field));
   }
   return status;
 }
 
-absl::Status validateColor(const Color& color) {
-  // Note: Color uses unsigned char, which automatically constrains values to 0-255.
-  // Values > 255 wrap around when assigned, so this validation can't detect them.
-  // This would need to be handled at JSON parsing time if needed.
-  return absl::OkStatus();
-}
-
 absl::Status validateSphere(const Sphere& sphere, std::string_view path) {
-  if (!validateVec3(const_cast<Vec3&>(sphere.center)).ok()) {
-    return invalidScene(absl::StrCat(path, "/center"), "Invalid sphere center");
+  // validateVec3 names the member itself, so its status passes straight
+  // through — keeping "Vec3 contains NaN" rather than flattening every
+  // cause into one "invalid center".
+  auto centerStatus = validateVec3(sphere.center, absl::StrCat(path, "/center"));
+  if (!centerStatus.ok()) {
+    return centerStatus;
   }
 
   if (std::isnan(sphere.radius)) {
@@ -51,11 +49,6 @@ absl::Status validateSphere(const Sphere& sphere, std::string_view path) {
 
   if (sphere.radius > 10000.0) {
     return invalidScene(absl::StrCat(path, "/radius"), "Sphere radius exceeds maximum (10000)");
-  }
-
-  auto colorStatus = validateColor(sphere.color);
-  if (!colorStatus.ok()) {
-    return colorStatus;
   }
 
   if (std::isnan(sphere.specular)) {
@@ -114,24 +107,20 @@ absl::Status validateLight(const Light& light, std::string_view path) {
     return invalidScene(absl::StrCat(path, "/intensity"), "Light intensity exceeds maximum (10)");
   }
 
-  if (!validateVec3(const_cast<Vec3&>(light.position)).ok()) {
-    return invalidScene(absl::StrCat(path, "/position"), "Invalid light position");
-  }
-
-  return absl::OkStatus();
+  return validateVec3(light.position, absl::StrCat(path, "/position"));
 }
 
 }  // namespace
 
 std::optional<std::string> invalidField(const absl::Status& status) {
-  std::optional<absl::Cord> payload = status.GetPayload(std::string(kInvalidFieldPayloadUrl));
+  std::optional<absl::Cord> payload = status.GetPayload(kInvalidFieldPayloadUrl);
   if (!payload.has_value()) {
     return std::nullopt;
   }
   return std::string(*payload);
 }
 
-absl::Status validateVec3(Vec3& vec3, std::string_view field) {
+absl::Status validateVec3(const Vec3& vec3, std::string_view field) {
   double x = std::get<0>(vec3);
   double y = std::get<1>(vec3);
   double z = std::get<2>(vec3);
@@ -186,11 +175,6 @@ absl::Status validateScene(const Scene& scene) {
     if (!lightStatus.ok()) {
       return lightStatus;
     }
-  }
-
-  auto bgColorStatus = validateColor(scene.backgroundColor);
-  if (!bgColorStatus.ok()) {
-    return bgColorStatus;
   }
 
   if (std::isnan(scene.backgroundStarProbability)) {

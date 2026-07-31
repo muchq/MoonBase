@@ -929,7 +929,7 @@ TEST_F(GolfHubStreamFixture, AFailedHistoryLoadDoesNotFailTheResume) {
   // History is best-effort: when the load fails, the resume still lands
   // (sessionReady, roomState) and the stream simply hears no history
   // event — the model's documented absence case.
-  auto capture = std::make_shared<CapturingMetricsRecorder>();
+  auto capture = MakeCapturingMetricsRecorder();
   auto instance = BuildSecondInstance(
       vault_, store_, std::make_shared<FailingHistoryChatStore>(chat_store_), capture);
   ASSERT_NE(instance, nullptr);
@@ -1009,7 +1009,7 @@ TEST_F(GolfHubStreamFixture, ChatMetricsCountOutcomesWithoutIdentifiers) {
 // reached, the sender is told so, and nothing counts as stored or
 // delivered.
 TEST_F(GolfHubStreamFixture, AnUnreachableStoreCountsTheAppendAsUnavailable) {
-  auto capture = std::make_shared<CapturingMetricsRecorder>();
+  auto capture = MakeCapturingMetricsRecorder();
   auto instance = BuildSecondInstance(
       vault_, store_, std::make_shared<FailingAppendChatStore>(chat_store_), capture);
   ASSERT_NE(instance, nullptr);
@@ -1037,7 +1037,7 @@ TEST_F(GolfHubStreamFixture, AnUnreachableStoreCountsTheAppendAsUnavailable) {
 // reject uses, and the outcome counts as rejected — an authorization
 // answer, not an outage.
 TEST_F(GolfHubStreamFixture, AStaleMembershipCountsTheAppendAsRejected) {
-  auto capture = std::make_shared<CapturingMetricsRecorder>();
+  auto capture = MakeCapturingMetricsRecorder();
   auto instance = BuildSecondInstance(vault_, store_,
                                       std::make_shared<NotAMemberChatStore>(chat_store_), capture);
   ASSERT_NE(instance, nullptr);

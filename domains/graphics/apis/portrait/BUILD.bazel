@@ -14,6 +14,11 @@ cc_library(
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
+        # absl::Cord carries the invalid-field payload. Separate target from
+        # :strings, and only reachable today because absl/status/status.h
+        # happens to include cord.h — layering_check is off repo-wide, so
+        # nothing would catch that going away.
+        "@com_google_absl//absl/strings:cord",
     ],
 )
 
@@ -55,6 +60,9 @@ cc_test(
         ":types",
         "//domains/graphics/libs/image_core",
         "//domains/graphics/libs/png_plusplus",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "@com_google_absl//absl/base:log_severity",
+        "@com_google_absl//absl/log:scoped_mock_log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@googletest//:gtest_main",
@@ -148,6 +156,7 @@ cc_test(
         "//domains/graphics/libs/png_plusplus",
         "@com_google_absl//absl/status",
         "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
         "@smithy_cpp//runtime:core",
         "@smithy_cpp//runtime:http",
     ],

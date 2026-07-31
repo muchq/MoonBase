@@ -25,6 +25,20 @@ cc_library(
     ],
 )
 
+# The recording test double the virtual methods on MetricsRecorder exist
+# for. Shared rather than per-fixture: "this counter fired with this label"
+# is an assertion every instrumented service needs, and it was already
+# written twice.
+cc_library(
+    name = "capturing_metrics_recorder",
+    testonly = True,
+    hdrs = ["capturing_metrics_recorder.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":metrics",
+    ],
+)
+
 # The shared HTTP serving instruments; transport-agnostic so every HTTP
 # service exports the same names and labels regardless of server framework.
 cc_library(

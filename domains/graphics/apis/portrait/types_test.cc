@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <limits>
+#include <optional>
 
 #include "absl/status/status.h"
 
@@ -735,6 +736,113 @@ TEST(TypesValidationTest, ValidateOutput_NegativeHeight) {
 
   absl::Status status = validateOutput(output);
   EXPECT_FALSE(status.ok()) << "Negative height should be invalid";
+}
+
+// ---------------------------------------------------------------------------
+// The invalid-field payload (#1267).
+//
+// The handler lifts this onto InvalidSceneError::field, and the only paths
+// pinned end-to-end are the sphere ones — every other rule here is
+// intercepted by a constraint trait before it can reach a client. That makes
+// these unit assertions the whole contract for the rest, and `types` is a
+// public library whose `invalidField` is public API, so the paths are worth
+// pinning at the layer that produces them rather than left to a caller that
+// cannot currently reach them.
+
+Scene OneSphereScene() {
+  Sphere sphere;
+  sphere.center = {0.0, 0.0, 5.0};
+  sphere.radius = 1.0;
+  sphere.color = {255, 0, 0};
+  sphere.specular = 500.0;
+  sphere.reflective = 0.3;
+
+  Light light;
+  light.lightType = AMBIENT;
+  light.intensity = 0.2;
+  light.position = {0.0, 0.0, 0.0};
+
+  Scene scene;
+  scene.spheres = {sphere};
+  scene.lights = {light};
+  return scene;
+}
+
+TEST(InvalidFieldTest, SceneRulesNameTheOffendingMember) {
+  Scene empty;
+  EXPECT_EQ(invalidField(validateScene(empty)), "/scene/spheres");
+
+  Scene bad_radius = OneSphereScene();
+  bad_radius.spheres[0].radius = 0.0;
+  EXPECT_EQ(invalidField(validateScene(bad_radius)), "/scene/spheres/0/radius");
+
+  Scene bad_specular = OneSphereScene();
+  bad_specular.spheres[0].specular = -1.0;
+  EXPECT_EQ(invalidField(validateScene(bad_specular)), "/scene/spheres/0/specular");
+
+  Scene bad_center = OneSphereScene();
+  bad_center.spheres[0].center = {std::nan(""), 0.0, 0.0};
+  EXPECT_EQ(invalidField(validateScene(bad_center)), "/scene/spheres/0/center");
+
+  Scene bad_probability = OneSphereScene();
+  bad_probability.backgroundStarProbability = 1.5;
+  EXPECT_EQ(invalidField(validateScene(bad_probability)), "/scene/backgroundStarProbability");
+}
+
+// The index is the element's own, not a hardcoded 0 — the reason a second
+// sphere and a second light appear here rather than one of each.
+TEST(InvalidFieldTest, ListRulesNameTheOffendingIndex) {
+  Scene scene = OneSphereScene();
+  scene.spheres.push_back(scene.spheres[0]);
+  scene.spheres[1].radius = 0.0;
+  EXPECT_EQ(invalidField(validateScene(scene)), "/scene/spheres/1/radius");
+
+  Scene lights = OneSphereScene();
+  lights.lights.push_back(lights.lights[0]);
+  lights.lights[1].intensity = 99.0;
+  EXPECT_EQ(invalidField(validateScene(lights)), "/scene/lights/1/intensity");
+
+  Scene light_type = OneSphereScene();
+  light_type.lights[0].lightType = UNKNOWN;
+  EXPECT_EQ(invalidField(validateScene(light_type)), "/scene/lights/0/lightType");
+
+  Scene light_position = OneSphereScene();
+  light_position.lights[0].position = {0.0, std::numeric_limits<double>::infinity(), 0.0};
+  EXPECT_EQ(invalidField(validateScene(light_position)), "/scene/lights/0/position");
+}
+
+TEST(InvalidFieldTest, OutputRulesNameTheOffendingMember) {
+  EXPECT_EQ(invalidField(validateOutput(Output{10, 100})), "/output/width");
+  EXPECT_EQ(invalidField(validateOutput(Output{100, 5000})), "/output/height");
+}
+
+TEST(InvalidFieldTest, PerspectiveRulesNameTheOffendingMember) {
+  Perspective nan_position{{std::nan(""), 0.0, 0.0}, {0.0, 0.0, 1.0}};
+  EXPECT_EQ(invalidField(validatePerspective(nan_position)), "/perspective/cameraPosition");
+
+  Perspective nan_focus{{0.0, 0.0, 0.0}, {0.0, std::nan(""), 1.0}};
+  EXPECT_EQ(invalidField(validatePerspective(nan_focus)), "/perspective/cameraFocus");
+}
+
+// The other half of the contract: a rule that blames two members together
+// must name neither, because InvalidSceneError::field is optional precisely
+// so those cases can leave it out rather than pick a member arbitrarily.
+TEST(InvalidFieldTest, CrossMemberRulesNameNoField) {
+  Perspective camera_at_focus{{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}};
+  absl::Status status = validatePerspective(camera_at_focus);
+  ASSERT_FALSE(status.ok());
+  EXPECT_EQ(invalidField(status), std::nullopt);
+
+  absl::Status aspect = validateOutput(Output{1200, 20});
+  ASSERT_FALSE(aspect.ok());
+  EXPECT_EQ(invalidField(aspect), std::nullopt);
+}
+
+// A status that never failed validation has no payload to lift, so the
+// handler cannot invent a field for a success or for some other error.
+TEST(InvalidFieldTest, UnrelatedStatusesCarryNoField) {
+  EXPECT_EQ(invalidField(absl::OkStatus()), std::nullopt);
+  EXPECT_EQ(invalidField(absl::InternalError("render failed")), std::nullopt);
 }
 
 }  // namespace

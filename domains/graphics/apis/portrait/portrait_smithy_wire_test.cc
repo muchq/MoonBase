@@ -184,6 +184,12 @@ struct ConstraintCase {
   const char* name;
   void (*mutate)(json&);
   const char* expect_in_body;
+  // The exact JSON-pointer path the fieldList entry must carry. Asserted
+  // separately from expect_in_body because every member name also appears
+  // in its own message text — so a substring check passes even if the
+  // "path" key is renamed, retyped, or dropped entirely, which is the
+  // half of the "one convention" claim that was going unpinned.
+  const char* expected_path;
 };
 
 class PortraitConstraintTest : public PortraitWireTest,
@@ -200,6 +206,12 @@ TEST_P(PortraitConstraintTest, RejectsWith400) {
   // The fieldList entries name the offending member in their path/message.
   EXPECT_NE(response.body.find(GetParam().expect_in_body), std::string::npos) << response.body;
 
+  const json body = json::parse(response.body);
+  ASSERT_TRUE(body.contains("fieldList")) << response.body;
+  ASSERT_FALSE(body["fieldList"].empty()) << response.body;
+  EXPECT_EQ(body["fieldList"][0].value("path", "<missing>"), GetParam().expected_path)
+      << response.body;
+
   // The handler must never see a request that fails constraint validation.
   EXPECT_FALSE(handler_->last_input().has_value());
 }
@@ -208,34 +220,43 @@ INSTANTIATE_TEST_SUITE_P(
     TypesCcRules, PortraitConstraintTest,
     ::testing::Values(
         ConstraintCase{"EmptyScene", [](json& r) { r["scene"]["spheres"] = json::array(); },
-                       "spheres"},
+                       "spheres", "/scene/spheres"},
         ConstraintCase{"TooManySpheres",
                        [](json& r) {
                          const json sphere = r["scene"]["spheres"][0];
                          for (int i = 0; i < 11; ++i) r["scene"]["spheres"][i] = sphere;
                        },
-                       "spheres"},
+                       "spheres", "/scene/spheres"},
         ConstraintCase{"RadiusTooLarge",
-                       [](json& r) { r["scene"]["spheres"][0]["radius"] = 20000.0; }, "radius"},
+                       [](json& r) { r["scene"]["spheres"][0]["radius"] = 20000.0; }, "radius",
+                       "/scene/spheres/0/radius"},
         ConstraintCase{"SpecularNegative",
-                       [](json& r) { r["scene"]["spheres"][0]["specular"] = -1.0; }, "specular"},
+                       [](json& r) { r["scene"]["spheres"][0]["specular"] = -1.0; }, "specular",
+                       "/scene/spheres/0/specular"},
         ConstraintCase{"ReflectiveAboveOne",
-                       [](json& r) { r["scene"]["spheres"][0]["reflective"] = 1.5; }, "reflective"},
+                       [](json& r) { r["scene"]["spheres"][0]["reflective"] = 1.5; }, "reflective",
+                       "/scene/spheres/0/reflective"},
         ConstraintCase{"ColorChannelAbove255",
-                       [](json& r) { r["scene"]["spheres"][0]["color"][0] = 300; }, "color"},
+                       [](json& r) { r["scene"]["spheres"][0]["color"][0] = 300; }, "color",
+                       "/scene/spheres/0/color/0"},
         ConstraintCase{"CenterNotThreeElements",
-                       [](json& r) { r["scene"]["spheres"][0]["center"] = {1.0, 2.0}; }, "center"},
+                       [](json& r) { r["scene"]["spheres"][0]["center"] = {1.0, 2.0}; }, "center",
+                       "/scene/spheres/0/center"},
         ConstraintCase{"UnknownLightType",
-                       [](json& r) { r["scene"]["lights"][0]["lightType"] = "spot"; }, "lightType"},
+                       [](json& r) { r["scene"]["lights"][0]["lightType"] = "spot"; }, "lightType",
+                       "/scene/lights/0/lightType"},
         ConstraintCase{"IntensityTooHigh",
-                       [](json& r) { r["scene"]["lights"][0]["intensity"] = 11.0; }, "intensity"},
+                       [](json& r) { r["scene"]["lights"][0]["intensity"] = 11.0; }, "intensity",
+                       "/scene/lights/0/intensity"},
         ConstraintCase{"StarProbabilityAboveOne",
                        [](json& r) { r["scene"]["backgroundStarProbability"] = 1.5; },
-                       "backgroundStarProbability"},
-        ConstraintCase{"WidthTooSmall", [](json& r) { r["output"]["width"] = 10; }, "width"},
-        ConstraintCase{"HeightTooLarge", [](json& r) { r["output"]["height"] = 5000; }, "height"},
-        ConstraintCase{"MissingPerspective", [](json& r) { r.erase("perspective"); },
-                       "perspective"}),
+                       "backgroundStarProbability", "/scene/backgroundStarProbability"},
+        ConstraintCase{"WidthTooSmall", [](json& r) { r["output"]["width"] = 10; }, "width",
+                       "/output/width"},
+        ConstraintCase{"HeightTooLarge", [](json& r) { r["output"]["height"] = 5000; }, "height",
+                       "/output/height"},
+        ConstraintCase{"MissingPerspective", [](json& r) { r.erase("perspective"); }, "perspective",
+                       "/perspective"}),
     [](const auto& info) { return info.param.name; });
 
 TEST_F(PortraitWireTest, NonJsonContentTypeRejected) {
