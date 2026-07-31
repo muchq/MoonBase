@@ -112,19 +112,59 @@ public class PlayedAtTimeZoneTest {
             gameAt("julyStart", Instant.parse("2026-07-01T00:00:00Z")),
             gameAt("juneEnd", Instant.parse("2026-06-30T23:59:59.999Z"))));
 
-    assertThat(storedPlayedAt("julyStart")).isEqualTo("2026-07-01 00:00:00");
-    assertThat(storedPlayedAt("juneEnd")).isEqualTo("2026-06-30 23:59:59.999");
+    assertThat(storedColumn("played_at", "julyStart")).isEqualTo("2026-07-01 00:00:00");
+    assertThat(storedColumn("played_at", "juneEnd")).isEqualTo("2026-06-30 23:59:59.999");
+  }
+
+  /**
+   * indexed_at is what retention compares against, and it used to be written by the database's own
+   * {@code now()} while the threshold came from the JVM (#1268). On H2 that was self-consistent —
+   * the engine runs in-process and shares the JVM's zone, so both sides shifted together and no
+   * round-trip test could see it — but it made the stored value depend on whichever process wrote
+   * it. Against a real Postgres in a different zone than the app, retention deleted early.
+   *
+   * <p>So the assertion has to be on the bytes on disk, not a round trip: under UTC+14 the old path
+   * wrote {@code 2026-07-01 14:00:00} for this instant.
+   */
+  @Test
+  public void storedIndexedAtIsUtcNotJvmLocal() {
+    Instant indexedAt = Instant.parse("2026-07-01T00:00:00Z");
+    dao.insertBatch(List.of(gameAt("indexed", Instant.parse("2026-07-15T12:00:00Z"), indexedAt)));
+
+    assertThat(storedColumn("indexed_at", "indexed")).isEqualTo("2026-07-01 00:00:00");
+  }
+
+  /**
+   * Retention's threshold rides the same convention as the column, so a row on the far side of the
+   * boundary goes and one on the near side stays.
+   *
+   * <p>The surviving row sits 6 hours past the threshold — deliberately inside the zone's 14-hour
+   * offset. Days either side of the boundary would prove nothing: the offset could not move them
+   * across it, and a threshold bound through the JVM zone would pass. At 6 hours it does not: the
+   * buggy bind shifts the boundary to 14:00 and sweeps a row that is not yet due.
+   */
+  @Test
+  public void retentionComparesLikeWithLikeUnderNonUtcJvmZone() {
+    Instant threshold = Instant.parse("2026-07-10T00:00:00Z");
+    dao.insertBatch(
+        List.of(
+            gameAt("due", Instant.parse("2026-07-15T12:00:00Z"), threshold.minusSeconds(3600)),
+            gameAt(
+                "notDue", Instant.parse("2026-07-15T12:00:00Z"), threshold.plusSeconds(6 * 3600))));
+
+    assertThat(dao.deleteOlderThan(threshold)).isEqualTo(1);
+    assertThat(urlsMatching("num.moves >= 0")).containsExactly("notDue");
   }
 
   /**
    * The stored wall clock as text. {@code CAST(... AS VARCHAR)} renders the column server-side, so
    * neither the JVM's zone nor the driver's Calendar handling can touch the answer.
    */
-  private String storedPlayedAt(String gameUrl) {
+  private String storedColumn(String column, String gameUrl) {
     try (var conn = testDb.dataSource().getConnection();
         var stmt =
             conn.prepareStatement(
-                "SELECT CAST(played_at AS VARCHAR) FROM game_features WHERE game_url = ?")) {
+                "SELECT CAST(" + column + " AS VARCHAR) FROM game_features WHERE game_url = ?")) {
       stmt.setString(1, gameUrl);
       try (var rs = stmt.executeQuery()) {
         assertThat(rs.next()).isTrue();
@@ -178,6 +218,10 @@ public class PlayedAtTimeZoneTest {
   }
 
   private GameFeature gameAt(String url, Instant playedAt) {
+    return gameAt(url, playedAt, Instant.now());
+  }
+
+  private GameFeature gameAt(String url, Instant playedAt, Instant indexedAt) {
     return new GameFeature(
         null,
         requestId,
@@ -196,7 +240,7 @@ public class PlayedAtTimeZoneTest {
         "1-0",
         playedAt,
         30,
-        Instant.now(),
+        indexedAt,
         "1. e4 e5 *");
   }
 }

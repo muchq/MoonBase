@@ -8,7 +8,7 @@ import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -33,7 +33,7 @@ public class GameFeatureDao implements GameFeatureStore {
           white_elo, black_elo, white_title, black_title, time_class, eco,
           opening_name, opening_family, result, played_at, num_moves,
           indexed_at, pgn
-      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
+      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       """;
 
   // On conflict, refresh the derived/enriched columns too so that reindexing a period backfills
@@ -45,7 +45,7 @@ public class GameFeatureDao implements GameFeatureStore {
           white_elo, black_elo, white_title, black_title, time_class, eco,
           opening_name, opening_family, result, played_at, num_moves,
           indexed_at, pgn
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (game_url) DO UPDATE SET
           indexed_at = EXCLUDED.indexed_at,
           request_id = EXCLUDED.request_id,
@@ -94,11 +94,9 @@ public class GameFeatureDao implements GameFeatureStore {
               rs.getString("opening_name"),
               rs.getString("opening_family"),
               rs.getString("result"),
-              playedAtToInstant(rs.getObject("played_at", LocalDateTime.class)),
+              fromUtcWallClock(rs.getObject("played_at", LocalDateTime.class)),
               getIntOrNull(rs, "num_moves"),
-              rs.getTimestamp("indexed_at") != null
-                  ? rs.getTimestamp("indexed_at").toInstant()
-                  : null,
+              fromUtcWallClock(rs.getObject("indexed_at", LocalDateTime.class)),
               rs.getString("pgn"));
 
   private static final RowMapper<GameForReanalysis> REANALYSIS_MAPPER =
@@ -110,10 +108,21 @@ public class GameFeatureDao implements GameFeatureStore {
 
   private final Jdbi jdbi;
   private final boolean useH2;
+  private final Clock clock;
 
   public GameFeatureDao(Jdbi jdbi, boolean useH2) {
+    this(jdbi, useH2, Clock.systemUTC());
+  }
+
+  /**
+   * @param clock stamps {@code indexed_at} when a caller supplies a row without one. Retention
+   *     compares that column against a threshold this same clock produces, so both sides have to
+   *     come from one source; see {@link #deleteOlderThan}.
+   */
+  public GameFeatureDao(Jdbi jdbi, boolean useH2, Clock clock) {
     this.jdbi = jdbi;
     this.useH2 = useH2;
+    this.clock = clock;
   }
 
   /**
@@ -133,12 +142,12 @@ public class GameFeatureDao implements GameFeatureStore {
    * Under a UTC JVM this is a no-op against the older Calendar-based binding — the conversion that
    * forced was already the identity — so existing rows keep their exact stored values.
    */
-  private static @Nullable LocalDateTime playedAtFromInstant(@Nullable Instant instant) {
+  private static @Nullable LocalDateTime toUtcWallClock(@Nullable Instant instant) {
     return instant == null ? null : instant.atOffset(ZoneOffset.UTC).toLocalDateTime();
   }
 
-  /** Inverse of {@link #playedAtFromInstant}: a stored UTC wall clock read back as an instant. */
-  private static @Nullable Instant playedAtToInstant(@Nullable LocalDateTime wallClock) {
+  /** Inverse of {@link #toUtcWallClock}: a stored UTC wall clock read back as an instant. */
+  private static @Nullable Instant fromUtcWallClock(@Nullable LocalDateTime wallClock) {
     return wallClock == null ? null : wallClock.toInstant(ZoneOffset.UTC);
   }
 
@@ -168,9 +177,15 @@ public class GameFeatureDao implements GameFeatureStore {
                 .bind(11, row.openingName())
                 .bind(12, row.openingFamily())
                 .bind(13, row.result())
-                .bindByType(14, playedAtFromInstant(row.playedAt()), LocalDateTime.class)
+                .bindByType(14, toUtcWallClock(row.playedAt()), LocalDateTime.class)
                 .bind(15, (Integer) row.numMoves())
-                .bind(16, row.pgn())
+                // Never null: the column is NOT NULL, and a row that slipped through without a
+                // stamp would be undeletable, since `NULL < threshold` is unknown.
+                .bindByType(
+                    16,
+                    toUtcWallClock(row.indexedAt() == null ? clock.instant() : row.indexedAt()),
+                    LocalDateTime.class)
+                .bind(17, row.pgn())
                 .add();
           }
           batch.execute();
@@ -178,14 +193,13 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   /**
-   * Deliberately binds the threshold as a plain {@link Timestamp}, converting through the JVM
-   * default zone, rather than as the UTC wall clock played_at uses. This compares against
-   * indexed_at, which is written by the database's own {@code now()} / {@code current_timestamp()}
-   * rather than by the JVM, so its stored wall clock is the database server's zone. Pinning the
-   * threshold to UTC would only be right when the server also runs UTC; making retention
-   * zone-independent means changing how indexed_at is *written* (a dialect-specific SQL change that
-   * reinterprets every existing row), which is a separate concern from played_at and is not
-   * attempted here.
+   * Both sides of this comparison are UTC wall clocks written by the JVM: {@code indexed_at} is
+   * bound by {@link #insertBatch} from the caller's clock, and the threshold is bound here on the
+   * same convention. Previously {@code indexed_at} came from the database's own {@code now()} while
+   * the threshold came from the JVM, so retention straddled two clocks and drifted with host skew
+   * and the database server's timezone (#1268). Nothing in the column changed for a UTC server —
+   * {@code now()} was already producing a UTC wall clock there — so existing rows keep their exact
+   * stored values.
    */
   @Override
   public int deleteOlderThan(Instant threshold) {
@@ -193,7 +207,7 @@ public class GameFeatureDao implements GameFeatureStore {
         h -> {
           int deleted =
               h.createUpdate("DELETE FROM game_features WHERE indexed_at < ?")
-                  .bind(0, Timestamp.from(threshold))
+                  .bindByType(0, toUtcWallClock(threshold), LocalDateTime.class)
                   .execute();
           if (deleted > 0) {
             LOG.debug("Deleted {} games older than {}", deleted, threshold);
