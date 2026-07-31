@@ -79,8 +79,6 @@ bottom of the script.
 
 The approach is lifted from smithy-cpp's `bazel/make-git-overrides.sh`
 (its `docs/development.md`, "Sandboxed sessions").
-[`scripts/bazel_restricted_egress.sh`](../scripts/bazel_restricted_egress.sh)
-predates it and covers a strict subset; prefer this.
 
 On a machine with normal egress, ignore all of this and run `bazel`.
 

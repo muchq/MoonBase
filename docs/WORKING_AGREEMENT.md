@@ -320,5 +320,5 @@ build, so nothing would have caught it. Run the app, not just its tests.
   directly, leaving the PR object open with phantom conflicts. Before believing
   a conflict, check whether the PR head is already an ancestor of
   `origin/main`; a push to the branch un-wedges it.
-- **Never commit `MODULE.bazel.lock` churn** produced by the sandbox's
-  restricted-egress stub.
+- **Never commit `MODULE.bazel.lock` churn** produced by the sandbox module
+  overrides — they run under `--lockfile_mode=off` for exactly this reason.

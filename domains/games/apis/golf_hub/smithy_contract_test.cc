@@ -14,8 +14,10 @@
 //                           (ADR-0018): the JSON text-frame codec every
 //                           production browser session rides
 //
-// Deliberately non-Beast so it runs in restricted-egress sandboxes; the
-// full transport path is covered by the hub e2e suites in CI.
+// Deliberately non-Beast so it runs with no sandbox setup at all
+// (scripts/make-git-overrides.sh unblocks Beast behind a blocking proxy,
+// but this file should not need anyone to have run it); the full transport
+// path is covered by the hub e2e suites in CI.
 
 #include <gtest/gtest.h>
 

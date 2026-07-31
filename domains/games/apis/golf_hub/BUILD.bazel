@@ -359,8 +359,8 @@ cc_test(
 # session bodies, the room-layer events and their ordering, the golf
 # command/update envelopes and GameView, the terminal exception frames)
 # fails here even though the typed e2e suites (which regenerate with it)
-# still pass. Non-Beast deps only, so it runs in restricted-egress
-# sandboxes.
+# still pass. Non-Beast deps only, so it runs with no sandbox setup at all
+# (behind a blocking proxy, Beast needs scripts/make-git-overrides.sh first).
 cc_test(
     name = "golf_hub_wire_test",
     size = "small",

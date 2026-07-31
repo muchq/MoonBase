@@ -6,10 +6,12 @@
 // grep through upstream diffs (the TrustedProxies constructor removal
 // that motivated this file arrived exactly that way).
 //
-// Deliberately depends only on smithy-cpp's non-Beast targets so it runs
-// in restricted-egress sandboxes (scripts/bazel_restricted_egress.sh
-// LIMITS); the Beast transport's own contracts (limits, deadlines,
-// rejection hooks) are exercised by the service e2e suites in CI.
+// Deliberately depends only on smithy-cpp's non-Beast targets, so it runs
+// with no sandbox setup at all — scripts/make-git-overrides.sh unblocks the
+// Beast dep closure behind a proxy that 403s GitHub source archives, but
+// this file should not need anyone to have run it. The Beast transport's
+// own contracts (limits, deadlines, rejection hooks) are exercised by the
+// service e2e suites.
 
 #include <gtest/gtest.h>
 

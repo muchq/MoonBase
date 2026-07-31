@@ -38,11 +38,11 @@
 # MODULE.bazel.lock. Re-run after a dep bump; it is idempotent and skips
 # modules already built.
 #
-# This covers BCR *modules*. Two repos in this build are fetched by module
-# extensions rather than the registry and so never appear in the scan —
-# container_structure_test and aspect_bazel_lib's bats toolchain; those keep
-# their --override_repository treatment in scripts/bazel_restricted_egress.sh,
-# which is the wrapper to use once this script has run.
+# Registry modules are the bulk of it and are found by scanning the
+# lockfile. Two repos come from module extensions instead, so they never
+# appear in that scan and are handled explicitly at the bottom: the bats
+# toolchain and raylib. (container_structure_test needs no special case —
+# it is a registry module, so the scan already covers it.)
 set -euo pipefail
 
 DEST="${1:-$HOME/bazel-overrides}"
