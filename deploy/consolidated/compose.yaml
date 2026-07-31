@@ -318,7 +318,7 @@ services:
           memory: 512M
 
   forgejo:
-    image: codeberg.org/forgejo/forgejo:15
+    image: codeberg.org/forgejo/forgejo:16
     restart: always
     ports:
       - "222:22"

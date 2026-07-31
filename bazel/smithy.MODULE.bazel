@@ -1,11 +1,13 @@
 bazel_dep(name = "smithy_cpp", version = "0.0.0")
 
 # smithy_cpp is not published to the Bazel Central Registry yet, so the module
-# version above is a placeholder and the source comes from this pinned commit.
-# Bump the pin deliberately; there are no tagged releases to track.
+# version above is a placeholder and the source comes from the pinned release
+# tarball below. The integrity hash pins the contents, so a re-pointed tag
+# fails loudly rather than silently changing the build.
 # Evaluation: https://github.com/muchq/MoonBase/issues/1168
-git_override(
+archive_override(
     module_name = "smithy_cpp",
-    commit = "c3fc0af31828d64b9e17336657051ba85ae30db0",
-    remote = "https://github.com/aaylward/smithy-cpp.git",
+    integrity = "sha256-m08PFnKnnuGomq1yX6R0unbjAGhIX6gZx4FEo2Dcqec=",
+    strip_prefix = "smithy-cpp-0.1.0",
+    urls = ["https://github.com/muchq/smithy-cpp/archive/refs/tags/v0.1.0.tar.gz"],
 )
