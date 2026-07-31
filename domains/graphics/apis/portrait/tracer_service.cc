@@ -10,6 +10,20 @@
 #include "absl/status/status.h"
 #include "domains/graphics/libs/png_plusplus/png_plusplus.h"
 
+// trace()'s contract — every failure is a value in the returned StatusOr — is
+// implemented by the catch clauses below, so it holds only while throws are
+// catchable. MoonBase sets -fno-exceptions nowhere today; under it,
+// pngpp::imageToPng's PngException and an allocation failure on a large scene
+// would call std::terminate instead of becoming kInternal and
+// kResourceExhausted. The try/catch would fail to compile in that build
+// anyway, but on a message about exception syntax rather than about the
+// contract it silently breaks.
+#ifndef __cpp_exceptions
+#error \
+    "portrait's TracerService converts throws into absl::Status; -fno-exceptions turns \
+every such failure into a terminate. Remove the flag, or rewrite trace()'s error contract."
+#endif
+
 namespace portrait {
 using image_core::Image;
 using image_core::RGB_Double;

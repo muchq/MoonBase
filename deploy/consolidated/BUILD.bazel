@@ -1,0 +1,14 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_test")
+
+# Named for the package directory so `bazel run //:gazelle` recognizes this
+# rule and merges into it, rather than generating a second, data-less target
+# beside it that could never find the configs.
+go_test(
+    name = "consolidated_test",
+    size = "small",
+    srcs = ["deploy_config_test.go"],
+    data = [
+        "Caddyfile",
+        "compose.yaml",
+    ],
+)

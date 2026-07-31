@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -37,17 +38,25 @@ using portrait::test_support::ValidTraceInput;
 using portrait::test_support::ValidTraceJson;
 
 // No rendering here — the chain's interaction with the generated server is
-// the subject under test.
+// the subject under test. The invocation count is what distinguishes "the
+// chain answered" from "the operation answered"; see
+// TheRateLimiterAnswersBeforeTheOperationIsReached.
 class StubHandler final : public PortraitHandler {
  public:
   smithy::Outcome<TraceOutput> Trace(const TraceInput& input,
                                      const smithy::server::RequestContext& /*context*/) override {
+    invocations_.fetch_add(1, std::memory_order_relaxed);
     TraceOutput output;
     output.base64_png = smithy::Blob::FromString("png");
     output.width = input.output.width;
     output.height = input.output.height;
     return output;
   }
+
+  int invocations() const { return invocations_.load(std::memory_order_relaxed); }
+
+ private:
+  std::atomic<int> invocations_{0};
 };
 
 class RecordingSink final : public aura::HttpMetricsSink {
@@ -72,7 +81,8 @@ class PortraitProductionChainTest : public ::testing::Test {
                                            .ttl = std::chrono::minutes(5),
                                            .cleanup_interval = std::chrono::seconds(30),
                                            .max_keys = 100})),
-        harness_(std::make_shared<StubHandler>(), [this](smithy::http::RequestHandler inner) {
+        handler_(std::make_shared<StubHandler>()),
+        harness_(handler_, [this](smithy::http::RequestHandler inner) {
           return aura::ProductionChain(
               aura::ChainOptions{.metrics = sink_,
                                  .allow_request =
@@ -95,6 +105,7 @@ class PortraitProductionChainTest : public ::testing::Test {
 
   std::shared_ptr<RecordingSink> sink_;
   std::shared_ptr<SlidingWindowRateLimiter<std::string>> limiter_;
+  std::shared_ptr<StubHandler> handler_;
   LoopbackHarness harness_;
 };
 
@@ -117,6 +128,37 @@ TEST_F(PortraitProductionChainTest, ServesTraceHealthAnd429ThroughTheChain) {
   health.target = "/health";
   health.peer_address = "203.0.113.4";
   EXPECT_EQ(harness_.Send(std::move(health)).status, 200);
+}
+
+// Portrait's Smithy model deliberately declares no ThrottlingError, on the
+// grounds that overload is answered by the chain *before* the operation runs
+// — so the handler has no way to return one, and modeling it would advertise
+// an error that cannot occur. That is a claim about ordering, and status
+// alone does not pin it: a chain that rendered first and rate-limited second
+// would still answer 429 and still satisfy the assertions above. The
+// invocation count is what makes the ordering observable, so reordering the
+// limiter behind the operation fails here rather than silently invalidating
+// the modeling decision.
+TEST_F(PortraitProductionChainTest, TheRateLimiterAnswersBeforeTheOperationIsReached) {
+  for (int i = 0; i < kMaxRequestsPerKey; ++i) {
+    ASSERT_EQ(PostTraceAs("198.51.100.7").status, 200);
+  }
+  ASSERT_EQ(handler_->invocations(), kMaxRequestsPerKey);
+
+  const auto limited = PostTraceAs("198.51.100.7");
+  ASSERT_EQ(limited.status, 429);
+  EXPECT_EQ(handler_->invocations(), kMaxRequestsPerKey)
+      << "the rate-limited request reached the operation; portrait's model omits "
+         "ThrottlingError on the premise that it cannot";
+
+  // The refused request carries no rendered payload either — the 429 body is
+  // the chain's, not a partially-served trace.
+  EXPECT_EQ(limited.body.find("base64Png"), std::string::npos);
+
+  // A different client still reaches the operation, so the assertion above
+  // measures the limiter rather than a globally wedged chain.
+  ASSERT_EQ(PostTraceAs("198.51.100.8").status, 200);
+  EXPECT_EQ(handler_->invocations(), kMaxRequestsPerKey + 1);
 }
 
 // One pass over the real Beast transport, shaped like main.cc: the
