@@ -1,7 +1,11 @@
 #include "domains/graphics/apis/portrait/tracer_service.h"
 
+#include <exception>
+#include <new>
 #include <vector>
 
+#include "absl/log/log.h"
+#include "absl/status/status.h"
 #include "domains/graphics/libs/png_plusplus/png_plusplus.h"
 
 namespace portrait {
@@ -55,9 +59,25 @@ absl::StatusOr<TraceResponse> TracerService::trace(TraceRequest& trace_request) 
     metrics_.RecordCounter("trace_requests_completed");
     return traceResponse;
 
+  } catch (const std::bad_alloc&) {
+    // The one render failure a caller can act on: the same scene at a smaller
+    // output size may fit. The message goes on the wire as
+    // RenderCapacityError::message, so it says only that.
+    metrics_.RecordCounter("trace_requests_failed", 1, {{"error", "out_of_memory"}});
+    LOG(ERROR) << "portrait: render ran out of memory at " << trace_request.output.width << "x"
+               << trace_request.output.height;
+    return absl::ResourceExhaustedError("render exceeded available memory; try a smaller output");
   } catch (const std::exception& e) {
+    // what() is for the operator, not the caller: the handler maps kInternal
+    // to an unmodeled 500 whose body the generated server fixes at
+    // "internal failure", so this line is the only record of the cause.
     metrics_.RecordCounter("trace_requests_failed", 1, {{"error", "rendering_failed"}});
-    throw;
+    LOG(ERROR) << "portrait: render failed: " << e.what();
+    return absl::InternalError("render failed");
+  } catch (...) {
+    metrics_.RecordCounter("trace_requests_failed", 1, {{"error", "rendering_failed"}});
+    LOG(ERROR) << "portrait: render failed with a non-std exception";
+    return absl::InternalError("render failed");
   }
 }
 

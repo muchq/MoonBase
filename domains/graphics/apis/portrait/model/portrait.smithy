@@ -20,6 +20,12 @@ namespace moonbase.portrait
 ///   - aspect ratio within [1/50, 50]
 ///   - strictly positive radius (@range is inclusive of 0)
 ///   - backgroundColor default [0, 0, 0] (Smithy list defaults must be empty)
+///
+/// Server-fault side of the space: a render that the server could not
+/// produce for a valid scene is RenderCapacityError when the client can
+/// recover by asking for less, and an unmodeled InternalFailure 500
+/// otherwise. Overload is not modeled here — the deployment answers 429 in
+/// the middleware chain (main.cc), before the operation is reached.
 service Portrait {
     version: "2026-07-16"
     operations: [Trace]
@@ -51,7 +57,7 @@ operation Trace {
         height: Integer
     }
 
-    errors: [InvalidSceneError]
+    errors: [InvalidSceneError, RenderCapacityError]
 }
 
 /// [x, y, z], exactly three elements.
@@ -150,6 +156,29 @@ structure Output {
 @error("client")
 @httpError(400)
 structure InvalidSceneError {
+    @required
+    message: String
+
+    /// JSON-pointer path to the offending input member, in the same form
+    /// ValidationException uses for the trait-expressible constraints —
+    /// "/scene/spheres/0/radius" — so a client can locate the problem the
+    /// same way whichever layer rejected it. Absent when the rule that
+    /// failed spans members and so has no single field to name.
+    field: String
+}
+
+/// The scene was valid, but the render could not be produced: it needed more
+/// memory than the server would give it. Distinct from the unmodeled
+/// InternalFailure 500 because the client has a specific recovery available
+/// — ask for a smaller `output` — which a generic 500 cannot tell them.
+///
+/// 503 rather than 500: the condition is a property of the server's capacity
+/// at this moment, not of the request, so the same request may well succeed
+/// later. @retryable makes generated clients treat it that way.
+@error("server")
+@httpError(503)
+@retryable
+structure RenderCapacityError {
     @required
     message: String
 }

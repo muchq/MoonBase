@@ -1,7 +1,9 @@
 #include "domains/graphics/apis/portrait/smithy_handler.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/status/status.h"
@@ -69,18 +71,39 @@ TraceRequest toDomainRequest(const gen::TraceInput& input) {
 
 }  // namespace
 
+smithy::Error ToSmithyError(const absl::Status& status) {
+  const std::string message(status.message());
+  switch (status.code()) {
+    case absl::StatusCode::kInvalidArgument: {
+      gen::InvalidSceneError detail{.message = message};
+      // Present only for rules that blame a single member; the cross-field
+      // ones (camera vs focus, aspect ratio) leave it absent on purpose.
+      detail.field = invalidField(status);
+      smithy::Error error = smithy::Error::Modeled("InvalidSceneError", message);
+      error.set_detail(std::move(detail));
+      return error;
+    }
+    case absl::StatusCode::kResourceExhausted: {
+      smithy::Error error =
+          smithy::Error::Modeled("RenderCapacityError", message, /*retryable=*/true);
+      error.set_detail(gen::RenderCapacityError{.message = message});
+      return error;
+    }
+    default:
+      // Undeclared on purpose. The generated server drops this message and
+      // answers 500 {"__type":"InternalFailure","message":"internal
+      // failure"}, so nothing the service put in the status reaches the
+      // client.
+      return smithy::Error::Unknown(message);
+  }
+}
+
 smithy::Outcome<gen::TraceOutput> SmithyTracerHandler::Trace(
     const gen::TraceInput& input, const smithy::server::RequestContext& /*context*/) {
   TraceRequest request = toDomainRequest(input);
-  absl::StatusOr<TraceResponse> response = tracer_service_.trace(request);
+  absl::StatusOr<TraceResponse> response = tracer_service_->trace(request);
   if (!response.ok()) {
-    const std::string message(response.status().message());
-    if (response.status().code() == absl::StatusCode::kInvalidArgument) {
-      smithy::Error error = smithy::Error::Modeled("InvalidSceneError", message);
-      error.set_detail(gen::InvalidSceneError{.message = message});
-      return error;
-    }
-    return smithy::Error::Unknown(message);  // undeclared -> non-leaking 500
+    return ToSmithyError(response.status());
   }
 
   gen::TraceOutput output;

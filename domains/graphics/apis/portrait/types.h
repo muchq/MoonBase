@@ -2,7 +2,9 @@
 #define CPP_PORTRAIT_TYPES_H
 
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -123,7 +125,22 @@ struct TraceResponse {
   int height;
 };
 
-absl::Status validateVec3(Vec3& vec3);
+/// Payload key carrying the offending member's JSON-pointer path on an
+/// InvalidArgument status ("/scene/spheres/0/radius"). The path form matches
+/// the one the generated server's ValidationException uses for the
+/// trait-expressible constraints, so a client sees one convention whichever
+/// layer rejected the scene. The handler lifts it onto
+/// InvalidSceneError::field.
+inline constexpr std::string_view kInvalidFieldPayloadUrl = "type.moonbase.portrait/invalid-field";
+
+/// The offending member's path, when the rule that failed named one. Absent
+/// for rules that span members and for any status that isn't a validation
+/// failure.
+std::optional<std::string> invalidField(const absl::Status& status);
+
+/// `field` is the JSON-pointer path this Vec3 occupies in the request, for
+/// the payload above; empty when the caller reports its own path instead.
+absl::Status validateVec3(Vec3& vec3, std::string_view field = {});
 absl::Status validatePerspective(Perspective& perspective);
 absl::Status validateScene(const Scene& scene);
 absl::Status validateOutput(const Output& output);

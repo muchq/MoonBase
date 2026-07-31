@@ -13,6 +13,7 @@ cc_library(
     deps = [
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -39,6 +40,8 @@ cc_library(
         "//domains/graphics/libs/tracy_cpp:tracy",
         "//domains/platform/libs/futility/cache",
         "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
     ],
 )
@@ -50,8 +53,10 @@ cc_test(
     deps = [
         ":tracer_service",
         ":types",
+        "//domains/graphics/libs/image_core",
         "//domains/graphics/libs/png_plusplus",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@googletest//:gtest_main",
     ],
 )
@@ -137,7 +142,11 @@ cc_test(
         ":portrait_smithy_client",
         ":smithy_handler",
         ":test_support",
+        ":tracer_service",
+        ":types",
+        "//domains/graphics/libs/image_core",
         "//domains/graphics/libs/png_plusplus",
+        "@com_google_absl//absl/status",
         "@googletest//:gtest_main",
         "@smithy_cpp//runtime:core",
         "@smithy_cpp//runtime:http",
