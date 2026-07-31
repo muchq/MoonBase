@@ -1,10 +1,23 @@
 # Aura
 
-The serving chain for C++ services on [smithy-cpp](https://github.com/muchq/smithy-cpp):
-observability, health, and optional per-client rate limiting, composed the
-same way in production and in tests.
+The serving-tier components for C++ services on
+[smithy-cpp](https://github.com/muchq/smithy-cpp): observability, health,
+per-client rate limiting, and caching, composed the same way in production
+and in tests.
 
-## What it gives you
+Two targets, deliberately separate:
+
+| Target | Contents | Pulls Beast? |
+|---|---|---|
+| `:aura` | the serving chain (`middleware.h`) | yes |
+| `:cache` | `aura::Cache` (`cache.h`) | no |
+
+A library that wants a cache should not inherit an HTTP transport. That is
+the whole of the split — `:cache` still reaches opentelemetry-cpp via
+`futility/otel`, so it is not a target you can build behind a blocking proxy
+without `scripts/make-git-overrides.sh`.
+
+## What the chain gives you
 
 - **`ProductionChain(ChainOptions, handler)`** — the one entry point:
   - `ServingObservability` outermost, so health probes and 429s are
@@ -46,3 +59,28 @@ options.on_connection_event = aura::ConnectionEventLog();
 Consumers: `//domains/graphics/apis/portrait`, `//domains/games/apis/golf_hub`.
 `HttpMetricsSink` is a virtual seam — tests inject a recording sink instead
 of the OTel-backed one.
+
+## `aura::Cache`
+
+A fixed-capacity LRU cache that counts its own hits and misses, emitting the
+standard `cache_hits_total` / `cache_misses_total{service_name, cache}` family
+([#1209](https://github.com/muchq/MoonBase/issues/1209)). Storage behavior is
+`futility/cache`'s; what aura adds is that the metric arrives by picking this
+type rather than by remembering to count in each branch of a lookup.
+
+```cpp
+#include "domains/platform/libs/aura/cache.h"
+
+aura::Cache<TraceRequest, std::vector<std::uint8_t>> cache_{"trace", 50, metrics};
+
+if (auto hit = cache_.get(request)) return *hit;   // counted either way
+```
+
+The `service_name` label comes from the `MetricsRecorder` you pass, not from a
+second argument, so a cache series cannot be labeled for a different service
+than the meter it was recorded through. Capacity 0 stores nothing and reports
+every lookup as a miss, which turns the cache off without disturbing its call
+sites or leaving a hole in the dashboard.
+
+Counter names are recorded without `_total`; the OTLP exporter appends it, as
+it does for `http_server_requests`.

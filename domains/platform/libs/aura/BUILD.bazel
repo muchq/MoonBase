@@ -19,6 +19,34 @@ cc_library(
     ],
 )
 
+# The instrumented cache. Deliberately a separate target from :aura, which
+# pulls the Beast transport in: a service wanting a cache should not inherit
+# an HTTP transport, and neither should its tests. That keeps Boost out of
+# this target's dep closure, not the sandbox out of the picture entirely —
+# :cache still reaches opentelemetry-cpp through futility/otel, so behind a
+# proxy that 403s GitHub archives it needs scripts/make-git-overrides.sh
+# just like most of the graph.
+cc_library(
+    name = "cache",
+    hdrs = ["cache.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/platform/libs/futility/cache",
+        "//domains/platform/libs/futility/otel:metrics",
+    ],
+)
+
+cc_test(
+    name = "cache_test",
+    size = "small",
+    srcs = ["cache_test.cc"],
+    deps = [
+        ":cache",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # Beyoncé Rule contract tests (platform tier): every smithy-cpp behavior the
 # aura chain — and through it every C++ service — depends on, pinned here so
 # a pin bump that changes one fails with a named contract. Non-Beast deps

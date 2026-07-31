@@ -4,13 +4,14 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/status/statusor.h"
 #include "domains/graphics/libs/image_core/image_core.h"
 #include "domains/graphics/libs/tracy_cpp/tracy.h"
-#include "domains/platform/libs/futility/cache/lru_cache.h"
+#include "domains/platform/libs/aura/cache.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "types.h"
 
@@ -27,8 +28,14 @@ class TracerService {
   /// counters carry the only label distinguishing an out-of-memory render
   /// from any other, and a label nothing asserts on is one that can silently
   /// become wrong.
+  ///
+  /// The cache shares that recorder rather than holding one of its own. That
+  /// is also where its `service_name` label comes from, so it names whatever
+  /// service this was built for instead of restating it here and hoping the
+  /// two stay equal. Both members copy the pointer: moving into one of them
+  /// would make correctness depend on the order they happen to be declared.
   TracerService(uint16_t _cache_size, std::shared_ptr<futility::otel::MetricsRecorder> metrics)
-      : cache_(_cache_size), metrics_(std::move(metrics)) {}
+      : cache_("trace", _cache_size, metrics), metrics_(metrics) {}
   virtual ~TracerService() = default;
 
   /// Traces a scene and returns the encoded PNG bytes plus dimensions.
@@ -70,7 +77,7 @@ class TracerService {
   tracy::LightType tracify(const LightType& lightType);
   TraceResponse toResponse(const Output& output, const std::vector<std::uint8_t>& png_bytes);
 
-  futility::cache::LRUCache<TraceRequest, std::vector<std::uint8_t>> cache_;
+  aura::Cache<TraceRequest, std::vector<std::uint8_t>> cache_;
   std::shared_ptr<futility::otel::MetricsRecorder> metrics_;
 };
 }  // namespace portrait
