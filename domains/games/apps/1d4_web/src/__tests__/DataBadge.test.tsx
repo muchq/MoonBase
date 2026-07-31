@@ -18,15 +18,16 @@ function availability(over: Partial<DataAvailability> = {}): DataAvailability {
 
 describe('formatCountdown', () => {
   it('reports days beyond two, hours below, and never a negative', () => {
-    expect(formatCountdown(inHours(72), NOW)).toBe('3d');
-    expect(formatCountdown(inHours(49), NOW)).toBe('2d');
-    expect(formatCountdown(inHours(47), NOW)).toBe('47h');
-    expect(formatCountdown(inHours(1), NOW)).toBe('1h');
-    expect(formatCountdown(inHours(0.5), NOW)).toBe('<1h');
+    expect(formatCountdown(inHours(72), NOW)).toBe('3d left');
+    expect(formatCountdown(inHours(49), NOW)).toBe('2d left');
+    expect(formatCountdown(inHours(47), NOW)).toBe('47h left');
+    expect(formatCountdown(inHours(1), NOW)).toBe('1h left');
+    expect(formatCountdown(inHours(0.5), NOW)).toBe('<1h left');
     // The sweep runs hourly, so a lapsed deadline means "not yet collected",
-    // not "-3h".
-    expect(formatCountdown(inHours(-5), NOW)).toBe('soon');
-    expect(formatCountdown(NOW / 1000, NOW)).toBe('soon');
+    // not "-3h". It also must not read "soon left" — the phrase is returned
+    // whole precisely so the caller cannot append to it.
+    expect(formatCountdown(inHours(-5), NOW)).toBe('expiring');
+    expect(formatCountdown(NOW / 1000, NOW)).toBe('expiring');
   });
 });
 
@@ -50,10 +51,42 @@ describe('DataBadge', () => {
     expect(container.querySelector('.data-badge')).toHaveClass('available');
   });
 
+  it('renders a lapsed deadline as a whole phrase, not "soon left"', () => {
+    const { container } = render(
+      <DataBadge data={availability({ expiresAt: inHours(-2) })} now={NOW} />
+    );
+
+    expect(screen.getByText('expiring')).toBeInTheDocument();
+    expect(container).not.toHaveTextContent(/soon left|NaN|-\d/);
+  });
+
+  it('treats an absent expiresAt like a missing one, not NaN', () => {
+    // The API omits the key rather than sending null, so undefined reaches the
+    // component; `=== null` would have let it through to formatCountdown.
+    const { expiresAt, ...withoutExpiry } = availability();
+    const { container } = render(<DataBadge data={withoutExpiry} now={NOW} />);
+
+    expect(screen.getByText('Indexed')).toBeInTheDocument();
+    expect(container).not.toHaveTextContent(/NaN/);
+  });
+
+  it('does not reassure about a status it does not recognize', () => {
+    const { container } = render(
+      <DataBadge
+        data={{ ...availability(), status: 'SOMETHING_NEW' as never }}
+        now={NOW}
+      />
+    );
+
+    // Fail closed: an unknown status must not render as "Indexed".
+    expect(container).not.toHaveTextContent('Indexed');
+    expect(container.querySelector('.data-badge')).toHaveClass('unknown');
+  });
+
   it('says Pruned once retention has swept everything', () => {
     const { container } = render(
       <DataBadge
-        data={availability({ status: 'EXPIRED', monthsAvailable: 0, expiresAt: null })}
+        data={availability({ status: 'EXPIRED', monthsAvailable: 0, expiresAt: undefined })}
         now={NOW}
       />
     );
@@ -88,7 +121,7 @@ describe('DataBadge', () => {
 
   it('omits the countdown when no expiry is known', () => {
     const { container } = render(
-      <DataBadge data={availability({ expiresAt: null })} now={NOW} />
+      <DataBadge data={availability({ expiresAt: undefined })} now={NOW} />
     );
 
     expect(screen.getByText('Indexed')).toBeInTheDocument();

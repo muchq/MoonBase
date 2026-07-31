@@ -110,11 +110,12 @@ The key is **absent** until the request reaches COMPLETED — never `"data": nul
 | status          | string      | `AVAILABLE`, `PARTIAL`, `EXPIRED`, or `UNKNOWN` (see below)      |
 | monthsAvailable | int         | Months in the request's range that are still indexed             |
 | monthsTotal     | int         | Months the request covers                                        |
-| expiresAt       | float\|null | When the first remaining month is due to be swept; null once none remain. Epoch seconds, same encoding as `playedAt` |
+| expiresAt       | float    | When the first remaining month is due to be swept. **Absent** once none remain — like every null field here, it is omitted rather than sent as null. Epoch seconds with nanos, e.g. `1785542400.000000000` |
 
 - `AVAILABLE` — every month in the range is still indexed.
-- `PARTIAL` — some months have been swept. Common on multi-month ranges, whose earlier months
-  age out first.
+- `PARTIAL` — some months have been swept. Within a single request every month is fetched minutes
+  apart and ages out together, so PARTIAL usually means the range was re-covered piecemeal by
+  later requests rather than that it decayed unevenly.
 - `EXPIRED` — nothing is left. Re-run the request to index the games again.
 - `UNKNOWN` — the stored month range could not be parsed, so coverage could not be checked.
 

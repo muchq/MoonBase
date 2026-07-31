@@ -239,10 +239,11 @@ what it does **not** cover: Rust, Go, and TypeScript have no formatting gate in
 CI at all, despite `rustfmt.toml` and `clippy.toml` existing. Don't claim
 otherwise.
 
-New source files must be added to the relevant `srcs` in `BUILD.bazel` by name
-— there is no glob and CI runs bazel directly. A file that isn't listed doesn't
-compile and its tests don't run, while a local `go test ./...` or `npm test`
-passes because neither reads `BUILD.bazel`.
+New source files must be added to the relevant `srcs` in `BUILD.bazel` by name.
+Two subtrees glob instead — `domains/chat/libs/yochat_lib` and
+`domains/games/apps/wordchains_ios` — but everywhere else a file that isn't
+listed doesn't compile and its tests don't run, while a local `go test ./...`
+or `npm test` passes because neither reads `BUILD.bazel`.
 
 **Be explicit about what couldn't be verified locally, and why.** The sandbox
 blocks the boost archive fetches (`boost.beast`, `boost.asio`) and some GitHub

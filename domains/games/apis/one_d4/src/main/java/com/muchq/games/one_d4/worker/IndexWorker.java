@@ -118,7 +118,14 @@ public class IndexWorker {
 
         Optional<GamesResponse> response = chessClient.fetchGames(message.player(), month);
         if (response.isEmpty()) {
+          // chess.com 404s the archive for a month the player has no games in. The month *was*
+          // indexed — the answer is "none" — so record an empty period rather than dropping
+          // through. Skipping it would leave the month indistinguishable from one retention has
+          // swept (DataAvailabilityResolver reads a missing row as "gone"), and would make the
+          // period cache miss forever, refetching an empty archive on every request.
           LOG.warn("No games found for player={} month={}", message.player(), month);
+          upsertPeriod(message, monthStr, month, 0, false);
+          requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
           continue;
         }
 
@@ -184,30 +191,13 @@ public class IndexWorker {
           }
         }
         flushBatch(featureBatch, occurrencesBatch);
-        Instant fetchedAt = Instant.now();
-        Instant firstDayNextMonth =
-            month.plusMonths(1).atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant();
-        // A month whose title lookups saw API errors is stored incomplete so the next request for
-        // this period refetches it (upserting titles via ON CONFLICT) instead of freezing nulls.
-        boolean isComplete = !fetchedAt.isBefore(firstDayNextMonth) && !titleResolution.degraded();
         if (titleResolution.degraded()) {
           LOG.warn(
               "Title enrichment degraded for player={} month={}; period stored incomplete",
               message.player(),
               monthStr);
         }
-        int finalMonthCount = monthCount;
-        Failsafe.with(UPSERT_RETRY)
-            .run(
-                () ->
-                    periodStore.upsertPeriod(
-                        message.player(),
-                        message.platform(),
-                        monthStr,
-                        fetchedAt,
-                        isComplete,
-                        finalMonthCount,
-                        message.excludeBullet()));
+        upsertPeriod(message, monthStr, month, monthCount, titleResolution.degraded());
         requestStore.updateStatus(message.requestId(), "PROCESSING", null, totalIndexed);
       }
 
@@ -218,6 +208,35 @@ public class IndexWorker {
       requestStore.updateStatus(
           message.requestId(), "FAILED", "Indexing failed due to an internal error", 0);
     }
+  }
+
+  /**
+   * Records that this month was indexed, whatever it turned out to contain.
+   *
+   * <p>Every fetched month gets a row, including one whose archive 404'd — a missing row means "not
+   * indexed", and both the period cache and {@code DataAvailabilityResolver} read it that way.
+   *
+   * <p>A period is complete only once the month itself is over, so the current month is always
+   * refetched, and a month whose title lookups saw API errors is stored incomplete so the next
+   * request refetches it (upserting titles via ON CONFLICT) instead of freezing nulls.
+   */
+  private void upsertPeriod(
+      IndexMessage message, String monthStr, YearMonth month, int gamesCount, boolean degraded) {
+    Instant fetchedAt = Instant.now();
+    Instant firstDayNextMonth =
+        month.plusMonths(1).atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+    boolean isComplete = !fetchedAt.isBefore(firstDayNextMonth) && !degraded;
+    Failsafe.with(UPSERT_RETRY)
+        .run(
+            () ->
+                periodStore.upsertPeriod(
+                    message.player(),
+                    message.platform(),
+                    monthStr,
+                    fetchedAt,
+                    isComplete,
+                    gamesCount,
+                    message.excludeBullet()));
   }
 
   private GameFeature buildGameFeature(

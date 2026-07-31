@@ -199,6 +199,7 @@ java_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        artifact("org.jspecify:jspecify"),
         ":api",
         ":db",
         ":dto",
@@ -245,6 +246,7 @@ java_binary(
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
+        artifact("org.jspecify:jspecify"),
         ":api",
         ":db",
         ":dto",
@@ -636,6 +638,10 @@ java_test_suite(
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
+        # e2e_support supplies FakeChessClient (@Replaces ChessClient). Without it these tests
+        # boot the real client, and any request that reaches the worker opens a live TLS
+        # connection to api.chess.com.
+        ":e2e_support",
         ":module",
         artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-http-server-netty"),

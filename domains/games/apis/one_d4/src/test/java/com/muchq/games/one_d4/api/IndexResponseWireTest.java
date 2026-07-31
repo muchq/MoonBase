@@ -72,4 +72,57 @@ public class IndexResponseWireTest {
     // what API.md documents.
     assertThat(body).doesNotContain("\"data\"").doesNotContain("\"errorMessage\"");
   }
+
+  /**
+   * The positive twin for the assertion above, sharing its fixture. Without it every assertion in
+   * this class would still pass if {@code IndexResponse.data} were deleted from the record outright
+   * — an absence test alone cannot tell "correctly omitted" from "never existed".
+   */
+  @Test
+  public void completedRequest_carriesDataOnTheWire() throws Exception {
+    String created =
+        post(
+            "{\"player\":\"wiretest\",\"platform\":\"CHESS_COM\","
+                + "\"startMonth\":\"2024-01\",\"endMonth\":\"2024-01\"}");
+    String id = created.replaceAll("^\\{\"id\":\"([^\"]+)\".*$", "$1");
+
+    String body = pollUntilCompleted(id);
+
+    // FakeChessClient has no games stubbed, so the month indexes as empty — and an empty month
+    // still records a period, which is what keeps this AVAILABLE rather than EXPIRED.
+    assertThat(body).contains("\"status\":\"COMPLETED\"");
+    assertThat(body).contains("\"data\":");
+    assertThat(body).contains("\"status\":\"AVAILABLE\"");
+    assertThat(body).contains("\"monthsAvailable\":1").contains("\"monthsTotal\":1");
+    assertThat(body).contains("\"expiresAt\":");
+  }
+
+  private String post(String json) throws Exception {
+    HttpResponse<String> response =
+        client.send(
+            HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/v1/index"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertThat(response.statusCode()).isEqualTo(200);
+    return response.body();
+  }
+
+  /** The worker runs in the background, so the terminal state has to be waited for. */
+  private String pollUntilCompleted(String id) throws Exception {
+    for (int attempt = 0; attempt < 100; attempt++) {
+      HttpResponse<String> response =
+          client.send(
+              HttpRequest.newBuilder().uri(URI.create(baseUrl + "/v1/index/" + id)).build(),
+              HttpResponse.BodyHandlers.ofString());
+      assertThat(response.statusCode()).isEqualTo(200);
+      if (response.body().contains("\"status\":\"COMPLETED\"")) {
+        return response.body();
+      }
+      Thread.sleep(50);
+    }
+    throw new AssertionError("request " + id + " never reached COMPLETED");
+  }
 }

@@ -36,9 +36,10 @@ Bazel formatting do.
 
 ## Things that bite
 
-- **`BUILD.bazel` `srcs` are explicit, never globbed.** A new file not listed
-  doesn't compile under Bazel and its tests don't run — while `go test ./...`
-  or `npm test` still passes locally, because neither reads `BUILD.bazel`.
+- **`BUILD.bazel` `srcs` are listed by name**, with two globbing exceptions
+  (`yochat_lib`, `wordchains_ios`). Elsewhere a new file not listed doesn't
+  compile under Bazel and its tests don't run — while `go test ./...` or
+  `npm test` still passes locally, because neither reads `BUILD.bazel`.
 - **Postgres-gated suites skip silently** without `PG_TEST_DB_URL` /
   `GOLF_HUB_TEST_DB_URL`. CI supplies them from a `postgres:18` service; a
   local green run may have exercised no SQL at all.

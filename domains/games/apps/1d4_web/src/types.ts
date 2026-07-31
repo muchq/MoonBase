@@ -39,8 +39,8 @@ export interface DataAvailability {
   status: 'AVAILABLE' | 'PARTIAL' | 'EXPIRED' | 'UNKNOWN';
   monthsAvailable: number;
   monthsTotal: number;
-  /** Epoch seconds; null once nothing is left to expire. */
-  expiresAt: number | null;
+  /** Epoch seconds. Absent (not null) once nothing is left to expire — the API omits nulls. */
+  expiresAt?: number;
 }
 
 export interface IndexRequest {

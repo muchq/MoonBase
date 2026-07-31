@@ -131,7 +131,7 @@ describe('IndexView', () => {
           status: 'EXPIRED',
           monthsAvailable: 0,
           monthsTotal: 3,
-          expiresAt: null,
+          // Omitted, matching the wire: the API drops nulls.
         },
       },
       // Older API, or a request that hasn't completed: no signal to show.

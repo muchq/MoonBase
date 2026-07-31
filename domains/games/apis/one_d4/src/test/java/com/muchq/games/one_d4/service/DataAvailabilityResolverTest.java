@@ -87,6 +87,52 @@ public class DataAvailabilityResolverTest {
     assertThat(resolve(request).status()).isEqualTo("AVAILABLE");
   }
 
+  /**
+   * The resolver keys on the request's own platform and excludeBullet, not on constants. Without
+   * this, mutating {@code request.excludeBullet()} to {@code false} or {@code request.platform()}
+   * to {@code "CHESS_COM"} leaves the rest of the suite green — every other request here is
+   * CHESS_COM with bullet included.
+   */
+  @Test
+  public void resolverReadsPlatformAndBulletSettingOffTheRequest() {
+    IndexingRequest bulletExcluded =
+        new IndexingRequest(
+            UUID.randomUUID(),
+            "hikaru",
+            "LICHESS",
+            "2026-07",
+            "2026-07",
+            "COMPLETED",
+            FETCHED,
+            FETCHED,
+            null,
+            42,
+            true);
+
+    // The period a CHESS_COM bullet-including request would have written cannot vouch for it.
+    periods.add("hikaru", "CHESS_COM", false, "2026-07", FETCHED);
+    assertThat(resolve(bulletExcluded).status()).isEqualTo("EXPIRED");
+
+    periods.add("hikaru", "LICHESS", true, "2026-07", FETCHED);
+    assertThat(resolve(bulletExcluded).status()).isEqualTo("AVAILABLE");
+  }
+
+  /**
+   * A period is stored incomplete while its month is still running — which is every request that
+   * covers the current month, the most common shape there is. The games are on disk either way, so
+   * the answer to "is this data still here?" is yes; is_complete only governs whether the indexer
+   * refetches.
+   */
+  @Test
+  public void anIncompletePeriodStillCountsAsAvailable() {
+    periods.add("hikaru", "CHESS_COM", false, "2026-07", FETCHED, false);
+
+    DataAvailability data = resolve(completed("hikaru", "2026-07", "2026-07"));
+
+    assertThat(data.status()).isEqualTo("AVAILABLE");
+    assertThat(data.monthsAvailable()).isEqualTo(1);
+  }
+
   @Test
   public void singleMonthRangeCountsOneMonth() {
     periods.add("hikaru", "CHESS_COM", false, "2026-07", FETCHED);
@@ -176,7 +222,18 @@ public class DataAvailabilityResolverTest {
 
     void add(
         String player, String platform, boolean excludeBullet, String month, Instant fetchedAt) {
-      stored.add(new IndexedPeriod(player, platform, month, fetchedAt, true, 1, excludeBullet));
+      add(player, platform, excludeBullet, month, fetchedAt, true);
+    }
+
+    void add(
+        String player,
+        String platform,
+        boolean excludeBullet,
+        String month,
+        Instant fetchedAt,
+        boolean isComplete) {
+      stored.add(
+          new IndexedPeriod(player, platform, month, fetchedAt, isComplete, 1, excludeBullet));
     }
 
     @Override

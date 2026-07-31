@@ -205,10 +205,12 @@ export default function IndexView() {
             </table>
           </div>
         )}
-        <p className="panel-note">
-          Indexed games are kept for 7 days, then deleted. A request stays in this list
-          after that, marked <strong>Pruned</strong> — re-run it to index the games again.
-        </p>
+        {requests.length > 0 && (
+          <p className="panel-note">
+            Indexed games are kept for 7 days, then deleted. A request stays in this list
+            after that, marked <strong>Pruned</strong> — re-run it to index the games again.
+          </p>
+        )}
       </div>
     </>
   );

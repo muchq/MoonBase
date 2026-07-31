@@ -99,6 +99,39 @@ public class IndexWorkerTest {
     assertThat(requestStore.getLastGamesIndexed()).isEqualTo(7);
   }
 
+  /**
+   * chess.com 404s the archive for a month a player has no games in, and {@code ChessClient} maps
+   * that to {@code Optional.empty()}. The month was still indexed — the answer is "no games" — so
+   * it has to leave a period row behind. Without one, the month is indistinguishable from one
+   * retention has swept, and {@code DataAvailabilityResolver} reports a request as PARTIAL or
+   * EXPIRED the moment it completes. It also means the empty month is refetched forever, because
+   * the period cache only hits on a row that exists.
+   */
+  @Test
+  public void process_monthWithNoArchive_stillRecordsAnEmptyPeriod() {
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/game/jan-1", MINIMAL_PGN, "blitz")));
+    // February is left unstubbed: the stub returns Optional.empty(), exactly as a 404 does.
+
+    worker.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-02", false));
+
+    assertThat(periodStore.getUpserts())
+        .extracting(StubPeriodStore.Upsert::month)
+        .containsExactly("2024-01", "2024-02");
+    assertThat(periodStore.getUpserts())
+        .filteredOn(u -> u.month().equals("2024-02"))
+        .singleElement()
+        .satisfies(
+            u -> {
+              assertThat(u.gamesCount()).isZero();
+              // Both months are over, so both are complete and cacheable.
+              assertThat(u.isComplete()).isTrue();
+            });
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+    assertThat(requestStore.getLastGamesIndexed()).isEqualTo(1);
+  }
+
   @Test
   public void process_fetchesWhenNoCachedPeriod() {
     IndexMessage message =
