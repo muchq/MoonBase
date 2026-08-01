@@ -143,6 +143,35 @@ public class RequestLivenessTest {
         .isTrue();
   }
 
+  /**
+   * Characterizes the hole the heartbeat does <em>not</em> close, so it cannot drift silently.
+   *
+   * <p>A message waiting in the queue has no worker running for it, so nothing beats on its behalf
+   * and {@code updated_at} stays frozen at insert. A backlog deeper than the cutoff therefore
+   * retires work that is owned and about to run, and tells the user to re-submit while the message
+   * is still queued.
+   *
+   * <p>This asserts the current, wrong-ish behaviour on purpose. When someone beats on enqueue —
+   * the actual fix, rather than a larger cutoff — this test should fail and be rewritten to assert
+   * the opposite. That failure is the notification.
+   */
+  @Test
+  public void queuedButUnstartedWorkIsStillRetired_knownGap() {
+    TestDb testDb = TestDb.create("liveness_backlog");
+    IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
+    UUID queued = claim(dao).request().id();
+
+    // No worker has picked the message up yet; the backlog outlasts the cutoff.
+    clock.advance(SLOW_FETCH);
+    dao.reclaimStale(STALE_AFTER, clock.instant());
+
+    assertThat(dao.findById(queued).orElseThrow().status())
+        .as(
+            "known gap: queued-but-unstarted work is indistinguishable from abandoned work,"
+                + " because only a running worker heartbeats. Fix is to beat on enqueue.")
+        .isEqualTo("FAILED");
+  }
+
   /** A beat must not resurrect a request someone else already took. */
   @Test
   public void aHeartbeatDoesNotReviveARequestThatWasAlreadyRetired() {

@@ -173,6 +173,43 @@ public class MigrationTest {
     assertThat(keyed).as("exactly one duplicate may hold the slot").isEqualTo(1);
   }
 
+  /**
+   * The backfill decides which duplicate holds the slot; {@code findExistingRequest} decides which
+   * one a later submit attaches to. They have to be the same row. Ordering by created_at alone
+   * settles it only when the timestamps differ — and duplicate submits are precisely what produces
+   * ties — so a tie is where the two can disagree and hand a caller a row nobody is working on
+   * while the keyed row does the work.
+   */
+  @Test
+  public void run_theBackfillWinnerIsTheRowASubsequentLookupReturns() throws Exception {
+    new Migration(dataSource, true).run();
+
+    Instant sameInstant = Instant.parse("2026-06-01T00:00:00Z");
+    for (int i = 0; i < 3; i++) {
+      insertLegacyRequest("tied", "2024-05", "2024-05", false, "PENDING", sameInstant);
+    }
+    clearDedupeKeys();
+
+    new Migration(dataSource, true).run();
+
+    IndexingRequestDao dao = new IndexingRequestDao(org.jdbi.v3.core.Jdbi.create(dataSource));
+    UUID found =
+        dao.findExistingRequest(
+                "tied",
+                "CHESS_COM",
+                "2024-05",
+                "2024-05",
+                false,
+                java.time.Duration.ofDays(3650),
+                Instant.parse("2026-06-01T01:00:00Z"))
+            .orElseThrow()
+            .id();
+
+    assertThat(dedupeKeyOf(found))
+        .as("the row a submit attaches to must be the row that holds the slot")
+        .isNotNull();
+  }
+
   private UUID insertLegacyRequest(
       String player, String startMonth, String endMonth, boolean excludeBullet, String status)
       throws Exception {

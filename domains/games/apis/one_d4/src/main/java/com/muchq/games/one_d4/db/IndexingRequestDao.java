@@ -287,7 +287,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
                       AND exclude_bullet = ?
                       AND status IN ('PENDING', 'PROCESSING')
                       AND updated_at >= ?
-                    ORDER BY created_at ASC
+                    ORDER BY created_at ASC, id ASC
                     LIMIT 1
                     """)
                 .bind(0, player)
@@ -315,6 +315,17 @@ public class IndexingRequestDao implements IndexingRequestStore {
     // A terminal status releases the dedupe slot: the same range becomes requestable again the
     // moment the work stops being in flight. Leaving the key behind would make one COMPLETED
     // request block that range permanently.
+    //
+    // Terminal writes are deliberately NOT fenced, unlike the non-terminal ones below, and the
+    // limits of that are worth stating. A worker retired while it was running can still write
+    // COMPLETED over its own FAILED row, so the row can end up describing a run that lost the
+    // range rather than the replacement that owns it. More importantly, nothing here fences the
+    // *data* plane at all: that worker keeps writing game_features and motif_occurrences, so if a
+    // replacement is running the same range concurrently the occurrence delete/insert pair can
+    // still interleave. The heartbeat makes reaching this state much harder, and the non-terminal
+    // guard stops the row itself from flip-flopping, but neither makes a retired worker stop
+    // working. Closing that needs an ownership token the worker carries into every write, which is
+    // a different design from this column and is tracked separately.
     boolean terminal = !"PENDING".equals(status) && !"PROCESSING".equals(status);
     String sql =
         terminal

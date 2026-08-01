@@ -309,7 +309,7 @@ On the deployed machine the indexer uses H2 file storage at `/data/indexer` insi
 
 ### Via the API (no direct DB access)
 
-- **Index requests:** `GET http://localhost:8088/v1/index/{id}` — returns `id`, `status`, `gamesIndexed`, `errorMessage` for that request. There is no list-all-requests endpoint; you need the request UUID.
+- **Index requests:** `GET http://localhost:8088/v1/index/{id}` — returns `id`, `status`, `gamesIndexed`, `errorMessage` and a `data` block for that request. `GET http://localhost:8088/v1/index` lists the 50 most recent, newest first, so you do not need the UUID to look around.
 - **Query games:** `POST http://localhost:8088/v1/query` with a ChessQL query (e.g. `white_username = "drawlya"` or `black_username = "drawlya"`) and check the `playedAt` field in the results to see what date ranges are indexed.
 
 ### Direct H2 access (copy DB out)

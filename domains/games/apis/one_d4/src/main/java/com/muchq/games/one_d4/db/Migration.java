@@ -246,6 +246,12 @@ public class Migration {
   private static final String ADD_DEDUPE_KEY_COLUMN =
       "ALTER TABLE indexing_requests ADD COLUMN IF NOT EXISTS dedupe_key VARCHAR(600)";
 
+  // The (created_at, id) order here is the same one findExistingRequest uses, and they have to stay
+  // that way: this picks which duplicate holds the slot, that picks which one a submit attaches to,
+  // and if they disagree a caller can be handed a row nobody is working on while the keyed row does
+  // the work. created_at alone does not settle it — ties are exactly what duplicate submits
+  // produce.
+  //
   // Backfill before the constraint exists, and only onto the row findExistingRequest would already
   // have returned (oldest non-terminal per group). The pre-constraint schema permitted duplicate
   // live rows, so any group holding several would fail the ADD CONSTRAINT below if they were all
