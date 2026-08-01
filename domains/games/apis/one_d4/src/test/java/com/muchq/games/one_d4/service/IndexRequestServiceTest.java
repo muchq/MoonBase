@@ -513,6 +513,16 @@ public class IndexRequestServiceTest {
     }
 
     @Override
+    public boolean heartbeat(UUID id, Instant now) {
+      IndexingRequest r = rows.get(id);
+      if (r == null || !live(r)) {
+        return false;
+      }
+      strand(id, now);
+      return true;
+    }
+
+    @Override
     public int reclaimStale(Duration staleAfter, Instant now) {
       Instant cutoff = now.minus(staleAfter);
       List<IndexingRequest> stranded =

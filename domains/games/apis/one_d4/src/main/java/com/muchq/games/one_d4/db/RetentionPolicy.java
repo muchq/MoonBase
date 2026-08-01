@@ -42,16 +42,19 @@ public final class RetentionPolicy {
    * process-local queue, or an inline MCP dispatch that throws before the worker takes ownership —
    * so "rare" is not the same as "never".
    *
-   * <p>An hour is far longer than a request spends <em>running</em>: {@code IndexWorker} writes
-   * PROCESSING once per month rather than once per run, so a twelve-month range refreshes {@code
-   * updated_at} up to twelve times and cannot age out mid-flight however slow chess.com is.
+   * <p>A running request cannot age out however slow chess.com is, because {@code IndexWorker}
+   * heartbeats it on a timer for as long as it is working — see {@code IndexWorker.startHeartbeat}.
+   * Status writes alone were not enough: they land at month boundaries and every hundredth game, so
+   * a single month under that size reported nothing between its first and last write, and the
+   * archive fetch inside that span goes through an HTTP client with no request timeout.
    *
-   * <p>What the hour does <em>not</em> cover is time spent waiting in the queue. {@code
-   * InMemoryIndexQueue} is drained by a single thread and a queued request's {@code updated_at} is
-   * frozen at insert, so a backlog deeper than an hour would retire work that is owned and about to
-   * run — telling the user to re-submit while the message is still queued. That is tracked
-   * separately rather than papered over here; the fix is a heartbeat on enqueue, not a bigger
-   * number, because raising the window trades one wrong answer for a slower one.
+   * <p>What the hour still does <em>not</em> cover is time spent waiting in the queue. {@code
+   * InMemoryIndexQueue} is drained by a single thread, and a queued message has no worker to
+   * heartbeat for it, so its {@code updated_at} stays frozen at insert. A backlog deeper than an
+   * hour therefore retires work that is owned and about to run, telling the user to re-submit while
+   * the message is still queued. That is tracked separately rather than papered over here; the fix
+   * is to beat on enqueue as well, not a bigger number, because raising the window trades one wrong
+   * answer for a slower one.
    *
    * <p>The invariant that {@link #REQUEST} must exceed {@link #PERIOD} is asserted in {@code
    * IndexE2ETest} alongside the existing check on PERIOD, not in a static initializer here. These

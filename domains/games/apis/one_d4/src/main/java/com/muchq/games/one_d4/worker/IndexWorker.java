@@ -9,6 +9,7 @@ import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.db.GameFeatureStore;
 import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
+import com.muchq.games.one_d4.db.RetentionPolicy;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
@@ -31,9 +32,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -63,6 +70,14 @@ public class IndexWorker {
   private final IndexedPeriodStore periodStore;
   private final ExecutorService extractionExecutor;
   private final Clock clock;
+  private final Duration heartbeatInterval;
+  private final ScheduledExecutorService heartbeatScheduler;
+
+  /**
+   * A quarter of the staleness cutoff, so three consecutive beats can be lost before the request
+   * looks abandoned.
+   */
+  static final Duration DEFAULT_HEARTBEAT_INTERVAL = RetentionPolicy.STALE_REQUEST.dividedBy(4);
 
   public IndexWorker(
       ChessClient chessClient,
@@ -81,12 +96,6 @@ public class IndexWorker {
         Clock.systemUTC());
   }
 
-  /**
-   * @param clock the source for {@code indexed_periods.fetched_at}, which retention compares
-   *     against. Injected so a test can advance time across the retention boundary instead of
-   *     backdating rows, which only ever exercises {@code deleteOlderThan} and never the window
-   *     arithmetic that decides what "old" means.
-   */
   public IndexWorker(
       ChessClient chessClient,
       FeatureExtractor featureExtractor,
@@ -95,6 +104,36 @@ public class IndexWorker {
       IndexedPeriodStore periodStore,
       ExecutorService extractionExecutor,
       Clock clock) {
+    this(
+        chessClient,
+        featureExtractor,
+        requestStore,
+        gameFeatureStore,
+        periodStore,
+        extractionExecutor,
+        clock,
+        DEFAULT_HEARTBEAT_INTERVAL);
+  }
+
+  /**
+   * @param clock the source for {@code indexed_periods.fetched_at}, which retention compares
+   *     against. Injected so a test can advance time across the retention boundary instead of
+   *     backdating rows, which only ever exercises {@code deleteOlderThan} and never the window
+   *     arithmetic that decides what "old" means.
+   * @param heartbeatInterval how often an in-flight request's {@code updated_at} is refreshed.
+   *     Injected only so a test can observe a beat without waiting a quarter of an hour for one —
+   *     the heartbeat runs on wall-clock time, not on {@code clock}, because its job is to prove
+   *     this process is still alive and a fake clock proves nothing about that.
+   */
+  public IndexWorker(
+      ChessClient chessClient,
+      FeatureExtractor featureExtractor,
+      IndexingRequestStore requestStore,
+      GameFeatureStore gameFeatureStore,
+      IndexedPeriodStore periodStore,
+      ExecutorService extractionExecutor,
+      Clock clock,
+      Duration heartbeatInterval) {
     this.chessClient = chessClient;
     this.featureExtractor = featureExtractor;
     this.requestStore = requestStore;
@@ -102,6 +141,15 @@ public class IndexWorker {
     this.periodStore = periodStore;
     this.extractionExecutor = extractionExecutor;
     this.clock = clock;
+    this.heartbeatInterval = heartbeatInterval;
+    this.heartbeatScheduler =
+        Executors.newSingleThreadScheduledExecutor(
+            r -> {
+              Thread t = new Thread(r, "index-request-heartbeat");
+              // Daemon: a heartbeat must never be the reason a JVM refuses to exit.
+              t.setDaemon(true);
+              return t;
+            });
   }
 
   public void process(IndexMessage message) {
@@ -111,6 +159,7 @@ public class IndexWorker {
         message.player(),
         message.platform());
 
+    ScheduledFuture<?> heartbeat = startHeartbeat(message.requestId());
     try {
       requestStore.updateStatus(message.requestId(), "PROCESSING", null, 0);
 
@@ -241,7 +290,49 @@ public class IndexWorker {
       LOG.error("Failed to process index request {}", message.requestId(), e);
       requestStore.updateStatus(
           message.requestId(), "FAILED", "Indexing failed due to an internal error", 0);
+    } finally {
+      heartbeat.cancel(false);
     }
+  }
+
+  /**
+   * Keeps {@code updated_at} moving for as long as this request is being worked on, so the
+   * staleness sweep can tell "running slowly" from "abandoned".
+   *
+   * <p>On a timer rather than at checkpoints, because the spans that need covering are exactly the
+   * ones with no checkpoint in them: a single archive fetch, a run of profile lookups, the
+   * extraction of a month holding fewer than {@link #BATCH_SIZE} games. The interval is a quarter
+   * of the cutoff, so three consecutive beats can be lost — to a paused GC, a blocked pool, a
+   * database blip — before the request looks abandoned.
+   *
+   * <p>A beat that comes back false means the row is no longer live: something already retired it
+   * and a replacement may own the range. The heartbeat stops rather than reasserting itself, and
+   * the run finishes against a row whose terminal write will be refused. That is the honest outcome
+   * — this worker lost the range while it was not looking.
+   */
+  private ScheduledFuture<?> startHeartbeat(UUID requestId) {
+    long everyMillis = Math.max(1, heartbeatInterval.toMillis());
+    return heartbeatScheduler.scheduleWithFixedDelay(
+        () -> {
+          try {
+            if (!requestStore.heartbeat(requestId, clock.instant())) {
+              LOG.warn(
+                  "Request {} is no longer live; another owner has taken this range. Stopping"
+                      + " heartbeat.",
+                  requestId);
+              throw new CancellationException("request no longer live");
+            }
+          } catch (CancellationException e) {
+            throw e;
+          } catch (RuntimeException e) {
+            // A missed beat is survivable — the interval leaves room for three. Logging and
+            // continuing beats killing the schedule on one transient database error.
+            LOG.warn("Heartbeat failed for request {}", requestId, e);
+          }
+        },
+        everyMillis,
+        everyMillis,
+        TimeUnit.MILLISECONDS);
   }
 
   /**

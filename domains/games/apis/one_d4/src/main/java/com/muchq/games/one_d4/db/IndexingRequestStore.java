@@ -65,6 +65,24 @@ public interface IndexingRequestStore {
   int reclaimStale(Duration staleAfter, Instant now);
 
   /**
+   * Moves a live request's {@code updated_at} forward without touching anything else. Returns true
+   * if the row was still live and was touched.
+   *
+   * <p>This exists because staleness infers liveness from progress, and progress is a bad proxy for
+   * it. {@link IndexWorker} writes status at month boundaries and every hundredth game, so a single
+   * month holding fewer games than that — the common case, since single-month requests run inline —
+   * reports nothing between its first and last write. The archive fetch and the profile lookups
+   * inside that span go through an HTTP client with no request timeout, so the span has no upper
+   * bound, and once it passes {@link RetentionPolicy#STALE_REQUEST} the sweep retires a request
+   * that is running perfectly well and frees the dedupe slot out from under it.
+   *
+   * <p>Returning false rather than throwing when the row is no longer live is deliberate: by then a
+   * replacement may own the range, and the caller's job is to notice and stop, not to fight for it
+   * back.
+   */
+  boolean heartbeat(UUID id, Instant now);
+
+  /**
    * Deletes terminal request rows created before {@code threshold} that no {@code game_features}
    * row still references. Returns the number deleted.
    *

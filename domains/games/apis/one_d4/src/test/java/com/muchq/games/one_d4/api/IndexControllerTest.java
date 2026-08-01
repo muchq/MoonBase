@@ -436,6 +436,11 @@ public class IndexControllerTest {
     }
 
     @Override
+    public boolean heartbeat(UUID id, Instant now) {
+      return true;
+    }
+
+    @Override
     public int deleteOlderThan(Instant threshold) {
       return 0;
     }

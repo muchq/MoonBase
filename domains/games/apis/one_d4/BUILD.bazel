@@ -380,6 +380,7 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/games/one_d4/worker/IndexWorkerTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/OpeningsTest.java",
+        "src/test/java/com/muchq/games/one_d4/worker/RequestLivenessTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/ResultMapperTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/RetentionWorkerTest.java",
     ],

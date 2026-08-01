@@ -110,7 +110,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
     // Retire an abandoned holder first, so a dead request cannot keep its replacement out. Without
     // this the unique constraint would turn #1250's stranded row from "dedupe keeps answering with
     // it" into "the database refuses the replacement" — the same lockout, enforced harder.
-    reclaimStaleForKey(key, staleAfter, now);
+    retire(key, staleAfter, now);
 
     RuntimeException lastConflict = null;
     for (int attempt = 0; attempt < MAX_CLAIM_ATTEMPTS; attempt++) {
@@ -215,10 +215,6 @@ public class IndexingRequestDao implements IndexingRequestStore {
                 .bind(0, dedupeKey)
                 .map(ROW_MAPPER)
                 .findFirst());
-  }
-
-  private int reclaimStaleForKey(String dedupeKey, Duration staleAfter, Instant now) {
-    return retire(dedupeKey, staleAfter, now);
   }
 
   @Override
@@ -364,6 +360,23 @@ public class IndexingRequestDao implements IndexingRequestStore {
           id,
           status);
     }
+  }
+
+  @Override
+  public boolean heartbeat(UUID id, Instant now) {
+    int touched =
+        jdbi.withHandle(
+            h ->
+                h.createUpdate(
+                        """
+                        UPDATE indexing_requests
+                        SET updated_at = ?
+                        WHERE id = ? AND status IN ('PENDING', 'PROCESSING')
+                        """)
+                    .bindByType(0, toUtcWallClock(now), LocalDateTime.class)
+                    .bind(1, id)
+                    .execute());
+    return touched > 0;
   }
 
   @Override
