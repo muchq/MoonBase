@@ -185,9 +185,22 @@ public class IndexWorker {
         message.platform());
 
     if (!requestStore.claim(message.requestId(), ownerId, RetentionPolicy.LEASE, clock.instant())) {
-      // Someone else holds a live lease on this request. That is not an error: it means the work
-      // is already owned, and doing it again would put two writers on the same games.
-      LOG.info("Skipping request {}: another worker holds the lease", message.requestId());
+      // Three causes, and the message must not pick one: a live rival holds the lease, the row
+      // reached a terminal status, or it is gone. Only the first is benign — it means the work is
+      // already owned and doing it again would put two writers on the same games.
+      //
+      // The second is not benign and is the known cost of dispatching from a process-local queue.
+      // A message that waits longer than the unclaimed cutoff has its row retired underneath it,
+      // and this worker then declines the work rather than doing it: the dedupe slot is free, so a
+      // replacement may already be running the range. Before ownership existed the worker carried
+      // on and its unfenced terminal write landed, so the user got their games — at the cost of
+      // exactly the concurrent-writer corruption this change prevents. Neither answer is right;
+      // the fix is for queued work not to be retired at all, which needs dispatch to claim from
+      // the table rather than from memory (#1279).
+      LOG.warn(
+          "Declining request {}: it is not available to claim (already held, or retired while"
+              + " queued). No games will be indexed for it.",
+          message.requestId());
       return;
     }
 
@@ -239,8 +252,14 @@ public class IndexWorker {
           // swept (DataAvailabilityResolver reads a missing row as "gone"), and would make the
           // period cache miss forever, refetching an empty archive on every request.
           LOG.warn("No games found for player={} month={}", message.player(), month);
-          upsertPeriod(message, monthStr, month, fetchedAt, 0, false);
+          // Ownership first. upsertPeriod is the one write in a run that carries no token —
+          // indexed_periods is keyed by (player, platform, month) and has no request to fence
+          // against — so the only protection it can have is not reaching it after the lease is
+          // gone. Writing an empty period for a month a replacement has already indexed properly
+          // would make the period cache report zero games and skip that month until retention
+          // sweeps it.
           progress(message.requestId(), totalIndexed);
+          upsertPeriod(message, monthStr, month, fetchedAt, 0, false);
           continue;
         }
 
@@ -316,23 +335,45 @@ public class IndexWorker {
         progress(message.requestId(), totalIndexed);
       }
 
-      requestStore.updateStatusOwned(
-          message.requestId(), ownerId, "COMPLETED", null, totalIndexed, clock.instant());
-      LOG.info("Completed indexing request {} with {} games", message.requestId(), totalIndexed);
+      final int finalCount = totalIndexed;
+      if (fenced(
+          message.requestId(),
+          () ->
+              requestStore.updateStatusOwned(
+                  message.requestId(), ownerId, "COMPLETED", null, finalCount, clock.instant()),
+          "the run could be completed")) {
+        LOG.info("Completed indexing request {} with {} games", message.requestId(), totalIndexed);
+      } else {
+        // Logging the count unconditionally read as success whatever the row said. The games are
+        // on disk either way; what is lost is the record that this run produced them.
+        LOG.warn(
+            "Indexed {} games for request {} but could not record COMPLETED: the lease is gone.",
+            totalIndexed,
+            message.requestId());
+      }
     } catch (LeaseLostException e) {
-      // Not a failure of the work, and deliberately not written down. The row belongs to someone
-      // else now; a FAILED here would clear their dedupe slot and their lease. Leaving it alone is
-      // the whole point of carrying a token.
+      // No terminal write is attempted, and that is the whole difference from an ordinary failure.
+      // It is not that a FAILED here would damage the replacement's row — that write is fenced
+      // too, and would simply be refused. It is that attempting it would log a spurious error for
+      // a run that did not fail: it was stopped, correctly, because the range moved.
       LOG.warn("Abandoning request {}: {}", message.requestId(), e.getMessage());
     } catch (Exception e) {
       LOG.error("Failed to process index request {}", message.requestId(), e);
-      requestStore.updateStatusOwned(
+      if (!requestStore.updateStatusOwned(
           message.requestId(),
           ownerId,
           "FAILED",
           "Indexing failed due to an internal error",
           0,
-          clock.instant());
+          clock.instant())) {
+        // Worth its own line: the failure is now recorded nowhere, and the row waits for the
+        // sweep. Reachable when the exception that landed here is itself the database problem
+        // that lapsed the lease.
+        LOG.error(
+            "Could not record FAILED for request {}: the lease is gone. The row will be reclaimed"
+                + " rather than reporting this error.",
+            message.requestId());
+      }
     } finally {
       heartbeat.cancel(false);
     }
@@ -531,9 +572,16 @@ public class IndexWorker {
       UUID requestId,
       List<GameFeature> featureBatch,
       Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesBatch) {
-    if (featureBatch.isEmpty()) return;
-    if (!gameFeatureStore.flushOwned(
-        requestId, ownerId, clock.instant(), featureBatch, occurrencesBatch)) {
+    // No early return on an empty batch. An empty flush writes nothing but still asks the question,
+    // and the answer is what gates everything after it — including upsertPeriod, which is not
+    // itself fenced. A month whose games were all bullet-filtered, or whose count is an exact
+    // multiple of BATCH_SIZE, arrives here empty, and skipping the check there was a hole.
+    if (!fenced(
+        requestId,
+        () ->
+            gameFeatureStore.flushOwned(
+                requestId, ownerId, clock.instant(), featureBatch, occurrencesBatch),
+        "a batch could be written")) {
       throw new LeaseLostException(requestId, "the lease was lost before a batch could be written");
     }
     featureBatch.clear();
@@ -545,11 +593,47 @@ public class IndexWorker {
    * so it unwinds the run rather than carrying on producing rows nobody will read.
    */
   private void progress(UUID requestId, int totalIndexed) {
-    if (!requestStore.updateStatusOwned(
-        requestId, ownerId, "PROCESSING", null, totalIndexed, clock.instant())) {
+    if (!fenced(
+        requestId,
+        () ->
+            requestStore.updateStatusOwned(
+                requestId, ownerId, "PROCESSING", null, totalIndexed, clock.instant()),
+        "progress could be recorded")) {
       throw new LeaseLostException(
           requestId, "the lease was lost before progress could be recorded");
     }
+  }
+
+  /**
+   * Runs a fenced write, and retries it once if the only thing wrong was that our own lease had
+   * lapsed.
+   *
+   * <p>A refusal has three causes and they do not deserve the same response: someone else took the
+   * request, the row reached a terminal status, or this worker's lease expired with nobody taking
+   * it. The last is recoverable and not rare — the renewal interval is 75 seconds against a
+   * five-minute lease, but a stalled connection pool can outlast both, and the heartbeat shares one
+   * scheduler thread with every other in-flight request on this instance. Treating it as a loss
+   * abandons a run nobody else wants, mid-way, leaving the row PROCESSING and still holding its
+   * dedupe slot until the sweep retires it with a message about an owner that never existed.
+   *
+   * <p>{@link IndexingRequestStore#renewLease} is exactly the discriminator: it is keyed on {@code
+   * owner_id}, so it succeeds when the row still names us and fails when it does not. No separate
+   * read is needed, and there is no window — a rival claim and a late renewal are two conditional
+   * updates on one row, so the row lock orders them and the rival always wins.
+   */
+  private boolean fenced(UUID requestId, java.util.function.BooleanSupplier write, String what) {
+    if (write.getAsBoolean()) {
+      return true;
+    }
+    if (!requestStore.renewLease(requestId, ownerId, RetentionPolicy.LEASE, clock.instant())) {
+      return false;
+    }
+    LOG.warn(
+        "Lease on request {} had lapsed before {}, but no one else took it. Renewed and"
+            + " continuing.",
+        requestId,
+        what);
+    return write.getAsBoolean();
   }
 
   /**

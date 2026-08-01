@@ -38,12 +38,15 @@ public interface IndexingRequestStore {
   Optional<IndexingRequest> findById(UUID id);
 
   /**
-   * Returns an existing request with the same (player, platform, startMonth, endMonth,
-   * excludeBullet) that is PENDING or PROCESSING and was updated within {@code staleAfter}, if any.
-   * Used to avoid creating duplicate indexing work.
+   * Returns the live request with the same (player, platform, startMonth, endMonth, excludeBullet),
+   * if there is one. Used to avoid creating duplicate indexing work.
    *
-   * <p>The age bound is what keeps a request whose owner died from answering for it forever. See
-   * {@link RetentionPolicy#STALE_REQUEST}.
+   * <p>"Live" here must mean exactly what it means to {@link #reclaimStale} — the same two arms,
+   * negated. A claimed request is live while its lease holds; an unclaimed one is live until {@code
+   * staleAfter}. Answering that question two different ways on one submit is a bug with a long
+   * tail: this read runs first and short-circuits, so a laxer predicate here silently overrides the
+   * stricter reclamation behind it, and a request whose worker was killed keeps being handed back
+   * to callers for the full hour instead of the lease's few minutes.
    */
   Optional<IndexingRequest> findExistingRequest(
       String player,
@@ -77,10 +80,15 @@ public interface IndexingRequestStore {
    * request being worked on now renews, and renewal is a claim about the owner rather than about
    * progress, so it stays alive however long a month takes.
    *
-   * <p>The unclaimed arm still has the gap it always had. A message waiting in a process-local
-   * queue has no owner to renew for it and is indistinguishable from one whose queue died with its
-   * process, so a backlog deeper than {@code staleAfter} still retires work that is owned and about
-   * to run. Closing that means dispatch pulling from this table instead of an in-memory queue.
+   * <p>Retiring makes a request reclaimable; it does not hand it to anyone. There is no scanner for
+   * expired leases and no re-dispatch — the row goes FAILED, the range becomes requestable, and the
+   * user resubmits. Actual takeover is #1279.
+   *
+   * <p>The unclaimed arm still has the gap it always had, and ownership made its consequence worse:
+   * a message waiting in a process-local queue has no owner to renew for it, so a backlog deeper
+   * than {@code staleAfter} retires work that is owned and about to run — and the worker that
+   * eventually reaches it now declines the retired row instead of indexing it anyway. Closing that
+   * means dispatch pulling from this table instead of an in-memory queue (#1279).
    */
   int reclaimStale(Duration staleAfter, Instant now);
 
@@ -99,16 +107,30 @@ public interface IndexingRequestStore {
   boolean claim(UUID id, String ownerId, Duration lease, Instant now);
 
   /**
-   * Extends this owner's lease. Returns false if the request is no longer live or is no longer held
-   * by {@code ownerId} — meaning someone else has taken it, and the caller should stop.
+   * Extends this owner's lease. Returns false if the request is no longer live, or if {@code
+   * owner_id} no longer names this caller — someone else has taken it, and the caller should stop.
    *
-   * <p>Failing rather than re-taking is the point. A worker that lost its lease has, by definition,
-   * been presumed dead by something that has already handed its range to a replacement; reasserting
-   * itself would put two writers on the same games.
+   * <p>Deliberately lenient about expiry, and that is not an oversight: a lease that has lapsed but
+   * still names this owner has not been taken by anyone, so renewing it is recovery rather than a
+   * second claim. A paused GC or a stalled connection pool can outlast a lease without anything
+   * being wrong, and the alternative — abandoning a run nobody else wants — throws away work and
+   * leaves the row stranded until the sweep.
+   *
+   * <p>What it will not do is re-take. Once {@code owner_id} has changed this returns false, and it
+   * cannot race a takeover: both are single conditional UPDATEs on one row, so the row lock orders
+   * them and the rival always wins. Refusing there is the point — the replacement is already
+   * indexing that range, and reasserting would put two writers on the same games.
    */
   boolean renewLease(UUID id, String ownerId, Duration lease, Instant now);
 
-  /** True if {@code ownerId} still holds a live, unexpired lease on this request. */
+  /**
+   * True if {@code ownerId} still holds a live, unexpired lease on this request.
+   *
+   * <p>Has no production caller, and should not acquire one: asking this before a write would be a
+   * check-then-act with a window in it, which is exactly what {@link #updateStatusOwned} and {@link
+   * GameFeatureStore#flushOwned} exist to avoid by folding the question into the write. It is here
+   * for tests and for diagnostics.
+   */
   boolean holdsLease(UUID id, String ownerId, Instant now);
 
   /**

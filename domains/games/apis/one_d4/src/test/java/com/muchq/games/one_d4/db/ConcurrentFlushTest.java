@@ -62,6 +62,13 @@ public class ConcurrentFlushTest {
    */
   private static final int ROUNDS = 200;
 
+  /**
+   * How long the rival in {@code aTakeoverThatCommitsDuringAFlushStillStopsIt} holds its row lock.
+   * Long enough that the flush is certainly inside its ownership probe, short enough to stay under
+   * H2's one-second default lock timeout so the blocked probe waits rather than erroring.
+   */
+  private static final long RIVAL_HOLD_MILLIS = 600;
+
   private TestDb testDb;
   private DataSource dataSource;
   private GameFeatureDao store;
@@ -87,10 +94,11 @@ public class ConcurrentFlushTest {
    * primitives with the interleaving forced by a latch, doubling is not a race that might happen
    * but the guaranteed outcome of an ordering the API permits.
    *
-   * <p>Those primitives are still public and still correct for their remaining caller — {@code
-   * AdminController}'s reanalysis path pairs them, single-threaded — so the constraint on their use
-   * needs somewhere to live. If a later change routes concurrent writers back through them, this is
-   * the explanation waiting.
+   * <p>Those primitives are still public, and "single-threaded within its own loop" is not a
+   * defence: {@code AdminController}'s reanalysis used to pair them, and the writer it races is an
+   * indexing worker on another thread, not a second admin call. It now goes through {@code
+   * replaceOccurrences}. This test is what the constraint on their use rests on — if a later change
+   * routes any concurrent writer back through the pair, the explanation is waiting here.
    */
   @Test
   @Timeout(30)
@@ -204,6 +212,55 @@ public class ConcurrentFlushTest {
         .isEqualTo(2);
   }
 
+  /**
+   * The other writer of {@code motif_occurrences}: reanalysis, which rewrites a game's motifs
+   * without holding any request lease. It has to be safe against a worker flushing a live request
+   * that covers the same game, and being a transaction is not enough on its own.
+   *
+   * <p>Under READ COMMITTED a {@code DELETE} blocked on another transaction's uncommitted delete
+   * re-checks the rows it was blocked on, but not rows that transaction inserted — those are
+   * outside its statement snapshot. So two transactional writers still interleave as delete,
+   * delete, insert, insert unless they first contend for something in common. Both now take the
+   * {@code game_features} row for the game.
+   *
+   * <p>Driven the same way as the takeover test: the admin side opens its transaction and holds it
+   * while the flush runs, which is the ordering that produces the doubling if nothing serializes
+   * them.
+   */
+  @Test
+  @Timeout(30)
+  public void reanalysisAndAWorkerFlushOverOneGameDoNotDuplicateOccurrences() throws Exception {
+    store.flushOwned(
+        requestId, OWNER_A, NOW, List.of(gameFeature()), Map.of(GAME_URL, occurrences()));
+    assertThat(countOccurrences()).isEqualTo(2);
+
+    CountDownLatch reanalysisStarted = new CountDownLatch(1);
+
+    Future<?> reanalysis =
+        pool.submit(
+            () -> {
+              reanalysisStarted.countDown();
+              store.replaceOccurrences(List.of(GAME_URL), Map.of(GAME_URL, occurrences()));
+            });
+    assertThat(reanalysisStarted.await(15, TimeUnit.SECONDS)).isTrue();
+    Future<Boolean> flush =
+        pool.submit(
+            () ->
+                store.flushOwned(
+                    requestId,
+                    OWNER_A,
+                    NOW,
+                    List.of(gameFeature()),
+                    Map.of(GAME_URL, occurrences())));
+
+    reanalysis.get(20, TimeUnit.SECONDS);
+    assertThat(flush.get(20, TimeUnit.SECONDS)).isTrue();
+
+    assertThat(countOccurrences())
+        .as("reanalysis and an indexing flush left two copies of every motif for this game")
+        .isEqualTo(2);
+  }
+
   /** The fence: a worker whose lease has been taken writes nothing at all. */
   @Test
   public void aFlushIsRefusedOnceTheLeaseHasMovedToAnotherOwner() {
@@ -222,10 +279,16 @@ public class ConcurrentFlushTest {
    * An expired lease is refused too, even though {@code owner_id} still names this worker. Past
    * expiry the system has already licensed a takeover, so writing would be racing a claim this
    * worker cannot see. Recovering from a lapse is the heartbeat's job, not the flush's.
+   *
+   * <p>Asserted <em>at</em> the expiry instant, not a second past it. {@code claim} hands the row
+   * over at {@code lease_expires_at <= now} while this predicate authorizes writing at {@code >
+   * now}; they are complementary, and the only instant where that could break is the one they
+   * share. Relaxing this to {@code >=} puts the replacement and the old owner on the same games for
+   * that instant, and a test a second either side of the boundary would not notice.
    */
   @Test
-  public void aFlushIsRefusedOnceTheLeaseHasExpired() {
-    setOwner(OWNER_A, NOW.minusSeconds(1));
+  public void aFlushIsRefusedAtTheExactInstantTheLeaseExpires() {
+    setOwner(OWNER_A, NOW);
 
     boolean wrote =
         store.flushOwned(
@@ -233,6 +296,69 @@ public class ConcurrentFlushTest {
 
     assertThat(wrote).isFalse();
     assertThat(countOccurrences()).isZero();
+  }
+
+  /**
+   * A takeover that commits <em>during</em> a flush, rather than before one.
+   *
+   * <p>This is the case a check-then-write cannot survive without a row lock. Nothing sets an
+   * isolation level, so both engines run READ COMMITTED and a plain {@code SELECT} inside the
+   * transaction is a snapshot, not a claim: the rival's {@code claim} commits in the gap and the
+   * flush goes on to write rows for a request it no longer owns. The window is the whole flush.
+   *
+   * <p>Driven from the other side, because a test cannot pause the DAO mid-transaction: the rival
+   * takes the lease first and holds its transaction open, then the flush runs. With {@code FOR
+   * UPDATE} on the probe the flush blocks on the rival's uncommitted row and, once released, reads
+   * the new owner and refuses. Without it the probe reads the pre-takeover snapshot and writes.
+   */
+  @Test
+  @Timeout(30)
+  public void aTakeoverThatCommitsDuringAFlushStillStopsIt() throws Exception {
+    CountDownLatch rivalHoldsRow = new CountDownLatch(1);
+    // Never counted down. The rival holds its row lock for the whole timeout, which has to outlast
+    // the flush reaching its ownership probe — otherwise the rival commits first, the probe reads
+    // the new owner from a committed snapshot, and the test passes whether or not it took a lock.
+    CountDownLatch neverReleased = new CountDownLatch(1);
+
+    Future<?> rival =
+        pool.submit(
+            () -> {
+              try (var conn = dataSource.getConnection()) {
+                conn.setAutoCommit(false);
+                try (var ps =
+                    conn.prepareStatement(
+                        "UPDATE indexing_requests SET owner_id = ?, lease_expires_at = ?"
+                            + " WHERE id = ?")) {
+                  ps.setString(1, OWNER_B);
+                  ps.setObject(2, utcWallClock(NOW.plus(Duration.ofMinutes(5))));
+                  ps.setObject(3, requestId);
+                  ps.executeUpdate();
+                }
+                rivalHoldsRow.countDown();
+                neverReleased.await(RIVAL_HOLD_MILLIS, TimeUnit.MILLISECONDS);
+                conn.commit();
+              } catch (Exception e) {
+                throw new RuntimeException(e);
+              }
+            });
+
+    assertThat(rivalHoldsRow.await(15, TimeUnit.SECONDS)).isTrue();
+    Future<Boolean> flush =
+        pool.submit(
+            () ->
+                store.flushOwned(
+                    requestId,
+                    OWNER_A,
+                    NOW,
+                    List.of(gameFeature()),
+                    Map.of(GAME_URL, occurrences())));
+
+    assertThat(flush.get(20, TimeUnit.SECONDS))
+        .as("the flush committed against a request that had already changed hands")
+        .isFalse();
+    rival.get(20, TimeUnit.SECONDS);
+    assertThat(countOccurrences()).isZero();
+    assertThat(countFeatures()).isZero();
   }
 
   /** And once the request is no longer live, whoever owned it may not keep writing to it. */

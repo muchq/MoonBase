@@ -104,7 +104,7 @@ flowchart TB
 
 **Query flow:** Client posts a ChessQL string to `POST /v1/query` → Parser and SqlCompiler produce SQL → GameFeatureStore runs the query and loads motif_occurrences for the result set → response returns GameFeatureRow list with per-game occurrences.
 
-**Retention:** RetentionWorker runs hourly. It deletes game_features, motif_occurrences (via FK cascade), and indexed_periods older than 7 days, and indexing_requests older than 30 days — games first, so a request and its games clear in one pass. It also retires live requests nobody is working on — a claimed one five minutes after its owner stops renewing its lease, an unclaimed one an hour after it was created — freeing the dedupe slot each one holds.
+**Retention:** RetentionWorker runs hourly. It deletes game_features, motif_occurrences (via FK cascade), and indexed_periods older than 7 days, and indexing_requests older than 30 days — games first, so a request and its games clear in one pass. It also retires live requests nobody is working on — a claimed one whose owner has stopped renewing its five-minute lease, an unclaimed one over an hour old — freeing the dedupe slot each one holds. Since the sweep is hourly, those windows say when a request becomes eligible, not when it is retired.
 
 ## Running Locally (in-memory)
 
@@ -252,22 +252,31 @@ one pass, and skips any request still referenced by a game.
 Separately, a live request that nobody is working on is retired to FAILED, which frees the dedupe
 slot it holds for its (player, platform, month range). Two different questions, on two clocks:
 
-| Situation | Retired after | Why that clock |
+| Situation | Eligible for retirement after | Why that clock |
 |---|---|---|
-| Claimed, but the owner stopped renewing | **5 minutes** (`LEASE`) | The owner reports in every 75 seconds. Three missed renewals and it is presumed gone. |
+| Claimed, but the owner stopped renewing | **5 minutes** (`LEASE`) | The owner reports in every 75 seconds. Three missed renewals are survivable; expiry lands on the fourth. |
 | Never claimed by anyone | **1 hour** (`STALE_REQUEST`) | There is no owner whose silence could be measured, so the only evidence is the age of the row. |
+
+*Eligible*, not retired — the distinction matters. Reclamation is only as prompt as its caller, and
+the caller is the hourly `RetentionWorker`; the one faster path is a resubmit for the same range,
+which retires the key it is about to claim. And retiring frees the range rather than handing it
+over: nothing scans for expired leases and nothing re-dispatches, so the user resubmits. Making
+another worker pick the range up is [#1279](https://github.com/muchq/MoonBase/issues/1279).
 
 A worker takes an explicit lease on a request before it writes anything: `owner_id` names the
 process, and every subsequent write — progress, the terminal status, and the batched game and
-occurrence writes — is conditioned on the row still naming it. A worker that has lost its lease
-stops rather than reasserting itself, because something has already handed its range to a
-replacement and two writers over the same games would corrupt the occurrence counts.
+occurrence writes — is conditioned on the row still naming it. A worker whose row has changed
+hands stops rather than reasserting itself; a lease that merely lapsed with nobody taking it is
+renewed and the run continues, because abandoning work no one else wants helps nobody.
 
 Renewal says "the owner is still here", not "progress was made", so a request can run for hours
-against a slow archive without looking abandoned. The hour above still misses one case: a message
-waiting in the in-memory queue has no worker to renew for it, so a backlog deeper than an hour
-retires work that is owned and about to run. Closing that means dispatch claiming from the table
-rather than from a process-local queue.
+against a slow archive without looking abandoned. The hour above still misses one case, and
+ownership made its cost worse: a message waiting in the in-memory queue has no worker to renew for
+it, so a backlog deeper than an hour retires it — and the worker that eventually dequeues it finds
+a retired row, declines it, and indexes nothing. Previously it carried on and recorded a result,
+which is how the range could end up with two writers. Closing this properly means dispatch claiming
+from the table rather than from a process-local queue
+([#1279](https://github.com/muchq/MoonBase/issues/1279)).
 
 ### Available Fields
 

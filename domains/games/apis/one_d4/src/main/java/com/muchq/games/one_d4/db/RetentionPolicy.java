@@ -48,13 +48,18 @@ public final class RetentionPolicy {
    * request that <em>has</em> been claimed there is a better question and a much shorter clock: see
    * {@link #LEASE}.
    *
-   * <p>What the hour still does not cover is time spent waiting in the queue. {@code
-   * InMemoryIndexQueue} is drained by a single thread, and a queued message has no worker to hold a
-   * lease for it, so its {@code updated_at} stays frozen at insert. A backlog deeper than an hour
-   * therefore retires work that is owned and about to run, telling the user to re-submit while the
-   * message is still queued. That is tracked separately rather than papered over here; the fix is
-   * for dispatch to claim from this table instead of an in-memory queue, not a bigger number,
-   * because raising the window trades one wrong answer for a slower one.
+   * <p>What the hour still does not cover is time spent waiting in the queue, and the cost of that
+   * went <em>up</em> when ownership arrived. {@code InMemoryIndexQueue} is drained by a single
+   * thread, and a queued message has no worker holding a lease for it, so its {@code updated_at}
+   * stays frozen at insert and a backlog deeper than an hour retires work that is owned and about
+   * to run. The worker then reaches the message, fails to claim a retired row, and declines: the
+   * indexing does not happen at all. Before ownership it carried on and its unfenced terminal write
+   * landed, so the user got their games — at the cost of exactly the concurrent-writer corruption
+   * this design prevents, since the freed dedupe slot may already have started a replacement.
+   *
+   * <p>Neither answer is right, and a bigger number only makes the wrong one slower. The fix is for
+   * queued work not to be invisible: dispatch claiming from this table instead of from memory,
+   * tracked as #1279.
    *
    * <p>The invariant that {@link #REQUEST} must exceed {@link #PERIOD} is asserted in {@code
    * IndexE2ETest} alongside the existing check on PERIOD, not in a static initializer here. These
@@ -69,14 +74,24 @@ public final class RetentionPolicy {
    *
    * <p>Deliberately far shorter than {@link #STALE_REQUEST}, because it answers a different
    * question. The hour above asks "did anyone ever pick this up?" — a question about a request
-   * nobody owns. This asks "is the owner still there?", and once ownership is explicit that can be
-   * answered quickly and safely: the holder renews every {@link #LEASE_RENEWAL} and a holder that
-   * stops renewing has its work taken over in minutes rather than an hour.
+   * nobody owns. This asks "is the owner still there?", which the owner itself answers by renewing
+   * every {@link #LEASE_RENEWAL}, so it can be decided in minutes rather than an hour.
    *
-   * <p>Five minutes is four renewal intervals, so three consecutive misses are survivable, and
-   * short enough that a crashed instance does not strand a range for longer than a user is willing
-   * to wait before resubmitting. It is not a timeout on the work: a request can run for hours,
-   * renewing throughout.
+   * <p>What "decided" means today is narrower than it sounds, and worth stating rather than
+   * implying. A lapsed lease makes the request <em>reclaimable</em>; nothing picks it up. {@code
+   * IndexWorker.process} is the only caller of {@code claim}, and it runs on a dispatched message,
+   * so there is no scanner looking for expired leases and no re-dispatch. The row is retired to
+   * FAILED and the range becomes requestable again — the user resubmits. Reclamation itself is only
+   * as prompt as its caller: {@code RetentionWorker} is on an hourly schedule, and the only faster
+   * path is {@code createOrAdopt}, which retires the key it is about to claim. So the five minutes
+   * bounds when a lapse <em>may</em> be acted on, not when it is. Actually handing the range to
+   * another worker is #1279.
+   *
+   * <p>Five minutes is four renewal intervals: three consecutive misses are survivable and expiry
+   * lands on the fourth. Short enough that a crashed instance does not strand a range for longer
+   * than a user will wait before resubmitting. It is not a timeout on the work — a request can run
+   * for hours, renewing throughout — and a lease that lapses without anyone taking it is renewed
+   * rather than abandoned, so a stalled pool costs a warning and not a run.
    *
    * <p>{@code IndexWorker.DEFAULT_HEARTBEAT_INTERVAL} must stay below this, and the relationship is
    * asserted in {@code IndexE2ETest} rather than left to inspection — an interval longer than the

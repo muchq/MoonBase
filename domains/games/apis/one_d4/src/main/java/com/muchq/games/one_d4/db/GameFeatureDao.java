@@ -14,10 +14,12 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.jdbi.v3.core.Handle;
 import org.jdbi.v3.core.Jdbi;
 import org.jdbi.v3.core.mapper.RowMapper;
 import org.jspecify.annotations.Nullable;
@@ -222,6 +224,40 @@ public class GameFeatureDao implements GameFeatureStore {
         });
   }
 
+  /**
+   * Takes the {@code game_features} row locks for these games, in the given order, before their
+   * occurrences are rewritten.
+   *
+   * <p>Making each writer's delete-and-insert one transaction is necessary and not sufficient.
+   * Nothing sets an isolation level, so both engines run READ COMMITTED, and under that a {@code
+   * DELETE} that blocks on another transaction's uncommitted delete re-evaluates the rows it was
+   * blocked on — but not rows that transaction <em>inserted</em>, which are outside its statement
+   * snapshot. Two transactional writers over one game therefore still interleave as delete, delete,
+   * insert, insert and both sets survive: exactly the doubling {@code ConcurrentFlushTest}
+   * demonstrates, one isolation level up.
+   *
+   * <p>What removes it is a lock both writers must take first. {@code game_features.game_url} is
+   * UNIQUE and every occurrence belongs to a game, so that row is the natural serialization point.
+   * A flush already takes it implicitly — its feature upsert conflicts on {@code game_url} — but
+   * only for games it is also writing features for, and the reanalysis path writes no features at
+   * all. Taking it explicitly in both places is what makes the two paths safe against each other
+   * rather than only against themselves.
+   *
+   * <p>Sorted, because two writers over an overlapping set that take these locks in different
+   * orders deadlock instead of queueing.
+   */
+  private static void lockGames(Handle h, List<String> sortedGameUrls) {
+    if (sortedGameUrls.isEmpty()) {
+      return;
+    }
+    h.createQuery(
+            "SELECT game_url FROM game_features WHERE game_url IN (<urls>)"
+                + " ORDER BY game_url FOR UPDATE")
+        .bindList("urls", sortedGameUrls)
+        .mapTo(String.class)
+        .list();
+  }
+
   @Override
   public boolean flushOwned(
       UUID requestId,
@@ -229,36 +265,51 @@ public class GameFeatureDao implements GameFeatureStore {
       Instant now,
       List<GameFeature> features,
       Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
-    if (features.isEmpty() && occurrencesByGame.isEmpty()) {
-      return true;
-    }
-    // Game urls in a stable order. Two flushes that touch an overlapping set take row locks in the
-    // same sequence, so they queue behind each other instead of deadlocking half way through.
+    // Everything this transaction locks, in one deterministic order, so two flushes over an
+    // overlapping set queue behind each other rather than deadlocking half way through. Both
+    // phases matter and only sorting one of them is worthless: the feature upsert runs first and
+    // takes an index-tuple lock per game_url on Postgres, so an inverted pair deadlocks there
+    // before it ever reaches the ordered deletes.
+    List<GameFeature> orderedFeatures = new ArrayList<>(features);
+    orderedFeatures.sort(Comparator.comparing(GameFeature::gameUrl));
     List<String> gameUrls = new ArrayList<>(occurrencesByGame.keySet());
     Collections.sort(gameUrls);
 
     return jdbi.inTransaction(
         h -> {
-          int stillOwner =
+          // SELECT ... FOR UPDATE, not a bare read. Nothing sets an isolation level, so both
+          // engines run READ COMMITTED, and under that a plain SELECT is a snapshot rather than a
+          // claim: a concurrent takeover can commit between this statement and the writes below,
+          // and then this transaction commits rows against a request it no longer owns. The
+          // window is the whole flush — up to a hundred upserts, a hundred deletes, and the
+          // occurrence batch — not an instant. Taking the row lock makes a rival claim() block
+          // until this commits or rolls back, which is what "checked in the same transaction that
+          // writes" has to mean to be worth anything.
+          //
+          // Selecting id rather than COUNT(*): Postgres rejects FOR UPDATE alongside an aggregate.
+          boolean stillOwner =
               h.createQuery(
                       """
-                      SELECT COUNT(*) FROM indexing_requests
+                      SELECT id FROM indexing_requests
                       WHERE id = ? AND owner_id = ?
                         AND status IN ('PENDING', 'PROCESSING')
                         AND lease_expires_at > ?
+                      FOR UPDATE
                       """)
                   .bind(0, requestId)
                   .bind(1, ownerId)
                   .bindByType(2, toUtcWallClock(now), LocalDateTime.class)
-                  .mapTo(Integer.class)
-                  .one();
-          if (stillOwner == 0) {
+                  .mapTo(String.class)
+                  .findFirst()
+                  .isPresent();
+          if (!stillOwner) {
             return false;
           }
-          if (!features.isEmpty()) {
-            insertFeatures(h, features);
+          if (!orderedFeatures.isEmpty()) {
+            insertFeatures(h, orderedFeatures);
           }
           if (!gameUrls.isEmpty()) {
+            lockGames(h, gameUrls);
             var deletes = h.prepareBatch(DELETE_OCCURRENCES_BY_GAME_URL);
             for (String gameUrl : gameUrls) {
               deletes.bind(0, gameUrl).add();
@@ -267,6 +318,39 @@ public class GameFeatureDao implements GameFeatureStore {
             insertOccurrences(h, occurrencesByGame);
           }
           return true;
+        });
+  }
+
+  /**
+   * Replaces the occurrences for a set of games as one unit, without an ownership check.
+   *
+   * <p>For the reanalysis path, which recomputes motifs for games it does not own a request for.
+   * The atomicity is the same requirement as {@link #flushOwned}'s and for the same reason: a
+   * delete that commits separately from its insert leaves a window in which another writer — an
+   * indexing worker flushing a live request that covers one of these games — can delete nothing,
+   * insert its own rows, and let both copies survive. Being single-threaded within its own loop
+   * does not help, because the other writer is in another thread.
+   */
+  @Override
+  public void replaceOccurrences(
+      List<String> gameUrlsToClear,
+      Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
+    if (gameUrlsToClear.isEmpty() && occurrencesByGame.isEmpty()) {
+      return;
+    }
+    List<String> merged = new ArrayList<>(gameUrlsToClear);
+    merged.addAll(occurrencesByGame.keySet());
+    List<String> gameUrls = merged.stream().distinct().sorted().toList();
+    final List<String> locked = gameUrls;
+    jdbi.useTransaction(
+        h -> {
+          lockGames(h, locked);
+          var deletes = h.prepareBatch(DELETE_OCCURRENCES_BY_GAME_URL);
+          for (String gameUrl : locked) {
+            deletes.bind(0, gameUrl).add();
+          }
+          deletes.execute();
+          insertOccurrences(h, occurrencesByGame);
         });
   }
 

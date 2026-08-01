@@ -533,16 +533,20 @@ java_test_suite(
     ],
 )
 
-# Every other DAO suite runs on H2, but Postgres is the deployment target and
-# the aggregate SQL uses two constructs the dialects can disagree on: GROUP BY
-# referencing a SELECT-list alias, and timestamp binds against a
-# TIMESTAMP-without-zone column. Real postgres via PG_TEST_DB_URL (which CI's
-# build-and-test job exports); skips otherwise.
+# Every other DAO suite runs on H2, but Postgres is the deployment target, and
+# some claims are only true — or only falsifiable — there. The aggregate SQL uses
+# two constructs the dialects can disagree on: GROUP BY referencing a SELECT-list
+# alias, and timestamp binds against a TIMESTAMP-without-zone column. The
+# concurrent-write suite covers guarantees about READ COMMITTED behaviour that
+# H2's MVStore does not reproduce, so asserting them on H2 would pass either way.
+# Real postgres via PG_TEST_DB_URL (which CI's build-and-test job exports);
+# skips otherwise.
 java_test_suite(
     name = "pg_db_tests",
     size = "small",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/db/PostgresAggregateCompatTest.java",
+        "src/test/java/com/muchq/games/one_d4/db/PostgresConcurrentWriteTest.java",
     ],
     env_inherit = ["PG_TEST_DB_URL"],
     # One shared scratch database: concurrent DB tests drop each other's schemas.
@@ -553,6 +557,7 @@ java_test_suite(
     deps = [
         ":db",
         ":dto",
+        ":model",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
         artifact("org.assertj:assertj-core"),

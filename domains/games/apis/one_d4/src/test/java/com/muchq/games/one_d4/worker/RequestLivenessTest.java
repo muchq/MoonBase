@@ -155,9 +155,15 @@ public class RequestLivenessTest {
    * retires work that is owned and about to run, and tells the user to re-submit while the message
    * is still queued.
    *
-   * <p>This asserts the current, wrong-ish behaviour on purpose. When someone beats on enqueue —
-   * the actual fix, rather than a larger cutoff — this test should fail and be rewritten to assert
-   * the opposite. That failure is the notification.
+   * <p>Ownership made the consequence worse rather than better, which is worth being explicit
+   * about: the worker that eventually dequeues the message now fails to claim the retired row and
+   * declines it, so nothing is indexed. Before, it carried on and its unfenced terminal write
+   * landed — the user got their games, at the cost of the concurrent-writer corruption that could
+   * follow from the freed dedupe slot.
+   *
+   * <p>This asserts the current, wrong behaviour on purpose. When dispatch claims from this table
+   * (#1279) the row will be claimed rather than queued, this test should fail, and it should be
+   * rewritten to assert the opposite. That failure is the notification.
    */
   @Test
   public void queuedButUnstartedWorkIsStillRetired_knownGap() {
@@ -172,7 +178,9 @@ public class RequestLivenessTest {
     assertThat(dao.findById(queued).orElseThrow().status())
         .as(
             "known gap: queued-but-unstarted work is indistinguishable from abandoned work,"
-                + " because only a running worker heartbeats. Fix is to beat on enqueue.")
+                + " because only a claimed request has an owner to renew for it. Beating on"
+                + " enqueue would not fix it either — the process holding the queue is the one"
+                + " that may have died. The fix is dispatch claiming from this table (#1279).")
         .isEqualTo("FAILED");
   }
 
@@ -237,6 +245,53 @@ public class RequestLivenessTest {
     assertThat(claim(dao).created())
         .as("and the dedupe slot must still be held, not freed by a COMPLETED it had no right to")
         .isFalse();
+  }
+
+  /**
+   * A lease that lapses with nobody taking it must not abandon the run.
+   *
+   * <p>The three reasons a fenced write is refused are not the same event. Someone else took the
+   * request; the row went terminal; or this worker's own lease expired and no one claimed it. Only
+   * the first two mean the range has moved. Collapsing all three into "lost" throws away a run
+   * nobody else wants, mid-way, and leaves the row PROCESSING and still holding its dedupe slot
+   * until the sweep retires it with a message about an owner that never existed.
+   *
+   * <p>Reachable without anything being broken: the heartbeat shares one scheduler thread across
+   * every in-flight request on the instance, against a five-connection pool with a ten-second
+   * timeout, so a stall can outlast a five-minute lease. Here the renewal interval is set past the
+   * length of the test to stand in for that, and the clock is pushed past expiry while the worker
+   * is parked in the fetch.
+   */
+  @Test
+  @Timeout(30)
+  public void aLeaseThatLapsesWithNoTakerIsRenewedRatherThanAbandoned() throws Exception {
+    TestDb testDb = TestDb.create("liveness_lapsed");
+    IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    CountDownLatch insideFetch = new CountDownLatch(1);
+    CountDownLatch releaseFetch = new CountDownLatch(1);
+    IndexWorker worker =
+        newWorker(
+            new ClockJumpingChessClient(clock, null, insideFetch, releaseFetch),
+            dao,
+            Duration.ofHours(1));
+
+    Future<?> run = workerExecutor.submit(() -> worker.process(message(requestId)));
+    assertThat(insideFetch.await(15, TimeUnit.SECONDS)).isTrue();
+
+    // The lease runs out. Nobody claims it.
+    clock.advance(RetentionPolicy.LEASE.plusMinutes(1));
+    assertThat(dao.holdsLease(requestId, worker.ownerId(), clock.instant()))
+        .as("precondition: the lease really has lapsed")
+        .isFalse();
+
+    releaseFetch.countDown();
+    run.get(20, TimeUnit.SECONDS);
+
+    assertThat(dao.findById(requestId).orElseThrow().status())
+        .as("the run finished under a lease it recovered, rather than being abandoned mid-way")
+        .isEqualTo("COMPLETED");
   }
 
   /** Two workers, one request: the second must decline rather than double up on the games. */

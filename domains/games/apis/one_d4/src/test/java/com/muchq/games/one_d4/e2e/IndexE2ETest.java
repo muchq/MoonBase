@@ -301,8 +301,12 @@ public class IndexE2ETest {
    */
   @Test
   public void theLeaseIsRenewedSeveralTimesBeforeItCouldExpire() {
-    assertThat(IndexWorker.DEFAULT_HEARTBEAT_INTERVAL).isEqualTo(RetentionPolicy.LEASE_RENEWAL);
-    assertThat(RetentionPolicy.LEASE_RENEWAL.multipliedBy(3))
+    // Asserted on DEFAULT_HEARTBEAT_INTERVAL, which is what a change would actually touch.
+    // LEASE_RENEWAL is defined as LEASE.dividedBy(4), so any claim relating those two — including
+    // "three renewals fit inside a lease" — is arithmetic, true for every positive LEASE, and
+    // fails for nothing. The heartbeat interval is an independent constant that has already been
+    // pointed at the wrong policy once.
+    assertThat(IndexWorker.DEFAULT_HEARTBEAT_INTERVAL.multipliedBy(3))
         .as("at least three renewals may be lost before anyone else may take the request")
         .isLessThan(RetentionPolicy.LEASE);
   }

@@ -486,8 +486,14 @@ public class IndexRequestServiceTest {
         Duration staleAfter,
         Instant now) {
       Instant cutoff = now.minus(staleAfter);
+      // Mirrors the DAO's two arms. A fake that answers this more loosely than production lets a
+      // divergence between dedupe and reclamation pass unnoticed here and fail against Postgres.
       return liveHolder(player, platform, startMonth, endMonth, excludeBullet)
-          .filter(r -> !r.updatedAt().isBefore(cutoff));
+          .filter(
+              r ->
+                  owners.containsKey(r.id())
+                      ? leases.get(r.id()) != null && leases.get(r.id()).isAfter(now)
+                      : !r.updatedAt().isBefore(cutoff));
     }
 
     @Override

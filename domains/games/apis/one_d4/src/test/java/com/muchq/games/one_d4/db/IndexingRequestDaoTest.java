@@ -675,16 +675,95 @@ public class IndexingRequestDaoTest {
         .isTrue();
   }
 
-  /** An expired lease is refused too, even with {@code owner_id} unchanged. */
+  /**
+   * An expired lease is refused too, even with {@code owner_id} unchanged — and asserted
+   * <em>at</em> the expiry instant rather than a second past it.
+   *
+   * <p>Five predicates have to agree on this boundary, not two. {@code claim} and the reclamation
+   * sweep hand the row over at {@code lease_expires_at <= now}; {@code holdsLease}, this, and the
+   * flush's ownership probe authorize at {@code > now}. A second either side of the boundary tests
+   * nothing about the boundary: relax any of the write-authorizing three to {@code >=} and there is
+   * one instant where the replacement owns the row and the old owner may still write to it, which
+   * is the state this whole change exists to prevent.
+   */
   @Test
-  public void updateStatusOwned_isRefusedOnceTheLeaseHasExpired() {
+  public void updateStatusOwned_isRefusedAtTheExactInstantTheLeaseExpires() {
     UUID id = create("fenced2", "2026-02", "2026-02", false).id();
     dao.claim(id, WORKER_A, LEASE, now);
 
-    assertThat(
-            dao.updateStatusOwned(
-                id, WORKER_A, "PROCESSING", null, 5, now.plus(LEASE).plusSeconds(1)))
+    assertThat(dao.updateStatusOwned(id, WORKER_A, "PROCESSING", null, 5, now.plus(LEASE)))
         .isFalse();
+  }
+
+  /**
+   * Dedupe must answer "is this alive?" the same way reclamation does. This read runs first on
+   * every submit and short-circuits, so a laxer predicate here silently overrides the stricter
+   * reclamation behind it.
+   *
+   * <p>The case that exposed it: a worker claims, then is killed. Its lease lapses in minutes and
+   * the row is reclaimable — but {@code updated_at} was bumped by its last renewal, so a predicate
+   * that asks only about age keeps handing the dead request back to callers for the full hour. The
+   * README's "five minutes" was delivered nowhere a user could reach.
+   */
+  @Test
+  public void findExistingRequest_doesNotAnswerWithARequestWhoseLeaseHasLapsed() {
+    dao.createOrAdopt("killed", "CHESS_COM", "2026-05", "2026-05", false, STALE_AFTER, now);
+    UUID id = find("killed", "2026-05", "2026-05", false).orElseThrow().id();
+    dao.claim(id, WORKER_A, LEASE, now);
+
+    Instant afterLapse = now.plus(LEASE).plusSeconds(1);
+    assertThat(
+            dao.findExistingRequest(
+                "killed", "CHESS_COM", "2026-05", "2026-05", false, STALE_AFTER, afterLapse))
+        .as("a request whose owner is gone must not keep answering for the range")
+        .isEmpty();
+    // The boundary itself. reclaimStale takes the row at exactly this instant, so dedupe must
+    // already have stopped offering it — otherwise there is a moment where the row is both
+    // reclaimable and reported as the live holder.
+    assertThat(
+            dao.findExistingRequest(
+                "killed", "CHESS_COM", "2026-05", "2026-05", false, STALE_AFTER, now.plus(LEASE)))
+        .isEmpty();
+  }
+
+  /** The converse: a claimed request with a live lease is still the answer, however quiet it is. */
+  @Test
+  public void findExistingRequest_stillAnswersWithAClaimedRequestThatIsRenewing() {
+    dao.createOrAdopt("busy", "CHESS_COM", "2026-06", "2026-06", false, STALE_AFTER, now);
+    UUID id = find("busy", "2026-06", "2026-06", false).orElseThrow().id();
+    dao.claim(id, WORKER_A, LEASE, now);
+    backdateUpdatedAt(id, now.minus(Duration.ofHours(3)));
+    dao.renewLease(id, WORKER_A, LEASE, now);
+
+    assertThat(
+            dao.findExistingRequest(
+                "busy", "CHESS_COM", "2026-06", "2026-06", false, STALE_AFTER, now))
+        .as("an owner that is renewing owns the range no matter how long the work takes")
+        .isPresent();
+  }
+
+  /**
+   * The two arms report different things to the user. {@code error_message} is surfaced by the API
+   * and rendered in the web app, so telling someone whose worker crashed mid-run that nobody ever
+   * picked their request up sends them looking for a dispatch problem that is not there.
+   */
+  @Test
+  public void reclaimStale_saysWhichArmRetiredTheRequest() {
+    IndexingRequestStore.Claim claimed =
+        dao.createOrAdopt("crashed2", "CHESS_COM", "2026-07", "2026-07", false, STALE_AFTER, now);
+    dao.claim(claimed.request().id(), WORKER_A, LEASE, now);
+
+    IndexingRequestStore.Claim neverClaimed =
+        dao.createOrAdopt("orphan", "CHESS_COM", "2026-08", "2026-08", false, STALE_AFTER, now);
+    backdateUpdatedAt(neverClaimed.request().id(), now.minus(Duration.ofHours(3)));
+
+    dao.reclaimStale(STALE_AFTER, now.plus(Duration.ofMinutes(6)));
+
+    assertThat(dao.findById(claimed.request().id()).orElseThrow().errorMessage())
+        .contains("stopped responding")
+        .doesNotContain("no worker took ownership");
+    assertThat(dao.findById(neverClaimed.request().id()).orElseThrow().errorMessage())
+        .contains("no worker took ownership");
   }
 
   @Test

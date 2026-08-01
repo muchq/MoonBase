@@ -25,9 +25,20 @@ public class IndexingRequestDao implements IndexingRequestStore {
    */
   private static final int MAX_CLAIM_ATTEMPTS = 5;
 
-  private static final String STRANDED_MESSAGE =
+  /** For the unclaimed arm: nobody ever picked this up. */
+  private static final String NEVER_CLAIMED_MESSAGE =
       "Abandoned: no worker took ownership before the staleness cutoff (orphaned by restart or a"
           + " failed inline dispatch). Re-submit to try again.";
+
+  /**
+   * For the lease arm. A different sentence because it describes a different event, and this text
+   * is not internal — it reaches the user as {@code IndexResponse.errorMessage} and is rendered in
+   * the web app. Telling someone whose worker crashed mid-run that nobody ever picked their request
+   * up sends them looking for a dispatch problem that is not there.
+   */
+  private static final String OWNER_GONE_MESSAGE =
+      "Abandoned: the worker indexing this request stopped responding and its lease expired."
+          + " Re-submit to try again.";
 
   private static final RowMapper<IndexingRequest> ROW_MAPPER =
       (rs, ctx) ->
@@ -221,9 +232,14 @@ public class IndexingRequestDao implements IndexingRequestStore {
   public int reclaimStale(Duration staleAfter, Instant now) {
     int reclaimed = retire(null, staleAfter, now);
     if (reclaimed > 0) {
+      // Deliberately vague about which arm fired: one statement covers both, and saying "not
+      // updated since <cutoff>" for a row retired on a five-minute lease — whose updated_at is
+      // minutes old — was simply false.
       LOG.warn(
-          "Retired {} stranded indexing request(s) not updated since {}",
+          "Retired {} indexing request(s) nobody is working on: leases expired as of {}, or never"
+              + " claimed and untouched since {}",
           reclaimed,
+          now,
           now.minus(staleAfter));
     }
     return reclaimed;
@@ -238,7 +254,11 @@ public class IndexingRequestDao implements IndexingRequestStore {
   private static final String RETIRE_SQL =
       """
       UPDATE indexing_requests
-      SET status = 'FAILED', error_message = :message, dedupe_key = NULL, updated_at = :now,
+      SET status = 'FAILED',
+          error_message = CASE WHEN owner_id IS NULL
+                            THEN CAST(:neverClaimed AS VARCHAR)
+                            ELSE CAST(:ownerGone AS VARCHAR) END,
+          dedupe_key = NULL, updated_at = :now,
           owner_id = NULL, lease_expires_at = NULL
       WHERE status IN ('PENDING', 'PROCESSING')
         AND ((owner_id IS NOT NULL
@@ -253,7 +273,8 @@ public class IndexingRequestDao implements IndexingRequestStore {
         h -> {
           var update =
               h.createUpdate(sql)
-                  .bind("message", STRANDED_MESSAGE)
+                  .bind("neverClaimed", NEVER_CLAIMED_MESSAGE)
+                  .bind("ownerGone", OWNER_GONE_MESSAGE)
                   .bindByType("now", toUtcWallClock(now), LocalDateTime.class)
                   .bindByType("cutoff", toUtcWallClock(now.minus(staleAfter)), LocalDateTime.class);
           if (keyOrNull != null) {
@@ -287,19 +308,24 @@ public class IndexingRequestDao implements IndexingRequestStore {
             h.createQuery(
                     """
                     SELECT * FROM indexing_requests
-                    WHERE player = ? AND platform = ? AND start_month = ? AND end_month = ?
-                      AND exclude_bullet = ?
+                    WHERE player = :player AND platform = :platform
+                      AND start_month = :startMonth AND end_month = :endMonth
+                      AND exclude_bullet = :excludeBullet
                       AND status IN ('PENDING', 'PROCESSING')
-                      AND updated_at >= ?
+                      AND ((owner_id IS NOT NULL
+                            AND lease_expires_at IS NOT NULL
+                            AND lease_expires_at > :now)
+                           OR (owner_id IS NULL AND updated_at >= :cutoff))
                     ORDER BY created_at ASC, id ASC
                     LIMIT 1
                     """)
-                .bind(0, player)
-                .bind(1, platform)
-                .bind(2, startMonth)
-                .bind(3, endMonth)
-                .bind(4, excludeBullet)
-                .bindByType(5, toUtcWallClock(now.minus(staleAfter)), LocalDateTime.class)
+                .bind("player", player)
+                .bind("platform", platform)
+                .bind("startMonth", startMonth)
+                .bind("endMonth", endMonth)
+                .bind("excludeBullet", excludeBullet)
+                .bindByType("now", toUtcWallClock(now), LocalDateTime.class)
+                .bindByType("cutoff", toUtcWallClock(now.minus(staleAfter)), LocalDateTime.class)
                 .map(ROW_MAPPER)
                 .findFirst());
   }
