@@ -6,6 +6,7 @@ import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.time.Instant;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
@@ -101,6 +102,127 @@ public class MigrationTest {
       assertThat(rs.getInt("move_number")).isEqualTo(3);
       assertThat(rs.getString("description")).isEqualTo("Check at move 3");
       assertThat(rs.next()).isFalse();
+    }
+  }
+
+  /**
+   * The backfill renders the dedupe key in SQL while {@link IndexingRequestDao} renders it in Java,
+   * and the two have to agree exactly or a migrated row is invisible to dedupe. H2 spells a BOOLEAN
+   * 'TRUE' where Java and Postgres spell it 'true', so the excludeBullet=true case is the one that
+   * catches a missing LOWER(CAST(...)) — the false case passes either way.
+   */
+  @Test
+  public void run_backfillsDedupeKeyMatchingTheJavaRendering() throws Exception {
+    new Migration(dataSource, true).run();
+
+    UUID pending = insertLegacyRequest("hikaru", "2024-01", "2024-03", true, "PENDING");
+    UUID completed = insertLegacyRequest("magnus", "2024-01", "2024-01", false, "COMPLETED");
+    clearDedupeKeys();
+
+    new Migration(dataSource, true).run();
+
+    assertThat(dedupeKeyOf(pending))
+        .isEqualTo(IndexingRequestDao.dedupeKey("hikaru", "CHESS_COM", "2024-01", "2024-03", true));
+    assertThat(dedupeKeyOf(completed)).as("terminal rows hold no slot").isNull();
+
+    // The proof that the rendering agrees: a fresh submit for the same tuple adopts the migrated
+    // row rather than trying to create a second one.
+    IndexingRequestDao dao = new IndexingRequestDao(org.jdbi.v3.core.Jdbi.create(dataSource));
+    IndexingRequestStore.Claim claim =
+        dao.createOrAdopt(
+            "hikaru",
+            "CHESS_COM",
+            "2024-01",
+            "2024-03",
+            true,
+            java.time.Duration.ofHours(1),
+            java.time.Instant.now());
+    assertThat(claim.created()).isFalse();
+    assertThat(claim.request().id()).isEqualTo(pending);
+  }
+
+  /**
+   * The pre-constraint schema allowed several live rows per tuple, so the backfill has to key at
+   * most one of them or ADD CONSTRAINT fails and the whole migration aborts.
+   *
+   * <p>All three rows are given the <em>same</em> created_at deliberately. The backfill picks the
+   * group's MIN(created_at), which on distinct timestamps already selects one row and hides the
+   * problem; a tie is what makes MIN match every row at once, and a tie is exactly what a coarse
+   * clock produces when duplicate submits land in the same instant — which is the situation that
+   * created these duplicates in the first place.
+   */
+  @Test
+  public void run_backfillKeysOnlyOneOfSeveralLiveRequestsCreatedInTheSameInstant()
+      throws Exception {
+    new Migration(dataSource, true).run();
+
+    Instant sameInstant = Instant.parse("2026-06-01T00:00:00Z");
+    UUID first = insertLegacyRequest("dupe", "2024-05", "2024-05", false, "PENDING", sameInstant);
+    UUID second = insertLegacyRequest("dupe", "2024-05", "2024-05", false, "PENDING", sameInstant);
+    UUID third =
+        insertLegacyRequest("dupe", "2024-05", "2024-05", false, "PROCESSING", sameInstant);
+    clearDedupeKeys();
+
+    new Migration(dataSource, true).run();
+
+    long keyed =
+        java.util.stream.Stream.of(first, second, third)
+            .filter(id -> dedupeKeyOf(id) != null)
+            .count();
+    assertThat(keyed).as("exactly one duplicate may hold the slot").isEqualTo(1);
+  }
+
+  private UUID insertLegacyRequest(
+      String player, String startMonth, String endMonth, boolean excludeBullet, String status)
+      throws Exception {
+    return insertLegacyRequest(player, startMonth, endMonth, excludeBullet, status, null);
+  }
+
+  private UUID insertLegacyRequest(
+      String player,
+      String startMonth,
+      String endMonth,
+      boolean excludeBullet,
+      String status,
+      Instant createdAt)
+      throws Exception {
+    UUID id = UUID.randomUUID();
+    try (Connection conn = dataSource.getConnection();
+        var ps =
+            conn.prepareStatement(
+                "INSERT INTO indexing_requests (id, player, platform, start_month, end_month,"
+                    + " exclude_bullet, status, created_at) VALUES (?, ?, 'CHESS_COM', ?, ?, ?, ?,"
+                    + " ?)")) {
+      ps.setObject(1, id);
+      ps.setString(2, player);
+      ps.setString(3, startMonth);
+      ps.setString(4, endMonth);
+      ps.setBoolean(5, excludeBullet);
+      ps.setString(6, status);
+      ps.setTimestamp(7, java.sql.Timestamp.from(createdAt == null ? Instant.now() : createdAt));
+      ps.executeUpdate();
+    }
+    return id;
+  }
+
+  /** Simulates rows written before the column existed, so the backfill has work to do. */
+  private void clearDedupeKeys() throws Exception {
+    try (Connection conn = dataSource.getConnection();
+        Statement stmt = conn.createStatement()) {
+      stmt.execute("UPDATE indexing_requests SET dedupe_key = NULL");
+    }
+  }
+
+  private String dedupeKeyOf(UUID id) {
+    try (Connection conn = dataSource.getConnection();
+        var ps = conn.prepareStatement("SELECT dedupe_key FROM indexing_requests WHERE id = ?")) {
+      ps.setObject(1, id);
+      try (ResultSet rs = ps.executeQuery()) {
+        assertThat(rs.next()).isTrue();
+        return rs.getString("dedupe_key");
+      }
+    } catch (Exception e) {
+      throw new RuntimeException(e);
     }
   }
 }

@@ -2,6 +2,7 @@ package com.muchq.games.one_d4.worker;
 
 import com.muchq.games.one_d4.db.GameFeatureStore;
 import com.muchq.games.one_d4.db.IndexedPeriodStore;
+import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.db.RetentionPolicy;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.scheduling.annotation.Scheduled;
@@ -17,12 +18,19 @@ public class RetentionWorker {
   private static final Logger LOG = LoggerFactory.getLogger(RetentionWorker.class);
   private static final Duration RETENTION_PERIOD = RetentionPolicy.PERIOD;
 
+  private static final Duration REQUEST_RETENTION_PERIOD = RetentionPolicy.REQUEST;
+  private static final Duration STALE_REQUEST_PERIOD = RetentionPolicy.STALE_REQUEST;
+
   private final GameFeatureStore gameFeatureStore;
   private final IndexedPeriodStore indexedPeriodStore;
+  private final IndexingRequestStore indexingRequestStore;
   private final Clock clock;
 
-  public RetentionWorker(GameFeatureStore gameFeatureStore, IndexedPeriodStore indexedPeriodStore) {
-    this(gameFeatureStore, indexedPeriodStore, Clock.systemUTC());
+  public RetentionWorker(
+      GameFeatureStore gameFeatureStore,
+      IndexedPeriodStore indexedPeriodStore,
+      IndexingRequestStore indexingRequestStore) {
+    this(gameFeatureStore, indexedPeriodStore, indexingRequestStore, Clock.systemUTC());
   }
 
   /**
@@ -33,22 +41,54 @@ public class RetentionWorker {
    */
   @Inject
   public RetentionWorker(
-      GameFeatureStore gameFeatureStore, IndexedPeriodStore indexedPeriodStore, Clock clock) {
+      GameFeatureStore gameFeatureStore,
+      IndexedPeriodStore indexedPeriodStore,
+      IndexingRequestStore indexingRequestStore,
+      Clock clock) {
     this.gameFeatureStore = gameFeatureStore;
     this.indexedPeriodStore = indexedPeriodStore;
+    this.indexingRequestStore = indexingRequestStore;
     this.clock = clock;
     LOG.info(
-        "RetentionWorker initialized (retention={} days, interval=1h)", RETENTION_PERIOD.toDays());
+        "RetentionWorker initialized (games/periods={} days, requests={} days, stale requests={},"
+            + " interval=1h)",
+        RETENTION_PERIOD.toDays(),
+        REQUEST_RETENTION_PERIOD.toDays(),
+        STALE_REQUEST_PERIOD);
   }
 
   @Scheduled(fixedDelay = "1h", initialDelay = "1m")
   public void runRetention() {
-    LOG.info("Running game retention policy ({} days)", RETENTION_PERIOD.toDays());
-    Instant threshold = clock.instant().minus(RETENTION_PERIOD);
+    LOG.info(
+        "Running retention policy (games/periods={} days, requests={} days)",
+        RETENTION_PERIOD.toDays(),
+        REQUEST_RETENTION_PERIOD.toDays());
+    Instant now = clock.instant();
+    Instant threshold = now.minus(RETENTION_PERIOD);
     try {
+      // Retire abandoned requests before deleting anything. A stranded PENDING row holds its
+      // dedupe slot until something retires it, and the submit path only reclaims the one tuple
+      // being submitted — a strand nobody re-submits would otherwise sit there until it aged out
+      // of the request window entirely.
+      int reclaimed = indexingRequestStore.reclaimStale(STALE_REQUEST_PERIOD, now);
+
+      // Games before requests, because game_features.request_id is a foreign key onto
+      // indexing_requests(id). The delete itself is guarded — deleteOlderThan skips any request
+      // still referenced — so reversing these would not corrupt anything or raise a violation; it
+      // would just leave a qualifying request behind for a later pass, once its games had gone.
+      // Ordering is what lets a request and the games it owns clear in the same pass rather than
+      // over two.
       int games = gameFeatureStore.deleteOlderThan(threshold);
       int periods = indexedPeriodStore.deleteOlderThan(threshold);
-      LOG.info("Retention cleanup complete: deleted {} games, {} periods", games, periods);
+      int requests = indexingRequestStore.deleteOlderThan(now.minus(REQUEST_RETENTION_PERIOD));
+
+      LOG.info(
+          "Retention cleanup complete: deleted {} games, {} periods, {} requests; retired {}"
+              + " stranded requests",
+          games,
+          periods,
+          requests,
+          reclaimed);
     } catch (Exception e) {
       LOG.error("Failed to run retention policy", e);
     }

@@ -97,11 +97,14 @@ Poll the status of an indexing request.
 
 ### The `data` object — is the indexed data still there?
 
-Request rows are kept forever; the games they produced are not. The retention worker deletes
-games and indexed periods once they are older than **7 days**, but never touches
-`indexing_requests` — so without `data`, a request from two weeks ago is indistinguishable from
-one indexed an hour ago. Both say `"status": "COMPLETED", "gamesIndexed": 147`; only one of them
-still has games to query.
+A request row outlives the games it produced. The retention worker deletes games and indexed
+periods once they are older than **7 days**, and the request row itself after **30 days** — so
+without `data`, a request from two weeks ago is indistinguishable from one indexed an hour ago.
+Both say `"status": "COMPLETED", "gamesIndexed": 147`; only one of them still has games to query.
+
+The 23-day gap between the two windows is deliberate. It is the period in which a request can
+still answer "what happened to my index?" with `EXPIRED` — pruned, re-run it — instead of the
+request having vanished too. After 30 days the row is deleted and the id stops resolving.
 
 The key is **absent** until the request reaches COMPLETED — never `"data": null`.
 

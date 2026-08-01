@@ -158,7 +158,8 @@ public class IndexE2ETest {
     // deleteOlderThan with a hand-made threshold would only test the DELETE; this exercises
     // RetentionWorker's own `clock.instant().minus(RETENTION_PERIOD)` arithmetic, so changing
     // RetentionPolicy.PERIOD now breaks a test instead of silently changing behaviour.
-    new RetentionWorker(gameFeatureStore, periodStore, clockOffsetBy(RETENTION_PLUS_MARGIN))
+    new RetentionWorker(
+            gameFeatureStore, periodStore, requestStore, clockOffsetBy(RETENTION_PLUS_MARGIN))
         .runRetention();
 
     IndexResponse swept = controller.getIndex(created.id());
@@ -189,7 +190,8 @@ public class IndexE2ETest {
         controller.createIndex(new IndexRequest(PLAYER, PLATFORM, "2024-03", "2024-03", null));
     processQueueUntilIdle();
 
-    new RetentionWorker(gameFeatureStore, periodStore, clockOffsetBy(RETENTION_MINUS_MARGIN))
+    new RetentionWorker(
+            gameFeatureStore, periodStore, requestStore, clockOffsetBy(RETENTION_MINUS_MARGIN))
         .runRetention();
 
     assertThat(controller.getIndex(created.id()).data().status()).isEqualTo("AVAILABLE");

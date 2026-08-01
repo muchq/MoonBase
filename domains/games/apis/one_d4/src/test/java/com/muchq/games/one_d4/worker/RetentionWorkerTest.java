@@ -7,6 +7,7 @@ import com.muchq.games.chessql.parser.Parser;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.db.GameFeatureDao;
 import com.muchq.games.one_d4.db.IndexedPeriodDao;
+import com.muchq.games.one_d4.db.IndexingRequestDao;
 import com.muchq.games.one_d4.db.TestDb;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.Test;
 public class RetentionWorkerTest {
   private GameFeatureDao dao;
   private IndexedPeriodDao periodDao;
+  private IndexingRequestDao requestDao;
   private RetentionWorker worker;
   private UUID requestId;
   private DataSource dataSource;
@@ -30,7 +32,8 @@ public class RetentionWorkerTest {
 
     dao = new GameFeatureDao(testDb.jdbi(), true);
     periodDao = new IndexedPeriodDao(testDb.jdbi(), true);
-    worker = new RetentionWorker(dao, periodDao);
+    requestDao = new IndexingRequestDao(testDb.jdbi());
+    worker = new RetentionWorker(dao, periodDao, requestDao);
     requestId = UUID.randomUUID();
 
     // Create a dummy indexing request to satisfy foreign key constraint
@@ -83,6 +86,150 @@ public class RetentionWorkerTest {
     assertThat(periodDao.findCompletePeriod("p", "CHESS_COM", "2024-02", false)).isEmpty();
   }
 
+  /**
+   * The acceptance case for #1266's foreign key constraint: a request old enough to sweep that
+   * still owns games at the moment the pass starts. Games are deleted first, which is what lets the
+   * request delete succeed — reverse the two and the FK refuses and the whole pass aborts.
+   */
+  @Test
+  public void runRetention_deletesAnOldRequestAndItsGamesInForeignKeyOrder() {
+    UUID oldRequest = insertRequest("COMPLETED", Instant.now().minus(40, ChronoUnit.DAYS));
+    dao.insertBatch(List.of(createGame("https://chess.com/owned", oldRequest)));
+    updateIndexedAt("https://chess.com/owned", Instant.now().minus(8, ChronoUnit.DAYS));
+
+    assertThat(countGames()).isEqualTo(1);
+    assertThat(countRequests()).isEqualTo(2);
+
+    worker.runRetention();
+
+    assertThat(countGames()).isEqualTo(0);
+    assertThat(requestDao.findById(oldRequest)).isEmpty();
+    // The fixture's own request is recent, so it stays.
+    assertThat(requestDao.findById(requestId)).isPresent();
+  }
+
+  /**
+   * The mirror case: the request has aged out but its games have not. Deleting it would violate the
+   * foreign key, so it has to survive this pass and go on the next one after its games do.
+   */
+  @Test
+  public void runRetention_keepsAnOldRequestWhoseGamesAreStillFresh() {
+    UUID oldRequest = insertRequest("COMPLETED", Instant.now().minus(40, ChronoUnit.DAYS));
+    dao.insertBatch(List.of(createGame("https://chess.com/fresh-game", oldRequest)));
+
+    worker.runRetention();
+
+    assertThat(countGames()).isEqualTo(1);
+    assertThat(requestDao.findById(oldRequest)).isPresent();
+  }
+
+  /**
+   * A request between the two windows — past the 7-day game clock, short of the 30-day request
+   * clock — must survive. This is the gap in which the row is the only thing left that can tell a
+   * user their data was pruned rather than never indexed, so sweeping requests on the games'
+   * threshold would delete exactly the explanation the API is built to give.
+   */
+  @Test
+  public void runRetention_keepsARequestThatIsPastTheGameWindowButNotTheRequestWindow() {
+    UUID midLife = insertRequest("COMPLETED", Instant.now().minus(10, ChronoUnit.DAYS));
+
+    worker.runRetention();
+
+    assertThat(requestDao.findById(midLife)).isPresent();
+  }
+
+  @Test
+  public void runRetention_retiresStrandedRequestsAndFreesTheirSlot() {
+    UUID stranded = insertRequest("PENDING", Instant.now());
+    // Exact rendering is IndexingRequestDao's business and is pinned in MigrationTest; here it
+    // only has to be non-null so that clearing it is observable.
+    setDedupeKey(stranded, "CHESS_COM|2024-01|2024-01|false|p2");
+    updateRequestUpdatedAt(stranded, Instant.now().minus(6, ChronoUnit.HOURS));
+
+    worker.runRetention();
+
+    var retired = requestDao.findById(stranded).orElseThrow();
+    assertThat(retired.status()).isEqualTo("FAILED");
+    assertThat(retired.errorMessage()).contains("Abandoned");
+    assertThat(dedupeKeyOf(stranded)).isNull();
+  }
+
+  @Test
+  public void runRetention_leavesAFreshPendingRequestRunning() {
+    UUID live = insertRequest("PENDING", Instant.now());
+
+    worker.runRetention();
+
+    assertThat(requestDao.findById(live).orElseThrow().status()).isEqualTo("PENDING");
+  }
+
+  private UUID insertRequest(String status, Instant createdAt) {
+    UUID id = UUID.randomUUID();
+    try (var conn = dataSource.getConnection();
+        var ps =
+            conn.prepareStatement(
+                "INSERT INTO indexing_requests (id, player, platform, start_month, end_month,"
+                    + " status, created_at, updated_at) VALUES (?, 'p2', 'CHESS_COM', '2024-01',"
+                    + " '2024-01', ?, ?, ?)")) {
+      ps.setObject(1, id);
+      ps.setString(2, status);
+      ps.setTimestamp(3, java.sql.Timestamp.from(createdAt));
+      ps.setTimestamp(4, java.sql.Timestamp.from(createdAt));
+      ps.executeUpdate();
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+    return id;
+  }
+
+  private void setDedupeKey(UUID id, String key) {
+    try (var conn = dataSource.getConnection();
+        var ps =
+            conn.prepareStatement("UPDATE indexing_requests SET dedupe_key = ? WHERE id = ?")) {
+      ps.setString(1, key);
+      ps.setObject(2, id);
+      ps.executeUpdate();
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  private String dedupeKeyOf(UUID id) {
+    try (var conn = dataSource.getConnection();
+        var ps = conn.prepareStatement("SELECT dedupe_key FROM indexing_requests WHERE id = ?")) {
+      ps.setObject(1, id);
+      try (var rs = ps.executeQuery()) {
+        rs.next();
+        return rs.getString("dedupe_key");
+      }
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  private void updateRequestUpdatedAt(UUID id, Instant updatedAt) {
+    try (var conn = dataSource.getConnection();
+        var ps =
+            conn.prepareStatement("UPDATE indexing_requests SET updated_at = ? WHERE id = ?")) {
+      ps.setTimestamp(1, java.sql.Timestamp.from(updatedAt));
+      ps.setObject(2, id);
+      ps.executeUpdate();
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  private int countRequests() {
+    try (var conn = dataSource.getConnection();
+        var ps = conn.prepareStatement("SELECT COUNT(*) FROM indexing_requests");
+        var rs = ps.executeQuery()) {
+      rs.next();
+      return rs.getInt(1);
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+  }
+
   private void updateIndexedAt(String url, Instant indexedAt) {
     try (var conn = dataSource.getConnection();
         var ps =
@@ -131,9 +278,13 @@ public class RetentionWorkerTest {
   }
 
   private GameFeature createGame(String url) {
+    return createGame(url, requestId);
+  }
+
+  private GameFeature createGame(String url, UUID owningRequest) {
     return new GameFeature(
         null,
-        requestId,
+        owningRequest,
         url,
         "CHESS_COM",
         "w",

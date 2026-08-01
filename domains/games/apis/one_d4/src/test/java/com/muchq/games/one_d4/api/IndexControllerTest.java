@@ -144,7 +144,25 @@ public class IndexControllerTest {
   }
 
   @Test
-  public void createIndex_skipCachePropagatesAndBypassesDedupe() {
+  public void createIndex_skipCachePropagatesTheFlag() {
+    IndexResponse response =
+        controller.createIndex(
+            new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-01", null, true));
+
+    assertThat(response.id()).isNotNull();
+    assertThat(requestStore.createCallCount()).isEqualTo(1);
+    assertThat(queue.enqueued()).hasSize(1);
+    assertThat(queue.enqueued().get(0).skipCache()).isTrue();
+  }
+
+  /**
+   * skip_cache forces a refetch, but it cannot start a second run of a range that is already in
+   * flight: concurrent indexers over the same games interleave the motif_occurrences delete and
+   * insert and leave every motif for those games counted twice. The caller gets the in-flight
+   * request back and can see from its status that it was coalesced.
+   */
+  @Test
+  public void createIndex_skipCacheCoalescesOntoAnInFlightRequest() {
     UUID existingId = UUID.randomUUID();
     requestStore.setExistingRequest(
         new IndexingRequestStore.IndexingRequest(
@@ -164,11 +182,9 @@ public class IndexControllerTest {
         controller.createIndex(
             new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-01", null, true));
 
-    // skip_cache means "force a refetch" — reusing the existing request would defeat that
-    assertThat(response.id()).isNotEqualTo(existingId);
-    assertThat(requestStore.createCallCount()).isEqualTo(1);
-    assertThat(queue.enqueued()).hasSize(1);
-    assertThat(queue.enqueued().get(0).skipCache()).isTrue();
+    assertThat(response.id()).isEqualTo(existingId);
+    assertThat(requestStore.createCallCount()).isZero();
+    assertThat(queue.enqueued()).isEmpty();
   }
 
   @Test
@@ -371,15 +387,57 @@ public class IndexControllerTest {
     }
 
     @Override
-    public UUID create(
-        String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
+    public Claim createOrAdopt(
+        String player,
+        String platform,
+        String startMonth,
+        String endMonth,
+        boolean excludeBullet,
+        Duration staleAfter,
+        Instant now) {
+      // Mirrors the schema's exclusivity: if a live request is already registered for this tuple,
+      // the caller adopts it rather than creating a rival.
+      Optional<IndexingRequestStore.IndexingRequest> holder =
+          existingRequest.filter(
+              r ->
+                  r.player().equals(player)
+                      && r.platform().equals(platform)
+                      && r.startMonth().equals(startMonth)
+                      && r.endMonth().equals(endMonth)
+                      && r.excludeBullet() == excludeBullet);
+      if (holder.isPresent()) {
+        return new Claim(holder.get(), false);
+      }
       createCallCount++;
-      return UUID.randomUUID();
+      return new Claim(
+          new IndexingRequestStore.IndexingRequest(
+              UUID.randomUUID(),
+              player,
+              platform,
+              startMonth,
+              endMonth,
+              "PENDING",
+              now,
+              now,
+              null,
+              0,
+              excludeBullet),
+          true);
     }
 
     @Override
     public Optional<IndexingRequestStore.IndexingRequest> findById(UUID id) {
       return findByIdResponse.filter(r -> r.id().equals(id));
+    }
+
+    @Override
+    public int reclaimStale(Duration staleAfter, Instant now) {
+      return 0;
+    }
+
+    @Override
+    public int deleteOlderThan(Instant threshold) {
+      return 0;
     }
 
     @Override
@@ -392,7 +450,13 @@ public class IndexControllerTest {
 
     @Override
     public Optional<IndexingRequestStore.IndexingRequest> findExistingRequest(
-        String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
+        String player,
+        String platform,
+        String startMonth,
+        String endMonth,
+        boolean excludeBullet,
+        Duration staleAfter,
+        Instant now) {
       return existingRequest.filter(
           r ->
               r.player().equals(player)

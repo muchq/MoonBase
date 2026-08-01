@@ -689,14 +689,43 @@ public class IndexWorkerTest {
     }
 
     @Override
-    public UUID create(
-        String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
-      return UUID.randomUUID();
+    public Claim createOrAdopt(
+        String player,
+        String platform,
+        String startMonth,
+        String endMonth,
+        boolean excludeBullet,
+        java.time.Duration staleAfter,
+        Instant now) {
+      return new Claim(
+          new IndexingRequestStore.IndexingRequest(
+              UUID.randomUUID(),
+              player,
+              platform,
+              startMonth,
+              endMonth,
+              "PENDING",
+              now,
+              now,
+              null,
+              0,
+              excludeBullet),
+          true);
     }
 
     @Override
     public Optional<IndexingRequestStore.IndexingRequest> findById(UUID id) {
       return Optional.empty();
+    }
+
+    @Override
+    public int reclaimStale(java.time.Duration staleAfter, Instant now) {
+      return 0;
+    }
+
+    @Override
+    public int deleteOlderThan(Instant threshold) {
+      return 0;
     }
 
     @Override
@@ -713,7 +742,13 @@ public class IndexWorkerTest {
 
     @Override
     public Optional<IndexingRequestStore.IndexingRequest> findExistingRequest(
-        String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
+        String player,
+        String platform,
+        String startMonth,
+        String endMonth,
+        boolean excludeBullet,
+        java.time.Duration staleAfter,
+        Instant now) {
       return Optional.empty();
     }
   }
