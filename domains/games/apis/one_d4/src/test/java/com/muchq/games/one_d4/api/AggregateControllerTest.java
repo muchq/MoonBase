@@ -216,6 +216,18 @@ public class AggregateControllerTest {
   }
 
   private static final class RecordingStore implements GameFeatureStore {
+
+    /** Not part of the AggregateController surface: only the worker flushes. */
+    @Override
+    public boolean flushOwned(
+        java.util.UUID requestId,
+        String ownerId,
+        Instant now,
+        List<GameFeature> features,
+        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
+      throw new UnsupportedOperationException("AggregateController tests never flush");
+    }
+
     List<AggregateRow> rows = List.of();
     AggregateTotals totals = new AggregateTotals(0, 0);
     Object lastCompiled;

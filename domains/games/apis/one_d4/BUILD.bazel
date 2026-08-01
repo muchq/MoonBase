@@ -469,6 +469,7 @@ java_test_suite(
     name = "db_tests",
     size = "small",
     srcs = [
+        "src/test/java/com/muchq/games/one_d4/db/ConcurrentFlushTest.java",
         "src/test/java/com/muchq/games/one_d4/db/GameFeatureDaoTest.java",
         "src/test/java/com/muchq/games/one_d4/db/IndexedPeriodDaoTest.java",
         "src/test/java/com/muchq/games/one_d4/db/IndexingRequestDaoTest.java",

@@ -104,7 +104,7 @@ flowchart TB
 
 **Query flow:** Client posts a ChessQL string to `POST /v1/query` → Parser and SqlCompiler produce SQL → GameFeatureStore runs the query and loads motif_occurrences for the result set → response returns GameFeatureRow list with per-game occurrences.
 
-**Retention:** RetentionWorker runs hourly. It deletes game_features, motif_occurrences (via FK cascade), and indexed_periods older than 7 days, and indexing_requests older than 30 days — games first, so a request and its games clear in one pass. It also retires requests stranded in PENDING/PROCESSING for over an hour, freeing the dedupe slot each one holds.
+**Retention:** RetentionWorker runs hourly. It deletes game_features, motif_occurrences (via FK cascade), and indexed_periods older than 7 days, and indexing_requests older than 30 days — games first, so a request and its games clear in one pass. It also retires live requests nobody is working on — a claimed one five minutes after its owner stops renewing its lease, an unclaimed one an hour after it was created — freeing the dedupe slot each one holds.
 
 ## Running Locally (in-memory)
 
@@ -249,10 +249,25 @@ between the two windows the surviving row is what lets `GET /v1/index/{id}` repo
 ("pruned — re-run it") rather than 404. The sweep deletes games before requests so both clear in
 one pass, and skips any request still referenced by a game.
 
-Separately, a PENDING or PROCESSING request whose owner died — a restart with work still queued,
-or an inline dispatch that threw — is retired to FAILED after **1 hour** without progress. Until
-it is, it holds the dedupe slot for its (player, platform, month range), and no new request for
-that range can be created.
+Separately, a live request that nobody is working on is retired to FAILED, which frees the dedupe
+slot it holds for its (player, platform, month range). Two different questions, on two clocks:
+
+| Situation | Retired after | Why that clock |
+|---|---|---|
+| Claimed, but the owner stopped renewing | **5 minutes** (`LEASE`) | The owner reports in every 75 seconds. Three missed renewals and it is presumed gone. |
+| Never claimed by anyone | **1 hour** (`STALE_REQUEST`) | There is no owner whose silence could be measured, so the only evidence is the age of the row. |
+
+A worker takes an explicit lease on a request before it writes anything: `owner_id` names the
+process, and every subsequent write — progress, the terminal status, and the batched game and
+occurrence writes — is conditioned on the row still naming it. A worker that has lost its lease
+stops rather than reasserting itself, because something has already handed its range to a
+replacement and two writers over the same games would corrupt the occurrence counts.
+
+Renewal says "the owner is still here", not "progress was made", so a request can run for hours
+against a slow archive without looking abandoned. The hour above still misses one case: a message
+waiting in the in-memory queue has no worker to renew for it, so a backlog deeper than an hour
+retires work that is owned and about to run. Closing that means dispatch claiming from the table
+rather than from a process-local queue.
 
 ### Available Fields
 

@@ -436,7 +436,28 @@ public class IndexControllerTest {
     }
 
     @Override
-    public boolean heartbeat(UUID id, Instant now) {
+    public boolean claim(UUID id, String ownerId, Duration lease, Instant now) {
+      return true;
+    }
+
+    @Override
+    public boolean renewLease(UUID id, String ownerId, Duration lease, Instant now) {
+      return true;
+    }
+
+    @Override
+    public boolean holdsLease(UUID id, String ownerId, Instant now) {
+      return true;
+    }
+
+    @Override
+    public boolean updateStatusOwned(
+        UUID id,
+        String ownerId,
+        String status,
+        String errorMessage,
+        int gamesIndexed,
+        Instant now) {
       return true;
     }
 

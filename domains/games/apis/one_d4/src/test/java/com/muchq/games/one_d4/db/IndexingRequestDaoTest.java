@@ -318,10 +318,14 @@ public class IndexingRequestDaoTest {
   }
 
   /**
-   * The dead worker is not fenced, so it keeps writing. Its next per-month PROCESSING heartbeat
-   * must not resurrect the row it no longer owns: that would produce a live request holding no
-   * dedupe slot, and the replacement already holds the key, so the constraint could not see the
-   * second live row.
+   * The unfenced write path, which is still reachable: {@code IndexRequestService}'s
+   * inline-dispatch failure handler has no lease to present, and neither do the tests below. A
+   * status write with no token behind it must not resurrect a row that was already retired — that
+   * would produce a live request holding no dedupe slot, and since the replacement already holds
+   * the key the constraint could not see the second live row.
+   *
+   * <p>A worker cannot reach this state at all now: its writes go through {@code updateStatusOwned}
+   * and are refused outright. This guard covers everything that is not a worker.
    */
   @Test
   public void updateStatus_cannotResurrectARetiredRequest() {
@@ -335,7 +339,7 @@ public class IndexingRequestDaoTest {
         dao.createOrAdopt("zombie", "CHESS_COM", "2025-09", "2025-09", false, STALE_AFTER, now);
     assertThat(replacement.created()).isTrue();
 
-    // The dead worker's next heartbeat.
+    // An unfenced status write landing after the fact.
     dao.updateStatus(strandedId, "PROCESSING", null, 9);
 
     assertThat(dao.findById(strandedId).orElseThrow().status())
@@ -481,6 +485,262 @@ public class IndexingRequestDaoTest {
   }
 
   // --- helpers ---------------------------------------------------------------------------------
+
+  // --- ownership leases (#1278) -----------------------------------------------------------------
+
+  private static final Duration LEASE = Duration.ofMinutes(5);
+  private static final String WORKER_A = "host-a/1/aaaa";
+  private static final String WORKER_B = "host-b/2/bbbb";
+
+  @Test
+  public void claim_takesAnUnclaimedLiveRequest() {
+    UUID id = create("lease1", "2025-01", "2025-01", false).id();
+
+    assertThat(dao.claim(id, WORKER_A, LEASE, now)).isTrue();
+    assertThat(dao.holdsLease(id, WORKER_A, now)).isTrue();
+    assertThat(dao.holdsLease(id, WORKER_B, now)).isFalse();
+  }
+
+  @Test
+  public void claim_isRefusedWhileAnotherOwnersLeaseIsLive() {
+    UUID id = create("lease2", "2025-02", "2025-02", false).id();
+    assertThat(dao.claim(id, WORKER_A, LEASE, now)).isTrue();
+
+    assertThat(dao.claim(id, WORKER_B, LEASE, now.plus(Duration.ofMinutes(4))))
+        .as("a live lease is not available to take")
+        .isFalse();
+    assertThat(dao.holdsLease(id, WORKER_A, now.plus(Duration.ofMinutes(4)))).isTrue();
+  }
+
+  @Test
+  public void claim_takesOverOnceTheOtherOwnersLeaseHasExpired() {
+    UUID id = create("lease3", "2025-03", "2025-03", false).id();
+    dao.claim(id, WORKER_A, LEASE, now);
+
+    Instant afterExpiry = now.plus(LEASE).plusSeconds(1);
+    assertThat(dao.claim(id, WORKER_B, LEASE, afterExpiry)).isTrue();
+    assertThat(dao.holdsLease(id, WORKER_A, afterExpiry))
+        .as("the old owner is out the moment the new one is in")
+        .isFalse();
+  }
+
+  /**
+   * The expiry boundary, pinned because two predicates have to agree on it and nothing else makes
+   * them. At the exact instant a lease expires it is no longer held ({@code lease_expires_at > now}
+   * is false), so it must also be available to take. A strict {@code <} in the claim predicate
+   * would leave one instant in which nobody holds the lease and nobody may take it.
+   */
+  @Test
+  public void claim_takesOverAtTheExactInstantTheLeaseExpires() {
+    UUID id = create("boundary", "2025-13", "2025-13", false).id();
+    dao.claim(id, WORKER_A, LEASE, now);
+
+    Instant atExpiry = now.plus(LEASE);
+    assertThat(dao.holdsLease(id, WORKER_A, atExpiry))
+        .as("the lease is over at its expiry, not one instant later")
+        .isFalse();
+    assertThat(dao.claim(id, WORKER_B, LEASE, atExpiry))
+        .as("and what nobody holds must be available to take")
+        .isTrue();
+  }
+
+  /** The same boundary on the sweep's side, so the two predicates cannot drift apart. */
+  @Test
+  public void reclaimStale_retiresALeaseAtTheExactInstantItExpires() {
+    IndexingRequestStore.Claim claim =
+        dao.createOrAdopt("boundary2", "CHESS_COM", "2025-14", "2025-14", false, STALE_AFTER, now);
+    UUID id = claim.request().id();
+    dao.claim(id, WORKER_A, LEASE, now);
+
+    assertThat(dao.reclaimStale(STALE_AFTER, now.plus(LEASE))).isEqualTo(1);
+    assertThat(dao.findById(id).orElseThrow().status()).isEqualTo("FAILED");
+  }
+
+  /**
+   * Re-claiming as the same owner extends rather than fails. A worker restarted mid-request with a
+   * stable id, or one whose claim call is retried after a timeout, must not lock itself out.
+   */
+  @Test
+  public void claim_isIdempotentForTheSameOwner() {
+    UUID id = create("lease4", "2025-04", "2025-04", false).id();
+    dao.claim(id, WORKER_A, LEASE, now);
+
+    Instant later = now.plus(Duration.ofMinutes(4));
+    assertThat(dao.claim(id, WORKER_A, LEASE, later)).isTrue();
+    assertThat(dao.holdsLease(id, WORKER_A, later.plus(Duration.ofMinutes(4))))
+        .as("the second claim extended the lease rather than leaving the first one's expiry")
+        .isTrue();
+  }
+
+  @Test
+  public void claim_isRefusedOnceTheRequestIsTerminal() {
+    UUID id = create("lease5", "2025-05", "2025-05", false).id();
+    dao.updateStatus(id, "COMPLETED", null, 3);
+
+    assertThat(dao.claim(id, WORKER_A, LEASE, now))
+        .as("finished work is not there to be picked up")
+        .isFalse();
+  }
+
+  @Test
+  public void renewLease_failsOnceAnotherOwnerHasTakenTheRequest() {
+    UUID id = create("lease6", "2025-06", "2025-06", false).id();
+    dao.claim(id, WORKER_A, LEASE, now);
+
+    Instant afterExpiry = now.plus(LEASE).plusSeconds(1);
+    dao.claim(id, WORKER_B, LEASE, afterExpiry);
+
+    assertThat(dao.renewLease(id, WORKER_A, LEASE, afterExpiry))
+        .as("a worker that lost its lease must stop, not reassert itself over the replacement")
+        .isFalse();
+    assertThat(dao.holdsLease(id, WORKER_B, afterExpiry)).isTrue();
+  }
+
+  /**
+   * Renewal is deliberately lenient about expiry: while {@code owner_id} still names this worker,
+   * nobody else has taken the request, so a lapse caused by a paused GC or a database blip is
+   * recoverable. Only a change of owner ends a claim.
+   */
+  @Test
+  public void renewLease_recoversFromALapseNobodyElseTook() {
+    UUID id = create("lease7", "2025-07", "2025-07", false).id();
+    dao.claim(id, WORKER_A, LEASE, now);
+
+    Instant afterExpiry = now.plus(LEASE).plusSeconds(1);
+    assertThat(dao.holdsLease(id, WORKER_A, afterExpiry)).isFalse();
+    assertThat(dao.renewLease(id, WORKER_A, LEASE, afterExpiry)).isTrue();
+    assertThat(dao.holdsLease(id, WORKER_A, afterExpiry)).isTrue();
+  }
+
+  /**
+   * The lease arm of reclamation: a crashed owner is reclaimable in minutes, without waiting out
+   * the hour that governs work nobody ever picked up. That is the whole point of asking "is the
+   * owner there?" instead of "has anything happened lately?".
+   */
+  @Test
+  public void reclaimStale_takesAnExpiredLeaseWithoutWaitingForTheStalenessCutoff() {
+    IndexingRequestStore.Claim claim =
+        dao.createOrAdopt("crashed", "CHESS_COM", "2025-11", "2025-11", false, STALE_AFTER, now);
+    UUID id = claim.request().id();
+    dao.claim(id, WORKER_A, LEASE, now);
+
+    Instant sixMinutesLater = now.plus(Duration.ofMinutes(6));
+    assertThat(dao.reclaimStale(STALE_AFTER, sixMinutesLater))
+        .as("six minutes is nowhere near the one-hour cutoff, but the lease is gone")
+        .isEqualTo(1);
+    assertThat(dao.findById(id).orElseThrow().status()).isEqualTo("FAILED");
+
+    IndexingRequestStore.Claim replacement =
+        dao.createOrAdopt(
+            "crashed", "CHESS_COM", "2025-11", "2025-11", false, STALE_AFTER, sixMinutesLater);
+    assertThat(replacement.created()).as("and the range is free again").isTrue();
+  }
+
+  /**
+   * The other arm, and the reason they are separate. A request whose owner is renewing must not be
+   * retired for being quiet, however long it has been quiet: renewal is a claim about the owner,
+   * not about progress, and an indexing run can legitimately produce nothing for hours.
+   *
+   * <p>Collapsing the two — judging a claimed row by {@code updated_at} — is what made a slow
+   * request indistinguishable from a dead one.
+   */
+  @Test
+  public void reclaimStale_leavesAClaimedRequestAloneEvenWhenItHasBeenQuietForHours() {
+    IndexingRequestStore.Claim claim =
+        dao.createOrAdopt("patient", "CHESS_COM", "2025-12", "2025-12", false, STALE_AFTER, now);
+    UUID id = claim.request().id();
+    dao.claim(id, WORKER_A, LEASE, now);
+    backdateUpdatedAt(id, now.minus(Duration.ofHours(3)));
+
+    assertThat(dao.reclaimStale(STALE_AFTER, now))
+        .as("the hour is for work nobody owns; this one has an owner and a live lease")
+        .isZero();
+    assertThat(dao.findById(id).orElseThrow().status()).isIn("PENDING", "PROCESSING");
+  }
+
+  @Test
+  public void updateStatusOwned_isRefusedForAWorkerThatLostTheLease() {
+    UUID id = create("fenced1", "2026-01", "2026-01", false).id();
+    dao.claim(id, WORKER_A, LEASE, now);
+    Instant afterExpiry = now.plus(LEASE).plusSeconds(1);
+    dao.claim(id, WORKER_B, LEASE, afterExpiry);
+
+    assertThat(dao.updateStatusOwned(id, WORKER_A, "COMPLETED", null, 99, afterExpiry)).isFalse();
+
+    IndexingRequestStore.IndexingRequest row = dao.findById(id).orElseThrow();
+    assertThat(row.status()).as("the replacement's row is untouched").isEqualTo("PENDING");
+    assertThat(row.gamesIndexed()).isZero();
+    assertThat(dao.holdsLease(id, WORKER_B, afterExpiry))
+        .as("and the replacement still holds the lease the refused write would have cleared")
+        .isTrue();
+  }
+
+  /** An expired lease is refused too, even with {@code owner_id} unchanged. */
+  @Test
+  public void updateStatusOwned_isRefusedOnceTheLeaseHasExpired() {
+    UUID id = create("fenced2", "2026-02", "2026-02", false).id();
+    dao.claim(id, WORKER_A, LEASE, now);
+
+    assertThat(
+            dao.updateStatusOwned(
+                id, WORKER_A, "PROCESSING", null, 5, now.plus(LEASE).plusSeconds(1)))
+        .isFalse();
+  }
+
+  @Test
+  public void updateStatusOwned_terminalWriteReleasesTheLeaseAndTheDedupeSlot() {
+    IndexingRequestStore.Claim claim =
+        dao.createOrAdopt("released", "CHESS_COM", "2026-03", "2026-03", false, STALE_AFTER, now);
+    UUID id = claim.request().id();
+    dao.claim(id, WORKER_A, LEASE, now);
+
+    assertThat(dao.updateStatusOwned(id, WORKER_A, "COMPLETED", null, 12, now)).isTrue();
+
+    IndexingRequestStore.IndexingRequest row = dao.findById(id).orElseThrow();
+    assertThat(row.status()).isEqualTo("COMPLETED");
+    assertThat(row.gamesIndexed()).isEqualTo(12);
+    // Read straight off the row. holdsLease would answer false for a COMPLETED request whatever
+    // the columns say, so it cannot tell a released lease from a stale one left behind.
+    assertThat(columnOf(id, "owner_id")).as("the lease is released, not just unusable").isNull();
+    assertThat(columnOf(id, "lease_expires_at")).isNull();
+    assertThat(dao.holdsLease(id, WORKER_A, now)).isFalse();
+    assertThat(
+            dao.createOrAdopt(
+                    "released", "CHESS_COM", "2026-03", "2026-03", false, STALE_AFTER, now)
+                .created())
+        .as("the range is requestable again the moment the work stops being in flight")
+        .isTrue();
+  }
+
+  @Test
+  public void updateStatusOwned_recordsProgressForTheHolder() {
+    UUID id = create("holder", "2026-04", "2026-04", false).id();
+    dao.claim(id, WORKER_A, LEASE, now);
+
+    assertThat(dao.updateStatusOwned(id, WORKER_A, "PROCESSING", null, 7, now)).isTrue();
+
+    IndexingRequestStore.IndexingRequest row = dao.findById(id).orElseThrow();
+    assertThat(row.status()).isEqualTo("PROCESSING");
+    assertThat(row.gamesIndexed()).isEqualTo(7);
+    assertThat(dao.holdsLease(id, WORKER_A, now))
+        .as("a progress write must not release the lease it was made under")
+        .isTrue();
+  }
+
+  /** Reads a column the {@code IndexingRequest} record does not carry. */
+  private Object columnOf(UUID id, String column) {
+    try (var conn = dataSource.getConnection();
+        var ps =
+            conn.prepareStatement("SELECT " + column + " FROM indexing_requests WHERE id = ?")) {
+      ps.setObject(1, id);
+      try (var rs = ps.executeQuery()) {
+        rs.next();
+        return rs.getObject(1);
+      }
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+  }
 
   private void backdateUpdatedAt(UUID id, Instant updatedAt) {
     execute("UPDATE indexing_requests SET updated_at = ? WHERE id = ?", updatedAt, id);

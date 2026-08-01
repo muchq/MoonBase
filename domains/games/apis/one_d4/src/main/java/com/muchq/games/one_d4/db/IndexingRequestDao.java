@@ -238,9 +238,13 @@ public class IndexingRequestDao implements IndexingRequestStore {
   private static final String RETIRE_SQL =
       """
       UPDATE indexing_requests
-      SET status = 'FAILED', error_message = :message, dedupe_key = NULL, updated_at = :now
+      SET status = 'FAILED', error_message = :message, dedupe_key = NULL, updated_at = :now,
+          owner_id = NULL, lease_expires_at = NULL
       WHERE status IN ('PENDING', 'PROCESSING')
-        AND updated_at < :cutoff
+        AND ((owner_id IS NOT NULL
+              AND lease_expires_at IS NOT NULL
+              AND lease_expires_at <= :now)
+             OR (owner_id IS NULL AND updated_at < :cutoff))
       """;
 
   private int retire(String keyOrNull, Duration staleAfter, Instant now) {
@@ -316,23 +320,17 @@ public class IndexingRequestDao implements IndexingRequestStore {
     // moment the work stops being in flight. Leaving the key behind would make one COMPLETED
     // request block that range permanently.
     //
-    // Terminal writes are deliberately NOT fenced, unlike the non-terminal ones below, and the
-    // limits of that are worth stating. A worker retired while it was running can still write
-    // COMPLETED over its own FAILED row, so the row can end up describing a run that lost the
-    // range rather than the replacement that owns it. More importantly, nothing here fences the
-    // *data* plane at all: that worker keeps writing game_features and motif_occurrences, so if a
-    // replacement is running the same range concurrently the occurrence delete/insert pair can
-    // still interleave. The heartbeat makes reaching this state much harder, and the non-terminal
-    // guard stops the row itself from flip-flopping, but neither makes a retired worker stop
-    // working. Closing that needs an ownership token the worker carries into every write, which is
-    // a different design from this column and is tracked separately.
-    boolean terminal = !"PENDING".equals(status) && !"PROCESSING".equals(status);
+    // Nothing here is fenced on ownership, so this is the unowned path: it is for callers writing
+    // about a request no worker ever claimed — the inline-dispatch failure in IndexRequestService,
+    // and tests. A worker presents its token and goes through updateStatusOwned instead, which is
+    // what stops a lapsed owner from stamping COMPLETED over a range someone else now holds.
+    boolean terminal = isTerminal(status);
     String sql =
         terminal
             ? """
             UPDATE indexing_requests
             SET status = ?, error_message = ?, games_indexed = ?, updated_at = ?,
-                dedupe_key = NULL
+                dedupe_key = NULL, owner_id = NULL, lease_expires_at = NULL
             WHERE id = ?
             """
             // A non-terminal write may only move a row that is still live. Without the status
@@ -373,21 +371,119 @@ public class IndexingRequestDao implements IndexingRequestStore {
     }
   }
 
+  private static boolean isTerminal(String status) {
+    return !"PENDING".equals(status) && !"PROCESSING".equals(status);
+  }
+
   @Override
-  public boolean heartbeat(UUID id, Instant now) {
-    int touched =
+  public boolean updateStatusOwned(
+      UUID id, String ownerId, String status, String errorMessage, int gamesIndexed, Instant now) {
+    // The lease is checked in the same statement that writes, so there is no window between
+    // establishing ownership and using it. Requiring an unexpired lease and not merely a matching
+    // owner_id is the stricter of the two available readings, and the right one: past expiry the
+    // system has already licensed a takeover, so a write from the old owner is racing a claim it
+    // cannot see. Recovering from a hiccup is renewLease's job, not this one's.
+    String sql =
+        isTerminal(status)
+            ? """
+            UPDATE indexing_requests
+            SET status = :status, error_message = :message, games_indexed = :games,
+                updated_at = :now, dedupe_key = NULL, owner_id = NULL, lease_expires_at = NULL
+            WHERE id = :id AND owner_id = :owner
+              AND status IN ('PENDING', 'PROCESSING')
+              AND lease_expires_at > :now
+            """
+            : """
+            UPDATE indexing_requests
+            SET status = :status, error_message = :message, games_indexed = :games,
+                updated_at = :now
+            WHERE id = :id AND owner_id = :owner
+              AND status IN ('PENDING', 'PROCESSING')
+              AND lease_expires_at > :now
+            """;
+    int updated =
+        jdbi.withHandle(
+            h ->
+                h.createUpdate(sql)
+                    .bind("status", status)
+                    .bind("message", errorMessage)
+                    .bind("games", gamesIndexed)
+                    .bindByType("now", toUtcWallClock(now), LocalDateTime.class)
+                    .bind("id", id)
+                    .bind("owner", ownerId)
+                    .execute());
+    if (updated == 0) {
+      LOG.warn(
+          "Refused to move request {} to {}: {} no longer holds the lease.", id, status, ownerId);
+    }
+    return updated > 0;
+  }
+
+  @Override
+  public boolean claim(UUID id, String ownerId, Duration lease, Instant now) {
+    // Unclaimed, or claimed by a lease that has run out. Expressed as one conditional UPDATE so
+    // two instances racing for the same request cannot both win: the row lock decides it, and the
+    // loser's WHERE no longer matches.
+    int taken =
         jdbi.withHandle(
             h ->
                 h.createUpdate(
                         """
                         UPDATE indexing_requests
-                        SET updated_at = ?
-                        WHERE id = ? AND status IN ('PENDING', 'PROCESSING')
+                        SET owner_id = :owner, lease_expires_at = :expires, updated_at = :now
+                        WHERE id = :id
+                          AND status IN ('PENDING', 'PROCESSING')
+                          AND (owner_id IS NULL
+                               OR owner_id = :owner
+                               OR lease_expires_at IS NULL
+                               OR lease_expires_at <= :now)
                         """)
-                    .bindByType(0, toUtcWallClock(now), LocalDateTime.class)
-                    .bind(1, id)
+                    .bind("owner", ownerId)
+                    .bindByType("expires", toUtcWallClock(now.plus(lease)), LocalDateTime.class)
+                    .bindByType("now", toUtcWallClock(now), LocalDateTime.class)
+                    .bind("id", id)
                     .execute());
-    return touched > 0;
+    return taken > 0;
+  }
+
+  @Override
+  public boolean renewLease(UUID id, String ownerId, Duration lease, Instant now) {
+    int renewed =
+        jdbi.withHandle(
+            h ->
+                h.createUpdate(
+                        """
+                        UPDATE indexing_requests
+                        SET lease_expires_at = :expires, updated_at = :now
+                        WHERE id = :id
+                          AND owner_id = :owner
+                          AND status IN ('PENDING', 'PROCESSING')
+                        """)
+                    .bindByType("expires", toUtcWallClock(now.plus(lease)), LocalDateTime.class)
+                    .bindByType("now", toUtcWallClock(now), LocalDateTime.class)
+                    .bind("id", id)
+                    .bind("owner", ownerId)
+                    .execute());
+    return renewed > 0;
+  }
+
+  @Override
+  public boolean holdsLease(UUID id, String ownerId, Instant now) {
+    return jdbi.withHandle(
+        h ->
+            h.createQuery(
+                        """
+                        SELECT COUNT(*) FROM indexing_requests
+                        WHERE id = ? AND owner_id = ?
+                          AND status IN ('PENDING', 'PROCESSING')
+                          AND lease_expires_at > ?
+                        """)
+                    .bind(0, id)
+                    .bind(1, ownerId)
+                    .bindByType(2, toUtcWallClock(now), LocalDateTime.class)
+                    .mapTo(Integer.class)
+                    .one()
+                > 0);
   }
 
   @Override

@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -154,42 +155,47 @@ public class GameFeatureDao implements GameFeatureStore {
   @Override
   public void insertBatch(List<GameFeature> features) {
     if (features.isEmpty()) return;
+    jdbi.useHandle(h -> insertFeatures(h, features));
+  }
+
+  private void insertFeatures(org.jdbi.v3.core.Handle h, List<GameFeature> features) {
     String sql = useH2 ? H2_INSERT : PG_INSERT;
-    jdbi.useHandle(
-        h -> {
-          var batch = h.prepareBatch(sql);
-          for (GameFeature row : features) {
-            // bindByType, not bind: played_at is nullable, and only the typed form carries
-            // Types.TIMESTAMP into setNull. Plain bind() would fall back to JDBI's untyped-null
-            // default (Types.OTHER) — accepted by both drivers today, but not the column's type.
-            batch
-                .bind(0, row.requestId())
-                .bind(1, row.gameUrl())
-                .bind(2, row.platform())
-                .bind(3, row.whiteUsername())
-                .bind(4, row.blackUsername())
-                .bind(5, (Integer) row.whiteElo())
-                .bind(6, (Integer) row.blackElo())
-                .bind(7, row.whiteTitle())
-                .bind(8, row.blackTitle())
-                .bind(9, row.timeClass())
-                .bind(10, row.eco())
-                .bind(11, row.openingName())
-                .bind(12, row.openingFamily())
-                .bind(13, row.result())
-                .bindByType(14, toUtcWallClock(row.playedAt()), LocalDateTime.class)
-                .bind(15, (Integer) row.numMoves())
-                // Never null: the column is NOT NULL, and a row that slipped through without a
-                // stamp would be undeletable, since `NULL < threshold` is unknown.
-                .bindByType(
-                    16,
-                    toUtcWallClock(row.indexedAt() == null ? clock.instant() : row.indexedAt()),
-                    LocalDateTime.class)
-                .bind(17, row.pgn())
-                .add();
-          }
-          batch.execute();
-        });
+    {
+      {
+        var batch = h.prepareBatch(sql);
+        for (GameFeature row : features) {
+          // bindByType, not bind: played_at is nullable, and only the typed form carries
+          // Types.TIMESTAMP into setNull. Plain bind() would fall back to JDBI's untyped-null
+          // default (Types.OTHER) — accepted by both drivers today, but not the column's type.
+          batch
+              .bind(0, row.requestId())
+              .bind(1, row.gameUrl())
+              .bind(2, row.platform())
+              .bind(3, row.whiteUsername())
+              .bind(4, row.blackUsername())
+              .bind(5, (Integer) row.whiteElo())
+              .bind(6, (Integer) row.blackElo())
+              .bind(7, row.whiteTitle())
+              .bind(8, row.blackTitle())
+              .bind(9, row.timeClass())
+              .bind(10, row.eco())
+              .bind(11, row.openingName())
+              .bind(12, row.openingFamily())
+              .bind(13, row.result())
+              .bindByType(14, toUtcWallClock(row.playedAt()), LocalDateTime.class)
+              .bind(15, (Integer) row.numMoves())
+              // Never null: the column is NOT NULL, and a row that slipped through without a
+              // stamp would be undeletable, since `NULL < threshold` is unknown.
+              .bindByType(
+                  16,
+                  toUtcWallClock(row.indexedAt() == null ? clock.instant() : row.indexedAt()),
+                  LocalDateTime.class)
+              .bind(17, row.pgn())
+              .add();
+        }
+        batch.execute();
+      }
+    }
   }
 
   /**
@@ -217,38 +223,93 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   @Override
+  public boolean flushOwned(
+      UUID requestId,
+      String ownerId,
+      Instant now,
+      List<GameFeature> features,
+      Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
+    if (features.isEmpty() && occurrencesByGame.isEmpty()) {
+      return true;
+    }
+    // Game urls in a stable order. Two flushes that touch an overlapping set take row locks in the
+    // same sequence, so they queue behind each other instead of deadlocking half way through.
+    List<String> gameUrls = new ArrayList<>(occurrencesByGame.keySet());
+    Collections.sort(gameUrls);
+
+    return jdbi.inTransaction(
+        h -> {
+          int stillOwner =
+              h.createQuery(
+                      """
+                      SELECT COUNT(*) FROM indexing_requests
+                      WHERE id = ? AND owner_id = ?
+                        AND status IN ('PENDING', 'PROCESSING')
+                        AND lease_expires_at > ?
+                      """)
+                  .bind(0, requestId)
+                  .bind(1, ownerId)
+                  .bindByType(2, toUtcWallClock(now), LocalDateTime.class)
+                  .mapTo(Integer.class)
+                  .one();
+          if (stillOwner == 0) {
+            return false;
+          }
+          if (!features.isEmpty()) {
+            insertFeatures(h, features);
+          }
+          if (!gameUrls.isEmpty()) {
+            var deletes = h.prepareBatch(DELETE_OCCURRENCES_BY_GAME_URL);
+            for (String gameUrl : gameUrls) {
+              deletes.bind(0, gameUrl).add();
+            }
+            deletes.execute();
+            insertOccurrences(h, occurrencesByGame);
+          }
+          return true;
+        });
+  }
+
+  @Override
   public void insertOccurrencesBatch(
       Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
     if (occurrencesByGame.isEmpty()) return;
-    jdbi.useHandle(
-        h -> {
-          var batch = h.prepareBatch(INSERT_OCCURRENCE);
-          for (var gameEntry : occurrencesByGame.entrySet()) {
-            String gameUrl = gameEntry.getKey();
-            for (var motifEntry : gameEntry.getValue().entrySet()) {
-              String motifName = motifEntry.getKey().name();
-              for (GameFeatures.MotifOccurrence occ : motifEntry.getValue()) {
-                if (occ.ply() <= 0) continue;
-                batch
-                    .bind(0, UUID.randomUUID().toString())
-                    .bind(1, gameUrl)
-                    .bind(2, motifName)
-                    .bind(3, occ.ply())
-                    .bind(4, occ.side())
-                    .bind(5, occ.moveNumber())
-                    .bind(6, occ.description())
-                    .bind(7, occ.movedPiece())
-                    .bind(8, occ.attacker())
-                    .bind(9, occ.target())
-                    .bind(10, occ.isDiscovered())
-                    .bind(11, occ.isMate())
-                    .bind(12, occ.pinType())
-                    .add();
-              }
+    jdbi.useHandle(h -> insertOccurrences(h, occurrencesByGame));
+  }
+
+  private void insertOccurrences(
+      org.jdbi.v3.core.Handle h,
+      Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
+    {
+      {
+        var batch = h.prepareBatch(INSERT_OCCURRENCE);
+        for (var gameEntry : occurrencesByGame.entrySet()) {
+          String gameUrl = gameEntry.getKey();
+          for (var motifEntry : gameEntry.getValue().entrySet()) {
+            String motifName = motifEntry.getKey().name();
+            for (GameFeatures.MotifOccurrence occ : motifEntry.getValue()) {
+              if (occ.ply() <= 0) continue;
+              batch
+                  .bind(0, UUID.randomUUID().toString())
+                  .bind(1, gameUrl)
+                  .bind(2, motifName)
+                  .bind(3, occ.ply())
+                  .bind(4, occ.side())
+                  .bind(5, occ.moveNumber())
+                  .bind(6, occ.description())
+                  .bind(7, occ.movedPiece())
+                  .bind(8, occ.attacker())
+                  .bind(9, occ.target())
+                  .bind(10, occ.isDiscovered())
+                  .bind(11, occ.isMate())
+                  .bind(12, occ.pinType())
+                  .add();
             }
           }
-          batch.execute();
-        });
+        }
+        batch.execute();
+      }
+    }
   }
 
   @Override

@@ -13,6 +13,33 @@ import java.util.UUID;
 public interface GameFeatureStore {
   void insertBatch(List<GameFeature> features);
 
+  /**
+   * Writes a batch of games and their occurrences as one unit, only if {@code ownerId} still holds
+   * the lease on {@code requestId}. Returns false without writing anything if it does not.
+   *
+   * <p>This replaces the three separate calls a flush used to make, and the single transaction is
+   * the point rather than a tidy-up. Occurrences are written by deleting a game's existing rows and
+   * inserting the new ones, and {@code motif_occurrences} has no uniqueness beyond a random UUID
+   * primary key. Split across transactions, two writers over the same game interleave as delete,
+   * delete, insert, insert and both sets survive — every motif for that game then reads double.
+   * That is reproducible in a test, not a worry; the delete and the insert have to be indivisible.
+   *
+   * <p>Two live requests can legitimately cover the same game: a game has two players, so indexing
+   * each of them reaches it. Dedupe cannot prevent that overlap because the requests are for
+   * different ranges, which is why the atomicity has to live here rather than in a lock on the
+   * request row.
+   *
+   * <p>The ownership check is the second, separate guarantee — it stops a worker that has lost its
+   * lease from continuing to write against a range someone else now owns. Because it happens inside
+   * the same transaction as the write, there is no window between checking and writing.
+   */
+  boolean flushOwned(
+      UUID requestId,
+      String ownerId,
+      Instant now,
+      List<GameFeature> features,
+      Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame);
+
   int deleteOlderThan(Instant threshold);
 
   void insertOccurrencesBatch(
