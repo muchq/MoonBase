@@ -155,6 +155,18 @@ public class AdminControllerTest {
   }
 
   private static class FakeGameFeatureStore implements GameFeatureStore {
+
+    /** Not part of the AdminController surface: only the worker flushes. */
+    @Override
+    public boolean flushOwned(
+        java.util.UUID requestId,
+        String ownerId,
+        Instant now,
+        List<GameFeature> features,
+        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
+      throw new UnsupportedOperationException("AdminController tests never flush");
+    }
+
     private final List<GameForReanalysis> games = new ArrayList<>();
     private final Map<String, Integer> deleteCount = new HashMap<>();
     private final Map<String, Integer> insertCount = new HashMap<>();

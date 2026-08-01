@@ -229,6 +229,13 @@ public class IndexerModule {
     return Executors.newFixedThreadPool(threads, tf);
   }
 
+  /**
+   * @param clock the same bean every other lease participant gets. The worker was the one holdout,
+   *     falling back to {@code Clock.systemUTC()} inside its no-clock constructor. Both resolve to
+   *     the same thing today, so nothing was broken — but the worker now stamps {@code
+   *     lease_expires_at} and {@code reclaimStale} compares against it, so a divergence that used
+   *     to nudge a seven-day retention boundary would decide ownership on a five-minute window.
+   */
   @Context
   public IndexWorker indexWorker(
       ChessClient chessClient,
@@ -236,14 +243,16 @@ public class IndexerModule {
       IndexingRequestStore requestStore,
       GameFeatureStore gameFeatureStore,
       IndexedPeriodStore periodStore,
-      @jakarta.inject.Named("indexExtraction") ExecutorService indexExtractionExecutor) {
+      @jakarta.inject.Named("indexExtraction") ExecutorService indexExtractionExecutor,
+      Clock clock) {
     return new IndexWorker(
         chessClient,
         featureExtractor,
         requestStore,
         gameFeatureStore,
         periodStore,
-        indexExtractionExecutor);
+        indexExtractionExecutor,
+        clock);
   }
 
   @Context

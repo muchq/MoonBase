@@ -285,6 +285,43 @@ public class IndexE2ETest {
     assertThat(RetentionPolicy.REQUEST).isGreaterThan(RetentionPolicy.PERIOD);
   }
 
+  @Test
+  public void leaseIsFiveMinutes() {
+    assertThat(RetentionPolicy.LEASE).isEqualTo(Duration.ofMinutes(5));
+  }
+
+  /**
+   * The relationship that makes a lease work at all, and the one most easily broken by accident. A
+   * renewal interval at or above the lease means every lease lapses between beats — which does not
+   * fail loudly, it fails as healthy workers having their ranges reclaimed underneath them.
+   *
+   * <p>This exact mistake was live in an earlier draft of #1278: the heartbeat kept its old pacing
+   * off {@link RetentionPolicy#STALE_REQUEST} (a quarter of an hour) while the new lease was five
+   * minutes, so a worker would have lost its claim three times over between one beat and the next.
+   */
+  @Test
+  public void theLeaseIsRenewedSeveralTimesBeforeItCouldExpire() {
+    // Asserted on DEFAULT_HEARTBEAT_INTERVAL, which is what a change would actually touch.
+    // LEASE_RENEWAL is defined as LEASE.dividedBy(4), so any claim relating those two — including
+    // "three renewals fit inside a lease" — is arithmetic, true for every positive LEASE, and
+    // fails for nothing. The heartbeat interval is an independent constant that has already been
+    // pointed at the wrong policy once.
+    assertThat(IndexWorker.DEFAULT_HEARTBEAT_INTERVAL.multipliedBy(3))
+        .as("at least three renewals may be lost before anyone else may take the request")
+        .isLessThan(RetentionPolicy.LEASE);
+  }
+
+  /**
+   * The two clocks are answers to different questions and must not converge. The hour is for work
+   * nobody has claimed, where the only evidence is the row's age; the lease is for work someone
+   * has, where the owner itself reports in. If the lease ever grew to the staleness cutoff the
+   * distinction would be decorative.
+   */
+  @Test
+  public void aDeadOwnerIsReclaimedFarSoonerThanAnUnclaimedRow() {
+    assertThat(RetentionPolicy.LEASE).isLessThan(RetentionPolicy.STALE_REQUEST);
+  }
+
   /**
    * A clock parked {@code offset} into the future. RetentionWorker subtracts RetentionPolicy.PERIOD
    * from it, so the resulting threshold sits {@code offset - PERIOD} either side of "now" — which

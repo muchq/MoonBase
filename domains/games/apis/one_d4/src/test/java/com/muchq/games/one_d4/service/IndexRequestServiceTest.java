@@ -416,6 +416,8 @@ public class IndexRequestServiceTest {
    */
   private static final class InMemoryRequestStore implements IndexingRequestStore {
     private final Map<UUID, IndexingRequest> rows = new HashMap<>();
+    private final Map<UUID, String> owners = new HashMap<>();
+    private final Map<UUID, Instant> leases = new HashMap<>();
     private Instant clock = Instant.parse("2026-07-01T12:00:00Z");
 
     private static boolean live(IndexingRequest r) {
@@ -484,8 +486,14 @@ public class IndexRequestServiceTest {
         Duration staleAfter,
         Instant now) {
       Instant cutoff = now.minus(staleAfter);
+      // Mirrors the DAO's two arms. A fake that answers this more loosely than production lets a
+      // divergence between dedupe and reclamation pass unnoticed here and fail against Postgres.
       return liveHolder(player, platform, startMonth, endMonth, excludeBullet)
-          .filter(r -> !r.updatedAt().isBefore(cutoff));
+          .filter(
+              r ->
+                  owners.containsKey(r.id())
+                      ? leases.get(r.id()) != null && leases.get(r.id()).isAfter(now)
+                      : !r.updatedAt().isBefore(cutoff));
     }
 
     @Override
@@ -496,6 +504,10 @@ public class IndexRequestServiceTest {
     @Override
     public void updateStatus(UUID id, String status, String errorMessage, int gamesIndexed) {
       IndexingRequest row = rows.get(id);
+      if (!"PENDING".equals(status) && !"PROCESSING".equals(status)) {
+        owners.remove(id);
+        leases.remove(id);
+      }
       rows.put(
           id,
           new IndexingRequest(
@@ -513,21 +525,80 @@ public class IndexRequestServiceTest {
     }
 
     @Override
-    public boolean heartbeat(UUID id, Instant now) {
+    public boolean claim(UUID id, String ownerId, Duration lease, Instant now) {
       IndexingRequest r = rows.get(id);
       if (r == null || !live(r)) {
         return false;
       }
+      String held = owners.get(id);
+      Instant expires = leases.get(id);
+      boolean heldByAnother =
+          held != null && !held.equals(ownerId) && expires != null && expires.isAfter(now);
+      if (heldByAnother) {
+        return false;
+      }
+      owners.put(id, ownerId);
+      leases.put(id, now.plus(lease));
       strand(id, now);
+      return true;
+    }
+
+    @Override
+    public boolean renewLease(UUID id, String ownerId, Duration lease, Instant now) {
+      IndexingRequest r = rows.get(id);
+      // Deliberately lenient about expiry, matching the DAO: renewing a lapsed-but-unstolen lease
+      // is the recovery path. Only a change of owner_id ends a worker's claim.
+      if (r == null || !live(r) || !ownerId.equals(owners.get(id))) {
+        return false;
+      }
+      leases.put(id, now.plus(lease));
+      strand(id, now);
+      return true;
+    }
+
+    @Override
+    public boolean holdsLease(UUID id, String ownerId, Instant now) {
+      IndexingRequest r = rows.get(id);
+      Instant expires = leases.get(id);
+      return r != null
+          && live(r)
+          && ownerId.equals(owners.get(id))
+          && expires != null
+          && expires.isAfter(now);
+    }
+
+    @Override
+    public boolean updateStatusOwned(
+        UUID id,
+        String ownerId,
+        String status,
+        String errorMessage,
+        int gamesIndexed,
+        Instant now) {
+      if (!holdsLease(id, ownerId, now)) {
+        return false;
+      }
+      updateStatus(id, status, errorMessage, gamesIndexed);
       return true;
     }
 
     @Override
     public int reclaimStale(Duration staleAfter, Instant now) {
       Instant cutoff = now.minus(staleAfter);
+      // Two arms, as in the DAO: a claimed row is judged by its lease, an unclaimed one by its
+      // age. Collapsing them here would let a test pass that retires a row a worker still owns.
       List<IndexingRequest> stranded =
-          rows.values().stream().filter(r -> live(r) && r.updatedAt().isBefore(cutoff)).toList();
+          rows.values().stream()
+              .filter(
+                  r ->
+                      live(r)
+                          && (owners.containsKey(r.id())
+                              ? leases.get(r.id()) != null && leases.get(r.id()).isBefore(now)
+                              : r.updatedAt().isBefore(cutoff)))
+              .toList();
       for (IndexingRequest r : stranded) {
+        owners.remove(r.id());
+        leases.remove(r.id());
         rows.put(
             r.id(),
             new IndexingRequest(

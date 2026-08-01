@@ -80,8 +80,12 @@ public class AdminController {
         }
       }
 
-      gameFeatureStore.deleteOccurrencesByGameUrls(gameUrlsToDelete);
-      gameFeatureStore.insertOccurrencesBatch(occurrencesBatch);
+      // One transaction. A delete that commits separately from its insert leaves a window in
+      // which an indexing worker flushing a live request over one of these games can insert its
+      // own occurrences and have both copies survive — the doubling ConcurrentFlushTest
+      // demonstrates. Being single-threaded inside this loop does not help; the other writer is
+      // in another thread.
+      gameFeatureStore.replaceOccurrences(gameUrlsToDelete, occurrencesBatch);
 
       offset += BATCH_SIZE;
       LOG.debug(

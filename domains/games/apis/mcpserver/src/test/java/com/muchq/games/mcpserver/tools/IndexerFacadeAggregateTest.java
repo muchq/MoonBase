@@ -85,6 +85,17 @@ public class IndexerFacadeAggregateTest {
     @Override
     public void insertBatch(List<GameFeature> features) {}
 
+    /** Not part of the aggregate surface: only the indexer's worker flushes. */
+    @Override
+    public boolean flushOwned(
+        java.util.UUID requestId,
+        String ownerId,
+        Instant now,
+        List<GameFeature> features,
+        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
+      throw new UnsupportedOperationException("aggregate tests never flush");
+    }
+
     @Override
     public int deleteOlderThan(Instant threshold) {
       return 0;

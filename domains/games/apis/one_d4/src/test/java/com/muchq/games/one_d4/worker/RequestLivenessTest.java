@@ -36,6 +36,7 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
@@ -47,11 +48,11 @@ import org.junit.jupiter.api.Timeout;
  * Liveness of an in-flight indexing request: can a request that is being worked on right now be
  * mistaken for an abandoned one?
  *
- * <p>{@link RetentionPolicy#STALE_REQUEST} retires a PENDING/PROCESSING request whose {@code
- * updated_at} has not moved in an hour, on the theory that its owner is dead. That theory is only
- * as good as the worker's heartbeat, and status writes alone are not one: {@link IndexWorker} wrote
- * PROCESSING at the start of a run and again at each month boundary, cache hit, empty archive and
- * 100-game batch flush, leaving everything between two of those points unobserved.
+ * <p>The question used to be answered by inference. A PENDING/PROCESSING row whose {@code
+ * updated_at} had not moved in {@link RetentionPolicy#STALE_REQUEST} was presumed dead, which
+ * cannot tell a worker that is slow from one that is gone — and status writes are a poor proxy for
+ * either, since {@link IndexWorker} wrote PROCESSING only at month boundaries, cache hits, empty
+ * archives and 100-game batch flushes, leaving everything between two of those points unobserved.
  *
  * <p>The gap that mattered most was the ordinary one. A single-month request holding fewer than
  * {@code BATCH_SIZE} games flushes exactly once, at the end, so the whole month — the archive
@@ -60,19 +61,22 @@ import org.junit.jupiter.api.Timeout;
  * bound at all, and single-month requests are the common case since {@code submitHybrid} runs them
  * inline.
  *
+ * <p>#1278 replaced the inference with a claim. A worker takes an explicit lease naming itself and
+ * renews it on a timer, so "is the owner still there?" is answered by the owner rather than guessed
+ * from its output — a request can run for hours without progress and still be alive, and a crashed
+ * one is reclaimable in minutes rather than an hour.
+ *
  * <p>Crossing the cutoff is not just a wrong label. Retirement clears {@code dedupe_key}, which is
  * the whole mechanism keeping one live request per range, so a resubmit creates a replacement and
  * two workers index the same games concurrently — interleaving the {@code motif_occurrences}
  * delete/insert pair and doubling every motif count. That is precisely the failure #1249 exists to
- * prevent, reached by a different road.
+ * prevent, reached by a different road. {@code ConcurrentFlushTest} covers the write path itself;
+ * what is tested here is that the situation does not arise from a healthy worker being declared
+ * dead, and that a worker which really has lost its lease stops.
  *
- * <p>These tests were written against the defect and observed failing before the timer-based
- * heartbeat that now satisfies them. What they pin is the invariant, not the fix: any future change
- * that lets a running request go unobserved for longer than the cutoff breaks them.
- *
- * <p>One case is deliberately <em>not</em> covered here, because it is out of the heartbeat's
- * reach: a message still waiting in the queue has no worker to beat for it, so a backlog deeper
- * than the cutoff still retires work that is owned but not yet started. See {@link
+ * <p>One case is deliberately <em>not</em> covered here, because it is out of a lease's reach: a
+ * message still waiting in the queue has no worker to renew for it, so a backlog deeper than the
+ * cutoff still retires work that is owned but not yet started. See {@link
  * RetentionPolicy#STALE_REQUEST}.
  */
 public class RequestLivenessTest {
@@ -115,12 +119,12 @@ public class RequestLivenessTest {
    */
   @Test
   @Timeout(30)
-  public void theRequestIsTouchedWhileTheWorkerIsInsideASlowArchiveFetch() throws Exception {
+  public void theLeaseIsRenewedWhileTheWorkerIsInsideASlowArchiveFetch() throws Exception {
     CountDownLatch insideFetch = new CountDownLatch(1);
     CountDownLatch releaseFetch = new CountDownLatch(1);
     CountDownLatch beatDuringFetch = new CountDownLatch(1);
 
-    HeartbeatRecorder recorder = new HeartbeatRecorder(beatDuringFetch);
+    RenewalRecorder recorder = new RenewalRecorder(beatDuringFetch);
     IndexWorker worker =
         newWorker(
             new ClockJumpingChessClient(clock, null, insideFetch, releaseFetch),
@@ -137,9 +141,9 @@ public class RequestLivenessTest {
 
     assertThat(touched)
         .as(
-            "nothing refreshed the request while the worker sat in the archive fetch — that span"
-                + " is unbounded, so a healthy worker crosses the %s cutoff and is retired mid-run",
-            STALE_AFTER)
+            "nothing renewed the lease while the worker sat in the archive fetch — that span is"
+                + " unbounded, so a healthy worker outlives its %s lease and is reclaimed mid-run",
+            RetentionPolicy.LEASE)
         .isTrue();
   }
 
@@ -151,9 +155,15 @@ public class RequestLivenessTest {
    * retires work that is owned and about to run, and tells the user to re-submit while the message
    * is still queued.
    *
-   * <p>This asserts the current, wrong-ish behaviour on purpose. When someone beats on enqueue —
-   * the actual fix, rather than a larger cutoff — this test should fail and be rewritten to assert
-   * the opposite. That failure is the notification.
+   * <p>Ownership made the consequence worse rather than better, which is worth being explicit
+   * about: the worker that eventually dequeues the message now fails to claim the retired row and
+   * declines it, so nothing is indexed. Before, it carried on and its unfenced terminal write
+   * landed — the user got their games, at the cost of the concurrent-writer corruption that could
+   * follow from the freed dedupe slot.
+   *
+   * <p>This asserts the current, wrong behaviour on purpose. When dispatch claims from this table
+   * (#1279) the row will be claimed rather than queued, this test should fail, and it should be
+   * rewritten to assert the opposite. That failure is the notification.
    */
   @Test
   public void queuedButUnstartedWorkIsStillRetired_knownGap() {
@@ -168,24 +178,202 @@ public class RequestLivenessTest {
     assertThat(dao.findById(queued).orElseThrow().status())
         .as(
             "known gap: queued-but-unstarted work is indistinguishable from abandoned work,"
-                + " because only a running worker heartbeats. Fix is to beat on enqueue.")
+                + " because only a claimed request has an owner to renew for it. Beating on"
+                + " enqueue would not fix it either — the process holding the queue is the one"
+                + " that may have died. The fix is dispatch claiming from this table (#1279).")
         .isEqualTo("FAILED");
   }
 
-  /** A beat must not resurrect a request someone else already took. */
+  /** A renewal must not resurrect a request someone else already took. */
   @Test
-  public void aHeartbeatDoesNotReviveARequestThatWasAlreadyRetired() {
+  public void aRenewalDoesNotReviveARequestThatWasAlreadyRetired() {
     TestDb testDb = TestDb.create("liveness_fenced");
     IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
     UUID requestId = claim(dao).request().id();
+    dao.claim(requestId, "worker-a", RetentionPolicy.LEASE, clock.instant());
 
     clock.advance(SLOW_FETCH);
     dao.reclaimStale(STALE_AFTER, clock.instant());
 
-    assertThat(dao.heartbeat(requestId, clock.instant()))
+    assertThat(dao.renewLease(requestId, "worker-a", RetentionPolicy.LEASE, clock.instant()))
         .as("a retired request is not this worker's to keep alive")
         .isFalse();
     assertThat(dao.findById(requestId).orElseThrow().status()).isEqualTo("FAILED");
+  }
+
+  /**
+   * The fence, end to end: a worker whose lease lapses while it is parked in a fetch must not carry
+   * on writing to a row a replacement now owns.
+   *
+   * <p>Its renewal interval is set past the length of the test, which is what a process that has
+   * stopped renewing — paused, partitioned, or dying — looks like from the table's side. When it
+   * wakes up it has no way to know it was replaced, so the refusal has to come from the write.
+   */
+  @Test
+  @Timeout(30)
+  public void aWorkerWhoseLeaseWasTakenStopsWritingToTheRequestRow() throws Exception {
+    TestDb testDb = TestDb.create("liveness_taken");
+    IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    CountDownLatch insideFetch = new CountDownLatch(1);
+    CountDownLatch releaseFetch = new CountDownLatch(1);
+    IndexWorker stalled =
+        newWorker(
+            new ClockJumpingChessClient(clock, null, insideFetch, releaseFetch),
+            dao,
+            Duration.ofHours(1));
+
+    Future<?> run = workerExecutor.submit(() -> stalled.process(message(requestId)));
+    assertThat(insideFetch.await(15, TimeUnit.SECONDS)).isTrue();
+
+    // Its lease runs out and a replacement takes the row.
+    clock.advance(RetentionPolicy.LEASE.plusMinutes(1));
+    assertThat(dao.claim(requestId, "replacement", RetentionPolicy.LEASE, clock.instant()))
+        .as("an expired lease is available to take")
+        .isTrue();
+
+    releaseFetch.countDown();
+    run.get(20, TimeUnit.SECONDS);
+
+    assertThat(dao.holdsLease(requestId, "replacement", clock.instant()))
+        .as("the replacement still owns the request the stalled worker was writing to")
+        .isTrue();
+    assertThat(dao.findById(requestId).orElseThrow().status())
+        .as("the stalled worker must not stamp its own outcome over the replacement's run")
+        .isEqualTo("PROCESSING");
+    assertThat(claim(dao).created())
+        .as("and the dedupe slot must still be held, not freed by a COMPLETED it had no right to")
+        .isFalse();
+  }
+
+  /**
+   * A lease that lapses with nobody taking it must not abandon the run.
+   *
+   * <p>The three reasons a fenced write is refused are not the same event. Someone else took the
+   * request; the row went terminal; or this worker's own lease expired and no one claimed it. Only
+   * the first two mean the range has moved. Collapsing all three into "lost" throws away a run
+   * nobody else wants, mid-way, and leaves the row PROCESSING and still holding its dedupe slot
+   * until the sweep retires it with a message about an owner that never existed.
+   *
+   * <p>Reachable without anything being broken: the heartbeat shares one scheduler thread across
+   * every in-flight request on the instance, against a five-connection pool with a ten-second
+   * timeout, so a stall can outlast a five-minute lease. Here the renewal interval is set past the
+   * length of the test to stand in for that, and the clock is pushed past expiry while the worker
+   * is parked in the fetch.
+   */
+  @Test
+  @Timeout(30)
+  public void aLeaseThatLapsesWithNoTakerIsRenewedRatherThanAbandoned() throws Exception {
+    TestDb testDb = TestDb.create("liveness_lapsed");
+    IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    CountDownLatch insideFetch = new CountDownLatch(1);
+    CountDownLatch releaseFetch = new CountDownLatch(1);
+    IndexWorker worker =
+        newWorker(
+            new ClockJumpingChessClient(clock, null, insideFetch, releaseFetch),
+            dao,
+            Duration.ofHours(1));
+
+    Future<?> run = workerExecutor.submit(() -> worker.process(message(requestId)));
+    assertThat(insideFetch.await(15, TimeUnit.SECONDS)).isTrue();
+
+    // The lease runs out. Nobody claims it.
+    clock.advance(RetentionPolicy.LEASE.plusMinutes(1));
+    assertThat(dao.holdsLease(requestId, worker.ownerId(), clock.instant()))
+        .as("precondition: the lease really has lapsed")
+        .isFalse();
+
+    releaseFetch.countDown();
+    run.get(20, TimeUnit.SECONDS);
+
+    assertThat(dao.findById(requestId).orElseThrow().status())
+        .as("the run finished under a lease it recovered, rather than being abandoned mid-way")
+        .isEqualTo("COMPLETED");
+  }
+
+  /**
+   * A run that genuinely fails, under a lease that lapsed with nobody taking it, must still record
+   * the failure.
+   *
+   * <p>The recovery path is not a nicety for the happy cases. Progress, the flush and COMPLETED all
+   * renew-and-retry when their own lease has merely lapsed; the FAILED write went straight at the
+   * store, so the one write that exists to explain a failure was the one most likely to be refused
+   * — and refused for a reason that has nothing to do with the failure. What follows is worse than
+   * a missing log line: the row stays PROCESSING holding its dedupe slot, so the range is blocked
+   * until the hourly sweep retires it under a message about an owner that stopped responding, which
+   * is not what happened. The user is told to wait, then told the wrong thing.
+   *
+   * <p>Reachable exactly when it hurts most: a database problem that throws out of the run is the
+   * same database problem that stalls the heartbeat.
+   */
+  @Test
+  @Timeout(30)
+  public void aRunThatFailsUnderALapsedLeaseStillRecordsTheFailure() throws Exception {
+    TestDb testDb = TestDb.create("liveness_failed_lapsed");
+    IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    CountDownLatch insideFetch = new CountDownLatch(1);
+    CountDownLatch releaseFetch = new CountDownLatch(1);
+    IndexWorker worker =
+        newWorker(new ThrowingChessClient(insideFetch, releaseFetch), dao, Duration.ofHours(1));
+
+    Future<?> run = workerExecutor.submit(() -> worker.process(message(requestId)));
+    assertThat(insideFetch.await(15, TimeUnit.SECONDS)).isTrue();
+
+    clock.advance(RetentionPolicy.LEASE.plusMinutes(1));
+    assertThat(dao.holdsLease(requestId, worker.ownerId(), clock.instant()))
+        .as("precondition: the lease really has lapsed, and nobody has taken it")
+        .isFalse();
+
+    releaseFetch.countDown();
+    run.get(20, TimeUnit.SECONDS);
+
+    IndexingRequestStore.IndexingRequest row = dao.findById(requestId).orElseThrow();
+    assertThat(row.status())
+        .as("the failure has to be recorded, not left for the sweep to mislabel")
+        .isEqualTo("FAILED");
+    assertThat(row.errorMessage()).contains("Indexing failed");
+    assertThat(
+            dao.createOrAdopt(PLAYER, PLATFORM, MONTH, MONTH, false, STALE_AFTER, clock.instant())
+                .created())
+        .as("and the dedupe slot is released, so the range is requestable again immediately")
+        .isTrue();
+  }
+
+  /** Two workers, one request: the second must decline rather than double up on the games. */
+  @Test
+  @Timeout(30)
+  public void aSecondWorkerDeclinesARequestThatIsAlreadyHeld() throws Exception {
+    TestDb testDb = TestDb.create("liveness_held");
+    IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    CountDownLatch insideFetch = new CountDownLatch(1);
+    CountDownLatch releaseFetch = new CountDownLatch(1);
+    IndexWorker holder = blockingWorker(dao, insideFetch, releaseFetch);
+    workerExecutor.submit(() -> holder.process(message(requestId)));
+    assertThat(insideFetch.await(15, TimeUnit.SECONDS)).isTrue();
+
+    // Runs on this thread: it is expected to return at the claim gate without reaching the fetch.
+    CountDownLatch secondReachedFetch = new CountDownLatch(1);
+    IndexWorker second = blockingWorker(dao, secondReachedFetch, new CountDownLatch(0));
+    second.process(message(requestId));
+
+    // Asserted before the holder is released, because finishing its run would release the lease
+    // legitimately and the question here is whether the second worker could take it mid-run.
+    assertThat(secondReachedFetch.getCount())
+        .as("the second worker started indexing a range it does not own")
+        .isEqualTo(1);
+    assertThat(dao.holdsLease(requestId, second.ownerId(), clock.instant()))
+        .as("a second worker must not take a request while its holder's lease is live")
+        .isFalse();
+    assertThat(dao.holdsLease(requestId, holder.ownerId(), clock.instant())).isTrue();
+
+    releaseFetch.countDown();
   }
 
   /**
@@ -208,17 +396,17 @@ public class RequestLivenessTest {
         .as("worker should have reached the archive fetch")
         .isTrue();
 
-    // The fetch is hanging and an hour and a half of it goes by. In production the heartbeat has
-    // beaten dozens of times by now; here we wait for one so the assertion is about the sweep's
-    // decision rather than about scheduler timing.
+    // The fetch is hanging and an hour and a half of it goes by. In production the lease has been
+    // renewed dozens of times by now; here we wait for one renewal so the assertion is about the
+    // sweep's decision rather than about scheduler timing.
     clock.advance(SLOW_FETCH);
-    boolean beat = awaitHeartbeatAtOrAfter(dao, requestId, clock.instant());
+    boolean beat = awaitRenewalAtOrAfter(dao, requestId, clock.instant());
 
     dao.reclaimStale(STALE_AFTER, clock.instant());
     IndexingRequestStore.IndexingRequest row = dao.findById(requestId).orElseThrow();
     releaseFetch.countDown();
 
-    assertThat(beat).as("no heartbeat landed during the hanging fetch").isTrue();
+    assertThat(beat).as("no renewal landed during the hanging fetch").isTrue();
     assertThat(row.status())
         .as("a request whose worker is still running must not be retired as abandoned")
         .isIn("PENDING", "PROCESSING");
@@ -245,7 +433,7 @@ public class RequestLivenessTest {
     assertThat(insideFetch.await(15, TimeUnit.SECONDS)).isTrue();
 
     clock.advance(SLOW_FETCH);
-    awaitHeartbeatAtOrAfter(dao, requestId, clock.instant());
+    awaitRenewalAtOrAfter(dao, requestId, clock.instant());
     dao.reclaimStale(STALE_AFTER, clock.instant());
 
     IndexingRequestStore.Claim resubmit = claim(dao);
@@ -291,8 +479,8 @@ public class RequestLivenessTest {
         heartbeatInterval);
   }
 
-  /** Polls until the stored row has been refreshed to at least {@code at}, or gives up. */
-  private boolean awaitHeartbeatAtOrAfter(IndexingRequestDao dao, UUID id, Instant at)
+  /** Polls until the stored row has been renewed to at least {@code at}, or gives up. */
+  private boolean awaitRenewalAtOrAfter(IndexingRequestDao dao, UUID id, Instant at)
       throws InterruptedException {
     for (int i = 0; i < 200; i++) {
       Optional<IndexingRequestStore.IndexingRequest> row = dao.findById(id);
@@ -376,17 +564,66 @@ public class RequestLivenessTest {
     }
   }
 
-  /** Trips a latch the first time anything refreshes the request. */
-  private static final class HeartbeatRecorder implements IndexingRequestStore {
-    private final CountDownLatch touched;
+  /** Parks in the archive fetch until released, then fails the run for real. */
+  private static final class ThrowingChessClient extends ChessClient {
+    private final CountDownLatch entered;
+    private final CountDownLatch release;
 
-    HeartbeatRecorder(CountDownLatch touched) {
-      this.touched = touched;
+    ThrowingChessClient(CountDownLatch entered, CountDownLatch release) {
+      super(null, new ObjectMapper());
+      this.entered = entered;
+      this.release = release;
     }
 
     @Override
-    public boolean heartbeat(UUID id, Instant now) {
-      touched.countDown();
+    public Optional<GamesResponse> fetchGames(String player, YearMonth yearMonth) {
+      entered.countDown();
+      try {
+        release.await(20, TimeUnit.SECONDS);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+      throw new IllegalStateException("chess.com exploded");
+    }
+
+    @Override
+    public Optional<Player> fetchPlayer(String player) {
+      return Optional.empty();
+    }
+  }
+
+  /** Trips a latch the first time the worker renews its lease. */
+  private static final class RenewalRecorder implements IndexingRequestStore {
+    private final CountDownLatch renewed;
+
+    RenewalRecorder(CountDownLatch renewed) {
+      this.renewed = renewed;
+    }
+
+    @Override
+    public boolean claim(UUID id, String ownerId, Duration lease, Instant now) {
+      return true;
+    }
+
+    @Override
+    public boolean renewLease(UUID id, String ownerId, Duration lease, Instant now) {
+      renewed.countDown();
+      return true;
+    }
+
+    @Override
+    public boolean holdsLease(UUID id, String ownerId, Instant now) {
+      return true;
+    }
+
+    @Override
+    public boolean updateStatusOwned(
+        UUID id,
+        String ownerId,
+        String status,
+        String errorMessage,
+        int gamesIndexed,
+        Instant now) {
       return true;
     }
 
@@ -469,6 +706,16 @@ public class RequestLivenessTest {
   private static final class NoOpGameFeatureStore implements GameFeatureStore {
     @Override
     public void insertBatch(List<GameFeature> features) {}
+
+    @Override
+    public boolean flushOwned(
+        UUID requestId,
+        String ownerId,
+        Instant now,
+        List<GameFeature> features,
+        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
+      return true;
+    }
 
     @Override
     public int deleteOlderThan(Instant threshold) {

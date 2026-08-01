@@ -185,6 +185,18 @@ public class QueryControllerTest {
   }
 
   private static final class FakeGameFeatureStore implements GameFeatureStore {
+
+    /** Not part of the QueryController surface: only the worker flushes. */
+    @Override
+    public boolean flushOwned(
+        java.util.UUID requestId,
+        String ownerId,
+        Instant now,
+        List<GameFeature> features,
+        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
+      throw new UnsupportedOperationException("QueryController tests never flush");
+    }
+
     private List<GameFeature> queryResult = List.of();
     private Map<String, Map<String, List<OccurrenceRow>>> occurrencesResult = Map.of();
 

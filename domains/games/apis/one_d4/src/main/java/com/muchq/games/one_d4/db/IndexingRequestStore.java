@@ -38,12 +38,15 @@ public interface IndexingRequestStore {
   Optional<IndexingRequest> findById(UUID id);
 
   /**
-   * Returns an existing request with the same (player, platform, startMonth, endMonth,
-   * excludeBullet) that is PENDING or PROCESSING and was updated within {@code staleAfter}, if any.
-   * Used to avoid creating duplicate indexing work.
+   * Returns the live request with the same (player, platform, startMonth, endMonth, excludeBullet),
+   * if there is one. Used to avoid creating duplicate indexing work.
    *
-   * <p>The age bound is what keeps a request whose owner died from answering for it forever. See
-   * {@link RetentionPolicy#STALE_REQUEST}.
+   * <p>"Live" here must mean exactly what it means to {@link #reclaimStale} — the same two arms,
+   * negated. A claimed request is live while its lease holds; an unclaimed one is live until {@code
+   * staleAfter}. Answering that question two different ways on one submit is a bug with a long
+   * tail: this read runs first and short-circuits, so a laxer predicate here silently overrides the
+   * stricter reclamation behind it, and a request whose worker was killed keeps being handed back
+   * to callers for the full hour instead of the lease's few minutes.
    */
   Optional<IndexingRequest> findExistingRequest(
       String player,
@@ -59,28 +62,94 @@ public interface IndexingRequestStore {
   void updateStatus(UUID id, String status, String errorMessage, int gamesIndexed);
 
   /**
-   * Retires every PENDING/PROCESSING request last updated before {@code now - staleAfter} to
-   * FAILED, freeing the dedupe slot each one holds. Returns the number retired.
+   * Retires live requests nobody is working on, freeing the dedupe slot and the lease each one
+   * holds. Returns the number retired.
+   *
+   * <p>Two different questions, deliberately kept apart:
+   *
+   * <ul>
+   *   <li><b>Claimed, lease expired.</b> Someone took this and stopped renewing, so the owner is
+   *       gone. Decided by {@link RetentionPolicy#LEASE}, in minutes.
+   *   <li><b>Never claimed, and old.</b> Nobody ever picked it up. Decided by {@code staleAfter},
+   *       in hours, because there is no owner whose silence could be measured — only the age of the
+   *       row itself.
+   * </ul>
+   *
+   * <p>Conflating those two is what made a slow request indistinguishable from a dead one: a
+   * running worker that simply had nothing to report for an hour was retired underneath itself. A
+   * request being worked on now renews, and renewal is a claim about the owner rather than about
+   * progress, so it stays alive however long a month takes.
+   *
+   * <p>Retiring makes a request reclaimable; it does not hand it to anyone. There is no scanner for
+   * expired leases and no re-dispatch — the row goes FAILED, the range becomes requestable, and the
+   * user resubmits. Actual takeover is #1279.
+   *
+   * <p>The unclaimed arm still has the gap it always had, and ownership made its consequence worse:
+   * a message waiting in a process-local queue has no owner to renew for it, so a backlog deeper
+   * than {@code staleAfter} retires work that is owned and about to run — and the worker that
+   * eventually reaches it now declines the retired row instead of indexing it anyway. Closing that
+   * means dispatch pulling from this table instead of an in-memory queue (#1279).
    */
   int reclaimStale(Duration staleAfter, Instant now);
 
   /**
-   * Moves a live request's {@code updated_at} forward without touching anything else. Returns true
-   * if the row was still live and was touched.
+   * Takes ownership of a request for {@code lease}, if it is live and either unclaimed or held by a
+   * lease that has already expired. Returns true if this caller now owns it.
    *
-   * <p>This exists because staleness infers liveness from progress, and progress is a bad proxy for
-   * it. {@link IndexWorker} writes status at month boundaries and every hundredth game, so a single
-   * month holding fewer games than that — the common case, since single-month requests run inline —
-   * reports nothing between its first and last write. The archive fetch and the profile lookups
-   * inside that span go through an HTTP client with no request timeout, so the span has no upper
-   * bound, and once it passes {@link RetentionPolicy#STALE_REQUEST} the sweep retires a request
-   * that is running perfectly well and frees the dedupe slot out from under it.
+   * <p>Claiming is how a worker earns the right to write. Before this, liveness was inferred from
+   * whether {@code updated_at} had moved recently, which cannot distinguish a worker that is slow
+   * from one that is dead, and gives nothing to check a later write against.
    *
-   * <p>Returning false rather than throwing when the row is no longer live is deliberate: by then a
-   * replacement may own the range, and the caller's job is to notice and stop, not to fight for it
-   * back.
+   * <p>{@code ownerId} identifies the <em>process</em>, not the thread or the run. It is the
+   * fencing token every subsequent write is conditioned on, so it has to stay stable while a worker
+   * holds the request and be unique across the instances competing for it.
    */
-  boolean heartbeat(UUID id, Instant now);
+  boolean claim(UUID id, String ownerId, Duration lease, Instant now);
+
+  /**
+   * Extends this owner's lease. Returns false if the request is no longer live, or if {@code
+   * owner_id} no longer names this caller — someone else has taken it, and the caller should stop.
+   *
+   * <p>Deliberately lenient about expiry, and that is not an oversight: a lease that has lapsed but
+   * still names this owner has not been taken by anyone, so renewing it is recovery rather than a
+   * second claim. A paused GC or a stalled connection pool can outlast a lease without anything
+   * being wrong, and the alternative — abandoning a run nobody else wants — throws away work and
+   * leaves the row stranded until the sweep.
+   *
+   * <p>What it will not do is re-take. Once {@code owner_id} has changed this returns false, and it
+   * cannot race a takeover: both are single conditional UPDATEs on one row, so the row lock orders
+   * them and the rival always wins. Refusing there is the point — the replacement is already
+   * indexing that range, and reasserting would put two writers on the same games.
+   */
+  boolean renewLease(UUID id, String ownerId, Duration lease, Instant now);
+
+  /**
+   * True if {@code ownerId} still holds a live, unexpired lease on this request.
+   *
+   * <p>Has no production caller, and should not acquire one: asking this before a write would be a
+   * check-then-act with a window in it, which is exactly what {@link #updateStatusOwned} and {@link
+   * GameFeatureStore#flushOwned} exist to avoid by folding the question into the write. It is here
+   * for tests and for diagnostics.
+   */
+  boolean holdsLease(UUID id, String ownerId, Instant now);
+
+  /**
+   * Writes a status, but only if {@code ownerId} still holds the lease. Returns false without
+   * writing if it does not — the caller has lost the request and should stop.
+   *
+   * <p>The fenced counterpart to {@link #updateStatus}. A worker holds a token, so every write it
+   * makes is conditioned on that token, and this is the request row's half of the same rule {@link
+   * GameFeatureStore#flushOwned} applies to the data plane. Without it a worker whose lease lapsed
+   * could still stamp COMPLETED — and a terminal write clears {@code dedupe_key} and the lease, so
+   * it would free the slot out from under whoever legitimately owns the range now, and report the
+   * dead run's game count as the answer.
+   *
+   * <p>Non-owner callers keep using {@link #updateStatus}: the inline-dispatch failure path in
+   * {@code IndexRequestService} writes on behalf of a request no worker ever claimed, and has no
+   * token to present.
+   */
+  boolean updateStatusOwned(
+      UUID id, String ownerId, String status, String errorMessage, int gamesIndexed, Instant now);
 
   /**
    * Deletes terminal request rows created before {@code threshold} that no {@code game_features}

@@ -724,7 +724,29 @@ public class IndexWorkerTest {
     }
 
     @Override
-    public boolean heartbeat(UUID id, Instant now) {
+    public boolean claim(UUID id, String ownerId, java.time.Duration lease, Instant now) {
+      return true;
+    }
+
+    @Override
+    public boolean renewLease(UUID id, String ownerId, java.time.Duration lease, Instant now) {
+      return true;
+    }
+
+    @Override
+    public boolean holdsLease(UUID id, String ownerId, Instant now) {
+      return true;
+    }
+
+    @Override
+    public boolean updateStatusOwned(
+        UUID id,
+        String ownerId,
+        String status,
+        String errorMessage,
+        int gamesIndexed,
+        Instant now) {
+      updateStatus(id, status, errorMessage, gamesIndexed);
       return true;
     }
 
@@ -761,6 +783,25 @@ public class IndexWorkerTest {
   private static class NoOpGameFeatureStore implements GameFeatureStore {
     @Override
     public void insertBatch(List<GameFeature> features) {}
+
+    /**
+     * Composed from the primitives rather than stubbed out, so a subclass that records only {@code
+     * insertBatch} still sees what a flush wrote. The production DAO does the same three things;
+     * the difference is that it does them in one transaction, which a fake cannot model and which
+     * the H2-backed ConcurrentFlushTest covers instead.
+     */
+    @Override
+    public boolean flushOwned(
+        UUID requestId,
+        String ownerId,
+        Instant now,
+        List<GameFeature> features,
+        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
+      insertBatch(features);
+      deleteOccurrencesByGameUrls(new ArrayList<>(occurrencesByGame.keySet()));
+      insertOccurrencesBatch(occurrencesByGame);
+      return true;
+    }
 
     @Override
     public int deleteOlderThan(Instant threshold) {

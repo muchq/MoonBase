@@ -151,6 +151,10 @@ com.muchq.indexer/
 | updated_at    | TIMESTAMP    | Updated on status change       |
 | error_message | TEXT         | Populated on FAILED            |
 | games_indexed | INT          | Running count during processing|
+| exclude_bullet | BOOLEAN     | Part of the dedupe tuple       |
+| dedupe_key    | VARCHAR      | UNIQUE. Held while live, NULLed on a terminal status — one live request per (player, platform, range, exclude_bullet) |
+| owner_id      | VARCHAR(128) | The worker process holding the lease; the fencing token every write is conditioned on |
+| lease_expires_at | TIMESTAMP | Renewed every 75s while the owner is alive. Past this the request is reclaimable |
 
 ### game_features
 

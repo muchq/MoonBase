@@ -301,6 +301,26 @@ public class Migration {
                  OR (o.created_at = r.created_at AND o.id < r.id)))
       """;
 
+  // Explicit ownership, replacing the inference that a request whose updated_at has not moved must
+  // be abandoned. owner_id names the worker that holds the request; lease_expires_at is how long
+  // that claim is good for without renewal. Both NULL means nobody has claimed it yet — which is a
+  // different state from "claimed and gone quiet", and the sweep now has to tell them apart.
+  //
+  // Nullable with no backfill on purpose. Rows already in flight when this deploys have no owner,
+  // so they read as unclaimed and fall to the orphan clock, which is exactly how they were being
+  // handled before this column existed. Anything else would mean inventing an owner for a worker
+  // this process cannot see.
+  private static final String[] ADD_LEASE_COLUMNS = {
+    "ALTER TABLE indexing_requests ADD COLUMN IF NOT EXISTS owner_id VARCHAR(128)",
+    "ALTER TABLE indexing_requests ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMP",
+  };
+
+  // The reclaim sweep looks for live rows whose lease has run out, and the orphan sweep for live
+  // rows that never had one. Both filter on status plus a lease column every hour.
+  private static final String CREATE_IDX_REQUESTS_LEASE =
+      "CREATE INDEX IF NOT EXISTS idx_indexing_requests_lease"
+          + " ON indexing_requests(status, lease_expires_at)";
+
   // The retention sweep's anti-join (deleteOlderThan) filters indexing_requests on an hourly
   // schedule by "does any game still point at me". Without this, EXPLAIN shows a hash anti-join
   // over a sequential scan of game_features — the largest table in the schema. Neither engine
@@ -389,6 +409,12 @@ public class Migration {
       stmt.execute(BACKFILL_DEDUPE_KEY);
       stmt.execute(useH2 ? ADD_DEDUPE_KEY_UNIQUE_H2 : ADD_DEDUPE_KEY_UNIQUE_PG);
       stmt.execute(CREATE_IDX_GAME_FEATURES_REQUEST_ID);
+
+      // Ownership leases.
+      for (String add : ADD_LEASE_COLUMNS) {
+        stmt.execute(add);
+      }
+      stmt.execute(CREATE_IDX_REQUESTS_LEASE);
 
       LOG.info("Database migration completed successfully (H2={})", useH2);
     } catch (SQLException e) {

@@ -13,10 +13,13 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.jdbi.v3.core.Handle;
 import org.jdbi.v3.core.Jdbi;
 import org.jdbi.v3.core.mapper.RowMapper;
 import org.jspecify.annotations.Nullable;
@@ -154,42 +157,47 @@ public class GameFeatureDao implements GameFeatureStore {
   @Override
   public void insertBatch(List<GameFeature> features) {
     if (features.isEmpty()) return;
+    jdbi.useHandle(h -> insertFeatures(h, features));
+  }
+
+  private void insertFeatures(org.jdbi.v3.core.Handle h, List<GameFeature> features) {
     String sql = useH2 ? H2_INSERT : PG_INSERT;
-    jdbi.useHandle(
-        h -> {
-          var batch = h.prepareBatch(sql);
-          for (GameFeature row : features) {
-            // bindByType, not bind: played_at is nullable, and only the typed form carries
-            // Types.TIMESTAMP into setNull. Plain bind() would fall back to JDBI's untyped-null
-            // default (Types.OTHER) — accepted by both drivers today, but not the column's type.
-            batch
-                .bind(0, row.requestId())
-                .bind(1, row.gameUrl())
-                .bind(2, row.platform())
-                .bind(3, row.whiteUsername())
-                .bind(4, row.blackUsername())
-                .bind(5, (Integer) row.whiteElo())
-                .bind(6, (Integer) row.blackElo())
-                .bind(7, row.whiteTitle())
-                .bind(8, row.blackTitle())
-                .bind(9, row.timeClass())
-                .bind(10, row.eco())
-                .bind(11, row.openingName())
-                .bind(12, row.openingFamily())
-                .bind(13, row.result())
-                .bindByType(14, toUtcWallClock(row.playedAt()), LocalDateTime.class)
-                .bind(15, (Integer) row.numMoves())
-                // Never null: the column is NOT NULL, and a row that slipped through without a
-                // stamp would be undeletable, since `NULL < threshold` is unknown.
-                .bindByType(
-                    16,
-                    toUtcWallClock(row.indexedAt() == null ? clock.instant() : row.indexedAt()),
-                    LocalDateTime.class)
-                .bind(17, row.pgn())
-                .add();
-          }
-          batch.execute();
-        });
+    {
+      {
+        var batch = h.prepareBatch(sql);
+        for (GameFeature row : features) {
+          // bindByType, not bind: played_at is nullable, and only the typed form carries
+          // Types.TIMESTAMP into setNull. Plain bind() would fall back to JDBI's untyped-null
+          // default (Types.OTHER) — accepted by both drivers today, but not the column's type.
+          batch
+              .bind(0, row.requestId())
+              .bind(1, row.gameUrl())
+              .bind(2, row.platform())
+              .bind(3, row.whiteUsername())
+              .bind(4, row.blackUsername())
+              .bind(5, (Integer) row.whiteElo())
+              .bind(6, (Integer) row.blackElo())
+              .bind(7, row.whiteTitle())
+              .bind(8, row.blackTitle())
+              .bind(9, row.timeClass())
+              .bind(10, row.eco())
+              .bind(11, row.openingName())
+              .bind(12, row.openingFamily())
+              .bind(13, row.result())
+              .bindByType(14, toUtcWallClock(row.playedAt()), LocalDateTime.class)
+              .bind(15, (Integer) row.numMoves())
+              // Never null: the column is NOT NULL, and a row that slipped through without a
+              // stamp would be undeletable, since `NULL < threshold` is unknown.
+              .bindByType(
+                  16,
+                  toUtcWallClock(row.indexedAt() == null ? clock.instant() : row.indexedAt()),
+                  LocalDateTime.class)
+              .bind(17, row.pgn())
+              .add();
+        }
+        batch.execute();
+      }
+    }
   }
 
   /**
@@ -216,39 +224,176 @@ public class GameFeatureDao implements GameFeatureStore {
         });
   }
 
+  /**
+   * Takes the {@code game_features} row locks for these games, in the given order, before their
+   * occurrences are rewritten.
+   *
+   * <p>Making each writer's delete-and-insert one transaction is necessary and not sufficient.
+   * Nothing sets an isolation level, so both engines run READ COMMITTED, and under that a {@code
+   * DELETE} that blocks on another transaction's uncommitted delete re-evaluates the rows it was
+   * blocked on — but not rows that transaction <em>inserted</em>, which are outside its statement
+   * snapshot. Two transactional writers over one game therefore still interleave as delete, delete,
+   * insert, insert and both sets survive: exactly the doubling {@code ConcurrentFlushTest}
+   * demonstrates, one isolation level up.
+   *
+   * <p>What removes it is a lock both writers must take first. {@code game_features.game_url} is
+   * UNIQUE and every occurrence belongs to a game, so that row is the natural serialization point.
+   * A flush already takes it implicitly — its feature upsert conflicts on {@code game_url} — but
+   * only for games it is also writing features for, and the reanalysis path writes no features at
+   * all. Taking it explicitly in both places is what makes the two paths safe against each other
+   * rather than only against themselves.
+   *
+   * <p>Sorted, because two writers over an overlapping set that take these locks in different
+   * orders deadlock instead of queueing.
+   */
+  private static void lockGames(Handle h, List<String> sortedGameUrls) {
+    if (sortedGameUrls.isEmpty()) {
+      return;
+    }
+    h.createQuery(
+            "SELECT game_url FROM game_features WHERE game_url IN (<urls>)"
+                + " ORDER BY game_url FOR UPDATE")
+        .bindList("urls", sortedGameUrls)
+        .mapTo(String.class)
+        .list();
+  }
+
+  @Override
+  public boolean flushOwned(
+      UUID requestId,
+      String ownerId,
+      Instant now,
+      List<GameFeature> features,
+      Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
+    // Everything this transaction locks, in one deterministic order, so two flushes over an
+    // overlapping set queue behind each other rather than deadlocking half way through. Both
+    // phases matter and only sorting one of them is worthless: the feature upsert runs first and
+    // takes an index-tuple lock per game_url on Postgres, so an inverted pair deadlocks there
+    // before it ever reaches the ordered deletes.
+    List<GameFeature> orderedFeatures = new ArrayList<>(features);
+    orderedFeatures.sort(Comparator.comparing(GameFeature::gameUrl));
+    List<String> gameUrls = new ArrayList<>(occurrencesByGame.keySet());
+    Collections.sort(gameUrls);
+
+    return jdbi.inTransaction(
+        h -> {
+          // SELECT ... FOR UPDATE, not a bare read. Nothing sets an isolation level, so both
+          // engines run READ COMMITTED, and under that a plain SELECT is a snapshot rather than a
+          // claim: a concurrent takeover can commit between this statement and the writes below,
+          // and then this transaction commits rows against a request it no longer owns. The
+          // window is the whole flush — up to a hundred upserts, a hundred deletes, and the
+          // occurrence batch — not an instant. Taking the row lock makes a rival claim() block
+          // until this commits or rolls back, which is what "checked in the same transaction that
+          // writes" has to mean to be worth anything.
+          //
+          // Selecting id rather than COUNT(*): Postgres rejects FOR UPDATE alongside an aggregate.
+          boolean stillOwner =
+              h.createQuery(
+                      """
+                      SELECT id FROM indexing_requests
+                      WHERE id = ? AND owner_id = ?
+                        AND status IN ('PENDING', 'PROCESSING')
+                        AND lease_expires_at > ?
+                      FOR UPDATE
+                      """)
+                  .bind(0, requestId)
+                  .bind(1, ownerId)
+                  .bindByType(2, toUtcWallClock(now), LocalDateTime.class)
+                  .mapTo(String.class)
+                  .findFirst()
+                  .isPresent();
+          if (!stillOwner) {
+            return false;
+          }
+          if (!orderedFeatures.isEmpty()) {
+            insertFeatures(h, orderedFeatures);
+          }
+          if (!gameUrls.isEmpty()) {
+            lockGames(h, gameUrls);
+            var deletes = h.prepareBatch(DELETE_OCCURRENCES_BY_GAME_URL);
+            for (String gameUrl : gameUrls) {
+              deletes.bind(0, gameUrl).add();
+            }
+            deletes.execute();
+            insertOccurrences(h, occurrencesByGame);
+          }
+          return true;
+        });
+  }
+
+  /**
+   * Replaces the occurrences for a set of games as one unit, without an ownership check.
+   *
+   * <p>For the reanalysis path, which recomputes motifs for games it does not own a request for.
+   * The atomicity is the same requirement as {@link #flushOwned}'s and for the same reason: a
+   * delete that commits separately from its insert leaves a window in which another writer — an
+   * indexing worker flushing a live request that covers one of these games — can delete nothing,
+   * insert its own rows, and let both copies survive. Being single-threaded within its own loop
+   * does not help, because the other writer is in another thread.
+   */
+  @Override
+  public void replaceOccurrences(
+      List<String> gameUrlsToClear,
+      Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
+    if (gameUrlsToClear.isEmpty() && occurrencesByGame.isEmpty()) {
+      return;
+    }
+    List<String> merged = new ArrayList<>(gameUrlsToClear);
+    merged.addAll(occurrencesByGame.keySet());
+    List<String> gameUrls = merged.stream().distinct().sorted().toList();
+    final List<String> locked = gameUrls;
+    jdbi.useTransaction(
+        h -> {
+          lockGames(h, locked);
+          var deletes = h.prepareBatch(DELETE_OCCURRENCES_BY_GAME_URL);
+          for (String gameUrl : locked) {
+            deletes.bind(0, gameUrl).add();
+          }
+          deletes.execute();
+          insertOccurrences(h, occurrencesByGame);
+        });
+  }
+
   @Override
   public void insertOccurrencesBatch(
       Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
     if (occurrencesByGame.isEmpty()) return;
-    jdbi.useHandle(
-        h -> {
-          var batch = h.prepareBatch(INSERT_OCCURRENCE);
-          for (var gameEntry : occurrencesByGame.entrySet()) {
-            String gameUrl = gameEntry.getKey();
-            for (var motifEntry : gameEntry.getValue().entrySet()) {
-              String motifName = motifEntry.getKey().name();
-              for (GameFeatures.MotifOccurrence occ : motifEntry.getValue()) {
-                if (occ.ply() <= 0) continue;
-                batch
-                    .bind(0, UUID.randomUUID().toString())
-                    .bind(1, gameUrl)
-                    .bind(2, motifName)
-                    .bind(3, occ.ply())
-                    .bind(4, occ.side())
-                    .bind(5, occ.moveNumber())
-                    .bind(6, occ.description())
-                    .bind(7, occ.movedPiece())
-                    .bind(8, occ.attacker())
-                    .bind(9, occ.target())
-                    .bind(10, occ.isDiscovered())
-                    .bind(11, occ.isMate())
-                    .bind(12, occ.pinType())
-                    .add();
-              }
+    jdbi.useHandle(h -> insertOccurrences(h, occurrencesByGame));
+  }
+
+  private void insertOccurrences(
+      org.jdbi.v3.core.Handle h,
+      Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
+    {
+      {
+        var batch = h.prepareBatch(INSERT_OCCURRENCE);
+        for (var gameEntry : occurrencesByGame.entrySet()) {
+          String gameUrl = gameEntry.getKey();
+          for (var motifEntry : gameEntry.getValue().entrySet()) {
+            String motifName = motifEntry.getKey().name();
+            for (GameFeatures.MotifOccurrence occ : motifEntry.getValue()) {
+              if (occ.ply() <= 0) continue;
+              batch
+                  .bind(0, UUID.randomUUID().toString())
+                  .bind(1, gameUrl)
+                  .bind(2, motifName)
+                  .bind(3, occ.ply())
+                  .bind(4, occ.side())
+                  .bind(5, occ.moveNumber())
+                  .bind(6, occ.description())
+                  .bind(7, occ.movedPiece())
+                  .bind(8, occ.attacker())
+                  .bind(9, occ.target())
+                  .bind(10, occ.isDiscovered())
+                  .bind(11, occ.isMate())
+                  .bind(12, occ.pinType())
+                  .add();
             }
           }
-          batch.execute();
-        });
+        }
+        batch.execute();
+      }
+    }
   }
 
   @Override
