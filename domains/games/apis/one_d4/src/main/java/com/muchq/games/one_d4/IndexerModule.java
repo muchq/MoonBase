@@ -256,7 +256,8 @@ public class IndexerModule {
   }
 
   @Context
-  public IndexWorkerLifecycle indexWorkerLifecycle(IndexQueue queue, IndexWorker worker) {
-    return new IndexWorkerLifecycle(queue, worker);
+  public IndexWorkerLifecycle indexWorkerLifecycle(
+      IndexQueue queue, IndexWorker worker, IndexingRequestStore requestStore, Clock clock) {
+    return new IndexWorkerLifecycle(queue, worker, requestStore, clock);
   }
 }

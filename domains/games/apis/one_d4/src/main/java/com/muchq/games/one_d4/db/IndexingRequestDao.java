@@ -25,21 +25,6 @@ public class IndexingRequestDao implements IndexingRequestStore {
    */
   private static final int MAX_CLAIM_ATTEMPTS = 5;
 
-  /** For the unclaimed arm: nobody ever picked this up. */
-  private static final String NEVER_CLAIMED_MESSAGE =
-      "Abandoned: no worker took ownership before the staleness cutoff (orphaned by restart or a"
-          + " failed inline dispatch). Re-submit to try again.";
-
-  /**
-   * For the lease arm. A different sentence because it describes a different event, and this text
-   * is not internal — it reaches the user as {@code IndexResponse.errorMessage} and is rendered in
-   * the web app. Telling someone whose worker crashed mid-run that nobody ever picked their request
-   * up sends them looking for a dispatch problem that is not there.
-   */
-  private static final String OWNER_GONE_MESSAGE =
-      "Abandoned: the worker indexing this request stopped responding and its lease expired."
-          + " Re-submit to try again.";
-
   private static final RowMapper<IndexingRequest> ROW_MAPPER =
       (rs, ctx) ->
           new IndexingRequest(
@@ -53,7 +38,9 @@ public class IndexingRequestDao implements IndexingRequestStore {
               rs.getTimestamp("updated_at").toInstant(),
               rs.getString("error_message"),
               rs.getInt("games_indexed"),
-              rs.getBoolean("exclude_bullet"));
+              rs.getBoolean("exclude_bullet"),
+              rs.getBoolean("skip_cache"),
+              rs.getInt("attempts"));
 
   private final Jdbi jdbi;
   private final Clock clock;
@@ -114,14 +101,15 @@ public class IndexingRequestDao implements IndexingRequestStore {
       String startMonth,
       String endMonth,
       boolean excludeBullet,
+      boolean skipCache,
       Duration staleAfter,
       Instant now) {
     String key = dedupeKey(player, platform, startMonth, endMonth, excludeBullet);
 
-    // Retire an abandoned holder first, so a dead request cannot keep its replacement out. Without
-    // this the unique constraint would turn #1250's stranded row from "dedupe keeps answering with
-    // it" into "the database refuses the replacement" — the same lockout, enforced harder.
-    retire(key, staleAfter, now);
+    // Settle any abandoned holder first. Usually that means releasing it — the work is still
+    // queued and this caller should adopt it rather than start a rival — and retiring it only once
+    // its attempts are spent, which frees the key so an insert can succeed.
+    reclaim(key, staleAfter, now);
 
     RuntimeException lastConflict = null;
     for (int attempt = 0; attempt < MAX_CLAIM_ATTEMPTS; attempt++) {
@@ -135,7 +123,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
       // engines. The constraint, not the transaction boundary, is what makes this safe: exactly
       // one racer's insert can succeed.
       try {
-        UUID id = insert(key, player, platform, startMonth, endMonth, excludeBullet);
+        UUID id = insert(key, player, platform, startMonth, endMonth, excludeBullet, skipCache);
         return new Claim(
             findById(id)
                 .orElseThrow(
@@ -172,7 +160,8 @@ public class IndexingRequestDao implements IndexingRequestStore {
       String platform,
       String startMonth,
       String endMonth,
-      boolean excludeBullet) {
+      boolean excludeBullet,
+      boolean skipCache) {
     UUID id = UUID.randomUUID();
     // created_at/updated_at are stamped here rather than left to the column DEFAULT, so they come
     // from the same clock the staleness predicates compare against.
@@ -183,8 +172,8 @@ public class IndexingRequestDao implements IndexingRequestStore {
                     """
                     INSERT INTO indexing_requests
                       (id, player, platform, start_month, end_month, exclude_bullet, dedupe_key,
-                       created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       created_at, updated_at, skip_cache, attempts)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                     """)
                 .bind(0, id)
                 .bind(1, player)
@@ -195,6 +184,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
                 .bind(6, dedupeKey)
                 .bindByType(7, stamp, LocalDateTime.class)
                 .bindByType(8, stamp, LocalDateTime.class)
+                .bind(9, skipCache)
                 .execute());
     return id;
   }
@@ -230,57 +220,172 @@ public class IndexingRequestDao implements IndexingRequestStore {
 
   @Override
   public int reclaimStale(Duration staleAfter, Instant now) {
-    int reclaimed = retire(null, staleAfter, now);
-    if (reclaimed > 0) {
-      // Deliberately vague about which arm fired: one statement covers both, and saying "not
-      // updated since <cutoff>" for a row retired on a five-minute lease — whose updated_at is
-      // minutes old — was simply false.
-      LOG.warn(
-          "Retired {} indexing request(s) nobody is working on: leases expired as of {}, or never"
-              + " claimed and untouched since {}",
-          reclaimed,
-          now,
-          now.minus(staleAfter));
-    }
-    return reclaimed;
+    return reclaim(null, staleAfter, now);
   }
 
   /**
-   * Marks abandoned live requests FAILED and releases the dedupe slot each one holds. Named
-   * parameters rather than positional ones, and two call sites rather than one with a conditional
-   * predicate: the sweep and the single-key reclaim differ only by one clause, and building that
-   * clause by concatenation meant the caller had to keep a {@code bind(3, ...)} in step with it.
+   * Returns abandoned work to the queue. An expired lease means the owner is gone, not that the
+   * work is unwanted, so the row is unclaimed and left live for the next worker to take.
+   *
+   * <p>This is the half of #1279 that is easiest to get backwards. Before dispatch read from this
+   * table an expired lease had to be retired: nothing was ever going to run that request again, so
+   * freeing the dedupe slot and telling the user to resubmit was the only way out. Now the row
+   * <em>is</em> the queue, and retiring it throws away work any worker could pick up. Clearing the
+   * owner is enough — {@code dedupe_key} stays, because the range is still spoken for.
    */
-  private static final String RETIRE_SQL =
+  private static final String RELEASE_SQL =
       """
       UPDATE indexing_requests
-      SET status = 'FAILED',
-          error_message = CASE WHEN owner_id IS NULL
-                            THEN CAST(:neverClaimed AS VARCHAR)
-                            ELSE CAST(:ownerGone AS VARCHAR) END,
-          dedupe_key = NULL, updated_at = :now,
-          owner_id = NULL, lease_expires_at = NULL
+      SET owner_id = NULL, updated_at = :now
       WHERE status IN ('PENDING', 'PROCESSING')
-        AND ((owner_id IS NOT NULL
-              AND lease_expires_at IS NOT NULL
-              AND lease_expires_at <= :now)
-             OR (owner_id IS NULL AND updated_at < :cutoff))
+        AND owner_id IS NOT NULL
+        AND lease_expires_at IS NOT NULL
+        AND lease_expires_at <= :now
+        AND attempts < :maxAttempts
       """;
 
-  private int retire(String keyOrNull, Duration staleAfter, Instant now) {
-    String sql = keyOrNull == null ? RETIRE_SQL : RETIRE_SQL + "  AND dedupe_key = :key\n";
-    return jdbi.withHandle(
+  /**
+   * The one case where abandoned work is still retired: it has been claimed {@link #MAX_ATTEMPTS}
+   * times and every worker stopped before finishing.
+   *
+   * <p>Releasing is unbounded by construction, and that is the new hazard. A request that kills the
+   * process handling it used to take that process's queue with it and stop there; once any worker
+   * can claim it, the same request tours the fleet indefinitely and each lap costs another worker.
+   * The counter is the only thing that separates "the last worker was unlucky" from "this request
+   * is the problem".
+   */
+  private static final String RETIRE_POISONED_SQL =
+      """
+      UPDATE indexing_requests
+      SET status = 'FAILED', error_message = :poisoned, dedupe_key = NULL, updated_at = :now,
+          owner_id = NULL, lease_expires_at = NULL
+      WHERE status IN ('PENDING', 'PROCESSING')
+        AND attempts >= :maxAttempts
+        AND (owner_id IS NULL
+             OR lease_expires_at IS NULL
+             OR lease_expires_at <= :now)
+      """;
+
+  /**
+   * The backstop: a request nobody is running, that nothing has touched in {@code staleAfter},
+   * while no worker anywhere holds a live lease.
+   *
+   * <p>Releasing work back to the queue is the right answer to a dead owner, but it cannot be the
+   * only answer. If every worker dies, or the fleet is partitioned from this database, released
+   * rows sit PENDING forever and the user is told nothing at all — which is worse than being told
+   * the request failed. Eventually the answer has to be an answer.
+   *
+   * <p>The {@code NOT EXISTS} is what stops this from re-becoming the bug two changes were spent
+   * removing. Plain age cannot distinguish "nothing is serving this" from "my turn has not come
+   * yet": a single worker draining a deep backlog leaves rows at the back untouched for as long as
+   * the backlog takes, and retiring those tells a user to resubmit work that was about to run.
+   *
+   * <p>Two probes, and it takes both, because either alone gets it wrong in a way that matters.
+   *
+   * <p>A live lease <em>right now</em> is the obvious signal and it is not enough on its own:
+   * leases are held in bursts, and between one job's terminal write and the next claim there is a
+   * real moment with none held anywhere. Sampling there declares a healthy fleet dead — reproduced
+   * on both engines, forty-nine queued rows FAILED in one statement by a millisecond-wide gap.
+   * Worse than the bug the guard exists to prevent.
+   *
+   * <p>A recent {@code lease_expires_at} covers that gap, and the column choice is the point. A
+   * plain "anything touched lately" would count submits, so a user submitting into a fleet of dead
+   * workers would suppress their own answer indefinitely — only a worker sets a lease. And it has
+   * to be the lease rather than {@code owner_id}, because a successful run clears the owner on its
+   * way out: the evidence that a worker was here would be erased by that worker finishing. So
+   * terminal writes and releases now leave {@code lease_expires_at} where it is. Nothing reads it
+   * as ownership — every such predicate also requires {@code owner_id} and a live status — and it
+   * becomes an honest record of when a worker last held this row.
+   *
+   * <p>The probe excludes the row being judged. Its own lease mark is not evidence that anyone is
+   * working <em>now</em> — it is the record of the worker that abandoned it, which is the whole
+   * reason it is a candidate.
+   *
+   * <p>Requiring both means this errs toward silence rather than toward false failure, which is the
+   * right way round — a wrong FAILED destroys queued work, a late FAILED only delays an answer. The
+   * residual case is a worker wedged mid-run: its heartbeat renews from a separate thread, so both
+   * probes stay positive, and that one live lease suppresses this arm for every queued row in the
+   * table rather than only its own. No liveness probe can close it — the worker is alive, and what
+   * is unknown is whether the run is progressing — so bounding it needs a ceiling on run duration.
+   * Tracked in #1282.
+   */
+  private static final String RETIRE_ABANDONED_SQL =
+      """
+      UPDATE indexing_requests
+      SET status = 'FAILED', error_message = :stalled, dedupe_key = NULL, updated_at = :now,
+          owner_id = NULL, lease_expires_at = NULL
+      WHERE status IN ('PENDING', 'PROCESSING')
+        AND (owner_id IS NULL
+             OR lease_expires_at IS NULL
+             OR lease_expires_at <= :now)
+        AND updated_at < :cutoff
+        AND NOT EXISTS (
+          SELECT 1 FROM indexing_requests live
+          WHERE live.owner_id IS NOT NULL AND live.lease_expires_at > :now)
+        AND NOT EXISTS (
+          SELECT 1 FROM indexing_requests recent
+          WHERE recent.id <> indexing_requests.id AND recent.lease_expires_at >= :cutoff)
+      """;
+
+  static final String STALLED_MESSAGE =
+      "Abandoned: no indexing worker has picked this up, and none is running anywhere. Re-submit"
+          + " once indexing is available again.";
+
+  private int reclaim(String keyOrNull, Duration staleAfter, Instant now) {
+    String keyClause = keyOrNull == null ? "" : "  AND dedupe_key = :key\n";
+    return jdbi.inTransaction(
         h -> {
-          var update =
-              h.createUpdate(sql)
-                  .bind("neverClaimed", NEVER_CLAIMED_MESSAGE)
-                  .bind("ownerGone", OWNER_GONE_MESSAGE)
+          // Order matters twice, for two different reasons, and neither is the one that looks
+          // obvious. A row at the attempt limit cannot match RELEASE_SQL at all — that statement
+          // carries its own attempts guard — so this is not about stopping an extra lap.
+          //
+          // Poisoned before stalled: a row whose attempts are spent is also unheld and may well be
+          // old, so it matches the stalled arm too. Both retire it; only one of them tells the
+          // user the truth about why.
+          //
+          // Stalled before released: releasing stamps updated_at, which would make the row look
+          // freshly touched and hide it from the staleness the stalled arm looks for — costing the
+          // user another full window of silence.
+          var retire =
+              h.createUpdate(RETIRE_POISONED_SQL + keyClause)
+                  .bind("poisoned", POISONED_MESSAGE)
+                  .bind("maxAttempts", MAX_ATTEMPTS)
+                  .bindByType("now", toUtcWallClock(now), LocalDateTime.class);
+          var release =
+              h.createUpdate(RELEASE_SQL + keyClause)
+                  .bind("maxAttempts", MAX_ATTEMPTS)
+                  .bindByType("now", toUtcWallClock(now), LocalDateTime.class);
+          if (keyOrNull != null) {
+            retire.bind("key", keyOrNull);
+            release.bind("key", keyOrNull);
+          }
+          var abandoned =
+              h.createUpdate(RETIRE_ABANDONED_SQL + keyClause)
+                  .bind("stalled", STALLED_MESSAGE)
                   .bindByType("now", toUtcWallClock(now), LocalDateTime.class)
                   .bindByType("cutoff", toUtcWallClock(now.minus(staleAfter)), LocalDateTime.class);
           if (keyOrNull != null) {
-            update.bind("key", keyOrNull);
+            abandoned.bind("key", keyOrNull);
           }
-          return update.execute();
+          int retired = retire.execute();
+          // Before the release, deliberately: releasing sets updated_at = now, which would make
+          // every row look freshly touched and hide the very staleness this arm looks for.
+          int stalled = abandoned.execute();
+          int released = release.execute();
+          if (stalled > 0) {
+            LOG.warn(
+                "Retired {} indexing request(s) that no worker has taken, with no live worker"
+                    + " anywhere",
+                stalled);
+          }
+          if (released > 0) {
+            LOG.info("Returned {} abandoned indexing request(s) to the queue", released);
+          }
+          if (retired > 0) {
+            LOG.warn(
+                "Retired {} indexing request(s) after {} failed attempts", retired, MAX_ATTEMPTS);
+          }
+          return retired + stalled + released;
         });
   }
 
@@ -296,13 +401,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
 
   @Override
   public Optional<IndexingRequest> findExistingRequest(
-      String player,
-      String platform,
-      String startMonth,
-      String endMonth,
-      boolean excludeBullet,
-      Duration staleAfter,
-      Instant now) {
+      String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
     return jdbi.withHandle(
         h ->
             h.createQuery(
@@ -312,10 +411,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
                       AND start_month = :startMonth AND end_month = :endMonth
                       AND exclude_bullet = :excludeBullet
                       AND status IN ('PENDING', 'PROCESSING')
-                      AND ((owner_id IS NOT NULL
-                            AND lease_expires_at IS NOT NULL
-                            AND lease_expires_at > :now)
-                           OR (owner_id IS NULL AND updated_at >= :cutoff))
+                      AND attempts < :maxAttempts
                     ORDER BY created_at ASC, id ASC
                     LIMIT 1
                     """)
@@ -324,8 +420,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
                 .bind("startMonth", startMonth)
                 .bind("endMonth", endMonth)
                 .bind("excludeBullet", excludeBullet)
-                .bindByType("now", toUtcWallClock(now), LocalDateTime.class)
-                .bindByType("cutoff", toUtcWallClock(now.minus(staleAfter)), LocalDateTime.class)
+                .bind("maxAttempts", MAX_ATTEMPTS)
                 .map(ROW_MAPPER)
                 .findFirst());
   }
@@ -365,9 +460,8 @@ public class IndexingRequestDao implements IndexingRequestStore {
             // that owner, and IndexWorker writes PROCESSING once per month rather than once per
             // run. The next such write would flip the row back to PROCESSING while leaving
             // dedupe_key NULL — a live request holding no slot. Its replacement already holds the
-            // key, so the constraint cannot see the violation, and a skipCache submit (which
-            // bypasses the dedupe read) would then start exactly the rival run this change exists
-            // to prevent.
+            // key, so the constraint cannot see the violation, and the next submit for that
+            // range would then start exactly the rival run this change exists to prevent.
             //
             // Restoring the key here instead would be wrong: the replacement holds it, so the
             // UPDATE would fail on the constraint. Refusing the resurrection is the only shape
@@ -414,7 +508,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
             ? """
             UPDATE indexing_requests
             SET status = :status, error_message = :message, games_indexed = :games,
-                updated_at = :now, dedupe_key = NULL, owner_id = NULL, lease_expires_at = NULL
+                updated_at = :now, dedupe_key = NULL, owner_id = NULL
             WHERE id = :id AND owner_id = :owner
               AND status IN ('PENDING', 'PROCESSING')
               AND lease_expires_at > :now
@@ -445,6 +539,55 @@ public class IndexingRequestDao implements IndexingRequestStore {
     return updated > 0;
   }
 
+  static final int MAX_ATTEMPTS = IndexingRequestStore.MAX_ATTEMPTS;
+
+  static final String POISONED_MESSAGE =
+      "Abandoned: this request was attempted "
+          + MAX_ATTEMPTS
+          + " times and each worker stopped before finishing it. Something about this range fails"
+          + " repeatedly rather than transiently.";
+
+  /**
+   * How deep {@link #claimNext} looks. One candidate would make every instance race for the same
+   * row and all but one fail each pass; a handful lets them spread out without reordering the queue
+   * in any way a user could notice.
+   */
+  private static final int CLAIM_CANDIDATES = 8;
+
+  @Override
+  public Optional<IndexingRequest> claimNext(String ownerId, Duration lease, Instant now) {
+    // Read candidates, then try to claim each. One statement would want FOR UPDATE SKIP LOCKED and
+    // H2 has none; the conditional UPDATE claim already performs is what makes this safe without
+    // it, since at most one racer's WHERE can match a given row. Losing costs a retry against the
+    // next candidate, not correctness.
+    List<UUID> candidates =
+        jdbi.withHandle(
+            h ->
+                h.createQuery(
+                        """
+                        SELECT id FROM indexing_requests
+                        WHERE status IN ('PENDING', 'PROCESSING')
+                          AND attempts < :maxAttempts
+                          AND (owner_id IS NULL
+                               OR lease_expires_at IS NULL
+                               OR lease_expires_at <= :now)
+                        ORDER BY created_at ASC, id ASC
+                        LIMIT :limit
+                        """)
+                    .bind("maxAttempts", MAX_ATTEMPTS)
+                    .bindByType("now", toUtcWallClock(now), LocalDateTime.class)
+                    .bind("limit", CLAIM_CANDIDATES)
+                    .mapTo(UUID.class)
+                    .list());
+
+    for (UUID id : candidates) {
+      if (claim(id, ownerId, lease, now)) {
+        return findById(id);
+      }
+    }
+    return Optional.empty();
+  }
+
   @Override
   public boolean claim(UUID id, String ownerId, Duration lease, Instant now) {
     // Unclaimed, or claimed by a lease that has run out. Expressed as one conditional UPDATE so
@@ -456,7 +599,9 @@ public class IndexingRequestDao implements IndexingRequestStore {
                 h.createUpdate(
                         """
                         UPDATE indexing_requests
-                        SET owner_id = :owner, lease_expires_at = :expires, updated_at = :now
+                        SET owner_id = :owner, lease_expires_at = :expires, updated_at = :now,
+                            attempts = CASE WHEN owner_id = :owner THEN attempts
+                                            ELSE attempts + 1 END
                         WHERE id = :id
                           AND status IN ('PENDING', 'PROCESSING')
                           AND (owner_id IS NULL

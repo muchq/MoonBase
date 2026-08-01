@@ -148,40 +148,39 @@ public class RequestLivenessTest {
   }
 
   /**
-   * Characterizes the hole the heartbeat does <em>not</em> close, so it cannot drift silently.
+   * The tripwire from #1278, now tripped, and honoured rather than renamed.
    *
-   * <p>A message waiting in the queue has no worker running for it, so nothing beats on its behalf
-   * and {@code updated_at} stays frozen at insert. A backlog deeper than the cutoff therefore
-   * retires work that is owned and about to run, and tells the user to re-submit while the message
-   * is still queued.
+   * <p>It used to assert that queued-but-unstarted work was retired, and said so as a known gap:
+   * "when dispatch claims from this table (#1279) the row will be claimed rather than queued, this
+   * test should fail, and it should be rewritten to assert the opposite."
    *
-   * <p>Ownership made the consequence worse rather than better, which is worth being explicit
-   * about: the worker that eventually dequeues the message now fails to claim the retired row and
-   * declines it, so nothing is indexed. Before, it carried on and its unfenced terminal write
-   * landed — the user got their games, at the cost of the concurrent-writer corruption that could
-   * follow from the freed dedupe slot.
-   *
-   * <p>This asserts the current, wrong behaviour on purpose. When dispatch claims from this table
-   * (#1279) the row will be claimed rather than queued, this test should fail, and it should be
-   * rewritten to assert the opposite. That failure is the notification.
+   * <p>So: a request nobody has started is not abandoned, it is queued, and any worker may take it.
+   * What still ends it is not age but a fleet that is demonstrably not running anything — the
+   * distinction between "my turn has not come" and "nothing is serving this", which age alone could
+   * never make.
    */
   @Test
-  public void queuedButUnstartedWorkIsStillRetired_knownGap() {
+  public void queuedButUnstartedWorkIsWaitingForAWorker() {
     TestDb testDb = TestDb.create("liveness_backlog");
     IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
     UUID queued = claim(dao).request().id();
 
-    // No worker has picked the message up yet; the backlog outlasts the cutoff.
+    // A worker is busy elsewhere: the fleet is alive, this row's turn has not come.
+    IndexingRequestStore.Claim elsewhere =
+        dao.createOrAdopt(
+            "other", PLATFORM, MONTH, MONTH, false, false, STALE_AFTER, clock.instant());
+    dao.claim(elsewhere.request().id(), "busy-worker", RetentionPolicy.LEASE, clock.instant());
+
     clock.advance(SLOW_FETCH);
+    dao.renewLease(elsewhere.request().id(), "busy-worker", RetentionPolicy.LEASE, clock.instant());
     dao.reclaimStale(STALE_AFTER, clock.instant());
 
     assertThat(dao.findById(queued).orElseThrow().status())
-        .as(
-            "known gap: queued-but-unstarted work is indistinguishable from abandoned work,"
-                + " because only a claimed request has an owner to renew for it. Beating on"
-                + " enqueue would not fix it either — the process holding the queue is the one"
-                + " that may have died. The fix is dispatch claiming from this table (#1279).")
-        .isEqualTo("FAILED");
+        .as("waiting behind a working fleet is not abandonment")
+        .isIn("PENDING", "PROCESSING");
+    assertThat(dao.claimNext("free-worker", RetentionPolicy.LEASE, clock.instant()))
+        .as("and any worker can take it")
+        .hasValueSatisfying(r -> assertThat(r.id()).isEqualTo(queued));
   }
 
   /** A renewal must not resurrect a request someone else already took. */
@@ -338,10 +337,51 @@ public class RequestLivenessTest {
         .isEqualTo("FAILED");
     assertThat(row.errorMessage()).contains("Indexing failed");
     assertThat(
-            dao.createOrAdopt(PLAYER, PLATFORM, MONTH, MONTH, false, STALE_AFTER, clock.instant())
+            dao.createOrAdopt(
+                    PLAYER, PLATFORM, MONTH, MONTH, false, false, STALE_AFTER, clock.instant())
                 .created())
         .as("and the dedupe slot is released, so the range is requestable again immediately")
         .isTrue();
+  }
+
+  /**
+   * One process, two ways in, one run.
+   *
+   * <p>#1279 gave this process a second entry point. The poller claims from the table; {@code
+   * submitHybrid} hands a message straight to {@code process}. Both can reach the same row — the
+   * poller can claim it in the gap between {@code createOrAdopt} committing and the inline call
+   * starting — and the lease cannot separate them, because {@code ownerId} names the process and
+   * {@code claim} therefore admits its own holder. That is correct for the question the lease
+   * answers and useless for this one.
+   *
+   * <p>Without an in-process guard both runs pass every fence, so the whole range is fetched and
+   * extracted twice, one terminal write is refused, and nothing anywhere says so.
+   */
+  @Test
+  @Timeout(30)
+  public void oneProcessRunsARequestOnceEvenWhenBothEntryPointsReachIt() throws Exception {
+    TestDb testDb = TestDb.create("liveness_two_entries");
+    IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    CountDownLatch insideFetch = new CountDownLatch(1);
+    CountDownLatch releaseFetch = new CountDownLatch(1);
+    CountingChessClient client = new CountingChessClient(insideFetch, releaseFetch);
+    IndexWorker worker = newWorker(client, dao, Duration.ofMillis(20));
+
+    // The poller's run gets there first and parks in the fetch.
+    Future<?> viaPoller = workerExecutor.submit(() -> worker.process(message(requestId)));
+    assertThat(insideFetch.await(15, TimeUnit.SECONDS)).isTrue();
+
+    // The inline dispatch arrives for the same row, in the same process, on this thread.
+    worker.process(message(requestId));
+
+    releaseFetch.countDown();
+    viaPoller.get(20, TimeUnit.SECONDS);
+
+    assertThat(client.fetches.get())
+        .as("the range was indexed twice — the same games fetched and extracted by both runs")
+        .isEqualTo(1);
   }
 
   /** Two workers, one request: the second must decline rather than double up on the games. */
@@ -450,7 +490,8 @@ public class RequestLivenessTest {
   // --- wiring ---------------------------------------------------------------------------------
 
   private IndexingRequestStore.Claim claim(IndexingRequestDao dao) {
-    return dao.createOrAdopt(PLAYER, PLATFORM, MONTH, MONTH, false, STALE_AFTER, clock.instant());
+    return dao.createOrAdopt(
+        PLAYER, PLATFORM, MONTH, MONTH, false, false, STALE_AFTER, clock.instant());
   }
 
   private IndexMessage message(UUID requestId) {
@@ -564,6 +605,37 @@ public class RequestLivenessTest {
     }
   }
 
+  /** Parks in the archive fetch until released, and counts how many runs got that far. */
+  private static final class CountingChessClient extends ChessClient {
+    final java.util.concurrent.atomic.AtomicInteger fetches =
+        new java.util.concurrent.atomic.AtomicInteger();
+    private final CountDownLatch entered;
+    private final CountDownLatch release;
+
+    CountingChessClient(CountDownLatch entered, CountDownLatch release) {
+      super(null, new ObjectMapper());
+      this.entered = entered;
+      this.release = release;
+    }
+
+    @Override
+    public Optional<GamesResponse> fetchGames(String player, YearMonth yearMonth) {
+      fetches.incrementAndGet();
+      entered.countDown();
+      try {
+        release.await(20, TimeUnit.SECONDS);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+      return Optional.empty();
+    }
+
+    @Override
+    public Optional<Player> fetchPlayer(String player) {
+      return Optional.empty();
+    }
+  }
+
   /** Parks in the archive fetch until released, then fails the run for real. */
   private static final class ThrowingChessClient extends ChessClient {
     private final CountDownLatch entered;
@@ -637,9 +709,16 @@ public class RequestLivenessTest {
         String startMonth,
         String endMonth,
         boolean excludeBullet,
+        boolean skipCache,
         Duration staleAfter,
         Instant now) {
       throw new UnsupportedOperationException();
+    }
+
+    /** Not exercised by RequestLiveness tests: nothing here dispatches from the table. */
+    @Override
+    public Optional<IndexingRequest> claimNext(String ownerId, Duration lease, Instant now) {
+      return Optional.empty();
     }
 
     @Override
@@ -649,13 +728,7 @@ public class RequestLivenessTest {
 
     @Override
     public Optional<IndexingRequest> findExistingRequest(
-        String player,
-        String platform,
-        String startMonth,
-        String endMonth,
-        boolean excludeBullet,
-        Duration staleAfter,
-        Instant now) {
+        String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
       return Optional.empty();
     }
 

@@ -41,6 +41,67 @@ public class MigrationTest {
     }
   }
 
+  /**
+   * The columns that make the table dispatchable, and the upgrade path onto them.
+   *
+   * <p>Asserted against a table that already has a row, because the interesting case is not a fresh
+   * schema — it is a request in flight during a deploy. Both columns are read as primitives, so a
+   * row the migration left NULL would arrive silently as "do not skip the cache, never attempted".
+   */
+  @Test
+  public void run_addsDispatchColumnsAndBackfillsExistingRows() throws Exception {
+    new Migration(dataSource, true).run();
+
+    UUID legacy = UUID.randomUUID();
+    try (Connection conn = dataSource.getConnection();
+        var ps =
+            conn.prepareStatement(
+                "INSERT INTO indexing_requests (id, player, platform, start_month, end_month,"
+                    + " status) VALUES (?, 'legacy', 'CHESS_COM', '2024-01', '2024-01',"
+                    + " 'PENDING')")) {
+      ps.setObject(1, legacy);
+      ps.executeUpdate();
+    }
+
+    // Idempotent: running again must not disturb the row or the columns.
+    new Migration(dataSource, true).run();
+
+    try (Connection conn = dataSource.getConnection();
+        var ps =
+            conn.prepareStatement(
+                "SELECT skip_cache, attempts FROM indexing_requests WHERE id = ?")) {
+      ps.setObject(1, legacy);
+      try (ResultSet rs = ps.executeQuery()) {
+        assertThat(rs.next()).isTrue();
+        assertThat(rs.getObject("skip_cache")).as("skip_cache must not be NULL").isNotNull();
+        assertThat(rs.getBoolean("skip_cache")).isFalse();
+        assertThat(rs.getObject("attempts")).as("attempts must not be NULL").isNotNull();
+        assertThat(rs.getInt("attempts")).isZero();
+      }
+    }
+  }
+
+  /**
+   * The index the poller's candidate scan depends on, on a query every instance runs constantly.
+   */
+  @Test
+  public void run_addsTheClaimableIndex() throws Exception {
+    new Migration(dataSource, true).run();
+
+    try (Connection conn = dataSource.getConnection();
+        ResultSet indexes =
+            conn.getMetaData().getIndexInfo(null, null, "INDEXING_REQUESTS", false, false)) {
+      boolean found = false;
+      while (indexes.next()) {
+        String name = indexes.getString("INDEX_NAME");
+        if (name != null && name.equalsIgnoreCase("idx_indexing_requests_claimable")) {
+          found = true;
+        }
+      }
+      assertThat(found).as("idx_indexing_requests_claimable should exist").isTrue();
+    }
+  }
+
   @Test
   public void run_addsTitleAndOpeningColumns() throws Exception {
     Migration migration = new Migration(dataSource, true);
@@ -135,6 +196,7 @@ public class MigrationTest {
             "2024-01",
             "2024-03",
             true,
+            false,
             java.time.Duration.ofHours(1),
             java.time.Instant.now());
     assertThat(claim.created()).isFalse();
@@ -194,14 +256,7 @@ public class MigrationTest {
 
     IndexingRequestDao dao = new IndexingRequestDao(org.jdbi.v3.core.Jdbi.create(dataSource));
     UUID found =
-        dao.findExistingRequest(
-                "tied",
-                "CHESS_COM",
-                "2024-05",
-                "2024-05",
-                false,
-                java.time.Duration.ofDays(3650),
-                Instant.parse("2026-06-01T01:00:00Z"))
+        dao.findExistingRequest("tied", "CHESS_COM", "2024-05", "2024-05", false)
             .orElseThrow()
             .id();
 

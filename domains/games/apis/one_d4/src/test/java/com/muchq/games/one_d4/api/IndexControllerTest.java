@@ -87,7 +87,9 @@ public class IndexControllerTest {
             Instant.now(),
             null,
             50,
-            false));
+            false,
+            false,
+            0));
 
     IndexRequest request = new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-03", null);
     IndexResponse response = controller.createIndex(request);
@@ -118,7 +120,9 @@ public class IndexControllerTest {
             Instant.now(),
             null,
             0,
-            false));
+            false,
+            false,
+            0));
 
     IndexResponse response =
         controller.createIndex(new IndexRequest("player", "CHESS_COM", "2024-06", "2024-06", null));
@@ -176,7 +180,9 @@ public class IndexControllerTest {
             Instant.now(),
             null,
             0,
-            false));
+            false,
+            false,
+            0));
 
     IndexResponse response =
         controller.createIndex(
@@ -211,7 +217,9 @@ public class IndexControllerTest {
                         Instant.now(),
                         null,
                         10,
-                        false)));
+                        false,
+                        false,
+                        0)));
 
     List<IndexResponse> responses = controller.listRequests();
 
@@ -232,7 +240,9 @@ public class IndexControllerTest {
             Instant.now(),
             null,
             42,
-            false);
+            false,
+            false,
+            0);
     requestStore.setExistingRequest(stored);
     requestStore.setFindByIdResponse(stored);
 
@@ -313,7 +323,9 @@ public class IndexControllerTest {
         Instant.now(),
         null,
         42,
-        false);
+        false,
+        false,
+        0);
   }
 
   private static IndexResponse byPlayer(List<IndexResponse> responses, String player) {
@@ -393,6 +405,7 @@ public class IndexControllerTest {
         String startMonth,
         String endMonth,
         boolean excludeBullet,
+        boolean skipCache,
         Duration staleAfter,
         Instant now) {
       // Mirrors the schema's exclusivity: if a live request is already registered for this tuple,
@@ -421,8 +434,17 @@ public class IndexControllerTest {
               now,
               null,
               0,
-              excludeBullet),
+              excludeBullet,
+              false,
+              0),
           true);
+    }
+
+    /** Not exercised by IndexController tests: nothing here dispatches from the table. */
+    @Override
+    public Optional<IndexingRequestStore.IndexingRequest> claimNext(
+        String ownerId, java.time.Duration lease, Instant now) {
+      return Optional.empty();
     }
 
     @Override
@@ -476,13 +498,7 @@ public class IndexControllerTest {
 
     @Override
     public Optional<IndexingRequestStore.IndexingRequest> findExistingRequest(
-        String player,
-        String platform,
-        String startMonth,
-        String endMonth,
-        boolean excludeBullet,
-        Duration staleAfter,
-        Instant now) {
+        String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
       return existingRequest.filter(
           r ->
               r.player().equals(player)

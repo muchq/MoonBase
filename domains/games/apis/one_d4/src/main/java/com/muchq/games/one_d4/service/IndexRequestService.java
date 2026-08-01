@@ -63,8 +63,7 @@ public class IndexRequestService {
 
   /**
    * @param skipCache refetch every month in the range instead of serving any of them from the
-   *     indexed-period cache, and skip the dedupe read — the backfill path for rows indexed before
-   *     newer columns existed.
+   *     indexed-period cache — the backfill path for rows indexed before newer columns existed.
    *     <p>It does not permit a second concurrent run of the same range. If a live request already
    *     holds that (player, platform, month range, excludeBullet), this returns that request rather
    *     than starting a rival one: two indexers over the same games interleave {@code
@@ -122,26 +121,16 @@ public class IndexRequestService {
           "Maximum range is " + MAX_MONTH_SPAN + " months, got " + monthSpan);
     }
 
-    if (!submission.skipCache()) {
-      Optional<IndexingRequestStore.IndexingRequest> existing =
-          requestStore.findExistingRequest(
-              player,
-              platform,
-              submission.startMonth(),
-              submission.endMonth(),
-              submission.excludeBullet(),
-              RetentionPolicy.STALE_REQUEST,
-              clock.instant());
-      if (existing.isPresent()) {
-        return toResponse(existing.get());
-      }
-    }
-
-    // Even on the skipCache path this goes through createOrAdopt rather than a bare insert. The
-    // read above is an optimization — it answers a duplicate submit without touching the write
-    // path — but it cannot be the thing that prevents double-dispatch, because two callers can
-    // both read nothing. The claim is what decides, and only a caller that actually created the
-    // row is allowed to dispatch work for it.
+    // One question, one call. createOrAdopt settles the key first and then either adopts the row
+    // that holds it or inserts, so it answers a duplicate submit as well as a fresh one, and only
+    // a caller that actually created the row is allowed to dispatch work for it.
+    //
+    // A findExistingRequest read used to short-circuit ahead of this as an optimization, skipped
+    // on skipCache. Both paths converged here anyway, so it saved a settle on duplicate submits
+    // and nothing else — and once #1279 took the clock out of that read, what it saved was the
+    // settle. A row nobody will ever run still reads as live, so the short-circuit answered every
+    // resubmit with it and never reached the reclaim that would have retired it and freed the
+    // range. The submit path is the one prompt reclaimer there is; RetentionWorker is hourly.
     IndexingRequestStore.Claim claim =
         requestStore.createOrAdopt(
             player,
@@ -149,6 +138,7 @@ public class IndexRequestService {
             submission.startMonth(),
             submission.endMonth(),
             submission.excludeBullet(),
+            submission.skipCache(),
             RetentionPolicy.STALE_REQUEST,
             clock.instant());
     if (!claim.created()) {
@@ -166,11 +156,10 @@ public class IndexRequestService {
             submission.skipCache());
 
     if (inlineSingleMonth && monthSpan <= 1) {
-      // The inline path has no queue entry and no other owner: if this throws, nothing else will
-      // ever move the row off PENDING, and it holds its dedupe slot until the staleness sweep
-      // notices an hour later. IndexWorker.process already catches Exception and marks FAILED, so
-      // reaching here means its own status write failed or an Error escaped — rare, but the row
-      // is stranded either way. Retire it on the way out so the range frees immediately.
+      // The row is the queue now, so a throw here no longer strands it — a poller will claim it,
+      // on this instance or another. This handler is still worth having: it turns an Error that
+      // escaped IndexWorker.process into a recorded outcome rather than a silent requeue, and
+      // submitHybrid's caller is waiting for an answer rather than polling for one.
       try {
         inlineProcessor.accept(message);
       } catch (Throwable t) {

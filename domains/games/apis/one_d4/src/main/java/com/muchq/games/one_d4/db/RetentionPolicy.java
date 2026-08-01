@@ -33,39 +33,26 @@ public final class RetentionPolicy {
   public static final Duration REQUEST = Duration.ofDays(30);
 
   /**
-   * How long a live request that <em>nobody has claimed</em> may sit before it is presumed orphaned
-   * and retired to FAILED.
+   * How long a request may sit untouched, with no worker running anywhere, before it is retired and
+   * the user is told.
    *
-   * <p>Without a bound, a single stranded row blocks its (player, platform, month range) forever:
-   * dedupe keeps returning it, and the unique constraint on {@code dedupe_key} keeps a replacement
-   * from being created. Rows get stranded by ordinary events — a restart with work still in the
-   * process-local queue, or an inline MCP dispatch that throws before the worker takes ownership —
-   * so "rare" is not the same as "never".
+   * <p>This used to mean "nobody ever picked this up, so it is orphaned" — a reasonable reading
+   * while dispatch came from a process-local queue, where a row nobody had claimed usually meant a
+   * message that died with its process. Once workers claim from the table (#1279), an unclaimed row
+   * is simply queued, and retiring it on age alone throws away work that was about to run and tells
+   * the user to resubmit into the same queue.
    *
-   * <p>This is measured in hours because it is the wrong question asked of an unanswerable
-   * situation. There is no owner whose silence could be measured, so the only evidence is the age
-   * of the row, and the row's age says nothing about whether the work is about to start. For a
-   * request that <em>has</em> been claimed there is a better question and a much shorter clock: see
-   * {@link #LEASE}.
+   * <p>So the window survives, but qualified: it fires only when no worker anywhere holds a live
+   * lease. That is the difference between a backlog and an outage. A backlog is the system working;
+   * an outage — every instance down, or partitioned from this database — is the one case where
+   * nothing will ever pick the work up, and the user needs an answer rather than an indefinite
+   * PENDING. See {@link IndexingRequestStore#reclaimStale}.
    *
-   * <p>What the hour still does not cover is time spent waiting in the queue, and the cost of that
-   * went <em>up</em> when ownership arrived. {@code InMemoryIndexQueue} is drained by a single
-   * thread, and a queued message has no worker holding a lease for it, so its {@code updated_at}
-   * stays frozen at insert and a backlog deeper than an hour retires work that is owned and about
-   * to run. The worker then reaches the message, fails to claim a retired row, and declines: the
-   * indexing does not happen at all. Before ownership it carried on and its unfenced terminal write
-   * landed, so the user got their games — at the cost of exactly the concurrent-writer corruption
-   * this design prevents, since the freed dedupe slot may already have started a replacement.
-   *
-   * <p>Neither answer is right, and a bigger number only makes the wrong one slower. The fix is for
-   * queued work not to be invisible: dispatch claiming from this table instead of from memory,
-   * tracked as #1279.
-   *
-   * <p>The invariant that {@link #REQUEST} must exceed {@link #PERIOD} is asserted in {@code
-   * IndexE2ETest} alongside the existing check on PERIOD, not in a static initializer here. These
-   * are compile-time constants a few lines apart, so a violation can only be introduced by editing
-   * this file — and a static block would report it as an {@code ExceptionInInitializerError} during
-   * Micronaut startup rather than as a failing test.
+   * <p>An hour is generous for detecting an outage and harmless for a healthy fleet, where a queued
+   * request is claimed within seconds and its {@code updated_at} moves. The invariant that {@link
+   * #REQUEST} must exceed {@link #PERIOD} is asserted in {@code IndexE2ETest} rather than in a
+   * static initializer here, where a violation would surface as an {@code
+   * ExceptionInInitializerError} during Micronaut startup instead of as a failing test.
    */
   public static final Duration STALE_REQUEST = Duration.ofHours(1);
 
@@ -77,15 +64,11 @@ public final class RetentionPolicy {
    * nobody owns. This asks "is the owner still there?", which the owner itself answers by renewing
    * every {@link #LEASE_RENEWAL}, so it can be decided in minutes rather than an hour.
    *
-   * <p>What "decided" means today is narrower than it sounds, and worth stating rather than
-   * implying. A lapsed lease makes the request <em>reclaimable</em>; nothing picks it up. {@code
-   * IndexWorker.process} is the only caller of {@code claim}, and it runs on a dispatched message,
-   * so there is no scanner looking for expired leases and no re-dispatch. The row is retired to
-   * FAILED and the range becomes requestable again — the user resubmits. Reclamation itself is only
-   * as prompt as its caller: {@code RetentionWorker} is on an hourly schedule, and the only faster
-   * path is {@code createOrAdopt}, which retires the key it is about to claim. So the five minutes
-   * bounds when a lapse <em>may</em> be acted on, not when it is. Actually handing the range to
-   * another worker is #1279.
+   * <p>A lapsed lease returns the work to the queue rather than ending it: the sweep clears the
+   * owner and any worker may claim it next (#1279). The five minutes still bounds when that
+   * <em>may</em> happen rather than when it does, because reclamation is only as prompt as its
+   * caller — {@code RetentionWorker} runs hourly, and the one faster path is {@code createOrAdopt}
+   * settling the key it is about to claim.
    *
    * <p>Five minutes is four renewal intervals: three consecutive misses are survivable and expiry
    * lands on the fourth. Short enough that a crashed instance does not strand a range for longer

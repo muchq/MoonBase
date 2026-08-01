@@ -46,12 +46,13 @@ To use PostgreSQL instead, set the `INDEXER_DB_URL` environment variable to a Po
 │                                               │
 │  ┌───────────┐   ┌──────────────────────┐    │
 │  │ HTTP API  │   │  InMemoryIndexQueue   │    │
-│  │ /v1/index ├──►│  (LinkedBlockingQueue) │    │
+│  │ /v1/index ├──►│  (wake-up nudge only)  │    │
 │  │ /v1/query │   └──────────┬───────────┘    │
-│  └─────┬─────┘              │                │
+│  └─────┬─────┘              ╎ (nudge)        │
 │        │              ┌─────▼──────┐         │
-│        │              │IndexWorker │         │
-│        │              └─────┬──────┘         │
+│        │              │IndexWorker │◄────────┼─ claims from
+│        │              └─────┬──────┘         │  indexing_requests
+│        │                    │                │
 │        │                    │                │
 │        │    ┌───────────────▼──────────────┐ │
 │        └───►│       H2 (in-memory)         │ │

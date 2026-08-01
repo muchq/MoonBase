@@ -67,7 +67,7 @@ public class RequestStalenessTimeZoneTest {
   @Test
   public void storedTimestampsAreUtcWallClocksNotJvmLocal() {
     IndexingRequestStore.Claim claim =
-        dao.createOrAdopt("tz", "CHESS_COM", "2026-06", "2026-06", false, STALE_AFTER, NOW);
+        dao.createOrAdopt("tz", "CHESS_COM", "2026-06", "2026-06", false, false, STALE_AFTER, NOW);
 
     LocalDateTime expected = LocalDateTime.of(2026, 7, 1, 12, 0, 0);
     assertThat(rawTimestamp(claim.request().id(), "created_at")).isEqualTo(expected);
@@ -77,7 +77,7 @@ public class RequestStalenessTimeZoneTest {
   @Test
   public void updateStatusAlsoStampsAUtcWallClock() {
     IndexingRequestStore.Claim claim =
-        dao.createOrAdopt("tz2", "CHESS_COM", "2026-06", "2026-06", false, STALE_AFTER, NOW);
+        dao.createOrAdopt("tz2", "CHESS_COM", "2026-06", "2026-06", false, false, STALE_AFTER, NOW);
     dao.updateStatus(claim.request().id(), "PROCESSING", null, 1);
 
     assertThat(rawTimestamp(claim.request().id(), "updated_at"))
@@ -92,9 +92,9 @@ public class RequestStalenessTimeZoneTest {
   @Test
   public void stalenessIsMeasuredInUtcRegardlessOfTheJvmZone() {
     IndexingRequestStore.Claim fresh =
-        dao.createOrAdopt("tz3", "CHESS_COM", "2026-06", "2026-06", false, STALE_AFTER, NOW);
+        dao.createOrAdopt("tz3", "CHESS_COM", "2026-06", "2026-06", false, false, STALE_AFTER, NOW);
     IndexingRequestStore.Claim stale =
-        dao.createOrAdopt("tz4", "CHESS_COM", "2026-06", "2026-06", false, STALE_AFTER, NOW);
+        dao.createOrAdopt("tz4", "CHESS_COM", "2026-06", "2026-06", false, false, STALE_AFTER, NOW);
 
     // 30 minutes old and 3 hours old, written as UTC wall clocks by hand.
     writeUtcWallClock(fresh.request().id(), LocalDateTime.of(2026, 7, 1, 11, 30));
@@ -107,19 +107,26 @@ public class RequestStalenessTimeZoneTest {
   }
 
   /**
-   * The same boundary through the dedupe read. Under a UTC+14 leak the 30-minute-old row would look
-   * 14 hours stale and dedupe would stop seeing it, which is what silently disables #1249's guard.
+   * The same boundary through the submit path. Under a UTC+14 leak the 30-minute-old row would look
+   * 14 hours stale, so the reclaim {@code createOrAdopt} runs first would retire it and this caller
+   * would insert a rival for the same games — which is exactly what silently disables #1249's
+   * guard.
+   *
+   * <p>Asserted through {@code createOrAdopt} rather than through {@code findExistingRequest},
+   * which since #1279 reads no timestamps at all: dedupe asks only whether a row still holds the
+   * range, and the clock belongs to reclamation. Pointing this at the read would make it vacuous.
    */
   @Test
-  public void findExistingRequestStillSeesAFreshRowUnderANonUtcZone() {
-    IndexingRequestStore.Claim claim =
-        dao.createOrAdopt("tz5", "CHESS_COM", "2026-06", "2026-06", false, STALE_AFTER, NOW);
-    writeUtcWallClock(claim.request().id(), LocalDateTime.of(2026, 7, 1, 11, 30));
+  public void submittingAgainAdoptsAFreshRowUnderANonUtcZone() {
+    IndexingRequestStore.Claim first =
+        dao.createOrAdopt("tz5", "CHESS_COM", "2026-06", "2026-06", false, false, STALE_AFTER, NOW);
+    writeUtcWallClock(first.request().id(), LocalDateTime.of(2026, 7, 1, 11, 30));
 
-    assertThat(
-            dao.findExistingRequest(
-                "tz5", "CHESS_COM", "2026-06", "2026-06", false, STALE_AFTER, NOW))
-        .isPresent();
+    IndexingRequestStore.Claim second =
+        dao.createOrAdopt("tz5", "CHESS_COM", "2026-06", "2026-06", false, false, STALE_AFTER, NOW);
+
+    assertThat(second.created()).as("a 30-minute-old row must not be retired as stale").isFalse();
+    assertThat(second.request().id()).isEqualTo(first.request().id());
   }
 
   private LocalDateTime rawTimestamp(UUID id, String column) {

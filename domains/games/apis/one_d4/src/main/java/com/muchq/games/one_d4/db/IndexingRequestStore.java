@@ -9,6 +9,21 @@ import java.util.UUID;
 public interface IndexingRequestStore {
 
   /**
+   * How many times a request may be claimed before it is presumed to be killing its workers.
+   *
+   * <p>Counted on claim rather than on failure, which is the conservative direction: a worker the
+   * request kills before it can report anything still moves the counter. Three tolerates a
+   * transient fault — a restart, a rolling deploy, one bad node — and is few enough that a genuine
+   * poison pill does not tour the fleet.
+   *
+   * <p>On the interface rather than the DAO because it is part of the contract, not an
+   * implementation detail: {@link #findExistingRequest} and {@link #reclaimStale} are both defined
+   * in terms of it, so a fake that picks its own number models a different system than the one it
+   * stands in for.
+   */
+  int MAX_ATTEMPTS = 3;
+
+  /**
    * Atomically claims the live slot for this (player, platform, startMonth, endMonth,
    * excludeBullet), returning either a freshly created request or the one that already holds it.
    *
@@ -23,8 +38,10 @@ public interface IndexingRequestStore {
    * <p>The caller must dispatch work only when {@link Claim#created()} is true. Adopting means
    * another caller already owns the work.
    *
-   * <p>Implementations also retire rows stranded past {@code staleAfter} as part of the same atomic
-   * step, so an abandoned request cannot hold the slot against its replacement.
+   * <p>Implementations settle any abandoned holder first, as part of the same atomic step. Usually
+   * that means releasing it back to the queue and letting this caller adopt it rather than start a
+   * rival; only a request whose attempts are spent is retired, which frees the key so an insert can
+   * succeed. See {@link #reclaimStale}.
    */
   Claim createOrAdopt(
       String player,
@@ -32,8 +49,30 @@ public interface IndexingRequestStore {
       String startMonth,
       String endMonth,
       boolean excludeBullet,
+      boolean skipCache,
       Duration staleAfter,
       Instant now);
+
+  /**
+   * Takes the oldest live request nobody currently holds, and returns it — the table used as the
+   * work queue.
+   *
+   * <p>This is what lets any worker run any request. Before it, a request could only ever be
+   * processed by the process that accepted the submit, because the message went into that JVM's
+   * {@code InMemoryIndexQueue}: adding an instance added no throughput for work already queued, a
+   * restart lost the messages while the rows survived, and the two-JVM deployment sent load
+   * wherever the submit happened to arrive.
+   *
+   * <p>Selection then {@link #claim}, rather than one statement, and deliberately so. {@code SELECT
+   * ... FOR UPDATE SKIP LOCKED} would be the obvious shape and H2 does not have it; the conditional
+   * UPDATE {@code claim} already performs is what makes this safe without it, since at most one
+   * racer's WHERE can match. Losing the race costs a retry against the next candidate, not
+   * correctness.
+   *
+   * <p>Ordered oldest-first because the queue it replaces was FIFO. Rows whose attempts are
+   * exhausted are skipped — see {@link #reclaimStale}.
+   */
+  Optional<IndexingRequest> claimNext(String ownerId, Duration lease, Instant now);
 
   Optional<IndexingRequest> findById(UUID id);
 
@@ -41,54 +80,64 @@ public interface IndexingRequestStore {
    * Returns the live request with the same (player, platform, startMonth, endMonth, excludeBullet),
    * if there is one. Used to avoid creating duplicate indexing work.
    *
-   * <p>"Live" here must mean exactly what it means to {@link #reclaimStale} — the same two arms,
-   * negated. A claimed request is live while its lease holds; an unclaimed one is live until {@code
-   * staleAfter}. Answering that question two different ways on one submit is a bug with a long
-   * tail: this read runs first and short-circuits, so a laxer predicate here silently overrides the
-   * stricter reclamation behind it, and a request whose worker was killed keeps being handed back
-   * to callers for the full hour instead of the lease's few minutes.
+   * <p>Live means "still holds this range", which since #1279 is a narrower question than it looks.
+   * A request whose worker died is still live: the work goes back in the queue, so a second submit
+   * should adopt it rather than start a rival for the same games. A request sitting unclaimed is
+   * live for the same reason. What ends a claim on a range is exhausting the attempts — after that
+   * no worker may take it again, so it cannot go on holding the range against a resubmit.
+   *
+   * <p>Takes no clock, because it no longer ages rows out itself. That duplicated {@link
+   * #reclaimStale}'s judgement, and once the stalled arm grew a fleet-liveness probe the two
+   * answers diverged — this one would disown a queued row that reclamation would rightly leave
+   * alone. The question is now purely "does a row still hold this range", and the clock belongs to
+   * the one operation that settles rows.
+   *
+   * <p>Which leaves this with no production caller, and it should not acquire one — the same rule
+   * {@link #holdsLease} is under, for the same reason. Reading this and then acting on the answer
+   * is a check-then-act: two submits can both see nothing and both insert, which is the race {@link
+   * #createOrAdopt} exists to close by folding the read into the claim. And since the read cannot
+   * judge staleness any more, a caller that short-circuits on it skips the settle that {@code
+   * createOrAdopt} does first, so a row nobody will ever run goes on answering resubmits forever.
+   * Kept for tests and diagnostics, where "does anything hold this range" is a question worth
+   * asking on its own.
    */
   Optional<IndexingRequest> findExistingRequest(
-      String player,
-      String platform,
-      String startMonth,
-      String endMonth,
-      boolean excludeBullet,
-      Duration staleAfter,
-      Instant now);
+      String player, String platform, String startMonth, String endMonth, boolean excludeBullet);
 
   List<IndexingRequest> listRecent(int limit);
 
   void updateStatus(UUID id, String status, String errorMessage, int gamesIndexed);
 
   /**
-   * Retires live requests nobody is working on, freeing the dedupe slot and the lease each one
-   * holds. Returns the number retired.
-   *
-   * <p>Two different questions, deliberately kept apart:
+   * Settles every request nobody is working on, and returns how many it touched. Three outcomes,
+   * because "nobody is working on it" has three different meanings once the table is the queue.
    *
    * <ul>
-   *   <li><b>Claimed, lease expired.</b> Someone took this and stopped renewing, so the owner is
-   *       gone. Decided by {@link RetentionPolicy#LEASE}, in minutes.
-   *   <li><b>Never claimed, and old.</b> Nobody ever picked it up. Decided by {@code staleAfter},
-   *       in hours, because there is no owner whose silence could be measured — only the age of the
-   *       row itself.
+   *   <li><b>Released.</b> A lease expired with attempts to spare. The owner is gone; the work is
+   *       not. The row is unclaimed and left live for the next worker, keeping its {@code
+   *       dedupe_key} because the range is still spoken for. This is the common case and it is
+   *       silent — telling the user anything here would be a lie about work that is about to run.
+   *   <li><b>Poisoned.</b> Claimed {@code MAX_ATTEMPTS} times, each worker stopping before it
+   *       finished. Releasing is unbounded by construction, so without this a request that kills
+   *       the process handling it tours the fleet forever, costing a worker each lap — a
+   *       possibility that did not exist while a crashed process took its queue down with it.
+   *   <li><b>Stalled.</b> Nobody holds it, nothing has touched it in {@code staleAfter}, and no
+   *       worker <em>anywhere</em> holds a live lease. Every instance is down or partitioned, so
+   *       nothing is going to run this and the user is owed an answer. Silence is the worse one.
    * </ul>
    *
-   * <p>Conflating those two is what made a slow request indistinguishable from a dead one: a
-   * running worker that simply had nothing to report for an hour was retired underneath itself. A
-   * request being worked on now renews, and renewal is a claim about the owner rather than about
-   * progress, so it stays alive however long a month takes.
+   * <p>That last clause is doing real work, and leaving it out would recreate the bug two previous
+   * changes were spent removing. Age alone cannot distinguish "nothing is serving this" from "my
+   * turn has not come": one worker draining a deep backlog leaves rows at the back untouched for as
+   * long as the backlog takes, and retiring those tells users to resubmit work that was about to
+   * start. A live lease held by anyone is proof the fleet is working.
    *
-   * <p>Retiring makes a request reclaimable; it does not hand it to anyone. There is no scanner for
-   * expired leases and no re-dispatch — the row goes FAILED, the range becomes requestable, and the
-   * user resubmits. Actual takeover is #1279.
-   *
-   * <p>The unclaimed arm still has the gap it always had, and ownership made its consequence worse:
-   * a message waiting in a process-local queue has no owner to renew for it, so a backlog deeper
-   * than {@code staleAfter} retires work that is owned and about to run — and the worker that
-   * eventually reaches it now declines the retired row instead of indexing it anyway. Closing that
-   * means dispatch pulling from this table instead of an in-memory queue (#1279).
+   * <p>Implementations must apply the arms <b>poisoned, stalled, released</b> — which is not the
+   * order they are listed in above, because that list is ordered by how often each happens rather
+   * than by precedence. Two overlaps force it. A row whose attempts are spent is usually also
+   * unheld and old, so it matches the stalled arm as well; both retire it, but only one gives the
+   * user the real reason. And releasing stamps {@code updated_at}, which makes a row look freshly
+   * touched and hides it from the stalled arm for another whole window.
    */
   int reclaimStale(Duration staleAfter, Instant now);
 
@@ -184,5 +233,7 @@ public interface IndexingRequestStore {
       Instant updatedAt,
       String errorMessage,
       int gamesIndexed,
-      boolean excludeBullet) {}
+      boolean excludeBullet,
+      boolean skipCache,
+      int attempts) {}
 }
