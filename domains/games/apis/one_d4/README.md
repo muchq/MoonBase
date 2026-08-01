@@ -37,7 +37,7 @@ flowchart TB
 
   subgraph IndexPath["Index Path"]
     Queue["IndexQueue\n(InMemory)"]
-    Lifecycle["IndexWorkerLifecycle\n(poll every 5s)"]
+    Lifecycle["IndexWorkerLifecycle\n(claims from indexing_requests)"]
     Worker["IndexWorker"]
     ChessClient["ChessClient"]
     Extractor["FeatureExtractor"]
@@ -81,7 +81,8 @@ flowchart TB
   RequestStore --> DB
   PeriodStore --> DB
 
-  Queue --> Lifecycle
+  RequestStore --> Lifecycle
+  Queue -.nudge.-> Lifecycle
   Lifecycle --> Worker
   Worker --> ChessClient
   Worker --> RequestStore
@@ -100,11 +101,11 @@ flowchart TB
   RetentionWorker --> RequestStore
 ```
 
-**Index flow:** Client posts to `POST /v1/index` → request is stored and a message is enqueued. A background thread (IndexWorkerLifecycle) polls the queue; IndexWorker fetches games from Chess.com per month (skipping months already in IndexedPeriodStore), runs FeatureExtractor (PgnParser → GameReplayer → MotifDetectors) on each game, and writes to GameFeatureStore (game_features + motif_occurrences) and IndexedPeriodStore. Fork occurrences are derived inside FeatureExtractor from ATTACK occurrences (same ply + attacker targeting 2+ pieces).
+**Index flow:** Client posts to `POST /v1/index` → a row is stored in `indexing_requests`, which is the work queue. A background thread (IndexWorkerLifecycle) on **any** instance claims the oldest unheld row and takes a lease on it; a local in-memory nudge just wakes the poller sooner. IndexWorker fetches games from Chess.com per month (skipping months already in IndexedPeriodStore), runs FeatureExtractor (PgnParser → GameReplayer → MotifDetectors) on each game, and writes to GameFeatureStore (game_features + motif_occurrences) and IndexedPeriodStore. Fork occurrences are derived inside FeatureExtractor from ATTACK occurrences (same ply + attacker targeting 2+ pieces).
 
 **Query flow:** Client posts a ChessQL string to `POST /v1/query` → Parser and SqlCompiler produce SQL → GameFeatureStore runs the query and loads motif_occurrences for the result set → response returns GameFeatureRow list with per-game occurrences.
 
-**Retention:** RetentionWorker runs hourly. It deletes game_features, motif_occurrences (via FK cascade), and indexed_periods older than 7 days, and indexing_requests older than 30 days — games first, so a request and its games clear in one pass. It also retires live requests nobody is working on — a claimed one whose owner has stopped renewing its five-minute lease, an unclaimed one over an hour old — freeing the dedupe slot each one holds. Since the sweep is hourly, those windows say when a request becomes eligible, not when it is retired.
+**Retention:** RetentionWorker runs hourly. It deletes game_features, motif_occurrences (via FK cascade), and indexed_periods older than 7 days, and indexing_requests older than 30 days — games first, so a request and its games clear in one pass. It also settles live requests nobody is working on: a lapsed lease returns the work to the queue for another worker, and only an exhausted attempt count or a fleet that is demonstrably not running anything retires a request to FAILED. Since the sweep is hourly, those windows say when a request becomes eligible, not when it is settled.
 
 ## Running Locally (in-memory)
 
@@ -249,34 +250,44 @@ between the two windows the surviving row is what lets `GET /v1/index/{id}` repo
 ("pruned — re-run it") rather than 404. The sweep deletes games before requests so both clear in
 one pass, and skips any request still referenced by a game.
 
-Separately, a live request that nobody is working on is retired to FAILED, which frees the dedupe
-slot it holds for its (player, platform, month range). Two different questions, on two clocks:
+Separately, a live request that nobody is working on is settled by the retention worker. Three
+outcomes, because "nobody is working on it" means three different things:
 
-| Situation | Eligible for retirement after | Why that clock |
+| Situation | Outcome | Why |
 |---|---|---|
-| Claimed, but the owner stopped renewing | **5 minutes** (`LEASE`) | The owner reports in every 75 seconds. Three missed renewals are survivable; expiry lands on the fourth. |
-| Never claimed by anyone | **1 hour** (`STALE_REQUEST`) | There is no owner whose silence could be measured, so the only evidence is the age of the row. |
+| Claimed, owner stopped renewing, attempts remain | **Requeued** | The owner is gone; the work is not. Another worker picks it up. Silent — the user is not told about work that is about to run. |
+| Claimed 3 times, each worker stopped before finishing | **FAILED** (poisoned) | Requeuing is unbounded by construction, so a request that kills its worker would tour the fleet forever. |
+| Untouched for **1 hour**, and no worker anywhere holds a lease | **FAILED** (stalled) | Every instance is down or partitioned. Nothing will run this, and silence is a worse answer than failure. |
 
-*Eligible*, not retired — the distinction matters. Reclamation is only as prompt as its caller, and
-the caller is the hourly `RetentionWorker`; the one faster path is a resubmit for the same range,
-which retires the key it is about to claim. And retiring frees the range rather than handing it
-over: nothing scans for expired leases and nothing re-dispatches, so the user resubmits. Making
-another worker pick the range up is [#1279](https://github.com/muchq/MoonBase/issues/1279).
+That last row's second condition is load-bearing. Age alone cannot tell "nothing is serving this"
+from "my turn hasn't come" — one worker draining a deep backlog leaves rows at the back untouched
+for as long as the backlog takes — so the sweep stays quiet while any worker holds a live lease.
 
-A worker takes an explicit lease on a request before it writes anything: `owner_id` names the
-process, and every subsequent write — progress, the terminal status, and the batched game and
-occurrence writes — is conditioned on the row still naming it. A worker whose row has changed
-hands stops rather than reasserting itself; a lease that merely lapsed with nobody taking it is
-renewed and the run continues, because abandoning work no one else wants helps nobody.
+The situations overlap, so the sweep applies them **poisoned, stalled, requeued** and the first
+match wins. A row at the attempt limit is usually also old and unheld, and both arms would fail it,
+but only one gives the user the real reason; and requeuing stamps `updated_at`, so doing it first
+would make a row look freshly touched and hide it from the staleness check for another whole hour.
 
-Renewal says "the owner is still here", not "progress was made", so a request can run for hours
-against a slow archive without looking abandoned. The hour above still misses one case, and
-ownership made its cost worse: a message waiting in the in-memory queue has no worker to renew for
-it, so a backlog deeper than an hour retires it — and the worker that eventually dequeues it finds
-a retired row, declines it, and indexes nothing. Previously it carried on and recorded a result,
-which is how the range could end up with two writers. Closing this properly means dispatch claiming
-from the table rather than from a process-local queue
-([#1279](https://github.com/muchq/MoonBase/issues/1279)).
+None of that covers a worker that is *leaving on purpose*, and it can't: every arm above needs the
+owner to have stopped answering, which a deploy only looks like after the lease expires. So a
+shutting-down worker hands its request back itself — unclaimed immediately, and with the attempt
+returned. The attempt matters more than the five minutes: `attempts` is spent on claim so that a
+request which kills its worker outright still moves the counter, which means a process exit is
+otherwise indistinguishable from a crash, and a long-running request outliving three rolling
+restarts would be retired as poisoned. A hand-back is the evidence that resolves it — the worker
+survived long enough to say it was going, which is exactly what a killer request prevents.
+
+### Dispatch
+
+`indexing_requests` is the work queue. Any worker claims the oldest request nobody holds, runs it,
+and renews a lease while it does; every write is fenced on that ownership, so two instances polling
+one table cannot end up on the same range. The in-memory queue still exists but only as a wake-up
+nudge for the instance that accepted the submit — losing it costs latency, not work.
+
+This is what makes horizontal scale-out work. Previously a request could only ever be processed by
+the process that accepted it: adding an instance added no throughput for queued work, a restart lost
+the messages while the rows survived, and with REST and MCP as separate JVMs against one Postgres,
+load landed wherever the submit happened to arrive.
 
 ### Available Fields
 

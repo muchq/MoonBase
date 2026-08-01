@@ -38,14 +38,14 @@ public class IndexingRequestDaoTest {
 
   private IndexingRequestStore.IndexingRequest create(
       String player, String start, String end, boolean excludeBullet) {
-    return dao.createOrAdopt(player, "CHESS_COM", start, end, excludeBullet, STALE_AFTER, now)
+    return dao.createOrAdopt(
+            player, "CHESS_COM", start, end, excludeBullet, false, STALE_AFTER, now)
         .request();
   }
 
   private Optional<IndexingRequestStore.IndexingRequest> find(
       String player, String start, String end, boolean excludeBullet) {
-    return dao.findExistingRequest(
-        player, "CHESS_COM", start, end, excludeBullet, STALE_AFTER, now);
+    return dao.findExistingRequest(player, "CHESS_COM", start, end, excludeBullet);
   }
 
   @Test
@@ -117,9 +117,11 @@ public class IndexingRequestDaoTest {
   @Test
   public void createOrAdopt_secondIdenticalSubmitAdoptsTheFirstInsteadOfCreating() {
     IndexingRequestStore.Claim first =
-        dao.createOrAdopt("same", "CHESS_COM", "2024-01", "2024-01", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "same", "CHESS_COM", "2024-01", "2024-01", false, false, STALE_AFTER, now);
     IndexingRequestStore.Claim second =
-        dao.createOrAdopt("same", "CHESS_COM", "2024-01", "2024-01", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "same", "CHESS_COM", "2024-01", "2024-01", false, false, STALE_AFTER, now);
 
     assertThat(first.created()).isTrue();
     assertThat(second.created()).isFalse();
@@ -149,7 +151,7 @@ public class IndexingRequestDaoTest {
               startLine.await();
               IndexingRequestStore.Claim claim =
                   dao.createOrAdopt(
-                      "racer", "CHESS_COM", "2024-06", "2024-06", false, STALE_AFTER, now);
+                      "racer", "CHESS_COM", "2024-06", "2024-06", false, false, STALE_AFTER, now);
               claimedIds.add(claim.request().id());
               if (claim.created()) {
                 createdCount.incrementAndGet();
@@ -175,11 +177,13 @@ public class IndexingRequestDaoTest {
   @Test
   public void createOrAdopt_terminalStatusFreesTheSlotForANewRequest() {
     IndexingRequestStore.Claim first =
-        dao.createOrAdopt("done", "CHESS_COM", "2024-07", "2024-07", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "done", "CHESS_COM", "2024-07", "2024-07", false, false, STALE_AFTER, now);
     dao.updateStatus(first.request().id(), "COMPLETED", null, 12);
 
     IndexingRequestStore.Claim second =
-        dao.createOrAdopt("done", "CHESS_COM", "2024-07", "2024-07", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "done", "CHESS_COM", "2024-07", "2024-07", false, false, STALE_AFTER, now);
 
     assertThat(second.created()).isTrue();
     assertThat(second.request().id()).isNotEqualTo(first.request().id());
@@ -189,11 +193,13 @@ public class IndexingRequestDaoTest {
   @Test
   public void createOrAdopt_failedStatusAlsoFreesTheSlot() {
     IndexingRequestStore.Claim first =
-        dao.createOrAdopt("retry", "CHESS_COM", "2024-08", "2024-08", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "retry", "CHESS_COM", "2024-08", "2024-08", false, false, STALE_AFTER, now);
     dao.updateStatus(first.request().id(), "FAILED", "boom", 0);
 
     IndexingRequestStore.Claim second =
-        dao.createOrAdopt("retry", "CHESS_COM", "2024-08", "2024-08", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "retry", "CHESS_COM", "2024-08", "2024-08", false, false, STALE_AFTER, now);
 
     assertThat(second.created()).isTrue();
     assertThat(second.request().id()).isNotEqualTo(first.request().id());
@@ -203,11 +209,13 @@ public class IndexingRequestDaoTest {
   @Test
   public void createOrAdopt_processingStatusKeepsHoldingTheSlot() {
     IndexingRequestStore.Claim first =
-        dao.createOrAdopt("busy", "CHESS_COM", "2024-09", "2024-09", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "busy", "CHESS_COM", "2024-09", "2024-09", false, false, STALE_AFTER, now);
     dao.updateStatus(first.request().id(), "PROCESSING", null, 3);
 
     IndexingRequestStore.Claim second =
-        dao.createOrAdopt("busy", "CHESS_COM", "2024-09", "2024-09", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "busy", "CHESS_COM", "2024-09", "2024-09", false, false, STALE_AFTER, now);
 
     assertThat(second.created()).isFalse();
     assertThat(second.request().id()).isEqualTo(first.request().id());
@@ -227,11 +235,13 @@ public class IndexingRequestDaoTest {
   @Test
   public void createOrAdopt_reclaimsAStrandedHolderAndCreatesAReplacement() {
     IndexingRequestStore.Claim stranded =
-        dao.createOrAdopt("ghost", "CHESS_COM", "2024-10", "2024-10", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "ghost", "CHESS_COM", "2024-10", "2024-10", false, false, STALE_AFTER, now);
     backdateUpdatedAt(stranded.request().id(), now.minus(Duration.ofHours(3)));
 
     IndexingRequestStore.Claim replacement =
-        dao.createOrAdopt("ghost", "CHESS_COM", "2024-10", "2024-10", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "ghost", "CHESS_COM", "2024-10", "2024-10", false, false, STALE_AFTER, now);
 
     assertThat(replacement.created()).isTrue();
     assertThat(replacement.request().id()).isNotEqualTo(stranded.request().id());
@@ -245,32 +255,41 @@ public class IndexingRequestDaoTest {
   @Test
   public void createOrAdopt_doesNotReclaimAHolderThatIsStillFresh() {
     IndexingRequestStore.Claim live =
-        dao.createOrAdopt("alive", "CHESS_COM", "2024-11", "2024-11", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "alive", "CHESS_COM", "2024-11", "2024-11", false, false, STALE_AFTER, now);
     backdateUpdatedAt(live.request().id(), now.minus(Duration.ofMinutes(30)));
 
     IndexingRequestStore.Claim second =
-        dao.createOrAdopt("alive", "CHESS_COM", "2024-11", "2024-11", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "alive", "CHESS_COM", "2024-11", "2024-11", false, false, STALE_AFTER, now);
 
     assertThat(second.created()).isFalse();
     assertThat(second.request().id()).isEqualTo(live.request().id());
     assertThat(dao.findById(live.request().id()).orElseThrow().status()).isEqualTo("PENDING");
   }
 
+  /**
+   * A row nobody has claimed is queued work, not a strand, so dedupe keeps answering with it. What
+   * used to make this row invisible was its age; age is now the business of the sweep's third arm,
+   * which retires it only when no worker is running anywhere.
+   */
   @Test
-  public void findExistingRequest_ignoresAStrandedRow() {
-    IndexingRequestStore.Claim stranded =
-        dao.createOrAdopt("ghost2", "CHESS_COM", "2024-12", "2024-12", false, STALE_AFTER, now);
-    backdateUpdatedAt(stranded.request().id(), now.minus(Duration.ofHours(5)));
+  public void findExistingRequest_answersWithAQueuedRowHoweverLongItHasWaited() {
+    dao.createOrAdopt("ghost2", "CHESS_COM", "2024-12", "2024-12", false, false, STALE_AFTER, now);
+    UUID id = find("ghost2", "2024-12", "2024-12", false).orElseThrow().id();
+    backdateUpdatedAt(id, now.minus(Duration.ofHours(5)));
 
-    assertThat(find("ghost2", "2024-12", "2024-12", false)).isEmpty();
+    assertThat(find("ghost2", "2024-12", "2024-12", false))
+        .as("resubmitting a queued range should adopt it, not start a second one")
+        .hasValueSatisfying(r -> assertThat(r.id()).isEqualTo(id));
   }
 
   @Test
   public void reclaimStale_retiresStrandedRowsAndLeavesFreshOnes() {
     IndexingRequestStore.Claim old =
-        dao.createOrAdopt("p1", "CHESS_COM", "2025-01", "2025-01", false, STALE_AFTER, now);
+        dao.createOrAdopt("p1", "CHESS_COM", "2025-01", "2025-01", false, false, STALE_AFTER, now);
     IndexingRequestStore.Claim fresh =
-        dao.createOrAdopt("p2", "CHESS_COM", "2025-01", "2025-01", false, STALE_AFTER, now);
+        dao.createOrAdopt("p2", "CHESS_COM", "2025-01", "2025-01", false, false, STALE_AFTER, now);
     backdateUpdatedAt(old.request().id(), now.minus(Duration.ofHours(2)));
 
     assertThat(dao.reclaimStale(STALE_AFTER, now)).isEqualTo(1);
@@ -288,7 +307,8 @@ public class IndexingRequestDaoTest {
   @Test
   public void reclaimStale_retiresAStrandedProcessingRow() {
     IndexingRequestStore.Claim claim =
-        dao.createOrAdopt("halfdone", "CHESS_COM", "2025-07", "2025-07", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "halfdone", "CHESS_COM", "2025-07", "2025-07", false, false, STALE_AFTER, now);
     dao.updateStatus(claim.request().id(), "PROCESSING", null, 4);
     backdateUpdatedAt(claim.request().id(), now.minus(Duration.ofHours(3)));
 
@@ -299,19 +319,22 @@ public class IndexingRequestDaoTest {
     assertThat(retired.gamesIndexed()).as("progress so far is preserved").isEqualTo(4);
 
     IndexingRequestStore.Claim replacement =
-        dao.createOrAdopt("halfdone", "CHESS_COM", "2025-07", "2025-07", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "halfdone", "CHESS_COM", "2025-07", "2025-07", false, false, STALE_AFTER, now);
     assertThat(replacement.created()).isTrue();
   }
 
   @Test
   public void createOrAdopt_reclaimsAStrandedProcessingHolder() {
     IndexingRequestStore.Claim stranded =
-        dao.createOrAdopt("halfdone2", "CHESS_COM", "2025-08", "2025-08", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "halfdone2", "CHESS_COM", "2025-08", "2025-08", false, false, STALE_AFTER, now);
     dao.updateStatus(stranded.request().id(), "PROCESSING", null, 2);
     backdateUpdatedAt(stranded.request().id(), now.minus(Duration.ofHours(3)));
 
     IndexingRequestStore.Claim replacement =
-        dao.createOrAdopt("halfdone2", "CHESS_COM", "2025-08", "2025-08", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "halfdone2", "CHESS_COM", "2025-08", "2025-08", false, false, STALE_AFTER, now);
 
     assertThat(replacement.created()).isTrue();
     assertThat(replacement.request().id()).isNotEqualTo(stranded.request().id());
@@ -330,13 +353,15 @@ public class IndexingRequestDaoTest {
   @Test
   public void updateStatus_cannotResurrectARetiredRequest() {
     IndexingRequestStore.Claim stranded =
-        dao.createOrAdopt("zombie", "CHESS_COM", "2025-09", "2025-09", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "zombie", "CHESS_COM", "2025-09", "2025-09", false, false, STALE_AFTER, now);
     UUID strandedId = stranded.request().id();
     backdateUpdatedAt(strandedId, now.minus(Duration.ofHours(3)));
     dao.reclaimStale(STALE_AFTER, now);
 
     IndexingRequestStore.Claim replacement =
-        dao.createOrAdopt("zombie", "CHESS_COM", "2025-09", "2025-09", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "zombie", "CHESS_COM", "2025-09", "2025-09", false, false, STALE_AFTER, now);
     assertThat(replacement.created()).isTrue();
 
     // An unfenced status write landing after the fact.
@@ -354,7 +379,8 @@ public class IndexingRequestDaoTest {
   @Test
   public void updateStatus_terminalWriteOnARetiredRequestStillRecordsTheOutcome() {
     IndexingRequestStore.Claim stranded =
-        dao.createOrAdopt("late", "CHESS_COM", "2025-10", "2025-10", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "late", "CHESS_COM", "2025-10", "2025-10", false, false, STALE_AFTER, now);
     UUID strandedId = stranded.request().id();
     backdateUpdatedAt(strandedId, now.minus(Duration.ofHours(3)));
     dao.reclaimStale(STALE_AFTER, now);
@@ -386,7 +412,8 @@ public class IndexingRequestDaoTest {
   public void schema_allowsManyTerminalRowsForOneTuple() {
     for (int i = 0; i < 3; i++) {
       IndexingRequestStore.Claim claim =
-          dao.createOrAdopt("recycled", "CHESS_COM", "2025-12", "2025-12", false, STALE_AFTER, now);
+          dao.createOrAdopt(
+              "recycled", "CHESS_COM", "2025-12", "2025-12", false, false, STALE_AFTER, now);
       dao.updateStatus(claim.request().id(), "COMPLETED", null, i);
     }
     assertThat(countRequests()).isEqualTo(3);
@@ -395,7 +422,7 @@ public class IndexingRequestDaoTest {
   @Test
   public void reclaimStale_leavesTerminalRowsAlone() {
     IndexingRequestStore.Claim completed =
-        dao.createOrAdopt("p3", "CHESS_COM", "2025-02", "2025-02", false, STALE_AFTER, now);
+        dao.createOrAdopt("p3", "CHESS_COM", "2025-02", "2025-02", false, false, STALE_AFTER, now);
     dao.updateStatus(completed.request().id(), "COMPLETED", null, 7);
     backdateUpdatedAt(completed.request().id(), now.minus(Duration.ofDays(2)));
 
@@ -410,13 +437,13 @@ public class IndexingRequestDaoTest {
   @Test
   public void reclaimStale_freesTheSlotSoTheRangeCanBeRequestedAgain() {
     IndexingRequestStore.Claim stranded =
-        dao.createOrAdopt("p4", "CHESS_COM", "2025-03", "2025-03", false, STALE_AFTER, now);
+        dao.createOrAdopt("p4", "CHESS_COM", "2025-03", "2025-03", false, false, STALE_AFTER, now);
     backdateUpdatedAt(stranded.request().id(), now.minus(Duration.ofHours(4)));
 
     dao.reclaimStale(STALE_AFTER, now);
 
     IndexingRequestStore.Claim replacement =
-        dao.createOrAdopt("p4", "CHESS_COM", "2025-03", "2025-03", false, STALE_AFTER, now);
+        dao.createOrAdopt("p4", "CHESS_COM", "2025-03", "2025-03", false, false, STALE_AFTER, now);
     assertThat(replacement.created()).isTrue();
   }
 
@@ -425,9 +452,10 @@ public class IndexingRequestDaoTest {
   @Test
   public void deleteOlderThan_removesRequestsPastTheThreshold() {
     IndexingRequestStore.Claim old =
-        dao.createOrAdopt("old", "CHESS_COM", "2025-04", "2025-04", false, STALE_AFTER, now);
+        dao.createOrAdopt("old", "CHESS_COM", "2025-04", "2025-04", false, false, STALE_AFTER, now);
     IndexingRequestStore.Claim recent =
-        dao.createOrAdopt("recent", "CHESS_COM", "2025-05", "2025-05", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "recent", "CHESS_COM", "2025-05", "2025-05", false, false, STALE_AFTER, now);
     dao.updateStatus(old.request().id(), "COMPLETED", null, 5);
     dao.updateStatus(recent.request().id(), "COMPLETED", null, 5);
     backdateCreatedAt(old.request().id(), now.minus(Duration.ofDays(40)));
@@ -448,7 +476,8 @@ public class IndexingRequestDaoTest {
   @Test
   public void deleteOlderThan_refusesToSweepALiveRequestHoweverOldItIs() {
     IndexingRequestStore.Claim pending =
-        dao.createOrAdopt("ancient", "CHESS_COM", "2025-04", "2025-04", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "ancient", "CHESS_COM", "2025-04", "2025-04", false, false, STALE_AFTER, now);
     backdateCreatedAt(pending.request().id(), now.minus(Duration.ofDays(400)));
 
     assertThat(dao.deleteOlderThan(now.minus(Duration.ofDays(30)))).isEqualTo(0);
@@ -458,7 +487,8 @@ public class IndexingRequestDaoTest {
   @Test
   public void deleteOlderThan_leavesRequestsThatStillOwnGames() {
     IndexingRequestStore.Claim owner =
-        dao.createOrAdopt("owner", "CHESS_COM", "2025-06", "2025-06", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "owner", "CHESS_COM", "2025-06", "2025-06", false, false, STALE_AFTER, now);
     backdateCreatedAt(owner.request().id(), now.minus(Duration.ofDays(40)));
     insertGame(owner.request().id(), "https://chess.com/still-here");
 
@@ -489,6 +519,7 @@ public class IndexingRequestDaoTest {
   // --- ownership leases (#1278) -----------------------------------------------------------------
 
   private static final Duration LEASE = Duration.ofMinutes(5);
+  private static final int MAX_ATTEMPTS = IndexingRequestDao.MAX_ATTEMPTS;
   private static final String WORKER_A = "host-a/1/aaaa";
   private static final String WORKER_B = "host-b/2/bbbb";
 
@@ -546,14 +577,18 @@ public class IndexingRequestDaoTest {
 
   /** The same boundary on the sweep's side, so the two predicates cannot drift apart. */
   @Test
-  public void reclaimStale_retiresALeaseAtTheExactInstantItExpires() {
+  public void reclaimStale_releasesALeaseAtTheExactInstantItExpires() {
     IndexingRequestStore.Claim claim =
-        dao.createOrAdopt("boundary2", "CHESS_COM", "2025-14", "2025-14", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "boundary2", "CHESS_COM", "2025-14", "2025-14", false, false, STALE_AFTER, now);
     UUID id = claim.request().id();
     dao.claim(id, WORKER_A, LEASE, now);
 
     assertThat(dao.reclaimStale(STALE_AFTER, now.plus(LEASE))).isEqualTo(1);
-    assertThat(dao.findById(id).orElseThrow().status()).isEqualTo("FAILED");
+    assertThat(dao.findById(id).orElseThrow().status()).isIn("PENDING", "PROCESSING");
+    assertThat(dao.holdsLease(id, WORKER_A, now.plus(LEASE)))
+        .as("released means the owner is cleared, not that the request is over")
+        .isFalse();
   }
 
   /**
@@ -613,14 +648,15 @@ public class IndexingRequestDaoTest {
   }
 
   /**
-   * The lease arm of reclamation: a crashed owner is reclaimable in minutes, without waiting out
-   * the hour that governs work nobody ever picked up. That is the whole point of asking "is the
-   * owner there?" instead of "has anything happened lately?".
+   * The lease arm: a crashed owner is dealt with in minutes, without waiting out the hour that
+   * governs a fleet nobody is running. Dealt with now means <em>requeued</em> — the work is still
+   * wanted, and any worker can take it.
    */
   @Test
-  public void reclaimStale_takesAnExpiredLeaseWithoutWaitingForTheStalenessCutoff() {
+  public void reclaimStale_requeuesAnExpiredLeaseWithoutWaitingForTheStalenessCutoff() {
     IndexingRequestStore.Claim claim =
-        dao.createOrAdopt("crashed", "CHESS_COM", "2025-11", "2025-11", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "crashed", "CHESS_COM", "2025-11", "2025-11", false, false, STALE_AFTER, now);
     UUID id = claim.request().id();
     dao.claim(id, WORKER_A, LEASE, now);
 
@@ -628,12 +664,11 @@ public class IndexingRequestDaoTest {
     assertThat(dao.reclaimStale(STALE_AFTER, sixMinutesLater))
         .as("six minutes is nowhere near the one-hour cutoff, but the lease is gone")
         .isEqualTo(1);
-    assertThat(dao.findById(id).orElseThrow().status()).isEqualTo("FAILED");
 
-    IndexingRequestStore.Claim replacement =
-        dao.createOrAdopt(
-            "crashed", "CHESS_COM", "2025-11", "2025-11", false, STALE_AFTER, sixMinutesLater);
-    assertThat(replacement.created()).as("and the range is free again").isTrue();
+    assertThat(dao.findById(id).orElseThrow().status()).isIn("PENDING", "PROCESSING");
+    assertThat(dao.claimNext(WORKER_B, LEASE, sixMinutesLater))
+        .as("and another worker can pick it straight up")
+        .hasValueSatisfying(r -> assertThat(r.id()).isEqualTo(id));
   }
 
   /**
@@ -647,7 +682,8 @@ public class IndexingRequestDaoTest {
   @Test
   public void reclaimStale_leavesAClaimedRequestAloneEvenWhenItHasBeenQuietForHours() {
     IndexingRequestStore.Claim claim =
-        dao.createOrAdopt("patient", "CHESS_COM", "2025-12", "2025-12", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "patient", "CHESS_COM", "2025-12", "2025-12", false, false, STALE_AFTER, now);
     UUID id = claim.request().id();
     dao.claim(id, WORKER_A, LEASE, now);
     backdateUpdatedAt(id, now.minus(Duration.ofHours(3)));
@@ -696,80 +732,356 @@ public class IndexingRequestDaoTest {
   }
 
   /**
-   * Dedupe must answer "is this alive?" the same way reclamation does. This read runs first on
-   * every submit and short-circuits, so a laxer predicate here silently overrides the stricter
-   * reclamation behind it.
+   * A lapsed lease no longer means the range is free. The row goes back in the queue, so it is
+   * still the holder and dedupe must keep answering with it — a second submit should adopt the work
+   * already waiting rather than create a rival for the same range.
    *
-   * <p>The case that exposed it: a worker claims, then is killed. Its lease lapses in minutes and
-   * the row is reclaimable — but {@code updated_at} was bumped by its last renewal, so a predicate
-   * that asks only about age keeps handing the dead request back to callers for the full hour. The
-   * README's "five minutes" was delivered nowhere a user could reach.
+   * <p>This is the inverse of what it asserted before #1279, and deliberately so: back then a
+   * lapsed lease was retired, because nothing was ever going to run that request again.
    */
   @Test
-  public void findExistingRequest_doesNotAnswerWithARequestWhoseLeaseHasLapsed() {
-    dao.createOrAdopt("killed", "CHESS_COM", "2026-05", "2026-05", false, STALE_AFTER, now);
+  public void findExistingRequest_stillAnswersWithARequestWhoseLeaseHasLapsed() {
+    dao.createOrAdopt("killed", "CHESS_COM", "2026-05", "2026-05", false, false, STALE_AFTER, now);
     UUID id = find("killed", "2026-05", "2026-05", false).orElseThrow().id();
     dao.claim(id, WORKER_A, LEASE, now);
 
     Instant afterLapse = now.plus(LEASE).plusSeconds(1);
-    assertThat(
-            dao.findExistingRequest(
-                "killed", "CHESS_COM", "2026-05", "2026-05", false, STALE_AFTER, afterLapse))
-        .as("a request whose owner is gone must not keep answering for the range")
-        .isEmpty();
-    // The boundary itself. reclaimStale takes the row at exactly this instant, so dedupe must
-    // already have stopped offering it — otherwise there is a moment where the row is both
-    // reclaimable and reported as the live holder.
-    assertThat(
-            dao.findExistingRequest(
-                "killed", "CHESS_COM", "2026-05", "2026-05", false, STALE_AFTER, now.plus(LEASE)))
+    assertThat(dao.findExistingRequest("killed", "CHESS_COM", "2026-05", "2026-05", false))
+        .as("the work is queued for another worker, so the range is still spoken for")
+        .hasValueSatisfying(r -> assertThat(r.id()).isEqualTo(id));
+  }
+
+  /** What does end it: burning through the attempts. Then the range really is free. */
+  @Test
+  public void findExistingRequest_stopsAnsweringOnceARequestIsPoisoned() {
+    dao.createOrAdopt("doomed", "CHESS_COM", "2026-06", "2026-06", false, false, STALE_AFTER, now);
+    UUID id = find("doomed", "2026-06", "2026-06", false).orElseThrow().id();
+    exhaustAttempts(id);
+
+    assertThat(find("doomed", "2026-06", "2026-06", false))
+        .as("a request no worker may take again cannot go on holding its range")
         .isEmpty();
   }
 
   /** The converse: a claimed request with a live lease is still the answer, however quiet it is. */
   @Test
   public void findExistingRequest_stillAnswersWithAClaimedRequestThatIsRenewing() {
-    dao.createOrAdopt("busy", "CHESS_COM", "2026-06", "2026-06", false, STALE_AFTER, now);
+    dao.createOrAdopt("busy", "CHESS_COM", "2026-06", "2026-06", false, false, STALE_AFTER, now);
     UUID id = find("busy", "2026-06", "2026-06", false).orElseThrow().id();
     dao.claim(id, WORKER_A, LEASE, now);
     backdateUpdatedAt(id, now.minus(Duration.ofHours(3)));
     dao.renewLease(id, WORKER_A, LEASE, now);
 
-    assertThat(
-            dao.findExistingRequest(
-                "busy", "CHESS_COM", "2026-06", "2026-06", false, STALE_AFTER, now))
+    assertThat(dao.findExistingRequest("busy", "CHESS_COM", "2026-06", "2026-06", false))
         .as("an owner that is renewing owns the range no matter how long the work takes")
         .isPresent();
   }
 
   /**
-   * The two arms report different things to the user. {@code error_message} is surfaced by the API
-   * and rendered in the web app, so telling someone whose worker crashed mid-run that nobody ever
-   * picked their request up sends them looking for a dispatch problem that is not there.
+   * The three outcomes report three different things, and two of them reach the user as {@code
+   * error_message} rendered in the web app. A crashed owner whose attempts remain is not a failure
+   * at all — the work goes back in the queue silently — so saying anything to the user there would
+   * be a lie about work that is about to run.
    */
   @Test
-  public void reclaimStale_saysWhichArmRetiredTheRequest() {
-    IndexingRequestStore.Claim claimed =
-        dao.createOrAdopt("crashed2", "CHESS_COM", "2026-07", "2026-07", false, STALE_AFTER, now);
-    dao.claim(claimed.request().id(), WORKER_A, LEASE, now);
+  public void reclaimStale_distinguishesReleasedFromPoisonedFromStalled() {
+    // A crashed owner with attempts to spare: released, still live, no message.
+    IndexingRequestStore.Claim crashed =
+        dao.createOrAdopt(
+            "crashed2", "CHESS_COM", "2026-07", "2026-07", false, false, STALE_AFTER, now);
+    dao.claim(crashed.request().id(), WORKER_A, LEASE, now);
 
-    IndexingRequestStore.Claim neverClaimed =
-        dao.createOrAdopt("orphan", "CHESS_COM", "2026-08", "2026-08", false, STALE_AFTER, now);
-    backdateUpdatedAt(neverClaimed.request().id(), now.minus(Duration.ofHours(3)));
+    // A request that has burned through its attempts: retired as poisoned.
+    IndexingRequestStore.Claim poisoned =
+        dao.createOrAdopt(
+            "poison", "CHESS_COM", "2026-09", "2026-09", false, false, STALE_AFTER, now);
+    exhaustAttempts(poisoned.request().id());
 
-    dao.reclaimStale(STALE_AFTER, now.plus(Duration.ofMinutes(6)));
+    // Past the last lease exhaustAttempts took out, or the poisoned row still looks held.
+    Instant afterEveryLease = now.plus(LEASE.multipliedBy(MAX_ATTEMPTS + 1));
+    dao.reclaimStale(STALE_AFTER, afterEveryLease);
 
-    assertThat(dao.findById(claimed.request().id()).orElseThrow().errorMessage())
-        .contains("stopped responding")
-        .doesNotContain("no worker took ownership");
-    assertThat(dao.findById(neverClaimed.request().id()).orElseThrow().errorMessage())
-        .contains("no worker took ownership");
+    IndexingRequestStore.IndexingRequest released =
+        dao.findById(crashed.request().id()).orElseThrow();
+    assertThat(released.status())
+        .as("a crashed owner with attempts left means requeue, not failure")
+        .isIn("PENDING", "PROCESSING");
+    assertThat(released.errorMessage()).isNull();
+
+    assertThat(dao.findById(poisoned.request().id()).orElseThrow().errorMessage())
+        .contains("each worker stopped before finishing");
+  }
+
+  /**
+   * The third arm, and the reason it exists: eventually the user needs an answer. A request nobody
+   * has taken, while no worker anywhere holds a lease, means the fleet is not serving it — every
+   * instance is down, or partitioned from this database — and silence is a worse answer than
+   * failure.
+   */
+  @Test
+  public void reclaimStale_retiresQueuedWorkOnceNoWorkerIsRunningAnywhere() {
+    IndexingRequestStore.Claim queued =
+        dao.createOrAdopt(
+            "orphan", "CHESS_COM", "2026-08", "2026-08", false, false, STALE_AFTER, now);
+    backdateUpdatedAt(queued.request().id(), now.minus(Duration.ofHours(3)));
+
+    assertThat(dao.reclaimStale(STALE_AFTER, now)).isEqualTo(1);
+    IndexingRequestStore.IndexingRequest row = dao.findById(queued.request().id()).orElseThrow();
+    assertThat(row.status()).isEqualTo("FAILED");
+    assertThat(row.errorMessage()).contains("none is running anywhere");
+  }
+
+  /**
+   * The gap between two jobs is not an outage, and the sweep must not mistake it for one.
+   *
+   * <p>A worker finishes a request: its terminal write clears {@code owner_id}, and for the moment
+   * before its next claim lands there is no live lease anywhere in the table. Sampling for one at
+   * that instant declares a healthy fleet dead. With a backlog behind it, that is not one wrong
+   * answer — it is every queued request FAILED in a single statement, which is worse than the bug
+   * the guard exists to prevent.
+   *
+   * <p>So liveness is a window: has anything been touched recently, not is a lease held right now.
+   * Claims, renewals, progress writes and completions all leave a trail; leases are held in bursts.
+   */
+  @Test
+  public void reclaimStale_doesNotMistakeTheGapBetweenTwoJobsForADeadFleet() {
+    // A backlog, old enough to be eligible.
+    List<UUID> backlog = new java.util.ArrayList<>();
+    for (int i = 0; i < 5; i++) {
+      IndexingRequestStore.Claim queued =
+          dao.createOrAdopt(
+              "queued" + i, "CHESS_COM", "2027-01", "2027-01", false, false, STALE_AFTER, now);
+      backdateUpdatedAt(queued.request().id(), now.minus(Duration.ofHours(3)));
+      backlog.add(queued.request().id());
+    }
+
+    // A worker just finished something. It holds no lease at this instant, but it was working
+    // moments ago — which is what "the fleet is alive" actually looks like between two jobs.
+    IndexingRequestStore.Claim justFinished =
+        dao.createOrAdopt(
+            "done", "CHESS_COM", "2027-02", "2027-02", false, false, STALE_AFTER, now);
+    dao.claim(justFinished.request().id(), WORKER_A, LEASE, now);
+    dao.updateStatusOwned(justFinished.request().id(), WORKER_A, "COMPLETED", null, 5, now);
+
+    assertThat(dao.reclaimStale(STALE_AFTER, now))
+        .as("a momentary gap with no lease held is not an outage")
+        .isZero();
+    for (UUID id : backlog) {
+      assertThat(dao.findById(id).orElseThrow().status()).isIn("PENDING", "PROCESSING");
+    }
+  }
+
+  /**
+   * The arms have to run poisoned, stalled, released — and this is the row that proves it.
+   *
+   * <p>A worker claimed this request and then the whole fleet went away: its lease is long expired,
+   * nothing has touched it since the claim, and no worker holds a lease anywhere. All three facts
+   * are true at once, so it matches both the stalled arm and the release arm.
+   *
+   * <p>Releasing first would set {@code updated_at} to now, which makes the row look freshly
+   * touched and hides it from the stalled arm for another full window. The user waits another hour
+   * to be told something the sweep already knew.
+   */
+  @Test
+  public void reclaimStale_retiresAStalledRowRatherThanRequeueingItFirst() {
+    IndexingRequestStore.Claim claim =
+        dao.createOrAdopt(
+            "fleet-gone", "CHESS_COM", "2026-12", "2026-12", false, false, STALE_AFTER, now);
+    UUID id = claim.request().id();
+    dao.claim(id, WORKER_A, LEASE, now);
+    backdateUpdatedAt(id, now.minus(Duration.ofHours(3)));
+
+    // Long past the lease, and nothing else is running.
+    dao.reclaimStale(STALE_AFTER, now.plus(Duration.ofHours(1)));
+
+    IndexingRequestStore.IndexingRequest row = dao.findById(id).orElseThrow();
+    assertThat(row.status())
+        .as("both arms match this row; the one that tells the user has to win")
+        .isEqualTo("FAILED");
+    assertThat(row.errorMessage()).contains("none is running anywhere");
+  }
+
+  /**
+   * A worker shutting down cleanly gives the request back, and gives the attempt back with it.
+   *
+   * <p>{@code attempts} is spent on claim, deliberately — a request that kills its worker before it
+   * can report anything still has to move the counter, or the poison bound means nothing. The cost
+   * of counting that early is that it cannot tell a crash from a deploy, and every process exit
+   * looks like the request killed it. Three rolling restarts across a long-running request would
+   * retire it as poisoned and tell the user its range fails repeatedly, which is a lie about a
+   * healthy system.
+   *
+   * <p>A graceful hand-back is the evidence that resolves it: the worker survived long enough to
+   * say so, which is precisely what a killer request does not allow. So the lap does not count.
+   */
+  @Test
+  public void handBack_returnsTheRequestWithoutSpendingAnAttempt() {
+    IndexingRequestStore.Claim claim =
+        dao.createOrAdopt(
+            "deploying", "CHESS_COM", "2027-06", "2027-06", false, false, STALE_AFTER, now);
+    UUID id = claim.request().id();
+    dao.claim(id, WORKER_A, LEASE, now);
+    assertThat(dao.findById(id).orElseThrow().attempts()).isEqualTo(1);
+
+    assertThat(dao.handBack(id, WORKER_A, now)).isTrue();
+
+    IndexingRequestStore.IndexingRequest row = dao.findById(id).orElseThrow();
+    assertThat(row.attempts()).as("a deploy is not one of the three strikes").isZero();
+    assertThat(row.status()).as("the work is still wanted").isIn("PENDING", "PROCESSING");
+    assertThat(dao.claim(id, WORKER_B, LEASE, now))
+        .as("the next worker takes it now, not once the lease lapses")
+        .isTrue();
+  }
+
+  /** Fenced like every other write: a worker cannot give away a request someone else now holds. */
+  @Test
+  public void handBack_refusesOnceAnotherWorkerHasTakenTheRequest() {
+    IndexingRequestStore.Claim claim =
+        dao.createOrAdopt(
+            "stolen", "CHESS_COM", "2027-07", "2027-07", false, false, STALE_AFTER, now);
+    UUID id = claim.request().id();
+    dao.claim(id, WORKER_A, LEASE, now);
+
+    Instant afterLapse = now.plus(LEASE).plusSeconds(1);
+    assertThat(dao.claim(id, WORKER_B, LEASE, afterLapse)).isTrue();
+
+    assertThat(dao.handBack(id, WORKER_A, afterLapse))
+        .as("A no longer holds this; unclaiming it would strand B mid-run")
+        .isFalse();
+    assertThat(dao.holdsLease(id, WORKER_B, afterLapse)).isTrue();
+  }
+
+  /**
+   * Hand-back keeps the lease mark, like every other path that ends a claim. It is the record of
+   * when a worker last held the row, and a fleet mid-deploy is the worst possible moment to look
+   * dead to the sweep — every instance is handing work back at once.
+   */
+  @Test
+  public void handBack_leavesTheFleetLookingAliveDuringADeploy() {
+    IndexingRequestStore.Claim queued =
+        dao.createOrAdopt(
+            "backlog", "CHESS_COM", "2027-08", "2027-08", false, false, STALE_AFTER, now);
+    backdateUpdatedAt(queued.request().id(), now.minus(Duration.ofHours(3)));
+
+    IndexingRequestStore.Claim running =
+        dao.createOrAdopt(
+            "handed", "CHESS_COM", "2027-09", "2027-09", false, false, STALE_AFTER, now);
+    dao.claim(running.request().id(), WORKER_A, LEASE, now);
+    dao.handBack(running.request().id(), WORKER_A, now);
+
+    assertThat(dao.reclaimStale(STALE_AFTER, now))
+        .as("a worker was here moments ago — it just told us it was leaving")
+        .isZero();
+    assertThat(dao.findById(queued.request().id()).orElseThrow().status())
+        .isIn("PENDING", "PROCESSING");
+  }
+
+  /**
+   * The other half of the ordering, and the one that was left unpinned: poisoned before stalled.
+   *
+   * <p>A row whose attempts are spent is usually also unheld and old, so it matches the stalled arm
+   * too. Both arms retire it and both leave it FAILED, so the status proves nothing — the whole
+   * difference is the sentence the user reads. Run stalled first and someone whose range fails
+   * repeatedly is told the indexing fleet is down, which sends them to resubmit into a system that
+   * is working fine and will fail them again the same way.
+   *
+   * <p>Constructing the overlap takes both steps. Spending the attempts alone leaves {@code
+   * updated_at} at the last claim, which is recent by definition, so a poisoned row is not normally
+   * stalled as well — which is exactly why the suite stayed green with the arms swapped until this
+   * existed.
+   */
+  @Test
+  public void reclaimStale_prefersThePoisonedReasonWhenARowIsAlsoStalled() {
+    IndexingRequestStore.Claim claim =
+        dao.createOrAdopt(
+            "both", "CHESS_COM", "2027-03", "2027-03", false, false, STALE_AFTER, now);
+    UUID id = claim.request().id();
+    exhaustAttempts(id);
+    backdateUpdatedAt(id, now.minus(Duration.ofHours(3)));
+
+    // Past the last lease exhaustAttempts took out, so the row is unheld, and with nothing else in
+    // the table no worker is running anywhere either. Poisoned and stalled are both true.
+    dao.reclaimStale(STALE_AFTER, now.plus(LEASE.multipliedBy(MAX_ATTEMPTS + 1)));
+
+    IndexingRequestStore.IndexingRequest row = dao.findById(id).orElseThrow();
+    assertThat(row.status()).isEqualTo("FAILED");
+    assertThat(row.errorMessage())
+        .as("both arms retire this row; the one that names the real cause has to win")
+        .contains("each worker stopped before finishing");
+  }
+
+  /**
+   * An unowned terminal write must not erase the evidence that a worker was here.
+   *
+   * <p>{@code lease_expires_at} is the fleet-liveness probe's memory. A successful run clears its
+   * owner on the way out, so {@code owner_id} cannot answer "was anyone working recently?" — only
+   * the lease mark can, which is why {@link IndexingRequestStore#updateStatusOwned} leaves it in
+   * place. The unowned path has to keep the same promise: its one production caller is the inline
+   * dispatch failure handler, and by the time that runs the worker has already claimed and leased
+   * the row.
+   *
+   * <p>Erasing it there is not a cosmetic inconsistency. The mark this row carries is what tells
+   * the sweep the fleet is alive, so losing it retires the entire backlog behind it in one
+   * statement — the exact failure the probe was added to prevent, reached through a different door.
+   */
+  @Test
+  public void reclaimStale_stillSeesAWorkerAfterAnUnownedTerminalWrite() {
+    List<UUID> backlog = new java.util.ArrayList<>();
+    for (int i = 0; i < 3; i++) {
+      IndexingRequestStore.Claim queued =
+          dao.createOrAdopt(
+              "waiting" + i, "CHESS_COM", "2027-04", "2027-04", false, false, STALE_AFTER, now);
+      backdateUpdatedAt(queued.request().id(), now.minus(Duration.ofHours(3)));
+      backlog.add(queued.request().id());
+    }
+
+    // A worker claimed this one and ran it inline; it threw, and the inline handler recorded the
+    // outcome through updateStatus because it holds no token of its own.
+    IndexingRequestStore.Claim inline =
+        dao.createOrAdopt(
+            "inline", "CHESS_COM", "2027-05", "2027-05", false, false, STALE_AFTER, now);
+    dao.claim(inline.request().id(), WORKER_A, LEASE, now);
+    dao.updateStatus(inline.request().id(), "FAILED", "boom", 0);
+
+    assertThat(dao.reclaimStale(STALE_AFTER, now))
+        .as("a worker held this row moments ago, so the fleet is not dead")
+        .isZero();
+    for (UUID id : backlog) {
+      assertThat(dao.findById(id).orElseThrow().status()).isIn("PENDING", "PROCESSING");
+    }
+  }
+
+  /**
+   * And the guard on that arm, which is what stops it from re-becoming the bug #1278 and #1250 were
+   * spent on. A single worker draining a deep backlog leaves rows at the back untouched for as long
+   * as the backlog takes; age alone cannot tell that from a dead fleet. A live lease held by anyone
+   * is proof the fleet is working, so queued work is left alone while anything is being indexed.
+   */
+  @Test
+  public void reclaimStale_leavesQueuedWorkAloneWhileAnyWorkerIsStillIndexing() {
+    IndexingRequestStore.Claim backlogged =
+        dao.createOrAdopt(
+            "waiting", "CHESS_COM", "2026-10", "2026-10", false, false, STALE_AFTER, now);
+    backdateUpdatedAt(backlogged.request().id(), now.minus(Duration.ofHours(3)));
+
+    // Another request is being indexed right now, by a worker whose lease is live.
+    IndexingRequestStore.Claim running =
+        dao.createOrAdopt(
+            "busy-elsewhere", "CHESS_COM", "2026-11", "2026-11", false, false, STALE_AFTER, now);
+    dao.claim(running.request().id(), WORKER_A, LEASE, now);
+
+    assertThat(dao.reclaimStale(STALE_AFTER, now))
+        .as("nothing to reclaim: the fleet is alive and this row is simply waiting its turn")
+        .isZero();
+    assertThat(dao.findById(backlogged.request().id()).orElseThrow().status())
+        .isIn("PENDING", "PROCESSING");
   }
 
   @Test
   public void updateStatusOwned_terminalWriteReleasesTheLeaseAndTheDedupeSlot() {
     IndexingRequestStore.Claim claim =
-        dao.createOrAdopt("released", "CHESS_COM", "2026-03", "2026-03", false, STALE_AFTER, now);
+        dao.createOrAdopt(
+            "released", "CHESS_COM", "2026-03", "2026-03", false, false, STALE_AFTER, now);
     UUID id = claim.request().id();
     dao.claim(id, WORKER_A, LEASE, now);
 
@@ -781,11 +1093,17 @@ public class IndexingRequestDaoTest {
     // Read straight off the row. holdsLease would answer false for a COMPLETED request whatever
     // the columns say, so it cannot tell a released lease from a stale one left behind.
     assertThat(columnOf(id, "owner_id")).as("the lease is released, not just unusable").isNull();
-    assertThat(columnOf(id, "lease_expires_at")).isNull();
+    // lease_expires_at deliberately survives. Nothing reads it as ownership — every such predicate
+    // also requires owner_id and a live status — and it is the only durable record that a worker
+    // held this row, which the stalled arm's liveness probe needs precisely because a successful
+    // run clears the owner on its way out.
+    assertThat(columnOf(id, "lease_expires_at"))
+        .as("the mark of when a worker last held this row outlives the run")
+        .isNotNull();
     assertThat(dao.holdsLease(id, WORKER_A, now)).isFalse();
     assertThat(
             dao.createOrAdopt(
-                    "released", "CHESS_COM", "2026-03", "2026-03", false, STALE_AFTER, now)
+                    "released", "CHESS_COM", "2026-03", "2026-03", false, false, STALE_AFTER, now)
                 .created())
         .as("the range is requestable again the moment the work stops being in flight")
         .isTrue();
@@ -818,6 +1136,22 @@ public class IndexingRequestDaoTest {
       }
     } catch (Exception e) {
       throw new RuntimeException(e);
+    }
+  }
+
+  /**
+   * Claims a request until its attempts are spent, letting each lease lapse in between.
+   *
+   * <p>Claiming repeatedly at one instant does not work and the reason is the point: a live lease
+   * refuses every other owner, so attempts can only accumulate through the release-and-retake cycle
+   * that a crashing fleet actually produces.
+   */
+  private void exhaustAttempts(UUID id) {
+    for (int i = 0; i < IndexingRequestDao.MAX_ATTEMPTS; i++) {
+      Instant at = now.plus(LEASE.multipliedBy(i));
+      assertThat(dao.claim(id, "worker-" + i, LEASE, at))
+          .as("attempt %s should have been claimable", i)
+          .isTrue();
     }
   }
 

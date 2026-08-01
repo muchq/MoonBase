@@ -4,7 +4,7 @@ Currently indexing is **strictly sequential**: one worker thread, one index requ
 
 ### Current bottleneck
 
-- **IndexWorkerLifecycle:** Single thread polls the queue and calls `worker.process(message)`; no overlap between index requests.
+- **IndexWorkerLifecycle:** Single thread per instance claims the oldest unheld row from `indexing_requests` and runs it; the in-memory queue is now only a wake-up nudge (#1279); no overlap between index requests.
 - **IndexWorker.process():** For each month, `chessClient.fetchGames(player, month)` (one HTTP call, ~10–100 games), then a **sequential** loop over games: `featureExtractor.extract(game.pgn())` then `gameFeatureStore.insert(row)` + `insertOccurrences()`. So per month, games are processed one-by-one.
 - **Costs:** Chess.com API latency (~200 ms/request) dominates when many months are requested; for a single month, PGN replay + motif detection (~2–5K games/sec in the Lichess bulk-ingest estimate) and DB writes are the limit. So both I/O and CPU matter.
 

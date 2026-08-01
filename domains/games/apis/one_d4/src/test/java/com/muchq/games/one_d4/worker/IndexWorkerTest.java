@@ -695,6 +695,7 @@ public class IndexWorkerTest {
         String startMonth,
         String endMonth,
         boolean excludeBullet,
+        boolean skipCache,
         java.time.Duration staleAfter,
         Instant now) {
       return new Claim(
@@ -709,8 +710,17 @@ public class IndexWorkerTest {
               now,
               null,
               0,
-              excludeBullet),
+              excludeBullet,
+              false,
+              0),
           true);
+    }
+
+    /** Not exercised by IndexWorker tests: nothing here dispatches from the table. */
+    @Override
+    public Optional<IndexingRequestStore.IndexingRequest> claimNext(
+        String ownerId, java.time.Duration lease, Instant now) {
+      return Optional.empty();
     }
 
     @Override
@@ -731,6 +741,12 @@ public class IndexWorkerTest {
     @Override
     public boolean renewLease(UUID id, String ownerId, java.time.Duration lease, Instant now) {
       return true;
+    }
+
+    @Override
+    public boolean handBack(UUID id, String ownerId, Instant now) {
+
+      return false;
     }
 
     @Override
@@ -769,13 +785,7 @@ public class IndexWorkerTest {
 
     @Override
     public Optional<IndexingRequestStore.IndexingRequest> findExistingRequest(
-        String player,
-        String platform,
-        String startMonth,
-        String endMonth,
-        boolean excludeBullet,
-        java.time.Duration staleAfter,
-        Instant now) {
+        String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
       return Optional.empty();
     }
   }

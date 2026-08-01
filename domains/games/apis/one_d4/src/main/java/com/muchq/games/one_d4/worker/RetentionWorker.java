@@ -66,10 +66,10 @@ public class RetentionWorker {
     Instant now = clock.instant();
     Instant threshold = now.minus(RETENTION_PERIOD);
     try {
-      // Retire abandoned requests before deleting anything. A stranded PENDING row holds its
-      // dedupe slot until something retires it, and the submit path only reclaims the one tuple
-      // being submitted — a strand nobody re-submits would otherwise sit there until it aged out
-      // of the request window entirely.
+      // Settle abandoned requests before deleting anything. This is the only unconditional caller:
+      // the submit path reclaims too, but only the one tuple being submitted, so a row nobody
+      // re-submits would otherwise sit unsettled until it aged out of the request window entirely
+      // — never returned to the queue if its owner died, and never answered if the fleet did.
       int reclaimed = indexingRequestStore.reclaimStale(STALE_REQUEST_PERIOD, now);
 
       // Games before requests, because game_features.request_id is a foreign key onto
@@ -82,9 +82,11 @@ public class RetentionWorker {
       int periods = indexedPeriodStore.deleteOlderThan(threshold);
       int requests = indexingRequestStore.deleteOlderThan(now.minus(REQUEST_RETENTION_PERIOD));
 
+      // "Settled", not "retired": since #1279 most of this count is requests returned to the
+      // queue for another worker, not requests given up on. The DAO logs the split.
       LOG.info(
-          "Retention cleanup complete: deleted {} games, {} periods, {} requests; retired {}"
-              + " stranded requests",
+          "Retention cleanup complete: deleted {} games, {} periods, {} requests; settled {}"
+              + " abandoned requests",
           games,
           periods,
           requests,

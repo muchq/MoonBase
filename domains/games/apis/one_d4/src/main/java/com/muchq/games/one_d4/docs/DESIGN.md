@@ -13,35 +13,48 @@ A Micronaut service that indexes chess games from chess.com (lichess planned), e
                          │   Client     │
                          └──────┬───────┘
                                 │
-                    ┌───────────▼────────────┐
-                    │    Micronaut HTTP       │
-                    │  (Netty + JAX-RS)      │
-                    ├────────────┬───────────┤
-                    │ IndexCtrl  │ QueryCtrl │
-                    └─────┬──────┴─────┬─────┘
-                          │            │
-                 ┌────────▼──┐   ┌─────▼──────────┐
-                 │IndexQueue │   │  ChessQL        │
-                 │(in-memory)│   │  Lexer→Parser→  │
-                 └────┬──────┘   │  Compiler→SQL   │
-                      │          └─────┬───────────┘
-                ┌─────▼──────┐         │
-                │IndexWorker │         │
-                │  (daemon)  │         │
-                └─────┬──────┘         │
-                      │                │
-           ┌──────────▼─────┐          │
-           │ FeatureExtract │          │
-           │  PgnParser     │          │
-           │  GameReplayer  │          │
-           │  MotifDetect[] │          │
-           └──────┬─────────┘          │
-                  │                    │
-            ┌─────▼────────────────────▼──┐
-            │         PostgreSQL          │
-            │  indexing_requests          │
-            │  game_features             │
-            └─────────────────────────────┘
+                    ┌───────────▼───────────┐
+                    │    Micronaut HTTP     │
+                    │   (Netty + JAX-RS)    │
+                    ├───────────┬───────────┤
+                    │ IndexCtrl │ QueryCtrl │
+                    └─────┬─────┴─────┬─────┘
+                          │           │
+                   INSERT PENDING      │
+                          │     ┌─────▼───────────┐
+                          │     │  ChessQL        │
+                          │     │  Lexer→Parser→  │
+                          │     │  Compiler→SQL   │
+                          │     └─────┬───────────┘
+                          │           │
+     ┌────────────────────▼────────┐  │
+     │  indexing_requests          │  │   IndexQueue (in-memory)
+     │  — the work queue —         │  │   wake-up nudge only,
+     └────┬───────────────▲────────┘  │   payload ignored
+      claimNext     fenced writes     │            ╎
+          │               │           │            ╎
+          │      ┌────────┴──────┐    │            ╎
+          └─────►│  IndexWorker  │◄╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯
+                 │   (daemon,    │    │
+                 │    any host)  │    │
+                 └───────┬───────┘    │
+                         │            │
+              ┌──────────▼─────┐      │
+              │ FeatureExtract │      │
+              │  PgnParser     │      │
+              │  GameReplayer  │      │
+              │  MotifDetect[] │      │
+              └──────┬─────────┘      │
+                     │                │
+               ┌─────▼────────────────▼──────┐
+               │      PostgreSQL / H2        │
+               │  indexing_requests          │
+               │  game_features              │
+               │  motif_occurrences          │
+               └─────────────────────────────┘
+
+Any instance's worker may claim any queued row, so the arrow into IndexWorker
+is not the nudge — the nudge only saves it waiting out the poll interval.
 ```
 
 ## Package Structure
@@ -118,8 +131,8 @@ com.muchq.indexer/
 ### Indexing
 
 1. Client sends `POST /v1/index` with player, platform, month range
-2. `IndexController` creates a row in `indexing_requests` (status=PENDING), enqueues an `IndexMessage`
-3. `IndexWorkerLifecycle` daemon thread polls the queue
+2. `IndexController` creates a row in `indexing_requests` (status=PENDING). That row *is* the work queue; an `IndexMessage` is also enqueued locally, but only as a wake-up nudge whose payload is ignored
+3. `IndexWorkerLifecycle` on any instance claims the oldest unheld row (`claimNext`), taking a lease it renews for the duration
 4. `IndexWorker.process()`:
    - Sets status to PROCESSING
    - Iterates months, fetches games from chess.com API via `ChessClient`
@@ -154,7 +167,9 @@ com.muchq.indexer/
 | exclude_bullet | BOOLEAN     | Part of the dedupe tuple       |
 | dedupe_key    | VARCHAR      | UNIQUE. Held while live, NULLed on a terminal status — one live request per (player, platform, range, exclude_bullet) |
 | owner_id      | VARCHAR(128) | The worker process holding the lease; the fencing token every write is conditioned on |
-| lease_expires_at | TIMESTAMP | Renewed every 75s while the owner is alive. Past this the request is reclaimable |
+| lease_expires_at | TIMESTAMP | Renewed every 75s while the owner is alive. Past this the request is reclaimable. Deliberately survives a terminal write, as the record of when a worker last held the row |
+| skip_cache    | BOOLEAN      | Persisted so a worker on any instance honours what the submitter asked for |
+| attempts      | INT          | Claims so far. Bounds the requeue loop for a request that keeps killing its worker |
 
 ### game_features
 

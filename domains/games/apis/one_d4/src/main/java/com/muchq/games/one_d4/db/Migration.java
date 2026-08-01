@@ -321,6 +321,67 @@ public class Migration {
       "CREATE INDEX IF NOT EXISTS idx_indexing_requests_lease"
           + " ON indexing_requests(status, lease_expires_at)";
 
+  /**
+   * Columns that make the table dispatchable (#1279).
+   *
+   * <p>{@code skip_cache} has to be persisted because it stops being the submitter's business the
+   * moment any worker can pick the row up. Every other field a run needs is already a column; this
+   * one lived only in the queue message, so a worker claiming from the table would silently honour
+   * the period cache for a request that asked to bypass it.
+   *
+   * <p>{@code attempts} is the bound that replaces "nobody ever picked this up". Once an expired
+   * lease returns work to the queue instead of retiring it, a request that reliably kills its
+   * worker is retried forever, across every instance — a possibility that did not exist while a
+   * crashed process took its queue with it. Incremented on each claim, so it counts attempts and
+   * not failures, which is the conservative direction: a worker killed before it could report
+   * anything still moves the counter.
+   *
+   * <p>Both default for existing rows, and both defaults are the pre-#1279 behaviour: requests in
+   * flight during a deploy did not skip the cache and have not been attempted by a table-claiming
+   * worker.
+   *
+   * <p>The DEFAULT is the whole backfill. Both engines fill existing rows from it as the column is
+   * added, so there is no second statement to write — and an earlier version of this that added one
+   * anyway was dead code that no test could distinguish from the DEFAULT doing its job. Both
+   * columns are read as primitives ({@code getBoolean}, {@code getInt}), so a NULL would silently
+   * arrive as false or zero rather than failing; the DEFAULT is what keeps that from being
+   * load-bearing.
+   */
+  private static final String[] ADD_DISPATCH_COLUMNS = {
+    // The DEFAULTs are what backfills existing rows — both engines apply them when the column is
+    // added, so a request in flight during a deploy comes out as "do not skip the cache, never
+    // attempted", which is exactly its pre-#1279 behaviour. Both are read as primitives, so a NULL
+    // here would arrive silently as the same values without anyone having decided that.
+    "ALTER TABLE indexing_requests ADD COLUMN IF NOT EXISTS skip_cache BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE indexing_requests ADD COLUMN IF NOT EXISTS attempts INT DEFAULT 0",
+  };
+
+  /**
+   * What {@code claimNext} scans: the oldest live row nobody currently holds, on a query every
+   * instance runs every few seconds. Ordered by {@code created_at} because the queue it replaces
+   * was FIFO, and a poller that skipped ahead would starve the front under sustained load.
+   *
+   * <p>Partial on Postgres, and that is not a preference. Postgres before 17 cannot emit btree
+   * output already ordered on a trailing column when the leading one sits under a {@code
+   * ScalarArrayOp}, which {@code status IN (...)} is — so a composite {@code (status, created_at)}
+   * is never chosen, and forcing it still produces a full top-N sort of every live row. Measured at
+   * 200k rows with 10k live, the partial index planned three orders of magnitude cheaper. Worth
+   * pinning explicitly because CI runs {@code postgres:18}, where ordered SAOP scans do exist and
+   * the composite would have looked perfectly healthy.
+   */
+  private static final String CREATE_IDX_REQUESTS_CLAIMABLE_PG =
+      "CREATE INDEX IF NOT EXISTS idx_indexing_requests_claimable"
+          + " ON indexing_requests(created_at) WHERE status IN ('PENDING', 'PROCESSING')";
+
+  /**
+   * The same index for H2, which has no partial indexes. The composite is what a partial index
+   * approximates there, and H2 is the test engine rather than the deployment target, so the cost of
+   * it being the weaker plan is a slower test rather than a slower production poll.
+   */
+  private static final String CREATE_IDX_REQUESTS_CLAIMABLE_H2 =
+      "CREATE INDEX IF NOT EXISTS idx_indexing_requests_claimable"
+          + " ON indexing_requests(status, created_at)";
+
   // The retention sweep's anti-join (deleteOlderThan) filters indexing_requests on an hourly
   // schedule by "does any game still point at me". Without this, EXPLAIN shows a hash anti-join
   // over a sequential scan of game_features — the largest table in the schema. Neither engine
@@ -415,6 +476,12 @@ public class Migration {
         stmt.execute(add);
       }
       stmt.execute(CREATE_IDX_REQUESTS_LEASE);
+
+      // Table-backed dispatch.
+      for (String add : ADD_DISPATCH_COLUMNS) {
+        stmt.execute(add);
+      }
+      stmt.execute(useH2 ? CREATE_IDX_REQUESTS_CLAIMABLE_H2 : CREATE_IDX_REQUESTS_CLAIMABLE_PG);
 
       LOG.info("Database migration completed successfully (H2={})", useH2);
     } catch (SQLException e) {

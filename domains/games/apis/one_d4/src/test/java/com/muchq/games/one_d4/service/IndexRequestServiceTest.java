@@ -160,9 +160,9 @@ public class IndexRequestServiceTest {
   }
 
   /**
-   * #1249: two callers that both see nothing must still produce one unit of work. The service's
-   * dedupe read cannot prevent this — only the claim can — so this drives the path where the read
-   * is bypassed entirely.
+   * #1249: two callers that both see nothing must still produce one unit of work. Only the claim
+   * can decide that — a read followed by a write has a window in it, which is why the submit path
+   * asks createOrAdopt and nothing else.
    */
   @Test
   public void submit_secondCallerAdoptsRatherThanDispatchingASecondTime() {
@@ -174,8 +174,17 @@ public class IndexRequestServiceTest {
   }
 
   /**
-   * #1250: a request whose owner died must not hold its range hostage. Before the age bound, the
-   * stranded row answered every later submit forever and the only escape was skipCache.
+   * #1250: a request nothing is going to run must not hold its range hostage. Before the age bound,
+   * that row answered every later submit forever and the only escape was skipCache.
+   *
+   * <p>No worker has ever held a lease in this fixture, which since #1279 is the whole reason it
+   * retires: an old row is only stalled when nothing is running anywhere. An old row on a working
+   * fleet is a backlog, and the test below it covers the case where the age has not yet elapsed.
+   *
+   * <p>This is also what pins the submit path to a single call. #1279 took the clock out of {@code
+   * findExistingRequest}, and the dedupe read that used to run ahead of {@code createOrAdopt}
+   * immediately started answering with this row instead of reaching the reclaim that retires it —
+   * reintroducing a short-circuit here fails on exactly this assertion.
    */
   @Test
   public void submit_strandedRequestIsRetiredAndReplacedOnTheNextSubmit() {
@@ -294,9 +303,7 @@ public class IndexRequestServiceTest {
         .isInstanceOf(RuntimeException.class)
         .hasMessage("boom");
 
-    assertThat(
-            requestStore.findExistingRequest(
-                "hikaru", "CHESS_COM", "2024-01", "2024-01", false, Duration.ofHours(1), NOW))
+    assertThat(requestStore.findExistingRequest("hikaru", "CHESS_COM", "2024-01", "2024-01", false))
         .as("the range must not stay locked by a row nothing will ever finish")
         .isEmpty();
 
@@ -445,6 +452,7 @@ public class IndexRequestServiceTest {
         String startMonth,
         String endMonth,
         boolean excludeBullet,
+        boolean skipCache,
         Duration staleAfter,
         Instant now) {
       reclaimStale(staleAfter, now);
@@ -466,9 +474,23 @@ public class IndexRequestServiceTest {
               now,
               null,
               0,
-              excludeBullet);
+              excludeBullet,
+              skipCache,
+              0);
       rows.put(id, created);
       return new Claim(created, true);
+    }
+
+    /**
+     * Unimplemented on purpose. The submit path never claims — it creates a row and hands the work
+     * to a worker, and {@code IndexWorkerLifecycle} is the only thing that takes rows off the
+     * table. Returning empty here would be the quieter choice and the worse one: if a later change
+     * makes the service claim, an empty answer looks like "no work" and the test still passes.
+     */
+    @Override
+    public Optional<IndexingRequest> claimNext(String ownerId, Duration lease, Instant now) {
+      throw new UnsupportedOperationException(
+          "the submit path does not claim; see IndexWorkerLifecycleTest");
     }
 
     @Override
@@ -478,22 +500,11 @@ public class IndexRequestServiceTest {
 
     @Override
     public Optional<IndexingRequest> findExistingRequest(
-        String player,
-        String platform,
-        String startMonth,
-        String endMonth,
-        boolean excludeBullet,
-        Duration staleAfter,
-        Instant now) {
-      Instant cutoff = now.minus(staleAfter);
-      // Mirrors the DAO's two arms. A fake that answers this more loosely than production lets a
-      // divergence between dedupe and reclamation pass unnoticed here and fail against Postgres.
+        String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
+      // Mirrors the DAO: live, and not yet out of attempts. Age and ownership deliberately do not
+      // appear — a row whose worker died is still queued, so it still holds the range.
       return liveHolder(player, platform, startMonth, endMonth, excludeBullet)
-          .filter(
-              r ->
-                  owners.containsKey(r.id())
-                      ? leases.get(r.id()) != null && leases.get(r.id()).isAfter(now)
-                      : !r.updatedAt().isBefore(cutoff));
+          .filter(r -> r.attempts() < MAX_ATTEMPTS);
     }
 
     @Override
@@ -521,7 +532,9 @@ public class IndexRequestServiceTest {
               clock,
               errorMessage,
               gamesIndexed,
-              row.excludeBullet()));
+              row.excludeBullet(),
+              row.skipCache(),
+              row.attempts()));
     }
 
     @Override
@@ -537,10 +550,29 @@ public class IndexRequestServiceTest {
       if (heldByAnother) {
         return false;
       }
+      boolean reclaiming = !ownerId.equals(held);
       owners.put(id, ownerId);
       leases.put(id, now.plus(lease));
-      strand(id, now);
+      // Counted per new owner, as in the DAO — re-claiming your own row is a renewal, not a lap.
+      rows.put(id, withAttempts(touched(r, now), reclaiming ? r.attempts() + 1 : r.attempts()));
       return true;
+    }
+
+    private static IndexingRequest withAttempts(IndexingRequest r, int attempts) {
+      return new IndexingRequest(
+          r.id(),
+          r.player(),
+          r.platform(),
+          r.startMonth(),
+          r.endMonth(),
+          r.status(),
+          r.createdAt(),
+          r.updatedAt(),
+          r.errorMessage(),
+          r.gamesIndexed(),
+          r.excludeBullet(),
+          r.skipCache(),
+          attempts);
     }
 
     @Override
@@ -552,7 +584,18 @@ public class IndexRequestServiceTest {
         return false;
       }
       leases.put(id, now.plus(lease));
-      strand(id, now);
+      rows.put(id, touched(r, now));
+      return true;
+    }
+
+    @Override
+    public boolean handBack(UUID id, String ownerId, Instant now) {
+      IndexingRequest r = rows.get(id);
+      if (r == null || !live(r) || !ownerId.equals(owners.get(id))) {
+        return false;
+      }
+      owners.remove(id);
+      rows.put(id, withAttempts(touched(r, now), Math.max(0, r.attempts() - 1)));
       return true;
     }
 
@@ -582,39 +625,97 @@ public class IndexRequestServiceTest {
       return true;
     }
 
+    /**
+     * Three arms, as in the DAO, applied poisoned then stalled then released.
+     *
+     * <p>Worth modelling rather than stubbing, and worth getting the arms right, because this is
+     * the fake the submit path runs against and the two outcomes differ in exactly the way that
+     * matters here: a retired row frees its range for the next submit, a released one does not. An
+     * earlier version of this fake retired on lease expiry — the behaviour #1279 deleted — which
+     * would have let a service that resurrects released work look correct.
+     */
     @Override
     public int reclaimStale(Duration staleAfter, Instant now) {
       Instant cutoff = now.minus(staleAfter);
-      // Two arms, as in the DAO: a claimed row is judged by its lease, an unclaimed one by its
-      // age. Collapsing them here would let a test pass that retires a row a worker still owns.
-      List<IndexingRequest> stranded =
+      List<IndexingRequest> candidates =
+          rows.values().stream().filter(InMemoryRequestStore::live).toList();
+      boolean anyoneWorking =
           rows.values().stream()
-              .filter(
-                  r ->
-                      live(r)
-                          && (owners.containsKey(r.id())
-                              ? leases.get(r.id()) != null && leases.get(r.id()).isBefore(now)
-                              : r.updatedAt().isBefore(cutoff)))
-              .toList();
-      for (IndexingRequest r : stranded) {
-        owners.remove(r.id());
-        leases.remove(r.id());
-        rows.put(
-            r.id(),
-            new IndexingRequest(
-                r.id(),
-                r.player(),
-                r.platform(),
-                r.startMonth(),
-                r.endMonth(),
-                "FAILED",
-                r.createdAt(),
-                now,
-                "Abandoned",
-                r.gamesIndexed(),
-                r.excludeBullet()));
+              .anyMatch(r -> owners.containsKey(r.id()) && expiresAfter(r.id(), now));
+
+      int settled = 0;
+      for (IndexingRequest r : candidates) {
+        boolean unheld = !owners.containsKey(r.id()) || !expiresAfter(r.id(), now);
+        if (r.attempts() >= MAX_ATTEMPTS && unheld) {
+          retire(r, "Abandoned: attempts exhausted", now);
+        } else if (unheld
+            && r.updatedAt().isBefore(cutoff)
+            && !anyoneWorking
+            && !leasedSince(r, cutoff)) {
+          retire(r, "Abandoned: no worker running anywhere", now);
+        } else if (owners.containsKey(r.id()) && !expiresAfter(r.id(), now)) {
+          // Released: the owner is gone, the work is not. The row stays live and keeps its range.
+          owners.remove(r.id());
+          rows.put(r.id(), touched(r, now));
+        } else {
+          continue;
+        }
+        settled++;
       }
-      return stranded.size();
+      return settled;
+    }
+
+    private boolean expiresAfter(UUID id, Instant now) {
+      Instant expires = leases.get(id);
+      return expires != null && expires.isAfter(now);
+    }
+
+    /** Any other row a worker held recently — the DAO's second liveness probe. */
+    private boolean leasedSince(IndexingRequest judged, Instant cutoff) {
+      return rows.values().stream()
+          .anyMatch(
+              other ->
+                  !other.id().equals(judged.id())
+                      && leases.get(other.id()) != null
+                      && !leases.get(other.id()).isBefore(cutoff));
+    }
+
+    private void retire(IndexingRequest r, String reason, Instant now) {
+      owners.remove(r.id());
+      leases.remove(r.id());
+      rows.put(
+          r.id(),
+          new IndexingRequest(
+              r.id(),
+              r.player(),
+              r.platform(),
+              r.startMonth(),
+              r.endMonth(),
+              "FAILED",
+              r.createdAt(),
+              now,
+              reason,
+              r.gamesIndexed(),
+              r.excludeBullet(),
+              r.skipCache(),
+              r.attempts()));
+    }
+
+    private static IndexingRequest touched(IndexingRequest r, Instant now) {
+      return new IndexingRequest(
+          r.id(),
+          r.player(),
+          r.platform(),
+          r.startMonth(),
+          r.endMonth(),
+          r.status(),
+          r.createdAt(),
+          now,
+          r.errorMessage(),
+          r.gamesIndexed(),
+          r.excludeBullet(),
+          r.skipCache(),
+          r.attempts());
     }
 
     @Override
@@ -629,22 +730,9 @@ public class IndexRequestServiceTest {
     }
 
     /** Backdates a row's updatedAt so a test can strand it without waiting an hour. */
+    /** Backdates {@code updated_at}, so a test can age a row past the staleness window. */
     void strand(UUID id, Instant updatedAt) {
-      IndexingRequest r = rows.get(id);
-      rows.put(
-          id,
-          new IndexingRequest(
-              r.id(),
-              r.player(),
-              r.platform(),
-              r.startMonth(),
-              r.endMonth(),
-              r.status(),
-              r.createdAt(),
-              updatedAt,
-              r.errorMessage(),
-              r.gamesIndexed(),
-              r.excludeBullet()));
+      rows.put(id, touched(rows.get(id), updatedAt));
     }
   }
 

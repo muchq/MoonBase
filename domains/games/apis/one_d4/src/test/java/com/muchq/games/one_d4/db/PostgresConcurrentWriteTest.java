@@ -19,6 +19,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -241,6 +242,75 @@ public class PostgresConcurrentWriteTest {
     assertThat(countOccurrences())
         .as("reanalysis and an indexing flush left duplicated motif rows for this game")
         .isEqualTo(2);
+  }
+
+  /**
+   * Many pollers, one table, on the engine that actually runs this in production.
+   *
+   * <p>{@code claimNext} reads candidates without a lock — every poller is entitled to see the same
+   * ones — and relies entirely on {@code claim} being a conditional UPDATE to decide who gets each
+   * row. H2 covers the shape; this covers it where the row locks are Postgres's, with enough
+   * pollers and rounds that a broken predicate has somewhere to show itself.
+   *
+   * <p>Two workers holding one request is the failure this whole cluster of changes exists to
+   * prevent, so it is asserted directly rather than inferred from a count.
+   */
+  @Test
+  @Timeout(120)
+  public void concurrentPollersNeverHandOneRequestToTwoWorkers() throws Exception {
+    IndexingRequestDao requests = new IndexingRequestDao(Jdbi.create(dataSource));
+    // The suite's fixture request is claimable too: setUp leaves it PROCESSING with a lease that
+    // has expired long before the instant these pollers claim at. Counting only the rows this test
+    // inserts would make the totals wrong by exactly one — which is how this was caught.
+    int fixtureRows = 1;
+    int pollers = 4;
+    int requestCount = 40;
+    for (int i = 0; i < requestCount; i++) {
+      requests.createOrAdopt(
+          "racer" + i,
+          "CHESS_COM",
+          "2026-01",
+          "2026-01",
+          false,
+          false,
+          Duration.ofHours(1),
+          NOW.plusSeconds(i));
+    }
+
+    ExecutorService racers = Executors.newFixedThreadPool(pollers);
+    try {
+      java.util.concurrent.CyclicBarrier start = new java.util.concurrent.CyclicBarrier(pollers);
+      List<java.util.concurrent.Callable<List<UUID>>> tasks = new java.util.ArrayList<>();
+      for (int i = 0; i < pollers; i++) {
+        String owner = "pg-worker-" + i;
+        tasks.add(
+            () -> {
+              start.await(30, TimeUnit.SECONDS);
+              List<UUID> mine = new java.util.ArrayList<>();
+              for (Optional<IndexingRequestStore.IndexingRequest> got =
+                      requests.claimNext(owner, Duration.ofMinutes(5), NOW.plusSeconds(1000));
+                  got.isPresent();
+                  got = requests.claimNext(owner, Duration.ofMinutes(5), NOW.plusSeconds(1000))) {
+                mine.add(got.get().id());
+              }
+              return mine;
+            });
+      }
+
+      List<UUID> all = new java.util.ArrayList<>();
+      for (Future<List<UUID>> f : racers.invokeAll(tasks, 90, TimeUnit.SECONDS)) {
+        all.addAll(f.get());
+      }
+
+      assertThat(all)
+          .as("every request should have been claimed by someone")
+          .hasSize(requestCount + fixtureRows);
+      assertThat(java.util.Set.copyOf(all))
+          .as("a request was handed to more than one worker")
+          .hasSize(all.size());
+    } finally {
+      racers.shutdownNow();
+    }
   }
 
   // --- helpers ---------------------------------------------------------------------------------

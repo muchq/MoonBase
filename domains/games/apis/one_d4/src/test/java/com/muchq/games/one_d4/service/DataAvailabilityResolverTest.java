@@ -107,7 +107,9 @@ public class DataAvailabilityResolverTest {
             FETCHED,
             null,
             42,
-            true);
+            true,
+            false,
+            0);
 
     // The period a CHESS_COM bullet-including request would have written cannot vouch for it.
     periods.add("hikaru", "CHESS_COM", false, "2026-07", FETCHED);
@@ -212,7 +214,9 @@ public class DataAvailabilityResolverTest {
         FETCHED,
         null,
         42,
-        false);
+        false,
+        false,
+        0);
   }
 
   private static final class FakePeriodStore implements IndexedPeriodStore {

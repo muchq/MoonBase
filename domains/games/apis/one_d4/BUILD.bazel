@@ -378,6 +378,7 @@ java_test_suite(
     name = "worker_tests",
     size = "small",
     srcs = [
+        "src/test/java/com/muchq/games/one_d4/worker/IndexWorkerLifecycleTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/IndexWorkerTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/OpeningsTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/RequestLivenessTest.java",
@@ -459,7 +460,11 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/IndexerModuleTest.java",
     ],
     deps = [
+        ":db",
         ":module",
+        ":queue",
+        ":worker",
+        artifact("io.micronaut:micronaut-inject"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
@@ -474,6 +479,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/db/IndexedPeriodDaoTest.java",
         "src/test/java/com/muchq/games/one_d4/db/IndexingRequestDaoTest.java",
         "src/test/java/com/muchq/games/one_d4/db/MigrationTest.java",
+        "src/test/java/com/muchq/games/one_d4/db/TableDispatchTest.java",
     ],
     deps = [
         ":db",

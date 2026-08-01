@@ -179,9 +179,14 @@ public class McpModule {
         indexExtractionExecutor);
   }
 
+  // preDestroy is load-bearing, not hygiene: the poller is a daemon thread, so without it a deploy
+  // is indistinguishable from a crash — the row stays owned by a dead process for a full lease, and
+  // the attempt it spent is gone. See IndexWorkerLifecycle#stop.
   @Context
-  public IndexWorkerLifecycle indexWorkerLifecycle(IndexQueue queue, IndexWorker worker) {
-    return new IndexWorkerLifecycle(queue, worker);
+  @Bean(preDestroy = "stop")
+  public IndexWorkerLifecycle indexWorkerLifecycle(
+      IndexQueue queue, IndexWorker worker, IndexingRequestStore requestStore, Clock clock) {
+    return new IndexWorkerLifecycle(queue, worker, requestStore, clock);
   }
 
   @Context

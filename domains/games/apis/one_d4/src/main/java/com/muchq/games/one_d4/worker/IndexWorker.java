@@ -34,6 +34,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -94,6 +95,37 @@ public class IndexWorker {
   /** Visible so a test can assert which worker holds a request. */
   public String ownerId() {
     return ownerId;
+  }
+
+  /**
+   * Requests this process is running right now.
+   *
+   * <p>The lease cannot do this job, and that is not a gap in the lease — it is what the lease is.
+   * {@code ownerId} names the <em>process</em> so that a run can renew across its own retries, and
+   * {@link IndexingRequestStore#claim} therefore admits its own holder. Correct for the question it
+   * answers ("may this process write?"), and useless for a different one ("is this process already
+   * running this?").
+   *
+   * <p>Since #1279 there are two ways into a run and both live here: the poller, which claims from
+   * the table, and {@code submitHybrid}'s inline dispatch, which hands the message straight over.
+   * They can pick up the same row — the poller can claim it in the gap between {@code
+   * createOrAdopt} committing and the inline call starting — and both claims succeed, because they
+   * present the same token. Every fence downstream then passes for both, so the range is fetched
+   * and extracted twice, one run's terminal write is refused, and nothing says so. Across two
+   * processes the lease handles it; within one, only this does.
+   */
+  private final Set<UUID> inFlight = ConcurrentHashMap.newKeySet();
+
+  /**
+   * A snapshot of what this process is running, for the shutdown path to hand back.
+   *
+   * <p>A live view rather than a copy would be worse than useless here: the caller iterates it
+   * while runs are still finishing and removing themselves, so it would be racing the very set it
+   * is reading. Both entry points register here, so a request picked up inline is handed back on
+   * shutdown just like a claimed one — the JVM is going away either way.
+   */
+  public Set<UUID> inFlight() {
+    return Set.copyOf(inFlight);
   }
 
   /**
@@ -184,19 +216,29 @@ public class IndexWorker {
         message.player(),
         message.platform());
 
+    if (!inFlight.add(message.requestId())) {
+      LOG.info(
+          "Skipping request {}: this process is already running it. The poller and an inline"
+              + " dispatch both reached it; one run is enough.",
+          message.requestId());
+      return;
+    }
+    try {
+      claimAndRun(message);
+    } finally {
+      inFlight.remove(message.requestId());
+    }
+  }
+
+  private void claimAndRun(IndexMessage message) {
     if (!requestStore.claim(message.requestId(), ownerId, RetentionPolicy.LEASE, clock.instant())) {
       // Three causes, and the message must not pick one: a live rival holds the lease, the row
       // reached a terminal status, or it is gone. Only the first is benign — it means the work is
       // already owned and doing it again would put two writers on the same games.
       //
-      // The second is not benign and is the known cost of dispatching from a process-local queue.
-      // A message that waits longer than the unclaimed cutoff has its row retired underneath it,
-      // and this worker then declines the work rather than doing it: the dedupe slot is free, so a
-      // replacement may already be running the range. Before ownership existed the worker carried
-      // on and its unfenced terminal write landed, so the user got their games — at the cost of
-      // exactly the concurrent-writer corruption this change prevents. Neither answer is right;
-      // the fix is for queued work not to be retired at all, which needs dispatch to claim from
-      // the table rather than from memory (#1279).
+      // The second means the sweep has already given up on this request — its attempts are spent,
+      // or nothing was running anywhere for long enough that the user was told it failed. Either
+      // way it is not this worker's to resume.
       LOG.warn(
           "Declining request {}: it is not available to claim (already held, or retired while"
               + " queued). No games will be indexed for it.",
@@ -331,6 +373,10 @@ public class IndexWorker {
               message.player(),
               monthStr);
         }
+        // Unfenced, like the 404 path above and for the same reason — indexed_periods is keyed by
+        // (player, platform, month), so there is no request to condition the write on. What keeps
+        // it safe is order: the flushBatch immediately above checks ownership and throws if this
+        // worker has lost it, so this line is unreachable without a live lease.
         upsertPeriod(message, monthStr, month, fetchedAt, monthCount, titleResolution.degraded());
         progress(message.requestId(), totalIndexed);
       }
