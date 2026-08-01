@@ -69,6 +69,15 @@ public class ConcurrentFlushTest {
    */
   private static final long RIVAL_HOLD_MILLIS = 600;
 
+  /**
+   * How long a writer must fail to finish for us to call it blocked. Generously above what an
+   * unblocked flush of one game takes, so the assertion cannot fire on a slow machine.
+   */
+  private static final long BLOCKED_WINDOW_MILLIS = 1500;
+
+  /** Rounds of reanalysis against a flush. A race, not a proof — see the test that says so. */
+  private static final int CONTENTION_ROUNDS = 60;
+
   private TestDb testDb;
   private DataSource dataSource;
   private GameFeatureDao store;
@@ -213,51 +222,146 @@ public class ConcurrentFlushTest {
   }
 
   /**
-   * The other writer of {@code motif_occurrences}: reanalysis, which rewrites a game's motifs
-   * without holding any request lease. It has to be safe against a worker flushing a live request
-   * that covers the same game, and being a transaction is not enough on its own.
+   * The mechanism that makes reanalysis and an indexing flush safe against each other, asserted
+   * directly rather than raced for.
    *
-   * <p>Under READ COMMITTED a {@code DELETE} blocked on another transaction's uncommitted delete
-   * re-checks the rows it was blocked on, but not rows that transaction inserted — those are
-   * outside its statement snapshot. So two transactional writers still interleave as delete,
-   * delete, insert, insert unless they first contend for something in common. Both now take the
-   * {@code game_features} row for the game.
+   * <p>Both rewrite a game's occurrences, and both being a transaction is not what saves them:
+   * under READ COMMITTED a {@code DELETE} blocked on another transaction's uncommitted delete
+   * re-checks the rows it blocked on but not the rows that transaction <em>inserted</em>, so they
+   * still interleave as delete, delete, insert, insert. What saves them is contending for something
+   * shared first, and the only thing they share is the game's {@code game_features} row.
    *
-   * <p>Driven the same way as the takeover test: the admin side opens its transaction and holds it
-   * while the flush runs, which is the ordering that produces the doubling if nothing serializes
-   * them.
+   * <p>Racing two writers cannot prove that — whichever finishes first, the count is right, so the
+   * test passes with or without the lock. Holding the row from outside can: if a writer takes it,
+   * it blocks; if it does not, it sails through. Delete either {@code lockGames} call and the
+   * corresponding case fails immediately.
    */
   @Test
   @Timeout(30)
+  public void bothOccurrenceWritersTakeTheGamesFeatureRowBeforeRewritingIt() throws Exception {
+    store.flushOwned(
+        requestId, OWNER_A, NOW, List.of(gameFeature()), Map.of(GAME_URL, occurrences()));
+
+    assertBlocksWhileTheGameRowIsHeld(
+        "reanalysis",
+        () -> store.replaceOccurrences(List.of(GAME_URL), Map.of(GAME_URL, occurrences())));
+    assertBlocksWhileTheGameRowIsHeld(
+        "an indexing flush",
+        () ->
+            store.flushOwned(
+                requestId, OWNER_A, NOW, List.of(gameFeature()), Map.of(GAME_URL, occurrences())));
+    // The shape where the explicit lock is the only lock. A flush that writes features takes the
+    // row implicitly — its upsert conflicts on the UNIQUE game_url — so deleting lockGames from
+    // that path changes nothing observable and the case above passes either way. Occurrences
+    // without features is reachable through the interface and rewrites the same rows with nothing
+    // to conflict on, which is precisely what the explicit lock is for.
+    assertBlocksWhileTheGameRowIsHeld(
+        "a flush of occurrences alone",
+        () ->
+            store.flushOwned(requestId, OWNER_A, NOW, List.of(), Map.of(GAME_URL, occurrences())));
+  }
+
+  /**
+   * Runs {@code writer} while another connection holds the game's {@code game_features} row, and
+   * asserts it makes no progress until that is released.
+   *
+   * <p>The negative half is the load-bearing one and it is sound in the direction that matters: a
+   * writer that takes the row lock <em>cannot</em> finish inside the window, so completing is proof
+   * it never asked for it. The window is generous, so the converse — a writer slow for unrelated
+   * reasons — cannot fail it.
+   */
+  private void assertBlocksWhileTheGameRowIsHeld(String what, Runnable writer) throws Exception {
+    CountDownLatch rowHeld = new CountDownLatch(1);
+    CountDownLatch releaseRow = new CountDownLatch(1);
+
+    Future<?> holder =
+        pool.submit(
+            () -> {
+              try (var conn = dataSource.getConnection()) {
+                conn.setAutoCommit(false);
+                try (var ps =
+                    conn.prepareStatement(
+                        "SELECT game_url FROM game_features WHERE game_url = ? FOR UPDATE")) {
+                  ps.setString(1, GAME_URL);
+                  ps.executeQuery().close();
+                }
+                rowHeld.countDown();
+                releaseRow.await(20, TimeUnit.SECONDS);
+                conn.commit();
+              } catch (Exception e) {
+                throw new RuntimeException(e);
+              }
+            });
+
+    assertThat(rowHeld.await(15, TimeUnit.SECONDS)).isTrue();
+    Future<?> blocked = pool.submit(writer);
+    try {
+      blocked.get(BLOCKED_WINDOW_MILLIS, TimeUnit.MILLISECONDS);
+      throw new AssertionError(
+          what + " rewrote the game's occurrences without taking its game_features row first");
+    } catch (java.util.concurrent.TimeoutException expected) {
+      // Blocked, which is the point.
+    }
+
+    releaseRow.countDown();
+    blocked.get(20, TimeUnit.SECONDS);
+    holder.get(20, TimeUnit.SECONDS);
+  }
+
+  /**
+   * Both writers, run against each other repeatedly with a barrier per round.
+   *
+   * <p>This is a race and says so: it cannot force the delete/delete/insert/insert order, because
+   * neither {@code flushOwned} nor {@code replaceOccurrences} can be paused mid-transaction from
+   * outside. What it adds over the deterministic test above is coverage of orderings nobody thought
+   * to write down. Treat a failure as real and a pass as weak evidence — the lock itself is pinned
+   * by {@code bothOccurrenceWritersTakeTheGamesFeatureRowBeforeRewritingIt}, and the Postgres
+   * behaviour that makes it necessary by {@code PostgresConcurrentWriteTest}.
+   */
+  @Test
+  @Timeout(60)
   public void reanalysisAndAWorkerFlushOverOneGameDoNotDuplicateOccurrences() throws Exception {
     store.flushOwned(
         requestId, OWNER_A, NOW, List.of(gameFeature()), Map.of(GAME_URL, occurrences()));
     assertThat(countOccurrences()).isEqualTo(2);
 
-    CountDownLatch reanalysisStarted = new CountDownLatch(1);
+    java.util.concurrent.CyclicBarrier round = new java.util.concurrent.CyclicBarrier(2);
+    Runnable sync =
+        () -> {
+          try {
+            round.await(20, TimeUnit.SECONDS);
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+        };
 
     Future<?> reanalysis =
         pool.submit(
             () -> {
-              reanalysisStarted.countDown();
-              store.replaceOccurrences(List.of(GAME_URL), Map.of(GAME_URL, occurrences()));
+              for (int i = 0; i < CONTENTION_ROUNDS; i++) {
+                sync.run();
+                store.replaceOccurrences(List.of(GAME_URL), Map.of(GAME_URL, occurrences()));
+              }
             });
-    assertThat(reanalysisStarted.await(15, TimeUnit.SECONDS)).isTrue();
-    Future<Boolean> flush =
+    Future<?> flush =
         pool.submit(
-            () ->
+            () -> {
+              for (int i = 0; i < CONTENTION_ROUNDS; i++) {
+                sync.run();
                 store.flushOwned(
                     requestId,
                     OWNER_A,
                     NOW,
                     List.of(gameFeature()),
-                    Map.of(GAME_URL, occurrences())));
+                    Map.of(GAME_URL, occurrences()));
+              }
+            });
 
-    reanalysis.get(20, TimeUnit.SECONDS);
-    assertThat(flush.get(20, TimeUnit.SECONDS)).isTrue();
+    reanalysis.get(45, TimeUnit.SECONDS);
+    flush.get(45, TimeUnit.SECONDS);
 
     assertThat(countOccurrences())
-        .as("reanalysis and an indexing flush left two copies of every motif for this game")
+        .as("reanalysis and an indexing flush left duplicated motif rows for this game")
         .isEqualTo(2);
   }
 

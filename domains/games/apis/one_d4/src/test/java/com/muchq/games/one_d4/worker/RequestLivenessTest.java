@@ -294,6 +294,56 @@ public class RequestLivenessTest {
         .isEqualTo("COMPLETED");
   }
 
+  /**
+   * A run that genuinely fails, under a lease that lapsed with nobody taking it, must still record
+   * the failure.
+   *
+   * <p>The recovery path is not a nicety for the happy cases. Progress, the flush and COMPLETED all
+   * renew-and-retry when their own lease has merely lapsed; the FAILED write went straight at the
+   * store, so the one write that exists to explain a failure was the one most likely to be refused
+   * — and refused for a reason that has nothing to do with the failure. What follows is worse than
+   * a missing log line: the row stays PROCESSING holding its dedupe slot, so the range is blocked
+   * until the hourly sweep retires it under a message about an owner that stopped responding, which
+   * is not what happened. The user is told to wait, then told the wrong thing.
+   *
+   * <p>Reachable exactly when it hurts most: a database problem that throws out of the run is the
+   * same database problem that stalls the heartbeat.
+   */
+  @Test
+  @Timeout(30)
+  public void aRunThatFailsUnderALapsedLeaseStillRecordsTheFailure() throws Exception {
+    TestDb testDb = TestDb.create("liveness_failed_lapsed");
+    IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    CountDownLatch insideFetch = new CountDownLatch(1);
+    CountDownLatch releaseFetch = new CountDownLatch(1);
+    IndexWorker worker =
+        newWorker(new ThrowingChessClient(insideFetch, releaseFetch), dao, Duration.ofHours(1));
+
+    Future<?> run = workerExecutor.submit(() -> worker.process(message(requestId)));
+    assertThat(insideFetch.await(15, TimeUnit.SECONDS)).isTrue();
+
+    clock.advance(RetentionPolicy.LEASE.plusMinutes(1));
+    assertThat(dao.holdsLease(requestId, worker.ownerId(), clock.instant()))
+        .as("precondition: the lease really has lapsed, and nobody has taken it")
+        .isFalse();
+
+    releaseFetch.countDown();
+    run.get(20, TimeUnit.SECONDS);
+
+    IndexingRequestStore.IndexingRequest row = dao.findById(requestId).orElseThrow();
+    assertThat(row.status())
+        .as("the failure has to be recorded, not left for the sweep to mislabel")
+        .isEqualTo("FAILED");
+    assertThat(row.errorMessage()).contains("Indexing failed");
+    assertThat(
+            dao.createOrAdopt(PLAYER, PLATFORM, MONTH, MONTH, false, STALE_AFTER, clock.instant())
+                .created())
+        .as("and the dedupe slot is released, so the range is requestable again immediately")
+        .isTrue();
+  }
+
   /** Two workers, one request: the second must decline rather than double up on the games. */
   @Test
   @Timeout(30)
@@ -506,6 +556,34 @@ public class RequestLivenessTest {
       // The archive is empty: the month still counts as indexed, and the worker takes its
       // no-games path. What is under test is the silence before this returns, not the payload.
       return Optional.empty();
+    }
+
+    @Override
+    public Optional<Player> fetchPlayer(String player) {
+      return Optional.empty();
+    }
+  }
+
+  /** Parks in the archive fetch until released, then fails the run for real. */
+  private static final class ThrowingChessClient extends ChessClient {
+    private final CountDownLatch entered;
+    private final CountDownLatch release;
+
+    ThrowingChessClient(CountDownLatch entered, CountDownLatch release) {
+      super(null, new ObjectMapper());
+      this.entered = entered;
+      this.release = release;
+    }
+
+    @Override
+    public Optional<GamesResponse> fetchGames(String player, YearMonth yearMonth) {
+      entered.countDown();
+      try {
+        release.await(20, TimeUnit.SECONDS);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+      throw new IllegalStateException("chess.com exploded");
     }
 
     @Override

@@ -359,16 +359,25 @@ public class IndexWorker {
       LOG.warn("Abandoning request {}: {}", message.requestId(), e.getMessage());
     } catch (Exception e) {
       LOG.error("Failed to process index request {}", message.requestId(), e);
-      if (!requestStore.updateStatusOwned(
+      // Through fenced(), like every other write in the run. This is the write most likely to be
+      // refused for a reason unrelated to what it is reporting — the database problem that throws
+      // out of a run is the same one that stalls the heartbeat — and it is the only write that can
+      // explain the failure. Refused, it leaves the row PROCESSING holding its dedupe slot, so the
+      // range stays blocked until the hourly sweep retires it under a message about an owner that
+      // stopped responding, which is not what happened.
+      if (!fenced(
           message.requestId(),
-          ownerId,
-          "FAILED",
-          "Indexing failed due to an internal error",
-          0,
-          clock.instant())) {
-        // Worth its own line: the failure is now recorded nowhere, and the row waits for the
-        // sweep. Reachable when the exception that landed here is itself the database problem
-        // that lapsed the lease.
+          () ->
+              requestStore.updateStatusOwned(
+                  message.requestId(),
+                  ownerId,
+                  "FAILED",
+                  "Indexing failed due to an internal error",
+                  0,
+                  clock.instant()),
+          "the failure could be recorded")) {
+        // Only reachable now when the range has genuinely moved on, in which case the replacement
+        // owns the outcome and this run has nothing to report.
         LOG.error(
             "Could not record FAILED for request {}: the lease is gone. The row will be reclaimed"
                 + " rather than reporting this error.",
