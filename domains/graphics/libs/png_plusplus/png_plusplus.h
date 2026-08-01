@@ -21,6 +21,34 @@ class PngException : public std::runtime_error {
   explicit PngException(const std::string& msg) : std::runtime_error(msg) {}
 };
 
+namespace detail {
+
+/// Whatever libpng handed the error handler before jumping, or `fallback`
+/// when the jump arrived without a message.
+inline std::string ErrorText(const std::string& recorded, const char* fallback) {
+  return recorded.empty() ? std::string(fallback) : recorded;
+}
+
+}  // namespace detail
+
+// How errors get out of libpng, and why it looks like this (#1274).
+//
+// libpng is C. Its error handler is required not to return — it calls
+// abort() if one does — so the way back to C++ is the longjmp that
+// png_jmpbuf sets up. Throwing from the handler instead unwinds through
+// libpng's own frames, which are compiled without unwind tables: undefined
+// behavior, and it strands every allocation libpng was holding, including
+// the png struct the C++ object had not finished adopting yet.
+//
+// So the handlers below record the message and longjmp, and the exception
+// is thrown from the C++ side of the jump, where unwinding is defined.
+//
+// The second half of the rule matters just as much: longjmp runs no
+// destructors. Anything owning memory has to be constructed in a frame the
+// jump lands *below*, never between the setjmp and the libpng call that
+// might jump. That is why the row buffers are built by the caller and the
+// setjmp sits in a small helper holding nothing but a pointer.
+
 class PngWriter {
  public:
   PngWriter(const std::string& filename, int width, int height)
@@ -43,10 +71,13 @@ class PngWriter {
       throw PngException("Failed to create PNG info struct");
     }
 
-    // Set up error handling with setjmp
+    // Where errorHandler's longjmp lands. Nothing with a destructor is live
+    // in this frame, so the jump skips nothing.
     if (setjmp(png_jmpbuf(png_))) {
+      const std::string message =
+          detail::ErrorText(error_message_, "PNG error during initialization");
       cleanup();
-      throw PngException("PNG error during initialization");
+      throw PngException(message);
     }
 
     png_init_io(png_, file_);
@@ -99,10 +130,8 @@ class PngWriter {
       throw PngException("Image dimensions don't match writer dimensions");
     }
 
-    if (setjmp(png_jmpbuf(png_))) {
-      throw PngException("PNG error during write");
-    }
-
+    // Built before the jump target is armed, so they belong to this frame
+    // and are destroyed on the way out however writeRows leaves.
     std::vector<png_bytep> row_pointers(height_);
     std::vector<png_byte> row_data(width_ * 3 * height_);
 
@@ -115,8 +144,7 @@ class PngWriter {
       }
     }
 
-    png_write_image(png_, row_pointers.data());
-    png_write_end(png_, nullptr);
+    writeRows(row_pointers.data());
   }
 
   int getWidth() const { return width_; }
@@ -124,6 +152,18 @@ class PngWriter {
   const std::string& getFilename() const { return filename_; }
 
  private:
+  /// The only frame that calls libpng with a jump target armed. It holds
+  /// nothing but its argument on purpose: longjmp runs no destructors, so
+  /// anything owning memory has to live in the caller's frame instead.
+  void writeRows(png_bytep* rows) {
+    if (setjmp(png_jmpbuf(png_))) {
+      throw PngException(detail::ErrorText(error_message_, "PNG error during write"));
+    }
+
+    png_write_image(png_, rows);
+    png_write_end(png_, nullptr);
+  }
+
   void cleanup() {
     if (png_ || info_) {
       png_destroy_write_struct(png_ ? &png_ : nullptr, info_ ? &info_ : nullptr);
@@ -136,9 +176,15 @@ class PngWriter {
     }
   }
 
+  /// Records the message and jumps; never returns. libpng aborts the
+  /// process if an error handler returns, and throwing from here would
+  /// unwind through its C frames.
   static void errorHandler(png_structp png, png_const_charp msg) {
-    (void)png;  // Unused
-    throw PngException(std::string("PNG Error: ") + msg);
+    auto* self = static_cast<PngWriter*>(png_get_error_ptr(png));
+    if (self != nullptr) {
+      self->error_message_ = std::string("PNG Error: ") + (msg != nullptr ? msg : "unknown");
+    }
+    longjmp(png_jmpbuf(png), 1);
   }
 
   static void warningHandler(png_structp png, png_const_charp msg) {
@@ -153,6 +199,8 @@ class PngWriter {
   int width_;
   int height_;
   std::string filename_;
+  /// Written by errorHandler before it jumps, read on the far side.
+  std::string error_message_;
 };
 
 // Convenience function for simple image writing
@@ -266,10 +314,13 @@ class MemoryPngWriter {
       throw PngException("Failed to create PNG info struct");
     }
 
-    // Set up error handling with setjmp
+    // Where errorHandler's longjmp lands. Nothing with a destructor is live
+    // in this frame, so the jump skips nothing.
     if (setjmp(png_jmpbuf(png_))) {
+      const std::string message =
+          detail::ErrorText(error_message_, "PNG error during initialization");
       cleanup();
-      throw PngException("PNG error during initialization");
+      throw PngException(message);
     }
 
     png_set_write_fn(png_, this, &MemoryPngWriter::writeData, nullptr);
@@ -325,10 +376,8 @@ class MemoryPngWriter {
       throw PngException("Image dimensions don't match writer dimensions");
     }
 
-    if (setjmp(png_jmpbuf(png_))) {
-      throw PngException("PNG error during write");
-    }
-
+    // Built before the jump target is armed, so they belong to this frame
+    // and are destroyed on the way out however writeRows leaves.
     std::vector<png_bytep> row_pointers(height_);
     std::vector<png_byte> row_data(width_ * 3 * height_);
 
@@ -341,8 +390,7 @@ class MemoryPngWriter {
       }
     }
 
-    png_write_image(png_, row_pointers.data());
-    png_write_end(png_, nullptr);
+    writeRows(row_pointers.data());
   }
 
   const std::vector<unsigned char>& getBuffer() const { return buffer_; }
@@ -365,14 +413,32 @@ class MemoryPngWriter {
     writer->buffer_.insert(writer->buffer_.end(), data, data + length);
   }
 
+  /// Records the message and jumps; never returns. libpng aborts the
+  /// process if an error handler returns, and throwing from here would
+  /// unwind through its C frames.
   static void errorHandler(png_structp png, png_const_charp msg) {
-    (void)png;  // Unused
-    throw PngException(std::string("PNG Error: ") + msg);
+    auto* self = static_cast<MemoryPngWriter*>(png_get_error_ptr(png));
+    if (self != nullptr) {
+      self->error_message_ = std::string("PNG Error: ") + (msg != nullptr ? msg : "unknown");
+    }
+    longjmp(png_jmpbuf(png), 1);
   }
 
   static void warningHandler(png_structp png, png_const_charp msg) {
     (void)png;  // Unused
     (void)msg;  // Could log warnings here if desired
+  }
+
+  /// The only frame that calls libpng with a jump target armed. It holds
+  /// nothing but its argument on purpose: longjmp runs no destructors, so
+  /// anything owning memory has to live in the caller's frame instead.
+  void writeRows(png_bytep* rows) {
+    if (setjmp(png_jmpbuf(png_))) {
+      throw PngException(detail::ErrorText(error_message_, "PNG error during write"));
+    }
+
+    png_write_image(png_, rows);
+    png_write_end(png_, nullptr);
   }
 
   png_structp png_ = nullptr;
@@ -381,6 +447,8 @@ class MemoryPngWriter {
   int height_;
   int compression_level_;
   std::vector<unsigned char> buffer_;
+  /// Written by errorHandler before it jumps, read on the far side.
+  std::string error_message_;
 };
 
 // Memory-based PNG reader for reading from in-memory buffers

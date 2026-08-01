@@ -577,6 +577,27 @@ TEST_F(PngPlusPlusTest, EmptyImageHandling) {
       PngException);
 }
 
+// Errors leave libpng by longjmp now, not by throwing across its C frames
+// (#1274), so the diagnostic has to survive that trip: the handler records
+// it on the far side of a jump that runs no destructors and copies nothing.
+// Get that wrong and the caller still sees a PngException — just the generic
+// fallback, with libpng's actual objection gone. The tests above assert only
+// that *something* throws, so nothing else would notice.
+TEST_F(PngPlusPlusTest, LibpngsOwnMessageSurvivesTheJump) {
+  image_core::Image<image_core::RGB_Double> empty_image(0, 0);
+
+  try {
+    imageToPng(empty_image);
+    FAIL() << "expected imageToPng to throw";
+  } catch (const PngException& e) {
+    const std::string message = e.what();
+    EXPECT_NE(message.find("PNG Error: "), std::string::npos)
+        << "the recorded message never reached the caller: " << message;
+    EXPECT_EQ(message.find("PNG error during initialization"), std::string::npos)
+        << "fell back to the generic text, so nothing was recorded: " << message;
+  }
+}
+
 TEST_F(PngPlusPlusTest, InvalidPngBufferHandling) {
   // Test with invalid PNG data
   std::vector<unsigned char> invalid_buffer = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05};

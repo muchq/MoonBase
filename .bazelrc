@@ -74,6 +74,56 @@ common --test_output=errors
 # don't block on remote-cache uploads
 common --bes_upload_mode=fully_async
 
+# Sanitizers (#1273). Off by default and never implied by another config:
+# they change codegen, and a sanitized binary is not what we ship.
+#
+# The point of these is the class of bug whose symptom is undefined behavior
+# rather than a wrong answer, which no assertion can see. #1272 shipped a
+# use-after-free fix whose test could only pin the recovery shape, because
+# the buggy and correct orderings are indistinguishable from outside.
+#
+# compilation_mode=dbg deliberately overrides the repo-wide opt above: a
+# report whose stack has been inlined away names the wrong function, which
+# is the difference between a lead and a shrug.
+build:sanitizer --compilation_mode=dbg
+build:sanitizer --strip=never
+build:sanitizer --copt=-g
+build:sanitizer --copt=-fno-omit-frame-pointer
+build:sanitizer --copt=-fno-optimize-sibling-calls
+# Sanitized runs are slow enough to trip the default small/medium timeouts
+# on tests that pass comfortably under opt.
+build:sanitizer --test_timeout=120,600,1800,3600
+# Targets with a known finding that has an issue and no fix yet. Each one
+# carries the issue number at its tags= line; removing the tag is that
+# issue's acceptance test. Pass --test_tag_filters= to see them anyway.
+test:sanitizer --test_tag_filters=-no-sanitize
+
+build:asan --config=sanitizer
+build:asan --copt=-fsanitize=address
+build:asan --linkopt=-fsanitize=address
+test:asan --test_env=ASAN_OPTIONS=detect_stack_use_after_return=1:strict_string_checks=1
+
+build:ubsan --config=sanitizer
+build:ubsan --copt=-fsanitize=undefined
+build:ubsan --linkopt=-fsanitize=undefined
+# Everything except the vptr check, which is the one UBSan check that needs
+# the C++-specific runtime (libclang_rt.ubsan_standalone_cxx). The toolchain
+# links through clang rather than clang++, so leaving it on fails at link
+# with undefined __ubsan_vptr_type_cache rather than finding anything. The
+# checks that carry the weight here — signed overflow, shifts, alignment,
+# null deref, bogus bool/enum loads, float casts — are all still on.
+build:ubsan --copt=-fno-sanitize=vptr
+build:ubsan --linkopt=-fno-sanitize=vptr
+# UBSan diagnoses and keeps going by default, so a finding scrolls past
+# inside a test that still reports green. Make it fatal.
+build:ubsan --copt=-fno-sanitize-recover=all
+test:ubsan --test_env=UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
+
+build:tsan --config=sanitizer
+build:tsan --copt=-fsanitize=thread
+build:tsan --linkopt=-fsanitize=thread
+test:tsan --test_env=TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1
+
 # Platform-specific configurations
 build:macos --features=-module_maps
 
