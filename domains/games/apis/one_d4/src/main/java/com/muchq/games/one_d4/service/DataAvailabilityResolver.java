@@ -19,10 +19,13 @@ import org.jspecify.annotations.Nullable;
 /**
  * Answers "is this request's data still on disk?" for rows in {@code indexing_requests}.
  *
- * <p>Request rows are never swept, but the games and indexed periods they produced are — so a
+ * <p>Request rows outlive the games and indexed periods they produced — 30 days against 7 — so a
  * COMPLETED request from two weeks ago still reads "COMPLETED, 325 games" while querying it returns
- * nothing. This resolver closes that gap by checking each month the request covers against the
- * surviving {@code indexed_periods} rows, which retention deletes on the same clock as the games.
+ * nothing. That gap is deliberate (see {@link com.muchq.games.one_d4.db.RetentionPolicy}), and it
+ * is exactly the window this resolver exists to describe: past 30 days the request is deleted too
+ * and there is nothing left to ask about. This resolver closes that gap by checking each month the
+ * request covers against the surviving {@code indexed_periods} rows, which retention deletes on the
+ * same clock as the games.
  */
 public class DataAvailabilityResolver {
 

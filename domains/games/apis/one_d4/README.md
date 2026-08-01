@@ -52,7 +52,7 @@ flowchart TB
   end
 
   subgraph Retention["Retention"]
-    RetentionWorker["RetentionWorker\n@Scheduled 1h\n(7-day policy)"]
+    RetentionWorker["RetentionWorker\n@Scheduled 1h\n(7d data / 30d requests)"]
   end
 
   subgraph Store["Stores & DB"]
@@ -97,13 +97,14 @@ flowchart TB
 
   RetentionWorker --> GameStore
   RetentionWorker --> PeriodStore
+  RetentionWorker --> RequestStore
 ```
 
 **Index flow:** Client posts to `POST /v1/index` → request is stored and a message is enqueued. A background thread (IndexWorkerLifecycle) polls the queue; IndexWorker fetches games from Chess.com per month (skipping months already in IndexedPeriodStore), runs FeatureExtractor (PgnParser → GameReplayer → MotifDetectors) on each game, and writes to GameFeatureStore (game_features + motif_occurrences) and IndexedPeriodStore. Fork occurrences are derived inside FeatureExtractor from ATTACK occurrences (same ply + attacker targeting 2+ pieces).
 
 **Query flow:** Client posts a ChessQL string to `POST /v1/query` → Parser and SqlCompiler produce SQL → GameFeatureStore runs the query and loads motif_occurrences for the result set → response returns GameFeatureRow list with per-game occurrences.
 
-**Retention:** RetentionWorker runs hourly and deletes game_features, motif_occurrences (via FK cascade), and indexed_periods older than 7 days.
+**Retention:** RetentionWorker runs hourly. It deletes game_features, motif_occurrences (via FK cascade), and indexed_periods older than 7 days, and indexing_requests older than 30 days — games first, so a request and its games clear in one pass. It also retires requests stranded in PENDING/PROCESSING for over an hour, freeing the dedupe slot each one holds.
 
 ## Running Locally (in-memory)
 
@@ -235,7 +236,23 @@ curl -X POST http://localhost:8080/v1/query \
 
 ### Data Retention Policy
 
-The indexer maintains a **7-day retention policy**. Games are automatically deleted 7 days after they are indexed (based on the `indexed_at` timestamp). This policy is enforced by a background worker that runs hourly.
+Two windows, both enforced by a background worker that runs hourly:
+
+| What | Window | Measured from |
+|---|---|---|
+| `game_features` (and `motif_occurrences` via FK cascade), `indexed_periods` | **7 days** | `indexed_at` / `fetched_at` |
+| `indexing_requests` | **30 days** | `created_at` |
+
+Requests outlive their games on purpose. `game_features.request_id` is a foreign key onto
+`indexing_requests(id)`, so a request cannot be deleted while its games remain — and in the gap
+between the two windows the surviving row is what lets `GET /v1/index/{id}` report `EXPIRED`
+("pruned — re-run it") rather than 404. The sweep deletes games before requests so both clear in
+one pass, and skips any request still referenced by a game.
+
+Separately, a PENDING or PROCESSING request whose owner died — a restart with work still queued,
+or an inline dispatch that threw — is retired to FAILED after **1 hour** without progress. Until
+it is, it holds the dedupe slot for its (player, platform, month range), and no new request for
+that range can be created.
 
 ### Available Fields
 
@@ -292,7 +309,7 @@ On the deployed machine the indexer uses H2 file storage at `/data/indexer` insi
 
 ### Via the API (no direct DB access)
 
-- **Index requests:** `GET http://localhost:8088/v1/index/{id}` — returns `id`, `status`, `gamesIndexed`, `errorMessage` for that request. There is no list-all-requests endpoint; you need the request UUID.
+- **Index requests:** `GET http://localhost:8088/v1/index/{id}` — returns `id`, `status`, `gamesIndexed`, `errorMessage` and a `data` block for that request. `GET http://localhost:8088/v1/index` lists the 50 most recent, newest first, so you do not need the UUID to look around.
 - **Query games:** `POST http://localhost:8088/v1/query` with a ChessQL query (e.g. `white_username = "drawlya"` or `black_username = "drawlya"`) and check the `playedAt` field in the results to see what date ranges are indexed.
 
 ### Direct H2 access (copy DB out)

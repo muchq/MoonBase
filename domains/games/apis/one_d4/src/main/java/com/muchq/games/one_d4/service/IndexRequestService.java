@@ -2,8 +2,10 @@ package com.muchq.games.one_d4.service;
 
 import com.muchq.games.one_d4.api.dto.IndexResponse;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
+import com.muchq.games.one_d4.db.RetentionPolicy;
 import com.muchq.games.one_d4.queue.IndexMessage;
 import com.muchq.games.one_d4.queue.IndexQueue;
+import java.time.Clock;
 import java.time.YearMonth;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
@@ -26,6 +28,15 @@ public class IndexRequestService {
   private final IndexQueue queue;
   private final Consumer<IndexMessage> inlineProcessor;
   private final DataAvailabilityResolver dataAvailability;
+  private final Clock clock;
+
+  public IndexRequestService(
+      IndexingRequestStore requestStore,
+      IndexQueue queue,
+      Consumer<IndexMessage> inlineProcessor,
+      DataAvailabilityResolver dataAvailability) {
+    this(requestStore, queue, inlineProcessor, dataAvailability, Clock.systemUTC());
+  }
 
   /**
    * @param inlineProcessor runs a message to completion on the calling thread; used by {@link
@@ -34,21 +45,32 @@ public class IndexRequestService {
    *     request without saying whether its games still exist. When only the REST controller
    *     enriched the response, the MCP {@code index_status} tool told agents "COMPLETED, 325 games"
    *     about a corpus retention had already deleted.
+   * @param clock supplies the "now" that dedupe measures request staleness against, so a test can
+   *     step over the cutoff instead of sleeping through it
    */
   public IndexRequestService(
       IndexingRequestStore requestStore,
       IndexQueue queue,
       Consumer<IndexMessage> inlineProcessor,
-      DataAvailabilityResolver dataAvailability) {
+      DataAvailabilityResolver dataAvailability,
+      Clock clock) {
     this.requestStore = requestStore;
     this.queue = queue;
     this.inlineProcessor = inlineProcessor;
     this.dataAvailability = dataAvailability;
+    this.clock = clock;
   }
 
   /**
-   * @param skipCache bypass the indexed-period cache and request dedupe, refetching every month in
-   *     the range — the backfill path for rows indexed before newer columns existed
+   * @param skipCache refetch every month in the range instead of serving any of them from the
+   *     indexed-period cache, and skip the dedupe read — the backfill path for rows indexed before
+   *     newer columns existed.
+   *     <p>It does not permit a second concurrent run of the same range. If a live request already
+   *     holds that (player, platform, month range, excludeBullet), this returns that request rather
+   *     than starting a rival one: two indexers over the same games interleave {@code
+   *     motif_occurrences} deletes and inserts and leave every motif for those games counted twice.
+   *     The caller can see it was coalesced — the response carries the in-flight request's id and
+   *     its PENDING/PROCESSING status — and re-issuing once that finishes does force the refetch.
    */
   public record Submission(
       String player,
@@ -107,19 +129,32 @@ public class IndexRequestService {
               platform,
               submission.startMonth(),
               submission.endMonth(),
-              submission.excludeBullet());
+              submission.excludeBullet(),
+              RetentionPolicy.STALE_REQUEST,
+              clock.instant());
       if (existing.isPresent()) {
         return toResponse(existing.get());
       }
     }
 
-    UUID id =
-        requestStore.create(
+    // Even on the skipCache path this goes through createOrAdopt rather than a bare insert. The
+    // read above is an optimization — it answers a duplicate submit without touching the write
+    // path — but it cannot be the thing that prevents double-dispatch, because two callers can
+    // both read nothing. The claim is what decides, and only a caller that actually created the
+    // row is allowed to dispatch work for it.
+    IndexingRequestStore.Claim claim =
+        requestStore.createOrAdopt(
             player,
             platform,
             submission.startMonth(),
             submission.endMonth(),
-            submission.excludeBullet());
+            submission.excludeBullet(),
+            RetentionPolicy.STALE_REQUEST,
+            clock.instant());
+    if (!claim.created()) {
+      return toResponse(claim.request());
+    }
+    UUID id = claim.request().id();
     IndexMessage message =
         new IndexMessage(
             id,
@@ -131,7 +166,29 @@ public class IndexRequestService {
             submission.skipCache());
 
     if (inlineSingleMonth && monthSpan <= 1) {
-      inlineProcessor.accept(message);
+      // The inline path has no queue entry and no other owner: if this throws, nothing else will
+      // ever move the row off PENDING, and it holds its dedupe slot until the staleness sweep
+      // notices an hour later. IndexWorker.process already catches Exception and marks FAILED, so
+      // reaching here means its own status write failed or an Error escaped — rare, but the row
+      // is stranded either way. Retire it on the way out so the range frees immediately.
+      try {
+        inlineProcessor.accept(message);
+      } catch (Throwable t) {
+        try {
+          requestStore.updateStatus(id, "FAILED", "Inline indexing failed: " + t, 0);
+        } catch (Throwable suppressed) {
+          // Catch Throwable, not RuntimeException, to match the outer catch. The outer one is
+          // wide precisely because an Error can escape the processor — and if that Error is an
+          // OutOfMemoryError, this recovery allocates a connection, a statement and a message
+          // string, so the likeliest second failure is another Error. Catching only
+          // RuntimeException here would let it replace the original instead of being attached to
+          // it, contradicting the line below.
+          t.addSuppressed(suppressed);
+        }
+        // The original failure is what the caller needs to see; the staleness sweep is the
+        // backstop for the row if the update above did not land.
+        throw t;
+      }
       return status(id)
           .orElse(
               new IndexResponse(

@@ -69,7 +69,11 @@ line derived from the chess.com `ECOUrl` (e.g. `Caro Kann Defense Two Knights At
 questions are asked at, e.g. `white.username = "hikaru" AND opening.family = "Caro Kann Defense"`.
 Rows indexed before these columns existed hold NULL until reindexed with `skipCache: true` on
 `POST /v1/index` (or `skip_cache` on the `index_chess_games` MCP tool) — a plain re-request is
-served from the indexed-period cache and does not refetch.
+served from the indexed-period cache and does not refetch. One thing to check when a backfill
+appears to do nothing: `skipCache` will not start a second run over a range that is already being
+indexed. If a request for that player and month range is still PENDING or PROCESSING, the submit
+returns *that* request and refetches nothing, so the NULLs stay. Poll it to COMPLETED, then submit
+the backfill again.
 
 > **Caveat — `opening.family` is not a normalized taxonomy.** Both opening fields are string
 > slices of chess.com's ECO-URL, so near-identical spellings form distinct values and distinct

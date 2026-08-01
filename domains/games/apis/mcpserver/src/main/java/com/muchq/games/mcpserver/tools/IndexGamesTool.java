@@ -62,7 +62,10 @@ public class IndexGamesTool implements McpTool {
             "description",
             "Refetch every month in the range even if it was already indexed, refreshing stored"
                 + " rows (e.g. to backfill titles and opening names on games indexed before those"
-                + " columns existed). Default false"));
+                + " columns existed). Does not start a second run of a range that is already"
+                + " being indexed: if a request for the same player and months is still"
+                + " PENDING/PROCESSING, that request is returned and nothing is refetched, so"
+                + " wait for it to finish and submit again. Default false"));
     return Map.of(
         "type",
         "object",

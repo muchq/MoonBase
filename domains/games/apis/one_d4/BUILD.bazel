@@ -380,6 +380,7 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/games/one_d4/worker/IndexWorkerTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/OpeningsTest.java",
+        "src/test/java/com/muchq/games/one_d4/worker/RequestLivenessTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/ResultMapperTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/RetentionWorkerTest.java",
     ],
@@ -506,6 +507,26 @@ java_test_suite(
         ":test_db",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
+        artifact("org.junit.jupiter:junit-jupiter-api"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+# The same hazard on indexing_requests, and a sharper one: staleness is measured
+# over a one-hour window, so a zone leak does not move the boundary, it inverts
+# the predicate — retiring every healthy request or ignoring every strand. Its
+# own target for the same reason as above: the zone has to come from the
+# environment or H2's cached default makes the suite vacuous.
+java_test_suite(
+    name = "request_staleness_timezone_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/db/RequestStalenessTimeZoneTest.java",
+    ],
+    env = {"TZ": "Pacific/Kiritimati"},
+    deps = [
+        ":db",
+        ":test_db",
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],

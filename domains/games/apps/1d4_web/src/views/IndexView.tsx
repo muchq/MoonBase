@@ -209,6 +209,7 @@ export default function IndexView() {
           <p className="panel-note">
             Indexed games are kept for 7 days, then deleted. A request stays in this list
             after that, marked <strong>Pruned</strong> — re-run it to index the games again.
+            The request itself is removed after 30 days.
           </p>
         )}
       </div>

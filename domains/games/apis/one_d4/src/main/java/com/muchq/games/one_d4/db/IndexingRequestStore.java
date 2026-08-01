@@ -1,27 +1,108 @@
 package com.muchq.games.one_d4.db;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface IndexingRequestStore {
-  UUID create(
-      String player, String platform, String startMonth, String endMonth, boolean excludeBullet);
+
+  /**
+   * Atomically claims the live slot for this (player, platform, startMonth, endMonth,
+   * excludeBullet), returning either a freshly created request or the one that already holds it.
+   *
+   * <p>This exists instead of a bare {@code create} because dedupe cannot be done as a read
+   * followed by a write. Two identical submits — two REST threads, or REST and MCP, which are two
+   * JVMs against one Postgres whenever {@code INDEXER_DB_URL} is set — can both find nothing and
+   * both insert. {@code game_features} survives that on its {@code game_url} upsert, but {@code
+   * motif_occurrences} does not: its flush deletes and re-inserts under fresh UUIDs in separate
+   * transactions, so interleaved runs leave duplicated occurrence rows and every motif count for
+   * those games reads double.
+   *
+   * <p>The caller must dispatch work only when {@link Claim#created()} is true. Adopting means
+   * another caller already owns the work.
+   *
+   * <p>Implementations also retire rows stranded past {@code staleAfter} as part of the same atomic
+   * step, so an abandoned request cannot hold the slot against its replacement.
+   */
+  Claim createOrAdopt(
+      String player,
+      String platform,
+      String startMonth,
+      String endMonth,
+      boolean excludeBullet,
+      Duration staleAfter,
+      Instant now);
 
   Optional<IndexingRequest> findById(UUID id);
 
   /**
    * Returns an existing request with the same (player, platform, startMonth, endMonth,
-   * excludeBullet) that is PENDING or PROCESSING, if any. Used to avoid creating duplicate indexing
-   * work.
+   * excludeBullet) that is PENDING or PROCESSING and was updated within {@code staleAfter}, if any.
+   * Used to avoid creating duplicate indexing work.
+   *
+   * <p>The age bound is what keeps a request whose owner died from answering for it forever. See
+   * {@link RetentionPolicy#STALE_REQUEST}.
    */
   Optional<IndexingRequest> findExistingRequest(
-      String player, String platform, String startMonth, String endMonth, boolean excludeBullet);
+      String player,
+      String platform,
+      String startMonth,
+      String endMonth,
+      boolean excludeBullet,
+      Duration staleAfter,
+      Instant now);
 
   List<IndexingRequest> listRecent(int limit);
 
   void updateStatus(UUID id, String status, String errorMessage, int gamesIndexed);
+
+  /**
+   * Retires every PENDING/PROCESSING request last updated before {@code now - staleAfter} to
+   * FAILED, freeing the dedupe slot each one holds. Returns the number retired.
+   */
+  int reclaimStale(Duration staleAfter, Instant now);
+
+  /**
+   * Moves a live request's {@code updated_at} forward without touching anything else. Returns true
+   * if the row was still live and was touched.
+   *
+   * <p>This exists because staleness infers liveness from progress, and progress is a bad proxy for
+   * it. {@link IndexWorker} writes status at month boundaries and every hundredth game, so a single
+   * month holding fewer games than that — the common case, since single-month requests run inline —
+   * reports nothing between its first and last write. The archive fetch and the profile lookups
+   * inside that span go through an HTTP client with no request timeout, so the span has no upper
+   * bound, and once it passes {@link RetentionPolicy#STALE_REQUEST} the sweep retires a request
+   * that is running perfectly well and frees the dedupe slot out from under it.
+   *
+   * <p>Returning false rather than throwing when the row is no longer live is deliberate: by then a
+   * replacement may own the range, and the caller's job is to notice and stop, not to fight for it
+   * back.
+   */
+  boolean heartbeat(UUID id, Instant now);
+
+  /**
+   * Deletes terminal request rows created before {@code threshold} that no {@code game_features}
+   * row still references. Returns the number deleted.
+   *
+   * <p>Two guards, both narrowing what this can destroy rather than relying on the caller.
+   *
+   * <p>The reference check is belt and braces on top of sweep ordering: games are deleted first and
+   * on a shorter clock, so by the time a request is old enough to sweep its games are already gone.
+   * Checking anyway means the delete cannot raise a foreign key violation and abort the whole
+   * retention pass even if the two clocks are ever reconfigured into overlap.
+   *
+   * <p>The status check stops a PENDING or PROCESSING request from being deleted out from under a
+   * running worker. Today that is unreachable — {@link RetentionPolicy#REQUEST} is thirty days
+   * against a one-hour staleness cutoff, and the worker reclaims stale rows earlier in the same
+   * pass — but it is unreachable because of how the caller is sequenced, which is exactly the kind
+   * of guarantee that evaporates when someone reorders the caller.
+   */
+  int deleteOlderThan(Instant threshold);
+
+  /** The outcome of {@link #createOrAdopt}: the winning row, and whether this caller created it. */
+  record Claim(IndexingRequest request, boolean created) {}
 
   record IndexingRequest(
       UUID id,

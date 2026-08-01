@@ -158,7 +158,8 @@ public class IndexE2ETest {
     // deleteOlderThan with a hand-made threshold would only test the DELETE; this exercises
     // RetentionWorker's own `clock.instant().minus(RETENTION_PERIOD)` arithmetic, so changing
     // RetentionPolicy.PERIOD now breaks a test instead of silently changing behaviour.
-    new RetentionWorker(gameFeatureStore, periodStore, clockOffsetBy(RETENTION_PLUS_MARGIN))
+    new RetentionWorker(
+            gameFeatureStore, periodStore, requestStore, clockOffsetBy(RETENTION_PLUS_MARGIN))
         .runRetention();
 
     IndexResponse swept = controller.getIndex(created.id());
@@ -189,7 +190,8 @@ public class IndexE2ETest {
         controller.createIndex(new IndexRequest(PLAYER, PLATFORM, "2024-03", "2024-03", null));
     processQueueUntilIdle();
 
-    new RetentionWorker(gameFeatureStore, periodStore, clockOffsetBy(RETENTION_MINUS_MARGIN))
+    new RetentionWorker(
+            gameFeatureStore, periodStore, requestStore, clockOffsetBy(RETENTION_MINUS_MARGIN))
         .runRetention();
 
     assertThat(controller.getIndex(created.id()).data().status()).isEqualTo("AVAILABLE");
@@ -252,6 +254,35 @@ public class IndexE2ETest {
   @Test
   public void retentionWindowIsSevenDays() {
     assertThat(RetentionPolicy.PERIOD).isEqualTo(SEVEN_DAYS);
+  }
+
+  /**
+   * Same contract, the other two windows. Both are published in prose that nothing else gates —
+   * API.md's "**30 days**" and its "23-day gap" paragraph, the README retention table, and the web
+   * app's panel note. Behavior alone pins these only loosely: the worker suite's fixtures are 10
+   * and 40 days old, so anything in between would keep it green while falsifying every one of those
+   * sentences.
+   */
+  @Test
+  public void requestRetentionWindowIsThirtyDays() {
+    assertThat(RetentionPolicy.REQUEST).isEqualTo(Duration.ofDays(30));
+  }
+
+  @Test
+  public void strandedRequestCutoffIsOneHour() {
+    assertThat(RetentionPolicy.STALE_REQUEST).isEqualTo(Duration.ofHours(1));
+  }
+
+  /**
+   * Not a style preference — a correctness constraint. {@code game_features.request_id} is a
+   * foreign key onto {@code indexing_requests(id)}, so a request must outlive the games it produced
+   * or the sweep would be deleting rows its own children still reference. Asserted here rather than
+   * in a static initializer on RetentionPolicy, where a violation would surface as an
+   * ExceptionInInitializerError during Micronaut startup instead of as a failing test.
+   */
+  @Test
+  public void requestsAreRetainedLongerThanTheGamesTheyProduced() {
+    assertThat(RetentionPolicy.REQUEST).isGreaterThan(RetentionPolicy.PERIOD);
   }
 
   /**

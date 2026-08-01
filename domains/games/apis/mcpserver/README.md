@@ -257,7 +257,9 @@ The indexer engine, database, and worker are embedded in this process (Option A 
 - `index_chess_games` — index a player's games. Required: `username`, `platform`
   (`chess.com`), `start_month`/`end_month` (YYYY-MM). Optional: `exclude_bullet`, and
   `skip_cache` to refetch already-indexed months (refreshing stored rows, e.g. backfilling
-  titles/opening names on rows indexed before those columns existed). Single-month requests
+  titles/opening names on rows indexed before those columns existed) — though it returns the
+  in-flight request without refetching if one is already running for the same range.
+  Single-month requests
   complete synchronously; longer ranges return `PENDING` and run in the background.
 - `index_status` — poll an indexing request by `request_id`.
 - `query_chess_games` — ChessQL search over indexed games: `query`, optional `player` (resolves

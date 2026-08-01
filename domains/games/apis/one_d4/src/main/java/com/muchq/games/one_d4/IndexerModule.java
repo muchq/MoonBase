@@ -134,8 +134,8 @@ public class IndexerModule {
   }
 
   @Context
-  public IndexingRequestStore indexingRequestStore(Jdbi jdbi) {
-    return new IndexingRequestDao(jdbi);
+  public IndexingRequestStore indexingRequestStore(Jdbi jdbi, Clock clock) {
+    return new IndexingRequestDao(jdbi, clock);
   }
 
   @Context
@@ -163,8 +163,9 @@ public class IndexerModule {
       IndexingRequestStore requestStore,
       IndexQueue queue,
       IndexWorker worker,
-      DataAvailabilityResolver dataAvailability) {
-    return new IndexRequestService(requestStore, queue, worker::process, dataAvailability);
+      DataAvailabilityResolver dataAvailability,
+      Clock clock) {
+    return new IndexRequestService(requestStore, queue, worker::process, dataAvailability, clock);
   }
 
   @Context

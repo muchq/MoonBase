@@ -32,8 +32,10 @@ export interface GameRow {
 /**
  * Whether a request's indexed games are still stored. Request rows outlive the
  * games they produced — the retention worker sweeps games and indexed periods
- * on a 7-day clock but never touches `indexing_requests` — so "COMPLETED, 325
- * games" keeps rendering long after querying it would return nothing.
+ * on a 7-day clock and the request rows themselves on a 30-day one — so
+ * "COMPLETED, 325 games" keeps rendering long after querying it would return
+ * nothing. The gap between the two windows is where this field earns its keep:
+ * the request is still there to say EXPIRED rather than having vanished.
  */
 export interface DataAvailability {
   status: 'AVAILABLE' | 'PARTIAL' | 'EXPIRED' | 'UNKNOWN';
