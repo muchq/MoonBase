@@ -152,11 +152,14 @@ describe('IndexView', () => {
     expect(silentRow.cells[4].querySelector('.data-badge')).toBeNull();
   });
 
-  it('explains the retention window so a pruned row is not a mystery', async () => {
+  it('explains both retention windows so a pruned row is not a mystery', async () => {
     setup();
     await waitFor(() =>
       expect(screen.getByText(/kept for 7 days/)).toBeInTheDocument()
     );
+    // The second window matters as much as the first: without it the note promises the row
+    // stays "after that" indefinitely, and a user who comes back in a month finds it gone.
+    expect(screen.getByText(/removed after 30 days/)).toBeInTheDocument();
   });
 
   it('lets a wide status table scroll instead of overflowing the panel', async () => {

@@ -42,22 +42,24 @@ public final class RetentionPolicy {
    * process-local queue, or an inline MCP dispatch that throws before the worker takes ownership —
    * so "rare" is not the same as "never".
    *
-   * <p>An hour is far longer than any healthy request takes (a twelve-month range is minutes) while
-   * still being short enough that a user who hits a strand is not locked out for a working day.
+   * <p>An hour is far longer than a request spends <em>running</em>: {@code IndexWorker} writes
+   * PROCESSING once per month rather than once per run, so a twelve-month range refreshes {@code
+   * updated_at} up to twelve times and cannot age out mid-flight however slow chess.com is.
+   *
+   * <p>What the hour does <em>not</em> cover is time spent waiting in the queue. {@code
+   * InMemoryIndexQueue} is drained by a single thread and a queued request's {@code updated_at} is
+   * frozen at insert, so a backlog deeper than an hour would retire work that is owned and about to
+   * run — telling the user to re-submit while the message is still queued. That is tracked
+   * separately rather than papered over here; the fix is a heartbeat on enqueue, not a bigger
+   * number, because raising the window trades one wrong answer for a slower one.
+   *
+   * <p>The invariant that {@link #REQUEST} must exceed {@link #PERIOD} is asserted in {@code
+   * IndexE2ETest} alongside the existing check on PERIOD, not in a static initializer here. These
+   * are compile-time constants six lines apart, so a violation can only be introduced by editing
+   * this file — and a static block would report it as an {@code ExceptionInInitializerError} during
+   * Micronaut startup rather than as a failing test.
    */
   public static final Duration STALE_REQUEST = Duration.ofHours(1);
-
-  static {
-    if (REQUEST.compareTo(PERIOD) <= 0) {
-      throw new IllegalStateException(
-          "REQUEST retention ("
-              + REQUEST
-              + ") must exceed PERIOD ("
-              + PERIOD
-              + "): game_features.request_id is a foreign key onto indexing_requests(id), so"
-              + " deleting requests first would be blocked by their own games.");
-    }
-  }
 
   private RetentionPolicy() {}
 }

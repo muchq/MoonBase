@@ -1,6 +1,7 @@
 package com.muchq.games.one_d4.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -278,6 +279,115 @@ public class IndexingRequestDaoTest {
     assertThat(dao.findById(fresh.request().id()).orElseThrow().status()).isEqualTo("PENDING");
   }
 
+  /**
+   * A worker that marked its request PROCESSING and then died is the likelier strand than one that
+   * never started, and the README promises both are handled. Narrowing {@code retire}'s predicate
+   * to PENDING alone left every other reclamation test green, because they all strand a row that
+   * never left PENDING.
+   */
+  @Test
+  public void reclaimStale_retiresAStrandedProcessingRow() {
+    IndexingRequestStore.Claim claim =
+        dao.createOrAdopt("halfdone", "CHESS_COM", "2025-07", "2025-07", false, STALE_AFTER, now);
+    dao.updateStatus(claim.request().id(), "PROCESSING", null, 4);
+    backdateUpdatedAt(claim.request().id(), now.minus(Duration.ofHours(3)));
+
+    assertThat(dao.reclaimStale(STALE_AFTER, now)).isEqualTo(1);
+
+    IndexingRequestStore.IndexingRequest retired = dao.findById(claim.request().id()).orElseThrow();
+    assertThat(retired.status()).isEqualTo("FAILED");
+    assertThat(retired.gamesIndexed()).as("progress so far is preserved").isEqualTo(4);
+
+    IndexingRequestStore.Claim replacement =
+        dao.createOrAdopt("halfdone", "CHESS_COM", "2025-07", "2025-07", false, STALE_AFTER, now);
+    assertThat(replacement.created()).isTrue();
+  }
+
+  @Test
+  public void createOrAdopt_reclaimsAStrandedProcessingHolder() {
+    IndexingRequestStore.Claim stranded =
+        dao.createOrAdopt("halfdone2", "CHESS_COM", "2025-08", "2025-08", false, STALE_AFTER, now);
+    dao.updateStatus(stranded.request().id(), "PROCESSING", null, 2);
+    backdateUpdatedAt(stranded.request().id(), now.minus(Duration.ofHours(3)));
+
+    IndexingRequestStore.Claim replacement =
+        dao.createOrAdopt("halfdone2", "CHESS_COM", "2025-08", "2025-08", false, STALE_AFTER, now);
+
+    assertThat(replacement.created()).isTrue();
+    assertThat(replacement.request().id()).isNotEqualTo(stranded.request().id());
+  }
+
+  /**
+   * The dead worker is not fenced, so it keeps writing. Its next per-month PROCESSING heartbeat
+   * must not resurrect the row it no longer owns: that would produce a live request holding no
+   * dedupe slot, and the replacement already holds the key, so the constraint could not see the
+   * second live row.
+   */
+  @Test
+  public void updateStatus_cannotResurrectARetiredRequest() {
+    IndexingRequestStore.Claim stranded =
+        dao.createOrAdopt("zombie", "CHESS_COM", "2025-09", "2025-09", false, STALE_AFTER, now);
+    UUID strandedId = stranded.request().id();
+    backdateUpdatedAt(strandedId, now.minus(Duration.ofHours(3)));
+    dao.reclaimStale(STALE_AFTER, now);
+
+    IndexingRequestStore.Claim replacement =
+        dao.createOrAdopt("zombie", "CHESS_COM", "2025-09", "2025-09", false, STALE_AFTER, now);
+    assertThat(replacement.created()).isTrue();
+
+    // The dead worker's next heartbeat.
+    dao.updateStatus(strandedId, "PROCESSING", null, 9);
+
+    assertThat(dao.findById(strandedId).orElseThrow().status())
+        .as("a retired request stays retired")
+        .isEqualTo("FAILED");
+    assertThat(countLiveRowsFor("zombie"))
+        .as("exactly one live row per tuple, always")
+        .isEqualTo(1);
+  }
+
+  /** A terminal write is still allowed to land on a retired row — it does not un-retire it. */
+  @Test
+  public void updateStatus_terminalWriteOnARetiredRequestStillRecordsTheOutcome() {
+    IndexingRequestStore.Claim stranded =
+        dao.createOrAdopt("late", "CHESS_COM", "2025-10", "2025-10", false, STALE_AFTER, now);
+    UUID strandedId = stranded.request().id();
+    backdateUpdatedAt(strandedId, now.minus(Duration.ofHours(3)));
+    dao.reclaimStale(STALE_AFTER, now);
+
+    dao.updateStatus(strandedId, "COMPLETED", null, 11);
+
+    IndexingRequestStore.IndexingRequest row = dao.findById(strandedId).orElseThrow();
+    assertThat(row.status()).isEqualTo("COMPLETED");
+    assertThat(row.gamesIndexed()).isEqualTo(11);
+  }
+
+  /**
+   * Every other test reaches the constraint only through {@code findByDedupeKey}, which short
+   * circuits before the insert. This drives the constraint itself, so removing it from the
+   * migration fails deterministically rather than only under a thread interleaving.
+   */
+  @Test
+  public void schema_rejectsASecondRowWithTheSameDedupeKey() {
+    create("constrained", "2025-11", "2025-11", false);
+    String key =
+        IndexingRequestDao.dedupeKey("constrained", "CHESS_COM", "2025-11", "2025-11", false);
+
+    assertThatThrownBy(() -> insertRawWithDedupeKey(key))
+        .as("the database, not the application, is what makes the slot exclusive")
+        .isInstanceOf(Exception.class);
+  }
+
+  @Test
+  public void schema_allowsManyTerminalRowsForOneTuple() {
+    for (int i = 0; i < 3; i++) {
+      IndexingRequestStore.Claim claim =
+          dao.createOrAdopt("recycled", "CHESS_COM", "2025-12", "2025-12", false, STALE_AFTER, now);
+      dao.updateStatus(claim.request().id(), "COMPLETED", null, i);
+    }
+    assertThat(countRequests()).isEqualTo(3);
+  }
+
   @Test
   public void reclaimStale_leavesTerminalRowsAlone() {
     IndexingRequestStore.Claim completed =
@@ -314,12 +424,31 @@ public class IndexingRequestDaoTest {
         dao.createOrAdopt("old", "CHESS_COM", "2025-04", "2025-04", false, STALE_AFTER, now);
     IndexingRequestStore.Claim recent =
         dao.createOrAdopt("recent", "CHESS_COM", "2025-05", "2025-05", false, STALE_AFTER, now);
+    dao.updateStatus(old.request().id(), "COMPLETED", null, 5);
+    dao.updateStatus(recent.request().id(), "COMPLETED", null, 5);
     backdateCreatedAt(old.request().id(), now.minus(Duration.ofDays(40)));
 
     assertThat(dao.deleteOlderThan(now.minus(Duration.ofDays(30)))).isEqualTo(1);
 
     assertThat(dao.findById(old.request().id())).isEmpty();
     assertThat(dao.findById(recent.request().id())).isPresent();
+  }
+
+  /**
+   * Age alone is not licence to delete. A request only reaches this age while still live if the
+   * staleness reclamation never ran, and deleting it would take the row out from under a worker
+   * that is still writing against its id — losing the FK's protection and the user's status.
+   * Unreachable through {@code RetentionWorker}, which reclaims first, but the guard belongs on the
+   * delete rather than in the caller's ordering.
+   */
+  @Test
+  public void deleteOlderThan_refusesToSweepALiveRequestHoweverOldItIs() {
+    IndexingRequestStore.Claim pending =
+        dao.createOrAdopt("ancient", "CHESS_COM", "2025-04", "2025-04", false, STALE_AFTER, now);
+    backdateCreatedAt(pending.request().id(), now.minus(Duration.ofDays(400)));
+
+    assertThat(dao.deleteOlderThan(now.minus(Duration.ofDays(30)))).isEqualTo(0);
+    assertThat(dao.findById(pending.request().id())).isPresent();
   }
 
   @Test
@@ -382,6 +511,37 @@ public class IndexingRequestDaoTest {
       ps.setObject(2, requestId);
       ps.setString(3, gameUrl);
       ps.executeUpdate();
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  private void insertRawWithDedupeKey(String dedupeKey) {
+    try (var conn = dataSource.getConnection();
+        var ps =
+            conn.prepareStatement(
+                "INSERT INTO indexing_requests (id, player, platform, start_month, end_month,"
+                    + " dedupe_key) VALUES (?, 'constrained', 'CHESS_COM', '2025-11', '2025-11',"
+                    + " ?)")) {
+      ps.setObject(1, UUID.randomUUID());
+      ps.setString(2, dedupeKey);
+      ps.executeUpdate();
+    } catch (java.sql.SQLException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  private int countLiveRowsFor(String player) {
+    try (var conn = dataSource.getConnection();
+        var ps =
+            conn.prepareStatement(
+                "SELECT COUNT(*) FROM indexing_requests WHERE player = ? AND status IN"
+                    + " ('PENDING', 'PROCESSING')")) {
+      ps.setString(1, player);
+      try (var rs = ps.executeQuery()) {
+        rs.next();
+        return rs.getInt(1);
+      }
     } catch (Exception e) {
       throw new RuntimeException(e);
     }

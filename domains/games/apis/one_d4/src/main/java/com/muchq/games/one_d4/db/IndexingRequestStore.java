@@ -65,13 +65,21 @@ public interface IndexingRequestStore {
   int reclaimStale(Duration staleAfter, Instant now);
 
   /**
-   * Deletes request rows created before {@code threshold} that no {@code game_features} row still
-   * references. Returns the number deleted.
+   * Deletes terminal request rows created before {@code threshold} that no {@code game_features}
+   * row still references. Returns the number deleted.
+   *
+   * <p>Two guards, both narrowing what this can destroy rather than relying on the caller.
    *
    * <p>The reference check is belt and braces on top of sweep ordering: games are deleted first and
    * on a shorter clock, so by the time a request is old enough to sweep its games are already gone.
    * Checking anyway means the delete cannot raise a foreign key violation and abort the whole
    * retention pass even if the two clocks are ever reconfigured into overlap.
+   *
+   * <p>The status check stops a PENDING or PROCESSING request from being deleted out from under a
+   * running worker. Today that is unreachable — {@link RetentionPolicy#REQUEST} is thirty days
+   * against a one-hour staleness cutoff, and the worker reclaims stale rows earlier in the same
+   * pass — but it is unreachable because of how the caller is sequenced, which is exactly the kind
+   * of guarantee that evaporates when someone reorders the caller.
    */
   int deleteOlderThan(Instant threshold);
 

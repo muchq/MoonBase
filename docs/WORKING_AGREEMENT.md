@@ -49,9 +49,14 @@ better question, because:
   did. (It would also be worse UX — a request silently disappearing is a poorer
   answer than one labelled "Pruned" — so the signal survives the challenge. But
   that conclusion had to be *reached*, not assumed.)
-- The table has no lifecycle at all. It grows forever, and `listRecent(50)`
-  hides that from the UI, so nothing will ever surface it as a symptom. The
-  feature request pointed straight at a gap that the feature does not close.
+- The table had no lifecycle at all. It grew forever, and `listRecent(50)`
+  hid that from the UI, so nothing would ever have surfaced it as a symptom.
+  The feature request pointed straight at a gap that the feature did not close.
+
+That gap became #1266 and was closed in #1277, which gave the table a 30-day
+window against the data's 7 — long enough that the availability signal above
+still has something to report from, which is the conclusion this example says
+had to be reached rather than assumed.
 
 Raise the alternative in a sentence or two, give a recommendation, and proceed
 — don't stall. If the alternative turns out to be the better design, that is a

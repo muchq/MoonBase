@@ -511,6 +511,26 @@ java_test_suite(
     ],
 )
 
+# The same hazard on indexing_requests, and a sharper one: staleness is measured
+# over a one-hour window, so a zone leak does not move the boundary, it inverts
+# the predicate — retiring every healthy request or ignoring every strand. Its
+# own target for the same reason as above: the zone has to come from the
+# environment or H2's cached default makes the suite vacuous.
+java_test_suite(
+    name = "request_staleness_timezone_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/db/RequestStalenessTimeZoneTest.java",
+    ],
+    env = {"TZ": "Pacific/Kiritimati"},
+    deps = [
+        ":db",
+        ":test_db",
+        artifact("org.junit.jupiter:junit-jupiter-api"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
 # Every other DAO suite runs on H2, but Postgres is the deployment target and
 # the aggregate SQL uses two constructs the dialects can disagree on: GROUP BY
 # referencing a SELECT-list alias, and timestamp binds against a

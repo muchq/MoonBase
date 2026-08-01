@@ -176,11 +176,17 @@ public class IndexRequestService {
       } catch (Throwable t) {
         try {
           requestStore.updateStatus(id, "FAILED", "Inline indexing failed: " + t, 0);
-        } catch (RuntimeException suppressed) {
-          // Best effort. The original failure is what the caller needs to see; the staleness
-          // sweep is the backstop for the row.
+        } catch (Throwable suppressed) {
+          // Catch Throwable, not RuntimeException, to match the outer catch. The outer one is
+          // wide precisely because an Error can escape the processor — and if that Error is an
+          // OutOfMemoryError, this recovery allocates a connection, a statement and a message
+          // string, so the likeliest second failure is another Error. Catching only
+          // RuntimeException here would let it replace the original instead of being attached to
+          // it, contradicting the line below.
           t.addSuppressed(suppressed);
         }
+        // The original failure is what the caller needs to see; the staleness sweep is the
+        // backstop for the row if the update above did not land.
         throw t;
       }
       return status(id)

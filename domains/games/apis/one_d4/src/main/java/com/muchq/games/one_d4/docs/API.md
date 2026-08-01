@@ -32,7 +32,7 @@ Start indexing games for a player over a month range.
 | startMonth    | string | yes      | Start month inclusive, format `YYYY-MM` |
 | endMonth      | string | yes      | End month inclusive, format `YYYY-MM`   |
 | excludeBullet | bool   | no       | Skip bullet games (default false)       |
-| skipCache     | bool   | no       | Refetch every month in the range even if already indexed, refreshing stored rows — e.g. to backfill titles and opening names on rows indexed before those columns existed (default false) |
+| skipCache     | bool   | no       | Refetch every month in the range even if already indexed, refreshing stored rows — e.g. to backfill titles and opening names on rows indexed before those columns existed. Does **not** start a rival run of a range already in flight: if a request for the same player/months is PENDING or PROCESSING, that request is returned and nothing is refetched (default false) |
 
 ### Response (200)
 

@@ -145,11 +145,12 @@ public class MigrationTest {
    * The pre-constraint schema allowed several live rows per tuple, so the backfill has to key at
    * most one of them or ADD CONSTRAINT fails and the whole migration aborts.
    *
-   * <p>All three rows are given the <em>same</em> created_at deliberately. The backfill picks the
-   * group's MIN(created_at), which on distinct timestamps already selects one row and hides the
-   * problem; a tie is what makes MIN match every row at once, and a tie is exactly what a coarse
-   * clock produces when duplicate submits land in the same instant — which is the situation that
-   * created these duplicates in the first place.
+   * <p>All three rows are given the <em>same</em> created_at deliberately. The backfill orders
+   * candidates by (created_at, id); on distinct timestamps created_at alone decides and the id
+   * tiebreak never runs, so a fixture with distinct timestamps would pass against a backfill that
+   * omitted it. A tie is what forces the tiebreak to do the work — and a tie is exactly what a
+   * coarse clock produces when duplicate submits land in the same instant, which is the situation
+   * that created these duplicates in the first place.
    */
   @Test
   public void run_backfillKeysOnlyOneOfSeveralLiveRequestsCreatedInTheSameInstant()

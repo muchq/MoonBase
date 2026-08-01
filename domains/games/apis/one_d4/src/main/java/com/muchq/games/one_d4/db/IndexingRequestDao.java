@@ -1,9 +1,11 @@
 package com.muchq.games.one_d4.db;
 
 import java.sql.SQLException;
-import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -43,9 +45,40 @@ public class IndexingRequestDao implements IndexingRequestStore {
               rs.getBoolean("exclude_bullet"));
 
   private final Jdbi jdbi;
+  private final Clock clock;
 
   public IndexingRequestDao(Jdbi jdbi) {
+    this(jdbi, Clock.systemUTC());
+  }
+
+  /**
+   * @param clock stamps {@code created_at} and {@code updated_at}. Every write goes through it and
+   *     every staleness comparison is made against it, so the table sits on one clock — see {@link
+   *     #toUtcWallClock}.
+   */
+  public IndexingRequestDao(Jdbi jdbi, Clock clock) {
     this.jdbi = jdbi;
+    this.clock = clock;
+  }
+
+  /**
+   * {@code created_at} and {@code updated_at} are TIMESTAMP WITHOUT TIME ZONE, so they hold a wall
+   * clock rather than an instant, and the convention here — as in {@link GameFeatureDao} — is that
+   * the stored wall clock is UTC. Both sides of every comparison are bound through this, so
+   * staleness is measured in one frame of reference.
+   *
+   * <p>This matters more here than it did for {@code game_features}. That column had the same split
+   * — written by the database's {@code now()}, compared against a JVM threshold — and it drifted
+   * with host skew and the server's timezone (#1268). Retention's window there is 7 days, so drift
+   * moved a boundary. {@link RetentionPolicy#STALE_REQUEST} is <em>one hour</em>, and three things
+   * reach that far: clock skew between the app host and the database host, which are different
+   * machines; the documented two-JVM deployment, where REST and MCP write and compare against one
+   * Postgres and a zone difference between them is a straight offset; and DST, where a local wall
+   * clock repeats or skips exactly one hour — exactly the window — so at a boundary the sweep would
+   * either ignore every strand or retire every healthy request. Pinning UTC removes all three.
+   */
+  private static LocalDateTime toUtcWallClock(Instant instant) {
+    return instant.atOffset(ZoneOffset.UTC).toLocalDateTime();
   }
 
   /**
@@ -79,6 +112,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
     // it" into "the database refuses the replacement" — the same lockout, enforced harder.
     reclaimStaleForKey(key, staleAfter, now);
 
+    RuntimeException lastConflict = null;
     for (int attempt = 0; attempt < MAX_CLAIM_ATTEMPTS; attempt++) {
       Optional<IndexingRequest> holder = findByDedupeKey(key);
       if (holder.isPresent()) {
@@ -89,10 +123,8 @@ public class IndexingRequestDao implements IndexingRequestStore {
       // would need a savepoint; separate statements make the recovery path identical on both
       // engines. The constraint, not the transaction boundary, is what makes this safe: exactly
       // one racer's insert can succeed.
-      Optional<UUID> inserted =
-          tryInsert(key, player, platform, startMonth, endMonth, excludeBullet);
-      if (inserted.isPresent()) {
-        UUID id = inserted.get();
+      try {
+        UUID id = insert(key, player, platform, startMonth, endMonth, excludeBullet);
         return new Claim(
             findById(id)
                 .orElseThrow(
@@ -100,19 +132,30 @@ public class IndexingRequestDao implements IndexingRequestStore {
                         new IllegalStateException(
                             "inserted request " + id + " vanished before it could be read back")),
             true);
+      } catch (RuntimeException e) {
+        if (!isUniqueViolation(e)) {
+          throw e;
+        }
+        // Lost the race. Go round: normally the winner is there to adopt, but if it finished in
+        // the gap the key is free again and inserting is the right move.
+        //
+        // Keep the exception. isUniqueViolation matches SQLState class 23 broadly, so a NOT NULL
+        // or check violation lands here too; without the cause, the throw below would blame
+        // contention for what is really a bad column value.
+        lastConflict = e;
       }
-      // Lost the race. Go round: normally the winner is there to adopt, but if it finished in the
-      // gap the key is free again and inserting is the right move.
     }
     throw new IllegalStateException(
         "Could not claim or adopt an indexing request for "
             + key
             + " after "
             + MAX_CLAIM_ATTEMPTS
-            + " attempts");
+            + " attempts",
+        lastConflict);
   }
 
-  private Optional<UUID> tryInsert(
+  /** Throws on conflict; {@link #createOrAdopt} decides whether that is recoverable. */
+  private UUID insert(
       String dedupeKey,
       String player,
       String platform,
@@ -120,30 +163,29 @@ public class IndexingRequestDao implements IndexingRequestStore {
       String endMonth,
       boolean excludeBullet) {
     UUID id = UUID.randomUUID();
-    try {
-      jdbi.useHandle(
-          h ->
-              h.createUpdate(
-                      """
-                      INSERT INTO indexing_requests
-                        (id, player, platform, start_month, end_month, exclude_bullet, dedupe_key)
-                      VALUES (?, ?, ?, ?, ?, ?, ?)
-                      """)
-                  .bind(0, id)
-                  .bind(1, player)
-                  .bind(2, platform)
-                  .bind(3, startMonth)
-                  .bind(4, endMonth)
-                  .bind(5, excludeBullet)
-                  .bind(6, dedupeKey)
-                  .execute());
-      return Optional.of(id);
-    } catch (RuntimeException e) {
-      if (isUniqueViolation(e)) {
-        return Optional.empty();
-      }
-      throw e;
-    }
+    // created_at/updated_at are stamped here rather than left to the column DEFAULT, so they come
+    // from the same clock the staleness predicates compare against.
+    LocalDateTime stamp = toUtcWallClock(clock.instant());
+    jdbi.useHandle(
+        h ->
+            h.createUpdate(
+                    """
+                    INSERT INTO indexing_requests
+                      (id, player, platform, start_month, end_month, exclude_bullet, dedupe_key,
+                       created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """)
+                .bind(0, id)
+                .bind(1, player)
+                .bind(2, platform)
+                .bind(3, startMonth)
+                .bind(4, endMonth)
+                .bind(5, excludeBullet)
+                .bind(6, dedupeKey)
+                .bindByType(7, stamp, LocalDateTime.class)
+                .bindByType(8, stamp, LocalDateTime.class)
+                .execute());
+    return id;
   }
 
   /**
@@ -176,12 +218,12 @@ public class IndexingRequestDao implements IndexingRequestStore {
   }
 
   private int reclaimStaleForKey(String dedupeKey, Duration staleAfter, Instant now) {
-    return retire("dedupe_key = ?", dedupeKey, staleAfter, now);
+    return retire(dedupeKey, staleAfter, now);
   }
 
   @Override
   public int reclaimStale(Duration staleAfter, Instant now) {
-    int reclaimed = retire(null, null, staleAfter, now);
+    int reclaimed = retire(null, staleAfter, now);
     if (reclaimed > 0) {
       LOG.warn(
           "Retired {} stranded indexing request(s) not updated since {}",
@@ -192,29 +234,30 @@ public class IndexingRequestDao implements IndexingRequestStore {
   }
 
   /**
-   * Marks abandoned live requests FAILED and releases the dedupe slot each one holds. {@code
-   * extraPredicate} narrows the sweep to a single key when a submit is trying to reclaim its own
-   * tuple; null sweeps everything.
+   * Marks abandoned live requests FAILED and releases the dedupe slot each one holds. Named
+   * parameters rather than positional ones, and two call sites rather than one with a conditional
+   * predicate: the sweep and the single-key reclaim differ only by one clause, and building that
+   * clause by concatenation meant the caller had to keep a {@code bind(3, ...)} in step with it.
    */
-  private int retire(String extraPredicate, String predicateArg, Duration staleAfter, Instant now) {
-    Timestamp cutoff = Timestamp.from(now.minus(staleAfter));
-    String sql =
-        """
-        UPDATE indexing_requests
-        SET status = 'FAILED', error_message = ?, dedupe_key = NULL, updated_at = ?
-        WHERE status IN ('PENDING', 'PROCESSING')
-          AND updated_at < ?
-        """
-            + (extraPredicate == null ? "" : "  AND " + extraPredicate + "\n");
+  private static final String RETIRE_SQL =
+      """
+      UPDATE indexing_requests
+      SET status = 'FAILED', error_message = :message, dedupe_key = NULL, updated_at = :now
+      WHERE status IN ('PENDING', 'PROCESSING')
+        AND updated_at < :cutoff
+      """;
+
+  private int retire(String keyOrNull, Duration staleAfter, Instant now) {
+    String sql = keyOrNull == null ? RETIRE_SQL : RETIRE_SQL + "  AND dedupe_key = :key\n";
     return jdbi.withHandle(
         h -> {
           var update =
               h.createUpdate(sql)
-                  .bind(0, STRANDED_MESSAGE)
-                  .bind(1, Timestamp.from(now))
-                  .bind(2, cutoff);
-          if (predicateArg != null) {
-            update.bind(3, predicateArg);
+                  .bind("message", STRANDED_MESSAGE)
+                  .bindByType("now", toUtcWallClock(now), LocalDateTime.class)
+                  .bindByType("cutoff", toUtcWallClock(now.minus(staleAfter)), LocalDateTime.class);
+          if (keyOrNull != null) {
+            update.bind("key", keyOrNull);
           }
           return update.execute();
         });
@@ -256,7 +299,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
                 .bind(2, startMonth)
                 .bind(3, endMonth)
                 .bind(4, excludeBullet)
-                .bind(5, Timestamp.from(now.minus(staleAfter)))
+                .bindByType(5, toUtcWallClock(now.minus(staleAfter)), LocalDateTime.class)
                 .map(ROW_MAPPER)
                 .findFirst());
   }
@@ -281,23 +324,46 @@ public class IndexingRequestDao implements IndexingRequestStore {
         terminal
             ? """
             UPDATE indexing_requests
-            SET status = ?, error_message = ?, games_indexed = ?, updated_at = now(),
+            SET status = ?, error_message = ?, games_indexed = ?, updated_at = ?,
                 dedupe_key = NULL
             WHERE id = ?
             """
+            // A non-terminal write may only move a row that is still live. Without the status
+            // guard a retired request can be resurrected: reclaimStale marks a stalled request
+            // FAILED and NULLs its key on the assumption its owner is dead, but nothing fences
+            // that owner, and IndexWorker writes PROCESSING once per month rather than once per
+            // run. The next such write would flip the row back to PROCESSING while leaving
+            // dedupe_key NULL — a live request holding no slot. Its replacement already holds the
+            // key, so the constraint cannot see the violation, and a skipCache submit (which
+            // bypasses the dedupe read) would then start exactly the rival run this change exists
+            // to prevent.
+            //
+            // Restoring the key here instead would be wrong: the replacement holds it, so the
+            // UPDATE would fail on the constraint. Refusing the resurrection is the only shape
+            // that keeps one live row per tuple.
             : """
             UPDATE indexing_requests
-            SET status = ?, error_message = ?, games_indexed = ?, updated_at = now()
-            WHERE id = ?
+            SET status = ?, error_message = ?, games_indexed = ?, updated_at = ?
+            WHERE id = ? AND status IN ('PENDING', 'PROCESSING')
             """;
-    jdbi.useHandle(
-        h ->
-            h.createUpdate(sql)
-                .bind(0, status)
-                .bind(1, errorMessage)
-                .bind(2, gamesIndexed)
-                .bind(3, id)
-                .execute());
+    LocalDateTime stamp = toUtcWallClock(clock.instant());
+    int updated =
+        jdbi.withHandle(
+            h ->
+                h.createUpdate(sql)
+                    .bind(0, status)
+                    .bind(1, errorMessage)
+                    .bind(2, gamesIndexed)
+                    .bindByType(3, stamp, LocalDateTime.class)
+                    .bind(4, id)
+                    .execute());
+    if (updated == 0 && !terminal) {
+      LOG.warn(
+          "Refused to move request {} to {}: it is no longer live, most likely retired as stale."
+              + " A replacement request owns this range now.",
+          id,
+          status);
+    }
   }
 
   @Override
@@ -309,11 +375,12 @@ public class IndexingRequestDao implements IndexingRequestStore {
                       """
                       DELETE FROM indexing_requests
                       WHERE created_at < ?
+                        AND status NOT IN ('PENDING', 'PROCESSING')
                         AND NOT EXISTS (
                           SELECT 1 FROM game_features g
                           WHERE g.request_id = indexing_requests.id)
                       """)
-                  .bind(0, Timestamp.from(threshold))
+                  .bindByType(0, toUtcWallClock(threshold), LocalDateTime.class)
                   .execute();
           if (deleted > 0) {
             LOG.debug("Deleted {} indexing requests older than {}", deleted, threshold);

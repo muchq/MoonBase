@@ -295,6 +295,13 @@ public class Migration {
                  OR (o.created_at = r.created_at AND o.id < r.id)))
       """;
 
+  // The retention sweep's anti-join (deleteOlderThan) filters indexing_requests on an hourly
+  // schedule by "does any game still point at me". Without this, EXPLAIN shows a hash anti-join
+  // over a sequential scan of game_features — the largest table in the schema. Neither engine
+  // indexes a foreign key column automatically.
+  private static final String CREATE_IDX_GAME_FEATURES_REQUEST_ID =
+      "CREATE INDEX IF NOT EXISTS idx_game_features_request_id ON game_features(request_id)";
+
   private static final String ADD_DEDUPE_KEY_UNIQUE_H2 =
       "ALTER TABLE indexing_requests ADD CONSTRAINT IF NOT EXISTS indexing_requests_dedupe_unique"
           + " UNIQUE (dedupe_key)";
@@ -375,6 +382,7 @@ public class Migration {
       stmt.execute(ADD_DEDUPE_KEY_COLUMN);
       stmt.execute(BACKFILL_DEDUPE_KEY);
       stmt.execute(useH2 ? ADD_DEDUPE_KEY_UNIQUE_H2 : ADD_DEDUPE_KEY_UNIQUE_PG);
+      stmt.execute(CREATE_IDX_GAME_FEATURES_REQUEST_ID);
 
       LOG.info("Database migration completed successfully (H2={})", useH2);
     } catch (SQLException e) {
