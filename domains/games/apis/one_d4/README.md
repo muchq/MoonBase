@@ -268,6 +268,15 @@ match wins. A row at the attempt limit is usually also old and unheld, and both 
 but only one gives the user the real reason; and requeuing stamps `updated_at`, so doing it first
 would make a row look freshly touched and hide it from the staleness check for another whole hour.
 
+None of that covers a worker that is *leaving on purpose*, and it can't: every arm above needs the
+owner to have stopped answering, which a deploy only looks like after the lease expires. So a
+shutting-down worker hands its request back itself — unclaimed immediately, and with the attempt
+returned. The attempt matters more than the five minutes: `attempts` is spent on claim so that a
+request which kills its worker outright still moves the counter, which means a process exit is
+otherwise indistinguishable from a crash, and a long-running request outliving three rolling
+restarts would be retired as poisoned. A hand-back is the evidence that resolves it — the worker
+survived long enough to say it was going, which is exactly what a killer request prevents.
+
 ### Dispatch
 
 `indexing_requests` is the work queue. Any worker claims the oldest request nobody holds, runs it,

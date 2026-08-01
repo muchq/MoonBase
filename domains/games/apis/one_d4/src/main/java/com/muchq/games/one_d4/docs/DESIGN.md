@@ -13,35 +13,48 @@ A Micronaut service that indexes chess games from chess.com (lichess planned), e
                          │   Client     │
                          └──────┬───────┘
                                 │
-                    ┌───────────▼────────────┐
-                    │    Micronaut HTTP       │
-                    │  (Netty + JAX-RS)      │
-                    ├────────────┬───────────┤
-                    │ IndexCtrl  │ QueryCtrl │
-                    └─────┬──────┴─────┬─────┘
-                          │            │
-                 ┌────────▼──┐   ┌─────▼──────────┐
-                 │IndexQueue │   │  ChessQL        │
-                 │(in-memory)│   │  Lexer→Parser→  │
-                 └────┬──────┘   │  Compiler→SQL   │
-                      │          └─────┬───────────┘
-                ┌─────▼──────┐         │
-                │IndexWorker │         │
-                │  (daemon)  │         │
-                └─────┬──────┘         │
-                      │                │
-           ┌──────────▼─────┐          │
-           │ FeatureExtract │          │
-           │  PgnParser     │          │
-           │  GameReplayer  │          │
-           │  MotifDetect[] │          │
-           └──────┬─────────┘          │
-                  │                    │
-            ┌─────▼────────────────────▼──┐
-            │         PostgreSQL          │
-            │  indexing_requests          │
-            │  game_features             │
-            └─────────────────────────────┘
+                    ┌───────────▼───────────┐
+                    │    Micronaut HTTP     │
+                    │   (Netty + JAX-RS)    │
+                    ├───────────┬───────────┤
+                    │ IndexCtrl │ QueryCtrl │
+                    └─────┬─────┴─────┬─────┘
+                          │           │
+                   INSERT PENDING      │
+                          │     ┌─────▼───────────┐
+                          │     │  ChessQL        │
+                          │     │  Lexer→Parser→  │
+                          │     │  Compiler→SQL   │
+                          │     └─────┬───────────┘
+                          │           │
+     ┌────────────────────▼────────┐  │
+     │  indexing_requests          │  │   IndexQueue (in-memory)
+     │  — the work queue —         │  │   wake-up nudge only,
+     └────┬───────────────▲────────┘  │   payload ignored
+      claimNext     fenced writes     │            ╎
+          │               │           │            ╎
+          │      ┌────────┴──────┐    │            ╎
+          └─────►│  IndexWorker  │◄╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯
+                 │   (daemon,    │    │
+                 │    any host)  │    │
+                 └───────┬───────┘    │
+                         │            │
+              ┌──────────▼─────┐      │
+              │ FeatureExtract │      │
+              │  PgnParser     │      │
+              │  GameReplayer  │      │
+              │  MotifDetect[] │      │
+              └──────┬─────────┘      │
+                     │                │
+               ┌─────▼────────────────▼──────┐
+               │      PostgreSQL / H2        │
+               │  indexing_requests          │
+               │  game_features              │
+               │  motif_occurrences          │
+               └─────────────────────────────┘
+
+Any instance's worker may claim any queued row, so the arrow into IndexWorker
+is not the nudge — the nudge only saves it waiting out the poll interval.
 ```
 
 ## Package Structure

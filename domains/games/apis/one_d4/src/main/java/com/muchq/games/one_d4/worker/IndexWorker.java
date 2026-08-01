@@ -117,6 +117,18 @@ public class IndexWorker {
   private final Set<UUID> inFlight = ConcurrentHashMap.newKeySet();
 
   /**
+   * A snapshot of what this process is running, for the shutdown path to hand back.
+   *
+   * <p>A live view rather than a copy would be worse than useless here: the caller iterates it
+   * while runs are still finishing and removing themselves, so it would be racing the very set it
+   * is reading. Both entry points register here, so a request picked up inline is handed back on
+   * shutdown just like a claimed one — the JVM is going away either way.
+   */
+  public Set<UUID> inFlight() {
+    return Set.copyOf(inFlight);
+  }
+
+  /**
    * How often the lease is renewed. Paced against {@link RetentionPolicy#LEASE}, not against {@link
    * RetentionPolicy#STALE_REQUEST}: the hour is how long an <em>unclaimed</em> row may sit before
    * it is presumed orphaned, and beating on that schedule against a five-minute lease would let
@@ -361,6 +373,10 @@ public class IndexWorker {
               message.player(),
               monthStr);
         }
+        // Unfenced, like the 404 path above and for the same reason — indexed_periods is keyed by
+        // (player, platform, month), so there is no request to condition the write on. What keeps
+        // it safe is order: the flushBatch immediately above checks ownership and throws if this
+        // worker has lost it, so this line is unreachable without a live lease.
         upsertPeriod(message, monthStr, month, fetchedAt, monthCount, titleResolution.degraded());
         progress(message.requestId(), totalIndexed);
       }

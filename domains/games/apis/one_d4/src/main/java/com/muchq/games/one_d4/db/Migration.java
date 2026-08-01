@@ -339,10 +339,14 @@ public class Migration {
    * <p>Both default for existing rows, and both defaults are the pre-#1279 behaviour: requests in
    * flight during a deploy did not skip the cache and have not been attempted by a table-claiming
    * worker.
+   *
+   * <p>The DEFAULT is the whole backfill. Both engines fill existing rows from it as the column is
+   * added, so there is no second statement to write — and an earlier version of this that added one
+   * anyway was dead code that no test could distinguish from the DEFAULT doing its job. Both
+   * columns are read as primitives ({@code getBoolean}, {@code getInt}), so a NULL would silently
+   * arrive as false or zero rather than failing; the DEFAULT is what keeps that from being
+   * load-bearing.
    */
-  // Belt and braces: both engines fill existing rows from the DEFAULT when the column is added, so
-  // this should be a no-op — but the reader treats these as primitives, and a NULL would arrive as
-
   private static final String[] ADD_DISPATCH_COLUMNS = {
     // The DEFAULTs are what backfills existing rows — both engines apply them when the column is
     // added, so a request in flight during a deploy comes out as "do not skip the cache, never

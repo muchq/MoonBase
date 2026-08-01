@@ -684,6 +684,12 @@ public class RequestLivenessTest {
     }
 
     @Override
+    public boolean handBack(UUID id, String ownerId, Instant now) {
+
+      return false;
+    }
+
+    @Override
     public boolean holdsLease(UUID id, String ownerId, Instant now) {
       return true;
     }

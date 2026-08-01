@@ -589,6 +589,17 @@ public class IndexRequestServiceTest {
     }
 
     @Override
+    public boolean handBack(UUID id, String ownerId, Instant now) {
+      IndexingRequest r = rows.get(id);
+      if (r == null || !live(r) || !ownerId.equals(owners.get(id))) {
+        return false;
+      }
+      owners.remove(id);
+      rows.put(id, withAttempts(touched(r, now), Math.max(0, r.attempts() - 1)));
+      return true;
+    }
+
+    @Override
     public boolean holdsLease(UUID id, String ownerId, Instant now) {
       IndexingRequest r = rows.get(id);
       Instant expires = leases.get(id);

@@ -902,6 +902,156 @@ public class IndexingRequestDaoTest {
   }
 
   /**
+   * A worker shutting down cleanly gives the request back, and gives the attempt back with it.
+   *
+   * <p>{@code attempts} is spent on claim, deliberately — a request that kills its worker before it
+   * can report anything still has to move the counter, or the poison bound means nothing. The cost
+   * of counting that early is that it cannot tell a crash from a deploy, and every process exit
+   * looks like the request killed it. Three rolling restarts across a long-running request would
+   * retire it as poisoned and tell the user its range fails repeatedly, which is a lie about a
+   * healthy system.
+   *
+   * <p>A graceful hand-back is the evidence that resolves it: the worker survived long enough to
+   * say so, which is precisely what a killer request does not allow. So the lap does not count.
+   */
+  @Test
+  public void handBack_returnsTheRequestWithoutSpendingAnAttempt() {
+    IndexingRequestStore.Claim claim =
+        dao.createOrAdopt(
+            "deploying", "CHESS_COM", "2027-06", "2027-06", false, false, STALE_AFTER, now);
+    UUID id = claim.request().id();
+    dao.claim(id, WORKER_A, LEASE, now);
+    assertThat(dao.findById(id).orElseThrow().attempts()).isEqualTo(1);
+
+    assertThat(dao.handBack(id, WORKER_A, now)).isTrue();
+
+    IndexingRequestStore.IndexingRequest row = dao.findById(id).orElseThrow();
+    assertThat(row.attempts()).as("a deploy is not one of the three strikes").isZero();
+    assertThat(row.status()).as("the work is still wanted").isIn("PENDING", "PROCESSING");
+    assertThat(dao.claim(id, WORKER_B, LEASE, now))
+        .as("the next worker takes it now, not once the lease lapses")
+        .isTrue();
+  }
+
+  /** Fenced like every other write: a worker cannot give away a request someone else now holds. */
+  @Test
+  public void handBack_refusesOnceAnotherWorkerHasTakenTheRequest() {
+    IndexingRequestStore.Claim claim =
+        dao.createOrAdopt(
+            "stolen", "CHESS_COM", "2027-07", "2027-07", false, false, STALE_AFTER, now);
+    UUID id = claim.request().id();
+    dao.claim(id, WORKER_A, LEASE, now);
+
+    Instant afterLapse = now.plus(LEASE).plusSeconds(1);
+    assertThat(dao.claim(id, WORKER_B, LEASE, afterLapse)).isTrue();
+
+    assertThat(dao.handBack(id, WORKER_A, afterLapse))
+        .as("A no longer holds this; unclaiming it would strand B mid-run")
+        .isFalse();
+    assertThat(dao.holdsLease(id, WORKER_B, afterLapse)).isTrue();
+  }
+
+  /**
+   * Hand-back keeps the lease mark, like every other path that ends a claim. It is the record of
+   * when a worker last held the row, and a fleet mid-deploy is the worst possible moment to look
+   * dead to the sweep — every instance is handing work back at once.
+   */
+  @Test
+  public void handBack_leavesTheFleetLookingAliveDuringADeploy() {
+    IndexingRequestStore.Claim queued =
+        dao.createOrAdopt(
+            "backlog", "CHESS_COM", "2027-08", "2027-08", false, false, STALE_AFTER, now);
+    backdateUpdatedAt(queued.request().id(), now.minus(Duration.ofHours(3)));
+
+    IndexingRequestStore.Claim running =
+        dao.createOrAdopt(
+            "handed", "CHESS_COM", "2027-09", "2027-09", false, false, STALE_AFTER, now);
+    dao.claim(running.request().id(), WORKER_A, LEASE, now);
+    dao.handBack(running.request().id(), WORKER_A, now);
+
+    assertThat(dao.reclaimStale(STALE_AFTER, now))
+        .as("a worker was here moments ago — it just told us it was leaving")
+        .isZero();
+    assertThat(dao.findById(queued.request().id()).orElseThrow().status())
+        .isIn("PENDING", "PROCESSING");
+  }
+
+  /**
+   * The other half of the ordering, and the one that was left unpinned: poisoned before stalled.
+   *
+   * <p>A row whose attempts are spent is usually also unheld and old, so it matches the stalled arm
+   * too. Both arms retire it and both leave it FAILED, so the status proves nothing — the whole
+   * difference is the sentence the user reads. Run stalled first and someone whose range fails
+   * repeatedly is told the indexing fleet is down, which sends them to resubmit into a system that
+   * is working fine and will fail them again the same way.
+   *
+   * <p>Constructing the overlap takes both steps. Spending the attempts alone leaves {@code
+   * updated_at} at the last claim, which is recent by definition, so a poisoned row is not normally
+   * stalled as well — which is exactly why the suite stayed green with the arms swapped until this
+   * existed.
+   */
+  @Test
+  public void reclaimStale_prefersThePoisonedReasonWhenARowIsAlsoStalled() {
+    IndexingRequestStore.Claim claim =
+        dao.createOrAdopt(
+            "both", "CHESS_COM", "2027-03", "2027-03", false, false, STALE_AFTER, now);
+    UUID id = claim.request().id();
+    exhaustAttempts(id);
+    backdateUpdatedAt(id, now.minus(Duration.ofHours(3)));
+
+    // Past the last lease exhaustAttempts took out, so the row is unheld, and with nothing else in
+    // the table no worker is running anywhere either. Poisoned and stalled are both true.
+    dao.reclaimStale(STALE_AFTER, now.plus(LEASE.multipliedBy(MAX_ATTEMPTS + 1)));
+
+    IndexingRequestStore.IndexingRequest row = dao.findById(id).orElseThrow();
+    assertThat(row.status()).isEqualTo("FAILED");
+    assertThat(row.errorMessage())
+        .as("both arms retire this row; the one that names the real cause has to win")
+        .contains("each worker stopped before finishing");
+  }
+
+  /**
+   * An unowned terminal write must not erase the evidence that a worker was here.
+   *
+   * <p>{@code lease_expires_at} is the fleet-liveness probe's memory. A successful run clears its
+   * owner on the way out, so {@code owner_id} cannot answer "was anyone working recently?" — only
+   * the lease mark can, which is why {@link IndexingRequestStore#updateStatusOwned} leaves it in
+   * place. The unowned path has to keep the same promise: its one production caller is the inline
+   * dispatch failure handler, and by the time that runs the worker has already claimed and leased
+   * the row.
+   *
+   * <p>Erasing it there is not a cosmetic inconsistency. The mark this row carries is what tells
+   * the sweep the fleet is alive, so losing it retires the entire backlog behind it in one
+   * statement — the exact failure the probe was added to prevent, reached through a different door.
+   */
+  @Test
+  public void reclaimStale_stillSeesAWorkerAfterAnUnownedTerminalWrite() {
+    List<UUID> backlog = new java.util.ArrayList<>();
+    for (int i = 0; i < 3; i++) {
+      IndexingRequestStore.Claim queued =
+          dao.createOrAdopt(
+              "waiting" + i, "CHESS_COM", "2027-04", "2027-04", false, false, STALE_AFTER, now);
+      backdateUpdatedAt(queued.request().id(), now.minus(Duration.ofHours(3)));
+      backlog.add(queued.request().id());
+    }
+
+    // A worker claimed this one and ran it inline; it threw, and the inline handler recorded the
+    // outcome through updateStatus because it holds no token of its own.
+    IndexingRequestStore.Claim inline =
+        dao.createOrAdopt(
+            "inline", "CHESS_COM", "2027-05", "2027-05", false, false, STALE_AFTER, now);
+    dao.claim(inline.request().id(), WORKER_A, LEASE, now);
+    dao.updateStatus(inline.request().id(), "FAILED", "boom", 0);
+
+    assertThat(dao.reclaimStale(STALE_AFTER, now))
+        .as("a worker held this row moments ago, so the fleet is not dead")
+        .isZero();
+    for (UUID id : backlog) {
+      assertThat(dao.findById(id).orElseThrow().status()).isIn("PENDING", "PROCESSING");
+    }
+  }
+
+  /**
    * And the guard on that arm, which is what stops it from re-becoming the bug #1278 and #1250 were
    * spent on. A single worker draining a deep backlog leaves rows at the back untouched for as long
    * as the backlog takes; age alone cannot tell that from a dead fleet. A live lease held by anyone

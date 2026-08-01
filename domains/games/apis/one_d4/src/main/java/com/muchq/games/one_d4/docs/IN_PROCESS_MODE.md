@@ -27,7 +27,8 @@ curl -X POST http://localhost:8080/v1/query \
 
 ## Overview
 
-**In-process mode is the default.** The indexer runs with no external dependencies — no PostgreSQL, no SQS, no S3. Everything lives in-process using an in-memory queue and an H2 in-memory database.
+**In-process mode is the default.** The indexer runs with no external dependencies — no PostgreSQL, no SQS, no S3. Everything lives in-process against an H2 in-memory database, which is also the work queue —
+the in-memory `IndexQueue` survives only as a wake-up nudge.
 
 This mode is useful for:
 - Local development without Docker or PostgreSQL installed
@@ -226,7 +227,7 @@ The system auto-detects H2 vs PostgreSQL from the JDBC URL and uses the appropri
 - Full ChessQL query support
 - Full motif detection pipeline
 - chess.com API fetching (still makes real HTTP calls)
-- Concurrent indexing requests via the queue
+- Concurrent indexing requests, claimed from `indexing_requests` by the in-process worker
 
 ### What Doesn't Persist
 

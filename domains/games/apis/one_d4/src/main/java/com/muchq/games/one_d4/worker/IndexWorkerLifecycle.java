@@ -9,6 +9,7 @@ import io.micronaut.runtime.server.event.ServerStartupEvent;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -136,7 +137,45 @@ public class IndexWorkerLifecycle implements ApplicationEventListener<ServerStar
     }
   }
 
+  /**
+   * Stops taking work, and gives back whatever this process is holding.
+   *
+   * <p>Wired as the bean's {@code preDestroy} in both modules, which is the whole point — the
+   * poller is a daemon thread, so without this a deploy is indistinguishable from a crash. The row
+   * stays owned by a process that no longer exists, nothing may take it until the lease lapses five
+   * minutes later, and the attempt spent claiming it is gone. A long-running request that outlives
+   * three rolling restarts is then retired as poisoned, telling the user its range fails repeatedly
+   * about a fleet that is working perfectly.
+   *
+   * <p>It hands back rather than draining, and that is deliberate. An indexing run has no bound — a
+   * twelve-month range against a slow chess.com is legitimately long — so a shutdown that waits for
+   * one is a shutdown that hangs, and the container kills it anyway. Handing back is what a drain
+   * was for: the work moves to a surviving instance immediately, unspent.
+   *
+   * <p>The departing run is not interrupted. It may still be mid-fetch when its row changes hands,
+   * and it needs no stopping — every write it makes is fenced on ownership it no longer has, so the
+   * first one fails and the run unwinds itself. That is the same mechanism that protects against a
+   * lapsed lease, reached a few minutes earlier.
+   */
+  /**
+   * Whether this poller is still taking work. Exists so a test can boot a real context, close it,
+   * and check the container actually invoked {@link #stop} — an annotation the tests only read back
+   * off the factory method would prove nothing about whether Micronaut honours it.
+   */
+  public boolean isRunning() {
+    return running;
+  }
+
   public void stop() {
     running = false;
+    for (UUID id : worker.inFlight()) {
+      try {
+        requestStore.handBack(id, worker.ownerId(), clock.instant());
+      } catch (Exception e) {
+        // Shutdown must not throw. Failing here costs the lease's five minutes and one attempt —
+        // exactly the pre-#1279 behaviour — which is a worse outcome, not a broken one.
+        LOG.warn("Could not hand request {} back on shutdown", id, e);
+      }
+    }
   }
 }

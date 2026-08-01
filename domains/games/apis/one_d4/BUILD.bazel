@@ -460,7 +460,11 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/IndexerModuleTest.java",
     ],
     deps = [
+        ":db",
         ":module",
+        ":queue",
+        ":worker",
+        artifact("io.micronaut:micronaut-inject"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],

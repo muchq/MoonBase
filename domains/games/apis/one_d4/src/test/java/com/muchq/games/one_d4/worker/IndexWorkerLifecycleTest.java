@@ -35,8 +35,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -160,6 +162,61 @@ public class IndexWorkerLifecycleTest {
         .isZero();
   }
 
+  /**
+   * Shutting down hands the work back, rather than letting the JVM drop it on the floor.
+   *
+   * <p>The poller is a daemon thread, so process exit kills whatever it is running. Without this,
+   * every deploy looks exactly like a crash: the row stays owned by a process that no longer
+   * exists, nothing may take it until the lease lapses five minutes later, and the attempt spent on
+   * claiming it is gone. Three rolling restarts across one long request retire it as poisoned and
+   * tell the user its range fails repeatedly — about a fleet that is working perfectly.
+   *
+   * <p>Handing back rather than waiting for the run to finish is the deliberate choice. An indexing
+   * run has no bound — a twelve-month range against a slow chess.com is legitimately long — so a
+   * shutdown that drains is a shutdown that hangs. The departing run is not interrupted here; it
+   * simply loses the right to write, which the fencing already enforces.
+   */
+  @Test
+  @Timeout(30)
+  public void stopHandsBackTheRequestThisProcessWasRunning() throws Exception {
+    UUID id = submit("mid-run", false).request().id();
+    CountDownLatch reachedFetch = new CountDownLatch(1);
+    CountDownLatch letItFinish = new CountDownLatch(1);
+    IndexWorkerLifecycle lifecycle =
+        lifecycleFor(new BlockingClient(reachedFetch, letItFinish), new InMemoryIndexQueue());
+
+    Thread run = Thread.ofVirtual().start(lifecycle::claimAndRunOne);
+    try {
+      assertThat(reachedFetch.await(20, TimeUnit.SECONDS)).as("the run got going").isTrue();
+      assertThat(dao.findById(id).orElseThrow().attempts()).isEqualTo(1);
+
+      lifecycle.stop();
+
+      assertThat(dao.findById(id).orElseThrow().attempts())
+          .as("a deploy must not spend one of the three attempts")
+          .isZero();
+      assertThat(dao.claim(id, "another-instance", RetentionPolicy.LEASE, NOW))
+          .as("the work moves to a surviving instance now, not five minutes from now")
+          .isTrue();
+    } finally {
+      letItFinish.countDown();
+      run.join();
+    }
+  }
+
+  /** Nothing in flight, nothing to give back — shutting down idle must not touch the table. */
+  @Test
+  @Timeout(30)
+  public void stopIsHarmlessWhenNothingIsRunning() {
+    UUID id = submit("untouched", false).request().id();
+
+    lifecycleFor(new RecordingClient(), new InMemoryIndexQueue()).stop();
+
+    IndexingRequestStore.IndexingRequest row = dao.findById(id).orElseThrow();
+    assertThat(row.status()).isEqualTo("PENDING");
+    assertThat(row.attempts()).isZero();
+  }
+
   // --- wiring ---------------------------------------------------------------------------------
 
   private IndexingRequestStore.Claim submit(String player, boolean skipCache) {
@@ -193,6 +250,34 @@ public class IndexWorkerLifecycleTest {
             CLOCK,
             Duration.ofHours(1));
     return new IndexWorkerLifecycle(queue, worker, dao, CLOCK);
+  }
+
+  /** Parks inside the fetch so a test can act while a run is genuinely in flight. */
+  private static final class BlockingClient extends ChessClient {
+    private final CountDownLatch reachedFetch;
+    private final CountDownLatch letItFinish;
+
+    BlockingClient(CountDownLatch reachedFetch, CountDownLatch letItFinish) {
+      super(null, new ObjectMapper());
+      this.reachedFetch = reachedFetch;
+      this.letItFinish = letItFinish;
+    }
+
+    @Override
+    public Optional<GamesResponse> fetchGames(String player, YearMonth yearMonth) {
+      reachedFetch.countDown();
+      try {
+        letItFinish.await();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+      return Optional.empty();
+    }
+
+    @Override
+    public Optional<Player> fetchPlayer(String player) {
+      return Optional.empty();
+    }
   }
 
   /** Records which players were actually fetched, and returns nothing for each. */

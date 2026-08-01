@@ -173,6 +173,29 @@ public interface IndexingRequestStore {
   boolean renewLease(UUID id, String ownerId, Duration lease, Instant now);
 
   /**
+   * Gives a claimed request back to the queue, unspent. Returns false if {@code owner_id} no longer
+   * names this caller — someone else has it, and unclaiming it would strand them mid-run.
+   *
+   * <p>For a worker that is going away on purpose. {@link #reclaimStale}'s release arm covers the
+   * owner that stopped answering, but it can only act once the lease has lapsed, because a lapsed
+   * lease is the only evidence it has. A process being shut down knows sooner and can say so, which
+   * turns five minutes of a stranded range into none.
+   *
+   * <p>It also returns the attempt, and that is the part that matters. {@code attempts} is spent on
+   * claim so that a request which kills its worker outright still moves the counter — necessary,
+   * and the reason the counter cannot tell a crash from a deploy on its own. Every process exit
+   * would otherwise look like the request killed it, and a long-running request outliving three
+   * rolling restarts would be retired as poisoned, telling the user its range fails repeatedly
+   * about a fleet that is working perfectly. A hand-back is the missing evidence: the worker
+   * survived long enough to say it was leaving, which is exactly what a killer request prevents.
+   *
+   * <p>Lenient about expiry, like {@link #renewLease} and for the same reason — a lease that lapsed
+   * without anyone taking it is still this caller's to give back. Keeps {@code lease_expires_at},
+   * because a fleet mid-deploy is the worst possible moment to look dead to {@link #reclaimStale}.
+   */
+  boolean handBack(UUID id, String ownerId, Instant now);
+
+  /**
    * True if {@code ownerId} still holds a live, unexpired lease on this request.
    *
    * <p>Has no production caller, and should not acquire one: asking this before a write would be a

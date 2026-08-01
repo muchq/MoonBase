@@ -442,16 +442,24 @@ public class IndexingRequestDao implements IndexingRequestStore {
     // request block that range permanently.
     //
     // Nothing here is fenced on ownership, so this is the unowned path: it is for callers writing
-    // about a request no worker ever claimed — the inline-dispatch failure in IndexRequestService,
+    // about a request they hold no token for — the inline-dispatch failure in IndexRequestService,
     // and tests. A worker presents its token and goes through updateStatusOwned instead, which is
     // what stops a lapsed owner from stamping COMPLETED over a range someone else now holds.
+    //
+    // lease_expires_at is left alone here for the same reason updateStatusOwned leaves it alone:
+    // it is the fleet-liveness probe's only memory. Clearing owner_id is what ends the claim, and
+    // every predicate that reads ownership requires owner_id and a live status, so the mark is
+    // inert once a row is terminal. What it is not is unowned — "no worker ever claimed this" does
+    // not follow from "this caller holds no token". The inline handler's request was claimed and
+    // leased by the worker that then threw, and erasing its mark makes the fleet look dead and
+    // retires the whole queued backlog behind it.
     boolean terminal = isTerminal(status);
     String sql =
         terminal
             ? """
             UPDATE indexing_requests
             SET status = ?, error_message = ?, games_indexed = ?, updated_at = ?,
-                dedupe_key = NULL, owner_id = NULL, lease_expires_at = NULL
+                dedupe_key = NULL, owner_id = NULL
             WHERE id = ?
             """
             // A non-terminal write may only move a row that is still live. Without the status
@@ -636,6 +644,30 @@ public class IndexingRequestDao implements IndexingRequestStore {
                     .bind("owner", ownerId)
                     .execute());
     return renewed > 0;
+  }
+
+  @Override
+  public boolean handBack(UUID id, String ownerId, Instant now) {
+    int handed =
+        jdbi.withHandle(
+            h ->
+                h.createUpdate(
+                        """
+                        UPDATE indexing_requests
+                        SET owner_id = NULL, updated_at = :now,
+                            attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END
+                        WHERE id = :id
+                          AND owner_id = :owner
+                          AND status IN ('PENDING', 'PROCESSING')
+                        """)
+                    .bindByType("now", toUtcWallClock(now), LocalDateTime.class)
+                    .bind("id", id)
+                    .bind("owner", ownerId)
+                    .execute());
+    if (handed > 0) {
+      LOG.info("Handed request {} back to the queue on shutdown", id);
+    }
+    return handed > 0;
   }
 
   @Override

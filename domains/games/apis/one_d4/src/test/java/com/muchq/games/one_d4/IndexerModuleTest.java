@@ -3,16 +3,47 @@ package com.muchq.games.one_d4;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.muchq.games.one_d4.db.IndexingRequestStore;
+import com.muchq.games.one_d4.queue.IndexQueue;
+import com.muchq.games.one_d4.worker.IndexWorker;
+import io.micronaut.context.annotation.Bean;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 public class IndexerModuleTest {
 
   @TempDir Path tmp;
+
+  /**
+   * The poller is a daemon thread, so nothing stops it at shutdown unless the container is told to.
+   * Without this annotation a deploy is indistinguishable from a crash: the in-flight row stays
+   * owned by a process that no longer exists for a full lease, and the attempt it spent is gone.
+   *
+   * <p>Asserted on the factory method rather than by booting a context, because that is where the
+   * mistake would be made — the method is easy to edit without noticing the annotation, and
+   * IndexWorkerLifecycleTest already covers what stop() does once it is called. McpModuleTest boots
+   * a real context and closes it, which is where the container's half of this is exercised.
+   */
+  @Test
+  public void indexWorkerLifecycleIsToldToStopOnShutdown() throws Exception {
+    Bean bean =
+        IndexerModule.class
+            .getMethod(
+                "indexWorkerLifecycle",
+                IndexQueue.class,
+                IndexWorker.class,
+                IndexingRequestStore.class,
+                Clock.class)
+            .getAnnotation(Bean.class);
+
+    assertThat(bean).as("the lifecycle bean declares no preDestroy").isNotNull();
+    assertThat(bean.preDestroy()).isEqualTo("stop");
+  }
 
   @Test
   public void readJdbcUrl_returnsEnvVar_whenSet() {
