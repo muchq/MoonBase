@@ -26,6 +26,7 @@ import com.muchq.games.one_d4.motifs.MotifDetector;
 import com.muchq.games.one_d4.motifs.PinDetector;
 import com.muchq.games.one_d4.motifs.SkewerDetector;
 import com.muchq.games.one_d4.queue.IndexMessage;
+import com.muchq.platform.yodel.CustomMetrics;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -589,6 +590,23 @@ public class IndexWorkerTest {
       1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0
       """;
 
+  /**
+   * Two checks in one game: 3...Qe5+ down the open e-file, then 6.Nxc7+ forking from c7. A
+   * one-check fixture cannot tell "count the occurrences" from "count one per game", which is a
+   * real way for a motif chart to under-report by exactly the amount that matters.
+   */
+  private static final String TWO_CHECKS_PGN =
+      """
+      [Event "Live Chess"]
+      [Site "Chess.com"]
+      [White "White"]
+      [Black "Black"]
+      [Result "*"]
+      [ECO "B01"]
+
+      1. e4 d5 2. exd5 Qxd5 3. Nc3 Qe5+ 4. Be2 Qg5 5. Nb5 Na6 6. Nxc7+ Kd8 *
+      """;
+
   private static final class StubChessClient extends ChessClient {
     private final List<java.time.YearMonth> fetchCalls = new ArrayList<>();
     private final Map<java.time.YearMonth, List<PlayedGame>> responseByMonth = new HashMap<>();
@@ -943,5 +961,246 @@ public class IndexWorkerTest {
     public int deleteOlderThan(Instant threshold) {
       return 0;
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // What the indexer reports about its own work (#1212).
+  //
+  // The dashboard showed request counts and nothing about indexing, because a Java service had no
+  // way to record anything else. These assert the instruments the one_d4 registry entry queries,
+  // and they assert values rather than presence: a counter stuck at zero is exactly what a broken
+  // emit site produces, and it renders as a flat line rather than as an error.
+  // ---------------------------------------------------------------------------
+
+  private CustomMetrics metrics;
+
+  private IndexWorker meteredWorker() {
+    metrics = new CustomMetrics();
+    // Its own extractor: the shared one in setUp has no CheckDetector, so the motif assertions
+    // below would pass against a worker that never counted anything.
+    FeatureExtractor withCheck =
+        new FeatureExtractor(new PgnParser(), new GameReplayer(), List.of(new CheckDetector()));
+    return new IndexWorker(
+        stubChessClient,
+        withCheck,
+        requestStore,
+        new NoOpGameFeatureStore(),
+        periodStore,
+        extractionExecutor,
+        java.time.Clock.systemUTC(),
+        IndexWorker.DEFAULT_HEARTBEAT_INTERVAL,
+        metrics);
+  }
+
+  private long counter(String name, Map<String, String> labels) {
+    return metrics.counterSnapshot().stream()
+        .filter(s -> s.name().equals(name) && s.labels().equals(labels))
+        .mapToLong(CustomMetrics.CounterSnapshot::value)
+        .sum();
+  }
+
+  private long distributionCount(String name) {
+    return metrics.distributionSnapshot().stream()
+        .filter(s -> s.name().equals(name))
+        .mapToLong(CustomMetrics.DistributionSnapshot::count)
+        .sum();
+  }
+
+  private double distributionSum(String name) {
+    return metrics.distributionSnapshot().stream()
+        .filter(s -> s.name().equals(name))
+        .mapToDouble(CustomMetrics.DistributionSnapshot::sum)
+        .sum();
+  }
+
+  private static IndexMessage oneMonth() {
+    return new IndexMessage(UUID.randomUUID(), PLAYER, PLATFORM, "2024-01", "2024-01", false);
+  }
+
+  @Test
+  public void metrics_completedRunReportsOutcomeAndGamesIndexed() {
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(
+            playedGame("https://chess.com/game/m1", SCHOLARS_MATE_PGN, "blitz"),
+            playedGame("https://chess.com/game/m2", SCHOLARS_MATE_PGN, "blitz"),
+            playedGame("https://chess.com/game/m3", SCHOLARS_MATE_PGN, "blitz")));
+    IndexWorker w = meteredWorker();
+
+    w.process(oneMonth());
+
+    assertThat(counter(IndexWorker.RUNS, Map.of("outcome", "completed"))).isEqualTo(1);
+    assertThat(counter(IndexWorker.GAMES_INDEXED, Map.of()))
+        .as("the headline number the dashboard exists to show")
+        .isEqualTo(3);
+    assertThat(counter(IndexWorker.MONTHS, Map.of("result", "indexed"))).isEqualTo(1);
+    assertThat(counter(IndexWorker.ARCHIVE_FETCHES, Map.of("result", "ok"))).isEqualTo(1);
+    assertThat(distributionCount(IndexWorker.RUN_DURATION)).isEqualTo(1);
+    assertThat(distributionSum(IndexWorker.GAMES_PER_MONTH))
+        .as("per-month shape, not just the run total")
+        .isEqualTo(3.0);
+  }
+
+  /**
+   * A month with no archive is indexed — the answer is "none". Counting it as a failure would make
+   * a quiet player look like an outage.
+   */
+  @Test
+  public void metrics_monthWithNoArchiveCountsAsIndexedNotFailed() {
+    IndexWorker w = meteredWorker();
+
+    w.process(oneMonth());
+
+    assertThat(counter(IndexWorker.ARCHIVE_FETCHES, Map.of("result", "no_archive"))).isEqualTo(1);
+    assertThat(counter(IndexWorker.MONTHS, Map.of("result", "empty"))).isEqualTo(1);
+    assertThat(counter(IndexWorker.GAMES_INDEXED, Map.of())).isZero();
+    assertThat(counter(IndexWorker.RUNS, Map.of("outcome", "completed"))).isEqualTo(1);
+  }
+
+  @Test
+  public void metrics_motifOccurrencesAreCountedByMotif() {
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/game/mm1", SCHOLARS_MATE_PGN, "blitz")));
+    IndexWorker w = meteredWorker();
+
+    w.process(oneMonth());
+
+    assertThat(counter(IndexWorker.MOTIF_OCCURRENCES, Map.of("motif", "check")))
+        .as("scholar's mate ends in Qxf7#, so CheckDetector must have found one")
+        .isPositive();
+  }
+
+  /**
+   * Every occurrence counts, not one per game. With a single-check fixture "add occurrences.size()"
+   * and "add 1" are the same statement, and the difference is a motif chart that silently reports
+   * games-containing-a-motif while claiming to report occurrences.
+   */
+  @Test
+  public void metrics_countsEveryOccurrenceNotOnePerGame() {
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/game/two", TWO_CHECKS_PGN, "blitz")));
+    IndexWorker w = meteredWorker();
+
+    w.process(oneMonth());
+
+    assertThat(counter(IndexWorker.MOTIF_OCCURRENCES, Map.of("motif", "check")))
+        .as("one game, two checks")
+        .isGreaterThanOrEqualTo(2);
+  }
+
+  /** Two runs over the same motif accumulate rather than overwrite. */
+  @Test
+  public void metrics_motifCountsAccumulateAcrossGames() {
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/game/ma1", SCHOLARS_MATE_PGN, "blitz")));
+    IndexWorker w = meteredWorker();
+    w.process(oneMonth());
+    long afterOne = counter(IndexWorker.MOTIF_OCCURRENCES, Map.of("motif", "check"));
+    assertThat(afterOne).isPositive();
+
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(
+            playedGame("https://chess.com/game/ma2", SCHOLARS_MATE_PGN, "blitz"),
+            playedGame("https://chess.com/game/ma3", SCHOLARS_MATE_PGN, "blitz")));
+    w.process(oneMonth());
+
+    assertThat(counter(IndexWorker.MOTIF_OCCURRENCES, Map.of("motif", "check")))
+        .isEqualTo(afterOne * 3);
+  }
+
+  /**
+   * Title enrichment must never fail indexing, so a profile lookup that errors leaves the month
+   * indexed but incomplete. That is worth seeing on its own: a chart where every month is degraded
+   * is a chess.com problem, and one where none are is the healthy case — reporting both as
+   * "indexed" hides the difference entirely.
+   */
+  @Test
+  public void metrics_monthWithFailedTitleLookupIsReportedDegraded() {
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/game/deg", SCHOLARS_MATE_PGN, "blitz")));
+    stubChessClient.setThrowOnFetchPlayer(new RuntimeException("429 from chess.com"));
+    IndexWorker w = meteredWorker();
+
+    w.process(oneMonth());
+
+    assertThat(counter(IndexWorker.MONTHS, Map.of("result", "degraded"))).isEqualTo(1);
+    assertThat(counter(IndexWorker.MONTHS, Map.of("result", "indexed"))).isZero();
+    assertThat(counter(IndexWorker.RUNS, Map.of("outcome", "completed")))
+        .as("degraded titles must not turn into a failed run")
+        .isEqualTo(1);
+  }
+
+  @Test
+  public void metrics_runThatThrowsIsReportedFailedNotCompleted() {
+    stubChessClient.setThrowOnFetch(new RuntimeException("chess.com is down"));
+    IndexWorker w = meteredWorker();
+
+    w.process(oneMonth());
+
+    assertThat(counter(IndexWorker.RUNS, Map.of("outcome", "failed"))).isEqualTo(1);
+    assertThat(counter(IndexWorker.RUNS, Map.of("outcome", "completed"))).isZero();
+    assertThat(distributionCount(IndexWorker.RUN_DURATION))
+        .as("a failed run still took time, and that time is the interesting part")
+        .isEqualTo(1);
+  }
+
+  /**
+   * The privacy sweep. Every distinct label set is a stored series, so one label carrying a player
+   * name turns the metrics backend into a directory of who uses the service, growing without bound.
+   * Asserted over every emitted series rather than at each call site, so an emit site added later
+   * cannot quietly opt out.
+   */
+  @Test
+  public void metrics_noLabelCarriesAPlayerOrGameIdentifier() {
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/game/priv", SCHOLARS_MATE_PGN, "blitz")));
+    IndexWorker w = meteredWorker();
+    w.process(oneMonth());
+
+    List<String> values = new ArrayList<>();
+    metrics.counterSnapshot().forEach(s -> values.addAll(s.labels().values()));
+    metrics.distributionSnapshot().forEach(s -> values.addAll(s.labels().values()));
+
+    assertThat(values).isNotEmpty();
+    assertThat(values).doesNotContain(PLAYER);
+    assertThat(values).noneSatisfy(v -> assertThat(v).contains("chess.com"));
+    assertThat(values)
+        .as("labels are bounded vocabularies — outcomes, results, motif names")
+        .allSatisfy(v -> assertThat(v).matches("[a-z_]+"));
+  }
+
+  /**
+   * The Java half of a cross-language contract. prom_proxy's one_d4 entry queries these names with
+   * {@code _total} appended by the collector's Prometheus exporter, and a rename here is invisible
+   * on that side: the query stays valid PromQL, matches no series, and the dashboard shows an empty
+   * chart that looks exactly like an idle indexer. Pinned as literals rather than read from the
+   * constants, so renaming a constant fails here instead of silently agreeing with itself. The Go
+   * half is TestOneD4Queries_GoldenInstrumentNames.
+   */
+  @Test
+  public void metrics_exportedInstrumentNames() {
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/game/names", SCHOLARS_MATE_PGN, "blitz")));
+    IndexWorker w = meteredWorker();
+    w.process(oneMonth());
+
+    assertThat(metrics.counterSnapshot())
+        .extracting(CustomMetrics.CounterSnapshot::name)
+        .containsOnly(
+            "index_runs",
+            "games_indexed",
+            "index_months",
+            "chess_com_archive_fetches",
+            "motif_occurrences");
+    assertThat(metrics.distributionSnapshot())
+        .extracting(CustomMetrics.DistributionSnapshot::name)
+        .containsOnly("index_run_duration_micros", "index_games_per_month");
   }
 }

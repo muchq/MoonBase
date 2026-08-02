@@ -175,7 +175,10 @@ func TestMetricsHandler_GetServiceCatalog(t *testing.T) {
 		{"mcpserver", false},
 		{"microgpt-serve", true},
 		{"mithril", false},
-		{"one_d4", false},
+		// The first Java service with a custom set (#1212): yodel grew counters and
+		// distributions, so one_d4 can report indexing and motif work rather than
+		// only the requests that asked for it.
+		{"one_d4", true},
 		{"portrait", true},
 		{"posterize", false},
 	}
@@ -500,4 +503,43 @@ func TestMetricsHandler_GetHostMetricsTimeSeries(t *testing.T) {
 	assert.True(t, names["container_restarts"])
 	assert.Equal(t, 5, hostSeries)
 	assert.Equal(t, 7, containerSeries)
+}
+
+// The one_d4 custom set is a cross-language contract: IndexWorker names an
+// instrument, the collector's Prometheus exporter appends _total to counters,
+// and these queries have to name the result exactly. Nothing fails loudly when
+// they disagree — the query is valid PromQL that matches no series, so the
+// dashboard renders an empty chart, which looks exactly like an idle indexer.
+// The Java half is pinned by IndexWorkerTest#metrics_exportedInstrumentNames.
+func TestOneD4Queries_GoldenInstrumentNames(t *testing.T) {
+	entry := serviceRegistry["one_d4"]
+	var all []string
+	for _, s := range entry.CustomScalars {
+		all = append(all, s.Query)
+	}
+	for _, q := range entry.CustomTimeseries {
+		all = append(all, q)
+	}
+	joined := strings.Join(all, "\n")
+
+	for _, name := range []string{
+		"games_indexed_total",
+		"index_runs_total",
+		"index_months_total",
+		"chess_com_archive_fetches_total",
+		"motif_occurrences_total",
+		"index_run_duration_micros_sum",
+		"index_run_duration_micros_count",
+		"index_games_per_month_sum",
+		"index_games_per_month_count",
+	} {
+		assert.Contains(t, joined, name, "one_d4 query set must reference %s", name)
+	}
+
+	// Outcome labels are the vocabulary IndexWorker writes; a typo here silently
+	// selects nothing rather than erroring.
+	assert.Contains(t, joined, `outcome="completed"`)
+	assert.Contains(t, joined, `outcome="failed"`)
+	assert.Contains(t, joined, `outcome="interrupted"`)
+	assert.Contains(t, joined, `result="empty"`)
 }

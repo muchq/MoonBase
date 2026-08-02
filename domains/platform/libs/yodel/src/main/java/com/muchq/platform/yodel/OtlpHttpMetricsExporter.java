@@ -22,6 +22,7 @@ public final class OtlpHttpMetricsExporter implements AutoCloseable {
   private final URI metricsUri;
   private final Map<String, String> resourceAttributes;
   private final HttpServerMetrics metrics;
+  private final CustomMetrics custom;
   private final Duration interval;
   private final HttpClient client;
   private final Thread thread;
@@ -33,10 +34,20 @@ public final class OtlpHttpMetricsExporter implements AutoCloseable {
       Map<String, String> resourceAttributes,
       HttpServerMetrics metrics,
       Duration interval) {
+    this(endpoint, resourceAttributes, metrics, new CustomMetrics(), interval);
+  }
+
+  public OtlpHttpMetricsExporter(
+      String endpoint,
+      Map<String, String> resourceAttributes,
+      HttpServerMetrics metrics,
+      CustomMetrics custom,
+      Duration interval) {
     String base = endpoint.endsWith("/") ? endpoint.substring(0, endpoint.length() - 1) : endpoint;
     this.metricsUri = URI.create(base + "/v1/metrics");
     this.resourceAttributes = Map.copyOf(resourceAttributes);
     this.metrics = metrics;
+    this.custom = custom;
     this.interval = interval;
     this.client = HttpClient.newBuilder().connectTimeout(REQUEST_TIMEOUT).build();
     this.thread = new Thread(this::runLoop, "yodel-otlp-exporter");
@@ -66,7 +77,7 @@ public final class OtlpHttpMetricsExporter implements AutoCloseable {
   void exportOnce() {
     byte[] body =
         OtlpJsonEncoder.encode(
-            resourceAttributes, metrics, System.currentTimeMillis() * 1_000_000L);
+            resourceAttributes, metrics, custom, System.currentTimeMillis() * 1_000_000L);
     HttpRequest request =
         HttpRequest.newBuilder(metricsUri)
             .timeout(REQUEST_TIMEOUT)

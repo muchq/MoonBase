@@ -95,7 +95,36 @@ var serviceRegistry = map[string]serviceEntry{
 	// The Java services (#1212): yodel's standard instruments only, no
 	// custom set yet.
 	"mcpserver": {},
-	"one_d4":    {},
+	// The first Java service with a custom set, now that yodel has counters and
+	// distributions to record into. Counts, outcomes and motif names only — the
+	// emitter never labels by player or by game, so no series here is per-user.
+	"one_d4": {
+		CustomScalars: []customScalarDef{
+			{"Indexing", "games_indexed_total", "games", `sum(games_indexed_total{service_name="one_d4"})`},
+			{"Indexing", "games_per_sec", "/s", `sum(rate(games_indexed_total{service_name="one_d4"}[5m]))`},
+			{"Indexing", "runs_completed_total", "", `sum(index_runs_total{service_name="one_d4",outcome="completed"})`},
+			{"Indexing", "runs_failed_total", "", `sum(index_runs_total{service_name="one_d4",outcome="failed"})`},
+			// A wedge cut loose by the MAX_RUN ceiling lands here (#1282). Anything
+			// above zero means a worker was stuck long enough to be given up on.
+			{"Indexing", "runs_interrupted_total", "", `sum(index_runs_total{service_name="one_d4",outcome="interrupted"})`},
+			// Windowed averages over the histograms: rate(sum)/rate(count) is the
+			// mean per run in the window, the same shape portrait uses.
+			{"Indexing", "avg_run_seconds_1h", "s", `sum(rate(index_run_duration_micros_sum{service_name="one_d4"}[1h]))/sum(rate(index_run_duration_micros_count{service_name="one_d4"}[1h]))/1000000`},
+			{"Indexing", "avg_games_per_month_1h", "games", `sum(rate(index_games_per_month_sum{service_name="one_d4"}[1h]))/sum(rate(index_games_per_month_count{service_name="one_d4"}[1h]))`},
+			{"Indexing", "empty_months_total", "", `sum(index_months_total{service_name="one_d4",result="empty"})`},
+			{"Indexing", "archive_fetches_per_sec", "/s", `sum(rate(chess_com_archive_fetches_total{service_name="one_d4"}[5m]))`},
+			{"Motifs", "occurrences_per_sec", "/s", `sum(rate(motif_occurrences_total{service_name="one_d4"}[5m]))`},
+			{"Motifs", "occurrences_total", "", `sum(motif_occurrences_total{service_name="one_d4"})`},
+			{"Motifs", "per_game_avg_1h", "motifs", `sum(rate(motif_occurrences_total{service_name="one_d4"}[1h]))/clamp_min(sum(rate(games_indexed_total{service_name="one_d4"}[1h])), 0.0001)`},
+		},
+		CustomTimeseries: map[string]string{
+			"games_indexed_rate":  `sum(rate(games_indexed_total{service_name="one_d4"}[5m]))`,
+			"run_completion_rate": `sum(rate(index_runs_total{service_name="one_d4",outcome="completed"}[5m]))`,
+			"run_failure_rate":    `sum(rate(index_runs_total{service_name="one_d4"}[5m])) - sum(rate(index_runs_total{service_name="one_d4",outcome="completed"}[5m]))`,
+			"run_duration_avg_us": `sum(rate(index_run_duration_micros_sum{service_name="one_d4"}[5m]))/sum(rate(index_run_duration_micros_count{service_name="one_d4"}[5m]))`,
+			"motif_rate":          `sum(rate(motif_occurrences_total{service_name="one_d4"}[5m]))`,
+		},
+	},
 	// Wordchains: server_pal's standard instruments only, no custom set.
 	"mithril": {},
 	// Image blur/edges: server_pal's standard instruments only.

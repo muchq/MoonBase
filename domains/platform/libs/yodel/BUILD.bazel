@@ -3,6 +3,7 @@ load("//bazel/rules:java.bzl", "artifact", "java_library", "java_test_suite")
 java_library(
     name = "yodel",
     srcs = [
+        "src/main/java/com/muchq/platform/yodel/CustomMetrics.java",
         "src/main/java/com/muchq/platform/yodel/HttpMetricsPipeline.java",
         "src/main/java/com/muchq/platform/yodel/HttpServerMetrics.java",
         "src/main/java/com/muchq/platform/yodel/OtlpHttpMetricsExporter.java",
@@ -24,10 +25,12 @@ java_library(
     name = "micronaut",
     srcs = [
         "src/main/java/com/muchq/platform/yodel/micronaut/HttpServerMetricsFilter.java",
+        "src/main/java/com/muchq/platform/yodel/micronaut/YodelMetricsFactory.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":yodel",
+        artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-core"),
         artifact("io.micronaut:micronaut-http"),
         artifact("io.micronaut:micronaut-inject"),
@@ -42,6 +45,8 @@ java_test_suite(
     name = "yodel_tests",
     size = "small",
     srcs = [
+        "src/test/java/com/muchq/platform/yodel/CustomMetricsEncodingTest.java",
+        "src/test/java/com/muchq/platform/yodel/CustomMetricsTest.java",
         "src/test/java/com/muchq/platform/yodel/HttpMetricsPipelineTest.java",
         "src/test/java/com/muchq/platform/yodel/HttpServerMetricsTest.java",
         "src/test/java/com/muchq/platform/yodel/OtlpHttpMetricsExporterTest.java",
