@@ -324,6 +324,24 @@ TEST(ConnectionEventLogTest, LogsKindPeerDetailAndElapsed) {
   log.StopCapturingLogs();
 }
 
+// Failed WebSocket upgrades (smithy ConnectionEvent::kUpgradeFailure) must
+// name themselves — not fall through to unknown(N) after a pin bump.
+TEST(ConnectionEventLogTest, LogsUpgradeFailureKind) {
+  smithy::http::BeastServerTransport::ConnectionEvent event;
+  event.kind = smithy::http::BeastServerTransport::ConnectionEvent::Kind::kUpgradeFailure;
+  event.peer_address = "203.0.113.10:80";
+  event.detail = "handshake failed";
+  event.elapsed = std::chrono::milliseconds(12);
+
+  absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+  EXPECT_CALL(log, Log(absl::LogSeverity::kWarning, testing::_,
+                       "connection_event kind=upgrade_failure peer=203.0.113.10:80 "
+                       "detail=handshake failed elapsed_ms=12"));
+  log.StartCapturingLogs();
+  aura::ConnectionEventLog()(event);
+  log.StopCapturingLogs();
+}
+
 // A 431 can fire before Beast parses the method or target; the adapter maps
 // those to a stable label instead of empty strings dashboards would drop.
 TEST(RejectionMetricsTest, UnparsedRejectionLandsOnStableLabels) {

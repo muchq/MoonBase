@@ -45,6 +45,8 @@ std::string KindName(smithy::http::BeastServerTransport::ConnectionEvent::Kind k
       return "read_timeout";
     case Kind::kDropped:
       return "dropped";
+    case Kind::kUpgradeFailure:
+      return "upgrade_failure";
   }
   // Reached only when a pin bump adds a Kind this mapping doesn't know yet
   // (-Wswitch flags the missing case, but it isn't an error here): surface

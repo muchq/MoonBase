@@ -254,11 +254,9 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
   }
 
   // Pulls already-queued frames off a seat so the registry's async
-  // delivery chain can finish. Leaving those frames unread parks
-  // TearDown in SharedViewOwner::End — a smithy-cpp close-ordering
-  // deadlock (receive completion runs ~AsyncEventStream→End→Close while
-  // a harvested send waiter still holds the pin). Quiesce is the
-  // fixture workaround; the real fix is send-before-receive in smithy.
+  // delivery chain can finish. smithy-cpp#173 (send-before-receive on
+  // terminal transitions) fixed the End()/Close deadlock; draining here
+  // still keeps TearDown deterministic when wake frames are unread.
   static void DrainPending(moonbase::golf::PlayClientStream& stream) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
     while (std::chrono::steady_clock::now() < deadline) {

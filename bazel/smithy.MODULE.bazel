@@ -1,13 +1,21 @@
 bazel_dep(name = "smithy_cpp", version = "0.0.0")
 
 # smithy_cpp is not published to the Bazel Central Registry yet, so the module
-# version above is a placeholder and the source comes from the pinned release
-# tarball below. The integrity hash pins the contents, so a re-pointed tag
-# fails loudly rather than silently changing the build.
+# version above is a placeholder and the source comes from the pinned archive
+# below. The integrity hash pins the contents, so a re-pointed URL fails
+# loudly rather than silently changing the build.
 # Evaluation: https://github.com/muchq/MoonBase/issues/1168
+#
+# Pinned past muchq/smithy-cpp#173 (4208f791): terminal transitions fire the
+# parked send before the parked receive so End()/Close cannot deadlock when a
+# harvested send waiter still holds the stream pin. Golf hub e2e Quiesce is
+# defense-in-depth for unread wake frames; the End() hang that motivated it
+# is fixed upstream here.
 archive_override(
     module_name = "smithy_cpp",
-    integrity = "sha256-m08PFnKnnuGomq1yX6R0unbjAGhIX6gZx4FEo2Dcqec=",
-    strip_prefix = "smithy-cpp-0.1.0",
-    urls = ["https://github.com/muchq/smithy-cpp/archive/refs/tags/v0.1.0.tar.gz"],
+    integrity = "sha256-xHxCkCYRt/JIachM/q2SmPF2JvZbk5Jo4oCNZCyJ6+A=",
+    strip_prefix = "smithy-cpp-4208f791464c55520da6db0e4c491da9402c7508",
+    urls = [
+        "https://github.com/muchq/smithy-cpp/archive/4208f791464c55520da6db0e4c491da9402c7508.tar.gz",
+    ],
 )

@@ -318,12 +318,11 @@ cc_library(
 cc_test(
     name = "pg_hub_e2e_test",
     # Small on purpose (#1241, #1276): normal runtime is ~2s; the tight
-    # ceiling turns a recurrence into a loud red. Two independent hang
-    # shapes share the signature — a lost LISTEN/NOTIFY wakeup (fixed in
-    # pg::Listener) and a TearDown End() deadlock when unread wake
-    # frames pin the async delivery chain (worked around here by
-    # QuiesceCrossTable; root cause is send-before-receive ordering in
-    # smithy-cpp). Do not raise the ceiling.
+    # ceiling turns a recurrence into a loud red. Two hang shapes share
+    # the signature — a lost LISTEN/NOTIFY wakeup (fixed in pg::Listener)
+    # and a TearDown End() deadlock on unread wake frames (smithy-cpp#173
+    # send-before-receive; QuiesceCrossTable still drains for deterministic
+    # teardown). Do not raise the ceiling.
     size = "small",
     srcs = [
         "pg_hub_e2e_test.cc",
