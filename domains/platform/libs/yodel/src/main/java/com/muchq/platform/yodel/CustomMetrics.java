@@ -16,9 +16,10 @@ import java.util.regex.Pattern;
  *
  * <p>Until this existed a Java service could say how many requests it served and nothing about what
  * it did with them, which is why every Java entry in prom_proxy's registry was empty
- * (https://github.com/muchq/MoonBase/issues/1212). The C++ and Rust rails already had the
- * equivalent — futility/otel's counters and server_pal's {@code RecordDistribution} — so this is
- * Java catching up to them rather than a new idea.
+ * (https://github.com/muchq/MoonBase/issues/1212). The C++ rail already had the equivalent —
+ * futility/otel's {@code RecordCounter} and {@code RecordDistribution} — so this is Java catching
+ * up to it rather than a new idea. The Rust rail has not caught up: server_pal exposes only the
+ * HTTP family, which is why mithril and posterize are still empty entries in that same registry.
  *
  * <p>Two instrument kinds, matching what the dashboard can already render:
  *
@@ -28,7 +29,8 @@ import java.util.regex.Pattern;
  *       games_indexed_total}.
  *   <li><b>Distributions</b> — histograms over the same bucket bounds the HTTP duration histogram
  *       uses, exported as {@code _sum}/{@code _count}/{@code _bucket}. A windowed mean is then
- *       {@code rate(x_sum[5m])/rate(x_count[5m])}, which is how portrait reports scene complexity.
+ *       {@code rate(x_sum[5m])/rate(x_count[5m])}, which is how portrait — a C++ service, on
+ *       futility/otel — reports scene complexity.
  * </ul>
  *
  * <p>Labels are for bounded, low-cardinality dimensions — an outcome, a stage, a motif name. Never

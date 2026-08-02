@@ -615,4 +615,20 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 		assert.NotRegexp(t, `outcome\s*!=|outcome\s*!~`, query,
 			"timeseries %s selects outcomes by exclusion", key)
 	}
+
+	// Exclusion is not the only way back to a wrong failure line, and the check above only
+	// forbids the one spelling. Reverting to outcome=~"failed|interrupted|lease_lost", or to a
+	// bare sum over index_runs_total with no outcome at all, uses no negation and passes it. So
+	// the set is pinned positively, the way the duration guard pins outcome="completed".
+	failureRate, ok := entry.CustomTimeseries["run_failure_rate"]
+	require.True(t, ok, "one_d4 lost its run_failure_rate timeseries")
+	outcomeMatch := regexp.MustCompile(`outcome=~?"([^"]*)"`).FindStringSubmatch(failureRate)
+	require.NotNil(t, outcomeMatch,
+		"run_failure_rate names no outcome at all, so every run counts as a failure: %s",
+		failureRate)
+	assert.ElementsMatch(t, []string{"failed", "interrupted"},
+		strings.Split(outcomeMatch[1], "|"),
+		"run_failure_rate must name exactly failed|interrupted — lease_lost is ordinary and puts a"+
+			" permanent floor under the line, and anything wider counts healthy runs as"+
+			" failures: %s", failureRate)
 }
