@@ -179,16 +179,33 @@ export default function GameDetailPanel({ game, onClose }: Props) {
           <span className="text-muted" style={{ marginLeft: '0.75rem', fontSize: '0.875rem' }}>
             {game.result} · {game.timeClass} · {game.eco}
           </span>
+          {game.indexedAt && (
+            <span className="text-muted" style={{ marginLeft: '0.75rem', fontSize: '0.875rem' }}>
+              indexed {formatDate(game.indexedAt)}
+            </span>
+          )}
         </div>
-        <button
-          type="button"
-          className="btn"
-          onClick={onClose}
-          aria-label="Close panel"
-          style={{ padding: '0 0.5rem' }}
-        >
-          ×
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexShrink: 0 }}>
+          {game.gameUrl && (
+            <a
+              href={game.gameUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn"
+            >
+              View game ↗
+            </a>
+          )}
+          <button
+            type="button"
+            className="btn"
+            onClick={onClose}
+            aria-label="Close panel"
+            style={{ padding: '0 0.5rem' }}
+          >
+            ×
+          </button>
+        </div>
       </div>
 
       {!game.pgn && (

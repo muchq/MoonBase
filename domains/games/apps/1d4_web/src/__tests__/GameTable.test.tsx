@@ -53,13 +53,6 @@ describe('GameTable', () => {
     expect(screen.getByText('Carol')).toBeInTheDocument();
   });
 
-  it('renders external links for game URLs', () => {
-    render(<GameTable games={mockGames} sortBy="" sortDir="asc" onSort={() => {}} />);
-    const links = screen.getAllByRole('link', { name: 'View' });
-    expect(links).toHaveLength(2);
-    expect(links[0]).toHaveAttribute('href', 'https://chess.com/game/1');
-  });
-
   it('calls onSort when a sortable column header is clicked', () => {
     const onSort = vi.fn();
     render(<GameTable games={mockGames} sortBy="" sortDir="asc" onSort={onSort} />);
@@ -70,7 +63,7 @@ describe('GameTable', () => {
   it('does not call onSort for non-sortable columns', () => {
     const onSort = vi.fn();
     render(<GameTable games={mockGames} sortBy="" sortDir="asc" onSort={onSort} />);
-    fireEvent.click(screen.getByText('Game'));
+    fireEvent.click(screen.getByText('Motifs'));
     expect(onSort).not.toHaveBeenCalled();
   });
 
@@ -98,9 +91,8 @@ describe('GameTable', () => {
 
   it('formats unix timestamps as YYYY-MM-DD dates', () => {
     render(<GameTable games={mockGames} sortBy="" sortDir="asc" onSort={() => {}} />);
-    // 1700000000 seconds = 2023-11-14 (both playedAt and indexedAt land on same day)
-    const dateCells = screen.getAllByText('2023-11-14');
-    expect(dateCells.length).toBeGreaterThanOrEqual(1);
+    // 1700000000 seconds = 2023-11-14 (mockGames[0].playedAt)
+    expect(screen.getByText('2023-11-14')).toBeInTheDocument();
   });
 
   it('shows game detail accordion inline when selectedGame matches a row', () => {

@@ -45,6 +45,25 @@ describe('GameDetailPanel', () => {
     expect(screen.getByText(/1-0/)).toBeInTheDocument();
   });
 
+  it('shows a link to view the game on its source site', () => {
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    const link = screen.getByRole('link', { name: /View game/ });
+    expect(link).toHaveAttribute('href', 'https://chess.com/game/1');
+    expect(link).toHaveAttribute('target', '_blank');
+  });
+
+  it('omits the view-game link when gameUrl is absent', () => {
+    const game = { ...mockGame, gameUrl: '' };
+    render(<GameDetailPanel game={game} onClose={() => {}} />);
+    expect(screen.queryByRole('link', { name: /View game/ })).not.toBeInTheDocument();
+  });
+
+  it('shows the indexed-at date', () => {
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+    // 1700001000 seconds = 2023-11-14
+    expect(screen.getByText(/indexed 2023-11-14/)).toBeInTheDocument();
+  });
+
   it('calls onClose when close button is clicked', () => {
     const onClose = vi.fn();
     render(<GameDetailPanel game={mockGame} onClose={onClose} />);

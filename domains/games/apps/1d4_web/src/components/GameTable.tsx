@@ -4,8 +4,11 @@ import MotifBadge from './MotifBadge';
 import GameDetailPanel from './GameDetailPanel';
 
 
+// The game link and indexed-at timestamp live in GameDetailPanel instead of
+// here — eleven columns left the motifs column, the one that actually needs
+// room, squeezed to nothing on a laptop-width screen. Click the row to get
+// both back.
 const COLUMNS = [
-  { id: 'gameUrl', label: 'Game', sort: false },
   { id: 'whiteUsername', label: 'White', sort: true },
   { id: 'blackUsername', label: 'Black', sort: true },
   { id: 'whiteElo', label: 'White ELO', sort: true },
@@ -14,7 +17,6 @@ const COLUMNS = [
   { id: 'eco', label: 'ECO', sort: true },
   { id: 'result', label: 'Result', sort: true },
   { id: 'playedAt', label: 'Played', sort: true },
-  { id: 'indexedAt', label: 'Indexed', sort: true },
   { id: 'motifs', label: 'Motifs', sort: false },
 ];
 
@@ -28,27 +30,9 @@ function formatDate(val: string | number | null | undefined): string {
   return isNaN(date.getTime()) ? '—' : date.toISOString().slice(0, 10);
 }
 
-function renderCell(
-  colId: string,
-  game: GameRow,
-  onRowClick?: (g: GameRow) => void
-): React.ReactNode {
+function renderCell(colId: string, game: GameRow): React.ReactNode {
   const g = game as unknown as Record<string, unknown>;
   switch (colId) {
-    case 'gameUrl':
-      return game.gameUrl ? (
-        <a
-          href={game.gameUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="external"
-          onClick={(e) => e.stopPropagation()}
-        >
-          View
-        </a>
-      ) : (
-        '—'
-      );
     case 'motifs':
       return (
         <span className="motifs">
@@ -65,7 +49,6 @@ function renderCell(
     case 'blackElo':
       return formatElo(g[colId] as number | null);
     case 'playedAt':
-    case 'indexedAt':
       return formatDate(g[colId] as string | number | null);
     default:
       return String(g[colId] ?? '—');
@@ -120,7 +103,7 @@ export default function GameTable({
                 className={selectedGame?.gameUrl === game.gameUrl ? 'selected' : undefined}
               >
                 {COLUMNS.map((col) => (
-                  <td key={col.id}>{renderCell(col.id, game, onRowClick)}</td>
+                  <td key={col.id}>{renderCell(col.id, game)}</td>
                 ))}
               </tr>
               {selectedGame?.gameUrl === game.gameUrl && (
