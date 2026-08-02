@@ -835,13 +835,22 @@ func TestStandardQueries_RequestsIsWindowedNotCumulative(t *testing.T) {
 // whose whole purpose is to be non-zero after something went wrong disarms
 // itself between the failure and someone looking at it.
 func TestRegistry_AlarmCountersCountOverALongWindow(t *testing.T) {
-	// First, that there is still a distinction to assert. Every check below
-	// compares against alarmWindow, so collapsing that constant onto the
-	// default would leave them all passing while the alarms quietly decayed on
-	// a five-minute clock — the exact regression, invisible to the test
-	// meant to catch it.
-	require.NotEqual(t, defaultCounterWindow, alarmWindow,
-		"the alarm window has collapsed onto the default one")
+	// First, that the window is actually long. Every check below compares
+	// against the alarmWindow constant, so the constant itself is the thing
+	// that has to be pinned — otherwise shrinking it leaves every assertion
+	// comparing against the shrunken value and still passing, which is the
+	// regression these tiles exist to prevent, invisible to the test meant to
+	// catch it.
+	//
+	// A floor rather than "not the default": alarmWindow = "6m" differs from
+	// the default and still fails the purpose, since a failure from an hour
+	// ago has already decayed out of it. An hour is the loosest bound that
+	// still means "someone who looks after the fact sees it".
+	window, err := time.ParseDuration(alarmWindow)
+	require.NoError(t, err, "alarmWindow is not a duration Go can parse: %q", alarmWindow)
+	require.GreaterOrEqual(t, window, time.Hour,
+		"alarmWindow is %s — long enough to differ from the default, too short to still be "+
+			"non-zero when someone reads the dashboard after the failure", alarmWindow)
 
 	alarms := map[string][]string{
 		"one_d4":   {"runs_failed", "runs_interrupted", "runs_lease_lost"},
@@ -908,4 +917,58 @@ func TestRegistry_BothViewsShareOneSelector(t *testing.T) {
 			assert.Contains(t, rate, def.Counter)
 		}
 	}
+}
+
+// The two new JSON keys, asserted on the raw payload rather than through the
+// struct.
+//
+// Every other handler test unmarshals into ServiceMetricsResponse, which means
+// it reads the keys back through the same tags it wrote them with — renaming
+// `json:"view"` to `json:"metric_view"` would keep all of them green while the
+// UI, which lives in another repo and reads by name, silently loses the field.
+// The same reasoning already covers requests_total's *value*; these are the
+// keys it applies to.
+func TestMetricsHandler_GetServiceMetrics_JsonKeysAreStable(t *testing.T) {
+	entry := serviceRegistry["golf_hub"]
+	responses := map[string]*QueryResponse{}
+	for i, def := range entry.CustomScalars {
+		responses[def.QueryFor(DefaultView)] = scalarResponse(fmt.Sprintf("%d", 400+i))
+	}
+
+	handler := &MetricsHandler{promClient: &mockPrometheusClient{queryResponses: responses}}
+	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub", nil)
+	req.SetPathValue("name", "golf_hub")
+	w := httptest.NewRecorder()
+
+	handler.GetServiceMetrics(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var raw map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+	assert.Equal(t, "count", raw["view"], `the response must carry a top-level "view" key`)
+
+	groups, ok := raw["custom"].([]interface{})
+	require.True(t, ok, "custom is not an array")
+	require.NotEmpty(t, groups)
+
+	tiles := map[string]map[string]interface{}{}
+	for _, group := range groups {
+		for _, tile := range group.(map[string]interface{})["metrics"].([]interface{}) {
+			metric := tile.(map[string]interface{})
+			tiles[metric["label"].(string)] = metric
+		}
+	}
+
+	counter, ok := tiles["commands"]
+	require.True(t, ok, "golf_hub lost its commands tile")
+	assert.Equal(t, true, counter["toggleable"],
+		`a counter tile must carry "toggleable": true for the UI to offer the switch`)
+
+	// And the negative half: omitempty means a fixed-form tile has no key at
+	// all, which is what tells the UI not to draw a toggle it cannot honour.
+	gauge, ok := tiles["active"]
+	require.True(t, ok, "golf_hub lost its active tile")
+	_, present := gauge["toggleable"]
+	assert.False(t, present,
+		"a fixed-form tile must omit the key entirely, not send false: %v", gauge)
 }

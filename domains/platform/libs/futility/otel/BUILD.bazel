@@ -56,6 +56,18 @@ cc_library(
 )
 
 cc_test(
+    name = "otel_provider_test",
+    size = "small",
+    srcs = ["otel_provider_test.cc"],
+    deps = [
+        ":otel_provider",
+        "@googletest//:gtest_main",
+        "@opentelemetry-cpp//exporters/memory:in_memory_metric_data",
+        "@opentelemetry-cpp//exporters/memory:in_memory_metric_exporter_factory",
+    ],
+)
+
+cc_test(
     name = "http_metrics_test",
     size = "small",
     srcs = ["http_metrics_test.cc"],

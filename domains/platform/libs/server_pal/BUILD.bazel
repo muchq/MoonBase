@@ -1,5 +1,5 @@
 load("@crates//:defs.bzl", "all_crate_deps")
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 # Read as text by //domains/platform/libs/otel_contract, which pins this rail's
 # latency bucket bounds equal to yodel's and futility/otel's.
@@ -14,4 +14,19 @@ rust_library(
     visibility = ["//visibility:public"],
     deps = [
     ] + all_crate_deps(),
+)
+
+# Unit tests compiled into the crate. Covers the view predicate behind #1286 —
+# the bucket constant is pinned by //domains/platform/libs/otel_contract, but a
+# constant nothing selects on is the bug that issue is about.
+#
+# This target is new. lib.rs already carried a #[cfg(test)] module, and without
+# a rust_test nothing ever compiled it, let alone ran it — `cargo test` would
+# have, but CI builds through Bazel. Adding the target is what surfaced that its
+# tower dev-dependency was missing from the graph.
+rust_test(
+    name = "server_pal_test",
+    size = "small",
+    crate = ":server_pal",
+    deps = all_crate_deps(normal_dev = True),
 )

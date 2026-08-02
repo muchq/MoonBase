@@ -21,8 +21,6 @@
 
 namespace futility::otel {
 
-namespace {
-
 // The only way to give a histogram explicit bounds in opentelemetry-cpp: the
 // API's CreateUInt64Histogram takes a name and nothing else, so a view on the
 // provider is what turns kHttpLatencyBucketBoundsMicros into the layout the
@@ -65,8 +63,6 @@ void RegisterLatencyBucketView(opentelemetry::sdk::metrics::MeterProvider& meter
   meter_provider.AddView(std::move(instrument_selector), std::move(meter_selector),
                          std::move(view));
 }
-
-}  // namespace
 
 OtelProvider::OtelProvider(const OtelConfig& config) : metrics_enabled_(config.enable_metrics) {
   if (!config.enable_metrics) {

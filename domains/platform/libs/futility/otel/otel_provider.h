@@ -32,6 +32,7 @@
 #include <string>
 
 #include "opentelemetry/metrics/provider.h"
+#include "opentelemetry/sdk/metrics/meter_provider.h"
 
 namespace futility::otel {
 
@@ -57,6 +58,20 @@ namespace futility::otel {
 inline constexpr std::array<double, 15> kHttpLatencyBucketBoundsMicros = {
     100,   250,    500,    1000,   2500,    5000,    10000,   25000,
     50000, 100000, 250000, 500000, 1000000, 2500000, 10000000};
+
+/// @brief Registers the explicit-bucket view for latency histograms.
+///
+/// Called by OtelProvider's constructor; exposed so a test can drive it
+/// against an in-memory reader. Without a view, opentelemetry-cpp gives every
+/// histogram the SDK's millisecond-shaped defaults, which is #1286 — and the
+/// bucket constant alone cannot pin that, since a constant nothing applies is
+/// exactly the bug.
+///
+/// Matches any histogram whose name ends in `_microseconds`, which is the
+/// suffix MetricsRecorder::RecordLatency appends and nothing else produces.
+/// RecordDistribution keeps its bare name and is deliberately left on the
+/// defaults.
+void RegisterLatencyBucketView(opentelemetry::sdk::metrics::MeterProvider& meter_provider);
 
 /// @brief Configuration for the OpenTelemetry provider.
 struct OtelConfig {
