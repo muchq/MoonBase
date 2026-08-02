@@ -257,12 +257,42 @@ func TestMountPointExcludesAreWrittenFromTheHostsPerspective(t *testing.T) {
 		case strings.HasPrefix(line, "exclude_fs_types:"), strings.HasPrefix(line, "network:"):
 			inExcludeBlock = false
 		case inExcludeBlock && strings.HasPrefix(line, "- "):
-			pattern := strings.TrimPrefix(line, "- ")
+			// The patterns are anchored (see the test below), so compare the path part.
+			pattern := strings.TrimPrefix(strings.TrimPrefix(line, "- "), "^")
 			if strings.HasPrefix(pattern, hostfsMountPath+"/") {
 				t.Errorf("mount-point exclude %q is prefixed with %s; filtering happens before"+
 					" root_path is applied, so this can never match", pattern, hostfsMountPath)
 			}
 		}
+	}
+}
+
+// filterset's regexp matcher is Go's MatchString, which looks for the pattern
+// anywhere in the string rather than at the front. These excludes are all meant
+// as path prefixes, and unanchored they overreach: `/dev/.*` drops `/mnt/dev/data`
+// too. The panel still renders, just missing a volume nobody thought to exclude —
+// the same shape of quiet wrongness as the /hostfs prefix above.
+func TestMountPointExcludesAreAnchored(t *testing.T) {
+	inExcludeBlock := false
+	seen := 0
+	for _, line := range activeLines(t, "o11y/otel-collector.yml") {
+		switch {
+		case strings.HasPrefix(line, "exclude_mount_points:"):
+			inExcludeBlock = true
+		case strings.HasPrefix(line, "exclude_fs_types:"), strings.HasPrefix(line, "network:"):
+			inExcludeBlock = false
+		case inExcludeBlock && strings.HasPrefix(line, "- "):
+			seen++
+			pattern := strings.TrimPrefix(line, "- ")
+			if !strings.HasPrefix(pattern, "^") {
+				t.Errorf("mount-point exclude %q is unanchored; filterset matches it anywhere in"+
+					" the path, so it also excludes mounts that merely contain it", pattern)
+			}
+		}
+	}
+	// Without this the test passes just as well against a deleted exclude block.
+	if seen == 0 {
+		t.Fatal("found no mount-point excludes to check; this test is not reading the config")
 	}
 }
 

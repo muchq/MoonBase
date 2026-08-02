@@ -1,9 +1,11 @@
 #include "domains/graphics/apis/portrait/tracer_service.h"
 
 #include <exception>
+#include <map>
 #include <memory>
 #include <new>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "absl/log/log.h"
@@ -53,6 +55,7 @@ absl::StatusOr<TraceResponse> TracerService::trace(TraceRequest& trace_request) 
 
     auto cached_png = lookupCache(trace_request);
     if (cached_png.has_value()) {
+      recordSceneComplexity(trace_request.scene, /*cache_hit=*/true);
       auto duration = std::chrono::steady_clock::now() - start_time;
       metrics_->RecordLatency("trace_request_duration",
                               std::chrono::duration_cast<std::chrono::microseconds>(duration),
@@ -62,11 +65,7 @@ absl::StatusOr<TraceResponse> TracerService::trace(TraceRequest& trace_request) 
 
     auto [scene, perspective, output] = trace_request;
 
-    // Record scene complexity metrics
-    // Distributions, not gauges: RecordGauge is an up-down delta;
-    // absolute per-request counts belong in a histogram.
-    metrics_->RecordDistribution("scene_sphere_count", static_cast<double>(scene.spheres.size()));
-    metrics_->RecordDistribution("scene_light_count", static_cast<double>(scene.lights.size()));
+    recordSceneComplexity(scene, /*cache_hit=*/false);
 
     auto image = do_trace(scene, perspective, output);
     auto png_bytes = pngpp::imageToPng(image);
@@ -116,6 +115,23 @@ absl::StatusOr<TraceResponse> TracerService::trace(TraceRequest& trace_request) 
     metrics_->RecordCounter("trace_requests_failed", 1, {{"error", "rendering_failed"}});
     return absl::InternalError("render failed");
   }
+}
+
+void TracerService::recordSceneComplexity(const Scene& scene, bool cache_hit) {
+  // Distributions, not gauges: RecordGauge is an up-down delta; absolute
+  // per-request counts belong in a histogram.
+  //
+  // The label matches the one RecordLatency already puts on
+  // trace_request_duration, so the two read the same way and a query can join
+  // them. Unlabelled, these series were a mean over renders that the dashboard
+  // presented as a mean over requests; with it, prom_proxy asks for offered
+  // load by summing across the label and for render cost by selecting
+  // cache_hit="false" (#1287).
+  const std::map<std::string, std::string> labels{{"cache_hit", cache_hit ? "true" : "false"}};
+  metrics_->RecordDistribution("scene_sphere_count", static_cast<double>(scene.spheres.size()),
+                               labels);
+  metrics_->RecordDistribution("scene_light_count", static_cast<double>(scene.lights.size()),
+                               labels);
 }
 
 Image<RGB_Double> TracerService::do_trace(Scene& scene, Perspective& perspective,

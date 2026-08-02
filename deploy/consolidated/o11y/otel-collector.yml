@@ -39,15 +39,21 @@ receivers:
         # Paths are the host's, unprefixed: root_path is applied when the scraper
         # reads usage, not when it filters, so a /hostfs-prefixed pattern matches
         # nothing.
+        #
+        # Anchored with ^. filterset's regexp matcher is Go's MatchString, which
+        # looks for the pattern anywhere in the string, so an unanchored /dev/.*
+        # also excludes /mnt/dev/data — a real volume, dropped off the usage
+        # panel because its path happens to contain one of these. These are meant
+        # as prefixes, so they say so.
         exclude_mount_points:
           mount_points:
-            - /var/lib/docker/.*
-            - /var/lib/kubelet/.*
-            - /snap/.*
-            - /run/.*
-            - /dev/.*
-            - /sys/.*
-            - /proc/.*
+            - ^/var/lib/docker/.*
+            - ^/var/lib/kubelet/.*
+            - ^/snap/.*
+            - ^/run/.*
+            - ^/dev/.*
+            - ^/sys/.*
+            - ^/proc/.*
           match_type: regexp
         exclude_fs_types:
           fs_types:

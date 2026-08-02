@@ -169,6 +169,12 @@ type CustomMetricValue struct {
 	Label string  `json:"label"`
 	Value float64 `json:"value"`
 	Unit  string  `json:"unit"`
+	// True when this tile is counter-derived and so has both a count and a
+	// rate form (#1287). The UI needs it to know which tiles get a toggle:
+	// inferring it from the label or the unit would put one on the windowed
+	// means, whose rate form does not exist — they are already ratios of
+	// rates. Omitted when false so the fixed-form tiles stay as they were.
+	Toggleable bool `json:"toggleable,omitempty"`
 }
 
 type CustomMetricGroup struct {
@@ -177,10 +183,15 @@ type CustomMetricGroup struct {
 }
 
 type ServiceMetricsResponse struct {
-	Timestamp time.Time           `json:"timestamp"`
-	Service   string              `json:"service"`
-	Standard  StandardMetrics     `json:"standard"`
-	Custom    []CustomMetricGroup `json:"custom"`
+	Timestamp time.Time       `json:"timestamp"`
+	Service   string          `json:"service"`
+	Standard  StandardMetrics `json:"standard"`
+	// Which form the toggleable tiles below are in. Echoed rather than left
+	// implicit so a client that sent no ?view= still knows what it is looking
+	// at, and so the default can move without a silent reinterpretation of
+	// every counter tile on the page.
+	View   string              `json:"view"`
+	Custom []CustomMetricGroup `json:"custom"`
 }
 
 // ContainerDetail wraps a single container so the point-in-time endpoints all

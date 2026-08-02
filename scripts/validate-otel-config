@@ -52,6 +52,20 @@ fi
 
 echo "otel-collector config dry-run against $IMAGE"
 
+# Pull before anything is timed. `timeout` wraps `docker run`, which pulls on a
+# cold cache — so on a runner without the image a pull slower than WINDOW gets
+# killed at 124, the exact code that means "healthy" here, and the first half
+# passes without the collector ever having parsed the config. The mutant run
+# then finds warm layers, starts, dies on glob, and the negative control passes
+# too. Both halves green having proved nothing, which is the self-validating
+# property failing in the one place it is load-bearing. Today's runner had the
+# image cached; a cold one would not.
+if ! docker pull "$IMAGE" > "$WORK/pull.log" 2>&1; then
+  echo "could not pull $IMAGE — this dry-run cannot prove anything without it" >&2
+  cat "$WORK/pull.log" >&2
+  exit 1
+fi
+
 # Echoes "up" if the collector was still running when the window closed, or
 # "down:<code>" if it exited on its own. A collector that builds its pipelines
 # runs until something stops it, so being killed by the timeout (124) is the

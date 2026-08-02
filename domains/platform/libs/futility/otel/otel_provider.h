@@ -26,13 +26,52 @@
 /// Environment Variables:
 /// - OTEL_EXPORTER_OTLP_ENDPOINT: Overrides config.otlp_endpoint if set.
 
+#include <array>
 #include <chrono>
 #include <memory>
 #include <string>
 
 #include "opentelemetry/metrics/provider.h"
+#include "opentelemetry/sdk/metrics/meter_provider.h"
 
 namespace futility::otel {
+
+/// @brief Explicit bucket boundaries, in microseconds, for latency histograms.
+///
+/// Runs from 100µs to 10s. Registered as an SDK view by OtelProvider, because
+/// opentelemetry-cpp offers no way to pass bounds to CreateUInt64Histogram —
+/// without a view every histogram gets the SDK defaults.
+///
+/// Those defaults (0, 5, 10, ... 10000) are shaped for milliseconds. Every
+/// MetricsRecorder::RecordLatency observation is microseconds, so the top
+/// finite bucket meant 10ms: anything slower landed in +Inf, and
+/// histogram_quantile answers the highest finite bound when the rank lands
+/// there, so p95 read a flat 10000 no matter how slow the service got (#1286).
+/// Confirmed in production on portrait, which was serving at a real p95 near
+/// one second while its tile held steady at 10ms (#1287).
+///
+/// yodel (Java, HttpServerMetrics.BUCKET_BOUNDS) and server_pal (Rust,
+/// HTTP_LATENCY_BUCKET_BOUNDS_MICROS) declare this same set. prom_proxy runs
+/// one histogram_quantile expression across all three languages, which only
+/// compares like with like if the layouts match — so the three move together
+/// or not at all. //domains/platform/libs/otel_contract pins them equal.
+inline constexpr std::array<double, 15> kHttpLatencyBucketBoundsMicros = {
+    100,   250,    500,    1000,   2500,    5000,    10000,   25000,
+    50000, 100000, 250000, 500000, 1000000, 2500000, 10000000};
+
+/// @brief Registers the explicit-bucket view for latency histograms.
+///
+/// Called by OtelProvider's constructor; exposed so a test can drive it
+/// against an in-memory reader. Without a view, opentelemetry-cpp gives every
+/// histogram the SDK's millisecond-shaped defaults, which is #1286 — and the
+/// bucket constant alone cannot pin that, since a constant nothing applies is
+/// exactly the bug.
+///
+/// Matches any histogram whose name ends in `_microseconds`, which is the
+/// suffix MetricsRecorder::RecordLatency appends and nothing else produces.
+/// RecordDistribution keeps its bare name and is deliberately left on the
+/// defaults.
+void RegisterLatencyBucketView(opentelemetry::sdk::metrics::MeterProvider& meter_provider);
 
 /// @brief Configuration for the OpenTelemetry provider.
 struct OtelConfig {

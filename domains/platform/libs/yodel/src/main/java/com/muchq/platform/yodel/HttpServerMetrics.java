@@ -16,17 +16,26 @@ import java.util.concurrent.atomic.LongAdder;
  * (https://github.com/muchq/MoonBase/issues/1212).
  */
 public final class HttpServerMetrics {
-  // The OTel SDK default explicit bucket boundaries. The C++ and Rust emitters
-  // record microseconds against these same defaults, and the dashboard's
-  // histogram_quantile and avg queries are built on them.
+  // Microsecond-shaped bucket boundaries for the HTTP duration histogram,
+  // running from 100µs out to 10s (#1286).
   //
-  // Known wrong, and left wrong deliberately: the defaults are shaped for
-  // milliseconds, so read as microseconds they top out at 10ms and every p95
-  // tile is capped there (#1286). Matching the other two emitters is what keeps
-  // the shared query comparable across languages, so this moves when they do,
-  // not before. Do not "fix" this array on its own.
+  // These replace the OTel SDK defaults, which are shaped for milliseconds:
+  // read as microseconds they topped out at 10ms, so every request slower than
+  // that landed in +Inf and histogram_quantile answered a flat 10000 forever —
+  // observed in production on portrait at a real p95 of ~1s (#1287).
+  //
+  // The C++ (futility/otel) and Rust (server_pal) emitters configure SDK views
+  // with this same set, because prom_proxy's histogram_quantile query is shared
+  // across all three languages and only compares like with like if the layouts
+  // match. //domains/platform/libs/otel_contract pins them equal; if you change
+  // this array, change the other two in the same commit or that test fails.
+  //
+  // Not retroactive: Prometheus keeps the old `le` series, so quantiles over a
+  // window spanning the rollout read from both layouts and are wrong until the
+  // old series age out.
   static final double[] BUCKET_BOUNDS = {
-    0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000
+    100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000, 2500000,
+    10000000
   };
 
   private final String serviceName;

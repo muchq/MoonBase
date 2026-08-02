@@ -1,0 +1,22 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_test")
+
+# Cross-language pins for the metric contract prom_proxy reads. No library and
+# no importable code: the sources under test are Java, C++ and Rust, and the
+# properties pinned here are the ones that only exist between them.
+go_test(
+    name = "otel_contract_test",
+    size = "small",
+    srcs = ["http_latency_buckets_test.go"],
+    # Read as text rather than linked. There is no build configuration in which
+    # a Go test could link all three, and the declaration site is what has to
+    # agree — the constant, not a value some running process reports.
+    data = [
+        "//domains/platform/libs/futility/otel:otel_provider.h",
+        "//domains/platform/libs/server_pal:src/lib.rs",
+        "//domains/platform/libs/yodel:src/main/java/com/muchq/platform/yodel/HttpServerMetrics.java",
+    ],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

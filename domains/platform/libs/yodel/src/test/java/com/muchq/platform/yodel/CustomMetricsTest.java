@@ -175,17 +175,42 @@ public class CustomMetricsTest {
     assertThat(d.bounds()).containsExactly(1_000.0, 1_000_000.0, 60_000_000.0);
     assertThat(d.bucketCounts()).containsExactly(1L, 0L, 1L, 1L);
     assertThat(metrics.boundsFor("run_micros")).containsExactly(1_000.0, 1_000_000.0, 60_000_000.0);
-    assertThat(metrics.boundsFor("undeclared")).isEqualTo(HttpServerMetrics.BUCKET_BOUNDS);
+    assertThat(metrics.boundsFor("undeclared")).isEqualTo(CustomMetrics.DEFAULT_BOUNDS);
+  }
+
+  /**
+   * The fallback for an undeclared distribution is not the HTTP latency layout.
+   *
+   * <p>It was, until #1286 reshaped {@link HttpServerMetrics#BUCKET_BOUNDS} for microseconds out to
+   * 10s. Left aliased, that fix would have quietly made this default worse than what it replaced:
+   * against bounds starting at 100, every distribution over small counts — spheres in a scene,
+   * games in a month, rows in a drain — collapses into bucket 0, and its quantiles go with it.
+   *
+   * <p>Pinned as a non-equality because the failure it guards is someone re-collapsing the two back
+   * into one constant, which reads like a tidy-up and passes every other test in this file.
+   */
+  @Test
+  public void theUndeclaredDefaultIsNotTheHttpLatencyLayout() {
+    assertThat(CustomMetrics.DEFAULT_BOUNDS)
+        .as(
+            "an undeclared distribution must not inherit the HTTP duration histogram's "
+                + "microsecond bounds — those start at 100 and reach 10s, which buckets every "
+                + "small-count instrument into slot 0")
+        .isNotEqualTo(HttpServerMetrics.BUCKET_BOUNDS);
+    assertThat(CustomMetrics.DEFAULT_BOUNDS[0])
+        .as("the generic default has to start low enough to separate single-digit observations")
+        .isLessThan(HttpServerMetrics.BUCKET_BOUNDS[0]);
   }
 
   /**
    * Every array that crosses this class's boundary is a copy, in both directions.
    *
    * <p>The interesting one is the last: an undeclared distribution buckets on {@link
-   * HttpServerMetrics#BUCKET_BOUNDS}, a shared static. If that reference reached a snapshot, one
-   * caller editing what looks like its own result would rebucket the HTTP latency histogram — and
-   * every other undeclared distribution in the process — for the rest of the run. Nothing would
-   * throw; the exported {@code explicitBounds} would simply stop describing the buckets beside it.
+   * CustomMetrics#DEFAULT_BOUNDS}, a shared static. If that reference reached a snapshot, one
+   * caller editing what looks like its own result would rebucket every other undeclared
+   * distribution in the process — in every {@code CustomMetrics} instance, since the array is
+   * static — for the rest of the run. Nothing would throw; the exported {@code explicitBounds}
+   * would simply stop describing the buckets beside it.
    */
   @Test
   public void boundsArraysAreCopiedOnEveryCrossing() {
@@ -213,7 +238,7 @@ public class CustomMetricsTest {
     CustomMetrics other = new CustomMetrics();
     other.record("undeclared", 1);
     other.distributionSnapshot().get(0).bounds()[0] = 999;
-    assertThat(HttpServerMetrics.BUCKET_BOUNDS[0])
+    assertThat(CustomMetrics.DEFAULT_BOUNDS[0])
         .as("the shared default set is not reachable through a snapshot")
         .isNotEqualTo(999.0);
   }
@@ -254,8 +279,8 @@ public class CustomMetricsTest {
   }
 
   private static int indexOfBound(double bound) {
-    for (int i = 0; i < HttpServerMetrics.BUCKET_BOUNDS.length; i++) {
-      if (HttpServerMetrics.BUCKET_BOUNDS[i] == bound) {
+    for (int i = 0; i < CustomMetrics.DEFAULT_BOUNDS.length; i++) {
+      if (CustomMetrics.DEFAULT_BOUNDS[i] == bound) {
         return i;
       }
     }
@@ -268,7 +293,7 @@ public class CustomMetricsTest {
     metrics.record("month_duration_micros", 999_999.0);
 
     long[] buckets = metrics.distributionSnapshot().get(0).bucketCounts();
-    assertThat(buckets[HttpServerMetrics.BUCKET_BOUNDS.length])
+    assertThat(buckets[CustomMetrics.DEFAULT_BOUNDS.length])
         .as("a value past the largest bound must still be counted, not dropped")
         .isEqualTo(1L);
   }

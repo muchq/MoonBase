@@ -66,6 +66,81 @@ func TestRegistry_CustomTimeseriesKeysDoNotShadowStandardSeries(t *testing.T) {
 // than being flagged.
 var cacheSelectorPattern = regexp.MustCompile(`\bcache_[a-z_]+\b(\{[^}]*\})?`)
 
+// The other shape a selector can take: {__name__=~"a|b",labels}. One
+// expression covering two metric names has to be written this way, which
+// portrait's operations tile now is — a count and a rate form built from one
+// selector over both cache counters.
+var nameMatcherPattern = regexp.MustCompile(`\{[^}]*__name__=~"([^"]*)"[^}]*\}`)
+
+type cacheSelector struct {
+	name   string
+	labels string
+	raw    string
+}
+
+// Every cache_* selector in a query, in either shape. The label block is
+// reported the same way for both, because in both it is the same braces —
+// only where the metric name sits differs.
+//
+// The __name__ form is consumed first and blanked out before the bare-name
+// pattern runs. Without that the names inside the quoted alternation match as
+// if they were bare selectors, and report no labels at all: the check would
+// then fail on the one selector that is in fact fully scoped.
+func cacheSelectorsIn(query string) []cacheSelector {
+	var found []cacheSelector
+	remainder := query
+
+	for _, match := range nameMatcherPattern.FindAllStringSubmatch(query, -1) {
+		for _, name := range strings.Split(match[1], "|") {
+			if !strings.HasPrefix(name, "cache_") {
+				continue
+			}
+			found = append(found, cacheSelector{name: name, labels: match[0], raw: match[0]})
+		}
+		remainder = strings.Replace(remainder, match[0], "{}", 1)
+	}
+
+	for _, loc := range cacheSelectorPattern.FindAllStringSubmatchIndex(remainder, -1) {
+		// A cache_* token followed by '=' is a label name, not a metric name:
+		// scene complexity is labelled cache_hit="false" (#1287), and matching
+		// that would report a selector with no labels and fail every scoping
+		// check below. RE2 has no lookahead, so the position is checked here
+		// rather than in the pattern.
+		//
+		// Narrow on purpose. Skipping anything that merely *contains* a label
+		// matcher would skip the real selectors too, since cache="trace" sits
+		// inside every one of them.
+		if end := loc[1]; end < len(remainder) && remainder[end] == '=' {
+			continue
+		}
+		whole := remainder[loc[0]:loc[1]]
+		labels := ""
+		if loc[2] >= 0 {
+			labels = remainder[loc[2]:loc[3]]
+		}
+		found = append(found, cacheSelector{
+			name:   strings.SplitN(whole, "{", 2)[0],
+			labels: labels,
+			raw:    whole,
+		})
+	}
+	return found
+}
+
+// Every expression a service's entry can produce, scalars in both views plus
+// the timeseries. Counter-derived tiles keep their expression in Counter
+// rather than Query, so a scan of Query alone would silently skip them.
+func allQueriesFor(entry serviceEntry) []string {
+	var queries []string
+	for _, def := range entry.CustomScalars {
+		queries = append(queries, def.AllQueries()...)
+	}
+	for _, query := range entry.CustomTimeseries {
+		queries = append(queries, query)
+	}
+	return queries
+}
+
 // Portrait's cache queries follow the emitter: aura::Cache emits the
 // standard cache family labeled by service and cache, so the bespoke
 // trace_cache_* series no longer exist to be queried. A rename on one side
@@ -78,13 +153,7 @@ func TestRegistry_PortraitCacheQueriesUseTheStandardFamily(t *testing.T) {
 	require.Contains(t, portrait.CustomTimeseries, "cache_hit_rate")
 	require.Contains(t, portrait.CustomTimeseries, "cache_operations_rate")
 
-	var queries []string
-	for _, def := range portrait.CustomScalars {
-		queries = append(queries, def.Query)
-	}
-	for _, query := range portrait.CustomTimeseries {
-		queries = append(queries, query)
-	}
+	queries := allQueriesFor(portrait)
 	require.NotEmpty(t, queries)
 
 	seen := map[string]int{}
@@ -96,14 +165,12 @@ func TestRegistry_PortraitCacheQueriesUseTheStandardFamily(t *testing.T) {
 		// so asserting the query as a whole contains the labels passes while
 		// either half of it is unscoped — and an unscoped half silently sums
 		// every service's caches into portrait's panel.
-		for _, match := range cacheSelectorPattern.FindAllStringSubmatch(query, -1) {
-			name := strings.SplitN(match[0], "{", 2)[0]
-			seen[name]++
-			labels := match[1]
-			assert.Contains(t, labels, `service_name="portrait"`,
-				"selector %q is not scoped to portrait, in %s", match[0], query)
-			assert.Contains(t, labels, `cache="trace"`,
-				"selector %q does not name which cache, in %s", match[0], query)
+		for _, selector := range cacheSelectorsIn(query) {
+			seen[selector.name]++
+			assert.Contains(t, selector.labels, `service_name="portrait"`,
+				"selector %q is not scoped to portrait, in %s", selector.raw, query)
+			assert.Contains(t, selector.labels, `cache="trace"`,
+				"selector %q does not name which cache, in %s", selector.raw, query)
 		}
 	}
 
@@ -123,18 +190,10 @@ func TestRegistry_PortraitCacheQueriesUseTheStandardFamily(t *testing.T) {
 // panel.
 func TestRegistry_EveryCacheQueryNamesItsService(t *testing.T) {
 	for _, name := range serviceOrder {
-		entry := serviceRegistry[name]
-		queries := make([]string, 0, len(entry.CustomScalars)+len(entry.CustomTimeseries))
-		for _, def := range entry.CustomScalars {
-			queries = append(queries, def.Query)
-		}
-		for _, query := range entry.CustomTimeseries {
-			queries = append(queries, query)
-		}
-		for _, query := range queries {
-			for _, match := range cacheSelectorPattern.FindAllStringSubmatch(query, -1) {
-				assert.Contains(t, match[1], "service_name=",
-					"service %q has an unscoped cache selector %q", name, match[0])
+		for _, query := range allQueriesFor(serviceRegistry[name]) {
+			for _, selector := range cacheSelectorsIn(query) {
+				assert.Contains(t, selector.labels, "service_name=",
+					"service %q has an unscoped cache selector %q", name, selector.raw)
 			}
 		}
 	}
@@ -221,7 +280,7 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 		if def == omitted {
 			continue
 		}
-		responses[def.Query] = scalarResponse(fmt.Sprintf("%d", 200+i))
+		responses[def.QueryFor(DefaultView)] = scalarResponse(fmt.Sprintf("%d", 200+i))
 	}
 
 	handler := &MetricsHandler{promClient: &mockPrometheusClient{queryResponses: responses}}
@@ -249,6 +308,10 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Equal(t, 106.0, response.Standard.P95DurationMicros)
 	assert.Equal(t, 107.0, response.Standard.ActiveRequests)
 
+	// An unasked-for view is the default, and it is stated rather than left
+	// for the client to assume.
+	assert.Equal(t, string(DefaultView), response.View)
+
 	// Custom groups keep registry order and every descriptor is present.
 	require.Len(t, response.Custom, 3)
 	assert.Equal(t, "Sessions", response.Custom[0].Title)
@@ -256,19 +319,20 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Equal(t, "Chat", response.Custom[2].Title)
 	assert.Len(t, response.Custom[0].Metrics, 6)
 	assert.Len(t, response.Custom[1].Metrics, 4)
-	require.Len(t, response.Custom[2].Metrics, 6)
+	require.Len(t, response.Custom[2].Metrics, 5)
 
+	// A gauge: one form, so no toggle offered.
 	assert.Equal(t, CustomMetricValue{Label: "active", Value: 200.0, Unit: "sessions"},
 		response.Custom[0].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "commands_per_sec", Value: 206.0, Unit: "/s"},
+	assert.Equal(t, CustomMetricValue{Label: "commands", Value: 206.0, Toggleable: true},
 		response.Custom[1].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "rejections_per_sec", Value: 208.0, Unit: "/s"},
+	assert.Equal(t, CustomMetricValue{Label: "rejections", Value: 208.0, Toggleable: true},
 		response.Custom[1].Metrics[2])
 	// Chat starts at CustomScalars index 10, so its first value is 200+10.
-	assert.Equal(t, CustomMetricValue{Label: "messages_per_sec", Value: 210.0, Unit: "/s"},
+	assert.Equal(t, CustomMetricValue{Label: "messages", Value: 210.0, Toggleable: true},
 		response.Custom[2].Metrics[0])
 	// The omitted query's descriptor survives with a zero value.
-	last := response.Custom[2].Metrics[5]
+	last := response.Custom[2].Metrics[4]
 	assert.Equal(t, omitted.Label, last.Label)
 	assert.Equal(t, 0.0, last.Value)
 }
@@ -542,7 +606,10 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 
 	labelled := map[string][]string{}
 	for _, def := range entry.CustomScalars {
-		labelled["scalar "+def.Label] = []string{def.Query}
+		// Both views of a toggleable tile. They share a selector, so a scope
+		// or name error appears in both — but reading them from AllQueries is
+		// what keeps the counter tiles in scope at all.
+		labelled["scalar "+def.Label] = def.AllQueries()
 	}
 	for key, query := range entry.CustomTimeseries {
 		labelled["timeseries "+key] = []string{query}
@@ -575,7 +642,7 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 	// than erroring, so the tiles would read zero forever.
 	joined := strings.Join([]string{}, "")
 	for _, def := range entry.CustomScalars {
-		joined += def.Query + "\n"
+		joined += strings.Join(def.AllQueries(), "\n") + "\n"
 	}
 	for _, query := range entry.CustomTimeseries {
 		joined += query + "\n"
@@ -608,11 +675,300 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 	// failure line. It also opts every future outcome in by default: whoever adds a fifth
 	// label gets it counted as a failure without deciding that it is one.
 	for _, def := range entry.CustomScalars {
-		assert.NotRegexp(t, `outcome\s*!=|outcome\s*!~`, def.Query,
-			"scalar %s selects outcomes by exclusion", def.Label)
+		for _, query := range def.AllQueries() {
+			assert.NotRegexp(t, `outcome\s*!=|outcome\s*!~`, query,
+				"scalar %s selects outcomes by exclusion", def.Label)
+		}
 	}
 	for key, query := range entry.CustomTimeseries {
 		assert.NotRegexp(t, `outcome\s*!=|outcome\s*!~`, query,
 			"timeseries %s selects outcomes by exclusion", key)
 	}
+
+	// Exclusion is not the only way back to a wrong failure line, and the check above only
+	// forbids the one spelling. Reverting to outcome=~"failed|interrupted|lease_lost", or to a
+	// bare sum over index_runs_total with no outcome at all, uses no negation and passes it. So
+	// the set is pinned positively, the way the duration guard pins outcome="completed".
+	failureRate, ok := entry.CustomTimeseries["run_failure_rate"]
+	require.True(t, ok, "one_d4 lost its run_failure_rate timeseries")
+	outcomeMatch := regexp.MustCompile(`outcome=~?"([^"]*)"`).FindStringSubmatch(failureRate)
+	require.NotNil(t, outcomeMatch,
+		"run_failure_rate names no outcome at all, so every run counts as a failure: %s",
+		failureRate)
+	assert.ElementsMatch(t, []string{"failed", "interrupted"},
+		strings.Split(outcomeMatch[1], "|"),
+		"run_failure_rate must name exactly failed|interrupted — lease_lost is ordinary and puts a"+
+			" permanent floor under the line, and anything wider counts healthy runs as"+
+			" failures: %s", failureRate)
+}
+
+// --- The count/rate toggle (#1287) ------------------------------------------
+
+func TestMetricsHandler_GetServiceMetrics_RateViewSelectsTheRateForm(t *testing.T) {
+	entry := serviceRegistry["golf_hub"]
+	responses := map[string]*QueryResponse{}
+	for i, def := range entry.CustomScalars {
+		responses[def.QueryFor(ViewRate)] = scalarResponse(fmt.Sprintf("%d", 300+i))
+	}
+
+	handler := &MetricsHandler{promClient: &mockPrometheusClient{queryResponses: responses}}
+	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub?view=rate", nil)
+	req.SetPathValue("name", "golf_hub")
+	w := httptest.NewRecorder()
+
+	handler.GetServiceMetrics(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response ServiceMetricsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Equal(t, "rate", response.View)
+
+	byLabel := map[string]CustomMetricValue{}
+	for _, group := range response.Custom {
+		for _, metric := range group.Metrics {
+			byLabel[metric.Label] = metric
+		}
+	}
+
+	// A unitless counter reads per-second; one with a unit keeps it and gains
+	// the suffix. Both come from the same descriptor, which in the count view
+	// answers "" and "rows".
+	assert.Equal(t, "/s", byLabel["commands"].Unit)
+	assert.Equal(t, "rows/s", byLabel["delivered_rows"].Unit)
+	assert.Equal(t, 306.0, byLabel["commands"].Value)
+
+	// The fixed-form tiles are untouched by the view: a gauge has no rate, and
+	// the windowed mean is already a ratio of two rates.
+	assert.Equal(t, "sessions", byLabel["active"].Unit)
+	assert.False(t, byLabel["active"].Toggleable)
+	assert.Equal(t, "rows", byLabel["catch_up_rows_avg_5m"].Unit)
+	assert.False(t, byLabel["catch_up_rows_avg_5m"].Toggleable)
+}
+
+func TestMetricsHandler_GetServiceMetrics_InvalidViewIsRejected(t *testing.T) {
+	handler := &MetricsHandler{}
+
+	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub?view=cumulative", nil)
+	req.SetPathValue("name", "golf_hub")
+	w := httptest.NewRecorder()
+
+	handler.GetServiceMetrics(w, req)
+
+	// Rejected rather than quietly defaulted. "cumulative" is the specific
+	// wrong answer someone will reach for, and defaulting would hand them a
+	// windowed count while they believed they were reading a lifetime total.
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var response map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Contains(t, response["detail"], "Invalid view")
+}
+
+// No tile reads a counter cumulatively any more (#1287).
+//
+// sum(x) over a monotonic counter is its value since the process started, so
+// it drops to zero on every deploy and cannot be compared across one. The
+// dashboard read twenty-one tiles that way. increase() answers the same
+// question and survives a restart.
+//
+// Gauges are exempt and have to be: sum(http_server_requests_active_gauge) is
+// the correct form for a level. The rule is about counters, which is what the
+// _total suffix marks.
+func TestRegistry_NoTileReadsACounterCumulatively(t *testing.T) {
+	bareCounterSum := regexp.MustCompile(`sum\(\s*[a-zA-Z_]*_total`)
+
+	check := func(t *testing.T, what, query string) {
+		t.Helper()
+		if !strings.Contains(query, "_total") {
+			return
+		}
+		assert.NotRegexp(t, bareCounterSum, query,
+			"%s sums a counter directly, so it resets on deploy: %s", what, query)
+		assert.True(t,
+			strings.Contains(query, "rate(") || strings.Contains(query, "increase("),
+			"%s reads a _total counter outside any rate() or increase(): %s", what, query)
+	}
+
+	for _, name := range serviceOrder {
+		entry := serviceRegistry[name]
+		for _, def := range entry.CustomScalars {
+			for _, query := range def.AllQueries() {
+				check(t, "scalar "+name+"/"+def.Label, query)
+			}
+		}
+		for key, query := range entry.CustomTimeseries {
+			check(t, "timeseries "+name+"/"+key, query)
+		}
+		for _, q := range standardScalarQueries(name) {
+			check(t, "standard scalar "+name, q.Query)
+		}
+		for key, query := range standardTimeseriesQueries(name) {
+			check(t, "standard timeseries "+name+"/"+key, query)
+		}
+	}
+}
+
+// The standard block's requests tile, pinned as a literal.
+//
+// It is the one converted tile whose JSON key could not change: StandardMetrics
+// is a fixed struct the UI reads by name, and the UI lives in another repo. So
+// requests_total now holds a windowed count under a name that still says total,
+// and only this assertion says which of the two it is.
+func TestStandardQueries_RequestsIsWindowedNotCumulative(t *testing.T) {
+	var requests string
+	for _, q := range standardScalarQueries("golf_hub") {
+		var probe StandardMetrics
+		if q.Field(&probe) == &probe.RequestsTotal {
+			requests = q.Query
+		}
+	}
+	require.NotEmpty(t, requests, "no query maps to RequestsTotal")
+	assert.Equal(t,
+		`sum(increase(http_server_requests_total{service_name="golf_hub"}[5m]))`,
+		requests)
+}
+
+// Counters that answer "has this happened" rather than "how fast" count over a
+// day.
+//
+// Over five minutes an interruption from an hour ago reads zero, and a tile
+// whose whole purpose is to be non-zero after something went wrong disarms
+// itself between the failure and someone looking at it.
+func TestRegistry_AlarmCountersCountOverALongWindow(t *testing.T) {
+	// First, that the window is actually long. Every check below compares
+	// against the alarmWindow constant, so the constant itself is the thing
+	// that has to be pinned — otherwise shrinking it leaves every assertion
+	// comparing against the shrunken value and still passing, which is the
+	// regression these tiles exist to prevent, invisible to the test meant to
+	// catch it.
+	//
+	// A floor rather than "not the default": alarmWindow = "6m" differs from
+	// the default and still fails the purpose, since a failure from an hour
+	// ago has already decayed out of it. An hour is the loosest bound that
+	// still means "someone who looks after the fact sees it".
+	window, err := time.ParseDuration(alarmWindow)
+	require.NoError(t, err, "alarmWindow is not a duration Go can parse: %q", alarmWindow)
+	require.GreaterOrEqual(t, window, time.Hour,
+		"alarmWindow is %s — long enough to differ from the default, too short to still be "+
+			"non-zero when someone reads the dashboard after the failure", alarmWindow)
+
+	alarms := map[string][]string{
+		"one_d4":   {"runs_failed", "runs_interrupted", "runs_lease_lost"},
+		"golf_hub": {"failures"},
+	}
+
+	for service, labels := range alarms {
+		byLabel := map[string]customScalarDef{}
+		for _, def := range serviceRegistry[service].CustomScalars {
+			byLabel[def.Label] = def
+		}
+		for _, label := range labels {
+			def, ok := byLabel[label]
+			require.True(t, ok, "%s lost its %s tile", service, label)
+			require.True(t, def.Toggleable(), "%s/%s stopped being counter-derived", service, label)
+			assert.Equal(t, alarmWindow, def.window(),
+				"%s/%s is an alarm and must not decay inside a five-minute window", service, label)
+			assert.Contains(t, def.QueryFor(ViewCount), "["+alarmWindow+"]")
+		}
+	}
+}
+
+// A toggleable tile's label may not name one of its two forms.
+//
+// The label is what the dashboard prints beside the number. games_indexed_total
+// showing a per-second rate, or commands_per_sec showing a count, is a caption
+// that contradicts the value under it — and it is the exact state the registry
+// was in before the toggle, when the form was fixed at declaration time.
+func TestRegistry_ToggleableLabelsNameNoForm(t *testing.T) {
+	for _, name := range serviceOrder {
+		for _, def := range serviceRegistry[name].CustomScalars {
+			if !def.Toggleable() {
+				continue
+			}
+			assert.NotContains(t, def.Label, "_total",
+				"%s/%s names the count form but also has a rate form", name, def.Label)
+			assert.NotContains(t, def.Label, "_per_sec",
+				"%s/%s names the rate form but also has a count form", name, def.Label)
+		}
+	}
+}
+
+// Every counter tile builds both forms from one selector, and the two differ
+// only by the function wrapping it.
+//
+// Spelling the two expressions out separately in the descriptor is the obvious
+// alternative, and the failure it invites is silent: the count and rate tiles
+// drift onto different label selectors and the toggle starts switching between
+// two different questions rather than two views of one.
+func TestRegistry_BothViewsShareOneSelector(t *testing.T) {
+	for _, name := range serviceOrder {
+		for _, def := range serviceRegistry[name].CustomScalars {
+			if !def.Toggleable() {
+				assert.Equal(t, def.Query, def.QueryFor(ViewRate),
+					"%s/%s is fixed-form but changed under a view", name, def.Label)
+				continue
+			}
+			count := def.QueryFor(ViewCount)
+			rate := def.QueryFor(ViewRate)
+			assert.NotEqual(t, count, rate)
+			assert.Equal(t, strings.Replace(count, "increase(", "rate(", 1), rate,
+				"%s/%s builds its two views from different expressions", name, def.Label)
+			assert.Contains(t, count, def.Counter)
+			assert.Contains(t, rate, def.Counter)
+		}
+	}
+}
+
+// The two new JSON keys, asserted on the raw payload rather than through the
+// struct.
+//
+// Every other handler test unmarshals into ServiceMetricsResponse, which means
+// it reads the keys back through the same tags it wrote them with — renaming
+// `json:"view"` to `json:"metric_view"` would keep all of them green while the
+// UI, which lives in another repo and reads by name, silently loses the field.
+// The same reasoning already covers requests_total's *value*; these are the
+// keys it applies to.
+func TestMetricsHandler_GetServiceMetrics_JsonKeysAreStable(t *testing.T) {
+	entry := serviceRegistry["golf_hub"]
+	responses := map[string]*QueryResponse{}
+	for i, def := range entry.CustomScalars {
+		responses[def.QueryFor(DefaultView)] = scalarResponse(fmt.Sprintf("%d", 400+i))
+	}
+
+	handler := &MetricsHandler{promClient: &mockPrometheusClient{queryResponses: responses}}
+	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub", nil)
+	req.SetPathValue("name", "golf_hub")
+	w := httptest.NewRecorder()
+
+	handler.GetServiceMetrics(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var raw map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+	assert.Equal(t, "count", raw["view"], `the response must carry a top-level "view" key`)
+
+	groups, ok := raw["custom"].([]interface{})
+	require.True(t, ok, "custom is not an array")
+	require.NotEmpty(t, groups)
+
+	tiles := map[string]map[string]interface{}{}
+	for _, group := range groups {
+		for _, tile := range group.(map[string]interface{})["metrics"].([]interface{}) {
+			metric := tile.(map[string]interface{})
+			tiles[metric["label"].(string)] = metric
+		}
+	}
+
+	counter, ok := tiles["commands"]
+	require.True(t, ok, "golf_hub lost its commands tile")
+	assert.Equal(t, true, counter["toggleable"],
+		`a counter tile must carry "toggleable": true for the UI to offer the switch`)
+
+	// And the negative half: omitempty means a fixed-form tile has no key at
+	// all, which is what tells the UI not to draw a toggle it cannot honour.
+	gauge, ok := tiles["active"]
+	require.True(t, ok, "golf_hub lost its active tile")
+	_, present := gauge["toggleable"]
+	assert.False(t, present,
+		"a fixed-form tile must omit the key entirely, not send false: %v", gauge)
 }

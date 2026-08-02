@@ -1,5 +1,9 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
+# Read as text by //domains/platform/libs/otel_contract, which pins this rail's
+# latency bucket bounds equal to yodel's and server_pal's.
+exports_files(["otel_provider.h"])
+
 cc_library(
     name = "otel_provider",
     srcs = ["otel_provider.cc"],
@@ -48,6 +52,18 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":metrics",
+    ],
+)
+
+cc_test(
+    name = "otel_provider_test",
+    size = "small",
+    srcs = ["otel_provider_test.cc"],
+    deps = [
+        ":otel_provider",
+        "@googletest//:gtest_main",
+        "@opentelemetry-cpp//exporters/memory:in_memory_metric_data",
+        "@opentelemetry-cpp//exporters/memory:in_memory_metric_exporter_factory",
     ],
 )
 

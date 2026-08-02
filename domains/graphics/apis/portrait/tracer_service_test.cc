@@ -571,6 +571,94 @@ TEST_F(TracerServiceTest, ADifferentSceneMissesRatherThanReusingTheLastRender) {
   EXPECT_EQ(metrics->CounterTotal("cache_hits", TraceCacheLabels()), 0);
 }
 
+/// The labels scene complexity carries on each path.
+std::map<std::string, std::string> SceneLabels(bool cache_hit) {
+  return {{"cache_hit", cache_hit ? "true" : "false"}};
+}
+
+/// How many observations of `name` landed under exactly these labels — the
+/// count, where CounterTotal gives the sum. A mean needs both.
+int ObservationCount(const futility::otel::CapturingMetricsRecorder& metrics,
+                     const std::string& name, const std::map<std::string, std::string>& labels) {
+  int found = 0;
+  for (const futility::otel::CapturingMetricsRecorder::Entry& entry : metrics.Entries()) {
+    if (entry.name == name && entry.attributes == labels) ++found;
+  }
+  return found;
+}
+
+TEST_F(TracerServiceTest, SceneComplexityIsRecordedOnTheCacheHitPathToo) {
+  auto metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>(kService);
+  TracerService service(10, metrics);
+  TraceRequest request{basic_scene_, basic_perspective_, basic_output_};
+
+  ASSERT_TRUE(service.trace(request).ok());
+  ASSERT_TRUE(service.trace(request).ok());
+
+  EXPECT_EQ(ObservationCount(*metrics, "scene_sphere_count", SceneLabels(false)), 1);
+  EXPECT_EQ(ObservationCount(*metrics, "scene_sphere_count", SceneLabels(true)), 1)
+      << "the cached request never reached the recorder";
+  EXPECT_EQ(ObservationCount(*metrics, "scene_light_count", SceneLabels(true)), 1);
+
+  // basic_scene_ is one sphere and two lights, on both paths.
+  EXPECT_EQ(metrics->CounterTotal("scene_sphere_count", SceneLabels(true)), 1);
+  EXPECT_EQ(metrics->CounterTotal("scene_light_count", SceneLabels(true)), 2);
+}
+
+/**
+ * The #1287 reading, in miniature: a workload whose two means differ.
+ *
+ * Four requests over two scenes — a 1-sphere scene asked for three times and
+ * rendered once, and a 5-sphere scene rendered once. Offered load is 8 spheres
+ * over 4 requests (2.0); render cost is 6 spheres over 2 renders (3.0). Before
+ * the cache-hit path recorded anything, the panel labelled `avg_spheres_1h`
+ * could only ever answer 3.0.
+ *
+ * The ratios are chosen so the two disagree, which the issue's own first batch
+ * did not manage: 33/11 and 9/3 are both exactly 3.0, so a homogeneous workload
+ * cannot tell the readings apart and neither could a test built on one.
+ */
+TEST_F(TracerServiceTest, ComplexityDistinguishesOfferedLoadFromRenderCost) {
+  auto metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>(kService);
+  TracerService service(10, metrics);
+
+  TraceRequest light{basic_scene_, basic_perspective_, basic_output_};
+  ASSERT_TRUE(service.trace(light).ok());  // miss
+  ASSERT_TRUE(service.trace(light).ok());  // hit
+  ASSERT_TRUE(service.trace(light).ok());  // hit
+
+  Scene heavy_scene = basic_scene_;
+  for (int i = 0; i < 4; i++) {
+    Sphere extra;
+    extra.center = {static_cast<double>(i) + 2.0, 0.0, 5.0};
+    extra.radius = 0.5;
+    extra.color = {0, 0, 255};
+    extra.specular = 100.0;
+    extra.reflective = 0.1;
+    heavy_scene.spheres.push_back(extra);
+  }
+  TraceRequest heavy{heavy_scene, basic_perspective_, basic_output_};
+  ASSERT_TRUE(service.trace(heavy).ok());  // miss
+
+  const double rendered_spheres = metrics->CounterTotal("scene_sphere_count", SceneLabels(false));
+  const int renders = ObservationCount(*metrics, "scene_sphere_count", SceneLabels(false));
+  const double requested_spheres =
+      rendered_spheres + metrics->CounterTotal("scene_sphere_count", SceneLabels(true));
+  const int requests =
+      renders + ObservationCount(*metrics, "scene_sphere_count", SceneLabels(true));
+
+  EXPECT_EQ(renders, 2);
+  EXPECT_EQ(requests, 4);
+  EXPECT_EQ(rendered_spheres, 6.0);
+  EXPECT_EQ(requested_spheres, 8.0);
+
+  // Both readings are now available, and they are different numbers — which is
+  // the whole point of carrying the label.
+  EXPECT_EQ(requested_spheres / requests, 2.0) << "offered load: what callers asked to render";
+  EXPECT_EQ(rendered_spheres / renders, 3.0) << "render cost: what the tracer actually drew";
+  EXPECT_NE(requested_spheres / requests, rendered_spheres / renders);
+}
+
 TEST_F(TracerServiceTest, TheBespokeTraceCacheCountersAreGone) {
   auto metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>(kService);
   TracerService service(10, metrics);

@@ -11,7 +11,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
 use opentelemetry_otlp::{MetricExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
+use opentelemetry_sdk::metrics::{Aggregation, Instrument, PeriodicReader, SdkMeterProvider, Stream};
 use std::env;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -26,11 +26,46 @@ use tower_http::validate_request::ValidateRequestHeaderLayer;
 
 const DEFAULT_PORT: u16 = 8080;
 
+/// Explicit bucket boundaries, in microseconds, for latency histograms —
+/// 100µs to 10s.
+///
+/// Without a view the SDK applies its own defaults (0, 5, 10, ... 10000),
+/// which are shaped for milliseconds. `http_server_request_duration_
+/// microseconds` records microseconds, so that top finite bucket meant 10ms:
+/// every slower request landed in +Inf, and `histogram_quantile` answers the
+/// highest finite bound when the rank falls there, so p95 read a flat 10000
+/// however slow the service actually was (#1286). Seen in production on
+/// portrait at a real p95 near a second (#1287).
+///
+/// yodel (Java, `HttpServerMetrics.BUCKET_BOUNDS`) and futility/otel (C++,
+/// `kHttpLatencyBucketBoundsMicros`) declare this same set. prom_proxy runs one
+/// `histogram_quantile` expression across all three languages, which only
+/// compares like with like if the layouts match — so the three move together or
+/// not at all. `//domains/platform/libs/otel_contract` pins them equal.
+pub const HTTP_LATENCY_BUCKET_BOUNDS_MICROS: [f64; 15] = [
+    100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0, 25000.0, 50000.0, 100000.0, 250000.0,
+    500000.0, 1000000.0, 2500000.0, 10000000.0,
+];
+
 static HTTP_REQUESTS: OnceLock<Counter<u64>> = OnceLock::new();
 static HTTP_SUCCESS: OnceLock<Counter<u64>> = OnceLock::new();
 static HTTP_FAILURE: OnceLock<Counter<u64>> = OnceLock::new();
 static HTTP_ACTIVE: OnceLock<UpDownCounter<i64>> = OnceLock::new();
 static HTTP_DURATION: OnceLock<Histogram<f64>> = OnceLock::new();
+
+/// Whether an instrument of this name should get the explicit latency buckets.
+///
+/// A free function rather than an inline condition purely so it can be tested:
+/// `Instrument` has no public constructor, so a test cannot drive the view
+/// closure itself, and the predicate is the half of that closure with a
+/// decision in it.
+///
+/// The suffix is the contract. `RecordLatency`-equivalent instruments end in
+/// `_microseconds` and want a layout reaching 10s; distributions over counts
+/// keep their bare names and want the SDK defaults, which start near zero.
+fn wants_latency_buckets(instrument_name: &str) -> bool {
+    instrument_name.ends_with("_microseconds")
+}
 
 /// Initialise the global OTel meter provider when
 /// OTEL_EXPORTER_OTLP_ENDPOINT is set; a no-op None otherwise. Callers
@@ -91,11 +126,37 @@ pub fn init_otel() -> Option<SdkMeterProvider> {
         }
     };
 
+    // Matched on the suffix rather than on the one HTTP instrument name: any
+    // histogram whose name says it holds microseconds wants this layout, and
+    // pinning the single name would leave the next one to rediscover #1286.
+    // Nothing here records a non-latency quantity under that suffix.
+    //
+    // build() returns Err only for a malformed stream (unsorted or empty
+    // boundaries), which for a const array is a compile-time-shaped mistake
+    // rather than a runtime one. .ok() therefore reads as "no view" — the
+    // silent default-bucket path this exists to eliminate — so it is
+    // deliberately not used: a broken constant should be loud.
+    let latency_buckets = |i: &Instrument| {
+        if !wants_latency_buckets(i.name()) {
+            return None;
+        }
+        Some(
+            Stream::builder()
+                .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                    boundaries: HTTP_LATENCY_BUCKET_BOUNDS_MICROS.to_vec(),
+                    record_min_max: true,
+                })
+                .build()
+                .expect("HTTP_LATENCY_BUCKET_BOUNDS_MICROS must be a valid histogram layout"),
+        )
+    };
+
     // Resource::builder() picks up OTEL_SERVICE_NAME and
     // OTEL_RESOURCE_ATTRIBUTES via the built-in EnvResourceDetector.
     let provider = SdkMeterProvider::builder()
         .with_reader(PeriodicReader::builder(exporter).build())
         .with_resource(Resource::builder().build())
+        .with_view(latency_buckets)
         .build();
 
     opentelemetry::global::set_meter_provider(provider.clone());
@@ -348,5 +409,61 @@ mod tests {
             let resp = app.clone().oneshot(make_request()).await.unwrap();
             assert_ne!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
         }
+    }
+}
+
+#[cfg(test)]
+mod latency_bucket_tests {
+    use super::*;
+
+    /// The predicate behind `init_otel`'s view.
+    ///
+    /// `//domains/platform/libs/otel_contract` pins this rail's bucket constant
+    /// equal to the Java and C++ ones, but a constant is only half the fix —
+    /// nothing applies it except the view, and a view whose predicate stops
+    /// matching leaves the constant correct and the histograms on the SDK's
+    /// millisecond defaults, which is #1286 exactly.
+    #[test]
+    fn latency_instruments_are_selected_and_others_are_not() {
+        assert!(wants_latency_buckets(
+            "http_server_request_duration_microseconds"
+        ));
+        // portrait's render timer, on the C++ rail, carries the same suffix and
+        // the same defect; narrowing this to an http_server_ prefix would put
+        // that class of instrument back on the defaults (#1287).
+        assert!(wants_latency_buckets("trace_request_duration_microseconds"));
+
+        // Distributions keep their bare names. Against bounds starting at 100µs
+        // every one of these — spheres, lights, rows — collapses into bucket 0.
+        assert!(!wants_latency_buckets("scene_sphere_count"));
+        assert!(!wants_latency_buckets("chat_catch_up_rows"));
+        assert!(!wants_latency_buckets("http_server_requests_total"));
+
+        // Suffix, not substring. Both of these contain the token and neither
+        // ends with it, so relaxing `ends_with` to `contains` fails here rather
+        // than silently widening the view over instruments it was never meant
+        // to reshape.
+        assert!(!wants_latency_buckets("request_microseconds_histogram"));
+        assert!(!wants_latency_buckets("microseconds_elapsed_total"));
+    }
+
+    /// The constant itself is shaped for microseconds, ascending, and reaches
+    /// far enough that a one-second request is not in the overflow bucket.
+    ///
+    /// otel_contract asserts the same properties by parsing this file as text;
+    /// this asserts them against the compiled value, so a mismatch between what
+    /// the file says and what rustc sees cannot hide.
+    #[test]
+    fn the_bounds_are_ascending_and_reach_ten_seconds() {
+        let bounds = HTTP_LATENCY_BUCKET_BOUNDS_MICROS;
+        assert!(bounds[0] > 0.0);
+        for pair in bounds.windows(2) {
+            assert!(pair[1] > pair[0], "bounds must ascend: {pair:?}");
+        }
+        assert_eq!(*bounds.last().unwrap(), 10_000_000.0);
+        assert!(
+            bounds.iter().any(|b| *b >= 1_000_000.0),
+            "a one-second request must land in a finite bucket"
+        );
     }
 }

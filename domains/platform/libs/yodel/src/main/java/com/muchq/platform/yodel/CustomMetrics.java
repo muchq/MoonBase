@@ -16,9 +16,10 @@ import java.util.regex.Pattern;
  *
  * <p>Until this existed a Java service could say how many requests it served and nothing about what
  * it did with them, which is why every Java entry in prom_proxy's registry was empty
- * (https://github.com/muchq/MoonBase/issues/1212). The C++ and Rust rails already had the
- * equivalent — futility/otel's counters and server_pal's {@code RecordDistribution} — so this is
- * Java catching up to them rather than a new idea.
+ * (https://github.com/muchq/MoonBase/issues/1212). The C++ rail already had the equivalent —
+ * futility/otel's {@code RecordCounter} and {@code RecordDistribution} — so this is Java catching
+ * up to it rather than a new idea. The Rust rail has not caught up: server_pal exposes only the
+ * HTTP family, which is why mithril and posterize are still empty entries in that same registry.
  *
  * <p>Two instrument kinds, matching what the dashboard can already render:
  *
@@ -26,9 +27,10 @@ import java.util.regex.Pattern;
  *   <li><b>Counters</b> — monotonic totals. The collector's Prometheus exporter appends {@code
  *       _total}, so a counter named {@code games_indexed} is queried as {@code
  *       games_indexed_total}.
- *   <li><b>Distributions</b> — histograms over the same bucket bounds the HTTP duration histogram
- *       uses, exported as {@code _sum}/{@code _count}/{@code _bucket}. A windowed mean is then
- *       {@code rate(x_sum[5m])/rate(x_count[5m])}, which is how portrait reports scene complexity.
+ *   <li><b>Distributions</b> — histograms exported as {@code _sum}/{@code _count}/{@code _bucket},
+ *       over bounds the instrument declares for itself via {@link #defineDistribution}. A windowed
+ *       mean is then {@code rate(x_sum[5m])/rate(x_count[5m])}, which is how portrait — a C++
+ *       service, on futility/otel — reports scene complexity.
  * </ul>
  *
  * <p>Labels are for bounded, low-cardinality dimensions — an outcome, a stage, a motif name. Never
@@ -45,6 +47,23 @@ public final class CustomMetrics {
    * that shows up as an empty chart weeks later rather than as anything a test would catch.
    */
   private static final Pattern VALID_NAME = Pattern.compile("[a-zA-Z_][a-zA-Z0-9_]*");
+
+  /**
+   * Bounds for a distribution that never declared any: the OTel SDK defaults, spanning 0 to 10000.
+   *
+   * <p>Deliberately <em>not</em> {@link HttpServerMetrics#BUCKET_BOUNDS}. It used to be, back when
+   * that array also held the SDK defaults. #1286 reshaped it for microsecond latency out to 10s,
+   * which is the right layout for request durations and the wrong one for everything else — against
+   * those bounds a distribution over small counts puts every observation in the first bucket, which
+   * is a worse default than what it replaced. Latency is one instrument's concern; this is the
+   * fallback for arbitrary ones, so the two moved apart.
+   *
+   * <p>Still only a fallback, and still not a good one for most instruments — see {@link
+   * #defineDistribution}.
+   */
+  static final double[] DEFAULT_BOUNDS = {
+    0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000
+  };
 
   private final ConcurrentHashMap<Series, LongAdder> counters = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<Series, Distribution> distributions = new ConcurrentHashMap<>();
@@ -72,15 +91,18 @@ public final class CustomMetrics {
   /**
    * Declares the bucket bounds for a distribution, ahead of the first observation.
    *
-   * <p>The default is the set the HTTP latency histogram uses, which tops out at 10ms — a ceiling
-   * that is too low even for the requests it was chosen for (#1286), and hopeless for anything
-   * else. A distribution over minutes, or over counts in the thousands, puts every observation in
-   * the overflow bucket. Declare bounds for any instrument that is not sub-10ms request latency;
-   * treat inheriting this default as a bug rather than a choice. The mean still reads correctly off
-   * {@code _sum}/{@code _count}, so the damage is quiet — fifteen bucket series pinned at zero, and
-   * any quantile over them answering the top bound rather than the truth. {@code
-   * histogram_quantile} falls back to the highest finite bucket when the rank lands in {@code
-   * +Inf}, so the chart shows 10ms forever instead of showing nothing.
+   * <p>The default is {@link #DEFAULT_BOUNDS}, which tops out at 10000 and is a guess about no
+   * instrument in particular. A distribution over minutes, or over counts in the millions, puts
+   * every observation in the overflow bucket; one over single-digit counts puts every observation
+   * in the first two. Declare bounds for anything whose range you know — which is nearly everything
+   * — and treat inheriting this default as a bug rather than a choice.
+   *
+   * <p>The damage from getting it wrong is quiet, which is what makes it worth saying twice. The
+   * mean still reads correctly off {@code _sum}/{@code _count}, so the tile beside the broken one
+   * stays right. What breaks is every quantile: {@code histogram_quantile} falls back to the
+   * highest finite bucket when the rank lands in {@code +Inf}, so the chart answers the top bound
+   * forever rather than showing nothing. That is exactly how #1286 hid in the HTTP histogram until
+   * someone put real traffic through it (#1287).
    *
    * <p>Call before recording. Bounds must be ascending, and a later call for the same name is
    * ignored rather than allowed to reshape a histogram mid-flight — the collector treats bucket
@@ -108,7 +130,7 @@ public final class CustomMetrics {
 
   /** The bounds a distribution will use, whether declared or defaulted. */
   public double[] boundsFor(String name) {
-    return boundsByName.getOrDefault(name, HttpServerMetrics.BUCKET_BOUNDS).clone();
+    return boundsByName.getOrDefault(name, DEFAULT_BOUNDS).clone();
   }
 
   /** Records one observation of {@code name} with no labels. */
@@ -136,7 +158,7 @@ public final class CustomMetrics {
     distributions
         .computeIfAbsent(
             series(name, labels),
-            s -> new Distribution(boundsByName.getOrDefault(name, HttpServerMetrics.BUCKET_BOUNDS)))
+            s -> new Distribution(boundsByName.getOrDefault(name, DEFAULT_BOUNDS)))
         .record(value);
   }
 
@@ -239,9 +261,9 @@ public final class CustomMetrics {
 
     Distribution(double[] bounds) {
       // Held by reference, deliberately: for an undeclared distribution this is the shared
-      // HttpServerMetrics.BUCKET_BOUNDS static, and for a declared one it is the array
-      // boundsByName already owns. Neither escapes — boundsFor and snapshot both copy — and a
-      // clone here would be a third copy no test can distinguish from its absence.
+      // DEFAULT_BOUNDS static, and for a declared one it is the array boundsByName already
+      // owns. Neither escapes — boundsFor and snapshot both copy — and a clone here would be a
+      // third copy no test can distinguish from its absence.
       this.bounds = bounds;
       buckets = new LongAdder[bounds.length + 1];
       for (int i = 0; i < buckets.length; i++) {
