@@ -29,6 +29,10 @@ services:
     command: ["--config=/etc/otel-collector-config.yml"]
     volumes:
       - ./o11y/otel-collector.yml:/etc/otel-collector-config.yml
+      # What the hostmetrics receiver reads through `root_path: /hostfs`.
+      # Read-only, and the reason the Host page can report the machine rather
+      # than this container — cadvisor below has had the equivalent all along.
+      - /:/hostfs:ro
     ports:
       - "4318:4318"   # OTLP HTTP receiver
       - "8889:8889"   # Prometheus metrics endpoint

@@ -10,5 +10,7 @@ go_test(
     data = [
         "Caddyfile",
         "compose.yaml",
+        "docker-compose.observability.yml",
+        "o11y/otel-collector.yml",
     ],
 )

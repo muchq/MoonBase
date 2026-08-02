@@ -146,3 +146,42 @@ func readConfig(t *testing.T, name string) string {
 	}
 	return string(contents)
 }
+
+// The host-metrics pair.
+//
+// The collector runs in a container, so the hostmetrics receiver reads the
+// machine only through a bind mount plus a matching root_path. Those two live
+// in different files, and losing either produces no error anywhere: the
+// receiver happily scrapes its own namespace, cpu/memory/network keep
+// reporting plausible numbers from /proc inside the container, and only the
+// disk and filesystem panels go quiet — because /proc/diskstats is not the
+// host's and the container's mounts are all overlay and tmpfs, which the
+// scraper filters. An empty chart reads as an idle machine, so this was live
+// for a while before anyone asked.
+//
+// Pinned as a pair rather than as two separate facts: either one alone is the
+// broken state.
+const hostfsMountPath = "/hostfs"
+
+func TestHostMetricsReadsTheHostAndNotTheCollectorContainer(t *testing.T) {
+	receiver := readConfig(t, "o11y/otel-collector.yml")
+	compose := readConfig(t, "docker-compose.observability.yml")
+
+	if !strings.Contains(receiver, "root_path: "+hostfsMountPath) {
+		t.Errorf("hostmetrics has no root_path: %s — every scraper measures the collector container,"+
+			" and the disk panels silently report nothing", hostfsMountPath)
+	}
+	if !strings.Contains(compose, "- /:"+hostfsMountPath+":ro") {
+		t.Errorf("otelcol does not bind the host root at %s — root_path points at a path that does not"+
+			" exist in the container", hostfsMountPath)
+	}
+
+	// Both scrapers are the ones that need the mount; the panels are named
+	// after them. Enabled-but-unmounted was the bug, so enabled is worth
+	// asserting alongside the mount rather than assumed.
+	for _, scraper := range []string{"disk:", "filesystem:"} {
+		if !strings.Contains(receiver, scraper) {
+			t.Errorf("hostmetrics scraper %q is not enabled; the Host page charts it", scraper)
+		}
+	}
+}
