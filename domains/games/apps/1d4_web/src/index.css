@@ -245,6 +245,32 @@ th .sort-icon {
 th.sorted-asc .sort-icon::after { content: " ↑"; }
 th.sorted-desc .sort-icon::after { content: " ↓"; }
 
+/* The White cell is the row's expand control — a real button so the detail
+   panel is keyboard-reachable (see GameTable.tsx). Tailwind preflight already
+   zeroes padding/margin/border and inherits font and colour, so this only has
+   to undo the button-ness that would otherwise read as a control in a column
+   of plain usernames. */
+.row-toggle {
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row-toggle:hover {
+  color: var(--accent);
+}
+
+/* Which row the open panel belongs to. The panel renders in a separate <tr>,
+   so without this the connection between the two is left to proximity. Uses
+   neither --surface nor --border flat: the table sits inside a .panel that is
+   already --surface, so that reads as no highlight at all, and --border is
+   exactly what .motif-badge paints its chips with, so the badges in the
+   highlighted row dissolve into it. Sitting between the two keeps both
+   contrasts. */
+tr.selected td {
+  background: color-mix(in oklab, var(--border) 55%, var(--surface));
+}
+
 /* Motif badges */
 .motifs {
   display: flex;

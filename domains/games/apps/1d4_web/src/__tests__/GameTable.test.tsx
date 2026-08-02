@@ -143,12 +143,59 @@ describe('GameTable', () => {
   });
 
   // The negative half of the move: the link and the indexed date left the table
-  // for GameDetailPanel, so the table body must hold no link at all. This also
-  // pins the accessibility fact that the row is the only affordance here — if
-  // that ever changes, this test should be the thing that notices.
+  // for GameDetailPanel, so the table body must hold no link at all. The way
+  // back to the game is the White-cell toggle plus the panel, covered below.
   it('renders no links in the table body — the game link lives in the detail panel', () => {
     render(<GameTable games={mockGames} />);
     expect(screen.queryAllByRole('link')).toHaveLength(0);
+  });
+
+  // A <tr onClick> is not focusable and has no keyboard semantics, so when the
+  // game link left the table the body had no keyboard affordance at all and
+  // the panel became pointer-only. These pin the button that fixed that.
+  it('renders the White cell as a button that reports its collapsed state', () => {
+    render(<GameTable games={mockGames} onRowClick={() => {}} />);
+    const toggle = screen.getByRole('button', { name: 'Alice' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    // Dangling references are worse than none: no panel exists to point at.
+    expect(toggle).not.toHaveAttribute('aria-controls');
+  });
+
+  it('reports the expanded state and points at the panel it opened', () => {
+    render(
+      <GameTable
+        games={mockGames}
+        onRowClick={() => {}}
+        selectedGame={mockGames[0]}
+        onClose={() => {}}
+      />
+    );
+    const toggle = screen.getByRole('button', { name: 'Alice' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    const panelId = toggle.getAttribute('aria-controls');
+    expect(panelId).toBeTruthy();
+    // The id has to resolve, or a screen reader follows it nowhere.
+    expect(document.getElementById(panelId!)).not.toBeNull();
+  });
+
+  // The row's own onClick still fires for mouse users. Without stopPropagation
+  // on the button both handlers run, the toggle flips twice, and the panel
+  // lands back exactly where it started — a click that visibly does nothing.
+  // The existing "calls onRowClick with the correct game" test cannot see this:
+  // toHaveBeenCalledWith passes just as well when called twice.
+  it('toggles exactly once when the White button is clicked', () => {
+    const onRowClick = vi.fn();
+    render(<GameTable games={mockGames} onRowClick={onRowClick} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Alice' }));
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+    expect(onRowClick).toHaveBeenCalledWith(mockGames[0]);
+  });
+
+  // Non-expandable tables must not grow a dead control.
+  it('leaves the White cell as plain text when the table cannot expand', () => {
+    render(<GameTable games={mockGames} />);
+    expect(screen.queryByRole('button', { name: 'Alice' })).not.toBeInTheDocument();
+    expect(screen.getByText('Alice')).toBeInTheDocument();
   });
 
   // jsdom has no layout, so this cannot assert the rendered result — only that
