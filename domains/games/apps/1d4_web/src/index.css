@@ -159,12 +159,58 @@ body {
 .table-wrap {
   overflow-x: auto;
   margin-top: 1rem;
+  /* Overlay scrollbars stay invisible until something scrolls them, so a table
+     that overflows reads as truncated rather than scrollable — the content just
+     stops at the edge. Reserving the gutter and painting the bar puts the
+     affordance on screen before anyone tries. */
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.table-wrap::-webkit-scrollbar {
+  height: 10px;
+}
+
+.table-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.table-wrap::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+}
+
+.table-wrap::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.875rem;
+}
+
+/* The games table carries eleven columns. Without a floor the browser keeps
+   honouring width:100% by crushing the last ones instead of letting the wrapper
+   scroll, and the motif badges — the narrowest column's content — get cut
+   mid-word. Scoped to this table so the shorter index-requests table still fits
+   a phone without a scrollbar. */
+.table-wrap--wide table {
+  min-width: 64rem;
+}
+
+/* Every value in this table is an atom — a username, an ELO, an ISO date. None
+   of them mean anything broken across two lines, and "2026-07-" over "25" is
+   what a squeezed column produces before the min-width above can catch it. The
+   motifs cell opts back in: it is a flex container whose badges are meant to
+   wrap, just never mid-badge. */
+.table-wrap--wide td {
+  white-space: nowrap;
+}
+
+.table-wrap--wide td .motifs {
+  white-space: normal;
 }
 
 th,
@@ -218,6 +264,9 @@ td a.external:hover {
   font-size: 0.75rem;
   font-weight: 500;
   color: var(--text-muted);
+  /* A badge is one token. Without this "discovered attack" breaks across two
+     lines inside its own pill and the second word hangs outside the cell. */
+  white-space: nowrap;
 }
 
 /* Status */

@@ -126,4 +126,16 @@ describe('GameTable', () => {
     expect(screen.getByText('Alice')).toBeInTheDocument();
     expect(screen.getByText('Carol')).toBeInTheDocument();
   });
+
+  // jsdom has no layout, so this cannot assert the rendered result — only that
+  // the hook the stylesheet hangs the fix on is still here. Eleven columns do
+  // not fit a laptop, and without the modifier the browser keeps honouring
+  // width:100% by crushing the last ones instead of letting the wrapper scroll:
+  // ISO dates break after the month and motif badges split mid-word.
+  it('marks the games table as wide so its columns scroll instead of being crushed', () => {
+    const { container } = render(<GameTable games={mockGames} />);
+    const wrap = container.querySelector('.table-wrap');
+    expect(wrap).not.toBeNull();
+    expect(wrap).toHaveClass('table-wrap--wide');
+  });
 });
