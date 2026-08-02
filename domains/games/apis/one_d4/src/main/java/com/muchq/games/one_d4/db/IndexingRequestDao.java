@@ -673,6 +673,32 @@ public class IndexingRequestDao implements IndexingRequestStore {
   }
 
   @Override
+  public boolean releaseOwned(UUID id, String ownerId, Instant now) {
+    // No attempts arithmetic at all, and that is the difference from handBack: the attempt was
+    // spent on claim and stays spent. Nulling owner_id is what makes the next claim count, since
+    // claim only holds the counter flat while the row still names the same owner.
+    int released =
+        jdbi.withHandle(
+            h ->
+                h.createUpdate(
+                        """
+                        UPDATE indexing_requests
+                        SET owner_id = NULL, updated_at = :now
+                        WHERE id = :id
+                          AND owner_id = :owner
+                          AND status IN ('PENDING', 'PROCESSING')
+                        """)
+                    .bindByType("now", toUtcWallClock(now), LocalDateTime.class)
+                    .bind("id", id)
+                    .bind("owner", ownerId)
+                    .execute());
+    if (released > 0) {
+      LOG.warn("Released request {} after the run holding it was cut loose", id);
+    }
+    return released > 0;
+  }
+
+  @Override
   public boolean holdsLease(UUID id, String ownerId, Instant now) {
     return jdbi.withHandle(
         h ->

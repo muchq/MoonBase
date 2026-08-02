@@ -402,6 +402,15 @@ public class IndexWorker {
         // Resolve titles (deduped, bounded by the extraction pool size) before extraction work is
         // submitted, so the pool is otherwise idle and total chess.com concurrency stays capped.
         TitleResolution titleResolution = resolveTitles(games, titleCache);
+        // The third span that blocks, and it swallows the interrupt exactly like the fetch above:
+        // it marks itself degraded and returns a usable map, because a title lookup must never
+        // fail indexing. Walking on from here is worse than it looks. The drain below cannot catch
+        // the interrupt for us — a future that has already completed returns from get() without
+        // ever checking the flag — so every game is submitted to the shared pool, and a month at
+        // BATCH_SIZE flushes a partial batch mid-loop. That flush is fenced but not refused: the
+        // ceiling stops the heartbeat, it does not expire the lease, so for the next LEASE this
+        // run still owns the row and the write lands. Stop before anything is submitted.
+        ensureNotInterrupted(message.requestId());
         Map<String, String> titles = titleResolution.titles();
 
         // Submit each surviving game to the extraction pool, preserving source order.
@@ -511,6 +520,7 @@ public class IndexWorker {
                 + " left for another worker rather than recorded as a failure.",
             message.requestId(),
             e);
+        releaseAfterInterrupt(message.requestId());
       } else {
         recordFailure(message.requestId(), e);
       }
@@ -526,6 +536,34 @@ public class IndexWorker {
         // send it and does not know what it means.
         Thread.interrupted();
       }
+    }
+  }
+
+  /**
+   * Gives up the row an interrupted run was holding, so the next claim on it counts.
+   *
+   * <p>Leaving it owned looks harmless — the lease lapses on its own within {@link
+   * RetentionPolicy#LEASE} and any worker may then take it — and it is the one thing that turns
+   * this whole ceiling back into a no-op. {@code claim} holds {@code attempts} flat when the owner
+   * re-presents the same token, so the poller that just abandoned this run re-claims its own row a
+   * few minutes later, takes a fresh {@link RetentionPolicy#MAX_RUN}, and wedges again on a counter
+   * that has not moved. Nothing ever retires it, and for as long as it loops its live lease answers
+   * "yes, someone is working" on behalf of the entire fleet. The bound this class advertises would
+   * exist and bound nothing.
+   *
+   * <p>Not through {@link #fenced}: that renews on a refused write, which is the exact opposite of
+   * letting go. Best-effort — if the database is the reason this run wedged, the hourly release arm
+   * clears the owner once the lease lapses and the next claim counts then instead.
+   */
+  private void releaseAfterInterrupt(UUID requestId) {
+    try {
+      requestStore.releaseOwned(requestId, ownerId, clock.instant());
+    } catch (RuntimeException e) {
+      LOG.warn(
+          "Could not release request {} after its run was cut loose; the hourly sweep will clear"
+              + " the owner once the lease lapses.",
+          requestId,
+          e);
     }
   }
 
@@ -661,10 +699,20 @@ public class IndexWorker {
    *
    * <p>An interrupt only ends a run if what the run is blocked on honours it. The calls this worker
    * actually waits in are JDK {@code HttpClient} sends and body reads, and both return promptly
-   * when the thread is interrupted (#1282). Where the wedge is somewhere that does not — a lock
-   * held forever by another thread, a native call — this changes nothing and the ceiling still
-   * gives the request up. The two are independent on purpose: the row is recovered by the lease
-   * lapsing, not by the interrupt landing.
+   * when the thread is interrupted (#1282).
+   *
+   * <p>The unwind keys on the interrupt <em>status</em>, and the two paths leave it set for
+   * different reasons — worth naming, because only one of them is the JDK's doing. A body read
+   * surfaces as an {@code IOException} wrapping {@code InterruptedException} with the status
+   * already set. A {@code send} throws {@code InterruptedException} with the status
+   * <em>cleared</em>, and {@code Jdk11HttpClient} is what restores it before rethrowing. That
+   * restore is load-bearing for this class, not tidiness: drop it and a wedged send unwinds as an
+   * ordinary failure, which spends an attempt and blames the range.
+   *
+   * <p>Where the wedge is somewhere that honours nothing — a lock held forever by another thread, a
+   * native call — this changes nothing and the ceiling still gives the request up. The two are
+   * independent on purpose: the row is recovered by the lease lapsing, not by the interrupt
+   * landing.
    *
    * <p>Absent from the map means the run already ended. Nothing to stop, and nothing to interrupt:
    * the thread has moved on and the interrupt would land on whatever it is doing now.

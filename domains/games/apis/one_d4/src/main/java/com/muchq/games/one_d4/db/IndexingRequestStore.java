@@ -196,6 +196,29 @@ public interface IndexingRequestStore {
   boolean handBack(UUID id, String ownerId, Instant now);
 
   /**
+   * Lets go of a request this worker was cut loose from, <em>spent</em>. Returns false if {@code
+   * owner_id} no longer names this caller.
+   *
+   * <p>The counterpart to {@link #handBack}, and the difference is the whole point: a hand-back
+   * returns the attempt because the worker chose to leave, while a run stopped at {@link
+   * RetentionPolicy#MAX_RUN} was wedged, and that has to cost something or it repeats forever.
+   *
+   * <p>Clearing {@code owner_id} is what makes it cost something, which is not obvious. {@link
+   * #claim} holds {@code attempts} flat when the same owner re-claims — deliberately, so a run can
+   * renew across its own retries — and the worker that just gave a wedged run up is the same
+   * process whose poller will see the row next. Left owned, it re-claims its own abandoned request
+   * within {@link RetentionPolicy#LEASE}, takes a fresh ceiling, and wedges again on a counter that
+   * never moves: the poison arm never fires, and each cycle's live lease vouches for the whole
+   * fleet against {@link #reclaimStale}'s stalled arm. Nulling the owner puts the next claim on the
+   * {@code ELSE attempts + 1} branch whoever wins it, so three wedges retire the request instead of
+   * looping on it.
+   *
+   * <p>Stamps {@code updated_at}, so the replacement inherits a row that looks as freshly touched
+   * as it actually is rather than one already part-way to looking stalled.
+   */
+  boolean releaseOwned(UUID id, String ownerId, Instant now);
+
+  /**
    * True if {@code ownerId} still holds a live, unexpired lease on this request.
    *
    * <p>Has no production caller, and should not acquire one: asking this before a write would be a

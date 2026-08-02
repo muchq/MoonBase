@@ -284,9 +284,19 @@ wedge stops taking work entirely and does not start again until someone restarts
 would recover its rows one at a time while shedding an instance for each one. It is best-effort by
 nature — an interrupt ends a run only if what the run is blocked on honours it, which the JDK
 `HttpClient` sends and body reads a worker actually waits in do, and a lock held forever by another
-thread does not — and the row is recovered either way. A run that has been interrupted does not
-record FAILED: it was stopped, not broken, and the range goes back to the queue rather than being
-blamed for the worker.
+thread does not — and the row is recovered either way. The unwind keys on the interrupt status: a
+body read leaves it set itself, while a send throws with it cleared and `Jdk11HttpClient` restores
+it before rethrowing, which is why that restore matters here and is not just tidiness. A run that
+has been interrupted does not record FAILED: it was stopped, not broken, and the range goes back to
+the queue rather than being blamed for the worker.
+
+What it does do is let go of the row, and that is the part that keeps the ceiling honest. `claim`
+holds `attempts` flat when the same owner re-claims — deliberately, so a run can renew across its
+own retries — and the worker that just gave up a wedged run is the same process whose poller sees
+the row next. Left owned, it would re-claim its own abandoned request every five minutes, take a
+fresh ceiling, and wedge again on a counter that never moved, with each lap's live lease vouching
+for the whole fleet. So the interrupt path clears `owner_id` without returning the attempt: three
+wedges retire the request and tell the user, rather than looping on it forever.
 
 None of that covers a worker that is *leaving on purpose* either, and it can't: every arm above
 needs the owner to have stopped answering, which a deploy only looks like after the lease expires.

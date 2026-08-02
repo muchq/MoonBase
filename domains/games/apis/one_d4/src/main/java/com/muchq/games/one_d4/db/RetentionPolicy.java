@@ -113,8 +113,10 @@ public final class RetentionPolicy {
    * instance holding a wedged run stops taking work until someone restarts it, so a fleet would
    * recover its rows one at a time while shedding a worker for each one. It is best-effort by
    * nature: it ends the run only if whatever the run is blocked on honours an interrupt, which the
-   * JDK {@code HttpClient} sends and body reads this worker actually waits in do (#1282), and a
-   * lock held forever by another thread does not. The row is recovered either way.
+   * JDK {@code HttpClient} sends and body reads this worker actually waits in do (#1282) — a body
+   * read leaves the interrupt status set itself, while a send throws with it cleared and {@code
+   * Jdk11HttpClient} restores it on the way out — and a lock held forever by another thread does
+   * not. The row is recovered either way.
    *
    * <p>Neither half bounds writes. A run that crosses the ceiling with a valid lease may finish
    * what it is already inside; what it may not do is start the next month or renew its way back in.
@@ -127,9 +129,14 @@ public final class RetentionPolicy {
    * a message blaming the range. So it is set where crossing it is evidence of a fault rather than
    * of a big request, and crossing it is logged as one.
    *
-   * <p>Must exceed {@link #STALE_REQUEST}, or a released run's replacement inherits a row already
-   * old enough for the stalled arm. Asserted in {@code IndexE2ETest} rather than here, where a
-   * violation would surface as an {@code ExceptionInInitializerError} during Micronaut startup.
+   * <p>Must exceed {@link #STALE_REQUEST} — though not for the reason it first looks like. The
+   * replacement does not inherit an aged row: the heartbeat stamps {@code updated_at} on every
+   * beat, and {@link IndexingRequestStore#releaseOwned} stamps it again on the way out. It is that
+   * a ceiling below the staleness window would cut runs short of the very window the system uses to
+   * decide whether anything is happening at all, which is incoherent — a run still going is the
+   * clearest evidence there is that something is. Asserted in {@code IndexE2ETest} rather than
+   * here, where a violation would surface as an {@code ExceptionInInitializerError} during
+   * Micronaut startup.
    */
   public static final Duration MAX_RUN = Duration.ofHours(6);
 

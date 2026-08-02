@@ -31,15 +31,19 @@ import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -257,7 +261,15 @@ public class RequestLivenessTest {
 
     CountDownLatch insideFetch = new CountDownLatch(1);
     CountDownLatch releaseFetch = new CountDownLatch(1);
-    IndexWorker wedged = blockingWorker(dao, insideFetch, releaseFetch);
+    // Deliberately a fetch that ignores the interrupt rather than one that restores it. A fixture
+    // that restores the status hands the run to the nearest checkpoint, which unwinds it before it
+    // reaches a single fenced write — so the test passes with the cap deleted, which is exactly
+    // what this one was doing until the panel caught it.
+    IndexWorker wedged =
+        newWorker(
+            new InterruptIgnoringChessClient(insideFetch, releaseFetch),
+            dao,
+            Duration.ofMillis(20));
     Future<?> run = workerExecutor.submit(() -> wedged.process(message(requestId)));
     assertThat(insideFetch.await(15, TimeUnit.SECONDS)).isTrue();
 
@@ -265,11 +277,16 @@ public class RequestLivenessTest {
     assertThat(dao.awaitRenewalsToStop()).as("the ceiling should have fired").isTrue();
     // Nobody has taken the row, so owner_id still names this worker — which is exactly what makes
     // fenced()'s recovery renewal succeed if it is not also capped.
+    int renewalsAtCeiling = dao.renewals();
 
-    // The fetch finally returns and the run tries to carry on writing.
+    // The fetch finally returns, with no interrupt for the run to notice, and the run walks on to
+    // its terminal write under a lapsed lease it still owns.
     releaseFetch.countDown();
     run.get(15, TimeUnit.SECONDS);
 
+    assertThat(dao.renewals())
+        .as("fenced() must not renew a run back in past its own ceiling")
+        .isEqualTo(renewalsAtCeiling);
     assertThat(dao.holdsLease(requestId, wedged.ownerId(), clock.instant()))
         .as("a run past the ceiling must not reassert the lease its own ceiling took away")
         .isFalse();
@@ -313,6 +330,45 @@ public class RequestLivenessTest {
     assertThat(queuedStatus)
         .as("nothing has run for hours, and the wedged lease must stop hiding that")
         .isEqualTo("FAILED");
+  }
+
+  /**
+   * The converse, and the reason the arm above is qualified rather than a plain age check: a run
+   * that is merely slow must go on vouching for the fleet.
+   *
+   * <p>Without this the test above passes against a stalled arm that ignores leases altogether,
+   * which would retire every queued request behind any long-running one. The clock moves past
+   * {@link RetentionPolicy#STALE_REQUEST} — so the queued sibling is old enough to be eligible on
+   * age — but not past the ceiling, so the heartbeat is still beating and the lease is still live.
+   */
+  @Test
+  public void aSlowRunUnderTheCeilingKeepsVouchingForTheFleet() throws Exception {
+    TestDb testDb = TestDb.create("liveness_ceiling_fleet_live");
+    CountingDao dao = new CountingDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    IndexingRequestStore.Claim queued =
+        dao.createOrAdopt(
+            "waiting", PLATFORM, MONTH, MONTH, false, false, STALE_AFTER, clock.instant());
+
+    CountDownLatch insideFetch = new CountDownLatch(1);
+    CountDownLatch releaseFetch = new CountDownLatch(1);
+    IndexWorker slow = blockingWorker(dao, insideFetch, releaseFetch);
+    workerExecutor.submit(() -> slow.process(message(requestId)));
+    assertThat(insideFetch.await(15, TimeUnit.SECONDS)).isTrue();
+
+    clock.advance(STALE_AFTER.plus(Duration.ofMinutes(1)));
+    assertThat(awaitRenewalAtOrAfter(dao, requestId, clock.instant().minus(RetentionPolicy.LEASE)))
+        .as("the heartbeat is still beating, so this run still holds a live lease")
+        .isTrue();
+
+    dao.reclaimStale(STALE_AFTER, clock.instant());
+    String queuedStatus = dao.findById(queued.request().id()).orElseThrow().status();
+    releaseFetch.countDown();
+
+    assertThat(queuedStatus)
+        .as("a slow run is a backlog, not an outage: the queue behind it must keep waiting")
+        .isEqualTo("PENDING");
   }
 
   // --- #1282 option 2: cutting the wedged run loose
@@ -416,6 +472,128 @@ public class RequestLivenessTest {
     assertThat(dao.findById(wedgedId).orElseThrow().status())
         .as("and the request that was stuck was picked up again and finished")
         .isEqualTo("COMPLETED");
+  }
+
+  /**
+   * A wedge that never clears has to retire the request, not loop on it.
+   *
+   * <p>Option 2 is what makes this reachable: before it, a wedged run never returned, so the poller
+   * never came back for the row. Now it does — and it is the same process, presenting the same
+   * token to a {@link IndexingRequestStore#claim} that deliberately holds {@code attempts} flat for
+   * its own holder so a run can renew across its own retries. Leave the row owned on the way out
+   * and that kindness becomes the bug: the poller re-claims its own abandoned request every {@link
+   * RetentionPolicy#LEASE}, takes a fresh ceiling, and wedges again on a counter that never moves.
+   * Nothing retires it, and each lap's live lease tells the stalled arm the fleet is fine — which
+   * is the very thing the ceiling exists to stop.
+   *
+   * <p>The sibling test above uses a client that succeeds on the second fetch, because its subject
+   * is the worker coming back. This one uses a peer that is never coming back, because its subject
+   * is the counter.
+   */
+  @Test
+  public void aRequestThatWedgesEveryRunItGetsIsRetiredRatherThanLoopingForever() throws Exception {
+    TestDb testDb = TestDb.create("liveness_ceiling_poison");
+    IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    PermanentlyWedgedChessClient client = new PermanentlyWedgedChessClient();
+    IndexWorker worker = newWorker(client, dao, Duration.ofMillis(20));
+    IndexWorkerLifecycle lifecycle =
+        new IndexWorkerLifecycle(new InMemoryIndexQueue(), worker, dao, clock);
+    Callable<Boolean> onePoll = lifecycle::claimAndRunOne;
+
+    List<Integer> attemptsPerCycle = new ArrayList<>();
+    for (int cycle = 1; cycle <= IndexingRequestStore.MAX_ATTEMPTS; cycle++) {
+      Future<Boolean> run = workerExecutor.submit(onePoll);
+      assertThat(client.awaitFetches(cycle)).as("cycle %s reaches the wedge", cycle).isTrue();
+      attemptsPerCycle.add(dao.findById(requestId).orElseThrow().attempts());
+      clock.advance(RetentionPolicy.MAX_RUN.plus(RetentionPolicy.LEASE));
+      assertThat(run.get(30, TimeUnit.SECONDS)).as("cycle %s ran a request", cycle).isTrue();
+    }
+
+    assertThat(attemptsPerCycle)
+        .as("every wedge must cost an attempt; a flat counter is a request that loops forever")
+        .isEqualTo(List.of(1, 2, 3));
+    assertThat(workerExecutor.submit(onePoll).get(15, TimeUnit.SECONDS))
+        .as("and a request whose attempts are spent is not claimable again")
+        .isFalse();
+
+    dao.reclaimStale(STALE_AFTER, clock.instant());
+    assertThat(dao.findById(requestId).orElseThrow().status())
+        .as("so the poison arm can finally answer the user instead of the wedge repeating")
+        .isEqualTo("FAILED");
+  }
+
+  /**
+   * The month is not extracted when the interrupt lands during title resolution.
+   *
+   * <p>{@code resolveTitles} is the third span that blocks, and it absorbs an interrupt by design —
+   * title enrichment must never fail indexing, so it marks itself degraded and returns a usable
+   * map. Walking on from there is worse than it looks, and the reason is not obvious: the drain
+   * loop below cannot catch the interrupt on our behalf, because a {@link Future} that has already
+   * completed returns from {@code get()} without ever checking the flag. So every game is submitted
+   * to the shared pool, and a month at {@code BATCH_SIZE} flushes a partial batch mid-loop, before
+   * the pre-flush checkpoint is ever reached. That flush is fenced but not refused — the ceiling
+   * stops the heartbeat, it does not expire the lease, so the run still owns the row for another
+   * {@link RetentionPolicy#LEASE}.
+   *
+   * <p>Interrupted directly rather than through the ceiling, and with the heartbeat parked at an
+   * hour, so what is under test is the checkpoint and not the clock.
+   *
+   * <p>Counted on <em>submission</em> rather than on extraction finishing, and the difference is
+   * the whole test. An earlier version asserted that no game was extracted, and that passes with
+   * the checkpoint deleted: the drain loop's first {@code get()} lands on a future that has not
+   * completed yet, so it checks the flag, throws, and the rest are cancelled. Whether any
+   * extraction completes is a race the run usually wins. What is not a race is the submitting —
+   * without the checkpoint every game goes to the pool before anything can stop it.
+   */
+  @Test
+  public void anInterruptedRunDoesNotSubmitTheMonthItWasResolvingTitlesFor() throws Exception {
+    TestDb testDb = TestDb.create("liveness_interrupt_titles");
+    IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    CountDownLatch insideLookup = new CountDownLatch(1);
+    WedgedProfileChessClient client = new WedgedProfileChessClient(insideLookup);
+    CountingExecutor pool = new CountingExecutor(2);
+    try {
+      IndexWorker worker =
+          new IndexWorker(
+              client,
+              new FeatureExtractor(
+                  new PgnParser(), new GameReplayer(), List.of(new CheckDetector())),
+              dao,
+              new NoOpGameFeatureStore(),
+              new RecordingPeriodStore(),
+              pool,
+              clock,
+              Duration.ofHours(1));
+
+      AtomicReference<Thread> runThread = new AtomicReference<>();
+      Future<?> run =
+          workerExecutor.submit(
+              () -> {
+                runThread.set(Thread.currentThread());
+                worker.process(message(requestId));
+              });
+      assertThat(insideLookup.await(15, TimeUnit.SECONDS))
+          .as("a profile lookup should be parked on the pool")
+          .isTrue();
+      // resolveTitles submits every lookup before it drains any of them, so by the time one is
+      // running the title phase has finished submitting and this number has stopped moving.
+      int submittedForTitles = pool.submissions();
+
+      runThread.get().interrupt();
+      run.get(30, TimeUnit.SECONDS);
+
+      assertThat(pool.submissions())
+          .as(
+              "a run told to stop must not go on to hand the whole month to the pool, which is"
+                  + " what flushes partial rows under a lease that has not lapsed yet")
+          .isEqualTo(submittedForTitles);
+    } finally {
+      pool.shutdownNow();
+    }
   }
 
   /**
@@ -1004,6 +1182,104 @@ public class RequestLivenessTest {
   }
 
   /**
+   * A fetch that never returns on its own and never honours an interrupt.
+   *
+   * <p>The distinction from {@code ClockJumpingChessClient} is the whole point. A fixture that
+   * restores the interrupt status hands the run to the nearest checkpoint, which unwinds it before
+   * it can attempt a single write — so a cap on {@code fenced()} is unreachable and a test built on
+   * one passes whether the cap exists or not. This one absorbs the interrupt entirely, which is
+   * what a library that catches {@link InterruptedException} and returns normally looks like from
+   * the run's side, and it leaves the run walking on to its terminal write past the ceiling.
+   */
+  private static final class InterruptIgnoringChessClient extends ChessClient {
+    private final CountDownLatch entered;
+    private final CountDownLatch release;
+
+    InterruptIgnoringChessClient(CountDownLatch entered, CountDownLatch release) {
+      super(null, new ObjectMapper());
+      this.entered = entered;
+      this.release = release;
+    }
+
+    @Override
+    public Optional<GamesResponse> fetchGames(String player, YearMonth yearMonth) {
+      entered.countDown();
+      while (true) {
+        try {
+          release.await();
+          return Optional.empty();
+        } catch (InterruptedException e) {
+          // Swallowed and deliberately not restored. Re-awaiting rather than returning is what
+          // keeps the run inside the call until the test lets it out.
+        }
+      }
+    }
+
+    @Override
+    public Optional<Player> fetchPlayer(String player) {
+      return Optional.empty();
+    }
+  }
+
+  /**
+   * A peer that is never coming back: every fetch parks forever, so each run this request gets ends
+   * at the ceiling rather than finishing.
+   */
+  private static final class PermanentlyWedgedChessClient extends ChessClient {
+    private final AtomicInteger fetches = new AtomicInteger();
+    private final CountDownLatch neverReleased = new CountDownLatch(1);
+
+    PermanentlyWedgedChessClient() {
+      super(null, new ObjectMapper());
+    }
+
+    @Override
+    public Optional<GamesResponse> fetchGames(String player, YearMonth yearMonth) {
+      fetches.incrementAndGet();
+      try {
+        neverReleased.await();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+      return Optional.empty();
+    }
+
+    @Override
+    public Optional<Player> fetchPlayer(String player) {
+      return Optional.empty();
+    }
+
+    boolean awaitFetches(int target) throws InterruptedException {
+      for (int i = 0; i < 300; i++) {
+        if (fetches.get() >= target) {
+          return true;
+        }
+        Thread.sleep(50);
+      }
+      return false;
+    }
+  }
+
+  /** An extraction pool that counts what was handed to it. */
+  private static final class CountingExecutor extends ThreadPoolExecutor {
+    private final AtomicInteger submissions = new AtomicInteger();
+
+    CountingExecutor(int threads) {
+      super(threads, threads, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
+    }
+
+    @Override
+    public <T> Future<T> submit(Callable<T> task) {
+      submissions.incrementAndGet();
+      return super.submit(task);
+    }
+
+    int submissions() {
+      return submissions.get();
+    }
+  }
+
+  /**
    * A real DAO that counts renewals, so a test can assert the heartbeat <em>stopped</em>.
    *
    * <p>Reading the lease column instead does not work, and the reason is worth recording: between
@@ -1038,6 +1314,10 @@ public class RequestLivenessTest {
         }
       }
       return false;
+    }
+
+    int renewals() {
+      return renewals.get();
     }
   }
 
@@ -1419,6 +1699,12 @@ public class RequestLivenessTest {
 
     @Override
     public boolean handBack(UUID id, String ownerId, Instant now) {
+
+      return false;
+    }
+
+    @Override
+    public boolean releaseOwned(UUID id, String ownerId, Instant now) {
 
       return false;
     }
