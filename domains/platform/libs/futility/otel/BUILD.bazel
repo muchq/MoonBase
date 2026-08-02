@@ -1,5 +1,9 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
+# Read as text by //domains/platform/libs/otel_contract, which pins this rail's
+# latency bucket bounds equal to yodel's and server_pal's.
+exports_files(["otel_provider.h"])
+
 cc_library(
     name = "otel_provider",
     srcs = ["otel_provider.cc"],

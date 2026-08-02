@@ -70,6 +70,17 @@ class TracerService {
                             const std::vector<std::uint8_t>& png_bytes);
 
  private:
+  /// Records spheres and lights for one accepted request, labelled by whether
+  /// the render cache answered it.
+  ///
+  /// Called on both paths deliberately. It used to run only after the cache
+  /// miss, which made `avg_spheres_1h` a mean over renders rather than over
+  /// requests — a defensible number under a label that claimed the other one,
+  /// and one that drifts further from offered load as the hit rate climbs. At
+  /// portrait's observed 50% hit rate the panel described half the traffic
+  /// (#1287). The label lets the dashboard ask for either.
+  void recordSceneComplexity(const Scene& scene, bool cache_hit);
+
   tracy::Scene toTracyScene(Scene& scene, const Output& output);
   std::vector<tracy::Sphere> tracify(const std::vector<Sphere>& spheres);
   std::vector<tracy::Light> tracify(const std::vector<Light>& lights);

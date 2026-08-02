@@ -88,12 +88,28 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// An absent view is the default; a present one has to be a view this
+	// package builds queries for. Rejected rather than defaulted, for the
+	// reason the time range is: silently answering a different question than
+	// the one asked is worse than a 400, and a typo in a toggle is invisible
+	// once the number renders.
+	view := DefaultView
+	if raw := r.URL.Query().Get("view"); raw != "" {
+		if !ValidView(raw) {
+			problem := mucks.NewBadRequest("Invalid view. Valid options: count, rate")
+			mucks.JsonError(w, problem)
+			return
+		}
+		view = MetricView(raw)
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
 	response := &ServiceMetricsResponse{
 		Timestamp: time.Now().UTC(),
 		Service:   name,
+		View:      string(view),
 		Custom:    []CustomMetricGroup{},
 	}
 
@@ -111,7 +127,7 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 	groupIndex := map[string]int{}
 	for _, def := range entry.CustomScalars {
 		value := 0.0
-		resp, err := h.promClient.Query(ctx, def.Query)
+		resp, err := h.promClient.Query(ctx, def.QueryFor(view))
 		if err == nil && len(resp.Data.Result) > 0 {
 			if val, err := extractFloatValue(&resp.Data.Result[0]); err == nil {
 				value = val
@@ -124,9 +140,10 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 			response.Custom = append(response.Custom, CustomMetricGroup{Title: def.Group})
 		}
 		response.Custom[i].Metrics = append(response.Custom[i].Metrics, CustomMetricValue{
-			Label: def.Label,
-			Value: value,
-			Unit:  def.Unit,
+			Label:      def.Label,
+			Value:      value,
+			Unit:       def.UnitFor(view),
+			Toggleable: def.Toggleable(),
 		})
 	}
 

@@ -1,6 +1,10 @@
 load("@crates//:defs.bzl", "all_crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
+# Read as text by //domains/platform/libs/otel_contract, which pins this rail's
+# latency bucket bounds equal to yodel's and futility/otel's.
+exports_files(["src/lib.rs"])
+
 rust_library(
     name = "server_pal",
     srcs = [

@@ -11,7 +11,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
 use opentelemetry_otlp::{MetricExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
+use opentelemetry_sdk::metrics::{Aggregation, Instrument, PeriodicReader, SdkMeterProvider, Stream};
 use std::env;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -25,6 +25,27 @@ use tower_http::trace::TraceLayer;
 use tower_http::validate_request::ValidateRequestHeaderLayer;
 
 const DEFAULT_PORT: u16 = 8080;
+
+/// Explicit bucket boundaries, in microseconds, for latency histograms —
+/// 100µs to 10s.
+///
+/// Without a view the SDK applies its own defaults (0, 5, 10, ... 10000),
+/// which are shaped for milliseconds. `http_server_request_duration_
+/// microseconds` records microseconds, so that top finite bucket meant 10ms:
+/// every slower request landed in +Inf, and `histogram_quantile` answers the
+/// highest finite bound when the rank falls there, so p95 read a flat 10000
+/// however slow the service actually was (#1286). Seen in production on
+/// portrait at a real p95 near a second (#1287).
+///
+/// yodel (Java, `HttpServerMetrics.BUCKET_BOUNDS`) and futility/otel (C++,
+/// `kHttpLatencyBucketBoundsMicros`) declare this same set. prom_proxy runs one
+/// `histogram_quantile` expression across all three languages, which only
+/// compares like with like if the layouts match — so the three move together or
+/// not at all. `//domains/platform/libs/otel_contract` pins them equal.
+pub const HTTP_LATENCY_BUCKET_BOUNDS_MICROS: [f64; 15] = [
+    100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0, 25000.0, 50000.0, 100000.0, 250000.0,
+    500000.0, 1000000.0, 2500000.0, 10000000.0,
+];
 
 static HTTP_REQUESTS: OnceLock<Counter<u64>> = OnceLock::new();
 static HTTP_SUCCESS: OnceLock<Counter<u64>> = OnceLock::new();
@@ -93,9 +114,35 @@ pub fn init_otel() -> Option<SdkMeterProvider> {
 
     // Resource::builder() picks up OTEL_SERVICE_NAME and
     // OTEL_RESOURCE_ATTRIBUTES via the built-in EnvResourceDetector.
+    // Matched on the suffix rather than on the one HTTP instrument name: any
+    // histogram whose name says it holds microseconds wants this layout, and
+    // pinning the single name would leave the next one to rediscover #1286.
+    // Nothing here records a non-latency quantity under that suffix.
+    //
+    // build() returns Err only for a malformed stream (unsorted or empty
+    // boundaries), which for a const array is a compile-time-shaped mistake
+    // rather than a runtime one. .ok() therefore reads as "no view" — the
+    // silent default-bucket path this exists to eliminate — so it is
+    // deliberately not used: a broken constant should be loud.
+    let latency_buckets = |i: &Instrument| {
+        if !i.name().ends_with("_microseconds") {
+            return None;
+        }
+        Some(
+            Stream::builder()
+                .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                    boundaries: HTTP_LATENCY_BUCKET_BOUNDS_MICROS.to_vec(),
+                    record_min_max: true,
+                })
+                .build()
+                .expect("HTTP_LATENCY_BUCKET_BOUNDS_MICROS must be a valid histogram layout"),
+        )
+    };
+
     let provider = SdkMeterProvider::builder()
         .with_reader(PeriodicReader::builder(exporter).build())
         .with_resource(Resource::builder().build())
+        .with_view(latency_buckets)
         .build();
 
     opentelemetry::global::set_meter_provider(provider.clone());

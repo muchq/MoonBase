@@ -61,45 +61,71 @@ public class HttpServerMetricsTest {
   public void durationsLandInUpperInclusiveBuckets() {
     HttpServerMetrics metrics = new HttpServerMetrics("svc", 0L);
     metrics.recordRequestStart("GET");
-    metrics.recordRequestComplete("GET", 200, 5.0); // on the boundary: bucket for <=5
+    metrics.recordRequestComplete("GET", 200, 100.0); // on the boundary: bucket for <=100
     metrics.recordRequestStart("GET");
-    metrics.recordRequestComplete("GET", 200, 6.0); // bucket for <=10
+    metrics.recordRequestComplete("GET", 200, 101.0); // bucket for <=250
     metrics.recordRequestStart("GET");
-    metrics.recordRequestComplete("GET", 200, 20_000.0); // overflow bucket
+    metrics.recordRequestComplete("GET", 200, 20_000_000.0); // 20s: overflow bucket
 
     long[] buckets = metrics.snapshot().get(0).bucketCounts();
     assertThat(buckets).hasSize(HttpServerMetrics.BUCKET_BOUNDS.length + 1);
-    assertThat(buckets[1]).isEqualTo(1); // (0, 5]
-    assertThat(buckets[2]).isEqualTo(1); // (5, 10]
-    assertThat(buckets[buckets.length - 1]).isEqualTo(1); // (10000, +Inf)
+    assertThat(buckets[0]).isEqualTo(1); // [0, 100]
+    assertThat(buckets[1]).isEqualTo(1); // (100, 250]
+    assertThat(buckets[buckets.length - 1]).isEqualTo(1); // (10000000, +Inf)
   }
 
   /**
-   * The HTTP bounds are wrong and may not be fixed here alone (#1286).
+   * The #1286 regression, replayed as the traffic that exposed it (#1287).
    *
-   * <p>They are the OTel SDK defaults, which are shaped for milliseconds; this emitter records
-   * microseconds, so the top bound is 10ms and every p95 tile is capped there. The Rust
-   * (server_pal) and C++ (futility/otel) emitters inherit the same defaults from their SDKs and
-   * record microseconds too, and prom_proxy charts all three through one shared PromQL expression.
-   * Widening Java's array on its own would leave those services answering the same query on a
-   * different bucket layout — a worse state than the one it fixes, and a silent one.
+   * <p>Against the old millisecond-shaped defaults the top finite bound was 10000 — 10ms, read as
+   * microseconds — so both batches below landed in {@code +Inf} together. {@code
+   * histogram_quantile} answers the highest finite bound when the rank falls in the overflow
+   * bucket, so p95 read a flat 10000 whether the service was serving in 8ms or in a second. That is
+   * the whole defect: not a chart that breaks, a chart that lies and holds steady while doing it.
    *
-   * <p>So this test does not assert the bounds are right. It asserts they still match the defaults
-   * the other two emitters get, and fails the moment Java drifts alone.
+   * <p>Asserted as separation rather than as placement. Pinning "the 1s requests are in bucket 12"
+   * passes against any layout that happens to have twelve slots below a second; what has to be true
+   * is that the fast batch and the slow batch land in <em>different, finite</em> buckets, because
+   * that is the only property a quantile can read.
    */
   @Test
-  public void httpBoundsStayMatchedToTheOtherEmittersUntilAllThreeMove() {
-    double[] otelSdkDefaults = {
-      0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000
-    };
+  public void aSecondLongRequestNoLongerFallsOffTheTopOfTheHistogram() {
+    HttpServerMetrics metrics = new HttpServerMetrics("portrait", 0L);
+    // The two batches from #1287: 11 light requests around 8.6ms, 5 heavy ones around 1s.
+    for (int i = 0; i < 11; i++) {
+      metrics.recordRequestStart("POST");
+      metrics.recordRequestComplete("POST", 200, 8_669.5);
+    }
+    for (int i = 0; i < 5; i++) {
+      metrics.recordRequestStart("POST");
+      metrics.recordRequestComplete("POST", 200, 1_000_000.0);
+    }
 
-    assertThat(HttpServerMetrics.BUCKET_BOUNDS)
-        .as(
-            "yodel's HTTP bounds no longer match the OTel SDK defaults that server_pal (Rust) and "
-                + "futility/otel (C++) inherit. If this is the #1286 fix, it has to land in all "
-                + "three emitters together — prom_proxy's p95 query spans them. If it is not, "
-                + "Java services have quietly become incomparable to every other service.")
-        .isEqualTo(otelSdkDefaults);
+    long[] buckets = metrics.snapshot().get(0).bucketCounts();
+    int light = bucketIndexFor(8_669.5);
+    int heavy = bucketIndexFor(1_000_000.0);
+
+    assertThat(heavy)
+        .as("a 1s request must land in a finite bucket, not the overflow slot p95 collapses onto")
+        .isLessThan(HttpServerMetrics.BUCKET_BOUNDS.length);
+    assertThat(light)
+        .as("8.6ms and 1s have to be distinguishable, or no quantile between them can be right")
+        .isLessThan(heavy);
+    assertThat(buckets[light]).isEqualTo(11);
+    assertThat(buckets[heavy]).isEqualTo(5);
+    assertThat(buckets[buckets.length - 1])
+        .as("nothing in a realistic HTTP workload belongs past the top bound")
+        .isZero();
+  }
+
+  /** Upper-inclusive first match, the same rule {@code HttpServerMetrics} buckets by. */
+  private static int bucketIndexFor(double micros) {
+    for (int i = 0; i < HttpServerMetrics.BUCKET_BOUNDS.length; i++) {
+      if (micros <= HttpServerMetrics.BUCKET_BOUNDS[i]) {
+        return i;
+      }
+    }
+    return HttpServerMetrics.BUCKET_BOUNDS.length;
   }
 
   @Test
