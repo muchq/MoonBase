@@ -320,7 +320,7 @@ public class IndexWorker {
     RunHandle handle = new RunHandle(Thread.currentThread());
     runHandles.put(message.requestId(), handle);
     ScheduledFuture<?> heartbeat = startHeartbeat(message.requestId());
-    boolean stoppedByAForeignInterrupt = false;
+    boolean abandonedBecauseInterrupted = false;
     try {
       progress(message.requestId(), 0);
 
@@ -521,7 +521,7 @@ public class IndexWorker {
                 + " left for another worker rather than recorded as a failure.",
             message.requestId(),
             e);
-        stoppedByAForeignInterrupt = true;
+        abandonedBecauseInterrupted = true;
       } else {
         recordFailure(message.requestId(), e);
       }
@@ -548,7 +548,13 @@ public class IndexWorker {
       //
       // Ordered after the status is cleared: releasing is a database write, and handing it a
       // thread that is still flagged invites the driver to fail it for the wrong reason.
-      if (weInterruptedThisRun || stoppedByAForeignInterrupt) {
+      //
+      // The two terms overlap without either containing the other. The first is true whenever our
+      // ceiling fired, however the run then unwound — including the LeaseLostException route,
+      // which never reaches the catch that sets the second. The second is true whenever the run
+      // unwound as interrupted, including on an interrupt this worker did not send, where the
+      // first is false.
+      if (weInterruptedThisRun || abandonedBecauseInterrupted) {
         releaseAfterInterrupt(message.requestId());
       }
     }
