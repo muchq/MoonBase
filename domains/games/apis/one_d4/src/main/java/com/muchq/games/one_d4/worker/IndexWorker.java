@@ -129,6 +129,26 @@ public class IndexWorker {
   }
 
   /**
+   * When each in-flight run stops being allowed to renew (#1282).
+   *
+   * <p>Keyed by request rather than held in a field because one process runs several at once, and
+   * the two things that consult it are far apart: the heartbeat, on its own scheduler thread, and
+   * {@link #fenced}, which is called from deep inside the month loop and has nothing but a request
+   * id to go on.
+   */
+  private final Map<UUID, Instant> renewalDeadlines = new ConcurrentHashMap<>();
+
+  /**
+   * True once this run has been going long enough that its own liveness is no longer evidence of
+   * anything. Absent means no ceiling applies — an inline run this worker never claimed, or one
+   * already unwound.
+   */
+  private boolean pastRenewalCeiling(UUID requestId) {
+    Instant deadline = renewalDeadlines.get(requestId);
+    return deadline != null && !clock.instant().isBefore(deadline);
+  }
+
+  /**
    * How often the lease is renewed. Paced against {@link RetentionPolicy#LEASE}, not against {@link
    * RetentionPolicy#STALE_REQUEST}: the hour is how long an <em>unclaimed</em> row may sit before
    * it is presumed orphaned, and beating on that schedule against a five-minute lease would let
@@ -246,6 +266,7 @@ public class IndexWorker {
       return;
     }
 
+    renewalDeadlines.put(message.requestId(), clock.instant().plus(RetentionPolicy.MAX_RUN));
     ScheduledFuture<?> heartbeat = startHeartbeat(message.requestId());
     try {
       progress(message.requestId(), 0);
@@ -431,6 +452,7 @@ public class IndexWorker {
       }
     } finally {
       heartbeat.cancel(false);
+      renewalDeadlines.remove(message.requestId());
     }
   }
 
@@ -455,6 +477,20 @@ public class IndexWorker {
     return heartbeatScheduler.scheduleWithFixedDelay(
         () -> {
           try {
+            if (pastRenewalCeiling(requestId)) {
+              // Loudly, and at ERROR: nothing legitimate reaches this. A twelve-month range for a
+              // prolific player is minutes against a healthy chess.com, so a run still going after
+              // MAX_RUN is a wedge — a hung socket, a deadlocked pool, an unbounded retry — and
+              // the request is about to cost an attempt because of it. Whoever reads this needs to
+              // go and look at the worker, not at the request.
+              LOG.error(
+                  "Request {} has been running for {} without finishing. Releasing the lease: a"
+                      + " run this long is a stuck worker, and holding it open strands this range"
+                      + " and hides every other queued request from the staleness sweep.",
+                  requestId,
+                  RetentionPolicy.MAX_RUN);
+              throw new CancellationException("run exceeded the renewal ceiling");
+            }
             if (!requestStore.renewLease(
                 requestId, ownerId, RetentionPolicy.LEASE, clock.instant())) {
               LOG.warn(
@@ -679,6 +715,20 @@ public class IndexWorker {
   private boolean fenced(UUID requestId, java.util.function.BooleanSupplier write, String what) {
     if (write.getAsBoolean()) {
       return true;
+    }
+    if (pastRenewalCeiling(requestId)) {
+      // The recovery above is exactly wrong here, and this is the half of #1282 that is easy to
+      // miss. Nobody has necessarily taken this row — the heartbeat gave it up on purpose — so
+      // owner_id still names us and the renewal below would succeed, restoring the lease the
+      // ceiling just took away and putting the run straight back to holding the range. Capping
+      // only the heartbeat looks like a fix and is not one.
+      LOG.warn(
+          "Not renewing request {} so that {}: this run is past the {} ceiling and has given the"
+              + " request up.",
+          requestId,
+          what,
+          RetentionPolicy.MAX_RUN);
+      return false;
     }
     if (!requestStore.renewLease(requestId, ownerId, RetentionPolicy.LEASE, clock.instant())) {
       return false;

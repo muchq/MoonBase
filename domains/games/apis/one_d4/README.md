@@ -268,7 +268,16 @@ match wins. A row at the attempt limit is usually also old and unheld, and both 
 but only one gives the user the real reason; and requeuing stamps `updated_at`, so doing it first
 would make a row look freshly touched and hide it from the staleness check for another whole hour.
 
-None of that covers a worker that is *leaving on purpose*, and it can't: every arm above needs the
+None of the three covers a worker that is *alive but not getting anywhere*, and no better probe
+could: a run wedged on a hung socket renews from its heartbeat thread, so it answers "yes, I'm
+here" honestly while going nowhere. Worse, the stalled arm asks whether **any** worker holds a live
+lease, so one wedged run vouches for the entire fleet and every other queued request waits in
+silence behind it. The bound is a ceiling on how long one claim may be renewed — **6 hours**, far
+above any legitimate run. Past it the heartbeat stops, the lease lapses, and the request is
+requeued at the cost of one attempt. It caps renewal, not writes: a run that crosses the ceiling
+holding a valid lease may finish what it is already inside.
+
+None of that covers a worker that is *leaving on purpose* either, and it can't: every arm above needs the
 owner to have stopped answering, which a deploy only looks like after the lease expires. So a
 shutting-down worker hands its request back itself — unclaimed immediately, and with the attempt
 returned. The attempt matters more than the five minutes: `attempts` is spent on claim so that a

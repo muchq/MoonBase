@@ -73,8 +73,8 @@ public final class RetentionPolicy {
    * <p>Five minutes is four renewal intervals: three consecutive misses are survivable and expiry
    * lands on the fourth. Short enough that a crashed instance does not strand a range for longer
    * than a user will wait before resubmitting. It is not a timeout on the work — a request can run
-   * for hours, renewing throughout — and a lease that lapses without anyone taking it is renewed
-   * rather than abandoned, so a stalled pool costs a warning and not a run.
+   * for hours, renewing throughout, up to {@link #MAX_RUN} — and a lease that lapses without anyone
+   * taking it is renewed rather than abandoned, so a stalled pool costs a warning and not a run.
    *
    * <p>{@code IndexWorker.DEFAULT_HEARTBEAT_INTERVAL} must stay below this, and the relationship is
    * asserted in {@code IndexE2ETest} rather than left to inspection — an interval longer than the
@@ -89,6 +89,37 @@ public final class RetentionPolicy {
    * the request.
    */
   public static final Duration LEASE_RENEWAL = LEASE.dividedBy(4);
+
+  /**
+   * How long one claim may go on being renewed before the worker has to let go (#1282).
+   *
+   * <p>The third clock, and it answers the question the other two structurally cannot. {@link
+   * #LEASE} asks "is the owner still there?", which the owner answers itself by renewing, and
+   * {@link #STALE_REQUEST} asks "is anyone serving this at all?". A worker wedged mid-run — blocked
+   * forever on a hung socket, a deadlocked pool, an unbounded retry — answers yes to both,
+   * honestly: it is there, and it is serving this. Its heartbeat runs on a separate thread and
+   * keeps renewing whatever the run is doing, so no liveness probe can catch it. What is unknown is
+   * not whether the worker is alive but whether the <em>run</em> is going anywhere, and only
+   * elapsed time can speak to that.
+   *
+   * <p>Past this the heartbeat stops. The lease then lapses within {@link #LEASE} and the ordinary
+   * release path applies, so the request goes back to the queue rather than being failed outright —
+   * costing one of {@code MAX_ATTEMPTS} rather than an answer. This bounds renewal, not writes: a
+   * run that crosses the ceiling with a valid lease may finish what it is doing inside it.
+   *
+   * <p>Six hours is deliberately far above any legitimate run. A twelve-month range for a prolific
+   * player is the worst case — one archive fetch and a profile lookup per distinct opponent per
+   * month, plus replaying every game — and that is minutes, not hours, against a healthy chess.com.
+   * The cost of being wrong is asymmetric: too high only delays recovering from a wedge, while too
+   * low interrupts real work and spends an attempt doing it, three of which retire the request with
+   * a message blaming the range. So it is set where crossing it is evidence of a fault rather than
+   * of a big request, and crossing it is logged as one.
+   *
+   * <p>Must exceed {@link #STALE_REQUEST}, or a released run's replacement inherits a row already
+   * old enough for the stalled arm. Asserted in {@code IndexE2ETest} rather than here, where a
+   * violation would surface as an {@code ExceptionInInitializerError} during Micronaut startup.
+   */
+  public static final Duration MAX_RUN = Duration.ofHours(6);
 
   private RetentionPolicy() {}
 }

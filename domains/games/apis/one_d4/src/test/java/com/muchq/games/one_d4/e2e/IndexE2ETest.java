@@ -323,6 +323,24 @@ public class IndexE2ETest {
   }
 
   /**
+   * And the third clock sits above both (#1282). It is the only one that can end a run whose worker
+   * is alive but not progressing, so it must be long enough that reaching it is evidence of a fault
+   * rather than of a large request.
+   *
+   * <p>The lower bound is the load-bearing one. A run released at the ceiling hands its row to a
+   * replacement carrying an {@code updated_at} as old as the run was, so a ceiling under {@link
+   * RetentionPolicy#STALE_REQUEST} would deliver work that is already eligible for the stalled arm
+   * — the replacement would be racing a sweep that thinks nobody is serving the request. Nothing
+   * about that fails loudly; it surfaces as requests failing shortly after being requeued.
+   */
+  @Test
+  public void aRunMayOutlastEveryOtherWindowBeforeItsCeilingApplies() {
+    assertThat(RetentionPolicy.MAX_RUN).isGreaterThan(RetentionPolicy.STALE_REQUEST);
+    assertThat(RetentionPolicy.MAX_RUN).isGreaterThan(RetentionPolicy.LEASE);
+    assertThat(RetentionPolicy.MAX_RUN).isEqualTo(Duration.ofHours(6));
+  }
+
+  /**
    * A clock parked {@code offset} into the future. RetentionWorker subtracts RetentionPolicy.PERIOD
    * from it, so the resulting threshold sits {@code offset - PERIOD} either side of "now" — which
    * is what puts the rows just written on one side of the boundary or the other.

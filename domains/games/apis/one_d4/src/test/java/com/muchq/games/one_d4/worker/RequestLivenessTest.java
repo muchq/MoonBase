@@ -38,6 +38,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -181,6 +182,134 @@ public class RequestLivenessTest {
     assertThat(dao.claimNext("free-worker", RetentionPolicy.LEASE, clock.instant()))
         .as("and any worker can take it")
         .hasValueSatisfying(r -> assertThat(r.id()).isEqualTo(queued));
+  }
+
+  // --- #1282: the ceiling on a single run -----------------------------------------------------
+
+  /**
+   * The case the lease cannot reach on its own: a worker that is alive but not progressing.
+   *
+   * <p>Every reclamation arm needs the owner to have <em>stopped</em>, and a wedged run has not.
+   * Its heartbeat is a separate thread, so a run blocked forever on a hung socket read renews
+   * forever: the release arm sees an unexpired lease, the poison counter never moves because
+   * nothing re-claims it, and the stalled arm sees a live lease. No better liveness probe can fix
+   * that — the worker genuinely is alive. What is unknown is whether the <em>run</em> is going
+   * anywhere, and only a clock can answer that.
+   *
+   * <p>So renewals are bounded. Past the ceiling the heartbeat stops, the lease lapses within
+   * {@link RetentionPolicy#LEASE}, and the ordinary release path takes the request somewhere it can
+   * actually be worked on.
+   */
+  @Test
+  @Timeout(30)
+  public void aRunThatOutlivesTheCeilingLetsGoOfItsRequest() throws Exception {
+    TestDb testDb = TestDb.create("liveness_ceiling");
+    CountingDao dao = new CountingDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    CountDownLatch insideFetch = new CountDownLatch(1);
+    CountDownLatch releaseFetch = new CountDownLatch(1);
+    IndexWorker wedged = blockingWorker(dao, insideFetch, releaseFetch);
+    workerExecutor.submit(() -> wedged.process(message(requestId)));
+    assertThat(insideFetch.await(15, TimeUnit.SECONDS)).isTrue();
+
+    // Still under the ceiling: the heartbeat is doing its job and nobody else may take this.
+    clock.advance(RetentionPolicy.MAX_RUN.dividedBy(2));
+    assertThat(awaitRenewalAtOrAfter(dao, requestId, clock.instant()))
+        .as("a long run is still a live one")
+        .isTrue();
+    assertThat(dao.claimNext("rescuer", RetentionPolicy.LEASE, clock.instant()))
+        .as("a run under the ceiling must not be interrupted")
+        .isEmpty();
+
+    clock.advance(RetentionPolicy.MAX_RUN);
+    boolean stopped = dao.awaitRenewalsToStop();
+    boolean stillHeld = dao.holdsLease(requestId, wedged.ownerId(), clock.instant());
+    Optional<IndexingRequestStore.IndexingRequest> rescued =
+        dao.claimNext("rescuer", RetentionPolicy.LEASE, clock.instant());
+    releaseFetch.countDown();
+
+    assertThat(stopped).as("the heartbeat must stop once the run outlives the ceiling").isTrue();
+    assertThat(stillHeld).as("and the lease it was holding open must lapse").isFalse();
+    assertThat(rescued)
+        .as("so the work can move to a worker that will actually get through it")
+        .hasValueSatisfying(r -> assertThat(r.id()).isEqualTo(requestId));
+  }
+
+  /**
+   * And it must not renew its way back in when it wakes up.
+   *
+   * <p>{@code fenced()} renews too — deliberately, because a lapsed-but-unstolen lease normally
+   * means a stalled pool rather than a lost request, and abandoning the run there would throw away
+   * work nobody else wants. That recovery is exactly wrong past the ceiling: the run whose renewals
+   * were cut would restore its own lease at its next write and carry on holding the range, which
+   * makes the ceiling decorative. Capping only the heartbeat looks like it works and does not.
+   */
+  @Test
+  @Timeout(30)
+  public void aRunPastTheCeilingCannotRenewItsWayBackInAtTheNextWrite() throws Exception {
+    TestDb testDb = TestDb.create("liveness_ceiling_fenced");
+    CountingDao dao = new CountingDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    CountDownLatch insideFetch = new CountDownLatch(1);
+    CountDownLatch releaseFetch = new CountDownLatch(1);
+    IndexWorker wedged = blockingWorker(dao, insideFetch, releaseFetch);
+    Future<?> run = workerExecutor.submit(() -> wedged.process(message(requestId)));
+    assertThat(insideFetch.await(15, TimeUnit.SECONDS)).isTrue();
+
+    clock.advance(RetentionPolicy.MAX_RUN.plus(RetentionPolicy.LEASE));
+    assertThat(dao.awaitRenewalsToStop()).as("the ceiling should have fired").isTrue();
+    // Nobody has taken the row, so owner_id still names this worker — which is exactly what makes
+    // fenced()'s recovery renewal succeed if it is not also capped.
+
+    // The fetch finally returns and the run tries to carry on writing.
+    releaseFetch.countDown();
+    run.get(15, TimeUnit.SECONDS);
+
+    assertThat(dao.holdsLease(requestId, wedged.ownerId(), clock.instant()))
+        .as("a run past the ceiling must not reassert the lease its own ceiling took away")
+        .isFalse();
+    assertThat(dao.findById(requestId).orElseThrow().status())
+        .as("and must not finish the request it no longer holds")
+        .isNotEqualTo("COMPLETED");
+  }
+
+  /**
+   * The blast radius, which is what makes this worth fixing rather than tolerating.
+   *
+   * <p>The stalled arm asks whether any worker anywhere holds a live lease, so one wedged run does
+   * not merely strand its own range — it vouches for the whole fleet. Every other queued request
+   * stays PENDING in silence for as long as the wedge lasts, however dead everything else is. The
+   * ceiling puts a bound on that: once the wedged lease lapses, the table tells the truth again and
+   * the users waiting behind it get an answer.
+   */
+  @Test
+  @Timeout(30)
+  public void aWedgedRunStopsVouchingForADeadFleet() throws Exception {
+    TestDb testDb = TestDb.create("liveness_ceiling_fleet");
+    CountingDao dao = new CountingDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    IndexingRequestStore.Claim queued =
+        dao.createOrAdopt(
+            "waiting", PLATFORM, MONTH, MONTH, false, false, STALE_AFTER, clock.instant());
+
+    CountDownLatch insideFetch = new CountDownLatch(1);
+    CountDownLatch releaseFetch = new CountDownLatch(1);
+    IndexWorker wedged = blockingWorker(dao, insideFetch, releaseFetch);
+    workerExecutor.submit(() -> wedged.process(message(requestId)));
+    assertThat(insideFetch.await(15, TimeUnit.SECONDS)).isTrue();
+
+    clock.advance(RetentionPolicy.MAX_RUN.plus(RetentionPolicy.LEASE));
+    assertThat(dao.awaitRenewalsToStop()).isTrue();
+    dao.reclaimStale(STALE_AFTER, clock.instant());
+    String queuedStatus = dao.findById(queued.request().id()).orElseThrow().status();
+    releaseFetch.countDown();
+
+    assertThat(queuedStatus)
+        .as("nothing has run for hours, and the wedged lease must stop hiding that")
+        .isEqualTo("FAILED");
   }
 
   /** A renewal must not resurrect a request someone else already took. */
@@ -518,6 +647,44 @@ public class RequestLivenessTest {
         extractionExecutor,
         clock,
         heartbeatInterval);
+  }
+
+  /**
+   * A real DAO that counts renewals, so a test can assert the heartbeat <em>stopped</em>.
+   *
+   * <p>Reading the lease column instead does not work, and the reason is worth recording: between
+   * any two beats the stored lease is always momentarily behind a clock that has jumped, so
+   * "expired right now" is true even while the heartbeat is beating happily. A test that polls for
+   * it wins that race almost immediately and passes against an unbounded run. Counting is the only
+   * signal that distinguishes stopped from between-beats.
+   */
+  private static final class CountingDao extends IndexingRequestDao {
+    private final AtomicInteger renewals = new AtomicInteger();
+
+    CountingDao(org.jdbi.v3.core.Jdbi jdbi, Clock clock) {
+      super(jdbi, clock);
+    }
+
+    @Override
+    public boolean renewLease(UUID id, String ownerId, Duration lease, Instant now) {
+      renewals.incrementAndGet();
+      return super.renewLease(id, ownerId, lease, now);
+    }
+
+    /**
+     * True once renewals have gone quiet for several beat intervals. The worker under test beats
+     * every 20ms, so a window of 250ms would hold a dozen of them.
+     */
+    boolean awaitRenewalsToStop() throws InterruptedException {
+      for (int i = 0; i < 20; i++) {
+        int before = renewals.get();
+        Thread.sleep(250);
+        if (renewals.get() == before) {
+          return true;
+        }
+      }
+      return false;
+    }
   }
 
   /** Polls until the stored row has been renewed to at least {@code at}, or gives up. */
