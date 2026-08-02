@@ -114,6 +114,13 @@ void Listener::SyncChannels(PGconn* conn) {
   }
 }
 
+void Listener::DrainNotifies(PGconn* conn) {
+  while (PGnotify* notify = PQnotifies(conn)) {
+    on_notify_(notify->relname, notify->extra == nullptr ? "" : notify->extra);
+    PQfreemem(notify);
+  }
+}
+
 void Listener::Loop() {
   std::unique_ptr<PGconn, decltype(&PQfinish)> conn(nullptr, &PQfinish);
   auto backoff = std::chrono::milliseconds(100);
@@ -135,6 +142,11 @@ void Listener::Loop() {
       active_.clear();  // fresh connection LISTENs from scratch
     }
     SyncChannels(conn.get());
+    // PQexec(LISTEN/UNLISTEN) reads the socket itself and can leave
+    // NOTIFY messages in libpq's queue with no POLLIN left for poll.
+    // Drain unconditionally: a single absorbed wake with no later
+    // socket event is how TwoInstancesShareOneGame hung (#1276).
+    DrainNotifies(conn.get());
 
     struct pollfd fds[2];
     fds[0] = {PQsocket(conn.get()), POLLIN, 0};
@@ -153,10 +165,7 @@ void Listener::Loop() {
         conn.reset();
         continue;
       }
-      while (PGnotify* notify = PQnotifies(conn.get())) {
-        on_notify_(notify->relname, notify->extra == nullptr ? "" : notify->extra);
-        PQfreemem(notify);
-      }
+      DrainNotifies(conn.get());
     }
   }
 }

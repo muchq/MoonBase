@@ -146,10 +146,11 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   void OnNotify(const std::string& channel, const std::string& payload);
 
   /// The listener's channel-active target; runs on the listener's
-  /// thread. A chat channel becoming active (first LISTEN, or re-LISTEN
-  /// after a reconnect) pumps that room: anything committed while we
-  /// were not subscribed never queued a notification, so the cursor
-  /// read is the only thing that closes the gap.
+  /// thread. Fired on first LISTEN and again after every reconnect's
+  /// re-LISTEN — the "you may have missed notifications" signal.
+  /// Chat channels pump from the cursor; room channels refresh like a
+  /// wake (#1276), because rows committed while we were not subscribed
+  /// queued no notification for us.
   void OnChannelActive(const std::string& channel);
 
  private:

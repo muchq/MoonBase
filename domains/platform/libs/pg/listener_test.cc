@@ -122,6 +122,63 @@ TEST_F(ListenerTest, ActiveFiresOnSubscribeAndAgainAfterReconnect) {
   EXPECT_EQ(notified.events[1].second, "two");
 }
 
+// #1276: a NOTIFY read into libpq during PQexec(LISTEN) must still be
+// delivered when no later socket POLLIN arrives. Without an
+// unconditional drain after SyncChannels, the victim stays queued
+// forever and the owner hangs waiting for a wake that already happened.
+TEST_F(ListenerTest, DrainsNotifyBufferedByListenExec) {
+  Received received;
+  Received active;
+  std::mutex mu;
+  std::condition_variable cv;
+  bool holding = false;
+  bool release = false;
+
+  pg::Listener listener(
+      url_,
+      [&](const std::string& channel, const std::string& payload) {
+        if (payload == "hold") {
+          std::unique_lock<std::mutex> lock(mu);
+          holding = true;
+          cv.notify_all();
+          cv.wait(lock, [&] { return release; });
+        }
+        received.Add(channel, payload);
+      },
+      [&](const std::string& channel) { active.Add(channel, ""); });
+
+  listener.Listen("ch");
+  ASSERT_TRUE(active.WaitForCount(1, std::chrono::seconds(10)));
+
+  pg::Client client(url_);
+  ASSERT_TRUE(client.Exec("SELECT pg_notify('ch', 'hold')").ok());
+  {
+    std::unique_lock<std::mutex> lock(mu);
+    ASSERT_TRUE(cv.wait_for(lock, std::chrono::seconds(10), [&] { return holding; }));
+  }
+
+  // Poll thread is inside on_notify. Subscribe a new channel (wake →
+  // SyncChannels → PQexec(LISTEN other)) and put the victim on the
+  // wire. PQexec will pull it into libpq's queue; poll then sees no
+  // POLLIN because the socket is already empty.
+  listener.Listen("other");
+  ASSERT_TRUE(client.Exec("SELECT pg_notify('ch', 'victim')").ok());
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  {
+    const std::lock_guard<std::mutex> lock(mu);
+    release = true;
+  }
+  cv.notify_all();
+
+  ASSERT_TRUE(received.WaitForCount(2, std::chrono::seconds(10)))
+      << "victim notify absorbed during LISTEN was never delivered";
+  const std::lock_guard<std::mutex> lock(received.mu);
+  ASSERT_EQ(received.events.size(), 2u);
+  EXPECT_EQ(received.events[0].second, "hold");
+  EXPECT_EQ(received.events[1].first, "ch");
+  EXPECT_EQ(received.events[1].second, "victim");
+}
+
 TEST_F(ListenerTest, ReconnectsAndReListensAfterConnectionLoss) {
   Received received;
   pg::Listener listener(url_, [&](const std::string& channel, const std::string& payload) {

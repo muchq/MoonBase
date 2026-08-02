@@ -317,10 +317,10 @@ cc_library(
 # skips otherwise.
 cc_test(
     name = "pg_hub_e2e_test",
-    # Small on purpose, even after the one-off 60s stall observed on
-    # #1241 (never reproduced across 40 local runs on postgres 16 and
-    # 18; the whole suite runs in ~2s): the tight ceiling is what turns
-    # a recurrence into a loud red instead of a quietly slow pass.
+    # Small on purpose: the 60s stall on TwoInstancesShareOneGame
+    # (#1241, #1276) is a lost wakeup, not marginal slowness — normal
+    # runtime is ~2s. The tight ceiling turns a recurrence into a loud
+    # red instead of a quietly slow pass; do not raise it.
     size = "small",
     srcs = [
         "pg_hub_e2e_test.cc",

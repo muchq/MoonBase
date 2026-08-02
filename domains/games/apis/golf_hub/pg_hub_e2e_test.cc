@@ -33,27 +33,53 @@ using moonbase::golf::GolfMove;
 // Receives roomState frames until one satisfies the predicate — the
 // cross-instance tests converge on content, not frame counts, because a
 // wake re-projects everything and the frame count is timing-dependent.
+// `waiting_for` names the condition and which seat/instance cares, so a
+// lost wake fails with a diagnosis instead of `[ RUN ]` and silence (#1276).
 template <typename Predicate>
-std::optional<moonbase::golf::RoomState> AwaitRoomState(moonbase::golf::PlayClientStream& stream,
-                                                        Predicate&& predicate) {
+std::optional<moonbase::golf::RoomState> AwaitRoomState(
+    moonbase::golf::PlayClientStream& stream, Predicate&& predicate, const std::string& waiting_for,
+    std::chrono::milliseconds budget = kReceiveBudget) {
+  const auto deadline = std::chrono::steady_clock::now() + budget;
   for (int i = 0; i < 32; ++i) {
-    auto event = ReceiveCase(stream, "roomState");
-    if (!event.has_value()) return std::nullopt;
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+        deadline - std::chrono::steady_clock::now());
+    if (remaining <= std::chrono::milliseconds::zero()) {
+      ADD_FAILURE() << "gave up waiting for " << waiting_for;
+      return std::nullopt;
+    }
+    auto event = ReceiveCase(stream, "roomState", remaining);
+    if (!event.has_value()) {
+      ADD_FAILURE() << "gave up waiting for " << waiting_for;
+      return std::nullopt;
+    }
     const auto* room = event->as_roomState_or_null();
     if (predicate(*room)) return *room;
   }
+  ADD_FAILURE() << "gave up waiting for " << waiting_for << " (frame budget)";
   return std::nullopt;
 }
 
 template <typename Predicate>
-std::optional<moonbase::golf::GameView> AwaitGameView(moonbase::golf::PlayClientStream& stream,
-                                                      Predicate&& predicate) {
+std::optional<moonbase::golf::GameView> AwaitGameView(
+    moonbase::golf::PlayClientStream& stream, Predicate&& predicate, const std::string& waiting_for,
+    std::chrono::milliseconds budget = kReceiveBudget) {
+  const auto deadline = std::chrono::steady_clock::now() + budget;
   for (int i = 0; i < 32; ++i) {
-    auto update = ReceiveGolf(stream, "gameState");
-    if (!update.has_value()) return std::nullopt;
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+        deadline - std::chrono::steady_clock::now());
+    if (remaining <= std::chrono::milliseconds::zero()) {
+      ADD_FAILURE() << "gave up waiting for " << waiting_for;
+      return std::nullopt;
+    }
+    auto update = ReceiveGolf(stream, "gameState", remaining);
+    if (!update.has_value()) {
+      ADD_FAILURE() << "gave up waiting for " << waiting_for;
+      return std::nullopt;
+    }
     const auto& view = update->as_gameState_or_null()->view;
     if (predicate(view)) return view;
   }
+  ADD_FAILURE() << "gave up waiting for " << waiting_for << " (frame budget)";
   return std::nullopt;
 }
 
@@ -113,8 +139,9 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
         [handler](const std::string& channel, const std::string& payload) {
           handler->OnNotify(channel, payload);
         },
-        // The active signal is chat's catch-up trigger: rows committed
-        // before a (re)LISTEN landed never notified this instance.
+        // The active signal is the catch-up trigger for chat and rooms:
+        // rows committed before a (re)LISTEN landed never notified this
+        // instance (#1276).
         [handler](const std::string& channel) { handler->OnChannelActive(channel); });
     handler->AttachListener(listener.get());
     return listener;
@@ -198,11 +225,15 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
     pg::Client db(url_);
     for (int i = 0; i < 10; ++i) {
       if (!db.Exec("SELECT pg_notify($1, 'listen-sync')", {RoomChannel(room_id)}).ok()) {
+        ADD_FAILURE() << "LISTEN sync poke failed for " << RoomChannel(room_id);
         return false;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
-    return ReceiveCase(seat.stream, "roomState").has_value();
+    if (ReceiveCase(seat.stream, "roomState").has_value()) return true;
+    ADD_FAILURE() << "LISTEN sync for " << RoomChannel(room_id)
+                  << " never produced roomState on seat " << seat.player_id;
+    return false;
   }
 
   bool WaitForListenerCount(const std::string& room_id, int count) {
@@ -257,16 +288,20 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
     if (!bob->stream.Send(GolfCommands::FromJoinroom(join_room)).ok()) return std::nullopt;
     // bob's join materializes the room on his instance: his snapshot
     // already shows both members.
-    if (!AwaitRoomState(bob->stream, [](const moonbase::golf::RoomState& room) {
-           return room.players.size() == 2;
-         }).has_value()) {
+    if (!AwaitRoomState(
+             bob->stream,
+             [](const moonbase::golf::RoomState& room) { return room.players.size() == 2; },
+             "bob (remote) roomState with 2 players after join")
+             .has_value()) {
       return std::nullopt;
     }
     if (!SyncListen(*bob, room_id)) return std::nullopt;
     // The join's wake rider is how alice's instance learns of bob.
-    if (!AwaitRoomState(alice->stream, [](const moonbase::golf::RoomState& room) {
-           return room.players.size() == 2;
-         }).has_value()) {
+    if (!AwaitRoomState(
+             alice->stream,
+             [](const moonbase::golf::RoomState& room) { return room.players.size() == 2; },
+             "alice (primary) roomState with 2 players after bob's join wake")
+             .has_value()) {
       return std::nullopt;
     }
 
@@ -277,12 +312,16 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
     if (!game_joined.has_value()) return std::nullopt;
     const std::string game_id = game_joined->as_gameJoined_or_null()->view.gameId;
     // The create commit's wake carries the lobby game to bob.
-    if (!AwaitRoomState(bob->stream, [&](const moonbase::golf::RoomState& room) {
-           for (const auto& game : room.games) {
-             if (game.gameId == game_id) return true;
-           }
-           return false;
-         }).has_value()) {
+    if (!AwaitRoomState(
+             bob->stream,
+             [&](const moonbase::golf::RoomState& room) {
+               for (const auto& game : room.games) {
+                 if (game.gameId == game_id) return true;
+               }
+               return false;
+             },
+             "bob (remote) roomState carrying alice's created game " + game_id)
+             .has_value()) {
       return std::nullopt;
     }
 
@@ -291,9 +330,11 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
     if (!bob->stream.Send(Move(GolfMove::FromJoingame(join_game))).ok()) return std::nullopt;
     if (!ReceiveGolf(bob->stream, "gameJoined").has_value()) return std::nullopt;
     // alice's instance must adopt the two-seat roster before she starts.
-    if (!AwaitGameView(alice->stream, [](const moonbase::golf::GameView& view) {
-           return view.players.size() == 2;
-         }).has_value()) {
+    if (!AwaitGameView(
+             alice->stream,
+             [](const moonbase::golf::GameView& view) { return view.players.size() == 2; },
+             "alice (primary) gameView with 2 players after bob's seat wake")
+             .has_value()) {
       return std::nullopt;
     }
 
@@ -303,9 +344,11 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
     if (!ReceiveGolf(alice->stream, "gameStarted").has_value()) return std::nullopt;
     // bob's start signal is the projected deal (remote refresh sends
     // views, not the started event — the view is the contract).
-    if (!AwaitGameView(bob->stream, [](const moonbase::golf::GameView& view) {
-           return view.phase != "waiting";
-         }).has_value()) {
+    if (!AwaitGameView(
+             bob->stream,
+             [](const moonbase::golf::GameView& view) { return view.phase != "waiting"; },
+             "bob (remote) gameView dealt after alice's start wake")
+             .has_value()) {
       return std::nullopt;
     }
     return CrossTable{std::move(*alice), std::move(*bob), room_id, game_id};
@@ -633,12 +676,16 @@ TEST_F(PgGolfHubFixture, TwoInstancesShareOneGame) {
       ASSERT_TRUE(seat->stream.Send(Move(GolfMove::FromPeekcard(peek))).ok());
     }
   }
-  ASSERT_TRUE(AwaitGameView(alice.stream, [](const moonbase::golf::GameView& view) {
-                return view.allPlayersPeeked;
-              }).has_value());
-  ASSERT_TRUE(AwaitGameView(bob.stream, [](const moonbase::golf::GameView& view) {
-                return view.allPlayersPeeked;
-              }).has_value());
+  ASSERT_TRUE(AwaitGameView(
+                  alice.stream,
+                  [](const moonbase::golf::GameView& view) { return view.allPlayersPeeked; },
+                  "alice (primary) allPlayersPeeked after cross-instance peeks")
+                  .has_value());
+  ASSERT_TRUE(AwaitGameView(
+                  bob.stream,
+                  [](const moonbase::golf::GameView& view) { return view.allPlayersPeeked; },
+                  "bob (remote) allPlayersPeeked after cross-instance peeks")
+                  .has_value());
 
   // alice's turn on her instance: hide, draw, discard...
   ASSERT_TRUE(alice.stream.Send(Move(GolfMove::FromHidecards(moonbase::golf::HideCards{}))).ok());
@@ -646,17 +693,25 @@ TEST_F(PgGolfHubFixture, TwoInstancesShareOneGame) {
   ASSERT_TRUE(
       alice.stream.Send(Move(GolfMove::FromDiscarddrawn(moonbase::golf::DiscardDrawn{}))).ok());
   // ...lands on bob's instance as two discards and the turn handoff.
-  ASSERT_TRUE(AwaitGameView(bob.stream, [&](const moonbase::golf::GameView& view) {
-                return view.discardCount == 2 && view.currentPlayerId == bob.player_id;
-              }).has_value());
+  ASSERT_TRUE(AwaitGameView(
+                  bob.stream,
+                  [&](const moonbase::golf::GameView& view) {
+                    return view.discardCount == 2 && view.currentPlayerId == bob.player_id;
+                  },
+                  "bob (remote) turn handoff after alice's discard wake")
+                  .has_value());
 
   // bob answers from his instance, and alice's projection follows.
   ASSERT_TRUE(bob.stream.Send(Move(GolfMove::FromDrawcard(moonbase::golf::DrawCard{}))).ok());
   ASSERT_TRUE(
       bob.stream.Send(Move(GolfMove::FromDiscarddrawn(moonbase::golf::DiscardDrawn{}))).ok());
-  ASSERT_TRUE(AwaitGameView(alice.stream, [&](const moonbase::golf::GameView& view) {
-                return view.discardCount == 3 && view.currentPlayerId == alice.player_id;
-              }).has_value());
+  ASSERT_TRUE(AwaitGameView(
+                  alice.stream,
+                  [&](const moonbase::golf::GameView& view) {
+                    return view.discardCount == 3 && view.currentPlayerId == alice.player_id;
+                  },
+                  "alice (primary) turn handoff after bob's discard wake")
+                  .has_value());
 
   // Every move was exactly one landed commit: 4 peeks + hide + 2 draws
   // + 2 discards continue the version sequence without a gap — a fork,
@@ -682,9 +737,13 @@ TEST_F(PgGolfHubFixture, RemoteFinishRunsOneCeremonyEverywhere) {
   // Quickest legal game: alice knocks unseen on her instance...
   ASSERT_TRUE(alice.stream.Send(Move(GolfMove::FromKnock(moonbase::golf::Knock{}))).ok());
   // ...and the knocked phase reaches bob's projection.
-  ASSERT_TRUE(AwaitGameView(bob.stream, [&](const moonbase::golf::GameView& view) {
-                return view.knockedPlayerId == alice.player_id;
-              }).has_value());
+  ASSERT_TRUE(AwaitGameView(
+                  bob.stream,
+                  [&](const moonbase::golf::GameView& view) {
+                    return view.knockedPlayerId == alice.player_id;
+                  },
+                  "bob (remote) knockedPlayerId after alice's knock wake")
+                  .has_value());
   // Hold Alice's listener behind the finish and the finishing instance's
   // writer drain. This makes the lost-handoff race deterministic.
   handler_->AttachListener(nullptr);

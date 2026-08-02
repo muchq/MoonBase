@@ -181,6 +181,45 @@ class HubStoreRaceFixture : public GolfHubStreamFixture {
   std::shared_ptr<GatedHubStore> gated_store_ = std::make_shared<GatedHubStore>();
 };
 
+// Room catch-up on channel-active (#1276): rows committed while an
+// instance was not subscribed queued no notification; the active signal
+// must re-read and re-project like a wake — same contract as chat's
+// ActiveSignalHealsAMissedNotify.
+TEST_F(HubStoreRaceFixture, ActiveSignalRefreshesHeldRoom) {
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  auto alice = OpenSeat();
+  auto bob = OpenSeatVia(*remote->client);
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::golf::GolfEvents>>(
+                  [&] { return ReceiveCase(alice->stream, "sessionReady"); }, remote.get())
+                  .has_value());
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::golf::GolfEvents>>(
+                  [&] { return ReceiveCase(bob->stream, "sessionReady"); }, remote.get())
+                  .has_value());
+
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
+  auto created = ReceiveWithin<std::optional<moonbase::golf::GolfEvents>>(
+      [&] { return ReceiveCase(alice->stream, "roomState"); }, remote.get());
+  ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
+
+  moonbase::golf::JoinRoom join_room;
+  join_room.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join_room)).ok());
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::golf::GolfEvents>>(
+                  [&] { return ReceiveCase(bob->stream, "roomState"); }, remote.get())
+                  .has_value());
+
+  // No OnNotify: the active signal alone must carry bob onto alice's
+  // projection the way a missed wake would after (re)LISTEN.
+  handler_->OnChannelActive(RoomChannel(room_id));
+  auto refreshed = ReceiveWithin<std::optional<moonbase::golf::GolfEvents>>(
+      [&] { return ReceiveCase(alice->stream, "roomState"); }, remote.get());
+  ASSERT_TRUE(refreshed.has_value());
+  EXPECT_EQ(refreshed->as_roomState_or_null()->players.size(), 2u);
+}
+
 TEST_F(HubStoreRaceFixture, DelayedFinishWakeReadsRetainedTerminalRow) {
   auto remote = BuildInstance();
   ASSERT_NE(remote, nullptr);

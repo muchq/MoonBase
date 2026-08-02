@@ -329,13 +329,25 @@ void HubHandler::OnNotify(const std::string& channel, const std::string& payload
 }
 
 void HubHandler::OnChannelActive(const std::string& channel) {
-  // Only chat needs the signal: a room wake re-reads everything anyway,
-  // but chat delivery is cursor-driven, and rows committed while we were
-  // not subscribed queued no notification for us.
+  // Rows committed while we were not subscribed queued no notification.
+  // Chat heals from its cursor; rooms re-read and re-project like a wake
+  // (#1276) — the notify-only path is not enough around (re)LISTEN.
   constexpr std::string_view kChatPrefix = "chat_";
   if (absl::StartsWith(channel, kChatPrefix)) {
     PumpChat(std::string(channel.substr(kChatPrefix.size())));
+    return;
   }
+  constexpr std::string_view kPrefix = "room_";
+  if (!absl::StartsWith(channel, kPrefix)) return;
+  const std::string room_id = channel.substr(kPrefix.size());
+  Outbox outbox;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    // Same membership guard as OnNotify: never materialize from a wake.
+    if (!rooms_.contains(room_id)) return;
+    RefreshRoomLocked(room_id, outbox);
+  }
+  Deliver(outbox);
 }
 
 void HubHandler::RefreshRoomLocked(const std::string& room_id, Outbox& outbox) {
