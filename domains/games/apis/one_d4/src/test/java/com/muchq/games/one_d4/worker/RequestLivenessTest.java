@@ -293,6 +293,20 @@ public class RequestLivenessTest {
     assertThat(dao.findById(requestId).orElseThrow().status())
         .as("and must not finish the request it no longer holds")
         .isNotEqualTo("COMPLETED");
+
+    // This run left through LeaseLostException — past the ceiling every fenced write refuses, so
+    // that is the ordinary way out, and it is a branch that knows nothing about interrupts. The
+    // two assertions above pass with the row still owned: an expired lease is not a released one.
+    // What separates them is what happens when this same worker comes back for it.
+    int attemptsBeforeReclaim = dao.findById(requestId).orElseThrow().attempts();
+    assertThat(dao.claim(requestId, wedged.ownerId(), RetentionPolicy.LEASE, clock.instant()))
+        .as("the row is claimable again")
+        .isTrue();
+    assertThat(dao.findById(requestId).orElseThrow().attempts())
+        .as(
+            "and this worker re-claiming its own wedge has to cost an attempt, which only happens"
+                + " if the run let the row go on the way out")
+        .isEqualTo(attemptsBeforeReclaim + 1);
   }
 
   /**

@@ -320,6 +320,7 @@ public class IndexWorker {
     RunHandle handle = new RunHandle(Thread.currentThread());
     runHandles.put(message.requestId(), handle);
     ScheduledFuture<?> heartbeat = startHeartbeat(message.requestId());
+    boolean stoppedByAForeignInterrupt = false;
     try {
       progress(message.requestId(), 0);
 
@@ -520,7 +521,7 @@ public class IndexWorker {
                 + " left for another worker rather than recorded as a failure.",
             message.requestId(),
             e);
-        releaseAfterInterrupt(message.requestId());
+        stoppedByAForeignInterrupt = true;
       } else {
         recordFailure(message.requestId(), e);
       }
@@ -528,13 +529,27 @@ public class IndexWorker {
       heartbeat.cancel(false);
       renewalDeadlines.remove(message.requestId());
       runHandles.remove(message.requestId());
-      if (handle.finish()) {
+      boolean weInterruptedThisRun = handle.finish();
+      if (weInterruptedThisRun) {
         // Our own interrupt, and it stops here. The thread it landed on belongs to the poller,
         // which has more requests to claim after this one; letting the status escape would make
         // its next blocking call fail for a reason that has nothing to do with the request it is
         // working on by then. An interrupt from anywhere else is left alone — this worker did not
         // send it and does not know what it means.
         Thread.interrupted();
+      }
+      // Here rather than in the interrupt catch above, because that catch is not the only way out
+      // of an interrupted run and was not even the common one. Past the ceiling every fenced write
+      // refuses without renewing, so the run unwinds as a LeaseLostException — caught first, and
+      // by a branch that knows nothing about interrupts. It leaves owner_id set, and the poller
+      // that comes back for the row is the owner named in it, so claim holds attempts flat and the
+      // wedge repeats for free. The cached-month progress call reaches the same place with no
+      // checkpoint in front of it at all.
+      //
+      // Ordered after the status is cleared: releasing is a database write, and handing it a
+      // thread that is still flagged invites the driver to fail it for the wrong reason.
+      if (weInterruptedThisRun || stoppedByAForeignInterrupt) {
+        releaseAfterInterrupt(message.requestId());
       }
     }
   }
