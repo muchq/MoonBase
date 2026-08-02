@@ -50,6 +50,10 @@ describe('GameDetailPanel', () => {
     const link = screen.getByRole('link', { name: /View game/ });
     expect(link).toHaveAttribute('href', 'https://chess.com/game/1');
     expect(link).toHaveAttribute('target', '_blank');
+    // target="_blank" without this hands the opened tab a window.opener
+    // handle back to us. Asserted because the two attributes have to travel
+    // together and only one of them is visible in review.
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
   it('omits the view-game link when gameUrl is absent', () => {
@@ -62,6 +66,15 @@ describe('GameDetailPanel', () => {
     render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
     // 1700001000 seconds = 2023-11-14
     expect(screen.getByText(/indexed 2023-11-14/)).toBeInTheDocument();
+  });
+
+  // The negative half. formatDate returns '' for a missing value, so dropping
+  // the `game.indexedAt &&` guard renders a bare "indexed " with no date —
+  // which no positive assertion above can see.
+  it('omits the indexed label entirely when indexedAt is absent', () => {
+    const game = { ...mockGame, indexedAt: 0 };
+    render(<GameDetailPanel game={game} onClose={() => {}} />);
+    expect(screen.queryByText(/indexed/)).not.toBeInTheDocument();
   });
 
   it('calls onClose when close button is clicked', () => {

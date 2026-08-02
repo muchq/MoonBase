@@ -120,9 +120,40 @@ describe('GameTable', () => {
     expect(screen.getByText('Carol')).toBeInTheDocument();
   });
 
+  // The whole point of the column set is that it is short. Without this,
+  // re-adding a Game or Indexed column — the two that crushed Motifs — is a
+  // silently green change. Asserted as an exact list rather than two absence
+  // checks so any twelfth column has to be a deliberate edit here too.
+  it('shows only the nine columns that earn their width', () => {
+    render(<GameTable games={mockGames} />);
+    const headers = Array.from(
+      screen.getByRole('table').querySelectorAll('thead th')
+    ).map((th) => th.textContent);
+    expect(headers).toEqual([
+      'White',
+      'Black',
+      'White ELO',
+      'Black ELO',
+      'Time',
+      'ECO',
+      'Result',
+      'Played',
+      'Motifs',
+    ]);
+  });
+
+  // The negative half of the move: the link and the indexed date left the table
+  // for GameDetailPanel, so the table body must hold no link at all. This also
+  // pins the accessibility fact that the row is the only affordance here — if
+  // that ever changes, this test should be the thing that notices.
+  it('renders no links in the table body — the game link lives in the detail panel', () => {
+    render(<GameTable games={mockGames} />);
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
+  });
+
   // jsdom has no layout, so this cannot assert the rendered result — only that
-  // the hook the stylesheet hangs the fix on is still here. Eleven columns do
-  // not fit a laptop, and without the modifier the browser keeps honouring
+  // the hook the stylesheet hangs the fix on is still here. Nine columns still
+  // do not fit a laptop, and without the modifier the browser keeps honouring
   // width:100% by crushing the last ones instead of letting the wrapper scroll:
   // ISO dates break after the month and motif badges split mid-word.
   it('marks the games table as wide so its columns scroll instead of being crushed', () => {
@@ -146,7 +177,18 @@ describe('GameTable', () => {
     const rule = (selector: string) =>
       css.match(new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
 
-    expect(rule('.table-wrap--wide table')).toMatch(/min-width:\s*\d/);
+    // Not just `\d`: that matched `0` and `4px` as happily as `52rem`, so it
+    // could not tell a real floor from a zeroed or unit-less one. Pin the unit
+    // and a lower bound instead. The band is wide on purpose — the exact number
+    // is a judgement call, but a floor below the table's own min-content
+    // (measured 816px with short usernames) is inert, and one far above it
+    // reintroduces the laptop scrolling this modifier exists to bound.
+    const minWidth = rule('.table-wrap--wide table').match(
+      /min-width:\s*(\d+(?:\.\d+)?)rem/
+    );
+    expect(minWidth).not.toBeNull();
+    expect(Number(minWidth![1])).toBeGreaterThanOrEqual(48);
+    expect(Number(minWidth![1])).toBeLessThanOrEqual(64);
     expect(rule('.table-wrap--wide td')).toMatch(/white-space:\s*nowrap/);
     // Badges wrap between themselves; only mid-badge breaking is the bug.
     expect(rule('.table-wrap--wide td .motifs')).toMatch(/white-space:\s*normal/);

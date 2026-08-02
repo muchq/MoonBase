@@ -140,10 +140,6 @@ body {
   cursor: not-allowed;
 }
 
-a.btn {
-  text-decoration: none;
-}
-
 /* Cards / panels */
 .panel {
   background: var(--surface);
@@ -196,11 +192,15 @@ table {
 }
 
 /* The games table carries nine columns (the game link and indexed-at date
-   moved into GameDetailPanel — see GameTable.tsx). Without a floor the browser
-   keeps honouring width:100% by crushing the last ones instead of letting the
-   wrapper scroll, and the motif badges — the narrowest column's content — get
-   cut mid-word. Scoped to this table so the shorter index-requests table still
-   fits a phone without a scrollbar. */
+   moved into GameDetailPanel — see GameTable.tsx). This is a floor, not the
+   thing keeping badges intact: because the `nowrap` rule below makes every
+   cell's min-content its full text, the table's own intrinsic minimum already
+   sits near this value — measured 816px with short usernames and 993px with
+   ones like `only_strong_moves`, against the 832px below. So it binds only at
+   the short end, and what actually stops a badge being cut mid-word is
+   `white-space: nowrap` on `.motif-badge`. Kept because the short-username
+   case is real, and scoped to this table so the shorter index-requests table
+   still fits a phone without a scrollbar. */
 .table-wrap--wide table {
   min-width: 52rem;
 }
@@ -244,15 +244,6 @@ th .sort-icon {
 
 th.sorted-asc .sort-icon::after { content: " ↑"; }
 th.sorted-desc .sort-icon::after { content: " ↓"; }
-
-td a.external {
-  color: var(--accent);
-  text-decoration: none;
-}
-
-td a.external:hover {
-  text-decoration: underline;
-}
 
 /* Motif badges */
 .motifs {
