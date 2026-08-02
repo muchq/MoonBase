@@ -1084,8 +1084,9 @@ public class IndexWorkerTest {
         .isEqualTo(1);
     // The bounds, not just the count. CustomMetricsTest pins that declared bounds are honoured;
     // nothing pinned that this worker declares any, and without the call every run lands in the
-    // overflow bucket of a histogram whose top bound is 10ms — fifteen dead series and a p95 of
-    // +Inf, with _sum and _count still perfectly correct.
+    // overflow bucket of a histogram whose top bound is 10ms — fifteen dead series, and a p95 that
+    // answers a flat 10000 rather than failing loudly, with _sum and _count still perfectly
+    // correct. A histogram that reads like a fast run is why this is pinned and not argued.
     assertThat(metrics.boundsFor(IndexWorker.RUN_DURATION))
         .as("run duration must not be bucketed on the HTTP latency bounds")
         .isEqualTo(IndexWorker.RUN_DURATION_BOUNDS);

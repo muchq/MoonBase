@@ -94,7 +94,13 @@ public class IndexWorker {
    * <p>The default set yodel shares with the HTTP latency histogram tops out at 10ms, which no
    * index run has ever finished inside — a run does at least four database round trips before it
    * fetches anything. Every observation would land in the overflow bucket: fifteen series pinned at
-   * zero, a sixteenth equal to the count, and a p95 of +Inf for whoever charts one later.
+   * zero and a sixteenth equal to the count.
+   *
+   * <p>The quantile that reads them does not announce this. When the rank falls in the {@code +Inf}
+   * bucket, {@code histogram_quantile} returns the upper bound of the highest <em>finite</em>
+   * bucket, so a p95 over runs that all take minutes answers a flat 10000 — a plausible-looking
+   * 10ms, not an obvious {@code +Inf}. That is the failure worth avoiding: a broken histogram that
+   * reads like a fast one.
    */
   static final double[] RUN_DURATION_BOUNDS = {
     1_000,

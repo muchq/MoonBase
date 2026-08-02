@@ -74,6 +74,34 @@ public class HttpServerMetricsTest {
     assertThat(buckets[buckets.length - 1]).isEqualTo(1); // (10000, +Inf)
   }
 
+  /**
+   * The HTTP bounds are wrong and may not be fixed here alone (#1286).
+   *
+   * <p>They are the OTel SDK defaults, which are shaped for milliseconds; this emitter records
+   * microseconds, so the top bound is 10ms and every p95 tile is capped there. The Rust
+   * (server_pal) and C++ (futility/otel) emitters inherit the same defaults from their SDKs and
+   * record microseconds too, and prom_proxy charts all three through one shared PromQL expression.
+   * Widening Java's array on its own would leave those services answering the same query on a
+   * different bucket layout — a worse state than the one it fixes, and a silent one.
+   *
+   * <p>So this test does not assert the bounds are right. It asserts they still match the defaults
+   * the other two emitters get, and fails the moment Java drifts alone.
+   */
+  @Test
+  public void httpBoundsStayMatchedToTheOtherEmittersUntilAllThreeMove() {
+    double[] otelSdkDefaults = {
+      0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000
+    };
+
+    assertThat(HttpServerMetrics.BUCKET_BOUNDS)
+        .as(
+            "yodel's HTTP bounds no longer match the OTel SDK defaults that server_pal (Rust) and "
+                + "futility/otel (C++) inherit. If this is the #1286 fix, it has to land in all "
+                + "three emitters together — prom_proxy's p95 query spans them. If it is not, "
+                + "Java services have quietly become incomparable to every other service.")
+        .isEqualTo(otelSdkDefaults);
+  }
+
   @Test
   public void snapshotOrdersMethodsDeterministically() {
     HttpServerMetrics metrics = new HttpServerMetrics("svc", 0L);

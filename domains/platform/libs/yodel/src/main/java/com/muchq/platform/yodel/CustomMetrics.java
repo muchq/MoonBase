@@ -72,11 +72,15 @@ public final class CustomMetrics {
   /**
    * Declares the bucket bounds for a distribution, ahead of the first observation.
    *
-   * <p>The default is the set the HTTP latency histogram uses, which tops out at 10ms. That suits
-   * anything request-shaped and suits nothing else: a distribution over minutes, or over counts in
-   * the thousands, puts every observation in the overflow bucket. The mean still reads correctly
-   * off {@code _sum}/{@code _count}, so the damage is quiet — fifteen bucket series pinned at zero,
-   * and any quantile over them returning {@code +Inf}.
+   * <p>The default is the set the HTTP latency histogram uses, which tops out at 10ms — a ceiling
+   * that is too low even for the requests it was chosen for (#1286), and hopeless for anything
+   * else. A distribution over minutes, or over counts in the thousands, puts every observation in
+   * the overflow bucket. Declare bounds for any instrument that is not sub-10ms request latency;
+   * treat inheriting this default as a bug rather than a choice. The mean still reads correctly off
+   * {@code _sum}/{@code _count}, so the damage is quiet — fifteen bucket series pinned at zero, and
+   * any quantile over them answering the top bound rather than the truth. {@code
+   * histogram_quantile} falls back to the highest finite bucket when the rank lands in {@code
+   * +Inf}, so the chart shows 10ms forever instead of showing nothing.
    *
    * <p>Call before recording. Bounds must be ascending, and a later call for the same name is
    * ignored rather than allowed to reshape a histogram mid-flight — the collector treats bucket
