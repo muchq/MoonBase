@@ -164,7 +164,8 @@ TEST_F(PgChatStoreTest, MigrationIsIdempotentAndDefinesTheContract) {
 TEST_F(PgChatStoreTest, AppendCommitsARowAndNotifiesItsChatChannel) {
   Received received;
   pg::Listener listener(
-      url_, [&](const std::string&, const std::string& payload) { received.Add(payload); });
+      url_, [&](const std::string&, const std::string& payload) { received.Add(payload); },
+      /*on_active=*/nullptr);
   listener.Listen(golf_hub::ChatChannel("R1"));
   ConfirmSubscribed(golf_hub::ChatChannel("R1"), received);
 
@@ -190,7 +191,8 @@ TEST_F(PgChatStoreTest, AppendCommitsARowAndNotifiesItsChatChannel) {
 TEST_F(PgChatStoreTest, RejectedAppendWritesNoRowAndNotifiesNobody) {
   Received received;
   pg::Listener listener(
-      url_, [&](const std::string&, const std::string& payload) { received.Add(payload); });
+      url_, [&](const std::string&, const std::string& payload) { received.Add(payload); },
+      /*on_active=*/nullptr);
   listener.Listen(golf_hub::ChatChannel("R1"));
   ConfirmSubscribed(golf_hub::ChatChannel("R1"), received);
 

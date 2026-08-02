@@ -146,10 +146,11 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   void OnNotify(const std::string& channel, const std::string& payload);
 
   /// The listener's channel-active target; runs on the listener's
-  /// thread. A chat channel becoming active (first LISTEN, or re-LISTEN
-  /// after a reconnect) pumps that room: anything committed while we
-  /// were not subscribed never queued a notification, so the cursor
-  /// read is the only thing that closes the gap.
+  /// thread. Fired on first LISTEN and again after every reconnect's
+  /// re-LISTEN — the "you may have missed notifications" signal.
+  /// Chat channels pump from the cursor; room channels catch up with a
+  /// re-read (#1276) but only re-project when rows actually moved, so a
+  /// reconnect across many rooms does not flood session queues.
   void OnChannelActive(const std::string& channel);
 
  private:
@@ -310,13 +311,27 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
                            const std::optional<golf::GameState>& state,
                            const std::vector<HubStore::StatsDelta>* finish);
 
+  /// Shared chat/room dispatch for OnNotify and OnChannelActive.
+  /// `from_active` skips the own-instance filter (active has no payload)
+  /// and uses change-gated projection for rooms so reconnect catch-up
+  /// does not re-fan identical state.
+  void WakeChannel(const std::string& channel, const std::string& payload, bool from_active);
+
+  /// Notify/active catch-up for a held room: Flush+LoadRoom off mu_
+  /// (PumpChat's pattern), then reconcile under the lock. Keeps the
+  /// listener poll thread from holding mu_ across DB round trips on a
+  /// reconnect storm.
+  void CatchUpRoom(const std::string& room_id, bool project_always);
+
   /// The wake handler's body: flush our own queue (so the read is never
   /// older than local truth), re-read the room's rows, reconcile, and
   /// re-project views to local members. Also the join path's fallback —
   /// it materializes a room another instance created. Callers hold mu_.
   void RefreshRoomLocked(const std::string& room_id, Outbox& outbox);
-  void ReconcileRoomLocked(const std::string& room_id, const HubStore::RoomRows& rows,
-                           Outbox& outbox);
+  /// Returns whether local membership/games changed. When
+  /// `project_always` is false, skips re-project on a no-op catch-up.
+  bool ReconcileRoomLocked(const std::string& room_id, const HubStore::RoomRows& rows,
+                           Outbox& outbox, bool project_always = true);
   /// Erases the game and its player mappings without any events — for
   /// games the database says no longer exist.
   void DropGameLocked(const GameRef& ref);

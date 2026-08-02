@@ -1,5 +1,7 @@
 #include "domains/platform/libs/pg/listener.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <unistd.h>
 
@@ -40,9 +42,14 @@ Listener::Listener(std::string conninfo, Callback on_notify, ActiveCallback on_a
       on_notify_(std::move(on_notify)),
       on_active_(std::move(on_active)) {
   int fds[2] = {-1, -1};
+  // O_NONBLOCK: a blocking drain that reads an exact multiple of the
+  // buffer size would issue one more read and hang forever on an empty
+  // pipe — another lost-wakeup shape with idle postgres (#1276).
   if (pipe(fds) == 0) {
     wake_read_ = fds[0];
     wake_write_ = fds[1];
+    fcntl(wake_read_, F_SETFL, O_NONBLOCK);
+    fcntl(wake_write_, F_SETFL, O_NONBLOCK);
   }
   thread_ = std::thread([this] { Loop(); });
 }
@@ -114,6 +121,13 @@ void Listener::SyncChannels(PGconn* conn) {
   }
 }
 
+void Listener::DrainNotifies(PGconn* conn) {
+  while (PGnotify* notify = PQnotifies(conn)) {
+    on_notify_(notify->relname, notify->extra == nullptr ? "" : notify->extra);
+    PQfreemem(notify);
+  }
+}
+
 void Listener::Loop() {
   std::unique_ptr<PGconn, decltype(&PQfinish)> conn(nullptr, &PQfinish);
   auto backoff = std::chrono::milliseconds(100);
@@ -135,6 +149,11 @@ void Listener::Loop() {
       active_.clear();  // fresh connection LISTENs from scratch
     }
     SyncChannels(conn.get());
+    // PQexec(LISTEN/UNLISTEN) reads the socket itself and can leave
+    // NOTIFY messages in libpq's queue with no POLLIN left for poll.
+    // Drain unconditionally: a single absorbed wake with no later
+    // socket event is how TwoInstancesShareOneGame hung (#1276).
+    DrainNotifies(conn.get());
 
     struct pollfd fds[2];
     fds[0] = {PQsocket(conn.get()), POLLIN, 0};
@@ -144,7 +163,14 @@ void Listener::Loop() {
 
     if (wake_read_ >= 0 && (fds[1].revents & POLLIN) != 0) {
       char drain[64];
-      while (read(wake_read_, drain, sizeof(drain)) == sizeof(drain)) {
+      while (true) {
+        const ssize_t n = read(wake_read_, drain, sizeof(drain));
+        if (n < 0) {
+          if (errno == EINTR) continue;
+          break;  // EAGAIN/EWOULDBLOCK: empty
+        }
+        if (n == 0) break;
+        if (n < static_cast<ssize_t>(sizeof(drain))) break;
       }
     }
     if ((fds[0].revents & POLLIN) != 0) {
@@ -153,10 +179,7 @@ void Listener::Loop() {
         conn.reset();
         continue;
       }
-      while (PGnotify* notify = PQnotifies(conn.get())) {
-        on_notify_(notify->relname, notify->extra == nullptr ? "" : notify->extra);
-        PQfreemem(notify);
-      }
+      DrainNotifies(conn.get());
     }
   }
 }

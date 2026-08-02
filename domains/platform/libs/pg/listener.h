@@ -15,8 +15,11 @@ namespace pg {
 /// thread delivers notifications to one callback. Channels come and go
 /// at runtime (the hub subscribes rooms as it learns them); a lost
 /// connection reconnects with backoff and re-LISTENs every subscribed
-/// channel. Dropped notifications during the gap are fine by protocol:
-/// a notify is only a wake-up, and every wake re-reads current state.
+/// channel. Dropped notifications during a disconnect gap are fine by
+/// protocol: a notify is only a wake-up, and every wake re-reads current
+/// state. Notifications absorbed into libpq during LISTEN/UNLISTEN are
+/// not dropped — the poll loop drains PQnotifies after every sync pass
+/// (#1276), not only when poll reports POLLIN.
 ///
 /// The callbacks run on the listener's thread. They may call Listen and
 /// Unlisten (they only flag work for the poll thread), but must not
@@ -31,7 +34,10 @@ class Listener {
   /// at-least-once delivery does a catch-up read when it fires.
   using ActiveCallback = std::function<void(const std::string& channel)>;
 
-  Listener(std::string conninfo, Callback on_notify, ActiveCallback on_active = nullptr);
+  /// `on_active` is required: omitting it silently skips catch-up on
+  /// (re)LISTEN, which is how room/chat fans lose commits across a gap.
+  /// Pass an empty callback when the owner truly needs notify-only.
+  Listener(std::string conninfo, Callback on_notify, ActiveCallback on_active);
   ~Listener();
   Listener(const Listener&) = delete;
   Listener& operator=(const Listener&) = delete;
@@ -44,10 +50,8 @@ class Listener {
  private:
   void Loop();
   void Wake();
-  /// (Re)connects and LISTENs the current channel set; returns false
-  /// when stopping.
-  bool ConnectLocked(std::unique_lock<std::mutex>& lock);
   void SyncChannels(PGconn* conn);
+  void DrainNotifies(PGconn* conn);
 
   const std::string conninfo_;
   const Callback on_notify_;
