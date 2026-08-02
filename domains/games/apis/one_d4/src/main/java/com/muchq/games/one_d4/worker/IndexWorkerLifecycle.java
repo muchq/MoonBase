@@ -152,10 +152,13 @@ public class IndexWorkerLifecycle implements ApplicationEventListener<ServerStar
    * one is a shutdown that hangs, and the container kills it anyway. Handing back is what a drain
    * was for: the work moves to a surviving instance immediately, unspent.
    *
-   * <p>The departing run is not interrupted. It may still be mid-fetch when its row changes hands,
-   * and it needs no stopping — every write it makes is fenced on ownership it no longer has, so the
-   * first one fails and the run unwinds itself. That is the same mechanism that protects against a
-   * lapsed lease, reached a few minutes earlier.
+   * <p>The departing run is not interrupted, and the contrast with the {@link
+   * RetentionPolicy#MAX_RUN} ceiling — which does interrupt — is the point rather than an
+   * inconsistency. The ceiling interrupts to get a thread back, because the process is staying and
+   * its poller has more work to claim. Here the process is leaving, so there is no slot worth
+   * reclaiming, and the run needs no stopping: every write it makes is fenced on ownership it has
+   * just given away, so the first one fails and the run unwinds itself. That is the same mechanism
+   * that protects against a lapsed lease, reached a few minutes earlier.
    */
   /**
    * Whether this poller is still taking work. Exists so a test can boot a real context, close it,

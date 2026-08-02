@@ -600,6 +600,18 @@ public class IndexRequestServiceTest {
     }
 
     @Override
+    public boolean releaseOwned(UUID id, String ownerId, Instant now) {
+      IndexingRequest r = rows.get(id);
+      if (r == null || !live(r) || !ownerId.equals(owners.get(id))) {
+        return false;
+      }
+      // No attempts arithmetic, unlike handBack above — the attempt stays spent.
+      owners.remove(id);
+      rows.put(id, touched(r, now));
+      return true;
+    }
+
+    @Override
     public boolean holdsLease(UUID id, String ownerId, Instant now) {
       IndexingRequest r = rows.get(id);
       Instant expires = leases.get(id);

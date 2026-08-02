@@ -302,12 +302,14 @@ public class IndexingRequestDao implements IndexingRequestStore {
    * reason it is a candidate.
    *
    * <p>Requiring both means this errs toward silence rather than toward false failure, which is the
-   * right way round — a wrong FAILED destroys queued work, a late FAILED only delays an answer. The
-   * residual case is a worker wedged mid-run: its heartbeat renews from a separate thread, so both
-   * probes stay positive, and that one live lease suppresses this arm for every queued row in the
-   * table rather than only its own. No liveness probe can close it — the worker is alive, and what
-   * is unknown is whether the run is progressing — so bounding it needs a ceiling on run duration.
-   * Tracked in #1282.
+   * right way round — a wrong FAILED destroys queued work, a late FAILED only delays an answer.
+   *
+   * <p>What stops that from becoming indefinite silence is not here. A worker wedged mid-run renews
+   * from its heartbeat thread, so both probes stay positive and that one live lease vouches for the
+   * whole fleet — every queued row in the table, not just its own. No liveness probe can close
+   * that, because the worker really is alive; what is unknown is whether the run is progressing.
+   * The bound is {@link RetentionPolicy#MAX_RUN}, which stops the renewals so this arm can see the
+   * truth again (#1282).
    */
   private static final String RETIRE_ABANDONED_SQL =
       """
@@ -668,6 +670,32 @@ public class IndexingRequestDao implements IndexingRequestStore {
       LOG.info("Handed request {} back to the queue on shutdown", id);
     }
     return handed > 0;
+  }
+
+  @Override
+  public boolean releaseOwned(UUID id, String ownerId, Instant now) {
+    // No attempts arithmetic at all, and that is the difference from handBack: the attempt was
+    // spent on claim and stays spent. Nulling owner_id is what makes the next claim count, since
+    // claim only holds the counter flat while the row still names the same owner.
+    int released =
+        jdbi.withHandle(
+            h ->
+                h.createUpdate(
+                        """
+                        UPDATE indexing_requests
+                        SET owner_id = NULL, updated_at = :now
+                        WHERE id = :id
+                          AND owner_id = :owner
+                          AND status IN ('PENDING', 'PROCESSING')
+                        """)
+                    .bindByType("now", toUtcWallClock(now), LocalDateTime.class)
+                    .bind("id", id)
+                    .bind("owner", ownerId)
+                    .execute());
+    if (released > 0) {
+      LOG.warn("Released request {} after the run holding it was cut loose", id);
+    }
+    return released > 0;
   }
 
   @Override

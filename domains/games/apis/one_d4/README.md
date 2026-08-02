@@ -268,10 +268,40 @@ match wins. A row at the attempt limit is usually also old and unheld, and both 
 but only one gives the user the real reason; and requeuing stamps `updated_at`, so doing it first
 would make a row look freshly touched and hide it from the staleness check for another whole hour.
 
-None of that covers a worker that is *leaving on purpose*, and it can't: every arm above needs the
-owner to have stopped answering, which a deploy only looks like after the lease expires. So a
-shutting-down worker hands its request back itself — unclaimed immediately, and with the attempt
-returned. The attempt matters more than the five minutes: `attempts` is spent on claim so that a
+None of the three covers a worker that is *alive but not getting anywhere*, and no better probe
+could: a run wedged on a hung socket renews from its heartbeat thread, so it answers "yes, I'm
+here" honestly while going nowhere. Worse, the stalled arm asks whether **any** worker holds a live
+lease, so one wedged run vouches for the entire fleet and every other queued request waits in
+silence behind it. The bound is a ceiling on how long one claim may be renewed — **6 hours**, far
+above any legitimate run. Past it the heartbeat stops, the lease lapses, and the request is
+requeued at the cost of one attempt. It caps renewal, not writes: a run that crosses the ceiling
+holding a valid lease may finish what it is already inside.
+
+Crossing the ceiling also interrupts the run's thread, and the two halves recover different things.
+Letting the lease lapse recovers the **request** — another worker takes the row. The interrupt
+recovers the **worker**, whose poller is a single thread: without it the instance that hit the
+wedge stops taking work entirely and does not start again until someone restarts it, so a fleet
+would recover its rows one at a time while shedding an instance for each one. It is best-effort by
+nature — an interrupt ends a run only if what the run is blocked on honours it, which the JDK
+`HttpClient` sends and body reads a worker actually waits in do, and a lock held forever by another
+thread does not — and the row is recovered either way. The unwind keys on the interrupt status: a
+body read leaves it set itself, while a send throws with it cleared and `Jdk11HttpClient` restores
+it before rethrowing, which is why that restore matters here and is not just tidiness. A run that
+has been interrupted does not record FAILED: it was stopped, not broken, and the range goes back to
+the queue rather than being blamed for the worker.
+
+What it does do is let go of the row, and that is the part that keeps the ceiling honest. `claim`
+holds `attempts` flat when the same owner re-claims — deliberately, so a run can renew across its
+own retries — and the worker that just gave up a wedged run is the same process whose poller sees
+the row next. Left owned, it would re-claim its own abandoned request every five minutes, take a
+fresh ceiling, and wedge again on a counter that never moved, with each lap's live lease vouching
+for the whole fleet. So the interrupt path clears `owner_id` without returning the attempt: three
+wedges retire the request and tell the user, rather than looping on it forever.
+
+None of that covers a worker that is *leaving on purpose* either, and it can't: every arm above
+needs the owner to have stopped answering, which a deploy only looks like after the lease expires.
+So a shutting-down worker hands its request back itself — unclaimed immediately, and with the
+attempt returned. The attempt matters more than the five minutes: `attempts` is spent on claim so that a
 request which kills its worker outright still moves the counter, which means a process exit is
 otherwise indistinguishable from a crash, and a long-running request outliving three rolling
 restarts would be retired as poisoned. A hand-back is the evidence that resolves it — the worker

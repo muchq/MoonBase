@@ -750,6 +750,12 @@ public class IndexWorkerTest {
     }
 
     @Override
+    public boolean releaseOwned(UUID id, String ownerId, Instant now) {
+
+      return false;
+    }
+
+    @Override
     public boolean holdsLease(UUID id, String ownerId, Instant now) {
       return true;
     }

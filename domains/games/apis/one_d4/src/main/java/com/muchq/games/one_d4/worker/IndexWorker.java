@@ -129,6 +129,76 @@ public class IndexWorker {
   }
 
   /**
+   * When each in-flight run stops being allowed to renew (#1282).
+   *
+   * <p>Keyed by request rather than held in a field because one process runs several at once, and
+   * the two things that consult it are far apart: the heartbeat, on its own scheduler thread, and
+   * {@link #fenced}, which is called from deep inside the month loop and has nothing but a request
+   * id to go on.
+   */
+  private final Map<UUID, Instant> renewalDeadlines = new ConcurrentHashMap<>();
+
+  /**
+   * The thread each in-flight run is on, so the ceiling can stop the run rather than merely stop
+   * vouching for it (#1282, option 2).
+   *
+   * <p>Giving the request up is only half of recovering from a wedge. The row goes back to the
+   * queue and another worker gets through it, but the thread that was stuck stays stuck: the poller
+   * is one thread, so the instance holding a wedged run stops taking work entirely and does not
+   * start again until someone restarts it. A fleet recovering its rows one at a time while losing a
+   * worker each time is not recovering.
+   */
+  private final Map<UUID, RunHandle> runHandles = new ConcurrentHashMap<>();
+
+  /**
+   * True once this run has been going long enough that its own liveness is no longer evidence of
+   * anything. Absent means no ceiling applies — an inline run this worker never claimed, or one
+   * already unwound.
+   */
+  private boolean pastRenewalCeiling(UUID requestId) {
+    Instant deadline = renewalDeadlines.get(requestId);
+    return deadline != null && !clock.instant().isBefore(deadline);
+  }
+
+  /**
+   * Lets the heartbeat interrupt a run without the interrupt ever landing on a thread that has
+   * moved on to something else.
+   *
+   * <p>Both halves lock the same handle, so the interrupt and the end of the run are ordered:
+   * either the interrupt is delivered while the run is still inside {@link #claimAndRun}, where it
+   * is expected and consumed, or {@link #finish} got there first and no interrupt is sent at all.
+   * Without that ordering the poller would occasionally return to its loop carrying an interrupt
+   * meant for a run that had already ended, and fail its next blocking call for a reason nobody
+   * could reconstruct from the logs.
+   *
+   * <p>Package-private so the ordering can be tested directly. It is a race, and a test that had to
+   * schedule one would be a test that passes when it loses.
+   */
+  static final class RunHandle {
+    private final Thread thread;
+    private boolean finished;
+    private boolean interrupted;
+
+    RunHandle(Thread thread) {
+      this.thread = thread;
+    }
+
+    synchronized void interruptRun() {
+      if (finished) {
+        return;
+      }
+      interrupted = true;
+      thread.interrupt();
+    }
+
+    /** Ends the run, and reports whether this worker ever interrupted it. */
+    synchronized boolean finish() {
+      finished = true;
+      return interrupted;
+    }
+  }
+
+  /**
    * How often the lease is renewed. Paced against {@link RetentionPolicy#LEASE}, not against {@link
    * RetentionPolicy#STALE_REQUEST}: the hour is how long an <em>unclaimed</em> row may sit before
    * it is presumed orphaned, and beating on that schedule against a five-minute lease would let
@@ -246,7 +316,11 @@ public class IndexWorker {
       return;
     }
 
+    renewalDeadlines.put(message.requestId(), clock.instant().plus(RetentionPolicy.MAX_RUN));
+    RunHandle handle = new RunHandle(Thread.currentThread());
+    runHandles.put(message.requestId(), handle);
     ScheduledFuture<?> heartbeat = startHeartbeat(message.requestId());
+    boolean abandonedBecauseInterrupted = false;
     try {
       progress(message.requestId(), 0);
 
@@ -287,6 +361,15 @@ public class IndexWorker {
         }
 
         Optional<GamesResponse> response = chessClient.fetchGames(message.player(), month);
+        // Checked on the way out of the fetch, not only where an interrupt is thrown, because a
+        // blocking call is entitled to swallow one — restore the status, return normally, and
+        // leave the caller unable to tell an empty archive from a call that was cut short. Taking
+        // that answer at face value does two wrong things: it writes an empty period, which the
+        // period cache honours until retention sweeps it a week later, and it goes on to the next
+        // month, which is the opposite of stopping. This and the check before the flush below are
+        // placed the same way — on the way out of a span that blocks, which is where an interrupt
+        // can have been absorbed without a trace.
+        ensureNotInterrupted(message.requestId());
         if (response.isEmpty()) {
           // chess.com 404s the archive for a month the player has no games in. The month *was*
           // indexed — the answer is "none" — so record an empty period rather than dropping
@@ -320,6 +403,15 @@ public class IndexWorker {
         // Resolve titles (deduped, bounded by the extraction pool size) before extraction work is
         // submitted, so the pool is otherwise idle and total chess.com concurrency stays capped.
         TitleResolution titleResolution = resolveTitles(games, titleCache);
+        // The third span that blocks, and it swallows the interrupt exactly like the fetch above:
+        // it marks itself degraded and returns a usable map, because a title lookup must never
+        // fail indexing. Walking on from here is worse than it looks. The drain below cannot catch
+        // the interrupt for us — a future that has already completed returns from get() without
+        // ever checking the flag — so every game is submitted to the shared pool, and a month at
+        // BATCH_SIZE flushes a partial batch mid-loop. That flush is fenced but not refused: the
+        // ceiling stops the heartbeat, it does not expire the lease, so for the next LEASE this
+        // run still owns the row and the write lands. Stop before anything is submitted.
+        ensureNotInterrupted(message.requestId());
         Map<String, String> titles = titleResolution.titles();
 
         // Submit each surviving game to the extraction pool, preserving source order.
@@ -343,29 +435,39 @@ public class IndexWorker {
         }
 
         int monthCount = 0;
-        for (Future<ExtractResult> future : futures) {
-          ExtractResult result;
-          try {
-            result = future.get();
-          } catch (ExecutionException e) {
-            LOG.warn("{}", e.getCause().getMessage(), e.getCause());
-            continue;
-          } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            LOG.warn("Interrupted while draining extraction futures", e);
-            break;
+        try {
+          for (Future<ExtractResult> future : futures) {
+            ExtractResult result;
+            try {
+              result = future.get();
+            } catch (ExecutionException e) {
+              LOG.warn("{}", e.getCause().getMessage(), e.getCause());
+              continue;
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+              LOG.warn("Interrupted while draining extraction futures", e);
+              break;
+            }
+            featureBatch.add(result.row());
+            if (!result.occurrences().isEmpty()) {
+              occurrencesBatch.put(result.gameUrl(), result.occurrences());
+            }
+            monthCount++;
+            totalIndexed++;
+            if (featureBatch.size() >= BATCH_SIZE) {
+              flushBatch(message.requestId(), featureBatch, occurrencesBatch);
+              progress(message.requestId(), totalIndexed);
+            }
           }
-          featureBatch.add(result.row());
-          if (!result.occurrences().isEmpty()) {
-            occurrencesBatch.put(result.gameUrl(), result.occurrences());
-          }
-          monthCount++;
-          totalIndexed++;
-          if (featureBatch.size() >= BATCH_SIZE) {
-            flushBatch(message.requestId(), featureBatch, occurrencesBatch);
-            progress(message.requestId(), totalIndexed);
-          }
+        } finally {
+          abandon(futures);
         }
+        // The drain above stops early when this thread is interrupted, and everything below it
+        // writes — a partial batch, then a period row stamping the month as indexed. That row is
+        // the damaging one: it is keyed by (player, platform, month) with no request to fence it,
+        // so a month half-extracted before the run was stopped would be cached as done and skipped
+        // by every later request until retention swept it.
+        ensureNotInterrupted(message.requestId());
         flushBatch(message.requestId(), featureBatch, occurrencesBatch);
         if (titleResolution.degraded()) {
           LOG.warn(
@@ -404,33 +506,129 @@ public class IndexWorker {
       // a run that did not fail: it was stopped, correctly, because the range moved.
       LOG.warn("Abandoning request {}: {}", message.requestId(), e.getMessage());
     } catch (Exception e) {
-      LOG.error("Failed to process index request {}", message.requestId(), e);
-      // Through fenced(), like every other write in the run. This is the write most likely to be
-      // refused for a reason unrelated to what it is reporting — the database problem that throws
-      // out of a run is the same one that stalls the heartbeat — and it is the only write that can
-      // explain the failure. Refused, it leaves the row PROCESSING holding its dedupe slot, so the
-      // range stays blocked until the hourly sweep retires it under a message about an owner that
-      // stopped responding, which is not what happened.
-      if (!fenced(
-          message.requestId(),
-          () ->
-              requestStore.updateStatusOwned(
-                  message.requestId(),
-                  ownerId,
-                  "FAILED",
-                  "Indexing failed due to an internal error",
-                  0,
-                  clock.instant()),
-          "the failure could be recorded")) {
-        // Only reachable now when the range has genuinely moved on, in which case the replacement
-        // owns the outcome and this run has nothing to report.
-        LOG.error(
-            "Could not record FAILED for request {}: the lease is gone. The row will be reclaimed"
-                + " rather than reporting this error.",
-            message.requestId());
+      if (e instanceof RunInterruptedException || Thread.currentThread().isInterrupted()) {
+        // Stopped, not failed, and the row's outcome turns on the difference. A FAILED here spends
+        // one of three attempts and tells the user their range is broken, when what actually
+        // happened is that this worker was told to let go of it. Left alone, the request goes back
+        // to the queue and a worker that is not wedged finishes it.
+        //
+        // Checked on the status rather than only on the exception type because an interrupt
+        // arrives in whatever shape the blocking call gives it — an interrupted HTTP read, a
+        // driver's own wrapper, a future that was being waited on. What they have in common is the
+        // status, which every one of them restores on the way out.
+        LOG.warn(
+            "Abandoning request {}: this run was interrupted before it finished, so it is being"
+                + " left for another worker rather than recorded as a failure.",
+            message.requestId(),
+            e);
+        abandonedBecauseInterrupted = true;
+      } else {
+        recordFailure(message.requestId(), e);
       }
     } finally {
       heartbeat.cancel(false);
+      renewalDeadlines.remove(message.requestId());
+      runHandles.remove(message.requestId());
+      boolean weInterruptedThisRun = handle.finish();
+      if (weInterruptedThisRun) {
+        // Our own interrupt, and it stops here. The thread it landed on belongs to the poller,
+        // which has more requests to claim after this one; letting the status escape would make
+        // its next blocking call fail for a reason that has nothing to do with the request it is
+        // working on by then. An interrupt from anywhere else is left alone — this worker did not
+        // send it and does not know what it means.
+        Thread.interrupted();
+      }
+      // Here rather than in the interrupt catch above, because that catch is not the only way out
+      // of an interrupted run and was not even the common one. Past the ceiling every fenced write
+      // refuses without renewing, so the run unwinds as a LeaseLostException — caught first, and
+      // by a branch that knows nothing about interrupts. It leaves owner_id set, and the poller
+      // that comes back for the row is the owner named in it, so claim holds attempts flat and the
+      // wedge repeats for free. The cached-month progress call reaches the same place with no
+      // checkpoint in front of it at all.
+      //
+      // Ordered after the status is cleared: releasing is a database write, and handing it a
+      // thread that is still flagged invites the driver to fail it for the wrong reason.
+      //
+      // The two terms overlap without either containing the other. The first is true whenever our
+      // ceiling fired, however the run then unwound — including the LeaseLostException route,
+      // which never reaches the catch that sets the second. The second is true whenever the run
+      // unwound as interrupted, including on an interrupt this worker did not send, where the
+      // first is false.
+      if (weInterruptedThisRun || abandonedBecauseInterrupted) {
+        releaseAfterInterrupt(message.requestId());
+      }
+    }
+  }
+
+  /**
+   * Gives up the row an interrupted run was holding, so the next claim on it counts.
+   *
+   * <p>Leaving it owned looks harmless — the lease lapses on its own within {@link
+   * RetentionPolicy#LEASE} and any worker may then take it — and it is the one thing that turns
+   * this whole ceiling back into a no-op. {@code claim} holds {@code attempts} flat when the owner
+   * re-presents the same token, so the poller that just abandoned this run re-claims its own row a
+   * few minutes later, takes a fresh {@link RetentionPolicy#MAX_RUN}, and wedges again on a counter
+   * that has not moved. Nothing ever retires it, and for as long as it loops its live lease answers
+   * "yes, someone is working" on behalf of the entire fleet. The bound this class advertises would
+   * exist and bound nothing.
+   *
+   * <p>Not through {@link #fenced}: that renews on a refused write, which is the exact opposite of
+   * letting go. Best-effort — if the database is the reason this run wedged, the hourly release arm
+   * clears the owner once the lease lapses and the next claim counts then instead.
+   */
+  private void releaseAfterInterrupt(UUID requestId) {
+    try {
+      requestStore.releaseOwned(requestId, ownerId, clock.instant());
+    } catch (RuntimeException e) {
+      LOG.warn(
+          "Could not release request {} after its run was cut loose; the hourly sweep will clear"
+              + " the owner once the lease lapses.",
+          requestId,
+          e);
+    }
+  }
+
+  /**
+   * Records a run that genuinely failed.
+   *
+   * <p>Through fenced(), like every other write in the run. This is the write most likely to be
+   * refused for a reason unrelated to what it is reporting — the database problem that throws out
+   * of a run is the same one that stalls the heartbeat — and it is the only write that can explain
+   * the failure. Refused, it leaves the row PROCESSING holding its dedupe slot, so the range stays
+   * blocked until the hourly sweep retires it under a message about an owner that stopped
+   * responding, which is not what happened.
+   */
+  private void recordFailure(UUID requestId, Exception cause) {
+    LOG.error("Failed to process index request {}", requestId, cause);
+    if (!fenced(
+        requestId,
+        () ->
+            requestStore.updateStatusOwned(
+                requestId,
+                ownerId,
+                "FAILED",
+                "Indexing failed due to an internal error",
+                0,
+                clock.instant()),
+        "the failure could be recorded")) {
+      // Only reachable now when the range has genuinely moved on, in which case the replacement
+      // owns the outcome and this run has nothing to report.
+      LOG.error(
+          "Could not record FAILED for request {}: the lease is gone. The row will be reclaimed"
+              + " rather than reporting this error.",
+          requestId);
+    }
+  }
+
+  /**
+   * Unwinds the run if this thread has been told to stop.
+   *
+   * <p>Called where the run is about to commit to more work or to a write, which is where the
+   * difference between stopping and carrying on becomes visible from outside the process.
+   */
+  private static void ensureNotInterrupted(UUID requestId) {
+    if (Thread.currentThread().isInterrupted()) {
+      throw new RunInterruptedException(requestId);
     }
   }
 
@@ -455,6 +653,22 @@ public class IndexWorker {
     return heartbeatScheduler.scheduleWithFixedDelay(
         () -> {
           try {
+            if (pastRenewalCeiling(requestId)) {
+              // Loudly, and at ERROR: nothing legitimate reaches this. A twelve-month range for a
+              // prolific player is minutes against a healthy chess.com, so a run still going after
+              // MAX_RUN is a wedge — a hung socket, a deadlocked pool, an unbounded retry — and
+              // the request is about to cost an attempt because of it. Whoever reads this needs to
+              // go and look at the worker, not at the request.
+              LOG.error(
+                  "Request {} has been running for {} without finishing. Releasing the lease and"
+                      + " interrupting the run: a run this long is a stuck worker, and holding it"
+                      + " open strands this range and hides every other queued request from the"
+                      + " staleness sweep.",
+                  requestId,
+                  RetentionPolicy.MAX_RUN);
+              interruptRun(requestId);
+              throw new CancellationException("run exceeded the renewal ceiling");
+            }
             if (!requestStore.renewLease(
                 requestId, ownerId, RetentionPolicy.LEASE, clock.instant())) {
               LOG.warn(
@@ -474,6 +688,61 @@ public class IndexWorker {
         everyMillis,
         everyMillis,
         TimeUnit.MILLISECONDS);
+  }
+
+  /**
+   * Lets go of work this run submitted to the extraction pool, interrupting whatever is still
+   * running.
+   *
+   * <p>Interrupting the run thread frees the run; it does nothing for the pool threads the run left
+   * behind, and those are the ones holding chess.com connections. Title resolution submits a
+   * profile lookup per distinct opponent, so the same hung peer that wedged the archive fetch
+   * wedges every one of them — and unlike the run, they belong to a pool shared by every request on
+   * this instance. Leaving them there recovers one worker's poll loop while quietly retiring its
+   * extraction capacity, which is the same failure a size down.
+   *
+   * <p>A no-op on the ordinary path: the drain loops consume every future before they return, and
+   * cancelling a completed future does nothing. This only bites when a loop broke out early.
+   */
+  private static void abandon(List<? extends Future<?>> futures) {
+    for (Future<?> future : futures) {
+      future.cancel(true);
+    }
+  }
+
+  /**
+   * Cuts a run loose from whatever it is blocked on, so this worker gets its slot back.
+   *
+   * <p>Releasing the lease is what recovers the <em>request</em>; this is what recovers the
+   * <em>worker</em>. Without it a wedged run keeps its thread forever, and since the poller is one
+   * thread, the instance stops taking work until someone restarts it — so the fleet recovers its
+   * rows one at a time while shedding a worker for each one.
+   *
+   * <p>An interrupt only ends a run if what the run is blocked on honours it. The calls this worker
+   * actually waits in are JDK {@code HttpClient} sends and body reads, and both return promptly
+   * when the thread is interrupted (#1282).
+   *
+   * <p>The unwind keys on the interrupt <em>status</em>, and the two paths leave it set for
+   * different reasons — worth naming, because only one of them is the JDK's doing. A body read
+   * surfaces as an {@code IOException} wrapping {@code InterruptedException} with the status
+   * already set. A {@code send} throws {@code InterruptedException} with the status
+   * <em>cleared</em>, and {@code Jdk11HttpClient} is what restores it before rethrowing. That
+   * restore is load-bearing for this class, not tidiness: drop it and a wedged send unwinds as an
+   * ordinary failure, which spends an attempt and blames the range.
+   *
+   * <p>Where the wedge is somewhere that honours nothing — a lock held forever by another thread, a
+   * native call — this changes nothing and the ceiling still gives the request up. The two are
+   * independent on purpose: the row is recovered by the lease lapsing, not by the interrupt
+   * landing.
+   *
+   * <p>Absent from the map means the run already ended. Nothing to stop, and nothing to interrupt:
+   * the thread has moved on and the interrupt would land on whatever it is doing now.
+   */
+  private void interruptRun(UUID requestId) {
+    RunHandle handle = runHandles.get(requestId);
+    if (handle != null) {
+      handle.interruptRun();
+    }
   }
 
   /**
@@ -555,24 +824,28 @@ public class IndexWorker {
     for (String username : missing) {
       futures.add(extractionExecutor.submit(() -> fetchTitle(username)));
     }
-    for (Future<TitleFetch> future : futures) {
-      try {
-        TitleFetch fetch = future.get();
-        if (fetch.failed()) {
+    try {
+      for (Future<TitleFetch> future : futures) {
+        try {
+          TitleFetch fetch = future.get();
+          if (fetch.failed()) {
+            degraded = true;
+          } else {
+            cache.put(fetch.username(), fetch.title());
+          }
+        } catch (ExecutionException e) {
+          // fetchTitle catches its own errors; this is a safety net.
+          LOG.warn("Title lookup task failed", e.getCause());
           degraded = true;
-        } else {
-          cache.put(fetch.username(), fetch.title());
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          LOG.warn("Interrupted while resolving player titles", e);
+          degraded = true;
+          break;
         }
-      } catch (ExecutionException e) {
-        // fetchTitle catches its own errors; this is a safety net.
-        LOG.warn("Title lookup task failed", e.getCause());
-        degraded = true;
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        LOG.warn("Interrupted while resolving player titles", e);
-        degraded = true;
-        break;
       }
+    } finally {
+      abandon(futures);
     }
     return new TitleResolution(Collections.unmodifiableMap(new HashMap<>(cache)), degraded);
   }
@@ -680,6 +953,20 @@ public class IndexWorker {
     if (write.getAsBoolean()) {
       return true;
     }
+    if (pastRenewalCeiling(requestId)) {
+      // The recovery above is exactly wrong here, and this is the half of #1282 that is easy to
+      // miss. Nobody has necessarily taken this row — the heartbeat gave it up on purpose — so
+      // owner_id still names us and the renewal below would succeed, restoring the lease the
+      // ceiling just took away and putting the run straight back to holding the range. Capping
+      // only the heartbeat looks like a fix and is not one.
+      LOG.warn(
+          "Not renewing request {} so that {}: this run is past the {} ceiling and has given the"
+              + " request up.",
+          requestId,
+          what,
+          RetentionPolicy.MAX_RUN);
+      return false;
+    }
     if (!requestStore.renewLease(requestId, ownerId, RetentionPolicy.LEASE, clock.instant())) {
       return false;
     }
@@ -699,6 +986,17 @@ public class IndexWorker {
   private static final class LeaseLostException extends RuntimeException {
     LeaseLostException(UUID requestId, String detail) {
       super("Request " + requestId + ": " + detail);
+    }
+  }
+
+  /**
+   * Thrown to unwind a run that has been told to stop. A sibling of {@link LeaseLostException} and
+   * for the same reason: neither is a failure of the range, so neither may leave a FAILED behind
+   * for a user to read as one.
+   */
+  private static final class RunInterruptedException extends RuntimeException {
+    RunInterruptedException(UUID requestId) {
+      super("Request " + requestId + ": the run was interrupted and will not continue");
     }
   }
 
