@@ -191,13 +191,18 @@ table {
   font-size: 0.875rem;
 }
 
-/* The games table carries eleven columns. Without a floor the browser keeps
-   honouring width:100% by crushing the last ones instead of letting the wrapper
-   scroll, and the motif badges — the narrowest column's content — get cut
-   mid-word. Scoped to this table so the shorter index-requests table still fits
-   a phone without a scrollbar. */
+/* The games table carries nine columns (the game link and indexed-at date
+   moved into GameDetailPanel — see GameTable.tsx). This is a floor, not the
+   thing keeping badges intact: because the `nowrap` rule below makes every
+   cell's min-content its full text, the table's own intrinsic minimum already
+   sits near this value — measured 816px with short usernames and 993px with
+   ones like `only_strong_moves`, against the 832px below. So it binds only at
+   the short end, and what actually stops a badge being cut mid-word is
+   `white-space: nowrap` on `.motif-badge`. Kept because the short-username
+   case is real, and scoped to this table so the shorter index-requests table
+   still fits a phone without a scrollbar. */
 .table-wrap--wide table {
-  min-width: 64rem;
+  min-width: 52rem;
 }
 
 /* Every value in this table is an atom — a username, an ELO, an ISO date. None
@@ -240,13 +245,30 @@ th .sort-icon {
 th.sorted-asc .sort-icon::after { content: " ↑"; }
 th.sorted-desc .sort-icon::after { content: " ↓"; }
 
-td a.external {
-  color: var(--accent);
-  text-decoration: none;
+/* The White cell is the row's expand control — a real button so the detail
+   panel is keyboard-reachable (see GameTable.tsx). Tailwind preflight already
+   zeroes padding/margin/border and inherits font and colour, so this only has
+   to undo the button-ness that would otherwise read as a control in a column
+   of plain usernames. */
+.row-toggle {
+  background: none;
+  text-align: left;
+  cursor: pointer;
 }
 
-td a.external:hover {
-  text-decoration: underline;
+.row-toggle:hover {
+  color: var(--accent);
+}
+
+/* Which row the open panel belongs to. The panel renders in a separate <tr>,
+   so without this the connection between the two is left to proximity. Uses
+   neither --surface nor --border flat: the table sits inside a .panel that is
+   already --surface, so that reads as no highlight at all, and --border is
+   exactly what .motif-badge paints its chips with, so the badges in the
+   highlighted row dissolve into it. Sitting between the two keeps both
+   contrasts. */
+tr.selected td {
+  background: color-mix(in oklab, var(--border) 55%, var(--surface));
 }
 
 /* Motif badges */
