@@ -253,6 +253,17 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
     return false;
   }
 
+  // Pulls already-queued frames off a seat so the registry's async
+  // delivery chain can finish. Cross-instance wakes re-project freely;
+  // leaving those frames unread is what parks TearDown in End() (#1276).
+  static void DrainPending(moonbase::golf::PlayClientStream& stream) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+    while (std::chrono::steady_clock::now() < deadline) {
+      auto received = stream.Receive(std::chrono::milliseconds(5));
+      if (!received.ok() || !received->has_value()) return;
+    }
+  }
+
   // alice on the primary instance, bob on `remote`, one room and one
   // started game between them. Every cross-instance step waits on the
   // events that prove the other instance caught up, so the flow is
@@ -262,6 +273,30 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
     Seat bob;
     std::string room_id;
     std::string game_id;
+  };
+
+  // Stop both instances' listeners, then drain unread wake frames. Call
+  // before CrossTable/Instance go out of scope — a late OnChannelActive
+  // after DrainPending would refill the chain and TearDown hangs again.
+  void QuiesceCrossTable(Instance& remote, CrossTable& table) {
+    if (handler_ != nullptr) handler_->AttachListener(nullptr);
+    listener_.reset();
+    if (remote.handler != nullptr) remote.handler->AttachListener(nullptr);
+    remote.listener.reset();
+    DrainPending(table.alice.stream);
+    DrainPending(table.bob.stream);
+  }
+
+  // Ensures QuiesceCrossTable runs on success and on ASSERT failure alike.
+  struct QuiesceOnScopeExit {
+    PgGolfHubFixture* fixture;
+    Instance* remote;
+    CrossTable* table;
+    ~QuiesceOnScopeExit() {
+      if (fixture != nullptr && remote != nullptr && table != nullptr) {
+        fixture->QuiesceCrossTable(*remote, *table);
+      }
+    }
   };
   std::optional<CrossTable> SeatedCrossTable(Instance& remote) {
     auto alice = OpenSeat();
@@ -657,6 +692,7 @@ TEST_F(PgGolfHubFixture, TwoInstancesShareOneGame) {
   ASSERT_NE(remote, nullptr);
   auto table = SeatedCrossTable(*remote);
   ASSERT_TRUE(table.has_value());
+  QuiesceOnScopeExit quiesce{this, remote.get(), &*table};
   Seat& alice = table->alice;
   Seat& bob = table->bob;
 
@@ -731,6 +767,7 @@ TEST_F(PgGolfHubFixture, RemoteFinishRunsOneCeremonyEverywhere) {
   ASSERT_NE(remote, nullptr);
   auto table = SeatedCrossTable(*remote);
   ASSERT_TRUE(table.has_value());
+  QuiesceOnScopeExit quiesce{this, remote.get(), &*table};
   Seat& alice = table->alice;
   Seat& bob = table->bob;
 
