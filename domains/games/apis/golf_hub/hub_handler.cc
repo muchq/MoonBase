@@ -305,47 +305,55 @@ void HubHandler::AttachListener(pg::Listener* listener) {
 }
 
 void HubHandler::OnNotify(const std::string& channel, const std::string& payload) {
+  WakeChannel(channel, payload, /*from_active=*/false);
+}
+
+void HubHandler::OnChannelActive(const std::string& channel) {
+  WakeChannel(channel, /*payload=*/"", /*from_active=*/true);
+}
+
+void HubHandler::WakeChannel(const std::string& channel, const std::string& payload,
+                             bool from_active) {
   constexpr std::string_view kChatPrefix = "chat_";
   if (absl::StartsWith(channel, kChatPrefix)) {
     // Own wakes pump too, deliberately: the cursor makes it a no-op in
     // the common case, and it is what recovers an append whose
-    // connection died between COMMIT and the reply.
+    // connection died between COMMIT and the reply. Active has no
+    // payload, so the own-instance filter never applies here.
     PumpChat(std::string(channel.substr(kChatPrefix.size())));
     return;
   }
-  if (payload == instance_id_) return;  // our own commit; locals already heard it
+  // Notify echoes of our own commit are skipped; locals already heard
+  // them. Active signals carry no instance id — always a catch-up.
+  if (!from_active && payload == instance_id_) return;
   constexpr std::string_view kPrefix = "room_";
   if (!absl::StartsWith(channel, kPrefix)) return;
-  const std::string room_id = channel.substr(kPrefix.size());
-  Outbox outbox;
+  // Notify always re-projects (wake contract). Active only projects when
+  // rows moved — reconnect re-LISTENs every room and must not flood.
+  CatchUpRoom(std::string(channel.substr(kPrefix.size())), /*project_always=*/!from_active);
+}
+
+void HubHandler::CatchUpRoom(const std::string& room_id, bool project_always) {
   {
     const std::lock_guard<std::mutex> lock(mu_);
     // Only rooms we hold: a stale wake for a dropped room must not
     // resurrect it (join is the one path that materializes rooms).
     if (!rooms_.contains(room_id)) return;
-    RefreshRoomLocked(room_id, outbox);
   }
-  Deliver(outbox);
-}
-
-void HubHandler::OnChannelActive(const std::string& channel) {
-  // Rows committed while we were not subscribed queued no notification.
-  // Chat heals from its cursor; rooms re-read and re-project like a wake
-  // (#1276) — the notify-only path is not enough around (re)LISTEN.
-  constexpr std::string_view kChatPrefix = "chat_";
-  if (absl::StartsWith(channel, kChatPrefix)) {
-    PumpChat(std::string(channel.substr(kChatPrefix.size())));
+  // Off mu_: reconnect fires this once per room on the poll thread; holding
+  // the lock across Flush+LoadRoom would stall every move/chat/join for
+  // the whole burst. Same shape as PumpChat.
+  store_->Flush();
+  auto rows = store_->LoadRoom(room_id);
+  if (!rows.ok()) {
+    LOG(WARNING) << "room " << room_id << " catch-up failed: " << rows.status();
     return;
   }
-  constexpr std::string_view kPrefix = "room_";
-  if (!absl::StartsWith(channel, kPrefix)) return;
-  const std::string room_id = channel.substr(kPrefix.size());
   Outbox outbox;
   {
     const std::lock_guard<std::mutex> lock(mu_);
-    // Same membership guard as OnNotify: never materialize from a wake.
     if (!rooms_.contains(room_id)) return;
-    RefreshRoomLocked(room_id, outbox);
+    ReconcileRoomLocked(room_id, *rows, outbox, project_always);
   }
   Deliver(outbox);
 }
@@ -353,7 +361,8 @@ void HubHandler::OnChannelActive(const std::string& channel) {
 void HubHandler::RefreshRoomLocked(const std::string& room_id, Outbox& outbox) {
   // The flush means this read can never be older than our own truth;
   // holding mu_ across it means nothing local moves in between. The
-  // writer thread needs no lock we hold, so it drains freely.
+  // writer thread needs no lock we hold, so it drains freely. Join uses
+  // this path to materialize; notify/active use CatchUpRoom instead.
   store_->Flush();
   auto rows = store_->LoadRoom(room_id);
   if (!rows.ok()) {
@@ -361,15 +370,15 @@ void HubHandler::RefreshRoomLocked(const std::string& room_id, Outbox& outbox) {
     LOG(WARNING) << "room " << room_id << " refresh failed: " << rows.status();
     return;
   }
-  ReconcileRoomLocked(room_id, *rows, outbox);
+  ReconcileRoomLocked(room_id, *rows, outbox, /*project_always=*/true);
 }
 
-void HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore::RoomRows& rows,
-                                     Outbox& outbox) {
+bool HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore::RoomRows& rows,
+                                     Outbox& outbox, bool project_always) {
   if (!rows.exists) {
     // Deleted by another instance; nothing local can outrank that.
     const auto room = rooms_.find(room_id);
-    if (room == rooms_.end()) return;
+    if (room == rooms_.end()) return false;
     for (const auto& [member_id, member] : room->second.members) {
       if (auto it = player_room_.find(member_id);
           it != player_room_.end() && it->second == room_id) {
@@ -384,7 +393,7 @@ void HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore:
     chat_store_->DropRoom(room_id);
     chat_cursors_.erase(room_id);
     UnlistenRoomLocked(room_id);
-    return;
+    return true;
   }
 
   const bool materialized = !rooms_.contains(room_id);
@@ -394,6 +403,8 @@ void HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore:
   // no member exists locally yet, so no append can commit behind it and
   // then be stepped over — the adoption race a wake-time seed would have.
   if (materialized) SeedChatCursorLocked(room_id);
+
+  bool changed = materialized;
 
   // Members mirror the rows: every instance writes its own players'
   // rows, and the refresh flush made ours current.
@@ -407,8 +418,23 @@ void HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore:
     members.emplace(row.player_id, member);
     player_room_[row.player_id] = room_id;
   }
+  if (members.size() != room.members.size()) {
+    changed = true;
+  } else {
+    for (const auto& [id, member] : members) {
+      const auto prior = room.members.find(id);
+      if (prior == room.members.end() || prior->second.connected != member.connected ||
+          prior->second.games_played != member.games_played ||
+          prior->second.games_won != member.games_won ||
+          prior->second.total_score != member.total_score) {
+        changed = true;
+        break;
+      }
+    }
+  }
   for (const auto& [member_id, member] : room.members) {
     if (members.contains(member_id)) continue;
+    changed = true;
     if (auto it = player_room_.find(member_id); it != player_room_.end() && it->second == room_id) {
       player_room_.erase(it);
       player_game_.erase(member_id);
@@ -433,10 +459,12 @@ void HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore:
       if (row.state.has_value()) entry.state.emplace(*row.state);
       for (const std::string& member_id : entry.roster) player_game_[member_id] = row.game_id;
       room.games.emplace(row.game_id, std::move(entry));
+      changed = true;
       continue;
     }
     GameEntry& entry = game->second;
     if (row.version <= entry.version) continue;  // ours is current
+    changed = true;
     for (const std::string& member_id : entry.roster) {
       // A member the new roster dropped left the game remotely.
       if (std::find(row.roster.begin(), row.roster.end(), member_id) == row.roster.end()) {
@@ -457,6 +485,7 @@ void HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore:
       ++game;
       continue;
     }
+    changed = true;
     // Deleted remotely: a disbanded lobby or a finished game's cleanup.
     for (const std::string& member_id : game->second.roster) {
       if (auto it = player_game_.find(member_id);
@@ -467,10 +496,13 @@ void HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore:
     game = room.games.erase(game);
   }
 
-  // The wake contract: re-read, then re-project — local viewers get
-  // current views whether or not anything above changed.
-  for (const auto& [game_id, entry] : room.games) StageGameViewsLocked(game_id, entry, outbox);
-  StageRoomStateLocked(room_id, outbox);
+  // Notify wake contract: always re-project. Active catch-up: only when
+  // something moved, so a no-op reconnect does not fill session queues.
+  if (changed || project_always) {
+    for (const auto& [game_id, entry] : room.games) StageGameViewsLocked(game_id, entry, outbox);
+    StageRoomStateLocked(room_id, outbox);
+  }
+  return changed;
 }
 
 void HubHandler::DropGameLocked(const GameRef& ref) {

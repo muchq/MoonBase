@@ -41,9 +41,12 @@ class ListenerTest : public ::testing::Test {
 
 TEST_F(ListenerTest, DeliversNotificationsAndChannelChurn) {
   Received received;
-  pg::Listener listener(url_, [&](const std::string& channel, const std::string& payload) {
-    received.Add(channel, payload);
-  });
+  pg::Listener listener(
+      url_,
+      [&](const std::string& channel, const std::string& payload) {
+        received.Add(channel, payload);
+      },
+      /*on_active=*/nullptr);
   listener.Listen("room_ABC123");  // mixed case must survive quoting
 
   pg::Client client(url_);
@@ -134,6 +137,22 @@ TEST_F(ListenerTest, DrainsNotifyBufferedByListenExec) {
   bool holding = false;
   bool release = false;
 
+  // Always release the poll thread, even if an ASSERT below fires —
+  // otherwise ~Listener joins a callback that waits forever and the
+  // small target dies at 60s with no failure text.
+  struct ReleaseHold {
+    std::mutex& mu;
+    std::condition_variable& cv;
+    bool& release;
+    ~ReleaseHold() {
+      {
+        const std::lock_guard<std::mutex> lock(mu);
+        release = true;
+      }
+      cv.notify_all();
+    }
+  } release_hold{mu, cv, release};
+
   pg::Listener listener(
       url_,
       [&](const std::string& channel, const std::string& payload) {
@@ -141,7 +160,11 @@ TEST_F(ListenerTest, DrainsNotifyBufferedByListenExec) {
           std::unique_lock<std::mutex> lock(mu);
           holding = true;
           cv.notify_all();
-          cv.wait(lock, [&] { return release; });
+          // Bounded: a stuck test must not pin the poll thread until the
+          // Bazel ceiling.
+          if (!cv.wait_for(lock, std::chrono::seconds(30), [&] { return release; })) {
+            ADD_FAILURE() << "hold callback timed out waiting for release";
+          }
         }
         received.Add(channel, payload);
       },
@@ -159,16 +182,23 @@ TEST_F(ListenerTest, DrainsNotifyBufferedByListenExec) {
 
   // Poll thread is inside on_notify. Subscribe a new channel (wake →
   // SyncChannels → PQexec(LISTEN other)) and put the victim on the
-  // wire. PQexec will pull it into libpq's queue; poll then sees no
-  // POLLIN because the socket is already empty.
+  // wire. Once Exec returns, postgres has delivered to listening
+  // backends — the bytes sit in the listener socket while the poll
+  // thread is still held. Release then runs PQexec, which absorbs
+  // them into libpq's queue with no POLLIN left for poll.
   listener.Listen("other");
   ASSERT_TRUE(client.Exec("SELECT pg_notify('ch', 'victim')").ok());
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
   {
     const std::lock_guard<std::mutex> lock(mu);
     release = true;
   }
   cv.notify_all();
+
+  // SyncChannels ran iff "other" became active — pins the absorb path
+  // to a real LISTEN pass rather than a later POLLIN delivery.
+  ASSERT_TRUE(active.WaitForCount(2, std::chrono::seconds(10)))
+      << "LISTEN other never completed after release";
+  EXPECT_EQ(active.events[1].first, "other");
 
   ASSERT_TRUE(received.WaitForCount(2, std::chrono::seconds(10)))
       << "victim notify absorbed during LISTEN was never delivered";
@@ -181,9 +211,12 @@ TEST_F(ListenerTest, DrainsNotifyBufferedByListenExec) {
 
 TEST_F(ListenerTest, ReconnectsAndReListensAfterConnectionLoss) {
   Received received;
-  pg::Listener listener(url_, [&](const std::string& channel, const std::string& payload) {
-    received.Add(channel, payload);
-  });
+  pg::Listener listener(
+      url_,
+      [&](const std::string& channel, const std::string& payload) {
+        received.Add(channel, payload);
+      },
+      /*on_active=*/nullptr);
   listener.Listen("heal");
 
   pg::Client client(url_);

@@ -138,7 +138,8 @@ TEST_F(PgHubStoreTest, CommitNotifiesExactlyTheSavesThatLand) {
 
   Received received;
   pg::Listener listener(
-      url_, [&](const std::string&, const std::string& payload) { received.Add(payload); });
+      url_, [&](const std::string&, const std::string& payload) { received.Add(payload); },
+      /*on_active=*/nullptr);
   listener.Listen(golf_hub::RoomChannel("R1"));
   ConfirmSubscribed(golf_hub::RoomChannel("R1"), received);
 
@@ -269,7 +270,8 @@ TEST_F(PgHubStoreTest, LoadRoomScopesToOneRoom) {
 TEST_F(PgHubStoreTest, NotifyOpFiresAfterItsBatch) {
   Received received;
   pg::Listener listener(
-      url_, [&](const std::string&, const std::string& payload) { received.Add(payload); });
+      url_, [&](const std::string&, const std::string& payload) { received.Add(payload); },
+      /*on_active=*/nullptr);
   listener.Listen(golf_hub::kRoomsChannel);
   ConfirmSubscribed(golf_hub::kRoomsChannel, received);
 

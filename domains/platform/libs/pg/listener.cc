@@ -1,5 +1,7 @@
 #include "domains/platform/libs/pg/listener.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <unistd.h>
 
@@ -40,9 +42,14 @@ Listener::Listener(std::string conninfo, Callback on_notify, ActiveCallback on_a
       on_notify_(std::move(on_notify)),
       on_active_(std::move(on_active)) {
   int fds[2] = {-1, -1};
+  // O_NONBLOCK: a blocking drain that reads an exact multiple of the
+  // buffer size would issue one more read and hang forever on an empty
+  // pipe — another lost-wakeup shape with idle postgres (#1276).
   if (pipe(fds) == 0) {
     wake_read_ = fds[0];
     wake_write_ = fds[1];
+    fcntl(wake_read_, F_SETFL, O_NONBLOCK);
+    fcntl(wake_write_, F_SETFL, O_NONBLOCK);
   }
   thread_ = std::thread([this] { Loop(); });
 }
@@ -156,7 +163,14 @@ void Listener::Loop() {
 
     if (wake_read_ >= 0 && (fds[1].revents & POLLIN) != 0) {
       char drain[64];
-      while (read(wake_read_, drain, sizeof(drain)) == sizeof(drain)) {
+      while (true) {
+        const ssize_t n = read(wake_read_, drain, sizeof(drain));
+        if (n < 0) {
+          if (errno == EINTR) continue;
+          break;  // EAGAIN/EWOULDBLOCK: empty
+        }
+        if (n == 0) break;
+        if (n < static_cast<ssize_t>(sizeof(drain))) break;
       }
     }
     if ((fds[0].revents & POLLIN) != 0) {

@@ -220,6 +220,39 @@ TEST_F(HubStoreRaceFixture, ActiveSignalRefreshesHeldRoom) {
   EXPECT_EQ(refreshed->as_roomState_or_null()->players.size(), 2u);
 }
 
+// Membership guard on room active: never materialize from a catch-up.
+TEST_F(HubStoreRaceFixture, ActiveSignalForUnheldRoomIsIgnored) {
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::golf::GolfEvents>>(
+                  [&] { return ReceiveCase(alice->stream, "sessionReady"); }, remote.get())
+                  .has_value());
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
+  auto created = ReceiveWithin<std::optional<moonbase::golf::GolfEvents>>(
+      [&] { return ReceiveCase(alice->stream, "roomState"); }, remote.get());
+  ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
+
+  // Remote never materialized this room; a phantom channel is not a room.
+  remote->handler->OnChannelActive(RoomChannel(room_id));
+  remote->handler->OnChannelActive(RoomChannel("never-existed"));
+
+  // Primary stays healthy and can still host a join the ordinary way.
+  auto bob = OpenSeatVia(*remote->client);
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::golf::GolfEvents>>(
+                  [&] { return ReceiveCase(bob->stream, "sessionReady"); }, remote.get())
+                  .has_value());
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::golf::GolfEvents>>(
+                  [&] { return ReceiveCase(bob->stream, "roomState"); }, remote.get())
+                  .has_value());
+}
+
 TEST_F(HubStoreRaceFixture, DelayedFinishWakeReadsRetainedTerminalRow) {
   auto remote = BuildInstance();
   ASSERT_NE(remote, nullptr);

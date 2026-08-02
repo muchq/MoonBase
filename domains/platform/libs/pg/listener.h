@@ -34,7 +34,10 @@ class Listener {
   /// at-least-once delivery does a catch-up read when it fires.
   using ActiveCallback = std::function<void(const std::string& channel)>;
 
-  Listener(std::string conninfo, Callback on_notify, ActiveCallback on_active = nullptr);
+  /// `on_active` is required: omitting it silently skips catch-up on
+  /// (re)LISTEN, which is how room/chat fans lose commits across a gap.
+  /// Pass an empty callback when the owner truly needs notify-only.
+  Listener(std::string conninfo, Callback on_notify, ActiveCallback on_active);
   ~Listener();
   Listener(const Listener&) = delete;
   Listener& operator=(const Listener&) = delete;
