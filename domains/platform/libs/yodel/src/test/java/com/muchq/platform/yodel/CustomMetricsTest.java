@@ -31,8 +31,12 @@ public class CustomMetricsTest {
   }
 
   /**
-   * The same pairs in a different order are the same series. Without normalisation they would be
-   * two, and a dashboard summing one of them would silently report half the traffic.
+   * Two callers passing the same pairs in different orders land on one series.
+   *
+   * <p>Weaker than it looks on its own — {@code Map.equals} is order-insensitive, so a
+   * ConcurrentHashMap keyed on any map would dedup these — which is why the ordering assertion
+   * below is the real subject. Sorting is what makes {@code Series.compareTo} total, and a
+   * comparator that ties leaves payload order to hash iteration.
    */
   @Test
   public void labelOrderDoesNotSplitASeries() {
@@ -42,6 +46,144 @@ public class CustomMetricsTest {
 
     assertThat(metrics.counterSnapshot()).hasSize(1);
     assertThat(metrics.counterSnapshot().get(0).value()).isEqualTo(2L);
+  }
+
+  /**
+   * Snapshot order is a function of name and labels, not of insertion or hash order. Asserted over
+   * series that differ only in a later label, since those are the ones a tie would reorder.
+   */
+  @Test
+  public void snapshotOrderIsStableAcrossLabelSets() {
+    CustomMetrics first = new CustomMetrics();
+    first.increment("runs", Map.of("outcome", "failed"));
+    first.increment("runs", Map.of("outcome", "completed"));
+    first.increment("games", Map.of("outcome", "completed"));
+
+    CustomMetrics second = new CustomMetrics();
+    second.increment("games", Map.of("outcome", "completed"));
+    second.increment("runs", Map.of("outcome", "completed"));
+    second.increment("runs", Map.of("outcome", "failed"));
+
+    assertThat(describe(first))
+        .containsExactly(
+            "games{outcome=completed}", "runs{outcome=completed}", "runs{outcome=failed}");
+    assertThat(describe(first)).isEqualTo(describe(second));
+  }
+
+  /**
+   * Two series whose label maps stringify identically stay two series, in a fixed order.
+   *
+   * <p>{@code {a=1, b=2}} and the single entry {@code {a="1, b=2"}} produce the same {@code
+   * toString}, and label values are not validated — so a comparator built on that string ties, and
+   * a tie hands ordering back to hash iteration. Compared on the label maps rather than on a
+   * rendering of them, because a rendering is exactly what collapses the two.
+   */
+  @Test
+  public void seriesThatStringifyAlikeStayDistinctAndOrderStably() {
+    Map<String, String> twoLabels = Map.of("a", "1", "b", "2");
+    Map<String, String> oneAmbiguousLabel = Map.of("a", "1, b=2");
+
+    CustomMetrics first = new CustomMetrics();
+    first.increment("runs", twoLabels);
+    first.increment("runs", oneAmbiguousLabel);
+
+    CustomMetrics second = new CustomMetrics();
+    second.increment("runs", oneAmbiguousLabel);
+    second.increment("runs", twoLabels);
+
+    assertThat(first.counterSnapshot()).hasSize(2);
+    assertThat(labelsOf(first))
+        .as("distinct label sets, not one merged series")
+        .containsExactlyInAnyOrder(twoLabels, oneAmbiguousLabel);
+    assertThat(labelsOf(first))
+        .as("and the same order regardless of which arrived first")
+        .isEqualTo(labelsOf(second));
+  }
+
+  private static List<Map<String, String>> labelsOf(CustomMetrics metrics) {
+    return metrics.counterSnapshot().stream().map(CustomMetrics.CounterSnapshot::labels).toList();
+  }
+
+  private static List<String> describe(CustomMetrics metrics) {
+    return metrics.counterSnapshot().stream().map(s -> s.name() + s.labels()).toList();
+  }
+
+  /**
+   * A snapshot hands out a copy of the labels, never the live hash key.
+   *
+   * <p>The key's own map decides its hash. Handing the caller the real one lets a mutation strand
+   * the entry in the wrong bin: the next record for those labels mints a second entry from zero
+   * while iteration still finds the old one, and the encoder emits two data points with identical
+   * attributes in a single payload — which Prometheus rejects as a duplicate sample.
+   */
+  @Test
+  public void aSnapshotDoesNotExposeTheLiveSeriesKey() {
+    CustomMetrics metrics = new CustomMetrics();
+    metrics.increment("runs", Map.of("outcome", "completed"));
+    metrics.record("d", 1.0, Map.of("outcome", "completed"));
+
+    assertThatThrownBy(() -> metrics.counterSnapshot().get(0).labels().put("outcome", "failed"))
+        .isInstanceOf(UnsupportedOperationException.class);
+    assertThatThrownBy(
+            () -> metrics.distributionSnapshot().get(0).labels().put("outcome", "failed"))
+        .isInstanceOf(UnsupportedOperationException.class);
+
+    // And the registry is untouched by the attempt.
+    metrics.increment("runs", Map.of("outcome", "completed"));
+    assertThat(metrics.counterSnapshot()).hasSize(1);
+    assertThat(metrics.counterSnapshot().get(0).value()).isEqualTo(2L);
+  }
+
+  /** A label the encoder always adds cannot also be supplied by the caller. */
+  @Test
+  public void serviceNameIsRejectedAsACallerLabel() {
+    CustomMetrics metrics = new CustomMetrics();
+    assertThatThrownBy(() -> metrics.increment("runs", Map.of("service_name", "one_d4")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("service_name");
+  }
+
+  /** A negative or NaN observation corrupts a cumulative _sum silently. */
+  @Test
+  public void aDistributionRefusesObservationsThatWouldCorruptTheSum() {
+    CustomMetrics metrics = new CustomMetrics();
+    assertThatThrownBy(() -> metrics.record("d", -1.0))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> metrics.record("d", Double.NaN))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> metrics.record("d", Double.POSITIVE_INFINITY))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  /**
+   * Declared bounds are used, and the default set is not. Without this the per-distribution bounds
+   * are unpinned: every observation of a minutes-scale value would silently land in the overflow
+   * bucket while _sum and _count stayed correct, which is exactly the failure the feature exists to
+   * prevent.
+   */
+  @Test
+  public void aDeclaredDistributionUsesItsOwnBounds() {
+    CustomMetrics metrics = new CustomMetrics();
+    double[] bounds = {1_000, 1_000_000, 60_000_000};
+    metrics.defineDistribution("run_micros", bounds);
+
+    metrics.record("run_micros", 500); // <= 1_000        -> bucket 0
+    metrics.record("run_micros", 30_000_000); // <= 60_000_000   -> bucket 2
+    metrics.record("run_micros", 90_000_000); // overflow        -> bucket 3
+
+    CustomMetrics.DistributionSnapshot d = metrics.distributionSnapshot().get(0);
+    assertThat(d.bounds()).containsExactly(1_000.0, 1_000_000.0, 60_000_000.0);
+    assertThat(d.bucketCounts()).containsExactly(1L, 0L, 1L, 1L);
+    assertThat(metrics.boundsFor("run_micros")).containsExactly(1_000.0, 1_000_000.0, 60_000_000.0);
+    assertThat(metrics.boundsFor("undeclared")).isEqualTo(HttpServerMetrics.BUCKET_BOUNDS);
+  }
+
+  @Test
+  public void distributionBoundsMustAscend() {
+    CustomMetrics metrics = new CustomMetrics();
+    assertThatThrownBy(() -> metrics.defineDistribution("d", new double[] {10, 5}))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("ascend");
   }
 
   @Test
@@ -55,9 +197,29 @@ public class CustomMetricsTest {
     CustomMetrics.DistributionSnapshot d = snapshots.get(0);
     assertThat(d.count()).isEqualTo(2L);
     assertThat(d.sum()).isEqualTo(100.0);
-    // Bounds are {0,5,10,25,50,75,...}: 30 lands in the "<=50" bucket, 70 in "<=75".
-    assertThat(d.bucketCounts()[HttpServerMetrics.BUCKET_BOUNDS.length]).isZero();
+    // The placement, not just the total. Asserting "nothing overflowed" and "nothing was lost"
+    // passes against a bucketFor that puts every value in bucket 0 — which leaves _sum and _count
+    // right and every _bucket series and quantile wrong.
+    // Bounds are {0,5,10,25,50,75,...}: 30 lands in the "<=50" slot, 70 in "<=75".
+    int fifty = indexOfBound(50);
+    int seventyFive = indexOfBound(75);
+    assertThat(d.bucketCounts()[fifty]).as("30 belongs in <=50").isEqualTo(1L);
+    assertThat(d.bucketCounts()[seventyFive]).as("70 belongs in <=75").isEqualTo(1L);
     assertThat(java.util.Arrays.stream(d.bucketCounts()).sum()).isEqualTo(2L);
+
+    // Upper-inclusive: a value exactly on a bound belongs to that bucket, not the next.
+    CustomMetrics onBoundary = new CustomMetrics();
+    onBoundary.record("d", 50.0);
+    assertThat(onBoundary.distributionSnapshot().get(0).bucketCounts()[fifty]).isEqualTo(1L);
+  }
+
+  private static int indexOfBound(double bound) {
+    for (int i = 0; i < HttpServerMetrics.BUCKET_BOUNDS.length; i++) {
+      if (HttpServerMetrics.BUCKET_BOUNDS[i] == bound) {
+        return i;
+      }
+    }
+    throw new IllegalArgumentException("no such bound: " + bound);
   }
 
   @Test

@@ -30,6 +30,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -85,6 +86,32 @@ public class IndexWorker {
   static final String ARCHIVE_FETCHES = "chess_com_archive_fetches";
   static final String MOTIF_OCCURRENCES = "motif_occurrences";
   static final String RUN_DURATION = "index_run_duration_micros";
+
+  /**
+   * Bounds for {@link #RUN_DURATION}, in microseconds, spanning a millisecond to the {@link
+   * RetentionPolicy#MAX_RUN} ceiling.
+   *
+   * <p>The default set yodel shares with the HTTP latency histogram tops out at 10ms, which no
+   * index run has ever finished inside — a run does at least four database round trips before it
+   * fetches anything. Every observation would land in the overflow bucket: fifteen series pinned at
+   * zero, a sixteenth equal to the count, and a p95 of +Inf for whoever charts one later.
+   */
+  static final double[] RUN_DURATION_BOUNDS = {
+    1_000,
+    10_000,
+    100_000,
+    1_000_000,
+    5_000_000,
+    30_000_000,
+    60_000_000,
+    300_000_000,
+    900_000_000,
+    1_800_000_000,
+    3_600_000_000L,
+    10_800_000_000L,
+    21_600_000_000L
+  };
+
   static final String GAMES_PER_MONTH = "index_games_per_month";
 
   /**
@@ -367,6 +394,7 @@ public class IndexWorker {
     // that jumps its clock by six hours to trip the ceiling would otherwise report a six-hour run.
     long runStartNanos = System.nanoTime();
     String outcome = "failed";
+    metrics.defineDistribution(RUN_DURATION, RUN_DURATION_BOUNDS);
     try {
       progress(message.requestId(), 0);
 
@@ -401,12 +429,22 @@ public class IndexWorker {
                 message.platform(),
                 monthStr,
                 count);
+            metrics.increment(MONTHS, Map.of("result", "cached"));
             progress(message.requestId(), totalIndexed);
             continue;
           }
         }
 
-        Optional<GamesResponse> response = chessClient.fetchGames(message.player(), month);
+        Optional<GamesResponse> response;
+        try {
+          response = chessClient.fetchGames(message.player(), month);
+        } catch (RuntimeException e) {
+          // Counted before rethrowing. ChessClient maps only a 404 to empty and throws on every
+          // other non-200, so without this the rate-limits and 5xx — the failures an operator most
+          // wants a rate on — were the one archive outcome the counter could not show.
+          metrics.increment(ARCHIVE_FETCHES, Map.of("result", "error"));
+          throw e;
+        }
         // Checked on the way out of the fetch, not only where an interrupt is thrown, because a
         // blocking call is entitled to swallow one — restore the status, return normally, and
         // leave the caller unable to tell an empty archive from a call that was cut short. Taking
@@ -433,8 +471,11 @@ public class IndexWorker {
           // sweeps it.
           progress(message.requestId(), totalIndexed);
           upsertPeriod(message, monthStr, month, fetchedAt, 0, false);
+          // Counted as an empty month, and deliberately not recorded into
+          // GAMES_PER_MONTH: a decade-long backfill of a three-year player is mostly
+          // 404s, and feeding those zeros in makes the average archive look a third
+          // its real size. empty_months_total already carries that population.
           metrics.increment(MONTHS, Map.of("result", "empty"));
-          metrics.record(GAMES_PER_MONTH, 0);
           continue;
         }
 
@@ -512,7 +553,7 @@ public class IndexWorker {
                         metrics.add(
                             MOTIF_OCCURRENCES,
                             occurrences.size(),
-                            Map.of("motif", motif.name().toLowerCase())));
+                            Map.of("motif", motif.name().toLowerCase(Locale.ROOT))));
             monthCount++;
             totalIndexed++;
             if (featureBatch.size() >= BATCH_SIZE) {

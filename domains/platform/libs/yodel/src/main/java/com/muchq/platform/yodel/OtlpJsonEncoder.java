@@ -228,7 +228,7 @@ final class OtlpJsonEncoder {
               bucketCounts.add(Long.toString(count));
             }
             ArrayNode bounds = point.putArray("explicitBounds");
-            for (double bound : HttpServerMetrics.BUCKET_BOUNDS) {
+            for (double bound : snapshot.bounds()) {
               bounds.add(bound);
             }
             addLabelledAttributes(point, serviceName, snapshot.labels());

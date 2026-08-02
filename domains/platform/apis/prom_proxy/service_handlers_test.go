@@ -505,41 +505,83 @@ func TestMetricsHandler_GetHostMetricsTimeSeries(t *testing.T) {
 	assert.Equal(t, 7, containerSeries)
 }
 
-// The one_d4 custom set is a cross-language contract: IndexWorker names an
-// instrument, the collector's Prometheus exporter appends _total to counters,
-// and these queries have to name the result exactly. Nothing fails loudly when
-// they disagree — the query is valid PromQL that matches no series, so the
-// dashboard renders an empty chart, which looks exactly like an idle indexer.
-// The Java half is pinned by IndexWorkerTest#metrics_exportedInstrumentNames.
-func TestOneD4Queries_GoldenInstrumentNames(t *testing.T) {
+// Every selector in the one_d4 set, checked one at a time.
+//
+// The first version of this joined every query into one blob and ran
+// strings.Contains over it. That pins almost nothing: a prefix rename of every
+// instrument passes (the old name is still a substring of the new one), dropping
+// service_name from all seventeen selectors passes, deleting every timeseries
+// passes, and pointing games_per_sec at index_runs_total passes — because a union
+// of names never says which query uses which. The third of those is the exact
+// failure the comment claimed to prevent.
+//
+// So this borrows the shape TestRegistry_PortraitCacheQueriesUseTheStandardFamily
+// already uses: match each selector, assert on that selector, and close the set of
+// names so a new instrument has to be declared here too.
+var oneD4SelectorPattern = regexp.MustCompile(`\b((?:games_indexed|index_runs|index_months|chess_com_archive_fetches|motif_occurrences|index_run_duration_micros|index_games_per_month)[a-z_]*)(\{[^}]*\})?`)
+
+// What IndexWorker emits, plus the suffixes the collector's Prometheus exporter
+// appends: _total for a cumulative monotonic sum, _sum/_count for a histogram.
+// The Java end is IndexWorkerTest#metrics_exportedInstrumentNames.
+var oneD4ExportedNames = map[string]bool{
+	"games_indexed_total":             true,
+	"index_runs_total":                true,
+	"index_months_total":              true,
+	"chess_com_archive_fetches_total": true,
+	"motif_occurrences_total":         true,
+	"index_run_duration_micros_sum":   true,
+	"index_run_duration_micros_count": true,
+	"index_games_per_month_sum":       true,
+	"index_games_per_month_count":     true,
+}
+
+func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 	entry := serviceRegistry["one_d4"]
-	var all []string
-	for _, s := range entry.CustomScalars {
-		all = append(all, s.Query)
-	}
-	for _, q := range entry.CustomTimeseries {
-		all = append(all, q)
-	}
-	joined := strings.Join(all, "\n")
+	require.NotEmpty(t, entry.CustomScalars)
+	require.NotEmpty(t, entry.CustomTimeseries, "the timeseries panels are part of this entry")
 
-	for _, name := range []string{
-		"games_indexed_total",
-		"index_runs_total",
-		"index_months_total",
-		"chess_com_archive_fetches_total",
-		"motif_occurrences_total",
-		"index_run_duration_micros_sum",
-		"index_run_duration_micros_count",
-		"index_games_per_month_sum",
-		"index_games_per_month_count",
-	} {
-		assert.Contains(t, joined, name, "one_d4 query set must reference %s", name)
+	labelled := map[string][]string{}
+	for _, def := range entry.CustomScalars {
+		labelled["scalar "+def.Label] = []string{def.Query}
+	}
+	for key, query := range entry.CustomTimeseries {
+		labelled["timeseries "+key] = []string{query}
 	}
 
-	// Outcome labels are the vocabulary IndexWorker writes; a typo here silently
-	// selects nothing rather than erroring.
-	assert.Contains(t, joined, `outcome="completed"`)
-	assert.Contains(t, joined, `outcome="failed"`)
-	assert.Contains(t, joined, `outcome="interrupted"`)
-	assert.Contains(t, joined, `result="empty"`)
+	seen := map[string]int{}
+	for what, queries := range labelled {
+		for _, query := range queries {
+			matches := oneD4SelectorPattern.FindAllStringSubmatch(query, -1)
+			assert.NotEmpty(t, matches, "%s queries no one_d4 instrument: %s", what, query)
+			for _, match := range matches {
+				name := match[1]
+				seen[name]++
+				assert.True(t, oneD4ExportedNames[name],
+					"%s reads %q, which IndexWorker does not export", what, name)
+				assert.Contains(t, match[2], `service_name="one_d4"`,
+					"selector %q in %s is not scoped to one_d4, so it sums every service that ever"+
+						" emits that name: %s", match[0], what, query)
+			}
+		}
+	}
+
+	// Closed in the other direction too: an instrument nothing charts is one the
+	// service pays to export and nobody reads.
+	for name := range oneD4ExportedNames {
+		assert.NotZero(t, seen[name], "nothing in the one_d4 entry reads %s", name)
+	}
+
+	// Outcome labels are IndexWorker's vocabulary. A typo selects nothing rather
+	// than erroring, so the tiles would read zero forever.
+	joined := strings.Join([]string{}, "")
+	for _, def := range entry.CustomScalars {
+		joined += def.Query + "\n"
+	}
+	for _, query := range entry.CustomTimeseries {
+		joined += query + "\n"
+	}
+	for _, label := range []string{`outcome="completed"`, `outcome="failed"`,
+		`outcome="interrupted"`, `outcome="lease_lost"`, `result="empty"`, `result="cached"`} {
+		assert.Contains(t, joined, label, "no query selects %s", label)
+	}
 }

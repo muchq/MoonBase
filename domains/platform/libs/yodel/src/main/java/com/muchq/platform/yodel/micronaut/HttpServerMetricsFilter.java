@@ -8,7 +8,6 @@ import io.micronaut.http.annotation.Filter;
 import io.micronaut.http.filter.HttpServerFilter;
 import io.micronaut.http.filter.ServerFilterChain;
 import io.micronaut.http.filter.ServerFilterPhase;
-import jakarta.annotation.PreDestroy;
 import jakarta.inject.Inject;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.reactivestreams.Publisher;
@@ -80,8 +79,12 @@ public class HttpServerMetricsFilter implements HttpServerFilter {
             });
   }
 
-  @PreDestroy
-  void stop() {
-    pipeline.close();
-  }
+  // No @PreDestroy closing the pipeline. It used to be right — the filter built the pipeline in
+  // its own constructor and was the only thing holding it. Now YodelMetricsFactory owns it and
+  // declares preDestroy = "close", so closing it here as well would shut the same exporter down
+  // twice. OtlpHttpMetricsExporter.close() is not idempotent about its side effect: it runs a
+  // final synchronous export, so a double close means two OTLP POSTs on the shutdown path, each
+  // able to block for the request timeout. Worse, Micronaut destroys dependents before their
+  // dependencies, so the filter would stop the exporter while the service's own beans are still
+  // recording into the CustomMetrics it drains.
 }

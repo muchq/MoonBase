@@ -2,6 +2,8 @@ package com.muchq.platform.yodel.micronaut;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.muchq.platform.yodel.CustomMetrics;
+import com.muchq.platform.yodel.HttpMetricsPipeline;
 import com.muchq.platform.yodel.HttpServerMetrics;
 import io.micronaut.context.ApplicationContext;
 import io.micronaut.runtime.server.EmbeddedServer;
@@ -57,5 +59,30 @@ public class HttpServerMetricsFilterTest {
     assertThat(get.active()).isZero();
     assertThat(get.durationCount()).isEqualTo(3);
     assertThat(get.durationSumMicros()).isGreaterThan(0.0);
+  }
+
+  /**
+   * One pipeline per process, which the factory's javadoc asserts and nothing was checking.
+   *
+   * <p>Micronaut factory methods are prototype-scoped unless annotated, so dropping
+   * {@code @Singleton} gives the filter and the injected {@code CustomMetrics} different pipelines
+   * — two exporter threads posting two partial views of the same service on the same interval, and
+   * a dashboard summing across them double-counts every request. Nothing fails at boot; the numbers
+   * are just quietly wrong.
+   */
+  @Test
+  public void thePipelineIsOneInstanceSharedByTheFilterAndTheService() {
+    HttpMetricsPipeline first = server.getApplicationContext().getBean(HttpMetricsPipeline.class);
+    HttpMetricsPipeline second = server.getApplicationContext().getBean(HttpMetricsPipeline.class);
+    assertThat(first).isSameAs(second);
+
+    // And the injectable registry is that pipeline's own, not a detached one — otherwise a
+    // service's recordings never reach the exporter.
+    CustomMetrics custom = server.getApplicationContext().getBean(CustomMetrics.class);
+    assertThat(custom).isSameAs(first.custom());
+
+    HttpServerMetricsFilter filter =
+        server.getApplicationContext().getBean(HttpServerMetricsFilter.class);
+    assertThat(filter.metrics()).isSameAs(first.metrics());
   }
 }

@@ -107,20 +107,35 @@ var serviceRegistry = map[string]serviceEntry{
 			// A wedge cut loose by the MAX_RUN ceiling lands here (#1282). Anything
 			// above zero means a worker was stuck long enough to be given up on.
 			{"Indexing", "runs_interrupted_total", "", `sum(index_runs_total{service_name="one_d4",outcome="interrupted"})`},
+			// Emitted since the ceiling landed, and listed so the four outcomes add up to
+			// index_runs_total. A range changing hands mid-run is ordinary; a rising count
+			// beside a flat interrupted count is contention, not a wedge.
+			{"Indexing", "runs_lease_lost_total", "", `sum(index_runs_total{service_name="one_d4",outcome="lease_lost"})`},
 			// Windowed averages over the histograms: rate(sum)/rate(count) is the
 			// mean per run in the window, the same shape portrait uses.
 			{"Indexing", "avg_run_seconds_1h", "s", `sum(rate(index_run_duration_micros_sum{service_name="one_d4"}[1h]))/sum(rate(index_run_duration_micros_count{service_name="one_d4"}[1h]))/1000000`},
 			{"Indexing", "avg_games_per_month_1h", "games", `sum(rate(index_games_per_month_sum{service_name="one_d4"}[1h]))/sum(rate(index_games_per_month_count{service_name="one_d4"}[1h]))`},
 			{"Indexing", "empty_months_total", "", `sum(index_months_total{service_name="one_d4",result="empty"})`},
+			{"Indexing", "cached_months_total", "", `sum(index_months_total{service_name="one_d4",result="cached"})`},
 			{"Indexing", "archive_fetches_per_sec", "/s", `sum(rate(chess_com_archive_fetches_total{service_name="one_d4"}[5m]))`},
 			{"Motifs", "occurrences_per_sec", "/s", `sum(rate(motif_occurrences_total{service_name="one_d4"}[5m]))`},
 			{"Motifs", "occurrences_total", "", `sum(motif_occurrences_total{service_name="one_d4"})`},
-			{"Motifs", "per_game_avg_1h", "motifs", `sum(rate(motif_occurrences_total{service_name="one_d4"}[1h]))/clamp_min(sum(rate(games_indexed_total{service_name="one_d4"}[1h])), 0.0001)`},
+			// No motifs-per-game tile. The two counters are recorded on opposite sides of
+			// the durability boundary — motifs per game inside the drain loop, games only
+			// after the month's flush and period write succeed — so an interrupted or
+			// lease-lost month contributes motifs and zero games. The ratio then divides
+			// by a rate of zero, and any clamp large enough to avoid a divide-by-zero is
+			// small enough to turn the result into a four-order-of-magnitude spike. A tile
+			// that is wrong exactly when the system is unhealthy is worse than no tile.
 		},
 		CustomTimeseries: map[string]string{
 			"games_indexed_rate":  `sum(rate(games_indexed_total{service_name="one_d4"}[5m]))`,
 			"run_completion_rate": `sum(rate(index_runs_total{service_name="one_d4",outcome="completed"}[5m]))`,
-			"run_failure_rate":    `sum(rate(index_runs_total{service_name="one_d4"}[5m])) - sum(rate(index_runs_total{service_name="one_d4",outcome="completed"}[5m]))`,
+			// Selected, not subtracted. In PromQL sum() over no matching series is an
+			// empty vector, and vector-minus-empty is empty rather than the left side —
+			// so a total-minus-completed form renders nothing on a fresh process whose
+			// runs are all failing, which is precisely when someone is looking at it.
+			"run_failure_rate":    `sum(rate(index_runs_total{service_name="one_d4",outcome!="completed"}[5m]))`,
 			"run_duration_avg_us": `sum(rate(index_run_duration_micros_sum{service_name="one_d4"}[5m]))/sum(rate(index_run_duration_micros_count{service_name="one_d4"}[5m]))`,
 			"motif_rate":          `sum(rate(motif_occurrences_total{service_name="one_d4"}[5m]))`,
 		},

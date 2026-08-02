@@ -164,24 +164,61 @@ func readConfig(t *testing.T, name string) string {
 const hostfsMountPath = "/hostfs"
 
 func TestHostMetricsReadsTheHostAndNotTheCollectorContainer(t *testing.T) {
-	receiver := readConfig(t, "o11y/otel-collector.yml")
-	compose := readConfig(t, "docker-compose.observability.yml")
+	receiver := activeLines(t, "o11y/otel-collector.yml")
+	compose := activeLines(t, "docker-compose.observability.yml")
 
-	if !strings.Contains(receiver, "root_path: "+hostfsMountPath) {
-		t.Errorf("hostmetrics has no root_path: %s — every scraper measures the collector container,"+
-			" and the disk panels silently report nothing", hostfsMountPath)
+	// Exact lines, not substrings. `strings.Contains` would accept a commented-out
+	// directive and — worse — `root_path: /hostfs-typo`, which is the very state the
+	// error message below describes: a root_path naming a path the container has no
+	// mount for. Both were true of the first version of this test.
+	if !hasLine(receiver, "root_path: "+hostfsMountPath) {
+		t.Errorf("hostmetrics has no active `root_path: %s` — every scraper measures the collector"+
+			" container, and the disk panels silently report nothing", hostfsMountPath)
 	}
-	if !strings.Contains(compose, "- /:"+hostfsMountPath+":ro") {
-		t.Errorf("otelcol does not bind the host root at %s — root_path points at a path that does not"+
-			" exist in the container", hostfsMountPath)
+	if !hasLine(compose, "- /:"+hostfsMountPath+":ro") {
+		t.Errorf("otelcol does not bind the host root at %s — root_path points at a path that does"+
+			" not exist in the container", hostfsMountPath)
 	}
 
-	// Both scrapers are the ones that need the mount; the panels are named
-	// after them. Enabled-but-unmounted was the bug, so enabled is worth
-	// asserting alongside the mount rather than assumed.
+	// Enabled-but-unmounted was the bug, so the scrapers are asserted alongside the
+	// mount rather than assumed. These two are the ones whose panels were empty.
 	for _, scraper := range []string{"disk:", "filesystem:"} {
-		if !strings.Contains(receiver, scraper) {
+		if !hasLinePrefix(receiver, scraper) {
 			t.Errorf("hostmetrics scraper %q is not enabled; the Host page charts it", scraper)
 		}
 	}
+}
+
+// Config lines with comments and blanks removed, so an assertion cannot be
+// satisfied by a directive somebody commented out.
+func activeLines(t *testing.T, name string) []string {
+	t.Helper()
+	var out []string
+	for _, line := range strings.Split(readConfig(t, name), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func hasLine(lines []string, want string) bool {
+	for _, line := range lines {
+		if line == want {
+			return true
+		}
+	}
+	return false
+}
+
+// For a mapping key whose value may be inline (`disk: {}`) or nested.
+func hasLinePrefix(lines []string, want string) bool {
+	for _, line := range lines {
+		if strings.HasPrefix(line, want) {
+			return true
+		}
+	}
+	return false
 }
