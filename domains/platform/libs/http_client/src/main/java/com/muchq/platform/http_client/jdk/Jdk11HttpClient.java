@@ -3,6 +3,7 @@ package com.muchq.platform.http_client.jdk;
 import com.muchq.platform.http_client.core.HttpClient;
 import com.muchq.platform.http_client.core.HttpRequest;
 import com.muchq.platform.http_client.core.HttpResponse;
+import com.muchq.platform.http_client.core.InterruptedRequestException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -26,8 +27,13 @@ public class Jdk11HttpClient implements HttpClient {
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new RuntimeException(e);
+      // Reported as itself rather than as a bare RuntimeException. The two are not the same event:
+      // this one means the caller asked to stop, and a caller that cannot tell it apart from a
+      // transport failure has to record its own cancellation as an error against whatever it was
+      // fetching. Restoring the interrupt status is what makes the stop stick — send() clears it
+      // on the way out, so without this the next blocking call would wait out its full timeout.
+      throw InterruptedRequestException.restoringInterruptStatus(
+          "Interrupted while waiting for a response from " + request.getUrl(), e);
     }
     return new Jdk11HttpResponse(request, response);
   }

@@ -1,4 +1,4 @@
-load("//bazel/rules:java.bzl", "artifact", "java_library")
+load("//bazel/rules:java.bzl", "artifact", "java_library", "java_test_suite")
 
 java_library(
     name = "core",
@@ -7,6 +7,7 @@ java_library(
         "src/main/java/com/muchq/platform/http_client/core/HttpClient.java",
         "src/main/java/com/muchq/platform/http_client/core/HttpRequest.java",
         "src/main/java/com/muchq/platform/http_client/core/HttpResponse.java",
+        "src/main/java/com/muchq/platform/http_client/core/InterruptedRequestException.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -17,11 +18,32 @@ java_library(
 java_library(
     name = "jdk11",
     srcs = [
+        "src/main/java/com/muchq/platform/http_client/jdk/InterruptibleBody.java",
         "src/main/java/com/muchq/platform/http_client/jdk/Jdk11HttpClient.java",
         "src/main/java/com/muchq/platform/http_client/jdk/Jdk11HttpResponse.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":core",
+    ],
+)
+
+# Against a real socket, because the claim is about what a blocking call does when it is
+# interrupted, and nothing that does not actually block can be used to test it. The server here
+# does what a wedged peer does: accepts the connection, then nothing.
+java_test_suite(
+    name = "jdk11_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/platform/http_client/jdk/InterruptProbe.java",
+        "src/test/java/com/muchq/platform/http_client/jdk/InterruptibleBodyTest.java",
+        "src/test/java/com/muchq/platform/http_client/jdk/Jdk11HttpClientInterruptTest.java",
+        "src/test/java/com/muchq/platform/http_client/jdk/StalledServer.java",
+    ],
+    deps = [
+        ":core",
+        ":jdk11",
+        artifact("org.assertj:assertj-core"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
     ],
 )

@@ -102,10 +102,22 @@ public final class RetentionPolicy {
    * not whether the worker is alive but whether the <em>run</em> is going anywhere, and only
    * elapsed time can speak to that.
    *
-   * <p>Past this the heartbeat stops. The lease then lapses within {@link #LEASE} and the ordinary
-   * release path applies, so the request goes back to the queue rather than being failed outright —
-   * costing one of {@code MAX_ATTEMPTS} rather than an answer. This bounds renewal, not writes: a
-   * run that crosses the ceiling with a valid lease may finish what it is doing inside it.
+   * <p>Past this the heartbeat stops and the run's thread is interrupted. The lease then lapses
+   * within {@link #LEASE} and the ordinary release path applies, so the request goes back to the
+   * queue rather than being failed outright — costing one of {@code MAX_ATTEMPTS} rather than an
+   * answer.
+   *
+   * <p>The two halves recover different things and neither implies the other. Letting the lease
+   * lapse recovers the <em>request</em>: another worker takes the row and gets through it. The
+   * interrupt recovers the <em>worker</em>, whose poller is a single thread — without it the
+   * instance holding a wedged run stops taking work until someone restarts it, so a fleet would
+   * recover its rows one at a time while shedding a worker for each one. It is best-effort by
+   * nature: it ends the run only if whatever the run is blocked on honours an interrupt, which
+   * {@code http_client} guarantees for the calls this worker actually waits in (#1282), and a lock
+   * held forever by another thread does not. The row is recovered either way.
+   *
+   * <p>Neither half bounds writes. A run that crosses the ceiling with a valid lease may finish
+   * what it is already inside; what it may not do is start the next month or renew its way back in.
    *
    * <p>Six hours is deliberately far above any legitimate run. A twelve-month range for a prolific
    * player is the worst case — one archive fetch and a profile lookup per distinct opponent per

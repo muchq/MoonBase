@@ -96,6 +96,56 @@ println("Request failed: "+response.getStatusCode());
         }
 ```
 
+## Interruption
+
+Nothing bounds a call by default. No request timeout is set, and a peer that accepts the
+connection and then goes quiet produces no bytes, no error and no EOF — so a thread parked in
+`execute`, or in a read of the response body, stays there. `Thread.interrupt()` is the only way to
+get it back.
+
+Both blocking points honour it — the underlying JDK client always did — and both report it as
+`InterruptedRequestException` rather than leaving you to identify it. That is the part this library
+adds, and it is worth being precise about what it is and isn't.
+
+It is **not** recovering information that was lost. The JDK leaves the interrupt identifiable:
+`send` throws `InterruptedException`, and a body read throws `IOException(InterruptedException)`
+with the thread's interrupt status set. A caller could walk that chain.
+
+What the type gives you is (a) not having to, against a convention nothing documents — the
+`IOException` wrapping is a detail of `HttpResponseInputStream`, not of `BodyHandlers`' contract —
+and (b) precision. The cheap alternative is checking `Thread.currentThread().isInterrupted()` after
+catching, and that answers a question about the *thread* when you asked about the *call*: a
+genuinely truncated body, on a thread interrupted for some unrelated reason, reads as a
+cancellation that never happened.
+
+```java
+Thread worker = Thread.ofVirtual().start(() -> {
+    try {
+        HttpResponse response = client.execute(request);
+        process(response.getAsInputStream());   // body reads throw it too
+    } catch (InterruptedRequestException e) {
+        // Told to stop. Not a failure of the request — unwind quietly.
+    }
+});
+
+worker.interrupt();   // returns promptly, however silent the peer is
+```
+
+Three things to know:
+
+- **The interrupt status is always set** when the exception is thrown, so a caller that catches it
+  and keeps going still sees the interrupt at its next blocking point. If you are the one who sent
+  the interrupt and the thread has more work to do afterwards, consume it with
+  `Thread.interrupted()` once the call has unwound.
+- **A thread that is already interrupted does not get parked**, so unwinding through a loop of
+  calls does not cost one unbounded wait per remaining iteration.
+- **The exception reaches parsers too.** `getAsInputStream()` is wrapped, so an interrupt during a
+  body read comes out of `read` — a Jackson `readValue` over the stream propagates it rather than
+  turning it into a parse failure.
+
+Ordinary transport failures are unaffected: a refused connection is still an `UncheckedIOException`
+and a truncated body is still an I/O error, on a thread whose interrupt status is untouched.
+
 ## API Reference
 
 ### HttpRequest.Builder
@@ -128,3 +178,6 @@ println("Request failed: "+response.getStatusCode());
 - `getAsInputStream()` - Get response body as input stream
 - `getHeaders()` - Get response headers
 - `getRequest()` - Get the original request
+
+The three body accessors block, and all three throw `InterruptedRequestException` if the calling
+thread is interrupted while they do. See [Interruption](#interruption).

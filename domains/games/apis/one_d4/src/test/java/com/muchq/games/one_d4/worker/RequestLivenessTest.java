@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.muchq.games.chess_com_client.ChessClient;
 import com.muchq.games.chess_com_client.GamesResponse;
+import com.muchq.games.chess_com_client.PlayedGame;
 import com.muchq.games.chess_com_client.Player;
+import com.muchq.games.chess_com_client.PlayerResult;
 import com.muchq.games.one_d4.api.dto.AggregateRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
@@ -21,6 +23,7 @@ import com.muchq.games.one_d4.engine.PgnParser;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import com.muchq.games.one_d4.motifs.CheckDetector;
+import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.games.one_d4.queue.IndexMessage;
 import java.time.Clock;
 import java.time.Duration;
@@ -310,6 +313,341 @@ public class RequestLivenessTest {
     assertThat(queuedStatus)
         .as("nothing has run for hours, and the wedged lease must stop hiding that")
         .isEqualTo("FAILED");
+  }
+
+  // --- #1282 option 2: cutting the wedged run loose
+  // ----------------------------------------------------
+
+  /**
+   * Giving the request up recovers the row. This is the other half: recovering the thread.
+   *
+   * <p>The ceiling on its own leaves the wedged run exactly where it was — parked in a call that
+   * will never return, holding the poller, which is one thread. So the instance stops taking work
+   * from the moment of the wedge and does not start again until someone restarts it. A fleet that
+   * recovers each stranded row by shedding the worker that was on it is not recovering; it is
+   * trading one stuck request for one dead instance, and the second is the more expensive.
+   *
+   * <p>Nothing releases the fetch in this test. Its latch is never counted down, exactly as a hung
+   * socket is never answered, so the run returning at all is the assertion — and before the
+   * interrupt existed it did not return, which is why the ceiling tests above all have to release
+   * their latch by hand at the end.
+   */
+  @Test
+  @Timeout(60)
+  public void aRunPastTheCeilingIsCutLooseFromTheCallItIsStuckIn() throws Exception {
+    TestDb testDb = TestDb.create("liveness_ceiling_interrupt");
+    IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    CountDownLatch insideFetch = new CountDownLatch(1);
+    IndexWorker worker = newWorker(new WedgedChessClient(insideFetch), dao, Duration.ofMillis(20));
+    Future<?> run = workerExecutor.submit(() -> worker.process(message(requestId)));
+    assertThat(insideFetch.await(15, TimeUnit.SECONDS)).isTrue();
+
+    clock.advance(RetentionPolicy.MAX_RUN.plus(RetentionPolicy.LEASE));
+    run.get(40, TimeUnit.SECONDS);
+
+    // A renewal already in flight when the ceiling fired stamped an expiry from the clock as it
+    // then stood. Move past that too, so what follows is about the heartbeat having stopped rather
+    // than about which side of one beat the test happened to land on.
+    clock.advance(RetentionPolicy.LEASE.plusMinutes(1));
+
+    IndexingRequestStore.IndexingRequest row = dao.findById(requestId).orElseThrow();
+    assertThat(row.status())
+        .as(
+            "a run that was told to stop did not fail — the range is fine, and a FAILED here would"
+                + " spend an attempt and blame the user's request for the worker being stuck")
+        .isEqualTo("PROCESSING");
+    assertThat(row.errorMessage()).isNull();
+    assertThat(dao.claimNext("rescuer", RetentionPolicy.LEASE, clock.instant()))
+        .as("and the range is back in the queue for a worker that is not wedged")
+        .hasValueSatisfying(r -> assertThat(r.id()).isEqualTo(requestId));
+  }
+
+  /**
+   * The consequence at the level a deployment feels it: the instance keeps working.
+   *
+   * <p>Driven through the poll loop rather than through {@code process}, because the loop is what
+   * the claim is about — {@code claimAndRunOne} in a straight round is exactly what {@code
+   * pollLoop} does with a backlog. The first request wedges and is cut loose at the ceiling; what
+   * has to happen next is that the same thread goes back and takes the next one.
+   *
+   * <p>Two things could stop it and both are silent. The run might never return, which is the
+   * ceiling's half. Or it might return with the interrupt status still set — the interrupt was
+   * aimed at a run, not at the poller that outlives it — and then every request the poller takes
+   * afterwards dies at its first checkpoint, leaving an instance that looks like it is polling and
+   * completes nothing.
+   */
+  @Test
+  @Timeout(60)
+  public void theWorkerGoesBackToTakingRequestsAfterAWedgedRunIsCutLoose() throws Exception {
+    TestDb testDb = TestDb.create("liveness_ceiling_slot");
+    IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
+    UUID wedgedId = claim(dao).request().id();
+    clock.advance(Duration.ofMinutes(1)); // so the queue order is the one the narrative assumes
+    UUID nextId =
+        dao.createOrAdopt(
+                "next-in-line", PLATFORM, MONTH, MONTH, false, false, STALE_AFTER, clock.instant())
+            .request()
+            .id();
+
+    CountDownLatch insideFetch = new CountDownLatch(1);
+    // Wedged once. A permanently hung peer would wedge the retry too and prove nothing about the
+    // poller, and the interesting claim is about the instance recovering, not the request.
+    IndexWorker worker = newWorker(new WedgedChessClient(insideFetch), dao, Duration.ofMillis(20));
+    IndexWorkerLifecycle lifecycle =
+        new IndexWorkerLifecycle(new InMemoryIndexQueue(), worker, dao, clock);
+
+    Future<?> poller =
+        workerExecutor.submit(
+            () -> {
+              while (lifecycle.claimAndRunOne()) {
+                // Straight round for the next request, as pollLoop does when there is a backlog.
+              }
+            });
+
+    assertThat(insideFetch.await(15, TimeUnit.SECONDS)).isTrue();
+    clock.advance(RetentionPolicy.MAX_RUN.plus(RetentionPolicy.LEASE));
+    poller.get(40, TimeUnit.SECONDS);
+
+    assertThat(dao.findById(nextId).orElseThrow().status())
+        .as("the queue behind the wedge never moved: this worker never came back for it")
+        .isEqualTo("COMPLETED");
+    assertThat(dao.findById(wedgedId).orElseThrow().status())
+        .as("and the request that was stuck was picked up again and finished")
+        .isEqualTo("COMPLETED");
+  }
+
+  /**
+   * An interrupted run must not leave a period behind claiming the month is done.
+   *
+   * <p>{@code indexed_periods} is keyed by (player, platform, month) and carries no request, so it
+   * is the one write in a run that cannot be fenced — which makes ordering the only thing
+   * protecting it. A run stopped part-way through a month has extracted some of its games and none
+   * of the rest, and a period row stamped on that is not merely premature: the period cache reads
+   * it as "indexed, {@code n} games", so every later request skips the month until retention sweeps
+   * the row a week later.
+   *
+   * <p>Reached without the ceiling being involved, deliberately. Past the ceiling the fenced flush
+   * fails first and the run unwinds before it can get here, so a ceiling-driven test would pass
+   * with no guard at all. An interrupt arriving while the lease is perfectly live is the case that
+   * needs the guard, and it is the ordinary one — anything may interrupt a worker thread.
+   */
+  @Test
+  @Timeout(60)
+  public void anInterruptedRunDoesNotStampAPeriodForAMonthItOnlyHalfIndexed() throws Exception {
+    TestDb testDb = TestDb.create("liveness_interrupt_period");
+    IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    CountDownLatch insideExtraction = new CountDownLatch(1);
+    CountDownLatch releaseExtraction = new CountDownLatch(1);
+    RecordingPeriodStore periods = new RecordingPeriodStore();
+    IndexWorker worker =
+        newWorker(
+            new OneGameChessClient(),
+            dao,
+            // No ceiling in play: the lease stays live for the whole test, so the flush that
+            // precedes the period write would succeed and the run would carry on to write it.
+            Duration.ofHours(1),
+            new BlockingFeatureExtractor(insideExtraction, releaseExtraction),
+            periods);
+
+    AtomicReference<Thread> runThread = new AtomicReference<>();
+    Future<?> run =
+        workerExecutor.submit(
+            () -> {
+              runThread.set(Thread.currentThread());
+              worker.process(message(requestId));
+            });
+    assertThat(insideExtraction.await(15, TimeUnit.SECONDS))
+        .as("the run should be waiting on the extraction pool")
+        .isTrue();
+
+    runThread.get().interrupt();
+    run.get(30, TimeUnit.SECONDS);
+    releaseExtraction.countDown();
+
+    assertThat(periods.upserts.get())
+        .as(
+            "a month whose games were only half extracted was recorded as indexed, so every later"
+                + " request will skip it until retention sweeps the row")
+        .isZero();
+    assertThat(dao.findById(requestId).orElseThrow().status())
+        .as("and being stopped is not a failure of the range")
+        .isEqualTo("PROCESSING");
+  }
+
+  /**
+   * A run told to stop must stop where it is, whatever the call it was in chose to report.
+   *
+   * <p>An interrupt does not always arrive as an exception. A great deal of blocking code —
+   * including plenty that predates {@code http_client} being interruptible, and every library this
+   * worker does not own — catches {@link InterruptedException}, restores the status, and returns
+   * normally. From the run's side that is indistinguishable from a month with no games in it, and
+   * both of the things it then does are wrong: it writes an empty period, which the period cache
+   * will honour for a week, and it moves on to the next month, which is the opposite of stopping.
+   *
+   * <p>Nothing to do with the ceiling, deliberately. Past the ceiling the fenced writes refuse and
+   * the run unwinds on its own, so a ceiling-driven version of this passes with no guard at all.
+   * The case that needs one is an interrupt arriving while the lease is perfectly live.
+   */
+  @Test
+  @Timeout(60)
+  public void anInterruptedRunStopsAtTheMonthItWasOnEvenIfTheFetchSwallowedIt() throws Exception {
+    TestDb testDb = TestDb.create("liveness_interrupt_months");
+    IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    CountDownLatch insideFetch = new CountDownLatch(1);
+    SwallowingChessClient client = new SwallowingChessClient(insideFetch);
+    RecordingPeriodStore periods = new RecordingPeriodStore();
+    IndexWorker worker =
+        newWorker(
+            client,
+            dao,
+            Duration.ofHours(1),
+            new FeatureExtractor(new PgnParser(), new GameReplayer(), List.of(new CheckDetector())),
+            periods);
+
+    AtomicReference<Thread> runThread = new AtomicReference<>();
+    Future<?> run =
+        workerExecutor.submit(
+            () -> {
+              runThread.set(Thread.currentThread());
+              worker.process(message(requestId, "2024-01", "2024-03"));
+            });
+    assertThat(insideFetch.await(15, TimeUnit.SECONDS)).isTrue();
+
+    runThread.get().interrupt();
+    run.get(30, TimeUnit.SECONDS);
+
+    assertThat(client.fetches.get())
+        .as("the run carried on into the rest of the range after being told to stop")
+        .isEqualTo(1);
+    assertThat(periods.upserts.get())
+        .as(
+            "an interrupted fetch's empty answer was recorded as a month with no games in it, so"
+                + " every later request will skip that month until retention sweeps the row")
+        .isZero();
+    assertThat(dao.findById(requestId).orElseThrow().status())
+        .as("and being stopped is not a failure of the range")
+        .isEqualTo("PROCESSING");
+  }
+
+  /**
+   * The pool the run leaves behind, which the run's own interrupt does nothing about.
+   *
+   * <p>Interrupting the run thread frees the poller. It does not free the extraction pool threads
+   * that run submitted work to, and those are the ones holding chess.com connections: title
+   * resolution submits a profile lookup per distinct opponent, so the same silent peer that wedged
+   * the archive fetch wedges every one of them. Unlike the run's own thread, that pool is shared by
+   * every request on the instance — leaving threads parked in it recovers one poll loop while
+   * quietly retiring the capacity behind it, which is the same failure arriving a size down.
+   *
+   * <p>#1282 named this when it named interrupting the run: the pool has to be interruptible too,
+   * "which wants checking". This is the check.
+   */
+  @Test
+  @Timeout(60)
+  public void anInterruptedRunLetsGoOfTheLookupsItLeftOnTheExtractionPool() throws Exception {
+    TestDb testDb = TestDb.create("liveness_interrupt_pool");
+    IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    CountDownLatch insideLookup = new CountDownLatch(1);
+    WedgedProfileChessClient client = new WedgedProfileChessClient(insideLookup);
+    IndexWorker worker =
+        newWorker(
+            client,
+            dao,
+            Duration.ofHours(1),
+            new FeatureExtractor(new PgnParser(), new GameReplayer(), List.of(new CheckDetector())),
+            new RecordingPeriodStore());
+
+    AtomicReference<Thread> runThread = new AtomicReference<>();
+    Future<?> run =
+        workerExecutor.submit(
+            () -> {
+              runThread.set(Thread.currentThread());
+              worker.process(message(requestId));
+            });
+    assertThat(insideLookup.await(15, TimeUnit.SECONDS))
+        .as("a profile lookup should be parked on the pool")
+        .isTrue();
+
+    runThread.get().interrupt();
+    run.get(30, TimeUnit.SECONDS);
+
+    assertThat(client.lookupInterrupted.await(15, TimeUnit.SECONDS))
+        .as(
+            "the profile lookup is still parked on a chess.com connection that will never answer,"
+                + " on a pool thread every other request on this instance has to share")
+        .isTrue();
+  }
+
+  /**
+   * The control. Same fixture, same single game, nothing interrupting it — and the period is
+   * written. Without this the period tests above pass just as well against a worker that never
+   * records a period at all, or against a fixture whose extraction never returns anything to
+   * record.
+   */
+  @Test
+  @Timeout(60)
+  public void anUninterruptedRunOverTheSameMonthDoesStampItsPeriod() throws Exception {
+    TestDb testDb = TestDb.create("liveness_interrupt_period_control");
+    IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
+    UUID requestId = claim(dao).request().id();
+
+    CountDownLatch insideExtraction = new CountDownLatch(1);
+    CountDownLatch releaseExtraction = new CountDownLatch(1);
+    releaseExtraction.countDown();
+    RecordingPeriodStore periods = new RecordingPeriodStore();
+    IndexWorker worker =
+        newWorker(
+            new OneGameChessClient(),
+            dao,
+            Duration.ofHours(1),
+            new BlockingFeatureExtractor(insideExtraction, releaseExtraction),
+            periods);
+
+    workerExecutor.submit(() -> worker.process(message(requestId))).get(30, TimeUnit.SECONDS);
+
+    assertThat(periods.upserts.get()).isEqualTo(1);
+    assertThat(dao.findById(requestId).orElseThrow().status()).isEqualTo("COMPLETED");
+  }
+
+  /**
+   * The ordering that stops an interrupt outliving the run it was aimed at.
+   *
+   * <p>A beat can read the handle, be descheduled, and come back after the run has finished and the
+   * poller has moved on to the next request. Delivering the interrupt then lands it on work that
+   * has nothing to do with the wedge, and nobody left to consume it. The window is small and
+   * entirely real, and it is asserted here rather than in a scheduled race — a test that had to win
+   * a race would be a test that passes whenever it loses.
+   */
+  @Test
+  public void aHandleThatHasFinishedDoesNotInterruptTheThreadItNamed() {
+    IndexWorker.RunHandle handle = new IndexWorker.RunHandle(Thread.currentThread());
+
+    assertThat(handle.finish()).as("the run ended without ever being interrupted").isFalse();
+    handle.interruptRun();
+
+    assertThat(Thread.interrupted())
+        .as("a late beat interrupted a thread that had already gone back to polling")
+        .isFalse();
+  }
+
+  /** And the converse: an interrupt delivered in time is delivered, and reported for consuming. */
+  @Test
+  public void aHandleInterruptedBeforeItFinishedSaysSo() {
+    IndexWorker.RunHandle handle = new IndexWorker.RunHandle(Thread.currentThread());
+    handle.interruptRun();
+
+    assertThat(Thread.interrupted()).as("the run's thread really was interrupted").isTrue();
+    assertThat(handle.finish())
+        .as("and the run is told, so it knows the status is its own to clear")
+        .isTrue();
   }
 
   /** A renewal must not resurrect a request someone else already took. */
@@ -624,7 +962,11 @@ public class RequestLivenessTest {
   }
 
   private IndexMessage message(UUID requestId) {
-    return new IndexMessage(requestId, PLAYER, PLATFORM, MONTH, MONTH, false);
+    return message(requestId, MONTH, MONTH);
+  }
+
+  private IndexMessage message(UUID requestId, String startMonth, String endMonth) {
+    return new IndexMessage(requestId, PLAYER, PLATFORM, startMonth, endMonth, false);
   }
 
   /** A worker that parks inside the archive fetch until released. */
@@ -636,14 +978,26 @@ public class RequestLivenessTest {
 
   private IndexWorker newWorker(
       ChessClient client, IndexingRequestStore store, Duration heartbeatInterval) {
-    FeatureExtractor extractor =
-        new FeatureExtractor(new PgnParser(), new GameReplayer(), List.of(new CheckDetector()));
+    return newWorker(
+        client,
+        store,
+        heartbeatInterval,
+        new FeatureExtractor(new PgnParser(), new GameReplayer(), List.of(new CheckDetector())),
+        new NoOpPeriodStore());
+  }
+
+  private IndexWorker newWorker(
+      ChessClient client,
+      IndexingRequestStore store,
+      Duration heartbeatInterval,
+      FeatureExtractor extractor,
+      IndexedPeriodStore periods) {
     return new IndexWorker(
         client,
         extractor,
         store,
         new NoOpGameFeatureStore(),
-        new NoOpPeriodStore(),
+        periods,
         extractionExecutor,
         clock,
         heartbeatInterval);
@@ -800,6 +1154,219 @@ public class RequestLivenessTest {
     @Override
     public Optional<Player> fetchPlayer(String player) {
       return Optional.empty();
+    }
+  }
+
+  /**
+   * A chess.com call that never comes back on its own, and honours an interrupt the way {@code
+   * http_client} now does — by throwing, rather than by quietly returning as if the fetch had
+   * succeeded.
+   *
+   * <p>The latch is never released by anyone. That is the fixture: a peer that has accepted the
+   * connection and gone silent produces no bytes, no error and no EOF, so the only way out of the
+   * call is an interrupt. The second call through — a retry after the request is requeued — returns
+   * normally, so a test can watch the worker recover rather than wedge again.
+   */
+  private static final class WedgedChessClient extends ChessClient {
+    private final CountDownLatch entered;
+    private final CountDownLatch neverReleased = new CountDownLatch(1);
+    private final AtomicInteger fetches = new AtomicInteger();
+
+    WedgedChessClient(CountDownLatch entered) {
+      super(null, new ObjectMapper());
+      this.entered = entered;
+    }
+
+    @Override
+    public Optional<GamesResponse> fetchGames(String player, YearMonth yearMonth) {
+      if (fetches.incrementAndGet() > 1) {
+        return Optional.empty();
+      }
+      entered.countDown();
+      try {
+        neverReleased.await();
+        throw new AssertionError("unreachable: nothing ever counts this latch down");
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException("interrupted while fetching the archive", e);
+      }
+    }
+
+    @Override
+    public Optional<Player> fetchPlayer(String player) {
+      return Optional.empty();
+    }
+  }
+
+  /**
+   * A fetch that swallows its interrupt: it restores the status and returns as if the month were
+   * simply empty. The shape of every blocking call this worker does not own.
+   */
+  private static final class SwallowingChessClient extends ChessClient {
+    final AtomicInteger fetches = new AtomicInteger();
+    private final CountDownLatch entered;
+    private final CountDownLatch neverReleased = new CountDownLatch(1);
+
+    SwallowingChessClient(CountDownLatch entered) {
+      super(null, new ObjectMapper());
+      this.entered = entered;
+    }
+
+    @Override
+    public Optional<GamesResponse> fetchGames(String player, YearMonth yearMonth) {
+      fetches.incrementAndGet();
+      entered.countDown();
+      try {
+        neverReleased.await();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+      return Optional.empty();
+    }
+
+    @Override
+    public Optional<Player> fetchPlayer(String player) {
+      return Optional.empty();
+    }
+  }
+
+  /** One real game in the month, so the run has something to extract and a period to stamp. */
+  private static final class OneGameChessClient extends ChessClient {
+    private static final String PGN =
+        """
+        [Event "Live Chess"]
+        [Site "Chess.com"]
+        [White "White"]
+        [Black "Black"]
+        [Result "1-0"]
+        [ECO "C20"]
+
+        1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 1-0
+        """;
+
+    OneGameChessClient() {
+      super(null, new ObjectMapper());
+    }
+
+    @Override
+    public Optional<GamesResponse> fetchGames(String player, YearMonth yearMonth) {
+      return Optional.of(
+          new GamesResponse(
+              List.of(
+                  new PlayedGame(
+                      "https://chess.com/g/half-indexed",
+                      PGN,
+                      Instant.EPOCH,
+                      true,
+                      null,
+                      "",
+                      "uuid-1",
+                      "",
+                      "",
+                      "blitz",
+                      "chess",
+                      new PlayerResult(1500, "win", "https://chess.com/w", "White", "uuid-w"),
+                      new PlayerResult(1500, "loss", "https://chess.com/b", "Black", "uuid-b"),
+                      "C20"))));
+    }
+
+    @Override
+    public Optional<Player> fetchPlayer(String player) {
+      return Optional.empty();
+    }
+  }
+
+  /**
+   * The archive comes back fine and the <em>profile lookups</em> are what hang — the realistic
+   * shape, since they are the calls that fan out. They park on the extraction pool while the run
+   * thread waits for them, so an interrupt aimed at the run does not reach them.
+   */
+  private static final class WedgedProfileChessClient extends ChessClient {
+    final CountDownLatch lookupInterrupted = new CountDownLatch(1);
+    private final CountDownLatch entered;
+    private final CountDownLatch neverReleased = new CountDownLatch(1);
+
+    WedgedProfileChessClient(CountDownLatch entered) {
+      super(null, new ObjectMapper());
+      this.entered = entered;
+    }
+
+    @Override
+    public Optional<GamesResponse> fetchGames(String player, YearMonth yearMonth) {
+      return new OneGameChessClient().fetchGames(player, yearMonth);
+    }
+
+    @Override
+    public Optional<Player> fetchPlayer(String player) {
+      entered.countDown();
+      try {
+        neverReleased.await();
+      } catch (InterruptedException e) {
+        // What http_client now does: report the interrupt rather than absorb it. Recorded here
+        // because the claim is precisely that this thread got one.
+        lookupInterrupted.countDown();
+        Thread.currentThread().interrupt();
+      }
+      return Optional.empty();
+    }
+  }
+
+  /**
+   * Extraction that parks on the pool, leaving the run thread waiting in {@code future.get()} —
+   * which is where an interrupt aimed at the run lands when the month is mid-extraction.
+   */
+  private static final class BlockingFeatureExtractor extends FeatureExtractor {
+    private final CountDownLatch entered;
+    private final CountDownLatch release;
+
+    BlockingFeatureExtractor(CountDownLatch entered, CountDownLatch release) {
+      super(new PgnParser(), new GameReplayer(), List.of(new CheckDetector()));
+      this.entered = entered;
+      this.release = release;
+    }
+
+    @Override
+    public GameFeatures extract(String pgn) {
+      entered.countDown();
+      try {
+        release.await(20, TimeUnit.SECONDS);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+      return super.extract(pgn);
+    }
+  }
+
+  /** Counts period writes, which is the thing an interrupted run must not have made. */
+  private static final class RecordingPeriodStore implements IndexedPeriodStore {
+    final AtomicInteger upserts = new AtomicInteger();
+
+    @Override
+    public Optional<IndexedPeriod> findCompletePeriod(
+        String player, String platform, String month, boolean excludeBullet) {
+      return Optional.empty();
+    }
+
+    @Override
+    public void upsertPeriod(
+        String player,
+        String platform,
+        String month,
+        Instant fetchedAt,
+        boolean isComplete,
+        int gamesCount,
+        boolean excludeBullet) {
+      upserts.incrementAndGet();
+    }
+
+    @Override
+    public List<IndexedPeriod> findPeriodsForPlayers(Collection<String> players) {
+      return List.of();
+    }
+
+    @Override
+    public int deleteOlderThan(Instant threshold) {
+      return 0;
     }
   }
 
