@@ -115,6 +115,19 @@ public class IndexWorker {
   static final String GAMES_PER_MONTH = "index_games_per_month";
 
   /**
+   * Bounds for {@link #GAMES_PER_MONTH}, in games.
+   *
+   * <p>The HTTP default set happens to span a month's archive well enough — a heavy blitz player
+   * clears a few hundred games and the top bound is 10,000 — so the mean this is charted through
+   * reads correctly either way. Declared anyway, because "happens to" is the whole failure: the two
+   * distributions would be silently coupled to a latency histogram, and the first quantile anyone
+   * draws over a month count is the moment that stops being harmless.
+   */
+  static final double[] GAMES_PER_MONTH_BOUNDS = {
+    1, 2, 5, 10, 25, 50, 100, 200, 400, 800, 1_600, 3_200
+  };
+
+  /**
    * Identifies this worker as the holder of a lease. Stable for the life of the process and unique
    * across the instances competing for the same table, which is what makes it usable as a fencing
    * token: every write this worker makes is conditioned on the request still naming it. The host
@@ -395,6 +408,7 @@ public class IndexWorker {
     long runStartNanos = System.nanoTime();
     String outcome = "failed";
     metrics.defineDistribution(RUN_DURATION, RUN_DURATION_BOUNDS);
+    metrics.defineDistribution(GAMES_PER_MONTH, GAMES_PER_MONTH_BOUNDS);
     try {
       progress(message.requestId(), 0);
 

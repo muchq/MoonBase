@@ -1095,6 +1095,9 @@ public class IndexWorkerTest {
     assertThat(distributionSum(IndexWorker.GAMES_PER_MONTH))
         .as("per-month shape, not just the run total")
         .isEqualTo(3.0);
+    assertThat(metrics.boundsFor(IndexWorker.GAMES_PER_MONTH))
+        .as("counts get count-shaped buckets, not the HTTP latency set they happen to fit")
+        .isEqualTo(IndexWorker.GAMES_PER_MONTH_BOUNDS);
   }
 
   /**
