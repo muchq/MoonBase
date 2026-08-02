@@ -481,12 +481,12 @@ public class RequestLivenessTest {
   /**
    * A run told to stop must stop where it is, whatever the call it was in chose to report.
    *
-   * <p>An interrupt does not always arrive as an exception. A great deal of blocking code —
-   * including plenty that predates {@code http_client} being interruptible, and every library this
-   * worker does not own — catches {@link InterruptedException}, restores the status, and returns
-   * normally. From the run's side that is indistinguishable from a month with no games in it, and
-   * both of the things it then does are wrong: it writes an empty period, which the period cache
-   * will honour for a week, and it moves on to the next month, which is the opposite of stopping.
+   * <p>An interrupt does not always arrive as an exception. A great deal of blocking code — every
+   * library this worker does not own included — catches {@link InterruptedException}, restores the
+   * status, and returns normally. From the run's side that is indistinguishable from a month with
+   * no games in it, and both of the things it then does are wrong: it writes an empty period, which
+   * the period cache will honour for a week, and it moves on to the next month, which is the
+   * opposite of stopping.
    *
    * <p>Nothing to do with the ceiling, deliberately. Past the ceiling the fenced writes refuse and
    * the run unwinds on its own, so a ceiling-driven version of this passes with no guard at all.
@@ -1158,9 +1158,9 @@ public class RequestLivenessTest {
   }
 
   /**
-   * A chess.com call that never comes back on its own, and honours an interrupt the way {@code
-   * http_client} now does — by throwing, rather than by quietly returning as if the fetch had
-   * succeeded.
+   * A chess.com call that never comes back on its own, and honours an interrupt the way a JDK
+   * {@code HttpClient} call does — by throwing, rather than by quietly returning as if the fetch
+   * had succeeded.
    *
    * <p>The latch is never released by anyone. That is the fixture: a peer that has accepted the
    * connection and gone silent produces no bytes, no error and no EOF, so the only way out of the
@@ -1302,8 +1302,8 @@ public class RequestLivenessTest {
       try {
         neverReleased.await();
       } catch (InterruptedException e) {
-        // What http_client now does: report the interrupt rather than absorb it. Recorded here
-        // because the claim is precisely that this thread got one.
+        // Report the interrupt rather than absorb it. Recorded here because the claim is
+        // precisely that this thread got one.
         lookupInterrupted.countDown();
         Thread.currentThread().interrupt();
       }

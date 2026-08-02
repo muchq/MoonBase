@@ -112,9 +112,9 @@ public final class RetentionPolicy {
    * interrupt recovers the <em>worker</em>, whose poller is a single thread — without it the
    * instance holding a wedged run stops taking work until someone restarts it, so a fleet would
    * recover its rows one at a time while shedding a worker for each one. It is best-effort by
-   * nature: it ends the run only if whatever the run is blocked on honours an interrupt, which
-   * {@code http_client} guarantees for the calls this worker actually waits in (#1282), and a lock
-   * held forever by another thread does not. The row is recovered either way.
+   * nature: it ends the run only if whatever the run is blocked on honours an interrupt, which the
+   * JDK {@code HttpClient} sends and body reads this worker actually waits in do (#1282), and a
+   * lock held forever by another thread does not. The row is recovered either way.
    *
    * <p>Neither half bounds writes. A run that crosses the ceiling with a valid lease may finish
    * what it is already inside; what it may not do is start the next month or renew its way back in.

@@ -71,12 +71,8 @@ public class Jdk11HttpResponse implements HttpResponse {
     }
   }
 
-  /**
-   * Wrapped, not raw. Every way of consuming the body goes through here — including {@link
-   * #getAsBytes} above — so this one line is what puts the interrupt contract on all of them.
-   */
   @Override
   public InputStream getAsInputStream() {
-    return new InterruptibleBody(delegate.body());
+    return delegate.body();
   }
 }

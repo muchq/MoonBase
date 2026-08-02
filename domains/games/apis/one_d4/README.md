@@ -282,16 +282,16 @@ Letting the lease lapse recovers the **request** — another worker takes the ro
 recovers the **worker**, whose poller is a single thread: without it the instance that hit the
 wedge stops taking work entirely and does not start again until someone restarts it, so a fleet
 would recover its rows one at a time while shedding an instance for each one. It is best-effort by
-nature — an interrupt ends a run only if what the run is blocked on honours it, which `http_client`
-guarantees for the calls a worker actually waits in and a lock held forever by another thread does
-not — and the row is recovered either way. A run that has been interrupted does not record FAILED:
-it was stopped, not broken, and the range goes back to the queue rather than being blamed for the
-worker.
+nature — an interrupt ends a run only if what the run is blocked on honours it, which the JDK
+`HttpClient` sends and body reads a worker actually waits in do, and a lock held forever by another
+thread does not — and the row is recovered either way. A run that has been interrupted does not
+record FAILED: it was stopped, not broken, and the range goes back to the queue rather than being
+blamed for the worker.
 
-None of that covers a worker that is *leaving on purpose* either, and it can't: every arm above needs the
-owner to have stopped answering, which a deploy only looks like after the lease expires. So a
-shutting-down worker hands its request back itself — unclaimed immediately, and with the attempt
-returned. The attempt matters more than the five minutes: `attempts` is spent on claim so that a
+None of that covers a worker that is *leaving on purpose* either, and it can't: every arm above
+needs the owner to have stopped answering, which a deploy only looks like after the lease expires.
+So a shutting-down worker hands its request back itself — unclaimed immediately, and with the
+attempt returned. The attempt matters more than the five minutes: `attempts` is spent on claim so that a
 request which kills its worker outright still moves the counter, which means a process exit is
 otherwise indistinguishable from a crash, and a long-running request outliving three rolling
 restarts would be retired as poisoned. A hand-back is the evidence that resolves it — the worker

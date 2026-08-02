@@ -659,11 +659,12 @@ public class IndexWorker {
    * thread, the instance stops taking work until someone restarts it — so the fleet recovers its
    * rows one at a time while shedding a worker for each one.
    *
-   * <p>An interrupt only ends a run if what the run is blocked on honours it, which is why {@code
-   * http_client} guarantees that its calls do (#1282). Where the wedge is somewhere that does not —
-   * a lock held forever by another thread, a native call — this changes nothing and the ceiling
-   * still gives the request up. The two are independent on purpose: the row is recovered by the
-   * lease lapsing, not by the interrupt landing.
+   * <p>An interrupt only ends a run if what the run is blocked on honours it. The calls this worker
+   * actually waits in are JDK {@code HttpClient} sends and body reads, and both return promptly
+   * when the thread is interrupted (#1282). Where the wedge is somewhere that does not — a lock
+   * held forever by another thread, a native call — this changes nothing and the ceiling still
+   * gives the request up. The two are independent on purpose: the row is recovered by the lease
+   * lapsing, not by the interrupt landing.
    *
    * <p>Absent from the map means the run already ended. Nothing to stop, and nothing to interrupt:
    * the thread has moved on and the interrupt would land on whatever it is doing now.
