@@ -674,7 +674,12 @@ public class IndexWorker {
         outcome = "interrupted";
       }
       metrics.increment(RUNS, Map.of("outcome", outcome));
-      metrics.record(RUN_DURATION, (System.nanoTime() - runStartNanos) / 1000.0);
+      // Labelled by outcome, like the counter beside it. An interrupted run sat at the MAX_RUN
+      // ceiling by definition, so pooling it with the completed ones makes the average run time
+      // jump precisely when a wedge is being cut loose — the tile reads worst exactly when it is
+      // being used to judge how bad things are. Four outcomes over these bounds is 64 series.
+      metrics.record(
+          RUN_DURATION, (System.nanoTime() - runStartNanos) / 1000.0, Map.of("outcome", outcome));
     }
   }
 

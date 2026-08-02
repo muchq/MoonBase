@@ -26,18 +26,29 @@ receivers:
       memory: {}
       disk: {}
       filesystem:
-        # Host root brings the container runtime's own bookkeeping with it.
-        # Without these the usage panel is mostly per-container overlay mounts,
-        # which is cadvisor's job and drowns out the real volumes.
+        # Host root brings the container runtime's own bookkeeping with it. Without
+        # these the usage panel is mostly per-container overlay mounts, which is
+        # cadvisor's job and drowns out the real volumes.
+        #
+        # regexp, not glob: filterset accepts only strict and regexp
+        # (internal/filter/filterset/config.go), and an unrecognised match_type is an
+        # error out of CreateFilterSet — which fails the whole hostmetrics receiver,
+        # and with it the otlp pipeline it shares. Empty disk panels would have been
+        # the least of it.
+        #
+        # Paths are the host's, unprefixed: root_path is applied when the scraper
+        # reads usage, not when it filters, so a /hostfs-prefixed pattern matches
+        # nothing.
         exclude_mount_points:
           mount_points:
-            - /hostfs/var/lib/docker/*
-            - /hostfs/snap/*
-            - /hostfs/run/*
-            - /hostfs/dev/*
-            - /hostfs/sys/*
-            - /hostfs/proc/*
-          match_type: glob
+            - /var/lib/docker/.*
+            - /var/lib/kubelet/.*
+            - /snap/.*
+            - /run/.*
+            - /dev/.*
+            - /sys/.*
+            - /proc/.*
+          match_type: regexp
         exclude_fs_types:
           fs_types:
             [
@@ -66,14 +77,6 @@ receivers:
             ]
           match_type: strict
       network: {}
-      process:
-        # Reading the host's /proc as a non-root container user means most
-        # processes belong to somebody else. These are the fields that denies
-        # on, and each one otherwise logs per process per interval — enough
-        # noise to bury a real error.
-        mute_process_exe_error: true
-        mute_process_io_error: true
-        mute_process_user_error: true
 
 processors:
   batch:

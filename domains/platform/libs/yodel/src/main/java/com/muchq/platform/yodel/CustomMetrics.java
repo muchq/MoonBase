@@ -234,6 +234,10 @@ public final class CustomMetrics {
     final LongAdder[] buckets;
 
     Distribution(double[] bounds) {
+      // Held by reference, deliberately: for an undeclared distribution this is the shared
+      // HttpServerMetrics.BUCKET_BOUNDS static, and for a declared one it is the array
+      // boundsByName already owns. Neither escapes — boundsFor and snapshot both copy — and a
+      // clone here would be a third copy no test can distinguish from its absence.
       this.bounds = bounds;
       buckets = new LongAdder[bounds.length + 1];
       for (int i = 0; i < buckets.length; i++) {
@@ -262,7 +266,12 @@ public final class CustomMetrics {
       for (int i = 0; i < buckets.length; i++) {
         counts[i] = buckets[i].sum();
       }
-      return new DistributionSnapshot(name, labels, sum.sum(), count.sum(), counts, bounds);
+      // bounds is cloned for the same reason the label map is copied above: handing out the live
+      // array lets a caller reshape a histogram that is already recording into it, so observations
+      // before and after the edit sit in buckets that mean different things while the exported
+      // explicitBounds claims one set. A thirteen-element copy per series per export is nothing
+      // beside the buckets we already allocate on the same line.
+      return new DistributionSnapshot(name, labels, sum.sum(), count.sum(), counts, bounds.clone());
     }
   }
 }

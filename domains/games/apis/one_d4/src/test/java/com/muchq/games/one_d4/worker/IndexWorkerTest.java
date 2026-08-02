@@ -1032,10 +1032,24 @@ public class IndexWorkerTest {
         .sum();
   }
 
+  private long distributionCount(String name, Map<String, String> labels) {
+    return metrics.distributionSnapshot().stream()
+        .filter(s -> s.name().equals(name) && s.labels().equals(labels))
+        .mapToLong(CustomMetrics.DistributionSnapshot::count)
+        .sum();
+  }
+
   private double distributionSum(String name) {
     return metrics.distributionSnapshot().stream()
         .filter(s -> s.name().equals(name))
         .mapToDouble(CustomMetrics.DistributionSnapshot::sum)
+        .sum();
+  }
+
+  private long runDurationOverflowCount() {
+    return metrics.distributionSnapshot().stream()
+        .filter(d -> d.name().equals(IndexWorker.RUN_DURATION))
+        .mapToLong(d -> d.bucketCounts()[d.bucketCounts().length - 1])
         .sum();
   }
 
@@ -1062,6 +1076,22 @@ public class IndexWorkerTest {
     assertThat(counter(IndexWorker.MONTHS, Map.of("result", "indexed"))).isEqualTo(1);
     assertThat(counter(IndexWorker.ARCHIVE_FETCHES, Map.of("result", "ok"))).isEqualTo(1);
     assertThat(distributionCount(IndexWorker.RUN_DURATION)).isEqualTo(1);
+    // Under the outcome label, not bare. prom_proxy's avg_run_seconds_1h selects
+    // outcome="completed" so a ceiling-length interrupted run cannot drag the average; an
+    // unlabelled histogram makes that selector match nothing and the tile reads empty.
+    assertThat(distributionCount(IndexWorker.RUN_DURATION, Map.of("outcome", "completed")))
+        .as("the duration histogram is labelled the same way the run counter is")
+        .isEqualTo(1);
+    // The bounds, not just the count. CustomMetricsTest pins that declared bounds are honoured;
+    // nothing pinned that this worker declares any, and without the call every run lands in the
+    // overflow bucket of a histogram whose top bound is 10ms — fifteen dead series and a p95 of
+    // +Inf, with _sum and _count still perfectly correct.
+    assertThat(metrics.boundsFor(IndexWorker.RUN_DURATION))
+        .as("run duration must not be bucketed on the HTTP latency bounds")
+        .isEqualTo(IndexWorker.RUN_DURATION_BOUNDS);
+    assertThat(runDurationOverflowCount())
+        .as("a run of ordinary length belongs in a real bucket, not the overflow")
+        .isZero();
     assertThat(distributionSum(IndexWorker.GAMES_PER_MONTH))
         .as("per-month shape, not just the run total")
         .isEqualTo(3.0);
@@ -1081,6 +1111,12 @@ public class IndexWorkerTest {
     assertThat(counter(IndexWorker.MONTHS, Map.of("result", "empty"))).isEqualTo(1);
     assertThat(counter(IndexWorker.GAMES_INDEXED, Map.of())).isZero();
     assertThat(counter(IndexWorker.RUNS, Map.of("outcome", "completed"))).isEqualTo(1);
+    // A decade-long backfill of a three-year player is mostly 404s. Feeding those zeros into the
+    // per-month distribution makes the average archive read a third its real size, and they are
+    // already counted as empty months.
+    assertThat(distributionCount(IndexWorker.GAMES_PER_MONTH))
+        .as("an empty month is counted, not averaged in")
+        .isZero();
   }
 
   @Test
@@ -1186,6 +1222,11 @@ public class IndexWorkerTest {
     assertThat(distributionCount(IndexWorker.RUN_DURATION))
         .as("a failed run still took time, and that time is the interesting part")
         .isEqualTo(1);
+    assertThat(distributionCount(IndexWorker.RUN_DURATION, Map.of("outcome", "failed")))
+        .as("and it is recorded under failed, so it stays out of the completed-run average")
+        .isEqualTo(1);
+    assertThat(distributionCount(IndexWorker.RUN_DURATION, Map.of("outcome", "completed")))
+        .isZero();
     // ChessClient maps only a 404 to empty and throws on everything else, so without an explicit
     // count here the rate-limits and 5xx — the archive failures worth alerting on — are the one
     // outcome the counter cannot show.
@@ -1250,7 +1291,7 @@ public class IndexWorkerTest {
    * on that side: the query stays valid PromQL, matches no series, and the dashboard shows an empty
    * chart that looks exactly like an idle indexer. Pinned as literals rather than read from the
    * constants, so renaming a constant fails here instead of silently agreeing with itself. The Go
-   * half is TestOneD4Queries_GoldenInstrumentNames.
+   * half is TestOneD4QueriesNameRealInstrumentsAndScopeThem.
    */
   @Test
   public void metrics_exportedInstrumentNames() {

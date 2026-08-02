@@ -85,4 +85,33 @@ public class HttpServerMetricsFilterTest {
         server.getApplicationContext().getBean(HttpServerMetricsFilter.class);
     assertThat(filter.metrics()).isSameAs(first.metrics());
   }
+
+  /**
+   * Sharing the pipeline means the filter no longer owns it, and the destroy hook has to move with
+   * the ownership. {@link YodelMetricsFactory} declares {@code preDestroy = "close"}; a hook here
+   * as well would close the same exporter twice.
+   *
+   * <p>Micronaut destroys dependents before their dependencies, so the filter's hook runs first —
+   * stopping the exporter while the service's own beans are still recording into the {@code
+   * CustomMetrics} it drains. That the second close is now a no-op ({@code
+   * OtlpHttpMetricsExporterTest.aSecondCloseSendsNothingFurther}) limits the damage to a lost
+   * shutdown flush rather than a duplicate one; it does not make the hook correct.
+   *
+   * <p>Checked reflectively because the failure is an annotation that is absent — there is no call
+   * to assert on, and a behavioural test would need a stub OTLP endpoint injected through {@code
+   * fromEnv}, which the factory does not offer. Both {@code Closeable} routes are covered too:
+   * Micronaut gives any {@code AutoCloseable} bean an implicit destroy hook, so implementing the
+   * interface reintroduces exactly what removing the annotation fixed.
+   */
+  @Test
+  public void theFilterDeclaresNoDestroyHookForAPipelineItDoesNotOwn() {
+    assertThat(AutoCloseable.class.isAssignableFrom(HttpServerMetricsFilter.class))
+        .as("an AutoCloseable bean is closed by Micronaut without any annotation")
+        .isFalse();
+
+    assertThat(HttpServerMetricsFilter.class.getDeclaredMethods())
+        .filteredOn(m -> m.isAnnotationPresent(jakarta.annotation.PreDestroy.class))
+        .as("the factory owns the pipeline's lifecycle; the filter is a consumer")
+        .isEmpty();
+  }
 }

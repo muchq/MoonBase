@@ -113,7 +113,10 @@ var serviceRegistry = map[string]serviceEntry{
 			{"Indexing", "runs_lease_lost_total", "", `sum(index_runs_total{service_name="one_d4",outcome="lease_lost"})`},
 			// Windowed averages over the histograms: rate(sum)/rate(count) is the
 			// mean per run in the window, the same shape portrait uses.
-			{"Indexing", "avg_run_seconds_1h", "s", `sum(rate(index_run_duration_micros_sum{service_name="one_d4"}[1h]))/sum(rate(index_run_duration_micros_count{service_name="one_d4"}[1h]))/1000000`},
+			// Completed runs only. The histogram is labelled by outcome, and an interrupted
+			// run is one that sat at the MAX_RUN ceiling — pooling those in makes the average
+			// spike at exactly the moment someone is reading it to size a real run.
+			{"Indexing", "avg_run_seconds_1h", "s", `sum(rate(index_run_duration_micros_sum{service_name="one_d4",outcome="completed"}[1h]))/sum(rate(index_run_duration_micros_count{service_name="one_d4",outcome="completed"}[1h]))/1000000`},
 			{"Indexing", "avg_games_per_month_1h", "games", `sum(rate(index_games_per_month_sum{service_name="one_d4"}[1h]))/sum(rate(index_games_per_month_count{service_name="one_d4"}[1h]))`},
 			{"Indexing", "empty_months_total", "", `sum(index_months_total{service_name="one_d4",result="empty"})`},
 			{"Indexing", "cached_months_total", "", `sum(index_months_total{service_name="one_d4",result="cached"})`},
@@ -135,8 +138,13 @@ var serviceRegistry = map[string]serviceEntry{
 			// empty vector, and vector-minus-empty is empty rather than the left side —
 			// so a total-minus-completed form renders nothing on a fresh process whose
 			// runs are all failing, which is precisely when someone is looking at it.
-			"run_failure_rate":    `sum(rate(index_runs_total{service_name="one_d4",outcome!="completed"}[5m]))`,
-			"run_duration_avg_us": `sum(rate(index_run_duration_micros_sum{service_name="one_d4"}[5m]))/sum(rate(index_run_duration_micros_count{service_name="one_d4"}[5m]))`,
+			//
+			// Named outcomes rather than != "completed": lease_lost is the fourth, and it
+			// is ordinary. A range changing hands mid-run happens whenever two pollers
+			// overlap, so counting it here puts a permanent floor under the failure line
+			// and buries the two outcomes that do mean something went wrong.
+			"run_failure_rate":    `sum(rate(index_runs_total{service_name="one_d4",outcome=~"failed|interrupted"}[5m]))`,
+			"run_duration_avg_us": `sum(rate(index_run_duration_micros_sum{service_name="one_d4",outcome="completed"}[5m]))/sum(rate(index_run_duration_micros_count{service_name="one_d4",outcome="completed"}[5m]))`,
 			"motif_rate":          `sum(rate(motif_occurrences_total{service_name="one_d4"}[5m]))`,
 		},
 	},

@@ -584,4 +584,35 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 		`outcome="interrupted"`, `outcome="lease_lost"`, `result="empty"`, `result="cached"`} {
 		assert.Contains(t, joined, label, "no query selects %s", label)
 	}
+
+	// The duration histogram carries the same outcome label the run counter does, and both
+	// averages over it have to say which outcome they mean. Unscoped, a single run cut loose
+	// at the six-hour MAX_RUN ceiling swamps every ordinary run in the window — the average
+	// reads worst at the moment it is being used to judge how bad things are.
+	for what, queries := range labelled {
+		for _, query := range queries {
+			for _, match := range oneD4SelectorPattern.FindAllStringSubmatch(query, -1) {
+				if !strings.HasPrefix(match[1], "index_run_duration_micros") {
+					continue
+				}
+				assert.Contains(t, match[2], `outcome="completed"`,
+					"%s averages over every outcome, ceiling-length interrupts included: %s",
+					what, query)
+			}
+		}
+	}
+
+	// And selected positively. outcome!="completed" reads as "everything that went wrong",
+	// but IndexWorker's fourth outcome is lease_lost — a range changing hands because two
+	// pollers overlapped, which is ordinary — so a negation puts a permanent floor under the
+	// failure line. It also opts every future outcome in by default: whoever adds a fifth
+	// label gets it counted as a failure without deciding that it is one.
+	for _, def := range entry.CustomScalars {
+		assert.NotRegexp(t, `outcome\s*!=|outcome\s*!~`, def.Query,
+			"scalar %s selects outcomes by exclusion", def.Label)
+	}
+	for key, query := range entry.CustomTimeseries {
+		assert.NotRegexp(t, `outcome\s*!=|outcome\s*!~`, query,
+			"timeseries %s selects outcomes by exclusion", key)
+	}
 }

@@ -7,6 +7,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,6 +29,7 @@ public final class OtlpHttpMetricsExporter implements AutoCloseable {
   private final Thread thread;
   private volatile boolean started;
   private volatile boolean closed;
+  private final AtomicBoolean flushed = new AtomicBoolean();
 
   public OtlpHttpMetricsExporter(
       String endpoint,
@@ -100,8 +102,12 @@ public final class OtlpHttpMetricsExporter implements AutoCloseable {
   public void close() {
     closed = true;
     thread.interrupt();
-    if (started) {
-      // Final flush so the last interval's counts aren't lost on clean shutdown.
+    // Final flush so the last interval's counts aren't lost on clean shutdown — once, whoever
+    // calls. The flush is a synchronous POST that can block for REQUEST_TIMEOUT, and cumulative
+    // sums mean a repeat sends the same totals again rather than more data, so a second close
+    // buys nothing and costs five seconds of a shutdown path. compareAndSet rather than a check
+    // on `closed`: two threads racing here would both read false and both post.
+    if (started && flushed.compareAndSet(false, true)) {
       exportOnce();
     }
   }

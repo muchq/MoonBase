@@ -178,6 +178,46 @@ public class CustomMetricsTest {
     assertThat(metrics.boundsFor("undeclared")).isEqualTo(HttpServerMetrics.BUCKET_BOUNDS);
   }
 
+  /**
+   * Every array that crosses this class's boundary is a copy, in both directions.
+   *
+   * <p>The interesting one is the last: an undeclared distribution buckets on {@link
+   * HttpServerMetrics#BUCKET_BOUNDS}, a shared static. If that reference reached a snapshot, one
+   * caller editing what looks like its own result would rebucket the HTTP latency histogram — and
+   * every other undeclared distribution in the process — for the rest of the run. Nothing would
+   * throw; the exported {@code explicitBounds} would simply stop describing the buckets beside it.
+   */
+  @Test
+  public void boundsArraysAreCopiedOnEveryCrossing() {
+    CustomMetrics metrics = new CustomMetrics();
+    double[] declared = {10, 20, 30};
+    metrics.defineDistribution("d", declared);
+
+    declared[0] = 999; // the caller still holds the array it passed in
+    assertThat(metrics.boundsFor("d")).containsExactly(10.0, 20.0, 30.0);
+
+    metrics.boundsFor("d")[1] = 999; // and the array it was handed back
+    assertThat(metrics.boundsFor("d")).containsExactly(10.0, 20.0, 30.0);
+
+    metrics.record("d", 15);
+    // And the one on its snapshot. Widening the *lowest* bound, not the highest: bucketing is
+    // upper-inclusive first-match, so raising bounds[0] past a later observation pulls it all the
+    // way down to bucket 0, while raising the top bound leaves everything where it was — which is
+    // why the obvious edit here is a pin that passes against the aliased version too.
+    metrics.distributionSnapshot().get(0).bounds()[0] = 100;
+    metrics.record("d", 25);
+    assertThat(metrics.distributionSnapshot().get(0).bucketCounts())
+        .as("15 and 25 belong in buckets 1 and 2; against a live array the 25 drops to bucket 0")
+        .containsExactly(0L, 1L, 1L, 0L);
+
+    CustomMetrics other = new CustomMetrics();
+    other.record("undeclared", 1);
+    other.distributionSnapshot().get(0).bounds()[0] = 999;
+    assertThat(HttpServerMetrics.BUCKET_BOUNDS[0])
+        .as("the shared default set is not reachable through a snapshot")
+        .isNotEqualTo(999.0);
+  }
+
   @Test
   public void distributionBoundsMustAscend() {
     CustomMetrics metrics = new CustomMetrics();

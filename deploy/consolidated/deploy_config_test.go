@@ -222,3 +222,46 @@ func hasLinePrefix(lines []string, want string) bool {
 	}
 	return false
 }
+
+// The collector rejects a match_type it does not know, and the rejection is not
+// local: CreateFilterSet errors out of the filesystem scraper, that fails the
+// hostmetrics receiver, and hostmetrics shares a pipeline with otlp — so an
+// invalid value here takes every application metric down with the host ones.
+// `glob` reads like it should work and does not; filterset accepts only these
+// two (internal/filter/filterset/config.go at the pinned v0.155.0).
+var validFilterMatchTypes = map[string]bool{"strict": true, "regexp": true}
+
+func TestHostMetricsFilterConfigIsOneTheCollectorAccepts(t *testing.T) {
+	for _, line := range activeLines(t, "o11y/otel-collector.yml") {
+		if !strings.HasPrefix(line, "match_type:") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(line, "match_type:"))
+		if !validFilterMatchTypes[value] {
+			t.Errorf("match_type %q is not one the collector accepts (strict or regexp);"+
+				" hostmetrics fails to build and takes the otlp pipeline with it", value)
+		}
+	}
+}
+
+// Mount-point filters run before root_path is applied, so they are written from
+// the host's perspective. A /hostfs-prefixed pattern matches nothing and the
+// exclusion silently does not happen — which looks like the filter working,
+// because the panel still renders.
+func TestMountPointExcludesAreWrittenFromTheHostsPerspective(t *testing.T) {
+	inExcludeBlock := false
+	for _, line := range activeLines(t, "o11y/otel-collector.yml") {
+		switch {
+		case strings.HasPrefix(line, "exclude_mount_points:"):
+			inExcludeBlock = true
+		case strings.HasPrefix(line, "exclude_fs_types:"), strings.HasPrefix(line, "network:"):
+			inExcludeBlock = false
+		case inExcludeBlock && strings.HasPrefix(line, "- "):
+			pattern := strings.TrimPrefix(line, "- ")
+			if strings.HasPrefix(pattern, hostfsMountPath+"/") {
+				t.Errorf("mount-point exclude %q is prefixed with %s; filtering happens before"+
+					" root_path is applied, so this can never match", pattern, hostfsMountPath)
+			}
+		}
+	}
+}
