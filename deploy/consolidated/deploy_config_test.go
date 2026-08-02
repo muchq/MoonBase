@@ -265,3 +265,49 @@ func TestMountPointExcludesAreWrittenFromTheHostsPerspective(t *testing.T) {
 		}
 	}
 }
+
+// The two tests above read the config as text, which bounds what they can find
+// to mistakes someone already thought of. `match_type: glob` was not one of
+// those: it passed review and passed the line-presence test of the day, and it
+// would have failed the hostmetrics receiver on deploy.
+//
+// scripts/validate-otel-config is the check that does not need to know the
+// mistake in advance — it starts the pinned collector against the real config.
+// But it only runs if CI invokes it, and a workflow that stopped invoking it
+// would leave every test in this file green. So the wiring is pinned too.
+//
+// This asserts the call exists, not that it passed; the job's own exit code is
+// the real signal. What it rules out is the silent version, where the dry-run
+// is dropped and nothing anywhere goes red.
+func TestCIStillRunsTheCollectorDryRun(t *testing.T) {
+	const script = "scripts/validate-otel-config"
+	workflow := readConfig(t, "../../.github/workflows/branch.yml")
+
+	// An exact line, not a substring. `strings.Contains` would be satisfied by a
+	// commented-out step, by a path that merely starts with this one, and by the
+	// script's name appearing in a comment — which is how the golden-instrument
+	// test in this same PR managed to pin nothing at all.
+	invocation := "run: ./" + script
+	found := false
+	for _, line := range strings.Split(workflow, "\n") {
+		if strings.TrimSpace(line) == invocation {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("no active `%s` step in branch.yml — the collector config is back to being"+
+			" checked only as text, and the next match_type: glob ships", invocation)
+	}
+
+	// Worthless if it is not executable: CI invokes it directly rather than
+	// through `bash`, so a lost +x is a job that fails for a reason nobody will
+	// connect back to this file.
+	info, err := os.Stat("../../" + script)
+	if err != nil {
+		t.Fatalf("branch.yml runs %s but it does not exist: %v", script, err)
+	}
+	if info.Mode()&0o111 == 0 {
+		t.Errorf("%s is not executable (%v); CI runs it directly", script, info.Mode())
+	}
+}
