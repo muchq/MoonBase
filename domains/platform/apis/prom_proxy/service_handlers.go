@@ -165,6 +165,19 @@ func (h *MetricsHandler) GetServiceMetricsTimeSeries(w http.ResponseWriter, r *h
 		return
 	}
 
+	// Same contract as GetServiceMetrics: an absent view defaults rather than
+	// offering a third, implicit answer, and an unrecognised one is a 400
+	// rather than a silent fallback.
+	view := DefaultView
+	if raw := r.URL.Query().Get("view"); raw != "" {
+		if !ValidView(raw) {
+			problem := mucks.NewBadRequest("Invalid view. Valid options: count, rate")
+			mucks.JsonError(w, problem)
+			return
+		}
+		view = MetricView(raw)
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
@@ -177,10 +190,11 @@ func (h *MetricsHandler) GetServiceMetricsTimeSeries(w http.ResponseWriter, r *h
 		StartTime: startTime,
 		EndTime:   endTime,
 		Step:      step,
+		View:      string(view),
 		Series:    []TimeSeries{},
 	}
 
-	queries := standardTimeseriesQueries(name)
+	queries := standardTimeseriesQueries(name, step, view)
 	for metricName, query := range entry.CustomTimeseries {
 		queries[metricName] = query
 	}

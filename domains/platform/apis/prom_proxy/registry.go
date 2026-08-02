@@ -375,14 +375,37 @@ func standardScalarQueries(service string) []struct {
 	}
 }
 
+// standardRequestRateQuery is the one standard timeseries built from a
+// counter, so it is also the one with a count form (#1287 extended to the
+// Serving charts).
+//
+// The count form buckets per step rather than over a fixed window like the
+// scalar tiles' 5m: a chart wants one count per point, and increase() over a
+// window wider than the gap between points would make adjacent buckets
+// overlap and double-count requests that land near a boundary. container_
+// handlers' "restarts" series already windows a range query by its own step
+// for the same reason.
+func standardRequestRateQuery(service, step string, view MetricView) string {
+	s := fmt.Sprintf("%q", service)
+	if view == ViewCount {
+		return `sum(increase(http_server_requests_total{service_name=` + s + `}[` + step + `]))`
+	}
+	return `sum(rate(http_server_requests_total{service_name=` + s + `}[5m]))`
+}
+
 // Keys are mirrored by STANDARD_SERIES in the UI's ServiceDashboard
 // (muchq.github.io); keep them in sync, and keep CustomTimeseries keys
 // from colliding with them — a colliding custom series is classified as
 // standard by the UI and silently never charts.
-func standardTimeseriesQueries(service string) map[string]string {
+//
+// Only request_rate answers to view: it is the only one of the five built
+// from a counter. The other four are already ratios, quantiles, or a gauge —
+// none of them has a count form to switch to, the same reasoning that keeps
+// the scalar block's windowed-mean tiles fixed-form in QueryFor above.
+func standardTimeseriesQueries(service, step string, view MetricView) map[string]string {
 	s := fmt.Sprintf("%q", service)
 	return map[string]string{
-		"request_rate":       `sum(rate(http_server_requests_total{service_name=` + s + `}[5m]))`,
+		"request_rate":       standardRequestRateQuery(service, step, view),
 		"error_rate_percent": `sum(rate(http_server_requests_failure_total{service_name=` + s + `}[5m]))/(sum(rate(http_server_requests_success_total{service_name=` + s + `}[5m]))+sum(rate(http_server_requests_failure_total{service_name=` + s + `}[5m])))*100`,
 		"avg_duration_us":    `sum(rate(http_server_request_duration_microseconds_sum{service_name=` + s + `}[5m]))/sum(rate(http_server_request_duration_microseconds_count{service_name=` + s + `}[5m]))`,
 		"p95_duration_us":    `histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name=` + s + `}[5m])))`,
