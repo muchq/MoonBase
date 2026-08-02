@@ -14,6 +14,7 @@ import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import com.muchq.games.one_d4.queue.IndexMessage;
+import com.muchq.platform.yodel.CustomMetrics;
 import dev.failsafe.Failsafe;
 import dev.failsafe.RetryPolicy;
 import java.sql.SQLException;
@@ -29,6 +30,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -73,6 +75,63 @@ public class IndexWorker {
   private final Clock clock;
   private final Duration heartbeatInterval;
   private final ScheduledExecutorService heartbeatScheduler;
+  private final CustomMetrics metrics;
+
+  // Instrument names. The collector's Prometheus exporter appends _total to counters, so
+  // index_runs is queried as index_runs_total. Labels are outcomes and motif names only — bounded
+  // sets. A player name or a request id here would mint a new stored series per user.
+  static final String RUNS = "index_runs";
+  static final String GAMES_INDEXED = "games_indexed";
+  static final String MONTHS = "index_months";
+  static final String ARCHIVE_FETCHES = "chess_com_archive_fetches";
+  static final String MOTIF_OCCURRENCES = "motif_occurrences";
+  static final String RUN_DURATION = "index_run_duration_micros";
+
+  /**
+   * Bounds for {@link #RUN_DURATION}, in microseconds, spanning a millisecond to the {@link
+   * RetentionPolicy#MAX_RUN} ceiling.
+   *
+   * <p>The default set yodel shares with the HTTP latency histogram tops out at 10ms, which no
+   * index run has ever finished inside — a run does at least four database round trips before it
+   * fetches anything. Every observation would land in the overflow bucket: fifteen series pinned at
+   * zero and a sixteenth equal to the count.
+   *
+   * <p>The quantile that reads them does not announce this. When the rank falls in the {@code +Inf}
+   * bucket, {@code histogram_quantile} returns the upper bound of the highest <em>finite</em>
+   * bucket, so a p95 over runs that all take minutes answers a flat 10000 — a plausible-looking
+   * 10ms, not an obvious {@code +Inf}. That is the failure worth avoiding: a broken histogram that
+   * reads like a fast one.
+   */
+  static final double[] RUN_DURATION_BOUNDS = {
+    1_000,
+    10_000,
+    100_000,
+    1_000_000,
+    5_000_000,
+    30_000_000,
+    60_000_000,
+    300_000_000,
+    900_000_000,
+    1_800_000_000,
+    3_600_000_000L,
+    10_800_000_000L,
+    21_600_000_000L
+  };
+
+  static final String GAMES_PER_MONTH = "index_games_per_month";
+
+  /**
+   * Bounds for {@link #GAMES_PER_MONTH}, in games.
+   *
+   * <p>The HTTP default set happens to span a month's archive well enough — a heavy blitz player
+   * clears a few hundred games and the top bound is 10,000 — so the mean this is charted through
+   * reads correctly either way. Declared anyway, because "happens to" is the whole failure: the two
+   * distributions would be silently coupled to a latency histogram, and the first quantile anyone
+   * draws over a month count is the moment that stops being harmless.
+   */
+  static final double[] GAMES_PER_MONTH_BOUNDS = {
+    1, 2, 5, 10, 25, 50, 100, 200, 400, 800, 1_600, 3_200
+  };
 
   /**
    * Identifies this worker as the holder of a lease. Stable for the life of the process and unique
@@ -261,6 +320,34 @@ public class IndexWorker {
       ExecutorService extractionExecutor,
       Clock clock,
       Duration heartbeatInterval) {
+    this(
+        chessClient,
+        featureExtractor,
+        requestStore,
+        gameFeatureStore,
+        periodStore,
+        extractionExecutor,
+        clock,
+        heartbeatInterval,
+        new CustomMetrics());
+  }
+
+  /**
+   * @param metrics where this worker reports what it did. Defaulted to a detached registry by the
+   *     constructors above rather than made nullable: recording into memory nobody exports is the
+   *     same no-op yodel already gives a service with no OTEL endpoint configured, and it keeps
+   *     every emit site free of a null check.
+   */
+  public IndexWorker(
+      ChessClient chessClient,
+      FeatureExtractor featureExtractor,
+      IndexingRequestStore requestStore,
+      GameFeatureStore gameFeatureStore,
+      IndexedPeriodStore periodStore,
+      ExecutorService extractionExecutor,
+      Clock clock,
+      Duration heartbeatInterval,
+      CustomMetrics metrics) {
     this.chessClient = chessClient;
     this.featureExtractor = featureExtractor;
     this.requestStore = requestStore;
@@ -269,6 +356,7 @@ public class IndexWorker {
     this.extractionExecutor = extractionExecutor;
     this.clock = clock;
     this.heartbeatInterval = heartbeatInterval;
+    this.metrics = metrics;
     this.heartbeatScheduler =
         Executors.newSingleThreadScheduledExecutor(
             r -> {
@@ -321,6 +409,12 @@ public class IndexWorker {
     runHandles.put(message.requestId(), handle);
     ScheduledFuture<?> heartbeat = startHeartbeat(message.requestId());
     boolean abandonedBecauseInterrupted = false;
+    // Wall-clock, not the injected clock: this measures how long the run really took, and a test
+    // that jumps its clock by six hours to trip the ceiling would otherwise report a six-hour run.
+    long runStartNanos = System.nanoTime();
+    String outcome = "failed";
+    metrics.defineDistribution(RUN_DURATION, RUN_DURATION_BOUNDS);
+    metrics.defineDistribution(GAMES_PER_MONTH, GAMES_PER_MONTH_BOUNDS);
     try {
       progress(message.requestId(), 0);
 
@@ -355,12 +449,22 @@ public class IndexWorker {
                 message.platform(),
                 monthStr,
                 count);
+            metrics.increment(MONTHS, Map.of("result", "cached"));
             progress(message.requestId(), totalIndexed);
             continue;
           }
         }
 
-        Optional<GamesResponse> response = chessClient.fetchGames(message.player(), month);
+        Optional<GamesResponse> response;
+        try {
+          response = chessClient.fetchGames(message.player(), month);
+        } catch (RuntimeException e) {
+          // Counted before rethrowing. ChessClient maps only a 404 to empty and throws on every
+          // other non-200, so without this the rate-limits and 5xx — the failures an operator most
+          // wants a rate on — were the one archive outcome the counter could not show.
+          metrics.increment(ARCHIVE_FETCHES, Map.of("result", "error"));
+          throw e;
+        }
         // Checked on the way out of the fetch, not only where an interrupt is thrown, because a
         // blocking call is entitled to swallow one — restore the status, return normally, and
         // leave the caller unable to tell an empty archive from a call that was cut short. Taking
@@ -370,6 +474,8 @@ public class IndexWorker {
         // placed the same way — on the way out of a span that blocks, which is where an interrupt
         // can have been absorbed without a trace.
         ensureNotInterrupted(message.requestId());
+        metrics.increment(
+            ARCHIVE_FETCHES, Map.of("result", response.isEmpty() ? "no_archive" : "ok"));
         if (response.isEmpty()) {
           // chess.com 404s the archive for a month the player has no games in. The month *was*
           // indexed — the answer is "none" — so record an empty period rather than dropping
@@ -385,6 +491,11 @@ public class IndexWorker {
           // sweeps it.
           progress(message.requestId(), totalIndexed);
           upsertPeriod(message, monthStr, month, fetchedAt, 0, false);
+          // Counted as an empty month, and deliberately not recorded into
+          // GAMES_PER_MONTH: a decade-long backfill of a three-year player is mostly
+          // 404s, and feeding those zeros in makes the average archive look a third
+          // its real size. empty_months_total already carries that population.
+          metrics.increment(MONTHS, Map.of("result", "empty"));
           continue;
         }
 
@@ -452,6 +563,17 @@ public class IndexWorker {
             if (!result.occurrences().isEmpty()) {
               occurrencesBatch.put(result.gameUrl(), result.occurrences());
             }
+            // Counted here rather than at flush time because the flush batches by request and
+            // loses the per-motif breakdown. The motif name is the label, and the detector set is
+            // fixed and small, so the cardinality is bounded by the code rather than by traffic.
+            result
+                .occurrences()
+                .forEach(
+                    (motif, occurrences) ->
+                        metrics.add(
+                            MOTIF_OCCURRENCES,
+                            occurrences.size(),
+                            Map.of("motif", motif.name().toLowerCase(Locale.ROOT))));
             monthCount++;
             totalIndexed++;
             if (featureBatch.size() >= BATCH_SIZE) {
@@ -480,6 +602,10 @@ public class IndexWorker {
         // it safe is order: the flushBatch immediately above checks ownership and throws if this
         // worker has lost it, so this line is unreachable without a live lease.
         upsertPeriod(message, monthStr, month, fetchedAt, monthCount, titleResolution.degraded());
+        metrics.increment(
+            MONTHS, Map.of("result", titleResolution.degraded() ? "degraded" : "indexed"));
+        metrics.add(GAMES_INDEXED, monthCount, Map.of());
+        metrics.record(GAMES_PER_MONTH, monthCount);
         progress(message.requestId(), totalIndexed);
       }
 
@@ -491,6 +617,7 @@ public class IndexWorker {
                   message.requestId(), ownerId, "COMPLETED", null, finalCount, clock.instant()),
           "the run could be completed")) {
         LOG.info("Completed indexing request {} with {} games", message.requestId(), totalIndexed);
+        outcome = "completed";
       } else {
         // Logging the count unconditionally read as success whatever the row said. The games are
         // on disk either way; what is lost is the record that this run produced them.
@@ -498,6 +625,9 @@ public class IndexWorker {
             "Indexed {} games for request {} but could not record COMPLETED: the lease is gone.",
             totalIndexed,
             message.requestId());
+        // The games landed but the run cannot claim them. Distinct from "completed" on purpose:
+        // counting it as success would hide a range changing hands mid-run behind a green chart.
+        outcome = "lease_lost";
       }
     } catch (LeaseLostException e) {
       // No terminal write is attempted, and that is the whole difference from an ordinary failure.
@@ -505,6 +635,7 @@ public class IndexWorker {
       // too, and would simply be refused. It is that attempting it would log a spurious error for
       // a run that did not fail: it was stopped, correctly, because the range moved.
       LOG.warn("Abandoning request {}: {}", message.requestId(), e.getMessage());
+      outcome = "lease_lost";
     } catch (Exception e) {
       if (e instanceof RunInterruptedException || Thread.currentThread().isInterrupted()) {
         // Stopped, not failed, and the row's outcome turns on the difference. A FAILED here spends
@@ -522,6 +653,7 @@ public class IndexWorker {
             message.requestId(),
             e);
         abandonedBecauseInterrupted = true;
+        outcome = "interrupted";
       } else {
         recordFailure(message.requestId(), e);
       }
@@ -556,7 +688,18 @@ public class IndexWorker {
       // first is false.
       if (weInterruptedThisRun || abandonedBecauseInterrupted) {
         releaseAfterInterrupt(message.requestId());
+        // A run the ceiling cut loose reports as interrupted even when it unwound through the
+        // LeaseLostException branch above, which is the shape a past-ceiling fenced refusal takes.
+        // Reporting those as lease_lost would bury the wedge signal in ordinary range handovers.
+        outcome = "interrupted";
       }
+      metrics.increment(RUNS, Map.of("outcome", outcome));
+      // Labelled by outcome, like the counter beside it. An interrupted run sat at the MAX_RUN
+      // ceiling by definition, so pooling it with the completed ones makes the average run time
+      // jump precisely when a wedge is being cut loose — the tile reads worst exactly when it is
+      // being used to judge how bad things are. Four outcomes over these bounds is 64 series.
+      metrics.record(
+          RUN_DURATION, (System.nanoTime() - runStartNanos) / 1000.0, Map.of("outcome", outcome));
     }
   }
 

@@ -28,6 +28,40 @@ jobs:
       - name: Test deploy.sh
         run: ./scripts/test-deploy
 
+  # deploy_config_test pins the text of the collector config, which can only
+  # catch mistakes someone already knew to look for: `match_type: glob` passed
+  # review and passed the line-presence test that existed at the time, and would
+  # have taken the whole metrics pipeline down on deploy. This starts the pinned
+  # collector against the real config instead.
+  #
+  # Its own job, not a step in test-deploy: that one runs inside the ci-base
+  # container and this needs the runner's own docker. Path-gated because it
+  # pulls the collector image, and nothing outside these three files can change
+  # the answer.
+  validate-otel-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for collector config changes
+        id: filter
+        run: |
+          CHANGED=$(git diff --name-only origin/main...HEAD -- \
+            deploy/consolidated/o11y/otel-collector.yml \
+            deploy/consolidated/docker-compose.observability.yml \
+            scripts/validate-otel-config)
+          if [ -n "$CHANGED" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Dry-run the collector config
+        if: steps.filter.outputs.changed == 'true'
+        run: ./scripts/validate-otel-config
+
   # deploy.sh runs from a developer machine, and macOS ships bash 3.2 as
   # /bin/bash — no associative arrays or case-conversion expansions. The Linux
   # job above runs bash 5 and cannot reproduce that, so run the same suite on a

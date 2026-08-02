@@ -1,0 +1,107 @@
+#!/bin/bash
+# Starts the pinned collector against the real config and asserts it comes up.
+#
+# deploy_config_test pins the *text* of o11y/otel-collector.yml: that no
+# forbidden match_type appears, that mount points are written unprefixed. Static
+# checks only catch the mistakes someone already knew to look for. `match_type:
+# glob` passed review and passed the line-presence test that existed at the
+# time, and it would have failed the whole hostmetrics receiver on deploy —
+# taking the otlp pipeline with it, since they share a metrics pipeline. The
+# only thing that catches the next one of those is the collector itself.
+#
+# Not `otelcol validate`: that unmarshals the config and calls Validate() on it,
+# which is a weaker check than building the components. The filterset error
+# comes out of CreateFilterSet at scraper construction, so the config has to
+# actually start.
+#
+# Self-validating. The run is done twice — once against the real config
+# expecting it to stay up, once against a copy with `match_type: glob` spliced
+# back in expecting it to die. A docker that is absent, stubbed, or otherwise
+# not discriminating fails one of the two, so this script cannot pass by doing
+# nothing. That property is the point; keep both halves.
+set -uo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+COMPOSE=$REPO/deploy/consolidated/docker-compose.observability.yml
+CONFIG=$REPO/deploy/consolidated/o11y/otel-collector.yml
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+FAILURES=0
+pass() { echo "  ok    $1"; }
+fail() {
+  echo "  FAIL  $1"
+  FAILURES=$((FAILURES + 1))
+}
+
+# How long a healthy collector has to prove it is healthy. A broken one exits
+# in well under a second, so this only ever costs wall-clock on success.
+WINDOW=${OTEL_VALIDATE_WINDOW:-15}
+
+# The tag the deploy actually uses. Hardcoding a version here would let this
+# drift onto a collector nobody runs, which is the failure it exists to prevent.
+IMAGE=$(sed -n \
+  's|^[[:space:]]*image:[[:space:]]*\(otel/opentelemetry-collector-contrib:[^[:space:]]*\).*$|\1|p' \
+  "$COMPOSE")
+
+if [ -z "$IMAGE" ]; then
+  echo "could not read the collector image out of $COMPOSE" >&2
+  exit 1
+fi
+
+echo "otel-collector config dry-run against $IMAGE"
+
+# Echoes "up" if the collector was still running when the window closed, or
+# "down:<code>" if it exited on its own. A collector that builds its pipelines
+# runs until something stops it, so being killed by the timeout (124) is the
+# success signal.
+run_collector() {
+  local cfg=$1 log=$2
+  timeout "$WINDOW" docker run --rm \
+    -v "$cfg:/etc/otel-collector-config.yml:ro" \
+    -v /:/hostfs:ro \
+    "$IMAGE" --config=/etc/otel-collector-config.yml \
+    > "$log" 2>&1
+  local rc=$?
+  if [ "$rc" -eq 124 ]; then echo "up"; else echo "down:$rc"; fi
+}
+
+# ------------------------------------------------- the config as committed
+
+REAL=$(run_collector "$CONFIG" "$WORK/real.log")
+if [ "$REAL" = "up" ]; then
+  pass "the committed config builds its pipelines and stays up"
+else
+  fail "the committed config did not start ($REAL)"
+  echo "--- collector output ---" >&2
+  cat "$WORK/real.log" >&2
+  echo "------------------------" >&2
+fi
+
+# ------------------------------------------- the mistake this exists to catch
+
+# Puts back the exact blocker that shipped in this file once: filterset accepts
+# only strict and regexp, and anything else is an error out of CreateFilterSet.
+sed 's/match_type: regexp/match_type: glob/' "$CONFIG" > "$WORK/glob.yml"
+
+if ! grep -q "match_type: glob" "$WORK/glob.yml"; then
+  fail "could not splice match_type: glob into a copy — this check is not running"
+else
+  MUTANT=$(run_collector "$WORK/glob.yml" "$WORK/glob.log")
+  if [ "$MUTANT" = "up" ]; then
+    fail "a config with match_type: glob started anyway — this dry-run proves nothing"
+  else
+    pass "match_type: glob is rejected by the collector ($MUTANT)"
+  fi
+fi
+
+# ---------------------------------------------------------------- verdict
+
+echo
+if [ "$FAILURES" -eq 0 ]; then
+  echo "otel config dry-run passed"
+  exit 0
+fi
+echo "$FAILURES check(s) failed"
+exit 1

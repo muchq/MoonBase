@@ -95,7 +95,59 @@ var serviceRegistry = map[string]serviceEntry{
 	// The Java services (#1212): yodel's standard instruments only, no
 	// custom set yet.
 	"mcpserver": {},
-	"one_d4":    {},
+	// The first Java service with a custom set, now that yodel has counters and
+	// distributions to record into. Counts, outcomes and motif names only — the
+	// emitter never labels by player or by game, so no series here is per-user.
+	"one_d4": {
+		CustomScalars: []customScalarDef{
+			{"Indexing", "games_indexed_total", "games", `sum(games_indexed_total{service_name="one_d4"})`},
+			{"Indexing", "games_per_sec", "/s", `sum(rate(games_indexed_total{service_name="one_d4"}[5m]))`},
+			{"Indexing", "runs_completed_total", "", `sum(index_runs_total{service_name="one_d4",outcome="completed"})`},
+			{"Indexing", "runs_failed_total", "", `sum(index_runs_total{service_name="one_d4",outcome="failed"})`},
+			// A wedge cut loose by the MAX_RUN ceiling lands here (#1282). Anything
+			// above zero means a worker was stuck long enough to be given up on.
+			{"Indexing", "runs_interrupted_total", "", `sum(index_runs_total{service_name="one_d4",outcome="interrupted"})`},
+			// Emitted since the ceiling landed, and listed so the four outcomes add up to
+			// index_runs_total. A range changing hands mid-run is ordinary; a rising count
+			// beside a flat interrupted count is contention, not a wedge.
+			{"Indexing", "runs_lease_lost_total", "", `sum(index_runs_total{service_name="one_d4",outcome="lease_lost"})`},
+			// Windowed averages over the histograms: rate(sum)/rate(count) is the
+			// mean per run in the window, the same shape portrait uses.
+			// Completed runs only. The histogram is labelled by outcome, and an interrupted
+			// run is one that sat at the MAX_RUN ceiling — pooling those in makes the average
+			// spike at exactly the moment someone is reading it to size a real run.
+			{"Indexing", "avg_run_seconds_1h", "s", `sum(rate(index_run_duration_micros_sum{service_name="one_d4",outcome="completed"}[1h]))/sum(rate(index_run_duration_micros_count{service_name="one_d4",outcome="completed"}[1h]))/1000000`},
+			{"Indexing", "avg_games_per_month_1h", "games", `sum(rate(index_games_per_month_sum{service_name="one_d4"}[1h]))/sum(rate(index_games_per_month_count{service_name="one_d4"}[1h]))`},
+			{"Indexing", "empty_months_total", "", `sum(index_months_total{service_name="one_d4",result="empty"})`},
+			{"Indexing", "cached_months_total", "", `sum(index_months_total{service_name="one_d4",result="cached"})`},
+			{"Indexing", "archive_fetches_per_sec", "/s", `sum(rate(chess_com_archive_fetches_total{service_name="one_d4"}[5m]))`},
+			{"Motifs", "occurrences_per_sec", "/s", `sum(rate(motif_occurrences_total{service_name="one_d4"}[5m]))`},
+			{"Motifs", "occurrences_total", "", `sum(motif_occurrences_total{service_name="one_d4"})`},
+			// No motifs-per-game tile. The two counters are recorded on opposite sides of
+			// the durability boundary — motifs per game inside the drain loop, games only
+			// after the month's flush and period write succeed — so an interrupted or
+			// lease-lost month contributes motifs and zero games. The ratio then divides
+			// by a rate of zero, and any clamp large enough to avoid a divide-by-zero is
+			// small enough to turn the result into a four-order-of-magnitude spike. A tile
+			// that is wrong exactly when the system is unhealthy is worse than no tile.
+		},
+		CustomTimeseries: map[string]string{
+			"games_indexed_rate":  `sum(rate(games_indexed_total{service_name="one_d4"}[5m]))`,
+			"run_completion_rate": `sum(rate(index_runs_total{service_name="one_d4",outcome="completed"}[5m]))`,
+			// Selected, not subtracted. In PromQL sum() over no matching series is an
+			// empty vector, and vector-minus-empty is empty rather than the left side —
+			// so a total-minus-completed form renders nothing on a fresh process whose
+			// runs are all failing, which is precisely when someone is looking at it.
+			//
+			// Named outcomes rather than != "completed": lease_lost is the fourth, and it
+			// is ordinary. A range changing hands mid-run happens whenever two pollers
+			// overlap, so counting it here puts a permanent floor under the failure line
+			// and buries the two outcomes that do mean something went wrong.
+			"run_failure_rate":    `sum(rate(index_runs_total{service_name="one_d4",outcome=~"failed|interrupted"}[5m]))`,
+			"run_duration_avg_us": `sum(rate(index_run_duration_micros_sum{service_name="one_d4",outcome="completed"}[5m]))/sum(rate(index_run_duration_micros_count{service_name="one_d4",outcome="completed"}[5m]))`,
+			"motif_rate":          `sum(rate(motif_occurrences_total{service_name="one_d4"}[5m]))`,
+		},
+	},
 	// Wordchains: server_pal's standard instruments only, no custom set.
 	"mithril": {},
 	// Image blur/edges: server_pal's standard instruments only.

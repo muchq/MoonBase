@@ -19,6 +19,12 @@ public final class HttpServerMetrics {
   // The OTel SDK default explicit bucket boundaries. The C++ and Rust emitters
   // record microseconds against these same defaults, and the dashboard's
   // histogram_quantile and avg queries are built on them.
+  //
+  // Known wrong, and left wrong deliberately: the defaults are shaped for
+  // milliseconds, so read as microseconds they top out at 10ms and every p95
+  // tile is capped there (#1286). Matching the other two emitters is what keeps
+  // the shared query comparable across languages, so this moves when they do,
+  // not before. Do not "fix" this array on its own.
   static final double[] BUCKET_BOUNDS = {
     0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000
   };

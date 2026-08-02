@@ -7,6 +7,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,21 +23,33 @@ public final class OtlpHttpMetricsExporter implements AutoCloseable {
   private final URI metricsUri;
   private final Map<String, String> resourceAttributes;
   private final HttpServerMetrics metrics;
+  private final CustomMetrics custom;
   private final Duration interval;
   private final HttpClient client;
   private final Thread thread;
   private volatile boolean started;
   private volatile boolean closed;
+  private final AtomicBoolean flushed = new AtomicBoolean();
 
   public OtlpHttpMetricsExporter(
       String endpoint,
       Map<String, String> resourceAttributes,
       HttpServerMetrics metrics,
       Duration interval) {
+    this(endpoint, resourceAttributes, metrics, new CustomMetrics(), interval);
+  }
+
+  public OtlpHttpMetricsExporter(
+      String endpoint,
+      Map<String, String> resourceAttributes,
+      HttpServerMetrics metrics,
+      CustomMetrics custom,
+      Duration interval) {
     String base = endpoint.endsWith("/") ? endpoint.substring(0, endpoint.length() - 1) : endpoint;
     this.metricsUri = URI.create(base + "/v1/metrics");
     this.resourceAttributes = Map.copyOf(resourceAttributes);
     this.metrics = metrics;
+    this.custom = custom;
     this.interval = interval;
     this.client = HttpClient.newBuilder().connectTimeout(REQUEST_TIMEOUT).build();
     this.thread = new Thread(this::runLoop, "yodel-otlp-exporter");
@@ -66,7 +79,7 @@ public final class OtlpHttpMetricsExporter implements AutoCloseable {
   void exportOnce() {
     byte[] body =
         OtlpJsonEncoder.encode(
-            resourceAttributes, metrics, System.currentTimeMillis() * 1_000_000L);
+            resourceAttributes, metrics, custom, System.currentTimeMillis() * 1_000_000L);
     HttpRequest request =
         HttpRequest.newBuilder(metricsUri)
             .timeout(REQUEST_TIMEOUT)
@@ -89,8 +102,12 @@ public final class OtlpHttpMetricsExporter implements AutoCloseable {
   public void close() {
     closed = true;
     thread.interrupt();
-    if (started) {
-      // Final flush so the last interval's counts aren't lost on clean shutdown.
+    // Final flush so the last interval's counts aren't lost on clean shutdown — once, whoever
+    // calls. The flush is a synchronous POST that can block for REQUEST_TIMEOUT, and cumulative
+    // sums mean a repeat sends the same totals again rather than more data, so a second close
+    // buys nothing and costs five seconds of a shutdown path. compareAndSet rather than a check
+    // on `closed`: two threads racing here would both read false and both post.
+    if (started && flushed.compareAndSet(false, true)) {
       exportOnce();
     }
   }

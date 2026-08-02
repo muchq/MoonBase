@@ -4,9 +4,11 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.ToLongFunction;
+import java.util.stream.Collectors;
 
 /**
  * Renders the http_server_* family as an OTLP/HTTP JSON ExportMetricsServiceRequest. 64-bit values
@@ -23,6 +25,14 @@ final class OtlpJsonEncoder {
 
   static byte[] encode(
       Map<String, String> resourceAttributes, HttpServerMetrics metrics, long timeUnixNanos) {
+    return encode(resourceAttributes, metrics, new CustomMetrics(), timeUnixNanos);
+  }
+
+  static byte[] encode(
+      Map<String, String> resourceAttributes,
+      HttpServerMetrics metrics,
+      CustomMetrics custom,
+      long timeUnixNanos) {
     ObjectNode root = MAPPER.createObjectNode();
     ObjectNode resourceMetric = root.putArray("resourceMetrics").addObject();
     ArrayNode resourceAttrs = resourceMetric.putObject("resource").putArray("attributes");
@@ -77,6 +87,17 @@ final class OtlpJsonEncoder {
             startNanos,
             timeUnixNanos));
     metricNodes.add(histogram(snapshots, serviceName, startNanos, timeUnixNanos));
+
+    // Service-defined instruments ride in their own scope so a reader can tell at a glance which
+    // series are the shared rails and which the service invented. Omitted entirely when nothing
+    // has been recorded, rather than exporting an empty scope every interval.
+    if (!custom.isEmpty()) {
+      ObjectNode customScope = resourceMetric.withArray("scopeMetrics").addObject();
+      customScope.putObject("scope").put("name", "custom");
+      ArrayNode customNodes = customScope.putArray("metrics");
+      addCustomCounters(customNodes, custom, serviceName, startNanos, timeUnixNanos);
+      addCustomDistributions(customNodes, custom, serviceName, startNanos, timeUnixNanos);
+    }
 
     try {
       return MAPPER.writeValueAsBytes(root);
@@ -140,6 +161,90 @@ final class OtlpJsonEncoder {
       addPointAttributes(point, serviceName, snapshot.httpMethod());
     }
     return metric;
+  }
+
+  /**
+   * One OTLP metric per counter name, with a data point per label set. Grouping matters: emitting a
+   * separate metric node per label set is legal JSON but leaves the collector reconciling repeated
+   * names, and the labels stop behaving like dimensions of one series.
+   */
+  private static void addCustomCounters(
+      ArrayNode metricNodes,
+      CustomMetrics custom,
+      String serviceName,
+      long startNanos,
+      long timeNanos) {
+    Map<String, List<CustomMetrics.CounterSnapshot>> byName =
+        custom.counterSnapshot().stream()
+            .collect(
+                Collectors.groupingBy(
+                    CustomMetrics.CounterSnapshot::name, LinkedHashMap::new, Collectors.toList()));
+    byName.forEach(
+        (name, points) -> {
+          ObjectNode metric = metricNodes.addObject();
+          metric.put("name", name);
+          ObjectNode sum = metric.putObject("sum");
+          sum.put("aggregationTemporality", AGGREGATION_TEMPORALITY_CUMULATIVE);
+          sum.put("isMonotonic", true);
+          ArrayNode dataPoints = sum.putArray("dataPoints");
+          for (CustomMetrics.CounterSnapshot snapshot : points) {
+            ObjectNode point = dataPoints.addObject();
+            point.put("startTimeUnixNano", Long.toString(startNanos));
+            point.put("timeUnixNano", Long.toString(timeNanos));
+            point.put("asInt", Long.toString(snapshot.value()));
+            addLabelledAttributes(point, serviceName, snapshot.labels());
+          }
+        });
+  }
+
+  private static void addCustomDistributions(
+      ArrayNode metricNodes,
+      CustomMetrics custom,
+      String serviceName,
+      long startNanos,
+      long timeNanos) {
+    Map<String, List<CustomMetrics.DistributionSnapshot>> byName =
+        custom.distributionSnapshot().stream()
+            .collect(
+                Collectors.groupingBy(
+                    CustomMetrics.DistributionSnapshot::name,
+                    LinkedHashMap::new,
+                    Collectors.toList()));
+    byName.forEach(
+        (name, points) -> {
+          ObjectNode metric = metricNodes.addObject();
+          metric.put("name", name);
+          ObjectNode histogram = metric.putObject("histogram");
+          histogram.put("aggregationTemporality", AGGREGATION_TEMPORALITY_CUMULATIVE);
+          ArrayNode dataPoints = histogram.putArray("dataPoints");
+          for (CustomMetrics.DistributionSnapshot snapshot : points) {
+            ObjectNode point = dataPoints.addObject();
+            point.put("startTimeUnixNano", Long.toString(startNanos));
+            point.put("timeUnixNano", Long.toString(timeNanos));
+            point.put("count", Long.toString(snapshot.count()));
+            point.put("sum", snapshot.sum());
+            ArrayNode bucketCounts = point.putArray("bucketCounts");
+            for (long count : snapshot.bucketCounts()) {
+              bucketCounts.add(Long.toString(count));
+            }
+            ArrayNode bounds = point.putArray("explicitBounds");
+            for (double bound : snapshot.bounds()) {
+              bounds.add(bound);
+            }
+            addLabelledAttributes(point, serviceName, snapshot.labels());
+          }
+        });
+  }
+
+  /**
+   * {@code service_name} on every point, exactly as the HTTP family does — prom_proxy scopes every
+   * query by it, so a custom series without it belongs to no service on the dashboard.
+   */
+  private static void addLabelledAttributes(
+      ObjectNode point, String serviceName, Map<String, String> labels) {
+    ArrayNode attributes = point.putArray("attributes");
+    labels.forEach((key, value) -> addAttribute(attributes, key, value));
+    addAttribute(attributes, "service_name", serviceName);
   }
 
   private static void addPointAttributes(ObjectNode point, String serviceName, String httpMethod) {

@@ -146,3 +146,168 @@ func readConfig(t *testing.T, name string) string {
 	}
 	return string(contents)
 }
+
+// The host-metrics pair.
+//
+// The collector runs in a container, so the hostmetrics receiver reads the
+// machine only through a bind mount plus a matching root_path. Those two live
+// in different files, and losing either produces no error anywhere: the
+// receiver happily scrapes its own namespace, cpu/memory/network keep
+// reporting plausible numbers from /proc inside the container, and only the
+// disk and filesystem panels go quiet — because /proc/diskstats is not the
+// host's and the container's mounts are all overlay and tmpfs, which the
+// scraper filters. An empty chart reads as an idle machine, so this was live
+// for a while before anyone asked.
+//
+// Pinned as a pair rather than as two separate facts: either one alone is the
+// broken state.
+const hostfsMountPath = "/hostfs"
+
+func TestHostMetricsReadsTheHostAndNotTheCollectorContainer(t *testing.T) {
+	receiver := activeLines(t, "o11y/otel-collector.yml")
+	compose := activeLines(t, "docker-compose.observability.yml")
+
+	// Exact lines, not substrings. `strings.Contains` would accept a commented-out
+	// directive and — worse — `root_path: /hostfs-typo`, which is the very state the
+	// error message below describes: a root_path naming a path the container has no
+	// mount for. Both were true of the first version of this test.
+	if !hasLine(receiver, "root_path: "+hostfsMountPath) {
+		t.Errorf("hostmetrics has no active `root_path: %s` — every scraper measures the collector"+
+			" container, and the disk panels silently report nothing", hostfsMountPath)
+	}
+	if !hasLine(compose, "- /:"+hostfsMountPath+":ro") {
+		t.Errorf("otelcol does not bind the host root at %s — root_path points at a path that does"+
+			" not exist in the container", hostfsMountPath)
+	}
+
+	// Enabled-but-unmounted was the bug, so the scrapers are asserted alongside the
+	// mount rather than assumed. These two are the ones whose panels were empty.
+	for _, scraper := range []string{"disk:", "filesystem:"} {
+		if !hasLinePrefix(receiver, scraper) {
+			t.Errorf("hostmetrics scraper %q is not enabled; the Host page charts it", scraper)
+		}
+	}
+}
+
+// Config lines with comments and blanks removed, so an assertion cannot be
+// satisfied by a directive somebody commented out.
+func activeLines(t *testing.T, name string) []string {
+	t.Helper()
+	var out []string
+	for _, line := range strings.Split(readConfig(t, name), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func hasLine(lines []string, want string) bool {
+	for _, line := range lines {
+		if line == want {
+			return true
+		}
+	}
+	return false
+}
+
+// For a mapping key whose value may be inline (`disk: {}`) or nested.
+func hasLinePrefix(lines []string, want string) bool {
+	for _, line := range lines {
+		if strings.HasPrefix(line, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// The collector rejects a match_type it does not know, and the rejection is not
+// local: CreateFilterSet errors out of the filesystem scraper, that fails the
+// hostmetrics receiver, and hostmetrics shares a pipeline with otlp — so an
+// invalid value here takes every application metric down with the host ones.
+// `glob` reads like it should work and does not; filterset accepts only these
+// two (internal/filter/filterset/config.go at the pinned v0.155.0).
+var validFilterMatchTypes = map[string]bool{"strict": true, "regexp": true}
+
+func TestHostMetricsFilterConfigIsOneTheCollectorAccepts(t *testing.T) {
+	for _, line := range activeLines(t, "o11y/otel-collector.yml") {
+		if !strings.HasPrefix(line, "match_type:") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(line, "match_type:"))
+		if !validFilterMatchTypes[value] {
+			t.Errorf("match_type %q is not one the collector accepts (strict or regexp);"+
+				" hostmetrics fails to build and takes the otlp pipeline with it", value)
+		}
+	}
+}
+
+// Mount-point filters run before root_path is applied, so they are written from
+// the host's perspective. A /hostfs-prefixed pattern matches nothing and the
+// exclusion silently does not happen — which looks like the filter working,
+// because the panel still renders.
+func TestMountPointExcludesAreWrittenFromTheHostsPerspective(t *testing.T) {
+	inExcludeBlock := false
+	for _, line := range activeLines(t, "o11y/otel-collector.yml") {
+		switch {
+		case strings.HasPrefix(line, "exclude_mount_points:"):
+			inExcludeBlock = true
+		case strings.HasPrefix(line, "exclude_fs_types:"), strings.HasPrefix(line, "network:"):
+			inExcludeBlock = false
+		case inExcludeBlock && strings.HasPrefix(line, "- "):
+			pattern := strings.TrimPrefix(line, "- ")
+			if strings.HasPrefix(pattern, hostfsMountPath+"/") {
+				t.Errorf("mount-point exclude %q is prefixed with %s; filtering happens before"+
+					" root_path is applied, so this can never match", pattern, hostfsMountPath)
+			}
+		}
+	}
+}
+
+// The two tests above read the config as text, which bounds what they can find
+// to mistakes someone already thought of. `match_type: glob` was not one of
+// those: it passed review and passed the line-presence test of the day, and it
+// would have failed the hostmetrics receiver on deploy.
+//
+// scripts/validate-otel-config is the check that does not need to know the
+// mistake in advance — it starts the pinned collector against the real config.
+// But it only runs if CI invokes it, and a workflow that stopped invoking it
+// would leave every test in this file green. So the wiring is pinned too.
+//
+// This asserts the call exists, not that it passed; the job's own exit code is
+// the real signal. What it rules out is the silent version, where the dry-run
+// is dropped and nothing anywhere goes red.
+func TestCIStillRunsTheCollectorDryRun(t *testing.T) {
+	const script = "scripts/validate-otel-config"
+	workflow := readConfig(t, "../../.github/workflows/branch.yml")
+
+	// An exact line, not a substring. `strings.Contains` would be satisfied by a
+	// commented-out step, by a path that merely starts with this one, and by the
+	// script's name appearing in a comment — which is how the golden-instrument
+	// test in this same PR managed to pin nothing at all.
+	invocation := "run: ./" + script
+	found := false
+	for _, line := range strings.Split(workflow, "\n") {
+		if strings.TrimSpace(line) == invocation {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("no active `%s` step in branch.yml — the collector config is back to being"+
+			" checked only as text, and the next match_type: glob ships", invocation)
+	}
+
+	// Worthless if it is not executable: CI invokes it directly rather than
+	// through `bash`, so a lost +x is a job that fails for a reason nobody will
+	// connect back to this file.
+	info, err := os.Stat("../../" + script)
+	if err != nil {
+		t.Fatalf("branch.yml runs %s but it does not exist: %v", script, err)
+	}
+	if info.Mode()&0o111 == 0 {
+		t.Errorf("%s is not executable (%v); CI runs it directly", script, info.Mode())
+	}
+}

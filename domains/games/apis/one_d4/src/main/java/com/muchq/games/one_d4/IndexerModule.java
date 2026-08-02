@@ -25,6 +25,7 @@ import com.muchq.games.one_d4.worker.IndexWorkerLifecycle;
 import com.muchq.platform.http_client.core.HttpClient;
 import com.muchq.platform.http_client.jdk.Jdk11HttpClient;
 import com.muchq.platform.json.JsonUtils;
+import com.muchq.platform.yodel.CustomMetrics;
 import io.micronaut.context.annotation.Bean;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.context.annotation.Factory;
@@ -244,7 +245,8 @@ public class IndexerModule {
       GameFeatureStore gameFeatureStore,
       IndexedPeriodStore periodStore,
       @jakarta.inject.Named("indexExtraction") ExecutorService indexExtractionExecutor,
-      Clock clock) {
+      Clock clock,
+      CustomMetrics metrics) {
     return new IndexWorker(
         chessClient,
         featureExtractor,
@@ -252,7 +254,9 @@ public class IndexerModule {
         gameFeatureStore,
         periodStore,
         indexExtractionExecutor,
-        clock);
+        clock,
+        IndexWorker.DEFAULT_HEARTBEAT_INTERVAL,
+        metrics);
   }
 
   // preDestroy is load-bearing, not hygiene: the poller is a daemon thread, so without it a deploy

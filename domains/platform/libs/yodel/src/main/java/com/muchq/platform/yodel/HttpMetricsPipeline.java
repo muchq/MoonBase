@@ -15,11 +15,13 @@ public final class HttpMetricsPipeline implements AutoCloseable {
   private static final Duration EXPORT_INTERVAL = Duration.ofSeconds(15);
 
   private final HttpServerMetrics metrics;
+  private final CustomMetrics custom;
   private final @Nullable OtlpHttpMetricsExporter exporter;
 
   private HttpMetricsPipeline(
-      HttpServerMetrics metrics, @Nullable OtlpHttpMetricsExporter exporter) {
+      HttpServerMetrics metrics, CustomMetrics custom, @Nullable OtlpHttpMetricsExporter exporter) {
     this.metrics = metrics;
+    this.custom = custom;
     this.exporter = exporter;
   }
 
@@ -31,15 +33,16 @@ public final class HttpMetricsPipeline implements AutoCloseable {
     String serviceName = env.getOrDefault("OTEL_SERVICE_NAME", "");
     HttpServerMetrics metrics =
         new HttpServerMetrics(serviceName, System.currentTimeMillis() * 1_000_000L);
+    CustomMetrics custom = new CustomMetrics();
     String endpoint = env.get("OTEL_EXPORTER_OTLP_ENDPOINT");
     if (endpoint == null || endpoint.isBlank()) {
-      return new HttpMetricsPipeline(metrics, null);
+      return new HttpMetricsPipeline(metrics, custom, null);
     }
     OtlpHttpMetricsExporter exporter =
         new OtlpHttpMetricsExporter(
-            endpoint, resourceAttributes(env, serviceName), metrics, EXPORT_INTERVAL);
+            endpoint, resourceAttributes(env, serviceName), metrics, custom, EXPORT_INTERVAL);
     exporter.start();
-    return new HttpMetricsPipeline(metrics, exporter);
+    return new HttpMetricsPipeline(metrics, custom, exporter);
   }
 
   /**
@@ -62,6 +65,15 @@ public final class HttpMetricsPipeline implements AutoCloseable {
 
   public HttpServerMetrics metrics() {
     return metrics;
+  }
+
+  /**
+   * The service's own instruments. Always present, exported on the same interval as the HTTP family
+   * when an endpoint is configured and recording harmlessly into memory when it is not — so a
+   * caller never has to branch on whether observability is switched on.
+   */
+  public CustomMetrics custom() {
+    return custom;
   }
 
   @Override

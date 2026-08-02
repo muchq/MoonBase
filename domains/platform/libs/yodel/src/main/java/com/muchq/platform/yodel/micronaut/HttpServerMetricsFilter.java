@@ -8,7 +8,6 @@ import io.micronaut.http.annotation.Filter;
 import io.micronaut.http.filter.HttpServerFilter;
 import io.micronaut.http.filter.ServerFilterChain;
 import io.micronaut.http.filter.ServerFilterPhase;
-import jakarta.annotation.PreDestroy;
 import jakarta.inject.Inject;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.reactivestreams.Publisher;
@@ -24,13 +23,18 @@ import reactor.core.publisher.Mono;
 public class HttpServerMetricsFilter implements HttpServerFilter {
   private final HttpMetricsPipeline pipeline;
 
+  /**
+   * Takes the process-wide pipeline from {@link YodelMetricsFactory} rather than building its own,
+   * so the service's custom instruments and this filter's HTTP counts leave on the same exporter.
+   */
   @Inject
-  public HttpServerMetricsFilter() {
-    this(HttpMetricsPipeline.fromEnv());
+  public HttpServerMetricsFilter(HttpMetricsPipeline pipeline) {
+    this.pipeline = pipeline;
   }
 
-  HttpServerMetricsFilter(HttpMetricsPipeline pipeline) {
-    this.pipeline = pipeline;
+  /** For a filter constructed outside a bean context. */
+  public HttpServerMetricsFilter() {
+    this(HttpMetricsPipeline.fromEnv());
   }
 
   public HttpServerMetrics metrics() {
@@ -75,8 +79,15 @@ public class HttpServerMetricsFilter implements HttpServerFilter {
             });
   }
 
-  @PreDestroy
-  void stop() {
-    pipeline.close();
-  }
+  // No @PreDestroy closing the pipeline. It used to be right — the filter built the pipeline in
+  // its own constructor and was the only thing holding it. Now YodelMetricsFactory owns it and
+  // declares preDestroy = "close", so closing it here as well would shut the same exporter down
+  // twice: Micronaut destroys dependents before their dependencies, so the filter's hook would
+  // run first and stop the exporter while the service's own beans are still recording into the
+  // CustomMetrics it drains.
+  //
+  // Pinned by theFilterDeclaresNoDestroyHookForAPipelineItDoesNotOwn, which also covers the
+  // AutoCloseable route — Micronaut closes those with no annotation at all. The redundant flush
+  // is separately defused in OtlpHttpMetricsExporter.close(); the ordering is not, which is why
+  // the hook stays gone rather than being made safe.
 }

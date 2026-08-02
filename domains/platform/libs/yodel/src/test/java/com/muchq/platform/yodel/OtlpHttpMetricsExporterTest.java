@@ -64,4 +64,32 @@ public class OtlpHttpMetricsExporterTest {
     assertThat(payload.at("/resourceMetrics/0/scopeMetrics/0/metrics/0/name").asText())
         .isEqualTo("http_server_requests");
   }
+
+  /**
+   * close() flushes once, however many callers reach it.
+   *
+   * <p>Two owners closing the same exporter used to mean two synchronous POSTs on the shutdown
+   * path, each able to block for REQUEST_TIMEOUT. The second carries no new information either —
+   * the sums are cumulative, so it re-sends the totals the first one already delivered.
+   */
+  @Test
+  public void aSecondCloseSendsNothingFurther() throws Exception {
+    HttpServerMetrics metrics = new HttpServerMetrics("svc", 1_000_000_000L);
+    metrics.recordRequestStart("GET");
+
+    OtlpHttpMetricsExporter exporter =
+        new OtlpHttpMetricsExporter(
+            "http://127.0.0.1:" + server.getAddress().getPort(),
+            Map.of("service.name", "svc"),
+            metrics,
+            // Long enough that the periodic loop never fires; every POST here is a close flush.
+            Duration.ofHours(1));
+    exporter.start();
+
+    exporter.close();
+    assertThat(received.poll(5, TimeUnit.SECONDS)).as("the shutdown flush").isNotNull();
+
+    exporter.close();
+    assertThat(received.poll(1, TimeUnit.SECONDS)).as("and only the one").isNull();
+  }
 }

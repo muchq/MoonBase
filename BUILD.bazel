@@ -53,3 +53,11 @@ config_setting(
         "@platforms//os:linux",
     ],
 )
+
+# Neither .github/ nor scripts/ has a BUILD file, so these belong to the root
+# package. deploy/consolidated's dry-run wiring test reads both, and a go_test
+# only sees what it declares — so the root package has to export them first.
+exports_files([
+    ".github/workflows/branch.yml",
+    "scripts/validate-otel-config",
+])

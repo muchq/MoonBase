@@ -109,6 +109,7 @@ java_library(
         ":model",
         ":queue",
         "//domains/games/libs/chess_com_client",
+        "//domains/platform/libs/yodel",
         artifact("com.fasterxml.jackson.core:jackson-core"),
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("dev.failsafe:failsafe"),
@@ -214,6 +215,7 @@ java_library(
         "//domains/platform/libs/http_client:core",
         "//domains/platform/libs/http_client:jdk11",
         "//domains/platform/libs/json",
+        "//domains/platform/libs/yodel",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("com.zaxxer:HikariCP"),
         artifact("org.jdbi:jdbi3-core"),
@@ -262,6 +264,7 @@ java_binary(
         "//domains/platform/libs/http_client:jdk11",
         "//domains/platform/libs/json",
         "//domains/platform/libs/logging",
+        "//domains/platform/libs/yodel",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("com.zaxxer:HikariCP"),
         artifact("org.jdbi:jdbi3-core"),
@@ -397,6 +400,7 @@ java_test_suite(
         "//domains/games/libs/chess_com_client",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
+        "//domains/platform/libs/yodel",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
@@ -611,6 +615,11 @@ java_test_suite(
     ],
     runtime_deps = [
         "//domains/platform/libs/logging",
+        # The same integration the binary carries. IndexerModule injects yodel's
+        # CustomMetrics into the worker, and the bean that supplies it lives here —
+        # without it a context boot fails on a missing bean rather than on anything
+        # these tests are about.
+        "//domains/platform/libs/yodel:micronaut",
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
@@ -668,6 +677,11 @@ java_test_suite(
     ],
     runtime_deps = [
         "//domains/platform/libs/logging",
+        # The same integration the binary carries. IndexerModule injects yodel's
+        # CustomMetrics into the worker, and the bean that supplies it lives here —
+        # without it a context boot fails on a missing bean rather than on anything
+        # these tests are about.
+        "//domains/platform/libs/yodel:micronaut",
         artifact("org.postgresql:postgresql"),
     ],
     deps = [

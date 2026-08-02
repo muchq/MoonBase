@@ -7,14 +7,76 @@ receivers:
         endpoint: 0.0.0.0:4318
   
   hostmetrics:
+    # The collector runs in a container, so without this every scraper below
+    # measures the container instead of the machine. cpu, memory and network
+    # still produced plausible-looking numbers that way — /proc/stat,
+    # /proc/meminfo and /proc/net/dev exist in any namespace — which is what
+    # made the gap easy to miss. disk and filesystem produced nothing at all:
+    # /proc/diskstats was not the host's, and the container's only mounts are
+    # overlay and tmpfs, which the filesystem scraper filters out. That is the
+    # empty "Disk I/O" and "Disk Usage" panels on the Host page.
+    #
+    # Paired with the `/:/hostfs:ro` bind in docker-compose.observability.yml.
+    # Change one without the other and the panels go quiet again, so
+    # deploy_config_test pins the pair.
+    root_path: /hostfs
     collection_interval: 10s
     scrapers:
       cpu: {}
       memory: {}
       disk: {}
-      filesystem: {}
+      filesystem:
+        # Host root brings the container runtime's own bookkeeping with it. Without
+        # these the usage panel is mostly per-container overlay mounts, which is
+        # cadvisor's job and drowns out the real volumes.
+        #
+        # regexp, not glob: filterset accepts only strict and regexp
+        # (internal/filter/filterset/config.go), and an unrecognised match_type is an
+        # error out of CreateFilterSet — which fails the whole hostmetrics receiver,
+        # and with it the otlp pipeline it shares. Empty disk panels would have been
+        # the least of it.
+        #
+        # Paths are the host's, unprefixed: root_path is applied when the scraper
+        # reads usage, not when it filters, so a /hostfs-prefixed pattern matches
+        # nothing.
+        exclude_mount_points:
+          mount_points:
+            - /var/lib/docker/.*
+            - /var/lib/kubelet/.*
+            - /snap/.*
+            - /run/.*
+            - /dev/.*
+            - /sys/.*
+            - /proc/.*
+          match_type: regexp
+        exclude_fs_types:
+          fs_types:
+            [
+              autofs,
+              binfmt_misc,
+              bpf,
+              cgroup2,
+              configfs,
+              debugfs,
+              devpts,
+              devtmpfs,
+              fusectl,
+              hugetlbfs,
+              iso9660,
+              mqueue,
+              nsfs,
+              overlay,
+              proc,
+              procfs,
+              pstore,
+              securityfs,
+              selinuxfs,
+              squashfs,
+              sysfs,
+              tracefs,
+            ]
+          match_type: strict
       network: {}
-      process: {}
 
 processors:
   batch:

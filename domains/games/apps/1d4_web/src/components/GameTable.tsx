@@ -92,7 +92,7 @@ export default function GameTable({
   onClose,
 }: Props) {
   return (
-    <div className="table-wrap">
+    <div className="table-wrap table-wrap--wide">
       <table>
         <thead>
           <tr>

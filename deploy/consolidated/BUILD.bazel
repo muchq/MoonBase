@@ -10,5 +10,11 @@ go_test(
     data = [
         "Caddyfile",
         "compose.yaml",
+        "docker-compose.observability.yml",
+        "o11y/otel-collector.yml",
+        # Read by TestCIStillRunsTheCollectorDryRun, which checks that CI has not
+        # quietly stopped invoking the collector dry-run.
+        "//:.github/workflows/branch.yml",
+        "//:scripts/validate-otel-config",
     ],
 )
