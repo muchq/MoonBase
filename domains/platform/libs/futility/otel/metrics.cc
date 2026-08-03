@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include "domains/platform/libs/futility/otel/http_instrument_descriptions.h"
 #include "opentelemetry/common/key_value_iterable_view.h"
 #include "opentelemetry/context/context.h"
 #include "opentelemetry/metrics/provider.h"
@@ -49,8 +50,9 @@ void MetricsRecorder::RecordCounter(const std::string& metric_name, int64_t valu
                                     const std::map<std::string, std::string>& attributes) {
   if (!meter_) return;
 
-  auto* counter = FindOrCreate(counters_, metric_name,
-                               [&] { return meter_->CreateUInt64Counter(metric_name); });
+  auto* counter = FindOrCreate(counters_, metric_name, [&] {
+    return meter_->CreateUInt64Counter(metric_name, DescriptionFor(metric_name));
+  });
   if (counter != nullptr) {
     RecordWithAttributes(attributes, [&](auto&&... labels) {
       counter->Add(static_cast<uint64_t>(value), std::forward<decltype(labels)>(labels)...);
@@ -66,8 +68,9 @@ void MetricsRecorder::RecordLatency(const std::string& metric_name,
   // Cache key is the instrument name, so a latency "x" (instrument
   // x_microseconds) can never alias a distribution "x".
   const std::string instrument_name = metric_name + "_microseconds";
-  auto* histogram = FindOrCreate(histograms_, instrument_name,
-                                 [&] { return meter_->CreateUInt64Histogram(instrument_name); });
+  auto* histogram = FindOrCreate(histograms_, instrument_name, [&] {
+    return meter_->CreateUInt64Histogram(instrument_name, DescriptionFor(instrument_name));
+  });
   if (histogram != nullptr) {
     RecordWithAttributes(attributes, [&](auto&&... labels) {
       histogram->Record(static_cast<uint64_t>(duration.count()),
@@ -83,8 +86,9 @@ void MetricsRecorder::RecordDistribution(const std::string& metric_name, double 
   // are non-negative quantities by contract, so drop anything else.
   if (!std::isfinite(value) || value < 0.0) return;
 
-  auto* histogram = FindOrCreate(histograms_, metric_name,
-                                 [&] { return meter_->CreateUInt64Histogram(metric_name); });
+  auto* histogram = FindOrCreate(histograms_, metric_name, [&] {
+    return meter_->CreateUInt64Histogram(metric_name, DescriptionFor(metric_name));
+  });
   if (histogram != nullptr) {
     RecordWithAttributes(attributes, [&](auto&&... labels) {
       histogram->Record(static_cast<uint64_t>(value), std::forward<decltype(labels)>(labels)...);
@@ -96,8 +100,11 @@ void MetricsRecorder::RecordGauge(const std::string& metric_name, double value,
                                   const std::map<std::string, std::string>& attributes) {
   if (!meter_) return;
 
+  // Cache key stays the stem the caller passed; the instrument, and so the
+  // description lookup, take the _gauge name the collector actually sees.
+  const std::string instrument_name = metric_name + "_gauge";
   auto* gauge = FindOrCreate(gauges_, metric_name, [&] {
-    return meter_->CreateInt64UpDownCounter(metric_name + "_gauge");
+    return meter_->CreateInt64UpDownCounter(instrument_name, DescriptionFor(instrument_name));
   });
   if (gauge != nullptr) {
     RecordWithAttributes(attributes, [&](auto&&... labels) {

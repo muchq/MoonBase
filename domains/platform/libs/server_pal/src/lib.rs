@@ -232,10 +232,13 @@ async fn http_metrics_middleware(req: Request, next: Next) -> Response {
     let status = resp.status().as_u16();
 
     if status < 400 {
+        // The range is spelled with an ASCII hyphen, matching yodel and
+        // futility. An en-dash reads identically here and exports as a
+        // different string, which is the conflict otel_contract now pins.
         http_counter(
             &HTTP_SUCCESS,
             "http_server_requests_success",
-            "HTTP requests completed successfully (2xx–3xx)",
+            "HTTP requests completed successfully (2xx-3xx)",
         )
         .add(1, &attrs);
     } else {

@@ -1,8 +1,12 @@
 load("//bazel/rules:java.bzl", "artifact", "java_library", "java_test_suite")
 
 # Read as text by //domains/platform/libs/otel_contract, which pins this rail's
-# latency bucket bounds equal to futility/otel's and server_pal's.
-exports_files(["src/main/java/com/muchq/platform/yodel/HttpServerMetrics.java"])
+# latency bucket bounds and http_server_* descriptions equal to futility/otel's
+# and server_pal's.
+exports_files([
+    "src/main/java/com/muchq/platform/yodel/HttpServerMetrics.java",
+    "src/main/java/com/muchq/platform/yodel/OtlpJsonEncoder.java",
+])
 
 java_library(
     name = "yodel",

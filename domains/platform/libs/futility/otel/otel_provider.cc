@@ -5,6 +5,7 @@
 #include "opentelemetry/exporters/otlp/otlp_http_metric_exporter.h"
 #include "opentelemetry/exporters/otlp/otlp_http_metric_exporter_factory.h"
 #include "opentelemetry/exporters/otlp/otlp_http_metric_exporter_options.h"
+#include "opentelemetry/metrics/noop.h"
 #include "opentelemetry/metrics/provider.h"
 #include "opentelemetry/sdk/metrics/aggregation/aggregation_config.h"
 #include "opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader.h"
@@ -22,10 +23,11 @@
 namespace futility::otel {
 
 // The only way to give a histogram explicit bounds in opentelemetry-cpp: the
-// API's CreateUInt64Histogram takes a name and nothing else, so a view on the
-// provider is what turns kHttpLatencyBucketBoundsMicros into the layout the
-// SDK actually aggregates into. Without it every histogram silently gets the
-// millisecond-shaped SDK defaults (#1286).
+// API's CreateUInt64Histogram takes a name, a description and a unit, but no
+// boundaries, so a view on the provider is what turns
+// kHttpLatencyBucketBoundsMicros into the layout the SDK actually aggregates
+// into. Without it every histogram silently gets the millisecond-shaped SDK
+// defaults (#1286).
 //
 // Matched on the name suffix rather than on http_server_request_duration_
 // microseconds alone. MetricsRecorder::RecordLatency appends _microseconds to
@@ -56,9 +58,17 @@ void RegisterLatencyBucketView(opentelemetry::sdk::metrics::MeterProvider& meter
   // Empty view name keeps the instrument's own name (meter.cc only overrides
   // when the view names something). Renaming the stream here would point every
   // service's duration series at a name prom_proxy does not query.
+  //
+  // The description is empty for the same reason and by the same rule. This
+  // view matches every *_microseconds histogram, so any description written
+  // here is stamped onto all of them — it cannot be right for more than one.
+  // Leaving it empty lets each instrument keep the description it declared,
+  // which for the shared rails is the one pinned in
+  // http_instrument_descriptions.h; a sentence here instead would overwrite
+  // that and put this rail back in conflict with yodel and server_pal.
   auto view = opentelemetry::sdk::metrics::ViewFactory::Create(
-      /*name=*/"", "Latency in microseconds, bucketed for 100us to 10s",
-      opentelemetry::sdk::metrics::AggregationType::kHistogram, histogram_config);
+      /*name=*/"", /*description=*/"", opentelemetry::sdk::metrics::AggregationType::kHistogram,
+      histogram_config);
 
   meter_provider.AddView(std::move(instrument_selector), std::move(meter_selector),
                          std::move(view));
@@ -114,9 +124,14 @@ OtelProvider::OtelProvider(const OtelConfig& config) : metrics_enabled_(config.e
 
 OtelProvider::~OtelProvider() {
   if (metrics_enabled_ && meter_provider_) {
-    // Reset global provider to default
+    // Restore the no-op provider, not an empty pointer. The API guarantees
+    // GetMeterProvider() never returns nullptr, and MetricsRecorder's
+    // constructor dereferences it without checking — so clearing the singleton
+    // turns any recorder built after this destructor into a crash rather than
+    // into the no-op the guarantee promises.
     opentelemetry::metrics::Provider::SetMeterProvider(
-        std::shared_ptr<opentelemetry::v1::metrics::MeterProvider>{});
+        std::shared_ptr<opentelemetry::v1::metrics::MeterProvider>(
+            new opentelemetry::metrics::NoopMeterProvider()));
     meter_provider_.reset();
   }
 }

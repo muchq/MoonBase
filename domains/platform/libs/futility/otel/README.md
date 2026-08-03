@@ -13,12 +13,14 @@ This module provides:
   `http_server_request_duration`, `http_server_requests_success` /
   `_failure`), transport-agnostic so every service exports the same names
   and labels
+- **http_instrument_descriptions.h**: The descriptions those shared
+  instruments are exported with, pinned equal to the Java and Rust rails
 
 ## Quick Start
 
 ```cpp
-#include "cpp/futility/otel/otel_provider.h"
-#include "cpp/futility/otel/metrics.h"
+#include "domains/platform/libs/futility/otel/otel_provider.h"
+#include "domains/platform/libs/futility/otel/metrics.h"
 
 using namespace futility::otel;
 
@@ -170,12 +172,39 @@ http_metrics.RecordRequestStart("/api/users", "GET");
 http_metrics.RecordRequestComplete("/api/users", "GET", 200, duration_us);
 ```
 
+## Instrument Descriptions
+
+The `http_server_*` instruments are reported by services in all three
+languages, and every one of them lands in the same collector. The collector
+merges series by instrument name and keeps the **first** description it sees,
+logging
+
+```
+Instrument description conflict, using existing
+```
+
+for every later one that disagrees — once per export interval, for as long as
+both services run. An empty description conflicts with a non-empty one just as
+loudly, so declining to describe an instrument is not a way to stay out of it.
+
+`MetricsRecorder` therefore looks each instrument up in
+`http_instrument_descriptions.h` at creation, and
+`RegisterLatencyBucketView` leaves the view's description empty so it does not
+stamp one sentence over every `*_microseconds` histogram it matches.
+Service-defined instruments get no description, which is correct: only one
+service reports them, so there is nothing to conflict with.
+
+The table is pinned equal to yodel's and server_pal's by
+[`//domains/platform/libs/otel_contract`](../../otel_contract). Changing a
+description means changing it in all three.
+
 ## Bazel Targets
 
 ```python
 deps = [
-    "//cpp/futility/otel:otel_provider",
-    "//cpp/futility/otel:metrics",
-    "//cpp/futility/otel:http_metrics",
+    "//domains/platform/libs/futility/otel:otel_provider",
+    "//domains/platform/libs/futility/otel:metrics",
+    "//domains/platform/libs/futility/otel:http_metrics",
+    "//domains/platform/libs/futility/otel:http_instrument_descriptions",
 ]
 ```
