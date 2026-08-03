@@ -872,6 +872,83 @@ TEST_F(GolfHubStreamFixture, ResumingOnAFreshInstanceReplaysChatHistory) {
   EXPECT_GT(history->messages[1].messageId, history->messages[0].messageId);
 }
 
+// The boot-time twin of ActiveSignalRefreshesHeldRoom's contract: a
+// channel-active with nothing new in the rows projects nothing. A fresh
+// instance restores members from the same rows the catch-up re-reads, so
+// its first LISTEN-landed signal must be a no-op — when the restore
+// instead seeded presence as disconnected, every boot manufactured a
+// memory-vs-rows mismatch and the "only when rows moved" guard projected
+// a roomState that could land inside a resuming seat's hydration,
+// between its snapshot and its chat replay (#1276 sighting #4, on
+// #1293's CI run of StatsSurviveARestart). The seed must copy the row in
+// both polarities — alice crashed connected, carol parked disconnected —
+// so neither "seed false" nor "seed true" can hide in a one-sided room.
+TEST_F(GolfHubStreamFixture, BootCatchUpProjectsNothingWhenRowsNeverMoved) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  auto carol = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value() && carol.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
+  ASSERT_TRUE(carol->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
+  // carol's clean close parks her seat and writes her row disconnected;
+  // alice's park broadcast is the proof the flip landed before the
+  // "crash". alice and bob crash with the process, rows still connected.
+  carol->stream.Close();
+  auto parked = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(parked.has_value());
+  for (const auto& player : parked->as_roomState_or_null()->players) {
+    if (player.playerId == carol->player_id) EXPECT_FALSE(player.connected);
+  }
+  store_->Flush();
+
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  auto resumed = OpenSeatVia(*instance->client, bob->resume_token);
+  ASSERT_TRUE(resumed.has_value());
+
+  // The documented hydration order, strictly — the frames the injected
+  // projection was observed splitting.
+  auto ready = NextEvent(resumed->stream);
+  ASSERT_TRUE(ready.has_value());
+  ASSERT_EQ(std::string(ready->case_name()), "sessionReady");
+  auto snapshot = NextEvent(resumed->stream);
+  ASSERT_TRUE(snapshot.has_value());
+  ASSERT_EQ(std::string(snapshot->case_name()), "roomState");
+  // The snapshot projects the restored seeds: row truth in both
+  // directions, not a blanket value.
+  const auto* lobby = snapshot->as_roomState_or_null();
+  ASSERT_NE(lobby, nullptr);
+  ASSERT_EQ(lobby->players.size(), 3u);
+  for (const auto& player : lobby->players) {
+    EXPECT_EQ(player.connected, player.playerId != carol->player_id)
+        << "restored presence for " << player.playerId << " does not match its row";
+  }
+  auto replay = NextEvent(resumed->stream);
+  ASSERT_TRUE(replay.has_value());
+  ASSERT_EQ(std::string(replay->case_name()), "roomChatHistory");
+
+  // The LISTEN-landed signals, called directly so no listener timing is
+  // in play. Neither alice nor carol resumed here — their rows are what
+  // a crashed instance leaves behind — yet nothing has moved since the
+  // restore read these same rows, so both catch-ups must stay quiet.
+  instance->handler->OnChannelActive(RoomChannel(room_id));
+  instance->handler->OnChannelActive(ChatChannel(room_id));
+  auto leftover = resumed->stream.Receive(std::chrono::milliseconds(50));
+  EXPECT_TRUE(!leftover.ok() || !leftover->has_value())
+      << "boot catch-up projected a frame though no row moved";
+}
+
 TEST_F(GolfHubStreamFixture, JoinHistoryIsCappedAtTheRetentionLimit) {
   auto alice = OpenSeat();
   ASSERT_TRUE(alice.has_value());

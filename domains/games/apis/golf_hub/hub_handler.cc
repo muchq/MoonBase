@@ -178,10 +178,16 @@ absl::Status HubHandler::RestoreFromStore() {
   const std::lock_guard<std::mutex> lock(mu_);
   for (const std::string& room_id : snapshot->rooms) rooms_[room_id];
   for (const HubStore::MemberRow& row : snapshot->members) {
-    // Sockets did not survive the restart: everyone restores
-    // disconnected and flips back on resume.
+    // Presence seeds from the row, the fleet truth ReconcileRoomLocked
+    // already adopts on every wake. Seeding false here instead made the
+    // first channel-active after a boot see phantom movement and inject
+    // a roomState into a resuming seat's hydration (#1276 sighting #4).
+    // A member whose socket died with the old process reads connected
+    // until they resume or leave; no one owns flipping a crashed
+    // instance's rows, and inventing a local answer just diverges from
+    // what every other instance projects.
     Member member;
-    member.connected = false;
+    member.connected = row.connected;
     member.games_played = row.games_played;
     member.games_won = row.games_won;
     member.total_score = row.total_score;

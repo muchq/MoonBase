@@ -238,12 +238,20 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
 
   bool WaitForListenerCount(const std::string& room_id, int count) {
     pg::Client db(url_);
-    const std::string statement = "LISTEN \"" + RoomChannel(room_id) + "\"";
+    // pg_stat_activity.query is a backend's *last* statement. The poll
+    // thread LISTENs a room's two channels in sorted order (chat before
+    // room), but a wake between AttachListener's two Listen() calls can
+    // split them across passes and leave the chat LISTEN as the one that
+    // sticks. Either statement therefore counts: both are only ever
+    // wanted together, so a backend showing one has the other active or
+    // lands it within the same pass.
+    const std::string room_statement = "LISTEN \"" + RoomChannel(room_id) + "\"";
+    const std::string chat_statement = "LISTEN \"" + ChatChannel(room_id) + "\"";
     for (int i = 0; i < 50; ++i) {
       auto result = db.Exec(
           "SELECT count(*) FROM pg_stat_activity"
-          " WHERE datname = current_database() AND query = $1",
-          {statement});
+          " WHERE datname = current_database() AND query IN ($1, $2)",
+          {room_statement, chat_statement});
       if (result.ok() && result->Get(0, 0).has_value() &&
           std::atoi(result->Get(0, 0)->c_str()) >= count) {
         return true;
@@ -710,8 +718,8 @@ TEST_F(PgGolfHubFixture, ConnectedFlagFollowsPresence) {
     EXPECT_TRUE(rows.members[0].connected);
   }
 
-  // Across a restart the row keeps its last written value; the member
-  // restores disconnected in memory and flips the row back on resume.
+  // Across a restart the row keeps its last written value, the restore
+  // adopts it as presence truth, and the resume re-affirms it.
   const std::string token = alice->resume_token;
   RestartHub();
   auto alice_back = OpenSeat(token);
