@@ -122,8 +122,8 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// For main's SIGTERM path: Drain, then transport Stop.
   Registry& registry() { return registry_; }
 
-  /// Boot-time restore of the store's snapshot: rooms, members (everyone
-  /// disconnected until they resume), and games. Call before the
+  /// Boot-time restore of the store's snapshot: rooms, members (presence
+  /// seeded from their rows), and games. Call before the
   /// transport serves; no-op without a store. Undecodable rows were
   /// already dropped (loudly) by the store — an error here means the
   /// snapshot itself couldn't be read.
