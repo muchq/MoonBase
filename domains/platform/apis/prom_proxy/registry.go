@@ -182,9 +182,12 @@ func tsFixed(query string) customTimeseriesDef {
 }
 
 // expandCustomTimeseries flattens a service's Trends descriptors into the
-// panel keys a timeseries response actually carries.
+// panel keys a timeseries response actually carries. A toggleable entry
+// contributes two, so the capacity hint doubles the map's own length —
+// only ever a hint, but len(custom) undercounts by up to 2x whenever the
+// registry is mostly toggleable entries, which is the common case.
 func expandCustomTimeseries(custom map[string]customTimeseriesDef, step string) map[string]string {
-	out := make(map[string]string, len(custom))
+	out := make(map[string]string, len(custom)*2)
 	for key, def := range custom {
 		for panelKey, query := range def.panels(key, step) {
 			out[panelKey] = query
@@ -281,7 +284,13 @@ var serviceRegistry = map[string]serviceEntry{
 		// only ever asked for the rate panel keeps reading the same series
 		// name it always did.
 		CustomTimeseries: map[string]customTimeseriesDef{
-			"sessions_active":    tsFixed(`sum(stream_sessions_active_gauge)`),
+			"sessions_active": tsFixed(`sum(stream_sessions_active_gauge)`),
+			// Fixed rather than tsCounter(stream_sessions_total): this key
+			// predates the toggle and is already a count, over a plain 5m
+			// window rather than the chart's own step. Making it toggleable
+			// would rename it away from "session_starts" (tsCounter's base
+			// key becomes both the _rate and _count panel name), breaking
+			// the one client-facing name this key has ever had.
 			"session_starts":     tsFixed(`sum(increase(stream_sessions_total[5m]))`),
 			"command":            tsCounter(`stream_commands_total`),
 			"event":              tsCounter(`stream_events_total`),

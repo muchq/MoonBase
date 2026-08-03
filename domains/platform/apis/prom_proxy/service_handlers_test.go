@@ -60,6 +60,31 @@ func TestRegistry_CustomTimeseriesKeysDoNotShadowStandardSeries(t *testing.T) {
 	}
 }
 
+// Two CustomTimeseries entries can collide on their own without ever
+// naming a standard series: a fixed def literally named "foo_rate" beside
+// a toggleable def with base "foo" both expand to the same "foo_rate"
+// panel. expandCustomTimeseries's map assignment is last-wins on that, so
+// one def's query silently overwrites the other's rather than erroring —
+// exactly the footgun portrait's cache_hit_rate (fixed) sits next to were
+// anyone to add a toggleable "cache_hit" counter beside it.
+//
+// Counting keys in vs. panels out is what catches this: a keys() diff can't
+// tell "two defs produced the same key" from "one key, as expected", but a
+// collision always drops the total panel count below the sum of what each
+// def contributes on its own.
+func TestRegistry_CustomTimeseriesPanelKeysAreUniquePerService(t *testing.T) {
+	for _, name := range serviceOrder {
+		custom := serviceRegistry[name].CustomTimeseries
+		wantPanels := 0
+		for key, def := range custom {
+			wantPanels += len(def.panels(key, "5m"))
+		}
+		gotPanels := len(expandCustomTimeseries(custom, "5m"))
+		assert.Equal(t, wantPanels, gotPanels,
+			"service %q has two CustomTimeseries entries whose panels collide", name)
+	}
+}
+
 // Any reference to a cache metric, with whatever label selector follows it.
 //
 // Deliberately broader than cache_hits_total|cache_misses_total: a selector
@@ -579,6 +604,42 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_RequestCountBucketsByTheRang
 	}
 	require.NotNil(t, requestCount, "request_count missing from the response")
 	require.Len(t, requestCount.Values, 2, "the mock's fixture didn't answer — the handler built a different query than expected")
+}
+
+// The failure-counter analogue of the request_count test above: error_count
+// windows by the range's own step too, and it's a different selector
+// (http_server_requests_failure_total, not _total) from request_count, so
+// a copy-paste that left it reading the wrong counter would still pass a
+// test that only checked the window.
+func TestMetricsHandler_GetServiceMetricsTimeSeries_ErrorCountBucketsByTheRangesStep(t *testing.T) {
+	countQuery := `sum(increase(http_server_requests_failure_total{service_name="golf_hub"}[1h]))`
+	handler := &MetricsHandler{
+		promClient: &mockPrometheusClient{
+			queryRangeResponses: map[string]*QueryResponse{
+				countQuery: rangeResponse("error_count"),
+			},
+		},
+	}
+
+	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub/timeseries/7d", nil)
+	req.SetPathValue("name", "golf_hub")
+	req.SetPathValue("range", "7d")
+	w := httptest.NewRecorder()
+
+	handler.GetServiceMetricsTimeSeries(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response TimeSeriesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+	var errorCount *TimeSeries
+	for i := range response.Series {
+		if response.Series[i].MetricName == "error_count" {
+			errorCount = &response.Series[i]
+		}
+	}
+	require.NotNil(t, errorCount, "error_count missing from the response")
+	require.Len(t, errorCount.Values, 2, "the mock's fixture didn't answer — the handler built a different query than expected")
 }
 
 // No ?view= on this route at all: request_rate and request_count both come
