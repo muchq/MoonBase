@@ -288,7 +288,22 @@ services:
           cpus: '0.5'
           memory: 512M
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      # The base (@java_base, azul/zulu-openjdk) has bash, head and grep but no
+      # curl and no wget, so the probe talks HTTP over bash's /dev/tcp rather
+      # than shelling out to a client. The previous curl form never ran at all:
+      # every attempt exited on "executable file not found", so the container
+      # sat permanently unhealthy while serving fine.
+      #
+      # `timeout` bounds the probe itself. Compose's `timeout:` below only
+      # decides when Docker calls the attempt failed — it does not kill the
+      # process, so a probe blocked on a server that accepts and then stalls
+      # would otherwise leak a bash and an open socket every interval.
+      #
+      # The status line is matched rather than just the connect, which catches a
+      # container whose HTTP stack is up but misrouting. It is not a database
+      # check: /health answers 200 with {"status":"DOWN"} when Postgres is
+      # unreachable, so only a non-2xx — or no answer at all — fails this.
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
       interval: 30s
       timeout: 5s
       retries: 3

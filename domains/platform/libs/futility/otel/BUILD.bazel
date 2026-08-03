@@ -1,8 +1,12 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
 # Read as text by //domains/platform/libs/otel_contract, which pins this rail's
-# latency bucket bounds equal to yodel's and server_pal's.
-exports_files(["otel_provider.h"])
+# latency bucket bounds and http_server_* descriptions equal to yodel's and
+# server_pal's.
+exports_files([
+    "http_instrument_descriptions.h",
+    "otel_provider.h",
+])
 
 cc_library(
     name = "otel_provider",
@@ -17,12 +21,22 @@ cc_library(
     ],
 )
 
+# The descriptions the shared http_server_* instruments are exported with.
+# Header-only and dependency-free so both the recorder that creates the
+# instruments and any test can name one declaration site.
+cc_library(
+    name = "http_instrument_descriptions",
+    hdrs = ["http_instrument_descriptions.h"],
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "metrics",
     srcs = ["metrics.cc"],
     hdrs = ["metrics.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":http_instrument_descriptions",
         ":otel_provider",
         "@com_google_absl//absl/strings",
         "@opentelemetry-cpp//api",
@@ -60,6 +74,20 @@ cc_test(
     size = "small",
     srcs = ["otel_provider_test.cc"],
     deps = [
+        ":otel_provider",
+        "@googletest//:gtest_main",
+        "@opentelemetry-cpp//exporters/memory:in_memory_metric_data",
+        "@opentelemetry-cpp//exporters/memory:in_memory_metric_exporter_factory",
+    ],
+)
+
+cc_test(
+    name = "http_instrument_descriptions_test",
+    size = "small",
+    srcs = ["http_instrument_descriptions_test.cc"],
+    deps = [
+        ":http_instrument_descriptions",
+        ":metrics",
         ":otel_provider",
         "@googletest//:gtest_main",
         "@opentelemetry-cpp//exporters/memory:in_memory_metric_data",

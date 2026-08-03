@@ -18,6 +18,7 @@ package deploy_test
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -340,4 +341,177 @@ func TestCIStillRunsTheCollectorDryRun(t *testing.T) {
 	if info.Mode()&0o111 == 0 {
 		t.Errorf("%s is not executable (%v); CI runs it directly", script, info.Mode())
 	}
+}
+
+// A healthcheck probe has to exist inside the image it runs in.
+//
+// The images built by //bazel/rules:oci.bzl carry their base plus one binary,
+// and no base we use installs an HTTP client — there is no curl and no wget in
+// any of them. A probe that shells out to either does not fail the way a sick
+// container fails. It fails on the first attempt and every attempt after it,
+// with
+//
+//	OCI runtime exec failed: exec: "curl": executable file not found in $PATH
+//
+// which Docker counts as a failed probe like any other. one_d4 sat permanently
+// unhealthy that way while serving traffic normally, and any depends_on
+// waiting on service_healthy would have blocked on it forever.
+//
+// Nothing catches this earlier: `docker compose config` validates the YAML, not
+// the PATH, and no test in the service's own language can see the image it
+// ships in. Probes here talk HTTP over bash's /dev/tcp instead — a redirection
+// the shell implements itself, so it cannot be missing the way a binary can.
+var binariesOurImagesLack = []*regexp.Regexp{
+	regexp.MustCompile(`\bcurl\b`),
+	regexp.MustCompile(`\bwget\b`),
+}
+
+func TestHealthchecksDoNotShellOutToBinariesOurImagesLack(t *testing.T) {
+	probes := healthcheckProbes(t, "compose.yaml")
+
+	// Guards the guard. Every one of these has been the state of this test at
+	// some point during review: no services parsed, services parsed but no
+	// healthcheck recognised, and — the one that shipped — a healthcheck found
+	// whose command lines were never read.
+	if len(probes) == 0 {
+		t.Fatal("parsed no healthchecks out of compose.yaml; this test is reading nothing")
+	}
+	if _, ok := probes["one_d4"]; !ok {
+		t.Fatal("no healthcheck found for one_d4, which has one; the parser has gone stale")
+	}
+
+	for service, probe := range probes {
+		// Third-party images ship their own tooling — postgres has pg_isready.
+		// The constraint is specific to what oci.bzl puts in an image.
+		if !strings.Contains(probe.image, "ghcr.io/muchq/") {
+			continue
+		}
+		for _, line := range probe.lines {
+			for _, binary := range binariesOurImagesLack {
+				if binary.MatchString(line) {
+					t.Errorf("%s's healthcheck invokes %s, which is not in the image: %q\n"+
+						"Every probe would fail on \"executable file not found\" while the "+
+						"service is healthy. Use bash's /dev/tcp, as one_d4 does.",
+						service, binary, line)
+				}
+			}
+		}
+	}
+}
+
+// A healthcheck must be readable where it is written.
+//
+// The guard above reads the probe command as text, so a healthcheck assembled
+// from a YAML anchor elsewhere in the file is one it cannot see: the merge key
+// is all that appears here, and it names no binary at all. Rather than grow a
+// YAML evaluator, refuse the construct — the probes are three lines each and
+// have no reason to be shared.
+func TestHealthchecksAreWrittenInPlaceRatherThanMerged(t *testing.T) {
+	for service, probe := range healthcheckProbes(t, "compose.yaml") {
+		for _, line := range probe.lines {
+			if strings.HasPrefix(line, "<<:") || strings.Contains(line, " *") {
+				t.Errorf("%s's healthcheck is merged from an anchor (%q). Write it inline: the "+
+					"binary guard reads these lines as text and an alias hides the command.",
+					service, line)
+			}
+		}
+	}
+}
+
+type healthcheckProbe struct {
+	image string
+	lines []string
+}
+
+// healthcheckProbes returns each service's healthcheck block, keyed by service.
+//
+// The lines are every line of the block, not just the one starting `test:`.
+// Compose accepts the command as an inline list, as a block sequence, or as a
+// folded scalar, and only the first keeps the command on the `test:` line —
+// `docker compose config` itself normalises to the second. An earlier version
+// of this read only `test:`-prefixed lines and so passed on the exact form the
+// tooling emits, which is the kind of hole that makes a guard worse than none.
+func healthcheckProbes(t *testing.T, name string) map[string]healthcheckProbe {
+	t.Helper()
+	probes := map[string]healthcheckProbe{}
+
+	for service, block := range composeServiceLines(t, name) {
+		image := ""
+		var lines []string
+		healthcheckIndent := -1
+
+		for _, raw := range block {
+			trimmed := strings.TrimSpace(raw)
+			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			indent := len(raw) - len(strings.TrimLeft(raw, " "))
+
+			if strings.HasPrefix(trimmed, "image:") {
+				image = trimmed
+			}
+			if trimmed == "healthcheck:" {
+				healthcheckIndent = indent
+				continue
+			}
+			if healthcheckIndent < 0 {
+				continue
+			}
+			if indent <= healthcheckIndent {
+				healthcheckIndent = -1 // The next key ends the block.
+				continue
+			}
+			lines = append(lines, trimmed)
+		}
+
+		if len(lines) > 0 {
+			probes[service] = healthcheckProbe{image: image, lines: lines}
+		}
+	}
+	return probes
+}
+
+// composeServiceLines returns each compose service's raw lines, keyed by
+// service name. Raw rather than trimmed: the healthcheck block is delimited by
+// indentation, so trimming here would destroy the only thing that marks where
+// it ends.
+func composeServiceLines(t *testing.T, name string) map[string][]string {
+	t.Helper()
+	services := map[string][]string{}
+	current := ""
+	var block []string
+
+	flush := func() {
+		if current != "" && len(block) > 0 {
+			services[current] = block
+		}
+		block = nil
+	}
+
+	inServices := false
+	for _, line := range strings.Split(readConfig(t, name), "\n") {
+		if !strings.HasPrefix(line, " ") && strings.TrimSpace(line) != "" {
+			flush()
+			current = ""
+			inServices = strings.TrimSpace(line) == "services:"
+			continue
+		}
+		if !inServices {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		// A two-space-indented key starts the next service. Comments at that
+		// indentation are not keys and must not end the block.
+		if !strings.HasPrefix(line, "   ") && !strings.HasPrefix(trimmed, "#") {
+			flush()
+			current = strings.TrimSuffix(trimmed, ":")
+			continue
+		}
+		block = append(block, line)
+	}
+	flush()
+	return services
 }
