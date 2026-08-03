@@ -85,6 +85,13 @@ Before committing anything non-trivial, run a self-review panel:
   dies mid-run leaves deliberately-broken code in the tree; and a dirty tree
   invites a commit that ships the mutation. An agent that wants to know whether
   a test bites reports that as a finding instead of finding out.
+- **Enforce read-only structurally, not by instruction.** Convene panels on an
+  agent type without edit or write tools, and keep write-shaped questions out
+  of the briefs — "verify this test fails on the old code" is an instruction
+  to mutate the tree no matter how firmly the same brief says never to. The
+  rule above was already written when #1297's panel got write-capable agents
+  with exactly such briefs; every predicted failure followed, including the
+  mystery mutant and edits silently reverted under a live session.
 - **Each agent hunts, then tries to refute its own findings** before reporting.
   This is what keeps the signal-to-noise usable.
 - **Verify the survivors yourself** before acting on them. Agents are sometimes
