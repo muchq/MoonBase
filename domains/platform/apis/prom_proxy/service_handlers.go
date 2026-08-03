@@ -180,8 +180,12 @@ func (h *MetricsHandler) GetServiceMetricsTimeSeries(w http.ResponseWriter, r *h
 		Series:    []TimeSeries{},
 	}
 
-	queries := standardTimeseriesQueries(name)
-	for metricName, query := range entry.CustomTimeseries {
+	// request_rate/request_count and every toggleable Trends chart's
+	// _rate/_count pair all come back unconditionally — no ?view= here, see
+	// standardTimeseriesQueries for why a toggled meaning on one shared key
+	// is a deploy hazard this avoids.
+	queries := standardTimeseriesQueries(name, step)
+	for metricName, query := range expandCustomTimeseries(entry.CustomTimeseries, step) {
 		queries[metricName] = query
 	}
 

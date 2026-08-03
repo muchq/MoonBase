@@ -49,11 +49,39 @@ func TestRegistry_OrderAndEntriesAgree(t *testing.T) {
 // authors to avoid this; this pins it.
 func TestRegistry_CustomTimeseriesKeysDoNotShadowStandardSeries(t *testing.T) {
 	for _, name := range serviceOrder {
-		standard := standardTimeseriesQueries(name)
-		for key := range serviceRegistry[name].CustomTimeseries {
+		standard := standardTimeseriesQueries(name, "5m")
+		// Expanded panel keys, not the def map's own keys: a toggleable
+		// entry's map key ("command") never appears in a response — only its
+		// _rate/_count panels do, and those are what could collide.
+		for key := range expandCustomTimeseries(serviceRegistry[name].CustomTimeseries, "5m") {
 			_, shadows := standard[key]
 			assert.False(t, shadows, "service %q custom series %q shadows a standard series", name, key)
 		}
+	}
+}
+
+// Two CustomTimeseries entries can collide on their own without ever
+// naming a standard series: a fixed def literally named "foo_rate" beside
+// a toggleable def with base "foo" both expand to the same "foo_rate"
+// panel. expandCustomTimeseries's map assignment is last-wins on that, so
+// one def's query silently overwrites the other's rather than erroring —
+// exactly the footgun portrait's cache_hit_rate (fixed) sits next to were
+// anyone to add a toggleable "cache_hit" counter beside it.
+//
+// Counting keys in vs. panels out is what catches this: a keys() diff can't
+// tell "two defs produced the same key" from "one key, as expected", but a
+// collision always drops the total panel count below the sum of what each
+// def contributes on its own.
+func TestRegistry_CustomTimeseriesPanelKeysAreUniquePerService(t *testing.T) {
+	for _, name := range serviceOrder {
+		custom := serviceRegistry[name].CustomTimeseries
+		wantPanels := 0
+		for key, def := range custom {
+			wantPanels += len(def.panels(key, "5m"))
+		}
+		gotPanels := len(expandCustomTimeseries(custom, "5m"))
+		assert.Equal(t, wantPanels, gotPanels,
+			"service %q has two CustomTimeseries entries whose panels collide", name)
 	}
 }
 
@@ -135,7 +163,7 @@ func allQueriesFor(entry serviceEntry) []string {
 	for _, def := range entry.CustomScalars {
 		queries = append(queries, def.AllQueries()...)
 	}
-	for _, query := range entry.CustomTimeseries {
+	for _, query := range expandCustomTimeseries(entry.CustomTimeseries, "5m") {
 		queries = append(queries, query)
 	}
 	return queries
@@ -149,9 +177,14 @@ func allQueriesFor(entry serviceEntry) []string {
 func TestRegistry_PortraitCacheQueriesUseTheStandardFamily(t *testing.T) {
 	portrait := serviceRegistry["portrait"]
 
-	// The panels the UI renders by key.
+	// The panels the UI actually receives: cache_hit_rate is fixed-form and
+	// keeps its def-map key; cache_operations is toggleable, so its def-map
+	// key ("cache_operations") never reaches a response — only its expanded
+	// _rate/_count panels do.
 	require.Contains(t, portrait.CustomTimeseries, "cache_hit_rate")
-	require.Contains(t, portrait.CustomTimeseries, "cache_operations_rate")
+	panels := expandCustomTimeseries(portrait.CustomTimeseries, "5m")
+	require.Contains(t, panels, "cache_operations_rate")
+	require.Contains(t, panels, "cache_operations_count")
 
 	queries := allQueriesFor(portrait)
 	require.NotEmpty(t, queries)
@@ -454,19 +487,262 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_StandardPlusCustom(t *testin
 		assert.GreaterOrEqual(t, series.MetricName, previous)
 		previous = series.MetricName
 	}
-	// The five standard series plus golf's ten custom series.
+	// The seven standard series plus golf's nineteen custom panels: three
+	// fixed-form charts, and eight toggleable ones each expanding to a
+	// _rate/_count pair.
 	expected := []string{
-		"request_rate", "error_rate_percent", "avg_duration_us", "p95_duration_us",
-		"active_requests",
-		"sessions_active", "session_starts", "command_rate", "event_rate",
-		"rejection_rate", "disconnect_rate",
-		"chat_message_rate", "chat_delivery_rate", "chat_failure_rate", "chat_catch_up_rows",
-		"rate_limited_rate",
+		"request_rate", "request_count", "error_rate_percent", "error_count",
+		"avg_duration_us", "p95_duration_us", "active_requests",
+		"sessions_active", "session_starts", "chat_catch_up_rows",
+		"command_rate", "command_count",
+		"event_rate", "event_count",
+		"rejection_rate", "rejection_count",
+		"disconnect_rate", "disconnect_count",
+		"rate_limited_rate", "rate_limited_count",
+		"chat_message_rate", "chat_message_count",
+		"chat_delivery_rate", "chat_delivery_count",
+		"chat_failure_rate", "chat_failure_count",
 	}
 	assert.Len(t, names, len(expected))
 	for _, name := range expected {
 		assert.True(t, names[name], name)
 	}
+}
+
+// --- The Serving chart's count/rate pair --------------------------------
+
+// Both literal pins, the same way TestStandardQueries_GoldenStrings pins the
+// scalar block: a typo in the shared instrument name should fail loudly
+// rather than hide behind the enumeration in TestRegistry_*.
+//
+// request_count windows by step (5m here, standing in for whatever
+// GetTimeRangeConfig picked) rather than the scalar tiles' fixed 5m — see
+// standardTimeseriesQueries for why a fixed window would overlap and
+// double-count. request_rate is untouched: unlike the scalar block's
+// counter-derived custom tiles, this pair doesn't share a query built by
+// switching a function name, precisely so neither series' meaning depends on
+// a query parameter — see the same comment for why.
+func TestStandardTimeseriesQueries_RequestRateAndCountAreIndependentSeries(t *testing.T) {
+	queries := standardTimeseriesQueries("golf_hub", "5m")
+	assert.Equal(t,
+		`sum(rate(http_server_requests_total{service_name="golf_hub"}[5m]))`,
+		queries["request_rate"])
+	assert.Equal(t,
+		`sum(increase(http_server_requests_total{service_name="golf_hub"}[5m]))`,
+		queries["request_count"])
+
+	// A different step changes request_count's window but not request_rate's
+	// — that one is fixed at 5m regardless of how far apart the chart's
+	// points are.
+	withStep := standardTimeseriesQueries("golf_hub", "30s")
+	assert.Equal(t,
+		`sum(increase(http_server_requests_total{service_name="golf_hub"}[30s]))`,
+		withStep["request_count"])
+	assert.Equal(t, queries["request_rate"], withStep["request_rate"])
+}
+
+// error_rate_percent is itself a ratio of two rates with no count form of its
+// own, but the failure counter it's built from does — error_count is that
+// counter's own count/rate pair, the same relationship request_count has to
+// request_rate, not "the error rate as a count".
+func TestStandardTimeseriesQueries_ErrorCountIsTheFailureCounterNotTheRatio(t *testing.T) {
+	queries := standardTimeseriesQueries("golf_hub", "5m")
+	assert.Equal(t,
+		`sum(increase(http_server_requests_failure_total{service_name="golf_hub"}[5m]))`,
+		queries["error_count"])
+
+	withStep := standardTimeseriesQueries("golf_hub", "30s")
+	assert.Equal(t,
+		`sum(increase(http_server_requests_failure_total{service_name="golf_hub"}[30s]))`,
+		withStep["error_count"])
+	// error_rate_percent itself never changes: it isn't wrapped in rate()/
+	// increase() over a counter the way request_rate/error_count are, so
+	// there's no window to swap out.
+	assert.Equal(t, queries["error_rate_percent"], withStep["error_rate_percent"])
+}
+
+// avg/p95 latency and active requests have no counter behind them at all — a
+// ratio-of-rates, a quantile, and a gauge — so unlike the two request/error
+// pairs they get no count-form sibling.
+func TestStandardTimeseriesQueries_LatencyAndActiveHaveNoCountForm(t *testing.T) {
+	queries := standardTimeseriesQueries("portrait", "5m")
+	for _, key := range []string{"avg_duration_us", "p95_duration_us", "active_requests"} {
+		assert.NotContains(t, queries, key+"_count", "%s unexpectedly grew a count-form sibling", key)
+	}
+}
+
+func TestMetricsHandler_GetServiceMetricsTimeSeries_RequestCountBucketsByTheRangesStep(t *testing.T) {
+	countQuery := `sum(increase(http_server_requests_total{service_name="golf_hub"}[1h]))`
+	handler := &MetricsHandler{
+		promClient: &mockPrometheusClient{
+			queryRangeResponses: map[string]*QueryResponse{
+				countQuery: rangeResponse("request_count"),
+			},
+		},
+	}
+
+	// The 7d range steps at 1h (models.go's GetTimeRangeConfig), which
+	// request_count's window has to match — a mismatch here means the mock's
+	// exact-string lookup misses and the series comes back empty, catching a
+	// step that was hardcoded instead of threaded through.
+	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub/timeseries/7d", nil)
+	req.SetPathValue("name", "golf_hub")
+	req.SetPathValue("range", "7d")
+	w := httptest.NewRecorder()
+
+	handler.GetServiceMetricsTimeSeries(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response TimeSeriesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+	var requestCount *TimeSeries
+	for i := range response.Series {
+		if response.Series[i].MetricName == "request_count" {
+			requestCount = &response.Series[i]
+		}
+	}
+	require.NotNil(t, requestCount, "request_count missing from the response")
+	require.Len(t, requestCount.Values, 2, "the mock's fixture didn't answer — the handler built a different query than expected")
+}
+
+// The failure-counter analogue of the request_count test above: error_count
+// windows by the range's own step too, and it's a different selector
+// (http_server_requests_failure_total, not _total) from request_count, so
+// a copy-paste that left it reading the wrong counter would still pass a
+// test that only checked the window.
+func TestMetricsHandler_GetServiceMetricsTimeSeries_ErrorCountBucketsByTheRangesStep(t *testing.T) {
+	countQuery := `sum(increase(http_server_requests_failure_total{service_name="golf_hub"}[1h]))`
+	handler := &MetricsHandler{
+		promClient: &mockPrometheusClient{
+			queryRangeResponses: map[string]*QueryResponse{
+				countQuery: rangeResponse("error_count"),
+			},
+		},
+	}
+
+	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub/timeseries/7d", nil)
+	req.SetPathValue("name", "golf_hub")
+	req.SetPathValue("range", "7d")
+	w := httptest.NewRecorder()
+
+	handler.GetServiceMetricsTimeSeries(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response TimeSeriesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+	var errorCount *TimeSeries
+	for i := range response.Series {
+		if response.Series[i].MetricName == "error_count" {
+			errorCount = &response.Series[i]
+		}
+	}
+	require.NotNil(t, errorCount, "error_count missing from the response")
+	require.Len(t, errorCount.Values, 2, "the mock's fixture didn't answer — the handler built a different query than expected")
+}
+
+// No ?view= on this route at all: request_rate and request_count both come
+// back on every request, unconditionally, regardless of query parameters —
+// there is nothing here to reject as invalid.
+func TestMetricsHandler_GetServiceMetricsTimeSeries_IgnoresViewParam(t *testing.T) {
+	handler := &MetricsHandler{
+		promClient: &mockPrometheusClient{queryRangeResponse: rangeResponse("series")},
+	}
+
+	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub/timeseries/1d?view=cumulative", nil)
+	req.SetPathValue("name", "golf_hub")
+	req.SetPathValue("range", "1d")
+	w := httptest.NewRecorder()
+
+	handler.GetServiceMetricsTimeSeries(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response TimeSeriesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	names := map[string]bool{}
+	for _, series := range response.Series {
+		names[series.MetricName] = true
+	}
+	assert.True(t, names["request_rate"])
+	assert.True(t, names["request_count"])
+}
+
+// --- Custom Trends charts, extended with the same count/rate pairing -------
+
+// A toggleable custom chart expands to exactly two panels, keyed off the
+// def-map key rather than spelling either suffix in the descriptor — the
+// same shape standardRequestRateQuery's sibling gets, so a Trends chart and
+// the Serving chart can't drift onto different conventions.
+func TestCustomTimeseriesDef_ToggleableExpandsToRateAndCountBucketedByStep(t *testing.T) {
+	def := tsCounter(`stream_commands_total`)
+	panels := def.panels("command", "30s")
+	assert.Equal(t, map[string]string{
+		"command_rate":  `sum(rate(stream_commands_total[5m]))`,
+		"command_count": `sum(increase(stream_commands_total[30s]))`,
+	}, panels)
+
+	// The rate form is fixed at the scalar tiles' 5m regardless of step —
+	// only the count form windows per point.
+	withStep := def.panels("command", "1h")
+	assert.Equal(t, panels["command_rate"], withStep["command_rate"])
+	assert.NotEqual(t, panels["command_count"], withStep["command_count"])
+}
+
+// A fixed custom chart keeps its map key unchanged and ignores step
+// entirely — there's no window in it to bucket.
+func TestCustomTimeseriesDef_FixedFormKeepsItsOwnKey(t *testing.T) {
+	def := tsFixed(`sum(stream_sessions_active_gauge)`)
+	panels := def.panels("sessions_active", "30s")
+	assert.Equal(t, map[string]string{"sessions_active": `sum(stream_sessions_active_gauge)`}, panels)
+}
+
+// End to end through the handler: a toggleable custom chart's two panels
+// both land in the response, and the count form is bucketed by the range's
+// own step exactly like request_count.
+func TestMetricsHandler_GetServiceMetricsTimeSeries_CustomCounterPanelBucketsByStep(t *testing.T) {
+	countQuery := `sum(increase(stream_commands_total[1h]))`
+	handler := &MetricsHandler{
+		promClient: &mockPrometheusClient{
+			queryRangeResponses: map[string]*QueryResponse{
+				countQuery: rangeResponse("command_count"),
+			},
+		},
+	}
+
+	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub/timeseries/7d", nil)
+	req.SetPathValue("name", "golf_hub")
+	req.SetPathValue("range", "7d")
+	w := httptest.NewRecorder()
+
+	handler.GetServiceMetricsTimeSeries(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response TimeSeriesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+	var commandCount *TimeSeries
+	for i := range response.Series {
+		if response.Series[i].MetricName == "command_count" {
+			commandCount = &response.Series[i]
+		}
+	}
+	require.NotNil(t, commandCount, "command_count missing from the response")
+	require.Len(t, commandCount.Values, 2, "the mock's fixture didn't answer — the handler built a different query than expected")
+}
+
+// microgpt-serve's tokens_per_second baked one form into its name the way
+// request_rate used to; "tokens" replaces it so the chart can toggle. No
+// other file names the old key (grep confirmed it before the rename), so
+// this is the only place a caller could still expect it.
+func TestRegistry_MicrogptTokensReplacesTokensPerSecond(t *testing.T) {
+	panels := expandCustomTimeseries(serviceRegistry["microgpt-serve"].CustomTimeseries, "5m")
+	assert.Contains(t, panels, "tokens_rate")
+	assert.Contains(t, panels, "tokens_count")
+	assert.NotContains(t, panels, "tokens_per_second")
+	assert.Equal(t,
+		`sum(rate(microgpt_tokens_generated_total[5m]))`,
+		panels["tokens_rate"])
 }
 
 func TestMetricsHandler_GetHostMetrics_Success(t *testing.T) {
@@ -611,7 +887,8 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 		// what keeps the counter tiles in scope at all.
 		labelled["scalar "+def.Label] = def.AllQueries()
 	}
-	for key, query := range entry.CustomTimeseries {
+	// Both panels of a toggleable timeseries entry, for the same reason.
+	for key, query := range expandCustomTimeseries(entry.CustomTimeseries, "5m") {
 		labelled["timeseries "+key] = []string{query}
 	}
 
@@ -644,7 +921,7 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 	for _, def := range entry.CustomScalars {
 		joined += strings.Join(def.AllQueries(), "\n") + "\n"
 	}
-	for _, query := range entry.CustomTimeseries {
+	for _, query := range expandCustomTimeseries(entry.CustomTimeseries, "5m") {
 		joined += query + "\n"
 	}
 	for _, label := range []string{`outcome="completed"`, `outcome="failed"`,
@@ -680,7 +957,7 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 				"scalar %s selects outcomes by exclusion", def.Label)
 		}
 	}
-	for key, query := range entry.CustomTimeseries {
+	for key, query := range expandCustomTimeseries(entry.CustomTimeseries, "5m") {
 		assert.NotRegexp(t, `outcome\s*!=|outcome\s*!~`, query,
 			"timeseries %s selects outcomes by exclusion", key)
 	}
@@ -689,17 +966,18 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 	// forbids the one spelling. Reverting to outcome=~"failed|interrupted|lease_lost", or to a
 	// bare sum over index_runs_total with no outcome at all, uses no negation and passes it. So
 	// the set is pinned positively, the way the duration guard pins outcome="completed".
-	failureRate, ok := entry.CustomTimeseries["run_failure_rate"]
-	require.True(t, ok, "one_d4 lost its run_failure_rate timeseries")
-	outcomeMatch := regexp.MustCompile(`outcome=~?"([^"]*)"`).FindStringSubmatch(failureRate)
+	runFailure, ok := entry.CustomTimeseries["run_failure"]
+	require.True(t, ok, "one_d4 lost its run_failure timeseries")
+	require.True(t, runFailure.toggleable(), "run_failure stopped being counter-derived")
+	outcomeMatch := regexp.MustCompile(`outcome=~?"([^"]*)"`).FindStringSubmatch(runFailure.Counter)
 	require.NotNil(t, outcomeMatch,
-		"run_failure_rate names no outcome at all, so every run counts as a failure: %s",
-		failureRate)
+		"run_failure names no outcome at all, so every run counts as a failure: %s",
+		runFailure.Counter)
 	assert.ElementsMatch(t, []string{"failed", "interrupted"},
 		strings.Split(outcomeMatch[1], "|"),
-		"run_failure_rate must name exactly failed|interrupted — lease_lost is ordinary and puts a"+
+		"run_failure must name exactly failed|interrupted — lease_lost is ordinary and puts a"+
 			" permanent floor under the line, and anything wider counts healthy runs as"+
-			" failures: %s", failureRate)
+			" failures: %s", runFailure.Counter)
 }
 
 // --- The count/rate toggle (#1287) ------------------------------------------
@@ -796,13 +1074,13 @@ func TestRegistry_NoTileReadsACounterCumulatively(t *testing.T) {
 				check(t, "scalar "+name+"/"+def.Label, query)
 			}
 		}
-		for key, query := range entry.CustomTimeseries {
+		for key, query := range expandCustomTimeseries(entry.CustomTimeseries, "5m") {
 			check(t, "timeseries "+name+"/"+key, query)
 		}
 		for _, q := range standardScalarQueries(name) {
 			check(t, "standard scalar "+name, q.Query)
 		}
-		for key, query := range standardTimeseriesQueries(name) {
+		for key, query := range standardTimeseriesQueries(name, "5m") {
 			check(t, "standard timeseries "+name+"/"+key, query)
 		}
 	}
