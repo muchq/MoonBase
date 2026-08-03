@@ -183,6 +183,12 @@ HubHandler::~HubHandler() {
 }
 
 absl::Status HubHandler::RestoreFromStore() {
+  // Once, before serving. A second restore would stack a new cohort
+  // behind a reaper that never re-arms — forever-membership again, the
+  // exact silent shape #1295 closed — so refuse it loudly instead.
+  if (boot_reaper_.joinable()) {
+    return absl::FailedPreconditionError("RestoreFromStore already ran");
+  }
   auto snapshot = store_->LoadSnapshot();
   if (!snapshot.ok()) return snapshot.status();
   const std::lock_guard<std::mutex> lock(mu_);
@@ -203,7 +209,12 @@ absl::Status HubHandler::RestoreFromStore() {
     member.total_score = row.total_score;
     rooms_[row.room_id].members.emplace(row.player_id, member);
     player_room_[row.player_id] = row.room_id;
-    restored_pending_.insert(row.player_id);
+    // Only parked rows enter the boot cohort. A row restored connected
+    // is either a sibling's live seat — whose registry owns its grace,
+    // and whose later park must run that full grace, not the remainder
+    // of ours — or a connected-at-crash ghost the drain's row check
+    // would spare anyway (#1295 records that residue).
+    if (!row.connected) restored_pending_.insert(row.player_id);
   }
   for (HubStore::GameRow& row : snapshot->games) {
     if (row.state.has_value() && row.state->isOver()) {
@@ -228,8 +239,7 @@ absl::Status HubHandler::RestoreFromStore() {
   // The old process's registry took every parked member's grace timer
   // with it; this cohort deadline is their replacement (#1295). Zero
   // grace keeps it disabled, matching the registry's own contract.
-  if (!restored_pending_.empty() && grace_period_ > std::chrono::seconds(0) &&
-      !boot_reaper_.joinable()) {
+  if (!restored_pending_.empty() && grace_period_ > std::chrono::seconds(0)) {
     boot_reaper_ = std::thread([this] { BootReaperMain(); });
   }
   return absl::OkStatus();
@@ -248,9 +258,17 @@ void HubHandler::BootReaperMain() {
     restored_pending_.clear();
   }
   for (const std::string& player_id : pending) {
-    // A resume that races this drain is safe either way: its admission
-    // already staged connected=true, and the reap's fresh read flushes
-    // before it looks, so the row spares the seat.
+    // Re-check stop between reaps: each one is a store round trip, and
+    // a destructor landing mid-drain should wait out one, not all.
+    {
+      const std::lock_guard<std::mutex> lock(reaper_mu_);
+      if (reaper_stop_) return;
+    }
+    // A resume that races this drain lands coherently in either order:
+    // if its SetConnected write is in before the reap's flushed read,
+    // the row spares the seat; if the reap wins mu_ first, the seat is
+    // reaped and the resume admits room-less — the same outcome as
+    // resuming a moment after the deadline.
     if (ReapUnlessResumedElsewhere(player_id)) Count("restored_seats_reaped");
   }
 }
@@ -461,6 +479,13 @@ bool HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore:
     member.total_score = row.total_score;
     members.emplace(row.player_id, member);
     player_room_[row.player_id] = room_id;
+    // A row observed connected is a seat some session owns, and that
+    // session's registry owns its grace from here on. Ceding the boot
+    // cohort's claim is the remote mirror of Play's local erase: a
+    // member who resumed on a sibling during our boot window — and may
+    // park again before our deadline — gets their full grace from the
+    // sibling's registry, not the remainder of ours (#1295).
+    if (row.connected) restored_pending_.erase(row.player_id);
   }
   if (members.size() != room.members.size()) {
     changed = true;
