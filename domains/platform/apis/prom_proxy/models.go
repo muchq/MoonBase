@@ -26,15 +26,11 @@ type DataPoint struct {
 
 // TimeSeriesResponse wraps timeseries data with metadata
 type TimeSeriesResponse struct {
-	TimeRange string    `json:"time_range"`
-	StartTime time.Time `json:"start_time"`
-	EndTime   time.Time `json:"end_time"`
-	Step      string    `json:"step"`
-	// Which form request_rate is in (#1287, extended to the Serving charts).
-	// Omitted from the host and container timeseries endpoints, which have no
-	// toggleable series and so never set it — see GetServiceMetricsTimeSeries.
-	View   string       `json:"view,omitempty"`
-	Series []TimeSeries `json:"series"`
+	TimeRange string       `json:"time_range"`
+	StartTime time.Time    `json:"start_time"`
+	EndTime   time.Time    `json:"end_time"`
+	Step      string       `json:"step"`
+	Series    []TimeSeries `json:"series"`
 }
 
 // GetTimeRangeConfig returns duration and step for a given time range

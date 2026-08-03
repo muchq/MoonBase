@@ -49,7 +49,7 @@ func TestRegistry_OrderAndEntriesAgree(t *testing.T) {
 // authors to avoid this; this pins it.
 func TestRegistry_CustomTimeseriesKeysDoNotShadowStandardSeries(t *testing.T) {
 	for _, name := range serviceOrder {
-		standard := standardTimeseriesQueries(name, "5m", DefaultView)
+		standard := standardTimeseriesQueries(name, "5m")
 		for key := range serviceRegistry[name].CustomTimeseries {
 			_, shadows := standard[key]
 			assert.False(t, shadows, "service %q custom series %q shadows a standard series", name, key)
@@ -454,9 +454,9 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_StandardPlusCustom(t *testin
 		assert.GreaterOrEqual(t, series.MetricName, previous)
 		previous = series.MetricName
 	}
-	// The five standard series plus golf's ten custom series.
+	// The six standard series plus golf's ten custom series.
 	expected := []string{
-		"request_rate", "error_rate_percent", "avg_duration_us", "p95_duration_us",
+		"request_rate", "request_count", "error_rate_percent", "avg_duration_us", "p95_duration_us",
 		"active_requests",
 		"sessions_active", "session_starts", "command_rate", "event_rate",
 		"rejection_rate", "disconnect_rate",
@@ -469,61 +469,63 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_StandardPlusCustom(t *testin
 	}
 }
 
-// --- The count/rate toggle on the Serving charts -----------------------
+// --- The Serving chart's count/rate pair --------------------------------
 
-// request_rate is a literal pin, the same way TestStandardQueries_GoldenStrings
-// pins the scalar block: a typo in the shared instrument name should fail
-// loudly rather than hide behind the enumeration in TestRegistry_*.
+// Both literal pins, the same way TestStandardQueries_GoldenStrings pins the
+// scalar block: a typo in the shared instrument name should fail loudly
+// rather than hide behind the enumeration in TestRegistry_*.
 //
-// The count form windows by step (5m here, standing in for whatever
-// GetTimeRangeConfig picked), not by the scalar tiles' fixed 5m — see
-// standardRequestRateQuery for why a fixed window would overlap and
-// double-count.
-func TestStandardTimeseriesQueries_RequestRateTogglesFormAndBucketsByStep(t *testing.T) {
+// request_count windows by step (5m here, standing in for whatever
+// GetTimeRangeConfig picked) rather than the scalar tiles' fixed 5m — see
+// standardTimeseriesQueries for why a fixed window would overlap and
+// double-count. request_rate is untouched: unlike the scalar block's
+// counter-derived custom tiles, this pair doesn't share a query built by
+// switching a function name, precisely so neither series' meaning depends on
+// a query parameter — see the same comment for why.
+func TestStandardTimeseriesQueries_RequestRateAndCountAreIndependentSeries(t *testing.T) {
+	queries := standardTimeseriesQueries("golf_hub", "5m")
 	assert.Equal(t,
 		`sum(rate(http_server_requests_total{service_name="golf_hub"}[5m]))`,
-		standardTimeseriesQueries("golf_hub", "5m", ViewRate)["request_rate"])
+		queries["request_rate"])
 	assert.Equal(t,
 		`sum(increase(http_server_requests_total{service_name="golf_hub"}[5m]))`,
-		standardTimeseriesQueries("golf_hub", "5m", ViewCount)["request_rate"])
-	// A different step changes the count form's window but not the rate
-	// form's — rate's is fixed at 5m regardless of how far apart the chart's
+		queries["request_count"])
+
+	// A different step changes request_count's window but not request_rate's
+	// — that one is fixed at 5m regardless of how far apart the chart's
 	// points are.
+	withStep := standardTimeseriesQueries("golf_hub", "30s")
 	assert.Equal(t,
 		`sum(increase(http_server_requests_total{service_name="golf_hub"}[30s]))`,
-		standardTimeseriesQueries("golf_hub", "30s", ViewCount)["request_rate"])
-	assert.Equal(t,
-		`sum(rate(http_server_requests_total{service_name="golf_hub"}[5m]))`,
-		standardTimeseriesQueries("golf_hub", "30s", ViewRate)["request_rate"])
+		withStep["request_count"])
+	assert.Equal(t, queries["request_rate"], withStep["request_rate"])
 }
 
-// The other four standard series have no counter behind them — a ratio, a
-// quantile, and a gauge — so the view toggle must not perturb them, the same
-// contract QueryFor holds for a fixed-form scalar tile.
-func TestStandardTimeseriesQueries_OnlyRequestRateAnswersToView(t *testing.T) {
-	count := standardTimeseriesQueries("portrait", "5m", ViewCount)
-	rate := standardTimeseriesQueries("portrait", "5m", ViewRate)
+// The other three standard series have no counter behind them — a ratio, a
+// quantile, and a gauge — so unlike request_rate/request_count they get no
+// count-form sibling.
+func TestStandardTimeseriesQueries_OnlyRequestHasACountForm(t *testing.T) {
+	queries := standardTimeseriesQueries("portrait", "5m")
 	for _, key := range []string{"error_rate_percent", "avg_duration_us", "p95_duration_us", "active_requests"} {
-		assert.Equal(t, rate[key], count[key], "%s changed under the view toggle", key)
+		assert.NotContains(t, queries, key+"_count", "%s unexpectedly grew a count-form sibling", key)
 	}
-	assert.NotEqual(t, rate["request_rate"], count["request_rate"])
 }
 
-func TestMetricsHandler_GetServiceMetricsTimeSeries_ViewSelectsRequestRateForm(t *testing.T) {
+func TestMetricsHandler_GetServiceMetricsTimeSeries_RequestCountBucketsByTheRangesStep(t *testing.T) {
 	countQuery := `sum(increase(http_server_requests_total{service_name="golf_hub"}[1h]))`
 	handler := &MetricsHandler{
 		promClient: &mockPrometheusClient{
 			queryRangeResponses: map[string]*QueryResponse{
-				countQuery: rangeResponse("request_rate"),
+				countQuery: rangeResponse("request_count"),
 			},
 		},
 	}
 
-	// The 7d range steps at 1h (models.go's GetTimeRangeConfig), which the
-	// count form's window has to match — a mismatch here means the mock's
+	// The 7d range steps at 1h (models.go's GetTimeRangeConfig), which
+	// request_count's window has to match — a mismatch here means the mock's
 	// exact-string lookup misses and the series comes back empty, catching a
 	// step that was hardcoded instead of threaded through.
-	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub/timeseries/7d?view=count", nil)
+	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub/timeseries/7d", nil)
 	req.SetPathValue("name", "golf_hub")
 	req.SetPathValue("range", "7d")
 	w := httptest.NewRecorder()
@@ -533,24 +535,26 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_ViewSelectsRequestRateForm(t
 
 	var response TimeSeriesResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-	assert.Equal(t, "count", response.View)
 
-	var requestRate *TimeSeries
+	var requestCount *TimeSeries
 	for i := range response.Series {
-		if response.Series[i].MetricName == "request_rate" {
-			requestRate = &response.Series[i]
+		if response.Series[i].MetricName == "request_count" {
+			requestCount = &response.Series[i]
 		}
 	}
-	require.NotNil(t, requestRate, "request_rate missing from the response")
-	require.Len(t, requestRate.Values, 2, "the mock's fixture didn't answer — the handler built a different query than expected")
+	require.NotNil(t, requestCount, "request_count missing from the response")
+	require.Len(t, requestCount.Values, 2, "the mock's fixture didn't answer — the handler built a different query than expected")
 }
 
-func TestMetricsHandler_GetServiceMetricsTimeSeries_DefaultViewIsCount(t *testing.T) {
+// No ?view= on this route at all: request_rate and request_count both come
+// back on every request, unconditionally, regardless of query parameters —
+// there is nothing here to reject as invalid.
+func TestMetricsHandler_GetServiceMetricsTimeSeries_IgnoresViewParam(t *testing.T) {
 	handler := &MetricsHandler{
 		promClient: &mockPrometheusClient{queryRangeResponse: rangeResponse("series")},
 	}
 
-	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub/timeseries/1d", nil)
+	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub/timeseries/1d?view=cumulative", nil)
 	req.SetPathValue("name", "golf_hub")
 	req.SetPathValue("range", "1d")
 	w := httptest.NewRecorder()
@@ -560,25 +564,12 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_DefaultViewIsCount(t *testin
 
 	var response TimeSeriesResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-	// Matches DefaultView on the scalar endpoint, so a page that never sends
-	// ?view= reads the same form on both its tiles and its Serving chart.
-	assert.Equal(t, string(DefaultView), response.View)
-}
-
-func TestMetricsHandler_GetServiceMetricsTimeSeries_InvalidViewIsRejected(t *testing.T) {
-	handler := &MetricsHandler{}
-
-	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub/timeseries/1d?view=cumulative", nil)
-	req.SetPathValue("name", "golf_hub")
-	req.SetPathValue("range", "1d")
-	w := httptest.NewRecorder()
-
-	handler.GetServiceMetricsTimeSeries(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-
-	var response map[string]interface{}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-	assert.Contains(t, response["detail"], "Invalid view")
+	names := map[string]bool{}
+	for _, series := range response.Series {
+		names[series.MetricName] = true
+	}
+	assert.True(t, names["request_rate"])
+	assert.True(t, names["request_count"])
 }
 
 func TestMetricsHandler_GetHostMetrics_Success(t *testing.T) {
@@ -914,14 +905,8 @@ func TestRegistry_NoTileReadsACounterCumulatively(t *testing.T) {
 		for _, q := range standardScalarQueries(name) {
 			check(t, "standard scalar "+name, q.Query)
 		}
-		// Both views: request_rate's two forms build from increase() and
-		// rate() respectively, and only checking one would leave the other
-		// unexamined the same way AllQueries() exists to check both forms of
-		// a custom scalar tile.
-		for _, view := range []MetricView{ViewCount, ViewRate} {
-			for key, query := range standardTimeseriesQueries(name, "5m", view) {
-				check(t, "standard timeseries "+name+"/"+key+" ("+string(view)+")", query)
-			}
+		for key, query := range standardTimeseriesQueries(name, "5m") {
+			check(t, "standard timeseries "+name+"/"+key, query)
 		}
 	}
 }

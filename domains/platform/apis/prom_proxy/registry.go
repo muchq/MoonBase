@@ -375,9 +375,22 @@ func standardScalarQueries(service string) []struct {
 	}
 }
 
-// standardRequestRateQuery is the one standard timeseries built from a
-// counter, so it is also the one with a count form (#1287 extended to the
-// Serving charts).
+// Keys are mirrored by STANDARD_SERIES in the UI's ServiceDashboard
+// (muchq.github.io); keep them in sync, and keep CustomTimeseries keys
+// from colliding with them — a colliding custom series is classified as
+// standard by the UI and silently never charts.
+//
+// request_count sits beside request_rate rather than replacing it under a
+// ?view=-selected meaning, on the same reasoning #1287 already spelled out
+// for the scalar block: a toggle that changes what an existing key means is
+// a deploy hazard between two services that ship independently — a proxy new
+// enough to answer the count form and a UI old enough to still expect rate()
+// under that name would silently mislabel the chart, and the reverse is just
+// as possible depending on rollout order. Two names, one always rate() and
+// one always increase(), means either side can deploy first: an old UI never
+// asks for request_count and keeps reading request_rate exactly as before: a
+// new UI reading an old proxy simply finds no request_count series, the same
+// "nothing there yet" a chart already renders for any absent series.
 //
 // The count form buckets per step rather than over a fixed window like the
 // scalar tiles' 5m: a chart wants one count per point, and increase() over a
@@ -385,27 +398,16 @@ func standardScalarQueries(service string) []struct {
 // overlap and double-count requests that land near a boundary. container_
 // handlers' "restarts" series already windows a range query by its own step
 // for the same reason.
-func standardRequestRateQuery(service, step string, view MetricView) string {
-	s := fmt.Sprintf("%q", service)
-	if view == ViewCount {
-		return `sum(increase(http_server_requests_total{service_name=` + s + `}[` + step + `]))`
-	}
-	return `sum(rate(http_server_requests_total{service_name=` + s + `}[5m]))`
-}
-
-// Keys are mirrored by STANDARD_SERIES in the UI's ServiceDashboard
-// (muchq.github.io); keep them in sync, and keep CustomTimeseries keys
-// from colliding with them — a colliding custom series is classified as
-// standard by the UI and silently never charts.
 //
-// Only request_rate answers to view: it is the only one of the five built
-// from a counter. The other four are already ratios, quantiles, or a gauge —
-// none of them has a count form to switch to, the same reasoning that keeps
-// the scalar block's windowed-mean tiles fixed-form in QueryFor above.
-func standardTimeseriesQueries(service, step string, view MetricView) map[string]string {
+// Only request_rate/request_count answer to a counter: they're the only pair
+// built from one. The other three are already ratios, a quantile, or a
+// gauge — none has a count form, the same reasoning that keeps the scalar
+// block's windowed-mean tiles fixed-form in QueryFor above.
+func standardTimeseriesQueries(service, step string) map[string]string {
 	s := fmt.Sprintf("%q", service)
 	return map[string]string{
-		"request_rate":       standardRequestRateQuery(service, step, view),
+		"request_rate":       `sum(rate(http_server_requests_total{service_name=` + s + `}[5m]))`,
+		"request_count":      `sum(increase(http_server_requests_total{service_name=` + s + `}[` + step + `]))`,
 		"error_rate_percent": `sum(rate(http_server_requests_failure_total{service_name=` + s + `}[5m]))/(sum(rate(http_server_requests_success_total{service_name=` + s + `}[5m]))+sum(rate(http_server_requests_failure_total{service_name=` + s + `}[5m])))*100`,
 		"avg_duration_us":    `sum(rate(http_server_request_duration_microseconds_sum{service_name=` + s + `}[5m]))/sum(rate(http_server_request_duration_microseconds_count{service_name=` + s + `}[5m]))`,
 		"p95_duration_us":    `histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name=` + s + `}[5m])))`,

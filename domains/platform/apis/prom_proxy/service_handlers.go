@@ -165,19 +165,6 @@ func (h *MetricsHandler) GetServiceMetricsTimeSeries(w http.ResponseWriter, r *h
 		return
 	}
 
-	// Same contract as GetServiceMetrics: an absent view defaults rather than
-	// offering a third, implicit answer, and an unrecognised one is a 400
-	// rather than a silent fallback.
-	view := DefaultView
-	if raw := r.URL.Query().Get("view"); raw != "" {
-		if !ValidView(raw) {
-			problem := mucks.NewBadRequest("Invalid view. Valid options: count, rate")
-			mucks.JsonError(w, problem)
-			return
-		}
-		view = MetricView(raw)
-	}
-
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
@@ -190,11 +177,13 @@ func (h *MetricsHandler) GetServiceMetricsTimeSeries(w http.ResponseWriter, r *h
 		StartTime: startTime,
 		EndTime:   endTime,
 		Step:      step,
-		View:      string(view),
 		Series:    []TimeSeries{},
 	}
 
-	queries := standardTimeseriesQueries(name, step, view)
+	// request_rate and request_count both come back unconditionally — no
+	// ?view= here, see standardTimeseriesQueries for why a toggled meaning on
+	// one shared key is a deploy hazard this avoids.
+	queries := standardTimeseriesQueries(name, step)
 	for metricName, query := range entry.CustomTimeseries {
 		queries[metricName] = query
 	}
