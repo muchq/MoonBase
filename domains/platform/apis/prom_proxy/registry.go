@@ -138,9 +138,67 @@ func (d customScalarDef) UnitFor(view MetricView) string {
 	return d.Unit + "/s"
 }
 
+// customTimeseriesDef is one chart in a service's Trends section.
+//
+// A fixed one — a gauge, a ratio, a windowed mean — carries its whole
+// expression in Query, the timeseries analogue of customScalarDef.Query. A
+// counter-derived one sets Counter instead: the bare selector, wrapped into
+// two panels rather than one whose meaning depends on ?view= — see the
+// request_rate/request_count comment on standardTimeseriesQueries for why.
+// The map key is the panel's base name; panels() appends _rate/_count to it,
+// so a toggleable entry never has to spell either suffix twice.
+type customTimeseriesDef struct {
+	Query   string
+	Counter string
+}
+
+func (d customTimeseriesDef) toggleable() bool { return d.Counter != "" }
+
+// panels is the key(s) this descriptor contributes to a timeseries response:
+// the map key unchanged for a fixed chart, key_rate/key_count for a
+// counter-derived one. step is the chart's own bucket width, the same
+// per-point windowing request_count uses and for the same reason: increase()
+// over a fixed window wider than the gap between points would make adjacent
+// buckets overlap and double-count.
+func (d customTimeseriesDef) panels(key, step string) map[string]string {
+	if !d.toggleable() {
+		return map[string]string{key: d.Query}
+	}
+	return map[string]string{
+		key + "_rate":  fmt.Sprintf("sum(rate(%s[%s]))", d.Counter, defaultCounterWindow),
+		key + "_count": fmt.Sprintf("sum(increase(%s[%s]))", d.Counter, step),
+	}
+}
+
+// tsCounter declares a toggleable Trends chart: its map key is the base
+// name, and panels() expands it into <base>_rate and <base>_count.
+func tsCounter(selector string) customTimeseriesDef {
+	return customTimeseriesDef{Counter: selector}
+}
+
+// tsFixed declares a Trends chart with one form and no toggle.
+func tsFixed(query string) customTimeseriesDef {
+	return customTimeseriesDef{Query: query}
+}
+
+// expandCustomTimeseries flattens a service's Trends descriptors into the
+// panel keys a timeseries response actually carries.
+func expandCustomTimeseries(custom map[string]customTimeseriesDef, step string) map[string]string {
+	out := make(map[string]string, len(custom))
+	for key, def := range custom {
+		for panelKey, query := range def.panels(key, step) {
+			out[panelKey] = query
+		}
+	}
+	return out
+}
+
 type serviceEntry struct {
-	CustomScalars    []customScalarDef
-	CustomTimeseries map[string]string
+	CustomScalars []customScalarDef
+	// Keyed by base name; a toggleable entry expands to two panel keys — see
+	// customTimeseriesDef.panels — so this map's own keys are not always the
+	// series names a timeseries response carries.
+	CustomTimeseries map[string]customTimeseriesDef
 }
 
 // Portrait's render cache emits the standard cache family (#1209) from
@@ -216,18 +274,24 @@ var serviceRegistry = map[string]serviceEntry{
 			counter("Chat", "history_replays", "", `chat_history_replays_total`),
 			counterOver("Chat", "failures", "", `chat_failures_total`, alarmWindow),
 		},
-		CustomTimeseries: map[string]string{
-			"sessions_active":    `sum(stream_sessions_active_gauge)`,
-			"session_starts":     `sum(increase(stream_sessions_total[5m]))`,
-			"command_rate":       `sum(rate(stream_commands_total[5m]))`,
-			"event_rate":         `sum(rate(stream_events_total[5m]))`,
-			"rejection_rate":     `sum(rate(stream_rejections_total[5m]))`,
-			"disconnect_rate":    `sum(rate(stream_disconnects_total[5m]))`,
-			"rate_limited_rate":  `sum(rate(stream_rate_limited_total[5m]))`,
-			"chat_message_rate":  `sum(rate(chat_appends_total{result="stored"}[5m]))`,
-			"chat_delivery_rate": `sum(rate(chat_rows_delivered_total[5m]))`,
-			"chat_failure_rate":  `sum(rate(chat_failures_total[5m]))`,
-			"chat_catch_up_rows": `sum(rate(chat_catch_up_rows_sum[5m]))/sum(rate(chat_catch_up_rows_count[5m]))`,
+		// command/event/rejection/disconnect/rate_limited/chat_message/
+		// chat_delivery/chat_failure are all toggleable: each expands to a
+		// _rate and a _count panel (see customTimeseriesDef.panels). Base
+		// names match the pre-toggle _rate keys exactly, so a client that
+		// only ever asked for the rate panel keeps reading the same series
+		// name it always did.
+		CustomTimeseries: map[string]customTimeseriesDef{
+			"sessions_active":    tsFixed(`sum(stream_sessions_active_gauge)`),
+			"session_starts":     tsFixed(`sum(increase(stream_sessions_total[5m]))`),
+			"command":            tsCounter(`stream_commands_total`),
+			"event":              tsCounter(`stream_events_total`),
+			"rejection":          tsCounter(`stream_rejections_total`),
+			"disconnect":         tsCounter(`stream_disconnects_total`),
+			"rate_limited":       tsCounter(`stream_rate_limited_total`),
+			"chat_message":       tsCounter(`chat_appends_total{result="stored"}`),
+			"chat_delivery":      tsCounter(`chat_rows_delivered_total`),
+			"chat_failure":       tsCounter(`chat_failures_total`),
+			"chat_catch_up_rows": tsFixed(`sum(rate(chat_catch_up_rows_sum[5m]))/sum(rate(chat_catch_up_rows_count[5m]))`),
 		},
 	},
 	"microgpt-serve": {
@@ -239,9 +303,13 @@ var serviceRegistry = map[string]serviceEntry{
 				`sum(rate(microgpt_request_duration_ms_sum[5m]))/sum(rate(microgpt_request_duration_ms_count[5m]))`),
 			counter("Inference", "conversations", "", `microgpt_conversations_total`),
 		},
-		CustomTimeseries: map[string]string{
-			"tokens_per_second": `sum(rate(microgpt_tokens_generated_total[5m]))`,
-			"avg_duration_ms":   `sum(rate(microgpt_request_duration_ms_sum[5m]))/sum(rate(microgpt_request_duration_ms_count[5m]))`,
+		// "tokens" replaces the old "tokens_per_second" key: that name baked
+		// in one form the way request_rate used to, and toggling it points
+		// at tokens_rate/tokens_count instead. No other consumer names the
+		// old key (grep confirms this is the only place it appeared).
+		CustomTimeseries: map[string]customTimeseriesDef{
+			"tokens":          tsCounter(`microgpt_tokens_generated_total`),
+			"avg_duration_ms": tsFixed(`sum(rate(microgpt_request_duration_ms_sum[5m]))/sum(rate(microgpt_request_duration_ms_count[5m]))`),
 		},
 	},
 	// The Java services (#1212): yodel's standard instruments only, no
@@ -291,9 +359,9 @@ var serviceRegistry = map[string]serviceEntry{
 			// small enough to turn the result into a four-order-of-magnitude spike. A tile
 			// that is wrong exactly when the system is unhealthy is worse than no tile.
 		},
-		CustomTimeseries: map[string]string{
-			"games_indexed_rate":  `sum(rate(games_indexed_total{service_name="one_d4"}[5m]))`,
-			"run_completion_rate": `sum(rate(index_runs_total{service_name="one_d4",outcome="completed"}[5m]))`,
+		CustomTimeseries: map[string]customTimeseriesDef{
+			"games_indexed":  tsCounter(`games_indexed_total{service_name="one_d4"}`),
+			"run_completion": tsCounter(`index_runs_total{service_name="one_d4",outcome="completed"}`),
 			// Selected, not subtracted. In PromQL sum() over no matching series is an
 			// empty vector, and vector-minus-empty is empty rather than the left side —
 			// so a total-minus-completed form renders nothing on a fresh process whose
@@ -303,9 +371,9 @@ var serviceRegistry = map[string]serviceEntry{
 			// is ordinary. A range changing hands mid-run happens whenever two pollers
 			// overlap, so counting it here puts a permanent floor under the failure line
 			// and buries the two outcomes that do mean something went wrong.
-			"run_failure_rate":    `sum(rate(index_runs_total{service_name="one_d4",outcome=~"failed|interrupted"}[5m]))`,
-			"run_duration_avg_us": `sum(rate(index_run_duration_micros_sum{service_name="one_d4",outcome="completed"}[5m]))/sum(rate(index_run_duration_micros_count{service_name="one_d4",outcome="completed"}[5m]))`,
-			"motif_rate":          `sum(rate(motif_occurrences_total{service_name="one_d4"}[5m]))`,
+			"run_failure":         tsCounter(`index_runs_total{service_name="one_d4",outcome=~"failed|interrupted"}`),
+			"run_duration_avg_us": tsFixed(`sum(rate(index_run_duration_micros_sum{service_name="one_d4",outcome="completed"}[5m]))/sum(rate(index_run_duration_micros_count{service_name="one_d4",outcome="completed"}[5m]))`),
+			"motif":               tsCounter(`motif_occurrences_total{service_name="one_d4"}`),
 		},
 	},
 	// Wordchains: server_pal's standard instruments only, no custom set.
@@ -325,13 +393,19 @@ var serviceRegistry = map[string]serviceEntry{
 			scalar("Scene complexity", "avg_lights_requested_1h", "lights", portraitLightsRequested),
 			scalar("Scene complexity", "avg_lights_rendered_1h", "lights", portraitLightsRendered),
 		},
-		CustomTimeseries: map[string]string{
-			"cache_hit_rate":          portraitCacheHitPercent,
-			"cache_operations_rate":   `sum(rate(` + portraitCacheOps + `[5m]))`,
-			"scene_spheres_requested": `sum(rate(scene_sphere_count_sum[5m]))/sum(rate(scene_sphere_count_count[5m]))`,
-			"scene_spheres_rendered":  `sum(rate(scene_sphere_count_sum{cache_hit="false"}[5m]))/sum(rate(scene_sphere_count_count{cache_hit="false"}[5m]))`,
-			"scene_lights_requested":  `sum(rate(scene_light_count_sum[5m]))/sum(rate(scene_light_count_count[5m]))`,
-			"scene_lights_rendered":   `sum(rate(scene_light_count_sum{cache_hit="false"}[5m]))/sum(rate(scene_light_count_count{cache_hit="false"}[5m]))`,
+		// cache_hit_rate keeps its _rate-shaped name despite being fixed-form:
+		// it is a ratio (hits over hits+misses), not a counter-derived rate,
+		// so it has no _count sibling and the name predates this file's
+		// convention of that suffix meaning "toggleable." Renaming it would
+		// only cost clarity for a chart that was never going to pair with
+		// anything.
+		CustomTimeseries: map[string]customTimeseriesDef{
+			"cache_hit_rate":          tsFixed(portraitCacheHitPercent),
+			"cache_operations":        tsCounter(portraitCacheOps),
+			"scene_spheres_requested": tsFixed(`sum(rate(scene_sphere_count_sum[5m]))/sum(rate(scene_sphere_count_count[5m]))`),
+			"scene_spheres_rendered":  tsFixed(`sum(rate(scene_sphere_count_sum{cache_hit="false"}[5m]))/sum(rate(scene_sphere_count_count{cache_hit="false"}[5m]))`),
+			"scene_lights_requested":  tsFixed(`sum(rate(scene_light_count_sum[5m]))/sum(rate(scene_light_count_count[5m]))`),
+			"scene_lights_rendered":   tsFixed(`sum(rate(scene_light_count_sum{cache_hit="false"}[5m]))/sum(rate(scene_light_count_count{cache_hit="false"}[5m]))`),
 		},
 	},
 }
@@ -399,16 +473,24 @@ func standardScalarQueries(service string) []struct {
 // handlers' "restarts" series already windows a range query by its own step
 // for the same reason.
 //
-// Only request_rate/request_count answer to a counter: they're the only pair
-// built from one. The other three are already ratios, a quantile, or a
-// gauge — none has a count form, the same reasoning that keeps the scalar
-// block's windowed-mean tiles fixed-form in QueryFor above.
+// request_rate/request_count and error_rate_percent/error_count are the two
+// pairs built from a counter: total requests and failed requests. Everything
+// else here — avg/p95 latency, active requests — is a ratio, a quantile, or a
+// gauge, none of which has a count form, the same reasoning that keeps the
+// scalar block's windowed-mean tiles fixed-form in QueryFor above.
+//
+// error_count is the count of failures, not "the error rate as a count" —
+// there's no such thing, since error_rate_percent is already a ratio of two
+// rates rather than a windowed read of one counter. A failure count is the
+// closest counter-derived analogue, the same relationship request_count has
+// to request_rate.
 func standardTimeseriesQueries(service, step string) map[string]string {
 	s := fmt.Sprintf("%q", service)
 	return map[string]string{
 		"request_rate":       `sum(rate(http_server_requests_total{service_name=` + s + `}[5m]))`,
 		"request_count":      `sum(increase(http_server_requests_total{service_name=` + s + `}[` + step + `]))`,
 		"error_rate_percent": `sum(rate(http_server_requests_failure_total{service_name=` + s + `}[5m]))/(sum(rate(http_server_requests_success_total{service_name=` + s + `}[5m]))+sum(rate(http_server_requests_failure_total{service_name=` + s + `}[5m])))*100`,
+		"error_count":        `sum(increase(http_server_requests_failure_total{service_name=` + s + `}[` + step + `]))`,
 		"avg_duration_us":    `sum(rate(http_server_request_duration_microseconds_sum{service_name=` + s + `}[5m]))/sum(rate(http_server_request_duration_microseconds_count{service_name=` + s + `}[5m]))`,
 		"p95_duration_us":    `histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name=` + s + `}[5m])))`,
 		"active_requests":    `sum(http_server_requests_active_gauge{service_name=` + s + `})`,
