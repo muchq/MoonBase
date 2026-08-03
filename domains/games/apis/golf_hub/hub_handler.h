@@ -2,12 +2,14 @@
 #define DOMAINS_GAMES_APIS_GOLF_HUB_HUB_HANDLER_H
 
 #include <chrono>
+#include <condition_variable>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -41,7 +43,9 @@ namespace golf_hub {
 /// game layer on the reshaped libs/cards/golf engine. One SessionRegistry
 /// keyed by playerId carries all fan-out (async delivery — no writer
 /// threads); rooms are a mutex'd map, membership marked disconnected
-/// during ADR-0020 grace and reaped by on_expired.
+/// during ADR-0020 grace and reaped by on_expired — with one boot-time
+/// grace for restored members no session ever reclaims (#1295), since
+/// the registry that died with the old process took their timers.
 ///
 /// Redaction discipline: every game broadcast goes through the
 /// per-recipient Broadcast(ids, make) form with views built by ViewLocked
@@ -93,6 +97,9 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
                       std::shared_ptr<futility::otel::MetricsRecorder> metrics = nullptr,
                       std::shared_ptr<HubStore> store = nullptr,
                       std::shared_ptr<ChatStore> chat_store = nullptr, RateLimits limits = {});
+
+  /// Joins the boot reaper before the members it walks are torn down.
+  ~HubHandler() override;
 
   /// Runs `action` while mu_ holds (room_id, player_id) to be a current
   /// member, or returns false without running it. Membership cannot
@@ -283,6 +290,19 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   void BroadcastRoom(const std::string& room_id);
   void Reject(const std::string& player_id, std::string reason);
   void OnExpired(const std::string& player_id);
+  /// The reap decision both expiry paths share: one fresh read of the
+  /// member's room, then LeaveEverywhere unless the row says connected —
+  /// a row back at connected belongs to a live session somewhere (their
+  /// new instance, or a sibling that held them all along) and must not
+  /// be reaped from here. Returns whether the member was reaped.
+  bool ReapUnlessResumedElsewhere(const std::string& player_id);
+  /// Waits out one grace period from boot, then reaps every restored
+  /// member no session reclaimed (#1295): the registry can only arm
+  /// grace for seats it admitted, so without this a restart converts a
+  /// parked member's five-minute grace into forever-membership — and a
+  /// stale membership is what turns a share-link join into "room
+  /// unavailable or already in a room" (muchq.github.io#260).
+  void BootReaperMain();
   void Deliver(Outbox& outbox);
   /// Hands staged ops to the store's writer queue. Callers hold mu_ (see
   /// Writes above). Asynchronous — clients may be told before the row
@@ -363,6 +383,9 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   const std::shared_ptr<HubStore> store_;
   const std::shared_ptr<ChatStore> chat_store_;
   const RateLimits limits_;
+  /// ADR-0020 reconnect grace, shared by the registry's per-seat timers
+  /// and the boot reaper's one cohort deadline. Zero disables both.
+  const std::chrono::seconds grace_period_;
   /// Rides every commit and rider as the notify payload, so an instance
   /// can tell its own wake-ups from the ones that carry news.
   const std::string instance_id_;
@@ -385,8 +408,20 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
 
   std::unordered_map<std::string, std::string> player_room_;
   std::unordered_map<std::string, std::string> player_game_;
+
+  /// The boot cohort (#1295): members RestoreFromStore rebuilt, minus
+  /// everyone a session reclaimed since. Guarded by mu_; drained once by
+  /// the boot reaper at boot + grace_period_. The stop flag has its own
+  /// mutex so the destructor never contends with a reap in progress.
+  std::unordered_set<std::string> restored_pending_;
+  std::mutex reaper_mu_;
+  std::condition_variable reaper_cv_;
+  bool reaper_stop_ = false;
+  std::thread boot_reaper_;
+
   // Declared last: destroyed first, joining registry threads before the
-  // maps its on_expired callback touches go away.
+  // maps its on_expired callback touches go away. (The boot reaper is
+  // joined earlier still, explicitly, in ~HubHandler.)
   Registry registry_;
 };
 

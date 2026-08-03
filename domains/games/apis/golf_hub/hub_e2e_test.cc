@@ -9,10 +9,12 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -202,16 +204,34 @@ class NotAMemberChatStore final : public ChatStore {
   std::shared_ptr<ChatStore> delegate_;
 };
 
+// Distinct id space for the second instance (the hub_store_race_test /
+// pg suite pattern): two SequentialIdGenerators would both mint
+// "player-1", and a fresh seat on the second instance would then hold
+// the first instance's player id — a seat conflict for that player's
+// own resume.
+class RemoteIdGenerator final : public IdGenerator {
+ public:
+  std::string PlayerId() override { return "remote-player-" + std::to_string(++players_); }
+  std::string RoomId() override { return "remote-room-" + std::to_string(++rooms_); }
+  std::string GameCode() override { return "RGAME" + std::to_string(++games_); }
+
+ private:
+  int players_ = 0;
+  int rooms_ = 0;
+  int games_ = 0;
+};
+
 std::unique_ptr<SecondInstance> BuildSecondInstance(
     std::shared_ptr<TicketVault> vault, std::shared_ptr<HubStore> store,
     std::shared_ptr<ChatStore> chat_store,
     std::shared_ptr<futility::otel::MetricsRecorder> metrics =
-        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test")) {
+        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"),
+    std::chrono::seconds grace = std::chrono::seconds(60)) {
   auto instance = std::make_unique<SecondInstance>();
-  instance->handler = std::make_shared<HubHandler>(
-      std::move(vault), std::make_shared<cards::NoShuffleDealer>(),
-      std::make_shared<SequentialIdGenerator>(), std::chrono::seconds(60), std::move(metrics),
-      std::move(store), std::move(chat_store), UnlimitedRateLimits());
+  instance->handler =
+      std::make_shared<HubHandler>(std::move(vault), std::make_shared<cards::NoShuffleDealer>(),
+                                   std::make_shared<RemoteIdGenerator>(), grace, std::move(metrics),
+                                   std::move(store), std::move(chat_store), UnlimitedRateLimits());
   EXPECT_TRUE(instance->handler->RestoreFromStore().ok());
   instance->server = std::make_unique<moonbase::golf::GolfHubServer>(instance->handler);
 
@@ -947,6 +967,140 @@ TEST_F(GolfHubStreamFixture, BootCatchUpProjectsNothingWhenRowsNeverMoved) {
   auto leftover = resumed->stream.Receive(std::chrono::milliseconds(50));
   EXPECT_TRUE(!leftover.ok() || !leftover->has_value())
       << "boot catch-up projected a frame though no row moved";
+}
+
+// The boot reaper works on wall time and rows, not frames, so its tests
+// watch the store converge. Returns the last snapshot either way; the
+// caller's assertions name what never arrived.
+HubStore::Snapshot AwaitSnapshot(HubStore& store,
+                                 const std::function<bool(const HubStore::Snapshot&)>& predicate,
+                                 std::chrono::milliseconds budget = std::chrono::seconds(5)) {
+  const auto deadline = std::chrono::steady_clock::now() + budget;
+  while (true) {
+    auto snapshot = store.LoadSnapshot();
+    if (snapshot.ok() && predicate(*snapshot)) return *std::move(snapshot);
+    if (std::chrono::steady_clock::now() >= deadline) {
+      return snapshot.ok() ? *std::move(snapshot) : HubStore::Snapshot{};
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+  }
+}
+
+// The boot cohort (#1295): a restart converts a parked member's grace
+// into forever-membership, because the registry that owned their timer
+// died with the process. The successor's one boot deadline reaps what
+// no session reclaims — under the same row check as session expiry, so
+// each spare mode gets a seat here: bob's row says connected (a live
+// seat "elsewhere" — this generation), and carol resumes on the new
+// instance before the deadline. Only alice, parked with her row at
+// disconnected and never coming back, is the ghost.
+TEST_F(GolfHubStreamFixture, BootGraceReapsParkedGhostAndSparesLiveSeats) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  auto carol = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value() && carol.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(carol->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "roomState").has_value());
+
+  // alice and carol park; their clean closes write disconnected through.
+  alice->stream.Close();
+  carol->stream.Close();
+  auto parked = AwaitSnapshot(*store_, [](const HubStore::Snapshot& snapshot) {
+    int disconnected = 0;
+    for (const auto& member : snapshot.members) {
+      if (!member.connected) ++disconnected;
+    }
+    return disconnected == 2;
+  });
+  ASSERT_EQ(parked.members.size(), 3u);
+
+  // The "crash": a successor boots over the same rows while this
+  // generation stays parked, saying no goodbyes. Two seconds of boot
+  // grace — enough headroom for carol's loopback resume, short enough
+  // for a test.
+  auto instance =
+      BuildSecondInstance(vault_, store_, chat_store_,
+                          std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"),
+                          /*grace=*/std::chrono::seconds(2));
+  ASSERT_NE(instance, nullptr);
+  auto carol_back = OpenSeatVia(*instance->client, carol->resume_token);
+  ASSERT_TRUE(carol_back.has_value());
+  EXPECT_EQ(carol_back->player_id, carol->player_id);
+  ASSERT_TRUE(ReceiveCase(carol_back->stream, "sessionReady").has_value());
+
+  auto reaped = AwaitSnapshot(
+      *store_, [](const HubStore::Snapshot& snapshot) { return snapshot.members.size() == 2; },
+      std::chrono::seconds(6));
+  ASSERT_EQ(reaped.members.size(), 2u);
+  std::set<std::string> survivors;
+  for (const auto& member : reaped.members) survivors.insert(member.player_id);
+  EXPECT_TRUE(survivors.contains(bob->player_id)) << "connected row was reaped";
+  EXPECT_TRUE(survivors.contains(carol->player_id)) << "resumed seat was reaped";
+}
+
+// The muchq.github.io#260 symptom, hub half: a visitor parked in one
+// room follows a share link into another, and the stale membership the
+// old process's death fossilized must not answer "room unavailable or
+// already in a room" forever. Once the boot grace clears it, the resume
+// carries no room and the join lands.
+TEST_F(GolfHubStreamFixture, ShareLinkJoinSucceedsOnceBootGraceClearsStaleMembership) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  const std::string old_room = CreateRoomFor(*alice);
+  ASSERT_FALSE(old_room.empty());
+  alice->stream.Close();
+  AwaitSnapshot(*store_, [](const HubStore::Snapshot& snapshot) {
+    return snapshot.members.size() == 1 && !snapshot.members[0].connected;
+  });
+
+  auto instance =
+      BuildSecondInstance(vault_, store_, chat_store_,
+                          std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"),
+                          /*grace=*/std::chrono::seconds(1));
+  ASSERT_NE(instance, nullptr);
+  // The share link's room, created on the new instance while the old
+  // membership ages out.
+  auto bob = OpenSeatVia(*instance->client);
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
+  auto created = ReceiveCase(bob->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  const std::string shared_room = created->as_roomState_or_null()->roomId;
+
+  // The reap deletes alice's membership, and with it her empty room.
+  auto cleared = AwaitSnapshot(
+      *store_,
+      [&](const HubStore::Snapshot& snapshot) {
+        return snapshot.rooms.size() == 1 && snapshot.rooms[0] == shared_room;
+      },
+      std::chrono::seconds(6));
+  ASSERT_EQ(cleared.rooms.size(), 1u);
+
+  // The share-link visit: alice's resume finds no fossil membership,
+  // and the join that #260 saw rejected goes through.
+  auto alice_back = OpenSeatVia(*instance->client, alice->resume_token);
+  ASSERT_TRUE(alice_back.has_value());
+  auto ready = ReceiveCase(alice_back->stream, "sessionReady");
+  ASSERT_TRUE(ready.has_value());
+  EXPECT_FALSE(ready->as_sessionReady_or_null()->roomId.has_value());
+  moonbase::golf::JoinRoom join;
+  join.roomId = shared_room;
+  ASSERT_TRUE(alice_back->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  auto joined = ReceiveCase(alice_back->stream, "roomState");
+  ASSERT_TRUE(joined.has_value());
+  EXPECT_EQ(joined->as_roomState_or_null()->roomId, shared_room);
+  EXPECT_EQ(joined->as_roomState_or_null()->players.size(), 2u);
 }
 
 TEST_F(GolfHubStreamFixture, JoinHistoryIsCappedAtTheRetentionLimit) {

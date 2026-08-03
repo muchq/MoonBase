@@ -163,6 +163,7 @@ HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards
                           return WithMember(room_id, player_id, action);
                         })),
       limits_(limits),
+      grace_period_(grace_period),
       instance_id_(InstanceId()),
       registry_([this, grace_period] {
         Registry::Options options;
@@ -171,6 +172,15 @@ HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards
         options.on_expired = [this](const std::string& id) { OnExpired(id); };
         return options;
       }()) {}
+
+HubHandler::~HubHandler() {
+  {
+    const std::lock_guard<std::mutex> lock(reaper_mu_);
+    reaper_stop_ = true;
+  }
+  reaper_cv_.notify_all();
+  if (boot_reaper_.joinable()) boot_reaper_.join();
+}
 
 absl::Status HubHandler::RestoreFromStore() {
   auto snapshot = store_->LoadSnapshot();
@@ -193,6 +203,7 @@ absl::Status HubHandler::RestoreFromStore() {
     member.total_score = row.total_score;
     rooms_[row.room_id].members.emplace(row.player_id, member);
     player_room_[row.player_id] = row.room_id;
+    restored_pending_.insert(row.player_id);
   }
   for (HubStore::GameRow& row : snapshot->games) {
     if (row.state.has_value() && row.state->isOver()) {
@@ -214,7 +225,34 @@ absl::Status HubHandler::RestoreFromStore() {
   for (const auto& [room_id, room] : rooms_) SeedChatCursorLocked(room_id);
   LOG(INFO) << "hub restored " << snapshot->rooms.size() << " rooms, " << snapshot->members.size()
             << " members, " << snapshot->games.size() << " games";
+  // The old process's registry took every parked member's grace timer
+  // with it; this cohort deadline is their replacement (#1295). Zero
+  // grace keeps it disabled, matching the registry's own contract.
+  if (!restored_pending_.empty() && grace_period_ > std::chrono::seconds(0) &&
+      !boot_reaper_.joinable()) {
+    boot_reaper_ = std::thread([this] { BootReaperMain(); });
+  }
   return absl::OkStatus();
+}
+
+void HubHandler::BootReaperMain() {
+  {
+    std::unique_lock<std::mutex> lock(reaper_mu_);
+    reaper_cv_.wait_for(lock, grace_period_, [this] { return reaper_stop_; });
+    if (reaper_stop_) return;
+  }
+  std::vector<std::string> pending;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    pending.assign(restored_pending_.begin(), restored_pending_.end());
+    restored_pending_.clear();
+  }
+  for (const std::string& player_id : pending) {
+    // A resume that races this drain is safe either way: its admission
+    // already staged connected=true, and the reap's fresh read flushes
+    // before it looks, so the row spares the seat.
+    if (ReapUnlessResumedElsewhere(player_id)) Count("restored_seats_reaped");
+  }
 }
 
 void HubHandler::SeedChatCursorLocked(const std::string& room_id) {
@@ -597,6 +635,9 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
   SetConnected(player_id, true);
   {
     const std::lock_guard<std::mutex> lock(mu_);
+    // A reclaimed seat leaves the boot cohort: its lifecycle belongs to
+    // the registry's own grace from here on (#1295).
+    restored_pending_.erase(player_id);
     const auto room_it = player_room_.find(player_id);
     if (room_it != player_room_.end()) room = room_it->second;
     // A resumed seat mid-game gets its current view back immediately.
@@ -1413,13 +1454,22 @@ void HubHandler::OnExpired(const std::string& player_id) {
   // Grace ran out (ADR-0020): the seat is gone; free the room and game
   // slots and tell whoever remains. Runs on the registry's expiry thread.
   Count("stream_seats_expired");
+  ReapUnlessResumedElsewhere(player_id);
+}
+
+bool HubHandler::ReapUnlessResumedElsewhere(const std::string& player_id) {
   Outbox outbox;
   Writes writes;
+  bool reaped = false;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     // Cross-instance grace (#1194 step 3): the player may have resumed
     // on another instance while parked here. One fresh read decides —
-    // a member row back at connected belongs to its new instance.
+    // a member row back at connected belongs to its new instance. The
+    // boot reaper leans on the same check from the other side: a row
+    // still at connected after a whole boot grace may be a sibling's
+    // live seat, so it stays (#1295 records the orphaned-row residue
+    // this leaves — only that seat's owner could have known better).
     bool resumed_elsewhere = false;
     if (const auto room_it = player_room_.find(player_id); room_it != player_room_.end()) {
       RefreshRoomLocked(room_it->second, outbox);
@@ -1431,9 +1481,11 @@ void HubHandler::OnExpired(const std::string& player_id) {
     if (!resumed_elsewhere) {
       LeaveEverywhere(player_id, outbox, writes);
       EnqueueWritesLocked(writes);
+      reaped = true;
     }
   }
   Deliver(outbox);
+  return reaped;
 }
 
 void HubHandler::Deliver(Outbox& outbox) {
