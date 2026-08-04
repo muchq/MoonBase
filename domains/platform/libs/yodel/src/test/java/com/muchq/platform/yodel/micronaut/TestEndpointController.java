@@ -15,4 +15,12 @@ public class TestEndpointController {
   public String boom() {
     throw new RuntimeException("boom");
   }
+
+  // A parameterized route: the one shape where the matched template and
+  // the raw path differ, which is what the route label's bounded-
+  // cardinality argument rests on (#1303).
+  @Get("/widgets/{id}")
+  public String widget(String id) {
+    return id;
+  }
 }

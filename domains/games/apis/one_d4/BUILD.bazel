@@ -673,6 +673,7 @@ java_test_suite(
     size = "small",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/api/ContentTypeHandlingTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/HealthProbeRouteLabelTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexResponseWireTest.java",
     ],
     runtime_deps = [
@@ -690,6 +691,11 @@ java_test_suite(
         # connection to api.chess.com.
         ":e2e_support",
         ":module",
+        # HealthProbeRouteLabelTest reads the filter's snapshot to pin the
+        # jaxrs-bridge route template (#1303), so yodel moves from a purely
+        # runtime integration to a compile-time one for this suite.
+        "//domains/platform/libs/yodel",
+        "//domains/platform/libs/yodel:micronaut",
         artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-http-server-netty"),
         artifact("io.micronaut:micronaut-inject"),

@@ -43,6 +43,37 @@ func TestRegistry_OrderAndEntriesAgree(t *testing.T) {
 	}
 }
 
+// The #1303 guard: every standard Serving expression excludes the probe
+// route, per selector — a healthcheck's steady GET /health otherwise floors
+// every request count and drags every latency figure toward its
+// sub-millisecond durations, indistinguishable from real traffic. The gauge
+// included: a negative matcher also matches series with no route label at
+// all, so the filter subtracts futility's route-labeled gauge and passes
+// yodel's route-less one through whole — safe on every selector.
+func TestRegistry_StandardServingQueriesExcludeTheProbeRoute(t *testing.T) {
+	// Per http_server_* selector, not per query: error_rate_percent names
+	// three selectors, and a Contains over the whole expression passes while
+	// two of them still count probes.
+	selectorPattern := regexp.MustCompile(`http_server_[a-z_]+\{[^}]*\}`)
+	check := func(t *testing.T, what, query string) {
+		t.Helper()
+		selectors := selectorPattern.FindAllString(query, -1)
+		assert.NotEmpty(t, selectors, "%s has no http_server selector: %s", what, query)
+		for _, selector := range selectors {
+			assert.Contains(t, selector, `route!="/health"`,
+				"%s counts probe traffic in %q: %s", what, selector, query)
+		}
+	}
+	for _, name := range serviceOrder {
+		for _, q := range standardScalarQueries(name) {
+			check(t, "scalar for "+name, q.Query)
+		}
+		for key, query := range standardTimeseriesQueries(name, "5m") {
+			check(t, "timeseries "+key+" for "+name, query)
+		}
+	}
+}
+
 // The UI classifies series by name: anything in its STANDARD_SERIES
 // mirror renders on the standard charts, so a custom key that collides
 // is silently reclassified and never charts. The registry comment asks
@@ -292,10 +323,12 @@ func TestStandardQueries_GoldenStrings(t *testing.T) {
 	for _, q := range queries {
 		all = append(all, q.Query)
 	}
-	assert.Contains(t, all, `sum(rate(http_server_requests_total{service_name="golf_hub"}[5m]))`)
 	assert.Contains(t, all,
-		`histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name="golf_hub"}[5m])))`)
-	assert.Contains(t, all, `sum(http_server_requests_active_gauge{service_name="golf_hub"})`)
+		`sum(rate(http_server_requests_total{service_name="golf_hub",route!="/health"}[5m]))`)
+	assert.Contains(t, all,
+		`histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name="golf_hub",route!="/health"}[5m])))`)
+	assert.Contains(t, all,
+		`sum(http_server_requests_active_gauge{service_name="golf_hub",route!="/health"})`)
 }
 
 func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T) {
@@ -373,7 +406,7 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 func TestMetricsHandler_GetServiceMetrics_NoCustomServiceKeepsEmptyArray(t *testing.T) {
 	mockClient := &mockPrometheusClient{
 		queryResponses: map[string]*QueryResponse{
-			`sum(rate(http_server_requests_total{service_name="mithril"}[5m]))`: scalarResponse("2.5"),
+			`sum(rate(http_server_requests_total{service_name="mithril",route!="/health"}[5m]))`: scalarResponse("2.5"),
 		},
 	}
 
@@ -525,10 +558,10 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_StandardPlusCustom(t *testin
 func TestStandardTimeseriesQueries_RequestRateAndCountAreIndependentSeries(t *testing.T) {
 	queries := standardTimeseriesQueries("golf_hub", "5m")
 	assert.Equal(t,
-		`sum(rate(http_server_requests_total{service_name="golf_hub"}[5m]))`,
+		`sum(rate(http_server_requests_total{service_name="golf_hub",route!="/health"}[5m]))`,
 		queries["request_rate"])
 	assert.Equal(t,
-		`sum(increase(http_server_requests_total{service_name="golf_hub"}[5m]))`,
+		`sum(increase(http_server_requests_total{service_name="golf_hub",route!="/health"}[5m]))`,
 		queries["request_count"])
 
 	// A different step changes request_count's window but not request_rate's
@@ -536,7 +569,7 @@ func TestStandardTimeseriesQueries_RequestRateAndCountAreIndependentSeries(t *te
 	// points are.
 	withStep := standardTimeseriesQueries("golf_hub", "30s")
 	assert.Equal(t,
-		`sum(increase(http_server_requests_total{service_name="golf_hub"}[30s]))`,
+		`sum(increase(http_server_requests_total{service_name="golf_hub",route!="/health"}[30s]))`,
 		withStep["request_count"])
 	assert.Equal(t, queries["request_rate"], withStep["request_rate"])
 }
@@ -548,12 +581,12 @@ func TestStandardTimeseriesQueries_RequestRateAndCountAreIndependentSeries(t *te
 func TestStandardTimeseriesQueries_ErrorCountIsTheFailureCounterNotTheRatio(t *testing.T) {
 	queries := standardTimeseriesQueries("golf_hub", "5m")
 	assert.Equal(t,
-		`sum(increase(http_server_requests_failure_total{service_name="golf_hub"}[5m]))`,
+		`sum(increase(http_server_requests_failure_total{service_name="golf_hub",route!="/health"}[5m]))`,
 		queries["error_count"])
 
 	withStep := standardTimeseriesQueries("golf_hub", "30s")
 	assert.Equal(t,
-		`sum(increase(http_server_requests_failure_total{service_name="golf_hub"}[30s]))`,
+		`sum(increase(http_server_requests_failure_total{service_name="golf_hub",route!="/health"}[30s]))`,
 		withStep["error_count"])
 	// error_rate_percent itself never changes: it isn't wrapped in rate()/
 	// increase() over a counter the way request_rate/error_count are, so
@@ -572,7 +605,7 @@ func TestStandardTimeseriesQueries_LatencyAndActiveHaveNoCountForm(t *testing.T)
 }
 
 func TestMetricsHandler_GetServiceMetricsTimeSeries_RequestCountBucketsByTheRangesStep(t *testing.T) {
-	countQuery := `sum(increase(http_server_requests_total{service_name="golf_hub"}[1h]))`
+	countQuery := `sum(increase(http_server_requests_total{service_name="golf_hub",route!="/health"}[1h]))`
 	handler := &MetricsHandler{
 		promClient: &mockPrometheusClient{
 			queryRangeResponses: map[string]*QueryResponse{
@@ -612,7 +645,7 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_RequestCountBucketsByTheRang
 // a copy-paste that left it reading the wrong counter would still pass a
 // test that only checked the window.
 func TestMetricsHandler_GetServiceMetricsTimeSeries_ErrorCountBucketsByTheRangesStep(t *testing.T) {
-	countQuery := `sum(increase(http_server_requests_failure_total{service_name="golf_hub"}[1h]))`
+	countQuery := `sum(increase(http_server_requests_failure_total{service_name="golf_hub",route!="/health"}[1h]))`
 	handler := &MetricsHandler{
 		promClient: &mockPrometheusClient{
 			queryRangeResponses: map[string]*QueryResponse{
@@ -895,6 +928,18 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 	seen := map[string]int{}
 	for what, queries := range labelled {
 		for _, query := range queries {
+			// The probes tile (#1303) is the one entry that reads the standard
+			// http_server family rather than an IndexWorker instrument: it
+			// shows the healthcheck traffic probeFilter subtracts from every
+			// Serving number. It still has to be scoped and route-selected.
+			if strings.Contains(query, "http_server_requests_total") {
+				assert.Contains(t, query, `service_name="one_d4"`,
+					"%s reads the standard family unscoped: %s", what, query)
+				assert.Contains(t, query, `route="/health"`,
+					"%s reads the standard family without naming the probe route,"+
+						" so it double-counts serving traffic: %s", what, query)
+				continue
+			}
 			matches := oneD4SelectorPattern.FindAllStringSubmatch(query, -1)
 			assert.NotEmpty(t, matches, "%s queries no one_d4 instrument: %s", what, query)
 			for _, match := range matches {
@@ -1102,7 +1147,7 @@ func TestStandardQueries_RequestsIsWindowedNotCumulative(t *testing.T) {
 	}
 	require.NotEmpty(t, requests, "no query maps to RequestsTotal")
 	assert.Equal(t,
-		`sum(increase(http_server_requests_total{service_name="golf_hub"}[5m]))`,
+		`sum(increase(http_server_requests_total{service_name="golf_hub",route!="/health"}[5m]))`,
 		requests)
 }
 

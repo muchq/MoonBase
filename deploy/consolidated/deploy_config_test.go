@@ -86,6 +86,31 @@ func TestPortraitHasNoHealthcheckOnTheTraceRoute(t *testing.T) {
 	}
 }
 
+// The /health literal lives in three places that nothing structurally ties
+// together: one_d4's probe request line here, prom_proxy's probeFilter
+// (which subtracts route="/health" from every Serving number, #1303), and
+// its Probes tile (which selects route="/health"). A renamed probe path
+// would silently un-exclude the probe from Serving while the Probes tile
+// read a permanent zero — the shape prom_proxy's own comments call "a zero
+// that means healthy and also broken". This pins the compose side to the
+// same literal the query side's TestRegistry_StandardServingQueriesExclude-
+// TheProbeRoute pins.
+func TestOneD4HealthcheckProbesTheRouteProbeFilterSubtracts(t *testing.T) {
+	block := serviceBlock(t, "compose.yaml", "one_d4")
+	if !strings.Contains(block, "ghcr.io/muchq/one_d4") {
+		t.Fatalf("did not find one_d4's image in its compose block; this test is no longer "+
+			"reading the service it claims to. Block was:\n%s", block)
+	}
+	if !strings.Contains(block, "healthcheck") {
+		t.Fatal("one_d4's compose block has no healthcheck; if the probe moved or was removed, " +
+			"prom_proxy's probeFilter and Probes tile (#1303) need the same decision applied")
+	}
+	if !strings.Contains(block, "GET /health HTTP") {
+		t.Error("one_d4's healthcheck no longer probes GET /health; prom_proxy subtracts and " +
+			"charts exactly route=\"/health\" (#1303), so move all three literals together")
+	}
+}
+
 // directiveLines returns the file's non-empty, non-comment lines, trimmed.
 func directiveLines(t *testing.T, name string) []string {
 	t.Helper()

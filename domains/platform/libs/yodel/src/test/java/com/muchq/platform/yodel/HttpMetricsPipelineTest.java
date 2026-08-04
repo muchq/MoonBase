@@ -11,7 +11,7 @@ public class HttpMetricsPipelineTest {
   public void withoutEndpointRecordsInMemoryAndNeverExports() {
     try (HttpMetricsPipeline pipeline = HttpMetricsPipeline.fromEnv(Map.of())) {
       pipeline.metrics().recordRequestStart("GET");
-      assertThat(pipeline.metrics().snapshot()).hasSize(1);
+      assertThat(pipeline.metrics().activeSnapshot()).hasSize(1);
       assertThat(pipeline.metrics().serviceName()).isEmpty();
     }
   }

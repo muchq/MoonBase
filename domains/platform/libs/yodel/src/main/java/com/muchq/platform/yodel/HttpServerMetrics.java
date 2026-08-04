@@ -1,6 +1,7 @@
 package com.muchq.platform.yodel;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -11,9 +12,20 @@ import java.util.concurrent.atomic.LongAdder;
 /**
  * The shared HTTP serving instruments (http_server_requests, http_server_requests_success /
  * _failure, http_server_requests_active_gauge, http_server_request_duration_microseconds) labeled
- * by service_name and http_method, mirroring futility/otel (C++) and server_pal (Rust) so
- * prom_proxy's standard block reads Java services with zero changes
+ * by service_name, http_method, and route, mirroring futility/otel (C++) so prom_proxy can separate
+ * probe traffic from serving traffic (https://github.com/muchq/MoonBase/issues/1303) while its
+ * standard block reads Java services with zero changes
  * (https://github.com/muchq/MoonBase/issues/1212).
+ *
+ * <p>The route is the matched template ("/games/{id}"), never the raw path, so the label stays
+ * bounded. It is only knowable once routing has happened, which shapes the recording contract: the
+ * counters and the histogram move at completion (or abandonment), where the route is in hand; only
+ * the in-flight gauge moves at request start, and it stays keyed by method alone. The requests
+ * counter therefore counts completed-or-abandoned requests rather than started ones — the same
+ * totals, observed a request-duration later. Once in-flight requests drain, requests equals
+ * success + failure plus the abandoned count (which has no counter of its own: an abandoned
+ * request increments requests and records no outcome); a snapshot taken mid-request can
+ * legitimately read requests ahead of the outcomes.
  */
 public final class HttpServerMetrics {
   // Microsecond-shaped bucket boundaries for the HTTP duration histogram,
@@ -40,7 +52,8 @@ public final class HttpServerMetrics {
 
   private final String serviceName;
   private final long startTimeUnixNanos;
-  private final ConcurrentHashMap<String, MethodStats> byMethod = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<RouteKey, RouteStats> byRoute = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<String, AtomicLong> activeByMethod = new ConcurrentHashMap<>();
 
   public HttpServerMetrics(String serviceName, long startTimeUnixNanos) {
     this.serviceName = serviceName;
@@ -55,15 +68,16 @@ public final class HttpServerMetrics {
     return startTimeUnixNanos;
   }
 
+  /** Routing hasn't happened yet, so only the in-flight gauge can move here. */
   public void recordRequestStart(String httpMethod) {
-    MethodStats stats = statsFor(httpMethod);
-    stats.requests.increment();
-    stats.active.incrementAndGet();
+    activeFor(httpMethod).incrementAndGet();
   }
 
-  public void recordRequestComplete(String httpMethod, int statusCode, double durationMicros) {
-    MethodStats stats = statsFor(httpMethod);
-    stats.active.decrementAndGet();
+  public void recordRequestComplete(
+      String httpMethod, String route, int statusCode, double durationMicros) {
+    activeFor(httpMethod).decrementAndGet();
+    RouteStats stats = statsFor(httpMethod, route);
+    stats.requests.increment();
     if (statusCode < 400) {
       stats.success.increment();
     } else {
@@ -75,46 +89,66 @@ public final class HttpServerMetrics {
   }
 
   /**
-   * A request that ended without a response (the client went away first): only the in-flight gauge
-   * moves, matching server_pal's drop-guard semantics.
+   * A request that ended without a response (the client went away first): it counts as a request —
+   * it was real load — but records no outcome and no duration, matching server_pal's drop-guard
+   * semantics.
    */
-  public void recordRequestAbandoned(String httpMethod) {
-    statsFor(httpMethod).active.decrementAndGet();
+  public void recordRequestAbandoned(String httpMethod, String route) {
+    activeFor(httpMethod).decrementAndGet();
+    statsFor(httpMethod, route).requests.increment();
   }
 
-  /** Point-in-time cumulative totals per method, ordered by method for stable payloads. */
-  public List<MethodSnapshot> snapshot() {
-    List<MethodSnapshot> out = new ArrayList<>(byMethod.size());
-    byMethod.entrySet().stream()
-        .sorted(Map.Entry.comparingByKey())
+  /** Point-in-time cumulative totals per (method, route), ordered for stable payloads. */
+  public List<RouteSnapshot> snapshot() {
+    List<RouteSnapshot> out = new ArrayList<>(byRoute.size());
+    byRoute.entrySet().stream()
+        .sorted(
+            Comparator.comparing((Map.Entry<RouteKey, RouteStats> e) -> e.getKey().httpMethod())
+                .thenComparing(e -> e.getKey().route()))
         .forEach(e -> out.add(e.getValue().snapshot(e.getKey())));
     return out;
   }
 
-  private MethodStats statsFor(String httpMethod) {
-    return byMethod.computeIfAbsent(httpMethod, m -> new MethodStats());
+  /** Point-in-time in-flight counts per method, ordered by method for stable payloads. */
+  public List<ActiveSnapshot> activeSnapshot() {
+    List<ActiveSnapshot> out = new ArrayList<>(activeByMethod.size());
+    activeByMethod.entrySet().stream()
+        .sorted(Map.Entry.comparingByKey())
+        .forEach(e -> out.add(new ActiveSnapshot(e.getKey(), e.getValue().get())));
+    return out;
   }
 
-  public record MethodSnapshot(
+  private RouteStats statsFor(String httpMethod, String route) {
+    return byRoute.computeIfAbsent(new RouteKey(httpMethod, route), k -> new RouteStats());
+  }
+
+  private AtomicLong activeFor(String httpMethod) {
+    return activeByMethod.computeIfAbsent(httpMethod, m -> new AtomicLong());
+  }
+
+  private record RouteKey(String httpMethod, String route) {}
+
+  public record ActiveSnapshot(String httpMethod, long active) {}
+
+  public record RouteSnapshot(
       String httpMethod,
+      String route,
       long requests,
       long success,
       long failure,
-      long active,
       double durationSumMicros,
       long durationCount,
       long[] bucketCounts) {}
 
-  private static final class MethodStats {
+  private static final class RouteStats {
     final LongAdder requests = new LongAdder();
     final LongAdder success = new LongAdder();
     final LongAdder failure = new LongAdder();
-    final AtomicLong active = new AtomicLong();
     final DoubleAdder durationSumMicros = new DoubleAdder();
     final LongAdder durationCount = new LongAdder();
     final LongAdder[] buckets;
 
-    MethodStats() {
+    RouteStats() {
       buckets = new LongAdder[BUCKET_BOUNDS.length + 1];
       for (int i = 0; i < buckets.length; i++) {
         buckets[i] = new LongAdder();
@@ -131,17 +165,17 @@ public final class HttpServerMetrics {
       return buckets[BUCKET_BOUNDS.length];
     }
 
-    MethodSnapshot snapshot(String httpMethod) {
+    RouteSnapshot snapshot(RouteKey key) {
       long[] counts = new long[buckets.length];
       for (int i = 0; i < buckets.length; i++) {
         counts[i] = buckets[i].sum();
       }
-      return new MethodSnapshot(
-          httpMethod,
+      return new RouteSnapshot(
+          key.httpMethod(),
+          key.route(),
           requests.sum(),
           success.sum(),
           failure.sum(),
-          active.get(),
           durationSumMicros.sum(),
           durationCount.sum(),
           counts);
