@@ -186,7 +186,7 @@ absl::Status HubHandler::RestoreFromStore() {
   // Once, before serving. A second restore would stack a new cohort
   // behind a reaper that never re-arms — forever-membership again, the
   // exact silent shape #1295 closed — so refuse it loudly instead.
-  if (boot_reaper_.joinable()) {
+  if (restored_) {
     return absl::FailedPreconditionError("RestoreFromStore already ran");
   }
   auto snapshot = store_->LoadSnapshot();
@@ -242,6 +242,7 @@ absl::Status HubHandler::RestoreFromStore() {
   if (!restored_pending_.empty() && grace_period_ > std::chrono::seconds(0)) {
     boot_reaper_ = std::thread([this] { BootReaperMain(); });
   }
+  restored_ = true;
   return absl::OkStatus();
 }
 
@@ -484,7 +485,11 @@ bool HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore:
     // cohort's claim is the remote mirror of Play's local erase: a
     // member who resumed on a sibling during our boot window — and may
     // park again before our deadline — gets their full grace from the
-    // sibling's registry, not the remainder of ours (#1295).
+    // sibling's registry, not the remainder of ours (#1295). This is a
+    // sample, not a subscription: a resume-and-repark whose connected
+    // pulse no wake ever showed us stays in the cohort and reaps at our
+    // deadline — closing that for real needs row-level presence
+    // ownership, the same schema gap #1295's residue note records.
     if (row.connected) restored_pending_.erase(row.player_id);
   }
   if (members.size() != room.members.size()) {

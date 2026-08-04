@@ -414,6 +414,10 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// the boot reaper at boot + grace_period_. The stop flag has its own
   /// mutex so the destructor never contends with a reap in progress.
   std::unordered_set<std::string> restored_pending_;
+  /// RestoreFromStore ran to completion — the real once-guard, since a
+  /// restore that found nothing (or zero grace) arms no thread and a
+  /// joinable() check would wave the second call through.
+  bool restored_ = false;
   std::mutex reaper_mu_;
   std::condition_variable reaper_cv_;
   bool reaper_stop_ = false;
