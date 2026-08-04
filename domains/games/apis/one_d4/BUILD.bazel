@@ -615,6 +615,12 @@ java_test_suite(
     ],
     runtime_deps = [
         "//domains/platform/libs/logging",
+        # The same integration the binary carries. IndexerModule injects yodel's
+        # CustomMetrics into the worker, and the bean that supplies it lives here —
+        # without it a context boot fails on a missing bean rather than on anything
+        # these tests are about. Not a duplicate of the compile-time yodel dep
+        # that rides in through :module — that is :yodel only, not :micronaut.
+        "//domains/platform/libs/yodel:micronaut",
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
