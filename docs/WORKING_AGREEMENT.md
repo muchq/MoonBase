@@ -75,9 +75,15 @@ follow-ups for what you deliberately left out rather than leaving it implicit.
 
 Before committing anything non-trivial, run a self-review panel:
 
-- **Three independent agents, three distinct lenses.** Typically correctness
-  and control flow; data access, SQL, and resource safety; and tests, docs, and
-  CI gates. The lenses should barely overlap.
+- **Four independent agents, four distinct lenses.** Typically correctness
+  and control flow; data access, SQL, and resource safety; tests, docs, and
+  CI gates; and altitude. The lenses should barely overlap.
+- **The altitude lens re-asks the pre-code question of the finished diff.**
+  Is this change at the right level, or a patch over a symptom of something
+  bigger? Does each new abstraction earn its keep, and would less code do
+  (see Design and simplification)? The other lenses stare at what the diff
+  does; this one asks whether it should exist in this shape at all — the
+  review most likely to be skipped, precisely because nothing is "wrong."
 - **Panel agents read; they never write.** No edits, no `scripts/mutation-check`,
   no "revert it and see what happens" — not even a change the agent fully
   intends to undo. The panel runs several agents at once over the same files,
@@ -85,6 +91,13 @@ Before committing anything non-trivial, run a self-review panel:
   dies mid-run leaves deliberately-broken code in the tree; and a dirty tree
   invites a commit that ships the mutation. An agent that wants to know whether
   a test bites reports that as a finding instead of finding out.
+- **Enforce read-only structurally, not by instruction.** Convene panels on an
+  agent type without edit or write tools, and keep write-shaped questions out
+  of the briefs — "verify this test fails on the old code" is an instruction
+  to mutate the tree no matter how firmly the same brief says never to. The
+  rule above was already written when #1297's panel got write-capable agents
+  with exactly such briefs; every predicted failure followed, including the
+  mystery mutant and edits silently reverted under a live session.
 - **Each agent hunts, then tries to refute its own findings** before reporting.
   This is what keeps the signal-to-noise usable.
 - **Verify the survivors yourself** before acting on them. Agents are sometimes
