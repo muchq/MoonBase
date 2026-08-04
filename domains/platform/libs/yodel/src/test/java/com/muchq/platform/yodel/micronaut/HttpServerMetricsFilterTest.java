@@ -101,6 +101,33 @@ public class HttpServerMetricsFilterTest {
   }
 
   /**
+   * The method label has the same bounded-cardinality contract as the route label (#1303), on a
+   * different mechanism: the filter reads {@code getMethod().name()}, the enum, which collapses
+   * every verb it doesn't know to {@code CUSTOM}. Reverting to {@code getMethodName()} — the raw
+   * wire token — hands a scanner spraying invented verbs a label value and a gauge entry per token.
+   * Driven over a real socket so the netty parsing leg is the one measured.
+   */
+  @Test
+  public void aCustomVerbCollapsesToTheBoundedMethodEnum() throws Exception {
+    HttpRequest request =
+        HttpRequest.newBuilder()
+            .uri(URI.create(baseUrl + "/yodel-test/ok"))
+            .method("BREW", HttpRequest.BodyPublishers.noBody())
+            .build();
+    client.send(request, HttpResponse.BodyHandlers.discarding());
+
+    HttpServerMetricsFilter filter =
+        server.getApplicationContext().getBean(HttpServerMetricsFilter.class);
+    assertThat(filter.metrics().snapshot())
+        .isNotEmpty()
+        .extracting(HttpServerMetrics.RouteSnapshot::httpMethod)
+        .containsOnly("CUSTOM");
+    assertThat(filter.metrics().activeSnapshot())
+        .extracting(HttpServerMetrics.ActiveSnapshot::httpMethod)
+        .containsOnly("CUSTOM");
+  }
+
+  /**
    * A chain that throws synchronously — a filter further down blowing up during setup, before any
    * publisher exists — must still count the request. Without the defer around {@code
    * chain.proceed}, no Mono is ever constructed, none of the completion hooks fire, and the request

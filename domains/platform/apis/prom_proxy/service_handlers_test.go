@@ -1027,6 +1027,26 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 			" failures: %s", runFailure.Counter)
 }
 
+// The Probes tile is the visible half of probeFilter's subtraction (#1303), and
+// the guards around it are one-sided without this: the per-selector exclusion
+// test and the carve-out above both pass with the tile deleted outright — the
+// carve-out only fires on queries that already contain the route literal. Pin
+// existence, so the subtracted traffic is charted somewhere by construction.
+func TestOneD4KeepsTheProbesTile(t *testing.T) {
+	entry := serviceRegistry["one_d4"]
+	found := false
+	for _, def := range entry.CustomScalars {
+		for _, query := range def.AllQueries() {
+			if strings.Contains(query, `route="/health"`) {
+				found = true
+			}
+		}
+	}
+	assert.True(t, found,
+		`no one_d4 tile reads route="/health": the traffic probeFilter subtracts from every`+
+			" Serving number is charted nowhere, and a failing probe looks exactly like health")
+}
+
 // --- The count/rate toggle (#1287) ------------------------------------------
 
 func TestMetricsHandler_GetServiceMetrics_RateViewSelectsTheRateForm(t *testing.T) {
