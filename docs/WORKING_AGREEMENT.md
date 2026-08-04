@@ -75,9 +75,15 @@ follow-ups for what you deliberately left out rather than leaving it implicit.
 
 Before committing anything non-trivial, run a self-review panel:
 
-- **Three independent agents, three distinct lenses.** Typically correctness
-  and control flow; data access, SQL, and resource safety; and tests, docs, and
-  CI gates. The lenses should barely overlap.
+- **Four independent agents, four distinct lenses.** Typically correctness
+  and control flow; data access, SQL, and resource safety; tests, docs, and
+  CI gates; and altitude. The lenses should barely overlap.
+- **The altitude lens re-asks the pre-code question of the finished diff.**
+  Is this change at the right level, or a patch over a symptom of something
+  bigger? Does each new abstraction earn its keep, and would less code do
+  (see Design and simplification)? The other lenses stare at what the diff
+  does; this one asks whether it should exist in this shape at all — the
+  review most likely to be skipped, precisely because nothing is "wrong."
 - **Panel agents read; they never write.** No edits, no `scripts/mutation-check`,
   no "revert it and see what happens" — not even a change the agent fully
   intends to undo. The panel runs several agents at once over the same files,
