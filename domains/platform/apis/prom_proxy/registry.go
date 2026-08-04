@@ -261,6 +261,10 @@ var serviceRegistry = map[string]serviceEntry{
 			counter("Sessions", "refused", "", `stream_admissions_refused_total`),
 			counter("Sessions", "disconnects", "", `stream_disconnects_total`),
 			counter("Sessions", "seats_expired", "", `stream_seats_expired_total`),
+			// Boot-cohort reaps (#1295): fires unattended at boot+grace, so
+			// this series is the only evidence the reaper runs at all — a
+			// broken one is indistinguishable from a hub with no ghosts.
+			counter("Sessions", "restored_reaped", "", `restored_seats_reaped_total`),
 			counter("Activity", "commands", "", `stream_commands_total`),
 			counter("Activity", "events", "", `stream_events_total`),
 			counter("Activity", "rejections", "", `stream_rejections_total`),

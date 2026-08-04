@@ -9,10 +9,12 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -206,12 +208,13 @@ std::unique_ptr<SecondInstance> BuildSecondInstance(
     std::shared_ptr<TicketVault> vault, std::shared_ptr<HubStore> store,
     std::shared_ptr<ChatStore> chat_store,
     std::shared_ptr<futility::otel::MetricsRecorder> metrics =
-        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test")) {
+        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"),
+    std::chrono::seconds grace = std::chrono::seconds(60)) {
   auto instance = std::make_unique<SecondInstance>();
-  instance->handler = std::make_shared<HubHandler>(
-      std::move(vault), std::make_shared<cards::NoShuffleDealer>(),
-      std::make_shared<SequentialIdGenerator>(), std::chrono::seconds(60), std::move(metrics),
-      std::move(store), std::move(chat_store), UnlimitedRateLimits());
+  instance->handler =
+      std::make_shared<HubHandler>(std::move(vault), std::make_shared<cards::NoShuffleDealer>(),
+                                   std::make_shared<RemoteIdGenerator>(), grace, std::move(metrics),
+                                   std::move(store), std::move(chat_store), UnlimitedRateLimits());
   EXPECT_TRUE(instance->handler->RestoreFromStore().ok());
   instance->server = std::make_unique<moonbase::golf::GolfHubServer>(instance->handler);
 
@@ -947,6 +950,403 @@ TEST_F(GolfHubStreamFixture, BootCatchUpProjectsNothingWhenRowsNeverMoved) {
   auto leftover = resumed->stream.Receive(std::chrono::milliseconds(50));
   EXPECT_TRUE(!leftover.ok() || !leftover->has_value())
       << "boot catch-up projected a frame though no row moved";
+}
+
+// The boot reaper works on wall time and rows, not frames, so its tests
+// watch the store converge. Returns the last snapshot either way; the
+// caller's assertions name what never arrived.
+HubStore::Snapshot AwaitSnapshot(HubStore& store,
+                                 const std::function<bool(const HubStore::Snapshot&)>& predicate,
+                                 std::chrono::milliseconds budget = std::chrono::seconds(5)) {
+  const auto deadline = std::chrono::steady_clock::now() + budget;
+  while (true) {
+    auto snapshot = store.LoadSnapshot();
+    if (snapshot.ok() && predicate(*snapshot)) return *std::move(snapshot);
+    if (std::chrono::steady_clock::now() >= deadline) {
+      return snapshot.ok() ? *std::move(snapshot) : HubStore::Snapshot{};
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+  }
+}
+
+// The boot cohort's happy path (#1295): a restart converts a parked
+// member's grace into forever-membership, because the registry that
+// owned their timer died with the process. The successor's one boot
+// deadline reaps what no session reclaims — alice, parked and never
+// coming back — while bob (row connected) and carol (resumes here)
+// survive. A smoke of the whole flow, not a unique pin of any one
+// guard: the restore filter alone spares bob, and carol's Play erase
+// and the drain's row check are indistinguishable from her survival.
+// The per-guard pins live in BootGraceNeverClaimsASeatRestoredConnected
+// (filter), BootGraceCedesASeatObservedConnectedMidWindow (cede), and
+// BootGraceDrainSparesARowThatTurnedConnectedUnobserved (drain check).
+TEST_F(GolfHubStreamFixture, BootGraceReapsParkedGhostAndSparesLiveSeats) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  auto carol = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value() && carol.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(carol->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "roomState").has_value());
+
+  // alice and carol park; their clean closes write disconnected through.
+  alice->stream.Close();
+  carol->stream.Close();
+  auto parked = AwaitSnapshot(*store_, [](const HubStore::Snapshot& snapshot) {
+    int disconnected = 0;
+    for (const auto& member : snapshot.members) {
+      if (!member.connected) ++disconnected;
+    }
+    return disconnected == 2;
+  });
+  ASSERT_EQ(parked.members.size(), 3u);
+
+  // The "crash": a successor boots over the same rows while this
+  // generation stays parked, saying no goodbyes. Two seconds of boot
+  // grace — enough headroom for carol's loopback resume, short enough
+  // for a test.
+  auto instance =
+      BuildSecondInstance(vault_, store_, chat_store_,
+                          std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"),
+                          /*grace=*/std::chrono::seconds(2));
+  ASSERT_NE(instance, nullptr);
+  auto carol_back = OpenSeatVia(*instance->client, carol->resume_token);
+  ASSERT_TRUE(carol_back.has_value());
+  EXPECT_EQ(carol_back->player_id, carol->player_id);
+  ASSERT_TRUE(ReceiveCase(carol_back->stream, "sessionReady").has_value());
+
+  auto reaped = AwaitSnapshot(
+      *store_, [](const HubStore::Snapshot& snapshot) { return snapshot.members.size() == 2; },
+      std::chrono::seconds(6));
+  ASSERT_EQ(reaped.members.size(), 2u);
+  std::set<std::string> survivors;
+  for (const auto& member : reaped.members) survivors.insert(member.player_id);
+  EXPECT_TRUE(survivors.contains(bob->player_id)) << "connected row was reaped";
+  EXPECT_TRUE(survivors.contains(carol->player_id)) << "resumed seat was reaped";
+}
+
+// The muchq.github.io#260 symptom, hub half, both timelines. While a
+// fossil membership is live, a resume lands back in it and a share-link
+// join is refused with the exact #260 answer — that mid-window shape is
+// the frontend's to fix (leave first), pinned here so the hub half is
+// not mistaken for the whole fix. What the hub owes is the other
+// timeline: the fossil must not answer that way *forever*. Once the
+// boot grace clears it, a resume carries no room and the join lands.
+TEST_F(GolfHubStreamFixture, ShareLinkJoinSucceedsOnceBootGraceClearsStaleMembership) {
+  auto alice = OpenSeat();
+  auto dave = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && dave.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(dave->stream, "sessionReady").has_value());
+  const std::string old_room = CreateRoomFor(*alice);
+  ASSERT_FALSE(old_room.empty());
+  moonbase::golf::JoinRoom join_old;
+  join_old.roomId = old_room;
+  ASSERT_TRUE(dave->stream.Send(GolfCommands::FromJoinroom(join_old)).ok());
+  ASSERT_TRUE(ReceiveCase(dave->stream, "roomState").has_value());
+  alice->stream.Close();
+  dave->stream.Close();
+  AwaitSnapshot(*store_, [](const HubStore::Snapshot& snapshot) {
+    int disconnected = 0;
+    for (const auto& member : snapshot.members) {
+      if (!member.connected) ++disconnected;
+    }
+    return disconnected == 2;
+  });
+
+  auto instance =
+      BuildSecondInstance(vault_, store_, chat_store_,
+                          std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"),
+                          /*grace=*/std::chrono::seconds(2));
+  ASSERT_NE(instance, nullptr);
+  // The share link's room, created on the new instance while the old
+  // memberships age out.
+  auto bob = OpenSeatVia(*instance->client);
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
+  auto created = ReceiveCase(bob->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  const std::string shared_room = created->as_roomState_or_null()->roomId;
+
+  // dave follows the share link mid-window: his resume lands in the
+  // fossil (which also spares him from the cohort), and the bare join
+  // gets #260's exact answer. Production v2 always resumes first, so
+  // this is the shape the frontend's leave-before-join exists for.
+  auto dave_back = OpenSeatVia(*instance->client, dave->resume_token);
+  ASSERT_TRUE(dave_back.has_value());
+  auto dave_ready = ReceiveCase(dave_back->stream, "sessionReady");
+  ASSERT_TRUE(dave_ready.has_value());
+  ASSERT_TRUE(dave_ready->as_sessionReady_or_null()->roomId.has_value());
+  EXPECT_EQ(*dave_ready->as_sessionReady_or_null()->roomId, old_room);
+  moonbase::golf::JoinRoom join_shared;
+  join_shared.roomId = shared_room;
+  ASSERT_TRUE(dave_back->stream.Send(GolfCommands::FromJoinroom(join_shared)).ok());
+  auto refused = ReceiveCase(dave_back->stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "room unavailable or already in a room");
+
+  // The reap clears alice's fossil; resumed dave keeps his seat, so the
+  // old room survives him.
+  auto cleared = AwaitSnapshot(
+      *store_,
+      [&](const HubStore::Snapshot& snapshot) {
+        for (const auto& member : snapshot.members) {
+          if (member.player_id == alice->player_id) return false;
+        }
+        return true;
+      },
+      std::chrono::seconds(6));
+  std::set<std::string> remaining;
+  for (const auto& member : cleared.members) remaining.insert(member.player_id);
+  ASSERT_FALSE(remaining.contains(alice->player_id)) << "the boot deadline never reaped";
+  ASSERT_TRUE(remaining.contains(dave->player_id));
+
+  // The share-link visit on the hub's timeline: alice's resume finds no
+  // fossil membership, and the join that #260 saw rejected goes through.
+  auto alice_back = OpenSeatVia(*instance->client, alice->resume_token);
+  ASSERT_TRUE(alice_back.has_value());
+  auto ready = ReceiveCase(alice_back->stream, "sessionReady");
+  ASSERT_TRUE(ready.has_value());
+  EXPECT_FALSE(ready->as_sessionReady_or_null()->roomId.has_value());
+  ASSERT_TRUE(alice_back->stream.Send(GolfCommands::FromJoinroom(join_shared)).ok());
+  auto joined = ReceiveCase(alice_back->stream, "roomState");
+  ASSERT_TRUE(joined.has_value());
+  EXPECT_EQ(joined->as_roomState_or_null()->roomId, shared_room);
+  EXPECT_EQ(joined->as_roomState_or_null()->players.size(), 2u);
+}
+
+// The fleet half of the boot cohort's contract (#1295): a seat restored
+// with its row at connected belongs to whatever session owns that row —
+// here, alice live on this generation — and must never enter the
+// sibling's cohort at all. Otherwise her park during the sibling's boot
+// window would be reaped at its boot deadline instead of running her
+// own full grace on this generation's registry. bob, parked before the
+// boot with his row at disconnected, is the canary that proves the
+// deadline fired and the drain ran.
+TEST_F(GolfHubStreamFixture, BootGraceNeverClaimsASeatRestoredConnected) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  bob->stream.Close();
+  AwaitSnapshot(*store_, [&](const HubStore::Snapshot& snapshot) {
+    for (const auto& member : snapshot.members) {
+      if (member.player_id == bob->player_id) return !member.connected;
+    }
+    return false;
+  });
+
+  // The sibling boots while alice is live: her row reads connected.
+  auto instance =
+      BuildSecondInstance(vault_, store_, chat_store_,
+                          std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"),
+                          /*grace=*/std::chrono::seconds(1));
+  ASSERT_NE(instance, nullptr);
+  // She parks inside the sibling's boot window; this generation's
+  // registry arms her grace (60s here — far past the test). Await the
+  // row flip before watching for the reap: a drain that read her row
+  // still connected would spare her for the wrong reason and mask a
+  // deleted restore filter.
+  alice->stream.Close();
+  AwaitSnapshot(*store_, [&](const HubStore::Snapshot& snapshot) {
+    for (const auto& member : snapshot.members) {
+      if (member.player_id == alice->player_id) return !member.connected;
+    }
+    return false;
+  });
+
+  // bob's reap is the deadline's proof; alice must outlive it.
+  auto reaped = AwaitSnapshot(
+      *store_,
+      [&](const HubStore::Snapshot& snapshot) {
+        for (const auto& member : snapshot.members) {
+          if (member.player_id == bob->player_id) return false;
+        }
+        return true;
+      },
+      std::chrono::seconds(6));
+  ASSERT_EQ(reaped.members.size(), 1u);
+  EXPECT_EQ(reaped.members[0].player_id, alice->player_id)
+      << "a seat restored connected was claimed by the sibling's boot cohort";
+}
+
+// The same contract's second window: a seat that entered the cohort
+// parked, but whose row a reconcile later observed at connected —
+// bob resumes on this generation mid-window — is ceded to that row's
+// owner for good. His second park then runs this generation's full
+// grace, not the remainder of the sibling's boot deadline. carol is
+// the parked-ghost canary again.
+TEST_F(GolfHubStreamFixture, BootGraceCedesASeatObservedConnectedMidWindow) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  auto carol = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value() && carol.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(carol->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "roomState").has_value());
+  bob->stream.Close();
+  carol->stream.Close();
+  AwaitSnapshot(*store_, [](const HubStore::Snapshot& snapshot) {
+    int disconnected = 0;
+    for (const auto& member : snapshot.members) {
+      if (!member.connected) ++disconnected;
+    }
+    return disconnected == 2;
+  });
+
+  // The sibling boots with bob and carol both parked — both cohort.
+  auto instance =
+      BuildSecondInstance(vault_, store_, chat_store_,
+                          std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"),
+                          /*grace=*/std::chrono::seconds(2));
+  ASSERT_NE(instance, nullptr);
+
+  // bob resumes on this generation: his row flips to connected, and the
+  // sibling's LISTEN-landed reconcile observes it (direct call, no
+  // listener timing) — the cede under test.
+  auto bob_back = OpenSeat(bob->resume_token);
+  ASSERT_TRUE(bob_back.has_value());
+  ASSERT_TRUE(ReceiveCase(bob_back->stream, "sessionReady").has_value());
+  instance->handler->OnChannelActive(RoomChannel(room_id));
+  // He parks again, still inside the sibling's window: this
+  // generation's registry owns his fresh grace now.
+  bob_back->stream.Close();
+  AwaitSnapshot(*store_, [&](const HubStore::Snapshot& snapshot) {
+    for (const auto& member : snapshot.members) {
+      if (member.player_id == bob->player_id) return !member.connected;
+    }
+    return false;
+  });
+
+  // carol's reap proves the deadline fired; ceded bob must outlive it.
+  auto reaped = AwaitSnapshot(
+      *store_,
+      [&](const HubStore::Snapshot& snapshot) {
+        for (const auto& member : snapshot.members) {
+          if (member.player_id == carol->player_id) return false;
+        }
+        return true;
+      },
+      std::chrono::seconds(6));
+  std::set<std::string> survivors;
+  for (const auto& member : reaped.members) survivors.insert(member.player_id);
+  // Hard canary: AwaitSnapshot hands back its last look on timeout, so
+  // a reaper that never ran would leave carol present and every spare
+  // assertion below vacuously green.
+  ASSERT_FALSE(survivors.contains(carol->player_id)) << "the boot deadline never reaped";
+  EXPECT_TRUE(survivors.contains(alice->player_id));
+  EXPECT_TRUE(survivors.contains(bob->player_id))
+      << "a seat whose row a reconcile observed connected was still reaped by the boot cohort";
+}
+
+// The drain's own row check, pinned in the one shape neither the
+// restore filter nor the cede can reach: bob enters the cohort parked,
+// turns connected by resuming on this generation, and no reconcile ever
+// shows the sibling that pulse — so only the drain-time fresh read
+// stands between him and a wrongful reap. carol is the parked-ghost
+// canary proving the deadline fired.
+TEST_F(GolfHubStreamFixture, BootGraceDrainSparesARowThatTurnedConnectedUnobserved) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  auto carol = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value() && carol.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  moonbase::golf::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(carol->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "roomState").has_value());
+  bob->stream.Close();
+  carol->stream.Close();
+  AwaitSnapshot(*store_, [](const HubStore::Snapshot& snapshot) {
+    int disconnected = 0;
+    for (const auto& member : snapshot.members) {
+      if (!member.connected) ++disconnected;
+    }
+    return disconnected == 2;
+  });
+
+  // The sibling boots with bob and carol both parked — both cohort.
+  auto instance =
+      BuildSecondInstance(vault_, store_, chat_store_,
+                          std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"),
+                          /*grace=*/std::chrono::seconds(2));
+  ASSERT_NE(instance, nullptr);
+  // bob resumes on this generation. Deliberately no OnChannelActive on
+  // the sibling: it never observes the connected pulse, so bob stays in
+  // its cohort and only the drain's fresh read can spare him.
+  auto bob_back = OpenSeat(bob->resume_token);
+  ASSERT_TRUE(bob_back.has_value());
+  ASSERT_TRUE(ReceiveCase(bob_back->stream, "sessionReady").has_value());
+
+  auto reaped = AwaitSnapshot(
+      *store_,
+      [&](const HubStore::Snapshot& snapshot) {
+        for (const auto& member : snapshot.members) {
+          if (member.player_id == carol->player_id) return false;
+        }
+        return true;
+      },
+      std::chrono::seconds(6));
+  std::set<std::string> survivors;
+  for (const auto& member : reaped.members) survivors.insert(member.player_id);
+  ASSERT_FALSE(survivors.contains(carol->player_id)) << "the boot deadline never reaped";
+  EXPECT_TRUE(survivors.contains(alice->player_id));
+  EXPECT_TRUE(survivors.contains(bob->player_id))
+      << "the drain reaped a row its own fresh read shows connected";
+}
+
+// The once-guard is behavior, not just a comment: a second restore
+// would stack a fresh cohort behind a reaper that never re-arms —
+// forever-membership again, silently. Refusal must not depend on
+// whether the first restore happened to arm a thread.
+TEST_F(GolfHubStreamFixture, RestoreFromStoreRefusesASecondCall) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_FALSE(CreateRoomFor(*alice).empty());
+  store_->Flush();
+
+  auto instance =
+      BuildSecondInstance(vault_, store_, chat_store_,
+                          std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"));
+  ASSERT_NE(instance, nullptr);
+  const absl::Status again = instance->handler->RestoreFromStore();
+  EXPECT_EQ(again.code(), absl::StatusCode::kFailedPrecondition) << again;
+
+  // The fixture's own hub restored an empty store — no thread armed —
+  // and must refuse a second call all the same.
+  const absl::Status empty_again = handler_->RestoreFromStore();
+  EXPECT_EQ(empty_again.code(), absl::StatusCode::kFailedPrecondition) << empty_again;
 }
 
 TEST_F(GolfHubStreamFixture, JoinHistoryIsCappedAtTheRetentionLimit) {
