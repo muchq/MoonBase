@@ -350,19 +350,19 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Equal(t, "Sessions", response.Custom[0].Title)
 	assert.Equal(t, "Activity", response.Custom[1].Title)
 	assert.Equal(t, "Chat", response.Custom[2].Title)
-	assert.Len(t, response.Custom[0].Metrics, 6)
+	assert.Len(t, response.Custom[0].Metrics, 7)
 	assert.Len(t, response.Custom[1].Metrics, 4)
 	require.Len(t, response.Custom[2].Metrics, 5)
 
 	// A gauge: one form, so no toggle offered.
 	assert.Equal(t, CustomMetricValue{Label: "active", Value: 200.0, Unit: "sessions"},
 		response.Custom[0].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "commands", Value: 206.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "commands", Value: 207.0, Toggleable: true},
 		response.Custom[1].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "rejections", Value: 208.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "rejections", Value: 209.0, Toggleable: true},
 		response.Custom[1].Metrics[2])
-	// Chat starts at CustomScalars index 10, so its first value is 200+10.
-	assert.Equal(t, CustomMetricValue{Label: "messages", Value: 210.0, Toggleable: true},
+	// Chat starts at CustomScalars index 11, so its first value is 200+11.
+	assert.Equal(t, CustomMetricValue{Label: "messages", Value: 211.0, Toggleable: true},
 		response.Custom[2].Metrics[0])
 	// The omitted query's descriptor survives with a zero value.
 	last := response.Custom[2].Metrics[4]
@@ -1013,7 +1013,7 @@ func TestMetricsHandler_GetServiceMetrics_RateViewSelectsTheRateForm(t *testing.
 	// answers "" and "rows".
 	assert.Equal(t, "/s", byLabel["commands"].Unit)
 	assert.Equal(t, "rows/s", byLabel["delivered_rows"].Unit)
-	assert.Equal(t, 306.0, byLabel["commands"].Value)
+	assert.Equal(t, 307.0, byLabel["commands"].Value)
 
 	// The fixed-form tiles are untouched by the view: a gauge has no rate, and
 	// the windowed mean is already a ratio of two rates.

@@ -204,23 +204,6 @@ class NotAMemberChatStore final : public ChatStore {
   std::shared_ptr<ChatStore> delegate_;
 };
 
-// Distinct id space for the second instance (the hub_store_race_test /
-// pg suite pattern): two SequentialIdGenerators would both mint
-// "player-1", and a fresh seat on the second instance would then hold
-// the first instance's player id — a seat conflict for that player's
-// own resume.
-class RemoteIdGenerator final : public IdGenerator {
- public:
-  std::string PlayerId() override { return "remote-player-" + std::to_string(++players_); }
-  std::string RoomId() override { return "remote-room-" + std::to_string(++rooms_); }
-  std::string GameCode() override { return "RGAME" + std::to_string(++games_); }
-
- private:
-  int players_ = 0;
-  int rooms_ = 0;
-  int games_ = 0;
-};
-
 std::unique_ptr<SecondInstance> BuildSecondInstance(
     std::shared_ptr<TicketVault> vault, std::shared_ptr<HubStore> store,
     std::shared_ptr<ChatStore> chat_store,

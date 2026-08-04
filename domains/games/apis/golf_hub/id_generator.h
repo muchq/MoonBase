@@ -49,6 +49,23 @@ class SequentialIdGenerator final : public IdGenerator {
   int games_ = 0;
 };
 
+/// SequentialIdGenerator's twin for a test's second hub instance: a
+/// distinct id space (remote-player-1, remote-room-1, RGAME1), because
+/// two SequentialIdGenerators would both mint "player-1" and a fresh
+/// seat on the second instance would then hold the first instance's
+/// player id — a seat conflict for that player's own resume.
+class RemoteIdGenerator final : public IdGenerator {
+ public:
+  std::string PlayerId() override { return "remote-player-" + std::to_string(++players_); }
+  std::string RoomId() override { return "remote-room-" + std::to_string(++rooms_); }
+  std::string GameCode() override { return "RGAME" + std::to_string(++games_); }
+
+ private:
+  int players_ = 0;
+  int rooms_ = 0;
+  int games_ = 0;
+};
+
 }  // namespace golf_hub
 
 #endif

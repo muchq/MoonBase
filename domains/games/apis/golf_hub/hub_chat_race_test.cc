@@ -113,20 +113,6 @@ class GatedChatStore final : public ChatStore {
   TestGate released_;
 };
 
-// Secondary instances mint from their own space so two hubs can never
-// hand out the same player id.
-class RemoteIdGenerator final : public IdGenerator {
- public:
-  std::string PlayerId() override { return "remote-player-" + std::to_string(++players_); }
-  std::string RoomId() override { return "remote-room-" + std::to_string(++rooms_); }
-  std::string GameCode() override { return "RGAME" + std::to_string(++games_); }
-
- private:
-  int players_ = 0;
-  int rooms_ = 0;
-  int games_ = 0;
-};
-
 class HubChatRaceFixture : public GolfHubStreamFixture {
  protected:
   struct Instance {
