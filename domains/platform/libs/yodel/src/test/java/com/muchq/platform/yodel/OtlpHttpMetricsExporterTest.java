@@ -47,7 +47,7 @@ public class OtlpHttpMetricsExporterTest {
   public void postsOtlpJsonToTheMetricsPath() throws Exception {
     HttpServerMetrics metrics = new HttpServerMetrics("svc", 1_000_000_000L);
     metrics.recordRequestStart("GET");
-    metrics.recordRequestComplete("GET", 200, 42.0);
+    metrics.recordRequestComplete("GET", "/widgets", 200, 42.0);
 
     String endpoint = "http://127.0.0.1:" + server.getAddress().getPort();
     OtlpHttpMetricsExporter exporter =

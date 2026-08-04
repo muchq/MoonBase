@@ -8,64 +8,110 @@ import org.junit.jupiter.api.Test;
 public class HttpServerMetricsTest {
 
   @Test
-  public void startAndCompleteKeepCountersAndGaugeSymmetric() {
+  public void startMovesOnlyTheGaugeAndCompleteSettlesTheCounters() {
     HttpServerMetrics metrics = new HttpServerMetrics("svc", 0L);
 
+    // Routing hasn't happened at start (#1303): no route-level entry can
+    // exist yet, only the in-flight gauge.
     metrics.recordRequestStart("GET");
-    List<HttpServerMetrics.MethodSnapshot> inFlight = metrics.snapshot();
+    assertThat(metrics.snapshot()).isEmpty();
+    List<HttpServerMetrics.ActiveSnapshot> inFlight = metrics.activeSnapshot();
     assertThat(inFlight).hasSize(1);
-    assertThat(inFlight.get(0).requests()).isEqualTo(1);
     assertThat(inFlight.get(0).active()).isEqualTo(1);
-    assertThat(inFlight.get(0).durationCount()).isZero();
 
-    metrics.recordRequestComplete("GET", 200, 42.0);
-    HttpServerMetrics.MethodSnapshot done = metrics.snapshot().get(0);
+    metrics.recordRequestComplete("GET", "/widgets/{id}", 200, 42.0);
+    HttpServerMetrics.RouteSnapshot done = metrics.snapshot().get(0);
+    assertThat(done.httpMethod()).isEqualTo("GET");
+    assertThat(done.route()).isEqualTo("/widgets/{id}");
     assertThat(done.requests()).isEqualTo(1);
-    assertThat(done.active()).isZero();
     assertThat(done.success()).isEqualTo(1);
     assertThat(done.failure()).isZero();
     assertThat(done.durationCount()).isEqualTo(1);
     assertThat(done.durationSumMicros()).isEqualTo(42.0);
+    assertThat(metrics.activeSnapshot().get(0).active()).isZero();
   }
 
   @Test
   public void statusSplitsAtFourHundred() {
     HttpServerMetrics metrics = new HttpServerMetrics("svc", 0L);
     metrics.recordRequestStart("GET");
-    metrics.recordRequestComplete("GET", 399, 1.0);
+    metrics.recordRequestComplete("GET", "/w", 399, 1.0);
     metrics.recordRequestStart("GET");
-    metrics.recordRequestComplete("GET", 400, 1.0);
+    metrics.recordRequestComplete("GET", "/w", 400, 1.0);
     metrics.recordRequestStart("GET");
-    metrics.recordRequestComplete("GET", 500, 1.0);
+    metrics.recordRequestComplete("GET", "/w", 500, 1.0);
 
-    HttpServerMetrics.MethodSnapshot snapshot = metrics.snapshot().get(0);
+    HttpServerMetrics.RouteSnapshot snapshot = metrics.snapshot().get(0);
     assertThat(snapshot.success()).isEqualTo(1);
     assertThat(snapshot.failure()).isEqualTo(2);
   }
 
   @Test
-  public void abandonedRequestsOnlyMoveTheGauge() {
+  public void abandonedRequestsCountAsRequestsWithNoOutcome() {
     HttpServerMetrics metrics = new HttpServerMetrics("svc", 0L);
     metrics.recordRequestStart("POST");
-    metrics.recordRequestAbandoned("POST");
+    metrics.recordRequestAbandoned("POST", "/w");
 
-    HttpServerMetrics.MethodSnapshot snapshot = metrics.snapshot().get(0);
+    HttpServerMetrics.RouteSnapshot snapshot = metrics.snapshot().get(0);
     assertThat(snapshot.requests()).isEqualTo(1);
-    assertThat(snapshot.active()).isZero();
     assertThat(snapshot.success()).isZero();
     assertThat(snapshot.failure()).isZero();
     assertThat(snapshot.durationCount()).isZero();
+    assertThat(metrics.activeSnapshot().get(0).active()).isZero();
+  }
+
+  /**
+   * requests == success + failure + abandoned, at every snapshot. Moving the requests counter to
+   * completion (#1303, so it can carry the route) must not have broken the family's internal
+   * arithmetic — a requests total that drifts from its outcomes is the "zero that means healthy and
+   * also broken" shape in a different coat.
+   */
+  @Test
+  public void requestsEqualOutcomesPlusAbandoned() {
+    HttpServerMetrics metrics = new HttpServerMetrics("svc", 0L);
+    metrics.recordRequestStart("GET");
+    metrics.recordRequestComplete("GET", "/w", 200, 1.0);
+    metrics.recordRequestStart("GET");
+    metrics.recordRequestComplete("GET", "/w", 500, 1.0);
+    metrics.recordRequestStart("GET");
+    metrics.recordRequestAbandoned("GET", "/w");
+
+    HttpServerMetrics.RouteSnapshot snapshot = metrics.snapshot().get(0);
+    assertThat(snapshot.requests()).isEqualTo(3);
+    assertThat(snapshot.success() + snapshot.failure()).isEqualTo(2);
+  }
+
+  @Test
+  public void routesKeepSeparateCountersUnderOneMethod() {
+    HttpServerMetrics metrics = new HttpServerMetrics("svc", 0L);
+    metrics.recordRequestStart("GET");
+    metrics.recordRequestComplete("GET", "/health", 200, 1.0);
+    metrics.recordRequestStart("GET");
+    metrics.recordRequestComplete("GET", "/widgets/{id}", 200, 1.0);
+    metrics.recordRequestStart("GET");
+    metrics.recordRequestComplete("GET", "/widgets/{id}", 200, 1.0);
+
+    List<HttpServerMetrics.RouteSnapshot> snapshots = metrics.snapshot();
+    assertThat(snapshots).hasSize(2);
+    assertThat(snapshots)
+        .filteredOn(s -> s.route().equals("/health"))
+        .singleElement()
+        .satisfies(s -> assertThat(s.requests()).isEqualTo(1));
+    assertThat(snapshots)
+        .filteredOn(s -> s.route().equals("/widgets/{id}"))
+        .singleElement()
+        .satisfies(s -> assertThat(s.requests()).isEqualTo(2));
   }
 
   @Test
   public void durationsLandInUpperInclusiveBuckets() {
     HttpServerMetrics metrics = new HttpServerMetrics("svc", 0L);
     metrics.recordRequestStart("GET");
-    metrics.recordRequestComplete("GET", 200, 100.0); // on the boundary: bucket for <=100
+    metrics.recordRequestComplete("GET", "/w", 200, 100.0); // on the boundary: bucket for <=100
     metrics.recordRequestStart("GET");
-    metrics.recordRequestComplete("GET", 200, 101.0); // bucket for <=250
+    metrics.recordRequestComplete("GET", "/w", 200, 101.0); // bucket for <=250
     metrics.recordRequestStart("GET");
-    metrics.recordRequestComplete("GET", 200, 20_000_000.0); // 20s: overflow bucket
+    metrics.recordRequestComplete("GET", "/w", 200, 20_000_000.0); // 20s: overflow bucket
 
     long[] buckets = metrics.snapshot().get(0).bucketCounts();
     assertThat(buckets).hasSize(HttpServerMetrics.BUCKET_BOUNDS.length + 1);
@@ -94,11 +140,11 @@ public class HttpServerMetricsTest {
     // The two batches from #1287: 11 light requests around 8.6ms, 5 heavy ones around 1s.
     for (int i = 0; i < 11; i++) {
       metrics.recordRequestStart("POST");
-      metrics.recordRequestComplete("POST", 200, 8_669.5);
+      metrics.recordRequestComplete("POST", "/trace", 200, 8_669.5);
     }
     for (int i = 0; i < 5; i++) {
       metrics.recordRequestStart("POST");
-      metrics.recordRequestComplete("POST", 200, 1_000_000.0);
+      metrics.recordRequestComplete("POST", "/trace", 200, 1_000_000.0);
     }
 
     long[] buckets = metrics.snapshot().get(0).bucketCounts();
@@ -129,14 +175,21 @@ public class HttpServerMetricsTest {
   }
 
   @Test
-  public void snapshotOrdersMethodsDeterministically() {
+  public void snapshotsOrderDeterministically() {
     HttpServerMetrics metrics = new HttpServerMetrics("svc", 0L);
+    metrics.recordRequestComplete("POST", "/b", 200, 1.0);
+    metrics.recordRequestComplete("DELETE", "/z", 200, 1.0);
+    metrics.recordRequestComplete("GET", "/m", 200, 1.0);
+    metrics.recordRequestComplete("GET", "/a", 200, 1.0);
     metrics.recordRequestStart("POST");
     metrics.recordRequestStart("DELETE");
     metrics.recordRequestStart("GET");
 
     assertThat(metrics.snapshot())
-        .extracting(HttpServerMetrics.MethodSnapshot::httpMethod)
+        .extracting(s -> s.httpMethod() + " " + s.route())
+        .containsExactly("DELETE /z", "GET /a", "GET /m", "POST /b");
+    assertThat(metrics.activeSnapshot())
+        .extracting(HttpServerMetrics.ActiveSnapshot::httpMethod)
         .containsExactly("DELETE", "GET", "POST");
   }
 }

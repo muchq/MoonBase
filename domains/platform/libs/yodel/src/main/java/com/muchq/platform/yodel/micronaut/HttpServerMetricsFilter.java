@@ -2,6 +2,7 @@ package com.muchq.platform.yodel.micronaut;
 
 import com.muchq.platform.yodel.HttpMetricsPipeline;
 import com.muchq.platform.yodel.HttpServerMetrics;
+import io.micronaut.http.BasicHttpAttributes;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.MutableHttpResponse;
 import io.micronaut.http.annotation.Filter;
@@ -21,6 +22,13 @@ import reactor.core.publisher.Mono;
  */
 @Filter(Filter.MATCH_ALL_PATTERN)
 public class HttpServerMetricsFilter implements HttpServerFilter {
+  /**
+   * The route label for a request no route ever matched (404s, probes for paths that don't exist).
+   * A fixed sentinel rather than the raw path, so scanners cannot mint unbounded series
+   * (https://github.com/muchq/MoonBase/issues/1303).
+   */
+  public static final String UNMATCHED_ROUTE = "unmatched";
+
   private final HttpMetricsPipeline pipeline;
 
   /**
@@ -50,33 +58,62 @@ public class HttpServerMetricsFilter implements HttpServerFilter {
   public Publisher<MutableHttpResponse<?>> doFilter(
       HttpRequest<?> request, ServerFilterChain chain) {
     HttpServerMetrics metrics = pipeline.metrics();
-    String method = request.getMethodName();
+    // getMethod(), not getMethodName(): the netty request's method name is
+    // the raw wire token, so a scanner spraying invented verbs would mint a
+    // label value (and a gauge entry) per token. The enum collapses them
+    // all to CUSTOM, which keeps every key in this family bounded — the
+    // same reason the route label is the matched template (#1303).
+    String method = request.getMethod().name();
     long startNanos = System.nanoTime();
     metrics.recordRequestStart(method);
     AtomicBoolean recorded = new AtomicBoolean();
-    return Mono.from(chain.proceed(request))
+    // defer: a chain.proceed that throws synchronously (rather than
+    // returning a failed publisher) must still surface as an error
+    // signal, or the request is counted nowhere at all — started in the
+    // gauge, absent from every counter.
+    return Mono.defer(() -> Mono.from(chain.proceed(request)))
         .doOnNext(
             response -> {
               if (recorded.compareAndSet(false, true)) {
                 metrics.recordRequestComplete(
-                    method, response.code(), (System.nanoTime() - startNanos) / 1000.0);
+                    method,
+                    routeOf(request),
+                    response.code(),
+                    (System.nanoTime() - startNanos) / 1000.0);
               }
             })
         .doOnError(
             t -> {
               if (recorded.compareAndSet(false, true)) {
                 metrics.recordRequestComplete(
-                    method, 500, (System.nanoTime() - startNanos) / 1000.0);
+                    method, routeOf(request), 500, (System.nanoTime() - startNanos) / 1000.0);
               }
             })
         .doFinally(
             signal -> {
               // Cancellation (client gone before a response) emits neither next nor
-              // error; only the in-flight gauge moves, like server_pal's drop guard.
+              // error; only the gauge and the request count move, like server_pal's
+              // drop guard.
               if (recorded.compareAndSet(false, true)) {
-                metrics.recordRequestAbandoned(method);
+                metrics.recordRequestAbandoned(method, routeOf(request));
               }
             });
+  }
+
+  /**
+   * The matched route template ("/games/{id}"), never the raw path, so the label stays bounded
+   * (#1303). This filter runs before routing — deliberately, so unmatched requests are measured too
+   * — which is why the route is read here, on the far side of {@code chain.proceed}, where the
+   * router has stamped its match onto the request. A request that matched nothing keeps the
+   * sentinel.
+   *
+   * <p>Read through {@code BasicHttpAttributes.getUriTemplate} — the supported accessor for the
+   * same attribute the router's {@code setRouteAttributes} writes; the raw {@code
+   * HttpAttributes.URI_TEMPLATE} constant is deprecated {@code forRemoval} since Micronaut 4.8. The
+   * filter tests break loudly if an upgrade stops populating it.
+   */
+  private static String routeOf(HttpRequest<?> request) {
+    return BasicHttpAttributes.getUriTemplate(request).orElse(UNMATCHED_ROUTE);
   }
 
   // No @PreDestroy closing the pipeline. It used to be right — the filter built the pipeline in

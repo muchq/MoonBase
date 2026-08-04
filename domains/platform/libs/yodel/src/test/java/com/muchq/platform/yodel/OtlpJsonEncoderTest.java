@@ -10,9 +10,9 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * Pins the wire contract: instrument names, service_name/http_method labels, cumulative
+ * Pins the wire contract: instrument names, service_name/http_method/route labels, cumulative
  * temporality, and string-encoded 64-bit values, so the collector reads Java exactly like the C++
- * and Rust emitters (#1212).
+ * and Rust emitters (#1212, #1303).
  */
 public class OtlpJsonEncoderTest {
   private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -28,7 +28,7 @@ public class OtlpJsonEncoderTest {
   public void emitsTheFiveStandardInstruments() throws Exception {
     HttpServerMetrics metrics = new HttpServerMetrics("svc", 1_000_000_000L);
     metrics.recordRequestStart("GET");
-    metrics.recordRequestComplete("GET", 200, 42.0);
+    metrics.recordRequestComplete("GET", "/widgets", 200, 42.0);
 
     JsonNode metricNodes = encode(metrics).at("/resourceMetrics/0/scopeMetrics/0/metrics");
 
@@ -47,8 +47,9 @@ public class OtlpJsonEncoderTest {
   public void sumsAreCumulativeWithProtoJsonStringInts() throws Exception {
     HttpServerMetrics metrics = new HttpServerMetrics("svc", 1_000_000_000L);
     metrics.recordRequestStart("GET");
-    metrics.recordRequestComplete("GET", 200, 42.0);
+    metrics.recordRequestComplete("GET", "/widgets", 200, 42.0);
     metrics.recordRequestStart("GET");
+    metrics.recordRequestComplete("GET", "/widgets", 200, 7.0);
 
     JsonNode requests = encode(metrics).at("/resourceMetrics/0/scopeMetrics/0/metrics/0/sum");
     assertThat(requests.get("aggregationTemporality").asInt()).isEqualTo(2);
@@ -76,7 +77,7 @@ public class OtlpJsonEncoderTest {
   public void histogramCarriesMicrosecondsWithDefaultBounds() throws Exception {
     HttpServerMetrics metrics = new HttpServerMetrics("svc", 1_000_000_000L);
     metrics.recordRequestStart("GET");
-    metrics.recordRequestComplete("GET", 200, 42.0);
+    metrics.recordRequestComplete("GET", "/widgets", 200, 42.0);
 
     JsonNode histogram =
         encode(metrics).at("/resourceMetrics/0/scopeMetrics/0/metrics/4/histogram");
@@ -90,16 +91,45 @@ public class OtlpJsonEncoderTest {
     assertThat(point.at("/bucketCounts/0").isTextual()).isTrue();
   }
 
+  /**
+   * The #1303 guard: the request counter — and, through the shared sum() helper, the
+   * success/failure counters — plus the histogram carry the route, so probe traffic is separable by
+   * label. The route sits between yodel's historical http_method spelling and service_name, and is
+   * spelled {@code route} to match futility.
+   */
   @Test
-  public void pointsCarryServiceNameAndHttpMethodLabels() throws Exception {
+  public void counterPointsCarryServiceNameMethodAndRouteLabels() throws Exception {
+    HttpServerMetrics metrics = new HttpServerMetrics("svc", 1_000_000_000L);
+    metrics.recordRequestStart("POST");
+    metrics.recordRequestComplete("POST", "/health", 200, 5.0);
+
+    JsonNode root = encode(metrics);
+    JsonNode requestsAttributes =
+        root.at("/resourceMetrics/0/scopeMetrics/0/metrics/0/sum/dataPoints/0/attributes");
+    assertThat(attributeMap(requestsAttributes))
+        .containsExactly(
+            Map.entry("http_method", "POST"),
+            Map.entry("route", "/health"),
+            Map.entry("service_name", "svc"));
+    JsonNode histogramAttributes =
+        root.at("/resourceMetrics/0/scopeMetrics/0/metrics/4/histogram/dataPoints/0/attributes");
+    assertThat(attributeMap(histogramAttributes)).containsKey("route");
+  }
+
+  /**
+   * The gauge is the one instrument without a route: it moves at request start, before routing has
+   * matched anything (#1303). A gauge point minted per route would also never return to zero per
+   * key, which is exactly the unbounded-series shape the matched-template rule exists to prevent.
+   */
+  @Test
+  public void gaugePointsCarryNoRouteLabel() throws Exception {
     HttpServerMetrics metrics = new HttpServerMetrics("svc", 1_000_000_000L);
     metrics.recordRequestStart("POST");
 
     JsonNode attributes =
         encode(metrics)
-            .at("/resourceMetrics/0/scopeMetrics/0/metrics/0/sum/dataPoints/0/attributes");
-    Map<String, String> labels = attributeMap(attributes);
-    assertThat(labels)
+            .at("/resourceMetrics/0/scopeMetrics/0/metrics/3/sum/dataPoints/0/attributes");
+    assertThat(attributeMap(attributes))
         .containsExactly(Map.entry("http_method", "POST"), Map.entry("service_name", "svc"));
   }
 

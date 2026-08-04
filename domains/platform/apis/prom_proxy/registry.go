@@ -31,6 +31,29 @@ const DefaultView = ViewCount
 // The window both views are computed over, unless a descriptor overrides it.
 const defaultCounterWindow = "5m"
 
+// Serving numbers exclude probe traffic (#1303): the container healthcheck's
+// steady GET /health otherwise floors every request count (~10 per 5m at
+// compose's 30s interval) and drags every latency figure toward its
+// sub-millisecond durations. A negative matcher also matches series that
+// carry no route label at all, which is what makes one filter safe on every
+// selector fleet-wide: futility labels the whole family (gauge included) and
+// gets the subtraction; yodel's gauge and everything server_pal emits are
+// route-less (#1304) and pass through whole, there being nothing to
+// subtract yet.
+//
+// Fleet-wide by decision, not accident: /health is the probe path by
+// convention on every service (Caddy exposes it publicly too), so traffic
+// to it is excluded from Serving everywhere, and a service that grows an
+// HTTP probe adds its own Probes tile the way one_d4's entry does. The
+// compose side of the /health literal is pinned by deploy's config test;
+// the query side by TestRegistry_StandardServingQueriesExcludeTheProbeRoute.
+//
+// Composition contract: a leading comma, so it only splices after an
+// existing matcher — `{service_name=` + s + probeFilter + `}`. Appended to
+// an empty matcher list it is a PromQL syntax error, which is the loud
+// failure you want.
+const probeFilter = `,route!="/health"`
+
 // The window for counters that are alarms rather than volumes.
 //
 // Some of these tiles answer "has this happened at all" — the comment on
@@ -333,6 +356,14 @@ var serviceRegistry = map[string]serviceEntry{
 	// emitter never labels by player or by game, so no series here is per-user.
 	"one_d4": {
 		CustomScalars: []customScalarDef{
+			// The /health traffic (#1303): the container probe plus anything Caddy
+			// routes there, excluded from every standard Serving number by
+			// probeFilter and shown here instead, so the subtraction is a visible
+			// fact rather than a floor under every chart. ~10/5m while compose's
+			// 30s probe is healthy; zero means the probe is failing, or the route
+			// label hasn't deployed yet (the deploy config test and one_d4's
+			// HealthProbeRouteLabelTest pin the other two ways this can lie).
+			counter("Probes", "health_checks", "", `http_server_requests_total{service_name="one_d4",route="/health"}`),
 			counter("Indexing", "games_indexed", "games", `games_indexed_total{service_name="one_d4"}`),
 			counter("Indexing", "runs_completed", "", `index_runs_total{service_name="one_d4",outcome="completed"}`),
 			// The three outcomes below are alarms rather than volumes, so they
@@ -443,21 +474,21 @@ func standardScalarQueries(service string) []struct {
 		Query string
 		Field func(*StandardMetrics) *float64
 	}{
-		{`sum(increase(http_server_requests_total{service_name=` + s + `}[` + defaultCounterWindow + `]))`,
+		{`sum(increase(http_server_requests_total{service_name=` + s + probeFilter + `}[` + defaultCounterWindow + `]))`,
 			func(m *StandardMetrics) *float64 { return &m.RequestsTotal }},
-		{`sum(rate(http_server_requests_total{service_name=` + s + `}[5m]))`,
+		{`sum(rate(http_server_requests_total{service_name=` + s + probeFilter + `}[5m]))`,
 			func(m *StandardMetrics) *float64 { return &m.RatePerSec }},
-		{`sum(increase(http_server_requests_success_total{service_name=` + s + `}[5m]))`,
+		{`sum(increase(http_server_requests_success_total{service_name=` + s + probeFilter + `}[5m]))`,
 			func(m *StandardMetrics) *float64 { return &m.SuccessCount5m }},
-		{`sum(increase(http_server_requests_failure_total{service_name=` + s + `}[5m]))`,
+		{`sum(increase(http_server_requests_failure_total{service_name=` + s + probeFilter + `}[5m]))`,
 			func(m *StandardMetrics) *float64 { return &m.FailureCount5m }},
-		{`sum(rate(http_server_requests_failure_total{service_name=` + s + `}[5m]))/(sum(rate(http_server_requests_success_total{service_name=` + s + `}[5m]))+sum(rate(http_server_requests_failure_total{service_name=` + s + `}[5m])))*100`,
+		{`sum(rate(http_server_requests_failure_total{service_name=` + s + probeFilter + `}[5m]))/(sum(rate(http_server_requests_success_total{service_name=` + s + probeFilter + `}[5m]))+sum(rate(http_server_requests_failure_total{service_name=` + s + probeFilter + `}[5m])))*100`,
 			func(m *StandardMetrics) *float64 { return &m.ErrorRatePercent }},
-		{`sum(rate(http_server_request_duration_microseconds_sum{service_name=` + s + `}[5m]))/sum(rate(http_server_request_duration_microseconds_count{service_name=` + s + `}[5m]))`,
+		{`sum(rate(http_server_request_duration_microseconds_sum{service_name=` + s + probeFilter + `}[5m]))/sum(rate(http_server_request_duration_microseconds_count{service_name=` + s + probeFilter + `}[5m]))`,
 			func(m *StandardMetrics) *float64 { return &m.AvgDurationMicros }},
-		{`histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name=` + s + `}[5m])))`,
+		{`histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name=` + s + probeFilter + `}[5m])))`,
 			func(m *StandardMetrics) *float64 { return &m.P95DurationMicros }},
-		{`sum(http_server_requests_active_gauge{service_name=` + s + `})`,
+		{`sum(http_server_requests_active_gauge{service_name=` + s + probeFilter + `})`,
 			func(m *StandardMetrics) *float64 { return &m.ActiveRequests }},
 	}
 }
@@ -500,12 +531,12 @@ func standardScalarQueries(service string) []struct {
 func standardTimeseriesQueries(service, step string) map[string]string {
 	s := fmt.Sprintf("%q", service)
 	return map[string]string{
-		"request_rate":       `sum(rate(http_server_requests_total{service_name=` + s + `}[5m]))`,
-		"request_count":      `sum(increase(http_server_requests_total{service_name=` + s + `}[` + step + `]))`,
-		"error_rate_percent": `sum(rate(http_server_requests_failure_total{service_name=` + s + `}[5m]))/(sum(rate(http_server_requests_success_total{service_name=` + s + `}[5m]))+sum(rate(http_server_requests_failure_total{service_name=` + s + `}[5m])))*100`,
-		"error_count":        `sum(increase(http_server_requests_failure_total{service_name=` + s + `}[` + step + `]))`,
-		"avg_duration_us":    `sum(rate(http_server_request_duration_microseconds_sum{service_name=` + s + `}[5m]))/sum(rate(http_server_request_duration_microseconds_count{service_name=` + s + `}[5m]))`,
-		"p95_duration_us":    `histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name=` + s + `}[5m])))`,
-		"active_requests":    `sum(http_server_requests_active_gauge{service_name=` + s + `})`,
+		"request_rate":       `sum(rate(http_server_requests_total{service_name=` + s + probeFilter + `}[5m]))`,
+		"request_count":      `sum(increase(http_server_requests_total{service_name=` + s + probeFilter + `}[` + step + `]))`,
+		"error_rate_percent": `sum(rate(http_server_requests_failure_total{service_name=` + s + probeFilter + `}[5m]))/(sum(rate(http_server_requests_success_total{service_name=` + s + probeFilter + `}[5m]))+sum(rate(http_server_requests_failure_total{service_name=` + s + probeFilter + `}[5m])))*100`,
+		"error_count":        `sum(increase(http_server_requests_failure_total{service_name=` + s + probeFilter + `}[` + step + `]))`,
+		"avg_duration_us":    `sum(rate(http_server_request_duration_microseconds_sum{service_name=` + s + probeFilter + `}[5m]))/sum(rate(http_server_request_duration_microseconds_count{service_name=` + s + probeFilter + `}[5m]))`,
+		"p95_duration_us":    `histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name=` + s + probeFilter + `}[5m])))`,
+		"active_requests":    `sum(http_server_requests_active_gauge{service_name=` + s + probeFilter + `})`,
 	}
 }

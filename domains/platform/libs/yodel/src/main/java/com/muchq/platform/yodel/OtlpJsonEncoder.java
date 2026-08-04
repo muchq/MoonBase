@@ -42,7 +42,7 @@ final class OtlpJsonEncoder {
     scopeMetric.putObject("scope").put("name", "http_server");
     ArrayNode metricNodes = scopeMetric.putArray("metrics");
 
-    List<HttpServerMetrics.MethodSnapshot> snapshots = metrics.snapshot();
+    List<HttpServerMetrics.RouteSnapshot> snapshots = metrics.snapshot();
     String serviceName = metrics.serviceName();
     long startNanos = metrics.startTimeUnixNanos();
 
@@ -51,7 +51,7 @@ final class OtlpJsonEncoder {
             "http_server_requests",
             "HTTP requests received",
             true,
-            HttpServerMetrics.MethodSnapshot::requests,
+            HttpServerMetrics.RouteSnapshot::requests,
             snapshots,
             serviceName,
             startNanos,
@@ -61,7 +61,7 @@ final class OtlpJsonEncoder {
             "http_server_requests_success",
             "HTTP requests completed successfully (2xx-3xx)",
             true,
-            HttpServerMetrics.MethodSnapshot::success,
+            HttpServerMetrics.RouteSnapshot::success,
             snapshots,
             serviceName,
             startNanos,
@@ -71,21 +71,14 @@ final class OtlpJsonEncoder {
             "http_server_requests_failure",
             "HTTP requests that returned 4xx or 5xx",
             true,
-            HttpServerMetrics.MethodSnapshot::failure,
+            HttpServerMetrics.RouteSnapshot::failure,
             snapshots,
             serviceName,
             startNanos,
             timeUnixNanos));
-    metricNodes.add(
-        sum(
-            "http_server_requests_active_gauge",
-            "HTTP requests currently in flight",
-            false,
-            HttpServerMetrics.MethodSnapshot::active,
-            snapshots,
-            serviceName,
-            startNanos,
-            timeUnixNanos));
+    // The in-flight gauge is the one instrument without a route: it moves at
+    // request start, before routing has matched anything (#1303).
+    metricNodes.add(activeGauge(metrics.activeSnapshot(), serviceName, startNanos, timeUnixNanos));
     metricNodes.add(histogram(snapshots, serviceName, startNanos, timeUnixNanos));
 
     // Service-defined instruments ride in their own scope so a reader can tell at a glance which
@@ -111,8 +104,8 @@ final class OtlpJsonEncoder {
       String name,
       String description,
       boolean monotonic,
-      ToLongFunction<HttpServerMetrics.MethodSnapshot> value,
-      List<HttpServerMetrics.MethodSnapshot> snapshots,
+      ToLongFunction<HttpServerMetrics.RouteSnapshot> value,
+      List<HttpServerMetrics.RouteSnapshot> snapshots,
       String serviceName,
       long startNanos,
       long timeNanos) {
@@ -123,18 +116,40 @@ final class OtlpJsonEncoder {
     sum.put("aggregationTemporality", AGGREGATION_TEMPORALITY_CUMULATIVE);
     sum.put("isMonotonic", monotonic);
     ArrayNode points = sum.putArray("dataPoints");
-    for (HttpServerMetrics.MethodSnapshot snapshot : snapshots) {
+    for (HttpServerMetrics.RouteSnapshot snapshot : snapshots) {
       ObjectNode point = points.addObject();
       point.put("startTimeUnixNano", Long.toString(startNanos));
       point.put("timeUnixNano", Long.toString(timeNanos));
       point.put("asInt", Long.toString(value.applyAsLong(snapshot)));
+      addPointAttributes(point, serviceName, snapshot.httpMethod(), snapshot.route());
+    }
+    return metric;
+  }
+
+  private static ObjectNode activeGauge(
+      List<HttpServerMetrics.ActiveSnapshot> snapshots,
+      String serviceName,
+      long startNanos,
+      long timeNanos) {
+    ObjectNode metric = MAPPER.createObjectNode();
+    metric.put("name", "http_server_requests_active_gauge");
+    metric.put("description", "HTTP requests currently in flight");
+    ObjectNode sum = metric.putObject("sum");
+    sum.put("aggregationTemporality", AGGREGATION_TEMPORALITY_CUMULATIVE);
+    sum.put("isMonotonic", false);
+    ArrayNode points = sum.putArray("dataPoints");
+    for (HttpServerMetrics.ActiveSnapshot snapshot : snapshots) {
+      ObjectNode point = points.addObject();
+      point.put("startTimeUnixNano", Long.toString(startNanos));
+      point.put("timeUnixNano", Long.toString(timeNanos));
+      point.put("asInt", Long.toString(snapshot.active()));
       addPointAttributes(point, serviceName, snapshot.httpMethod());
     }
     return metric;
   }
 
   private static ObjectNode histogram(
-      List<HttpServerMetrics.MethodSnapshot> snapshots,
+      List<HttpServerMetrics.RouteSnapshot> snapshots,
       String serviceName,
       long startNanos,
       long timeNanos) {
@@ -144,7 +159,7 @@ final class OtlpJsonEncoder {
     ObjectNode histogram = metric.putObject("histogram");
     histogram.put("aggregationTemporality", AGGREGATION_TEMPORALITY_CUMULATIVE);
     ArrayNode points = histogram.putArray("dataPoints");
-    for (HttpServerMetrics.MethodSnapshot snapshot : snapshots) {
+    for (HttpServerMetrics.RouteSnapshot snapshot : snapshots) {
       ObjectNode point = points.addObject();
       point.put("startTimeUnixNano", Long.toString(startNanos));
       point.put("timeUnixNano", Long.toString(timeNanos));
@@ -158,7 +173,7 @@ final class OtlpJsonEncoder {
       for (double bound : HttpServerMetrics.BUCKET_BOUNDS) {
         bounds.add(bound);
       }
-      addPointAttributes(point, serviceName, snapshot.httpMethod());
+      addPointAttributes(point, serviceName, snapshot.httpMethod(), snapshot.route());
     }
     return metric;
   }
@@ -250,6 +265,22 @@ final class OtlpJsonEncoder {
   private static void addPointAttributes(ObjectNode point, String serviceName, String httpMethod) {
     ArrayNode attributes = point.putArray("attributes");
     addAttribute(attributes, "http_method", httpMethod);
+    addAttribute(attributes, "service_name", serviceName);
+  }
+
+  /**
+   * Route-labeled points for the counters and the histogram. The label is spelled {@code route},
+   * matching futility/otel — the method label keeps yodel's historical {@code http_method}
+   * spelling, which futility spells {@code method}. The route *vocabulary* is not aligned: futility
+   * has emitted the raw request path since #1174, where yodel emits the matched template.
+   * Literal-route queries (probeFilter's {@code route="/health"}) work on both; template-shaped
+   * values and the bounded-cardinality property are yodel-only (#1303).
+   */
+  private static void addPointAttributes(
+      ObjectNode point, String serviceName, String httpMethod, String route) {
+    ArrayNode attributes = point.putArray("attributes");
+    addAttribute(attributes, "http_method", httpMethod);
+    addAttribute(attributes, "route", route);
     addAttribute(attributes, "service_name", serviceName);
   }
 

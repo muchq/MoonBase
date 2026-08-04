@@ -19,9 +19,20 @@ languages emit — parity is the whole point:
 | `http_server_request_duration_microseconds` | histogram (values in **microseconds**) | `..._{sum,count,bucket}` |
 
 Every data point carries `service_name` (from `OTEL_SERVICE_NAME`) and
-`http_method` — the same label set as `server_pal`. Success means status
-< 400. Durations use the OTel SDK default bucket bounds, matching the
-other emitters.
+`http_method`; the counters and the histogram also carry `route` (#1303) —
+the matched route template, never the raw path, with a fixed `unmatched`
+sentinel — so probe traffic is separable from serving traffic. The gauge is
+the one instrument without a route: it moves at request start, before
+routing has matched anything, which is also why the counters move at
+completion rather than start. Success means status < 400.
+
+The three rails do not all speak the same label dialect yet: server_pal
+carries no route at all (#1304), and futility's `route` is the raw request
+path rather than the matched template. Queries naming a literal route
+(`route="/health"`) work on both; anything relying on template values or on
+bounded cardinality is yodel-only until those are aligned. Nothing pins
+label sets or counter timing across rails today — the otel_contract suite
+pins descriptions and bucket layouts only.
 
 Rather than pulling the OpenTelemetry SDK + Micrometer dependency trees into
 `maven_install.json` for five fixed instruments (and then remapping
@@ -55,6 +66,9 @@ tests and local runs need no configuration.
 ## Non-Micronaut use
 
 `HttpMetricsPipeline.fromEnv()` + `recordRequestStart` /
-`recordRequestComplete` are framework-agnostic; the Micronaut filter is just
-the first transport binding. Future cross-cutting families (`rate_limit_*`,
-`cache_*` — #1209) should ride the same exporter.
+`recordRequestComplete(method, route, status, micros)` are
+framework-agnostic; the Micronaut filter is just the first transport
+binding, and a non-Micronaut caller supplies its own matched-template
+route (or the filter's `unmatched` sentinel). Future cross-cutting
+families (`rate_limit_*`, `cache_*` — #1209) should ride the same
+exporter.
