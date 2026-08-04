@@ -12,20 +12,21 @@ import java.util.concurrent.atomic.LongAdder;
 /**
  * The shared HTTP serving instruments (http_server_requests, http_server_requests_success /
  * _failure, http_server_requests_active_gauge, http_server_request_duration_microseconds) labeled
- * by service_name, http_method, and route, mirroring futility/otel (C++) so prom_proxy can separate
- * probe traffic from serving traffic (https://github.com/muchq/MoonBase/issues/1303) while its
- * standard block reads Java services with zero changes
- * (https://github.com/muchq/MoonBase/issues/1212).
+ * by service_name, http_method, and route, so prom_proxy can separate probe traffic from serving
+ * traffic (https://github.com/muchq/MoonBase/issues/1303) while its standard block reads Java
+ * services with zero changes (https://github.com/muchq/MoonBase/issues/1212). The label name
+ * matches futility/otel; the value deliberately does not — futility emits the raw path, which is
+ * unbounded, and this class's whole-template rule below is the corrected shape.
  *
  * <p>The route is the matched template ("/games/{id}"), never the raw path, so the label stays
  * bounded. It is only knowable once routing has happened, which shapes the recording contract: the
  * counters and the histogram move at completion (or abandonment), where the route is in hand; only
  * the in-flight gauge moves at request start, and it stays keyed by method alone. The requests
  * counter therefore counts completed-or-abandoned requests rather than started ones — the same
- * totals, observed a request-duration later. Once in-flight requests drain, requests equals
- * success + failure plus the abandoned count (which has no counter of its own: an abandoned
- * request increments requests and records no outcome); a snapshot taken mid-request can
- * legitimately read requests ahead of the outcomes.
+ * totals, observed a request-duration later. Once in-flight requests drain, requests equals success
+ * + failure plus the abandoned count (which has no counter of its own: an abandoned request
+ * increments requests and records no outcome); a snapshot taken mid-request can legitimately read
+ * requests ahead of the outcomes.
  */
 public final class HttpServerMetrics {
   // Microsecond-shaped bucket boundaries for the HTTP duration histogram,

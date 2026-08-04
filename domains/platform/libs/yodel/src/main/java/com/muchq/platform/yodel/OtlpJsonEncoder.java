@@ -271,9 +271,10 @@ final class OtlpJsonEncoder {
   /**
    * Route-labeled points for the counters and the histogram. The label is spelled {@code route},
    * matching futility/otel — the method label keeps yodel's historical {@code http_method}
-   * spelling, which futility spells {@code method}; prom_proxy queries never select on the method
-   * label, so the divergence is cosmetic, but route is new everywhere and starts out aligned
-   * (#1303).
+   * spelling, which futility spells {@code method}. The route *vocabulary* is not aligned: futility
+   * has emitted the raw request path since #1174, where yodel emits the matched template.
+   * Literal-route queries (probeFilter's {@code route="/health"}) work on both; template-shaped
+   * values and the bounded-cardinality property are yodel-only (#1303).
    */
   private static void addPointAttributes(
       ObjectNode point, String serviceName, String httpMethod, String route) {

@@ -93,9 +93,9 @@ public class OtlpJsonEncoderTest {
 
   /**
    * The #1303 guard: the request counter — and, through the shared sum() helper, the
-   * success/failure counters — plus the histogram carry the route, so probe traffic is separable
-   * by label. The route sits between yodel's historical
-   * http_method spelling and service_name, and is spelled {@code route} to match futility.
+   * success/failure counters — plus the histogram carry the route, so probe traffic is separable by
+   * label. The route sits between yodel's historical http_method spelling and service_name, and is
+   * spelled {@code route} to match futility.
    */
   @Test
   public void counterPointsCarryServiceNameMethodAndRouteLabels() throws Exception {

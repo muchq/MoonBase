@@ -356,11 +356,13 @@ var serviceRegistry = map[string]serviceEntry{
 	// emitter never labels by player or by game, so no series here is per-user.
 	"one_d4": {
 		CustomScalars: []customScalarDef{
-			// The healthcheck's own traffic (#1303): excluded from every standard
-			// Serving number by probeFilter, and shown here instead so the probe
-			// staying alive is a visible fact rather than a floor under every
-			// chart. ~10/5m while compose's 30s probe is healthy; zero means the
-			// probe is failing, or the route label hasn't deployed yet.
+			// The /health traffic (#1303): the container probe plus anything Caddy
+			// routes there, excluded from every standard Serving number by
+			// probeFilter and shown here instead, so the subtraction is a visible
+			// fact rather than a floor under every chart. ~10/5m while compose's
+			// 30s probe is healthy; zero means the probe is failing, or the route
+			// label hasn't deployed yet (the deploy config test and one_d4's
+			// HealthProbeRouteLabelTest pin the other two ways this can lie).
 			counter("Probes", "health_checks", "", `http_server_requests_total{service_name="one_d4",route="/health"}`),
 			counter("Indexing", "games_indexed", "games", `games_indexed_total{service_name="one_d4"}`),
 			counter("Indexing", "runs_completed", "", `index_runs_total{service_name="one_d4",outcome="completed"}`),

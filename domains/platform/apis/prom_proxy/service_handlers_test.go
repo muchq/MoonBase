@@ -930,9 +930,11 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 		for _, query := range queries {
 			// The probes tile (#1303) is the one entry that reads the standard
 			// http_server family rather than an IndexWorker instrument: it
-			// shows the healthcheck traffic probeFilter subtracts from every
-			// Serving number. It still has to be scoped and route-selected.
-			if strings.Contains(query, "http_server_requests_total") {
+			// shows the /health traffic probeFilter subtracts from every
+			// Serving number. Keyed on the route literal, not the instrument,
+			// so a future http_server tile on another route writes its own
+			// rules instead of inheriting the probe's.
+			if strings.Contains(query, `route="/health"`) {
 				assert.Contains(t, query, `service_name="one_d4"`,
 					"%s reads the standard family unscoped: %s", what, query)
 				assert.Contains(t, query, `route="/health"`,

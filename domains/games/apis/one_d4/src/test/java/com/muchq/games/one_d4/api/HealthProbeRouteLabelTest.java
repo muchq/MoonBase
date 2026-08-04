@@ -2,7 +2,6 @@ package com.muchq.games.one_d4.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.muchq.platform.yodel.HttpServerMetrics;
 import com.muchq.platform.yodel.micronaut.HttpServerMetricsFilter;
 import io.micronaut.context.ApplicationContext;
 import io.micronaut.runtime.server.EmbeddedServer;
