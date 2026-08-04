@@ -97,18 +97,6 @@ class GatedHubStore final : public HubStore {
   std::atomic<int> delete_game_count_ = 0;
 };
 
-class RemoteIdGenerator final : public IdGenerator {
- public:
-  std::string PlayerId() override { return "remote-player-" + std::to_string(++players_); }
-  std::string RoomId() override { return "remote-room-" + std::to_string(++rooms_); }
-  std::string GameCode() override { return "RGAME" + std::to_string(++games_); }
-
- private:
-  int players_ = 0;
-  int rooms_ = 0;
-  int games_ = 0;
-};
-
 class HubStoreRaceFixture : public GolfHubStreamFixture {
  protected:
   struct Instance {
