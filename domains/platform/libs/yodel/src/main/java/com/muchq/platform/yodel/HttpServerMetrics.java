@@ -171,14 +171,24 @@ public final class HttpServerMetrics {
       for (int i = 0; i < buckets.length; i++) {
         counts[i] = buckets[i].sum();
       }
+      // Outcomes before requests, the reverse of the writer's order
+      // (requests first, then the outcome): with the writer and reader
+      // crossing in opposite directions, a torn read can only ever see
+      // requests at or ahead of the outcomes — never success + failure
+      // running past requests, which no request history can produce.
+      double durationSum = durationSumMicros.sum();
+      long durations = durationCount.sum();
+      long succeeded = success.sum();
+      long failed = failure.sum();
+      long requested = requests.sum();
       return new RouteSnapshot(
           key.httpMethod(),
           key.route(),
-          requests.sum(),
-          success.sum(),
-          failure.sum(),
-          durationSumMicros.sum(),
-          durationCount.sum(),
+          requested,
+          succeeded,
+          failed,
+          durationSum,
+          durations,
           counts);
     }
   }

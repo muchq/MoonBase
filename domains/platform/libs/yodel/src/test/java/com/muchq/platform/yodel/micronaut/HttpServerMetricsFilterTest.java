@@ -101,6 +101,36 @@ public class HttpServerMetricsFilterTest {
   }
 
   /**
+   * A chain that throws synchronously — a filter further down blowing up during setup, before any
+   * publisher exists — must still count the request. Without the defer around {@code
+   * chain.proceed}, no Mono is ever constructed, none of the completion hooks fire, and the request
+   * lands in the gauge but in no counter at all.
+   */
+  @Test
+  public void aSynchronouslyThrowingChainStillCountsTheRequest() {
+    // The server's own filter bean, driven directly: no request has gone
+    // over the wire yet, so its snapshot holds only what this call records.
+    HttpServerMetricsFilter filter =
+        server.getApplicationContext().getBean(HttpServerMetricsFilter.class);
+    io.micronaut.http.HttpRequest<?> request = io.micronaut.http.HttpRequest.GET("/kaboom");
+
+    reactor.core.publisher.Mono.from(
+            filter.doFilter(
+                request,
+                r -> {
+                  throw new RuntimeException("filter chain exploded before producing a publisher");
+                }))
+        .onErrorComplete()
+        .block();
+
+    HttpServerMetrics.RouteSnapshot snapshot = filter.metrics().snapshot().get(0);
+    assertThat(snapshot.route()).isEqualTo(HttpServerMetricsFilter.UNMATCHED_ROUTE);
+    assertThat(snapshot.requests()).isEqualTo(1);
+    assertThat(snapshot.failure()).isEqualTo(1);
+    assertThat(filter.metrics().activeSnapshot().get(0).active()).isZero();
+  }
+
+  /**
    * One pipeline per process, which the factory's javadoc asserts and nothing was checking.
    *
    * <p>Micronaut factory methods are prototype-scoped unless annotated, so dropping

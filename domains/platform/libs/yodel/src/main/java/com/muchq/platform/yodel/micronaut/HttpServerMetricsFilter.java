@@ -2,7 +2,7 @@ package com.muchq.platform.yodel.micronaut;
 
 import com.muchq.platform.yodel.HttpMetricsPipeline;
 import com.muchq.platform.yodel.HttpServerMetrics;
-import io.micronaut.http.HttpAttributes;
+import io.micronaut.http.BasicHttpAttributes;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.MutableHttpResponse;
 import io.micronaut.http.annotation.Filter;
@@ -67,7 +67,11 @@ public class HttpServerMetricsFilter implements HttpServerFilter {
     long startNanos = System.nanoTime();
     metrics.recordRequestStart(method);
     AtomicBoolean recorded = new AtomicBoolean();
-    return Mono.from(chain.proceed(request))
+    // defer: a chain.proceed that throws synchronously (rather than
+    // returning a failed publisher) must still surface as an error
+    // signal, or the request is counted nowhere at all — started in the
+    // gauge, absent from every counter.
+    return Mono.defer(() -> Mono.from(chain.proceed(request)))
         .doOnNext(
             response -> {
               if (recorded.compareAndSet(false, true)) {
@@ -103,13 +107,13 @@ public class HttpServerMetricsFilter implements HttpServerFilter {
    * router has stamped its match onto the request. A request that matched nothing keeps the
    * sentinel.
    *
-   * <p>{@code HttpAttributes.URI_TEMPLATE} is deprecated {@code forRemoval} since Micronaut 4.8 in
-   * favor of {@code io.micronaut.web.router.RouteAttributes}; it is still what both the native
-   * router and micronaut-jaxrs stamp today, and the filter tests break loudly if an upgrade stops
-   * populating it — swap the accessor then, not speculatively.
+   * <p>Read through {@code BasicHttpAttributes.getUriTemplate} — the supported accessor for the
+   * same attribute the router's {@code setRouteAttributes} writes; the raw {@code
+   * HttpAttributes.URI_TEMPLATE} constant is deprecated {@code forRemoval} since Micronaut 4.8. The
+   * filter tests break loudly if an upgrade stops populating it.
    */
   private static String routeOf(HttpRequest<?> request) {
-    return request.getAttribute(HttpAttributes.URI_TEMPLATE, String.class).orElse(UNMATCHED_ROUTE);
+    return BasicHttpAttributes.getUriTemplate(request).orElse(UNMATCHED_ROUTE);
   }
 
   // No @PreDestroy closing the pipeline. It used to be right — the filter built the pipeline in

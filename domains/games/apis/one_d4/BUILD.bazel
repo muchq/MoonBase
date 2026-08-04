@@ -615,11 +615,6 @@ java_test_suite(
     ],
     runtime_deps = [
         "//domains/platform/libs/logging",
-        # The same integration the binary carries. IndexerModule injects yodel's
-        # CustomMetrics into the worker, and the bean that supplies it lives here —
-        # without it a context boot fails on a missing bean rather than on anything
-        # these tests are about.
-        "//domains/platform/libs/yodel:micronaut",
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
@@ -678,11 +673,6 @@ java_test_suite(
     ],
     runtime_deps = [
         "//domains/platform/libs/logging",
-        # The same integration the binary carries. IndexerModule injects yodel's
-        # CustomMetrics into the worker, and the bean that supplies it lives here —
-        # without it a context boot fails on a missing bean rather than on anything
-        # these tests are about.
-        "//domains/platform/libs/yodel:micronaut",
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
@@ -691,9 +681,11 @@ java_test_suite(
         # connection to api.chess.com.
         ":e2e_support",
         ":module",
-        # HealthProbeRouteLabelTest reads the filter's snapshot to pin the
-        # jaxrs-bridge route template (#1303), so yodel moves from a purely
-        # runtime integration to a compile-time one for this suite.
+        # Was runtime-only (IndexerModule injects yodel's CustomMetrics, and
+        # the bean that supplies it lives in :micronaut — without it a context
+        # boot fails on a missing bean). HealthProbeRouteLabelTest now also
+        # reads the filter's snapshot to pin the jaxrs-bridge route template
+        # (#1303), which makes yodel a compile-time dep; deps implies runtime.
         "//domains/platform/libs/yodel",
         "//domains/platform/libs/yodel:micronaut",
         artifact("io.micronaut:micronaut-context"),
