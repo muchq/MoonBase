@@ -4,11 +4,9 @@ import com.muchq.games.one_d4.db.GameFeatureStore;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.context.annotation.Requires;
 import io.micronaut.scheduling.annotation.Scheduled;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
- * Keeps {@link FirstPageCache} warm by re-running the default first-load query on a schedule.
+ * Keeps {@link FirstPageCache} warm by refreshing it on a schedule.
  *
  * <p>The schedule is the point, not an optimization of a read-through cache: on a low-traffic site
  * a lazily-populated cache misses for exactly the visitor it exists for — the first one after a
@@ -18,18 +16,15 @@ import org.slf4j.LoggerFactory;
  */
 // @Requires because this bean is eager: test contexts that boot the api package without the
 // database layer (e.g. DtoJsonCompatTest, which only wants the container's ObjectMapper) must not
-// be forced to satisfy QueryExecutor's store dependency. FirstPageWarmupTest pins that the bean
-// does activate — and fires — in the real application context.
+// be forced to satisfy the cache loader's store dependency. FirstPageWarmupTest pins that the
+// bean does activate — and fires — in the real application context.
 @Context
 @Requires(beans = GameFeatureStore.class)
 public class FirstPageWarmer {
-  private static final Logger LOG = LoggerFactory.getLogger(FirstPageWarmer.class);
 
-  private final QueryExecutor queryExecutor;
   private final FirstPageCache cache;
 
-  public FirstPageWarmer(QueryExecutor queryExecutor, FirstPageCache cache) {
-    this.queryExecutor = queryExecutor;
+  public FirstPageWarmer(FirstPageCache cache) {
     this.cache = cache;
   }
 
@@ -37,16 +32,11 @@ public class FirstPageWarmer {
   // FirstPageWarmerTest), or the cache expires between refreshes and every first load falls
   // through to the database again. fixedDelay measures from the previous run's completion, so
   // the true period is 30s plus query time; the 2x headroom in MAX_AGE absorbs that.
+  // refreshNow() keeps the last good snapshot and logs on failure, so a failed tick never
+  // cancels the schedule. A query that hangs (rather than throws) does block future ticks —
+  // the cache's load-on-miss bounds the damage to serving live until a restart.
   @Scheduled(fixedDelay = "30s", initialDelay = "1s")
   public void refresh() {
-    try {
-      cache.put(queryExecutor.execute(FirstPageCache.defaultRequest()));
-    } catch (Exception e) {
-      // Swallow so a failed tick doesn't cancel the schedule; a stale snapshot ages out via
-      // MAX_AGE and requests fall back to the live query path. A query that hangs (rather than
-      // throws) does block future ticks — the same fall-through bounds the damage to serving
-      // live until a restart.
-      LOG.warn("Failed to refresh first-page cache", e);
-    }
+    cache.refreshNow();
   }
 }

@@ -1,27 +1,27 @@
 package com.muchq.games.one_d4.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.one_d4.api.dto.QueryRequest;
 import com.muchq.games.one_d4.api.dto.QueryResponse;
-import java.time.Duration;
-import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 public class FirstPageCacheTest {
 
+  private FakeGameFeatureStore store;
   private MutableTicker ticker;
   private FirstPageCache cache;
 
   @BeforeEach
   public void setUp() {
+    store = new FakeGameFeatureStore();
     ticker = new MutableTicker();
-    cache = new FirstPageCache(ticker, FirstPageCache.MAX_AGE);
-  }
-
-  private static QueryResponse response() {
-    return new QueryResponse(List.of(), 0);
+    cache =
+        new FirstPageCache(
+            ticker, FirstPageCache.MAX_AGE, new QueryExecutor(store, new SqlCompiler()));
   }
 
   @Test
@@ -77,45 +77,65 @@ public class FirstPageCacheTest {
   }
 
   @Test
-  public void get_isEmptyBeforeAnythingIsStored() {
-    assertThat(cache.get()).isEmpty();
+  public void get_loadsExactlyTheDefaultRequestOnAMiss() {
+    cache.get();
+
+    assertThat(store.queryCount()).isEqualTo(1);
+    assertThat(store.lastLimit()).isEqualTo(FirstPageCache.DEFAULT_LIMIT);
+    assertThat(store.lastOffset()).isEqualTo(0);
+    assertThat(store.lastCompiled())
+        .isEqualTo(
+            new SqlCompiler()
+                .compile(
+                    com.muchq.games.chessql.parser.Parser.parse(FirstPageCache.DEFAULT_QUERY),
+                    null));
   }
 
   @Test
-  public void get_returnsWhatWasPut() {
-    QueryResponse stored = response();
-    cache.put(stored);
-    assertThat(cache.get()).contains(stored);
-  }
-
-  @Test
-  public void get_servesUntilMaxAgeAndNotAfter() {
-    cache.put(response());
-
+  public void get_servesTheSnapshotWithoutReloadingWhileFresh() {
+    QueryResponse first = cache.get();
     ticker.advance(FirstPageCache.MAX_AGE.minusSeconds(1));
-    assertThat(cache.get()).as("just inside the window the snapshot is served").isPresent();
+    QueryResponse second = cache.get();
 
+    assertThat(store.queryCount()).isEqualTo(1);
+    assertThat(second).isEqualTo(first);
+  }
+
+  @Test
+  public void get_reloadsOnceExpired() {
+    cache.get();
     // Caffeine's expireAfterWrite expires the entry once its age reaches the duration.
-    ticker.advance(Duration.ofSeconds(1));
-    assertThat(cache.get()).as("at the boundary it is expired").isEmpty();
+    ticker.advance(FirstPageCache.MAX_AGE);
+    cache.get();
+
+    assertThat(store.queryCount()).isEqualTo(2);
   }
 
   @Test
-  public void put_resetsTheFreshnessWindow() {
-    cache.put(response());
-    ticker.advance(FirstPageCache.MAX_AGE.plusSeconds(1));
-    assertThat(cache.get()).isEmpty();
+  public void get_propagatesALoaderFailureLikeTheLivePath() {
+    store.failQueriesWith(new RuntimeException("db down"));
 
-    QueryResponse fresh = response();
-    cache.put(fresh);
-    assertThat(cache.get()).contains(fresh);
+    assertThatThrownBy(() -> cache.get()).hasMessageContaining("db down");
+    assertThat(cache.peek()).as("a failed load caches nothing").isEmpty();
   }
 
   @Test
-  public void put_replacesTheEarlierSnapshot() {
-    cache.put(response());
-    QueryResponse newer = new QueryResponse(List.of(), 0);
-    cache.put(newer);
-    assertThat(cache.get()).containsSame(newer);
+  public void refreshNow_recomputesEvenWhileFresh() {
+    cache.get();
+    cache.refreshNow();
+
+    assertThat(store.queryCount()).isEqualTo(2);
+  }
+
+  @Test
+  public void refreshNow_failureKeepsTheEarlierSnapshotAndDoesNotThrow() {
+    QueryResponse warmed = cache.get();
+
+    store.failQueriesWith(new RuntimeException("db down"));
+    cache.refreshNow();
+
+    assertThat(cache.peek())
+        .as("a failed refresh keeps the last good snapshot until MAX_AGE expires it")
+        .contains(warmed);
   }
 }

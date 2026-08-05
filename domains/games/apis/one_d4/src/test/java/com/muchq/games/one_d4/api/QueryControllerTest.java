@@ -27,10 +27,9 @@ public class QueryControllerTest {
   public void setUp() {
     store = new FakeGameFeatureStore();
     ticker = new MutableTicker();
-    cache = new FirstPageCache(ticker, FirstPageCache.MAX_AGE);
-    controller =
-        new QueryController(
-            new QueryExecutor(store, new SqlCompiler()), new QueryRequestValidator(), cache);
+    QueryExecutor executor = new QueryExecutor(store, new SqlCompiler());
+    cache = new FirstPageCache(ticker, FirstPageCache.MAX_AGE, executor);
+    controller = new QueryController(executor, new QueryRequestValidator(), cache);
   }
 
   private static QueryRequest defaultRequest() {

@@ -21,19 +21,23 @@ public class FirstPageWarmerTest {
   @BeforeEach
   public void setUp() {
     store = new FakeGameFeatureStore();
-    cache = new FirstPageCache(new MutableTicker(), FirstPageCache.MAX_AGE);
-    warmer = new FirstPageWarmer(new QueryExecutor(store, new SqlCompiler()), cache);
+    cache =
+        new FirstPageCache(
+            new MutableTicker(),
+            FirstPageCache.MAX_AGE,
+            new QueryExecutor(store, new SqlCompiler()));
+    warmer = new FirstPageWarmer(cache);
   }
 
   @Test
-  public void refresh_populatesTheCache() {
+  public void refresh_populatesTheCacheWithoutWaitingForARequest() {
     store.setQueryResult(List.of(gameFeature("https://chess.com/game/warm")));
     store.setOccurrencesResult(Map.of());
 
     warmer.refresh();
 
-    assertThat(cache.get()).isPresent();
-    assertThat(cache.get().orElseThrow().games().get(0).gameUrl())
+    assertThat(cache.peek()).isPresent();
+    assertThat(cache.peek().orElseThrow().games().get(0).gameUrl())
         .isEqualTo("https://chess.com/game/warm");
   }
 
@@ -45,7 +49,7 @@ public class FirstPageWarmerTest {
     warmer.refresh();
 
     // A warmer that warms any other page poisons the cache the controller serves as page 0.
-    // The compiled query is pinned too: limit/offset alone would let a warmer run a different
+    // The compiled query is pinned too: limit/offset alone would let the loader run a different
     // ChessQL query with the right pagination and stay green.
     assertThat(store.lastLimit()).isEqualTo(FirstPageCache.DEFAULT_LIMIT);
     assertThat(store.lastOffset()).isEqualTo(0);
@@ -55,6 +59,39 @@ public class FirstPageWarmerTest {
                 .compile(
                     com.muchq.games.chessql.parser.Parser.parse(FirstPageCache.DEFAULT_QUERY),
                     null));
+  }
+
+  @Test
+  public void refresh_replacesTheEarlierSnapshotWithNewData() {
+    store.setQueryResult(List.of(gameFeature("https://chess.com/game/old")));
+    warmer.refresh();
+
+    store.setQueryResult(List.of(gameFeature("https://chess.com/game/new")));
+    warmer.refresh();
+
+    assertThat(cache.peek().orElseThrow().games().get(0).gameUrl())
+        .isEqualTo("https://chess.com/game/new");
+  }
+
+  @Test
+  public void refresh_swallowsStoreFailuresSoTheSchedulerKeepsTicking() {
+    store.failQueriesWith(new RuntimeException("db down"));
+
+    assertThatCode(() -> warmer.refresh()).doesNotThrowAnyException();
+    assertThat(cache.peek()).as("a failed refresh must not poison the cache").isEmpty();
+  }
+
+  @Test
+  public void refresh_afterAFailure_theEarlierSnapshotSurvives() {
+    store.setQueryResult(List.of(gameFeature("https://chess.com/game/kept")));
+    warmer.refresh();
+
+    store.failQueriesWith(new RuntimeException("db down"));
+    warmer.refresh();
+
+    assertThat(cache.peek().orElseThrow().games().get(0).gameUrl())
+        .as("a failed refresh keeps the last good snapshot until MAX_AGE expires it")
+        .isEqualTo("https://chess.com/game/kept");
   }
 
   @Test
@@ -71,39 +108,6 @@ public class FirstPageWarmerTest {
     // delay exceeds half MAX_AGE, the snapshot expires between refreshes and every first load
     // falls through to the database again.
     assertThat(delaySeconds * 2).isLessThanOrEqualTo(FirstPageCache.MAX_AGE.toSeconds());
-  }
-
-  @Test
-  public void refresh_replacesTheEarlierSnapshotWithNewData() {
-    store.setQueryResult(List.of(gameFeature("https://chess.com/game/old")));
-    warmer.refresh();
-
-    store.setQueryResult(List.of(gameFeature("https://chess.com/game/new")));
-    warmer.refresh();
-
-    assertThat(cache.get().orElseThrow().games().get(0).gameUrl())
-        .isEqualTo("https://chess.com/game/new");
-  }
-
-  @Test
-  public void refresh_swallowsStoreFailuresSoTheSchedulerKeepsTicking() {
-    store.failQueriesWith(new RuntimeException("db down"));
-
-    assertThatCode(() -> warmer.refresh()).doesNotThrowAnyException();
-    assertThat(cache.get()).as("a failed refresh must not poison the cache").isEmpty();
-  }
-
-  @Test
-  public void refresh_afterAFailure_theEarlierSnapshotSurvives() {
-    store.setQueryResult(List.of(gameFeature("https://chess.com/game/kept")));
-    warmer.refresh();
-
-    store.failQueriesWith(new RuntimeException("db down"));
-    warmer.refresh();
-
-    assertThat(cache.get().orElseThrow().games().get(0).gameUrl())
-        .as("a failed refresh keeps the last good snapshot until MAX_AGE expires it")
-        .isEqualTo("https://chess.com/game/kept");
   }
 
   private static GameFeature gameFeature(String gameUrl) {

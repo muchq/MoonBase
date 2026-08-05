@@ -56,11 +56,12 @@ public class FirstPageWarmupTest {
   public void cacheIsWarmedShortlyAfterStartupWithoutAnyRequest() throws Exception {
     FirstPageCache cache = awaitWarm();
 
-    assertThat(cache.get())
+    // peek(), not get(): get() would load on demand and make this pass without the warmer.
+    assertThat(cache.peek())
         .as("the scheduled warmer populates the cache with no traffic")
         .isPresent();
     // Empty database, so the warmed snapshot is an empty page — warm and empty, not absent.
-    assertThat(cache.get().orElseThrow().count()).isEqualTo(0);
+    assertThat(cache.peek().orElseThrow().count()).isEqualTo(0);
   }
 
   /**
@@ -101,10 +102,11 @@ public class FirstPageWarmupTest {
 
   private FirstPageCache awaitWarm() throws Exception {
     FirstPageCache cache = server.getApplicationContext().getBean(FirstPageCache.class);
+    // peek() so the poll itself cannot populate the cache — only the warmer can.
     // The warmer's initial delay is 1s; give a loaded CI machine headroom without running into
     // the small-test 60s ceiling.
     long deadline = System.nanoTime() + java.time.Duration.ofSeconds(20).toNanos();
-    while (cache.get().isEmpty() && System.nanoTime() < deadline) {
+    while (cache.peek().isEmpty() && System.nanoTime() < deadline) {
       Thread.sleep(100);
     }
     return cache;

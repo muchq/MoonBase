@@ -1,7 +1,7 @@
 package com.muchq.games.one_d4.api;
 
-import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.github.benmanes.caffeine.cache.Ticker;
 import com.muchq.games.one_d4.api.dto.QueryRequest;
 import com.muchq.games.one_d4.api.dto.QueryResponse;
@@ -9,6 +9,8 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import java.time.Duration;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * In-memory snapshot of the response to the query 1d4_web's GamesView fires on first page load, so
@@ -16,19 +18,20 @@ import java.util.Optional;
  *
  * <p>Freshness is bounded by {@link #MAX_AGE} rather than by write invalidation: writers include
  * index workers on other JVMs sharing the same database, which this process cannot observe, so a
- * short time bound is the honest guarantee. {@link FirstPageWarmer} refreshes the snapshot on a
- * schedule; a snapshot older than two refresh intervals means the warmer is dead or the database is
- * down, and {@link #get()} then returns empty so the caller falls back to the live path instead of
- * serving arbitrarily old data. A live request that falls through re-warms the snapshot on its way
- * out.
+ * short time bound is the honest guarantee. {@link FirstPageWarmer} calls {@link #refreshNow()} on
+ * a schedule; if the warmer is dead or was never scheduled, {@link #get()} loads on demand — under
+ * Caffeine's per-key lock, so concurrent cold misses collapse to a single query.
  *
- * <p>Backed by a single-entry Caffeine cache: Caffeine owns the expiry bookkeeping; this class owns
- * what is cacheable ({@link #matches}) and the freshness policy. Production uses Caffeine's
- * monotonic system ticker — {@link Ticker}'s contract is a monotonic source, which a wall clock is
- * not — and tests inject their own ticker to drive expiry.
+ * <p>Backed by a single-entry Caffeine {@link LoadingCache}: Caffeine owns expiry, loading, and
+ * single-flight; this class owns what is cacheable ({@link #matches}) and the freshness policy. The
+ * loader is the one place that knows how a snapshot is computed — the same {@link QueryExecutor} a
+ * live request runs. Production uses Caffeine's monotonic system ticker ({@link Ticker}'s contract
+ * is a monotonic source, which a wall clock is not); tests inject their own.
  */
 @Singleton
 public class FirstPageCache {
+  private static final Logger LOG = LoggerFactory.getLogger(FirstPageCache.class);
+
   /** Must match DEFAULT_QUERY in 1d4_web's GamesView.tsx — that is the request being cached. */
   public static final String DEFAULT_QUERY = "num.moves >= 0";
 
@@ -43,15 +46,22 @@ public class FirstPageCache {
 
   private static final String KEY = "first-page";
 
-  private final Cache<String, QueryResponse> cache;
+  private final LoadingCache<String, QueryResponse> cache;
 
   @Inject
-  public FirstPageCache() {
-    this(Ticker.systemTicker(), MAX_AGE);
+  public FirstPageCache(QueryExecutor queryExecutor) {
+    this(Ticker.systemTicker(), MAX_AGE, queryExecutor);
   }
 
-  FirstPageCache(Ticker ticker, Duration maxAge) {
-    this.cache = Caffeine.newBuilder().expireAfterWrite(maxAge).ticker(ticker).build();
+  FirstPageCache(Ticker ticker, Duration maxAge, QueryExecutor queryExecutor) {
+    this.cache =
+        Caffeine.newBuilder()
+            .expireAfterWrite(maxAge)
+            .ticker(ticker)
+            // Same-thread executor: refreshNow() computes on the warmer's scheduled thread
+            // rather than a shared pool, keeping threading observable and tests synchronous.
+            .executor(Runnable::run)
+            .build(key -> queryExecutor.execute(defaultRequest()));
   }
 
   /** The exact request GamesView sends on first load. */
@@ -75,12 +85,33 @@ public class FirstPageCache {
         && (request.player() == null || request.player().isBlank());
   }
 
-  /** The cached response, or empty if nothing has been stored or the snapshot has expired. */
-  public Optional<QueryResponse> get() {
+  /**
+   * The cached response, loading it on a miss or after expiry. Loading happens under the key's
+   * lock, so concurrent cold misses run one query, and a loader failure propagates to the caller
+   * like any live-path query failure.
+   */
+  public QueryResponse get() {
+    return cache.get(KEY);
+  }
+
+  /** The cached response without loading — for tests and diagnostics only. */
+  Optional<QueryResponse> peek() {
     return Optional.ofNullable(cache.getIfPresent(KEY));
   }
 
-  public void put(QueryResponse response) {
-    cache.put(KEY, response);
+  /**
+   * Recomputes the snapshot even if it is still fresh — the warmer's tick. On failure the previous
+   * snapshot is kept (until it expires) and the error is logged; nothing propagates, so the
+   * scheduler keeps ticking.
+   */
+  public void refreshNow() {
+    cache
+        .refresh(KEY)
+        .whenComplete(
+            (response, error) -> {
+              if (error != null) {
+                LOG.warn("Failed to refresh first-page cache", error);
+              }
+            });
   }
 }

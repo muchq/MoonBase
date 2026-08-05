@@ -8,7 +8,6 @@ import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
-import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,18 +40,12 @@ public class QueryController {
         request.offset(),
         request.player());
 
+    // A default request is answered from (or, on a cold/expired miss, loads) the shared
+    // snapshot; matches() guarantees the loader computes exactly this request. Everything else
+    // runs live.
     if (firstPageCache.matches(request)) {
-      Optional<QueryResponse> cached = firstPageCache.get();
-      if (cached.isPresent()) {
-        return cached.get();
-      }
-      // Cache empty or expired (warmer not yet run, or dead): serve live and re-warm on the way
-      // out so the next first load is fast even if the scheduler is wedged.
-      QueryResponse response = queryExecutor.execute(request);
-      firstPageCache.put(response);
-      return response;
+      return firstPageCache.get();
     }
-
     return queryExecutor.execute(request);
   }
 }
