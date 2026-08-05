@@ -156,10 +156,12 @@ case-insensitively, but group keys are not case-normalized, so the same opponent
 two casings forms two groups (same trap as `opening_family` variants). Without `player`,
 grouping by any perspective field is rejected.
 
-The two rating fields (`me.elo`, `opponent.elo`) group as fixed-width buckets, never raw —
-grouping by a raw rating would make one bucket per distinct value, burying the answer under
+The two rating fields (`me.elo`, `opponent.elo`) group as fixed-width buckets, never raw by
+default — grouping by a raw rating makes one bucket per distinct value, burying the answer under
 one-game groups (#1310). Bare `opponent.elo` buckets by 100 points; a parenthesized width
-overrides it: `groupBy: ["opponent.elo(200)"]`. Bands are half-open and keyed by their numeric
+overrides it: `groupBy: ["opponent.elo(200)"]`. Any width down to 1 is honored (an explicit
+`opponent.elo(1)` *is* raw grouping, deliberately — `totalGroups` / `truncated` will say what it
+cost). Bands are half-open and keyed by their numeric
 lower bound — a group key of `2400` at width 200 means ratings in [2400, 2600) — under the
 underscore response key (`opponent_elo`), so bands sort numerically in the tiebreak. Rows with a
 NULL elo (chess.com omitted that side's rating data) form a `null` bucket, like the title

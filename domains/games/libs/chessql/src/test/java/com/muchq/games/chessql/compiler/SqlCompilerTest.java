@@ -1072,6 +1072,16 @@ public class SqlCompilerTest {
   }
 
   @Test
+  public void testBucketWidthOneIsTheAcceptedBoundary() {
+    // The positive twin of the width-validation loop: 1 is the smallest legal width, a deliberate
+    // per-rating opt-in (the rejection guards against *implicit* raw grouping, and the totals
+    // machinery still reports burial). Pins the boundary so the guard can't drift to < 2.
+    CompiledQuery result =
+        compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("me.elo(1)"), "hikaru");
+    assertThat(result.selectSql()).contains("END) / 1 * 1 AS me_elo");
+  }
+
+  @Test
   public void testBareEloAndExplicitDefaultWidthCompileIdentically() {
     // Bare me.elo is exactly me.elo(100) — same SQL, same params — so the two spellings of "the
     // default" can never drift apart.
@@ -1086,12 +1096,40 @@ public class SqlCompilerTest {
   @Test
   public void testCompileAggregateDedupesSameWidthBucketTerms() {
     // Equivalent bucket terms (any spelling, same effective width) are one term — one alias, one
-    // GROUP BY key — like the categorical spellings dedup.
+    // GROUP BY key — like the categorical spellings dedup. Bare participates via its default.
     CompiledQuery result =
         compiler.compileAggregate(
             Parser.parse("white.elo > 1"), List.of("opponent.elo", "opponent_elo(100)"), "hikaru");
     assertThat(result.selectSql()).containsOnlyOnce("AS opponent_elo");
     assertThat(result.selectSql()).contains(" GROUP BY opponent_elo ORDER BY");
+
+    // Width 200 sits above the Integer autobox cache (-128..127), so this dedup only holds if
+    // widths compare by value — the bare/default pair above would pass under reference equality
+    // by accident, because both 100s are the same cached Integer.
+    CompiledQuery aboveCache =
+        compiler.compileAggregate(
+            Parser.parse("white.elo > 1"),
+            List.of("opponent.elo(200)", "opponent_elo(200)"),
+            "hikaru");
+    assertThat(aboveCache.selectSql()).containsOnlyOnce("AS opponent_elo");
+  }
+
+  @Test
+  public void testCompileAggregateGroupsBothRatingFieldsWithIndependentWidths() {
+    // The cross-tab the buckets exist for — my band × opponent band — and the pin that the
+    // conflicting-width check is scoped per group key: different widths on *different* fields are
+    // two independent terms, not a conflict.
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("white.elo > 1"), List.of("me.elo", "opponent.elo(200)"), "hikaru");
+
+    assertThat(result.selectSql())
+        .contains("THEN white_elo ELSE black_elo END) / 100 * 100 AS me_elo")
+        .contains("THEN black_elo ELSE white_elo END) / 200 * 200 AS opponent_elo")
+        .contains("GROUP BY me_elo, opponent_elo")
+        .contains("ORDER BY group_count DESC, me_elo ASC, opponent_elo ASC");
+    // One player param per bucket CASE in SELECT order, then the two participation-guard params.
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", 1));
   }
 
   @Test

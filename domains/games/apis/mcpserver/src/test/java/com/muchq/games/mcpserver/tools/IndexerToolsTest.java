@@ -366,10 +366,11 @@ public class IndexerToolsTest {
   }
 
   /**
-   * The #1310 headline through the MCP tool: the stub deals White 2800 and Black 1500, so hikaru's
-   * opponents rate 1500 (game/1, hikaru White) and 2800 (game/2, hikaru Black) — two buckets, one
-   * per color, keyed by *numeric* lower bounds in the JSON. A CASE reading the wrong side would
-   * pool both games into a single bucket.
+   * The #1310 plumbing through the MCP tool: the group_by string carries the bucket term (and its
+   * width) end to end, and the group keys arrive as *numeric* JSON lower bounds, not strings. The
+   * stub deals every game White 2800 / Black 1500, so this fixture is side-symmetric — me.elo and
+   * opponent.elo produce identical buckets — and cannot see a CASE reading the wrong side; that pin
+   * lives in GameFeatureDaoTest and PostgresAggregateCompatTest, where the elos are asymmetric.
    */
   @Test
   public void aggregateGroupsByOpponentEloBucketsAcrossBothColors() {
