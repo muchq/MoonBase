@@ -162,7 +162,8 @@ one-game groups (#1310). Bare `opponent.elo` buckets by 100 points; a parenthesi
 overrides it: `groupBy: ["opponent.elo(200)"]`. Bands are half-open and keyed by their numeric
 lower bound — a group key of `2400` at width 200 means ratings in [2400, 2600) — under the
 underscore response key (`opponent_elo`), so bands sort numerically in the tiebreak. Rows with a
-NULL elo (indexed before the elo columns existed) form a `null` bucket, like the title fields.
+NULL elo (chess.com omitted that side's rating data) form a `null` bucket, like the title
+fields.
 One width per field per request: `["me.elo(100)", "me.elo(200)"]` is rejected rather than
 silently picking one.
 

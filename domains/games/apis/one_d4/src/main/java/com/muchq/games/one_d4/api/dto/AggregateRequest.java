@@ -6,7 +6,9 @@ import java.util.List;
  * Request for POST /v1/aggregate: a ChessQL filter plus group-by fields, returning per-group
  * counts. {@code orderBy} currently supports only "count" (descending), which is also the default.
  * {@code player} is the optional perspective player for me.*, opponent.*, and outcome fields in the
- * filter; group-by fields must be physical columns.
+ * filter; group-by fields are physical columns, plus — when {@code player} is set — the perspective
+ * fields: categorical ones by value (#1301), the rating fields as fixed-width buckets like {@code
+ * opponent.elo(200)} (#1310).
  */
 public record AggregateRequest(
     String query, List<String> groupBy, String orderBy, int limit, String player) {

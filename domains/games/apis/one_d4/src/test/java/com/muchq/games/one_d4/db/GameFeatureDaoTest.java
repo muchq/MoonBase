@@ -812,8 +812,8 @@ public class GameFeatureDaoTest {
   /**
    * The #1310 headline, through the real store: opponent.elo buckets by the band's numeric lower
    * bound across both colors. 2400 and 2499 land in the same [2400, 2500) bucket while 2399 falls
-   * into [2300, 2400) — the half-open boundary — and a NULL elo (rows indexed before the column
-   * existed) pools into a NULL bucket instead of vanishing. Keys come back as Integers, not
+   * into [2300, 2400) — the half-open boundary — and a NULL elo (chess.com omitted that side's
+   * rating data) pools into a NULL bucket instead of vanishing. Keys come back as Integers, not
    * strings: the numeric key is what makes the ASC tiebreak sort bands numerically.
    */
   @Test

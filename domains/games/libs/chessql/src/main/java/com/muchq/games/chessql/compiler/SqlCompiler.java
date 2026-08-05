@@ -402,9 +402,12 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       } else if (!Objects.equals(existing.bucketWidth(), term.bucketWidth())) {
         // Same-key duplicates dedupe (either spelling, same width), but two widths for one field
         // would silently keep whichever came first — both aliases land on the same group key.
+        // Only rating terms can reach here (categorical duplicates share a null width), so the
+        // dotted perspective field is always present to name, keeping the message's vocabulary
+        // consistent with its siblings instead of introducing the underscore key mid-sentence.
         throw new IllegalArgumentException(
             "Conflicting bucket widths for "
-                + term.key()
+                + term.perspectiveField()
                 + ": "
                 + existing.bucketWidth()
                 + " and "

@@ -199,6 +199,14 @@ always hits the database. If the snapshot is missing or older than 60 seconds (r
 database down at startup), the request loads a fresh snapshot through the cache — concurrent cold
 misses share a single query — so serving the live result also re-warms the cache.
 
+### Error Responses
+
+| Condition          | HTTP Status | Cause                                |
+|--------------------|-------------|--------------------------------------|
+| Bad ChessQL syntax | 400         | `ParseException` (body includes `position`) |
+| Unknown field      | 400         | `IllegalArgumentException`           |
+| Unknown motif      | 400         | `IllegalArgumentException`           |
+
 ---
 
 ## POST /v1/aggregate
@@ -221,7 +229,7 @@ matching row and group client-side.
 | Field   | Type     | Required | Default | Max  | Description                                       |
 |---------|----------|----------|---------|------|---------------------------------------------------|
 | query   | string   | yes      | —       | —    | ChessQL filter (may use perspective fields when `player` is set) |
-| groupBy | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form; physical columns, plus the categorical perspective fields when `player` is set) |
+| groupBy | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form; physical columns, plus the perspective fields when `player` is set — the rating fields as width-bucketed terms like `"opponent.elo(200)"`) |
 | orderBy | string   | no       | "count" | —    | Only "count" is supported (descending)            |
 | limit   | int      | no       | 50      | 1000 | Max groups to return                              |
 | player  | string   | no       | —       | —    | Username that perspective fields in the filter and groupBy are resolved against |
@@ -247,6 +255,15 @@ CHESSQL.md).
   "totalGroups": 2,
   "truncated": false
 }
+```
+
+A rating-bucket group key is a JSON *number* (the band's lower bound), and a NULL group — an
+untitled opponent, a NULL elo — is an explicit `null` value, so `group` values are not uniformly
+strings:
+
+```json
+{ "group": { "opponent_elo": 2400 }, "count": 12 },
+{ "group": { "opponent_elo": null }, "count": 3 }
 ```
 
 Group keys are canonical column names (e.g. `opening_family`, even when requested as
@@ -277,17 +294,6 @@ it first via `POST /v1/index`.
 | Conflicting bucket widths for one field           | 400         |
 | Perspective field in groupBy without `player`     | 400         |
 | Perspective field in the filter without `player`  | 400         |
-
----
-
-### Error Responses
-
-| Condition          | HTTP Status | Cause                                |
-|--------------------|-------------|--------------------------------------|
-| Bad ChessQL syntax | 400         | `ParseException` (body includes `position`) |
-| Unknown field      | 400         | `IllegalArgumentException`           |
-| Unknown motif      | 400         | `IllegalArgumentException`           |
-| Unknown request ID | 404         | `NoSuchElementException`             |
 
 ---
 

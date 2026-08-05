@@ -702,7 +702,7 @@ public class SqlCompilerTest {
                     Parser.parse("white.elo > 1"), List.of("me.elo(200)", "me_elo(300)"), "hikaru"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage(
-            "Conflicting bucket widths for me_elo: 200 and 300 (bare me.elo / opponent.elo means"
+            "Conflicting bucket widths for me.elo: 200 and 300 (bare me.elo / opponent.elo means"
                 + " a width of 100)");
     assertThatThrownBy(
             () ->
@@ -712,7 +712,7 @@ public class SqlCompilerTest {
                     "hikaru"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage(
-            "Conflicting bucket widths for opponent_elo: 100 and 200 (bare me.elo / opponent.elo"
+            "Conflicting bucket widths for opponent.elo: 100 and 200 (bare me.elo / opponent.elo"
                 + " means a width of 100)");
     // Groupable fields still require a player — same voice as the filter-side message. me.elo
     // included: bucket terms resolve before the player check, but must not bypass it.
