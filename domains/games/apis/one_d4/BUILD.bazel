@@ -167,9 +167,12 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/api/AggregateController.java",
         "src/main/java/com/muchq/games/one_d4/api/AggregateRequestValidator.java",
         "src/main/java/com/muchq/games/one_d4/api/ErrorHandler.java",
+        "src/main/java/com/muchq/games/one_d4/api/FirstPageCache.java",
+        "src/main/java/com/muchq/games/one_d4/api/FirstPageWarmer.java",
         "src/main/java/com/muchq/games/one_d4/api/HealthController.java",
         "src/main/java/com/muchq/games/one_d4/api/IndexController.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryController.java",
+        "src/main/java/com/muchq/games/one_d4/api/QueryExecutor.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryRequestValidator.java",
     ],
     visibility = ["//visibility:public"],
@@ -183,12 +186,14 @@ java_library(
         "//domains/games/libs/chessql:ast",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
+        artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-http"),
         artifact("io.micronaut:micronaut-http-server"),
         artifact("io.micronaut:micronaut-inject"),
         artifact("io.micronaut.jaxrs:micronaut-jaxrs-server"),
         artifact("jakarta.inject:jakarta-inject-api"),
         artifact("jakarta.ws.rs:jakarta-ws.rs-api"),
+        artifact("org.jspecify:jspecify"),
         artifact("org.slf4j:slf4j-api"),
     ],
 )
@@ -415,7 +420,11 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/AdminControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/AggregateControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/AggregateRequestValidatorTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/FakeGameFeatureStore.java",
+        "src/test/java/com/muchq/games/one_d4/api/FirstPageCacheTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/FirstPageWarmerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexControllerTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/MutableClock.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryRequestValidatorTest.java",
         "src/test/java/com/muchq/games/one_d4/api/dto/DtoJsonCompatTest.java",
@@ -674,6 +683,7 @@ java_test_suite(
     size = "small",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/api/ContentTypeHandlingTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/FirstPageWarmupTest.java",
         "src/test/java/com/muchq/games/one_d4/api/HealthProbeRouteLabelTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexResponseWireTest.java",
     ],
@@ -685,6 +695,10 @@ java_test_suite(
         # e2e_support supplies FakeChessClient (@Replaces ChessClient). Without it these tests
         # boot the real client, and any request that reaches the worker opens a live TLS
         # connection to api.chess.com.
+        # FirstPageWarmupTest reads FirstPageCache (:api) and its QueryResponse (:dto) out of the
+        # booted context; Bazel java deps are not transitive, so riding on :module is not enough.
+        ":api",
+        ":dto",
         ":e2e_support",
         ":module",
         # Was runtime-only (IndexerModule injects yodel's CustomMetrics, and

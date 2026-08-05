@@ -88,6 +88,20 @@ describe('GamesView', () => {
     );
   });
 
+  it('sends the exact request the backend first-page cache is keyed on', async () => {
+    render(<GamesView />, { wrapper: makeWrapper() });
+    await waitFor(() => screen.getByText('_prior'));
+
+    // The one_d4 API keeps this exact request warmed in memory (FirstPageCache.java) so the
+    // first page load is served without a database round trip. Changing the default query,
+    // page size, or offset here silently loses that fast path — update FirstPageCache to match.
+    expect(api.query).toHaveBeenCalledWith({
+      query: 'num.moves >= 0',
+      limit: 25,
+      offset: 0,
+    });
+  });
+
   it('opens game detail panel when a row is clicked', async () => {
     render(<GamesView />, { wrapper: makeWrapper() });
     await waitFor(() => screen.getByText('_prior'));
