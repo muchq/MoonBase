@@ -166,12 +166,33 @@ public class PostgresAggregateCompatTest {
   public void aggregateGroupsByOpponentTitleWithNullBucketOnPostgres() {
     dao.insertBatch(
         List.of(
-            titledGame(
-                "pgt-1", "hikaru", "gmfoe", null, "GM", Instant.parse("2026-07-02T10:00:00Z")),
-            titledGame(
-                "pgt-2", "gmfoe2", "hikaru", "GM", null, Instant.parse("2026-07-03T10:00:00Z")),
-            titledGame(
-                "pgt-3", "plain", "hikaru", null, null, Instant.parse("2026-07-04T10:00:00Z"))));
+            game(
+                "pgt-1",
+                "hikaru",
+                "gmfoe",
+                null,
+                "GM",
+                "1-0",
+                "Caro Kann",
+                Instant.parse("2026-07-02T10:00:00Z")),
+            game(
+                "pgt-2",
+                "gmfoe2",
+                "hikaru",
+                "GM",
+                null,
+                "1-0",
+                "Caro Kann",
+                Instant.parse("2026-07-03T10:00:00Z")),
+            game(
+                "pgt-3",
+                "plain",
+                "hikaru",
+                null,
+                null,
+                "1-0",
+                "Caro Kann",
+                Instant.parse("2026-07-04T10:00:00Z"))));
 
     SqlCompiler compiler = new SqlCompiler();
     ParsedQuery parsed = Parser.parse("time.class = \"blitz\"");
@@ -191,31 +212,6 @@ public class PostgresAggregateCompatTest {
     var totals = dao.aggregateTotals(compiler.compileAggregateTotals(parsed, groupBy, "hikaru"));
     assertThat(totals.totalGames()).isEqualTo(3);
     assertThat(totals.totalGroups()).isEqualTo(2);
-  }
-
-  private GameFeature titledGame(
-      String url, String white, String black, String whiteTitle, String blackTitle, Instant at) {
-    GameFeature base = game(url, white, black, "1-0", "Caro Kann", at);
-    return new GameFeature(
-        base.id(),
-        base.requestId(),
-        base.gameUrl(),
-        base.platform(),
-        base.whiteUsername(),
-        base.blackUsername(),
-        base.whiteElo(),
-        base.blackElo(),
-        whiteTitle,
-        blackTitle,
-        base.timeClass(),
-        base.eco(),
-        base.openingName(),
-        base.openingFamily(),
-        base.result(),
-        base.playedAt(),
-        base.numMoves(),
-        base.indexedAt(),
-        base.pgn());
   }
 
   /**
@@ -311,6 +307,18 @@ public class PostgresAggregateCompatTest {
       String result,
       String openingFamily,
       Instant playedAt) {
+    return game(url, white, black, null, null, result, openingFamily, playedAt);
+  }
+
+  private GameFeature game(
+      String url,
+      String white,
+      String black,
+      String whiteTitle,
+      String blackTitle,
+      String result,
+      String openingFamily,
+      Instant playedAt) {
     return new GameFeature(
         null,
         requestId,
@@ -320,8 +328,8 @@ public class PostgresAggregateCompatTest {
         black,
         1500,
         1500,
-        null,
-        null,
+        whiteTitle,
+        blackTitle,
         "blitz",
         "A00",
         openingFamily,

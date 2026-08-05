@@ -289,8 +289,9 @@ public class IndexerToolsTest {
     assertThat(unsupported.get("error").asText())
         .isEqualTo(
             "Rating fields are not supported in groupBy: me.elo groups one bucket per distinct"
-                + " rating. Filter with rating ranges instead (e.g. opponent.elo >= 2500), or"
-                + " bucket at the call site. Groupable, with a player: me.color, me.title,"
+                + " rating (#1310 tracks bucketed grouping). Filter one rating band per call"
+                + " instead, e.g. opponent.elo >= 2500, then opponent.elo >= 2000 AND"
+                + " opponent.elo < 2500. Groupable, with a player: me.color, me.title,"
                 + " opponent.username, opponent.title, outcome");
   }
 

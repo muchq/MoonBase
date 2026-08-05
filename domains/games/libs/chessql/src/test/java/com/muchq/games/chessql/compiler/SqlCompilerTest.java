@@ -663,8 +663,11 @@ public class SqlCompilerTest {
   @Test
   public void testGroupByPerspectiveErrorMessagesAreExact() {
     // The rating fields are the only perspective fields that stay filter-only (#1301): grouping
-    // by one makes a bucket per distinct rating. The message says why and names the alternatives.
-    for (String field : List.of("me.elo", "opponent.elo")) {
+    // by one makes a bucket per distinct rating. Both spellings get this message — the underscore
+    // form must not degrade to the generic Unknown-field error, since the response keys teach
+    // callers the underscore convention — and the text names the executable alternative (one
+    // range-filtered call per band), not a technique.
+    for (String field : List.of("me.elo", "opponent.elo", "me_elo", "opponent_elo")) {
       assertThatThrownBy(
               () ->
                   compiler.compileAggregate(
@@ -673,9 +676,10 @@ public class SqlCompilerTest {
           .hasMessage(
               "Rating fields are not supported in groupBy: "
                   + field
-                  + " groups one bucket per distinct rating. Filter with rating ranges instead"
-                  + " (e.g. opponent.elo >= 2500), or bucket at the call site. Groupable, with a"
-                  + " player: me.color, me.title, opponent.username, opponent.title, outcome");
+                  + " groups one bucket per distinct rating (#1310 tracks bucketed grouping)."
+                  + " Filter one rating band per call instead, e.g. opponent.elo >= 2500, then"
+                  + " opponent.elo >= 2000 AND opponent.elo < 2500. Groupable, with a player:"
+                  + " me.color, me.title, opponent.username, opponent.title, outcome");
     }
     // Groupable fields still require a player — same voice as the filter-side message
     for (String field : List.of("me.color", "outcome", "opponent.title")) {
@@ -886,24 +890,6 @@ public class SqlCompilerTest {
   }
 
   @Test
-  public void testCompileAggregateRejectsRatingGroupBy() {
-    // The rating fields are the only perspective fields still rejected in groupBy (#1301);
-    // opponent.title, once the canonical example of this rejection, is groupable now.
-    assertThatThrownBy(
-            () ->
-                compiler.compileAggregate(
-                    Parser.parse("white.elo > 1"), List.of("opponent.elo"), "hikaru"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Rating fields are not supported in groupBy");
-    assertThatThrownBy(
-            () ->
-                compiler.compileAggregate(
-                    Parser.parse("white.elo > 1"), List.of("me.elo"), "hikaru"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Rating fields are not supported in groupBy");
-  }
-
-  @Test
   public void testCompileAggregateGroupByMeColor() {
     CompiledQuery result =
         compiler.compileAggregate(
@@ -1068,10 +1054,27 @@ public class SqlCompilerTest {
   public void testResolveGroupByColumnsMapsPerspectiveFieldsToUnderscoreKeys() {
     assertThat(compiler.resolveGroupByColumns(List.of("me.color", "outcome", "opening.family")))
         .containsExactly("me_color", "outcome", "opening_family");
-    assertThat(
-            compiler.resolveGroupByColumns(
-                List.of("me.title", "opponent.username", "opponent_title")))
-        .containsExactly("me_title", "opponent_username", "opponent_title");
+  }
+
+  /**
+   * The property behind the spellings map, not examples from it: every groupable perspective field
+   * resolves under both its dotted and its underscore spelling, to the underscore key the response
+   * is keyed by. This is what catches a typo'd or dropped map entry — before it, opponent_username
+   * was an accepted spelling no test ever sent, so deleting its entry left the suite green while
+   * breaking the round-trip CHESSQL.md promises (send back the key you got).
+   */
+  @Test
+  public void testEveryGroupableFieldResolvesUnderBothSpellings() {
+    for (String field :
+        List.of("me.color", "me.title", "opponent.username", "opponent.title", "outcome")) {
+      String key = field.replace('.', '_');
+      assertThat(compiler.resolveGroupByColumns(List.of(field)))
+          .as("dotted spelling %s", field)
+          .containsExactly(key);
+      assertThat(compiler.resolveGroupByColumns(List.of(key)))
+          .as("underscore spelling %s", key)
+          .containsExactly(key);
+    }
   }
 
   @Test

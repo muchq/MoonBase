@@ -148,19 +148,25 @@ across both colors — the color-specific columns (`white_title`, ...) hold the 
 value on half the rows, so grouping them silently mixes the player into the opponent buckets.
 Group keys in the response use the underscore form (`me_color`, `opponent_title`, ...), and
 either spelling is accepted in the request. Untitled opponents form a `null` group, the same as
-grouping the physical nullable title columns. Without `player`, grouping by any perspective
-field is rejected.
+grouping the physical nullable title columns — which is also the practical way to see untitled
+opponents at all while `!=` excludes NULLs (#1302, below): `opponent.title != "GM"` cannot
+return them, but grouping by `opponent.title` counts them under the `null` key.
+`opponent.username` groups by the stored username as-is — the perspective *filter* matches
+case-insensitively, but group keys are not case-normalized, so the same opponent stored under
+two casings forms two groups (same trap as `opening_family` variants). Without `player`,
+grouping by any perspective field is rejected.
 
 The two rating fields (`me.elo`, `opponent.elo`) remain filter-only in `groupBy`: grouping by a
 rating makes one bucket per distinct value, which buries the answer under one-game groups and
-then hits the group limit. Ask rating questions with range filters (`opponent.elo >= 2500`), or
-bucket at the call site.
+then hits the group limit. Ask rating questions one band per call with range filters
+(`opponent.elo >= 2500`, then `opponent.elo >= 2000 AND opponent.elo < 2500`, ...); #1310
+tracks server-side bucketed rating grouping.
 
 Like the physical `*.title` / `*.elo` columns they resolve to, `me.title`, `opponent.title`,
 `me.elo`, and `opponent.elo` follow SQL NULL semantics: untitled players (and rows indexed before
 these columns existed) hold NULL, and NULL never matches a comparison — so
 `opponent.title != "GM"` returns only games against *titled* non-GM opponents, not games against
-untitled ones.
+untitled ones (#1302 tracks making `!=` NULL-inclusive).
 
 ## Motifs
 

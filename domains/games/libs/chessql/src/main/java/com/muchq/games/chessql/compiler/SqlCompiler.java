@@ -363,8 +363,8 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    * categorical fields are all here; the two rating fields ({@code me.elo}, {@code opponent.elo})
    * are deliberately absent — GROUP BY on a rating makes one bucket per distinct value, which
    * buries the answer under hundreds of one-game groups and then hits the caller's group limit.
-   * Rating questions are filter-shaped ({@code opponent.elo >= 2500}) until someone builds
-   * bucketing; the rejection message says so.
+   * Rating questions are filter-shaped ({@code opponent.elo >= 2500}, one call per band) until
+   * bucketed grouping exists (#1310); the rejection message says so.
    */
   private static final Map<String, String> GROUPABLE_PERSPECTIVE_FIELDS =
       Map.ofEntries(
@@ -397,14 +397,18 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     if (perspectiveField != null) {
       return new GroupByTerm(perspectiveField.replace('.', '_'), perspectiveField);
     }
-    if (PERSPECTIVE_FIELDS.containsKey(field)) {
+    // Both spellings, like the groupable map above: me_elo must get this message, not the
+    // generic Unknown-field one — it is the only actionable text for the caller.
+    if (PERSPECTIVE_FIELDS.containsKey(field)
+        || PERSPECTIVE_FIELDS.containsKey(field.replace('_', '.'))) {
       // Only the rating fields land here; every categorical perspective field is groupable.
       throw new IllegalArgumentException(
           "Rating fields are not supported in groupBy: "
               + field
-              + " groups one bucket per distinct rating. Filter with rating ranges instead"
-              + " (e.g. opponent.elo >= 2500), or bucket at the call site. Groupable, with a"
-              + " player: me.color, me.title, opponent.username, opponent.title, outcome");
+              + " groups one bucket per distinct rating (#1310 tracks bucketed grouping)."
+              + " Filter one rating band per call instead, e.g. opponent.elo >= 2500, then"
+              + " opponent.elo >= 2000 AND opponent.elo < 2500. Groupable, with a player:"
+              + " me.color, me.title, opponent.username, opponent.title, outcome");
     }
     if (DATE_FIELD.equals(field) || MONTH_FIELD.equals(field)) {
       throw new IllegalArgumentException(

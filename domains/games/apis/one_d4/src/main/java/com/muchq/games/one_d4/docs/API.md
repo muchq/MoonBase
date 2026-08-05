@@ -248,7 +248,8 @@ Group-by fields validate against the same column whitelist as ChessQL comparison
 ```
 
 Group keys are canonical column names (e.g. `opening_family`, even when requested as
-`opening.family`; perspective group keys use the underscore form `me_color` / `outcome`). Groups
+`opening.family`; perspective group keys use their underscore forms — `me_color`, `me_title`,
+`opponent_username`, `opponent_title`, `outcome`). Groups
 are ordered by count descending, then by group values ascending. `count` is the number of groups
 returned — not a game count, which is what `totalGames` reports. `totalGames` and `totalGroups`
 are computed over the untruncated result, and `truncated` is true when `limit` cut off groups —
@@ -268,8 +269,8 @@ it first via `POST /v1/index`.
 | Unknown group-by field                            | 400         |
 | Missing query/groupBy                             | 400         |
 | Filter-only field in groupBy (`date`, `month`)    | 400         |
-| Perspective field in groupBy other than `me.color` / `outcome` | 400 |
-| `me.color` / `outcome` in groupBy without `player` | 400        |
+| Rating field in groupBy (`me.elo`, `opponent.elo`) | 400        |
+| Perspective field in groupBy without `player`     | 400         |
 | Perspective field in the filter without `player`  | 400         |
 
 ---
