@@ -68,14 +68,15 @@ public class FirstPageCacheTest {
   }
 
   @Test
-  public void get_servesAtExactlyMaxAgeButNotBeyond() {
+  public void get_servesUntilMaxAgeAndNotAfter() {
     cache.put(response());
 
-    clock.advance(FirstPageCache.MAX_AGE);
-    assertThat(cache.get()).as("at the boundary the snapshot is still served").isPresent();
+    clock.advance(FirstPageCache.MAX_AGE.minusSeconds(1));
+    assertThat(cache.get()).as("just inside the window the snapshot is served").isPresent();
 
+    // Caffeine's expireAfterWrite expires the entry once its age reaches the duration.
     clock.advance(Duration.ofSeconds(1));
-    assertThat(cache.get()).as("past the boundary it is not").isEmpty();
+    assertThat(cache.get()).as("at the boundary it is expired").isEmpty();
   }
 
   @Test

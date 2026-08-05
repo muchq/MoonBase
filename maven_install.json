@@ -11,6 +11,7 @@
     "com.fasterxml.jackson.datatype:jackson-datatype-jsr310": -578085414,
     "com.fasterxml.jackson.module:jackson-module-scala_2.13": 667474392,
     "com.fasterxml.jackson:jackson-bom": -317755572,
+    "com.github.ben-manes.caffeine:caffeine": 1135537849,
     "com.google.code.findbugs:jsr305": 495355163,
     "com.google.code.gson:gson": 597770368,
     "com.google.errorprone:error_prone_annotations": -1035138750,
@@ -67,7 +68,7 @@
     "com.fasterxml.jackson.datatype:jackson-datatype-jdk8": 1414302893,
     "com.fasterxml.jackson.datatype:jackson-datatype-jsr310": 1771227479,
     "com.fasterxml.jackson.module:jackson-module-scala_2.13": -884871156,
-    "com.github.ben-manes.caffeine:caffeine": 1673337840,
+    "com.github.ben-manes.caffeine:caffeine": -1494872453,
     "com.github.javaparser:javaparser-core": 264576784,
     "com.github.javaparser:javaparser-symbol-solver-core": 1306308122,
     "com.github.kevinstern:software-and-algorithms": 2052480962,
@@ -78,8 +79,8 @@
     "com.google.code.gson:gson": -1575757252,
     "com.google.errorprone:error_prone_annotation": -843715032,
     "com.google.errorprone:error_prone_annotations": 652227016,
-    "com.google.errorprone:error_prone_check_api": 1171291591,
-    "com.google.errorprone:error_prone_core": -454370392,
+    "com.google.errorprone:error_prone_check_api": -1016103013,
+    "com.google.errorprone:error_prone_core": 596577796,
     "com.google.googlejavaformat:google-java-format": 1151813790,
     "com.google.guava:failureaccess": 1715931538,
     "com.google.guava:guava": 951060859,
@@ -278,9 +279,9 @@
     },
     "com.github.ben-manes.caffeine:caffeine": {
       "shasums": {
-        "jar": "8a9b54d3506a3b92ee46b217bcee79196b21ca6d52dc2967c686a205fb2f9c15"
+        "jar": "c74a6c72221dfb76eb92f2bb40108ea561a7da2f315dc3b1e64afa8f077f210c"
       },
-      "version": "3.0.5"
+      "version": "3.2.2"
     },
     "com.github.javaparser:javaparser-core": {
       "shasums": {
@@ -1048,7 +1049,7 @@
     ],
     "com.github.ben-manes.caffeine:caffeine": [
       "com.google.errorprone:error_prone_annotations",
-      "org.checkerframework:checker-qual"
+      "org.jspecify:jspecify"
     ],
     "com.github.javaparser:javaparser-symbol-solver-core": [
       "com.github.javaparser:javaparser-core",
@@ -1603,8 +1604,6 @@
       "com.fasterxml.jackson.core.filter",
       "com.fasterxml.jackson.core.format",
       "com.fasterxml.jackson.core.internal.shaded.fdp.v2_21_2",
-      "com.fasterxml.jackson.core.internal.shaded.fdp.v2_21_2.bte",
-      "com.fasterxml.jackson.core.internal.shaded.fdp.v2_21_2.chr",
       "com.fasterxml.jackson.core.io",
       "com.fasterxml.jackson.core.io.schubfach",
       "com.fasterxml.jackson.core.json",
@@ -1717,7 +1716,6 @@
       "com.github.javaparser.symbolsolver.cache",
       "com.github.javaparser.symbolsolver.core.resolution",
       "com.github.javaparser.symbolsolver.declarations.common",
-      "com.github.javaparser.symbolsolver.javaparser",
       "com.github.javaparser.symbolsolver.javaparsermodel",
       "com.github.javaparser.symbolsolver.javaparsermodel.contexts",
       "com.github.javaparser.symbolsolver.javaparsermodel.declarations",
@@ -2914,7 +2912,6 @@
       "org.junit.platform.launcher.tagexpression"
     ],
     "org.junit.platform:junit-platform-reporting": [
-      "org.junit.platform.reporting",
       "org.junit.platform.reporting.legacy",
       "org.junit.platform.reporting.legacy.xml",
       "org.junit.platform.reporting.open.xml",

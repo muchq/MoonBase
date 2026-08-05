@@ -1,15 +1,15 @@
 package com.muchq.games.one_d4.api;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.muchq.games.one_d4.api.dto.QueryRequest;
 import com.muchq.games.one_d4.api.dto.QueryResponse;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
-import org.jspecify.annotations.Nullable;
+import java.util.concurrent.TimeUnit;
 
 /**
  * In-memory snapshot of the response to the query 1d4_web's GamesView fires on first page load, so
@@ -21,6 +21,9 @@ import org.jspecify.annotations.Nullable;
  * schedule; a snapshot older than two refresh intervals means the warmer is dead or the database is
  * down, and {@link #get()} then returns empty so the caller falls back to the live path instead of
  * serving arbitrarily old data.
+ *
+ * <p>Backed by a single-entry Caffeine cache: Caffeine owns the expiry bookkeeping; this class owns
+ * what is cacheable ({@link #matches}) and the freshness policy.
  */
 @Singleton
 public class FirstPageCache {
@@ -35,9 +38,9 @@ public class FirstPageCache {
    */
   static final Duration MAX_AGE = Duration.ofSeconds(60);
 
-  private final Clock clock;
-  private final Duration maxAge;
-  private final AtomicReference<@Nullable Snapshot> snapshot = new AtomicReference<>();
+  private static final String KEY = "first-page";
+
+  private final Cache<String, QueryResponse> cache;
 
   @Inject
   public FirstPageCache(Clock clock) {
@@ -45,8 +48,11 @@ public class FirstPageCache {
   }
 
   FirstPageCache(Clock clock, Duration maxAge) {
-    this.clock = clock;
-    this.maxAge = maxAge;
+    this.cache =
+        Caffeine.newBuilder()
+            .expireAfterWrite(maxAge)
+            .ticker(() -> TimeUnit.MILLISECONDS.toNanos(clock.millis()))
+            .build();
   }
 
   /** The exact request GamesView sends on first load. */
@@ -67,21 +73,12 @@ public class FirstPageCache {
         && (request.player() == null || request.player().isBlank());
   }
 
-  /** The cached response, or empty if nothing has been stored or the snapshot is too old. */
+  /** The cached response, or empty if nothing has been stored or the snapshot has expired. */
   public Optional<QueryResponse> get() {
-    Snapshot current = snapshot.get();
-    if (current == null) {
-      return Optional.empty();
-    }
-    if (Duration.between(current.refreshedAt(), clock.instant()).compareTo(maxAge) > 0) {
-      return Optional.empty();
-    }
-    return Optional.of(current.response());
+    return Optional.ofNullable(cache.getIfPresent(KEY));
   }
 
   public void put(QueryResponse response) {
-    snapshot.set(new Snapshot(response, clock.instant()));
+    cache.put(KEY, response);
   }
-
-  private record Snapshot(QueryResponse response, Instant refreshedAt) {}
 }
