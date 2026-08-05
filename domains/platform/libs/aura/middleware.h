@@ -44,7 +44,8 @@ inline constexpr char kUnmatchedRoute[] = "unmatched";
 /// known about the path, so only the in-flight gauge can move. The route —
 /// the matched Smithy operation, kHealthRoute, or kUnmatchedRoute, never the
 /// raw target — arrives at completion, which is where the counters and the
-/// histogram record (#1305).
+/// histogram record (#1305). The method label is bounded too: the nine RFC
+/// 9110 methods verbatim, every other wire token collapsed to "CUSTOM".
 class HttpMetricsSink {
  public:
   virtual ~HttpMetricsSink() = default;

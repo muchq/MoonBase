@@ -239,6 +239,38 @@ TEST(AuraUnroutedTest, ScannerPathsCollapseIntoTheSentinel) {
   }
 }
 
+// The same rule, one label over: Beast passes any wire token through as the
+// method, so invented verbs collapse to CUSTOM instead of minting a series
+// (and a gauge entry) per token. Lowercase "get" is deliberately in the set —
+// methods are case-sensitive, so it is an invented token, not GET. The nine
+// real methods pass through verbatim; the suite's GET/POST assertions
+// elsewhere pin that side.
+TEST(AuraUnroutedTest, InventedMethodsCollapseIntoCustom) {
+  auto sink = std::make_shared<RecordingSink>();
+  auto handler = aura::ProductionChain(aura::ChainOptions{.metrics = sink}, UnroutedHandler(405));
+  auto loopback = std::make_shared<smithy::http::Loopback>();
+  ASSERT_TRUE(loopback->Start(handler).ok());
+
+  for (const std::string method : {"FOOBAR1", "FOOBAR2", "get"}) {
+    smithy::http::HttpRequest request;
+    request.method = method;
+    request.target = "/echo";
+    request.peer_address = "203.0.113.4";
+    ASSERT_TRUE(loopback->Send(request).ok());
+  }
+
+  const auto starts = sink->starts();
+  const auto completes = sink->completes();
+  ASSERT_EQ(starts.size(), 3u);
+  ASSERT_EQ(completes.size(), 3u);
+  for (const auto& start : starts) {
+    EXPECT_EQ(start.method, "CUSTOM");
+  }
+  for (const auto& complete : completes) {
+    EXPECT_EQ(complete.method, "CUSTOM");
+  }
+}
+
 TEST_F(AuraMiddlewareTest, RateLimitsPerClientAddressWithRetryAfter) {
   for (int i = 0; i < kMaxRequestsPerKey; ++i) {
     EXPECT_EQ(Send("POST", "/echo", "hello", "203.0.113.4").status, 200);

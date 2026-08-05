@@ -1049,6 +1049,8 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 // numbers have probe traffic subtracted, and each needs its own scoped tile
 // showing it.
 func TestEveryProbedServiceKeepsItsProbesTile(t *testing.T) {
+	// Guards the guard: over an empty serviceOrder the loop asserts nothing.
+	require.NotEmpty(t, serviceOrder)
 	for _, name := range serviceOrder {
 		entry := serviceRegistry[name]
 		found := false

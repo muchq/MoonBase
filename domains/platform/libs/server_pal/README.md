@@ -30,25 +30,23 @@ serve(app, &listen_addr_pal()).await;
 Use `serve()` (rather than `axum::serve` directly) so `tower_governor` can
 extract peer IPs for per-IP rate limiting.
 
-Call `init_otel()` **before** `.build()`: the http_server_* instruments are
-resolved from the global meter provider at build time, so a router built
-first binds to the no-op default and serves fine while exporting nothing.
-Every service main in the repo already does this.
-
 ## HTTP metrics
 
 `build()` wires the shared `http_server_*` family (requests, success,
 failure, active gauge, microsecond duration histogram), labeled with
-`service_name` (from `OTEL_SERVICE_NAME`), `http_method`, and — on the
+`service_name` (from `OTEL_SERVICE_NAME`), `http_method` (the nine RFC 9110
+methods verbatim, anything else collapsed to `CUSTOM`), and — on the
 counters and histogram — `route` (#1304): the matched Axum route template
 (`/widgets/{id}`), the `/health` literal for the built-in health endpoint,
 or the fixed `unmatched` sentinel for requests no route matched, so
 scanners cannot mint unbounded series. The gauge alone carries no route: it
 moves at request start; the counters and histogram move at completion (a
 request abandoned mid-flight still counts, with its route, and records no
-outcome). The label sets, descriptions, units, and histogram bucket bounds
-are pinned across the Java/C++/Rust rails by
-`//domains/platform/libs/otel_contract`.
+outcome). Instruments bind lazily on the first request, so `init_otel()`
+just needs to have run by then — every main calls it before `serve`.
+Descriptions, bucket bounds, and the route literals are pinned across the
+Java/C++/Rust rails by `//domains/platform/libs/otel_contract`; label sets
+and units are pinned by this crate's own tests against a real exporter.
 
 ## Rate limiting
 

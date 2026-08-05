@@ -15,8 +15,9 @@
 /// the recording contract mirror yodel's HttpServerMetrics: the counters and
 /// the histogram move at completion, where the route and status are known;
 /// only the in-flight gauge moves at request start, keyed by http_method and
-/// service_name alone. //domains/platform/libs/otel_contract pins the label
-/// sets across the three rails.
+/// service_name alone. http_metrics_test pins the label sets against what
+/// this rail actually records; //domains/platform/libs/otel_contract pins
+/// the route literals shared with the other rails.
 
 #include <chrono>
 #include <map>

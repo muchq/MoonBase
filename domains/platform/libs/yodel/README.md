@@ -26,15 +26,19 @@ The gauge is the one instrument without a route: it moves at request start,
 before routing has matched anything, which is also why the counters move at
 completion rather than start. Success means status < 400.
 
-All three rails speak this dialect now (#1304, #1305), pinned by the
-otel_contract suite alongside descriptions, units, and bucket layouts. The
-`route` *value* vocabulary differs per rail because each router exposes a
-different bounded identity: yodel and server_pal emit the matched route
-template ("/games/{id}"), while futility emits the matched Smithy operation
-name ("Trace") — smithy-cpp annotates responses with the operation, not the
-URI pattern. All three agree on the literal `/health` for the probe
-endpoint (which prom_proxy's probeFilter subtracts) and on the `unmatched`
-sentinel. futility additionally labels its histogram with
+All three rails speak this dialect now (#1304, #1305). Descriptions, bucket
+layouts, and the route literals are pinned cross-language by the
+otel_contract suite; label sets and unit-lessness are pinned per rail
+against real exported payloads (this library's encoder tests, server_pal's
+in-memory-exporter tests, futility's recorder tests). The `route` *value*
+vocabulary differs per rail because each router exposes a different bounded
+identity: yodel and server_pal emit the matched route template
+("/games/{id}"), while futility emits the matched Smithy operation name
+("Trace") — smithy-cpp annotates responses with the operation, not the URI
+pattern. All three agree on the literal `/health` for the probe endpoint
+(which prom_proxy's probeFilter subtracts), on the `unmatched` sentinel,
+and on the bounded method rule (the nine RFC 9110 methods verbatim,
+anything else `CUSTOM`). futility additionally labels its histogram with
 `status_code`/`result` and its failure counter with those plus
 `error_type`; the shared core is identical everywhere.
 

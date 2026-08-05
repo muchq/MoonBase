@@ -27,7 +27,9 @@ without `scripts/make-git-overrides.sh`.
     ADR-0011). The route label is bounded (#1305): the matched Smithy
     operation name the generated router stamps on its responses,
     `kHealthRoute` for the health endpoint, or the `kUnmatchedRoute`
-    sentinel — never the raw request path
+    sentinel — never the raw request path. The method label is bounded the
+    same way: the nine RFC 9110 methods verbatim, any other wire token
+    collapsed to `CUSTOM`
   - `HealthEndpoint(kHealthRoute)` before the guard, so probes are never
     rate limited
   - `PerClientRateLimit` keyed on the ADR-0012 derived client address

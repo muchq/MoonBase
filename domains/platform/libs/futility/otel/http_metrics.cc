@@ -58,7 +58,7 @@ std::map<std::string, std::string> HttpMetricsManager::CreateGaugeAttributes(
 std::map<std::string, std::string> HttpMetricsManager::CreateBaseAttributes(
     const std::string& route, const std::string& method) const {
   // http_method, not futility's historical `method`: the label spelling is
-  // shared with yodel and server_pal, and otel_contract pins the common set.
+  // shared with yodel and server_pal; http_metrics_test pins it, exactly.
   return {{"service_name", service_name_}, {"route", route}, {"http_method", method}};
 }
 

@@ -15,9 +15,9 @@ import java.util.concurrent.atomic.LongAdder;
  * by service_name, http_method, and route, so prom_proxy can separate probe traffic from serving
  * traffic (https://github.com/muchq/MoonBase/issues/1303) while its standard block reads Java
  * services with zero changes (https://github.com/muchq/MoonBase/issues/1212). The label set and the
- * recording contract are shared with futility/otel and server_pal, pinned by the otel_contract
- * suite (#1304, #1305); the route value is bounded on every rail — this class's whole-template rule
- * was the model the others adopted.
+ * recording contract are shared with futility/otel and server_pal (#1304, #1305), pinned per rail
+ * against real exported payloads; the route value is bounded on every rail — this class's
+ * whole-template rule was the model the others adopted.
  *
  * <p>The route is the matched template ("/games/{id}"), never the raw path, so the label stays
  * bounded. It is only knowable once routing has happened, which shapes the recording contract: the

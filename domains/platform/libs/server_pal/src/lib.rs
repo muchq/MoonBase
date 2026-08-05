@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use axum::Router;
 use axum::extract::{DefaultBodyLimit, MatchedPath, Request, State};
@@ -173,13 +173,19 @@ pub fn init_otel() -> Option<SdkMeterProvider> {
     Some(provider)
 }
 
-/// The five shared serving instruments, resolved once per router at `build`
-/// time rather than lazily from a process-wide static: a static binds to
-/// whichever meter provider was global at first use, which no test can
-/// control and only one test per process could ever win. Instrument names
-/// mirror the C++ aura/futility http_server_* family (requests,
-/// success/failure, active gauge, microseconds histogram), so prom_proxy's
-/// standard service block reads every language the same way.
+/// The five shared serving instruments, resolved lazily on the first request
+/// through each router. Per-router rather than a process-wide static so a
+/// test can hand `build_with` instruments bound to its own private provider;
+/// lazy rather than resolved at `build()` so there is no init-order contract
+/// — requests cannot arrive before `serve`, and every main calls `init_otel`
+/// before that, so the global provider is always the real one by the time
+/// this binds. (Resolving at `build()` looked equivalent but quietly
+/// documented its own failure mode: a router built before `init_otel` would
+/// serve fine while exporting nothing — a new silent way to go dark, in the
+/// PR that exists because services go dark.) Instrument names mirror the C++
+/// aura/futility http_server_* family (requests, success/failure, active
+/// gauge, microseconds histogram), so prom_proxy's standard service block
+/// reads every language the same way.
 struct HttpInstruments {
     requests: Counter<u64>,
     success: Counter<u64>,
@@ -188,6 +194,10 @@ struct HttpInstruments {
     duration: Histogram<f64>,
     service_name: String,
 }
+
+/// One router's lazily-bound instruments; `build` hands the middleware an
+/// empty cell, `build_with` a pre-filled one.
+type InstrumentsCell = Arc<OnceLock<Arc<HttpInstruments>>>;
 
 impl HttpInstruments {
     fn from_global() -> Arc<Self> {
@@ -203,9 +213,11 @@ impl HttpInstruments {
     // disagrees. The success range is spelled with an ASCII hyphen, matching
     // yodel and futility — an en-dash reads identically here and exports as
     // a different string. //domains/platform/libs/otel_contract pins these
-    // equal to the other rails', and pins that no instrument declares a
-    // unit: the Prometheus exporter folds a unit into the metric *name*
-    // (#1294), which would silently fork every series off the dashboards.
+    // equal to the other rails'. No instrument declares a unit: the
+    // Prometheus exporter folds a unit into the metric *name* (#1294), which
+    // would silently fork every series off the dashboards —
+    // no_shared_instrument_declares_a_unit below reads that off a real
+    // export.
     fn new(meter: &Meter, service_name: String) -> Arc<Self> {
         Arc::new(Self {
             requests: meter
@@ -233,19 +245,36 @@ impl HttpInstruments {
     }
 }
 
-/// In-flight gauge plus the abandoned-request count, as a drop guard: the
-/// code after the `next.run` await never executes when the request future is
-/// cancelled (client disconnect), so a manual gauge decrement would drift
-/// upward forever — and the request would otherwise vanish from
+/// The nine RFC 9110 methods pass through verbatim; anything else — hyper
+/// admits any token as an extension method — collapses to "CUSTOM", yodel's
+/// spelling for the same rule. Without this, the method label is a
+/// client-controlled value on every instrument (the gauge included), and a
+/// scanner spraying invented verbs mints a series per token: the exact
+/// unbounded-cardinality shape the route sentinel exists to prevent (#1305),
+/// one label over. Case-sensitive on purpose — methods are case-sensitive,
+/// so "get" is an extension token, not GET.
+fn bounded_method_label(method: &axum::http::Method) -> String {
+    match method.as_str() {
+        m @ ("GET" | "HEAD" | "POST" | "PUT" | "DELETE" | "CONNECT" | "OPTIONS" | "TRACE"
+        | "PATCH") => m.to_string(),
+        _ => "CUSTOM".to_string(),
+    }
+}
+
+/// In-flight gauge plus the request count, as a drop guard: the code after
+/// the `next.run` await never executes when the request future is cancelled
+/// (client disconnect), so a manual gauge decrement would drift upward
+/// forever — and the request would otherwise vanish from
 /// `http_server_requests` entirely, now that the counter moves at completion
-/// to carry the route (#1304). An abandoned request was real load: it counts,
-/// with its route, and records no outcome and no duration — the same contract
-/// yodel documents on `HttpServerMetrics.recordRequestAbandoned`.
+/// to carry the route (#1304). Both paths — completion and abandonment —
+/// want the same two moves, so `Drop` makes them unconditionally: gauge
+/// down, request counted with its route. An abandoned request was real load;
+/// it simply records no outcome and no duration, the same contract yodel
+/// documents on `HttpServerMetrics.recordRequestAbandoned`.
 struct RequestGuard {
     instruments: Arc<HttpInstruments>,
     gauge_attrs: [KeyValue; 2],
     route_attrs: [KeyValue; 3],
-    completed: bool,
 }
 
 impl RequestGuard {
@@ -259,27 +288,14 @@ impl RequestGuard {
             instruments,
             gauge_attrs,
             route_attrs,
-            completed: false,
         }
-    }
-
-    /// Ends the in-flight window and hands the route attributes back to the
-    /// completion path, which records the counters itself. Consumes the guard
-    /// so the abandonment arm below cannot also fire.
-    fn complete(mut self) -> [KeyValue; 3] {
-        self.completed = true;
-        let route_attrs = self.route_attrs.clone();
-        drop(self);
-        route_attrs
     }
 }
 
 impl Drop for RequestGuard {
     fn drop(&mut self) {
         self.instruments.active.add(-1, &self.gauge_attrs);
-        if !self.completed {
-            self.instruments.requests.add(1, &self.route_attrs);
-        }
+        self.instruments.requests.add(1, &self.route_attrs);
     }
 }
 
@@ -290,12 +306,13 @@ impl Drop for RequestGuard {
 // `requests` counter therefore counts completed-or-abandoned requests rather
 // than started ones: the same totals, observed a request-duration later.
 async fn http_metrics_middleware(
-    State(instruments): State<Arc<HttpInstruments>>,
+    State(cell): State<InstrumentsCell>,
     req: Request,
     next: Next,
 ) -> Response {
+    let instruments = cell.get_or_init(HttpInstruments::from_global).clone();
     let start = std::time::Instant::now();
-    let method = req.method().as_str().to_string();
+    let method = bounded_method_label(req.method());
     // Router::layer middleware runs after routing, so the matched route
     // template ("/widgets/{id}", never the raw path) is already in the
     // request extensions here. The fallback leaves it absent, and mapping
@@ -317,15 +334,15 @@ async fn http_metrics_middleware(
         KeyValue::new("service_name", instruments.service_name.clone()),
     ];
 
-    let guard = RequestGuard::start(instruments.clone(), gauge_attrs, route_attrs);
+    let guard = RequestGuard::start(instruments.clone(), gauge_attrs, route_attrs.clone());
 
     let resp = next.run(req).await;
 
-    let route_attrs = guard.complete();
+    // Gauge down and request counted, the same order as on abandonment.
+    drop(guard);
     let duration_us = start.elapsed().as_micros() as f64;
     let status = resp.status().as_u16();
 
-    instruments.requests.add(1, &route_attrs);
     if status < 400 {
         instruments.success.add(1, &route_attrs);
     } else {
@@ -383,16 +400,23 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
         self
     }
 
-    /// Composes the router with the production middleware stack. Resolves the
-    /// http_server_* instruments from the global meter provider *now*, so
-    /// call `init_otel` before `build` (every service main does) — a router
-    /// built first binds its instruments to the no-op default and serves
-    /// fine while exporting nothing.
+    /// Composes the router with the production middleware stack. The
+    /// http_server_* instruments bind lazily on the first request, from
+    /// whatever meter provider is global by then — see HttpInstruments.
     pub fn build(self) -> Router<S> {
-        self.build_with(HttpInstruments::from_global())
+        self.build_with_cell(Arc::new(OnceLock::new()))
     }
 
+    /// The seam the metrics tests use: instruments bound to a private
+    /// provider, pre-filled so the lazy path never consults the global one.
+    #[cfg(test)]
     fn build_with(self, instruments: Arc<HttpInstruments>) -> Router<S> {
+        let cell: InstrumentsCell = Arc::new(OnceLock::new());
+        assert!(cell.set(instruments).is_ok(), "fresh cell");
+        self.build_with_cell(cell)
+    }
+
+    fn build_with_cell(self, cell: InstrumentsCell) -> Router<S> {
         let router = self
             .router
             .route("/health", get(|_: State<S>| async { "Ok" }))
@@ -424,7 +448,7 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
         // HTTP metrics middleware sits outside rate-limiting so rate-limited
         // requests (429) are also counted as failures.
         router.layer(axum::middleware::from_fn_with_state(
-            instruments,
+            cell,
             http_metrics_middleware,
         ))
     }
@@ -793,6 +817,33 @@ mod http_metrics_label_tests {
             i64_sum_points(&rm, "http_server_requests_active_gauge"),
             vec![(gauge_attrs("GET"), 0)],
             "the drop guard must still drain the gauge"
+        );
+    }
+
+    /// Scanner-sprayed verbs collapse to one CUSTOM series — the method
+    /// label is bounded the same way the route label is (#1305): hyper
+    /// admits any token as an extension method, so the raw token is
+    /// client-controlled and would otherwise mint a series per verb on
+    /// every instrument, the gauge included.
+    #[tokio::test]
+    async fn invented_methods_collapse_into_the_custom_label() {
+        let rig = rig();
+        for method in ["FOOBAR1", "FOOBAR2", "SPRAYED"] {
+            assert_eq!(
+                send(&rig, method, "/widgets/7").await,
+                StatusCode::METHOD_NOT_ALLOWED
+            );
+        }
+
+        let rm = exported(&rig);
+        assert_eq!(
+            u64_sum_points(&rm, "http_server_requests"),
+            vec![(route_attrs("CUSTOM", "/widgets/{id}"), 3)],
+            "an invented verb must not mint its own series"
+        );
+        assert_eq!(
+            i64_sum_points(&rm, "http_server_requests_active_gauge"),
+            vec![(gauge_attrs("CUSTOM"), 0)]
         );
     }
 

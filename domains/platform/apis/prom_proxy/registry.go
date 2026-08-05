@@ -59,7 +59,11 @@ const probeFilter = `,route!="/health"`
 // number by probeFilter, shown as its own count so the subtraction is a
 // visible fact rather than a floor under every chart. ~10/5m while the 30s
 // probe is healthy; zero means the probe is failing, or the service's route
-// label hasn't deployed yet.
+// label hasn't deployed yet. The route literal counts everything on the
+// health path — Caddy exposes /health publicly, so scanner traffic to it
+// (any method; a POST that 405s is still health-path traffic) also lands
+// here rather than in Serving, and can in principle hold this tile above
+// zero while the container's own probe is dead.
 func probesTile(service string) customScalarDef {
 	return counter("Probes", "health_checks", "",
 		fmt.Sprintf(`http_server_requests_total{service_name=%q,route="/health"}`, service))

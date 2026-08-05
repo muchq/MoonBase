@@ -13,9 +13,11 @@
 // server_pal (#1304, #1305): the counters and the histogram move at
 // completion carrying a bounded route, the in-flight gauge moves at start
 // carrying no route, and the shared labels are spelled http_method /
-// route / service_name. //domains/platform/libs/otel_contract pins the
-// spellings across the three rails by reading this rail's source; these
-// tests pin that the recording code actually emits them.
+// route / service_name. Each rail pins its own label sets this way, against
+// what it actually records — exact attribute maps, not source text — and
+// //domains/platform/libs/otel_contract pins the cross-rail literals (the
+// unmatched sentinel and the health route) that no single language's test
+// can see.
 
 namespace futility::otel {
 namespace {
