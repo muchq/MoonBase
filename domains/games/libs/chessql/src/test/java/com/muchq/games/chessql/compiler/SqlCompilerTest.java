@@ -662,28 +662,32 @@ public class SqlCompilerTest {
 
   @Test
   public void testGroupByPerspectiveErrorMessagesAreExact() {
-    // me.elo is perspective-relative but not groupable, even with a player
-    assertThatThrownBy(
-            () ->
-                compiler.compileAggregate(
-                    Parser.parse("white.elo > 1"), List.of("me.elo"), "hikaru"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage(
-            "Perspective fields are not supported in groupBy: me.elo (only me.color and outcome"
-                + " are groupable, with a player)");
-    // me.color IS groupable, but only with a player — same voice as the filter-side message
-    assertThatThrownBy(
-            () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("me.color")))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage(
-            "Field 'me.color' is perspective-relative (me.*, opponent.*, outcome) and requires a"
-                + " player parameter on the request");
-    assertThatThrownBy(
-            () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("outcome")))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage(
-            "Field 'outcome' is perspective-relative (me.*, opponent.*, outcome) and requires a"
-                + " player parameter on the request");
+    // The rating fields are the only perspective fields that stay filter-only (#1301): grouping
+    // by one makes a bucket per distinct rating. The message says why and names the alternatives.
+    for (String field : List.of("me.elo", "opponent.elo")) {
+      assertThatThrownBy(
+              () ->
+                  compiler.compileAggregate(
+                      Parser.parse("white.elo > 1"), List.of(field), "hikaru"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(
+              "Rating fields are not supported in groupBy: "
+                  + field
+                  + " groups one bucket per distinct rating. Filter with rating ranges instead"
+                  + " (e.g. opponent.elo >= 2500), or bucket at the call site. Groupable, with a"
+                  + " player: me.color, me.title, opponent.username, opponent.title, outcome");
+    }
+    // Groupable fields still require a player — same voice as the filter-side message
+    for (String field : List.of("me.color", "outcome", "opponent.title")) {
+      assertThatThrownBy(
+              () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of(field)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(
+              "Field '"
+                  + field
+                  + "' is perspective-relative (me.*, opponent.*, outcome) and requires a"
+                  + " player parameter on the request");
+    }
   }
 
   @Test
@@ -882,19 +886,21 @@ public class SqlCompilerTest {
   }
 
   @Test
-  public void testCompileAggregateRejectsPerspectiveGroupBy() {
+  public void testCompileAggregateRejectsRatingGroupBy() {
+    // The rating fields are the only perspective fields still rejected in groupBy (#1301);
+    // opponent.title, once the canonical example of this rejection, is groupable now.
     assertThatThrownBy(
             () ->
                 compiler.compileAggregate(
-                    Parser.parse("white.elo > 1"), List.of("opponent.title"), "hikaru"))
+                    Parser.parse("white.elo > 1"), List.of("opponent.elo"), "hikaru"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Perspective fields are not supported in groupBy");
+        .hasMessageContaining("Rating fields are not supported in groupBy");
     assertThatThrownBy(
             () ->
                 compiler.compileAggregate(
                     Parser.parse("white.elo > 1"), List.of("me.elo"), "hikaru"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Perspective fields are not supported in groupBy");
+        .hasMessageContaining("Rating fields are not supported in groupBy");
   }
 
   @Test
@@ -953,6 +959,62 @@ public class SqlCompilerTest {
     assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", 2500));
   }
 
+  /**
+   * The #1301 headline: grouping by opponent.title resolves the opposite side's column per row, so
+   * a both-colors aggregate reads black_title where the player was White and white_title where the
+   * player was Black. The color-specific columns cannot express this — white_title mixes the
+   * player's own title into the buckets on half the rows.
+   */
+  @Test
+  public void testCompileAggregateGroupByOpponentTitle() {
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("time.class = \"bullet\""), List.of("opponent.title"), "hikaru");
+
+    assertThat(result.selectSql())
+        .isEqualTo(
+            "SELECT (CASE WHEN LOWER(white_username) = LOWER(?) THEN black_title ELSE white_title"
+                + " END) AS opponent_title, COUNT(*) AS group_count FROM game_features g WHERE"
+                + " ((LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))"
+                + " AND LOWER(time_class) = LOWER(?))"
+                + " GROUP BY opponent_title"
+                + " ORDER BY group_count DESC, opponent_title ASC");
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", "bullet"));
+  }
+
+  @Test
+  public void testCompileAggregateGroupByEveryCategoricalPerspectiveField() {
+    // All five categorical fields compile, in one grouping, under either spelling; the rating
+    // fields are the pinned exception (see testGroupByPerspectiveErrorMessagesAreExact).
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("white.elo >= 2500"),
+            List.of("me.color", "me_title", "opponent.username", "opponent_title", "outcome"),
+            "hikaru");
+
+    assertThat(result.selectSql())
+        .contains("END) AS me_color")
+        .contains("THEN white_title ELSE black_title END) AS me_title")
+        .contains("THEN black_username ELSE white_username END) AS opponent_username")
+        .contains("THEN black_title ELSE white_title END) AS opponent_title")
+        .contains("END) AS outcome")
+        .contains("GROUP BY me_color, me_title, opponent_username, opponent_title, outcome");
+  }
+
+  @Test
+  public void testCompileAggregateTotalsGroupByOpponentTitle() {
+    CompiledQuery result =
+        compiler.compileAggregateTotals(
+            Parser.parse("time.class = \"bullet\""), List.of("opponent.title"), "hikaru");
+
+    // The inner query inlines the CASE in GROUP BY; its player param binds after the WHERE params.
+    assertThat(result.selectSql())
+        .contains(
+            "GROUP BY (CASE WHEN LOWER(white_username) = LOWER(?) THEN black_title ELSE"
+                + " white_title END)");
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "bullet", "hikaru"));
+  }
+
   @Test
   public void testCompileAggregatePerspectiveGroupByWithoutPlayerRejected() {
     assertThatThrownBy(
@@ -970,6 +1032,10 @@ public class SqlCompilerTest {
   public void testResolveGroupByColumnsMapsPerspectiveFieldsToUnderscoreKeys() {
     assertThat(compiler.resolveGroupByColumns(List.of("me.color", "outcome", "opening.family")))
         .containsExactly("me_color", "outcome", "opening_family");
+    assertThat(
+            compiler.resolveGroupByColumns(
+                List.of("me.title", "opponent.username", "opponent_title")))
+        .containsExactly("me_title", "opponent_username", "opponent_title");
   }
 
   @Test

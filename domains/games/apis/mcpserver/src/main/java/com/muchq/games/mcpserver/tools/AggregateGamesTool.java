@@ -41,9 +41,14 @@ public class AggregateGamesTool implements McpTool {
         + " parameter the filter may use perspective fields (me.*, opponent.*, outcome) — e.g."
         + " player: hikaru with query 'me.color = \"white\" AND opponent.title = \"GM\"'."
         + " Groupable fields: opening_family, opening_name, eco, result, time_class, white_title,"
-        + " black_title, white_username, black_username, platform — plus me.color and outcome"
-        + " when player is set (group keys me_color/outcome), which separates your repertoire"
-        + " from what opponents play. Note: opening_family is derived from chess.com ECO-URL"
+        + " black_title, white_username, black_username, platform — plus, when player is set, the"
+        + " categorical perspective fields me.color, me.title, opponent.username, opponent.title,"
+        + " and outcome (group keys me_color/me_title/opponent_username/opponent_title/outcome)."
+        + " Grouping by opponent.title or opponent.username is the only correct way to break down"
+        + " opponents across both colors — the color-specific columns mix your own values into"
+        + " the buckets on half the rows. Untitled opponents group under a null key. me.elo and"
+        + " opponent.elo stay filter-only (one bucket per distinct rating helps nobody; use"
+        + " rating-range filters). Note: opening_family is derived from chess.com ECO-URL"
         + " strings, not a normalized taxonomy — 'Closed Sicilian' and 'Closed Sicilian Defense'"
         + " are distinct groups. In the output, count is how many groups were returned, not how"
         + " many games; totalGames/totalGroups cover the untruncated result, and truncated=true"
@@ -61,8 +66,8 @@ public class AggregateGamesTool implements McpTool {
             "string",
             "description",
             "chess.com username that perspective fields (me.*, opponent.*, outcome) are resolved"
-                + " against; required when the filter uses them, and when group_by uses me.color"
-                + " or outcome"));
+                + " against; required when the filter uses them, and when group_by uses any"
+                + " perspective field"));
     properties.put(
         "group_by",
         Map.of(
@@ -73,9 +78,10 @@ public class AggregateGamesTool implements McpTool {
             "description",
             "Fields to group by, e.g. [\"opening_family\"]. Groupable: opening_family,"
                 + " opening_name, eco, result, time_class, white_title, black_title,"
-                + " white_username, black_username, platform — plus me.color and outcome when"
-                + " player is set, keyed me_color/outcome in the output. date and month are"
-                + " filter-only and rejected here."));
+                + " white_username, black_username, platform — plus me.color, me.title,"
+                + " opponent.username, opponent.title, and outcome when player is set, keyed by"
+                + " their underscore forms in the output. date, month, me.elo, and opponent.elo"
+                + " are filter-only and rejected here."));
     properties.put(
         "limit",
         Map.of(

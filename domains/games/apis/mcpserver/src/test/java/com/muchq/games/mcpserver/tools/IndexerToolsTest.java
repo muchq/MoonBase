@@ -288,8 +288,38 @@ public class IndexerToolsTest {
                     List.of("me.elo"))));
     assertThat(unsupported.get("error").asText())
         .isEqualTo(
-            "Perspective fields are not supported in groupBy: me.elo (only me.color and outcome"
-                + " are groupable, with a player)");
+            "Rating fields are not supported in groupBy: me.elo groups one bucket per distinct"
+                + " rating. Filter with rating ranges instead (e.g. opponent.elo >= 2500), or"
+                + " bucket at the call site. Groupable, with a player: me.color, me.title,"
+                + " opponent.username, opponent.title, outcome");
+  }
+
+  /**
+   * The #1301 headline through the MCP tool: hikaru faces someuser as White in game/1 and as Black
+   * in game/2, and grouping by opponent.username pools both into one bucket. No physical column can
+   * produce this — white_username and black_username each hold hikaru himself on half the rows.
+   */
+  @Test
+  public void aggregateGroupsByOpponentUsernameAcrossBothColors() {
+    givenIndexedMonth();
+
+    JsonNode result =
+        parse(
+            aggregateTool.execute(
+                Map.of(
+                    "query",
+                    "time.class = \"blitz\"",
+                    "player",
+                    "hikaru",
+                    "group_by",
+                    List.of("opponent.username"))));
+
+    assertThat(result.get("count").asInt()).isEqualTo(1);
+    JsonNode group = result.get("groups").get(0);
+    assertThat(group.get("group").get("opponent_username").asText()).isEqualTo("someuser");
+    assertThat(group.get("count").asLong()).isEqualTo(2);
+    assertThat(result.get("totalGames").asLong()).isEqualTo(2);
+    assertThat(result.get("totalGroups").asLong()).isEqualTo(1);
   }
 
   @Test

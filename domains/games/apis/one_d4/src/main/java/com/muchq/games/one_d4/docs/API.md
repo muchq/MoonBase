@@ -221,13 +221,16 @@ matching row and group client-side.
 | Field   | Type     | Required | Default | Max  | Description                                       |
 |---------|----------|----------|---------|------|---------------------------------------------------|
 | query   | string   | yes      | —       | —    | ChessQL filter (may use perspective fields when `player` is set) |
-| groupBy | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form; physical columns, plus `me.color` / `outcome` when `player` is set) |
+| groupBy | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form; physical columns, plus the categorical perspective fields when `player` is set) |
 | orderBy | string   | no       | "count" | —    | Only "count" is supported (descending)            |
 | limit   | int      | no       | 50      | 1000 | Max groups to return                              |
 | player  | string   | no       | —       | —    | Username that perspective fields in the filter and groupBy are resolved against |
 
-Group-by fields validate against the same column whitelist as ChessQL comparisons; `me.color`
-and `outcome` are the only perspective fields allowed, and only with `player` (see CHESSQL.md).
+Group-by fields validate against the same column whitelist as ChessQL comparisons. With
+`player`, the categorical perspective fields — `me.color`, `me.title`, `opponent.username`,
+`opponent.title`, `outcome` — are also groupable (response keys use their underscore forms);
+`me.elo` and `opponent.elo` stay filter-only, and a NULL value (untitled opponents) forms a
+`null` group (see CHESSQL.md).
 
 ### Response (200)
 

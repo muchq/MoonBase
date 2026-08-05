@@ -159,14 +159,46 @@ public class AggregateControllerTest {
   }
 
   @Test
-  public void aggregate_otherPerspectiveFieldsStillRejectedInGroupBy() {
+  public void aggregate_ratingFieldsStillRejectedInGroupBy() {
+    // Since #1301 every categorical perspective field is groupable; the rating fields remain the
+    // pinned exception, rejected before the store is touched.
     assertThatThrownBy(
             () ->
                 controller.aggregate(
                     new AggregateRequest("white.elo > 1", List.of("me.elo"), null, 20, "hikaru")))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Perspective fields are not supported in groupBy");
+        .hasMessageContaining("Rating fields are not supported in groupBy");
     assertThat(store.lastCompiled).isNull();
+  }
+
+  @Test
+  public void aggregate_opponentTitleGroupByCompilesWithUnderscoreKey() {
+    store.rows =
+        List.of(
+            new AggregateRow(groupWith("opponent_title", "GM"), 9),
+            new AggregateRow(groupWith("opponent_title", null), 120));
+
+    AggregateResponse response =
+        controller.aggregate(
+            new AggregateRequest(
+                "time.class = \"bullet\"", List.of("opponent.title"), "count", 20, "hikaru"));
+
+    assertThat(response.groups()).hasSize(2);
+    assertThat(response.groups().get(0).group()).containsEntry("opponent_title", "GM");
+    // Untitled opponents are a NULL group, serialized as a null value under the group key —
+    // the same shape grouping the physical nullable title columns has always produced.
+    assertThat(response.groups().get(1).group()).containsEntry("opponent_title", null);
+    assertThat(store.lastGroupColumns).containsExactly("opponent_title");
+    assertThat(((CompiledQuery) store.lastCompiled).selectSql())
+        .contains("THEN black_title ELSE white_title END) AS opponent_title")
+        .contains("GROUP BY opponent_title");
+  }
+
+  /** Map.of rejects null values; group maps carry them for NULL group keys. */
+  private static Map<String, Object> groupWith(String key, Object value) {
+    Map<String, Object> map = new java.util.LinkedHashMap<>();
+    map.put(key, value);
+    return map;
   }
 
   @Test

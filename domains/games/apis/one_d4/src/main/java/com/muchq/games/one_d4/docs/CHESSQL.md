@@ -138,13 +138,23 @@ outcome = "win" AND opponent.title = "GM" AND time.class = "blitz"
 with `player: "hikaru"`. Perspective fields compile to `CASE` expressions over the `white_*` /
 `black_*` columns plus a participation guard.
 
-Two perspective fields may also be used in `groupBy` on `/v1/aggregate` (and the
-`aggregate_chess_games` tool) when `player` is supplied: `me.color` and `outcome`. This separates
-the player's repertoire from what opponents play — grouping by `["me.color", "opening_family"]`
-answers "which openings do I face as Black" where `opening_family` alone conflates both sides'
-choices. Group keys in the response use the underscore form (`me_color`, `outcome`). Without
-`player`, grouping by them is rejected; all other perspective fields (`me.elo`, `opponent.*`,
-...) remain filter-only.
+The categorical perspective fields may also be used in `groupBy` on `/v1/aggregate` (and the
+`aggregate_chess_games` tool) when `player` is supplied: `me.color`, `me.title`,
+`opponent.username`, `opponent.title`, and `outcome` (#1301). This is what makes both-colors
+breakdowns expressible at all: grouping by `["me.color", "opening_family"]` answers "which
+openings do I face as Black" where `opening_family` alone conflates both sides' choices, and
+grouping by `opponent.title` or `opponent.username` is the only correct opponent breakdown
+across both colors — the color-specific columns (`white_title`, ...) hold the *player's own*
+value on half the rows, so grouping them silently mixes the player into the opponent buckets.
+Group keys in the response use the underscore form (`me_color`, `opponent_title`, ...), and
+either spelling is accepted in the request. Untitled opponents form a `null` group, the same as
+grouping the physical nullable title columns. Without `player`, grouping by any perspective
+field is rejected.
+
+The two rating fields (`me.elo`, `opponent.elo`) remain filter-only in `groupBy`: grouping by a
+rating makes one bucket per distinct value, which buries the answer under one-game groups and
+then hits the group limit. Ask rating questions with range filters (`opponent.elo >= 2500`), or
+bucket at the call site.
 
 Like the physical `*.title` / `*.elo` columns they resolve to, `me.title`, `opponent.title`,
 `me.elo`, and `opponent.elo` follow SQL NULL semantics: untitled players (and rows indexed before

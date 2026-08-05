@@ -660,6 +660,64 @@ public class GameFeatureDaoTest {
     assertThat(totals.totalGroups()).isEqualTo(3);
   }
 
+  /**
+   * The #1301 headline, through the real store: grouping by opponent.title across both colors
+   * buckets each game by the *other* side's title. The old workaround — grouping by white_title
+   * with the player pinned to Black — cannot express this: over both colors it files the player's
+   * own title into the buckets on half the rows (here that would read IM 4, which is hikaru, not
+   * his opponents). Untitled opponents land in a NULL group, exactly as they do when grouping the
+   * physical nullable columns.
+   */
+  @Test
+  public void aggregate_groupsByOpponentTitleAcrossBothColors() {
+    dao.insertBatch(
+        List.of(
+            perspectiveGame(
+                "https://chess.com/game/opp-1", "hikaru", "gmfoe", "IM", "GM", "1-0", "Caro Kann"),
+            perspectiveGame(
+                "https://chess.com/game/opp-2", "gmfoe2", "Hikaru", "GM", "IM", "0-1", "Caro Kann"),
+            perspectiveGame(
+                "https://chess.com/game/opp-3", "hikaru", "fmfoe", "IM", "FM", "1-0", "Caro Kann"),
+            perspectiveGame(
+                "https://chess.com/game/opp-4",
+                "untitled_foe",
+                "hikaru",
+                null,
+                "IM",
+                "0-1",
+                "Caro Kann")));
+
+    SqlCompiler compiler = new SqlCompiler();
+    CompiledQuery compiled =
+        compiler.compileAggregate(
+            Parser.parse("time.class = \"blitz\""), List.of("opponent.title"), "hikaru");
+    List<AggregateRow> groups = dao.aggregate(compiled, List.of("opponent_title"), 10);
+
+    // GM from both colors pools into one bucket; hikaru's IM appears in none of them.
+    assertThat(groups).hasSize(3);
+    assertThat(groups.get(0).group()).containsEntry("opponent_title", "GM");
+    assertThat(groups.get(0).count()).isEqualTo(2);
+    assertThat(groups)
+        .anySatisfy(
+            g -> {
+              assertThat(g.group()).containsEntry("opponent_title", "FM");
+              assertThat(g.count()).isEqualTo(1);
+            })
+        .anySatisfy(
+            g -> {
+              assertThat(g.group()).containsEntry("opponent_title", null);
+              assertThat(g.count()).isEqualTo(1);
+            })
+        .noneSatisfy(g -> assertThat(g.group()).containsEntry("opponent_title", "IM"));
+
+    CompiledQuery totalsQuery =
+        compiler.compileAggregateTotals(
+            Parser.parse("time.class = \"blitz\""), List.of("opponent.title"), "hikaru");
+    GameFeatureStore.AggregateTotals totals = dao.aggregateTotals(totalsQuery);
+    assertThat(totals.totalGroups()).isEqualTo(3);
+    assertThat(totals.totalGames()).isEqualTo(4);
+  }
+
   @Test
   public void aggregateTotals_zeroWhenNoGamesMatch() {
     SqlCompiler compiler = new SqlCompiler();

@@ -158,6 +158,67 @@ public class PostgresAggregateCompatTest {
   }
 
   /**
+   * The #1301 grouping on real Postgres: opponent.title resolves the opposite side's nullable
+   * column, so this doubles as the pin that a NULL group key groups (Postgres pools NULLs into one
+   * GROUP BY bucket, like H2) and comes back as a null map value rather than an error.
+   */
+  @Test
+  public void aggregateGroupsByOpponentTitleWithNullBucketOnPostgres() {
+    dao.insertBatch(
+        List.of(
+            titledGame(
+                "pgt-1", "hikaru", "gmfoe", null, "GM", Instant.parse("2026-07-02T10:00:00Z")),
+            titledGame(
+                "pgt-2", "gmfoe2", "hikaru", "GM", null, Instant.parse("2026-07-03T10:00:00Z")),
+            titledGame(
+                "pgt-3", "plain", "hikaru", null, null, Instant.parse("2026-07-04T10:00:00Z"))));
+
+    SqlCompiler compiler = new SqlCompiler();
+    ParsedQuery parsed = Parser.parse("time.class = \"blitz\"");
+    List<String> groupBy = List.of("opponent.title");
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(parsed, groupBy, "hikaru"),
+            compiler.resolveGroupByColumns(groupBy),
+            10);
+
+    assertThat(groups).hasSize(2);
+    assertThat(groups.get(0).group()).containsEntry("opponent_title", "GM");
+    assertThat(groups.get(0).count()).isEqualTo(2);
+    assertThat(groups.get(1).group()).containsEntry("opponent_title", null);
+    assertThat(groups.get(1).count()).isEqualTo(1);
+
+    var totals = dao.aggregateTotals(compiler.compileAggregateTotals(parsed, groupBy, "hikaru"));
+    assertThat(totals.totalGames()).isEqualTo(3);
+    assertThat(totals.totalGroups()).isEqualTo(2);
+  }
+
+  private GameFeature titledGame(
+      String url, String white, String black, String whiteTitle, String blackTitle, Instant at) {
+    GameFeature base = game(url, white, black, "1-0", "Caro Kann", at);
+    return new GameFeature(
+        base.id(),
+        base.requestId(),
+        base.gameUrl(),
+        base.platform(),
+        base.whiteUsername(),
+        base.blackUsername(),
+        base.whiteElo(),
+        base.blackElo(),
+        whiteTitle,
+        blackTitle,
+        base.timeClass(),
+        base.eco(),
+        base.openingName(),
+        base.openingFamily(),
+        base.result(),
+        base.playedAt(),
+        base.numMoves(),
+        base.indexedAt(),
+        base.pgn());
+  }
+
+  /**
    * The totals query inlines the perspective CASE in GROUP BY while the groups query aliases it, so
    * the two statements bind their shared params in different positions. If either mapping were
    * wrong the counts would silently disagree rather than error.

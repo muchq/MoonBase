@@ -234,7 +234,10 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
   /**
    * Aggregate variant of {@link #compile(ParsedQuery, String)}: the filter may use perspective
    * fields (resolved against {@code player}); group-by fields must be physical columns, except for
-   * {@code me.color} and {@code outcome}, which are groupable when a player is supplied.
+   * the categorical perspective fields ({@code me.color}, {@code me.title}, {@code
+   * opponent.username}, {@code opponent.title}, {@code outcome}), which are groupable when a player
+   * is supplied — the only way to aggregate opponents across both colors, since the color-specific
+   * columns mix the player's own values into the buckets on half the rows (#1301).
    */
   public CompiledQuery compileAggregate(ParsedQuery pq, List<String> groupByFields, String player) {
     if (pq.orderBy() != null) {
@@ -340,8 +343,9 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
   /**
    * Resolves group-by fields (dotted or underscore form) to their canonical group keys,
    * deduplicating while preserving order. Physical columns resolve to their column name; groupable
-   * perspective fields resolve to their underscore form ({@code me_color}, {@code outcome}), which
-   * is also the SELECT alias aggregate rows are keyed by. Throws on unknown fields.
+   * perspective fields resolve to their underscore form ({@code me_color}, {@code opponent_title},
+   * {@code outcome}, ...), which is also the SELECT alias aggregate rows are keyed by. Throws on
+   * unknown fields.
    */
   public List<String> resolveGroupByColumns(List<String> groupByFields) {
     return resolveGroupByTerms(groupByFields).stream().map(GroupByTerm::key).toList();
@@ -354,9 +358,25 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    */
   private record GroupByTerm(String key, String perspectiveField) {}
 
-  /** Perspective fields allowed in groupBy, keyed by every accepted spelling. */
+  /**
+   * Perspective fields allowed in groupBy, keyed by every accepted spelling (#1301). The
+   * categorical fields are all here; the two rating fields ({@code me.elo}, {@code opponent.elo})
+   * are deliberately absent — GROUP BY on a rating makes one bucket per distinct value, which
+   * buries the answer under hundreds of one-game groups and then hits the caller's group limit.
+   * Rating questions are filter-shaped ({@code opponent.elo >= 2500}) until someone builds
+   * bucketing; the rejection message says so.
+   */
   private static final Map<String, String> GROUPABLE_PERSPECTIVE_FIELDS =
-      Map.of("me.color", "me.color", "me_color", "me.color", "outcome", "outcome");
+      Map.ofEntries(
+          Map.entry("me.color", "me.color"),
+          Map.entry("me_color", "me.color"),
+          Map.entry("me.title", "me.title"),
+          Map.entry("me_title", "me.title"),
+          Map.entry("opponent.username", "opponent.username"),
+          Map.entry("opponent_username", "opponent.username"),
+          Map.entry("opponent.title", "opponent.title"),
+          Map.entry("opponent_title", "opponent.title"),
+          Map.entry("outcome", "outcome"));
 
   private List<GroupByTerm> resolveGroupByTerms(List<String> groupByFields) {
     if (groupByFields == null || groupByFields.isEmpty()) {
@@ -378,10 +398,13 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       return new GroupByTerm(perspectiveField.replace('.', '_'), perspectiveField);
     }
     if (PERSPECTIVE_FIELDS.containsKey(field)) {
+      // Only the rating fields land here; every categorical perspective field is groupable.
       throw new IllegalArgumentException(
-          "Perspective fields are not supported in groupBy: "
+          "Rating fields are not supported in groupBy: "
               + field
-              + " (only me.color and outcome are groupable, with a player)");
+              + " groups one bucket per distinct rating. Filter with rating ranges instead"
+              + " (e.g. opponent.elo >= 2500), or bucket at the call site. Groupable, with a"
+              + " player: me.color, me.title, opponent.username, opponent.title, outcome");
     }
     if (DATE_FIELD.equals(field) || MONTH_FIELD.equals(field)) {
       throw new IllegalArgumentException(
