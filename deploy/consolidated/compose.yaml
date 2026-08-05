@@ -82,6 +82,19 @@ services:
         limits:
           cpus: '0.5'
           memory: 512M
+    healthcheck:
+      # Steady /health probe (#1307): verifies the container serves, and keeps
+      # the http_server_* series alive from boot, so dashboards don't go blind
+      # after a deploy until the first real request. prom_proxy subtracts
+      # route="/health" from every Serving number and charts it on the Probes
+      # tile instead (#1303). Talks HTTP over bash's /dev/tcp because the
+      # ubuntu base image ships no curl and no wget — see one_d4's probe for
+      # the longer story, including why `timeout` bounds the probe itself.
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8089 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   portrait:
     image: ghcr.io/muchq/portrait:${PORTRAIT_SHA:-${DEPLOY_SHA:-latest}}
@@ -107,6 +120,18 @@ services:
         limits:
           cpus: '0.5'
           memory: 512M
+    healthcheck:
+      # Steady /health probe (#1307); see golf_hub's for the full rationale.
+      # Deliberately the dedicated health endpoint and never the trace route:
+      # a 503 for a render too large to allocate must stay a per-request
+      # error, not evidence the container is sick — unhealthy status is what
+      # health-conditioned tooling acts on, and under an orchestrator it
+      # means restart. The deploy config test pins this.
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8081 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   prom_proxy:
     image: ghcr.io/muchq/prom_proxy:${PROM_PROXY_SHA:-${DEPLOY_SHA:-latest}}
@@ -149,6 +174,13 @@ services:
         limits:
           cpus: '0.5'
           memory: 512M
+    healthcheck:
+      # Steady /health probe (#1307); see golf_hub's for the full rationale.
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8083 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   posterize:
     image: ghcr.io/muchq/posterize:${POSTERIZE_SHA:-${DEPLOY_SHA:-latest}}
@@ -171,6 +203,13 @@ services:
         limits:
           cpus: '0.5'
           memory: 512M
+    healthcheck:
+      # Steady /health probe (#1307); see golf_hub's for the full rationale.
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8084 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   r3dr:
     image: ghcr.io/muchq/r3dr:${R3DR_SHA:-${DEPLOY_SHA:-latest}}
@@ -211,6 +250,16 @@ services:
         limits:
           cpus: '0.5'
           memory: 512M
+    healthcheck:
+      # Steady /health probe (#1307); see golf_hub's for the full rationale.
+      # Served by mcpserver's HealthController — static liveness, no database
+      # check, on the azul base whose bash/head/grep this command relies on
+      # (same base as one_d4).
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   one_d4_postgres:
     image: postgres:18
@@ -331,6 +380,16 @@ services:
         limits:
           cpus: '0.5'
           memory: 512M
+    healthcheck:
+      # Steady /health probe (#1307); see golf_hub's for the full rationale.
+      # microgpt-serve previously had no healthcheck at all, which is how its
+      # dashboard sat empty for hours after a deploy until the first real
+      # request arrived.
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8087 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   forgejo:
     image: codeberg.org/forgejo/forgejo:16

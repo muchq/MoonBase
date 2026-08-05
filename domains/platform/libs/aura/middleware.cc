@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -20,8 +21,8 @@ class OtelHttpMetricsSink final : public HttpMetricsSink {
   explicit OtelHttpMetricsSink(std::shared_ptr<futility::otel::HttpMetricsManager> metrics)
       : metrics_(std::move(metrics)) {}
 
-  void RecordRequestStart(const std::string& route, const std::string& method) override {
-    metrics_->RecordRequestStart(route, method);
+  void RecordRequestStart(const std::string& method) override {
+    metrics_->RecordRequestStart(method);
   }
   void RecordRequestComplete(const std::string& route, const std::string& method, int status_code,
                              std::chrono::microseconds duration) override {
@@ -32,7 +33,49 @@ class OtelHttpMetricsSink final : public HttpMetricsSink {
   std::shared_ptr<futility::otel::HttpMetricsManager> metrics_;
 };
 
-std::string RouteOf(const std::string& target) { return target.substr(0, target.find('?')); }
+std::string PathOf(const std::string& target) { return target.substr(0, target.find('?')); }
+
+// The bounded route label (#1305). The generated router stamps the matched
+// operation name onto the response for exactly this purpose, and that name —
+// not the URI pattern, which smithy doesn't expose to middleware — is the
+// bounded vocabulary this rail speaks. The health endpoint is middleware, not
+// a routed operation, so it is recognized by its path and keeps the literal
+// prom_proxy's probeFilter subtracts — any method, on this rail: a POST that
+// 405s is still health-path traffic, excluded from Serving like the probes.
+// (yodel differs on that edge — no template is stamped on a 405, so a
+// wrong-method /health lands under its sentinel and stays in Serving; its
+// filter test pins that. Probes are GET, so the rails agree where it
+// matters.) Everything
+// else shares one sentinel: 404s, 405s, rate-limited requests, transport
+// rejections, scanner noise, and the one server-side case — a handler that
+// throws (rather than returning an error response) completes as a 500 with
+// no operation annotation, so it lands here too, separable by
+// error_type="server_error". The raw target minted a Prometheus series per
+// distinct path a scanner tried, which is the unbounded-cardinality shape
+// this replaces.
+std::string RouteLabelOf(const std::string& operation, const std::string& target) {
+  if (!operation.empty()) return operation;
+  if (PathOf(target) == kHealthRoute) return kHealthRoute;
+  return kUnmatchedRoute;
+}
+
+// The bounded method label: the nine RFC 9110 methods pass through verbatim,
+// anything else collapses to "CUSTOM" (yodel's spelling for the same rule —
+// Micronaut's HttpMethod enum does it for the Java rail). Beast hands the
+// chain the raw wire token (`wire.method_string()`), so without this the
+// method is a client-controlled label on every instrument, the gauge
+// included, and a scanner spraying invented verbs mints a series per token —
+// the same unbounded shape the route sentinel exists to prevent (#1305).
+// Case-sensitive on purpose: methods are case-sensitive, so "get" is an
+// invented token, not GET.
+std::string MethodLabelOf(const std::string& method) {
+  static constexpr std::string_view kKnown[] = {"GET",     "HEAD",    "POST",  "PUT",  "DELETE",
+                                                "CONNECT", "OPTIONS", "TRACE", "PATCH"};
+  for (const std::string_view known : kKnown) {
+    if (method == known) return method;
+  }
+  return "CUSTOM";
+}
 
 std::string KindName(smithy::http::BeastServerTransport::ConnectionEvent::Kind kind) {
   using Kind = smithy::http::BeastServerTransport::ConnectionEvent::Kind;
@@ -100,14 +143,17 @@ smithy::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink>
   return [metrics = std::move(metrics)](smithy::http::RequestHandler next) {
     // Metrics ride the runtime's Observe: microsecond durations (as of
     // smithy-cpp cfd8299) and start/complete guaranteed to pair even when
-    // dispatch throws.
+    // dispatch throws. The completion carries the observation's operation —
+    // the matched handler the router annotated — which RouteLabelOf turns
+    // into the bounded route label (#1305).
     smithy::server::Middleware observe = smithy::server::Observe(
         [metrics](const smithy::server::RequestObservation& observation) {
-          metrics->RecordRequestComplete(RouteOf(observation.target), observation.method,
-                                         observation.status, observation.duration);
+          metrics->RecordRequestComplete(RouteLabelOf(observation.operation, observation.target),
+                                         MethodLabelOf(observation.method), observation.status,
+                                         observation.duration);
         },
         [metrics](const smithy::server::RequestStart& start) {
-          metrics->RecordRequestStart(RouteOf(start.target), start.method);
+          metrics->RecordRequestStart(MethodLabelOf(start.method));
         });
     return observe(AccessLog()(std::move(next)));
   };
@@ -116,7 +162,7 @@ smithy::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink>
 smithy::http::RequestHandler ProductionChain(ChainOptions options,
                                              smithy::http::RequestHandler handler) {
   std::vector<smithy::server::Middleware> chain = {ServingObservability(std::move(options.metrics)),
-                                                   smithy::server::HealthEndpoint("/health")};
+                                                   smithy::server::HealthEndpoint(kHealthRoute)};
   if (options.allow_request) {
     chain.push_back(smithy::server::PerClientRateLimit(
         std::move(options.allow_request), std::move(options.trusted_proxies), options.retry_after));
@@ -128,15 +174,19 @@ std::function<void(const smithy::http::BeastServerTransport::RejectedRequest&)> 
     std::shared_ptr<HttpMetricsSink> metrics) {
   return [metrics = std::move(metrics)](
              const smithy::http::BeastServerTransport::RejectedRequest& rejected) {
-    // method/target may be empty when the request never parsed that far (a
-    // 431 can fire mid-headers); keep those series on a stable label rather
-    // than an empty string dashboards would drop or misgroup.
-    const std::string route = rejected.target.empty() ? "(unparsed)" : RouteOf(rejected.target);
-    const std::string method = rejected.method.empty() ? "(unparsed)" : rejected.method;
-    // Start + complete keeps the request counter and active gauge symmetric;
-    // the rejection happens at parse time, so zero duration is accurate.
-    metrics->RecordRequestStart(route, method);
-    metrics->RecordRequestComplete(route, method, rejected.status, std::chrono::microseconds{0});
+    // A rejection fires before any routing, so the route is always the
+    // sentinel — a 413 flood against distinct paths must not mint a series
+    // per path (#1305), and the method is bounded like everywhere else. The
+    // method may also be empty when the request never parsed that far (a 431
+    // can fire mid-headers); keep those series on a stable label rather than
+    // an empty string dashboards would drop or misgroup.
+    const std::string method =
+        rejected.method.empty() ? "(unparsed)" : MethodLabelOf(rejected.method);
+    // Start + complete keeps the active gauge symmetric; the rejection
+    // happens at parse time, so zero duration is accurate.
+    metrics->RecordRequestStart(method);
+    metrics->RecordRequestComplete(kUnmatchedRoute, method, rejected.status,
+                                   std::chrono::microseconds{0});
   };
 }
 

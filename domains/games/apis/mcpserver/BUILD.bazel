@@ -87,6 +87,22 @@ java_library(
     ],
 )
 
+# The /health liveness endpoint the compose healthcheck probes (#1307). Its
+# own library so the route-label test can compile against it without pulling
+# the whole binary's srcs into a test target.
+java_library(
+    name = "api",
+    srcs = [
+        "src/main/java/com/muchq/games/mcpserver/api/HealthController.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        artifact("io.micronaut:micronaut-core"),
+        artifact("io.micronaut:micronaut-http"),
+        artifact("io.micronaut:micronaut-inject"),
+    ],
+)
+
 java_binary(
     name = "mcpserver",
     srcs = [
@@ -102,6 +118,7 @@ java_binary(
     ],
     visibility = ["//visibility:public"],
     runtime_deps = [
+        ":api",
         ":module",
         "//domains/platform/libs/logging",
         "//domains/platform/libs/yodel:micronaut",
@@ -177,6 +194,36 @@ java_test_suite(
         "//domains/games/apis/one_d4:worker",
         artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-inject"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+java_test_suite(
+    name = "api_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/mcpserver/api/HealthProbeRouteLabelTest.java",
+    ],
+    resource_strip_prefix = "domains/platform/resources",
+    resources = [
+        "//domains/platform/resources:micronaut_config",
+    ],
+    runtime_deps = [
+        "//domains/platform/libs/logging",
+        # The embedded server's error-response path needs the JSON codec
+        # beans (JsonErrorResponseBodyProvider et al), same as the binary.
+        artifact("io.micronaut:micronaut-jackson-databind"),
+    ],
+    deps = [
+        ":api",
+        ":module",
+        "//domains/platform/libs/yodel",
+        "//domains/platform/libs/yodel:micronaut",
+        artifact("io.micronaut:micronaut-context"),
+        artifact("io.micronaut:micronaut-http-server-netty"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("io.micronaut:micronaut-runtime"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],

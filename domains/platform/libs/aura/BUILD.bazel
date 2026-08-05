@@ -1,5 +1,9 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
+# Read as text by //domains/platform/libs/otel_contract, which pins the
+# route sentinel and health-route literal equal across the three rails.
+exports_files(["middleware.h"])
+
 # aura: the serving chain for smithy-cpp services — observability over the
 # shared futility/otel HTTP instruments (plus the access log), health, and
 # optional per-client rate limiting, composed identically in production and

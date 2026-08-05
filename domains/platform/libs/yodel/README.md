@@ -20,19 +20,34 @@ languages emit — parity is the whole point:
 
 Every data point carries `service_name` (from `OTEL_SERVICE_NAME`) and
 `http_method`; the counters and the histogram also carry `route` (#1303) —
-the matched route template, never the raw path, with a fixed `unmatched`
-sentinel — so probe traffic is separable from serving traffic. The gauge is
-the one instrument without a route: it moves at request start, before
-routing has matched anything, which is also why the counters move at
+a bounded matched-handler value, never the raw path, with a fixed
+`unmatched` sentinel — so probe traffic is separable from serving traffic.
+The gauge is the one instrument without a route: it moves at request start,
+before routing has matched anything, which is also why the counters move at
 completion rather than start. Success means status < 400.
 
-The three rails do not all speak the same label dialect yet: server_pal
-carries no route at all (#1304), and futility's `route` is the raw request
-path rather than the matched template. Queries naming a literal route
-(`route="/health"`) work on both; anything relying on template values or on
-bounded cardinality is yodel-only until those are aligned. Nothing pins
-label sets or counter timing across rails today — the otel_contract suite
-pins descriptions and bucket layouts only.
+All three rails speak this dialect now (#1304, #1305). Descriptions, bucket
+layouts, and the route literals are pinned cross-language by the
+otel_contract suite; label sets and unit-lessness are pinned per rail —
+against the real exported payload for this library (encoder tests) and
+server_pal (in-memory exporter), and at the recorder seam for futility
+(one layer shy of the wire; the export-level version is part of #1308).
+The `route` *value* vocabulary differs per rail because each router
+exposes a different bounded identity: yodel and server_pal emit the
+matched route template ("/games/{id}"), while futility emits the matched
+Smithy operation name ("Trace") — smithy-cpp annotates responses with the
+operation, not the URI pattern. All three agree on the literal `/health`
+for the probe endpoint (which prom_proxy's probeFilter subtracts), on the
+`unmatched` sentinel, and on the bounded method rule (the nine RFC 9110
+methods verbatim, anything else `CUSTOM`). One pinned edge divergence,
+specific to the health path: a wrong-method `/health` request keeps the
+`/health` label on the C++ rail (recognized by path) and on the Rust rail
+(axum stamps the matched template on 405s), but lands under yodel's
+sentinel — no template is stamped on a 405 there. On other paths a 405
+follows each rail's normal rule: matched template on Rust, sentinel on
+C++. futility additionally labels its histogram with
+`status_code`/`result` and its failure counter with those plus
+`error_type`; the shared core is identical everywhere.
 
 Rather than pulling the OpenTelemetry SDK + Micrometer dependency trees into
 `maven_install.json` for five fixed instruments (and then remapping

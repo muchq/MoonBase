@@ -75,39 +75,79 @@ func TestPortraitHasNoHealthcheckOnTheTraceRoute(t *testing.T) {
 	}
 
 	if !strings.Contains(block, "healthcheck") {
-		return // The state this PR verified: nothing health-checks portrait.
+		return // Since #1307 portrait is probed — on /health, never the trace route.
 	}
 	for _, route := range []string{"/portrait/v1/trace", "/v1/trace"} {
 		if strings.Contains(block, route) {
-			t.Errorf("portrait's compose healthcheck probes %s. Docker restarts a container whose "+
-				"healthcheck fails, so a render too large to allocate — a 503 the client is meant "+
-				"to retry smaller — would bounce the service instead.", route)
+			t.Errorf("portrait's compose healthcheck probes %s. A render too large to allocate — "+
+				"a 503 the client is meant to retry smaller — would mark the container unhealthy, "+
+				"and unhealthy is what health-conditioned tooling acts on (an orchestrator "+
+				"restarts on it). Probe the dedicated /health endpoint instead.", route)
+		}
+	}
+}
+
+// Every first-party service that reports the http_server_* family carries a
+// /health probe (#1307). The probe is not only container supervision: the
+// OTel SDK exports nothing for an instrument that has never recorded, and
+// otelcol's Prometheus endpoint expires a dead process's series within
+// minutes, so after each deploy a service with no background traffic went
+// completely dark on the dashboard until its first real request. The steady
+// probe is what keeps the series alive from boot. A healthcheck quietly
+// deleted here would regress that without failing anything else.
+var servicesWithSteadyProbes = []string{
+	"golf_hub",
+	"mcpserver",
+	"microgpt-serve",
+	"mithril",
+	"one_d4",
+	"portrait",
+	"posterize",
+}
+
+func TestEveryServiceOnTheStandardRailsIsProbed(t *testing.T) {
+	probes := healthcheckProbes(t, "compose.yaml")
+	for _, service := range servicesWithSteadyProbes {
+		if _, ok := probes[service]; !ok {
+			t.Errorf("%s has no compose healthcheck. Without the steady probe its http_server_* "+
+				"series die with every deploy and the dashboard goes blind until the first real "+
+				"request (#1307); if removing it is deliberate, remove it from this list too.",
+				service)
 		}
 	}
 }
 
 // The /health literal lives in three places that nothing structurally ties
-// together: one_d4's probe request line here, prom_proxy's probeFilter
-// (which subtracts route="/health" from every Serving number, #1303), and
-// its Probes tile (which selects route="/health"). A renamed probe path
-// would silently un-exclude the probe from Serving while the Probes tile
-// read a permanent zero — the shape prom_proxy's own comments call "a zero
-// that means healthy and also broken". This pins the compose side to the
-// same literal the query side's TestRegistry_StandardServingQueriesExclude-
-// TheProbeRoute pins.
-func TestOneD4HealthcheckProbesTheRouteProbeFilterSubtracts(t *testing.T) {
-	block := serviceBlock(t, "compose.yaml", "one_d4")
-	if !strings.Contains(block, "ghcr.io/muchq/one_d4") {
-		t.Fatalf("did not find one_d4's image in its compose block; this test is no longer "+
-			"reading the service it claims to. Block was:\n%s", block)
+// together: the probe request lines here, prom_proxy's probeFilter (which
+// subtracts route="/health" from every Serving number, #1303), and the
+// Probes tiles (which select route="/health"). A renamed probe path would
+// silently un-exclude the probe from Serving while the Probes tile read a
+// permanent zero — the shape prom_proxy's own comments call "a zero that
+// means healthy and also broken". This pins the compose side of every
+// first-party probe to the same literal the query side's
+// TestRegistry_StandardServingQueriesExcludeTheProbeRoute pins.
+func TestFirstPartyHealthchecksProbeTheRouteProbeFilterSubtracts(t *testing.T) {
+	checked := 0
+	for service, probe := range healthcheckProbes(t, "compose.yaml") {
+		if !strings.Contains(probe.image, "ghcr.io/muchq/") {
+			continue // Third-party containers (postgres) probe their own way.
+		}
+		checked++
+		found := false
+		for _, line := range probe.lines {
+			if strings.Contains(line, "GET /health HTTP") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s's healthcheck does not probe GET /health; prom_proxy subtracts and "+
+				"charts exactly route=\"/health\" (#1303), so move all the literals together. "+
+				"Probe lines:\n%s", service, strings.Join(probe.lines, "\n"))
+		}
 	}
-	if !strings.Contains(block, "healthcheck") {
-		t.Fatal("one_d4's compose block has no healthcheck; if the probe moved or was removed, " +
-			"prom_proxy's probeFilter and Probes tile (#1303) need the same decision applied")
-	}
-	if !strings.Contains(block, "GET /health HTTP") {
-		t.Error("one_d4's healthcheck no longer probes GET /health; prom_proxy subtracts and " +
-			"charts exactly route=\"/health\" (#1303), so move all three literals together")
+	if checked < len(servicesWithSteadyProbes) {
+		t.Fatalf("only %d first-party healthchecks parsed; the probed-services pin above expects "+
+			"at least %d, so the parser has gone stale", checked, len(servicesWithSteadyProbes))
 	}
 }
 

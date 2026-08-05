@@ -18,5 +18,11 @@ tower_governor = { workspace = true }
 tower-http = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 tower = "0.5"
+# The in-memory exporter behind the label-set and unit tests. Costs one new
+# Cargo.lock edge (opentelemetry_sdk -> tokio) and, because crate_universe
+# resolves one feature set per crate across the whole workspace, the testing
+# module is compiled into the production opentelemetry_sdk build too — dead
+# code in the binaries, nothing more.
+opentelemetry_sdk = { workspace = true, features = ["testing"] }

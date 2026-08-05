@@ -1,22 +1,29 @@
 #include "domains/platform/libs/futility/otel/http_metrics.h"
 
 #include <string>
+#include <utility>
 
 namespace futility::otel {
 
 HttpMetricsManager::HttpMetricsManager(const std::string& service_name)
-    : service_name_(service_name), recorder_(std::make_unique<MetricsRecorder>(service_name)) {}
+    : HttpMetricsManager(service_name, std::make_unique<MetricsRecorder>(service_name)) {}
 
-void HttpMetricsManager::RecordRequestStart(const std::string& route, const std::string& method) {
+HttpMetricsManager::HttpMetricsManager(const std::string& service_name,
+                                       std::unique_ptr<MetricsRecorder> recorder)
+    : service_name_(service_name), recorder_(std::move(recorder)) {}
+
+void HttpMetricsManager::RecordRequestStart(const std::string& method) {
   if (!recorder_) return;
 
-  auto base_attrs = CreateBaseAttributes(route, method);
-
-  // Increment total requests counter
-  recorder_->RecordCounter("http_server_requests", 1, base_attrs);
-
-  // Increment active requests gauge
-  recorder_->RecordGauge("http_server_requests_active", 1, base_attrs);
+  // The gauge is the one instrument that moves here, and the one instrument
+  // without a route: pre-dispatch nothing bounded is known about the path,
+  // and the raw target is exactly what #1305 removed from the labels. The
+  // request counter moves at completion instead, where it can carry the
+  // route — so it counts completed-or-abandoned requests rather than started
+  // ones, the same totals observed a request-duration later (yodel's
+  // contract; the two always pair on this rail because smithy's Observe
+  // reports a completion even when dispatch throws).
+  recorder_->RecordGauge("http_server_requests_active", 1, CreateGaugeAttributes(method));
 }
 
 void HttpMetricsManager::RecordRequestComplete(const std::string& route, const std::string& method,
@@ -24,28 +31,35 @@ void HttpMetricsManager::RecordRequestComplete(const std::string& route, const s
                                                std::chrono::microseconds duration) {
   if (!recorder_) return;
 
+  // Decrement with the same label set the increment used, or the per-label
+  // gauge series would drift apart instead of draining.
+  recorder_->RecordGauge("http_server_requests_active", -1, CreateGaugeAttributes(method));
+
   auto base_attrs = CreateBaseAttributes(route, method);
-  auto request_attrs = CreateRequestAttributes(route, method, status_code);
+  recorder_->RecordCounter("http_server_requests", 1, base_attrs);
 
-  // Decrement active requests gauge
-  recorder_->RecordGauge("http_server_requests_active", -1, base_attrs);
-
-  // Record request duration
-  recorder_->RecordLatency("http_server_request_duration", duration, request_attrs);
-
-  // Record success or failure
   if (IsSuccess(status_code)) {
     recorder_->RecordCounter("http_server_requests_success", 1, base_attrs);
   } else {
-    auto failure_attrs = request_attrs;
+    auto failure_attrs = CreateRequestAttributes(route, method, status_code);
     failure_attrs["error_type"] = DetermineErrorType(status_code);
     recorder_->RecordCounter("http_server_requests_failure", 1, failure_attrs);
   }
+
+  recorder_->RecordLatency("http_server_request_duration", duration,
+                           CreateRequestAttributes(route, method, status_code));
+}
+
+std::map<std::string, std::string> HttpMetricsManager::CreateGaugeAttributes(
+    const std::string& method) const {
+  return {{"service_name", service_name_}, {"http_method", method}};
 }
 
 std::map<std::string, std::string> HttpMetricsManager::CreateBaseAttributes(
     const std::string& route, const std::string& method) const {
-  return {{"service_name", service_name_}, {"route", route}, {"method", method}};
+  // http_method, not futility's historical `method`: the label spelling is
+  // shared with yodel and server_pal; http_metrics_test pins it, exactly.
+  return {{"service_name", service_name_}, {"route", route}, {"http_method", method}};
 }
 
 std::map<std::string, std::string> HttpMetricsManager::CreateRequestAttributes(

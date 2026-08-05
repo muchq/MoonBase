@@ -34,12 +34,12 @@ const defaultCounterWindow = "5m"
 // Serving numbers exclude probe traffic (#1303): the container healthcheck's
 // steady GET /health otherwise floors every request count (~10 per 5m at
 // compose's 30s interval) and drags every latency figure toward its
-// sub-millisecond durations. A negative matcher also matches series that
-// carry no route label at all, which is what makes one filter safe on every
-// selector fleet-wide: futility labels the whole family (gauge included) and
-// gets the subtraction; yodel's gauge and everything server_pal emits are
-// route-less (#1304) and pass through whole, there being nothing to
-// subtract yet.
+// sub-millisecond durations. All three rails label their counters and
+// histogram with the route (#1304, #1305), so the subtraction works
+// fleet-wide; the in-flight gauge deliberately carries no route on any rail,
+// and a negative matcher also matches series without the label, so the same
+// filter is safe on the gauge selector — it passes through whole.
+// //domains/platform/libs/otel_contract pins both label sets.
 //
 // Fleet-wide by decision, not accident: /health is the probe path by
 // convention on every service (Caddy exposes it publicly too), so traffic
@@ -53,6 +53,22 @@ const defaultCounterWindow = "5m"
 // an empty matcher list it is a PromQL syntax error, which is the loud
 // failure you want.
 const probeFilter = `,route!="/health"`
+
+// probesTile is the standard Probes tile for a service with a compose
+// healthcheck (#1307): the /health traffic excluded from every Serving
+// number by probeFilter, shown as its own count so the subtraction is a
+// visible fact rather than a floor under every chart. ~10/5m while the 30s
+// probe is healthy; zero means the probe is failing, or the service's route
+// label hasn't deployed yet. The route literal counts everything on the
+// health path — Caddy exposes /health publicly, so scanner traffic to it
+// also lands here rather than in Serving, and can in principle hold this
+// tile above zero while the container's own probe is dead. (Wrong-method
+// health requests stay on the literal on the C++/Rust rails; yodel parks
+// them under its sentinel — its filter test pins that edge.)
+func probesTile(service string) customScalarDef {
+	return counter("Probes", "health_checks", "",
+		fmt.Sprintf(`http_server_requests_total{service_name=%q,route="/health"}`, service))
+}
 
 // The window for counters that are alarms rather than volumes.
 //
@@ -278,6 +294,7 @@ var serviceOrder = []string{"golf_hub", "mcpserver", "microgpt-serve", "mithril"
 var serviceRegistry = map[string]serviceEntry{
 	"golf_hub": {
 		CustomScalars: []customScalarDef{
+			probesTile("golf_hub"),
 			scalar("Sessions", "active", "sessions", `sum(stream_sessions_active_gauge)`),
 			counter("Sessions", "started", "", `stream_sessions_total`),
 			counter("Sessions", "resumed", "", `stream_sessions_total{resumed="true"}`),
@@ -332,6 +349,7 @@ var serviceRegistry = map[string]serviceEntry{
 	},
 	"microgpt-serve": {
 		CustomScalars: []customScalarDef{
+			probesTile("microgpt-serve"),
 			counter("Requests by endpoint", "generate", "", `microgpt_requests_total{endpoint="generate"}`),
 			counter("Requests by endpoint", "chat", "", `microgpt_requests_total{endpoint="chat"}`),
 			counter("Inference", "tokens_generated", "tokens", `microgpt_tokens_generated_total`),
@@ -348,22 +366,22 @@ var serviceRegistry = map[string]serviceEntry{
 			"avg_duration_ms": tsFixed(`sum(rate(microgpt_request_duration_ms_sum[5m]))/sum(rate(microgpt_request_duration_ms_count[5m]))`),
 		},
 	},
-	// The Java services (#1212): yodel's standard instruments only, no
-	// custom set yet.
-	"mcpserver": {},
+	// The Java services (#1212): yodel's standard instruments, plus the
+	// standard Probes tile now that the container is probed (#1307).
+	"mcpserver": {
+		CustomScalars: []customScalarDef{
+			probesTile("mcpserver"),
+		},
+	},
 	// The first Java service with a custom set, now that yodel has counters and
 	// distributions to record into. Counts, outcomes and motif names only — the
 	// emitter never labels by player or by game, so no series here is per-user.
 	"one_d4": {
 		CustomScalars: []customScalarDef{
 			// The /health traffic (#1303): the container probe plus anything Caddy
-			// routes there, excluded from every standard Serving number by
-			// probeFilter and shown here instead, so the subtraction is a visible
-			// fact rather than a floor under every chart. ~10/5m while compose's
-			// 30s probe is healthy; zero means the probe is failing, or the route
-			// label hasn't deployed yet (the deploy config test and one_d4's
-			// HealthProbeRouteLabelTest pin the other two ways this can lie).
-			counter("Probes", "health_checks", "", `http_server_requests_total{service_name="one_d4",route="/health"}`),
+			// routes there. The deploy config test and one_d4's
+			// HealthProbeRouteLabelTest pin the two ways a zero here can lie.
+			probesTile("one_d4"),
 			counter("Indexing", "games_indexed", "games", `games_indexed_total{service_name="one_d4"}`),
 			counter("Indexing", "runs_completed", "", `index_runs_total{service_name="one_d4",outcome="completed"}`),
 			// The three outcomes below are alarms rather than volumes, so they
@@ -420,12 +438,23 @@ var serviceRegistry = map[string]serviceEntry{
 			"motif":               tsCounter(`motif_occurrences_total{service_name="one_d4"}`),
 		},
 	},
-	// Wordchains: server_pal's standard instruments only, no custom set.
-	"mithril": {},
-	// Image blur/edges: server_pal's standard instruments only.
-	"posterize": {},
+	// Wordchains: server_pal's standard instruments plus the standard
+	// Probes tile (#1307).
+	"mithril": {
+		CustomScalars: []customScalarDef{
+			probesTile("mithril"),
+		},
+	},
+	// Image blur/edges: server_pal's standard instruments plus the standard
+	// Probes tile (#1307).
+	"posterize": {
+		CustomScalars: []customScalarDef{
+			probesTile("posterize"),
+		},
+	},
 	"portrait": {
 		CustomScalars: []customScalarDef{
+			probesTile("portrait"),
 			scalar("Render cache", "hit_rate_percent", "%", portraitCacheHitPercent),
 			counter("Render cache", "operations", "", portraitCacheOps),
 			// Windowed averages over RecordDistribution histograms:

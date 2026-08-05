@@ -101,6 +101,33 @@ public class HttpServerMetricsFilterTest {
   }
 
   /**
+   * A wrong-method request to an existing path keeps the sentinel on this rail: the router stamps
+   * no template on a 405, so {@code routeOf} falls through to {@code UNMATCHED_ROUTE}, and the
+   * request stays in the Serving numbers. This is a deliberate, pinned divergence from the C++ and
+   * Rust rails, where any method on the health *path* keeps the {@code /health} literal (aura
+   * compares the path; axum stamps MatchedPath on 405s). It only matters for scanner traffic on a
+   * Java service's public /health — the compose probes are GET — and the safe direction: a scanner
+   * POST cannot hide inside the probe subtraction here.
+   */
+  @Test
+  public void wrongMethodOnAnExistingPathKeepsTheSentinel() throws Exception {
+    HttpRequest request =
+        HttpRequest.newBuilder()
+            .uri(URI.create(baseUrl + "/yodel-test/ok"))
+            .POST(HttpRequest.BodyPublishers.noBody())
+            .build();
+    assertThat(client.send(request, HttpResponse.BodyHandlers.discarding()).statusCode())
+        .isEqualTo(405);
+
+    HttpServerMetricsFilter filter =
+        server.getApplicationContext().getBean(HttpServerMetricsFilter.class);
+    assertThat(filter.metrics().snapshot())
+        .filteredOn(s -> s.httpMethod().equals("POST"))
+        .singleElement()
+        .satisfies(s -> assertThat(s.route()).isEqualTo(HttpServerMetricsFilter.UNMATCHED_ROUTE));
+  }
+
+  /**
    * The method label has the same bounded-cardinality contract as the route label (#1303), on a
    * different mechanism: the filter reads {@code getMethod().name()}, the enum, which collapses
    * every verb it doesn't know to {@code CUSTOM}. Reverting to {@code getMethodName()} — the raw

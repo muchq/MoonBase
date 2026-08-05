@@ -143,6 +143,33 @@ public class OtlpJsonEncoderTest {
         .containsEntry("service.version", "abc123");
   }
 
+  /**
+   * No metric node carries a unit (#1294). The collector's Prometheus exporter folds a non-empty
+   * unit into the metric name — http_server_requests_total would become
+   * http_server_requests_microseconds_total — logging no conflict anywhere: the series just forks,
+   * and prom_proxy selects every panel by literal name, so the service silently vanishes from the
+   * dashboards. All three rails pin this; //domains/platform/libs/otel_contract pins the source
+   * sites, and this pins yodel's actual payload.
+   */
+  @Test
+  public void noMetricNodeDeclaresAUnit() throws Exception {
+    HttpServerMetrics metrics = new HttpServerMetrics("svc", 1_000_000_000L);
+    metrics.recordRequestStart("GET");
+    metrics.recordRequestComplete("GET", "/widgets", 200, 42.0);
+    metrics.recordRequestStart("GET");
+    metrics.recordRequestComplete("GET", "/widgets", 500, 7.0);
+
+    JsonNode metricNodes = encode(metrics).at("/resourceMetrics/0/scopeMetrics/0/metrics");
+    assertThat(metricNodes.size()).isEqualTo(5);
+    metricNodes.forEach(
+        metric ->
+            assertThat(metric.has("unit"))
+                .as(
+                    "%s declares a unit; the collector folds it into the metric name (#1294)",
+                    metric.get("name").asText())
+                .isFalse());
+  }
+
   private static Map<String, String> attributeMap(JsonNode attributes) {
     Map<String, String> out = new java.util.LinkedHashMap<>();
     attributes.forEach(a -> out.put(a.get("key").asText(), a.at("/value/stringValue").asText()));

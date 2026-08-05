@@ -24,9 +24,14 @@ without `scripts/make-git-overrides.sh`.
     observed too: the shared `http_server_*` instruments
     (`futility/otel:http_metrics`) plus one access-log line per request
     with the W3C `trace_id=` from the request's traceparent (smithy-cpp
-    ADR-0011)
-  - `HealthEndpoint("/health")` before the guard, so probes are never rate
-    limited
+    ADR-0011). The route label is bounded (#1305): the matched Smithy
+    operation name the generated router stamps on its responses,
+    `kHealthRoute` for the health endpoint, or the `kUnmatchedRoute`
+    sentinel — never the raw request path. The method label is bounded the
+    same way: the nine RFC 9110 methods verbatim, any other wire token
+    collapsed to `CUSTOM`
+  - `HealthEndpoint(kHealthRoute)` before the guard, so probes are never
+    rate limited
   - `PerClientRateLimit` keyed on the ADR-0012 derived client address
     (trust boundary from `ChainOptions::trusted_proxies`), answering 429
     with Retry-After — skipped entirely when `allow_request` is unset
