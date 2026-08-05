@@ -1,10 +1,12 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
 # Read as text by //domains/platform/libs/otel_contract, which pins this rail's
-# latency bucket bounds and http_server_* descriptions equal to yodel's and
-# server_pal's.
+# latency bucket bounds, http_server_* descriptions, label sets, and
+# unit-lessness equal to yodel's and server_pal's.
 exports_files([
     "http_instrument_descriptions.h",
+    "http_metrics.cc",
+    "metrics.cc",
     "otel_provider.h",
 ])
 
@@ -100,6 +102,7 @@ cc_test(
     size = "small",
     srcs = ["http_metrics_test.cc"],
     deps = [
+        ":capturing_metrics_recorder",
         ":http_metrics",
         "@googletest//:gtest_main",
     ],

@@ -158,18 +158,24 @@ Example collector endpoint: `http://otel-collector:4318/v1/metrics`
 
 ### HttpMetricsManager
 
-Per-request HTTP serving metrics with `service_name`/`route`/`method` labels
-(plus `status_code`, `result`, and `error_type` on completions). Call
-`RecordRequestStart` at ingress and `RecordRequestComplete` when the response
-is written; the pair keeps the request counter and active gauge symmetric.
+Per-request HTTP serving metrics with `service_name`/`route`/`http_method`
+labels (plus `status_code` and `result` on the histogram, and those plus
+`error_type` on the failure counter). Call `RecordRequestStart` at ingress —
+it moves only the in-flight gauge, without a route, because routing hasn't
+happened yet — and `RecordRequestComplete` when the response is written,
+which drains the gauge and records the request counter, outcome, and
+duration under the bounded route. The route must be a bounded value: aura
+passes the matched Smithy operation name, `/health`, or the `unmatched`
+sentinel — never the raw request path, which minted a Prometheus series per
+distinct path a scanner tried (#1305).
 
 ```cpp
 #include "domains/platform/libs/futility/otel/http_metrics.h"
 
 futility::otel::HttpMetricsManager http_metrics("my-service");
-http_metrics.RecordRequestStart("/api/users", "GET");
-// ... serve ...
-http_metrics.RecordRequestComplete("/api/users", "GET", 200, duration_us);
+http_metrics.RecordRequestStart("GET");
+// ... route, then serve ...
+http_metrics.RecordRequestComplete("GetUsers", "GET", 200, duration_us);
 ```
 
 ## Instrument Descriptions

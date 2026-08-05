@@ -1,17 +1,19 @@
 use std::net::SocketAddr;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::{DefaultBodyLimit, Request, State};
+use axum::extract::{DefaultBodyLimit, MatchedPath, Request, State};
 use axum::http::{StatusCode, Uri};
 use axum::middleware::Next;
 use axum::response::Response;
 use axum::routing::{MethodRouter, get};
 use opentelemetry::KeyValue;
-use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
+use opentelemetry::metrics::{Counter, Histogram, Meter, UpDownCounter};
 use opentelemetry_otlp::{MetricExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::{Aggregation, Instrument, PeriodicReader, SdkMeterProvider, Stream};
+use opentelemetry_sdk::metrics::{
+    Aggregation, Instrument, PeriodicReader, SdkMeterProvider, Stream,
+};
 use std::env;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -47,11 +49,12 @@ pub const HTTP_LATENCY_BUCKET_BOUNDS_MICROS: [f64; 15] = [
     500000.0, 1000000.0, 2500000.0, 10000000.0,
 ];
 
-static HTTP_REQUESTS: OnceLock<Counter<u64>> = OnceLock::new();
-static HTTP_SUCCESS: OnceLock<Counter<u64>> = OnceLock::new();
-static HTTP_FAILURE: OnceLock<Counter<u64>> = OnceLock::new();
-static HTTP_ACTIVE: OnceLock<UpDownCounter<i64>> = OnceLock::new();
-static HTTP_DURATION: OnceLock<Histogram<f64>> = OnceLock::new();
+/// The route label for a request no route ever matched (404s, probes for
+/// paths that don't exist). A fixed sentinel rather than the raw path, so
+/// scanners cannot mint unbounded series — the same rule, and the same
+/// spelling, as yodel's `HttpServerMetricsFilter.UNMATCHED_ROUTE` and
+/// aura's `kUnmatchedRoute` (#1304, #1303).
+pub const UNMATCHED_ROUTE: &str = "unmatched";
 
 /// Whether an instrument of this name should get the explicit latency buckets.
 ///
@@ -65,6 +68,37 @@ static HTTP_DURATION: OnceLock<Histogram<f64>> = OnceLock::new();
 /// keep their bare names and want the SDK defaults, which start near zero.
 fn wants_latency_buckets(instrument_name: &str) -> bool {
     instrument_name.ends_with("_microseconds")
+}
+
+/// The SDK view applying `HTTP_LATENCY_BUCKET_BOUNDS_MICROS` to latency
+/// histograms. Matched on the suffix rather than on the one HTTP instrument
+/// name: any histogram whose name says it holds microseconds wants this
+/// layout, and pinning the single name would leave the next one to rediscover
+/// #1286. Nothing here records a non-latency quantity under that suffix.
+///
+/// A free function rather than a closure inside `init_otel` so a test can
+/// register it on its own provider and read the exported bucket bounds back:
+/// the constant is pinned by `//domains/platform/libs/otel_contract`, but a
+/// constant nothing applies is exactly the bug #1286 describes.
+///
+/// `build()` returns Err only for a malformed stream (unsorted or empty
+/// boundaries), which for a const array is a compile-time-shaped mistake
+/// rather than a runtime one. `.ok()` therefore reads as "no view" — the
+/// silent default-bucket path this exists to eliminate — so it is
+/// deliberately not used: a broken constant should be loud.
+fn latency_bucket_view(instrument: &Instrument) -> Option<Stream> {
+    if !wants_latency_buckets(instrument.name()) {
+        return None;
+    }
+    Some(
+        Stream::builder()
+            .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                boundaries: HTTP_LATENCY_BUCKET_BOUNDS_MICROS.to_vec(),
+                record_min_max: true,
+            })
+            .build()
+            .expect("HTTP_LATENCY_BUCKET_BOUNDS_MICROS must be a valid histogram layout"),
+    )
 }
 
 /// Initialise the global OTel meter provider when
@@ -126,37 +160,12 @@ pub fn init_otel() -> Option<SdkMeterProvider> {
         }
     };
 
-    // Matched on the suffix rather than on the one HTTP instrument name: any
-    // histogram whose name says it holds microseconds wants this layout, and
-    // pinning the single name would leave the next one to rediscover #1286.
-    // Nothing here records a non-latency quantity under that suffix.
-    //
-    // build() returns Err only for a malformed stream (unsorted or empty
-    // boundaries), which for a const array is a compile-time-shaped mistake
-    // rather than a runtime one. .ok() therefore reads as "no view" — the
-    // silent default-bucket path this exists to eliminate — so it is
-    // deliberately not used: a broken constant should be loud.
-    let latency_buckets = |i: &Instrument| {
-        if !wants_latency_buckets(i.name()) {
-            return None;
-        }
-        Some(
-            Stream::builder()
-                .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                    boundaries: HTTP_LATENCY_BUCKET_BOUNDS_MICROS.to_vec(),
-                    record_min_max: true,
-                })
-                .build()
-                .expect("HTTP_LATENCY_BUCKET_BOUNDS_MICROS must be a valid histogram layout"),
-        )
-    };
-
     // Resource::builder() picks up OTEL_SERVICE_NAME and
     // OTEL_RESOURCE_ATTRIBUTES via the built-in EnvResourceDetector.
     let provider = SdkMeterProvider::builder()
         .with_reader(PeriodicReader::builder(exporter).build())
         .with_resource(Resource::builder().build())
-        .with_view(latency_buckets)
+        .with_view(latency_bucket_view)
         .build();
 
     opentelemetry::global::set_meter_provider(provider.clone());
@@ -164,100 +173,165 @@ pub fn init_otel() -> Option<SdkMeterProvider> {
     Some(provider)
 }
 
-fn http_counter(
-    cell: &'static OnceLock<Counter<u64>>,
-    name: &'static str,
-    desc: &'static str,
-) -> &'static Counter<u64> {
-    cell.get_or_init(|| {
-        opentelemetry::global::meter("http_server")
-            .u64_counter(name)
-            .with_description(desc)
-            .build()
-    })
+/// The five shared serving instruments, resolved once per router at `build`
+/// time rather than lazily from a process-wide static: a static binds to
+/// whichever meter provider was global at first use, which no test can
+/// control and only one test per process could ever win. Instrument names
+/// mirror the C++ aura/futility http_server_* family (requests,
+/// success/failure, active gauge, microseconds histogram), so prom_proxy's
+/// standard service block reads every language the same way.
+struct HttpInstruments {
+    requests: Counter<u64>,
+    success: Counter<u64>,
+    failure: Counter<u64>,
+    active: UpDownCounter<i64>,
+    duration: Histogram<f64>,
+    service_name: String,
 }
 
-/// In-flight gauge as a drop guard: a manual decrement after the await
-/// never runs when the request future is cancelled (client disconnect),
-/// and the gauge would drift upward forever.
-struct ActiveRequest {
-    attrs: [KeyValue; 2],
-}
-
-impl ActiveRequest {
-    fn start(attrs: [KeyValue; 2]) -> Self {
-        Self::counter().add(1, &attrs);
-        Self { attrs }
+impl HttpInstruments {
+    fn from_global() -> Arc<Self> {
+        Self::new(
+            &opentelemetry::global::meter("http_server"),
+            env::var("OTEL_SERVICE_NAME").unwrap_or_default(),
+        )
     }
 
-    fn counter() -> &'static UpDownCounter<i64> {
-        HTTP_ACTIVE.get_or_init(|| {
-            opentelemetry::global::meter("http_server")
+    // The descriptions are a cross-language contract: the collector merges
+    // series by instrument name across services and keeps the first
+    // description it sees, logging a conflict for every later one that
+    // disagrees. The success range is spelled with an ASCII hyphen, matching
+    // yodel and futility — an en-dash reads identically here and exports as
+    // a different string. //domains/platform/libs/otel_contract pins these
+    // equal to the other rails', and pins that no instrument declares a
+    // unit: the Prometheus exporter folds a unit into the metric *name*
+    // (#1294), which would silently fork every series off the dashboards.
+    fn new(meter: &Meter, service_name: String) -> Arc<Self> {
+        Arc::new(Self {
+            requests: meter
+                .u64_counter("http_server_requests")
+                .with_description("HTTP requests received")
+                .build(),
+            success: meter
+                .u64_counter("http_server_requests_success")
+                .with_description("HTTP requests completed successfully (2xx-3xx)")
+                .build(),
+            failure: meter
+                .u64_counter("http_server_requests_failure")
+                .with_description("HTTP requests that returned 4xx or 5xx")
+                .build(),
+            active: meter
                 .i64_up_down_counter("http_server_requests_active_gauge")
                 .with_description("HTTP requests currently in flight")
-                .build()
+                .build(),
+            duration: meter
+                .f64_histogram("http_server_request_duration_microseconds")
+                .with_description("HTTP request duration in microseconds")
+                .build(),
+            service_name,
         })
     }
 }
 
-impl Drop for ActiveRequest {
-    fn drop(&mut self) {
-        Self::counter().add(-1, &self.attrs);
+/// In-flight gauge plus the abandoned-request count, as a drop guard: the
+/// code after the `next.run` await never executes when the request future is
+/// cancelled (client disconnect), so a manual gauge decrement would drift
+/// upward forever — and the request would otherwise vanish from
+/// `http_server_requests` entirely, now that the counter moves at completion
+/// to carry the route (#1304). An abandoned request was real load: it counts,
+/// with its route, and records no outcome and no duration — the same contract
+/// yodel documents on `HttpServerMetrics.recordRequestAbandoned`.
+struct RequestGuard {
+    instruments: Arc<HttpInstruments>,
+    gauge_attrs: [KeyValue; 2],
+    route_attrs: [KeyValue; 3],
+    completed: bool,
+}
+
+impl RequestGuard {
+    fn start(
+        instruments: Arc<HttpInstruments>,
+        gauge_attrs: [KeyValue; 2],
+        route_attrs: [KeyValue; 3],
+    ) -> Self {
+        instruments.active.add(1, &gauge_attrs);
+        Self {
+            instruments,
+            gauge_attrs,
+            route_attrs,
+            completed: false,
+        }
+    }
+
+    /// Ends the in-flight window and hands the route attributes back to the
+    /// completion path, which records the counters itself. Consumes the guard
+    /// so the abandonment arm below cannot also fire.
+    fn complete(mut self) -> [KeyValue; 3] {
+        self.completed = true;
+        let route_attrs = self.route_attrs.clone();
+        drop(self);
+        route_attrs
     }
 }
 
-// Instrument names mirror the C++ aura/futility http_server_* family
-// (requests, success/failure, active gauge, microseconds histogram), so
-// prom_proxy's standard service block reads every language the same way.
-async fn http_metrics_middleware(req: Request, next: Next) -> Response {
+impl Drop for RequestGuard {
+    fn drop(&mut self) {
+        self.instruments.active.add(-1, &self.gauge_attrs);
+        if !self.completed {
+            self.instruments.requests.add(1, &self.route_attrs);
+        }
+    }
+}
+
+// The counters and the histogram move at completion, where the status is
+// known and the route can ride along; only the in-flight gauge moves at
+// request start, keyed by method and service alone — the same recording
+// contract yodel documents on HttpServerMetrics (#1303, #1304). The
+// `requests` counter therefore counts completed-or-abandoned requests rather
+// than started ones: the same totals, observed a request-duration later.
+async fn http_metrics_middleware(
+    State(instruments): State<Arc<HttpInstruments>>,
+    req: Request,
+    next: Next,
+) -> Response {
     let start = std::time::Instant::now();
     let method = req.method().as_str().to_string();
-    let service_name = env::var("OTEL_SERVICE_NAME").unwrap_or_default();
-    let attrs = [
+    // Router::layer middleware runs after routing, so the matched route
+    // template ("/widgets/{id}", never the raw path) is already in the
+    // request extensions here. The fallback leaves it absent, and mapping
+    // that to a fixed sentinel is what keeps the label bounded: a scanner's
+    // paths all collapse into one series instead of minting one each.
+    let route = req
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|p| p.as_str().to_string())
+        .unwrap_or_else(|| UNMATCHED_ROUTE.to_string());
+
+    let gauge_attrs = [
+        KeyValue::new("http_method", method.clone()),
+        KeyValue::new("service_name", instruments.service_name.clone()),
+    ];
+    let route_attrs = [
         KeyValue::new("http_method", method),
-        KeyValue::new("service_name", service_name),
+        KeyValue::new("route", route),
+        KeyValue::new("service_name", instruments.service_name.clone()),
     ];
 
-    http_counter(
-        &HTTP_REQUESTS,
-        "http_server_requests",
-        "HTTP requests received",
-    )
-    .add(1, &attrs);
-    let _active = ActiveRequest::start(attrs.clone());
+    let guard = RequestGuard::start(instruments.clone(), gauge_attrs, route_attrs);
 
     let resp = next.run(req).await;
 
+    let route_attrs = guard.complete();
     let duration_us = start.elapsed().as_micros() as f64;
     let status = resp.status().as_u16();
 
+    instruments.requests.add(1, &route_attrs);
     if status < 400 {
-        // The range is spelled with an ASCII hyphen, matching yodel and
-        // futility. An en-dash reads identically here and exports as a
-        // different string, which is the conflict otel_contract now pins.
-        http_counter(
-            &HTTP_SUCCESS,
-            "http_server_requests_success",
-            "HTTP requests completed successfully (2xx-3xx)",
-        )
-        .add(1, &attrs);
+        instruments.success.add(1, &route_attrs);
     } else {
-        http_counter(
-            &HTTP_FAILURE,
-            "http_server_requests_failure",
-            "HTTP requests that returned 4xx or 5xx",
-        )
-        .add(1, &attrs);
+        instruments.failure.add(1, &route_attrs);
     }
-
-    HTTP_DURATION
-        .get_or_init(|| {
-            opentelemetry::global::meter("http_server")
-                .f64_histogram("http_server_request_duration_microseconds")
-                .with_description("HTTP request duration in microseconds")
-                .build()
-        })
-        .record(duration_us, &attrs);
+    instruments.duration.record(duration_us, &route_attrs);
 
     resp
 }
@@ -309,7 +383,16 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
         self
     }
 
+    /// Composes the router with the production middleware stack. Resolves the
+    /// http_server_* instruments from the global meter provider *now*, so
+    /// call `init_otel` before `build` (every service main does) — a router
+    /// built first binds its instruments to the no-op default and serves
+    /// fine while exporting nothing.
     pub fn build(self) -> Router<S> {
+        self.build_with(HttpInstruments::from_global())
+    }
+
+    fn build_with(self, instruments: Arc<HttpInstruments>) -> Router<S> {
         let router = self
             .router
             .route("/health", get(|_: State<S>| async { "Ok" }))
@@ -340,7 +423,10 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
 
         // HTTP metrics middleware sits outside rate-limiting so rate-limited
         // requests (429) are also counted as failures.
-        router.layer(axum::middleware::from_fn(http_metrics_middleware))
+        router.layer(axum::middleware::from_fn_with_state(
+            instruments,
+            http_metrics_middleware,
+        ))
     }
 }
 
@@ -468,5 +554,323 @@ mod latency_bucket_tests {
             bounds.iter().any(|b| *b >= 1_000_000.0),
             "a one-second request must land in a finite bucket"
         );
+    }
+}
+
+// The #1304 guard shape, through the real middleware and a real SDK pipeline:
+// requests routed through `build_with` record into a per-test provider, so
+// these tests read exported data points — names, label sets, values, bucket
+// layouts, units — rather than trusting the recording code to mean what it
+// says. Nothing here touches the global meter provider, so the suite stays
+// parallel-safe.
+#[cfg(test)]
+mod http_metrics_label_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request as TestRequest;
+    use axum::routing::get;
+    use opentelemetry::metrics::MeterProvider as _;
+    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics};
+    use tower::util::ServiceExt;
+
+    #[derive(Clone)]
+    struct NoState;
+
+    const TEST_SERVICE: &str = "pal-under-test";
+
+    struct Rig {
+        provider: SdkMeterProvider,
+        exporter: InMemoryMetricExporter,
+        router: Router<()>,
+    }
+
+    /// A router over an isolated provider, with one templated route so the
+    /// matched-template-vs-raw-path distinction is observable, and one
+    /// hanging route so a test can abandon a request mid-flight.
+    fn rig() -> Rig {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = SdkMeterProvider::builder()
+            .with_reader(PeriodicReader::builder(exporter.clone()).build())
+            .with_view(latency_bucket_view)
+            .build();
+        let instruments =
+            HttpInstruments::new(&provider.meter("http_server"), TEST_SERVICE.to_string());
+        let router = router_builder::<NoState>()
+            .rate_limit(None)
+            .route("/widgets/{id}", get(|_: State<NoState>| async { "w" }))
+            .route(
+                "/hang",
+                get(|_: State<NoState>| async { std::future::pending::<String>().await }),
+            )
+            .build_with(instruments)
+            .with_state(NoState);
+        Rig {
+            provider,
+            exporter,
+            router,
+        }
+    }
+
+    fn request(method: &str, path: &str) -> TestRequest<Body> {
+        TestRequest::builder()
+            .method(method)
+            .uri(path)
+            .header("Accept", "application/json")
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    async fn send(rig: &Rig, method: &str, path: &str) -> StatusCode {
+        rig.router
+            .clone()
+            .oneshot(request(method, path))
+            .await
+            .unwrap()
+            .status()
+    }
+
+    /// The last (cumulative) export after a flush.
+    fn exported(rig: &Rig) -> ResourceMetrics {
+        rig.provider.force_flush().expect("force_flush failed");
+        rig.exporter
+            .get_finished_metrics()
+            .expect("get_finished_metrics failed")
+            .pop()
+            .expect("nothing was exported")
+    }
+
+    fn sorted_attrs<'a>(attrs: impl Iterator<Item = &'a KeyValue>) -> Vec<(String, String)> {
+        let mut out: Vec<_> = attrs
+            .map(|kv| (kv.key.to_string(), kv.value.as_str().to_string()))
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// (sorted attribute set, value) per data point of the named u64 sum;
+    /// empty when the instrument never recorded (the SDK exports nothing for
+    /// an instrument with no measurements).
+    fn u64_sum_points(rm: &ResourceMetrics, name: &str) -> Vec<(Vec<(String, String)>, u64)> {
+        let mut out = vec![];
+        for scope in rm.scope_metrics() {
+            for metric in scope.metrics() {
+                if metric.name() != name {
+                    continue;
+                }
+                if let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() {
+                    for dp in sum.data_points() {
+                        out.push((sorted_attrs(dp.attributes()), dp.value()));
+                    }
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    fn i64_sum_points(rm: &ResourceMetrics, name: &str) -> Vec<(Vec<(String, String)>, i64)> {
+        let mut out = vec![];
+        for scope in rm.scope_metrics() {
+            for metric in scope.metrics() {
+                if metric.name() != name {
+                    continue;
+                }
+                if let AggregatedMetrics::I64(MetricData::Sum(sum)) = metric.data() {
+                    for dp in sum.data_points() {
+                        out.push((sorted_attrs(dp.attributes()), dp.value()));
+                    }
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    fn route_attrs(method: &str, route: &str) -> Vec<(String, String)> {
+        vec![
+            ("http_method".to_string(), method.to_string()),
+            ("route".to_string(), route.to_string()),
+            ("service_name".to_string(), TEST_SERVICE.to_string()),
+        ]
+    }
+
+    fn gauge_attrs(method: &str) -> Vec<(String, String)> {
+        vec![
+            ("http_method".to_string(), method.to_string()),
+            ("service_name".to_string(), TEST_SERVICE.to_string()),
+        ]
+    }
+
+    /// The guard #1304 asks for: the request counter carries the matched
+    /// route template — not the raw path — and the in-flight gauge carries no
+    /// route at all.
+    #[tokio::test]
+    async fn the_request_counter_carries_the_matched_route_and_the_gauge_does_not() {
+        let rig = rig();
+        assert_eq!(send(&rig, "GET", "/widgets/7").await, StatusCode::OK);
+
+        let rm = exported(&rig);
+        let expected = route_attrs("GET", "/widgets/{id}");
+        assert_eq!(
+            u64_sum_points(&rm, "http_server_requests"),
+            vec![(expected.clone(), 1)],
+            "the raw path /widgets/7 must not appear; the label is the matched template"
+        );
+        assert_eq!(
+            u64_sum_points(&rm, "http_server_requests_success"),
+            vec![(expected, 1)]
+        );
+
+        // The gauge moves at request start, before routing's answer matters
+        // for anything it reports, and stays keyed by method and service
+        // alone; zero because the request has completed. A route label here
+        // would make prom_proxy's negative matcher subtract in-flight probes
+        // on some rails and not others.
+        assert_eq!(
+            i64_sum_points(&rm, "http_server_requests_active_gauge"),
+            vec![(gauge_attrs("GET"), 0)]
+        );
+    }
+
+    /// Boundedness (the #1305 shape, on this rail): scanner paths share one
+    /// sentinel series, and the health route keeps the literal that
+    /// prom_proxy's probeFilter subtracts and its Probes tiles select.
+    #[tokio::test]
+    async fn unmatched_paths_share_one_sentinel_series_and_health_keeps_its_literal() {
+        let rig = rig();
+        assert_eq!(send(&rig, "GET", "/health").await, StatusCode::OK);
+        for path in ["/wp-login.php", "/admin/config", "/widgets/7/nope"] {
+            assert_eq!(send(&rig, "GET", path).await, StatusCode::NOT_FOUND);
+        }
+
+        let rm = exported(&rig);
+        let requests = u64_sum_points(&rm, "http_server_requests");
+        assert!(
+            requests.contains(&(route_attrs("GET", "/health"), 1)),
+            "probe traffic must land under exactly route=\"/health\": {requests:?}"
+        );
+        assert!(
+            requests.contains(&(route_attrs("GET", UNMATCHED_ROUTE), 3)),
+            "unmatched requests must share the sentinel: {requests:?}"
+        );
+        assert_eq!(
+            requests.len(),
+            2,
+            "a scanner must not mint a series per path: {requests:?}"
+        );
+
+        // 404s are failures, under the same sentinel.
+        assert_eq!(
+            u64_sum_points(&rm, "http_server_requests_failure"),
+            vec![(route_attrs("GET", UNMATCHED_ROUTE), 3)]
+        );
+    }
+
+    /// A cancelled request (client gone before the response) still counts as
+    /// a request — with its route — but records no outcome and no duration,
+    /// and the gauge drains. Matches yodel's recordRequestAbandoned contract;
+    /// the counter moving at completion (#1304) is what makes this case need
+    /// its own arm in the drop guard.
+    #[tokio::test]
+    async fn an_abandoned_request_counts_with_its_route_and_records_no_outcome() {
+        let rig = rig();
+        let hung = tokio::time::timeout(
+            Duration::from_millis(50),
+            rig.router.clone().oneshot(request("GET", "/hang")),
+        )
+        .await;
+        assert!(hung.is_err(), "the hanging handler completed a response");
+
+        let rm = exported(&rig);
+        assert_eq!(
+            u64_sum_points(&rm, "http_server_requests"),
+            vec![(route_attrs("GET", "/hang"), 1)]
+        );
+        assert_eq!(u64_sum_points(&rm, "http_server_requests_success"), vec![]);
+        assert_eq!(u64_sum_points(&rm, "http_server_requests_failure"), vec![]);
+        assert_eq!(
+            i64_sum_points(&rm, "http_server_requests_active_gauge"),
+            vec![(gauge_attrs("GET"), 0)],
+            "the drop guard must still drain the gauge"
+        );
+    }
+
+    /// No shared instrument declares a unit (#1294). The collector's
+    /// Prometheus exporter folds a non-empty unit into the metric *name*
+    /// (http_server_requests_total would become
+    /// http_server_requests_microseconds_total), logging no conflict — the
+    /// series just forks, and prom_proxy selects by literal name, so the
+    /// service silently vanishes from every dashboard panel.
+    #[tokio::test]
+    async fn no_shared_instrument_declares_a_unit() {
+        let rig = rig();
+        assert_eq!(send(&rig, "GET", "/widgets/7").await, StatusCode::OK);
+        assert_eq!(send(&rig, "GET", "/nope").await, StatusCode::NOT_FOUND);
+
+        let rm = exported(&rig);
+        let mut seen = vec![];
+        for scope in rm.scope_metrics() {
+            for metric in scope.metrics() {
+                seen.push(metric.name().to_string());
+                assert_eq!(
+                    metric.unit(),
+                    "",
+                    "{} declares a unit; the collector folds it into the metric name (#1294)",
+                    metric.name()
+                );
+            }
+        }
+        for name in [
+            "http_server_requests",
+            "http_server_requests_success",
+            "http_server_requests_failure",
+            "http_server_requests_active_gauge",
+            "http_server_request_duration_microseconds",
+        ] {
+            assert!(
+                seen.contains(&name.to_string()),
+                "{name} was never exported, so nothing pinned its unit; seen: {seen:?}"
+            );
+        }
+    }
+
+    /// The exported histogram actually carries HTTP_LATENCY_BUCKET_BOUNDS_
+    /// MICROS. otel_contract pins the constant equal across the three rails,
+    /// and latency_instruments_are_selected_and_others_are_not pins the view
+    /// predicate — this closes the remaining gap, a correct constant and a
+    /// correct predicate that no provider registers (#1286's exact shape).
+    #[tokio::test]
+    async fn the_latency_view_applies_the_microsecond_bounds_to_the_exported_histogram() {
+        let rig = rig();
+        assert_eq!(send(&rig, "GET", "/widgets/7").await, StatusCode::OK);
+
+        let rm = exported(&rig);
+        let mut found = false;
+        for scope in rm.scope_metrics() {
+            for metric in scope.metrics() {
+                if metric.name() != "http_server_request_duration_microseconds" {
+                    continue;
+                }
+                let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = metric.data() else {
+                    panic!("the duration histogram exported as something other than f64");
+                };
+                for dp in histogram.data_points() {
+                    found = true;
+                    assert_eq!(
+                        dp.bounds().collect::<Vec<f64>>(),
+                        HTTP_LATENCY_BUCKET_BOUNDS_MICROS.to_vec(),
+                        "the exported layout is not the microsecond one — the view stopped \
+                         applying, which is #1286 with a correct constant"
+                    );
+                    assert_eq!(
+                        sorted_attrs(dp.attributes()),
+                        route_attrs("GET", "/widgets/{id}"),
+                        "the histogram carries the same route-labeled set as the counters"
+                    );
+                }
+            }
+        }
+        assert!(found, "no duration data point was exported");
     }
 }

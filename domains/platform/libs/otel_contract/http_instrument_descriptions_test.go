@@ -56,9 +56,9 @@ var descriptionRails = []struct {
 		name: "server_pal (Rust)",
 		path: "../server_pal/src/lib.rs",
 		patterns: []*regexp.Regexp{
-			// http_counter(&CELL, "http_server_requests", "HTTP requests received")
-			regexp.MustCompile(`"(http_server_[a-z_]*)",\s*\n\s*"([^"]*)",`),
-			// .i64_up_down_counter("...").with_description("...")
+			// Every instrument is a builder chain in HttpInstruments::new:
+			// .u64_counter("http_server_requests")
+			//     .with_description("HTTP requests received")
 			regexp.MustCompile(`\("(http_server_[a-z_]*)"\)\s*\n\s*\.with_description\("([^"]*)"\)`),
 		},
 	},

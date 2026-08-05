@@ -31,7 +31,6 @@ using futility::rate_limiter::SlidingWindowRateLimiter;
 using futility::rate_limiter::SlidingWindowRateLimiterConfig;
 
 struct StartCall {
-  std::string route;
   std::string method;
 };
 
@@ -44,9 +43,9 @@ struct CompleteCall {
 
 class RecordingSink final : public aura::HttpMetricsSink {
  public:
-  void RecordRequestStart(const std::string& route, const std::string& method) override {
+  void RecordRequestStart(const std::string& method) override {
     const std::lock_guard<std::mutex> lock(mu_);
-    starts_.push_back({route, method});
+    starts_.push_back({method});
   }
   void RecordRequestComplete(const std::string& route, const std::string& method, int status_code,
                              std::chrono::microseconds duration) override {
@@ -70,13 +69,29 @@ class RecordingSink final : public aura::HttpMetricsSink {
 };
 
 // The innermost handler: echoes 200 for anything, so every observed status
-// other than 200 was produced by the chain itself.
+// other than 200 was produced by the chain itself. Annotates its responses
+// with an operation the way the generated router does, so completions carry
+// the matched-handler route label; tests for the unrouted shapes use
+// UnroutedHandler below.
 smithy::http::RequestHandler EchoHandler() {
   return [](const smithy::http::HttpRequest& /*request*/) {
     smithy::http::HttpResponse response;
     response.status = 200;
     response.headers.Set("content-type", "text/plain");
     response.body = "echo";
+    response.operation = "Echo";
+    return response;
+  };
+}
+
+// A handler that never annotates an operation — the shape of a generated
+// router's dispatch failures (404/405/400), where no handler matched.
+smithy::http::RequestHandler UnroutedHandler(int status) {
+  return [status](const smithy::http::HttpRequest& /*request*/) {
+    smithy::http::HttpResponse response;
+    response.status = status;
+    response.headers.Set("content-type", "text/plain");
+    response.body = "no route";
     return response;
   };
 }
@@ -161,38 +176,68 @@ class AuraMiddlewareTest : public ::testing::Test {
   int next_default_peer_ = 0;
 };
 
-TEST_F(AuraMiddlewareTest, HealthServedAndObserved) {
+TEST_F(AuraMiddlewareTest, HealthServedAndObservedUnderTheProbeFilterLiteral) {
   const auto response = Send("GET", "/health");
   EXPECT_EQ(response.status, 200);
   EXPECT_EQ(response.body, R"({"status":"healthy"})");
 
-  // Health probes count in the serving instruments.
+  // Health probes count in the serving instruments, under exactly the
+  // route literal prom_proxy's probeFilter subtracts and its Probes tiles
+  // select (#1303, #1307). The endpoint is middleware, not a routed
+  // operation, so this mapping is aura's own — nothing upstream stamps it.
   const auto starts = sink_->starts();
   const auto completes = sink_->completes();
   ASSERT_EQ(starts.size(), 1u);
-  EXPECT_EQ(starts[0].route, "/health");
   EXPECT_EQ(starts[0].method, "GET");
   ASSERT_EQ(completes.size(), 1u);
+  EXPECT_EQ(completes[0].route, aura::kHealthRoute);
   EXPECT_EQ(completes[0].status, 200);
 }
 
-TEST_F(AuraMiddlewareTest, RequestObservedWithRouteMethodAndStatus) {
+TEST_F(AuraMiddlewareTest, CompletionCarriesTheMatchedOperationAsItsRoute) {
   const auto response = Send("POST", "/echo", "hello");
   ASSERT_EQ(response.status, 200) << response.body;
 
   const auto completes = sink_->completes();
   ASSERT_EQ(completes.size(), 1u);
-  EXPECT_EQ(completes[0].route, "/echo");
+  // The operation the handler annotated, not the request path: the path is
+  // client-controlled and unbounded, the operation set is fixed (#1305).
+  EXPECT_EQ(completes[0].route, "Echo");
   EXPECT_EQ(completes[0].method, "POST");
   EXPECT_EQ(completes[0].status, 200);
   EXPECT_GE(completes[0].duration.count(), 0);
 }
 
-TEST_F(AuraMiddlewareTest, QueryStringStrippedFromRouteLabel) {
+TEST_F(AuraMiddlewareTest, QueryStringDoesNotDefeatTheHealthRouteMapping) {
   Send("GET", "/health?probe=1");
-  const auto starts = sink_->starts();
-  ASSERT_EQ(starts.size(), 1u);
-  EXPECT_EQ(starts[0].route, "/health");
+  const auto completes = sink_->completes();
+  ASSERT_EQ(completes.size(), 1u);
+  EXPECT_EQ(completes[0].route, aura::kHealthRoute);
+}
+
+// The #1305 pin: distinct unrouted paths share one sentinel label. Before
+// this, every path a scanner tried became its own Prometheus series.
+TEST(AuraUnroutedTest, ScannerPathsCollapseIntoTheSentinel) {
+  auto sink = std::make_shared<RecordingSink>();
+  auto handler =
+      aura::ProductionChain(aura::ChainOptions{.metrics = sink}, UnroutedHandler(404));
+  auto loopback = std::make_shared<smithy::http::Loopback>();
+  ASSERT_TRUE(loopback->Start(handler).ok());
+
+  for (const std::string target : {"/wp-login.php", "/admin/config", "/v1/nope?x=1"}) {
+    smithy::http::HttpRequest request;
+    request.method = "GET";
+    request.target = target;
+    request.peer_address = "203.0.113.4";
+    ASSERT_TRUE(loopback->Send(request).ok());
+  }
+
+  const auto completes = sink->completes();
+  ASSERT_EQ(completes.size(), 3u);
+  for (const auto& complete : completes) {
+    EXPECT_EQ(complete.route, aura::kUnmatchedRoute);
+    EXPECT_EQ(complete.status, 404);
+  }
 }
 
 TEST_F(AuraMiddlewareTest, RateLimitsPerClientAddressWithRetryAfter) {
@@ -343,13 +388,16 @@ TEST(ConnectionEventLogTest, LogsUpgradeFailureKind) {
 }
 
 // A 431 can fire before Beast parses the method or target; the adapter maps
-// those to a stable label instead of empty strings dashboards would drop.
+// the method to a stable label instead of an empty string dashboards would
+// drop. The route is the sentinel like every unrouted request — a rejection
+// never reached the router, and a 413 flood against distinct paths must not
+// mint a series per path (#1305).
 TEST(RejectionMetricsTest, UnparsedRejectionLandsOnStableLabels) {
   auto sink = std::make_shared<RecordingSink>();
   aura::RejectionMetrics(sink)({.status = 431});
   const auto completes = sink->completes();
   ASSERT_EQ(completes.size(), 1u);
-  EXPECT_EQ(completes[0].route, "(unparsed)");
+  EXPECT_EQ(completes[0].route, aura::kUnmatchedRoute);
   EXPECT_EQ(completes[0].method, "(unparsed)");
   EXPECT_EQ(completes[0].status, 431);
 }
@@ -392,7 +440,8 @@ TEST_F(AuraMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   EXPECT_EQ(rejected->status, 413);
   const auto completes = sink_->completes();
   ASSERT_EQ(completes.size(), completes_before + 1);
-  EXPECT_EQ(completes.back().route, "/echo");
+  // Rejected before routing, so the sentinel — not the target path (#1305).
+  EXPECT_EQ(completes.back().route, aura::kUnmatchedRoute);
   EXPECT_EQ(completes.back().status, 413);
 
   transport.Stop();

@@ -22,13 +22,33 @@ class HttpMetricsManager;
 
 namespace aura {
 
+/// The health path every part of this deployment agrees on: ProductionChain
+/// serves it, the compose healthchecks probe it, and prom_proxy subtracts
+/// exactly route="/health" from every Serving number (and selects it on the
+/// Probes tiles). Requests to it are labeled with this literal rather than
+/// the sentinel below, so the subtraction keeps working (#1303, #1307).
+inline constexpr char kHealthRoute[] = "/health";
+
+/// The route label for a request the router never matched — 404s, 405s,
+/// transport rejections, rate-limited requests, scanner noise. A fixed
+/// sentinel rather than the raw path, so scanners cannot mint unbounded
+/// Prometheus series (#1305); same spelling as yodel's UNMATCHED_ROUTE and
+/// server_pal's UNMATCHED_ROUTE.
+inline constexpr char kUnmatchedRoute[] = "unmatched";
+
 /// The two calls futility::otel::HttpMetricsManager exposes, as a virtual
 /// seam so tests can observe middleware invocations. MakeHttpMetricsSink
 /// builds the production implementation.
+///
+/// Start carries no route: it runs before dispatch, where nothing bounded is
+/// known about the path, so only the in-flight gauge can move. The route —
+/// the matched Smithy operation, kHealthRoute, or kUnmatchedRoute, never the
+/// raw target — arrives at completion, which is where the counters and the
+/// histogram record (#1305).
 class HttpMetricsSink {
  public:
   virtual ~HttpMetricsSink() = default;
-  virtual void RecordRequestStart(const std::string& route, const std::string& method) = 0;
+  virtual void RecordRequestStart(const std::string& method) = 0;
   virtual void RecordRequestComplete(const std::string& route, const std::string& method,
                                      int status_code, std::chrono::microseconds duration) = 0;
 };
@@ -45,8 +65,10 @@ std::shared_ptr<HttpMetricsSink> MakeHttpMetricsSink(
 
 /// Serving observability, composed outermost so health probes and
 /// rate-limited requests are observed too:
-///   - metrics start/complete with route (path sans query string) and method
-///     labels, microsecond durations
+///   - metrics: the gauge at start (method label only); the counters and
+///     histogram at completion, labeled with the bounded route — the matched
+///     Smithy operation name from the generated router, kHealthRoute for the
+///     endpoint ProductionChain composes, kUnmatchedRoute for everything else
 ///   - one access-log line per request, with trace_id carrying the W3C
 ///     trace id parsed from the request's traceparent (minted or joined at
 ///     transport ingress, smithy-cpp ADR-0011):

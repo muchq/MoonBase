@@ -8,17 +8,23 @@ go_test(
     size = "small",
     srcs = [
         "http_instrument_descriptions_test.go",
+        "http_instrument_labels_test.go",
+        "http_instrument_units_test.go",
         "http_latency_buckets_test.go",
     ],
     # Read as text rather than linked. There is no build configuration in which
     # a Go test could link all three, and the declaration site is what has to
     # agree — the constant, not a value some running process reports.
     data = [
+        "//domains/platform/libs/aura:middleware.h",
         "//domains/platform/libs/futility/otel:http_instrument_descriptions.h",
+        "//domains/platform/libs/futility/otel:http_metrics.cc",
+        "//domains/platform/libs/futility/otel:metrics.cc",
         "//domains/platform/libs/futility/otel:otel_provider.h",
         "//domains/platform/libs/server_pal:src/lib.rs",
         "//domains/platform/libs/yodel:src/main/java/com/muchq/platform/yodel/HttpServerMetrics.java",
         "//domains/platform/libs/yodel:src/main/java/com/muchq/platform/yodel/OtlpJsonEncoder.java",
+        "//domains/platform/libs/yodel:src/main/java/com/muchq/platform/yodel/micronaut/HttpServerMetricsFilter.java",
     ],
     deps = [
         "@com_github_stretchr_testify//assert",

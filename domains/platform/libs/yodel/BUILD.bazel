@@ -6,6 +6,7 @@ load("//bazel/rules:java.bzl", "artifact", "java_library", "java_test_suite")
 exports_files([
     "src/main/java/com/muchq/platform/yodel/HttpServerMetrics.java",
     "src/main/java/com/muchq/platform/yodel/OtlpJsonEncoder.java",
+    "src/main/java/com/muchq/platform/yodel/micronaut/HttpServerMetricsFilter.java",
 ])
 
 java_library(

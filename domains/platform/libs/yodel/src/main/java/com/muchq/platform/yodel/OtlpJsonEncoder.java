@@ -269,12 +269,11 @@ final class OtlpJsonEncoder {
   }
 
   /**
-   * Route-labeled points for the counters and the histogram. The label is spelled {@code route},
-   * matching futility/otel — the method label keeps yodel's historical {@code http_method}
-   * spelling, which futility spells {@code method}. The route *vocabulary* is not aligned: futility
-   * has emitted the raw request path since #1174, where yodel emits the matched template.
-   * Literal-route queries (probeFilter's {@code route="/health"}) work on both; template-shaped
-   * values and the bounded-cardinality property are yodel-only (#1303).
+   * Route-labeled points for the counters and the histogram. The shared label set —
+   * {@code http_method}, {@code route}, {@code service_name} — is spelled identically on all three
+   * rails and pinned by the otel_contract suite (#1305). The route value is bounded everywhere:
+   * yodel and server_pal emit the matched template, futility the matched Smithy operation name,
+   * and all three share the {@code /health} literal and the {@code unmatched} sentinel.
    */
   private static void addPointAttributes(
       ObjectNode point, String serviceName, String httpMethod, String route) {

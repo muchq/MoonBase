@@ -18,5 +18,8 @@ tower_governor = { workspace = true }
 tower-http = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 tower = "0.5"
+# The in-memory exporter behind the label-set and unit tests. A feature on a
+# crate the graph already carries, so Cargo.lock does not change.
+opentelemetry_sdk = { workspace = true, features = ["testing"] }

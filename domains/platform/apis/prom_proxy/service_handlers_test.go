@@ -47,9 +47,9 @@ func TestRegistry_OrderAndEntriesAgree(t *testing.T) {
 // route, per selector — a healthcheck's steady GET /health otherwise floors
 // every request count and drags every latency figure toward its
 // sub-millisecond durations, indistinguishable from real traffic. The gauge
-// included: a negative matcher also matches series with no route label at
-// all, so the filter subtracts futility's route-labeled gauge and passes
-// yodel's route-less one through whole — safe on every selector.
+// included: no rail labels its gauge with a route (otel_contract pins that),
+// and a negative matcher also matches series without the label, so the same
+// filter is safe there too — gauges pass through whole.
 func TestRegistry_StandardServingQueriesExcludeTheProbeRoute(t *testing.T) {
 	// Per http_server_* selector, not per query: error_rate_percent names
 	// three selectors, and a Contains over the whole expression passes while
@@ -290,20 +290,19 @@ func TestMetricsHandler_GetServiceCatalog(t *testing.T) {
 	var catalog ServiceCatalog
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &catalog))
 
+	// Every service has a custom set now: at minimum the standard Probes tile
+	// that charts the /health traffic probeFilter subtracts (#1307).
 	wantCustom := []struct {
 		name      string
 		hasCustom bool
 	}{
 		{"golf_hub", true},
-		{"mcpserver", false},
+		{"mcpserver", true},
 		{"microgpt-serve", true},
-		{"mithril", false},
-		// The first Java service with a custom set (#1212): yodel grew counters and
-		// distributions, so one_d4 can report indexing and motif work rather than
-		// only the requests that asked for it.
+		{"mithril", true},
 		{"one_d4", true},
 		{"portrait", true},
-		{"posterize", false},
+		{"posterize", true},
 	}
 	require.Len(t, catalog.Services, len(wantCustom))
 	for i, want := range wantCustom {
@@ -379,41 +378,52 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Equal(t, string(DefaultView), response.View)
 
 	// Custom groups keep registry order and every descriptor is present.
-	require.Len(t, response.Custom, 3)
-	assert.Equal(t, "Sessions", response.Custom[0].Title)
-	assert.Equal(t, "Activity", response.Custom[1].Title)
-	assert.Equal(t, "Chat", response.Custom[2].Title)
-	assert.Len(t, response.Custom[0].Metrics, 7)
-	assert.Len(t, response.Custom[1].Metrics, 4)
-	require.Len(t, response.Custom[2].Metrics, 5)
+	require.Len(t, response.Custom, 4)
+	assert.Equal(t, "Probes", response.Custom[0].Title)
+	assert.Equal(t, "Sessions", response.Custom[1].Title)
+	assert.Equal(t, "Activity", response.Custom[2].Title)
+	assert.Equal(t, "Chat", response.Custom[3].Title)
+	assert.Len(t, response.Custom[0].Metrics, 1)
+	assert.Len(t, response.Custom[1].Metrics, 7)
+	assert.Len(t, response.Custom[2].Metrics, 4)
+	require.Len(t, response.Custom[3].Metrics, 5)
 
-	// A gauge: one form, so no toggle offered.
-	assert.Equal(t, CustomMetricValue{Label: "active", Value: 200.0, Unit: "sessions"},
+	assert.Equal(t, CustomMetricValue{Label: "health_checks", Value: 200.0, Toggleable: true},
 		response.Custom[0].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "commands", Value: 207.0, Toggleable: true},
+	// A gauge: one form, so no toggle offered.
+	assert.Equal(t, CustomMetricValue{Label: "active", Value: 201.0, Unit: "sessions"},
 		response.Custom[1].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "rejections", Value: 209.0, Toggleable: true},
-		response.Custom[1].Metrics[2])
-	// Chat starts at CustomScalars index 11, so its first value is 200+11.
-	assert.Equal(t, CustomMetricValue{Label: "messages", Value: 211.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "commands", Value: 208.0, Toggleable: true},
 		response.Custom[2].Metrics[0])
+	assert.Equal(t, CustomMetricValue{Label: "rejections", Value: 210.0, Toggleable: true},
+		response.Custom[2].Metrics[2])
+	// Chat starts at CustomScalars index 12, so its first value is 200+12.
+	assert.Equal(t, CustomMetricValue{Label: "messages", Value: 212.0, Toggleable: true},
+		response.Custom[3].Metrics[0])
 	// The omitted query's descriptor survives with a zero value.
-	last := response.Custom[2].Metrics[4]
+	last := response.Custom[3].Metrics[4]
 	assert.Equal(t, omitted.Label, last.Label)
 	assert.Equal(t, 0.0, last.Value)
 }
 
 func TestMetricsHandler_GetServiceMetrics_NoCustomServiceKeepsEmptyArray(t *testing.T) {
+	// Every real registry entry now carries at least the standard Probes tile
+	// (#1307), so the no-custom-tiles wire shape needs a fixture entry. The
+	// contract it pins is unchanged: a service with nothing custom answers
+	// `[]`, never null.
+	serviceRegistry["fixture_svc"] = serviceEntry{}
+	defer delete(serviceRegistry, "fixture_svc")
+
 	mockClient := &mockPrometheusClient{
 		queryResponses: map[string]*QueryResponse{
-			`sum(rate(http_server_requests_total{service_name="mithril",route!="/health"}[5m]))`: scalarResponse("2.5"),
+			`sum(rate(http_server_requests_total{service_name="fixture_svc",route!="/health"}[5m]))`: scalarResponse("2.5"),
 		},
 	}
 
 	handler := &MetricsHandler{promClient: mockClient}
 
-	req := httptest.NewRequest("GET", "/metrics/v1/service/mithril", nil)
-	req.SetPathValue("name", "mithril")
+	req := httptest.NewRequest("GET", "/metrics/v1/service/fixture_svc", nil)
+	req.SetPathValue("name", "fixture_svc")
 	w := httptest.NewRecorder()
 
 	handler.GetServiceMetrics(w, req)
@@ -445,9 +455,10 @@ func TestMetricsHandler_GetServiceMetrics_PrometheusError(t *testing.T) {
 	var response ServiceMetricsResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	assert.Equal(t, 0.0, response.Standard.RatePerSec)
-	require.Len(t, response.Custom, 2)
-	assert.Equal(t, "Render cache", response.Custom[0].Title)
-	assert.Equal(t, "Scene complexity", response.Custom[1].Title)
+	require.Len(t, response.Custom, 3)
+	assert.Equal(t, "Probes", response.Custom[0].Title)
+	assert.Equal(t, "Render cache", response.Custom[1].Title)
+	assert.Equal(t, "Scene complexity", response.Custom[2].Title)
 	for _, group := range response.Custom {
 		for _, metric := range group.Metrics {
 			assert.Equal(t, 0.0, metric.Value, metric.Label)
@@ -1032,19 +1043,28 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 // test and the carve-out above both pass with the tile deleted outright — the
 // carve-out only fires on queries that already contain the route literal. Pin
 // existence, so the subtracted traffic is charted somewhere by construction.
-func TestOneD4KeepsTheProbesTile(t *testing.T) {
-	entry := serviceRegistry["one_d4"]
-	found := false
-	for _, def := range entry.CustomScalars {
-		for _, query := range def.AllQueries() {
-			if strings.Contains(query, `route="/health"`) {
-				found = true
+//
+// Every registry service, not just one_d4: since #1307 every entry's container
+// is probed (deploy's config test pins that side), so every service's Serving
+// numbers have probe traffic subtracted, and each needs its own scoped tile
+// showing it.
+func TestEveryProbedServiceKeepsItsProbesTile(t *testing.T) {
+	for _, name := range serviceOrder {
+		entry := serviceRegistry[name]
+		found := false
+		for _, def := range entry.CustomScalars {
+			for _, query := range def.AllQueries() {
+				if strings.Contains(query, `route="/health"`) &&
+					strings.Contains(query, fmt.Sprintf("service_name=%q", name)) {
+					found = true
+				}
 			}
 		}
+		assert.True(t, found,
+			"no %s tile reads route=\"/health\" scoped to it: the traffic probeFilter subtracts "+
+				"from every Serving number is charted nowhere, and a failing probe looks exactly "+
+				"like health", name)
 	}
-	assert.True(t, found,
-		`no one_d4 tile reads route="/health": the traffic probeFilter subtracts from every`+
-			" Serving number is charted nowhere, and a failing probe looks exactly like health")
 }
 
 // --- The count/rate toggle (#1287) ------------------------------------------
@@ -1080,7 +1100,7 @@ func TestMetricsHandler_GetServiceMetrics_RateViewSelectsTheRateForm(t *testing.
 	// answers "" and "rows".
 	assert.Equal(t, "/s", byLabel["commands"].Unit)
 	assert.Equal(t, "rows/s", byLabel["delivered_rows"].Unit)
-	assert.Equal(t, 307.0, byLabel["commands"].Value)
+	assert.Equal(t, 308.0, byLabel["commands"].Value)
 
 	// The fixed-form tiles are untouched by the view: a gauge has no rate, and
 	// the windowed mean is already a ratio of two rates.

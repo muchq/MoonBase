@@ -61,7 +61,7 @@ class StubHandler final : public PortraitHandler {
 
 class RecordingSink final : public aura::HttpMetricsSink {
  public:
-  void RecordRequestStart(const std::string& /*route*/, const std::string& /*method*/) override {}
+  void RecordRequestStart(const std::string& /*method*/) override {}
   void RecordRequestComplete(const std::string& route, const std::string& /*method*/,
                              int status_code, std::chrono::microseconds /*duration*/) override {
     completes_.push_back({route, status_code});
@@ -115,7 +115,10 @@ TEST_F(PortraitProductionChainTest, ServesTraceHealthAnd429ThroughTheChain) {
     EXPECT_EQ(PostTraceAs("203.0.113.4").status, 200);
   }
   ASSERT_FALSE(sink_->completes_.empty());
-  EXPECT_EQ(sink_->completes_[0], (std::pair<std::string, int>{"/portrait/v1/trace", 200}));
+  // The route label is the operation the generated router matched, stamped
+  // through the real PortraitServer — the bounded vocabulary this rail
+  // speaks since #1305, in place of the raw request path.
+  EXPECT_EQ(sink_->completes_[0], (std::pair<std::string, int>{"Trace", 200}));
 
   // The budget is enforced per client, with Retry-After.
   const auto limited = PostTraceAs("203.0.113.4");
@@ -196,7 +199,9 @@ TEST_F(PortraitProductionChainTest, BeastTransportServesChainAndEnforcesBodyLimi
   ASSERT_TRUE(rejected.ok()) << rejected.error().message();
   EXPECT_EQ(rejected->status, 413);
   ASSERT_EQ(sink_->completes_.size(), completes_before + 1);
-  EXPECT_EQ(sink_->completes_.back(), (std::pair<std::string, int>{"/portrait/v1/trace", 413}));
+  // The transport rejected this before routing, so it lands under the
+  // sentinel: a 413 flood must not mint a series per path (#1305).
+  EXPECT_EQ(sink_->completes_.back(), (std::pair<std::string, int>{aura::kUnmatchedRoute, 413}));
 
   transport.Stop();
 }

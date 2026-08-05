@@ -14,9 +14,10 @@ import java.util.concurrent.atomic.LongAdder;
  * _failure, http_server_requests_active_gauge, http_server_request_duration_microseconds) labeled
  * by service_name, http_method, and route, so prom_proxy can separate probe traffic from serving
  * traffic (https://github.com/muchq/MoonBase/issues/1303) while its standard block reads Java
- * services with zero changes (https://github.com/muchq/MoonBase/issues/1212). The label name
- * matches futility/otel; the value deliberately does not — futility emits the raw path, which is
- * unbounded, and this class's whole-template rule below is the corrected shape.
+ * services with zero changes (https://github.com/muchq/MoonBase/issues/1212). The label set and
+ * the recording contract are shared with futility/otel and server_pal, pinned by the otel_contract
+ * suite (#1304, #1305); the route value is bounded on every rail — this class's whole-template
+ * rule was the model the others adopted.
  *
  * <p>The route is the matched template ("/games/{id}"), never the raw path, so the label stays
  * bounded. It is only knowable once routing has happened, which shapes the recording contract: the
