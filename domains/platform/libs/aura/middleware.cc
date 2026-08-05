@@ -40,8 +40,12 @@ std::string PathOf(const std::string& target) { return target.substr(0, target.f
 // not the URI pattern, which smithy doesn't expose to middleware — is the
 // bounded vocabulary this rail speaks. The health endpoint is middleware, not
 // a routed operation, so it is recognized by its path and keeps the literal
-// prom_proxy's probeFilter subtracts — any method: a POST that 405s is still
-// health-path traffic, excluded from Serving like the probes. Everything
+// prom_proxy's probeFilter subtracts — any method, on this rail: a POST that
+// 405s is still health-path traffic, excluded from Serving like the probes.
+// (yodel differs on that edge — no template is stamped on a 405, so a
+// wrong-method /health lands under its sentinel and stays in Serving; its
+// filter test pins that. Probes are GET, so the rails agree where it
+// matters.) Everything
 // else shares one sentinel: 404s, 405s, rate-limited requests, transport
 // rejections, scanner noise, and the one server-side case — a handler that
 // throws (rather than returning an error response) completes as a 500 with

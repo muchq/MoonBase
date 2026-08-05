@@ -61,9 +61,10 @@ const probeFilter = `,route!="/health"`
 // probe is healthy; zero means the probe is failing, or the service's route
 // label hasn't deployed yet. The route literal counts everything on the
 // health path — Caddy exposes /health publicly, so scanner traffic to it
-// (any method; a POST that 405s is still health-path traffic) also lands
-// here rather than in Serving, and can in principle hold this tile above
-// zero while the container's own probe is dead.
+// also lands here rather than in Serving, and can in principle hold this
+// tile above zero while the container's own probe is dead. (Wrong-method
+// health requests stay on the literal on the C++/Rust rails; yodel parks
+// them under its sentinel — its filter test pins that edge.)
 func probesTile(service string) customScalarDef {
 	return counter("Probes", "health_checks", "",
 		fmt.Sprintf(`http_server_requests_total{service_name=%q,route="/health"}`, service))

@@ -75,13 +75,14 @@ func TestPortraitHasNoHealthcheckOnTheTraceRoute(t *testing.T) {
 	}
 
 	if !strings.Contains(block, "healthcheck") {
-		return // The state this PR verified: nothing health-checks portrait.
+		return // Since #1307 portrait is probed — on /health, never the trace route.
 	}
 	for _, route := range []string{"/portrait/v1/trace", "/v1/trace"} {
 		if strings.Contains(block, route) {
-			t.Errorf("portrait's compose healthcheck probes %s. Docker restarts a container whose "+
-				"healthcheck fails, so a render too large to allocate — a 503 the client is meant "+
-				"to retry smaller — would bounce the service instead.", route)
+			t.Errorf("portrait's compose healthcheck probes %s. A render too large to allocate — "+
+				"a 503 the client is meant to retry smaller — would mark the container unhealthy, "+
+				"and unhealthy is what health-conditioned tooling acts on (an orchestrator "+
+				"restarts on it). Probe the dedicated /health endpoint instead.", route)
 		}
 	}
 }

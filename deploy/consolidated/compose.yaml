@@ -123,9 +123,10 @@ services:
     healthcheck:
       # Steady /health probe (#1307); see golf_hub's for the full rationale.
       # Deliberately the dedicated health endpoint and never the trace route:
-      # Docker restarts a failing container, and a 503 for a render too large
-      # to allocate must stay a per-request error — the deploy config test
-      # pins this.
+      # a 503 for a render too large to allocate must stay a per-request
+      # error, not evidence the container is sick — unhealthy status is what
+      # health-conditioned tooling acts on, and under an orchestrator it
+      # means restart. The deploy config test pins this.
       test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8081 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
       interval: 30s
       timeout: 5s

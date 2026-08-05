@@ -11,10 +11,12 @@ import java.util.Map;
  * all, so its container could never be probed and its metric series died with every deploy until
  * the first real MCP request arrived.
  *
- * <p>Deliberately static — no database check. The compose probe restarts a container whose
- * healthcheck fails, and mcpserver stays up (serving errors) when its backing store is unhappy;
- * restarting it would not help. The one_d4 pattern is the same: /health answers 200 and puts any
- * dependency state in the body.
+ * <p>Deliberately static — no database check. A store-gated probe would mark this container
+ * unhealthy whenever the shared Postgres blips, and unhealthy is what health-conditioned tooling
+ * acts on (compose's own service_healthy gating today; anything orchestration-shaped later, where
+ * unhealthy does mean restart) — while mcpserver itself stays up serving errors, which no restart
+ * improves. The one_d4 pattern is the same: /health answers 200 and puts any dependency state in
+ * the body.
  *
  * <p>The path must stay exactly "/health": prom_proxy subtracts {@code route="/health"} from every
  * Serving number and selects it on the Probes tile, and the compose healthcheck probes the same
