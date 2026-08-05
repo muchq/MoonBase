@@ -1,6 +1,7 @@
 package com.muchq.games.one_d4.api.dto;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -26,6 +27,11 @@ public record GameFeatureRow(
 
   public static GameFeatureRow fromStore(
       GameFeature row, Map<String, List<OccurrenceRow>> occurrences) {
+    // Copy rather than alias the DAO's mutable map and lists: rows built here can outlive the
+    // request inside FirstPageCache's snapshot, read concurrently by every request thread.
+    // LinkedHashMap keeps the store's motif ordering, unlike Map.copyOf.
+    Map<String, List<OccurrenceRow>> copied = new LinkedHashMap<>();
+    occurrences.forEach((motif, rows) -> copied.put(motif, List.copyOf(rows)));
     return new GameFeatureRow(
         row.gameUrl(),
         row.platform(),
@@ -44,6 +50,6 @@ public record GameFeatureRow(
         row.indexedAt(),
         row.numMoves(),
         row.pgn(),
-        occurrences);
+        copied);
   }
 }

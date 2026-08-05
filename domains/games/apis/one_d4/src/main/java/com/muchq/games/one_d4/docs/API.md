@@ -191,11 +191,13 @@ Search indexed games using ChessQL.
 
 The exact request the 1d4 web UI sends on first page load —
 `{"query": "num.moves >= 0", "limit": 25, "offset": 0}` with no `player` — is served from an
-in-memory snapshot that a background task refreshes every 30 seconds, so the first paint does not
-wait on a database round trip. That response may therefore be up to ~60 seconds stale. Any other
-request (different query, page, page size, or a `player`) always hits the database. If the snapshot
-is older than 60 seconds (refresher dead, database down at startup), the request falls through to
-the live query path instead of serving old data.
+in-memory snapshot that a background task refreshes every 30 seconds (measured from the previous
+refresh's completion), so the first paint does not wait on a database round trip. That response may
+therefore be up to ~60 seconds stale. Matching is on the trimmed query string, and a blank `player`
+counts as absent; any other request — different query, page, page size, or a non-blank `player` —
+always hits the database. If the snapshot is older than 60 seconds (refresher dead, database down
+at startup), the request falls through to the live query path and the live result re-warms the
+snapshot.
 
 ---
 

@@ -5,20 +5,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.muchq.games.one_d4.api.dto.QueryRequest;
 import com.muchq.games.one_d4.api.dto.QueryResponse;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 public class FirstPageCacheTest {
 
-  private MutableClock clock;
+  private MutableTicker ticker;
   private FirstPageCache cache;
 
   @BeforeEach
   public void setUp() {
-    clock = new MutableClock(Instant.parse("2026-08-01T00:00:00Z"));
-    cache = new FirstPageCache(clock);
+    ticker = new MutableTicker();
+    cache = new FirstPageCache(ticker, FirstPageCache.MAX_AGE);
   }
 
   private static QueryResponse response() {
@@ -50,7 +49,9 @@ public class FirstPageCacheTest {
         .as("different page")
         .isFalse();
     assertThat(cache.matches(new QueryRequest("num.moves >= 0", 25, 0, "hikaru")))
-        .as("player perspective changes motif filtering downstream")
+        .as(
+            "a player cannot change this query's results today, but rejecting it keeps matches()"
+                + " a pure request predicate rather than a claim about ChessQL semantics")
         .isFalse();
     assertThat(cache.matches(new QueryRequest(null, 25, 0, null))).as("null query").isFalse();
   }
@@ -71,18 +72,18 @@ public class FirstPageCacheTest {
   public void get_servesUntilMaxAgeAndNotAfter() {
     cache.put(response());
 
-    clock.advance(FirstPageCache.MAX_AGE.minusSeconds(1));
+    ticker.advance(FirstPageCache.MAX_AGE.minusSeconds(1));
     assertThat(cache.get()).as("just inside the window the snapshot is served").isPresent();
 
     // Caffeine's expireAfterWrite expires the entry once its age reaches the duration.
-    clock.advance(Duration.ofSeconds(1));
+    ticker.advance(Duration.ofSeconds(1));
     assertThat(cache.get()).as("at the boundary it is expired").isEmpty();
   }
 
   @Test
   public void put_resetsTheFreshnessWindow() {
     cache.put(response());
-    clock.advance(FirstPageCache.MAX_AGE.plusSeconds(1));
+    ticker.advance(FirstPageCache.MAX_AGE.plusSeconds(1));
     assertThat(cache.get()).isEmpty();
 
     QueryResponse fresh = response();

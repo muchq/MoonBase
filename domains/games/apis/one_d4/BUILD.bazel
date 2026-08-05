@@ -424,7 +424,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/FirstPageCacheTest.java",
         "src/test/java/com/muchq/games/one_d4/api/FirstPageWarmerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexControllerTest.java",
-        "src/test/java/com/muchq/games/one_d4/api/MutableClock.java",
+        "src/test/java/com/muchq/games/one_d4/api/MutableTicker.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryRequestValidatorTest.java",
         "src/test/java/com/muchq/games/one_d4/api/dto/DtoJsonCompatTest.java",
@@ -440,6 +440,7 @@ java_test_suite(
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("com.github.ben-manes.caffeine:caffeine"),
         artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-inject"),
         artifact("io.micronaut:micronaut-jackson-databind"),
@@ -696,8 +697,10 @@ java_test_suite(
         # boot the real client, and any request that reaches the worker opens a live TLS
         # connection to api.chess.com.
         # FirstPageWarmupTest reads FirstPageCache (:api) and its QueryResponse (:dto) out of the
-        # booted context; Bazel java deps are not transitive, so riding on :module is not enough.
+        # booted context and seeds a row through GameFeatureStore/Jdbi (:db, jdbi3-core); Bazel
+        # java deps are not transitive, so riding on :module is not enough.
         ":api",
+        ":db",
         ":dto",
         ":e2e_support",
         ":module",
@@ -712,6 +715,7 @@ java_test_suite(
         artifact("io.micronaut:micronaut-http-server-netty"),
         artifact("io.micronaut:micronaut-inject"),
         artifact("io.micronaut:micronaut-runtime"),
+        artifact("org.jdbi:jdbi3-core"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],

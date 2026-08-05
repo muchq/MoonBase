@@ -33,15 +33,19 @@ public class FirstPageWarmer {
     this.cache = cache;
   }
 
-  // fixedDelay must stay at half FirstPageCache.MAX_AGE or less, or the cache expires between
-  // refreshes and every first load falls through to the database again.
+  // fixedDelay must stay at half FirstPageCache.MAX_AGE or less (pinned by
+  // FirstPageWarmerTest), or the cache expires between refreshes and every first load falls
+  // through to the database again. fixedDelay measures from the previous run's completion, so
+  // the true period is 30s plus query time; the 2x headroom in MAX_AGE absorbs that.
   @Scheduled(fixedDelay = "30s", initialDelay = "1s")
   public void refresh() {
     try {
       cache.put(queryExecutor.execute(FirstPageCache.defaultRequest()));
     } catch (Exception e) {
-      // Swallow so the scheduler keeps ticking; a stale snapshot ages out via MAX_AGE and
-      // requests fall back to the live query path.
+      // Swallow so a failed tick doesn't cancel the schedule; a stale snapshot ages out via
+      // MAX_AGE and requests fall back to the live query path. A query that hangs (rather than
+      // throws) does block future ticks — the same fall-through bounds the damage to serving
+      // live until a restart.
       LOG.warn("Failed to refresh first-page cache", e);
     }
   }

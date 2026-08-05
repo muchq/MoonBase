@@ -2,14 +2,13 @@ package com.muchq.games.one_d4.api;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.Ticker;
 import com.muchq.games.one_d4.api.dto.QueryRequest;
 import com.muchq.games.one_d4.api.dto.QueryResponse;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import java.time.Clock;
 import java.time.Duration;
 import java.util.Optional;
-import java.util.concurrent.TimeUnit;
 
 /**
  * In-memory snapshot of the response to the query 1d4_web's GamesView fires on first page load, so
@@ -20,10 +19,13 @@ import java.util.concurrent.TimeUnit;
  * short time bound is the honest guarantee. {@link FirstPageWarmer} refreshes the snapshot on a
  * schedule; a snapshot older than two refresh intervals means the warmer is dead or the database is
  * down, and {@link #get()} then returns empty so the caller falls back to the live path instead of
- * serving arbitrarily old data.
+ * serving arbitrarily old data. A live request that falls through re-warms the snapshot on its way
+ * out.
  *
  * <p>Backed by a single-entry Caffeine cache: Caffeine owns the expiry bookkeeping; this class owns
- * what is cacheable ({@link #matches}) and the freshness policy.
+ * what is cacheable ({@link #matches}) and the freshness policy. Production uses Caffeine's
+ * monotonic system ticker — {@link Ticker}'s contract is a monotonic source, which a wall clock is
+ * not — and tests inject their own ticker to drive expiry.
  */
 @Singleton
 public class FirstPageCache {
@@ -35,6 +37,7 @@ public class FirstPageCache {
 
   /**
    * Two {@link FirstPageWarmer} refresh intervals: one missed tick tolerated, not a dead warmer.
+   * FirstPageWarmerTest pins the 2x relationship against the annotation.
    */
   static final Duration MAX_AGE = Duration.ofSeconds(60);
 
@@ -43,16 +46,12 @@ public class FirstPageCache {
   private final Cache<String, QueryResponse> cache;
 
   @Inject
-  public FirstPageCache(Clock clock) {
-    this(clock, MAX_AGE);
+  public FirstPageCache() {
+    this(Ticker.systemTicker(), MAX_AGE);
   }
 
-  FirstPageCache(Clock clock, Duration maxAge) {
-    this.cache =
-        Caffeine.newBuilder()
-            .expireAfterWrite(maxAge)
-            .ticker(() -> TimeUnit.MILLISECONDS.toNanos(clock.millis()))
-            .build();
+  FirstPageCache(Ticker ticker, Duration maxAge) {
+    this.cache = Caffeine.newBuilder().expireAfterWrite(maxAge).ticker(ticker).build();
   }
 
   /** The exact request GamesView sends on first load. */
@@ -61,9 +60,12 @@ public class FirstPageCache {
   }
 
   /**
-   * Whether this request is the first-load default. Exact match on all four fields: anything else —
-   * another page, another page size, a player perspective — is a different result set and must go
-   * to the database.
+   * Whether this request is the first-load default: the default query string after trimming, the
+   * default page size, offset 0, and no player (blank counts as absent). Anything else — another
+   * page, another page size, a non-blank player — is treated as a different result set and must go
+   * to the database. Player cannot actually change this query's results today (it has no
+   * perspective fields), but rejecting it keeps this predicate a pure function of the request
+   * rather than of ChessQL semantics.
    */
   public boolean matches(QueryRequest request) {
     return request.query() != null

@@ -95,7 +95,9 @@ describe('GamesView', () => {
     // The one_d4 API keeps this exact request warmed in memory (FirstPageCache.java) so the
     // first page load is served without a database round trip. Changing the default query,
     // page size, or offset here silently loses that fast path — update FirstPageCache to match.
-    expect(api.query).toHaveBeenCalledWith({
+    // Pinned on the FIRST call specifically: a matching request buried behind some other
+    // first fetch would still pay the cold path on first paint.
+    expect(vi.mocked(api.query).mock.calls[0][0]).toEqual({
       query: 'num.moves >= 0',
       limit: 25,
       offset: 0,

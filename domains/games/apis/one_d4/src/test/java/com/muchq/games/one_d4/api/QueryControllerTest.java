@@ -20,14 +20,14 @@ public class QueryControllerTest {
 
   private QueryController controller;
   private FakeGameFeatureStore store;
-  private MutableClock clock;
+  private MutableTicker ticker;
   private FirstPageCache cache;
 
   @BeforeEach
   public void setUp() {
     store = new FakeGameFeatureStore();
-    clock = new MutableClock(Instant.parse("2026-08-01T00:00:00Z"));
-    cache = new FirstPageCache(clock);
+    ticker = new MutableTicker();
+    cache = new FirstPageCache(ticker, FirstPageCache.MAX_AGE);
     controller =
         new QueryController(
             new QueryExecutor(store, new SqlCompiler()), new QueryRequestValidator(), cache);
@@ -173,7 +173,7 @@ public class QueryControllerTest {
     store.setOccurrencesResult(Map.of());
 
     controller.query(defaultRequest());
-    clock.advance(FirstPageCache.MAX_AGE.plusSeconds(1));
+    ticker.advance(FirstPageCache.MAX_AGE.plusSeconds(1));
     controller.query(defaultRequest());
 
     assertThat(store.queryCount()).isEqualTo(2);
@@ -184,19 +184,37 @@ public class QueryControllerTest {
 
   @Test
   public void query_nonDefaultRequests_bypassTheCacheEvenWhenWarm() {
-    store.setQueryResult(List.of());
+    String cachedUrl = "https://chess.com/game/warmed-first";
+    store.setQueryResult(List.of(createGameFeature(cachedUrl)));
     store.setOccurrencesResult(Map.of());
 
     controller.query(defaultRequest());
     assertThat(store.queryCount()).isEqualTo(1);
 
     // Same query, different page / page size / player: each is a different result set.
+    store.setQueryResult(List.of(createGameFeature("https://chess.com/game/other")));
     controller.query(new QueryRequest(FirstPageCache.DEFAULT_QUERY, 25, 25, null));
     controller.query(new QueryRequest(FirstPageCache.DEFAULT_QUERY, 50, 0, null));
     controller.query(new QueryRequest(FirstPageCache.DEFAULT_QUERY, 25, 0, "hikaru"));
     controller.query(new QueryRequest("white_elo >= 2000", 25, 0, null));
-
     assertThat(store.queryCount()).isEqualTo(5);
+
+    // The negative half: none of those bypass responses may have been written into the cache.
+    // The default request must still see the originally warmed page, served without a 6th query.
+    QueryResponse defaultAgain = controller.query(defaultRequest());
+    assertThat(store.queryCount()).isEqualTo(5);
+    assertThat(defaultAgain.games().get(0).gameUrl()).isEqualTo(cachedUrl);
+  }
+
+  @Test
+  public void query_passesTheRequestsLimitAndOffsetToTheStore() {
+    store.setQueryResult(List.of());
+    store.setOccurrencesResult(Map.of());
+
+    controller.query(new QueryRequest("white_elo >= 2000", 10, 7, null));
+
+    assertThat(store.lastLimit()).isEqualTo(10);
+    assertThat(store.lastOffset()).isEqualTo(7);
   }
 
   @Test

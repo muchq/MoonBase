@@ -21,7 +21,7 @@ public class FirstPageWarmerTest {
   @BeforeEach
   public void setUp() {
     store = new FakeGameFeatureStore();
-    cache = new FirstPageCache(new MutableClock(Instant.parse("2026-08-01T00:00:00Z")));
+    cache = new FirstPageCache(new MutableTicker(), FirstPageCache.MAX_AGE);
     warmer = new FirstPageWarmer(new QueryExecutor(store, new SqlCompiler()), cache);
   }
 
@@ -35,6 +35,34 @@ public class FirstPageWarmerTest {
     assertThat(cache.get()).isPresent();
     assertThat(cache.get().orElseThrow().games().get(0).gameUrl())
         .isEqualTo("https://chess.com/game/warm");
+  }
+
+  @Test
+  public void refresh_asksTheStoreForExactlyTheDefaultFirstPage() {
+    store.setQueryResult(List.of());
+    store.setOccurrencesResult(Map.of());
+
+    warmer.refresh();
+
+    // A warmer that warms any other page poisons the cache the controller serves as page 0.
+    assertThat(store.lastLimit()).isEqualTo(FirstPageCache.DEFAULT_LIMIT);
+    assertThat(store.lastOffset()).isEqualTo(0);
+  }
+
+  @Test
+  public void scheduledDelayStaysWithinHalfOfMaxAge() throws Exception {
+    io.micronaut.scheduling.annotation.Scheduled scheduled =
+        FirstPageWarmer.class
+            .getMethod("refresh")
+            .getAnnotation(io.micronaut.scheduling.annotation.Scheduled.class);
+
+    assertThat(scheduled).as("refresh() is no longer scheduled").isNotNull();
+    assertThat(scheduled.fixedDelay()).matches("\\d+s");
+    long delaySeconds = Long.parseLong(scheduled.fixedDelay().replace("s", ""));
+    // The comment on the annotation states this invariant; this is what enforces it. If the
+    // delay exceeds half MAX_AGE, the snapshot expires between refreshes and every first load
+    // falls through to the database again.
+    assertThat(delaySeconds * 2).isLessThanOrEqualTo(FirstPageCache.MAX_AGE.toSeconds());
   }
 
   @Test
