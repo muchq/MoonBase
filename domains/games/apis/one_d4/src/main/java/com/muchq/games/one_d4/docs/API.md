@@ -195,9 +195,9 @@ in-memory snapshot that a background task refreshes every 30 seconds (measured f
 refresh's completion), so the first paint does not wait on a database round trip. That response may
 therefore be up to ~60 seconds stale. Matching is on the trimmed query string, and a blank `player`
 counts as absent; any other request — different query, page, page size, or a non-blank `player` —
-always hits the database. If the snapshot is older than 60 seconds (refresher dead, database down
-at startup), the request falls through to the live query path and the live result re-warms the
-snapshot.
+always hits the database. If the snapshot is missing or older than 60 seconds (refresher dead,
+database down at startup), the request loads a fresh snapshot through the cache — concurrent cold
+misses share a single query — so serving the live result also re-warms the cache.
 
 ---
 

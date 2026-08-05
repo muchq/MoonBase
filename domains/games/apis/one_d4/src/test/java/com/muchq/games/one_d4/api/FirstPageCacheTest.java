@@ -127,6 +127,25 @@ public class FirstPageCacheTest {
     assertThat(store.queryCount()).isEqualTo(2);
   }
 
+  /**
+   * The reason refreshNow() is a put and not LoadingCache.refresh: refresh discards a reload whose
+   * entry changed underneath it, and expiring mid-reload counts. A tick whose query outlives the
+   * remaining freshness window must still install its (successful) result rather than silently
+   * leaving the cache cold until the next tick.
+   */
+  @Test
+  public void refreshNow_slowTickWhoseEntryExpiresMidLoadStillInstallsTheResult() {
+    cache.get();
+
+    // The next store query simulates a load so slow the warmed entry expires while it runs.
+    store.onQuery(() -> ticker.advance(FirstPageCache.MAX_AGE.plusSeconds(1)));
+    cache.refreshNow();
+
+    assertThat(cache.peek())
+        .as("a successful warm installs even when the prior entry expired mid-load")
+        .isPresent();
+  }
+
   @Test
   public void refreshNow_failureKeepsTheEarlierSnapshotAndDoesNotThrow() {
     QueryResponse warmed = cache.get();

@@ -47,6 +47,7 @@ public class FirstPageCache {
   private static final String KEY = "first-page";
 
   private final LoadingCache<String, QueryResponse> cache;
+  private final QueryExecutor queryExecutor;
 
   @Inject
   public FirstPageCache(QueryExecutor queryExecutor) {
@@ -54,14 +55,20 @@ public class FirstPageCache {
   }
 
   FirstPageCache(Ticker ticker, Duration maxAge, QueryExecutor queryExecutor) {
+    this.queryExecutor = queryExecutor;
     this.cache =
         Caffeine.newBuilder()
             .expireAfterWrite(maxAge)
             .ticker(ticker)
-            // Same-thread executor: refreshNow() computes on the warmer's scheduled thread
-            // rather than a shared pool, keeping threading observable and tests synchronous.
+            // Same-thread executor: Caffeine's maintenance work runs on the calling thread,
+            // keeping tests deterministic.
             .executor(Runnable::run)
-            .build(key -> queryExecutor.execute(defaultRequest()));
+            .build(key -> loadSnapshot());
+  }
+
+  /** The one definition of how a snapshot is computed — used by get()'s loader and refreshNow(). */
+  private QueryResponse loadSnapshot() {
+    return queryExecutor.execute(defaultRequest());
   }
 
   /** The exact request GamesView sends on first load. */
@@ -103,15 +110,18 @@ public class FirstPageCache {
    * Recomputes the snapshot even if it is still fresh — the warmer's tick. On failure the previous
    * snapshot is kept (until it expires) and the error is logged; nothing propagates, so the
    * scheduler keeps ticking.
+   *
+   * <p>Deliberately {@code put}, not {@code LoadingCache.refresh}: refresh discards a reload whose
+   * entry changed underneath it, and an entry <em>expiring</em> mid-reload counts as such a change
+   * — a tick whose query outlives the remaining freshness window would compute a snapshot, throw it
+   * away without logging, and leave the cache cold until the next tick. A successful warm must
+   * always install.
    */
   public void refreshNow() {
-    cache
-        .refresh(KEY)
-        .whenComplete(
-            (response, error) -> {
-              if (error != null) {
-                LOG.warn("Failed to refresh first-page cache", error);
-              }
-            });
+    try {
+      cache.put(KEY, loadSnapshot());
+    } catch (RuntimeException e) {
+      LOG.warn("Failed to refresh first-page cache", e);
+    }
   }
 }

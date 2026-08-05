@@ -22,6 +22,7 @@ final class FakeGameFeatureStore implements GameFeatureStore {
   private int lastLimit = -1;
   private int lastOffset = -1;
   private RuntimeException queryFailure;
+  private Runnable onQuery = () -> {};
 
   void setQueryResult(List<GameFeature> result) {
     this.queryResult = result;
@@ -33,6 +34,11 @@ final class FakeGameFeatureStore implements GameFeatureStore {
 
   void failQueriesWith(RuntimeException failure) {
     this.queryFailure = failure;
+  }
+
+  /** Runs inside query(), before it returns — lets a test simulate things happening mid-load. */
+  void onQuery(Runnable hook) {
+    this.onQuery = hook;
   }
 
   int queryCount() {
@@ -63,6 +69,7 @@ final class FakeGameFeatureStore implements GameFeatureStore {
     if (queryFailure != null) {
       throw queryFailure;
     }
+    onQuery.run();
     return queryResult;
   }
 
