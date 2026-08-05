@@ -269,11 +269,11 @@ final class OtlpJsonEncoder {
   }
 
   /**
-   * Route-labeled points for the counters and the histogram. The shared label set —
-   * {@code http_method}, {@code route}, {@code service_name} — is spelled identically on all three
-   * rails and pinned by the otel_contract suite (#1305). The route value is bounded everywhere:
-   * yodel and server_pal emit the matched template, futility the matched Smithy operation name,
-   * and all three share the {@code /health} literal and the {@code unmatched} sentinel.
+   * Route-labeled points for the counters and the histogram. The shared label set — {@code
+   * http_method}, {@code route}, {@code service_name} — is spelled identically on all three rails
+   * and pinned by the otel_contract suite (#1305). The route value is bounded everywhere: yodel and
+   * server_pal emit the matched template, futility the matched Smithy operation name, and all three
+   * share the {@code /health} literal and the {@code unmatched} sentinel.
    */
   private static void addPointAttributes(
       ObjectNode point, String serviceName, String httpMethod, String route) {

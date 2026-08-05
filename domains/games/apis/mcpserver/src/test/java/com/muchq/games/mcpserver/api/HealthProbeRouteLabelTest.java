@@ -15,11 +15,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The #1307 contract has three parties on this service: the compose healthcheck probes GET
- * /health, HealthController answers it, and the probe traffic must land under exactly {@code
- * route="/health"} so prom_proxy's probeFilter subtracts it from the Serving numbers and the
- * Probes tile can chart it. This boots the real server and reads the filter's snapshot, the same
- * shape as one_d4's HealthProbeRouteLabelTest.
+ * The #1307 contract has three parties on this service: the compose healthcheck probes GET /health,
+ * HealthController answers it, and the probe traffic must land under exactly {@code
+ * route="/health"} so prom_proxy's probeFilter subtracts it from the Serving numbers and the Probes
+ * tile can chart it. This boots the real server and reads the filter's snapshot, the same shape as
+ * one_d4's HealthProbeRouteLabelTest.
  */
 public class HealthProbeRouteLabelTest {
 

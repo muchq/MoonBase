@@ -211,6 +211,9 @@ java_test_suite(
     ],
     runtime_deps = [
         "//domains/platform/libs/logging",
+        # The embedded server's error-response path needs the JSON codec
+        # beans (JsonErrorResponseBodyProvider et al), same as the binary.
+        artifact("io.micronaut:micronaut-jackson-databind"),
     ],
     deps = [
         ":api",

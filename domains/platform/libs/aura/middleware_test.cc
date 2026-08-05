@@ -219,8 +219,7 @@ TEST_F(AuraMiddlewareTest, QueryStringDoesNotDefeatTheHealthRouteMapping) {
 // this, every path a scanner tried became its own Prometheus series.
 TEST(AuraUnroutedTest, ScannerPathsCollapseIntoTheSentinel) {
   auto sink = std::make_shared<RecordingSink>();
-  auto handler =
-      aura::ProductionChain(aura::ChainOptions{.metrics = sink}, UnroutedHandler(404));
+  auto handler = aura::ProductionChain(aura::ChainOptions{.metrics = sink}, UnroutedHandler(404));
   auto loopback = std::make_shared<smithy::http::Loopback>();
   ASSERT_TRUE(loopback->Start(handler).ok());
 

@@ -9,7 +9,7 @@ HttpMetricsManager::HttpMetricsManager(const std::string& service_name)
     : HttpMetricsManager(service_name, std::make_unique<MetricsRecorder>(service_name)) {}
 
 HttpMetricsManager::HttpMetricsManager(const std::string& service_name,
-                                      std::unique_ptr<MetricsRecorder> recorder)
+                                       std::unique_ptr<MetricsRecorder> recorder)
     : service_name_(service_name), recorder_(std::move(recorder)) {}
 
 void HttpMetricsManager::RecordRequestStart(const std::string& method) {
