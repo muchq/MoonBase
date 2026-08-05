@@ -1002,6 +1002,42 @@ public class SqlCompilerTest {
   }
 
   @Test
+  public void testCompileAggregateDedupesNewFieldSpellings() {
+    // Both spellings of one field are one term: one alias, one GROUP BY key. Without the dedup
+    // the SQL would alias the same CASE twice and Postgres would reject the duplicate.
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("white.elo >= 2500"),
+            List.of("opponent.title", "opponent_title"),
+            "hikaru");
+
+    assertThat(result.selectSql()).containsOnlyOnce("AS opponent_title");
+    assertThat(result.selectSql()).contains(" GROUP BY opponent_title ORDER BY");
+  }
+
+  @Test
+  public void testCompileAggregateTotalsRejectsRatingFieldsThroughTheSharedResolver() {
+    // Both aggregate paths resolve group-by terms through resolveGroupByTerms; this pins that the
+    // totals path shares the rejection rather than growing its own vocabulary.
+    assertThatThrownBy(
+            () ->
+                compiler.compileAggregateTotals(
+                    Parser.parse("white.elo > 1"), List.of("opponent.elo"), "hikaru"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Rating fields are not supported in groupBy");
+  }
+
+  @Test
+  public void testRatingRejectionFiresBeforeThePlayerRequirement() {
+    // Group-by resolution runs before any perspective compilation, so a rating field with no
+    // player still gets the rating message — the actionable one — not the player-required one.
+    assertThatThrownBy(
+            () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("me.elo")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Rating fields are not supported in groupBy");
+  }
+
+  @Test
   public void testCompileAggregateTotalsGroupByOpponentTitle() {
     CompiledQuery result =
         compiler.compileAggregateTotals(

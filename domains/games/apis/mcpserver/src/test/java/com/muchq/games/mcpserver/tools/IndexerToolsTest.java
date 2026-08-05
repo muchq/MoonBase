@@ -295,6 +295,49 @@ public class IndexerToolsTest {
   }
 
   /**
+   * The title CASEs pick the right side per row, end to end: someuser is untitled, so grouping by
+   * opponent.title pools both games into one null-keyed bucket — hikaru's own GM (stamped on
+   * whichever side he sat) reaches no opponent bucket — while me.title pools that GM from both
+   * colors. Also the pin that a NULL group key survives JSON serialization as an explicit null
+   * value rather than a dropped key.
+   */
+  @Test
+  public void aggregateGroupsByTitlesAcrossBothColors() {
+    givenIndexedMonth();
+
+    JsonNode opponents =
+        parse(
+            aggregateTool.execute(
+                Map.of(
+                    "query",
+                    "time.class = \"blitz\"",
+                    "player",
+                    "hikaru",
+                    "group_by",
+                    List.of("opponent.title"))));
+    assertThat(opponents.get("count").asInt()).isEqualTo(1);
+    JsonNode opponentGroup = opponents.get("groups").get(0);
+    assertThat(opponentGroup.get("group").has("opponent_title")).isTrue();
+    assertThat(opponentGroup.get("group").get("opponent_title").isNull()).isTrue();
+    assertThat(opponentGroup.get("count").asLong()).isEqualTo(2);
+
+    JsonNode mine =
+        parse(
+            aggregateTool.execute(
+                Map.of(
+                    "query",
+                    "time.class = \"blitz\"",
+                    "player",
+                    "hikaru",
+                    "group_by",
+                    List.of("me.title"))));
+    assertThat(mine.get("count").asInt()).isEqualTo(1);
+    JsonNode myGroup = mine.get("groups").get(0);
+    assertThat(myGroup.get("group").get("me_title").asText()).isEqualTo("GM");
+    assertThat(myGroup.get("count").asLong()).isEqualTo(2);
+  }
+
+  /**
    * The #1301 headline through the MCP tool: hikaru faces someuser as White in game/1 and as Black
    * in game/2, and grouping by opponent.username pools both into one bucket. No physical column can
    * produce this — white_username and black_username each hold hikaru himself on half the rows.

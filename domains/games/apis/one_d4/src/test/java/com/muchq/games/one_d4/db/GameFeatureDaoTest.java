@@ -718,6 +718,97 @@ public class GameFeatureDaoTest {
     assertThat(totals.totalGames()).isEqualTo(4);
   }
 
+  /**
+   * The mirror of the opponent.title test above: me.title pools the player's own title from
+   * whichever side they sat — four games, two colors, one IM bucket — and the opponents' titles
+   * reach no bucket. Together the two tests pin that the two CASEs pick opposite sides of the same
+   * rows.
+   */
+  @Test
+  public void aggregate_groupsByMeTitleAcrossBothColors() {
+    dao.insertBatch(
+        List.of(
+            perspectiveGame(
+                "https://chess.com/game/mt-1", "hikaru", "gmfoe", "IM", "GM", "1-0", "Caro Kann"),
+            perspectiveGame(
+                "https://chess.com/game/mt-2", "gmfoe2", "hikaru", "GM", "IM", "0-1", "Caro Kann"),
+            perspectiveGame(
+                "https://chess.com/game/mt-3", "hikaru", "fmfoe", "IM", "FM", "1-0", "Caro Kann"),
+            perspectiveGame(
+                "https://chess.com/game/mt-4",
+                "untitled_foe",
+                "hikaru",
+                null,
+                "IM",
+                "0-1",
+                "Caro Kann")));
+
+    SqlCompiler compiler = new SqlCompiler();
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(
+                Parser.parse("time.class = \"blitz\""), List.of("me.title"), "hikaru"),
+            List.of("me_title"),
+            10);
+
+    assertThat(groups).hasSize(1);
+    assertThat(groups.get(0).group()).containsEntry("me_title", "IM");
+    assertThat(groups.get(0).count()).isEqualTo(4);
+  }
+
+  /**
+   * Two perspective CASEs with different player-param counts in one grouping, executed for real:
+   * opponent.title binds one player param, outcome binds two, and the participation guard prepends
+   * two more — the bind-order contract SqlCompilerTest pins as strings, driven through the engine.
+   * Tuple assertions are order-free on purpose: every group ties at count 1, and H2 and Postgres
+   * disagree on where NULL sorts in an ASC tiebreak.
+   */
+  @Test
+  public void aggregate_groupsByOpponentTitleAndOutcomeTogether() {
+    dao.insertBatch(
+        List.of(
+            perspectiveGame(
+                "https://chess.com/game/to-1", "hikaru", "gmfoe", "IM", "GM", "1-0", "Caro Kann"),
+            perspectiveGame(
+                "https://chess.com/game/to-2", "gmfoe2", "hikaru", "GM", "IM", "1-0", "Caro Kann"),
+            perspectiveGame(
+                "https://chess.com/game/to-3",
+                "hikaru",
+                "fmfoe",
+                "IM",
+                "FM",
+                "1/2-1/2",
+                "Caro Kann"),
+            perspectiveGame(
+                "https://chess.com/game/to-4",
+                "untitled_foe",
+                "hikaru",
+                null,
+                "IM",
+                "0-1",
+                "Caro Kann")));
+
+    SqlCompiler compiler = new SqlCompiler();
+    List<String> groupBy = List.of("opponent.title", "outcome");
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(Parser.parse("time.class = \"blitz\""), groupBy, "hikaru"),
+            compiler.resolveGroupByColumns(groupBy),
+            10);
+
+    assertThat(groups).hasSize(4);
+    assertThat(
+            groups.stream()
+                .map(
+                    g ->
+                        g.group().get("opponent_title")
+                            + "/"
+                            + g.group().get("outcome")
+                            + "/"
+                            + g.count()))
+        .containsExactlyInAnyOrder("GM/win/1", "GM/loss/1", "FM/draw/1", "null/win/1");
+  }
+
   @Test
   public void aggregateTotals_zeroWhenNoGamesMatch() {
     SqlCompiler compiler = new SqlCompiler();
