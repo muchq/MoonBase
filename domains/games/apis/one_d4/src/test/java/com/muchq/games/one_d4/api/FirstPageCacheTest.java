@@ -56,6 +56,26 @@ public class FirstPageCacheTest {
     assertThat(cache.matches(new QueryRequest(null, 25, 0, null))).as("null query").isFalse();
   }
 
+  /**
+   * The cross-language gate: this fixture is also POSTed verbatim by FirstPageWarmupTest and read
+   * by 1d4_web's GamesView.test.tsx. If the Java constants drift from it, this test fails; if the
+   * frontend default drifts from it, the frontend suite fails. Neither side can silently lose the
+   * fast path by editing only its own literal.
+   */
+  @Test
+  public void sharedWireFixtureMatchesTheJavaConstants() throws Exception {
+    try (java.io.InputStream in =
+        FirstPageCacheTest.class.getResourceAsStream("/first_page_request.json")) {
+      assertThat(in).as("fixture missing from test resources").isNotNull();
+      com.fasterxml.jackson.databind.JsonNode fixture =
+          new com.fasterxml.jackson.databind.ObjectMapper().readTree(in);
+      assertThat(fixture.get("query").asText()).isEqualTo(FirstPageCache.DEFAULT_QUERY);
+      assertThat(fixture.get("limit").asInt()).isEqualTo(FirstPageCache.DEFAULT_LIMIT);
+      assertThat(fixture.get("offset").asInt()).isEqualTo(0);
+      assertThat(fixture.has("player")).as("the first-load request sends no player").isFalse();
+    }
+  }
+
   @Test
   public void get_isEmptyBeforeAnythingIsStored() {
     assertThat(cache.get()).isEmpty();

@@ -1,4 +1,6 @@
 import React from 'react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
@@ -7,6 +9,18 @@ import { MemoryRouter } from 'react-router';
 import GamesView from '../views/GamesView';
 import * as api from '../api';
 import type { GameRow } from '../types';
+
+// The first-load request contract shared with the backend: one_d4's FirstPageCacheTest pins its
+// Java constants to this same file and FirstPageWarmupTest POSTs it verbatim, so neither side can
+// drift from the warmed cache key by editing only its own literal.
+// Resolved from the package root (vitest's cwd), because import.meta.url is not a file: URL
+// under the jsdom transform.
+const FIRST_PAGE_CONTRACT = JSON.parse(
+  readFileSync(
+    resolve(process.cwd(), '../../apis/one_d4/src/test/resources/first_page_request.json'),
+    'utf-8'
+  )
+);
 
 afterEach(cleanup);
 
@@ -93,15 +107,10 @@ describe('GamesView', () => {
     await waitFor(() => screen.getByText('_prior'));
 
     // The one_d4 API keeps this exact request warmed in memory (FirstPageCache.java) so the
-    // first page load is served without a database round trip. Changing the default query,
-    // page size, or offset here silently loses that fast path — update FirstPageCache to match.
-    // Pinned on the FIRST call specifically: a matching request buried behind some other
-    // first fetch would still pay the cold path on first paint.
-    expect(vi.mocked(api.query).mock.calls[0][0]).toEqual({
-      query: 'num.moves >= 0',
-      limit: 25,
-      offset: 0,
-    });
+    // first page load is served without a database round trip. Pinned against the shared
+    // contract fixture, and on the FIRST call specifically: a matching request buried behind
+    // some other first fetch would still pay the cold path on first paint.
+    expect(vi.mocked(api.query).mock.calls[0][0]).toEqual(FIRST_PAGE_CONTRACT);
   });
 
   it('opens game detail panel when a row is clicked', async () => {

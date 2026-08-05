@@ -18,6 +18,7 @@ final class FakeGameFeatureStore implements GameFeatureStore {
   private List<GameFeature> queryResult = List.of();
   private Map<String, Map<String, List<OccurrenceRow>>> occurrencesResult = Map.of();
   private int queryCount;
+  private Object lastCompiled;
   private int lastLimit = -1;
   private int lastOffset = -1;
   private RuntimeException queryFailure;
@@ -38,6 +39,10 @@ final class FakeGameFeatureStore implements GameFeatureStore {
     return queryCount;
   }
 
+  Object lastCompiled() {
+    return lastCompiled;
+  }
+
   int lastLimit() {
     return lastLimit;
   }
@@ -47,11 +52,12 @@ final class FakeGameFeatureStore implements GameFeatureStore {
   }
 
   // Records its arguments so tests can pin what was actually asked of the store — a fake that
-  // discards them lets a caller pass the wrong limit/offset (or warm the wrong request) with
-  // every assertion still green.
+  // discards them lets a caller pass the wrong compiled query or limit/offset (or warm the
+  // wrong request) with every assertion still green.
   @Override
   public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
     queryCount++;
+    lastCompiled = compiledQuery;
     lastLimit = limit;
     lastOffset = offset;
     if (queryFailure != null) {

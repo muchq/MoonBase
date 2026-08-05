@@ -74,8 +74,16 @@ public class FirstPageWarmupTest {
     awaitWarm();
     insertOneGame("https://chess.com/game/after-warm");
 
-    HttpResponse<String> cached =
-        postQuery("{\"query\":\"num.moves >= 0\",\"limit\":25,\"offset\":0}");
+    // The shared fixture, POSTed verbatim — the same file GamesView.test.tsx pins the frontend
+    // default against, so this request is by construction the one the browser sends.
+    String firstLoadBody;
+    try (java.io.InputStream in =
+        FirstPageWarmupTest.class.getResourceAsStream("/first_page_request.json")) {
+      assertThat(in).as("fixture missing from test resources").isNotNull();
+      firstLoadBody = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    HttpResponse<String> cached = postQuery(firstLoadBody);
     assertThat(cached.statusCode()).isEqualTo(200);
     assertThat(cached.body())
         .as("the default request is answered from the pre-insert snapshot")

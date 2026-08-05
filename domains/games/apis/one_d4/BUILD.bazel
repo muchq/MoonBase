@@ -313,6 +313,17 @@ java_library(
     resources = ["src/test/resources/hikaru_corpus.pgn"],
 )
 
+# The first-load request contract shared across languages: FirstPageCacheTest pins the Java
+# constants to this file, FirstPageWarmupTest POSTs it verbatim, and 1d4_web's GamesView.test.tsx
+# reads the same file from the repo — so either side drifting from the shared wire body fails its
+# own CI job instead of silently losing the first-page cache fast path.
+java_library(
+    name = "first_page_request_fixture",
+    testonly = True,
+    resource_strip_prefix = "domains/games/apis/one_d4/src/test/resources",
+    resources = ["src/test/resources/first_page_request.json"],
+)
+
 # 500 real chess.com games replayed against chariot per ply — the wide-net regression bank for
 # the internal ReplayBoard. Kept out of engine_tests so the small suite stays fast.
 java_test_suite(
@@ -434,6 +445,7 @@ java_test_suite(
         ":db",
         ":dto",
         ":engine",
+        ":first_page_request_fixture",
         ":model",
         ":queue",
         ":service",
@@ -703,6 +715,7 @@ java_test_suite(
         ":db",
         ":dto",
         ":e2e_support",
+        ":first_page_request_fixture",
         ":module",
         # Was runtime-only (IndexerModule injects yodel's CustomMetrics, and
         # the bean that supplies it lives in :micronaut — without it a context

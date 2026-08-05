@@ -45,8 +45,16 @@ public class FirstPageWarmerTest {
     warmer.refresh();
 
     // A warmer that warms any other page poisons the cache the controller serves as page 0.
+    // The compiled query is pinned too: limit/offset alone would let a warmer run a different
+    // ChessQL query with the right pagination and stay green.
     assertThat(store.lastLimit()).isEqualTo(FirstPageCache.DEFAULT_LIMIT);
     assertThat(store.lastOffset()).isEqualTo(0);
+    assertThat(store.lastCompiled())
+        .isEqualTo(
+            new SqlCompiler()
+                .compile(
+                    com.muchq.games.chessql.parser.Parser.parse(FirstPageCache.DEFAULT_QUERY),
+                    null));
   }
 
   @Test
