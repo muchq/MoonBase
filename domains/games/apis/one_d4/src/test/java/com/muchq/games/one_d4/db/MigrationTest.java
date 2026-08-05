@@ -102,6 +102,47 @@ public class MigrationTest {
     }
   }
 
+  /**
+   * The index behind the browse ordering — the {@code ORDER BY played_at DESC, game_url ASC LIMIT
+   * n} that SqlCompiler appends to every query without an explicit ORDER BY. Column order and
+   * directions are asserted, not just existence: an index on the same columns in the wrong order or
+   * direction exists happily while the sort goes back to a full-table top-N.
+   *
+   * <p>Both sides of the contract are pinned here, in one test: what the compiler actually emits
+   * for the browse default, and the index shape that serves it. Changing either alone fails this
+   * test, instead of the index silently ceasing to satisfy the plan while a metadata-only assertion
+   * stays green.
+   */
+  @Test
+  public void run_addsThePlayedAtBrowseIndexMatchingTheCompilersOrderBy() throws Exception {
+    new Migration(dataSource, true).run();
+
+    String compiledDefault =
+        new com.muchq.games.chessql.compiler.SqlCompiler()
+            .compile(com.muchq.games.chessql.parser.Parser.parse("num.moves >= 0"), null)
+            .selectSql();
+    assertThat(compiledDefault)
+        .as("the browse default's sort — the ORDER BY this index exists to serve")
+        .endsWith("ORDER BY g.played_at DESC, g.game_url ASC");
+
+    java.util.List<String> columnsInOrder = new java.util.ArrayList<>();
+    try (Connection conn = dataSource.getConnection();
+        ResultSet indexes =
+            conn.getMetaData().getIndexInfo(null, null, "GAME_FEATURES", false, false)) {
+      while (indexes.next()) {
+        String name = indexes.getString("INDEX_NAME");
+        if (name != null && name.equalsIgnoreCase("idx_game_features_played_at")) {
+          columnsInOrder.add(
+              indexes.getString("COLUMN_NAME") + ":" + indexes.getString("ASC_OR_DESC"));
+        }
+      }
+    }
+
+    assertThat(columnsInOrder)
+        .as("idx_game_features_played_at must mirror ORDER BY played_at DESC, game_url ASC")
+        .containsExactly("PLAYED_AT:D", "GAME_URL:A");
+  }
+
   @Test
   public void run_addsTitleAndOpeningColumns() throws Exception {
     Migration migration = new Migration(dataSource, true);

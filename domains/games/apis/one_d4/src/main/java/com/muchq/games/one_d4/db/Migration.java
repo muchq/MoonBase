@@ -389,6 +389,18 @@ public class Migration {
   private static final String CREATE_IDX_GAME_FEATURES_REQUEST_ID =
       "CREATE INDEX IF NOT EXISTS idx_game_features_request_id ON game_features(request_id)";
 
+  // The browse ordering. Every /v1/query without an explicit ORDER BY — the browse default,
+  // including the first-load request FirstPageCache warms every 30s and the page-2 prefetch the
+  // cache deliberately excludes — ends in SqlCompiler's ORDER BY g.played_at DESC, g.game_url
+  // ASC LIMIT n. (An explicit ORDER BY motif_count(...) sorts on a computed count and does not
+  // ride this index.) Without an index in that exact column order and direction the plan is a
+  // full scan plus top-N sort of the whole table per page; with it, a LIMIT-sized index walk.
+  // MigrationTest pins this index against the compiled default query's ORDER BY, so the two
+  // cannot drift apart silently.
+  private static final String CREATE_IDX_GAME_FEATURES_PLAYED_AT =
+      "CREATE INDEX IF NOT EXISTS idx_game_features_played_at"
+          + " ON game_features(played_at DESC, game_url ASC)";
+
   private static final String ADD_DEDUPE_KEY_UNIQUE_H2 =
       "ALTER TABLE indexing_requests ADD CONSTRAINT IF NOT EXISTS indexing_requests_dedupe_unique"
           + " UNIQUE (dedupe_key)";
@@ -470,6 +482,7 @@ public class Migration {
       stmt.execute(BACKFILL_DEDUPE_KEY);
       stmt.execute(useH2 ? ADD_DEDUPE_KEY_UNIQUE_H2 : ADD_DEDUPE_KEY_UNIQUE_PG);
       stmt.execute(CREATE_IDX_GAME_FEATURES_REQUEST_ID);
+      stmt.execute(CREATE_IDX_GAME_FEATURES_PLAYED_AT);
 
       // Ownership leases.
       for (String add : ADD_LEASE_COLUMNS) {

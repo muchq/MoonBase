@@ -24,6 +24,7 @@ maven.install(
         "com.fasterxml.jackson.core:jackson-annotations",
         "com.fasterxml.jackson.core:jackson-core",
         "com.fasterxml.jackson.core:jackson-databind",
+        "com.github.ben-manes.caffeine:caffeine:3.2.2",
         "com.google.errorprone:error_prone_core:%s" % ERROR_PRONE_VERSION,
         "com.uber.nullaway:nullaway:%s" % NULLAWAY_VERSION,
         "com.zaxxer:HikariCP:7.1.0",

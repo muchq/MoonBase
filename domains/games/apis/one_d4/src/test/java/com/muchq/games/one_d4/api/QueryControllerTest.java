@@ -9,11 +9,7 @@ import com.muchq.games.one_d4.api.dto.GameFeatureRow;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.api.dto.QueryRequest;
 import com.muchq.games.one_d4.api.dto.QueryResponse;
-import com.muchq.games.one_d4.db.GameFeatureStore;
-import com.muchq.games.one_d4.engine.model.GameFeatures;
-import com.muchq.games.one_d4.engine.model.Motif;
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -24,11 +20,20 @@ public class QueryControllerTest {
 
   private QueryController controller;
   private FakeGameFeatureStore store;
+  private MutableTicker ticker;
+  private FirstPageCache cache;
 
   @BeforeEach
   public void setUp() {
     store = new FakeGameFeatureStore();
-    controller = new QueryController(store, new SqlCompiler(), new QueryRequestValidator());
+    ticker = new MutableTicker();
+    QueryExecutor executor = new QueryExecutor(store, new SqlCompiler());
+    cache = new FirstPageCache(ticker, FirstPageCache.MAX_AGE, executor);
+    controller = new QueryController(executor, new QueryRequestValidator(), cache);
+  }
+
+  private static QueryRequest defaultRequest() {
+    return new QueryRequest(FirstPageCache.DEFAULT_QUERY, FirstPageCache.DEFAULT_LIMIT, 0, null);
   }
 
   @Test
@@ -148,6 +153,81 @@ public class QueryControllerTest {
   }
 
   @Test
+  public void query_defaultFirstPageRequest_secondRequestIsServedFromCacheWithoutStoreQuery() {
+    String gameUrl = "https://chess.com/game/cached";
+    store.setQueryResult(List.of(createGameFeature(gameUrl)));
+    store.setOccurrencesResult(Map.of(gameUrl, Map.of()));
+
+    QueryResponse first = controller.query(defaultRequest());
+    QueryResponse second = controller.query(defaultRequest());
+
+    assertThat(store.queryCount()).isEqualTo(1);
+    assertThat(second).isEqualTo(first);
+    assertThat(second.games().get(0).gameUrl()).isEqualTo(gameUrl);
+  }
+
+  @Test
+  public void query_defaultFirstPageRequest_staleCacheFallsThroughToStoreAndRewarms() {
+    store.setQueryResult(List.of());
+    store.setOccurrencesResult(Map.of());
+
+    controller.query(defaultRequest());
+    ticker.advance(FirstPageCache.MAX_AGE.plusSeconds(1));
+    controller.query(defaultRequest());
+
+    assertThat(store.queryCount()).isEqualTo(2);
+    // The fall-through re-warmed the cache: a third request inside the window is served from it.
+    controller.query(defaultRequest());
+    assertThat(store.queryCount()).isEqualTo(2);
+  }
+
+  @Test
+  public void query_nonDefaultRequests_bypassTheCacheEvenWhenWarm() {
+    String cachedUrl = "https://chess.com/game/warmed-first";
+    store.setQueryResult(List.of(createGameFeature(cachedUrl)));
+    store.setOccurrencesResult(Map.of());
+
+    controller.query(defaultRequest());
+    assertThat(store.queryCount()).isEqualTo(1);
+
+    // Same query, different page / page size / player: each is a different result set.
+    store.setQueryResult(List.of(createGameFeature("https://chess.com/game/other")));
+    controller.query(new QueryRequest(FirstPageCache.DEFAULT_QUERY, 25, 25, null));
+    controller.query(new QueryRequest(FirstPageCache.DEFAULT_QUERY, 50, 0, null));
+    controller.query(new QueryRequest(FirstPageCache.DEFAULT_QUERY, 25, 0, "hikaru"));
+    controller.query(new QueryRequest("white_elo >= 2000", 25, 0, null));
+    assertThat(store.queryCount()).isEqualTo(5);
+
+    // The negative half: none of those bypass responses may have been written into the cache.
+    // The default request must still see the originally warmed page, served without a 6th query.
+    QueryResponse defaultAgain = controller.query(defaultRequest());
+    assertThat(store.queryCount()).isEqualTo(5);
+    assertThat(defaultAgain.games().get(0).gameUrl()).isEqualTo(cachedUrl);
+  }
+
+  @Test
+  public void query_passesTheRequestsLimitAndOffsetToTheStore() {
+    store.setQueryResult(List.of());
+    store.setOccurrencesResult(Map.of());
+
+    controller.query(new QueryRequest("white_elo >= 2000", 10, 7, null));
+
+    assertThat(store.lastLimit()).isEqualTo(10);
+    assertThat(store.lastOffset()).isEqualTo(7);
+  }
+
+  @Test
+  public void query_defaultRequestWithSurroundingWhitespace_stillHitsCache() {
+    store.setQueryResult(List.of());
+    store.setOccurrencesResult(Map.of());
+
+    controller.query(defaultRequest());
+    controller.query(new QueryRequest("  " + FirstPageCache.DEFAULT_QUERY + " ", 25, 0, null));
+
+    assertThat(store.queryCount()).isEqualTo(1);
+  }
+
+  @Test
   public void query_blankQuery_throws() {
     assertThatThrownBy(() -> controller.query(new QueryRequest("  ", 10, 0)))
         .isInstanceOf(IllegalArgumentException.class)
@@ -182,76 +262,5 @@ public class QueryControllerTest {
         30,
         Instant.now(),
         "pgn");
-  }
-
-  private static final class FakeGameFeatureStore implements GameFeatureStore {
-
-    /** Not part of the QueryController surface: only the worker flushes. */
-    @Override
-    public boolean flushOwned(
-        java.util.UUID requestId,
-        String ownerId,
-        Instant now,
-        List<GameFeature> features,
-        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
-      throw new UnsupportedOperationException("QueryController tests never flush");
-    }
-
-    private List<GameFeature> queryResult = List.of();
-    private Map<String, Map<String, List<OccurrenceRow>>> occurrencesResult = Map.of();
-
-    void setQueryResult(List<GameFeature> result) {
-      this.queryResult = result;
-    }
-
-    void setOccurrencesResult(Map<String, Map<String, List<OccurrenceRow>>> result) {
-      this.occurrencesResult = result == null ? Map.of() : result;
-    }
-
-    @Override
-    public void insertBatch(List<GameFeature> features) {}
-
-    @Override
-    public int deleteOlderThan(Instant threshold) {
-      return 0;
-    }
-
-    @Override
-    public void insertOccurrencesBatch(
-        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {}
-
-    @Override
-    public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
-      return queryResult;
-    }
-
-    @Override
-    public List<com.muchq.games.one_d4.api.dto.AggregateRow> aggregate(
-        Object compiledQuery, List<String> groupColumns, int limit) {
-      return List.of();
-    }
-
-    @Override
-    public AggregateTotals aggregateTotals(Object compiledQuery) {
-      return new AggregateTotals(0, 0);
-    }
-
-    @Override
-    public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
-      if (gameUrls.isEmpty()) return Map.of();
-      Map<String, Map<String, List<OccurrenceRow>>> out = new LinkedHashMap<>();
-      for (String url : gameUrls) {
-        out.put(url, occurrencesResult.getOrDefault(url, Map.of()));
-      }
-      return out;
-    }
-
-    @Override
-    public void deleteOccurrencesByGameUrls(List<String> gameUrls) {}
-
-    @Override
-    public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
-      return List.of();
-    }
   }
 }

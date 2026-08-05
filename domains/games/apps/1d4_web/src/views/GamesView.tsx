@@ -5,6 +5,9 @@ import type { GameRow } from '../types';
 import GameResultsTable from '../components/GameResultsTable';
 import Pagination from '../components/Pagination';
 
+// The backend keeps the first page of this exact request warmed in memory
+// (one_d4 FirstPageCache.java) so first paint skips the database. Keep these
+// two values in step with the constants there.
 const DEFAULT_PAGE_SIZE = 25;
 const DEFAULT_QUERY = 'num.moves >= 0';
 

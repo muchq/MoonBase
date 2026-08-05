@@ -167,9 +167,12 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/api/AggregateController.java",
         "src/main/java/com/muchq/games/one_d4/api/AggregateRequestValidator.java",
         "src/main/java/com/muchq/games/one_d4/api/ErrorHandler.java",
+        "src/main/java/com/muchq/games/one_d4/api/FirstPageCache.java",
+        "src/main/java/com/muchq/games/one_d4/api/FirstPageWarmer.java",
         "src/main/java/com/muchq/games/one_d4/api/HealthController.java",
         "src/main/java/com/muchq/games/one_d4/api/IndexController.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryController.java",
+        "src/main/java/com/muchq/games/one_d4/api/QueryExecutor.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryRequestValidator.java",
     ],
     visibility = ["//visibility:public"],
@@ -183,6 +186,8 @@ java_library(
         "//domains/games/libs/chessql:ast",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
+        artifact("com.github.ben-manes.caffeine:caffeine"),
+        artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-http"),
         artifact("io.micronaut:micronaut-http-server"),
         artifact("io.micronaut:micronaut-inject"),
@@ -308,6 +313,17 @@ java_library(
     resources = ["src/test/resources/hikaru_corpus.pgn"],
 )
 
+# The first-load request contract shared across languages: FirstPageCacheTest pins the Java
+# constants to this file, FirstPageWarmupTest POSTs it verbatim, and 1d4_web's GamesView.test.tsx
+# reads the same file from the repo — so either side drifting from the shared wire body fails its
+# own CI job instead of silently losing the first-page cache fast path.
+java_library(
+    name = "first_page_request_fixture",
+    testonly = True,
+    resource_strip_prefix = "domains/games/apis/one_d4/src/test/resources",
+    resources = ["src/test/resources/first_page_request.json"],
+)
+
 # 500 real chess.com games replayed against chariot per ply — the wide-net regression bank for
 # the internal ReplayBoard. Kept out of engine_tests so the small suite stays fast.
 java_test_suite(
@@ -415,7 +431,11 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/AdminControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/AggregateControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/AggregateRequestValidatorTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/FakeGameFeatureStore.java",
+        "src/test/java/com/muchq/games/one_d4/api/FirstPageCacheTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/FirstPageWarmerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexControllerTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/MutableTicker.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryRequestValidatorTest.java",
         "src/test/java/com/muchq/games/one_d4/api/dto/DtoJsonCompatTest.java",
@@ -425,12 +445,14 @@ java_test_suite(
         ":db",
         ":dto",
         ":engine",
+        ":first_page_request_fixture",
         ":model",
         ":queue",
         ":service",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("com.github.ben-manes.caffeine:caffeine"),
         artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-inject"),
         artifact("io.micronaut:micronaut-jackson-databind"),
@@ -674,6 +696,7 @@ java_test_suite(
     size = "small",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/api/ContentTypeHandlingTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/FirstPageWarmupTest.java",
         "src/test/java/com/muchq/games/one_d4/api/HealthProbeRouteLabelTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexResponseWireTest.java",
     ],
@@ -685,7 +708,14 @@ java_test_suite(
         # e2e_support supplies FakeChessClient (@Replaces ChessClient). Without it these tests
         # boot the real client, and any request that reaches the worker opens a live TLS
         # connection to api.chess.com.
+        # FirstPageWarmupTest reads FirstPageCache (:api) and its QueryResponse (:dto) out of the
+        # booted context and seeds a row through GameFeatureStore/Jdbi (:db, jdbi3-core); Bazel
+        # java deps are not transitive, so riding on :module is not enough.
+        ":api",
+        ":db",
+        ":dto",
         ":e2e_support",
+        ":first_page_request_fixture",
         ":module",
         # Was runtime-only (IndexerModule injects yodel's CustomMetrics, and
         # the bean that supplies it lives in :micronaut — without it a context
@@ -698,6 +728,7 @@ java_test_suite(
         artifact("io.micronaut:micronaut-http-server-netty"),
         artifact("io.micronaut:micronaut-inject"),
         artifact("io.micronaut:micronaut-runtime"),
+        artifact("org.jdbi:jdbi3-core"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],

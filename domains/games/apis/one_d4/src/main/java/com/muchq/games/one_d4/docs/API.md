@@ -187,6 +187,18 @@ Search indexed games using ChessQL.
 - `1/2-1/2` — Draw (stalemate, repetition, agreement, etc.)
 - `unknown` — Result could not be determined
 
+### First-page cache
+
+The exact request the 1d4 web UI sends on first page load —
+`{"query": "num.moves >= 0", "limit": 25, "offset": 0}` with no `player` — is served from an
+in-memory snapshot that a background task refreshes every 30 seconds (measured from the previous
+refresh's completion), so the first paint does not wait on a database round trip. That response may
+therefore be up to ~60 seconds stale. Matching is on the trimmed query string, and a blank `player`
+counts as absent; any other request — different query, page, page size, or a non-blank `player` —
+always hits the database. If the snapshot is missing or older than 60 seconds (refresher dead,
+database down at startup), the request loads a fresh snapshot through the cache — concurrent cold
+misses share a single query — so serving the live result also re-warms the cache.
+
 ---
 
 ## POST /v1/aggregate

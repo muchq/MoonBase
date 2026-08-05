@@ -1,23 +1,13 @@
 package com.muchq.games.one_d4.api;
 
-import com.muchq.games.chessql.compiler.CompiledQuery;
-import com.muchq.games.chessql.compiler.SqlCompiler;
-import com.muchq.games.chessql.parser.ParsedQuery;
-import com.muchq.games.chessql.parser.Parser;
-import com.muchq.games.one_d4.api.dto.GameFeature;
-import com.muchq.games.one_d4.api.dto.GameFeatureRow;
-import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.api.dto.QueryRequest;
 import com.muchq.games.one_d4.api.dto.QueryResponse;
-import com.muchq.games.one_d4.db.GameFeatureStore;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
-import java.util.List;
-import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,17 +16,15 @@ import org.slf4j.LoggerFactory;
 public class QueryController {
   private static final Logger LOG = LoggerFactory.getLogger(QueryController.class);
 
-  private final GameFeatureStore gameFeatureStore;
-  private final SqlCompiler queryCompiler;
+  private final QueryExecutor queryExecutor;
   private final QueryRequestValidator validator;
+  private final FirstPageCache firstPageCache;
 
   public QueryController(
-      GameFeatureStore gameFeatureStore,
-      SqlCompiler queryCompiler,
-      QueryRequestValidator validator) {
-    this.gameFeatureStore = gameFeatureStore;
-    this.queryCompiler = queryCompiler;
+      QueryExecutor queryExecutor, QueryRequestValidator validator, FirstPageCache firstPageCache) {
+    this.queryExecutor = queryExecutor;
     this.validator = validator;
+    this.firstPageCache = firstPageCache;
   }
 
   @POST
@@ -52,23 +40,12 @@ public class QueryController {
         request.offset(),
         request.player());
 
-    ParsedQuery parsed = Parser.parse(request.query());
-    CompiledQuery compiled = queryCompiler.compile(parsed, request.player());
-
-    List<GameFeature> rows = gameFeatureStore.query(compiled, request.limit(), request.offset());
-
-    List<String> gameUrls = rows.stream().map(GameFeature::gameUrl).toList();
-    Map<String, Map<String, List<OccurrenceRow>>> occurrences =
-        gameFeatureStore.queryOccurrences(gameUrls);
-
-    List<GameFeatureRow> dtos =
-        rows.stream()
-            .map(
-                row ->
-                    GameFeatureRow.fromStore(
-                        row, occurrences.getOrDefault(row.gameUrl(), Map.of())))
-            .toList();
-
-    return new QueryResponse(dtos, dtos.size());
+    // A default request is answered from (or, on a cold/expired miss, loads) the shared
+    // snapshot; matches() guarantees the loader computes exactly this request. Everything else
+    // runs live.
+    if (firstPageCache.matches(request)) {
+      return firstPageCache.get();
+    }
+    return queryExecutor.execute(request);
   }
 }
