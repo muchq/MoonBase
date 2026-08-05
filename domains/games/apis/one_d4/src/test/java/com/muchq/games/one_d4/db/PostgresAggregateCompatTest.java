@@ -314,6 +314,50 @@ public class PostgresAggregateCompatTest {
   }
 
   /**
+   * The other half of the dialect divergence pinned by
+   * GameFeatureDaoTest.aggregate_nullGroupKeySortsFirstInTheTiebreakOnH2: on Postgres a NULL group
+   * key sorts LAST in the ASC tiebreak. The two twins pin opposite orders on purpose — the compiler
+   * emits no NULLS FIRST/LAST normalization, and this pair is what turns that recorded divergence
+   * into something CI checks instead of something comments assert.
+   */
+  @Test
+  public void nullGroupKeySortsLastInTheTiebreakOnPostgres() {
+    dao.insertBatch(
+        List.of(
+            game(
+                "pgn-1",
+                "hikaru",
+                "fmfoe",
+                null,
+                "FM",
+                "1-0",
+                "Caro Kann",
+                Instant.parse("2026-07-02T10:00:00Z")),
+            game(
+                "pgn-2",
+                "untitled_foe",
+                "hikaru",
+                null,
+                null,
+                "1-0",
+                "Caro Kann",
+                Instant.parse("2026-07-03T10:00:00Z"))));
+
+    SqlCompiler compiler = new SqlCompiler();
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(
+                Parser.parse("time.class = \"blitz\""), List.of("opponent.title"), "hikaru"),
+            List.of("opponent_title"),
+            10);
+
+    // Both groups tie at count 1, so the order IS the ASC tiebreak — and on Postgres the NULL
+    // key trails.
+    assertThat(groups.stream().map(g -> g.group().get("opponent_title")))
+        .containsExactly("FM", null);
+  }
+
+  /**
    * The bucket arithmetic at the INT extremes on the real dialect — the H2 twin
    * (GameFeatureDaoTest.aggregate_bucketArithmeticAtIntegerExtremes) explains the fixture. This is
    * the test behind the portability claim that {@code int4 / int4 * int4} neither widens nor raises

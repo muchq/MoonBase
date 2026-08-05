@@ -935,6 +935,69 @@ public class GameFeatureDaoTest {
     assertThat(groups.get(0).count()).isEqualTo(5);
   }
 
+  /**
+   * One half of the dialect divergence the order-free sibling assertions accommodate, pinned
+   * deliberately: H2 sorts a NULL group key FIRST in the ASC tiebreak, while the Postgres twin
+   * (PostgresAggregateCompatTest.nullGroupKeySortsLastInTheTiebreakOnPostgres) pins LAST. The
+   * compiler emits no NULLS FIRST/LAST normalization on purpose; if it ever does, or if either
+   * engine changes its default, exactly one of the twins fails and the recorded divergence gets
+   * re-examined.
+   */
+  @Test
+  public void aggregate_nullGroupKeySortsFirstInTheTiebreakOnH2() {
+    dao.insertBatch(
+        List.of(
+            perspectiveGame(
+                "https://chess.com/game/nf-1", "hikaru", "fmfoe", "IM", "FM", "1-0", "Caro Kann"),
+            perspectiveGame(
+                "https://chess.com/game/nf-2",
+                "untitled_foe",
+                "hikaru",
+                null,
+                "IM",
+                "0-1",
+                "Caro Kann")));
+
+    SqlCompiler compiler = new SqlCompiler();
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(
+                Parser.parse("time.class = \"blitz\""), List.of("opponent.title"), "hikaru"),
+            List.of("opponent_title"),
+            10);
+
+    // Both groups tie at count 1, so the order IS the ASC tiebreak — and on H2 the NULL key
+    // leads.
+    assertThat(groups.stream().map(g -> g.group().get("opponent_title")))
+        .containsExactly(null, "FM");
+  }
+
+  /**
+   * opponent.username groups by the stored casing, exactly as documented: the perspective filter
+   * matches the player case-insensitively (hikaru/Hikaru is one player here), but group keys are
+   * the raw stored values, so one opponent stored under two casings forms two groups — the same
+   * trap opening_family's unnormalized values set.
+   */
+  @Test
+  public void aggregate_opponentUsernameGroupsKeepStoredCasingDistinct() {
+    dao.insertBatch(
+        List.of(
+            eloGame("https://chess.com/game/case-1", "hikaru", "Foe", 2800, 2400),
+            eloGame("https://chess.com/game/case-2", "foe", "Hikaru", 2400, 2800)));
+
+    SqlCompiler compiler = new SqlCompiler();
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(
+                Parser.parse("time.class = \"blitz\""), List.of("opponent.username"), "hikaru"),
+            compiler.resolveGroupByColumns(List.of("opponent.username")),
+            10);
+
+    assertThat(groups.stream().map(g -> g.group().get("opponent_username")))
+        .containsExactlyInAnyOrder("Foe", "foe");
+    assertThat(groups).allSatisfy(g -> assertThat(g.count()).isEqualTo(1));
+  }
+
   @Test
   public void aggregateTotals_zeroWhenNoGamesMatch() {
     SqlCompiler compiler = new SqlCompiler();

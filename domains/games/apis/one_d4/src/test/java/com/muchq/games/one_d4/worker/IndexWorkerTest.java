@@ -202,6 +202,54 @@ public class IndexWorkerTest {
     assertThat(occurrences.get(Motif.CHECK).get(0).description()).isNotBlank();
   }
 
+  /**
+   * Where NULL elos come from, pinned at the source: chess.com can omit a side's player-result
+   * record from the archive entirely, and the worker persists that side's username, elo, and title
+   * as NULL — it neither fails the game nor invents a zero rating. These are the rows the aggregate
+   * NULL bucket counts, and the reason the docs attribute NULL elos to omitted rating data rather
+   * than to schema history.
+   */
+  @Test
+  public void process_gameMissingASidesResultIndexesWithNullUsernameEloAndTitle() {
+    String gameUrl = "https://chess.com/game/absent-side";
+    PlayedGame missingBlack =
+        new PlayedGame(
+            gameUrl,
+            MINIMAL_PGN,
+            Instant.EPOCH,
+            true,
+            new Accuracies(90.0, 85.0),
+            "",
+            "uuid-absent",
+            "",
+            "",
+            "blitz",
+            "chess",
+            new PlayerResult(1500, "win", "https://chess.com/w", "White", "uuid-w"),
+            null,
+            "C20");
+    stubChessClient.setResponse(java.time.YearMonth.of(2024, 1), List.of(missingBlack));
+    RecordingGameFeatureStore store = new RecordingGameFeatureStore();
+    IndexWorker w =
+        new IndexWorker(
+            stubChessClient,
+            featureExtractor,
+            requestStore,
+            store,
+            periodStore,
+            extractionExecutor);
+
+    w.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+    assertThat(store.getInsertedFeatures()).hasSize(1);
+    GameFeature feature = store.getInsertedFeatures().get(0);
+    assertThat(feature.whiteElo()).isEqualTo(1500);
+    assertThat(feature.blackUsername()).isNull();
+    assertThat(feature.blackElo()).isNull();
+    assertThat(feature.blackTitle()).isNull();
+  }
+
   @Test
   public void process_bulletGamesNotSkippedWhenExcludeBulletFalse() {
     String gameUrl = "https://chess.com/game/bullet-keep";
