@@ -670,22 +670,7 @@ public class GameFeatureDaoTest {
    */
   @Test
   public void aggregate_groupsByOpponentTitleAcrossBothColors() {
-    dao.insertBatch(
-        List.of(
-            perspectiveGame(
-                "https://chess.com/game/opp-1", "hikaru", "gmfoe", "IM", "GM", "1-0", "Caro Kann"),
-            perspectiveGame(
-                "https://chess.com/game/opp-2", "gmfoe2", "Hikaru", "GM", "IM", "0-1", "Caro Kann"),
-            perspectiveGame(
-                "https://chess.com/game/opp-3", "hikaru", "fmfoe", "IM", "FM", "1-0", "Caro Kann"),
-            perspectiveGame(
-                "https://chess.com/game/opp-4",
-                "untitled_foe",
-                "hikaru",
-                null,
-                "IM",
-                "0-1",
-                "Caro Kann")));
+    dao.insertBatch(titledGames("opp"));
 
     SqlCompiler compiler = new SqlCompiler();
     CompiledQuery compiled =
@@ -726,22 +711,7 @@ public class GameFeatureDaoTest {
    */
   @Test
   public void aggregate_groupsByMeTitleAcrossBothColors() {
-    dao.insertBatch(
-        List.of(
-            perspectiveGame(
-                "https://chess.com/game/mt-1", "hikaru", "gmfoe", "IM", "GM", "1-0", "Caro Kann"),
-            perspectiveGame(
-                "https://chess.com/game/mt-2", "gmfoe2", "hikaru", "GM", "IM", "0-1", "Caro Kann"),
-            perspectiveGame(
-                "https://chess.com/game/mt-3", "hikaru", "fmfoe", "IM", "FM", "1-0", "Caro Kann"),
-            perspectiveGame(
-                "https://chess.com/game/mt-4",
-                "untitled_foe",
-                "hikaru",
-                null,
-                "IM",
-                "0-1",
-                "Caro Kann")));
+    dao.insertBatch(titledGames("mt"));
 
     SqlCompiler compiler = new SqlCompiler();
     List<AggregateRow> groups =
@@ -818,20 +788,15 @@ public class GameFeatureDaoTest {
    */
   @Test
   public void aggregate_groupsByOpponentEloBucketsAcrossBothColors() {
-    dao.insertBatch(
-        List.of(
-            eloGame("https://chess.com/game/eb-1", "hikaru", "a", 2800, 2450),
-            eloGame("https://chess.com/game/eb-2", "b", "Hikaru", 2499, 2800),
-            eloGame("https://chess.com/game/eb-3", "hikaru", "c", 2800, 2400),
-            eloGame("https://chess.com/game/eb-4", "hikaru", "d", 2800, 2399),
-            eloGame("https://chess.com/game/eb-5", "e", "hikaru", null, 2800)));
+    dao.insertBatch(bucketGames("eb"));
 
     SqlCompiler compiler = new SqlCompiler();
+    ParsedQuery parsed = Parser.parse("time.class = \"blitz\"");
+    List<String> groupBy = List.of("opponent.elo");
     List<AggregateRow> groups =
         dao.aggregate(
-            compiler.compileAggregate(
-                Parser.parse("time.class = \"blitz\""), List.of("opponent.elo"), "hikaru"),
-            compiler.resolveGroupByColumns(List.of("opponent.elo")),
+            compiler.compileAggregate(parsed, groupBy, "hikaru"),
+            compiler.resolveGroupByColumns(groupBy),
             10);
 
     // 2450 (as White), 2499 (as Black), and boundary 2400 pool into one bucket; hikaru's own
@@ -853,19 +818,17 @@ public class GameFeatureDaoTest {
             });
 
     GameFeatureStore.AggregateTotals totals =
-        dao.aggregateTotals(
-            compiler.compileAggregateTotals(
-                Parser.parse("time.class = \"blitz\""), List.of("opponent.elo"), "hikaru"));
+        dao.aggregateTotals(compiler.compileAggregateTotals(parsed, groupBy, "hikaru"));
     assertThat(totals.totalGroups()).isEqualTo(3);
     assertThat(totals.totalGames()).isEqualTo(5);
 
     // A caller-supplied width reshapes the bands: at 200 wide, 2400/2450/2499 stay together and
     // 2399 moves to [2200, 2400).
+    List<String> wideBy = List.of("opponent.elo(200)");
     List<AggregateRow> wide =
         dao.aggregate(
-            compiler.compileAggregate(
-                Parser.parse("time.class = \"blitz\""), List.of("opponent.elo(200)"), "hikaru"),
-            compiler.resolveGroupByColumns(List.of("opponent.elo(200)")),
+            compiler.compileAggregate(parsed, wideBy, "hikaru"),
+            compiler.resolveGroupByColumns(wideBy),
             10);
     assertThat(wide.get(0).group()).containsEntry("opponent_elo", 2400);
     assertThat(wide.get(0).count()).isEqualTo(3);
@@ -880,13 +843,7 @@ public class GameFeatureDaoTest {
    */
   @Test
   public void aggregate_groupsByMeColorAndOpponentEloBucketsTogether() {
-    dao.insertBatch(
-        List.of(
-            eloGame("https://chess.com/game/cb-1", "hikaru", "a", 2800, 2450),
-            eloGame("https://chess.com/game/cb-2", "b", "hikaru", 2499, 2800),
-            eloGame("https://chess.com/game/cb-3", "hikaru", "c", 2800, 2400),
-            eloGame("https://chess.com/game/cb-4", "hikaru", "d", 2800, 2399),
-            eloGame("https://chess.com/game/cb-5", "e", "hikaru", null, 2800)));
+    dao.insertBatch(bucketGames("cb"));
 
     SqlCompiler compiler = new SqlCompiler();
     List<String> groupBy = List.of("me.color", "opponent.elo(200)");
@@ -916,13 +873,7 @@ public class GameFeatureDaoTest {
    */
   @Test
   public void aggregate_groupsByMeEloBucketsAcrossBothColors() {
-    dao.insertBatch(
-        List.of(
-            eloGame("https://chess.com/game/mb-1", "hikaru", "a", 2800, 2450),
-            eloGame("https://chess.com/game/mb-2", "b", "hikaru", 2499, 2800),
-            eloGame("https://chess.com/game/mb-3", "hikaru", "c", 2800, 2400),
-            eloGame("https://chess.com/game/mb-4", "hikaru", "d", 2800, 2399),
-            eloGame("https://chess.com/game/mb-5", "e", "hikaru", null, 2800)));
+    dao.insertBatch(bucketGames("mb"));
 
     SqlCompiler compiler = new SqlCompiler();
     List<AggregateRow> groups =
@@ -1323,6 +1274,25 @@ public class GameFeatureDaoTest {
       String blackTitle,
       String result,
       String openingFamily) {
+    return perspectiveGame(
+        url, white, black, 1500, 1500, whiteTitle, blackTitle, result, openingFamily);
+  }
+
+  private GameFeature eloGame(
+      String url, String white, String black, Integer whiteElo, Integer blackElo) {
+    return perspectiveGame(url, white, black, whiteElo, blackElo, null, null, "1-0", "Caro Kann");
+  }
+
+  private GameFeature perspectiveGame(
+      String url,
+      String white,
+      String black,
+      Integer whiteElo,
+      Integer blackElo,
+      String whiteTitle,
+      String blackTitle,
+      String result,
+      String openingFamily) {
     return new GameFeature(
         null,
         requestId,
@@ -1330,8 +1300,8 @@ public class GameFeatureDaoTest {
         "CHESS_COM",
         white,
         black,
-        1500,
-        1500,
+        whiteElo,
+        blackElo,
         whiteTitle,
         blackTitle,
         "blitz",
@@ -1345,28 +1315,33 @@ public class GameFeatureDaoTest {
         "pgn");
   }
 
-  private GameFeature eloGame(
-      String url, String white, String black, Integer whiteElo, Integer blackElo) {
-    return new GameFeature(
-        null,
-        requestId,
-        url,
-        "CHESS_COM",
-        white,
-        black,
-        whiteElo,
-        blackElo,
-        null,
-        null,
-        "blitz",
-        "B10",
-        "Caro Kann Some Line",
-        "Caro Kann",
-        "1-0",
-        Instant.now(),
-        20,
-        Instant.now(),
-        "pgn");
+  /**
+   * The four-game titled fixture the title-grouping mirrors share: hikaru (IM) faces a GM as White
+   * and as Black — the mixed "Hikaru" casing doubling as the case-insensitive player-match pin —
+   * plus an FM and an untitled opponent.
+   */
+  private List<GameFeature> titledGames(String prefix) {
+    String base = "https://chess.com/game/" + prefix;
+    return List.of(
+        perspectiveGame(base + "-1", "hikaru", "gmfoe", "IM", "GM", "1-0", "Caro Kann"),
+        perspectiveGame(base + "-2", "gmfoe2", "Hikaru", "GM", "IM", "0-1", "Caro Kann"),
+        perspectiveGame(base + "-3", "hikaru", "fmfoe", "IM", "FM", "1-0", "Caro Kann"),
+        perspectiveGame(base + "-4", "untitled_foe", "hikaru", null, "IM", "0-1", "Caro Kann"));
+  }
+
+  /**
+   * The five-game elo fixture the bucket tests share: hikaru at 2800 from both colors (mixed
+   * "Hikaru" casing, the case-insensitive pin), opponents at 2450/2499 (one per color, pooling into
+   * [2400, 2500)), boundary values 2400 and 2399, and one NULL-elo opponent.
+   */
+  private List<GameFeature> bucketGames(String prefix) {
+    String base = "https://chess.com/game/" + prefix;
+    return List.of(
+        eloGame(base + "-1", "hikaru", "a", 2800, 2450),
+        eloGame(base + "-2", "b", "Hikaru", 2499, 2800),
+        eloGame(base + "-3", "hikaru", "c", 2800, 2400),
+        eloGame(base + "-4", "hikaru", "d", 2800, 2399),
+        eloGame(base + "-5", "e", "hikaru", null, 2800));
   }
 
   private GameFeature gameWithOpening(String url, String openingFamily, String timeClass) {

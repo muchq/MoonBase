@@ -268,8 +268,7 @@ strings:
 
 Group keys are canonical column names (e.g. `opening_family`, even when requested as
 `opening.family`; perspective group keys use their underscore forms — `me_color`, `me_title`,
-`opponent_username`, `opponent_title`, `outcome`, and for the rating buckets `me_elo` /
-`opponent_elo` with the band's numeric lower bound as the value). Groups
+`opponent_username`, `opponent_title`, `outcome`, `me_elo`, `opponent_elo`). Groups
 are ordered by count descending, then by group values ascending. `count` is the number of groups
 returned — not a game count, which is what `totalGames` reports. `totalGames` and `totalGroups`
 are computed over the untruncated result, and `truncated` is true when `limit` cut off groups —

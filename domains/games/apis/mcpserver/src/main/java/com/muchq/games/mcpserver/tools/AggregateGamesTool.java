@@ -39,12 +39,9 @@ public class AggregateGamesTool implements McpTool {
         + " zero groups rather than an error — indistinguishable from 'played no games then'"
         + " unless you index that period first with index_chess_games. With the player"
         + " parameter the filter may use perspective fields (me.*, opponent.*, outcome) — e.g."
-        + " player: hikaru with query 'me.color = \"white\" AND opponent.title = \"GM\"'."
-        + " Groupable fields: opening_family, opening_name, eco, result, time_class, white_title,"
-        + " black_title, white_username, black_username, platform — plus, when player is set, the"
-        + " perspective fields me.color, me.title, opponent.username, opponent.title, outcome,"
-        + " and the rating buckets me.elo / opponent.elo, keyed by their underscore forms in the"
-        + " output. Grouping by"
+        + " player: hikaru with query 'me.color = \"white\" AND opponent.title = \"GM\"'. With"
+        + " player set, perspective fields can also go in group_by (the group_by schema lists"
+        + " what's groupable, keyed by underscore forms in the output). Grouping by"
         + " opponent.title or opponent.username is the only correct way to break down opponents"
         + " across both colors — the color-specific columns mix your own values into the buckets"
         + " on half the rows. Untitled opponents group under a null key, and opponent.username"
@@ -52,11 +49,10 @@ public class AggregateGamesTool implements McpTool {
         + " fixed-width rating buckets, 100 points unless the term carries a width like"
         + " opponent.elo(200); each group key is the band's numeric lower bound (2400 at width"
         + " 200 means 2400-2599), and NULL elos group under a null key. Note: opening_family is"
-        + " derived from chess.com ECO-URL"
-        + " strings, not a normalized taxonomy — 'Closed Sicilian' and 'Closed Sicilian Defense'"
-        + " are distinct groups. In the output, count is how many groups were returned, not how"
-        + " many games; totalGames/totalGroups cover the untruncated result, and truncated=true"
-        + " means the group limit cut off a long tail.";
+        + " derived from chess.com ECO-URL strings, not a normalized taxonomy — 'Closed Sicilian'"
+        + " and 'Closed Sicilian Defense' are distinct groups. In the output, count is how many"
+        + " groups were returned, not how many games; totalGames/totalGroups cover the"
+        + " untruncated result, and truncated=true means the group limit cut off a long tail.";
   }
 
   @Override

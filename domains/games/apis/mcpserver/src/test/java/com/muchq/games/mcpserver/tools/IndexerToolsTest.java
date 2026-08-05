@@ -108,6 +108,16 @@ public class IndexerToolsTest {
     return JsonUtils.readAs(json, JsonNode.class);
   }
 
+  /** Runs the aggregate tool over the indexed month's blitz games, as hikaru's perspective. */
+  private JsonNode aggregateAsHikaru(String... groupBy) {
+    return parse(
+        aggregateTool.execute(
+            Map.of(
+                "query", "time.class = \"blitz\"",
+                "player", "hikaru",
+                "group_by", List.of(groupBy))));
+  }
+
   private void givenIndexedMonth() {
     chessClient.setTitle("hikaru", "GM");
     chessClient.setGames(
@@ -244,16 +254,7 @@ public class IndexerToolsTest {
     givenIndexedMonth();
 
     // hikaru wins game/1 as white and loses game/2 as black
-    JsonNode result =
-        parse(
-            aggregateTool.execute(
-                Map.of(
-                    "query",
-                    "time.class = \"blitz\"",
-                    "player",
-                    "hikaru",
-                    "group_by",
-                    List.of("me.color", "outcome"))));
+    JsonNode result = aggregateAsHikaru("me.color", "outcome");
 
     assertThat(result.get("count").asInt()).isEqualTo(2);
     // Group keys use the underscore form; tiebreak orders black before white
@@ -277,16 +278,7 @@ public class IndexerToolsTest {
                 + " player parameter on the request");
 
     // A bad bucket width surfaces as the compiler's actionable message, not a stack trace.
-    JsonNode badWidth =
-        parse(
-            aggregateTool.execute(
-                Map.of(
-                    "query",
-                    "time.class = \"blitz\"",
-                    "player",
-                    "hikaru",
-                    "group_by",
-                    List.of("me.elo(abc)"))));
+    JsonNode badWidth = aggregateAsHikaru("me.elo(abc)");
     assertThat(badWidth.get("error").asText())
         .isEqualTo(
             "Bucket width must be a positive integer: me.elo(abc). Bare me.elo / opponent.elo"
@@ -305,32 +297,14 @@ public class IndexerToolsTest {
   public void aggregateGroupsByTitlesAcrossBothColors() {
     givenIndexedMonth();
 
-    JsonNode opponents =
-        parse(
-            aggregateTool.execute(
-                Map.of(
-                    "query",
-                    "time.class = \"blitz\"",
-                    "player",
-                    "hikaru",
-                    "group_by",
-                    List.of("opponent.title"))));
+    JsonNode opponents = aggregateAsHikaru("opponent.title");
     assertThat(opponents.get("count").asInt()).isEqualTo(1);
     JsonNode opponentGroup = opponents.get("groups").get(0);
     assertThat(opponentGroup.get("group").has("opponent_title")).isTrue();
     assertThat(opponentGroup.get("group").get("opponent_title").isNull()).isTrue();
     assertThat(opponentGroup.get("count").asLong()).isEqualTo(2);
 
-    JsonNode mine =
-        parse(
-            aggregateTool.execute(
-                Map.of(
-                    "query",
-                    "time.class = \"blitz\"",
-                    "player",
-                    "hikaru",
-                    "group_by",
-                    List.of("me.title"))));
+    JsonNode mine = aggregateAsHikaru("me.title");
     assertThat(mine.get("count").asInt()).isEqualTo(1);
     JsonNode myGroup = mine.get("groups").get(0);
     assertThat(myGroup.get("group").get("me_title").asText()).isEqualTo("GM");
@@ -346,16 +320,7 @@ public class IndexerToolsTest {
   public void aggregateGroupsByOpponentUsernameAcrossBothColors() {
     givenIndexedMonth();
 
-    JsonNode result =
-        parse(
-            aggregateTool.execute(
-                Map.of(
-                    "query",
-                    "time.class = \"blitz\"",
-                    "player",
-                    "hikaru",
-                    "group_by",
-                    List.of("opponent.username"))));
+    JsonNode result = aggregateAsHikaru("opponent.username");
 
     assertThat(result.get("count").asInt()).isEqualTo(1);
     JsonNode group = result.get("groups").get(0);
@@ -376,16 +341,7 @@ public class IndexerToolsTest {
   public void aggregateGroupsByOpponentEloBucketsAcrossBothColors() {
     givenIndexedMonth();
 
-    JsonNode result =
-        parse(
-            aggregateTool.execute(
-                Map.of(
-                    "query",
-                    "time.class = \"blitz\"",
-                    "player",
-                    "hikaru",
-                    "group_by",
-                    List.of("opponent.elo"))));
+    JsonNode result = aggregateAsHikaru("opponent.elo");
 
     assertThat(result.get("count").asInt()).isEqualTo(2);
     JsonNode first = result.get("groups").get(0).get("group");
@@ -395,16 +351,7 @@ public class IndexerToolsTest {
         .isEqualTo(2800);
 
     // An explicit width reshapes the bands end to end: 1500 → [1000, 2000), 2800 → [2000, 3000).
-    JsonNode wide =
-        parse(
-            aggregateTool.execute(
-                Map.of(
-                    "query",
-                    "time.class = \"blitz\"",
-                    "player",
-                    "hikaru",
-                    "group_by",
-                    List.of("opponent.elo(1000)"))));
+    JsonNode wide = aggregateAsHikaru("opponent.elo(1000)");
     assertThat(wide.get("groups").get(0).get("group").get("opponent_elo").asInt()).isEqualTo(1000);
     assertThat(wide.get("groups").get(1).get("group").get("opponent_elo").asInt()).isEqualTo(2000);
   }

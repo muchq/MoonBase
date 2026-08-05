@@ -693,7 +693,7 @@ public class SqlCompilerTest {
         .hasMessage(
             "Only the rating fields take a bucket width in groupBy: me.color(100). Bucketed:"
                 + " me.elo, opponent.elo (e.g. opponent.elo(200)); groupable as-is, with a player:"
-                + " me.color, me.title, opponent.username, opponent.title, outcome");
+                + " me.color, me.title, opponent.title, opponent.username, outcome");
     // Two widths for one field would both alias the same group key, so the conflict is an error
     // rather than a silent first-one-wins. The bare spelling participates via its default.
     assertThatThrownBy(

@@ -14,6 +14,7 @@ import com.muchq.games.one_d4.db.GameFeatureStore;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -165,8 +166,8 @@ public class AggregateControllerTest {
     // the numeric bound under the underscore name.
     store.rows =
         List.of(
-            new AggregateRow(groupWith("opponent_elo", 2400), 9),
-            new AggregateRow(groupWith("opponent_elo", null), 2));
+            new AggregateRow(Collections.singletonMap("opponent_elo", 2400), 9),
+            new AggregateRow(Collections.singletonMap("opponent_elo", null), 2));
 
     AggregateResponse response =
         controller.aggregate(
@@ -197,8 +198,8 @@ public class AggregateControllerTest {
   public void aggregate_opponentTitleGroupByCompilesWithUnderscoreKey() {
     store.rows =
         List.of(
-            new AggregateRow(groupWith("opponent_title", "GM"), 9),
-            new AggregateRow(groupWith("opponent_title", null), 120));
+            new AggregateRow(Collections.singletonMap("opponent_title", "GM"), 9),
+            new AggregateRow(Collections.singletonMap("opponent_title", null), 120));
 
     AggregateResponse response =
         controller.aggregate(
@@ -214,13 +215,6 @@ public class AggregateControllerTest {
     assertThat(((CompiledQuery) store.lastCompiled).selectSql())
         .contains("THEN black_title ELSE white_title END) AS opponent_title")
         .contains("GROUP BY opponent_title");
-  }
-
-  /** Map.of rejects null values; group maps carry them for NULL group keys. */
-  private static Map<String, Object> groupWith(String key, Object value) {
-    Map<String, Object> map = new java.util.LinkedHashMap<>();
-    map.put(key, value);
-    return map;
   }
 
   @Test
