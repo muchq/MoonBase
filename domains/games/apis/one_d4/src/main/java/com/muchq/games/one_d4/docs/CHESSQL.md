@@ -156,11 +156,15 @@ case-insensitively, but group keys are not case-normalized, so the same opponent
 two casings forms two groups (same trap as `opening_family` variants). Without `player`,
 grouping by any perspective field is rejected.
 
-The two rating fields (`me.elo`, `opponent.elo`) remain filter-only in `groupBy`: grouping by a
-rating makes one bucket per distinct value, which buries the answer under one-game groups and
-then hits the group limit. Ask rating questions one band per call with range filters
-(`opponent.elo >= 2500`, then `opponent.elo >= 2000 AND opponent.elo < 2500`, ...); #1310
-tracks server-side bucketed rating grouping.
+The two rating fields (`me.elo`, `opponent.elo`) group as fixed-width buckets, never raw —
+grouping by a raw rating would make one bucket per distinct value, burying the answer under
+one-game groups (#1310). Bare `opponent.elo` buckets by 100 points; a parenthesized width
+overrides it: `groupBy: ["opponent.elo(200)"]`. Bands are half-open and keyed by their numeric
+lower bound — a group key of `2400` at width 200 means ratings in [2400, 2600) — under the
+underscore response key (`opponent_elo`), so bands sort numerically in the tiebreak. Rows with a
+NULL elo (indexed before the elo columns existed) form a `null` bucket, like the title fields.
+One width per field per request: `["me.elo(100)", "me.elo(200)"]` is rejected rather than
+silently picking one.
 
 Like the physical `*.title` / `*.elo` columns they resolve to, `me.title`, `opponent.title`,
 `me.elo`, and `opponent.elo` follow SQL NULL semantics: untitled players (and rows indexed before

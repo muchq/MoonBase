@@ -159,15 +159,37 @@ public class AggregateControllerTest {
   }
 
   @Test
-  public void aggregate_ratingFieldsStillRejectedInGroupBy() {
-    // Since #1301 every categorical perspective field is groupable; the rating fields remain the
-    // pinned exception, rejected before the store is touched.
+  public void aggregate_eloBucketGroupByCompilesThroughTheController() {
+    // Since #1310 the rating fields group in bucketed form: the REST groupBy string carries the
+    // width, the compiled SQL floors the CASE to the band's lower bound, and the response keys
+    // the numeric bound under the underscore name.
+    store.rows =
+        List.of(
+            new AggregateRow(groupWith("opponent_elo", 2400), 9),
+            new AggregateRow(groupWith("opponent_elo", null), 2));
+
+    AggregateResponse response =
+        controller.aggregate(
+            new AggregateRequest(
+                "time.class = \"bullet\"", List.of("opponent.elo(200)"), "count", 20, "hikaru"));
+
+    assertThat(response.groups().get(0).group()).containsEntry("opponent_elo", 2400);
+    assertThat(response.groups().get(1).group()).containsEntry("opponent_elo", null);
+    assertThat(store.lastGroupColumns).containsExactly("opponent_elo");
+    assertThat(((CompiledQuery) store.lastCompiled).selectSql())
+        .contains("END) / 200 * 200 AS opponent_elo")
+        .contains("GROUP BY opponent_elo");
+  }
+
+  @Test
+  public void aggregate_invalidBucketWidthRejectedBeforeTheStore() {
     assertThatThrownBy(
             () ->
                 controller.aggregate(
-                    new AggregateRequest("white.elo > 1", List.of("me.elo"), null, 20, "hikaru")))
+                    new AggregateRequest(
+                        "white.elo > 1", List.of("me.elo(0)"), null, 20, "hikaru")))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Rating fields are not supported in groupBy");
+        .hasMessageContaining("Bucket width must be a positive integer");
     assertThat(store.lastCompiled).isNull();
   }
 

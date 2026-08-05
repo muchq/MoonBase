@@ -662,27 +662,61 @@ public class SqlCompilerTest {
 
   @Test
   public void testGroupByPerspectiveErrorMessagesAreExact() {
-    // The rating fields are the only perspective fields that stay filter-only (#1301): grouping
-    // by one makes a bucket per distinct rating. Both spellings get this message — the underscore
-    // form must not degrade to the generic Unknown-field error, since the response keys teach
-    // callers the underscore convention — and the text names the executable alternative (one
-    // range-filtered call per band), not a technique.
-    for (String field : List.of("me.elo", "opponent.elo", "me_elo", "opponent_elo")) {
+    // Bucket-width validation (#1310): a malformed, zero, negative, overflowing, or unclosed
+    // width — and a width on a field that doesn't bucket — must each get an actionable message,
+    // not the generic Unknown-field error. Width 0 in particular would otherwise compile into a
+    // division by zero, and the unclosed "me.elo(100" must not lenient-parse into a working term.
+    for (String field :
+        List.of(
+            "me.elo(0)",
+            "opponent.elo(-100)",
+            "me.elo(abc)",
+            "me_elo()",
+            "me.elo(99999999999)",
+            "me.elo(100")) {
       assertThatThrownBy(
               () ->
                   compiler.compileAggregate(
                       Parser.parse("white.elo > 1"), List.of(field), "hikaru"))
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessage(
-              "Rating fields are not supported in groupBy: "
+              "Bucket width must be a positive integer: "
                   + field
-                  + " groups one bucket per distinct rating (#1310 tracks bucketed grouping)."
-                  + " Filter one rating band per call instead, e.g. opponent.elo >= 2500, then"
-                  + " opponent.elo >= 2000 AND opponent.elo < 2500. Groupable, with a player:"
-                  + " me.color, me.title, opponent.username, opponent.title, outcome");
+                  + ". Bare me.elo / opponent.elo bucket by 100; opponent.elo(200) groups ratings"
+                  + " into [2000, 2200), [2200, 2400), ...");
     }
-    // Groupable fields still require a player — same voice as the filter-side message
-    for (String field : List.of("me.color", "outcome", "opponent.title")) {
+    assertThatThrownBy(
+            () ->
+                compiler.compileAggregate(
+                    Parser.parse("white.elo > 1"), List.of("me.color(100)"), "hikaru"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "Only the rating fields take a bucket width in groupBy: me.color(100). Bucketed:"
+                + " me.elo, opponent.elo (e.g. opponent.elo(200)); groupable as-is, with a player:"
+                + " me.color, me.title, opponent.username, opponent.title, outcome");
+    // Two widths for one field would both alias the same group key, so the conflict is an error
+    // rather than a silent first-one-wins. The bare spelling participates via its default.
+    assertThatThrownBy(
+            () ->
+                compiler.compileAggregate(
+                    Parser.parse("white.elo > 1"), List.of("me.elo(200)", "me_elo(300)"), "hikaru"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "Conflicting bucket widths for me_elo: 200 and 300 (bare me.elo / opponent.elo means"
+                + " a width of 100)");
+    assertThatThrownBy(
+            () ->
+                compiler.compileAggregate(
+                    Parser.parse("white.elo > 1"),
+                    List.of("opponent_elo", "opponent.elo(200)"),
+                    "hikaru"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "Conflicting bucket widths for opponent_elo: 100 and 200 (bare me.elo / opponent.elo"
+                + " means a width of 100)");
+    // Groupable fields still require a player — same voice as the filter-side message. me.elo
+    // included: bucket terms resolve before the player check, but must not bypass it.
+    for (String field : List.of("me.color", "outcome", "opponent.title", "me.elo")) {
       assertThatThrownBy(
               () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of(field)))
           .isInstanceOf(IllegalArgumentException.class)
@@ -971,7 +1005,7 @@ public class SqlCompilerTest {
   @Test
   public void testCompileAggregateGroupByEveryCategoricalPerspectiveField() {
     // All five categorical fields compile, in one grouping, under either spelling; the rating
-    // fields are the pinned exception (see testGroupByPerspectiveErrorMessagesAreExact).
+    // fields group separately, in bucketed form (see the elo-bucket tests).
     CompiledQuery result =
         compiler.compileAggregate(
             Parser.parse("white.elo >= 2500"),
@@ -1002,25 +1036,93 @@ public class SqlCompilerTest {
   }
 
   @Test
-  public void testCompileAggregateTotalsRejectsRatingFieldsThroughTheSharedResolver() {
-    // Both aggregate paths resolve group-by terms through resolveGroupByTerms; this pins that the
-    // totals path shares the rejection rather than growing its own vocabulary.
-    assertThatThrownBy(
-            () ->
-                compiler.compileAggregateTotals(
-                    Parser.parse("white.elo > 1"), List.of("opponent.elo"), "hikaru"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Rating fields are not supported in groupBy");
+  public void testCompileAggregateGroupByEloBucketsDefaultWidth() {
+    // The headline #1310 grouping: bare opponent.elo buckets by 100, keyed by the band's numeric
+    // lower bound via integer arithmetic on the aliased CASE. Exact SQL because every piece is
+    // load-bearing — the / 100 * 100 must wrap the CASE (not one column), the alias must carry
+    // into GROUP BY and the tiebreak, and the SELECT player param must precede the WHERE params.
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("time.class = \"blitz\""), List.of("opponent.elo"), "hikaru");
+
+    assertThat(result.selectSql())
+        .isEqualTo(
+            "SELECT (CASE WHEN LOWER(white_username) = LOWER(?) THEN black_elo ELSE white_elo"
+                + " END) / 100 * 100 AS opponent_elo, COUNT(*) AS group_count FROM game_features g"
+                + " WHERE ((LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))"
+                + " AND LOWER(time_class) = LOWER(?))"
+                + " GROUP BY opponent_elo"
+                + " ORDER BY group_count DESC, opponent_elo ASC");
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", "blitz"));
   }
 
   @Test
-  public void testRatingRejectionFiresBeforeThePlayerRequirement() {
-    // Group-by resolution runs before any perspective compilation, so a rating field with no
-    // player still gets the rating message — the actionable one — not the player-required one.
-    assertThatThrownBy(
-            () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("me.elo")))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Rating fields are not supported in groupBy");
+  public void testCompileAggregateGroupByEloBucketsExplicitWidth() {
+    // A parenthesized width overrides the default, under either spelling of the field.
+    for (String field : List.of("me.elo(200)", "me_elo(200)")) {
+      CompiledQuery result =
+          compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of(field), "hikaru");
+      assertThat(result.selectSql())
+          .as(field)
+          .contains(
+              "(CASE WHEN LOWER(white_username) = LOWER(?) THEN white_elo ELSE black_elo END)"
+                  + " / 200 * 200 AS me_elo")
+          .contains(" GROUP BY me_elo ORDER BY");
+    }
+  }
+
+  @Test
+  public void testBareEloAndExplicitDefaultWidthCompileIdentically() {
+    // Bare me.elo is exactly me.elo(100) — same SQL, same params — so the two spellings of "the
+    // default" can never drift apart.
+    CompiledQuery bare =
+        compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("me.elo"), "hikaru");
+    CompiledQuery explicit =
+        compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("me.elo(100)"), "hikaru");
+    assertThat(bare.selectSql()).isEqualTo(explicit.selectSql());
+    assertThat(bare.parameters()).isEqualTo(explicit.parameters());
+  }
+
+  @Test
+  public void testCompileAggregateDedupesSameWidthBucketTerms() {
+    // Equivalent bucket terms (any spelling, same effective width) are one term — one alias, one
+    // GROUP BY key — like the categorical spellings dedup.
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("white.elo > 1"), List.of("opponent.elo", "opponent_elo(100)"), "hikaru");
+    assertThat(result.selectSql()).containsOnlyOnce("AS opponent_elo");
+    assertThat(result.selectSql()).contains(" GROUP BY opponent_elo ORDER BY");
+  }
+
+  @Test
+  public void testCompileAggregateMixesBucketCategoricalAndPhysicalTerms() {
+    // A bucket term composes with a categorical perspective term and a physical column in one
+    // grouping; the physical column contributes no alias and no params.
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("white.elo > 1"),
+            List.of("opponent.elo(200)", "me.color", "time_class"),
+            "hikaru");
+    assertThat(result.selectSql())
+        .contains("/ 200 * 200 AS opponent_elo")
+        .contains("END) AS me_color")
+        .contains("GROUP BY opponent_elo, me_color, time_class")
+        .contains("ORDER BY group_count DESC, opponent_elo ASC, me_color ASC, time_class ASC");
+  }
+
+  @Test
+  public void testCompileAggregateTotalsBucketsRatingFields() {
+    // Both aggregate paths resolve terms through resolveGroupByTerms: the totals path inlines the
+    // same bucket arithmetic in GROUP BY, binding its player param after the WHERE params.
+    CompiledQuery result =
+        compiler.compileAggregateTotals(
+            Parser.parse("time.class = \"bullet\""), List.of("opponent.elo(200)"), "hikaru");
+
+    assertThat(result.selectSql())
+        .contains(
+            "GROUP BY (CASE WHEN LOWER(white_username) = LOWER(?) THEN black_elo ELSE white_elo"
+                + " END) / 200 * 200) grp");
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "bullet", "hikaru"));
   }
 
   @Test
@@ -1066,7 +1168,14 @@ public class SqlCompilerTest {
   @Test
   public void testEveryGroupableFieldResolvesUnderBothSpellings() {
     for (String field :
-        List.of("me.color", "me.title", "opponent.username", "opponent.title", "outcome")) {
+        List.of(
+            "me.color",
+            "me.title",
+            "me.elo",
+            "opponent.username",
+            "opponent.title",
+            "opponent.elo",
+            "outcome")) {
       String key = field.replace('.', '_');
       assertThat(compiler.resolveGroupByColumns(List.of(field)))
           .as("dotted spelling %s", field)
@@ -1075,6 +1184,9 @@ public class SqlCompilerTest {
           .as("underscore spelling %s", key)
           .containsExactly(key);
     }
+    // A width never leaks into the key: the DAO reads result-set columns by these names.
+    assertThat(compiler.resolveGroupByColumns(List.of("opponent.elo(200)")))
+        .containsExactly("opponent_elo");
   }
 
   @Test

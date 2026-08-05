@@ -269,9 +269,10 @@ The indexer engine, database, and worker are embedded in this process (Option A 
 - `aggregate_chess_games` — grouped counts over indexed games: `query`, `group_by` (e.g.
   `["opening_family"]`; with `player` also the categorical perspective fields `me.color`,
   `me.title`, `opponent.username`, `opponent.title`, `outcome`, keyed by their underscore forms
-  in the output — rating fields stay filter-only), optional `player` and `limit`. Answers "most
-  popular openings" — or "hikaru's results against each GM he faced, both colors pooled" via
-  perspective fields — in one call. The output's `count` is the
+  in the output, plus `me.elo` / `opponent.elo` as fixed-width rating buckets — 100 points
+  unless the term carries a width like `opponent.elo(200)`, keyed by each band's numeric lower
+  bound), optional `player` and `limit`. Answers "most popular openings" — or "hikaru's results
+  against each GM he faced, both colors pooled" via perspective fields — in one call. The output's `count` is the
   number of groups returned, not games; `totalGames`/`totalGroups` cover the untruncated result
   and `truncated` says the group limit cut off a long tail (common with `opening_family`, whose
   chess.com ECO-URL-derived values are not normalized: "Closed Sicilian" and "Closed Sicilian

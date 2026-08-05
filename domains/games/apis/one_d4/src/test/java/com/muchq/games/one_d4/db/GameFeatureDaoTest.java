@@ -809,6 +809,134 @@ public class GameFeatureDaoTest {
         .containsExactlyInAnyOrder("GM/win/1", "GM/loss/1", "FM/draw/1", "null/win/1");
   }
 
+  /**
+   * The #1310 headline, through the real store: opponent.elo buckets by the band's numeric lower
+   * bound across both colors. 2400 and 2499 land in the same [2400, 2500) bucket while 2399 falls
+   * into [2300, 2400) — the half-open boundary — and a NULL elo (rows indexed before the column
+   * existed) pools into a NULL bucket instead of vanishing. Keys come back as Integers, not
+   * strings: the numeric key is what makes the ASC tiebreak sort bands numerically.
+   */
+  @Test
+  public void aggregate_groupsByOpponentEloBucketsAcrossBothColors() {
+    dao.insertBatch(
+        List.of(
+            eloGame("https://chess.com/game/eb-1", "hikaru", "a", 2800, 2450),
+            eloGame("https://chess.com/game/eb-2", "b", "Hikaru", 2499, 2800),
+            eloGame("https://chess.com/game/eb-3", "hikaru", "c", 2800, 2400),
+            eloGame("https://chess.com/game/eb-4", "hikaru", "d", 2800, 2399),
+            eloGame("https://chess.com/game/eb-5", "e", "hikaru", null, 2800)));
+
+    SqlCompiler compiler = new SqlCompiler();
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(
+                Parser.parse("time.class = \"blitz\""), List.of("opponent.elo"), "hikaru"),
+            compiler.resolveGroupByColumns(List.of("opponent.elo")),
+            10);
+
+    // 2450 (as White), 2499 (as Black), and boundary 2400 pool into one bucket; hikaru's own
+    // 2800s reach no bucket. The count-1 groups tie, so those assertions are order-free (H2 and
+    // Postgres disagree on where NULL sorts in an ASC tiebreak).
+    assertThat(groups).hasSize(3);
+    assertThat(groups.get(0).group()).containsEntry("opponent_elo", 2400);
+    assertThat(groups.get(0).count()).isEqualTo(3);
+    assertThat(groups)
+        .anySatisfy(
+            g -> {
+              assertThat(g.group()).containsEntry("opponent_elo", 2300);
+              assertThat(g.count()).isEqualTo(1);
+            })
+        .anySatisfy(
+            g -> {
+              assertThat(g.group()).containsEntry("opponent_elo", null);
+              assertThat(g.count()).isEqualTo(1);
+            });
+
+    GameFeatureStore.AggregateTotals totals =
+        dao.aggregateTotals(
+            compiler.compileAggregateTotals(
+                Parser.parse("time.class = \"blitz\""), List.of("opponent.elo"), "hikaru"));
+    assertThat(totals.totalGroups()).isEqualTo(3);
+    assertThat(totals.totalGames()).isEqualTo(5);
+
+    // A caller-supplied width reshapes the bands: at 200 wide, 2400/2450/2499 stay together and
+    // 2399 moves to [2200, 2400).
+    List<AggregateRow> wide =
+        dao.aggregate(
+            compiler.compileAggregate(
+                Parser.parse("time.class = \"blitz\""), List.of("opponent.elo(200)"), "hikaru"),
+            compiler.resolveGroupByColumns(List.of("opponent.elo(200)")),
+            10);
+    assertThat(wide.get(0).group()).containsEntry("opponent_elo", 2400);
+    assertThat(wide.get(0).count()).isEqualTo(3);
+    assertThat(wide).anySatisfy(g -> assertThat(g.group()).containsEntry("opponent_elo", 2200));
+  }
+
+  /**
+   * A bucket term and a categorical perspective term in one grouping, executed for real: the
+   * arithmetic-wrapped alias and the plain CASE alias must both survive GROUP BY and the ORDER BY
+   * tiebreak in the same statement, with the bucket's player param binding before me.color's.
+   * Order-free tuples because every count-1 group ties (H2 and Postgres disagree on NULL order).
+   */
+  @Test
+  public void aggregate_groupsByMeColorAndOpponentEloBucketsTogether() {
+    dao.insertBatch(
+        List.of(
+            eloGame("https://chess.com/game/cb-1", "hikaru", "a", 2800, 2450),
+            eloGame("https://chess.com/game/cb-2", "b", "hikaru", 2499, 2800),
+            eloGame("https://chess.com/game/cb-3", "hikaru", "c", 2800, 2400),
+            eloGame("https://chess.com/game/cb-4", "hikaru", "d", 2800, 2399),
+            eloGame("https://chess.com/game/cb-5", "e", "hikaru", null, 2800)));
+
+    SqlCompiler compiler = new SqlCompiler();
+    List<String> groupBy = List.of("me.color", "opponent.elo(200)");
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(Parser.parse("time.class = \"blitz\""), groupBy, "hikaru"),
+            compiler.resolveGroupByColumns(groupBy),
+            10);
+
+    assertThat(
+            groups.stream()
+                .map(
+                    g ->
+                        g.group().get("me_color")
+                            + "/"
+                            + g.group().get("opponent_elo")
+                            + "/"
+                            + g.count()))
+        .containsExactlyInAnyOrder("white/2400/2", "black/2400/1", "white/2200/1", "black/null/1");
+  }
+
+  /**
+   * The me.elo mirror of the bucket test above: the CASE picks the player's own side, so five games
+   * at 2800 — three as White, two as Black, one against a NULL-elo opponent — are one [2800, 2900)
+   * bucket. If the CASE picked the wrong side the groups would fragment into the opponents'
+   * buckets.
+   */
+  @Test
+  public void aggregate_groupsByMeEloBucketsAcrossBothColors() {
+    dao.insertBatch(
+        List.of(
+            eloGame("https://chess.com/game/mb-1", "hikaru", "a", 2800, 2450),
+            eloGame("https://chess.com/game/mb-2", "b", "hikaru", 2499, 2800),
+            eloGame("https://chess.com/game/mb-3", "hikaru", "c", 2800, 2400),
+            eloGame("https://chess.com/game/mb-4", "hikaru", "d", 2800, 2399),
+            eloGame("https://chess.com/game/mb-5", "e", "hikaru", null, 2800)));
+
+    SqlCompiler compiler = new SqlCompiler();
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(
+                Parser.parse("time.class = \"blitz\""), List.of("me.elo"), "hikaru"),
+            compiler.resolveGroupByColumns(List.of("me.elo")),
+            10);
+
+    assertThat(groups).hasSize(1);
+    assertThat(groups.get(0).group()).containsEntry("me_elo", 2800);
+    assertThat(groups.get(0).count()).isEqualTo(5);
+  }
+
   @Test
   public void aggregateTotals_zeroWhenNoGamesMatch() {
     SqlCompiler compiler = new SqlCompiler();
@@ -1211,6 +1339,30 @@ public class GameFeatureDaoTest {
         openingFamily + " Some Line",
         openingFamily,
         result,
+        Instant.now(),
+        20,
+        Instant.now(),
+        "pgn");
+  }
+
+  private GameFeature eloGame(
+      String url, String white, String black, Integer whiteElo, Integer blackElo) {
+    return new GameFeature(
+        null,
+        requestId,
+        url,
+        "CHESS_COM",
+        white,
+        black,
+        whiteElo,
+        blackElo,
+        null,
+        null,
+        "blitz",
+        "B10",
+        "Caro Kann Some Line",
+        "Caro Kann",
+        "1-0",
         Instant.now(),
         20,
         Instant.now(),

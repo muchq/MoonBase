@@ -276,7 +276,8 @@ public class IndexerToolsTest {
             "Field 'me.color' is perspective-relative (me.*, opponent.*, outcome) and requires a"
                 + " player parameter on the request");
 
-    JsonNode unsupported =
+    // A bad bucket width surfaces as the compiler's actionable message, not a stack trace.
+    JsonNode badWidth =
         parse(
             aggregateTool.execute(
                 Map.of(
@@ -285,14 +286,12 @@ public class IndexerToolsTest {
                     "player",
                     "hikaru",
                     "group_by",
-                    List.of("me.elo"))));
-    assertThat(unsupported.get("error").asText())
+                    List.of("me.elo(abc)"))));
+    assertThat(badWidth.get("error").asText())
         .isEqualTo(
-            "Rating fields are not supported in groupBy: me.elo groups one bucket per distinct"
-                + " rating (#1310 tracks bucketed grouping). Filter one rating band per call"
-                + " instead, e.g. opponent.elo >= 2500, then opponent.elo >= 2000 AND"
-                + " opponent.elo < 2500. Groupable, with a player: me.color, me.title,"
-                + " opponent.username, opponent.title, outcome");
+            "Bucket width must be a positive integer: me.elo(abc). Bare me.elo / opponent.elo"
+                + " bucket by 100; opponent.elo(200) groups ratings into [2000, 2200),"
+                + " [2200, 2400), ...");
   }
 
   /**
@@ -364,6 +363,49 @@ public class IndexerToolsTest {
     assertThat(group.get("count").asLong()).isEqualTo(2);
     assertThat(result.get("totalGames").asLong()).isEqualTo(2);
     assertThat(result.get("totalGroups").asLong()).isEqualTo(1);
+  }
+
+  /**
+   * The #1310 headline through the MCP tool: the stub deals White 2800 and Black 1500, so hikaru's
+   * opponents rate 1500 (game/1, hikaru White) and 2800 (game/2, hikaru Black) — two buckets, one
+   * per color, keyed by *numeric* lower bounds in the JSON. A CASE reading the wrong side would
+   * pool both games into a single bucket.
+   */
+  @Test
+  public void aggregateGroupsByOpponentEloBucketsAcrossBothColors() {
+    givenIndexedMonth();
+
+    JsonNode result =
+        parse(
+            aggregateTool.execute(
+                Map.of(
+                    "query",
+                    "time.class = \"blitz\"",
+                    "player",
+                    "hikaru",
+                    "group_by",
+                    List.of("opponent.elo"))));
+
+    assertThat(result.get("count").asInt()).isEqualTo(2);
+    JsonNode first = result.get("groups").get(0).get("group");
+    assertThat(first.get("opponent_elo").isIntegralNumber()).isTrue();
+    assertThat(first.get("opponent_elo").asInt()).isEqualTo(1500);
+    assertThat(result.get("groups").get(1).get("group").get("opponent_elo").asInt())
+        .isEqualTo(2800);
+
+    // An explicit width reshapes the bands end to end: 1500 → [1000, 2000), 2800 → [2000, 3000).
+    JsonNode wide =
+        parse(
+            aggregateTool.execute(
+                Map.of(
+                    "query",
+                    "time.class = \"blitz\"",
+                    "player",
+                    "hikaru",
+                    "group_by",
+                    List.of("opponent.elo(1000)"))));
+    assertThat(wide.get("groups").get(0).get("group").get("opponent_elo").asInt()).isEqualTo(1000);
+    assertThat(wide.get("groups").get(1).get("group").get("opponent_elo").asInt()).isEqualTo(2000);
   }
 
   @Test

@@ -34,7 +34,8 @@ import org.junit.jupiter.api.Test;
  *   <li>GROUP BY (and the ORDER BY tiebreak) referencing a SELECT-list <em>alias</em> rather than
  *       repeating the perspective CASE expression. Postgres resolves a bare GROUP BY name against
  *       input columns first and output column names second, so this only works because no
- *       game_features column shares the alias.
+ *       game_features column shares the alias. The rating buckets (#1310) ride the same convention
+ *       with integer arithmetic on top of the CASE.
  *   <li>date/month bounds bound as {@link java.time.LocalDateTime} against a TIMESTAMP-without-zone
  *       column. {@link GameFeatureDao} uses that zone-free type on both the write and the read, so
  *       pgjdbc stores the UTC wall clock as-is instead of converting through the JVM default zone;
@@ -215,6 +216,104 @@ public class PostgresAggregateCompatTest {
   }
 
   /**
+   * The #1310 bucket arithmetic on real Postgres: {@code (CASE ...) / width * width} under a SELECT
+   * alias that GROUP BY and the tiebreak reference. Integer division must truncate the same way
+   * H2's does (INT / INT stays INT — a dialect that widened to numeric would surface here as a
+   * non-integer key), a NULL elo must propagate through the arithmetic into the NULL bucket, and
+   * pgjdbc must hand the key back as an Integer.
+   */
+  @Test
+  public void aggregateGroupsByOpponentEloBucketsWithNullBucketOnPostgres() {
+    dao.insertBatch(
+        List.of(
+            game(
+                "pge-1",
+                "hikaru",
+                "a",
+                2800,
+                2450,
+                null,
+                null,
+                "1-0",
+                "Caro Kann",
+                Instant.parse("2026-07-02T10:00:00Z")),
+            game(
+                "pge-2",
+                "b",
+                "hikaru",
+                2499,
+                2800,
+                null,
+                null,
+                "1-0",
+                "Caro Kann",
+                Instant.parse("2026-07-03T10:00:00Z")),
+            game(
+                "pge-3",
+                "hikaru",
+                "c",
+                2800,
+                2399,
+                null,
+                null,
+                "1-0",
+                "Caro Kann",
+                Instant.parse("2026-07-04T10:00:00Z")),
+            game(
+                "pge-4",
+                "d",
+                "hikaru",
+                null,
+                2800,
+                null,
+                null,
+                "1-0",
+                "Caro Kann",
+                Instant.parse("2026-07-05T10:00:00Z"))));
+
+    SqlCompiler compiler = new SqlCompiler();
+    ParsedQuery parsed = Parser.parse("time.class = \"blitz\"");
+    List<String> groupBy = List.of("opponent.elo");
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(parsed, groupBy, "hikaru"),
+            compiler.resolveGroupByColumns(groupBy),
+            10);
+
+    // 2450 (hikaru as White) and 2499 (as Black) pool into [2400, 2500); 2399 and NULL each get
+    // their own bucket. The count-1 groups tie, so their assertions are order-free.
+    assertThat(groups).hasSize(3);
+    assertThat(groups.get(0).group()).containsEntry("opponent_elo", 2400);
+    assertThat(groups.get(0).count()).isEqualTo(2);
+    assertThat(groups)
+        .anySatisfy(
+            g -> {
+              assertThat(g.group()).containsEntry("opponent_elo", 2300);
+              assertThat(g.count()).isEqualTo(1);
+            })
+        .anySatisfy(
+            g -> {
+              assertThat(g.group()).containsEntry("opponent_elo", null);
+              assertThat(g.count()).isEqualTo(1);
+            });
+
+    var totals = dao.aggregateTotals(compiler.compileAggregateTotals(parsed, groupBy, "hikaru"));
+    assertThat(totals.totalGames()).isEqualTo(4);
+    assertThat(totals.totalGroups()).isEqualTo(3);
+
+    // Caller-supplied width, same alias convention: at 200 wide 2399 joins [2200, 2400).
+    List<String> wideBy = List.of("opponent.elo(200)");
+    List<AggregateRow> wide =
+        dao.aggregate(
+            compiler.compileAggregate(parsed, wideBy, "hikaru"),
+            compiler.resolveGroupByColumns(wideBy),
+            10);
+    assertThat(wide.get(0).group()).containsEntry("opponent_elo", 2400);
+    assertThat(wide.get(0).count()).isEqualTo(2);
+    assertThat(wide).anySatisfy(g -> assertThat(g.group()).containsEntry("opponent_elo", 2200));
+  }
+
+  /**
    * The totals query inlines the perspective CASE in GROUP BY while the groups query aliases it, so
    * the two statements bind their shared params in different positions. If either mapping were
    * wrong the counts would silently disagree rather than error.
@@ -319,6 +418,21 @@ public class PostgresAggregateCompatTest {
       String result,
       String openingFamily,
       Instant playedAt) {
+    return game(
+        url, white, black, 1500, 1500, whiteTitle, blackTitle, result, openingFamily, playedAt);
+  }
+
+  private GameFeature game(
+      String url,
+      String white,
+      String black,
+      Integer whiteElo,
+      Integer blackElo,
+      String whiteTitle,
+      String blackTitle,
+      String result,
+      String openingFamily,
+      Instant playedAt) {
     return new GameFeature(
         null,
         requestId,
@@ -326,8 +440,8 @@ public class PostgresAggregateCompatTest {
         "CHESS_COM",
         white,
         black,
-        1500,
-        1500,
+        whiteElo,
+        blackElo,
         whiteTitle,
         blackTitle,
         "blitz",

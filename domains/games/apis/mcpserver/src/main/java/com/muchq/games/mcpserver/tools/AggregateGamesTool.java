@@ -47,10 +47,11 @@ public class AggregateGamesTool implements McpTool {
         + " opponent.title or opponent.username is the only correct way to break down opponents"
         + " across both colors — the color-specific columns mix your own values into the buckets"
         + " on half the rows. Untitled opponents group under a null key, and opponent.username"
-        + " groups by the stored casing without normalization. me.elo and opponent.elo stay"
-        + " filter-only; ask rating questions one band per call (opponent.elo >= 2500, then"
-        + " opponent.elo >= 2000 AND opponent.elo < 2500). Note: opening_family is derived from"
-        + " chess.com ECO-URL"
+        + " groups by the stored casing without normalization. me.elo and opponent.elo group as"
+        + " fixed-width rating buckets, 100 points unless the term carries a width like"
+        + " opponent.elo(200); each group key is the band's numeric lower bound (2400 at width"
+        + " 200 means 2400-2599), and NULL elos group under a null key. Note: opening_family is"
+        + " derived from chess.com ECO-URL"
         + " strings, not a normalized taxonomy — 'Closed Sicilian' and 'Closed Sicilian Defense'"
         + " are distinct groups. In the output, count is how many groups were returned, not how"
         + " many games; totalGames/totalGroups cover the untruncated result, and truncated=true"
@@ -81,9 +82,10 @@ public class AggregateGamesTool implements McpTool {
             "Fields to group by, e.g. [\"opening_family\"]. Groupable: opening_family,"
                 + " opening_name, eco, result, time_class, white_title, black_title,"
                 + " white_username, black_username, platform — plus me.color, me.title,"
-                + " opponent.username, opponent.title, and outcome when player is set, keyed by"
-                + " their underscore forms in the output. date, month, me.elo, and opponent.elo"
-                + " are filter-only and rejected here."));
+                + " opponent.username, opponent.title, outcome, and the rating buckets me.elo /"
+                + " opponent.elo (optionally with a width, e.g. opponent.elo(200); default 100)"
+                + " when player is set, keyed by their underscore forms in the output. date and"
+                + " month are filter-only and rejected here."));
     properties.put(
         "limit",
         Map.of(

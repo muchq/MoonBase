@@ -227,10 +227,12 @@ matching row and group client-side.
 | player  | string   | no       | —       | —    | Username that perspective fields in the filter and groupBy are resolved against |
 
 Group-by fields validate against the same column whitelist as ChessQL comparisons. With
-`player`, the categorical perspective fields — `me.color`, `me.title`, `opponent.username`,
-`opponent.title`, `outcome` — are also groupable (response keys use their underscore forms);
-`me.elo` and `opponent.elo` stay filter-only, and a NULL value (untitled opponents) forms a
-`null` group (see CHESSQL.md).
+`player`, the perspective fields are also groupable (response keys use their underscore forms):
+the categorical fields — `me.color`, `me.title`, `opponent.username`, `opponent.title`,
+`outcome` — group by value, and the rating fields group as fixed-width buckets keyed by the
+band's numeric lower bound, 100 points wide unless the term carries a width
+(`"opponent.elo(200)"`). A NULL value (untitled opponents, NULL elos) forms a `null` group (see
+CHESSQL.md).
 
 ### Response (200)
 
@@ -249,7 +251,8 @@ Group-by fields validate against the same column whitelist as ChessQL comparison
 
 Group keys are canonical column names (e.g. `opening_family`, even when requested as
 `opening.family`; perspective group keys use their underscore forms — `me_color`, `me_title`,
-`opponent_username`, `opponent_title`, `outcome`). Groups
+`opponent_username`, `opponent_title`, `outcome`, and for the rating buckets `me_elo` /
+`opponent_elo` with the band's numeric lower bound as the value). Groups
 are ordered by count descending, then by group values ascending. `count` is the number of groups
 returned — not a game count, which is what `totalGames` reports. `totalGames` and `totalGroups`
 are computed over the untruncated result, and `truncated` is true when `limit` cut off groups —
@@ -269,7 +272,9 @@ it first via `POST /v1/index`.
 | Unknown group-by field                            | 400         |
 | Missing query/groupBy                             | 400         |
 | Filter-only field in groupBy (`date`, `month`)    | 400         |
-| Rating field in groupBy (`me.elo`, `opponent.elo`) | 400        |
+| Bucket width not a positive integer (`me.elo(0)`) | 400         |
+| Bucket width on a non-rating field (`me.color(100)`) | 400      |
+| Conflicting bucket widths for one field           | 400         |
 | Perspective field in groupBy without `player`     | 400         |
 | Perspective field in the filter without `player`  | 400         |
 
