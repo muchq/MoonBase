@@ -7,8 +7,8 @@ import java.util.List;
  * counts. {@code orderBy} currently supports only "count" (descending), which is also the default.
  * {@code player} is the optional perspective player for me.*, opponent.*, and outcome fields in the
  * filter; group-by fields are physical columns, plus — when {@code player} is set — the perspective
- * fields: categorical ones by value (#1301), the rating fields as fixed-width buckets like {@code
- * opponent.elo(200)} (#1310).
+ * fields: categorical ones by value, the rating fields as fixed-width buckets like {@code
+ * opponent.elo(200)}.
  */
 public record AggregateRequest(
     String query, List<String> groupBy, String orderBy, int limit, String player) {

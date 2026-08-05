@@ -34,8 +34,8 @@ import org.junit.jupiter.api.Test;
  *   <li>GROUP BY (and the ORDER BY tiebreak) referencing a SELECT-list <em>alias</em> rather than
  *       repeating the perspective CASE expression. Postgres resolves a bare GROUP BY name against
  *       input columns first and output column names second, so this only works because no
- *       game_features column shares the alias. The rating buckets (#1310) ride the same convention
- *       with integer arithmetic on top of the CASE.
+ *       game_features column shares the alias. The rating buckets ride the same convention with
+ *       integer arithmetic on top of the CASE.
  *   <li>date/month bounds bound as {@link java.time.LocalDateTime} against a TIMESTAMP-without-zone
  *       column. {@link GameFeatureDao} uses that zone-free type on both the write and the read, so
  *       pgjdbc stores the UTC wall clock as-is instead of converting through the JVM default zone;
@@ -159,9 +159,9 @@ public class PostgresAggregateCompatTest {
   }
 
   /**
-   * The #1301 grouping on real Postgres: opponent.title resolves the opposite side's nullable
-   * column, so this doubles as the pin that a NULL group key groups (Postgres pools NULLs into one
-   * GROUP BY bucket, like H2) and comes back as a null map value rather than an error.
+   * Grouping by opponent.title on real Postgres resolves the opposite side's nullable column, so
+   * this doubles as the pin that a NULL group key groups (Postgres pools NULLs into one GROUP BY
+   * bucket, like H2) and comes back as a null map value rather than an error.
    */
   @Test
   public void aggregateGroupsByOpponentTitleWithNullBucketOnPostgres() {
@@ -216,11 +216,11 @@ public class PostgresAggregateCompatTest {
   }
 
   /**
-   * The #1310 bucket arithmetic on real Postgres: {@code (CASE ...) / width * width} under a SELECT
-   * alias that GROUP BY and the tiebreak reference. Integer division must truncate the same way
-   * H2's does (INT / INT stays INT — a dialect that widened to numeric would surface here as a
-   * non-integer key), a NULL elo must propagate through the arithmetic into the NULL bucket, and
-   * pgjdbc must hand the key back as an Integer.
+   * The bucket arithmetic on real Postgres: {@code (CASE ...) / width * width} under a SELECT alias
+   * that GROUP BY and the tiebreak reference. Integer division must truncate the same way H2's does
+   * (INT / INT stays INT — a dialect that widened to numeric would surface here as a non-integer
+   * key), a NULL elo must propagate through the arithmetic into the NULL bucket, and pgjdbc must
+   * hand the key back as an Integer.
    */
   @Test
   public void aggregateGroupsByOpponentEloBucketsWithNullBucketOnPostgres() {

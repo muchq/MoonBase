@@ -662,7 +662,7 @@ public class SqlCompilerTest {
 
   @Test
   public void testGroupByPerspectiveErrorMessagesAreExact() {
-    // Bucket-width validation (#1310): a malformed, zero, negative, overflowing, or unclosed
+    // Bucket-width validation: a malformed, zero, negative, overflowing, or unclosed
     // width — and a width on a field that doesn't bucket — must each get an actionable message,
     // not the generic Unknown-field error. Width 0 in particular would otherwise compile into a
     // division by zero, and the unclosed "me.elo(100" must not lenient-parse into a working term.
@@ -980,10 +980,10 @@ public class SqlCompilerTest {
   }
 
   /**
-   * The #1301 headline: grouping by opponent.title resolves the opposite side's column per row, so
-   * a both-colors aggregate reads black_title where the player was White and white_title where the
-   * player was Black. The color-specific columns cannot express this — white_title mixes the
-   * player's own title into the buckets on half the rows.
+   * Grouping by opponent.title resolves the opposite side's column per row, so a both-colors
+   * aggregate reads black_title where the player was White and white_title where the player was
+   * Black. The color-specific columns cannot express this — white_title mixes the player's own
+   * title into the buckets on half the rows.
    */
   @Test
   public void testCompileAggregateGroupByOpponentTitle() {
@@ -1037,7 +1037,7 @@ public class SqlCompilerTest {
 
   @Test
   public void testCompileAggregateGroupByEloBucketsDefaultWidth() {
-    // The headline #1310 grouping: bare opponent.elo buckets by 100, keyed by the band's numeric
+    // Bare opponent.elo buckets by 100, keyed by the band's numeric
     // lower bound via integer arithmetic on the aliased CASE. Exact SQL because every piece is
     // load-bearing — the / 100 * 100 must wrap the CASE (not one column), the alias must carry
     // into GROUP BY and the tiebreak, and the SELECT player param must precede the WHERE params.
@@ -1197,11 +1197,10 @@ public class SqlCompilerTest {
   }
 
   /**
-   * The property behind the spellings map, not examples from it: every groupable perspective field
-   * resolves under both its dotted and its underscore spelling, to the underscore key the response
-   * is keyed by. This is what catches a typo'd or dropped map entry — before it, opponent_username
-   * was an accepted spelling no test ever sent, so deleting its entry left the suite green while
-   * breaking the round-trip CHESSQL.md promises (send back the key you got).
+   * The property, not examples: every groupable perspective field resolves under both its dotted
+   * and its underscore spelling, to the underscore key the response is keyed by. CHESSQL.md
+   * promises the round trip (send back the key you got), so this guards the spelling derivation and
+   * the field roster end to end.
    */
   @Test
   public void testEveryGroupableFieldResolvesUnderBothSpellings() {

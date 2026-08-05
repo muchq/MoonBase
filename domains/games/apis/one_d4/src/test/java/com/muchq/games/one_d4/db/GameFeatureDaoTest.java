@@ -661,12 +661,11 @@ public class GameFeatureDaoTest {
   }
 
   /**
-   * The #1301 headline, through the real store: grouping by opponent.title across both colors
-   * buckets each game by the *other* side's title. The old workaround — grouping by white_title
-   * with the player pinned to Black — cannot express this: over both colors it files the player's
-   * own title into the buckets on half the rows (here that would read IM 4, which is hikaru, not
-   * his opponents). Untitled opponents land in a NULL group, exactly as they do when grouping the
-   * physical nullable columns.
+   * Grouping by opponent.title, through the real store, buckets each game by the *other* side's
+   * title across both colors. No physical column can express this: grouping white_title or
+   * black_title files the player's own title into the buckets on half the rows (here that would
+   * read IM 4, which is hikaru, not his opponents). Untitled opponents land in a NULL group,
+   * exactly as they do when grouping the physical nullable columns.
    */
   @Test
   public void aggregate_groupsByOpponentTitleAcrossBothColors() {
@@ -780,11 +779,11 @@ public class GameFeatureDaoTest {
   }
 
   /**
-   * The #1310 headline, through the real store: opponent.elo buckets by the band's numeric lower
-   * bound across both colors. 2400 and 2499 land in the same [2400, 2500) bucket while 2399 falls
-   * into [2300, 2400) — the half-open boundary — and a NULL elo (chess.com omitted that side's
-   * rating data) pools into a NULL bucket instead of vanishing. Keys come back as Integers, not
-   * strings: the numeric key is what makes the ASC tiebreak sort bands numerically.
+   * Opponent.elo, through the real store, buckets by the band's numeric lower bound across both
+   * colors. 2400 and 2499 land in the same [2400, 2500) bucket while 2399 falls into [2300, 2400) —
+   * the half-open boundary — and a NULL elo (chess.com omitted that side's rating data) pools into
+   * a NULL bucket instead of vanishing. Keys come back as Integers, not strings: the numeric key is
+   * what makes the ASC tiebreak sort bands numerically.
    */
   @Test
   public void aggregate_groupsByOpponentEloBucketsAcrossBothColors() {

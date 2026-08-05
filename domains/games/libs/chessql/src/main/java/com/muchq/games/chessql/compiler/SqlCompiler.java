@@ -101,9 +101,9 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
 
   /**
    * How a perspective field groups on /v1/aggregate: CATEGORICAL fields (string-valued) group by
-   * value; RATING fields group only as fixed-width buckets (#1310) — GROUP BY on a raw rating makes
-   * one bucket per distinct value, which buries the answer under hundreds of one-game groups. The
-   * kind also decides filter-side string semantics (LOWER-wrapped comparisons and IN).
+   * value; RATING fields group only as fixed-width buckets — GROUP BY on a raw rating makes one
+   * bucket per distinct value, which buries the answer under hundreds of one-game groups. The kind
+   * also decides filter-side string semantics (LOWER-wrapped comparisons and IN).
    */
   private enum GroupKind {
     CATEGORICAL,
@@ -163,10 +163,10 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
               GroupKind.CATEGORICAL));
 
   /**
-   * Every accepted groupBy spelling of a perspective field, mapped to its canonical dotted name
-   * (#1301). Derived, not hand-typed: the underscore spelling is mechanically the dotted one with
-   * {@code .}→{@code _}, so a field added to {@link #PERSPECTIVE_FIELDS} is groupable under both
-   * spellings with no second edit site to forget.
+   * Every accepted groupBy spelling of a perspective field, mapped to its canonical dotted name.
+   * Derived, not hand-typed: the underscore spelling is mechanically the dotted one with {@code
+   * .}→{@code _}, so a field added to {@link #PERSPECTIVE_FIELDS} is groupable under both spellings
+   * with no second edit site to forget.
    */
   private static final Map<String, String> PERSPECTIVE_SPELLINGS = perspectiveSpellings();
 
@@ -293,10 +293,10 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    * the perspective fields, which are groupable when a player is supplied — the only way to
    * aggregate opponents across both colors, since the color-specific columns mix the player's own
    * values into the buckets on half the rows. The categorical fields ({@code me.color}, {@code
-   * me.title}, {@code opponent.username}, {@code opponent.title}, {@code outcome}) group by value
-   * (#1301); the rating fields ({@code me.elo}, {@code opponent.elo}) group into fixed-width
-   * buckets keyed by the band's lower bound, 100 points wide unless the term supplies a width
-   * ({@code opponent.elo(200)}) (#1310).
+   * me.title}, {@code opponent.username}, {@code opponent.title}, {@code outcome}) group by value;
+   * the rating fields ({@code me.elo}, {@code opponent.elo}) group into fixed-width buckets keyed
+   * by the band's lower bound, 100 points wide unless the term supplies a width ({@code
+   * opponent.elo(200)}).
    */
   public CompiledQuery compileAggregate(ParsedQuery pq, List<String> groupByFields, String player) {
     if (pq.orderBy() != null) {
@@ -449,7 +449,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     String canonical = PERSPECTIVE_SPELLINGS.get(field);
     if (canonical != null) {
       // Categorical fields group by value; rating fields never group raw — a bare rating term
-      // means the default bucket width (#1310).
+      // means the default bucket width.
       return switch (PERSPECTIVE_FIELDS.get(canonical).kind()) {
         case CATEGORICAL -> GroupByTerm.perspective(canonical, null);
         case RATING -> GroupByTerm.perspective(canonical, DEFAULT_ELO_BUCKET_WIDTH);
@@ -470,7 +470,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     return GroupByTerm.column(resolveColumn(field));
   }
 
-  /** A parenthesized groupBy term is a bucket width, allowed only on the rating fields (#1310). */
+  /** A parenthesized groupBy term is a bucket width, allowed only on the rating fields. */
   private GroupByTerm resolveBucketTerm(String field) {
     int paren = field.indexOf('(');
     String canonical = PERSPECTIVE_SPELLINGS.get(field.substring(0, paren));

@@ -312,9 +312,10 @@ public class IndexerToolsTest {
   }
 
   /**
-   * The #1301 headline through the MCP tool: hikaru faces someuser as White in game/1 and as Black
-   * in game/2, and grouping by opponent.username pools both into one bucket. No physical column can
-   * produce this — white_username and black_username each hold hikaru himself on half the rows.
+   * Opponent aggregation through the MCP tool: hikaru faces someuser as White in game/1 and as
+   * Black in game/2, and grouping by opponent.username pools both into one bucket. No physical
+   * column can produce this — white_username and black_username each hold hikaru himself on half
+   * the rows.
    */
   @Test
   public void aggregateGroupsByOpponentUsernameAcrossBothColors() {
@@ -331,7 +332,7 @@ public class IndexerToolsTest {
   }
 
   /**
-   * The #1310 plumbing through the MCP tool: the group_by string carries the bucket term (and its
+   * Bucket plumbing through the MCP tool: the group_by string carries the bucket term (and its
    * width) end to end, and the group keys arrive as *numeric* JSON lower bounds, not strings. The
    * stub deals every game White 2800 / Black 1500, so this fixture is side-symmetric — me.elo and
    * opponent.elo produce identical buckets — and cannot see a CASE reading the wrong side; that pin

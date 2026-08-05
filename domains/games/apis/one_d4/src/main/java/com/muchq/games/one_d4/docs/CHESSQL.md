@@ -140,7 +140,7 @@ with `player: "hikaru"`. Perspective fields compile to `CASE` expressions over t
 
 The categorical perspective fields may also be used in `groupBy` on `/v1/aggregate` (and the
 `aggregate_chess_games` tool) when `player` is supplied: `me.color`, `me.title`,
-`opponent.username`, `opponent.title`, and `outcome` (#1301). This is what makes both-colors
+`opponent.username`, `opponent.title`, and `outcome`. This is what makes both-colors
 breakdowns expressible at all: grouping by `["me.color", "opening_family"]` answers "which
 openings do I face as Black" where `opening_family` alone conflates both sides' choices, and
 grouping by `opponent.title` or `opponent.username` is the only correct opponent breakdown
@@ -155,7 +155,7 @@ case-normalized, so the same opponent stored under two casings forms two groups 
 
 The two rating fields (`me.elo`, `opponent.elo`) group as fixed-width buckets, never raw by
 default — grouping by a raw rating makes one bucket per distinct value, burying the answer under
-one-game groups (#1310). A `groupBy` term is either a field name or a rating field with a
+one-game groups. A `groupBy` term is either a field name or a rating field with a
 bucket width:
 
 ```

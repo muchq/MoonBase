@@ -161,9 +161,8 @@ public class AggregateControllerTest {
 
   @Test
   public void aggregate_eloBucketGroupByCompilesThroughTheController() {
-    // Since #1310 the rating fields group in bucketed form: the REST groupBy string carries the
-    // width, the compiled SQL floors the CASE to the band's lower bound, and the response keys
-    // the numeric bound under the underscore name.
+    // The REST groupBy string carries the bucket width, the compiled SQL floors the CASE to the
+    // band's lower bound, and the response keys the numeric bound under the underscore name.
     store.rows =
         List.of(
             new AggregateRow(Collections.singletonMap("opponent_elo", 2400), 9),
@@ -209,7 +208,7 @@ public class AggregateControllerTest {
     assertThat(response.groups()).hasSize(2);
     assertThat(response.groups().get(0).group()).containsEntry("opponent_title", "GM");
     // Untitled opponents are a NULL group, serialized as a null value under the group key —
-    // the same shape grouping the physical nullable title columns has always produced.
+    // the same shape grouping the physical nullable title columns produces.
     assertThat(response.groups().get(1).group()).containsEntry("opponent_title", null);
     assertThat(store.lastGroupColumns).containsExactly("opponent_title");
     assertThat(((CompiledQuery) store.lastCompiled).selectSql())
