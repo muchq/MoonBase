@@ -314,6 +314,81 @@ public class PostgresAggregateCompatTest {
   }
 
   /**
+   * The bucket arithmetic at the INT extremes on the real dialect — the H2 twin
+   * (GameFeatureDaoTest.aggregate_bucketArithmeticAtIntegerExtremes) explains the fixture. This is
+   * the test behind the portability claim that {@code int4 / int4 * int4} neither widens nor raises
+   * for any elo the column can hold: Integer.MAX_VALUE at width 100 must key 2147483600 as an
+   * Integer, a negative elo must truncate toward zero (-150 → -100, where FLOOR would give -200),
+   * and a width of Integer.MAX_VALUE must collapse smaller elos to bucket 0 while keying the
+   * MAX_VALUE elo as itself.
+   */
+  @Test
+  public void aggregateBucketArithmeticAtIntegerExtremesOnPostgres() {
+    dao.insertBatch(
+        List.of(
+            game(
+                "pgx-1",
+                "hikaru",
+                "a",
+                2800,
+                2450,
+                null,
+                null,
+                "1-0",
+                "Caro Kann",
+                Instant.parse("2026-07-02T10:00:00Z")),
+            game(
+                "pgx-2",
+                "hikaru",
+                "b",
+                2800,
+                Integer.MAX_VALUE,
+                null,
+                null,
+                "1-0",
+                "Caro Kann",
+                Instant.parse("2026-07-03T10:00:00Z")),
+            game(
+                "pgx-3",
+                "hikaru",
+                "c",
+                2800,
+                -150,
+                null,
+                null,
+                "1-0",
+                "Caro Kann",
+                Instant.parse("2026-07-04T10:00:00Z"))));
+
+    SqlCompiler compiler = new SqlCompiler();
+    ParsedQuery parsed = Parser.parse("time.class = \"blitz\"");
+    List<String> groupBy = List.of("opponent.elo");
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(parsed, groupBy, "hikaru"),
+            compiler.resolveGroupByColumns(groupBy),
+            10);
+
+    assertThat(groups).hasSize(3);
+    assertThat(groups)
+        .anySatisfy(g -> assertThat(g.group()).containsEntry("opponent_elo", 2400))
+        .anySatisfy(g -> assertThat(g.group()).containsEntry("opponent_elo", 2147483600))
+        .anySatisfy(g -> assertThat(g.group()).containsEntry("opponent_elo", -100));
+
+    List<String> maxWidth = List.of("opponent.elo(" + Integer.MAX_VALUE + ")");
+    List<AggregateRow> collapsed =
+        dao.aggregate(
+            compiler.compileAggregate(parsed, maxWidth, "hikaru"),
+            compiler.resolveGroupByColumns(maxWidth),
+            10);
+    assertThat(collapsed).hasSize(2);
+    assertThat(collapsed.get(0).group()).containsEntry("opponent_elo", 0);
+    assertThat(collapsed.get(0).count()).isEqualTo(2);
+    assertThat(collapsed.get(1).group()).containsEntry("opponent_elo", Integer.MAX_VALUE);
+    assertThat(collapsed.get(1).count()).isEqualTo(1);
+  }
+
+  /**
    * The totals query inlines the perspective CASE in GROUP BY while the groups query aliases it, so
    * the two statements bind their shared params in different positions. If either mapping were
    * wrong the counts would silently disagree rather than error.

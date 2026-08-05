@@ -865,6 +865,54 @@ public class GameFeatureDaoTest {
   }
 
   /**
+   * The bucket arithmetic at the INT extremes, executed rather than reasoned about: {@code (elo /
+   * width) * width} must stay in INT range for every elo the column can hold (truncating division
+   * bounds the product by the input, so Integer.MAX_VALUE at width 100 keys 2147483600, and at
+   * width Integer.MAX_VALUE keys itself), and a negative elo — impossible via ingest but not
+   * constrained by the schema — truncates toward zero (-150 keys -100, not FLOOR's -200).
+   * PostgresAggregateCompatTest runs the same fixture on the real dialect; if either engine widened
+   * the arithmetic or raised on the multiply, one of these buckets would come back a different
+   * type, a different key, or not at all.
+   */
+  @Test
+  public void aggregate_bucketArithmeticAtIntegerExtremes() {
+    dao.insertBatch(
+        List.of(
+            eloGame("https://chess.com/game/ex-1", "hikaru", "a", 2800, 2450),
+            eloGame("https://chess.com/game/ex-2", "hikaru", "b", 2800, Integer.MAX_VALUE),
+            eloGame("https://chess.com/game/ex-3", "hikaru", "c", 2800, -150)));
+
+    SqlCompiler compiler = new SqlCompiler();
+    ParsedQuery parsed = Parser.parse("time.class = \"blitz\"");
+    List<String> groupBy = List.of("opponent.elo");
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(parsed, groupBy, "hikaru"),
+            compiler.resolveGroupByColumns(groupBy),
+            10);
+
+    assertThat(groups).hasSize(3);
+    assertThat(groups)
+        .anySatisfy(g -> assertThat(g.group()).containsEntry("opponent_elo", 2400))
+        .anySatisfy(g -> assertThat(g.group()).containsEntry("opponent_elo", 2147483600))
+        .anySatisfy(g -> assertThat(g.group()).containsEntry("opponent_elo", -100));
+
+    // A width at Integer.MAX_VALUE collapses every smaller elo to bucket 0 and keys the
+    // MAX_VALUE elo as itself (MAX / MAX * MAX) — no overflow, no widening, still two groups.
+    List<String> maxWidth = List.of("opponent.elo(" + Integer.MAX_VALUE + ")");
+    List<AggregateRow> collapsed =
+        dao.aggregate(
+            compiler.compileAggregate(parsed, maxWidth, "hikaru"),
+            compiler.resolveGroupByColumns(maxWidth),
+            10);
+    assertThat(collapsed).hasSize(2);
+    assertThat(collapsed.get(0).group()).containsEntry("opponent_elo", 0);
+    assertThat(collapsed.get(0).count()).isEqualTo(2);
+    assertThat(collapsed.get(1).group()).containsEntry("opponent_elo", Integer.MAX_VALUE);
+    assertThat(collapsed.get(1).count()).isEqualTo(1);
+  }
+
+  /**
    * The me.elo mirror of the bucket test above: the CASE picks the player's own side, so five games
    * at 2800 — three as White, two as Black, one against a NULL-elo opponent — are one [2800, 2900)
    * bucket. If the CASE picked the wrong side the groups would fragment into the opponents'
