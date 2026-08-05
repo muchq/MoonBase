@@ -389,12 +389,14 @@ public class Migration {
   private static final String CREATE_IDX_GAME_FEATURES_REQUEST_ID =
       "CREATE INDEX IF NOT EXISTS idx_game_features_request_id ON game_features(request_id)";
 
-  // The browse ordering. Every loosely-filtered /v1/query — including the first-load default that
-  // FirstPageCache warms and the page-2 prefetch the cache deliberately excludes — ends in
-  // SqlCompiler's ORDER BY g.played_at DESC, g.game_url ASC LIMIT n. Without an index in that
-  // exact column order and direction the plan is a full scan plus top-N sort of the whole table
-  // per page; with it, a LIMIT-sized index walk. The columns and directions here must stay in
-  // step with SqlCompiler's ORDER BY or the index stops satisfying the sort.
+  // The browse ordering. Every /v1/query without an explicit ORDER BY — the browse default,
+  // including the first-load request FirstPageCache warms every 30s and the page-2 prefetch the
+  // cache deliberately excludes — ends in SqlCompiler's ORDER BY g.played_at DESC, g.game_url
+  // ASC LIMIT n. (An explicit ORDER BY motif_count(...) sorts on a computed count and does not
+  // ride this index.) Without an index in that exact column order and direction the plan is a
+  // full scan plus top-N sort of the whole table per page; with it, a LIMIT-sized index walk.
+  // MigrationTest pins this index against the compiled default query's ORDER BY, so the two
+  // cannot drift apart silently.
   private static final String CREATE_IDX_GAME_FEATURES_PLAYED_AT =
       "CREATE INDEX IF NOT EXISTS idx_game_features_played_at"
           + " ON game_features(played_at DESC, game_url ASC)";

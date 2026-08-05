@@ -56,12 +56,13 @@ Without a cursor, omit the `AND (...)` clause (first page).
 Add a composite index to make keyset seeks O(log N):
 
 ```sql
-CREATE INDEX idx_game_features_played_at_game_url
+CREATE INDEX idx_game_features_played_at
 ON game_features (played_at DESC, game_url ASC);
 ```
 
 This index also speeds up the current LIMIT/OFFSET approach and is safe to add
-at any time without waiting for the full keyset migration.
+at any time without waiting for the full keyset migration. **Done:** it ships in
+`Migration.java` as `idx_game_features_played_at` (PR #1312).
 
 ### Frontend change
 
@@ -86,11 +87,8 @@ Replace `page` state with `cursorStack: string[]` state:
 ## Recommended short-term action
 
 Add the composite index now — it's a one-line migration, improves the current
-LIMIT/OFFSET approach, and is required for keyset pagination anyway:
-
-```sql
-CREATE INDEX CONCURRENTLY idx_game_features_played_at_game_url
-ON game_features (played_at DESC, game_url ASC);
-```
-
-`CONCURRENTLY` avoids a table lock and is safe to run on a live database.
+LIMIT/OFFSET approach, and is required for keyset pagination anyway. **Done in
+PR #1312:** `Migration.java` creates `idx_game_features_played_at` (plain
+`CREATE INDEX IF NOT EXISTS`, matching the other migration indexes — fine at
+this table's 7-day-retention size; `CONCURRENTLY` would matter on a large live
+table).

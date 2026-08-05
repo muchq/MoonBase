@@ -103,14 +103,27 @@ public class MigrationTest {
   }
 
   /**
-   * The index behind the browse ordering — SqlCompiler's {@code ORDER BY played_at DESC, game_url
-   * ASC LIMIT n}, which every loosely-filtered query pages through. Column order and directions are
-   * asserted, not just existence: an index on the same columns in the wrong order or direction
-   * exists happily while the sort goes back to a full-table top-N.
+   * The index behind the browse ordering — the {@code ORDER BY played_at DESC, game_url ASC LIMIT
+   * n} that SqlCompiler appends to every query without an explicit ORDER BY. Column order and
+   * directions are asserted, not just existence: an index on the same columns in the wrong order or
+   * direction exists happily while the sort goes back to a full-table top-N.
+   *
+   * <p>Both sides of the contract are pinned here, in one test: what the compiler actually emits
+   * for the browse default, and the index shape that serves it. Changing either alone fails this
+   * test, instead of the index silently ceasing to satisfy the plan while a metadata-only assertion
+   * stays green.
    */
   @Test
   public void run_addsThePlayedAtBrowseIndexMatchingTheCompilersOrderBy() throws Exception {
     new Migration(dataSource, true).run();
+
+    String compiledDefault =
+        new com.muchq.games.chessql.compiler.SqlCompiler()
+            .compile(com.muchq.games.chessql.parser.Parser.parse("num.moves >= 0"), null)
+            .selectSql();
+    assertThat(compiledDefault)
+        .as("the browse default's sort — the ORDER BY this index exists to serve")
+        .endsWith("ORDER BY g.played_at DESC, g.game_url ASC");
 
     java.util.List<String> columnsInOrder = new java.util.ArrayList<>();
     try (Connection conn = dataSource.getConnection();
