@@ -141,6 +141,7 @@ java_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        artifact("com.fasterxml.jackson.core:jackson-annotations"),
         artifact("org.jspecify:jspecify"),
     ],
 )
@@ -695,6 +696,7 @@ java_test_suite(
     name = "http_integration_tests",
     size = "small",
     srcs = [
+        "src/test/java/com/muchq/games/one_d4/api/AggregateResponseWireTest.java",
         "src/test/java/com/muchq/games/one_d4/api/ContentTypeHandlingTest.java",
         "src/test/java/com/muchq/games/one_d4/api/FirstPageWarmupTest.java",
         "src/test/java/com/muchq/games/one_d4/api/HealthProbeRouteLabelTest.java",
