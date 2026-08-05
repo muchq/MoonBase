@@ -39,10 +39,13 @@ Smithy operation name ("Trace") — smithy-cpp annotates responses with the
 operation, not the URI pattern. All three agree on the literal `/health`
 for the probe endpoint (which prom_proxy's probeFilter subtracts), on the
 `unmatched` sentinel, and on the bounded method rule (the nine RFC 9110
-methods verbatim, anything else `CUSTOM`). One pinned edge divergence: a
-wrong-method request to an existing path keeps the health literal on the
-C++/Rust rails but lands under yodel's sentinel (no template is stamped on
-a 405). futility additionally labels its histogram with
+methods verbatim, anything else `CUSTOM`). One pinned edge divergence,
+specific to the health path: a wrong-method `/health` request keeps the
+`/health` label on the C++ rail (recognized by path) and on the Rust rail
+(axum stamps the matched template on 405s), but lands under yodel's
+sentinel — no template is stamped on a 405 there. On other paths a 405
+follows each rail's normal rule: matched template on Rust, sentinel on
+C++. futility additionally labels its histogram with
 `status_code`/`result` and its failure counter with those plus
 `error_type`; the shared core is identical everywhere.
 
