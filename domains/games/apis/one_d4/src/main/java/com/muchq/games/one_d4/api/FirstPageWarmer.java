@@ -31,7 +31,7 @@ public class FirstPageWarmer {
   // fixedDelay must stay at half FirstPageCache.MAX_AGE or less (pinned by
   // FirstPageWarmerTest), or the cache expires between refreshes and every first load falls
   // through to the database again. fixedDelay measures from the previous run's completion, and
-  // a tick runs two database reads, each bounded by GameFeatureDao.READ_QUERY_TIMEOUT_SECONDS —
+  // a tick runs two database reads, each bounded by StatementTimeouts.SERVING_READ_SECONDS —
   // so the true worst-case period is 30s plus twice that bound, which must also stay under
   // MAX_AGE (pinned by FirstPageWarmerTest too). refreshNow() keeps the last good snapshot and
   // logs on failure, so a failed tick never cancels the schedule; the read timeout is what

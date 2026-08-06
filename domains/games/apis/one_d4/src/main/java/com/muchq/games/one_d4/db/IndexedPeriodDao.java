@@ -118,7 +118,10 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
 
   @Override
   public int deleteOlderThan(Instant threshold) {
-    return jdbi.withHandle(
+    // Bounded at the sweep timeout: idempotent hourly cleanup, re-run in an hour if truncated.
+    return StatementTimeouts.withStatementTimeout(
+        jdbi,
+        StatementTimeouts.RETENTION_SWEEP_SECONDS,
         h -> {
           int deleted =
               h.createUpdate(DELETE_OLDER_THAN).bind(0, Timestamp.from(threshold)).execute();

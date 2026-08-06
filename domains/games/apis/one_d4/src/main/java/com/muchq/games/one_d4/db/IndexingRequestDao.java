@@ -570,8 +570,14 @@ public class IndexingRequestDao implements IndexingRequestStore {
     // H2 has none; the conditional UPDATE claim already performs is what makes this safe without
     // it, since at most one racer's WHERE can match a given row. Losing costs a retry against the
     // next candidate, not correctness.
+    //
+    // Bounded: this scan runs every few seconds on the poller's single dedicated thread, whose
+    // loop never returns while a statement is in flight — unbounded, one wedged scan stopped the
+    // instance claiming any work until a restart, with nothing local to recover it.
     List<UUID> candidates =
-        jdbi.withHandle(
+        StatementTimeouts.withStatementTimeout(
+            jdbi,
+            StatementTimeouts.SERVING_READ_SECONDS,
             h ->
                 h.createQuery(
                         """
@@ -719,7 +725,10 @@ public class IndexingRequestDao implements IndexingRequestStore {
 
   @Override
   public int deleteOlderThan(Instant threshold) {
-    return jdbi.withHandle(
+    // Bounded at the sweep timeout: idempotent hourly cleanup, re-run in an hour if truncated.
+    return StatementTimeouts.withStatementTimeout(
+        jdbi,
+        StatementTimeouts.RETENTION_SWEEP_SECONDS,
         h -> {
           int deleted =
               h.createUpdate(

@@ -78,6 +78,7 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/db/IndexingRequestStore.java",
         "src/main/java/com/muchq/games/one_d4/db/Migration.java",
         "src/main/java/com/muchq/games/one_d4/db/RetentionPolicy.java",
+        "src/main/java/com/muchq/games/one_d4/db/StatementTimeouts.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -502,10 +503,12 @@ java_test_suite(
     size = "small",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/db/ConcurrentFlushTest.java",
+        "src/test/java/com/muchq/games/one_d4/db/DataSourceFactoryTest.java",
         "src/test/java/com/muchq/games/one_d4/db/GameFeatureDaoTest.java",
         "src/test/java/com/muchq/games/one_d4/db/IndexedPeriodDaoTest.java",
         "src/test/java/com/muchq/games/one_d4/db/IndexingRequestDaoTest.java",
         "src/test/java/com/muchq/games/one_d4/db/MigrationTest.java",
+        "src/test/java/com/muchq/games/one_d4/db/StatementTimeoutsTest.java",
         "src/test/java/com/muchq/games/one_d4/db/TableDispatchTest.java",
     ],
     deps = [

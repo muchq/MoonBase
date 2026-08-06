@@ -29,38 +29,6 @@ import org.slf4j.LoggerFactory;
 public class GameFeatureDao implements GameFeatureStore {
   private static final Logger LOG = LoggerFactory.getLogger(GameFeatureDao.class);
 
-  /**
-   * Execution bound on the serving read paths — everything that goes through {@link
-   * #withReadHandle}: query, aggregate, aggregateTotals, queryOccurrences. HikariCP's
-   * connectionTimeout bounds pool <em>checkout</em> only — nothing bounded execution, so a query
-   * wedged on a lock wait ran forever. That is worst for FirstPageWarmer: its
-   * {@code @Scheduled(fixedDelay)} never re-schedules while a run is in flight, so one hung query
-   * silently stopped all future refreshes until a restart, while holding a thread of the small
-   * shared scheduled pool.
-   *
-   * <p>Ten seconds is far above any legitimate read here (LIMIT-bounded pages over a table with
-   * 7-day retention, now index-served). The binding constraint is FirstPageCache.MAX_AGE (60s), not
-   * the warmer's 30s tick — fixedDelay measures from completion, so ticks cannot overlap at any
-   * timeout — and a warmer tick runs <em>two</em> bounded reads (query, then queryOccurrences), so
-   * its worst successful case is 2x this value plus the 30s delay, which must stay under MAX_AGE or
-   * the snapshot expires between refreshes. FirstPageWarmerTest pins that arithmetic. A wedged tick
-   * fails loudly, into the warmer's catch-and-log, well before the next tick is due.
-   *
-   * <p>Write paths are deliberately not bounded by this: the index worker has its own lease ceiling
-   * and interrupt machinery, and cutting a flush short creates recovery work a read never has.
-   * {@link #fetchForReanalysis} is also excluded on purpose — it is the read half of the admin
-   * reanalysis batch loop, paging the whole table to feed a write path, not a serving read.
-   *
-   * <p>JDBC's queryTimeout cancels server-side execution (lock waits, slow plans). A true network
-   * black hole additionally needs a driver-level socket timeout, which lives in the JDBC URL (e.g.
-   * {@code &socketTimeout=30} for Postgres) — deployment config, not code; the one_d4 README's
-   * database-URL section carries the guidance.
-   *
-   * <p>On H2 the timeout is session-scoped rather than statement-scoped, so every read clears it
-   * again on the way out; see {@link #clearSessionQueryTimeout}.
-   */
-  public static final int READ_QUERY_TIMEOUT_SECONDS = 10;
-
   private static final String H2_INSERT =
       """
       MERGE INTO game_features (
@@ -147,13 +115,13 @@ public class GameFeatureDao implements GameFeatureStore {
   private final int readQueryTimeoutSeconds;
 
   public GameFeatureDao(Jdbi jdbi, boolean useH2) {
-    this(jdbi, useH2, Clock.systemUTC(), READ_QUERY_TIMEOUT_SECONDS);
+    this(jdbi, useH2, Clock.systemUTC(), StatementTimeouts.SERVING_READ_SECONDS);
   }
 
   /**
    * @param readQueryTimeoutSeconds injected so a test can bound a deliberately slow query in about
    *     a second instead of ten — the behavioral test for the timeout is the point of the seam.
-   *     Production always uses {@link #READ_QUERY_TIMEOUT_SECONDS}.
+   *     Production always uses {@link StatementTimeouts#SERVING_READ_SECONDS}.
    */
   GameFeatureDao(Jdbi jdbi, boolean useH2, Clock clock, int readQueryTimeoutSeconds) {
     this.jdbi = jdbi;
@@ -168,7 +136,7 @@ public class GameFeatureDao implements GameFeatureStore {
    *     come from one source; see {@link #deleteOlderThan}.
    */
   public GameFeatureDao(Jdbi jdbi, boolean useH2, Clock clock) {
-    this(jdbi, useH2, clock, READ_QUERY_TIMEOUT_SECONDS);
+    this(jdbi, useH2, clock, StatementTimeouts.SERVING_READ_SECONDS);
   }
 
   /**
@@ -254,7 +222,12 @@ public class GameFeatureDao implements GameFeatureStore {
    */
   @Override
   public int deleteOlderThan(Instant threshold) {
-    return jdbi.withHandle(
+    // Bounded at the sweep timeout, not the read one: RetentionWorker shares the warmer's
+    // scheduled pool with no lease or interrupt machinery, and this cascade delete is the
+    // statement most likely to sit behind a lock. Idempotent, so a truncated pass loses nothing.
+    return StatementTimeouts.withStatementTimeout(
+        jdbi,
+        StatementTimeouts.RETENTION_SWEEP_SECONDS,
         h -> {
           int deleted =
               h.createUpdate("DELETE FROM game_features WHERE indexed_at < ?")
@@ -440,48 +413,13 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   /**
-   * H2 scopes {@code Statement.setQueryTimeout} to the connection's session — {@code JdbcStatement}
-   * delegates straight to {@code JdbcConnection.setQueryTimeout} — and HikariCP does not reset it
-   * on checkin, so without this a single read would leave its timeout on the pooled connection for
-   * every later statement, including writes this class deliberately leaves unbounded. Postgres
-   * scopes the timeout to the statement, so there is nothing to clean up there.
-   *
-   * <p>Reset through the JDBC API rather than {@code SET QUERY_TIMEOUT 0}: H2 also caches the value
-   * client-side in the connection, and raw SQL resets only the server session, leaving the cached
-   * value to keep answering {@code getQueryTimeout} — and to keep applying — for later statements.
-   */
-  private void clearSessionQueryTimeout(Handle h) {
-    if (useH2) {
-      try (var stmt = h.getConnection().createStatement()) {
-        stmt.setQueryTimeout(0);
-      } catch (SQLException e) {
-        // Log-and-swallow: this runs in a finally, where a throw would replace the read's real
-        // exception — including the timeout this bound exists to surface — and could fail an
-        // otherwise-successful read. A connection too broken to accept the reset is one HikariCP
-        // evicts, so the leak this guards against cannot outlive it.
-        LOG.warn("Failed to clear H2 session query timeout", e);
-      }
-    }
-  }
-
-  /**
-   * The single entry point for serving reads: every statement opened by {@code body} carries {@link
-   * #READ_QUERY_TIMEOUT_SECONDS} (set once on the handle's statement config), and the H2 session is
-   * cleared on the way out. The bound being part of the entry point — rather than a call each read
-   * must remember — is what makes "serving reads are bounded" structural: a new read either goes
-   * through here and is bounded, or visibly doesn't.
+   * The serving reads' bounded entry point — see {@link StatementTimeouts#withStatementTimeout} for
+   * the mechanism and {@link StatementTimeouts#SERVING_READ_SECONDS} for the policy. {@link
+   * #fetchForReanalysis} deliberately does not go through here: it is the read half of the admin
+   * reanalysis batch loop, paging the whole table to feed a write path, not a serving read.
    */
   private <T> T withReadHandle(org.jdbi.v3.core.HandleCallback<T, RuntimeException> body) {
-    return jdbi.withHandle(
-        h -> {
-          h.getConfig(org.jdbi.v3.core.statement.SqlStatements.class)
-              .setQueryTimeout(readQueryTimeoutSeconds);
-          try {
-            return body.withHandle(h);
-          } finally {
-            clearSessionQueryTimeout(h);
-          }
-        });
+    return StatementTimeouts.withStatementTimeout(jdbi, readQueryTimeoutSeconds, body);
   }
 
   @Override
