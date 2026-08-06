@@ -1,6 +1,7 @@
 package com.muchq.games.one_d4.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.sql.SQLException;
 import java.time.Duration;
@@ -9,14 +10,16 @@ import java.util.ArrayList;
 import java.util.List;
 import org.jdbi.v3.core.statement.SqlLogger;
 import org.jdbi.v3.core.statement.StatementContext;
+import org.jdbi.v3.core.statement.UnableToExecuteStatementException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The bounds on the other unattended loops — the dispatch poller's candidate scan and the hourly
- * retention sweep's deletes — observed on the real JDBC statements via Jdbi's logger, the same way
- * GameFeatureDaoTest pins the serving reads. Asserted against literals rather than the constants,
- * so mutating a constant cannot mutate the expectation with it.
+ * The timeout mechanism itself, plus the wiring of the unattended loops and status reads onto it —
+ * observed on the real JDBC statements via Jdbi's logger. Wiring assertions reference the constants
+ * (0 from a path that lost its bound never equals them); the constants' values are pinned exactly
+ * once, in {@link #theBoundsAreThePolicyValues}, so changing a bound costs one edit plus whatever
+ * pinned arithmetic genuinely breaks.
  */
 public class StatementTimeoutsTest {
 
@@ -47,8 +50,27 @@ public class StatementTimeoutsTest {
             });
   }
 
+  /**
+   * The one home of each bound's value, with its rationale — every wiring assertion elsewhere
+   * references the constant. Mutating a constant fails exactly here; losing a bound at a call site
+   * fails the wiring probe for that site.
+   */
   @Test
-  public void claimNextsCandidateScanIsBoundedAndItsClaimUpdatesAreNot() {
+  public void theBoundsAreThePolicyValues() {
+    assertThat(StatementTimeouts.SERVING_READ_SECONDS)
+        .as(
+            "far above any LIMIT-bounded read or 8-row poll; FirstPageWarmerTest pins its"
+                + " relationship to the warmer tick budget")
+        .isEqualTo(10);
+    assertThat(StatementTimeouts.RETENTION_SWEEP_SECONDS)
+        .as(
+            "sized for a sweep, not a page; DataSourceFactoryTest pins that the Postgres socket"
+                + " timeout exceeds it")
+        .isEqualTo(120);
+  }
+
+  @Test
+  public void claimNextsCandidateScanIsBounded() {
     IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi());
     dao.createOrAdopt(
         "poller",
@@ -63,17 +85,27 @@ public class StatementTimeoutsTest {
     timeouts.clear();
     var claimed = dao.claimNext("owner-1", Duration.ofMinutes(5), Instant.now());
 
-    // The claim must succeed, or the "statements after the scan" half below is vacuously true.
+    // The claim must succeed so the probe list demonstrably covers a full poll, not a no-op.
     assertThat(claimed).as("the seeded request must be claimable").isPresent();
-    assertThat(timeouts.size())
-        .as("a successful claim runs the scan plus at least the claim UPDATE")
-        .isGreaterThan(1);
+    assertThat(timeouts).as("claimNext ran no statements?").isNotEmpty();
     assertThat(timeouts.get(0))
         .as("the candidate scan — the poller's wedge point — must carry the serving-read bound")
-        .isEqualTo(10);
-    assertThat(timeouts.subList(1, timeouts.size()))
-        .as("the claim UPDATE and status reads that follow stay unbounded")
-        .allMatch(t -> t == 0);
+        .isEqualTo(StatementTimeouts.SERVING_READ_SECONDS);
+  }
+
+  @Test
+  public void statusPathServingReadsAreBounded() {
+    timeouts.clear();
+    new IndexingRequestDao(testDb.jdbi()).listRecent(50);
+    assertThat(timeouts)
+        .as("listRecent — GET /v1/index's list read")
+        .containsExactly(StatementTimeouts.SERVING_READ_SECONDS);
+
+    timeouts.clear();
+    new IndexedPeriodDao(testDb.jdbi(), true).findPeriodsForPlayers(List.of("hikaru"));
+    assertThat(timeouts)
+        .as("findPeriodsForPlayers — GET /v1/index's data-availability read")
+        .containsExactly(StatementTimeouts.SERVING_READ_SECONDS);
   }
 
   @Test
@@ -85,31 +117,121 @@ public class StatementTimeoutsTest {
     assertThat(timeouts).as("reclaim ran no statements?").isNotEmpty();
     assertThat(timeouts)
         .as("every settle statement in the reclaim transaction carries the sweep bound")
-        .allMatch(t -> t == 120);
-    // The "inside its transaction" half: reclaim must use the transactional variant, or the three
-    // settle statements stop being a unit. The non-transactional variant compiles in its place,
-    // which is exactly why this is a probe rather than prose.
+        .allMatch(t -> t == StatementTimeouts.RETENTION_SWEEP_SECONDS);
+    // The "inside its transaction" half: reclaim's three settles have order-dependent predicates
+    // (releasing stamps updated_at, which hides the staleness the retire arm looks for), so they
+    // must stay one unit. The non-transactional variant compiles in its place, which is exactly
+    // why this is a probe rather than prose.
     assertThat(autoCommits)
         .as("reclaim's statements run inside one transaction")
         .allMatch(ac -> !ac);
   }
 
   @Test
-  public void theSweepDeletesAreSingleStatementsOutsideAnyTransaction() {
+  public void allThreeRetentionDeletesCarryTheSweepBound() {
+    Instant threshold = Instant.parse("2026-01-01T00:00:00Z");
+
     timeouts.clear();
-    autoCommits.clear();
+    new GameFeatureDao(testDb.jdbi(), true).deleteOlderThan(threshold);
+    assertThat(timeouts)
+        .as("game_features delete")
+        .contains(StatementTimeouts.RETENTION_SWEEP_SECONDS);
+
+    timeouts.clear();
+    new IndexingRequestDao(testDb.jdbi()).deleteOlderThan(threshold);
+    assertThat(timeouts)
+        .as("indexing_requests delete")
+        .contains(StatementTimeouts.RETENTION_SWEEP_SECONDS);
+
+    timeouts.clear();
+    new IndexedPeriodDao(testDb.jdbi(), true).deleteOlderThan(threshold);
+    assertThat(timeouts)
+        .as("indexed_periods delete")
+        .contains(StatementTimeouts.RETENTION_SWEEP_SECONDS);
+  }
+
+  @Test
+  public void aBoundedSweepLeavesNoTimeoutOnTheSession() throws Exception {
     new GameFeatureDao(testDb.jdbi(), true).deleteOlderThan(Instant.parse("2026-01-01T00:00:00Z"));
 
-    // Each delete is one self-committing statement — unlike reclaim there is no multi-statement
-    // unit to keep atomic, and holding a transaction open across the cascade would only lengthen
-    // lock hold times. Pinned so the two shapes stay deliberate rather than accidental.
-    assertThat(autoCommits).as("the delete ran no statements?").isNotEmpty();
-    assertThat(autoCommits).allMatch(ac -> ac);
+    try (var conn = testDb.dataSource().getConnection();
+        var probe = conn.createStatement()) {
+      assertThat(probe.getQueryTimeout())
+          .as("the sweep bound must not leak to later statements on the pooled connection")
+          .isEqualTo(0);
+    }
   }
 
   // ---------------------------------------------------------------------------------------------
   // The mechanism itself, tested directly rather than through a DAO.
   // ---------------------------------------------------------------------------------------------
+
+  /** H2 alias target for the slow-query tests: sleeps per evaluated row. Must be public static. */
+  public static int nap(int millis) throws InterruptedException {
+    Thread.sleep(millis);
+    return 0;
+  }
+
+  /**
+   * The bound must cancel a statement that is actually running, not merely be set. 400 rows
+   * sleeping 20ms each is a ~8s query; a 1s bound has to kill it partway. H2 enforces the timeout
+   * cooperatively and only checks every so many processed rows, which is why the fixture needs
+   * hundreds of rows — with too few the check never runs and the query completes as if unbounded.
+   * The positive twin shares the fixture (same alias, same query shape), so a broken alias cannot
+   * masquerade as the bound firing. Postgres-side cancellation is covered by
+   * PostgresReadTimeoutTest.
+   */
+  @Test
+  public void slowExecutionIsCancelledAtTheBound() throws Exception {
+    try (var conn = testDb.dataSource().getConnection();
+        var stmt = conn.createStatement()) {
+      stmt.execute(
+          "CREATE ALIAS IF NOT EXISTS NAP FOR"
+              + " \"com.muchq.games.one_d4.db.StatementTimeoutsTest.nap\"");
+      for (int i = 0; i < 400; i++) {
+        stmt.execute(
+            "INSERT INTO indexed_periods (player, platform, year_month, fetched_at, is_complete,"
+                + " games_count) VALUES ('slow-"
+                + i
+                + "', 'CHESS_COM', '2026-01', now(), true, 0)");
+      }
+    }
+
+    String slowSql = "SELECT player FROM indexed_periods WHERE NAP(20) = 0";
+    long start = System.nanoTime();
+    assertThatThrownBy(
+            () ->
+                StatementTimeouts.withStatementTimeout(
+                    testDb.jdbi(), 1, h -> h.createQuery(slowSql).mapTo(String.class).list()))
+        .as("a statement outrunning the bound must be cancelled, not awaited")
+        .isInstanceOf(UnableToExecuteStatementException.class);
+    long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+    assertThat(elapsedMillis)
+        .as("cancellation must arrive well before the ~8s the full query needs")
+        .isLessThan(5_000);
+
+    // The error path must clear the H2 session too: this is the leak that matters in production
+    // — a timed-out statement returning its pooled connection with the bound still set. Without
+    // the reset running in a finally (rather than at the end of the try), this probe reads 1.
+    try (var conn = testDb.dataSource().getConnection();
+        var probe = conn.createStatement()) {
+      assertThat(probe.getQueryTimeout())
+          .as("a cancelled statement must not leave its bound on the pooled connection")
+          .isEqualTo(0);
+    }
+
+    // Positive twin: the same query shape under a negligible per-row sleep completes normally,
+    // proving the alias and the query work and the failure above is the bound.
+    List<String> rows =
+        StatementTimeouts.withStatementTimeout(
+            testDb.jdbi(),
+            1,
+            h ->
+                h.createQuery("SELECT player FROM indexed_periods WHERE NAP(0) = 0")
+                    .mapTo(String.class)
+                    .list());
+    assertThat(rows).hasSize(400);
+  }
 
   @Test
   public void withStatementTimeout_appliesTheGivenBoundAndReturnsTheBodysValue() {
@@ -126,7 +248,7 @@ public class StatementTimeoutsTest {
   @Test
   public void withStatementTimeout_propagatesTheBodysExceptionAndStillClearsTheSession()
       throws Exception {
-    org.assertj.core.api.Assertions.assertThatThrownBy(
+    assertThatThrownBy(
             () ->
                 StatementTimeouts.withStatementTimeout(
                     testDb.jdbi(),
@@ -194,7 +316,7 @@ public class StatementTimeoutsTest {
 
     // Error path: the body's exception survives a failed cleanup — not the cleanup's.
     failCreateStatement.set(false);
-    org.assertj.core.api.Assertions.assertThatThrownBy(
+    assertThatThrownBy(
             () ->
                 StatementTimeouts.withStatementTimeout(
                     faultyJdbi,
@@ -210,7 +332,7 @@ public class StatementTimeoutsTest {
   @Test
   public void inTransactionWithTimeout_isBoundedAndActuallyTransactional() {
     timeouts.clear();
-    org.assertj.core.api.Assertions.assertThatThrownBy(
+    assertThatThrownBy(
             () ->
                 StatementTimeouts.inTransactionWithTimeout(
                     testDb.jdbi(),
@@ -234,7 +356,7 @@ public class StatementTimeoutsTest {
             .withHandle(
                 h ->
                     h.createQuery(
-                            "SELECT COUNT(*) FROM indexing_requests WHERE player =" + " 'rollback'")
+                            "SELECT COUNT(*) FROM indexing_requests WHERE player = 'rollback'")
                         .mapTo(Integer.class)
                         .one());
     assertThat(survivors)
@@ -251,34 +373,5 @@ public class StatementTimeoutsTest {
     // The exclusion GameFeatureDao's javadoc states, pinned: the admin batch read pages the whole
     // table to feed a write path and must not silently gain the serving bound.
     assertThat(timeouts).allMatch(t -> t == 0);
-  }
-
-  @Test
-  public void allThreeRetentionDeletesCarryTheSweepBound() {
-    Instant threshold = Instant.parse("2026-01-01T00:00:00Z");
-
-    timeouts.clear();
-    new GameFeatureDao(testDb.jdbi(), true).deleteOlderThan(threshold);
-    assertThat(timeouts).as("game_features delete").contains(120);
-
-    timeouts.clear();
-    new IndexingRequestDao(testDb.jdbi()).deleteOlderThan(threshold);
-    assertThat(timeouts).as("indexing_requests delete").contains(120);
-
-    timeouts.clear();
-    new IndexedPeriodDao(testDb.jdbi(), true).deleteOlderThan(threshold);
-    assertThat(timeouts).as("indexed_periods delete").contains(120);
-  }
-
-  @Test
-  public void aBoundedSweepLeavesNoTimeoutOnTheSession() throws Exception {
-    new GameFeatureDao(testDb.jdbi(), true).deleteOlderThan(Instant.parse("2026-01-01T00:00:00Z"));
-
-    try (var conn = testDb.dataSource().getConnection();
-        var probe = conn.createStatement()) {
-      assertThat(probe.getQueryTimeout())
-          .as("the sweep bound must not leak to later statements on the pooled connection")
-          .isEqualTo(0);
-    }
   }
 }

@@ -108,7 +108,10 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
   @Override
   public List<IndexedPeriod> findPeriodsForPlayers(Collection<String> players) {
     if (players.isEmpty()) return List.of();
-    return jdbi.withHandle(
+    // Bounded like every serving read: this feeds the data-availability block of GET /v1/index.
+    return StatementTimeouts.withStatementTimeout(
+        jdbi,
+        StatementTimeouts.SERVING_READ_SECONDS,
         h ->
             h.createQuery(FIND_FOR_PLAYERS)
                 .bindList("players", List.copyOf(players))

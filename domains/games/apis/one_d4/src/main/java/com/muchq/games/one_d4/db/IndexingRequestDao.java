@@ -434,7 +434,10 @@ public class IndexingRequestDao implements IndexingRequestStore {
 
   @Override
   public List<IndexingRequest> listRecent(int limit) {
-    return jdbi.withHandle(
+    // Bounded like every serving read: this backs GET /v1/index on a request thread.
+    return StatementTimeouts.withStatementTimeout(
+        jdbi,
+        StatementTimeouts.SERVING_READ_SECONDS,
         h ->
             h.createQuery("SELECT * FROM indexing_requests ORDER BY created_at DESC LIMIT ?")
                 .bind(0, limit)

@@ -698,7 +698,9 @@ java_test_suite(
 
 java_test_suite(
     name = "http_integration_tests",
-    size = "small",
+    # medium (300s), not small: FirstPageWarmupTest boots an embedded server per method plus a
+    # polling warm-up wait, which sits too close to small's 60s ceiling on a loaded CI machine.
+    size = "medium",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/api/AggregateResponseWireTest.java",
         "src/test/java/com/muchq/games/one_d4/api/ContentTypeHandlingTest.java",

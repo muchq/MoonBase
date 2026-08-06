@@ -16,8 +16,8 @@ import java.util.Map;
 
 /**
  * The query pipeline (parse, compile, run, attach occurrences), shared by {@link QueryController}
- * and {@link FirstPageWarmer} so the warmed response is built by exactly the code a live request
- * would run.
+ * and {@link FirstPageCache}'s loader so the warmed snapshot is built by exactly the code a live
+ * request would run.
  */
 @Singleton
 public class QueryExecutor {

@@ -112,22 +112,9 @@ public class GameFeatureDao implements GameFeatureStore {
   private final Jdbi jdbi;
   private final boolean useH2;
   private final Clock clock;
-  private final int readQueryTimeoutSeconds;
 
   public GameFeatureDao(Jdbi jdbi, boolean useH2) {
-    this(jdbi, useH2, Clock.systemUTC(), StatementTimeouts.SERVING_READ_SECONDS);
-  }
-
-  /**
-   * @param readQueryTimeoutSeconds injected so a test can bound a deliberately slow query in about
-   *     a second instead of ten — the behavioral test for the timeout is the point of the seam.
-   *     Production always uses {@link StatementTimeouts#SERVING_READ_SECONDS}.
-   */
-  GameFeatureDao(Jdbi jdbi, boolean useH2, Clock clock, int readQueryTimeoutSeconds) {
-    this.jdbi = jdbi;
-    this.useH2 = useH2;
-    this.clock = clock;
-    this.readQueryTimeoutSeconds = readQueryTimeoutSeconds;
+    this(jdbi, useH2, Clock.systemUTC());
   }
 
   /**
@@ -136,7 +123,9 @@ public class GameFeatureDao implements GameFeatureStore {
    *     come from one source; see {@link #deleteOlderThan}.
    */
   public GameFeatureDao(Jdbi jdbi, boolean useH2, Clock clock) {
-    this(jdbi, useH2, clock, StatementTimeouts.SERVING_READ_SECONDS);
+    this.jdbi = jdbi;
+    this.useH2 = useH2;
+    this.clock = clock;
   }
 
   /**
@@ -419,7 +408,8 @@ public class GameFeatureDao implements GameFeatureStore {
    * reanalysis batch loop, paging the whole table to feed a write path, not a serving read.
    */
   private <T> T withReadHandle(org.jdbi.v3.core.HandleCallback<T, RuntimeException> body) {
-    return StatementTimeouts.withStatementTimeout(jdbi, readQueryTimeoutSeconds, body);
+    return StatementTimeouts.withStatementTimeout(
+        jdbi, StatementTimeouts.SERVING_READ_SECONDS, body);
   }
 
   @Override

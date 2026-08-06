@@ -49,6 +49,36 @@ public class RetentionWorkerTest {
     }
   }
 
+  /**
+   * The statement timeouts turned a wedged sweep from a hang into a throw, which only helps if the
+   * schedule survives the throw: an exception escaping a {@code @Scheduled(fixedDelay)} task
+   * cancels all future ticks permanently, so runRetention's catch-everything is the designed
+   * recovery path — pinned here against stores that fail the way a timed-out statement now does
+   * (every call throws; the datasource underneath is closed).
+   */
+  @Test
+  public void runRetention_survivesStoreFailuresWithoutPropagating() throws Exception {
+    TestDb broken = TestDb.create("retention_broken");
+    RetentionWorker brokenWorker =
+        new RetentionWorker(
+            new GameFeatureDao(broken.jdbi(), true),
+            new IndexedPeriodDao(broken.jdbi(), true),
+            new IndexingRequestDao(broken.jdbi()));
+    ((java.io.Closeable) broken.dataSource()).close();
+
+    org.assertj.core.api.Assertions.assertThatCode(brokenWorker::runRetention)
+        .as("a failing sweep must not escape and cancel the schedule")
+        .doesNotThrowAnyException();
+
+    // The control: the same worker method against healthy stores still does its work, so the
+    // no-throw above is swallow-and-recover, not a sweep that never ran.
+    GameFeature old = createGame("https://chess.com/control-old");
+    dao.insertBatch(List.of(old));
+    updateIndexedAt("https://chess.com/control-old", Instant.now().minus(8, ChronoUnit.DAYS));
+    worker.runRetention();
+    assertThat(countGames()).isEqualTo(0);
+  }
+
   @Test
   public void runRetention_deletesOldGames() {
     // Insert a fresh game and an old game

@@ -1,7 +1,6 @@
 package com.muchq.games.one_d4.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.muchq.games.chessql.compiler.CompiledQuery;
 import com.muchq.games.chessql.compiler.SqlCompiler;
@@ -14,7 +13,6 @@ import com.muchq.games.one_d4.db.GameFeatureStore.GameForReanalysis;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import java.sql.SQLException;
-import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -24,7 +22,6 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.jdbi.v3.core.statement.SqlLogger;
 import org.jdbi.v3.core.statement.StatementContext;
-import org.jdbi.v3.core.statement.UnableToExecuteStatementException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -72,82 +69,19 @@ public class GameFeatureDaoTest {
     assertThat(dao.query(allGames, 10, 0)).isEmpty();
   }
 
-  /** H2 alias target for the slow-query tests: sleeps per evaluated row. Must be public static. */
-  public static int nap(int millis) throws InterruptedException {
-    Thread.sleep(millis);
-    return 0;
-  }
-
   /**
-   * The read-path timeout must cancel a query that is actually running, not merely be set. 400 rows
-   * sleeping 20ms each is a ~8s query; a 1s timeout has to kill it partway. H2 enforces the timeout
-   * cooperatively and only checks every so many processed rows, which is why the fixture needs
-   * hundreds of rows rather than a handful — with too few rows the check never runs and the query
-   * completes as if unbounded. The positive twin below shares the fixture (same alias, same query
-   * shape), so a broken alias cannot masquerade as the timeout firing.
-   */
-  @Test
-  public void query_slowExecutionIsCancelledByTheReadTimeout() throws Exception {
-    try (var conn = testDb.dataSource().getConnection();
-        var stmt = conn.createStatement()) {
-      stmt.execute(
-          "CREATE ALIAS IF NOT EXISTS NAP FOR"
-              + " \"com.muchq.games.one_d4.db.GameFeatureDaoTest.nap\"");
-    }
-    List<GameFeature> games = new ArrayList<>();
-    for (int i = 0; i < 400; i++) {
-      games.add(createGame("https://chess.com/game/slow-" + i));
-    }
-    dao.insertBatch(games);
-
-    GameFeatureDao boundedDao = new GameFeatureDao(testDb.jdbi(), true, Clock.systemUTC(), 1);
-    CompiledQuery slow =
-        new CompiledQuery(
-            "SELECT g.* FROM game_features g WHERE NAP(20) = 0"
-                + " ORDER BY g.played_at DESC, g.game_url ASC",
-            List.of());
-
-    long start = System.nanoTime();
-    assertThatThrownBy(() -> boundedDao.query(slow, 500, 0))
-        .as("a query outrunning the timeout must be cancelled, not awaited")
-        .isInstanceOf(UnableToExecuteStatementException.class);
-    long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
-    assertThat(elapsedMillis)
-        .as("cancellation must arrive well before the ~8s the full query needs")
-        .isLessThan(5_000);
-
-    // The error path must clear the H2 session too: this is the leak that matters in production
-    // — a timed-out read returning its pooled connection with the timeout still set. Without the
-    // reset running in a finally (rather than at the end of the try), this probe reads 1.
-    try (var conn = testDb.dataSource().getConnection();
-        var probe = conn.createStatement()) {
-      assertThat(probe.getQueryTimeout())
-          .as("a timed-out read must not leave its timeout on the pooled connection")
-          .isEqualTo(0);
-    }
-
-    // Positive twin: the same query shape under a negligible per-row sleep completes normally,
-    // proving the alias and the crafted CompiledQuery work and the failure above is the timeout.
-    CompiledQuery fast =
-        new CompiledQuery(
-            "SELECT g.* FROM game_features g WHERE NAP(0) = 0"
-                + " ORDER BY g.played_at DESC, g.game_url ASC",
-            List.of());
-    assertThat(boundedDao.query(fast, 500, 0)).hasSize(400);
-  }
-
-  /**
-   * The production constructors must apply the 10-second timeout to all four read statements —
-   * observed on the real JDBC statements via Jdbi's logger, per "test through the same objects
-   * production uses". Asserted against the literal 10 rather than the constant, so mutating the
-   * constant cannot mutate the expectation with it. Any read path losing its timeout regresses to
-   * unbounded execution silently; this is what notices.
+   * All four read paths must route through the bounded entry point — observed on the real JDBC
+   * statements via Jdbi's logger, per "test through the same objects production uses". Wiring is
+   * asserted against the constant (0 from a path that lost its bound never equals it); the
+   * constant's value itself is pinned once, in StatementTimeoutsTest, so a bound change costs one
+   * edit rather than a scavenger hunt. Behavioral cancellation at a short bound lives on the
+   * mechanism in StatementTimeoutsTest too.
    *
    * <p>The final probe pins the H2 session cleanup: H2 scopes setQueryTimeout to the pooled
-   * connection's session, so without the DAO's reset a read's timeout would leak into every later
-   * statement on that connection — including writes, which are deliberately unbounded. It also
-   * keeps the per-path probes honest: with a leaked session value, a read path that forgot its own
-   * setQueryTimeout would inherit an earlier read's and still probe as 10.
+   * connection's session, so without the entry point's reset a read's timeout would leak into every
+   * later statement on that connection — including writes, which are deliberately left without a
+   * statement bound. It also keeps the per-path probes honest: with a leaked session value, a read
+   * path that lost its own bound would inherit an earlier read's and still probe as bounded.
    */
   @Test
   public void allFourReadPathsCarryTheProductionTimeout() {
@@ -174,11 +108,13 @@ public class GameFeatureDaoTest {
 
     lastTimeout.set(-1);
     prodDao.query(new SqlCompiler().compile(Parser.parse("white_elo >= 1000")), 10, 0);
-    assertThat(lastTimeout.get()).as("query()").isEqualTo(10);
+    assertThat(lastTimeout.get()).as("query()").isEqualTo(StatementTimeouts.SERVING_READ_SECONDS);
 
     lastTimeout.set(-1);
     prodDao.queryOccurrences(List.of("https://chess.com/game/timeout-probe"));
-    assertThat(lastTimeout.get()).as("queryOccurrences()").isEqualTo(10);
+    assertThat(lastTimeout.get())
+        .as("queryOccurrences()")
+        .isEqualTo(StatementTimeouts.SERVING_READ_SECONDS);
 
     lastTimeout.set(-1);
     prodDao.aggregate(
@@ -188,13 +124,17 @@ public class GameFeatureDaoTest {
             List.of()),
         List.of("opening_family"),
         10);
-    assertThat(lastTimeout.get()).as("aggregate()").isEqualTo(10);
+    assertThat(lastTimeout.get())
+        .as("aggregate()")
+        .isEqualTo(StatementTimeouts.SERVING_READ_SECONDS);
 
     lastTimeout.set(-1);
     prodDao.aggregateTotals(
         new CompiledQuery(
             "SELECT COUNT(*) AS total_games, 1 AS total_groups FROM game_features", List.of()));
-    assertThat(lastTimeout.get()).as("aggregateTotals()").isEqualTo(10);
+    assertThat(lastTimeout.get())
+        .as("aggregateTotals()")
+        .isEqualTo(StatementTimeouts.SERVING_READ_SECONDS);
 
     // An unrelated statement on the same (pooled) session must NOT inherit the read timeout.
     lastTimeout.set(-1);

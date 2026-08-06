@@ -103,8 +103,12 @@ public class FirstPageWarmerTest {
             .getAnnotation(io.micronaut.scheduling.annotation.Scheduled.class);
 
     assertThat(scheduled).as("refresh() is no longer scheduled").isNotNull();
-    assertThat(scheduled.fixedDelay()).matches("\\d+s");
-    long delaySeconds = Long.parseLong(scheduled.fixedDelay().replace("s", ""));
+    // fixedDelay, not fixedRate: fixedRate ticks can overlap, which would invalidate the budget
+    // arithmetic below (it assumes a tick completes before the next delay starts).
+    assertThat(scheduled.fixedRate())
+        .as("the warmer must not use an overlapping schedule")
+        .isEmpty();
+    long delaySeconds = parseSeconds(scheduled.fixedDelay());
     // The comment on the annotation states this invariant; this is what enforces it. If the
     // delay exceeds half MAX_AGE, the snapshot expires between refreshes and every first load
     // falls through to the database again.
@@ -118,6 +122,20 @@ public class FirstPageWarmerTest {
     assertThat(delaySeconds + worstTickSeconds)
         .as("a worst-case tick plus the delay must refresh before MAX_AGE expires the snapshot")
         .isLessThan(FirstPageCache.MAX_AGE.toSeconds());
+  }
+
+  /** Tolerant of the spellings Micronaut accepts, so the pin is on the budget, not the format. */
+  private static long parseSeconds(String duration) {
+    var matcher = java.util.regex.Pattern.compile("(\\d+)(m?s|m|h)").matcher(duration.strip());
+    assertThat(matcher.matches()).as("unrecognized @Scheduled duration: %s", duration).isTrue();
+    long value = Long.parseLong(matcher.group(1));
+    return switch (matcher.group(2)) {
+      case "ms" -> value / 1000;
+      case "s" -> value;
+      case "m" -> value * 60;
+      case "h" -> value * 3600;
+      default -> throw new IllegalStateException(duration);
+    };
   }
 
   private static GameFeature gameFeature(String gameUrl) {
