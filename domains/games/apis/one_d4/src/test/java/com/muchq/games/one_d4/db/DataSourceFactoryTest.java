@@ -39,6 +39,22 @@ public class DataSourceFactoryTest {
                 "jdbc:postgresql://host:5432/db?user=u&socketTimeout=30"))
         .as("an operator's explicit choice in the URL must never be overridden")
         .isEmpty();
+    assertThat(
+            DataSourceFactory.defaultSocketTimeout(
+                "jdbc:postgresql://host:5432/db?socketTimeout=30"))
+        .as("first query parameter position counts too")
+        .isEmpty();
+  }
+
+  @Test
+  public void theSubstringInsideAnotherParametersValueDoesNotSuppressTheDefault() {
+    // The "already set?" check must match at a parameter boundary. A bare substring search
+    // would read this ApplicationName value as the operator choosing a socket timeout and
+    // silently ship the connection without one.
+    assertThat(
+            DataSourceFactory.defaultSocketTimeout(
+                "jdbc:postgresql://host:5432/db?user=u&ApplicationName=why_socketTimeout=is_here"))
+        .hasValue(150);
   }
 
   @Test

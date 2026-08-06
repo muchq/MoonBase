@@ -55,7 +55,11 @@ public class DataSourceFactory {
    * operator's explicit choice in {@code /etc/one_d4/db_config} is never overridden.
    */
   static OptionalInt defaultSocketTimeout(String jdbcUrl) {
-    if (!jdbcUrl.startsWith("jdbc:postgresql:") || jdbcUrl.contains("socketTimeout=")) {
+    // Matched at a parameter boundary so the substring appearing inside another parameter's
+    // value cannot silently suppress the default.
+    if (!jdbcUrl.startsWith("jdbc:postgresql:")
+        || jdbcUrl.contains("?socketTimeout=")
+        || jdbcUrl.contains("&socketTimeout=")) {
       return OptionalInt.empty();
     }
     return OptionalInt.of(PG_SOCKET_TIMEOUT_SECONDS);

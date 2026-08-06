@@ -91,6 +91,13 @@ public class StatementTimeoutsTest {
     assertThat(timeouts.get(0))
         .as("the candidate scan — the poller's wedge point — must carry the serving-read bound")
         .isEqualTo(StatementTimeouts.SERVING_READ_SECONDS);
+    // The exclusion is as deliberate as the bound: the claim UPDATEs that follow the scan stay
+    // unbounded, so wrapping all of claimNext in the serving bound must fail here. Non-empty
+    // because a successful claim necessarily ran at least the claiming UPDATE.
+    assertThat(timeouts.subList(1, timeouts.size()))
+        .as("the claim UPDATEs after the scan stay deliberately unbounded")
+        .isNotEmpty()
+        .allMatch(t -> t == 0);
   }
 
   @Test
