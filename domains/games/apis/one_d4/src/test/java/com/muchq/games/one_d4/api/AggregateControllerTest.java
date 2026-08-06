@@ -14,6 +14,7 @@ import com.muchq.games.one_d4.db.GameFeatureStore;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -159,14 +160,60 @@ public class AggregateControllerTest {
   }
 
   @Test
-  public void aggregate_otherPerspectiveFieldsStillRejectedInGroupBy() {
+  public void aggregate_eloBucketGroupByCompilesThroughTheController() {
+    // The REST groupBy string carries the bucket width, the compiled SQL floors the CASE to the
+    // band's lower bound, and the response keys the numeric bound under the underscore name.
+    store.rows =
+        List.of(
+            new AggregateRow(Collections.singletonMap("opponent_elo", 2400), 9),
+            new AggregateRow(Collections.singletonMap("opponent_elo", null), 2));
+
+    AggregateResponse response =
+        controller.aggregate(
+            new AggregateRequest(
+                "time.class = \"bullet\"", List.of("opponent.elo(200)"), "count", 20, "hikaru"));
+
+    assertThat(response.groups().get(0).group()).containsEntry("opponent_elo", 2400);
+    assertThat(response.groups().get(1).group()).containsEntry("opponent_elo", null);
+    assertThat(store.lastGroupColumns).containsExactly("opponent_elo");
+    assertThat(((CompiledQuery) store.lastCompiled).selectSql())
+        .contains("END) / 200 * 200 AS opponent_elo")
+        .contains("GROUP BY opponent_elo");
+  }
+
+  @Test
+  public void aggregate_invalidBucketWidthRejectedBeforeTheStore() {
     assertThatThrownBy(
             () ->
                 controller.aggregate(
-                    new AggregateRequest("white.elo > 1", List.of("me.elo"), null, 20, "hikaru")))
+                    new AggregateRequest(
+                        "white.elo > 1", List.of("me.elo(0)"), null, 20, "hikaru")))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Perspective fields are not supported in groupBy");
+        .hasMessageContaining("Bucket width must be a positive integer");
     assertThat(store.lastCompiled).isNull();
+  }
+
+  @Test
+  public void aggregate_opponentTitleGroupByCompilesWithUnderscoreKey() {
+    store.rows =
+        List.of(
+            new AggregateRow(Collections.singletonMap("opponent_title", "GM"), 9),
+            new AggregateRow(Collections.singletonMap("opponent_title", null), 120));
+
+    AggregateResponse response =
+        controller.aggregate(
+            new AggregateRequest(
+                "time.class = \"bullet\"", List.of("opponent.title"), "count", 20, "hikaru"));
+
+    assertThat(response.groups()).hasSize(2);
+    assertThat(response.groups().get(0).group()).containsEntry("opponent_title", "GM");
+    // Untitled opponents are a NULL group, serialized as a null value under the group key —
+    // the same shape grouping the physical nullable title columns produces.
+    assertThat(response.groups().get(1).group()).containsEntry("opponent_title", null);
+    assertThat(store.lastGroupColumns).containsExactly("opponent_title");
+    assertThat(((CompiledQuery) store.lastCompiled).selectSql())
+        .contains("THEN black_title ELSE white_title END) AS opponent_title")
+        .contains("GROUP BY opponent_title");
   }
 
   @Test

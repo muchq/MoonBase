@@ -138,19 +138,45 @@ outcome = "win" AND opponent.title = "GM" AND time.class = "blitz"
 with `player: "hikaru"`. Perspective fields compile to `CASE` expressions over the `white_*` /
 `black_*` columns plus a participation guard.
 
-Two perspective fields may also be used in `groupBy` on `/v1/aggregate` (and the
-`aggregate_chess_games` tool) when `player` is supplied: `me.color` and `outcome`. This separates
-the player's repertoire from what opponents play — grouping by `["me.color", "opening_family"]`
-answers "which openings do I face as Black" where `opening_family` alone conflates both sides'
-choices. Group keys in the response use the underscore form (`me_color`, `outcome`). Without
-`player`, grouping by them is rejected; all other perspective fields (`me.elo`, `opponent.*`,
-...) remain filter-only.
+The categorical perspective fields may also be used in `groupBy` on `/v1/aggregate` (and the
+`aggregate_chess_games` tool) when `player` is supplied: `me.color`, `me.title`,
+`opponent.username`, `opponent.title`, and `outcome`. This is what makes both-colors
+breakdowns expressible at all: grouping by `["me.color", "opening_family"]` answers "which
+openings do I face as Black" where `opening_family` alone conflates both sides' choices, and
+grouping by `opponent.title` or `opponent.username` is the only correct opponent breakdown
+across both colors — the color-specific columns (`white_title`, ...) hold the *player's own*
+value on half the rows, so grouping them silently mixes the player into the opponent buckets.
+Group keys in the response use the underscore form (`me_color`, `opponent_title`, ...), and
+either spelling is accepted in the request. Untitled opponents form a `null` group, the same as
+grouping the physical nullable title columns. `opponent.username` groups by the stored username
+as-is — the perspective *filter* matches case-insensitively, but group keys are not
+case-normalized, so the same opponent stored under two casings forms two groups (same trap as
+`opening_family` variants). Without `player`, grouping by any perspective field is rejected.
+
+The two rating fields (`me.elo`, `opponent.elo`) group as fixed-width buckets, never raw by
+default — grouping by a raw rating makes one bucket per distinct value, burying the answer under
+one-game groups. A `groupBy` term is either a field name or a rating field with a
+bucket width:
+
+```
+group_term ::= field | rating_field "(" NUMBER ")"
+```
+
+Bare `opponent.elo` buckets by 100 points; a parenthesized width overrides it:
+`groupBy: ["opponent.elo(200)"]`. Any width down to 1 is honored (an explicit `opponent.elo(1)`
+*is* raw grouping, deliberately — `totalGroups` / `truncated` will say what it cost). Bands are
+half-open and keyed by their numeric lower bound — a group key of `2400` at width 200 means
+ratings in [2400, 2600) — under the underscore response key (`opponent_elo`), so bands sort
+numerically in the tiebreak. Rows with a NULL elo (chess.com omitted that side's rating data)
+form a `null` bucket, like the title fields. One width per field per request:
+`["me.elo(100)", "me.elo(200)"]` is rejected rather than silently picking one.
 
 Like the physical `*.title` / `*.elo` columns they resolve to, `me.title`, `opponent.title`,
-`me.elo`, and `opponent.elo` follow SQL NULL semantics: untitled players (and rows indexed before
-these columns existed) hold NULL, and NULL never matches a comparison — so
-`opponent.title != "GM"` returns only games against *titled* non-GM opponents, not games against
-untitled ones.
+`me.elo`, and `opponent.elo` follow SQL NULL semantics: NULLs (untitled players, rows indexed
+before the title columns existed, sides whose rating chess.com omitted) never match a comparison
+— so `opponent.title != "GM"` returns only games against *titled* non-GM opponents, not games
+against untitled ones (#1302 tracks making `!=` NULL-inclusive; until then, grouping by
+`opponent.title` is how to count the `null` bucket `!=` drops).
 
 ## Motifs
 

@@ -39,15 +39,20 @@ public class AggregateGamesTool implements McpTool {
         + " zero groups rather than an error — indistinguishable from 'played no games then'"
         + " unless you index that period first with index_chess_games. With the player"
         + " parameter the filter may use perspective fields (me.*, opponent.*, outcome) — e.g."
-        + " player: hikaru with query 'me.color = \"white\" AND opponent.title = \"GM\"'."
-        + " Groupable fields: opening_family, opening_name, eco, result, time_class, white_title,"
-        + " black_title, white_username, black_username, platform — plus me.color and outcome"
-        + " when player is set (group keys me_color/outcome), which separates your repertoire"
-        + " from what opponents play. Note: opening_family is derived from chess.com ECO-URL"
-        + " strings, not a normalized taxonomy — 'Closed Sicilian' and 'Closed Sicilian Defense'"
-        + " are distinct groups. In the output, count is how many groups were returned, not how"
-        + " many games; totalGames/totalGroups cover the untruncated result, and truncated=true"
-        + " means the group limit cut off a long tail.";
+        + " player: hikaru with query 'me.color = \"white\" AND opponent.title = \"GM\"'. With"
+        + " player set, perspective fields can also go in group_by (the group_by schema lists"
+        + " what's groupable, keyed by underscore forms in the output). Grouping by"
+        + " opponent.title or opponent.username is the only correct way to break down opponents"
+        + " across both colors — the color-specific columns mix your own values into the buckets"
+        + " on half the rows. Untitled opponents group under a null key, and opponent.username"
+        + " groups by the stored casing without normalization. me.elo and opponent.elo group as"
+        + " fixed-width rating buckets, 100 points unless the term carries a width like"
+        + " opponent.elo(200); each group key is the band's numeric lower bound (2400 at width"
+        + " 200 means 2400-2599), and NULL elos group under a null key. Note: opening_family is"
+        + " derived from chess.com ECO-URL strings, not a normalized taxonomy — 'Closed Sicilian'"
+        + " and 'Closed Sicilian Defense' are distinct groups. In the output, count is how many"
+        + " groups were returned, not how many games; totalGames/totalGroups cover the"
+        + " untruncated result, and truncated=true means the group limit cut off a long tail.";
   }
 
   @Override
@@ -61,8 +66,8 @@ public class AggregateGamesTool implements McpTool {
             "string",
             "description",
             "chess.com username that perspective fields (me.*, opponent.*, outcome) are resolved"
-                + " against; required when the filter uses them, and when group_by uses me.color"
-                + " or outcome"));
+                + " against; required when the filter uses them, and when group_by uses any"
+                + " perspective field"));
     properties.put(
         "group_by",
         Map.of(
@@ -73,9 +78,11 @@ public class AggregateGamesTool implements McpTool {
             "description",
             "Fields to group by, e.g. [\"opening_family\"]. Groupable: opening_family,"
                 + " opening_name, eco, result, time_class, white_title, black_title,"
-                + " white_username, black_username, platform — plus me.color and outcome when"
-                + " player is set, keyed me_color/outcome in the output. date and month are"
-                + " filter-only and rejected here."));
+                + " white_username, black_username, platform — plus me.color, me.title,"
+                + " opponent.username, opponent.title, outcome, and the rating buckets me.elo /"
+                + " opponent.elo (optionally with a width, e.g. opponent.elo(200); default 100)"
+                + " when player is set, keyed by their underscore forms in the output. date and"
+                + " month are filter-only and rejected here."));
     properties.put(
         "limit",
         Map.of(

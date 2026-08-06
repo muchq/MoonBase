@@ -108,6 +108,16 @@ public class IndexerToolsTest {
     return JsonUtils.readAs(json, JsonNode.class);
   }
 
+  /** Runs the aggregate tool over the indexed month's blitz games, as hikaru's perspective. */
+  private JsonNode aggregateAsHikaru(String... groupBy) {
+    return parse(
+        aggregateTool.execute(
+            Map.of(
+                "query", "time.class = \"blitz\"",
+                "player", "hikaru",
+                "group_by", List.of(groupBy))));
+  }
+
   private void givenIndexedMonth() {
     chessClient.setTitle("hikaru", "GM");
     chessClient.setGames(
@@ -244,16 +254,7 @@ public class IndexerToolsTest {
     givenIndexedMonth();
 
     // hikaru wins game/1 as white and loses game/2 as black
-    JsonNode result =
-        parse(
-            aggregateTool.execute(
-                Map.of(
-                    "query",
-                    "time.class = \"blitz\"",
-                    "player",
-                    "hikaru",
-                    "group_by",
-                    List.of("me.color", "outcome"))));
+    JsonNode result = aggregateAsHikaru("me.color", "outcome");
 
     assertThat(result.get("count").asInt()).isEqualTo(2);
     // Group keys use the underscore form; tiebreak orders black before white
@@ -276,20 +277,84 @@ public class IndexerToolsTest {
             "Field 'me.color' is perspective-relative (me.*, opponent.*, outcome) and requires a"
                 + " player parameter on the request");
 
-    JsonNode unsupported =
-        parse(
-            aggregateTool.execute(
-                Map.of(
-                    "query",
-                    "time.class = \"blitz\"",
-                    "player",
-                    "hikaru",
-                    "group_by",
-                    List.of("me.elo"))));
-    assertThat(unsupported.get("error").asText())
+    // A bad bucket width surfaces as the compiler's actionable message, not a stack trace.
+    JsonNode badWidth = aggregateAsHikaru("me.elo(abc)");
+    assertThat(badWidth.get("error").asText())
         .isEqualTo(
-            "Perspective fields are not supported in groupBy: me.elo (only me.color and outcome"
-                + " are groupable, with a player)");
+            "Bucket width must be a positive integer: me.elo(abc). Bare me.elo / opponent.elo"
+                + " bucket by 100; opponent.elo(200) groups ratings into [2000, 2200),"
+                + " [2200, 2400), ...");
+  }
+
+  /**
+   * The title CASEs pick the right side per row, end to end: someuser is untitled, so grouping by
+   * opponent.title pools both games into one null-keyed bucket — hikaru's own GM (stamped on
+   * whichever side he sat) reaches no opponent bucket — while me.title pools that GM from both
+   * colors. Also the pin that a NULL group key survives JSON serialization as an explicit null
+   * value rather than a dropped key.
+   */
+  @Test
+  public void aggregateGroupsByTitlesAcrossBothColors() {
+    givenIndexedMonth();
+
+    JsonNode opponents = aggregateAsHikaru("opponent.title");
+    assertThat(opponents.get("count").asInt()).isEqualTo(1);
+    JsonNode opponentGroup = opponents.get("groups").get(0);
+    assertThat(opponentGroup.get("group").has("opponent_title")).isTrue();
+    assertThat(opponentGroup.get("group").get("opponent_title").isNull()).isTrue();
+    assertThat(opponentGroup.get("count").asLong()).isEqualTo(2);
+
+    JsonNode mine = aggregateAsHikaru("me.title");
+    assertThat(mine.get("count").asInt()).isEqualTo(1);
+    JsonNode myGroup = mine.get("groups").get(0);
+    assertThat(myGroup.get("group").get("me_title").asText()).isEqualTo("GM");
+    assertThat(myGroup.get("count").asLong()).isEqualTo(2);
+  }
+
+  /**
+   * Opponent aggregation through the MCP tool: hikaru faces someuser as White in game/1 and as
+   * Black in game/2, and grouping by opponent.username pools both into one bucket. No physical
+   * column can produce this — white_username and black_username each hold hikaru himself on half
+   * the rows.
+   */
+  @Test
+  public void aggregateGroupsByOpponentUsernameAcrossBothColors() {
+    givenIndexedMonth();
+
+    JsonNode result = aggregateAsHikaru("opponent.username");
+
+    assertThat(result.get("count").asInt()).isEqualTo(1);
+    JsonNode group = result.get("groups").get(0);
+    assertThat(group.get("group").get("opponent_username").asText()).isEqualTo("someuser");
+    assertThat(group.get("count").asLong()).isEqualTo(2);
+    assertThat(result.get("totalGames").asLong()).isEqualTo(2);
+    assertThat(result.get("totalGroups").asLong()).isEqualTo(1);
+  }
+
+  /**
+   * Bucket plumbing through the MCP tool: the group_by string carries the bucket term (and its
+   * width) end to end, and the group keys arrive as *numeric* JSON lower bounds, not strings. The
+   * stub deals every game White 2800 / Black 1500, so this fixture is side-symmetric — me.elo and
+   * opponent.elo produce identical buckets — and cannot see a CASE reading the wrong side; that pin
+   * lives in GameFeatureDaoTest and PostgresAggregateCompatTest, where the elos are asymmetric.
+   */
+  @Test
+  public void aggregateGroupsByOpponentEloBucketsAcrossBothColors() {
+    givenIndexedMonth();
+
+    JsonNode result = aggregateAsHikaru("opponent.elo");
+
+    assertThat(result.get("count").asInt()).isEqualTo(2);
+    JsonNode first = result.get("groups").get(0).get("group");
+    assertThat(first.get("opponent_elo").isIntegralNumber()).isTrue();
+    assertThat(first.get("opponent_elo").asInt()).isEqualTo(1500);
+    assertThat(result.get("groups").get(1).get("group").get("opponent_elo").asInt())
+        .isEqualTo(2800);
+
+    // An explicit width reshapes the bands end to end: 1500 → [1000, 2000), 2800 → [2000, 3000).
+    JsonNode wide = aggregateAsHikaru("opponent.elo(1000)");
+    assertThat(wide.get("groups").get(0).get("group").get("opponent_elo").asInt()).isEqualTo(1000);
+    assertThat(wide.get("groups").get(1).get("group").get("opponent_elo").asInt()).isEqualTo(2000);
   }
 
   @Test

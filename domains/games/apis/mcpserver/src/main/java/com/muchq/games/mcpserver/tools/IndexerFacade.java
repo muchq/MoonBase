@@ -107,9 +107,11 @@ public class IndexerFacade {
   /**
    * Counts indexed games matching a ChessQL filter, grouped by the given fields. Perspective fields
    * in the filter are resolved against {@code player}; group-by fields must be physical columns,
-   * except me.color and outcome, which are groupable when {@code player} is supplied. Alongside the
-   * (limit-truncated) groups, the result carries untruncated totals so callers can tell when a long
-   * tail of groups was cut off.
+   * except the perspective fields, which are groupable when {@code player} is supplied: the
+   * categorical ones (me.color, me.title, opponent.username, opponent.title, outcome) by value, the
+   * rating ones (me.elo, opponent.elo) as fixed-width buckets keyed by each band's numeric lower
+   * bound. Alongside the (limit-truncated) groups, the result carries untruncated totals so callers
+   * can tell when a long tail of groups was cut off.
    */
   public AggregateResult aggregate(String chessql, List<String> groupBy, String player, int limit) {
     ParsedQuery parsed = Parser.parse(chessql);

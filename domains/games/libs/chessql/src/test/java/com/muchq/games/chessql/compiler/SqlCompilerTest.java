@@ -662,28 +662,70 @@ public class SqlCompilerTest {
 
   @Test
   public void testGroupByPerspectiveErrorMessagesAreExact() {
-    // me.elo is perspective-relative but not groupable, even with a player
+    // Bucket-width validation: a malformed, zero, negative, overflowing, or unclosed
+    // width — and a width on a field that doesn't bucket — must each get an actionable message,
+    // not the generic Unknown-field error. Width 0 in particular would otherwise compile into a
+    // division by zero, and the unclosed "me.elo(100" must not lenient-parse into a working term.
+    for (String field :
+        List.of(
+            "me.elo(0)",
+            "opponent.elo(-100)",
+            "me.elo(abc)",
+            "me_elo()",
+            "me.elo(99999999999)",
+            "me.elo(100")) {
+      assertThatThrownBy(
+              () ->
+                  compiler.compileAggregate(
+                      Parser.parse("white.elo > 1"), List.of(field), "hikaru"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(
+              "Bucket width must be a positive integer: "
+                  + field
+                  + ". Bare me.elo / opponent.elo bucket by 100; opponent.elo(200) groups ratings"
+                  + " into [2000, 2200), [2200, 2400), ...");
+    }
     assertThatThrownBy(
             () ->
                 compiler.compileAggregate(
-                    Parser.parse("white.elo > 1"), List.of("me.elo"), "hikaru"))
+                    Parser.parse("white.elo > 1"), List.of("me.color(100)"), "hikaru"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage(
-            "Perspective fields are not supported in groupBy: me.elo (only me.color and outcome"
-                + " are groupable, with a player)");
-    // me.color IS groupable, but only with a player — same voice as the filter-side message
+            "Only the rating fields take a bucket width in groupBy: me.color(100). Bucketed:"
+                + " me.elo, opponent.elo (e.g. opponent.elo(200)); groupable as-is, with a player:"
+                + " me.color, me.title, opponent.title, opponent.username, outcome");
+    // Two widths for one field would both alias the same group key, so the conflict is an error
+    // rather than a silent first-one-wins. The bare spelling participates via its default.
     assertThatThrownBy(
-            () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("me.color")))
+            () ->
+                compiler.compileAggregate(
+                    Parser.parse("white.elo > 1"), List.of("me.elo(200)", "me_elo(300)"), "hikaru"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage(
-            "Field 'me.color' is perspective-relative (me.*, opponent.*, outcome) and requires a"
-                + " player parameter on the request");
+            "Conflicting bucket widths for me.elo: 200 and 300 (bare me.elo / opponent.elo means"
+                + " a width of 100)");
     assertThatThrownBy(
-            () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("outcome")))
+            () ->
+                compiler.compileAggregate(
+                    Parser.parse("white.elo > 1"),
+                    List.of("opponent_elo", "opponent.elo(200)"),
+                    "hikaru"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage(
-            "Field 'outcome' is perspective-relative (me.*, opponent.*, outcome) and requires a"
-                + " player parameter on the request");
+            "Conflicting bucket widths for opponent.elo: 100 and 200 (bare me.elo / opponent.elo"
+                + " means a width of 100)");
+    // Groupable fields still require a player — same voice as the filter-side message. me.elo
+    // included: bucket terms resolve before the player check, but must not bypass it.
+    for (String field : List.of("me.color", "outcome", "opponent.title", "me.elo")) {
+      assertThatThrownBy(
+              () -> compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of(field)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage(
+              "Field '"
+                  + field
+                  + "' is perspective-relative (me.*, opponent.*, outcome) and requires a"
+                  + " player parameter on the request");
+    }
   }
 
   @Test
@@ -882,22 +924,6 @@ public class SqlCompilerTest {
   }
 
   @Test
-  public void testCompileAggregateRejectsPerspectiveGroupBy() {
-    assertThatThrownBy(
-            () ->
-                compiler.compileAggregate(
-                    Parser.parse("white.elo > 1"), List.of("opponent.title"), "hikaru"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Perspective fields are not supported in groupBy");
-    assertThatThrownBy(
-            () ->
-                compiler.compileAggregate(
-                    Parser.parse("white.elo > 1"), List.of("me.elo"), "hikaru"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Perspective fields are not supported in groupBy");
-  }
-
-  @Test
   public void testCompileAggregateGroupByMeColor() {
     CompiledQuery result =
         compiler.compileAggregate(
@@ -953,6 +979,204 @@ public class SqlCompilerTest {
     assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", 2500));
   }
 
+  /**
+   * Grouping by opponent.title resolves the opposite side's column per row, so a both-colors
+   * aggregate reads black_title where the player was White and white_title where the player was
+   * Black. The color-specific columns cannot express this — white_title mixes the player's own
+   * title into the buckets on half the rows.
+   */
+  @Test
+  public void testCompileAggregateGroupByOpponentTitle() {
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("time.class = \"bullet\""), List.of("opponent.title"), "hikaru");
+
+    assertThat(result.selectSql())
+        .isEqualTo(
+            "SELECT (CASE WHEN LOWER(white_username) = LOWER(?) THEN black_title ELSE white_title"
+                + " END) AS opponent_title, COUNT(*) AS group_count FROM game_features g WHERE"
+                + " ((LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))"
+                + " AND LOWER(time_class) = LOWER(?))"
+                + " GROUP BY opponent_title"
+                + " ORDER BY group_count DESC, opponent_title ASC");
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", "bullet"));
+  }
+
+  @Test
+  public void testCompileAggregateGroupByEveryCategoricalPerspectiveField() {
+    // All five categorical fields compile, in one grouping, under either spelling; the rating
+    // fields group separately, in bucketed form (see the elo-bucket tests).
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("white.elo >= 2500"),
+            List.of("me.color", "me_title", "opponent.username", "opponent_title", "outcome"),
+            "hikaru");
+
+    assertThat(result.selectSql())
+        .contains("END) AS me_color")
+        .contains("THEN white_title ELSE black_title END) AS me_title")
+        .contains("THEN black_username ELSE white_username END) AS opponent_username")
+        .contains("THEN black_title ELSE white_title END) AS opponent_title")
+        .contains("END) AS outcome")
+        .contains("GROUP BY me_color, me_title, opponent_username, opponent_title, outcome");
+  }
+
+  @Test
+  public void testCompileAggregateDedupesNewFieldSpellings() {
+    // Both spellings of one field are one term: one alias, one GROUP BY key. Without the dedup
+    // the SQL would alias the same CASE twice and Postgres would reject the duplicate.
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("white.elo >= 2500"),
+            List.of("opponent.title", "opponent_title"),
+            "hikaru");
+
+    assertThat(result.selectSql()).containsOnlyOnce("AS opponent_title");
+    assertThat(result.selectSql()).contains(" GROUP BY opponent_title ORDER BY");
+  }
+
+  @Test
+  public void testCompileAggregateGroupByEloBucketsDefaultWidth() {
+    // Bare opponent.elo buckets by 100, keyed by the band's numeric
+    // lower bound via integer arithmetic on the aliased CASE. Exact SQL because every piece is
+    // load-bearing — the / 100 * 100 must wrap the CASE (not one column), the alias must carry
+    // into GROUP BY and the tiebreak, and the SELECT player param must precede the WHERE params.
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("time.class = \"blitz\""), List.of("opponent.elo"), "hikaru");
+
+    assertThat(result.selectSql())
+        .isEqualTo(
+            "SELECT (CASE WHEN LOWER(white_username) = LOWER(?) THEN black_elo ELSE white_elo"
+                + " END) / 100 * 100 AS opponent_elo, COUNT(*) AS group_count FROM game_features g"
+                + " WHERE ((LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))"
+                + " AND LOWER(time_class) = LOWER(?))"
+                + " GROUP BY opponent_elo"
+                + " ORDER BY group_count DESC, opponent_elo ASC");
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", "blitz"));
+  }
+
+  @Test
+  public void testCompileAggregateGroupByEloBucketsExplicitWidth() {
+    // A parenthesized width overrides the default, under either spelling of the field.
+    for (String field : List.of("me.elo(200)", "me_elo(200)")) {
+      CompiledQuery result =
+          compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of(field), "hikaru");
+      assertThat(result.selectSql())
+          .as(field)
+          .contains(
+              "(CASE WHEN LOWER(white_username) = LOWER(?) THEN white_elo ELSE black_elo END)"
+                  + " / 200 * 200 AS me_elo")
+          .contains(" GROUP BY me_elo ORDER BY");
+    }
+  }
+
+  @Test
+  public void testBucketWidthOneIsTheAcceptedBoundary() {
+    // The positive twin of the width-validation loop: 1 is the smallest legal width, a deliberate
+    // per-rating opt-in (the rejection guards against *implicit* raw grouping, and the totals
+    // machinery still reports burial). Pins the boundary so the guard can't drift to < 2.
+    CompiledQuery result =
+        compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("me.elo(1)"), "hikaru");
+    assertThat(result.selectSql()).contains("END) / 1 * 1 AS me_elo");
+  }
+
+  @Test
+  public void testBareEloAndExplicitDefaultWidthCompileIdentically() {
+    // Bare me.elo is exactly me.elo(100) — same SQL, same params — so the two spellings of "the
+    // default" can never drift apart.
+    CompiledQuery bare =
+        compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("me.elo"), "hikaru");
+    CompiledQuery explicit =
+        compiler.compileAggregate(Parser.parse("white.elo > 1"), List.of("me.elo(100)"), "hikaru");
+    assertThat(bare.selectSql()).isEqualTo(explicit.selectSql());
+    assertThat(bare.parameters()).isEqualTo(explicit.parameters());
+  }
+
+  @Test
+  public void testCompileAggregateDedupesSameWidthBucketTerms() {
+    // Equivalent bucket terms (any spelling, same effective width) are one term — one alias, one
+    // GROUP BY key — like the categorical spellings dedup. Bare participates via its default.
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("white.elo > 1"), List.of("opponent.elo", "opponent_elo(100)"), "hikaru");
+    assertThat(result.selectSql()).containsOnlyOnce("AS opponent_elo");
+    assertThat(result.selectSql()).contains(" GROUP BY opponent_elo ORDER BY");
+
+    // Width 200 sits above the Integer autobox cache (-128..127), so this dedup only holds if
+    // widths compare by value — the bare/default pair above would pass under reference equality
+    // by accident, because both 100s are the same cached Integer.
+    CompiledQuery aboveCache =
+        compiler.compileAggregate(
+            Parser.parse("white.elo > 1"),
+            List.of("opponent.elo(200)", "opponent_elo(200)"),
+            "hikaru");
+    assertThat(aboveCache.selectSql()).containsOnlyOnce("AS opponent_elo");
+  }
+
+  @Test
+  public void testCompileAggregateGroupsBothRatingFieldsWithIndependentWidths() {
+    // The cross-tab the buckets exist for — my band × opponent band — and the pin that the
+    // conflicting-width check is scoped per group key: different widths on *different* fields are
+    // two independent terms, not a conflict.
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("white.elo > 1"), List.of("me.elo", "opponent.elo(200)"), "hikaru");
+
+    assertThat(result.selectSql())
+        .contains("THEN white_elo ELSE black_elo END) / 100 * 100 AS me_elo")
+        .contains("THEN black_elo ELSE white_elo END) / 200 * 200 AS opponent_elo")
+        .contains("GROUP BY me_elo, opponent_elo")
+        .contains("ORDER BY group_count DESC, me_elo ASC, opponent_elo ASC");
+    // One player param per bucket CASE in SELECT order, then the two participation-guard params.
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", 1));
+  }
+
+  @Test
+  public void testCompileAggregateMixesBucketCategoricalAndPhysicalTerms() {
+    // A bucket term composes with a categorical perspective term and a physical column in one
+    // grouping; the physical column contributes no alias and no params.
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("white.elo > 1"),
+            List.of("opponent.elo(200)", "me.color", "time_class"),
+            "hikaru");
+    assertThat(result.selectSql())
+        .contains("/ 200 * 200 AS opponent_elo")
+        .contains("END) AS me_color")
+        .contains("GROUP BY opponent_elo, me_color, time_class")
+        .contains("ORDER BY group_count DESC, opponent_elo ASC, me_color ASC, time_class ASC");
+  }
+
+  @Test
+  public void testCompileAggregateTotalsBucketsRatingFields() {
+    // Both aggregate paths resolve terms through resolveGroupByTerms: the totals path inlines the
+    // same bucket arithmetic in GROUP BY, binding its player param after the WHERE params.
+    CompiledQuery result =
+        compiler.compileAggregateTotals(
+            Parser.parse("time.class = \"bullet\""), List.of("opponent.elo(200)"), "hikaru");
+
+    assertThat(result.selectSql())
+        .contains(
+            "GROUP BY (CASE WHEN LOWER(white_username) = LOWER(?) THEN black_elo ELSE white_elo"
+                + " END) / 200 * 200) grp");
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "bullet", "hikaru"));
+  }
+
+  @Test
+  public void testCompileAggregateTotalsGroupByOpponentTitle() {
+    CompiledQuery result =
+        compiler.compileAggregateTotals(
+            Parser.parse("time.class = \"bullet\""), List.of("opponent.title"), "hikaru");
+
+    // The inner query inlines the CASE in GROUP BY; its player param binds after the WHERE params.
+    assertThat(result.selectSql())
+        .contains(
+            "GROUP BY (CASE WHEN LOWER(white_username) = LOWER(?) THEN black_title ELSE"
+                + " white_title END)");
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "bullet", "hikaru"));
+  }
+
   @Test
   public void testCompileAggregatePerspectiveGroupByWithoutPlayerRejected() {
     assertThatThrownBy(
@@ -970,6 +1194,36 @@ public class SqlCompilerTest {
   public void testResolveGroupByColumnsMapsPerspectiveFieldsToUnderscoreKeys() {
     assertThat(compiler.resolveGroupByColumns(List.of("me.color", "outcome", "opening.family")))
         .containsExactly("me_color", "outcome", "opening_family");
+  }
+
+  /**
+   * The property, not examples: every groupable perspective field resolves under both its dotted
+   * and its underscore spelling, to the underscore key the response is keyed by. CHESSQL.md
+   * promises the round trip (send back the key you got), so this guards the spelling derivation and
+   * the field roster end to end.
+   */
+  @Test
+  public void testEveryGroupableFieldResolvesUnderBothSpellings() {
+    for (String field :
+        List.of(
+            "me.color",
+            "me.title",
+            "me.elo",
+            "opponent.username",
+            "opponent.title",
+            "opponent.elo",
+            "outcome")) {
+      String key = field.replace('.', '_');
+      assertThat(compiler.resolveGroupByColumns(List.of(field)))
+          .as("dotted spelling %s", field)
+          .containsExactly(key);
+      assertThat(compiler.resolveGroupByColumns(List.of(key)))
+          .as("underscore spelling %s", key)
+          .containsExactly(key);
+    }
+    // A width never leaks into the key: the DAO reads result-set columns by these names.
+    assertThat(compiler.resolveGroupByColumns(List.of("opponent.elo(200)")))
+        .containsExactly("opponent_elo");
   }
 
   @Test

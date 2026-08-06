@@ -199,6 +199,14 @@ always hits the database. If the snapshot is missing or older than 60 seconds (r
 database down at startup), the request loads a fresh snapshot through the cache — concurrent cold
 misses share a single query — so serving the live result also re-warms the cache.
 
+### Error Responses
+
+| Condition          | HTTP Status | Cause                                |
+|--------------------|-------------|--------------------------------------|
+| Bad ChessQL syntax | 400         | `ParseException` (body includes `position`) |
+| Unknown field      | 400         | `IllegalArgumentException`           |
+| Unknown motif      | 400         | `IllegalArgumentException`           |
+
 ---
 
 ## POST /v1/aggregate
@@ -221,13 +229,18 @@ matching row and group client-side.
 | Field   | Type     | Required | Default | Max  | Description                                       |
 |---------|----------|----------|---------|------|---------------------------------------------------|
 | query   | string   | yes      | —       | —    | ChessQL filter (may use perspective fields when `player` is set) |
-| groupBy | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form; physical columns, plus `me.color` / `outcome` when `player` is set) |
+| groupBy | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form; physical columns, plus the perspective fields when `player` is set — the rating fields as width-bucketed terms like `"opponent.elo(200)"`) |
 | orderBy | string   | no       | "count" | —    | Only "count" is supported (descending)            |
 | limit   | int      | no       | 50      | 1000 | Max groups to return                              |
 | player  | string   | no       | —       | —    | Username that perspective fields in the filter and groupBy are resolved against |
 
-Group-by fields validate against the same column whitelist as ChessQL comparisons; `me.color`
-and `outcome` are the only perspective fields allowed, and only with `player` (see CHESSQL.md).
+Group-by fields validate against the same column whitelist as ChessQL comparisons. With
+`player`, the perspective fields are also groupable (response keys use their underscore forms):
+the categorical fields — `me.color`, `me.title`, `opponent.username`, `opponent.title`,
+`outcome` — group by value, and the rating fields group as fixed-width buckets keyed by the
+band's numeric lower bound, 100 points wide unless the term carries a width
+(`"opponent.elo(200)"`). A NULL value (untitled opponents, NULL elos) forms a `null` group (see
+CHESSQL.md).
 
 ### Response (200)
 
@@ -244,8 +257,18 @@ and `outcome` are the only perspective fields allowed, and only with `player` (s
 }
 ```
 
+A rating-bucket group key is a JSON *number* (the band's lower bound), and a NULL group — an
+untitled opponent, a NULL elo — is an explicit `null` value, so `group` values are not uniformly
+strings:
+
+```json
+{ "group": { "opponent_elo": 2400 }, "count": 12 },
+{ "group": { "opponent_elo": null }, "count": 3 }
+```
+
 Group keys are canonical column names (e.g. `opening_family`, even when requested as
-`opening.family`; perspective group keys use the underscore form `me_color` / `outcome`). Groups
+`opening.family`; perspective group keys use their underscore forms — `me_color`, `me_title`,
+`opponent_username`, `opponent_title`, `outcome`, `me_elo`, `opponent_elo`). Groups
 are ordered by count descending, then by group values ascending. `count` is the number of groups
 returned — not a game count, which is what `totalGames` reports. `totalGames` and `totalGroups`
 are computed over the untruncated result, and `truncated` is true when `limit` cut off groups —
@@ -265,20 +288,11 @@ it first via `POST /v1/index`.
 | Unknown group-by field                            | 400         |
 | Missing query/groupBy                             | 400         |
 | Filter-only field in groupBy (`date`, `month`)    | 400         |
-| Perspective field in groupBy other than `me.color` / `outcome` | 400 |
-| `me.color` / `outcome` in groupBy without `player` | 400        |
+| Bucket width not a positive integer (`me.elo(0)`) | 400         |
+| Bucket width on a non-rating field (`me.color(100)`) | 400      |
+| Conflicting bucket widths for one field           | 400         |
+| Perspective field in groupBy without `player`     | 400         |
 | Perspective field in the filter without `player`  | 400         |
-
----
-
-### Error Responses
-
-| Condition          | HTTP Status | Cause                                |
-|--------------------|-------------|--------------------------------------|
-| Bad ChessQL syntax | 400         | `ParseException` (body includes `position`) |
-| Unknown field      | 400         | `IllegalArgumentException`           |
-| Unknown motif      | 400         | `IllegalArgumentException`           |
-| Unknown request ID | 404         | `NoSuchElementException`             |
 
 ---
 

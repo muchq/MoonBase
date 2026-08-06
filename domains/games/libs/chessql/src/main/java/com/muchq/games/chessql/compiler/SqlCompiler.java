@@ -15,8 +15,10 @@ import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -98,45 +100,99 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
   private static final String MONTH_FIELD = "month";
 
   /**
+   * How a perspective field groups on /v1/aggregate: CATEGORICAL fields (string-valued) group by
+   * value; RATING fields group only as fixed-width buckets — GROUP BY on a raw rating makes one
+   * bucket per distinct value, which buries the answer under hundreds of one-game groups. The kind
+   * also decides filter-side string semantics (LOWER-wrapped comparisons and IN).
+   */
+  private enum GroupKind {
+    CATEGORICAL,
+    RATING
+  }
+
+  /**
    * Perspective fields resolve the white/black columns relative to a player supplied at compile
    * time, so "hikaru's results regardless of color" is one predicate instead of a hand-written
    * union. Whenever a query uses one, the compiled WHERE clause is additionally guarded by a
    * participation predicate (the player is one of the two sides), because the CASE expressions
    * treat "not white" as "black".
    */
-  private record PerspectiveField(String sql, int playerParams) {}
+  private record PerspectiveField(String sql, int playerParams, GroupKind kind) {}
 
   private static final String ME_IS_WHITE = "LOWER(white_username) = LOWER(?)";
 
   private static final Map<String, PerspectiveField> PERSPECTIVE_FIELDS =
       Map.of(
           "me.color",
-          new PerspectiveField("CASE WHEN " + ME_IS_WHITE + " THEN 'white' ELSE 'black' END", 1),
+          new PerspectiveField(
+              "CASE WHEN " + ME_IS_WHITE + " THEN 'white' ELSE 'black' END",
+              1,
+              GroupKind.CATEGORICAL),
           "me.elo",
           new PerspectiveField(
-              "CASE WHEN " + ME_IS_WHITE + " THEN white_elo ELSE black_elo END", 1),
+              "CASE WHEN " + ME_IS_WHITE + " THEN white_elo ELSE black_elo END",
+              1,
+              GroupKind.RATING),
           "me.title",
           new PerspectiveField(
-              "CASE WHEN " + ME_IS_WHITE + " THEN white_title ELSE black_title END", 1),
+              "CASE WHEN " + ME_IS_WHITE + " THEN white_title ELSE black_title END",
+              1,
+              GroupKind.CATEGORICAL),
           "opponent.username",
           new PerspectiveField(
-              "CASE WHEN " + ME_IS_WHITE + " THEN black_username ELSE white_username END", 1),
+              "CASE WHEN " + ME_IS_WHITE + " THEN black_username ELSE white_username END",
+              1,
+              GroupKind.CATEGORICAL),
           "opponent.elo",
           new PerspectiveField(
-              "CASE WHEN " + ME_IS_WHITE + " THEN black_elo ELSE white_elo END", 1),
+              "CASE WHEN " + ME_IS_WHITE + " THEN black_elo ELSE white_elo END",
+              1,
+              GroupKind.RATING),
           "opponent.title",
           new PerspectiveField(
-              "CASE WHEN " + ME_IS_WHITE + " THEN black_title ELSE white_title END", 1),
+              "CASE WHEN " + ME_IS_WHITE + " THEN black_title ELSE white_title END",
+              1,
+              GroupKind.CATEGORICAL),
           "outcome",
           new PerspectiveField(
               "CASE WHEN result = '1/2-1/2' THEN 'draw'"
                   + " WHEN (result = '1-0' AND LOWER(white_username) = LOWER(?))"
                   + " OR (result = '0-1' AND LOWER(black_username) = LOWER(?)) THEN 'win'"
                   + " WHEN result IN ('1-0', '0-1') THEN 'loss' ELSE 'unknown' END",
-              2));
+              2,
+              GroupKind.CATEGORICAL));
 
-  private static final Set<String> STRING_PERSPECTIVE_FIELDS =
-      Set.of("me.color", "me.title", "opponent.username", "opponent.title", "outcome");
+  /**
+   * Every accepted groupBy spelling of a perspective field, mapped to its canonical dotted name.
+   * Derived, not hand-typed: the underscore spelling is mechanically the dotted one with {@code
+   * .}→{@code _}, so a field added to {@link #PERSPECTIVE_FIELDS} is groupable under both spellings
+   * with no second edit site to forget.
+   */
+  private static final Map<String, String> PERSPECTIVE_SPELLINGS = perspectiveSpellings();
+
+  private static Map<String, String> perspectiveSpellings() {
+    Map<String, String> spellings = new LinkedHashMap<>();
+    for (String field : PERSPECTIVE_FIELDS.keySet()) {
+      spellings.put(field, field);
+      spellings.put(field.replace('.', '_'), field);
+    }
+    return Map.copyOf(spellings);
+  }
+
+  /** The groupable-as-is roster for error messages, derived so it cannot drift from the maps. */
+  private static final String CATEGORICAL_ROSTER = roster(GroupKind.CATEGORICAL, ", ");
+
+  private static final String RATING_ROSTER = roster(GroupKind.RATING, ", ");
+
+  private static final String RATING_ROSTER_SLASHED = roster(GroupKind.RATING, " / ");
+
+  private static String roster(GroupKind kind, String separator) {
+    return PERSPECTIVE_FIELDS.entrySet().stream()
+        .filter(e -> e.getValue().kind() == kind)
+        .map(Map.Entry::getKey)
+        .sorted()
+        .collect(Collectors.joining(separator));
+  }
 
   /** Mutable compile-scope state: the player (if any) and whether a perspective field was used. */
   private static final class Perspective {
@@ -234,7 +290,13 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
   /**
    * Aggregate variant of {@link #compile(ParsedQuery, String)}: the filter may use perspective
    * fields (resolved against {@code player}); group-by fields must be physical columns, except for
-   * {@code me.color} and {@code outcome}, which are groupable when a player is supplied.
+   * the perspective fields, which are groupable when a player is supplied — the only way to
+   * aggregate opponents across both colors, since the color-specific columns mix the player's own
+   * values into the buckets on half the rows. The categorical fields ({@code me.color}, {@code
+   * me.title}, {@code opponent.username}, {@code opponent.title}, {@code outcome}) group by value;
+   * the rating fields ({@code me.elo}, {@code opponent.elo}) group into fixed-width buckets keyed
+   * by the band's lower bound, 100 points wide unless the term supplies a width ({@code
+   * opponent.elo(200)}).
    */
   public CompiledQuery compileAggregate(ParsedQuery pq, List<String> groupByFields, String player) {
     if (pq.orderBy() != null) {
@@ -251,13 +313,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       if (term.perspectiveField() == null) {
         selectExprs.add(term.key());
       } else {
-        String expr =
-            perspectiveExpr(
-                term.perspectiveField(),
-                PERSPECTIVE_FIELDS.get(term.perspectiveField()),
-                perspective,
-                selectParams);
-        selectExprs.add(expr + " AS " + term.key());
+        selectExprs.add(groupTermExpr(term, perspective, selectParams) + " AS " + term.key());
       }
     }
 
@@ -312,16 +368,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     List<Object> groupParams = new ArrayList<>();
     List<String> groupExprs = new ArrayList<>();
     for (GroupByTerm term : terms) {
-      if (term.perspectiveField() == null) {
-        groupExprs.add(term.key());
-      } else {
-        groupExprs.add(
-            perspectiveExpr(
-                term.perspectiveField(),
-                PERSPECTIVE_FIELDS.get(term.perspectiveField()),
-                perspective,
-                groupParams));
-      }
+      groupExprs.add(groupTermExpr(term, perspective, groupParams));
     }
     whereClause = guardParticipation(whereClause, whereParams, perspective);
 
@@ -340,8 +387,10 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
   /**
    * Resolves group-by fields (dotted or underscore form) to their canonical group keys,
    * deduplicating while preserving order. Physical columns resolve to their column name; groupable
-   * perspective fields resolve to their underscore form ({@code me_color}, {@code outcome}), which
-   * is also the SELECT alias aggregate rows are keyed by. Throws on unknown fields.
+   * perspective fields resolve to their underscore form ({@code me_color}, {@code opponent_title},
+   * {@code outcome}, ...), which is also the SELECT alias aggregate rows are keyed by. Rating
+   * bucket terms resolve to the bare underscore name ({@code opponent.elo(200)} → {@code
+   * opponent_elo}) — the width shapes the SQL, not the key. Throws on unknown fields.
    */
   public List<String> resolveGroupByColumns(List<String> groupByFields) {
     return resolveGroupByTerms(groupByFields).stream().map(GroupByTerm::key).toList();
@@ -349,39 +398,65 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
 
   /**
    * One resolved groupBy term: the group key (canonical column name, or underscore perspective name
-   * used as the SELECT alias) and, for perspective terms, the dotted field to render the CASE
-   * expression from ({@code null} for physical columns).
+   * used as the SELECT alias); for perspective terms, the dotted field to render the CASE
+   * expression from ({@code null} for physical columns); and for rating terms, the bucket width the
+   * rendered expression is floored to ({@code null} for everything else). Rating buckets are
+   * half-open bands keyed by their numeric lower bound ({@code (elo / width) * width}) — numeric so
+   * the ORDER BY tiebreak sorts bands numerically, where a rendered label like '800-899' would sort
+   * lexicographically after '1000-1099'.
    */
-  private record GroupByTerm(String key, String perspectiveField) {}
+  private record GroupByTerm(String key, String perspectiveField, Integer bucketWidth) {
+    static GroupByTerm perspective(String field, Integer bucketWidth) {
+      return new GroupByTerm(field.replace('.', '_'), field, bucketWidth);
+    }
 
-  /** Perspective fields allowed in groupBy, keyed by every accepted spelling. */
-  private static final Map<String, String> GROUPABLE_PERSPECTIVE_FIELDS =
-      Map.of("me.color", "me.color", "me_color", "me.color", "outcome", "outcome");
+    static GroupByTerm column(String column) {
+      return new GroupByTerm(column, null, null);
+    }
+  }
+
+  private static final int DEFAULT_ELO_BUCKET_WIDTH = 100;
 
   private List<GroupByTerm> resolveGroupByTerms(List<String> groupByFields) {
     if (groupByFields == null || groupByFields.isEmpty()) {
       throw new IllegalArgumentException("groupBy requires at least one field");
     }
-    List<GroupByTerm> terms = new ArrayList<>();
+    // Dedupe by group key, first spelling wins — but two different widths for one field would
+    // silently keep whichever came first, so that conflict is an error instead.
+    Map<String, GroupByTerm> terms = new LinkedHashMap<>();
     for (String field : groupByFields) {
       GroupByTerm term = resolveGroupByTerm(field);
-      if (terms.stream().noneMatch(t -> t.key().equals(term.key()))) {
-        terms.add(term);
+      GroupByTerm existing = terms.putIfAbsent(term.key(), term);
+      if (existing != null && !Objects.equals(existing.bucketWidth(), term.bucketWidth())) {
+        throw new IllegalArgumentException(
+            "Conflicting bucket widths for "
+                + term.perspectiveField()
+                + ": "
+                + existing.bucketWidth()
+                + " and "
+                + term.bucketWidth()
+                + " (bare "
+                + RATING_ROSTER_SLASHED
+                + " means a width of "
+                + DEFAULT_ELO_BUCKET_WIDTH
+                + ")");
       }
     }
-    return terms;
+    return List.copyOf(terms.values());
   }
 
   private GroupByTerm resolveGroupByTerm(String field) {
-    String perspectiveField = GROUPABLE_PERSPECTIVE_FIELDS.get(field);
-    if (perspectiveField != null) {
-      return new GroupByTerm(perspectiveField.replace('.', '_'), perspectiveField);
+    String canonical = PERSPECTIVE_SPELLINGS.get(field);
+    if (canonical != null) {
+      // Categorical fields group by value; rating fields never group raw — a bare rating term
+      // means the default bucket width.
+      return switch (PERSPECTIVE_FIELDS.get(canonical).kind()) {
+        case CATEGORICAL -> GroupByTerm.perspective(canonical, null);
+        case RATING -> GroupByTerm.perspective(canonical, DEFAULT_ELO_BUCKET_WIDTH);
+      };
     }
-    if (PERSPECTIVE_FIELDS.containsKey(field)) {
-      throw new IllegalArgumentException(
-          "Perspective fields are not supported in groupBy: "
-              + field
-              + " (only me.color and outcome are groupable, with a player)");
+    if (field.indexOf('(') >= 0) {
+      return resolveBucketTerm(field);
     }
     if (DATE_FIELD.equals(field) || MONTH_FIELD.equals(field)) {
       throw new IllegalArgumentException(
@@ -392,7 +467,45 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
               + dateFieldExample(field)
               + ")");
     }
-    return new GroupByTerm(resolveColumn(field), null);
+    return GroupByTerm.column(resolveColumn(field));
+  }
+
+  /** A parenthesized groupBy term is a bucket width, allowed only on the rating fields. */
+  private GroupByTerm resolveBucketTerm(String field) {
+    int paren = field.indexOf('(');
+    String canonical = PERSPECTIVE_SPELLINGS.get(field.substring(0, paren));
+    if (canonical == null || PERSPECTIVE_FIELDS.get(canonical).kind() != GroupKind.RATING) {
+      throw new IllegalArgumentException(
+          "Only the rating fields take a bucket width in groupBy: "
+              + field
+              + ". Bucketed: "
+              + RATING_ROSTER
+              + " (e.g. opponent.elo(200)); groupable as-is, with a player: "
+              + CATEGORICAL_ROSTER);
+    }
+    // An unclosed paren must not lenient-parse "me.elo(100" into a working term; the empty
+    // widthText fails the same validation as any other malformed width.
+    String widthText = field.endsWith(")") ? field.substring(paren + 1, field.length() - 1) : "";
+    int width;
+    try {
+      width = Integer.parseInt(widthText);
+    } catch (NumberFormatException e) {
+      throw new IllegalArgumentException(invalidBucketWidth(field));
+    }
+    if (width < 1) {
+      throw new IllegalArgumentException(invalidBucketWidth(field));
+    }
+    return GroupByTerm.perspective(canonical, width);
+  }
+
+  private static String invalidBucketWidth(String field) {
+    return "Bucket width must be a positive integer: "
+        + field
+        + ". Bare "
+        + RATING_ROSTER_SLASHED
+        + " bucket by "
+        + DEFAULT_ELO_BUCKET_WIDTH
+        + "; opponent.elo(200) groups ratings into [2000, 2200), [2200, 2400), ...";
   }
 
   /**
@@ -444,7 +557,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     if (perspectiveField != null) {
       String expr = perspectiveExpr(cmp.field(), perspectiveField, perspective, params);
       params.add(cmp.value());
-      if (STRING_PERSPECTIVE_FIELDS.contains(cmp.field()) && (op.equals("=") || op.equals("!="))) {
+      if (perspectiveField.kind() == GroupKind.CATEGORICAL && (op.equals("=") || op.equals("!="))) {
         return "LOWER" + expr + " " + op + " LOWER(?)";
       }
       return expr + " " + op + " ?";
@@ -551,7 +664,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     if (perspectiveField != null) {
       String expr = perspectiveExpr(in.field(), perspectiveField, perspective, params);
       params.addAll(in.values());
-      if (STRING_PERSPECTIVE_FIELDS.contains(in.field())) {
+      if (perspectiveField.kind() == GroupKind.CATEGORICAL) {
         String lowerPlaceholders =
             in.values().stream().map(v -> "LOWER(?)").collect(Collectors.joining(", "));
         return "LOWER" + expr + " IN (" + lowerPlaceholders + ")";
@@ -569,6 +682,32 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     }
     String placeholders = in.values().stream().map(v -> "?").collect(Collectors.joining(", "));
     return column + " IN (" + placeholders + ")";
+  }
+
+  /**
+   * Renders a groupBy term's SQL: the bare column name for physical terms, the CASE expression
+   * (binding its player params in SQL order) for perspective terms. Rating terms floor the CASE to
+   * their bucket's lower bound with integer arithmetic — {@code / width * width} truncates
+   * identically on H2 and Postgres for the non-negative INT elo columns, and a NULL elo propagates
+   * straight through to the NULL group bucket. The width is an inlined literal rather than a bind
+   * param (it round-trips through Integer.parseInt, so there is no injection surface) to keep the
+   * groups/totals param positions identical to the categorical fields'.
+   */
+  private static String groupTermExpr(
+      GroupByTerm term, Perspective perspective, List<Object> params) {
+    if (term.perspectiveField() == null) {
+      return term.key();
+    }
+    String expr =
+        perspectiveExpr(
+            term.perspectiveField(),
+            PERSPECTIVE_FIELDS.get(term.perspectiveField()),
+            perspective,
+            params);
+    if (term.bucketWidth() == null) {
+      return expr;
+    }
+    return expr + " / " + term.bucketWidth() + " * " + term.bucketWidth();
   }
 
   /** Renders a perspective field's CASE expression, binding its player param(s) in SQL order. */
