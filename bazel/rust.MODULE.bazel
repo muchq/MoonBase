@@ -1,5 +1,4 @@
 bazel_dep(name = "rules_rust", version = "0.72.0")
-bazel_dep(name = "rules_rust_prost", version = "0.72.0")
 
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(
@@ -9,8 +8,6 @@ rust.toolchain(
 use_repo(rust, "rust_toolchains")
 
 register_toolchains("@rust_toolchains//:all")
-
-register_toolchains("//bazel/toolchains:prost_toolchain")
 
 crate = use_extension(
     "@rules_rust//crate_universe:extensions.bzl",
@@ -28,13 +25,5 @@ crate.from_cargo(
         "aarch64-unknown-linux-gnu",
         "x86_64-unknown-linux-gnu",
     ],
-)
-crate.annotation(
-    crate = "protoc-gen-prost",
-    gen_binaries = ["protoc-gen-prost"],
-)
-crate.annotation(
-    crate = "protoc-gen-tonic",
-    gen_binaries = ["protoc-gen-tonic"],
 )
 use_repo(crate, "crates")
