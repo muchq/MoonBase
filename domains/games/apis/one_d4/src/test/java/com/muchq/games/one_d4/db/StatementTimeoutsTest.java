@@ -59,15 +59,41 @@ public class StatementTimeoutsTest {
         Instant.now());
 
     timeouts.clear();
-    dao.claimNext("owner-1", Duration.ofMinutes(5), Instant.now());
+    var claimed = dao.claimNext("owner-1", Duration.ofMinutes(5), Instant.now());
 
-    assertThat(timeouts).as("claimNext ran no statements?").isNotEmpty();
+    // The claim must succeed, or the "statements after the scan" half below is vacuously true.
+    assertThat(claimed).as("the seeded request must be claimable").isPresent();
+    assertThat(timeouts.size())
+        .as("a successful claim runs the scan plus at least the claim UPDATE")
+        .isGreaterThan(1);
     assertThat(timeouts.get(0))
         .as("the candidate scan — the poller's wedge point — must carry the serving-read bound")
         .isEqualTo(10);
     assertThat(timeouts.subList(1, timeouts.size()))
         .as("the claim UPDATE and status reads that follow stay unbounded")
         .allMatch(t -> t == 0);
+  }
+
+  @Test
+  public void reclaimStaleCarriesTheSweepBoundInsideItsTransaction() {
+    timeouts.clear();
+    new IndexingRequestDao(testDb.jdbi()).reclaimStale(Duration.ofHours(1), Instant.now());
+
+    assertThat(timeouts).as("reclaim ran no statements?").isNotEmpty();
+    assertThat(timeouts)
+        .as("every settle statement in the reclaim transaction carries the sweep bound")
+        .allMatch(t -> t == 120);
+  }
+
+  @Test
+  public void fetchForReanalysisStaysDeliberatelyUnbounded() {
+    timeouts.clear();
+    new GameFeatureDao(testDb.jdbi(), true).fetchForReanalysis(10, 0);
+
+    assertThat(timeouts).as("fetchForReanalysis ran no statements?").isNotEmpty();
+    // The exclusion GameFeatureDao's javadoc states, pinned: the admin batch read pages the whole
+    // table to feed a write path and must not silently gain the serving bound.
+    assertThat(timeouts).allMatch(t -> t == 0);
   }
 
   @Test

@@ -12,6 +12,26 @@ public class DataSourceFactoryTest {
         .hasValue(150);
   }
 
+  /**
+   * Through the config create() actually builds, not just the policy function — deleting the
+   * addDataSourceProperty wiring must fail here, not stay green behind a correct-but-unapplied
+   * policy.
+   */
+  @Test
+  public void createWiresTheDefaultIntoTheDriverProperties() {
+    assertThat(
+            DataSourceFactory.hikariConfig("jdbc:postgresql://host:5432/db?user=u")
+                .getDataSourceProperties()
+                .getProperty("socketTimeout"))
+        .isEqualTo("150");
+    assertThat(
+            DataSourceFactory.hikariConfig("jdbc:h2:mem:x;DB_CLOSE_DELAY=-1")
+                .getDataSourceProperties()
+                .getProperty("socketTimeout"))
+        .as("H2 must get no driver property it would reject")
+        .isNull();
+  }
+
   @Test
   public void explicitSocketTimeoutInTheUrlWins() {
     assertThat(

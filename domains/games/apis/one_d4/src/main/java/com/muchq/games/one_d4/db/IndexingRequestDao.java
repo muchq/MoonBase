@@ -335,7 +335,12 @@ public class IndexingRequestDao implements IndexingRequestStore {
 
   private int reclaim(String keyOrNull, Duration staleAfter, Instant now) {
     String keyClause = keyOrNull == null ? "" : "  AND dedupe_key = :key\n";
-    return jdbi.inTransaction(
+    // Bounded at the sweep timeout: this runs on the retention tick's shared scheduled pool with
+    // no lease or interrupt machinery, and settling is idempotent — a truncated pass re-runs in
+    // an hour (or on the next submit of the same tuple).
+    return StatementTimeouts.inTransactionWithTimeout(
+        jdbi,
+        StatementTimeouts.RETENTION_SWEEP_SECONDS,
         h -> {
           // Order matters twice, for two different reasons, and neither is the one that looks
           // obvious. A row at the attempt limit cannot match RELEASE_SQL at all — that statement

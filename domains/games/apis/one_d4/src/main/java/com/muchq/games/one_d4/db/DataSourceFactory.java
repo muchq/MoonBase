@@ -26,6 +26,16 @@ public class DataSourceFactory {
   }
 
   public static DataSource create(String jdbcUrl) {
+    return new HikariDataSource(hikariConfig(jdbcUrl));
+  }
+
+  /**
+   * Package-private so DataSourceFactoryTest can assert what {@link #create} actually wires —
+   * probing the built config rather than {@link #defaultSocketTimeout} alone, which would stay
+   * green if create() stopped applying it — without starting a pool against a database that isn't
+   * there.
+   */
+  static HikariConfig hikariConfig(String jdbcUrl) {
     HikariConfig config = new HikariConfig();
     config.setJdbcUrl(jdbcUrl);
     config.setMaximumPoolSize(5);
@@ -36,7 +46,7 @@ public class DataSourceFactory {
     defaultSocketTimeout(jdbcUrl)
         .ifPresent(
             seconds -> config.addDataSourceProperty("socketTimeout", String.valueOf(seconds)));
-    return new HikariDataSource(config);
+    return config;
   }
 
   /**

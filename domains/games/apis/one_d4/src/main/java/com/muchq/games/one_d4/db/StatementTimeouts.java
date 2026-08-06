@@ -39,12 +39,14 @@ public final class StatementTimeouts {
   public static final int SERVING_READ_SECONDS = 10;
 
   /**
-   * The bound for the hourly retention sweep's deletes. Sized for a sweep, not a page: the
-   * steady-state delete covers roughly one hour of aged-out rows, and even a post-outage backlog of
-   * days clears in well under this. The sweep is idempotent and re-runs in an hour, so a truncated
-   * pass loses nothing — unlike the index worker's flushes, which have their own lease and
-   * interrupt machinery and stay unbounded (GameFeatureDao.fetchForReanalysis likewise, as the read
-   * half of the admin reanalysis batch loop).
+   * The bound for the hourly retention tick's statements — the reclaim transaction and the three
+   * deletes. Sized for a sweep, not a page: the steady-state delete covers roughly one hour of
+   * aged-out rows, and even a post-outage backlog of days clears in well under this. Per statement,
+   * not per tick — a tick where everything wedges can take up to four windows (~8 minutes) before
+   * the hourly schedule re-arms, still bounded. The sweep is idempotent and re-runs in an hour, so
+   * a truncated pass loses nothing — unlike the index worker's flushes, which have their own lease
+   * and interrupt machinery and stay unbounded (GameFeatureDao.fetchForReanalysis likewise, as the
+   * read half of the admin reanalysis batch loop).
    *
    * <p>Must stay under {@link DataSourceFactory}'s default Postgres socketTimeout, or the driver
    * would sever the connection under a legitimately long sweep before the server-side cancel fires.
@@ -64,6 +66,25 @@ public final class StatementTimeouts {
   public static <T> T withStatementTimeout(
       Jdbi jdbi, int timeoutSeconds, HandleCallback<T, RuntimeException> body) {
     return jdbi.withHandle(
+        h -> {
+          h.getConfig(SqlStatements.class).setQueryTimeout(timeoutSeconds);
+          try {
+            return body.withHandle(h);
+          } finally {
+            clearSessionQueryTimeout(h);
+          }
+        });
+  }
+
+  /**
+   * {@link #withStatementTimeout}'s transactional sibling, for bounded work that must stay one
+   * transaction — the retention tick's reclaim, whose three UPDATEs settle abandoned requests as a
+   * unit. Same bound-and-clear contract; the session clear runs inside the transaction, which is
+   * safe because session settings are not transactional on either engine.
+   */
+  public static <T> T inTransactionWithTimeout(
+      Jdbi jdbi, int timeoutSeconds, HandleCallback<T, RuntimeException> body) {
+    return jdbi.inTransaction(
         h -> {
           h.getConfig(SqlStatements.class).setQueryTimeout(timeoutSeconds);
           try {

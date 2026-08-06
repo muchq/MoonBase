@@ -294,7 +294,7 @@ it first via `POST /v1/index`.
 | Conflicting bucket widths for one field           | 400         |
 | Perspective field in groupBy without `player`     | 400         |
 | Perspective field in the filter without `player`  | 400         |
-| Query exceeds the 10s read timeout (per statement; aggregate runs two) | 500 |
+| Query exceeds the 10s read timeout (per statement; an aggregate that truncates runs a second totals statement) | 500 |
 
 ---
 
