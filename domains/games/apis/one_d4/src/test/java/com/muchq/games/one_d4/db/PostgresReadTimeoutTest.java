@@ -163,6 +163,21 @@ public class PostgresReadTimeoutTest {
     }
   }
 
+  /**
+   * The socket-timeout default, proven through the real driver rather than the built config: {@code
+   * setUp}'s pool came from {@code DataSourceFactory.create} on a URL without {@code
+   * socketTimeout}, and pgjdbc surfaces the applied value as {@code Connection.getNetworkTimeout}
+   * (milliseconds, backed by the socket's SO_TIMEOUT).
+   */
+  @Test
+  public void createAppliesTheSocketTimeoutDefaultToRealConnections() throws Exception {
+    try (Connection conn = dataSource.getConnection()) {
+      assertThat(conn.getNetworkTimeout())
+          .as("the 150s default must reach the actual socket")
+          .isEqualTo(150_000);
+    }
+  }
+
   private void insertOneGame(String gameUrl) {
     GameFeatureDao dao = new GameFeatureDao(Jdbi.create(dataSource), false);
     dao.insertBatch(
