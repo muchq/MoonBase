@@ -567,7 +567,11 @@ public class RequestLivenessTest {
     IndexingRequestDao dao = new IndexingRequestDao(testDb.jdbi(), clock);
     UUID requestId = claim(dao).request().id();
 
-    CountDownLatch insideLookup = new CountDownLatch(1);
+    // One count per distinct username in the fixture game ("White" and "Black"). Awaiting a
+    // single lookup raced the pool against the submit loop: the first lookup can be running —
+    // and tripping the latch — before the second is submitted, so the capture below read a
+    // count that was still moving. Awaiting both means the title phase has finished submitting.
+    CountDownLatch insideLookup = new CountDownLatch(2);
     WedgedProfileChessClient client = new WedgedProfileChessClient(insideLookup);
     CountingExecutor pool = new CountingExecutor(2);
     try {
@@ -591,10 +595,11 @@ public class RequestLivenessTest {
                 worker.process(message(requestId));
               });
       assertThat(insideLookup.await(15, TimeUnit.SECONDS))
-          .as("a profile lookup should be parked on the pool")
+          .as("both profile lookups should be parked on the pool")
           .isTrue();
-      // resolveTitles submits every lookup before it drains any of them, so by the time one is
-      // running the title phase has finished submitting and this number has stopped moving.
+      // Stable, not racing: every lookup the title phase will ever submit is now wedged on the
+      // pool, so nothing can move this number again except the extraction submissions the
+      // checkpoint under test exists to prevent.
       int submittedForTitles = pool.submissions();
 
       runThread.get().interrupt();
