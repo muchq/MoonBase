@@ -30,27 +30,36 @@ public class GameFeatureDao implements GameFeatureStore {
   private static final Logger LOG = LoggerFactory.getLogger(GameFeatureDao.class);
 
   /**
-   * Execution bound on the read path (query, aggregate, aggregateTotals, queryOccurrences).
-   * HikariCP's connectionTimeout bounds pool <em>checkout</em> only — nothing bounded execution, so
-   * a query wedged on a lock wait ran forever. That is worst for FirstPageWarmer: its
+   * Execution bound on the serving read paths — everything that goes through {@link
+   * #withReadHandle}: query, aggregate, aggregateTotals, queryOccurrences. HikariCP's
+   * connectionTimeout bounds pool <em>checkout</em> only — nothing bounded execution, so a query
+   * wedged on a lock wait ran forever. That is worst for FirstPageWarmer: its
    * {@code @Scheduled(fixedDelay)} never re-schedules while a run is in flight, so one hung query
    * silently stopped all future refreshes until a restart, while holding a thread of the small
    * shared scheduled pool.
    *
    * <p>Ten seconds is far above any legitimate read here (LIMIT-bounded pages over a table with
-   * 7-day retention, now index-served) and well under the warmer's 30s tick, so a wedged tick fails
-   * — loudly, into the warmer's catch-and-log — before the next tick is due. Write paths are
-   * deliberately not bounded by this: the index worker has its own lease ceiling and interrupt
-   * machinery, and cutting a flush short creates recovery work a read never has.
+   * 7-day retention, now index-served). The binding constraint is FirstPageCache.MAX_AGE (60s), not
+   * the warmer's 30s tick — fixedDelay measures from completion, so ticks cannot overlap at any
+   * timeout — and a warmer tick runs <em>two</em> bounded reads (query, then queryOccurrences), so
+   * its worst successful case is 2x this value plus the 30s delay, which must stay under MAX_AGE or
+   * the snapshot expires between refreshes. FirstPageWarmerTest pins that arithmetic. A wedged tick
+   * fails loudly, into the warmer's catch-and-log, well before the next tick is due.
+   *
+   * <p>Write paths are deliberately not bounded by this: the index worker has its own lease ceiling
+   * and interrupt machinery, and cutting a flush short creates recovery work a read never has.
+   * {@link #fetchForReanalysis} is also excluded on purpose — it is the read half of the admin
+   * reanalysis batch loop, paging the whole table to feed a write path, not a serving read.
    *
    * <p>JDBC's queryTimeout cancels server-side execution (lock waits, slow plans). A true network
    * black hole additionally needs a driver-level socket timeout, which lives in the JDBC URL (e.g.
-   * {@code &socketTimeout=30} for Postgres) — deployment config, not code.
+   * {@code &socketTimeout=30} for Postgres) — deployment config, not code; the one_d4 README's
+   * database-URL section carries the guidance.
    *
    * <p>On H2 the timeout is session-scoped rather than statement-scoped, so every read clears it
    * again on the way out; see {@link #clearSessionQueryTimeout}.
    */
-  static final int READ_QUERY_TIMEOUT_SECONDS = 10;
+  public static final int READ_QUERY_TIMEOUT_SECONDS = 10;
 
   private static final String H2_INSERT =
       """
@@ -446,9 +455,33 @@ public class GameFeatureDao implements GameFeatureStore {
       try (var stmt = h.getConnection().createStatement()) {
         stmt.setQueryTimeout(0);
       } catch (SQLException e) {
-        throw new RuntimeException("Failed to clear H2 session query timeout", e);
+        // Log-and-swallow: this runs in a finally, where a throw would replace the read's real
+        // exception — including the timeout this bound exists to surface — and could fail an
+        // otherwise-successful read. A connection too broken to accept the reset is one HikariCP
+        // evicts, so the leak this guards against cannot outlive it.
+        LOG.warn("Failed to clear H2 session query timeout", e);
       }
     }
+  }
+
+  /**
+   * The single entry point for serving reads: every statement opened by {@code body} carries {@link
+   * #READ_QUERY_TIMEOUT_SECONDS} (set once on the handle's statement config), and the H2 session is
+   * cleared on the way out. The bound being part of the entry point — rather than a call each read
+   * must remember — is what makes "serving reads are bounded" structural: a new read either goes
+   * through here and is bounded, or visibly doesn't.
+   */
+  private <T> T withReadHandle(org.jdbi.v3.core.HandleCallback<T, RuntimeException> body) {
+    return jdbi.withHandle(
+        h -> {
+          h.getConfig(org.jdbi.v3.core.statement.SqlStatements.class)
+              .setQueryTimeout(readQueryTimeoutSeconds);
+          try {
+            return body.withHandle(h);
+          } finally {
+            clearSessionQueryTimeout(h);
+          }
+        });
   }
 
   @Override
@@ -458,20 +491,16 @@ public class GameFeatureDao implements GameFeatureStore {
           "Expected CompiledQuery, got: " + compiledQuery.getClass());
     }
     String sql = cq.selectSql() + " LIMIT ? OFFSET ?";
-    return jdbi.withHandle(
+    return withReadHandle(
         h -> {
-          try {
-            var query = h.createQuery(sql).setQueryTimeout(readQueryTimeoutSeconds);
-            int idx = 0;
-            for (Object param : cq.parameters()) {
-              query.bind(idx++, param);
-            }
-            query.bind(idx++, limit);
-            query.bind(idx, offset);
-            return query.map(GAME_FEATURE_MAPPER).list();
-          } finally {
-            clearSessionQueryTimeout(h);
+          var query = h.createQuery(sql);
+          int idx = 0;
+          for (Object param : cq.parameters()) {
+            query.bind(idx++, param);
           }
+          query.bind(idx++, limit);
+          query.bind(idx, offset);
+          return query.map(GAME_FEATURE_MAPPER).list();
         });
   }
 
@@ -482,28 +511,24 @@ public class GameFeatureDao implements GameFeatureStore {
           "Expected CompiledQuery, got: " + compiledQuery.getClass());
     }
     String sql = cq.selectSql() + " LIMIT ?";
-    return jdbi.withHandle(
+    return withReadHandle(
         h -> {
-          try {
-            var query = h.createQuery(sql).setQueryTimeout(readQueryTimeoutSeconds);
-            int idx = 0;
-            for (Object param : cq.parameters()) {
-              query.bind(idx++, param);
-            }
-            query.bind(idx, limit);
-            return query
-                .map(
-                    (rs, ctx) -> {
-                      Map<String, Object> group = new LinkedHashMap<>();
-                      for (String column : groupColumns) {
-                        group.put(column, rs.getObject(column));
-                      }
-                      return new AggregateRow(group, rs.getLong("group_count"));
-                    })
-                .list();
-          } finally {
-            clearSessionQueryTimeout(h);
+          var query = h.createQuery(sql);
+          int idx = 0;
+          for (Object param : cq.parameters()) {
+            query.bind(idx++, param);
           }
+          query.bind(idx, limit);
+          return query
+              .map(
+                  (rs, ctx) -> {
+                    Map<String, Object> group = new LinkedHashMap<>();
+                    for (String column : groupColumns) {
+                      group.put(column, rs.getObject(column));
+                    }
+                    return new AggregateRow(group, rs.getLong("group_count"));
+                  })
+              .list();
         });
   }
 
@@ -513,22 +538,18 @@ public class GameFeatureDao implements GameFeatureStore {
       throw new IllegalArgumentException(
           "Expected CompiledQuery, got: " + compiledQuery.getClass());
     }
-    return jdbi.withHandle(
+    return withReadHandle(
         h -> {
-          try {
-            var query = h.createQuery(cq.selectSql()).setQueryTimeout(readQueryTimeoutSeconds);
-            int idx = 0;
-            for (Object param : cq.parameters()) {
-              query.bind(idx++, param);
-            }
-            return query
-                .map(
-                    (rs, ctx) ->
-                        new AggregateTotals(rs.getLong("total_games"), rs.getLong("total_groups")))
-                .one();
-          } finally {
-            clearSessionQueryTimeout(h);
+          var query = h.createQuery(cq.selectSql());
+          int idx = 0;
+          for (Object param : cq.parameters()) {
+            query.bind(idx++, param);
           }
+          return query
+              .map(
+                  (rs, ctx) ->
+                      new AggregateTotals(rs.getLong("total_games"), rs.getLong("total_groups")))
+              .one();
         });
   }
 
@@ -538,44 +559,39 @@ public class GameFeatureDao implements GameFeatureStore {
     // Fetch all rows including ATTACK (needed for derivation) but excluding stale materialized
     // rows for motifs now derived at response time. ATTACK itself is removed in post-processing.
     Map<String, Map<String, List<OccurrenceRow>>> result =
-        jdbi.withHandle(
+        withReadHandle(
             h -> {
-              try {
-                var rows =
-                    h.createQuery(QUERY_OCCURRENCES)
-                        .setQueryTimeout(readQueryTimeoutSeconds)
-                        .bindList("urls", gameUrls)
-                        .map(
-                            (rs, ctx) -> {
-                              String gameUrl = rs.getString("game_url");
-                              // Store motif key as lowercase to match ChessQL motif naming
-                              // convention
-                              String motif = rs.getString("motif").toLowerCase();
-                              return new OccurrenceRow(
-                                  gameUrl,
-                                  motif,
-                                  rs.getInt("move_number"),
-                                  rs.getString("side"),
-                                  rs.getString("description"),
-                                  rs.getString("moved_piece"),
-                                  rs.getString("attacker"),
-                                  rs.getString("target"),
-                                  rs.getBoolean("is_discovered"),
-                                  rs.getBoolean("is_mate"),
-                                  rs.getString("pin_type"));
-                            })
-                        .list();
-                Map<String, Map<String, List<OccurrenceRow>>> grouped = new LinkedHashMap<>();
-                for (OccurrenceRow row : rows) {
-                  grouped
-                      .computeIfAbsent(row.gameUrl(), k -> new LinkedHashMap<>())
-                      .computeIfAbsent(row.motif(), k -> new ArrayList<>())
-                      .add(row);
-                }
-                return grouped;
-              } finally {
-                clearSessionQueryTimeout(h);
+              var rows =
+                  h.createQuery(QUERY_OCCURRENCES)
+                      .bindList("urls", gameUrls)
+                      .map(
+                          (rs, ctx) -> {
+                            String gameUrl = rs.getString("game_url");
+                            // Store motif key as lowercase to match ChessQL motif naming
+                            // convention
+                            String motif = rs.getString("motif").toLowerCase();
+                            return new OccurrenceRow(
+                                gameUrl,
+                                motif,
+                                rs.getInt("move_number"),
+                                rs.getString("side"),
+                                rs.getString("description"),
+                                rs.getString("moved_piece"),
+                                rs.getString("attacker"),
+                                rs.getString("target"),
+                                rs.getBoolean("is_discovered"),
+                                rs.getBoolean("is_mate"),
+                                rs.getString("pin_type"));
+                          })
+                      .list();
+              Map<String, Map<String, List<OccurrenceRow>>> grouped = new LinkedHashMap<>();
+              for (OccurrenceRow row : rows) {
+                grouped
+                    .computeIfAbsent(row.gameUrl(), k -> new LinkedHashMap<>())
+                    .computeIfAbsent(row.motif(), k -> new ArrayList<>())
+                    .add(row);
               }
+              return grouped;
             });
 
     // Post-process: derive all ATTACK-based motifs, then remove ATTACK (internal primitive).

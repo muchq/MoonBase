@@ -206,6 +206,7 @@ misses share a single query — so serving the live result also re-warms the cac
 | Bad ChessQL syntax | 400         | `ParseException` (body includes `position`) |
 | Unknown field      | 400         | `IllegalArgumentException`           |
 | Unknown motif      | 400         | `IllegalArgumentException`           |
+| Query exceeds the 10s read timeout | 500 | Statement cancelled server-side; previously such a request never returned |
 
 ---
 
@@ -293,6 +294,7 @@ it first via `POST /v1/index`.
 | Conflicting bucket widths for one field           | 400         |
 | Perspective field in groupBy without `player`     | 400         |
 | Perspective field in the filter without `player`  | 400         |
+| Query exceeds the 10s read timeout (per statement; aggregate runs two) | 500 |
 
 ---
 

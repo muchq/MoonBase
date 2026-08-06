@@ -141,8 +141,13 @@ line) instead of using an environment variable. The app resolves config in this 
 
 For Neon, the URL looks like:
 ```
-jdbc:postgresql://ep-xxx.us-east-2.aws.neon.tech/dbname?user=xxx&password=xxx&sslmode=require
+jdbc:postgresql://ep-xxx.us-east-2.aws.neon.tech/dbname?user=xxx&password=xxx&sslmode=require&socketTimeout=30
 ```
+
+Include `socketTimeout` (seconds) on any remote Postgres URL. The application bounds read-query
+*execution* with a 10s JDBC statement timeout, but that cancellation travels over the network — on
+a dead network only a driver-level socket timeout gets the connection back. Without it, a TCP
+black hole can still hang a query indefinitely.
 
 The server starts on **port 8080**. Then index a player and query:
 

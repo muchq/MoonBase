@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 
 import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.one_d4.api.dto.GameFeature;
+import com.muchq.games.one_d4.db.GameFeatureDao;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -108,6 +109,15 @@ public class FirstPageWarmerTest {
     // delay exceeds half MAX_AGE, the snapshot expires between refreshes and every first load
     // falls through to the database again.
     assertThat(delaySeconds * 2).isLessThanOrEqualTo(FirstPageCache.MAX_AGE.toSeconds());
+
+    // The full tick budget: fixedDelay measures from completion, and a tick runs two reads each
+    // bounded by the DAO's read timeout — so a worst-case-but-successful tick must still land a
+    // fresh snapshot before the previous one expires. This is the arithmetic that makes the read
+    // timeout's value safe, pinned here rather than reasoned about in javadoc.
+    long worstTickSeconds = 2 * GameFeatureDao.READ_QUERY_TIMEOUT_SECONDS;
+    assertThat(delaySeconds + worstTickSeconds)
+        .as("a worst-case tick plus the delay must refresh before MAX_AGE expires the snapshot")
+        .isLessThan(FirstPageCache.MAX_AGE.toSeconds());
   }
 
   private static GameFeature gameFeature(String gameUrl) {

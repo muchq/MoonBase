@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.muchq.games.chessql.compiler.CompiledQuery;
+import com.muchq.games.one_d4.api.dto.GameFeature;
 import java.io.Closeable;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -14,10 +15,12 @@ import java.sql.DriverManager;
 import java.sql.Statement;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.jdbi.v3.core.Jdbi;
+import org.jdbi.v3.core.statement.UnableToExecuteStatementException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -105,7 +108,7 @@ public class PostgresReadTimeoutTest {
     long start = System.nanoTime();
     assertThatThrownBy(() -> oneSecond.query(slow, 10, 0))
         .as("a query outrunning the timeout must be cancelled, not awaited")
-        .isInstanceOf(Exception.class);
+        .isInstanceOf(UnableToExecuteStatementException.class);
     long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
     assertThat(elapsedMillis)
         .as("cancellation must arrive near the 1s timeout, not after the 5s sleep")
@@ -120,16 +123,24 @@ public class PostgresReadTimeoutTest {
   }
 
   /**
-   * The claim behind gating the session cleanup on H2 only: pgjdbc scopes setQueryTimeout to the
-   * statement, so a read's timeout must not be visible to a later statement on the same pooled
-   * connection even though the DAO does nothing to clear it there.
+   * The claim behind gating the session cleanup on H2 only: on Postgres a read's timeout must not
+   * bound later statements on the same pooled connection, even though the DAO does nothing to clear
+   * it there.
+   *
+   * <p>Pinned behaviorally, not by reading a client-side field: a fresh {@code PgStatement}'s
+   * {@code getQueryTimeout()} is 0 by construction, so asserting it proves nothing. Instead, after
+   * a 1s-bounded read, an <em>unbounded</em> 2s {@code pg_sleep} on the same pool must complete —
+   * any leak, through the client timer or a server-side {@code statement_timeout}, would cancel it
+   * at 1s. The {@code SHOW statement_timeout} probe additionally pins that pgjdbc's mechanism is
+   * the client cancel timer and left no server-side session setting behind.
    */
   @Test
   public void readTimeoutDoesNotLeakAcrossStatementsOnPostgres() throws Exception {
-    GameFeatureDao dao = new GameFeatureDao(Jdbi.create(dataSource), false);
+    GameFeatureDao oneSecond =
+        new GameFeatureDao(Jdbi.create(dataSource), false, Clock.systemUTC(), 1);
     insertOneGame("https://chess.com/game/pg-leak-probe");
 
-    dao.query(
+    oneSecond.query(
         new CompiledQuery(
             "SELECT g.* FROM game_features g ORDER BY g.played_at DESC, g.game_url ASC", List.of()),
         10,
@@ -138,9 +149,17 @@ public class PostgresReadTimeoutTest {
     // The pool is small and access is sequential, so this draws the connection the read used.
     try (Connection conn = dataSource.getConnection();
         Statement stmt = conn.createStatement()) {
-      assertThat(stmt.getQueryTimeout())
-          .as("a fresh statement must not inherit the read timeout")
-          .isEqualTo(0);
+      try (var rs = stmt.executeQuery("SHOW statement_timeout")) {
+        assertThat(rs.next()).isTrue();
+        assertThat(rs.getString(1))
+            .as("the read bound must not become a server-side session setting")
+            .isEqualTo("0");
+      }
+      try (var rs = stmt.executeQuery("SELECT pg_sleep(2)")) {
+        assertThat(rs.next())
+            .as("an unbounded statement after a bounded read must run to completion")
+            .isTrue();
+      }
     }
   }
 
@@ -148,7 +167,7 @@ public class PostgresReadTimeoutTest {
     GameFeatureDao dao = new GameFeatureDao(Jdbi.create(dataSource), false);
     dao.insertBatch(
         List.of(
-            new com.muchq.games.one_d4.api.dto.GameFeature(
+            new GameFeature(
                 UUID.randomUUID(),
                 requestId,
                 gameUrl,
@@ -177,7 +196,7 @@ public class PostgresReadTimeoutTest {
    */
   private static String jdbcUrl(String rawUrl, String schema) {
     URI uri = URI.create(rawUrl);
-    java.util.List<String> params = new java.util.ArrayList<>();
+    List<String> params = new ArrayList<>();
     String userInfo = uri.getUserInfo();
     if (userInfo != null) {
       int colon = userInfo.indexOf(':');

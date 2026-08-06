@@ -335,7 +335,10 @@ Already addressed:
 Additional hardening:
 - Max query string length (4KB)
 - Max AST depth (20 levels) to prevent stack overflow on deeply nested queries
-- Query timeout at the DB level (`SET statement_timeout = '5s'`)
+- ~~Query timeout at the DB level (`SET statement_timeout = '5s'`)~~ **Done**, as a 10s JDBC
+  statement timeout on GameFeatureDao's serving reads rather than a session-level setting — a
+  session `statement_timeout` would also bound writes, which keep their own recovery machinery.
+  A driver `socketTimeout` for network black holes remains deployment config (see README).
 
 ### Estimated Changes
 

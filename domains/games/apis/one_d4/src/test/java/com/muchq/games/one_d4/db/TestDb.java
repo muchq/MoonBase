@@ -15,8 +15,9 @@ public final class TestDb {
   }
 
   public static TestDb create(String name) {
-    String jdbcUrl =
-        "jdbc:h2:mem:" + name + "_" + System.currentTimeMillis() + ";DB_CLOSE_DELAY=-1";
+    // nanoTime, not currentTimeMillis: two tests starting in the same millisecond would silently
+    // share a database.
+    String jdbcUrl = "jdbc:h2:mem:" + name + "_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
     DataSource dataSource = DataSourceFactory.create(jdbcUrl);
     new Migration(dataSource, true).run();
     return new TestDb(dataSource, Jdbi.create(dataSource));

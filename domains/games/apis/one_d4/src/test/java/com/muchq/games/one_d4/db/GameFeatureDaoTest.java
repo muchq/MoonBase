@@ -1,6 +1,7 @@
 package com.muchq.games.one_d4.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.muchq.games.chessql.compiler.CompiledQuery;
 import com.muchq.games.chessql.compiler.SqlCompiler;
@@ -12,6 +13,7 @@ import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.db.GameFeatureStore.GameForReanalysis;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -19,6 +21,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.jdbi.v3.core.statement.SqlLogger;
+import org.jdbi.v3.core.statement.StatementContext;
+import org.jdbi.v3.core.statement.UnableToExecuteStatementException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -102,13 +108,23 @@ public class GameFeatureDaoTest {
             List.of());
 
     long start = System.nanoTime();
-    org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundedDao.query(slow, 500, 0))
+    assertThatThrownBy(() -> boundedDao.query(slow, 500, 0))
         .as("a query outrunning the timeout must be cancelled, not awaited")
-        .isInstanceOf(Exception.class);
+        .isInstanceOf(UnableToExecuteStatementException.class);
     long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
     assertThat(elapsedMillis)
         .as("cancellation must arrive well before the ~8s the full query needs")
-        .isLessThan(7_000);
+        .isLessThan(5_000);
+
+    // The error path must clear the H2 session too: this is the leak that matters in production
+    // — a timed-out read returning its pooled connection with the timeout still set. Without the
+    // reset running in a finally (rather than at the end of the try), this probe reads 1.
+    try (var conn = testDb.dataSource().getConnection();
+        var probe = conn.createStatement()) {
+      assertThat(probe.getQueryTimeout())
+          .as("a timed-out read must not leave its timeout on the pooled connection")
+          .isEqualTo(0);
+    }
 
     // Positive twin: the same query shape under a negligible per-row sleep completes normally,
     // proving the alias and the crafted CompiledQuery work and the failure above is the timeout.
@@ -135,21 +151,20 @@ public class GameFeatureDaoTest {
    */
   @Test
   public void allFourReadPathsCarryTheProductionTimeout() {
-    java.util.concurrent.atomic.AtomicInteger lastTimeout =
-        new java.util.concurrent.atomic.AtomicInteger(-1);
+    AtomicInteger lastTimeout = new AtomicInteger(-1);
     testDb
         .jdbi()
         .setSqlLogger(
-            new org.jdbi.v3.core.statement.SqlLogger() {
+            new SqlLogger() {
               @Override
-              public void logBeforeExecution(org.jdbi.v3.core.statement.StatementContext ctx) {
+              public void logBeforeExecution(StatementContext ctx) {
                 try {
                   // Batch statements log with a null statement here; only reads are probed.
                   var statement = ctx.getStatement();
                   if (statement != null) {
                     lastTimeout.set(statement.getQueryTimeout());
                   }
-                } catch (java.sql.SQLException e) {
+                } catch (SQLException e) {
                   throw new RuntimeException(e);
                 }
               }
