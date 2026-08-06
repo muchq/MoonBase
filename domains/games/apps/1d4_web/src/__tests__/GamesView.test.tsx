@@ -92,16 +92,6 @@ describe('GamesView', () => {
     );
   });
 
-  it('fetches with correct limit and offset on initial load', async () => {
-    render(<GamesView />, { wrapper: makeWrapper() });
-    await waitFor(() => screen.getByText('_prior'));
-
-    // Initial load: page 0, pageSize 25 → offset 0, limit 25
-    expect(api.query).toHaveBeenCalledWith(
-      expect.objectContaining({ limit: 25, offset: 0 })
-    );
-  });
-
   it('sends the exact request the backend first-page cache is keyed on', async () => {
     render(<GamesView />, { wrapper: makeWrapper() });
     await waitFor(() => screen.getByText('_prior'));

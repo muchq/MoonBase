@@ -211,7 +211,12 @@ public class GameFeatureDao implements GameFeatureStore {
    */
   @Override
   public int deleteOlderThan(Instant threshold) {
-    return jdbi.withHandle(
+    // Bounded at the sweep timeout, not the read one: RetentionWorker shares the warmer's
+    // scheduled pool with no lease or interrupt machinery, and this cascade delete is the
+    // statement most likely to sit behind a lock. Idempotent, so a truncated pass loses nothing.
+    return StatementTimeouts.withStatementTimeout(
+        jdbi,
+        StatementTimeouts.RETENTION_SWEEP_SECONDS,
         h -> {
           int deleted =
               h.createUpdate("DELETE FROM game_features WHERE indexed_at < ?")
@@ -396,6 +401,17 @@ public class GameFeatureDao implements GameFeatureStore {
     }
   }
 
+  /**
+   * The serving reads' bounded entry point — see {@link StatementTimeouts#withStatementTimeout} for
+   * the mechanism and {@link StatementTimeouts#SERVING_READ_SECONDS} for the policy. {@link
+   * #fetchForReanalysis} deliberately does not go through here: it is the read half of the admin
+   * reanalysis batch loop, paging the whole table to feed a write path, not a serving read.
+   */
+  private <T> T withReadHandle(org.jdbi.v3.core.HandleCallback<T, RuntimeException> body) {
+    return StatementTimeouts.withStatementTimeout(
+        jdbi, StatementTimeouts.SERVING_READ_SECONDS, body);
+  }
+
   @Override
   public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
     if (!(compiledQuery instanceof CompiledQuery cq)) {
@@ -403,7 +419,7 @@ public class GameFeatureDao implements GameFeatureStore {
           "Expected CompiledQuery, got: " + compiledQuery.getClass());
     }
     String sql = cq.selectSql() + " LIMIT ? OFFSET ?";
-    return jdbi.withHandle(
+    return withReadHandle(
         h -> {
           var query = h.createQuery(sql);
           int idx = 0;
@@ -423,7 +439,7 @@ public class GameFeatureDao implements GameFeatureStore {
           "Expected CompiledQuery, got: " + compiledQuery.getClass());
     }
     String sql = cq.selectSql() + " LIMIT ?";
-    return jdbi.withHandle(
+    return withReadHandle(
         h -> {
           var query = h.createQuery(sql);
           int idx = 0;
@@ -450,7 +466,7 @@ public class GameFeatureDao implements GameFeatureStore {
       throw new IllegalArgumentException(
           "Expected CompiledQuery, got: " + compiledQuery.getClass());
     }
-    return jdbi.withHandle(
+    return withReadHandle(
         h -> {
           var query = h.createQuery(cq.selectSql());
           int idx = 0;
@@ -471,7 +487,7 @@ public class GameFeatureDao implements GameFeatureStore {
     // Fetch all rows including ATTACK (needed for derivation) but excluding stale materialized
     // rows for motifs now derived at response time. ATTACK itself is removed in post-processing.
     Map<String, Map<String, List<OccurrenceRow>>> result =
-        jdbi.withHandle(
+        withReadHandle(
             h -> {
               var rows =
                   h.createQuery(QUERY_OCCURRENCES)
@@ -479,7 +495,8 @@ public class GameFeatureDao implements GameFeatureStore {
                       .map(
                           (rs, ctx) -> {
                             String gameUrl = rs.getString("game_url");
-                            // Store motif key as lowercase to match ChessQL motif naming convention
+                            // Store motif key as lowercase to match ChessQL motif naming
+                            // convention
                             String motif = rs.getString("motif").toLowerCase();
                             return new OccurrenceRow(
                                 gameUrl,

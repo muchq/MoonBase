@@ -108,7 +108,10 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
   @Override
   public List<IndexedPeriod> findPeriodsForPlayers(Collection<String> players) {
     if (players.isEmpty()) return List.of();
-    return jdbi.withHandle(
+    // Bounded like every serving read: this feeds the data-availability block of GET /v1/index.
+    return StatementTimeouts.withStatementTimeout(
+        jdbi,
+        StatementTimeouts.SERVING_READ_SECONDS,
         h ->
             h.createQuery(FIND_FOR_PLAYERS)
                 .bindList("players", List.copyOf(players))
@@ -118,7 +121,10 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
 
   @Override
   public int deleteOlderThan(Instant threshold) {
-    return jdbi.withHandle(
+    // Bounded at the sweep timeout: idempotent hourly cleanup, re-run in an hour if truncated.
+    return StatementTimeouts.withStatementTimeout(
+        jdbi,
+        StatementTimeouts.RETENTION_SWEEP_SECONDS,
         h -> {
           int deleted =
               h.createUpdate(DELETE_OLDER_THAN).bind(0, Timestamp.from(threshold)).execute();

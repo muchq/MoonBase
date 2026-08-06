@@ -227,6 +227,25 @@ public class QueryControllerTest {
     assertThat(store.queryCount()).isEqualTo(1);
   }
 
+  /**
+   * A failing read — which since the statement timeouts includes a query cancelled at the bound —
+   * must surface as an error, never as an empty or partial page. Nothing else prevents a future
+   * "resilience" change from catching the failure and returning an empty result: users would see a
+   * silently empty page, operators no error, and no test would break. Pinned on both paths: the
+   * live one and the cache's cold-miss loader.
+   */
+  @Test
+  public void query_readFailureSurfacesAsAnErrorNotAnEmptyPage() {
+    store.failQueriesWith(new RuntimeException("statement cancelled at the read timeout"));
+
+    assertThatThrownBy(() -> controller.query(new QueryRequest("white_elo >= 2000", 25, 0, null)))
+        .as("live path")
+        .hasMessageContaining("statement cancelled");
+    assertThatThrownBy(() -> controller.query(defaultRequest()))
+        .as("cold-cache loader path")
+        .hasMessageContaining("statement cancelled");
+  }
+
   @Test
   public void query_blankQuery_throws() {
     assertThatThrownBy(() -> controller.query(new QueryRequest("  ", 10, 0)))

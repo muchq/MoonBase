@@ -231,6 +231,150 @@ public class IndexWorkerLifecycleTest {
         NOW);
   }
 
+  /**
+   * The statement timeouts turned a wedged poll from a hang into a throw, which only helps if the
+   * loop survives the throw — pollLoop's catch-and-backoff is the designed recovery path, and
+   * nothing else pins it. The first claimNext fails the way a timed-out candidate scan now does;
+   * the loop must back off and claim the work on a later poll rather than dying with the exception.
+   */
+  @Test
+  @Timeout(30)
+  public void pollLoopSurvivesAClaimFailureAndClaimsOnALaterPoll() throws Exception {
+    UUID id = submit("resilient", false).request().id();
+
+    FeatureExtractor extractor =
+        new FeatureExtractor(new PgnParser(), new GameReplayer(), List.of(new CheckDetector()));
+    IndexWorker worker =
+        new IndexWorker(
+            new RecordingClient(),
+            extractor,
+            dao,
+            new NoOpGameFeatureStore(),
+            new NoOpPeriodStore(),
+            extraction,
+            CLOCK,
+            Duration.ofHours(1));
+    ThrowingFirstClaimStore store = new ThrowingFirstClaimStore(dao);
+    IndexWorkerLifecycle lifecycle =
+        new IndexWorkerLifecycle(new InMemoryIndexQueue(), worker, store, CLOCK);
+    lifecycle.onApplicationEvent(null);
+    try {
+      // The recovery poll arrives after ERROR_BACKOFF (5s); poll well past it.
+      long deadline = System.nanoTime() + Duration.ofSeconds(25).toNanos();
+      while (System.nanoTime() < deadline
+          && !"COMPLETED".equals(dao.findById(id).orElseThrow().status())) {
+        Thread.sleep(100);
+      }
+    } finally {
+      lifecycle.stop();
+    }
+
+    assertThat(store.claimNextCalls.get())
+        .as("the loop polled again after the failure — the control that the throw happened")
+        .isGreaterThan(1);
+    assertThat(dao.findById(id).orElseThrow().status()).isEqualTo("COMPLETED");
+  }
+
+  /** Delegates everything to the real DAO except the first claimNext, which fails. */
+  private static final class ThrowingFirstClaimStore implements IndexingRequestStore {
+    private final IndexingRequestStore delegate;
+    final java.util.concurrent.atomic.AtomicInteger claimNextCalls =
+        new java.util.concurrent.atomic.AtomicInteger();
+
+    ThrowingFirstClaimStore(IndexingRequestStore delegate) {
+      this.delegate = delegate;
+    }
+
+    @Override
+    public Optional<IndexingRequest> claimNext(String ownerId, Duration lease, Instant now) {
+      if (claimNextCalls.incrementAndGet() == 1) {
+        throw new IllegalStateException("candidate scan cancelled at the statement timeout");
+      }
+      return delegate.claimNext(ownerId, lease, now);
+    }
+
+    @Override
+    public Claim createOrAdopt(
+        String player,
+        String platform,
+        String startMonth,
+        String endMonth,
+        boolean excludeBullet,
+        boolean skipCache,
+        Duration lease,
+        Instant now) {
+      return delegate.createOrAdopt(
+          player, platform, startMonth, endMonth, excludeBullet, skipCache, lease, now);
+    }
+
+    @Override
+    public Optional<IndexingRequest> findById(UUID id) {
+      return delegate.findById(id);
+    }
+
+    @Override
+    public Optional<IndexingRequest> findExistingRequest(
+        String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
+      return delegate.findExistingRequest(player, platform, startMonth, endMonth, excludeBullet);
+    }
+
+    @Override
+    public List<IndexingRequest> listRecent(int limit) {
+      return delegate.listRecent(limit);
+    }
+
+    @Override
+    public void updateStatus(UUID id, String status, String errorMessage, int gamesIndexed) {
+      delegate.updateStatus(id, status, errorMessage, gamesIndexed);
+    }
+
+    @Override
+    public int reclaimStale(Duration staleAfter, Instant now) {
+      return delegate.reclaimStale(staleAfter, now);
+    }
+
+    @Override
+    public boolean claim(UUID id, String ownerId, Duration lease, Instant now) {
+      return delegate.claim(id, ownerId, lease, now);
+    }
+
+    @Override
+    public boolean renewLease(UUID id, String ownerId, Duration lease, Instant now) {
+      return delegate.renewLease(id, ownerId, lease, now);
+    }
+
+    @Override
+    public boolean handBack(UUID id, String ownerId, Instant now) {
+      return delegate.handBack(id, ownerId, now);
+    }
+
+    @Override
+    public boolean releaseOwned(UUID id, String ownerId, Instant now) {
+      return delegate.releaseOwned(id, ownerId, now);
+    }
+
+    @Override
+    public boolean holdsLease(UUID id, String ownerId, Instant now) {
+      return delegate.holdsLease(id, ownerId, now);
+    }
+
+    @Override
+    public boolean updateStatusOwned(
+        UUID id,
+        String ownerId,
+        String status,
+        String errorMessage,
+        int gamesIndexed,
+        Instant now) {
+      return delegate.updateStatusOwned(id, ownerId, status, errorMessage, gamesIndexed, now);
+    }
+
+    @Override
+    public int deleteOlderThan(Instant threshold) {
+      return delegate.deleteOlderThan(threshold);
+    }
+  }
+
   private IndexWorkerLifecycle lifecycleFor(ChessClient client, IndexQueue queue) {
     return lifecycleFor(client, queue, new NoOpPeriodStore());
   }

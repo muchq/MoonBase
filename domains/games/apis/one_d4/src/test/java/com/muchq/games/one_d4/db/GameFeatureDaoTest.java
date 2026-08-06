@@ -12,12 +12,16 @@ import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.db.GameFeatureStore.GameForReanalysis;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.jdbi.v3.core.statement.SqlLogger;
+import org.jdbi.v3.core.statement.StatementContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -63,6 +67,81 @@ public class GameFeatureDaoTest {
     dao.insertBatch(List.of());
     CompiledQuery allGames = new SqlCompiler().compile(Parser.parse("white_elo >= 1000"));
     assertThat(dao.query(allGames, 10, 0)).isEmpty();
+  }
+
+  /**
+   * All four read paths must route through the bounded entry point — observed on the real JDBC
+   * statements via Jdbi's logger, per "test through the same objects production uses". Wiring is
+   * asserted against the constant (0 from a path that lost its bound never equals it); the
+   * constant's value itself is pinned once, in StatementTimeoutsTest, so a bound change costs one
+   * edit rather than a scavenger hunt. Behavioral cancellation at a short bound lives on the
+   * mechanism in StatementTimeoutsTest too.
+   *
+   * <p>The final probe pins the H2 session cleanup: H2 scopes setQueryTimeout to the pooled
+   * connection's session, so without the entry point's reset a read's timeout would leak into every
+   * later statement on that connection — including writes, which are deliberately left without a
+   * statement bound. It also keeps the per-path probes honest: with a leaked session value, a read
+   * path that lost its own bound would inherit an earlier read's and still probe as bounded.
+   */
+  @Test
+  public void allFourReadPathsCarryTheProductionTimeout() {
+    AtomicInteger lastTimeout = new AtomicInteger(-1);
+    testDb
+        .jdbi()
+        .setSqlLogger(
+            new SqlLogger() {
+              @Override
+              public void logBeforeExecution(StatementContext ctx) {
+                try {
+                  // Batch statements log with a null statement here; only reads are probed.
+                  var statement = ctx.getStatement();
+                  if (statement != null) {
+                    lastTimeout.set(statement.getQueryTimeout());
+                  }
+                } catch (SQLException e) {
+                  throw new RuntimeException(e);
+                }
+              }
+            });
+    GameFeatureDao prodDao = new GameFeatureDao(testDb.jdbi(), true);
+    dao.insertBatch(List.of(createGame("https://chess.com/game/timeout-probe")));
+
+    lastTimeout.set(-1);
+    prodDao.query(new SqlCompiler().compile(Parser.parse("white_elo >= 1000")), 10, 0);
+    assertThat(lastTimeout.get()).as("query()").isEqualTo(StatementTimeouts.SERVING_READ_SECONDS);
+
+    lastTimeout.set(-1);
+    prodDao.queryOccurrences(List.of("https://chess.com/game/timeout-probe"));
+    assertThat(lastTimeout.get())
+        .as("queryOccurrences()")
+        .isEqualTo(StatementTimeouts.SERVING_READ_SECONDS);
+
+    lastTimeout.set(-1);
+    prodDao.aggregate(
+        new CompiledQuery(
+            "SELECT opening_family, COUNT(*) AS group_count FROM game_features"
+                + " GROUP BY opening_family",
+            List.of()),
+        List.of("opening_family"),
+        10);
+    assertThat(lastTimeout.get())
+        .as("aggregate()")
+        .isEqualTo(StatementTimeouts.SERVING_READ_SECONDS);
+
+    lastTimeout.set(-1);
+    prodDao.aggregateTotals(
+        new CompiledQuery(
+            "SELECT COUNT(*) AS total_games, 1 AS total_groups FROM game_features", List.of()));
+    assertThat(lastTimeout.get())
+        .as("aggregateTotals()")
+        .isEqualTo(StatementTimeouts.SERVING_READ_SECONDS);
+
+    // An unrelated statement on the same (pooled) session must NOT inherit the read timeout.
+    lastTimeout.set(-1);
+    testDb.jdbi().withHandle(h -> h.createQuery("SELECT 1").mapTo(Integer.class).one());
+    assertThat(lastTimeout.get())
+        .as("the read timeout must not leak to later statements on the session")
+        .isEqualTo(0);
   }
 
   @Test

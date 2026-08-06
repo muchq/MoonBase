@@ -144,6 +144,13 @@ For Neon, the URL looks like:
 jdbc:postgresql://ep-xxx.us-east-2.aws.neon.tech/dbname?user=xxx&password=xxx&sslmode=require
 ```
 
+Postgres URLs get a default `socketTimeout=150` (seconds) from `DataSourceFactory` unless the URL
+already carries one. The application bounds query *execution* with JDBC statement timeouts, but
+that cancellation travels over the network — on a dead network only a driver-level socket timeout
+gets the connection back. If you override it in the URL, keep it above the retention sweep's 120s
+statement bound: a long DELETE sends nothing over the socket until it finishes, and a smaller
+value would sever a healthy connection mid-sweep.
+
 The server starts on **port 8080**. Then index a player and query:
 
 ```bash

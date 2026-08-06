@@ -335,7 +335,12 @@ public class IndexingRequestDao implements IndexingRequestStore {
 
   private int reclaim(String keyOrNull, Duration staleAfter, Instant now) {
     String keyClause = keyOrNull == null ? "" : "  AND dedupe_key = :key\n";
-    return jdbi.inTransaction(
+    // Bounded at the sweep timeout: this runs on the retention tick's shared scheduled pool with
+    // no lease or interrupt machinery, and settling is idempotent — a truncated pass re-runs in
+    // an hour (or on the next submit of the same tuple).
+    return StatementTimeouts.inTransactionWithTimeout(
+        jdbi,
+        StatementTimeouts.RETENTION_SWEEP_SECONDS,
         h -> {
           // Order matters twice, for two different reasons, and neither is the one that looks
           // obvious. A row at the attempt limit cannot match RELEASE_SQL at all — that statement
@@ -429,7 +434,10 @@ public class IndexingRequestDao implements IndexingRequestStore {
 
   @Override
   public List<IndexingRequest> listRecent(int limit) {
-    return jdbi.withHandle(
+    // Bounded like every serving read: this backs GET /v1/index on a request thread.
+    return StatementTimeouts.withStatementTimeout(
+        jdbi,
+        StatementTimeouts.SERVING_READ_SECONDS,
         h ->
             h.createQuery("SELECT * FROM indexing_requests ORDER BY created_at DESC LIMIT ?")
                 .bind(0, limit)
@@ -570,8 +578,14 @@ public class IndexingRequestDao implements IndexingRequestStore {
     // H2 has none; the conditional UPDATE claim already performs is what makes this safe without
     // it, since at most one racer's WHERE can match a given row. Losing costs a retry against the
     // next candidate, not correctness.
+    //
+    // Bounded: this scan runs every few seconds on the poller's single dedicated thread, whose
+    // loop never returns while a statement is in flight — unbounded, one wedged scan stopped the
+    // instance claiming any work until a restart, with nothing local to recover it.
     List<UUID> candidates =
-        jdbi.withHandle(
+        StatementTimeouts.withStatementTimeout(
+            jdbi,
+            StatementTimeouts.SERVING_READ_SECONDS,
             h ->
                 h.createQuery(
                         """
@@ -719,7 +733,10 @@ public class IndexingRequestDao implements IndexingRequestStore {
 
   @Override
   public int deleteOlderThan(Instant threshold) {
-    return jdbi.withHandle(
+    // Bounded at the sweep timeout: idempotent hourly cleanup, re-run in an hour if truncated.
+    return StatementTimeouts.withStatementTimeout(
+        jdbi,
+        StatementTimeouts.RETENTION_SWEEP_SECONDS,
         h -> {
           int deleted =
               h.createUpdate(

@@ -30,11 +30,12 @@ public class FirstPageWarmer {
 
   // fixedDelay must stay at half FirstPageCache.MAX_AGE or less (pinned by
   // FirstPageWarmerTest), or the cache expires between refreshes and every first load falls
-  // through to the database again. fixedDelay measures from the previous run's completion, so
-  // the true period is 30s plus query time; the 2x headroom in MAX_AGE absorbs that.
-  // refreshNow() keeps the last good snapshot and logs on failure, so a failed tick never
-  // cancels the schedule. A query that hangs (rather than throws) does block future ticks —
-  // the cache's load-on-miss bounds the damage to serving live until a restart.
+  // through to the database again. fixedDelay measures from the previous run's completion, and
+  // a tick runs two database reads, each bounded by StatementTimeouts.SERVING_READ_SECONDS —
+  // so the true worst-case period is 30s plus twice that bound, which must also stay under
+  // MAX_AGE (pinned by FirstPageWarmerTest too). refreshNow() keeps the last good snapshot and
+  // logs on failure, so a failed tick never cancels the schedule; the read timeout is what
+  // guarantees a tick cannot hang the schedule either.
   @Scheduled(fixedDelay = "30s", initialDelay = "1s")
   public void refresh() {
     cache.refreshNow();

@@ -91,8 +91,13 @@ public class FirstPageWarmupTest {
         .contains("\"count\":0")
         .doesNotContain("after-warm");
 
+    // DEFAULT_LIMIT + 1, derived rather than literal: a hardcoded 26 would silently become a
+    // cache HIT if the default ever changed to 26, failing this control with a misleading message.
     HttpResponse<String> live =
-        postQuery("{\"query\":\"num.moves >= 0\",\"limit\":26,\"offset\":0}");
+        postQuery(
+            "{\"query\":\"num.moves >= 0\",\"limit\":"
+                + (FirstPageCache.DEFAULT_LIMIT + 1)
+                + ",\"offset\":0}");
     assertThat(live.statusCode()).isEqualTo(200);
     assertThat(live.body())
         .as("control: any other page size goes to the database and sees the insert")
