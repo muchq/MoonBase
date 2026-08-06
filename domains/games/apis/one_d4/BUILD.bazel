@@ -580,6 +580,7 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/games/one_d4/db/PostgresAggregateCompatTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresConcurrentWriteTest.java",
+        "src/test/java/com/muchq/games/one_d4/db/PostgresReadTimeoutTest.java",
     ],
     env_inherit = ["PG_TEST_DB_URL"],
     # One shared scratch database: concurrent DB tests drop each other's schemas.
