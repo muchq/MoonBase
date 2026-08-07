@@ -452,9 +452,11 @@ public class Migration {
    * The index behind the retention delete (#1313 item 11). {@code deleteOlderThan} filters {@code
    * game_features} on {@code indexed_at} hourly; unindexed, every 120s-bounded sweep re-scanned the
    * table from the start, so a sweep that hit its bound rolled back having made <em>no forward
-   * progress</em> and retried the same scan an hour later — a ratchet that never advances. With the
-   * index the delete walks straight to the expired rows, and a truncated pass leaves fewer of them
-   * for the next one. Dialect-neutral: a plain b-tree on a plain column.
+   * progress</em> and retried the same scan an hour later — a ratchet that never advances. The
+   * delete is one statement, so a cancel always rolls the whole pass back; what the index changes
+   * is the cost side, letting the steady-state delete walk straight to the expired rows and
+   * <em>finish</em> inside the bound. (If a backlog ever outgrows the bound anyway, LIMIT-batched
+   * deletes are the next tool.) Dialect-neutral: a plain b-tree on a plain column.
    */
   private static final String CREATE_IDX_GAME_FEATURES_INDEXED_AT =
       "CREATE INDEX IF NOT EXISTS idx_game_features_indexed_at ON game_features(indexed_at)";
