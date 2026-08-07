@@ -1011,24 +1011,57 @@ public class SqlCompilerTest {
   }
 
   /**
-   * The username filter may sit anywhere in the tree, including under a NOT or an IN — the refusal
-   * asks whether the filter constrains a username at all, not whether it does so in one shape.
+   * The question is not "is a username mentioned?" but "can this filter match a game the player did
+   * not play?" — so shapes that name a username while still admitting strangers are refused. Each
+   * would otherwise reproduce the exact failure the refusal exists to prevent: a corpus-wide (or
+   * someone-else-wide) count under the named player's heading.
    */
   @Test
-  public void testAggregateAcceptsAUsernameFilterAnywhereInTheTree() {
-    assertThatCode(
-            () ->
-                compiler.compileAggregate(
-                    Parser.parse("time.class = \"blitz\" AND NOT white.username = \"magnus\""),
-                    List.of("eco"),
-                    "hikaru"))
-        .doesNotThrowAnyException();
-    assertThatCode(
-            () ->
-                compiler.compileAggregate(
-                    Parser.parse("black.username IN [\"hikaru\", \"magnus\"]"),
-                    List.of("eco"),
-                    "hikaru"))
+  public void testAggregateRefusesUsernameFiltersThatStillAdmitOtherPlayersGames() {
+    // The complement of "is magnus" is everyone else — hikaru included, but hardly alone.
+    assertUnscoped("time.class = \"blitz\" AND NOT white.username = \"magnus\"");
+    // Negation of the player's own name is the case that matters: it names hikaru and admits
+    // precisely the games that are not his. A rule that recursed through NOT would accept it.
+    assertUnscoped("NOT white.username = \"hikaru\"");
+    assertUnscoped("NOT (white.username = \"hikaru\" OR black.username = \"hikaru\")");
+    // One unscoped branch of an OR admits the whole corpus, whatever the other branch says.
+    assertUnscoped("white.username = \"hikaru\" OR time.class = \"blitz\"");
+    // Only equality pins a value — "not hikaru" names him and excludes him.
+    assertUnscoped("white.username != \"hikaru\"");
+    assertUnscoped("white.username != \"magnus\"");
+    // A list naming anyone else admits their games too.
+    assertUnscoped("black.username IN [\"hikaru\", \"magnus\"]");
+    // And a filter pinning a username to somebody who is not the named player scopes to them, not
+    // to the player the response will be read as being about.
+    assertUnscoped("white.username = \"magnus\" OR black.username = \"magnus\"");
+  }
+
+  /** The shapes that genuinely cannot match another player's game still compile. */
+  @Test
+  public void testAggregateAcceptsUsernameFiltersThatCannotAdmitOtherPlayersGames() {
+    // AND only narrows, so one scoping conjunct suffices, at any depth.
+    assertScoped("time.class = \"blitz\" AND white.username = \"hikaru\"");
+    assertScoped(
+        "(white.username = \"hikaru\" OR black.username = \"hikaru\") AND time.class = \"blitz\"");
+    // Every branch of the OR pins the same player.
+    assertScoped("white.username = \"hikaru\" OR black.username = \"hikaru\"");
+    // Case-folded, matching the case-folding the compiled predicate itself does.
+    assertScoped("white.username = \"HIKARU\" OR black.username = \"Hikaru\"");
+    // A single-alternative IN is an equality in list clothing.
+    assertScoped("black.username IN [\"hikaru\"]");
+  }
+
+  private void assertUnscoped(String query) {
+    assertThatThrownBy(
+            () -> compiler.compileAggregate(Parser.parse(query), List.of("eco"), "hikaru"))
+        .as(query)
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("would not scope this aggregate");
+  }
+
+  private void assertScoped(String query) {
+    assertThatCode(() -> compiler.compileAggregate(Parser.parse(query), List.of("eco"), "hikaru"))
+        .as(query)
         .doesNotThrowAnyException();
   }
 

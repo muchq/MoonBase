@@ -522,12 +522,15 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    * aggregate entry points reject the combination instead of answering the wrong question
    * convincingly.
    *
-   * <p>An explicit username filter counts as scoping, since the caller has said what they meant in
-   * the query itself; the named player is then merely redundant.
+   * <p>A filter that pins a username column to the named player counts as scoping — the caller said
+   * what they meant in the query itself, and the named player is then merely redundant. That is a
+   * narrower test than "a username is mentioned somewhere", deliberately: {@code NOT white.username
+   * = "magnus"} names a username while saying nothing about the player, and answering it would
+   * reproduce exactly the failure this method exists to prevent.
    */
   private void requireTheAggregateScopesToItsPlayer(ParsedQuery pq, Perspective perspective) {
     // Perspective normalizes a blank player to null, so the null check covers both.
-    if (perspective.player == null || perspective.used || filtersOnUsername(pq.expr())) {
+    if (perspective.player == null || perspective.used || scopesToPlayer(pq.expr(), perspective)) {
       return;
     }
     throw new IllegalArgumentException(
@@ -535,23 +538,44 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
             + perspective.player
             + "\" would not scope this aggregate: no perspective field ("
             + PERSPECTIVE_FIELDS.keySet().stream().sorted().collect(Collectors.joining(", "))
-            + ") appears in the filter or groupBy, and the filter names no username, so the"
-            + " result would cover every indexed game rather than that player's. Group by or"
+            + ") appears in the filter or groupBy, and the filter does not restrict a username"
+            + " to that player, so the result would cover games that are not theirs. Group by or"
             + " filter on a perspective field, or filter explicitly:"
-            + " white.username = \"NAME\" OR black.username = \"NAME\".");
+            + " white.username = \"NAME\" OR black.username = \"NAME\" (the same NAME).");
   }
 
-  /** Whether the filter itself constrains a username column, on either side. */
-  private boolean filtersOnUsername(Expr expr) {
+  /**
+   * Whether this filter cannot match a game the named player did not play.
+   *
+   * <p>Read as "does every row this expression admits belong to the player?", which is why the
+   * cases are not symmetric. A conjunction scopes if <em>any</em> conjunct does, since AND only
+   * narrows. A disjunction scopes only if <em>every</em> branch does, since one unscoped branch
+   * admits the whole corpus. Negation never scopes: the complement of "is the player" is everyone
+   * else. Only equality pins a value — {@code !=} and the ordering operators widen — and an {@code
+   * IN} list scopes only when every alternative is the player, since a list naming anyone else
+   * admits their games too.
+   */
+  private boolean scopesToPlayer(Expr expr, Perspective perspective) {
     return switch (expr) {
-      case OrExpr or -> or.operands().stream().anyMatch(this::filtersOnUsername);
-      case AndExpr and -> and.operands().stream().anyMatch(this::filtersOnUsername);
-      case NotExpr not -> filtersOnUsername(not.operand());
-      case ComparisonExpr cmp -> isUsernameField(cmp.field());
-      case InExpr in -> isUsernameField(in.field());
+      case OrExpr or -> or.operands().stream().allMatch(e -> scopesToPlayer(e, perspective));
+      case AndExpr and -> and.operands().stream().anyMatch(e -> scopesToPlayer(e, perspective));
+      case NotExpr ignored -> false;
+      case ComparisonExpr cmp ->
+          "=".equals(cmp.operator())
+              && isUsernameField(cmp.field())
+              && isThePlayer(cmp.value(), perspective);
+      case InExpr in ->
+          isUsernameField(in.field())
+              && !in.values().isEmpty()
+              && in.values().stream().allMatch(v -> isThePlayer(v, perspective));
       case MotifExpr ignored -> false;
       case SequenceExpr ignored -> false;
     };
+  }
+
+  /** Compared case-insensitively, since the compiled username predicates case-fold both sides. */
+  private static boolean isThePlayer(Object value, Perspective perspective) {
+    return value instanceof String name && name.equalsIgnoreCase(perspective.player);
   }
 
   private boolean isUsernameField(String field) {

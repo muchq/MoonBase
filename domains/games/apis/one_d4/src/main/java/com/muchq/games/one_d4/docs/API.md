@@ -220,7 +220,7 @@ matching row and group client-side.
 
 ```json
 {
-  "query": "white.username = \"hikaru\" AND time.class = \"blitz\"",
+  "query": "(white.username = \"hikaru\" OR black.username = \"hikaru\") AND time.class = \"blitz\"",
   "groupBy": ["opening_family"],
   "orderBy": "count",
   "limit": 20
