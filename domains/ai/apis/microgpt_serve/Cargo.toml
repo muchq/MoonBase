@@ -24,3 +24,7 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 tower = { workspace = true }
 http-body-util = { workspace = true }
+# The in-memory exporter behind the zero-baseline test. server_pal already
+# pulls this feature in, and crate_universe resolves one feature set per crate
+# across the workspace, so this adds no new edge.
+opentelemetry_sdk = { workspace = true, features = ["testing"] }

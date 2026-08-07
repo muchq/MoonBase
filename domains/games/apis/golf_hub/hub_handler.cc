@@ -171,7 +171,64 @@ HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards
         options.grace_period = grace_period;
         options.on_expired = [this](const std::string& id) { OnExpired(id); };
         return options;
-      }()) {}
+      }()) {
+  DeclareMetrics();
+}
+
+// Every counter series this handler can report, declared at construction so
+// each exports a zero before it counts anything. Without a baseline the series
+// is born carrying its first event's value, and increase() has nothing earlier
+// to measure it against — so the first chat message, the first refused
+// admission, the first reaped seat after a deploy are all invisible (#1323).
+//
+// Each entry is written out in full so it greps against its emit site as one
+// string. That is the point of listing them at all: the declaration and the
+// emit sites have to agree, and a reader checking that should not have to
+// assemble a series out of two nested loops first.
+//
+// hub_e2e_test pins one of the two directions. ExpectOnlyDeclaredCounterSeries
+// runs in every stream test's TearDown, so a series emitted but not declared
+// fails — including from the tests that refuse admissions, trip the rate
+// limiter or drop a stream, which is where most of these fire. The other
+// direction, a value declared here that nothing ever emits, has no such guard:
+// it costs a permanently flat line on a dashboard, and the only thing in its
+// way is the literal copy of this list in
+// BuildingAHandlerDeclaresEveryCounterSeriesAtZero, which has to be edited too.
+//
+// Not declared: chat_catch_up_rows, a distribution. It has the same
+// first-observation gap and futility offers no DeclareDistribution to close it
+// — the same carve-out microgpt_serve's AppMetrics::declare() makes for its
+// histograms, and for the same reason.
+const std::vector<HubHandler::CounterSeries>& HubHandler::DeclaredCounterSeries() {
+  static const auto* kSeries = new std::vector<CounterSeries>{
+      {"chat_appends", {{"result", "stored"}}},
+      {"chat_appends", {{"result", "rejected"}}},
+      {"chat_appends", {{"result", "unavailable"}}},
+      {"chat_failures", {{"stage", "cursor_seed"}}},
+      {"chat_failures", {{"stage", "catch_up"}}},
+      {"chat_failures", {{"stage", "history_load"}}},
+      {"chat_history_replays", {}},
+      {"chat_rows_delivered", {}},
+      {"restored_seats_reaped", {}},
+      {"stream_admissions_refused", {{"reason", "bad_ticket"}}},
+      {"stream_admissions_refused", {{"reason", "seat_conflict"}}},
+      {"stream_disconnects", {{"kind", "clean"}}},
+      {"stream_disconnects", {{"kind", "abrupt"}}},
+      {"stream_rate_limited", {{"kind", "chat"}}},
+      {"stream_rate_limited", {{"kind", "command"}}},
+      {"stream_seats_expired", {}},
+      {"stream_sessions", {{"resumed", "true"}}},
+      {"stream_sessions", {{"resumed", "false"}}},
+  };
+  return *kSeries;
+}
+
+void HubHandler::DeclareMetrics() {
+  if (!metrics_) return;
+  for (const CounterSeries& series : DeclaredCounterSeries()) {
+    metrics_->DeclareCounter(series.name, series.attributes);
+  }
+}
 
 HubHandler::~HubHandler() {
   {

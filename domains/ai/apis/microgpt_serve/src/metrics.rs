@@ -1,5 +1,11 @@
+use opentelemetry::metrics::{Counter, Histogram, Meter};
 use opentelemetry::{global, KeyValue};
-use opentelemetry::metrics::{Counter, Histogram};
+
+/// The `endpoint` label values the emit sites use — the whole set, because a
+/// zero baseline is per series and a series is the instrument *and* its
+/// attributes. Spelled out rather than derived so a third endpoint has to say
+/// so here too.
+const ENDPOINTS: [&str; 2] = ["generate", "chat"];
 
 pub struct AppMetrics {
     pub requests_total: Counter<u64>,
@@ -11,8 +17,13 @@ pub struct AppMetrics {
 
 impl AppMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("microgpt");
-        AppMetrics {
+        Self::with_meter(&global::meter("microgpt"))
+    }
+
+    /// Takes the meter rather than reaching for the global one so a test can
+    /// hand it an isolated provider and read the exported series back.
+    pub fn with_meter(meter: &Meter) -> Self {
+        let metrics = AppMetrics {
             requests_total: meter
                 .u64_counter("microgpt_requests")
                 .with_description("Total inference requests by endpoint")
@@ -34,6 +45,35 @@ impl AppMetrics {
                 .f64_histogram("microgpt_tokens_per_second")
                 .with_description("Tokens generated per second per request")
                 .build(),
+        };
+        metrics.declare();
+        metrics
+    }
+
+    /// Puts every counter series on the wire at 0 before anything is served
+    /// (#1323). Building the instrument is not enough: the SDK exports nothing
+    /// for an instrument that has taken no measurement, so without this each
+    /// series is born carrying its first request's value and `increase()` has
+    /// no earlier sample to measure it against — the first generate after every
+    /// deploy is uncounted, forever.
+    ///
+    /// Adding zero is what materializes the series. Zero is a measurement.
+    ///
+    /// The two histograms are deliberately left alone. `record(0.0)` is not a
+    /// declaration, it is a real observation: it would leave `_sum` where it is
+    /// and add one to `_count`, so `avg_duration_ms` — which the dashboard
+    /// computes as `rate(_sum)/rate(_count)` — would read low for the window
+    /// containing process start. The Java rail can baseline a distribution
+    /// because `CustomMetrics.defineDistributionSeries` creates an empty
+    /// series with a count of 0; the OTel Histogram API has no equivalent, so
+    /// this rail declares counters only and the histograms keep the
+    /// first-observation gap.
+    fn declare(&self) {
+        self.conversations_total.add(0, &[]);
+        for endpoint in ENDPOINTS {
+            let attrs = [KeyValue::new("endpoint", endpoint)];
+            self.requests_total.add(0, &attrs);
+            self.tokens_generated_total.add(0, &attrs);
         }
     }
 
@@ -62,5 +102,119 @@ impl AppMetrics {
         self.tokens_generated_total.add(tokens, &attrs);
         self.request_duration_ms.record(duration_ms, &attrs);
         self.tokens_per_second.record(tps, &attrs);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opentelemetry::metrics::MeterProvider as _;
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics};
+    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
+
+    struct Rig {
+        provider: SdkMeterProvider,
+        exporter: InMemoryMetricExporter,
+        metrics: AppMetrics,
+    }
+
+    /// An isolated provider, so this reads only what AppMetrics recorded — the
+    /// global one is shared with whatever else the test binary touched.
+    fn rig() -> Rig {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = SdkMeterProvider::builder()
+            .with_reader(PeriodicReader::builder(exporter.clone()).build())
+            .build();
+        let metrics = AppMetrics::with_meter(&provider.meter("microgpt"));
+        Rig {
+            provider,
+            exporter,
+            metrics,
+        }
+    }
+
+    fn exported(rig: &Rig) -> ResourceMetrics {
+        rig.provider.force_flush().expect("force_flush failed");
+        rig.exporter
+            .get_finished_metrics()
+            .expect("get_finished_metrics failed")
+            .pop()
+            .expect("nothing was exported")
+    }
+
+    /// `name{endpoint="..."}` and its value, for EVERY u64 counter series the
+    /// export carries — not a lookup by name. Sweeping the whole export is what
+    /// makes an unexpected series fail: a by-name reader can only check the
+    /// instruments the test already thought to ask about, so a counter added
+    /// with no entry in `declare()` would slip past it exactly the way this
+    /// whole change exists to prevent.
+    ///
+    /// A series missing entirely simply does not appear — the SDK exports
+    /// nothing for an instrument that has taken no measurement, which is the
+    /// bug being pinned.
+    fn counter_series(rm: &ResourceMetrics) -> Vec<(String, u64)> {
+        let mut out = vec![];
+        for scope in rm.scope_metrics() {
+            for metric in scope.metrics() {
+                if let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() {
+                    for dp in sum.data_points() {
+                        let label = match dp.attributes().find(|kv| kv.key.as_str() == "endpoint") {
+                            Some(kv) => format!("{}{{endpoint=\"{}\"}}", metric.name(), kv.value),
+                            None => metric.name().to_string(),
+                        };
+                        out.push((label, dp.value()));
+                    }
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// The five series `declare()` is expected to produce, each at `value`.
+    fn expected(value: u64) -> Vec<(String, u64)> {
+        let mut out = vec![
+            ("microgpt_conversations".to_string(), value),
+            (r#"microgpt_requests{endpoint="chat"}"#.to_string(), value),
+            (r#"microgpt_requests{endpoint="generate"}"#.to_string(), value),
+            (
+                r#"microgpt_tokens_generated{endpoint="chat"}"#.to_string(),
+                value,
+            ),
+            (
+                r#"microgpt_tokens_generated{endpoint="generate"}"#.to_string(),
+                value,
+            ),
+        ];
+        out.sort();
+        out
+    }
+
+    /// The zero baseline (#1323). Every counter series must be on the wire at 0
+    /// from construction, before a single request — otherwise it is born
+    /// carrying its first request's value and increase() shows nothing for that
+    /// request, ever.
+    ///
+    /// Compared as a whole set, so this fails on a missing series, an extra one,
+    /// and a nonzero one alike.
+    #[test]
+    fn building_the_metrics_declares_every_counter_series_at_zero() {
+        let rig = rig();
+        assert_eq!(counter_series(&exported(&rig)), expected(0));
+    }
+
+    /// The declared set and the emit sites have to agree, or a declared endpoint
+    /// nobody serves is a permanently flat line and a served one nobody declared
+    /// loses its first request. Serving both endpoints once must land on exactly
+    /// the declared series and nothing else.
+    #[test]
+    fn recording_adds_no_series_the_declaration_did_not_cover() {
+        let rig = rig();
+        rig.metrics.record_generate(1, 100.0);
+        rig.metrics.record_chat(1, 50.0);
+
+        // One request each, one token each, one conversation — so every series
+        // reads 1 and a single expectation covers them all.
+        assert_eq!(counter_series(&exported(&rig)), expected(1));
     }
 }

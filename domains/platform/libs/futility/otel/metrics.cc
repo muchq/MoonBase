@@ -60,6 +60,14 @@ void MetricsRecorder::RecordCounter(const std::string& metric_name, int64_t valu
   }
 }
 
+void MetricsRecorder::DeclareCounter(const std::string& metric_name,
+                                     const std::map<std::string, std::string>& attributes) {
+  // Adding zero is what materializes the series: creating the instrument alone
+  // registers no attribute set, so the SDK still has nothing to export until a
+  // measurement arrives. Zero is a measurement.
+  RecordCounter(metric_name, 0, attributes);
+}
+
 void MetricsRecorder::RecordLatency(const std::string& metric_name,
                                     std::chrono::microseconds duration,
                                     const std::map<std::string, std::string>& attributes) {

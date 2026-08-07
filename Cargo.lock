@@ -2142,6 +2142,7 @@ dependencies = [
  "http-body-util",
  "microgpt",
  "opentelemetry",
+ "opentelemetry_sdk",
  "serde",
  "serde_json",
  "server_pal",

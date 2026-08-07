@@ -5,11 +5,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -1485,6 +1487,76 @@ TEST_F(GolfHubStreamFixture, ChatMetricsCountOutcomesWithoutIdentifiers) {
 // The unavailable side of the append counter: the store cannot be
 // reached, the sender is told so, and nothing counts as stored or
 // delivered.
+
+// The zero baseline (#1323): a handler must put its counters on the wire at 0
+// when it is built, before any session. Without it each series is born carrying
+// its first event's value and increase() shows nothing for that event, ever —
+// so the first chat message, the first refused admission, the first reaped seat
+// after a deploy are all uncounted.
+//
+// Every declared series is asserted individually, attributes included, because
+// a series is name *and* attributes: a bare chat_appends baselines an orphan
+// while chat_appends{result="stored"} — the one the Chat tile queries — stays
+// unbaselined.
+//
+// The expected roster is written out here rather than read off the handler, and
+// the duplication is the point. Reading DeclaredCounterSeries() would make the
+// loop iterate the same list production iterates, so deleting an entry would
+// delete its assertion too and the test would stay green while a dashboard went
+// blind. This copy is what makes a deletion cost two edits instead of one — and
+// it is the only guard against the reverse mistake, a series declared here that
+// no emit site ever writes, which nothing else in the suite can see.
+TEST_F(GolfHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) {
+  const std::vector<HubHandler::CounterSeries> kExpected = {
+      {"chat_appends", {{"result", "stored"}}},
+      {"chat_appends", {{"result", "rejected"}}},
+      {"chat_appends", {{"result", "unavailable"}}},
+      {"chat_failures", {{"stage", "cursor_seed"}}},
+      {"chat_failures", {{"stage", "catch_up"}}},
+      {"chat_failures", {{"stage", "history_load"}}},
+      {"chat_history_replays", {}},
+      {"chat_rows_delivered", {}},
+      {"restored_seats_reaped", {}},
+      {"stream_admissions_refused", {{"reason", "bad_ticket"}}},
+      {"stream_admissions_refused", {{"reason", "seat_conflict"}}},
+      {"stream_disconnects", {{"kind", "clean"}}},
+      {"stream_disconnects", {{"kind", "abrupt"}}},
+      {"stream_rate_limited", {{"kind", "chat"}}},
+      {"stream_rate_limited", {{"kind", "command"}}},
+      {"stream_seats_expired", {}},
+      {"stream_sessions", {{"resumed", "true"}}},
+      {"stream_sessions", {{"resumed", "false"}}},
+  };
+
+  auto capture = MakeCapturingMetricsRecorder();
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_, capture);
+  ASSERT_NE(instance, nullptr);
+
+  // Count first, so dropping an entry from the handler's list fails here rather
+  // than only failing whichever per-series assertion happened to cover it.
+  EXPECT_EQ(HubHandler::DeclaredCounterSeries().size(), kExpected.size());
+
+  const auto entries = capture->Entries();
+  for (const auto& series : kExpected) {
+    const std::string label = SeriesLabel(series);
+    EXPECT_EQ(capture->CounterTotal(series.name, series.attributes), 0) << label;
+    // Presence, not just a zero read: CounterTotal sums an empty match to 0, so
+    // the assertion above passes just as happily against a series that was
+    // never declared — including one whose name a rename left behind.
+    const bool declared = std::any_of(entries.begin(), entries.end(), [&](const auto& entry) {
+      return entry.name == series.name && entry.attributes == series.attributes;
+    });
+    EXPECT_TRUE(declared) << label << " was never put on the wire";
+  }
+}
+
+// The other direction — a series emitted but not declared, which loses its first
+// occurrence — is not pinned here. It is pinned in the fixture's TearDown by
+// ExpectOnlyDeclaredCounterSeries, so every test in this suite checks it against
+// whatever paths that test happens to drive: the bad-ticket admission, the rate
+// limiter, the chat store failures, and the disconnects the closes produce. One
+// scripted session would have covered four of the eighteen.
+
 TEST_F(GolfHubStreamFixture, AnUnreachableStoreCountsTheAppendAsUnavailable) {
   auto capture = MakeCapturingMetricsRecorder();
   auto instance = BuildSecondInstance(

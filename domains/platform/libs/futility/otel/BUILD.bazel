@@ -97,6 +97,17 @@ cc_test(
 )
 
 cc_test(
+    name = "metrics_declaration_test",
+    size = "small",
+    srcs = ["metrics_declaration_test.cc"],
+    deps = [
+        ":capturing_metrics_recorder",
+        ":metrics",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "http_metrics_test",
     size = "small",
     srcs = ["http_metrics_test.cc"],

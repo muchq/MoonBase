@@ -399,6 +399,13 @@ public class IndexWorker {
   private void declareMetrics() {
     metrics.defineDistribution(RUN_DURATION, RUN_DURATION_BOUNDS);
     metrics.defineDistribution(GAMES_PER_MONTH, GAMES_PER_MONTH_BOUNDS);
+    // Bounds are per name; the series is per name and labels, so both are declared. Without the
+    // second, avg_run_seconds_1h divides a rate over one sample by a rate over one sample the
+    // first time a run finishes — the same blindness as the counters, one level less obvious.
+    metrics.defineDistributionSeries(GAMES_PER_MONTH);
+    for (String outcome : RUN_OUTCOMES) {
+      metrics.defineDistributionSeries(RUN_DURATION, Map.of("outcome", outcome));
+    }
 
     metrics.defineCounter(GAMES_INDEXED);
     for (String outcome : RUN_OUTCOMES) {

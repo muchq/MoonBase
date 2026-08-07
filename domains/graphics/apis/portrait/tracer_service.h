@@ -35,7 +35,20 @@ class TracerService {
   /// two stay equal. Both members copy the pointer: moving into one of them
   /// would make correctness depend on the order they happen to be declared.
   TracerService(uint16_t _cache_size, std::shared_ptr<futility::otel::MetricsRecorder> metrics)
-      : cache_("trace", _cache_size, metrics), metrics_(metrics) {}
+      : cache_("trace", _cache_size, metrics), metrics_(metrics) {
+    // Declared here rather than left to the first request, so each series
+    // exports a zero before it counts anything and the first render after a
+    // deploy is visible as an increase rather than as the value the series was
+    // born with (#1323). The error labels are spelled out because the emit
+    // sites spell them out; TracerServiceTest pins that the two agree.
+    if (metrics_) {
+      metrics_->DeclareCounter("trace_requests_total");
+      metrics_->DeclareCounter("trace_requests_completed");
+      for (const char* error : {"validation_failed", "out_of_memory", "rendering_failed"}) {
+        metrics_->DeclareCounter("trace_requests_failed", {{"error", error}});
+      }
+    }
+  }
   virtual ~TracerService() = default;
 
   /// Traces a scene and returns the encoded PNG bytes plus dimensions.

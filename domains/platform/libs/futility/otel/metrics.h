@@ -79,6 +79,37 @@ class MetricsRecorder {
   virtual void RecordCounter(const std::string& metric_name, int64_t value = 1,
                              const std::map<std::string, std::string>& attributes = {});
 
+  /// @brief Declares a counter series ahead of its first event, so it exports
+  ///        as 0 from process start.
+  ///
+  /// Without this a counter springs into existence already carrying the value
+  /// of the first event it counted: the instrument is created lazily on the
+  /// first RecordCounter, so the series' very first exported sample is that
+  /// event's value. increase() and rate() measure the change *between*
+  /// samples, so with nothing earlier to measure from that first event shows
+  /// no increase at all — forever. The counter is not wrong; every dashboard
+  /// built on it reads zero, which is worse than a missing tile because it
+  /// looks like an answer.
+  ///
+  /// That is what every process does after every deploy, so the first event of
+  /// anything is uncounted until a second one follows it. Diagnosed on the
+  /// Java rail, where an overnight run of a thousand games left a panel of
+  /// zeros (https://github.com/muchq/MoonBase/issues/1323); this rail creates
+  /// its instruments the same way.
+  ///
+  /// Declare the label sets whose values are known up front — outcomes,
+  /// error kinds, states. A label whose values come from client input or a
+  /// generated union has no series to declare, and declaring one per possible
+  /// value is how a metric becomes a cardinality problem.
+  ///
+  /// Idempotent, and harmless once events have arrived: adding zero to a
+  /// counter leaves its total alone.
+  ///
+  /// @param metric_name The metric name (e.g., "trace_requests_failed").
+  /// @param attributes The label set to declare (default: none).
+  virtual void DeclareCounter(const std::string& metric_name,
+                              const std::map<std::string, std::string>& attributes = {});
+
   /// @brief Records a histogram metric for latency/duration measurements.
   ///
   /// Use for timing operations: request latency, processing time, etc.
