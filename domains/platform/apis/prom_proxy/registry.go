@@ -87,7 +87,7 @@ const alarmWindow = "24h"
 // answer to "how busy is it right now?" and the wrong answer to the question
 // anyone actually opens this panel with, "did the thing I ran work?".
 //
-// #1313: a thousand-game run at 05:09 left a panel of zeros by breakfast,
+// #1323: a thousand-game run at 05:09 left a panel of zeros by breakfast,
 // with nothing to distinguish it from a service that had never indexed
 // anything. Same length as alarmWindow, for the same reason — the interesting
 // events are sparse — but named apart because these are volumes, not alarms,

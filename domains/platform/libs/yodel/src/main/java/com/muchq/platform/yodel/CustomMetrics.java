@@ -102,7 +102,7 @@ public final class CustomMetrics {
    * <p>That is not a corner case: it is what every process does after every deploy, so the first
    * run of anything is uncounted until a second one follows it. It cost a real investigation on
    * one_d4, where an overnight indexing run of a thousand games left an Indexing panel of zeros
-   * (https://github.com/muchq/MoonBase/issues/1313).
+   * (https://github.com/muchq/MoonBase/issues/1323).
    *
    * <p>Declare the label sets whose values are known up front — outcomes, results, states. An
    * unbounded label (a username, a URL) has no series to declare, and declaring one per possible

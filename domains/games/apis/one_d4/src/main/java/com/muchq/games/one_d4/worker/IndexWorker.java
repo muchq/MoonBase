@@ -393,8 +393,8 @@ public class IndexWorker {
    * any request arrives. See {@link CustomMetrics#defineCounter}.
    *
    * <p>The label values are spelled out because the emit sites spell them out; {@code
-   * IndexWorkerMetricsTest} pins that the two sets agree, so an outcome added at an emit site
-   * without a declaration here fails rather than quietly losing its first occurrence.
+   * IndexWorkerTest} pins that the two sets agree, so an outcome added at an emit site without a
+   * declaration here fails rather than quietly losing its first occurrence.
    */
   private void declareMetrics() {
     metrics.defineDistribution(RUN_DURATION, RUN_DURATION_BOUNDS);
