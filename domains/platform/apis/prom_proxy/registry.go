@@ -80,6 +80,21 @@ func probesTile(service string) customScalarDef {
 // at the dashboard after the fact still sees it.
 const alarmWindow = "24h"
 
+// The window for counters over work that arrives in bursts rather than as a
+// steady stream: indexing runs, and the months and archive fetches inside
+// them. All of it is triggered by a person asking for a player, so between
+// asks the true rate is zero and a 5m window reads zero — which is the honest
+// answer to "how busy is it right now?" and the wrong answer to the question
+// anyone actually opens this panel with, "did the thing I ran work?".
+//
+// #1323: a thousand-game run at 05:09 left a panel of zeros by breakfast,
+// with nothing to distinguish it from a service that had never indexed
+// anything. Same length as alarmWindow, for the same reason — the interesting
+// events are sparse — but named apart because these are volumes, not alarms,
+// and a future change to how long a failure stays on screen should not
+// silently retune how far back the counts reach.
+const burstWindow = "24h"
+
 // ValidView reports whether a client-supplied view is one this package builds
 // queries for. Callers must check before passing the value on: a view string
 // never reaches PromQL, but an unrecognised one would silently fall through to
@@ -382,10 +397,13 @@ var serviceRegistry = map[string]serviceEntry{
 			// routes there. The deploy config test and one_d4's
 			// HealthProbeRouteLabelTest pin the two ways a zero here can lie.
 			probesTile("one_d4"),
-			counter("Indexing", "games_indexed", "games", `games_indexed_total{service_name="one_d4"}`),
-			counter("Indexing", "runs_completed", "", `index_runs_total{service_name="one_d4",outcome="completed"}`),
-			// The three outcomes below are alarms rather than volumes, so they
-			// count over a day. A failed run an hour ago is still the thing an
+			counterOver("Indexing", "games_indexed", "games",
+				`games_indexed_total{service_name="one_d4"}`, burstWindow),
+			counterOver("Indexing", "runs_completed", "",
+				`index_runs_total{service_name="one_d4",outcome="completed"}`, burstWindow),
+			// The three outcomes below are alarms rather than volumes. They
+			// share burstWindow's length by coincidence of both being sparse,
+			// not by meaning: a failed run an hour ago is still the thing an
 			// operator opened this page to find.
 			counterOver("Indexing", "runs_failed", "",
 				`index_runs_total{service_name="one_d4",outcome="failed"}`, alarmWindow),
@@ -409,10 +427,14 @@ var serviceRegistry = map[string]serviceEntry{
 				`sum(rate(index_run_duration_micros_sum{service_name="one_d4",outcome="completed"}[1h]))/sum(rate(index_run_duration_micros_count{service_name="one_d4",outcome="completed"}[1h]))/1000000`),
 			scalar("Indexing", "avg_games_per_month_1h", "games",
 				`sum(rate(index_games_per_month_sum{service_name="one_d4"}[1h]))/sum(rate(index_games_per_month_count{service_name="one_d4"}[1h]))`),
-			counter("Indexing", "empty_months", "", `index_months_total{service_name="one_d4",result="empty"}`),
-			counter("Indexing", "cached_months", "", `index_months_total{service_name="one_d4",result="cached"}`),
-			counter("Indexing", "archive_fetches", "", `chess_com_archive_fetches_total{service_name="one_d4"}`),
-			counter("Motifs", "occurrences", "", `motif_occurrences_total{service_name="one_d4"}`),
+			counterOver("Indexing", "empty_months", "",
+				`index_months_total{service_name="one_d4",result="empty"}`, burstWindow),
+			counterOver("Indexing", "cached_months", "",
+				`index_months_total{service_name="one_d4",result="cached"}`, burstWindow),
+			counterOver("Indexing", "archive_fetches", "",
+				`chess_com_archive_fetches_total{service_name="one_d4"}`, burstWindow),
+			counterOver("Motifs", "occurrences", "",
+				`motif_occurrences_total{service_name="one_d4"}`, burstWindow),
 			// No motifs-per-game tile. The two counters are recorded on opposite sides of
 			// the durability boundary — motifs per game inside the drain loop, games only
 			// after the month's flush and period write succeed — so an interrupted or

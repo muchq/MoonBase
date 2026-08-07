@@ -1339,3 +1339,71 @@ func TestMetricsHandler_GetServiceMetrics_JsonKeysAreStable(t *testing.T) {
 	assert.False(t, present,
 		"a fixed-form tile must omit the key entirely, not send false: %v", gauge)
 }
+
+// Indexing is triggered by a person asking for a player, so between asks the
+// true rate is zero. Read through the 5m window every serving tile uses, a
+// thousand-game run is invisible by breakfast — which is what #1323 reported:
+// an Indexing panel of zeros over a night's work, indistinguishable from a
+// service that had never indexed anything. These tiles count over burstWindow
+// instead, so "did the thing I ran work?" has an answer for as long as the
+// question is likely to be asked.
+//
+// Only the volume tiles. The three run-outcome alarms in the same group are
+// owned by TestRegistry_AlarmCountersCountOverALongWindow and measured against
+// alarmWindow — asserting them here against a literal would re-couple the two
+// constants that were deliberately named apart, so retuning how long a failure
+// stays on screen would fail a test about volumes.
+func TestRegistry_OneD4IndexingVolumesCountOverABurstWindow(t *testing.T) {
+	// The constant itself first, for the reason the alarm test gives: every
+	// check below compares against burstWindow, so shrinking it would leave
+	// them all comparing against the shrunken value and still passing.
+	//
+	// A floor of twelve hours, because the reported gap is the point: the run
+	// finished overnight and the panel was read the next morning. Anything
+	// shorter differs from the default and still answers zero to the question
+	// this window exists to answer.
+	window, err := time.ParseDuration(burstWindow)
+	require.NoError(t, err, "burstWindow is not a duration Go can parse: %q", burstWindow)
+	require.GreaterOrEqual(t, window, 12*time.Hour,
+		"burstWindow is %s — too short to still be non-zero when someone reads the "+
+			"dashboard the morning after a run", burstWindow)
+
+	entry, ok := serviceRegistry["one_d4"]
+	require.True(t, ok, "one_d4 missing from the registry")
+
+	// Every volume counter, not a sample: a tile left on the 5m default is
+	// exactly the flat zero this test exists to prevent.
+	wantBurst := map[string]bool{
+		"games_indexed": true, "empty_months": true, "cached_months": true,
+		"archive_fetches": true, "occurrences": true, "runs_completed": true,
+	}
+	alarms := map[string]bool{
+		"runs_failed": true, "runs_interrupted": true, "runs_lease_lost": true,
+	}
+	seen := map[string]bool{}
+	for _, def := range entry.CustomScalars {
+		if def.Group != "Indexing" && def.Group != "Motifs" {
+			continue
+		}
+		if def.Counter == "" {
+			continue // the windowed averages are scalars, with their own 1h range
+		}
+		if alarms[def.Label] {
+			continue // owned by the alarm test, against alarmWindow
+		}
+		seen[def.Label] = true
+		if !wantBurst[def.Label] {
+			t.Errorf("unexpected indexing counter %q: add it to this test with a window decision", def.Label)
+			continue
+		}
+		if got := def.window(); got != burstWindow {
+			t.Errorf("%s counts over %s; episodic work needs burstWindow (%s) to stay visible",
+				def.Label, got, burstWindow)
+		}
+	}
+	for label := range wantBurst {
+		if !seen[label] {
+			t.Errorf("expected an indexing counter %q; did it move groups or get dropped?", label)
+		}
+	}
+}

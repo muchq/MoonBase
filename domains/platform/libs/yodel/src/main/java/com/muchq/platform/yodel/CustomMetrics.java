@@ -89,6 +89,39 @@ public final class CustomMetrics {
   }
 
   /**
+   * Declares a counter series ahead of its first event, so it exports as 0 from process start.
+   *
+   * <p>Without this a counter springs into existence already carrying the value of the first event
+   * it counted, and that first event is then invisible forever. {@code increase()} and {@code
+   * rate()} measure the change <em>between</em> samples, so they need an earlier sample to measure
+   * from; a series whose very first sample is 75 shows no increase at all, and every later sample
+   * is flat until something else happens. The counter is not wrong — {@code games_indexed_total}
+   * really does read 75 — but every dashboard built on it reads zero, which is worse than a missing
+   * tile because it looks like an answer.
+   *
+   * <p>That is not a corner case: it is what every process does after every deploy, so the first
+   * run of anything is uncounted until a second one follows it. It cost a real investigation on
+   * one_d4, where an overnight indexing run of a thousand games left an Indexing panel of zeros
+   * (https://github.com/muchq/MoonBase/issues/1323).
+   *
+   * <p>Declare the label sets whose values are known up front — outcomes, results, states. An
+   * unbounded label (a username, a URL) has no series to declare, and declaring one per possible
+   * value is how a metric becomes a cardinality problem; leave those to appear on first use and
+   * accept that their first event is the baseline.
+   *
+   * <p>Idempotent, and never resets a counter that has already counted something: a repeat call for
+   * the same series leaves the existing total alone.
+   */
+  public void defineCounter(String name, Map<String, String> labels) {
+    counters.computeIfAbsent(series(name, labels), s -> new LongAdder());
+  }
+
+  /** Declares an unlabelled counter series. See {@link #defineCounter(String, Map)}. */
+  public void defineCounter(String name) {
+    defineCounter(name, Map.of());
+  }
+
+  /**
    * Declares the bucket bounds for a distribution, ahead of the first observation.
    *
    * <p>The default is {@link #DEFAULT_BOUNDS}, which tops out at 10000 and is a guess about no

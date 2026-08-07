@@ -359,4 +359,60 @@ public class CustomMetricsTest {
     assertThat(metrics.counterSnapshot().get(0).value()).isEqualTo((long) threads * perThread);
     assertThat(metrics.distributionSnapshot().get(0).count()).isEqualTo((long) threads * perThread);
   }
+
+  /**
+   * The zero baseline, and the failure it exists to prevent: a counter whose first exported sample
+   * already carries its first event's value shows no increase for that event, ever. increase() and
+   * rate() measure between samples, so the event that created the series has nothing to be measured
+   * against. Declaring the series up front gives it something.
+   */
+  @Test
+  public void aDeclaredCounterExportsAtZeroBeforeAnythingHappens() {
+    CustomMetrics metrics = new CustomMetrics();
+    metrics.defineCounter("games_indexed");
+    metrics.defineCounter("index_runs", Map.of("outcome", "completed"));
+
+    assertThat(metrics.isEmpty())
+        .as("a declared series must be exported, or there is no baseline to increase from")
+        .isFalse();
+    assertThat(metrics.counterSnapshot())
+        .extracting(CustomMetrics.CounterSnapshot::name, CustomMetrics.CounterSnapshot::value)
+        .containsExactlyInAnyOrder(
+            org.assertj.core.groups.Tuple.tuple("games_indexed", 0L),
+            org.assertj.core.groups.Tuple.tuple("index_runs", 0L));
+  }
+
+  /** The declared series is the same series the event lands on, not a second one beside it. */
+  @Test
+  public void aDeclaredCounterCountsNormallyOnceEventsArrive() {
+    CustomMetrics metrics = new CustomMetrics();
+    metrics.defineCounter("games_indexed");
+    metrics.add("games_indexed", 75, Map.of());
+
+    assertThat(metrics.counterSnapshot()).hasSize(1);
+    assertThat(metrics.counterSnapshot().get(0).value()).isEqualTo(75L);
+  }
+
+  /**
+   * Declaration runs at construction and events arrive later, but nothing stops a caller declaring
+   * again — a re-declared counter must not lose what it has already counted.
+   */
+  @Test
+  public void redeclaringACounterDoesNotResetIt() {
+    CustomMetrics metrics = new CustomMetrics();
+    metrics.increment("index_runs", Map.of("outcome", "completed"));
+    metrics.defineCounter("index_runs", Map.of("outcome", "completed"));
+
+    assertThat(metrics.counterSnapshot().get(0).value()).isEqualTo(1L);
+  }
+
+  /** Label sets are distinct series, so declaring one leaves the others to appear on first use. */
+  @Test
+  public void declaringOneLabelSetDoesNotDeclareItsSiblings() {
+    CustomMetrics metrics = new CustomMetrics();
+    metrics.defineCounter("index_runs", Map.of("outcome", "completed"));
+
+    assertThat(metrics.counterSnapshot()).hasSize(1);
+    assertThat(metrics.counterSnapshot().get(0).labels()).containsEntry("outcome", "completed");
+  }
 }

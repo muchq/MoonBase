@@ -1066,6 +1066,66 @@ public class IndexWorkerTest {
         metrics);
   }
 
+  /**
+   * The zero baseline (#1313). Constructing the worker must put every bounded series on the wire at
+   * 0, before any run — otherwise the series is born carrying its first run's numbers and
+   * increase() shows nothing for that run, forever. That is what hid a thousand-game overnight run
+   * behind a panel of zeros: the counter read 1092 and every dashboard read 0.
+   */
+  @Test
+  public void constructionDeclaresEveryBoundedSeriesAtZero() {
+    meteredWorker();
+
+    assertThat(counter(IndexWorker.GAMES_INDEXED, Map.of())).isZero();
+    for (String outcome : IndexWorker.RUN_OUTCOMES) {
+      assertThat(counter(IndexWorker.RUNS, Map.of("outcome", outcome)))
+          .as("run outcome %s", outcome)
+          .isZero();
+    }
+    for (String result : IndexWorker.MONTH_RESULTS) {
+      assertThat(counter(IndexWorker.MONTHS, Map.of("result", result)))
+          .as("month result %s", result)
+          .isZero();
+    }
+    for (String result : IndexWorker.ARCHIVE_FETCH_RESULTS) {
+      assertThat(counter(IndexWorker.ARCHIVE_FETCHES, Map.of("result", result)))
+          .as("archive fetch result %s", result)
+          .isZero();
+    }
+    // Presence, not just a zero read: counter() sums an empty stream to 0, so the assertions
+    // above pass just as happily against a worker that declared nothing at all.
+    assertThat(metrics.counterSnapshot()).isNotEmpty();
+  }
+
+  /**
+   * The declarations and the emit sites have to agree, or a declared-but-never-emitted series is a
+   * permanently flat line and an emitted-but-never-declared one loses its first event. A run emits
+   * only series this list already knows about.
+   */
+  @Test
+  public void aRunEmitsNoSeriesThatConstructionDidNotDeclare() {
+    IndexWorker metered = meteredWorker();
+    java.util.Set<String> declared =
+        metrics.counterSnapshot().stream()
+            .map(sn -> sn.name() + sn.labels())
+            .collect(java.util.stream.Collectors.toSet());
+
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/g/baseline", SCHOLARS_MATE_PGN, "blitz")));
+    metered.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    assertThat(
+            metrics.counterSnapshot().stream()
+                .map(sn -> sn.name() + sn.labels())
+                .filter(key -> !declared.contains(key))
+                // motif_occurrences is labelled per motif and deliberately left undeclared.
+                .filter(key -> !key.startsWith(IndexWorker.MOTIF_OCCURRENCES))
+                .toList())
+        .as("every counter a run touches must have had a zero baseline waiting for it")
+        .isEmpty();
+  }
+
   private long counter(String name, Map<String, String> labels) {
     return metrics.counterSnapshot().stream()
         .filter(s -> s.name().equals(name) && s.labels().equals(labels))
