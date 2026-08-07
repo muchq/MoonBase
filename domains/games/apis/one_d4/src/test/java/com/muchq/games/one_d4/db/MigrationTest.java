@@ -199,6 +199,30 @@ public class MigrationTest {
         .containsEntry("idx_game_features_black_username", java.util.List.of("black_username"));
   }
 
+  /**
+   * The retention delete's index, pinned to its column: {@code deleteOlderThan} filters {@code
+   * game_features} on {@code indexed_at} hourly, and without this index a sweep truncated at its
+   * 120s bound made no forward progress — same scan, next hour, forever. The plan-level proof on
+   * the deployment dialect lives in {@code PostgresRetentionIndexTest}.
+   */
+  @Test
+  public void run_addsTheIndexedAtRetentionIndex() throws Exception {
+    new Migration(dataSource, true).run();
+
+    java.util.List<String> columns = new java.util.ArrayList<>();
+    try (Connection conn = dataSource.getConnection();
+        ResultSet indexes =
+            conn.getMetaData().getIndexInfo(null, null, "GAME_FEATURES", false, false)) {
+      while (indexes.next()) {
+        String name = indexes.getString("INDEX_NAME");
+        if (name != null && name.equalsIgnoreCase("idx_game_features_indexed_at")) {
+          columns.add(indexes.getString("COLUMN_NAME").toLowerCase());
+        }
+      }
+    }
+    assertThat(columns).containsExactly("indexed_at");
+  }
+
   @Test
   public void run_addsTitleAndOpeningColumns() throws Exception {
     Migration migration = new Migration(dataSource, true);
