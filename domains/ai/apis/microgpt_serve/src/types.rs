@@ -159,31 +159,27 @@ mod tests {
 
     #[test]
     fn generate_validate_ok_temperature_zero() {
-        let req: GenerateRequest =
-            serde_json::from_str(r#"{"temperature":0.0}"#).unwrap();
+        let req: GenerateRequest = serde_json::from_str(r#"{"temperature":0.0}"#).unwrap();
         assert!(req.validate().is_ok());
     }
 
     #[test]
     fn generate_validate_rejects_negative_temperature() {
-        let req: GenerateRequest =
-            serde_json::from_str(r#"{"temperature":-0.1}"#).unwrap();
+        let req: GenerateRequest = serde_json::from_str(r#"{"temperature":-0.1}"#).unwrap();
         let err = req.validate().unwrap_err();
         assert!(err.contains("temperature"), "{err}");
     }
 
     #[test]
     fn generate_validate_rejects_zero_num_samples() {
-        let req: GenerateRequest =
-            serde_json::from_str(r#"{"num_samples":0}"#).unwrap();
+        let req: GenerateRequest = serde_json::from_str(r#"{"num_samples":0}"#).unwrap();
         let err = req.validate().unwrap_err();
         assert!(err.contains("num_samples"), "{err}");
     }
 
     #[test]
     fn generate_validate_rejects_zero_max_tokens() {
-        let req: GenerateRequest =
-            serde_json::from_str(r#"{"max_tokens":0}"#).unwrap();
+        let req: GenerateRequest = serde_json::from_str(r#"{"max_tokens":0}"#).unwrap();
         let err = req.validate().unwrap_err();
         assert!(err.contains("max_tokens"), "{err}");
     }
@@ -196,8 +192,7 @@ mod tests {
 
     #[test]
     fn generate_validate_ok_max_tokens_some() {
-        let req: GenerateRequest =
-            serde_json::from_str(r#"{"max_tokens":5}"#).unwrap();
+        let req: GenerateRequest = serde_json::from_str(r#"{"max_tokens":5}"#).unwrap();
         assert!(req.validate().is_ok());
     }
 
@@ -205,10 +200,8 @@ mod tests {
 
     #[test]
     fn chat_request_defaults() {
-        let req: ChatRequest = serde_json::from_str(
-            r#"{"messages":[{"role":"user","content":"hi"}]}"#,
-        )
-        .unwrap();
+        let req: ChatRequest =
+            serde_json::from_str(r#"{"messages":[{"role":"user","content":"hi"}]}"#).unwrap();
         assert_eq!(req.temperature, 0.8);
         assert_eq!(req.seed, 42);
         assert!(req.max_tokens.is_none());
@@ -230,10 +223,8 @@ mod tests {
 
     #[test]
     fn chat_validate_ok_single_message() {
-        let req: ChatRequest = serde_json::from_str(
-            r#"{"messages":[{"role":"user","content":"hello"}]}"#,
-        )
-        .unwrap();
+        let req: ChatRequest =
+            serde_json::from_str(r#"{"messages":[{"role":"user","content":"hello"}]}"#).unwrap();
         assert!(req.validate().is_ok());
     }
 
@@ -248,8 +239,7 @@ mod tests {
 
     #[test]
     fn chat_validate_rejects_empty_messages() {
-        let req: ChatRequest =
-            serde_json::from_str(r#"{"messages":[]}"#).unwrap();
+        let req: ChatRequest = serde_json::from_str(r#"{"messages":[]}"#).unwrap();
         let err = req.validate().unwrap_err();
         assert!(err.contains("empty"), "{err}");
     }
@@ -266,40 +256,34 @@ mod tests {
 
     #[test]
     fn chat_validate_rejects_zero_max_tokens() {
-        let req: ChatRequest = serde_json::from_str(
-            r#"{"messages":[{"role":"user","content":"hi"}],"max_tokens":0}"#,
-        )
-        .unwrap();
+        let req: ChatRequest =
+            serde_json::from_str(r#"{"messages":[{"role":"user","content":"hi"}],"max_tokens":0}"#)
+                .unwrap();
         let err = req.validate().unwrap_err();
         assert!(err.contains("max_tokens"), "{err}");
     }
 
     #[test]
     fn chat_validate_rejects_unknown_role() {
-        let req: ChatRequest = serde_json::from_str(
-            r#"{"messages":[{"role":"system","content":"you are helpful"}]}"#,
-        )
-        .unwrap();
+        let req: ChatRequest =
+            serde_json::from_str(r#"{"messages":[{"role":"system","content":"you are helpful"}]}"#)
+                .unwrap();
         let err = req.validate().unwrap_err();
         assert!(err.contains("unknown role"), "{err}");
     }
 
     #[test]
     fn chat_validate_rejects_empty_content() {
-        let req: ChatRequest = serde_json::from_str(
-            r#"{"messages":[{"role":"user","content":""}]}"#,
-        )
-        .unwrap();
+        let req: ChatRequest =
+            serde_json::from_str(r#"{"messages":[{"role":"user","content":""}]}"#).unwrap();
         let err = req.validate().unwrap_err();
         assert!(err.contains("content"), "{err}");
     }
 
     #[test]
     fn chat_validate_rejects_whitespace_only_content() {
-        let req: ChatRequest = serde_json::from_str(
-            r#"{"messages":[{"role":"user","content":"   "}]}"#,
-        )
-        .unwrap();
+        let req: ChatRequest =
+            serde_json::from_str(r#"{"messages":[{"role":"user","content":"   "}]}"#).unwrap();
         let err = req.validate().unwrap_err();
         assert!(err.contains("content"), "{err}");
     }

@@ -1,5 +1,5 @@
 use opentelemetry::metrics::{Counter, Histogram, Meter};
-use opentelemetry::{global, KeyValue};
+use opentelemetry::{KeyValue, global};
 
 /// The `endpoint` label values the emit sites use — the whole set, because a
 /// zero baseline is per series and a series is the instrument *and* its
@@ -176,7 +176,10 @@ mod tests {
         let mut out = vec![
             ("microgpt_conversations".to_string(), value),
             (r#"microgpt_requests{endpoint="chat"}"#.to_string(), value),
-            (r#"microgpt_requests{endpoint="generate"}"#.to_string(), value),
+            (
+                r#"microgpt_requests{endpoint="generate"}"#.to_string(),
+                value,
+            ),
             (
                 r#"microgpt_tokens_generated{endpoint="chat"}"#.to_string(),
                 value,

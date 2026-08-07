@@ -66,7 +66,11 @@ async fn main() {
     );
 
     let metrics = AppMetrics::new();
-    let state = Arc::new(AppState { model, tokenizer, metrics });
+    let state = Arc::new(AppState {
+        model,
+        tokenizer,
+        metrics,
+    });
 
     let listen_address = listen_addr_pal();
     let has_chat = state.tokenizer.special_tokens.is_some();
@@ -75,7 +79,10 @@ async fn main() {
     let app = router_builder()
         .route("/microgpt/v1/generate", post(generate_post))
         .route("/microgpt/v1/chat", post(chat_post))
-        .rate_limit(Some(RateLimit { per_second: 5, burst: 10 }))
+        .rate_limit(Some(RateLimit {
+            per_second: 5.0,
+            burst: 10,
+        }))
         .build()
         .with_state(state);
 
@@ -84,19 +91,14 @@ async fn main() {
 }
 
 /// Load model weights from safetensors.
-fn load_model(
-    model_dir: &Path,
-    meta: &ModelMeta,
-    config: microgpt::ModelConfig,
-) -> InferenceGpt {
+fn load_model(model_dir: &Path, meta: &ModelMeta, config: microgpt::ModelConfig) -> InferenceGpt {
     let st_path = model_dir.join("weights.safetensors");
     let bytes = fs::read(&st_path).unwrap_or_else(|e| {
         eprintln!("error: cannot read {}: {e}", st_path.display());
         process::exit(1);
     });
-    InferenceGpt::load_safetensors(meta.vocab_size, &bytes, config)
-        .unwrap_or_else(|e| {
-            eprintln!("error: {e}");
-            process::exit(1);
-        })
+    InferenceGpt::load_safetensors(meta.vocab_size, &bytes, config).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        process::exit(1);
+    })
 }

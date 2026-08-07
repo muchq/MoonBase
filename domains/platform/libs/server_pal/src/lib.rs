@@ -354,14 +354,52 @@ async fn http_metrics_middleware(
 }
 
 pub struct RateLimit {
-    pub per_second: u64,
+    /// Sustained requests per second, keyed per peer IP.
+    ///
+    /// Fractional rates are allowed: `0.1` is one request every ten seconds.
+    ///
+    /// "Per peer IP" is not per client for anything behind a reverse proxy.
+    /// The default extractor reads the socket's peer address, which for every
+    /// service in `deploy/consolidated` is Caddy — so external callers share a
+    /// single bucket. Sizing a limit as though it were per-user will throttle
+    /// everyone at once. The C++ rail keys off a trusted-proxy boundary
+    /// instead (smithy-cpp ADR-0012, `TRUSTED_PROXY_CIDRS` in compose.yaml);
+    /// this rail has not adopted that yet.
+    pub per_second: f64,
+    /// How many may arrive at once before the sustained rate binds.
     pub burst: u32,
 }
 
 const DEFAULT_RATE_LIMIT: RateLimit = RateLimit {
-    per_second: 100,
+    per_second: 100.0,
     burst: 200,
 };
+
+/// `RateLimit` as the quota `tower_governor` actually wants.
+///
+/// Its builder takes a **replenish interval**, not a rate: `per_second(n)`
+/// there means "restore one element every n seconds". So the obvious spelling
+/// of "100 requests per second" — `per_second(100)` — configures one request
+/// per 100 seconds, 10,000x tighter than it reads, and the mistake is invisible
+/// because both the field and the method are called `per_second`. That is what
+/// drained the health-probe bucket in production: a 30s probe interval against
+/// a 100s refill, so two of every three probes 429'd and containers flapped
+/// between healthy and unhealthy while serving normally.
+///
+/// Converting here keeps `RateLimit::per_second` meaning what it says at every
+/// call site.
+fn quota_period(per_second: f64) -> Duration {
+    assert!(
+        per_second.is_finite() && per_second > 0.0,
+        "rate_limit per_second must be a positive rate, got {per_second}"
+    );
+    let period = Duration::from_secs_f64(1.0 / per_second);
+    assert!(
+        !period.is_zero(),
+        "rate_limit per_second of {per_second} rounds to a zero-length period"
+    );
+    period
+}
 
 pub fn listen_addr_pal() -> String {
     let port = env::var("PORT")
@@ -379,6 +417,24 @@ async fn fallback(_: Uri) -> (StatusCode, String) {
 pub struct RouterBuilder<S: Clone + Send + Sync + 'static> {
     router: Router<S>,
     rate_limit: Option<RateLimit>,
+}
+
+/// The middleware every route carries, rate limiting aside. Shared by the
+/// limited router and the exempt /health one so the two cannot drift: a layer
+/// added to one and not the other would make the probe exercise a different
+/// stack than the traffic it reports on.
+fn common_layers<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<S> {
+    router
+        .layer(TraceLayer::new_for_http())
+        .layer(DefaultBodyLimit::disable())
+        .layer(RequestBodyLimitLayer::new(4 * 1024 * 1024))
+        .layer(CompressionLayer::new())
+        .layer(ValidateRequestHeaderLayer::accept("application/json"))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(10),
+        ))
+        .layer(CatchPanicLayer::new())
 }
 
 pub fn router_builder<S: Clone + Send + Sync + 'static>() -> RouterBuilder<S> {
@@ -417,40 +473,48 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
     }
 
     fn build_with_cell(self, cell: InstrumentsCell) -> Router<S> {
-        let router = self
-            .router
-            .route("/health", get(|_: State<S>| async { "Ok" }))
-            .fallback(fallback)
-            .layer(TraceLayer::new_for_http())
-            .layer(DefaultBodyLimit::disable())
-            .layer(RequestBodyLimitLayer::new(4 * 1024 * 1024))
-            .layer(CompressionLayer::new())
-            .layer(ValidateRequestHeaderLayer::accept("application/json"))
-            .layer(TimeoutLayer::with_status_code(
-                StatusCode::REQUEST_TIMEOUT,
-                Duration::from_secs(10),
-            ))
-            .layer(CatchPanicLayer::new());
-
-        let router = if let Some(RateLimit { per_second, burst }) = self.rate_limit {
+        // /health is served from its own router so the governor can wrap the
+        // service's routes without wrapping the probe. Both carry the identical
+        // stack below, so the exemption is the only difference between them.
+        let limited = common_layers(self.router.fallback(fallback));
+        let limited = if let Some(RateLimit { per_second, burst }) = self.rate_limit {
+            assert!(burst > 0, "rate_limit burst must be at least 1");
             let config = Arc::new(
                 GovernorConfigBuilder::default()
-                    .per_second(per_second)
+                    .per_nanosecond(quota_period(per_second).as_nanos() as u64)
                     .burst_size(burst)
                     .finish()
-                    .unwrap(),
+                    .expect("a non-zero period and burst is a valid quota"),
             );
-            router.layer(GovernorLayer::new(config))
+            // Outermost of the two, so a request rejected further in still
+            // costs quota. Applied under `common_layers` instead, a 406 from
+            // the Accept check would short-circuit ahead of the governor and
+            // cost nothing — an unlimited request sink behind one bad header.
+            limited.layer(GovernorLayer::new(config))
         } else {
-            router
+            limited
         };
+
+        // Defence in depth, and the shape the C++ rail already has (aura's
+        // middleware runs its health endpoint ahead of the rate-limit guard).
+        //
+        // Not load-bearing for the outage that prompted it: the probe connects
+        // over loopback from inside the container, so it keys on 127.0.0.1 and
+        // never shared a bucket with client traffic. It drained its *own*
+        // bucket, at the wrong units fixed in `quota_period` — burst 200
+        // refilling once per 100s against a probe every 30s. At a correct rate
+        // no probe cadence can drain it. This keeps a liveness signal off the
+        // quota path regardless of how the limit is later tuned or keyed.
+        let health = common_layers(Router::new().route("/health", get(|| async { "Ok" })));
 
         // HTTP metrics middleware sits outside rate-limiting so rate-limited
         // requests (429) are also counted as failures.
-        router.layer(axum::middleware::from_fn_with_state(
-            cell,
-            http_metrics_middleware,
-        ))
+        health
+            .merge(limited)
+            .layer(axum::middleware::from_fn_with_state(
+                cell,
+                http_metrics_middleware,
+            ))
     }
 }
 
@@ -477,11 +541,11 @@ mod tests {
     struct NoState;
 
     // Inject a mock peer IP so GovernorLayer's PeerIpKeyExtractor can extract it.
-    fn make_request() -> Request<Body> {
+    fn make_request(path: &str) -> Request<Body> {
         let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
         let mut req = Request::builder()
             .method("GET")
-            .uri("/health")
+            .uri(path)
             .header("Accept", "application/json")
             .body(Body::empty())
             .unwrap();
@@ -489,12 +553,115 @@ mod tests {
         req
     }
 
-    #[tokio::test]
-    async fn rate_limiter_blocks_after_burst() {
-        // 1 req/s per IP, burst of 2
+    /// A router whose bucket is spent.
+    ///
+    /// The rate sets the margin and nothing else: once the burst is gone, GCRA
+    /// reopens after exactly one replenish period, whatever the burst size. At
+    /// one request per second that is a one-second window for the rest of the
+    /// test to run in, which a stall on a loaded CI machine can outlast — so
+    /// this asks for one per 10,000 seconds, and a later 200 can only mean the
+    /// request never reached the governor.
+    async fn drained_app() -> Router {
         let app = router_builder::<NoState>()
             .rate_limit(Some(RateLimit {
-                per_second: 1,
+                per_second: 0.0001,
+                burst: 2,
+            }))
+            .build()
+            .with_state(NoState);
+
+        for _ in 0..2 {
+            app.clone().oneshot(make_request("/nope")).await.unwrap();
+        }
+        // Pin that the burst is actually spent; every caller reasons from this.
+        let resp = app.clone().oneshot(make_request("/nope")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        app
+    }
+
+    /// `per_second` is a rate, not the replenish interval tower_governor's
+    /// builder takes. Read as an interval, 100 configures one request every
+    /// 100 seconds — and nothing in the types or the names catches it, because
+    /// both spellings are `per_second`. This is the production defect: the
+    /// default limit was 10,000x tighter than it read.
+    #[tokio::test]
+    async fn per_second_is_a_rate_not_a_replenish_interval() {
+        let app = router_builder::<NoState>()
+            .rate_limit(Some(RateLimit {
+                per_second: 100.0,
+                burst: 1,
+            }))
+            .build()
+            .with_state(NoState);
+
+        // Spend the one-request burst.
+        let resp = app.clone().oneshot(make_request("/nope")).await.unwrap();
+        assert_ne!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        let resp = app.clone().oneshot(make_request("/nope")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        // At 100/s an element returns in 10ms. Waiting longer only ever helps,
+        // so this cannot flake on a slow machine — it fails only if the quota
+        // genuinely has not replenished.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let resp = app.oneshot(make_request("/nope")).await.unwrap();
+        assert_ne!(
+            resp.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "no quota after 100ms at 100 req/s — per_second is being applied \
+             as a replenish interval, making the real limit 1 per 100 seconds"
+        );
+    }
+
+    /// The conversion itself, at the two rates this repo actually configures.
+    #[test]
+    fn quota_period_turns_a_rate_into_an_interval() {
+        assert_eq!(quota_period(100.0), Duration::from_millis(10));
+        assert_eq!(quota_period(5.0), Duration::from_millis(200));
+        assert_eq!(quota_period(1.0), Duration::from_secs(1));
+        // Sub-1/s rates stay expressible; the old u64 field could not say this
+        // and the drained-bucket tests depend on it.
+        assert_eq!(quota_period(0.1), Duration::from_secs(10));
+    }
+
+    /// A request the Accept check rejects must still cost quota. The governor
+    /// has to sit outside that check for this to hold; inside it, any client
+    /// sending one bad header gets an unmetered 406 sink, and the exemption
+    /// this file exists to add would have quietly bought that.
+    #[tokio::test]
+    async fn a_rejected_accept_header_still_consumes_quota() {
+        let app = drained_app().await;
+
+        // Already drained, so a well-formed request 429s.
+        let resp = app.clone().oneshot(make_request("/nope")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        // The unacceptable one is refused by the limiter, not by the Accept
+        // check: reaching 406 would mean it never touched the governor.
+        let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        let mut req = Request::builder()
+            .method("GET")
+            .uri("/nope")
+            .header("Accept", "text/plain")
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(ConnectInfo(peer));
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "a 406 here means the Accept check short-circuited ahead of the \
+             governor, leaving an unmetered path past the rate limiter"
+        );
+    }
+
+    #[tokio::test]
+    async fn rate_limiter_blocks_after_burst() {
+        // Replenish one element per second, burst of 2
+        let app = router_builder::<NoState>()
+            .rate_limit(Some(RateLimit {
+                per_second: 1.0,
                 burst: 2,
             }))
             .build()
@@ -502,12 +669,12 @@ mod tests {
 
         // First two requests should pass (burst of 2)
         for _ in 0..2 {
-            let resp = app.clone().oneshot(make_request()).await.unwrap();
+            let resp = app.clone().oneshot(make_request("/nope")).await.unwrap();
             assert_ne!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
         }
 
         // Third request immediately after should be rate-limited
-        let resp = app.oneshot(make_request()).await.unwrap();
+        let resp = app.oneshot(make_request("/nope")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 
@@ -518,10 +685,39 @@ mod tests {
             .build()
             .with_state(NoState);
 
-        for _ in 0..20 {
-            let resp = app.clone().oneshot(make_request()).await.unwrap();
+        // A limited path, not /health — the exemption would carry that one
+        // whether or not `None` was honoured. And more requests than
+        // DEFAULT_RATE_LIMIT.burst, or ignoring `None` and installing the
+        // default would leave this green too: 20 hits fit inside a burst of
+        // 200 with room to spare.
+        for _ in 0..(DEFAULT_RATE_LIMIT.burst + 50) {
+            let resp = app.clone().oneshot(make_request("/nope")).await.unwrap();
             assert_ne!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
         }
+    }
+
+    /// A spent bucket must not reach the probe: a 429 there reads as a dead
+    /// service. See the exemption's own comment for why this is defence in
+    /// depth rather than the cause of the flapping it was written for.
+    #[tokio::test]
+    async fn health_is_exempt_from_rate_limiting() {
+        let app = drained_app().await;
+
+        for _ in 0..5 {
+            let resp = app.clone().oneshot(make_request("/health")).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+        }
+    }
+
+    /// The exemption is the health route alone — 404s stay metered, so a
+    /// scanner spraying unknown paths cannot spend the service's budget for
+    /// free.
+    #[tokio::test]
+    async fn unmatched_paths_stay_rate_limited() {
+        let app = drained_app().await;
+
+        let resp = app.oneshot(make_request("/wp-login.php")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 }
 
