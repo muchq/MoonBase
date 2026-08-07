@@ -12,7 +12,6 @@ members = [
     "domains/platform/libs/server_pal",
     "domains/games/libs/wordchains",
     "domains/games/apps/wordchains",
-    "domains/platform/protos/example_grpc",
 ]
 
 [workspace.package]
@@ -31,8 +30,6 @@ clap = { version = "4.5.60", features = ["cargo"] }
 image = { version = "0.25.9", default-features = false, features = ["png", "jpeg"] }
 imagine = { path = "domains/graphics/libs/imagine_rust" }
 log = "0.4.29"
-prost = { version = "0.14.3" }
-prost-types = { version = "0.14.3", default-features = false }
 half = "2.7.1"
 reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls-no-provider", "query"] }
 rustls = { version = "0.23.36", default-features = false, features = ["std", "tls12", "ring", "logging"] }
@@ -44,11 +41,6 @@ server_pal = { path = "domains/platform/libs/server_pal" }
 sha2 = "0.11.0-rc.5"
 simplelog = { version = "0.12.2", features = ["paris"] }
 tokio = { version = "1.50.0", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
-tonic = { version = "0.14.5", features = ["transport"] }
-tonic-prost = "0.14.5"
-tonic-prost-build = "0.14.5"
-protoc-gen-prost = "0.5.0"
-protoc-gen-tonic = "0.5.0"
 tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.0", features = ["full"] }
 http-body-util = "0.1.3"
