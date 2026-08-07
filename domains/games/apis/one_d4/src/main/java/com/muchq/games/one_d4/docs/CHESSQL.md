@@ -138,6 +138,13 @@ outcome = "win" AND opponent.title = "GM" AND time.class = "blitz"
 with `player: "hikaru"`. Perspective fields compile to `CASE` expressions over the `white_*` /
 `black_*` columns plus a participation guard.
 
+The guard exists to repair those `CASE` expressions — they read "not white" as "black" — so it is
+added only when a perspective field is used. `player` on its own is **not** a filter: a query
+that names a player but uses no perspective field is compiled without any player predicate, and
+matches every indexed game. On `/v1/query` that is visible in the first row's usernames, and it
+stays permitted; on `/v1/aggregate` no column would reveal it, so that combination is rejected
+(400) unless the filter names a username itself — see API.md.
+
 The categorical perspective fields may also be used in `groupBy` on `/v1/aggregate` (and the
 `aggregate_chess_games` tool) when `player` is supplied: `me.color`, `me.title`,
 `opponent.username`, `opponent.title`, and `outcome`. This is what makes both-colors

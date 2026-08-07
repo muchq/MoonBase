@@ -1,6 +1,7 @@
 package com.muchq.games.chessql.compiler;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.muchq.games.chessql.ast.OrderByClause;
@@ -925,24 +926,110 @@ public class SqlCompilerTest {
 
   /**
    * The guard exists to repair perspective resolution (the CASEs read "not white" as "black"), not
-   * to scope results — so a player with no perspective field in play adds no predicate at all.
-   * Pinned in both directions because the aggregate half is a genuine footgun: {@code
-   * player=hikaru, group by opening_family} over a plain filter aggregates the whole corpus, and
-   * unlike the select path nothing in the output reveals it. Whoever changes this semantics (e.g.
-   * to always-scope) is changing a documented contract, and this is the test that makes them say
-   * so.
+   * to scope results — so on the select path a player with no perspective field in play adds no
+   * predicate at all. That stays: the rows carry usernames, so a caller who expected one player's
+   * games sees strangers in the very first result.
    */
   @Test
-  public void testPlayerWithoutPerspectiveFieldAddsNoParticipationGuard() {
+  public void testPlayerWithoutPerspectiveFieldAddsNoParticipationGuardOnSelect() {
     CompiledQuery select = compiler.compile(Parser.parse("num.moves >= 0"), "hikaru");
     assertThat(select.selectSql()).doesNotContain("LOWER(white_username)");
     assertThat(select.parameters()).isEqualTo(List.of(0));
+  }
 
-    CompiledQuery aggregate =
+  /**
+   * The aggregate half of the same semantics was a footgun rather than a contract, so it is now
+   * refused (#1313 item 14). {@code player=hikaru, group by opening_family} over a plain filter
+   * aggregated the whole corpus under a heading that read as hikaru's, and — unlike the select path
+   * — no column in the response revealed it. Both aggregate entry points reject it, because the
+   * truncation path runs the totals query and the MCP facade calls the compiler directly rather
+   * than through the controller.
+   */
+  @Test
+  public void testAggregateRefusesAPlayerItWouldNotScopeTo() {
+    assertThatThrownBy(
+            () ->
+                compiler.compileAggregate(
+                    Parser.parse("num.moves >= 0"), List.of("opening_family"), "hikaru"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("would not scope this aggregate")
+        .hasMessageContaining("hikaru")
+        .hasMessageContaining("white.username");
+
+    assertThatThrownBy(
+            () ->
+                compiler.compileAggregateTotals(
+                    Parser.parse("num.moves >= 0"), List.of("opening_family"), "hikaru"))
+        .as("the totals query runs on the truncation path and must refuse the same request")
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("would not scope this aggregate");
+  }
+
+  /**
+   * The three ways an aggregate legitimately names a player — a perspective field in the filter, a
+   * perspective field in the groupBy, or an explicit username filter that scopes it without any
+   * perspective field at all. Each must still compile; a refusal that swallowed these would push
+   * callers back to hand-written unions.
+   */
+  @Test
+  public void testAggregateAcceptsEveryFormThatActuallyScopes() {
+    assertThat(
+            compiler
+                .compileAggregate(Parser.parse("outcome = \"win\""), List.of("eco"), "hikaru")
+                .selectSql())
+        .as("perspective field in the filter")
+        .contains(PARTICIPATION_GUARD);
+
+    assertThat(
+            compiler
+                .compileAggregate(Parser.parse("num.moves >= 0"), List.of("me.color"), "hikaru")
+                .selectSql())
+        .as("perspective field in the groupBy")
+        .contains(PARTICIPATION_GUARD);
+
+    CompiledQuery explicit =
         compiler.compileAggregate(
-            Parser.parse("num.moves >= 0"), List.of("opening_family"), "hikaru");
-    assertThat(aggregate.selectSql()).doesNotContain("LOWER(white_username)");
-    assertThat(aggregate.parameters()).isEqualTo(List.of(0));
+            Parser.parse("white.username = \"hikaru\" OR black.username = \"hikaru\""),
+            List.of("opening_family"),
+            "hikaru");
+    // The filter compiles to text identical to the guard — the same coincidence the username
+    // indexes rely on — so the params are what distinguish them: two values from the filter, and
+    // no third and fourth from a guard that never fired.
+    assertThat(explicit.selectSql())
+        .as("an explicit username filter scopes it; the named player is merely redundant")
+        .contains(PARTICIPATION_GUARD);
+    assertThat(explicit.parameters())
+        .as("the filter's own two binds, with no guard params layered on top")
+        .isEqualTo(List.of("hikaru", "hikaru"));
+
+    assertThat(
+            compiler
+                .compileAggregate(Parser.parse("num.moves >= 0"), List.of("opening_family"), null)
+                .selectSql())
+        .as("and naming no player at all is a corpus-wide aggregate, which is a real question")
+        .doesNotContain("LOWER(white_username)");
+  }
+
+  /**
+   * The username filter may sit anywhere in the tree, including under a NOT or an IN — the refusal
+   * asks whether the filter constrains a username at all, not whether it does so in one shape.
+   */
+  @Test
+  public void testAggregateAcceptsAUsernameFilterAnywhereInTheTree() {
+    assertThatCode(
+            () ->
+                compiler.compileAggregate(
+                    Parser.parse("time.class = \"blitz\" AND NOT white.username = \"magnus\""),
+                    List.of("eco"),
+                    "hikaru"))
+        .doesNotThrowAnyException();
+    assertThatCode(
+            () ->
+                compiler.compileAggregate(
+                    Parser.parse("black.username IN [\"hikaru\", \"magnus\"]"),
+                    List.of("eco"),
+                    "hikaru"))
+        .doesNotThrowAnyException();
   }
 
   @Test

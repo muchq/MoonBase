@@ -254,6 +254,14 @@ The indexer engine, database, and worker are embedded in this process (Option A 
 `one_d4/.../docs/MCP_INTEGRATION.md`). By default the index lives in in-memory H2; set
 `INDEXER_DB_URL` to point at a durable database.
 
+**The deployed MCP server takes that default.** `INDEXER_DB_URL` is the only source `McpModule`
+reads — there is no `/etc/…/db_config` fallback like `one_d4`'s — and the Compose service sets no
+such variable, so its index is in-memory H2, scoped to the process: empty at boot, discarded on
+restart, and entirely separate from the `one_d4` service's PostgreSQL corpus. Indexing tools work
+here, but each container starts from nothing and re-indexes on demand. Pointing this at the shared
+database is a deliberate deployment change (it would write to the production corpus), not a
+missing setting to paste in.
+
 - `index_chess_games` — index a player's games. Required: `username`, `platform`
   (`chess.com`), `start_month`/`end_month` (YYYY-MM). Optional: `exclude_bullet`, and
   `skip_cache` to refetch already-indexed months (refreshing stored rows, e.g. backfilling

@@ -233,7 +233,22 @@ matching row and group client-side.
 | groupBy | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form; physical columns, plus the perspective fields when `player` is set — the rating fields as width-bucketed terms like `"opponent.elo(200)"`) |
 | orderBy | string   | no       | "count" | —    | Only "count" is supported (descending)            |
 | limit   | int      | no       | 50      | 1000 | Max groups to return                              |
-| player  | string   | no       | —       | —    | Username that perspective fields in the filter and groupBy are resolved against |
+| player  | string   | no       | —       | —    | Username that perspective fields in the filter and groupBy are resolved against. It does **not** by itself scope the aggregate — see below |
+
+`player` resolves perspective fields; it is not a filter. Games are restricted to that player
+only through the participation guard, which is added when a perspective field is actually in play
+(in the filter or in `groupBy`). An aggregate that names a `player`, uses no perspective field,
+and does not filter on a username is therefore rejected with **400** rather than answered: the
+response would count every indexed game while reading as that player's, and — unlike
+`/v1/query`, whose rows show the usernames — nothing in an aggregate response would reveal it.
+To count one player's games either use a perspective field, or filter explicitly:
+
+```json
+{ "query": "white.username = \"hikaru\" OR black.username = \"hikaru\"", "groupBy": ["opening_family"] }
+```
+
+(Both sides, or the aggregate counts only the games they had White.) Omitting `player` entirely
+is unaffected — a corpus-wide aggregate is a legitimate question.
 
 Group-by fields validate against the same column whitelist as ChessQL comparisons. With
 `player`, the perspective fields are also groupable (response keys use their underscore forms):

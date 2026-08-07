@@ -320,6 +320,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     List<Object> whereParams = new ArrayList<>();
     String whereClause = compileExpr(pq.expr(), whereParams, perspective);
     whereClause = guardParticipation(whereClause, whereParams, perspective);
+    requireTheAggregateScopesToItsPlayer(pq, perspective);
 
     // GROUP BY references the term keys: the column itself for physical fields, the SELECT alias
     // for perspective fields. Repeating the CASE expression instead would not be portable —
@@ -371,6 +372,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       groupExprs.add(groupTermExpr(term, perspective, groupParams));
     }
     whereClause = guardParticipation(whereClause, whereParams, perspective);
+    requireTheAggregateScopesToItsPlayer(pq, perspective);
 
     String sql =
         "SELECT COUNT(*) AS total_groups, COALESCE(SUM(group_count), 0) AS total_games FROM ("
@@ -506,6 +508,61 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
         + " bucket by "
         + DEFAULT_ELO_BUCKET_WIDTH
         + "; opponent.elo(200) groups ratings into [2000, 2200), [2200, 2400), ...";
+  }
+
+  /**
+   * Aggregates must not name a player they never scope to.
+   *
+   * <p>A player only narrows a query through the participation guard, and the guard only fires when
+   * a perspective field is in play (it exists to repair the CASE expressions, not to filter). On
+   * the select path that is harmless: the rows carry usernames, so a caller who expected one
+   * player's games sees strangers immediately. An aggregate has no such tell — {@code player:
+   * hikaru, query: num.moves >= 0, group by opening_family} returns the whole corpus's openings
+   * under a heading that reads as hikaru's, and nothing in the response reveals it. So the
+   * aggregate entry points reject the combination instead of answering the wrong question
+   * convincingly.
+   *
+   * <p>An explicit username filter counts as scoping, since the caller has said what they meant in
+   * the query itself; the named player is then merely redundant.
+   */
+  private void requireTheAggregateScopesToItsPlayer(ParsedQuery pq, Perspective perspective) {
+    // Perspective normalizes a blank player to null, so the null check covers both.
+    if (perspective.player == null || perspective.used || filtersOnUsername(pq.expr())) {
+      return;
+    }
+    throw new IllegalArgumentException(
+        "player \""
+            + perspective.player
+            + "\" would not scope this aggregate: no perspective field ("
+            + PERSPECTIVE_FIELDS.keySet().stream().sorted().collect(Collectors.joining(", "))
+            + ") appears in the filter or groupBy, and the filter names no username, so the"
+            + " result would cover every indexed game rather than that player's. Group by or"
+            + " filter on a perspective field, or filter explicitly:"
+            + " white.username = \"NAME\" OR black.username = \"NAME\".");
+  }
+
+  /** Whether the filter itself constrains a username column, on either side. */
+  private boolean filtersOnUsername(Expr expr) {
+    return switch (expr) {
+      case OrExpr or -> or.operands().stream().anyMatch(this::filtersOnUsername);
+      case AndExpr and -> and.operands().stream().anyMatch(this::filtersOnUsername);
+      case NotExpr not -> filtersOnUsername(not.operand());
+      case ComparisonExpr cmp -> isUsernameField(cmp.field());
+      case InExpr in -> isUsernameField(in.field());
+      case MotifExpr ignored -> false;
+      case SequenceExpr ignored -> false;
+    };
+  }
+
+  private boolean isUsernameField(String field) {
+    try {
+      String column = resolveColumn(field);
+      return column.equals("white_username") || column.equals("black_username");
+    } catch (IllegalArgumentException unknownOrPerspective) {
+      // Perspective spellings and genuinely unknown fields both land here. The first is already
+      // covered by perspective.used; the second is compileExpr's error to report, not ours.
+      return false;
+    }
   }
 
   /**
