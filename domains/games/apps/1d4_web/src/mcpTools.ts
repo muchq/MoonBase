@@ -18,16 +18,17 @@ export const MCP_TOOLS: McpToolDoc[] = [
   {
     name: 'index_chess_games',
     summary:
-      "Index a player's games for a month range. Asynchronous — returns a request id to poll.",
+      "Index a player's games. A single month runs while you wait; a multi-month range returns a request id to poll.",
   },
   {
     name: 'index_status',
     summary:
-      'Poll an indexing request: status, how many games have landed, and any error message.',
+      'Poll a multi-month indexing request: status, how many games have landed, and any error message.',
   },
   {
     name: 'query_chess_games',
-    summary: 'Search indexed games with ChessQL, including motif and sequence predicates.',
+    summary:
+      'Search indexed games with ChessQL, including motif and sequence predicates.',
     needsIndex: true,
   },
   {
@@ -60,6 +61,7 @@ export const MCP_TOOLS: McpToolDoc[] = [
   },
   {
     name: 'server_time',
-    summary: 'Current UTC time, for grounding relative dates like "last month".',
+    summary:
+      'Current UTC time, for grounding relative dates like "last month".',
   },
 ];

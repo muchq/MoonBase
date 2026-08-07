@@ -17,9 +17,12 @@ import { MCP_TOOLS } from '../mcpTools';
 // under the jsdom transform.
 const ADVERTISED_TOOLS: { tools: string[] } = JSON.parse(
   readFileSync(
-    resolve(process.cwd(), '../../apis/mcpserver/src/test/resources/mcp_tools.json'),
-    'utf-8'
-  )
+    resolve(
+      process.cwd(),
+      '../../apis/mcpserver/src/test/resources/mcp_tools.json',
+    ),
+    'utf-8',
+  ),
 );
 
 afterEach(cleanup);
@@ -34,7 +37,7 @@ describe('McpView', () => {
     render(
       <MemoryRouter>
         <McpView />
-      </MemoryRouter>
+      </MemoryRouter>,
     );
 
     // Scoped to the table: several tool names also appear in the prose above it.
@@ -55,11 +58,13 @@ describe('McpView', () => {
     render(
       <MemoryRouter>
         <McpView />
-      </MemoryRouter>
+      </MemoryRouter>,
     );
 
     expect(screen.getByRole('heading', { name: /index first/i })).toBeTruthy();
-    expect(screen.getByText(/only see games that have been indexed/i)).toBeTruthy();
+    expect(
+      screen.getByText(/only see games that have been indexed/i),
+    ).toBeTruthy();
   });
 
   /**
@@ -70,7 +75,7 @@ describe('McpView', () => {
     render(
       <MemoryRouter>
         <McpView />
-      </MemoryRouter>
+      </MemoryRouter>,
     );
 
     expect(screen.getAllByText(/mcp\.1d4\.net/).length).toBeGreaterThan(0);
@@ -78,11 +83,53 @@ describe('McpView', () => {
     expect(screen.getByText(/Mcp-Session-Id/)).toBeTruthy();
   });
 
+  /**
+   * The MCP server indexes into its own in-memory database — empty at boot, discarded on restart,
+   * and not the corpus behind Games/api.1d4.net. A page that sits in the same nav and talks about
+   * indexing invites exactly the wrong conclusion, so the fact is pinned rather than left to
+   * whoever edits the copy next.
+   */
+  it('says its index is separate from the site corpus and does not survive restarts', () => {
+    render(
+      <MemoryRouter>
+        <McpView />
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByRole('heading', { name: /its index is its own/i }),
+    ).toBeTruthy();
+    expect(screen.getByText(/in-memory database/i)).toBeTruthy();
+    expect(
+      screen.getByText(/discarded when the process restarts/i),
+    ).toBeTruthy();
+  });
+
+  /**
+   * index_chess_games is synchronous for a single month (IndexerFacade goes through
+   * submitHybrid) and queued for a range. The page's worked example is one month, so copy that
+   * says "poll until it completes" would be telling readers to poll something already finished.
+   */
+  it('describes single-month indexing as synchronous and ranges as polled', () => {
+    render(
+      <MemoryRouter>
+        <McpView />
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByText(/single month is indexed while you wait/i),
+    ).toBeTruthy();
+    expect(screen.getByText(/multi-month range is queued/i)).toBeTruthy();
+    // And the worked example, which is a single month, must not send the reader off to poll.
+    expect(screen.getByText(/nothing to poll/i)).toBeTruthy();
+  });
+
   it('is reachable at /mcp and marks its nav link active', () => {
     render(
       <MemoryRouter initialEntries={['/mcp']}>
         <App />
-      </MemoryRouter>
+      </MemoryRouter>,
     );
 
     expect(screen.getByRole('heading', { name: /MCP server/i })).toBeTruthy();
