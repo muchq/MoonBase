@@ -135,7 +135,12 @@ Allow forcing a full re-fetch and re-index for periods that would otherwise be s
 
 ### Disk cap
 
-Avoid filling disk when using file-based storage (e.g. H2 file in Docker with `one_d4_data` volume). Neither H2 nor the current Compose config impose a size limit; the volume can grow until the host runs out of space.
+**Largely overtaken by the move to PostgreSQL (#1194).** This item was written when the
+deployment ran H2 file storage on a `one_d4_data` volume, which no longer exists: the indexer
+depends on the `one_d4_postgres` service and its `one_d4_pgdata` volume, and retention (7 days of
+games, see README) bounds growth in a way the original H2 setup did not. What is left of the
+concern is host-level: nothing caps `one_d4_pgdata`, so the notes below apply to that volume,
+minus the app-level H2 file measurement.
 
 **App-level cap (optional):**
 
@@ -148,9 +153,9 @@ Avoid filling disk when using file-based storage (e.g. H2 file in Docker with `o
 **Deployment / volume:**
 
 - Document that production deployments should put the indexer data volume on a quota-backed filesystem or use a volume driver that supports a size limit where available.
-- Compose does not support a max size on named volumes directly; document recommended host-level limits or quota setup for `one_d4_data`.
+- Compose does not support a max size on named volumes directly; document recommended host-level limits or quota setup for `one_d4_pgdata`.
 
-**Note:** Once the indexer uses PostgreSQL (e.g. Neon) instead of H2 file storage, this is less of a concern: the database runs in a managed service with its own storage limits and scaling; the app no longer owns the data directory on disk.
+**Note:** the app no longer owns a data directory on disk — Postgres does. A managed service (e.g. Neon) would push storage limits and scaling onto the provider entirely; on the current self-hosted `postgres:18` container, a host-level quota on `one_d4_pgdata` is what remains to do.
 
 ### Fanout by player+year_month
 

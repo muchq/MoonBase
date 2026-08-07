@@ -143,7 +143,7 @@ added only when a perspective field is used. `player` on its own is **not** a fi
 that names a player but uses no perspective field is compiled without any player predicate, and
 matches every indexed game. On `/v1/query` that is visible in the first row's usernames, and it
 stays permitted; on `/v1/aggregate` no column would reveal it, so that combination is rejected
-(400) unless the filter names a username itself — see API.md.
+(400) unless the filter itself restricts the games to that player — see API.md.
 
 The categorical perspective fields may also be used in `groupBy` on `/v1/aggregate` (and the
 `aggregate_chess_games` tool) when `player` is supplied: `me.color`, `me.title`,

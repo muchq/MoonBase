@@ -72,8 +72,12 @@ public class AggregateGamesTool implements McpTool {
                 + " perspective field. It does NOT by itself restrict the aggregate to that"
                 + " player: to count only their games, either use a perspective field (in the"
                 + " filter or group_by) or filter explicitly with 'white.username = \"NAME\" OR"
-                + " black.username = \"NAME\"'. Naming a player without either is rejected"
-                + " rather than silently aggregating every indexed game"));
+                + " black.username = \"NAME\"' — the same NAME on both sides, matching this"
+                + " player. Naming a player without either is rejected rather than silently"
+                + " counting other people's games. The filter must be one that cannot match"
+                + " another player's game, so a negation ('NOT white.username = ...'), a '!='"
+                + " comparison, an OR whose other branch is unrestricted, or an IN list naming"
+                + " anyone else does not qualify"));
     properties.put(
         "group_by",
         Map.of(

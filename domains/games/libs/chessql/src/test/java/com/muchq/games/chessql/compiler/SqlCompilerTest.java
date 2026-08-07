@@ -992,12 +992,10 @@ public class SqlCompilerTest {
             Parser.parse("white.username = \"hikaru\" OR black.username = \"hikaru\""),
             List.of("opening_family"),
             "hikaru");
-    // The filter compiles to text identical to the guard — the same coincidence the username
-    // indexes rely on — so the params are what distinguish them: two values from the filter, and
-    // no third and fourth from a guard that never fired.
-    assertThat(explicit.selectSql())
-        .as("an explicit username filter scopes it; the named player is merely redundant")
-        .contains(PARTICIPATION_GUARD);
+    // No guard fires here — the filter is the caller's own, and it compiles to text identical to
+    // the guard (the same coincidence the username indexes rely on), so asserting on the SQL
+    // string could not tell the two apart. The params can: two from the filter, and no third and
+    // fourth from a guard that never ran.
     assertThat(explicit.parameters())
         .as("the filter's own two binds, with no guard params layered on top")
         .isEqualTo(List.of("hikaru", "hikaru"));
