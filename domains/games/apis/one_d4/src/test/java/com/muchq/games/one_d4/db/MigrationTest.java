@@ -178,20 +178,25 @@ public class MigrationTest {
         .as("the browse search predicate these indexes serve, case-folded on both sides")
         .contains("(LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))");
 
-    java.util.Set<String> names = new java.util.HashSet<>();
+    java.util.Map<String, java.util.List<String>> columnsByIndex = new java.util.HashMap<>();
     try (Connection conn = dataSource.getConnection();
         ResultSet indexes =
             conn.getMetaData().getIndexInfo(null, null, "GAME_FEATURES", false, false)) {
       while (indexes.next()) {
         String name = indexes.getString("INDEX_NAME");
         if (name != null) {
-          names.add(name.toLowerCase());
+          columnsByIndex
+              .computeIfAbsent(name.toLowerCase(), k -> new java.util.ArrayList<>())
+              .add(indexes.getString("COLUMN_NAME").toLowerCase());
         }
       }
     }
-    assertThat(names)
-        .as("one index per side: an OR across two columns is served by two indexes, not one")
-        .contains("idx_game_features_white_username", "idx_game_features_black_username");
+    // One index per side — an OR across two columns is served by two indexes, not one — and each
+    // stand-in must sit on its own side's column: a stand-in redirected at the wrong column would
+    // keep the name this test looks for while modeling an index Postgres doesn't have.
+    assertThat(columnsByIndex)
+        .containsEntry("idx_game_features_white_username", java.util.List.of("white_username"))
+        .containsEntry("idx_game_features_black_username", java.util.List.of("black_username"));
   }
 
   @Test

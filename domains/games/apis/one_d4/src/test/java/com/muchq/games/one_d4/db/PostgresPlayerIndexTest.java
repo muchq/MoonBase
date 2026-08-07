@@ -29,11 +29,11 @@ import org.junit.jupiter.api.Test;
  * The username expression indexes on the deployment dialect. The participation guard case-folds
  * both sides — {@code LOWER(white_username) = LOWER(?)} — so only an expression index on {@code
  * LOWER(...)} can serve it, and only Postgres has expression indexes; the H2 side of the migration
- * creates plain-column stand-ins that this predicate cannot use. That makes the plan assertion here
- * the only test that can catch either side of the contract drifting: an index losing its {@code
- * LOWER} (back to a plain column) or the compiler's predicate changing shape both leave the H2
- * suite green while production quietly returns to the full-table walk this index exists to remove
- * (#1313 item 10).
+ * creates plain-column stand-ins that this predicate cannot use. The compiled predicate shape is
+ * pinned on H2 too ({@code MigrationTest}), so what is uniquely this suite's job is the
+ * <em>index</em> side of the contract: an index expression drifting from the compiler's predicate —
+ * losing its {@code LOWER}, say — leaves every H2 test green while production quietly returns to
+ * the full-table walk these indexes exist to remove (#1313 item 10).
  *
  * <p>Runs against the real postgres CI provides via {@code PG_TEST_DB_URL}; skips when unset. Uses
  * a dedicated schema like the other PG-gated suites sharing that scratch database.
@@ -110,11 +110,14 @@ public class PostgresPlayerIndexTest {
     String plan = explain(new SqlCompiler().compile(Parser.parse("me.elo >= 0"), "hikaru"));
 
     assertThat(plan)
-        .as("the white side of the OR must be an index scan, not part of a table walk")
+        .as("the white side of the OR must reach its index")
         .contains("idx_game_features_white_username");
     assertThat(plan)
         .as("and the black side its own — one index per disjunct")
         .contains("idx_game_features_black_username");
+    assertThat(plan)
+        .as("and nothing may fall back to walking the table")
+        .doesNotContain("Seq Scan");
   }
 
   /**
@@ -137,6 +140,9 @@ public class PostgresPlayerIndexTest {
         .as("the UI's search predicate must reach the white-side index")
         .contains("idx_game_features_white_username");
     assertThat(plan).as("and the black-side index").contains("idx_game_features_black_username");
+    assertThat(plan)
+        .as("and nothing may fall back to walking the table")
+        .doesNotContain("Seq Scan");
   }
 
   private String explain(CompiledQuery compiled) throws Exception {

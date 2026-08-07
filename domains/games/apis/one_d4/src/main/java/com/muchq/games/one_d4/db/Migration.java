@@ -420,6 +420,11 @@ public class Migration {
    * the deployment dialect for both emitting paths: the plan actually reaches these indexes for the
    * compiler's exact predicates, so either side drifting (a compiler path losing its {@code LOWER},
    * or an index expression changing) fails a test.
+   *
+   * <p>Ops note, same as every index here: created at boot without {@code CONCURRENTLY}, so the
+   * first deploy onto a populated table holds a SHARE lock for the build and pauses the indexer's
+   * writes; later boots are IF NOT EXISTS no-ops. (CONCURRENTLY + IF NOT EXISTS would be worse — a
+   * failed build leaves an INVALID index behind that IF NOT EXISTS then skips forever.)
    */
   private static final String[] CREATE_IDX_GAME_FEATURES_USERNAMES_PG = {
     "CREATE INDEX IF NOT EXISTS idx_game_features_white_username"
