@@ -162,7 +162,20 @@ public class MigrationTest {
             .compile(com.muchq.games.chessql.parser.Parser.parse("outcome = \"win\""), "hikaru")
             .selectSql();
     assertThat(playerScoped)
-        .as("the participation guard these indexes exist to serve, case-folded on both sides")
+        .as("the participation guard these indexes serve, case-folded on both sides")
+        .contains("(LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))");
+
+    // The browse UI's username search reaches the same shape through a different compiler branch
+    // (STRING_COLUMNS equality, no player) — the highest-traffic consumer of these indexes.
+    String browseSearch =
+        new com.muchq.games.chessql.compiler.SqlCompiler()
+            .compile(
+                com.muchq.games.chessql.parser.Parser.parse(
+                    "white.username = \"hikaru\" OR black.username = \"hikaru\""),
+                null)
+            .selectSql();
+    assertThat(browseSearch)
+        .as("the browse search predicate these indexes serve, case-folded on both sides")
         .contains("(LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))");
 
     java.util.Set<String> names = new java.util.HashSet<>();

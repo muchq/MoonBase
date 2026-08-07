@@ -107,9 +107,39 @@ public class PostgresPlayerIndexTest {
    */
   @Test
   public void thePlayerScopedQueryIsServedByBothUsernameIndexesOnPostgres() throws Exception {
-    CompiledQuery compiled = new SqlCompiler().compile(Parser.parse("me.elo >= 0"), "hikaru");
+    String plan = explain(new SqlCompiler().compile(Parser.parse("me.elo >= 0"), "hikaru"));
 
-    String plan;
+    assertThat(plan)
+        .as("the white side of the OR must be an index scan, not part of a table walk")
+        .contains("idx_game_features_white_username");
+    assertThat(plan)
+        .as("and the black side its own — one index per disjunct")
+        .contains("idx_game_features_black_username");
+  }
+
+  /**
+   * The browse UI's username search — {@code white.username = "x" OR black.username = "x"}, sent by
+   * GamesView with no {@code player} — reaches the same predicate shape through a different
+   * compiler path (the STRING_COLUMNS equality branch, not the participation guard), and it is the
+   * highest-traffic consumer of these indexes. Pinned separately so that path losing its {@code
+   * LOWER} cannot fall off the indexes while every guard-path test stays green.
+   */
+  @Test
+  public void theBrowseUsernameSearchIsServedByBothUsernameIndexesOnPostgres() throws Exception {
+    String plan =
+        explain(
+            new SqlCompiler()
+                .compile(
+                    Parser.parse("white.username = \"hikaru\" OR black.username = \"hikaru\""),
+                    null));
+
+    assertThat(plan)
+        .as("the UI's search predicate must reach the white-side index")
+        .contains("idx_game_features_white_username");
+    assertThat(plan).as("and the black-side index").contains("idx_game_features_black_username");
+  }
+
+  private String explain(CompiledQuery compiled) throws Exception {
     try (Connection conn = dataSource.getConnection();
         Statement stmt = conn.createStatement()) {
       stmt.execute("SET enable_seqscan = off");
@@ -127,15 +157,8 @@ public class PostgresPlayerIndexTest {
           // The connection is already broken; the primary exception is propagating.
         }
       }
-      plan = sb.toString();
+      return sb.toString();
     }
-
-    assertThat(plan)
-        .as("the white side of the OR must be an index scan, not part of a table walk")
-        .contains("idx_game_features_white_username");
-    assertThat(plan)
-        .as("and the black side its own — one index per disjunct")
-        .contains("idx_game_features_black_username");
   }
 
   /**
@@ -157,6 +180,19 @@ public class PostgresPlayerIndexTest {
         dao.query(new SqlCompiler().compile(Parser.parse("me.elo >= 0"), "hikaru"), 10, 0);
 
     assertThat(games)
+        .extracting(GameFeature::gameUrl)
+        .containsExactlyInAnyOrder("https://chess.com/game/pgi-1", "https://chess.com/game/pgi-2");
+
+    // The browse UI's search path must agree: same predicate shape, different compiler branch.
+    List<GameFeature> browsed =
+        dao.query(
+            new SqlCompiler()
+                .compile(
+                    Parser.parse("white.username = \"hikaru\" OR black.username = \"hikaru\""),
+                    null),
+            10,
+            0);
+    assertThat(browsed)
         .extracting(GameFeature::gameUrl)
         .containsExactlyInAnyOrder("https://chess.com/game/pgi-1", "https://chess.com/game/pgi-2");
   }

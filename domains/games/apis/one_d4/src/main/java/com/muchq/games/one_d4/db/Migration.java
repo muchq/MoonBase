@@ -402,18 +402,24 @@ public class Migration {
           + " ON game_features(played_at DESC, game_url ASC)";
 
   /**
-   * The indexes behind the player-participation guard (#1313 item 10). Every player-scoped query —
-   * any use of a perspective field — runs SqlCompiler's {@code (LOWER(white_username) = LOWER(?) OR
-   * LOWER(black_username) = LOWER(?))}, case-folded on <em>both</em> sides, so a plain column index
-   * can never serve it on Postgres: these are expression indexes on {@code LOWER(...)}. One per
-   * side rather than a composite, because an OR across two columns is answered by a BitmapOr of two
-   * independent index scans, and a composite serves neither disjunct alone.
+   * The indexes behind username search (#1313 item 10). Two compiler paths emit the same
+   * case-folded predicate shape, {@code LOWER(white_username) = LOWER(?)} OR'd across the sides:
+   * the browse UI's username search compiles {@code white.username = "x" OR black.username = "x"}
+   * through the STRING_COLUMNS equality branch — the highest-traffic consumer — and every
+   * perspective-field query runs the participation guard. Case-folded on <em>both</em> sides, so a
+   * plain column index can never serve either on Postgres: these are expression indexes on {@code
+   * LOWER(...)}. One per side rather than any composite — an OR across two columns is answered by a
+   * BitmapOr of two independent scans, and a BitmapOr's output is unordered, so a composite with
+   * {@code played_at} could not skip the sort either; it would only double index weight on the
+   * hottest-write table.
    *
-   * <p>Without them this predicate was the last user-triggerable full-table scan in the schema —
-   * and with a 5-connection pool, five concurrent player searches held every connection for the
-   * full serving-read bound. {@code PostgresPlayerIndexTest} pins both sides of the contract on the
-   * deployment dialect: the plan actually reaches these indexes for the compiler's exact predicate,
-   * so either side drifting (compiler predicate or index expression) fails a test.
+   * <p>Without them these predicates were the full-table scan on the player-search path — and with
+   * a 5-connection pool, five concurrent player searches held every connection for the full
+   * serving-read bound. (Not the last table walk in the schema: an unscoped {@code /v1/aggregate}
+   * GROUP BY legitimately reads the corpus.) {@code PostgresPlayerIndexTest} pins the contract on
+   * the deployment dialect for both emitting paths: the plan actually reaches these indexes for the
+   * compiler's exact predicates, so either side drifting (a compiler path losing its {@code LOWER},
+   * or an index expression changing) fails a test.
    */
   private static final String[] CREATE_IDX_GAME_FEATURES_USERNAMES_PG = {
     "CREATE INDEX IF NOT EXISTS idx_game_features_white_username"
@@ -423,10 +429,12 @@ public class Migration {
   };
 
   /**
-   * The same indexes for H2, which has no expression indexes; plain column indexes stand in under
-   * the same names. H2 is the test engine rather than the deployment target, so the cost of the
-   * weaker shape is a slower test, never a slower production search — same trade as the claimable
-   * index above.
+   * The same names on H2, which has no expression indexes — and a plain column index cannot serve a
+   * {@code LOWER(...)} predicate there for exactly the reason the Postgres javadoc gives, so on H2
+   * these are pure write cost, not a weaker plan. They are carried anyway so the migration path
+   * stays identical on both engines and the H2 suite can pin their existence. The only H2
+   * deployment is the MCP server's boot-scoped in-memory store, where a handful of rows makes both
+   * the missing plan and the extra writes negligible.
    */
   private static final String[] CREATE_IDX_GAME_FEATURES_USERNAMES_H2 = {
     "CREATE INDEX IF NOT EXISTS idx_game_features_white_username"
