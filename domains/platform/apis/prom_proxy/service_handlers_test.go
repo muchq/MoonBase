@@ -1339,3 +1339,47 @@ func TestMetricsHandler_GetServiceMetrics_JsonKeysAreStable(t *testing.T) {
 	assert.False(t, present,
 		"a fixed-form tile must omit the key entirely, not send false: %v", gauge)
 }
+
+// Indexing is triggered by a person asking for a player, so between asks the
+// true rate is zero. Read through the 5m window every serving tile uses, a
+// thousand-game run is invisible by breakfast — which is what #1313 reported:
+// an Indexing panel of zeros over a night's work, indistinguishable from a
+// service that had never indexed anything. These tiles count over a day
+// instead, so "did the thing I ran work?" has an answer for as long as the
+// question is likely to be asked.
+func TestRegistry_OneD4IndexingVolumesCountOverADay(t *testing.T) {
+	entry, ok := serviceRegistry["one_d4"]
+	if !ok {
+		t.Fatal("one_d4 missing from the registry")
+	}
+
+	// Every Indexing and Motifs counter, not a sample of them: a tile left on
+	// the 5m default is exactly the flat zero this test exists to prevent.
+	wantDay := map[string]bool{
+		"games_indexed": true, "runs_completed": true, "runs_failed": true,
+		"runs_interrupted": true, "runs_lease_lost": true, "empty_months": true,
+		"cached_months": true, "archive_fetches": true, "occurrences": true,
+	}
+	seen := map[string]bool{}
+	for _, def := range entry.CustomScalars {
+		if def.Group != "Indexing" && def.Group != "Motifs" {
+			continue
+		}
+		if def.Counter == "" {
+			continue // the windowed averages are scalars, with their own 1h range
+		}
+		seen[def.Label] = true
+		if !wantDay[def.Label] {
+			t.Errorf("unexpected indexing counter %q: add it to this test with a window decision", def.Label)
+			continue
+		}
+		if got := def.window(); got != "24h" {
+			t.Errorf("%s counts over %s; episodic work needs a day to stay visible", def.Label, got)
+		}
+	}
+	for label := range wantDay {
+		if !seen[label] {
+			t.Errorf("expected an indexing counter %q; did it move groups or get dropped?", label)
+		}
+	}
+}

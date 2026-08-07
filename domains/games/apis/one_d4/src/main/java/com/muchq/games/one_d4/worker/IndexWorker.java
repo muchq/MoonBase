@@ -88,6 +88,19 @@ public class IndexWorker {
   static final String RUN_DURATION = "index_run_duration_micros";
 
   /**
+   * The label values the counters above can carry, so each series can be declared at startup and
+   * export a zero baseline. Bounded sets only: {@link #MOTIF_OCCURRENCES} is labelled by motif and
+   * left to appear on first use, since its baseline would be one series per motif for a tile that
+   * only ever reads their sum.
+   */
+  static final List<String> RUN_OUTCOMES =
+      List.of("completed", "failed", "interrupted", "lease_lost");
+
+  static final List<String> MONTH_RESULTS = List.of("indexed", "degraded", "cached", "empty");
+
+  static final List<String> ARCHIVE_FETCH_RESULTS = List.of("ok", "no_archive", "error");
+
+  /**
    * Bounds for {@link #RUN_DURATION}, in microseconds, spanning a millisecond to the {@link
    * RetentionPolicy#MAX_RUN} ceiling.
    *
@@ -365,6 +378,38 @@ public class IndexWorker {
               t.setDaemon(true);
               return t;
             });
+    declareMetrics();
+  }
+
+  /**
+   * Every series this worker can report, declared at construction so each exports as 0 from process
+   * start rather than springing into existence carrying its first run's numbers.
+   *
+   * <p>Declared here rather than at the top of {@link #process}, which is where the distribution
+   * bounds used to be: a baseline is only useful if it is exported <em>before</em> the increment it
+   * is a baseline for, and a run that starts and finishes between two export ticks would declare
+   * and increment inside the same interval, leaving the first run as invisible as it was. The
+   * worker bean is eager, so construction happens at startup and the baseline is minutes old before
+   * any request arrives. See {@link CustomMetrics#defineCounter}.
+   *
+   * <p>The label values are spelled out because the emit sites spell them out; {@code
+   * IndexWorkerMetricsTest} pins that the two sets agree, so an outcome added at an emit site
+   * without a declaration here fails rather than quietly losing its first occurrence.
+   */
+  private void declareMetrics() {
+    metrics.defineDistribution(RUN_DURATION, RUN_DURATION_BOUNDS);
+    metrics.defineDistribution(GAMES_PER_MONTH, GAMES_PER_MONTH_BOUNDS);
+
+    metrics.defineCounter(GAMES_INDEXED);
+    for (String outcome : RUN_OUTCOMES) {
+      metrics.defineCounter(RUNS, Map.of("outcome", outcome));
+    }
+    for (String result : MONTH_RESULTS) {
+      metrics.defineCounter(MONTHS, Map.of("result", result));
+    }
+    for (String result : ARCHIVE_FETCH_RESULTS) {
+      metrics.defineCounter(ARCHIVE_FETCHES, Map.of("result", result));
+    }
   }
 
   public void process(IndexMessage message) {
@@ -413,8 +458,6 @@ public class IndexWorker {
     // that jumps its clock by six hours to trip the ceiling would otherwise report a six-hour run.
     long runStartNanos = System.nanoTime();
     String outcome = "failed";
-    metrics.defineDistribution(RUN_DURATION, RUN_DURATION_BOUNDS);
-    metrics.defineDistribution(GAMES_PER_MONTH, GAMES_PER_MONTH_BOUNDS);
     try {
       progress(message.requestId(), 0);
 
