@@ -146,6 +146,13 @@ java_binary(
 
 linux_oci_java(bin_name = "mcpserver")
 
+java_library(
+    name = "mcp_tools_fixture",
+    testonly = True,
+    resource_strip_prefix = "domains/games/apis/mcpserver/src/test/resources",
+    resources = ["src/test/resources/mcp_tools.json"],
+)
+
 java_test_suite(
     name = "tools_tests",
     size = "small",
@@ -156,9 +163,12 @@ java_test_suite(
         "src/test/java/com/muchq/games/mcpserver/tools/ChessComStatsToolTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/IndexerFacadeAggregateTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/IndexerToolsTest.java",
+        "src/test/java/com/muchq/games/mcpserver/tools/McpToolRegistryContractTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/ServerTimeToolTest.java",
     ],
     deps = [
+        ":mcp_tools_fixture",
+        ":module",
         ":tools",
         "//domains/games/apis/one_d4:db",
         "//domains/games/apis/one_d4:dto",
