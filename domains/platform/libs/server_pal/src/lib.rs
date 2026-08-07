@@ -685,16 +685,20 @@ mod tests {
             .build()
             .with_state(NoState);
 
-        for _ in 0..20 {
-            let resp = app.clone().oneshot(make_request("/health")).await.unwrap();
+        // A limited path, not /health — the exemption would carry that one
+        // whether or not `None` was honoured. And more requests than
+        // DEFAULT_RATE_LIMIT.burst, or ignoring `None` and installing the
+        // default would leave this green too: 20 hits fit inside a burst of
+        // 200 with room to spare.
+        for _ in 0..(DEFAULT_RATE_LIMIT.burst + 50) {
+            let resp = app.clone().oneshot(make_request("/nope")).await.unwrap();
             assert_ne!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
         }
     }
 
-    /// The healthcheck probes on a fixed cadence from one IP, so it must not
-    /// compete with clients for rate-limit quota: a drained bucket that 429s
-    /// the probe reads as a dead service, which is what left the consolidated
-    /// stack flapping between healthy and unhealthy.
+    /// A spent bucket must not reach the probe: a 429 there reads as a dead
+    /// service. See the exemption's own comment for why this is defence in
+    /// depth rather than the cause of the flapping it was written for.
     #[tokio::test]
     async fn health_is_exempt_from_rate_limiting() {
         let app = drained_app().await;
