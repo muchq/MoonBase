@@ -354,7 +354,9 @@ async fn http_metrics_middleware(
 }
 
 pub struct RateLimit {
+    /// Sustained requests per second, per IP.
     pub per_second: u64,
+    /// How many may arrive at once before the sustained rate binds.
     pub burst: u32,
 }
 
@@ -362,6 +364,28 @@ const DEFAULT_RATE_LIMIT: RateLimit = RateLimit {
     per_second: 100,
     burst: 200,
 };
+
+/// `RateLimit` as the quota `tower_governor` actually wants.
+///
+/// Its builder takes a **replenish interval**, not a rate: `per_second(n)`
+/// there means "restore one element every n seconds". So the obvious spelling
+/// of "100 requests per second" — `per_second(100)` — configures one request
+/// per 100 seconds, 10,000x tighter than it reads, and the mistake is invisible
+/// because both the field and the method are called `per_second`. That is what
+/// drained the health-probe bucket in production: a 30s probe interval against
+/// a 100s refill, so two of every three probes 429'd and containers flapped
+/// between healthy and unhealthy while serving normally.
+///
+/// Converting here keeps `RateLimit::per_second` meaning what it says at every
+/// call site. Nanoseconds rather than milliseconds so rates above 1000/s stay
+/// expressible instead of truncating to a zero-length period.
+fn quota_period(per_second: u64) -> Duration {
+    assert!(
+        per_second > 0 && per_second <= 1_000_000_000,
+        "rate_limit per_second must be 1..=1_000_000_000 requests/second, got {per_second}"
+    );
+    Duration::from_nanos(1_000_000_000 / per_second)
+}
 
 pub fn listen_addr_pal() -> String {
     let port = env::var("PORT")
@@ -442,10 +466,10 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
         let limited = if let Some(RateLimit { per_second, burst }) = self.rate_limit {
             let config = Arc::new(
                 GovernorConfigBuilder::default()
-                    .per_second(per_second)
+                    .per_nanosecond(quota_period(per_second).as_nanos() as u64)
                     .burst_size(burst)
                     .finish()
-                    .unwrap(),
+                    .expect("a non-zero period and burst is a valid quota"),
             );
             // Outermost of the two, so a request rejected further in still
             // costs quota. Applied under `common_layers` instead, a 406 from
@@ -506,13 +530,14 @@ mod tests {
         req
     }
 
-    /// A router whose per-IP bucket is spent, with a replenish interval far
-    /// longer than any test, so nothing refills mid-test and a later 200 can
-    /// only mean the request never reached the governor.
+    /// A router whose per-IP bucket is spent. One request per second is the
+    /// slowest sustained rate expressible, and these tests finish in well under
+    /// a millisecond, so nothing meaningfully replenishes mid-test and a later
+    /// 200 can only mean the request never reached the governor.
     async fn drained_app() -> Router {
         let app = router_builder::<NoState>()
             .rate_limit(Some(RateLimit {
-                per_second: 3600,
+                per_second: 1,
                 burst: 2,
             }))
             .build()
@@ -525,6 +550,49 @@ mod tests {
         let resp = app.clone().oneshot(make_request("/nope")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
         app
+    }
+
+    /// `per_second` is a rate, not the replenish interval tower_governor's
+    /// builder takes. Read as an interval, 100 configures one request every
+    /// 100 seconds — and nothing in the types or the names catches it, because
+    /// both spellings are `per_second`. This is the production defect: the
+    /// default limit was 10,000x tighter than it read.
+    #[tokio::test]
+    async fn per_second_is_a_rate_not_a_replenish_interval() {
+        let app = router_builder::<NoState>()
+            .rate_limit(Some(RateLimit {
+                per_second: 100,
+                burst: 1,
+            }))
+            .build()
+            .with_state(NoState);
+
+        // Spend the one-request burst.
+        let resp = app.clone().oneshot(make_request("/nope")).await.unwrap();
+        assert_ne!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        let resp = app.clone().oneshot(make_request("/nope")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        // At 100/s an element returns in 10ms. Waiting longer only ever helps,
+        // so this cannot flake on a slow machine — it fails only if the quota
+        // genuinely has not replenished.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let resp = app.oneshot(make_request("/nope")).await.unwrap();
+        assert_ne!(
+            resp.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "no quota after 100ms at 100 req/s — per_second is being applied \
+             as a replenish interval, making the real limit 1 per 100 seconds"
+        );
+    }
+
+    /// The conversion itself, at the two rates this repo actually configures.
+    #[test]
+    fn quota_period_turns_a_rate_into_an_interval() {
+        assert_eq!(quota_period(100), Duration::from_millis(10));
+        assert_eq!(quota_period(5), Duration::from_millis(200));
+        assert_eq!(quota_period(1), Duration::from_secs(1));
     }
 
     /// A request the Accept check rejects must still cost quota. The governor

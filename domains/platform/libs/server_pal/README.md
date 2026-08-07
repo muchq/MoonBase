@@ -72,10 +72,11 @@ costs quota. Requests rejected further in — a `406` from the `Accept` check, a
 `408`, a panic — are counted against the limit too, because the limiter is the
 outermost layer.
 
-Note that `per_second` is a **replenish interval, not a rate**: `tower_governor`
-reads it as "one element restored every N seconds". The default above is
-therefore one request per 100 seconds, not 100 per second — it does not match
-its own description and is tracked separately from this exemption.
+`per_second` is a rate — requests per second — and `burst` is how many may
+arrive at once before that rate binds. Note that `tower_governor`'s own builder
+takes a *replenish interval* under the same name, so `per_second(100)` there
+means one request every 100 seconds; `RateLimit` converts, so the field means
+what it says.
 
 ## Environment variables
 
