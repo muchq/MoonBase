@@ -18,7 +18,9 @@ public class MigrationTest {
 
   @BeforeEach
   public void setUp() {
-    String jdbcUrl = "jdbc:h2:mem:migration_" + System.currentTimeMillis() + ";DB_CLOSE_DELAY=-1";
+    // nanoTime, not currentTimeMillis: two tests starting in the same millisecond would silently
+    // share a database — the same trap TestDb documents and avoids.
+    String jdbcUrl = "jdbc:h2:mem:migration_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
     dataSource = DataSourceFactory.create(jdbcUrl);
   }
 

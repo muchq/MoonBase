@@ -141,7 +141,9 @@ public class PostgresPlayerIndexTest {
   /**
    * The behavioral twin: the guard is case-insensitive on both sides, so a player search must find
    * games where the stored username differs from the queried one only by case, on both colors,
-   * while excluding everyone else — through the real DAO and the real indexes.
+   * while excluding everyone else — through the real DAO on the deployment dialect. (At three
+   * unanalyzed rows the planner seq-scans, so this pins predicate semantics and PG collation
+   * agreement, not index participation — that is the plan test's job.)
    */
   @Test
   public void playerSearchIsCaseInsensitiveOnBothSidesOnPostgres() {
