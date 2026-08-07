@@ -143,6 +143,42 @@ public class MigrationTest {
         .containsExactly("PLAYED_AT:D", "GAME_URL:A");
   }
 
+  /**
+   * The username indexes behind the player-participation guard, and the predicate they exist to
+   * serve. On H2 they are plain column indexes (H2 has no expression indexes), so what this pins is
+   * presence and the compiler's side of the contract: the guard must still be the
+   * case-folded-on-both-sides shape the Postgres {@code LOWER(...)} expression indexes mirror. If
+   * the compiler's predicate changes shape, this fails and points at the index definitions; the
+   * plan-level proof on the deployment dialect lives in {@code PostgresPlayerIndexTest}.
+   */
+  @Test
+  public void run_addsTheUsernameIndexesBehindTheParticipationGuard() throws Exception {
+    new Migration(dataSource, true).run();
+
+    String playerScoped =
+        new com.muchq.games.chessql.compiler.SqlCompiler()
+            .compile(com.muchq.games.chessql.parser.Parser.parse("outcome = \"win\""), "hikaru")
+            .selectSql();
+    assertThat(playerScoped)
+        .as("the participation guard these indexes exist to serve, case-folded on both sides")
+        .contains("(LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))");
+
+    java.util.Set<String> names = new java.util.HashSet<>();
+    try (Connection conn = dataSource.getConnection();
+        ResultSet indexes =
+            conn.getMetaData().getIndexInfo(null, null, "GAME_FEATURES", false, false)) {
+      while (indexes.next()) {
+        String name = indexes.getString("INDEX_NAME");
+        if (name != null) {
+          names.add(name.toLowerCase());
+        }
+      }
+    }
+    assertThat(names)
+        .as("one index per side: an OR across two columns is served by two indexes, not one")
+        .contains("idx_game_features_white_username", "idx_game_features_black_username");
+  }
+
   @Test
   public void run_addsTitleAndOpeningColumns() throws Exception {
     Migration migration = new Migration(dataSource, true);

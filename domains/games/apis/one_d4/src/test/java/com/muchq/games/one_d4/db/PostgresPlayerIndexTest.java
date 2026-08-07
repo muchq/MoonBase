@@ -1,0 +1,217 @@
+package com.muchq.games.one_d4.db;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
+import com.muchq.games.chessql.compiler.CompiledQuery;
+import com.muchq.games.chessql.compiler.SqlCompiler;
+import com.muchq.games.chessql.parser.Parser;
+import com.muchq.games.one_d4.api.dto.GameFeature;
+import java.io.Closeable;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import javax.sql.DataSource;
+import org.jdbi.v3.core.Jdbi;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+/**
+ * The username expression indexes on the deployment dialect. The participation guard case-folds
+ * both sides — {@code LOWER(white_username) = LOWER(?)} — so only an expression index on {@code
+ * LOWER(...)} can serve it, and only Postgres has expression indexes; the H2 side of the migration
+ * creates plain-column stand-ins that this predicate cannot use. That makes the plan assertion here
+ * the only test that can catch either side of the contract drifting: an index losing its {@code
+ * LOWER} (back to a plain column) or the compiler's predicate changing shape both leave the H2
+ * suite green while production quietly returns to the full-table walk this index exists to remove
+ * (#1313 item 10).
+ *
+ * <p>Runs against the real postgres CI provides via {@code PG_TEST_DB_URL}; skips when unset. Uses
+ * a dedicated schema like the other PG-gated suites sharing that scratch database.
+ */
+public class PostgresPlayerIndexTest {
+
+  private static final String DB_URL_ENV = "PG_TEST_DB_URL";
+  private static final String SCHEMA = "one_d4_pg_player_index_test";
+
+  private DataSource dataSource;
+  private GameFeatureDao dao;
+  private UUID requestId;
+
+  @BeforeEach
+  public void setUp() throws Exception {
+    String rawUrl = System.getenv(DB_URL_ENV);
+    assumeTrue(
+        rawUrl != null && !rawUrl.isBlank(),
+        DB_URL_ENV + " is not set; skipping the real-postgres player-index suite");
+
+    try (Connection conn = DriverManager.getConnection(jdbcUrl(rawUrl, null));
+        Statement stmt = conn.createStatement()) {
+      stmt.execute("DROP SCHEMA IF EXISTS " + SCHEMA + " CASCADE");
+      stmt.execute("CREATE SCHEMA " + SCHEMA);
+    }
+
+    dataSource = DataSourceFactory.create(jdbcUrl(rawUrl, SCHEMA));
+    new Migration(dataSource, false).run();
+    dao = new GameFeatureDao(Jdbi.create(dataSource), false);
+
+    requestId = UUID.randomUUID();
+    try (Connection conn = dataSource.getConnection();
+        var stmt =
+            conn.prepareStatement(
+                "INSERT INTO indexing_requests (id, player, platform, start_month, end_month,"
+                    + " status) VALUES (?, 'p', 'CHESS_COM', '2026-06', '2026-07', 'COMPLETED')")) {
+      stmt.setObject(1, requestId);
+      stmt.executeUpdate();
+    }
+  }
+
+  @AfterEach
+  public void tearDown() throws Exception {
+    if (dataSource instanceof Closeable closeable) {
+      closeable.close();
+    }
+    String rawUrl = System.getenv(DB_URL_ENV);
+    if (rawUrl == null || rawUrl.isBlank()) {
+      return;
+    }
+    try (Connection conn = DriverManager.getConnection(jdbcUrl(rawUrl, null));
+        Statement stmt = conn.createStatement()) {
+      stmt.execute("DROP SCHEMA IF EXISTS " + SCHEMA + " CASCADE");
+    }
+  }
+
+  /**
+   * The plan-level pin: Postgres must answer the compiler's participation guard through both
+   * expression indexes — a BitmapOr of the white-side and black-side scans — rather than a
+   * sequential scan. {@code enable_seqscan = off} removes the planner's row-count judgement from
+   * the test (an empty-ish table would otherwise always seq-scan), leaving exactly the question
+   * this suite exists to answer: <em>can</em> the plan reach these indexes for this predicate? With
+   * a raw-column index, or a predicate whose shape no longer matches the indexed expression, it
+   * cannot — Postgres then seq-scans even at prohibitive cost, and the assertion fails.
+   */
+  @Test
+  public void thePlayerScopedQueryIsServedByBothUsernameIndexesOnPostgres() throws Exception {
+    CompiledQuery compiled = new SqlCompiler().compile(Parser.parse("me.elo >= 0"), "hikaru");
+
+    String plan;
+    try (Connection conn = dataSource.getConnection();
+        Statement stmt = conn.createStatement()) {
+      stmt.execute("SET enable_seqscan = off");
+      StringBuilder sb = new StringBuilder();
+      try (ResultSet rs = stmt.executeQuery("EXPLAIN " + inlineParams(compiled))) {
+        while (rs.next()) {
+          sb.append(rs.getString(1)).append('\n');
+        }
+      } finally {
+        stmt.execute("SET enable_seqscan = on");
+      }
+      plan = sb.toString();
+    }
+
+    assertThat(plan)
+        .as("the white side of the OR must be an index scan, not part of a table walk")
+        .contains("idx_game_features_white_username");
+    assertThat(plan)
+        .as("and the black side its own — one index per disjunct")
+        .contains("idx_game_features_black_username");
+  }
+
+  /**
+   * The behavioral twin: the guard is case-insensitive on both sides, so a player search must find
+   * games where the stored username differs from the queried one only by case, on both colors,
+   * while excluding everyone else — through the real DAO and the real indexes.
+   */
+  @Test
+  public void playerSearchIsCaseInsensitiveOnBothSidesOnPostgres() {
+    dao.insertBatch(
+        List.of(
+            game("pgi-1", "Hikaru", "someone"),
+            game("pgi-2", "other", "HIKARU"),
+            game("pgi-3", "magnus", "fabiano")));
+
+    List<GameFeature> games =
+        dao.query(new SqlCompiler().compile(Parser.parse("me.elo >= 0"), "hikaru"), 10, 0);
+
+    assertThat(games)
+        .extracting(GameFeature::gameUrl)
+        .containsExactlyInAnyOrder("https://chess.com/game/pgi-1", "https://chess.com/game/pgi-2");
+  }
+
+  /** Inlines the compiled query's bind params as SQL literals, for EXPLAIN. */
+  private static String inlineParams(CompiledQuery compiled) {
+    String sql = compiled.selectSql();
+    for (Object param : compiled.parameters()) {
+      String literal =
+          param instanceof Number
+              ? param.toString()
+              : "'" + param.toString().replace("'", "''") + "'";
+      sql = sql.replaceFirst("\\?", java.util.regex.Matcher.quoteReplacement(literal));
+    }
+    return sql;
+  }
+
+  private GameFeature game(String urlSuffix, String white, String black) {
+    return new GameFeature(
+        null,
+        requestId,
+        "https://chess.com/game/" + urlSuffix,
+        "CHESS_COM",
+        white,
+        black,
+        1500,
+        1500,
+        null,
+        null,
+        "blitz",
+        "A00",
+        "Sicilian",
+        "Sicilian",
+        "1-0",
+        Instant.parse("2026-07-02T10:00:00Z"),
+        30,
+        Instant.now(),
+        "1. e4 e5 *");
+  }
+
+  /**
+   * Converts the libpq-style URL CI exports ({@code postgresql://user:pass@host:port/db}) into a
+   * pgjdbc URL, same as the other PG-gated suites.
+   */
+  private static String jdbcUrl(String rawUrl, String schema) {
+    URI uri = URI.create(rawUrl);
+    List<String> params = new ArrayList<>();
+    String userInfo = uri.getUserInfo();
+    if (userInfo != null) {
+      int colon = userInfo.indexOf(':');
+      String user = colon < 0 ? userInfo : userInfo.substring(0, colon);
+      params.add("user=" + encode(user));
+      if (colon >= 0) {
+        params.add("password=" + encode(userInfo.substring(colon + 1)));
+      }
+    }
+    if (schema != null) {
+      params.add("currentSchema=" + encode(schema));
+    }
+    int port = uri.getPort() < 0 ? 5432 : uri.getPort();
+    return "jdbc:postgresql://"
+        + uri.getHost()
+        + ":"
+        + port
+        + uri.getPath()
+        + (params.isEmpty() ? "" : "?" + String.join("&", params));
+  }
+
+  private static String encode(String value) {
+    return URLEncoder.encode(value, StandardCharsets.UTF_8);
+  }
+}

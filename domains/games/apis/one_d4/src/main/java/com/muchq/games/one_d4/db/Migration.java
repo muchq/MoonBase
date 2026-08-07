@@ -401,6 +401,40 @@ public class Migration {
       "CREATE INDEX IF NOT EXISTS idx_game_features_played_at"
           + " ON game_features(played_at DESC, game_url ASC)";
 
+  /**
+   * The indexes behind the player-participation guard (#1313 item 10). Every player-scoped query —
+   * any use of a perspective field — runs SqlCompiler's {@code (LOWER(white_username) = LOWER(?) OR
+   * LOWER(black_username) = LOWER(?))}, case-folded on <em>both</em> sides, so a plain column index
+   * can never serve it on Postgres: these are expression indexes on {@code LOWER(...)}. One per
+   * side rather than a composite, because an OR across two columns is answered by a BitmapOr of two
+   * independent index scans, and a composite serves neither disjunct alone.
+   *
+   * <p>Without them this predicate was the last user-triggerable full-table scan in the schema —
+   * and with a 5-connection pool, five concurrent player searches held every connection for the
+   * full serving-read bound. {@code PostgresPlayerIndexTest} pins both sides of the contract on the
+   * deployment dialect: the plan actually reaches these indexes for the compiler's exact predicate,
+   * so either side drifting (compiler predicate or index expression) fails a test.
+   */
+  private static final String[] CREATE_IDX_GAME_FEATURES_USERNAMES_PG = {
+    "CREATE INDEX IF NOT EXISTS idx_game_features_white_username"
+        + " ON game_features(LOWER(white_username))",
+    "CREATE INDEX IF NOT EXISTS idx_game_features_black_username"
+        + " ON game_features(LOWER(black_username))",
+  };
+
+  /**
+   * The same indexes for H2, which has no expression indexes; plain column indexes stand in under
+   * the same names. H2 is the test engine rather than the deployment target, so the cost of the
+   * weaker shape is a slower test, never a slower production search — same trade as the claimable
+   * index above.
+   */
+  private static final String[] CREATE_IDX_GAME_FEATURES_USERNAMES_H2 = {
+    "CREATE INDEX IF NOT EXISTS idx_game_features_white_username"
+        + " ON game_features(white_username)",
+    "CREATE INDEX IF NOT EXISTS idx_game_features_black_username"
+        + " ON game_features(black_username)",
+  };
+
   private static final String ADD_DEDUPE_KEY_UNIQUE_H2 =
       "ALTER TABLE indexing_requests ADD CONSTRAINT IF NOT EXISTS indexing_requests_dedupe_unique"
           + " UNIQUE (dedupe_key)";
@@ -483,6 +517,10 @@ public class Migration {
       stmt.execute(useH2 ? ADD_DEDUPE_KEY_UNIQUE_H2 : ADD_DEDUPE_KEY_UNIQUE_PG);
       stmt.execute(CREATE_IDX_GAME_FEATURES_REQUEST_ID);
       stmt.execute(CREATE_IDX_GAME_FEATURES_PLAYED_AT);
+      for (String create :
+          useH2 ? CREATE_IDX_GAME_FEATURES_USERNAMES_H2 : CREATE_IDX_GAME_FEATURES_USERNAMES_PG) {
+        stmt.execute(create);
+      }
 
       // Ownership leases.
       for (String add : ADD_LEASE_COLUMNS) {
