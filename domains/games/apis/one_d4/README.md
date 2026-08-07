@@ -379,24 +379,30 @@ Returns `{"gamesReanalyzed": N}`.
 
 ## Inspecting the database (deployed)
 
-On the deployed machine the indexer uses H2 file storage at `/data/indexer` inside the container (Compose volume `one_d4_data`).
+On the deployed machine the indexer runs against **PostgreSQL** — the `one_d4_postgres` service
+(image `postgres:18`, Compose volume `one_d4_pgdata`), reached via the JDBC URL in
+`/etc/one_d4/db_config` (mounted into the container; see the resolution order above). H2 is the
+local-dev default only.
 
 ### Via the API (no direct DB access)
 
 - **Index requests:** `GET http://localhost:8088/v1/index/{id}` — returns `id`, `status`, `gamesIndexed`, `errorMessage` and a `data` block for that request. `GET http://localhost:8088/v1/index` lists the 50 most recent, newest first, so you do not need the UUID to look around.
 - **Query games:** `POST http://localhost:8088/v1/query` with a ChessQL query (e.g. `white_username = "drawlya"` or `black_username = "drawlya"`) and check the `playedAt` field in the results to see what date ranges are indexed.
 
-### Direct H2 access (copy DB out)
+### Direct database access
 
-1. Find the container: `docker ps | grep one_d4` (Compose names it like `*_one_d4_*`).
-2. Copy the H2 files from the container (e.g. replace `CONTAINER` with the actual name):
+1. Find the database container: `docker ps | grep one_d4_postgres`.
+2. Open a shell against it (credentials come from the deploy environment; the JDBC URL in
+   `/etc/one_d4/db_config` carries the same user and database):
    ```bash
-   docker cp CONTAINER:/data ./one_d4_data_backup
+   docker exec -it CONTAINER psql -U one_d4 -d one_d4
    ```
-   The DB file is `./one_d4_data_backup/indexer.mv.db`. Copying while the app is running is usually safe for a read-only snapshot; for a fully consistent copy you can stop the container first.
-3. On a machine with [H2](https://www.h2database.com/) installed, open the copy:
-   - **H2 Console (jar):** `java -jar h2*.jar` → JDBC URL `jdbc:h2:file:/path/to/one_d4_data_backup/indexer`, user `sa`, password blank.
-   - Or use any SQL client that supports H2 (e.g. DBeaver).
+3. Or dump a snapshot to inspect elsewhere:
+   ```bash
+   docker exec CONTAINER pg_dump -U one_d4 one_d4 > one_d4_backup.sql
+   ```
+   `pg_dump` takes a consistent snapshot without stopping the service, so there is no need to
+   pause the indexer first.
 
 Main tables:
 - `indexing_requests` — id, player, platform, start_month, end_month, status, games_indexed, …

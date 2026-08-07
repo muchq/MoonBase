@@ -320,6 +320,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     List<Object> whereParams = new ArrayList<>();
     String whereClause = compileExpr(pq.expr(), whereParams, perspective);
     whereClause = guardParticipation(whereClause, whereParams, perspective);
+    requireTheAggregateScopesToItsPlayer(pq, perspective);
 
     // GROUP BY references the term keys: the column itself for physical fields, the SELECT alias
     // for perspective fields. Repeating the CASE expression instead would not be portable —
@@ -371,6 +372,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       groupExprs.add(groupTermExpr(term, perspective, groupParams));
     }
     whereClause = guardParticipation(whereClause, whereParams, perspective);
+    requireTheAggregateScopesToItsPlayer(pq, perspective);
 
     String sql =
         "SELECT COUNT(*) AS total_groups, COALESCE(SUM(group_count), 0) AS total_games FROM ("
@@ -506,6 +508,85 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
         + " bucket by "
         + DEFAULT_ELO_BUCKET_WIDTH
         + "; opponent.elo(200) groups ratings into [2000, 2200), [2200, 2400), ...";
+  }
+
+  /**
+   * Aggregates must not name a player they never scope to.
+   *
+   * <p>A player only narrows a query through the participation guard, and the guard only fires when
+   * a perspective field is in play (it exists to repair the CASE expressions, not to filter). On
+   * the select path that is harmless: the rows carry usernames, so a caller who expected one
+   * player's games sees strangers immediately. An aggregate has no such tell — {@code player:
+   * hikaru, query: num.moves >= 0, group by opening_family} returns the whole corpus's openings
+   * under a heading that reads as hikaru's, and nothing in the response reveals it. So the
+   * aggregate entry points reject the combination instead of answering the wrong question
+   * convincingly.
+   *
+   * <p>A filter that pins a username column to the named player counts as scoping — the caller said
+   * what they meant in the query itself, and the named player is then merely redundant. That is a
+   * narrower test than "a username is mentioned somewhere", deliberately: {@code NOT white.username
+   * = "magnus"} names a username while saying nothing about the player, and answering it would
+   * reproduce exactly the failure this method exists to prevent.
+   */
+  private void requireTheAggregateScopesToItsPlayer(ParsedQuery pq, Perspective perspective) {
+    // Perspective normalizes a blank player to null, so the null check covers both.
+    if (perspective.player == null || perspective.used || scopesToPlayer(pq.expr(), perspective)) {
+      return;
+    }
+    throw new IllegalArgumentException(
+        "player \""
+            + perspective.player
+            + "\" would not scope this aggregate: no perspective field ("
+            + PERSPECTIVE_FIELDS.keySet().stream().sorted().collect(Collectors.joining(", "))
+            + ") appears in the filter or groupBy, and the filter does not restrict a username"
+            + " to that player, so the result would cover games that are not theirs. Group by or"
+            + " filter on a perspective field, or filter explicitly:"
+            + " white.username = \"NAME\" OR black.username = \"NAME\" (the same NAME).");
+  }
+
+  /**
+   * Whether this filter cannot match a game the named player did not play.
+   *
+   * <p>Read as "does every row this expression admits belong to the player?", which is why the
+   * cases are not symmetric. A conjunction scopes if <em>any</em> conjunct does, since AND only
+   * narrows. A disjunction scopes only if <em>every</em> branch does, since one unscoped branch
+   * admits the whole corpus. Negation never scopes: the complement of "is the player" is everyone
+   * else. Only equality pins a value — {@code !=} and the ordering operators widen — and an {@code
+   * IN} list scopes only when every alternative is the player, since a list naming anyone else
+   * admits their games too.
+   */
+  private boolean scopesToPlayer(Expr expr, Perspective perspective) {
+    return switch (expr) {
+      case OrExpr or -> or.operands().stream().allMatch(e -> scopesToPlayer(e, perspective));
+      case AndExpr and -> and.operands().stream().anyMatch(e -> scopesToPlayer(e, perspective));
+      case NotExpr ignored -> false;
+      case ComparisonExpr cmp ->
+          "=".equals(cmp.operator())
+              && isUsernameField(cmp.field())
+              && isThePlayer(cmp.value(), perspective);
+      case InExpr in ->
+          isUsernameField(in.field())
+              && !in.values().isEmpty()
+              && in.values().stream().allMatch(v -> isThePlayer(v, perspective));
+      case MotifExpr ignored -> false;
+      case SequenceExpr ignored -> false;
+    };
+  }
+
+  /** Compared case-insensitively, since the compiled username predicates case-fold both sides. */
+  private static boolean isThePlayer(Object value, Perspective perspective) {
+    return value instanceof String name && name.equalsIgnoreCase(perspective.player);
+  }
+
+  private boolean isUsernameField(String field) {
+    try {
+      String column = resolveColumn(field);
+      return column.equals("white_username") || column.equals("black_username");
+    } catch (IllegalArgumentException unknownOrPerspective) {
+      // Perspective spellings and genuinely unknown fields both land here. The first is already
+      // covered by perspective.used; the second is compileExpr's error to report, not ours.
+      return false;
+    }
   }
 
   /**

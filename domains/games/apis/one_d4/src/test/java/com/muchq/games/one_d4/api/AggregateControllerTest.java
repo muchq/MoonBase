@@ -243,6 +243,48 @@ public class AggregateControllerTest {
     assertThat(store.lastCompiled).isNull();
   }
 
+  /**
+   * The unscoped-player aggregate is refused before it reaches the store (#1313 item 14). The
+   * request that matters is the natural one — "hikaru's most common openings" — which named a
+   * player, used no perspective field, and counted the whole corpus under a heading that read as
+   * hikaru's. Pinned here, at the endpoint, because that is where a caller meets it; the compiler
+   * owns the rule so the MCP facade (which never touches this controller) is covered too.
+   */
+  @Test
+  public void aggregate_playerThatWouldNotScopeTheResultIsRejectedBeforeStoreCall() {
+    assertThatThrownBy(
+            () ->
+                controller.aggregate(
+                    new AggregateRequest(
+                        "num.moves >= 0", List.of("opening_family"), "count", 20, "hikaru")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("would not scope this aggregate");
+    assertThat(store.lastCompiled)
+        .as("a wrong answer must not be computed, let alone returned")
+        .isNull();
+  }
+
+  /** The same request, scoped the two ways the rejection message offers, reaches the store. */
+  @Test
+  public void aggregate_scopedPlayerRequestsStillReachTheStore() {
+    store.rows = List.of(new AggregateRow(Map.of("opening_family", "Sicilian Defense"), 3));
+    store.totals = new GameFeatureStore.AggregateTotals(3, 1);
+
+    controller.aggregate(
+        new AggregateRequest(
+            "white.username = \"hikaru\" OR black.username = \"hikaru\"",
+            List.of("opening_family"),
+            "count",
+            20,
+            "hikaru"));
+    assertThat(store.lastCompiled).as("explicit username filter").isNotNull();
+
+    store.lastCompiled = null;
+    controller.aggregate(
+        new AggregateRequest("num.moves >= 0", List.of("me.color"), "count", 20, "hikaru"));
+    assertThat(store.lastCompiled).as("perspective field in groupBy").isNotNull();
+  }
+
   @Test
   public void aggregate_invalidRequestRejectedBeforeStoreCall() {
     assertThatThrownBy(

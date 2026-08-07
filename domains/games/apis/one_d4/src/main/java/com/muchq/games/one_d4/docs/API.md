@@ -220,7 +220,7 @@ matching row and group client-side.
 
 ```json
 {
-  "query": "white.username = \"hikaru\" AND time.class = \"blitz\"",
+  "query": "(white.username = \"hikaru\" OR black.username = \"hikaru\") AND time.class = \"blitz\"",
   "groupBy": ["opening_family"],
   "orderBy": "count",
   "limit": 20
@@ -233,7 +233,32 @@ matching row and group client-side.
 | groupBy | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form; physical columns, plus the perspective fields when `player` is set — the rating fields as width-bucketed terms like `"opponent.elo(200)"`) |
 | orderBy | string   | no       | "count" | —    | Only "count" is supported (descending)            |
 | limit   | int      | no       | 50      | 1000 | Max groups to return                              |
-| player  | string   | no       | —       | —    | Username that perspective fields in the filter and groupBy are resolved against |
+| player  | string   | no       | —       | —    | Username that perspective fields in the filter and groupBy are resolved against. It does **not** by itself scope the aggregate — see below |
+
+`player` resolves perspective fields; it is not a filter. Games are restricted to that player
+only through the participation guard, which is added when a perspective field is actually in play
+(in the filter or in `groupBy`). An aggregate that names a `player`, uses no perspective field,
+and whose filter cannot by itself exclude other players' games is therefore rejected with **400**
+rather than answered: the response would count games that are not that player's while reading as
+theirs, and — unlike `/v1/query`, whose rows show the usernames — nothing in an aggregate
+response would reveal it. To count one player's games either use a perspective field, or filter
+explicitly:
+
+```json
+{ "query": "white.username = \"hikaru\" OR black.username = \"hikaru\"", "groupBy": ["opening_family"] }
+```
+
+(Both sides, or the aggregate counts only the games they had White.)
+
+"Cannot admit another player's games" is checked, not assumed, so mentioning a username is not
+enough on its own. `AND` qualifies if any one conjunct does; an `OR` qualifies only if *every*
+branch does; `NOT` never does; only `=` pins a value (`!=` and the ordering operators do not);
+an `IN` list qualifies only when every alternative is the player; and the name must be the
+`player` named on the request, compared case-insensitively. So `white.username != "hikaru"`,
+`NOT white.username = "hikaru"`, `white.username = "hikaru" OR time.class = "blitz"`, and
+`black.username IN ["hikaru", "magnus"]` are all rejected — each still admits games that are not
+hikaru's. Omitting `player` entirely
+is unaffected — a corpus-wide aggregate is a legitimate question.
 
 Group-by fields validate against the same column whitelist as ChessQL comparisons. With
 `player`, the perspective fields are also groupable (response keys use their underscore forms):
@@ -294,6 +319,7 @@ it first via `POST /v1/index`.
 | Conflicting bucket widths for one field           | 400         |
 | Perspective field in groupBy without `player`     | 400         |
 | Perspective field in the filter without `player`  | 400         |
+| `player` set, but neither a perspective field nor a filter that excludes other players' games | 400 |
 | Query exceeds the 10s read timeout (per statement; an aggregate that truncates runs a second totals statement) | 500 |
 
 ---

@@ -1,6 +1,7 @@
 package com.muchq.games.mcpserver.tools;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.one_d4.api.dto.AggregateRow;
@@ -65,14 +66,45 @@ public class IndexerFacadeAggregateTest {
     assertThat(result.totalGroups()).isZero();
   }
 
+  /**
+   * The MCP path is where the unscoped-player aggregate does the most damage (#1313 item 14): an
+   * assistant asked for "hikaru's most common openings" naturally sends {@code player: hikaru} with
+   * a plain filter, and a corpus-wide answer under that heading is indistinguishable from a correct
+   * one. This facade never touches {@code AggregateController}, so the endpoint's own rejection
+   * test would not cover it — the rule lives in the compiler for exactly that reason, and this pins
+   * that the facade inherits it rather than answering.
+   */
+  @Test
+  public void aggregate_playerThatWouldNotScopeTheResultIsRefusedBeforeAnyQuery() {
+    store.rows = TWO_GROUPS;
+
+    assertThatThrownBy(
+            () -> facade.aggregate("num.moves >= 0", List.of("opening_family"), "hikaru", 20))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("would not scope this aggregate");
+    assertThat(store.aggregateCalls).as("no wrong answer is computed").isZero();
+
+    // The scoped form the message points at still answers.
+    IndexerFacade.AggregateResult scoped =
+        facade.aggregate(
+            "white.username = \"hikaru\" OR black.username = \"hikaru\"",
+            List.of("opening_family"),
+            "hikaru",
+            20);
+    assertThat(scoped.groups()).isEqualTo(TWO_GROUPS);
+    assertThat(store.aggregateCalls).isEqualTo(1);
+  }
+
   private static final class CountingStore implements GameFeatureStore {
     List<AggregateRow> rows = List.of();
     AggregateTotals totals = new AggregateTotals(0, 0);
     int totalsCalls;
+    int aggregateCalls;
 
     @Override
     public List<AggregateRow> aggregate(
         Object compiledQuery, List<String> groupColumns, int limit) {
+      aggregateCalls++;
       return rows.size() > limit ? rows.subList(0, limit) : rows;
     }
 

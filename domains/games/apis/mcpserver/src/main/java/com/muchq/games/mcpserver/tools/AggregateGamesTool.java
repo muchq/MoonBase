@@ -32,8 +32,10 @@ public class AggregateGamesTool implements McpTool {
   public String getDescription() {
     return "Count indexed games grouped by one or more fields, filtered by a ChessQL query"
         + " (index first with index_chess_games). This answers questions like 'most popular"
-        + " openings' in one call: query 'white.username = \"hikaru\" AND time.class ="
-        + " \"blitz\"' with group_by [\"opening_family\"]. The filter may scope time with date"
+        + " openings' in one call: for one player's openings, query 'white.username ="
+        + " \"hikaru\" OR black.username = \"hikaru\"' with group_by [\"opening_family\"] —"
+        + " both sides, or you count only the games they had white. The filter may scope time"
+        + " with date"
         + " comparisons ('date >= \"2026-07-01\"') or 'month = \"2026-07\"'; date and month"
         + " filter the indexed corpus only, so a period that was never indexed comes back with"
         + " zero groups rather than an error — indistinguishable from 'played no games then'"
@@ -67,7 +69,15 @@ public class AggregateGamesTool implements McpTool {
             "description",
             "chess.com username that perspective fields (me.*, opponent.*, outcome) are resolved"
                 + " against; required when the filter uses them, and when group_by uses any"
-                + " perspective field"));
+                + " perspective field. It does NOT by itself restrict the aggregate to that"
+                + " player: to count only their games, either use a perspective field (in the"
+                + " filter or group_by) or filter explicitly with 'white.username = \"NAME\" OR"
+                + " black.username = \"NAME\"' — the same NAME on both sides, matching this"
+                + " player. Naming a player without either is rejected rather than silently"
+                + " counting other people's games. The filter must be one that cannot match"
+                + " another player's game, so a negation ('NOT white.username = ...'), a '!='"
+                + " comparison, an OR whose other branch is unrestricted, or an IN list naming"
+                + " anyone else does not qualify"));
     properties.put(
         "group_by",
         Map.of(

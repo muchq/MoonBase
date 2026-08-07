@@ -26,6 +26,12 @@ export default function Header() {
         >
           Query
         </NavLink>
+        <NavLink
+          to="/mcp"
+          className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+        >
+          MCP
+        </NavLink>
       </nav>
     </header>
   );
