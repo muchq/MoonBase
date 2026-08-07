@@ -11,7 +11,7 @@ Opinionated Axum router builder with batteries included.
 - `Accept: application/json` header validation
 - 10-second request timeout with `408` response
 - Panic → 500 handler
-- `GET /health` endpoint
+- `GET /health` endpoint, exempt from rate limiting
 
 ## Usage
 
@@ -62,6 +62,20 @@ The default limit is **100 req/s per IP, burst 200**. Override with `.rate_limit
 
 Requests over the limit receive `429 Too Many Requests`. Rate-limited requests
 are rejected before `TraceLayer`, so they won't appear in request logs.
+
+`GET /health` is exempt: it is served from a separate router that the limiter
+does not wrap. The container healthcheck probes on a fixed interval from one
+IP, so a shared bucket drains and starts answering probes with `429` — the
+service then reads as unhealthy while it is serving normally. Everything else
+stays limited, the 404 fallback included, so spraying unknown paths still
+costs quota. Requests rejected further in — a `406` from the `Accept` check, a
+`408`, a panic — are counted against the limit too, because the limiter is the
+outermost layer.
+
+Note that `per_second` is a **replenish interval, not a rate**: `tower_governor`
+reads it as "one element restored every N seconds". The default above is
+therefore one request per 100 seconds, not 100 per second — it does not match
+its own description and is tracked separately from this exemption.
 
 ## Environment variables
 

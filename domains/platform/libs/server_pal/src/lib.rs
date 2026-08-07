@@ -381,6 +381,24 @@ pub struct RouterBuilder<S: Clone + Send + Sync + 'static> {
     rate_limit: Option<RateLimit>,
 }
 
+/// The middleware every route carries, rate limiting aside. Shared by the
+/// limited router and the exempt /health one so the two cannot drift: a layer
+/// added to one and not the other would make the probe exercise a different
+/// stack than the traffic it reports on.
+fn common_layers<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<S> {
+    router
+        .layer(TraceLayer::new_for_http())
+        .layer(DefaultBodyLimit::disable())
+        .layer(RequestBodyLimitLayer::new(4 * 1024 * 1024))
+        .layer(CompressionLayer::new())
+        .layer(ValidateRequestHeaderLayer::accept("application/json"))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(10),
+        ))
+        .layer(CatchPanicLayer::new())
+}
+
 pub fn router_builder<S: Clone + Send + Sync + 'static>() -> RouterBuilder<S> {
     RouterBuilder {
         router: Router::new(),
@@ -417,22 +435,11 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
     }
 
     fn build_with_cell(self, cell: InstrumentsCell) -> Router<S> {
-        let router = self
-            .router
-            .route("/health", get(|_: State<S>| async { "Ok" }))
-            .fallback(fallback)
-            .layer(TraceLayer::new_for_http())
-            .layer(DefaultBodyLimit::disable())
-            .layer(RequestBodyLimitLayer::new(4 * 1024 * 1024))
-            .layer(CompressionLayer::new())
-            .layer(ValidateRequestHeaderLayer::accept("application/json"))
-            .layer(TimeoutLayer::with_status_code(
-                StatusCode::REQUEST_TIMEOUT,
-                Duration::from_secs(10),
-            ))
-            .layer(CatchPanicLayer::new());
-
-        let router = if let Some(RateLimit { per_second, burst }) = self.rate_limit {
+        // /health is served from its own router so the governor can wrap the
+        // service's routes without wrapping the probe. Both carry the identical
+        // stack below, so the exemption is the only difference between them.
+        let limited = common_layers(self.router.fallback(fallback));
+        let limited = if let Some(RateLimit { per_second, burst }) = self.rate_limit {
             let config = Arc::new(
                 GovernorConfigBuilder::default()
                     .per_second(per_second)
@@ -440,17 +447,27 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
                     .finish()
                     .unwrap(),
             );
-            router.layer(GovernorLayer::new(config))
+            // Outermost of the two, so a request rejected further in still
+            // costs quota. Applied under `common_layers` instead, a 406 from
+            // the Accept check would short-circuit ahead of the governor and
+            // cost nothing — an unlimited request sink behind one bad header.
+            limited.layer(GovernorLayer::new(config))
         } else {
-            router
+            limited
         };
+
+        // The probe runs on a fixed cadence from a single IP, so quota shared
+        // with clients drains and 429s it, and a healthy service reads as dead.
+        let health = common_layers(Router::new().route("/health", get(|| async { "Ok" })));
 
         // HTTP metrics middleware sits outside rate-limiting so rate-limited
         // requests (429) are also counted as failures.
-        router.layer(axum::middleware::from_fn_with_state(
-            cell,
-            http_metrics_middleware,
-        ))
+        health
+            .merge(limited)
+            .layer(axum::middleware::from_fn_with_state(
+                cell,
+                http_metrics_middleware,
+            ))
     }
 }
 
@@ -477,11 +494,11 @@ mod tests {
     struct NoState;
 
     // Inject a mock peer IP so GovernorLayer's PeerIpKeyExtractor can extract it.
-    fn make_request() -> Request<Body> {
+    fn make_request(path: &str) -> Request<Body> {
         let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
         let mut req = Request::builder()
             .method("GET")
-            .uri("/health")
+            .uri(path)
             .header("Accept", "application/json")
             .body(Body::empty())
             .unwrap();
@@ -489,9 +506,61 @@ mod tests {
         req
     }
 
+    /// A router whose per-IP bucket is spent, with a replenish interval far
+    /// longer than any test, so nothing refills mid-test and a later 200 can
+    /// only mean the request never reached the governor.
+    async fn drained_app() -> Router {
+        let app = router_builder::<NoState>()
+            .rate_limit(Some(RateLimit {
+                per_second: 3600,
+                burst: 2,
+            }))
+            .build()
+            .with_state(NoState);
+
+        for _ in 0..2 {
+            app.clone().oneshot(make_request("/nope")).await.unwrap();
+        }
+        // Pin that the burst is actually spent; every caller reasons from this.
+        let resp = app.clone().oneshot(make_request("/nope")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        app
+    }
+
+    /// A request the Accept check rejects must still cost quota. The governor
+    /// has to sit outside that check for this to hold; inside it, any client
+    /// sending one bad header gets an unmetered 406 sink, and the exemption
+    /// this file exists to add would have quietly bought that.
+    #[tokio::test]
+    async fn a_rejected_accept_header_still_consumes_quota() {
+        let app = drained_app().await;
+
+        // Already drained, so a well-formed request 429s.
+        let resp = app.clone().oneshot(make_request("/nope")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        // The unacceptable one is refused by the limiter, not by the Accept
+        // check: reaching 406 would mean it never touched the governor.
+        let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        let mut req = Request::builder()
+            .method("GET")
+            .uri("/nope")
+            .header("Accept", "text/plain")
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(ConnectInfo(peer));
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "a 406 here means the Accept check short-circuited ahead of the \
+             governor, leaving an unmetered path past the rate limiter"
+        );
+    }
+
     #[tokio::test]
     async fn rate_limiter_blocks_after_burst() {
-        // 1 req/s per IP, burst of 2
+        // Replenish one element per second, burst of 2
         let app = router_builder::<NoState>()
             .rate_limit(Some(RateLimit {
                 per_second: 1,
@@ -502,12 +571,12 @@ mod tests {
 
         // First two requests should pass (burst of 2)
         for _ in 0..2 {
-            let resp = app.clone().oneshot(make_request()).await.unwrap();
+            let resp = app.clone().oneshot(make_request("/nope")).await.unwrap();
             assert_ne!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
         }
 
         // Third request immediately after should be rate-limited
-        let resp = app.oneshot(make_request()).await.unwrap();
+        let resp = app.oneshot(make_request("/nope")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 
@@ -519,9 +588,34 @@ mod tests {
             .with_state(NoState);
 
         for _ in 0..20 {
-            let resp = app.clone().oneshot(make_request()).await.unwrap();
+            let resp = app.clone().oneshot(make_request("/health")).await.unwrap();
             assert_ne!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
         }
+    }
+
+    /// The healthcheck probes on a fixed cadence from one IP, so it must not
+    /// compete with clients for rate-limit quota: a drained bucket that 429s
+    /// the probe reads as a dead service, which is what left the consolidated
+    /// stack flapping between healthy and unhealthy.
+    #[tokio::test]
+    async fn health_is_exempt_from_rate_limiting() {
+        let app = drained_app().await;
+
+        for _ in 0..5 {
+            let resp = app.clone().oneshot(make_request("/health")).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+        }
+    }
+
+    /// The exemption is the health route alone — 404s stay metered, so a
+    /// scanner spraying unknown paths cannot spend the service's budget for
+    /// free.
+    #[tokio::test]
+    async fn unmatched_paths_stay_rate_limited() {
+        let app = drained_app().await;
+
+        let resp = app.oneshot(make_request("/wp-login.php")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 }
 
