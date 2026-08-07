@@ -9,14 +9,10 @@ import com.muchq.games.chessql.parser.Parser;
 import com.muchq.games.one_d4.api.dto.AggregateRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import java.io.Closeable;
-import java.net.URI;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import javax.sql.DataSource;
@@ -64,13 +60,13 @@ public class PostgresAggregateCompatTest {
         DB_URL_ENV + " is not set; skipping the real-postgres compatibility suite");
 
     // A clean schema per run: the same scratch database backs the other DB-gated suites.
-    try (Connection conn = DriverManager.getConnection(jdbcUrl(rawUrl, null));
+    try (Connection conn = DriverManager.getConnection(PgTestUrls.jdbcUrl(rawUrl, null));
         Statement stmt = conn.createStatement()) {
       stmt.execute("DROP SCHEMA IF EXISTS " + SCHEMA + " CASCADE");
       stmt.execute("CREATE SCHEMA " + SCHEMA);
     }
 
-    dataSource = DataSourceFactory.create(jdbcUrl(rawUrl, SCHEMA));
+    dataSource = DataSourceFactory.create(PgTestUrls.jdbcUrl(rawUrl, SCHEMA));
     new Migration(dataSource, false).run();
     dao = new GameFeatureDao(Jdbi.create(dataSource), false);
 
@@ -94,7 +90,7 @@ public class PostgresAggregateCompatTest {
     if (rawUrl == null || rawUrl.isBlank()) {
       return;
     }
-    try (Connection conn = DriverManager.getConnection(jdbcUrl(rawUrl, null));
+    try (Connection conn = DriverManager.getConnection(PgTestUrls.jdbcUrl(rawUrl, null));
         Statement stmt = conn.createStatement()) {
       stmt.execute("DROP SCHEMA IF EXISTS " + SCHEMA + " CASCADE");
     }
@@ -572,38 +568,5 @@ public class PostgresAggregateCompatTest {
         30,
         Instant.now(),
         "1. e4 e5 *");
-  }
-
-  /**
-   * Converts the libpq-style URL CI exports ({@code postgresql://user:pass@host:port/db}) into a
-   * pgjdbc URL. pgjdbc does not accept credentials in the authority, so they move to query params.
-   */
-  private static String jdbcUrl(String rawUrl, String schema) {
-    URI uri = URI.create(rawUrl);
-    List<String> params = new ArrayList<>();
-    String userInfo = uri.getUserInfo();
-    if (userInfo != null) {
-      int colon = userInfo.indexOf(':');
-      String user = colon < 0 ? userInfo : userInfo.substring(0, colon);
-      params.add("user=" + encode(user));
-      if (colon >= 0) {
-        params.add("password=" + encode(userInfo.substring(colon + 1)));
-      }
-    }
-    if (schema != null) {
-      params.add("currentSchema=" + encode(schema));
-    }
-    int port = uri.getPort() < 0 ? 5432 : uri.getPort();
-    return "jdbc:postgresql://"
-        + uri.getHost()
-        + ":"
-        + port
-        + uri.getPath()
-        + "?"
-        + String.join("&", params);
-  }
-
-  private static String encode(String value) {
-    return URLEncoder.encode(value, StandardCharsets.UTF_8);
   }
 }

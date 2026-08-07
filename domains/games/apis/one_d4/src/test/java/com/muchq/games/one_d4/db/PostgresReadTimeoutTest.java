@@ -5,13 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.Closeable;
-import java.net.URI;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.Statement;
-import java.util.ArrayList;
-import java.util.List;
 import javax.sql.DataSource;
 import org.jdbi.v3.core.Jdbi;
 import org.jdbi.v3.core.statement.UnableToExecuteStatementException;
@@ -45,7 +40,7 @@ public class PostgresReadTimeoutTest {
         rawUrl != null && !rawUrl.isBlank(),
         DB_URL_ENV + " is not set; skipping the real-postgres read-timeout suite");
 
-    dataSource = DataSourceFactory.create(jdbcUrl(rawUrl));
+    dataSource = DataSourceFactory.create(PgTestUrls.jdbcUrl(rawUrl, null));
     jdbi = Jdbi.create(dataSource);
   }
 
@@ -129,35 +124,5 @@ public class PostgresReadTimeoutTest {
           .as("the default must reach the actual socket")
           .isEqualTo(DataSourceFactory.PG_SOCKET_TIMEOUT_SECONDS * 1000);
     }
-  }
-
-  /**
-   * Converts the libpq-style URL CI exports ({@code postgresql://user:pass@host:port/db}) into a
-   * pgjdbc URL, same as the other PG-gated suites. pgjdbc does not accept credentials in the
-   * authority, so they move to query params.
-   */
-  private static String jdbcUrl(String rawUrl) {
-    URI uri = URI.create(rawUrl);
-    List<String> params = new ArrayList<>();
-    String userInfo = uri.getUserInfo();
-    if (userInfo != null) {
-      int colon = userInfo.indexOf(':');
-      String user = colon < 0 ? userInfo : userInfo.substring(0, colon);
-      params.add("user=" + encode(user));
-      if (colon >= 0) {
-        params.add("password=" + encode(userInfo.substring(colon + 1)));
-      }
-    }
-    int port = uri.getPort() < 0 ? 5432 : uri.getPort();
-    return "jdbc:postgresql://"
-        + uri.getHost()
-        + ":"
-        + port
-        + uri.getPath()
-        + (params.isEmpty() ? "" : "?" + String.join("&", params));
-  }
-
-  private static String encode(String value) {
-    return URLEncoder.encode(value, StandardCharsets.UTF_8);
   }
 }

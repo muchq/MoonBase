@@ -7,9 +7,6 @@ import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import java.io.Closeable;
-import java.net.URI;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
@@ -97,13 +94,13 @@ public class PostgresConcurrentWriteTest {
         rawUrl != null && !rawUrl.isBlank(),
         DB_URL_ENV + " is not set; skipping the real-postgres concurrency suite");
 
-    try (Connection conn = DriverManager.getConnection(jdbcUrl(rawUrl, null));
+    try (Connection conn = DriverManager.getConnection(PgTestUrls.jdbcUrl(rawUrl, null));
         Statement stmt = conn.createStatement()) {
       stmt.execute("DROP SCHEMA IF EXISTS " + SCHEMA + " CASCADE");
       stmt.execute("CREATE SCHEMA " + SCHEMA);
     }
 
-    dataSource = DataSourceFactory.create(jdbcUrl(rawUrl, SCHEMA));
+    dataSource = DataSourceFactory.create(PgTestUrls.jdbcUrl(rawUrl, SCHEMA));
     new Migration(dataSource, false).run();
     dao = new GameFeatureDao(Jdbi.create(dataSource), false);
     requestId = insertClaimedRequest();
@@ -122,7 +119,7 @@ public class PostgresConcurrentWriteTest {
     if (rawUrl == null || rawUrl.isBlank()) {
       return;
     }
-    try (Connection conn = DriverManager.getConnection(jdbcUrl(rawUrl, null));
+    try (Connection conn = DriverManager.getConnection(PgTestUrls.jdbcUrl(rawUrl, null));
         Statement stmt = conn.createStatement()) {
       stmt.execute("DROP SCHEMA IF EXISTS " + SCHEMA + " CASCADE");
     }
@@ -380,37 +377,5 @@ public class PostgresConcurrentWriteTest {
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
-  }
-
-  /**
-   * Same shape as {@link PostgresAggregateCompatTest}: a scratch database, one schema per suite.
-   */
-  private static String jdbcUrl(String rawUrl, String schema) {
-    URI uri = URI.create(rawUrl.startsWith("jdbc:") ? rawUrl.substring("jdbc:".length()) : rawUrl);
-    String userInfo = uri.getUserInfo();
-    StringBuilder sb = new StringBuilder("jdbc:postgresql://");
-    sb.append(uri.getHost());
-    if (uri.getPort() > 0) {
-      sb.append(':').append(uri.getPort());
-    }
-    sb.append(uri.getPath() == null || uri.getPath().isEmpty() ? "/postgres" : uri.getPath());
-    StringBuilder params = new StringBuilder();
-    if (userInfo != null && !userInfo.isEmpty()) {
-      String[] parts = userInfo.split(":", 2);
-      params.append("user=").append(URLEncoder.encode(parts[0], StandardCharsets.UTF_8));
-      if (parts.length > 1) {
-        params.append("&password=").append(URLEncoder.encode(parts[1], StandardCharsets.UTF_8));
-      }
-    }
-    if (schema != null) {
-      if (params.length() > 0) {
-        params.append('&');
-      }
-      params.append("currentSchema=").append(schema);
-    }
-    if (params.length() > 0) {
-      sb.append('?').append(params);
-    }
-    return sb.toString();
   }
 }

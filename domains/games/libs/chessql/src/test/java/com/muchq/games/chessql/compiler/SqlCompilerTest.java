@@ -923,6 +923,28 @@ public class SqlCompilerTest {
         .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", "loss", "blitz"));
   }
 
+  /**
+   * The guard exists to repair perspective resolution (the CASEs read "not white" as "black"), not
+   * to scope results — so a player with no perspective field in play adds no predicate at all.
+   * Pinned in both directions because the aggregate half is a genuine footgun: {@code
+   * player=hikaru, group by opening_family} over a plain filter aggregates the whole corpus, and
+   * unlike the select path nothing in the output reveals it. Whoever changes this semantics (e.g.
+   * to always-scope) is changing a documented contract, and this is the test that makes them say
+   * so.
+   */
+  @Test
+  public void testPlayerWithoutPerspectiveFieldAddsNoParticipationGuard() {
+    CompiledQuery select = compiler.compile(Parser.parse("num.moves >= 0"), "hikaru");
+    assertThat(select.selectSql()).doesNotContain("LOWER(white_username)");
+    assertThat(select.parameters()).isEqualTo(List.of(0));
+
+    CompiledQuery aggregate =
+        compiler.compileAggregate(
+            Parser.parse("num.moves >= 0"), List.of("opening_family"), "hikaru");
+    assertThat(aggregate.selectSql()).doesNotContain("LOWER(white_username)");
+    assertThat(aggregate.parameters()).isEqualTo(List.of(0));
+  }
+
   @Test
   public void testCompileAggregateGroupByMeColor() {
     CompiledQuery result =

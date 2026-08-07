@@ -401,6 +401,66 @@ public class Migration {
       "CREATE INDEX IF NOT EXISTS idx_game_features_played_at"
           + " ON game_features(played_at DESC, game_url ASC)";
 
+  /**
+   * The indexes behind username search (#1313 item 10). Two compiler paths emit the same
+   * case-folded predicate shape, {@code LOWER(white_username) = LOWER(?)} OR'd across the sides:
+   * the browse UI's username search compiles {@code white.username = "x" OR black.username = "x"}
+   * through the STRING_COLUMNS equality branch — the highest-traffic consumer — and every
+   * perspective-field query runs the participation guard. Case-folded on <em>both</em> sides, so a
+   * plain column index can never serve either on Postgres: these are expression indexes on {@code
+   * LOWER(...)}. One per side rather than any composite — an OR across two columns is answered by a
+   * BitmapOr of two independent scans, and a BitmapOr's output is unordered, so a composite with
+   * {@code played_at} could not skip the sort either; it would only double index weight on the
+   * hottest-write table.
+   *
+   * <p>Without them these predicates were the full-table scan on the player-search path — and with
+   * a 5-connection pool, five concurrent player searches held every connection for the full
+   * serving-read bound. (Not the last table walk in the schema: an unscoped {@code /v1/aggregate}
+   * GROUP BY legitimately reads the corpus.) {@code PostgresPlayerIndexTest} pins the contract on
+   * the deployment dialect for both emitting paths: the plan actually reaches these indexes for the
+   * compiler's exact predicates, so either side drifting (a compiler path losing its {@code LOWER},
+   * or an index expression changing) fails a test.
+   *
+   * <p>Ops note, same as every index here: created at boot without {@code CONCURRENTLY}, so the
+   * first deploy onto a populated table holds a SHARE lock for the build and pauses the indexer's
+   * writes; later boots are IF NOT EXISTS no-ops. (CONCURRENTLY + IF NOT EXISTS would be worse — a
+   * failed build leaves an INVALID index behind that IF NOT EXISTS then skips forever.)
+   */
+  private static final String[] CREATE_IDX_GAME_FEATURES_USERNAMES_PG = {
+    "CREATE INDEX IF NOT EXISTS idx_game_features_white_username"
+        + " ON game_features(LOWER(white_username))",
+    "CREATE INDEX IF NOT EXISTS idx_game_features_black_username"
+        + " ON game_features(LOWER(black_username))",
+  };
+
+  /**
+   * The same names on H2, which has no expression indexes — and a plain column index cannot serve a
+   * {@code LOWER(...)} predicate there for exactly the reason the Postgres javadoc gives, so on H2
+   * these are pure write cost, not a weaker plan. They are carried anyway so the migration path
+   * stays identical on both engines and the H2 suite can pin their existence. The only H2
+   * deployment is the MCP server's boot-scoped in-memory store, where a handful of rows makes both
+   * the missing plan and the extra writes negligible.
+   */
+  private static final String[] CREATE_IDX_GAME_FEATURES_USERNAMES_H2 = {
+    "CREATE INDEX IF NOT EXISTS idx_game_features_white_username"
+        + " ON game_features(white_username)",
+    "CREATE INDEX IF NOT EXISTS idx_game_features_black_username"
+        + " ON game_features(black_username)",
+  };
+
+  /**
+   * The index behind the retention delete (#1313 item 11). {@code deleteOlderThan} filters {@code
+   * game_features} on {@code indexed_at} hourly; unindexed, every 120s-bounded sweep re-scanned the
+   * table from the start, so a sweep that hit its bound rolled back having made <em>no forward
+   * progress</em> and retried the same scan an hour later — a ratchet that never advances. The
+   * delete is one statement, so a cancel always rolls the whole pass back; what the index changes
+   * is the cost side, letting the steady-state delete walk straight to the expired rows and
+   * <em>finish</em> inside the bound. (If a backlog ever outgrows the bound anyway, LIMIT-batched
+   * deletes are the next tool.) Dialect-neutral: a plain b-tree on a plain column.
+   */
+  private static final String CREATE_IDX_GAME_FEATURES_INDEXED_AT =
+      "CREATE INDEX IF NOT EXISTS idx_game_features_indexed_at ON game_features(indexed_at)";
+
   private static final String ADD_DEDUPE_KEY_UNIQUE_H2 =
       "ALTER TABLE indexing_requests ADD CONSTRAINT IF NOT EXISTS indexing_requests_dedupe_unique"
           + " UNIQUE (dedupe_key)";
@@ -483,6 +543,11 @@ public class Migration {
       stmt.execute(useH2 ? ADD_DEDUPE_KEY_UNIQUE_H2 : ADD_DEDUPE_KEY_UNIQUE_PG);
       stmt.execute(CREATE_IDX_GAME_FEATURES_REQUEST_ID);
       stmt.execute(CREATE_IDX_GAME_FEATURES_PLAYED_AT);
+      for (String create :
+          useH2 ? CREATE_IDX_GAME_FEATURES_USERNAMES_H2 : CREATE_IDX_GAME_FEATURES_USERNAMES_PG) {
+        stmt.execute(create);
+      }
+      stmt.execute(CREATE_IDX_GAME_FEATURES_INDEXED_AT);
 
       // Ownership leases.
       for (String add : ADD_LEASE_COLUMNS) {

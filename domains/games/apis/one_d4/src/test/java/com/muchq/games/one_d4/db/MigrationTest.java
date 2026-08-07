@@ -18,7 +18,9 @@ public class MigrationTest {
 
   @BeforeEach
   public void setUp() {
-    String jdbcUrl = "jdbc:h2:mem:migration_" + System.currentTimeMillis() + ";DB_CLOSE_DELAY=-1";
+    // nanoTime, not currentTimeMillis: two tests starting in the same millisecond would silently
+    // share a database — the same trap TestDb documents and avoids.
+    String jdbcUrl = "jdbc:h2:mem:migration_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
     dataSource = DataSourceFactory.create(jdbcUrl);
   }
 
@@ -141,6 +143,84 @@ public class MigrationTest {
     assertThat(columnsInOrder)
         .as("idx_game_features_played_at must mirror ORDER BY played_at DESC, game_url ASC")
         .containsExactly("PLAYED_AT:D", "GAME_URL:A");
+  }
+
+  /**
+   * The username indexes behind the player-participation guard, and the predicate they exist to
+   * serve. On H2 they are plain column indexes (H2 has no expression indexes), so what this pins is
+   * presence and the compiler's side of the contract: the guard must still be the
+   * case-folded-on-both-sides shape the Postgres {@code LOWER(...)} expression indexes mirror. If
+   * the compiler's predicate changes shape, this fails and points at the index definitions; the
+   * plan-level proof on the deployment dialect lives in {@code PostgresPlayerIndexTest}.
+   */
+  @Test
+  public void run_addsTheUsernameIndexesBehindTheParticipationGuard() throws Exception {
+    new Migration(dataSource, true).run();
+
+    String playerScoped =
+        new com.muchq.games.chessql.compiler.SqlCompiler()
+            .compile(com.muchq.games.chessql.parser.Parser.parse("outcome = \"win\""), "hikaru")
+            .selectSql();
+    assertThat(playerScoped)
+        .as("the participation guard these indexes serve, case-folded on both sides")
+        .contains("(LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))");
+
+    // The browse UI's username search reaches the same shape through a different compiler branch
+    // (STRING_COLUMNS equality, no player) — the highest-traffic consumer of these indexes.
+    String browseSearch =
+        new com.muchq.games.chessql.compiler.SqlCompiler()
+            .compile(
+                com.muchq.games.chessql.parser.Parser.parse(
+                    "white.username = \"hikaru\" OR black.username = \"hikaru\""),
+                null)
+            .selectSql();
+    assertThat(browseSearch)
+        .as("the browse search predicate these indexes serve, case-folded on both sides")
+        .contains("(LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))");
+
+    java.util.Map<String, java.util.List<String>> columnsByIndex = new java.util.HashMap<>();
+    try (Connection conn = dataSource.getConnection();
+        ResultSet indexes =
+            conn.getMetaData().getIndexInfo(null, null, "GAME_FEATURES", false, false)) {
+      while (indexes.next()) {
+        String name = indexes.getString("INDEX_NAME");
+        if (name != null) {
+          columnsByIndex
+              .computeIfAbsent(name.toLowerCase(), k -> new java.util.ArrayList<>())
+              .add(indexes.getString("COLUMN_NAME").toLowerCase());
+        }
+      }
+    }
+    // One index per side — an OR across two columns is served by two indexes, not one — and each
+    // stand-in must sit on its own side's column: a stand-in redirected at the wrong column would
+    // keep the name this test looks for while modeling an index Postgres doesn't have.
+    assertThat(columnsByIndex)
+        .containsEntry("idx_game_features_white_username", java.util.List.of("white_username"))
+        .containsEntry("idx_game_features_black_username", java.util.List.of("black_username"));
+  }
+
+  /**
+   * The retention delete's index, pinned to its column: {@code deleteOlderThan} filters {@code
+   * game_features} on {@code indexed_at} hourly, and without this index a sweep truncated at its
+   * 120s bound made no forward progress — same scan, next hour, forever. The plan-level proof on
+   * the deployment dialect lives in {@code PostgresRetentionIndexTest}.
+   */
+  @Test
+  public void run_addsTheIndexedAtRetentionIndex() throws Exception {
+    new Migration(dataSource, true).run();
+
+    java.util.List<String> columns = new java.util.ArrayList<>();
+    try (Connection conn = dataSource.getConnection();
+        ResultSet indexes =
+            conn.getMetaData().getIndexInfo(null, null, "GAME_FEATURES", false, false)) {
+      while (indexes.next()) {
+        String name = indexes.getString("INDEX_NAME");
+        if (name != null && name.equalsIgnoreCase("idx_game_features_indexed_at")) {
+          columns.add(indexes.getString("COLUMN_NAME").toLowerCase());
+        }
+      }
+    }
+    assertThat(columns).containsExactly("indexed_at");
   }
 
   @Test
