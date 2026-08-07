@@ -171,7 +171,30 @@ HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards
         options.grace_period = grace_period;
         options.on_expired = [this](const std::string& id) { OnExpired(id); };
         return options;
-      }()) {}
+      }()) {
+  DeclareMetrics();
+}
+
+// Every unlabelled counter this handler can report, declared at construction so
+// each exports a zero before it counts anything. Without a baseline the series
+// is born carrying its first event's value, and increase() has nothing earlier
+// to measure it against — so the first chat message, the first refused
+// admission, the first reaped seat after a deploy are all invisible (#1323).
+//
+// The two labelled counters, stream_commands{command} and stream_events{event},
+// are deliberately absent: their labels come from a generated union's case
+// names rather than a list this file could state, and they fire continuously in
+// any live session, which is exactly the case a missing first event costs
+// least.
+void HubHandler::DeclareMetrics() {
+  if (!metrics_) return;
+  for (const char* name :
+       {"chat_appends", "chat_failures", "chat_history_replays", "chat_rows_delivered",
+        "restored_seats_reaped", "stream_admissions_refused", "stream_disconnects",
+        "stream_rate_limited", "stream_rejections", "stream_seats_expired", "stream_sessions"}) {
+    metrics_->DeclareCounter(name);
+  }
+}
 
 HubHandler::~HubHandler() {
   {

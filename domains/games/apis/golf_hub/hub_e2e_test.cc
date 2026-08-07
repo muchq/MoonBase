@@ -1485,6 +1485,33 @@ TEST_F(GolfHubStreamFixture, ChatMetricsCountOutcomesWithoutIdentifiers) {
 // The unavailable side of the append counter: the store cannot be
 // reached, the sender is told so, and nothing counts as stored or
 // delivered.
+
+// The zero baseline (#1323): a handler must put its unlabelled counters on the
+// wire at 0 when it is built, before any session. Without it each series is
+// born carrying its first event's value and increase() shows nothing for that
+// event, ever — so the first chat message, the first refused admission, the
+// first reaped seat after a deploy are all uncounted.
+//
+// stream_commands and stream_events are deliberately absent: their labels come
+// from a generated union's case names rather than a list the handler could
+// state, and they fire continuously in any live session, which is the case a
+// missing first event costs least.
+TEST_F(GolfHubStreamFixture, BuildingAHandlerDeclaresItsUnlabelledCountersAtZero) {
+  auto capture = MakeCapturingMetricsRecorder();
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_, capture);
+  ASSERT_NE(instance, nullptr);
+
+  for (const char* name :
+       {"chat_appends", "chat_failures", "chat_history_replays", "chat_rows_delivered",
+        "restored_seats_reaped", "stream_admissions_refused", "stream_disconnects",
+        "stream_rate_limited", "stream_rejections", "stream_seats_expired", "stream_sessions"}) {
+    EXPECT_EQ(capture->CounterTotal(name), 0) << name;
+  }
+  // Presence, not just zero reads: CounterTotal sums an empty match to 0, so
+  // every assertion above passes against a handler that declared nothing.
+  EXPECT_GE(capture->Entries().size(), 11U);
+}
+
 TEST_F(GolfHubStreamFixture, AnUnreachableStoreCountsTheAppendAsUnavailable) {
   auto capture = MakeCapturingMetricsRecorder();
   auto instance = BuildSecondInstance(

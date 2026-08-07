@@ -235,6 +235,10 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// and the command/event flow are counted here. All no-ops when no
   /// recorder is injected.
   void Count(const char* name, const std::map<std::string, std::string>& attributes = {});
+
+  /// Declares the unlabelled counters at construction so each exports a zero
+  /// baseline; see the definition for why the two labelled ones are excluded.
+  void DeclareMetrics();
   void TrackActive(int delta);
   void CountCommand(const moonbase::golf::GolfCommands& command);
   /// Every event leaves through here so stream_events sees each send.

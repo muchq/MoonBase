@@ -195,6 +195,34 @@ public final class CustomMetrics {
         .record(value);
   }
 
+  /**
+   * Declares a distribution series ahead of its first observation, so it exports as an empty
+   * histogram — count 0, sum 0, every bucket 0 — from process start.
+   *
+   * <p>Same failure as {@link #defineCounter}, one level less obvious. {@link #defineDistribution}
+   * declares only the <em>bounds</em>; the series itself is still created by the first {@code
+   * record}, so a windowed mean of {@code rate(x_sum)/rate(x_count)} over that first observation
+   * divides a rate computed from one sample by another, and the first run's duration never appears
+   * on the chart it was instrumented for.
+   *
+   * <p>Takes the label set, which is why it cannot simply be folded into {@code
+   * defineDistribution}: bounds are per name, but a series is per name <em>and</em> labels, and
+   * declaring bounds for {@code index_run_duration_micros} says nothing about which outcomes it
+   * will be sliced by.
+   *
+   * <p>Idempotent, and never discards observations a series has already taken.
+   */
+  public void defineDistributionSeries(String name, Map<String, String> labels) {
+    distributions.computeIfAbsent(
+        series(name, labels),
+        s -> new Distribution(boundsByName.getOrDefault(name, DEFAULT_BOUNDS)));
+  }
+
+  /** Declares an unlabelled distribution series. See {@link #defineDistributionSeries}. */
+  public void defineDistributionSeries(String name) {
+    defineDistributionSeries(name, Map.of());
+  }
+
   /** Cumulative counter totals, ordered by name then labels so payloads are stable. */
   public List<CounterSnapshot> counterSnapshot() {
     List<CounterSnapshot> out = new ArrayList<>(counters.size());

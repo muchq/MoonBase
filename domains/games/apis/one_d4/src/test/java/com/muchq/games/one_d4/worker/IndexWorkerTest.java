@@ -1095,6 +1095,19 @@ public class IndexWorkerTest {
     // Presence, not just a zero read: counter() sums an empty stream to 0, so the assertions
     // above pass just as happily against a worker that declared nothing at all.
     assertThat(metrics.counterSnapshot()).isNotEmpty();
+
+    // The distributions too. defineDistribution declares bounds, not a series, so these need
+    // their own declaration or the first run's duration is the value the series is born with —
+    // and avg_run_seconds_1h divides a one-sample rate by a one-sample rate.
+    assertThat(metrics.distributionSnapshot())
+        .extracting(
+            CustomMetrics.DistributionSnapshot::name, CustomMetrics.DistributionSnapshot::labels)
+        .contains(
+            org.assertj.core.groups.Tuple.tuple(IndexWorker.GAMES_PER_MONTH, Map.of()),
+            org.assertj.core.groups.Tuple.tuple(
+                IndexWorker.RUN_DURATION, Map.of("outcome", "completed")));
+    assertThat(distributionCount(IndexWorker.RUN_DURATION, Map.of("outcome", "completed")))
+        .isZero();
   }
 
   /**

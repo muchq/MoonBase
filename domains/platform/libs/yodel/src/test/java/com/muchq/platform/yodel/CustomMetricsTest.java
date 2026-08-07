@@ -415,4 +415,37 @@ public class CustomMetricsTest {
     assertThat(metrics.counterSnapshot()).hasSize(1);
     assertThat(metrics.counterSnapshot().get(0).labels()).containsEntry("outcome", "completed");
   }
+
+  /**
+   * Distributions have the counter's problem one level down: defineDistribution declares bounds,
+   * not a series, so the first observation still creates the series and a windowed mean over it
+   * divides a one-sample rate by a one-sample rate.
+   */
+  @Test
+  public void aDeclaredDistributionExportsEmptyBeforeAnyObservation() {
+    CustomMetrics metrics = new CustomMetrics();
+    metrics.defineDistribution("index_run_duration_micros", new double[] {1, 10, 100});
+    metrics.defineDistributionSeries("index_run_duration_micros", Map.of("outcome", "completed"));
+
+    assertThat(metrics.isEmpty()).isFalse();
+    assertThat(metrics.distributionSnapshot()).hasSize(1);
+    CustomMetrics.DistributionSnapshot snapshot = metrics.distributionSnapshot().get(0);
+    assertThat(snapshot.count()).isZero();
+    assertThat(snapshot.sum()).isZero();
+    assertThat(snapshot.labels()).containsEntry("outcome", "completed");
+    assertThat(snapshot.bounds())
+        .as("a declared series must use the declared bounds, not the fallback")
+        .containsExactly(1, 10, 100);
+  }
+
+  /** Declaring does not discard what a series has already observed. */
+  @Test
+  public void redeclaringADistributionSeriesKeepsItsObservations() {
+    CustomMetrics metrics = new CustomMetrics();
+    metrics.record("index_games_per_month", 40);
+    metrics.defineDistributionSeries("index_games_per_month");
+
+    assertThat(metrics.distributionSnapshot().get(0).count()).isEqualTo(1L);
+    assertThat(metrics.distributionSnapshot().get(0).sum()).isEqualTo(40.0);
+  }
 }

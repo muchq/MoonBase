@@ -63,6 +63,41 @@ public class CustomMetricsEncodingTest {
   }
 
   /**
+   * The zero baseline has to survive the wire, not just the registry. A declared-but-untouched
+   * counter is the whole point of {@link CustomMetrics#defineCounter} — if the encoder dropped it
+   * as uninteresting, or wrote a bare {@code 0} where the collector expects a string, the series
+   * would still not exist in Prometheus and the first real event would still be invisible.
+   */
+  @Test
+  public void aDeclaredButUntouchedCounterShipsAsAZeroPoint() throws Exception {
+    CustomMetrics custom = new CustomMetrics();
+    custom.defineCounter("index_runs", Map.of("outcome", "completed"));
+
+    JsonNode metric = customScope(encode(custom)).at("/metrics/0");
+    assertThat(metric.get("name").asText()).isEqualTo("index_runs");
+    assertThat(metric.at("/sum/dataPoints/0/asInt").isTextual()).isTrue();
+    assertThat(metric.at("/sum/dataPoints/0/asInt").asText()).isEqualTo("0");
+  }
+
+  /** Same for a declared distribution: an empty histogram, not an absent one. */
+  @Test
+  public void aDeclaredButUnobservedDistributionShipsAsAnEmptyHistogram() throws Exception {
+    CustomMetrics custom = new CustomMetrics();
+    custom.defineDistribution("index_run_duration_micros", new double[] {1, 10});
+    custom.defineDistributionSeries("index_run_duration_micros", Map.of("outcome", "completed"));
+
+    JsonNode metric = customScope(encode(custom)).at("/metrics/0");
+    assertThat(metric.get("name").asText()).isEqualTo("index_run_duration_micros");
+    JsonNode point = metric.at("/histogram/dataPoints/0");
+    assertThat(point.get("count").asText()).isEqualTo("0");
+    assertThat(point.get("sum").asDouble()).isZero();
+    // Buckets are still shaped by the declared bounds, so the first observation lands in the
+    // right one rather than reshaping the histogram mid-flight.
+    assertThat(point.get("explicitBounds")).hasSize(2);
+    assertThat(point.get("bucketCounts")).hasSize(3);
+  }
+
+  /**
    * One metric, many points — not many metrics sharing a name. The labels are dimensions of a
    * single series, and repeating the name instead is what makes a collector treat them as rivals.
    */

@@ -449,6 +449,27 @@ TEST_F(TracerServiceTest, ACacheWriteFailureDoesNotDiscardTheRender) {
   EXPECT_EQ(service.attempts, 1);
 }
 
+// The zero baseline (#1323): constructing the service must put every counter
+// on the wire at 0, before any request. Without it the series is born carrying
+// the first render's value and increase() shows nothing for that render, ever
+// — so the first traffic after every deploy is uncounted. The error labels are
+// listed here because the emit sites list them; a label declared under one
+// spelling and emitted under another leaves the real series unbaselined.
+TEST_F(TracerServiceTest, ConstructionDeclaresEveryCounterAtZero) {
+  auto metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>("portrait_test");
+  TracerService service(50, metrics);
+
+  EXPECT_EQ(metrics->CounterTotal("trace_requests_total"), 0);
+  EXPECT_EQ(metrics->CounterTotal("trace_requests_completed"), 0);
+  for (const char* error : {"validation_failed", "out_of_memory", "rendering_failed"}) {
+    EXPECT_EQ(metrics->CounterTotal("trace_requests_failed", {{"error", error}}), 0)
+        << "failure label " << error;
+  }
+  // Presence, not just zero reads: CounterTotal sums an empty match to 0, so
+  // every assertion above passes against a service that declared nothing.
+  EXPECT_EQ(metrics->Entries().size(), 5U);
+}
+
 // The cache lookup copies the stored PNG, so the cheap path allocates too.
 // Before the guard covered the whole body this unwound out of trace(),
 // past the handler, and reached the transport — a different 500 than the one
