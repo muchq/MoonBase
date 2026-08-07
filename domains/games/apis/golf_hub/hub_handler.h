@@ -76,6 +76,46 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
  public:
   using Registry = smithy::server::SessionRegistry<moonbase::golf::GolfEvents>;
 
+  /// One counter series: the name and the exact attributes it is emitted
+  /// under. A series is identified by both, which is the whole point of
+  /// spelling the attributes out — see DeclaredCounterSeries().
+  struct CounterSeries {
+    std::string name;
+    std::map<std::string, std::string> attributes;
+  };
+
+  /// Every counter series this handler baselines at construction, listing
+  /// each label value its emit sites actually use.
+  ///
+  /// The label values are here rather than inferred because a series is
+  /// name *and* attributes: declaring a bare `chat_appends` when every emit
+  /// site writes `chat_appends{result=...}` baselines an orphan nothing ever
+  /// increments, and leaves the three real series to be born carrying their
+  /// first event's value — which is the bug (#1323), not a fix for it.
+  ///
+  /// Three counters are deliberately absent, and the reason is maintenance
+  /// rather than cardinality — all three label sets are bounded, and declaring
+  /// every one of them would cost around thirty series, which is nothing.
+  ///
+  /// stream_commands{command} and stream_events{event} take a generated
+  /// union's case names, so a list here would be a hand-kept copy of
+  /// golf_hub.smithy. They also fire on every message in any live session,
+  /// which is the case a missing first event costs least.
+  ///
+  /// stream_rejections{reason} is the uncomfortable one. Its reasons *are*
+  /// literals — every Reject() call site passes one, and the rest come from the
+  /// cards engine's status messages — but they are ~30 strings spread across
+  /// this file and another library, so a list here would rot on the first new
+  /// rejection. It is also the opposite of cheap to lose: a well-behaved
+  /// session emits none, so the first rejection after a deploy is exactly the
+  /// event someone goes looking for, and the Activity/rejections tile computes
+  /// increase() over it. The fix is a bounded `kind` alongside the free text
+  /// rather than a longer list; until then this counter keeps the #1323 bug.
+  ///
+  /// Exposed so the tests can assert the emit sites declare nothing this list
+  /// does not name.
+  static const std::vector<CounterSeries>& DeclaredCounterSeries();
+
   /// Every rooms/members/games mutation goes through HubStore. A null
   /// argument selects the production MemoryHubStore; PostgreSQL callers
   /// inject PgHubStore. Call RestoreFromStore before serving to rebuild
@@ -236,8 +276,8 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// recorder is injected.
   void Count(const char* name, const std::map<std::string, std::string>& attributes = {});
 
-  /// Declares the unlabelled counters at construction so each exports a zero
-  /// baseline; see the definition for why the two labelled ones are excluded.
+  /// Declares every series in DeclaredCounterSeries() at construction so each
+  /// exports a zero baseline before it counts anything.
   void DeclareMetrics();
   void TrackActive(int delta);
   void CountCommand(const moonbase::golf::GolfCommands& command);

@@ -11,11 +11,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -37,6 +39,59 @@
 #include "smithy/http/websocket_pair.h"
 
 namespace golf_hub {
+
+// `name{key="value"}` — a series printed the way a dashboard query names it,
+// so a failure says which series rather than just which metric.
+inline std::string SeriesLabel(const HubHandler::CounterSeries& series) {
+  if (series.attributes.empty()) return series.name;
+  std::string label = series.name + "{";
+  for (const auto& [key, value] : series.attributes) {
+    if (label.back() != '{') label += ",";
+    label += key + "=\"" + value + "\"";
+  }
+  return label + "}";
+}
+
+// Every counter series a test may emit without HubHandler::DeclaredCounterSeries()
+// naming it. All three carry a label whose values the handler cannot enumerate:
+// stream_commands{command} and stream_events{event} take a generated union's case
+// names, and stream_rejections{reason} takes whatever string Reject() was handed —
+// around thirty literals spread across this handler and the cards engine's status
+// messages. See DeclaredCounterSeries() for why that is a maintenance call and not
+// a cardinality one.
+inline const std::set<std::string>& UndeclarableCounters() {
+  static const auto* kNames =
+      new std::set<std::string>{"stream_commands", "stream_events", "stream_rejections"};
+  return *kNames;
+}
+
+// The two non-counter instruments the handler emits. Entry carries no instrument
+// kind, so they are named rather than filtered.
+inline const std::set<std::string>& NonCounterInstruments() {
+  static const auto* kNames =
+      new std::set<std::string>{"chat_catch_up_rows", "stream_sessions_active"};
+  return *kNames;
+}
+
+// Fails if the recorder saw a counter series construction did not declare.
+//
+// Run from TearDown so every test in the suite contributes its own paths — the
+// declaration list is hand-written, and one scripted session touches only a
+// handful of the series on it. A test that refuses an admission, trips the rate
+// limiter or drops a stream is checking those series here without saying so.
+inline void ExpectOnlyDeclaredCounterSeries(
+    const futility::otel::CapturingMetricsRecorder& recorder) {
+  const auto& declared = HubHandler::DeclaredCounterSeries();
+  for (const auto& entry : recorder.Entries()) {
+    if (NonCounterInstruments().count(entry.name) > 0) continue;
+    if (UndeclarableCounters().count(entry.name) > 0) continue;
+    const bool found = std::any_of(declared.begin(), declared.end(), [&](const auto& series) {
+      return series.name == entry.name && series.attributes == entry.attributes;
+    });
+    EXPECT_TRUE(found) << SeriesLabel({entry.name, entry.attributes})
+                       << " is emitted but not declared, so it loses its first event (#1323)";
+  }
+}
 
 // How long a receive helper waits in total for the event it wants. The
 // frame counts below bound the wrong-events case; this bounds the case
@@ -229,6 +284,11 @@ class GolfHubStreamFixture : public testing::Test {
     // Idempotent; unblocks any session a failed test body left parked so
     // the registry's teardown joins cannot hang.
     for (auto& session : sessions_) session->Close();
+    // After the closes, so the disconnect counters this suite would otherwise
+    // never observe are in the recorder when the sweep runs. Covers the
+    // fixture's own handler only: a test that builds a second instance with
+    // its own recorder has to call this itself.
+    ExpectOnlyDeclaredCounterSeries(*metrics_);
   }
 
   // Mint a session and open its Play stream; fails the test on any step.

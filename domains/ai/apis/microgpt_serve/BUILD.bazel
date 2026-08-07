@@ -23,6 +23,7 @@ rust_test(
     crate = ":microgpt-serve",
     deps = crate_deps([
         "http-body-util",
+        "opentelemetry_sdk",
         "tower",
     ]),
 )

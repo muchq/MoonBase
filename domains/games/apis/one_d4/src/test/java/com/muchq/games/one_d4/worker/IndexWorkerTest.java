@@ -1099,15 +1099,26 @@ public class IndexWorkerTest {
     // The distributions too. defineDistribution declares bounds, not a series, so these need
     // their own declaration or the first run's duration is the value the series is born with —
     // and avg_run_seconds_1h divides a one-sample rate by a one-sample rate.
+    //
+    // Every outcome, not just "completed": production declares RUN_DURATION once per
+    // RUN_OUTCOMES entry, and a run that fails or loses its lease is exactly the run someone
+    // goes looking for. Pinning one spelling would let the other three drop out unnoticed.
     assertThat(metrics.distributionSnapshot())
         .extracting(
             CustomMetrics.DistributionSnapshot::name, CustomMetrics.DistributionSnapshot::labels)
-        .contains(
-            org.assertj.core.groups.Tuple.tuple(IndexWorker.GAMES_PER_MONTH, Map.of()),
-            org.assertj.core.groups.Tuple.tuple(
-                IndexWorker.RUN_DURATION, Map.of("outcome", "completed")));
-    assertThat(distributionCount(IndexWorker.RUN_DURATION, Map.of("outcome", "completed")))
-        .isZero();
+        .contains(org.assertj.core.groups.Tuple.tuple(IndexWorker.GAMES_PER_MONTH, Map.of()));
+    assertThat(distributionCount(IndexWorker.GAMES_PER_MONTH)).isZero();
+    for (String outcome : IndexWorker.RUN_OUTCOMES) {
+      Map<String, String> labels = Map.of("outcome", outcome);
+      assertThat(metrics.distributionSnapshot())
+          .as("run duration series for outcome %s", outcome)
+          .extracting(
+              CustomMetrics.DistributionSnapshot::name, CustomMetrics.DistributionSnapshot::labels)
+          .contains(org.assertj.core.groups.Tuple.tuple(IndexWorker.RUN_DURATION, labels));
+      assertThat(distributionCount(IndexWorker.RUN_DURATION, labels))
+          .as("run duration count for outcome %s", outcome)
+          .isZero();
+    }
   }
 
   /**
