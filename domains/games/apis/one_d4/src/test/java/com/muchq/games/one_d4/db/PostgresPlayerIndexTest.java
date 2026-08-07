@@ -98,6 +98,12 @@ public class PostgresPlayerIndexTest {
    * this suite exists to answer: <em>can</em> the plan reach these indexes for this predicate? With
    * a raw-column index, or a predicate whose shape no longer matches the indexed expression, it
    * cannot — Postgres then seq-scans even at prohibitive cost, and the assertion fails.
+   *
+   * <p>Deliberately the bare SELECT, without the {@code LIMIT ? OFFSET ?} the DAO appends: with a
+   * LIMIT the planner may legitimately prefer walking {@code idx_game_features_played_at} in order
+   * and filtering (cheapest-startup wins for a common player), and which side of that coin it picks
+   * depends on row statistics this fixture cannot meaningfully supply. Reachability is the stable,
+   * load-bearing property; the planner's per-query choice is its own business.
    */
   @Test
   public void thePlayerScopedQueryIsServedByBothUsernameIndexesOnPostgres() throws Exception {
@@ -113,7 +119,13 @@ public class PostgresPlayerIndexTest {
           sb.append(rs.getString(1)).append('\n');
         }
       } finally {
-        stmt.execute("SET enable_seqscan = on");
+        // Best-effort: this pool dies with the test (fresh DataSource per method), and a reset
+        // failure here must not replace the EXPLAIN failure that is the actual signal.
+        try {
+          stmt.execute("SET enable_seqscan = on");
+        } catch (java.sql.SQLException ignored) {
+          // The connection is already broken; the primary exception is propagating.
+        }
       }
       plan = sb.toString();
     }
@@ -147,17 +159,25 @@ public class PostgresPlayerIndexTest {
         .containsExactlyInAnyOrder("https://chess.com/game/pgi-1", "https://chess.com/game/pgi-2");
   }
 
-  /** Inlines the compiled query's bind params as SQL literals, for EXPLAIN. */
+  /**
+   * Inlines the compiled query's bind params as SQL literals, for EXPLAIN. Placeholders are
+   * consumed left to right with a moving cursor rather than repeated replaceFirst from the start,
+   * so a parameter value containing {@code ?} can never be mistaken for the next placeholder.
+   */
   private static String inlineParams(CompiledQuery compiled) {
-    String sql = compiled.selectSql();
+    StringBuilder sql = new StringBuilder(compiled.selectSql());
+    int cursor = 0;
     for (Object param : compiled.parameters()) {
       String literal =
           param instanceof Number
               ? param.toString()
               : "'" + param.toString().replace("'", "''") + "'";
-      sql = sql.replaceFirst("\\?", java.util.regex.Matcher.quoteReplacement(literal));
+      int placeholder = sql.indexOf("?", cursor);
+      assertThat(placeholder).as("a placeholder must exist for every parameter").isNotNegative();
+      sql.replace(placeholder, placeholder + 1, literal);
+      cursor = placeholder + literal.length();
     }
-    return sql;
+    return sql.toString();
   }
 
   private GameFeature game(String urlSuffix, String white, String black) {
