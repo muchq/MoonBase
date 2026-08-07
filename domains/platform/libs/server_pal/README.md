@@ -50,11 +50,14 @@ and units are pinned by this crate's own tests against a real exporter.
 
 ## Rate limiting
 
-The default limit is **100 req/s per IP, burst 200**. Override with `.rate_limit()`:
+The default limit is **100 req/s, burst 200**. Override with `.rate_limit()`:
 
 ```rust
 // Custom limit
-.rate_limit(Some(RateLimit { per_second: 5, burst: 10 }))
+.rate_limit(Some(RateLimit { per_second: 5.0, burst: 10 }))
+
+// One request every ten seconds
+.rate_limit(Some(RateLimit { per_second: 0.1, burst: 1 }))
 
 // Disable entirely
 .rate_limit(None)
@@ -63,20 +66,42 @@ The default limit is **100 req/s per IP, burst 200**. Override with `.rate_limit
 Requests over the limit receive `429 Too Many Requests`. Rate-limited requests
 are rejected before `TraceLayer`, so they won't appear in request logs.
 
-`GET /health` is exempt: it is served from a separate router that the limiter
-does not wrap. The container healthcheck probes on a fixed interval from one
-IP, so a shared bucket drains and starts answering probes with `429` — the
-service then reads as unhealthy while it is serving normally. Everything else
-stays limited, the 404 fallback included, so spraying unknown paths still
-costs quota. Requests rejected further in — a `406` from the `Accept` check, a
-`408`, a panic — are counted against the limit too, because the limiter is the
-outermost layer.
-
 `per_second` is a rate — requests per second — and `burst` is how many may
-arrive at once before that rate binds. Note that `tower_governor`'s own builder
-takes a *replenish interval* under the same name, so `per_second(100)` there
-means one request every 100 seconds; `RateLimit` converts, so the field means
-what it says.
+arrive at once before that rate binds. `tower_governor`'s own builder takes a
+*replenish interval* under the same name, so `per_second(100)` there means one
+request every 100 seconds; `RateLimit` converts, so the field means what it
+says.
+
+### Buckets are keyed on the peer IP, which behind a proxy is the proxy
+
+The default extractor reads the socket's peer address. Every service in
+`deploy/consolidated` is reached only through Caddy, so external callers all
+key on Caddy's container IP and **share one bucket** — a limit sized as though
+it were per-user throttles everyone at once. The C++ rail keys off a declared
+trust boundary instead (`TRUSTED_PROXY_CIDRS`, smithy-cpp ADR-0012); this rail
+has not adopted that yet. Note that simply switching to `SmartIpKeyExtractor`
+would make the key client-controlled, since Caddy appends to `X-Forwarded-For`
+rather than replacing it.
+
+### `GET /health` is exempt
+
+It is served from a separate router the limiter does not wrap, matching the C++
+rail, where the health endpoint runs ahead of the rate-limit guard.
+
+This is defence in depth rather than a fix for anything currently reachable.
+The container healthcheck connects over loopback from inside the container, so
+it keys on `127.0.0.1` and never shared a bucket with client traffic. What made
+probes fail was the units bug above: a bucket of 200 refilling once per 100
+seconds, against a probe every 30 seconds, drained after a couple of hours and
+then failed two probes in three — the service read as unhealthy while serving
+normally. At a correct rate no probe cadence can drain it. The exemption keeps
+the liveness signal off the quota path however the limit is later tuned or
+keyed.
+
+Everything else stays limited, the 404 fallback included, so spraying unknown
+paths still costs quota. Requests rejected further in — a `406` from the
+`Accept` check, a `408`, a panic — count against the limit too, because the
+limiter is the outermost layer.
 
 ## Environment variables
 

@@ -354,14 +354,24 @@ async fn http_metrics_middleware(
 }
 
 pub struct RateLimit {
-    /// Sustained requests per second, per IP.
-    pub per_second: u64,
+    /// Sustained requests per second, keyed per peer IP.
+    ///
+    /// Fractional rates are allowed: `0.1` is one request every ten seconds.
+    ///
+    /// "Per peer IP" is not per client for anything behind a reverse proxy.
+    /// The default extractor reads the socket's peer address, which for every
+    /// service in `deploy/consolidated` is Caddy — so external callers share a
+    /// single bucket. Sizing a limit as though it were per-user will throttle
+    /// everyone at once. The C++ rail keys off a trusted-proxy boundary
+    /// instead (smithy-cpp ADR-0012, `TRUSTED_PROXY_CIDRS` in compose.yaml);
+    /// this rail has not adopted that yet.
+    pub per_second: f64,
     /// How many may arrive at once before the sustained rate binds.
     pub burst: u32,
 }
 
 const DEFAULT_RATE_LIMIT: RateLimit = RateLimit {
-    per_second: 100,
+    per_second: 100.0,
     burst: 200,
 };
 
@@ -377,14 +387,18 @@ const DEFAULT_RATE_LIMIT: RateLimit = RateLimit {
 /// between healthy and unhealthy while serving normally.
 ///
 /// Converting here keeps `RateLimit::per_second` meaning what it says at every
-/// call site. Nanoseconds rather than milliseconds so rates above 1000/s stay
-/// expressible instead of truncating to a zero-length period.
-fn quota_period(per_second: u64) -> Duration {
+/// call site.
+fn quota_period(per_second: f64) -> Duration {
     assert!(
-        per_second > 0 && per_second <= 1_000_000_000,
-        "rate_limit per_second must be 1..=1_000_000_000 requests/second, got {per_second}"
+        per_second.is_finite() && per_second > 0.0,
+        "rate_limit per_second must be a positive rate, got {per_second}"
     );
-    Duration::from_nanos(1_000_000_000 / per_second)
+    let period = Duration::from_secs_f64(1.0 / per_second);
+    assert!(
+        !period.is_zero(),
+        "rate_limit per_second of {per_second} rounds to a zero-length period"
+    );
+    period
 }
 
 pub fn listen_addr_pal() -> String {
@@ -464,6 +478,7 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
         // stack below, so the exemption is the only difference between them.
         let limited = common_layers(self.router.fallback(fallback));
         let limited = if let Some(RateLimit { per_second, burst }) = self.rate_limit {
+            assert!(burst > 0, "rate_limit burst must be at least 1");
             let config = Arc::new(
                 GovernorConfigBuilder::default()
                     .per_nanosecond(quota_period(per_second).as_nanos() as u64)
@@ -480,8 +495,16 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
             limited
         };
 
-        // The probe runs on a fixed cadence from a single IP, so quota shared
-        // with clients drains and 429s it, and a healthy service reads as dead.
+        // Defence in depth, and the shape the C++ rail already has (aura's
+        // middleware runs its health endpoint ahead of the rate-limit guard).
+        //
+        // Not load-bearing for the outage that prompted it: the probe connects
+        // over loopback from inside the container, so it keys on 127.0.0.1 and
+        // never shared a bucket with client traffic. It drained its *own*
+        // bucket, at the wrong units fixed in `quota_period` — burst 200
+        // refilling once per 100s against a probe every 30s. At a correct rate
+        // no probe cadence can drain it. This keeps a liveness signal off the
+        // quota path regardless of how the limit is later tuned or keyed.
         let health = common_layers(Router::new().route("/health", get(|| async { "Ok" })));
 
         // HTTP metrics middleware sits outside rate-limiting so rate-limited
@@ -530,14 +553,18 @@ mod tests {
         req
     }
 
-    /// A router whose per-IP bucket is spent. One request per second is the
-    /// slowest sustained rate expressible, and these tests finish in well under
-    /// a millisecond, so nothing meaningfully replenishes mid-test and a later
-    /// 200 can only mean the request never reached the governor.
+    /// A router whose bucket is spent.
+    ///
+    /// The rate sets the margin and nothing else: once the burst is gone, GCRA
+    /// reopens after exactly one replenish period, whatever the burst size. At
+    /// one request per second that is a one-second window for the rest of the
+    /// test to run in, which a stall on a loaded CI machine can outlast — so
+    /// this asks for one per 10,000 seconds, and a later 200 can only mean the
+    /// request never reached the governor.
     async fn drained_app() -> Router {
         let app = router_builder::<NoState>()
             .rate_limit(Some(RateLimit {
-                per_second: 1,
+                per_second: 0.0001,
                 burst: 2,
             }))
             .build()
@@ -561,7 +588,7 @@ mod tests {
     async fn per_second_is_a_rate_not_a_replenish_interval() {
         let app = router_builder::<NoState>()
             .rate_limit(Some(RateLimit {
-                per_second: 100,
+                per_second: 100.0,
                 burst: 1,
             }))
             .build()
@@ -590,9 +617,12 @@ mod tests {
     /// The conversion itself, at the two rates this repo actually configures.
     #[test]
     fn quota_period_turns_a_rate_into_an_interval() {
-        assert_eq!(quota_period(100), Duration::from_millis(10));
-        assert_eq!(quota_period(5), Duration::from_millis(200));
-        assert_eq!(quota_period(1), Duration::from_secs(1));
+        assert_eq!(quota_period(100.0), Duration::from_millis(10));
+        assert_eq!(quota_period(5.0), Duration::from_millis(200));
+        assert_eq!(quota_period(1.0), Duration::from_secs(1));
+        // Sub-1/s rates stay expressible; the old u64 field could not say this
+        // and the drained-bucket tests depend on it.
+        assert_eq!(quota_period(0.1), Duration::from_secs(10));
     }
 
     /// A request the Accept check rejects must still cost quota. The governor
@@ -631,7 +661,7 @@ mod tests {
         // Replenish one element per second, burst of 2
         let app = router_builder::<NoState>()
             .rate_limit(Some(RateLimit {
-                per_second: 1,
+                per_second: 1.0,
                 burst: 2,
             }))
             .build()

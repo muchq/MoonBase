@@ -7,9 +7,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 
 use crate::AppState;
-use crate::types::{
-    ChatRequest, ChatResponse, ErrorResponse, GenerateRequest, GenerateResponse,
-};
+use crate::types::{ChatRequest, ChatResponse, ErrorResponse, GenerateRequest, GenerateResponse};
 
 fn error_response(status: StatusCode, msg: String) -> impl IntoResponse {
     (
@@ -86,7 +84,11 @@ pub async fn chat_post(
         prompt_tokens.insert(0, tok.bos);
     }
 
-    let remaining = state.model.config.block_size.saturating_sub(prompt_tokens.len());
+    let remaining = state
+        .model
+        .config
+        .block_size
+        .saturating_sub(prompt_tokens.len());
     let default_max = remaining.max(64).min(state.model.config.block_size / 4);
     let max_tokens = Some(req.max_tokens.unwrap_or(default_max));
     let stop_tokens = [special.end_turn];
@@ -104,20 +106,25 @@ pub async fn chat_post(
     );
     let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
 
-    state.metrics.record_chat(output_tokens.len() as u64, duration_ms);
+    state
+        .metrics
+        .record_chat(output_tokens.len() as u64, duration_ms);
 
-    let content = tok.decode_str(&output_tokens)
+    let content = tok
+        .decode_str(&output_tokens)
         .trim()
         .trim_start_matches(|c: char| c.is_ascii_punctuation())
         .trim_start()
         .to_string();
 
-    Json(serde_json::to_value(ChatResponse {
-        role: "assistant".to_string(),
-        content,
-        tokens_dropped,
-    })
-    .unwrap())
+    Json(
+        serde_json::to_value(ChatResponse {
+            role: "assistant".to_string(),
+            content,
+            tokens_dropped,
+        })
+        .unwrap(),
+    )
     .into_response()
 }
 
@@ -148,7 +155,11 @@ mod tests {
         let model = TensorGpt::new(tok.vocab_size, 42, config, &device, DType::F32);
         let bytes = model.save_weights_st().unwrap();
         let model = InferenceGpt::load_safetensors(tok.vocab_size, &bytes, config).unwrap();
-        Arc::new(AppState { model, tokenizer: tok, metrics: crate::metrics::AppMetrics::new() })
+        Arc::new(AppState {
+            model,
+            tokenizer: tok,
+            metrics: crate::metrics::AppMetrics::new(),
+        })
     }
 
     fn test_app(state: Arc<AppState>) -> Router {
@@ -191,10 +202,7 @@ mod tests {
     async fn generate_with_defaults() {
         let state = make_test_state(false);
         let app = test_app(state);
-        let resp = app
-            .oneshot(json_request("/generate", "{}"))
-            .await
-            .unwrap();
+        let resp = app.oneshot(json_request("/generate", "{}")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = response_body(resp).await;
         assert_eq!(body["samples"].as_array().unwrap().len(), 1);
@@ -454,7 +462,8 @@ mod tests {
     #[tokio::test]
     async fn chat_deterministic_with_same_seed() {
         let state = make_test_state(true);
-        let body_json = r#"{"messages":[{"role":"user","content":"hello"}],"seed":77,"temperature":0.5}"#;
+        let body_json =
+            r#"{"messages":[{"role":"user","content":"hello"}],"seed":77,"temperature":0.5}"#;
 
         let app1 = test_app(state.clone());
         let resp1 = app1
@@ -528,31 +537,42 @@ mod tests {
         let body = format!(
             r#"{{"messages":[{all_msgs},{{"role":"user","content":"final question"}}],"max_tokens":5}}"#
         );
-        let resp = app
-            .oneshot(json_request("/chat", &body))
-            .await
-            .unwrap();
+        let resp = app.oneshot(json_request("/chat", &body)).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = response_body(resp).await;
-        assert!(body["tokens_dropped"].as_u64().unwrap() > 0, "long context should trigger truncation");
+        assert!(
+            body["tokens_dropped"].as_u64().unwrap() > 0,
+            "long context should trigger truncation"
+        );
     }
 
     #[test]
     fn leading_punctuation_stripping() {
         assert_eq!(
-            "! Hello".trim().trim_start_matches(|c: char| c.is_ascii_punctuation()).trim_start(),
+            "! Hello"
+                .trim()
+                .trim_start_matches(|c: char| c.is_ascii_punctuation())
+                .trim_start(),
             "Hello"
         );
         assert_eq!(
-            "!!? test".trim().trim_start_matches(|c: char| c.is_ascii_punctuation()).trim_start(),
+            "!!? test"
+                .trim()
+                .trim_start_matches(|c: char| c.is_ascii_punctuation())
+                .trim_start(),
             "test"
         );
         assert_eq!(
-            "Hello world".trim().trim_start_matches(|c: char| c.is_ascii_punctuation()).trim_start(),
+            "Hello world"
+                .trim()
+                .trim_start_matches(|c: char| c.is_ascii_punctuation())
+                .trim_start(),
             "Hello world"
         );
         assert_eq!(
-            "".trim().trim_start_matches(|c: char| c.is_ascii_punctuation()).trim_start(),
+            "".trim()
+                .trim_start_matches(|c: char| c.is_ascii_punctuation())
+                .trim_start(),
             ""
         );
     }
