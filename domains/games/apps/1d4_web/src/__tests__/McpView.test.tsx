@@ -11,9 +11,9 @@ import { MCP_TOOLS } from '../mcpTools';
 
 // The tool roster the server actually advertises. McpToolRosterContractTest (Java) pins what the
 // running server returns from tools/list to this same file, so a tool added, removed or renamed
-// on the server fails there first, and fails here until the page's table catches up. The page
-// could fetch the list now that mcp.1d4.net sends CORS headers; it deliberately does not, so the
-// drift is caught in CI rather than discovered in production. See mcpTools.ts.
+// on the server fails there first, and fails here until the page's table catches up. mcp.1d4.net
+// allows this origin, so the page could fetch the list instead; it deliberately does not, so the
+// drift is caught in CI rather than in production. See mcpTools.ts.
 // Resolved from the package root (vitest's cwd), because import.meta.url is not a file: URL
 // under the jsdom transform.
 const ADVERTISED_TOOLS: { tools: string[] } = JSON.parse(
@@ -69,10 +69,8 @@ describe('McpView', () => {
   });
 
   /**
-   * The page's job in the connection section is to be copy-pasteable (#1325). Before the server
-   * spoke a standard transport it could only explain why nobody could connect; now it has to
-   * carry a config a reader can paste, and a config with no URL in it is worse than the old
-   * explanation because it looks like it works.
+   * The connection section's job is to be copy-pasteable (#1325). A config block that renders but
+   * names no endpoint is worse than no config at all, because it looks like it works.
    */
   it('gives a copy-pasteable client config naming the endpoint', () => {
     render(

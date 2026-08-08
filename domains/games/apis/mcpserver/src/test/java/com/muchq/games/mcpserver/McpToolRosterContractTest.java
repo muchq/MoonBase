@@ -25,12 +25,12 @@ import org.junit.jupiter.api.Test;
  * when the page's table stops matching the same file — so a tool change breaks the build here
  * first, and again on the frontend until the page is updated.
  *
- * <p>The roster stays checked in rather than fetched by the page at runtime, now that CORS makes a
- * browser call possible. A build-time contract fails in CI, before a deploy; a runtime fetch would
- * only ever be wrong in production, and would put an empty table on the page whenever the MCP
- * server was down.
+ * <p>The roster stays checked in rather than fetched by the page at runtime, even though CORS
+ * allows the call. A build-time contract fails in CI, before a deploy; a runtime fetch can only
+ * ever be wrong in production, and would put an empty table on the page whenever the MCP server is
+ * down.
  *
- * <p>This asks the running server over {@code tools/list} — the same answer a client gets, derived
+ * <p>It asks the running server over {@code tools/list} — the same answer a client gets, derived
  * from the {@code @Tool} methods themselves. Nothing between the annotations and this assertion is
  * hand-maintained, so a tool that fails to register (a missing {@code @Singleton}, a bean the
  * context cannot construct) fails here rather than going quietly missing from the deployment.

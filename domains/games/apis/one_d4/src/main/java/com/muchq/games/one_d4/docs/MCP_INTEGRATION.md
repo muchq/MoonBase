@@ -1,17 +1,12 @@
 # Chess Game Indexer — MCP Server Integration
 
 > **Status: implemented (Option A, in-process).** `mcpserver` embeds the indexer engine,
-> database access, and queue, and registers `index_chess_games`, `index_status`,
-> `query_chess_games`, `analyze_position`, plus an `aggregate_chess_games` tool over
-> `SqlCompiler.compileAggregate`. See `mcpserver/tools/IndexerFacade.java` and
-> `mcpserver/McpModule.java`. The rest of this document is the original design.
->
-> **The wiring below is historical.** #1325 replaced mcpserver's hand-rolled transport
-> with micronaut-mcp, so there is no `McpRequestHandler`, no `McpTool` interface, no
-> `ToolRegistry`, and no `getInputSchema()`. A tool is now a `@Tool`-annotated method on
-> a `@Singleton` bean whose parameters *are* its input schema. Everything Option A
-> actually decided — the in-process engine, DB, and queue, and `IndexerFacade` as the
-> seam — is unchanged; only the registration mechanism in the samples is out of date.
+> database access, and queue, and serves `index_chess_games`, `index_status`,
+> `query_chess_games`, `analyze_position`, and `aggregate_chess_games`. The tools are
+> `@Tool` methods on `@Singleton` beans, served over MCP by micronaut-mcp; their
+> parameters are their input schemas. See `mcpserver/tools/` and `mcpserver/McpModule.java`
+> for the code, and `mcpserver/README.md` for the transport. This document is the design
+> that led there — the tool semantics below still describe what the tools do.
 
 ## Overview
 
@@ -29,20 +24,11 @@ Add indexer tool classes directly to the `mcpserver` package. The mcpserver proc
 ┌──────────────────────────────────────────────────┐
 │              mcpserver JVM Process                │
 │                                                   │
-│  McpRequestHandler                                │
-│    └─ ToolRegistry                                │
-│         ├─ ChessComGamesTool     (existing)       │
-│         ├─ ChessComPlayerTool    (existing)       │
-│         ├─ ChessComStatsTool     (existing)       │
-│         ├─ ServerTimeTool        (existing)       │
-│         ├─ IndexGamesTool        (NEW)            │
-│         ├─ IndexStatusTool       (NEW)            │
-│         ├─ QueryGamesTool        (NEW)            │
-│         └─ AnalyzePositionTool   (NEW)            │
+│  MCP tools (chess.com lookups + the five below)   │
 │                  │                                │
 │         ┌────────▼─────────┐                      │
-│         │ IndexerFacade    │                       │
-│         │  (thin wrapper)  │                       │
+│         │ IndexerFacade    │                      │
+│         │  (thin wrapper)  │                      │
 │         └────────┬─────────┘                      │
 │                  │                                │
 │    ┌─────────────▼──────────────────┐             │
@@ -254,107 +240,6 @@ public class IndexerFacade {
     public AnalysisResult analyze(String pgn) { ... }
 }
 ```
-
-#### IndexGamesTool.java
-
-```java
-public class IndexGamesTool implements McpTool {
-    private final IndexerFacade facade;
-    private final ObjectMapper mapper;
-
-    @Override
-    public String getName() { return "index_chess_games"; }
-
-    @Override
-    public String getDescription() {
-        return "Index a chess player's games for tactical motif detection. "
-             + "Fetches games from chess.com, replays positions, and detects "
-             + "pins, forks, skewers, discovered attacks, cross-pins, checks, "
-             + "checkmates, and promotions (including promotion with check/checkmate). "
-             + "Returns a request ID to check status with index_status.";
-    }
-
-    @Override
-    public Map<String, Object> getInputSchema() {
-        return Map.of(
-            "type", "object",
-            "properties", Map.of(
-                "username", Map.of("type", "string", "description", "Chess platform username"),
-                "platform", Map.of("type", "string", "enum", List.of("chess.com"),
-                                   "description", "Chess platform"),
-                "start_month", Map.of("type", "string",
-                                      "description", "Start month (YYYY-MM format)"),
-                "end_month", Map.of("type", "string",
-                                    "description", "End month (YYYY-MM format)")
-            ),
-            "required", List.of("username", "platform", "start_month", "end_month")
-        );
-    }
-
-    @Override
-    public String execute(Map<String, Object> arguments) {
-        String username = (String) arguments.get("username");
-        String platform = (String) arguments.get("platform");
-        String startMonth = (String) arguments.get("start_month");
-        String endMonth = (String) arguments.get("end_month");
-
-        var result = facade.indexAsync(username, platform, startMonth, endMonth);
-        return serialize(result);
-    }
-}
-```
-
-#### IndexStatusTool.java, QueryGamesTool.java, AnalyzePositionTool.java
-
-Same pattern as above — implement `McpTool`, delegate to `IndexerFacade`.
-
-### McpModule Changes
-
-Wire the new tools into the tool registry:
-
-```java
-@Context
-public List<McpTool> mcpTools(
-        Clock clock,
-        ChessClient chessClient,
-        ObjectMapper objectMapper,
-        IndexerFacade indexerFacade) {
-    return List.of(
-        new ChessComGamesTool(chessClient, objectMapper),
-        new ChessComPlayerTool(chessClient, objectMapper),
-        new ChessComStatsTool(chessClient, objectMapper),
-        new ServerTimeTool(clock),
-        new IndexGamesTool(indexerFacade, objectMapper),       // NEW
-        new IndexStatusTool(indexerFacade, objectMapper),      // NEW
-        new QueryGamesTool(indexerFacade, objectMapper),       // NEW
-        new AnalyzePositionTool(indexerFacade, objectMapper)   // NEW
-    );
-}
-
-@Context
-public IndexerFacade indexerFacade(...) {
-    // Wire indexer components — reuses existing engine, DB, queue code
-}
-```
-
-### BUILD.bazel Changes
-
-Add indexer libraries as deps to `mcpserver/tools/BUILD.bazel`:
-
-```bzl
-deps = [
-    # existing deps...
-    "//domains/games/apis/one_d4/chessql/compiler",
-    "//domains/games/apis/one_d4/chessql/parser",
-    "//domains/games/apis/one_d4/db",
-    "//domains/games/apis/one_d4/engine",
-    "//domains/games/apis/one_d4/engine/model",
-    "//domains/games/apis/one_d4/queue",
-    "//domains/games/apis/one_d4/worker",
-],
-```
-
-And H2 as a runtime dep for in-process mode on `mcpserver/BUILD.bazel`.
 
 ---
 

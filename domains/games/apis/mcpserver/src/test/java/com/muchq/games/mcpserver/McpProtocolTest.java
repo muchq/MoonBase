@@ -19,11 +19,10 @@ import org.junit.jupiter.api.Test;
 /**
  * Speaks the protocol to the real server, over HTTP, the way a client does.
  *
- * <p>Every assertion here is a claim the hand-rolled transport got wrong and shipped anyway,
- * because nothing at this level ever ran: {@code notifications/initialized} answered {@code -32601}
- * — an error object for a message that must draw no response at all — so a spec-following client
- * failed at step two of the handshake and never reached {@code tools/list} (#1325). The framework
- * owns those methods now, and these tests are what keeps that true.
+ * <p>The framework owns the handshake, the JSON-RPC framing and the tool methods, so the risk is
+ * not that this package computes them wrongly — it is that a config change, a version bump or a
+ * bean that fails to register takes the endpoint off-spec with everything still compiling. These
+ * tests are the only ones that would notice (#1325).
  */
 public class McpProtocolTest {
 
@@ -63,10 +62,10 @@ public class McpProtocolTest {
   }
 
   /**
-   * The bug that motivated the migration. A JSON-RPC notification carries no {@code id} and must
-   * draw no response body; the old handler ran it through the same dispatch as a request and
-   * returned {@code -32601 Method not found}. A spec-following client sends this immediately after
-   * {@code initialize}, so that error ended the handshake before tools were ever listed.
+   * A JSON-RPC notification carries no {@code id} and must draw no response object — not a result,
+   * and not an error either. A client sends this one immediately after {@code initialize}, so a
+   * server that answers it at all fails the handshake at step two and never reaches {@code
+   * tools/list}.
    */
   @Test
   public void theInitializedNotificationIsAcceptedAndAnsweredWithNoJsonRpcBody() throws Exception {

@@ -132,9 +132,9 @@ public class ChessComPlayersToolTest {
   }
 
   /**
-   * Omitting usernames entirely is no longer this tool's error to report: the parameter is
-   * non-null, so the framework rejects that call with a JSON-RPC error before the method runs. An
-   * empty array still reaches the tool, and is still its own answer.
+   * An empty array reaches the tool and is its own answer. Omitting usernames entirely is not this
+   * tool's error to report: the parameter is non-null, so the framework rejects that call with a
+   * JSON-RPC error before the method runs.
    */
   @Test
   public void testEmptyUsernamesRejected() {

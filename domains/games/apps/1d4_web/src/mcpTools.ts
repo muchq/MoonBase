@@ -1,10 +1,10 @@
 /**
  * The tools mcp.1d4.net advertises, as documented on /mcp.
  *
- * The roster is checked in rather than fetched. mcp.1d4.net now sends CORS headers, so a
- * tools/list call from a browser on 1d4.net would work — but a build-time contract fails in CI,
- * before a deploy, where a runtime fetch could only ever be wrong in production, and would put an
- * empty table on the page whenever the MCP server was down.
+ * The roster is checked in rather than fetched. mcp.1d4.net allows this origin, so a tools/list
+ * call from a browser on 1d4.net would work — but a build-time contract fails in CI, before a
+ * deploy, where a runtime fetch can only ever be wrong in production, and would put an empty
+ * table on the page whenever the MCP server is down.
  *
  * Pinned from both ends, because a hand-maintained table would otherwise rot the first time a
  * tool is added or renamed. `McpToolRosterContractTest` (Java) asserts what the server actually

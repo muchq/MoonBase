@@ -12,11 +12,11 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link McpAuthenticationFilter} had no test in either state, and the two states are easy to
- * confuse: the shared {@code application.yml} always defines {@code mcp.auth.token}, so the
- * property is never absent — an empty value is what leaves the endpoint open, and that is what the
- * deployment runs. Both halves are pinned here so "mcp.1d4.net is unauthenticated" stays a decision
- * someone made rather than a wiring accident nobody noticed (#1325).
+ * {@link McpAuthenticationFilter} has two states and they are easy to confuse: the shared {@code
+ * application.yml} always defines {@code mcp.auth.token}, so what decides is whether it holds
+ * anything, not whether it is set. Empty leaves the endpoint open, and empty is what the deployment
+ * runs. Both halves are pinned here so "mcp.1d4.net is unauthenticated" reads as a decision someone
+ * made rather than a wiring accident (#1325).
  *
  * <p>The filter is also pinned to the endpoint it is supposed to guard. Both it and the controller
  * read {@code micronaut.mcp.server.endpoint}, and the last test here moves that endpoint to prove
