@@ -5,6 +5,13 @@
 > `query_chess_games`, `analyze_position`, plus an `aggregate_chess_games` tool over
 > `SqlCompiler.compileAggregate`. See `mcpserver/tools/IndexerFacade.java` and
 > `mcpserver/McpModule.java`. The rest of this document is the original design.
+>
+> **The wiring below is historical.** #1325 replaced mcpserver's hand-rolled transport
+> with micronaut-mcp, so there is no `McpRequestHandler`, no `McpTool` interface, no
+> `ToolRegistry`, and no `getInputSchema()`. A tool is now a `@Tool`-annotated method on
+> a `@Singleton` bean whose parameters *are* its input schema. Everything Option A
+> actually decided — the in-process engine, DB, and queue, and `IndexerFacade` as the
+> seam — is unchanged; only the registration mechanism in the samples is out of date.
 
 ## Overview
 
