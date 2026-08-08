@@ -9,10 +9,11 @@ import App from '../App';
 import McpView from '../views/McpView';
 import { MCP_TOOLS } from '../mcpTools';
 
-// The tool roster the server actually advertises. McpToolRegistryContractTest (Java) pins the
-// registry to this same file, so a tool added, removed or renamed on the server fails there
-// first, and fails here until the page's table catches up. The page cannot ask the server
-// directly — mcp.1d4.net sends no CORS headers — which is exactly why this loop exists.
+// The tool roster the server actually advertises. McpToolRosterContractTest (Java) pins what the
+// running server returns from tools/list to this same file, so a tool added, removed or renamed
+// on the server fails there first, and fails here until the page's table catches up. The page
+// could fetch the list now that mcp.1d4.net sends CORS headers; it deliberately does not, so the
+// drift is caught in CI rather than discovered in production. See mcpTools.ts.
 // Resolved from the package root (vitest's cwd), because import.meta.url is not a file: URL
 // under the jsdom transform.
 const ADVERTISED_TOOLS: { tools: string[] } = JSON.parse(
@@ -68,10 +69,12 @@ describe('McpView', () => {
   });
 
   /**
-   * The transport caveat is the reason a reader's standard MCP client will not connect, and it is
-   * the kind of awkward sentence that gets tidied away. Pinned so removing it is deliberate.
+   * The page's job in the connection section is to be copy-pasteable (#1325). Before the server
+   * spoke a standard transport it could only explain why nobody could connect; now it has to
+   * carry a config a reader can paste, and a config with no URL in it is worse than the old
+   * explanation because it looks like it works.
    */
-  it('states the endpoint and that it is not a standard MCP transport', () => {
+  it('gives a copy-pasteable client config naming the endpoint', () => {
     render(
       <MemoryRouter>
         <McpView />
@@ -79,8 +82,32 @@ describe('McpView', () => {
     );
 
     expect(screen.getAllByText(/mcp\.1d4\.net/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/no SSE/i)).toBeTruthy();
-    expect(screen.getByText(/Mcp-Session-Id/)).toBeTruthy();
+
+    const configs = screen
+      .getAllByText(/mcpServers/)
+      .map((el) => el.textContent ?? '');
+    expect(configs.length).toBeGreaterThan(0);
+    // Every config block must actually point at the deployment, not just look like JSON.
+    for (const config of configs) {
+      expect(config).toContain('https://mcp.1d4.net/mcp');
+    }
+    // And one of them must be the no-bridge case: a direct http client entry.
+    expect(configs.some((c) => /"type":\s*"http"/.test(c))).toBe(true);
+  });
+
+  /**
+   * The one thing the transport does not do. Streamable HTTP makes the server->client SSE leg
+   * optional, and micronaut-mcp does not implement it, so GET /mcp is a 405 rather than a stream.
+   * A reader debugging a client that probes GET needs to find that here rather than guess.
+   */
+  it('says the server-to-client SSE stream is not implemented', () => {
+    render(
+      <MemoryRouter>
+        <McpView />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/SSE stream is not implemented/i)).toBeTruthy();
   });
 
   /**

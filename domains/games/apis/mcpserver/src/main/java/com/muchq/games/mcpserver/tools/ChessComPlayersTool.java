@@ -1,15 +1,16 @@
 package com.muchq.games.mcpserver.tools;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.muchq.games.chess_com_client.ChessClient;
 import com.muchq.games.chess_com_client.ChessComApiException;
 import com.muchq.games.chess_com_client.Player;
-import java.io.IOException;
+import io.micronaut.mcp.annotations.Tool;
+import io.micronaut.mcp.annotations.ToolArg;
+import jakarta.inject.Named;
+import jakarta.inject.Singleton;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
@@ -22,83 +23,55 @@ import java.util.concurrent.Future;
  * a small shared pool, so fan-out against chess.com is bounded by the pool size rather than
  * unbounded per call.
  */
-public class ChessComPlayersTool implements McpTool {
+@Singleton
+public class ChessComPlayersTool {
 
   static final int MAX_USERNAMES = 50;
 
   private final ChessClient chessClient;
-  private final ObjectMapper mapper;
   private final ExecutorService lookupExecutor;
 
   public ChessComPlayersTool(
-      ChessClient chessClient, ObjectMapper mapper, ExecutorService lookupExecutor) {
+      ChessClient chessClient, @Named("chessComLookup") ExecutorService lookupExecutor) {
     this.chessClient = chessClient;
-    this.mapper = mapper;
     this.lookupExecutor = lookupExecutor;
   }
 
-  @Override
-  public String getName() {
-    return "chess_com_players";
-  }
-
-  @Override
-  public String getDescription() {
-    return "Returns chess.com player information (including title, if any) for a batch of up to "
-        + MAX_USERNAMES
-        + " usernames in one call. The response maps each lowercased username to its profile;"
-        + " unknown usernames are listed under not_found.";
-  }
-
-  @Override
-  public Map<String, Object> getInputSchema() {
-    return Map.of(
-        "type", "object",
-        "properties",
-            Map.of(
-                "usernames",
-                Map.of(
-                    "type",
-                    "array",
-                    "items",
-                    Map.of("type", "string"),
-                    "maxItems",
-                    MAX_USERNAMES,
-                    "description",
-                    "The chess.com usernames to look up (max " + MAX_USERNAMES + ")")),
-        "required", List.of("usernames"));
-  }
-
-  @Override
-  public String execute(Map<String, Object> arguments) {
-    Object raw = arguments.get("usernames");
-    if (!(raw instanceof List<?> rawList) || rawList.isEmpty()) {
-      return ToolResponses.error(mapper, "usernames must be a non-empty array of strings");
+  @Tool(
+      name = "chess_com_players",
+      description =
+          "Returns chess.com player information (including title, if any) for a batch of up to 50"
+              + " usernames in one call. The response maps each lowercased username to its"
+              + " profile; unknown usernames are listed under not_found.")
+  public String chessComPlayers(
+      @ToolArg(description = "The chess.com usernames to look up (max 50)")
+          List<String> usernames) {
+    if (usernames.isEmpty()) {
+      return ToolJson.error("usernames must be a non-empty array of strings");
     }
 
-    Set<String> usernames = new LinkedHashSet<>();
-    for (Object item : rawList) {
-      if (item == null || item.toString().isBlank()) {
-        return ToolResponses.error(mapper, "usernames must not contain blank entries");
+    Set<String> deduped = new LinkedHashSet<>();
+    for (String item : usernames) {
+      if (item == null || item.isBlank()) {
+        return ToolJson.error("usernames must not contain blank entries");
       }
-      usernames.add(item.toString().toLowerCase());
+      deduped.add(item.toLowerCase());
     }
-    if (usernames.size() > MAX_USERNAMES) {
-      return ToolResponses.error(
-          mapper,
-          "too many usernames: " + usernames.size() + " (max " + MAX_USERNAMES + " per call)");
+    if (deduped.size() > MAX_USERNAMES) {
+      return ToolJson.error(
+          "too many usernames: " + deduped.size() + " (max " + MAX_USERNAMES + " per call)");
     }
 
-    List<String> ordered = new ArrayList<>(usernames);
+    List<String> ordered = new ArrayList<>(deduped);
     List<Future<Lookup>> futures = new ArrayList<>(ordered.size());
     for (String username : ordered) {
       futures.add(lookupExecutor.submit(() -> lookup(username)));
     }
 
-    ObjectNode result = mapper.createObjectNode();
+    ObjectNode result = ToolJson.object();
     ObjectNode players = result.putObject("players");
     var notFound = result.putArray("not_found");
-    ObjectNode errors = mapper.createObjectNode();
+    ObjectNode errors = ToolJson.object();
 
     for (int i = 0; i < futures.size(); i++) {
       String username = ordered.get(i);
@@ -118,7 +91,7 @@ public class ChessComPlayersTool implements McpTool {
       } else if (lookup.player() == null) {
         notFound.add(username);
       } else {
-        players.set(username, mapper.valueToTree(lookup.player()));
+        players.set(username, ToolJson.mapper().valueToTree(lookup.player()));
       }
     }
 
@@ -126,11 +99,7 @@ public class ChessComPlayersTool implements McpTool {
       result.set("errors", errors);
     }
 
-    try {
-      return mapper.writeValueAsString(result);
-    } catch (IOException e) {
-      throw new RuntimeException(e);
-    }
+    return ToolJson.write(result);
   }
 
   /**

@@ -1,67 +1,44 @@
 package com.muchq.games.mcpserver.tools;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.muchq.games.one_d4.api.dto.IndexResponse;
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
+import io.micronaut.mcp.annotations.Tool;
+import io.micronaut.mcp.annotations.ToolArg;
+import jakarta.inject.Singleton;
 import java.util.Optional;
 import java.util.UUID;
 
-public class IndexStatusTool implements McpTool {
+@Singleton
+public class IndexStatusTool {
 
   private final IndexerFacade facade;
-  private final ObjectMapper mapper;
 
-  public IndexStatusTool(IndexerFacade facade, ObjectMapper mapper) {
+  public IndexStatusTool(IndexerFacade facade) {
     this.facade = facade;
-    this.mapper = mapper;
   }
 
-  @Override
-  public String getName() {
-    return "index_status";
-  }
-
-  @Override
-  public String getDescription() {
-    return "Check the status of an indexing request started with index_chess_games. Returns the"
-        + " current status (PENDING/PROCESSING/COMPLETED/FAILED), games indexed so far, and any"
-        + " error message.";
-  }
-
-  @Override
-  public Map<String, Object> getInputSchema() {
-    return Map.of(
-        "type", "object",
-        "properties",
-            Map.of(
-                "request_id",
-                Map.of("type", "string", "description", "The UUID of the indexing request")),
-        "required", List.of("request_id"));
-  }
-
-  @Override
-  public String execute(Map<String, Object> arguments) {
-    Object raw = arguments.get("request_id");
-    if (raw == null || raw.toString().isBlank()) {
-      return ToolResponses.error(mapper, "request_id is required");
+  @Tool(
+      name = "index_status",
+      description =
+          "Check the status of an indexing request started with index_chess_games. Returns the"
+              + " current status (PENDING/PROCESSING/COMPLETED/FAILED), games indexed so far, and"
+              + " any error message.")
+  public String indexStatus(
+      @ToolArg(name = "request_id", description = "The UUID of the indexing request")
+          String requestId) {
+    if (requestId.isBlank()) {
+      return ToolJson.error("request_id is required");
     }
-    UUID requestId;
+    UUID parsed;
     try {
-      requestId = UUID.fromString(raw.toString().trim());
+      parsed = UUID.fromString(requestId.trim());
     } catch (IllegalArgumentException e) {
-      return ToolResponses.error(mapper, "invalid request_id: '" + raw + "' (expected a UUID)");
+      return ToolJson.error("invalid request_id: '" + requestId + "' (expected a UUID)");
     }
 
-    Optional<IndexResponse> status = facade.status(requestId);
+    Optional<IndexResponse> status = facade.status(parsed);
     if (status.isEmpty()) {
-      return ToolResponses.error(mapper, "indexing request not found: " + requestId);
+      return ToolJson.error("indexing request not found: " + parsed);
     }
-    try {
-      return mapper.writeValueAsString(status.get());
-    } catch (IOException e) {
-      throw new RuntimeException(e);
-    }
+    return ToolJson.write(status.get());
   }
 }

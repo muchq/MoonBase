@@ -4,8 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.muchq.games.chess_com_client.ChessClient;
 import com.muchq.games.chess_com_client.StatsResponse;
-import com.muchq.platform.json.JsonUtils;
-import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
@@ -28,51 +26,26 @@ public class ChessComStatsToolTest {
   private final StatsResponse emptyStatsResponse =
       new StatsResponse(null, null, null, null, 0, null);
   private final ChessClient stubClient = new StubChessClient(Optional.of(emptyStatsResponse));
-  private final ChessComStatsTool tool = new ChessComStatsTool(stubClient, JsonUtils.mapper());
-
-  @Test
-  public void testGetName() {
-    assertThat(tool.getName()).isEqualTo("chess_com_stats");
-  }
-
-  @Test
-  public void testGetDescription() {
-    assertThat(tool.getDescription()).contains("chess.com").contains("stats");
-  }
-
-  @Test
-  public void testGetInputSchema() {
-    Map<String, Object> schema = tool.getInputSchema();
-    assertThat(schema).containsKey("type");
-    assertThat(schema).containsKey("properties");
-    assertThat(schema).containsKey("required");
-
-    @SuppressWarnings("unchecked")
-    Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
-    assertThat(properties).containsKey("username");
-  }
+  private final ChessComStatsTool tool = new ChessComStatsTool(stubClient);
 
   @Test
   public void testExecuteWithValidParameters() {
-    Map<String, Object> arguments = Map.of("username", "hikaru");
-    String result = tool.execute(arguments);
+    String result = tool.chessComStats("hikaru");
     assertThat(result).isNotNull();
   }
 
   @Test
   public void testExecuteWithDifferentUsername() {
-    Map<String, Object> arguments = Map.of("username", "magnus");
-    String result = tool.execute(arguments);
+    String result = tool.chessComStats("magnus");
     assertThat(result).isNotNull();
   }
 
   @Test
   public void testExecuteWithPlayerNotFound() {
     ChessClient notFoundClient = new StubChessClient(Optional.empty());
-    ChessComStatsTool notFoundTool = new ChessComStatsTool(notFoundClient, JsonUtils.mapper());
+    ChessComStatsTool notFoundTool = new ChessComStatsTool(notFoundClient);
 
-    Map<String, Object> arguments = Map.of("username", "nonexistent");
-    String result = notFoundTool.execute(arguments);
+    String result = notFoundTool.chessComStats("nonexistent");
     assertThat(result).isEqualTo("{\"error\":\"player not found\"}");
   }
 }

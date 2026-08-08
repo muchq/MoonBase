@@ -4,6 +4,21 @@ micronaut:
   application:
     name: ${APP_NAME:helloworld}
 
+  # mcpserver only. micronaut-mcp is on no other binary's classpath, so these keys
+  # bind to nothing in the apps that share this file. transport has no usable
+  # default: micronaut-mcp gates its whole server configuration on the property
+  # being *present*, so leaving it out disables the MCP endpoint entirely rather
+  # than falling back to HTTP.
+  mcp:
+    server:
+      transport: HTTP
+      endpoint: /mcp
+      info:
+        name: 1d4-mcp
+        version: ${MCP_SERVER_VERSION:1.0.0}
+
 mcp:
   auth:
+    # Empty means open: McpAuthenticationFilter requires this to be non-empty
+    # before it is created at all. The deployment sets no MCP_AUTH_TOKEN.
     token: ${MCP_AUTH_TOKEN:}

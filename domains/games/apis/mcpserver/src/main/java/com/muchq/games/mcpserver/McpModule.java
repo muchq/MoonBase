@@ -3,19 +3,7 @@ package com.muchq.games.mcpserver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.muchq.games.chess_com_client.ChessClient;
 import com.muchq.games.chessql.compiler.SqlCompiler;
-import com.muchq.games.mcpserver.tools.AggregateGamesTool;
-import com.muchq.games.mcpserver.tools.AnalyzePositionTool;
-import com.muchq.games.mcpserver.tools.ChessComGamesTool;
-import com.muchq.games.mcpserver.tools.ChessComPlayerTool;
-import com.muchq.games.mcpserver.tools.ChessComPlayersTool;
-import com.muchq.games.mcpserver.tools.ChessComStatsTool;
-import com.muchq.games.mcpserver.tools.IndexGamesTool;
-import com.muchq.games.mcpserver.tools.IndexStatusTool;
 import com.muchq.games.mcpserver.tools.IndexerFacade;
-import com.muchq.games.mcpserver.tools.McpTool;
-import com.muchq.games.mcpserver.tools.QueryGamesTool;
-import com.muchq.games.mcpserver.tools.ServerTimeTool;
-import com.muchq.games.mcpserver.tools.ToolRegistry;
 import com.muchq.games.one_d4.db.DataSourceFactory;
 import com.muchq.games.one_d4.db.GameFeatureDao;
 import com.muchq.games.one_d4.db.GameFeatureStore;
@@ -41,7 +29,6 @@ import io.micronaut.context.annotation.Bean;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.context.annotation.Factory;
 import java.time.Clock;
-import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -56,10 +43,10 @@ public class McpModule {
   // external database via INDEXER_DB_URL for durable indexes.
   private static final String DEFAULT_JDBC_URL = "jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1";
 
-  // Tool payloads are serialized with this mapper rather than an injected bean: Micronaut's own
-  // ObjectMapper (used for the HTTP layer) carries different inclusion defaults, and which bean
-  // wins injection must not decide the shape of tool responses. Tests use JsonUtils.mapper() too.
-  private static final ObjectMapper TOOL_MAPPER = JsonUtils.mapper();
+  // Deliberately not the injected Micronaut ObjectMapper: chess.com responses carry fields this
+  // client does not model, and JsonUtils' mapper is the one configured to ignore them. Tool
+  // payloads get the same treatment for the same reason — see ToolJson.
+  private static final ObjectMapper CHESS_CLIENT_MAPPER = JsonUtils.mapper();
 
   static String indexerJdbcUrl() {
     String env = System.getenv("INDEXER_DB_URL");
@@ -78,7 +65,7 @@ public class McpModule {
 
   @Context
   public ChessClient chessClient(HttpClient httpClient) {
-    return new ChessClient(httpClient, TOOL_MAPPER);
+    return new ChessClient(httpClient, CHESS_CLIENT_MAPPER);
   }
 
   @Context
@@ -213,27 +200,7 @@ public class McpModule {
     return new IndexerFacade(indexRequestService, gameFeatureStore, featureExtractor, sqlCompiler);
   }
 
-  @Context
-  public List<McpTool> mcpTools(
-      Clock clock,
-      ChessClient chessClient,
-      IndexerFacade indexerFacade,
-      @jakarta.inject.Named("chessComLookup") ExecutorService lookupExecutor) {
-    return List.of(
-        new ChessComGamesTool(chessClient, TOOL_MAPPER),
-        new ChessComPlayerTool(chessClient, TOOL_MAPPER),
-        new ChessComPlayersTool(chessClient, TOOL_MAPPER, lookupExecutor),
-        new ChessComStatsTool(chessClient, TOOL_MAPPER),
-        new ServerTimeTool(clock),
-        new IndexGamesTool(indexerFacade, TOOL_MAPPER),
-        new IndexStatusTool(indexerFacade, TOOL_MAPPER),
-        new QueryGamesTool(indexerFacade, TOOL_MAPPER),
-        new AggregateGamesTool(indexerFacade, TOOL_MAPPER),
-        new AnalyzePositionTool(indexerFacade, TOOL_MAPPER));
-  }
-
-  @Context
-  public ToolRegistry toolRegistry(List<McpTool> tools) {
-    return new ToolRegistry(tools);
-  }
+  // The tools themselves are @Singleton beans in the tools package, discovered by micronaut-mcp
+  // through the @Executable meta-annotation on @Tool. This factory only supplies what they
+  // inject: the ChessClient, the IndexerFacade, the Clock, and the named lookup pool.
 }

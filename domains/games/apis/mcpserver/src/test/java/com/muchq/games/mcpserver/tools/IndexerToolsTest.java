@@ -56,8 +56,6 @@ public class IndexerToolsTest {
       1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0
       """;
 
-  private final ObjectMapper mapper = JsonUtils.mapper();
-
   private TestDb testDb;
   private StubChessClient chessClient;
   private InMemoryIndexQueue queue;
@@ -92,16 +90,55 @@ public class IndexerToolsTest {
             requestDao, queue, worker::process, new DataAvailabilityResolver(periodDao));
     facade = new IndexerFacade(indexRequestService, gameFeatureDao, extractor, new SqlCompiler());
 
-    indexTool = new IndexGamesTool(facade, mapper);
-    statusTool = new IndexStatusTool(facade, mapper);
-    queryTool = new QueryGamesTool(facade, mapper);
-    aggregateTool = new AggregateGamesTool(facade, mapper);
-    analyzeTool = new AnalyzePositionTool(facade, mapper);
+    indexTool = new IndexGamesTool(facade);
+    statusTool = new IndexStatusTool(facade);
+    queryTool = new QueryGamesTool(facade);
+    aggregateTool = new AggregateGamesTool(facade);
+    analyzeTool = new AnalyzePositionTool(facade);
   }
 
   @AfterEach
   public void tearDown() {
     executor.shutdownNow();
+  }
+
+  // Each tool method's parameters *are* its input schema now, so these spread the arguments a
+  // client would send over the real signature. The cases below still read as "these arguments,
+  // that result", and a parameter renamed or dropped fails to compile here.
+
+  private String index(Map<String, Object> arguments) {
+    return indexTool.indexChessGames(
+        (String) arguments.get("username"),
+        (String) arguments.get("platform"),
+        (String) arguments.get("start_month"),
+        (String) arguments.get("end_month"),
+        (Boolean) arguments.get("exclude_bullet"),
+        (Boolean) arguments.get("skip_cache"));
+  }
+
+  private String status(Map<String, Object> arguments) {
+    return statusTool.indexStatus((String) arguments.get("request_id"));
+  }
+
+  private String query(Map<String, Object> arguments) {
+    return queryTool.queryChessGames(
+        (String) arguments.get("query"),
+        (String) arguments.get("player"),
+        (Integer) arguments.get("limit"),
+        (Boolean) arguments.get("include_pgn"));
+  }
+
+  @SuppressWarnings("unchecked")
+  private String aggregate(Map<String, Object> arguments) {
+    return aggregateTool.aggregateChessGames(
+        (String) arguments.get("query"),
+        (List<String>) arguments.getOrDefault("group_by", List.of()),
+        (String) arguments.get("player"),
+        (Integer) arguments.get("limit"));
+  }
+
+  private String analyze(Map<String, Object> arguments) {
+    return analyzeTool.analyzePosition((String) arguments.get("pgn"));
   }
 
   private JsonNode parse(String json) {
@@ -111,7 +148,7 @@ public class IndexerToolsTest {
   /** Runs the aggregate tool over the indexed month's blitz games, as hikaru's perspective. */
   private JsonNode aggregateAsHikaru(String... groupBy) {
     return parse(
-        aggregateTool.execute(
+        aggregate(
             Map.of(
                 "query", "time.class = \"blitz\"",
                 "player", "hikaru",
@@ -136,7 +173,7 @@ public class IndexerToolsTest {
 
     JsonNode result =
         parse(
-            indexTool.execute(
+            index(
                 Map.of(
                     "username", "hikaru",
                     "platform", "chess.com",
@@ -151,9 +188,7 @@ public class IndexerToolsTest {
     givenIndexedMonth();
 
     JsonNode queried =
-        parse(
-            queryTool.execute(
-                Map.of("query", "white.username = \"hikaru\" AND motif(check)", "limit", 10)));
+        parse(query(Map.of("query", "white.username = \"hikaru\" AND motif(check)", "limit", 10)));
     assertThat(queried.get("count").asInt()).isEqualTo(1);
     JsonNode game = queried.get("games").get(0);
     assertThat(game.get("whiteTitle").asText()).isEqualTo("GM");
@@ -165,15 +200,12 @@ public class IndexerToolsTest {
   public void queryByTitleAndOpeningFamilyFields() {
     givenIndexedMonth();
 
-    JsonNode byTitle =
-        parse(queryTool.execute(Map.of("query", "black.title = \"GM\"", "limit", 10)));
+    JsonNode byTitle = parse(query(Map.of("query", "black.title = \"GM\"", "limit", 10)));
     assertThat(byTitle.get("count").asInt()).isEqualTo(1);
     assertThat(byTitle.get("games").get(0).get("blackUsername").asText()).isEqualTo("Hikaru");
 
     JsonNode byFamily =
-        parse(
-            queryTool.execute(
-                Map.of("query", "opening.family = \"caro kann defense\"", "limit", 10)));
+        parse(query(Map.of("query", "opening.family = \"caro kann defense\"", "limit", 10)));
     assertThat(byFamily.get("count").asInt()).isEqualTo(1);
   }
 
@@ -181,8 +213,7 @@ public class IndexerToolsTest {
   public void queryIncludePgnKeepsPgn() {
     givenIndexedMonth();
     JsonNode queried =
-        parse(
-            queryTool.execute(Map.of("query", "white.username = \"hikaru\"", "include_pgn", true)));
+        parse(query(Map.of("query", "white.username = \"hikaru\"", "include_pgn", true)));
     assertThat(queried.get("games").get(0).get("pgn").asText()).contains("1. e4 e5");
   }
 
@@ -192,7 +223,7 @@ public class IndexerToolsTest {
 
     JsonNode result =
         parse(
-            aggregateTool.execute(
+            aggregate(
                 Map.of(
                     "query",
                     "white.username = \"hikaru\" OR black.username = \"hikaru\"",
@@ -217,7 +248,7 @@ public class IndexerToolsTest {
 
     JsonNode result =
         parse(
-            aggregateTool.execute(
+            aggregate(
                 Map.of(
                     "query",
                     "white.username = \"hikaru\" OR black.username = \"hikaru\"",
@@ -236,7 +267,7 @@ public class IndexerToolsTest {
     // so an LLM must not be told to re-query with a larger limit.
     JsonNode exact =
         parse(
-            aggregateTool.execute(
+            aggregate(
                 Map.of(
                     "query",
                     "white.username = \"hikaru\" OR black.username = \"hikaru\"",
@@ -270,8 +301,7 @@ public class IndexerToolsTest {
 
     JsonNode missingPlayer =
         parse(
-            aggregateTool.execute(
-                Map.of("query", "time.class = \"blitz\"", "group_by", List.of("me.color"))));
+            aggregate(Map.of("query", "time.class = \"blitz\"", "group_by", List.of("me.color"))));
     assertThat(missingPlayer.get("error").asText())
         .isEqualTo(
             "Field 'me.color' is perspective-relative (me.*, opponent.*, outcome) and requires a"
@@ -362,23 +392,19 @@ public class IndexerToolsTest {
     // The stub's games are played 2025-06-15T15:06:40Z
     givenIndexedMonth();
 
-    assertThat(
-            parse(queryTool.execute(Map.of("query", "month = \"2025-06\""))).get("count").asInt())
+    assertThat(parse(query(Map.of("query", "month = \"2025-06\""))).get("count").asInt())
+        .isEqualTo(2);
+    assertThat(parse(query(Map.of("query", "date = \"2025-06-15\""))).get("count").asInt())
         .isEqualTo(2);
     assertThat(
-            parse(queryTool.execute(Map.of("query", "date = \"2025-06-15\""))).get("count").asInt())
-        .isEqualTo(2);
-    assertThat(
-            parse(
-                    queryTool.execute(
-                        Map.of("query", "date >= \"2025-06-01\" AND date < \"2025-06-15\"")))
+            parse(query(Map.of("query", "date >= \"2025-06-01\" AND date < \"2025-06-15\"")))
                 .get("count")
                 .asInt())
         .isZero();
 
     // A month that was never indexed is indistinguishable from a month with no games: the tool
     // returns an empty result, not an error. Callers must not read this as "played nothing".
-    JsonNode neverIndexed = parse(queryTool.execute(Map.of("query", "month = \"2020-01\"")));
+    JsonNode neverIndexed = parse(query(Map.of("query", "month = \"2020-01\"")));
     assertThat(neverIndexed.has("error")).isFalse();
     assertThat(neverIndexed.get("count").asInt()).isZero();
   }
@@ -389,7 +415,7 @@ public class IndexerToolsTest {
 
     JsonNode inMonth =
         parse(
-            aggregateTool.execute(
+            aggregate(
                 Map.of("query", "month = \"2025-06\"", "group_by", List.of("opening_family"))));
     assertThat(inMonth.get("count").asInt()).isEqualTo(2);
     assertThat(inMonth.get("totalGames").asLong()).isEqualTo(2);
@@ -397,7 +423,7 @@ public class IndexerToolsTest {
     // Same empty-not-error contract on the aggregate side
     JsonNode neverIndexed =
         parse(
-            aggregateTool.execute(
+            aggregate(
                 Map.of("query", "month = \"2020-01\"", "group_by", List.of("opening_family"))));
     assertThat(neverIndexed.has("error")).isFalse();
     assertThat(neverIndexed.get("count").asInt()).isZero();
@@ -415,40 +441,43 @@ public class IndexerToolsTest {
   public void dateAndMonthFailurePathsReturnActionableToolErrors() {
     givenIndexedMonth();
 
-    assertThat(errorFrom(queryTool, Map.of("query", "date = \"2026-7-1\"")))
+    assertThat(errorFrom(this::query, Map.of("query", "date = \"2026-7-1\"")))
         .isEqualTo("date requires an ISO date string (\"YYYY-MM-DD\"), got: 2026-7-1");
-    assertThat(errorFrom(queryTool, Map.of("query", "date >= \"July\"")))
+    assertThat(errorFrom(this::query, Map.of("query", "date >= \"July\"")))
         .isEqualTo("date requires an ISO date string (\"YYYY-MM-DD\"), got: July");
-    assertThat(errorFrom(queryTool, Map.of("query", "date = 20260701")))
+    assertThat(errorFrom(this::query, Map.of("query", "date = 20260701")))
         .isEqualTo("date requires an ISO date string (\"YYYY-MM-DD\"), got: 20260701");
-    assertThat(errorFrom(queryTool, Map.of("query", "month = \"2026-7\"")))
+    assertThat(errorFrom(this::query, Map.of("query", "month = \"2026-7\"")))
         .isEqualTo("month requires a \"YYYY-MM\" string, got: 2026-7");
-    assertThat(errorFrom(queryTool, Map.of("query", "month >= \"2026-07\"")))
+    assertThat(errorFrom(this::query, Map.of("query", "month >= \"2026-07\"")))
         .isEqualTo("month supports only '=' (use date for range comparisons), got: >=");
-    assertThat(errorFrom(queryTool, Map.of("query", "date IN [\"2026-07-01\"]")))
+    assertThat(errorFrom(this::query, Map.of("query", "date IN [\"2026-07-01\"]")))
         .isEqualTo(
             "date does not support IN; use comparisons instead (date >= \"2026-07-01\", or a"
                 + " range like date >= \"2026-07-01\" AND date < \"2026-09-01\")");
-    assertThat(errorFrom(queryTool, Map.of("query", "month IN [\"2026-07\"]")))
+    assertThat(errorFrom(this::query, Map.of("query", "month IN [\"2026-07\"]")))
         .isEqualTo(
             "month does not support IN; use comparisons instead (month = \"2026-07\", or a"
                 + " range like date >= \"2026-07-01\" AND date < \"2026-09-01\")");
 
     assertThat(
-            errorFrom(aggregateTool, Map.of("query", "white.elo > 1", "group_by", List.of("date"))))
+            errorFrom(
+                this::aggregate, Map.of("query", "white.elo > 1", "group_by", List.of("date"))))
         .isEqualTo(
             "'date' is a filter-only field and is not supported in groupBy; use it in the query"
                 + " filter instead (e.g. date >= \"2026-07-01\")");
     assertThat(
             errorFrom(
-                aggregateTool, Map.of("query", "white.elo > 1", "group_by", List.of("month"))))
+                this::aggregate, Map.of("query", "white.elo > 1", "group_by", List.of("month"))))
         .isEqualTo(
             "'month' is a filter-only field and is not supported in groupBy; use it in the query"
                 + " filter instead (e.g. month = \"2026-07\")");
   }
 
-  private String errorFrom(McpTool tool, Map<String, Object> arguments) {
-    JsonNode result = parse(tool.execute(arguments));
+  private String errorFrom(
+      java.util.function.Function<Map<String, Object>, String> tool,
+      Map<String, Object> arguments) {
+    JsonNode result = parse(tool.apply(arguments));
     assertThat(result.has("error")).as("expected an error for %s", arguments).isTrue();
     return result.get("error").asText();
   }
@@ -459,13 +488,13 @@ public class IndexerToolsTest {
     // Re-issuing the same request returns the existing one
     JsonNode result =
         parse(
-            indexTool.execute(
+            index(
                 Map.of(
                     "username", "hikaru",
                     "platform", "chess.com",
                     "start_month", "2026-06",
                     "end_month", "2026-06")));
-    JsonNode status = parse(statusTool.execute(Map.of("request_id", result.get("id").asText())));
+    JsonNode status = parse(status(Map.of("request_id", result.get("id").asText())));
     assertThat(status.get("status").asText()).isEqualTo("COMPLETED");
   }
 
@@ -479,13 +508,13 @@ public class IndexerToolsTest {
   public void indexStatusReportsWhetherTheDataStillExists() {
     JsonNode result =
         parse(
-            indexTool.execute(
+            index(
                 Map.of(
                     "username", "hikaru",
                     "platform", "chess.com",
                     "start_month", "2026-06",
                     "end_month", "2026-06")));
-    JsonNode status = parse(statusTool.execute(Map.of("request_id", result.get("id").asText())));
+    JsonNode status = parse(status(Map.of("request_id", result.get("id").asText())));
 
     assertThat(status.get("status").asText()).isEqualTo("COMPLETED");
     assertThat(status.has("data")).isTrue();
@@ -502,7 +531,7 @@ public class IndexerToolsTest {
     // Without skip_cache, a re-request (any username case) is served from the period cache
     JsonNode cached =
         parse(
-            indexTool.execute(
+            index(
                 Map.of(
                     "username", "HIKARU",
                     "platform", "chess.com",
@@ -515,7 +544,7 @@ public class IndexerToolsTest {
     // With skip_cache, the month is refetched and rows rewritten
     JsonNode refetched =
         parse(
-            indexTool.execute(
+            index(
                 Map.of(
                     "username", "hikaru",
                     "platform", "chess.com",
@@ -531,7 +560,7 @@ public class IndexerToolsTest {
   public void multiMonthIndexIsEnqueuedAsPending() {
     JsonNode result =
         parse(
-            indexTool.execute(
+            index(
                 Map.of(
                     "username", "hikaru",
                     "platform", "chess.com",
@@ -547,16 +576,14 @@ public class IndexerToolsTest {
 
     // hikaru wins game/1 as white (1-0) and loses game/2 as black (1-0)
     JsonNode wins =
-        parse(
-            queryTool.execute(
-                Map.of("query", "outcome = \"win\"", "player", "hikaru", "limit", 10)));
+        parse(query(Map.of("query", "outcome = \"win\"", "player", "hikaru", "limit", 10)));
     assertThat(wins.get("count").asInt()).isEqualTo(1);
     assertThat(wins.get("games").get(0).get("gameUrl").asText())
         .isEqualTo("https://chess.com/game/1");
 
     JsonNode lossesByFamily =
         parse(
-            aggregateTool.execute(
+            aggregate(
                 Map.of(
                     "query",
                     "outcome = \"loss\"",
@@ -568,7 +595,7 @@ public class IndexerToolsTest {
     assertThat(lossesByFamily.get("groups").get(0).get("group").get("opening_family").asText())
         .isEqualTo("Caro Kann Defense");
 
-    JsonNode missingPlayer = parse(queryTool.execute(Map.of("query", "outcome = \"win\"")));
+    JsonNode missingPlayer = parse(query(Map.of("query", "outcome = \"win\"")));
     assertThat(missingPlayer.get("error").asText()).contains("requires a player");
   }
 
@@ -576,7 +603,7 @@ public class IndexerToolsTest {
   public void aggregateWithNoMatchesReturnsEmptyGroupsArray() {
     JsonNode result =
         parse(
-            aggregateTool.execute(
+            aggregate(
                 Map.of(
                     "query",
                     "white.username = \"nobody\"",
@@ -592,7 +619,7 @@ public class IndexerToolsTest {
 
   @Test
   public void analyzePositionDetectsMotifsWithoutIndexing() {
-    JsonNode result = parse(analyzeTool.execute(Map.of("pgn", SCHOLARS_MATE_PGN)));
+    JsonNode result = parse(analyze(Map.of("pgn", SCHOLARS_MATE_PGN)));
     assertThat(result.get("numMoves").asInt()).isEqualTo(4);
     List<String> motifs = new ArrayList<>();
     result.get("motifs").forEach(m -> motifs.add(m.asText()));
@@ -607,7 +634,7 @@ public class IndexerToolsTest {
     // (username/start_month/end_month), not the REST field names the shared service uses.
     JsonNode result =
         parse(
-            indexTool.execute(
+            index(
                 Map.of(
                     "username", "hikaru",
                     "platform", "chess.com",
@@ -621,7 +648,7 @@ public class IndexerToolsTest {
   public void missingUsernameErrorUsesToolArgumentNames() {
     JsonNode result =
         parse(
-            indexTool.execute(
+            index(
                 Map.of(
                     "platform", "chess.com",
                     "start_month", "2026-06",
@@ -633,7 +660,7 @@ public class IndexerToolsTest {
   public void startAfterEndErrorUsesToolArgumentNames() {
     JsonNode result =
         parse(
-            indexTool.execute(
+            index(
                 Map.of(
                     "username", "hikaru",
                     "platform", "chess.com",
@@ -646,7 +673,7 @@ public class IndexerToolsTest {
   public void unsupportedPlatformReturnsJsonError() {
     JsonNode result =
         parse(
-            indexTool.execute(
+            index(
                 Map.of(
                     "username", "x",
                     "platform", "lichess",
@@ -657,21 +684,20 @@ public class IndexerToolsTest {
 
   @Test
   public void badChessQlReturnsJsonError() {
-    JsonNode result = parse(queryTool.execute(Map.of("query", "motif(")));
+    JsonNode result = parse(query(Map.of("query", "motif(")));
     assertThat(result.has("error")).isTrue();
 
     JsonNode unknownField =
-        parse(aggregateTool.execute(Map.of("query", "white.elo > 1", "group_by", List.of("pgn"))));
+        parse(aggregate(Map.of("query", "white.elo > 1", "group_by", List.of("pgn"))));
     assertThat(unknownField.get("error").asText()).contains("Unknown field");
   }
 
   @Test
   public void unknownRequestIdReturnsJsonError() {
-    JsonNode badUuid = parse(statusTool.execute(Map.of("request_id", "not-a-uuid")));
+    JsonNode badUuid = parse(status(Map.of("request_id", "not-a-uuid")));
     assertThat(badUuid.get("error").asText()).contains("UUID");
 
-    JsonNode missing =
-        parse(statusTool.execute(Map.of("request_id", "00000000-0000-0000-0000-000000000000")));
+    JsonNode missing = parse(status(Map.of("request_id", "00000000-0000-0000-0000-000000000000")));
     assertThat(missing.get("error").asText()).contains("not found");
   }
 

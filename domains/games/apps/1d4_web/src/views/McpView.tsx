@@ -3,6 +3,24 @@ import { MCP_TOOLS } from '../mcpTools';
 
 const ENDPOINT = 'https://mcp.1d4.net/mcp';
 
+const CLAUDE_DESKTOP_CONFIG = `{
+  "mcpServers": {
+    "1d4": {
+      "type": "http",
+      "url": "${ENDPOINT}"
+    }
+  }
+}`;
+
+const MCP_REMOTE_CONFIG = `{
+  "mcpServers": {
+    "1d4": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "${ENDPOINT}"]
+    }
+  }
+}`;
+
 const LIST_TOOLS_CURL = `curl -s ${ENDPOINT} \\
   -H 'Content-Type: application/json' \\
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`;
@@ -50,29 +68,39 @@ export default function McpView() {
       <section className="panel">
         <h2>Connecting</h2>
         <p>
-          The endpoint speaks{' '}
-          <strong>JSON-RPC 2.0 over a single HTTP POST</strong>. Each request is
-          self-contained: send a method, get a JSON response.
+          The endpoint speaks <strong>Streamable HTTP</strong>, MCP&rsquo;s
+          current remote transport. Point a client at it and it connects — no
+          bridge, no wrapper.
+        </p>
+        <pre className="code-block">
+          <code>{CLAUDE_DESKTOP_CONFIG}</code>
+        </pre>
+        <p>
+          For a client that only speaks stdio, or an older one without native
+          Streamable HTTP support, <code>mcp-remote</code> does the translation:
+        </p>
+        <pre className="code-block">
+          <code>{MCP_REMOTE_CONFIG}</code>
+        </pre>
+        <p className="panel-note">
+          One caveat, and it costs nothing today: the optional server&rarr;client
+          SSE stream is not implemented, so <code>GET /mcp</code> answers{' '}
+          <code>405</code>. Streamable HTTP makes that leg optional and every
+          tool here is request/response, so no client needs it. Calls are
+          unauthenticated; the server supports a bearer token, but the
+          deployment sets none.
+        </p>
+      </section>
+
+      <section className="panel">
+        <h2>Or drive it yourself</h2>
+        <p>
+          It is JSON-RPC 2.0 over HTTP POST, so a request is also just a{' '}
+          <code>curl</code>:
         </p>
         <pre className="code-block">
           <code>{LIST_TOOLS_CURL}</code>
         </pre>
-        <p>
-          That is the whole protocol surface — which is also the caveat. It is{' '}
-          <strong>not</strong> one of MCP&rsquo;s standard remote transports:
-          there is no SSE stream, no <code>Mcp-Session-Id</code>, and{' '}
-          <code>notifications/initialized</code> is not implemented. Clients
-          that speak stdio, HTTP+SSE or Streamable HTTP will not connect without
-          a small bridge that turns their transport into these plain POSTs. If
-          you are driving it from your own code, the <code>curl</code> above is
-          the entire contract.
-        </p>
-        <p className="panel-note">
-          <code>initialize</code>, <code>tools/list</code> and{' '}
-          <code>tools/call</code> are the three methods implemented. Calls are
-          unauthenticated today; the server supports a bearer token, but the
-          deployment sets none.
-        </p>
       </section>
 
       <section className="panel">

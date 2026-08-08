@@ -74,8 +74,7 @@ public class ChessComGamesToolTest {
           game("g5", "rapid", "chess", false, "opp3", "Hikaru"));
 
   private static ChessComGamesTool toolFor(List<PlayedGame> games) {
-    return new ChessComGamesTool(
-        new StubChessClient(Optional.of(new GamesResponse(games))), JsonUtils.mapper());
+    return new ChessComGamesTool(new StubChessClient(Optional.of(new GamesResponse(games))));
   }
 
   private final ChessComGamesTool tool = toolFor(GAMES);
@@ -84,55 +83,38 @@ public class ChessComGamesToolTest {
     return JsonUtils.readAs(json, JsonNode.class);
   }
 
-  private static Map<String, Object> args(Map<String, Object> extra) {
+  /**
+   * Calls the tool the way the framework does: by name, with the arguments a client sent. The
+   * signature is the input schema now, so spreading a map over it here keeps each case below
+   * reading as "these arguments, that result" while still exercising the real parameter list.
+   */
+  private String call(Map<String, Object> arguments) {
+    return call(tool, arguments);
+  }
+
+  private static String call(ChessComGamesTool tool, Map<String, Object> arguments) {
     var all =
         new java.util.HashMap<String, Object>(
             Map.of("username", "hikaru", "year", "2026", "month", "07"));
-    all.putAll(extra);
-    return all;
-  }
-
-  @Test
-  public void testGetName() {
-    assertThat(tool.getName()).isEqualTo("chess_com_games");
-  }
-
-  @Test
-  public void testGetDescription() {
-    assertThat(tool.getDescription())
-        .contains("chess.com games")
-        .contains("month")
-        .contains("year");
-  }
-
-  @Test
-  public void testGetInputSchema() {
-    Map<String, Object> schema = tool.getInputSchema();
-    assertThat(schema).containsKey("type");
-    assertThat(schema).containsKey("properties");
-    assertThat(schema).containsKey("required");
-
-    @SuppressWarnings("unchecked")
-    Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
-    assertThat(properties)
-        .containsKeys(
-            "username",
-            "year",
-            "month",
-            "time_class",
-            "color",
-            "rated",
-            "rules",
-            "opponent",
-            "include_pgn",
-            "include_tcn",
-            "limit",
-            "offset");
+    all.putAll(arguments);
+    return tool.chessComGames(
+        (String) all.get("username"),
+        (String) all.get("year"),
+        (String) all.get("month"),
+        (String) all.get("time_class"),
+        (String) all.get("color"),
+        (Boolean) all.get("rated"),
+        (String) all.get("rules"),
+        (String) all.get("opponent"),
+        (Boolean) all.get("include_pgn"),
+        (Boolean) all.get("include_tcn"),
+        (Integer) all.get("limit"),
+        (Integer) all.get("offset"));
   }
 
   @Test
   public void testDefaultExcludesVariantsAndOmitsPgnAndTcn() {
-    JsonNode result = parse(tool.execute(args(Map.of())));
+    JsonNode result = parse(call(Map.of()));
 
     // g4 is chess960 and excluded by the default rules=chess filter
     assertThat(result.get("total_matching").asInt()).isEqualTo(4);
@@ -147,7 +129,7 @@ public class ChessComGamesToolTest {
 
   @Test
   public void testTimeClassFilter() {
-    JsonNode result = parse(tool.execute(args(Map.of("time_class", "blitz"))));
+    JsonNode result = parse(call(Map.of("time_class", "blitz")));
     assertThat(result.get("total_matching").asInt()).isEqualTo(2);
     for (JsonNode game : result.get("games")) {
       assertThat(game.get("timeClass").asText()).isEqualTo("blitz");
@@ -156,7 +138,7 @@ public class ChessComGamesToolTest {
 
   @Test
   public void testColorFilterIsCaseInsensitive() {
-    JsonNode result = parse(tool.execute(args(Map.of("color", "white"))));
+    JsonNode result = parse(call(Map.of("color", "white")));
     // hikaru played white in g1 and g3 (g4 is excluded as a variant)
     assertThat(result.get("total_matching").asInt()).isEqualTo(2);
     for (JsonNode game : result.get("games")) {
@@ -166,24 +148,24 @@ public class ChessComGamesToolTest {
 
   @Test
   public void testRatedFilter() {
-    JsonNode result = parse(tool.execute(args(Map.of("rated", false))));
+    JsonNode result = parse(call(Map.of("rated", false)));
     assertThat(result.get("total_matching").asInt()).isEqualTo(1);
     assertThat(result.get("games").get(0).get("url").asText()).isEqualTo("g5");
   }
 
   @Test
   public void testRulesVariantSelection() {
-    JsonNode chess960 = parse(tool.execute(args(Map.of("rules", "chess960"))));
+    JsonNode chess960 = parse(call(Map.of("rules", "chess960")));
     assertThat(chess960.get("total_matching").asInt()).isEqualTo(1);
     assertThat(chess960.get("games").get(0).get("url").asText()).isEqualTo("g4");
 
-    JsonNode all = parse(tool.execute(args(Map.of("rules", "all"))));
+    JsonNode all = parse(call(Map.of("rules", "all")));
     assertThat(all.get("total_matching").asInt()).isEqualTo(5);
   }
 
   @Test
   public void testOpponentFilter() {
-    JsonNode result = parse(tool.execute(args(Map.of("opponent", "OPP1"))));
+    JsonNode result = parse(call(Map.of("opponent", "OPP1")));
     assertThat(result.get("total_matching").asInt()).isEqualTo(2);
     for (JsonNode game : result.get("games")) {
       assertThat(game.get("url").asText()).isIn("g1", "g3");
@@ -192,14 +174,14 @@ public class ChessComGamesToolTest {
 
   @Test
   public void testCombinedFilters() {
-    JsonNode result = parse(tool.execute(args(Map.of("time_class", "blitz", "color", "white"))));
+    JsonNode result = parse(call(Map.of("time_class", "blitz", "color", "white")));
     assertThat(result.get("total_matching").asInt()).isEqualTo(1);
     assertThat(result.get("games").get(0).get("url").asText()).isEqualTo("g1");
   }
 
   @Test
   public void testIncludePgnAndTcn() {
-    JsonNode result = parse(tool.execute(args(Map.of("include_pgn", true, "include_tcn", true))));
+    JsonNode result = parse(call(Map.of("include_pgn", true, "include_tcn", true)));
     JsonNode game = result.get("games").get(0);
     assertThat(game.get("pgn").asText()).contains("1. e4 e5");
     assertThat(game.get("tcn").asText()).isNotEmpty();
@@ -207,12 +189,12 @@ public class ChessComGamesToolTest {
 
   @Test
   public void testLimitAndOffsetPagination() {
-    JsonNode page1 = parse(tool.execute(args(Map.of("limit", 2))));
+    JsonNode page1 = parse(call(Map.of("limit", 2)));
     assertThat(page1.get("total_matching").asInt()).isEqualTo(4);
     assertThat(page1.get("returned").asInt()).isEqualTo(2);
     assertThat(page1.get("has_more").asBoolean()).isTrue();
 
-    JsonNode page2 = parse(tool.execute(args(Map.of("limit", 2, "offset", 2))));
+    JsonNode page2 = parse(call(Map.of("limit", 2, "offset", 2)));
     assertThat(page2.get("returned").asInt()).isEqualTo(2);
     assertThat(page2.get("has_more").asBoolean()).isFalse();
     assertThat(page2.get("games").get(0).get("url").asText())
@@ -221,45 +203,44 @@ public class ChessComGamesToolTest {
 
   @Test
   public void testMonthWithAndWithoutLeadingZeroBothWork() {
-    assertThat(parse(tool.execute(args(Map.of("month", "7")))).has("games")).isTrue();
-    assertThat(parse(tool.execute(args(Map.of("month", "07")))).has("games")).isTrue();
+    assertThat(parse(call(Map.of("month", "7"))).has("games")).isTrue();
+    assertThat(parse(call(Map.of("month", "07"))).has("games")).isTrue();
   }
 
   @Test
   public void testInvalidMonthReturnsUsableError() {
-    JsonNode result = parse(tool.execute(args(Map.of("month", "July"))));
+    JsonNode result = parse(call(Map.of("month", "July")));
     assertThat(result.get("error").asText()).contains("month").contains("July");
   }
 
   @Test
   public void testOutOfRangeMonthReturnsError() {
-    JsonNode result = parse(tool.execute(args(Map.of("month", "13"))));
+    JsonNode result = parse(call(Map.of("month", "13")));
     assertThat(result.get("error").asText()).contains("month");
   }
 
   @Test
   public void testInvalidYearReturnsUsableError() {
-    JsonNode result = parse(tool.execute(args(Map.of("year", "invalid"))));
+    JsonNode result = parse(call(Map.of("year", "invalid")));
     assertThat(result.get("error").asText()).contains("year").contains("invalid");
   }
 
   @Test
   public void testInvalidTimeClassReturnsError() {
-    JsonNode result = parse(tool.execute(args(Map.of("time_class", "hyperbullet"))));
+    JsonNode result = parse(call(Map.of("time_class", "hyperbullet")));
     assertThat(result.get("error").asText()).contains("time_class");
   }
 
   @Test
   public void testInvalidColorReturnsError() {
-    JsonNode result = parse(tool.execute(args(Map.of("color", "green"))));
+    JsonNode result = parse(call(Map.of("color", "green")));
     assertThat(result.get("error").asText()).contains("color");
   }
 
   @Test
   public void testPlayerNotFoundReturnsJsonError() {
-    ChessComGamesTool notFoundTool =
-        new ChessComGamesTool(new StubChessClient(Optional.empty()), JsonUtils.mapper());
-    String result = notFoundTool.execute(args(Map.of()));
+    ChessComGamesTool notFoundTool = new ChessComGamesTool(new StubChessClient(Optional.empty()));
+    String result = call(notFoundTool, Map.of());
     assertThat(result).isEqualTo("{\"error\":\"player not found\"}");
   }
 }

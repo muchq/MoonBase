@@ -48,6 +48,11 @@ maven.install(
         "io.micronaut:micronaut-runtime",
         "io.micronaut.jaxrs:micronaut-jaxrs-processor",
         "io.micronaut.jaxrs:micronaut-jaxrs-server",
+        # micronaut-mcp is pinned at the 0.0.x line on purpose: 1.0.0 and later
+        # require Micronaut 5, and this repo is on the Micronaut 4 core BOM
+        # above. 0.0.20 is the last release built against Micronaut 4.
+        "io.micronaut.mcp:micronaut-mcp-annotations",
+        "io.micronaut.mcp:micronaut-mcp-server-java-sdk",
         "io.netty:netty-common",
         "io.netty:netty-codec",
         "io.netty:netty-handler",
@@ -70,6 +75,7 @@ maven.install(
         "io.micronaut:micronaut-core-bom:4.10.25",
         "io.micronaut.jaxrs:micronaut-jaxrs-bom:4.10.0",
         "io.micronaut.validation:micronaut-validation-bom:4.12.0",
+        "io.micronaut.mcp:micronaut-mcp-bom:0.0.20",
         "com.fasterxml.jackson:jackson-bom:2.22.0",
         "org.junit:junit-bom:6.1.1",
     ],

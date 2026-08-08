@@ -1,5 +1,5 @@
 {
-  "_comment": "The tool roster mcp.1d4.net advertises, and the contract between the server and the site's /mcp page. McpToolRegistryContractTest asserts this matches ToolRegistry exactly; 1d4_web's McpView.test.tsx asserts the page's table matches this file. Adding, removing or renaming a tool therefore fails on the Java side until this list is updated, and fails on the frontend side until the page is. Sorted by name.",
+  "_comment": "The tool roster mcp.1d4.net advertises, and the contract between the server and the site's /mcp page. McpToolRosterContractTest asks the running server for tools/list and asserts it matches this file exactly; 1d4_web's McpView.test.tsx asserts the page's table matches the same file. Adding, removing or renaming a tool therefore fails on the Java side until this list is updated, and fails on the frontend side until the page is. The names come from the @Tool annotations, so there is no hand-written registry left in between. Sorted by name.",
   "tools": [
     "aggregate_chess_games",
     "analyze_position",

@@ -2,30 +2,6 @@ load("//bazel/rules:java.bzl", "artifact", "java_binary", "java_library", "java_
 load("//bazel/rules:oci.bzl", "linux_oci_java")
 
 java_library(
-    name = "dtos",
-    srcs = [
-        "src/main/java/com/muchq/games/mcpserver/dtos/ClientInfo.java",
-        "src/main/java/com/muchq/games/mcpserver/dtos/ContentItem.java",
-        "src/main/java/com/muchq/games/mcpserver/dtos/InitializeParams.java",
-        "src/main/java/com/muchq/games/mcpserver/dtos/InitializeResult.java",
-        "src/main/java/com/muchq/games/mcpserver/dtos/JsonRpcError.java",
-        "src/main/java/com/muchq/games/mcpserver/dtos/JsonRpcRequest.java",
-        "src/main/java/com/muchq/games/mcpserver/dtos/JsonRpcResponse.java",
-        "src/main/java/com/muchq/games/mcpserver/dtos/ServerCapabilities.java",
-        "src/main/java/com/muchq/games/mcpserver/dtos/ServerInfo.java",
-        "src/main/java/com/muchq/games/mcpserver/dtos/Tool.java",
-        "src/main/java/com/muchq/games/mcpserver/dtos/ToolCallParams.java",
-        "src/main/java/com/muchq/games/mcpserver/dtos/ToolCallResult.java",
-        "src/main/java/com/muchq/games/mcpserver/dtos/ToolsCapability.java",
-        "src/main/java/com/muchq/games/mcpserver/dtos/ToolsListResult.java",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        artifact("com.fasterxml.jackson.core:jackson-annotations"),
-    ],
-)
-
-java_library(
     name = "tools",
     srcs = [
         "src/main/java/com/muchq/games/mcpserver/tools/AggregateGamesTool.java",
@@ -37,15 +13,12 @@ java_library(
         "src/main/java/com/muchq/games/mcpserver/tools/IndexGamesTool.java",
         "src/main/java/com/muchq/games/mcpserver/tools/IndexStatusTool.java",
         "src/main/java/com/muchq/games/mcpserver/tools/IndexerFacade.java",
-        "src/main/java/com/muchq/games/mcpserver/tools/McpTool.java",
         "src/main/java/com/muchq/games/mcpserver/tools/QueryGamesTool.java",
         "src/main/java/com/muchq/games/mcpserver/tools/ServerTimeTool.java",
-        "src/main/java/com/muchq/games/mcpserver/tools/ToolRegistry.java",
-        "src/main/java/com/muchq/games/mcpserver/tools/ToolResponses.java",
+        "src/main/java/com/muchq/games/mcpserver/tools/ToolJson.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":dtos",
         "//domains/games/apis/one_d4:db",
         "//domains/games/apis/one_d4:dto",
         "//domains/games/apis/one_d4:engine",
@@ -54,8 +27,15 @@ java_library(
         "//domains/games/libs/chess_com_client",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
+        "//domains/platform/libs/json",
         artifact("com.fasterxml.jackson.core:jackson-core"),
         artifact("com.fasterxml.jackson.core:jackson-databind"),
+        # @Tool / @ToolArg. The tool roster and every input schema are derived from
+        # these at runtime — there are no hand-written schemas left to drift.
+        artifact("io.micronaut.mcp:micronaut-mcp-annotations"),
+        artifact("io.micronaut:micronaut-core"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("jakarta.inject:jakarta-inject-api"),
         artifact("org.slf4j:slf4j-api"),
     ],
 )
@@ -103,13 +83,39 @@ java_library(
     ],
 )
 
+# The HTTP filters, split out of the binary so the tests can boot a context
+# against them without depending on java_binary srcs.
+java_library(
+    name = "filters",
+    srcs = [
+        "src/main/java/com/muchq/games/mcpserver/McpAuthenticationFilter.java",
+        "src/main/java/com/muchq/games/mcpserver/McpBooleanSchemaTypeFilter.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        artifact("io.micronaut:micronaut-context"),
+        artifact("io.micronaut:micronaut-core"),
+        artifact("io.micronaut:micronaut-http"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("io.modelcontextprotocol.sdk:mcp-core"),
+        artifact("io.projectreactor:reactor-core"),
+        artifact("jakarta.inject:jakarta-inject-api"),
+        artifact("org.reactivestreams:reactive-streams"),
+        artifact("org.slf4j:slf4j-api"),
+    ],
+)
+
+# JSON-RPC framing, the handshake, tools/list and tools/call all come from
+# micronaut-mcp-server-java-sdk; nothing in this binary implements the protocol.
+MCP_SERVER_DEPS = [
+    artifact("io.micronaut.mcp:micronaut-mcp-server-java-sdk"),
+    artifact("io.micronaut:micronaut-jackson-databind"),
+]
+
 java_binary(
     name = "mcpserver",
     srcs = [
         "src/main/java/com/muchq/games/mcpserver/App.java",
-        "src/main/java/com/muchq/games/mcpserver/McpAuthenticationFilter.java",
-        "src/main/java/com/muchq/games/mcpserver/McpController.java",
-        "src/main/java/com/muchq/games/mcpserver/McpRequestHandler.java",
     ],
     main_class = "com.muchq.games.mcpserver.App",
     resource_strip_prefix = "domains/platform/resources",
@@ -117,29 +123,20 @@ java_binary(
         "//domains/platform/resources:micronaut_config",
     ],
     visibility = ["//visibility:public"],
-    runtime_deps = [
+    runtime_deps = MCP_SERVER_DEPS + [
         ":api",
+        ":filters",
         ":module",
+        ":tools",
         "//domains/platform/libs/logging",
         "//domains/platform/libs/yodel:micronaut",
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
-        ":dtos",
-        ":tools",
         "//domains/platform/libs/logging",
-        artifact("com.fasterxml.jackson.core:jackson-annotations"),
-        artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("io.micronaut:micronaut-context"),
-        artifact("io.micronaut:micronaut-core"),
-        artifact("io.micronaut:micronaut-http"),
         artifact("io.micronaut:micronaut-http-server-netty"),
-        artifact("io.micronaut:micronaut-inject"),
-        artifact("io.micronaut:micronaut-jackson-databind"),
         artifact("io.micronaut:micronaut-runtime"),
-        artifact("io.projectreactor:reactor-core"),
-        artifact("jakarta.inject:jakarta-inject-api"),
-        artifact("org.reactivestreams:reactive-streams"),
         artifact("org.slf4j:slf4j-api"),
     ],
 )
@@ -163,11 +160,9 @@ java_test_suite(
         "src/test/java/com/muchq/games/mcpserver/tools/ChessComStatsToolTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/IndexerFacadeAggregateTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/IndexerToolsTest.java",
-        "src/test/java/com/muchq/games/mcpserver/tools/McpToolRegistryContractTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/ServerTimeToolTest.java",
     ],
     deps = [
-        ":mcp_tools_fixture",
         ":module",
         ":tools",
         "//domains/games/apis/one_d4:db",
@@ -198,12 +193,48 @@ java_test_suite(
         "//domains/platform/libs/logging",
     ],
     deps = [
-        ":dtos",
         ":module",
         ":tools",
         "//domains/games/apis/one_d4:worker",
         artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-inject"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
+# Boots the real server and speaks MCP to it over HTTP: the handshake, the
+# advertised roster, a tool call, and the auth gate in both of its states.
+# These are the tests that would have caught the notifications/initialized
+# violation the hand-rolled transport shipped with (#1325).
+java_test_suite(
+    name = "protocol_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/mcpserver/McpAuthenticationTest.java",
+        "src/test/java/com/muchq/games/mcpserver/McpProtocolTest.java",
+        "src/test/java/com/muchq/games/mcpserver/McpToolRosterContractTest.java",
+    ],
+    resource_strip_prefix = "domains/platform/resources",
+    resources = [
+        "//domains/platform/resources:micronaut_config",
+    ],
+    runtime_deps = MCP_SERVER_DEPS + [
+        ":api",
+        ":filters",
+        ":module",
+        ":tools",
+        "//domains/platform/libs/logging",
+        "//domains/platform/libs/yodel:micronaut",
+    ],
+    deps = [
+        ":mcp_tools_fixture",
+        "//domains/platform/libs/json",
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("io.micronaut:micronaut-context"),
+        artifact("io.micronaut:micronaut-http-server-netty"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("io.micronaut:micronaut-runtime"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
@@ -219,15 +250,16 @@ java_test_suite(
     resources = [
         "//domains/platform/resources:micronaut_config",
     ],
-    runtime_deps = [
+    # MCP_SERVER_DEPS carries micronaut-jackson-databind, which the embedded
+    # server's error-response path needs for its JSON codec beans
+    # (JsonErrorResponseBodyProvider et al) — same as the binary.
+    runtime_deps = MCP_SERVER_DEPS + [
+        ":module",
+        ":tools",
         "//domains/platform/libs/logging",
-        # The embedded server's error-response path needs the JSON codec
-        # beans (JsonErrorResponseBodyProvider et al), same as the binary.
-        artifact("io.micronaut:micronaut-jackson-databind"),
     ],
     deps = [
         ":api",
-        ":module",
         "//domains/platform/libs/yodel",
         "//domains/platform/libs/yodel:micronaut",
         artifact("io.micronaut:micronaut-context"),

@@ -28,7 +28,7 @@ public class ChessComPlayersToolTest {
   }
 
   private static ChessComPlayersTool newTool(ChessClient client) {
-    return new ChessComPlayersTool(client, JsonUtils.mapper(), LOOKUP_EXECUTOR);
+    return new ChessComPlayersTool(client, LOOKUP_EXECUTOR);
   }
 
   private static Player player(String username, String title) {
@@ -81,21 +81,6 @@ public class ChessComPlayersToolTest {
   }
 
   @Test
-  public void testGetName() {
-    var tool = newTool(new StubChessClient(Map.of(), Map.of()));
-    assertThat(tool.getName()).isEqualTo("chess_com_players");
-  }
-
-  @Test
-  public void testGetInputSchema() {
-    var tool = newTool(new StubChessClient(Map.of(), Map.of()));
-    Map<String, Object> schema = tool.getInputSchema();
-    @SuppressWarnings("unchecked")
-    Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
-    assertThat(properties).containsKey("usernames");
-  }
-
-  @Test
   public void testBatchLookupKeyedByLowercasedUsername() {
     var stub =
         new StubChessClient(
@@ -103,8 +88,7 @@ public class ChessComPlayersToolTest {
             Map.of());
     var tool = newTool(stub);
 
-    JsonNode result =
-        parse(tool.execute(Map.of("usernames", List.of("Hikaru", "RPRAGCHESS", "ghost"))));
+    JsonNode result = parse(tool.chessComPlayers(List.of("Hikaru", "RPRAGCHESS", "ghost")));
 
     assertThat(result.get("players").get("hikaru").get("title").asText()).isEqualTo("GM");
     assertThat(result.get("players").get("rpragchess").get("title").asText()).isEqualTo("GM");
@@ -118,7 +102,7 @@ public class ChessComPlayersToolTest {
     var stub = new StubChessClient(Map.of("hikaru", player("hikaru", "GM")), Map.of());
     var tool = newTool(stub);
 
-    tool.execute(Map.of("usernames", List.of("hikaru", "Hikaru", "HIKARU")));
+    tool.chessComPlayers(List.of("hikaru", "Hikaru", "HIKARU"));
 
     assertThat(stub.requested).containsExactly("hikaru");
   }
@@ -128,7 +112,7 @@ public class ChessComPlayersToolTest {
     var stub = new StubChessClient(Map.of("hikaru", player("hikaru", "GM")), Map.of("flaky", 429));
     var tool = newTool(stub);
 
-    JsonNode result = parse(tool.execute(Map.of("usernames", List.of("hikaru", "flaky"))));
+    JsonNode result = parse(tool.chessComPlayers(List.of("hikaru", "flaky")));
 
     assertThat(result.get("players").has("hikaru")).isTrue();
     assertThat(result.get("errors").get("flaky").asText()).isEqualTo("HTTP 429");
@@ -142,15 +126,19 @@ public class ChessComPlayersToolTest {
             .mapToObj(i -> "user" + i)
             .toList();
 
-    JsonNode result = parse(tool.execute(Map.of("usernames", usernames)));
+    JsonNode result = parse(tool.chessComPlayers(usernames));
 
     assertThat(result.get("error").asText()).contains("too many usernames");
   }
 
+  /**
+   * Omitting usernames entirely is no longer this tool's error to report: the parameter is
+   * non-null, so the framework rejects that call with a JSON-RPC error before the method runs. An
+   * empty array still reaches the tool, and is still its own answer.
+   */
   @Test
-  public void testEmptyOrMissingUsernamesRejected() {
+  public void testEmptyUsernamesRejected() {
     var tool = newTool(new StubChessClient(Map.of(), Map.of()));
-    assertThat(parse(tool.execute(Map.of())).has("error")).isTrue();
-    assertThat(parse(tool.execute(Map.of("usernames", List.of()))).has("error")).isTrue();
+    assertThat(parse(tool.chessComPlayers(List.of())).has("error")).isTrue();
   }
 }

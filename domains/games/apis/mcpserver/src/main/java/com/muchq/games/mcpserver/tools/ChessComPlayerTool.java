@@ -1,57 +1,31 @@
 package com.muchq.games.mcpserver.tools;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.muchq.games.chess_com_client.ChessClient;
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
+import io.micronaut.mcp.annotations.Tool;
+import io.micronaut.mcp.annotations.ToolArg;
+import jakarta.inject.Singleton;
 
-public class ChessComPlayerTool implements McpTool {
+@Singleton
+public class ChessComPlayerTool {
 
   private final ChessClient chessClient;
-  private final ObjectMapper mapper;
 
-  public ChessComPlayerTool(ChessClient chessClient, ObjectMapper mapper) {
+  public ChessComPlayerTool(ChessClient chessClient) {
     this.chessClient = chessClient;
-    this.mapper = mapper;
   }
 
-  @Override
-  public String getName() {
-    return "chess_com_player";
-  }
-
-  @Override
-  public String getDescription() {
-    return "Returns the requested user's chess.com player information";
-  }
-
-  @Override
-  public Map<String, Object> getInputSchema() {
-    return Map.of(
-        "type", "object",
-        "properties",
-            Map.of(
-                "username",
-                Map.of("type", "string", "description", "The player's chess.com username")),
-        "required", List.of("username"));
-  }
-
-  @Override
-  public String execute(Map<String, Object> arguments) {
-    String player = (String) arguments.get("username");
-    if (player == null || player.isBlank()) {
-      return ToolResponses.error(mapper, "username is required");
+  @Tool(
+      name = "chess_com_player",
+      description = "Returns the requested user's chess.com player information")
+  public String chessComPlayer(
+      @ToolArg(description = "The player's chess.com username") String username) {
+    if (username.isBlank()) {
+      return ToolJson.error("username is required");
     }
-    var playerMaybe = chessClient.fetchPlayer(player);
+    var playerMaybe = chessClient.fetchPlayer(username);
     if (playerMaybe.isEmpty()) {
-      return ToolResponses.error(mapper, "player not found");
+      return ToolJson.error("player not found");
     }
-
-    try {
-      return mapper.writeValueAsString(playerMaybe.get());
-    } catch (IOException e) {
-      throw new RuntimeException(e);
-    }
+    return ToolJson.write(playerMaybe.get());
   }
 }

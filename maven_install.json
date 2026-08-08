@@ -26,6 +26,9 @@
     "io.micronaut.jaxrs:micronaut-jaxrs-bom": -1899878931,
     "io.micronaut.jaxrs:micronaut-jaxrs-processor": -1554586820,
     "io.micronaut.jaxrs:micronaut-jaxrs-server": -831028121,
+    "io.micronaut.mcp:micronaut-mcp-annotations": -17235762,
+    "io.micronaut.mcp:micronaut-mcp-bom": 1982166574,
+    "io.micronaut.mcp:micronaut-mcp-server-java-sdk": 1524004995,
     "io.micronaut.validation:micronaut-validation": 756375861,
     "io.micronaut.validation:micronaut-validation-bom": 1920124787,
     "io.micronaut.validation:micronaut-validation-processor": -2127654576,
@@ -61,9 +64,11 @@
   "__RESOLVED_ARTIFACTS_HASH": {
     "ch.qos.logback:logback-classic": -130418118,
     "ch.qos.logback:logback-core": 459824923,
+    "com.ethlo.time:itu": 743389881,
     "com.fasterxml.jackson.core:jackson-annotations": 1145483352,
     "com.fasterxml.jackson.core:jackson-core": -863050871,
     "com.fasterxml.jackson.core:jackson-databind": 939448353,
+    "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml": 83392157,
     "com.fasterxml.jackson.datatype:jackson-datatype-guava": -920654291,
     "com.fasterxml.jackson.datatype:jackson-datatype-jdk8": 1414302893,
     "com.fasterxml.jackson.datatype:jackson-datatype-jsr310": 1771227479,
@@ -88,6 +93,7 @@
     "com.google.j2objc:j2objc-annotations": -1008747351,
     "com.google.protobuf:protobuf-java": 1838995038,
     "com.h2database:h2": 1660949213,
+    "com.networknt:json-schema-validator": 1015884468,
     "com.thoughtworks.paranamer:paranamer": -1233040102,
     "com.uber.nullaway:nullaway": 435081709,
     "com.zaxxer:HikariCP": 1080799863,
@@ -99,7 +105,14 @@
     "io.micronaut.jaxrs:micronaut-jaxrs-common": -100212363,
     "io.micronaut.jaxrs:micronaut-jaxrs-processor": -1333068067,
     "io.micronaut.jaxrs:micronaut-jaxrs-server": -1628661524,
+    "io.micronaut.jsonschema:micronaut-json-schema-annotations": -1004450888,
+    "io.micronaut.jsonschema:micronaut-json-schema-utils": -1882186485,
+    "io.micronaut.jsonschema:micronaut-json-schema-validation": -614217048,
+    "io.micronaut.mcp:micronaut-mcp": 555370088,
+    "io.micronaut.mcp:micronaut-mcp-annotations": 341141024,
+    "io.micronaut.mcp:micronaut-mcp-server-java-sdk": 549576853,
     "io.micronaut.reactor:micronaut-reactor": -1429567106,
+    "io.micronaut.serde:micronaut-serde-api": 1534141998,
     "io.micronaut.sourcegen:micronaut-sourcegen-bytecode-writer": -749054118,
     "io.micronaut.sourcegen:micronaut-sourcegen-model": -2091024146,
     "io.micronaut.validation:micronaut-validation": 1947431212,
@@ -127,6 +140,8 @@
     "io.micronaut:micronaut-router": 532376693,
     "io.micronaut:micronaut-runtime": 2002914999,
     "io.micronaut:micronaut-websocket": 47005285,
+    "io.modelcontextprotocol.sdk:mcp-core": -1518203748,
+    "io.modelcontextprotocol.sdk:mcp-json": -2045229250,
     "io.netty:netty-buffer": -2075998888,
     "io.netty:netty-codec": -510651193,
     "io.netty:netty-codec-base": 45810061,
@@ -190,7 +205,8 @@
     "org.postgresql:postgresql": -439421249,
     "org.reactivestreams:reactive-streams": 1281941191,
     "org.scala-lang:scala-library": -997461185,
-    "org.slf4j:slf4j-api": 500377983
+    "org.slf4j:slf4j-api": 500377983,
+    "org.yaml:snakeyaml": 1218201193
   },
   "conflict_resolution": {
     "com.fasterxml.jackson.core:jackson-annotations": "com.fasterxml.jackson.core:jackson-annotations:2.21",
@@ -204,6 +220,8 @@
     "com.google.j2objc:j2objc-annotations:2.8": "com.google.j2objc:j2objc-annotations:3.1",
     "io.micronaut.jaxrs:micronaut-jaxrs-processor": "io.micronaut.jaxrs:micronaut-jaxrs-processor:4.10.0",
     "io.micronaut.jaxrs:micronaut-jaxrs-server": "io.micronaut.jaxrs:micronaut-jaxrs-server:4.10.0",
+    "io.micronaut.mcp:micronaut-mcp-annotations": "io.micronaut.mcp:micronaut-mcp-annotations:0.0.20",
+    "io.micronaut.mcp:micronaut-mcp-server-java-sdk": "io.micronaut.mcp:micronaut-mcp-server-java-sdk:0.0.20",
     "io.micronaut.validation:micronaut-validation": "io.micronaut.validation:micronaut-validation:4.12.0",
     "io.micronaut.validation:micronaut-validation-processor": "io.micronaut.validation:micronaut-validation-processor:4.12.0",
     "io.micronaut:micronaut-http-client": "io.micronaut:micronaut-http-client:4.10.25",
@@ -235,6 +253,12 @@
       },
       "version": "1.5.37"
     },
+    "com.ethlo.time:itu": {
+      "shasums": {
+        "jar": "23d3ba84095d489a595240f89045085ea5066fb6fc1dc091258d577df9d74abc"
+      },
+      "version": "1.10.3"
+    },
     "com.fasterxml.jackson.core:jackson-annotations": {
       "shasums": {
         "jar": "53ca085f4a150f703f49e1aabd935bd03b43e1ea3d55d135438292af22cef56b"
@@ -250,6 +274,12 @@
     "com.fasterxml.jackson.core:jackson-databind": {
       "shasums": {
         "jar": "8c982f01f148d805f0aaac2339011244757e0df7c6ff8951f2fa3f433b8ed849"
+      },
+      "version": "2.21.2"
+    },
+    "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml": {
+      "shasums": {
+        "jar": "d25551812fa0c14f37cabaa9401e63eadcea42ce36311183af5622d5bc8a1bc7"
       },
       "version": "2.21.2"
     },
@@ -397,6 +427,12 @@
       },
       "version": "2.4.240"
     },
+    "com.networknt:json-schema-validator": {
+      "shasums": {
+        "jar": "41ffb494849f28721a28021b97c94ea60513c02812309459462f1f7da8b697d4"
+      },
+      "version": "1.5.8"
+    },
     "com.thoughtworks.paranamer:paranamer": {
       "shasums": {
         "jar": "a9df136f2e926b37a838a5b4e2227343c3a755d15724b3a8350b4aea4b158945"
@@ -463,11 +499,53 @@
       },
       "version": "4.10.0"
     },
+    "io.micronaut.jsonschema:micronaut-json-schema-annotations": {
+      "shasums": {
+        "jar": "af422d059ec2370bb619c2c0dd395d1d9400372b41c3592b08085a742cbccb5e"
+      },
+      "version": "1.7.4"
+    },
+    "io.micronaut.jsonschema:micronaut-json-schema-utils": {
+      "shasums": {
+        "jar": "23592ce48186d6a72cadff87f026678fc328ccc23088be7d7a3d16b294c54fec"
+      },
+      "version": "1.7.4"
+    },
+    "io.micronaut.jsonschema:micronaut-json-schema-validation": {
+      "shasums": {
+        "jar": "7cdf31fb25431072f901e62d82174692080a77ab000436079824b9250120695f"
+      },
+      "version": "1.7.4"
+    },
+    "io.micronaut.mcp:micronaut-mcp": {
+      "shasums": {
+        "jar": "5dbb18d7ee3f48ec0a748962f05c561d0c89f057311d305767094da80608d25a"
+      },
+      "version": "0.0.20"
+    },
+    "io.micronaut.mcp:micronaut-mcp-annotations": {
+      "shasums": {
+        "jar": "d11d6353d4e76f98f2f94bb22b69454849c54e6eec1a6318d0cbe1e359136f00"
+      },
+      "version": "0.0.20"
+    },
+    "io.micronaut.mcp:micronaut-mcp-server-java-sdk": {
+      "shasums": {
+        "jar": "464f5e3a689a729cfa214ecfe35b7b59846d6b5cc6fef61baf1ddcc60ccd6d66"
+      },
+      "version": "0.0.20"
+    },
     "io.micronaut.reactor:micronaut-reactor": {
       "shasums": {
         "jar": "2d453ac65eb6efdd1722cdaf637b891f5797b8b50278dd327729cdbf337d7b3a"
       },
       "version": "3.9.0"
+    },
+    "io.micronaut.serde:micronaut-serde-api": {
+      "shasums": {
+        "jar": "3115b065ed54c977cc943bd298b305b2d113b199e0481731dd053cb4d693b568"
+      },
+      "version": "2.16.2"
     },
     "io.micronaut.sourcegen:micronaut-sourcegen-bytecode-writer": {
       "shasums": {
@@ -630,6 +708,18 @@
         "jar": "cde00b66a184832f8062e4806e1b6398e2f13836da3ffbfe522a604ec0125866"
       },
       "version": "4.10.25"
+    },
+    "io.modelcontextprotocol.sdk:mcp-core": {
+      "shasums": {
+        "jar": "27494e2150375752be61669d696a30bc4da2e8d5a4293209d908d8f8334d75ec"
+      },
+      "version": "0.17.0"
+    },
+    "io.modelcontextprotocol.sdk:mcp-json": {
+      "shasums": {
+        "jar": "dc6a8e24226bd12f8f27ff6e30137c31fc39c2f0158f6833be1d56b337729d77"
+      },
+      "version": "0.17.0"
     },
     "io.netty:netty-buffer": {
       "shasums": {
@@ -1014,6 +1104,12 @@
         "jar": "44508fd1576500688c790b190acdd16fec4f8c79a3e0b900afd70503cf055f55"
       },
       "version": "2.0.18"
+    },
+    "org.yaml:snakeyaml": {
+      "shasums": {
+        "jar": "ef779af5d29a9dde8cc70ce0341f5c6f7735e23edff9685ceaa9d35359b7bb7f"
+      },
+      "version": "2.4"
     }
   },
   "dependencies": {
@@ -1024,6 +1120,11 @@
     "com.fasterxml.jackson.core:jackson-databind": [
       "com.fasterxml.jackson.core:jackson-annotations",
       "com.fasterxml.jackson.core:jackson-core"
+    ],
+    "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml": [
+      "com.fasterxml.jackson.core:jackson-core",
+      "com.fasterxml.jackson.core:jackson-databind",
+      "org.yaml:snakeyaml"
     ],
     "com.fasterxml.jackson.datatype:jackson-datatype-guava": [
       "com.fasterxml.jackson.core:jackson-annotations",
@@ -1097,6 +1198,12 @@
       "com.google.j2objc:j2objc-annotations",
       "org.jspecify:jspecify"
     ],
+    "com.networknt:json-schema-validator": [
+      "com.ethlo.time:itu",
+      "com.fasterxml.jackson.core:jackson-databind",
+      "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml",
+      "org.slf4j:slf4j-api"
+    ],
     "com.uber.nullaway:nullaway": [
       "com.google.guava:guava",
       "org.checkerframework:dataflow-nullaway",
@@ -1124,9 +1231,46 @@
       "io.micronaut:micronaut-router",
       "jakarta.ws.rs:jakarta.ws.rs-api"
     ],
+    "io.micronaut.jsonschema:micronaut-json-schema-annotations": [
+      "io.micronaut:micronaut-inject"
+    ],
+    "io.micronaut.jsonschema:micronaut-json-schema-utils": [
+      "io.micronaut.jsonschema:micronaut-json-schema-annotations",
+      "io.micronaut:micronaut-inject"
+    ],
+    "io.micronaut.jsonschema:micronaut-json-schema-validation": [
+      "com.networknt:json-schema-validator",
+      "io.micronaut.jsonschema:micronaut-json-schema-utils",
+      "io.micronaut:micronaut-inject",
+      "io.micronaut:micronaut-json-core"
+    ],
+    "io.micronaut.mcp:micronaut-mcp": [
+      "io.micronaut.serde:micronaut-serde-api",
+      "io.micronaut:micronaut-inject"
+    ],
+    "io.micronaut.mcp:micronaut-mcp-annotations": [
+      "io.micronaut:micronaut-inject"
+    ],
+    "io.micronaut.mcp:micronaut-mcp-server-java-sdk": [
+      "io.micronaut.jsonschema:micronaut-json-schema-annotations",
+      "io.micronaut.jsonschema:micronaut-json-schema-utils",
+      "io.micronaut.jsonschema:micronaut-json-schema-validation",
+      "io.micronaut.mcp:micronaut-mcp",
+      "io.micronaut.mcp:micronaut-mcp-annotations",
+      "io.micronaut.serde:micronaut-serde-api",
+      "io.micronaut:micronaut-inject",
+      "io.micronaut:micronaut-json-core",
+      "io.modelcontextprotocol.sdk:mcp-core",
+      "jakarta.validation:jakarta.validation-api"
+    ],
     "io.micronaut.reactor:micronaut-reactor": [
       "io.micronaut:micronaut-inject",
       "io.projectreactor:reactor-core"
+    ],
+    "io.micronaut.serde:micronaut-serde-api": [
+      "io.micronaut:micronaut-context",
+      "io.micronaut:micronaut-inject",
+      "io.micronaut:micronaut-json-core"
     ],
     "io.micronaut.sourcegen:micronaut-sourcegen-bytecode-writer": [
       "io.micronaut.sourcegen:micronaut-sourcegen-model",
@@ -1294,6 +1438,12 @@
       "io.micronaut:micronaut-http",
       "io.micronaut:micronaut-http-client-core",
       "io.micronaut:micronaut-inject",
+      "io.projectreactor:reactor-core",
+      "org.slf4j:slf4j-api"
+    ],
+    "io.modelcontextprotocol.sdk:mcp-core": [
+      "com.fasterxml.jackson.core:jackson-annotations",
+      "io.modelcontextprotocol.sdk:mcp-json",
       "io.projectreactor:reactor-core",
       "org.slf4j:slf4j-api"
     ],
@@ -1593,6 +1743,14 @@
       "ch.qos.logback.core.testUtil",
       "ch.qos.logback.core.util"
     ],
+    "com.ethlo.time:itu": [
+      "com.ethlo.time",
+      "com.ethlo.time.internal",
+      "com.ethlo.time.internal.fixed",
+      "com.ethlo.time.internal.token",
+      "com.ethlo.time.internal.util",
+      "com.ethlo.time.token"
+    ],
     "com.fasterxml.jackson.core:jackson-annotations": [
       "com.fasterxml.jackson.annotation"
     ],
@@ -1636,6 +1794,11 @@
       "com.fasterxml.jackson.databind.type",
       "com.fasterxml.jackson.databind.util",
       "com.fasterxml.jackson.databind.util.internal"
+    ],
+    "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml": [
+      "com.fasterxml.jackson.dataformat.yaml",
+      "com.fasterxml.jackson.dataformat.yaml.snakeyaml.error",
+      "com.fasterxml.jackson.dataformat.yaml.util"
     ],
     "com.fasterxml.jackson.datatype:jackson-datatype-guava": [
       "com.fasterxml.jackson.datatype.guava",
@@ -1910,6 +2073,22 @@
       "org.h2.value",
       "org.h2.value.lob"
     ],
+    "com.networknt:json-schema-validator": [
+      "com.networknt.org.apache.commons.validator.routines",
+      "com.networknt.schema",
+      "com.networknt.schema.annotation",
+      "com.networknt.schema.format",
+      "com.networknt.schema.i18n",
+      "com.networknt.schema.oas",
+      "com.networknt.schema.output",
+      "com.networknt.schema.regex",
+      "com.networknt.schema.resource",
+      "com.networknt.schema.result",
+      "com.networknt.schema.serialization",
+      "com.networknt.schema.serialization.node",
+      "com.networknt.schema.utils",
+      "com.networknt.schema.walk"
+    ],
     "com.thoughtworks.paranamer:paranamer": [
       "com.thoughtworks.paranamer"
     ],
@@ -2054,10 +2233,56 @@
       "io.micronaut.jaxrs.container",
       "io.micronaut.jaxrs.runtime.ext.bind"
     ],
+    "io.micronaut.jsonschema:micronaut-json-schema-annotations": [
+      "io.micronaut.jsonschema"
+    ],
+    "io.micronaut.jsonschema:micronaut-json-schema-utils": [
+      "io.micronaut.jsonschema.utils"
+    ],
+    "io.micronaut.jsonschema:micronaut-json-schema-validation": [
+      "io.micronaut.jsonschema.validation"
+    ],
+    "io.micronaut.mcp:micronaut-mcp": [
+      "io.micronaut.mcp.conf",
+      "io.micronaut.mcp.conf.client",
+      "io.micronaut.mcp.conf.server",
+      "io.micronaut.mcp.primitives.prompts",
+      "io.micronaut.mcp.primitives.utils"
+    ],
+    "io.micronaut.mcp:micronaut-mcp-annotations": [
+      "io.micronaut.mcp.annotations"
+    ],
+    "io.micronaut.mcp:micronaut-mcp-server-java-sdk": [
+      "io.micronaut.mcp.server",
+      "io.micronaut.mcp.server.context",
+      "io.micronaut.mcp.server.exceptions",
+      "io.micronaut.mcp.server.json",
+      "io.micronaut.mcp.server.registry",
+      "io.micronaut.mcp.server.stateless",
+      "io.micronaut.mcp.server.stateless.async",
+      "io.micronaut.mcp.server.stateless.sync",
+      "io.micronaut.mcp.server.stdio",
+      "io.micronaut.mcp.server.stdio.async",
+      "io.micronaut.mcp.server.stdio.sync",
+      "io.micronaut.mcp.server.tools",
+      "io.micronaut.mcp.server.tools.fetch",
+      "io.micronaut.mcp.server.tools.search"
+    ],
     "io.micronaut.reactor:micronaut-reactor": [
       "io.micronaut.reactor.config",
       "io.micronaut.reactor.convert",
       "io.micronaut.reactor.instrument"
+    ],
+    "io.micronaut.serde:micronaut-serde-api": [
+      "io.micronaut.serde",
+      "io.micronaut.serde.annotation",
+      "io.micronaut.serde.config",
+      "io.micronaut.serde.config.annotation",
+      "io.micronaut.serde.config.naming",
+      "io.micronaut.serde.exceptions",
+      "io.micronaut.serde.exceptions.path",
+      "io.micronaut.serde.reference",
+      "io.micronaut.serde.util"
     ],
     "io.micronaut.sourcegen:micronaut-sourcegen-bytecode-writer": [
       "io.micronaut.sourcegen.bytecode",
@@ -2398,6 +2623,22 @@
       "io.micronaut.websocket.event",
       "io.micronaut.websocket.exceptions",
       "io.micronaut.websocket.interceptor"
+    ],
+    "io.modelcontextprotocol.sdk:mcp-core": [
+      "io.modelcontextprotocol.client",
+      "io.modelcontextprotocol.client.transport",
+      "io.modelcontextprotocol.client.transport.customizer",
+      "io.modelcontextprotocol.common",
+      "io.modelcontextprotocol.json",
+      "io.modelcontextprotocol.json.schema",
+      "io.modelcontextprotocol.server",
+      "io.modelcontextprotocol.server.transport",
+      "io.modelcontextprotocol.spec",
+      "io.modelcontextprotocol.util"
+    ],
+    "io.modelcontextprotocol.sdk:mcp-json": [
+      "io.modelcontextprotocol.json",
+      "io.modelcontextprotocol.json.schema"
     ],
     "io.netty:netty-buffer": [
       "io.netty.buffer",
@@ -3027,15 +3268,41 @@
       "org.slf4j.event",
       "org.slf4j.helpers",
       "org.slf4j.spi"
+    ],
+    "org.yaml:snakeyaml": [
+      "org.yaml.snakeyaml",
+      "org.yaml.snakeyaml.comments",
+      "org.yaml.snakeyaml.composer",
+      "org.yaml.snakeyaml.constructor",
+      "org.yaml.snakeyaml.emitter",
+      "org.yaml.snakeyaml.env",
+      "org.yaml.snakeyaml.error",
+      "org.yaml.snakeyaml.events",
+      "org.yaml.snakeyaml.extensions.compactnotation",
+      "org.yaml.snakeyaml.external.com.google.gdata.util.common.base",
+      "org.yaml.snakeyaml.inspector",
+      "org.yaml.snakeyaml.internal",
+      "org.yaml.snakeyaml.introspector",
+      "org.yaml.snakeyaml.nodes",
+      "org.yaml.snakeyaml.parser",
+      "org.yaml.snakeyaml.reader",
+      "org.yaml.snakeyaml.representer",
+      "org.yaml.snakeyaml.resolver",
+      "org.yaml.snakeyaml.scanner",
+      "org.yaml.snakeyaml.serializer",
+      "org.yaml.snakeyaml.tokens",
+      "org.yaml.snakeyaml.util"
     ]
   },
   "repositories": {
     "https://repo1.maven.org/maven2/": [
       "ch.qos.logback:logback-classic",
       "ch.qos.logback:logback-core",
+      "com.ethlo.time:itu",
       "com.fasterxml.jackson.core:jackson-annotations",
       "com.fasterxml.jackson.core:jackson-core",
       "com.fasterxml.jackson.core:jackson-databind",
+      "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml",
       "com.fasterxml.jackson.datatype:jackson-datatype-guava",
       "com.fasterxml.jackson.datatype:jackson-datatype-jdk8",
       "com.fasterxml.jackson.datatype:jackson-datatype-jsr310",
@@ -3060,6 +3327,7 @@
       "com.google.j2objc:j2objc-annotations",
       "com.google.protobuf:protobuf-java",
       "com.h2database:h2",
+      "com.networknt:json-schema-validator",
       "com.thoughtworks.paranamer:paranamer",
       "com.uber.nullaway:nullaway",
       "com.zaxxer:HikariCP",
@@ -3071,7 +3339,14 @@
       "io.micronaut.jaxrs:micronaut-jaxrs-common",
       "io.micronaut.jaxrs:micronaut-jaxrs-processor",
       "io.micronaut.jaxrs:micronaut-jaxrs-server",
+      "io.micronaut.jsonschema:micronaut-json-schema-annotations",
+      "io.micronaut.jsonschema:micronaut-json-schema-utils",
+      "io.micronaut.jsonschema:micronaut-json-schema-validation",
+      "io.micronaut.mcp:micronaut-mcp",
+      "io.micronaut.mcp:micronaut-mcp-annotations",
+      "io.micronaut.mcp:micronaut-mcp-server-java-sdk",
       "io.micronaut.reactor:micronaut-reactor",
+      "io.micronaut.serde:micronaut-serde-api",
       "io.micronaut.sourcegen:micronaut-sourcegen-bytecode-writer",
       "io.micronaut.sourcegen:micronaut-sourcegen-model",
       "io.micronaut.validation:micronaut-validation",
@@ -3099,6 +3374,8 @@
       "io.micronaut:micronaut-router",
       "io.micronaut:micronaut-runtime",
       "io.micronaut:micronaut-websocket",
+      "io.modelcontextprotocol.sdk:mcp-core",
+      "io.modelcontextprotocol.sdk:mcp-json",
       "io.netty:netty-buffer",
       "io.netty:netty-codec",
       "io.netty:netty-codec-base",
@@ -3162,7 +3439,8 @@
       "org.postgresql:postgresql",
       "org.reactivestreams:reactive-streams",
       "org.scala-lang:scala-library",
-      "org.slf4j:slf4j-api"
+      "org.slf4j:slf4j-api",
+      "org.yaml:snakeyaml"
     ]
   },
   "services": {
@@ -3182,6 +3460,14 @@
     "com.fasterxml.jackson.core:jackson-databind": {
       "com.fasterxml.jackson.core.ObjectCodec": [
         "com.fasterxml.jackson.databind.ObjectMapper"
+      ]
+    },
+    "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml": {
+      "com.fasterxml.jackson.core.JsonFactory": [
+        "com.fasterxml.jackson.dataformat.yaml.YAMLFactory"
+      ],
+      "com.fasterxml.jackson.core.ObjectCodec": [
+        "com.fasterxml.jackson.dataformat.yaml.YAMLMapper"
       ]
     },
     "com.fasterxml.jackson.datatype:jackson-datatype-guava": {
@@ -3264,9 +3550,19 @@
         "io.micronaut.jaxrs.processor.JaxRsTypeElementVisitor"
       ]
     },
+    "io.micronaut.mcp:micronaut-mcp-server-java-sdk": {
+      "io.modelcontextprotocol.json.McpJsonMapperSupplier": [
+        "io.micronaut.mcp.server.json.MicronautMcpJsonMapperSupplier"
+      ]
+    },
     "io.micronaut.reactor:micronaut-reactor": {
       "io.micronaut.core.convert.TypeConverterRegistrar": [
         "io.micronaut.reactor.convert.ReactorConverterRegistrar"
+      ]
+    },
+    "io.micronaut.serde:micronaut-serde-api": {
+      "io.micronaut.json.JsonMapperSupplier": [
+        "io.micronaut.serde.SerdeJsonMapperSupplier"
       ]
     },
     "io.micronaut.validation:micronaut-validation": {
