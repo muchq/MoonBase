@@ -30,9 +30,14 @@ public class McpAuthenticationTest {
   private static final String TOOLS_LIST =
       "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}";
 
+  /**
+   * The token is set to empty explicitly rather than left to application.yml's {@code
+   * ${MCP_AUTH_TOKEN:}} default: an ambient MCP_AUTH_TOKEN in the environment would otherwise turn
+   * this into the gated case and fail somewhere confusing.
+   */
   @Test
   public void withNoTokenConfiguredTheEndpointIsOpen() throws Exception {
-    try (EmbeddedServer server = startServer(Map.of())) {
+    try (EmbeddedServer server = startServer(Map.of("mcp.auth.token", ""))) {
       HttpResponse<String> response = post(server, TOOLS_LIST, null);
 
       assertThat(response.statusCode())

@@ -54,7 +54,9 @@ public class McpProtocolTest {
 
     assertThat(response.statusCode()).isEqualTo(200);
     JsonNode result = json(response).get("result");
-    assertThat(result.get("protocolVersion").asText()).isNotBlank();
+    assertThat(result.get("protocolVersion").asText())
+        .as("the negotiated spec revision is what a client keys its behavior off")
+        .isEqualTo("2025-06-18");
     assertThat(result.at("/capabilities/tools").isMissingNode())
         .as("a server that advertises no tools capability is one no client will call tools on")
         .isFalse();
@@ -75,11 +77,10 @@ public class McpProtocolTest {
             {"jsonrpc":"2.0","method":"notifications/initialized"}
             """);
 
-    assertThat(response.statusCode()).isBetween(200, 299);
+    assertThat(response.statusCode()).isEqualTo(202);
     assertThat(response.body())
         .as("a notification must draw no response object at all, error or otherwise")
-        .doesNotContain("\"error\"")
-        .doesNotContain("\"result\"");
+        .isEmpty();
   }
 
   @Test
@@ -176,6 +177,84 @@ public class McpProtocolTest {
         .isPositive();
   }
 
+  /**
+   * Streamable HTTP makes the server->client SSE stream optional, and micronaut-mcp does not
+   * implement it. The spec's answer for that is 405, and a client that probes GET needs to get it:
+   * anything 2xx reads as "here is a stream" and leaves the client waiting on one that never
+   * arrives. The README and the /mcp page both promise this number.
+   */
+  @Test
+  public void getReturns405BecauseTheSseStreamIsNotImplemented() throws Exception {
+    HttpResponse<String> response =
+        client.send(
+            HttpRequest.newBuilder().uri(URI.create(endpoint)).GET().build(),
+            HttpResponse.BodyHandlers.ofString());
+
+    assertThat(response.statusCode()).isEqualTo(405);
+  }
+
+  /**
+   * Integer parameters advertise {@code "number"}, not {@code "integer"} — micronaut-mcp maps every
+   * {@code Number} to the one type and has no {@code TYPE_INTEGER}. Accepted rather than worked
+   * around: unlike the {@code "bool"} it once emitted, {@code "number"} is a real JSON Schema type,
+   * so no validator rejects it, and the cost is only that a model may offer 10.5 for a limit —
+   * which fails binding with a JSON-RPC error rather than silently truncating.
+   *
+   * <p>Pinned so the choice is visible. If a later micronaut-mcp distinguishes them this test
+   * fails, which is the moment to decide whether the tighter type is worth having.
+   */
+  @Test
+  public void integerArgumentsAdvertiseNumber() throws Exception {
+    JsonNode tools = toolsList(8);
+    JsonNode properties = toolNamed(tools, "chess_com_games").at("/inputSchema/properties");
+
+    assertThat(properties.at("/limit/type").asText()).isEqualTo("number");
+    assertThat(properties.at("/offset/type").asText()).isEqualTo("number");
+  }
+
+  /**
+   * Deriving the schema from the signature loses the constraints the hand-written maps carried:
+   * {@code enum} on time_class/color, {@code items}/{@code maxItems} on the array arguments. The
+   * tools still reject bad values at runtime with the same messages, so this costs guidance to the
+   * model rather than correctness — {@code toolArgumentsAreBoundToTheDeclaredTypes} covers the
+   * enforcement half. Pinned because it is a real difference, and because re-growing constraints is
+   * the kind of thing that should be noticed rather than assumed.
+   */
+  @Test
+  public void derivedSchemasCarryNoEnumOrArrayConstraints() throws Exception {
+    JsonNode tools = toolsList(9);
+    JsonNode games = toolNamed(tools, "chess_com_games").at("/inputSchema/properties");
+
+    assertThat(games.at("/time_class").has("enum")).isFalse();
+    assertThat(games.at("/time_class/description").asText())
+        .as("the allowed values have to reach the model somehow, so they live in the description")
+        .contains("blitz");
+
+    JsonNode usernames =
+        toolNamed(tools, "chess_com_players").at("/inputSchema/properties/usernames");
+    assertThat(usernames.get("type").asText()).isEqualTo("array");
+    assertThat(usernames.has("items")).isFalse();
+    assertThat(usernames.has("maxItems")).isFalse();
+  }
+
+  /**
+   * A JSON-RPC error no longer always rides on HTTP 200: micronaut-mcp maps the protocol codes onto
+   * statuses, so an unknown method is a 400. Clients that read the JSON-RPC envelope are
+   * unaffected, but anything that branches on the status first sees a different shape, so the
+   * mapping is pinned rather than left to the library.
+   */
+  @Test
+  public void jsonRpcErrorsCarryAMatchingHttpStatus() throws Exception {
+    HttpResponse<String> unknownMethod =
+        post(
+            """
+            {"jsonrpc":"2.0","id":10,"method":"no/such/method"}
+            """);
+
+    assertThat(unknownMethod.statusCode()).isEqualTo(400);
+    assertThat(json(unknownMethod).at("/error/code").asInt()).isEqualTo(-32601);
+  }
+
   @Test
   public void toolsCallRunsTheToolAndReturnsItsTextContent() throws Exception {
     HttpResponse<String> response =
@@ -226,6 +305,11 @@ public class McpProtocolTest {
     assertThat(body.has("error") || body.at("/result/isError").asBoolean(false))
         .as("the caller has to be able to tell this apart from a successful call")
         .isTrue();
+  }
+
+  private static JsonNode toolsList(int id) throws Exception {
+    return json(post("{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"method\":\"tools/list\"}"))
+        .at("/result/tools");
   }
 
   private static JsonNode toolNamed(JsonNode tools, String name) throws Exception {

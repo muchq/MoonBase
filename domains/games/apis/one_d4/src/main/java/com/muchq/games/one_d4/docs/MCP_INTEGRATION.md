@@ -245,36 +245,8 @@ public class IndexerFacade {
 
 ## Implementation: Option B (HTTP Proxy)
 
-### New Files
-
-Same tool classes, but `IndexerFacade` calls the indexer REST API instead:
-
-```java
-public class IndexerHttpClient {
-    private final HttpClient httpClient;
-    private final String baseUrl; // e.g. http://localhost:8080
-
-    public IndexResult index(String player, String platform, String startMonth, String endMonth) {
-        // POST http://localhost:8080/v1/index
-        // Body: {"player":"...","platform":"...","startMonth":"...","endMonth":"..."}
-    }
-
-    public IndexResult getStatus(UUID requestId) {
-        // GET http://localhost:8080/v1/index/{id}
-    }
-
-    public QueryResult query(String chessql, int limit) {
-        // POST http://localhost:8080/v1/query
-        // Body: {"query":"...","limit":N,"offset":0}
-    }
-}
-```
-
-This reuses the existing `HttpClient` abstraction (`domains.platform.http_client.core`).
-
-No `analyze_position` over HTTP unless we add a dedicated endpoint to the indexer API. Alternatively, embed just the engine (no DB) in the mcpserver for analysis.
-
----
+Not built. The tools would keep their semantics and their arguments; only `IndexerFacade`
+would change, calling the indexer's REST API instead of holding the engine in-process.
 
 ## Sync vs Async Indexing in MCP Context
 
@@ -286,25 +258,8 @@ MCP tool calls are synchronous — the LLM waits for a response. Indexing a mont
 
 2. **Large requests (multi-month)**: Run asynchronously. Return the request ID immediately. The LLM then polls with `index_status` in a follow-up turn.
 
-```java
-public String execute(Map<String, Object> arguments) {
-    // ...
-    YearMonth start = YearMonth.parse(startMonth);
-    YearMonth end = YearMonth.parse(endMonth);
-    long monthSpan = start.until(end, java.time.temporal.ChronoUnit.MONTHS) + 1;
-
-    if (monthSpan <= 1) {
-        // Synchronous — block and return full result
-        var result = facade.indexSync(username, platform, startMonth, endMonth);
-        return serialize(result);
-    } else {
-        // Async — enqueue and return ID
-        var result = facade.indexAsync(username, platform, startMonth, endMonth);
-        return serialize(result) + "\n\nNote: Multi-month indexing runs in the background. "
-             + "Use index_status to check progress.";
-    }
-}
-```
+`IndexerFacade.submitHybrid` makes that call: one month runs inline and comes back COMPLETED,
+a longer range is enqueued and comes back PENDING with a request id to poll.
 
 ---
 
