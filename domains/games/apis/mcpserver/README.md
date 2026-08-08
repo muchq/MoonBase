@@ -30,17 +30,15 @@ Two things the transport does not do, both deliberate:
   library grows it.
 - **No sessions.** The server is stateless, so there is no `Mcp-Session-Id`.
 
-### Version pin
+### Versions
 
-micronaut-mcp is pinned to **0.0.20**, the last release built against Micronaut 4.
-1.0.0 and later require Micronaut 5, and this repo is on the Micronaut 4 core BOM.
+micronaut-mcp **2.0.0**, on Micronaut **5.1.10** (`bazel/java.MODULE.bazel`).
 
-That version has one defect worth knowing about: it writes `"type": "bool"` for
-boolean tool arguments, which is not a JSON Schema type.
-`McpBooleanSchemaTypeFilter` corrects it on the way out; upstream fixed the constant,
-but only on the 2.0.x line. Delete the filter when the pin can move —
-`McpProtocolTest` asserts the served type either way, so it will say if the filter is
-still needed.
+This landed on 0.0.20 first — the last micronaut-mcp release built against Micronaut 4
+— which wrote `"type": "bool"` for boolean tool arguments, not a JSON Schema type, and
+needed a response filter to correct it. 2.0.0 fixed the constant upstream, so the
+filter is gone. `McpProtocolTest` asserts the served property types, so a regression
+there fails the build rather than reaching a client.
 
 ## Build the Java binary
 

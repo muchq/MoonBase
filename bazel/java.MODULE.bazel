@@ -48,9 +48,6 @@ maven.install(
         "io.micronaut:micronaut-runtime",
         "io.micronaut.jaxrs:micronaut-jaxrs-processor",
         "io.micronaut.jaxrs:micronaut-jaxrs-server",
-        # micronaut-mcp is pinned at the 0.0.x line on purpose: 1.0.0 and later
-        # require Micronaut 5, and this repo is on the Micronaut 4 core BOM
-        # above. 0.0.20 is the last release built against Micronaut 4.
         "io.micronaut.mcp:micronaut-mcp-annotations",
         "io.micronaut.mcp:micronaut-mcp-server-java-sdk",
         "io.netty:netty-common",
@@ -69,13 +66,20 @@ maven.install(
         "org.eclipse.jetty.websocket:websocket-jetty-server:%s" % JETTY_VERSION,
         "org.jspecify:jspecify:1.0.0",
         "org.slf4j:slf4j-api:2.0.18",
+        # Micronaut's YamlPropertySourceLoader is compiled against classic snakeyaml
+        # (org.yaml.snakeyaml.Yaml) and disables itself when that class is absent —
+        # silently, so application.yml is simply never read. Micronaut 4 got it
+        # transitively through Jackson 2's jackson-dataformat-yaml; Jackson 3 switched
+        # to snakeyaml-engine, which is a different package. Declared here so YAML
+        # config does not depend on another library's choice of YAML parser.
+        "org.yaml:snakeyaml:2.4",
     ],
     boms = [
         "io.netty:netty-bom:4.2.16.Final",
-        "io.micronaut:micronaut-core-bom:4.10.25",
-        "io.micronaut.jaxrs:micronaut-jaxrs-bom:4.10.0",
-        "io.micronaut.validation:micronaut-validation-bom:4.12.0",
-        "io.micronaut.mcp:micronaut-mcp-bom:0.0.20",
+        "io.micronaut:micronaut-core-bom:5.1.10",
+        "io.micronaut.jaxrs:micronaut-jaxrs-bom:5.1.0",
+        "io.micronaut.validation:micronaut-validation-bom:5.1.0",
+        "io.micronaut.mcp:micronaut-mcp-bom:2.0.0",
         "com.fasterxml.jackson:jackson-bom:2.22.0",
         "org.junit:junit-bom:6.1.1",
     ],

@@ -135,11 +135,15 @@ public class McpProtocolTest {
   }
 
   /**
-   * Every advertised property type must be one JSON Schema actually defines. micronaut-mcp 0.0.20
-   * writes {@code "bool"} for booleans, which is not one of them, and a client hands this straight
-   * to a model provider — see {@link McpBooleanSchemaTypeFilter}, which corrects it. This asserts
-   * the served result rather than the filter, so it keeps passing when the filter is deleted
-   * against a fixed library, and fails if the filter is deleted too early.
+   * Every advertised property type must be one JSON Schema actually defines — a client hands {@code
+   * inputSchema} straight to a model provider, and a provider that validates it rejects an unknown
+   * {@code type}.
+   *
+   * <p>micronaut-mcp 0.0.20 wrote {@code "bool"} for booleans, which is not one of them, and this
+   * repo carried a response filter to correct it. Upstream fixed the constant in 2.0.0; the
+   * Micronaut 5 bump picked that up and the filter is gone. The assertion never moved, because it
+   * was written against the served result rather than the workaround — which is what let the filter
+   * be deleted without anyone having to re-derive whether it was still load-bearing.
    */
   @Test
   public void everyAdvertisedPropertyTypeIsAJsonSchemaType() throws Exception {

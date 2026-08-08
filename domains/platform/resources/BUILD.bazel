@@ -1,3 +1,5 @@
+load("//bazel/rules:java.bzl", "artifact", "java_library")
+
 filegroup(
     name = "logback_config",
     srcs = ["logback.xml"],
@@ -8,4 +10,21 @@ filegroup(
     name = "micronaut_config",
     srcs = ["application.yml"],
     visibility = ["//visibility:public"],
+)
+
+# application.yml packaged with the parser that can read it. Micronaut's
+# YamlPropertySourceLoader is compiled against classic snakeyaml and disables itself
+# when that class is missing — without complaint, so the file is simply ignored and
+# every property in it silently takes its default. Micronaut 4 inherited snakeyaml
+# through Jackson 2; Jackson 3 uses snakeyaml-engine instead, so nothing pulls it in
+# any more.
+#
+# Depend on this rather than on :micronaut_config plus a resource_strip_prefix, so the
+# config and the thing that parses it cannot arrive separately.
+java_library(
+    name = "micronaut_config_lib",
+    resource_strip_prefix = "domains/platform/resources",
+    resources = [":micronaut_config"],
+    visibility = ["//visibility:public"],
+    runtime_deps = [artifact("org.yaml:snakeyaml")],
 )

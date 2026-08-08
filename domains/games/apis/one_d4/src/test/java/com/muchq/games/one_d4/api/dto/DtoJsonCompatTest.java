@@ -2,8 +2,6 @@ package com.muchq.games.one_d4.api.dto;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micronaut.context.ApplicationContext;
 import java.time.Instant;
 import java.util.List;
@@ -12,6 +10,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Wire-compatibility tests for the request and response DTOs. QueryRequest and AggregateRequest are
@@ -34,6 +34,11 @@ public class DtoJsonCompatTest {
    * serialize response bodies. A hand-built {@code new ObjectMapper()} would pin whatever Jackson's
    * defaults happen to be rather than what this service actually puts on the wire, which is the one
    * thing these tests exist to check.
+   *
+   * <p>This is Jackson 3's {@code tools.jackson.databind.ObjectMapper}, not Jackson 2's: Micronaut
+   * 5 serializes the HTTP layer with Jackson 3. The rest of the repo still uses Jackson 2 through
+   * {@code JsonUtils}, and the two coexist — which is precisely why this test resolves the mapper
+   * from the container instead of importing whichever one is nearest.
    */
   private static ApplicationContext context;
 
