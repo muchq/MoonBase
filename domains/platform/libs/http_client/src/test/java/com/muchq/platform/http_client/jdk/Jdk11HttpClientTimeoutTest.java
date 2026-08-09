@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -65,6 +66,64 @@ public class Jdk11HttpClientTimeoutTest {
       assertThatThrownBy(() -> client().execute(request(server.url(), Duration.ofMillis(250))))
           .isInstanceOf(UncheckedIOException.class)
           .hasCauseInstanceOf(HttpTimeoutException.class);
+    }
+  }
+
+  /**
+   * Expiring the caller's wait is only half of a timeout. The exchange has to be torn down too.
+   *
+   * <p>Nothing above this line can tell the difference: a client that abandons the wait and leaves
+   * the exchange running throws the same exception at the same moment, and every assertion in this
+   * file passed against exactly that. What is left behind is a live subscriber on a live socket,
+   * buffering whatever the peer sends, plus a {@code close()} that waits on an operation the caller
+   * already gave up on.
+   *
+   * <p>So the peer is asked instead, and it is kept open past the assertion on purpose — closing it
+   * would produce the disconnection this test is trying to observe.
+   *
+   * <p>The mechanism this pins is narrow: {@code cancel(true)} is what reaches the far end, and it
+   * only does so on a future that has not completed. Timing the {@code get} keeps it that way, and
+   * {@code orTimeout} did not — it completes the future itself, leaving a cancel that returns false
+   * and touches nothing.
+   */
+  @Test
+  @Timeout(60)
+  public void aTimedOutExchangeIsTornDownAtThePeer() throws Exception {
+    try (StalledServer server = new StalledServer(StalledServer.Behaviour.HEAD_THEN_STALL)) {
+      assertThatThrownBy(() -> client().execute(request(server.url(), Duration.ofMillis(250))))
+          .isInstanceOf(UncheckedIOException.class);
+
+      assertThat(server.clientHungUp().await(30, TimeUnit.SECONDS))
+          .as("the peer still sees a connected client, so the exchange outlived the deadline")
+          .isTrue();
+    }
+  }
+
+  /**
+   * A deadline is not a cancellation, and one_d4's IndexWorker reads the difference off the
+   * interrupt status rather than off an exception type. If an expiring timeout left that status
+   * set, an ordinary slow upstream would be indistinguishable from a worker being told to let go:
+   * the run would be abandoned instead of recorded as a failed attempt, and the flag would ride
+   * back to a pooled thread that nobody interrupted.
+   *
+   * <p>Both stalls, because they leave through different catch blocks.
+   */
+  @Test
+  @Timeout(60)
+  public void aTimeoutLeavesTheInterruptStatusClear() throws Exception {
+    Thread.interrupted(); // Stand on nothing a previous case left behind.
+    for (StalledServer.Behaviour behaviour :
+        new StalledServer.Behaviour[] {
+          StalledServer.Behaviour.SILENT, StalledServer.Behaviour.HEAD_THEN_STALL
+        }) {
+      try (StalledServer server = new StalledServer(behaviour)) {
+        assertThatThrownBy(() -> client().execute(request(server.url(), Duration.ofMillis(250))))
+            .isInstanceOf(UncheckedIOException.class);
+
+        assertThat(Thread.currentThread().isInterrupted())
+            .as("a timeout against a %s peer must not look like a cancellation", behaviour)
+            .isFalse();
+      }
     }
   }
 

@@ -23,8 +23,6 @@ java_library(
     deps = [
         "//domains/platform/libs/http_client:core",
         artifact("com.fasterxml.jackson.core:jackson-annotations"),
-        # Bounds the whole exchange, body read included (#1336).
-        artifact("dev.failsafe:failsafe"),
         artifact("com.fasterxml.jackson.core:jackson-core"),
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("org.slf4j:slf4j-api"),

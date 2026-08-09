@@ -93,19 +93,6 @@ public class HttpRequest {
   }
 
   /**
-   * How long to wait for the <em>response head</em>, or empty for no deadline.
-   *
-   * <p>Read the name literally: this expires while awaiting the status line and headers, and stops
-   * there. The body is streamed afterwards and is <b>not</b> covered — a peer that sends a complete
-   * head, promises a Content-Length it never delivers, and goes quiet will still park a caller
-   * indefinitely in {@code getAsBytes()} (#1336).
-   *
-   * <p>So this bounds an unresponsive peer, not a slow or malicious body. A caller that needs the
-   * whole exchange bounded has to wrap it — {@code OneD4Client} uses a Failsafe {@code Timeout}
-   * with {@code withInterrupt()} for exactly that. {@code Jdk11HttpClientTimeoutTest} pins both
-   * halves.
-   */
-  /**
    * Deadline for the whole exchange, or empty for none.
    *
    * <p>Headers and body, genuinely: the client sends asynchronously and waits for the complete

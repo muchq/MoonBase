@@ -4,11 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.muchq.platform.http_client.core.HttpClient;
 import com.muchq.platform.http_client.core.HttpRequest;
 import com.muchq.platform.http_client.core.HttpResponse;
-import dev.failsafe.Failsafe;
-import dev.failsafe.FailsafeException;
-import dev.failsafe.Timeout;
-import dev.failsafe.TimeoutExceededException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
@@ -43,7 +41,6 @@ public class ChessClient {
   private final HttpClient httpClient;
   private final ObjectMapper mapper;
   private final Duration timeout;
-  private final Timeout<Object> deadline;
 
   public ChessClient(HttpClient httpClient, ObjectMapper objectMapper) {
     this(httpClient, objectMapper, DEFAULT_TIMEOUT);
@@ -53,9 +50,6 @@ public class ChessClient {
     this.httpClient = httpClient;
     this.mapper = objectMapper;
     this.timeout = timeout;
-    // withInterrupt is the load-bearing half: without it Failsafe marks the execution failed and
-    // leaves the thread parked in the body read, which is the bug rather than the fix.
-    this.deadline = Timeout.builder(timeout).withInterrupt().build();
   }
 
   public Optional<Player> fetchPlayer(String player) {
@@ -75,26 +69,34 @@ public class ChessClient {
   }
 
   /**
-   * One deadline over the request, the status check and the body read.
+   * Translation only. The deadline itself belongs to the shared client, which bounds the whole
+   * exchange — send, head and body alike — and reports an expired one as {@link
+   * HttpTimeoutException}.
    *
-   * <p>The transport timeout below covers only time-to-headers — the JDK's request deadline ends
-   * when the response head arrives and the body is streamed after that. Wrapping the whole thing
-   * here is what bounds a peer that answers and then stalls mid-body.
+   * <p>This used to run the exchange inside a Failsafe {@code Timeout} as well, back when the
+   * transport deadline stopped at the response head and something had to cover the body read
+   * (#1336). Two deadlines of the same length over one call is worse than one: they race, and the
+   * caller got {@link ChessComApiException} or {@link UncheckedIOException} depending on which
+   * scheduler thread happened to fire first. Worse, Failsafe's {@code withInterrupt} bounded the
+   * call by interrupting this thread, so an ordinary slow upstream left the interrupt status set —
+   * and IndexWorker reads that status to decide a run was cancelled, so a timeout here could
+   * abandon a request instead of recording a failed attempt against it.
    *
-   * <p>TODO: retry with backoff on 429/5xx, which is the other half of Failsafe-ifying this.
+   * <p>TODO: retry with backoff on 429/5xx. That is a real use for Failsafe here; a second timeout
+   * was not.
    */
   private <T> Optional<T> getAs(String url, Class<T> clazz) {
     try {
-      return Failsafe.with(deadline).get(() -> exchange(url, clazz));
-    } catch (TimeoutExceededException e) {
-      throw new ChessComApiException(
-          TIMEOUT_STATUS, "chess.com did not answer within " + timeout + " for " + url);
-    } catch (FailsafeException e) {
-      Throwable cause = e.getCause();
-      if (cause instanceof RuntimeException runtime) {
-        throw runtime;
+      return exchange(url, clazz);
+    } catch (UncheckedIOException e) {
+      if (e.getCause() instanceof HttpTimeoutException) {
+        throw new ChessComApiException(
+            TIMEOUT_STATUS, "chess.com did not answer within " + timeout + " for " + url);
       }
-      throw new RuntimeException(cause == null ? e : cause);
+      throw e;
+    } catch (IOException e) {
+      // Only the parse throws this now; the transport's own failures arrive unchecked.
+      throw new UncheckedIOException(e);
     }
   }
 
@@ -104,9 +106,8 @@ public class ChessClient {
     HttpResponse response = httpClient.execute(request);
 
     if (response.getStatusCode() == 404) {
-      // Drain before returning: an unread body holds its connection out of the pool, and a
-      // not-found lookup is common enough here to leak one per miss.
-      discardBody(response);
+      // Nothing to drain: the shared client reads the complete response before returning, so the
+      // connection is already back in the pool by the time we look at the status.
       return Optional.empty();
     }
 
@@ -118,13 +119,5 @@ public class ChessClient {
     }
 
     return Optional.of(mapper.readValue(response.getAsInputStream(), clazz));
-  }
-
-  private static void discardBody(HttpResponse response) {
-    try {
-      response.getAsBytes();
-    } catch (RuntimeException e) {
-      // Nothing to salvage; the status was the whole answer.
-    }
   }
 }

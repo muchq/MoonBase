@@ -283,8 +283,9 @@ public class ChessClientTest {
    * forever keeps that row owned by a process that is never coming back, so the request burns an
    * attempt and the lease has to expire before anyone else can pick it up (#1336).
    *
-   * <p>The transport timeout alone does not cover this — the JDK's request deadline ends when the
-   * response head arrives, which this server sends in full before going quiet.
+   * <p>Against a real socket, because the claim is about a thread that would otherwise be parked on
+   * one. The deadline itself is the shared client's now; what this pins is that a stalled body
+   * still reaches a caller of <em>this</em> class as the documented 504.
    *
    * <p>{@code @Timeout} is the backstop that makes a regression a failure rather than a hung CI
    * job: without a working deadline this does not fail, it hangs.
@@ -321,10 +322,88 @@ public class ChessClientTest {
               MAPPER,
               java.time.Duration.ofMillis(300));
 
+      Thread.interrupted(); // Stand on nothing an earlier case left behind.
+
       assertThatThrownBy(() -> client.fetchGames("stalled", YearMonth.of(2024, 1)))
           .isInstanceOf(ChessComApiException.class)
-          .hasMessageContaining("did not answer within");
+          .hasMessageContaining("did not answer within")
+          .satisfies(e -> assertThat(((ChessComApiException) e).statusCode()).isEqualTo(504));
+
+      assertThat(Thread.currentThread().isInterrupted())
+          .as(
+              "a slow upstream is not a cancellation; IndexWorker reads this status to decide"
+                  + " whether to abandon a request or record a failed attempt against it")
+          .isFalse();
     }
+  }
+
+  /**
+   * The same translation, without a socket, so it holds whichever timer fired.
+   *
+   * <p>The socket test above cannot distinguish these: it produces one timeout and cannot say what
+   * would happen to the other. There were two while this class ran its own Failsafe deadline
+   * alongside the transport's, and a caller got {@link ChessComApiException} or a bare {@code
+   * UncheckedIOException} depending on which scheduler thread won a race between two equal
+   * durations — reproducible in production, unreproducible in a test.
+   *
+   * <p>Now the shared client raises exactly this, and it is the only thing that raises it.
+   */
+  @Test
+  public void aTransportTimeoutIsAlwaysReportedAsAGatewayTimeout() {
+    HttpClient timingOut =
+        new HttpClient() {
+          @Override
+          public HttpResponse execute(HttpRequest request) {
+            throw new java.io.UncheckedIOException(
+                new java.net.http.HttpTimeoutException("request did not complete within deadline"));
+          }
+
+          @Override
+          public HttpResponse executeAsync(HttpRequest request) {
+            return execute(request);
+          }
+
+          @Override
+          public void close() {}
+        };
+
+    ChessClient client = new ChessClient(timingOut, MAPPER, java.time.Duration.ofSeconds(7));
+
+    assertThatThrownBy(() -> client.fetchPlayer("hikaru"))
+        .isInstanceOf(ChessComApiException.class)
+        .satisfies(e -> assertThat(((ChessComApiException) e).statusCode()).isEqualTo(504))
+        .hasMessageContaining("did not answer within PT7S");
+  }
+
+  /**
+   * The negative half. Not every {@code UncheckedIOException} is a deadline — a reset connection is
+   * one too — and turning those into a 504 would tell a caller to wait and retry a request that
+   * failed outright.
+   */
+  @Test
+  public void anOrdinaryTransportFailureIsNotDressedUpAsATimeout() {
+    HttpClient reset =
+        new HttpClient() {
+          @Override
+          public HttpResponse execute(HttpRequest request) {
+            throw new java.io.UncheckedIOException(
+                new java.io.IOException("connection reset by peer"));
+          }
+
+          @Override
+          public HttpResponse executeAsync(HttpRequest request) {
+            return execute(request);
+          }
+
+          @Override
+          public void close() {}
+        };
+
+    ChessClient client = new ChessClient(reset, MAPPER, java.time.Duration.ofSeconds(7));
+
+    assertThatThrownBy(() -> client.fetchPlayer("hikaru"))
+        .isInstanceOf(java.io.UncheckedIOException.class)
+        .hasMessageContaining("connection reset by peer");
   }
 
   @Test

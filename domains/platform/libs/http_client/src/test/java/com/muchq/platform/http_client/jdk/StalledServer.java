@@ -51,6 +51,7 @@ final class StalledServer implements Closeable {
   private final ServerSocket serverSocket;
   private final CountDownLatch connected = new CountDownLatch(1);
   private final CountDownLatch bodyStarted = new CountDownLatch(1);
+  private final CountDownLatch clientHungUp = new CountDownLatch(1);
 
   /** Held open on purpose: closing them would unblock the caller and defeat the whole fixture. */
   private final List<Socket> open = new CopyOnWriteArrayList<>();
@@ -76,6 +77,19 @@ final class StalledServer implements Closeable {
     return bodyStarted;
   }
 
+  /**
+   * Trips when the client's end of a stalled exchange goes away — EOF or a reset on the socket this
+   * server is still holding open.
+   *
+   * <p>The one observation that distinguishes an abandoned exchange from a cancelled one. A client
+   * whose deadline expires without cancelling leaves this latch untripped: its caller has been sent
+   * on its way, but the socket is still there, still subscribed, still buffering whatever the peer
+   * chooses to send. Only a real cancellation reaches the far end.
+   */
+  CountDownLatch clientHungUp() {
+    return clientHungUp;
+  }
+
   private void acceptLoop(Behaviour behaviour) {
     while (!serverSocket.isClosed()) {
       try {
@@ -84,6 +98,9 @@ final class StalledServer implements Closeable {
         connected.countDown();
         if (behaviour != Behaviour.SILENT) {
           respondPartially(socket, behaviour);
+        }
+        if (behaviour != Behaviour.HEAD_THEN_CLOSE) {
+          watchForHangup(socket);
         }
       } catch (IOException e) {
         return; // The socket was closed: the test is over.
@@ -108,6 +125,30 @@ final class StalledServer implements Closeable {
       open.remove(socket);
     }
     bodyStarted.countDown();
+  }
+
+  /**
+   * Drains whatever the client sends until the connection ends, on its own thread so the accept
+   * loop stays free. The bytes are not the point — reaching the end of them is.
+   */
+  private void watchForHangup(Socket socket) {
+    Thread watcher =
+        new Thread(
+            () -> {
+              try {
+                InputStream in = socket.getInputStream();
+                while (in.read() != -1) {
+                  // The request head, and then nothing: a stalled client sends no more.
+                }
+              } catch (IOException reset) {
+                // A reset is a hangup too, and reads as one.
+              } finally {
+                clientHungUp.countDown();
+              }
+            },
+            "stalled-server-watch");
+    watcher.setDaemon(true);
+    watcher.start();
   }
 
   /** Reads up to the blank line, so the client's write completes and it settles into the wait. */
