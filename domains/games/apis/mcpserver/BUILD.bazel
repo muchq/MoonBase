@@ -30,6 +30,8 @@ java_library(
         "//domains/platform/libs/json",
         artifact("com.fasterxml.jackson.core:jackson-core"),
         artifact("com.fasterxml.jackson.core:jackson-databind"),
+        # Bounds the whole one_d4 exchange, body read included (#1336).
+        artifact("dev.failsafe:failsafe"),
         # @Tool / @ToolArg. The tool roster and every input schema are derived from
         # these at runtime — there are no hand-written schemas left to drift.
         artifact("io.micronaut.mcp:micronaut-mcp-annotations"),

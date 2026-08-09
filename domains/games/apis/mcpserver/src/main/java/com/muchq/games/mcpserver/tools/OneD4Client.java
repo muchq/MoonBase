@@ -13,6 +13,10 @@ import com.muchq.games.one_d4.api.dto.QueryResponse;
 import com.muchq.platform.http_client.core.HttpClient;
 import com.muchq.platform.http_client.core.HttpRequest;
 import com.muchq.platform.http_client.core.HttpResponse;
+import dev.failsafe.Failsafe;
+import dev.failsafe.FailsafeException;
+import dev.failsafe.Timeout;
+import dev.failsafe.TimeoutExceededException;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
@@ -46,6 +50,7 @@ public class OneD4Client {
   private final ObjectMapper mapper;
   private final String baseUrl;
   private final Duration timeout;
+  private final Timeout<Object> deadline;
 
   public OneD4Client(HttpClient httpClient, ObjectMapper mapper, String baseUrl) {
     this(httpClient, mapper, baseUrl, DEFAULT_TIMEOUT);
@@ -53,6 +58,11 @@ public class OneD4Client {
 
   OneD4Client(HttpClient httpClient, ObjectMapper mapper, String baseUrl, Duration timeout) {
     this.timeout = timeout;
+    // Failsafe bounds the whole exchange, which the transport timeout alone does not: the JDK's
+    // request deadline ends when the response head arrives, and the body is read afterwards
+    // (#1336). Wrapping here rather than changing the shared client keeps ChessClient streaming
+    // chess.com month archives instead of buffering them.
+    this.deadline = Timeout.builder(timeout).withInterrupt().build();
     this.httpClient = httpClient;
     this.mapper = mapper;
     // Trailing slashes would produce //v1/index, which some routers treat as a different path.
@@ -69,15 +79,21 @@ public class OneD4Client {
 
   /** Empty when one_d4 has no such request, which is a 404 rather than a failure. */
   public Optional<IndexResponse> status(UUID requestId) {
-    HttpResponse response = send(get("/v1/index/" + requestId));
-    if (response.getStatusCode() == 404) {
-      // Drain before returning. The body is an undrained InputStream, and an unread one holds its
-      // connection out of the pool — a tool polling unknown ids would leak one per call.
-      discardBody(response);
-      return Optional.empty();
-    }
-    throwIfNotOk(response, "GET /v1/index/" + requestId);
-    return Optional.of(read(response, IndexResponse.class, "GET /v1/index/" + requestId));
+    String description = "GET /v1/index/" + requestId;
+    return withinDeadline(
+        description,
+        () -> {
+          HttpResponse response = send(get("/v1/index/" + requestId));
+          if (response.getStatusCode() == 404) {
+            // Drain before returning. The body is an undrained InputStream, and an unread one
+            // holds its connection out of the pool — a tool polling unknown ids would leak one
+            // per call.
+            discardBody(response);
+            return Optional.empty();
+          }
+          throwIfNotOk(response, description);
+          return Optional.of(read(response, IndexResponse.class, description));
+        });
   }
 
   public QueryResponse query(QueryRequest request) {
@@ -108,9 +124,39 @@ public class OneD4Client {
     } catch (Exception e) {
       throw new UpstreamException(description + ": could not serialize request", e);
     }
-    HttpResponse response = send(request);
-    throwIfNotOk(response, description);
-    return read(response, type, description);
+    // One deadline over send + status check + body read, so a stall anywhere in the exchange
+    // expires rather than only a stall before the headers.
+    return withinDeadline(
+        description,
+        () -> {
+          HttpResponse response = send(request);
+          throwIfNotOk(response, description);
+          return read(response, type, description);
+        });
+  }
+
+  /**
+   * Runs one exchange under the deadline.
+   *
+   * <p>Failsafe's TimeoutExceededException becomes an UpstreamException like any other transport
+   * failure — from a caller's side "one_d4 did not answer in time" and "one_d4 refused the
+   * connection" are the same problem. IllegalArgumentException passes through untouched, because a
+   * 4xx that arrived inside the deadline is still the caller's to fix.
+   */
+  private <T> T withinDeadline(String description, java.util.concurrent.Callable<T> exchange) {
+    try {
+      return Failsafe.with(deadline).get(exchange::call);
+    } catch (TimeoutExceededException e) {
+      throw new UpstreamException(
+          description + ": one_d4 at " + baseUrl + " did not answer within " + timeout, e);
+    } catch (FailsafeException e) {
+      Throwable cause = e.getCause();
+      if (cause instanceof RuntimeException runtime) {
+        throw runtime;
+      }
+      throw new UpstreamException(
+          description + ": call to one_d4 failed", cause == null ? e : cause);
+    }
   }
 
   private HttpRequest get(String path) {

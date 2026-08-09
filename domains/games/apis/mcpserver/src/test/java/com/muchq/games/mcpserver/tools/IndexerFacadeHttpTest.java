@@ -421,6 +421,47 @@ public class IndexerFacadeHttpTest {
         .hasMessageContaining("localhost:1");
   }
 
+  /**
+   * A peer that sends a complete head and then stalls mid-body must expire, not park the caller.
+   *
+   * <p>This is the case the transport deadline alone cannot reach: the JDK's request timeout ends
+   * when the response head arrives, so {@code execute} returns and the unbounded wait moves into
+   * the body read (#1336). Failsafe wraps send, status check and body read together, which is what
+   * makes the whole exchange bounded.
+   *
+   * <p>The {@code @Timeout} is the backstop that turns a regression into a failure rather than a
+   * hung CI job — without a working deadline this test does not fail, it hangs.
+   */
+  @Test
+  @org.junit.jupiter.api.Timeout(60)
+  public void aPeerThatStallsMidBodyExpiresRatherThanParkingTheCaller() throws Exception {
+    routes.put(
+        "POST /v1/query",
+        exchange -> {
+          // A head promising far more body than will ever arrive, then silence.
+          exchange.getResponseHeaders().add("Content-Type", "application/json");
+          exchange.sendResponseHeaders(200, 4096);
+          exchange.getResponseBody().write("{\"games\":[".getBytes(StandardCharsets.UTF_8));
+          exchange.getResponseBody().flush();
+          try {
+            Thread.sleep(3_000);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+          }
+        });
+
+    OneD4Client client =
+        new OneD4Client(
+            new Jdk11HttpClient(java.net.http.HttpClient.newHttpClient()),
+            JsonUtils.mapper(),
+            baseUrl,
+            Duration.ofMillis(300));
+
+    assertThatThrownBy(() -> new IndexerFacade(client).query("motif(pin)", null, 10))
+        .isInstanceOf(OneD4Client.UpstreamException.class)
+        .hasMessageContaining("did not answer within");
+  }
+
   /** A base URL with a trailing slash must not produce //v1/query. */
   @Test
   public void aTrailingSlashOnTheBaseUrlIsNormalized() {
