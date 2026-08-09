@@ -57,6 +57,16 @@ Bazel formatting do.
 - **Postgres-gated suites skip silently** without `PG_TEST_DB_URL` /
   `GOLF_HUB_TEST_DB_URL`. CI supplies them from a `postgres:18` service; a
   local green run may have exercised no SQL at all.
+- **NullAway only checks `com.muchq.platform` and `com.muchq.chat`**, and no
+  test source anywhere. `bazel/rules/java.bzl` attaches the plugin to every
+  `java_library`/`java_binary`, so it reads as repo-wide; the scope is one
+  `AnnotatedPackages` string (`java.bzl:59`). Everything under
+  `com.muchq.games` compiles unchecked, so a `@Nullable` there is a comment —
+  it will not fail a build. Test sources are unchecked even under the annotated
+  roots, because `java_test_suite` is a passthrough that adds neither the
+  plugin nor the javacopts (the `java_test` macro beside it adds both; the repo
+  uses `java_test_suite`). `//bazel/rules:rules_test` guards against the scope
+  silently narrowing, but nothing makes it wider — widen it deliberately.
 - **Behind a proxy that 403s GitHub source archives** (cloud sandboxes, some CI
   runners), run `scripts/make-git-overrides.sh` once and import its output from
   `.bazelrc.user` — see [`docs/BUILD_AND_IDE.md`](docs/BUILD_AND_IDE.md). That
