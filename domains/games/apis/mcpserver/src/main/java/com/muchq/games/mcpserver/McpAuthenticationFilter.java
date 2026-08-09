@@ -5,6 +5,7 @@ import io.micronaut.context.annotation.Value;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpResponse;
 import io.micronaut.http.HttpStatus;
+import io.micronaut.http.MediaType;
 import io.micronaut.http.MutableHttpResponse;
 import io.micronaut.http.annotation.Filter;
 import io.micronaut.http.filter.HttpServerFilter;
@@ -12,8 +13,6 @@ import io.micronaut.http.filter.ServerFilterChain;
 import jakarta.inject.Inject;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import org.reactivestreams.Publisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,34 +22,44 @@ import reactor.core.publisher.Mono;
  * Bearer-token gate on the MCP endpoint, active only when {@code mcp.auth.token} is set to a
  * non-empty value.
  *
- * <p>The shared {@code application.yml} declares {@code mcp.auth.token: ${MCP_AUTH_TOKEN:}}, and
- * with {@code MCP_AUTH_TOKEN} unset that resolves to nothing. The condition is written as a
- * <em>pattern</em> rather than a presence or {@code notEquals} check because Micronaut 4 and 5
- * disagree about which of those an empty placeholder is: on 4 the property was present-and-empty,
- * on 5 it is absent, and {@code notEquals = ""} flips meaning between them — under 5 it admitted
- * the bean and then failed to inject {@code ${mcp.auth.token}}, turning every request into a 500.
- * {@code pattern = ".+"} says the thing actually meant — a token with at least one character — and
- * reads the same on both. With no token this bean is never created and the endpoint is open, which
- * is what the deployment runs: Compose sets no such variable. {@code McpAuthenticationTest} pins
- * both halves so "open" stays a decision rather than an accident.
+ * <p>The condition must mean "the token holds something usable", and the obvious spellings do not.
+ * {@code notEquals = ""} inverts between Micronaut 4 and 5, which disagree about whether the empty
+ * placeholder in {@code mcp.auth.token: ${MCP_AUTH_TOKEN:}} is present-and-empty or absent. {@code
+ * pattern = ".+"} is worse and in the dangerous direction: {@code String.matches} anchors the whole
+ * value and {@code .} excludes line terminators, so a token read from a file-backed secret — a
+ * Kubernetes secret, {@code $(cat token)} — arrives as {@code "s3cret\n"}, fails the match, and the
+ * bean is never created. The endpoint would serve anonymous {@code tools/call} while the operator
+ * reads a configured token, with a missing log line as the only signal. It also admits {@code " "},
+ * gating the endpoint behind a secret nobody can send. {@code (?s).*\S.*} is the honest test: at
+ * least one non-whitespace character, any character class.
  *
- * <p>The 401 body is a JSON-RPC error object rather than an empty response: a client that only
- * knows how to parse MCP responses gets a message it can surface instead of a bare status code.
+ * <p>The token is stripped for the same reason: a trailing newline that survived into the
+ * comparison would reject every correct request.
  *
- * <p>The pattern reads the same property the MCP controller is mounted on rather than repeating the
- * literal path, so moving the endpoint cannot leave the gate behind on the old one.
+ * <p>With no token this bean is never created and the endpoint is open, which is what the
+ * deployment runs — Compose sets no such variable. {@code McpAuthenticationTest} pins both halves,
+ * and the whitespace cases, so "open" stays a decision rather than an accident.
+ *
+ * <p>The 401 body is written as a JSON-RPC error object so a client that only knows how to parse
+ * MCP responses gets a message it can surface. It is serialized by hand rather than handed to the
+ * container mapper because that mapper omits nulls, which would drop the {@code id} member that
+ * JSON-RPC requires to be present.
+ *
+ * <p>The route pattern reads the same property the MCP controller is mounted on rather than
+ * repeating the literal path, so moving the endpoint cannot leave the gate behind on the old one.
  */
 @Filter("${micronaut.mcp.server.endpoint:/mcp}")
-@Requires(property = "mcp.auth.token", pattern = ".+")
+@Requires(property = "mcp.auth.token", pattern = "(?s).*\\S.*")
 public class McpAuthenticationFilter implements HttpServerFilter {
   private static final Logger LOG = LoggerFactory.getLogger(McpAuthenticationFilter.class);
   private static final String BEARER = "Bearer ";
+  private static final int JSON_RPC_UNAUTHORIZED = -32000;
 
   private final String requiredToken;
 
   @Inject
   public McpAuthenticationFilter(@Value("${mcp.auth.token}") String requiredToken) {
-    this.requiredToken = requiredToken;
+    this.requiredToken = requiredToken.strip();
     LOG.info("MCP authentication enabled");
   }
 
@@ -81,19 +90,23 @@ public class McpAuthenticationFilter implements HttpServerFilter {
     return chain.proceed(request);
   }
 
+  /**
+   * The id member is null because the request was rejected before its body was read, and JSON-RPC
+   * requires it present anyway. Handing a map to the container mapper would drop it — that mapper
+   * omits nulls — so the envelope is written literally. Every message is a constant in this file,
+   * so there is nothing to escape.
+   */
   private static Mono<MutableHttpResponse<?>> unauthorized(String message) {
-    // LinkedHashMap rather than Map.of: JSON-RPC wants the id member present, and it is null here
-    // because the request was rejected before its body was read.
-    Map<String, Object> error = new LinkedHashMap<>();
-    error.put("code", -32000);
-    error.put("message", message);
-    Map<String, Object> body = new LinkedHashMap<>();
-    body.put("jsonrpc", "2.0");
-    body.put("id", null);
-    body.put("error", error);
+    String body =
+        "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":"
+            + JSON_RPC_UNAUTHORIZED
+            + ",\"message\":\""
+            + message
+            + "\"}}";
     return Mono.just(
         HttpResponse.status(HttpStatus.UNAUTHORIZED)
             .header("WWW-Authenticate", "Bearer")
+            .contentType(MediaType.APPLICATION_JSON)
             .body(body));
   }
 }

@@ -6,7 +6,9 @@
 > `@Tool` methods on `@Singleton` beans, served over MCP by micronaut-mcp; their
 > parameters are their input schemas. See `mcpserver/tools/` and `mcpserver/McpModule.java`
 > for the code, and `mcpserver/README.md` for the transport. This document is the design
-> that led there — the tool semantics below still describe what the tools do.
+> that led there — the tool semantics below still describe what the tools do, though the
+> served schemas are derived from the method signatures and carry no `enum` or `items`
+> constraints; `McpProtocolTest` is authoritative for their exact shape.
 
 ## Overview
 
@@ -74,7 +76,6 @@ Start indexing a player's games for motif detection.
     },
     "platform": {
       "type": "string",
-      "enum": ["chess.com"],
       "description": "The chess platform (currently only chess.com)"
     },
     "start_month": {
@@ -143,7 +144,7 @@ Search indexed games using ChessQL.
       "description": "A ChessQL query string. Examples: 'white.elo >= 2500 AND motif(fork)', 'motif(pin) OR motif(skewer)', 'eco = \"B90\" AND NOT motif(fork)'. Available motifs: pin, cross_pin, fork, skewer, discovered_attack, check, checkmate, promotion, promotion_with_check, promotion_with_checkmate. Available fields: white.elo, black.elo, white.username, black.username, time.class, eco, result, num.moves, platform."
     },
     "limit": {
-      "type": "integer",
+      "type": "number",
       "description": "Maximum number of results to return (default 10, max 50)"
     }
   },

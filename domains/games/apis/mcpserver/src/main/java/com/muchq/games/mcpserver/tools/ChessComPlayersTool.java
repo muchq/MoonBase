@@ -44,18 +44,20 @@ public class ChessComPlayersTool {
               + " usernames in one call. The response maps each lowercased username to its"
               + " profile; unknown usernames are listed under not_found.")
   public String chessComPlayers(
-      @ToolArg(description = "The chess.com usernames to look up (max 50)")
-          List<String> usernames) {
+      @ToolArg(description = "The chess.com usernames to look up (max 50)") List<?> usernames) {
     if (usernames.isEmpty()) {
       return ToolJson.error("usernames must be a non-empty array of strings");
     }
 
+    // List<?>, not List<String>: the argument binder converts the array to a List but leaves the
+    // elements alone, so a JSON number arrives as an Integer and a declared List<String> would
+    // throw ClassCastException out of this loop — a 500 where the caller deserves an error message.
     Set<String> deduped = new LinkedHashSet<>();
-    for (String item : usernames) {
-      if (item == null || item.isBlank()) {
+    for (Object item : usernames) {
+      if (item == null || item.toString().isBlank()) {
         return ToolJson.error("usernames must not contain blank entries");
       }
-      deduped.add(item.toLowerCase());
+      deduped.add(item.toString().toLowerCase());
     }
     if (deduped.size() > MAX_USERNAMES) {
       return ToolJson.error(

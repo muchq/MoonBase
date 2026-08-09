@@ -30,11 +30,9 @@ public class AggregateGamesTool {
               + " openings' in one call: for one player's openings, query 'white.username ="
               + " \"hikaru\" OR black.username = \"hikaru\"' with group_by [\"opening_family\"] —"
               + " both sides, or you count only the games they had white. The filter may scope"
-              + " time with date comparisons ('date >= \"2026-07-01\"') or 'month = \"2026-07\"';"
-              + " date and month filter the indexed corpus only, so a period that was never"
-              + " indexed comes back with zero groups rather than an error — indistinguishable"
-              + " from 'played no games then' unless you index that period first with"
-              + " index_chess_games. With the player parameter the filter may use perspective"
+              + " time with date comparisons ('date >= \"2026-07-01\"') or 'month = \"2026-07\"'; "
+              + ToolDescriptions.UNINDEXED_PERIODS_READ_AS_EMPTY
+              + " With the player parameter the filter may use perspective"
               + " fields (me.*, opponent.*, outcome) — e.g. player: hikaru with query 'me.color ="
               + " \"white\" AND opponent.title = \"GM\"'. With player set, perspective fields can"
               + " also go in group_by (the group_by description lists what's groupable, keyed by"
@@ -45,9 +43,8 @@ public class AggregateGamesTool {
               + " groups by the stored casing without normalization. me.elo and opponent.elo group"
               + " as fixed-width rating buckets, 100 points unless the term carries a width like"
               + " opponent.elo(200); each group key is the band's numeric lower bound (2400 at"
-              + " width 200 means 2400-2599), and NULL elos group under a null key. Note:"
-              + " opening_family is derived from chess.com ECO-URL strings, not a normalized"
-              + " taxonomy — 'Closed Sicilian' and 'Closed Sicilian Defense' are distinct groups."
+              + " width 200 means 2400-2599), and NULL elos group under a null key. "
+              + ToolDescriptions.OPENING_FAMILY_IS_NOT_NORMALIZED
               + " In the output, count is how many groups were returned, not how many games;"
               + " totalGames/totalGroups cover the untruncated result, and truncated=true means"
               + " the group limit cut off a long tail.")
@@ -64,7 +61,7 @@ public class AggregateGamesTool {
                       + " opponent.elo(200); default 100) when player is set, keyed by their"
                       + " underscore forms in the output. date and month are filter-only and"
                       + " rejected here.")
-          List<String> groupBy,
+          List<?> groupBy,
       @Nullable
           @ToolArg(
               description =
@@ -92,11 +89,14 @@ public class AggregateGamesTool {
     if (groupBy.isEmpty()) {
       return ToolJson.error("group_by must be a non-empty array of field names");
     }
+    // List<?>: the binder converts the array but not its elements, so a JSON number would throw
+    // ClassCastException out of a declared List<String>.
+    List<String> groupByNames = groupBy.stream().map(String::valueOf).toList();
     int effectiveLimit = limit == null ? DEFAULT_LIMIT : Math.min(Math.max(limit, 1), MAX_LIMIT);
 
     IndexerFacade.AggregateResult aggregate;
     try {
-      aggregate = facade.aggregate(query, groupBy, player, effectiveLimit);
+      aggregate = facade.aggregate(query, groupByNames, player, effectiveLimit);
     } catch (ParseException | IllegalArgumentException e) {
       return ToolJson.error(e.getMessage());
     }

@@ -28,17 +28,21 @@ Two things the transport does not do, both deliberate:
   request/response, so nothing needs it today. `index_chess_games` is the one that
   would benefit — streamed progress instead of polling `index_status` — if the
   library grows it.
-- **No sessions.** The server is stateless, so there is no `Mcp-Session-Id`.
+- **No sessions.** The server is stateless, so there is no `Mcp-Session-Id`. The
+  2026-07-28 revision removes session pinning from the protocol altogether, so this is
+  the direction of travel rather than a shortfall.
 
 ### Versions
 
 micronaut-mcp **2.0.0**, on Micronaut **5.1.10** (`bazel/java.MODULE.bazel`).
 
-This landed on 0.0.20 first — the last micronaut-mcp release built against Micronaut 4
-— which wrote `"type": "bool"` for boolean tool arguments, not a JSON Schema type, and
-needed a response filter to correct it. 2.0.0 fixed the constant upstream, so the
-filter is gone. `McpProtocolTest` asserts the served property types, so a regression
-there fails the build rather than reaching a client.
+The server negotiates protocol revisions up to **2025-11-25** — a client that asks for
+an older revision it speaks is answered there, and one that asks for something newer is
+answered with that ceiling. MCP's current revision is
+[2026-07-28](https://modelcontextprotocol.io/specification/versioning), which drops the
+handshake and `Mcp-Session-Id` entirely; no Java SDK implements it yet.
+`McpProtocolTest` pins the ceiling, so a library bump that raises it fails the build
+rather than changing what clients negotiate unnoticed.
 
 ## Build the Java binary
 
@@ -208,7 +212,7 @@ concluding anything from an empty date-scoped result.
 
 Environment variables:
 - **PORT**: Server port (default: 8080)
-- **APP_NAME**: Application name (default: mcp-server)
+- **APP_NAME**: Application name (default: `helloworld`, from the shared `application.yml`; Compose sets `mcpserver`)
 - **MCP_AUTH_TOKEN**: Bearer token for authentication (optional, open if unset or empty)
 - **MCP_SERVER_VERSION**: Version reported in `initialize`'s `serverInfo` (default: 1.0.0)
 - **INDEXER_DB_URL**: JDBC URL for the in-process indexer (default: in-memory H2)

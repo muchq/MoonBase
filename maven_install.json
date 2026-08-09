@@ -3,7 +3,7 @@
   "__INPUT_ARTIFACTS_HASH": {
     "ch.qos.logback:logback-classic": -1622778065,
     "ch.qos.logback:logback-core": -1878965258,
-    "com.fasterxml.jackson.core:jackson-annotations": -921857167,
+    "com.fasterxml.jackson.core:jackson-annotations": 1690295661,
     "com.fasterxml.jackson.core:jackson-core": 1977162006,
     "com.fasterxml.jackson.core:jackson-databind": 1925127134,
     "com.fasterxml.jackson.datatype:jackson-datatype-guava": -1899689209,
@@ -66,13 +66,13 @@
     "ch.qos.logback:logback-classic": -130418118,
     "ch.qos.logback:logback-core": 459824923,
     "com.ethlo.time:itu": -908980983,
-    "com.fasterxml.jackson.core:jackson-annotations": 1145483352,
+    "com.fasterxml.jackson.core:jackson-annotations": -1012223496,
     "com.fasterxml.jackson.core:jackson-core": -1244959148,
-    "com.fasterxml.jackson.core:jackson-databind": 2113154956,
-    "com.fasterxml.jackson.datatype:jackson-datatype-guava": -458696540,
-    "com.fasterxml.jackson.datatype:jackson-datatype-jdk8": 2024183681,
-    "com.fasterxml.jackson.datatype:jackson-datatype-jsr310": -1129896352,
-    "com.fasterxml.jackson.module:jackson-module-scala_2.13": 1802815725,
+    "com.fasterxml.jackson.core:jackson-databind": 728542137,
+    "com.fasterxml.jackson.datatype:jackson-datatype-guava": -23622417,
+    "com.fasterxml.jackson.datatype:jackson-datatype-jdk8": 1748107625,
+    "com.fasterxml.jackson.datatype:jackson-datatype-jsr310": -1158266059,
+    "com.fasterxml.jackson.module:jackson-module-scala_2.13": -1850506568,
     "com.github.ben-manes.caffeine:caffeine": -1494872453,
     "com.github.javaparser:javaparser-core": -1165910921,
     "com.github.javaparser:javaparser-symbol-solver-core": -2145359977,
@@ -93,7 +93,7 @@
     "com.google.j2objc:j2objc-annotations": -1008747351,
     "com.google.protobuf:protobuf-java": 1838995038,
     "com.h2database:h2": 1660949213,
-    "com.networknt:json-schema-validator": 577462077,
+    "com.networknt:json-schema-validator": -448005541,
     "com.thoughtworks.paranamer:paranamer": -1233040102,
     "com.uber.nullaway:nullaway": 435081709,
     "com.zaxxer:HikariCP": 1080799863,
@@ -107,10 +107,10 @@
     "io.micronaut.jaxrs:micronaut-jaxrs-server": -1862314693,
     "io.micronaut.jsonschema:micronaut-json-schema-annotations": -1480261473,
     "io.micronaut.jsonschema:micronaut-json-schema-utils": -326768646,
-    "io.micronaut.jsonschema:micronaut-json-schema-validation": -1948597722,
+    "io.micronaut.jsonschema:micronaut-json-schema-validation": 2110376091,
     "io.micronaut.mcp:micronaut-mcp": 1121654626,
     "io.micronaut.mcp:micronaut-mcp-annotations": 2123690444,
-    "io.micronaut.mcp:micronaut-mcp-server-java-sdk": 628364599,
+    "io.micronaut.mcp:micronaut-mcp-server-java-sdk": 1857387703,
     "io.micronaut.reactor:micronaut-reactor": -1723279319,
     "io.micronaut.serde:micronaut-serde-api": 1414178283,
     "io.micronaut.sourcegen:micronaut-sourcegen-bytecode-writer": 609190321,
@@ -133,14 +133,14 @@
     "io.micronaut:micronaut-http-server-netty": 1042869078,
     "io.micronaut:micronaut-inject": 1787836429,
     "io.micronaut:micronaut-inject-java": 144308794,
-    "io.micronaut:micronaut-jackson-core": -1601532463,
-    "io.micronaut:micronaut-jackson-databind": 1408121727,
+    "io.micronaut:micronaut-jackson-core": -649417058,
+    "io.micronaut:micronaut-jackson-databind": 92877517,
     "io.micronaut:micronaut-json-core": -1045492321,
     "io.micronaut:micronaut-retry": 530880800,
     "io.micronaut:micronaut-router": 118801276,
     "io.micronaut:micronaut-runtime": -348451785,
     "io.micronaut:micronaut-websocket": -1112034115,
-    "io.modelcontextprotocol.sdk:mcp-core": 417142414,
+    "io.modelcontextprotocol.sdk:mcp-core": -2077442527,
     "io.netty.contrib:netty-codec-multipart-core": 1927629490,
     "io.netty:netty-buffer": -2075998888,
     "io.netty:netty-codec": -510651193,
@@ -209,11 +209,10 @@
     "org.snakeyaml:snakeyaml-engine": -1273354013,
     "org.yaml:snakeyaml": 1218201193,
     "tools.jackson.core:jackson-core": -435916916,
-    "tools.jackson.core:jackson-databind": 1277331618,
-    "tools.jackson.dataformat:jackson-dataformat-yaml": 187021870
+    "tools.jackson.core:jackson-databind": 1536017795,
+    "tools.jackson.dataformat:jackson-dataformat-yaml": -850893627
   },
   "conflict_resolution": {
-    "com.fasterxml.jackson.core:jackson-annotations": "com.fasterxml.jackson.core:jackson-annotations:2.21",
     "com.fasterxml.jackson.core:jackson-core": "com.fasterxml.jackson.core:jackson-core:2.22.0",
     "com.fasterxml.jackson.core:jackson-databind": "com.fasterxml.jackson.core:jackson-databind:2.22.0",
     "com.fasterxml.jackson.datatype:jackson-datatype-guava": "com.fasterxml.jackson.datatype:jackson-datatype-guava:2.22.0",
@@ -265,9 +264,9 @@
     },
     "com.fasterxml.jackson.core:jackson-annotations": {
       "shasums": {
-        "jar": "53ca085f4a150f703f49e1aabd935bd03b43e1ea3d55d135438292af22cef56b"
+        "jar": "21ddb598807d3a51a876704eb979d9296e1c6a6f47ab1826ff88c6d6a127a2d0"
       },
-      "version": "2.21"
+      "version": "2.22"
     },
     "com.fasterxml.jackson.core:jackson-core": {
       "shasums": {

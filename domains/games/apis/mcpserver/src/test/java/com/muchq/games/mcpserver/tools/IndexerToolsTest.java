@@ -132,7 +132,7 @@ public class IndexerToolsTest {
   private String aggregate(Map<String, Object> arguments) {
     return aggregateTool.aggregateChessGames(
         (String) arguments.get("query"),
-        (List<String>) arguments.getOrDefault("group_by", List.of()),
+        (List<?>) arguments.getOrDefault("group_by", List.of()),
         (String) arguments.get("player"),
         (Integer) arguments.get("limit"));
   }

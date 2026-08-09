@@ -17,11 +17,12 @@ micronaut:
         name: 1d4-mcp
         version: ${MCP_SERVER_VERSION:1.0.0}
 
-# Micronaut 5 serializes the HTTP layer with Jackson 3, which flipped
-# FAIL_ON_NULL_FOR_PRIMITIVES on. That is a wire-compatibility change, not a
-# preference: a request body that sends an explicit null for an int field used
-# to bind as 0 and would now be rejected with a 400 — for clients that have been
-# sending exactly that. AggregateResponseWireTest and DtoJsonCompatTest pin it.
+# Wire compatibility, not a preference. The HTTP layer serializes with Jackson 3,
+# which defaults FAIL_ON_NULL_FOR_PRIMITIVES on. Every DTO here is a record, so an
+# omitted field reaches the canonical constructor as null: with the feature on, a
+# primitive component rejects the whole body; off, it binds to 0. Any client
+# payload that omits an optional numeric field — totalGames/totalGroups among them
+# — is exactly that shape. AggregateResponseWireTest and DtoJsonCompatTest pin it.
 # Set explicitly rather than inherited, so the next Jackson default flip is a
 # visible edit here instead of a behavior change nobody chose.
 jackson:

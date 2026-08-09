@@ -319,6 +319,7 @@ services:
     ports:
       - "8088:8080"
     environment:
+      - APP_NAME=one_d4
       - PORT=8080
       - SENTRY_DSN=${ONE_D4_SENTRY_DSN}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318

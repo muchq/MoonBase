@@ -15,6 +15,7 @@ java_library(
         "src/main/java/com/muchq/games/mcpserver/tools/IndexerFacade.java",
         "src/main/java/com/muchq/games/mcpserver/tools/QueryGamesTool.java",
         "src/main/java/com/muchq/games/mcpserver/tools/ServerTimeTool.java",
+        "src/main/java/com/muchq/games/mcpserver/tools/ToolDescriptions.java",
         "src/main/java/com/muchq/games/mcpserver/tools/ToolJson.java",
     ],
     visibility = ["//visibility:public"],
@@ -204,7 +205,10 @@ java_test_suite(
 # violation the hand-rolled transport shipped with (#1325).
 java_test_suite(
     name = "protocol_tests",
-    size = "small",
+    # medium, not small: McpAuthenticationTest boots eight embedded servers, each running
+    # H2 migrations and the indexer wiring, which sits too close to small's 60s ceiling on
+    # a loaded CI machine — the same reason one_d4's http_integration_tests is medium.
+    size = "medium",
     srcs = [
         "src/test/java/com/muchq/games/mcpserver/McpAuthenticationTest.java",
         "src/test/java/com/muchq/games/mcpserver/McpProtocolTest.java",

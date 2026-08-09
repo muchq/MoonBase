@@ -31,12 +31,11 @@ public class QueryGamesTool {
               + " Available fields: white.elo, black.elo, white.username, black.username,"
               + " white.title, black.title, time.class, eco, opening.name, opening.family, result,"
               + " num.moves, platform, date (ISO comparisons, e.g. 'date >= \"2026-07-01\"'), and"
-              + " month (equality only, 'month = \"2026-07\"'). date and month filter the indexed"
-              + " corpus only, so a period that was never indexed comes back with zero games"
-              + " rather than an error — indistinguishable from 'played no games then' unless you"
-              + " index that period first with index_chess_games. Note: opening.family is derived"
-              + " from chess.com ECO-URL strings, not a normalized taxonomy — 'Closed Sicilian'"
-              + " and 'Closed Sicilian Defense' are distinct values. With the player parameter,"
+              + " month (equality only, 'month = \"2026-07\"'). "
+              + ToolDescriptions.UNINDEXED_PERIODS_READ_AS_EMPTY
+              + " "
+              + ToolDescriptions.OPENING_FAMILY_IS_NOT_NORMALIZED
+              + " With the player parameter,"
               + " perspective fields work regardless of color: me.color, me.elo, me.title,"
               + " opponent.username, opponent.elo, opponent.title, and outcome (win/loss/draw) —"
               + " e.g. player: hikaru with 'outcome = \"win\" AND opponent.title = \"GM\"'."

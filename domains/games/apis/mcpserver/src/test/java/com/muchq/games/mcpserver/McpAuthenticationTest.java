@@ -2,6 +2,8 @@ package com.muchq.games.mcpserver;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.muchq.platform.json.JsonUtils;
 import io.micronaut.context.ApplicationContext;
 import io.micronaut.runtime.server.EmbeddedServer;
 import java.net.URI;
@@ -112,6 +114,55 @@ public class McpAuthenticationTest {
       assertThat(postTo(server, "/mcp", "Bearer " + TOKEN).statusCode())
           .as("and nothing should still be answering MCP on the old path")
           .isNotEqualTo(200);
+    }
+  }
+
+  /**
+   * A token from a file-backed secret — a Kubernetes secret, {@code $(cat token)} — carries a
+   * trailing newline. The gate must still engage, and must still accept the token the operator
+   * thinks they configured. {@code pattern = ".+"} failed both: the bean was never created and the
+   * endpoint served anonymous calls while looking configured.
+   */
+  @Test
+  public void aTokenWithATrailingNewlineStillGatesTheEndpoint() throws Exception {
+    try (EmbeddedServer server = startServer(Map.of("mcp.auth.token", TOKEN + "\n"))) {
+      assertThat(post(server, TOOLS_LIST, null).statusCode())
+          .as("a newline in the secret must not open the endpoint")
+          .isEqualTo(401);
+      assertThat(post(server, TOOLS_LIST, "Bearer " + TOKEN).statusCode())
+          .as("and the operator's token, without the newline, must still work")
+          .isEqualTo(200);
+    }
+  }
+
+  /**
+   * A whitespace-only token is not a token; it must not gate the endpoint behind an unusable
+   * secret.
+   */
+  @Test
+  public void aWhitespaceOnlyTokenLeavesTheEndpointOpen() throws Exception {
+    try (EmbeddedServer server = startServer(Map.of("mcp.auth.token", "   "))) {
+      assertThat(post(server, TOOLS_LIST, null).statusCode()).isEqualTo(200);
+    }
+  }
+
+  /**
+   * The 401 carries a JSON-RPC error envelope, not a bare status. The {@code id} member is the part
+   * that goes missing by accident: the container mapper omits nulls, so serializing a map would
+   * drop it, and JSON-RPC requires it present.
+   */
+  @Test
+  public void theUnauthorizedBodyIsAJsonRpcErrorEnvelope() throws Exception {
+    try (EmbeddedServer server = startServer(Map.of("mcp.auth.token", TOKEN))) {
+      HttpResponse<String> response = post(server, TOOLS_LIST, null);
+
+      assertThat(response.headers().firstValue("WWW-Authenticate")).hasValue("Bearer");
+      JsonNode body = JsonUtils.mapper().readTree(response.body());
+      assertThat(body.get("jsonrpc").asText()).isEqualTo("2.0");
+      assertThat(body.has("id")).as("JSON-RPC requires the id member, null when unknown").isTrue();
+      assertThat(body.get("id").isNull()).isTrue();
+      assertThat(body.at("/error/code").asInt()).isEqualTo(-32000);
+      assertThat(body.at("/error/message").asText()).isEqualTo("Missing Authorization header");
     }
   }
 

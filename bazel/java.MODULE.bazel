@@ -21,7 +21,13 @@ maven.install(
     artifacts = [
         "ch.qos.logback:logback-classic:%s" % LOGBACK_VERSION,
         "ch.qos.logback:logback-core:%s" % LOGBACK_VERSION,
-        "com.fasterxml.jackson.core:jackson-annotations",
+        # Versioned explicitly: micronaut-core-bom is listed first and pins annotations
+        # to 2.21, while Micronaut 5 does not manage Jackson 2 core/databind at all, so those
+        # fall through to jackson-bom below and land on 2.22.0. databind introspects
+        # annotation classes, so leaving the family split across minors is a trap that
+        # only bites on some future bump. No patch component: jackson-annotations
+        # dropped it in 2.20, which is why jackson-bom:2.22.0 pins it to plain "2.22".
+        "com.fasterxml.jackson.core:jackson-annotations:2.22",
         "com.fasterxml.jackson.core:jackson-core",
         "com.fasterxml.jackson.core:jackson-databind",
         "com.github.ben-manes.caffeine:caffeine:3.2.2",
@@ -68,10 +74,11 @@ maven.install(
         "org.slf4j:slf4j-api:2.0.18",
         # Micronaut's YamlPropertySourceLoader is compiled against classic snakeyaml
         # (org.yaml.snakeyaml.Yaml) and disables itself when that class is absent —
-        # silently, so application.yml is simply never read. Micronaut 4 got it
-        # transitively through Jackson 2's jackson-dataformat-yaml; Jackson 3 switched
-        # to snakeyaml-engine, which is a different package. Declared here so YAML
-        # config does not depend on another library's choice of YAML parser.
+        # silently, so application.yml is simply never read. Nothing in this repo had
+        # it before micronaut-mcp pulled it in transitively, and the Micronaut 5 /
+        # Jackson 3 upgrade dropped it again (Jackson 3 uses snakeyaml-engine, a
+        # different package). Declared directly so YAML config depends on nothing but
+        # itself: without it the file is inert and every property silently defaults.
         "org.yaml:snakeyaml:2.4",
     ],
     boms = [
