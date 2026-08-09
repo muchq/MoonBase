@@ -275,6 +275,58 @@ public class ChessClientTest {
     assertThat(result.get().fideRating()).isNull();
   }
 
+  /**
+   * A peer that answers and then stalls mid-body must expire rather than park the caller.
+   *
+   * <p>The worst case in this repo, and the reason the deadline is here rather than left to the
+   * shared client: the caller is an indexing worker holding a request lease. A thread parked
+   * forever keeps that row owned by a process that is never coming back, so the request burns an
+   * attempt and the lease has to expire before anyone else can pick it up (#1336).
+   *
+   * <p>The transport timeout alone does not cover this — the JDK's request deadline ends when the
+   * response head arrives, which this server sends in full before going quiet.
+   *
+   * <p>{@code @Timeout} is the backstop that makes a regression a failure rather than a hung CI
+   * job: without a working deadline this does not fail, it hangs.
+   */
+  @Test
+  @org.junit.jupiter.api.Timeout(60)
+  public void aStalledBodyExpiresRatherThanParkingTheCaller() throws Exception {
+    try (java.net.ServerSocket socket =
+        new java.net.ServerSocket(0, 8, java.net.InetAddress.getLoopbackAddress())) {
+      Thread server =
+          new Thread(
+              () -> {
+                try (java.net.Socket accepted = socket.accept()) {
+                  // A head promising 4096 bytes, ten delivered, then silence.
+                  accepted
+                      .getOutputStream()
+                      .write(
+                          ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                  + "Content-Length: 4096\r\n\r\n{\"games\":[")
+                              .getBytes(StandardCharsets.UTF_8));
+                  accepted.getOutputStream().flush();
+                  Thread.sleep(3_000);
+                } catch (Exception e) {
+                  Thread.currentThread().interrupt();
+                }
+              });
+      server.setDaemon(true);
+      server.start();
+
+      ChessClient client =
+          new ChessClient(
+              new com.muchq.platform.http_client.jdk.Jdk11HttpClient(
+                  java.net.http.HttpClient.newHttpClient()),
+              MAPPER,
+              java.time.Duration.ofMillis(300));
+
+      assertThatThrownBy(() -> client.fetchGames("stalled", YearMonth.of(2024, 1)))
+          .isInstanceOf(ChessComApiException.class)
+          .hasMessageContaining("did not answer within");
+    }
+  }
+
   @Test
   public void testFetchPlayer_rateLimitedThrowsWithStatusCode() {
     HttpClient httpClient = new StubHttpClient(429, "slow down");

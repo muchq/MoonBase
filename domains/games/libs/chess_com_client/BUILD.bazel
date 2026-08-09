@@ -23,6 +23,8 @@ java_library(
     deps = [
         "//domains/platform/libs/http_client:core",
         artifact("com.fasterxml.jackson.core:jackson-annotations"),
+        # Bounds the whole exchange, body read included (#1336).
+        artifact("dev.failsafe:failsafe"),
         artifact("com.fasterxml.jackson.core:jackson-core"),
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("org.slf4j:slf4j-api"),
@@ -38,6 +40,7 @@ java_test_suite(
         "//domains/platform/libs/http_client:core",
         # The mapper production hands ChessClient, so the parsing tests exercise the
         # same configuration the services do rather than Jackson's bare defaults.
+        "//domains/platform/libs/http_client:jdk11",
         "//domains/platform/libs/json",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
