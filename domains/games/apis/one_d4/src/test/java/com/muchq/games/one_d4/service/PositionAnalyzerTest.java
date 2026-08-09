@@ -218,6 +218,81 @@ public class PositionAnalyzerTest {
   }
 
   /**
+   * The claim that matters for a publicly reachable analyze endpoint: an abandoned analysis stops,
+   * rather than running to completion on a thread nobody is waiting for.
+   *
+   * <p>Deliberately does not use a latch. A latch wait is interruptible, so a test built on one
+   * passes whether or not the work itself checks interruption — it proves the timeout fires, not
+   * that anything stopped. This spins on the clock instead, which only ends when the loop under
+   * test notices the interrupt.
+   *
+   * <p>Real extraction, so it is the production replay and detector loops being interrupted rather
+   * than a stub agreeing that it would be.
+   */
+  @Test
+  public void abandonedWorkStopsRatherThanRunningToCompletion() {
+    // A long legal game, so replay has enough moves to notice an interrupt part-way.
+    StringBuilder longGame = new StringBuilder("[Event \"x\"]\n\n");
+    for (int i = 1; i <= 200; i++) {
+      longGame.append(i).append(". Nf3 Nf6 ").append(i + 200).append(". Ng1 Ng8 ");
+    }
+    longGame.append("1/2-1/2");
+
+    java.util.concurrent.atomic.AtomicBoolean finished =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    FeatureExtractor observed =
+        new FeatureExtractor(new PgnParser(), new GameReplayer(), Detectors.defaultDetectors()) {
+          @Override
+          public GameFeatures extractOrThrow(String pgn) {
+            GameFeatures features = super.extractOrThrow(pgn);
+            finished.set(true);
+            return features;
+          }
+        };
+
+    assertThatThrownBy(() -> new PositionAnalyzer(observed, pool, 1).analyze(longGame.toString()))
+        .isInstanceOf(PositionAnalyzer.AnalysisTimeoutException.class);
+
+    // Give an uncancelled task time to run to completion, so a regression fails rather than races.
+    try {
+      Thread.sleep(500);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+    assertThat(finished)
+        .as("the abandoned extraction kept running after the caller got its 504")
+        .isFalse();
+  }
+
+  /**
+   * The replay loop's own check, exercised directly.
+   *
+   * <p>Needed because the end-to-end test above cannot isolate it: on a short game replay finishes
+   * before the deadline and the detector loop is what notices the interrupt, so removing this check
+   * changes nothing there. On a long game — the case that actually threatens the service — replay
+   * is where the time goes and detection may never start, which makes this the load-bearing one.
+   *
+   * <p>Interrupts the calling thread and replays synchronously, so there is no scheduling to race.
+   */
+  @Test
+  public void replayStopsWhenTheThreadIsInterrupted() {
+    StringBuilder longGame = new StringBuilder();
+    for (int i = 1; i <= 500; i++) {
+      longGame.append(i).append(". Nf3 Nf6 ").append(i + 500).append(". Ng1 Ng8 ");
+    }
+
+    Thread.currentThread().interrupt();
+    try {
+      assertThatThrownBy(() -> new GameReplayer().replay(longGame.toString()))
+          .isInstanceOf(GameReplayer.AnalysisCancelledException.class)
+          .hasMessageContaining("replay cancelled");
+    } finally {
+      // Leaving it set would poison every test that runs after this one on the same thread.
+      Thread.interrupted();
+    }
+  }
+
+  /**
    * A timeout must not poison the pool for the next caller. Two threads and a blocked task means a
    * second request still has somewhere to run — but only if the abandoned one was cancelled rather
    * than left holding its thread forever.

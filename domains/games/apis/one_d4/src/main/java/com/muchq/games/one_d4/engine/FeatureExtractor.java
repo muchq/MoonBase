@@ -49,6 +49,10 @@ public class FeatureExtractor {
   public GameFeatures extract(String pgn) {
     try {
       return extractOrThrow(pgn);
+    } catch (GameReplayer.AnalysisCancelledException e) {
+      // Nobody interrupts the indexing path, but if that changes, an abandoned game must not be
+      // recorded as one with no motifs — that would write a wrong row rather than skip a bad one.
+      throw e;
     } catch (ReplayFailedException e) {
       LOG.warn("Failed to replay game, skipping motif detection", e.getCause());
       return new GameFeatures(EnumSet.noneOf(Motif.class), 0, Map.of());
@@ -67,6 +71,8 @@ public class FeatureExtractor {
     List<PositionContext> positions;
     try {
       positions = replayer.replay(parsed.moveText());
+    } catch (GameReplayer.AnalysisCancelledException e) {
+      throw e; // Cancellation is not bad input.
     } catch (Exception e) {
       throw new ReplayFailedException(e);
     }
@@ -76,6 +82,12 @@ public class FeatureExtractor {
     Map<Motif, List<GameFeatures.MotifOccurrence>> allOccurrences = new EnumMap<>(Motif.class);
 
     for (MotifDetector detector : detectors) {
+      // Detection is the other half of the cost, and a detector walks every position — so an
+      // abandoned analysis that got past replay would otherwise run all ten of them to completion.
+      if (Thread.currentThread().isInterrupted()) {
+        throw new GameReplayer.AnalysisCancelledException(
+            "detection cancelled before " + detector.motif());
+      }
       try {
         List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
         if (!occurrences.isEmpty()) {

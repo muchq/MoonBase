@@ -7,6 +7,19 @@ import java.util.List;
 
 public class GameReplayer {
 
+  /**
+   * The caller gave up and the thread was interrupted, so replay stopped early.
+   *
+   * <p>Not an IllegalArgumentException: the PGN may be perfectly legal, and reporting this as bad
+   * input would tell a caller to fix something that was never wrong. Callers that time out map it
+   * to their own timeout answer; indexing never interrupts, so it never sees this.
+   */
+  public static class AnalysisCancelledException extends RuntimeException {
+    public AnalysisCancelledException(String message) {
+      super(message);
+    }
+  }
+
   public List<PositionContext> replay(String moveText) {
     List<PositionContext> positions = new ArrayList<>();
     ReplayBoard board = ReplayBoard.standard();
@@ -18,6 +31,11 @@ public class GameReplayer {
     boolean whiteToMove = true;
 
     for (String move : moves) {
+      // One check per move, not per inner board operation: enough to end an abandoned analysis
+      // promptly on a 40k-move PGN, cheap enough to be invisible next to playing the move.
+      if (Thread.currentThread().isInterrupted()) {
+        throw new AnalysisCancelledException("replay cancelled at move " + moveNumber);
+      }
       try {
         board.play(move);
       } catch (RuntimeException e) {
