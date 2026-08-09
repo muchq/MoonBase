@@ -17,7 +17,6 @@ java_library(
 java_library(
     name = "jdk11",
     srcs = [
-        "src/main/java/com/muchq/platform/http_client/jdk/DeadlineInputStream.java",
         "src/main/java/com/muchq/platform/http_client/jdk/Jdk11HttpClient.java",
         "src/main/java/com/muchq/platform/http_client/jdk/Jdk11HttpResponse.java",
     ],

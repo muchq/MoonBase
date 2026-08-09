@@ -99,8 +99,7 @@ public class ChessClient {
   }
 
   private <T> Optional<T> exchange(String url, Class<T> clazz) throws IOException {
-    HttpRequest request =
-        HttpRequest.newBuilder().setUrl(url).setResponseHeadersTimeout(timeout).build();
+    HttpRequest request = HttpRequest.newBuilder().setUrl(url).setTimeout(timeout).build();
 
     HttpResponse response = httpClient.execute(request);
 

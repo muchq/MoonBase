@@ -118,7 +118,7 @@ public class OneD4Client {
               .setMethod(HttpRequest.Method.POST)
               .setContentType(HttpRequest.ContentType.JSON)
               .setAccept(HttpRequest.ContentType.JSON)
-              .setResponseHeadersTimeout(timeout)
+              .setTimeout(timeout)
               .setBody(mapper.writeValueAsString(body))
               .build();
     } catch (Exception e) {
@@ -164,7 +164,7 @@ public class OneD4Client {
         .setUrl(baseUrl + path)
         .setMethod(HttpRequest.Method.GET)
         .setAccept(HttpRequest.ContentType.JSON)
-        .setResponseHeadersTimeout(timeout)
+        .setTimeout(timeout)
         .build();
   }
 

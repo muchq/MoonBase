@@ -3,7 +3,6 @@ package com.muchq.platform.http_client.jdk;
 import com.muchq.platform.http_client.core.Header;
 import com.muchq.platform.http_client.core.HttpRequest;
 import com.muchq.platform.http_client.core.HttpResponse;
-import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -13,9 +12,9 @@ import java.util.stream.Collectors;
 public class Jdk11HttpResponse implements HttpResponse {
 
   private final HttpRequest request;
-  private final java.net.http.HttpResponse<InputStream> delegate;
+  private final java.net.http.HttpResponse<byte[]> delegate;
 
-  public Jdk11HttpResponse(HttpRequest request, java.net.http.HttpResponse<InputStream> delegate) {
+  public Jdk11HttpResponse(HttpRequest request, java.net.http.HttpResponse<byte[]> delegate) {
     this.request = Objects.requireNonNull(request);
     this.delegate = Objects.requireNonNull(delegate);
   }
@@ -64,25 +63,18 @@ public class Jdk11HttpResponse implements HttpResponse {
 
   @Override
   public byte[] getAsBytes() {
-    try (InputStream inputStream = getAsInputStream()) {
-      return inputStream.readAllBytes();
-    } catch (IOException e) {
-      throw new RuntimeException(e);
-    }
+    return delegate.body();
   }
 
   /**
-   * The body, bounded when the request asked for it.
+   * The body, already in hand.
    *
-   * <p>Wrapped here rather than buffered: the JDK's request deadline ended when the head arrived,
-   * so a peer that answers and then stalls leaves the caller parked in this stream with no ceiling
-   * at all (#1336). Streaming callers — the indexer reading a month of PGNs — keep streaming.
+   * <p>The whole response is read before {@code execute} returns, so this cannot block and cannot
+   * outlive its deadline — which is the point (#1336). Callers that parse from a stream keep
+   * working unchanged; they are just reading from memory now.
    */
   @Override
   public InputStream getAsInputStream() {
-    return request
-        .getBodyReadTimeout()
-        .<InputStream>map(timeout -> new DeadlineInputStream(delegate.body(), timeout))
-        .orElseGet(delegate::body);
+    return new java.io.ByteArrayInputStream(delegate.body());
   }
 }

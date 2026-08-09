@@ -7,7 +7,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.muchq.platform.http_client.core.HttpClient;
 import com.muchq.platform.http_client.core.HttpRequest;
-import com.muchq.platform.http_client.core.HttpResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -22,19 +21,14 @@ import org.junit.jupiter.api.Timeout;
  * in whatever shape the blocking call gives it. That makes the status a contract this library is
  * quietly party to, and nothing here was asserting it.
  *
- * <p>The two blocking points reach that contract by different routes, which is the part worth
- * pinning:
+ * <p>There is one blocking point now. The client waits for the complete response, so a caller is
+ * only ever parked in {@code execute} — the body read that used to block separately is reading from
+ * memory. That path throws {@link InterruptedException} with the status <em>cleared</em>, and
+ * {@link Jdk11HttpClient} restoring it is the only reason the caller sees it at all.
  *
- * <ul>
- *   <li>a <b>body read</b> surfaces the interrupt with the status already set — that is the JDK's
- *       doing, and this library is only passing it through;
- *   <li>a <b>send</b> throws {@link InterruptedException} with the status <em>cleared</em>, and
- *       {@link Jdk11HttpClient} restoring it is the only reason the caller sees it at all.
- * </ul>
- *
- * <p>So the second is load-bearing rather than tidiness. Delete that one line and a wedged send
- * unwinds through the worker's ordinary failure path: an attempt spent, and a user told their range
- * is broken when the truth is that a worker was told to let go of it.
+ * <p>So that one line is load-bearing rather than tidiness. Delete it and a wedged send unwinds
+ * through the worker's ordinary failure path: an attempt spent, and a user told their range is
+ * broken when the truth is that a worker was told to let go of it.
  *
  * <p>Real sockets throughout. A stub cannot block, and blocking is the entire subject.
  */
@@ -79,45 +73,19 @@ public class Jdk11HttpClientInterruptTest {
   }
 
   /**
-   * The other half, and the JDK's own doing: a body read hands the interrupt back with the status
-   * already set. Asserted so that the comment in {@code IndexWorker} claiming as much is checked by
-   * something rather than believed.
-   */
-  @Test
-  @Timeout(60)
-  public void anInterruptedBodyReadLeavesTheInterruptStatusSet() throws Exception {
-    try (HttpClient client = newClient();
-        StalledServer server = new StalledServer(StalledServer.Behaviour.HEAD_THEN_STALL)) {
-      HttpResponse response = client.execute(get(server));
-      assertThat(response.getStatusCode())
-          .as("the head arrived, so what stalls next is the body and not the request")
-          .isEqualTo(200);
-
-      InterruptProbe.Outcome outcome =
-          interruptWhileBlocked(server.bodyStarted(), response::getAsBytes);
-
-      assertThat(outcome.interruptStatusSet())
-          .as("a body read interrupted mid-stream leaves the status set for the caller")
-          .isTrue();
-      assertThat(outcome.thrown())
-          .as("and unblocks rather than waiting on a peer that has stopped sending")
-          .isNotNull();
-    }
-  }
-
-  /**
-   * The negative that keeps both of the above honest. A body that stops short of its declared
-   * length is a genuine transport failure, and on a thread nobody interrupted the status must stay
-   * clear — otherwise "the status is set" would be true of every failure and would pin nothing.
+   * The negative that keeps the above honest. A body that stops short of its declared length is a
+   * genuine transport failure, and on a thread nobody interrupted the status must stay clear —
+   * otherwise "the status is set" would be true of every failure and would pin nothing.
+   *
+   * <p>Asserted on {@code execute} rather than on the body read: the response is complete before
+   * execute returns, so a truncation surfaces there now.
    */
   @Test
   @Timeout(60)
   public void aTruncatedBodyOnAnUninterruptedThreadLeavesTheStatusClear() throws Exception {
     try (HttpClient client = newClient();
         StalledServer server = new StalledServer(StalledServer.Behaviour.HEAD_THEN_CLOSE)) {
-      HttpResponse response = client.execute(get(server));
-
-      assertThatThrownBy(response::getAsBytes)
+      assertThatThrownBy(() -> client.execute(get(server)))
           .as("a body short of its Content-Length is a failure, not a cancellation")
           .isInstanceOf(RuntimeException.class);
       assertThat(Thread.currentThread().isInterrupted())

@@ -58,17 +58,14 @@ public class HttpRequest {
   private final List<Header> headers;
   private final byte @Nullable [] body;
   private final @Nullable Duration timeout;
-  private final @Nullable Duration bodyReadTimeout;
 
   private HttpRequest(
       Method method,
       URI url,
       List<Header> headers,
       byte @Nullable [] body,
-      @Nullable Duration timeout,
-      @Nullable Duration bodyReadTimeout) {
+      @Nullable Duration timeout) {
     this.timeout = timeout;
-    this.bodyReadTimeout = bodyReadTimeout;
     this.method = Objects.requireNonNull(method);
     this.url = Objects.requireNonNull(url);
     this.headers = Objects.requireNonNull(headers);
@@ -109,21 +106,18 @@ public class HttpRequest {
    * halves.
    */
   /**
-   * How long the response body may take to read in full, or empty for no deadline.
+   * Deadline for the whole exchange, or empty for none.
    *
-   * <p>The other half of {@link #getResponseHeadersTimeout()}, and the one that matters against a
-   * peer which answers and then stalls: the head arrived, so the request deadline is satisfied and
-   * the caller is parked in the body read instead.
+   * <p>Headers and body, genuinely: the client sends asynchronously and waits for the complete
+   * response, so this fires whether the peer stalls before answering or halfway through the body.
+   * An earlier version of this only covered time-to-headers while claiming otherwise, which is a
+   * worse failure than having no deadline — a caller sets one, reads the name, and believes the
+   * body read is bounded when it is not (#1336).
    *
-   * <p>Bounds the whole body rather than each read — a peer dribbling one byte per second would
-   * satisfy any per-read deadline forever. Streaming is preserved: the body is not buffered to
-   * apply this.
+   * <p>Worth setting on any call to a peer you do not control. Without it a stalled server parks
+   * the calling thread indefinitely, and indefinitely outlasts every retry and budget above it.
    */
-  public Optional<Duration> getBodyReadTimeout() {
-    return Optional.ofNullable(bodyReadTimeout);
-  }
-
-  public Optional<Duration> getResponseHeadersTimeout() {
+  public Optional<Duration> getTimeout() {
     return Optional.ofNullable(timeout);
   }
 
@@ -135,7 +129,6 @@ public class HttpRequest {
     private ContentType contentType = ContentType.JSON;
     private ContentType accept = ContentType.JSON;
     private @Nullable Duration timeout = null;
-    private @Nullable Duration bodyReadTimeout = null;
 
     private Builder() {}
 
@@ -173,26 +166,10 @@ public class HttpRequest {
       return this;
     }
 
-    /**
-     * Deadline for receiving the response head. Does not bound the body read — see {@link
-     * HttpRequest#getResponseHeadersTimeout()}.
-     */
-    public Builder setResponseHeadersTimeout(Duration timeout) {
+    /** Deadline for the whole exchange — headers and body. */
+    public Builder setTimeout(Duration timeout) {
       this.timeout = Objects.requireNonNull(timeout);
       return this;
-    }
-
-    /**
-     * Deadline for reading the response body in full. See {@link HttpRequest#getBodyReadTimeout()}.
-     */
-    public Builder setBodyReadTimeout(Duration bodyReadTimeout) {
-      this.bodyReadTimeout = Objects.requireNonNull(bodyReadTimeout);
-      return this;
-    }
-
-    /** Sets both deadlines to the same value: the common case is "bound the whole exchange". */
-    public Builder setTimeouts(Duration timeout) {
-      return setResponseHeadersTimeout(timeout).setBodyReadTimeout(timeout);
     }
 
     public HttpRequest build() {
@@ -200,7 +177,7 @@ public class HttpRequest {
       List<Header> headers = buildHeaders();
       validateBodyState();
 
-      return new HttpRequest(method, url, headers, body, timeout, bodyReadTimeout);
+      return new HttpRequest(method, url, headers, body, timeout);
     }
 
     private URI buildUrl() {
