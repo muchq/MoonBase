@@ -238,11 +238,21 @@ services:
     environment:
       - PORT=8080
       - APP_NAME=mcpserver
+      # The corpus lives behind one_d4, and mcpserver reaches it over the internal
+      # network as an HTTP client (#1332). Service name, not a published host: these
+      # paths are not routed through Caddy and do not need to be.
+      - ONE_D4_BASE_URL=http://one_d4:8080
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=mcpserver
       - OTEL_RESOURCE_ATTRIBUTES=service.name=mcpserver,service.version=${MCPSERVER_SHA:-${DEPLOY_SHA:-latest}}
     volumes:
       - /etc/mcpserver:/etc/mcpserver
+    # Every corpus-backed tool is a call to one_d4, so starting before it is ready
+    # means a window where those tools answer "not reachable". service_healthy waits
+    # for the /health probe above rather than just for the container to exist.
+    depends_on:
+      one_d4:
+        condition: service_healthy
     networks:
       - app_network
     deploy:

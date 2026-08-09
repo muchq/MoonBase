@@ -447,6 +447,11 @@ public class McpProtocolTest {
    * A list argument whose elements are not strings must not become a 500. The derived schema says
    * only "array" — it carries no {@code items} type — so a model has nothing telling it to send
    * strings, and the tool has to cope.
+   *
+   * <p>Only the shape is asserted here, not the message. The element used to reach the ChessQL
+   * compiler in this process, which named the bad field back; it now reaches one_d4 in a request
+   * body, and no one_d4 is running in this suite. That the element is stringified rather than
+   * dropped is pinned in {@code IndexerFacadeHttpTest}, against a server that can be inspected.
    */
   @Test
   public void aNonStringElementInAListArgumentIsHandledNotFatal() throws Exception {
@@ -461,9 +466,12 @@ public class McpProtocolTest {
     assertThat(response.statusCode())
         .as("a numeric group_by element is a binding the tool has to absorb, not a 500")
         .isEqualTo(200);
+    assertThat(json(response).at("/result/isError").asBoolean(false))
+        .as("nor may it fail the call")
+        .isFalse();
     assertThat(json(response).at("/result/content/0/text").asText())
-        .as("the compiler rejects the unknown field by name, which is a usable message")
-        .contains("5");
+        .as("whatever happens next, the tool answers with its own error envelope")
+        .contains("error");
   }
 
   /**

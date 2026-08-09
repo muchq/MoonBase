@@ -697,3 +697,52 @@ func caddyBlockAt(lines []string, open int) []string {
 	}
 	return block[1:] // block[0] is the header line that opened the block.
 }
+
+// mcpserver reaches the corpus through one_d4's HTTP API rather than a database
+// of its own (#1332). Two things have to hold for that to work in the
+// deployment, and neither is visible to any Java test.
+//
+// The upstream URL is one of them: mcpserver's own default is the Compose
+// service name, so a missing variable does not fail loudly — it just happens to
+// work here and would not anywhere else. Pinning it in compose keeps the
+// deployment's answer written down rather than inherited from a code default.
+func TestMcpserverIsPointedAtOneD4(t *testing.T) {
+	block := serviceBlock(t, "compose.yaml", "mcpserver")
+
+	if !strings.Contains(block, "ghcr.io/muchq/mcpserver") {
+		t.Fatalf("did not find mcpserver's image in its compose block; this test is no longer "+
+			"reading the service it claims to. Block was:\n%s", block)
+	}
+	if !strings.Contains(block, "ONE_D4_BASE_URL=http://one_d4:8080") {
+		t.Errorf("mcpserver does not name one_d4 as its upstream. Every corpus-backed MCP tool "+
+			"is an HTTP call to that service (#1332); without the variable the container falls "+
+			"back to a compiled-in default, which is a deployment decision living in Java. "+
+			"Block was:\n%s", block)
+	}
+
+	// The regression this guards against is the one the issue was filed about: a
+	// second indexer, or a direct connection to the corpus database.
+	for _, forbidden := range []string{"INDEXER_DB_URL", "PG_URL", "postgresql://"} {
+		if strings.Contains(block, forbidden) {
+			t.Errorf("mcpserver's compose block mentions %s. It is an HTTP client of one_d4 and "+
+				"must hold no corpus database access of its own — one_d4 owns validation, the "+
+				"indexing lifecycle, retention, the schema and its migrations (#1332).", forbidden)
+		}
+	}
+}
+
+// one_d4's API stays internal. mcpserver calls /v1/index, /v1/query,
+// /v1/aggregate and /v1/analyze over the Compose network; none of that requires
+// a public route, and /v1/analyze in particular is unauthenticated CPU on
+// caller-supplied PGN, which is a different proposition on the open internet
+// than between two containers.
+func TestTheAnalyzeRouteIsNotPubliclyExposed(t *testing.T) {
+	for _, line := range directiveLines(t, "Caddyfile") {
+		if strings.Contains(line, "/v1/analyze") {
+			t.Errorf("Caddy routes /v1/analyze (%q). Analysis is unauthenticated work on "+
+				"caller-supplied input, bounded by a size cap and a timeout but not by auth or "+
+				"rate limiting; exposing it publicly is a deliberate decision that needs both "+
+				"(#1332).", line)
+		}
+	}
+}

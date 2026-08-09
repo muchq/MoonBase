@@ -10,40 +10,35 @@ import com.muchq.games.mcpserver.tools.ChessComPlayersTool;
 import com.muchq.games.mcpserver.tools.ChessComStatsTool;
 import com.muchq.games.mcpserver.tools.IndexGamesTool;
 import com.muchq.games.mcpserver.tools.IndexStatusTool;
+import com.muchq.games.mcpserver.tools.IndexerFacade;
+import com.muchq.games.mcpserver.tools.OneD4Client;
 import com.muchq.games.mcpserver.tools.QueryGamesTool;
 import com.muchq.games.mcpserver.tools.ServerTimeTool;
-import com.muchq.games.one_d4.worker.IndexWorkerLifecycle;
 import io.micronaut.context.ApplicationContext;
 import org.junit.jupiter.api.Test;
 
 /**
- * Boots the real Micronaut context so McpModule's eager (@Context) wiring — including the
- * in-process indexer's DataSource, migration, worker, and facade — is exercised in CI rather than
- * only by manual smoke tests.
+ * Boots the real Micronaut context so McpModule's eager ({@code @Context}) wiring is exercised in
+ * CI rather than only by manual smoke tests.
  */
 public class McpModuleTest {
 
   /**
-   * The container's half of the shutdown contract, exercised for real: boot, then close, and the
-   * poller must have been told to stop.
-   *
-   * <p>Worth a real context rather than reading the annotation back off the factory method. The
-   * poller is a daemon thread, so if Micronaut does not invoke preDestroy — wrong bean scope, a
-   * misspelled method name, a refactor that renames stop() — nothing anywhere fails, and every
-   * deploy silently strands its in-flight request for a full lease and spends one of its three
-   * attempts. This is the one place that catches that.
+   * No indexer beans, which is the structural half of #1332. This process reaches the corpus over
+   * HTTP; a DataSource or an IndexWorkerLifecycle appearing in this context again would mean
+   * someone had re-wired a second indexer, and the deployment would quietly grow a private
+   * in-memory database whose contents never reach the site.
    */
   @Test
-  public void closingTheContextStopsTheIndexWorker() {
-    IndexWorkerLifecycle lifecycle;
+  public void thereIsNoIndexerWiredIntoThisProcess() {
     try (ApplicationContext context = ApplicationContext.run()) {
-      lifecycle = context.getBean(IndexWorkerLifecycle.class);
-      assertThat(lifecycle.isRunning()).as("the poller should be live while the app is").isTrue();
+      assertThat(context.containsBean(javax.sql.DataSource.class))
+          .as("mcpserver must hold no database connection of its own")
+          .isFalse();
+      assertThat(context.findBean(OneD4Client.class))
+          .as("the corpus is reached through this and nothing else")
+          .isPresent();
     }
-
-    assertThat(lifecycle.isRunning())
-        .as("shutdown must reach the poller, or every deploy looks like a crash")
-        .isFalse();
   }
 
   /**
@@ -68,15 +63,33 @@ public class McpModuleTest {
     }
   }
 
+  /**
+   * The property override actually reaches the client.
+   *
+   * <p>Added because it was not: {@code one.d4.base.url} exists so an in-process test can aim
+   * mcpserver at an embedded one_d4 on a port chosen at boot, but nothing set it, so a bean that
+   * ignored the property and always read the environment would have passed the whole suite.
+   */
   @Test
-  public void toolsRunAgainstTheWiredIndexer() {
+  public void theUpstreamUrlCanBeSetByProperty() {
+    try (ApplicationContext context =
+        ApplicationContext.run(
+            java.util.Map.of("one.d4.base.url", "http://one-d4-under-test:9999"))) {
+      assertThat(context.getBean(OneD4Client.class).baseUrl())
+          .isEqualTo("http://one-d4-under-test:9999");
+    }
+  }
+
+  /**
+   * The facade the tools inject points at the configured upstream. A default that silently pointed
+   * somewhere else would leave every corpus tool answering "not reachable" in production while
+   * every unit test stayed green.
+   */
+  @Test
+  public void theFacadePointsAtTheConfiguredUpstream() {
     try (ApplicationContext context = ApplicationContext.run()) {
-      // Query against the freshly migrated in-memory H2 — proves parser, compiler, and DB wiring
-      String result =
-          context
-              .getBean(QueryGamesTool.class)
-              .queryChessGames("white.elo >= 2500", null, null, null);
-      assertThat(result).contains("\"games\":[]").contains("\"count\":0");
+      assertThat(context.getBean(IndexerFacade.class)).isNotNull();
+      assertThat(context.getBean(OneD4Client.class).baseUrl()).isEqualTo(McpModule.oneD4BaseUrl());
     }
   }
 }

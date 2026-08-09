@@ -18,6 +18,16 @@ import org.slf4j.LoggerFactory;
 public class FeatureExtractor {
   private static final Logger LOG = LoggerFactory.getLogger(FeatureExtractor.class);
 
+  /**
+   * The moves did not replay: an illegal SAN, a move from an impossible position, a PGN that parsed
+   * but is not a game. Bad input, not a server fault.
+   */
+  public static class ReplayFailedException extends IllegalArgumentException {
+    public ReplayFailedException(Throwable cause) {
+      super("pgn could not be replayed: " + cause.getMessage(), cause);
+    }
+  }
+
   private final PgnParser pgnParser;
   private final GameReplayer replayer;
   private final List<MotifDetector> detectors;
@@ -29,14 +39,42 @@ public class FeatureExtractor {
     this.detectors = detectors;
   }
 
+  /**
+   * Extracts features, treating a game that cannot be replayed as one with no motifs.
+   *
+   * <p>That is what indexing wants: one unplayable game in a month of 400 should not fail the
+   * month. It is <em>not</em> what a caller asking about a single game wants — see {@link
+   * #extractOrThrow}.
+   */
   public GameFeatures extract(String pgn) {
+    try {
+      return extractOrThrow(pgn);
+    } catch (GameReplayer.AnalysisCancelledException e) {
+      // Nobody interrupts the indexing path, but if that changes, an abandoned game must not be
+      // recorded as one with no motifs — that would write a wrong row rather than skip a bad one.
+      throw e;
+    } catch (ReplayFailedException e) {
+      LOG.warn("Failed to replay game, skipping motif detection", e.getCause());
+      return new GameFeatures(EnumSet.noneOf(Motif.class), 0, Map.of());
+    }
+  }
+
+  /**
+   * Extracts features, or fails if the game cannot be replayed.
+   *
+   * <p>For callers analyzing one game the caller chose. {@link #extract}'s empty result is
+   * indistinguishable from a quiet game with no motifs, so an illegal move would come back as a
+   * successful "nothing found" — an answer about a game that was never actually played through.
+   */
+  public GameFeatures extractOrThrow(String pgn) {
     ParsedGame parsed = pgnParser.parse(pgn);
     List<PositionContext> positions;
     try {
       positions = replayer.replay(parsed.moveText());
+    } catch (GameReplayer.AnalysisCancelledException e) {
+      throw e; // Cancellation is not bad input.
     } catch (Exception e) {
-      LOG.warn("Failed to replay game, skipping motif detection", e);
-      return new GameFeatures(EnumSet.noneOf(Motif.class), 0, Map.of());
+      throw new ReplayFailedException(e);
     }
 
     int numMoves = positions.isEmpty() ? 0 : positions.get(positions.size() - 1).moveNumber();
@@ -44,6 +82,12 @@ public class FeatureExtractor {
     Map<Motif, List<GameFeatures.MotifOccurrence>> allOccurrences = new EnumMap<>(Motif.class);
 
     for (MotifDetector detector : detectors) {
+      // Detection is the other half of the cost, and a detector walks every position — so an
+      // abandoned analysis that got past replay would otherwise run all ten of them to completion.
+      if (Thread.currentThread().isInterrupted()) {
+        throw new GameReplayer.AnalysisCancelledException(
+            "detection cancelled before " + detector.motif());
+      }
       try {
         List<GameFeatures.MotifOccurrence> occurrences = detector.detect(positions);
         if (!occurrences.isEmpty()) {
