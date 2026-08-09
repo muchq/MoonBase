@@ -2,7 +2,6 @@ package com.muchq.games.mcpserver.tools;
 
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.muchq.games.chessql.parser.ParseException;
 import com.muchq.games.one_d4.api.dto.AggregateRow;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.mcp.annotations.Tool;
@@ -97,7 +96,7 @@ public class AggregateGamesTool {
     IndexerFacade.AggregateResult aggregate;
     try {
       aggregate = facade.aggregate(query, groupByNames, player, effectiveLimit);
-    } catch (ParseException | IllegalArgumentException e) {
+    } catch (IllegalArgumentException | OneD4Client.UpstreamException e) {
       return ToolJson.error(e.getMessage());
     }
 

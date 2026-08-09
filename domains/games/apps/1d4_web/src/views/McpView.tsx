@@ -33,19 +33,17 @@ export default function McpView() {
       </section>
 
       <section className="panel">
-        <h2>Its index is its own</h2>
+        <h2>One corpus, shared with the site</h2>
         <p>
-          What you index through these tools is <strong>not</strong> what
-          1d4.net shows. The MCP server carries its own indexer with an
-          in-memory database: it starts empty, it is discarded when the process
-          restarts, and it is separate from the corpus behind the{' '}
+          What you index through these tools is <strong>the same corpus</strong>{' '}
+          1d4.net shows. The MCP server has no database of its own: the indexing
+          and search tools are calls to the same API behind the{' '}
           <Link to="/games">Games</Link> page and <code>api.1d4.net</code>.
         </p>
         <p className="panel-note">
-          So a player you index here is searchable here, by you, until the next
-          restart — and does not appear on the site. Index through the{' '}
-          <Link to="/index">Index</Link> page instead if the corpus is what you
-          are filling.
+          So a player you index here shows up on the site, and a query here sees
+          everything the <Link to="/index">Index</Link> page has already
+          collected — there is no separate index to fill first.
         </p>
       </section>
 

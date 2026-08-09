@@ -26,10 +26,10 @@ public class AnalyzePositionTool {
       return ToolJson.error("pgn is required");
     }
 
-    IndexerFacade.AnalysisResult result;
+    com.muchq.games.one_d4.api.dto.AnalyzeResponse result;
     try {
       result = facade.analyze(pgn);
-    } catch (IllegalArgumentException e) {
+    } catch (IllegalArgumentException | OneD4Client.UpstreamException e) {
       return ToolJson.error(e.getMessage());
     }
 

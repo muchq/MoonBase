@@ -109,12 +109,12 @@ describe('McpView', () => {
   });
 
   /**
-   * The MCP server indexes into its own in-memory database — empty at boot, discarded on restart,
-   * and not the corpus behind Games/api.1d4.net. A page that sits in the same nav and talks about
-   * indexing invites exactly the wrong conclusion, so the fact is pinned rather than left to
-   * whoever edits the copy next.
+   * The MCP tools act on the corpus the site serves — they are calls to the same API (#1332).
+   * This page used to say the opposite, correctly, because the server carried its own in-memory
+   * index. A visitor deciding whether to index here or on the Index page acts on this paragraph,
+   * so it is pinned rather than left to whoever edits the copy next.
    */
-  it('says its index is separate from the site corpus and does not survive restarts', () => {
+  it('says the corpus is shared with the site rather than private to this server', () => {
     render(
       <MemoryRouter>
         <McpView />
@@ -122,18 +122,19 @@ describe('McpView', () => {
     );
 
     expect(
-      screen.getByRole('heading', { name: /its index is its own/i }),
+      screen.getByRole('heading', { name: /one corpus, shared with the site/i }),
     ).toBeTruthy();
-    expect(screen.getByText(/in-memory database/i)).toBeTruthy();
-    expect(
-      screen.getByText(/discarded when the process restarts/i),
-    ).toBeTruthy();
+    expect(screen.getByText(/the same corpus/i)).toBeTruthy();
+    // The stale claim, named so it cannot quietly come back while the heading changes.
+    expect(screen.queryByText(/in-memory database/i)).toBeNull();
+    expect(screen.queryByText(/discarded when the process restarts/i)).toBeNull();
   });
 
   /**
-   * index_chess_games is synchronous for a single month (IndexerFacade goes through
-   * submitHybrid) and queued for a range. The page's worked example is one month, so copy that
-   * says "poll until it completes" would be telling readers to poll something already finished.
+   * index_chess_games is synchronous for a single month — one_d4's POST /v1/index is async, and
+   * the adapter polls it to completion — and queued for a range. The page's worked example is one
+   * month, so copy that says "poll until it completes" would send readers after something already
+   * finished.
    */
   it('describes single-month indexing as synchronous and ranges as polled', () => {
     render(

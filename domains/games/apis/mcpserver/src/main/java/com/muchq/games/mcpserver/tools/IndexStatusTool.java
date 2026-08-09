@@ -31,7 +31,7 @@ public class IndexStatusTool {
     UUID parsed;
     try {
       parsed = UUID.fromString(requestId.trim());
-    } catch (IllegalArgumentException e) {
+    } catch (IllegalArgumentException | OneD4Client.UpstreamException e) {
       return ToolJson.error("invalid request_id: '" + requestId + "' (expected a UUID)");
     }
 

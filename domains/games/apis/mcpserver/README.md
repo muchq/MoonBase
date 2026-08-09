@@ -148,19 +148,21 @@ curl -s http://localhost:8080/mcp \
 - `chess_com_stats` — a player's rating stats.
 - `server_time` — current UTC time.
 
-### Indexer tools (in-process one_d4)
+### Corpus tools (one_d4 over HTTP)
 
-The indexer engine, database, and worker are embedded in this process (Option A in
-`one_d4/.../docs/MCP_INTEGRATION.md`). By default the index lives in in-memory H2; set
-`INDEXER_DB_URL` to point at a durable database.
+These are calls to the `one_d4` service, not work this process does. `index_chess_games` is
+`POST /v1/index`, `index_status` is `GET /v1/index/{id}`, `query_chess_games` is `POST /v1/query`,
+`aggregate_chess_games` is `POST /v1/aggregate`, and `analyze_position` is `POST /v1/analyze`. The
+upstream is `ONE_D4_BASE_URL`, which Compose sets to the internal service name.
 
-**The deployed MCP server takes that default.** `INDEXER_DB_URL` is the only source `McpModule`
-reads — there is no `/etc/…/db_config` fallback like `one_d4`'s — and the Compose service sets no
-such variable, so its index is in-memory H2, scoped to the process: empty at boot, discarded on
-restart, and entirely separate from the `one_d4` service's PostgreSQL corpus. Indexing tools work
-here, but each container starts from nothing and re-indexes on demand. Pointing this at the shared
-database is a deliberate deployment change (it would write to the production corpus), not a
-missing setting to paste in.
+**They act on the same corpus the site serves** — indexing through MCP puts games where
+`1d4.net` can see them, and a query here sees everything `api.1d4.net` does. That is the point of
+routing through the API: `one_d4` owns validation, the indexing lifecycle, retention, query limits,
+the schema, and its migrations, and this server holds no database credentials at all (#1332).
+
+`POST /v1/index` is asynchronous. Single-month requests are polled here until they finish, so
+`index_chess_games` still answers with a final status in one call; longer ranges come back
+`PENDING` immediately and are followed with `index_status`.
 
 - `index_chess_games` — index a player's games. Required: `username`, `platform`
   (`chess.com`), `start_month`/`end_month` (YYYY-MM). Optional: `exclude_bullet`, and
@@ -197,7 +199,7 @@ Environment variables:
 - **APP_NAME**: Application name (default: `helloworld`, from the shared `application.yml`; Compose sets `mcpserver`)
 - **MCP_AUTH_TOKEN**: Bearer token for authentication (optional, open if unset or empty)
 - **MCP_SERVER_VERSION**: Version reported in `initialize`'s `serverInfo` (default: 1.0.0)
-- **INDEXER_DB_URL**: JDBC URL for the in-process indexer (default: in-memory H2)
+- **ONE_D4_BASE_URL**: Base URL of the one_d4 API the corpus tools call (default: `http://one_d4:8080`)
 
 The MCP transport itself is configured in the shared `application.yml`
 (`domains/platform/resources`) under `micronaut.mcp.server`: `transport: HTTP`,

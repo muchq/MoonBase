@@ -56,7 +56,7 @@ public class IndexGamesTool {
               Boolean.TRUE.equals(excludeBullet),
               Boolean.TRUE.equals(skipCache));
       return ToolJson.write(result);
-    } catch (IllegalArgumentException e) {
+    } catch (IllegalArgumentException | OneD4Client.UpstreamException e) {
       return ToolJson.error(e.getMessage());
     } catch (ChessComApiException e) {
       return ToolJson.error("chess.com API error (HTTP " + e.statusCode() + "): " + e.getMessage());

@@ -1,14 +1,12 @@
 # Chess Game Indexer — MCP Server Integration
 
-> **Status: implemented (Option A, in-process).** `mcpserver` embeds the indexer engine,
-> database access, and queue, and serves `index_chess_games`, `index_status`,
-> `query_chess_games`, `analyze_position`, and `aggregate_chess_games`. The tools are
-> `@Tool` methods on `@Singleton` beans, served over MCP by micronaut-mcp; their
-> parameters are their input schemas. See `mcpserver/tools/` and `mcpserver/McpModule.java`
-> for the code, and `mcpserver/README.md` for the transport. This document is the design
-> that led there — the tool semantics below still describe what the tools do, though the
-> served schemas are derived from the method signatures and carry no `enum` or `items`
-> constraints; `McpProtocolTest` is authoritative for their exact shape.
+> **Status: implemented.** `mcpserver` serves `index_chess_games`, `index_status`,
+> `query_chess_games`, `analyze_position` and `aggregate_chess_games` as `@Tool` methods on
+> `@Singleton` beans, over MCP via micronaut-mcp; their parameters are their input schemas.
+> Each one is an HTTP call to this service — see the Architecture section below. Code is in
+> `mcpserver/tools/`, transport in `mcpserver/README.md`. The tool semantics below describe what
+> the tools do; the served schemas are derived from the method signatures and carry no `enum` or
+> `items` constraints, and `McpProtocolTest` is authoritative for their exact shape.
 
 ## Overview
 
@@ -16,48 +14,34 @@ Expose the indexer's capabilities as MCP (Model Context Protocol) tool calls, so
 
 ## Architecture
 
-There are two integration approaches. Both are viable; choose based on deployment topology.
-
-### Option A: In-Process (Recommended)
-
-Add indexer tool classes directly to the `mcpserver` package. The mcpserver process embeds the indexer engine, DB access, and queue. Uses in-process mode (H2) by default with PostgreSQL as an option.
+`mcpserver` is an HTTP adapter. It holds no database credentials and runs no indexer; every
+corpus-backed tool is a call to this service over the internal network (#1332).
 
 ```
-┌──────────────────────────────────────────────────┐
-│              mcpserver JVM Process                │
-│                                                   │
-│  MCP tools (chess.com lookups + the five below)   │
-│                  │                                │
-│         ┌────────▼─────────┐                      │
-│         │ IndexerFacade    │                      │
-│         │  (thin wrapper)  │                      │
-│         └────────┬─────────┘                      │
-│                  │                                │
-│    ┌─────────────▼──────────────────┐             │
-│    │  Indexer Engine + H2/Postgres  │             │
-│    └────────────────────────────────┘             │
-└──────────────────────────────────────────────────┘
+┌──────────────────┐          ┌───────────────────────────────┐
+│  mcpserver JVM   │          │        one_d4 JVM             │
+│                  │          │                               │
+│  MCP tools       │  HTTP    │  /v1/index    /v1/query       │
+│      │           │ ───────► │  /v1/index/{id}               │
+│  IndexerFacade   │          │  /v1/aggregate  /v1/analyze   │
+│  (HTTP client)   │          │            │                  │
+└──────────────────┘          │  Indexer engine + PostgreSQL  │
+                              └───────────────────────────────┘
 ```
 
-**Pros**: Single process, no network hops, in-process mode works out of the box, simplest deployment.
-**Cons**: Larger binary, indexer lifecycle coupled to mcpserver.
+One corpus, one owner. `one_d4` keeps validation, the indexing lifecycle, retention, query limits,
+the schema and its migrations; a second process with a connection string would own a copy of all of
+that by accident, and the copies drift. It also means indexing through MCP reaches the same corpus
+`1d4.net` serves, rather than a private index nobody else can see.
 
-### Option B: HTTP Proxy
+`ONE_D4_BASE_URL` configures the upstream; Compose sets it to the internal service name. These
+paths are not routed publicly through Caddy and do not need to be.
 
-MCP tools call the indexer's REST API over HTTP. The indexer runs as a separate process.
-
-```
-┌────────────────────┐       HTTP        ┌──────────────────┐
-│    mcpserver       │ ────────────────► │    indexer        │
-│  IndexGamesTool ───┤  POST /v1/index  │  IndexController  │
-│  QueryGamesTool ───┤  POST /v1/query  │  QueryController  │
-└────────────────────┘                   └──────────────────┘
-```
-
-**Pros**: Independent scaling, separate deploys, clear service boundary.
-**Cons**: Network latency, two processes to manage, need indexer running.
-
----
+**Indexing is asynchronous upstream.** `POST /v1/index` returns immediately. The adapter polls
+`GET /v1/index/{id}` for single-month requests so `index_chess_games` still answers with a final
+status in one tool call, under an explicit timeout; longer ranges come back `PENDING` and are
+followed with `index_status`. Running out of polling budget is not an error — the caller gets the
+last status seen and a request id that still works.
 
 ## Tool Definitions
 
@@ -206,49 +190,6 @@ Detect motifs in a single PGN without indexing it to the database.
 
 ---
 
-## Implementation: Option A (In-Process)
-
-### New Files
-
-All under `domains/games/apis/mcpserver/src/main/java/com/muchq/games/mcpserver/tools/`:
-
-#### IndexerFacade.java
-
-Thin wrapper that manages indexer components without exposing internal types to MCP tools:
-
-```java
-public class IndexerFacade {
-    private final IndexingRequestDao requestDao;
-    private final GameFeatureDao gameFeatureDao;
-    private final IndexQueue queue;
-    private final IndexWorker worker;
-    private final FeatureExtractor featureExtractor;
-    private final SqlCompiler sqlCompiler;
-
-    // Synchronous index (blocks until complete — suitable for small ranges)
-    public IndexResult indexSync(String player, String platform, String startMonth, String endMonth) { ... }
-
-    // Async index (enqueues and returns immediately)
-    public IndexResult indexAsync(String player, String platform, String startMonth, String endMonth) { ... }
-
-    // Poll status
-    public IndexResult getStatus(UUID requestId) { ... }
-
-    // Query
-    public QueryResult query(String chessql, int limit) { ... }
-
-    // Analyze a single PGN
-    public AnalysisResult analyze(String pgn) { ... }
-}
-```
-
----
-
-## Implementation: Option B (HTTP Proxy)
-
-Not built. The tools would keep their semantics and their arguments; only `IndexerFacade`
-would change, calling the indexer's REST API instead of holding the engine in-process.
-
 ## Sync vs Async Indexing in MCP Context
 
 MCP tool calls are synchronous — the LLM waits for a response. Indexing a month of games can involve hundreds of API calls to chess.com.
@@ -259,8 +200,10 @@ MCP tool calls are synchronous — the LLM waits for a response. Indexing a mont
 
 2. **Large requests (multi-month)**: Run asynchronously. Return the request ID immediately. The LLM then polls with `index_status` in a follow-up turn.
 
-`IndexerFacade.submitHybrid` makes that call: one month runs inline and comes back COMPLETED,
-a longer range is enqueued and comes back PENDING with a request id to poll.
+`IndexerFacade` makes that call. `POST /v1/index` is asynchronous for both cases, so the single-
+month path is bounded polling of `GET /v1/index/{id}` inside the adapter — the tool still answers
+COMPLETED in one call. A longer range returns PENDING with a request id, and so does a single month
+that outruns the polling budget, which keeps a slow month from costing the caller their request id.
 
 ---
 
@@ -320,31 +263,3 @@ LLM: In the indexed high-elo Sicilian games, forks are nearly 3x more common
 ```
 
 ---
-
-## Files Summary
-
-### Option A (In-Process)
-
-| File | Action | Description |
-|------|--------|-------------|
-| `mcpserver/tools/IndexerFacade.java` | Create | Thin wrapper over indexer components |
-| `mcpserver/tools/IndexGamesTool.java` | Create | `index_chess_games` MCP tool |
-| `mcpserver/tools/IndexStatusTool.java` | Create | `index_status` MCP tool |
-| `mcpserver/tools/QueryGamesTool.java` | Create | `query_chess_games` MCP tool |
-| `mcpserver/tools/AnalyzePositionTool.java` | Create | `analyze_position` MCP tool |
-| `mcpserver/tools/BUILD.bazel` | Modify | Add indexer library deps |
-| `mcpserver/McpModule.java` | Modify | Wire IndexerFacade + new tools |
-| `mcpserver/BUILD.bazel` | Modify | Add indexer + H2 deps |
-
-### Option B (HTTP Proxy)
-
-| File | Action | Description |
-|------|--------|-------------|
-| `mcpserver/tools/IndexerHttpClient.java` | Create | HTTP client to indexer API |
-| `mcpserver/tools/IndexGamesTool.java` | Create | Delegates to IndexerHttpClient |
-| `mcpserver/tools/IndexStatusTool.java` | Create | Delegates to IndexerHttpClient |
-| `mcpserver/tools/QueryGamesTool.java` | Create | Delegates to IndexerHttpClient |
-| `mcpserver/tools/BUILD.bazel` | Modify | Add http_client dep |
-| `mcpserver/McpModule.java` | Modify | Wire IndexerHttpClient + new tools |
-
-Option A is recommended for initial implementation. It requires no separate process, works with in-process mode, and can be split into Option B later if scaling demands it.
