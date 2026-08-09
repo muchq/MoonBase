@@ -2,12 +2,16 @@ package com.muchq.platform.http_client.jdk;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.muchq.platform.http_client.core.HttpRequest;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -90,12 +94,39 @@ public class Jdk11HttpClientTimeoutTest {
   @Timeout(60)
   public void aTimedOutExchangeIsTornDownAtThePeer() throws Exception {
     try (StalledServer server = new StalledServer(StalledServer.Behaviour.HEAD_THEN_STALL)) {
-      assertThatThrownBy(() -> client().execute(request(server.url(), Duration.ofMillis(250))))
-          .isInstanceOf(UncheckedIOException.class);
+      // Off-thread, with a deadline long enough to lose the race it would otherwise be in. A
+      // 250ms deadline against this peer can expire before the head even arrives, and then it is
+      // the JDK's request timer that fires and closes the socket — the peer disconnects, the
+      // assertion below passes, and nothing here has touched the timed get or its cancel. Waiting
+      // on bodyStarted() from this thread while the call is still parked is what fixes the order:
+      // the peer has already stalled mid-body before the deadline is anywhere near expiring.
+      Duration deadline = Duration.ofSeconds(3);
+      ExecutorService caller = Executors.newSingleThreadExecutor();
+      try {
+        Future<Throwable> outcome =
+            caller.submit(
+                () -> catchThrowable(() -> client().execute(request(server.url(), deadline))));
 
-      assertThat(server.clientHungUp().await(30, TimeUnit.SECONDS))
-          .as("the peer still sees a connected client, so the exchange outlived the deadline")
-          .isTrue();
+        assertThat(server.bodyStarted().await(30, TimeUnit.SECONDS))
+            .as("the peer never reached its mid-body stall, so nothing below is about that case")
+            .isTrue();
+
+        Throwable thrown = outcome.get(30, TimeUnit.SECONDS);
+        assertThat(thrown)
+            .isInstanceOf(UncheckedIOException.class)
+            .hasCauseInstanceOf(HttpTimeoutException.class);
+        assertThat(thrown.getCause())
+            .as(
+                "the timed get has to be what expired: the JDK's own request timer says 'request"
+                    + " timed out' and never runs the cancel this test exists for")
+            .hasMessage("request did not complete within the deadline");
+
+        assertThat(server.clientHungUp().await(30, TimeUnit.SECONDS))
+            .as("the peer still sees a connected client, so the exchange outlived the deadline")
+            .isTrue();
+      } finally {
+        caller.shutdownNow();
+      }
     }
   }
 

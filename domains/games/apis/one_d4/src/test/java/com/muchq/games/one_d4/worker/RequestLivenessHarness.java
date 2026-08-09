@@ -58,9 +58,11 @@ import org.junit.jupiter.api.BeforeEach;
  * <p>The gap that mattered most was the ordinary one. A single-month request holding fewer than
  * {@code BATCH_SIZE} games flushes exactly once, at the end, so the whole month — the archive
  * fetch, one profile lookup per distinct opponent, and the extraction of every game — sat between
- * two writes. {@code ChessClient} sets no request timeout, so a chess.com call that hangs has no
- * bound at all, and single-month requests are the common case since {@code submitHybrid} runs them
- * inline.
+ * two writes. {@code ChessClient} set no request timeout at the time, so a chess.com call that hung
+ * had no bound at all, and single-month requests are the common case since {@code submitHybrid}
+ * runs them inline. It carries a 60s deadline over the whole exchange now (#1336), which bounds a
+ * hung call but not a slow-and-working one — a month of archives fetched a few seconds at a time
+ * still crosses the staleness ceiling, so the heartbeat below is what the lease rests on.
  *
  * <p>#1278 replaced the inference with a claim. A worker takes an explicit lease naming itself and
  * renews it on a timer, so "is the owner still there?" is answered by the owner rather than guessed
@@ -353,8 +355,10 @@ abstract class RequestLivenessHarness {
 
   /**
    * Stands in for a chess.com call that is slow rather than broken: it either jumps the clock to a
-   * fixed instant, or blocks until a latch is released. `ChessClient` has no request timeout, so
-   * neither shape is bounded in production.
+   * fixed instant, or blocks until a latch is released. {@code ChessClient}'s deadline bounds a
+   * single hung exchange (#1336), not a sequence of working-but-slow ones, so a run can still
+   * outlast the staleness ceiling without anything having failed — which is the case these stand in
+   * for.
    */
   static final class ClockJumpingChessClient extends ChessClient {
     private final MutableClock clock;

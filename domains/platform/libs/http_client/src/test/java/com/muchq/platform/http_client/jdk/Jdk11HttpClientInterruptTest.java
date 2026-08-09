@@ -69,6 +69,14 @@ public class Jdk11HttpClientInterruptTest {
       assertThat(outcome.thrown())
           .as("the interrupt stays identifiable in the cause chain")
           .hasRootCauseInstanceOf(InterruptedException.class);
+
+      // Asserted here, inside the block, because teardown would supply this by itself: the server
+      // closes before the client, and its sockets closing is a disconnection too. Everything
+      // above passes with the cancel deleted — the caller returns, carrying the right status and
+      // the right cause, while the exchange it abandoned is still running underneath.
+      assertThat(server.clientHungUp().await(30, java.util.concurrent.TimeUnit.SECONDS))
+          .as("an interrupted call has to take the exchange down with it, not just return")
+          .isTrue();
     }
   }
 
