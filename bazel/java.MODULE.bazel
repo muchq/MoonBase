@@ -21,7 +21,13 @@ maven.install(
     artifacts = [
         "ch.qos.logback:logback-classic:%s" % LOGBACK_VERSION,
         "ch.qos.logback:logback-core:%s" % LOGBACK_VERSION,
-        "com.fasterxml.jackson.core:jackson-annotations",
+        # Versioned explicitly: micronaut-core-bom is listed first and pins annotations
+        # to 2.21, while Micronaut 5 does not manage Jackson 2 core/databind at all, so those
+        # fall through to jackson-bom below and land on 2.22.0. databind introspects
+        # annotation classes, so leaving the family split across minors is a trap that
+        # only bites on some future bump. No patch component: jackson-annotations
+        # dropped it in 2.20, which is why jackson-bom:2.22.0 pins it to plain "2.22".
+        "com.fasterxml.jackson.core:jackson-annotations:2.22",
         "com.fasterxml.jackson.core:jackson-core",
         "com.fasterxml.jackson.core:jackson-databind",
         "com.github.ben-manes.caffeine:caffeine:3.2.2",
@@ -48,6 +54,8 @@ maven.install(
         "io.micronaut:micronaut-runtime",
         "io.micronaut.jaxrs:micronaut-jaxrs-processor",
         "io.micronaut.jaxrs:micronaut-jaxrs-server",
+        "io.micronaut.mcp:micronaut-mcp-annotations",
+        "io.micronaut.mcp:micronaut-mcp-server-java-sdk",
         "io.netty:netty-common",
         "io.netty:netty-codec",
         "io.netty:netty-handler",
@@ -64,12 +72,21 @@ maven.install(
         "org.eclipse.jetty.websocket:websocket-jetty-server:%s" % JETTY_VERSION,
         "org.jspecify:jspecify:1.0.0",
         "org.slf4j:slf4j-api:2.0.18",
+        # Micronaut's YamlPropertySourceLoader is compiled against classic snakeyaml
+        # (org.yaml.snakeyaml.Yaml) and disables itself when that class is absent —
+        # silently, so application.yml is simply never read. Nothing in this repo had
+        # it before micronaut-mcp pulled it in transitively, and the Micronaut 5 /
+        # Jackson 3 upgrade dropped it again (Jackson 3 uses snakeyaml-engine, a
+        # different package). Declared directly so YAML config depends on nothing but
+        # itself: without it the file is inert and every property silently defaults.
+        "org.yaml:snakeyaml:2.4",
     ],
     boms = [
         "io.netty:netty-bom:4.2.16.Final",
-        "io.micronaut:micronaut-core-bom:4.10.25",
-        "io.micronaut.jaxrs:micronaut-jaxrs-bom:4.10.0",
-        "io.micronaut.validation:micronaut-validation-bom:4.12.0",
+        "io.micronaut:micronaut-core-bom:5.1.10",
+        "io.micronaut.jaxrs:micronaut-jaxrs-bom:5.1.0",
+        "io.micronaut.validation:micronaut-validation-bom:5.1.0",
+        "io.micronaut.mcp:micronaut-mcp-bom:2.0.0",
         "com.fasterxml.jackson:jackson-bom:2.22.0",
         "org.junit:junit-bom:6.1.1",
     ],

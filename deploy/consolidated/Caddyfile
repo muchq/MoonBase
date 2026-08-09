@@ -290,12 +290,52 @@ api.1d4.net {
 }
 
 mcp.1d4.net {
+	# Every method on /mcp reaches the server, not just POST. Streamable HTTP
+	# clients probe GET for the optional server->client SSE stream and may send
+	# DELETE to end a session; micronaut-mcp offers neither and answers 405,
+	# which is what the transport spec says to do and what a client knows how to
+	# read. Proxying POST alone left those falling through to Caddy's empty 200
+	# — a body no client can parse, and the "GET /mcp returns 200 with an empty
+	# body" probe in #1325.
 	@mcp {
-		method POST
 		path /mcp
 	}
 
-	reverse_proxy @mcp mcpserver:8080
+	@options {
+		method OPTIONS
+		path /mcp
+	}
+
+	# CORS, so 1d4.net's /mcp page can call tools/list from the browser. The
+	# MCP-specific request headers are named because a Streamable HTTP client
+	# sends them on every request after the handshake; without them in the
+	# allow-list the preflight fails and the call never goes out.
+	header {
+		Access-Control-Allow-Origin "https://1d4.net"
+		Access-Control-Allow-Methods "GET, POST, DELETE, OPTIONS"
+		Access-Control-Allow-Headers "Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version"
+		Access-Control-Expose-Headers "Mcp-Session-Id"
+		Access-Control-Max-Age "86400"
+	}
+
+	handle @options {
+		header {
+			Access-Control-Allow-Origin "https://1d4.net"
+			Access-Control-Allow-Methods "GET, POST, DELETE, OPTIONS"
+			Access-Control-Allow-Headers "Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version"
+			Access-Control-Expose-Headers "Mcp-Session-Id"
+			Access-Control-Max-Age "86400"
+		}
+		respond 204
+	}
+
+	handle @mcp {
+		reverse_proxy mcpserver:8080
+	}
+
+	handle {
+		respond 404
+	}
 
 	log {
 		output file /var/log/caddy/access.log {

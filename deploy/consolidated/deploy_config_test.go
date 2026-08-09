@@ -580,3 +580,120 @@ func composeServiceLines(t *testing.T, name string) map[string][]string {
 	flush()
 	return services
 }
+
+// The MCP endpoint, which is the one route in this file whose correctness a
+// server-side test cannot reach.
+//
+// Streamable HTTP is not a POST-only protocol. A client probes GET for the
+// optional server->client stream and may send DELETE to end a session;
+// micronaut-mcp implements neither and answers 405, which is what the transport
+// spec says to do and what every client knows how to read. Scoping the proxy to
+// POST does not produce a 405 — it leaves GET and DELETE falling through to
+// Caddy's own handling, and an empty 200 is a body no client can parse. That is
+// the "GET /mcp returns 200 with an empty body" report in #1325, and
+// McpProtocolTest.getReturns405BecauseTheSseStreamIsNotImplemented cannot see
+// it: the server answers 405 correctly either way, because the request never
+// reaches the server.
+func TestTheMcpProxyIsNotScopedToASingleMethod(t *testing.T) {
+	site := caddySiteBlock(t, "Caddyfile", "mcp.1d4.net")
+
+	matcher := ""
+	for i, line := range site {
+		if !strings.HasPrefix(line, "handle @") || !strings.HasSuffix(line, "{") {
+			continue
+		}
+		body := caddyBlockAt(site, i)
+		for _, inner := range body {
+			if strings.HasPrefix(inner, "reverse_proxy mcpserver") {
+				matcher = strings.TrimSuffix(strings.Fields(line)[1], "{")
+			}
+		}
+	}
+	if matcher == "" {
+		t.Fatalf("no `handle @... { reverse_proxy mcpserver ... }` in the mcp.1d4.net block; this "+
+			"test is no longer reading the route it claims to. Block was:\n%s",
+			strings.Join(site, "\n"))
+	}
+
+	defined := false
+	for i, line := range site {
+		if line != matcher+" {" {
+			continue
+		}
+		defined = true
+		for _, inner := range caddyBlockAt(site, i) {
+			if firstToken(inner) == "method" {
+				t.Errorf("the matcher gating the MCP proxy restricts methods (%q). Streamable HTTP "+
+					"clients send GET and DELETE to /mcp and expect the server's 405; a method "+
+					"matcher stops those reaching it and Caddy answers an empty 200 instead, which "+
+					"no client can parse (#1325).", inner)
+			}
+		}
+	}
+	if !defined {
+		t.Fatalf("%s gates the MCP proxy but is never defined in the block, so this test read no "+
+			"matcher at all. Block was:\n%s", matcher, strings.Join(site, "\n"))
+	}
+}
+
+// Caddy is the only place these headers are declared, so a browser is the only
+// thing that can notice them missing. 1d4.net's /mcp page calls the endpoint
+// cross-origin, and a Streamable HTTP client sends MCP-Protocol-Version on every
+// request after the handshake and Mcp-Session-Id whenever a server issues one.
+// Dropping either from the allow-list fails the preflight, so the call never
+// leaves the browser — nothing reaches the server, no server test fails, and the
+// page just shows no tools.
+func TestTheMcpCorsAllowListCarriesTheProtocolHeaders(t *testing.T) {
+	site := caddySiteBlock(t, "Caddyfile", "mcp.1d4.net")
+
+	allowLists := 0
+	for _, line := range site {
+		if !strings.HasPrefix(line, "Access-Control-Allow-Headers") {
+			continue
+		}
+		allowLists++
+		for _, header := range []string{"Mcp-Session-Id", "MCP-Protocol-Version"} {
+			if !strings.Contains(line, header) {
+				t.Errorf("the MCP CORS allow-list omits %s (%q). A Streamable HTTP client sends it "+
+					"on every request after the handshake, so the preflight fails and 1d4.net's "+
+					"/mcp page never gets a response to render.", header, line)
+			}
+		}
+	}
+	// The preflight and the actual response each carry their own copy; one of
+	// them silently losing the list is exactly the state this guards.
+	if allowLists < 2 {
+		t.Errorf("found %d Access-Control-Allow-Headers declarations in the mcp.1d4.net block, "+
+			"expected the preflight's and the response's. Block was:\n%s",
+			allowLists, strings.Join(site, "\n"))
+	}
+}
+
+// caddySiteBlock returns the comment-stripped, trimmed lines inside one site
+// block, excluding its own braces.
+func caddySiteBlock(t *testing.T, name, host string) []string {
+	t.Helper()
+	lines := directiveLines(t, name)
+	for i, line := range lines {
+		if line == host+" {" {
+			return caddyBlockAt(lines, i)
+		}
+	}
+	t.Fatalf("no %q site block in %s", host, name)
+	return nil
+}
+
+// caddyBlockAt returns the lines nested inside the block opened at lines[open],
+// which must end in "{". Nested blocks are included; the closing brace is not.
+func caddyBlockAt(lines []string, open int) []string {
+	depth := 0
+	var block []string
+	for _, line := range lines[open:] {
+		depth += strings.Count(line, "{") - strings.Count(line, "}")
+		if depth == 0 {
+			break
+		}
+		block = append(block, line)
+	}
+	return block[1:] // block[0] is the header line that opened the block.
+}

@@ -4,10 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.muchq.games.chess_com_client.ChessClient;
 import com.muchq.games.chess_com_client.Player;
-import com.muchq.platform.json.JsonUtils;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
@@ -47,34 +45,11 @@ public class ChessComPlayerToolTest {
           "Somewhere",
           2650);
   private final ChessClient stubClient = new StubChessClient(Optional.of(emptyPlayer));
-  private final ChessComPlayerTool tool = new ChessComPlayerTool(stubClient, JsonUtils.mapper());
-
-  @Test
-  public void testGetName() {
-    assertThat(tool.getName()).isEqualTo("chess_com_player");
-  }
-
-  @Test
-  public void testGetDescription() {
-    assertThat(tool.getDescription()).contains("chess.com").contains("player");
-  }
-
-  @Test
-  public void testGetInputSchema() {
-    Map<String, Object> schema = tool.getInputSchema();
-    assertThat(schema).containsKey("type");
-    assertThat(schema).containsKey("properties");
-    assertThat(schema).containsKey("required");
-
-    @SuppressWarnings("unchecked")
-    Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
-    assertThat(properties).containsKey("username");
-  }
+  private final ChessComPlayerTool tool = new ChessComPlayerTool(stubClient);
 
   @Test
   public void testExecuteWithValidParameters() {
-    Map<String, Object> arguments = Map.of("username", "hikaru");
-    String result = tool.execute(arguments);
+    String result = tool.chessComPlayer("hikaru");
     assertThat(result).isNotNull();
     assertThat(result).contains("testuser");
     assertThat(result).contains("\"title\":\"GM\"");
@@ -82,18 +57,16 @@ public class ChessComPlayerToolTest {
 
   @Test
   public void testExecuteWithDifferentUsername() {
-    Map<String, Object> arguments = Map.of("username", "magnus");
-    String result = tool.execute(arguments);
+    String result = tool.chessComPlayer("magnus");
     assertThat(result).isNotNull();
   }
 
   @Test
   public void testExecuteWithPlayerNotFound() {
     ChessClient notFoundClient = new StubChessClient(Optional.empty());
-    ChessComPlayerTool notFoundTool = new ChessComPlayerTool(notFoundClient, JsonUtils.mapper());
+    ChessComPlayerTool notFoundTool = new ChessComPlayerTool(notFoundClient);
 
-    Map<String, Object> arguments = Map.of("username", "nonexistent");
-    String result = notFoundTool.execute(arguments);
+    String result = notFoundTool.chessComPlayer("nonexistent");
     assertThat(result).isEqualTo("{\"error\":\"player not found\"}");
   }
 }

@@ -9,10 +9,11 @@ import App from '../App';
 import McpView from '../views/McpView';
 import { MCP_TOOLS } from '../mcpTools';
 
-// The tool roster the server actually advertises. McpToolRegistryContractTest (Java) pins the
-// registry to this same file, so a tool added, removed or renamed on the server fails there
-// first, and fails here until the page's table catches up. The page cannot ask the server
-// directly — mcp.1d4.net sends no CORS headers — which is exactly why this loop exists.
+// The tool roster the server actually advertises. McpToolRosterContractTest (Java) pins what the
+// running server returns from tools/list to this same file, so a tool added, removed or renamed
+// on the server fails there first, and fails here until the page's table catches up. mcp.1d4.net
+// allows this origin, so the page could fetch the list instead; it deliberately does not, so the
+// drift is caught in CI rather than in production. See mcpTools.ts.
 // Resolved from the package root (vitest's cwd), because import.meta.url is not a file: URL
 // under the jsdom transform.
 const ADVERTISED_TOOLS: { tools: string[] } = JSON.parse(
@@ -68,19 +69,43 @@ describe('McpView', () => {
   });
 
   /**
-   * The transport caveat is the reason a reader's standard MCP client will not connect, and it is
-   * the kind of awkward sentence that gets tidied away. Pinned so removing it is deliberate.
+   * Connecting is one command, and its whole job is to be copy-pasteable (#1325). A command that
+   * renders but names the wrong endpoint — or names none — is worse than no command at all,
+   * because it looks like it works.
+   *
+   * Asserts the transport flag too: `claude mcp add` without `--transport http` registers a stdio
+   * server that tries to execute the URL as a program, which fails in a way that reads like the
+   * server being down rather than the line being wrong.
    */
-  it('states the endpoint and that it is not a standard MCP transport', () => {
+  it('gives a one-line connect command naming the endpoint', () => {
     render(
       <MemoryRouter>
         <McpView />
       </MemoryRouter>,
     );
 
-    expect(screen.getAllByText(/mcp\.1d4\.net/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/no SSE/i)).toBeTruthy();
-    expect(screen.getByText(/Mcp-Session-Id/)).toBeTruthy();
+    const connecting = screen.getByRole('heading', { name: /connecting/i })
+      .parentElement as HTMLElement;
+    const text = connecting.textContent ?? '';
+
+    expect(text).toContain('claude mcp add');
+    expect(text).toContain('--transport http');
+    expect(text).toContain('https://mcp.1d4.net/mcp');
+  });
+
+  /**
+   * The one thing the transport does not do. Streamable HTTP makes the server->client SSE leg
+   * optional, and micronaut-mcp does not implement it, so GET /mcp is a 405 rather than a stream.
+   * A reader debugging a client that probes GET needs to find that here rather than guess.
+   */
+  it('says the server-to-client SSE stream is not implemented', () => {
+    render(
+      <MemoryRouter>
+        <McpView />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/SSE stream is not implemented/i)).toBeTruthy();
   });
 
   /**

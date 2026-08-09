@@ -1,11 +1,15 @@
 /**
  * The tools mcp.1d4.net advertises, as documented on /mcp.
  *
- * The page cannot ask the server for this list: mcp.1d4.net sends no CORS headers, so a
- * tools/list call from a browser on 1d4.net is blocked. So the roster is checked in — and pinned
- * from both ends, because a hand-maintained table would otherwise rot the first time a tool is
- * added or renamed. `McpToolRegistryContractTest` (Java) asserts the server's registry matches
- * mcp_tools.json, and `McpView.test.tsx` asserts the names below match that same file.
+ * The roster is checked in rather than fetched. mcp.1d4.net allows this origin, so a tools/list
+ * call from a browser on 1d4.net would work — but a build-time contract fails in CI, before a
+ * deploy, where a runtime fetch can only ever be wrong in production, and would put an empty
+ * table on the page whenever the MCP server is down.
+ *
+ * Pinned from both ends, because a hand-maintained table would otherwise rot the first time a
+ * tool is added or renamed. `McpToolRosterContractTest` (Java) asserts what the server actually
+ * advertises over tools/list matches mcp_tools.json, and `McpView.test.tsx` asserts the names
+ * below match that same file.
  */
 export type McpToolDoc = {
   name: string;

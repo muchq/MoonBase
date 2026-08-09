@@ -7,7 +7,7 @@ React + TypeScript frontend for the [one_d4](https://github.com/muchq/MoonBase/t
 - **Games** — Browse indexed games with sortable columns (player, ELO, time class, ECO, result, motifs), motif badges with occurrence tooltips, and click-through to chess.com. Pagination.
 - **Index** — Enqueue index requests (username, platform, start/end month). Auto-polls `GET /v1/index` while any request is pending/processing.
 - **Query** — ChessQL query input with syntax help and example chips; results table and limit selector.
-- **MCP** — Documentation for the MCP server at `mcp.1d4.net`: the tool roster, the index-before-you-query ordering, how to connect, and a worked example. Static documentation, not an interactive client — `mcp.1d4.net` sends no CORS headers, so the browser cannot call it from here.
+- **MCP** — Documentation for the MCP server at `mcp.1d4.net`: the tool roster, the index-before-you-query ordering, how to connect, and a worked example. Static documentation, not an interactive client: `mcp.1d4.net` allows this origin, so the browser could call it, but the roster is checked in so drift fails in CI rather than in production.
 
 ## Develop locally
 
@@ -60,4 +60,4 @@ This tars `dist/` for CI artifact storage.
 
 - Requires the one_d4 API deployed at `api.1d4.net`.
 - API CORS must allow origin `https://1d4.net`.
-- The `/mcp` page documents `mcp.1d4.net` but never calls it, so that server needs nothing from this app. Its tool list is checked in at `src/mcpTools.ts` and pinned against the server's registry from both sides — see `src/__tests__/McpView.test.tsx` and mcpserver's `McpToolRegistryContractTest`.
+- The `/mcp` page documents `mcp.1d4.net` but never calls it. `mcp.1d4.net` does allow this origin now, so it could — the list stays checked in at `src/mcpTools.ts` because a build-time contract fails in CI, where a runtime fetch could only ever be wrong in production. Pinned from both sides: `src/__tests__/McpView.test.tsx` here, and mcpserver's `McpToolRosterContractTest`, which asks the running server over `tools/list`.

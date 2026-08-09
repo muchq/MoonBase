@@ -1,29 +1,48 @@
 # MCP Server (Model Context Protocol)
 
-A basic [Model Context Protocol](https://modelcontextprotocol.io) server built with Micronaut and HTTP. Implements the MCP JSON-RPC protocol to provide tools that AI assistants like Claude can use.
+1d4's chess indexer and chess.com lookups, exposed as ten
+[Model Context Protocol](https://modelcontextprotocol.io) tools. Deployed at
+`https://mcp.1d4.net/mcp`.
 
-## What is MCP?
+## The transport is not ours
 
-The Model Context Protocol (MCP) is an open protocol that enables seamless integration between LLM applications and external data sources and tools. This server implements MCP over HTTP, allowing AI assistants to discover and execute tools remotely.
+The protocol comes from
+[micronaut-mcp](https://micronaut-projects.github.io/micronaut-mcp/latest/guide/)
+(`io.micronaut.mcp:micronaut-mcp-server-java-sdk`), configured with
+`micronaut.mcp.server.transport=HTTP` — **Streamable HTTP**, MCP's current remote
+transport. `initialize`, `notifications/initialized`, `tools/list` and `tools/call`
+are the framework's, as is the JSON-RPC framing and the derivation of
+`ServerCapabilities` from the declared primitives. Nothing in this package implements
+any of it (#1325).
 
-## Features
+A tool is a `@Tool`-annotated method on a `@Singleton` bean. Its **parameters are its
+input schema**: property names come from the parameter (or `@ToolArg(name = ...)` for
+the snake_case ones), descriptions from `@ToolArg(description = ...)`, and a parameter
+is required unless it is `@Nullable`. There is no hand-written schema to fall out of
+step with the signature, and no registry to remember to add the tool to.
 
-- **JSON-RPC 2.0 Protocol**: Standard MCP communication over HTTP
-- **Bearer Token Authentication**: Optional authentication for secure remote access
-- **Tool Discovery**: Clients can list all available tools via `tools/list`
-- **Tool Execution**: Execute tools remotely via `tools/call`
-- **Built-in Tools**:
-  - `chess_com_games` - A player's games for a month, with filters (time_class, color, rated,
-    rules, opponent) and projection (pgn/tcn omitted unless requested)
-  - `chess_com_player` - A player's profile (including title, if any)
-  - `chess_com_players` - Batch profile lookup for up to 50 usernames
-  - `chess_com_stats` - A player's rating stats
-  - `server_time` - Current UTC time
-  - `index_chess_games` - Index a player's games into the in-process indexer (one_d4)
-  - `index_status` - Poll an indexing request
-  - `query_chess_games` - ChessQL search over indexed games
-  - `aggregate_chess_games` - Grouped counts over indexed games ("most popular openings")
-  - `analyze_position` - Motif detection for a single PGN without indexing
+Two things the transport does not do, both deliberate:
+
+- **No server→client SSE stream.** micronaut-mcp does not implement that leg, so
+  `GET /mcp` answers `405`. Streamable HTTP makes it optional and every tool here is
+  request/response, so nothing needs it today. `index_chess_games` is the one that
+  would benefit — streamed progress instead of polling `index_status` — if the
+  library grows it.
+- **No sessions.** The server is stateless, so there is no `Mcp-Session-Id`. The
+  2026-07-28 revision removes session pinning from the protocol altogether, so this is
+  the direction of travel rather than a shortfall.
+
+### Versions
+
+micronaut-mcp **2.0.0**, on Micronaut **5.1.10** (`bazel/java.MODULE.bazel`).
+
+The server negotiates protocol revisions up to **2025-11-25** — a client that asks for
+an older revision it speaks is answered there, and one that asks for something newer is
+answered with that ceiling. MCP's current revision is
+[2026-07-28](https://modelcontextprotocol.io/specification/versioning), which drops the
+handshake and `Mcp-Session-Id` entirely; no Java SDK implements it yet.
+`McpProtocolTest` pins the ceiling, so a library bump that raises it fails the build
+rather than changing what clients negotiate unnoticed.
 
 ## Build the Java binary
 
@@ -56,9 +75,22 @@ docker run -e PORT=9090 -e APP_NAME=mcp-server -p 9090:9090 mcpserver:latest
 bazel run //domains/games/apis/mcpserver:mcpserver
 ```
 
+## Connecting a client
+
+Streamable HTTP, so a client points straight at it:
+
+```bash
+claude mcp add --transport http 1d4 https://mcp.1d4.net/mcp
+```
+
+No key, no bridge.
+
 ## Authentication
 
-The server supports optional Bearer token authentication. Set the `MCP_AUTH_TOKEN` environment variable to enable authentication:
+Optional bearer token, off unless `MCP_AUTH_TOKEN` is set to a non-empty value. The
+shared `application.yml` always defines `mcp.auth.token` (defaulting to empty), so it
+is the emptiness, not the absence, that leaves the endpoint open — which is what the
+deployment runs. `McpAuthenticationTest` pins both states.
 
 ```bash
 # Run with authentication
@@ -69,166 +101,34 @@ bazel run //domains/games/apis/mcpserver:mcpserver
 docker run -e MCP_AUTH_TOKEN=my-secret-token -p 8080:8080 mcpserver:latest
 ```
 
-If `MCP_AUTH_TOKEN` is not set, the server runs without authentication (suitable for local development).
-
 ## Testing with curl
 
+It is JSON-RPC 2.0 over HTTP POST, so every method is also one `curl`. Against a
+local server on 8080:
+
 ```bash
-# Set auth token (optional - only needed if MCP_AUTH_TOKEN is configured)
-export MCP_AUTH_TOKEN=my-secret-token
+# 1. Initialize
+curl -s http://localhost:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1.0.0"}}}'
 
-# 1. Initialize the connection
-curl -X POST http://localhost:8080/mcp \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-client","version":"1.0.0"}}}'
+# 2. Complete the handshake. A notification carries no id and draws no response body,
+#    so this answers 202 Accepted with nothing in it.
+curl -s -i http://localhost:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
 
-# 2. List available tools
-curl -X POST http://localhost:8080/mcp \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+# 3. List the tools, each with the input schema derived from its method signature
+curl -s http://localhost:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 
-# 3. Call the echo tool
-curl -X POST http://localhost:8080/mcp \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"message":"Hello, MCP!"}}}'
+# 4. Call one
+curl -s http://localhost:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"chess_com_stats","arguments":{"username":"hikaru"}}}'
 
-# 4. Call the add tool
-curl -X POST http://localhost:8080/mcp \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
-  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"add","arguments":{"a":42,"b":58}}}'
-
-# 5. Get timestamp
-curl -X POST http://localhost:8080/mcp \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
-  -d '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_timestamp","arguments":{}}}'
-
-# 6. Generate random number
-curl -X POST http://localhost:8080/mcp \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
-  -d '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"random","arguments":{"min":1,"max":100}}}'
-
-# Without authentication (if MCP_AUTH_TOKEN not set on server)
-curl -X POST http://localhost:8080/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-```
-
-## MCP Protocol Reference
-
-### Initialize
-
-**Request:**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "initialize",
-  "params": {
-    "protocolVersion": "2024-11-05",
-    "capabilities": {},
-    "clientInfo": {
-      "name": "client-name",
-      "version": "1.0.0"
-    }
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "protocolVersion": "2024-11-05",
-    "capabilities": {
-      "tools": {
-        "listChanged": true
-      }
-    },
-    "serverInfo": {
-      "name": "micronaut-mcp-server",
-      "version": "1.0.0"
-    }
-  }
-}
-```
-
-### List Tools
-
-**Request:**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 2,
-  "method": "tools/list",
-  "params": {}
-}
-```
-
-**Response:**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 2,
-  "result": {
-    "tools": [
-      {
-        "name": "echo",
-        "description": "Echoes back the provided message",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "message": {
-              "type": "string",
-              "description": "The message to echo"
-            }
-          },
-          "required": ["message"]
-        }
-      }
-    ]
-  }
-}
-```
-
-### Call Tool
-
-**Request:**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 3,
-  "method": "tools/call",
-  "params": {
-    "name": "echo",
-    "arguments": {
-      "message": "Hello, World!"
-    }
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 3,
-  "result": {
-    "content": [
-      {
-        "type": "text",
-        "text": "Echo: Hello, World!"
-      }
-    ]
-  }
-}
+# With authentication enabled, add: -H "Authorization: Bearer $MCP_AUTH_TOKEN"
 ```
 
 ## Available Tools
@@ -294,20 +194,29 @@ concluding anything from an empty date-scoped result.
 
 Environment variables:
 - **PORT**: Server port (default: 8080)
-- **APP_NAME**: Application name (default: mcp-server)
-- **MCP_AUTH_TOKEN**: Bearer token for authentication (optional, no auth if not set)
+- **APP_NAME**: Application name (default: `helloworld`, from the shared `application.yml`; Compose sets `mcpserver`)
+- **MCP_AUTH_TOKEN**: Bearer token for authentication (optional, open if unset or empty)
+- **MCP_SERVER_VERSION**: Version reported in `initialize`'s `serverInfo` (default: 1.0.0)
 - **INDEXER_DB_URL**: JDBC URL for the in-process indexer (default: in-memory H2)
+
+The MCP transport itself is configured in the shared `application.yml`
+(`domains/platform/resources`) under `micronaut.mcp.server`: `transport: HTTP`,
+`endpoint: /mcp`, and `info.name` / `info.version`. `transport` has no usable default —
+micronaut-mcp gates its whole server configuration on that property being present, so
+removing it disables the endpoint rather than falling back.
 
 ## HTTP Endpoint
 
-- **Method**: POST
-- **Path**: `/mcp`
-- **URL**: `http://localhost:8080/mcp`
-- **Content-Type**: `application/json`
-- **Authentication**: `Authorization: Bearer <token>` (optional)
+- **Path**: `/mcp` (`micronaut.mcp.server.endpoint`; Caddy routes `mcp.1d4.net/mcp` here)
+- **POST**: JSON-RPC 2.0 requests and notifications. `Content-Type: application/json`
+- **GET**: `405` — the optional server→client SSE stream is not implemented
+- **Authentication**: `Authorization: Bearer <token>`, only when a token is configured
+- **CORS**: `https://1d4.net` is allowed at the Caddy layer, so 1d4.net's `/mcp` page
+  can call the endpoint from a browser
 
 ## Resources
 
 - [Model Context Protocol Specification](https://modelcontextprotocol.io/specification/2025-11-25)
+- [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#streamable-http)
+- [micronaut-mcp guide](https://micronaut-projects.github.io/micronaut-mcp/latest/guide/)
 - [MCP Java SDK](https://github.com/modelcontextprotocol/java-sdk)
-- [Anthropic MCP Introduction](https://www.anthropic.com/news/model-context-protocol)
