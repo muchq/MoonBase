@@ -39,11 +39,11 @@ public class McpModule {
   }
 
   /**
-   * @param configured the {@code one.d4.base.url} property. Tests set it to point at an embedded
-   *     one_d4 on a random port; nothing sets it in production, where the URL comes from {@code
-   *     $ONE_D4_BASE_URL} or the Compose service name. Mirrors how IndexerModule takes {@code
-   *     indexer.db.url} — an env-only lookup cannot be aimed at a server that picks its port at
-   *     boot, which is every in-process test of this seam.
+   * @param configured the {@code one.d4.base.url} property, which takes precedence over the
+   *     environment. Nothing sets it in production, where the URL comes from {@code
+   *     $ONE_D4_BASE_URL} or the Compose service name; it exists so an in-process test can aim this
+   *     server at an embedded one_d4 whose port is only known at boot, which an env-only lookup
+   *     cannot do. Mirrors how IndexerModule takes {@code indexer.db.url}.
    */
   static String oneD4BaseUrl(@Nullable String configured) {
     if (configured != null && !configured.isBlank()) {

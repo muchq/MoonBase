@@ -64,6 +64,23 @@ public class McpModuleTest {
   }
 
   /**
+   * The property override actually reaches the client.
+   *
+   * <p>Added because it was not: {@code one.d4.base.url} exists so an in-process test can aim
+   * mcpserver at an embedded one_d4 on a port chosen at boot, but nothing set it, so a bean that
+   * ignored the property and always read the environment would have passed the whole suite.
+   */
+  @Test
+  public void theUpstreamUrlCanBeSetByProperty() {
+    try (ApplicationContext context =
+        ApplicationContext.run(
+            java.util.Map.of("one.d4.base.url", "http://one-d4-under-test:9999"))) {
+      assertThat(context.getBean(OneD4Client.class).baseUrl())
+          .isEqualTo("http://one-d4-under-test:9999");
+    }
+  }
+
+  /**
    * The facade the tools inject points at the configured upstream. A default that silently pointed
    * somewhere else would leave every corpus tool answering "not reachable" in production while
    * every unit test stayed green.
