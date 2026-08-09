@@ -93,14 +93,19 @@ public class HttpRequest {
   }
 
   /**
-   * How long the whole exchange may take, or empty for no deadline.
+   * How long to wait for the <em>response head</em>, or empty for no deadline.
    *
-   * <p>Worth setting on any call to a peer you do not control. A server that accepts the connection
-   * and then stalls — mid-handshake, or after headers and before the body — parks the calling
-   * thread forever otherwise, and "forever" outlasts every retry and budget the caller thought it
-   * had.
+   * <p>Read the name literally: this expires while awaiting the status line and headers, and stops
+   * there. The body is streamed afterwards and is <b>not</b> covered — a peer that sends a complete
+   * head, promises a Content-Length it never delivers, and goes quiet will still park a caller
+   * indefinitely in {@code getAsBytes()} (#1336).
+   *
+   * <p>So this bounds an unresponsive peer, not a slow or malicious body. A caller that needs the
+   * whole exchange bounded has to wrap it — {@code OneD4Client} uses a Failsafe {@code Timeout}
+   * with {@code withInterrupt()} for exactly that. {@code Jdk11HttpClientTimeoutTest} pins both
+   * halves.
    */
-  public Optional<Duration> getTimeout() {
+  public Optional<Duration> getResponseHeadersTimeout() {
     return Optional.ofNullable(timeout);
   }
 
@@ -149,8 +154,11 @@ public class HttpRequest {
       return this;
     }
 
-    /** Deadline for the whole exchange, headers and body. */
-    public Builder setTimeout(Duration timeout) {
+    /**
+     * Deadline for receiving the response head. Does not bound the body read — see {@link
+     * HttpRequest#getResponseHeadersTimeout()}.
+     */
+    public Builder setResponseHeadersTimeout(Duration timeout) {
       this.timeout = Objects.requireNonNull(timeout);
       return this;
     }

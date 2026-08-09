@@ -54,10 +54,11 @@ public class Jdk11HttpClient implements HttpClient {
           java.net.http.HttpRequest.BodyPublishers.ofByteArray(request.getBody()));
     }
 
-    // The JDK client's request timeout covers headers and body, and expires as an
-    // HttpTimeoutException — an IOException, so it surfaces through the same UncheckedIOException
-    // path as a refused connection. A caller that set no timeout keeps the old behaviour.
-    request.getTimeout().ifPresent(builder::timeout);
+    // The JDK's request timeout ends when the response head arrives — the body is streamed after
+    // that and is not covered (#1336). Expires as an HttpTimeoutException, an IOException, so it
+    // surfaces through the same UncheckedIOException path as a refused connection. A caller that
+    // set none keeps the old behaviour.
+    request.getResponseHeadersTimeout().ifPresent(builder::timeout);
 
     return builder.build();
   }

@@ -36,7 +36,7 @@ import java.util.UUID;
 public class OneD4Client {
 
   /**
-   * Deadline for one call to one_d4, headers and body.
+   * Deadline for one call to one_d4, covering the whole exchange.
    *
    * <p>Not optional in practice: without it a peer that accepts the connection and then stalls
    * parks the calling thread forever, and forever outlasts every budget above it — including
@@ -118,7 +118,7 @@ public class OneD4Client {
               .setMethod(HttpRequest.Method.POST)
               .setContentType(HttpRequest.ContentType.JSON)
               .setAccept(HttpRequest.ContentType.JSON)
-              .setTimeout(timeout)
+              .setResponseHeadersTimeout(timeout)
               .setBody(mapper.writeValueAsString(body))
               .build();
     } catch (Exception e) {
@@ -164,7 +164,7 @@ public class OneD4Client {
         .setUrl(baseUrl + path)
         .setMethod(HttpRequest.Method.GET)
         .setAccept(HttpRequest.ContentType.JSON)
-        .setTimeout(timeout)
+        .setResponseHeadersTimeout(timeout)
         .build();
   }
 

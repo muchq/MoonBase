@@ -32,7 +32,7 @@ public class Jdk11HttpClientTimeoutTest {
     return HttpRequest.newBuilder()
         .setUrl(url)
         .setMethod(HttpRequest.Method.GET)
-        .setTimeout(timeout)
+        .setResponseHeadersTimeout(timeout)
         .build();
   }
 
@@ -82,8 +82,9 @@ public class Jdk11HttpClientTimeoutTest {
             .setMethod(HttpRequest.Method.GET)
             .build();
 
-    assertThat(noTimeout.getTimeout()).isEmpty();
-    assertThat(request("http://example.invalid/x", Duration.ofSeconds(3)).getTimeout())
+    assertThat(noTimeout.getResponseHeadersTimeout()).isEmpty();
+    assertThat(
+            request("http://example.invalid/x", Duration.ofSeconds(3)).getResponseHeadersTimeout())
         .contains(Duration.ofSeconds(3));
   }
 }
