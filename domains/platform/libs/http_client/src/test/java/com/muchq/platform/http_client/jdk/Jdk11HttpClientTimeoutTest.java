@@ -47,27 +47,98 @@ public class Jdk11HttpClientTimeoutTest {
   }
 
   /**
-   * The deadline covers time-to-headers, and this pins the boundary: a peer that sends a complete
-   * head and then stalls mid-body gets past {@code execute} without expiring, because the JDK's
-   * request timeout ends when the response head arrives and the body is still being streamed.
+   * The headers deadline stops at the headers, which is why the body one exists.
    *
-   * <p>So the body read after this point is <em>not</em> bounded by the timeout. Closing that gap
-   * means either buffering the whole body inside the deadline (which would change ChessClient's
-   * memory profile on a month of PGNs) or a separate read deadline — a decision about this shared
-   * client rather than about any one caller. Recorded here rather than left as folklore: this test
-   * is what tells the next reader which half is covered.
+   * <p>A peer that sends a complete head and then stalls gets past {@code execute} without
+   * expiring: the JDK's request timeout ends when the response head arrives. Pinned so the division
+   * of labour between the two settings is written down rather than inferred.
    */
   @Test
   @Timeout(60)
-  public void theDeadlineCoversHeadersAndNotTheBodyThatFollows() throws Exception {
+  public void theHeadersDeadlineStopsAtTheHeaders() throws Exception {
     try (StalledServer server = new StalledServer(StalledServer.Behaviour.HEAD_THEN_STALL)) {
-      // Returns rather than throwing: the head arrived inside the deadline.
       var response = client().execute(request(server.url(), Duration.ofMillis(250)));
 
       assertThat(response.getStatusCode())
           .as("the head arrived, so execute completes and the stall moves to the body read")
           .isEqualTo(200);
     }
+  }
+
+  /**
+   * The gap that mattered: a peer that answers and then stalls mid-body must not park the caller.
+   *
+   * <p>This is the case that costs an indexing worker its request lease, because the thread stuck
+   * here is holding one. Before the body deadline existed there was no ceiling on it at all — the
+   * headers deadline is already satisfied by the time the stall starts.
+   *
+   * <p>{@code @Timeout} is the backstop that makes a regression a failure rather than a hung CI
+   * job: without a working deadline this does not fail, it hangs.
+   */
+  @Test
+  @Timeout(60)
+  public void aStalledBodyExpiresOnTheBodyDeadline() throws Exception {
+    try (StalledServer server = new StalledServer(StalledServer.Behaviour.HEAD_THEN_STALL)) {
+      HttpRequest bounded =
+          HttpRequest.newBuilder()
+              .setUrl(server.url())
+              .setMethod(HttpRequest.Method.GET)
+              .setBodyReadTimeout(Duration.ofMillis(250))
+              .build();
+
+      var response = client().execute(bounded);
+
+      assertThatThrownBy(response::getAsBytes)
+          .as("an unbounded body read is how a stalled peer parks a worker holding a lease")
+          .hasRootCauseInstanceOf(HttpTimeoutException.class);
+    }
+  }
+
+  /**
+   * A body that arrives in full inside the deadline reads normally — the wrapper must not turn a
+   * slow-but-working response into a failure, and must not truncate it.
+   */
+  @Test
+  @Timeout(60)
+  public void aBodyThatArrivesInTimeIsReadWhole() throws Exception {
+    try (StalledServer server = new StalledServer(StalledServer.Behaviour.HEAD_THEN_CLOSE)) {
+      HttpRequest bounded =
+          HttpRequest.newBuilder()
+              .setUrl(server.url())
+              .setMethod(HttpRequest.Method.GET)
+              .setBodyReadTimeout(Duration.ofSeconds(30))
+              .build();
+
+      var response = client().execute(bounded);
+
+      // HEAD_THEN_CLOSE hangs up short of its declared length: a real failure, and it must stay
+      // one rather than being reported as a timeout.
+      assertThatThrownBy(response::getAsBytes)
+          .as("a truncated body is not a timeout")
+          .isNotInstanceOf(HttpTimeoutException.class);
+    }
+  }
+
+  /** No body deadline set keeps the previous behaviour: the stream is handed over unwrapped. */
+  @Test
+  @Timeout(60)
+  public void aRequestWithoutABodyDeadlineCarriesNone() {
+    assertThat(
+            HttpRequest.newBuilder()
+                .setUrl("http://example.invalid/x")
+                .setMethod(HttpRequest.Method.GET)
+                .build()
+                .getBodyReadTimeout())
+        .isEmpty();
+    assertThat(
+            HttpRequest.newBuilder()
+                .setUrl("http://example.invalid/x")
+                .setMethod(HttpRequest.Method.GET)
+                .setTimeouts(Duration.ofSeconds(5))
+                .build()
+                .getBodyReadTimeout())
+        .as("setTimeouts sets both halves, which is the common case")
+        .contains(Duration.ofSeconds(5));
   }
 
   /**

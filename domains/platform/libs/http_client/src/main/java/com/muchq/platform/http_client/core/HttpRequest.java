@@ -58,14 +58,17 @@ public class HttpRequest {
   private final List<Header> headers;
   private final byte @Nullable [] body;
   private final @Nullable Duration timeout;
+  private final @Nullable Duration bodyReadTimeout;
 
   private HttpRequest(
       Method method,
       URI url,
       List<Header> headers,
       byte @Nullable [] body,
-      @Nullable Duration timeout) {
+      @Nullable Duration timeout,
+      @Nullable Duration bodyReadTimeout) {
     this.timeout = timeout;
+    this.bodyReadTimeout = bodyReadTimeout;
     this.method = Objects.requireNonNull(method);
     this.url = Objects.requireNonNull(url);
     this.headers = Objects.requireNonNull(headers);
@@ -105,6 +108,21 @@ public class HttpRequest {
    * with {@code withInterrupt()} for exactly that. {@code Jdk11HttpClientTimeoutTest} pins both
    * halves.
    */
+  /**
+   * How long the response body may take to read in full, or empty for no deadline.
+   *
+   * <p>The other half of {@link #getResponseHeadersTimeout()}, and the one that matters against a
+   * peer which answers and then stalls: the head arrived, so the request deadline is satisfied and
+   * the caller is parked in the body read instead.
+   *
+   * <p>Bounds the whole body rather than each read — a peer dribbling one byte per second would
+   * satisfy any per-read deadline forever. Streaming is preserved: the body is not buffered to
+   * apply this.
+   */
+  public Optional<Duration> getBodyReadTimeout() {
+    return Optional.ofNullable(bodyReadTimeout);
+  }
+
   public Optional<Duration> getResponseHeadersTimeout() {
     return Optional.ofNullable(timeout);
   }
@@ -117,6 +135,7 @@ public class HttpRequest {
     private ContentType contentType = ContentType.JSON;
     private ContentType accept = ContentType.JSON;
     private @Nullable Duration timeout = null;
+    private @Nullable Duration bodyReadTimeout = null;
 
     private Builder() {}
 
@@ -163,12 +182,25 @@ public class HttpRequest {
       return this;
     }
 
+    /**
+     * Deadline for reading the response body in full. See {@link HttpRequest#getBodyReadTimeout()}.
+     */
+    public Builder setBodyReadTimeout(Duration bodyReadTimeout) {
+      this.bodyReadTimeout = Objects.requireNonNull(bodyReadTimeout);
+      return this;
+    }
+
+    /** Sets both deadlines to the same value: the common case is "bound the whole exchange". */
+    public Builder setTimeouts(Duration timeout) {
+      return setResponseHeadersTimeout(timeout).setBodyReadTimeout(timeout);
+    }
+
     public HttpRequest build() {
       URI url = buildUrl();
       List<Header> headers = buildHeaders();
       validateBodyState();
 
-      return new HttpRequest(method, url, headers, body, timeout);
+      return new HttpRequest(method, url, headers, body, timeout, bodyReadTimeout);
     }
 
     private URI buildUrl() {

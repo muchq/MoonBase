@@ -71,8 +71,18 @@ public class Jdk11HttpResponse implements HttpResponse {
     }
   }
 
+  /**
+   * The body, bounded when the request asked for it.
+   *
+   * <p>Wrapped here rather than buffered: the JDK's request deadline ended when the head arrived,
+   * so a peer that answers and then stalls leaves the caller parked in this stream with no ceiling
+   * at all (#1336). Streaming callers — the indexer reading a month of PGNs — keep streaming.
+   */
   @Override
   public InputStream getAsInputStream() {
-    return delegate.body();
+    return request
+        .getBodyReadTimeout()
+        .<InputStream>map(timeout -> new DeadlineInputStream(delegate.body(), timeout))
+        .orElseGet(delegate::body);
   }
 }
