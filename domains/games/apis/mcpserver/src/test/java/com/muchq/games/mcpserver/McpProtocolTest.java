@@ -467,6 +467,37 @@ public class McpProtocolTest {
   }
 
   /**
+   * The sibling of {@code aNonStringElementInAListArgumentIsHandledNotFatal}, for the other tool
+   * that takes a list. Both signatures are {@code List<?>} for the same reason and only one of them
+   * was covered, which made the second a claim rather than a guarantee.
+   *
+   * <p>Fifty-one numeric usernames rather than two: the loop that stringifies and dedupes elements
+   * runs before the size check, so an oversized batch still reaches it — the exact place a declared
+   * {@code List<String>} throws ClassCastException — and then returns the size error without a
+   * single call going out to chess.com. That is what keeps this test off the network.
+   */
+  @Test
+  public void aNonStringElementInTheUsernamesArrayIsHandledNotFatal() throws Exception {
+    List<String> numbers = new java.util.ArrayList<>();
+    for (int i = 1; i <= 51; i++) {
+      numbers.add(Integer.toString(i));
+    }
+    HttpResponse<String> response =
+        post(
+            "{\"jsonrpc\":\"2.0\",\"id\":18,\"method\":\"tools/call\","
+                + "\"params\":{\"name\":\"chess_com_players\",\"arguments\":{\"usernames\":["
+                + String.join(",", numbers)
+                + "]}}}");
+
+    assertThat(response.statusCode()).as("a numeric usernames element must not 500").isEqualTo(200);
+    JsonNode result = json(response).get("result");
+    assertThat(result.at("/isError").asBoolean(false)).as("nor may it fail the call").isFalse();
+    assertThat(result.at("/content/0/text").asText())
+        .as("reaching the size error proves every element was stringified by the loop first")
+        .contains("too many usernames: 51");
+  }
+
+  /**
    * The spec requires clients to offer both media types on POST. The reference client sends this
    * header on every request, so a suite that never does is validating a shape no real client uses.
    */

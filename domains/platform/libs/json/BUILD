@@ -18,6 +18,7 @@ java_test_suite(
     size = "small",
     srcs = [
         "src/test/java/com/muchq/platform/json/GuavaWidget.java",
+        "src/test/java/com/muchq/platform/json/JacksonFamilyVersionTest.java",
         "src/test/java/com/muchq/platform/json/Java8Widget.java",
         "src/test/java/com/muchq/platform/json/JsonUtilsTest.java",
     ],
