@@ -94,6 +94,36 @@ describe('McpView', () => {
   });
 
   /**
+   * A config block is only copy-pasteable if the reader knows where to paste it, and these two are
+   * not interchangeable: `{"type":"http","url":...}` is Claude Code's `.mcp.json` schema, while
+   * Claude Desktop's `claude_desktop_config.json` takes command/args and reaches a remote server
+   * through Custom Connectors. Pasting the http block into the Desktop file yields a server that
+   * silently never loads, so an unlabelled block is a wrong answer that looks like a right one.
+   *
+   * Pins the destinations rather than the prose: the failure this guards is a block losing its
+   * label, which every other test here would still pass.
+   */
+  it('says which client each config block is for, and that the http one is not Desktop', () => {
+    render(
+      <MemoryRouter>
+        <McpView />
+      </MemoryRouter>,
+    );
+
+    const connecting = screen.getByRole('heading', { name: /connecting/i })
+      .parentElement as HTMLElement;
+    const text = connecting.textContent ?? '';
+
+    expect(text).toMatch(/Claude Code/);
+    expect(text).toMatch(/\.mcp\.json/);
+    expect(text).toMatch(/Claude Desktop/);
+    // The correction that matters: Desktop's file cannot take the http entry, and the route that
+    // does work is named.
+    expect(text).toMatch(/claude_desktop_config\.json/);
+    expect(text).toMatch(/custom connector/i);
+  });
+
+  /**
    * The one thing the transport does not do. Streamable HTTP makes the server->client SSE leg
    * optional, and micronaut-mcp does not implement it, so GET /mcp is a 405 rather than a stream.
    * A reader debugging a client that probes GET needs to find that here rather than guess.

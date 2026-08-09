@@ -3,7 +3,12 @@ import { MCP_TOOLS } from '../mcpTools';
 
 const ENDPOINT = 'https://mcp.1d4.net/mcp';
 
-const CLAUDE_DESKTOP_CONFIG = `{
+// Claude Code's .mcp.json shape, not Claude Desktop's. Desktop's
+// claude_desktop_config.json takes command/args (stdio) and reaches a remote
+// server through Custom Connectors instead, so a reader who pastes this into
+// that file gets a server that never loads. Both blocks are labelled on the
+// page for exactly that reason.
+const CLAUDE_CODE_CONFIG = `{
   "mcpServers": {
     "1d4": {
       "type": "http",
@@ -69,15 +74,26 @@ export default function McpView() {
         <h2>Connecting</h2>
         <p>
           The endpoint speaks <strong>Streamable HTTP</strong>, MCP&rsquo;s
-          current remote transport. Point a client at it and it connects — no
-          bridge, no wrapper.
+          current remote transport. A client with native support points straight
+          at it — no bridge, no wrapper.
+        </p>
+        <p>
+          <strong>Claude Code</strong> — in <code>.mcp.json</code>, or run{' '}
+          <code>claude mcp add --transport http 1d4 {ENDPOINT}</code>:
         </p>
         <pre className="code-block">
-          <code>{CLAUDE_DESKTOP_CONFIG}</code>
+          <code>{CLAUDE_CODE_CONFIG}</code>
         </pre>
         <p>
-          For a client that only speaks stdio, or an older one without native
-          Streamable HTTP support, <code>mcp-remote</code> does the translation:
+          <strong>Claude Desktop</strong> — its{' '}
+          <code>claude_desktop_config.json</code> does not take a{' '}
+          <code>url</code>, so the block above will not work there. Add the
+          endpoint under Settings &rarr; Connectors &rarr; Add custom connector
+          instead; there is no token to supply, so it connects as-is.
+        </p>
+        <p>
+          For any client that only speaks stdio — Desktop by way of its config
+          file included — <code>mcp-remote</code> does the translation:
         </p>
         <pre className="code-block">
           <code>{MCP_REMOTE_CONFIG}</code>
