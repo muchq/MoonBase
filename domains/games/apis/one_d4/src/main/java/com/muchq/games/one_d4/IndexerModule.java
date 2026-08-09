@@ -20,6 +20,7 @@ import com.muchq.games.one_d4.queue.InMemoryIndexQueue;
 import com.muchq.games.one_d4.queue.IndexQueue;
 import com.muchq.games.one_d4.service.DataAvailabilityResolver;
 import com.muchq.games.one_d4.service.IndexRequestService;
+import com.muchq.games.one_d4.service.PositionAnalyzer;
 import com.muchq.games.one_d4.worker.IndexWorker;
 import com.muchq.games.one_d4.worker.IndexWorkerLifecycle;
 import com.muchq.platform.http_client.core.HttpClient;
@@ -228,6 +229,55 @@ public class IndexerModule {
         };
     LOG.info("Index extraction executor: fixed pool of {} threads", threads);
     return Executors.newFixedThreadPool(threads, tf);
+  }
+
+  private static final AtomicInteger ANALYZE_THREAD_COUNTER = new AtomicInteger();
+
+  /**
+   * Its own pool, not the indexing one. /v1/analyze is a synchronous request path and indexing is a
+   * background batch: sharing would let a backlog of extraction work queue ahead of an interactive
+   * analysis and burn its timeout waiting to start, which would read as the analyzer being slow.
+   */
+  @Context
+  @Bean(preDestroy = "shutdown")
+  @jakarta.inject.Named("positionAnalysis")
+  public ExecutorService positionAnalysisExecutor() {
+    int threads = parseThreads(System.getenv("ANALYZE_THREADS"), 2);
+    ThreadFactory tf =
+        r -> {
+          Thread t = new Thread(r);
+          t.setName("analyze-" + ANALYZE_THREAD_COUNTER.incrementAndGet());
+          t.setDaemon(true);
+          return t;
+        };
+    LOG.info("Position analysis executor: fixed pool of {} threads", threads);
+    return Executors.newFixedThreadPool(threads, tf);
+  }
+
+  @Context
+  public PositionAnalyzer positionAnalyzer(
+      FeatureExtractor featureExtractor,
+      @jakarta.inject.Named("positionAnalysis") ExecutorService analysisPool) {
+    long timeoutMillis = parseTimeoutMillis(System.getenv("ANALYZE_TIMEOUT_MILLIS"), 10_000L);
+    LOG.info("Position analyzer: {}ms ceiling per request", timeoutMillis);
+    return new PositionAnalyzer(featureExtractor, analysisPool, timeoutMillis);
+  }
+
+  static long parseTimeoutMillis(String raw, long defaultValue) {
+    if (raw == null || raw.isBlank()) {
+      return defaultValue;
+    }
+    try {
+      long parsed = Long.parseLong(raw.strip());
+      if (parsed <= 0) {
+        LOG.warn("Invalid ANALYZE_TIMEOUT_MILLIS={}; falling back to {}", raw, defaultValue);
+        return defaultValue;
+      }
+      return parsed;
+    } catch (NumberFormatException e) {
+      LOG.warn("Unparseable ANALYZE_TIMEOUT_MILLIS={}; falling back to {}", raw, defaultValue);
+      return defaultValue;
+    }
   }
 
   /**

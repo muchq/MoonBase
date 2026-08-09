@@ -130,6 +130,9 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/api/dto/AggregateRequest.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/AggregateResponse.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/AggregateRow.java",
+        "src/main/java/com/muchq/games/one_d4/api/dto/AnalyzeRequest.java",
+        "src/main/java/com/muchq/games/one_d4/api/dto/AnalyzeResponse.java",
+        "src/main/java/com/muchq/games/one_d4/api/dto/AnalyzedOccurrence.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/DataAvailability.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/GameFeature.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/GameFeatureRow.java",
@@ -152,11 +155,14 @@ java_library(
     srcs = [
         "src/main/java/com/muchq/games/one_d4/service/DataAvailabilityResolver.java",
         "src/main/java/com/muchq/games/one_d4/service/IndexRequestService.java",
+        "src/main/java/com/muchq/games/one_d4/service/PositionAnalyzer.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":db",
         ":dto",
+        ":engine",
+        ":model",
         ":queue",
         artifact("org.jspecify:jspecify"),
     ],
@@ -168,6 +174,7 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/api/AdminController.java",
         "src/main/java/com/muchq/games/one_d4/api/AggregateController.java",
         "src/main/java/com/muchq/games/one_d4/api/AggregateRequestValidator.java",
+        "src/main/java/com/muchq/games/one_d4/api/AnalyzeController.java",
         "src/main/java/com/muchq/games/one_d4/api/ErrorHandler.java",
         "src/main/java/com/muchq/games/one_d4/api/FirstPageCache.java",
         "src/main/java/com/muchq/games/one_d4/api/FirstPageWarmer.java",
@@ -474,10 +481,14 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/games/one_d4/service/DataAvailabilityResolverTest.java",
         "src/test/java/com/muchq/games/one_d4/service/IndexRequestServiceTest.java",
+        "src/test/java/com/muchq/games/one_d4/service/PositionAnalyzerTest.java",
     ],
     deps = [
         ":db",
         ":dto",
+        ":engine",
+        ":model",
+        ":motifs",
         ":queue",
         ":service",
         artifact("org.junit.jupiter:junit-jupiter-api"),
@@ -711,6 +722,7 @@ java_test_suite(
     size = "medium",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/api/AggregateResponseWireTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/AnalyzeEndpointTest.java",
         "src/test/java/com/muchq/games/one_d4/api/ContentTypeHandlingTest.java",
         "src/test/java/com/muchq/games/one_d4/api/FirstPageWarmupTest.java",
         "src/test/java/com/muchq/games/one_d4/api/HealthProbeRouteLabelTest.java",
@@ -735,15 +747,22 @@ java_test_suite(
         ":db",
         ":dto",
         ":e2e_support",
+        # AnalyzeEndpointTest compares the served motifs against the container's own
+        # FeatureExtractor bean, and reads PositionAnalyzer.MAX_PGN_BYTES for the size case.
+        ":engine",
         ":first_page_request_fixture",
+        ":model",
         ":module",
+        ":service",
         # Was runtime-only (IndexerModule injects yodel's CustomMetrics, and
         # the bean that supplies it lives in :micronaut — without it a context
         # boot fails on a missing bean). HealthProbeRouteLabelTest now also
         # reads the filter's snapshot to pin the jaxrs-bridge route template
         # (#1303), which makes yodel a compile-time dep; deps implies runtime.
+        "//domains/platform/libs/json",
         "//domains/platform/libs/yodel",
         "//domains/platform/libs/yodel:micronaut",
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-http-server-netty"),
         artifact("io.micronaut:micronaut-inject"),

@@ -1,6 +1,7 @@
 package com.muchq.games.one_d4.api;
 
 import com.muchq.games.chessql.parser.ParseException;
+import com.muchq.games.one_d4.service.PositionAnalyzer;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpResponse;
 import io.micronaut.http.HttpStatus;
@@ -37,6 +38,19 @@ public class ErrorHandler {
   public HttpResponse<Map<String, Object>> handleNotFound(
       HttpRequest<?> request, NoSuchElementException ex) {
     return HttpResponse.notFound(Map.of("error", ex.getMessage()));
+  }
+
+  /**
+   * 504, not 400 or 500: the request was well-formed and the service is healthy, analysis just did
+   * not finish inside its ceiling. A caller that retries a 400 verbatim gets the same answer
+   * forever, which is the wrong thing to tell them here.
+   */
+  @Error(global = true, exception = PositionAnalyzer.AnalysisTimeoutException.class)
+  public HttpResponse<Map<String, Object>> handleAnalysisTimeout(
+      HttpRequest<?> request, PositionAnalyzer.AnalysisTimeoutException ex) {
+    LOG.warn("Analysis timed out on {} {}", request.getMethod(), request.getUri());
+    return HttpResponse.<Map<String, Object>>status(HttpStatus.GATEWAY_TIMEOUT)
+        .body(Map.of("error", ex.getMessage()));
   }
 
   @Error(global = true, exception = NotFoundException.class)
