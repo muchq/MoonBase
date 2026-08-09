@@ -53,10 +53,36 @@ _MICRONAUT_PLUGINS = [
     "//bazel/rules:micronaut_package_element_visitor_processor",
 ]
 
+# NullAway is on for everything under com.muchq. These packages predate that and
+# still carry violations, so they are exempt until someone fixes them — 97 at the
+# time this list was written, all of them here.
+#
+# The list only shrinks. Fixing a package and deleting its line is the intended
+# direction and needs no ceremony; adding a line means code that was analyzed no
+# longer is, and //bazel/rules:rules_test fails until the new entry is declared
+# there too. That is the friction, and it is deliberate.
+#
+# Prefixes, so a subpackage is covered by its parent's entry.
+_NULLAWAY_LEGACY_OPT_OUTS = [
+    "com.muchq.games.chessql.compiler",
+    "com.muchq.games.chessql.parser",
+    "com.muchq.games.mcpserver.tools",
+    "com.muchq.games.one_d4.api",
+    "com.muchq.games.one_d4.db",
+    "com.muchq.games.one_d4.e2e",
+    "com.muchq.games.one_d4.engine",
+    "com.muchq.games.one_d4.motifs",
+    "com.muchq.games.one_d4.service",
+    "com.muchq.games.one_d4.worker",
+]
+
 _JAVACOPTS = [
     "-XDcompilePolicy=simple",
     "-Xep:NullAway:ERROR",
-    "-XepOpt:NullAway:AnnotatedPackages=com.muchq.platform,com.muchq.chat",
+    # Annotated at the root: a new package is analyzed the day it exists, rather
+    # than the day someone remembers to add it here.
+    "-XepOpt:NullAway:AnnotatedPackages=com.muchq",
+    "-XepOpt:NullAway:UnannotatedSubPackages=" + ",".join(_NULLAWAY_LEGACY_OPT_OUTS),
 ]
 
 def java_library(

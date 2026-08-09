@@ -57,6 +57,17 @@ Bazel formatting do.
 - **Postgres-gated suites skip silently** without `PG_TEST_DB_URL` /
   `GOLF_HUB_TEST_DB_URL`. CI supplies them from a `postgres:18` service; a
   local green run may have exercised no SQL at all.
+- **NullAway is on by default for all of `com.muchq`**, with exemptions listed
+  one by one in `_NULLAWAY_LEGACY_OPT_OUTS` (`bazel/rules/java.bzl`). A new
+  package is analyzed the day it exists; nobody has to remember to add it. The
+  listed packages are legacy — they carried violations when the default flipped
+  — and **that list only shrinks**: fix a package, delete its line. Adding a
+  line fails `//bazel/rules:rules_test` until it is declared there too, on
+  purpose.
+- **No test source is analyzed anywhere**, including under annotated packages,
+  because `java_test_suite` is a passthrough that adds neither the plugin nor
+  the javacopts (the `java_test` macro beside it adds both; the repo uses
+  `java_test_suite`). So a `@Nullable` mistake in a test is never caught.
 - **Behind a proxy that 403s GitHub source archives** (cloud sandboxes, some CI
   runners), run `scripts/make-git-overrides.sh` once and import its output from
   `.bazelrc.user` — see [`docs/BUILD_AND_IDE.md`](docs/BUILD_AND_IDE.md). That

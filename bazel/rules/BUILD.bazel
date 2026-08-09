@@ -1,4 +1,5 @@
 load("@rules_java//java:defs.bzl", "java_plugin")
+load(":nullaway_scope_test.bzl", "nullaway_scope_test_suite")
 
 exports_files(["java_image_test.yaml"])
 
@@ -66,3 +67,7 @@ java_plugin(
         "@maven//:io_micronaut_validation_micronaut_validation_processor",
     ],
 )
+
+# Guards NullAway's scope, which nothing else would notice losing: the analysis
+# fails silently by definition — narrow it and every build stays green.
+nullaway_scope_test_suite(name = "rules_test")
