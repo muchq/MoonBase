@@ -10,11 +10,13 @@ import com.muchq.platform.json.JsonUtils;
 import io.micronaut.context.annotation.Bean;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.context.annotation.Factory;
+import io.micronaut.context.annotation.Value;
 import java.time.Clock;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.jspecify.annotations.Nullable;
 
 @Factory
 public class McpModule {
@@ -33,6 +35,20 @@ public class McpModule {
   private static final ObjectMapper CLIENT_MAPPER = JsonUtils.mapper();
 
   static String oneD4BaseUrl() {
+    return oneD4BaseUrl(null);
+  }
+
+  /**
+   * @param configured the {@code one.d4.base.url} property. Tests set it to point at an embedded
+   *     one_d4 on a random port; nothing sets it in production, where the URL comes from {@code
+   *     $ONE_D4_BASE_URL} or the Compose service name. Mirrors how IndexerModule takes {@code
+   *     indexer.db.url} — an env-only lookup cannot be aimed at a server that picks its port at
+   *     boot, which is every in-process test of this seam.
+   */
+  static String oneD4BaseUrl(@Nullable String configured) {
+    if (configured != null && !configured.isBlank()) {
+      return configured.strip();
+    }
     String env = System.getenv("ONE_D4_BASE_URL");
     return env != null && !env.isBlank() ? env.strip() : DEFAULT_ONE_D4_URL;
   }
@@ -53,8 +69,9 @@ public class McpModule {
   }
 
   @Context
-  public OneD4Client oneD4Client(HttpClient httpClient) {
-    return new OneD4Client(httpClient, CLIENT_MAPPER, oneD4BaseUrl());
+  public OneD4Client oneD4Client(
+      HttpClient httpClient, @Value("${one.d4.base.url:}") String configuredUrl) {
+    return new OneD4Client(httpClient, CLIENT_MAPPER, oneD4BaseUrl(configuredUrl));
   }
 
   @Context

@@ -147,7 +147,14 @@ public class IndexerFacade {
 
   /** Runs a ChessQL query over indexed games; perspective fields resolve against {@code player}. */
   public List<GameFeatureRow> query(String chessql, String player, int limit) {
-    return client.query(new QueryRequest(chessql, limit, 0, player)).games();
+    // Coalesced, not trusted: one_d4's mapper omits null fields, so an empty result arrives with
+    // no "games" key at all and deserializes to null. Handing that to a tool is an NPE inside the
+    // response builder rather than the empty answer the caller asked for.
+    return orEmpty(client.query(new QueryRequest(chessql, limit, 0, player)).games());
+  }
+
+  private static <T> List<T> orEmpty(List<T> maybeNull) {
+    return maybeNull == null ? List.of() : maybeNull;
   }
 
   /**
@@ -159,7 +166,8 @@ public class IndexerFacade {
   public AggregateResult aggregate(String chessql, List<String> groupBy, String player, int limit) {
     AggregateResponse response =
         client.aggregate(new AggregateRequest(chessql, groupBy, "count", limit, player));
-    return new AggregateResult(response.groups(), response.totalGames(), response.totalGroups());
+    return new AggregateResult(
+        orEmpty(response.groups()), response.totalGames(), response.totalGroups());
   }
 
   /** Aggregate result: the (possibly limit-truncated) groups plus the untruncated totals. */

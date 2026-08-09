@@ -462,6 +462,24 @@ public class IndexerFacadeHttpTest {
         .hasMessageContaining("did not answer within");
   }
 
+  /**
+   * one_d4 omits null fields, so an empty result arrives with no {@code games} / {@code groups} key
+   * at all — which deserializes to null, not to an empty list. Handing that to a tool is an NPE in
+   * the response builder rather than the empty answer the caller asked for.
+   *
+   * <p>Found by the shared-corpus E2E, which NPE'd on an aggregate over an empty corpus. Pinned
+   * here rather than there because that test has data by the time it runs, so the null path is
+   * unreachable from it.
+   */
+  @Test
+  public void anOmittedCollectionComesBackEmptyRatherThanNull() {
+    route("POST /v1/query", 200, "{\"count\":0}");
+    route("POST /v1/aggregate", 200, "{\"count\":0,\"totalGames\":0,\"totalGroups\":0}");
+
+    assertThat(facade().query("motif(pin)", null, 10)).isEmpty();
+    assertThat(facade().aggregate("white.elo > 1", List.of("eco"), null, 20).groups()).isEmpty();
+  }
+
   /** A base URL with a trailing slash must not produce //v1/query. */
   @Test
   public void aTrailingSlashOnTheBaseUrlIsNormalized() {

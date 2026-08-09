@@ -685,6 +685,37 @@ java_test_suite(
     ],
 )
 
+# The MCP-to-one_d4 seam: real tools, real HTTP, real corpus (#1332). Lives here rather than in
+# mcpserver because it needs one_d4's e2e_support (FakeChessClient) and a booted one_d4 server;
+# the mcpserver side is just the tool objects, which are a plain library dep.
+java_test_suite(
+    name = "mcp_shared_corpus_tests",
+    size = "medium",
+    srcs = ["src/test/java/com/muchq/games/one_d4/e2e/McpSharedCorpusE2ETest.java"],
+    runtime_deps = [
+        "//domains/platform/libs/logging",
+        "//domains/platform/resources:micronaut_config_lib",
+        artifact("org.postgresql:postgresql"),
+    ],
+    deps = [
+        ":e2e_support",
+        ":module",
+        "//domains/games/apis/mcpserver:tools",
+        "//domains/games/libs/chess_com_client",
+        "//domains/platform/libs/http_client:jdk11",
+        "//domains/platform/libs/json",
+        "//domains/platform/libs/yodel",
+        "//domains/platform/libs/yodel:micronaut",
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("io.micronaut:micronaut-context"),
+        artifact("io.micronaut:micronaut-http-server-netty"),
+        artifact("io.micronaut:micronaut-inject"),
+        artifact("io.micronaut:micronaut-runtime"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
+        artifact("org.assertj:assertj-core"),
+    ],
+)
+
 java_test_suite(
     name = "e2e_tests",
     size = "small",
