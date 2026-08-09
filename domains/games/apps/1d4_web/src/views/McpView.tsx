@@ -3,28 +3,7 @@ import { MCP_TOOLS } from '../mcpTools';
 
 const ENDPOINT = 'https://mcp.1d4.net/mcp';
 
-// Claude Code's .mcp.json shape, not Claude Desktop's. Desktop's
-// claude_desktop_config.json takes command/args (stdio) and reaches a remote
-// server through Custom Connectors instead, so a reader who pastes this into
-// that file gets a server that never loads. Both blocks are labelled on the
-// page for exactly that reason.
-const CLAUDE_CODE_CONFIG = `{
-  "mcpServers": {
-    "1d4": {
-      "type": "http",
-      "url": "${ENDPOINT}"
-    }
-  }
-}`;
-
-const MCP_REMOTE_CONFIG = `{
-  "mcpServers": {
-    "1d4": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "${ENDPOINT}"]
-    }
-  }
-}`;
+const ADD_COMMAND = `claude mcp add --transport http 1d4 ${ENDPOINT}`;
 
 const LIST_TOOLS_CURL = `curl -s ${ENDPOINT} \\
   -H 'Content-Type: application/json' \\
@@ -72,39 +51,13 @@ export default function McpView() {
 
       <section className="panel">
         <h2>Connecting</h2>
-        <p>
-          The endpoint speaks <strong>Streamable HTTP</strong>, MCP&rsquo;s
-          current remote transport. A client with native support points straight
-          at it — no bridge, no wrapper.
-        </p>
-        <p>
-          <strong>Claude Code</strong> — in <code>.mcp.json</code>, or run{' '}
-          <code>claude mcp add --transport http 1d4 {ENDPOINT}</code>:
-        </p>
+        <p>Streamable HTTP, so a client points straight at it:</p>
         <pre className="code-block">
-          <code>{CLAUDE_CODE_CONFIG}</code>
-        </pre>
-        <p>
-          <strong>Claude Desktop</strong> — its{' '}
-          <code>claude_desktop_config.json</code> does not take a{' '}
-          <code>url</code>, so the block above will not work there. Add the
-          endpoint under Settings &rarr; Connectors &rarr; Add custom connector
-          instead; there is no token to supply, so it connects as-is.
-        </p>
-        <p>
-          For any client that only speaks stdio — Desktop by way of its config
-          file included — <code>mcp-remote</code> does the translation:
-        </p>
-        <pre className="code-block">
-          <code>{MCP_REMOTE_CONFIG}</code>
+          <code>{ADD_COMMAND}</code>
         </pre>
         <p className="panel-note">
-          One caveat, and it costs nothing today: the optional server&rarr;client
-          SSE stream is not implemented, so <code>GET /mcp</code> answers{' '}
-          <code>405</code>. Streamable HTTP makes that leg optional and every
-          tool here is request/response, so no client needs it. Calls are
-          unauthenticated; the server supports a bearer token, but the
-          deployment sets none.
+          No key, no bridge. The optional server&rarr;client SSE stream is not
+          implemented, so <code>GET /mcp</code> answers <code>405</code>.
         </p>
       </section>
 

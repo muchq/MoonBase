@@ -77,38 +77,13 @@ bazel run //domains/games/apis/mcpserver:mcpserver
 
 ## Connecting a client
 
-Streamable HTTP, so a client with native support connects with no bridge.
+Streamable HTTP, so a client points straight at it:
 
-**Claude Code** — `.mcp.json`, or `claude mcp add --transport http 1d4 https://mcp.1d4.net/mcp`:
-
-```json
-{
-  "mcpServers": {
-    "1d4": {
-      "type": "http",
-      "url": "https://mcp.1d4.net/mcp"
-    }
-  }
-}
+```bash
+claude mcp add --transport http 1d4 https://mcp.1d4.net/mcp
 ```
 
-**Claude Desktop** takes a different route: `claude_desktop_config.json` accepts `command`/`args`
-and has no `url` field, so the entry above does not load there. Add the endpoint under
-Settings → Connectors → Add custom connector. No token is configured, so it connects as-is.
-
-For any client that only speaks stdio — including Desktop by way of its config file — `mcp-remote`
-translates:
-
-```json
-{
-  "mcpServers": {
-    "1d4": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "https://mcp.1d4.net/mcp"]
-    }
-  }
-}
-```
+No key, no bridge.
 
 ## Authentication
 

@@ -69,41 +69,15 @@ describe('McpView', () => {
   });
 
   /**
-   * The connection section's job is to be copy-pasteable (#1325). A config block that renders but
-   * names no endpoint is worse than no config at all, because it looks like it works.
-   */
-  it('gives a copy-pasteable client config naming the endpoint', () => {
-    render(
-      <MemoryRouter>
-        <McpView />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getAllByText(/mcp\.1d4\.net/).length).toBeGreaterThan(0);
-
-    const configs = screen
-      .getAllByText(/mcpServers/)
-      .map((el) => el.textContent ?? '');
-    expect(configs.length).toBeGreaterThan(0);
-    // Every config block must actually point at the deployment, not just look like JSON.
-    for (const config of configs) {
-      expect(config).toContain('https://mcp.1d4.net/mcp');
-    }
-    // And one of them must be the no-bridge case: a direct http client entry.
-    expect(configs.some((c) => /"type":\s*"http"/.test(c))).toBe(true);
-  });
-
-  /**
-   * A config block is only copy-pasteable if the reader knows where to paste it, and these two are
-   * not interchangeable: `{"type":"http","url":...}` is Claude Code's `.mcp.json` schema, while
-   * Claude Desktop's `claude_desktop_config.json` takes command/args and reaches a remote server
-   * through Custom Connectors. Pasting the http block into the Desktop file yields a server that
-   * silently never loads, so an unlabelled block is a wrong answer that looks like a right one.
+   * Connecting is one command, and its whole job is to be copy-pasteable (#1325). A command that
+   * renders but names the wrong endpoint — or names none — is worse than no command at all,
+   * because it looks like it works.
    *
-   * Pins the destinations rather than the prose: the failure this guards is a block losing its
-   * label, which every other test here would still pass.
+   * Asserts the transport flag too: `claude mcp add` without `--transport http` registers a stdio
+   * server that tries to execute the URL as a program, which fails in a way that reads like the
+   * server being down rather than the line being wrong.
    */
-  it('says which client each config block is for, and that the http one is not Desktop', () => {
+  it('gives a one-line connect command naming the endpoint', () => {
     render(
       <MemoryRouter>
         <McpView />
@@ -114,13 +88,9 @@ describe('McpView', () => {
       .parentElement as HTMLElement;
     const text = connecting.textContent ?? '';
 
-    expect(text).toMatch(/Claude Code/);
-    expect(text).toMatch(/\.mcp\.json/);
-    expect(text).toMatch(/Claude Desktop/);
-    // The correction that matters: Desktop's file cannot take the http entry, and the route that
-    // does work is named.
-    expect(text).toMatch(/claude_desktop_config\.json/);
-    expect(text).toMatch(/custom connector/i);
+    expect(text).toContain('claude mcp add');
+    expect(text).toContain('--transport http');
+    expect(text).toContain('https://mcp.1d4.net/mcp');
   });
 
   /**
