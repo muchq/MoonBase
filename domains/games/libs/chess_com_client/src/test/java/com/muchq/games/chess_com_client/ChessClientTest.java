@@ -7,15 +7,24 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.muchq.platform.http_client.core.HttpClient;
 import com.muchq.platform.http_client.core.HttpRequest;
 import com.muchq.platform.http_client.core.HttpResponse;
+import com.muchq.platform.json.JsonUtils;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.YearMonth;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 public class ChessClientTest {
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+
+  /**
+   * The mapper production injects, not a locally built one. Both {@code McpModule} and {@code
+   * IndexerModule} hand ChessClient {@code JsonUtils.mapper()}, which carries JavaTimeModule and
+   * FAIL_ON_UNKNOWN_PROPERTIES=false; a bare {@code new ObjectMapper()} has neither, so it would
+   * reject payloads the services read and accept shapes they do not.
+   */
+  private static final ObjectMapper MAPPER = JsonUtils.mapper();
 
   private static class StubHttpClient implements HttpClient {
     private final int statusCode;
@@ -158,6 +167,57 @@ public class ChessClientTest {
     assertThat(result).isPresent();
     assertThat(result.get().username()).isEqualTo("hikaru");
     assertThat(result.get().streamer()).isTrue();
+  }
+
+  /**
+   * chess.com's field names and this record's component names disagree on six fields, and the
+   * {@code @JsonCreator} factory's {@code @JsonProperty} annotations are the entire bridge. Nothing
+   * else would notice them breaking: a name that stops binding does not throw, it yields null (or
+   * 0), so a wrong answer reaches the caller looking like a player with no profile URL who has
+   * never been online.
+   *
+   * <p>{@code @id} is the one worth naming. It is not a legal Java identifier, so it can only ever
+   * arrive through the annotation — there is no field-name or getter inference to fall back on —
+   * and it is what {@code chess_com_player} puts on the wire as {@code playerApiUrl}.
+   *
+   * <p>Asserts every renamed component rather than a sample. Checking two of six leaves four
+   * renames that can break without failing anything, which is exactly how {@code @id} stayed
+   * uncovered until a mutation check went looking for it.
+   */
+  @Test
+  public void testFetchPlayer_bindsChessComsWireNamesOntoRenamedComponents() {
+    String playerJson =
+        """
+        {
+          "player_id": 12345,
+          "@id": "https://api.chess.com/pub/player/hikaru",
+          "url": "https://www.chess.com/member/hikaru",
+          "username": "hikaru",
+          "country": "https://api.chess.com/pub/country/US",
+          "last_online": 1234567890,
+          "joined": 1200000000,
+          "status": "premium",
+          "is_streamer": true
+        }
+        """;
+
+    ChessClient client = new ChessClient(new StubHttpClient(200, playerJson), MAPPER);
+
+    Player player = client.fetchPlayer("hikaru").orElseThrow();
+
+    assertThat(player.playerId()).as("player_id").isEqualTo(12345);
+    assertThat(player.playerApiUrl())
+        .as("@id, which no inference can supply")
+        .isEqualTo("https://api.chess.com/pub/player/hikaru");
+    assertThat(player.playerPageUrl())
+        .as("url, distinct from @id and easy to swap with it")
+        .isEqualTo("https://www.chess.com/member/hikaru");
+    assertThat(player.countryUrl()).as("country").isEqualTo("https://api.chess.com/pub/country/US");
+    assertThat(player.lastOnlineAt())
+        .as("last_online")
+        .isEqualTo(Instant.ofEpochSecond(1234567890));
+    assertThat(player.joinedAt()).as("joined").isEqualTo(Instant.ofEpochSecond(1200000000));
+    assertThat(player.streamer()).as("is_streamer").isTrue();
   }
 
   @Test
@@ -319,8 +379,25 @@ public class ChessClientTest {
 
     assertThat(result).isPresent();
     assertThat(result.get().games()).hasSize(1);
-    assertThat(result.get().games().get(0).url())
-        .isEqualTo("https://www.chess.com/game/live/12345");
+    PlayedGame game = result.get().games().get(0);
+    assertThat(game.url()).isEqualTo("https://www.chess.com/game/live/12345");
+
+    // The renamed fields, which asserting url alone left unproven. white/black are the load-bearing
+    // pair: ChessComGamesTool reads whiteResult()/blackResult() to pick a side, and IndexWorker
+    // reads their ratings and usernames into every indexed row. A rename that stops binding yields
+    // null rather than throwing, so games come back with no players on them.
+    assertThat(game.whiteResult().username()).as("white").isEqualTo("hikaru");
+    assertThat(game.whiteResult().rating()).isEqualTo(2800);
+    assertThat(game.whiteResult().result()).isEqualTo("win");
+    assertThat(game.blackResult().username()).as("black").isEqualTo("opponent");
+    assertThat(game.blackResult().result()).isEqualTo("checkmated");
+    assertThat(game.endTime()).as("end_time").isEqualTo(Instant.ofEpochSecond(1234567890));
+    assertThat(game.timeClass()).as("time_class").isEqualTo("rapid");
+    assertThat(game.initialSetup())
+        .as("initial_setup")
+        .isEqualTo("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    assertThat(game.rated()).isTrue();
+    assertThat(game.tcn()).isEqualTo("mCvSkBwRnBxE");
   }
 
   @Test
