@@ -25,23 +25,31 @@ traps that only surface in CI), [`docs/BUILD_AND_IDE.md`](docs/BUILD_AND_IDE.md)
 ## Commands
 
 ```bash
-scripts/diff-build origin/main   # what CI's build-and-test runs — COMMIT FIRST, see below
-scripts/format-all               # bazel + java + cc + scala formatters
+bazel test //domains/<path>/...   # verify your change — this is the local command
+bazel build //domains/<path>/...
+scripts/format-all                # bazel + java + cc + scala formatters
 scripts/mutation-check -f FILE -t 'TEST CMD' 's/OLD/NEW/'
-bazel test //domains/<path>/...
 ```
+
+`scripts/diff-build` is **CI's** entry point, not a local one. Reach for `bazel
+test` on the affected targets instead — see below for why this matters more than
+it looks.
 
 Rust, Go, and TypeScript have **no formatting gate in CI**. Java formatting and
 Bazel formatting do.
 
 ## Things that bite
 
-- **`scripts/diff-build` destroys uncommitted work.** It runs
-  `git checkout <base> --force` and back to hash both revisions, and `--force`
-  discards every modification to a tracked file. Untracked files survive, which
-  makes the loss look partial and easy to misread. There is no prompt and no
-  stash. Commit before running it, or run `bazel test` on the affected targets
-  instead — that is the same build without the checkout.
+- **Don't run `scripts/diff-build` locally. It destroys uncommitted work.** It
+  runs `git checkout <base> --force` and back to hash both revisions, and
+  `--force` discards every modification to a tracked file. There is no prompt
+  and no stash. Untracked files survive, which makes the loss look partial and
+  reads like something else went wrong — you will go looking for the wrong bug.
+  `bazel test` on the affected targets is the same build without the checkout,
+  so there is no local job this script is the right tool for. "I want to see
+  what CI will say" is not a reason: CI will say it. If you run it anyway,
+  commit first — and note that wanting a green run before committing is exactly
+  the impulse that loses the tree.
 - **`BUILD.bazel` `srcs` are listed by name**, with two globbing exceptions
   (`yochat_lib`, `wordchains_ios`). Elsewhere a new file not listed doesn't
   compile under Bazel and its tests don't run — while `go test ./...` or
