@@ -29,8 +29,9 @@ public class RequestLeaseCeilingTest extends RequestLivenessHarness {
 
   /**
    * The property, stated directly: a request must be touched while it is inside the archive fetch,
-   * not only on either side of it. That span has no checkpoint and no HTTP timeout bounding it, so
-   * if nothing writes during it, "stale" means "slow" as well as "dead".
+   * not only on either side of it. That span has no checkpoint, and the HTTP deadline on it bounds
+   * one exchange rather than the span (#1336) — several slow-but-successful fetches still add up
+   * past the ceiling. So if nothing writes during it, "stale" means "slow" as well as "dead".
    *
    * <p>Wall-clock, not the injected clock. Advancing a fake clock proves the arithmetic; it cannot
    * prove that something in this process is still running, which is the only thing a heartbeat is

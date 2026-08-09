@@ -275,6 +275,137 @@ public class ChessClientTest {
     assertThat(result.get().fideRating()).isNull();
   }
 
+  /**
+   * A peer that answers and then stalls mid-body must expire rather than park the caller.
+   *
+   * <p>The worst case in this repo, and the reason the deadline is here rather than left to the
+   * shared client: the caller is an indexing worker holding a request lease. A thread parked
+   * forever keeps that row owned by a process that is never coming back, so the request burns an
+   * attempt and the lease has to expire before anyone else can pick it up (#1336).
+   *
+   * <p>Against a real socket, because the claim is about a thread that would otherwise be parked on
+   * one. The deadline itself is the shared client's now; what this pins is that a stalled body
+   * still reaches a caller of <em>this</em> class as the documented 504.
+   *
+   * <p>{@code @Timeout} is the backstop that makes a regression a failure rather than a hung CI
+   * job: without a working deadline this does not fail, it hangs.
+   */
+  @Test
+  @org.junit.jupiter.api.Timeout(60)
+  public void aStalledBodyExpiresRatherThanParkingTheCaller() throws Exception {
+    try (java.net.ServerSocket socket =
+        new java.net.ServerSocket(0, 8, java.net.InetAddress.getLoopbackAddress())) {
+      Thread server =
+          new Thread(
+              () -> {
+                try (java.net.Socket accepted = socket.accept()) {
+                  // A head promising 4096 bytes, ten delivered, then silence.
+                  accepted
+                      .getOutputStream()
+                      .write(
+                          ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                  + "Content-Length: 4096\r\n\r\n{\"games\":[")
+                              .getBytes(StandardCharsets.UTF_8));
+                  accepted.getOutputStream().flush();
+                  Thread.sleep(3_000);
+                } catch (Exception e) {
+                  Thread.currentThread().interrupt();
+                }
+              });
+      server.setDaemon(true);
+      server.start();
+
+      ChessClient client =
+          new ChessClient(
+              new com.muchq.platform.http_client.jdk.Jdk11HttpClient(
+                  java.net.http.HttpClient.newHttpClient()),
+              MAPPER,
+              java.time.Duration.ofMillis(300));
+
+      Thread.interrupted(); // Stand on nothing an earlier case left behind.
+
+      assertThatThrownBy(() -> client.fetchGames("stalled", YearMonth.of(2024, 1)))
+          .isInstanceOf(ChessComApiException.class)
+          .hasMessageContaining("did not answer within")
+          .satisfies(e -> assertThat(((ChessComApiException) e).statusCode()).isEqualTo(504));
+
+      assertThat(Thread.currentThread().isInterrupted())
+          .as(
+              "a slow upstream is not a cancellation; IndexWorker reads this status to decide"
+                  + " whether to abandon a request or record a failed attempt against it")
+          .isFalse();
+    }
+  }
+
+  /**
+   * The same translation, without a socket, so it holds whichever timer fired.
+   *
+   * <p>The socket test above cannot distinguish these: it produces one timeout and cannot say what
+   * would happen to the other. There were two while this class ran its own Failsafe deadline
+   * alongside the transport's, and a caller got {@link ChessComApiException} or a bare {@code
+   * UncheckedIOException} depending on which scheduler thread won a race between two equal
+   * durations — reproducible in production, unreproducible in a test.
+   *
+   * <p>Now the shared client raises exactly this, and it is the only thing that raises it.
+   */
+  @Test
+  public void aTransportTimeoutIsAlwaysReportedAsAGatewayTimeout() {
+    HttpClient timingOut =
+        new HttpClient() {
+          @Override
+          public HttpResponse execute(HttpRequest request) {
+            throw new java.io.UncheckedIOException(
+                new java.net.http.HttpTimeoutException("request did not complete within deadline"));
+          }
+
+          @Override
+          public HttpResponse executeAsync(HttpRequest request) {
+            return execute(request);
+          }
+
+          @Override
+          public void close() {}
+        };
+
+    ChessClient client = new ChessClient(timingOut, MAPPER, java.time.Duration.ofSeconds(7));
+
+    assertThatThrownBy(() -> client.fetchPlayer("hikaru"))
+        .isInstanceOf(ChessComApiException.class)
+        .satisfies(e -> assertThat(((ChessComApiException) e).statusCode()).isEqualTo(504))
+        .hasMessageContaining("did not answer within PT7S");
+  }
+
+  /**
+   * The negative half. Not every {@code UncheckedIOException} is a deadline — a reset connection is
+   * one too — and turning those into a 504 would tell a caller to wait and retry a request that
+   * failed outright.
+   */
+  @Test
+  public void anOrdinaryTransportFailureIsNotDressedUpAsATimeout() {
+    HttpClient reset =
+        new HttpClient() {
+          @Override
+          public HttpResponse execute(HttpRequest request) {
+            throw new java.io.UncheckedIOException(
+                new java.io.IOException("connection reset by peer"));
+          }
+
+          @Override
+          public HttpResponse executeAsync(HttpRequest request) {
+            return execute(request);
+          }
+
+          @Override
+          public void close() {}
+        };
+
+    ChessClient client = new ChessClient(reset, MAPPER, java.time.Duration.ofSeconds(7));
+
+    assertThatThrownBy(() -> client.fetchPlayer("hikaru"))
+        .isInstanceOf(java.io.UncheckedIOException.class)
+        .hasMessageContaining("connection reset by peer");
+  }
+
   @Test
   public void testFetchPlayer_rateLimitedThrowsWithStatusCode() {
     HttpClient httpClient = new StubHttpClient(429, "slow down");

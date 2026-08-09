@@ -424,10 +424,11 @@ public class IndexerFacadeHttpTest {
   /**
    * A peer that sends a complete head and then stalls mid-body must expire, not park the caller.
    *
-   * <p>This is the case the transport deadline alone cannot reach: the JDK's request timeout ends
-   * when the response head arrives, so {@code execute} returns and the unbounded wait moves into
-   * the body read (#1336). Failsafe wraps send, status check and body read together, which is what
-   * makes the whole exchange bounded.
+   * <p>This is the case a head-only deadline cannot reach: the JDK's request timeout ends when the
+   * response head arrives, so {@code execute} used to return with the unbounded wait moved into the
+   * body read (#1336). The shared client now waits on the whole response, which is what makes the
+   * exchange bounded — this class no longer runs a deadline of its own, and the assertion below is
+   * that one client-side deadline is enough to produce the documented failure.
    *
    * <p>The {@code @Timeout} is the backstop that turns a regression into a failure rather than a
    * hung CI job — without a working deadline this test does not fail, it hangs.
@@ -457,9 +458,17 @@ public class IndexerFacadeHttpTest {
             baseUrl,
             Duration.ofMillis(300));
 
+    Thread.interrupted(); // Stand on nothing an earlier case left behind.
+
     assertThatThrownBy(() -> new IndexerFacade(client).query("motif(pin)", null, 10))
         .isInstanceOf(OneD4Client.UpstreamException.class)
         .hasMessageContaining("did not answer within");
+
+    assertThat(Thread.currentThread().isInterrupted())
+        .as(
+            "a slow upstream is not a cancellation — the Failsafe deadline this replaced bounded"
+                + " the call by interrupting this thread, and left the flag set on the way out")
+        .isFalse();
   }
 
   /**

@@ -38,6 +38,7 @@ java_test_suite(
         "//domains/platform/libs/http_client:core",
         # The mapper production hands ChessClient, so the parsing tests exercise the
         # same configuration the services do rather than Jackson's bare defaults.
+        "//domains/platform/libs/http_client:jdk11",
         "//domains/platform/libs/json",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("org.junit.jupiter:junit-jupiter-api"),

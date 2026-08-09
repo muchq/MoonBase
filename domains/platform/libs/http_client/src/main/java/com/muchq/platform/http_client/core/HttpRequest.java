@@ -93,19 +93,18 @@ public class HttpRequest {
   }
 
   /**
-   * How long to wait for the <em>response head</em>, or empty for no deadline.
+   * Deadline for the whole exchange, or empty for none.
    *
-   * <p>Read the name literally: this expires while awaiting the status line and headers, and stops
-   * there. The body is streamed afterwards and is <b>not</b> covered — a peer that sends a complete
-   * head, promises a Content-Length it never delivers, and goes quiet will still park a caller
-   * indefinitely in {@code getAsBytes()} (#1336).
+   * <p>Headers and body, genuinely: the client sends asynchronously and waits for the complete
+   * response, so this fires whether the peer stalls before answering or halfway through the body.
+   * An earlier version of this only covered time-to-headers while claiming otherwise, which is a
+   * worse failure than having no deadline — a caller sets one, reads the name, and believes the
+   * body read is bounded when it is not (#1336).
    *
-   * <p>So this bounds an unresponsive peer, not a slow or malicious body. A caller that needs the
-   * whole exchange bounded has to wrap it — {@code OneD4Client} uses a Failsafe {@code Timeout}
-   * with {@code withInterrupt()} for exactly that. {@code Jdk11HttpClientTimeoutTest} pins both
-   * halves.
+   * <p>Worth setting on any call to a peer you do not control. Without it a stalled server parks
+   * the calling thread indefinitely, and indefinitely outlasts every retry and budget above it.
    */
-  public Optional<Duration> getResponseHeadersTimeout() {
+  public Optional<Duration> getTimeout() {
     return Optional.ofNullable(timeout);
   }
 
@@ -154,11 +153,8 @@ public class HttpRequest {
       return this;
     }
 
-    /**
-     * Deadline for receiving the response head. Does not bound the body read — see {@link
-     * HttpRequest#getResponseHeadersTimeout()}.
-     */
-    public Builder setResponseHeadersTimeout(Duration timeout) {
+    /** Deadline for the whole exchange — headers and body. */
+    public Builder setTimeout(Duration timeout) {
       this.timeout = Objects.requireNonNull(timeout);
       return this;
     }
