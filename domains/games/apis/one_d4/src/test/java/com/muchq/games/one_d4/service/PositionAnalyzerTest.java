@@ -124,7 +124,7 @@ public class PositionAnalyzerTest {
     FeatureExtractor emptyPin =
         new FeatureExtractor(new PgnParser(), new GameReplayer(), Detectors.defaultDetectors()) {
           @Override
-          public GameFeatures extract(String pgn) {
+          public GameFeatures extractOrThrow(String pgn) {
             return new GameFeatures(
                 java.util.EnumSet.of(Motif.PIN, Motif.CHECK),
                 12,
@@ -198,13 +198,13 @@ public class PositionAnalyzerTest {
     FeatureExtractor blocking =
         new FeatureExtractor(new PgnParser(), new GameReplayer(), Detectors.defaultDetectors()) {
           @Override
-          public GameFeatures extract(String pgn) {
+          public GameFeatures extractOrThrow(String pgn) {
             try {
               release.await(30, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
               Thread.currentThread().interrupt();
             }
-            return super.extract(pgn);
+            return super.extractOrThrow(pgn);
           }
         };
 
@@ -228,13 +228,13 @@ public class PositionAnalyzerTest {
     FeatureExtractor blocking =
         new FeatureExtractor(new PgnParser(), new GameReplayer(), Detectors.defaultDetectors()) {
           @Override
-          public GameFeatures extract(String pgn) {
+          public GameFeatures extractOrThrow(String pgn) {
             try {
               release.await(30, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
               Thread.currentThread().interrupt();
             }
-            return super.extract(pgn);
+            return super.extractOrThrow(pgn);
           }
         };
 

@@ -31,11 +31,19 @@ public class IndexStatusTool {
     UUID parsed;
     try {
       parsed = UUID.fromString(requestId.trim());
-    } catch (IllegalArgumentException | OneD4Client.UpstreamException e) {
+    } catch (IllegalArgumentException e) {
       return ToolJson.error("invalid request_id: '" + requestId + "' (expected a UUID)");
     }
 
-    Optional<IndexResponse> status = facade.status(parsed);
+    // Separate try: the lookup is the part that talks to one_d4, and folding it into the one above
+    // would report an outage as "invalid request_id" — a message that sends the caller to fix an
+    // argument that was fine.
+    Optional<IndexResponse> status;
+    try {
+      status = facade.status(parsed);
+    } catch (IllegalArgumentException | OneD4Client.UpstreamException e) {
+      return ToolJson.error(e.getMessage());
+    }
     if (status.isEmpty()) {
       return ToolJson.error("indexing request not found: " + parsed);
     }

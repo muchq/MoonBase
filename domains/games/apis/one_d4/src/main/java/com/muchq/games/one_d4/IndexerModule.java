@@ -199,18 +199,27 @@ public class IndexerModule {
   private static final AtomicInteger EXTRACT_THREAD_COUNTER = new AtomicInteger();
 
   static int parseThreads(String raw, int defaultValue) {
+    return parseThreads("INDEXER_EXTRACTION_THREADS", raw, defaultValue);
+  }
+
+  /**
+   * @param setting the environment variable the value came from. Named rather than hardcoded
+   *     because two pools parse their size this way now, and a warning that points an operator at
+   *     the variable they did not set is worse than no warning.
+   */
+  static int parseThreads(String setting, String raw, int defaultValue) {
     if (raw == null || raw.isBlank()) {
       return defaultValue;
     }
     try {
       int parsed = Integer.parseInt(raw.strip());
       if (parsed <= 0) {
-        LOG.warn("Invalid INDEXER_EXTRACTION_THREADS={}; falling back to {}", raw, defaultValue);
+        LOG.warn("Invalid {}={}; falling back to {}", setting, raw, defaultValue);
         return defaultValue;
       }
       return parsed;
     } catch (NumberFormatException e) {
-      LOG.warn("Unparseable INDEXER_EXTRACTION_THREADS={}; falling back to {}", raw, defaultValue);
+      LOG.warn("Unparseable {}={}; falling back to {}", setting, raw, defaultValue);
       return defaultValue;
     }
   }
@@ -242,7 +251,7 @@ public class IndexerModule {
   @Bean(preDestroy = "shutdown")
   @jakarta.inject.Named("positionAnalysis")
   public ExecutorService positionAnalysisExecutor() {
-    int threads = parseThreads(System.getenv("ANALYZE_THREADS"), 2);
+    int threads = parseThreads("ANALYZE_THREADS", System.getenv("ANALYZE_THREADS"), 2);
     ThreadFactory tf =
         r -> {
           Thread t = new Thread(r);

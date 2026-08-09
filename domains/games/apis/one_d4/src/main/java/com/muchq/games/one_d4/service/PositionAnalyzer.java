@@ -83,7 +83,7 @@ public class PositionAnalyzer {
   }
 
   private GameFeatures extractWithinTimeout(String pgn) {
-    Future<GameFeatures> future = analysisPool.submit(() -> featureExtractor.extract(pgn));
+    Future<GameFeatures> future = analysisPool.submit(() -> featureExtractor.extractOrThrow(pgn));
     try {
       return future.get(timeoutMillis, TimeUnit.MILLISECONDS);
     } catch (TimeoutException e) {

@@ -35,6 +35,7 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/platform/http_client/jdk/InterruptProbe.java",
         "src/test/java/com/muchq/platform/http_client/jdk/Jdk11HttpClientInterruptTest.java",
+        "src/test/java/com/muchq/platform/http_client/jdk/Jdk11HttpClientTimeoutTest.java",
         "src/test/java/com/muchq/platform/http_client/jdk/StalledServer.java",
     ],
     deps = [

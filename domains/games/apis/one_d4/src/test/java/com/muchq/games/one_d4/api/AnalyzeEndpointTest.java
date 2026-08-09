@@ -162,6 +162,26 @@ public class AnalyzeEndpointTest {
         .contains("too large");
   }
 
+  /**
+   * A game that parses but cannot be replayed is a 400, not a 200 reporting no motifs.
+   *
+   * <p>{@code FeatureExtractor.extract} swallows replay failures and returns an empty result, which
+   * is right for indexing — one unplayable game should not fail a month of 400. It is wrong here:
+   * "no motifs found" and "this is not a legal game" are different answers, and a caller cannot
+   * tell them apart. The analyzer uses {@code extractOrThrow} for that reason.
+   */
+  @Test
+  public void aGameThatCannotBeReplayedIsRejectedRatherThanReportedAsMotifless() throws Exception {
+    // Parses as a PGN; Nf7 is not a legal knight move from the start.
+    HttpResponse<String> response = post(json("[Event \"x\"]\n\n1. Nf7 e5 2. Qz9 1-0"));
+
+    assertThat(response.statusCode())
+        .as("an unplayable game must not read as a game with nothing in it")
+        .isEqualTo(400);
+    assertThat(JsonUtils.mapper().readTree(response.body()).get("error").asText())
+        .contains("could not be replayed");
+  }
+
   /** Nothing is persisted, so analysis must not create an indexing request as a side effect. */
   @Test
   public void analyzingDoesNotWriteToTheCorpus() throws Exception {

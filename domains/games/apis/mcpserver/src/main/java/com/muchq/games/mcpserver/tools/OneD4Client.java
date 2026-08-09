@@ -13,6 +13,7 @@ import com.muchq.games.one_d4.api.dto.QueryResponse;
 import com.muchq.platform.http_client.core.HttpClient;
 import com.muchq.platform.http_client.core.HttpRequest;
 import com.muchq.platform.http_client.core.HttpResponse;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -30,11 +31,28 @@ import java.util.UUID;
  */
 public class OneD4Client {
 
+  /**
+   * Deadline for one call to one_d4, headers and body.
+   *
+   * <p>Not optional in practice: without it a peer that accepts the connection and then stalls
+   * parks the calling thread forever, and forever outlasts every budget above it — including
+   * IndexerFacade's polling ceiling, which is only consulted between calls and cannot interrupt one
+   * already in flight. Comfortably above one_d4's own analyze ceiling so a slow-but-working request
+   * is not cut off by the client.
+   */
+  static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
+
   private final HttpClient httpClient;
   private final ObjectMapper mapper;
   private final String baseUrl;
+  private final Duration timeout;
 
   public OneD4Client(HttpClient httpClient, ObjectMapper mapper, String baseUrl) {
+    this(httpClient, mapper, baseUrl, DEFAULT_TIMEOUT);
+  }
+
+  OneD4Client(HttpClient httpClient, ObjectMapper mapper, String baseUrl, Duration timeout) {
+    this.timeout = timeout;
     this.httpClient = httpClient;
     this.mapper = mapper;
     // Trailing slashes would produce //v1/index, which some routers treat as a different path.
@@ -53,6 +71,9 @@ public class OneD4Client {
   public Optional<IndexResponse> status(UUID requestId) {
     HttpResponse response = send(get("/v1/index/" + requestId));
     if (response.getStatusCode() == 404) {
+      // Drain before returning. The body is an undrained InputStream, and an unread one holds its
+      // connection out of the pool — a tool polling unknown ids would leak one per call.
+      discardBody(response);
       return Optional.empty();
     }
     throwIfNotOk(response, "GET /v1/index/" + requestId);
@@ -81,6 +102,7 @@ public class OneD4Client {
               .setMethod(HttpRequest.Method.POST)
               .setContentType(HttpRequest.ContentType.JSON)
               .setAccept(HttpRequest.ContentType.JSON)
+              .setTimeout(timeout)
               .setBody(mapper.writeValueAsString(body))
               .build();
     } catch (Exception e) {
@@ -96,6 +118,7 @@ public class OneD4Client {
         .setUrl(baseUrl + path)
         .setMethod(HttpRequest.Method.GET)
         .setAccept(HttpRequest.ContentType.JSON)
+        .setTimeout(timeout)
         .build();
   }
 
@@ -103,8 +126,9 @@ public class OneD4Client {
     try {
       return httpClient.execute(request);
     } catch (RuntimeException e) {
-      // Connection refused, DNS failure, read timeout — one_d4 is not answering. Distinct from a
-      // 4xx, because nothing the caller changes about their arguments will fix it.
+      // Connection refused, DNS failure, or the deadline expiring on a stalled peer — one_d4 is
+      // not answering. Distinct from a 4xx, because nothing the caller changes about their
+      // arguments will fix it.
       throw new UpstreamException("one_d4 at " + baseUrl + " is not reachable", e);
     }
   }
@@ -143,6 +167,15 @@ public class OneD4Client {
       // Fall through to the default.
     }
     return fallback;
+  }
+
+  /** Reads and throws away a body whose content is not needed, so its connection can be reused. */
+  private static void discardBody(HttpResponse response) {
+    try {
+      response.getAsBytes();
+    } catch (RuntimeException e) {
+      // Nothing to salvage; the status was the whole answer.
+    }
   }
 
   private <T> T read(HttpResponse response, Class<T> type, String description) {
