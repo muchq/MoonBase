@@ -25,8 +25,12 @@ public class McpModule {
    * Where the corpus lives. The Compose network name, because this is a service-to-service call on
    * the internal network — one_d4's API is not routed publicly for these paths and does not need to
    * be (#1332).
+   *
+   * <p>The alias {@code one-d4}, not the service key {@code one_d4}: {@link java.net.URI} gives an
+   * authority containing an underscore a null host, so every request built from the key was
+   * rejected before it left the process. OneD4Client refuses such a URL at construction now.
    */
-  private static final String DEFAULT_ONE_D4_URL = "http://one_d4:8080";
+  private static final String DEFAULT_ONE_D4_URL = "http://one-d4:8080";
 
   // Deliberately not the injected Micronaut ObjectMapper: chess.com responses carry fields this
   // client does not model, and JsonUtils' mapper is the one configured to ignore them. Tool

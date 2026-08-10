@@ -146,6 +146,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/mcpserver/tools/ChessComPlayersToolTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/ChessComStatsToolTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/IndexerFacadeHttpTest.java",
+        "src/test/java/com/muchq/games/mcpserver/tools/OneD4ClientTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/ServerTimeToolTest.java",
     ],
     deps = [

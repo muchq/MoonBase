@@ -14,6 +14,8 @@ import com.muchq.platform.http_client.core.HttpClient;
 import com.muchq.platform.http_client.core.HttpRequest;
 import com.muchq.platform.http_client.core.HttpResponse;
 import java.io.UncheckedIOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.Optional;
@@ -58,7 +60,40 @@ public class OneD4Client {
     this.httpClient = httpClient;
     this.mapper = mapper;
     // Trailing slashes would produce //v1/index, which some routers treat as a different path.
-    this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+    this.baseUrl =
+        requireUsableAddress(
+            baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl);
+  }
+
+  /**
+   * Rejects an upstream address this client could never call, at construction rather than on the
+   * first request.
+   *
+   * <p>Written after a deployment spent its life pointed at {@code http://one_d4:8080}. Docker's
+   * embedded DNS resolves that name and every other container on the network reached it; {@link
+   * URI} applies RFC 3986's reg-name rule, hands back a null host for an authority containing an
+   * underscore, and {@code java.net.http.HttpRequest} then refuses the URI outright — so mcpserver
+   * never opened a socket. {@link #send} catches that {@link IllegalArgumentException} along with
+   * the genuine transport failures and reports "not reachable", which is a statement about a
+   * service that was healthy the whole time.
+   *
+   * <p>Failing here makes it a startup failure instead: the container never reports healthy, the
+   * compose gate holds, and the message names the string to fix. The alternative — staying up and
+   * serving the chess.com tools while every corpus tool errors — is the state this bug already
+   * produced, and it took a packet capture's worth of digging to tell apart from an outage.
+   */
+  private static String requireUsableAddress(String baseUrl) {
+    URI uri;
+    try {
+      uri = new URI(baseUrl);
+    } catch (URISyntaxException e) {
+      throw new IllegalArgumentException("one_d4 base URL " + baseUrl + " is not a valid URI", e);
+    }
+    if (uri.getHost() == null) {
+      throw new IllegalArgumentException(
+          "one_d4 base URL " + baseUrl + " has no host java.net.URI can parse");
+    }
+    return baseUrl;
   }
 
   public String baseUrl() {
@@ -147,7 +182,15 @@ public class OneD4Client {
    * 4xx, because nothing the caller changes about their arguments will fix it.
    */
   private UpstreamException notReachable(RuntimeException cause) {
-    return new UpstreamException("one_d4 at " + baseUrl + " is not reachable", cause);
+    // The cause rode along on the exception and nothing ever printed it, so the only text anyone
+    // read was a guess about the network. Naming it costs a few characters in the tool's error.
+    Throwable root = cause.getCause() != null ? cause.getCause() : cause;
+    String detail =
+        root.getMessage() == null
+            ? root.getClass().getSimpleName()
+            : root.getClass().getSimpleName() + ": " + root.getMessage();
+    return new UpstreamException(
+        "one_d4 at " + baseUrl + " is not reachable (" + detail + ")", cause);
   }
 
   /**
