@@ -1,7 +1,9 @@
 package com.muchq.games.mcpserver.tools;
 
+import io.micronaut.core.annotation.Nullable;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Tool responses, in the protocol's own result type.
@@ -43,9 +45,13 @@ final class ToolResults {
    * flag that makes parsing unnecessary. Arguments the framework itself cannot bind never reach a
    * tool — those it already reports as errors on its own.
    */
-  static CallToolResult error(String message) {
+  static CallToolResult error(@Nullable String message) {
+    // Map.of rejects a null value, and the message here is usually an exception's — which may be
+    // null. Left alone, the one case that most needs the isError channel would throw on its way
+    // into it, and the throw becomes a JSON-RPC error instead: the tool's rejection, reported as a
+    // protocol failure, which is the shape this class exists to stop.
     return CallToolResult.builder()
-        .addTextContent(ToolJson.write(Map.of("error", message)))
+        .addTextContent(ToolJson.write(Map.of("error", Objects.toString(message, "unknown error"))))
         .isError(true)
         .build();
   }

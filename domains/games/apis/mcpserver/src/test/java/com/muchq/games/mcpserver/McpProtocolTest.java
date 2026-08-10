@@ -300,9 +300,13 @@ public class McpProtocolTest {
   }
 
   /**
-   * Arguments arrive as JSON and are bound to the method's declared types. A tool that rejects its
-   * own input still answers with a normal result — an {@code {"error": ...}} payload — rather than
-   * failing the call.
+   * Arguments arrive as JSON and are bound to the method's declared types, and a tool that rejects
+   * its own input answers with a tool result rather than a JSON-RPC error — the caller gets a
+   * readable {@code {"error": ...}} payload instead of a protocol-level failure.
+   *
+   * <p>Only the payload is asserted here. Since #1331 that result also carries {@code isError:
+   * true}, which is {@code aToolsOwnValidationErrorIsFlaggedAsAnMcpToolError}'s subject, on this
+   * same month-13 call.
    */
   @Test
   public void toolArgumentsAreBoundToTheDeclaredTypes() throws Exception {
@@ -427,6 +431,10 @@ public class McpProtocolTest {
    *
    * <p>The body is asserted too. Setting the flag would be a poor trade if it cost the message, and
    * anything already parsing {@code {"error": ...}} keeps working.
+   *
+   * <p>The control against a flag pinned always-true is {@code
+   * toolsCallRunsTheToolAndReturnsItsTextContent}, which already required a successful call to come
+   * back false — a different tool, since no tool here succeeds without reaching the network.
    */
   @Test
   public void aToolsOwnValidationErrorIsFlaggedAsAnMcpToolError() throws Exception {
@@ -443,27 +451,6 @@ public class McpProtocolTest {
         .as("a tool's own rejection has to use MCP's isError channel, not only the payload")
         .isTrue();
     assertThat(result.at("/content/0/text").asText()).contains("invalid month");
-  }
-
-  /**
-   * The negative that keeps the above honest. If {@code isError} were simply always true, every
-   * assertion about rejections would pass and the flag would carry no information — so a call that
-   * succeeds has to come back false, on the same tool, differing only in the argument.
-   */
-  @Test
-  public void aSuccessfulToolCallIsNotFlaggedAsAnError() throws Exception {
-    HttpResponse<String> response =
-        post(
-            """
-            {"jsonrpc":"2.0","id":17,"method":"tools/call",
-             "params":{"name":"server_time","arguments":{}}}
-            """);
-
-    JsonNode result = json(response).get("result");
-    assertThat(result.get("isError").asBoolean())
-        .as("a call that worked must not claim to have failed")
-        .isFalse();
-    assertThat(result.at("/content/0/text").asText()).isNotEmpty();
   }
 
   /**

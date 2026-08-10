@@ -152,6 +152,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/mcpserver/tools/OneD4ClientTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/ServerTimeToolTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/ToolResultText.java",
+        "src/test/java/com/muchq/games/mcpserver/tools/ToolResultsTest.java",
     ],
     deps = [
         # CallToolResult, which the tools now return (#1331).
@@ -213,6 +214,10 @@ java_test_suite(
         "//domains/platform/resources:micronaut_config_lib",
     ],
     deps = [
+        # @Tool and CallToolResult: everyToolReturnsTheProtocolResultType reads both
+        # off the bean definitions (#1331).
+        artifact("io.micronaut.mcp:micronaut-mcp-annotations"),
+        artifact("io.modelcontextprotocol.sdk:mcp-core"),
         ":mcp_tools_fixture",
         "//domains/platform/libs/json",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
