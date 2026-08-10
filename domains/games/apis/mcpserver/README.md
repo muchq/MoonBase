@@ -192,6 +192,24 @@ Both query tools see only what has been indexed, and neither reports which perio
 which reads exactly like "played no games then" — run `index_chess_games` for the period before
 concluding anything from an empty date-scoped result.
 
+## Resources
+
+- `chessql://reference` (`text/markdown`) — one_d4's `CHESSQL.md`, served verbatim: the EBNF
+  grammar, operator precedence, the field and motif rosters, perspective fields, date scoping and
+  NULL semantics.
+
+A resource, not an eleventh tool (#1326). A tool is a call the model chooses to make; a resource is
+context a client attaches up front, and making a model spend a `tools/call` round trip to learn
+query syntax *before* it can write a query is the wrong shape. The tool descriptions still carry
+the vocabulary on their own, so a client that never reads resources loses the grammar and the
+edges, not the field list.
+
+The rosters inside it are a copy of what `SqlCompiler` accepts, so they are pinned:
+`ChessQlReferenceTest` (in one_d4) fails when the doc's tables and the compiler's maps disagree,
+in either direction. That is what makes serving the file verbatim safe rather than a third place
+to drift — it had already drifted once, into this server's own tool description, which was missing
+`zugzwang` and `overloaded_piece`.
+
 ## Configuration
 
 Environment variables:

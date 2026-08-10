@@ -41,7 +41,10 @@ public class QueryGamesTool {
               + " e.g. player: hikaru with 'outcome = \"win\" AND opponent.title = \"GM\"'."
               + " Available motifs: pin, cross_pin, fork, skewer, discovered_attack,"
               + " discovered_check, check, checkmate, promotion, promotion_with_check,"
-              + " promotion_with_checkmate, back_rank_mate, smothered_mate, double_check.")
+              + " promotion_with_checkmate, back_rank_mate, smothered_mate, double_check,"
+              + " zugzwang, overloaded_piece."
+              + " Full syntax — grammar, operator precedence, IN lists, NULL semantics — is the"
+              + " chessql://reference resource.")
   public CallToolResult queryChessGames(
       @ToolArg(description = "A ChessQL query string") String query,
       @Nullable

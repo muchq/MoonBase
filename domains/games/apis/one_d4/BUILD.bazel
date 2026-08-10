@@ -292,6 +292,22 @@ java_binary(
 
 linux_oci_java(bin_name = "one_d4")
 
+# CHESSQL.md is served verbatim to MCP clients (#1326), so its rosters are a copy of what
+# SqlCompiler accepts. This is what stops that copy drifting.
+java_test_suite(
+    name = "docs_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/docs/ChessQlReferenceTest.java",
+    ],
+    deps = [
+        ":chessql_reference",
+        "//domains/games/libs/chessql:compiler",
+        artifact("org.assertj:assertj-core"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
+    ],
+)
+
 java_test_suite(
     name = "engine_tests",
     size = "small",
@@ -317,6 +333,17 @@ java_library(
     testonly = True,
     resource_strip_prefix = "domains/games/apis/one_d4/src/test/resources",
     resources = ["src/test/resources/hikaru_corpus.pgn"],
+)
+
+# CHESSQL.md as a classpath resource, so mcpserver can serve it as an MCP resource (#1326).
+# Deliberately not testonly: this ships inside the mcpserver image. The doc stays a readable file
+# in the repo — the resource is the same bytes, not a generated copy — and ChessQlReferenceTest
+# pins its rosters against SqlCompiler so the prose cannot drift from what the compiler accepts.
+java_library(
+    name = "chessql_reference",
+    resource_strip_prefix = "domains/games/apis/one_d4/src/main/java/com/muchq/games/one_d4/docs",
+    resources = ["src/main/java/com/muchq/games/one_d4/docs/CHESSQL.md"],
+    visibility = ["//visibility:public"],
 )
 
 # The first-load request contract shared across languages: FirstPageCacheTest pins the Java
