@@ -287,12 +287,22 @@ fn dfs_all_paths(
     result: &mut Vec<Vec<String>>,
     max_depth: usize,
 ) {
+    // Checked before the push, not after it. Below the target check this bounded
+    // descent but not the pushes themselves: a frame entered while there was
+    // still room walks its neighbours regardless, and stepping into the target
+    // pushed unconditionally — so every frame already past its own check could
+    // add one more path after the bound had been reached, and the cap was
+    // advisory rather than a bound (#1339).
+    if result.len() >= MAX_ALL_PATHS_RESULTS {
+        return;
+    }
+
     if current == target {
         result.push(path.clone());
         return;
     }
 
-    if path.len() > max_depth || result.len() >= MAX_ALL_PATHS_RESULTS {
+    if path.len() > max_depth {
         return;
     }
 
@@ -424,6 +434,79 @@ mod tests {
         assert!(paths.is_empty());
         let paths = find_all_paths("dog".to_string(), "cat", &graph);
         assert!(paths.is_empty());
+    }
+
+    /// The cap is a bound, not a suggestion.
+    ///
+    /// `test_find_all_paths_dense_graph_terminates` below asserts the same
+    /// property but only fails on unlucky runs, because `build_graph` iterates
+    /// `HashMap`s and Rust seeds their order randomly per process — so the
+    /// traversal order, and with it whether the overshoot happens at all,
+    /// changes run to run. It failed roughly 2 times in 25. That reads as a
+    /// flaky test rather than as the bug report it is, and a test that only
+    /// sometimes catches a regression will eventually be re-run instead of read.
+    ///
+    /// This one builds the graph directly instead. `dfs_all_paths` walks
+    /// `edges[u]`, which is a `Vec`, and the `HashMap`s it consults are only
+    /// ever read by key — so with the adjacency lists written out explicitly the
+    /// whole traversal is deterministic and the outcome is the same every run.
+    ///
+    /// The shape is what makes the overshoot reachable: `target` is the *last*
+    /// neighbour of every `a`, so each `a` frame generates its paths through the
+    /// `b` layer first and only then steps to `target`. When the cap trips deep
+    /// in that `b` loop, the `a` frame above is still mid-iteration with
+    /// `target` pending — and before #1339 the target branch pushed without
+    /// consulting the cap at all. 1240 paths exist, so the walk is guaranteed to
+    /// cross 1000 well before it runs out.
+    #[test]
+    fn test_find_all_paths_cap_is_not_exceeded() {
+        const A_COUNT: usize = 40;
+        const B_COUNT: usize = 30;
+
+        // 0 = start, 1 = target, then the a layer, then the b layer.
+        let mut nodes = vec!["start".to_string(), "target".to_string()];
+        for i in 0..A_COUNT {
+            nodes.push(format!("a{}", i));
+        }
+        for j in 0..B_COUNT {
+            nodes.push(format!("b{}", j));
+        }
+
+        let a_start = 2;
+        let b_start = 2 + A_COUNT;
+        let mut edges: Vec<Vec<usize>> = vec![vec![]; nodes.len()];
+
+        edges[0] = (a_start..a_start + A_COUNT).collect();
+        for i in 0..A_COUNT {
+            // The b layer first, target last: the ordering the overshoot needs.
+            let mut neighbours: Vec<usize> = (b_start..b_start + B_COUNT).collect();
+            neighbours.push(1);
+            edges[a_start + i] = neighbours;
+        }
+        for j in 0..B_COUNT {
+            edges[b_start + j] = vec![1];
+        }
+
+        let graph = Graph { nodes, edges };
+        let paths = find_all_paths("start".to_string(), "target", &graph);
+
+        assert!(
+            paths.len() <= super::MAX_ALL_PATHS_RESULTS,
+            "find_all_paths returned {} paths, over the {} cap: the bound only stopped further \
+             descent, so frames already past it still pushed on their way to the target",
+            paths.len(),
+            super::MAX_ALL_PATHS_RESULTS
+        );
+        assert_eq!(
+            paths.len(),
+            super::MAX_ALL_PATHS_RESULTS,
+            "1240 paths exist within the depth limit, so collection should stop exactly at the \
+             cap — fewer means it now gives up early, which this test would otherwise hide"
+        );
+        for p in &paths {
+            assert_eq!(p.first().unwrap(), "start");
+            assert_eq!(p.last().unwrap(), "target");
+        }
     }
 
     #[test]
