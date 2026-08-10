@@ -41,30 +41,45 @@ public class ChessClient {
   private final HttpClient httpClient;
   private final ObjectMapper mapper;
   private final Duration timeout;
+  private final String baseUrl;
 
   public ChessClient(HttpClient httpClient, ObjectMapper objectMapper) {
     this(httpClient, objectMapper, DEFAULT_TIMEOUT);
   }
 
   public ChessClient(HttpClient httpClient, ObjectMapper objectMapper, Duration timeout) {
+    this(httpClient, objectMapper, timeout, BASE_URL);
+  }
+
+  /**
+   * Package-private, and the only reason it exists: the deadline can only be tested against a peer
+   * that actually stalls, and chess.com will not. The test that claims to cover it built exactly
+   * such a server and then had no way to aim the client at it, so it called the public API instead
+   * and passed or failed on how fast chess.com answered that day.
+   *
+   * <p>Not public. chess.com's base URL is not a deployment decision and nothing outside this
+   * package has a reason to change it.
+   */
+  ChessClient(HttpClient httpClient, ObjectMapper objectMapper, Duration timeout, String baseUrl) {
     this.httpClient = httpClient;
     this.mapper = objectMapper;
     this.timeout = timeout;
+    this.baseUrl = baseUrl;
   }
 
   public Optional<Player> fetchPlayer(String player) {
-    String url = BASE_URL + "/" + player.toLowerCase();
+    String url = baseUrl + "/" + player.toLowerCase();
     return getAs(url, Player.class);
   }
 
   public Optional<StatsResponse> fetchStats(String player) {
-    String url = BASE_URL + "/" + player.toLowerCase() + "/stats";
+    String url = baseUrl + "/" + player.toLowerCase() + "/stats";
     return getAs(url, StatsResponse.class);
   }
 
   public Optional<GamesResponse> fetchGames(String player, YearMonth yearMonth) {
     String url =
-        BASE_URL + "/" + player.toLowerCase() + "/games/" + yearMonth.format(YEAR_MONTH_FORMATTER);
+        baseUrl + "/" + player.toLowerCase() + "/games/" + yearMonth.format(YEAR_MONTH_FORMATTER);
     return getAs(url, GamesResponse.class);
   }
 
