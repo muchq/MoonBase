@@ -41,10 +41,7 @@ public class OpeningsCorpusTest {
 
     Set<String> families = new LinkedHashSet<>();
     for (String ecoUrl : ecoUrls) {
-      String name = Openings.nameFromEcoUrl(ecoUrl);
-      assertThat(name).as("name for %s", ecoUrl).isNotNull();
-      String family = Openings.familyFromName(name);
-      assertThat(family).as("family for %s", ecoUrl).isNotNull();
+      String family = familyOf(ecoUrl);
       assertThat(family)
           .as("family for %s is opening words only", ecoUrl)
           .doesNotContain(".")
@@ -64,12 +61,21 @@ public class OpeningsCorpusTest {
   public void corpusFamiliesKeepTheirStructuralWord() throws IOException {
     Set<String> families = new LinkedHashSet<>();
     for (String ecoUrl : loadEcoUrls()) {
-      families.add(Openings.familyFromName(Openings.nameFromEcoUrl(ecoUrl)));
+      families.add(familyOf(ecoUrl));
     }
 
     assertThat(families)
         .contains("Giuoco Piano Game", "Kings Indian Attack", "Old Benoni Defense", "Owens Defense")
         .doesNotContain("Giuoco Piano", "Kings Indian", "Old Benoni");
+  }
+
+  /** Every corpus slug carries a name and a family; a null from either is a failure, not a skip. */
+  private static String familyOf(String ecoUrl) {
+    String name = Openings.nameFromEcoUrl(ecoUrl);
+    assertThat(name).as("name for %s", ecoUrl).isNotNull();
+    String family = Openings.familyFromName(name);
+    assertThat(family).as("family for %s", ecoUrl).isNotNull();
+    return family;
   }
 
   private static List<String> loadEcoUrls() throws IOException {

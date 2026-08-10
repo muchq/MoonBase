@@ -67,9 +67,9 @@ profiles at index time; untitled players are NULL. `opening.name` is the human-r
 line derived from the chess.com `ECOUrl` (e.g. `Caro Kann Defense Two Knights Attack 3...dxe4`);
 `opening.family` is its leading family segment (e.g. `Caro Kann Defense`) — the level most
 questions are asked at, e.g. `white.username = "hikaru" AND opening.family = "Caro Kann Defense"`.
-The family drops the move continuation first, so `Owens-Defense...3.Nc3-e6` files under
-`Owens Defense`; the continuation is kept in `opening.name`, which is what makes it the
-fine-grained field.
+The family drops the move continuation first, so `Owens Defense...3.Nc3 e6` files under
+`Owens Defense`; the continuation stays in `opening.name`, which is what makes it the fine-grained
+field of the two.
 Rows indexed before these columns existed hold NULL until reindexed with `skipCache: true` on
 `POST /v1/index` (or `skip_cache` on the `index_chess_games` MCP tool) — a plain re-request is
 served from the indexed-period cache and does not refetch. One thing to check when a backfill
@@ -83,10 +83,9 @@ earlier keeps splitting one family across two group keys until it is reindexed.
 > **Caveat — `opening.family` is not a normalized taxonomy.** Both opening fields are string
 > slices of chess.com's ECO-URL, so a qualified name forms its own value and its own aggregation
 > group: `Closed Sicilian Defense` and `Alapin Sicilian Defense` do not roll up into
-> `Sicilian Defense`. When
-> aggregating by `opening_family`, check the response's `truncated` flag: it is true when the
-> group limit cut off a long tail of small variant groups, and `totalGroups` says how many there
-> really were.
+> `Sicilian Defense`. When aggregating by `opening_family`, check the response's `truncated` flag:
+> it is true when the group limit cut off a long tail of small variant groups, and `totalGroups`
+> says how many there really were.
 
 ### Date scoping
 
