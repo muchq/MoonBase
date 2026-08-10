@@ -183,8 +183,8 @@ the schema, and its migrations, and this server holds no database credentials at
   perspective fields — in one call. The output's `count` is the number of groups returned, not
   games; `totalGames`/`totalGroups` cover the untruncated result and `truncated` says the group
   limit cut off a long tail (common with `opening_family`, whose chess.com ECO-URL-derived
-  values are not normalized: "Closed Sicilian" and "Closed Sicilian Defense" are distinct
-  groups).
+  values are not normalized: "Closed Sicilian Defense" and "Alapin Sicilian Defense" are
+  distinct groups, not part of "Sicilian Defense").
 - `analyze_position` — detect motifs in a single `pgn` without indexing it.
 
 Both query tools see only what has been indexed, and neither reports which periods those are. A

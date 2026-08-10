@@ -67,20 +67,25 @@ profiles at index time; untitled players are NULL. `opening.name` is the human-r
 line derived from the chess.com `ECOUrl` (e.g. `Caro Kann Defense Two Knights Attack 3...dxe4`);
 `opening.family` is its leading family segment (e.g. `Caro Kann Defense`) — the level most
 questions are asked at, e.g. `white.username = "hikaru" AND opening.family = "Caro Kann Defense"`.
+The family drops the move continuation first, so `Owens Defense...3.Nc3 e6` files under
+`Owens Defense`; the continuation stays in `opening.name`, which is what makes it the fine-grained
+field of the two.
 Rows indexed before these columns existed hold NULL until reindexed with `skipCache: true` on
 `POST /v1/index` (or `skip_cache` on the `index_chess_games` MCP tool) — a plain re-request is
 served from the indexed-period cache and does not refetch. One thing to check when a backfill
 appears to do nothing: `skipCache` will not start a second run over a range that is already being
 indexed. If a request for that player and month range is still PENDING or PROCESSING, the submit
 returns *that* request and refetches nothing, so the NULLs stay. Poll it to COMPLETED, then submit
-the backfill again.
+the backfill again. The same backfill is what corrects stored values, not just NULLs: rows indexed
+before the move-continuation strip (#1344) hold the family derived at the time, so a month indexed
+earlier keeps splitting one family across two group keys until it is reindexed.
 
 > **Caveat — `opening.family` is not a normalized taxonomy.** Both opening fields are string
-> slices of chess.com's ECO-URL, so near-identical spellings form distinct values and distinct
-> aggregation groups: `Closed Sicilian` and `Closed Sicilian Defense` do not merge. When
-> aggregating by `opening_family`, check the response's `truncated` flag: it is true when the
-> group limit cut off a long tail of small variant groups, and `totalGroups` says how many there
-> really were.
+> slices of chess.com's ECO-URL, so a qualified name forms its own value and its own aggregation
+> group: `Closed Sicilian Defense` and `Alapin Sicilian Defense` do not roll up into
+> `Sicilian Defense`. When aggregating by `opening_family`, check the response's `truncated` flag:
+> it is true when the group limit cut off a long tail of small variant groups, and `totalGroups`
+> says how many there really were.
 
 ### Date scoping
 

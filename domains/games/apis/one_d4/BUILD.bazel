@@ -405,6 +405,7 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/games/one_d4/worker/IndexWorkerLifecycleTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/IndexWorkerTest.java",
+        "src/test/java/com/muchq/games/one_d4/worker/OpeningsCorpusTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/OpeningsTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/RequestInterruptCheckpointTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/RequestLeaseCeilingTest.java",
@@ -417,6 +418,7 @@ java_test_suite(
         ":db",
         ":dto",
         ":engine",
+        ":hikaru_corpus",
         ":model",
         ":motifs",
         ":queue",

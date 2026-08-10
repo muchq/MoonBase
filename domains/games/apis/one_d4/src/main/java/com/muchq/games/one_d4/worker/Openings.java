@@ -10,11 +10,11 @@ import org.jspecify.annotations.Nullable;
  * {@code eco} field on monthly-archive games), e.g. {@code
  * https://www.chess.com/openings/Caro-Kann-Defense-Two-Knights-Attack-3...dxe4}.
  *
- * <p>The family derivation is a deliberately naive v1: it keeps slug words up to and including the
- * first structural word (Defense, Opening, Gambit, ...), falling back to the first two words. That
- * maps both "English-Opening-Agincourt-Defense-2.Nf3-d5-3.g3" to "English Opening" and
- * "Caro-Kann-Defense-Two-Knights-Attack" to "Caro Kann Defense", which is the level most questions
- * are asked at.
+ * <p>The family derivation is a deliberately naive v1: it drops the move continuation, then keeps
+ * slug words up to and including the first structural word (Defense, Opening, Gambit, ...), falling
+ * back to the first two words. That maps "English-Opening-Agincourt-Defense-2.Nf3-d5-3.g3" to
+ * "English Opening", "Caro-Kann-Defense-Two-Knights-Attack" to "Caro Kann Defense", and
+ * "Owens-Defense...3.Nc3-e6" to "Owens Defense", which is the level most questions are asked at.
  */
 public final class Openings {
 
@@ -51,13 +51,18 @@ public final class Openings {
 
   /**
    * Derives the opening family (e.g. "Caro Kann Defense") from a full opening name, or null when no
-   * name is available.
+   * name is available or the name is nothing but a move continuation.
    */
   public static @Nullable String familyFromName(@Nullable String openingName) {
-    if (openingName == null || openingName.isBlank()) {
+    if (openingName == null) {
       return null;
     }
-    String[] words = openingName.strip().split("\\s+");
+    // Covers a blank name too: stripping leaves nothing either way.
+    String base = stripMoveContinuation(openingName);
+    if (base.isEmpty()) {
+      return null;
+    }
+    String[] words = base.split("\\s+");
     for (int i = 0; i < words.length; i++) {
       if (FAMILY_TERMINATORS.contains(words[i].toLowerCase(Locale.ROOT))) {
         return truncate(String.join(" ", java.util.Arrays.copyOfRange(words, 0, i + 1)));
@@ -65,6 +70,17 @@ public final class Openings {
     }
     int take = Math.min(2, words.length);
     return truncate(String.join(" ", java.util.Arrays.copyOfRange(words, 0, take)));
+  }
+
+  /**
+   * Drops chess.com's move continuation — everything from the first "..." — so the terminator scan
+   * sees opening words only. The continuation is glued straight onto the preceding word
+   * ("Owens-Defense...3.Nc3-e6"), which is what hides that word from a scan that splits on
+   * whitespace.
+   */
+  private static String stripMoveContinuation(String openingName) {
+    int continuation = openingName.indexOf("...");
+    return (continuation < 0 ? openingName : openingName.substring(0, continuation)).strip();
   }
 
   private static String truncate(String value) {
