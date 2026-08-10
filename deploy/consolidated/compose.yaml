@@ -68,7 +68,7 @@ services:
       # Credentials live in the hub's own database on the shared postgres
       # instance (MoonBase#1194 step 1): tickets and resume tokens survive
       # deploys. golf_hub_db_init provisions the role + database.
-      GOLF_HUB_DB_URL: postgresql://golf_hub:${GOLF_HUB_DB_PASSWORD}@one_d4_postgres:5432/golf_hub
+      GOLF_HUB_DB_URL: postgresql://golf_hub:${GOLF_HUB_DB_PASSWORD}@shared_postgres:5432/golf_hub
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
       OTEL_SERVICE_NAME: golf_hub
       OTEL_RESOURCE_ATTRIBUTES: service.name=golf_hub,service.version=${GOLF_HUB_SHA:-${DEPLOY_SHA:-latest}}
@@ -272,17 +272,37 @@ services:
       retries: 3
       start_period: 15s
 
-  one_d4_postgres:
+  # The one Postgres instance on this host. one_d4 and golf_hub both keep a
+  # database here (MoonBase#1194), so the service key names the role rather
+  # than the first tenant (MoonBase#1225).
+  #
+  # The bootstrap database, role and pg_isready user are still one_d4: those
+  # were written into the cluster by initdb on first boot, and changing
+  # POSTGRES_* does not rewrite an initialized cluster — it is simply ignored.
+  # Neutralizing them is a database migration, tracked separately on #1225.
+  shared_postgres:
     image: postgres:18
+    labels:
+      com.muchq.description: "Shared PostgreSQL for MoonBase services"
     restart: always
     environment:
       - POSTGRES_DB=one_d4
       - POSTGRES_USER=one_d4
       - POSTGRES_PASSWORD=${ONE_D4_DB_PASSWORD}
     volumes:
+      # The volume key stays one_d4_pgdata: renaming it would not move the
+      # cluster, it would mint an empty volume and initdb a fresh one on top,
+      # and the deploy would come up looking healthy with no data in it. See
+      # the volumes block at the bottom of this file.
       - one_d4_pgdata:/var/lib/postgresql
     networks:
-      - app_network
+      # one_d4 reads its JDBC URL from /etc/one_d4 on the host, which this repo
+      # does not track and a deploy does not rewrite — so the old service name
+      # has to keep resolving. Removing this alias needs an inventory of the
+      # deployed host's config first (#1225).
+      app_network:
+        aliases:
+          - one_d4_postgres
     deploy:
       resources:
         limits:
@@ -303,7 +323,7 @@ services:
     image: postgres:18
     restart: "no"
     environment:
-      PGHOST: one_d4_postgres
+      PGHOST: shared_postgres
       PGUSER: one_d4
       PGDATABASE: one_d4
       PGPASSWORD: ${ONE_D4_DB_PASSWORD}
@@ -319,7 +339,7 @@ services:
     networks:
       - app_network
     depends_on:
-      one_d4_postgres:
+      shared_postgres:
         condition: service_healthy
 
   one_d4:
@@ -339,6 +359,10 @@ services:
       # this variable above the file, so it takes effect without removing the file first. See
       # IndexerModule.readJdbcUrl for why the file is still ranked second.
       #
+      # This names the service key, so the alias is no longer what one_d4 resolves — it is now
+      # only what the still-mounted db_config resolves, on the rollback path #1351 kept. The
+      # alias goes when that file does (#1225).
+      #
       # Credentials are separate variables, not query parameters on the URL: pgjdbc URL-decodes
       # parameter values, so ?password= silently mangles a secret containing + or %, and
       # truncates at &. DataSourceFactory.create explains it at length.
@@ -347,7 +371,7 @@ services:
       # URL itself rather than through java.net.URI, which is what rejects such authorities.
       # Pinned by IndexerModuleTest so a driver upgrade that tightened parsing fails there
       # rather than on deploy.
-      - INDEXER_DB_URL=jdbc:postgresql://one_d4_postgres:5432/one_d4
+      - INDEXER_DB_URL=jdbc:postgresql://shared_postgres:5432/one_d4
       - INDEXER_DB_USERNAME=one_d4
       - INDEXER_DB_PASSWORD=${ONE_D4_DB_PASSWORD}
       - SENTRY_DSN=${ONE_D4_SENTRY_DSN}
@@ -366,7 +390,7 @@ services:
         aliases:
           - one-d4
     depends_on:
-      one_d4_postgres:
+      shared_postgres:
         condition: service_healthy
     deploy:
       resources:
@@ -454,6 +478,15 @@ volumes:
   caddy_data:
   caddy_config:
   forgejo_data:
+  # Named for one_d4 because that is what the live volume is called, not
+  # because one_d4 owns the instance — shared_postgres does (#1225). Compose
+  # prefixes these keys with the project name, so the cluster on the deploy
+  # host lives in ubuntu_one_d4_pgdata and the one local_deploy.sh creates
+  # lives in local_docker_one_d4_pgdata. Renaming the key does not rename
+  # either volume: it creates an empty one, initdb populates it, and the stack
+  # comes up healthy and blank. Pinning a concrete `name:` here would fix one
+  # project and break the other, so the key stays put and the *service* is what
+  # carries the neutral name.
   one_d4_pgdata:
 
 networks:

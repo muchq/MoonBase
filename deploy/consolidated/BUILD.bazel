@@ -10,6 +10,12 @@ go_test(
     data = [
         "Caddyfile",
         "compose.yaml",
+        # Run, not read, by TestTheServicesListingMatchesWhatCanBeDeployed: the
+        # --services listing is awk and sed, and asserting on their text is not
+        # asserting on their output. The script self-locates and reads
+        # compose.yaml from the repo root, which is why that path has to hold
+        # in the runfiles tree too.
+        "deploy.sh",
         "docker-compose.observability.yml",
         "o11y/otel-collector.yml",
         # Read by TestCIStillRunsTheCollectorDryRun, which checks that CI has not

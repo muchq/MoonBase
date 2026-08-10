@@ -116,13 +116,16 @@ To ship a change without restarting the whole stack:
 SERVICE             DESCRIPTION
 games_ws_backend    Websocket backend for v1 games
 golf_hub            Golf v2 hub on smithy event streams (/games/v2/*)
-portrait            Ray-traced scene renderer
+mcpserver           Model Context Protocol server
 ...
 ```
 
 Descriptions come from each service's `com.muchq.description` label in
 `compose.yaml`, so that file stays the source of truth (the labels also land on
-the containers).
+the containers). The listing is the services with a pinned image, which is
+exactly what `--service` accepts — a labelled service without one (like
+`shared_postgres`) carries its description on the container but is not a deploy
+target.
 
 A targeted deploy pins **only** that service, recorded as its own variable
 (`POSTERIZE_SHA`) so the pin survives a reboot without dragging the rest of the
@@ -226,3 +229,33 @@ kept. When verifying a deploy, read the **body** of `/health` — it answers 200
 ## Network
 
 All services run on the `muchq_network` Docker bridge network.
+
+## The shared database
+
+`shared_postgres` is the one Postgres instance on the host. `one_d4` and
+`golf_hub` each keep a database on it, and `golf_hub_db_init` provisions
+golf_hub's role and database on every deploy (idempotently — the
+`docker-entrypoint-initdb.d` hook only fires on a fresh volume).
+
+Three things about it are load-bearing and easy to undo by accident:
+
+- **It answers to `one_d4_postgres` as well**, via a network alias. one_d4 reads
+  its JDBC URL from `/etc/one_d4/db_config` on the host, which this repo does
+  not track and a deploy does not rewrite, so the pre-rename name has to keep
+  resolving. Removing the alias needs an inventory of the host's configuration
+  first (#1225) — and the failure mode if you get it wrong is silent, because
+  one_d4's `/health` answers 200 with `{"status":"DOWN"}` when the database is
+  unreachable. The container stays healthy and every query 500s.
+- **The volume key is `one_d4_pgdata`** and must stay that way. Compose prefixes
+  volume keys with the project name, so the live cluster is
+  `ubuntu_one_d4_pgdata` (and `local_docker_one_d4_pgdata` under
+  `local_deploy.sh`). Renaming the key does not rename the volume — it creates
+  an empty one, initdb fills it, and the stack comes up green and blank.
+- **The bootstrap database, role and `pg_isready` user are still `one_d4`.**
+  Those were written by initdb on first boot; changing `POSTGRES_*` does not
+  rewrite an initialized cluster, it is simply ignored. Neutralizing them is a
+  database migration, not a config edit.
+
+To roll the rename back: check out the previous `compose.yaml` and redeploy.
+The volume is untouched by it, so nothing needs restoring — see the note in
+**Rollback** above about config always coming from your working tree.
