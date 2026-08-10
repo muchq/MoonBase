@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.muchq.platform.json.JsonUtils;
 import java.io.IOException;
-import java.util.Map;
 
 /**
  * JSON rendering for tool payloads.
@@ -38,18 +37,5 @@ final class ToolJson {
     } catch (IOException e) {
       throw new RuntimeException(e);
     }
-  }
-
-  /**
-   * Renders a caller error as a JSON object ({@code {"error": "..."}}) so that failures are
-   * machine-distinguishable from successful payloads, which are always JSON too.
-   *
-   * <p>This is for arguments the framework accepted but the tool rejects — a month out of range, a
-   * username that resolves to nothing. Arguments the framework itself cannot bind (a missing
-   * required property, a non-numeric integer) never reach the tool: they surface as a JSON-RPC
-   * error instead, which is the protocol's own channel for them.
-   */
-  static String error(String message) {
-    return write(Map.of("error", message));
   }
 }

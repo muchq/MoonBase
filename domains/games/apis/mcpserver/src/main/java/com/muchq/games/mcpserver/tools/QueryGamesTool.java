@@ -6,6 +6,7 @@ import com.muchq.games.one_d4.api.dto.GameFeatureRow;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.mcp.annotations.Tool;
 import io.micronaut.mcp.annotations.ToolArg;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import jakarta.inject.Singleton;
 import java.util.List;
 
@@ -41,7 +42,7 @@ public class QueryGamesTool {
               + " Available motifs: pin, cross_pin, fork, skewer, discovered_attack,"
               + " discovered_check, check, checkmate, promotion, promotion_with_check,"
               + " promotion_with_checkmate, back_rank_mate, smothered_mate, double_check.")
-  public String queryChessGames(
+  public CallToolResult queryChessGames(
       @ToolArg(description = "A ChessQL query string") String query,
       @Nullable
           @ToolArg(
@@ -60,7 +61,7 @@ public class QueryGamesTool {
               description = "Include the full PGN of each game (large). Default false")
           Boolean includePgn) {
     if (query.isBlank()) {
-      return ToolJson.error("query is required");
+      return ToolResults.error("query is required");
     }
     int effectiveLimit = limit == null ? DEFAULT_LIMIT : Math.min(Math.max(limit, 1), MAX_LIMIT);
 
@@ -68,7 +69,7 @@ public class QueryGamesTool {
     try {
       games = facade.query(query, player, effectiveLimit);
     } catch (IllegalArgumentException | OneD4Client.UpstreamException e) {
-      return ToolJson.error(e.getMessage());
+      return ToolResults.error(e.getMessage());
     }
 
     ObjectNode result = ToolJson.object();
@@ -82,6 +83,6 @@ public class QueryGamesTool {
     }
     result.put("count", games.size());
 
-    return ToolJson.write(result);
+    return ToolResults.ok(result);
   }
 }

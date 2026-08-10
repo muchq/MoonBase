@@ -56,6 +56,9 @@ maven.install(
         "io.micronaut.jaxrs:micronaut-jaxrs-server",
         "io.micronaut.mcp:micronaut-mcp-annotations",
         "io.micronaut.mcp:micronaut-mcp-server-java-sdk",
+        # The protocol's own result type. mcpserver's tools return CallToolResult so a
+        # rejection can set isError; version comes from micronaut-mcp-bom (#1331).
+        "io.modelcontextprotocol.sdk:mcp-core",
         "io.netty:netty-common",
         "io.netty:netty-codec",
         "io.netty:netty-handler",

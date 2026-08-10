@@ -13,6 +13,8 @@ import com.muchq.platform.http_client.jdk.Jdk11HttpClient;
 import com.muchq.platform.json.JsonUtils;
 import io.micronaut.context.ApplicationContext;
 import io.micronaut.runtime.server.EmbeddedServer;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -102,7 +104,8 @@ public class McpSharedCorpusE2ETest {
   @Test
   public void aGameIndexedThroughMcpIsVisibleToOneD4AndBack() throws Exception {
     String indexed =
-        indexTool.indexChessGames("hikaru", "chess.com", "2024-01", "2024-01", null, null);
+        payloadOf(
+            indexTool.indexChessGames("hikaru", "chess.com", "2024-01", "2024-01", null, null));
     JsonNode indexResult = JsonUtils.mapper().readTree(indexed);
 
     assertThat(indexResult.path("error").isMissingNode())
@@ -130,7 +133,8 @@ public class McpSharedCorpusE2ETest {
 
     // Door two: the MCP tool, over HTTP to the same service.
     JsonNode mcpGames =
-        JsonUtils.mapper().readTree(queryTool.queryChessGames("num.moves >= 0", null, 50, null));
+        JsonUtils.mapper()
+            .readTree(payloadOf(queryTool.queryChessGames("num.moves >= 0", null, 50, null)));
     assertThat(mcpGames.get("games")).isNotEmpty();
 
     List<String> siteUrls = urls(siteGames);
@@ -149,7 +153,9 @@ public class McpSharedCorpusE2ETest {
     JsonNode aggregate =
         JsonUtils.mapper()
             .readTree(
-                aggregateTool.aggregateChessGames("num.moves >= 0", List.of("platform"), null, 20));
+                payloadOf(
+                    aggregateTool.aggregateChessGames(
+                        "num.moves >= 0", List.of("platform"), null, 20)));
 
     assertThat(aggregate.path("error").isMissingNode())
         .as("aggregate failed: %s", aggregate)
@@ -169,7 +175,7 @@ public class McpSharedCorpusE2ETest {
   public void analyzingThroughMcpReachesOneD4AndWritesNothing() throws Exception {
     String pgn = "[Event \"x\"]\n\n1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0";
 
-    JsonNode analysis = JsonUtils.mapper().readTree(analyzeTool.analyzePosition(pgn));
+    JsonNode analysis = JsonUtils.mapper().readTree(payloadOf(analyzeTool.analyzePosition(pgn)));
 
     assertThat(analysis.path("error").isMissingNode()).as("analyze failed: %s", analysis).isTrue();
     assertThat(analysis.get("numMoves").asInt()).isEqualTo(4);
@@ -196,5 +202,20 @@ public class McpSharedCorpusE2ETest {
     return java.util.stream.StreamSupport.stream(games.spliterator(), false)
         .map(g -> g.get("gameUrl").asText())
         .toList();
+  }
+
+  /**
+   * The text payload of a tool result.
+   *
+   * <p>The tools return MCP's {@code CallToolResult} since #1331, so a rejection can travel on the
+   * {@code isError} channel rather than only as an {@code {"error": ...}} body. This suite asserts
+   * on the body, so it unwraps — and asserts the flag agrees, since a call that came back flagged
+   * has failed however readable its payload is.
+   */
+  private static String payloadOf(CallToolResult result) {
+    assertThat(result.content()).hasSize(1);
+    String text = ((TextContent) result.content().get(0)).text();
+    assertThat(result.isError()).as("the tool call failed: %s", text).isFalse();
+    return text;
   }
 }

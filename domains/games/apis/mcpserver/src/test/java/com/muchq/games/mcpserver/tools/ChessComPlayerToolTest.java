@@ -49,7 +49,7 @@ public class ChessComPlayerToolTest {
 
   @Test
   public void testExecuteWithValidParameters() {
-    String result = tool.chessComPlayer("hikaru");
+    String result = ToolResultText.payloadOf(tool.chessComPlayer("hikaru"));
     assertThat(result).isNotNull();
     assertThat(result).contains("testuser");
     assertThat(result).contains("\"title\":\"GM\"");
@@ -57,7 +57,7 @@ public class ChessComPlayerToolTest {
 
   @Test
   public void testExecuteWithDifferentUsername() {
-    String result = tool.chessComPlayer("magnus");
+    String result = ToolResultText.payloadOf(tool.chessComPlayer("magnus"));
     assertThat(result).isNotNull();
   }
 
@@ -66,7 +66,7 @@ public class ChessComPlayerToolTest {
     ChessClient notFoundClient = new StubChessClient(Optional.empty());
     ChessComPlayerTool notFoundTool = new ChessComPlayerTool(notFoundClient);
 
-    String result = notFoundTool.chessComPlayer("nonexistent");
+    String result = ToolResultText.errorPayloadOf(notFoundTool.chessComPlayer("nonexistent"));
     assertThat(result).isEqualTo("{\"error\":\"player not found\"}");
   }
 }

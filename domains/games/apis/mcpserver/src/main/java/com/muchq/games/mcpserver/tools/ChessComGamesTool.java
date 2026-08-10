@@ -8,6 +8,7 @@ import com.muchq.games.chess_com_client.PlayerResult;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.mcp.annotations.Tool;
 import io.micronaut.mcp.annotations.ToolArg;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import jakarta.inject.Singleton;
 import java.time.YearMonth;
 import java.util.List;
@@ -35,7 +36,7 @@ public class ChessComGamesTool {
               + " example, username: hikaru, year: 2025, month: 01. Games can be filtered by"
               + " time_class, color, rated, rules, and opponent. Bulky pgn/tcn fields are omitted"
               + " unless include_pgn/include_tcn are set.")
-  public String chessComGames(
+  public CallToolResult chessComGames(
       @ToolArg(description = "The player's chess.com username") String username,
       @ToolArg(description = "The year the games were played (yyyy format)") String year,
       @ToolArg(description = "The month the games were played (MM format)") String month,
@@ -77,7 +78,7 @@ public class ChessComGamesTool {
       @Nullable @ToolArg(description = "Games to skip after filtering. Default 0") Integer offset) {
 
     if (username.isBlank()) {
-      return ToolJson.error("username is required");
+      return ToolResults.error("username is required");
     }
 
     int parsedYear;
@@ -86,12 +87,12 @@ public class ChessComGamesTool {
       parsedYear = parseIntArg("year", year, 1900, 2999);
       parsedMonth = parseIntArg("month", month, 1, 12);
     } catch (IllegalArgumentException e) {
-      return ToolJson.error(e.getMessage());
+      return ToolResults.error(e.getMessage());
     }
 
     String normalizedTimeClass = lowerOrNull(timeClass);
     if (normalizedTimeClass != null && !TIME_CLASSES.contains(normalizedTimeClass)) {
-      return ToolJson.error(
+      return ToolResults.error(
           "invalid time_class: '"
               + normalizedTimeClass
               + "' (expected one of "
@@ -100,7 +101,8 @@ public class ChessComGamesTool {
     }
     String normalizedColor = lowerOrNull(color);
     if (normalizedColor != null && !COLORS.contains(normalizedColor)) {
-      return ToolJson.error("invalid color: '" + normalizedColor + "' (expected white or black)");
+      return ToolResults.error(
+          "invalid color: '" + normalizedColor + "' (expected white or black)");
     }
     String normalizedRules = lowerOrNull(rules);
     String effectiveRules = normalizedRules == null ? "chess" : normalizedRules;
@@ -113,7 +115,7 @@ public class ChessComGamesTool {
 
     var gamesMaybe = chessClient.fetchGames(username, YearMonth.of(parsedYear, parsedMonth));
     if (gamesMaybe.isEmpty()) {
-      return ToolJson.error("player not found");
+      return ToolResults.error("player not found");
     }
 
     String usernameLower = username.toLowerCase();
@@ -152,7 +154,7 @@ public class ChessComGamesTool {
     result.put("offset", effectiveOffset);
     result.put("has_more", effectiveOffset + page.size() < matching.size());
 
-    return ToolJson.write(result);
+    return ToolResults.ok(result);
   }
 
   /** True when {@code usernameLower} played the given side in this game. */

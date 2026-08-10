@@ -6,6 +6,7 @@ import com.muchq.games.chess_com_client.ChessComApiException;
 import com.muchq.games.chess_com_client.Player;
 import io.micronaut.mcp.annotations.Tool;
 import io.micronaut.mcp.annotations.ToolArg;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import java.util.ArrayList;
@@ -43,10 +44,10 @@ public class ChessComPlayersTool {
           "Returns chess.com player information (including title, if any) for a batch of up to 50"
               + " usernames in one call. The response maps each lowercased username to its"
               + " profile; unknown usernames are listed under not_found.")
-  public String chessComPlayers(
+  public CallToolResult chessComPlayers(
       @ToolArg(description = "The chess.com usernames to look up (max 50)") List<?> usernames) {
     if (usernames.isEmpty()) {
-      return ToolJson.error("usernames must be a non-empty array of strings");
+      return ToolResults.error("usernames must be a non-empty array of strings");
     }
 
     // List<?>, not List<String>: the argument binder converts the array to a List but leaves the
@@ -55,12 +56,12 @@ public class ChessComPlayersTool {
     Set<String> deduped = new LinkedHashSet<>();
     for (Object item : usernames) {
       if (item == null || item.toString().isBlank()) {
-        return ToolJson.error("usernames must not contain blank entries");
+        return ToolResults.error("usernames must not contain blank entries");
       }
       deduped.add(item.toString().toLowerCase());
     }
     if (deduped.size() > MAX_USERNAMES) {
-      return ToolJson.error(
+      return ToolResults.error(
           "too many usernames: " + deduped.size() + " (max " + MAX_USERNAMES + " per call)");
     }
 
@@ -101,7 +102,7 @@ public class ChessComPlayersTool {
       result.set("errors", errors);
     }
 
-    return ToolJson.write(result);
+    return ToolResults.ok(result);
   }
 
   /**
