@@ -747,19 +747,13 @@ func oneD4UpstreamHost(t *testing.T) string {
 	return parsed.Hostname()
 }
 
-// Docker's embedded DNS resolves a service name containing an underscore, and
-// so does every C-based client on the network — wget from the caddy container
-// reaches http://one_d4:8080 today. Java does not. java.net.URI applies RFC
-// 3986's reg-name rule, returns a null host for an authority with an
-// underscore in it, and java.net.http.HttpRequest then rejects the URI outright
-// with IllegalArgumentException — before any connection is attempted.
+// mcpserver is the one Java client of one_d4, and java.net.URI gives an
+// authority containing an underscore a null host — java.net.http then rejects
+// the URI before opening a connection. Docker's DNS and every C-based client on
+// this network accept such a name, so nothing else here would notice.
 //
-// mcpserver is the one Java client of one_d4, which is why this held for every
-// other service on the network and failed only there: every corpus-backed tool
-// answered "one_d4 ... is not reachable" while one_d4 was healthy and serving
-// the same URL to its neighbours.
-//
-// So the host has to be a legal RFC 1123 name, not merely one Docker resolves.
+// The host must therefore be a legal RFC 1123 name, not merely one Docker
+// resolves.
 func TestTheOneD4UpstreamHostIsOneJavaCanParse(t *testing.T) {
 	host := oneD4UpstreamHost(t)
 	legal := regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$`)
@@ -771,24 +765,83 @@ func TestTheOneD4UpstreamHostIsOneJavaCanParse(t *testing.T) {
 	}
 }
 
-// A legal name is only half of it: something on the network has to answer to
-// it. The compose service key stays one_d4 — renaming it would move the volume
-// and the pin variable — so the legal name has to be published as a network
-// alias on that service. Without the alias the URL is well-formed and resolves
-// to nothing, which fails exactly like the underscore did.
+// networkAliases returns the aliases a service publishes on one network. Read
+// from the indentation rather than by matching a list item anywhere in the
+// block, so an unrelated `- name` under volumes or ports cannot satisfy it and
+// an alias attached to the wrong network does not count.
+func networkAliases(t *testing.T, service, network string) []string {
+	t.Helper()
+	lines := composeServiceLines(t, "compose.yaml")[service]
+	if len(lines) == 0 {
+		t.Fatalf("no %q service found in compose.yaml", service)
+	}
+	indentOf := func(s string) int { return len(s) - len(strings.TrimLeft(s, " ")) }
+
+	var aliases []string
+	networksAt, networkAt, aliasesAt := -1, -1, -1
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		indent := indentOf(line)
+		if networksAt >= 0 && indent <= networksAt {
+			networksAt, networkAt, aliasesAt = -1, -1, -1
+		}
+		if trimmed == "networks:" {
+			networksAt = indent
+			continue
+		}
+		if networksAt < 0 {
+			continue
+		}
+		if networkAt >= 0 && indent <= networkAt {
+			networkAt, aliasesAt = -1, -1
+		}
+		if trimmed == network+":" {
+			networkAt = indent
+			continue
+		}
+		if networkAt < 0 {
+			continue
+		}
+		if aliasesAt >= 0 && indent <= aliasesAt {
+			aliasesAt = -1
+		}
+		if trimmed == "aliases:" {
+			aliasesAt = indent
+			continue
+		}
+		if aliasesAt >= 0 && strings.HasPrefix(trimmed, "- ") {
+			aliases = append(aliases, strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")))
+		}
+	}
+	return aliases
+}
+
+// A legal name is only half of it: something has to answer to it. The compose
+// service key stays one_d4 — renaming it would move the volume and the pin
+// variable — so any other internal name has to be published as an alias on the
+// network mcpserver shares with it. Without that, the URL is well-formed and
+// resolves to nothing.
+//
+// A dotted name is an external upstream (api.1d4.net), reached through DNS
+// rather than through this network, and nothing here applies to it.
 func TestTheOneD4UpstreamHostIsAnAliasOneD4Publishes(t *testing.T) {
 	host := oneD4UpstreamHost(t)
-	block := serviceBlock(t, "compose.yaml", "one_d4")
+	if host == "one_d4" || strings.Contains(host, ".") {
+		return
+	}
 
-	if host == "one_d4" {
-		return // The service key itself always resolves; no alias needed.
+	aliases := networkAliases(t, "one_d4", "app_network")
+	for _, alias := range aliases {
+		if alias == host {
+			return
+		}
 	}
-	if !regexp.MustCompile(`(?m)^-\s*` + regexp.QuoteMeta(host) + `$`).MatchString(block) {
-		t.Errorf("mcpserver calls %q but the one_d4 service publishes no such network alias. "+
-			"Docker resolves a service by its key (one_d4) and by any alias listed under its "+
-			"network; %q is neither, so the name does not resolve on app_network. Block was:\n%s",
-			host, host, block)
-	}
+	t.Errorf("mcpserver calls %q but one_d4 publishes no such alias on app_network (found %v). "+
+		"Docker resolves a service by its key (one_d4) and by the aliases listed under the "+
+		"network, so %q does not resolve.", host, aliases, host)
 }
 
 // one_d4's API stays internal. mcpserver calls /v1/index, /v1/query,

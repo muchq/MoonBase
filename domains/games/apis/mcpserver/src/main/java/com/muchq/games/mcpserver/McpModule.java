@@ -27,8 +27,8 @@ public class McpModule {
    * be (#1332).
    *
    * <p>The alias {@code one-d4}, not the service key {@code one_d4}: {@link java.net.URI} gives an
-   * authority containing an underscore a null host, so every request built from the key was
-   * rejected before it left the process. OneD4Client refuses such a URL at construction now.
+   * authority containing an underscore a null host, and no request built from such a URL can be
+   * sent.
    */
   private static final String DEFAULT_ONE_D4_URL = "http://one-d4:8080";
 

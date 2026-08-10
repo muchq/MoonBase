@@ -52,13 +52,10 @@ public class ChessClient {
   }
 
   /**
-   * Package-private, and the only reason it exists: the deadline can only be tested against a peer
-   * that actually stalls, and chess.com will not. The test that claims to cover it built exactly
-   * such a server and then had no way to aim the client at it, so it called the public API instead
-   * and passed or failed on how fast chess.com answered that day.
+   * Package-private so tests can aim this client at a local server — the deadline can only be
+   * exercised against a peer that actually stalls, and chess.com will not.
    *
-   * <p>Not public. chess.com's base URL is not a deployment decision and nothing outside this
-   * package has a reason to change it.
+   * <p>Not public: chess.com's base URL is not a deployment decision.
    */
   ChessClient(HttpClient httpClient, ObjectMapper objectMapper, Duration timeout, String baseUrl) {
     this.httpClient = httpClient;

@@ -14,8 +14,6 @@ import com.muchq.platform.http_client.core.HttpClient;
 import com.muchq.platform.http_client.core.HttpRequest;
 import com.muchq.platform.http_client.core.HttpResponse;
 import java.io.UncheckedIOException;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.Optional;
@@ -60,40 +58,29 @@ public class OneD4Client {
     this.httpClient = httpClient;
     this.mapper = mapper;
     // Trailing slashes would produce //v1/index, which some routers treat as a different path.
-    this.baseUrl =
-        requireUsableAddress(
-            baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl);
+    this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
   }
 
   /**
-   * Rejects an upstream address this client could never call, at construction rather than on the
-   * first request.
+   * Builds a request, reporting a base URL the transport cannot send as a configuration fault.
    *
-   * <p>Written after a deployment spent its life pointed at {@code http://one_d4:8080}. Docker's
-   * embedded DNS resolves that name and every other container on the network reached it; {@link
-   * URI} applies RFC 3986's reg-name rule, hands back a null host for an authority containing an
-   * underscore, and {@code java.net.http.HttpRequest} then refuses the URI outright — so mcpserver
-   * never opened a socket. {@link #send} catches that {@link IllegalArgumentException} along with
-   * the genuine transport failures and reports "not reachable", which is a statement about a
-   * service that was healthy the whole time.
+   * <p>Every request-building path goes through here, so an unusable URL reads the same from all of
+   * them — not "not reachable" (a claim about the peer), not "could not serialize" (a claim about
+   * Jackson), and not a bare {@link IllegalArgumentException}, which this class uses for "the
+   * caller's arguments are wrong" and would blame an MCP client's query for the deployment's URL.
    *
-   * <p>Failing here makes it a startup failure instead: the container never reports healthy, the
-   * compose gate holds, and the message names the string to fix. The alternative — staying up and
-   * serving the chess.com tools while every corpus tool errors — is the state this bug already
-   * produced, and it took a packet capture's worth of digging to tell apart from an outage.
+   * <p>Deliberately per call rather than at construction. mcpserver serves the chess.com tools from
+   * the same port with no dependency on one_d4 and no health gate in front of it, so a throw from
+   * this eagerly-built {@code @Context} bean would take the process down and {@code restart:
+   * always} would 502 every tool over a corpus misconfiguration.
    */
-  private static String requireUsableAddress(String baseUrl) {
-    URI uri;
+  private HttpRequest build(HttpRequest.Builder builder, String description) {
     try {
-      uri = new URI(baseUrl);
-    } catch (URISyntaxException e) {
-      throw new IllegalArgumentException("one_d4 base URL " + baseUrl + " is not a valid URI", e);
+      return builder.build();
+    } catch (IllegalArgumentException e) {
+      throw new UpstreamException(
+          description + ": one_d4 base URL " + baseUrl + " is not usable — " + e.getMessage(), e);
     }
-    if (uri.getHost() == null) {
-      throw new IllegalArgumentException(
-          "one_d4 base URL " + baseUrl + " has no host java.net.URI can parse");
-    }
-    return baseUrl;
   }
 
   public String baseUrl() {
@@ -107,7 +94,7 @@ public class OneD4Client {
   /** Empty when one_d4 has no such request, which is a 404 rather than a failure. */
   public Optional<IndexResponse> status(UUID requestId) {
     String description = "GET /v1/index/" + requestId;
-    HttpResponse response = send(get("/v1/index/" + requestId), description);
+    HttpResponse response = send(get("/v1/index/" + requestId, description), description);
     if (response.getStatusCode() == 404) {
       return Optional.empty();
     }
@@ -129,32 +116,35 @@ public class OneD4Client {
 
   private <T> T post(String path, Object body, Class<T> type) {
     String description = "POST " + path;
-    HttpRequest request;
+    String json;
     try {
-      request =
-          HttpRequest.newBuilder()
-              .setUrl(baseUrl + path)
-              .setMethod(HttpRequest.Method.POST)
-              .setContentType(HttpRequest.ContentType.JSON)
-              .setAccept(HttpRequest.ContentType.JSON)
-              .setTimeout(timeout)
-              .setBody(mapper.writeValueAsString(body))
-              .build();
+      json = mapper.writeValueAsString(body);
     } catch (Exception e) {
       throw new UpstreamException(description + ": could not serialize request", e);
     }
+    HttpRequest request =
+        build(
+            HttpRequest.newBuilder()
+                .setUrl(baseUrl + path)
+                .setMethod(HttpRequest.Method.POST)
+                .setContentType(HttpRequest.ContentType.JSON)
+                .setAccept(HttpRequest.ContentType.JSON)
+                .setTimeout(timeout)
+                .setBody(json),
+            description);
     HttpResponse response = send(request, description);
     throwIfNotOk(response, description);
     return read(response, type, description);
   }
 
-  private HttpRequest get(String path) {
-    return HttpRequest.newBuilder()
-        .setUrl(baseUrl + path)
-        .setMethod(HttpRequest.Method.GET)
-        .setAccept(HttpRequest.ContentType.JSON)
-        .setTimeout(timeout)
-        .build();
+  private HttpRequest get(String path, String description) {
+    return build(
+        HttpRequest.newBuilder()
+            .setUrl(baseUrl + path)
+            .setMethod(HttpRequest.Method.GET)
+            .setAccept(HttpRequest.ContentType.JSON)
+            .setTimeout(timeout),
+        description);
   }
 
   /**
@@ -182,8 +172,8 @@ public class OneD4Client {
    * 4xx, because nothing the caller changes about their arguments will fix it.
    */
   private UpstreamException notReachable(RuntimeException cause) {
-    // The cause rode along on the exception and nothing ever printed it, so the only text anyone
-    // read was a guess about the network. Naming it costs a few characters in the tool's error.
+    // The cause is named in the message: "not reachable" alone sends a reader to the network
+    // without saying whether it was DNS, a refused connection or a reset.
     Throwable root = cause.getCause() != null ? cause.getCause() : cause;
     String detail =
         root.getMessage() == null

@@ -168,19 +168,12 @@ public class HttpRequest {
     }
 
     /**
-     * Parses the URL and refuses one the transport could not send.
+     * Parses the URL and refuses one {@code java.net.http} could not send.
      *
-     * <p>{@link URI#create} is more permissive than {@code java.net.http.HttpRequest}: it accepts a
-     * relative path, a URI with no host, and — the case this was written for — an authority
-     * containing an underscore, for which RFC 3986's reg-name rule leaves {@code getHost()} null.
-     * The JDK client rejects all three, but only at execute(), by which point the caller's own
-     * catch block is reporting a network failure: mcpserver spent a deployment telling every client
-     * that a healthy one_d4 was "not reachable", because its Compose service name had an underscore
-     * in it and no request ever left the process.
-     *
-     * <p>Docker's DNS resolves such a name and every non-Java client on the network reaches it, so
-     * nothing outside the JVM contradicts the configuration. That is what makes it worth failing on
-     * here, where the message can name the URL, rather than one layer down.
+     * <p>{@link URI#create} is the more permissive of the two: it accepts a relative path, a URI
+     * with no host, and an authority containing an underscore, for which RFC 3986's reg-name rule
+     * leaves {@code getHost()} null. The JDK client rejects all three at execute(), where callers
+     * are already wrapping failures as a dead peer. Rejecting them here names the URL instead.
      */
     private URI buildUrl() {
       Objects.requireNonNull(url, "URL is not set");
@@ -188,8 +181,11 @@ public class HttpRequest {
       if (parsed.getHost() == null) {
         throw new IllegalArgumentException("URL " + url + " has no host java.net.URI can parse");
       }
+      // Case-insensitive, matching URI semantics and java.net.http's own check. Anything
+      // stricter refuses HTTP:// and Https://, which the transport would have sent.
       String scheme = parsed.getScheme();
-      if (scheme == null || !(scheme.equals("http") || scheme.equals("https"))) {
+      if (scheme == null
+          || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
         throw new IllegalArgumentException("URL " + url + " is not http or https");
       }
       return parsed;

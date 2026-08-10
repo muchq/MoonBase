@@ -34,7 +34,7 @@ the schema and its migrations; a second process with a connection string would o
 that by accident, and the copies drift. It also means indexing through MCP reaches the same corpus
 `1d4.net` serves, rather than a private index nobody else can see.
 
-`ONE_D4_BASE_URL` configures the upstream; Compose sets it to the internal service name. These
+`ONE_D4_BASE_URL` configures the upstream; Compose sets it to one_d4's `one-d4` network alias. These
 paths are not routed publicly through Caddy and do not need to be.
 
 **Indexing is asynchronous upstream.** `POST /v1/index` returns immediately. The adapter polls
