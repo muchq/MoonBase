@@ -241,16 +241,20 @@ Three things about it are load-bearing and easy to undo by accident:
 
 - **It answers to `one_d4_postgres` as well**, via a network alias. one_d4 reads
   its JDBC URL from `/etc/one_d4/db_config` on the host, which this repo does
-  not track and a deploy does not rewrite, so the pre-rename name has to keep
-  resolving. Removing the alias needs an inventory of the host's configuration
-  first (#1225) — and the failure mode if you get it wrong is silent, because
-  one_d4's `/health` answers 200 with `{"status":"DOWN"}` when the database is
-  unreachable. The container stays healthy and every query 500s.
-- **The volume key is `one_d4_pgdata`** and must stay that way. Compose prefixes
-  volume keys with the project name, so the live cluster is
-  `ubuntu_one_d4_pgdata` (and `local_docker_one_d4_pgdata` under
-  `local_deploy.sh`). Renaming the key does not rename the volume — it creates
-  an empty one, initdb fills it, and the stack comes up green and blank.
+  not track and a deploy does not rewrite, and that file today reads
+  `jdbc:postgresql://one_d4_postgres:5432/one_d4?...` — so the pre-rename name
+  has to keep resolving. The failure mode if it doesn't is silent: one_d4's
+  `/health` answers 200 with `{"status":"DOWN"}` when the database is
+  unreachable, so the container stays healthy and every query 500s. #1351 moves
+  that URL into compose, which is what lets the alias go.
+- **The volume key is `one_d4_pgdata`**, and renaming it in this file alone
+  would lose the cluster. Compose prefixes volume keys with the project name,
+  so the live cluster is `ubuntu_one_d4_pgdata` (113M) and `local_deploy.sh`'s
+  is `local_docker_one_d4_pgdata`. Renaming the key does not rename either
+  volume — it creates an empty one, initdb fills it, and the stack comes up
+  green and blank. Giving it a neutral name is therefore a host migration, not
+  a config edit; pinning `name:` instead would hardcode `ubuntu`, which is only
+  the host's login account, into tracked config.
 - **The bootstrap database, role and `pg_isready` user are still `one_d4`.**
   Those were written by initdb on first boot; changing `POSTGRES_*` does not
   rewrite an initialized cluster, it is simply ignored. Neutralizing them is a

@@ -479,14 +479,24 @@ volumes:
   caddy_config:
   forgejo_data:
   # Named for one_d4 because that is what the live volume is called, not
-  # because one_d4 owns the instance — shared_postgres does (#1225). Compose
-  # prefixes these keys with the project name, so the cluster on the deploy
-  # host lives in ubuntu_one_d4_pgdata and the one local_deploy.sh creates
-  # lives in local_docker_one_d4_pgdata. Renaming the key does not rename
-  # either volume: it creates an empty one, initdb populates it, and the stack
-  # comes up healthy and blank. Pinning a concrete `name:` here would fix one
-  # project and break the other, so the key stays put and the *service* is what
-  # carries the neutral name.
+  # because one_d4 owns the instance — shared_postgres does (#1225).
+  #
+  # Compose prefixes these keys with the project name, so the deployed cluster
+  # is ubuntu_one_d4_pgdata (113M, verified on the host) and local_deploy.sh's
+  # is local_docker_one_d4_pgdata. Renaming the key does not rename either
+  # volume: it creates an empty one, initdb populates it, and the stack comes
+  # up healthy and blank.
+  #
+  # Pinning `name: ubuntu_one_d4_pgdata` would point every project at the
+  # deployed volume, which is right on the host and merely odd locally. It is
+  # rejected for a different reason: `ubuntu` is the host's login account,
+  # picked up because deploy.sh scps this file to ~ and Compose derives the
+  # project from the directory. Baking that accident into tracked config means
+  # that if it ever stops being true, Docker does not error — it creates a new
+  # empty volume, which is the same silent blank cluster, made permanent.
+  #
+  # Giving the volume a neutral name is a host migration (copy 113M, swap the
+  # key, drop the old volume), tracked on #1225 rather than folded in here.
   one_d4_pgdata:
 
 networks:
