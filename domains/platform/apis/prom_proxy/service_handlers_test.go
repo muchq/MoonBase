@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1036,6 +1037,65 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 		"run_failure must name exactly failed|interrupted — lease_lost is ordinary and puts a"+
 			" permanent floor under the line, and anything wider counts healthy runs as"+
 			" failures: %s", runFailure.Counter)
+}
+
+// The unit a run-duration reader claims and the conversion its query applies have
+// to agree, because nothing downstream checks. A scalar tile at least carries a
+// Unit field; a Trends series carries no unit in the payload at all — the chart
+// title is the registry key title-cased by the dashboard's prettyLabel, so the key
+// is the only place the unit is ever stated, and it is stated in a different file
+// from the arithmetic that has to match it.
+//
+// IndexWorker records this histogram in microseconds, the unit yodel's standard
+// latency series use — right for an HTTP request, six orders of magnitude off for
+// an index run — so every reader converts. The failure this pins is silent in both
+// directions: a chart titled "Run Duration Avg Ms" plotting 120000000 for a
+// two-minute run reads as a broken service rather than a missing divisor, and a
+// divisor added without renaming the key mislabels a correct number.
+func TestOneD4RunDurationQueriesConvertToTheUnitTheyClaim(t *testing.T) {
+	entry := serviceRegistry["one_d4"]
+	// Divisor taking the recorded microseconds to the named unit.
+	perUnit := map[string]int{"us": 1, "ms": 1_000, "s": 1_000_000}
+	trailingDivisor := regexp.MustCompile(`/(\d+)$`)
+
+	// query -> the unit it claims, read from wherever that query's unit lives.
+	claimed := map[string]string{}
+	for _, def := range entry.CustomScalars {
+		for _, query := range def.AllQueries() {
+			if strings.Contains(query, "index_run_duration_micros") {
+				claimed[query] = def.Unit
+			}
+		}
+	}
+	for key, query := range expandCustomTimeseries(entry.CustomTimeseries, "5m") {
+		if !strings.Contains(query, "index_run_duration_micros") {
+			continue
+		}
+		parts := strings.Split(key, "_")
+		claimed[query] = parts[len(parts)-1]
+	}
+	// Guards the guard: over an empty set the loop below asserts nothing, which is
+	// also what deleting both readers looks like.
+	require.NotEmpty(t, claimed, "nothing in the one_d4 entry reads the run duration histogram")
+
+	for query, unit := range claimed {
+		want, known := perUnit[unit]
+		if !assert.True(t, known,
+			"a run duration reader claims unit %q, which names no time unit — a Trends key's"+
+				" last segment and a scalar tile's unit are the whole of what the reader is"+
+				" told, so it has to be us, ms or s: %s", unit, query) {
+			continue
+		}
+		got := 1
+		if match := trailingDivisor.FindStringSubmatch(query); match != nil {
+			parsed, err := strconv.Atoi(match[1])
+			require.NoError(t, err, "unparseable divisor in %s", query)
+			got = parsed
+		}
+		assert.Equal(t, want, got,
+			"query claims %s but divides the recorded microseconds by %d, not %d: %s",
+			unit, got, want, query)
+	}
 }
 
 // The Probes tile is the visible half of probeFilter's subtraction (#1303), and

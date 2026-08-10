@@ -455,8 +455,14 @@ var serviceRegistry = map[string]serviceEntry{
 			// is ordinary. A range changing hands mid-run happens whenever two pollers
 			// overlap, so counting it here puts a permanent floor under the failure line
 			// and buries the two outcomes that do mean something went wrong.
-			"run_failure":         tsCounter(`index_runs_total{service_name="one_d4",outcome=~"failed|interrupted"}`),
-			"run_duration_avg_us": tsFixed(`sum(rate(index_run_duration_micros_sum{service_name="one_d4",outcome="completed"}[5m]))/sum(rate(index_run_duration_micros_count{service_name="one_d4",outcome="completed"}[5m]))`),
+			"run_failure": tsCounter(`index_runs_total{service_name="one_d4",outcome=~"failed|interrupted"}`),
+			// Converted to milliseconds. A Trends series carries no unit in the payload —
+			// the chart title is the key title-cased, and nothing else on it says what the
+			// numbers are — so the key names the unit and the query has to match it. The
+			// histogram is recorded in microseconds because that is the unit yodel's
+			// standard latency series use, which suits an HTTP request and not an index
+			// run: unconverted, a two-minute run plots as 120000000.
+			"run_duration_avg_ms": tsFixed(`sum(rate(index_run_duration_micros_sum{service_name="one_d4",outcome="completed"}[5m]))/sum(rate(index_run_duration_micros_count{service_name="one_d4",outcome="completed"}[5m]))/1000`),
 			"motif":               tsCounter(`motif_occurrences_total{service_name="one_d4"}`),
 		},
 	},
