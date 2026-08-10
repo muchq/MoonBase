@@ -21,6 +21,13 @@ import java.util.Objects;
  * byte-for-byte what they were.
  *
  * <p>{@link ToolJson} still owns rendering. This owns the envelope around it.
+ *
+ * <p><b>Which half is the contract.</b> {@code isError} is, and a caller should branch on it. The
+ * {@code {"error": "..."}} body is a message for whoever reads it, not a schema to match on — it
+ * survived the migration so that anything already parsing it kept working, and it is expected to
+ * stay, but a caller that depends on its shape is relying on prose. That asymmetry is the point of
+ * having a flag at all: the wording of a rejection should be free to improve without breaking
+ * anyone. A later change to the body needs no ceremony; a change to the flag's meaning does.
  */
 final class ToolResults {
 
