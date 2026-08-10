@@ -15,18 +15,20 @@ public class ServerTimeToolTest {
 
   @Test
   public void testReturnsExpectedTimestamp() {
-    assertThat(tool.serverTime()).isEqualTo(String.valueOf(FIXED_INSTANT.toEpochMilli()));
+    assertThat(ToolResultText.payloadOf(tool.serverTime()))
+        .isEqualTo(String.valueOf(FIXED_INSTANT.toEpochMilli()));
   }
 
   @Test
   public void testReturnsConsistentValue() {
-    assertThat(tool.serverTime()).isEqualTo(tool.serverTime());
+    assertThat(ToolResultText.payloadOf(tool.serverTime()))
+        .isEqualTo(ToolResultText.payloadOf(tool.serverTime()));
   }
 
   @Test
   public void testWithSystemClock() {
     ServerTimeTool systemTool = new ServerTimeTool(Clock.systemUTC());
-    long timestamp = Long.parseLong(systemTool.serverTime());
+    long timestamp = Long.parseLong(ToolResultText.payloadOf(systemTool.serverTime()));
     long now = System.currentTimeMillis();
     assertThat(timestamp).isBetween(now - 1000, now + 1000);
   }

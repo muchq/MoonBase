@@ -300,9 +300,13 @@ public class McpProtocolTest {
   }
 
   /**
-   * Arguments arrive as JSON and are bound to the method's declared types. A tool that rejects its
-   * own input still answers with a normal result — an {@code {"error": ...}} payload — rather than
-   * failing the call.
+   * Arguments arrive as JSON and are bound to the method's declared types, and a tool that rejects
+   * its own input answers with a tool result rather than a JSON-RPC error — the caller gets a
+   * readable {@code {"error": ...}} payload instead of a protocol-level failure.
+   *
+   * <p>Only the payload is asserted here. Since #1331 that result also carries {@code isError:
+   * true}, which is {@code aToolsOwnValidationErrorIsFlaggedAsAnMcpToolError}'s subject, on this
+   * same month-13 call.
    */
   @Test
   public void toolArgumentsAreBoundToTheDeclaredTypes() throws Exception {
@@ -416,18 +420,24 @@ public class McpProtocolTest {
   }
 
   /**
-   * Two error channels, and the tools use the quieter one. The framework flags its own failures
-   * with {@code isError} — the test above — while a tool that rejects its own arguments returns a
-   * successful result whose text happens to be {@code {"error": ...}}, so a model has to
-   * string-match the payload to learn the call failed.
+   * The other half of the same contract, and the one that was wrong until #1331: a tool that
+   * rejects its own arguments travels on the same {@code isError} channel the framework uses for
+   * arguments it could not bind.
    *
-   * <p>Pinned rather than fixed here: making the tools set {@code isError} means returning {@code
-   * CallToolResult} from all ten, which drags mcp-core's types into a package that currently knows
-   * nothing about the protocol. That is a trade worth making deliberately, not as a footnote to
-   * this migration — so this test records today's answer and fails if it drifts.
+   * <p>Both channels now agree, which is the point. Before, an argument the framework refused came
+   * back flagged while an argument the *tool* refused came back as a successful result whose text
+   * happened to be {@code {"error": ...}} — so a caller had to string-match the payload to learn
+   * the call had failed, and {@code isError: false} was a positive claim that it had not.
+   *
+   * <p>The body is asserted too. Setting the flag would be a poor trade if it cost the message, and
+   * anything already parsing {@code {"error": ...}} keeps working.
+   *
+   * <p>The control against a flag pinned always-true is {@code
+   * toolsCallRunsTheToolAndReturnsItsTextContent}, which already required a successful call to come
+   * back false — a different tool, since no tool here succeeds without reaching the network.
    */
   @Test
-  public void aToolsOwnValidationErrorIsNotFlaggedAsAnMcpToolError() throws Exception {
+  public void aToolsOwnValidationErrorIsFlaggedAsAnMcpToolError() throws Exception {
     HttpResponse<String> response =
         post(
             """
@@ -438,8 +448,8 @@ public class McpProtocolTest {
 
     JsonNode result = json(response).get("result");
     assertThat(result.get("isError").asBoolean())
-        .as("known gap: tool-level rejections do not use MCP's isError channel")
-        .isFalse();
+        .as("a tool's own rejection has to use MCP's isError channel, not only the payload")
+        .isTrue();
     assertThat(result.at("/content/0/text").asText()).contains("invalid month");
   }
 
@@ -447,6 +457,10 @@ public class McpProtocolTest {
    * A list argument whose elements are not strings must not become a 500. The derived schema says
    * only "array" — it carries no {@code items} type — so a model has nothing telling it to send
    * strings, and the tool has to cope.
+   *
+   * <p>"Not fatal" means the server answered with a tool result rather than a 500 or a JSON-RPC
+   * error — not that the call succeeded. It did not: since #1331 the tool's own error envelope
+   * carries {@code isError: true}, which is the honest report of what happened.
    *
    * <p>Only the shape is asserted here, not the message. The element used to reach the ChessQL
    * compiler in this process, which named the bad field back; it now reaches one_d4 in a request
@@ -466,12 +480,12 @@ public class McpProtocolTest {
     assertThat(response.statusCode())
         .as("a numeric group_by element is a binding the tool has to absorb, not a 500")
         .isEqualTo(200);
-    assertThat(json(response).at("/result/isError").asBoolean(false))
-        .as("nor may it fail the call")
-        .isFalse();
     assertThat(json(response).at("/result/content/0/text").asText())
         .as("whatever happens next, the tool answers with its own error envelope")
         .contains("error");
+    assertThat(json(response).at("/result/isError").asBoolean(false))
+        .as("and that envelope is flagged, since the call did not produce an aggregate (#1331)")
+        .isTrue();
   }
 
   /**
@@ -499,7 +513,9 @@ public class McpProtocolTest {
 
     assertThat(response.statusCode()).as("a numeric usernames element must not 500").isEqualTo(200);
     JsonNode result = json(response).get("result");
-    assertThat(result.at("/isError").asBoolean(false)).as("nor may it fail the call").isFalse();
+    assertThat(result.at("/isError").asBoolean(false))
+        .as("the batch was refused for its size, and a refusal is flagged as one (#1331)")
+        .isTrue();
     assertThat(result.at("/content/0/text").asText())
         .as("reaching the size error proves every element was stringified by the loop first")
         .contains("too many usernames: 51");

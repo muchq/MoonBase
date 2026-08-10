@@ -5,6 +5,7 @@ import com.muchq.games.one_d4.api.dto.IndexResponse;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.mcp.annotations.Tool;
 import io.micronaut.mcp.annotations.ToolArg;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import jakarta.inject.Singleton;
 
 @Singleton
@@ -25,7 +26,7 @@ public class IndexGamesTool {
               + " Single-month requests complete synchronously; multi-month requests run in the"
               + " background — check progress with index_status. Once indexed, use"
               + " query_chess_games and aggregate_chess_games.")
-  public String indexChessGames(
+  public CallToolResult indexChessGames(
       @ToolArg(description = "Chess platform username") String username,
       @ToolArg(description = "Chess platform (currently only chess.com)") String platform,
       @ToolArg(name = "start_month", description = "Start month in YYYY-MM format (e.g. 2026-03)")
@@ -55,11 +56,12 @@ public class IndexGamesTool {
               endMonth,
               Boolean.TRUE.equals(excludeBullet),
               Boolean.TRUE.equals(skipCache));
-      return ToolJson.write(result);
+      return ToolResults.ok(result);
     } catch (IllegalArgumentException | OneD4Client.UpstreamException e) {
-      return ToolJson.error(e.getMessage());
+      return ToolResults.error(e.getMessage());
     } catch (ChessComApiException e) {
-      return ToolJson.error("chess.com API error (HTTP " + e.statusCode() + "): " + e.getMessage());
+      return ToolResults.error(
+          "chess.com API error (HTTP " + e.statusCode() + "): " + e.getMessage());
     }
   }
 }

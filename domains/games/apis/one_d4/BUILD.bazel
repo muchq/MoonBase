@@ -698,6 +698,8 @@ java_test_suite(
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
+        # CallToolResult: the MCP tools return it since #1331.
+        artifact("io.modelcontextprotocol.sdk:mcp-core"),
         ":e2e_support",
         ":module",
         "//domains/games/apis/mcpserver:tools",

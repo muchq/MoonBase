@@ -6,6 +6,7 @@ import com.muchq.games.one_d4.api.dto.AggregateRow;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.mcp.annotations.Tool;
 import io.micronaut.mcp.annotations.ToolArg;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import jakarta.inject.Singleton;
 import java.util.List;
 
@@ -47,7 +48,7 @@ public class AggregateGamesTool {
               + " In the output, count is how many groups were returned, not how many games;"
               + " totalGames/totalGroups cover the untruncated result, and truncated=true means"
               + " the group limit cut off a long tail.")
-  public String aggregateChessGames(
+  public CallToolResult aggregateChessGames(
       @ToolArg(description = "A ChessQL filter") String query,
       @ToolArg(
               name = "group_by",
@@ -83,10 +84,10 @@ public class AggregateGamesTool {
                   "Maximum groups to return (default " + DEFAULT_LIMIT + ", max " + MAX_LIMIT + ")")
           Integer limit) {
     if (query.isBlank()) {
-      return ToolJson.error("query is required");
+      return ToolResults.error("query is required");
     }
     if (groupBy.isEmpty()) {
-      return ToolJson.error("group_by must be a non-empty array of field names");
+      return ToolResults.error("group_by must be a non-empty array of field names");
     }
     // List<?>: the binder converts the array but not its elements, so a JSON number would throw
     // ClassCastException out of a declared List<String>.
@@ -97,7 +98,7 @@ public class AggregateGamesTool {
     try {
       aggregate = facade.aggregate(query, groupByNames, player, effectiveLimit);
     } catch (IllegalArgumentException | OneD4Client.UpstreamException e) {
-      return ToolJson.error(e.getMessage());
+      return ToolResults.error(e.getMessage());
     }
 
     // Built as a node so "groups" stays present even when empty, regardless of the mapper's
@@ -113,6 +114,6 @@ public class AggregateGamesTool {
     result.put("totalGames", aggregate.totalGames());
     result.put("totalGroups", aggregate.totalGroups());
     result.put("truncated", aggregate.totalGroups() > aggregate.groups().size());
-    return ToolJson.write(result);
+    return ToolResults.ok(result);
   }
 }

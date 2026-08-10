@@ -88,7 +88,10 @@ public class ChessComPlayersToolTest {
             Map.of());
     var tool = newTool(stub);
 
-    JsonNode result = parse(tool.chessComPlayers(List.of("Hikaru", "RPRAGCHESS", "ghost")));
+    JsonNode result =
+        parse(
+            ToolResultText.payloadOf(
+                tool.chessComPlayers(List.of("Hikaru", "RPRAGCHESS", "ghost"))));
 
     assertThat(result.get("players").get("hikaru").get("title").asText()).isEqualTo("GM");
     assertThat(result.get("players").get("rpragchess").get("title").asText()).isEqualTo("GM");
@@ -112,7 +115,8 @@ public class ChessComPlayersToolTest {
     var stub = new StubChessClient(Map.of("hikaru", player("hikaru", "GM")), Map.of("flaky", 429));
     var tool = newTool(stub);
 
-    JsonNode result = parse(tool.chessComPlayers(List.of("hikaru", "flaky")));
+    JsonNode result =
+        parse(ToolResultText.payloadOf(tool.chessComPlayers(List.of("hikaru", "flaky"))));
 
     assertThat(result.get("players").has("hikaru")).isTrue();
     assertThat(result.get("errors").get("flaky").asText()).isEqualTo("HTTP 429");
@@ -126,7 +130,7 @@ public class ChessComPlayersToolTest {
             .mapToObj(i -> "user" + i)
             .toList();
 
-    JsonNode result = parse(tool.chessComPlayers(usernames));
+    JsonNode result = parse(ToolResultText.errorPayloadOf(tool.chessComPlayers(usernames)));
 
     assertThat(result.get("error").asText()).contains("too many usernames");
   }
@@ -139,6 +143,7 @@ public class ChessComPlayersToolTest {
   @Test
   public void testEmptyUsernamesRejected() {
     var tool = newTool(new StubChessClient(Map.of(), Map.of()));
-    assertThat(parse(tool.chessComPlayers(List.of())).has("error")).isTrue();
+    assertThat(parse(ToolResultText.errorPayloadOf(tool.chessComPlayers(List.of()))).has("error"))
+        .isTrue();
   }
 }

@@ -30,13 +30,13 @@ public class ChessComStatsToolTest {
 
   @Test
   public void testExecuteWithValidParameters() {
-    String result = tool.chessComStats("hikaru");
+    String result = ToolResultText.payloadOf(tool.chessComStats("hikaru"));
     assertThat(result).isNotNull();
   }
 
   @Test
   public void testExecuteWithDifferentUsername() {
-    String result = tool.chessComStats("magnus");
+    String result = ToolResultText.payloadOf(tool.chessComStats("magnus"));
     assertThat(result).isNotNull();
   }
 
@@ -45,7 +45,7 @@ public class ChessComStatsToolTest {
     ChessClient notFoundClient = new StubChessClient(Optional.empty());
     ChessComStatsTool notFoundTool = new ChessComStatsTool(notFoundClient);
 
-    String result = notFoundTool.chessComStats("nonexistent");
+    String result = ToolResultText.errorPayloadOf(notFoundTool.chessComStats("nonexistent"));
     assertThat(result).isEqualTo("{\"error\":\"player not found\"}");
   }
 }

@@ -3,6 +3,7 @@ package com.muchq.games.mcpserver.tools;
 import com.muchq.games.chess_com_client.ChessClient;
 import io.micronaut.mcp.annotations.Tool;
 import io.micronaut.mcp.annotations.ToolArg;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import jakarta.inject.Singleton;
 
 @Singleton
@@ -17,15 +18,15 @@ public class ChessComPlayerTool {
   @Tool(
       name = "chess_com_player",
       description = "Returns the requested user's chess.com player information")
-  public String chessComPlayer(
+  public CallToolResult chessComPlayer(
       @ToolArg(description = "The player's chess.com username") String username) {
     if (username.isBlank()) {
-      return ToolJson.error("username is required");
+      return ToolResults.error("username is required");
     }
     var playerMaybe = chessClient.fetchPlayer(username);
     if (playerMaybe.isEmpty()) {
-      return ToolJson.error("player not found");
+      return ToolResults.error("player not found");
     }
-    return ToolJson.write(playerMaybe.get());
+    return ToolResults.ok(playerMaybe.get());
   }
 }

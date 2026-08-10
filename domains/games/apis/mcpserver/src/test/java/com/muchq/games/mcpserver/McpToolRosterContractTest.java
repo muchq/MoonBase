@@ -5,7 +5,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.muchq.platform.json.JsonUtils;
 import io.micronaut.context.ApplicationContext;
+import io.micronaut.inject.BeanDefinition;
+import io.micronaut.inject.ExecutableMethod;
+import io.micronaut.mcp.annotations.Tool;
 import io.micronaut.runtime.server.EmbeddedServer;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -93,5 +97,50 @@ public class McpToolRosterContractTest {
       root.get("tools").forEach(n -> names.add(n.asText()));
       return names.stream().sorted().toList();
     }
+  }
+
+  /**
+   * Every {@code @Tool} method returns the protocol's result type.
+   *
+   * <p>This is the reason {@code ServerTimeTool} moved across in #1331 despite having nothing to
+   * reject: a {@code String}-returning tool is a working template for the next one, and that is how
+   * the isError gap reached all ten in the first place. Nothing else would catch its return — the
+   * month-13 test only exercises the tools it names, so a new tool could reintroduce the gap and
+   * every existing assertion would still pass.
+   *
+   * <p>Read off the bean definitions rather than a hand-listed set of classes, so a tool added
+   * tomorrow is covered without anyone remembering to add it here. The count is asserted because a
+   * scan that silently matched nothing would pass this test while checking nothing at all.
+   */
+  @Test
+  public void everyToolReturnsTheProtocolResultType() throws Exception {
+    List<String> offenders = new ArrayList<>();
+    int tools = 0;
+
+    for (BeanDefinition<?> definition : server.getApplicationContext().getAllBeanDefinitions()) {
+      for (ExecutableMethod<?, ?> method : definition.getExecutableMethods()) {
+        if (!method.hasAnnotation(Tool.class)) {
+          continue;
+        }
+        tools++;
+        if (!CallToolResult.class.equals(method.getReturnType().getType())) {
+          offenders.add(
+              definition.getBeanType().getSimpleName()
+                  + "."
+                  + method.getMethodName()
+                  + " returns "
+                  + method.getReturnType().getType().getSimpleName());
+        }
+      }
+    }
+
+    assertThat(tools)
+        .as("no @Tool methods were found, so this test would pass against anything")
+        .isEqualTo(advertisedToolNames().size());
+    assertThat(offenders)
+        .as(
+            "a tool returning anything else cannot set isError, and its rejections would claim"
+                + " success (#1331)")
+        .isEmpty();
   }
 }

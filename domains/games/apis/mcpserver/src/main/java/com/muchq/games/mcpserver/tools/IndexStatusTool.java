@@ -3,6 +3,7 @@ package com.muchq.games.mcpserver.tools;
 import com.muchq.games.one_d4.api.dto.IndexResponse;
 import io.micronaut.mcp.annotations.Tool;
 import io.micronaut.mcp.annotations.ToolArg;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import jakarta.inject.Singleton;
 import java.util.Optional;
 import java.util.UUID;
@@ -22,17 +23,17 @@ public class IndexStatusTool {
           "Check the status of an indexing request started with index_chess_games. Returns the"
               + " current status (PENDING/PROCESSING/COMPLETED/FAILED), games indexed so far, and"
               + " any error message.")
-  public String indexStatus(
+  public CallToolResult indexStatus(
       @ToolArg(name = "request_id", description = "The UUID of the indexing request")
           String requestId) {
     if (requestId.isBlank()) {
-      return ToolJson.error("request_id is required");
+      return ToolResults.error("request_id is required");
     }
     UUID parsed;
     try {
       parsed = UUID.fromString(requestId.trim());
     } catch (IllegalArgumentException e) {
-      return ToolJson.error("invalid request_id: '" + requestId + "' (expected a UUID)");
+      return ToolResults.error("invalid request_id: '" + requestId + "' (expected a UUID)");
     }
 
     // Separate try: the lookup is the part that talks to one_d4, and folding it into the one above
@@ -42,11 +43,11 @@ public class IndexStatusTool {
     try {
       status = facade.status(parsed);
     } catch (IllegalArgumentException | OneD4Client.UpstreamException e) {
-      return ToolJson.error(e.getMessage());
+      return ToolResults.error(e.getMessage());
     }
     if (status.isEmpty()) {
-      return ToolJson.error("indexing request not found: " + parsed);
+      return ToolResults.error("indexing request not found: " + parsed);
     }
-    return ToolJson.write(status.get());
+    return ToolResults.ok(status.get());
   }
 }
