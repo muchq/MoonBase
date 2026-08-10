@@ -153,7 +153,7 @@ curl -s http://localhost:8080/mcp \
 These are calls to the `one_d4` service, not work this process does. `index_chess_games` is
 `POST /v1/index`, `index_status` is `GET /v1/index/{id}`, `query_chess_games` is `POST /v1/query`,
 `aggregate_chess_games` is `POST /v1/aggregate`, and `analyze_position` is `POST /v1/analyze`. The
-upstream is `ONE_D4_BASE_URL`, which Compose sets to the internal service name.
+upstream is `ONE_D4_BASE_URL`, which Compose sets to one_d4's `one-d4` network alias.
 
 **They act on the same corpus the site serves** — indexing through MCP puts games where
 `1d4.net` can see them, and a query here sees everything `api.1d4.net` does. That is the point of
@@ -199,7 +199,11 @@ Environment variables:
 - **APP_NAME**: Application name (default: `helloworld`, from the shared `application.yml`; Compose sets `mcpserver`)
 - **MCP_AUTH_TOKEN**: Bearer token for authentication (optional, open if unset or empty)
 - **MCP_SERVER_VERSION**: Version reported in `initialize`'s `serverInfo` (default: 1.0.0)
-- **ONE_D4_BASE_URL**: Base URL of the one_d4 API the corpus tools call (default: `http://one_d4:8080`)
+- **ONE_D4_BASE_URL**: Base URL of the one_d4 API the corpus tools call (default:
+  `http://one-d4:8080`). The host must be one `java.net.URI` can parse, which rules
+  out the `one_d4` service key — an underscore in an authority yields a null host, so
+  no request built from it can be sent. one_d4 publishes `one-d4` as a network alias
+  for this.
 
 The MCP transport itself is configured in the shared `application.yml`
 (`domains/platform/resources`) under `micronaut.mcp.server`: `transport: HTTP`,

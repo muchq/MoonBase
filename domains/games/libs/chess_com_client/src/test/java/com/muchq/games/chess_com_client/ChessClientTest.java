@@ -287,15 +287,12 @@ public class ChessClientTest {
    * one. The deadline itself is the shared client's now; what this pins is that a stalled body
    * still reaches a caller of <em>this</em> class as the documented 504.
    *
-   * <p>{@code @Timeout} is the backstop that makes a regression a failure rather than a hung CI
-   * job: without a working deadline this does not fail, it hangs.
+   * <p>The client is aimed at that socket through the package-private base URL, and the latch
+   * asserts something connected to it: a client pointed anywhere else can produce a plausible 504
+   * from an unrelated failure, and then this case proves nothing.
    *
-   * <p>The client is aimed at that socket through the package-private base URL. It used to be built
-   * with the public constructor, which pins chess.com — so this stood up a stalling server, never
-   * connected to it, and called the live API instead. It then passed whenever chess.com took longer
-   * than the 300ms deadline and failed when it did not, which on a fast link is most of the time:
-   * {@code /pub/player/stalled/games/2024/01} is a real archive that answers 200 in about a tenth
-   * of a second. Green or red, it never once exercised a stalled body.
+   * <p>{@code @Timeout} is a backstop against a regression that parks the caller instead of failing
+   * it.
    */
   @Test
   @org.junit.jupiter.api.Timeout(60)
@@ -555,6 +552,23 @@ public class ChessClientTest {
     Optional<GamesResponse> result = client.fetchGames("hikaru", YearMonth.of(2024, 1));
 
     assertThat(result).isEmpty();
+  }
+
+  /**
+   * The default base URL is the one chess.com actually serves.
+   *
+   * <p>It reaches the wire through a constructor default rather than three inlined constants, and
+   * nothing else asserts it: every other case here stubs the transport and ignores the request, so
+   * a typo in the default — {@code /pub/players}, a dropped path segment — would 404 every call in
+   * production with the whole suite green. Same shape as the base-URL bug this seam was added for.
+   */
+  @Test
+  public void theDefaultBaseUrlIsChessComsPublicApi() {
+    CapturingHttpClient httpClient = new CapturingHttpClient(404, "");
+
+    new ChessClient(httpClient, MAPPER).fetchPlayer("hikaru");
+
+    assertThat(httpClient.lastUrl).isEqualTo("https://api.chess.com/pub/player/hikaru");
   }
 
   private static class CapturingHttpClient extends StubHttpClient {

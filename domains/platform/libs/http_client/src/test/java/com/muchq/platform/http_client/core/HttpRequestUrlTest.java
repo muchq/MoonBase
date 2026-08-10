@@ -9,9 +9,8 @@ import org.junit.jupiter.api.Test;
  * What this builder will accept as a URL.
  *
  * <p>{@link java.net.URI#create} accepts strings the JDK's own HTTP client will not send, so a
- * request could be built successfully and then fail at execute() — one transport layer down from
- * the code that chose the string, where callers wrap failures as "the peer is down". Rejecting them
- * here puts the error next to the mistake.
+ * request builds cleanly and then fails at execute() — one layer below the code that chose the
+ * string, where callers wrap failures as a dead peer. Rejecting them here names the URL instead.
  */
 public class HttpRequestUrlTest {
 
@@ -20,11 +19,9 @@ public class HttpRequestUrlTest {
   }
 
   /**
-   * The failure this test exists for. A Compose service name may contain an underscore and Docker's
-   * DNS resolves it, but {@link java.net.URI} follows RFC 3986's reg-name rule and gives such an
-   * authority a null host; {@code java.net.http.HttpRequest} then rejects the URI outright. Before
-   * this guard the rejection surfaced from inside execute(), which is where clients report "not
-   * reachable" — a claim about the network, made about a URL that never reached it.
+   * A Compose service name may contain an underscore and Docker's DNS resolves it, but {@link
+   * java.net.URI} follows RFC 3986's reg-name rule and gives such an authority a null host, so
+   * {@code java.net.http.HttpRequest} rejects the URI outright.
    */
   @Test
   public void refusesAUrlWhoseHostJavaCannotParse() {
@@ -78,23 +75,50 @@ public class HttpRequestUrlTest {
   }
 
   /**
-   * A URL this builder accepts is one the JDK client will also accept. The two checks above are
-   * this repo's restatement of the JDK's rules, and a restatement can drift; this asserts the
-   * agreement directly rather than trusting that it holds.
+   * This builder and the JDK client agree, in both directions, about every URL below.
+   *
+   * <p>The guard is a restatement of {@code java.net.http}'s rules and can drift either way. Too
+   * loose accepts a URL that fails one layer down, where callers report it as a dead peer; too
+   * strict refuses one the transport would have sent. Walking only the URLs the builder accepts
+   * cannot catch the second, because an over-strict guard just shrinks the set being walked.
    */
   @Test
-  public void everyAcceptedUrlIsOneTheJdkClientWillTake() {
+  public void thisBuilderAndTheJdkClientAgreeOnEveryUrl() {
     for (String url :
         new String[] {
           "https://api.chess.com/pub/player/hikaru",
           "http://one-d4:8080/v1/query",
           "http://localhost:34567/health",
-          "http://[::1]:8080/health"
+          "http://127.0.0.1:8080/health",
+          "http://[::1]:8080/health",
+          "http://user:pw@example.com/x",
+          "HTTP://one-d4:8080/v1/query",
+          "HTTPS://api.chess.com/pub",
+          "http://one_d4:8080/v1/query",
+          "http:///v1/query",
+          "/v1/query",
+          "ftp://example.com/pub",
+          "ws://example.com/socket"
         }) {
-      HttpRequest request = get(url).build();
-      assertThat(java.net.http.HttpRequest.newBuilder(request.getUrl()).GET().build().uri())
-          .as(url)
-          .isEqualTo(request.getUrl());
+      assertThat(buildAccepts(url)).as(url).isEqualTo(jdkAccepts(url));
+    }
+  }
+
+  private static boolean buildAccepts(String url) {
+    try {
+      get(url).build();
+      return true;
+    } catch (IllegalArgumentException e) {
+      return false;
+    }
+  }
+
+  private static boolean jdkAccepts(String url) {
+    try {
+      java.net.http.HttpRequest.newBuilder(java.net.URI.create(url)).GET().build();
+      return true;
+    } catch (IllegalArgumentException e) {
+      return false;
     }
   }
 }

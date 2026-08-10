@@ -240,9 +240,8 @@ services:
       - APP_NAME=mcpserver
       # The corpus lives behind one_d4, and mcpserver reaches it over the internal
       # network as an HTTP client (#1332). Internal name, not a published host: these
-      # paths are not routed through Caddy and do not need to be. one-d4 is the network
-      # alias, not the service key — java.net.URI will not parse a host with an
-      # underscore, so the service key is unusable from this client.
+      # paths are not routed through Caddy and do not need to be. The alias rather
+      # than the service key, because this caller is Java — see one_d4's networks.
       - ONE_D4_BASE_URL=http://one-d4:8080
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=mcpserver
@@ -340,12 +339,10 @@ services:
     volumes:
       - /etc/one_d4:/etc/one_d4
     networks:
-      # one-d4, because mcpserver is a Java client and java.net.URI rejects a
-      # hostname with an underscore in it — it returns a null host and the
-      # request is refused before a socket is opened. Docker's DNS resolves
-      # one_d4 and every other client on this network uses it, which is why the
-      # break showed up in exactly one service. The Compose key stays one_d4:
-      # renaming it would move the pin variable and the volume.
+      # one-d4 for Java callers: java.net.URI gives a hostname containing an
+      # underscore a null host, so no request built from one can be sent.
+      # Compose keeps resolving the service key alongside this alias, so
+      # Caddy's one_d4:8080 upstreams are unaffected.
       app_network:
         aliases:
           - one-d4
