@@ -289,16 +289,25 @@ public class ChessClientTest {
    *
    * <p>{@code @Timeout} is the backstop that makes a regression a failure rather than a hung CI
    * job: without a working deadline this does not fail, it hangs.
+   *
+   * <p>The client is aimed at that socket through the package-private base URL. It used to be built
+   * with the public constructor, which pins chess.com — so this stood up a stalling server, never
+   * connected to it, and called the live API instead. It then passed whenever chess.com took longer
+   * than the 300ms deadline and failed when it did not, which on a fast link is most of the time:
+   * {@code /pub/player/stalled/games/2024/01} is a real archive that answers 200 in about a tenth
+   * of a second. Green or red, it never once exercised a stalled body.
    */
   @Test
   @org.junit.jupiter.api.Timeout(60)
   public void aStalledBodyExpiresRatherThanParkingTheCaller() throws Exception {
+    java.util.concurrent.CountDownLatch connected = new java.util.concurrent.CountDownLatch(1);
     try (java.net.ServerSocket socket =
         new java.net.ServerSocket(0, 8, java.net.InetAddress.getLoopbackAddress())) {
       Thread server =
           new Thread(
               () -> {
                 try (java.net.Socket accepted = socket.accept()) {
+                  connected.countDown();
                   // A head promising 4096 bytes, ten delivered, then silence.
                   accepted
                       .getOutputStream()
@@ -320,7 +329,8 @@ public class ChessClientTest {
               new com.muchq.platform.http_client.jdk.Jdk11HttpClient(
                   java.net.http.HttpClient.newHttpClient()),
               MAPPER,
-              java.time.Duration.ofMillis(300));
+              java.time.Duration.ofMillis(300),
+              "http://127.0.0.1:" + socket.getLocalPort() + "/pub/player");
 
       Thread.interrupted(); // Stand on nothing an earlier case left behind.
 
@@ -328,6 +338,12 @@ public class ChessClientTest {
           .isInstanceOf(ChessComApiException.class)
           .hasMessageContaining("did not answer within")
           .satisfies(e -> assertThat(((ChessComApiException) e).statusCode()).isEqualTo(504));
+
+      assertThat(connected.await(1, java.util.concurrent.TimeUnit.SECONDS))
+          .as(
+              "the stalling server is the peer under test; if nothing connected to it, the 504"
+                  + " above came from somewhere else and this case proves nothing")
+          .isTrue();
 
       assertThat(Thread.currentThread().isInterrupted())
           .as(

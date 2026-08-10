@@ -17,6 +17,7 @@
 package deploy_test
 
 import (
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -713,7 +714,7 @@ func TestMcpserverIsPointedAtOneD4(t *testing.T) {
 		t.Fatalf("did not find mcpserver's image in its compose block; this test is no longer "+
 			"reading the service it claims to. Block was:\n%s", block)
 	}
-	if !strings.Contains(block, "ONE_D4_BASE_URL=http://one_d4:8080") {
+	if !strings.Contains(block, "ONE_D4_BASE_URL=http://one-d4:8080") {
 		t.Errorf("mcpserver does not name one_d4 as its upstream. Every corpus-backed MCP tool "+
 			"is an HTTP call to that service (#1332); without the variable the container falls "+
 			"back to a compiled-in default, which is a deployment decision living in Java. "+
@@ -728,6 +729,65 @@ func TestMcpserverIsPointedAtOneD4(t *testing.T) {
 				"must hold no corpus database access of its own — one_d4 owns validation, the "+
 				"indexing lifecycle, retention, the schema and its migrations (#1332).", forbidden)
 		}
+	}
+}
+
+// The host in ONE_D4_BASE_URL, or "" if the variable is absent.
+func oneD4UpstreamHost(t *testing.T) string {
+	t.Helper()
+	match := regexp.MustCompile(`ONE_D4_BASE_URL=(\S+)`).
+		FindStringSubmatch(serviceBlock(t, "compose.yaml", "mcpserver"))
+	if match == nil {
+		t.Fatalf("mcpserver's compose block sets no ONE_D4_BASE_URL")
+	}
+	parsed, err := url.Parse(match[1])
+	if err != nil {
+		t.Fatalf("ONE_D4_BASE_URL=%q does not parse as a URL: %v", match[1], err)
+	}
+	return parsed.Hostname()
+}
+
+// Docker's embedded DNS resolves a service name containing an underscore, and
+// so does every C-based client on the network — wget from the caddy container
+// reaches http://one_d4:8080 today. Java does not. java.net.URI applies RFC
+// 3986's reg-name rule, returns a null host for an authority with an
+// underscore in it, and java.net.http.HttpRequest then rejects the URI outright
+// with IllegalArgumentException — before any connection is attempted.
+//
+// mcpserver is the one Java client of one_d4, which is why this held for every
+// other service on the network and failed only there: every corpus-backed tool
+// answered "one_d4 ... is not reachable" while one_d4 was healthy and serving
+// the same URL to its neighbours.
+//
+// So the host has to be a legal RFC 1123 name, not merely one Docker resolves.
+func TestTheOneD4UpstreamHostIsOneJavaCanParse(t *testing.T) {
+	host := oneD4UpstreamHost(t)
+	legal := regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$`)
+	if !legal.MatchString(host) {
+		t.Errorf("ONE_D4_BASE_URL names host %q, which is not an RFC 1123 hostname. Docker's DNS "+
+			"resolves it and curl accepts it, but java.net.URI gives it a null host and "+
+			"java.net.http.HttpRequest rejects the URI, so mcpserver never opens a connection "+
+			"and reports every corpus tool as unreachable.", host)
+	}
+}
+
+// A legal name is only half of it: something on the network has to answer to
+// it. The compose service key stays one_d4 — renaming it would move the volume
+// and the pin variable — so the legal name has to be published as a network
+// alias on that service. Without the alias the URL is well-formed and resolves
+// to nothing, which fails exactly like the underscore did.
+func TestTheOneD4UpstreamHostIsAnAliasOneD4Publishes(t *testing.T) {
+	host := oneD4UpstreamHost(t)
+	block := serviceBlock(t, "compose.yaml", "one_d4")
+
+	if host == "one_d4" {
+		return // The service key itself always resolves; no alias needed.
+	}
+	if !regexp.MustCompile(`(?m)^-\s*` + regexp.QuoteMeta(host) + `$`).MatchString(block) {
+		t.Errorf("mcpserver calls %q but the one_d4 service publishes no such network alias. "+
+			"Docker resolves a service by its key (one_d4) and by any alias listed under its "+
+			"network; %q is neither, so the name does not resolve on app_network. Block was:\n%s",
+			host, host, block)
 	}
 }
 
