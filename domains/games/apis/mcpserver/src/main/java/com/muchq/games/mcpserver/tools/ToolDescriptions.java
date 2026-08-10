@@ -24,8 +24,8 @@ final class ToolDescriptions {
   /** Spelled both ways: ChessQL takes the dotted form, group_by the underscored one. */
   static final String OPENING_FAMILY_IS_NOT_NORMALIZED =
       "Note: opening family (opening.family in a query, opening_family in group_by) is derived from"
-          + " chess.com ECO-URL strings, not a normalized taxonomy — 'Closed Sicilian' and 'Closed"
-          + " Sicilian Defense' are distinct values.";
+          + " chess.com ECO-URL strings, not a normalized taxonomy — 'Closed Sicilian Defense' and"
+          + " 'Alapin Sicilian Defense' are distinct values, not part of 'Sicilian Defense'.";
 
   private ToolDescriptions() {}
 }

@@ -347,7 +347,12 @@ load landed wherever the submit happened to arrive.
 
 ### Re-analyze All Games
 
-Re-runs feature extraction on every stored game and updates motif columns and occurrences. Useful after deploying a new detector or enrichment.
+Re-runs feature extraction on every stored game and updates motif columns and occurrences. Useful after deploying a new detector.
+
+It writes **no** `game_features` columns, so it does not touch the derived/enriched ones —
+`white_title`, `black_title`, `opening_name`, `opening_family`. Changing how those are derived (as
+#1344 did for `opening_family`) needs a reindex with `skipCache: true`, which is the only path that
+rewrites them; `/admin/reanalyze` returns a large `gamesReanalyzed` and leaves every one unchanged.
 
 ```bash
 curl -X POST http://localhost:8080/admin/reanalyze

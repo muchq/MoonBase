@@ -89,7 +89,15 @@ public class McpProtocolTest {
           .contains("played no games then");
       assertThat(description)
           .as("%s must say opening families are not normalized", name)
-          .contains("Closed Sicilian Defense");
+          .contains("Alapin Sicilian Defense");
+      // The old wording cited 'Closed Sicilian' vs 'Closed Sicilian Defense' as the split. That
+      // split was #1344 — a move continuation glued onto "Defense" hiding it from the family scan
+      // — so the strip made 'Closed Sicilian' unproducible and the caveat started describing a bug
+      // as though it were the taxonomy. Asserting the surviving pair alone would not have caught
+      // it: "Closed Sicilian Defense" is a substring of the stale sentence too.
+      assertThat(description)
+          .as("%s must not cite a family split that #1344 made unproducible", name)
+          .doesNotContain("'Closed Sicilian' and");
     }
   }
 
