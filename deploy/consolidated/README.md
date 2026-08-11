@@ -239,14 +239,15 @@ golf_hub's role and database on every deploy (idempotently — the
 
 Three things about it are load-bearing and easy to undo by accident:
 
-- **It answers to `one_d4_postgres` as well**, via a network alias. one_d4 reads
-  its JDBC URL from `/etc/one_d4/db_config` on the host, which this repo does
-  not track and a deploy does not rewrite, and that file today reads
-  `jdbc:postgresql://one_d4_postgres:5432/one_d4?...` — so the pre-rename name
-  has to keep resolving. The failure mode if it doesn't is silent: one_d4's
-  `/health` answers 200 with `{"status":"DOWN"}` when the database is
-  unreachable, so the container stays healthy and every query 500s. #1351 moves
-  that URL into compose, which is what lets the alias go.
+- **It answers to `one_d4_postgres` as well**, via a network alias — but no
+  longer because one_d4 needs it. Since #1351 `INDEXER_DB_URL` names the service
+  directly. The alias now covers exactly one path: `/etc/one_d4/db_config` is
+  still mounted as the rollback for that change, it is untracked and reads
+  `jdbc:postgresql://one_d4_postgres:5432/one_d4`, so commenting the variable
+  out lands on the old name. Delete the file and the alias can go with it. The
+  failure mode if you drop it early is silent — one_d4's `/health` answers 200
+  with `{"status":"DOWN"}` when the database is unreachable, so the container
+  stays healthy and every query 500s.
 - **The volume key is `one_d4_pgdata`**, and renaming it in this file alone
   would lose the cluster. Compose prefixes volume keys with the project name,
   so the live cluster is `ubuntu_one_d4_pgdata` (113M) and `local_deploy.sh`'s

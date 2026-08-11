@@ -296,10 +296,11 @@ services:
       # the volumes block at the bottom of this file.
       - one_d4_pgdata:/var/lib/postgresql
     networks:
-      # one_d4 reads its JDBC URL from /etc/one_d4 on the host, which this repo
-      # does not track and a deploy does not rewrite — so the old service name
-      # has to keep resolving. Removing this alias needs an inventory of the
-      # deployed host's config first (#1225).
+      # Not for one_d4, which names this service directly in INDEXER_DB_URL
+      # since #1351 — for the /etc/one_d4/db_config fallback that change kept
+      # as its rollback. That file is on the host, untracked, and names
+      # one_d4_postgres, so commenting the variable out lands on this alias.
+      # It goes when the file does (#1225).
       app_network:
         aliases:
           - one_d4_postgres
