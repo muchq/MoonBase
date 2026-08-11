@@ -214,8 +214,8 @@ Environment variables control the mode (H2 in-memory is the default):
 |-----------------------|------------------------------------------|---------------------------------------------|
 | `INDEXER_DB_URL`      | `jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1`  | H2 in-memory (default). No external deps.   |
 | `INDEXER_DB_URL`      | `jdbc:postgresql://localhost:5432/...`   | PostgreSQL mode. Requires external database.|
-| `INDEXER_DB_USERNAME` | `sa`                                     | Database username.                          |
-| `INDEXER_DB_PASSWORD` | (empty)                                  | Database password.                          |
+| `INDEXER_DB_USERNAME` | (unset)                                  | Database username. Unset leaves whatever the URL carries. |
+| `INDEXER_DB_PASSWORD` | (unset)                                  | Database password. Passed as a connection property, so no URL-encoding constraint. |
 
 The system auto-detects H2 vs PostgreSQL from the JDBC URL and uses the appropriate SQL dialect.
 

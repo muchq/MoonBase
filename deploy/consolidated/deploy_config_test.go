@@ -962,35 +962,48 @@ func TestEveryDatabaseUrlNamesAHostThisComposeFilePublishes(t *testing.T) {
 					service, host)
 				continue
 			}
-			resolved, aliases := aliasOnAppNetwork(t, services, host)
-			if resolved {
+			owners, aliases := aliasOwnersOnAppNetwork(t, services, host)
+			if len(owners) == 0 {
+				t.Errorf("%s's database host %q is not a service in compose.yaml and nothing "+
+					"publishes it as an alias on app_network (aliases found: %v). The container "+
+					"will start and fail to reach its database.", service, host, aliases)
 				continue
 			}
-			t.Errorf("%s's database host %q is not a service in compose.yaml and nothing "+
-				"publishes it as an alias on app_network (aliases found: %v). The container "+
-				"will start and fail to reach its database.", service, host, aliases)
+			postgresOwner := false
+			for _, owner := range owners {
+				if isPostgresService(t, services, owner) {
+					postgresOwner = true
+				}
+			}
+			if !postgresOwner {
+				t.Errorf("%s's database host %q resolves, but only as an alias of %v — none of "+
+					"which is a Postgres service. Docker answers the name and the connection is "+
+					"then refused on 5432.", service, host, owners)
+			}
 		}
 	}
 }
 
-// Whether any service publishes host as an alias on app_network, plus every
-// alias seen — the second return is what makes the failure message actionable.
-// Separate from the loop above so that a match short-circuits this lookup only,
-// not the whole test: an early return there would skip every service after the
-// first one that resolved.
-func aliasOnAppNetwork(t *testing.T, services map[string][]string, host string) (bool, []string) {
+// The services publishing host as an alias on app_network, plus every alias
+// seen — the second return is what makes the failure message actionable.
+//
+// Owners, not a bool: resolving is not the same as resolving to a database.
+// Attaching the one_d4_postgres alias to one_d4 would satisfy "something answers
+// to this name" while JDBC connected to the app container and got refused on
+// 5432 — the same wrong-container failure the service-key path already guards
+// against, arriving by the other route.
+func aliasOwnersOnAppNetwork(t *testing.T, services map[string][]string, host string) ([]string, []string) {
 	t.Helper()
-	var aliases []string
-	found := false
+	var owners, aliases []string
 	for candidate := range services {
 		for _, alias := range networkAliases(t, candidate, "app_network") {
 			aliases = append(aliases, alias)
 			if alias == host {
-				found = true
+				owners = append(owners, candidate)
 			}
 		}
 	}
-	return found, aliases
+	return owners, aliases
 }
 
 // one_d4's environment lines with comments stripped. serviceBlock keeps comment
@@ -1068,6 +1081,14 @@ func TestOneD4sCredentialsAreNotInTheUrl(t *testing.T) {
 		t.Errorf("INDEXER_DB_URL=%q embeds credentials in the URL's userinfo, which Hikari's "+
 			"password masking does not recognise — the URL would appear in full in a "+
 			"connection-failure message.", url)
+	}
+	// The username half. Deleting or misspelling it — INDEXER_DB_USERNAME is the
+	// name one_d4's own docs use, and INDEXER_DB_USER is the plausible slip —
+	// leaves a credential-free URL that DataSourceFactory pairs with no username,
+	// and /health keeps answering 200 with a DOWN body.
+	if username := oneD4Env(t, "INDEXER_DB_USERNAME"); username != "one_d4" {
+		t.Errorf("INDEXER_DB_USERNAME=%q, expected one_d4. The URL carries no credentials, so "+
+			"the connection has no user without it.", username)
 	}
 	if password := oneD4Env(t, "INDEXER_DB_PASSWORD"); password != "${ONE_D4_DB_PASSWORD}" {
 		t.Errorf("INDEXER_DB_PASSWORD=%q should interpolate ${ONE_D4_DB_PASSWORD} from the "+

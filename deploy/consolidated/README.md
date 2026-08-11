@@ -210,7 +210,7 @@ Keeping a URL here rather than in a host file is what makes the hostname visible
 the instance can be renamed (#1225) by editing one file instead of by keeping the old name
 resolving forever.
 
-one_d4's credentials are separate variables (`INDEXER_DB_USER`, `INDEXER_DB_PASSWORD`) rather than
+one_d4's credentials are separate variables (`INDEXER_DB_USERNAME`, `INDEXER_DB_PASSWORD`) rather than
 query parameters on the URL, because pgjdbc URL-decodes those — see `DataSourceFactory.create`.
 
 **Tradeoff, stated rather than absorbed.** A host file can be mode-restricted; an environment
