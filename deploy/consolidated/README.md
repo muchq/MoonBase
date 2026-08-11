@@ -237,30 +237,31 @@ All services run on the `muchq_network` Docker bridge network.
 golf_hub's role and database on every deploy (idempotently — the
 `docker-entrypoint-initdb.d` hook only fires on a fresh volume).
 
-Three things about it are load-bearing and easy to undo by accident:
+Two things about it are load-bearing and easy to undo by accident:
 
-- **It answers to `one_d4_postgres` as well**, via a network alias — but no
-  longer because one_d4 needs it. Since #1351 `INDEXER_DB_URL` names the service
-  directly. The alias now covers exactly one path: `/etc/one_d4/db_config` is
-  still mounted as the rollback for that change, it is untracked and reads
-  `jdbc:postgresql://one_d4_postgres:5432/one_d4`, so commenting the variable
-  out lands on the old name. Delete the file and the alias can go with it. The
-  failure mode if you drop it early is silent — one_d4's `/health` answers 200
-  with `{"status":"DOWN"}` when the database is unreachable, so the container
-  stays healthy and every query 500s.
-- **The volume key is `one_d4_pgdata`**, and renaming it in this file alone
-  would lose the cluster. Compose prefixes volume keys with the project name,
-  so the live cluster is `ubuntu_one_d4_pgdata` (113M) and `local_deploy.sh`'s
-  is `local_docker_one_d4_pgdata`. Renaming the key does not rename either
-  volume — it creates an empty one, initdb fills it, and the stack comes up
-  green and blank. Giving it a neutral name is therefore a host migration, not
-  a config edit; pinning `name:` instead would hardcode `ubuntu`, which is only
-  the host's login account, into tracked config.
-- **The bootstrap database, role and `pg_isready` user are still `one_d4`.**
-  Those were written by initdb on first boot; changing `POSTGRES_*` does not
-  rewrite an initialized cluster, it is simply ignored. Neutralizing them is a
-  database migration, not a config edit.
+- **The volume key is not the volume's name.** Compose prefixes it with the
+  project, so `shared_pgdata` is `ubuntu_shared_pgdata` here and
+  `local_docker_shared_pgdata` under `local_deploy.sh`. Renaming the key in
+  `compose.yaml` alone does not rename either volume — it mounts an empty one,
+  initdb fills it, and the stack comes up green and blank. Renaming means
+  copying the volume on the host in the same operation. Pinning `name:` instead
+  is not the way out: it hardcodes one project's prefix, and `ubuntu` is only
+  the host's login account.
+- **The bootstrap database, role and `pg_isready` user are `one_d4`.** initdb
+  wrote them on first boot; `POSTGRES_*` is ignored on an initialized cluster,
+  so changing them here does nothing. That needs a migration.
 
-To roll the rename back: check out the previous `compose.yaml` and redeploy.
-The volume is untouched by it, so nothing needs restoring — see the note in
-**Rollback** above about config always coming from your working tree.
+Renaming the volume, for reference — the copy and the deploy are one operation,
+or writes land in the volume you are copying away from:
+
+```bash
+sudo docker compose -f compose.yaml -f docker-compose.observability.yml stop
+sudo docker volume create ubuntu_shared_pgdata
+sudo docker run --rm -v ubuntu_one_d4_pgdata:/from -v ubuntu_shared_pgdata:/to \
+  alpine sh -c 'cd /from && cp -a . /to'
+# then deploy the compose.yaml carrying the new key
+```
+
+The old volume is left in place, so rollback is the previous `compose.yaml` and
+a redeploy — see **Rollback** above about config always coming from your working
+tree. Drop it once the new one has soaked.

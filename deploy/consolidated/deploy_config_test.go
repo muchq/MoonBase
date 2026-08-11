@@ -1142,59 +1142,19 @@ func TestNoDatabaseUrlCarriesALiteralPassword(t *testing.T) {
 	}
 }
 
-// Renaming the shared Postgres instance (#1225).
-//
-// The service key was one_d4_postgres back when one_d4 was its only tenant.
-// golf_hub keeps a database on the same instance now (#1194), so the key names
-// the role instead. TestEveryDatabaseUrlNamesAHostThisComposeFilePublishes
-// covers the hostnames; what follows is the rest of the rename.
-
 const postgresService = "shared_postgres"
 
-// The old name still resolves.
-//
-// Since #1351 this is no longer what one_d4 connects by — INDEXER_DB_URL names
-// the service key directly. It is what the still-mounted /etc/one_d4/db_config
-// resolves, and that file is the rollback path #1351 deliberately kept: comment
-// the variable out and IndexerModule falls back to the file, which names
-// one_d4_postgres. Dropping the alias would leave that rollback pointing at
-// nothing.
-//
-// The failure is quiet either way — one_d4's /health answers 200 with
-// {"status":"DOWN"} on a database it cannot reach, so the container stays
-// healthy while every query fails. The alias goes when the file does.
-func TestTheSharedPostgresStillAnswersToItsOldName(t *testing.T) {
-	aliases := networkAliases(t, postgresService, "app_network")
-	for _, alias := range aliases {
-		if alias == "one_d4_postgres" {
-			return
-		}
-	}
-	t.Errorf("%s publishes no one_d4_postgres alias on app_network (found %v). /etc/one_d4/"+
-		"db_config on the host still names that host, and it is what one_d4 falls back to if "+
-		"INDEXER_DB_URL does not reach the container — the documented rollback for #1351. "+
-		"Remove the alias only once the file is gone (#1225).", postgresService, aliases)
-}
-
-// The volume key must not follow the service key.
-//
-// Compose prefixes volume keys with the project name — ubuntu_one_d4_pgdata on
-// the deploy host, local_docker_one_d4_pgdata under local_deploy.sh. Renaming
-// the key does not rename either volume. It creates an empty one, initdb
-// populates it, and the stack comes up healthy and blank; the old volume is
-// still there, still full, and no longer mounted by anything.
-//
-// A `name:` under the key would sidestep the prefix, but it can only name one
-// project's volume, and `ubuntu` is not a name anybody chose — it is the deploy
-// host's login account, which Compose derives from the directory deploy.sh
-// scps into. This test rejects both the rename and the pin; renaming the volume
-// for real is a host migration, tracked on #1225.
-func TestTheSharedPostgresVolumeKeyIsNotRenamed(t *testing.T) {
-	if block := serviceBlock(t, "compose.yaml", postgresService); !strings.Contains(block, "- one_d4_pgdata:") {
-		t.Errorf("%s no longer mounts the one_d4_pgdata volume. The live cluster is in that "+
-			"volume under a project prefix; a renamed key mounts a fresh empty one and initdb "+
-			"fills it, which deploys green and loses every game in the corpus (#1225).",
-			postgresService)
+// Compose prefixes volume keys with the project name, so this key is not the
+// volume's name — ubuntu_shared_pgdata is. Renaming the key therefore does not
+// move the cluster: it mounts a fresh empty volume, initdb fills it, and the
+// stack comes up healthy and blank. A `name:` here would dodge the prefix but
+// hardcode one project's, so both are rejected. Moving the cluster is a host
+// operation, and this test is what makes you do it there.
+func TestTheSharedPostgresVolumeKeyIsPinned(t *testing.T) {
+	if block := serviceBlock(t, "compose.yaml", postgresService); !strings.Contains(block, "- shared_pgdata:") {
+		t.Errorf("%s no longer mounts the shared_pgdata volume. The cluster lives in that "+
+			"volume under a project prefix; a renamed key mounts a fresh empty one for initdb "+
+			"to fill, which deploys green and blank.", postgresService)
 	}
 
 	declared := false
@@ -1211,23 +1171,22 @@ func TestTheSharedPostgresVolumeKeyIsNotRenamed(t *testing.T) {
 		if !inVolumes {
 			continue
 		}
-		if trimmed == "one_d4_pgdata:" {
+		if trimmed == "shared_pgdata:" {
 			declared = true
 			continue
 		}
 		if declared && strings.HasPrefix(line, "   ") {
-			t.Errorf("the one_d4_pgdata volume key carries an option (%q). A concrete `name:` "+
-				"would hardcode the deploy host's project prefix — `ubuntu`, its login account "+
-				"— into tracked config, and the day that stops being true Docker creates an "+
-				"empty volume rather than failing (#1225).", trimmed)
+			t.Errorf("the shared_pgdata volume key carries an option (%q). A concrete `name:` "+
+				"hardcodes one project's prefix, and the day that stops holding Docker creates "+
+				"an empty volume rather than failing.", trimmed)
 		}
 		if !strings.HasPrefix(line, "   ") {
 			declared = false
 		}
 	}
-	if !strings.Contains(readConfig(t, "compose.yaml"), "\n  one_d4_pgdata:") {
-		t.Errorf("no one_d4_pgdata key in the top-level volumes block; the mount above would " +
-			"become a bind mount or fail outright (#1225).")
+	if !strings.Contains(readConfig(t, "compose.yaml"), "\n  shared_pgdata:") {
+		t.Errorf("no shared_pgdata key in the top-level volumes block; the mount above would " +
+			"become a bind mount or fail outright.")
 	}
 }
 

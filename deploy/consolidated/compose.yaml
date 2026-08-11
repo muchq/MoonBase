@@ -272,14 +272,12 @@ services:
       retries: 3
       start_period: 15s
 
-  # The one Postgres instance on this host. one_d4 and golf_hub both keep a
-  # database here (MoonBase#1194), so the service key names the role rather
-  # than the first tenant (MoonBase#1225).
+  # The one Postgres instance on this host; one_d4 and golf_hub each keep a
+  # database on it.
   #
-  # The bootstrap database, role and pg_isready user are still one_d4: those
-  # were written into the cluster by initdb on first boot, and changing
-  # POSTGRES_* does not rewrite an initialized cluster — it is simply ignored.
-  # Neutralizing them is a database migration, tracked separately on #1225.
+  # The bootstrap database, role and pg_isready user are one_d4 because initdb
+  # wrote them on first boot. POSTGRES_* is ignored on an initialized cluster,
+  # so changing them here does nothing — that needs a migration.
   shared_postgres:
     image: postgres:18
     labels:
@@ -290,20 +288,9 @@ services:
       - POSTGRES_USER=one_d4
       - POSTGRES_PASSWORD=${ONE_D4_DB_PASSWORD}
     volumes:
-      # The volume key stays one_d4_pgdata: renaming it would not move the
-      # cluster, it would mint an empty volume and initdb a fresh one on top,
-      # and the deploy would come up looking healthy with no data in it. See
-      # the volumes block at the bottom of this file.
-      - one_d4_pgdata:/var/lib/postgresql
+      - shared_pgdata:/var/lib/postgresql
     networks:
-      # Not for one_d4, which names this service directly in INDEXER_DB_URL
-      # since #1351 — for the /etc/one_d4/db_config fallback that change kept
-      # as its rollback. That file is on the host, untracked, and names
-      # one_d4_postgres, so commenting the variable out lands on this alias.
-      # It goes when the file does (#1225).
-      app_network:
-        aliases:
-          - one_d4_postgres
+      - app_network
     deploy:
       resources:
         limits:
@@ -353,16 +340,8 @@ services:
     environment:
       - APP_NAME=one_d4
       - PORT=8080
-      # The corpus database, named here rather than in /etc/one_d4/db_config on the host
-      # (MoonBase#1351). The file is untracked, deploy.sh does not rewrite it, and no test can
-      # read it — so the hostname one_d4 connects to was invisible to this repo, which is why
-      # #1225 planned to keep one_d4_postgres as a network alias forever. IndexerModule ranks
-      # this variable above the file, so it takes effect without removing the file first. See
-      # IndexerModule.readJdbcUrl for why the file is still ranked second.
-      #
-      # This names the service key, so the alias is no longer what one_d4 resolves — it is now
-      # only what the still-mounted db_config resolves, on the rollback path #1351 kept. The
-      # alias goes when that file does (#1225).
+      # The corpus database. IndexerModule ranks this above /etc/one_d4/db_config, which is
+      # still mounted but no longer present on the host — see IndexerModule.readJdbcUrl.
       #
       # Credentials are separate variables, not query parameters on the URL: pgjdbc URL-decodes
       # parameter values, so ?password= silently mangles a secret containing + or %, and
@@ -479,26 +458,11 @@ volumes:
   caddy_data:
   caddy_config:
   forgejo_data:
-  # Named for one_d4 because that is what the live volume is called, not
-  # because one_d4 owns the instance — shared_postgres does (#1225).
-  #
-  # Compose prefixes these keys with the project name, so the deployed cluster
-  # is ubuntu_one_d4_pgdata (113M, verified on the host) and local_deploy.sh's
-  # is local_docker_one_d4_pgdata. Renaming the key does not rename either
-  # volume: it creates an empty one, initdb populates it, and the stack comes
-  # up healthy and blank.
-  #
-  # Pinning `name: ubuntu_one_d4_pgdata` would point every project at the
-  # deployed volume, which is right on the host and merely odd locally. It is
-  # rejected for a different reason: `ubuntu` is the host's login account,
-  # picked up because deploy.sh scps this file to ~ and Compose derives the
-  # project from the directory. Baking that accident into tracked config means
-  # that if it ever stops being true, Docker does not error — it creates a new
-  # empty volume, which is the same silent blank cluster, made permanent.
-  #
-  # Giving the volume a neutral name is a host migration (copy 113M, swap the
-  # key, drop the old volume), tracked on #1225 rather than folded in here.
-  one_d4_pgdata:
+  # Compose prefixes this with the project name, so the cluster is
+  # ubuntu_shared_pgdata on the deploy host. Renaming this key does not rename
+  # the volume: it creates an empty one for initdb to fill, and the stack comes
+  # up healthy and blank. Renaming means migrating the volume on the host too.
+  shared_pgdata:
 
 networks:
   app_network:
