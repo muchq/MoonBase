@@ -395,10 +395,15 @@ Returns `{"gamesReanalyzed": N}`.
 
 ## Inspecting the database (deployed)
 
-On the deployed machine the indexer runs against **PostgreSQL** — the `one_d4_postgres` service
-(image `postgres:18`, Compose volume `one_d4_pgdata`), reached via the JDBC URL `compose.yaml`
+On the deployed machine the indexer runs against **PostgreSQL** — the `shared_postgres` service
+(image `postgres:18`, Compose volume `shared_pgdata`), reached via the JDBC URL `compose.yaml`
 sets in `INDEXER_DB_URL` (see the resolution order above; `/etc/one_d4/db_config` is still
 mounted, but the variable outranks it). H2 is the local-dev default only.
+
+The instance is shared: `golf_hub` keeps its own database on it too, which is why the service is
+no longer named after one_d4 (MoonBase#1225). The Compose volume key is not the volume's name —
+Compose prefixes it with the project — so renaming `shared_pgdata` in `compose.yaml` alone would
+mount an empty volume rather than move the cluster.
 
 ### Via the API (no direct DB access)
 
@@ -407,7 +412,7 @@ mounted, but the variable outranks it). H2 is the local-dev default only.
 
 ### Direct database access
 
-1. Find the database container: `docker ps | grep one_d4_postgres`.
+1. Find the database container: `docker ps | grep shared_postgres`.
 2. Open a shell against it (credentials come from the deploy environment; `INDEXER_DB_USERNAME`
    in `compose.yaml` names the same user, and the database is `one_d4`):
    ```bash

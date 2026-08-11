@@ -116,13 +116,16 @@ To ship a change without restarting the whole stack:
 SERVICE             DESCRIPTION
 games_ws_backend    Websocket backend for v1 games
 golf_hub            Golf v2 hub on smithy event streams (/games/v2/*)
-portrait            Ray-traced scene renderer
+mcpserver           Model Context Protocol server
 ...
 ```
 
 Descriptions come from each service's `com.muchq.description` label in
 `compose.yaml`, so that file stays the source of truth (the labels also land on
-the containers).
+the containers). The listing is the services with a pinned image, which is
+exactly what `--service` accepts — a labelled service without one (like
+`shared_postgres`) carries its description on the container but is not a deploy
+target.
 
 A targeted deploy pins **only** that service, recorded as its own variable
 (`POSTERIZE_SHA`) so the pin survives a reboot without dragging the rest of the
@@ -226,3 +229,39 @@ kept. When verifying a deploy, read the **body** of `/health` — it answers 200
 ## Network
 
 All services run on the `muchq_network` Docker bridge network.
+
+## The shared database
+
+`shared_postgres` is the one Postgres instance on the host. `one_d4` and
+`golf_hub` each keep a database on it, and `golf_hub_db_init` provisions
+golf_hub's role and database on every deploy (idempotently — the
+`docker-entrypoint-initdb.d` hook only fires on a fresh volume).
+
+Two things about it are load-bearing and easy to undo by accident:
+
+- **The volume key is not the volume's name.** Compose prefixes it with the
+  project, so `shared_pgdata` is `ubuntu_shared_pgdata` here and
+  `local_docker_shared_pgdata` under `local_deploy.sh`. Renaming the key in
+  `compose.yaml` alone does not rename either volume — it mounts an empty one,
+  initdb fills it, and the stack comes up green and blank. Renaming means
+  copying the volume on the host in the same operation. Pinning `name:` instead
+  is not the way out: it hardcodes one project's prefix, and `ubuntu` is only
+  the host's login account.
+- **The bootstrap database, role and `pg_isready` user are `one_d4`.** initdb
+  wrote them on first boot; `POSTGRES_*` is ignored on an initialized cluster,
+  so changing them here does nothing. That needs a migration.
+
+Renaming the volume, for reference — the copy and the deploy are one operation,
+or writes land in the volume you are copying away from:
+
+```bash
+sudo docker compose -f compose.yaml -f docker-compose.observability.yml stop
+sudo docker volume create ubuntu_shared_pgdata
+sudo docker run --rm -v ubuntu_one_d4_pgdata:/from -v ubuntu_shared_pgdata:/to \
+  alpine sh -c 'cd /from && cp -a . /to'
+# then deploy the compose.yaml carrying the new key
+```
+
+The old volume is left in place, so rollback is the previous `compose.yaml` and
+a redeploy — see **Rollback** above about config always coming from your working
+tree. Drop it once the new one has soaked.

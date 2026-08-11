@@ -136,13 +136,22 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# The listing is driven by service_names, not by the labels: --service accepts
+# only a service with a pinned image, and the two sets are not the same. Since
+# #1225 shared_postgres carries a description and has no image, so a listing
+# built from the labels would advertise a target the check below rejects — and
+# the old count-mismatch note would have called that missing label instead.
 if [ "$LIST_SERVICES" -eq 1 ]; then
+  described=$(service_table)
   printf '%-18s  %s\n' "SERVICE" "DESCRIPTION"
-  service_table | while IFS='|' read -r svc desc; do
+  undescribed=0
+  for svc in $(service_names); do
+    desc=$(printf '%s\n' "$described" | sed -n "s/^$svc|//p" | tail -1)
+    [ -n "$desc" ] || undescribed=$((undescribed + 1))
     printf '%-18s  %s\n' "$svc" "$desc"
   done
-  if [ "$(service_table | wc -l)" -ne "$(service_names | wc -l)" ]; then
-    echo "(note: some services have no com.muchq.description label)" >&2
+  if [ "$undescribed" -ne 0 ]; then
+    echo "(note: $undescribed deployable service(s) have no com.muchq.description label)" >&2
   fi
   exit 0
 fi

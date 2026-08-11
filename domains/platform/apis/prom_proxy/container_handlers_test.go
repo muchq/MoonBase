@@ -51,7 +51,7 @@ func TestContainerDisplayName(t *testing.T) {
 	}{
 		{"compose naming", "ubuntu-golf_hub-1", "golf_hub"},
 		{"hyphenated service", "ubuntu-microgpt-serve-1", "microgpt-serve"},
-		{"underscored service", "ubuntu-one_d4_postgres-1", "one_d4_postgres"},
+		{"underscored service", "ubuntu-shared_postgres-1", "shared_postgres"},
 		{"infrastructure container", "ubuntu-cadvisor-1", "cadvisor"},
 		// A bare "-1" strip would turn this into "svc0".
 		{"double digit index", "ubuntu-svc-10", "svc"},

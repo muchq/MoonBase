@@ -19,6 +19,7 @@ package deploy_test
 import (
 	"net/url"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
@@ -1139,4 +1140,176 @@ func TestNoDatabaseUrlCarriesALiteralPassword(t *testing.T) {
 	if checked == 0 {
 		t.Fatal("no database URLs found in compose.yaml; this test checked nothing")
 	}
+}
+
+const postgresService = "shared_postgres"
+
+// Compose prefixes volume keys with the project name, so this key is not the
+// volume's name — ubuntu_shared_pgdata is. Renaming the key therefore does not
+// move the cluster: it mounts a fresh empty volume, initdb fills it, and the
+// stack comes up healthy and blank. A `name:` here would dodge the prefix but
+// hardcode one project's, so both are rejected. Moving the cluster is a host
+// operation, and this test is what makes you do it there.
+func TestTheSharedPostgresVolumeKeyIsPinned(t *testing.T) {
+	if block := serviceBlock(t, "compose.yaml", postgresService); !strings.Contains(block, "- shared_pgdata:") {
+		t.Errorf("%s no longer mounts the shared_pgdata volume. The cluster lives in that "+
+			"volume under a project prefix; a renamed key mounts a fresh empty one for initdb "+
+			"to fill, which deploys green and blank.", postgresService)
+	}
+
+	declared := false
+	inVolumes := false
+	for _, line := range strings.Split(readConfig(t, "compose.yaml"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if !strings.HasPrefix(line, " ") {
+			inVolumes = trimmed == "volumes:"
+			continue
+		}
+		if !inVolumes {
+			continue
+		}
+		if trimmed == "shared_pgdata:" {
+			declared = true
+			continue
+		}
+		if declared && strings.HasPrefix(line, "   ") {
+			t.Errorf("the shared_pgdata volume key carries an option (%q). A concrete `name:` "+
+				"hardcodes one project's prefix, and the day that stops holding Docker creates "+
+				"an empty volume rather than failing.", trimmed)
+		}
+		if !strings.HasPrefix(line, "   ") {
+			declared = false
+		}
+	}
+	if !strings.Contains(readConfig(t, "compose.yaml"), "\n  shared_pgdata:") {
+		t.Errorf("no shared_pgdata key in the top-level volumes block; the mount above would " +
+			"become a bind mount or fail outright.")
+	}
+}
+
+// depends_on is checked by Compose, but on the host — this pins it here, where
+// a rename that missed one is a failing test rather than a failed deploy.
+func TestEveryDependsOnNamesAServiceThatExists(t *testing.T) {
+	services := composeServiceLines(t, "compose.yaml")
+	for service := range services {
+		for _, dep := range dependsOn(t, service) {
+			if _, ok := services[dep]; !ok {
+				t.Errorf("%s depends_on %q, which is not a service in compose.yaml. Compose "+
+					"refuses to start the project on this, so the rename that left it behind "+
+					"fails on the deploy host instead of here.", service, dep)
+			}
+		}
+	}
+}
+
+// dependsOn returns the services one service depends on, in either the list
+// form (`- svc`) or the map form (`svc:` with a nested `condition:`). Read from
+// the indentation, so a nested condition is not mistaken for a dependency.
+func dependsOn(t *testing.T, service string) []string {
+	t.Helper()
+	indentOf := func(s string) int { return len(s) - len(strings.TrimLeft(s, " ")) }
+
+	var deps []string
+	blockAt, entryAt := -1, -1
+	for _, line := range composeServiceLines(t, "compose.yaml")[service] {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		indent := indentOf(line)
+		if blockAt >= 0 && indent <= blockAt {
+			blockAt, entryAt = -1, -1
+		}
+		if trimmed == "depends_on:" {
+			blockAt = indent
+			continue
+		}
+		if blockAt < 0 {
+			continue
+		}
+		if entryAt < 0 {
+			entryAt = indent
+		}
+		if indent != entryAt {
+			continue // a nested `condition:`, not a dependency
+		}
+		deps = append(deps, strings.TrimSuffix(strings.TrimPrefix(trimmed, "- "), ":"))
+	}
+	return deps
+}
+
+// `deploy.sh --services` answers "what can I pass to --service", and the two
+// have to agree. The listing used to be built from the com.muchq.description
+// labels, which happened to name exactly the services carrying a pinned image
+// — until shared_postgres got a description and no image (#1225). That made
+// the listing offer a target --service rejects, and turned the old
+// count-mismatch note into a permanent, false "some services have no
+// description" warning.
+//
+// This runs the script rather than reading it: the listing is awk and sed, and
+// a text assertion about awk is not an assertion about its output.
+func TestTheServicesListingMatchesWhatCanBeDeployed(t *testing.T) {
+	var stderr strings.Builder
+	cmd := exec.Command("bash", "deploy.sh", "--services")
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("deploy.sh --services: %v\nstderr:\n%s", err, stderr.String())
+	}
+	if note := strings.TrimSpace(stderr.String()); note != "" {
+		t.Errorf("deploy.sh --services warned %q. Every deployable service carries a "+
+			"com.muchq.description label, so this note means either a label was dropped or the "+
+			"check is counting services that were never deployable.", note)
+	}
+
+	listed := map[string]bool{}
+	for i, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if i == 0 {
+			continue // SERVICE / DESCRIPTION header
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if len(fields) == 1 {
+			t.Errorf("deploy.sh --services lists %q with no description; the label is what the "+
+				"listing is for.", fields[0])
+		}
+		listed[fields[0]] = true
+	}
+
+	deployable := deployableServices(t)
+	for service := range deployable {
+		if !listed[service] {
+			t.Errorf("%s has a pinned image, so `--service %s` is accepted, but it is missing "+
+				"from `--services` — the listing is how you find out it can be deployed.",
+				service, service)
+		}
+	}
+	for service := range listed {
+		if !deployable[service] {
+			t.Errorf("`--services` offers %q, but it carries no ghcr.io/muchq image and "+
+				"`--service %s` is rejected. Listing it advertises a target that does not "+
+				"exist (#1225).", service, service)
+		}
+	}
+}
+
+// The services deploy.sh will accept for --service: the ones whose image is
+// pinned to a commit, which is the same rule the script's own service_names
+// applies.
+func deployableServices(t *testing.T) map[string]bool {
+	t.Helper()
+	deployable := map[string]bool{}
+	for service, lines := range composeServiceLines(t, "compose.yaml") {
+		for _, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "image: ghcr.io/muchq/") {
+				deployable[service] = true
+			}
+		}
+	}
+	return deployable
 }
