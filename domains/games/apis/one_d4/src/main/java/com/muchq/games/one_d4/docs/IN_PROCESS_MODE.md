@@ -67,6 +67,13 @@ Zero external processes. Start the JAR, use it, stop it. Data lives only for the
 
 ## Implementation Plan
 
+> **These are the original design sketches, not current code.** The work shipped, but not
+> always in the shape drawn here — `DataSourceFactory.createInMemory()` below never existed,
+> and the test sample near the end uses JUnit 4 while this repo is on JUnit 5. Read §5 and §6,
+> which were corrected against the source in MoonBase#1351, as the accurate part; treat the
+> rest as history. Anything you intend to rely on, check against the code.
+
+
 ### 1. Add H2 Dependency
 
 H2 is a pure-Java SQL database that runs embedded. It supports a large subset of PostgreSQL syntax.
@@ -186,25 +193,33 @@ public void insert(GameFeatureRow row) {
 
 ### 5. IndexerModule Wiring
 
+As shipped — there is no `indexer.mode` switch. H2 is not a mode, it is what the
+resolution chain lands on when nothing else is configured:
+
 ```java
 @Factory
 public class IndexerModule {
 
     @Context
-    public DataSource dataSource(
-            @Value("${indexer.mode:postgres}") String mode,
-            @Value("${indexer.db.url:jdbc:postgresql://localhost:5432/indexer}") String jdbcUrl,
-            @Value("${indexer.db.username:indexer}") String username,
-            @Value("${indexer.db.password:indexer}") String password) {
-        return switch (mode) {
-            case "in-process" -> DataSourceFactory.createInMemory();
-            default -> DataSourceFactory.create(jdbcUrl, username, password);
-        };
+    public DataSource dataSource(@Value("${indexer.db.url:}") String configuredUrl) {
+        return DataSourceFactory.create(
+                jdbcUrl(configuredUrl),
+                System.getenv("INDEXER_DB_USERNAME"),
+                System.getenv("INDEXER_DB_PASSWORD"));
     }
 
     // Queue is already InMemoryIndexQueue by default — no change needed
 }
 ```
+
+`indexer.db.url` is a Micronaut property tests set to give each ApplicationContext
+its own database; nothing sets it in production. When it is blank, `readJdbcUrl()`
+resolves `$INDEXER_DB_URL`, then `/etc/one_d4/db_config`, then H2 in-memory.
+
+Credentials are separate environment variables rather than Micronaut properties or
+URL query parameters — pgjdbc decodes query values, so a password containing `+`,
+`&` or `%` would be corrupted in the URL. Unset leaves whatever credentials the URL
+itself carries, which is what keeps the H2 and `db_config` paths working unchanged.
 
 ### 6. Configuration
 
