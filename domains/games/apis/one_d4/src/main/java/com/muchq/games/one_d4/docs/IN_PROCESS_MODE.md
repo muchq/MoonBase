@@ -4,7 +4,7 @@
 
 ```bash
 # Start the service (H2 in-memory, no external dependencies)
-INDEXER_DB_URL="jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1" bazel run //domains/games/apis/one_d4:indexer
+INDEXER_DB_URL="jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1" bazel run //domains/games/apis/one_d4:one_d4
 
 # Index a player's games
 curl -X POST http://localhost:8080/v1/index \
@@ -65,136 +65,12 @@ To use PostgreSQL instead, set the `INDEXER_DB_URL` environment variable to a Po
 
 Zero external processes. Start the JAR, use it, stop it. Data lives only for the lifetime of the process.
 
-## Implementation Plan
+## Configuration
 
-> **These are the original design sketches, not current code.** The work shipped, but not
-> always in the shape drawn here — `DataSourceFactory.createInMemory()` below never existed,
-> and the test sample near the end uses JUnit 4 while this repo is on JUnit 5. Read §5 and §6,
-> which were corrected against the source in MoonBase#1351, as the accurate part; treat the
-> rest as history. Anything you intend to rely on, check against the code.
+### Wiring
 
-
-### 1. Add H2 Dependency
-
-H2 is a pure-Java SQL database that runs embedded. It supports a large subset of PostgreSQL syntax.
-
-```
-# bazel/java.MODULE.bazel
-"com.h2database:h2:2.2.224",
-```
-
-Bazel label: `@maven//:com_h2database_h2`
-
-### 2. Adapt DataSourceFactory
-
-```java
-public class DataSourceFactory {
-    public static DataSource create(String jdbcUrl, String username, String password) {
-        // Existing HikariCP path — works for both H2 and PostgreSQL
-        HikariConfig config = new HikariConfig();
-        config.setJdbcUrl(jdbcUrl);
-        config.setUsername(username);
-        config.setPassword(password);
-        config.setMaximumPoolSize(10);
-        config.setMinimumIdle(2);
-        return new HikariDataSource(config);
-    }
-
-    public static DataSource createInMemory() {
-        return create("jdbc:h2:mem:indexer;MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "sa", "");
-    }
-}
-```
-
-Key H2 JDBC URL flags:
-- `mem:indexer` — named in-memory database
-- `MODE=PostgreSQL` — PostgreSQL compatibility (boolean handling, function names)
-- `DB_CLOSE_DELAY=-1` — keep DB alive as long as the JVM runs (default is to drop when last connection closes)
-
-### 3. Adapt Migration.java for H2 Compatibility
-
-The existing DDL uses `gen_random_uuid()` and `JSONB`, which H2 does not support in PostgreSQL mode. The migration needs dialect-aware DDL:
-
-```java
-public class Migration {
-    private final DataSource dataSource;
-    private final boolean isH2;
-
-    public Migration(DataSource dataSource) {
-        this.dataSource = dataSource;
-        this.isH2 = detectH2(dataSource);
-    }
-
-    public void run() {
-        if (isH2) {
-            runH2Schema();
-        } else {
-            runPostgresSchema();
-        }
-    }
-
-    private void runH2Schema() {
-        // UUID PRIMARY KEY DEFAULT random_uuid()
-        // TEXT instead of JSONB
-        // No gen_random_uuid() — use random_uuid()
-    }
-
-    private boolean detectH2(DataSource ds) {
-        try (Connection conn = ds.getConnection()) {
-            return conn.getMetaData().getDatabaseProductName().contains("H2");
-        }
-    }
-}
-```
-
-**Schema Differences**:
-
-| Feature         | PostgreSQL              | H2 (PostgreSQL mode)        |
-|-----------------|-------------------------|-----------------------------|
-| UUID default    | `gen_random_uuid()`     | `random_uuid()`             |
-| JSON column     | `JSONB`                 | `TEXT`                      |
-| `?::jsonb` cast | Supported               | Use plain `TEXT` parameter  |
-| `ON CONFLICT`   | Supported               | `MERGE INTO` or `INSERT IGNORE` — H2 2.x supports `ON CONFLICT` in PostgreSQL mode |
-| `RETURNING`     | Supported               | Not supported — use `CALL IDENTITY()` or `getGeneratedKeys()` |
-
-### 4. Adapt DAOs for Dialect Differences
-
-The `IndexingRequestDao.create()` method uses `RETURNING id`, which H2 doesn't support. Use JDBC's `getGeneratedKeys()` instead — this works for both databases:
-
-```java
-public UUID create(String player, String platform, String startMonth, String endMonth) {
-    String sql = "INSERT INTO indexing_requests (id, player, platform, start_month, end_month) VALUES (?, ?, ?, ?, ?)";
-    UUID id = UUID.randomUUID();
-    try (Connection conn = dataSource.getConnection();
-         PreparedStatement ps = conn.prepareStatement(sql)) {
-        ps.setObject(1, id);
-        ps.setString(2, player);
-        ps.setString(3, platform);
-        ps.setString(4, startMonth);
-        ps.setString(5, endMonth);
-        ps.executeUpdate();
-        return id;
-    }
-}
-```
-
-This approach generates the UUID in Java, which works identically on both databases and avoids the `RETURNING` clause entirely.
-
-The `GameFeatureDao.insert()` method uses `?::jsonb` for the motifs column. In H2 mode, this becomes a plain string parameter.
-
-```java
-public void insert(GameFeatureRow row) {
-    String sql = isH2
-        ? "INSERT INTO game_features (..., motifs_json, ...) VALUES (..., ?, ...) ON CONFLICT (game_url) DO NOTHING"
-        : "INSERT INTO game_features (..., motifs_json, ...) VALUES (..., ?::jsonb, ...) ON CONFLICT (game_url) DO NOTHING";
-    // ...
-}
-```
-
-### 5. IndexerModule Wiring
-
-As shipped — there is no `indexer.mode` switch. H2 is not a mode, it is what the
-resolution chain lands on when nothing else is configured:
+There is no mode switch. H2 is not selected — it is what the resolution chain lands
+on when nothing else is configured:
 
 ```java
 @Factory
@@ -221,9 +97,9 @@ URL query parameters — pgjdbc decodes query values, so a password containing `
 `&` or `%` would be corrupted in the URL. Unset leaves whatever credentials the URL
 itself carries, which is what keeps the H2 and `db_config` paths working unchanged.
 
-### 6. Configuration
+### Environment variables
 
-Environment variables control the mode (H2 in-memory is the default):
+H2 in-memory is the default; a PostgreSQL URL is what moves off it:
 
 | Variable              | Default Value                            | Effect                                      |
 |-----------------------|------------------------------------------|---------------------------------------------|
@@ -302,51 +178,9 @@ This shares 100% of the engine, motif detection, and ChessQL code with the serve
 
 ## Testing Benefits
 
-In-process mode makes integration tests trivial:
-
-```java
-public class IntegrationTest {
-    private GameFeatureDao dao;
-    private SqlCompiler compiler;
-
-    @Before
-    public void setUp() {
-        DataSource ds = DataSourceFactory.createInMemory();
-        new Migration(ds, true).run();
-        Jdbi jdbi = Jdbi.create(ds);
-        dao = new GameFeatureDao(jdbi, true);
-        compiler = new SqlCompiler();
-    }
-
-    @Test
-    public void testEndToEndQuery() {
-        // Insert test data directly
-        dao.insertBatch(List.of(testFeature("game1", 2500, 2400)));
-
-        // Query via ChessQL
-        Expr expr = Parser.parse("white.elo >= 2500");
-        CompiledQuery cq = compiler.compile(expr);
-        List<GameFeature> results = dao.query(cq, 10, 0);
-
-        assertThat(results).hasSize(1);
-        assertThat(results.get(0).whiteElo()).isEqualTo(2500);
-    }
-}
-```
-
-No test containers. No Docker. No database setup. Sub-second test execution.
-
-## Files Modified
-
-| File | Description |
-|------|-------------|
-| `bazel/java.MODULE.bazel` | Added `com.h2database:h2:2.2.224` |
-| `Migration.java` | H2 dialect detection + compatible DDL (separate SQL for H2 vs PostgreSQL) |
-| `GameFeatureDao.java` | Dialect-aware `jsonb` cast and `MERGE` vs `ON CONFLICT` |
-| `IndexerModule.java` | Default to H2 in-memory, auto-detect dialect from JDBC URL |
-| `db/BUILD.bazel` | Added H2 runtime dep |
-
-The entire in-process mode is a configuration default with ~100 lines of dialect adaptation across existing files.
+H2 in-memory is what lets the suite run integration tests without Docker or test containers:
+`TestDb`-backed DAO tests and the `e2e/` suites boot against it directly. See those tests for
+the current setup rather than a sample here.
 
 ## Comparison with Alternatives
 

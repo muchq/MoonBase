@@ -225,5 +225,5 @@ bazel test //domains/games/apis/one_d4:src/test/java/com/muchq/games/one_d4/engi
 bazel test //domains/games/apis/one_d4:src/test/java/com/muchq/games/one_d4/queue/InMemoryIndexQueueTest
 
 # Build OCI image
-bazel build //domains/games/apis/one_d4:indexer_image
+bazel build //domains/games/apis/one_d4:one_d4_image
 ```
