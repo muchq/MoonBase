@@ -969,16 +969,24 @@ func TestEveryDatabaseUrlNamesAHostThisComposeFilePublishes(t *testing.T) {
 					"will start and fail to reach its database.", service, host, aliases)
 				continue
 			}
-			postgresOwner := false
-			for _, owner := range owners {
-				if isPostgresService(t, services, owner) {
-					postgresOwner = true
-				}
+			// Exactly one owner, and it must be Postgres. Compose lets several
+			// services publish the same alias, and Docker's DNS then answers with
+			// one A record per container — so a shared alias round-robins. Mixed
+			// with an app container that sends half the connections to something
+			// refusing 5432; shared between two Postgres services it silently
+			// splits reads and writes across two different databases. Neither is
+			// ever intended for a database name, and "at least one owner is
+			// Postgres" would wave both through.
+			if len(owners) > 1 {
+				t.Errorf("%s's database host %q is published as an alias by more than one "+
+					"service (%v). Docker returns an address for each, so connections "+
+					"round-robin between them.", service, host, owners)
+				continue
 			}
-			if !postgresOwner {
-				t.Errorf("%s's database host %q resolves, but only as an alias of %v — none of "+
-					"which is a Postgres service. Docker answers the name and the connection is "+
-					"then refused on 5432.", service, host, owners)
+			if !isPostgresService(t, services, owners[0]) {
+				t.Errorf("%s's database host %q resolves, but only as an alias of %q, which is "+
+					"not a Postgres service. Docker answers the name and the connection is then "+
+					"refused on 5432.", service, host, owners[0])
 			}
 		}
 	}
