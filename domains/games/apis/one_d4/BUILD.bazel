@@ -563,6 +563,9 @@ java_test_suite(
         ":dto",
         ":model",
         ":test_db",
+        # HikariConfig: DataSourceFactoryTest asserts on the config create() builds,
+        # including the credentials passed beside the URL (#1351).
+        artifact("com.zaxxer:HikariCP"),
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
         artifact("org.junit.jupiter:junit-jupiter-api"),

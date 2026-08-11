@@ -336,21 +336,26 @@ services:
       # (MoonBase#1351). The file is untracked, deploy.sh does not rewrite it, and no test can
       # read it — so the hostname one_d4 connects to was invisible to this repo, which is why
       # #1225 planned to keep one_d4_postgres as a network alias forever. IndexerModule ranks
-      # this variable above the file, so it takes effect without removing the file first.
+      # this variable above the file, so it takes effect without removing the file first. See
+      # IndexerModule.readJdbcUrl for why the file is still ranked second.
+      #
+      # Credentials are separate variables, not query parameters on the URL: pgjdbc URL-decodes
+      # parameter values, so ?password= silently mangles a secret containing + or %, and
+      # truncates at &. DataSourceFactory.create explains it at length.
       #
       # Underscores in the host are fine here, unlike ONE_D4_BASE_URL below: pgjdbc parses the
       # URL itself rather than through java.net.URI, which is what rejects such authorities.
       # Pinned by IndexerModuleTest so a driver upgrade that tightened parsing fails there
       # rather than on deploy.
-      - INDEXER_DB_URL=jdbc:postgresql://one_d4_postgres:5432/one_d4?user=one_d4&password=${ONE_D4_DB_PASSWORD}
+      - INDEXER_DB_URL=jdbc:postgresql://one_d4_postgres:5432/one_d4
+      - INDEXER_DB_USER=one_d4
+      - INDEXER_DB_PASSWORD=${ONE_D4_DB_PASSWORD}
       - SENTRY_DSN=${ONE_D4_SENTRY_DSN}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=one_d4
       - OTEL_RESOURCE_ATTRIBUTES=service.name=one_d4,service.version=${ONE_D4_SHA:-${DEPLOY_SHA:-latest}}
     volumes:
-      # Still mounted: the file is the fallback until the deploy is verified and it is deleted
-      # (#1351 step 4). Removing both in one change would leave no path back if the variable
-      # turns out not to reach the container.
+      # Still mounted for the retained fallback — see IndexerModule.readJdbcUrl.
       - /etc/one_d4:/etc/one_d4
     networks:
       # one-d4 for Java callers: java.net.URI gives a hostname containing an

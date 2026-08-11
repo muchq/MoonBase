@@ -116,7 +116,10 @@ public class IndexerModule {
    */
   @Context
   public DataSource dataSource(@Value("${indexer.db.url:}") String configuredUrl) {
-    return DataSourceFactory.create(jdbcUrl(configuredUrl));
+    return DataSourceFactory.create(
+        jdbcUrl(configuredUrl),
+        System.getenv("INDEXER_DB_USER"),
+        System.getenv("INDEXER_DB_PASSWORD"));
   }
 
   @Context
