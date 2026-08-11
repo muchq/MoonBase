@@ -181,6 +181,15 @@ export default function McpView() {
           the <Link to="/query">Query</Link> page uses, where the field and
           motif reference lives.
         </p>
+        <p>
+          The server also publishes the full reference over MCP, as the{' '}
+          <code>chessql://reference</code> resource: grammar, operator
+          precedence, the field and motif rosters, perspective fields and NULL
+          semantics. It is a <em>resource</em> rather than an eleventh tool, so
+          a client attaches it as context instead of spending a call to learn
+          the syntax. Clients that do not read resources still get the
+          vocabulary from each tool&apos;s description.
+        </p>
       </section>
     </div>
   );

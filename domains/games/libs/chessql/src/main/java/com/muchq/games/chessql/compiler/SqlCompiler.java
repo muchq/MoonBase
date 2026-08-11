@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -88,6 +89,41 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
           Map.entry("opening.family", "opening_family"));
 
   private static final Set<String> VALID_OPS = Set.of("=", "!=", "<", "<=", ">", ">=");
+
+  /**
+   * The vocabulary a caller may write, as canonical spellings.
+   *
+   * <p>These three are already a published contract in everything but name: they are what {@code
+   * query_chess_games}' description lists and what CHESSQL.md tabulates. Naming them makes those
+   * copies checkable — {@code ChessQlReferenceTest} and {@code McpToolVocabularyTest} fail when a
+   * copy and the compiler disagree, which is the whole reason the reference can be served verbatim
+   * over MCP (#1326) instead of generated.
+   *
+   * <p>Note what they are <em>not</em>: the rejections do not enumerate them. "Unknown field: x"
+   * names only the offending field, which is #1257 — these accessors are what a fix for it would be
+   * built from, but nothing suggests alternatives today.
+   *
+   * <p>Canonical spellings only. Underscore forms ({@code white_elo} for {@code white.elo}) are
+   * accepted everywhere the dotted form is, mechanically, so listing both would say nothing extra.
+   */
+  public static Set<String> filterableFields() {
+    Set<String> fields = new HashSet<>(FIELD_MAP.keySet());
+    // Columns with no dotted alias — eco, result, platform — are written as-is.
+    VALID_COLUMNS.stream().filter(c -> !FIELD_MAP.containsValue(c)).forEach(fields::add);
+    fields.add(DATE_FIELD);
+    fields.add(MONTH_FIELD);
+    return Set.copyOf(fields);
+  }
+
+  /** Fields resolved against the request's player, usable only when one is supplied. */
+  public static Set<String> perspectiveFields() {
+    return PERSPECTIVE_FIELDS.keySet();
+  }
+
+  /** Every name {@code motif(...)} accepts, stored and ATTACK-derived alike. */
+  public static Set<String> motifs() {
+    return VALID_MOTIFS;
+  }
 
   /**
    * Virtual date-scoping fields compiled against the played_at TIMESTAMP column. Values are

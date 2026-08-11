@@ -192,6 +192,32 @@ Both query tools see only what has been indexed, and neither reports which perio
 which reads exactly like "played no games then" — run `index_chess_games` for the period before
 concluding anything from an empty date-scoped result.
 
+## Resources
+
+- `chessql://reference` (`text/markdown`) — one_d4's `CHESSQL.md`, served verbatim: the EBNF
+  grammar, operator precedence, the field and motif rosters, perspective fields, date scoping and
+  NULL semantics.
+
+A resource, not an eleventh tool (#1326). A tool is a call the model chooses to make; a resource is
+context a client attaches up front, and making a model spend a `tools/call` round trip to learn
+query syntax *before* it can write a query is the wrong shape. Clients are not required to read
+resources, so `query_chess_games`' description keeps the full vocabulary and a resource-blind
+client loses the grammar, precedence and NULL semantics — not the field, motif or perspective
+rosters.
+
+All three copies of that vocabulary — the compiler, the doc, and the tool description — are pinned
+against each other, in both directions:
+
+- `ChessQlReferenceTest` (one_d4) — CHESSQL.md's tables vs `SqlCompiler`.
+- `McpToolVocabularyTest` (here) — `query_chess_games`' served description vs `SqlCompiler`.
+- `SqlCompilerTest` — every advertised name actually compiles, and an unadvertised one is
+  rejected. Without this the other two pin the doc to a restatement of the accept rule rather than
+  to the rule.
+
+That is what makes serving the file verbatim safe rather than a third place to drift. It is not a
+theoretical risk: the tool description had already drifted twice, missing `zugzwang` and
+`overloaded_piece` from the motifs and `game.url` and `played.at` from the fields.
+
 ## Configuration
 
 Environment variables:

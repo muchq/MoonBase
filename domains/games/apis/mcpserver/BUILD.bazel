@@ -44,6 +44,21 @@ java_library(
 )
 
 java_library(
+    name = "resources",
+    srcs = [
+        "src/main/java/com/muchq/games/mcpserver/resources/ChessQlReferenceResource.java",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        # The reference is one_d4's CHESSQL.md on the classpath, not a copy kept here — a copy is
+        # exactly the drift this is meant to avoid (#1326).
+        "//domains/games/apis/one_d4:chessql_reference",
+        artifact("io.micronaut.mcp:micronaut-mcp-annotations"),
+        artifact("jakarta.inject:jakarta-inject-api"),
+    ],
+)
+
+java_library(
     name = "module",
     srcs = [
         "src/main/java/com/muchq/games/mcpserver/McpModule.java",
@@ -117,6 +132,7 @@ java_binary(
         ":api",
         ":auth",
         ":module",
+        ":resources",
         ":tools",
         "//domains/platform/libs/logging",
         "//domains/platform/libs/yodel:micronaut",
@@ -202,12 +218,15 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/games/mcpserver/McpAuthenticationTest.java",
         "src/test/java/com/muchq/games/mcpserver/McpProtocolTest.java",
+        "src/test/java/com/muchq/games/mcpserver/McpResourceContractTest.java",
         "src/test/java/com/muchq/games/mcpserver/McpToolRosterContractTest.java",
+        "src/test/java/com/muchq/games/mcpserver/McpToolVocabularyTest.java",
     ],
     runtime_deps = MCP_SERVER_DEPS + [
         ":api",
         ":auth",
         ":module",
+        ":resources",
         ":tools",
         "//domains/platform/libs/logging",
         "//domains/platform/libs/yodel:micronaut",
@@ -219,6 +238,10 @@ java_test_suite(
         artifact("io.micronaut.mcp:micronaut-mcp-annotations"),
         artifact("io.modelcontextprotocol.sdk:mcp-core"),
         ":mcp_tools_fixture",
+        # Test-only. McpToolVocabularyTest pins query_chess_games' served description
+        # against the compiler's rosters; production :tools still reaches one_d4 only
+        # through :dto and HTTP (#1332).
+        "//domains/games/libs/chessql:compiler",
         "//domains/platform/libs/json",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("io.micronaut:micronaut-context"),

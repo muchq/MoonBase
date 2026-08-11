@@ -52,6 +52,25 @@ describe('McpView', () => {
   });
 
   /**
+   * The page tells readers to fetch `chessql://reference`, so the URI is a published promise the
+   * same way the tool names are. It is the one literal on this page that the server can rename
+   * unilaterally: McpResourceContractTest hardcodes the URI too, so renaming it there turns that
+   * test red and it gets updated — and without this assertion 1d4.net would keep advertising the
+   * old URI, green, while clients got nothing back. Kept in sync by hand rather than through
+   * mcp_tools.json because that file is the *tool* roster, pinned from both sides; a second
+   * fixture for one string would cost more than it pins.
+   */
+  it('documents the ChessQL reference resource by URI', () => {
+    render(
+      <MemoryRouter>
+        <McpView />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('chessql://reference')).toBeTruthy();
+  });
+
+  /**
    * The index-first ordering is the single thing a newcomer gets wrong, so it is not allowed to
    * quietly vanish from the page.
    */

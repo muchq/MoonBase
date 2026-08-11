@@ -30,8 +30,8 @@ public class QueryGamesTool {
               + " opening.family = \"Caro Kann Defense\"', 'eco = \"B90\" AND NOT motif(pin)'."
               + " Available fields: white.elo, black.elo, white.username, black.username,"
               + " white.title, black.title, time.class, eco, opening.name, opening.family, result,"
-              + " num.moves, platform, date (ISO comparisons, e.g. 'date >= \"2026-07-01\"'), and"
-              + " month (equality only, 'month = \"2026-07\"'). "
+              + " num.moves, platform, game.url, played.at, date (ISO comparisons, e.g. 'date >="
+              + " \"2026-07-01\"'), and month (equality only, 'month = \"2026-07\"'). "
               + ToolDescriptions.UNINDEXED_PERIODS_READ_AS_EMPTY
               + " "
               + ToolDescriptions.OPENING_FAMILY_IS_NOT_NORMALIZED
@@ -41,7 +41,10 @@ public class QueryGamesTool {
               + " e.g. player: hikaru with 'outcome = \"win\" AND opponent.title = \"GM\"'."
               + " Available motifs: pin, cross_pin, fork, skewer, discovered_attack,"
               + " discovered_check, check, checkmate, promotion, promotion_with_check,"
-              + " promotion_with_checkmate, back_rank_mate, smothered_mate, double_check.")
+              + " promotion_with_checkmate, back_rank_mate, smothered_mate, double_check,"
+              + " zugzwang, overloaded_piece."
+              + " Full syntax — grammar, operator precedence, IN lists, NULL semantics — is the"
+              + " chessql://reference resource.")
   public CallToolResult queryChessGames(
       @ToolArg(description = "A ChessQL query string") String query,
       @Nullable
