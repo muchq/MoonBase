@@ -202,7 +202,8 @@ read by pgjdbc). Both point at the `one_d4_postgres` service.
 
 **r3dr is the exception and still reads a host file.** `ReadConnectionString` takes
 `DB_CONNECTION_STRING` then falls back to `/etc/r3dr/db_config`, and r3dr's compose block sets no
-environment at all — the same shape one_d4 had before #1351. Moving it is not tracked yet.
+environment at all — the same shape one_d4 had before #1351. Tracked as #1357; until then the guard
+below cannot see r3dr, because there is no URL in this file for it to check.
 
 Keeping a URL here rather than in a host file is what makes the hostname visible to this repo:
 `deploy_config_test.go` fails if a database host is not a Postgres service this file publishes, so
