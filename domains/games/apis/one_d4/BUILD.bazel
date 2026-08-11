@@ -537,6 +537,9 @@ java_test_suite(
         ":queue",
         ":worker",
         artifact("io.micronaut:micronaut-inject"),
+        # The driver itself, so the URL shape compose hands this container is checked
+        # against the parser that will actually read it (#1351).
+        artifact("org.postgresql:postgresql"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],

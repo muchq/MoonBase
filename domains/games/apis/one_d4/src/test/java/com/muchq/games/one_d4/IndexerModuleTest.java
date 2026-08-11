@@ -20,6 +20,41 @@ public class IndexerModuleTest {
   @TempDir Path tmp;
 
   /**
+   * compose hands this container {@code jdbc:postgresql://one_d4_postgres:5432/one_d4} (#1351), and
+   * that hostname has underscores in it. Three lines away in the same compose file sits the
+   * opposite lesson — mcpserver must call {@code one-d4}, not {@code one_d4}, because {@link
+   * java.net.URI} gives an authority containing an underscore a null host and every request built
+   * from it fails — so the natural assumption is that this URL needs an alias too.
+   *
+   * <p>It does not: pgjdbc parses the URL with its own parser rather than through {@code URI}. That
+   * is the whole reason the deploy can point at the service key directly instead of adding another
+   * alias to carry forever, so it is pinned rather than trusted — a driver upgrade that tightened
+   * host parsing would otherwise surface as one_d4 failing to reach its database on deploy.
+   */
+  @Test
+  public void pgjdbcAcceptsTheUnderscoredHostnameComposeHandsUs() throws Exception {
+    org.postgresql.Driver driver = new org.postgresql.Driver();
+    String url = "jdbc:postgresql://one_d4_postgres:5432/one_d4?user=one_d4&password=secret";
+
+    assertThat(driver.acceptsURL(url)).isTrue();
+    assertThat(org.postgresql.Driver.parseURL(url, null))
+        .as("the driver must resolve the underscored authority to a host, not drop it")
+        .containsEntry("PGHOST", "one_d4_postgres")
+        .containsEntry("PGDBNAME", "one_d4");
+  }
+
+  /**
+   * The control. Without it the assertion above would hold just as well against a driver that
+   * accepted everything, which is the failure mode that would let a libpq-shaped URL through.
+   */
+  @Test
+  public void pgjdbcRejectsTheLibpqUrlShapeGolfHubUses() throws Exception {
+    assertThat(new org.postgresql.Driver().acceptsURL("postgresql://one_d4_postgres:5432/one_d4"))
+        .as("golf_hub's C++ form is not a JDBC URL and must not be mistaken for one")
+        .isFalse();
+  }
+
+  /**
    * The poller is a daemon thread, so nothing stops it at shutdown unless the container is told to.
    * Without this annotation a deploy is indistinguishable from a crash: the in-flight row stays
    * owned by a process that no longer exists for a full lease, and the attempt it spent is gone.

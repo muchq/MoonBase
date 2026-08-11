@@ -194,6 +194,27 @@ Services require configuration files in their respective `/etc` directories on t
 - `/etc/microgpt-serve/` - microgpt config, including the model in `model/`
 - `/etc/one_d4/` - one_d4 service configuration
 
+### Database URLs
+
+Every database consumer takes its URL from `compose.yaml`, interpolating a password from the
+host's `~/.env`: `GOLF_HUB_DB_URL` for golf_hub (libpq form, read from C++) and `INDEXER_DB_URL`
+for one_d4 (JDBC form, read by pgjdbc). Both point at the `one_d4_postgres` service.
+
+Keeping them here rather than in a host file is what makes the hostname visible to this repo:
+`deploy_config_test.go` fails if a URL names a host no service publishes, and the instance can be
+renamed (#1225) by editing one file instead of by keeping the old name resolving forever.
+
+**Tradeoff, stated rather than absorbed.** A host file can be mode-restricted; an environment
+variable is readable in `docker inspect` output and in `/proc/<pid>/environ` by anyone who can
+reach them. golf_hub already accepts that, so this makes one_d4 consistent with the rest of the
+stack rather than newly exposed — but the password does move from a root-owned file into container
+metadata, and that is a real change in where it sits.
+
+one_d4 still falls back to `/etc/one_d4/db_config` when `INDEXER_DB_URL` is unset. That file is
+untracked and superseded; it is kept only until a deploy confirms the variable arrives (#1351).
+When checking, read the **body** of `/health` — it answers 200 with `{"status":"DOWN"}` when
+Postgres is unreachable, so the status code alone proves nothing.
+
 ## Network
 
 All services run on the `muchq_network` Docker bridge network.

@@ -859,3 +859,109 @@ func TestTheAnalyzeRouteIsNotPubliclyExposed(t *testing.T) {
 		}
 	}
 }
+
+// Every database hostname this file hands a service, as service -> host. Covers
+// both spellings compose allows for environment (the `- KEY=value` list one_d4
+// uses and the `KEY: value` mapping golf_hub uses) and both URL shapes in play
+// (JDBC, which pgjdbc parses itself, and libpq, which golf_hub's C++ uses).
+func databaseHosts(t *testing.T) map[string]string {
+	t.Helper()
+	// Host is what follows the last @ (credentials, if any) up to : or /.
+	urlPattern := regexp.MustCompile(`(?:jdbc:)?postgresql://(?:[^@\s/]*@)?([A-Za-z0-9_.-]+)`)
+
+	hosts := map[string]string{}
+	for service, lines := range composeServiceLines(t, "compose.yaml") {
+		for _, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "#") {
+				continue
+			}
+			if match := urlPattern.FindStringSubmatch(line); match != nil {
+				hosts[service] = match[1]
+			}
+		}
+	}
+	return hosts
+}
+
+// A database URL is only as good as the name in it, and the name is the half no
+// container can validate at build time: compose interpolates the password, the
+// driver parses the URL, and the first sign of a hostname nothing answers to is
+// a service that boots and cannot reach its data.
+//
+// This is not hypothetical. MoonBase#1351 proposed moving one_d4's URL into
+// compose pointed at `shared_postgres`, the name #1225 plans to rename the
+// instance to — but #1225 is still open and unimplemented, so that name resolves
+// to nothing today and one_d4 would have come up unable to connect. The mistake
+// is invisible in review precisely because the name reads correctly.
+//
+// Docker resolves a service by its compose key and by the aliases it publishes,
+// so those are the two things that count. A dotted name is external and out of
+// scope, the same carve-out TestTheOneD4UpstreamHostIsAnAliasOneD4Publishes makes.
+func TestEveryDatabaseUrlNamesAHostThisComposeFilePublishes(t *testing.T) {
+	services := composeServiceLines(t, "compose.yaml")
+	hosts := databaseHosts(t)
+
+	if len(hosts) == 0 {
+		t.Fatal("no database URLs found in compose.yaml; this test is reading nothing and would " +
+			"pass against a file that pointed every service at the wrong instance")
+	}
+
+	for service, host := range hosts {
+		if strings.Contains(host, ".") {
+			continue // external, reached through DNS rather than this network
+		}
+		if _, isService := services[host]; isService {
+			continue
+		}
+		resolved, aliases := aliasOnAppNetwork(t, services, host)
+		if resolved {
+			continue
+		}
+		t.Errorf("%s's database URL names host %q, but compose.yaml defines no such service and "+
+			"nothing publishes it as an alias on app_network (aliases found: %v). The container "+
+			"will start and fail to reach its database.", service, host, aliases)
+	}
+}
+
+// Whether any service publishes host as an alias on app_network, plus every
+// alias seen — the second return is what makes the failure message actionable.
+// Separate from the loop above so that a match short-circuits this lookup only,
+// not the whole test: an early return there would skip every service after the
+// first one that resolved.
+func aliasOnAppNetwork(t *testing.T, services map[string][]string, host string) (bool, []string) {
+	t.Helper()
+	var aliases []string
+	found := false
+	for candidate := range services {
+		for _, alias := range networkAliases(t, candidate, "app_network") {
+			aliases = append(aliases, alias)
+			if alias == host {
+				found = true
+			}
+		}
+	}
+	return found, aliases
+}
+
+// one_d4 is the only Java consumer of the shared instance — golf_hub reaches it
+// from C++ through libpq — so it is the only one for which the URL has to be a
+// JDBC URL rather than a libpq one. The two are not interchangeable: pgjdbc
+// rejects a URL without the jdbc: prefix outright, and DataSourceFactory hands
+// whatever it is given straight to Hikari.
+func TestOneD4sDatabaseUrlIsAJdbcUrl(t *testing.T) {
+	block := serviceBlock(t, "compose.yaml", "one_d4")
+	match := regexp.MustCompile(`INDEXER_DB_URL=(\S+)`).FindStringSubmatch(block)
+	if match == nil {
+		t.Fatalf("one_d4's compose block sets no INDEXER_DB_URL. Without it the container falls "+
+			"back to /etc/one_d4/db_config — a file this repo does not track and no test can "+
+			"read (#1351). Block was:\n%s", block)
+	}
+	if !strings.HasPrefix(match[1], "jdbc:postgresql://") {
+		t.Errorf("INDEXER_DB_URL=%q is not a JDBC URL. golf_hub's libpq form (postgresql://...) "+
+			"is what this would most likely be copied from, and pgjdbc rejects it.", match[1])
+	}
+	if !strings.Contains(match[1], "${ONE_D4_DB_PASSWORD}") {
+		t.Errorf("INDEXER_DB_URL=%q does not interpolate ${ONE_D4_DB_PASSWORD}. A literal "+
+			"password here would be a credential committed to the repo.", match[1])
+	}
+}
