@@ -201,9 +201,12 @@ Environment variables (with defaults):
 |------------------------|-------------------------------------------|
 | `PORT`                 | 8080                                      |
 | `APP_NAME`             | helloworld (shared application.yml)       |
-| `INDEXER_DB_URL`       | jdbc:postgresql://localhost:5432/indexer   |
-| `INDEXER_DB_USERNAME`  | indexer                                   |
-| `INDEXER_DB_PASSWORD`  | indexer                                   |
+| `INDEXER_DB_URL`       | jdbc:h2:mem:indexer (H2 in-memory)         |
+| `INDEXER_DB_USERNAME`  | (unset — the URL's own credentials apply) |
+| `INDEXER_DB_PASSWORD`  | (unset — the URL's own credentials apply) |
+
+The deploy sets all three from `compose.yaml` (MoonBase#1351). Credentials are passed
+separately rather than as URL query parameters, which pgjdbc decodes.
 
 ## Build & Test
 
@@ -222,5 +225,5 @@ bazel test //domains/games/apis/one_d4:src/test/java/com/muchq/games/one_d4/engi
 bazel test //domains/games/apis/one_d4:src/test/java/com/muchq/games/one_d4/queue/InMemoryIndexQueueTest
 
 # Build OCI image
-bazel build //domains/games/apis/one_d4:indexer_image
+bazel build //domains/games/apis/one_d4:one_d4_image
 ```

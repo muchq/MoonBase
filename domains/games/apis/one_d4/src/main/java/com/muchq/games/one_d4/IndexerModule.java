@@ -57,6 +57,11 @@ public class IndexerModule {
   /**
    * Resolves the JDBC URL. Priority: 1. INDEXER_DB_URL environment variable 2.
    * /etc/one_d4/db_config file (plain text, single line) 3. H2 in-memory (local dev default)
+   *
+   * <p>The deploy sets the variable from compose (#1351), so the file is a superseded fallback kept
+   * only until that is confirmed on the host and the file is deleted. It is deliberately still
+   * ranked second rather than removed: doing both at once would leave nothing to fall back to if
+   * the variable turned out not to reach the container.
    */
   static String readJdbcUrl() {
     return readJdbcUrl(System.getenv("INDEXER_DB_URL"), DB_CONFIG_PATH);
@@ -111,7 +116,10 @@ public class IndexerModule {
    */
   @Context
   public DataSource dataSource(@Value("${indexer.db.url:}") String configuredUrl) {
-    return DataSourceFactory.create(jdbcUrl(configuredUrl));
+    return DataSourceFactory.create(
+        jdbcUrl(configuredUrl),
+        System.getenv("INDEXER_DB_USERNAME"),
+        System.getenv("INDEXER_DB_PASSWORD"));
   }
 
   @Context

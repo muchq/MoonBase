@@ -4,6 +4,7 @@ import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import java.util.OptionalInt;
 import javax.sql.DataSource;
+import org.jspecify.annotations.Nullable;
 
 public class DataSourceFactory {
 
@@ -26,7 +27,29 @@ public class DataSourceFactory {
   }
 
   public static DataSource create(String jdbcUrl) {
-    return new HikariDataSource(hikariConfig(jdbcUrl));
+    return create(jdbcUrl, null, null);
+  }
+
+  /**
+   * Credentials passed beside the URL rather than inside it, because pgjdbc URL-decodes query
+   * parameter values. Interpolating a password into {@code ?password=...} silently corrupts any
+   * secret containing {@code +} (becomes a space), truncates at {@code &}, rewrites {@code %41} to
+   * {@code A}, and fails to parse at all on a stray {@code %} — reported as "No suitable driver",
+   * which implicates nothing. {@code openssl rand -base64} emits {@code +} routinely, so this is a
+   * live hazard for a password that already works elsewhere, not a theoretical one.
+   *
+   * <p>Hikari hands these to the driver as connection properties, which are not decoded, so the
+   * secret's alphabet stops being a constraint. Embedding credentials in the URL's userinfo instead
+   * would dodge the decoding but lose Hikari's password masking, whose regex only recognises the
+   * {@code password=} query form — the URL would then appear complete in a connection-failure
+   * message.
+   *
+   * <p>Null or empty leaves the config alone, so a URL that carries its own credentials (the {@code
+   * /etc/one_d4/db_config} fallback, and every H2 test URL) behaves exactly as before.
+   */
+  public static DataSource create(
+      String jdbcUrl, @Nullable String username, @Nullable String password) {
+    return new HikariDataSource(hikariConfig(jdbcUrl, username, password));
   }
 
   /**
@@ -36,8 +59,21 @@ public class DataSourceFactory {
    * there.
    */
   static HikariConfig hikariConfig(String jdbcUrl) {
+    return hikariConfig(jdbcUrl, null, null);
+  }
+
+  static HikariConfig hikariConfig(
+      String jdbcUrl, @Nullable String username, @Nullable String password) {
     HikariConfig config = new HikariConfig();
     config.setJdbcUrl(jdbcUrl);
+    if (username != null && !username.isEmpty()) {
+      config.setUsername(username);
+    }
+    // isEmpty, not isBlank: an all-whitespace password is legal, and an unset environment
+    // variable arrives as "" rather than as whitespace.
+    if (password != null && !password.isEmpty()) {
+      config.setPassword(password);
+    }
     config.setMaximumPoolSize(5);
     config.setMinimumIdle(1);
     config.setKeepaliveTime(60_000);

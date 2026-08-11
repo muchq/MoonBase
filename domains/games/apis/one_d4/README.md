@@ -125,19 +125,30 @@ INDEXER_DB_URL="jdbc:h2:file:/tmp/indexer;DB_CLOSE_DELAY=-1" \
   bazel run //domains/games/apis/one_d4:one_d4
 ```
 
-To point at a PostgreSQL or Neon instance, embed credentials in the URL:
+To point at a PostgreSQL or Neon instance, pass the credentials beside the URL:
 
 ```bash
-INDEXER_DB_URL="jdbc:postgresql://localhost:5432/indexer?user=indexer&password=indexer" \
+INDEXER_DB_URL="jdbc:postgresql://localhost:5432/indexer" \
+  INDEXER_DB_USERNAME=indexer \
+  INDEXER_DB_PASSWORD=indexer \
   bazel run //domains/games/apis/one_d4:one_d4
 ```
 
-On a deployed server, place the JDBC URL in `/etc/one_d4/db_config` (plain text, one
-line) instead of using an environment variable. The app resolves config in this order:
+Credentials in the URL still work, but only if the password survives URL decoding —
+pgjdbc decodes query values, so `+` becomes a space, `&` truncates the rest, and a bare
+`%` fails to parse. The separate variables have no such constraint; see
+`DataSourceFactory.create`.
+
+The app resolves the URL in this order:
 
 1. `INDEXER_DB_URL` environment variable
 2. `/etc/one_d4/db_config` file
 3. H2 in-memory (local dev fallback)
+
+**On the deployed server the variable is what applies.** `compose.yaml` sets
+`INDEXER_DB_URL`, `INDEXER_DB_USERNAME` and `INDEXER_DB_PASSWORD` (MoonBase#1351), and the
+variable outranks the file — so editing `/etc/one_d4/db_config` there now has no effect.
+The file is kept only as a fallback until that deploy is confirmed.
 
 For Neon, the URL looks like:
 ```
@@ -385,9 +396,9 @@ Returns `{"gamesReanalyzed": N}`.
 ## Inspecting the database (deployed)
 
 On the deployed machine the indexer runs against **PostgreSQL** — the `one_d4_postgres` service
-(image `postgres:18`, Compose volume `one_d4_pgdata`), reached via the JDBC URL in
-`/etc/one_d4/db_config` (mounted into the container; see the resolution order above). H2 is the
-local-dev default only.
+(image `postgres:18`, Compose volume `one_d4_pgdata`), reached via the JDBC URL `compose.yaml`
+sets in `INDEXER_DB_URL` (see the resolution order above; `/etc/one_d4/db_config` is still
+mounted, but the variable outranks it). H2 is the local-dev default only.
 
 ### Via the API (no direct DB access)
 
@@ -397,8 +408,8 @@ local-dev default only.
 ### Direct database access
 
 1. Find the database container: `docker ps | grep one_d4_postgres`.
-2. Open a shell against it (credentials come from the deploy environment; the JDBC URL in
-   `/etc/one_d4/db_config` carries the same user and database):
+2. Open a shell against it (credentials come from the deploy environment; `INDEXER_DB_USERNAME`
+   in `compose.yaml` names the same user, and the database is `one_d4`):
    ```bash
    docker exec -it CONTAINER psql -U one_d4 -d one_d4
    ```

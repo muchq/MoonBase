@@ -2,6 +2,7 @@ package com.muchq.games.one_d4.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.zaxxer.hikari.HikariConfig;
 import org.junit.jupiter.api.Test;
 
 public class DataSourceFactoryTest {
@@ -73,5 +74,41 @@ public class DataSourceFactoryTest {
   public void socketTimeoutExceedsTheLongestSilentStatementBound() {
     assertThat(DataSourceFactory.PG_SOCKET_TIMEOUT_SECONDS)
         .isGreaterThan(StatementTimeouts.RETENTION_SWEEP_SECONDS);
+  }
+
+  /**
+   * Credentials reach the driver as connection properties, not as URL text, so the secret's
+   * alphabet stops mattering. pgjdbc URL-decodes query parameter values: the same password in
+   * {@code ?password=} arrives as "a b" for {@code a+b}, truncates at {@code &}, and rewrites
+   * {@code %41} to {@code A}. These are the exact characters that would be corrupted, asserted
+   * through the config create() builds rather than through the policy alone.
+   */
+  @Test
+  public void credentialsPassedBesideTheUrlSurviveCharactersAQueryStringWouldMangle() {
+    for (String password : new String[] {"a+b", "a&b", "ab%41cd", "ab%zz", "plain"}) {
+      HikariConfig config =
+          DataSourceFactory.hikariConfig(
+              "jdbc:postgresql://one_d4_postgres:5432/one_d4", "one_d4", password);
+      assertThat(config.getPassword()).isEqualTo(password);
+      assertThat(config.getUsername()).isEqualTo("one_d4");
+      assertThat(config.getJdbcUrl())
+          .as("the URL must stay free of credentials, or Hikari's masking has nothing to mask")
+          .doesNotContain(password)
+          .doesNotContain("password=");
+    }
+  }
+
+  /**
+   * The compatibility half. A URL that carries its own credentials — /etc/one_d4/db_config, and
+   * every H2 test URL — must be untouched, so unset variables cannot override what the URL says.
+   */
+  @Test
+  public void absentCredentialsLeaveTheConfigAlone() {
+    for (String[] pair : new String[][] {{null, null}, {"", ""}}) {
+      HikariConfig config =
+          DataSourceFactory.hikariConfig("jdbc:h2:mem:x;DB_CLOSE_DELAY=-1", pair[0], pair[1]);
+      assertThat(config.getUsername()).isNull();
+      assertThat(config.getPassword()).isNull();
+    }
   }
 }
