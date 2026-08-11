@@ -1481,6 +1481,75 @@ public class SqlCompilerTest {
         .hasMessageContaining("not supported in aggregate");
   }
 
+  /**
+   * {@code filterableFields()} is a reconstruction of the accept rule, not the rule itself — {@code
+   * resolveColumn} enumerates nothing, it tries {@code FIELD_MAP}, then the bare column, then the
+   * underscored form, then throws. So the set could drift from what the compiler actually takes
+   * with nothing to notice, and CHESSQL.md (which is pinned to the set, and served to MCP clients
+   * as {@code chessql://reference}) would confidently document a roster the compiler no longer
+   * honours. This is the round trip that ties the two together.
+   *
+   * <p>One direction only, deliberately: advertised ⊆ accepted. The converse cannot be asserted
+   * without enumerating every string the compiler might take, which {@code resolveColumn} does not
+   * expose. Widening through the maps is still covered, just not here — a column added to {@code
+   * VALID_COLUMNS} lands in {@code filterableFields()} too, so {@code ChessQlReferenceTest} and
+   * {@code McpToolVocabularyTest} both fail until the doc and the tool description catch up
+   * (verified by mutation). What nothing catches is a new special case inside {@code resolveColumn}
+   * itself.
+   */
+  @Test
+  public void everyFilterableFieldActuallyCompiles() {
+    for (String field : SqlCompiler.filterableFields()) {
+      String literal =
+          field.equals("date") ? "\"2026-07-01\"" : field.equals("month") ? "\"2026-07\"" : "\"x\"";
+      assertThatCode(() -> compile(field + " = " + literal))
+          .as("%s is advertised by filterableFields() but the compiler rejects it", field)
+          .doesNotThrowAnyException();
+    }
+  }
+
+  /**
+   * The negative twin. Without it the test above passes against a {@code filterableFields()} that
+   * returned everything, or a compiler that accepted everything — and "accepts everything" is the
+   * failure mode that turns an unknown field into a silent empty result rather than an error.
+   */
+  @Test
+  public void aFieldOutsideTheAdvertisedSetIsRejected() {
+    assertThat(SqlCompiler.filterableFields()).doesNotContain("white.rating");
+    assertThatThrownBy(() -> compile("white.rating = 2500"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Unknown field");
+  }
+
+  /** Likewise for motifs: everything advertised compiles, and nothing outside the set does. */
+  @Test
+  public void everyAdvertisedMotifCompilesAndNothingElseDoes() {
+    for (String motif : SqlCompiler.motifs()) {
+      assertThatCode(() -> compile("motif(" + motif + ")"))
+          .as("%s is advertised by motifs() but the compiler rejects it", motif)
+          .doesNotThrowAnyException();
+    }
+    assertThat(SqlCompiler.motifs()).doesNotContain("windmill");
+    assertThatThrownBy(() -> compile("motif(windmill)"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Unknown motif");
+  }
+
+  /**
+   * Perspective fields need a player, so they compile through the two-argument overload. Advertised
+   * means usable: without this, {@code perspectiveFields()} could name a field that only the
+   * groupBy path accepts.
+   */
+  @Test
+  public void everyPerspectiveFieldCompilesWithAPlayer() {
+    for (String field : SqlCompiler.perspectiveFields()) {
+      String literal = field.endsWith(".elo") ? "1500" : "\"x\"";
+      assertThatCode(() -> compiler.compile(Parser.parse(field + " = " + literal), "hikaru"))
+          .as("%s is advertised by perspectiveFields() but the compiler rejects it", field)
+          .doesNotThrowAnyException();
+    }
+  }
+
   private CompiledQuery compile(String input) {
     return compiler.compile(Parser.parse(input));
   }

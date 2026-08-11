@@ -86,9 +86,15 @@ public class McpResourceContractTest {
 
   /**
    * Not vacuous-content insurance: the equality above would hold just as well if the doc were
-   * empty, and an empty reference is the exact failure this resource exists to prevent. These are
-   * the parts a tool description cannot carry — the grammar and the precedence rule — so their
-   * absence would mean the resource is not earning its keep even while the wiring "works".
+   * empty, and an empty reference is the exact failure this resource exists to prevent. These two
+   * headings are what a tool description cannot carry, so their absence would mean the resource is
+   * not earning its keep even while the wiring "works".
+   *
+   * <p>Headings only, deliberately. An earlier draft also pinned the sentence stating the
+   * precedence rule, which made rewording one line of prose in <em>one_d4's</em> CHESSQL.md break a
+   * test in mcpserver — the cross-module coupling {@code McpToolRosterContractTest} explicitly
+   * refuses for tool descriptions. Structure here; the rosters are pinned in one_d4, where the doc
+   * lives.
    */
   @Test
   public void theServedReferenceCarriesWhatTheToolDescriptionCannot() throws Exception {
@@ -98,7 +104,6 @@ public class McpResourceContractTest {
             .asText();
 
     assertThat(text).contains("## Grammar (EBNF)").contains("## Operator Precedence");
-    assertThat(text).contains("`a OR b AND c` is parsed as `a OR (b AND c)`");
   }
 
   /**

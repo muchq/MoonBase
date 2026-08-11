@@ -60,6 +60,13 @@ public class McpProtocolTest {
     assertThat(result.at("/capabilities/tools").isMissingNode())
         .as("a server that advertises no tools capability is one no client will call tools on")
         .isFalse();
+    assertThat(result.at("/capabilities/resources").isMissingNode())
+        .as(
+            "clients gate resources/list on this flag, so losing it hides chessql://reference as"
+                + " completely as not serving it (#1326) — and micronaut-mcp derives the flag from"
+                + " the declared primitives, so it disappears silently if the bean stops"
+                + " registering")
+        .isFalse();
     assertThat(result.at("/serverInfo/name").asText()).isEqualTo("1d4-mcp");
     assertThat(result.at("/serverInfo/version").asText())
         .as(

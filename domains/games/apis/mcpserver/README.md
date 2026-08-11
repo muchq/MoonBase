@@ -200,15 +200,23 @@ concluding anything from an empty date-scoped result.
 
 A resource, not an eleventh tool (#1326). A tool is a call the model chooses to make; a resource is
 context a client attaches up front, and making a model spend a `tools/call` round trip to learn
-query syntax *before* it can write a query is the wrong shape. The tool descriptions still carry
-the vocabulary on their own, so a client that never reads resources loses the grammar and the
-edges, not the field list.
+query syntax *before* it can write a query is the wrong shape. Clients are not required to read
+resources, so `query_chess_games`' description keeps the full vocabulary and a resource-blind
+client loses the grammar, precedence and NULL semantics — not the field, motif or perspective
+rosters.
 
-The rosters inside it are a copy of what `SqlCompiler` accepts, so they are pinned:
-`ChessQlReferenceTest` (in one_d4) fails when the doc's tables and the compiler's maps disagree,
-in either direction. That is what makes serving the file verbatim safe rather than a third place
-to drift — it had already drifted once, into this server's own tool description, which was missing
-`zugzwang` and `overloaded_piece`.
+All three copies of that vocabulary — the compiler, the doc, and the tool description — are pinned
+against each other, in both directions:
+
+- `ChessQlReferenceTest` (one_d4) — CHESSQL.md's tables vs `SqlCompiler`.
+- `McpToolVocabularyTest` (here) — `query_chess_games`' served description vs `SqlCompiler`.
+- `SqlCompilerTest` — every advertised name actually compiles, and an unadvertised one is
+  rejected. Without this the other two pin the doc to a restatement of the accept rule rather than
+  to the rule.
+
+That is what makes serving the file verbatim safe rather than a third place to drift. It is not a
+theoretical risk: the tool description had already drifted twice, missing `zugzwang` and
+`overloaded_piece` from the motifs and `game.url` and `played.at` from the fields.
 
 ## Configuration
 

@@ -55,11 +55,17 @@ public class ChessQlReferenceTest {
    * Both motif tables at once — stored and ATTACK-derived. The split between them is an
    * implementation detail of how the predicate compiles; to a caller writing {@code motif(x)} it is
    * one roster, and it is the roster that has to be complete.
+   *
+   * <p>Bounded at {@code ## Values}, not run to the end of the document. Review caught this: the
+   * Compilation Examples table further down also writes {@code `motif(pin)`} and {@code
+   * `motif(checkmate)`}, so an unbounded scan let those two names be re-supplied from outside the
+   * roster — deleting either row from the tables above left this test green while the served
+   * reference no longer documented the motif anywhere a reader would look.
    */
   @Test
   public void theMotifTablesListExactlyTheMotifsTheCompilerAccepts() throws IOException {
     Set<String> documented = new LinkedHashSet<>();
-    Matcher matcher = MOTIF_CALL.matcher(section("## Motifs", null));
+    Matcher matcher = MOTIF_CALL.matcher(section("## Motifs", "## Values"));
     while (matcher.find()) {
       documented.add(matcher.group(1));
     }
@@ -79,7 +85,10 @@ public class ChessQlReferenceTest {
   public void theSectionsThisTestReadsExist() throws IOException {
     assertThat(section("## Fields", "### Date scoping")).isNotBlank();
     assertThat(section("### Perspective fields", "## Motifs")).isNotBlank();
-    assertThat(section("## Motifs", null)).isNotBlank();
+    assertThat(section("## Motifs", "## Values")).isNotBlank();
+    // The bound that keeps Compilation Examples out of the motif roster. If this heading is
+    // renamed, section() fails loudly here rather than the scan silently widening to EOF.
+    assertThat(reference()).contains("## Values");
     assertThat(SqlCompiler.filterableFields()).isNotEmpty();
     assertThat(SqlCompiler.perspectiveFields()).isNotEmpty();
     assertThat(SqlCompiler.motifs()).isNotEmpty();

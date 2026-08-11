@@ -93,11 +93,15 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
   /**
    * The vocabulary a caller may write, as canonical spellings.
    *
-   * <p>These three are already a published contract in everything but name: they are what the
-   * "Unknown field" and "Unknown motif" rejections enumerate, what {@code query_chess_games}'
-   * description lists, and what CHESSQL.md tabulates. Naming them makes the copies checkable —
-   * {@code ChessQlReferenceTest} fails when the doc and the compiler disagree, which is the whole
-   * reason the reference can be served verbatim over MCP (#1326) instead of generated.
+   * <p>These three are already a published contract in everything but name: they are what {@code
+   * query_chess_games}' description lists and what CHESSQL.md tabulates. Naming them makes those
+   * copies checkable — {@code ChessQlReferenceTest} and {@code McpToolVocabularyTest} fail when a
+   * copy and the compiler disagree, which is the whole reason the reference can be served verbatim
+   * over MCP (#1326) instead of generated.
+   *
+   * <p>Note what they are <em>not</em>: the rejections do not enumerate them. "Unknown field: x"
+   * names only the offending field, which is #1257 — these accessors are what a fix for it would be
+   * built from, but nothing suggests alternatives today.
    *
    * <p>Canonical spellings only. Underscore forms ({@code white_elo} for {@code white.elo}) are
    * accepted everywhere the dotted form is, mechanically, so listing both would say nothing extra.
