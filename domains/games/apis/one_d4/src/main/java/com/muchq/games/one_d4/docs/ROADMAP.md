@@ -136,11 +136,14 @@ Allow forcing a full re-fetch and re-index for periods that would otherwise be s
 ### Disk cap
 
 **Largely overtaken by the move to PostgreSQL (#1194).** This item was written when the
-deployment ran H2 file storage on a `one_d4_data` volume, which no longer exists: the indexer
-depends on the `shared_postgres` service and its `one_d4_pgdata` volume, and retention (7 days of
-games, see README) bounds growth in a way the original H2 setup did not. What is left of the
-concern is host-level: nothing caps `one_d4_pgdata`, so the notes below apply to that volume,
-minus the app-level H2 file measurement.
+deployment ran H2 file storage on a `one_d4_data` volume, which nothing mounts any more: the
+indexer depends on the `shared_postgres` service and its `one_d4_pgdata` volume, and retention
+(7 days of games, see README) bounds growth in a way the original H2 setup did not. What is left
+of the concern is host-level: nothing caps `one_d4_pgdata`, so the notes below apply to that
+volume, minus the app-level H2 file measurement.
+
+(The old volume is unmounted, not gone — `ubuntu_one_d4_data` is still on the deploy host with
+9.8M in it. #1354 removes it.)
 
 **App-level cap (optional):**
 
