@@ -8,7 +8,14 @@ out
 .bsp
 .bazelbsp
 .metals
-.claude
+# Ignore .claude's contents, but track the pieces the repo actually shares:
+# the session-start hook and the settings that register it. Ignoring the
+# directory itself would stop git descending into it, so the negations below
+# would never match. settings.local.json stays ignored — that is where
+# machine- and session-specific grants belong.
+.claude/*
+!.claude/hooks/
+!.claude/settings.json
 .kiro
 vcpkg_installed
 conan
