@@ -928,11 +928,10 @@ func isPostgresService(t *testing.T, services map[string][]string, host string) 
 // driver parses the URL, and the first sign of a hostname nothing answers to is
 // a service that boots and cannot reach its data.
 //
-// This is not hypothetical. MoonBase#1351 proposed moving one_d4's URL into
-// compose pointed at `shared_postgres`, the name #1225 plans to rename the
-// instance to — but #1225 is still open and unimplemented, so that name resolves
-// to nothing today and one_d4 would have come up unable to connect. The mistake
-// is invisible in review precisely because the name reads correctly.
+// This is not hypothetical: a URL can be renamed to point at a service name
+// that isn't backed by anything yet, and the container comes up unable to
+// connect. The mistake is invisible in review precisely because the name reads
+// correctly.
 //
 // A dotted name is external and reached through DNS, the same carve-out
 // TestTheOneD4UpstreamHostIsAnAliasOneD4Publishes makes.

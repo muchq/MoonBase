@@ -201,7 +201,7 @@ Services require configuration files in their respective `/etc` directories on t
 
 golf_hub and one_d4 take their database URLs from `compose.yaml`, interpolating a password from
 the host's `~/.env`: `GOLF_HUB_DB_URL` (libpq form, read from C++) and `INDEXER_DB_URL` (JDBC form,
-read by pgjdbc). Both point at the `one_d4_postgres` service.
+read by pgjdbc). Both point at the `shared_postgres` service.
 
 **r3dr is the exception and still reads a host file.** `ReadConnectionString` takes
 `DB_CONNECTION_STRING` then falls back to `/etc/r3dr/db_config`, and r3dr's compose block sets no
@@ -222,8 +222,9 @@ reach them. golf_hub already accepts that, so this makes one_d4 consistent with 
 stack rather than newly exposed — but the password does move from a root-owned file into container
 metadata, and that is a real change in where it sits.
 
-one_d4 still falls back to `/etc/one_d4/db_config`; `IndexerModule.readJdbcUrl` explains why it is
-kept. When verifying a deploy, read the **body** of `/health` — it answers 200 with
+`INDEXER_DB_URL` always wins over `/etc/one_d4/db_config` when both are present — see
+`IndexerModule.readJdbcUrl`. The file is mounted only as a fallback this repo does not maintain,
+not something a deploy still writes. When verifying a deploy, read the **body** of `/health` — it answers 200 with
 `{"status":"DOWN"}` when Postgres is unreachable, so the status code alone proves nothing.
 
 ## Network
@@ -258,9 +259,21 @@ or writes land in the volume you are copying away from:
 sudo docker compose -f compose.yaml -f docker-compose.observability.yml stop
 sudo docker volume create ubuntu_shared_pgdata
 sudo docker run --rm -v ubuntu_one_d4_pgdata:/from -v ubuntu_shared_pgdata:/to \
-  alpine sh -c 'cd /from && cp -a . /to'
+  alpine sh -c '
+    if [ -n "$(ls -A /to 2>/dev/null)" ]; then
+      echo "refusing: /to is not empty (partial or previous run?)" >&2
+      exit 1
+    fi
+    cd /from && cp -a . /to
+  '
 # then deploy the compose.yaml carrying the new key
 ```
+
+`docker volume create` is a no-op when the volume already exists, and `cp -a . /to` merges into
+whatever is already there rather than replacing it — safe the first time, but re-running after a
+partial or previously-started copy would merge files from two cluster states into one directory.
+The check above refuses unless the destination is empty; if you need to retry after a partial copy,
+remove and recreate the destination volume explicitly first.
 
 The old volume is left in place, so rollback is the previous `compose.yaml` and
 a redeploy — see **Rollback** above about config always coming from your working
