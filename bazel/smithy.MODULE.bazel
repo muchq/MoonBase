@@ -6,16 +6,24 @@ bazel_dep(name = "smithy_cpp", version = "0.0.0")
 # loudly rather than silently changing the build.
 # Evaluation: https://github.com/muchq/MoonBase/issues/1168
 #
-# Pinned past muchq/smithy-cpp#173 (4208f791): terminal transitions fire the
+# Pinned past muchq/smithy-cpp#187 (46bcd4d), which r3dr's rewrite needs
+# (#1359): modeled HTTP redirects. Generated clients now treat 3xx as success
+# instead of only 2xx, so a `@httpResponseCode` redirect arrives as a typed
+# output carrying Location rather than as a GenericError; and responses on the
+# statuses RFC 9110 forbids content on (1xx, 204, 205, 304) no longer carry a
+# JSON body, for `@httpPayload` responses as well as document bodies. r3dr's
+# `GET /r/{slug}` is a 302, so this is the pin that makes the port modelable.
+#
+# Carries muchq/smithy-cpp#173 (was 4208f791): terminal transitions fire the
 # parked send before the parked receive so End()/Close cannot deadlock when a
 # harvested send waiter still holds the stream pin. Golf hub e2e Quiesce is
 # defense-in-depth for unread wake frames; the End() hang that motivated it
 # is fixed upstream here.
 archive_override(
     module_name = "smithy_cpp",
-    integrity = "sha256-xHxCkCYRt/JIachM/q2SmPF2JvZbk5Jo4oCNZCyJ6+A=",
-    strip_prefix = "smithy-cpp-4208f791464c55520da6db0e4c491da9402c7508",
+    integrity = "sha256-md1wErYgywVM/dLjnk44sUcHsGjYGqyDT/uGlBR+X+A=",
+    strip_prefix = "smithy-cpp-46bcd4d225b1f030985f6675079d3fa89b5302ed",
     urls = [
-        "https://github.com/muchq/smithy-cpp/archive/4208f791464c55520da6db0e4c491da9402c7508.tar.gz",
+        "https://github.com/muchq/smithy-cpp/archive/46bcd4d225b1f030985f6675079d3fa89b5302ed.tar.gz",
     ],
 )

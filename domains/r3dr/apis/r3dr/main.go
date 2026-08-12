@@ -32,29 +32,40 @@ func MakeIpRateLimiterMiddleware(config rate_limit.RateLimiterConfig) mucks.Midd
 		config)
 }
 
-func main() {
-	config := ReadConfig()
-
-	shortenerApi := MakeShortenerApi(config)
-	defer shortenerApi.Close()
-
+// NewRouter wires the routes and middleware the service serves. Split out of
+// main so tests drive the same object production does — the routing, the
+// middleware order, and the rate-limit budgets are part of the wire contract,
+// and a test that rebuilt them would be testing its own copy.
+func NewRouter(api *ShortenerApi, fallback rate_limit.RateLimiterConfig,
+	shorten rate_limit.RateLimiterConfig) http.Handler {
 	router := mucks.NewMucks()
 
 	// Add fallback rate-limiter at the router layer
-	fallbackRateLimiter := MakeFallbackLimiterMiddleware(FallbackRateLimiterConfig)
+	fallbackRateLimiter := MakeFallbackLimiterMiddleware(fallback)
 	router.Add(fallbackRateLimiter)
 
 	// Ping endpoint
 	router.HandleFunc("GET /ping", PingHandler)
 
 	// Rate-limited Shorten API endpoint
-	shortenRateLimiter := MakeIpRateLimiterMiddleware(ShortenRateLimiterConfig)
+	shortenRateLimiter := MakeIpRateLimiterMiddleware(shorten)
 	router.HandleFunc("POST /shorten",
-		shortenRateLimiter.Wrap(shortenerApi.ShortenHandler))
+		shortenRateLimiter.Wrap(api.ShortenHandler))
 
 	// Non rate-limited Redirect API endpoint
 	router.HandleFunc("GET /r/{slug}",
-		shortenerApi.RedirectHandler)
+		api.RedirectHandler)
+
+	return router
+}
+
+func main() {
+	config := ReadConfig()
+
+	shortenerApi := MakeShortenerApi(config)
+	defer shortenerApi.Close()
+
+	router := NewRouter(shortenerApi, FallbackRateLimiterConfig, ShortenRateLimiterConfig)
 
 	log.Fatal(http.ListenAndServe(":"+config.Port, router))
 }

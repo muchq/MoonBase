@@ -1,5 +1,34 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
 load("//bazel/rules:oci.bzl", "linux_oci_go")
+
+# Phase 2 of the r3dr rewrite (#1359): the API modeled in Smithy, generating
+# alongside the Go service it describes. Nothing consumes these yet — the
+# handler and the postgres store are phase 3 — but generating them here means
+# the model is checked by CI from the day it exists rather than the day
+# someone writes code against it.
+#
+# The Go wire tests (wire_test.go) pin the same contract from the other side;
+# between them, a model that drifts from the running service fails somewhere.
+smithy_cpp_server_library(
+    name = "r3dr_smithy_server",
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/r3dr.smithy",
+    ],
+    namespace = "moonbase::r3dr",
+    service = "moonbase.r3dr#R3dr",
+)
+
+smithy_cpp_client_library(
+    name = "r3dr_smithy_client",
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/r3dr.smithy",
+    ],
+    namespace = "moonbase::r3dr",
+    service = "moonbase.r3dr#R3dr",
+)
 
 go_library(
     name = "r3dr_lib",
@@ -40,10 +69,12 @@ go_test(
         "dto_test.go",
         "encoding_test.go",
         "shortener_test.go",
+        "wire_test.go",
     ],
     embed = [":r3dr_lib"],
     deps = [
         "//domains/platform/libs/clock",
+        "//domains/platform/libs/resilience4g/rate_limit",
         "@com_github_hashicorp_golang_lru_v2//expirable",
         "@com_github_hashicorp_golang_lru_v2//simplelru",
         "@com_github_stretchr_testify//assert",
