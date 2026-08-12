@@ -45,9 +45,14 @@ public class AggregateGamesTool {
               + " opponent.elo(200); each group key is the band's numeric lower bound (2400 at"
               + " width 200 means 2400-2599), and NULL elos group under a null key. "
               + ToolDescriptions.OPENING_FAMILY_IS_NOT_NORMALIZED
-              + " In the output, count is how many groups were returned, not how many games;"
-              + " totalGames/totalGroups cover the untruncated result, and truncated=true means"
-              + " the group limit cut off a long tail.")
+              + " With player set, every group also carries wins/losses/draws and score (W + D/2)"
+              + " for that player, so 'which openings do I play' and 'how do I score in them' are"
+              + " one call — do NOT group by outcome to get this, which splits each family into up"
+              + " to three rows and spends the group limit three times over. Those four fields are"
+              + " absent without a player, and a game whose result is neither a decision nor a draw"
+              + " counts in count and in none of them. In the output, count is how many groups were"
+              + " returned, not how many games; totalGames/totalGroups cover the untruncated"
+              + " result, and truncated=true means the group limit cut off a long tail.")
   public CallToolResult aggregateChessGames(
       @ToolArg(description = "A ChessQL filter") String query,
       @ToolArg(
@@ -82,7 +87,27 @@ public class AggregateGamesTool {
           @ToolArg(
               description =
                   "Maximum groups to return (default " + DEFAULT_LIMIT + ", max " + MAX_LIMIT + ")")
-          Integer limit) {
+          Integer limit,
+      @Nullable
+          @ToolArg(
+              name = "order_by",
+              description =
+                  "How groups are ranked before the limit cuts the tail: \"count\" (most games"
+                      + " first, the default) or \"score\" (best score per game first — (W + D/2) /"
+                      + " games — ties broken by game count), which requires player. Ranking here"
+                      + " is not the same as sorting"
+                      + " the rows you got back — only this happens before truncation. Pair"
+                      + " \"score\" with min_games, or the top of the list is whatever sideline was"
+                      + " played once and won")
+          String orderBy,
+      @Nullable
+          @ToolArg(
+              name = "min_games",
+              description =
+                  "Drop groups with fewer than this many games (default 0, i.e. keep every group)."
+                      + " totalGames/totalGroups and truncated are computed over the groups that"
+                      + " qualified, so they still describe the answer being returned")
+          Integer minGames) {
     if (query.isBlank()) {
       return ToolResults.error("query is required");
     }
@@ -94,9 +119,13 @@ public class AggregateGamesTool {
     List<String> groupByNames = groupBy.stream().map(String::valueOf).toList();
     int effectiveLimit = limit == null ? DEFAULT_LIMIT : Math.min(Math.max(limit, 1), MAX_LIMIT);
 
+    // A negative floor is not a different request from no floor; one_d4 clamps it the same way.
+    int effectiveMinGames = minGames == null ? 0 : Math.max(minGames, 0);
+
     IndexerFacade.AggregateResult aggregate;
     try {
-      aggregate = facade.aggregate(query, groupByNames, player, effectiveLimit);
+      aggregate =
+          facade.aggregate(query, groupByNames, player, effectiveLimit, orderBy, effectiveMinGames);
     } catch (IllegalArgumentException | OneD4Client.UpstreamException e) {
       return ToolResults.error(e.getMessage());
     }

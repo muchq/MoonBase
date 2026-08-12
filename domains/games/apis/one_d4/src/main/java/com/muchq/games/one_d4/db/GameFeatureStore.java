@@ -74,8 +74,19 @@ public interface GameFeatureStore {
   /**
    * Runs a compiled aggregate query (see SqlCompiler.compileAggregate) and maps each group row
    * using the given canonical group column names.
+   *
+   * <p>{@code withOutcomeMetrics} must match what the query was compiled to SELECT — {@code
+   * AggregateSpec.hasOutcomeMetrics()} is the one answer both sides take it from. A row mapper that
+   * read the metric columns from a query compiled without them would fail per row, at the database
+   * driver, for what is really a caller mistake.
    */
-  List<AggregateRow> aggregate(Object compiledQuery, List<String> groupColumns, int limit);
+  List<AggregateRow> aggregate(
+      Object compiledQuery, List<String> groupColumns, boolean withOutcomeMetrics, int limit);
+
+  /** Counts only, for aggregates compiled with no perspective player. */
+  default List<AggregateRow> aggregate(Object compiledQuery, List<String> groupColumns, int limit) {
+    return aggregate(compiledQuery, groupColumns, false, limit);
+  }
 
   /**
    * Runs a compiled aggregate totals query (see SqlCompiler.compileAggregateTotals) and returns the

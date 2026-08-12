@@ -3,6 +3,7 @@ package com.muchq.games.one_d4.db;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import com.muchq.games.chessql.compiler.AggregateSpec;
 import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.chessql.parser.ParsedQuery;
 import com.muchq.games.chessql.parser.Parser;
@@ -460,6 +461,70 @@ public class PostgresAggregateCompatTest {
     assertThat(groups.stream().mapToLong(AggregateRow::count).sum()).isEqualTo(4);
     assertThat(totals.totalGames()).isEqualTo(4);
     assertThat(totals.totalGroups()).isEqualTo(3);
+  }
+
+  /**
+   * The outcome metrics and the score ranking on the real dialect (#1345). Three things could
+   * differ from H2 and none of them would show up as a compile error: {@code SUM(CASE ... THEN 1
+   * ELSE 0 END)} comes back as bigint rather than int, the ranking wraps the grouped query in a
+   * derived table whose columns the outer ORDER BY names, and {@code score_points * 1.0 /
+   * group_count} is numeric division in Postgres and floating-point in H2 — which must still order
+   * the same way. The floor rides along as a HAVING inside the derived table.
+   */
+  @Test
+  public void outcomeMetricsAndScoreRankingOnPostgres() {
+    dao.insertBatch(
+        List.of(
+            // Sideline: one win, a perfect rate on no evidence — excluded by the floor.
+            game("sc-1", "hikaru", "a", "1-0", "Side", Instant.parse("2026-07-02T10:00:00Z")),
+            // Caro: a win as White, a win as Black, a draw, a loss, and an unfinished game.
+            game("sc-2", "hikaru", "b", "1-0", "Caro", Instant.parse("2026-07-03T10:00:00Z")),
+            game("sc-3", "c", "hikaru", "0-1", "Caro", Instant.parse("2026-07-04T10:00:00Z")),
+            game("sc-4", "hikaru", "d", "1/2-1/2", "Caro", Instant.parse("2026-07-05T10:00:00Z")),
+            game("sc-5", "e", "hikaru", "1-0", "Caro", Instant.parse("2026-07-06T10:00:00Z")),
+            game("sc-6", "hikaru", "f", "*", "Caro", Instant.parse("2026-07-07T10:00:00Z")),
+            // Sicilian: a win and a draw — the best real rate.
+            game("sc-7", "hikaru", "g", "1-0", "Sic", Instant.parse("2026-07-08T10:00:00Z")),
+            game("sc-8", "hikaru", "h", "1/2-1/2", "Sic", Instant.parse("2026-07-09T10:00:00Z"))));
+
+    SqlCompiler compiler = new SqlCompiler();
+    ParsedQuery parsed = Parser.parse("white.username = \"hikaru\" OR black.username = \"hikaru\"");
+    List<String> groupBy = List.of("opening_family");
+
+    AggregateSpec metrics = AggregateSpec.of(groupBy, "hikaru");
+    List<AggregateRow> byCount =
+        dao.aggregate(
+            compiler.compileAggregate(parsed, metrics),
+            compiler.resolveGroupByColumns(groupBy),
+            metrics.hasOutcomeMetrics(),
+            50);
+
+    AggregateRow caro =
+        byCount.stream()
+            .filter(g -> "Caro".equals(g.group().get("opening_family")))
+            .findFirst()
+            .orElseThrow();
+    assertThat(caro.count()).isEqualTo(5);
+    assertThat(caro.wins()).isEqualTo(2);
+    assertThat(caro.losses()).isEqualTo(1);
+    assertThat(caro.draws()).isEqualTo(1);
+    assertThat(caro.score()).isEqualTo(2.5);
+
+    AggregateSpec ranked = new AggregateSpec(groupBy, "hikaru", AggregateSpec.Order.SCORE, 2);
+    List<AggregateRow> byScore =
+        dao.aggregate(
+            compiler.compileAggregate(parsed, ranked),
+            compiler.resolveGroupByColumns(groupBy),
+            ranked.hasOutcomeMetrics(),
+            50);
+
+    assertThat(byScore.stream().map(g -> g.group().get("opening_family")))
+        .as("ranked by points per game, with the one-game sideline below the floor")
+        .containsExactly("Sic", "Caro");
+
+    var totals = dao.aggregateTotals(compiler.compileAggregateTotals(parsed, ranked));
+    assertThat(totals.totalGroups()).isEqualTo(2);
+    assertThat(totals.totalGames()).isEqualTo(7);
   }
 
   /** The same day/month boundary math the H2 suite pins, against pgjdbc's timestamp binding. */

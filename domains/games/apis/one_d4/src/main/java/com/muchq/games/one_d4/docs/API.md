@@ -227,13 +227,14 @@ matching row and group client-side.
 }
 ```
 
-| Field   | Type     | Required | Default | Max  | Description                                       |
-|---------|----------|----------|---------|------|---------------------------------------------------|
-| query   | string   | yes      | —       | —    | ChessQL filter (may use perspective fields when `player` is set) |
-| groupBy | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form; physical columns, plus the perspective fields when `player` is set — the rating fields as width-bucketed terms like `"opponent.elo(200)"`) |
-| orderBy | string   | no       | "count" | —    | Only "count" is supported (descending)            |
-| limit   | int      | no       | 50      | 1000 | Max groups to return                              |
-| player  | string   | no       | —       | —    | Username that perspective fields in the filter and groupBy are resolved against. It does **not** by itself scope the aggregate — see below |
+| Field    | Type     | Required | Default | Max  | Description                                       |
+|----------|----------|----------|---------|------|---------------------------------------------------|
+| query    | string   | yes      | —       | —    | ChessQL filter (may use perspective fields when `player` is set) |
+| groupBy  | string[] | yes      | —       | 5    | Fields to group by (dotted or underscore form; physical columns, plus the perspective fields when `player` is set — the rating fields as width-bucketed terms like `"opponent.elo(200)"`) |
+| orderBy  | string   | no       | "count" | —    | `"count"` (most games first) or `"score"` (best score per game first, ties broken by game count) — `"score"` requires `player` |
+| limit    | int      | no       | 50      | 1000 | Max groups to return                              |
+| player   | string   | no       | —       | —    | Username that perspective fields in the filter and groupBy are resolved against, and whose results the per-group outcome metrics are computed for. It does **not** by itself scope the aggregate — see below |
+| minGames | int      | no       | 0       | —    | Drop groups with fewer games than this. Negative values clamp to 0 |
 
 `player` resolves perspective fields; it is not a filter. Games are restricted to that player
 only through the participation guard, which is added when a perspective field is actually in play
@@ -282,6 +283,35 @@ CHESSQL.md).
   "truncated": false
 }
 ```
+
+### Outcome metrics
+
+With `player` set, every group also carries how that player did in it, so "which openings do I
+play" and "how do I score in them" are one request instead of a `["opening_family", "outcome"]`
+grouping the caller pivots back by hand — a grouping that also spends the group limit up to three
+times over, because each family fans out into a win, a loss and a draw row:
+
+```json
+{
+  "groups": [
+    { "group": { "opening_family": "Caro Kann Defense" },
+      "count": 41, "wins": 15, "losses": 20, "draws": 6, "score": 18.0 }
+  ],
+  "count": 1, "totalGames": 41, "totalGroups": 1, "truncated": false
+}
+```
+
+`score` is the conventional W + D/2, so it can carry a half point. The four fields are **absent**
+without a `player` — not zero, which would read as "won none of these" rather than "nobody was
+asked about". `wins + losses + draws` can be less than `count`: a game whose result is neither a
+decision nor a draw (an unfinished `*`) is counted and scored nowhere.
+
+`"orderBy": "score"` ranks groups by score **per game** — (W + D/2) / games — before `limit`
+truncates, with game count breaking ties. That ordering is only useful with `minGames`: a
+one-game opening that was won scores 100% and would otherwise top every list. Ranking by total
+points would only re-spell `"count"`, since the most-played group collects the most points.
+`minGames` applies to `totalGames` / `totalGroups` too, so `truncated` still describes the answer
+being returned rather than a tail the caller asked not to see.
 
 A rating-bucket group key is a JSON *number* (the band's lower bound), and a NULL group — an
 untitled opponent, a NULL elo — is an explicit `null` value, so `group` values are not uniformly

@@ -196,6 +196,88 @@ public class IndexerFacadeHttpTest {
     assertThat(groupBy.get(1).asText()).isEqualTo("5");
   }
 
+  /**
+   * The ranking parameters reach one_d4 on the request body, under the names the endpoint reads.
+   * They are validated there and nowhere else, so a facade that dropped them would turn "rank these
+   * by score" into "rank these by count" with nothing anywhere reporting a problem.
+   */
+  @Test
+  public void aggregatePutsOrderByAndMinGamesOnTheWire() throws Exception {
+    List<String> bodies = new ArrayList<>();
+    routes.put(
+        "POST /v1/aggregate",
+        exchange -> {
+          bodies.add(readBody(exchange));
+          respond(
+              exchange,
+              200,
+              "{\"groups\":[],\"count\":0,\"totalGames\":0,\"totalGroups\":0,\"truncated\":false}");
+        });
+
+    facade().aggregate("outcome = \"win\"", List.of("opening_family"), "hikaru", 20, "score", 10);
+
+    var body = JsonUtils.mapper().readTree(bodies.get(0));
+    assertThat(body.get("orderBy").asText()).isEqualTo("score");
+    assertThat(body.get("minGames").asInt()).isEqualTo(10);
+    assertThat(body.get("player").asText()).isEqualTo("hikaru");
+  }
+
+  /** Omitting them sends the same body the four-argument call always sent. */
+  @Test
+  public void aggregateWithoutRankingArgumentsSendsTheCountDefault() throws Exception {
+    List<String> bodies = new ArrayList<>();
+    routes.put(
+        "POST /v1/aggregate",
+        exchange -> {
+          bodies.add(readBody(exchange));
+          respond(
+              exchange,
+              200,
+              "{\"groups\":[],\"count\":0,\"totalGames\":0,\"totalGroups\":0,\"truncated\":false}");
+        });
+
+    facade().aggregate("white.elo > 1", List.of("opening_family"), null, 20);
+
+    var body = JsonUtils.mapper().readTree(bodies.get(0));
+    assertThat(body.get("orderBy").asText()).isEqualTo("count");
+    assertThat(body.get("minGames").asInt()).isZero();
+  }
+
+  /** The outcome metrics one_d4 returns survive the extra hop rather than being dropped. */
+  @Test
+  public void outcomeMetricsSurviveTheRoundTrip() {
+    route(
+        "POST /v1/aggregate",
+        200,
+        "{\"groups\":[{\"group\":{\"opening_family\":\"Caro Kann\"},\"count\":41,"
+            + "\"wins\":15,\"losses\":20,\"draws\":6,\"score\":18.0}],"
+            + "\"count\":1,\"totalGames\":41,\"totalGroups\":1,\"truncated\":false}");
+
+    IndexerFacade.AggregateResult result =
+        facade().aggregate("outcome = \"win\"", List.of("opening_family"), "hikaru", 20);
+
+    assertThat(result.groups().get(0).wins()).isEqualTo(15);
+    assertThat(result.groups().get(0).losses()).isEqualTo(20);
+    assertThat(result.groups().get(0).draws()).isEqualTo(6);
+    assertThat(result.groups().get(0).score()).isEqualTo(18.0);
+  }
+
+  /** And a corpus-wide response still deserializes with them absent. */
+  @Test
+  public void anAggregateWithoutOutcomeMetricsDeserializesWithThemNull() {
+    route(
+        "POST /v1/aggregate",
+        200,
+        "{\"groups\":[{\"group\":{\"opening_family\":\"Caro Kann\"},\"count\":41}],"
+            + "\"count\":1,\"totalGames\":41,\"totalGroups\":1,\"truncated\":false}");
+
+    IndexerFacade.AggregateResult result =
+        facade().aggregate("white.elo > 1", List.of("opening_family"), null, 20);
+
+    assertThat(result.groups().get(0).wins()).isNull();
+    assertThat(result.groups().get(0).score()).isNull();
+  }
+
   /** The null group key the aggregate tool documents has to survive the extra hop. */
   @Test
   public void aNullGroupValueSurvivesTheRoundTrip() {

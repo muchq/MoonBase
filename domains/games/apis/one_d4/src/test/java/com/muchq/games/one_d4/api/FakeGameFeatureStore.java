@@ -110,7 +110,8 @@ final class FakeGameFeatureStore implements GameFeatureStore {
   public void deleteOccurrencesByGameUrls(List<String> gameUrls) {}
 
   @Override
-  public List<AggregateRow> aggregate(Object compiledQuery, List<String> groupColumns, int limit) {
+  public List<AggregateRow> aggregate(
+      Object compiledQuery, List<String> groupColumns, boolean withOutcomeMetrics, int limit) {
     return List.of();
   }
 

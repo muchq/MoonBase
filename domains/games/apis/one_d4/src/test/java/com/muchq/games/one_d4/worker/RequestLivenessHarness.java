@@ -828,7 +828,7 @@ abstract class RequestLivenessHarness {
 
     @Override
     public List<AggregateRow> aggregate(
-        Object compiledQuery, List<String> groupColumns, int limit) {
+        Object compiledQuery, List<String> groupColumns, boolean withOutcomeMetrics, int limit) {
       return List.of();
     }
 

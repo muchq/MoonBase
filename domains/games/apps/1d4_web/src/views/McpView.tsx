@@ -162,6 +162,13 @@ export default function McpView() {
             <code>group_by: ["opening_family"]</code> — the openings they
             played, by count.
           </li>
+          <li>
+            The same call with <code>player: &quot;hikaru&quot;</code>,{' '}
+            <code>order_by: &quot;score&quot;</code> and{' '}
+            <code>min_games: 10</code> — the openings they score best in, since
+            each group carries wins/losses/draws and score once a player is
+            named.
+          </li>
         </ul>
         <p className="panel-note">
           Both sides of the OR, or you only count the games they had White.

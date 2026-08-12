@@ -433,7 +433,8 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   @Override
-  public List<AggregateRow> aggregate(Object compiledQuery, List<String> groupColumns, int limit) {
+  public List<AggregateRow> aggregate(
+      Object compiledQuery, List<String> groupColumns, boolean withOutcomeMetrics, int limit) {
     if (!(compiledQuery instanceof CompiledQuery cq)) {
       throw new IllegalArgumentException(
           "Expected CompiledQuery, got: " + compiledQuery.getClass());
@@ -454,7 +455,17 @@ public class GameFeatureDao implements GameFeatureStore {
                     for (String column : groupColumns) {
                       group.put(column, rs.getObject(column));
                     }
-                    return new AggregateRow(group, rs.getLong("group_count"));
+                    long count = rs.getLong("group_count");
+                    if (!withOutcomeMetrics) {
+                      return new AggregateRow(group, count);
+                    }
+                    return AggregateRow.withOutcomes(
+                        group,
+                        count,
+                        rs.getLong("wins"),
+                        rs.getLong("losses"),
+                        rs.getLong("draws"),
+                        rs.getLong("score_points"));
                   })
               .list();
         });

@@ -165,6 +165,16 @@ as-is — the perspective *filter* matches case-insensitively, but group keys ar
 case-normalized, so the same opponent stored under two casings forms two groups (same trap as
 `opening_family` variants). Without `player`, grouping by any perspective field is rejected.
 
+`player` also decides whether the aggregate carries outcome metrics. With one supplied, each
+group comes back with `wins` / `losses` / `draws` / `score` (W + D/2) from that player's side,
+which is what makes `groupBy: ["opening_family"]` answer "how do I score in each opening" without
+a second `outcome` dimension to pivot back — and without spending the group limit three times per
+family. Without a player the four fields are absent rather than zero: there is no side to
+attribute a result to. A result that is neither a decision nor a draw (an unfinished `*`) is
+counted in `count` and in none of the three, so they need not add up. `orderBy: "score"` ranks by
+score per game before the limit truncates and requires `player`; pair it with `minGames` so a
+one-game sideline does not top the list. See API.md for the request fields.
+
 The two rating fields (`me.elo`, `opponent.elo`) group as fixed-width buckets, never raw by
 default — grouping by a raw rating makes one bucket per distinct value, burying the answer under
 one-game groups. A `groupBy` term is either a field name or a rating field with a

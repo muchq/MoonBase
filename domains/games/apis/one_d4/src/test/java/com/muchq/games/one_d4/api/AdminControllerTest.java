@@ -220,7 +220,7 @@ public class AdminControllerTest {
 
     @Override
     public List<com.muchq.games.one_d4.api.dto.AggregateRow> aggregate(
-        Object compiledQuery, List<String> groupColumns, int limit) {
+        Object compiledQuery, List<String> groupColumns, boolean withOutcomeMetrics, int limit) {
       return List.of();
     }
 

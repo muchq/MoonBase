@@ -178,13 +178,18 @@ the schema, and its migrations, and this server holds no database credentials at
   `date >= "2026-07-01"`) or `month` (`month = "2026-07"`, equality only).
 - `aggregate_chess_games` — grouped counts over indexed games: `query`, `group_by` (e.g.
   `["opening_family"]`; with `player` also the perspective fields — rating fields bucket,
-  default 100 points, e.g. `opponent.elo(200)`), optional `player` and `limit`. Answers "most
-  popular openings" — or "hikaru's results against each GM he faced, both colors pooled" via
-  perspective fields — in one call. The output's `count` is the number of groups returned, not
-  games; `totalGames`/`totalGroups` cover the untruncated result and `truncated` says the group
-  limit cut off a long tail (common with `opening_family`, whose chess.com ECO-URL-derived
-  values are not normalized: "Closed Sicilian Defense" and "Alapin Sicilian Defense" are
-  distinct groups, not part of "Sicilian Defense").
+  default 100 points, e.g. `opponent.elo(200)`), optional `player`, `limit`, `order_by` and
+  `min_games`. Answers "most popular openings" — or "hikaru's results against each GM he faced,
+  both colors pooled" via perspective fields — in one call. With `player` set, each group also
+  carries `wins`/`losses`/`draws` and `score` (W + D/2) for that player, so "how do I score in
+  them" is the same call rather than a second `outcome` dimension to pivot back; the four fields
+  are absent without a player. `order_by: "score"` ranks by score per game before the limit
+  truncates (requires `player`, and wants `min_games` so a one-game sideline does not top the
+  list). The output's `count` is the number of groups returned, not games;
+  `totalGames`/`totalGroups` cover the untruncated result and `truncated` says the group limit cut
+  off a long tail (common with `opening_family`, whose chess.com ECO-URL-derived values are not
+  normalized: "Closed Sicilian Defense" and "Alapin Sicilian Defense" are distinct groups, not
+  part of "Sicilian Defense").
 - `analyze_position` — detect motifs in a single `pgn` without indexing it.
 
 Both query tools see only what has been indexed, and neither reports which periods those are. A

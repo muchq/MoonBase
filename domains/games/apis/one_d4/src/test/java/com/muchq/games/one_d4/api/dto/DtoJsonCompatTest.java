@@ -126,6 +126,81 @@ public class DtoJsonCompatTest {
                     + "\"count\":2,\"totalGames\":59,\"totalGroups\":2,\"truncated\":false}"));
   }
 
+  /**
+   * The document API.md publishes for a player-scoped aggregate. The metric keys are as much a
+   * contract as {@code count} is, and {@code score} must stay a number that can carry a half point
+   * — serializing W + D/2 as an integer would silently round every drawn game away.
+   */
+  @Test
+  public void aggregateRowWithOutcomeMetricsSerializesDocumentedFieldNames() throws Exception {
+    AggregateResponse response =
+        new AggregateResponse(
+            List.of(
+                AggregateRow.withOutcomes(
+                    Map.of("opening_family", "Caro Kann"), 41, 15, 20, 6, 36)),
+            1,
+            41,
+            1,
+            false);
+
+    assertThat(mapper.readTree(mapper.writeValueAsString(response)))
+        .isEqualTo(
+            mapper.readTree(
+                "{\"groups\":[{\"group\":{\"opening_family\":\"Caro Kann\"},\"count\":41,"
+                    + "\"wins\":15,\"losses\":20,\"draws\":6,\"score\":18.0}],"
+                    + "\"count\":1,\"totalGames\":41,\"totalGroups\":1,\"truncated\":false}"));
+  }
+
+  /** Half points survive the wire: 15 wins and 5 draws is 17.5, not 17 and not 35. */
+  @Test
+  public void aggregateRowScoreCarriesHalfPoints() throws Exception {
+    AggregateRow row = AggregateRow.withOutcomes(Map.of("eco", "B10"), 21, 15, 1, 5, 35);
+
+    assertThat(row.score()).isEqualTo(17.5);
+    assertThat(mapper.writeValueAsString(row)).contains("\"score\":17.5");
+  }
+
+  /**
+   * A row from a corpus-wide aggregate omits the four metrics rather than zeroing them, and a body
+   * written before they existed still binds — the components fall back to null, which is the same
+   * "not asked" the omission means.
+   */
+  @Test
+  public void aggregateRowWithoutOutcomeMetricsOmitsThemAndStillBinds() throws Exception {
+    String json = mapper.writeValueAsString(new AggregateRow(Map.of("eco", "B10"), 42));
+    assertThat(json).isEqualTo("{\"group\":{\"eco\":\"B10\"},\"count\":42}");
+
+    AggregateRow legacy =
+        mapper.readValue("{\"group\":{\"eco\":\"B10\"},\"count\":42}", AggregateRow.class);
+    assertThat(legacy.count()).isEqualTo(42);
+    assertThat(legacy.wins()).isNull();
+    assertThat(legacy.score()).isNull();
+  }
+
+  @Test
+  public void aggregateRequestBindsOrderByScoreAndMinGames() throws Exception {
+    AggregateRequest request =
+        mapper.readValue(
+            "{\"query\":\"outcome = \\\"win\\\"\",\"groupBy\":[\"opening_family\"],"
+                + "\"orderBy\":\"score\",\"limit\":20,\"player\":\"hikaru\",\"minGames\":10}",
+            AggregateRequest.class);
+
+    assertThat(request.orderBy()).isEqualTo("score");
+    assertThat(request.minGames()).isEqualTo(10);
+  }
+
+  /** A body written before minGames existed binds to no floor rather than failing. */
+  @Test
+  public void aggregateRequestWithoutMinGamesStillBinds() throws Exception {
+    AggregateRequest request =
+        mapper.readValue(
+            "{\"query\":\"white.elo > 1\",\"groupBy\":[\"eco\"],\"limit\":20}",
+            AggregateRequest.class);
+
+    assertThat(request.minGames()).isZero();
+    assertThat(request.orderBy()).isNull();
+  }
+
   @Test
   public void aggregateResponseWithoutTotalsStillBinds() throws Exception {
     // A body produced before totalGames/totalGroups/truncated existed: the three new record
