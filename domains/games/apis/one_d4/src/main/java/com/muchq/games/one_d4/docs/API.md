@@ -307,7 +307,9 @@ asked about". `wins + losses + draws` can be less than `count`: a game whose res
 decision nor a draw (an unfinished `*`) is counted and scored nowhere.
 
 `"orderBy": "score"` ranks groups by score **per game** — (W + D/2) / games — before `limit`
-truncates, with game count breaking ties. That ordering is only useful with `minGames`: a
+truncates, with game count breaking ties. Note the two are not the same number: the `score` field
+on a row is a point *total*, so re-sorting the returned rows by it does **not** reproduce the
+server's ranking. Divide by `count` to get the rate the ordering used. That ordering is only useful with `minGames`: a
 one-game opening that was won scores 100% and would otherwise top every list. Ranking by total
 points would only re-spell `"count"`, since the most-played group collects the most points.
 `minGames` applies to `totalGames` / `totalGroups` too, so `truncated` still describes the answer
@@ -324,8 +326,9 @@ strings:
 
 Group keys are canonical column names (e.g. `opening_family`, even when requested as
 `opening.family`; perspective group keys use their underscore forms — `me_color`, `me_title`,
-`opponent_username`, `opponent_title`, `outcome`, `me_elo`, `opponent_elo`). Groups
-are ordered by count descending, then by group values ascending. `count` is the number of groups
+`opponent_username`, `opponent_title`, `outcome`, `me_elo`, `opponent_elo`). Groups are ordered
+by whatever `orderBy` asked for — count descending by default, score per game descending under
+`"score"` — and then, in both cases, by group values ascending. `count` is the number of groups
 returned — not a game count, which is what `totalGames` reports. `totalGames` and `totalGroups`
 are computed over the untruncated result, and `truncated` is true when `limit` cut off groups —
 important for `opening_family`, whose ECO-URL-derived values fragment into long tails of small
