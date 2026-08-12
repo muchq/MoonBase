@@ -67,7 +67,7 @@ public class IndexerModule {
     return readJdbcUrl(System.getenv("INDEXER_DB_URL"), DB_CONFIG_PATH);
   }
 
-  static String readJdbcUrl(String envUrl, Path configPath) {
+  static String readJdbcUrl(@Nullable String envUrl, Path configPath) {
     if (envUrl != null && !envUrl.isBlank()) {
       return envUrl.strip();
     }
@@ -206,7 +206,7 @@ public class IndexerModule {
 
   private static final AtomicInteger EXTRACT_THREAD_COUNTER = new AtomicInteger();
 
-  static int parseThreads(String raw, int defaultValue) {
+  static int parseThreads(@Nullable String raw, int defaultValue) {
     return parseThreads("INDEXER_EXTRACTION_THREADS", raw, defaultValue);
   }
 
@@ -215,7 +215,7 @@ public class IndexerModule {
    *     because two pools parse their size this way now, and a warning that points an operator at
    *     the variable they did not set is worse than no warning.
    */
-  static int parseThreads(String setting, String raw, int defaultValue) {
+  static int parseThreads(String setting, @Nullable String raw, int defaultValue) {
     if (raw == null || raw.isBlank()) {
       return defaultValue;
     }

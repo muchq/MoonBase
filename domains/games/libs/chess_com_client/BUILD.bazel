@@ -41,6 +41,7 @@ java_test_suite(
         "//domains/platform/libs/http_client:jdk11",
         "//domains/platform/libs/json",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("org.jspecify:jspecify"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],

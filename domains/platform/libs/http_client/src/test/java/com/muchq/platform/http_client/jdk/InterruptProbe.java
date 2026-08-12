@@ -7,6 +7,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Runs a blocking call on its own thread, interrupts it, and reports what came out.
@@ -19,7 +20,11 @@ final class InterruptProbe {
 
   private InterruptProbe() {}
 
-  record Outcome(Throwable thrown, boolean interruptStatusSet) {}
+  /**
+   * @param thrown null when the call returned normally — which is itself a result worth reporting,
+   *     since a client that swallows the interrupt and returns is the failure these suites hunt.
+   */
+  record Outcome(@Nullable Throwable thrown, boolean interruptStatusSet) {}
 
   /**
    * Runs {@code blockingCall} on its own thread, interrupts it once {@code parked} says it has
