@@ -238,19 +238,12 @@ services:
     environment:
       - PORT=8080
       - APP_NAME=mcpserver
-      # The corpus lives behind one_d4, and mcpserver reaches it over the internal
-      # network as an HTTP client (#1332). Internal name, not a published host: these
-      # paths are not routed through Caddy and do not need to be. The alias rather
-      # than the service key, because this caller is Java — see one_d4's networks.
       - ONE_D4_BASE_URL=http://one-d4:8080
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=mcpserver
       - OTEL_RESOURCE_ATTRIBUTES=service.name=mcpserver,service.version=${MCPSERVER_SHA:-${DEPLOY_SHA:-latest}}
     volumes:
       - /etc/mcpserver:/etc/mcpserver
-    # Every corpus-backed tool is a call to one_d4, so starting before it is ready
-    # means a window where those tools answer "not reachable". service_healthy waits
-    # for the /health probe above rather than just for the container to exist.
     depends_on:
       one_d4:
         condition: service_healthy
@@ -303,9 +296,9 @@ services:
       retries: 5
       start_period: 10s
 
-  # One-shot provisioning of golf_hub's own database and role on the shared
-  # postgres instance (MoonBase#1194). Idempotent — safe on every deploy —
-  # and runs as the instance's bootstrap superuser. The docker-entrypoint
+  # Idempotent one-shot provisioning of golf_hub's own database and role on
+  # the shared postgres instance (MoonBase#1194). Idempotent — safe on every
+  # deploy. Runs as the instance's bootstrap superuser. The docker-entrypoint
   # initdb.d hook can't do this: it only fires on a fresh data volume.
   golf_hub_db_init:
     image: postgres:18
@@ -340,17 +333,6 @@ services:
     environment:
       - APP_NAME=one_d4
       - PORT=8080
-      # The corpus database. IndexerModule ranks this above /etc/one_d4/db_config, which is
-      # still mounted but no longer present on the host — see IndexerModule.readJdbcUrl.
-      #
-      # Credentials are separate variables, not query parameters on the URL: pgjdbc URL-decodes
-      # parameter values, so ?password= silently mangles a secret containing + or %, and
-      # truncates at &. DataSourceFactory.create explains it at length.
-      #
-      # Underscores in the host are fine here, unlike ONE_D4_BASE_URL below: pgjdbc parses the
-      # URL itself rather than through java.net.URI, which is what rejects such authorities.
-      # Pinned by IndexerModuleTest so a driver upgrade that tightened parsing fails there
-      # rather than on deploy.
       - INDEXER_DB_URL=jdbc:postgresql://shared_postgres:5432/one_d4
       - INDEXER_DB_USERNAME=one_d4
       - INDEXER_DB_PASSWORD=${ONE_D4_DB_PASSWORD}
@@ -359,7 +341,6 @@ services:
       - OTEL_SERVICE_NAME=one_d4
       - OTEL_RESOURCE_ATTRIBUTES=service.name=one_d4,service.version=${ONE_D4_SHA:-${DEPLOY_SHA:-latest}}
     volumes:
-      # Still mounted for the retained fallback — see IndexerModule.readJdbcUrl.
       - /etc/one_d4:/etc/one_d4
     networks:
       # one-d4 for Java callers: java.net.URI gives a hostname containing an
@@ -378,20 +359,7 @@ services:
           cpus: '0.5'
           memory: 512M
     healthcheck:
-      # The base (@java_base, azul/zulu-openjdk) has bash, head and grep but no
-      # curl and no wget, so the probe talks HTTP over bash's /dev/tcp rather
-      # than shelling out to a client. The previous curl form never ran at all:
-      # every attempt exited on "executable file not found", so the container
-      # sat permanently unhealthy while serving fine.
-      #
-      # `timeout` bounds the probe itself. Compose's `timeout:` below only
-      # decides when Docker calls the attempt failed — it does not kill the
-      # process, so a probe blocked on a server that accepts and then stalls
-      # would otherwise leak a bash and an open socket every interval.
-      #
-      # The status line is matched rather than just the connect, which catches a
-      # container whose HTTP stack is up but misrouting. It is not a database
-      # check: /health answers 200 with {"status":"DOWN"} when Postgres is
+      # Check: /health answers 200 with {"status":"DOWN"} when Postgres is
       # unreachable, so only a non-2xx — or no answer at all — fails this.
       test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
       interval: 30s
