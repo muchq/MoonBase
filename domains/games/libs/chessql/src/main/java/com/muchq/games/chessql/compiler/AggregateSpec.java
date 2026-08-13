@@ -98,12 +98,13 @@ public record AggregateSpec(List<String> groupBy, String player, Order order, in
 
   /**
    * Whether the compiled aggregate carries per-group {@code wins} / {@code losses} / {@code draws}
-   * / {@code score_points} alongside {@code group_count}.
+   * alongside {@code group_count} — and, from those, the score the row reports and the score
+   * ordering ranks by.
    *
    * <p>Tied to the player rather than to a flag of its own: the metrics are outcomes <em>from
    * someone's point of view</em>, so a corpus-wide aggregate has nothing to report and a
    * player-scoped one always does. Every player-scoped aggregate already pays for the perspective
-   * machinery; four more SUMs over the same scan is not a second decision worth exposing.
+   * machinery; three more SUMs over the same scan is not a second decision worth exposing.
    */
   public boolean hasOutcomeMetrics() {
     return player != null;

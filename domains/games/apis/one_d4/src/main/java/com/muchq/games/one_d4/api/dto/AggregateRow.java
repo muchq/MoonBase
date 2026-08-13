@@ -37,16 +37,17 @@ public record AggregateRow(
   }
 
   /**
-   * A group counted from a player's perspective, from the half-points the SQL sums ({@code
-   * score_points}: 2 per win, 1 per draw). Halving here rather than in SQL keeps the database
-   * summing integers while the wire still carries the conventional W + D/2 — 20.5 out of 40, not
-   * 41.
+   * A group counted from a player's perspective. Score is derived here rather than summed alongside
+   * the others, because W + D/2 is not independent of them — a fourth SUM would re-render the
+   * outcome CASE twice for a number these two columns already fix, and give the row a way to
+   * contradict itself (#1370). The database keeps summing integers; the halving happens once, here,
+   * so the wire carries the conventional 20.5 out of 41 rather than 41 half-points.
    *
    * <p>{@code wins + losses + draws} can be less than {@code count}: a game whose result is neither
    * a decision nor a draw (an unfinished {@code *}) is counted and scored nowhere.
    */
   public static AggregateRow withOutcomes(
-      Map<String, Object> group, long count, long wins, long losses, long draws, long scorePoints) {
-    return new AggregateRow(group, count, wins, losses, draws, scorePoints / 2.0);
+      Map<String, Object> group, long count, long wins, long losses, long draws) {
+    return new AggregateRow(group, count, wins, losses, draws, wins + draws / 2.0);
   }
 }

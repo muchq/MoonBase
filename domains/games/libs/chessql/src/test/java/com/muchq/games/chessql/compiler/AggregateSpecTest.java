@@ -15,8 +15,9 @@ import org.junit.jupiter.api.Test;
  * <p>{@link AggregateSpec} is where "a score ranking needs a player" is enforced, and it is
  * enforced by construction so both entry points inherit it — the REST validator builds a spec, and
  * so does the compiler's own {@code compileAggregate(pq, groupBy, player)} overload. The compiler
- * relies on that: {@code ORDER BY score_points} names a column only a player-scoped SELECT list
- * carries, so a spec that allowed the combination would compile SQL the database rejects.
+ * relies on that: the score ordering divides {@code wins} and {@code draws}, columns only a
+ * player-scoped SELECT list carries, so a spec that allowed the combination would compile SQL the
+ * database rejects.
  */
 public class AggregateSpecTest {
 
@@ -55,7 +56,7 @@ public class AggregateSpecTest {
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("orderBy \"score\" requires a player");
     // A blank player is no player, so it must be refused for the same reason rather than
-    // producing a spec whose SELECT list would carry no score_points column to order by.
+    // producing a spec whose SELECT list would carry no wins/draws columns to order by.
     assertThatThrownBy(() -> new AggregateSpec(List.of("opening_family"), "  ", Order.SCORE, 0))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("requires a player");

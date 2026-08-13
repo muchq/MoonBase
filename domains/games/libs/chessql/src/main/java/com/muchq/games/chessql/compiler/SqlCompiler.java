@@ -345,11 +345,11 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    * by the band's lower bound, 100 points wide unless the term supplies a width ({@code
    * opponent.elo(200)}).
    *
-   * <p>With a player the SELECT list also carries {@code wins} / {@code losses} / {@code draws} /
-   * {@code score_points} per group, so "how do I score in each opening" is the same single query as
-   * "which openings do I play" — grouping by {@code [opening_family, outcome]} instead fans every
-   * family out into up to three rows, which the caller has to pivot back and which spends the group
-   * limit three times over (#1345).
+   * <p>With a player the SELECT list also carries {@code wins} / {@code losses} / {@code draws} per
+   * group, so "how do I score in each opening" is the same single query as "which openings do I
+   * play" — grouping by {@code [opening_family, outcome]} instead fans every family out into up to
+   * three rows, which the caller has to pivot back and which spends the group limit three times
+   * over (#1345).
    */
   public CompiledQuery compileAggregate(ParsedQuery pq, AggregateSpec spec) {
     if (pq.orderBy() != null) {
@@ -476,20 +476,17 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    * none of the three ({@code *}, an unfinished game), which land in {@code group_count} and in no
    * metric, leaving wins + losses + draws below the count on purpose.
    *
-   * <p>Score is summed in half-points because W + D/2 is not an integer: {@code score_points} is
-   * exact in every dialect, and the caller halves it once. Ordering by score is ordering by this
-   * column, so a fractional SUM would be sorting on a float for no gain.
+   * <p>Score is not among them, because it is not independent of them: W + D/2 is determined by
+   * {@code wins} and {@code draws}, so summing it separately would render the outcome CASE twice
+   * more for a number these columns already fix — and give the result a fourth way to disagree with
+   * itself. The row derives it, and the score ordering divides it out of these same two columns
+   * (#1370).
    */
   private static List<String> outcomeMetricSelects(String player, List<Object> params) {
     return List.of(
         "SUM(CASE WHEN " + outcomeIs("win", player, params) + " THEN 1 ELSE 0 END) AS wins",
         "SUM(CASE WHEN " + outcomeIs("loss", player, params) + " THEN 1 ELSE 0 END) AS losses",
-        "SUM(CASE WHEN " + outcomeIs("draw", player, params) + " THEN 1 ELSE 0 END) AS draws",
-        "SUM(CASE WHEN "
-            + outcomeIs("win", player, params)
-            + " THEN 2 WHEN "
-            + outcomeIs("draw", player, params)
-            + " THEN 1 ELSE 0 END) AS score_points");
+        "SUM(CASE WHEN " + outcomeIs("draw", player, params) + " THEN 1 ELSE 0 END) AS draws");
   }
 
   /** One rendering of the outcome CASE, compared to a literal this compiler owns. */
@@ -525,8 +522,10 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    * nothing. {@code group_count} cannot be zero — a group exists because rows matched — so the
    * division is safe, and it breaks ties so a 1-game 100% group does not outrank a 40-game one.
    *
-   * <p>{@code score_points} is a column only a player-scoped SELECT list carries, which is exactly
-   * why {@link AggregateSpec} refuses a score ordering without a player.
+   * <p>The score itself is {@code (2 * wins + draws) / 2}, so the rate is {@code (2 * wins + draws)
+   * / (2 * group_count)} — written below without the halving, which cancels out of a comparison.
+   * {@code wins} and {@code draws} are columns only a player-scoped SELECT list carries, which is
+   * exactly why {@link AggregateSpec} refuses a score ordering without a player.
    */
   private static String order(String grouped, AggregateSpec spec, String tiebreak) {
     return switch (spec.order()) {
@@ -534,7 +533,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       case SCORE ->
           "SELECT * FROM ("
               + grouped
-              + ") agg ORDER BY score_points * 1.0 / group_count DESC, group_count DESC, "
+              + ") agg ORDER BY (wins * 2 + draws) * 1.0 / group_count DESC, group_count DESC, "
               + tiebreak;
     };
   }

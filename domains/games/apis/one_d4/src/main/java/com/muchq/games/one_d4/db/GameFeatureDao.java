@@ -464,8 +464,7 @@ public class GameFeatureDao implements GameFeatureStore {
                         count,
                         rs.getLong("wins"),
                         rs.getLong("losses"),
-                        rs.getLong("draws"),
-                        rs.getLong("score_points"));
+                        rs.getLong("draws"));
                   })
               .list();
         });

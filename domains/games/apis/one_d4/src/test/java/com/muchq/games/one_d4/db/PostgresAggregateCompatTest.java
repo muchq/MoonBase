@@ -467,7 +467,7 @@ public class PostgresAggregateCompatTest {
    * The outcome metrics and the score ranking on the real dialect (#1345). Three things could
    * differ from H2 and none of them would show up as a compile error: {@code SUM(CASE ... THEN 1
    * ELSE 0 END)} comes back as bigint rather than int, the ranking wraps the grouped query in a
-   * derived table whose columns the outer ORDER BY names, and {@code score_points * 1.0 /
+   * derived table whose columns the outer ORDER BY names, and {@code (wins * 2 + draws) * 1.0 /
    * group_count} is numeric division in Postgres and floating-point in H2 — which must still order
    * the same way. The floor rides along as a HAVING inside the derived table.
    */

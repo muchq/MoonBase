@@ -136,8 +136,7 @@ public class DtoJsonCompatTest {
     AggregateResponse response =
         new AggregateResponse(
             List.of(
-                AggregateRow.withOutcomes(
-                    Map.of("opening_family", "Caro Kann"), 41, 15, 20, 6, 36)),
+                AggregateRow.withOutcomes(Map.of("opening_family", "Caro Kann"), 41, 15, 20, 6)),
             1,
             41,
             1,
@@ -154,7 +153,7 @@ public class DtoJsonCompatTest {
   /** Half points survive the wire: 15 wins and 5 draws is 17.5, not 17 and not 35. */
   @Test
   public void aggregateRowScoreCarriesHalfPoints() throws Exception {
-    AggregateRow row = AggregateRow.withOutcomes(Map.of("eco", "B10"), 21, 15, 1, 5, 35);
+    AggregateRow row = AggregateRow.withOutcomes(Map.of("eco", "B10"), 21, 15, 1, 5);
 
     assertThat(row.score()).isEqualTo(17.5);
     assertThat(mapper.writeValueAsString(row)).contains("\"score\":17.5");

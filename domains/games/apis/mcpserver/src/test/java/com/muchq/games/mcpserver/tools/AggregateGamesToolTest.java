@@ -118,8 +118,7 @@ public class AggregateGamesToolTest {
     facade.result =
         new IndexerFacade.AggregateResult(
             List.of(
-                AggregateRow.withOutcomes(
-                    Map.of("opening_family", "Caro Kann"), 41, 15, 20, 6, 36)),
+                AggregateRow.withOutcomes(Map.of("opening_family", "Caro Kann"), 41, 15, 20, 6)),
             41,
             1);
 

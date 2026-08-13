@@ -143,10 +143,10 @@ public class AggregateControllerTest {
         .contains("END) AS me_color")
         .contains("END) AS outcome")
         .contains("GROUP BY me_color, outcome");
-    // SELECT CASE params (1 + 2), the outcome-metric block (10), participation guard (2), then
+    // SELECT CASE params (1 + 2), the outcome-metric block (6), participation guard (2), then
     // the filter value. SqlCompilerTest pins the metric SQL itself; what matters here is that a
     // player-scoped request reaches the store asking for the metric columns.
-    assertThat(compiled.parameters()).hasSize(16).containsOnly("hikaru", "blitz");
+    assertThat(compiled.parameters()).hasSize(12).containsOnly("hikaru", "blitz");
     assertThat(store.lastOutcomeMetrics).isTrue();
   }
 
@@ -229,9 +229,9 @@ public class AggregateControllerTest {
 
     assertThat(response.count()).isEqualTo(1);
     CompiledQuery compiled = (CompiledQuery) store.lastCompiled;
-    // The outcome-metric block (10), participation guard params, then the outcome CASE's two,
+    // The outcome-metric block (6), participation guard params, then the outcome CASE's two,
     // then the value
-    assertThat(compiled.parameters()).hasSize(15).containsOnly("hikaru", "win");
+    assertThat(compiled.parameters()).hasSize(11).containsOnly("hikaru", "win");
   }
 
   @Test
@@ -318,7 +318,7 @@ public class AggregateControllerTest {
             "hikaru"));
 
     assertThat(((CompiledQuery) store.lastCompiled).selectSql())
-        .contains(") agg ORDER BY score_points * 1.0 / group_count DESC");
+        .contains(") agg ORDER BY (wins * 2 + draws) * 1.0 / group_count DESC");
     assertThat(store.lastOutcomeMetrics).isTrue();
   }
 

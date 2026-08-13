@@ -42,16 +42,11 @@ public class SqlCompilerTest {
           + " = 'loss' THEN 1 ELSE 0 END) AS losses"
           + ", SUM(CASE WHEN "
           + OUTCOME_CASE
-          + " = 'draw' THEN 1 ELSE 0 END) AS draws"
-          + ", SUM(CASE WHEN "
-          + OUTCOME_CASE
-          + " = 'win' THEN 2 WHEN "
-          + OUTCOME_CASE
-          + " = 'draw' THEN 1 ELSE 0 END) AS score_points";
+          + " = 'draw' THEN 1 ELSE 0 END) AS draws";
 
-  /** The ten player binds the metric block adds, in SELECT-list position. */
+  /** The six player binds the metric block adds, in SELECT-list position. */
   private static List<Object> metricParams(String player) {
-    return List.copyOf(java.util.Collections.nCopies(10, player));
+    return List.copyOf(java.util.Collections.nCopies(6, player));
   }
 
   @SafeVarargs
@@ -1219,9 +1214,10 @@ public class SqlCompilerTest {
 
     assertThat(result.selectSql())
         .contains("COUNT(*) AS group_count" + OUTCOME_METRICS + " FROM game_features g");
-    // Ten player binds, in SELECT-list position: two per metric CASE rendering, and the score
-    // sum renders it twice.
-    assertThat(result.parameters().subList(0, 10)).isEqualTo(metricParams("hikaru"));
+    // Six player binds, in SELECT-list position: two per metric CASE rendering. Score is not
+    // among them — it is derived from wins and draws rather than summed again (#1370).
+    assertThat(result.parameters().subList(0, 6)).isEqualTo(metricParams("hikaru"));
+    assertThat(result.selectSql()).doesNotContain("score_points");
   }
 
   /**
@@ -1261,7 +1257,7 @@ public class SqlCompilerTest {
     assertThat(result.selectSql())
         .startsWith("SELECT * FROM (SELECT opening_family, COUNT(*) AS group_count")
         .endsWith(
-            ") agg ORDER BY score_points * 1.0 / group_count DESC, group_count DESC,"
+            ") agg ORDER BY (wins * 2 + draws) * 1.0 / group_count DESC, group_count DESC,"
                 + " opening_family ASC");
     // The limit the DAO appends applies to the ranked result, not to an inner slice of it.
     assertThat(result.selectSql().indexOf(") agg ORDER BY"))
@@ -1278,7 +1274,7 @@ public class SqlCompilerTest {
 
     assertThat(result.selectSql())
         .contains(" ORDER BY group_count DESC, opening_family ASC")
-        .doesNotContain("score_points DESC");
+        .doesNotContain("wins * 2 + draws");
   }
 
   /**
