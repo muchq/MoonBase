@@ -1,7 +1,8 @@
 """Guards on what the java.bzl macros actually configure a compile with.
 
 Mostly that NullAway stays on by default and that its exemptions only shrink;
-also that the Micronaut processors run over main sources and not test ones.
+also that the Micronaut processors run for the library and binary macros and not
+for the test ones.
 
 NullAway is annotated at `com.muchq`, so a new package is analyzed the day it
 exists rather than the day someone remembers to add it to a list. What is listed
@@ -243,7 +244,7 @@ def _plugin_impl(ctx):
 plugin_test = analysistest.make(_plugin_impl)
 
 def _micronaut_impl(ctx):
-    """The Micronaut processors run over main sources and, deliberately, not over test sources.
+    """Micronaut processors run for the library and binary macros, deliberately not the test ones.
 
     This is the one thing the four macros do differently, and the difference is
     a choice rather than the drift it used to be: `java_library` and
@@ -253,7 +254,7 @@ def _micronaut_impl(ctx):
     Pinned in both directions because an unpinned choice is one somebody
     reverses by tidying. Adding the processors to the test macros looks like
     making the set consistent and costs build time everywhere; dropping them
-    from the main macros leaves the beans ungenerated.
+    from the library and binary macros leaves the beans ungenerated.
     """
     env = analysistest.begin(ctx)
 
@@ -277,12 +278,12 @@ def _micronaut_impl(ctx):
             env,
             [],
             on_the_compile,
-            "this is a test compile and it is running the Micronaut processors: " +
-            "{}. Nothing here needs generated bean definitions, and every test target in the " +
-            "repo pays for it. If a test suite genuinely needs them, pass them as that " +
-            "target's `plugins` rather than turning them on for all of them.".format(
-                on_the_compile,
-            ),
+            "this is a test-macro compile and it is running the Micronaut processors. " +
+            "These compiles do not need generated bean definitions, and every test target " +
+            "in the repo would pay for them. Test code that does need a bean generated " +
+            "belongs in a `testonly` java_library beside the suite, which runs the " +
+            "processors because it is a library — not in the suite's own `plugins`. " +
+            "On this compile: {}".format(on_the_compile),
         )
     return analysistest.end(env)
 
@@ -329,7 +330,7 @@ def java_rules_test_suite(name):
 
     # Each entry names a target to read and whether that compile should be
     # running the Micronaut processors — the only property that differs between
-    # main and test sources.
+    # the macros.
     #
     # The two suite entries use the names contrib_rules_jvm derives, which are
     # the only way to reach those compiles: `-test-lib` for the non-test

@@ -71,11 +71,16 @@ Bazel formatting do.
   a line off the list. `java_test_suite` produces two compiles from one `srcs`
   list — a `java_test` per `*Test.java`, and a shared `-test-lib` for the rest
   — and `//bazel/rules:rules_test` guards both.
-- **Only main sources get the Micronaut processors.** `java_library` and
-  `java_binary` add them; `java_test` and `java_test_suite` deliberately do not,
-  because nothing under test needs generated bean definitions and every test
-  target would pay for them. A suite that genuinely needs one passes it as that
-  target's `plugins`. Also guarded, in both directions.
+- **The Micronaut processors are keyed by macro, not by main-vs-test.**
+  `java_library` and `java_binary` add them; `java_test` and `java_test_suite`
+  deliberately do not, because running four annotation processors over every
+  test compile in the repo buys nothing to offset the cost. Test code that
+  genuinely needs a generated bean definition goes in a `testonly`
+  `java_library` beside the suite, which gets the processors like any other
+  library — see `filter_test_app` in `domains/platform/libs/yodel/BUILD.bazel`
+  and `e2e_support` in `domains/games/apis/one_d4/BUILD.bazel`. Reaching for the
+  suite's own `plugins` instead is not the pattern. Also guarded, in both
+  directions.
 - **Behind a proxy that 403s GitHub source archives** (cloud sandboxes, some CI
   runners), run `scripts/make-git-overrides.sh` once and import its output from
   `.bazelrc.user` — see [`docs/BUILD_AND_IDE.md`](docs/BUILD_AND_IDE.md). That

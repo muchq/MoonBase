@@ -73,7 +73,7 @@ _JAVACOPTS = [
 ]
 
 def _analysis(plugins, javacopts, micronaut):
-    """NullAway — and for main sources the Micronaut processors — appended to a target's config.
+    """NullAway — and Micronaut for the library and binary macros — appended to a target's config.
 
     Every macro in this file routes through here, because the previous
     arrangement was four hand-written copies of the same append loop and one of
@@ -81,10 +81,13 @@ def _analysis(plugins, javacopts, micronaut):
     macro that never called this, which is visible at its one call site rather
     than buried in a body that looks like the others.
 
-    Micronaut is the one real difference between the macros, and it splits along
-    main versus test sources rather than by accident: `java_library` and
+    Micronaut is the one real difference between the macros, and the split is by
+    macro rather than by whether the sources are main or test: `java_library` and
     `java_binary` compile the beans, and running four annotation processors over
-    every test compile in the repo buys nothing to offset the cost.
+    every test compile in the repo buys nothing to offset the cost. Test code
+    that does need a bean definition generated gets it the same way any other
+    library does — a `testonly` `java_library` beside the suite, as in
+    yodel's `filter_test_app` and one_d4's `e2e_support`.
 
     Args:
         plugins: Plugins the caller asked for.
