@@ -1808,11 +1808,14 @@ public class GameFeatureDaoTest {
             openingGame("https://chess.com/game/u-2", null, "orphaned"),
             openingGame("https://chess.com/game/u-3", "Caro Kann Defense", "Caro Kann Defense")));
 
+    // The name is the row's own: it is what the caller derived from, and the write is conditional
+    // on the row still holding it (see
+    // updateOpeningFamilies_doesNotClobberARowWhoseNameChangedUnderIt).
     int updated =
         dao.updateOpeningFamilies(
             List.of(
                 new GameFeatureStore.GameOpening(
-                    "https://chess.com/game/u-1", "ignored", "Owens Defense"),
+                    "https://chess.com/game/u-1", "Owens Defense 3.Nc3 e6", "Owens Defense"),
                 new GameFeatureStore.GameOpening("https://chess.com/game/u-2", null, null)));
 
     assertThat(updated).isEqualTo(2);
@@ -1831,6 +1834,81 @@ public class GameFeatureDaoTest {
                 .orElseThrow()
                 .openingName())
         .isEqualTo("Owens Defense 3.Nc3 e6");
+  }
+
+  /**
+   * The re-derive pass reads a row, derives a family from the name it saw, and writes it back
+   * later. If an indexer upserts that same game in between — which rewrites opening_name and
+   * opening_family together — the write must not land: it carries a family derived from a name that
+   * is no longer the row's. Raised by review on #1374.
+   */
+  @Test
+  public void updateOpeningFamilies_doesNotClobberARowWhoseNameChangedUnderIt() {
+    String url = "https://chess.com/game/cas-1";
+    dao.insertBatch(List.of(openingGame(url, "Owens Defense 3.Nc3 e6", "stale")));
+
+    // What the pass read, and what it intends to write from it.
+    GameFeatureStore.GameOpening asRead =
+        new GameFeatureStore.GameOpening(url, "Owens Defense 3.Nc3 e6", "Owens Defense");
+
+    // Meanwhile the game is reindexed: a different opening entirely, name and family together.
+    dao.insertBatch(
+        List.of(openingGame(url, "Caro Kann Defense Two Knights", "Caro Kann Defense")));
+
+    int updated = dao.updateOpeningFamilies(List.of(asRead));
+
+    assertThat(updated).as("the row moved on; this write is not about it any more").isZero();
+    assertThat(dao.fetchOpeningsForRederive(10, 0).get(0).openingFamily())
+        .isEqualTo("Caro Kann Defense");
+  }
+
+  /** The control: an unchanged row still takes the write, or the guard would block everything. */
+  @Test
+  public void updateOpeningFamilies_writesWhenTheNameIsStillWhatWasRead() {
+    String url = "https://chess.com/game/cas-2";
+    dao.insertBatch(List.of(openingGame(url, "Owens Defense 3.Nc3 e6", "stale")));
+
+    int updated =
+        dao.updateOpeningFamilies(
+            List.of(
+                new GameFeatureStore.GameOpening(url, "Owens Defense 3.Nc3 e6", "Owens Defense")));
+
+    assertThat(updated).isEqualTo(1);
+    assertThat(dao.fetchOpeningsForRederive(10, 0).get(0).openingFamily())
+        .isEqualTo("Owens Defense");
+  }
+
+  /** A NULL name is a value like any other for this check, not a wildcard that matches anything. */
+  @Test
+  public void updateOpeningFamilies_matchesANullNameExactly() {
+    String url = "https://chess.com/game/cas-3";
+    dao.insertBatch(List.of(openingGame(url, null, "orphaned")));
+
+    assertThat(
+            dao.updateOpeningFamilies(List.of(new GameFeatureStore.GameOpening(url, null, null))))
+        .as("NULL is what was read, so the clear lands")
+        .isEqualTo(1);
+    assertThat(dao.fetchOpeningsForRederive(10, 0).get(0).openingFamily()).isNull();
+
+    dao.insertBatch(List.of(openingGame(url, "Caro Kann Defense", "Caro Kann Defense")));
+    assertThat(
+            dao.updateOpeningFamilies(List.of(new GameFeatureStore.GameOpening(url, null, null))))
+        .as("a row that now has a name is not matched by a read that saw none")
+        .isZero();
+  }
+
+  /** A row someone else already corrected is not rewritten, so the count stays exact. */
+  @Test
+  public void updateOpeningFamilies_skipsARowThatAlreadyHasTheDerivedFamily() {
+    String url = "https://chess.com/game/cas-4";
+    dao.insertBatch(List.of(openingGame(url, "Owens Defense 3.Nc3 e6", "Owens Defense")));
+
+    assertThat(
+            dao.updateOpeningFamilies(
+                List.of(
+                    new GameFeatureStore.GameOpening(
+                        url, "Owens Defense 3.Nc3 e6", "Owens Defense"))))
+        .isZero();
   }
 
   @Test

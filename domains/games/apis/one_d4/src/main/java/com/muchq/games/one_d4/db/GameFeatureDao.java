@@ -69,8 +69,16 @@ public class GameFeatureDao implements GameFeatureStore {
       "SELECT game_url, opening_name, opening_family FROM game_features"
           + " ORDER BY indexed_at, game_url LIMIT ? OFFSET ?";
 
+  // Conditional on the row still holding the name the caller derived from, and on the family
+  // actually differing. The re-derive pass reads a row, computes from what it read, and writes
+  // back later; an indexer upsert in between rewrites opening_name and opening_family together, so
+  // an unconditional write would land a family derived from a name the row no longer has. The
+  // second clause keeps the reported count exact when someone else corrected the row first.
+  // IS NOT DISTINCT FROM rather than =, because a NULL name is a value here and not a wildcard.
   private static final String UPDATE_OPENING_FAMILY =
-      "UPDATE game_features SET opening_family = ? WHERE game_url = ?";
+      "UPDATE game_features SET opening_family = ? WHERE game_url = ?"
+          + " AND opening_name IS NOT DISTINCT FROM ?"
+          + " AND opening_family IS DISTINCT FROM ?";
 
   private static final String DELETE_OCCURRENCES_BY_GAME_URL =
       "DELETE FROM motif_occurrences WHERE game_url = ?";
@@ -776,6 +784,8 @@ public class GameFeatureDao implements GameFeatureStore {
             batch
                 .bindByType(0, update.openingFamily(), String.class)
                 .bind(1, update.gameUrl())
+                .bindByType(2, update.openingName(), String.class)
+                .bindByType(3, update.openingFamily(), String.class)
                 .add();
           }
           int updated = 0;

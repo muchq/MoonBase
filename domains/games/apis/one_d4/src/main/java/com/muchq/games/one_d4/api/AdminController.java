@@ -115,9 +115,15 @@ public class AdminController {
    * which is the whole failure being corrected.
    *
    * <p>Scope is deliberately this one column. Titles come from player profiles at index time and
-   * are not a function of anything stored; {@code opening_name} derives from the chess.com ECOUrl,
-   * which is not stored either — the {@code eco} column holds the PGN's ECO code. Those still need
-   * the reindex path.
+   * are not a function of anything stored. {@code opening_name} is a closer call: it derives from
+   * the chess.com ECOUrl, which is not a column — the {@code eco} column holds the PGN's ECO code —
+   * but the stored PGN usually carries the {@code [ECOUrl "..."]} tag, so a local re-derive of the
+   * name is possible and simply not built here. Changing that derivation still means a reindex.
+   *
+   * <p>Concurrency: each write is conditional on the row still holding the name it was derived
+   * from, so a game reindexed mid-pass keeps the fresher value rather than being overwritten from a
+   * stale read. Rows inserted during the pass can still be missed, since paging is by offset — the
+   * same property {@link #reanalyze} has, and a second run picks them up.
    *
    * <p>Only rows whose family actually changes are written, so a second run reports zero updates
    * and the number means something. Batched like {@link #reanalyze} to bound memory; synchronous.

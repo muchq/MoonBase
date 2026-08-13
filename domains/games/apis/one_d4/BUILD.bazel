@@ -808,6 +808,7 @@ java_test_suite(
     # polling warm-up wait, which sits too close to small's 60s ceiling on a loaded CI machine.
     size = "medium",
     srcs = [
+        "src/test/java/com/muchq/games/one_d4/api/AdminResponseWireTest.java",
         "src/test/java/com/muchq/games/one_d4/api/AggregateResponseWireTest.java",
         "src/test/java/com/muchq/games/one_d4/api/AnalyzeEndpointTest.java",
         "src/test/java/com/muchq/games/one_d4/api/ContentTypeHandlingTest.java",

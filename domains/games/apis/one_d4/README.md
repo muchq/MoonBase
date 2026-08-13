@@ -391,9 +391,18 @@ Returns `{"gamesScanned": N, "gamesUpdated": M}`. Only rows whose family actuall
 written, so a second run reports `gamesUpdated: 0` — and a first run reporting `0` means the
 stored values already agree with the current derivation.
 
+Each write is conditional on the row still holding the `opening_name` it was derived from. An
+indexer upsert rewrites `opening_name` and `opening_family` together, so a row reindexed while the
+pass is running keeps the fresher value instead of being overwritten from a stale read; it is
+simply not counted. Rows *inserted* during the pass can still be missed, because paging is by
+offset — as with `/admin/reanalyze`. Neither is a reason to avoid running it live, but a quiet
+moment costs nothing and a second run will pick up whatever a busy one skipped.
+
 It deliberately covers this one column. `white_title` / `black_title` come from player profiles at
-index time, and `opening_name` derives from the chess.com ECOUrl, which is not stored (`eco` holds
-the PGN's ECO code) — none of those can be recomputed locally, so they still need the reindex.
+index time and cannot be recomputed from anything stored. `opening_name` is a different case: it
+derives from the chess.com ECOUrl, which is not a column (`eco` holds the PGN's ECO code) — but the
+stored PGN usually carries the `[ECOUrl "..."]` tag it came from, so re-deriving the name locally
+is possible and simply not built. Changing *that* derivation still needs a reindex today.
 
 ### Available Motifs
 
