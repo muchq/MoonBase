@@ -1,5 +1,6 @@
 package com.muchq.games.one_d4.api;
 
+import com.muchq.games.chessql.compiler.AggregateSpec;
 import com.muchq.games.chessql.compiler.CompiledQuery;
 import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.chessql.parser.ParsedQuery;
@@ -45,20 +46,25 @@ public class AggregateController {
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   public AggregateResponse aggregate(AggregateRequest request) {
-    validator.validate(request);
+    AggregateSpec spec = validator.validate(request);
 
     LOG.info(
-        "POST /v1/aggregate query={} groupBy={} limit={}",
+        "POST /v1/aggregate query={} groupBy={} orderBy={} minGames={} limit={}",
         request.query(),
         request.groupBy(),
+        spec.order().wireName(),
+        spec.minGames(),
         request.limit());
 
     ParsedQuery parsed = Parser.parse(request.query());
     List<String> groupColumns = sqlCompiler.resolveGroupByColumns(request.groupBy());
-    CompiledQuery compiled =
-        sqlCompiler.compileAggregate(parsed, request.groupBy(), request.player());
+    CompiledQuery compiled = sqlCompiler.compileAggregate(parsed, spec);
 
-    List<AggregateRow> groups = gameFeatureStore.aggregate(compiled, groupColumns, request.limit());
+    // The spec decides both what the SELECT list carries and what the store reads back, so the
+    // row shape cannot be agreed on twice and answered differently.
+    List<AggregateRow> groups =
+        gameFeatureStore.aggregate(
+            compiled, groupColumns, spec.hasOutcomeMetrics(), request.limit());
 
     // Fewer groups came back than the limit allowed, so nothing was cut off and the totals are
     // already in hand: every matching group is present, and their counts sum to every matching
@@ -68,8 +74,7 @@ public class AggregateController {
       return new AggregateResponse(groups, groups.size(), sumCounts(groups), groups.size(), false);
     }
 
-    CompiledQuery totalsQuery =
-        sqlCompiler.compileAggregateTotals(parsed, request.groupBy(), request.player());
+    CompiledQuery totalsQuery = sqlCompiler.compileAggregateTotals(parsed, spec);
     GameFeatureStore.AggregateTotals totals = gameFeatureStore.aggregateTotals(totalsQuery);
     return new AggregateResponse(
         groups,

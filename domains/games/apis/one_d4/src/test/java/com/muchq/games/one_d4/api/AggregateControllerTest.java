@@ -143,9 +143,11 @@ public class AggregateControllerTest {
         .contains("END) AS me_color")
         .contains("END) AS outcome")
         .contains("GROUP BY me_color, outcome");
-    // SELECT CASE params (1 + 2), participation guard (2), then the filter value
-    assertThat(compiled.parameters())
-        .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", "hikaru", "blitz"));
+    // SELECT CASE params (1 + 2), the outcome-metric block (6), participation guard (2), then
+    // the filter value. SqlCompilerTest pins the metric SQL itself; what matters here is that a
+    // player-scoped request reaches the store asking for the metric columns.
+    assertThat(compiled.parameters()).hasSize(12).containsOnly("hikaru", "blitz");
+    assertThat(store.lastOutcomeMetrics).isTrue();
   }
 
   @Test
@@ -227,9 +229,9 @@ public class AggregateControllerTest {
 
     assertThat(response.count()).isEqualTo(1);
     CompiledQuery compiled = (CompiledQuery) store.lastCompiled;
-    // Participation guard params first, then the outcome CASE's two, then the value
-    assertThat(compiled.parameters())
-        .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", "win"));
+    // The outcome-metric block (6), participation guard params, then the outcome CASE's two,
+    // then the value
+    assertThat(compiled.parameters()).hasSize(11).containsOnly("hikaru", "win");
   }
 
   @Test
@@ -285,6 +287,84 @@ public class AggregateControllerTest {
     assertThat(store.lastCompiled).as("perspective field in groupBy").isNotNull();
   }
 
+  /**
+   * A corpus-wide aggregate asks the store for counts only. The positive twin is
+   * aggregate_perspectiveGroupByUsesUnderscoreKeysAndAliasedCase, which asserts the same flag true
+   * on a player-scoped request — one request shape decides both the SQL and the row mapping, so a
+   * mismatch here is a per-row failure in the driver rather than a wrong number.
+   */
+  @Test
+  public void aggregate_withoutAPlayerAsksTheStoreForCountsOnly() {
+    store.rows = List.of(new AggregateRow(Map.of("opening_family", "Caro Kann Defense"), 3));
+
+    controller.aggregate(
+        new AggregateRequest("white.elo >= 1", List.of("opening_family"), "count", 20));
+
+    assertThat(store.lastOutcomeMetrics).isFalse();
+    assertThat(((CompiledQuery) store.lastCompiled).selectSql()).doesNotContain("AS wins");
+  }
+
+  /** orderBy reaches the compiler rather than being validated and dropped. */
+  @Test
+  public void aggregate_orderByScoreRanksBeforeTheLimit() {
+    store.rows = List.of(new AggregateRow(Map.of("opening_family", "Sicilian Defense"), 3));
+
+    controller.aggregate(
+        new AggregateRequest(
+            "white.username = \"hikaru\" OR black.username = \"hikaru\"",
+            List.of("opening_family"),
+            "score",
+            20,
+            "hikaru"));
+
+    assertThat(((CompiledQuery) store.lastCompiled).selectSql())
+        .contains(") agg ORDER BY (wins * 2 + draws) * 1.0 / group_count DESC");
+    assertThat(store.lastOutcomeMetrics).isTrue();
+  }
+
+  /** The floor reaches both queries; a totals query without it would count excluded groups. */
+  @Test
+  public void aggregate_minGamesFloorsBothTheGroupsAndTheTotalsQuery() {
+    store.rows = List.of(new AggregateRow(Map.of("opening_family", "Sicilian Defense"), 3));
+    store.totals = new GameFeatureStore.AggregateTotals(3, 1);
+
+    controller.aggregate(
+        new AggregateRequest("white.elo >= 1", List.of("opening_family"), "count", 1, null, 5));
+
+    assertThat(((CompiledQuery) store.lastCompiled).selectSql()).contains("HAVING COUNT(*) >= ?");
+    assertThat(((CompiledQuery) store.lastCompiled).parameters()).containsExactly(1, 5);
+    assertThat(((CompiledQuery) store.lastTotalsCompiled).selectSql())
+        .contains("HAVING COUNT(*) >= ?");
+    assertThat(((CompiledQuery) store.lastTotalsCompiled).parameters()).containsExactly(1, 5);
+  }
+
+  @Test
+  public void aggregate_unsupportedOrderByRejectedBeforeStoreCall() {
+    assertThatThrownBy(
+            () ->
+                controller.aggregate(
+                    new AggregateRequest("white.elo > 1", List.of("eco"), "elo", 20)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("orderBy");
+    assertThat(store.lastCompiled).isNull();
+  }
+
+  /**
+   * Ranking by score names a column only a player-scoped query carries, so the endpoint refuses the
+   * combination rather than letting the database refuse it as a syntax error the caller cannot act
+   * on.
+   */
+  @Test
+  public void aggregate_orderByScoreWithoutPlayerRejectedBeforeStoreCall() {
+    assertThatThrownBy(
+            () ->
+                controller.aggregate(
+                    new AggregateRequest("white.elo > 1", List.of("eco"), "score", 20)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("requires a player");
+    assertThat(store.lastCompiled).isNull();
+  }
+
   @Test
   public void aggregate_invalidRequestRejectedBeforeStoreCall() {
     assertThatThrownBy(
@@ -323,13 +403,15 @@ public class AggregateControllerTest {
     Object lastTotalsCompiled;
     List<String> lastGroupColumns;
     int lastLimit;
+    Boolean lastOutcomeMetrics;
     int totalsCalls;
 
     @Override
     public List<AggregateRow> aggregate(
-        Object compiledQuery, List<String> groupColumns, int limit) {
+        Object compiledQuery, List<String> groupColumns, boolean withOutcomeMetrics, int limit) {
       this.lastCompiled = compiledQuery;
       this.lastGroupColumns = groupColumns;
+      this.lastOutcomeMetrics = withOutcomeMetrics;
       this.lastLimit = limit;
       return rows;
     }

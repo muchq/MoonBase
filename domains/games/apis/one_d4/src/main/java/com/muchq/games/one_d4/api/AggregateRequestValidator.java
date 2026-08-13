@@ -1,14 +1,24 @@
 package com.muchq.games.one_d4.api;
 
+import com.muchq.games.chessql.compiler.AggregateSpec;
 import com.muchq.games.one_d4.api.dto.AggregateRequest;
 import jakarta.inject.Singleton;
 
+/**
+ * Validates a POST /v1/aggregate request and hands back the {@link AggregateSpec} the compiler
+ * takes.
+ *
+ * <p>Returning the spec rather than {@code void} is the point: the spec's own constructor enforces
+ * the rules that are about the shape of an aggregate (a score ranking needs a player), so building
+ * it here means the endpoint checks them exactly once, in the same place it checks everything else,
+ * and cannot drift from what the compiler will accept a moment later.
+ */
 @Singleton
 public class AggregateRequestValidator {
   private static final int MAX_QUERY_LENGTH = 4096;
   private static final int MAX_GROUP_BY_FIELDS = 5;
 
-  public void validate(AggregateRequest request) {
+  public AggregateSpec validate(AggregateRequest request) {
     if (request.query() == null || request.query().isBlank()) {
       throw new IllegalArgumentException("query is required");
     }
@@ -28,8 +38,10 @@ public class AggregateRequestValidator {
         throw new IllegalArgumentException("groupBy fields must not be blank");
       }
     }
-    if (request.orderBy() != null && !"count".equalsIgnoreCase(request.orderBy())) {
-      throw new IllegalArgumentException("orderBy supports only \"count\"");
-    }
+    return new AggregateSpec(
+        request.groupBy(),
+        request.player(),
+        AggregateSpec.Order.fromWire(request.orderBy()),
+        request.minGames());
   }
 }

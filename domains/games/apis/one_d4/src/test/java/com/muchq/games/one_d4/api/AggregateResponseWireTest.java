@@ -107,6 +107,47 @@ public class AggregateResponseWireTest {
     assertThat(body).contains("\"group\":{\"opponent_title\":\"FM\",\"outcome\":\"win\"}");
   }
 
+  /**
+   * The outcome metrics on the wire, present-and-zero versus absent (#1345).
+   *
+   * <p>Zero is a real answer — "this player has never won in this bucket" — and it has to survive
+   * the mapper that omits nulls, which is the same mapper that must drop the fields entirely when
+   * there is no player to attribute a result to. The two cases produce the same Java record with
+   * different components set, so only the bytes can tell them apart, and only these bytes tell a
+   * client whether a missing {@code wins} means zero or means nobody asked.
+   */
+  @Test
+  public void aggregateResponseCarriesZeroOutcomeMetricsForAPlayer() throws Exception {
+    // Both games are hikaru wins as White, grouped by opponent title: the FM bucket is 1-0-0 and
+    // the untitled bucket is 1-0-0 too, so every metric is present and losses/draws are zero.
+    String body =
+        aggregate(
+            "{\"query\":\"white.username = \\\"hikaru\\\" OR black.username = \\\"hikaru\\\"\","
+                + "\"groupBy\":[\"opponent.title\"],\"player\":\"hikaru\"}");
+
+    assertThat(body).contains("\"wins\":1").contains("\"losses\":0").contains("\"draws\":0");
+    // Score is W + D/2, so it reaches the wire as a JSON number that can carry a half point.
+    assertThat(body).contains("\"score\":1.0");
+    // The control on the same response: the count is still there and still a group count.
+    assertThat(body).contains("\"count\":1");
+  }
+
+  /**
+   * The negative twin, byte for byte: with no player the four fields are absent rather than zero. A
+   * zeroed row would be a claim the service cannot make — nobody's results were asked for.
+   */
+  @Test
+  public void aggregateResponseOmitsOutcomeMetricsWithoutAPlayer() throws Exception {
+    String body = aggregate("{\"query\":\"num.moves >= 0\",\"groupBy\":[\"time_class\"]}");
+
+    assertThat(body).contains("\"group\":{\"time_class\":\"blitz\"}").contains("\"count\":2");
+    assertThat(body)
+        .doesNotContain("\"wins\"")
+        .doesNotContain("\"losses\"")
+        .doesNotContain("\"draws\"")
+        .doesNotContain("\"score\"");
+  }
+
   private String aggregate(String json) throws Exception {
     HttpResponse<String> response =
         client.send(

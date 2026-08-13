@@ -404,7 +404,7 @@ public class McpProtocolTest {
             "limit",
             "offset");
     assertThat(propertyNames(tools, "aggregate_chess_games"))
-        .containsExactlyInAnyOrder("query", "group_by", "player", "limit");
+        .containsExactlyInAnyOrder("query", "group_by", "player", "limit", "order_by", "min_games");
     assertThat(propertyNames(tools, "query_chess_games"))
         .containsExactlyInAnyOrder("query", "player", "limit", "include_pgn");
     assertThat(propertyNames(tools, "index_status")).containsExactly("request_id");

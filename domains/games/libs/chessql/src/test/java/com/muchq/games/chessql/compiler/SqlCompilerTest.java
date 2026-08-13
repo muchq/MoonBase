@@ -21,6 +21,43 @@ public class SqlCompilerTest {
   private static final String BASE_PREFIX = "SELECT g.* FROM game_features g WHERE ";
   private static final String BASE_SUFFIX = " ORDER BY g.played_at DESC, g.game_url ASC";
 
+  /** The outcome CASE as it renders inside each metric SUM — two player params per rendering. */
+  private static final String OUTCOME_CASE =
+      "(CASE WHEN result = '1/2-1/2' THEN 'draw'"
+          + " WHEN (result = '1-0' AND LOWER(white_username) = LOWER(?))"
+          + " OR (result = '0-1' AND LOWER(black_username) = LOWER(?)) THEN 'win'"
+          + " WHEN result IN ('1-0', '0-1') THEN 'loss' ELSE 'unknown' END)";
+
+  /**
+   * The per-group outcome metrics every player-scoped aggregate carries after {@code group_count}.
+   * Named once here so the exact-SQL assertions below stay about the thing each of them is pinning
+   * — the metrics themselves are pinned by {@code testCompileAggregateAddsOutcomeMetrics}.
+   */
+  private static final String OUTCOME_METRICS =
+      ", SUM(CASE WHEN "
+          + OUTCOME_CASE
+          + " = 'win' THEN 1 ELSE 0 END) AS wins"
+          + ", SUM(CASE WHEN "
+          + OUTCOME_CASE
+          + " = 'loss' THEN 1 ELSE 0 END) AS losses"
+          + ", SUM(CASE WHEN "
+          + OUTCOME_CASE
+          + " = 'draw' THEN 1 ELSE 0 END) AS draws";
+
+  /** The six player binds the metric block adds, in SELECT-list position. */
+  private static List<Object> metricParams(String player) {
+    return List.copyOf(java.util.Collections.nCopies(6, player));
+  }
+
+  @SafeVarargs
+  private static List<Object> params(List<Object>... groups) {
+    List<Object> all = new java.util.ArrayList<>();
+    for (List<Object> group : groups) {
+      all.addAll(group);
+    }
+    return all;
+  }
+
   private static String motifExists(String motif) {
     return "EXISTS (SELECT 1 FROM motif_occurrences mo"
         + " WHERE mo.game_url = g.game_url AND mo.motif = '"
@@ -921,7 +958,10 @@ public class SqlCompilerTest {
         .contains(PARTICIPATION_GUARD)
         .contains("GROUP BY opening_family");
     assertThat(result.parameters())
-        .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", "loss", "blitz"));
+        .isEqualTo(
+            params(
+                metricParams("hikaru"),
+                List.of("hikaru", "hikaru", "hikaru", "hikaru", "loss", "blitz")));
   }
 
   /**
@@ -997,8 +1037,8 @@ public class SqlCompilerTest {
     // string could not tell the two apart. The params can: two from the filter, and no third and
     // fourth from a guard that never ran.
     assertThat(explicit.parameters())
-        .as("the filter's own two binds, with no guard params layered on top")
-        .isEqualTo(List.of("hikaru", "hikaru"));
+        .as("the metric block's binds, then the filter's own two, with no guard params on top")
+        .isEqualTo(params(metricParams("hikaru"), List.of("hikaru", "hikaru")));
 
     assertThat(
             compiler
@@ -1074,13 +1114,19 @@ public class SqlCompilerTest {
     assertThat(result.selectSql())
         .isEqualTo(
             "SELECT (CASE WHEN LOWER(white_username) = LOWER(?) THEN 'white' ELSE 'black' END)"
-                + " AS me_color, COUNT(*) AS group_count FROM game_features g WHERE"
+                + " AS me_color, COUNT(*) AS group_count"
+                + OUTCOME_METRICS
+                + " FROM game_features g WHERE"
                 + " ((LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))"
                 + " AND LOWER(time_class) = LOWER(?))"
                 + " GROUP BY me_color"
                 + " ORDER BY group_count DESC, me_color ASC");
-    // SELECT CASE param first, then the participation guard's two, then the filter value
-    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", "blitz"));
+    // SELECT CASE param first, then the metric block's, then the participation guard's two, then
+    // the filter value — textual order, which is the order the driver binds them in
+    assertThat(result.parameters())
+        .isEqualTo(
+            params(
+                List.of("hikaru"), metricParams("hikaru"), List.of("hikaru", "hikaru", "blitz")));
   }
 
   @Test
@@ -1094,14 +1140,20 @@ public class SqlCompilerTest {
                 + " WHEN (result = '1-0' AND LOWER(white_username) = LOWER(?))"
                 + " OR (result = '0-1' AND LOWER(black_username) = LOWER(?)) THEN 'win'"
                 + " WHEN result IN ('1-0', '0-1') THEN 'loss' ELSE 'unknown' END) AS outcome,"
-                + " COUNT(*) AS group_count FROM game_features g WHERE"
+                + " COUNT(*) AS group_count"
+                + OUTCOME_METRICS
+                + " FROM game_features g WHERE"
                 + " ((LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))"
                 + " AND white_elo >= ?)"
                 + " GROUP BY outcome"
                 + " ORDER BY group_count DESC, outcome ASC");
-    // The outcome CASE's two params, then the guard's two, then the filter value
+    // The outcome CASE's two params, the metric block's, then the guard's two, then the filter
     assertThat(result.parameters())
-        .isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", 2500));
+        .isEqualTo(
+            params(
+                List.of("hikaru", "hikaru"),
+                metricParams("hikaru"),
+                List.of("hikaru", "hikaru", 2500)));
   }
 
   @Test
@@ -1116,7 +1168,9 @@ public class SqlCompilerTest {
         .contains("END) AS me_color")
         .contains("GROUP BY me_color, opening_family")
         .contains("ORDER BY group_count DESC, me_color ASC, opening_family ASC");
-    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", 2500));
+    assertThat(result.parameters())
+        .isEqualTo(
+            params(List.of("hikaru"), metricParams("hikaru"), List.of("hikaru", "hikaru", 2500)));
   }
 
   /**
@@ -1134,12 +1188,163 @@ public class SqlCompilerTest {
     assertThat(result.selectSql())
         .isEqualTo(
             "SELECT (CASE WHEN LOWER(white_username) = LOWER(?) THEN black_title ELSE white_title"
-                + " END) AS opponent_title, COUNT(*) AS group_count FROM game_features g WHERE"
+                + " END) AS opponent_title, COUNT(*) AS group_count"
+                + OUTCOME_METRICS
+                + " FROM game_features g WHERE"
                 + " ((LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))"
                 + " AND LOWER(time_class) = LOWER(?))"
                 + " GROUP BY opponent_title"
                 + " ORDER BY group_count DESC, opponent_title ASC");
-    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", "bullet"));
+    assertThat(result.parameters())
+        .isEqualTo(
+            params(
+                List.of("hikaru"), metricParams("hikaru"), List.of("hikaru", "hikaru", "bullet")));
+  }
+
+  /**
+   * The metric block itself, pinned once so the exact-SQL tests above can name it. Each SUM
+   * re-renders the same {@code outcome} CASE the group key would use, which is the point: a result
+   * string the compiler classifies one way in a group must be classified the same way in a metric.
+   */
+  @Test
+  public void testCompileAggregateAddsOutcomeMetricsForAPlayer() {
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("outcome = \"win\""), List.of("opening_family"), "hikaru");
+
+    assertThat(result.selectSql())
+        .contains("COUNT(*) AS group_count" + OUTCOME_METRICS + " FROM game_features g");
+    // Six player binds, in SELECT-list position: two per metric CASE rendering. Score is not
+    // among them — it is derived from wins and draws rather than summed again (#1370).
+    assertThat(result.parameters().subList(0, 6)).isEqualTo(metricParams("hikaru"));
+    assertThat(result.selectSql()).doesNotContain("score_points");
+  }
+
+  /**
+   * The negative half: without a player there is no side to attribute a result to, so no metric is
+   * emitted at all — not a column of zeroes, which would read as "never won these" rather than
+   * "nobody asked". The twin above shares the compiler and the group-by, so a broken fixture cannot
+   * masquerade as this holding.
+   */
+  @Test
+  public void testCompileAggregateOmitsOutcomeMetricsWithoutAPlayer() {
+    CompiledQuery result =
+        compiler.compileAggregate(Parser.parse("white.elo >= 2500"), List.of("opening_family"));
+
+    assertThat(result.selectSql())
+        .contains("COUNT(*) AS group_count FROM game_features g")
+        .doesNotContain("AS wins")
+        .doesNotContain("AS losses")
+        .doesNotContain("AS draws")
+        .doesNotContain("AS score_points");
+    assertThat(result.parameters()).isEqualTo(List.of(2500));
+  }
+
+  /**
+   * Ordering by score ranks before the limit truncates, which is the only place it can happen —
+   * that is what makes it a server-side parameter rather than a client-side sort. It ranks by
+   * points per game, so the grouped query becomes a derived table the outer ORDER BY can divide
+   * across (neither dialect resolves SELECT aliases inside an ORDER BY expression), and game count
+   * breaks ties so a 1-game 100% group cannot outrank a 40-game one at the same rate.
+   */
+  @Test
+  public void testCompileAggregateOrdersByScoreWhenAsked() {
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("outcome = \"win\""),
+            new AggregateSpec(List.of("opening_family"), "hikaru", AggregateSpec.Order.SCORE, 0));
+
+    assertThat(result.selectSql())
+        .startsWith("SELECT * FROM (SELECT opening_family, COUNT(*) AS group_count")
+        .endsWith(
+            ") agg ORDER BY (wins * 2 + draws) * 1.0 / group_count DESC, group_count DESC,"
+                + " opening_family ASC");
+    // The limit the DAO appends applies to the ranked result, not to an inner slice of it.
+    assertThat(result.selectSql().indexOf(") agg ORDER BY"))
+        .isGreaterThan(result.selectSql().indexOf("GROUP BY opening_family"));
+  }
+
+  /** The default is unchanged, and says so here rather than only by the absence of a failure. */
+  @Test
+  public void testCompileAggregateOrdersByCountByDefault() {
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("outcome = \"win\""),
+            new AggregateSpec(List.of("opening_family"), "hikaru", null, 0));
+
+    assertThat(result.selectSql())
+        .contains(" ORDER BY group_count DESC, opening_family ASC")
+        .doesNotContain("wins * 2 + draws");
+  }
+
+  /**
+   * The floor is a HAVING on the group's own count, and it binds after the WHERE clause — the DAO
+   * appends {@code LIMIT ?} after everything the compiler produced, so a floor param out of
+   * position would silently become the limit.
+   */
+  @Test
+  public void testCompileAggregateAppliesTheMinimumGamesFloor() {
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("white.elo >= 2500"),
+            new AggregateSpec(List.of("opening_family"), null, AggregateSpec.Order.COUNT, 5));
+
+    assertThat(result.selectSql())
+        .contains(" GROUP BY opening_family HAVING COUNT(*) >= ? ORDER BY group_count DESC");
+    assertThat(result.parameters()).isEqualTo(List.of(2500, 5));
+    assertThat(countPlaceholders(result.selectSql())).isEqualTo(result.parameters().size());
+  }
+
+  /** No floor asked for, no HAVING clause — and so no bind the LIMIT could be mistaken for. */
+  @Test
+  public void testCompileAggregateWithoutAFloorHasNoHavingClause() {
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("white.elo >= 2500"),
+            new AggregateSpec(List.of("opening_family"), null, AggregateSpec.Order.COUNT, 0));
+
+    assertThat(result.selectSql()).doesNotContain("HAVING");
+    assertThat(result.parameters()).isEqualTo(List.of(2500));
+  }
+
+  /**
+   * The totals query has to apply the same floor. Without it {@code totalGroups} counts groups the
+   * caller asked not to see, so {@code truncated} reports a tail that was never on offer — the same
+   * class of silently-wrong denominator the two queries were reconciled for in the first place.
+   */
+  @Test
+  public void testCompileAggregateTotalsAppliesTheSameFloor() {
+    AggregateSpec spec =
+        new AggregateSpec(List.of("opening_family"), null, AggregateSpec.Order.COUNT, 5);
+    CompiledQuery totals = compiler.compileAggregateTotals(Parser.parse("white.elo >= 2500"), spec);
+
+    assertThat(totals.selectSql()).contains(" GROUP BY opening_family HAVING COUNT(*) >= ?) grp");
+    assertThat(totals.parameters()).isEqualTo(List.of(2500, 5));
+    assertThat(countPlaceholders(totals.selectSql())).isEqualTo(totals.parameters().size());
+
+    CompiledQuery unfloored =
+        compiler.compileAggregateTotals(
+            Parser.parse("white.elo >= 2500"),
+            new AggregateSpec(List.of("opening_family"), null, AggregateSpec.Order.COUNT, 0));
+    assertThat(unfloored.selectSql()).doesNotContain("HAVING");
+  }
+
+  /**
+   * The metrics render the outcome CASE without marking the perspective used, so they cannot
+   * satisfy the rule that refuses a player the aggregate would not scope to. If they did, {@code
+   * player=hikaru, num.moves >= 0, group by opening_family} would start being answered — with a
+   * participation guard nobody asked for, over a corpus the caller believed was already theirs.
+   */
+  @Test
+  public void testOutcomeMetricsDoNotSatisfyTheScopingRule() {
+    assertThatThrownBy(
+            () ->
+                compiler.compileAggregate(
+                    Parser.parse("num.moves >= 0"),
+                    new AggregateSpec(
+                        List.of("opening_family"), "hikaru", AggregateSpec.Order.SCORE, 10)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("would not scope this aggregate");
   }
 
   @Test
@@ -1188,12 +1393,17 @@ public class SqlCompilerTest {
     assertThat(result.selectSql())
         .isEqualTo(
             "SELECT (CASE WHEN LOWER(white_username) = LOWER(?) THEN black_elo ELSE white_elo"
-                + " END) / 100 * 100 AS opponent_elo, COUNT(*) AS group_count FROM game_features g"
+                + " END) / 100 * 100 AS opponent_elo, COUNT(*) AS group_count"
+                + OUTCOME_METRICS
+                + " FROM game_features g"
                 + " WHERE ((LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))"
                 + " AND LOWER(time_class) = LOWER(?))"
                 + " GROUP BY opponent_elo"
                 + " ORDER BY group_count DESC, opponent_elo ASC");
-    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", "blitz"));
+    assertThat(result.parameters())
+        .isEqualTo(
+            params(
+                List.of("hikaru"), metricParams("hikaru"), List.of("hikaru", "hikaru", "blitz")));
   }
 
   @Test
@@ -1268,8 +1478,14 @@ public class SqlCompilerTest {
         .contains("THEN black_elo ELSE white_elo END) / 200 * 200 AS opponent_elo")
         .contains("GROUP BY me_elo, opponent_elo")
         .contains("ORDER BY group_count DESC, me_elo ASC, opponent_elo ASC");
-    // One player param per bucket CASE in SELECT order, then the two participation-guard params.
-    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", "hikaru", 1));
+    // One player param per bucket CASE in SELECT order, then the metric block, then the two
+    // participation-guard params.
+    assertThat(result.parameters())
+        .isEqualTo(
+            params(
+                List.of("hikaru", "hikaru"),
+                metricParams("hikaru"),
+                List.of("hikaru", "hikaru", 1)));
   }
 
   @Test
@@ -1425,19 +1641,30 @@ public class SqlCompilerTest {
 
     LocalDateTime julyStart = utc("2026-07-01T00:00:00Z");
     LocalDateTime augStart = utc("2026-08-01T00:00:00Z");
-    // groups: me.color CASE (1), guard (2), outcome CASE (2), "win", date bound, month bounds
+    // groups: me.color CASE (1), the metric block (10), guard (2), outcome CASE (2), "win", date
+    // bound, month bounds
     assertThat(groups.parameters())
         .isEqualTo(
-            List.of(
-                "hikaru", "hikaru", "hikaru", "hikaru", "hikaru", "win", julyStart, julyStart,
-                augStart));
+            params(
+                List.of("hikaru"),
+                metricParams("hikaru"),
+                List.of(
+                    "hikaru", "hikaru", "hikaru", "hikaru", "win", julyStart, julyStart,
+                    augStart)));
     // totals: same WHERE params in the same order, with the me.color CASE param moved to the end
+    // and no metric block — the totals query counts groups and games, which the metrics do not
+    // change
     assertThat(totals.parameters())
         .isEqualTo(
             List.of(
                 "hikaru", "hikaru", "hikaru", "hikaru", "win", julyStart, julyStart, augStart,
                 "hikaru"));
-    assertThat(groups.parameters())
+    // Filter and grouping agree once the metric block is set aside: it sits between the group
+    // expression's params and the WHERE clause's, so dropping that slice leaves exactly what the
+    // totals query binds.
+    List<Object> groupsWithoutMetrics = new java.util.ArrayList<>(groups.parameters());
+    groupsWithoutMetrics.subList(1, 1 + metricParams("hikaru").size()).clear();
+    assertThat(groupsWithoutMetrics)
         .containsExactlyInAnyOrderElementsOf(totals.parameters())
         .hasSameSizeAs(totals.parameters());
     // Every placeholder in each statement is accounted for by exactly one bound param.

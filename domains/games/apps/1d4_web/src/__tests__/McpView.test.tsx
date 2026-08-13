@@ -88,6 +88,28 @@ describe('McpView', () => {
   });
 
   /**
+   * The worked examples are the page's answer to "what do I actually ask it", and the scoring one
+   * is the half a reader would not guess: naming a `player` is what makes each group carry
+   * wins/losses/draws, and `order_by` without `min_games` ranks a one-game sideline first (#1345).
+   * Pinned because the example list is prose that drifts — the tool roster beside it is checked
+   * against mcp_tools.json, and until now nothing checked this.
+   */
+  it('shows a scoring example naming the arguments that make it work', () => {
+    render(
+      <MemoryRouter>
+        <McpView />
+      </MemoryRouter>,
+    );
+
+    const scoring = screen.getByText(/openings they score best in/i);
+    expect(scoring).toBeTruthy();
+    const example = scoring.closest('li');
+    expect(example?.textContent).toContain('order_by');
+    expect(example?.textContent).toContain('min_games');
+    expect(example?.textContent).toContain('player');
+  });
+
+  /**
    * Connecting is one command, and its whole job is to be copy-pasteable (#1325). A command that
    * renders but names the wrong endpoint — or names none — is worse than no command at all,
    * because it looks like it works.

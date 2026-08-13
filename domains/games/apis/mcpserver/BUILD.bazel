@@ -160,6 +160,7 @@ java_test_suite(
     name = "tools_tests",
     size = "small",
     srcs = [
+        "src/test/java/com/muchq/games/mcpserver/tools/AggregateGamesToolTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/ChessComGamesToolTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/ChessComPlayerToolTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/ChessComPlayersToolTest.java",

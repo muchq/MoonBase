@@ -155,7 +155,7 @@ public class McpSharedCorpusE2ETest {
             .readTree(
                 payloadOf(
                     aggregateTool.aggregateChessGames(
-                        "num.moves >= 0", List.of("platform"), null, 20)));
+                        "num.moves >= 0", List.of("platform"), null, 20, null, null)));
 
     assertThat(aggregate.path("error").isMissingNode())
         .as("aggregate failed: %s", aggregate)
@@ -164,6 +164,59 @@ public class McpSharedCorpusE2ETest {
     assertThat(aggregate.get("totalGames").asLong())
         .as("the untruncated total has to survive the hop")
         .isPositive();
+  }
+
+  /**
+   * The outcome metrics through the whole stack: the tool argument, the HTTP body, one_d4's
+   * compiler and database, and back through the client's deserialization into the tool's JSON.
+   * Every layer between here and the SQL has its own test; this is the one that would catch a
+   * metric the client dropped because it deserialized into a record component nobody added.
+   */
+  @Test
+  public void aggregatingThroughMcpCarriesTheOutcomeMetrics() throws Exception {
+    indexTool.indexChessGames("hikaru", "chess.com", "2024-01", "2024-01", null, null);
+
+    JsonNode aggregate =
+        JsonUtils.mapper()
+            .readTree(
+                payloadOf(
+                    aggregateTool.aggregateChessGames(
+                        // The indexed game's players are the fixture's own White and Black; the
+                        // perspective is White's, who won it.
+                        "white.username = \"White\" OR black.username = \"White\"",
+                        List.of("time_class"),
+                        "White",
+                        20,
+                        "score",
+                        1)));
+
+    assertThat(aggregate.path("error").isMissingNode())
+        .as("aggregate failed: %s", aggregate)
+        .isTrue();
+    JsonNode group = aggregate.get("groups").get(0);
+    assertThat(group.get("count").asLong()).isEqualTo(1);
+    assertThat(group.get("wins").asLong()).as("metrics reached the tool: %s", group).isEqualTo(1);
+    assertThat(group.get("losses").asLong()).isZero();
+    assertThat(group.get("draws").asLong()).isZero();
+    assertThat(group.get("score").asDouble()).isEqualTo(1.0);
+  }
+
+  /** The same call without a player: no metrics, rather than zeroed ones. */
+  @Test
+  public void aggregatingThroughMcpWithoutAPlayerCarriesNoOutcomeMetrics() throws Exception {
+    indexTool.indexChessGames("hikaru", "chess.com", "2024-01", "2024-01", null, null);
+
+    JsonNode aggregate =
+        JsonUtils.mapper()
+            .readTree(
+                payloadOf(
+                    aggregateTool.aggregateChessGames(
+                        "num.moves >= 0", List.of("platform"), null, 20, null, null)));
+
+    JsonNode group = aggregate.get("groups").get(0);
+    assertThat(group.has("wins")).isFalse();
+    assertThat(group.has("score")).isFalse();
+    assertThat(group.get("count").asLong()).isPositive();
   }
 
   /**

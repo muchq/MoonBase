@@ -164,8 +164,28 @@ public class IndexerFacade {
    * when the limit was actually reached.
    */
   public AggregateResult aggregate(String chessql, List<String> groupBy, String player, int limit) {
+    return aggregate(chessql, groupBy, player, limit, null, 0);
+  }
+
+  /**
+   * Ranked variant: {@code orderBy} is "count" or "score" and {@code minGames} drops groups below a
+   * floor. Both are one_d4's to validate — the compiler that owns the vocabulary lives there, and a
+   * second copy of it here is the drift this facade exists to avoid; a rejection comes back as the
+   * 400 message, which the tools already report verbatim.
+   */
+  public AggregateResult aggregate(
+      String chessql,
+      List<String> groupBy,
+      String player,
+      int limit,
+      String orderBy,
+      int minGames) {
+    // An omitted ordering is sent as the explicit default rather than as null: one_d4 reads both
+    // the same way, and the request body this facade puts on the wire is pinned by
+    // IndexerFacadeHttpTest, which should not change shape because a tool argument was left out.
+    String ordering = orderBy == null || orderBy.isBlank() ? "count" : orderBy;
     AggregateResponse response =
-        client.aggregate(new AggregateRequest(chessql, groupBy, "count", limit, player));
+        client.aggregate(new AggregateRequest(chessql, groupBy, ordering, limit, player, minGames));
     return new AggregateResult(
         orEmpty(response.groups()), response.totalGames(), response.totalGroups());
   }

@@ -2,6 +2,7 @@ package com.muchq.games.one_d4.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.muchq.games.chessql.compiler.AggregateSpec;
 import com.muchq.games.chessql.compiler.CompiledQuery;
 import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.chessql.parser.ParsedQuery;
@@ -802,6 +803,200 @@ public class GameFeatureDaoTest {
     assertThat(groups).hasSize(1);
     assertThat(groups.get(0).group()).containsEntry("me_title", "IM");
     assertThat(groups.get(0).count()).isEqualTo(4);
+  }
+
+  /**
+   * The whole point of #1345, executed: one row per opening family carrying how the player did in
+   * it, where the same answer used to need a second group-by dimension and a client-side pivot.
+   *
+   * <p>Three things are load-bearing and none of them are visible in the SQL string. Wins and
+   * losses are counted from the player's side across both colors, so a "0-1" is a win in one row
+   * and a loss in another. Score is halved from the SUM's half-points, so a win-and-a-draw family
+   * scores 1.5 rather than 3 or 1. And an unfinished game ("*") is counted in {@code count} and in
+   * none of the three metrics, which is why they are not required to add up.
+   */
+  @Test
+  public void aggregate_carriesPerGroupOutcomeMetricsForThePlayer() {
+    dao.insertBatch(
+        List.of(
+            // Caro Kann: a win as White, a win as Black, a draw, a loss, and an unfinished game.
+            perspectiveGame("https://chess.com/game/m-1", "hikaru", "a", null, null, "1-0", "Caro"),
+            perspectiveGame("https://chess.com/game/m-2", "b", "hikaru", null, null, "0-1", "Caro"),
+            perspectiveGame(
+                "https://chess.com/game/m-3", "hikaru", "c", null, null, "1/2-1/2", "Caro"),
+            perspectiveGame("https://chess.com/game/m-4", "d", "hikaru", null, null, "1-0", "Caro"),
+            perspectiveGame("https://chess.com/game/m-5", "hikaru", "e", null, null, "*", "Caro"),
+            // Sicilian: one loss, so the metrics differ per group rather than being global.
+            perspectiveGame(
+                "https://chess.com/game/m-6", "hikaru", "f", null, null, "0-1", "Sicilian")));
+
+    SqlCompiler compiler = new SqlCompiler();
+    List<String> groupBy = List.of("opening_family");
+    AggregateSpec spec = AggregateSpec.of(groupBy, "hikaru");
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(
+                Parser.parse("white.username = \"hikaru\" OR black.username = \"hikaru\""), spec),
+            compiler.resolveGroupByColumns(groupBy),
+            spec.hasOutcomeMetrics(),
+            10);
+
+    assertThat(groups).hasSize(2);
+    AggregateRow caro = groups.get(0);
+    assertThat(caro.group()).containsEntry("opening_family", "Caro");
+    assertThat(caro.count()).isEqualTo(5);
+    assertThat(caro.wins()).isEqualTo(2);
+    assertThat(caro.losses()).isEqualTo(1);
+    assertThat(caro.draws()).isEqualTo(1);
+    assertThat(caro.score()).isEqualTo(2.5);
+    // The unfinished game is counted and scored nowhere: 2 + 1 + 1 < 5.
+    assertThat(caro.wins() + caro.losses() + caro.draws()).isLessThan(caro.count());
+
+    AggregateRow sicilian = groups.get(1);
+    assertThat(sicilian.count()).isEqualTo(1);
+    assertThat(sicilian.wins()).isZero();
+    assertThat(sicilian.losses()).isEqualTo(1);
+    assertThat(sicilian.score()).isEqualTo(0.0);
+  }
+
+  /**
+   * The negative twin, on the same corpus: a corpus-wide aggregate carries no metrics at all. Zero
+   * would be a different claim — "won none of these" — and the wire test pins that the fields are
+   * absent rather than zeroed.
+   */
+  @Test
+  public void aggregate_withoutAPlayerCarriesNoOutcomeMetrics() {
+    dao.insertBatch(
+        List.of(
+            perspectiveGame("https://chess.com/game/n-1", "hikaru", "a", null, null, "1-0", "Caro"),
+            perspectiveGame(
+                "https://chess.com/game/n-2", "b", "hikaru", null, null, "0-1", "Caro")));
+
+    SqlCompiler compiler = new SqlCompiler();
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(Parser.parse("num.moves >= 0"), List.of("opening_family")),
+            List.of("opening_family"),
+            10);
+
+    assertThat(groups).hasSize(1);
+    assertThat(groups.get(0).count()).isEqualTo(2);
+    assertThat(groups.get(0).wins()).isNull();
+    assertThat(groups.get(0).losses()).isNull();
+    assertThat(groups.get(0).draws()).isNull();
+    assertThat(groups.get(0).score()).isNull();
+  }
+
+  /**
+   * Ranking by score, with the floor that makes it readable. The fixture is the shape the issue
+   * describes: a much-played family the player scores badly in, and a one-game sideline they won.
+   * Ordered by count the sideline is last; ordered by score with no floor it is first, which is the
+   * useless answer; ordered by score with a floor of two it disappears and the best real opening
+   * leads.
+   *
+   * <p>The floor also has to reach the totals query, or {@code totalGroups} would keep counting the
+   * group the caller asked not to see.
+   */
+  @Test
+  public void aggregate_ranksByScoreAboveAMinimumGamesFloor() {
+    dao.insertBatch(
+        List.of(
+            // Sideline: one game, one win — a perfect score on no evidence.
+            perspectiveGame("https://chess.com/game/s-1", "hikaru", "a", null, null, "1-0", "Side"),
+            // Caro: four games, one win and three losses — 25%.
+            perspectiveGame("https://chess.com/game/s-2", "hikaru", "b", null, null, "1-0", "Caro"),
+            perspectiveGame("https://chess.com/game/s-3", "hikaru", "c", null, null, "0-1", "Caro"),
+            perspectiveGame("https://chess.com/game/s-4", "hikaru", "d", null, null, "0-1", "Caro"),
+            perspectiveGame("https://chess.com/game/s-5", "hikaru", "e", null, null, "0-1", "Caro"),
+            // Sicilian: two games, a win and a draw — 75%, the answer worth surfacing.
+            perspectiveGame("https://chess.com/game/s-6", "hikaru", "f", null, null, "1-0", "Sic"),
+            perspectiveGame(
+                "https://chess.com/game/s-7", "hikaru", "g", null, null, "1/2-1/2", "Sic")));
+
+    SqlCompiler compiler = new SqlCompiler();
+    ParsedQuery parsed = Parser.parse("white.username = \"hikaru\" OR black.username = \"hikaru\"");
+    List<String> groupBy = List.of("opening_family");
+
+    AggregateSpec byCount = AggregateSpec.of(groupBy, "hikaru");
+    assertThat(
+            dao
+                .aggregate(
+                    compiler.compileAggregate(parsed, byCount),
+                    compiler.resolveGroupByColumns(groupBy),
+                    byCount.hasOutcomeMetrics(),
+                    10)
+                .stream()
+                .map(g -> g.group().get("opening_family"))
+                .toList())
+        .as("by count, the most-played family leads and the sideline is last")
+        .containsExactly("Caro", "Sic", "Side");
+
+    AggregateSpec byScore = new AggregateSpec(groupBy, "hikaru", AggregateSpec.Order.SCORE, 0);
+    assertThat(
+            dao
+                .aggregate(
+                    compiler.compileAggregate(parsed, byScore),
+                    compiler.resolveGroupByColumns(groupBy),
+                    byScore.hasOutcomeMetrics(),
+                    10)
+                .stream()
+                .map(g -> g.group().get("opening_family"))
+                .toList())
+        .as("by score alone the one-game sideline outranks everything, which is why the floor")
+        .containsExactly("Side", "Sic", "Caro");
+
+    AggregateSpec floored = new AggregateSpec(groupBy, "hikaru", AggregateSpec.Order.SCORE, 2);
+    List<AggregateRow> ranked =
+        dao.aggregate(
+            compiler.compileAggregate(parsed, floored),
+            compiler.resolveGroupByColumns(groupBy),
+            floored.hasOutcomeMetrics(),
+            10);
+    assertThat(ranked.stream().map(g -> g.group().get("opening_family")).toList())
+        .as("with a two-game floor the sideline is gone and the best real opening leads")
+        .containsExactly("Sic", "Caro");
+    assertThat(ranked.get(0).score()).isEqualTo(1.5);
+    assertThat(ranked.get(1).score()).isEqualTo(1.0);
+
+    GameFeatureStore.AggregateTotals totals =
+        dao.aggregateTotals(compiler.compileAggregateTotals(parsed, floored));
+    assertThat(totals.totalGroups()).as("the floored group is not part of the tail").isEqualTo(2);
+    assertThat(totals.totalGames()).as("nor are its games").isEqualTo(6);
+  }
+
+  /**
+   * Score ordering breaks ties by game count, so evidence wins: two families at the same score rate
+   * come back most-played first rather than in whatever order the engine produced.
+   */
+  @Test
+  public void aggregate_scoreTiesAreBrokenByGameCount() {
+    dao.insertBatch(
+        List.of(
+            perspectiveGame("https://chess.com/game/t-1", "hikaru", "a", null, null, "1-0", "Few"),
+            perspectiveGame("https://chess.com/game/t-2", "hikaru", "b", null, null, "0-1", "Few"),
+            perspectiveGame("https://chess.com/game/t-3", "hikaru", "c", null, null, "1-0", "Many"),
+            perspectiveGame("https://chess.com/game/t-4", "hikaru", "d", null, null, "0-1", "Many"),
+            perspectiveGame(
+                "https://chess.com/game/t-5", "hikaru", "e", null, null, "1/2-1/2", "Many"),
+            perspectiveGame(
+                "https://chess.com/game/t-6", "hikaru", "f", null, null, "1/2-1/2", "Many")));
+
+    SqlCompiler compiler = new SqlCompiler();
+    List<String> groupBy = List.of("opening_family");
+    AggregateSpec spec = new AggregateSpec(groupBy, "hikaru", AggregateSpec.Order.SCORE, 0);
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(
+                Parser.parse("white.username = \"hikaru\" OR black.username = \"hikaru\""), spec),
+            compiler.resolveGroupByColumns(groupBy),
+            spec.hasOutcomeMetrics(),
+            10);
+
+    // Both score 50% (Few: 1 win 1 loss over 2; Many: 1 win 1 loss 2 draws over 4), on different
+    // point totals — the ranking is by rate, so only the count tiebreak separates them.
+    assertThat(groups.stream().map(AggregateRow::score)).containsExactly(2.0, 1.0);
+    assertThat(groups.stream().map(g -> g.group().get("opening_family")))
+        .containsExactly("Many", "Few");
   }
 
   /**

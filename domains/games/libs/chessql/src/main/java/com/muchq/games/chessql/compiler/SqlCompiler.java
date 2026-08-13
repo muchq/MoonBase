@@ -157,6 +157,12 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
 
   private static final String ME_IS_WHITE = "LOWER(white_username) = LOWER(?)";
 
+  /**
+   * The one perspective field the aggregate metrics are derived from, named so the metrics read it
+   * out of {@link #PERSPECTIVE_FIELDS} instead of restating what a win is.
+   */
+  private static final String OUTCOME_FIELD = "outcome";
+
   private static final Map<String, PerspectiveField> PERSPECTIVE_FIELDS =
       Map.of(
           "me.color",
@@ -189,7 +195,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
               "CASE WHEN " + ME_IS_WHITE + " THEN black_title ELSE white_title END",
               1,
               GroupKind.CATEGORICAL),
-          "outcome",
+          OUTCOME_FIELD,
           new PerspectiveField(
               "CASE WHEN result = '1/2-1/2' THEN 'draw'"
                   + " WHEN (result = '1-0' AND LOWER(white_username) = LOWER(?))"
@@ -320,27 +326,38 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    * LIMIT via a bind parameter.
    */
   public CompiledQuery compileAggregate(ParsedQuery pq, List<String> groupByFields) {
-    return compileAggregate(pq, groupByFields, null);
+    return compileAggregate(pq, AggregateSpec.of(groupByFields));
+  }
+
+  /** Player-scoped variant, ranked by count with no minimum-games floor. */
+  public CompiledQuery compileAggregate(ParsedQuery pq, List<String> groupByFields, String player) {
+    return compileAggregate(pq, AggregateSpec.of(groupByFields, player));
   }
 
   /**
    * Aggregate variant of {@link #compile(ParsedQuery, String)}: the filter may use perspective
-   * fields (resolved against {@code player}); group-by fields must be physical columns, except for
-   * the perspective fields, which are groupable when a player is supplied — the only way to
-   * aggregate opponents across both colors, since the color-specific columns mix the player's own
-   * values into the buckets on half the rows. The categorical fields ({@code me.color}, {@code
+   * fields (resolved against {@code spec.player()}); group-by fields must be physical columns,
+   * except for the perspective fields, which are groupable when a player is supplied — the only way
+   * to aggregate opponents across both colors, since the color-specific columns mix the player's
+   * own values into the buckets on half the rows. The categorical fields ({@code me.color}, {@code
    * me.title}, {@code opponent.username}, {@code opponent.title}, {@code outcome}) group by value;
    * the rating fields ({@code me.elo}, {@code opponent.elo}) group into fixed-width buckets keyed
    * by the band's lower bound, 100 points wide unless the term supplies a width ({@code
    * opponent.elo(200)}).
+   *
+   * <p>With a player the SELECT list also carries {@code wins} / {@code losses} / {@code draws} per
+   * group, so "how do I score in each opening" is the same single query as "which openings do I
+   * play" — grouping by {@code [opening_family, outcome]} instead fans every family out into up to
+   * three rows, which the caller has to pivot back and which spends the group limit three times
+   * over (#1345).
    */
-  public CompiledQuery compileAggregate(ParsedQuery pq, List<String> groupByFields, String player) {
+  public CompiledQuery compileAggregate(ParsedQuery pq, AggregateSpec spec) {
     if (pq.orderBy() != null) {
       throw new IllegalArgumentException(
           "ORDER BY motif_count is not supported in aggregate queries");
     }
-    List<GroupByTerm> terms = resolveGroupByTerms(groupByFields);
-    Perspective perspective = new Perspective(player);
+    List<GroupByTerm> terms = resolveGroupByTerms(spec.groupBy());
+    Perspective perspective = new Perspective(spec.player());
 
     // SELECT-list group expressions render (and bind their player params) before the WHERE clause.
     List<Object> selectParams = new ArrayList<>();
@@ -351,6 +368,17 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       } else {
         selectExprs.add(groupTermExpr(term, perspective, selectParams) + " AS " + term.key());
       }
+    }
+    selectExprs.add("COUNT(*) AS group_count");
+
+    // The metrics render the outcome CASE without going through Perspective, so they never mark
+    // it used. That matters: `used` is what adds the participation guard and what satisfies
+    // requireTheAggregateScopesToItsPlayer, so metrics that flipped it would silently accept the
+    // unscoped player aggregate that rule exists to refuse — and answer a different question than
+    // the one that was asked, since the guard would also start filtering.
+    List<Object> metricParams = new ArrayList<>();
+    if (spec.hasOutcomeMetrics()) {
+      selectExprs.addAll(outcomeMetricSelects(spec.player(), metricParams));
     }
 
     List<Object> whereParams = new ArrayList<>();
@@ -364,38 +392,54 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     // rendering carries different bind-placeholder positions.
     String keys = terms.stream().map(GroupByTerm::key).collect(Collectors.joining(", "));
     String tiebreak = terms.stream().map(t -> t.key() + " ASC").collect(Collectors.joining(", "));
-    String sql =
+    List<Object> havingParams = new ArrayList<>();
+    String grouped =
         "SELECT "
             + String.join(", ", selectExprs)
-            + ", COUNT(*) AS group_count FROM game_features g WHERE "
+            + " FROM game_features g WHERE "
             + whereClause
             + " GROUP BY "
             + keys
-            + " ORDER BY group_count DESC, "
-            + tiebreak;
+            + havingAtLeast(spec.minGames(), havingParams);
+    String sql = order(grouped, spec, tiebreak);
+    // Bind order is textual: SELECT list (group expressions, then metrics), then WHERE, then
+    // HAVING. The caller's LIMIT binds after all of them.
     List<Object> params = new ArrayList<>(selectParams);
+    params.addAll(metricParams);
     params.addAll(whereParams);
+    params.addAll(havingParams);
     return new CompiledQuery(sql, params);
   }
 
-  /** Totals variant of {@link #compileAggregateTotals(ParsedQuery, List, String)} sans player. */
+  /** Totals variant of {@link #compileAggregateTotals(ParsedQuery, AggregateSpec)} sans player. */
   public CompiledQuery compileAggregateTotals(ParsedQuery pq, List<String> groupByFields) {
-    return compileAggregateTotals(pq, groupByFields, null);
+    return compileAggregateTotals(pq, AggregateSpec.of(groupByFields));
+  }
+
+  /** Player-scoped totals, with no minimum-games floor. */
+  public CompiledQuery compileAggregateTotals(
+      ParsedQuery pq, List<String> groupByFields, String player) {
+    return compileAggregateTotals(pq, AggregateSpec.of(groupByFields, player));
   }
 
   /**
-   * Companion to {@link #compileAggregate(ParsedQuery, List, String)}: compiles the same filter and
-   * grouping into a single-row totals query ({@code total_groups}, {@code total_games}) over the
-   * untruncated result, so callers applying a group limit can report how much was cut off.
+   * Companion to {@link #compileAggregate(ParsedQuery, AggregateSpec)}: compiles the same filter,
+   * grouping and minimum-games floor into a single-row totals query ({@code total_groups}, {@code
+   * total_games}) over the untruncated result, so callers applying a group limit can report how
+   * much was cut off.
+   *
+   * <p>It carries no outcome metrics and needs none — the totals answer "how many groups and games
+   * were there", which the ordering and the per-group breakdown do not change. The floor it does
+   * apply, because a group the floor excluded is not part of the tail the caller is being told
+   * about.
    */
-  public CompiledQuery compileAggregateTotals(
-      ParsedQuery pq, List<String> groupByFields, String player) {
+  public CompiledQuery compileAggregateTotals(ParsedQuery pq, AggregateSpec spec) {
     if (pq.orderBy() != null) {
       throw new IllegalArgumentException(
           "ORDER BY motif_count is not supported in aggregate queries");
     }
-    List<GroupByTerm> terms = resolveGroupByTerms(groupByFields);
-    Perspective perspective = new Perspective(player);
+    List<GroupByTerm> terms = resolveGroupByTerms(spec.groupBy());
+    Perspective perspective = new Perspective(spec.player());
 
     List<Object> whereParams = new ArrayList<>();
     String whereClause = compileExpr(pq.expr(), whereParams, perspective);
@@ -410,16 +454,88 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     whereClause = guardParticipation(whereClause, whereParams, perspective);
     requireTheAggregateScopesToItsPlayer(pq, perspective);
 
+    List<Object> havingParams = new ArrayList<>();
     String sql =
         "SELECT COUNT(*) AS total_groups, COALESCE(SUM(group_count), 0) AS total_games FROM ("
             + "SELECT COUNT(*) AS group_count FROM game_features g WHERE "
             + whereClause
             + " GROUP BY "
             + String.join(", ", groupExprs)
+            + havingAtLeast(spec.minGames(), havingParams)
             + ") grp";
     List<Object> params = new ArrayList<>(whereParams);
     params.addAll(groupParams);
+    params.addAll(havingParams);
     return new CompiledQuery(sql, params);
+  }
+
+  /**
+   * The per-group outcome metrics, in SELECT-list order. Each renders the {@code outcome}
+   * perspective expression rather than restating what a win is, so the metrics and the {@code
+   * outcome} group key can never disagree about a result string — including the results that are
+   * none of the three ({@code *}, an unfinished game), which land in {@code group_count} and in no
+   * metric, leaving wins + losses + draws below the count on purpose.
+   *
+   * <p>Score is not among them, because it is not independent of them: W + D/2 is determined by
+   * {@code wins} and {@code draws}, so summing it separately would render the outcome CASE twice
+   * more for a number these columns already fix — and give the result a fourth way to disagree with
+   * itself. The row derives it, and the score ordering divides it out of these same two columns
+   * (#1370).
+   */
+  private static List<String> outcomeMetricSelects(String player, List<Object> params) {
+    return List.of(
+        "SUM(CASE WHEN " + outcomeIs("win", player, params) + " THEN 1 ELSE 0 END) AS wins",
+        "SUM(CASE WHEN " + outcomeIs("loss", player, params) + " THEN 1 ELSE 0 END) AS losses",
+        "SUM(CASE WHEN " + outcomeIs("draw", player, params) + " THEN 1 ELSE 0 END) AS draws");
+  }
+
+  /** One rendering of the outcome CASE, compared to a literal this compiler owns. */
+  private static String outcomeIs(String outcome, String player, List<Object> params) {
+    PerspectiveField field = PERSPECTIVE_FIELDS.get(OUTCOME_FIELD);
+    for (int i = 0; i < field.playerParams(); i++) {
+      params.add(player);
+    }
+    return "(" + field.sql() + ") = '" + outcome + "'";
+  }
+
+  /**
+   * The minimum-games floor, as a HAVING on the group's own count. A floor is what makes a score
+   * ranking readable: without it the top of the list is whatever 1-0 sideline was played once.
+   */
+  private static String havingAtLeast(int minGames, List<Object> params) {
+    if (minGames <= 0) {
+      return "";
+    }
+    params.add(minGames);
+    return " HAVING COUNT(*) >= ?";
+  }
+
+  /**
+   * Applies the ordering to a grouped query.
+   *
+   * <p>Count orders in place, exactly as it always has. Score ranks by points <em>per game</em> —
+   * "which of these do I do best in", not "which did I collect the most points in", which is only a
+   * re-spelling of the count ordering — and that ratio has to be computed from two aggregates at
+   * once. Neither dialect lets an ORDER BY expression reference SELECT aliases, so the grouped
+   * query becomes a derived table whose columns the outer ORDER BY can name; the alternative is
+   * re-rendering the outcome CASE twice more inside ORDER BY, which doubles the metric block for
+   * nothing. {@code group_count} cannot be zero — a group exists because rows matched — so the
+   * division is safe, and it breaks ties so a 1-game 100% group does not outrank a 40-game one.
+   *
+   * <p>The score itself is {@code (2 * wins + draws) / 2}, so the rate is {@code (2 * wins + draws)
+   * / (2 * group_count)} — written below without the halving, which cancels out of a comparison.
+   * {@code wins} and {@code draws} are columns only a player-scoped SELECT list carries, which is
+   * exactly why {@link AggregateSpec} refuses a score ordering without a player.
+   */
+  private static String order(String grouped, AggregateSpec spec, String tiebreak) {
+    return switch (spec.order()) {
+      case COUNT -> grouped + " ORDER BY group_count DESC, " + tiebreak;
+      case SCORE ->
+          "SELECT * FROM ("
+              + grouped
+              + ") agg ORDER BY (wins * 2 + draws) * 1.0 / group_count DESC, group_count DESC, "
+              + tiebreak;
+    };
   }
 
   /**
