@@ -30,7 +30,12 @@ scripts/mutation-check -f path/to/file.go -t 'go test ./...' \
 
 It refuses to run against an already-red suite (every mutation would look
 caught) and reports an expression that matched nothing as `SKIPPED` rather
-than as a survivor, so a typo isn't mistaken for a finding. The file is
+than as a survivor, so a typo isn't mistaken for a finding. A malformed
+expression is `INVALID` and carries sed's own complaint, which is a different
+mistake from one that simply matched nothing. Either way the run exits
+non-zero and says the run was incomplete: an expression that never applied is
+a question that never got asked, and a green summary for it would be the same
+false-clean report the baseline check exists to prevent (#1372). The file is
 restored afterwards, including on Ctrl-C.
 
 The test command runs in a subshell, so `-t 'cd some/dir && npm test'` is

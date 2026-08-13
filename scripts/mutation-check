@@ -37,6 +37,10 @@ Examples:
 Mutate the behaviour, not the syntax: a change that won't compile is caught by
 the compiler and tells you nothing about the tests. Aim at the decisions —
 boundaries, guards, which variable feeds a call, an omitted field.
+
+Exits non-zero if any mutation survived, and also if any expression never
+applied (SKIPPED, or INVALID with sed's complaint). A run that tested nothing
+is not a passing run.
 USAGE
 }
 
@@ -87,12 +91,16 @@ fi
 FILE=$(cd "$(dirname "$FILE")" && pwd)/$(basename "$FILE")
 
 BACKUP=$(mktemp)
+SED_ERR=$(mktemp)
 cp "$FILE" "$BACKUP"
 restore() { cp "$BACKUP" "$FILE"; }
 # Restore on interrupt too: leaving a mutated source behind would be worse
-# than the bug being looked for.
-trap 'restore; rm -f "$BACKUP"; exit 130' INT TERM
-trap 'restore; rm -f "$BACKUP"' EXIT
+# than the bug being looked for. The signal handler only exits — `exit` fires
+# the EXIT trap, which does the restoring and the cleanup. Doing either here as
+# well means the EXIT handler then copies from a backup this one just deleted,
+# printing a cp error over whatever the user was reading (#1372).
+trap 'exit 130' INT TERM
+trap 'restore; rm -f "$BACKUP" "$SED_ERR"' EXIT
 
 # Baseline. Without this a suite that's already red makes every mutation look
 # caught, which is the most flattering possible wrong answer.
@@ -115,9 +123,23 @@ echo "  ok, suite is green"
 echo
 
 SURVIVED=0
+KILLED=0
+SKIPPED=0
+INVALID=0
 for mutation in "${MUTATIONS[@]}"; do
   restore
-  sed -i.bak "$mutation" "$FILE" 2>/dev/null
+
+  # sed's own complaint used to go to /dev/null, which made a malformed
+  # expression indistinguishable from one that simply matched nothing — the
+  # same SKIPPED line for two different mistakes, only one of which is fixable
+  # by looking harder at the source (#1372).
+  if ! sed -i.bak "$mutation" "$FILE" 2>"$SED_ERR"; then
+    echo "  INVALID  $mutation"
+    sed 's/^/           /' "$SED_ERR"
+    rm -f "$FILE.bak"
+    INVALID=$((INVALID + 1))
+    continue
+  fi
   rm -f "$FILE.bak"
 
   # A sed that matched nothing leaves the code intact, so the suite passes and
@@ -126,6 +148,7 @@ for mutation in "${MUTATIONS[@]}"; do
   if cmp -s "$FILE" "$BACKUP"; then
     echo "  SKIPPED  $mutation"
     echo "           (matched nothing — check the expression)"
+    SKIPPED=$((SKIPPED + 1))
     continue
   fi
 
@@ -134,6 +157,7 @@ for mutation in "${MUTATIONS[@]}"; do
     SURVIVED=$((SURVIVED + 1))
   else
     echo "  killed   $mutation"
+    KILLED=$((KILLED + 1))
   fi
 done
 
@@ -144,4 +168,25 @@ if [ "$SURVIVED" -gt 0 ]; then
   echo "Add an assertion that fails on each, then re-run."
   exit 1
 fi
-echo "all mutations killed"
+
+# Nothing ran. Reporting that as success is the failure mode this whole script
+# exists to prevent, one level up: a green verdict for an experiment that never
+# happened, reachable from a single typo in a sed expression (#1372).
+if [ "$KILLED" -eq 0 ]; then
+  echo "no mutation applied: $SKIPPED matched nothing, $INVALID invalid."
+  echo "Nothing was tested — fix the expressions and re-run."
+  exit 1
+fi
+
+SUMMARY="$KILLED mutation(s) killed"
+[ "$SKIPPED" -gt 0 ] && SUMMARY="$SUMMARY, $SKIPPED skipped"
+[ "$INVALID" -gt 0 ] && SUMMARY="$SUMMARY, $INVALID invalid"
+echo "$SUMMARY"
+# A skipped or invalid expression is a question that never got asked. The
+# answers that did come back are real, so they are reported above — but the run
+# as a whole did not do what it was told, and saying so only in a line someone
+# might not read is how a typo becomes a clean bill of health.
+if [ "$SKIPPED" -gt 0 ] || [ "$INVALID" -gt 0 ]; then
+  echo "Some expressions never applied; the run is incomplete."
+  exit 1
+fi
