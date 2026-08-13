@@ -63,11 +63,15 @@ subject_is_intact() { grep -qx "$ORIGINAL" "$SUBJECT"; }
 # used from the repo root ("-f domains/..."). An absolute path would paper over
 # exactly the hazard the cd cases below are pinning: with one, the restore
 # resolves the same from any directory and #1369 is invisible.
-run_check() { # run_check <test-cmd> <mutation>... ; captures output and status
-  local cmd=$1
-  shift
-  OUT=$(cd "$WORK" && "$MUTATION_CHECK" -f project/answer.txt -t "$cmd" "$@" 2>&1)
+run_check_as() { # run_check_as <-f value> <test-cmd> <mutation>...
+  local file=$1 cmd=$2
+  shift 2
+  OUT=$(cd "$WORK" && "$MUTATION_CHECK" -f "$file" -t "$cmd" "$@" 2>&1)
   STATUS=$?
+}
+
+run_check() { # run_check <test-cmd> <mutation>... ; the relative -f form
+  run_check_as project/answer.txt "$@"
 }
 
 out_has() { grep -q "$1" <<< "$OUT"; }
@@ -79,7 +83,7 @@ echo "reporting"
 
 reset_subject
 run_check "$STRICT_SUITE" 's/value = 41/value = 42/'
-check "reports a caught mutation as killed" out_has 'killed'
+check "reports a caught mutation as killed" out_has '^  killed'
 check "exits 0 when every mutation is killed" test "$STATUS" -eq 0
 check "restores the file afterwards" subject_is_intact
 
@@ -114,7 +118,7 @@ CD_SUITE="cd project && grep -qx 'value = 41' answer.txt"
 reset_subject
 run_check "$CD_SUITE" 's/value = 41/value = 42/'
 check "restores the file when the test command cds" subject_is_intact
-check "still reports the caught mutation as killed" out_has 'killed'
+check "still reports the caught mutation as killed" out_has '^  killed'
 check "restore does not error" out_lacks 'No such file or directory'
 
 # The dangerous half. With a suite that catches nothing, every mutation must be
@@ -133,19 +137,33 @@ check "restores the file after a cd-ing blind suite" subject_is_intact
 
 echo "paths"
 
-# The same hazard reached the other way: an absolute -f with a relative cd in
-# the command. Nothing here should depend on which form the caller used.
-reset_subject
-(cd "$WORK" && "$MUTATION_CHECK" -f "$SUBJECT" -t "cd project && true" \
-  's/value = 41/value = 42/' > /dev/null 2>&1)
-check "restores an absolute -f after a relative cd" subject_is_intact
+# Nothing here should depend on which form of -f the caller used, and the two
+# forms fail differently: with a relative -f the restore breaks loudly, while
+# with an absolute one the restore works and only the verdicts are wrong — a
+# quieter, worse outcome. Review caught this suite asserting only restoration
+# for the absolute form, which the pre-fix script passes while reporting two
+# fabricated `killed` lines and exiting 0. So both forms are checked the same
+# way: verdicts, exit status, and the file.
+for form in absolute relative; do
+  case $form in
+    absolute) file=$SUBJECT ;;
+    relative) file=project/answer.txt ;;
+  esac
 
-# A relative -f, resolved against the caller's directory rather than kept as a
-# string the script re-resolves later from wherever it happens to be standing.
-reset_subject
-(cd "$WORK" && "$MUTATION_CHECK" -f project/answer.txt -t "cd project && true" \
-  's/value = 41/value = 42/' > /dev/null 2>&1)
-check "restores a relative -f after a relative cd" subject_is_intact
+  reset_subject
+  run_check_as "$file" "$CD_BLIND_SUITE" \
+    's/value = 41/value = 42/' 's/value = 41/value = 43/'
+  check "$form -f: no fabricated killed verdict under a cd" out_lacks '^  killed'
+  check "$form -f: both uncaught mutations reported" \
+    test "$(grep -c SURVIVED <<< "$OUT")" -eq 2
+  check "$form -f: exits non-zero for the survivors" test "$STATUS" -ne 0
+  check "$form -f: restores the file" subject_is_intact
+
+  reset_subject
+  run_check_as "$file" "$CD_SUITE" 's/value = 41/value = 42/'
+  check "$form -f: still catches a real mutation under a cd" out_has '^  killed'
+  check "$form -f: restore does not error" out_lacks 'No such file or directory'
+done
 
 echo
 if [ "$FAILURES" -eq 0 ]; then
