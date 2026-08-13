@@ -1057,8 +1057,9 @@ func oneD4Env(t *testing.T, key string) string {
 func TestOneD4sDatabaseUrlIsAJdbcUrl(t *testing.T) {
 	url := oneD4Env(t, "INDEXER_DB_URL")
 	if url == "" {
-		t.Fatal("one_d4's compose block sets no INDEXER_DB_URL, so the container falls back to " +
-			"the untracked /etc/one_d4/db_config (#1351).")
+		t.Fatal("one_d4's compose block sets no INDEXER_DB_URL. That is the container's only " +
+			"source for the URL since #1362 removed the /etc/one_d4/db_config fallback, so it " +
+			"would start on in-memory H2 — answering requests and losing every write on restart.")
 	}
 	if !strings.HasPrefix(url, "jdbc:postgresql://") {
 		t.Errorf("INDEXER_DB_URL=%q is not a JDBC URL. golf_hub's libpq form (postgresql://...) "+
@@ -1102,6 +1103,36 @@ func TestOneD4sCredentialsAreNotInTheUrl(t *testing.T) {
 		t.Errorf("INDEXER_DB_PASSWORD=%q should interpolate ${ONE_D4_DB_PASSWORD} from the "+
 			"host's ~/.env. A literal here would be a credential committed to the repo.",
 			password)
+	}
+}
+
+// Nothing in one_d4's image reads a host file any more. IndexerModule resolved
+// $INDEXER_DB_URL, then /etc/one_d4/db_config, then H2; #1351 moved the URL into
+// the environment above and #1362 deleted the file fallback, so the bind mount
+// that carried it is dead weight — and a dead mount is worse than an absent one,
+// because it reads as configuration the deploy still honours. Editing that file
+// on the host now changes nothing, which is exactly the kind of thing an
+// operator finds out during an incident.
+//
+// The regression this guards is a host file coming back for one_d4 instead of a
+// variable here. That shape is what kept the database's hostname invisible to
+// this repo and forced one_d4_postgres to survive as an alias (#1225).
+func TestOneD4MountsNoHostConfigDirectory(t *testing.T) {
+	lines := oneD4ActiveLines(t)
+
+	// The control. Without it this passes just as well against a block that was
+	// renamed out from under the helper, or emptied.
+	if !strings.Contains(strings.Join(lines, "\n"), "ghcr.io/muchq/one_d4") {
+		t.Fatalf("did not find one_d4's image in its compose block; this test is no longer "+
+			"reading the service it claims to. Lines were:\n%s", strings.Join(lines, "\n"))
+	}
+
+	for _, line := range lines {
+		if strings.Contains(line, "/etc/one_d4") {
+			t.Errorf("one_d4's compose block still mounts a host config directory: %q. Nothing "+
+				"in the container reads it — the JDBC URL comes from INDEXER_DB_URL (#1351) and "+
+				"the file fallback that used to read it is gone (#1362).", line)
+		}
 	}
 }
 

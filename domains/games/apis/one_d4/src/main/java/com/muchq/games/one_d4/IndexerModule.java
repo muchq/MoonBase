@@ -31,11 +31,6 @@ import io.micronaut.context.annotation.Bean;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.context.annotation.Factory;
 import io.micronaut.context.annotation.Value;
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
 import java.time.Clock;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -52,37 +47,34 @@ import org.slf4j.LoggerFactory;
 public class IndexerModule {
   private static final Logger LOG = LoggerFactory.getLogger(IndexerModule.class);
   private static final String DEFAULT_JDBC_URL = "jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1";
-  private static final Path DB_CONFIG_PATH = Path.of("/etc/one_d4/db_config");
 
   /**
-   * Resolves the JDBC URL. Priority: 1. INDEXER_DB_URL environment variable 2.
-   * /etc/one_d4/db_config file (plain text, single line) 3. H2 in-memory (local dev default)
+   * Resolves the JDBC URL: {@code $INDEXER_DB_URL}, or H2 in-memory when it is unset.
    *
-   * <p>The deploy sets the variable from compose (#1351), so the file is a superseded fallback kept
-   * only until that is confirmed on the host and the file is deleted. It is deliberately still
-   * ranked second rather than removed: doing both at once would leave nothing to fall back to if
-   * the variable turned out not to reach the container.
+   * <p>There was a rank between those two until #1362 — a plain-text {@code /etc/one_d4/db_config}
+   * on the deploy host, bind-mounted into the container. #1351 moved the deployed URL into {@code
+   * compose.yaml}, where this repo can see and change it, and the file has since been deleted from
+   * the host along with the mount that carried it. A resolution path with no live consumer is one
+   * nobody exercises, and this one was worse than inert: it read as configuration an operator could
+   * still edit, when editing it had stopped doing anything the moment the variable outranked it.
+   *
+   * <p>H2 stays as the local-dev default, so an unset variable is not fatal. On the deploy that is
+   * silent data loss rather than an outage — the service starts, answers, and writes to a database
+   * that vanishes with the process — which is why it is logged at WARN and why {@code
+   * deploy_config_test.go} fails if compose stops setting the variable.
    */
   static String readJdbcUrl() {
-    return readJdbcUrl(System.getenv("INDEXER_DB_URL"), DB_CONFIG_PATH);
+    return readJdbcUrl(System.getenv("INDEXER_DB_URL"));
   }
 
-  static String readJdbcUrl(@Nullable String envUrl, Path configPath) {
+  static String readJdbcUrl(@Nullable String envUrl) {
     if (envUrl != null && !envUrl.isBlank()) {
       return envUrl.strip();
     }
-    try {
-      String fileUrl = Files.readString(configPath).strip();
-      if (!fileUrl.isEmpty()) {
-        LOG.info("Loaded JDBC URL from {}", configPath);
-        return fileUrl;
-      }
-      LOG.info("Empty DB config file found; falling back to H2 in-memory");
-    } catch (NoSuchFileException nsfe) {
-      LOG.info("No DB config file found; falling back to H2 in-memory");
-    } catch (IOException ioe) {
-      throw new UncheckedIOException(ioe);
-    }
+    LOG.warn(
+        "INDEXER_DB_URL is unset; falling back to in-memory H2 ({}). Nothing written survives a"
+            + " restart — on a deployed instance this is a misconfiguration, not a default.",
+        DEFAULT_JDBC_URL);
     return DEFAULT_JDBC_URL;
   }
 
@@ -110,9 +102,9 @@ public class IndexerModule {
   /**
    * @param configuredUrl the {@code indexer.db.url} property. Tests set it to give each
    *     ApplicationContext its own in-memory database; nothing sets it in production, where the URL
-   *     comes from {@code $INDEXER_DB_URL} or {@code /etc/one_d4/db_config}. Before this existed
-   *     the property was silently ignored, so every context that thought it had an isolated
-   *     database was sharing {@code jdbc:h2:mem:indexer}.
+   *     comes from {@code $INDEXER_DB_URL}. Before this existed the property was silently ignored,
+   *     so every context that thought it had an isolated database was sharing {@code
+   *     jdbc:h2:mem:indexer}.
    */
   @Context
   public DataSource dataSource(@Value("${indexer.db.url:}") String configuredUrl) {

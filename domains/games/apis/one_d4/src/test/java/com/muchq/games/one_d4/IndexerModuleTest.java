@@ -1,23 +1,15 @@
 package com.muchq.games.one_d4;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.queue.IndexQueue;
 import com.muchq.games.one_d4.worker.IndexWorker;
 import io.micronaut.context.annotation.Bean;
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Clock;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 public class IndexerModuleTest {
-
-  @TempDir Path tmp;
 
   /**
    * compose hands this container {@code jdbc:postgresql://one_d4_postgres:5432/one_d4} (#1351), and
@@ -82,63 +74,38 @@ public class IndexerModuleTest {
 
   @Test
   public void readJdbcUrl_returnsEnvVar_whenSet() {
-    String result = IndexerModule.readJdbcUrl("jdbc:postgresql://prod:5432/db", missingPath());
+    String result = IndexerModule.readJdbcUrl("jdbc:postgresql://prod:5432/db");
     assertThat(result).isEqualTo("jdbc:postgresql://prod:5432/db");
   }
 
   @Test
   public void readJdbcUrl_stripsEnvVar() {
-    String result = IndexerModule.readJdbcUrl("  jdbc:postgresql://host/db  ", missingPath());
+    String result = IndexerModule.readJdbcUrl("  jdbc:postgresql://host/db  ");
     assertThat(result).isEqualTo("jdbc:postgresql://host/db");
   }
 
+  /**
+   * {@code INDEXER_DB_URL=} with nothing after it is what compose produces when the variable it
+   * interpolates is absent from the host's environment, so this is the realistic misconfiguration
+   * rather than a synthetic one. It has to resolve to H2 rather than reach Hikari as a blank URL,
+   * which fails at pool construction with "No suitable driver".
+   */
   @Test
   public void readJdbcUrl_ignoresBlankEnvVar() {
-    String result = IndexerModule.readJdbcUrl("   ", missingPath());
+    String result = IndexerModule.readJdbcUrl("   ");
     assertThat(result).isEqualTo("jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1");
   }
 
+  /**
+   * The variable is now the entire resolution. There used to be a rank between it and H2 — {@code
+   * /etc/one_d4/db_config}, read here until #1362 — so an unset variable landed on whatever that
+   * file held. Nothing on disk can change this answer any more, which is why the method takes no
+   * path: the only input is the environment.
+   */
   @Test
-  public void readJdbcUrl_ignoresNullEnvVar_andReadsFile() throws IOException {
-    Path configFile = Files.createFile(tmp.resolve("db_config"));
-    Files.writeString(configFile, "jdbc:postgresql://file-host:5432/chess\n");
-
-    String result = IndexerModule.readJdbcUrl(null, configFile);
-    assertThat(result).isEqualTo("jdbc:postgresql://file-host:5432/chess");
-  }
-
-  @Test
-  public void readJdbcUrl_returnsDefault_whenFileIsMissing() {
-    String result = IndexerModule.readJdbcUrl(null, missingPath());
+  public void readJdbcUrl_returnsDefault_whenEnvVarIsUnset() {
+    String result = IndexerModule.readJdbcUrl(null);
     assertThat(result).isEqualTo("jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1");
-  }
-
-  @Test
-  public void readJdbcUrl_returnsDefault_whenFileIsEmpty() throws IOException {
-    Path configFile = Files.createFile(tmp.resolve("db_config_empty"));
-    Files.writeString(configFile, "   ");
-
-    String result = IndexerModule.readJdbcUrl(null, configFile);
-    assertThat(result).isEqualTo("jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1");
-  }
-
-  @Test
-  public void readJdbcUrl_envVarTakesPrecedenceOverFile() throws IOException {
-    Path configFile = Files.createFile(tmp.resolve("db_config_precedence"));
-    Files.writeString(configFile, "jdbc:postgresql://file-host/db");
-
-    String result = IndexerModule.readJdbcUrl("jdbc:postgresql://env-host/db", configFile);
-    assertThat(result).isEqualTo("jdbc:postgresql://env-host/db");
-  }
-
-  @Test
-  public void readJdbcUrl_throwsUncheckedIOException_onNonFileNotFoundIOError() {
-    // A directory path will cause an IOException (not NoSuchFileException) when read as a file
-    Path dirPath = tmp;
-
-    assertThatThrownBy(() -> IndexerModule.readJdbcUrl(null, dirPath))
-        .isInstanceOf(UncheckedIOException.class)
-        .hasCauseInstanceOf(IOException.class);
   }
 
   @Test
@@ -166,9 +133,5 @@ public class IndexerModuleTest {
   public void parseThreads_respectsValidValue() {
     assertThat(IndexerModule.parseThreads("8", 4)).isEqualTo(8);
     assertThat(IndexerModule.parseThreads(" 16 ", 4)).isEqualTo(16);
-  }
-
-  private Path missingPath() {
-    return tmp.resolve("nonexistent_db_config");
   }
 }

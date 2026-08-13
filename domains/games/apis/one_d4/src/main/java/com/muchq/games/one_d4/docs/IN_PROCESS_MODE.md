@@ -90,12 +90,14 @@ public class IndexerModule {
 
 `indexer.db.url` is a Micronaut property tests set to give each ApplicationContext
 its own database; nothing sets it in production. When it is blank, `readJdbcUrl()`
-resolves `$INDEXER_DB_URL`, then `/etc/one_d4/db_config`, then H2 in-memory.
+resolves `$INDEXER_DB_URL`, then H2 in-memory. (A `/etc/one_d4/db_config` host file
+sat between those two until MoonBase#1362.)
 
 Credentials are separate environment variables rather than Micronaut properties or
 URL query parameters — pgjdbc decodes query values, so a password containing `+`,
 `&` or `%` would be corrupted in the URL. Unset leaves whatever credentials the URL
-itself carries, which is what keeps the H2 and `db_config` paths working unchanged.
+itself carries, which is what keeps H2 and credential-bearing URLs (Neon's, for
+instance) working unchanged.
 
 ### Environment variables
 

@@ -195,7 +195,10 @@ Services require configuration files in their respective `/etc` directories on t
 - `/etc/posterize/` - Posterize service configuration
 - `/etc/mcpserver/` - MCP server configuration
 - `/etc/microgpt-serve/` - microgpt config, including the model in `model/`
-- `/etc/one_d4/` - one_d4 service configuration
+
+one_d4 is not on that list any more: it took its JDBC URL from `/etc/one_d4/db_config` until
+#1351 put the URL in `compose.yaml`, and #1362 removed both the fallback and the mount. It needs
+nothing from the host filesystem.
 
 ### Database URLs
 
@@ -222,9 +225,13 @@ reach them. golf_hub already accepts that, so this makes one_d4 consistent with 
 stack rather than newly exposed — but the password does move from a root-owned file into container
 metadata, and that is a real change in where it sits.
 
-`INDEXER_DB_URL` always wins over `/etc/one_d4/db_config` when both are present — see
-`IndexerModule.readJdbcUrl`. The file is mounted only as a fallback this repo does not maintain,
-not something a deploy still writes. When verifying a deploy, read the **body** of `/health` — it answers 200 with
+`INDEXER_DB_URL` is now one_d4's only source for the URL. It used to outrank a
+`/etc/one_d4/db_config` host file; that fallback and its bind mount are gone (#1362), so an unset
+variable falls straight through to in-memory H2 — the container starts, answers, and loses
+everything it writes on restart. `IndexerModule.readJdbcUrl` logs that at WARN, and
+`deploy_config_test.go` fails if this file stops setting the variable.
+
+When verifying a deploy, read the **body** of `/health` — it answers 200 with
 `{"status":"DOWN"}` when Postgres is unreachable, so the status code alone proves nothing.
 
 ## Network

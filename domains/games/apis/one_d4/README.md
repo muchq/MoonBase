@@ -142,13 +142,16 @@ pgjdbc decodes query values, so `+` becomes a space, `&` truncates the rest, and
 The app resolves the URL in this order:
 
 1. `INDEXER_DB_URL` environment variable
-2. `/etc/one_d4/db_config` file
-3. H2 in-memory (local dev fallback)
+2. H2 in-memory (local dev fallback)
 
 **On the deployed server the variable is what applies.** `compose.yaml` sets
-`INDEXER_DB_URL`, `INDEXER_DB_USERNAME` and `INDEXER_DB_PASSWORD` (MoonBase#1351), and the
-variable outranks the file — so editing `/etc/one_d4/db_config` there now has no effect.
-The file is kept only as a fallback until that deploy is confirmed.
+`INDEXER_DB_URL`, `INDEXER_DB_USERNAME` and `INDEXER_DB_PASSWORD` (MoonBase#1351).
+A third rank used to sit between the two above — a plain-text `/etc/one_d4/db_config` on
+the host — and it is gone (MoonBase#1362), along with the bind mount that carried it. An
+unset variable on a deployed instance therefore lands on in-memory H2: the service starts
+and answers, and everything it writes disappears with the process. It logs at WARN when
+that happens, and `deploy/consolidated/deploy_config_test.go` fails if `compose.yaml`
+stops setting the variable.
 
 For Neon, the URL looks like:
 ```
@@ -430,8 +433,8 @@ is possible and simply not built. Changing *that* derivation still needs a reind
 
 On the deployed machine the indexer runs against **PostgreSQL** — the `shared_postgres` service
 (image `postgres:18`, Compose volume `shared_pgdata`), reached via the JDBC URL `compose.yaml`
-sets in `INDEXER_DB_URL` (see the resolution order above; `/etc/one_d4/db_config` is still
-mounted, but the variable outranks it). H2 is the local-dev default only.
+sets in `INDEXER_DB_URL` — the only source there is (see the resolution order above). H2 is the
+local-dev default only.
 
 The instance is shared: `golf_hub` keeps its own database on it too, which is why the service is
 no longer named after one_d4 (MoonBase#1225). The Compose volume key is not the volume's name —
