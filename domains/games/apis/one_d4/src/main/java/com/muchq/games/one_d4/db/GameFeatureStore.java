@@ -111,10 +111,16 @@ public interface GameFeatureStore {
   List<GameOpening> fetchOpeningsForRederive(int limit, int offset);
 
   /**
-   * Writes {@code opening_family} for the given games, and returns how many rows changed. Only the
-   * family is written: {@code opening_name} is the input the caller derived from, and every other
-   * enriched column is not a function of stored data — titles come from player profiles at index
-   * time, and the ECOUrl that {@code opening_name} itself derives from is not stored at all.
+   * Writes {@code opening_family} for the given games, and returns how many rows changed.
+   *
+   * <p>Only the family is written, and only where the row still holds the {@code opening_name} the
+   * caller derived from — an indexer upsert rewrites name and family together, so an unconditional
+   * write could land a family derived from a name the row no longer has.
+   *
+   * <p>The other enriched columns stay on the reindex path: titles come from player profiles at
+   * index time, and while the ECOUrl behind {@code opening_name} is not a column, the stored PGN
+   * usually carries its {@code [ECOUrl "..."]} tag — so a local name re-derive is possible and
+   * simply not built here.
    */
   int updateOpeningFamilies(List<GameOpening> updates);
 
