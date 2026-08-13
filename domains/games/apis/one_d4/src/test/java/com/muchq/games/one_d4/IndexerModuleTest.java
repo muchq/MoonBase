@@ -2,12 +2,18 @@ package com.muchq.games.one_d4;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.queue.IndexQueue;
 import com.muchq.games.one_d4.worker.IndexWorker;
 import io.micronaut.context.annotation.Bean;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 public class IndexerModuleTest {
 
@@ -106,6 +112,83 @@ public class IndexerModuleTest {
   public void readJdbcUrl_returnsDefault_whenEnvVarIsUnset() {
     String result = IndexerModule.readJdbcUrl(null);
     assertThat(result).isEqualTo("jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1");
+  }
+
+  /**
+   * The absence half of #1362, asserted where the behaviour lives rather than in {@code
+   * deploy_config_test.go}: that test pins what compose hands the container, and would stay green
+   * against a class that had quietly grown a second source. Nothing enforced "no file is read"
+   * except the method signature, and a signature is a comment with a compiler.
+   *
+   * <p>Read off the compiled class because that is the only place the property is observable once
+   * the parameter is gone. A file read leaves {@code java/nio/file/...} in the constant pool no
+   * matter which method it hides in, which an assertion about parameter types would miss.
+   *
+   * <p>The control matters more than usual here: a scan that read nothing — wrong resource name,
+   * empty stream — would report the absence just as confidently. Requiring the variable's own name
+   * to be present proves the bytes are this class's, and pins the spelling {@code compose.yaml} has
+   * to match at the same time.
+   */
+  @Test
+  public void readJdbcUrl_consultsNoFile() throws Exception {
+    String constantPool = compiledBytesOfIndexerModule();
+
+    assertThat(constantPool)
+        .as("the class does not name INDEXER_DB_URL, so these are not the bytes we meant to scan")
+        .contains("INDEXER_DB_URL");
+    assertThat(constantPool)
+        .as(
+            "IndexerModule references java.nio.file. Resolution is the environment and nothing"
+                + " else since #1362 — a file fallback here is invisible to every other test,"
+                + " including the compose guard.")
+        .doesNotContain("java/nio/file");
+  }
+
+  /**
+   * The fall-through to H2 is the operator's only signal that a deployed container is about to run
+   * on a database that vanishes with the process — it starts, serves, and answers /health 200. It
+   * was logged at INFO beside the file-not-found line it belonged to; with the file gone (#1362)
+   * that INFO is the whole warning, sitting in the same stream as routine startup chatter.
+   *
+   * <p>Asserted rather than described because "we log this loudly" is exactly the kind of claim
+   * that survives an edit that stops it being true.
+   */
+  @Test
+  public void readJdbcUrl_warnsWhenItFallsBackToH2() {
+    ch.qos.logback.classic.Logger logger =
+        (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(IndexerModule.class);
+    ListAppender<ILoggingEvent> events = new ListAppender<>();
+    events.start();
+    logger.addAppender(events);
+    try {
+      IndexerModule.readJdbcUrl(null);
+      IndexerModule.readJdbcUrl("   ");
+
+      assertThat(events.list)
+          .as("both ways of not setting the variable have to say so")
+          .hasSize(2)
+          .allSatisfy(
+              event -> {
+                assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                assertThat(event.getFormattedMessage()).contains("INDEXER_DB_URL");
+              });
+
+      // The twin. Without it this passes against a method that warns unconditionally, which is
+      // the same as not warning at all once an operator learns to ignore it.
+      events.list.clear();
+      IndexerModule.readJdbcUrl("jdbc:postgresql://host/db");
+      assertThat(events.list).as("a configured URL is not a misconfiguration").isEmpty();
+    } finally {
+      logger.detachAppender(events);
+    }
+  }
+
+  /** The class's own bytes, decoded so that byte-for-byte substrings survive. */
+  private static String compiledBytesOfIndexerModule() throws Exception {
+    try (InputStream in = IndexerModule.class.getResourceAsStream("IndexerModule.class")) {
+      assertThat(in).as("IndexerModule.class is not on the test classpath").isNotNull();
+      return new String(in.readAllBytes(), StandardCharsets.ISO_8859_1);
+    }
   }
 
   @Test

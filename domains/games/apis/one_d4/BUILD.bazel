@@ -558,6 +558,11 @@ java_test_suite(
         # The driver itself, so the URL shape compose hands this container is checked
         # against the parser that will actually read it (#1351).
         artifact("org.postgresql:postgresql"),
+        # The real logging backend, so readJdbcUrl's fall-back warning can be read back
+        # off the logger production uses rather than asserted about (#1362).
+        artifact("ch.qos.logback:logback-classic"),
+        artifact("ch.qos.logback:logback-core"),
+        artifact("org.slf4j:slf4j-api"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
