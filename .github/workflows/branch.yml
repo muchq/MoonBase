@@ -28,6 +28,14 @@ jobs:
       - name: Test deploy.sh
         run: ./scripts/test-deploy
 
+      # mutation-check is what the testing bar leans on to prove a negative
+      # test actually bites, so a silent break in it invalidates every result
+      # taken from it — including reporting `killed` for a mutation that never
+      # applied (#1369). Rides in this job rather than its own: same container,
+      # no dependencies, well under a second.
+      - name: Test mutation-check
+        run: ./scripts/test-mutation-check
+
   # deploy_config_test pins the text of the collector config, which can only
   # catch mistakes someone already knew to look for: `match_type: glob` passed
   # review and passed the line-presence test that existed at the time, and would
