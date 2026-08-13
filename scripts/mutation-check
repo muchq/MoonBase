@@ -133,6 +133,9 @@ for mutation in "${MUTATIONS[@]}"; do
   # expression indistinguishable from one that simply matched nothing — the
   # same SKIPPED line for two different mistakes, only one of which is fixable
   # by looking harder at the source (#1372).
+  # Any non-zero sed — a malformed expression, an unwritable file — is a
+  # mutation that did not happen, and is counted as one. The label leans
+  # towards the common cause; sed's own message below says which it was.
   if ! sed -i.bak "$mutation" "$FILE" 2>"$SED_ERR"; then
     echo "  INVALID  $mutation"
     sed 's/^/           /' "$SED_ERR"
@@ -163,6 +166,17 @@ done
 
 restore
 echo
+
+# One summary, then one exit decision. Reporting the tally first and deciding
+# afterwards keeps them from disagreeing: an earlier version exited on the
+# survivor branch before the tally was printed, so a run with both a survivor
+# and a skipped expression never mentioned the skip at all.
+SUMMARY="$KILLED killed"
+[ "$SURVIVED" -gt 0 ] && SUMMARY="$SUMMARY, $SURVIVED survived"
+[ "$SKIPPED" -gt 0 ] && SUMMARY="$SUMMARY, $SKIPPED skipped"
+[ "$INVALID" -gt 0 ] && SUMMARY="$SUMMARY, $INVALID invalid"
+echo "$SUMMARY"
+
 if [ "$SURVIVED" -gt 0 ]; then
   echo "$SURVIVED mutation(s) survived: the tests would ship those bugs."
   echo "Add an assertion that fails on each, then re-run."
@@ -178,10 +192,6 @@ if [ "$KILLED" -eq 0 ]; then
   exit 1
 fi
 
-SUMMARY="$KILLED mutation(s) killed"
-[ "$SKIPPED" -gt 0 ] && SUMMARY="$SUMMARY, $SKIPPED skipped"
-[ "$INVALID" -gt 0 ] && SUMMARY="$SUMMARY, $INVALID invalid"
-echo "$SUMMARY"
 # A skipped or invalid expression is a question that never got asked. The
 # answers that did come back are real, so they are reported above — but the run
 # as a whole did not do what it was told, and saying so only in a line someone
@@ -190,3 +200,4 @@ if [ "$SKIPPED" -gt 0 ] || [ "$INVALID" -gt 0 ]; then
   echo "Some expressions never applied; the run is incomplete."
   exit 1
 fi
+echo "all mutations killed"

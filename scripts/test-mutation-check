@@ -189,6 +189,24 @@ check "a skip alongside a kill is reported" out_has 'skipped'
 check "does not claim all mutations were killed when one skipped" \
   out_lacks 'all mutations killed'
 check "the killed one is still reported" out_has '^  killed'
+# The half review found unpinned: deleting the incomplete-run branch left the
+# suite green while this case printed a tally and exited 0. A real result
+# alongside a question that never got asked is not a passing run.
+check "a skip alongside a kill exits non-zero" test "$STATUS" -ne 0
+check "a skip alongside a kill says the run is incomplete" out_has 'incomplete'
+
+# The other arm of the same condition, so neither can be dropped unnoticed.
+reset_subject
+run_check "$STRICT_SUITE" 's/value = 41/value = 42/' 's/unterminated'
+check "an invalid alongside a kill exits non-zero" test "$STATUS" -ne 0
+check "an invalid alongside a kill says the run is incomplete" out_has 'incomplete'
+
+# A survivor and a skip together: the survivor decides the exit, but the tally
+# still has to admit the skip rather than reporting only what it exited on.
+reset_subject
+run_check "$BLIND_SUITE" 's/value = 41/value = 42/' 's/nothing matches this/x/'
+check "a survivor alongside a skip still reports the skip" out_has 'skipped'
+check "a survivor alongside a skip exits non-zero" test "$STATUS" -ne 0
 
 # A malformed expression is a different mistake from one that matched nothing,
 # and sed's complaint about it used to go to /dev/null.
@@ -206,10 +224,17 @@ echo "interrupts"
 # restore ran against a file that was no longer there and printed a cp error
 # over whatever the user was reading (#1372).
 #
-# The suite sleeps only once the subject has been mutated, which puts the
-# interrupt squarely inside a per-mutation run rather than the baseline.
+# The suite blocks only once the subject has been mutated, which puts the
+# interrupt squarely inside a per-mutation run rather than the baseline. It
+# waits on a marker file rather than sleeping a fixed span: bash defers a trap
+# until the foreground command returns, so a `sleep 30` here would hold the
+# whole run — and this suite — for thirty seconds after the signal, which is
+# what took CI's test-deploy job from ~44s to ~1m12s. Releasing the marker
+# right after signalling makes the same assertions in a fraction of a second.
 reset_subject
-INTERRUPTIBLE="grep -qx 'value = 41' project/answer.txt || sleep 30"
+RELEASE=$WORK/release
+rm -f "$RELEASE"
+INTERRUPTIBLE="grep -qx 'value = 41' project/answer.txt || until [ -f '$RELEASE' ]; do sleep 0.05; done"
 INT_OUT=$WORK/int-out.txt
 # `exec` so the backgrounded subshell is *replaced* by the script: $! is then
 # the PID that has the traps, and the interrupt lands on it rather than on a
@@ -223,6 +248,8 @@ for _ in $(seq 1 100); do
   sleep 0.1
 done
 kill -INT "$runner" 2>/dev/null
+# Let the blocked command return so the deferred trap can run.
+touch "$RELEASE"
 wait "$runner"
 int_status=$?
 
