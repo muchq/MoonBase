@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -75,7 +76,7 @@ public class OpeningsCorpusTest {
     assertThat(name).as("name for %s", ecoUrl).isNotNull();
     String family = Openings.familyFromName(name);
     assertThat(family).as("family for %s", ecoUrl).isNotNull();
-    return family;
+    return Objects.requireNonNull(family);
   }
 
   private static List<String> loadEcoUrls() throws IOException {
