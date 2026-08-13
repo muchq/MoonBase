@@ -237,11 +237,46 @@ container's `ObjectMapper` bean, the real DAO, the real router — and when
 "the real one" is itself an inference, add one test that reads the actual bytes
 off a real server.
 
-**TDD for bug fixes.** Write the failing test first, watch it fail for the
-right reason, then fix it. The zone bug above was pinned by a test running
-under `TZ=Pacific/Kiritimati` that failed with
-`expected: "2026-07-01 00:00:00" but was: "2026-07-01 14:00:00"` before the fix
-landed.
+**TDD, nearly always — not just for bug fixes.** Write the test first, watch it
+fail for the right reason, then write the code. This is the default for
+features as much as for fixes; the exceptions are narrow (a spike you intend to
+throw away, a pure rename) and "I already know what this does" is not one of
+them.
+
+The reason is design, not discipline. Writing the expectation first forces the
+question "what should this do, and how would anyone tell?" while the answer is
+still cheap to change — before an interface exists to be accommodated. Tests
+written afterwards answer a different question: "what does this code do?" They
+inherit the shape of whatever was built, including the parts that are awkward
+to observe, and they are systematically blind to the case the implementation
+forgot, because they were derived from it.
+
+The zone bug was pinned this way: a test running under `TZ=Pacific/Kiritimati`
+that failed with `expected: "2026-07-01 00:00:00" but was: "2026-07-01 14:00:00"`
+before the fix landed. Watching it fail is half the value — a test that has
+never failed has not been shown to test anything.
+
+**Mutation checking is not a substitute for writing the test first.** It is
+worth doing (see below) and it answers a genuinely useful question, but a much
+narrower one: *does this assertion, as written, bite right now?* It cannot tell
+you the assertion is the right one. It cannot recover a case nobody thought to
+assert, because it only mutates code that exists to break tests that exist. And
+it applies long after the design decisions it might have influenced were made.
+
+Reaching for it to justify tests written after the fact is the failure it looks
+most like a fix for. Two receipts from one session:
+
+- #1371's first regression fixture asserted the property with an absolute path,
+  and passed against the very bug it was written to catch — the failure needed
+  a relative path. A test that passes against the bug is worse than no test,
+  and mutation checking found it only because someone thought to point the
+  suite at the old script.
+- #1373's first interrupt test signalled a wrapper process rather than the
+  script under test. The run carried on underneath, the assertion "passed", and
+  the reason had nothing to do with the behaviour being tested.
+
+Both were written to fit code that already existed, and both looked fine.
+Write the test first; mutation-check it afterwards.
 
 **Mutation-test negative and security tests.** A test asserting that something
 is *rejected* or *absent* must be proven to fail when the property it pins is
