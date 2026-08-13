@@ -361,15 +361,39 @@ load landed wherever the submit happened to arrive.
 Re-runs feature extraction on every stored game and updates motif columns and occurrences. Useful after deploying a new detector.
 
 It writes **no** `game_features` columns, so it does not touch the derived/enriched ones —
-`white_title`, `black_title`, `opening_name`, `opening_family`. Changing how those are derived (as
-#1344 did for `opening_family`) needs a reindex with `skipCache: true`, which is the only path that
-rewrites them; `/admin/reanalyze` returns a large `gamesReanalyzed` and leaves every one unchanged.
+`white_title`, `black_title`, `opening_name`, `opening_family`. It reports a large
+`gamesProcessed` and leaves every one of them unchanged. For `opening_family` specifically, use
+the re-derive below; the other three still need a reindex with `skipCache: true`.
 
 ```bash
 curl -X POST http://localhost:8080/admin/reanalyze
 ```
 
-Returns `{"gamesReanalyzed": N}`.
+Returns `{"gamesProcessed": N, "gamesFailed": M}`.
+
+### Re-derive Opening Families
+
+Recomputes `opening_family` from the stored `opening_name` on every row, in place. No chess.com
+traffic, no rate limiting, and no dependence on old monthly archives still being fetchable — the
+corrected value is a pure function of data the table already holds
+(`opening_family = Openings.familyFromName(opening_name)`), so the network round trip a
+`skipCache` reindex pays buys nothing for this class of change.
+
+Use it after changing the family derivation, as #1344 did. Until every row is corrected, one
+opening is split across two group keys and an exact-match filter on the family misses the
+un-corrected rows.
+
+```bash
+curl -X POST http://localhost:8080/admin/rederive-openings
+```
+
+Returns `{"gamesScanned": N, "gamesUpdated": M}`. Only rows whose family actually changes are
+written, so a second run reports `gamesUpdated: 0` — and a first run reporting `0` means the
+stored values already agree with the current derivation.
+
+It deliberately covers this one column. `white_title` / `black_title` come from player profiles at
+index time, and `opening_name` derives from the chess.com ECOUrl, which is not stored (`eco` holds
+the PGN's ECO code) — none of those can be recomputed locally, so they still need the reindex.
 
 ### Available Motifs
 

@@ -1,4 +1,4 @@
-package com.muchq.games.one_d4.worker;
+package com.muchq.games.one_d4.openings;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

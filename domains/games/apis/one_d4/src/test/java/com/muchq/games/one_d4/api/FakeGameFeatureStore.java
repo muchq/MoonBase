@@ -4,6 +4,7 @@ import com.muchq.games.one_d4.api.dto.AggregateRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.db.GameFeatureStore;
+import com.muchq.games.one_d4.db.GameFeatureStore.GameOpening;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import java.time.Instant;
@@ -118,6 +119,16 @@ final class FakeGameFeatureStore implements GameFeatureStore {
   @Override
   public AggregateTotals aggregateTotals(Object compiledQuery) {
     return new AggregateTotals(0, 0);
+  }
+
+  @Override
+  public java.util.List<GameOpening> fetchOpeningsForRederive(int limit, int offset) {
+    return java.util.List.of();
+  }
+
+  @Override
+  public int updateOpeningFamilies(java.util.List<GameOpening> updates) {
+    return 0;
   }
 
   @Override

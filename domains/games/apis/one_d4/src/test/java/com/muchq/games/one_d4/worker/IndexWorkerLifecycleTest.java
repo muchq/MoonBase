@@ -10,6 +10,7 @@ import com.muchq.games.one_d4.api.dto.AggregateRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.db.GameFeatureStore;
+import com.muchq.games.one_d4.db.GameFeatureStore.GameOpening;
 import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestDao;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
@@ -546,6 +547,16 @@ public class IndexWorkerLifecycleTest {
     @Override
     public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
       return Map.of();
+    }
+
+    @Override
+    public java.util.List<GameOpening> fetchOpeningsForRederive(int limit, int offset) {
+      return java.util.List.of();
+    }
+
+    @Override
+    public int updateOpeningFamilies(java.util.List<GameOpening> updates) {
+      return 0;
     }
 
     @Override
