@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.api.dto.ReanalysisResponse;
+import com.muchq.games.one_d4.api.dto.RederiveResponse;
 import com.muchq.games.one_d4.db.GameFeatureStore;
+import com.muchq.games.one_d4.db.GameFeatureStore.GameOpening;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.GameReplayer;
 import com.muchq.games.one_d4.engine.PgnParser;
@@ -154,6 +156,93 @@ public class AdminControllerTest {
     }
   }
 
+  /**
+   * Correcting a derivation like #1344's takes a `skipCache` reindex today, which refetches every
+   * month from chess.com to recompute something the table already determines: opening_family is
+   * Openings.familyFromName(opening_name), and opening_name is stored per row. These pin the local
+   * pass that replaces that round trip (#1350).
+   */
+  @Test
+  public void rederiveOpenings_rewritesOnlyTheRowsWhoseFamilyIsStale() {
+    FakeGameFeatureStore store = new FakeGameFeatureStore();
+    // Stale in exactly the way #1344 left rows: the family kept the move continuation.
+    store.addOpening("g1", "Owens Defense 3.Nc3 e6", "Owens Defense...3.Nc3-e6");
+    // Already correct — must not be rewritten, or "updated" stops meaning anything.
+    store.addOpening("g2", "Caro Kann Defense Two Knights Attack", "Caro Kann Defense");
+    AdminController controller = new AdminController(store, noOpExtractor());
+
+    RederiveResponse response = controller.rederiveOpenings();
+
+    assertThat(response.gamesScanned()).isEqualTo(2);
+    assertThat(response.gamesUpdated()).isEqualTo(1);
+    assertThat(store.familyOf("g1")).isEqualTo("Owens Defense");
+    assertThat(store.familyOf("g2")).isEqualTo("Caro Kann Defense");
+    assertThat(store.writtenUrls()).containsExactly("g1");
+  }
+
+  /** The derivation is shared with the index path, so a second pass has nothing left to do. */
+  @Test
+  public void rederiveOpenings_isIdempotent() {
+    FakeGameFeatureStore store = new FakeGameFeatureStore();
+    store.addOpening("g1", "Owens Defense 3.Nc3 e6", "Owens Defense...3.Nc3-e6");
+    AdminController controller = new AdminController(store, noOpExtractor());
+
+    assertThat(controller.rederiveOpenings().gamesUpdated()).isEqualTo(1);
+    RederiveResponse second = controller.rederiveOpenings();
+
+    assertThat(second.gamesScanned()).isEqualTo(1);
+    assertThat(second.gamesUpdated()).isZero();
+  }
+
+  /**
+   * A row whose name is NULL has no family, and re-deriving has to say so rather than leaving a
+   * value the current derivation would never produce. The reverse — deriving a family for a row
+   * that had none — is the same rule read the other way.
+   */
+  @Test
+  public void rederiveOpenings_clearsAFamilyWhoseNameIsGone() {
+    FakeGameFeatureStore store = new FakeGameFeatureStore();
+    store.addOpening("g1", null, "Stale Family");
+    store.addOpening("g2", "Birds Opening 2.Nf3", null);
+    AdminController controller = new AdminController(store, noOpExtractor());
+
+    RederiveResponse response = controller.rederiveOpenings();
+
+    assertThat(response.gamesUpdated()).isEqualTo(2);
+    assertThat(store.familyOf("g1")).isNull();
+    assertThat(store.familyOf("g2")).isEqualTo("Birds Opening");
+  }
+
+  @Test
+  public void rederiveOpenings_emptyStoreReportsNothing() {
+    RederiveResponse response =
+        new AdminController(new FakeGameFeatureStore(), noOpExtractor()).rederiveOpenings();
+
+    assertThat(response.gamesScanned()).isZero();
+    assertThat(response.gamesUpdated()).isZero();
+  }
+
+  /**
+   * More rows than one batch. The loop pages by offset while rewriting rows it has already read, so
+   * a page that shifted underneath the cursor would skip rows silently — every row has to be seen
+   * exactly once.
+   */
+  @Test
+  public void rederiveOpenings_pagesPastTheBatchSize() {
+    FakeGameFeatureStore store = new FakeGameFeatureStore();
+    int rows = AdminController.BATCH_SIZE + 7;
+    for (int i = 0; i < rows; i++) {
+      store.addOpening("g" + i, "Owens Defense 3.Nc3 e6", "stale");
+    }
+    AdminController controller = new AdminController(store, noOpExtractor());
+
+    RederiveResponse response = controller.rederiveOpenings();
+
+    assertThat(response.gamesScanned()).isEqualTo(rows);
+    assertThat(response.gamesUpdated()).isEqualTo(rows);
+    assertThat(store.writtenUrls()).hasSize(rows).doesNotHaveDuplicates();
+  }
+
   private static class FakeGameFeatureStore implements GameFeatureStore {
 
     /** Not part of the AdminController surface: only the worker flushes. */
@@ -170,6 +259,45 @@ public class AdminControllerTest {
     private final List<GameForReanalysis> games = new ArrayList<>();
     private final Map<String, Integer> deleteCount = new HashMap<>();
     private final Map<String, Integer> insertCount = new HashMap<>();
+    private final List<GameOpening> openings = new ArrayList<>();
+    private final List<String> written = new ArrayList<>();
+
+    void addOpening(String url, String name, String family) {
+      openings.add(new GameOpening(url, name, family));
+    }
+
+    String familyOf(String url) {
+      return openings.stream()
+          .filter(o -> o.gameUrl().equals(url))
+          .findFirst()
+          .orElseThrow()
+          .openingFamily();
+    }
+
+    List<String> writtenUrls() {
+      return List.copyOf(written);
+    }
+
+    @Override
+    public List<GameOpening> fetchOpeningsForRederive(int limit, int offset) {
+      int start = Math.min(offset, openings.size());
+      int end = Math.min(offset + limit, openings.size());
+      return List.copyOf(openings.subList(start, end));
+    }
+
+    @Override
+    public int updateOpeningFamilies(List<GameOpening> updates) {
+      for (GameOpening update : updates) {
+        written.add(update.gameUrl());
+        openings.replaceAll(
+            existing ->
+                existing.gameUrl().equals(update.gameUrl())
+                    ? new GameOpening(
+                        existing.gameUrl(), existing.openingName(), update.openingFamily())
+                    : existing);
+      }
+      return updates.size();
+    }
 
     void addGame(String url, String pgn) {
       games.add(new GameForReanalysis(UUID.randomUUID(), url, pgn));

@@ -13,6 +13,7 @@ import com.muchq.games.one_d4.db.RetentionPolicy;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
+import com.muchq.games.one_d4.openings.Openings;
 import com.muchq.games.one_d4.queue.IndexMessage;
 import com.muchq.platform.yodel.CustomMetrics;
 import dev.failsafe.Failsafe;

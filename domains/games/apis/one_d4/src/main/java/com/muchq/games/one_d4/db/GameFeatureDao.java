@@ -62,6 +62,24 @@ public class GameFeatureDao implements GameFeatureStore {
       "SELECT request_id, game_url, pgn FROM game_features ORDER BY indexed_at, game_url LIMIT ?"
           + " OFFSET ?";
 
+  // Ordered like FETCH_FOR_REANALYSIS, and for the same reason: the re-derive pass rewrites
+  // opening_family while paging by offset, and neither column in this ORDER BY is one it writes,
+  // so a row cannot move across a page boundary between batches and be skipped.
+  private static final String FETCH_OPENINGS_FOR_REDERIVE =
+      "SELECT game_url, opening_name, opening_family FROM game_features"
+          + " ORDER BY indexed_at, game_url LIMIT ? OFFSET ?";
+
+  // Conditional on the row still holding the name the caller derived from, and on the family
+  // actually differing. The re-derive pass reads a row, computes from what it read, and writes
+  // back later; an indexer upsert in between rewrites opening_name and opening_family together, so
+  // an unconditional write would land a family derived from a name the row no longer has. The
+  // second clause keeps the reported count exact when someone else corrected the row first.
+  // IS NOT DISTINCT FROM rather than =, because a NULL name is a value here and not a wildcard.
+  private static final String UPDATE_OPENING_FAMILY =
+      "UPDATE game_features SET opening_family = ? WHERE game_url = ?"
+          + " AND opening_name IS NOT DISTINCT FROM ?"
+          + " AND opening_family IS DISTINCT FROM ?";
+
   private static final String DELETE_OCCURRENCES_BY_GAME_URL =
       "DELETE FROM motif_occurrences WHERE game_url = ?";
 
@@ -101,6 +119,13 @@ public class GameFeatureDao implements GameFeatureStore {
               getIntOrNull(rs, "num_moves"),
               fromUtcWallClock(rs.getObject("indexed_at", LocalDateTime.class)),
               rs.getString("pgn"));
+
+  private static final RowMapper<GameOpening> OPENING_MAPPER =
+      (rs, ctx) ->
+          new GameOpening(
+              rs.getString("game_url"),
+              rs.getString("opening_name"),
+              rs.getString("opening_family"));
 
   private static final RowMapper<GameForReanalysis> REANALYSIS_MAPPER =
       (rs, ctx) ->
@@ -732,6 +757,43 @@ public class GameFeatureDao implements GameFeatureStore {
                 .bind(1, offset)
                 .map(REANALYSIS_MAPPER)
                 .list());
+  }
+
+  @Override
+  public List<GameOpening> fetchOpeningsForRederive(int limit, int offset) {
+    return jdbi.withHandle(
+        h ->
+            h.createQuery(FETCH_OPENINGS_FOR_REDERIVE)
+                .bind(0, limit)
+                .bind(1, offset)
+                .map(OPENING_MAPPER)
+                .list());
+  }
+
+  @Override
+  public int updateOpeningFamilies(List<GameOpening> updates) {
+    if (updates.isEmpty()) {
+      return 0;
+    }
+    return jdbi.withHandle(
+        h -> {
+          var batch = h.prepareBatch(UPDATE_OPENING_FAMILY);
+          for (GameOpening update : updates) {
+            // bindByType, not bind: clearing a family writes a NULL, and the untyped form has no
+            // type to hand the driver for one.
+            batch
+                .bindByType(0, update.openingFamily(), String.class)
+                .bind(1, update.gameUrl())
+                .bindByType(2, update.openingName(), String.class)
+                .bindByType(3, update.openingFamily(), String.class)
+                .add();
+          }
+          int updated = 0;
+          for (int rows : batch.execute()) {
+            updated += rows;
+          }
+          return updated;
+        });
   }
 
   private static @Nullable Integer getIntOrNull(ResultSet rs, String column) throws SQLException {

@@ -361,15 +361,48 @@ load landed wherever the submit happened to arrive.
 Re-runs feature extraction on every stored game and updates motif columns and occurrences. Useful after deploying a new detector.
 
 It writes **no** `game_features` columns, so it does not touch the derived/enriched ones —
-`white_title`, `black_title`, `opening_name`, `opening_family`. Changing how those are derived (as
-#1344 did for `opening_family`) needs a reindex with `skipCache: true`, which is the only path that
-rewrites them; `/admin/reanalyze` returns a large `gamesReanalyzed` and leaves every one unchanged.
+`white_title`, `black_title`, `opening_name`, `opening_family`. It reports a large
+`gamesProcessed` and leaves every one of them unchanged. For `opening_family` specifically, use
+the re-derive below; the other three still need a reindex with `skipCache: true`.
 
 ```bash
 curl -X POST http://localhost:8080/admin/reanalyze
 ```
 
-Returns `{"gamesReanalyzed": N}`.
+Returns `{"gamesProcessed": N, "gamesFailed": M}`.
+
+### Re-derive Opening Families
+
+Recomputes `opening_family` from the stored `opening_name` on every row, in place. No chess.com
+traffic, no rate limiting, and no dependence on old monthly archives still being fetchable — the
+corrected value is a pure function of data the table already holds
+(`opening_family = Openings.familyFromName(opening_name)`), so the network round trip a
+`skipCache` reindex pays buys nothing for this class of change.
+
+Use it after changing the family derivation, as #1344 did. Until every row is corrected, one
+opening is split across two group keys and an exact-match filter on the family misses the
+un-corrected rows.
+
+```bash
+curl -X POST http://localhost:8080/admin/rederive-openings
+```
+
+Returns `{"gamesScanned": N, "gamesUpdated": M}`. Only rows whose family actually changes are
+written, so a second run reports `gamesUpdated: 0` — and a first run reporting `0` means the
+stored values already agree with the current derivation.
+
+Each write is conditional on the row still holding the `opening_name` it was derived from. An
+indexer upsert rewrites `opening_name` and `opening_family` together, so a row reindexed while the
+pass is running keeps the fresher value instead of being overwritten from a stale read; it is
+simply not counted. Rows *inserted* during the pass can still be missed, because paging is by
+offset — as with `/admin/reanalyze`. Neither is a reason to avoid running it live, but a quiet
+moment costs nothing and a second run will pick up whatever a busy one skipped.
+
+It deliberately covers this one column. `white_title` / `black_title` come from player profiles at
+index time and cannot be recomputed from anything stored. `opening_name` is a different case: it
+derives from the chess.com ECOUrl, which is not a column (`eco` holds the PGN's ECO code) — but the
+stored PGN usually carries the `[ECOUrl "..."]` tag it came from, so re-deriving the name locally
+is possible and simply not built. Changing *that* derivation still needs a reindex today.
 
 ### Available Motifs
 

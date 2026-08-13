@@ -1751,6 +1751,197 @@ public class GameFeatureDaoTest {
         "pgn");
   }
 
+  /**
+   * The re-derive pass's read half, against the real table: the two opening columns come back per
+   * row, NULLs included, ordered so the caller can page through the whole table without a row
+   * moving between batches (#1350).
+   */
+  @Test
+  public void fetchOpeningsForRederive_readsBothColumnsIncludingNulls() {
+    dao.insertBatch(
+        List.of(
+            openingGame("https://chess.com/game/o-1", "Owens Defense 3.Nc3 e6", "stale family"),
+            openingGame("https://chess.com/game/o-2", null, null)));
+
+    List<GameFeatureStore.GameOpening> openings = dao.fetchOpeningsForRederive(10, 0);
+
+    assertThat(openings).hasSize(2);
+    assertThat(openings)
+        .anySatisfy(
+            o -> {
+              assertThat(o.gameUrl()).isEqualTo("https://chess.com/game/o-1");
+              assertThat(o.openingName()).isEqualTo("Owens Defense 3.Nc3 e6");
+              assertThat(o.openingFamily()).isEqualTo("stale family");
+            })
+        .anySatisfy(
+            o -> {
+              assertThat(o.gameUrl()).isEqualTo("https://chess.com/game/o-2");
+              assertThat(o.openingName()).isNull();
+              assertThat(o.openingFamily()).isNull();
+            });
+  }
+
+  /** Paging is by offset over a stable order, so every row is seen exactly once. */
+  @Test
+  public void fetchOpeningsForRederive_pagesWithoutRepeatingOrSkipping() {
+    for (int i = 0; i < 5; i++) {
+      dao.insertBatch(List.of(openingGame("https://chess.com/game/p-" + i, "Name " + i, null)));
+    }
+
+    List<String> paged = new ArrayList<>();
+    for (int offset = 0; offset < 6; offset += 2) {
+      dao.fetchOpeningsForRederive(2, offset).forEach(o -> paged.add(o.gameUrl()));
+    }
+
+    assertThat(paged).hasSize(5).doesNotHaveDuplicates();
+  }
+
+  /**
+   * The write half. Only the named rows change, the family can be set to NULL — which is what a row
+   * whose name went away must end up with — and the returned count is rows actually written.
+   */
+  @Test
+  public void updateOpeningFamilies_writesOnlyTheNamedRowsAndCanClearAFamily() {
+    dao.insertBatch(
+        List.of(
+            openingGame("https://chess.com/game/u-1", "Owens Defense 3.Nc3 e6", "stale"),
+            openingGame("https://chess.com/game/u-2", null, "orphaned"),
+            openingGame("https://chess.com/game/u-3", "Caro Kann Defense", "Caro Kann Defense")));
+
+    // The name is the row's own: it is what the caller derived from, and the write is conditional
+    // on the row still holding it (see
+    // updateOpeningFamilies_doesNotClobberARowWhoseNameChangedUnderIt).
+    int updated =
+        dao.updateOpeningFamilies(
+            List.of(
+                new GameFeatureStore.GameOpening(
+                    "https://chess.com/game/u-1", "Owens Defense 3.Nc3 e6", "Owens Defense"),
+                new GameFeatureStore.GameOpening("https://chess.com/game/u-2", null, null)));
+
+    assertThat(updated).isEqualTo(2);
+    Map<String, String> families = new LinkedHashMap<>();
+    dao.fetchOpeningsForRederive(10, 0).forEach(o -> families.put(o.gameUrl(), o.openingFamily()));
+    assertThat(families.get("https://chess.com/game/u-1")).isEqualTo("Owens Defense");
+    assertThat(families.get("https://chess.com/game/u-2")).isNull();
+    assertThat(families.get("https://chess.com/game/u-3"))
+        .as("a row nobody named must not be touched")
+        .isEqualTo("Caro Kann Defense");
+    // The name is the input the caller derived from and is never written back.
+    assertThat(
+            dao.fetchOpeningsForRederive(10, 0).stream()
+                .filter(o -> o.gameUrl().equals("https://chess.com/game/u-1"))
+                .findFirst()
+                .orElseThrow()
+                .openingName())
+        .isEqualTo("Owens Defense 3.Nc3 e6");
+  }
+
+  /**
+   * The re-derive pass reads a row, derives a family from the name it saw, and writes it back
+   * later. If an indexer upserts that same game in between — which rewrites opening_name and
+   * opening_family together — the write must not land: it carries a family derived from a name that
+   * is no longer the row's. Raised by review on #1374.
+   */
+  @Test
+  public void updateOpeningFamilies_doesNotClobberARowWhoseNameChangedUnderIt() {
+    String url = "https://chess.com/game/cas-1";
+    dao.insertBatch(List.of(openingGame(url, "Owens Defense 3.Nc3 e6", "stale")));
+
+    // What the pass read, and what it intends to write from it.
+    GameFeatureStore.GameOpening asRead =
+        new GameFeatureStore.GameOpening(url, "Owens Defense 3.Nc3 e6", "Owens Defense");
+
+    // Meanwhile the game is reindexed: a different opening entirely, name and family together.
+    dao.insertBatch(
+        List.of(openingGame(url, "Caro Kann Defense Two Knights", "Caro Kann Defense")));
+
+    int updated = dao.updateOpeningFamilies(List.of(asRead));
+
+    assertThat(updated).as("the row moved on; this write is not about it any more").isZero();
+    assertThat(dao.fetchOpeningsForRederive(10, 0).get(0).openingFamily())
+        .isEqualTo("Caro Kann Defense");
+  }
+
+  /** The control: an unchanged row still takes the write, or the guard would block everything. */
+  @Test
+  public void updateOpeningFamilies_writesWhenTheNameIsStillWhatWasRead() {
+    String url = "https://chess.com/game/cas-2";
+    dao.insertBatch(List.of(openingGame(url, "Owens Defense 3.Nc3 e6", "stale")));
+
+    int updated =
+        dao.updateOpeningFamilies(
+            List.of(
+                new GameFeatureStore.GameOpening(url, "Owens Defense 3.Nc3 e6", "Owens Defense")));
+
+    assertThat(updated).isEqualTo(1);
+    assertThat(dao.fetchOpeningsForRederive(10, 0).get(0).openingFamily())
+        .isEqualTo("Owens Defense");
+  }
+
+  /** A NULL name is a value like any other for this check, not a wildcard that matches anything. */
+  @Test
+  public void updateOpeningFamilies_matchesANullNameExactly() {
+    String url = "https://chess.com/game/cas-3";
+    dao.insertBatch(List.of(openingGame(url, null, "orphaned")));
+
+    assertThat(
+            dao.updateOpeningFamilies(List.of(new GameFeatureStore.GameOpening(url, null, null))))
+        .as("NULL is what was read, so the clear lands")
+        .isEqualTo(1);
+    assertThat(dao.fetchOpeningsForRederive(10, 0).get(0).openingFamily()).isNull();
+
+    dao.insertBatch(List.of(openingGame(url, "Caro Kann Defense", "Caro Kann Defense")));
+    assertThat(
+            dao.updateOpeningFamilies(List.of(new GameFeatureStore.GameOpening(url, null, null))))
+        .as("a row that now has a name is not matched by a read that saw none")
+        .isZero();
+  }
+
+  /** A row someone else already corrected is not rewritten, so the count stays exact. */
+  @Test
+  public void updateOpeningFamilies_skipsARowThatAlreadyHasTheDerivedFamily() {
+    String url = "https://chess.com/game/cas-4";
+    dao.insertBatch(List.of(openingGame(url, "Owens Defense 3.Nc3 e6", "Owens Defense")));
+
+    assertThat(
+            dao.updateOpeningFamilies(
+                List.of(
+                    new GameFeatureStore.GameOpening(
+                        url, "Owens Defense 3.Nc3 e6", "Owens Defense"))))
+        .isZero();
+  }
+
+  @Test
+  public void updateOpeningFamilies_withNothingToWriteTouchesNothing() {
+    dao.insertBatch(List.of(openingGame("https://chess.com/game/n-1", "Caro Kann", "Caro Kann")));
+
+    assertThat(dao.updateOpeningFamilies(List.of())).isZero();
+    assertThat(dao.fetchOpeningsForRederive(10, 0).get(0).openingFamily()).isEqualTo("Caro Kann");
+  }
+
+  private GameFeature openingGame(String url, String openingName, String openingFamily) {
+    return new GameFeature(
+        null,
+        requestId,
+        url,
+        "CHESS_COM",
+        "w",
+        "b",
+        1500,
+        1500,
+        null,
+        null,
+        "blitz",
+        "B00",
+        openingName,
+        openingFamily,
+        "1-0",
+        Instant.now(),
+        20,
+        Instant.now(),
+        "pgn");
+  }
+
   private GameFeature createGame(String url) {
     return new GameFeature(
         null,

@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.jspecify.annotations.Nullable;
 
 public interface GameFeatureStore {
   void insertBatch(List<GameFeature> features);
@@ -99,7 +100,38 @@ public interface GameFeatureStore {
   /** Returns a batch of game records (requestId, gameUrl, pgn) for re-analysis. */
   List<GameForReanalysis> fetchForReanalysis(int limit, int offset);
 
+  /**
+   * Returns a batch of stored opening values, for re-deriving {@code opening_family} from {@code
+   * opening_name} without refetching anything (#1350).
+   *
+   * <p>Paged the same way as {@link #fetchForReanalysis}: ordered by {@code (indexed_at,
+   * game_url)}, neither of which this pass writes, so a cursor cannot shift under a row that has
+   * already been rewritten.
+   */
+  List<GameOpening> fetchOpeningsForRederive(int limit, int offset);
+
+  /**
+   * Writes {@code opening_family} for the given games, and returns how many rows changed.
+   *
+   * <p>Only the family is written, and only where the row still holds the {@code opening_name} the
+   * caller derived from — an indexer upsert rewrites name and family together, so an unconditional
+   * write could land a family derived from a name the row no longer has.
+   *
+   * <p>The other enriched columns stay on the reindex path: titles come from player profiles at
+   * index time, and while the ECOUrl behind {@code opening_name} is not a column, the stored PGN
+   * usually carries its {@code [ECOUrl "..."]} tag — so a local name re-derive is possible and
+   * simply not built here.
+   */
+  int updateOpeningFamilies(List<GameOpening> updates);
+
   record GameForReanalysis(UUID requestId, String gameUrl, String pgn) {}
+
+  /**
+   * A game's stored opening values. Both are nullable: chess.com does not always give an ECOUrl to
+   * derive a name from, and a name that is nothing but a move continuation has no family.
+   */
+  record GameOpening(
+      String gameUrl, @Nullable String openingName, @Nullable String openingFamily) {}
 
   /** Untruncated totals for an aggregate: all games matching the filter, and all groups. */
   record AggregateTotals(long totalGames, long totalGroups) {}
