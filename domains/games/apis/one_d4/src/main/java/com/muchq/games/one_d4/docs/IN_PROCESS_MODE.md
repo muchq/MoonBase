@@ -33,10 +33,9 @@ curl -X POST http://localhost:8080/v1/query \
 index worker and the retention sweep all run in one JVM, and `indexing_requests` in the database
 *is* the work queue — the in-memory `IndexQueue` survives only as a wake-up nudge.
 
-The one external process is PostgreSQL. It used to be optional, because an unset `INDEXER_DB_URL`
-landed on H2 in-memory; that fallback is gone and H2 is a test-only dependency (MoonBase#1362), so
-the driver is not on the service's classpath and there is nothing to fall back to. The README has
-a one-line `docker run postgres:18` for local work.
+The one external process is PostgreSQL, and it is required: H2 is a test-only dependency, its
+driver is not on the service's classpath, and `INDEXER_DB_URL` has no default. The README has a
+one-line `docker run postgres:18` for local work.
 
 This mode is useful for:
 - Local development against one container instead of a fleet
@@ -95,8 +94,7 @@ public class IndexerModule {
 `indexer.db.url` is a Micronaut property tests set to give each ApplicationContext
 its own H2 database — the only place H2 is reachable from. Nothing sets it in
 production: when it is blank, `readJdbcUrl()` reads `$INDEXER_DB_URL` and throws if it
-is missing. Two ranks used to sit under that variable, a `/etc/one_d4/db_config` host
-file and H2 in-memory, and MoonBase#1362 removed both.
+is missing. Nothing sits under that variable — no host file, no in-memory default.
 
 Credentials are separate environment variables rather than Micronaut properties or
 URL query parameters — pgjdbc decodes query values, so a password containing `+`,
@@ -135,25 +133,21 @@ suite runs the production DAOs against H2.
 - No crash recovery beyond the lease: an interrupted job is reclaimed after its lease
   lapses, not resumed from where it stopped.
 
-Data itself does persist — it is in Postgres, and it outlives the process. What bounds
-its lifetime is the retention sweep (7 days of games, 30 of requests), not a restart.
-This is the paragraph that used to say the opposite, when the default database was H2
-in-memory and stopping the JVM was the same as dropping the schema.
+Data itself persists — it is in Postgres, and it outlives the process. What bounds its
+lifetime is the retention sweep (7 days of games, 30 of requests), not a restart.
 
 ### Performance Profile
 
-The comparison this section used to draw — in-process H2 against PostgreSQL — no longer
-describes a choice anyone can make: H2 is a test dependency (MoonBase#1362) and Postgres
-is the only database the service can open. What is worth keeping from it is where the
-time actually goes, which neither column ever disagreed about: the chess.com fetch and
-PGN replay dominate indexing, and the database is not the bottleneck at this size.
+Postgres is the only database the service can open, so there is no database choice to
+tune here. The time goes to the chess.com fetch and PGN replay, which dominate indexing;
+the database is not the bottleneck at this size.
 
 Query latency against a local Postgres runs 1-5ms simple, 5-50ms complex, and startup is
 ~3s including migrations.
 
 ### Memory Sizing
 
-The dataset no longer lives in the heap, so heap is not sized against game count:
+The dataset lives in Postgres rather than the heap, so heap is not sized against game count:
 
 ```
 Base JVM overhead:     ~100MB
@@ -190,8 +184,8 @@ H2 in-memory is what lets the suite run integration tests without Docker or test
 `TestDb`-backed DAO tests and the `e2e/` suites boot against it directly. See those tests for
 the current setup rather than a sample here.
 
-This is now the *only* place H2 appears: it is declared on the test targets that need it and on
-nothing else, so the production dependency closure has no H2 driver in it at all
+This is the *only* place H2 appears: it is declared on the test targets that need it and on
+nothing else, so the production dependency closure carries no H2 driver
 (`IndexerModuleTest.h2IsNotOnTheProductionClasspath`). The dialect branches in the DAOs and
 migrations remain, because the tests exercise the production DAOs rather than copies. What that
 buys — and what it costs — is below.

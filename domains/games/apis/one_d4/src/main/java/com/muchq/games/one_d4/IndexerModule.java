@@ -48,24 +48,20 @@ public class IndexerModule {
   private static final Logger LOG = LoggerFactory.getLogger(IndexerModule.class);
 
   /**
-   * Resolves the JDBC URL from {@code $INDEXER_DB_URL}, or fails. There is no default.
+   * The JDBC URL, from {@code $INDEXER_DB_URL}. The variable is the only source and there is no
+   * default, so an unset or blank one is fatal.
    *
-   * <p>Two ranks have been removed from underneath this variable. The first was a plain-text {@code
-   * /etc/one_d4/db_config} on the deploy host (#1362): #1351 moved the deployed URL into {@code
-   * compose.yaml}, where this repo can see and change it, and the file was deleted from the host
-   * along with the mount that carried it, leaving a resolution path nobody exercised and an
-   * operator could still be fooled into editing.
+   * <p>Failing here is the point. Any fallback a service can start on unattended — an in-memory
+   * database, a file on the host — turns a misconfigured URL into a container that boots, serves,
+   * answers {@code /health} 200, and loses every write on restart. That is silent data loss where
+   * an outage is the correct answer, and this exception is the outage.
    *
-   * <p>The second was in-memory H2, and it was the more dangerous of the two, because it made a
-   * missing URL look like a working service: the container started, served requests, answered
-   * {@code /health} 200, and lost every write on restart. That is silent data loss rather than an
-   * outage, and an outage is what a misconfigured database should be. H2 is now a test-only
-   * dependency — the driver is not on the production classpath at all ({@code
-   * IndexerModuleTest.h2IsNotOnTheProductionClasspath}), so keeping the default would have traded
-   * this message for a "No suitable driver" further down at pool construction.
+   * <p>Naming H2 as a default would not even reach that far: the driver is a test dependency and is
+   * not on this classpath ({@code IndexerModuleTest.h2IsNotOnTheProductionClasspath}), so it would
+   * fail at pool construction with "No suitable driver" instead of with the variable's name.
    *
-   * <p>Local development therefore needs a real Postgres and a real URL, the same as the deploy.
-   * See the README.
+   * <p>Local development needs a real Postgres and a real URL, the same as the deploy. See the
+   * README.
    */
   static String readJdbcUrl() {
     return readJdbcUrl(System.getenv("INDEXER_DB_URL"));
@@ -104,11 +100,10 @@ public class IndexerModule {
 
   /**
    * @param configuredUrl the {@code indexer.db.url} property. Tests set it to give each
-   *     ApplicationContext its own in-memory database — the only place H2 is reachable from, now
-   *     that the driver is a test dependency. Nothing sets it in production, where the URL comes
-   *     from {@code $INDEXER_DB_URL}. Before this property existed it was silently ignored, so
-   *     every context that thought it had an isolated database was sharing {@code
-   *     jdbc:h2:mem:indexer}.
+   *     ApplicationContext its own H2 database, which is the only place H2 is reachable from — the
+   *     driver is a test dependency. It has to be read here rather than assumed: a context whose
+   *     property is ignored silently shares one database with every other context. Nothing sets it
+   *     in production, where the URL comes from {@code $INDEXER_DB_URL}.
    */
   @Context
   public DataSource dataSource(@Value("${indexer.db.url:}") String configuredUrl) {

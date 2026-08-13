@@ -112,9 +112,9 @@ flowchart TB
 ## Running Locally
 
 one_d4 needs a real PostgreSQL. **H2 is a test dependency** — the driver is not on the
-service's classpath, so there is no in-memory mode to fall back on and no default URL:
-an unset `INDEXER_DB_URL` fails at startup rather than quietly starting a database that
-disappears on restart (MoonBase#1362).
+service's classpath — so there is no in-memory mode and no default URL. An unset
+`INDEXER_DB_URL` fails at startup, rather than quietly starting on a database that
+disappears with the process.
 
 ```bash
 docker run -d --name one_d4_dev -p 5432:5432 \
@@ -135,11 +135,10 @@ pgjdbc decodes query values, so `+` becomes a space, `&` truncates the rest, and
 `%` fails to parse. The separate variables have no such constraint; see
 `DataSourceFactory.create`.
 
-The app resolves the URL from `INDEXER_DB_URL` and nowhere else. Two ranks used to sit
-under it and both are gone: a plain-text `/etc/one_d4/db_config` on the deploy host, and
-in-memory H2 (MoonBase#1362). Tests are the exception, and they don't go through this
-path — they set the `indexer.db.url` Micronaut property directly, which is how each
-`ApplicationContext` gets its own H2 database.
+The app resolves the URL from `INDEXER_DB_URL` and nowhere else: no host file, no
+default. Tests are the exception and don't go through this path at all — they set the
+`indexer.db.url` Micronaut property directly, which is how each `ApplicationContext`
+gets its own H2 database.
 
 **On the deployed server** `compose.yaml` sets `INDEXER_DB_URL`, `INDEXER_DB_USERNAME` and
 `INDEXER_DB_PASSWORD` (MoonBase#1351), and `deploy/consolidated/deploy_config_test.go`
@@ -175,8 +174,6 @@ curl -s -X POST http://localhost:8080/v1/query \
   -d '{"query":"white_username = \"hikaru\"","limit":5,"offset":0}' \
   | jq .
 ```
-
-> **Note:** All data is lost when the process exits when using the default in-memory database.
 
 ---
 

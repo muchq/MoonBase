@@ -1057,9 +1057,9 @@ func oneD4Env(t *testing.T, key string) string {
 func TestOneD4sDatabaseUrlIsAJdbcUrl(t *testing.T) {
 	url := oneD4Env(t, "INDEXER_DB_URL")
 	if url == "" {
-		t.Fatal("one_d4's compose block sets no INDEXER_DB_URL. That is the container's only " +
-			"source for the URL — #1362 removed the /etc/one_d4/db_config fallback under it and " +
-			"made H2 a test-only dependency — so the container would fail to start.")
+		t.Fatal("one_d4's compose block sets no INDEXER_DB_URL. That variable is the container's " +
+			"only source for the URL — there is no file rank under it and no in-memory default — " +
+			"so the container would fail to start.")
 	}
 	if !strings.HasPrefix(url, "jdbc:postgresql://") {
 		t.Errorf("INDEXER_DB_URL=%q is not a JDBC URL. golf_hub's libpq form (postgresql://...) "+
@@ -1106,17 +1106,15 @@ func TestOneD4sCredentialsAreNotInTheUrl(t *testing.T) {
 	}
 }
 
-// Nothing in one_d4's image reads a host file any more. IndexerModule resolved
-// $INDEXER_DB_URL, then /etc/one_d4/db_config, then H2; #1351 moved the URL into
-// the environment above and #1362 deleted the file fallback, so the bind mount
-// that carried it is dead weight — and a dead mount is worse than an absent one,
-// because it reads as configuration the deploy still honours. Editing that file
-// on the host now changes nothing, which is exactly the kind of thing an
-// operator finds out during an incident.
+// one_d4 reads nothing from the host filesystem: its JDBC URL comes from the
+// environment above and there is no file rank under it. A mount here would be
+// configuration the deploy appears to honour and does not — an operator can edit
+// that file all day and change nothing, which is the kind of thing found out
+// during an incident.
 //
 // The regression this guards is a host file coming back for one_d4 instead of a
-// variable here. That shape is what kept the database's hostname invisible to
-// this repo and forced one_d4_postgres to survive as an alias (#1225).
+// variable here. That shape is what keeps a database hostname invisible to this
+// repo, and it is why one_d4_postgres has to survive as an alias (#1225).
 func TestOneD4MountsNoHostConfigDirectory(t *testing.T) {
 	lines := oneD4ActiveLines(t)
 
@@ -1129,9 +1127,9 @@ func TestOneD4MountsNoHostConfigDirectory(t *testing.T) {
 
 	for _, line := range lines {
 		if strings.Contains(line, "/etc/one_d4") {
-			t.Errorf("one_d4's compose block still mounts a host config directory: %q. Nothing "+
-				"in the container reads it — the JDBC URL comes from INDEXER_DB_URL (#1351) and "+
-				"the file fallback that used to read it is gone (#1362).", line)
+			t.Errorf("one_d4's compose block mounts a host config directory: %q. Nothing in the "+
+				"container reads one — the JDBC URL comes from INDEXER_DB_URL, and nothing "+
+				"resolves it from a file.", line)
 		}
 	}
 }

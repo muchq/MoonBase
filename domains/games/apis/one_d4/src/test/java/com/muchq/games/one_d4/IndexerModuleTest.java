@@ -101,14 +101,10 @@ public class IndexerModuleTest {
   }
 
   /**
-   * There is no default any more. H2 used to sit under the variable as a local-dev convenience, and
-   * on a deployed container that made a missing URL silent data loss rather than an outage: the
-   * service started, served, answered /health 200, and lost every write on restart. H2 is a test
-   * dependency now — the driver is not even on the production classpath, so a default naming it
-   * would fail later and less legibly, at pool construction.
-   *
-   * <p>Failing here means the container exits on boot with the variable's name in the message,
-   * which is the one place an operator is guaranteed to look.
+   * A missing URL has to be fatal. Any default a service can start on unattended turns the
+   * misconfiguration into a container that boots, serves, answers /health 200 and loses every write
+   * on restart, and the message has to name the variable: a boot failure is the one place an
+   * operator is guaranteed to look.
    */
   @Test
   public void readJdbcUrl_refusesAnUnsetEnvVar() {
@@ -118,10 +114,10 @@ public class IndexerModuleTest {
   }
 
   /**
-   * The dependency half of "H2 is test-only": prod code that merely avoids naming H2 is one edit
-   * away from using it again, and nothing would fail. This target depends on the module and its db
-   * library and on no test database, so the driver's absence from the classpath here is the absence
-   * of H2 from one_d4's production dependency closure.
+   * The dependency half of "H2 is test-only". Production code that merely avoids naming H2 is one
+   * edit away from using it again with nothing to fail; a closure that cannot resolve the driver is
+   * not. This target depends on the module and its db library and on no test database, so the
+   * driver's absence here is its absence from one_d4's production dependency closure.
    *
    * <p>The control is pgjdbc, which the same closure does carry — without it this passes just as
    * well against a lookup that can no longer find anything at all.
@@ -140,19 +136,17 @@ public class IndexerModuleTest {
   }
 
   /**
-   * The absence half of #1362, asserted where the behaviour lives rather than in {@code
-   * deploy_config_test.go}: that test pins what compose hands the container, and would stay green
-   * against a class that had quietly grown a second source. Nothing enforced "no file is read"
-   * except the method signature, and a signature is a comment with a compiler.
+   * The environment is the only input to the URL. Asserted here rather than left to {@code
+   * deploy_config_test.go}, which pins what compose hands the container and stays green against a
+   * class that has grown a second source of its own.
    *
-   * <p>Read off the compiled class because that is the only place the property is observable once
-   * the parameter is gone. A file read leaves {@code java/nio/file/...} in the constant pool no
-   * matter which method it hides in, which an assertion about parameter types would miss.
+   * <p>Read off the compiled class because that is where the property is observable: a file read
+   * leaves {@code java/nio/file/...} in the constant pool whichever method it hides in, while an
+   * assertion about parameter types sees only the ones declared.
    *
-   * <p>The control matters more than usual here: a scan that read nothing — wrong resource name,
-   * empty stream — would report the absence just as confidently. Requiring the variable's own name
-   * to be present proves the bytes are this class's, and pins the spelling {@code compose.yaml} has
-   * to match at the same time.
+   * <p>The control matters more than usual: a scan that read nothing — wrong resource name, empty
+   * stream — reports the absence just as confidently. Requiring the variable's own name in the same
+   * bytes proves they are this class's, and pins the spelling {@code compose.yaml} has to match.
    */
   @Test
   public void readJdbcUrl_consultsNoFile() throws Exception {
@@ -163,9 +157,9 @@ public class IndexerModuleTest {
         .contains("INDEXER_DB_URL");
     assertThat(constantPool)
         .as(
-            "IndexerModule references java.nio.file. Resolution is the environment and nothing"
-                + " else since #1362 — a file fallback here is invisible to every other test,"
-                + " including the compose guard.")
+            "IndexerModule references java.nio.file. The environment is the only input to the"
+                + " URL; a file fallback here is invisible to every other test, including the"
+                + " compose guard.")
         .doesNotContain("java/nio/file");
   }
 
