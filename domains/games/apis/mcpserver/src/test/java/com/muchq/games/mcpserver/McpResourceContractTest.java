@@ -1,5 +1,6 @@
 package com.muchq.games.mcpserver;
 
+import static java.util.Objects.requireNonNull;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -65,11 +66,14 @@ public class McpResourceContractTest {
         reference = resource;
       }
     }
-    assertThat(reference).isNotNull();
+    // requireNonNull rather than assertThat(...).isNotNull(): both fail the test when the resource
+    // is absent, but only this one narrows the type for the dereferences below.
+    JsonNode advertised = requireNonNull(reference, REFERENCE_URI + " is not in resources/list");
+
     // text/markdown, not the text/plain micronaut-mcp falls back to when mimeType is unset: a
     // client that renders by mime type shows a wall of pipes and backticks otherwise.
-    assertThat(reference.get("mimeType").asText()).isEqualTo("text/markdown");
-    assertThat(reference.get("name").asText()).isEqualTo("chessql_reference");
+    assertThat(advertised.get("mimeType").asText()).isEqualTo("text/markdown");
+    assertThat(advertised.get("name").asText()).isEqualTo("chessql_reference");
   }
 
   @Test

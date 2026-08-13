@@ -1,4 +1,8 @@
-"""Guards that NullAway stays on by default, and that its exemptions only shrink.
+"""Guards on what the java.bzl macros actually configure a compile with.
+
+Mostly that NullAway stays on by default and that its exemptions only shrink;
+also that the Micronaut processors run for the library and binary macros and not
+for the test ones.
 
 NullAway is annotated at `com.muchq`, so a new package is analyzed the day it
 exists rather than the day someone remembers to add it to a list. What is listed
@@ -18,23 +22,25 @@ So these guards are asymmetric on purpose:
     longer is, and that should cost a deliberate edit in two places rather than
     a quiet line in a build file.
 
-These assert against `JavaInfo.compilation_info` and the compile action of a
-library built by the macro under test, rather than against the text of java.bzl.
-The difference is the point. Searching the file for option text passes when the
-option sits in a comment, in a constant nothing reads, or in a macro that has
-stopped propagating it — all of which leave NullAway silently off. A static
-analysis fails by going quiet, so what a rule was actually configured with is
-the only thing worth asserting.
+These assert against `JavaInfo.compilation_info` and the compile actions of
+fixtures built by the macros under test, rather than against the text of
+java.bzl. The difference is the point. Searching the file for option text passes
+when the option sits in a comment, in a constant nothing reads, or in a macro
+that has stopped propagating it — all of which leave NullAway silently off. A
+static analysis fails by going quiet, so what a rule was actually configured
+with is the only thing worth asserting.
 
-Two things are deliberately not asserted here:
+And every guard runs against every fixture, not just the java_library one,
+because java_test_suite spent its whole life as a passthrough that added neither
+the plugin nor these javacopts — no test source anywhere was analyzed, and
+nothing went red to say so (#1340). A guard reading only java_library would have
+been green throughout. The suite fixture covers both compiles contrib_rules_jvm
+derives from one srcs list: the per-`*Test.java` java_test, and the shared
+`-test-lib` holding everything else.
 
-  - That any particular package is unchecked. Under this model that is what the
-    opt-out guard covers, and a test naming individual packages would go red the
-    day one was fixed.
-  - That test sources are analyzed. They are not, anywhere, because
-    java_test_suite is a passthrough to contrib_rules_jvm that adds neither the
-    plugin nor these javacopts. That gap survives this change and is documented
-    in CLAUDE.md; asserting it would pin a limitation in place.
+One thing is deliberately not asserted here: that any particular package is
+unchecked. Under this model that is what the opt-out guard covers, and a test
+naming individual packages would go red the day one was fixed.
 
 Also not claimed: that an opt-out or an annotated root points at source that
 exists. A package misspelled into one nobody has is well-formed and matches
@@ -45,7 +51,7 @@ fails safe — it exempts nothing — but it also lingers unnoticed.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
-load(":java.bzl", "java_library")
+load(":java.bzl", "java_library", "java_test_suite")
 
 _SEVERITY = "-Xep:NullAway:ERROR"
 
@@ -184,6 +190,27 @@ def _legacy_opt_outs_impl(ctx):
 
 legacy_opt_outs_test = analysistest.make(_legacy_opt_outs_impl)
 
+def _javac_action(env):
+    """The fixture's compile action, or None if the rule produced no Javac at all."""
+    javac = None
+    for action in analysistest.target_actions(env):
+        if action.mnemonic == "Javac":
+            javac = action
+    return javac
+
+def _processor_jars(javac, name):
+    """Basenames of the jars on this compile whose name carries `name`.
+
+    Matched on jars specifically, and never on sources — see `_plugin_impl` for
+    what that costs when forgotten. Sound here only because the fixtures declare
+    no deps: with an empty classpath, a jar on the compile came from a plugin.
+    """
+    return [
+        an_input.basename
+        for an_input in javac.inputs.to_list()
+        if an_input.extension == "jar" and name in an_input.basename.lower()
+    ]
+
 def _plugin_impl(ctx):
     """The flags are inert without the jar that implements them.
 
@@ -200,24 +227,14 @@ def _plugin_impl(ctx):
     """
     env = analysistest.begin(ctx)
 
-    javac = None
-    for action in analysistest.target_actions(env):
-        if action.mnemonic == "Javac":
-            javac = action
-
+    javac = _javac_action(env)
     if javac == None:
         asserts.true(env, False, "no Javac action on the fixture, so nothing here was checked")
         return analysistest.end(env)
 
-    on_the_compile = [
-        an_input.path
-        for an_input in javac.inputs.to_list()
-        if an_input.extension == "jar" and "nullaway" in an_input.basename.lower()
-    ]
-
     asserts.true(
         env,
-        on_the_compile != [],
+        _processor_jars(javac, "nullaway") != [],
         "the NullAway jar is not an input to this library's compile, so the -Xep flags above " +
         "are inert: they are still passed, every source still compiles, and no null-safety " +
         "analysis runs. That combination is green everywhere and checks nothing.",
@@ -226,48 +243,124 @@ def _plugin_impl(ctx):
 
 plugin_test = analysistest.make(_plugin_impl)
 
-def nullaway_scope_test_suite(name):
-    """Declares the fixture library and the guards that read its configuration.
+def _micronaut_impl(ctx):
+    """Micronaut processors run for the library and binary macros, deliberately not the test ones.
+
+    This is the one thing the four macros do differently, and the difference is
+    a choice rather than the drift it used to be: `java_library` and
+    `java_binary` compile the beans, while running four annotation processors
+    over every test compile in the repo would buy nothing to pay for it.
+
+    Pinned in both directions because an unpinned choice is one somebody
+    reverses by tidying. Adding the processors to the test macros looks like
+    making the set consistent and costs build time everywhere; dropping them
+    from the library and binary macros leaves the beans ungenerated.
+    """
+    env = analysistest.begin(ctx)
+
+    javac = _javac_action(env)
+    if javac == None:
+        asserts.true(env, False, "no Javac action on the fixture, so nothing here was checked")
+        return analysistest.end(env)
+
+    on_the_compile = _processor_jars(javac, "micronaut")
+
+    if ctx.attr.expected:
+        asserts.true(
+            env,
+            on_the_compile != [],
+            "no Micronaut processor jar is an input to this compile, so bean definitions are " +
+            "not generated for these sources. Micronaut then finds no beans at runtime, which " +
+            "fails as a missing injection point far from here rather than as a compile error.",
+        )
+    else:
+        asserts.equals(
+            env,
+            [],
+            on_the_compile,
+            "this is a test-macro compile and it is running the Micronaut processors. " +
+            "These compiles do not need generated bean definitions, and every test target " +
+            "in the repo would pay for them. Test code that does need a bean generated " +
+            "belongs in a `testonly` java_library beside the suite, which runs the " +
+            "processors because it is a library — not in the suite's own `plugins`. " +
+            "On this compile: {}".format(on_the_compile),
+        )
+    return analysistest.end(env)
+
+micronaut_test = analysistest.make(
+    _micronaut_impl,
+    attrs = {"expected": attr.bool(mandatory = True)},
+)
+
+_GUARDS = {
+    "severity": severity_test,
+    "annotated_root": annotated_root_test,
+    "legacy_opt_outs": legacy_opt_outs_test,
+    "plugin": plugin_test,
+}
+
+def java_rules_test_suite(name):
+    """Declares the fixtures and runs every guard against each of them.
 
     Args:
         name: Name of the resulting test_suite.
     """
 
-    # Built by the macro under test, so it carries whatever java_library
+    # Built by the macros under test, so each carries whatever that macro
     # actually propagates today. Analysis-only — analysistest never runs the
-    # compile, so this costs nothing to keep.
+    # compiles, so these cost nothing to keep.
     java_library(
         name = name + "_fixture",
         srcs = ["testdata/Probe.java"],
         tags = ["manual"],
     )
 
-    severity_test(
-        name = name + "_severity",
-        target_under_test = name + "_fixture",
+    java_test_suite(
+        name = name + "_suite_fixture",
+        srcs = [
+            "testdata/SuiteProbeHelper.java",
+            "testdata/SuiteProbeTest.java",
+        ],
+        # Explicitly empty rather than omitted: contrib_rules_jvm appends the
+        # shared -test-lib to deps, and appending to the default None is a
+        # loading-phase crash there.
+        deps = [],
+        tags = ["manual"],
     )
 
-    annotated_root_test(
-        name = name + "_annotated_root",
-        target_under_test = name + "_fixture",
-    )
+    # Each entry names a target to read and whether that compile should be
+    # running the Micronaut processors — the only property that differs between
+    # the macros.
+    #
+    # The two suite entries use the names contrib_rules_jvm derives, which are
+    # the only way to reach those compiles: `-test-lib` for the non-test
+    # sources, and one target per `*Test.java`, named after the source path with
+    # the extension dropped.
+    fixtures = {
+        "main": (name + "_fixture", True),
+        "test_suite_lib": (name + "_suite_fixture-test-lib", False),
+        "test_suite_test": ("testdata/SuiteProbeTest", False),
+    }
 
-    legacy_opt_outs_test(
-        name = name + "_legacy_opt_outs",
-        target_under_test = name + "_fixture",
-    )
+    tests = []
+    for fixture_label, (fixture, micronaut) in fixtures.items():
+        for guard_label, guard in _GUARDS.items():
+            test_name = "{}_{}_{}".format(name, fixture_label, guard_label)
+            guard(
+                name = test_name,
+                target_under_test = fixture,
+            )
+            tests.append(test_name)
 
-    plugin_test(
-        name = name + "_plugin",
-        target_under_test = name + "_fixture",
-    )
+        micronaut_name = "{}_{}_micronaut".format(name, fixture_label)
+        micronaut_test(
+            name = micronaut_name,
+            target_under_test = fixture,
+            expected = micronaut,
+        )
+        tests.append(micronaut_name)
 
     native.test_suite(
         name = name,
-        tests = [
-            name + "_severity",
-            name + "_annotated_root",
-            name + "_legacy_opt_outs",
-            name + "_plugin",
-        ],
+        tests = tests,
     )

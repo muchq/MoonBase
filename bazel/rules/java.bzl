@@ -1,10 +1,13 @@
 """Java rules with NullAway enabled.
 
-These macros wrap the standard java_library, java_binary, and java_test rules to enable
+These macros wrap java_library, java_binary, java_test and java_test_suite to enable
 NullAway static analysis. NullAway helps eliminate NullPointerExceptions by performing
 null-safety analysis at compile time.
 
-To enable NullAway for a new package, add it
+Nothing has to be enabled per package: analysis is on for everything under com.muchq,
+and what is listed instead is the exemptions — see _NULLAWAY_LEGACY_OPT_OUTS below.
+That covers test sources as well as main ones, which also means an exemption covers
+both: a test shares its package with the code it tests.
 
 Usage:
     load("//bazel/rules:java.bzl", "java_library", "java_binary")
@@ -27,22 +30,6 @@ _JUNIT_RUNTIME_DEPS = [
     _artifact("org.junit.platform:junit-platform-launcher"),
     _artifact("org.junit.platform:junit-platform-reporting"),
 ]
-
-def java_test_suite(runner = "junit5", runtime_deps = [], **kwargs):
-    """java_test_suite defaulting to JUnit 5 (Jupiter).
-
-    Automatically adds JUnit Jupiter engine and platform runtime deps.
-
-    Args:
-        runner: Test runner to use. Defaults to "junit5".
-        runtime_deps: Additional runtime dependencies.
-        **kwargs: Arguments passed to java_test_suite.
-    """
-    _java_test_suite(
-        runner = runner,
-        runtime_deps = runtime_deps + _JUNIT_RUNTIME_DEPS,
-        **kwargs
-    )
 
 _NULLAWAY_PLUGIN = "//bazel/rules:nullaway"
 
@@ -85,6 +72,75 @@ _JAVACOPTS = [
     "-XepOpt:NullAway:UnannotatedSubPackages=" + ",".join(_NULLAWAY_LEGACY_OPT_OUTS),
 ]
 
+def _analysis(plugins, javacopts, micronaut):
+    """NullAway — and Micronaut for the library and binary macros — appended to a target's config.
+
+    Every macro in this file routes through here, because the previous
+    arrangement was four hand-written copies of the same append loop and one of
+    them (`java_test_suite`) simply never had it. A macro that forgets is then a
+    macro that never called this, which is visible at its one call site rather
+    than buried in a body that looks like the others.
+
+    Micronaut is the one real difference between the macros, and the split is by
+    macro rather than by whether the sources are main or test: `java_library` and
+    `java_binary` compile the beans, and running four annotation processors over
+    every test compile in the repo buys nothing to offset the cost. Test code
+    that does need a bean definition generated gets it the same way any other
+    library does — a `testonly` `java_library` beside the suite, as in
+    yodel's `filter_test_app` and one_d4's `e2e_support`.
+
+    Args:
+        plugins: Plugins the caller asked for.
+        javacopts: Compiler options the caller asked for.
+        micronaut: Whether to add the Micronaut annotation processors.
+
+    Returns:
+        A (plugins, javacopts) tuple, each a new list, with nothing duplicated.
+    """
+    plugins = list(plugins or [])
+    javacopts = list(javacopts or [])
+
+    if _NULLAWAY_PLUGIN not in plugins:
+        plugins.append(_NULLAWAY_PLUGIN)
+
+    if micronaut:
+        for p in _MICRONAUT_PLUGINS:
+            if p not in plugins:
+                plugins.append(p)
+
+    for opt in _JAVACOPTS:
+        if opt not in javacopts:
+            javacopts.append(opt)
+
+    return plugins, javacopts
+
+def java_test_suite(runner = "junit5", runtime_deps = [], plugins = None, javacopts = None, **kwargs):
+    """java_test_suite defaulting to JUnit 5 (Jupiter), with NullAway enabled.
+
+    Automatically adds JUnit Jupiter engine and platform runtime deps.
+
+    contrib_rules_jvm splits the srcs into one `java_test` per `*Test.java` and a
+    shared `-test-lib` for the helpers, and forwards `plugins` and `javacopts` to
+    both — so setting them here analyzes every test source, not just the suite's
+    helper classes.
+
+    Args:
+        runner: Test runner to use. Defaults to "junit5".
+        runtime_deps: Additional runtime dependencies.
+        plugins: Additional annotation processor plugins.
+        javacopts: Additional Java compiler options.
+        **kwargs: Arguments passed to java_test_suite.
+    """
+    plugins, javacopts = _analysis(plugins, javacopts, micronaut = False)
+
+    _java_test_suite(
+        runner = runner,
+        runtime_deps = runtime_deps + _JUNIT_RUNTIME_DEPS,
+        plugins = plugins,
+        javacopts = javacopts,
+        **kwargs
+    )
+
 def java_library(
         name,
         srcs = None,
@@ -102,22 +158,10 @@ def java_library(
         javacopts: Additional Java compiler options.
         **kwargs: Additional arguments passed to java_library.
     """
-    plugins = list(plugins or [])
-    javacopts = list(javacopts or [])
-    deps = list(deps or [])
 
-    # Only add processors and deps if there are sources to compile
+    # Only add processors if there are sources to compile
     if srcs:
-        if _NULLAWAY_PLUGIN not in plugins:
-            plugins.append(_NULLAWAY_PLUGIN)
-
-        for p in _MICRONAUT_PLUGINS:
-            if p not in plugins:
-                plugins.append(p)
-
-        for opt in _JAVACOPTS:
-            if opt not in javacopts:
-                javacopts.append(opt)
+        plugins, javacopts = _analysis(plugins, javacopts, micronaut = True)
 
     _java_library(
         name = name,
@@ -145,22 +189,10 @@ def java_binary(
         javacopts: Additional Java compiler options.
         **kwargs: Additional arguments passed to java_binary.
     """
-    plugins = list(plugins or [])
-    javacopts = list(javacopts or [])
-    deps = list(deps or [])
 
-    # Only add processors and deps if there are sources to compile
+    # Only add processors if there are sources to compile
     if srcs:
-        if _NULLAWAY_PLUGIN not in plugins:
-            plugins.append(_NULLAWAY_PLUGIN)
-
-        for p in _MICRONAUT_PLUGINS:
-            if p not in plugins:
-                plugins.append(p)
-
-        for opt in _JAVACOPTS:
-            if opt not in javacopts:
-                javacopts.append(opt)
+        plugins, javacopts = _analysis(plugins, javacopts, micronaut = True)
 
     _java_binary(
         name = name,
@@ -188,18 +220,10 @@ def java_test(
         javacopts: Additional Java compiler options.
         **kwargs: Additional arguments passed to java_test.
     """
-    plugins = list(plugins or [])
-    javacopts = list(javacopts or [])
-    deps = list(deps or [])
 
-    # Only add processors and deps if there are sources to compile
+    # Only add processors if there are sources to compile
     if srcs:
-        if _NULLAWAY_PLUGIN not in plugins:
-            plugins.append(_NULLAWAY_PLUGIN)
-
-        for opt in _JAVACOPTS:
-            if opt not in javacopts:
-                javacopts.append(opt)
+        plugins, javacopts = _analysis(plugins, javacopts, micronaut = False)
 
     _java_test(
         name = name,

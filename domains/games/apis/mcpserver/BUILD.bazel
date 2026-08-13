@@ -249,6 +249,7 @@ java_test_suite(
         artifact("io.micronaut:micronaut-http-server-netty"),
         artifact("io.micronaut:micronaut-inject"),
         artifact("io.micronaut:micronaut-runtime"),
+        artifact("org.jspecify:jspecify"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],

@@ -11,6 +11,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.Map;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -176,18 +177,23 @@ public class McpAuthenticationTest {
     return "http://localhost:" + server.getPort();
   }
 
-  private static HttpResponse<String> post(EmbeddedServer server, String body, String authorization)
-      throws Exception {
+  /**
+   * @param authorization null sends no Authorization header at all, which is the anonymous call
+   *     every open-endpoint case here is built on — not a header with an empty value.
+   */
+  private static HttpResponse<String> post(
+      EmbeddedServer server, String body, @Nullable String authorization) throws Exception {
     return postTo(server, "/mcp", authorization, body);
   }
 
   private static HttpResponse<String> postTo(
-      EmbeddedServer server, String path, String authorization) throws Exception {
+      EmbeddedServer server, String path, @Nullable String authorization) throws Exception {
     return postTo(server, path, authorization, TOOLS_LIST);
   }
 
   private static HttpResponse<String> postTo(
-      EmbeddedServer server, String path, String authorization, String body) throws Exception {
+      EmbeddedServer server, String path, @Nullable String authorization, String body)
+      throws Exception {
     HttpRequest.Builder builder =
         HttpRequest.newBuilder()
             .uri(URI.create(baseUrl(server) + path))

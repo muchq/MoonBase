@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 public class ChessClientTest {
@@ -60,7 +61,10 @@ public class ChessClientTest {
 
     @Override
     public HttpRequest getRequest() {
-      return null;
+      // Nothing under test reads the request back off the response, and null was a lie the
+      // interface does not permit. Throwing keeps that honest: if a caller ever does read it,
+      // this fails loudly here instead of NPEing somewhere downstream.
+      throw new UnsupportedOperationException("the stub does not carry the request back");
     }
 
     @Override
@@ -572,7 +576,8 @@ public class ChessClientTest {
   }
 
   private static class CapturingHttpClient extends StubHttpClient {
-    String lastUrl;
+    /** Null until a call goes through, which is what a test asserting the URL wants to see. */
+    @Nullable String lastUrl;
 
     public CapturingHttpClient(int statusCode, String responseBody) {
       super(statusCode, responseBody);

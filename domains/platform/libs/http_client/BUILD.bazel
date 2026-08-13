@@ -55,6 +55,7 @@ java_test_suite(
         ":core",
         ":jdk11",
         artifact("org.assertj:assertj-core"),
+        artifact("org.jspecify:jspecify"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
     ],
 )

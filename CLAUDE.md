@@ -64,10 +64,23 @@ Bazel formatting do.
   — and **that list only shrinks**: fix a package, delete its line. Adding a
   line fails `//bazel/rules:rules_test` until it is declared there too, on
   purpose.
-- **No test source is analyzed anywhere**, including under annotated packages,
-  because `java_test_suite` is a passthrough that adds neither the plugin nor
-  the javacopts (the `java_test` macro beside it adds both; the repo uses
-  `java_test_suite`). So a `@Nullable` mistake in a test is never caught.
+- **Test sources are analyzed too**, on the same terms — but the opt-out list is
+  keyed on *package*, and a test shares its package with the code it tests. So
+  an exemption covers both halves, and deleting one exposes a package's test
+  sources in the same change as its main sources. Budget for that when you take
+  a line off the list. `java_test_suite` produces two compiles from one `srcs`
+  list — a `java_test` per `*Test.java`, and a shared `-test-lib` for the rest
+  — and `//bazel/rules:rules_test` guards both.
+- **The Micronaut processors are keyed by macro, not by main-vs-test.**
+  `java_library` and `java_binary` add them; `java_test` and `java_test_suite`
+  deliberately do not, because running four annotation processors over every
+  test compile in the repo buys nothing to offset the cost. Test code that
+  genuinely needs a generated bean definition goes in a `testonly`
+  `java_library` beside the suite, which gets the processors like any other
+  library — see `filter_test_app` in `domains/platform/libs/yodel/BUILD.bazel`
+  and `e2e_support` in `domains/games/apis/one_d4/BUILD.bazel`. Reaching for the
+  suite's own `plugins` instead is not the pattern. Also guarded, in both
+  directions.
 - **Behind a proxy that 403s GitHub source archives** (cloud sandboxes, some CI
   runners), run `scripts/make-git-overrides.sh` once and import its output from
   `.bazelrc.user` — see [`docs/BUILD_AND_IDE.md`](docs/BUILD_AND_IDE.md). That
