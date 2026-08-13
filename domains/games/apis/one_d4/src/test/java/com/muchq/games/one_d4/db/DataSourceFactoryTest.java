@@ -99,7 +99,7 @@ public class DataSourceFactoryTest {
   }
 
   /**
-   * The compatibility half. A URL that carries its own credentials — /etc/one_d4/db_config, and
+   * The compatibility half. A URL that carries its own credentials — a Neon connection string, and
    * every H2 test URL — must be untouched, so unset variables cannot override what the URL says.
    */
   @Test

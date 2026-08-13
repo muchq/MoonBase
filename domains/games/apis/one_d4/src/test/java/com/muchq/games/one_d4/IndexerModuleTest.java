@@ -1,23 +1,19 @@
 package com.muchq.games.one_d4;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.queue.IndexQueue;
 import com.muchq.games.one_d4.worker.IndexWorker;
 import io.micronaut.context.annotation.Bean;
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 public class IndexerModuleTest {
-
-  @TempDir Path tmp;
 
   /**
    * compose hands this container {@code jdbc:postgresql://one_d4_postgres:5432/one_d4} (#1351), and
@@ -82,63 +78,97 @@ public class IndexerModuleTest {
 
   @Test
   public void readJdbcUrl_returnsEnvVar_whenSet() {
-    String result = IndexerModule.readJdbcUrl("jdbc:postgresql://prod:5432/db", missingPath());
+    String result = IndexerModule.readJdbcUrl("jdbc:postgresql://prod:5432/db");
     assertThat(result).isEqualTo("jdbc:postgresql://prod:5432/db");
   }
 
   @Test
   public void readJdbcUrl_stripsEnvVar() {
-    String result = IndexerModule.readJdbcUrl("  jdbc:postgresql://host/db  ", missingPath());
+    String result = IndexerModule.readJdbcUrl("  jdbc:postgresql://host/db  ");
     assertThat(result).isEqualTo("jdbc:postgresql://host/db");
   }
 
+  /**
+   * {@code INDEXER_DB_URL=} with nothing after it is what compose produces when the variable it
+   * interpolates is absent from the host's environment, so this is the realistic misconfiguration
+   * rather than a synthetic one — and it has to fail the same way a missing variable does.
+   */
   @Test
-  public void readJdbcUrl_ignoresBlankEnvVar() {
-    String result = IndexerModule.readJdbcUrl("   ", missingPath());
-    assertThat(result).isEqualTo("jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1");
+  public void readJdbcUrl_refusesABlankEnvVar() {
+    assertThatThrownBy(() -> IndexerModule.readJdbcUrl("   "))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("INDEXER_DB_URL");
   }
 
+  /**
+   * A missing URL has to be fatal. Any default a service can start on unattended turns the
+   * misconfiguration into a container that boots, serves, answers /health 200 and loses every write
+   * on restart, and the message has to name the variable: a boot failure is the one place an
+   * operator is guaranteed to look.
+   */
   @Test
-  public void readJdbcUrl_ignoresNullEnvVar_andReadsFile() throws IOException {
-    Path configFile = Files.createFile(tmp.resolve("db_config"));
-    Files.writeString(configFile, "jdbc:postgresql://file-host:5432/chess\n");
-
-    String result = IndexerModule.readJdbcUrl(null, configFile);
-    assertThat(result).isEqualTo("jdbc:postgresql://file-host:5432/chess");
+  public void readJdbcUrl_refusesAnUnsetEnvVar() {
+    assertThatThrownBy(() -> IndexerModule.readJdbcUrl(null))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("INDEXER_DB_URL");
   }
 
+  /**
+   * The dependency half of "H2 is test-only". Production code that merely avoids naming H2 is one
+   * edit away from using it again with nothing to fail; a closure that cannot resolve the driver is
+   * not. This target depends on the module and its db library and on no test database, so the
+   * driver's absence here is its absence from one_d4's production dependency closure.
+   *
+   * <p>The control is pgjdbc, which the same closure does carry — without it this passes just as
+   * well against a lookup that can no longer find anything at all.
+   */
   @Test
-  public void readJdbcUrl_returnsDefault_whenFileIsMissing() {
-    String result = IndexerModule.readJdbcUrl(null, missingPath());
-    assertThat(result).isEqualTo("jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1");
+  public void h2IsNotOnTheProductionClasspath() {
+    assertThatThrownBy(() -> Class.forName("org.h2.Driver"))
+        .as(
+            "org.h2.Driver resolves from one_d4's production dependency closure. H2 is for tests;"
+                + " a deployed container must not be able to fall back to an in-memory database.")
+        .isInstanceOf(ClassNotFoundException.class);
+
+    assertThatCode(() -> Class.forName("org.postgresql.Driver"))
+        .as("pgjdbc is missing too, so the assertion above proves nothing")
+        .doesNotThrowAnyException();
   }
 
+  /**
+   * The environment is the only input to the URL. Asserted here rather than left to {@code
+   * deploy_config_test.go}, which pins what compose hands the container and stays green against a
+   * class that has grown a second source of its own.
+   *
+   * <p>Read off the compiled class because that is where the property is observable: a file read
+   * leaves {@code java/nio/file/...} in the constant pool whichever method it hides in, while an
+   * assertion about parameter types sees only the ones declared.
+   *
+   * <p>The control matters more than usual: a scan that read nothing — wrong resource name, empty
+   * stream — reports the absence just as confidently. Requiring the variable's own name in the same
+   * bytes proves they are this class's, and pins the spelling {@code compose.yaml} has to match.
+   */
   @Test
-  public void readJdbcUrl_returnsDefault_whenFileIsEmpty() throws IOException {
-    Path configFile = Files.createFile(tmp.resolve("db_config_empty"));
-    Files.writeString(configFile, "   ");
+  public void readJdbcUrl_consultsNoFile() throws Exception {
+    String constantPool = compiledBytesOfIndexerModule();
 
-    String result = IndexerModule.readJdbcUrl(null, configFile);
-    assertThat(result).isEqualTo("jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1");
+    assertThat(constantPool)
+        .as("the class does not name INDEXER_DB_URL, so these are not the bytes we meant to scan")
+        .contains("INDEXER_DB_URL");
+    assertThat(constantPool)
+        .as(
+            "IndexerModule references java.nio.file. The environment is the only input to the"
+                + " URL; a file fallback here is invisible to every other test, including the"
+                + " compose guard.")
+        .doesNotContain("java/nio/file");
   }
 
-  @Test
-  public void readJdbcUrl_envVarTakesPrecedenceOverFile() throws IOException {
-    Path configFile = Files.createFile(tmp.resolve("db_config_precedence"));
-    Files.writeString(configFile, "jdbc:postgresql://file-host/db");
-
-    String result = IndexerModule.readJdbcUrl("jdbc:postgresql://env-host/db", configFile);
-    assertThat(result).isEqualTo("jdbc:postgresql://env-host/db");
-  }
-
-  @Test
-  public void readJdbcUrl_throwsUncheckedIOException_onNonFileNotFoundIOError() {
-    // A directory path will cause an IOException (not NoSuchFileException) when read as a file
-    Path dirPath = tmp;
-
-    assertThatThrownBy(() -> IndexerModule.readJdbcUrl(null, dirPath))
-        .isInstanceOf(UncheckedIOException.class)
-        .hasCauseInstanceOf(IOException.class);
+  /** The class's own bytes, decoded so that byte-for-byte substrings survive. */
+  private static String compiledBytesOfIndexerModule() throws Exception {
+    try (InputStream in = IndexerModule.class.getResourceAsStream("IndexerModule.class")) {
+      assertThat(in).as("IndexerModule.class is not on the test classpath").isNotNull();
+      return new String(in.readAllBytes(), StandardCharsets.ISO_8859_1);
+    }
   }
 
   @Test
@@ -166,9 +196,5 @@ public class IndexerModuleTest {
   public void parseThreads_respectsValidValue() {
     assertThat(IndexerModule.parseThreads("8", 4)).isEqualTo(8);
     assertThat(IndexerModule.parseThreads(" 16 ", 4)).isEqualTo(16);
-  }
-
-  private Path missingPath() {
-    return tmp.resolve("nonexistent_db_config");
   }
 }

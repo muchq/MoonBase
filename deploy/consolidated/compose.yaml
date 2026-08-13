@@ -340,8 +340,6 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=one_d4
       - OTEL_RESOURCE_ATTRIBUTES=service.name=one_d4,service.version=${ONE_D4_SHA:-${DEPLOY_SHA:-latest}}
-    volumes:
-      - /etc/one_d4:/etc/one_d4
     networks:
       # one-d4 for Java callers: java.net.URI gives a hostname containing an
       # underscore a null host, so no request built from one can be sent.

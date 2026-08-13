@@ -360,8 +360,10 @@ it first via `POST /v1/index`.
 ## Example Session
 
 ```bash
-# Start the service (in-process mode with H2)
-INDEXER_DB_URL="jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1" bazel run //domains/games/apis/one_d4:one_d4
+# Start the service against a local Postgres (see the README for the container)
+INDEXER_DB_URL="jdbc:postgresql://localhost:5432/indexer" \
+  INDEXER_DB_USERNAME=indexer INDEXER_DB_PASSWORD=indexer \
+  bazel run //domains/games/apis/one_d4:one_d4
 
 # 1. Start indexing
 curl -X POST http://localhost:8080/v1/index \

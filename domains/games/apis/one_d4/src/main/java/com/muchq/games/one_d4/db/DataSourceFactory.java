@@ -44,8 +44,8 @@ public class DataSourceFactory {
    * {@code password=} query form — the URL would then appear complete in a connection-failure
    * message.
    *
-   * <p>Null or empty leaves the config alone, so a URL that carries its own credentials (the {@code
-   * /etc/one_d4/db_config} fallback, and every H2 test URL) behaves exactly as before.
+   * <p>Null or empty leaves the config alone, so a URL that carries its own credentials (a Neon
+   * connection string, and every H2 test URL) behaves exactly as before.
    */
   public static DataSource create(
       String jdbcUrl, @Nullable String username, @Nullable String password) {
@@ -88,7 +88,7 @@ public class DataSourceFactory {
   /**
    * The socket-timeout default to apply for this URL, if any. Postgres only — H2 rejects unknown
    * connection properties outright — and only when the URL does not already carry one, so an
-   * operator's explicit choice in {@code /etc/one_d4/db_config} is never overridden.
+   * operator's explicit {@code socketTimeout} in {@code INDEXER_DB_URL} is never overridden.
    */
   static OptionalInt defaultSocketTimeout(String jdbcUrl) {
     // Matched at a parameter boundary so the substring appearing inside another parameter's

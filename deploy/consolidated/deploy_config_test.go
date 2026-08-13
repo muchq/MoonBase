@@ -1057,8 +1057,9 @@ func oneD4Env(t *testing.T, key string) string {
 func TestOneD4sDatabaseUrlIsAJdbcUrl(t *testing.T) {
 	url := oneD4Env(t, "INDEXER_DB_URL")
 	if url == "" {
-		t.Fatal("one_d4's compose block sets no INDEXER_DB_URL, so the container falls back to " +
-			"the untracked /etc/one_d4/db_config (#1351).")
+		t.Fatal("one_d4's compose block sets no INDEXER_DB_URL. That variable is the container's " +
+			"only source for the URL — there is no file rank under it and no in-memory default — " +
+			"so the container would fail to start.")
 	}
 	if !strings.HasPrefix(url, "jdbc:postgresql://") {
 		t.Errorf("INDEXER_DB_URL=%q is not a JDBC URL. golf_hub's libpq form (postgresql://...) "+
@@ -1102,6 +1103,34 @@ func TestOneD4sCredentialsAreNotInTheUrl(t *testing.T) {
 		t.Errorf("INDEXER_DB_PASSWORD=%q should interpolate ${ONE_D4_DB_PASSWORD} from the "+
 			"host's ~/.env. A literal here would be a credential committed to the repo.",
 			password)
+	}
+}
+
+// one_d4 reads nothing from the host filesystem: its JDBC URL comes from the
+// environment above and there is no file rank under it. A mount here would be
+// configuration the deploy appears to honour and does not — an operator can edit
+// that file all day and change nothing, which is the kind of thing found out
+// during an incident.
+//
+// The regression this guards is a host file coming back for one_d4 instead of a
+// variable here. That shape is what keeps a database hostname invisible to this
+// repo, and it is why one_d4_postgres has to survive as an alias (#1225).
+func TestOneD4MountsNoHostConfigDirectory(t *testing.T) {
+	lines := oneD4ActiveLines(t)
+
+	// The control. Without it this passes just as well against a block that was
+	// renamed out from under the helper, or emptied.
+	if !strings.Contains(strings.Join(lines, "\n"), "ghcr.io/muchq/one_d4") {
+		t.Fatalf("did not find one_d4's image in its compose block; this test is no longer "+
+			"reading the service it claims to. Lines were:\n%s", strings.Join(lines, "\n"))
+	}
+
+	for _, line := range lines {
+		if strings.Contains(line, "/etc/one_d4") {
+			t.Errorf("one_d4's compose block mounts a host config directory: %q. Nothing in the "+
+				"container reads one — the JDBC URL comes from INDEXER_DB_URL, and nothing "+
+				"resolves it from a file.", line)
+		}
 	}
 }
 

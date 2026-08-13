@@ -31,11 +31,6 @@ import io.micronaut.context.annotation.Bean;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.context.annotation.Factory;
 import io.micronaut.context.annotation.Value;
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
 import java.time.Clock;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -51,39 +46,35 @@ import org.slf4j.LoggerFactory;
 @Factory
 public class IndexerModule {
   private static final Logger LOG = LoggerFactory.getLogger(IndexerModule.class);
-  private static final String DEFAULT_JDBC_URL = "jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1";
-  private static final Path DB_CONFIG_PATH = Path.of("/etc/one_d4/db_config");
 
   /**
-   * Resolves the JDBC URL. Priority: 1. INDEXER_DB_URL environment variable 2.
-   * /etc/one_d4/db_config file (plain text, single line) 3. H2 in-memory (local dev default)
+   * The JDBC URL, from {@code $INDEXER_DB_URL}. The variable is the only source and there is no
+   * default, so an unset or blank one is fatal.
    *
-   * <p>The deploy sets the variable from compose (#1351), so the file is a superseded fallback kept
-   * only until that is confirmed on the host and the file is deleted. It is deliberately still
-   * ranked second rather than removed: doing both at once would leave nothing to fall back to if
-   * the variable turned out not to reach the container.
+   * <p>Failing here is the point. Any fallback a service can start on unattended — an in-memory
+   * database, a file on the host — turns a misconfigured URL into a container that boots, serves,
+   * answers {@code /health} 200, and loses every write on restart. That is silent data loss where
+   * an outage is the correct answer, and this exception is the outage.
+   *
+   * <p>Naming H2 as a default would not even reach that far: the driver is a test dependency and is
+   * not on this classpath ({@code IndexerModuleTest.h2IsNotOnTheProductionClasspath}), so it would
+   * fail at pool construction with "No suitable driver" instead of with the variable's name.
+   *
+   * <p>Local development needs a real Postgres and a real URL, the same as the deploy. See the
+   * README.
    */
   static String readJdbcUrl() {
-    return readJdbcUrl(System.getenv("INDEXER_DB_URL"), DB_CONFIG_PATH);
+    return readJdbcUrl(System.getenv("INDEXER_DB_URL"));
   }
 
-  static String readJdbcUrl(@Nullable String envUrl, Path configPath) {
-    if (envUrl != null && !envUrl.isBlank()) {
-      return envUrl.strip();
+  static String readJdbcUrl(@Nullable String envUrl) {
+    if (envUrl == null || envUrl.isBlank()) {
+      throw new IllegalStateException(
+          "INDEXER_DB_URL is not set. one_d4 needs a PostgreSQL JDBC URL"
+              + " (jdbc:postgresql://host:5432/db); there is no in-memory fallback, because a"
+              + " service that starts on one loses every write on restart without saying so.");
     }
-    try {
-      String fileUrl = Files.readString(configPath).strip();
-      if (!fileUrl.isEmpty()) {
-        LOG.info("Loaded JDBC URL from {}", configPath);
-        return fileUrl;
-      }
-      LOG.info("Empty DB config file found; falling back to H2 in-memory");
-    } catch (NoSuchFileException nsfe) {
-      LOG.info("No DB config file found; falling back to H2 in-memory");
-    } catch (IOException ioe) {
-      throw new UncheckedIOException(ioe);
-    }
-    return DEFAULT_JDBC_URL;
+    return envUrl.strip();
   }
 
   /** One clock for everything that stamps or compares retention timestamps. */
@@ -109,10 +100,10 @@ public class IndexerModule {
 
   /**
    * @param configuredUrl the {@code indexer.db.url} property. Tests set it to give each
-   *     ApplicationContext its own in-memory database; nothing sets it in production, where the URL
-   *     comes from {@code $INDEXER_DB_URL} or {@code /etc/one_d4/db_config}. Before this existed
-   *     the property was silently ignored, so every context that thought it had an isolated
-   *     database was sharing {@code jdbc:h2:mem:indexer}.
+   *     ApplicationContext its own H2 database, which is the only place H2 is reachable from — the
+   *     driver is a test dependency. It has to be read here rather than assumed: a context whose
+   *     property is ignored silently shares one database with every other context. Nothing sets it
+   *     in production, where the URL comes from {@code $INDEXER_DB_URL}.
    */
   @Context
   public DataSource dataSource(@Value("${indexer.db.url:}") String configuredUrl) {
@@ -122,6 +113,12 @@ public class IndexerModule {
         System.getenv("INDEXER_DB_PASSWORD"));
   }
 
+  /**
+   * Which SQL dialect the DAOs and migrations speak. It is a test concern in practice — the only
+   * URLs that answer true here are the ones tests set through {@code indexer.db.url}, since the H2
+   * driver is not on the production classpath — but the branches it selects live in production code
+   * because the DAOs those tests exercise are the production DAOs.
+   */
   @Context
   public Boolean useH2(@Value("${indexer.db.url:}") String configuredUrl) {
     return jdbcUrl(configuredUrl).contains(":h2:");
