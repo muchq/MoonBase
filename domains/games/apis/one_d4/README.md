@@ -59,7 +59,7 @@ flowchart TB
     RequestStore["IndexingRequestStore"]
     GameStore["GameFeatureStore"]
     PeriodStore["IndexedPeriodStore"]
-    DB[(H2/PostgreSQL)]
+    DB[(PostgreSQL)]
   end
 
   subgraph External["External"]
@@ -109,49 +109,41 @@ flowchart TB
 
 **Retention:** RetentionWorker runs hourly. It deletes game_features, motif_occurrences (via FK cascade), and indexed_periods older than 7 days, and indexing_requests older than 30 days — games first, so a request and its games clear in one pass. It also settles live requests nobody is working on: a lapsed lease returns the work to the queue for another worker, and only an exhausted attempt count or a fleet that is demonstrably not running anything retires a request to FAILED. Since the sweep is hourly, those windows say when a request becomes eligible, not when it is settled.
 
-## Running Locally (in-memory)
+## Running Locally
 
-H2 in-memory is the default — no PostgreSQL or Docker required.
-
-```bash
-# Build and start (data lives only for the lifetime of the process)
-bazel run //domains/games/apis/one_d4:one_d4
-```
-
-To use a persistent H2 file instead of the default in-memory DB:
+one_d4 needs a real PostgreSQL. **H2 is a test dependency** — the driver is not on the
+service's classpath, so there is no in-memory mode to fall back on and no default URL:
+an unset `INDEXER_DB_URL` fails at startup rather than quietly starting a database that
+disappears on restart (MoonBase#1362).
 
 ```bash
-INDEXER_DB_URL="jdbc:h2:file:/tmp/indexer;DB_CLOSE_DELAY=-1" \
-  bazel run //domains/games/apis/one_d4:one_d4
-```
+docker run -d --name one_d4_dev -p 5432:5432 \
+  -e POSTGRES_USER=indexer -e POSTGRES_PASSWORD=indexer -e POSTGRES_DB=indexer postgres:18
 
-To point at a PostgreSQL or Neon instance, pass the credentials beside the URL:
-
-```bash
 INDEXER_DB_URL="jdbc:postgresql://localhost:5432/indexer" \
   INDEXER_DB_USERNAME=indexer \
   INDEXER_DB_PASSWORD=indexer \
   bazel run //domains/games/apis/one_d4:one_d4
 ```
 
+`postgres:18` is the image the deploy runs (`shared_postgres` in `compose.yaml`), so local
+dev and production speak the same dialect. Migrations run at startup against an empty
+database, so nothing else is needed to bring one up.
+
 Credentials in the URL still work, but only if the password survives URL decoding —
 pgjdbc decodes query values, so `+` becomes a space, `&` truncates the rest, and a bare
 `%` fails to parse. The separate variables have no such constraint; see
 `DataSourceFactory.create`.
 
-The app resolves the URL in this order:
+The app resolves the URL from `INDEXER_DB_URL` and nowhere else. Two ranks used to sit
+under it and both are gone: a plain-text `/etc/one_d4/db_config` on the deploy host, and
+in-memory H2 (MoonBase#1362). Tests are the exception, and they don't go through this
+path — they set the `indexer.db.url` Micronaut property directly, which is how each
+`ApplicationContext` gets its own H2 database.
 
-1. `INDEXER_DB_URL` environment variable
-2. H2 in-memory (local dev fallback)
-
-**On the deployed server the variable is what applies.** `compose.yaml` sets
-`INDEXER_DB_URL`, `INDEXER_DB_USERNAME` and `INDEXER_DB_PASSWORD` (MoonBase#1351).
-A third rank used to sit between the two above — a plain-text `/etc/one_d4/db_config` on
-the host — and it is gone (MoonBase#1362), along with the bind mount that carried it. An
-unset variable on a deployed instance therefore lands on in-memory H2: the service starts
-and answers, and everything it writes disappears with the process. It logs at WARN when
-that happens, and `deploy/consolidated/deploy_config_test.go` fails if `compose.yaml`
-stops setting the variable.
+**On the deployed server** `compose.yaml` sets `INDEXER_DB_URL`, `INDEXER_DB_USERNAME` and
+`INDEXER_DB_PASSWORD` (MoonBase#1351), and `deploy/consolidated/deploy_config_test.go`
+fails if it stops setting the URL.
 
 For Neon, the URL looks like:
 ```
@@ -433,8 +425,8 @@ is possible and simply not built. Changing *that* derivation still needs a reind
 
 On the deployed machine the indexer runs against **PostgreSQL** — the `shared_postgres` service
 (image `postgres:18`, Compose volume `shared_pgdata`), reached via the JDBC URL `compose.yaml`
-sets in `INDEXER_DB_URL` — the only source there is (see the resolution order above). H2 is the
-local-dev default only.
+sets in `INDEXER_DB_URL` — the only source there is (see above). H2 appears nowhere outside the
+test suite.
 
 The instance is shared: `golf_hub` keeps its own database on it too, which is why the service is
 no longer named after one_d4 (MoonBase#1225). The Compose volume key is not the volume's name —

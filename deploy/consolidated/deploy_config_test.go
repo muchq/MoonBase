@@ -1058,8 +1058,8 @@ func TestOneD4sDatabaseUrlIsAJdbcUrl(t *testing.T) {
 	url := oneD4Env(t, "INDEXER_DB_URL")
 	if url == "" {
 		t.Fatal("one_d4's compose block sets no INDEXER_DB_URL. That is the container's only " +
-			"source for the URL since #1362 removed the /etc/one_d4/db_config fallback, so it " +
-			"would start on in-memory H2 — answering requests and losing every write on restart.")
+			"source for the URL — #1362 removed the /etc/one_d4/db_config fallback under it and " +
+			"made H2 a test-only dependency — so the container would fail to start.")
 	}
 	if !strings.HasPrefix(url, "jdbc:postgresql://") {
 		t.Errorf("INDEXER_DB_URL=%q is not a JDBC URL. golf_hub's libpq form (postgresql://...) "+

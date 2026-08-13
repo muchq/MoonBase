@@ -47,7 +47,7 @@ A Micronaut service that indexes chess games from chess.com (lichess planned), e
               └──────┬─────────┘      │
                      │                │
                ┌─────▼────────────────▼──────┐
-               │      PostgreSQL / H2        │
+               │         PostgreSQL          │
                │  indexing_requests          │
                │  game_features              │
                │  motif_occurrences          │
@@ -201,12 +201,15 @@ Environment variables (with defaults):
 |------------------------|-------------------------------------------|
 | `PORT`                 | 8080                                      |
 | `APP_NAME`             | helloworld (shared application.yml)       |
-| `INDEXER_DB_URL`       | jdbc:h2:mem:indexer (H2 in-memory)         |
+| `INDEXER_DB_URL`       | none — required; startup fails without it  |
 | `INDEXER_DB_USERNAME`  | (unset — the URL's own credentials apply) |
 | `INDEXER_DB_PASSWORD`  | (unset — the URL's own credentials apply) |
 
 The deploy sets all three from `compose.yaml` (MoonBase#1351). Credentials are passed
-separately rather than as URL query parameters, which pgjdbc decodes.
+separately rather than as URL query parameters, which pgjdbc decodes. There is no
+in-memory default: H2 is a test-only dependency and its driver is not on the service's
+classpath (MoonBase#1362), so a missing URL is a failed startup rather than a service
+quietly running on a database that disappears.
 
 ## Build & Test
 

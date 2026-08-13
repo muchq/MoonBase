@@ -46,36 +46,39 @@ import org.slf4j.LoggerFactory;
 @Factory
 public class IndexerModule {
   private static final Logger LOG = LoggerFactory.getLogger(IndexerModule.class);
-  private static final String DEFAULT_JDBC_URL = "jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1";
 
   /**
-   * Resolves the JDBC URL: {@code $INDEXER_DB_URL}, or H2 in-memory when it is unset.
+   * Resolves the JDBC URL from {@code $INDEXER_DB_URL}, or fails. There is no default.
    *
-   * <p>There was a rank between those two until #1362 — a plain-text {@code /etc/one_d4/db_config}
-   * on the deploy host, bind-mounted into the container. #1351 moved the deployed URL into {@code
-   * compose.yaml}, where this repo can see and change it, and the file has since been deleted from
-   * the host along with the mount that carried it. A resolution path with no live consumer is one
-   * nobody exercises, and this one was worse than inert: it read as configuration an operator could
-   * still edit, when editing it had stopped doing anything the moment the variable outranked it.
+   * <p>Two ranks have been removed from underneath this variable. The first was a plain-text {@code
+   * /etc/one_d4/db_config} on the deploy host (#1362): #1351 moved the deployed URL into {@code
+   * compose.yaml}, where this repo can see and change it, and the file was deleted from the host
+   * along with the mount that carried it, leaving a resolution path nobody exercised and an
+   * operator could still be fooled into editing.
    *
-   * <p>H2 stays as the local-dev default, so an unset variable is not fatal. On the deploy that is
-   * silent data loss rather than an outage — the service starts, answers, and writes to a database
-   * that vanishes with the process — which is why it is logged at WARN and why {@code
-   * deploy_config_test.go} fails if compose stops setting the variable.
+   * <p>The second was in-memory H2, and it was the more dangerous of the two, because it made a
+   * missing URL look like a working service: the container started, served requests, answered
+   * {@code /health} 200, and lost every write on restart. That is silent data loss rather than an
+   * outage, and an outage is what a misconfigured database should be. H2 is now a test-only
+   * dependency — the driver is not on the production classpath at all ({@code
+   * IndexerModuleTest.h2IsNotOnTheProductionClasspath}), so keeping the default would have traded
+   * this message for a "No suitable driver" further down at pool construction.
+   *
+   * <p>Local development therefore needs a real Postgres and a real URL, the same as the deploy.
+   * See the README.
    */
   static String readJdbcUrl() {
     return readJdbcUrl(System.getenv("INDEXER_DB_URL"));
   }
 
   static String readJdbcUrl(@Nullable String envUrl) {
-    if (envUrl != null && !envUrl.isBlank()) {
-      return envUrl.strip();
+    if (envUrl == null || envUrl.isBlank()) {
+      throw new IllegalStateException(
+          "INDEXER_DB_URL is not set. one_d4 needs a PostgreSQL JDBC URL"
+              + " (jdbc:postgresql://host:5432/db); there is no in-memory fallback, because a"
+              + " service that starts on one loses every write on restart without saying so.");
     }
-    LOG.warn(
-        "INDEXER_DB_URL is unset; falling back to in-memory H2 ({}). Nothing written survives a"
-            + " restart — on a deployed instance this is a misconfiguration, not a default.",
-        DEFAULT_JDBC_URL);
-    return DEFAULT_JDBC_URL;
+    return envUrl.strip();
   }
 
   /** One clock for everything that stamps or compares retention timestamps. */
@@ -101,9 +104,10 @@ public class IndexerModule {
 
   /**
    * @param configuredUrl the {@code indexer.db.url} property. Tests set it to give each
-   *     ApplicationContext its own in-memory database; nothing sets it in production, where the URL
-   *     comes from {@code $INDEXER_DB_URL}. Before this existed the property was silently ignored,
-   *     so every context that thought it had an isolated database was sharing {@code
+   *     ApplicationContext its own in-memory database — the only place H2 is reachable from, now
+   *     that the driver is a test dependency. Nothing sets it in production, where the URL comes
+   *     from {@code $INDEXER_DB_URL}. Before this property existed it was silently ignored, so
+   *     every context that thought it had an isolated database was sharing {@code
    *     jdbc:h2:mem:indexer}.
    */
   @Context
@@ -114,6 +118,12 @@ public class IndexerModule {
         System.getenv("INDEXER_DB_PASSWORD"));
   }
 
+  /**
+   * Which SQL dialect the DAOs and migrations speak. It is a test concern in practice — the only
+   * URLs that answer true here are the ones tests set through {@code indexer.db.url}, since the H2
+   * driver is not on the production classpath — but the branches it selects live in production code
+   * because the DAOs those tests exercise are the production DAOs.
+   */
   @Context
   public Boolean useH2(@Value("${indexer.db.url:}") String configuredUrl) {
     return jdbcUrl(configuredUrl).contains(":h2:");

@@ -226,10 +226,11 @@ stack rather than newly exposed — but the password does move from a root-owned
 metadata, and that is a real change in where it sits.
 
 `INDEXER_DB_URL` is now one_d4's only source for the URL. It used to outrank a
-`/etc/one_d4/db_config` host file; that fallback and its bind mount are gone (#1362), so an unset
-variable falls straight through to in-memory H2 — the container starts, answers, and loses
-everything it writes on restart. `IndexerModule.readJdbcUrl` logs that at WARN, and
-`deploy_config_test.go` fails if this file stops setting the variable.
+`/etc/one_d4/db_config` host file, and in-memory H2 sat underneath both; #1362 removed the file
+(and its bind mount), and made H2 a test-only dependency whose driver is not on the service's
+classpath. An unset variable is therefore a container that exits on boot naming the variable,
+rather than one that starts, serves, and loses every write on restart. `deploy_config_test.go`
+fails if this file stops setting it.
 
 When verifying a deploy, read the **body** of `/health` — it answers 200 with
 `{"status":"DOWN"}` when Postgres is unreachable, so the status code alone proves nothing.

@@ -1,10 +1,9 @@
 package com.muchq.games.one_d4;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.queue.IndexQueue;
 import com.muchq.games.one_d4.worker.IndexWorker;
@@ -13,7 +12,6 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import org.junit.jupiter.api.Test;
-import org.slf4j.LoggerFactory;
 
 public class IndexerModuleTest {
 
@@ -93,25 +91,52 @@ public class IndexerModuleTest {
   /**
    * {@code INDEXER_DB_URL=} with nothing after it is what compose produces when the variable it
    * interpolates is absent from the host's environment, so this is the realistic misconfiguration
-   * rather than a synthetic one. It has to resolve to H2 rather than reach Hikari as a blank URL,
-   * which fails at pool construction with "No suitable driver".
+   * rather than a synthetic one — and it has to fail the same way a missing variable does.
    */
   @Test
-  public void readJdbcUrl_ignoresBlankEnvVar() {
-    String result = IndexerModule.readJdbcUrl("   ");
-    assertThat(result).isEqualTo("jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1");
+  public void readJdbcUrl_refusesABlankEnvVar() {
+    assertThatThrownBy(() -> IndexerModule.readJdbcUrl("   "))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("INDEXER_DB_URL");
   }
 
   /**
-   * The variable is now the entire resolution. There used to be a rank between it and H2 — {@code
-   * /etc/one_d4/db_config}, read here until #1362 — so an unset variable landed on whatever that
-   * file held. Nothing on disk can change this answer any more, which is why the method takes no
-   * path: the only input is the environment.
+   * There is no default any more. H2 used to sit under the variable as a local-dev convenience, and
+   * on a deployed container that made a missing URL silent data loss rather than an outage: the
+   * service started, served, answered /health 200, and lost every write on restart. H2 is a test
+   * dependency now — the driver is not even on the production classpath, so a default naming it
+   * would fail later and less legibly, at pool construction.
+   *
+   * <p>Failing here means the container exits on boot with the variable's name in the message,
+   * which is the one place an operator is guaranteed to look.
    */
   @Test
-  public void readJdbcUrl_returnsDefault_whenEnvVarIsUnset() {
-    String result = IndexerModule.readJdbcUrl(null);
-    assertThat(result).isEqualTo("jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1");
+  public void readJdbcUrl_refusesAnUnsetEnvVar() {
+    assertThatThrownBy(() -> IndexerModule.readJdbcUrl(null))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("INDEXER_DB_URL");
+  }
+
+  /**
+   * The dependency half of "H2 is test-only": prod code that merely avoids naming H2 is one edit
+   * away from using it again, and nothing would fail. This target depends on the module and its db
+   * library and on no test database, so the driver's absence from the classpath here is the absence
+   * of H2 from one_d4's production dependency closure.
+   *
+   * <p>The control is pgjdbc, which the same closure does carry — without it this passes just as
+   * well against a lookup that can no longer find anything at all.
+   */
+  @Test
+  public void h2IsNotOnTheProductionClasspath() {
+    assertThatThrownBy(() -> Class.forName("org.h2.Driver"))
+        .as(
+            "org.h2.Driver resolves from one_d4's production dependency closure. H2 is for tests;"
+                + " a deployed container must not be able to fall back to an in-memory database.")
+        .isInstanceOf(ClassNotFoundException.class);
+
+    assertThatCode(() -> Class.forName("org.postgresql.Driver"))
+        .as("pgjdbc is missing too, so the assertion above proves nothing")
+        .doesNotThrowAnyException();
   }
 
   /**
@@ -142,45 +167,6 @@ public class IndexerModuleTest {
                 + " else since #1362 — a file fallback here is invisible to every other test,"
                 + " including the compose guard.")
         .doesNotContain("java/nio/file");
-  }
-
-  /**
-   * The fall-through to H2 is the operator's only signal that a deployed container is about to run
-   * on a database that vanishes with the process — it starts, serves, and answers /health 200. It
-   * was logged at INFO beside the file-not-found line it belonged to; with the file gone (#1362)
-   * that INFO is the whole warning, sitting in the same stream as routine startup chatter.
-   *
-   * <p>Asserted rather than described because "we log this loudly" is exactly the kind of claim
-   * that survives an edit that stops it being true.
-   */
-  @Test
-  public void readJdbcUrl_warnsWhenItFallsBackToH2() {
-    ch.qos.logback.classic.Logger logger =
-        (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(IndexerModule.class);
-    ListAppender<ILoggingEvent> events = new ListAppender<>();
-    events.start();
-    logger.addAppender(events);
-    try {
-      IndexerModule.readJdbcUrl(null);
-      IndexerModule.readJdbcUrl("   ");
-
-      assertThat(events.list)
-          .as("both ways of not setting the variable have to say so")
-          .hasSize(2)
-          .allSatisfy(
-              event -> {
-                assertThat(event.getLevel()).isEqualTo(Level.WARN);
-                assertThat(event.getFormattedMessage()).contains("INDEXER_DB_URL");
-              });
-
-      // The twin. Without it this passes against a method that warns unconditionally, which is
-      // the same as not warning at all once an operator learns to ignore it.
-      events.list.clear();
-      IndexerModule.readJdbcUrl("jdbc:postgresql://host/db");
-      assertThat(events.list).as("a configured URL is not a misconfiguration").isEmpty();
-    } finally {
-      logger.detachAppender(events);
-    }
   }
 
   /** The class's own bytes, decoded so that byte-for-byte substrings survive. */

@@ -87,7 +87,6 @@ java_library(
         "//domains/games/libs/chessql:compiler",
         artifact("org.jdbi:jdbi3-core"),
         artifact("org.jspecify:jspecify"),
-        artifact("com.h2database:h2"),
         artifact("com.zaxxer:HikariCP"),
         artifact("org.slf4j:slf4j-api"),
     ],
@@ -459,6 +458,9 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/worker/RetentionWorkerTest.java",
     ],
     deps = [
+        # The database these tests run against. H2 is a test dependency only: the production
+        # closure has no driver for it, so nothing can fall back to an in-memory database (#1362).
+        artifact("com.h2database:h2"),
         ":db",
         ":dto",
         ":engine",
@@ -558,11 +560,6 @@ java_test_suite(
         # The driver itself, so the URL shape compose hands this container is checked
         # against the parser that will actually read it (#1351).
         artifact("org.postgresql:postgresql"),
-        # The real logging backend, so readJdbcUrl's fall-back warning can be read back
-        # off the logger production uses rather than asserted about (#1362).
-        artifact("ch.qos.logback:logback-classic"),
-        artifact("ch.qos.logback:logback-core"),
-        artifact("org.slf4j:slf4j-api"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
@@ -582,6 +579,9 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/db/TableDispatchTest.java",
     ],
     deps = [
+        # The database these tests run against. H2 is a test dependency only: the production
+        # closure has no driver for it, so nothing can fall back to an in-memory database (#1362).
+        artifact("com.h2database:h2"),
         ":db",
         ":dto",
         ":model",
@@ -612,6 +612,9 @@ java_test_suite(
     ],
     env = {"TZ": "Pacific/Kiritimati"},
     deps = [
+        # The database these tests run against. H2 is a test dependency only: the production
+        # closure has no driver for it, so nothing can fall back to an in-memory database (#1362).
+        artifact("com.h2database:h2"),
         ":db",
         ":dto",
         ":test_db",
@@ -635,6 +638,9 @@ java_test_suite(
     ],
     env = {"TZ": "Pacific/Kiritimati"},
     deps = [
+        # The database these tests run against. H2 is a test dependency only: the production
+        # closure has no driver for it, so nothing can fall back to an in-memory database (#1362).
+        artifact("com.h2database:h2"),
         ":db",
         ":test_db",
         artifact("org.junit.jupiter:junit-jupiter-api"),
@@ -667,6 +673,9 @@ java_test_suite(
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
+        # The database these tests run against. H2 is a test dependency only: the production
+        # closure has no driver for it, so nothing can fall back to an in-memory database (#1362).
+        artifact("com.h2database:h2"),
         ":db",
         ":dto",
         ":model",
@@ -728,6 +737,9 @@ java_test_suite(
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
+        # The database these tests run against. H2 is a test dependency only: the production
+        # closure has no driver for it, so nothing can fall back to an in-memory database (#1362).
+        artifact("com.h2database:h2"),
         ":db",
         ":e2e_support",
         ":module",
@@ -756,6 +768,9 @@ java_test_suite(
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
+        # The database these tests run against. H2 is a test dependency only: the production
+        # closure has no driver for it, so nothing can fall back to an in-memory database (#1362).
+        artifact("com.h2database:h2"),
         # CallToolResult: the MCP tools return it since #1331.
         artifact("io.modelcontextprotocol.sdk:mcp-core"),
         ":e2e_support",
@@ -786,6 +801,9 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/e2e/RederiveOpeningsE2ETest.java",
     ],
     deps = [
+        # The database these tests run against. H2 is a test dependency only: the production
+        # closure has no driver for it, so nothing can fall back to an in-memory database (#1362).
+        artifact("com.h2database:h2"),
         ":api",
         ":db",
         ":dto",
@@ -830,6 +848,9 @@ java_test_suite(
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
+        # The database these tests run against. H2 is a test dependency only: the production
+        # closure has no driver for it, so nothing can fall back to an in-memory database (#1362).
+        artifact("com.h2database:h2"),
         # e2e_support supplies FakeChessClient (@Replaces ChessClient). Without it these tests
         # boot the real client, and any request that reaches the worker opens a live TLS
         # connection to api.chess.com.
