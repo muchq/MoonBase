@@ -18,6 +18,39 @@ where MoonBase's tooling differs the MoonBase command is the one named.
 then take the next. Don't batch unrelated fixes. A dependency bump and a
 feature do not belong in the same PR.
 
+**Fold review feedback into the PR it came from.** When a review turns up
+something small — a doc line that now contradicts itself, an assertion that
+doesn't bite, a name that misleads — fix it in that PR. Don't file it. An issue
+for a twenty-line fix costs more to write, triage, schedule and re-explain than
+the fix does, and it lands on a reader who no longer has any of the context
+that made the finding obvious.
+
+This is in tension with "one item, one PR", and the tension resolves toward
+folding, because the two rules are protecting against different costs and only
+one of them is expensive here. Batching unrelated work makes a PR hard to
+review; that is what the first rule is for. But a finding that came *out of*
+this review is not unrelated to it — it is the review working. Splitting it out
+buys nothing and spends the scarcest thing in the process: a reviewer who has
+the code loaded right now. A second PR means a second full review pass, a
+second CI cycle, and a second round of someone rebuilding the same mental
+model, all so a diff can stay tidy in a way nobody will read it for.
+
+Reach for a separate issue when the answer is genuinely unrelated to the change
+under review, or when it is large enough to need its own design conversation —
+the kind of question that would hold the PR hostage while it was argued out.
+Both of those are real and both happen. But "it wasn't in the original scope"
+is not one of them, and neither is "the commit would touch a third file."
+Minimize round trips; use taste; when in doubt, fold it in and say in the PR
+that you did.
+
+The receipt is #1372, which should not exist. Review of #1371 turned up two
+rough edges in the same script the PR was already fixing — an all-skipped run
+reporting success, and an interrupt handler deleting a backup the exit handler
+then restored from. Together they were about twenty lines. Filing them bought a
+second issue to write, a second PR (#1373), a second review, and a second full
+CI run, to land a change that would have been three paragraphs of the first
+review thread.
+
 **Altitude review first.** Before writing any code: read the cited code,
 confirm the finding is actually real, and propose a plan. Only then implement.
 Jumping straight to a fix hides the cases where the reported issue is a symptom
