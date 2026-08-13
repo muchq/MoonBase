@@ -19,7 +19,8 @@ which mutations survived — i.e. which real bugs the tests fail to catch.
 
 Options:
   -f, --file FILE     File to mutate; restored afterwards, including on Ctrl-C
-  -t, --test CMD      Test command; must pass before mutating
+  -t, --test CMD      Test command; must pass before mutating. Runs in a
+                      subshell, so a `cd` in it is safe and does not leak
   -h, --help          Show this help
 
 Examples:
@@ -78,6 +79,13 @@ if [ ! -f "$FILE" ]; then
   exit 1
 fi
 
+# Resolve the target before anything else touches it. Every later reference —
+# the restore, the sed, the cmp — has to mean the same file no matter what
+# directory the shell is standing in by then, and a test command is free to
+# move it (see the subshell below). A relative path kept as a string is how a
+# restore silently turns into "cp: No such file or directory" (#1369).
+FILE=$(cd "$(dirname "$FILE")" && pwd)/$(basename "$FILE")
+
 BACKUP=$(mktemp)
 cp "$FILE" "$BACKUP"
 restore() { cp "$BACKUP" "$FILE"; }
@@ -88,8 +96,17 @@ trap 'restore; rm -f "$BACKUP"' EXIT
 
 # Baseline. Without this a suite that's already red makes every mutation look
 # caught, which is the most flattering possible wrong answer.
+# Every run of the test command goes through a subshell. `eval` alone runs it
+# in this shell, so a command containing `cd` — the ordinary way to run a suite
+# that lives in a subdirectory — leaves the script somewhere else for the rest
+# of the run. That corrupts the restore, and worse, makes the *next* relative
+# `cd` fail: the command exits non-zero, and this script reads that as the
+# suite catching a mutation. A clean report from an experiment that never ran
+# is the one outcome a mutation checker must never produce (#1369).
+run_tests() { ( eval "$TEST_CMD" ) > /dev/null 2>&1; }
+
 echo "baseline..."
-if ! eval "$TEST_CMD" > /dev/null 2>&1; then
+if ! run_tests; then
   echo "Error: tests fail before any mutation — fix that first, or every" >&2
   echo "mutation will look caught." >&2
   exit 1
@@ -112,7 +129,7 @@ for mutation in "${MUTATIONS[@]}"; do
     continue
   fi
 
-  if eval "$TEST_CMD" > /dev/null 2>&1; then
+  if run_tests; then
     echo "  SURVIVED $mutation"
     SURVIVED=$((SURVIVED + 1))
   else

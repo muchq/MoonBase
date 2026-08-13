@@ -33,6 +33,14 @@ caught) and reports an expression that matched nothing as `SKIPPED` rather
 than as a survivor, so a typo isn't mistaken for a finding. The file is
 restored afterwards, including on Ctrl-C.
 
+The test command runs in a subshell, so `-t 'cd some/dir && npm test'` is
+fine — it cannot move the script out from under its own restore. That was not
+always true: the script used to `eval` the command in its own shell against a
+relative path, and a `cd` broke the restore *and* made every later mutation
+report `killed`, because the second relative `cd` failed rather than the suite
+catching anything (#1369). `scripts/test-mutation-check` pins both halves;
+it runs in CI and takes under a second.
+
 Mutate the *behaviour*, not the syntax. A change that fails to compile is
 caught by the compiler and says nothing about the tests. Aim at decisions:
 boundaries, guards, which variable feeds a call, an omitted field.

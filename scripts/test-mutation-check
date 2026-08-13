@@ -1,0 +1,174 @@
+#!/bin/bash
+# Exercises mutation-check against a throwaway "project" — no bazel, no repo
+# sources, nothing that takes longer than a few milliseconds to answer.
+#
+# The subject under test is a harness, so the fixture is the smallest thing
+# that behaves like one: a file with a number in it, and a "test suite" that is
+# a shell command reading that file. That makes every property here decidable
+# without a build system, and lets the suite be told to pass or fail on demand
+# — which is what the interesting cases need.
+#
+# Two of these exist because of a real near-miss (#1369). mutation-check keeps
+# the path it was given and runs the test command with `eval` in its own shell,
+# so a command containing `cd` moves the shell out from under the script: the
+# restore silently fails, and every later mutation reports `killed` because the
+# *command* fell over rather than because the suite caught anything. Both halves
+# are pinned below, and a run that only checked the happy path would miss both.
+set -uo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+# Overridable so this suite can be pointed at another copy of the script — how
+# the #1369 cases below were shown to fail against the version that had the bug,
+# without mutating a shell script while it is running (bash reads a script as it
+# executes; editing one in place mid-run is its own kind of exciting).
+MUTATION_CHECK=${MUTATION_CHECK:-$REPO/scripts/mutation-check}
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+FAILURES=0
+pass() { echo "  ok    $1"; }
+fail() {
+  echo "  FAIL  $1"
+  FAILURES=$((FAILURES + 1))
+}
+check() { # check <description> <condition-as-args>
+  local desc=$1
+  shift
+  if "$@"; then pass "$desc"; else fail "$desc"; fi
+}
+
+# ------------------------------------------------------------------ fixture
+
+# A "source file" holding one value, and a suite that passes only while the
+# value is the original. A mutation that changes it is therefore caught; one
+# that changes a comment is not.
+SUBJECT=$WORK/project/answer.txt
+ORIGINAL='value = 41'
+
+reset_subject() {
+  mkdir -p "$(dirname "$SUBJECT")"
+  printf '%s\n# a comment nothing asserts on\n' "$ORIGINAL" > "$SUBJECT"
+}
+
+# The suite: green while the value is untouched.
+STRICT_SUITE="grep -qx 'value = 41' project/answer.txt"
+# A suite that notices nothing, so every mutation should survive it.
+BLIND_SUITE="true"
+# A suite that is red before anything is mutated.
+RED_SUITE="false"
+
+subject_is_intact() { grep -qx "$ORIGINAL" "$SUBJECT"; }
+
+# Every run happens from $WORK with a *relative* -f, which is how the script is
+# used from the repo root ("-f domains/..."). An absolute path would paper over
+# exactly the hazard the cd cases below are pinning: with one, the restore
+# resolves the same from any directory and #1369 is invisible.
+run_check_as() { # run_check_as <-f value> <test-cmd> <mutation>...
+  local file=$1 cmd=$2
+  shift 2
+  OUT=$(cd "$WORK" && "$MUTATION_CHECK" -f "$file" -t "$cmd" "$@" 2>&1)
+  STATUS=$?
+}
+
+run_check() { # run_check <test-cmd> <mutation>... ; the relative -f form
+  run_check_as project/answer.txt "$@"
+}
+
+out_has() { grep -q "$1" <<< "$OUT"; }
+out_lacks() { ! grep -q "$1" <<< "$OUT"; }
+
+# ------------------------------------------------------------- happy path
+
+echo "reporting"
+
+reset_subject
+run_check "$STRICT_SUITE" 's/value = 41/value = 42/'
+check "reports a caught mutation as killed" out_has '^  killed'
+check "exits 0 when every mutation is killed" test "$STATUS" -eq 0
+check "restores the file afterwards" subject_is_intact
+
+reset_subject
+run_check "$BLIND_SUITE" 's/value = 41/value = 42/'
+check "reports an uncaught mutation as SURVIVED" out_has 'SURVIVED'
+check "exits non-zero when a mutation survives" test "$STATUS" -ne 0
+check "restores the file after a survivor too" subject_is_intact
+
+reset_subject
+run_check "$STRICT_SUITE" 's/nothing here matches/x/'
+check "reports a no-op expression as SKIPPED" out_has 'SKIPPED'
+# Per-mutation verdicts are indented; the closing summary says "all mutations
+# killed" and must not be mistaken for one.
+check "does not call a no-op expression killed" out_lacks '^  killed'
+
+reset_subject
+run_check "$RED_SUITE" 's/value = 41/value = 42/'
+check "refuses to run against a red baseline" test "$STATUS" -ne 0
+check "says why it refused" out_has 'tests fail before any mutation'
+check "leaves the file alone when it refuses" subject_is_intact
+
+# -------------------------------------------------- the #1369 regressions
+
+echo "test commands that change directory"
+
+# A test command that cds is ordinary — it is how you run a suite that lives in
+# a subdirectory (`cd domains/games/apps/1d4_web && npx vitest run ...`). The
+# script has to survive it.
+CD_SUITE="cd project && grep -qx 'value = 41' answer.txt"
+
+reset_subject
+run_check "$CD_SUITE" 's/value = 41/value = 42/'
+check "restores the file when the test command cds" subject_is_intact
+check "still reports the caught mutation as killed" out_has '^  killed'
+check "restore does not error" out_lacks 'No such file or directory'
+
+# The dangerous half. With a suite that catches nothing, every mutation must be
+# reported SURVIVED. Before #1369 the second iteration's `cd` failed — the shell
+# was already inside that directory — so the command exited non-zero and the
+# script read that as the suite catching the mutation: a clean bill of health
+# from an experiment that never ran.
+CD_BLIND_SUITE="cd project && true"
+
+reset_subject
+run_check "$CD_BLIND_SUITE" 's/value = 41/value = 42/' 's/value = 41/value = 43/'
+check "does not fake a killed verdict on the first mutation" out_lacks '^  killed'
+check "reports both uncaught mutations as survivors" test "$(grep -c SURVIVED <<< "$OUT")" -eq 2
+check "exits non-zero, so the survivors are not silent" test "$STATUS" -ne 0
+check "restores the file after a cd-ing blind suite" subject_is_intact
+
+echo "paths"
+
+# Nothing here should depend on which form of -f the caller used, and the two
+# forms fail differently: with a relative -f the restore breaks loudly, while
+# with an absolute one the restore works and only the verdicts are wrong — a
+# quieter, worse outcome. Review caught this suite asserting only restoration
+# for the absolute form, which the pre-fix script passes while reporting two
+# fabricated `killed` lines and exiting 0. So both forms are checked the same
+# way: verdicts, exit status, and the file.
+for form in absolute relative; do
+  case $form in
+    absolute) file=$SUBJECT ;;
+    relative) file=project/answer.txt ;;
+  esac
+
+  reset_subject
+  run_check_as "$file" "$CD_BLIND_SUITE" \
+    's/value = 41/value = 42/' 's/value = 41/value = 43/'
+  check "$form -f: no fabricated killed verdict under a cd" out_lacks '^  killed'
+  check "$form -f: both uncaught mutations reported" \
+    test "$(grep -c SURVIVED <<< "$OUT")" -eq 2
+  check "$form -f: exits non-zero for the survivors" test "$STATUS" -ne 0
+  check "$form -f: restores the file" subject_is_intact
+
+  reset_subject
+  run_check_as "$file" "$CD_SUITE" 's/value = 41/value = 42/'
+  check "$form -f: still catches a real mutation under a cd" out_has '^  killed'
+  check "$form -f: restore does not error" out_lacks 'No such file or directory'
+done
+
+echo
+if [ "$FAILURES" -eq 0 ]; then
+  echo "all mutation-check checks passed"
+else
+  echo "$FAILURES check(s) failed"
+fi
+exit $((FAILURES > 0))
