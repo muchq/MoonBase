@@ -1,6 +1,7 @@
 package com.muchq.games.one_d4.worker;
 
 import com.muchq.games.chess_com_client.ChessClient;
+import com.muchq.games.chess_com_client.ChessComApiException;
 import com.muchq.games.chess_com_client.GamesResponse;
 import com.muchq.games.chess_com_client.PlayedGame;
 import com.muchq.games.chess_com_client.Player;
@@ -531,7 +532,10 @@ public class IndexWorker {
         // as "indexed, no games" (#1360).
         if (response.isEmpty()) {
           metrics.increment(ARCHIVE_FETCHES, Map.of("result", "error"));
-          throw new IllegalStateException(
+          // ChessClient collapsed the wire 404 into empty; restate it as the same exception
+          // type every other non-success archive status uses so the failure path stays uniform.
+          throw new ChessComApiException(
+              404,
               "chess.com returned 404 for player="
                   + message.player()
                   + " month="
