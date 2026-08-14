@@ -525,14 +525,30 @@ public class IndexWorker {
         // placed the same way — on the way out of a span that blocks, which is where an interrupt
         // can have been absorbed without a trace.
         ensureNotInterrupted(message.requestId());
-        metrics.increment(
-            ARCHIVE_FETCHES, Map.of("result", response.isEmpty() ? "no_archive" : "ok"));
+        // ChessClient still maps every 404 to Optional.empty(). That is not an empty month: a
+        // genuine empty archive is HTTP 200 with {"games":[]}. A 404 is either a missing player or
+        // an upstream failure on a listed archive — both must fail the request, not COMPLETE it
+        // as "indexed, no games" (#1360).
         if (response.isEmpty()) {
-          // chess.com 404s the archive for a month the player has no games in. The month *was*
-          // indexed — the answer is "none" — so record an empty period rather than dropping
-          // through. Skipping it would leave the month indistinguishable from one retention has
-          // swept (DataAvailabilityResolver reads a missing row as "gone"), and would make the
-          // period cache miss forever, refetching an empty archive on every request.
+          metrics.increment(ARCHIVE_FETCHES, Map.of("result", "error"));
+          throw new RuntimeException(
+              "chess.com returned 404 for player="
+                  + message.player()
+                  + " month="
+                  + month
+                  + " (empty months are HTTP 200 with an empty games list)");
+        }
+
+        List<GameFeature> featureBatch = new ArrayList<>();
+        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesBatch =
+            new LinkedHashMap<>();
+
+        if (response.get().games().isEmpty()) {
+          // The month *was* indexed — the answer is "none" — so record an empty period rather
+          // than dropping through. Skipping it would leave the month indistinguishable from one
+          // retention has swept (DataAvailabilityResolver reads a missing row as "gone"), and
+          // would make the period cache miss forever, refetching an empty archive on every
+          // request.
           LOG.warn("No games found for player={} month={}", message.player(), month);
           // Ownership first. upsertPeriod is the one write in a run that carries no token —
           // indexed_periods is keyed by (player, platform, month) and has no request to fence
@@ -544,15 +560,15 @@ public class IndexWorker {
           upsertPeriod(message, monthStr, month, fetchedAt, 0, false);
           // Counted as an empty month, and deliberately not recorded into
           // GAMES_PER_MONTH: a decade-long backfill of a three-year player is mostly
-          // 404s, and feeding those zeros in makes the average archive look a third
-          // its real size. empty_months_total already carries that population.
+          // empty archives, and feeding those zeros in makes the average archive look a
+          // third its real size. empty_months_total already carries that population.
           metrics.increment(MONTHS, Map.of("result", "empty"));
+          // no_archive kept as the empty-games label so existing dashboard selectors still match;
+          // the fetch itself succeeded (HTTP 200).
+          metrics.increment(ARCHIVE_FETCHES, Map.of("result", "no_archive"));
           continue;
         }
-
-        List<GameFeature> featureBatch = new ArrayList<>();
-        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesBatch =
-            new LinkedHashMap<>();
+        metrics.increment(ARCHIVE_FETCHES, Map.of("result", "ok"));
 
         List<PlayedGame> games = new ArrayList<>();
         for (PlayedGame game : response.get().games()) {
@@ -648,7 +664,8 @@ public class IndexWorker {
               message.player(),
               monthStr);
         }
-        // Unfenced, like the 404 path above and for the same reason — indexed_periods is keyed by
+        // Unfenced, like the empty-archive path above and for the same reason — indexed_periods is
+        // keyed by
         // (player, platform, month), so there is no request to condition the write on. What keeps
         // it safe is order: the flushBatch immediately above checks ownership and throws if this
         // worker has lost it, so this line is unreachable without a live lease.
@@ -942,8 +959,8 @@ public class IndexWorker {
   /**
    * Records that this month was indexed, whatever it turned out to contain.
    *
-   * <p>Every fetched month gets a row, including one whose archive 404'd — a missing row means "not
-   * indexed", and both the period cache and {@code DataAvailabilityResolver} read it that way.
+   * <p>Every fetched month gets a row, including one whose archive was empty — a missing row means
+   * "not indexed", and both the period cache and {@code DataAvailabilityResolver} read it that way.
    *
    * <p>A period is complete only once the month itself is over, so the current month is always
    * refetched, and a month whose title lookups saw API errors is stored incomplete so the next

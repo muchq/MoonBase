@@ -102,19 +102,18 @@ public class IndexWorkerTest {
   }
 
   /**
-   * chess.com 404s the archive for a month a player has no games in, and {@code ChessClient} maps
-   * that to {@code Optional.empty()}. The month was still indexed — the answer is "no games" — so
-   * it has to leave a period row behind. Without one, the month is indistinguishable from one
-   * retention has swept, and {@code DataAvailabilityResolver} reports a request as PARTIAL or
-   * EXPIRED the moment it completes. It also means the empty month is refetched forever, because
-   * the period cache only hits on a row that exists.
+   * An empty archive is HTTP 200 with {@code {"games":[]}}. The month was still indexed — the
+   * answer is "no games" — so it has to leave a period row behind. Without one, the month is
+   * indistinguishable from one retention has swept, and {@code DataAvailabilityResolver} reports a
+   * request as PARTIAL or EXPIRED the moment it completes. It also means the empty month is
+   * refetched forever, because the period cache only hits on a row that exists.
    */
   @Test
-  public void process_monthWithNoArchive_stillRecordsAnEmptyPeriod() {
+  public void process_emptyGamesList_stillRecordsAnEmptyPeriod() {
     stubChessClient.setResponse(
         java.time.YearMonth.of(2024, 1),
         List.of(playedGame("https://chess.com/game/jan-1", MINIMAL_PGN, "blitz")));
-    // February is left unstubbed: the stub returns Optional.empty(), exactly as a 404 does.
+    stubChessClient.setResponse(java.time.YearMonth.of(2024, 2), List.of());
 
     worker.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-02", false));
 
@@ -132,6 +131,53 @@ public class IndexWorkerTest {
             });
     assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
     assertThat(requestStore.getLastGamesIndexed()).isEqualTo(1);
+  }
+
+  /**
+   * ChessClient maps a 404 to {@code Optional.empty()}. That is not an empty month — empty months
+   * are a 200 with an empty games list — so the request must fail and be retried rather than
+   * COMPLETE with zero games (#1360).
+   */
+  @Test
+  public void a404OnAnArchiveChessComListsIsAnErrorNotAnEmptyMonth() {
+    stubChessClient.setNotFound(java.time.YearMonth.of(2024, 1));
+
+    worker.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    assertThat(requestStore.getLastStatus()).isEqualTo("FAILED");
+    assertThat(periodStore.getUpserts()).isEmpty();
+  }
+
+  @Test
+  public void metrics_archive404IsCountedAsErrorNotEmptyMonth() {
+    stubChessClient.setNotFound(java.time.YearMonth.of(2024, 1));
+    IndexWorker w = meteredWorker();
+
+    w.process(oneMonth());
+
+    assertThat(counter(IndexWorker.ARCHIVE_FETCHES, Map.of("result", "error"))).isEqualTo(1);
+    assertThat(counter(IndexWorker.ARCHIVE_FETCHES, Map.of("result", "no_archive"))).isZero();
+    assertThat(counter(IndexWorker.MONTHS, Map.of("result", "empty"))).isZero();
+    assertThat(counter(IndexWorker.RUNS, Map.of("outcome", "failed"))).isEqualTo(1);
+    assertThat(counter(IndexWorker.RUNS, Map.of("outcome", "completed"))).isZero();
+  }
+
+  /** Negative twin of {@link #a404OnAnArchiveChessComListsIsAnErrorNotAnEmptyMonth}. */
+  @Test
+  public void a200WithEmptyGamesStillRecordsAnEmptyMonthAndCompletes() {
+    stubChessClient.setResponse(java.time.YearMonth.of(2024, 1), List.of());
+
+    worker.process(new IndexMessage(REQUEST_ID, PLAYER, PLATFORM, "2024-01", "2024-01", false));
+
+    assertThat(requestStore.getLastStatus()).isEqualTo("COMPLETED");
+    assertThat(requestStore.getLastGamesIndexed()).isEqualTo(0);
+    assertThat(periodStore.getUpserts())
+        .singleElement()
+        .satisfies(
+            u -> {
+              assertThat(u.month()).isEqualTo("2024-01");
+              assertThat(u.gamesCount()).isZero();
+            });
   }
 
   @Test
@@ -659,6 +705,7 @@ public class IndexWorkerTest {
   private static final class StubChessClient extends ChessClient {
     private final List<java.time.YearMonth> fetchCalls = new ArrayList<>();
     private final Map<java.time.YearMonth, List<PlayedGame>> responseByMonth = new HashMap<>();
+    private final java.util.Set<java.time.YearMonth> notFoundMonths = new java.util.HashSet<>();
     private final Map<String, String> titlesByPlayer = new HashMap<>();
     // Title lookups run on the extraction pool, so record them thread-safely
     private final List<String> playerFetchCalls = Collections.synchronizedList(new ArrayList<>());
@@ -671,6 +718,13 @@ public class IndexWorkerTest {
 
     void setResponse(java.time.YearMonth month, List<PlayedGame> games) {
       responseByMonth.put(month, new ArrayList<>(games));
+      notFoundMonths.remove(month);
+    }
+
+    /** Optional.empty(), the shape ChessClient gives a chess.com 404. */
+    void setNotFound(java.time.YearMonth month) {
+      notFoundMonths.add(month);
+      responseByMonth.remove(month);
     }
 
     void setThrowOnFetch(RuntimeException ex) {
@@ -701,11 +755,15 @@ public class IndexWorkerTest {
       if (interruptDuringFetch) {
         Thread.currentThread().interrupt();
       }
-      List<PlayedGame> games = responseByMonth.get(yearMonth);
-      if (games != null) {
-        return Optional.of(new GamesResponse(games));
+      if (notFoundMonths.contains(yearMonth)) {
+        return Optional.empty();
       }
-      return Optional.empty();
+      List<PlayedGame> games = responseByMonth.get(yearMonth);
+      // Default: empty archive (HTTP 200), not a 404. ChessClient only returns empty on 404.
+      if (games == null) {
+        return Optional.of(new GamesResponse(List.of()));
+      }
+      return Optional.of(new GamesResponse(games));
     }
 
     @Override
@@ -1245,11 +1303,12 @@ public class IndexWorkerTest {
   }
 
   /**
-   * A month with no archive is indexed — the answer is "none". Counting it as a failure would make
-   * a quiet player look like an outage.
+   * A month with an empty archive is indexed — the answer is "none". Counting it as a failure would
+   * make a quiet player look like an outage.
    */
   @Test
   public void metrics_monthWithNoArchiveCountsAsIndexedNotFailed() {
+    stubChessClient.setResponse(java.time.YearMonth.of(2024, 1), List.of());
     IndexWorker w = meteredWorker();
 
     w.process(oneMonth());
@@ -1258,9 +1317,9 @@ public class IndexWorkerTest {
     assertThat(counter(IndexWorker.MONTHS, Map.of("result", "empty"))).isEqualTo(1);
     assertThat(counter(IndexWorker.GAMES_INDEXED, Map.of())).isZero();
     assertThat(counter(IndexWorker.RUNS, Map.of("outcome", "completed"))).isEqualTo(1);
-    // A decade-long backfill of a three-year player is mostly 404s. Feeding those zeros into the
-    // per-month distribution makes the average archive read a third its real size, and they are
-    // already counted as empty months.
+    // A decade-long backfill of a three-year player is mostly empty archives. Feeding those zeros
+    // into the per-month distribution makes the average archive read a third its real size, and
+    // they are already counted as empty months.
     assertThat(distributionCount(IndexWorker.GAMES_PER_MONTH))
         .as("an empty month is counted, not averaged in")
         .isZero();

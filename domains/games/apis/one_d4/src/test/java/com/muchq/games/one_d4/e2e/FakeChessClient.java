@@ -68,8 +68,10 @@ public class FakeChessClient extends ChessClient {
     fetchCalls.add(new FetchCall(player, yearMonth));
     String k = key(player, yearMonth);
     List<PlayedGame> games = responsesByKey.get(k);
+    // Default: empty archive (HTTP 200). Optional.empty() is reserved for chess.com 404s, which
+    // IndexWorker treats as failure rather than an empty month (#1360).
     if (games == null) {
-      return Optional.empty();
+      return Optional.of(new GamesResponse(List.of()));
     }
     return Optional.of(new GamesResponse(games));
   }

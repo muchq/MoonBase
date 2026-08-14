@@ -416,7 +416,7 @@ public class IndexWorkerLifecycleTest {
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
       }
-      return Optional.empty();
+      return Optional.of(new GamesResponse(List.of()));
     }
 
     @Override
@@ -425,7 +425,7 @@ public class IndexWorkerLifecycleTest {
     }
   }
 
-  /** Records which players were actually fetched, and returns nothing for each. */
+  /** Records which players were actually fetched; each month comes back as an empty archive. */
   private static final class RecordingClient extends ChessClient {
     final Collection<String> players = new ConcurrentLinkedQueue<>();
 
@@ -436,7 +436,7 @@ public class IndexWorkerLifecycleTest {
     @Override
     public Optional<GamesResponse> fetchGames(String player, YearMonth yearMonth) {
       players.add(player);
-      return Optional.empty();
+      return Optional.of(new GamesResponse(List.of()));
     }
 
     @Override

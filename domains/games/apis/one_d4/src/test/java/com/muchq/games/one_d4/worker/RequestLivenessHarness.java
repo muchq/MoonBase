@@ -199,7 +199,7 @@ abstract class RequestLivenessHarness {
       while (true) {
         try {
           release.await();
-          return Optional.empty();
+          return Optional.of(new GamesResponse(List.of()));
         } catch (InterruptedException e) {
           // Swallowed and deliberately not restored. Re-awaiting rather than returning is what
           // keeps the run inside the call until the test lets it out.
@@ -233,7 +233,7 @@ abstract class RequestLivenessHarness {
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
       }
-      return Optional.empty();
+      return Optional.of(new GamesResponse(List.of()));
     }
 
     @Override
@@ -391,7 +391,7 @@ abstract class RequestLivenessHarness {
       }
       // The archive is empty: the month still counts as indexed, and the worker takes its
       // no-games path. What is under test is the silence before this returns, not the payload.
-      return Optional.empty();
+      return Optional.of(new GamesResponse(List.of()));
     }
 
     @Override
@@ -422,7 +422,7 @@ abstract class RequestLivenessHarness {
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
       }
-      return Optional.empty();
+      return Optional.of(new GamesResponse(List.of()));
     }
 
     @Override
@@ -454,7 +454,7 @@ abstract class RequestLivenessHarness {
     @Override
     public Optional<GamesResponse> fetchGames(String player, YearMonth yearMonth) {
       if (fetches.incrementAndGet() > 1) {
-        return Optional.empty();
+        return Optional.of(new GamesResponse(List.of()));
       }
       entered.countDown();
       try {
@@ -495,7 +495,7 @@ abstract class RequestLivenessHarness {
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
       }
-      return Optional.empty();
+      return Optional.of(new GamesResponse(List.of()));
     }
 
     @Override
