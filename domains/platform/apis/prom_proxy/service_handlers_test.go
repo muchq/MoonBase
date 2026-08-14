@@ -616,12 +616,12 @@ func TestStandardTimeseriesQueries_LatencyAndActiveHaveNoCountForm(t *testing.T)
 	}
 }
 
-// At 30m and 1d the step (30s, 5m) never exceeds defaultCounterWindow, so
-// avg/p95 latency keep exactly the fixed 5m window they've always had —
-// this is the regression guard for the widening below staying scoped to
-// wide ranges only.
+// At 30m the step (30s) plus one scrape interval (15s) still lands well
+// under defaultCounterWindow, so avg/p95 latency keep exactly the fixed 5m
+// window they've always had — the regression guard for the widening below
+// staying scoped to ranges wide enough to need it.
 func TestStandardTimeseriesQueries_LatencyWindowStaysFixedBelowFiveMinutes(t *testing.T) {
-	for _, step := range []string{"30s", "1m", "5m"} {
+	for _, step := range []string{"30s", "1m"} {
 		queries := standardTimeseriesQueries("posterize", step)
 		assert.Equal(t,
 			`sum(rate(http_server_request_duration_microseconds_sum{service_name="posterize",route!="/health"}[5m]))/sum(rate(http_server_request_duration_microseconds_count{service_name="posterize",route!="/health"}[5m]))`,
@@ -632,22 +632,37 @@ func TestStandardTimeseriesQueries_LatencyWindowStaysFixedBelowFiveMinutes(t *te
 	}
 }
 
+// At 1d the step is exactly defaultCounterWindow (5m) — the case that most
+// directly exercises the left-open-range-vector fix: window == step with no
+// overlap still leaves the boundary gap latencyWindow's doc comment
+// describes, so even here the window must pad past 5m rather than land back
+// on it exactly.
+func TestStandardTimeseriesQueries_LatencyWindowOverlapsOneScrapeIntervalAtTheFiveMinuteStep(t *testing.T) {
+	queries := standardTimeseriesQueries("posterize", "5m")
+	assert.Equal(t,
+		`sum(rate(http_server_request_duration_microseconds_sum{service_name="posterize",route!="/health"}[5m15s]))/sum(rate(http_server_request_duration_microseconds_count{service_name="posterize",route!="/health"}[5m15s]))`,
+		queries["avg_duration_us"])
+	assert.Equal(t,
+		`histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name="posterize",route!="/health"}[5m15s])))`,
+		queries["p95_duration_us"])
+}
+
 // At 7d the step is 1h (models.go's GetTimeRangeConfig) — wider than the
 // fixed 5m window avg/p95 latency used to carry unconditionally. A rate()
 // evaluated once per hour against a 5m lookback only ever sees the last five
 // minutes of each hour, so a service without near-continuous traffic —
 // posterize, sampled a handful of times a day — showed a flat 0 across the
 // whole chart despite every one of those requests genuinely landing in the
-// histogram. The window now tracks the step past 5m, the same fix already
-// applied to request_count/error_count in this function and to container
-// restarts in container_handlers.go.
+// histogram. The window now tracks the step (plus one scrape interval) past
+// 5m, the same fix already applied to request_count/error_count in this
+// function and to container restarts in container_handlers.go.
 func TestStandardTimeseriesQueries_LatencyWindowWidensPastFiveMinutes(t *testing.T) {
 	queries := standardTimeseriesQueries("posterize", "1h")
 	assert.Equal(t,
-		`sum(rate(http_server_request_duration_microseconds_sum{service_name="posterize",route!="/health"}[1h]))/sum(rate(http_server_request_duration_microseconds_count{service_name="posterize",route!="/health"}[1h]))`,
+		`sum(rate(http_server_request_duration_microseconds_sum{service_name="posterize",route!="/health"}[1h0m15s]))/sum(rate(http_server_request_duration_microseconds_count{service_name="posterize",route!="/health"}[1h0m15s]))`,
 		queries["avg_duration_us"])
 	assert.Equal(t,
-		`histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name="posterize",route!="/health"}[1h])))`,
+		`histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name="posterize",route!="/health"}[1h0m15s])))`,
 		queries["p95_duration_us"])
 }
 
@@ -662,21 +677,27 @@ func TestStandardTimeseriesQueries_RequestRateStaysFixedWhileLatencyWidens(t *te
 		queries["request_rate"])
 }
 
-func TestLatencyWindow_WidensOnlyPastFiveMinutes(t *testing.T) {
+func TestLatencyWindow_PadsStepByOneScrapeIntervalPastFiveMinutes(t *testing.T) {
 	assert.Equal(t, "5m", latencyWindow("30s"))
-	assert.Equal(t, "5m", latencyWindow("5m"))
-	assert.Equal(t, "1h", latencyWindow("1h"))
+	assert.Equal(t, "5m", latencyWindow("1m"))
+	// step + scrapeInterval (5m15s) is the first value that actually exceeds
+	// the 5m floor, so this is the boundary: step alone (5m) would not have
+	// widened anything, but the left-open range vector gap it leaves is real
+	// regardless of how the 5m arrived.
+	assert.Equal(t, "5m15s", latencyWindow("5m"))
+	assert.Equal(t, "1h0m15s", latencyWindow("1h"))
 	// An unparsable step (not one GetTimeRangeConfig produces) must not
 	// propagate a broken duration string into a PromQL query.
 	assert.Equal(t, "5m", latencyWindow("not-a-duration"))
 }
 
 // End to end through the handler: the 7d range's avg/p95 latency queries
-// carry the widened 1h window, and the mock only answers that exact query
-// string — a window that stayed hardcoded at 5m would miss the mock's
+// carry the widened 1h0m15s window, and the mock only answers that exact
+// query string — a window that stayed hardcoded at 5m, or that widened to
+// bare step without the scrape-interval overlap, would miss the mock's
 // fixture and the series would come back empty.
 func TestMetricsHandler_GetServiceMetricsTimeSeries_P95LatencyWidensWithTheRangesStep(t *testing.T) {
-	p95Query := `histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name="posterize",route!="/health"}[1h])))`
+	p95Query := `histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name="posterize",route!="/health"}[1h0m15s])))`
 	handler := &MetricsHandler{
 		promClient: &mockPrometheusClient{
 			queryRangeResponses: map[string]*QueryResponse{

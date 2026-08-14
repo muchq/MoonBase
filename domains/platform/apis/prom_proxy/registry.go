@@ -613,11 +613,25 @@ func standardTimeseriesQueries(service, step string) map[string]string {
 	}
 }
 
+// The Prometheus scrape interval configured in
+// deploy/consolidated/o11y/prometheus.yml. Every server_pal/aura/yodel
+// emitter is scraped at the same interval, so one constant covers the fleet.
+const scrapeInterval = 15 * time.Second
+
 // latencyWindow is the rate() lookback avg_duration_us and p95_duration_us
-// use in a timeseries chart: defaultCounterWindow (5m), widened to the
-// chart's own step whenever that step is the larger of the two. Never
-// narrower than 5m, so the 30s step at 30m and the 5m step at 1d see the
-// same window they always have; only 7d's 1h step changes anything.
+// use in a timeseries chart: at least defaultCounterWindow (5m), widened to
+// the chart's own step plus one scrape interval whenever that sum is larger.
+//
+// The +scrapeInterval matters even once step alone already clears 5m.
+// Prometheus range vectors are left-open — (T-window, T] — so a request
+// landing just after a window's left boundary but before that window's
+// first scrape sample is invisible to rate() there, and the previous window
+// ended before the request happened at all: a boundary gap a window equal
+// to exactly step leaves open regardless of how wide step is. Padding by one
+// scrape interval past step closes it (the shape Grafana's $__rate_interval
+// uses for the same reason, though this repo has no Grafana dependency to
+// lean on — see
+// https://prometheus.io/docs/prometheus/latest/querying/basics/#range-vector-selectors).
 //
 // An unparsable step (never produced by GetTimeRangeConfig, but this has no
 // other caller to lean on that) falls back to defaultCounterWindow rather
@@ -627,8 +641,9 @@ func latencyWindow(step string) string {
 	if err != nil {
 		return defaultCounterWindow
 	}
-	if stepDuration <= 5*time.Minute {
+	widened := stepDuration + scrapeInterval
+	if widened <= 5*time.Minute {
 		return defaultCounterWindow
 	}
-	return step
+	return widened.String()
 }
