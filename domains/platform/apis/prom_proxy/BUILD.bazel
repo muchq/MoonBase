@@ -29,6 +29,7 @@ go_test(
         "handlers_test.go",
         "models_test.go",
         "prometheus_client_test.go",
+        "registry_test.go",
         "service_handlers_test.go",
     ],
     embed = [":prom_proxy_lib"],
