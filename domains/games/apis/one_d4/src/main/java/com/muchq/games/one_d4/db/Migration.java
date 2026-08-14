@@ -10,126 +10,12 @@ import org.slf4j.LoggerFactory;
 public class Migration {
   private static final Logger LOG = LoggerFactory.getLogger(Migration.class);
 
-  private static final String H2_INDEXING_REQUESTS =
-      """
-      CREATE TABLE IF NOT EXISTS indexing_requests (
-          id             UUID DEFAULT random_uuid() PRIMARY KEY,
-          player         VARCHAR(255) NOT NULL,
-          platform       VARCHAR(50) NOT NULL,
-          start_month    VARCHAR(7) NOT NULL,
-          end_month      VARCHAR(7) NOT NULL,
-          status         VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-          created_at     TIMESTAMP NOT NULL DEFAULT current_timestamp(),
-          updated_at     TIMESTAMP NOT NULL DEFAULT current_timestamp(),
-          error_message  TEXT,
-          games_indexed  INT DEFAULT 0,
-          exclude_bullet BOOLEAN NOT NULL DEFAULT FALSE
-      )
-      """;
-
-  private static final String H2_GAME_FEATURES =
-      """
-      CREATE TABLE IF NOT EXISTS game_features (
-          id            UUID DEFAULT random_uuid() PRIMARY KEY,
-          request_id    UUID NOT NULL REFERENCES indexing_requests(id),
-          game_url      VARCHAR(1024) NOT NULL UNIQUE,
-          platform      VARCHAR(50) NOT NULL,
-          white_username VARCHAR(255),
-          black_username VARCHAR(255),
-          white_elo     INT,
-          black_elo     INT,
-          white_title   VARCHAR(10),
-          black_title   VARCHAR(10),
-          time_class    VARCHAR(50),
-          eco           VARCHAR(10),
-          opening_name  VARCHAR(255),
-          opening_family VARCHAR(255),
-          result        VARCHAR(20),
-          played_at     TIMESTAMP,
-          num_moves     INT,
-          indexed_at    TIMESTAMP NOT NULL DEFAULT current_timestamp(),
-          pgn           TEXT
-      )
-      """;
-
-  private static final String H2_INDEXED_PERIODS =
-      """
-      CREATE TABLE IF NOT EXISTS indexed_periods (
-          id             UUID DEFAULT random_uuid() PRIMARY KEY,
-          player         VARCHAR(255) NOT NULL,
-          platform       VARCHAR(50) NOT NULL,
-          year_month     VARCHAR(7) NOT NULL,
-          fetched_at     TIMESTAMP NOT NULL,
-          is_complete    BOOLEAN NOT NULL,
-          games_count    INT NOT NULL,
-          exclude_bullet BOOLEAN NOT NULL DEFAULT FALSE,
-          CONSTRAINT indexed_periods_unique UNIQUE (player, platform, year_month, exclude_bullet)
-      )
-      """;
-
-  private static final String PG_INDEXING_REQUESTS =
-      """
-      CREATE TABLE IF NOT EXISTS indexing_requests (
-          id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          player         VARCHAR(255) NOT NULL,
-          platform       VARCHAR(50) NOT NULL,
-          start_month    VARCHAR(7) NOT NULL,
-          end_month      VARCHAR(7) NOT NULL,
-          status         VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-          created_at     TIMESTAMP NOT NULL DEFAULT now(),
-          updated_at     TIMESTAMP NOT NULL DEFAULT now(),
-          error_message  TEXT,
-          games_indexed  INT DEFAULT 0,
-          exclude_bullet BOOLEAN NOT NULL DEFAULT FALSE
-      )
-      """;
-
-  private static final String PG_GAME_FEATURES =
-      """
-      CREATE TABLE IF NOT EXISTS game_features (
-          id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          request_id    UUID NOT NULL REFERENCES indexing_requests(id),
-          game_url      VARCHAR(1024) NOT NULL UNIQUE,
-          platform      VARCHAR(50) NOT NULL,
-          white_username VARCHAR(255),
-          black_username VARCHAR(255),
-          white_elo     INT,
-          black_elo     INT,
-          white_title   VARCHAR(10),
-          black_title   VARCHAR(10),
-          time_class    VARCHAR(50),
-          eco           VARCHAR(10),
-          opening_name  VARCHAR(255),
-          opening_family VARCHAR(255),
-          result        VARCHAR(20),
-          played_at     TIMESTAMP,
-          num_moves     INT,
-          indexed_at    TIMESTAMP NOT NULL DEFAULT now(),
-          pgn           TEXT
-      )
-      """;
-
-  private static final String PG_INDEXED_PERIODS =
-      """
-      CREATE TABLE IF NOT EXISTS indexed_periods (
-          id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          player         VARCHAR(255) NOT NULL,
-          platform       VARCHAR(50) NOT NULL,
-          year_month     VARCHAR(7) NOT NULL,
-          fetched_at     TIMESTAMP NOT NULL,
-          is_complete    BOOLEAN NOT NULL,
-          games_count    INT NOT NULL,
-          exclude_bullet BOOLEAN NOT NULL DEFAULT FALSE,
-          CONSTRAINT indexed_periods_unique UNIQUE (player, platform, year_month, exclude_bullet)
-      )
-      """;
-
   private final DataSource dataSource;
-  private final boolean useH2;
+  private final SqlDialect dialect;
 
-  public Migration(DataSource dataSource, boolean useH2) {
+  public Migration(DataSource dataSource, SqlDialect dialect) {
     this.dataSource = dataSource;
-    this.useH2 = useH2;
+    this.dialect = dialect;
   }
 
   private static final String ADD_EXCLUDE_BULLET_COLUMN =
@@ -144,27 +30,10 @@ public class Migration {
   private static final String ADD_INDEXED_PERIODS_EXCLUDE_BULLET_COLUMN =
       "ALTER TABLE indexed_periods ADD COLUMN IF NOT EXISTS exclude_bullet BOOLEAN NOT NULL"
           + " DEFAULT FALSE";
-  private static final String DROP_INDEXED_PERIODS_OLD_UNIQUE_PG =
-      "ALTER TABLE indexed_periods DROP CONSTRAINT IF EXISTS"
-          + " indexed_periods_player_platform_year_month_key";
-  private static final String ADD_INDEXED_PERIODS_UNIQUE_H2 =
-      "ALTER TABLE indexed_periods ADD CONSTRAINT IF NOT EXISTS indexed_periods_unique"
-          + " UNIQUE (player, platform, year_month, exclude_bullet)";
-  private static final String ADD_INDEXED_PERIODS_UNIQUE_PG =
-      """
-      DO $$ BEGIN
-        ALTER TABLE indexed_periods ADD CONSTRAINT indexed_periods_unique
-          UNIQUE (player, platform, year_month, exclude_bullet);
-      EXCEPTION WHEN duplicate_table OR duplicate_object THEN NULL;
-      END $$\
-      """;
-
   private static final String ADD_INDEXED_AT_COLUMN =
       "ALTER TABLE game_features ADD COLUMN IF NOT EXISTS indexed_at TIMESTAMP NOT NULL DEFAULT"
           + " now()";
-  private static final String DROP_MOTIFS_JSON_COLUMN_H2 =
-      "ALTER TABLE game_features DROP COLUMN IF EXISTS motifs_json";
-  private static final String DROP_MOTIFS_JSON_COLUMN_PG =
+  private static final String DROP_MOTIFS_JSON_COLUMN =
       "ALTER TABLE game_features DROP COLUMN IF EXISTS motifs_json";
 
   // Drop has_* boolean motif columns — queries now use motif_occurrences directly.
@@ -356,32 +225,6 @@ public class Migration {
     "ALTER TABLE indexing_requests ADD COLUMN IF NOT EXISTS attempts INT DEFAULT 0",
   };
 
-  /**
-   * What {@code claimNext} scans: the oldest live row nobody currently holds, on a query every
-   * instance runs every few seconds. Ordered by {@code created_at} because the queue it replaces
-   * was FIFO, and a poller that skipped ahead would starve the front under sustained load.
-   *
-   * <p>Partial on Postgres, and that is not a preference. Postgres before 17 cannot emit btree
-   * output already ordered on a trailing column when the leading one sits under a {@code
-   * ScalarArrayOp}, which {@code status IN (...)} is — so a composite {@code (status, created_at)}
-   * is never chosen, and forcing it still produces a full top-N sort of every live row. Measured at
-   * 200k rows with 10k live, the partial index planned three orders of magnitude cheaper. Worth
-   * pinning explicitly because CI runs {@code postgres:18}, where ordered SAOP scans do exist and
-   * the composite would have looked perfectly healthy.
-   */
-  private static final String CREATE_IDX_REQUESTS_CLAIMABLE_PG =
-      "CREATE INDEX IF NOT EXISTS idx_indexing_requests_claimable"
-          + " ON indexing_requests(created_at) WHERE status IN ('PENDING', 'PROCESSING')";
-
-  /**
-   * The same index for H2, which has no partial indexes. The composite is what a partial index
-   * approximates there, and H2 is the test engine rather than the deployment target, so the cost of
-   * it being the weaker plan is a slower test rather than a slower production poll.
-   */
-  private static final String CREATE_IDX_REQUESTS_CLAIMABLE_H2 =
-      "CREATE INDEX IF NOT EXISTS idx_indexing_requests_claimable"
-          + " ON indexing_requests(status, created_at)";
-
   // The retention sweep's anti-join (deleteOlderThan) filters indexing_requests on an hourly
   // schedule by "does any game still point at me". Without this, EXPLAIN shows a hash anti-join
   // over a sequential scan of game_features — the largest table in the schema. Neither engine
@@ -401,52 +244,8 @@ public class Migration {
       "CREATE INDEX IF NOT EXISTS idx_game_features_played_at"
           + " ON game_features(played_at DESC, game_url ASC)";
 
-  /**
-   * The indexes behind username search (#1313 item 10). Two compiler paths emit the same
-   * case-folded predicate shape, {@code LOWER(white_username) = LOWER(?)} OR'd across the sides:
-   * the browse UI's username search compiles {@code white.username = "x" OR black.username = "x"}
-   * through the STRING_COLUMNS equality branch — the highest-traffic consumer — and every
-   * perspective-field query runs the participation guard. Case-folded on <em>both</em> sides, so a
-   * plain column index can never serve either on Postgres: these are expression indexes on {@code
-   * LOWER(...)}. One per side rather than any composite — an OR across two columns is answered by a
-   * BitmapOr of two independent scans, and a BitmapOr's output is unordered, so a composite with
-   * {@code played_at} could not skip the sort either; it would only double index weight on the
-   * hottest-write table.
-   *
-   * <p>Without them these predicates were the full-table scan on the player-search path — and with
-   * a 5-connection pool, five concurrent player searches held every connection for the full
-   * serving-read bound. (Not the last table walk in the schema: an unscoped {@code /v1/aggregate}
-   * GROUP BY legitimately reads the corpus.) {@code PostgresPlayerIndexTest} pins the contract on
-   * the deployment dialect for both emitting paths: the plan actually reaches these indexes for the
-   * compiler's exact predicates, so either side drifting (a compiler path losing its {@code LOWER},
-   * or an index expression changing) fails a test.
-   *
-   * <p>Ops note, same as every index here: created at boot without {@code CONCURRENTLY}, so the
-   * first deploy onto a populated table holds a SHARE lock for the build and pauses the indexer's
-   * writes; later boots are IF NOT EXISTS no-ops. (CONCURRENTLY + IF NOT EXISTS would be worse — a
-   * failed build leaves an INVALID index behind that IF NOT EXISTS then skips forever.)
-   */
-  private static final String[] CREATE_IDX_GAME_FEATURES_USERNAMES_PG = {
-    "CREATE INDEX IF NOT EXISTS idx_game_features_white_username"
-        + " ON game_features(LOWER(white_username))",
-    "CREATE INDEX IF NOT EXISTS idx_game_features_black_username"
-        + " ON game_features(LOWER(black_username))",
-  };
-
-  /**
-   * The same names on H2, which has no expression indexes — and a plain column index cannot serve a
-   * {@code LOWER(...)} predicate there for exactly the reason the Postgres javadoc gives, so on H2
-   * these are pure write cost, not a weaker plan. They are carried anyway so the migration path
-   * stays identical on both engines and the H2 suite can pin their existence. The only H2
-   * deployment is the MCP server's boot-scoped in-memory store, where a handful of rows makes both
-   * the missing plan and the extra writes negligible.
-   */
-  private static final String[] CREATE_IDX_GAME_FEATURES_USERNAMES_H2 = {
-    "CREATE INDEX IF NOT EXISTS idx_game_features_white_username"
-        + " ON game_features(white_username)",
-    "CREATE INDEX IF NOT EXISTS idx_game_features_black_username"
-        + " ON game_features(black_username)",
-  };
+  // Username expression indexes live on PostgresSqlDialect; H2 plain-column stand-ins on
+  // H2SqlDialect. PostgresPlayerIndexTest pins the Postgres contract.
 
   /**
    * The index behind the retention delete (#1313 item 11). {@code deleteOlderThan} filters {@code
@@ -461,18 +260,6 @@ public class Migration {
   private static final String CREATE_IDX_GAME_FEATURES_INDEXED_AT =
       "CREATE INDEX IF NOT EXISTS idx_game_features_indexed_at ON game_features(indexed_at)";
 
-  private static final String ADD_DEDUPE_KEY_UNIQUE_H2 =
-      "ALTER TABLE indexing_requests ADD CONSTRAINT IF NOT EXISTS indexing_requests_dedupe_unique"
-          + " UNIQUE (dedupe_key)";
-  private static final String ADD_DEDUPE_KEY_UNIQUE_PG =
-      """
-      DO $$ BEGIN
-        ALTER TABLE indexing_requests ADD CONSTRAINT indexing_requests_dedupe_unique
-          UNIQUE (dedupe_key);
-      EXCEPTION WHEN duplicate_table OR duplicate_object THEN NULL;
-      END $$\
-      """;
-
   // Opening name/family (derived from the chess.com ECOUrl) and player titles. Existing rows get
   // NULL until the affected periods are reindexed.
   private static final String[] ADD_OPENING_AND_TITLE_COLUMNS = {
@@ -486,30 +273,15 @@ public class Migration {
     try (Connection conn = dataSource.getConnection();
         Statement stmt = conn.createStatement()) {
 
-      if (useH2) {
-        stmt.execute(H2_INDEXING_REQUESTS);
-        stmt.execute(H2_GAME_FEATURES);
-        stmt.execute(H2_INDEXED_PERIODS);
-      } else {
-        stmt.execute(PG_INDEXING_REQUESTS);
-        stmt.execute(PG_GAME_FEATURES);
-        stmt.execute(PG_INDEXED_PERIODS);
-      }
+      dialect.createCoreTables(stmt);
 
       stmt.execute(ADD_EXCLUDE_BULLET_COLUMN);
       stmt.execute(ADD_INDEXED_PERIODS_EXCLUDE_BULLET_COLUMN);
-      if (!useH2) {
-        stmt.execute(DROP_INDEXED_PERIODS_OLD_UNIQUE_PG);
-      }
-      stmt.execute(useH2 ? ADD_INDEXED_PERIODS_UNIQUE_H2 : ADD_INDEXED_PERIODS_UNIQUE_PG);
+      dialect.migrateIndexedPeriodsUnique(stmt);
       stmt.execute(ADD_INDEXED_AT_COLUMN);
 
       // Drop legacy motifs_json column (replaced by motif_occurrences table)
-      if (useH2) {
-        stmt.execute(DROP_MOTIFS_JSON_COLUMN_H2);
-      } else {
-        stmt.execute(DROP_MOTIFS_JSON_COLUMN_PG);
-      }
+      stmt.execute(DROP_MOTIFS_JSON_COLUMN);
 
       stmt.execute(CREATE_MOTIF_OCCURRENCES);
       stmt.execute(CREATE_IDX_MOTIF_OCC_GAME_URL);
@@ -540,13 +312,10 @@ public class Migration {
       // write it, and the data has to be unique before the constraint can be added.
       stmt.execute(ADD_DEDUPE_KEY_COLUMN);
       stmt.execute(BACKFILL_DEDUPE_KEY);
-      stmt.execute(useH2 ? ADD_DEDUPE_KEY_UNIQUE_H2 : ADD_DEDUPE_KEY_UNIQUE_PG);
+      dialect.addDedupeKeyUnique(stmt);
       stmt.execute(CREATE_IDX_GAME_FEATURES_REQUEST_ID);
       stmt.execute(CREATE_IDX_GAME_FEATURES_PLAYED_AT);
-      for (String create :
-          useH2 ? CREATE_IDX_GAME_FEATURES_USERNAMES_H2 : CREATE_IDX_GAME_FEATURES_USERNAMES_PG) {
-        stmt.execute(create);
-      }
+      dialect.createGameFeatureUsernameIndexes(stmt);
       stmt.execute(CREATE_IDX_GAME_FEATURES_INDEXED_AT);
 
       // Ownership leases.
@@ -559,9 +328,9 @@ public class Migration {
       for (String add : ADD_DISPATCH_COLUMNS) {
         stmt.execute(add);
       }
-      stmt.execute(useH2 ? CREATE_IDX_REQUESTS_CLAIMABLE_H2 : CREATE_IDX_REQUESTS_CLAIMABLE_PG);
+      dialect.createClaimableRequestsIndex(stmt);
 
-      LOG.info("Database migration completed successfully (H2={})", useH2);
+      LOG.info("Database migration completed successfully");
     } catch (SQLException e) {
       throw new RuntimeException("Failed to run database migration", e);
     }

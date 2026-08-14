@@ -2,6 +2,7 @@ package com.muchq.games.one_d4.e2e;
 
 import com.muchq.games.one_d4.db.IndexedPeriodDao;
 import com.muchq.games.one_d4.db.IndexedPeriodStore;
+import com.muchq.games.one_d4.db.SqlDialect;
 import io.micronaut.context.annotation.Replaces;
 import jakarta.inject.Singleton;
 import java.time.Instant;
@@ -16,10 +17,8 @@ import org.jdbi.v3.core.Jdbi;
  * armed, the first upsertPeriod call signals {@code upsertReached} then blocks on {@code
  * proceedWithUpsert}, giving the test explicit control over the concurrency window.
  *
- * <p>Takes the module's {@code useH2} bean rather than re-deriving the dialect from {@code
- * indexer.db.url}. A {@code @Value} default that named H2 was how a context with {@code
- * INDEXER_DB_URL} set and the Micronaut property unset got a Postgres {@code DataSource} and an H2
- * dialect on this latch alone — see {@link LatchIndexedPeriodDaoWiringTest}.
+ * <p>Takes the same {@link SqlDialect} the module wires into the production store — not a
+ * {@code @Value} default that named H2. See {@link LatchIndexedPeriodDaoWiringTest}.
  */
 @Singleton
 @Replaces(IndexedPeriodStore.class)
@@ -31,8 +30,8 @@ public class LatchIndexedPeriodDao implements IndexedPeriodStore {
   private volatile CountDownLatch retryReached;
   private volatile CountDownLatch proceedWithRetry;
 
-  public LatchIndexedPeriodDao(Jdbi jdbi, Boolean useH2) {
-    this.delegate = new IndexedPeriodDao(jdbi, useH2);
+  public LatchIndexedPeriodDao(Jdbi jdbi, SqlDialect dialect) {
+    this.delegate = new IndexedPeriodDao(jdbi, dialect);
   }
 
   /**

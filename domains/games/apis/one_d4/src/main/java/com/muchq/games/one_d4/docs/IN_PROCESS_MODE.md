@@ -72,8 +72,10 @@ One external process — the database — and no others. Start it, start the JAR
 
 ### Wiring
 
-There is no mode switch. The database is whatever `INDEXER_DB_URL` names, and the
-dialect is inferred from it:
+There is no mode switch. The database is whatever `INDEXER_DB_URL` names. Production DAOs and
+migrations speak Postgres only — via `PostgresSqlDialect`. Tests that need H2 supply
+`H2SqlDialect` (through `TestDb`, or by replacing the dialect bean when `indexer.db.url` is an H2
+URL); `IndexerModule` itself never selects on H2.
 
 ```java
 @Factory
@@ -85,6 +87,11 @@ public class IndexerModule {
                 jdbcUrl(configuredUrl),
                 System.getenv("INDEXER_DB_USERNAME"),
                 System.getenv("INDEXER_DB_PASSWORD"));
+    }
+
+    @Context
+    public SqlDialect sqlDialect() {
+        return PostgresSqlDialect.INSTANCE;
     }
 
     // Queue is already InMemoryIndexQueue by default — no change needed
@@ -112,8 +119,8 @@ There is no default. `INDEXER_DB_URL` is required, and startup fails without it:
 | `INDEXER_DB_USERNAME` | (unset)                                  | Database username. Unset leaves whatever the URL carries. |
 | `INDEXER_DB_PASSWORD` | (unset)                                  | Database password. Passed as a connection property, so no URL-encoding constraint. |
 
-The DAOs and migrations still carry both dialects and pick one from the URL — that is how the test
-suite runs the production DAOs against H2.
+The DAOs and migrations speak Postgres in production. The H2 dialect is a test-only class
+(`H2SqlDialect`) that the suite wires when it runs those same DAOs against H2.
 
 ## Operational Characteristics
 
@@ -186,9 +193,10 @@ the current setup rather than a sample here.
 
 This is the *only* place H2 appears: it is declared on the test targets that need it and on
 nothing else, so the production dependency closure carries no H2 driver
-(`IndexerModuleTest.h2IsNotOnTheProductionClasspath`). The dialect branches in the DAOs and
-migrations remain, because the tests exercise the production DAOs rather than copies. What that
-buys — and what it costs — is below.
+(`IndexerModuleTest.h2IsNotOnTheProductionClasspath`). The H2 SQL itself lives in
+`H2SqlDialect` under `src/test`, not in the production DAOs or migrations — those take a
+`SqlDialect` and production always passes `PostgresSqlDialect`. What that buys — and what it
+costs — is below.
 
 ## Comparison with Alternatives
 

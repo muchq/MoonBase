@@ -16,6 +16,7 @@ import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.api.dto.ReanalysisResponse;
 import com.muchq.games.one_d4.db.GameFeatureDao;
 import com.muchq.games.one_d4.db.GameFeatureStore;
+import com.muchq.games.one_d4.db.H2SqlDialect;
 import com.muchq.games.one_d4.db.IndexedPeriodDao;
 import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestDao;
@@ -106,8 +107,8 @@ public class ReanalysisE2ETest {
     TestDb testDb = TestDb.create("reanalysis_e2e");
 
     requestStore = new IndexingRequestDao(testDb.jdbi());
-    periodStore = new IndexedPeriodDao(testDb.jdbi(), true);
-    gameFeatureStore = new GameFeatureDao(testDb.jdbi(), true);
+    periodStore = new IndexedPeriodDao(testDb.jdbi(), H2SqlDialect.INSTANCE);
+    gameFeatureStore = new GameFeatureDao(testDb.jdbi(), H2SqlDialect.INSTANCE);
 
     queue = new InMemoryIndexQueue();
     fakeChessClient = new FakeChessClient();

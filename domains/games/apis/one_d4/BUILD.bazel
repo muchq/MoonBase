@@ -77,7 +77,9 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/db/IndexingRequestDao.java",
         "src/main/java/com/muchq/games/one_d4/db/IndexingRequestStore.java",
         "src/main/java/com/muchq/games/one_d4/db/Migration.java",
+        "src/main/java/com/muchq/games/one_d4/db/PostgresSqlDialect.java",
         "src/main/java/com/muchq/games/one_d4/db/RetentionPolicy.java",
+        "src/main/java/com/muchq/games/one_d4/db/SqlDialect.java",
         "src/main/java/com/muchq/games/one_d4/db/StatementTimeouts.java",
     ],
     visibility = ["//visibility:public"],
@@ -693,6 +695,7 @@ java_library(
     name = "test_db",
     testonly = True,
     srcs = [
+        "src/test/java/com/muchq/games/one_d4/db/H2SqlDialect.java",
         "src/test/java/com/muchq/games/one_d4/db/TestDb.java",
     ],
     visibility = ["//visibility:public"],
@@ -710,10 +713,12 @@ java_library(
     testonly = True,
     srcs = [
         "src/test/java/com/muchq/games/one_d4/e2e/FakeChessClient.java",
+        "src/test/java/com/muchq/games/one_d4/e2e/H2TestSqlDialectFactory.java",
         "src/test/java/com/muchq/games/one_d4/e2e/LatchIndexedPeriodDao.java",
     ],
     deps = [
         ":db",
+        ":test_db",
         "//domains/games/libs/chess_com_client",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("io.micronaut:micronaut-context"),

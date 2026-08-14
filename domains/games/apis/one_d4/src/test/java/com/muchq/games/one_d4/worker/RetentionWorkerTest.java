@@ -6,6 +6,7 @@ import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.chessql.parser.Parser;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.db.GameFeatureDao;
+import com.muchq.games.one_d4.db.H2SqlDialect;
 import com.muchq.games.one_d4.db.IndexedPeriodDao;
 import com.muchq.games.one_d4.db.IndexingRequestDao;
 import com.muchq.games.one_d4.db.TestDb;
@@ -30,8 +31,8 @@ public class RetentionWorkerTest {
     TestDb testDb = TestDb.create("retention");
     dataSource = testDb.dataSource();
 
-    dao = new GameFeatureDao(testDb.jdbi(), true);
-    periodDao = new IndexedPeriodDao(testDb.jdbi(), true);
+    dao = new GameFeatureDao(testDb.jdbi(), H2SqlDialect.INSTANCE);
+    periodDao = new IndexedPeriodDao(testDb.jdbi(), H2SqlDialect.INSTANCE);
     requestDao = new IndexingRequestDao(testDb.jdbi());
     worker = new RetentionWorker(dao, periodDao, requestDao);
     requestId = UUID.randomUUID();
@@ -61,8 +62,8 @@ public class RetentionWorkerTest {
     TestDb broken = TestDb.create("retention_broken");
     RetentionWorker brokenWorker =
         new RetentionWorker(
-            new GameFeatureDao(broken.jdbi(), true),
-            new IndexedPeriodDao(broken.jdbi(), true),
+            new GameFeatureDao(broken.jdbi(), H2SqlDialect.INSTANCE),
+            new IndexedPeriodDao(broken.jdbi(), H2SqlDialect.INSTANCE),
             new IndexingRequestDao(broken.jdbi()));
     ((java.io.Closeable) broken.dataSource()).close();
 

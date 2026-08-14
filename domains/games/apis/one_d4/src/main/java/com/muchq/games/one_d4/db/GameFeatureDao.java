@@ -29,35 +29,6 @@ import org.slf4j.LoggerFactory;
 public class GameFeatureDao implements GameFeatureStore {
   private static final Logger LOG = LoggerFactory.getLogger(GameFeatureDao.class);
 
-  private static final String H2_INSERT =
-      """
-      MERGE INTO game_features (
-          request_id, game_url, platform, white_username, black_username,
-          white_elo, black_elo, white_title, black_title, time_class, eco,
-          opening_name, opening_family, result, played_at, num_moves,
-          indexed_at, pgn
-      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      """;
-
-  // On conflict, refresh the derived/enriched columns too so that reindexing a period backfills
-  // titles and opening names on rows indexed before those columns existed.
-  private static final String PG_INSERT =
-      """
-      INSERT INTO game_features (
-          request_id, game_url, platform, white_username, black_username,
-          white_elo, black_elo, white_title, black_title, time_class, eco,
-          opening_name, opening_family, result, played_at, num_moves,
-          indexed_at, pgn
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (game_url) DO UPDATE SET
-          indexed_at = EXCLUDED.indexed_at,
-          request_id = EXCLUDED.request_id,
-          white_title = EXCLUDED.white_title,
-          black_title = EXCLUDED.black_title,
-          opening_name = EXCLUDED.opening_name,
-          opening_family = EXCLUDED.opening_family
-      """;
-
   private static final String FETCH_FOR_REANALYSIS =
       "SELECT request_id, game_url, pgn FROM game_features ORDER BY indexed_at, game_url LIMIT ?"
           + " OFFSET ?";
@@ -135,11 +106,11 @@ public class GameFeatureDao implements GameFeatureStore {
               rs.getString("pgn"));
 
   private final Jdbi jdbi;
-  private final boolean useH2;
+  private final SqlDialect dialect;
   private final Clock clock;
 
-  public GameFeatureDao(Jdbi jdbi, boolean useH2) {
-    this(jdbi, useH2, Clock.systemUTC());
+  public GameFeatureDao(Jdbi jdbi, SqlDialect dialect) {
+    this(jdbi, dialect, Clock.systemUTC());
   }
 
   /**
@@ -147,9 +118,9 @@ public class GameFeatureDao implements GameFeatureStore {
    *     compares that column against a threshold this same clock produces, so both sides have to
    *     come from one source; see {@link #deleteOlderThan}.
    */
-  public GameFeatureDao(Jdbi jdbi, boolean useH2, Clock clock) {
+  public GameFeatureDao(Jdbi jdbi, SqlDialect dialect, Clock clock) {
     this.jdbi = jdbi;
-    this.useH2 = useH2;
+    this.dialect = dialect;
     this.clock = clock;
   }
 
@@ -186,7 +157,7 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   private void insertFeatures(org.jdbi.v3.core.Handle h, List<GameFeature> features) {
-    String sql = useH2 ? H2_INSERT : PG_INSERT;
+    String sql = dialect.insertGameFeature();
     {
       {
         var batch = h.prepareBatch(sql);
