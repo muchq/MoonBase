@@ -104,6 +104,28 @@ checklist, tick the item once merged.
 scope corrections — back into the issue so it stays the source of truth. File
 follow-ups for what you deliberately left out rather than leaving it implicit.
 
+**Commit messages describe the change, not the process that produced it.**
+State what changed and why a future reader would care — not a narrated account
+of the session: no mutation-check kill lists, no "written before the change and
+observed red", no confession that the review panel didn't run. That material is
+real and belongs somewhere, but the somewhere is the PR description or the
+tests themselves, not a message that ships into permanent history.
+
+The receipt is 4a059fc: four squashed commits, each running several
+paragraphs, re-deriving tradeoffs the diff already shows, quoting
+`scripts/mutation-check` kill output verbatim, and reporting mid-message that
+the review panel hadn't run. None of that is wrong to *know* — the panel
+status belongs in the PR thread (see Review panel, below); the mutation kills
+belong in the PR body per "Answer review questions with tests, not
+paragraphs." A commit message that tries to be the record of everything ends
+up worse at being any one of them: a `git log` reader wants what the commit
+does, not the essay that led there.
+
+Aim for what the diff needs: a one-line summary, and — only if the "why" isn't
+already obvious from the code and tests — a short paragraph. If that paragraph
+keeps growing, that's a sign the *change* should have been split, not that the
+message needs more room.
+
 ## Review panel
 
 Before committing anything non-trivial, run a self-review panel:
