@@ -616,6 +616,96 @@ func TestStandardTimeseriesQueries_LatencyAndActiveHaveNoCountForm(t *testing.T)
 	}
 }
 
+// At 30m and 1d the step (30s, 5m) never exceeds defaultCounterWindow, so
+// avg/p95 latency keep exactly the fixed 5m window they've always had —
+// this is the regression guard for the widening below staying scoped to
+// wide ranges only.
+func TestStandardTimeseriesQueries_LatencyWindowStaysFixedBelowFiveMinutes(t *testing.T) {
+	for _, step := range []string{"30s", "1m", "5m"} {
+		queries := standardTimeseriesQueries("posterize", step)
+		assert.Equal(t,
+			`sum(rate(http_server_request_duration_microseconds_sum{service_name="posterize",route!="/health"}[5m]))/sum(rate(http_server_request_duration_microseconds_count{service_name="posterize",route!="/health"}[5m]))`,
+			queries["avg_duration_us"], "step %q", step)
+		assert.Equal(t,
+			`histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name="posterize",route!="/health"}[5m])))`,
+			queries["p95_duration_us"], "step %q", step)
+	}
+}
+
+// At 7d the step is 1h (models.go's GetTimeRangeConfig) — wider than the
+// fixed 5m window avg/p95 latency used to carry unconditionally. A rate()
+// evaluated once per hour against a 5m lookback only ever sees the last five
+// minutes of each hour, so a service without near-continuous traffic —
+// posterize, sampled a handful of times a day — showed a flat 0 across the
+// whole chart despite every one of those requests genuinely landing in the
+// histogram. The window now tracks the step past 5m, the same fix already
+// applied to request_count/error_count in this function and to container
+// restarts in container_handlers.go.
+func TestStandardTimeseriesQueries_LatencyWindowWidensPastFiveMinutes(t *testing.T) {
+	queries := standardTimeseriesQueries("posterize", "1h")
+	assert.Equal(t,
+		`sum(rate(http_server_request_duration_microseconds_sum{service_name="posterize",route!="/health"}[1h]))/sum(rate(http_server_request_duration_microseconds_count{service_name="posterize",route!="/health"}[1h]))`,
+		queries["avg_duration_us"])
+	assert.Equal(t,
+		`histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name="posterize",route!="/health"}[1h])))`,
+		queries["p95_duration_us"])
+}
+
+// request_rate is deliberately untouched by the widening: it already has a
+// count-form sibling (request_count) that tracks the step, and toggling
+// between the two is how that chart avoids the blind spot — unlike
+// avg/p95 latency, which have no alternate form to fall back on.
+func TestStandardTimeseriesQueries_RequestRateStaysFixedWhileLatencyWidens(t *testing.T) {
+	queries := standardTimeseriesQueries("posterize", "1h")
+	assert.Equal(t,
+		`sum(rate(http_server_requests_total{service_name="posterize",route!="/health"}[5m]))`,
+		queries["request_rate"])
+}
+
+func TestLatencyWindow_WidensOnlyPastFiveMinutes(t *testing.T) {
+	assert.Equal(t, "5m", latencyWindow("30s"))
+	assert.Equal(t, "5m", latencyWindow("5m"))
+	assert.Equal(t, "1h", latencyWindow("1h"))
+	// An unparsable step (not one GetTimeRangeConfig produces) must not
+	// propagate a broken duration string into a PromQL query.
+	assert.Equal(t, "5m", latencyWindow("not-a-duration"))
+}
+
+// End to end through the handler: the 7d range's avg/p95 latency queries
+// carry the widened 1h window, and the mock only answers that exact query
+// string — a window that stayed hardcoded at 5m would miss the mock's
+// fixture and the series would come back empty.
+func TestMetricsHandler_GetServiceMetricsTimeSeries_P95LatencyWidensWithTheRangesStep(t *testing.T) {
+	p95Query := `histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name="posterize",route!="/health"}[1h])))`
+	handler := &MetricsHandler{
+		promClient: &mockPrometheusClient{
+			queryRangeResponses: map[string]*QueryResponse{
+				p95Query: rangeResponse("p95_duration_us"),
+			},
+		},
+	}
+
+	req := httptest.NewRequest("GET", "/metrics/v1/service/posterize/timeseries/7d", nil)
+	req.SetPathValue("name", "posterize")
+	req.SetPathValue("range", "7d")
+	w := httptest.NewRecorder()
+
+	handler.GetServiceMetricsTimeSeries(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response TimeSeriesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+	var p95 *TimeSeries
+	for i := range response.Series {
+		if response.Series[i].MetricName == "p95_duration_us" {
+			p95 = &response.Series[i]
+		}
+	}
+	require.NotNil(t, p95, "p95_duration_us missing from the response")
+	require.Len(t, p95.Values, 2, "the mock's fixture didn't answer — the handler built a different query than expected")
+}
+
 func TestMetricsHandler_GetServiceMetricsTimeSeries_RequestCountBucketsByTheRangesStep(t *testing.T) {
 	countQuery := `sum(increase(http_server_requests_total{service_name="golf_hub",route!="/health"}[1h]))`
 	handler := &MetricsHandler{

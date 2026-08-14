@@ -1,6 +1,9 @@
 package prom_proxy
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // The service registry behind the dashboard overhaul (#1199): the catalog
 // endpoint, the standard http_server_* block, and each service's custom
@@ -585,15 +588,47 @@ func standardScalarQueries(service string) []struct {
 // rates rather than a windowed read of one counter. A failure count is the
 // closest counter-derived analogue, the same relationship request_count has
 // to request_rate.
+//
+// avg_duration_us and p95_duration_us track the step too, unlike
+// request_rate: a fixed 5m rate() window is fine when the chart's points are
+// closer together than 5m (30m and 1d both are), but at 7d the step is 1h —
+// a rate() evaluated once per hour then only ever sees the last five minutes
+// of it, the same blind spot restarts' window comment in
+// container_handlers.go describes for changes(). A service without
+// near-continuous traffic — posterize, sampled a handful of times a day —
+// showed a flat 0 in every bucket despite the histogram genuinely recording
+// every one of those requests. latencyWindow keeps the existing 5m for the
+// finer ranges and only widens it where the step already exceeds it.
 func standardTimeseriesQueries(service, step string) map[string]string {
 	s := fmt.Sprintf("%q", service)
+	w := latencyWindow(step)
 	return map[string]string{
 		"request_rate":       `sum(rate(http_server_requests_total{service_name=` + s + probeFilter + `}[5m]))`,
 		"request_count":      `sum(increase(http_server_requests_total{service_name=` + s + probeFilter + `}[` + step + `]))`,
 		"error_rate_percent": `sum(rate(http_server_requests_failure_total{service_name=` + s + probeFilter + `}[5m]))/(sum(rate(http_server_requests_success_total{service_name=` + s + probeFilter + `}[5m]))+sum(rate(http_server_requests_failure_total{service_name=` + s + probeFilter + `}[5m])))*100`,
 		"error_count":        `sum(increase(http_server_requests_failure_total{service_name=` + s + probeFilter + `}[` + step + `]))`,
-		"avg_duration_us":    `sum(rate(http_server_request_duration_microseconds_sum{service_name=` + s + probeFilter + `}[5m]))/sum(rate(http_server_request_duration_microseconds_count{service_name=` + s + probeFilter + `}[5m]))`,
-		"p95_duration_us":    `histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name=` + s + probeFilter + `}[5m])))`,
+		"avg_duration_us":    `sum(rate(http_server_request_duration_microseconds_sum{service_name=` + s + probeFilter + `}[` + w + `]))/sum(rate(http_server_request_duration_microseconds_count{service_name=` + s + probeFilter + `}[` + w + `]))`,
+		"p95_duration_us":    `histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name=` + s + probeFilter + `}[` + w + `])))`,
 		"active_requests":    `sum(http_server_requests_active_gauge{service_name=` + s + probeFilter + `})`,
 	}
+}
+
+// latencyWindow is the rate() lookback avg_duration_us and p95_duration_us
+// use in a timeseries chart: defaultCounterWindow (5m), widened to the
+// chart's own step whenever that step is the larger of the two. Never
+// narrower than 5m, so the 30s step at 30m and the 5m step at 1d see the
+// same window they always have; only 7d's 1h step changes anything.
+//
+// An unparsable step (never produced by GetTimeRangeConfig, but this has no
+// other caller to lean on that) falls back to defaultCounterWindow rather
+// than propagating a broken duration string into three PromQL queries.
+func latencyWindow(step string) string {
+	stepDuration, err := time.ParseDuration(step)
+	if err != nil {
+		return defaultCounterWindow
+	}
+	if stepDuration <= 5*time.Minute {
+		return defaultCounterWindow
+	}
+	return step
 }
