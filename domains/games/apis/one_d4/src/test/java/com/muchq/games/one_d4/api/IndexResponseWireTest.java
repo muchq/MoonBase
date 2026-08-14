@@ -88,8 +88,9 @@ public class IndexResponseWireTest {
 
     String body = pollUntilCompleted(id);
 
-    // FakeChessClient has no games stubbed, so the month indexes as empty — and an empty month
-    // still records a period, which is what keeps this AVAILABLE rather than EXPIRED.
+    // FakeChessClient defaults to an empty archive (HTTP 200), so the month indexes as empty —
+    // and an empty month still records a period, which is what keeps this AVAILABLE rather than
+    // EXPIRED.
     assertThat(body).contains("\"status\":\"COMPLETED\"");
     assertThat(body).contains("\"data\":");
     assertThat(body).contains("\"status\":\"AVAILABLE\"");
