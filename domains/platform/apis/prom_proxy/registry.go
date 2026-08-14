@@ -591,14 +591,16 @@ func standardScalarQueries(service string) []struct {
 //
 // avg_duration_us and p95_duration_us track the step too, unlike
 // request_rate: a fixed 5m rate() window is fine when the chart's points are
-// closer together than 5m (30m and 1d both are), but at 7d the step is 1h —
-// a rate() evaluated once per hour then only ever sees the last five minutes
+// closer together than 5m (30m's 30s step is), but at 7d the step is 1h — a
+// rate() evaluated once per hour then only ever sees the last five minutes
 // of it, the same blind spot restarts' window comment in
 // container_handlers.go describes for changes(). A service without
 // near-continuous traffic — posterize, sampled a handful of times a day —
 // showed a flat 0 in every bucket despite the histogram genuinely recording
-// every one of those requests. latencyWindow keeps the existing 5m for the
-// finer ranges and only widens it where the step already exceeds it.
+// every one of those requests. latencyWindow keeps 5m as a floor and widens
+// past it once step plus one scrape interval exceeds it — which, at 1d's 5m
+// step, is true too: see latencyWindow's own comment for why the padding
+// matters even when step alone wouldn't have widened anything.
 func standardTimeseriesQueries(service, step string) map[string]string {
 	s := fmt.Sprintf("%q", service)
 	w := latencyWindow(step)
@@ -626,12 +628,10 @@ const scrapeInterval = 15 * time.Second
 // Prometheus range vectors are left-open — (T-window, T] — so a request
 // landing just after a window's left boundary but before that window's
 // first scrape sample is invisible to rate() there, and the previous window
-// ended before the request happened at all: a boundary gap a window equal
-// to exactly step leaves open regardless of how wide step is. Padding by one
-// scrape interval past step closes it (the shape Grafana's $__rate_interval
-// uses for the same reason, though this repo has no Grafana dependency to
-// lean on — see
-// https://prometheus.io/docs/prometheus/latest/querying/basics/#range-vector-selectors).
+// ended before the request happened at all: a window equal to exactly step
+// leaves that boundary gap open regardless of how wide step is. Padding by
+// one scrape interval past step closes it. See
+// https://prometheus.io/docs/prometheus/latest/querying/basics/#range-vector-selectors.
 //
 // An unparsable step (never produced by GetTimeRangeConfig, but this has no
 // other caller to lean on that) falls back to defaultCounterWindow rather
