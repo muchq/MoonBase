@@ -1,20 +1,32 @@
+# CLion project view, for the clwb plugin ("Bazel for IntelliJ", CLion build).
+#
+# The plugin generates and owns `.clwb/.bazelproject`; point that file here so
+# this one is the version-controlled source of truth:
+#
+#     import bazel/intellij/clion.bazelproject
+#
+# Scoped to the subtrees that contain C++, since that is what CLion is for.
+# Rust is deliberately absent: clwb has no Rust language class, and the
+# IntelliJ Rust plugin does not read Bazel. Rust files still open and
+# highlight in CLion, but no Bazel target model stands behind them.
+#
+# Directories are listed at tier granularity (`<domain>/{apis,libs,apps}`)
+# rather than per package, on purpose. The narrower the list, the sooner it is
+# wrong: this file previously named top-level `c`, `cpp`, `protos`, and `rust`,
+# none of which have existed since sources moved under `domains/`.
+
 directories:
   bazel
-  c
-  cpp
-  deploy
-  protos
-  rust
+  domains/games/apis
+  domains/games/libs
+  domains/graphics/apis
+  domains/graphics/apps
+  domains/graphics/libs
+  domains/leet/libs
+  domains/platform/libs
 
-# Automatically includes all relevant targets under the 'directories' above
+# Picks up every cc_* target under the directories above.
 derive_targets_from_directories: true
 
 targets:
-  # If source code isn't resolving, add additional targets that compile it here
-
-additional_languages:
-  # Uncomment any additional languages you want supported
-  # dart
-  # javascript
-  # python
-  # typescript
+  # Add a target here if its sources don't resolve after a sync.

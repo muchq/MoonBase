@@ -98,23 +98,75 @@ On a machine with normal egress, ignore all of this and run `bazel`.
 
 ## IDE Support
 
-### IntelliJ IDEA
-Tested with the [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij) plugin.
+Two different JetBrains plugins are in play, and which one you get depends on
+the IDE. They are not interchangeable, and the split is the reason C++ work
+does not belong in IDEA.
 
-Java, Go, and Python targets are well-supported. Add new targets to the [project view](bazel/intellij/universe.bazelproject) if they aren't detected automatically.
+### IntelliJ IDEA — the Bazel plugin, JVM/Go/Python only
 
-### CLion
-C++ and Rust projects work with the [Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij) plugin.
+[Bazel](https://plugins.jetbrains.com/plugin/22977-bazel) (`org.jetbrains.bazel`).
+It generates its project view at `.bazelbsp/.bazelproject`, seeded from
+[`bazel/intellij/universe.bazelproject`](../bazel/intellij/universe.bazelproject);
+add targets there if sources aren't detected automatically.
+
+**This plugin ships no C++ module in the IDEA distribution.** Its language
+modules are Java, Kotlin, Go, Python, and protobuf — there is no `cpp`, `clion`,
+or `cidr` module in `bazel-plugin/lib/modules/`. So no C++ target gets a project
+model in IDEA, and there is no setting that adds one; the C/C++ engine IDEA
+bundles logs `Entry points unavailable` for every `.cc` file in the repo.
+
+The failure is easy to misread, because IDEA still resolves *some* includes.
+With no model, includes are matched against paths under the content root, so
+`#include "domains/games/apis/golf_hub/hub_store.h"` finds a real file and looks
+fine, while anything whose search root only exists in `bazel-out` does not.
+Generated code is the whole of that second category — `#include
+"moonbase/golf/server.h"` resolves only via the `includes` attribute on the
+`cc_library` that wraps the Smithy codegen. The result reads as "generated code
+is invisible" when the truth is that no C++ model exists at all.
+
+### CLion — clwb, for C++
+
+[Bazel for IntelliJ](https://plugins.jetbrains.com/plugin/8609-bazel-for-intellij)
+(`com.google.idea.bazel.clwb`). This is the plugin with the C++ aspect, and it
+is where C++ work in this repo belongs.
+
+Point the plugin's generated `.clwb/.bazelproject` at the version-controlled
+view and re-sync:
+
+```
+import bazel/intellij/clion.bazelproject
+```
+
+Generated sources need no extra configuration. The aspect reads
+`CcInfo.compilation_context`, so an `includes` attribute on the generating
+`cc_library` becomes a header search root in the IDE; sync materializes the
+generated headers themselves. `golf_hub` is the worked example — the
+`smithy_cpp_server_library` macro sets `includes = ["<name>_smithy_gen/include"]`,
+which is what makes `#include "moonbase/golf/server.h"` resolve.
+
+**`.bazelignore` must not list `.clwb`.** The plugin writes its aspect to
+`.clwb/aspects/legacy/` and then passes `--aspects=//.clwb/aspects/legacy:...`.
+Ignoring the directory makes that label unloadable and sync dies with `'.clwb/
+aspects/legacy' is not a package`. Unignoring it costs nothing: the aspect's
+`BUILD` file is empty, so `bazel query //...` returns the same target set either
+way. `.ijwb` stays ignored — its `aspects/BUILD.bazel` calls `define_flag_hack()`
+and would inject real targets.
+
+Rust is not covered. clwb has no Rust language class, and the IntelliJ Rust
+plugin does not read Bazel — Rust sources open and highlight in CLion, but with
+no target model behind them.
 
 ### VSCode
-For C++, [hedronvision/bazel-compile-commands-extractor](https://github.com/hedronvision/bazel-compile-commands-extractor) is recommended for better IntelliSense.
 
-Follow the instructions [here](https://github.com/hedronvision/bazel-compile-commands-extractor#vscode), then run:
+For C++, [hedronvision/bazel-compile-commands-extractor](https://github.com/hedronvision/bazel-compile-commands-extractor)
+gives clangd a compilation database. **It is not currently wired up** —
+`@hedron_compile_commands` is not in `MODULE.bazel`, so the `refresh_all` target
+does not exist and would have to be added first. The `compile_commands.json` at
+the repo root is a stale leftover from before the `domains/` reorg and describes
+a source layout that no longer exists.
 
-```bash
-bazel run @hedron_compile_commands//:refresh_all
-code .
-```
+Note that a compilation database buys nothing in IntelliJ IDEA: nothing there
+consumes it. It is useful to clangd (VSCode, or an LSP client) and to CLion.
 
 ## Importing a project?
 See [IMPORTING.md](./IMPORTING.md) for details on adding new projects to the repository.
