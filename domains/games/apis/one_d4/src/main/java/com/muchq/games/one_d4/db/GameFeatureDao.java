@@ -158,42 +158,38 @@ public class GameFeatureDao implements GameFeatureStore {
 
   private void insertFeatures(org.jdbi.v3.core.Handle h, List<GameFeature> features) {
     String sql = dialect.insertGameFeature();
-    {
-      {
-        var batch = h.prepareBatch(sql);
-        for (GameFeature row : features) {
-          // bindByType, not bind: played_at is nullable, and only the typed form carries
-          // Types.TIMESTAMP into setNull. Plain bind() would fall back to JDBI's untyped-null
-          // default (Types.OTHER) — accepted by both drivers today, but not the column's type.
-          batch
-              .bind(0, row.requestId())
-              .bind(1, row.gameUrl())
-              .bind(2, row.platform())
-              .bind(3, row.whiteUsername())
-              .bind(4, row.blackUsername())
-              .bind(5, (Integer) row.whiteElo())
-              .bind(6, (Integer) row.blackElo())
-              .bind(7, row.whiteTitle())
-              .bind(8, row.blackTitle())
-              .bind(9, row.timeClass())
-              .bind(10, row.eco())
-              .bind(11, row.openingName())
-              .bind(12, row.openingFamily())
-              .bind(13, row.result())
-              .bindByType(14, toUtcWallClock(row.playedAt()), LocalDateTime.class)
-              .bind(15, (Integer) row.numMoves())
-              // Never null: the column is NOT NULL, and a row that slipped through without a
-              // stamp would be undeletable, since `NULL < threshold` is unknown.
-              .bindByType(
-                  16,
-                  toUtcWallClock(row.indexedAt() == null ? clock.instant() : row.indexedAt()),
-                  LocalDateTime.class)
-              .bind(17, row.pgn())
-              .add();
-        }
-        batch.execute();
-      }
+    var batch = h.prepareBatch(sql);
+    for (GameFeature row : features) {
+      // bindByType, not bind: played_at is nullable, and only the typed form carries
+      // Types.TIMESTAMP into setNull. Plain bind() would fall back to JDBI's untyped-null
+      // default (Types.OTHER) — accepted by both drivers today, but not the column's type.
+      batch
+          .bind(0, row.requestId())
+          .bind(1, row.gameUrl())
+          .bind(2, row.platform())
+          .bind(3, row.whiteUsername())
+          .bind(4, row.blackUsername())
+          .bind(5, (Integer) row.whiteElo())
+          .bind(6, (Integer) row.blackElo())
+          .bind(7, row.whiteTitle())
+          .bind(8, row.blackTitle())
+          .bind(9, row.timeClass())
+          .bind(10, row.eco())
+          .bind(11, row.openingName())
+          .bind(12, row.openingFamily())
+          .bind(13, row.result())
+          .bindByType(14, toUtcWallClock(row.playedAt()), LocalDateTime.class)
+          .bind(15, (Integer) row.numMoves())
+          // Never null: the column is NOT NULL, and a row that slipped through without a
+          // stamp would be undeletable, since `NULL < threshold` is unknown.
+          .bindByType(
+              16,
+              toUtcWallClock(row.indexedAt() == null ? clock.instant() : row.indexedAt()),
+              LocalDateTime.class)
+          .bind(17, row.pgn())
+          .add();
     }
+    batch.execute();
   }
 
   /**

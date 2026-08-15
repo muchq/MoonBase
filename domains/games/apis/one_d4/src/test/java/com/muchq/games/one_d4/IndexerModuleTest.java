@@ -165,18 +165,6 @@ public class IndexerModuleTest {
   }
 
   /**
-   * Production wires {@link com.muchq.games.one_d4.db.PostgresSqlDialect} and never a {@code useH2}
-   * flag. H2 SQL lives under {@code src/test}; a Boolean dialect switch in the module is how that
-   * boundary used to leak.
-   */
-  @Test
-  public void indexerModuleDoesNotExposeAUseH2Bean() {
-    assertThatThrownBy(() -> IndexerModule.class.getMethod("useH2", String.class))
-        .as("IndexerModule still declares useH2(String) — production must not select on H2")
-        .isInstanceOf(NoSuchMethodException.class);
-  }
-
-  /**
    * The production DAOs and Migration carry Postgres SQL only. H2's {@code MERGE INTO} is the
    * observable mark of the old in-class dialect branch; its absence here (with {@code ON CONFLICT}
    * present on {@link com.muchq.games.one_d4.db.PostgresSqlDialect} as the control) is what makes
@@ -200,6 +188,21 @@ public class IndexerModuleTest {
     assertThat(postgres)
         .as("PostgresSqlDialect does not name ON CONFLICT, so the absences above prove nothing")
         .contains("ON CONFLICT");
+  }
+
+  @Test
+  public void resolveJdbcUrl_prefersConfiguredProperty() {
+    assertThat(IndexerModule.resolveJdbcUrl("  jdbc:h2:mem:x  ")).isEqualTo("jdbc:h2:mem:x");
+  }
+
+  @Test
+  public void resolveJdbcUrl_fallsThroughToEnvWhenPropertyBlank() {
+    assertThatThrownBy(() -> IndexerModule.resolveJdbcUrl("   "))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("INDEXER_DB_URL");
+    assertThatThrownBy(() -> IndexerModule.resolveJdbcUrl(null))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("INDEXER_DB_URL");
   }
 
   /** The class's own bytes, decoded so that byte-for-byte substrings survive. */

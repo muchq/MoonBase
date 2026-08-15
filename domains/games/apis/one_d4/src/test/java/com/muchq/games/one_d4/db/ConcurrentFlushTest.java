@@ -88,7 +88,7 @@ public class ConcurrentFlushTest {
   public void setUp() {
     testDb = TestDb.create("concurrent_flush");
     dataSource = testDb.dataSource();
-    store = new GameFeatureDao(testDb.jdbi(), H2SqlDialect.INSTANCE);
+    store = new GameFeatureDao(testDb.jdbi(), new H2SqlDialect());
     requestId = insertRequest(OWNER_A, NOW.plus(Duration.ofMinutes(5)));
     pool = Executors.newFixedThreadPool(2);
   }

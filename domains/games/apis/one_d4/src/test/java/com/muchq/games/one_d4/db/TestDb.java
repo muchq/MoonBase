@@ -26,7 +26,7 @@ public final class TestDb {
     // share a database.
     String jdbcUrl = "jdbc:h2:mem:" + name + "_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
     DataSource dataSource = DataSourceFactory.create(jdbcUrl);
-    new Migration(dataSource, H2SqlDialect.INSTANCE).run();
+    new Migration(dataSource, new H2SqlDialect()).run();
     return new TestDb(dataSource, Jdbi.create(dataSource));
   }
 

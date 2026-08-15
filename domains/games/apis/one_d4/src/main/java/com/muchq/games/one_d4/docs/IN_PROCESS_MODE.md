@@ -74,24 +74,30 @@ One external process — the database — and no others. Start it, start the JAR
 
 There is no mode switch. The database is whatever `INDEXER_DB_URL` names. Production DAOs and
 migrations speak Postgres only — via `PostgresSqlDialect`. Tests that need H2 supply
-`H2SqlDialect` (through `TestDb`, or by replacing the dialect bean when `indexer.db.url` is an H2
-URL); `IndexerModule` itself never selects on H2.
+`H2SqlDialect` (through `TestDb`, or via `TestSqlDialectFactory` which reads the same resolved
+JDBC URL bean as the DataSource); `IndexerModule` itself never selects on H2.
 
 ```java
 @Factory
 public class IndexerModule {
 
     @Context
-    public DataSource dataSource(@Value("${indexer.db.url:}") String configuredUrl) {
+    @Named("indexerJdbcUrl")
+    public String indexerJdbcUrl(@Value("${indexer.db.url:}") String configuredUrl) {
+        return resolveJdbcUrl(configuredUrl);
+    }
+
+    @Context
+    public DataSource dataSource(@Named("indexerJdbcUrl") String jdbcUrl) {
         return DataSourceFactory.create(
-                jdbcUrl(configuredUrl),
+                jdbcUrl,
                 System.getenv("INDEXER_DB_USERNAME"),
                 System.getenv("INDEXER_DB_PASSWORD"));
     }
 
     @Context
     public SqlDialect sqlDialect() {
-        return PostgresSqlDialect.INSTANCE;
+        return new PostgresSqlDialect();
     }
 
     // Queue is already InMemoryIndexQueue by default — no change needed

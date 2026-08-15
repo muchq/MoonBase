@@ -125,10 +125,10 @@ public class MotifE2ETest {
     requestStore = new com.muchq.games.one_d4.db.IndexingRequestDao(testDb.jdbi());
     periodStore =
         new com.muchq.games.one_d4.db.IndexedPeriodDao(
-            testDb.jdbi(), com.muchq.games.one_d4.db.H2SqlDialect.INSTANCE);
+            testDb.jdbi(), new com.muchq.games.one_d4.db.H2SqlDialect());
     gameFeatureStore =
         new com.muchq.games.one_d4.db.GameFeatureDao(
-            testDb.jdbi(), com.muchq.games.one_d4.db.H2SqlDialect.INSTANCE);
+            testDb.jdbi(), new com.muchq.games.one_d4.db.H2SqlDialect());
 
     queue = new InMemoryIndexQueue();
     fakeChessClient = new FakeChessClient();

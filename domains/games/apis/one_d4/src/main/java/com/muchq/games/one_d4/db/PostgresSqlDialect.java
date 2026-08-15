@@ -1,13 +1,14 @@
 package com.muchq.games.one_d4.db;
 
-import java.sql.SQLException;
-import java.sql.Statement;
+import java.util.List;
 
 /** The only dialect the service ships. H2 lives under {@code src/test}. */
 public final class PostgresSqlDialect implements SqlDialect {
 
-  public static final PostgresSqlDialect INSTANCE = new PostgresSqlDialect();
-
+  /**
+   * On conflict, refresh the derived/enriched columns too so that reindexing a period backfills
+   * titles and opening names on rows indexed before those columns existed.
+   */
   private static final String INSERT_GAME_FEATURE =
       """
       INSERT INTO game_features (
@@ -114,22 +115,53 @@ public final class PostgresSqlDialect implements SqlDialect {
       END $$\
       """;
 
-  private static final String[] USERNAME_INDEXES = {
-    "CREATE INDEX IF NOT EXISTS idx_game_features_white_username"
-        + " ON game_features(LOWER(white_username))",
-    "CREATE INDEX IF NOT EXISTS idx_game_features_black_username"
-        + " ON game_features(LOWER(black_username))",
-  };
+  /**
+   * The indexes behind username search (#1313 item 10). Two compiler paths emit the same
+   * case-folded predicate shape, {@code LOWER(white_username) = LOWER(?)} OR'd across the sides:
+   * the browse UI's username search compiles {@code white.username = "x" OR black.username = "x"}
+   * through the STRING_COLUMNS equality branch — the highest-traffic consumer — and every
+   * perspective-field query runs the participation guard. Case-folded on <em>both</em> sides, so a
+   * plain column index can never serve either on Postgres: these are expression indexes on {@code
+   * LOWER(...)}. One per side rather than any composite — an OR across two columns is answered by a
+   * BitmapOr of two independent scans, and a BitmapOr's output is unordered, so a composite with
+   * {@code played_at} could not skip the sort either; it would only double index weight on the
+   * hottest-write table.
+   *
+   * <p>Without them these predicates were the full-table scan on the player-search path — and with
+   * a 5-connection pool, five concurrent player searches held every connection for the full
+   * serving-read bound. {@code PostgresPlayerIndexTest} pins the contract on the deployment dialect
+   * for both emitting paths: the plan actually reaches these indexes for the compiler's exact
+   * predicates, so either side drifting (a compiler path losing its {@code LOWER}, or an index
+   * expression changing) fails a test.
+   *
+   * <p>Ops note: created at boot without {@code CONCURRENTLY}, so the first deploy onto a populated
+   * table holds a SHARE lock for the build and pauses the indexer's writes; later boots are IF NOT
+   * EXISTS no-ops. ({@code CONCURRENTLY} + {@code IF NOT EXISTS} would be worse — a failed build
+   * leaves an INVALID index behind that IF NOT EXISTS then skips forever.)
+   */
+  private static final List<String> USERNAME_INDEXES =
+      List.of(
+          "CREATE INDEX IF NOT EXISTS idx_game_features_white_username"
+              + " ON game_features(LOWER(white_username))",
+          "CREATE INDEX IF NOT EXISTS idx_game_features_black_username"
+              + " ON game_features(LOWER(black_username))");
 
   /**
-   * Partial on Postgres: see Migration's claimable-index comment for why the WHERE clause is not a
-   * preference. Measured cheaper than a composite by three orders of magnitude at 200k rows.
+   * What {@code claimNext} scans: the oldest live row nobody currently holds, on a query every
+   * instance runs every few seconds. Ordered by {@code created_at} because the queue it replaces
+   * was FIFO, and a poller that skipped ahead would starve the front under sustained load.
+   *
+   * <p>Partial on Postgres, and that is not a preference. Postgres before 17 cannot emit btree
+   * output already ordered on a trailing column when the leading one sits under a {@code
+   * ScalarArrayOp}, which {@code status IN (...)} is — so a composite {@code (status, created_at)}
+   * is never chosen, and forcing it still produces a full top-N sort of every live row. Measured at
+   * 200k rows with 10k live, the partial index planned three orders of magnitude cheaper. Worth
+   * pinning explicitly because CI runs {@code postgres:18}, where ordered SAOP scans do exist and
+   * the composite would have looked perfectly healthy.
    */
   private static final String CLAIMABLE_INDEX =
       "CREATE INDEX IF NOT EXISTS idx_indexing_requests_claimable"
           + " ON indexing_requests(created_at) WHERE status IN ('PENDING', 'PROCESSING')";
-
-  private PostgresSqlDialect() {}
 
   @Override
   public String insertGameFeature() {
@@ -142,32 +174,27 @@ public final class PostgresSqlDialect implements SqlDialect {
   }
 
   @Override
-  public void createCoreTables(Statement stmt) throws SQLException {
-    stmt.execute(INDEXING_REQUESTS);
-    stmt.execute(GAME_FEATURES);
-    stmt.execute(INDEXED_PERIODS);
+  public List<String> createCoreTables() {
+    return List.of(INDEXING_REQUESTS, GAME_FEATURES, INDEXED_PERIODS);
   }
 
   @Override
-  public void migrateIndexedPeriodsUnique(Statement stmt) throws SQLException {
-    stmt.execute(DROP_INDEXED_PERIODS_OLD_UNIQUE);
-    stmt.execute(ADD_INDEXED_PERIODS_UNIQUE);
+  public List<String> indexedPeriodsUniqueMigration() {
+    return List.of(DROP_INDEXED_PERIODS_OLD_UNIQUE, ADD_INDEXED_PERIODS_UNIQUE);
   }
 
   @Override
-  public void addDedupeKeyUnique(Statement stmt) throws SQLException {
-    stmt.execute(ADD_DEDUPE_KEY_UNIQUE);
+  public String addDedupeKeyUnique() {
+    return ADD_DEDUPE_KEY_UNIQUE;
   }
 
   @Override
-  public void createGameFeatureUsernameIndexes(Statement stmt) throws SQLException {
-    for (String create : USERNAME_INDEXES) {
-      stmt.execute(create);
-    }
+  public List<String> usernameIndexes() {
+    return USERNAME_INDEXES;
   }
 
   @Override
-  public void createClaimableRequestsIndex(Statement stmt) throws SQLException {
-    stmt.execute(CLAIMABLE_INDEX);
+  public String claimableRequestsIndex() {
+    return CLAIMABLE_INDEX;
   }
 }

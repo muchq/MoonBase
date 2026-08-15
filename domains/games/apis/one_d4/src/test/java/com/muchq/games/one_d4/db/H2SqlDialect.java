@@ -1,15 +1,12 @@
 package com.muchq.games.one_d4.db;
 
-import java.sql.SQLException;
-import java.sql.Statement;
+import java.util.List;
 
 /**
  * H2 dialect for the test suite. Production never sees this class — it is under {@code src/test}
- * and wired by {@code TestDb} / {@code H2TestSqlDialectFactory}, not by {@code IndexerModule}.
+ * and wired by {@code TestDb} / {@code TestSqlDialectFactory}, not by {@code IndexerModule}.
  */
 public final class H2SqlDialect implements SqlDialect {
-
-  public static final H2SqlDialect INSTANCE = new H2SqlDialect();
 
   private static final String INSERT_GAME_FEATURE =
       """
@@ -95,19 +92,17 @@ public final class H2SqlDialect implements SqlDialect {
           + " UNIQUE (dedupe_key)";
 
   /** Plain column indexes: H2 has no expression indexes to serve {@code LOWER(...)}. */
-  private static final String[] USERNAME_INDEXES = {
-    "CREATE INDEX IF NOT EXISTS idx_game_features_white_username"
-        + " ON game_features(white_username)",
-    "CREATE INDEX IF NOT EXISTS idx_game_features_black_username"
-        + " ON game_features(black_username)",
-  };
+  private static final List<String> USERNAME_INDEXES =
+      List.of(
+          "CREATE INDEX IF NOT EXISTS idx_game_features_white_username"
+              + " ON game_features(white_username)",
+          "CREATE INDEX IF NOT EXISTS idx_game_features_black_username"
+              + " ON game_features(black_username)");
 
   /** Composite approximates the Postgres partial index; H2 has no partial indexes. */
   private static final String CLAIMABLE_INDEX =
       "CREATE INDEX IF NOT EXISTS idx_indexing_requests_claimable"
           + " ON indexing_requests(status, created_at)";
-
-  private H2SqlDialect() {}
 
   @Override
   public String insertGameFeature() {
@@ -120,31 +115,27 @@ public final class H2SqlDialect implements SqlDialect {
   }
 
   @Override
-  public void createCoreTables(Statement stmt) throws SQLException {
-    stmt.execute(INDEXING_REQUESTS);
-    stmt.execute(GAME_FEATURES);
-    stmt.execute(INDEXED_PERIODS);
+  public List<String> createCoreTables() {
+    return List.of(INDEXING_REQUESTS, GAME_FEATURES, INDEXED_PERIODS);
   }
 
   @Override
-  public void migrateIndexedPeriodsUnique(Statement stmt) throws SQLException {
-    stmt.execute(ADD_INDEXED_PERIODS_UNIQUE);
+  public List<String> indexedPeriodsUniqueMigration() {
+    return List.of(ADD_INDEXED_PERIODS_UNIQUE);
   }
 
   @Override
-  public void addDedupeKeyUnique(Statement stmt) throws SQLException {
-    stmt.execute(ADD_DEDUPE_KEY_UNIQUE);
+  public String addDedupeKeyUnique() {
+    return ADD_DEDUPE_KEY_UNIQUE;
   }
 
   @Override
-  public void createGameFeatureUsernameIndexes(Statement stmt) throws SQLException {
-    for (String create : USERNAME_INDEXES) {
-      stmt.execute(create);
-    }
+  public List<String> usernameIndexes() {
+    return USERNAME_INDEXES;
   }
 
   @Override
-  public void createClaimableRequestsIndex(Statement stmt) throws SQLException {
-    stmt.execute(CLAIMABLE_INDEX);
+  public String claimableRequestsIndex() {
+    return CLAIMABLE_INDEX;
   }
 }

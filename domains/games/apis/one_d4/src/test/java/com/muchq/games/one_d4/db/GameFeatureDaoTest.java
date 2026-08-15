@@ -35,7 +35,7 @@ public class GameFeatureDaoTest {
   @BeforeEach
   public void setUp() {
     testDb = TestDb.create("gamefeaturedao");
-    dao = new GameFeatureDao(testDb.jdbi(), H2SqlDialect.INSTANCE);
+    dao = new GameFeatureDao(testDb.jdbi(), new H2SqlDialect());
     requestId = UUID.randomUUID();
 
     try (var conn = testDb.dataSource().getConnection();
@@ -104,7 +104,7 @@ public class GameFeatureDaoTest {
                 }
               }
             });
-    GameFeatureDao prodDao = new GameFeatureDao(testDb.jdbi(), H2SqlDialect.INSTANCE);
+    GameFeatureDao prodDao = new GameFeatureDao(testDb.jdbi(), new H2SqlDialect());
     dao.insertBatch(List.of(createGame("https://chess.com/game/timeout-probe")));
 
     lastTimeout.set(-1);

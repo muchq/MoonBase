@@ -107,8 +107,8 @@ public class ReanalysisE2ETest {
     TestDb testDb = TestDb.create("reanalysis_e2e");
 
     requestStore = new IndexingRequestDao(testDb.jdbi());
-    periodStore = new IndexedPeriodDao(testDb.jdbi(), H2SqlDialect.INSTANCE);
-    gameFeatureStore = new GameFeatureDao(testDb.jdbi(), H2SqlDialect.INSTANCE);
+    periodStore = new IndexedPeriodDao(testDb.jdbi(), new H2SqlDialect());
+    gameFeatureStore = new GameFeatureDao(testDb.jdbi(), new H2SqlDialect());
 
     queue = new InMemoryIndexQueue();
     fakeChessClient = new FakeChessClient();

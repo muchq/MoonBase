@@ -26,7 +26,7 @@ public class MigrationTest {
 
   @Test
   public void run_createsMotifOccurrencesTable_andDropsHasMotifColumns() throws Exception {
-    Migration migration = new Migration(dataSource, H2SqlDialect.INSTANCE);
+    Migration migration = new Migration(dataSource, new H2SqlDialect());
     migration.run();
 
     try (Connection conn = dataSource.getConnection()) {
@@ -52,7 +52,7 @@ public class MigrationTest {
    */
   @Test
   public void run_addsDispatchColumnsAndBackfillsExistingRows() throws Exception {
-    new Migration(dataSource, H2SqlDialect.INSTANCE).run();
+    new Migration(dataSource, new H2SqlDialect()).run();
 
     UUID legacy = UUID.randomUUID();
     try (Connection conn = dataSource.getConnection();
@@ -66,7 +66,7 @@ public class MigrationTest {
     }
 
     // Idempotent: running again must not disturb the row or the columns.
-    new Migration(dataSource, H2SqlDialect.INSTANCE).run();
+    new Migration(dataSource, new H2SqlDialect()).run();
 
     try (Connection conn = dataSource.getConnection();
         var ps =
@@ -88,7 +88,7 @@ public class MigrationTest {
    */
   @Test
   public void run_addsTheClaimableIndex() throws Exception {
-    new Migration(dataSource, H2SqlDialect.INSTANCE).run();
+    new Migration(dataSource, new H2SqlDialect()).run();
 
     try (Connection conn = dataSource.getConnection();
         ResultSet indexes =
@@ -117,7 +117,7 @@ public class MigrationTest {
    */
   @Test
   public void run_addsThePlayedAtBrowseIndexMatchingTheCompilersOrderBy() throws Exception {
-    new Migration(dataSource, H2SqlDialect.INSTANCE).run();
+    new Migration(dataSource, new H2SqlDialect()).run();
 
     String compiledDefault =
         new com.muchq.games.chessql.compiler.SqlCompiler()
@@ -155,7 +155,7 @@ public class MigrationTest {
    */
   @Test
   public void run_addsTheUsernameIndexesBehindTheParticipationGuard() throws Exception {
-    new Migration(dataSource, H2SqlDialect.INSTANCE).run();
+    new Migration(dataSource, new H2SqlDialect()).run();
 
     String playerScoped =
         new com.muchq.games.chessql.compiler.SqlCompiler()
@@ -207,7 +207,7 @@ public class MigrationTest {
    */
   @Test
   public void run_addsTheIndexedAtRetentionIndex() throws Exception {
-    new Migration(dataSource, H2SqlDialect.INSTANCE).run();
+    new Migration(dataSource, new H2SqlDialect()).run();
 
     java.util.List<String> columns = new java.util.ArrayList<>();
     try (Connection conn = dataSource.getConnection();
@@ -225,7 +225,7 @@ public class MigrationTest {
 
   @Test
   public void run_addsTitleAndOpeningColumns() throws Exception {
-    Migration migration = new Migration(dataSource, H2SqlDialect.INSTANCE);
+    Migration migration = new Migration(dataSource, new H2SqlDialect());
     migration.run();
 
     try (Connection conn = dataSource.getConnection()) {
@@ -241,7 +241,7 @@ public class MigrationTest {
 
   @Test
   public void run_motifOccurrencesTableAcceptsInsertAndSelect() throws Exception {
-    Migration migration = new Migration(dataSource, H2SqlDialect.INSTANCE);
+    Migration migration = new Migration(dataSource, new H2SqlDialect());
     migration.run();
 
     UUID requestId = UUID.randomUUID();
@@ -295,13 +295,13 @@ public class MigrationTest {
    */
   @Test
   public void run_backfillsDedupeKeyMatchingTheJavaRendering() throws Exception {
-    new Migration(dataSource, H2SqlDialect.INSTANCE).run();
+    new Migration(dataSource, new H2SqlDialect()).run();
 
     UUID pending = insertLegacyRequest("hikaru", "2024-01", "2024-03", true, "PENDING");
     UUID completed = insertLegacyRequest("magnus", "2024-01", "2024-01", false, "COMPLETED");
     clearDedupeKeys();
 
-    new Migration(dataSource, H2SqlDialect.INSTANCE).run();
+    new Migration(dataSource, new H2SqlDialect()).run();
 
     assertThat(dedupeKeyOf(pending))
         .isEqualTo(IndexingRequestDao.dedupeKey("hikaru", "CHESS_COM", "2024-01", "2024-03", true));
@@ -338,7 +338,7 @@ public class MigrationTest {
   @Test
   public void run_backfillKeysOnlyOneOfSeveralLiveRequestsCreatedInTheSameInstant()
       throws Exception {
-    new Migration(dataSource, H2SqlDialect.INSTANCE).run();
+    new Migration(dataSource, new H2SqlDialect()).run();
 
     Instant sameInstant = Instant.parse("2026-06-01T00:00:00Z");
     UUID first = insertLegacyRequest("dupe", "2024-05", "2024-05", false, "PENDING", sameInstant);
@@ -347,7 +347,7 @@ public class MigrationTest {
         insertLegacyRequest("dupe", "2024-05", "2024-05", false, "PROCESSING", sameInstant);
     clearDedupeKeys();
 
-    new Migration(dataSource, H2SqlDialect.INSTANCE).run();
+    new Migration(dataSource, new H2SqlDialect()).run();
 
     long keyed =
         java.util.stream.Stream.of(first, second, third)
@@ -365,7 +365,7 @@ public class MigrationTest {
    */
   @Test
   public void run_theBackfillWinnerIsTheRowASubsequentLookupReturns() throws Exception {
-    new Migration(dataSource, H2SqlDialect.INSTANCE).run();
+    new Migration(dataSource, new H2SqlDialect()).run();
 
     Instant sameInstant = Instant.parse("2026-06-01T00:00:00Z");
     for (int i = 0; i < 3; i++) {
@@ -373,7 +373,7 @@ public class MigrationTest {
     }
     clearDedupeKeys();
 
-    new Migration(dataSource, H2SqlDialect.INSTANCE).run();
+    new Migration(dataSource, new H2SqlDialect()).run();
 
     IndexingRequestDao dao = new IndexingRequestDao(org.jdbi.v3.core.Jdbi.create(dataSource));
     UUID found =

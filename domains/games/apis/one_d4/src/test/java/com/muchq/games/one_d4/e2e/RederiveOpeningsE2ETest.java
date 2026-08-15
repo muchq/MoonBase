@@ -44,7 +44,7 @@ public class RederiveOpeningsE2ETest {
   @BeforeEach
   public void setUp() {
     TestDb testDb = TestDb.create("rederive_openings_e2e");
-    store = new GameFeatureDao(testDb.jdbi(), H2SqlDialect.INSTANCE);
+    store = new GameFeatureDao(testDb.jdbi(), new H2SqlDialect());
     admin =
         new AdminController(
             store, new FeatureExtractor(new PgnParser(), new GameReplayer(), List.of()));

@@ -31,8 +31,8 @@ public class RetentionWorkerTest {
     TestDb testDb = TestDb.create("retention");
     dataSource = testDb.dataSource();
 
-    dao = new GameFeatureDao(testDb.jdbi(), H2SqlDialect.INSTANCE);
-    periodDao = new IndexedPeriodDao(testDb.jdbi(), H2SqlDialect.INSTANCE);
+    dao = new GameFeatureDao(testDb.jdbi(), new H2SqlDialect());
+    periodDao = new IndexedPeriodDao(testDb.jdbi(), new H2SqlDialect());
     requestDao = new IndexingRequestDao(testDb.jdbi());
     worker = new RetentionWorker(dao, periodDao, requestDao);
     requestId = UUID.randomUUID();
@@ -62,8 +62,8 @@ public class RetentionWorkerTest {
     TestDb broken = TestDb.create("retention_broken");
     RetentionWorker brokenWorker =
         new RetentionWorker(
-            new GameFeatureDao(broken.jdbi(), H2SqlDialect.INSTANCE),
-            new IndexedPeriodDao(broken.jdbi(), H2SqlDialect.INSTANCE),
+            new GameFeatureDao(broken.jdbi(), new H2SqlDialect()),
+            new IndexedPeriodDao(broken.jdbi(), new H2SqlDialect()),
             new IndexingRequestDao(broken.jdbi()));
     ((java.io.Closeable) broken.dataSource()).close();
 

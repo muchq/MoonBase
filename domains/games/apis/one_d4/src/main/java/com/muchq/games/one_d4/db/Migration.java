@@ -245,7 +245,7 @@ public class Migration {
           + " ON game_features(played_at DESC, game_url ASC)";
 
   // Username expression indexes live on PostgresSqlDialect; H2 plain-column stand-ins on
-  // H2SqlDialect. PostgresPlayerIndexTest pins the Postgres contract.
+  // H2SqlDialect. See SqlDialect#usernameIndexes and PostgresPlayerIndexTest.
 
   /**
    * The index behind the retention delete (#1313 item 11). {@code deleteOlderThan} filters {@code
@@ -273,11 +273,15 @@ public class Migration {
     try (Connection conn = dataSource.getConnection();
         Statement stmt = conn.createStatement()) {
 
-      dialect.createCoreTables(stmt);
+      for (String sql : dialect.createCoreTables()) {
+        stmt.execute(sql);
+      }
 
       stmt.execute(ADD_EXCLUDE_BULLET_COLUMN);
       stmt.execute(ADD_INDEXED_PERIODS_EXCLUDE_BULLET_COLUMN);
-      dialect.migrateIndexedPeriodsUnique(stmt);
+      for (String sql : dialect.indexedPeriodsUniqueMigration()) {
+        stmt.execute(sql);
+      }
       stmt.execute(ADD_INDEXED_AT_COLUMN);
 
       // Drop legacy motifs_json column (replaced by motif_occurrences table)
@@ -312,10 +316,12 @@ public class Migration {
       // write it, and the data has to be unique before the constraint can be added.
       stmt.execute(ADD_DEDUPE_KEY_COLUMN);
       stmt.execute(BACKFILL_DEDUPE_KEY);
-      dialect.addDedupeKeyUnique(stmt);
+      stmt.execute(dialect.addDedupeKeyUnique());
       stmt.execute(CREATE_IDX_GAME_FEATURES_REQUEST_ID);
       stmt.execute(CREATE_IDX_GAME_FEATURES_PLAYED_AT);
-      dialect.createGameFeatureUsernameIndexes(stmt);
+      for (String sql : dialect.usernameIndexes()) {
+        stmt.execute(sql);
+      }
       stmt.execute(CREATE_IDX_GAME_FEATURES_INDEXED_AT);
 
       // Ownership leases.
@@ -328,7 +334,7 @@ public class Migration {
       for (String add : ADD_DISPATCH_COLUMNS) {
         stmt.execute(add);
       }
-      dialect.createClaimableRequestsIndex(stmt);
+      stmt.execute(dialect.claimableRequestsIndex());
 
       LOG.info("Database migration completed successfully");
     } catch (SQLException e) {

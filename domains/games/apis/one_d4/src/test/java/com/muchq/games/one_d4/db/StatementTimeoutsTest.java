@@ -109,7 +109,7 @@ public class StatementTimeoutsTest {
         .containsExactly(StatementTimeouts.SERVING_READ_SECONDS);
 
     timeouts.clear();
-    new IndexedPeriodDao(testDb.jdbi(), H2SqlDialect.INSTANCE)
+    new IndexedPeriodDao(testDb.jdbi(), new H2SqlDialect())
         .findPeriodsForPlayers(List.of("hikaru"));
     assertThat(timeouts)
         .as("findPeriodsForPlayers — GET /v1/index's data-availability read")
@@ -140,7 +140,7 @@ public class StatementTimeoutsTest {
     Instant threshold = Instant.parse("2026-01-01T00:00:00Z");
 
     timeouts.clear();
-    new GameFeatureDao(testDb.jdbi(), H2SqlDialect.INSTANCE).deleteOlderThan(threshold);
+    new GameFeatureDao(testDb.jdbi(), new H2SqlDialect()).deleteOlderThan(threshold);
     assertThat(timeouts)
         .as("game_features delete")
         .contains(StatementTimeouts.RETENTION_SWEEP_SECONDS);
@@ -152,7 +152,7 @@ public class StatementTimeoutsTest {
         .contains(StatementTimeouts.RETENTION_SWEEP_SECONDS);
 
     timeouts.clear();
-    new IndexedPeriodDao(testDb.jdbi(), H2SqlDialect.INSTANCE).deleteOlderThan(threshold);
+    new IndexedPeriodDao(testDb.jdbi(), new H2SqlDialect()).deleteOlderThan(threshold);
     assertThat(timeouts)
         .as("indexed_periods delete")
         .contains(StatementTimeouts.RETENTION_SWEEP_SECONDS);
@@ -160,7 +160,7 @@ public class StatementTimeoutsTest {
 
   @Test
   public void aBoundedSweepLeavesNoTimeoutOnTheSession() throws Exception {
-    new GameFeatureDao(testDb.jdbi(), H2SqlDialect.INSTANCE)
+    new GameFeatureDao(testDb.jdbi(), new H2SqlDialect())
         .deleteOlderThan(Instant.parse("2026-01-01T00:00:00Z"));
 
     try (var conn = testDb.dataSource().getConnection();
@@ -376,7 +376,7 @@ public class StatementTimeoutsTest {
   @Test
   public void fetchForReanalysisStaysDeliberatelyUnbounded() {
     timeouts.clear();
-    new GameFeatureDao(testDb.jdbi(), H2SqlDialect.INSTANCE).fetchForReanalysis(10, 0);
+    new GameFeatureDao(testDb.jdbi(), new H2SqlDialect()).fetchForReanalysis(10, 0);
 
     assertThat(timeouts).as("fetchForReanalysis ran no statements?").isNotEmpty();
     // The exclusion GameFeatureDao's javadoc states, pinned: the admin batch read pages the whole

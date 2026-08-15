@@ -713,8 +713,8 @@ java_library(
     testonly = True,
     srcs = [
         "src/test/java/com/muchq/games/one_d4/e2e/FakeChessClient.java",
-        "src/test/java/com/muchq/games/one_d4/e2e/H2TestSqlDialectFactory.java",
         "src/test/java/com/muchq/games/one_d4/e2e/LatchIndexedPeriodDao.java",
+        "src/test/java/com/muchq/games/one_d4/e2e/TestSqlDialectFactory.java",
     ],
     deps = [
         ":db",
@@ -759,7 +759,8 @@ java_test_suite(
         artifact("io.micronaut:micronaut-http-server-netty"),
         artifact("io.micronaut:micronaut-inject"),
         artifact("io.micronaut:micronaut-runtime"),
-        # LatchIndexedPeriodDaoWiringTest asserts the (Jdbi, Boolean) constructor.
+        # LatchIndexedPeriodDaoWiringTest boots a context and asserts the latch shares the
+        # module's SqlDialect bean.
         artifact("org.jdbi:jdbi3-core"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),

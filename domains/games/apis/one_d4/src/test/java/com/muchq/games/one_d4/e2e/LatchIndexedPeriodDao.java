@@ -25,13 +25,20 @@ import org.jdbi.v3.core.Jdbi;
 public class LatchIndexedPeriodDao implements IndexedPeriodStore {
 
   private final IndexedPeriodDao delegate;
+  private final SqlDialect dialect;
   private volatile CountDownLatch upsertReached;
   private volatile CountDownLatch proceedWithUpsert;
   private volatile CountDownLatch retryReached;
   private volatile CountDownLatch proceedWithRetry;
 
   public LatchIndexedPeriodDao(Jdbi jdbi, SqlDialect dialect) {
+    this.dialect = dialect;
     this.delegate = new IndexedPeriodDao(jdbi, dialect);
+  }
+
+  /** The dialect this latch was wired with — same bean the module hands the production store. */
+  SqlDialect dialect() {
+    return dialect;
   }
 
   /**

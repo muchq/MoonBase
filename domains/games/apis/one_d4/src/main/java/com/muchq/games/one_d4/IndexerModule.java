@@ -108,23 +108,32 @@ public class IndexerModule {
    *     in production, where the URL comes from {@code $INDEXER_DB_URL}.
    */
   @Context
-  public DataSource dataSource(@Value("${indexer.db.url:}") String configuredUrl) {
+  @jakarta.inject.Named("indexerJdbcUrl")
+  public String indexerJdbcUrl(@Value("${indexer.db.url:}") String configuredUrl) {
+    return resolveJdbcUrl(configuredUrl);
+  }
+
+  @Context
+  public DataSource dataSource(@jakarta.inject.Named("indexerJdbcUrl") String jdbcUrl) {
     return DataSourceFactory.create(
-        jdbcUrl(configuredUrl),
-        System.getenv("INDEXER_DB_USERNAME"),
-        System.getenv("INDEXER_DB_PASSWORD"));
+        jdbcUrl, System.getenv("INDEXER_DB_USERNAME"), System.getenv("INDEXER_DB_PASSWORD"));
   }
 
   /**
-   * Production speaks Postgres only. Tests that boot against H2 replace this bean via {@code
-   * H2TestSqlDialectFactory}; {@code IndexerModule} itself never names H2.
+   * Production speaks Postgres only. Module-boot tests replace this bean via {@code
+   * TestSqlDialectFactory}, which reads the same {@code indexerJdbcUrl} bean the DataSource uses so
+   * the dialect cannot diverge from the pool.
    */
   @Context
   public SqlDialect sqlDialect() {
-    return PostgresSqlDialect.INSTANCE;
+    return new PostgresSqlDialect();
   }
 
-  private static String jdbcUrl(@Nullable String configuredUrl) {
+  /**
+   * Property if set, otherwise {@code $INDEXER_DB_URL}. One resolution path for both the DataSource
+   * and (in tests) the dialect factory.
+   */
+  static String resolveJdbcUrl(@Nullable String configuredUrl) {
     return configuredUrl == null || configuredUrl.isBlank() ? readJdbcUrl() : configuredUrl.strip();
   }
 

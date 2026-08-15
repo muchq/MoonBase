@@ -1,11 +1,13 @@
 package com.muchq.games.one_d4.db;
 
-import java.sql.SQLException;
-import java.sql.Statement;
+import java.util.List;
 
 /**
  * SQL that differs across engines. Production ships {@link PostgresSqlDialect} only. The H2 variant
  * lives under {@code src/test} and is wired by tests — never by {@code IndexerModule}.
+ *
+ * <p>Pure SQL: every method returns statements for {@link Migration} (or the DAOs) to execute. The
+ * dialect does not take a {@link java.sql.Statement}; the migration's ordering stays in one place.
  */
 public interface SqlDialect {
 
@@ -17,18 +19,30 @@ public interface SqlDialect {
    */
   String upsertIndexedPeriod();
 
-  /** Create indexing_requests, game_features, and indexed_periods. */
-  void createCoreTables(Statement stmt) throws SQLException;
+  /**
+   * Create {@code indexing_requests}, {@code game_features}, and {@code indexed_periods}, in that
+   * order.
+   */
+  List<String> createCoreTables();
 
   /**
-   * After {@code exclude_bullet} is added to indexed_periods: drop the old 3-column unique when
-   * this engine needs that, then add the 4-column unique.
+   * After {@code exclude_bullet} is added to indexed_periods: statements that drop the old 3-column
+   * unique when this engine needs that, then add the 4-column unique.
    */
-  void migrateIndexedPeriodsUnique(Statement stmt) throws SQLException;
+  List<String> indexedPeriodsUniqueMigration();
 
-  void addDedupeKeyUnique(Statement stmt) throws SQLException;
+  /** Add the unique constraint on {@code indexing_requests.dedupe_key}. */
+  String addDedupeKeyUnique();
 
-  void createGameFeatureUsernameIndexes(Statement stmt) throws SQLException;
+  /**
+   * Indexes behind username search. Postgres uses expression indexes on {@code LOWER(...)}; H2 has
+   * no expression indexes and carries plain-column stand-ins so the migration path stays identical.
+   */
+  List<String> usernameIndexes();
 
-  void createClaimableRequestsIndex(Statement stmt) throws SQLException;
+  /**
+   * Index behind {@code claimNext}. Postgres uses a partial index; H2 approximates with a composite
+   * because it has no partial indexes.
+   */
+  String claimableRequestsIndex();
 }
