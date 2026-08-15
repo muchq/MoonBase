@@ -2,6 +2,39 @@
 set -euo pipefail
 
 BASE_REVISION=${1:-"origin/main"}
+
+# Paths whose change makes bazel-diff's impacted-target set untrustworthy for the
+# property CI needs: every consumer that would feel the change actually builds.
+# Config files (.bazelversion, .bazelrc) are the original case. Shared macros
+# under bazel/rules/ are the same class — a java.bzl / oci.bzl edit reshapes
+# every target that loads those macros, and trusting an impact set that may only
+# name //bazel/rules:* is how analysis failures reach main (#1378, found on a
+# NullAway change but not Java-specific).
+FULL_BUILD_PATHSPECS=(
+  .bazelversion
+  .bazelrc
+  bazel/rules/
+)
+
+# Paths between BASE_REVISION and HEAD that force a full //... build, one per
+# line, or empty. Shared with DIFF_BUILD_MODE=decide so scripts/test-diff-build
+# can pin the decision without running bazel or touching this tree.
+paths_forcing_full_build() {
+  local base=$1
+  git diff --name-only "$base" HEAD -- "${FULL_BUILD_PATHSPECS[@]}" 2>/dev/null || true
+}
+
+# Decide-only mode: print "full" or "diff" and exit. Used by the suite; not a
+# CI entry point.
+if [ "${DIFF_BUILD_MODE:-}" = "decide" ]; then
+  if [ -n "$(paths_forcing_full_build "$BASE_REVISION")" ]; then
+    echo "full"
+  else
+    echo "diff"
+  fi
+  exit 0
+fi
+
 CURRENT_COMMIT=$(git rev-parse HEAD)
 # Use branch name when available; fall back to commit hash in detached HEAD (e.g. CI)
 CURRENT_REF=$(git rev-parse --abbrev-ref HEAD)
@@ -33,10 +66,11 @@ echo "--- [diff-build] WORKSPACE_ROOT=$WORKSPACE_ROOT"
 echo "--- [diff-build] BASE_REVISION=$BASE_REVISION  CURRENT_REF=$CURRENT_REF"
 echo "--- [diff-build] java=$(which java 2>/dev/null || echo 'NOT FOUND')  version=$(java -version 2>&1 | head -1 || echo 'N/A')"
 
-# 2. If Bazel config changed, bazel-diff isn't reliable; do full build and test
-BAZEL_CONFIG_CHANGES=$(git diff --name-only "$BASE_REVISION" HEAD -- .bazelversion .bazelrc 2>/dev/null || echo "")
-if [ -n "$BAZEL_CONFIG_CHANGES" ]; then
-  echo "Bazel config changed; running full build and test..."
+# 2. Config or shared macros changed: bazel-diff isn't reliable; full build/test.
+FULL_BUILD_CHANGES=$(paths_forcing_full_build "$BASE_REVISION")
+if [ -n "$FULL_BUILD_CHANGES" ]; then
+  echo "Bazel config or shared build macros changed; running full build and test..."
+  echo "$FULL_BUILD_CHANGES" | sed 's/^/  /'
   bazel build //... || exit 1
   bazel test //... || exit 1
   exit 0

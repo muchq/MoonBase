@@ -1,0 +1,119 @@
+#!/bin/bash
+# Pins which path changes force scripts/diff-build onto the full //... path
+# instead of trusting bazel-diff (#1378).
+#
+# The subject under test is a decision over a git diff, so the fixture is a
+# throwaway repo with a base commit and a HEAD that touches one file. No bazel,
+# no real workspace — DIFF_BUILD_MODE=decide stops before either.
+set -uo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+DIFF_BUILD=${DIFF_BUILD:-$REPO/scripts/diff-build}
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+FAILURES=0
+pass() { echo "  ok    $1"; }
+fail() {
+  echo "  FAIL  $1"
+  FAILURES=$((FAILURES + 1))
+}
+check() {
+  local desc=$1
+  shift
+  if "$@"; then pass "$desc"; else fail "$desc"; fi
+}
+
+# ------------------------------------------------------------------ fixture
+
+FIXTURE=$WORK/repo
+mkdir -p "$FIXTURE"
+cd "$FIXTURE"
+git init -q
+git config user.email "test@example.com"
+git config user.name "test"
+
+# Minimal tree so every pathspec we care about exists on the base.
+mkdir -p bazel/rules/testdata domains/games
+printf '9.0.0\n' > .bazelversion
+printf 'build --foo\n' > .bazelrc
+printf '# macros\n' > bazel/rules/java.bzl
+printf '# oci\n' > bazel/rules/oci.bzl
+printf '# package\n' > bazel/rules/BUILD.bazel
+printf 'probe\n' > bazel/rules/testdata/Probe.java
+printf 'readme\n' > README.md
+printf 'src\n' > domains/games/hello.txt
+git add .
+git commit -q -m base
+BASE=$(git rev-parse HEAD)
+
+decide() {
+  DIFF_BUILD_MODE=decide "$DIFF_BUILD" "$BASE"
+}
+
+commit_change_to() { # commit_change_to <path> <contents>
+  local path=$1 contents=$2
+  mkdir -p "$(dirname "$path")"
+  printf '%s\n' "$contents" > "$path"
+  git add "$path"
+  git commit -q -m "change $path"
+}
+
+reset_to_base() {
+  git checkout -q "$BASE"
+  # Drop any commits above base so each case starts from the same tree.
+  git reset -q --hard "$BASE"
+}
+
+# --------------------------------------------------------------- cases
+
+echo "full-build pathspecs"
+
+reset_to_base
+commit_change_to README.md 'readme changed'
+check "an unrelated file keeps the bazel-diff path" \
+  test "$(decide)" = "diff"
+
+reset_to_base
+commit_change_to .bazelversion '9.1.1'
+check "a .bazelversion bump forces a full build" \
+  test "$(decide)" = "full"
+
+reset_to_base
+commit_change_to .bazelrc 'build --bar'
+check "a .bazelrc bump forces a full build" \
+  test "$(decide)" = "full"
+
+reset_to_base
+commit_change_to bazel/rules/java.bzl '# macros changed'
+check "a shared java.bzl edit forces a full build" \
+  test "$(decide)" = "full"
+
+reset_to_base
+commit_change_to bazel/rules/oci.bzl '# oci changed'
+check "a shared oci.bzl edit forces a full build (not Java-specific)" \
+  test "$(decide)" = "full"
+
+reset_to_base
+commit_change_to bazel/rules/BUILD.bazel '# package changed'
+check "a bazel/rules BUILD.bazel edit forces a full build" \
+  test "$(decide)" = "full"
+
+reset_to_base
+commit_change_to bazel/rules/testdata/Probe.java 'probe changed'
+check "a file under bazel/rules/ forces a full build" \
+  test "$(decide)" = "full"
+
+reset_to_base
+commit_change_to domains/games/hello.txt 'src changed'
+DECISION=$(decide)
+check "a domain source change keeps the bazel-diff path" \
+  test "$DECISION" = "diff"
+
+echo
+if [ "$FAILURES" -eq 0 ]; then
+  echo "all diff-build checks passed"
+else
+  echo "$FAILURES check(s) failed"
+fi
+exit $((FAILURES > 0))

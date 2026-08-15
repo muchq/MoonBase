@@ -36,6 +36,12 @@ jobs:
       - name: Test mutation-check
         run: ./scripts/test-mutation-check
 
+      # diff-build's full-build escape hatch is what stops a shared-macro edit
+      # from trusting an impact set that may only name //bazel/rules:* (#1378).
+      # Decide-only mode; no bazel.
+      - name: Test diff-build full-build decision
+        run: ./scripts/test-diff-build
+
   # deploy_config_test pins the text of the collector config, which can only
   # catch mistakes someone already knew to look for: `match_type: glob` passed
   # review and passed the line-presence test that existed at the time, and would
