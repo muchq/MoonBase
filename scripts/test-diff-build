@@ -134,7 +134,7 @@ BAD_OUT=$WORK/bad.out
 set +e
 "$DECIDE" refs/heads/does-not-exist >"$BAD_OUT" 2>&1
 BAD_STATUS=$?
-set -e
+set +e
 check "an unresolvable base exits non-zero" test "$BAD_STATUS" -ne 0
 check "an unresolvable base does not report diff" \
   out_lacks_line 'diff' "$BAD_OUT"
