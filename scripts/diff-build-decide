@@ -1,0 +1,17 @@
+#!/bin/bash
+# Test-only entry point for the full-build vs bazel-diff decision.
+# Not invoked by CI — build-and-test runs scripts/diff-build, which has no
+# decide mode and no environment-variable early exit (#1378 review finding 2).
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=diff-build-lib.sh
+source "$SCRIPT_DIR/diff-build-lib.sh"
+
+BASE_REVISION=${1:?usage: diff-build-decide <base-revision>}
+require_base_revision "$BASE_REVISION"
+if [ -n "$(paths_forcing_full_build "$BASE_REVISION")" ]; then
+  echo "full"
+else
+  echo "diff"
+fi

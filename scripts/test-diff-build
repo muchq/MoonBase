@@ -3,12 +3,13 @@
 # instead of trusting bazel-diff (#1378).
 #
 # The subject under test is a decision over a git diff, so the fixture is a
-# throwaway repo with a base commit and a HEAD that touches one file. No bazel,
-# no real workspace — DIFF_BUILD_MODE=decide stops before either.
+# throwaway repo with a base commit and a HEAD that touches one file. No bazel
+# and no real workspace — scripts/diff-build-decide shares the pathspec list
+# and never reaches a build.
 set -uo pipefail
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
-DIFF_BUILD=${DIFF_BUILD:-$REPO/scripts/diff-build}
+DECIDE=${DECIDE:-$REPO/scripts/diff-build-decide}
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
@@ -23,6 +24,7 @@ check() {
   shift
   if "$@"; then pass "$desc"; else fail "$desc"; fi
 }
+out_lacks_line() { ! grep -qx "$1" "$2"; }
 
 # ------------------------------------------------------------------ fixture
 
@@ -41,6 +43,7 @@ printf '# macros\n' > bazel/rules/java.bzl
 printf '# oci\n' > bazel/rules/oci.bzl
 printf '# package\n' > bazel/rules/BUILD.bazel
 printf 'probe\n' > bazel/rules/testdata/Probe.java
+printf 'image:\n' > bazel/rules/java_image_test.yaml
 printf 'readme\n' > README.md
 printf 'src\n' > domains/games/hello.txt
 git add .
@@ -48,7 +51,7 @@ git commit -q -m base
 BASE=$(git rev-parse HEAD)
 
 decide() {
-  DIFF_BUILD_MODE=decide "$DIFF_BUILD" "$BASE"
+  "$DECIDE" "$BASE"
 }
 
 commit_change_to() { # commit_change_to <path> <contents>
@@ -71,8 +74,9 @@ echo "full-build pathspecs"
 
 reset_to_base
 commit_change_to README.md 'readme changed'
+DECISION=$(decide)
 check "an unrelated file keeps the bazel-diff path" \
-  test "$(decide)" = "diff"
+  test "$DECISION" = "diff"
 
 reset_to_base
 commit_change_to .bazelversion '9.1.1'
@@ -100,15 +104,42 @@ check "a bazel/rules BUILD.bazel edit forces a full build" \
   test "$(decide)" = "full"
 
 reset_to_base
-commit_change_to bazel/rules/testdata/Probe.java 'probe changed'
-check "a file under bazel/rules/ forces a full build" \
+commit_change_to bazel/rules/java_rules_test.bzl '# guard test'
+check "a bazel/rules *.bzl edit forces a full build" \
   test "$(decide)" = "full"
+
+reset_to_base
+commit_change_to bazel/rules/testdata/Probe.java 'probe changed'
+DECISION=$(decide)
+check "a rules testdata fixture keeps the bazel-diff path" \
+  test "$DECISION" = "diff"
+
+reset_to_base
+commit_change_to bazel/rules/java_image_test.yaml 'image: changed'
+DECISION=$(decide)
+check "a rules yaml fixture keeps the bazel-diff path" \
+  test "$DECISION" = "diff"
 
 reset_to_base
 commit_change_to domains/games/hello.txt 'src changed'
 DECISION=$(decide)
 check "a domain source change keeps the bazel-diff path" \
   test "$DECISION" = "diff"
+
+echo "base revision resolution"
+
+reset_to_base
+commit_change_to bazel/rules/java.bzl '# still changed under a bad base'
+BAD_OUT=$WORK/bad.out
+set +e
+"$DECIDE" refs/heads/does-not-exist >"$BAD_OUT" 2>&1
+BAD_STATUS=$?
+set -e
+check "an unresolvable base exits non-zero" test "$BAD_STATUS" -ne 0
+check "an unresolvable base does not report diff" \
+  out_lacks_line 'diff' "$BAD_OUT"
+check "an unresolvable base names the failure" \
+  grep -q 'does not resolve' "$BAD_OUT"
 
 echo
 if [ "$FAILURES" -eq 0 ]; then

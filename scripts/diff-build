@@ -1,39 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=diff-build-lib.sh
+source "$SCRIPT_DIR/diff-build-lib.sh"
+
 BASE_REVISION=${1:-"origin/main"}
-
-# Paths whose change makes bazel-diff's impacted-target set untrustworthy for the
-# property CI needs: every consumer that would feel the change actually builds.
-# Config files (.bazelversion, .bazelrc) are the original case. Shared macros
-# under bazel/rules/ are the same class — a java.bzl / oci.bzl edit reshapes
-# every target that loads those macros, and trusting an impact set that may only
-# name //bazel/rules:* is how analysis failures reach main (#1378, found on a
-# NullAway change but not Java-specific).
-FULL_BUILD_PATHSPECS=(
-  .bazelversion
-  .bazelrc
-  bazel/rules/
-)
-
-# Paths between BASE_REVISION and HEAD that force a full //... build, one per
-# line, or empty. Shared with DIFF_BUILD_MODE=decide so scripts/test-diff-build
-# can pin the decision without running bazel or touching this tree.
-paths_forcing_full_build() {
-  local base=$1
-  git diff --name-only "$base" HEAD -- "${FULL_BUILD_PATHSPECS[@]}" 2>/dev/null || true
-}
-
-# Decide-only mode: print "full" or "diff" and exit. Used by the suite; not a
-# CI entry point.
-if [ "${DIFF_BUILD_MODE:-}" = "decide" ]; then
-  if [ -n "$(paths_forcing_full_build "$BASE_REVISION")" ]; then
-    echo "full"
-  else
-    echo "diff"
-  fi
-  exit 0
-fi
+require_base_revision "$BASE_REVISION"
 
 CURRENT_COMMIT=$(git rev-parse HEAD)
 # Use branch name when available; fall back to commit hash in detached HEAD (e.g. CI)

@@ -38,7 +38,7 @@ jobs:
 
       # diff-build's full-build escape hatch is what stops a shared-macro edit
       # from trusting an impact set that may only name //bazel/rules:* (#1378).
-      # Decide-only mode; no bazel.
+      # Exercise scripts/diff-build-decide (test-only); no bazel.
       - name: Test diff-build full-build decision
         run: ./scripts/test-diff-build
 
