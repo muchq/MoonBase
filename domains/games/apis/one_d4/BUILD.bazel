@@ -77,7 +77,9 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/db/IndexingRequestDao.java",
         "src/main/java/com/muchq/games/one_d4/db/IndexingRequestStore.java",
         "src/main/java/com/muchq/games/one_d4/db/Migration.java",
+        "src/main/java/com/muchq/games/one_d4/db/PostgresSqlDialect.java",
         "src/main/java/com/muchq/games/one_d4/db/RetentionPolicy.java",
+        "src/main/java/com/muchq/games/one_d4/db/SqlDialect.java",
         "src/main/java/com/muchq/games/one_d4/db/StatementTimeouts.java",
     ],
     visibility = ["//visibility:public"],
@@ -458,9 +460,6 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/worker/RetentionWorkerTest.java",
     ],
     deps = [
-        # The database these tests run against. H2 is declared here and on no production
-        # target, so nothing the service ships can open an in-memory database.
-        artifact("com.h2database:h2"),
         ":db",
         ":dto",
         ":engine",
@@ -579,9 +578,6 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/db/TableDispatchTest.java",
     ],
     deps = [
-        # The database these tests run against. H2 is declared here and on no production
-        # target, so nothing the service ships can open an in-memory database.
-        artifact("com.h2database:h2"),
         ":db",
         ":dto",
         ":model",
@@ -612,9 +608,6 @@ java_test_suite(
     ],
     env = {"TZ": "Pacific/Kiritimati"},
     deps = [
-        # The database these tests run against. H2 is declared here and on no production
-        # target, so nothing the service ships can open an in-memory database.
-        artifact("com.h2database:h2"),
         ":db",
         ":dto",
         ":test_db",
@@ -638,9 +631,6 @@ java_test_suite(
     ],
     env = {"TZ": "Pacific/Kiritimati"},
     deps = [
-        # The database these tests run against. H2 is declared here and on no production
-        # target, so nothing the service ships can open an in-memory database.
-        artifact("com.h2database:h2"),
         ":db",
         ":test_db",
         artifact("org.junit.jupiter:junit-jupiter-api"),
@@ -660,6 +650,7 @@ java_test_suite(
     name = "pg_db_tests",
     size = "small",
     srcs = [
+        "src/test/java/com/muchq/games/one_d4/db/H2IsNotOnThePostgresSuiteClasspathTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresAggregateCompatTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresConcurrentWriteTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresPlayerIndexTest.java",
@@ -673,13 +664,10 @@ java_test_suite(
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
-        # The database these tests run against. H2 is declared here and on no production
-        # target, so nothing the service ships can open an in-memory database.
-        artifact("com.h2database:h2"),
         ":db",
         ":dto",
         ":model",
-        ":test_db",
+        ":pg_test_urls",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
         artifact("org.assertj:assertj-core"),
@@ -688,14 +676,32 @@ java_test_suite(
     ],
 )
 
+# URL helper for the Postgres-gated suites. Kept off :test_db on purpose: H2 is a
+# runtime dep of :test_db (that is the library that opens jdbc:h2:mem:…), and
+# pg_db_tests must not see it — H2IsNotOnThePostgresSuiteClasspathTest pins that.
+java_library(
+    name = "pg_test_urls",
+    testonly = True,
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/db/PgTestUrls.java",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# In-memory H2 for DAO/worker/e2e suites that go through TestDb.create. The driver
+# is a runtime_dep here rather than copy-pasted onto every consumer, so a suite that
+# only needs PgTestUrls (pg_db_tests) does not pick it up.
 java_library(
     name = "test_db",
     testonly = True,
     srcs = [
-        "src/test/java/com/muchq/games/one_d4/db/PgTestUrls.java",
+        "src/test/java/com/muchq/games/one_d4/db/H2SqlDialect.java",
         "src/test/java/com/muchq/games/one_d4/db/TestDb.java",
     ],
     visibility = ["//visibility:public"],
+    runtime_deps = [
+        artifact("com.h2database:h2"),
+    ],
     deps = [
         ":db",
         artifact("org.jdbi:jdbi3-core"),
@@ -708,9 +714,11 @@ java_library(
     srcs = [
         "src/test/java/com/muchq/games/one_d4/e2e/FakeChessClient.java",
         "src/test/java/com/muchq/games/one_d4/e2e/LatchIndexedPeriodDao.java",
+        "src/test/java/com/muchq/games/one_d4/e2e/TestSqlDialectFactory.java",
     ],
     deps = [
         ":db",
+        ":test_db",
         "//domains/games/libs/chess_com_client",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("io.micronaut:micronaut-context"),
@@ -725,6 +733,7 @@ java_test_suite(
     size = "medium",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/e2e/ConcurrentIndexE2ETest.java",
+        "src/test/java/com/muchq/games/one_d4/e2e/LatchIndexedPeriodDaoWiringTest.java",
     ],
     runtime_deps = [
         "//domains/platform/libs/logging",
@@ -737,8 +746,8 @@ java_test_suite(
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
-        # The database these tests run against. H2 is declared here and on no production
-        # target, so nothing the service ships can open an in-memory database.
+        # Module-boot suites set indexer.db.url to H2 without going through :test_db, so
+        # the driver has to be declared here. TestDb consumers get it from :test_db instead.
         artifact("com.h2database:h2"),
         ":db",
         ":e2e_support",
@@ -750,6 +759,9 @@ java_test_suite(
         artifact("io.micronaut:micronaut-http-server-netty"),
         artifact("io.micronaut:micronaut-inject"),
         artifact("io.micronaut:micronaut-runtime"),
+        # LatchIndexedPeriodDaoWiringTest boots a context and asserts the latch shares the
+        # module's SqlDialect bean.
+        artifact("org.jdbi:jdbi3-core"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
@@ -768,8 +780,8 @@ java_test_suite(
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
-        # The database these tests run against. H2 is declared here and on no production
-        # target, so nothing the service ships can open an in-memory database.
+        # Module-boot suites set indexer.db.url to H2 without going through :test_db, so
+        # the driver has to be declared here. TestDb consumers get it from :test_db instead.
         artifact("com.h2database:h2"),
         # CallToolResult: the MCP tools return it since #1331.
         artifact("io.modelcontextprotocol.sdk:mcp-core"),
@@ -801,9 +813,6 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/e2e/RederiveOpeningsE2ETest.java",
     ],
     deps = [
-        # The database these tests run against. H2 is declared here and on no production
-        # target, so nothing the service ships can open an in-memory database.
-        artifact("com.h2database:h2"),
         ":api",
         ":db",
         ":dto",
@@ -848,8 +857,8 @@ java_test_suite(
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
-        # The database these tests run against. H2 is declared here and on no production
-        # target, so nothing the service ships can open an in-memory database.
+        # Module-boot suites set indexer.db.url to H2 without going through :test_db, so
+        # the driver has to be declared here. TestDb consumers get it from :test_db instead.
         artifact("com.h2database:h2"),
         # e2e_support supplies FakeChessClient (@Replaces ChessClient). Without it these tests
         # boot the real client, and any request that reaches the worker opens a live TLS

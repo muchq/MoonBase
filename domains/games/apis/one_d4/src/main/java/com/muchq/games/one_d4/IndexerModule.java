@@ -11,6 +11,8 @@ import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestDao;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.db.Migration;
+import com.muchq.games.one_d4.db.PostgresSqlDialect;
+import com.muchq.games.one_d4.db.SqlDialect;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.GameReplayer;
 import com.muchq.games.one_d4.engine.PgnParser;
@@ -106,31 +108,38 @@ public class IndexerModule {
    *     in production, where the URL comes from {@code $INDEXER_DB_URL}.
    */
   @Context
-  public DataSource dataSource(@Value("${indexer.db.url:}") String configuredUrl) {
+  @jakarta.inject.Named("indexerJdbcUrl")
+  public String indexerJdbcUrl(@Value("${indexer.db.url:}") String configuredUrl) {
+    return resolveJdbcUrl(configuredUrl);
+  }
+
+  @Context
+  public DataSource dataSource(@jakarta.inject.Named("indexerJdbcUrl") String jdbcUrl) {
     return DataSourceFactory.create(
-        jdbcUrl(configuredUrl),
-        System.getenv("INDEXER_DB_USERNAME"),
-        System.getenv("INDEXER_DB_PASSWORD"));
+        jdbcUrl, System.getenv("INDEXER_DB_USERNAME"), System.getenv("INDEXER_DB_PASSWORD"));
   }
 
   /**
-   * Which SQL dialect the DAOs and migrations speak. It is a test concern in practice — the only
-   * URLs that answer true here are the ones tests set through {@code indexer.db.url}, since the H2
-   * driver is not on the production classpath — but the branches it selects live in production code
-   * because the DAOs those tests exercise are the production DAOs.
+   * Production speaks Postgres only. Module-boot tests replace this bean via {@code
+   * TestSqlDialectFactory}, which reads the same {@code indexerJdbcUrl} bean the DataSource uses so
+   * the dialect cannot diverge from the pool.
    */
   @Context
-  public Boolean useH2(@Value("${indexer.db.url:}") String configuredUrl) {
-    return jdbcUrl(configuredUrl).contains(":h2:");
+  public SqlDialect sqlDialect() {
+    return new PostgresSqlDialect();
   }
 
-  private static String jdbcUrl(@Nullable String configuredUrl) {
+  /**
+   * Property if set, otherwise {@code $INDEXER_DB_URL}. One resolution path for both the DataSource
+   * and (in tests) the dialect factory.
+   */
+  static String resolveJdbcUrl(@Nullable String configuredUrl) {
     return configuredUrl == null || configuredUrl.isBlank() ? readJdbcUrl() : configuredUrl.strip();
   }
 
   @Context
-  public Migration migration(DataSource dataSource, Boolean useH2) {
-    Migration migration = new Migration(dataSource, useH2);
+  public Migration migration(DataSource dataSource, SqlDialect dialect) {
+    Migration migration = new Migration(dataSource, dialect);
     migration.run();
     return migration;
   }
@@ -146,13 +155,13 @@ public class IndexerModule {
   }
 
   @Context
-  public GameFeatureStore gameFeatureStore(Jdbi jdbi, Boolean useH2) {
-    return new GameFeatureDao(jdbi, useH2);
+  public GameFeatureStore gameFeatureStore(Jdbi jdbi, SqlDialect dialect) {
+    return new GameFeatureDao(jdbi, dialect);
   }
 
   @Context
-  public IndexedPeriodStore indexedPeriodStore(Jdbi jdbi, Boolean useH2) {
-    return new IndexedPeriodDao(jdbi, useH2);
+  public IndexedPeriodStore indexedPeriodStore(Jdbi jdbi, SqlDialect dialect) {
+    return new IndexedPeriodDao(jdbi, dialect);
   }
 
   @Context

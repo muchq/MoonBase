@@ -70,8 +70,12 @@ public class IndexE2ETest {
     TestDb testDb = TestDb.create("e2e");
 
     requestStore = new com.muchq.games.one_d4.db.IndexingRequestDao(testDb.jdbi());
-    periodStore = new com.muchq.games.one_d4.db.IndexedPeriodDao(testDb.jdbi(), true);
-    gameFeatureStore = new com.muchq.games.one_d4.db.GameFeatureDao(testDb.jdbi(), true);
+    periodStore =
+        new com.muchq.games.one_d4.db.IndexedPeriodDao(
+            testDb.jdbi(), new com.muchq.games.one_d4.db.H2SqlDialect());
+    gameFeatureStore =
+        new com.muchq.games.one_d4.db.GameFeatureDao(
+            testDb.jdbi(), new com.muchq.games.one_d4.db.H2SqlDialect());
 
     queue = new InMemoryIndexQueue();
     fakeChessClient = new FakeChessClient();

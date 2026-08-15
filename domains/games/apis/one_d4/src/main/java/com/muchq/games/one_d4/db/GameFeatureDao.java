@@ -29,35 +29,6 @@ import org.slf4j.LoggerFactory;
 public class GameFeatureDao implements GameFeatureStore {
   private static final Logger LOG = LoggerFactory.getLogger(GameFeatureDao.class);
 
-  private static final String H2_INSERT =
-      """
-      MERGE INTO game_features (
-          request_id, game_url, platform, white_username, black_username,
-          white_elo, black_elo, white_title, black_title, time_class, eco,
-          opening_name, opening_family, result, played_at, num_moves,
-          indexed_at, pgn
-      ) KEY (game_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      """;
-
-  // On conflict, refresh the derived/enriched columns too so that reindexing a period backfills
-  // titles and opening names on rows indexed before those columns existed.
-  private static final String PG_INSERT =
-      """
-      INSERT INTO game_features (
-          request_id, game_url, platform, white_username, black_username,
-          white_elo, black_elo, white_title, black_title, time_class, eco,
-          opening_name, opening_family, result, played_at, num_moves,
-          indexed_at, pgn
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (game_url) DO UPDATE SET
-          indexed_at = EXCLUDED.indexed_at,
-          request_id = EXCLUDED.request_id,
-          white_title = EXCLUDED.white_title,
-          black_title = EXCLUDED.black_title,
-          opening_name = EXCLUDED.opening_name,
-          opening_family = EXCLUDED.opening_family
-      """;
-
   private static final String FETCH_FOR_REANALYSIS =
       "SELECT request_id, game_url, pgn FROM game_features ORDER BY indexed_at, game_url LIMIT ?"
           + " OFFSET ?";
@@ -135,11 +106,11 @@ public class GameFeatureDao implements GameFeatureStore {
               rs.getString("pgn"));
 
   private final Jdbi jdbi;
-  private final boolean useH2;
+  private final SqlDialect dialect;
   private final Clock clock;
 
-  public GameFeatureDao(Jdbi jdbi, boolean useH2) {
-    this(jdbi, useH2, Clock.systemUTC());
+  public GameFeatureDao(Jdbi jdbi, SqlDialect dialect) {
+    this(jdbi, dialect, Clock.systemUTC());
   }
 
   /**
@@ -147,9 +118,9 @@ public class GameFeatureDao implements GameFeatureStore {
    *     compares that column against a threshold this same clock produces, so both sides have to
    *     come from one source; see {@link #deleteOlderThan}.
    */
-  public GameFeatureDao(Jdbi jdbi, boolean useH2, Clock clock) {
+  public GameFeatureDao(Jdbi jdbi, SqlDialect dialect, Clock clock) {
     this.jdbi = jdbi;
-    this.useH2 = useH2;
+    this.dialect = dialect;
     this.clock = clock;
   }
 
@@ -186,43 +157,39 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   private void insertFeatures(org.jdbi.v3.core.Handle h, List<GameFeature> features) {
-    String sql = useH2 ? H2_INSERT : PG_INSERT;
-    {
-      {
-        var batch = h.prepareBatch(sql);
-        for (GameFeature row : features) {
-          // bindByType, not bind: played_at is nullable, and only the typed form carries
-          // Types.TIMESTAMP into setNull. Plain bind() would fall back to JDBI's untyped-null
-          // default (Types.OTHER) — accepted by both drivers today, but not the column's type.
-          batch
-              .bind(0, row.requestId())
-              .bind(1, row.gameUrl())
-              .bind(2, row.platform())
-              .bind(3, row.whiteUsername())
-              .bind(4, row.blackUsername())
-              .bind(5, (Integer) row.whiteElo())
-              .bind(6, (Integer) row.blackElo())
-              .bind(7, row.whiteTitle())
-              .bind(8, row.blackTitle())
-              .bind(9, row.timeClass())
-              .bind(10, row.eco())
-              .bind(11, row.openingName())
-              .bind(12, row.openingFamily())
-              .bind(13, row.result())
-              .bindByType(14, toUtcWallClock(row.playedAt()), LocalDateTime.class)
-              .bind(15, (Integer) row.numMoves())
-              // Never null: the column is NOT NULL, and a row that slipped through without a
-              // stamp would be undeletable, since `NULL < threshold` is unknown.
-              .bindByType(
-                  16,
-                  toUtcWallClock(row.indexedAt() == null ? clock.instant() : row.indexedAt()),
-                  LocalDateTime.class)
-              .bind(17, row.pgn())
-              .add();
-        }
-        batch.execute();
-      }
+    String sql = dialect.insertGameFeature();
+    var batch = h.prepareBatch(sql);
+    for (GameFeature row : features) {
+      // bindByType, not bind: played_at is nullable, and only the typed form carries
+      // Types.TIMESTAMP into setNull. Plain bind() would fall back to JDBI's untyped-null
+      // default (Types.OTHER) — accepted by both drivers today, but not the column's type.
+      batch
+          .bind(0, row.requestId())
+          .bind(1, row.gameUrl())
+          .bind(2, row.platform())
+          .bind(3, row.whiteUsername())
+          .bind(4, row.blackUsername())
+          .bind(5, (Integer) row.whiteElo())
+          .bind(6, (Integer) row.blackElo())
+          .bind(7, row.whiteTitle())
+          .bind(8, row.blackTitle())
+          .bind(9, row.timeClass())
+          .bind(10, row.eco())
+          .bind(11, row.openingName())
+          .bind(12, row.openingFamily())
+          .bind(13, row.result())
+          .bindByType(14, toUtcWallClock(row.playedAt()), LocalDateTime.class)
+          .bind(15, (Integer) row.numMoves())
+          // Never null: the column is NOT NULL, and a row that slipped through without a
+          // stamp would be undeletable, since `NULL < threshold` is unknown.
+          .bindByType(
+              16,
+              toUtcWallClock(row.indexedAt() == null ? clock.instant() : row.indexedAt()),
+              LocalDateTime.class)
+          .bind(17, row.pgn())
+          .add();
     }
+    batch.execute();
   }
 
   /**

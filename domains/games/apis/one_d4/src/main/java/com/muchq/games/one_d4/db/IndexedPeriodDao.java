@@ -24,24 +24,6 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
               rs.getInt("games_count"),
               rs.getBoolean("exclude_bullet"));
 
-  private static final String H2_UPSERT =
-      """
-      MERGE INTO indexed_periods
-          (player, platform, year_month, fetched_at, is_complete, games_count, exclude_bullet)
-      KEY (player, platform, year_month, exclude_bullet)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      """;
-
-  private static final String PG_UPSERT =
-      """
-      INSERT INTO indexed_periods
-          (player, platform, year_month, fetched_at, is_complete, games_count, exclude_bullet)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (player, platform, year_month, exclude_bullet)
-      DO UPDATE SET fetched_at = EXCLUDED.fetched_at, is_complete = EXCLUDED.is_complete,
-                    games_count = EXCLUDED.games_count
-      """;
-
   private static final String FIND_COMPLETE =
       """
       SELECT player, platform, year_month, fetched_at, is_complete, games_count, exclude_bullet
@@ -61,11 +43,11 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
       "DELETE FROM indexed_periods WHERE fetched_at < ?";
 
   private final Jdbi jdbi;
-  private final boolean useH2;
+  private final SqlDialect dialect;
 
-  public IndexedPeriodDao(Jdbi jdbi, boolean useH2) {
+  public IndexedPeriodDao(Jdbi jdbi, SqlDialect dialect) {
     this.jdbi = jdbi;
-    this.useH2 = useH2;
+    this.dialect = dialect;
   }
 
   @Override
@@ -91,7 +73,7 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
       boolean isComplete,
       int gamesCount,
       boolean excludeBullet) {
-    String sql = useH2 ? H2_UPSERT : PG_UPSERT;
+    String sql = dialect.upsertIndexedPeriod();
     jdbi.useHandle(
         h ->
             h.createUpdate(sql)

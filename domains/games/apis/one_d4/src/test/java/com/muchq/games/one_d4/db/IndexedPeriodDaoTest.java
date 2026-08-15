@@ -13,7 +13,7 @@ public class IndexedPeriodDaoTest {
 
   @BeforeEach
   public void setUp() {
-    dao = new IndexedPeriodDao(TestDb.create("period_test").jdbi(), true);
+    dao = new IndexedPeriodDao(TestDb.create("period_test").jdbi(), new H2SqlDialect());
   }
 
   @Test

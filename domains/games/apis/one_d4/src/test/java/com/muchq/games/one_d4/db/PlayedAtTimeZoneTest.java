@@ -45,7 +45,7 @@ public class PlayedAtTimeZoneTest {
   @BeforeEach
   public void setUp() {
     testDb = TestDb.create("playedattz");
-    dao = new GameFeatureDao(testDb.jdbi(), true);
+    dao = new GameFeatureDao(testDb.jdbi(), new H2SqlDialect());
     requestId = UUID.randomUUID();
     try (var conn = testDb.dataSource().getConnection();
         var stmt =

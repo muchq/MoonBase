@@ -11,6 +11,7 @@ import io.micronaut.context.annotation.Bean;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 public class IndexerModuleTest {
@@ -163,10 +164,56 @@ public class IndexerModuleTest {
         .doesNotContain("java/nio/file");
   }
 
+  /**
+   * The production DAOs and Migration carry Postgres SQL only. H2's {@code MERGE INTO} is the
+   * observable mark of the old in-class dialect branch; its absence here (with {@code ON CONFLICT}
+   * present on {@link com.muchq.games.one_d4.db.PostgresSqlDialect} as the control) is what makes
+   * "H2 is a test dialect" a fact about the class files rather than a comment.
+   */
+  @Test
+  public void productionSqlCarriesNoH2Merge() throws Exception {
+    for (Class<?> type :
+        List.of(
+            com.muchq.games.one_d4.db.GameFeatureDao.class,
+            com.muchq.games.one_d4.db.IndexedPeriodDao.class,
+            com.muchq.games.one_d4.db.Migration.class)) {
+      String bytes = compiledBytes(type);
+      assertThat(bytes).as("%s still names useH2", type.getSimpleName()).doesNotContain("useH2");
+      assertThat(bytes)
+          .as("%s still carries H2 MERGE INTO SQL", type.getSimpleName())
+          .doesNotContain("MERGE INTO");
+    }
+
+    String postgres = compiledBytes(com.muchq.games.one_d4.db.PostgresSqlDialect.class);
+    assertThat(postgres)
+        .as("PostgresSqlDialect does not name ON CONFLICT, so the absences above prove nothing")
+        .contains("ON CONFLICT");
+  }
+
+  @Test
+  public void resolveJdbcUrl_prefersConfiguredProperty() {
+    assertThat(IndexerModule.resolveJdbcUrl("  jdbc:h2:mem:x  ")).isEqualTo("jdbc:h2:mem:x");
+  }
+
+  @Test
+  public void resolveJdbcUrl_fallsThroughToEnvWhenPropertyBlank() {
+    assertThatThrownBy(() -> IndexerModule.resolveJdbcUrl("   "))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("INDEXER_DB_URL");
+    assertThatThrownBy(() -> IndexerModule.resolveJdbcUrl(null))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("INDEXER_DB_URL");
+  }
+
   /** The class's own bytes, decoded so that byte-for-byte substrings survive. */
   private static String compiledBytesOfIndexerModule() throws Exception {
-    try (InputStream in = IndexerModule.class.getResourceAsStream("IndexerModule.class")) {
-      assertThat(in).as("IndexerModule.class is not on the test classpath").isNotNull();
+    return compiledBytes(IndexerModule.class);
+  }
+
+  private static String compiledBytes(Class<?> type) throws Exception {
+    String resource = type.getSimpleName() + ".class";
+    try (InputStream in = type.getResourceAsStream(resource)) {
+      assertThat(in).as("%s is not on the test classpath", resource).isNotNull();
       return new String(in.readAllBytes(), StandardCharsets.ISO_8859_1);
     }
   }

@@ -45,7 +45,7 @@ public class PostgresRetentionIndexTest {
     }
 
     dataSource = DataSourceFactory.create(PgTestUrls.jdbcUrl(rawUrl, SCHEMA));
-    new Migration(dataSource, false).run();
+    new Migration(dataSource, new PostgresSqlDialect()).run();
   }
 
   @AfterEach

@@ -3,7 +3,14 @@ package com.muchq.games.one_d4.db;
 import javax.sql.DataSource;
 import org.jdbi.v3.core.Jdbi;
 
-/** Shared test helper for creating an in-memory H2 database with JDBI. */
+/**
+ * Shared test helper for creating an in-memory H2 database with JDBI.
+ *
+ * <p>H2 is a {@code runtime_deps} of {@code :test_db} — the library that opens {@code
+ * jdbc:h2:mem:…} — and of the module-boot e2e suites that set {@code indexer.db.url} without going
+ * through this helper. It is not declared on every suite that happens to depend on {@code :db}. The
+ * H2 SQL itself lives in {@link H2SqlDialect}, not in production DAOs.
+ */
 public final class TestDb {
 
   private final DataSource dataSource;
@@ -19,7 +26,7 @@ public final class TestDb {
     // share a database.
     String jdbcUrl = "jdbc:h2:mem:" + name + "_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
     DataSource dataSource = DataSourceFactory.create(jdbcUrl);
-    new Migration(dataSource, true).run();
+    new Migration(dataSource, new H2SqlDialect()).run();
     return new TestDb(dataSource, Jdbi.create(dataSource));
   }
 

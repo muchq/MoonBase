@@ -2,8 +2,8 @@ package com.muchq.games.one_d4.e2e;
 
 import com.muchq.games.one_d4.db.IndexedPeriodDao;
 import com.muchq.games.one_d4.db.IndexedPeriodStore;
+import com.muchq.games.one_d4.db.SqlDialect;
 import io.micronaut.context.annotation.Replaces;
-import io.micronaut.context.annotation.Value;
 import jakarta.inject.Singleton;
 import java.time.Instant;
 import java.util.Collection;
@@ -16,21 +16,29 @@ import org.jdbi.v3.core.Jdbi;
  * Wraps the real {@link IndexedPeriodDao} with latch-based blocking on {@code upsertPeriod}. When
  * armed, the first upsertPeriod call signals {@code upsertReached} then blocks on {@code
  * proceedWithUpsert}, giving the test explicit control over the concurrency window.
+ *
+ * <p>Takes the same {@link SqlDialect} the module wires into the production store — not a
+ * {@code @Value} default that named H2. See {@link LatchIndexedPeriodDaoWiringTest}.
  */
 @Singleton
 @Replaces(IndexedPeriodStore.class)
 public class LatchIndexedPeriodDao implements IndexedPeriodStore {
 
   private final IndexedPeriodDao delegate;
+  private final SqlDialect dialect;
   private volatile CountDownLatch upsertReached;
   private volatile CountDownLatch proceedWithUpsert;
   private volatile CountDownLatch retryReached;
   private volatile CountDownLatch proceedWithRetry;
 
-  public LatchIndexedPeriodDao(
-      Jdbi jdbi, @Value("${indexer.db.url:jdbc:h2:mem:indexer;DB_CLOSE_DELAY=-1}") String jdbcUrl) {
-    boolean useH2 = jdbcUrl.contains(":h2:");
-    this.delegate = new IndexedPeriodDao(jdbi, useH2);
+  public LatchIndexedPeriodDao(Jdbi jdbi, SqlDialect dialect) {
+    this.dialect = dialect;
+    this.delegate = new IndexedPeriodDao(jdbi, dialect);
+  }
+
+  /** The dialect this latch was wired with — same bean the module hands the production store. */
+  SqlDialect dialect() {
+    return dialect;
   }
 
   /**

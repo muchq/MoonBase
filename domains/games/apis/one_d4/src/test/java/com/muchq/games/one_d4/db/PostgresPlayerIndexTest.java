@@ -57,8 +57,8 @@ public class PostgresPlayerIndexTest {
     }
 
     dataSource = DataSourceFactory.create(PgTestUrls.jdbcUrl(rawUrl, SCHEMA));
-    new Migration(dataSource, false).run();
-    dao = new GameFeatureDao(Jdbi.create(dataSource), false);
+    new Migration(dataSource, new PostgresSqlDialect()).run();
+    dao = new GameFeatureDao(Jdbi.create(dataSource), new PostgresSqlDialect());
 
     requestId = UUID.randomUUID();
     try (Connection conn = dataSource.getConnection();
