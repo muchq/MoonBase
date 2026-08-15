@@ -2,7 +2,7 @@ package com.muchq.games.one_d4.e2e;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.muchq.games.one_d4.db.H2SqlDialect;
+import com.muchq.games.one_d4.db.PostgresSqlDialect;
 import com.muchq.games.one_d4.db.SqlDialect;
 import io.micronaut.context.ApplicationContext;
 import java.util.Map;
@@ -45,9 +45,14 @@ public class LatchIndexedPeriodDaoWiringTest {
     SqlDialect dialect = ctx.getBean(SqlDialect.class);
     LatchIndexedPeriodDao latch = ctx.getBean(LatchIndexedPeriodDao.class);
 
-    assertThat(dialect)
+    // Named by class rather than importing H2SqlDialect: that type lives on :test_db, and this
+    // suite already has H2 on the classpath without pulling the whole test_db library in.
+    assertThat(dialect.getClass().getSimpleName())
         .as("module-boot against an H2 URL must select the H2 dialect via TestSqlDialectFactory")
-        .isInstanceOf(H2SqlDialect.class);
+        .isEqualTo("H2SqlDialect");
+    assertThat(dialect)
+        .as("control: the production Postgres dialect must not win on an H2 URL")
+        .isNotInstanceOf(PostgresSqlDialect.class);
     assertThat(latch.dialect())
         .as("the latch must hold the same SqlDialect bean the rest of the module got")
         .isSameAs(dialect);
