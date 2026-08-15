@@ -2,4 +2,3 @@ target
 out
 web/build_pal/node_modules
 .ijwb
-.clwb
