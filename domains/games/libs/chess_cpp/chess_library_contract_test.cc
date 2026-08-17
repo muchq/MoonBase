@@ -93,6 +93,19 @@ TEST(PgnReaderContract, KeepsUnknownHeadersRatherThanRejectingThem) {
               testing::Contains(std::make_pair(std::string("SomethingNew"), std::string("7"))));
 }
 
+TEST(PgnReaderContract, RaisesExceededMaxStringLengthForAnOversizedToken) {
+  // Our own error text exists because of this code: StreamParserError's
+  // message() has no case for it and falls into assert(false), so pgn.cc
+  // never calls message(). Pinned here because the day upstream describes
+  // it, that workaround can go — and because the code itself is what a
+  // 255-plus-character tag in a real archive produces.
+  std::istringstream stream("[Event \"" + std::string(300, 'x') + "\"]\n\n1. e4 *\n");
+  Recorder recorder;
+  const chess::pgn::StreamParserError error = chess::pgn::StreamParser(stream).readGames(recorder);
+  EXPECT_TRUE(error.hasError());
+  EXPECT_EQ(error.code(), chess::pgn::StreamParserError::ExceededMaxStringLength);
+}
+
 // --- SAN parsing --------------------------------------------------------
 
 TEST(SanContract, RejectsAnIllegalMove) {
@@ -172,6 +185,28 @@ TEST(BoardContract, UnmakeMoveRestoresThePositionExactly) {
 
   EXPECT_EQ(board.getFen(), fen);
   EXPECT_EQ(board.hash(), hash);
+}
+
+TEST(BoardContract, FenOmitsTheEnPassantSquareWhenNoCaptureIsAvailable) {
+  // The convention split corpus_test compares around, and the reason it
+  // compares that field asymmetrically: chess.com writes the square after
+  // any double push, this library writes it only when a capture is really
+  // on. Both directions, so an upstream change to either fails here by
+  // name instead of as a corpus diff.
+  // Played out from the standard position rather than set up by hand, so
+  // the fixtures cannot themselves be wrong about whose pawn is where.
+  const auto play = [](std::initializer_list<const char*> sans) {
+    chess::Board board;
+    for (const char* san : sans) board.makeMove(chess::uci::parseSan(board, san));
+    return board.getFen();
+  };
+
+  // 1. e4 — a double push with no black pawn on b4 or d4 to answer it.
+  EXPECT_THAT(play({"e4"}), testing::HasSubstr(" - 0 1")) << "nothing can take on e3";
+
+  // 1. e4 a6 2. e5 d5 — now the e5 pawn really can take on d6.
+  EXPECT_THAT(play({"e4", "a6", "e5", "d5"}), testing::HasSubstr(" d6 "))
+      << "the e5 pawn can take on d6";
 }
 
 TEST(BoardContract, FenCarriesHalfmoveAndFullmoveCounters) {

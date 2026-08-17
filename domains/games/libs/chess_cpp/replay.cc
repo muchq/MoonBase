@@ -1,5 +1,6 @@
 #include "domains/games/libs/chess_cpp/replay.h"
 
+#include <algorithm>
 #include <exception>
 #include <optional>
 #include <string>
@@ -29,28 +30,33 @@ absl::Status Replay(absl::Span<const std::string> san_moves,
 
 absl::Status ReplayFrom(std::string_view start_fen, absl::Span<const std::string> san_moves,
                         absl::FunctionRef<void(const Position&)> on_position) {
+  // Kings are counted in the text, before the library is handed it, and
+  // that ordering is the whole point rather than a style choice: setFen
+  // itself is not safe to call on a kingless position. It builds the
+  // castling paths as it parses, which calls kingSq() for both colours
+  // unconditionally, and kingSq() asserts on an empty king bitboard — so a
+  // [FEN] tag with a king missing aborts the process in a debug or
+  // sanitizer build, and reads an empty bitboard's lsb under NDEBUG. A
+  // check after the call could never run.
+  const std::string_view placement = start_fen.substr(0, start_fen.find(' '));
+  const auto count = [placement](char king) {
+    return std::count(placement.begin(), placement.end(), king);
+  };
+  if (count('K') != 1 || count('k') != 1) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("not a position, wants exactly one king per side: ", start_fen));
+  }
+
   chess::Board board;
   if (!board.setFen(start_fen)) {
     return absl::InvalidArgumentError(absl::StrCat("not a position: ", start_fen));
   }
 
-  // setFen checks syntax, not whether the position could occur, and its
-  // king check is off by default. Both gaps are reachable now that
-  // StartFen() feeds this straight from a [FEN] tag:
-  //
-  //  - No king, and the first facts::Checkers or board.kingSq() on the
-  //    result trips an assert inside the library (or, with NDEBUG, reads
-  //    an empty bitboard's lsb).
-  //  - The side *not* to move already in check is a position no game can
-  //    reach, and the next move can capture a king: the replay runs to
-  //    completion and hands out positions with pieces missing.
-  //
-  // Both are bad input rather than bad games, and saying so here beats
-  // failing somewhere in a detector three modules away.
-  if (!board.pieces(chess::PieceType::KING, chess::Color::WHITE) ||
-      !board.pieces(chess::PieceType::KING, chess::Color::BLACK)) {
-    return absl::InvalidArgumentError(absl::StrCat("position is missing a king: ", start_fen));
-  }
+  // The remaining gap is legality rather than syntax, and StartFen() feeds
+  // this straight from a [FEN] tag: a position with the side *not* to move
+  // already in check is one no game can reach, and the next move can
+  // capture a king. Left alone the replay runs happily to the end while
+  // handing out positions with pieces missing.
   const chess::Color waiting = ~board.sideToMove();
   if (chess::attacks::attackers(board, board.sideToMove(), board.kingSq(waiting))) {
     return absl::InvalidArgumentError(

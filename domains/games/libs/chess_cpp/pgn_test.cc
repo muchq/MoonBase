@@ -117,6 +117,24 @@ TEST(ParseGames, StopsAtTheFirstSinkFailureAndReportsIt) {
   EXPECT_EQ(seen, 2) << "the third game should not have reached the sink";
 }
 
+TEST(ParseGames, ReportsAnOversizedTokenInsteadOfAborting) {
+  // PGN string tokens cap at 255 characters in the reader, and the code it
+  // raises past that is the one its own message() forgets — asking that
+  // function to describe it runs into assert(false). So this input aborts
+  // the process unless the description is ours, and it arrives from
+  // somebody else's archive. Both halves of the reader that can raise it:
+  // a header value, and a move token.
+  const std::string too_long(300, 'x');
+
+  for (const std::string& pgn :
+       {"[Event \"" + too_long + "\"]\n\n1. e4 *\n", "[Event \"x\"]\n\n1. " + too_long + " *\n"}) {
+    std::istringstream stream(pgn);
+    const absl::Status status = ParseGames(stream, [](ParsedGame) { return absl::OkStatus(); });
+    EXPECT_EQ(status.code(), absl::StatusCode::kInvalidArgument);
+    EXPECT_THAT(status.message(), testing::HasSubstr("255 characters"));
+  }
+}
+
 // --- StartFen -----------------------------------------------------------
 
 TEST(StartFen, IsTheStandardPositionWhenNothingSaysOtherwise) {

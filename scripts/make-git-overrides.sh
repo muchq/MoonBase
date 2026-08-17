@@ -173,10 +173,17 @@ while IFS=$'\t' read -r name url strip_prefix; do
   subdir="${strip_prefix#*/}"
   [ "$subdir" = "$strip_prefix" ] && subdir=""
 
-  out="$DEST/$name-override"
+  repo="$(sed -E 's|https://github.com/([^/]+/[^/]+)/archive/.*|\1|' <<<"$url")"
+  ref="$(sed -E 's|.*/archive/(refs/tags/)?(.*)\.(tar\.gz\|zip)|\2|' <<<"$url")"
+
+  # The ref is in the directory name, exactly as the registry loop puts the
+  # version in its own. "$name-override" would be a cache key that never
+  # changes: a bumped pin would find the old clone already there, skip the
+  # fetch, and emit an override that quietly builds the previous commit —
+  # the stale-override failure this whole path exists to avoid, and the
+  # opposite of what the comment above promises.
+  out="$DEST/$name-$ref"
   if [ ! -d "$out" ]; then
-    repo="$(sed -E 's|https://github.com/([^/]+/[^/]+)/archive/.*|\1|' <<<"$url")"
-    ref="$(sed -E 's|.*/archive/(refs/tags/)?(.*)\.(tar\.gz\|zip)|\2|' <<<"$url")"
     echo ">> $name (archive_override)  <-  $repo @ $ref"
     # Commit-pinned far more often than tagged: a commit is the only thing
     # you can pin before a project cuts releases, which is a large part of

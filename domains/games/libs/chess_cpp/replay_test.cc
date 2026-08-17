@@ -201,6 +201,30 @@ TEST(ReplayFrom, PlaysAnOddsGameThatIsIllegalFromTheStandardStart) {
   EXPECT_TRUE(status.ok()) << status;
 }
 
+TEST(ReplayFrom, RejectsAPositionMissingAKing) {
+  // Not a taste question: setFen builds castling paths as it parses, which
+  // calls kingSq() for both colours, and kingSq() asserts on an empty king
+  // bitboard — so this input aborts the process outright if it reaches the
+  // library. It arrives from a [FEN] tag in somebody else's archive, so it
+  // has to be rejected before that, and this test runs under the sanitize
+  // job where the assert is live.
+  for (const std::string_view kingless : {"8/8/8/8/8/8/8/4K3 w - - 0 1",   // no black king
+                                          "4k3/8/8/8/8/8/8/8 w - - 0 1",   // no white king
+                                          "8/8/8/8/8/8/8/8 w - - 0 1"}) {  // neither
+    const absl::Status status = ReplayFrom(kingless, {}, [](const Position&) {});
+    EXPECT_EQ(status.code(), absl::StatusCode::kInvalidArgument) << kingless;
+    EXPECT_THAT(status.message(), testing::HasSubstr("one king per side")) << kingless;
+  }
+}
+
+TEST(ReplayFrom, RejectsAPositionWithTheSideNotToMoveInCheck) {
+  // Unreachable in a real game, and the next move can capture a king.
+  const absl::Status status =
+      ReplayFrom("4k3/8/8/8/8/8/8/r2K4 b - - 0 1", {"Rxd1"}, [](const Position&) {});
+  EXPECT_EQ(status.code(), absl::StatusCode::kInvalidArgument);
+  EXPECT_THAT(status.message(), testing::HasSubstr("not to move in check"));
+}
+
 TEST(ReplayFrom, RejectsTextThatIsNotAPosition) {
   const absl::Status status = ReplayFrom("not a fen at all", {"e4"}, [](const Position&) {});
   EXPECT_EQ(status.code(), absl::StatusCode::kInvalidArgument);

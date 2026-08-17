@@ -61,6 +61,34 @@ class CollectingVisitor : public chess::pgn::Visitor {
   absl::Status status_ = absl::OkStatus();
 };
 
+/// Says what a reader error was, in our own words.
+///
+/// Deliberately not StreamParserError::message(). That switch has no case
+/// for ExceededMaxStringLength and falls through to assert(false), so
+/// asking it to describe one aborts the process in a debug or sanitizer
+/// build and answers "Unknown error" under NDEBUG. The code is entirely
+/// reachable from input we do not control: PGN string tokens cap at 255
+/// characters, and a longer tag value or move token in somebody's archive
+/// would take the worker down with it. Describing the codes here costs a
+/// switch and removes that.
+std::string_view Describe(chess::pgn::StreamParserError::Code code) {
+  switch (code) {
+    case chess::pgn::StreamParserError::None:
+      return "no error";
+    case chess::pgn::StreamParserError::ExceededMaxStringLength:
+      return "a header or move token is longer than the 255 characters PGN allows";
+    case chess::pgn::StreamParserError::InvalidHeaderMissingClosingBracket:
+      return "a header is missing its closing bracket";
+    case chess::pgn::StreamParserError::InvalidHeaderMissingClosingQuote:
+      return "a header is missing its closing quote";
+    case chess::pgn::StreamParserError::NotEnoughData:
+      return "not enough data";
+  }
+  // No default label, so adding a code upstream fails the build here rather
+  // than at runtime — which is the whole problem being fixed.
+  return "unrecognised reader error";
+}
+
 }  // namespace
 
 absl::Status ParseGames(std::istream& stream, absl::FunctionRef<absl::Status(ParsedGame)> on_game) {
@@ -72,7 +100,7 @@ absl::Status ParseGames(std::istream& stream, absl::FunctionRef<absl::Status(Par
   // truncation at the end instead would name the symptom.
   if (!visitor.status().ok()) return visitor.status();
   if (error.hasError()) {
-    return absl::InvalidArgumentError(absl::StrCat("malformed pgn: ", error.message()));
+    return absl::InvalidArgumentError(absl::StrCat("malformed pgn: ", Describe(error.code())));
   }
   return absl::OkStatus();
 }
