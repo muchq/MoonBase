@@ -39,10 +39,12 @@
 # modules already built.
 #
 # Registry modules are the bulk of it and are found by scanning the
-# lockfile. Two repos come from module extensions instead, so they never
-# appear in that scan and are handled explicitly at the bottom: the bats
-# toolchain and raylib. (container_structure_test needs no special case —
-# it is a registry module, so the scan already covers it.)
+# lockfile. Two other kinds cannot be found that way and are handled after
+# it: modules pinned with archive_override, which have no source.json for
+# the scan to walk (smithy_cpp), and repos created by module extensions,
+# which are not modules at all (the bats toolchain, raylib).
+# (container_structure_test needs no special case — it is a registry
+# module, so the scan already covers it.)
 set -euo pipefail
 
 DEST="${1:-$HOME/bazel-overrides}"
@@ -140,6 +142,80 @@ for mod in $modules; do
   fi
   echo "common --override_module=$name=$out${subdir:+/$subdir}" >> "$RC.tmp"
 done
+
+# Modules this repo pins with archive_override rather than taking from the
+# registry (#1349). They are invisible to the scan above for a structural
+# reason: it walks source.json URLs, and a module the registry does not
+# serve has no source.json to record — so smithy_cpp never appeared, and
+# every bazel command in a sandbox died before analysis with a 403 on its
+# archive URL. Not "the scan missed one": it could not have seen it.
+#
+# Read out of the MODULE.bazel files rather than listed here, for the same
+# reason the raylib tag below is: a hardcoded pin next to a "keep in sync"
+# comment fails silently the first time somebody bumps the commit, and
+# --override_module wins, so the stale clone is quietly what gets built.
+#
+# Nothing to fetch from the registry for these, unlike the loop above — an
+# archive_override module carries its own MODULE.bazel, which is most of
+# why it is overridden rather than published.
+MODULE_FILES=("$(dirname "$0")/../MODULE.bazel" "$(dirname "$0")"/../bazel/*.MODULE.bazel)
+while IFS=$'\t' read -r name url strip_prefix; do
+  [ -n "$name" ] || continue
+  # Same filter as the registry path: only the on-demand archive endpoints
+  # are blocked, so an override already pinned to a release asset is fine.
+  case "$url" in
+    *github.com/*/archive/*) ;;
+    *) continue ;;
+  esac
+
+  # And the same strip_prefix rule: its first component is the directory
+  # GitHub wraps an archive in, which a clone does not have.
+  subdir="${strip_prefix#*/}"
+  [ "$subdir" = "$strip_prefix" ] && subdir=""
+
+  out="$DEST/$name-override"
+  if [ ! -d "$out" ]; then
+    repo="$(sed -E 's|https://github.com/([^/]+/[^/]+)/archive/.*|\1|' <<<"$url")"
+    ref="$(sed -E 's|.*/archive/(refs/tags/)?(.*)\.(tar\.gz\|zip)|\2|' <<<"$url")"
+    echo ">> $name (archive_override)  <-  $repo @ $ref"
+    # Commit-pinned far more often than tagged: a commit is the only thing
+    # you can pin before a project cuts releases, which is a large part of
+    # why it is not in the registry. So fetch the object by name first, and
+    # keep --branch as the fallback for the tag case.
+    if ! (git -c advice.detachedHead=false init -q "$out.tmp" &&
+      git -C "$out.tmp" remote add origin "https://github.com/$repo.git" &&
+      git -C "$out.tmp" fetch -q --depth 1 origin "$ref" &&
+      git -C "$out.tmp" -c advice.detachedHead=false checkout -q FETCH_HEAD); then
+      rm -rf "$out.tmp"
+      git -c advice.detachedHead=false clone -q --depth 1 --branch "$ref" \
+        "https://github.com/$repo.git" "$out.tmp"
+    fi
+    rm -rf "$out.tmp/.git"
+    mv "$out.tmp" "$out"
+  fi
+  echo "common --override_module=$name=$out${subdir:+/$subdir}" >> "$RC.tmp"
+done < <(awk '
+  # The first double-quoted string on the line, unquoted. Deliberately not
+  # a gsub of the surrounding text: /.*"/ is greedy and eats through the
+  # closing quote, which silently yields an empty field rather than a
+  # wrong one, and an empty field here reads exactly like "this repo pins
+  # nothing with archive_override".
+  function quoted(line,   value) {
+    if (!match(line, /"[^"]*"/)) return ""
+    return substr(line, RSTART + 1, RLENGTH - 2)
+  }
+  /archive_override\(/ { in_block = 1; name = ""; url = ""; prefix = ""; next }
+  in_block && /^\)/ {
+    if (name != "" && url != "") print name "\t" url "\t" prefix
+    in_block = 0
+    next
+  }
+  in_block {
+    if ($0 ~ /module_name[[:space:]]*=/) name = quoted($0)
+    if ($0 ~ /strip_prefix[[:space:]]*=/) prefix = quoted($0)
+    if (url == "" && $0 ~ /"https:\/\//) url = quoted($0)
+  }
+' "${MODULE_FILES[@]}")
 
 # Two repos come from module extensions rather than the registry, so the
 # lockfile scan above cannot see them and --override_module does not apply.
