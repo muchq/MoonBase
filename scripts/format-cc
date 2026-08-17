@@ -2,4 +2,14 @@
 
 set -e
 
-find . -type f -iname '*.cc' -o -iname '*.h' | xargs clang-format -i
+# bazel/3p holds vendored third-party sources (see bazel/3p/chess_library).
+# They are kept byte-identical to upstream so an update is a re-download
+# rather than a re-download plus a reformat, and so the diff of an update is
+# the upstream change and nothing else.
+#
+# The parentheses matter: -o binds looser than the implicit -a, so without
+# them "-type f -iname '*.cc' -o -iname '*.h'" reads as "(a regular file
+# named *.cc) or (anything named *.h)" and the prune leaks.
+find . -path ./bazel/3p -prune -o \
+  -type f \( -iname '*.cc' -o -iname '*.h' \) \
+  -exec clang-format -i {} +

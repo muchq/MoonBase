@@ -353,6 +353,17 @@ java_library(
     resources = ["src/test/resources/hikaru_corpus.pgn"],
 )
 
+# The same corpus as a plain file, for tests that read it off disk instead
+# of the classpath — //domains/games/libs/chess_cpp:corpus_test replays it
+# and asserts the same ply count HikaruCorpusParityTest does, which is what
+# holds the two tokenizers to each other. One copy of the file, two readers.
+filegroup(
+    name = "parity_corpora",
+    testonly = True,
+    srcs = ["src/test/resources/hikaru_corpus.pgn"],
+    visibility = ["//domains/games:__subpackages__"],
+)
+
 # CHESSQL.md as a classpath resource, so mcpserver can serve it as an MCP resource (#1326).
 # Deliberately not testonly: this ships inside the mcpserver image. The doc stays a readable file
 # in the repo — the resource is the same bytes, not a generated copy — and ChessQlReferenceTest

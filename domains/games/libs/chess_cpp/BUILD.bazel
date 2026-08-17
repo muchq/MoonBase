@@ -1,0 +1,162 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+# chess_cpp: the chess layer of the C++ index worker (#1389) — PGN in,
+# positions out, and the board queries the motif detectors are built on.
+#
+# The targets are split along the dependency direction they are meant to
+# have, and the split is load-bearing rather than decorative: parsed_game
+# names no chess type at all, so `pgn` builds without a chess library;
+# board_facts never sees a PGN; and phase 2's detectors take `side` and
+# `board_facts` without dragging parsing in behind them.
+
+cc_library(
+    name = "side",
+    srcs = ["side.cc"],
+    hdrs = ["side.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//bazel/3p/chess_library"],
+)
+
+cc_library(
+    name = "parsed_game",
+    srcs = ["parsed_game.cc"],
+    hdrs = ["parsed_game.h"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "pgn",
+    srcs = ["pgn.cc"],
+    hdrs = ["pgn.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":parsed_game",
+        "//bazel/3p/chess_library",
+        "@com_google_absl//absl/functional:function_ref",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "replay",
+    srcs = ["replay.cc"],
+    hdrs = ["replay.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":side",
+        "//bazel/3p/chess_library",
+        "@com_google_absl//absl/functional:function_ref",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "board_facts",
+    srcs = ["board_facts.cc"],
+    hdrs = ["board_facts.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":side",
+        "//bazel/3p/chess_library",
+    ],
+)
+
+cc_test(
+    name = "side_test",
+    size = "small",
+    srcs = ["side_test.cc"],
+    deps = [
+        ":side",
+        "//bazel/3p/chess_library",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "parsed_game_test",
+    size = "small",
+    srcs = ["parsed_game_test.cc"],
+    deps = [
+        ":parsed_game",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "pgn_test",
+    size = "small",
+    srcs = ["pgn_test.cc"],
+    deps = [
+        ":parsed_game",
+        ":pgn",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "replay_test",
+    size = "small",
+    srcs = ["replay_test.cc"],
+    deps = [
+        ":board_facts",
+        ":replay",
+        ":side",
+        "//bazel/3p/chess_library",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "board_facts_test",
+    size = "small",
+    srcs = ["board_facts_test.cc"],
+    deps = [
+        ":board_facts",
+        ":side",
+        "//bazel/3p/chess_library",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# The Beyoncé-rule suite: every upstream behavior this library declines to
+# implement itself, pinned by name so a vendored-header update fails here
+# rather than in a corpus diff. See bazel/3p/chess_library/README.md.
+cc_test(
+    name = "chess_library_contract_test",
+    size = "small",
+    srcs = ["chess_library_contract_test.cc"],
+    deps = [
+        "//bazel/3p/chess_library",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# Reads its corpora from the runfiles root, so both banks are data deps.
+# hikaru_corpus.pgn is shared with the Java pipeline's parity test and
+# stays where that test's resource wiring expects it.
+cc_test(
+    name = "corpus_test",
+    size = "medium",
+    srcs = ["corpus_test.cc"],
+    data = [
+        "testdata/tactics_corpus.pgn",
+        "//domains/games/apis/one_d4:parity_corpora",
+    ],
+    deps = [
+        ":board_facts",
+        ":parsed_game",
+        ":pgn",
+        ":replay",
+        ":side",
+        "//bazel/3p/chess_library",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)
