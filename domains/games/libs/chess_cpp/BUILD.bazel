@@ -5,7 +5,9 @@ load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 #
 # The targets are split along the dependency direction they are meant to
 # have, and the split is load-bearing rather than decorative: parsed_game
-# names no chess type at all, so `pgn` builds without a chess library;
+# names no chess type at all and builds without the chess library, so the
+# data model a caller holds after parsing carries none; pgn keeps the
+# library to its implementation, and pgn.h exposes no chess type either;
 # board_facts never sees a PGN; and phase 2's detectors take `side` and
 # `board_facts` without dragging parsing in behind them.
 
