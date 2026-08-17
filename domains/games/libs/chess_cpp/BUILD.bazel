@@ -140,9 +140,16 @@ cc_test(
 # Reads its corpora from the runfiles root, so both banks are data deps.
 # hikaru_corpus.pgn is shared with the Java pipeline's parity test and
 # stays where that test's resource wiring expects it.
+#
+# small, on measurement rather than optimism: 650 games and ~60k plies run
+# in 0.1s normally, and the sanitize job's instrumented -O0 build — which
+# also turns NDEBUG back off, arming ~85 asserts in the vendored header —
+# tops out at 3.2s under tsan. Bazel warns when a test finishes this far
+# inside a medium budget, and the warning would be the only thing anyone
+# ever read about it.
 cc_test(
     name = "corpus_test",
-    size = "medium",
+    size = "small",
     srcs = ["corpus_test.cc"],
     data = [
         "testdata/tactics_corpus.pgn",
