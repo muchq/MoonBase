@@ -15,6 +15,9 @@ import java.util.List;
  * <ol>
  *   <li>The move ends with '#' (checkmate).
  *   <li>The checkmated king is on its back rank (row 7 for white king, row 0 for black king).
+ *   <li>The checking piece is on that same back rank, so the mate is delivered along it. A queen or
+ *       bishop giving mate from g7 is a support mate, not this one — ten of the thirteen rows in
+ *       the parity corpus were exactly that.
  *   <li>At least one of the escape squares on the adjacent rank is occupied by a friendly piece.
  * </ol>
  */

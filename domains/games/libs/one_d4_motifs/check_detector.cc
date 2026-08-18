@@ -1,10 +1,10 @@
-// The check family: CHECK, and the two the read path has been deriving
-// from ATTACK rows because nothing stored them.
+// The check family: CHECK, and the two the read path derives from ATTACK
+// rows because nothing has ever stored them.
 //
-// DISCOVERED_CHECK is where this stops being a heuristic. The derivation
-// asks whether a discovered ATTACK row happens to target a king, which
-// depends on the discovery scan having produced that row; this asks the
-// move generator what kind of check the move gives.
+// Both stop being heuristics here. The derivations ask how many discovered
+// ATTACK rows happen to name a king, which depends on the discovery scan
+// having produced those rows; these ask the position which pieces are
+// giving check, and which of them this move did not put down.
 
 #include <algorithm>
 #include <memory>
@@ -97,8 +97,8 @@ class DiscoveredCheckDetector : public Detector {
 };
 
 /// DOUBLE_CHECK: two pieces giving check at once, so only the king may
-/// move. A property of the position, counted rather than inferred from how
-/// many ATTACK rows happen to name the king.
+/// move. Counted on the board rather than inferred from how many ATTACK
+/// rows happen to name the king.
 class DoubleCheckDetector : public Detector {
  public:
   Motif motif() const override { return Motif::kDoubleCheck; }

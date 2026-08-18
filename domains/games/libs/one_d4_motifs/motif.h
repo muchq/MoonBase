@@ -8,10 +8,12 @@ namespace one_d4 {
 
 /// A tactical pattern, spelled as `motif_occurrences.motif` spells it.
 ///
-/// The full set, not just what extraction writes: FORK, CHECKMATE,
-/// DISCOVERED_ATTACK, DISCOVERED_CHECK and DOUBLE_CHECK are derived from
-/// ATTACK rows at read time (GameFeatureDao); ZUGZWANG and OVERLOADED_PIECE
-/// have no detector yet.
+/// Extraction writes all of these but FORK, which is a grouping of ATTACK
+/// rows by attacker and is derived at read time (GameFeatureDao) and
+/// nowhere else. CHECKMATE, DISCOVERED_ATTACK, DISCOVERED_CHECK and
+/// DOUBLE_CHECK are derived there too, from the same rows — the read path
+/// keeps doing that until it can tell a game these detectors scanned from
+/// one they did not.
 enum class Motif {
   kPin,
   kCrossPin,

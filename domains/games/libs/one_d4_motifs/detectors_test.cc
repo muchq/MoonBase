@@ -299,8 +299,9 @@ TEST(DoubleCheckDetector, OneCheckerIsNotADoubleCheck) {
 }
 
 TEST(CheckmateDetector, StoresARowOfItsOwn) {
-  // Derived from ATTACK rows until now, which is why ChessQL's ORDER BY and
-  // sequence() have never matched a checkmate.
+  // Derived from ATTACK rows until now. ChessQL's WHERE and sequence() work
+  // off that derivation; ORDER BY motif_count counts stored rows, so it has
+  // always counted zero checkmates.
   const auto found =
       Found("[Event \"x\"]\n\n1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 4. Qxf7# 1-0\n", Motif::kCheckmate);
   ASSERT_EQ(found.size(), 1u);
