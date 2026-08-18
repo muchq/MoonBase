@@ -29,4 +29,7 @@ std::string_view ResultOf(std::string_view white, std::string_view black) {
   return "unknown";
 }
 
+absl::Span<const std::string_view> KnownDraws() { return kDraws; }
+absl::Span<const std::string_view> KnownLosses() { return kLosses; }
+
 }  // namespace one_d4_worker

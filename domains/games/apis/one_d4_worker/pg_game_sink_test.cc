@@ -30,16 +30,36 @@ using ::testing::ElementsAre;
 constexpr char kRequest[] = "00000000-0000-4000-8000-000000000001";
 constexpr char kOwner[] = "worker-1";
 
+/// This suite's own schema, so its DDL cannot race pg_queue_test's: both
+/// drop and recreate indexing_requests, and bazel runs them at the same
+/// time against one database.
+constexpr char kSchema[] = "one_d4_game_sink_test";
+
+/// The connection options carried in the conninfo rather than set with a
+/// statement, because pg::Client reconnects lazily and a reconnect drops
+/// anything a session-level SET established — silently, and the timezone
+/// would go back to the one value that makes half these assertions blind.
+///
+/// Not UTC, deliberately: under a UTC session `AT TIME ZONE 'UTC'` and a
+/// bare cast agree, so the convention could be deleted and nothing here
+/// would notice.
+std::string Conninfo(const std::string& url) {
+  return absl::StrCat(url, url.find('?') == std::string::npos ? "?" : "&",
+                      "options=-c%20search_path%3D", kSchema,
+                      "%20-c%20timezone%3DAmerica/New_York");
+}
+
 class PgGameSinkTest : public testing::Test {
  protected:
   void SetUp() override {
     const char* url = std::getenv("PG_TEST_DB_URL");
     if (url == nullptr || *url == '\0') GTEST_SKIP() << "PG_TEST_DB_URL unset";
-    client_ = std::make_unique<pg::Client>(url);
-    // Not UTC, deliberately. Under a UTC session `AT TIME ZONE 'UTC'` and a
-    // bare cast agree, so every assertion below about the convention would
-    // hold with the conversion deleted.
-    ASSERT_TRUE(client_->Exec("SET TimeZone = 'America/New_York'").ok());
+    {
+      pg::Client bootstrap(url);
+      ASSERT_TRUE(bootstrap.Exec(absl::StrCat("CREATE SCHEMA IF NOT EXISTS ", kSchema)).ok());
+    }
+    conninfo_ = Conninfo(url);
+    client_ = std::make_unique<pg::Client>(conninfo_);
 
     // Column for column what PostgresSqlDialect creates and Migration adds.
     ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS indexed_periods").ok());
@@ -146,6 +166,7 @@ class PgGameSinkTest : public testing::Test {
         << "the session went back to UTC, so the assertion below proves nothing";
   }
 
+  std::string conninfo_;
   std::unique_ptr<pg::Client> client_;
   std::unique_ptr<PgGameSink> sink_;
 };
@@ -421,9 +442,7 @@ TEST_F(PgGameSinkTest, TakesTheRequestRowRatherThanReadingIt) {
   // row, so it waits behind a rival whether the fence locks or not. The
   // empty write takes no such lock — and it is the write whose answer
   // gates the unfenced period row.
-  const char* url = std::getenv("PG_TEST_DB_URL");
-  ASSERT_NE(url, nullptr);
-  pg::Client rival(url);
+  pg::Client rival(conninfo_);
 
   absl::Notification held;
   absl::Notification release;

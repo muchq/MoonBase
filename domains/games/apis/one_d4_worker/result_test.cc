@@ -87,6 +87,23 @@ TEST(GameResult, LossesAreTheSameWordsToo) {
   }
 }
 
+TEST(GameResult, KnowsNoWordsTheJavaWorkerDoesNot) {
+  // The other direction, and the one the tests above cannot see: a word
+  // added here and not there is the same two-indexes-disagree harm, with
+  // this worker calling a game drawn that the other calls unfinished.
+  const std::set<std::string> draws = WordsIn(JavaSource(), "isDrawResult");
+  const std::set<std::string> losses = WordsIn(JavaSource(), "isLossResult");
+  ASSERT_FALSE(draws.empty());
+  ASSERT_FALSE(losses.empty());
+
+  for (const std::string_view word : KnownDraws()) {
+    EXPECT_TRUE(draws.count(std::string(word)) != 0) << word << " is a draw here and not in Java";
+  }
+  for (const std::string_view word : KnownLosses()) {
+    EXPECT_TRUE(losses.count(std::string(word)) != 0) << word << " is a loss here and not in Java";
+  }
+}
+
 TEST(GameResult, TheContractTestReadsSomethingRatherThanNothing) {
   // The regex above quietly returning an empty set would make both tests
   // above pass while checking nothing at all.

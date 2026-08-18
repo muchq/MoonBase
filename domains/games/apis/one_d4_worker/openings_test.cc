@@ -60,6 +60,16 @@ TEST(Openings, FamilyDropsAContinuationGluedToTheStructuralWord) {
   EXPECT_EQ(OpeningFamilyFromName("Owens Defense...3.Nc3 e6 4...Bb4"), "Owens Defense");
 }
 
+TEST(Openings, KeepsBothInsideTheColumn) {
+  // opening_name and opening_family are VARCHAR(255). A slug longer than
+  // that is not a parse error, it is a run-killing "value too long" on the
+  // insert — and chess.com's slugs carry the whole move continuation.
+  const std::string slug(400, 'a');
+  const std::string name = OpeningNameFromEcoUrl("https://www.chess.com/openings/" + slug);
+  EXPECT_EQ(name.size(), 255u);
+  EXPECT_EQ(OpeningFamilyFromName(std::string(400, 'b') + " Defense").size(), 255u);
+}
+
 TEST(Openings, FamilyFallsBackToTheFirstTwoWords) {
   EXPECT_EQ(OpeningFamilyFromName("Something Unusual Line Here"), "Something Unusual");
   EXPECT_EQ(OpeningFamilyFromName("Singleword"), "Singleword");
