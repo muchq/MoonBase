@@ -18,6 +18,7 @@ namespace {
 
 using ::testing::ElementsAre;
 using ::testing::IsEmpty;
+using ::testing::Not;
 
 constexpr char kScholarsMate[] =
     "[Event \"Live Chess\"]\n[White \"alice\"]\n[Black \"bob\"]\n[ECO \"C20\"]\n\n"
@@ -171,6 +172,7 @@ TEST(IndexRun, WritesWhatItExtracted) {
   EXPECT_EQ(game.opening_family, "Kings Pawn Opening");
   EXPECT_EQ(game.time_class, "blitz");
   EXPECT_EQ(game.played_at, 1767225600);
+  EXPECT_EQ(game.indexed_at, kLongAfter) << "the worker's clock, not the database's";
   EXPECT_EQ(game.num_moves, 4);
   EXPECT_FALSE(game.occurrences.empty()) << "the motifs are the point of indexing it";
 }
@@ -219,11 +221,16 @@ TEST(IndexRun, FailsWhenTheArchiveCannotBeReached) {
   EXPECT_EQ(report.status().code(), absl::StatusCode::kUnavailable);
 }
 
-TEST(IndexRun, SkipsAGameItCannotReplayAndKeepsGoing) {
-  // One unplayable game in a month of four hundred must not fail the month.
+TEST(IndexRun, RecordsAGameItCannotReplayRatherThanDroppingIt) {
+  // One unplayable game in a month of four hundred must not fail the
+  // month — and must not vanish from it either. Its players, result and
+  // PGN are all readable, and the Java worker writes the row with no
+  // motifs and no moves. Dropped here, the row exists on one indexer and
+  // not the other, and games_count agrees with neither.
   FakeArchive archive;
-  archive.months["2026-01"] = {AGame("g1"), AGame("g2", "[Event \"x\"]\n\n1. e4 e5 2. Qh6 *\n"),
-                               AGame("g3")};
+  ArchivedGame broken = AGame("g-broken");
+  broken.pgn = "[White \"alice\"]\n[Black \"bob\"]\n\n1. e4 e5 2. Qh6 *\n";
+  archive.months["2026-01"] = {AGame("g1"), broken, AGame("g2")};
   FakeSink sink;
   FakeLease lease;
 
@@ -231,8 +238,31 @@ TEST(IndexRun, SkipsAGameItCannotReplayAndKeepsGoing) {
   const absl::StatusOr<RunReport> report = run.Execute(AJob(), lease);
 
   ASSERT_TRUE(report.ok()) << report.status();
-  EXPECT_EQ(report->games_indexed, 2);
-  EXPECT_EQ(sink.written.size(), 2u);
+  EXPECT_EQ(report->games_indexed, 3);
+  ASSERT_EQ(sink.written.size(), 3u);
+  EXPECT_EQ(sink.written[1].url, "g-broken");
+  EXPECT_EQ(sink.written[1].num_moves, 0);
+  EXPECT_THAT(sink.written[1].occurrences, IsEmpty());
+  EXPECT_EQ(sink.written[1].result, "1-0") << "the metadata is readable either way";
+  EXPECT_THAT(sink.written[0].occurrences, Not(IsEmpty())) << "the good games still extract";
+}
+
+TEST(IndexRun, RecordsAGameWhosePgnWillNotEvenParse) {
+  FakeArchive archive;
+  ArchivedGame garbage = AGame("g-garbage");
+  garbage.pgn = "this is not a pgn at all";
+  archive.months["2026-01"] = {garbage};
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
+
+  ASSERT_EQ(sink.written.size(), 1u);
+  EXPECT_EQ(sink.written[0].num_moves, 0);
+  EXPECT_EQ(sink.written[0].eco, "") << "no headers to read a code out of";
+  EXPECT_EQ(sink.written[0].opening_name, "Kings Pawn Opening Wayward Queen Attack")
+      << "the ECOUrl comes from the archive, not the PGN";
 }
 
 TEST(IndexRun, FlushesInBatchesRatherThanAllAtOnce) {
@@ -583,6 +613,22 @@ TEST(IndexRun, IndexesTheMonthEvenWhenTitlesCannotBeRead) {
   EXPECT_EQ(sink.written.front().white_title, "");
 }
 
+TEST(IndexRun, DoesNotRetryAFailedTitleLookupOnEveryGameOfTheMonth) {
+  // Two hundred games between two regulars while chess.com is refusing is
+  // four hundred profile calls if a failure is not remembered — against
+  // the API that is already refusing.
+  FakeArchive archive;
+  for (int i = 0; i < 4; ++i) archive.months["2026-01"].push_back(AGame(absl::StrCat("g", i)));
+  archive.title_status = absl::UnavailableError("profile lookup failed");
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
+
+  EXPECT_THAT(archive.looked_up, ElementsAre("alice", "bob"));
+}
+
 TEST(IndexRun, RetriesATitleLookupThatFailed) {
   // A failed lookup is not an answer, so caching it would carry one bad
   // minute across a decade of backfill.
@@ -596,7 +642,8 @@ TEST(IndexRun, RetriesATitleLookupThatFailed) {
   IndexRun run(archive, sink, Options());
   ASSERT_TRUE(run.Execute(AJob("2026-01", "2026-02"), lease).ok());
 
-  EXPECT_THAT(archive.looked_up, ElementsAre("alice", "bob", "alice", "bob"));
+  EXPECT_THAT(archive.looked_up, ElementsAre("alice", "bob", "alice", "bob"))
+      << "a month is where the giving-up resets";
 }
 
 TEST(IndexRun, LeavesOutBulletWhenTheRequestSaysTo) {

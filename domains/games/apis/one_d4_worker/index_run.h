@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -68,6 +69,8 @@ class IndexRun {
   GameSink& sink_;
   Options options_;
   std::map<std::string, std::string, std::less<>> titles_;
+  /// Cleared at the top of each month. See TitleOf.
+  std::set<std::string, std::less<>> unreachable_titles_;
 };
 
 }  // namespace one_d4_worker

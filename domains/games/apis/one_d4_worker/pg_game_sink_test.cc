@@ -166,6 +166,7 @@ IndexedGame AGame(std::string_view url = "https://chess.com/game/1") {
   game.result = "1-0";
   game.played_at = 1'700'000'000;
   game.num_moves = 4;
+  game.indexed_at = 1'700'000'100;
   game.pgn = "1. e4 e5";
   return game;
 }
@@ -195,6 +196,10 @@ TEST_F(PgGameSinkTest, WritesTheRowTheJavaWorkerWouldHaveWritten) {
   EXPECT_EQ(One("SELECT opening_family FROM game_features"), "Kings Pawn Opening");
   EXPECT_EQ(One("SELECT result FROM game_features"), "1-0");
   EXPECT_EQ(One("SELECT num_moves FROM game_features"), "4");
+  ExpectSessionIsNotUtc();
+  EXPECT_EQ(One("SELECT to_char(indexed_at, 'YYYY-MM-DD HH24:MI:SS') FROM game_features"),
+            "2023-11-14 22:15:00")
+      << "stamped from the worker's clock, which is the one retention compares against";
   EXPECT_EQ(One("SELECT request_id::text FROM game_features"), kRequest);
   // The column is a wall clock and the convention is UTC — the same one
   // GameFeatureDao writes on, and the one ChessQL's month filters read.
@@ -208,13 +213,12 @@ TEST_F(PgGameSinkTest, WritesTheRowTheJavaWorkerWouldHaveWritten) {
   EXPECT_EQ(One("SELECT length(id)::text FROM motif_occurrences"), "36");
 }
 
-TEST_F(PgGameSinkTest, LeavesUnknownFieldsNullRatherThanBlank) {
+TEST_F(PgGameSinkTest, LeavesUnknownTextNullRatherThanBlank) {
   // A blank username and a missing one read the same to a query only if
   // one of them is stored wrong.
   IndexedGame game = AGame();
   game.white_title = "";
   game.black_title = "";
-  game.white_elo = 0;
   game.opening_name = "";
   game.played_at = 0;
   game.occurrences = {AnOccurrence(one_d4::Motif::kAttack, 3)};
@@ -223,10 +227,27 @@ TEST_F(PgGameSinkTest, LeavesUnknownFieldsNullRatherThanBlank) {
   ASSERT_TRUE(sink_->Write({&game, 1}).ok());
 
   EXPECT_EQ(One("SELECT count(*)::text FROM game_features WHERE white_title IS NULL"), "1");
-  EXPECT_EQ(One("SELECT count(*)::text FROM game_features WHERE white_elo IS NULL"), "1");
   EXPECT_EQ(One("SELECT count(*)::text FROM game_features WHERE opening_name IS NULL"), "1");
-  EXPECT_EQ(One("SELECT count(*)::text FROM game_features WHERE played_at IS NULL"), "1");
+  EXPECT_EQ(One("SELECT count(*)::text FROM game_features WHERE played_at IS NULL"), "1")
+      << "the epoch is not a date a game was played on";
   EXPECT_EQ(One("SELECT count(*)::text FROM motif_occurrences WHERE moved_piece IS NULL"), "1");
+}
+
+TEST_F(PgGameSinkTest, WritesTheNumbersTheJavaWorkerWritesEvenWhenTheyAreZero) {
+  // Java binds these as numbers, so an unrated game is white_elo = 0 and
+  // an unplayable one is num_moves = 0. Stored NULL instead, the same game
+  // answers a `white_elo < 1000` filter differently depending on which
+  // worker indexed it.
+  IndexedGame game = AGame();
+  game.white_elo = 0;
+  game.black_elo = 0;
+  game.num_moves = 0;
+
+  ASSERT_TRUE(sink_->Write({&game, 1}).ok());
+
+  EXPECT_EQ(One("SELECT white_elo::text FROM game_features"), "0");
+  EXPECT_EQ(One("SELECT black_elo::text FROM game_features"), "0");
+  EXPECT_EQ(One("SELECT num_moves::text FROM game_features"), "0");
 }
 
 TEST_F(PgGameSinkTest, ReindexingAGameReplacesItsMotifsRatherThanDoublingThem) {

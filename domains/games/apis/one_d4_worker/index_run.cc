@@ -70,12 +70,14 @@ std::string IndexRun::TitleOf(std::string_view player, bool& complete) {
   if (player.empty()) return "";
   const auto cached = titles_.find(player);
   if (cached != titles_.end()) return cached->second;
+  if (unreachable_titles_.count(player) != 0) return "";
 
   const absl::StatusOr<std::string> title = archive_.FetchTitle(player);
   // A failure is not an answer. Caching one would carry a bad minute
   // across a decade of backfill; recording the month complete without it
   // would do the same to the period cache.
   if (!title.ok()) {
+    unreachable_titles_.emplace(player);
     complete = false;
     return "";
   }
@@ -135,13 +137,23 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
 
     int month_count = 0;
     bool complete = true;
+    // A failed lookup is worth retrying next month, not next game: a month
+    // of four hundred games between two regulars is two profile calls, and
+    // eight hundred against an API that rate-limits is how one bad minute
+    // sustains itself.
+    unreachable_titles_.clear();
     for (const ArchivedGame& game : *games) {
       if (job.exclude_bullet && game.time_class == "bullet") continue;
 
+      // A game that will not replay is still a game: its players, result,
+      // opening and PGN are all readable, and the Java worker records it
+      // with no motifs and no moves rather than dropping it. Skipping it
+      // here would leave the row missing on one indexer and present on the
+      // other, and games_count disagreeing with both.
       const absl::StatusOr<chess_cpp::ParsedGame> parsed = chess_cpp::ParseGame(game.pgn);
-      if (!parsed.ok()) continue;
-      const absl::StatusOr<one_d4::GameFeatures> features = one_d4::Extract(*parsed);
-      if (!features.ok()) continue;
+      const absl::StatusOr<one_d4::GameFeatures> features =
+          parsed.ok() ? one_d4::Extract(*parsed)
+                      : absl::StatusOr<one_d4::GameFeatures>(parsed.status());
 
       IndexedGame row;
       row.url = game.url;
@@ -153,14 +165,15 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
       row.white_title = TitleOf(game.white_username, complete);
       row.black_title = TitleOf(game.black_username, complete);
       row.time_class = game.time_class;
-      row.eco = EcoFrom(parsed->headers);
+      row.eco = parsed.ok() ? EcoFrom(parsed->headers) : "";
       row.opening_name = OpeningNameFromEcoUrl(game.eco_url);
       row.opening_family = OpeningFamilyFromName(row.opening_name);
       row.result = std::string(ResultOf(game.white_result, game.black_result));
       row.played_at = game.end_time;
-      row.num_moves = features->num_moves;
+      row.num_moves = features.ok() ? features->num_moves : 0;
       row.pgn = game.pgn;
-      row.occurrences = features->occurrences;
+      if (features.ok()) row.occurrences = features->occurrences;
+      row.indexed_at = Now();
 
       observer().GameIndexed(row);
       batch.push_back(std::move(row));

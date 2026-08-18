@@ -38,13 +38,13 @@ INSERT INTO game_features (
     indexed_at, pgn
 ) VALUES (
     $1::uuid, $2, $3, NULLIF($4, ''), NULLIF($5, ''),
-    NULLIF($6, '')::int, NULLIF($7, '')::int, NULLIF($8, ''), NULLIF($9, ''),
+    $6::int, $7::int, NULLIF($8, ''), NULLIF($9, ''),
     NULLIF($10, ''), NULLIF($11, ''), NULLIF($12, ''), NULLIF($13, ''),
     NULLIF($14, ''),
     CASE WHEN $15 = '' THEN NULL
          ELSE to_timestamp($15::bigint) AT TIME ZONE 'UTC' END,
-    NULLIF($16, '')::int,
-    NOW() AT TIME ZONE 'UTC', $17
+    $16::int,
+    to_timestamp($17::bigint) AT TIME ZONE 'UTC', $18
 )
 ON CONFLICT (game_url) DO UPDATE SET
     indexed_at = EXCLUDED.indexed_at,
@@ -95,10 +95,14 @@ RETURNING id
 
 std::string Number(int value) { return std::to_string(value); }
 
-/// An unset number is NULL, not zero: a game with no rating recorded and a
-/// game played at rating 0 are different rows.
-std::string OptionalNumber(int value) { return value == 0 ? "" : std::to_string(value); }
-
+/// An absent timestamp is NULL, not the epoch.
+///
+/// The one place this worker does not follow the Java worker's handling of
+/// a missing field. Java stores 1970-01-01, which lands the game in a
+/// month it was not played in and changes what a date filter returns;
+/// absent is the honest answer and drops out of those filters cleanly.
+/// The integer columns take Java's value, since 0 there is only ever a
+/// rating or a move count nobody can read anything into.
 std::string OptionalNumber(int64_t value) { return value == 0 ? "" : std::to_string(value); }
 
 std::string Bool(bool value) { return value ? "true" : "false"; }
@@ -128,13 +132,13 @@ absl::Status PgGameSink::Write(absl::Span<const IndexedGame> games) {
     still_owner = true;
 
     for (const IndexedGame* game : ordered) {
-      const absl::StatusOr<pg::Result> upserted =
-          tx.Exec(kUpsertGame, {request_id_, game->url, game->platform, game->white_username,
-                                game->black_username, OptionalNumber(game->white_elo),
-                                OptionalNumber(game->black_elo), game->white_title,
-                                game->black_title, game->time_class, game->eco, game->opening_name,
-                                game->opening_family, game->result, OptionalNumber(game->played_at),
-                                OptionalNumber(game->num_moves), game->pgn});
+      const absl::StatusOr<pg::Result> upserted = tx.Exec(
+          kUpsertGame,
+          {request_id_, game->url, game->platform, game->white_username, game->black_username,
+           Number(game->white_elo), Number(game->black_elo), game->white_title, game->black_title,
+           game->time_class, game->eco, game->opening_name, game->opening_family, game->result,
+           OptionalNumber(game->played_at), Number(game->num_moves),
+           std::to_string(game->indexed_at), game->pgn});
       if (!upserted.ok()) return upserted.status();
     }
 

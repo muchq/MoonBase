@@ -32,6 +32,11 @@ struct IndexedGame {
   std::string result;
   int64_t played_at = 0;
   int num_moves = 0;
+  /// Seconds since the epoch, from the worker's clock rather than the
+  /// database's. Retention compares this column against a threshold the
+  /// worker supplies, so a row stamped by the server straddles two clocks
+  /// and drifts with host skew (#1268).
+  int64_t indexed_at = 0;
   std::string pgn;
   std::vector<one_d4::MotifOccurrence> occurrences;
 };
