@@ -11,19 +11,24 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "domains/games/libs/chess_cpp/pgn.h"
+#include "domains/games/libs/chess_cpp/side.h"
 #include "domains/games/libs/one_d4_motifs/extract.h"
 #include "domains/games/libs/one_d4_motifs/motif.h"
+#include "domains/games/libs/one_d4_motifs/occurrence.h"
 
 namespace one_d4 {
 namespace {
@@ -36,7 +41,32 @@ struct Extracted {
   int odds_games = 0;
   int occurrences = 0;
   std::map<std::string, int> by_motif;
+  std::vector<std::string> malformed;
 };
+
+/// Says what is wrong with an occurrence, or nothing.
+std::string Malformed(const MotifOccurrence& occurrence) {
+  if (occurrence.ply < 1) return "ply below 1";
+  if (occurrence.move_number < 1) return "move number below 1";
+  if (occurrence.ply !=
+      2 * occurrence.move_number - (occurrence.side == chess_cpp::Side::kWhite ? 1 : 0)) {
+    return "ply disagrees with move number and side";
+  }
+  if (occurrence.description.empty()) return "no description";
+  if (occurrence.pin_type.has_value() && occurrence.motif != Motif::kPin) {
+    return "pin type on something that is not a pin";
+  }
+  if (occurrence.is_discovered && !occurrence.moved_piece.has_value()) {
+    return "discovered with no moved piece";
+  }
+  for (const std::optional<std::string>* field : {&occurrence.attacker, &occurrence.target}) {
+    // Letter plus square, the spelling ChessQL matches on.
+    if (field->has_value() && (*field)->size() != 3) {
+      return "piece notation is not letter + square";
+    }
+  }
+  return "";
+}
 
 Extracted RunCorpus() {
   std::ifstream file(kCorpus);
@@ -71,6 +101,10 @@ Extracted RunCorpus() {
     result.occurrences += static_cast<int>(features->occurrences.size());
     for (const MotifOccurrence& occurrence : features->occurrences) {
       ++result.by_motif[std::string(ToString(occurrence.motif))];
+      const std::string wrong = Malformed(occurrence);
+      if (!wrong.empty()) {
+        result.malformed.push_back(absl::StrCat("game ", i, " ply ", occurrence.ply, ": ", wrong));
+      }
     }
   }
   return result;
@@ -126,6 +160,9 @@ TEST_F(TacticsCorpus, HoldsNoSmotheredMate) {
 TEST_F(TacticsCorpus, EveryOccurrenceIsWellFormed) {
   const Extracted& extracted = corpus();
   EXPECT_EQ(extracted.occurrences, 6512);
+  // Every row goes to a NOT NULL column or a typed field; these are the
+  // invariants the write path would otherwise discover in production.
+  EXPECT_TRUE(extracted.malformed.empty()) << absl::StrJoin(extracted.malformed, "\n");
 }
 
 }  // namespace

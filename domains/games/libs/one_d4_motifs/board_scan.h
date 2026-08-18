@@ -12,10 +12,11 @@ namespace one_d4 {
 
 // Square-by-square and along-ray walks, in a fixed order.
 //
-// The order is load-bearing: a detector that finds three attacked pieces
-// writes three rows, and their order is visible in the API and in the
-// parity goldens. Rank 8 down to rank 1, file a to h — the order the Java
-// pipeline's 8x8 walk produced, so the two compare row for row.
+// Rank 8 down to rank 1, file a to h — the order the Java pipeline's 8x8
+// walk produced. Two things depend on it: the order a ply's rows reach the
+// API (pinned by detectors_test, not by the goldens, which are sorted), and
+// which piece gets named when several qualify — FirstInScanOrder picks the
+// same checker Java's scan did, and that the goldens do pin.
 //
 // Here rather than in chess_cpp::facts because a ray walk carries a
 // detector's question ("what is behind the first piece"); facts answers

@@ -24,8 +24,9 @@ struct Finding {
 
 /// Findings go here, and this is the only place that derives ply, move
 /// number and side. The Java pipeline spells that arithmetic out per
-/// detector and per factory, and the copies disagree: Black's occurrences
-/// land two plies early and Black's first move is dropped entirely.
+/// detector and per factory — five copies of one subtraction, all of them
+/// wrong for Black, which lands its occurrences two plies early and drops
+/// its first move entirely.
 class Findings {
  public:
   /// `out` outlives this.
@@ -45,8 +46,9 @@ class Findings {
 /// written and none is parsed, which is the structural change from the
 /// Java pipeline's ten detectors each re-parsing every ply.
 ///
-/// A detector may hold per-game state: each game gets its own objects, and
-/// one is never shared across threads.
+/// Stateless, and has to be: Extract's span overload exists so a batch
+/// worker can build the set once and run it over every game, and there is
+/// no hook that would tell a detector a new game had started.
 class Detector {
  public:
   virtual ~Detector() = default;

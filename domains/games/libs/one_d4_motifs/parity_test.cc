@@ -13,6 +13,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -22,13 +23,16 @@
 #include <string>
 #include <vector>
 
+#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "domains/games/libs/chess_cpp/pgn.h"
+#include "domains/games/libs/chess_cpp/side.h"
 #include "domains/games/libs/one_d4_motifs/extract.h"
 #include "domains/games/libs/one_d4_motifs/motif.h"
+#include "domains/games/libs/one_d4_motifs/occurrence.h"
 
 namespace one_d4 {
 namespace {
@@ -37,6 +41,7 @@ using ::testing::IsEmpty;
 
 constexpr char kCorpus[] = "domains/games/apis/one_d4/src/test/resources/hikaru_corpus.pgn";
 constexpr char kGolden[] = "domains/games/apis/one_d4/src/test/resources/motif_parity_golden.tsv";
+constexpr char kCrossPinRows[] = "domains/games/libs/one_d4_motifs/testdata/cross_pins.tsv";
 constexpr int kGames = 500;
 
 std::string Read(const std::string& path) {
@@ -76,12 +81,15 @@ std::string Row(int game, const MotifOccurrence& occurrence) {
 
 /// The golden with the Java pipeline's ply bug undone.
 ///
-/// Black's occurrences are recorded two plies early there — every copy of
-/// its ply formula reads a move number that has already advanced past the
-/// move — so Black's row for move N carries 2(N-1) instead of 2N, and
-/// Black's first move comes out as ply 0 and is discarded. Correcting the
-/// oracle rather than breaking the port is the direction that leaves the
-/// stored data wrong; that is a migration, not a port. See #1389.
+/// Black's occurrences are recorded two plies early there. The move number
+/// is right — GameReplayer stores it before advancing it — but every copy
+/// of the ply formula subtracts one from it unconditionally, so Black's row
+/// for move N carries 2(N-1) instead of 2N, and Black's first move comes
+/// out as ply 0 and is discarded. That the move number is untouched is what
+/// makes a ply-only correction sound here.
+///
+/// Correcting the oracle rather than the port is the direction that leaves
+/// the stored data wrong; fixing that is a migration. See #1389.
 std::string WithCorrectedPly(const std::string& row) {
   const std::vector<std::string> fields = absl::StrSplit(row, '\t');
   if (fields.size() < 5 || fields[3] != "black") return row;
@@ -183,8 +191,22 @@ TEST_F(Parity, FindsEverythingTheJavaPipelineFinds) {
 }
 
 TEST_F(Parity, AddsTheCrossPinsJavaCannotSee) {
-  const std::vector<std::string> extra = Missing(*cpp_, *golden_);
-  EXPECT_EQ(ByMotif(extra)["CROSS_PIN"], kCrossPins);
+  // Row for row, not just 43 of them: Java emits none, so these are the one
+  // motif the golden cannot hold to account. A rewrite of the detector that
+  // found 43 different cross-pins would otherwise pass.
+  std::vector<std::string> found;
+  for (const std::string& row : Missing(*cpp_, *golden_)) {
+    if (absl::StrContains(row, "\tCROSS_PIN\t")) found.push_back(row);
+  }
+  std::sort(found.begin(), found.end());
+
+  std::vector<std::string> expected;
+  for (const std::string_view line : absl::StrSplit(Read(kCrossPinRows), '\n')) {
+    if (!line.empty()) expected.emplace_back(line);
+  }
+
+  EXPECT_EQ(expected.size(), kCrossPins);
+  EXPECT_EQ(found, expected);
 }
 
 TEST_F(Parity, AddsWhatJavaDropsFromBlacksFirstMove) {

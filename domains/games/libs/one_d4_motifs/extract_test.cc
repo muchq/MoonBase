@@ -3,11 +3,14 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "absl/status/status.h"
 #include "domains/games/libs/chess_cpp/pgn.h"
+#include "domains/games/libs/one_d4_motifs/detectors.h"
 #include "domains/games/libs/one_d4_motifs/motif.h"
 
 namespace one_d4 {
@@ -56,8 +59,8 @@ TEST(Extract, WhiteMovesAreOddPliesAndBlackEven) {
 }
 
 TEST(Extract, RecordsBlacksFirstMove) {
-  // The Java pipeline drops it: every copy of its ply formula reads a move
-  // number that has already advanced, so 1...  comes out as ply 0 and is
+  // The Java pipeline drops it: its ply formula subtracts one from a move
+  // number that is already correct, so 1... comes out as ply 0 and is
   // discarded as "the starting position". Black's occurrences land two
   // plies early for the whole game.
   //
@@ -76,18 +79,28 @@ TEST(Extract, RecordsBlacksFirstMove) {
 // --- ordering ---------------------------------------------------------
 
 TEST(Extract, GroupsOccurrencesByDetectorInTheOrderDetectorsRun) {
-  // Rows are read back per motif, and a stable order is what makes two
-  // extractions comparable row for row.
+  // The order rows reach the API. Nothing else pins it — the parity golden
+  // is sorted and compared as a multiset — so it is pinned against the
+  // detector list itself rather than against a hand-written sequence.
+  std::vector<Motif> expected;
+  for (const std::unique_ptr<Detector>& detector : DefaultDetectors()) {
+    expected.push_back(detector->motif());
+  }
+
   const GameFeatures features = Extracted(kScholarsMate);
   std::vector<Motif> seen;
   for (const MotifOccurrence& occurrence : features.occurrences) {
     if (seen.empty() || seen.back() != occurrence.motif) seen.push_back(occurrence.motif);
   }
-  std::vector<Motif> unique = seen;
-  std::sort(unique.begin(), unique.end());
-  EXPECT_EQ(std::unique(unique.begin(), unique.end()) - unique.begin(),
-            static_cast<long>(seen.size()))
-      << "a motif's rows should not be split into two runs";
+  ASSERT_FALSE(seen.empty());
+
+  // seen must be expected with the silent detectors removed — same order,
+  // no motif appearing twice.
+  std::vector<Motif> fired;
+  for (const Motif motif : expected) {
+    if (features.motifs.count(motif) > 0) fired.push_back(motif);
+  }
+  EXPECT_EQ(seen, fired);
 }
 
 TEST(Extract, KeepsPlyOrderWithinAMotif) {

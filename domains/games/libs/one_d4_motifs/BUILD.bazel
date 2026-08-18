@@ -31,7 +31,6 @@ cc_library(
     name = "notation",
     srcs = ["notation.cc"],
     hdrs = ["notation.h"],
-    visibility = ["//visibility:public"],
     deps = ["//bazel/3p/chess_library"],
 )
 
@@ -158,6 +157,8 @@ cc_test(
     size = "small",
     srcs = ["extract_test.cc"],
     deps = [
+        ":detector",
+        ":detectors",
         ":extract",
         ":motif",
         "//domains/games/libs/chess_cpp:pgn",
@@ -174,6 +175,7 @@ cc_test(
     size = "medium",
     srcs = ["parity_test.cc"],
     data = [
+        "testdata/cross_pins.tsv",
         "//domains/games/apis/one_d4:motif_parity_golden",
         "//domains/games/apis/one_d4:parity_corpora",
     ],
@@ -198,6 +200,7 @@ cc_test(
         ":motif",
         ":occurrence",
         "//domains/games/libs/chess_cpp:pgn",
+        "//domains/games/libs/chess_cpp:side",
         "@com_google_absl//absl/strings",
         "@googletest//:gtest_main",
     ],

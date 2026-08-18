@@ -115,7 +115,7 @@ TEST(SkewerDetector, WillNotCallAPinASkewer) {
 
 TEST(AttackDetector, RecordsAnAttackOnTheQueen) {
   const auto found = Found(From("3qk3/8/8/8/8/8/8/3RK3 w - - 0 1", "1. Rd3"), Motif::kAttack);
-  EXPECT_THAT(Targets(found), ElementsAre("qd8"));
+  ASSERT_THAT(Targets(found), ElementsAre("qd8"));
   EXPECT_EQ(found[0].attacker, "Rd3");
   EXPECT_EQ(found[0].moved_piece, "Rd3");
   EXPECT_FALSE(found[0].is_discovered);
@@ -230,6 +230,21 @@ TEST(SmotheredMateDetector, WantsAKnightAndNoEscape) {
   ASSERT_EQ(found.size(), 1u);
   EXPECT_EQ(found[0].attacker, "Nf7");
   EXPECT_EQ(found[0].target, "kh8");
+}
+
+TEST(SmotheredMateDetector, WantsTheEscapeSquaresFilledByTheKingsOwnMen) {
+  // A knight mate that is not smothered: the rook covers g7 and g8 rather
+  // than the king's own pieces standing on them. Without this the escape
+  // loop is never exercised in the direction that rejects.
+  const std::string pgn = From("7k/7p/8/4N3/8/8/8/6RK w - - 0 1", "1. Nf7#");
+  // It really is mate by a knight, or the detector would be bailing one
+  // step earlier and this would pass without reaching the escape squares.
+  const auto checks = Found(pgn, Motif::kCheck);
+  ASSERT_EQ(checks.size(), 1u);
+  ASSERT_TRUE(checks[0].is_mate);
+  ASSERT_EQ(checks[0].attacker, "Nf7");
+
+  EXPECT_THAT(Found(pgn, Motif::kSmotheredMate), IsEmpty());
 }
 
 TEST(SmotheredMateDetector, IgnoresAMateWithRoomToBreathe) {

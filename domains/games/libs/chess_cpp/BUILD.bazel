@@ -139,6 +139,15 @@ cc_test(
     ],
 )
 
+# The tactics bank as a plain file, for the motif layer's corpus test —
+# selected for promotions and mates, which ordinary play barely contains.
+filegroup(
+    name = "tactics_corpus",
+    testonly = True,
+    srcs = ["testdata/tactics_corpus.pgn"],
+    visibility = ["//domains/games:__subpackages__"],
+)
+
 # Reads its corpora from the runfiles root, so both banks are data deps.
 # hikaru_corpus.pgn is shared with the Java pipeline's parity test and
 # stays where that test's resource wiring expects it.
@@ -149,15 +158,6 @@ cc_test(
 # tops out at 3.2s under tsan. Bazel warns when a test finishes this far
 # inside a medium budget, and the warning would be the only thing anyone
 # ever read about it.
-# The tactics bank as a plain file, for the motif layer's corpus test —
-# selected for promotions and mates, which ordinary play barely contains.
-filegroup(
-    name = "tactics_corpus",
-    testonly = True,
-    srcs = ["testdata/tactics_corpus.pgn"],
-    visibility = ["//domains/games:__subpackages__"],
-)
-
 cc_test(
     name = "corpus_test",
     size = "small",

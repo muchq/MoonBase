@@ -16,6 +16,7 @@
 #include "domains/games/libs/one_d4_motifs/detector.h"
 #include "domains/games/libs/one_d4_motifs/detectors.h"
 #include "domains/games/libs/one_d4_motifs/notation.h"
+#include "domains/games/libs/one_d4_motifs/occurrence.h"
 
 namespace one_d4 {
 namespace {

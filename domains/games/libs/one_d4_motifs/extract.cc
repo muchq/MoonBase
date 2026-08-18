@@ -23,8 +23,9 @@ namespace {
 ///
 /// chess_cpp::Position is a borrowed view: its boards belong to the
 /// replayer and are gone the moment the pass ends. OnGameEnd runs after
-/// that, so the pieces it needs are copied — two boards and a move, once
-/// per game.
+/// that, so the pieces it needs are copied. Once per game, not once per
+/// ply — the caller knows how many moves it handed over, so the copy is
+/// taken at that ply and nowhere else.
 class FinalPosition {
  public:
   void Remember(const chess_cpp::Position& position) {
@@ -66,15 +67,18 @@ absl::StatusOr<GameFeatures> Extract(const chess_cpp::ParsedGame& game,
   if (!start.ok()) return start.status();
 
   GameFeatures features;
-  // One bucket per detector, so a ply's rows come out in detector order
-  // rather than interleaved.
+  // One bucket per detector: the output is grouped by motif, which is how
+  // the rows are read back. Appending straight to features.occurrences
+  // would interleave the motifs and order by ply instead.
   std::vector<std::vector<MotifOccurrence>> by_detector(detectors.size());
   FinalPosition final_position;
+  const int last_ply = static_cast<int>(game.san_moves.size());
 
   const absl::Status replayed =
       chess_cpp::ReplayFrom(*start, game.san_moves, [&](const chess_cpp::Position& position) {
         if (!position.last.has_value()) return;  // nothing happened at the start
         features.num_moves = position.move_number;
+        if (position.ply == last_ply) final_position.Remember(position);
         for (std::size_t i = 0; i < detectors.size(); ++i) {
           Findings findings(detectors[i]->motif(), &by_detector[i]);
           detectors[i]->OnPosition(position, findings);
