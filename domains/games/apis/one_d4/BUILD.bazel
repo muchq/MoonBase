@@ -417,6 +417,20 @@ java_test_suite(
     ],
 )
 
+# The schema the C++ worker is a second poller on (#1389 phase 4). Read as
+# text by //domains/games/apis/one_d4_worker:schema_contract_test, which is
+# the only thing standing between two implementations of the same table.
+filegroup(
+    name = "worker_schema_sources",
+    testonly = True,
+    srcs = [
+        "src/main/java/com/muchq/games/one_d4/db/IndexingRequestStore.java",
+        "src/main/java/com/muchq/games/one_d4/db/Migration.java",
+        "src/main/java/com/muchq/games/one_d4/db/PostgresSqlDialect.java",
+    ],
+    visibility = ["//domains/games:__subpackages__"],
+)
+
 # CHESSQL.md as a classpath resource, so mcpserver can serve it as an MCP resource (#1326).
 # Deliberately not testonly: this ships inside the mcpserver image. The doc stays a readable file
 # in the repo — the resource is the same bytes, not a generated copy — and ChessQlReferenceTest

@@ -222,7 +222,11 @@ jobs:
   # own object tree, not an extra flag on an existing one.
   #
   # Scope is the first-party C++ tests whose dependency closure is also
-  # first-party. That is a build-cost line, not a compatibility one — the
+  # first-party — which is why one_d4_worker's queue test is named here and
+  # the rest of that package is not: it is the only one that links libpq,
+  # and it skips without PG_TEST_DB_URL anyway, so instrumenting Postgres
+  # for it would buy a skipped test. That is a build-cost line, not a
+  # compatibility one — the
   # Beast, opentelemetry-cpp and Postgres targets do build and pass under
   # ASan; they just add a full instrumented -c dbg rebuild of boost and otel
   # to a runner that has to free disk before it can build at all. Widening
@@ -273,6 +277,7 @@ jobs:
         run: |
           TARGETS=$(bazel query 'kind(cc_test, //domains/...) except (
             //domains/games/apis/golf_hub/... union
+            //domains/games/apis/one_d4_worker:pg_queue_test union
             //domains/platform/libs/pg/... union
             //domains/platform/libs/aura/... union
             //domains/platform/libs/futility/otel/... union
