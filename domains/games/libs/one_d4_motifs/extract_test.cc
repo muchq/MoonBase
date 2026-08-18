@@ -9,7 +9,9 @@
 #include <vector>
 
 #include "absl/status/status.h"
+#include "absl/types/span.h"
 #include "domains/games/libs/chess_cpp/pgn.h"
+#include "domains/games/libs/one_d4_motifs/detector.h"
 #include "domains/games/libs/one_d4_motifs/detectors.h"
 #include "domains/games/libs/one_d4_motifs/motif.h"
 
@@ -116,6 +118,87 @@ TEST(Extract, KeepsPlyOrderWithinAMotif) {
     EXPECT_GE(occurrence.ply, previous);
     previous = occurrence.ply;
   }
+}
+
+// --- what OnGameEnd is given -------------------------------------------
+
+/// What the extractor handed a detector.
+struct Seen {
+  int positions = 0;
+  int game_ends = 0;
+  int last_position_ply = -1;
+  int final_ply = -1;
+  std::string final_fen;
+  std::string final_san;
+};
+
+class Recorder : public Detector {
+ public:
+  explicit Recorder(Seen* seen) : seen_(seen) {}
+
+  Motif motif() const override { return Motif::kZugzwang; }
+
+  void OnPosition(const chess_cpp::Position& position, Findings&) override {
+    ++seen_->positions;
+    seen_->last_position_ply = position.ply;
+  }
+
+  void OnGameEnd(const chess_cpp::Position& final_position, Findings&) override {
+    ++seen_->game_ends;
+    seen_->final_ply = final_position.ply;
+    seen_->final_fen = final_position.board.getFen();
+    seen_->final_san = std::string(final_position.last->san);
+  }
+
+ private:
+  Seen* seen_;
+};
+
+Seen Record(std::string_view pgn) {
+  Seen seen;
+  std::vector<std::unique_ptr<Detector>> detectors;
+  detectors.push_back(std::make_unique<Recorder>(&seen));
+
+  const auto game = chess_cpp::ParseGame(pgn);
+  EXPECT_TRUE(game.ok()) << game.status();
+  if (game.ok()) {
+    const auto features = Extract(*game, absl::MakeConstSpan(detectors));
+    EXPECT_TRUE(features.ok()) << features.status();
+  }
+  return seen;
+}
+
+TEST(Extract, CallsOnGameEndOnceWithTheLastPosition) {
+  const Seen seen = Record(kScholarsMate);
+  EXPECT_EQ(seen.positions, 7);
+  EXPECT_EQ(seen.game_ends, 1);
+  EXPECT_EQ(seen.final_ply, seen.last_position_ply);
+  EXPECT_EQ(seen.final_san, "Qxf7#");
+}
+
+TEST(Extract, TheFinalPositionSurvivesTheReplay) {
+  // A copy, because the replayer's boards are gone by the time OnGameEnd
+  // runs. Whether it is taken once or every ply is a cost, not a behaviour,
+  // and nothing here can tell the difference.
+  const Seen seen = Record(kScholarsMate);
+  EXPECT_EQ(seen.final_fen, "r1bqkb1r/pppp1Qpp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4");
+}
+
+TEST(Extract, CallsOnGameEndForAGameThatStartsFromAFenTag) {
+  // The ply the copy is taken at counts half-moves in this replay, not in
+  // the game, so a [FEN] start is the case that gets it wrong.
+  const Seen seen = Record(
+      "[Event \"x\"]\n[SetUp \"1\"]\n[FEN \"3rk3/8/8/8/8/8/8/3RK3 b - - 0 40\"]\n\n"
+      "40... Rxd1+ 41. Kxd1 *\n");
+  EXPECT_EQ(seen.positions, 2);
+  EXPECT_EQ(seen.game_ends, 1);
+  EXPECT_EQ(seen.final_san, "Kxd1");
+}
+
+TEST(Extract, DoesNotCallOnGameEndForAGameWithNoMoves) {
+  const Seen seen = Record("[Event \"abandoned\"]\n[Result \"*\"]\n\n*\n");
+  EXPECT_EQ(seen.positions, 0);
+  EXPECT_EQ(seen.game_ends, 0);
 }
 
 // --- games that are not the standard start ----------------------------

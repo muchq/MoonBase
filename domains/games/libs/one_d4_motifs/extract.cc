@@ -83,7 +83,6 @@ absl::StatusOr<GameFeatures> Extract(const chess_cpp::ParsedGame& game,
           Findings findings(detectors[i]->motif(), &by_detector[i]);
           detectors[i]->OnPosition(position, findings);
         }
-        final_position.Remember(position);
       });
   if (!replayed.ok()) return replayed;
 
