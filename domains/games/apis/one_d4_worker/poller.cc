@@ -75,9 +75,9 @@ absl::StatusOr<bool> Poller::PollOnce() {
   }
 
   if (report->stopped.has_value()) {
-    const absl::StatusOr<bool> handed =
-        *report->stopped == Stopped::kShutdown ? queue_.HandBack(job.id, options_.owner)
-                                               : queue_.Release(job.id, options_.owner);
+    const absl::StatusOr<bool> handed = *report->stopped == Stopped::kShutdown
+                                            ? queue_.HandBack(job.id, options_.owner)
+                                            : queue_.Release(job.id, options_.owner);
     return Finish(job, RunOutcome::kInterrupted, handed);
   }
 

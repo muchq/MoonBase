@@ -116,3 +116,98 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_library(
+    name = "result",
+    srcs = ["result.cc"],
+    hdrs = ["result.h"],
+    visibility = ["//visibility:public"],
+)
+
+# The result words are chess.com's, and both indexers write `result` for the
+# same games — so the vocabulary is read out of the Java mapper rather than
+# copied and hoped over.
+cc_test(
+    name = "result_test",
+    size = "small",
+    srcs = ["result_test.cc"],
+    data = ["//domains/games/apis/one_d4:worker_result_mapper"],
+    deps = [
+        ":result",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "openings",
+    srcs = ["openings.cc"],
+    hdrs = ["openings.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@com_google_absl//absl/strings"],
+)
+
+# The opening name is derived, not stored, so the two indexers derive it or
+# they disagree. Held to the same frozen corpus and the same counts as
+# OpeningsCorpusTest.
+cc_test(
+    name = "openings_test",
+    size = "small",
+    srcs = ["openings_test.cc"],
+    data = ["//domains/games/apis/one_d4:parity_corpora"],
+    deps = [
+        ":openings",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "archive",
+    hdrs = ["archive.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":job",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_library(
+    name = "game_sink",
+    hdrs = ["game_sink.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/games/libs/one_d4_motifs:occurrence",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "index_run",
+    srcs = ["index_run.cc"],
+    hdrs = ["index_run.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":archive",
+        ":game_sink",
+        ":job",
+        ":openings",
+        ":poller",
+        ":result",
+        "//domains/games/libs/chess_cpp:pgn",
+        "//domains/games/libs/one_d4_motifs:extract",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_test(
+    name = "index_run_test",
+    size = "small",
+    srcs = ["index_run_test.cc"],
+    deps = [
+        ":index_run",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)
