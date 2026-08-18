@@ -51,6 +51,15 @@ class Poller {
   struct Options {
     std::string owner;
     absl::Duration lease = absl::Minutes(5);
+    /// How often a claim is renewed in the background, independent of what
+    /// the run is doing. A quarter of the lease, so three renewals can be
+    /// missed before it lapses.
+    ///
+    /// A run that only renewed where it happens to check would lose a
+    /// month it was still working on: a month of four hundred games is
+    /// four archive calls, eight hundred profile lookups and four hundred
+    /// extractions between checkpoints, and the lease is five minutes.
+    absl::Duration renew_every = absl::Minutes(5) / 4;
   };
 
   using Run = std::function<absl::StatusOr<RunReport>(const IndexJob&, LeaseKeeper&)>;

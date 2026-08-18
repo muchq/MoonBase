@@ -3,6 +3,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <optional>
 #include <string>
 #include <vector>
@@ -33,7 +34,8 @@ class FakeQueue : public IndexQueue {
   absl::StatusOr<bool> Heartbeat(std::string_view id, std::string_view owner,
                                  absl::Duration lease) override {
     ++heartbeats;
-    return lease_held;
+    if (heartbeat_fails) return absl::UnavailableError("queue is down");
+    return lease_held.load();
   }
 
   absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner,
@@ -59,11 +61,12 @@ class FakeQueue : public IndexQueue {
   }
 
   std::optional<IndexJob> next;
-  bool lease_held = true;
+  std::atomic<bool> lease_held{true};
   bool claim_fails = false;
+  std::atomic<bool> heartbeat_fails{false};
   bool terminal_write_wins = true;
   int claims = 0;
-  int heartbeats = 0;
+  std::atomic<int> heartbeats{0};
   std::vector<std::string> calls;
 };
 
@@ -258,6 +261,102 @@ TEST(Poller, KeepsTheLeaseWhileTheRunWorks) {
 
   ASSERT_TRUE(poller.PollOnce().ok());
   EXPECT_EQ(queue.heartbeats, 3);
+}
+
+TEST(Poller, RenewsTheLeaseWithoutBeingAsked) {
+  // The gaps between a run's checkpoints are longer than a lease. A month
+  // of four hundred games is four archive calls, eight hundred profile
+  // lookups and four hundred extractions between them.
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller::Options options = Options();
+  options.lease = absl::Milliseconds(400);
+  options.renew_every = absl::Milliseconds(50);
+  Poller poller(
+      queue,
+      [](const IndexJob&, LeaseKeeper&) {
+        // Works, and never asks.
+        absl::SleepFor(absl::Milliseconds(300));
+        return RunReport{};
+      },
+      options);
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_GE(queue.heartbeats.load(), 3) << "the lease was never renewed on its own";
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kCompleted);
+}
+
+TEST(Poller, NoticesALeaseTakenWhileItWasWorking) {
+  // The renewal is also how a takeover is heard about between checkpoints.
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller::Options options = Options();
+  options.lease = absl::Milliseconds(400);
+  options.renew_every = absl::Milliseconds(50);
+  Poller poller(
+      queue,
+      [&](const IndexJob&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
+        queue.lease_held = false;
+        absl::SleepFor(absl::Milliseconds(200));
+        EXPECT_FALSE(lease.Keep());
+        RunReport report;
+        report.lease_lost = true;
+        return report;
+      },
+      options);
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_THAT(queue.calls, IsEmpty());
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kLeaseLost);
+}
+
+TEST(Poller, KeepsWorkingThroughAQueueItCannotReachForAMoment) {
+  // A blip is not proof the claim is gone, and giving up on the first one
+  // abandons a run nobody else wants, mid-way. Every write is fenced on
+  // the row itself, so carrying on is safe.
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller::Options options = Options();
+  options.lease = absl::Seconds(30);
+  options.renew_every = absl::Milliseconds(50);
+  Poller poller(
+      queue,
+      [&](const IndexJob&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
+        queue.heartbeat_fails = true;
+        absl::SleepFor(absl::Milliseconds(200));
+        EXPECT_TRUE(lease.Keep()) << "one unreachable moment ended the run";
+        queue.heartbeat_fails = false;
+        return RunReport{};
+      },
+      options);
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kCompleted);
+}
+
+TEST(Poller, GivesUpOnceTheLeaseItLastProvedWouldHaveExpired) {
+  // The benefit of the doubt runs out. Past that point the claim cannot be
+  // shown to be ours, and another worker is entitled to it.
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller::Options options = Options();
+  options.lease = absl::Milliseconds(150);
+  options.renew_every = absl::Milliseconds(25);
+  Poller poller(
+      queue,
+      [&](const IndexJob&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
+        queue.heartbeat_fails = true;
+        absl::SleepFor(absl::Milliseconds(400));
+        EXPECT_FALSE(lease.Keep());
+        RunReport report;
+        report.lease_lost = true;
+        return report;
+      },
+      options);
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_THAT(queue.calls, IsEmpty());
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kLeaseLost);
 }
 
 }  // namespace
