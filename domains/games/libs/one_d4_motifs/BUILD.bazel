@@ -1,0 +1,204 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+# one_d4_motifs: the motif layer of the C++ index worker (#1389). Positions
+# in, `motif_occurrences` rows out.
+#
+# Split from chess_cpp because the vocabulary is different: chess_cpp knows
+# about boards and moves, this knows about PIN and ATTACK and what the
+# database stores. The batch worker and the synchronous analyze RPC are two
+# front doors onto this one target — that is the point of it existing
+# separately from either.
+
+cc_library(
+    name = "motif",
+    srcs = ["motif.cc"],
+    hdrs = ["motif.h"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "occurrence",
+    srcs = ["occurrence.cc"],
+    hdrs = ["occurrence.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":motif",
+        "//domains/games/libs/chess_cpp:side",
+    ],
+)
+
+cc_library(
+    name = "notation",
+    srcs = ["notation.cc"],
+    hdrs = ["notation.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//bazel/3p/chess_library"],
+)
+
+cc_library(
+    name = "board_scan",
+    srcs = ["board_scan.cc"],
+    hdrs = ["board_scan.h"],
+    deps = [
+        "//bazel/3p/chess_library",
+        "//domains/games/libs/chess_cpp:replay",
+        "//domains/games/libs/chess_cpp:side",
+    ],
+)
+
+cc_library(
+    name = "detector",
+    srcs = ["detector.cc"],
+    hdrs = ["detector.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":motif",
+        ":occurrence",
+        "//domains/games/libs/chess_cpp:replay",
+        "//domains/games/libs/chess_cpp:side",
+    ],
+)
+
+cc_library(
+    name = "detectors",
+    srcs = [
+        "attack_detector.cc",
+        "check_detector.cc",
+        "detectors.cc",
+        "mate_detectors.cc",
+        "pin_detectors.cc",
+        "promotion_detectors.cc",
+        "skewer_detector.cc",
+    ],
+    hdrs = ["detectors.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":board_scan",
+        ":detector",
+        ":notation",
+        "//bazel/3p/chess_library",
+        "//domains/games/libs/chess_cpp:board_facts",
+        "//domains/games/libs/chess_cpp:replay",
+        "//domains/games/libs/chess_cpp:side",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "extract",
+    srcs = ["extract.cc"],
+    hdrs = ["extract.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":detector",
+        ":detectors",
+        ":motif",
+        ":occurrence",
+        "//bazel/3p/chess_library",
+        "//domains/games/libs/chess_cpp:parsed_game",
+        "//domains/games/libs/chess_cpp:pgn",
+        "//domains/games/libs/chess_cpp:replay",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_test(
+    name = "motif_test",
+    size = "small",
+    srcs = ["motif_test.cc"],
+    deps = [
+        ":motif",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "notation_test",
+    size = "small",
+    srcs = ["notation_test.cc"],
+    deps = [
+        ":notation",
+        "//bazel/3p/chess_library",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "board_scan_test",
+    size = "small",
+    srcs = ["board_scan_test.cc"],
+    deps = [
+        ":board_scan",
+        ":notation",
+        "//bazel/3p/chess_library",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "detectors_test",
+    size = "small",
+    srcs = ["detectors_test.cc"],
+    deps = [
+        ":detectors",
+        ":extract",
+        ":motif",
+        ":occurrence",
+        "//domains/games/libs/chess_cpp:pgn",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "extract_test",
+    size = "small",
+    srcs = ["extract_test.cc"],
+    deps = [
+        ":extract",
+        ":motif",
+        "//domains/games/libs/chess_cpp:pgn",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# Runs the port over the same 500 games the Java pipeline's golden covers.
+# medium on measurement: 0.3s normally, 11.8s under tsan — the sanitize jobs
+# build -c dbg, which also re-arms the vendored header's asserts.
+cc_test(
+    name = "parity_test",
+    size = "medium",
+    srcs = ["parity_test.cc"],
+    data = [
+        "//domains/games/apis/one_d4:motif_parity_golden",
+        "//domains/games/apis/one_d4:parity_corpora",
+    ],
+    deps = [
+        ":extract",
+        ":motif",
+        ":occurrence",
+        "//domains/games/libs/chess_cpp:pgn",
+        "//domains/games/libs/chess_cpp:side",
+        "@com_google_absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "tactics_corpus_test",
+    size = "small",
+    srcs = ["tactics_corpus_test.cc"],
+    data = ["//domains/games/libs/chess_cpp:tactics_corpus"],
+    deps = [
+        ":extract",
+        ":motif",
+        ":occurrence",
+        "//domains/games/libs/chess_cpp:pgn",
+        "@com_google_absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)

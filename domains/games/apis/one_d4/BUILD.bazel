@@ -364,6 +364,58 @@ filegroup(
     visibility = ["//domains/games:__subpackages__"],
 )
 
+# The Java pipeline's extraction output, as sorted TSV. The oracle the C++
+# port is measured against (#1389 phase 2): MotifGoldenTest asserts the
+# checked-in golden still matches what the pipeline produces, and
+# //domains/games/libs/one_d4_motifs:parity_test asserts the C++ port
+# matches the golden. Neither half is any use without the other.
+java_library(
+    name = "motif_dump",
+    testonly = True,
+    srcs = ["src/test/java/com/muchq/games/one_d4/parity/MotifDump.java"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":engine",
+        ":model",
+        ":motifs",
+    ],
+)
+
+java_binary(
+    name = "motif_dump_main",
+    testonly = True,
+    srcs = ["src/test/java/com/muchq/games/one_d4/parity/MotifDumpMain.java"],
+    main_class = "com.muchq.games.one_d4.parity.MotifDumpMain",
+    deps = [":motif_dump"],
+)
+
+filegroup(
+    name = "motif_parity_golden",
+    testonly = True,
+    srcs = ["src/test/resources/motif_parity_golden.tsv"],
+    visibility = ["//domains/games:__subpackages__"],
+)
+
+java_library(
+    name = "golden_resources",
+    testonly = True,
+    resource_strip_prefix = "domains/games/apis/one_d4/src/test/resources",
+    resources = ["src/test/resources/motif_parity_golden.tsv"],
+)
+
+java_test_suite(
+    name = "parity_tests",
+    size = "medium",
+    srcs = ["src/test/java/com/muchq/games/one_d4/parity/MotifGoldenTest.java"],
+    deps = [
+        ":golden_resources",
+        ":hikaru_corpus",
+        ":motif_dump",
+        artifact("org.assertj:assertj-core"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
+    ],
+)
+
 # CHESSQL.md as a classpath resource, so mcpserver can serve it as an MCP resource (#1326).
 # Deliberately not testonly: this ships inside the mcpserver image. The doc stays a readable file
 # in the repo — the resource is the same bytes, not a generated copy — and ChessQlReferenceTest

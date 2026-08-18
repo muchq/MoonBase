@@ -3,9 +3,10 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 # Disservin/chess-library, vendored. See README.md for the version, the
 # commit it came from, and how to update it.
 #
-# Visible only to //domains/games/libs/chess_cpp, which is the wrapper that
-# owns the dependency, so nothing else can declare a dep on it. That is all
-# the visibility buys: the wrapper's own headers expose chess:: types, and
+# Visible to the two packages that hand chess:: types around —
+# //domains/games/libs/chess_cpp, the wrapper that owns the dependency, and
+# //domains/games/libs/one_d4_motifs, whose detectors read a Board. Nothing
+# else can declare a dep on it. That is all the visibility buys: the wrapper's own headers expose chess:: types, and
 # with layering_check off (.bazelrc) a transitive consumer still compiles
 # against this header. Keeping chess:: out of those headers is what would
 # make the boundary real; the wrapper trades that for handing detectors a
@@ -14,5 +15,8 @@ cc_library(
     name = "chess_library",
     hdrs = ["chess.hpp"],
     includes = ["."],
-    visibility = ["//domains/games/libs/chess_cpp:__pkg__"],
+    visibility = [
+        "//domains/games/libs/chess_cpp:__pkg__",
+        "//domains/games/libs/one_d4_motifs:__pkg__",
+    ],
 )
