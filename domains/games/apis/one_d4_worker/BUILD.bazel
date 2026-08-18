@@ -1,0 +1,118 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+# one_d4_worker: the C++ index worker (#1389 phase 4).
+#
+# The table is the queue (#1279), so this is another poller on
+# indexing_requests rather than a new protocol — it claims, leases and
+# fences exactly as the Java worker does, and the two run side by side.
+
+cc_library(
+    name = "job",
+    srcs = ["job.cc"],
+    hdrs = ["job.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+    ],
+)
+
+cc_test(
+    name = "job_test",
+    size = "small",
+    srcs = ["job_test.cc"],
+    deps = [
+        ":job",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "queue",
+    hdrs = ["queue.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":job",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_library(
+    name = "poller",
+    srcs = ["poller.cc"],
+    hdrs = ["poller.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":job",
+        ":queue",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_test(
+    name = "poller_test",
+    size = "small",
+    srcs = ["poller_test.cc"],
+    deps = [
+        ":poller",
+        ":queue",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "pg_queue",
+    srcs = ["pg_queue.cc"],
+    hdrs = ["pg_queue.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":job",
+        ":queue",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+# Real SQL against a real Postgres: a claim being exclusive and a terminal
+# write being fenced are properties of concurrent statements, not of code.
+# Skips without PG_TEST_DB_URL, which the build-and-test job supplies.
+cc_test(
+    name = "pg_queue_test",
+    size = "small",
+    srcs = ["pg_queue_test.cc"],
+    env_inherit = ["PG_TEST_DB_URL"],
+    deps = [
+        ":pg_queue",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# The Beyoncé rule applied to somebody else's table: the Java service owns
+# indexing_requests, and nothing but agreement makes a second poller safe.
+cc_test(
+    name = "schema_contract_test",
+    size = "small",
+    srcs = ["schema_contract_test.cc"],
+    data = [
+        "pg_queue_test.cc",
+        "//domains/games/apis/one_d4:worker_schema_sources",
+    ],
+    deps = [
+        ":pg_queue",
+        "@com_google_absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)
