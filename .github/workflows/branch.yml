@@ -222,15 +222,18 @@ jobs:
   # own object tree, not an extra flag on an existing one.
   #
   # Scope is the first-party C++ tests whose dependency closure is also
-  # first-party — which is why one_d4_worker's queue test is named here and
-  # the rest of that package is not: it is the only one that links libpq,
-  # and it skips without PG_TEST_DB_URL anyway, so instrumenting Postgres
-  # for it would buy a skipped test. That is a build-cost line, not a
-  # compatibility one — the
-  # Beast, opentelemetry-cpp and Postgres targets do build and pass under
-  # ASan; they just add a full instrumented -c dbg rebuild of boost and otel
-  # to a runner that has to free disk before it can build at all. Widening
-  # that is a runner-budget call rather than a technical one.
+  # first-party — which is why four of one_d4_worker's tests are named here
+  # and the rest of that package is not. The two Postgres ones skip without
+  # PG_TEST_DB_URL, which this job does not supply, so instrumenting libpq
+  # for them would buy two skipped tests; the other two pull in Beast and
+  # opentelemetry-cpp. That is a build-cost line, not a compatibility one —
+  # those targets do build and pass under ASan; they just add a full
+  # instrumented -c dbg rebuild of boost and otel to a runner that has to
+  # free disk before it can build at all. Widening that is a runner-budget
+  # call rather than a technical one.
+  #
+  # Named one by one rather than excluding the package, so a new test in it
+  # is sanitized by default and only leaves on purpose.
   #
   # A matrix rather than three steps in one job, for two reasons. The three
   # configs share no build output — each is a distinct object tree, so
@@ -278,6 +281,9 @@ jobs:
           TARGETS=$(bazel query 'kind(cc_test, //domains/...) except (
             //domains/games/apis/golf_hub/... union
             //domains/games/apis/one_d4_worker:pg_queue_test union
+            //domains/games/apis/one_d4_worker:pg_game_sink_test union
+            //domains/games/apis/one_d4_worker:chess_com_archive_test union
+            //domains/games/apis/one_d4_worker:metrics_test union
             //domains/platform/libs/pg/... union
             //domains/platform/libs/aura/... union
             //domains/platform/libs/futility/otel/... union

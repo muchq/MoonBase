@@ -28,8 +28,10 @@
 
 #include <array>
 #include <chrono>
+#include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "opentelemetry/metrics/provider.h"
 #include "opentelemetry/sdk/metrics/meter_provider.h"
@@ -73,6 +75,22 @@ inline constexpr std::array<double, 15> kHttpLatencyBucketBoundsMicros = {
 /// defaults.
 void RegisterLatencyBucketView(opentelemetry::sdk::metrics::MeterProvider& meter_provider);
 
+/// @brief Registers explicit bucket boundaries for one named histogram.
+///
+/// The only way to give an instrument its own bounds: opentelemetry-cpp
+/// offers no way to pass them to CreateUInt64Histogram, so without a view
+/// every histogram takes the SDK's millisecond-shaped defaults (0 … 10000)
+/// — #1286 again, one instrument at a time.
+///
+/// `metric_name` is matched exactly. Use it for a distribution whose range
+/// is nothing like an HTTP request's: an index run takes minutes, so on the
+/// defaults every observation lands in +Inf and histogram_quantile answers
+/// the highest finite bound forever. yodel's CustomMetrics.defineDistribution
+/// is the Java side of the same job, and a series both languages write needs
+/// the same layout in each or a quantile across them compares nothing.
+void RegisterHistogramBounds(opentelemetry::sdk::metrics::MeterProvider& meter_provider,
+                             const std::string& metric_name, const std::vector<double>& bounds);
+
 /// @brief Configuration for the OpenTelemetry provider.
 struct OtelConfig {
   /// Service name reported in metrics.
@@ -87,6 +105,10 @@ struct OtelConfig {
 
   /// Interval between metric exports.
   std::chrono::seconds export_interval{10};
+
+  /// Explicit bucket boundaries per histogram name, applied as SDK views.
+  /// See RegisterHistogramBounds.
+  std::map<std::string, std::vector<double>> histogram_bounds;
 
   /// Whether metrics collection is enabled. Set to false to disable all metrics.
   bool enable_metrics = true;

@@ -298,5 +298,47 @@ TEST_F(PgQueueTest, StopsClaimingAfterTooManyAttempts) {
   EXPECT_FALSE(claimed->has_value());
 }
 
+TEST_F(PgQueueTest, ProgressMovesTheCountWithoutFinishingTheRun) {
+  Insert(Id(1), "alice");
+  const auto claimed = queue_->ClaimNext("worker-1", absl::Minutes(5));
+  ASSERT_TRUE(claimed.ok() && claimed->has_value());
+
+  const auto recorded = queue_->Progress(Id(1), "worker-1", 42);
+  ASSERT_TRUE(recorded.ok()) << recorded.status();
+  EXPECT_TRUE(*recorded);
+  EXPECT_EQ(Column(Id(1), "games_indexed"), "42");
+  EXPECT_EQ(Column(Id(1), "status"), "PROCESSING") << "progress is not an ending";
+  EXPECT_EQ(Column(Id(1), "owner_id"), "worker-1") << "nor a handing back";
+}
+
+TEST_F(PgQueueTest, ProgressIsFencedOnOwnershipToo) {
+  // A run that lost the range must not walk the counter of a row somebody
+  // else is now working.
+  Insert(Id(1), "alice");
+  const auto claimed = queue_->ClaimNext("worker-1", absl::Minutes(5));
+  ASSERT_TRUE(claimed.ok() && claimed->has_value());
+
+  const auto refused = queue_->Progress(Id(1), "worker-2", 42);
+  ASSERT_TRUE(refused.ok()) << refused.status();
+  EXPECT_FALSE(*refused);
+  EXPECT_EQ(Column(Id(1), "games_indexed"), "0");
+}
+
+TEST_F(PgQueueTest, ProgressIsRefusedOnceTheLeaseHasExpired) {
+  Insert(Id(1), "alice");
+  const auto claimed = queue_->ClaimNext("worker-1", absl::Minutes(5));
+  ASSERT_TRUE(claimed.ok() && claimed->has_value());
+  ASSERT_TRUE(client_
+                  ->Exec("UPDATE indexing_requests SET lease_expires_at = NOW() -"
+                         " INTERVAL '1 minute' WHERE id = $1 RETURNING id",
+                         {Id(1)})
+                  .ok());
+
+  const auto refused = queue_->Progress(Id(1), "worker-1", 42);
+  ASSERT_TRUE(refused.ok()) << refused.status();
+  EXPECT_FALSE(*refused);
+  EXPECT_EQ(Column(Id(1), "games_indexed"), "0");
+}
+
 }  // namespace
 }  // namespace one_d4_worker

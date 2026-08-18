@@ -74,6 +74,30 @@ void RegisterLatencyBucketView(opentelemetry::sdk::metrics::MeterProvider& meter
                          std::move(view));
 }
 
+void RegisterHistogramBounds(opentelemetry::sdk::metrics::MeterProvider& meter_provider,
+                             const std::string& metric_name, const std::vector<double>& bounds) {
+  auto histogram_config =
+      std::make_shared<opentelemetry::sdk::metrics::HistogramAggregationConfig>();
+  histogram_config->boundaries_ = bounds;
+
+  // Anchored: the selector is a regex, and an unanchored name would also
+  // claim every instrument that merely contains it.
+  auto instrument_selector = opentelemetry::sdk::metrics::InstrumentSelectorFactory::Create(
+      opentelemetry::sdk::metrics::InstrumentType::kHistogram, "^" + metric_name + "$",
+      /*unit=*/"");
+  auto meter_selector = opentelemetry::sdk::metrics::MeterSelectorFactory::Create(
+      /*name=*/"", /*version=*/"", /*schema=*/"");
+  // Empty name and description for the same reasons as the latency view:
+  // renaming the stream would point the series somewhere prom_proxy does
+  // not query, and a description here would overwrite the instrument's own.
+  auto view = opentelemetry::sdk::metrics::ViewFactory::Create(
+      /*name=*/"", /*description=*/"", opentelemetry::sdk::metrics::AggregationType::kHistogram,
+      histogram_config);
+
+  meter_provider.AddView(std::move(instrument_selector), std::move(meter_selector),
+                         std::move(view));
+}
+
 OtelProvider::OtelProvider(const OtelConfig& config) : metrics_enabled_(config.enable_metrics) {
   if (!config.enable_metrics) {
     return;
@@ -116,6 +140,9 @@ OtelProvider::OtelProvider(const OtelConfig& config) : metrics_enabled_(config.e
   meter_provider->AddMetricReader(std::move(reader));
 
   RegisterLatencyBucketView(*meter_provider);
+  for (const auto& [metric_name, bounds] : config.histogram_bounds) {
+    RegisterHistogramBounds(*meter_provider, metric_name, bounds);
+  }
 
   // Set global meter provider
   meter_provider_ = std::move(meter_provider);

@@ -1,6 +1,7 @@
 #ifndef DOMAINS_GAMES_APIS_ONE_D4_WORKER_JOB_H
 #define DOMAINS_GAMES_APIS_ONE_D4_WORKER_JOB_H
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,6 +19,9 @@ struct YearMonth {
 
   std::string ToString() const;
   YearMonth Next() const;
+
+  /// Seconds since the epoch at 00:00 UTC on the first day of this month.
+  int64_t FirstInstant() const;
 
   friend bool operator==(YearMonth a, YearMonth b) {
     return a.year == b.year && a.month == b.month;

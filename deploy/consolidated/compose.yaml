@@ -365,6 +365,39 @@ services:
       retries: 3
       start_period: 15s
 
+  # The C++ index worker (#1389). Another poller on the same
+  # indexing_requests table (#1279) rather than a second protocol: it
+  # claims, leases and fences exactly as one_d4's own worker does, and the
+  # two run side by side. Every metric it writes carries indexer="cpp", so
+  # a dashboard can tell them apart.
+  #
+  # No port and no healthcheck: it serves nothing. Liveness is visible as
+  # index_runs_total{indexer="cpp"} advancing, which a probe could not
+  # tell you anyway — a worker with an empty queue is idle, not sick.
+  #
+  # Creates no schema. one_d4 owns the migrations and must be up first,
+  # or this polls a table that does not exist yet.
+  one_d4_worker:
+    image: ghcr.io/muchq/one_d4_worker:${ONE_D4_WORKER_SHA:-${DEPLOY_SHA:-latest}}
+    labels:
+      com.muchq.description: "Chess index worker (C++)"
+    restart: always
+    environment:
+      - ONE_D4_DB_URL=postgresql://one_d4:${ONE_D4_DB_PASSWORD}@shared_postgres:5432/one_d4
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
+      - OTEL_SERVICE_NAME=one_d4_worker
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=one_d4_worker,service.version=${ONE_D4_WORKER_SHA:-${DEPLOY_SHA:-latest}}
+    networks:
+      - app_network
+    depends_on:
+      one_d4:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
   microgpt-serve:
     image: ghcr.io/muchq/microgpt-serve:${MICROGPT_SERVE_SHA:-${DEPLOY_SHA:-latest}}
     labels:

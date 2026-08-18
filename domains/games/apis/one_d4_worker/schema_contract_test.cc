@@ -6,6 +6,7 @@
 #include <regex>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/strings/str_cat.h"
@@ -57,19 +58,23 @@ std::map<std::string, std::string> Columns(const std::string& source, const std:
   return columns;
 }
 
-std::map<std::string, std::string> JavaSchema() {
+/// The DDL for one table, as the dialect creates it and the migrations
+/// then alter it.
+std::map<std::string, std::string> JavaSchemaFor(const std::string& table) {
   std::map<std::string, std::string> columns =
       Columns(Read("domains/games/apis/one_d4/src/main/java/com/muchq/games/one_d4/db/"
                    "PostgresSqlDialect.java"),
-              "indexing_requests");
+              table);
   for (const auto& [name, type] :
        Columns(Read("domains/games/apis/one_d4/src/main/java/com/muchq/games/one_d4/db/"
                     "Migration.java"),
-               "indexing_requests")) {
+               table)) {
     columns[name] = type;
   }
   return columns;
 }
+
+std::map<std::string, std::string> JavaSchema() { return JavaSchemaFor("indexing_requests"); }
 
 TEST(SchemaContract, TheJavaSchemaHasEveryColumnThisWorkerReadsOrWrites) {
   const std::map<std::string, std::string> java = JavaSchema();
@@ -100,6 +105,78 @@ TEST(SchemaContract, IdIsAUuid) {
   // Named on its own because it is the one a text fixture gets wrong
   // silently: 'job-1' is a fine VARCHAR and not a UUID at all.
   EXPECT_EQ(JavaSchema()["id"], "UUID");
+}
+
+// The same argument, for the three tables the sink writes. Its fixture
+// hand-copies their DDL too, so a column the Java migration changes leaves
+// these tests green and production broken — and unlike indexing_requests,
+// these are tables the C++ worker writes rows into rather than just claims
+// from.
+
+TEST(SchemaContract, TheJavaSchemaHasEveryColumnTheSinkWrites) {
+  for (const auto& [table, wanted] : std::vector<std::pair<std::string, std::vector<std::string>>>{
+           {"game_features",
+            {"id", "request_id", "game_url", "platform", "white_username", "black_username",
+             "white_elo", "black_elo", "white_title", "black_title", "time_class", "eco",
+             "opening_name", "opening_family", "result", "played_at", "num_moves", "indexed_at",
+             "pgn"}},
+           {"motif_occurrences",
+            {"id", "game_url", "motif", "ply", "side", "move_number", "description", "moved_piece",
+             "attacker", "target", "is_discovered", "is_mate", "pin_type"}},
+           {"indexed_periods",
+            {"id", "player", "platform", "year_month", "fetched_at", "is_complete", "games_count",
+             "exclude_bullet"}}}) {
+    const std::map<std::string, std::string> java = JavaSchemaFor(table);
+    ASSERT_FALSE(java.empty()) << "read no columns of " << table << " — the DDL moved";
+    for (const std::string& column : wanted) {
+      EXPECT_TRUE(java.count(column) == 1) << column << " is gone from " << table;
+    }
+  }
+}
+
+TEST(SchemaContract, TheSinkFixtureDeclaresTheSameTypes) {
+  const std::string fixture_source = Read("domains/games/apis/one_d4_worker/pg_game_sink_test.cc");
+  int checked = 0;
+  for (const std::string& table : {"game_features", "motif_occurrences", "indexed_periods"}) {
+    const std::map<std::string, std::string> java = JavaSchemaFor(table);
+    const std::map<std::string, std::string> fixture = Columns(fixture_source, table);
+    ASSERT_FALSE(fixture.empty()) << "read no columns of " << table << " from the fixture";
+
+    for (const auto& [name, type] : fixture) {
+      const auto declared = java.find(name);
+      ASSERT_TRUE(declared != java.end()) << name << " is not in the Java " << table;
+      EXPECT_EQ(type, declared->second)
+          << name << " is declared differently in the " << table << " fixture";
+      ++checked;
+    }
+  }
+  EXPECT_GT(checked, 30) << "the fixture parse found almost nothing to compare";
+}
+
+TEST(SchemaContract, TheOccurrenceIdIsNotAUuidColumn) {
+  // motif_occurrences.id is a VARCHAR holding a UUID, unlike every other
+  // id here — which is why the sink generates it with gen_random_uuid()
+  // cast to text. A fixture that made it UUID would accept a cast the real
+  // column rejects.
+  EXPECT_EQ(JavaSchemaFor("motif_occurrences")["id"], "VARCHAR(36)");
+  EXPECT_EQ(JavaSchemaFor("game_features")["id"], "UUID");
+}
+
+TEST(SchemaContract, AFailedRunSaysWhatTheJavaWorkerSays) {
+  // error_message is a column the API hands back, so what goes in it is a
+  // contract with the caller and not a debugging aid. Both workers write
+  // the same sentence, and neither writes the cause.
+  const std::string java = Read(
+      "domains/games/apis/one_d4/src/main/java/com/muchq/games/one_d4/worker/"
+      "IndexWorker.java");
+  const std::string poller = Read("domains/games/apis/one_d4_worker/poller.cc");
+
+  const std::regex message(R"re("(Indexing failed[^"]*)")re");
+  std::smatch found;
+  ASSERT_TRUE(std::regex_search(java, found, message))
+      << "IndexWorker no longer stores a fixed failure message";
+  EXPECT_THAT(poller, testing::HasSubstr(absl::StrCat("\"", found[1].str(), "\"")))
+      << "the C++ worker stores a different sentence than the Java one";
 }
 
 TEST(SchemaContract, AttemptsAgreeWithTheJavaLimit) {

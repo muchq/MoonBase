@@ -77,6 +77,26 @@ class LatencyBucketViewTest : public ::testing::Test {
   std::shared_ptr<metrics_sdk::MeterProvider> provider_;
 };
 
+TEST_F(LatencyBucketViewTest, ANamedHistogramGetsTheBoundsItAskedFor) {
+  // A distribution whose range is nothing like an HTTP request's: on the
+  // SDK defaults every observation lands in +Inf, and histogram_quantile
+  // answers the highest finite bound forever.
+  const std::vector<double> bounds = {1'000, 60'000'000, 3'600'000'000};
+  RegisterHistogramBounds(*provider_, "index_run_duration_micros", bounds);
+
+  EXPECT_EQ(BoundariesFor("index_run_duration_micros"), bounds);
+}
+
+TEST_F(LatencyBucketViewTest, NamedBoundsClaimOnlyTheirOwnInstrument) {
+  // The selector is a regex. Unanchored, this would also claim
+  // index_run_duration_micros_by_player and anything else containing it.
+  RegisterHistogramBounds(*provider_, "run_seconds", {1, 2, 3});
+
+  const std::vector<double> neighbour = BoundariesFor("run_seconds_extra");
+  EXPECT_NE(neighbour, (std::vector<double>{1, 2, 3}));
+  EXPECT_FALSE(neighbour.empty()) << "the neighbour exported nothing to compare";
+}
+
 TEST_F(LatencyBucketViewTest, AMicrosecondsHistogramGetsTheExplicitBounds) {
   RegisterLatencyBucketView(*provider_);
 

@@ -57,6 +57,22 @@ class CapturingMetricsRecorder final : public MetricsRecorder {
     MetricsRecorder::RecordGauge(name, value, attributes);
   }
 
+  // Captured separately from the record methods, and deliberately not as an
+  // entry: a declaration adds zero, so a test that could not tell the two
+  // apart would read "declared" and "fired with value 0" as the same event
+  // — which is the whole distinction #1323 turns on.
+  // The default is repeated, not inherited: a virtual's default arguments
+  // are not, and an override without one hides the base's single-argument
+  // form from every caller holding this type.
+  void DeclareCounter(const std::string& name,
+                      const std::map<std::string, std::string>& attributes = {}) override {
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      declared_.push_back({name, 0, attributes});
+    }
+    MetricsRecorder::DeclareCounter(name, attributes);
+  }
+
   /// Sum of increments recorded for the counter under exactly these
   /// attributes; 0 when it never fired. Exact-match on attributes is
   /// deliberate: asserting a labelled counter fired says nothing unless a
@@ -71,9 +87,38 @@ class CapturingMetricsRecorder final : public MetricsRecorder {
     return total;
   }
 
+  /// How many observations landed under exactly these attributes.
+  ///
+  /// The count, not the sum: a histogram of durations says nothing useful
+  /// about how many times it fired if the assertion adds the values up.
+  int ObservationCount(const std::string& name,
+                       const std::map<std::string, std::string>& attributes = {}) const {
+    const std::lock_guard<std::mutex> lock(mu_);
+    int count = 0;
+    for (const Entry& entry : entries_) {
+      if (entry.name == name && entry.attributes == attributes) ++count;
+    }
+    return count;
+  }
+
+  /// True when this exact series was declared ahead of its first event.
+  bool Declared(const std::string& name,
+                const std::map<std::string, std::string>& attributes = {}) const {
+    const std::lock_guard<std::mutex> lock(mu_);
+    for (const Entry& entry : declared_) {
+      if (entry.name == name && entry.attributes == attributes) return true;
+    }
+    return false;
+  }
+
   std::vector<Entry> Entries() const {
     const std::lock_guard<std::mutex> lock(mu_);
     return entries_;
+  }
+
+  std::vector<Entry> Declarations() const {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return declared_;
   }
 
  private:
@@ -85,6 +130,7 @@ class CapturingMetricsRecorder final : public MetricsRecorder {
 
   mutable std::mutex mu_;
   std::vector<Entry> entries_;
+  std::vector<Entry> declared_;
 };
 
 }  // namespace futility::otel

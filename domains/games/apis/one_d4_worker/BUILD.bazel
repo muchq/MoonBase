@@ -1,4 +1,5 @@
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
 # one_d4_worker: the C++ index worker (#1389 phase 4).
 #
@@ -48,8 +49,11 @@ cc_library(
     deps = [
         ":job",
         ":queue",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
     ],
 )
@@ -63,6 +67,7 @@ cc_test(
         ":queue",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
     ],
 )
@@ -107,7 +112,10 @@ cc_test(
     size = "small",
     srcs = ["schema_contract_test.cc"],
     data = [
+        "pg_game_sink_test.cc",
         "pg_queue_test.cc",
+        "poller.cc",
+        "//domains/games/apis/one_d4:worker_metric_names",
         "//domains/games/apis/one_d4:worker_schema_sources",
     ],
     deps = [
@@ -115,4 +123,237 @@ cc_test(
         "@com_google_absl//absl/strings",
         "@googletest//:gtest_main",
     ],
+)
+
+cc_library(
+    name = "result",
+    srcs = ["result.cc"],
+    hdrs = ["result.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@com_google_absl//absl/types:span"],
+)
+
+# The result words are chess.com's, and both indexers write `result` for the
+# same games — so the vocabulary is read out of the Java mapper rather than
+# copied and hoped over.
+cc_test(
+    name = "result_test",
+    size = "small",
+    srcs = ["result_test.cc"],
+    data = ["//domains/games/apis/one_d4:worker_result_mapper"],
+    deps = [
+        ":result",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "openings",
+    srcs = ["openings.cc"],
+    hdrs = ["openings.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@com_google_absl//absl/strings"],
+)
+
+# The opening name is derived, not stored, so the two indexers derive it or
+# they disagree. Held to the same frozen corpus and the same counts as
+# OpeningsCorpusTest.
+cc_test(
+    name = "openings_test",
+    size = "small",
+    srcs = ["openings_test.cc"],
+    data = ["//domains/games/apis/one_d4:parity_corpora"],
+    deps = [
+        ":openings",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "archive",
+    hdrs = ["archive.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":job",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_library(
+    name = "game_sink",
+    hdrs = ["game_sink.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/games/libs/one_d4_motifs:occurrence",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "index_run",
+    srcs = ["index_run.cc"],
+    hdrs = ["index_run.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":archive",
+        ":game_sink",
+        ":job",
+        ":openings",
+        ":poller",
+        ":result",
+        "//domains/games/libs/chess_cpp:pgn",
+        "//domains/games/libs/one_d4_motifs:extract",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_test(
+    name = "index_run_test",
+    size = "small",
+    srcs = ["index_run_test.cc"],
+    deps = [
+        ":index_run",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "chess_com_archive",
+    srcs = ["chess_com_archive.cc"],
+    hdrs = ["chess_com_archive.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":archive",
+        "//domains/games/libs/chess_com_cpp:client",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+# Against the generated loopback server, not a hand-rolled fake: which
+# errors are NotFound and which are not is a property of the wire shape,
+# and reading a 5xx as "no such archive" completes a request having indexed
+# nothing.
+cc_test(
+    name = "chess_com_archive_test",
+    size = "small",
+    srcs = ["chess_com_archive_test.cc"],
+    deps = [
+        ":chess_com_archive",
+        "//domains/games/libs/chess_com_cpp:chess_com_smithy_server",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:client",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
+cc_library(
+    name = "pg_game_sink",
+    srcs = ["pg_game_sink.cc"],
+    hdrs = ["pg_game_sink.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":game_sink",
+        "//domains/games/libs/chess_cpp:side",
+        "//domains/games/libs/one_d4_motifs:motif",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_test(
+    name = "pg_game_sink_test",
+    size = "small",
+    srcs = ["pg_game_sink_test.cc"],
+    env_inherit = ["PG_TEST_DB_URL"],
+    deps = [
+        ":pg_game_sink",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "metrics",
+    srcs = ["metrics.cc"],
+    hdrs = ["metrics.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":index_run",
+        ":poller",
+        "//domains/games/libs/one_d4_motifs:motif",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+# Names and label values shared with the Java worker, read out of
+# IndexWorker.java: a name that drifts fails nothing at runtime, it just
+# splits one chart into two and leaves one of them empty.
+cc_test(
+    name = "metrics_test",
+    size = "small",
+    srcs = ["metrics_test.cc"],
+    data = [
+        "metrics.cc",
+        "//domains/games/apis/one_d4:worker_metric_names",
+    ],
+    deps = [
+        ":metrics",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "@com_google_absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_binary(
+    name = "one_d4_worker",
+    srcs = ["worker_main.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":chess_com_archive",
+        ":index_run",
+        ":metrics",
+        ":pg_game_sink",
+        ":pg_queue",
+        ":poller",
+        "//domains/games/libs/chess_com_cpp:production_client",
+        "//domains/platform/libs/futility/otel:metrics",
+        "//domains/platform/libs/futility/otel:otel_provider",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:globals",
+        "@com_google_absl//absl/log:initialize",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+linux_amd64_oci_binary(bin_name = "one_d4_worker")
+
+# The service name this worker reports as. prom_proxy's indexing selectors
+# have to cover it, and nothing else ties the two together.
+filegroup(
+    name = "worker_service_name",
+    testonly = True,
+    srcs = ["worker_main.cc"],
+    visibility = ["//domains/platform:__subpackages__"],
 )
