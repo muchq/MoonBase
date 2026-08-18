@@ -394,6 +394,12 @@ var serviceRegistry = map[string]serviceEntry{
 	// The first Java service with a custom set, now that yodel has counters and
 	// distributions to record into. Counts, outcomes and motif names only — the
 	// emitter never labels by player or by game, so no series here is per-user.
+	//
+	// The indexing selectors match one_d4_worker too (#1389). Two processes
+	// index into one table, and they report under their own service names;
+	// pinned to one_d4 alone, every tile here would show half the work and
+	// read as a drop the day the second worker took a share of the queue.
+	// The probes tile stays scoped to one_d4: the worker serves no HTTP.
 	"one_d4": {
 		CustomScalars: []customScalarDef{
 			// The /health traffic (#1303): the container probe plus anything Caddy
@@ -401,25 +407,25 @@ var serviceRegistry = map[string]serviceEntry{
 			// HealthProbeRouteLabelTest pin the two ways a zero here can lie.
 			probesTile("one_d4"),
 			counterOver("Indexing", "games_indexed", "games",
-				`games_indexed_total{service_name="one_d4"}`, burstWindow),
+				`games_indexed_total{service_name=~"one_d4(_worker)?"}`, burstWindow),
 			counterOver("Indexing", "runs_completed", "",
-				`index_runs_total{service_name="one_d4",outcome="completed"}`, burstWindow),
+				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="completed"}`, burstWindow),
 			// The three outcomes below are alarms rather than volumes. They
 			// share burstWindow's length by coincidence of both being sparse,
 			// not by meaning: a failed run an hour ago is still the thing an
 			// operator opened this page to find.
 			counterOver("Indexing", "runs_failed", "",
-				`index_runs_total{service_name="one_d4",outcome="failed"}`, alarmWindow),
+				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="failed"}`, alarmWindow),
 			// A wedge cut loose by the MAX_RUN ceiling lands here (#1282). Anything
 			// above zero means a worker was stuck long enough to be given up on.
 			counterOver("Indexing", "runs_interrupted", "",
-				`index_runs_total{service_name="one_d4",outcome="interrupted"}`, alarmWindow),
+				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="interrupted"}`, alarmWindow),
 			// Emitted since the ceiling landed, and listed so the four outcomes add up to
 			// index_runs_total. A range changing hands mid-run is ordinary; a rising count
 			// beside a flat interrupted count is contention, not a wedge — which only
 			// reads that way if the two share a window, hence the same one.
 			counterOver("Indexing", "runs_lease_lost", "",
-				`index_runs_total{service_name="one_d4",outcome="lease_lost"}`, alarmWindow),
+				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="lease_lost"}`, alarmWindow),
 			// Windowed averages over the histograms: rate(sum)/rate(count) is the
 			// mean per run in the window, the same shape portrait uses. Means, so
 			// no rate form.
@@ -427,17 +433,17 @@ var serviceRegistry = map[string]serviceEntry{
 			// run is one that sat at the MAX_RUN ceiling — pooling those in makes the average
 			// spike at exactly the moment someone is reading it to size a real run.
 			scalar("Indexing", "avg_run_seconds_1h", "s",
-				`sum(rate(index_run_duration_micros_sum{service_name="one_d4",outcome="completed"}[1h]))/sum(rate(index_run_duration_micros_count{service_name="one_d4",outcome="completed"}[1h]))/1000000`),
+				`sum(rate(index_run_duration_micros_sum{service_name=~"one_d4(_worker)?",outcome="completed"}[1h]))/sum(rate(index_run_duration_micros_count{service_name=~"one_d4(_worker)?",outcome="completed"}[1h]))/1000000`),
 			scalar("Indexing", "avg_games_per_month_1h", "games",
-				`sum(rate(index_games_per_month_sum{service_name="one_d4"}[1h]))/sum(rate(index_games_per_month_count{service_name="one_d4"}[1h]))`),
+				`sum(rate(index_games_per_month_sum{service_name=~"one_d4(_worker)?"}[1h]))/sum(rate(index_games_per_month_count{service_name=~"one_d4(_worker)?"}[1h]))`),
 			counterOver("Indexing", "empty_months", "",
-				`index_months_total{service_name="one_d4",result="empty"}`, burstWindow),
+				`index_months_total{service_name=~"one_d4(_worker)?",result="empty"}`, burstWindow),
 			counterOver("Indexing", "cached_months", "",
-				`index_months_total{service_name="one_d4",result="cached"}`, burstWindow),
+				`index_months_total{service_name=~"one_d4(_worker)?",result="cached"}`, burstWindow),
 			counterOver("Indexing", "archive_fetches", "",
-				`chess_com_archive_fetches_total{service_name="one_d4"}`, burstWindow),
+				`chess_com_archive_fetches_total{service_name=~"one_d4(_worker)?"}`, burstWindow),
 			counterOver("Motifs", "occurrences", "",
-				`motif_occurrences_total{service_name="one_d4"}`, burstWindow),
+				`motif_occurrences_total{service_name=~"one_d4(_worker)?"}`, burstWindow),
 			// No motifs-per-game tile. The two counters are recorded on opposite sides of
 			// the durability boundary — motifs per game inside the drain loop, games only
 			// after the month's flush and period write succeed — so an interrupted or
@@ -447,8 +453,8 @@ var serviceRegistry = map[string]serviceEntry{
 			// that is wrong exactly when the system is unhealthy is worse than no tile.
 		},
 		CustomTimeseries: map[string]customTimeseriesDef{
-			"games_indexed":  tsCounter(`games_indexed_total{service_name="one_d4"}`),
-			"run_completion": tsCounter(`index_runs_total{service_name="one_d4",outcome="completed"}`),
+			"games_indexed":  tsCounter(`games_indexed_total{service_name=~"one_d4(_worker)?"}`),
+			"run_completion": tsCounter(`index_runs_total{service_name=~"one_d4(_worker)?",outcome="completed"}`),
 			// Selected, not subtracted. In PromQL sum() over no matching series is an
 			// empty vector, and vector-minus-empty is empty rather than the left side —
 			// so a total-minus-completed form renders nothing on a fresh process whose
@@ -458,15 +464,15 @@ var serviceRegistry = map[string]serviceEntry{
 			// is ordinary. A range changing hands mid-run happens whenever two pollers
 			// overlap, so counting it here puts a permanent floor under the failure line
 			// and buries the two outcomes that do mean something went wrong.
-			"run_failure": tsCounter(`index_runs_total{service_name="one_d4",outcome=~"failed|interrupted"}`),
+			"run_failure": tsCounter(`index_runs_total{service_name=~"one_d4(_worker)?",outcome=~"failed|interrupted"}`),
 			// Converted to milliseconds. A Trends series carries no unit in the payload —
 			// the chart title is the key title-cased, and nothing else on it says what the
 			// numbers are — so the key names the unit and the query has to match it. The
 			// histogram is recorded in microseconds because that is the unit yodel's
 			// standard latency series use, which suits an HTTP request and not an index
 			// run: unconverted, a two-minute run plots as 120000000.
-			"run_duration_avg_ms": tsFixed(`sum(rate(index_run_duration_micros_sum{service_name="one_d4",outcome="completed"}[5m]))/sum(rate(index_run_duration_micros_count{service_name="one_d4",outcome="completed"}[5m]))/1000`),
-			"motif":               tsCounter(`motif_occurrences_total{service_name="one_d4"}`),
+			"run_duration_avg_ms": tsFixed(`sum(rate(index_run_duration_micros_sum{service_name=~"one_d4(_worker)?",outcome="completed"}[5m]))/sum(rate(index_run_duration_micros_count{service_name=~"one_d4(_worker)?",outcome="completed"}[5m]))/1000`),
+			"motif":               tsCounter(`motif_occurrences_total{service_name=~"one_d4(_worker)?"}`),
 		},
 	},
 	// Wordchains: server_pal's standard instruments plus the standard

@@ -61,8 +61,11 @@ class CapturingMetricsRecorder final : public MetricsRecorder {
   // entry: a declaration adds zero, so a test that could not tell the two
   // apart would read "declared" and "fired with value 0" as the same event
   // — which is the whole distinction #1323 turns on.
+  // The default is repeated, not inherited: a virtual's default arguments
+  // are not, and an override without one hides the base's single-argument
+  // form from every caller holding this type.
   void DeclareCounter(const std::string& name,
-                      const std::map<std::string, std::string>& attributes) override {
+                      const std::map<std::string, std::string>& attributes = {}) override {
     {
       const std::lock_guard<std::mutex> lock(mu_);
       declared_.push_back({name, 0, attributes});

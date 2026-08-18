@@ -521,9 +521,12 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 				seen[name]++
 				assert.True(t, oneD4ExportedNames[name],
 					"%s reads %q, which IndexWorker does not export", what, name)
-				assert.Contains(t, match[2], `service_name="one_d4"`,
-					"selector %q in %s is not scoped to one_d4, so it sums every service that ever"+
-						" emits that name: %s", match[0], what, query)
+				// Both indexers, and only the two. An unscoped selector sums
+				// every service that ever emits the name; one pinned to
+				// service_name="one_d4" shows half the indexing the day the
+				// C++ worker takes a share of the queue (#1389).
+				assert.Contains(t, match[2], `service_name=~"one_d4(_worker)?"`,
+					"selector %q in %s does not cover both indexers: %s", match[0], what, query)
 			}
 		}
 	}
