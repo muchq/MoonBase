@@ -54,21 +54,17 @@ list PlayedGameList {
 }
 
 /// Fields consumed by the indexer. Unneeded chess.com metadata is deliberately
-/// not modeled. A player side remains optional because chess.com can omit it,
-/// in which case the indexer stores null player fields.
+/// not modeled. Response members remain optional because one incomplete game
+/// must not prevent the indexer from processing the rest of the month.
 structure PlayedGame {
-    @required
     url: String
 
-    @required
     pgn: String
 
-    @required
     @jsonName("end_time")
     @timestampFormat("epoch-seconds")
     endTime: Timestamp
 
-    @required
     @jsonName("time_class")
     timeClass: String
 
@@ -80,13 +76,10 @@ structure PlayedGame {
 }
 
 structure PlayerResult {
-    @required
     username: String
 
-    @required
     rating: Integer
 
-    @required
     result: String
 }
 

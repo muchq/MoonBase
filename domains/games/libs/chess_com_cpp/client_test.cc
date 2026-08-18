@@ -145,6 +145,8 @@ TEST(DefaultClientConfigTest, UsesChessComProductionDefaults) {
   EXPECT_EQ(config.user_agent, "MoonBase indexer/1.0");
   EXPECT_EQ(config.request_timeout_ms, 60'000);
   EXPECT_EQ(config.retry.max_attempts, 3);
+  EXPECT_EQ(config.retry.initial_backoff, std::chrono::seconds(1));
+  EXPECT_EQ(config.retry.max_backoff, std::chrono::seconds(20));
 }
 
 TEST_F(ClientTest, FetchPlayerLowercasesUsername) {
@@ -200,6 +202,15 @@ TEST_F(ClientTest, InvalidMonthIsRejectedBeforeSending) {
   EXPECT_EQ(handler_->archive_calls(), 0);
 }
 
+TEST_F(ClientTest, InvalidYearIsRejectedBeforeSending) {
+  const auto too_short = client_->FetchArchive("hikaru", 999, 1);
+  const auto too_long = client_->FetchArchive("hikaru", 10'000, 1);
+
+  EXPECT_FALSE(too_short.ok());
+  EXPECT_FALSE(too_long.ok());
+  EXPECT_EQ(handler_->archive_calls(), 0);
+}
+
 TEST_F(ClientTest, PlayerAndArchiveNotFoundRemainDistinct) {
   handler_->set_player_not_found();
   const auto player = client_->FetchPlayer("missing");
@@ -241,8 +252,10 @@ TEST(ClientContractTest, UnknownResponseMembersDoNotBreakArchiveDecoding) {
   ASSERT_TRUE(archive.ok()) << archive.error().message();
   ASSERT_EQ(archive->games.size(), 1u);
   ASSERT_TRUE(archive->games[0].white.has_value());
-  EXPECT_EQ(archive->games[0].white->username, "Hikaru");
-  EXPECT_EQ(archive->games[0].endTime.epoch_milliseconds(), 1'700'000'000'000);
+  ASSERT_TRUE(archive->games[0].white->username.has_value());
+  EXPECT_EQ(*archive->games[0].white->username, "Hikaru");
+  ASSERT_TRUE(archive->games[0].endTime.has_value());
+  EXPECT_EQ(archive->games[0].endTime->epoch_milliseconds(), 1'700'000'000'000);
 }
 
 TEST(ClientContractTest, MissingPlayerSideIsAccepted) {
@@ -272,6 +285,45 @@ TEST(ClientContractTest, MissingPlayerSideIsAccepted) {
   EXPECT_FALSE(archive->games[0].black.has_value());
 }
 
+TEST(ClientContractTest, MissingGameAndPlayerFieldsDoNotDiscardTheArchive) {
+  smithy::http::HttpResponse response;
+  response.status = 200;
+  response.body = R"({
+    "games": [
+      {"white": {}},
+      {
+        "url": "https://www.chess.com/game/live/123",
+        "pgn": "1. e4 e5",
+        "end_time": 1700000000,
+        "time_class": "blitz",
+        "white": {"username": "Hikaru", "rating": 2800, "result": "win"},
+        "black": {"username": "Opponent", "rating": 2700, "result": "resigned"}
+      }
+    ]
+  })";
+  auto transport =
+      std::make_shared<ScriptedHttpClient>(std::vector<smithy::http::HttpResponse>{response});
+  smithy::ClientConfig config = chess_com::DefaultClientConfig();
+  config.http_client = transport;
+  auto client = Client::Create(std::move(config));
+  ASSERT_TRUE(client.ok()) << client.error().message();
+
+  const auto archive = client->FetchArchive("hikaru", 2026, 3);
+
+  ASSERT_TRUE(archive.ok()) << archive.error().message();
+  ASSERT_EQ(archive->games.size(), 2u);
+  EXPECT_FALSE(archive->games[0].url.has_value());
+  EXPECT_FALSE(archive->games[0].pgn.has_value());
+  EXPECT_FALSE(archive->games[0].endTime.has_value());
+  EXPECT_FALSE(archive->games[0].timeClass.has_value());
+  ASSERT_TRUE(archive->games[0].white.has_value());
+  EXPECT_FALSE(archive->games[0].white->username.has_value());
+  EXPECT_FALSE(archive->games[0].white->rating.has_value());
+  EXPECT_FALSE(archive->games[0].white->result.has_value());
+  ASSERT_TRUE(archive->games[1].url.has_value());
+  EXPECT_EQ(*archive->games[1].url, "https://www.chess.com/game/live/123");
+}
+
 TEST(ClientContractTest, RateLimitIsRetriedWithConfiguredPolicy) {
   smithy::http::HttpResponse rate_limited;
   rate_limited.status = 429;
@@ -283,8 +335,9 @@ TEST(ClientContractTest, RateLimitIsRetriedWithConfiguredPolicy) {
       std::vector<smithy::http::HttpResponse>{rate_limited, success});
   smithy::ClientConfig config = chess_com::DefaultClientConfig();
   config.http_client = transport;
-  config.retry.sleep = [](std::chrono::milliseconds) {};
-  config.retry.jitter = [] { return 0.0; };
+  std::vector<std::chrono::milliseconds> delays;
+  config.retry.sleep = [&](std::chrono::milliseconds delay) { delays.push_back(delay); };
+  config.retry.jitter = [] { return 1.0; };
   auto client = Client::Create(std::move(config));
   ASSERT_TRUE(client.ok()) << client.error().message();
 
@@ -292,10 +345,33 @@ TEST(ClientContractTest, RateLimitIsRetriedWithConfiguredPolicy) {
 
   ASSERT_TRUE(archive.ok()) << archive.error().message();
   EXPECT_EQ(transport->requests().size(), 2u);
+  EXPECT_EQ(delays, (std::vector<std::chrono::milliseconds>{std::chrono::seconds(1)}));
   EXPECT_EQ(transport->requests()[0].method, "GET");
   EXPECT_EQ(transport->requests()[0].target, "/pub/player/hikaru/games/2026/03");
   EXPECT_EQ(transport->requests()[0].headers.Get("user-agent").value_or(""),
             "MoonBase indexer/1.0");
+}
+
+TEST(ClientContractTest, PersistentRateLimitStopsAfterThreeAttempts) {
+  smithy::http::HttpResponse rate_limited;
+  rate_limited.status = 429;
+  rate_limited.body = R"({"code":0,"message":"try again"})";
+  auto transport = std::make_shared<ScriptedHttpClient>(
+      std::vector<smithy::http::HttpResponse>{rate_limited, rate_limited, rate_limited});
+  smithy::ClientConfig config = chess_com::DefaultClientConfig();
+  config.http_client = transport;
+  std::vector<std::chrono::milliseconds> delays;
+  config.retry.sleep = [&](std::chrono::milliseconds delay) { delays.push_back(delay); };
+  config.retry.jitter = [] { return 1.0; };
+  auto client = Client::Create(std::move(config));
+  ASSERT_TRUE(client.ok()) << client.error().message();
+
+  const auto archive = client->FetchArchive("hikaru", 2026, 3);
+
+  EXPECT_FALSE(archive.ok());
+  EXPECT_EQ(transport->requests().size(), 3u);
+  EXPECT_EQ(delays, (std::vector<std::chrono::milliseconds>{std::chrono::seconds(1),
+                                                            std::chrono::seconds(2)}));
 }
 
 TEST(ClientContractTest, Bare404UsesTheOperationSpecificError) {

@@ -28,6 +28,7 @@ Game engines, services, and libraries.
 - [**Cards Java**](libs/cards_java): Java implementation of card game utilities.
 - [**Toyfish**](libs/toyfish): Toy chess engine in Go.
 - [**Chess.com Client**](libs/chess_com_client): API client for interacting with Chess.com.
+- [**Chess.com C++ Client**](libs/chess_com_cpp): Smithy-generated client for the Chess.com endpoints used by the C++ index worker.
 - [**ChessQL**](libs/chessql): Query language/engine for chess data.
 - [**Chess C++**](libs/chess_cpp): PGN parsing, replay, and board queries for the C++ index worker, on a vendored Disservin/chess-library.
 - [**1d4 Motifs**](libs/one_d4_motifs): The motif detectors — positions in, `motif_occurrences` rows out. Shared by the batch indexer and the analyze RPC.
