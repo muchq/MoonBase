@@ -77,9 +77,18 @@ class FakeSink : public GameSink {
     return absl::OkStatus();
   }
 
+  absl::Status RecordMonth(const IndexedMonth& month) override {
+    if (!month_status.ok()) return month_status;
+    periods.push_back(month);
+    return absl::OkStatus();
+  }
+
   std::vector<IndexedGame> written;
   std::vector<int> batches;
   absl::Status status;
+
+  std::vector<IndexedMonth> periods;
+  absl::Status month_status;
 };
 
 /// A lease that survives `holds` renewals and is gone after that.
@@ -319,6 +328,91 @@ TEST(IndexRun, RejectsARangeItCannotRead) {
   IndexRun run(archive, sink, Options());
   EXPECT_EQ(run.Execute(AJob("2026-03", "2026-01"), lease).status().code(),
             absl::StatusCode::kInvalidArgument);
+}
+
+TEST(IndexRun, RecordsEveryMonthItRead) {
+  // Without the period row the API reports the month as missing, however
+  // many games landed — DataAvailabilityResolver reads a missing row as
+  // "gone", not as "look again".
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1"), AGame("g2")};
+  archive.months["2026-02"] = {};
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexJob job = AJob("2026-01", "2026-02");
+  job.exclude_bullet = true;
+  IndexRun run(archive, sink, Options());
+  ASSERT_TRUE(run.Execute(job, lease).ok());
+
+  ASSERT_EQ(sink.periods.size(), 2u);
+  EXPECT_EQ(sink.periods[0].player, "alice");
+  EXPECT_EQ(sink.periods[0].platform, "chess.com");
+  EXPECT_EQ(sink.periods[0].month, "2026-01");
+  EXPECT_EQ(sink.periods[0].games, 2);
+  EXPECT_TRUE(sink.periods[0].complete);
+  EXPECT_TRUE(sink.periods[0].exclude_bullet);
+  EXPECT_GT(sink.periods[0].fetched_at, 0);
+  EXPECT_EQ(sink.periods[1].month, "2026-02");
+  EXPECT_EQ(sink.periods[1].games, 0) << "a quiet month was read, and the answer was none";
+}
+
+TEST(IndexRun, RecordsAMonthIncompleteWhenSomethingCouldNotBeRead) {
+  // Complete means "this row carries everything it should". A title that
+  // never arrived makes the month worth refetching, and saying otherwise
+  // caches the gap until retention sweeps it.
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  archive.title_status = absl::UnavailableError("profile lookup failed");
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
+
+  ASSERT_EQ(sink.periods.size(), 1u);
+  EXPECT_FALSE(sink.periods[0].complete);
+}
+
+TEST(IndexRun, DoesNotRecordAMonthItCouldNotWrite) {
+  // The period row is what makes a month look done. Stamping one over a
+  // batch that rolled back caches a month that was never stored.
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  FakeSink sink;
+  sink.status = absl::DataLossError("the transaction rolled back");
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  ASSERT_FALSE(run.Execute(AJob(), lease).ok());
+
+  EXPECT_THAT(sink.periods, IsEmpty());
+}
+
+TEST(IndexRun, DoesNotRecordAMonthWhoseLeaseWentAway) {
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  FakeSink sink;
+  sink.status = absl::FailedPreconditionError("the request names another owner");
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  const absl::StatusOr<RunReport> report = run.Execute(AJob(), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  EXPECT_TRUE(report->lease_lost);
+  EXPECT_THAT(sink.periods, IsEmpty());
+}
+
+TEST(IndexRun, FailsWhenTheMonthCannotBeRecorded) {
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  FakeSink sink;
+  sink.month_status = absl::DataLossError("indexed_periods is gone");
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  EXPECT_EQ(run.Execute(AJob(), lease).status().code(), absl::StatusCode::kDataLoss);
 }
 
 TEST(IndexRun, CarriesThePlayersTitles) {

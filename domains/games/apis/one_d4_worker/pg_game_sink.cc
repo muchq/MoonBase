@@ -78,6 +78,21 @@ VALUES (gen_random_uuid()::text, $1, $2, $3::int, $4, $5::int, NULLIF($6, ''),
 RETURNING id
 )sql";
 
+// PostgresSqlDialect.upsertIndexedPeriod, key for key. The conflict target
+// is the four-column unique constraint, so a period for the same month with
+// and without bullet games are separate rows rather than one overwriting
+// the other.
+constexpr char kUpsertPeriod[] = R"sql(
+INSERT INTO indexed_periods
+    (player, platform, year_month, fetched_at, is_complete, games_count, exclude_bullet)
+VALUES ($1, $2, $3, to_timestamp($4::bigint) AT TIME ZONE 'UTC', $5::boolean, $6::int,
+        $7::boolean)
+ON CONFLICT (player, platform, year_month, exclude_bullet)
+DO UPDATE SET fetched_at = EXCLUDED.fetched_at, is_complete = EXCLUDED.is_complete,
+              games_count = EXCLUDED.games_count
+RETURNING id
+)sql";
+
 std::string Number(int value) { return std::to_string(value); }
 
 /// An unset number is NULL, not zero: a game with no rating recorded and a
@@ -153,6 +168,13 @@ absl::Status PgGameSink::Write(absl::Span<const IndexedGame> games) {
         absl::StrCat("request ", request_id_, " no longer names ", owner_));
   }
   return absl::OkStatus();
+}
+
+absl::Status PgGameSink::RecordMonth(const IndexedMonth& month) {
+  const absl::StatusOr<pg::Result> upserted = client_.Exec(
+      kUpsertPeriod, {month.player, month.platform, month.month, std::to_string(month.fetched_at),
+                      Bool(month.complete), Number(month.games), Bool(month.exclude_bullet)});
+  return upserted.status();
 }
 
 }  // namespace one_d4_worker

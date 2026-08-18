@@ -23,6 +23,8 @@ class PgGameSink : public GameSink {
 
   absl::Status Write(absl::Span<const IndexedGame> games) override;
 
+  absl::Status RecordMonth(const IndexedMonth& month) override;
+
  private:
   pg::Client& client_;
   std::string request_id_;

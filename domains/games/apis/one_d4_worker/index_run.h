@@ -1,12 +1,14 @@
 #ifndef DOMAINS_GAMES_APIS_ONE_D4_WORKER_INDEX_RUN_H
 #define DOMAINS_GAMES_APIS_ONE_D4_WORKER_INDEX_RUN_H
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "domains/games/apis/one_d4_worker/archive.h"
 #include "domains/games/apis/one_d4_worker/game_sink.h"
@@ -41,6 +43,8 @@ class IndexRun {
     /// True when the worker is shutting down. Checked between months.
     std::function<bool()> stopping;
     RunObserver* observer = nullptr;
+    /// Seconds since the epoch. Injected so a test can pin a period stamp.
+    std::function<int64_t()> now;
   };
 
   IndexRun(ArchiveSource& archive, GameSink& sink, Options options);
@@ -51,10 +55,14 @@ class IndexRun {
   absl::StatusOr<RunReport> Execute(const IndexJob& job, LeaseKeeper& lease);
 
  private:
+  int64_t Now() const;
+  absl::Status RecordMonth(const IndexJob& job, YearMonth month, int64_t fetched_at, int games,
+                           bool complete);
   RunObserver& observer();
   absl::Status Flush(std::vector<IndexedGame>& batch);
-  /// "" for untitled and for a lookup that failed. Only answers are cached.
-  std::string TitleOf(std::string_view player);
+  /// "" for untitled, and for a lookup that failed — which also marks the
+  /// month incomplete, since the row is missing something it should carry.
+  std::string TitleOf(std::string_view player, bool& complete);
 
   ArchiveSource& archive_;
   GameSink& sink_;

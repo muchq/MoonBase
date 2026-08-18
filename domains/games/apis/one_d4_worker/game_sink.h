@@ -36,6 +36,27 @@ struct IndexedGame {
   std::vector<one_d4::MotifOccurrence> occurrences;
 };
 
+/// One month, as `indexed_periods` records it: the cache that answers
+/// "has this month been read" without going back to chess.com.
+struct IndexedMonth {
+  std::string player;
+  std::string platform;
+  /// "YYYY-MM".
+  std::string month;
+  /// Seconds since the epoch, taken before the month's games were written.
+  ///
+  /// Stamped up front so the period is never newer than the games it
+  /// vouches for. Retention compares both against one threshold, so a
+  /// period stamped afterwards would outlive its games and keep claiming
+  /// they are there.
+  int64_t fetched_at = 0;
+  int games = 0;
+  /// False when something the row should have carried could not be read,
+  /// so a later request refetches the month.
+  bool complete = true;
+  bool exclude_bullet = false;
+};
+
 /// Where extracted games go.
 ///
 /// A batch is one unit: a sink either writes all of it or none of it, so a
@@ -53,6 +74,14 @@ class GameSink {
   /// separate check is a snapshot: the takeover can commit in the gap and
   /// the batch lands against a request this worker has already lost.
   virtual absl::Status Write(absl::Span<const IndexedGame> games) = 0;
+
+  /// Records that a month was read.
+  ///
+  /// Unfenced, because indexed_periods is keyed by (player, platform,
+  /// month) and has no request to condition on. What keeps it safe is
+  /// order: it runs after a write that checked ownership, so a run that
+  /// lost the lease never reaches it.
+  virtual absl::Status RecordMonth(const IndexedMonth& month) = 0;
 };
 
 }  // namespace one_d4_worker

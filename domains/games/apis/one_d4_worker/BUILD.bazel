@@ -1,4 +1,4 @@
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 
 # one_d4_worker: the C++ index worker (#1389 phase 4).
 #
@@ -197,6 +197,7 @@ cc_library(
         "//domains/games/libs/one_d4_motifs:extract",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
     ],
 )
 
@@ -274,5 +275,60 @@ cc_test(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "metrics",
+    srcs = ["metrics.cc"],
+    hdrs = ["metrics.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":index_run",
+        ":poller",
+        "//domains/games/libs/one_d4_motifs:motif",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+# Names and label values shared with the Java worker, read out of
+# IndexWorker.java: a name that drifts fails nothing at runtime, it just
+# splits one chart into two and leaves one of them empty.
+cc_test(
+    name = "metrics_test",
+    size = "small",
+    srcs = ["metrics_test.cc"],
+    data = ["//domains/games/apis/one_d4:worker_metric_names"],
+    deps = [
+        ":metrics",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "@com_google_absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_binary(
+    name = "one_d4_worker",
+    srcs = ["worker_main.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":chess_com_archive",
+        ":index_run",
+        ":metrics",
+        ":pg_game_sink",
+        ":pg_queue",
+        ":poller",
+        "//domains/games/libs/chess_com_cpp:production_client",
+        "//domains/platform/libs/futility/otel:metrics",
+        "//domains/platform/libs/futility/otel:otel_provider",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:globals",
+        "@com_google_absl//absl/log:initialize",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
     ],
 )

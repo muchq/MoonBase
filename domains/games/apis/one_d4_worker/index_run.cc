@@ -6,6 +6,8 @@
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "domains/games/apis/one_d4_worker/openings.h"
 #include "domains/games/apis/one_d4_worker/result.h"
 #include "domains/games/libs/chess_cpp/parsed_game.h"
@@ -26,6 +28,23 @@ std::string EcoFrom(const chess_cpp::Headers& headers) {
 IndexRun::IndexRun(ArchiveSource& archive, GameSink& sink, Options options)
     : archive_(archive), sink_(sink), options_(std::move(options)) {}
 
+int64_t IndexRun::Now() const {
+  return options_.now ? options_.now() : absl::ToUnixSeconds(absl::Now());
+}
+
+absl::Status IndexRun::RecordMonth(const IndexJob& job, YearMonth month, int64_t fetched_at,
+                                   int games, bool complete) {
+  IndexedMonth period;
+  period.player = job.player;
+  period.platform = job.platform;
+  period.month = month.ToString();
+  period.fetched_at = fetched_at;
+  period.games = games;
+  period.complete = complete;
+  period.exclude_bullet = job.exclude_bullet;
+  return sink_.RecordMonth(period);
+}
+
 RunObserver& IndexRun::observer() {
   static RunObserver* const nobody = new RunObserver();
   return options_.observer != nullptr ? *options_.observer : *nobody;
@@ -38,15 +57,19 @@ absl::Status IndexRun::Flush(std::vector<IndexedGame>& batch) {
   return written;
 }
 
-std::string IndexRun::TitleOf(std::string_view player) {
+std::string IndexRun::TitleOf(std::string_view player, bool& complete) {
   if (player.empty()) return "";
   const auto cached = titles_.find(player);
   if (cached != titles_.end()) return cached->second;
 
   const absl::StatusOr<std::string> title = archive_.FetchTitle(player);
   // A failure is not an answer. Caching one would carry a bad minute
-  // across a decade of backfill.
-  if (!title.ok()) return "";
+  // across a decade of backfill; recording the month complete without it
+  // would do the same to the period cache.
+  if (!title.ok()) {
+    complete = false;
+    return "";
+  }
   titles_.emplace(player, *title);
   return *title;
 }
@@ -70,6 +93,8 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
       return report;
     }
 
+    // Stamped before the month's games are written. See IndexedMonth.
+    const int64_t fetched_at = Now();
     absl::StatusOr<std::vector<ArchivedGame>> games = archive_.FetchMonth(job.player, month);
     if (!games.ok()) {
       observer().ArchiveFetched("error");
@@ -77,14 +102,21 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
     }
     if (games->empty()) {
       // The month was read and the answer is "none". Distinct from a 404,
-      // which says the archive was not read at all.
+      // which says the archive was not read at all. Recorded anyway: a
+      // month with no period row is indistinguishable from one retention
+      // swept, and the cache would miss on it forever.
       observer().ArchiveFetched("no_archive");
+      if (const absl::Status recorded = RecordMonth(job, month, fetched_at, 0, true);
+          !recorded.ok()) {
+        return recorded;
+      }
       observer().MonthFinished("empty", 0);
       continue;
     }
     observer().ArchiveFetched("ok");
 
     int month_count = 0;
+    bool complete = true;
     for (const ArchivedGame& game : *games) {
       if (job.exclude_bullet && game.time_class == "bullet") continue;
 
@@ -100,8 +132,8 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
       row.black_username = game.black_username;
       row.white_elo = game.white_rating;
       row.black_elo = game.black_rating;
-      row.white_title = TitleOf(game.white_username);
-      row.black_title = TitleOf(game.black_username);
+      row.white_title = TitleOf(game.white_username, complete);
+      row.black_title = TitleOf(game.black_username, complete);
       row.time_class = game.time_class;
       row.eco = EcoFrom(parsed->headers);
       row.opening_name = OpeningNameFromEcoUrl(game.eco_url);
@@ -137,7 +169,11 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
       report.lease_lost = true;
       return report;
     }
-    observer().MonthFinished("indexed", month_count);
+    if (const absl::Status recorded = RecordMonth(job, month, fetched_at, month_count, complete);
+        !recorded.ok()) {
+      return recorded;
+    }
+    observer().MonthFinished(complete ? "indexed" : "degraded", month_count);
   }
 
   return report;

@@ -34,6 +34,7 @@ class PgGameSinkTest : public testing::Test {
     client_ = std::make_unique<pg::Client>(url);
 
     // Column for column what PostgresSqlDialect creates and Migration adds.
+    ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS indexed_periods").ok());
     ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS motif_occurrences").ok());
     ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS game_features").ok());
     ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS indexing_requests").ok());
@@ -93,6 +94,22 @@ class PgGameSinkTest : public testing::Test {
             is_discovered BOOLEAN NOT NULL DEFAULT FALSE,
             is_mate       BOOLEAN NOT NULL DEFAULT FALSE,
             pin_type      VARCHAR(20)
+        ))")
+                    .ok());
+
+    ASSERT_TRUE(client_
+                    ->Exec(R"(
+        CREATE TABLE indexed_periods (
+            id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            player         VARCHAR(255) NOT NULL,
+            platform       VARCHAR(50) NOT NULL,
+            year_month     VARCHAR(7) NOT NULL,
+            fetched_at     TIMESTAMP NOT NULL,
+            is_complete    BOOLEAN NOT NULL,
+            games_count    INT NOT NULL,
+            exclude_bullet BOOLEAN NOT NULL DEFAULT FALSE,
+            CONSTRAINT indexed_periods_unique
+                UNIQUE (player, platform, year_month, exclude_bullet)
         ))")
                     .ok());
 
@@ -273,6 +290,52 @@ TEST_F(PgGameSinkTest, WritesEveryGameOfABatch) {
 
   EXPECT_EQ(One("SELECT count(*)::text FROM game_features"), "2");
   EXPECT_EQ(One("SELECT count(*)::text FROM motif_occurrences"), "3");
+}
+
+IndexedMonth AMonth() {
+  IndexedMonth month;
+  month.player = "alice";
+  month.platform = "chess.com";
+  month.month = "2026-01";
+  month.fetched_at = 1'700'000'000;
+  month.games = 12;
+  return month;
+}
+
+TEST_F(PgGameSinkTest, RecordsTheMonthAsThePeriodCacheReadsIt) {
+  ASSERT_TRUE(sink_->RecordMonth(AMonth()).ok());
+
+  EXPECT_EQ(One("SELECT games_count::text FROM indexed_periods"), "12");
+  EXPECT_EQ(One("SELECT is_complete::text FROM indexed_periods"), "true");
+  EXPECT_EQ(One("SELECT exclude_bullet::text FROM indexed_periods"), "false");
+  EXPECT_EQ(One("SELECT to_char(fetched_at, 'YYYY-MM-DD HH24:MI:SS') FROM indexed_periods"),
+            "2023-11-14 22:13:20");
+}
+
+TEST_F(PgGameSinkTest, RereadingAMonthUpdatesItsPeriodRatherThanAddingOne) {
+  ASSERT_TRUE(sink_->RecordMonth(AMonth()).ok());
+  IndexedMonth again = AMonth();
+  again.games = 15;
+  again.complete = false;
+  ASSERT_TRUE(sink_->RecordMonth(again).ok());
+
+  EXPECT_EQ(One("SELECT count(*)::text FROM indexed_periods"), "1");
+  EXPECT_EQ(One("SELECT games_count::text FROM indexed_periods"), "15");
+  EXPECT_EQ(One("SELECT is_complete::text FROM indexed_periods"), "false");
+}
+
+TEST_F(PgGameSinkTest, AMonthWithAndWithoutBulletAreTwoPeriods) {
+  // The cache is keyed by the filter too: a range indexed without bullet
+  // games answers nothing about the same month indexed with them.
+  IndexedMonth with_bullet = AMonth();
+  IndexedMonth without_bullet = AMonth();
+  without_bullet.exclude_bullet = true;
+  without_bullet.games = 7;
+  ASSERT_TRUE(sink_->RecordMonth(with_bullet).ok());
+  ASSERT_TRUE(sink_->RecordMonth(without_bullet).ok());
+
+  EXPECT_EQ(One("SELECT count(*)::text FROM indexed_periods"), "2");
+  EXPECT_EQ(One("SELECT games_count::text FROM indexed_periods WHERE exclude_bullet"), "7");
 }
 
 TEST_F(PgGameSinkTest, AnEmptyBatchIsNotAWrite) {

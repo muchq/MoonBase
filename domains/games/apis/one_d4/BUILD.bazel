@@ -427,6 +427,15 @@ filegroup(
     visibility = ["//domains/games:__subpackages__"],
 )
 
+# The metric names and outcome labels the Java worker writes. The C++
+# worker fills the same series.
+filegroup(
+    name = "worker_metric_names",
+    testonly = True,
+    srcs = ["src/main/java/com/muchq/games/one_d4/worker/IndexWorker.java"],
+    visibility = ["//domains/games:__subpackages__"],
+)
+
 filegroup(
     name = "worker_schema_sources",
     testonly = True,
