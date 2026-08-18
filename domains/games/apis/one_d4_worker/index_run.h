@@ -57,7 +57,7 @@ class IndexRun {
  private:
   int64_t Now() const;
   absl::Status RecordMonth(const IndexJob& job, YearMonth month, int64_t fetched_at, int games,
-                           bool complete);
+                           bool nothing_degraded);
   RunObserver& observer();
   absl::Status Flush(std::vector<IndexedGame>& batch);
   /// "" for untitled, and for a lookup that failed — which also marks the

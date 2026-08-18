@@ -31,6 +31,19 @@ YearMonth YearMonth::Next() const {
   return month == 12 ? YearMonth{year + 1, 1} : YearMonth{year, month + 1};
 }
 
+int64_t YearMonth::FirstInstant() const {
+  // Howard Hinnant's days_from_civil, for day 1 of the month. Shifting the
+  // year to start in March puts the leap day at the end of it, which is what
+  // makes the era arithmetic exact rather than nearly right.
+  const int y = year - (month <= 2 ? 1 : 0);
+  const int era = (y >= 0 ? y : y - 399) / 400;
+  const unsigned yoe = static_cast<unsigned>(y - era * 400);
+  const unsigned doy = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5;
+  const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  const int64_t days = static_cast<int64_t>(era) * 146097 + static_cast<int64_t>(doe) - 719468;
+  return days * 86400;
+}
+
 absl::StatusOr<std::vector<YearMonth>> IndexJob::Months(std::string_view start,
                                                         std::string_view end) {
   const absl::StatusOr<YearMonth> from = YearMonth::Parse(start);

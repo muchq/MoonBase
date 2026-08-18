@@ -112,8 +112,8 @@ std::string PinTypeOf(const one_d4::MotifOccurrence& occurrence) {
 }  // namespace
 
 absl::Status PgGameSink::Write(absl::Span<const IndexedGame> games) {
-  if (games.empty()) return absl::OkStatus();
-
+  // An empty batch still asks. See IndexRun::Flush: the answer is what
+  // gates the period row, which has no fence of its own.
   std::vector<const IndexedGame*> ordered;
   ordered.reserve(games.size());
   for (const IndexedGame& game : games) ordered.push_back(&game);

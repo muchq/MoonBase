@@ -33,14 +33,18 @@ int64_t IndexRun::Now() const {
 }
 
 absl::Status IndexRun::RecordMonth(const IndexJob& job, YearMonth month, int64_t fetched_at,
-                                   int games, bool complete) {
+                                   int games, bool nothing_degraded) {
   IndexedMonth period;
   period.player = job.player;
   period.platform = job.platform;
   period.month = month.ToString();
   period.fetched_at = fetched_at;
   period.games = games;
-  period.complete = complete;
+  // Complete only once the month itself is over, so the current month is
+  // always refetched. Storing today's month complete would freeze it: the
+  // Java worker's period cache honours the flag and skips the month on
+  // every later request, so games played after this run are never indexed.
+  period.complete = fetched_at >= month.Next().FirstInstant() && nothing_degraded;
   period.exclude_bullet = job.exclude_bullet;
   return sink_.RecordMonth(period);
 }
@@ -51,7 +55,12 @@ RunObserver& IndexRun::observer() {
 }
 
 absl::Status IndexRun::Flush(std::vector<IndexedGame>& batch) {
-  if (batch.empty()) return absl::OkStatus();
+  // No early return on an empty batch. An empty write writes nothing but
+  // still asks the question, and the answer is what gates RecordMonth,
+  // which carries no fence of its own. A month whose games were all
+  // bullet-filtered, or whose count is an exact multiple of batch_size,
+  // arrives here empty — and skipping the question there is a hole a
+  // takeover fits through.
   const absl::Status written = sink_.Write(batch);
   if (written.ok()) batch.clear();
   return written;
@@ -106,6 +115,15 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
       // month with no period row is indistinguishable from one retention
       // swept, and the cache would miss on it forever.
       observer().ArchiveFetched("no_archive");
+      // Ownership first, and asked of the sink rather than the lease: the
+      // fetch above can outlive a lease, and a period row written over a
+      // month a replacement already indexed properly would cache it as
+      // holding zero games.
+      if (const absl::Status written = Flush(batch); !written.ok()) {
+        if (!absl::IsFailedPrecondition(written)) return written;
+        report.lease_lost = true;
+        return report;
+      }
       if (const absl::Status recorded = RecordMonth(job, month, fetched_at, 0, true);
           !recorded.ok()) {
         return recorded;

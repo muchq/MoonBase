@@ -3,13 +3,17 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdlib>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
+#include "absl/synchronization/notification.h"
+#include "absl/time/clock.h"
 #include "domains/platform/libs/pg/pg.h"
 
 namespace one_d4_worker {
@@ -32,6 +36,10 @@ class PgGameSinkTest : public testing::Test {
     const char* url = std::getenv("PG_TEST_DB_URL");
     if (url == nullptr || *url == '\0') GTEST_SKIP() << "PG_TEST_DB_URL unset";
     client_ = std::make_unique<pg::Client>(url);
+    // Not UTC, deliberately. Under a UTC session `AT TIME ZONE 'UTC'` and a
+    // bare cast agree, so every assertion below about the convention would
+    // hold with the conversion deleted.
+    ASSERT_TRUE(client_->Exec("SET TimeZone = 'America/New_York'").ok());
 
     // Column for column what PostgresSqlDialect creates and Migration adds.
     ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS indexed_periods").ok());
@@ -129,6 +137,15 @@ class PgGameSinkTest : public testing::Test {
     return result->Get(0, 0).value_or("(null)");
   }
 
+  /// The control for the two assertions above: under a UTC session the
+  /// conversion and a bare cast agree, so they would hold with `AT TIME
+  /// ZONE 'UTC'` deleted. pg::Client reconnects lazily, and a reconnect
+  /// drops the session setting — silently, and back to exactly that.
+  void ExpectSessionIsNotUtc() {
+    EXPECT_EQ(One("SHOW TimeZone"), "America/New_York")
+        << "the session went back to UTC, so the assertion below proves nothing";
+  }
+
   std::unique_ptr<pg::Client> client_;
   std::unique_ptr<PgGameSink> sink_;
 };
@@ -181,6 +198,7 @@ TEST_F(PgGameSinkTest, WritesTheRowTheJavaWorkerWouldHaveWritten) {
   EXPECT_EQ(One("SELECT request_id::text FROM game_features"), kRequest);
   // The column is a wall clock and the convention is UTC — the same one
   // GameFeatureDao writes on, and the one ChessQL's month filters read.
+  ExpectSessionIsNotUtc();
   EXPECT_EQ(One("SELECT to_char(played_at, 'YYYY-MM-DD HH24:MI:SS') FROM game_features"),
             "2023-11-14 22:13:20");
   EXPECT_EQ(One("SELECT motif FROM motif_occurrences"), "CHECK");
@@ -279,6 +297,22 @@ TEST_F(PgGameSinkTest, WritesABatchAsOneUnitOrNotAtAll) {
   EXPECT_EQ(One("SELECT count(*)::text FROM motif_occurrences"), "0");
 }
 
+TEST_F(PgGameSinkTest, WritesABatchInGameUrlOrder) {
+  // Both phases ordered the same way, so two flushes over an overlapping
+  // set queue behind each other rather than deadlocking half way through.
+  // Only sorting one phase is worthless: the upsert takes an index-tuple
+  // lock per game_url, so an inverted pair deadlocks there first.
+  IndexedGame first = AGame("https://chess.com/game/1");
+  IndexedGame second = AGame("https://chess.com/game/2");
+  IndexedGame third = AGame("https://chess.com/game/3");
+
+  const IndexedGame batch[] = {third, first, second};
+  ASSERT_TRUE(sink_->Write(batch).ok());
+
+  EXPECT_EQ(One("SELECT string_agg(game_url, ',' ORDER BY ctid) FROM game_features"),
+            "https://chess.com/game/1,https://chess.com/game/2,https://chess.com/game/3");
+}
+
 TEST_F(PgGameSinkTest, WritesEveryGameOfABatch) {
   IndexedGame first = AGame("https://chess.com/game/1");
   IndexedGame second = AGame("https://chess.com/game/2");
@@ -308,6 +342,7 @@ TEST_F(PgGameSinkTest, RecordsTheMonthAsThePeriodCacheReadsIt) {
   EXPECT_EQ(One("SELECT games_count::text FROM indexed_periods"), "12");
   EXPECT_EQ(One("SELECT is_complete::text FROM indexed_periods"), "true");
   EXPECT_EQ(One("SELECT exclude_bullet::text FROM indexed_periods"), "false");
+  ExpectSessionIsNotUtc();
   EXPECT_EQ(One("SELECT to_char(fetched_at, 'YYYY-MM-DD HH24:MI:SS') FROM indexed_periods"),
             "2023-11-14 22:13:20");
 }
@@ -338,9 +373,68 @@ TEST_F(PgGameSinkTest, AMonthWithAndWithoutBulletAreTwoPeriods) {
   EXPECT_EQ(One("SELECT games_count::text FROM indexed_periods WHERE exclude_bullet"), "7");
 }
 
-TEST_F(PgGameSinkTest, AnEmptyBatchIsNotAWrite) {
+TEST_F(PgGameSinkTest, AnEmptyBatchStillAsksWhoOwnsTheRequest) {
+  // The caller uses an empty write purely to ask the question, because the
+  // period row that follows it carries no fence of its own.
   EXPECT_TRUE(sink_->Write({}).ok());
   EXPECT_EQ(One("SELECT count(*)::text FROM game_features"), "0");
+
+  ASSERT_TRUE(client_
+                  ->Exec("UPDATE indexing_requests SET owner_id = 'worker-2' WHERE id = $1"
+                         " RETURNING id",
+                         {kRequest})
+                  .ok());
+  EXPECT_EQ(sink_->Write({}).code(), absl::StatusCode::kFailedPrecondition);
+}
+
+TEST_F(PgGameSinkTest, TakesTheRequestRowRatherThanReadingIt) {
+  // The fence is SELECT ... FOR UPDATE, not a bare read. Nothing sets an
+  // isolation level, so this runs READ COMMITTED, where a plain SELECT is a
+  // snapshot rather than a claim — a rival takeover could commit between
+  // the check and the writes, and the batch would land against a request
+  // this worker had already lost.
+  //
+  // Asked with an empty batch, which is the case that needs the lock and
+  // the only one that can see it. A batch with games in it inserts into
+  // game_features, whose foreign key takes a KEY SHARE on the same request
+  // row, so it waits behind a rival whether the fence locks or not. The
+  // empty write takes no such lock — and it is the write whose answer
+  // gates the unfenced period row.
+  const char* url = std::getenv("PG_TEST_DB_URL");
+  ASSERT_NE(url, nullptr);
+  pg::Client rival(url);
+
+  absl::Notification held;
+  absl::Notification release;
+  std::thread holder([&] {
+    const absl::Status locked = rival.InTransaction([&](pg::Transaction& tx) {
+      const auto row =
+          tx.Exec("SELECT id FROM indexing_requests WHERE id = $1 FOR UPDATE", {kRequest});
+      EXPECT_TRUE(row.ok()) << row.status();
+      held.Notify();
+      release.WaitForNotification();
+      return absl::OkStatus();
+    });
+    EXPECT_TRUE(locked.ok()) << locked;
+  });
+
+  held.WaitForNotification();
+  std::atomic<bool> answered{false};
+  std::thread asker([&] {
+    EXPECT_TRUE(sink_->Write({}).ok());
+    answered = true;
+  });
+  // Long enough that a fence which only read would have answered by now.
+  absl::SleepFor(absl::Milliseconds(250));
+  const bool read_through_the_lock = answered;
+
+  release.Notify();
+  holder.join();
+  asker.join();
+
+  EXPECT_FALSE(read_through_the_lock)
+      << "the fence answered while another transaction held the request row, so it read a"
+         " snapshot rather than claiming the row";
 }
 
 }  // namespace

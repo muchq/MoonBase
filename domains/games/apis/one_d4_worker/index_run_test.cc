@@ -109,8 +109,27 @@ IndexJob AJob(std::string_view start = "2026-01", std::string_view end = "2026-0
   return job;
 }
 
+/// Well after any month these tests index, so a period is "the month is
+/// over" unless a test says otherwise.
+constexpr int64_t kLongAfter = 1800000000;  // 2027-01-15
+
+/// Records what the run said happened.
+class FakeObserver : public RunObserver {
+ public:
+  void ArchiveFetched(std::string_view result) override { fetches.push_back(std::string(result)); }
+  void MonthFinished(std::string_view result, int games) override {
+    months.push_back(absl::StrCat(result, ":", games));
+  }
+  void GameIndexed(const IndexedGame& game) override { occurrences += game.occurrences.size(); }
+
+  std::vector<std::string> fetches;
+  std::vector<std::string> months;
+  std::size_t occurrences = 0;
+};
+
 IndexRun::Options Options() {
   IndexRun::Options options;
+  options.now = [] { return kLongAfter; };
   options.batch_size = 100;
   return options;
 }
@@ -352,9 +371,53 @@ TEST(IndexRun, RecordsEveryMonthItRead) {
   EXPECT_EQ(sink.periods[0].games, 2);
   EXPECT_TRUE(sink.periods[0].complete);
   EXPECT_TRUE(sink.periods[0].exclude_bullet);
-  EXPECT_GT(sink.periods[0].fetched_at, 0);
+  EXPECT_EQ(sink.periods[0].fetched_at, kLongAfter);
   EXPECT_EQ(sink.periods[1].month, "2026-02");
   EXPECT_EQ(sink.periods[1].games, 0) << "a quiet month was read, and the answer was none";
+
+  // The other arm: the period cache is keyed by the filter, so a run that
+  // kept bullet games must not file under the key of one that dropped them.
+  FakeSink with_bullet;
+  FakeLease again;
+  IndexRun keeps(archive, with_bullet, Options());
+  ASSERT_TRUE(keeps.Execute(AJob("2026-01", "2026-02"), again).ok());
+  ASSERT_EQ(with_bullet.periods.size(), 2u);
+  EXPECT_FALSE(with_bullet.periods[0].exclude_bullet);
+}
+
+TEST(IndexRun, RecordsAMonthNotYetOverAsIncomplete) {
+  // A period is complete only once the month itself is over. Stored
+  // complete, the current month is skipped by every later request — the
+  // Java worker honours the flag — so games played after this run are
+  // never indexed until retention sweeps the row.
+  FakeArchive archive;
+  archive.months["2026-08"] = {AGame("g1")};
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun::Options options = Options();
+  options.now = [] { return 1755000000; };  // 2025-08-12, mid-month
+  IndexRun run(archive, sink, options);
+  ASSERT_TRUE(run.Execute(AJob("2026-08", "2026-08"), lease).ok());
+
+  ASSERT_EQ(sink.periods.size(), 1u);
+  EXPECT_FALSE(sink.periods[0].complete);
+}
+
+TEST(IndexRun, RecordsAMonthCompleteOnceItIsOver) {
+  FakeArchive archive;
+  archive.months["2026-08"] = {AGame("g1")};
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun::Options options = Options();
+  // The first instant of September: the month is over, barely.
+  options.now = [] { return 1788220800; };
+  IndexRun run(archive, sink, options);
+  ASSERT_TRUE(run.Execute(AJob("2026-08", "2026-08"), lease).ok());
+
+  ASSERT_EQ(sink.periods.size(), 1u);
+  EXPECT_TRUE(sink.periods[0].complete);
 }
 
 TEST(IndexRun, RecordsAMonthIncompleteWhenSomethingCouldNotBeRead) {
@@ -372,6 +435,25 @@ TEST(IndexRun, RecordsAMonthIncompleteWhenSomethingCouldNotBeRead) {
 
   ASSERT_EQ(sink.periods.size(), 1u);
   EXPECT_FALSE(sink.periods[0].complete);
+}
+
+TEST(IndexRun, TellsTheObserverAMonthWasDegraded) {
+  // index_months{result="degraded"} is a declared series. Counted as
+  // "indexed", it is a permanent zero and nothing shows that a month went
+  // in missing something.
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  archive.title_status = absl::UnavailableError("profile lookup failed");
+  FakeSink sink;
+  FakeLease lease;
+  FakeObserver observer;
+
+  IndexRun::Options options = Options();
+  options.observer = &observer;
+  IndexRun run(archive, sink, options);
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
+
+  EXPECT_THAT(observer.months, ElementsAre("degraded:1"));
 }
 
 TEST(IndexRun, DoesNotRecordAMonthItCouldNotWrite) {
@@ -413,6 +495,45 @@ TEST(IndexRun, FailsWhenTheMonthCannotBeRecorded) {
 
   IndexRun run(archive, sink, Options());
   EXPECT_EQ(run.Execute(AJob(), lease).status().code(), absl::StatusCode::kDataLoss);
+}
+
+TEST(IndexRun, AsksBeforeRecordingAMonthThatWroteNothing) {
+  // Every game filtered out, so no batch is ever written — and the period
+  // row carries no fence of its own. Without an empty write to ask the
+  // question, this stamps a month over whoever holds the range now.
+  FakeArchive archive;
+  ArchivedGame bullet = AGame("g-bullet");
+  bullet.time_class = "bullet";
+  archive.months["2026-01"] = {bullet};
+  FakeSink sink;
+  sink.status = absl::FailedPreconditionError("the request names another owner");
+  FakeLease lease;
+
+  IndexJob job = AJob();
+  job.exclude_bullet = true;
+  IndexRun run(archive, sink, Options());
+  const absl::StatusOr<RunReport> report = run.Execute(job, lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  EXPECT_TRUE(report->lease_lost);
+  EXPECT_THAT(sink.periods, IsEmpty());
+}
+
+TEST(IndexRun, AsksBeforeRecordingAQuietMonth) {
+  // Same hole by the other road: an empty archive writes no games either,
+  // and the fetch that found it can easily outlive a lease.
+  FakeArchive archive;
+  archive.months["2026-01"] = {};
+  FakeSink sink;
+  sink.status = absl::FailedPreconditionError("the request names another owner");
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  const absl::StatusOr<RunReport> report = run.Execute(AJob(), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  EXPECT_TRUE(report->lease_lost);
+  EXPECT_THAT(sink.periods, IsEmpty());
 }
 
 TEST(IndexRun, CarriesThePlayersTitles) {
@@ -496,20 +617,6 @@ TEST(IndexRun, LeavesOutBulletWhenTheRequestSaysTo) {
   ASSERT_EQ(sink.written.size(), 1u);
   EXPECT_EQ(sink.written.front().url, "g1");
 }
-
-/// Records what the run said happened.
-class FakeObserver : public RunObserver {
- public:
-  void ArchiveFetched(std::string_view result) override { fetches.push_back(std::string(result)); }
-  void MonthFinished(std::string_view result, int games) override {
-    months.push_back(absl::StrCat(result, ":", games));
-  }
-  void GameIndexed(const IndexedGame& game) override { occurrences += game.occurrences.size(); }
-
-  std::vector<std::string> fetches;
-  std::vector<std::string> months;
-  std::size_t occurrences = 0;
-};
 
 TEST(IndexRun, TellsTheObserverWhatEachMonthDid) {
   // A quiet month is counted as no_archive/empty rather than ok/indexed:0,

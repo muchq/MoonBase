@@ -62,5 +62,20 @@ TEST(IndexJobMonths, RejectsAMonthItCannotRead) {
   EXPECT_FALSE(IndexJob::Months("2026-01", "").ok());
 }
 
+TEST(YearMonth, KnowsWhenAMonthBegins) {
+  // The epoch instants the period rule compares against. Wrong by a day and
+  // the current month is stored complete for its last day, or the previous
+  // one is refetched forever.
+  EXPECT_EQ((YearMonth{1970, 1}).FirstInstant(), 0);
+  EXPECT_EQ((YearMonth{2026, 1}).FirstInstant(), 1767225600);
+  EXPECT_EQ((YearMonth{2026, 9}).FirstInstant(), 1788220800);
+  // March 1st of a leap year and of the year after: the day the shifted-year
+  // arithmetic exists for.
+  EXPECT_EQ((YearMonth{2024, 3}).FirstInstant(), 1709251200);
+  EXPECT_EQ((YearMonth{2025, 3}).FirstInstant(), 1740787200);
+  EXPECT_EQ((YearMonth{2000, 3}).FirstInstant(), 951868800);
+  EXPECT_EQ((YearMonth{1900, 3}).FirstInstant(), -2203891200);
+}
+
 }  // namespace
 }  // namespace one_d4_worker

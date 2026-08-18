@@ -275,6 +275,8 @@ cc_test(
         "//domains/platform/libs/pg",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
     ],
 )
