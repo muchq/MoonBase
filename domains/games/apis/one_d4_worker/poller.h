@@ -2,6 +2,7 @@
 #define DOMAINS_GAMES_APIS_ONE_D4_WORKER_POLLER_H
 
 #include <functional>
+#include <optional>
 #include <string>
 
 #include "absl/status/statusor.h"
@@ -16,14 +17,21 @@ enum class RunOutcome { kCompleted, kFailed, kInterrupted, kLeaseLost };
 
 std::string_view ToString(RunOutcome outcome);
 
+/// Why a run stopped early. The two differ in what happens to the attempt.
+enum class Stopped {
+  /// The worker is shutting down. The request did nothing wrong, so the
+  /// attempt is refunded.
+  kShutdown,
+  /// The run hit its own time ceiling. The attempt stays spent.
+  kRunCeiling,
+};
+
 /// What a run reports back.
 struct RunReport {
   int games_indexed = 0;
-  /// The run stopped because the lease went to somebody else. They own the
-  /// row's outcome now.
+  /// The lease went to somebody else. They own the row's outcome now.
   bool lease_lost = false;
-  /// The worker is shutting down. Not a failure of the request.
-  bool interrupted = false;
+  std::optional<Stopped> stopped;
 };
 
 /// Keeps a claim alive while a run works.
@@ -55,6 +63,9 @@ class Poller {
   RunOutcome last_outcome() const { return last_outcome_; }
 
  private:
+  absl::StatusOr<bool> Finish(const IndexJob& job, RunOutcome outcome,
+                              const absl::StatusOr<bool>& written);
+
   IndexQueue& queue_;
   Run run_;
   Options options_;

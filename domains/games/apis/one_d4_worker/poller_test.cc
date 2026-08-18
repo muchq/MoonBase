@@ -39,18 +39,29 @@ class FakeQueue : public IndexQueue {
   absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner,
                                 int games_indexed) override {
     calls.push_back(absl::StrCat("complete ", id, " ", games_indexed));
-    return true;
+    return terminal_write_wins;
   }
 
   absl::StatusOr<bool> Fail(std::string_view id, std::string_view owner,
                             std::string_view message) override {
     calls.push_back(absl::StrCat("fail ", id, " ", message));
+    return terminal_write_wins;
+  }
+
+  absl::StatusOr<bool> HandBack(std::string_view id, std::string_view owner) override {
+    calls.push_back(absl::StrCat("hand back ", id));
+    return true;
+  }
+
+  absl::StatusOr<bool> Release(std::string_view id, std::string_view owner) override {
+    calls.push_back(absl::StrCat("release ", id));
     return true;
   }
 
   std::optional<IndexJob> next;
   bool lease_held = true;
   bool claim_fails = false;
+  bool terminal_write_wins = true;
   int claims = 0;
   int heartbeats = 0;
   std::vector<std::string> calls;
@@ -139,23 +150,91 @@ TEST(Poller, WritesNothingWhenTheLeaseIsLost) {
   EXPECT_EQ(poller.last_outcome(), RunOutcome::kLeaseLost);
 }
 
-TEST(Poller, LeavesAnInterruptedJobForSomebodyElse) {
-  // Stopped, not failed. A FAILED row here would spend one of the request's
-  // attempts on a shutdown that had nothing to do with the request.
+TEST(Poller, HandsBackAJobItWasShutDownDuring) {
+  // Stopped, not failed. Handing the row back frees it immediately instead
+  // of stranding the range until the lease expires, and refunds the attempt
+  // — a shutdown is not the request's fault.
   FakeQueue queue;
   queue.next = AJob();
   Poller poller(
       queue,
       [](const IndexJob&, LeaseKeeper&) {
         RunReport report;
-        report.interrupted = true;
+        report.stopped = Stopped::kShutdown;
         return report;
       },
       Options());
 
   ASSERT_TRUE(poller.PollOnce().ok());
-  EXPECT_THAT(queue.calls, IsEmpty());
+  EXPECT_THAT(queue.calls, ElementsAre("hand back job-1"));
   EXPECT_EQ(poller.last_outcome(), RunOutcome::kInterrupted);
+}
+
+TEST(Poller, ReleasesAJobThatRanOutOfTime) {
+  // The run hit its own ceiling rather than being told to stop, so the
+  // attempt stays spent: something about this range takes too long, and
+  // refunding it would retry forever.
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller poller(
+      queue,
+      [](const IndexJob&, LeaseKeeper&) {
+        RunReport report;
+        report.stopped = Stopped::kRunCeiling;
+        return report;
+      },
+      Options());
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_THAT(queue.calls, ElementsAre("release job-1"));
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kInterrupted);
+}
+
+TEST(Poller, DoesNotFailARunThatLostItsLeaseBeforeItRaised) {
+  // The rule is "a run which lost its lease reports nothing", and an error
+  // on the way out is still nothing to report: the row is somebody else's.
+  FakeQueue queue;
+  queue.next = AJob();
+  queue.lease_held = false;
+  Poller poller(
+      queue,
+      [](const IndexJob&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
+        EXPECT_FALSE(lease.Keep());
+        return absl::InternalError("and then it fell over");
+      },
+      Options());
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_THAT(queue.calls, IsEmpty());
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kLeaseLost);
+}
+
+TEST(Poller, ARefusedCompleteMeansTheLeaseWentSomewhereElse) {
+  // The fence answered no, so somebody else holds the row and has already
+  // written, or will. Calling this run completed would claim credit for an
+  // outcome we did not write.
+  FakeQueue queue;
+  queue.next = AJob();
+  queue.terminal_write_wins = false;
+  Poller poller(queue, [](const IndexJob&, LeaseKeeper&) { return RunReport{}; }, Options());
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kLeaseLost);
+}
+
+TEST(Poller, ARefusedFailMeansTheLeaseWentSomewhereElseToo) {
+  FakeQueue queue;
+  queue.next = AJob();
+  queue.terminal_write_wins = false;
+  Poller poller(
+      queue,
+      [](const IndexJob&, LeaseKeeper&) -> absl::StatusOr<RunReport> {
+        return absl::InternalError("chess.com said no");
+      },
+      Options());
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kLeaseLost);
 }
 
 TEST(Poller, ReportsAQueueThatWillNotAnswer) {

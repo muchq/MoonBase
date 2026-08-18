@@ -29,6 +29,8 @@ class PgQueue : public IndexQueue {
                                 int games_indexed) override;
   absl::StatusOr<bool> Fail(std::string_view id, std::string_view owner,
                             std::string_view message) override;
+  absl::StatusOr<bool> HandBack(std::string_view id, std::string_view owner) override;
+  absl::StatusOr<bool> Release(std::string_view id, std::string_view owner) override;
 
  private:
   pg::Client& client_;

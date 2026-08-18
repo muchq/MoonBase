@@ -39,20 +39,22 @@ absl::StatusOr<std::optional<IndexJob>> PgQueue::ClaimNext(std::string_view owne
   // matches. FOR UPDATE SKIP LOCKED picks the candidate without the two of
   // them queueing behind each other first.
   //
-  // Renewing our own claim does not spend an attempt; taking one from an
-  // expired lease does.
+  // A live claim of ours is work in progress, not work available, so it is
+  // not a candidate — otherwise one process hands itself the same range
+  // twice. Picking our own *expired* row back up is fine and does not spend
+  // an attempt; taking somebody else's does.
   const auto claimed = client_.Exec(
       R"(UPDATE indexing_requests SET
-             owner_id = $1,
+             owner_id = $1::text,
              status = 'PROCESSING',
              lease_expires_at = NOW() + $2::interval,
              updated_at = NOW(),
-             attempts = CASE WHEN owner_id = $1 THEN attempts ELSE attempts + 1 END
+             attempts = CASE WHEN owner_id = $1::text THEN attempts ELSE attempts + 1 END
          WHERE id = (
              SELECT id FROM indexing_requests
              WHERE status IN ('PENDING', 'PROCESSING')
                AND attempts < $3
-               AND (owner_id IS NULL OR owner_id = $1
+               AND (owner_id IS NULL
                     OR lease_expires_at IS NULL OR lease_expires_at <= NOW())
              ORDER BY created_at ASC, id ASC
              FOR UPDATE SKIP LOCKED
@@ -87,6 +89,9 @@ absl::StatusOr<bool> PgQueue::Heartbeat(std::string_view id, std::string_view ow
   return held->rows() > 0;
 }
 
+// Terminal writes need a live lease, not just our name on the row. At
+// expiry a takeover is already licensed even before a rival has written its
+// own owner_id, and the old owner must not win that race.
 absl::StatusOr<bool> PgQueue::Complete(std::string_view id, std::string_view owner,
                                        int games_indexed) {
   const auto written = client_.Exec(
@@ -94,6 +99,8 @@ absl::StatusOr<bool> PgQueue::Complete(std::string_view id, std::string_view own
          SET status = 'COMPLETED', games_indexed = $3, owner_id = NULL, dedupe_key = NULL,
              error_message = NULL, updated_at = NOW()
          WHERE id = $1 AND owner_id = $2
+           AND status IN ('PENDING', 'PROCESSING')
+           AND lease_expires_at > NOW()
          RETURNING id)",
       {std::string(id), std::string(owner), std::to_string(games_indexed)});
   if (!written.ok()) return written.status();
@@ -107,10 +114,35 @@ absl::StatusOr<bool> PgQueue::Fail(std::string_view id, std::string_view owner,
          SET status = 'FAILED', error_message = $3, owner_id = NULL, dedupe_key = NULL,
              updated_at = NOW()
          WHERE id = $1 AND owner_id = $2
+           AND status IN ('PENDING', 'PROCESSING')
+           AND lease_expires_at > NOW()
          RETURNING id)",
       {std::string(id), std::string(owner), std::string(message)});
   if (!written.ok()) return written.status();
   return written->rows() > 0;
+}
+
+absl::StatusOr<bool> PgQueue::HandBack(std::string_view id, std::string_view owner) {
+  const auto handed = client_.Exec(
+      R"(UPDATE indexing_requests
+         SET owner_id = NULL, updated_at = NOW(),
+             attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END
+         WHERE id = $1 AND owner_id = $2 AND status IN ('PENDING', 'PROCESSING')
+         RETURNING id)",
+      {std::string(id), std::string(owner)});
+  if (!handed.ok()) return handed.status();
+  return handed->rows() > 0;
+}
+
+absl::StatusOr<bool> PgQueue::Release(std::string_view id, std::string_view owner) {
+  const auto released = client_.Exec(
+      R"(UPDATE indexing_requests
+         SET owner_id = NULL, updated_at = NOW()
+         WHERE id = $1 AND owner_id = $2 AND status IN ('PENDING', 'PROCESSING')
+         RETURNING id)",
+      {std::string(id), std::string(owner)});
+  if (!released.ok()) return released.status();
+  return released->rows() > 0;
 }
 
 }  // namespace one_d4_worker

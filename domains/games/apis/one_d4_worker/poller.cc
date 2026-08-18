@@ -62,33 +62,35 @@ absl::StatusOr<bool> Poller::PollOnce() {
   QueueLease lease(queue_, job.id, options_.owner, options_.lease);
   const absl::StatusOr<RunReport> report = run_(job, lease);
 
-  if (!report.ok()) {
-    last_outcome_ = RunOutcome::kFailed;
-    const absl::StatusOr<bool> failed =
-        queue_.Fail(job.id, options_.owner, report.status().message());
-    if (!failed.ok()) return failed.status();
-    return true;
-  }
-
-  // A run that lost its lease reports nothing: the row belongs to whoever
-  // holds it now, and they will write its outcome.
-  if (report->lease_lost || lease.lost()) {
+  // Before anything else, including a failure: a run that lost its lease
+  // reports nothing, because the row belongs to whoever holds it now.
+  if (lease.lost() || (report.ok() && report->lease_lost)) {
     last_outcome_ = RunOutcome::kLeaseLost;
     return true;
   }
 
-  // Interrupted is a shutdown, not a verdict on the request. Leaving the
-  // row alone lets the lease expire and somebody else pick it up, without
-  // spending one of its attempts.
-  if (report->interrupted) {
-    last_outcome_ = RunOutcome::kInterrupted;
-    return true;
+  if (!report.ok()) {
+    return Finish(job, RunOutcome::kFailed,
+                  queue_.Fail(job.id, options_.owner, report.status().message()));
   }
 
-  last_outcome_ = RunOutcome::kCompleted;
-  const absl::StatusOr<bool> completed =
-      queue_.Complete(job.id, options_.owner, report->games_indexed);
-  if (!completed.ok()) return completed.status();
+  if (report->stopped.has_value()) {
+    const absl::StatusOr<bool> handed =
+        *report->stopped == Stopped::kShutdown ? queue_.HandBack(job.id, options_.owner)
+                                               : queue_.Release(job.id, options_.owner);
+    return Finish(job, RunOutcome::kInterrupted, handed);
+  }
+
+  return Finish(job, RunOutcome::kCompleted,
+                queue_.Complete(job.id, options_.owner, report->games_indexed));
+}
+
+absl::StatusOr<bool> Poller::Finish(const IndexJob& job, RunOutcome outcome,
+                                    const absl::StatusOr<bool>& written) {
+  if (!written.ok()) return written.status();
+  // The fence said no, so the row is somebody else's and they own its
+  // outcome — whatever we were about to call this run, it is theirs now.
+  last_outcome_ = *written ? outcome : RunOutcome::kLeaseLost;
   return true;
 }
 

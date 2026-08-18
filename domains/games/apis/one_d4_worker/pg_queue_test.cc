@@ -194,6 +194,97 @@ TEST_F(PgQueueTest, TakesTheOldestRequestFirst) {
   EXPECT_EQ((*claimed)->id, Id(2));
 }
 
+TEST_F(PgQueueTest, WillNotHandBackARowWeStillHoldToOurselves) {
+  // A live claim of ours is work in progress, not work available. Offering
+  // it again would have one process running the same range twice — and
+  // after a shutdown that left the row owned, immediately and forever.
+  Insert(Id(1), "hikaru");
+  ASSERT_TRUE(queue_->ClaimNext("worker-1", absl::Minutes(5)).ok());
+
+  const auto again = queue_->ClaimNext("worker-1", absl::Minutes(5));
+  ASSERT_TRUE(again.ok()) << again.status();
+  EXPECT_FALSE(again->has_value());
+}
+
+TEST_F(PgQueueTest, ReclaimingOurOwnExpiredRowDoesNotSpendAnAttempt) {
+  // We are picking up where we left off, not making a fresh attempt.
+  Insert(Id(1), "hikaru");
+  ASSERT_TRUE(queue_->ClaimNext("worker-1", absl::Seconds(-1)).ok());
+
+  const auto again = queue_->ClaimNext("worker-1", absl::Minutes(5));
+  ASSERT_TRUE(again.ok()) << again.status();
+  ASSERT_TRUE(again->has_value());
+  EXPECT_EQ((*again)->attempts, 1);
+}
+
+TEST_F(PgQueueTest, TerminalWritesAreRefusedOnceTheLeaseHasExpired) {
+  // At expiry a takeover is already licensed, even before a rival has
+  // written its own owner_id. The old owner must not win that race.
+  Insert(Id(1), "hikaru");
+  ASSERT_TRUE(queue_->ClaimNext("worker-1", absl::Seconds(-1)).ok());
+
+  const auto completed = queue_->Complete(Id(1), "worker-1", 42);
+  ASSERT_TRUE(completed.ok()) << completed.status();
+  EXPECT_FALSE(*completed);
+
+  const auto failed = queue_->Fail(Id(1), "worker-1", "too late");
+  ASSERT_TRUE(failed.ok()) << failed.status();
+  EXPECT_FALSE(*failed);
+  EXPECT_EQ(Column(Id(1), "status"), "PROCESSING");
+}
+
+TEST_F(PgQueueTest, TerminalWritesLandWhileTheLeaseIsLive) {
+  // The control for the test above: same call, unexpired lease.
+  Insert(Id(1), "hikaru");
+  ASSERT_TRUE(queue_->ClaimNext("worker-1", absl::Minutes(5)).ok());
+
+  const auto completed = queue_->Complete(Id(1), "worker-1", 42);
+  ASSERT_TRUE(completed.ok()) << completed.status();
+  EXPECT_TRUE(*completed);
+}
+
+TEST_F(PgQueueTest, HandBackFreesTheRowAndRefundsTheAttempt) {
+  Insert(Id(1), "hikaru");
+  ASSERT_TRUE(queue_->ClaimNext("worker-1", absl::Minutes(5)).ok());
+  ASSERT_EQ(Column(Id(1), "attempts"), "1");
+
+  const auto handed = queue_->HandBack(Id(1), "worker-1");
+  ASSERT_TRUE(handed.ok()) << handed.status();
+  EXPECT_TRUE(*handed);
+  EXPECT_EQ(Column(Id(1), "owner_id"), "(null)");
+  EXPECT_EQ(Column(Id(1), "attempts"), "0") << "a shutdown is not an attempt at the request";
+
+  // And it is claimable again straight away, by anyone.
+  const auto taken = queue_->ClaimNext("worker-2", absl::Minutes(5));
+  ASSERT_TRUE(taken.ok()) << taken.status();
+  EXPECT_TRUE(taken->has_value());
+}
+
+TEST_F(PgQueueTest, ReleaseFreesTheRowAndKeepsTheAttemptSpent) {
+  Insert(Id(1), "hikaru");
+  ASSERT_TRUE(queue_->ClaimNext("worker-1", absl::Minutes(5)).ok());
+
+  const auto released = queue_->Release(Id(1), "worker-1");
+  ASSERT_TRUE(released.ok()) << released.status();
+  EXPECT_TRUE(*released);
+  EXPECT_EQ(Column(Id(1), "owner_id"), "(null)");
+  EXPECT_EQ(Column(Id(1), "attempts"), "1") << "the range really was tried";
+}
+
+TEST_F(PgQueueTest, HandBackAndReleaseAreFencedToo) {
+  Insert(Id(1), "hikaru");
+  ASSERT_TRUE(queue_->ClaimNext("worker-1", absl::Minutes(5)).ok());
+
+  const auto handed = queue_->HandBack(Id(1), "worker-2");
+  ASSERT_TRUE(handed.ok()) << handed.status();
+  EXPECT_FALSE(*handed);
+
+  const auto released = queue_->Release(Id(1), "worker-2");
+  ASSERT_TRUE(released.ok()) << released.status();
+  EXPECT_FALSE(*released);
+  EXPECT_EQ(Column(Id(1), "owner_id"), "worker-1");
+}
+
 TEST_F(PgQueueTest, StopsClaimingAfterTooManyAttempts) {
   // A range that fails every time is a request nobody should keep retrying.
   Insert(Id(1), "hikaru");

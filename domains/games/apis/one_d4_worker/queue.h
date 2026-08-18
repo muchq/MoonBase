@@ -34,6 +34,14 @@ class IndexQueue {
 
   virtual absl::StatusOr<bool> Fail(std::string_view id, std::string_view owner,
                                     std::string_view message) = 0;
+
+  /// Gives the row back unfinished and refunds the attempt. For a shutdown,
+  /// which is not the request's fault.
+  virtual absl::StatusOr<bool> HandBack(std::string_view id, std::string_view owner) = 0;
+
+  /// Gives the row back unfinished, attempt spent. For a run that hit its
+  /// own ceiling — refunding that one would retry a slow range forever.
+  virtual absl::StatusOr<bool> Release(std::string_view id, std::string_view owner) = 0;
 };
 
 }  // namespace one_d4_worker
