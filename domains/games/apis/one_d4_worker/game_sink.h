@@ -20,6 +20,8 @@ struct IndexedGame {
   std::string black_username;
   int white_elo = 0;
   int black_elo = 0;
+  std::string white_title;
+  std::string black_title;
   std::string time_class;
   /// From the PGN [ECO] tag.
   std::string eco;
@@ -41,6 +43,15 @@ struct IndexedGame {
 class GameSink {
  public:
   virtual ~GameSink() = default;
+
+  /// FailedPrecondition means the fence refused — the caller no longer
+  /// owns the request, and nothing was written. It is a stopping
+  /// condition, not a failure: whoever holds the range now owns its
+  /// outcome. Every other error is a failure to write.
+  ///
+  /// The fence belongs here rather than in a check before the call. A
+  /// separate check is a snapshot: the takeover can commit in the gap and
+  /// the batch lands against a request this worker has already lost.
   virtual absl::Status Write(absl::Span<const IndexedGame> games) = 0;
 };
 

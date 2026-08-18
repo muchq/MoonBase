@@ -20,6 +20,7 @@ smithy_cpp_server_library(
     ],
     namespace = "moonbase::chess_com",
     service = "moonbase.chess_com#ChessCom",
+    visibility = ["//domains/games:__subpackages__"],
 )
 
 cc_library(

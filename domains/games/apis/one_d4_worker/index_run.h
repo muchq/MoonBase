@@ -2,6 +2,8 @@
 #define DOMAINS_GAMES_APIS_ONE_D4_WORKER_INDEX_RUN_H
 
 #include <functional>
+#include <map>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -51,10 +53,13 @@ class IndexRun {
  private:
   RunObserver& observer();
   absl::Status Flush(std::vector<IndexedGame>& batch);
+  /// "" for untitled and for a lookup that failed. Only answers are cached.
+  std::string TitleOf(std::string_view player);
 
   ArchiveSource& archive_;
   GameSink& sink_;
   Options options_;
+  std::map<std::string, std::string, std::less<>> titles_;
 };
 
 }  // namespace one_d4_worker

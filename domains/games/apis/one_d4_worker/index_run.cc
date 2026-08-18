@@ -38,6 +38,19 @@ absl::Status IndexRun::Flush(std::vector<IndexedGame>& batch) {
   return written;
 }
 
+std::string IndexRun::TitleOf(std::string_view player) {
+  if (player.empty()) return "";
+  const auto cached = titles_.find(player);
+  if (cached != titles_.end()) return cached->second;
+
+  const absl::StatusOr<std::string> title = archive_.FetchTitle(player);
+  // A failure is not an answer. Caching one would carry a bad minute
+  // across a decade of backfill.
+  if (!title.ok()) return "";
+  titles_.emplace(player, *title);
+  return *title;
+}
+
 absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& lease) {
   const absl::StatusOr<std::vector<YearMonth>> months = job.Months();
   if (!months.ok()) return months.status();
@@ -58,15 +71,16 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
     }
 
     absl::StatusOr<std::vector<ArchivedGame>> games = archive_.FetchMonth(job.player, month);
-    if (absl::IsNotFound(games.status())) {
-      // A player who did not play that month is the common case.
-      observer().ArchiveFetched("no_archive");
-      observer().MonthFinished("empty", 0);
-      continue;
-    }
     if (!games.ok()) {
       observer().ArchiveFetched("error");
       return games.status();
+    }
+    if (games->empty()) {
+      // The month was read and the answer is "none". Distinct from a 404,
+      // which says the archive was not read at all.
+      observer().ArchiveFetched("no_archive");
+      observer().MonthFinished("empty", 0);
+      continue;
     }
     observer().ArchiveFetched("ok");
 
@@ -86,6 +100,8 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
       row.black_username = game.black_username;
       row.white_elo = game.white_rating;
       row.black_elo = game.black_rating;
+      row.white_title = TitleOf(game.white_username);
+      row.black_title = TitleOf(game.black_username);
       row.time_class = game.time_class;
       row.eco = EcoFrom(parsed->headers);
       row.opening_name = OpeningNameFromEcoUrl(game.eco_url);
@@ -108,11 +124,19 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
           report.lease_lost = true;
           return report;
         }
-        if (const absl::Status written = Flush(batch); !written.ok()) return written;
+        if (const absl::Status written = Flush(batch); !written.ok()) {
+          if (!absl::IsFailedPrecondition(written)) return written;
+          report.lease_lost = true;
+          return report;
+        }
       }
     }
 
-    if (const absl::Status written = Flush(batch); !written.ok()) return written;
+    if (const absl::Status written = Flush(batch); !written.ok()) {
+      if (!absl::IsFailedPrecondition(written)) return written;
+      report.lease_lost = true;
+      return report;
+    }
     observer().MonthFinished("indexed", month_count);
   }
 

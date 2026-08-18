@@ -211,3 +211,68 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_library(
+    name = "chess_com_archive",
+    srcs = ["chess_com_archive.cc"],
+    hdrs = ["chess_com_archive.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":archive",
+        "//domains/games/libs/chess_com_cpp:client",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+# Against the generated loopback server, not a hand-rolled fake: which
+# errors are NotFound and which are not is a property of the wire shape,
+# and reading a 5xx as "no such archive" completes a request having indexed
+# nothing.
+cc_test(
+    name = "chess_com_archive_test",
+    size = "small",
+    srcs = ["chess_com_archive_test.cc"],
+    deps = [
+        ":chess_com_archive",
+        "//domains/games/libs/chess_com_cpp:chess_com_smithy_server",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:client",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
+cc_library(
+    name = "pg_game_sink",
+    srcs = ["pg_game_sink.cc"],
+    hdrs = ["pg_game_sink.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":game_sink",
+        "//domains/games/libs/chess_cpp:side",
+        "//domains/games/libs/one_d4_motifs:motif",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_test(
+    name = "pg_game_sink_test",
+    size = "small",
+    srcs = ["pg_game_sink_test.cc"],
+    env_inherit = ["PG_TEST_DB_URL"],
+    deps = [
+        ":pg_game_sink",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)

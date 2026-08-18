@@ -40,11 +40,22 @@ class ArchiveSource {
 
   /// The player's games for that month.
   ///
-  /// NotFound means the archive is not there, which for a month the player
-  /// did not play is the ordinary answer — the run treats it as empty. Any
-  /// other error fails the run.
+  /// A month the player was quiet in is an empty vector, not an error:
+  /// chess.com serves it as 200 with an empty games list. NotFound means
+  /// the archive is not there at all — a missing player, or an upstream
+  /// failure on a listed archive — and fails the run like any other error
+  /// (#1360), because completing a request on it would record "indexed, no
+  /// games" for a month nobody read.
   virtual absl::StatusOr<std::vector<ArchivedGame>> FetchMonth(std::string_view player,
                                                                YearMonth month) = 0;
+
+  /// The player's title ("GM", "WIM", ...), or "" for an untitled player.
+  ///
+  /// Same source, so same port. An error here never fails the run — a
+  /// title is decoration on a row, and losing the month over it would be
+  /// the tail wagging the dog — but it is not cached either, so a later
+  /// month retries it.
+  virtual absl::StatusOr<std::string> FetchTitle(std::string_view player) = 0;
 };
 
 }  // namespace one_d4_worker

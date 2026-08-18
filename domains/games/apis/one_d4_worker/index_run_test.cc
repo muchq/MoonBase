@@ -51,9 +51,20 @@ class FakeArchive : public ArchiveSource {
     return found->second;
   }
 
+  absl::StatusOr<std::string> FetchTitle(std::string_view player) override {
+    looked_up.push_back(std::string(player));
+    if (!title_status.ok()) return title_status;
+    const auto found = titles.find(std::string(player));
+    return found == titles.end() ? "" : found->second;
+  }
+
   std::map<std::string, std::vector<ArchivedGame>> months;
   absl::Status status;
   std::vector<std::string> asked;
+
+  std::map<std::string, std::string> titles;
+  absl::Status title_status;
+  std::vector<std::string> looked_up;
 };
 
 /// Collects what would have been written.
@@ -136,9 +147,11 @@ TEST(IndexRun, WritesWhatItExtracted) {
   EXPECT_FALSE(game.occurrences.empty()) << "the motifs are the point of indexing it";
 }
 
-TEST(IndexRun, TreatsAMonthWithNoArchiveAsEmptyRatherThanBroken) {
-  // A player who did not play that month is the common case, not an error.
+TEST(IndexRun, IndexesAQuietMonthAsNoGamesRatherThanSkippingIt) {
+  // chess.com serves a month the player did not play as 200 with an empty
+  // games list. It was read; the answer is "none".
   FakeArchive archive;
+  archive.months["2026-01"] = {};
   archive.months["2026-02"] = {AGame("g2")};
   FakeSink sink;
   FakeLease lease;
@@ -147,7 +160,23 @@ TEST(IndexRun, TreatsAMonthWithNoArchiveAsEmptyRatherThanBroken) {
   const absl::StatusOr<RunReport> report = run.Execute(AJob("2026-01", "2026-02"), lease);
 
   ASSERT_TRUE(report.ok()) << report.status();
+  EXPECT_THAT(archive.asked, ElementsAre("2026-01", "2026-02"));
   EXPECT_EQ(report->games_indexed, 1);
+}
+
+TEST(IndexRun, FailsAMonthWhoseArchiveIsNotThere) {
+  // A 404 is a missing player or an upstream failure on a listed archive,
+  // never a quiet month (#1360). Completing the request on it would stamp
+  // "indexed, no games" on a month nobody read — and the Java worker,
+  // writing the same rows, fails it.
+  FakeArchive archive;
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  const absl::StatusOr<RunReport> report = run.Execute(AJob("2026-01", "2026-02"), lease);
+
+  EXPECT_EQ(report.status().code(), absl::StatusCode::kNotFound);
 }
 
 TEST(IndexRun, FailsWhenTheArchiveCannotBeReached) {
@@ -250,6 +279,26 @@ TEST(IndexRun, StopsWhenAskedTo) {
   EXPECT_THAT(archive.asked, IsEmpty());
 }
 
+TEST(IndexRun, StopsRatherThanFailsWhenTheSinkRefusesTheFence) {
+  // The sink checks ownership in the transaction that writes, because a
+  // check before the call is a snapshot the takeover can commit inside. A
+  // refusal is the same news as a lost lease, arriving from the one place
+  // that can see it without a race.
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  archive.months["2026-02"] = {AGame("g2")};
+  FakeSink sink;
+  sink.status = absl::FailedPreconditionError("the request names another owner");
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  const absl::StatusOr<RunReport> report = run.Execute(AJob("2026-01", "2026-02"), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  EXPECT_TRUE(report->lease_lost);
+  EXPECT_THAT(archive.asked, ElementsAre("2026-01")) << "the second month is somebody else's now";
+}
+
 TEST(IndexRun, FailsWhenTheSinkDoes) {
   // A batch that will not write is not a month that was indexed.
   FakeArchive archive;
@@ -270,6 +319,69 @@ TEST(IndexRun, RejectsARangeItCannotRead) {
   IndexRun run(archive, sink, Options());
   EXPECT_EQ(run.Execute(AJob("2026-03", "2026-01"), lease).status().code(),
             absl::StatusCode::kInvalidArgument);
+}
+
+TEST(IndexRun, CarriesThePlayersTitles) {
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  archive.titles["alice"] = "GM";
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
+
+  ASSERT_EQ(sink.written.size(), 1u);
+  EXPECT_EQ(sink.written.front().white_title, "GM");
+  EXPECT_EQ(sink.written.front().black_title, "") << "untitled, and said so";
+}
+
+TEST(IndexRun, LooksUpEachPlayerOnce) {
+  // Two hundred games a month against a handful of regulars is two hundred
+  // profile calls if this is not cached, against an API that rate-limits.
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1"), AGame("g2")};
+  archive.months["2026-02"] = {AGame("g3")};
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  ASSERT_TRUE(run.Execute(AJob("2026-01", "2026-02"), lease).ok());
+
+  EXPECT_THAT(archive.looked_up, ElementsAre("alice", "bob"));
+}
+
+TEST(IndexRun, IndexesTheMonthEvenWhenTitlesCannotBeRead) {
+  // A title is decoration on a row. Losing the month over one would be the
+  // tail wagging the dog.
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  archive.title_status = absl::UnavailableError("profile lookup failed");
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  const absl::StatusOr<RunReport> report = run.Execute(AJob(), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  EXPECT_EQ(report->games_indexed, 1);
+  EXPECT_EQ(sink.written.front().white_title, "");
+}
+
+TEST(IndexRun, RetriesATitleLookupThatFailed) {
+  // A failed lookup is not an answer, so caching it would carry one bad
+  // minute across a decade of backfill.
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  archive.months["2026-02"] = {AGame("g2")};
+  archive.title_status = absl::UnavailableError("profile lookup failed");
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  ASSERT_TRUE(run.Execute(AJob("2026-01", "2026-02"), lease).ok());
+
+  EXPECT_THAT(archive.looked_up, ElementsAre("alice", "bob", "alice", "bob"));
 }
 
 TEST(IndexRun, LeavesOutBulletWhenTheRequestSaysTo) {
@@ -306,12 +418,12 @@ class FakeObserver : public RunObserver {
 };
 
 TEST(IndexRun, TellsTheObserverWhatEachMonthDid) {
-  // An empty month and a missing one are the same row in the archive
-  // counter and different rows in the month counter, because a dashboard
-  // that cannot tell them apart cannot tell a quiet player from an outage.
+  // A quiet month is counted as no_archive/empty rather than ok/indexed:0,
+  // so a dashboard can tell a quiet player from a busy one.
   FakeArchive archive;
   archive.months["2026-01"] = {AGame("g1")};
-  archive.months["2026-03"] = {};
+  archive.months["2026-02"] = {};
+  archive.months["2026-03"] = {AGame("g3"), AGame("g4")};
   FakeSink sink;
   FakeLease lease;
   FakeObserver observer;
@@ -322,7 +434,7 @@ TEST(IndexRun, TellsTheObserverWhatEachMonthDid) {
   ASSERT_TRUE(run.Execute(AJob("2026-01", "2026-03"), lease).ok());
 
   EXPECT_THAT(observer.fetches, ElementsAre("ok", "no_archive", "ok"));
-  EXPECT_THAT(observer.months, ElementsAre("indexed:1", "empty:0", "indexed:0"));
+  EXPECT_THAT(observer.months, ElementsAre("indexed:1", "empty:0", "indexed:2"));
   EXPECT_GT(observer.occurrences, 0u);
 }
 
