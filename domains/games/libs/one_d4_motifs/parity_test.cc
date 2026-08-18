@@ -6,7 +6,7 @@
 // regenerates stops describing anything, and a comparison against a file
 // this side generated agrees with itself.
 //
-// The port reproduces every row the Java pipeline writes, and writes six
+// The port reproduces every row the Java pipeline writes, and writes seven
 // motifs' worth that Java never has. Both halves are pinned row for row —
 // "allowed to differ" without identity is how a regression hides inside a
 // known difference.
@@ -20,7 +20,6 @@
 
 #include <algorithm>
 #include <fstream>
-#include <iostream>
 #include <map>
 #include <optional>
 #include <set>
@@ -31,7 +30,6 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
-#include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "domains/games/libs/chess_cpp/pgn.h"
 #include "domains/games/libs/chess_cpp/side.h"
@@ -74,13 +72,14 @@ std::vector<std::string> SplitGames(const std::string& pgn) {
 
 std::string Or(const std::optional<std::string>& value) { return value.value_or("-"); }
 
-/// A golden row, from either side.
+/// A golden row, from either side. Carries `description` because it is a
+/// stored column the API hands to clients, and nothing else compares it.
 std::string Row(int game, const MotifOccurrence& occurrence) {
   return absl::StrFormat(
-      "%04d\t%s\t%04d\t%s\t%d\t%s\t%s\t%s\t%d\t%d\t%s", game, ToString(occurrence.motif),
+      "%04d\t%s\t%04d\t%s\t%d\t%s\t%s\t%s\t%s\t%d\t%d\t%s", game, ToString(occurrence.motif),
       occurrence.ply, chess_cpp::ToString(occurrence.side), occurrence.move_number,
-      Or(occurrence.attacker), Or(occurrence.target), Or(occurrence.moved_piece),
-      occurrence.is_discovered ? 1 : 0, occurrence.is_mate ? 1 : 0,
+      occurrence.description, Or(occurrence.attacker), Or(occurrence.target),
+      Or(occurrence.moved_piece), occurrence.is_discovered ? 1 : 0, occurrence.is_mate ? 1 : 0,
       occurrence.pin_type.has_value() ? std::string(ToString(*occurrence.pin_type)) : "-");
 }
 
@@ -164,10 +163,11 @@ TEST_F(Parity, FindsEverythingTheJavaPipelineFinds) {
 }
 
 TEST_F(Parity, EmitsExactlyTheRowsJavaCannot) {
-  // Six motifs Java has never stored a row for, pinned row for row rather
-  // than counted: three of them the read path derives from ATTACK rows at
-  // query time (so ORDER BY and sequence() match nothing today), and three
-  // no implementation has ever produced.
+  // Seven motifs Java has never stored a row for, pinned row for row rather
+  // than counted. Four of them the read path derives from ATTACK rows when
+  // a query asks — so ORDER BY motif_count, which counts stored rows, has
+  // always counted zero for them — and three no implementation has ever
+  // produced at all.
   std::vector<std::string> found = Missing(*cpp_, *golden_);
   std::sort(found.begin(), found.end());
 
@@ -180,7 +180,7 @@ TEST_F(Parity, EmitsExactlyTheRowsJavaCannot) {
   EXPECT_EQ(found, expected);
 }
 
-TEST_F(Parity, TheExtraRowsAreTheSixMotifsAndNothingElse) {
+TEST_F(Parity, TheExtraRowsAreThoseSevenMotifsAndNothingElse) {
   // The readable summary of the file above. A detector that started firing
   // somewhere new moves one of these before the row-for-row diff has to be
   // read.
@@ -189,7 +189,7 @@ TEST_F(Parity, TheExtraRowsAreTheSixMotifsAndNothingElse) {
                        {"CHECKMATE", 41},
                        {"CROSS_PIN", 43},
                        {"DISCOVERED_ATTACK", 2892},
-                       {"DISCOVERED_CHECK", 28},
+                       {"DISCOVERED_CHECK", 31},
                        {"DOUBLE_CHECK", 3},
                        {"OVERLOADED_PIECE", 200},
                        {"ZUGZWANG", 10},

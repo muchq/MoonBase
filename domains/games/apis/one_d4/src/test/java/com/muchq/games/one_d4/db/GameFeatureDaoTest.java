@@ -467,74 +467,25 @@ public class GameFeatureDaoTest {
   }
 
   @Test
-  public void storedRowsSuppressTheDerivationTheyReplace() {
-    // The C++ indexer stores DOUBLE_CHECK from the position itself (#1389 phase 3). Deriving on
-    // top of that would return the same occurrence twice — once stored, once inferred from the
-    // ATTACK rows the same move produced.
-    String gameUrl = "https://chess.com/game/stored-double-check";
+  public void staleStoredMotifs_filteredFromResults() {
+    // Stale CHECKMATE, DISCOVERED_CHECK, DOUBLE_CHECK, DISCOVERED_ATTACK rows from old index runs
+    // must be excluded from queryOccurrences (filtered in SQL) and re-derived from ATTACK rows.
+    String gameUrl = "https://chess.com/game/stale-derived-1";
     dao.insertBatch(List.of(createGame(gameUrl)));
 
-    GameFeatures.MotifOccurrence direct =
-        GameFeatures.MotifOccurrence.attack(
-            19, 10, "white", "Attack at move 10", "Bd3", "Bd3", "ke8", false, false);
-    GameFeatures.MotifOccurrence discovered =
-        GameFeatures.MotifOccurrence.attack(
-            19, 10, "white", "Discovered attack at move 10", "Bd3", "Rd1", "ke8", true, false);
-    GameFeatures.MotifOccurrence stored =
-        new GameFeatures.MotifOccurrence(
-            19, 10, "white", "Double check at move 10", null, null, "ke8", false, false, null);
-    dao.insertOccurrencesBatch(
-        Map.of(
-            gameUrl,
-            Map.of(
-                Motif.ATTACK, List.of(direct, discovered),
-                Motif.DOUBLE_CHECK, List.of(stored))));
-
-    List<OccurrenceRow> occs =
-        dao.queryOccurrences(List.of(gameUrl)).get(gameUrl).get("double_check");
-    assertThat(occs).hasSize(1);
-    assertThat(occs.get(0).description()).isEqualTo("Double check at move 10");
-  }
-
-  @Test
-  public void derivationStillCoversGamesWithNoStoredRows() {
-    // Everything the Java worker indexed has ATTACK rows and nothing else, and must keep its
-    // derived motifs.
-    String gameUrl = "https://chess.com/game/derived-only";
-    dao.insertBatch(List.of(createGame(gameUrl)));
-
-    GameFeatures.MotifOccurrence direct =
-        GameFeatures.MotifOccurrence.attack(
-            19, 10, "white", "Attack at move 10", "Bd3", "Bd3", "ke8", false, false);
-    GameFeatures.MotifOccurrence discovered =
-        GameFeatures.MotifOccurrence.attack(
-            19, 10, "white", "Discovered attack at move 10", "Bd3", "Rd1", "ke8", true, false);
-    dao.insertOccurrencesBatch(Map.of(gameUrl, Map.of(Motif.ATTACK, List.of(direct, discovered))));
-
-    Map<String, List<OccurrenceRow>> byMotif = dao.queryOccurrences(List.of(gameUrl)).get(gameUrl);
-    assertThat(byMotif).containsKeys("double_check", "discovered_check", "discovered_attack");
-  }
-
-  @Test
-  public void storedRowsAreReturnedAndForkIsStillDerivedOnly() {
-    // Stored CHECKMATE / DISCOVERED_CHECK / DOUBLE_CHECK / DISCOVERED_ATTACK rows are the C++
-    // indexer's answer and are returned as they are. FORK has no detector on either side, so a
-    // stored FORK row can only be left over from an older pipeline and stays filtered.
-    String gameUrl = "https://chess.com/game/stored-rows-1";
-    dao.insertBatch(List.of(createGame(gameUrl)));
-
+    // Insert stale stored rows directly (simulating old indexed data)
     try (var conn = testDb.dataSource().getConnection()) {
-      for (String motif :
+      for (String staleMotif :
           List.of("CHECKMATE", "DISCOVERED_CHECK", "DOUBLE_CHECK", "DISCOVERED_ATTACK", "FORK")) {
         try (var ps =
             conn.prepareStatement(
                 "INSERT INTO motif_occurrences (id, game_url, motif, ply, side, move_number,"
                     + " description, moved_piece, attacker, target, is_discovered, is_mate,"
-                    + " pin_type) VALUES (?, ?, ?, 5, 'white', 3, 'stored', null, null, null,"
+                    + " pin_type) VALUES (?, ?, ?, 5, 'white', 3, 'stale', null, null, null,"
                     + " false, false, null)")) {
           ps.setString(1, UUID.randomUUID().toString());
           ps.setString(2, gameUrl);
-          ps.setString(3, motif);
+          ps.setString(3, staleMotif);
           ps.executeUpdate();
         }
       }
@@ -542,11 +493,9 @@ public class GameFeatureDaoTest {
       throw new RuntimeException(e);
     }
 
-    Map<String, List<OccurrenceRow>> byMotif =
-        dao.queryOccurrences(List.of(gameUrl)).getOrDefault(gameUrl, Map.of());
-    assertThat(byMotif)
-        .containsKeys("checkmate", "discovered_check", "double_check", "discovered_attack");
-    assertThat(byMotif).doesNotContainKey("fork");
+    Map<String, Map<String, List<OccurrenceRow>>> result = dao.queryOccurrences(List.of(gameUrl));
+    // No ATTACK rows → no derived motifs; stale stored rows are filtered out
+    assertThat(result.getOrDefault(gameUrl, Map.of())).isEmpty();
   }
 
   @Test

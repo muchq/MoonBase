@@ -6,9 +6,11 @@
 // depends on the discovery scan having produced that row; this asks the
 // move generator what kind of check the move gives.
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include "absl/strings/str_cat.h"
 #include "chess.hpp"
@@ -19,7 +21,6 @@
 #include "domains/games/libs/one_d4_motifs/detector.h"
 #include "domains/games/libs/one_d4_motifs/detectors.h"
 #include "domains/games/libs/one_d4_motifs/notation.h"
-#include "domains/games/libs/one_d4_motifs/occurrence.h"
 
 namespace one_d4 {
 namespace {
@@ -52,8 +53,14 @@ class CheckDetector : public Detector {
   }
 };
 
-/// DISCOVERED_CHECK: the move uncovered a checking line rather than
-/// checking with the piece that moved.
+/// DISCOVERED_CHECK: a checking piece that is not one the move put down.
+///
+/// Not ClassifyCheck: upstream's givesCheck returns the first kind it
+/// tests, so a knight that checks while uncovering a rook comes back
+/// DIRECT_CHECK and the discovery is lost — which is every double check.
+/// Asking which checkers the move did not place answers both cases with
+/// one question, and takes the landed squares from LandedOn so castling
+/// (two pieces down) is not a special case here either.
 class DiscoveredCheckDetector : public Detector {
  public:
   Motif motif() const override { return Motif::kDiscoveredCheck; }
@@ -61,29 +68,27 @@ class DiscoveredCheckDetector : public Detector {
   void OnPosition(const Position& position, Findings& out) override {
     const chess::Board& board = position.board;
     if (!board.inCheck()) return;
-    if (chess_cpp::facts::ClassifyCheck(position.last->before, position.last->move) !=
-        chess_cpp::facts::CheckKind::kDiscovered) {
-      return;
+
+    const std::vector<chess::Square> landed = LandedOn(position);
+    chess::Bitboard checkers = chess_cpp::facts::Checkers(board, position.side_to_move);
+    chess::Bitboard uncovered;
+    while (checkers) {
+      const chess::Square square(checkers.pop());
+      if (std::find(landed.begin(), landed.end(), square) == landed.end()) {
+        uncovered.set(square.index());
+      }
     }
+    const std::optional<chess::Square> checker = FirstInScanOrder(uncovered);
+    if (!checker.has_value()) return;
 
     const chess::Square king = board.kingSq(chess_cpp::ToColor(position.side_to_move));
-    // The checker that is not the piece that moved. In a double check both
-    // are checking; the uncovered one is the one this motif is about.
-    std::optional<chess::Square> uncovered;
-    ForEachSquare([&](int row, int col) {
-      const chess::Square square = SquareAt(row, col);
-      if (uncovered.has_value() || square == position.last->move.to()) return;
-      if (chess_cpp::facts::Checkers(board, position.side_to_move).check(square.index())) {
-        uncovered = square;
-      }
-    });
-    if (!uncovered.has_value()) return;
-
+    const chess::Move move = position.last->move;
     Finding finding;
     finding.description = absl::StrCat("Discovered check at move ", position.move_number);
-    finding.moved_piece = MovedPieceNotation(position.last->before.at(position.last->move.from()),
-                                             position.last->move.from(), position.last->move.to());
-    finding.attacker = PieceNotation(board.at(*uncovered), *uncovered);
+    finding.moved_piece =
+        MovedPieceNotation(position.last->before.at(move.from()), move.from(),
+                           landed.empty() ? std::nullopt : std::optional(landed.front()));
+    finding.attacker = PieceNotation(board.at(*checker), *checker);
     finding.target = PieceNotation(board.at(king), king);
     finding.is_discovered = true;
     finding.is_mate = IsCheckmate(position);

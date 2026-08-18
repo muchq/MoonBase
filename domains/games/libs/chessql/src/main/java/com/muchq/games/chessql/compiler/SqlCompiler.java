@@ -29,11 +29,12 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    * Motifs whose WHERE-clause detection is derived from ATTACK rows at query time. These motifs
    * have no stored rows of their own in motif_occurrences.
    *
-   * <p>Note: discovered_attack, checkmate, discovered_check, and double_check are ALSO expressed
-   * via ATTACK rows in compileMotif(). They had no stored rows at all until #1389 phase 3 — the C++
-   * indexer writes them from the position, so ORDER BY and sequence() on those four match something
-   * for the first time, and match nothing for games the Java worker indexed. The WHERE-clause
-   * derivation covers both. See GitHub issue #1083.
+   * <p>Note: discovered_attack, checkmate, discovered_check, and double_check are expressed via
+   * ATTACK rows both in compileMotif() and in motifToPlySubquery(), so WHERE and sequence() work on
+   * them without stored rows. What does not is ORDER BY motif_count, which counts stored rows and
+   * so counts zero for all four. No detector has ever written one; #1389 phase 3 adds C++ detectors
+   * that do, but nothing reads them until the read path can tell a game those detectors scanned
+   * from one they did not. See GitHub issue #1083.
    */
   private static final Set<String> ATTACK_DERIVED_MOTIFS = Set.of("fork");
 

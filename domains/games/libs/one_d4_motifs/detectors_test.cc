@@ -282,6 +282,17 @@ TEST(DoubleCheckDetector, WantsTwoCheckersAtOnce) {
   EXPECT_EQ(found[0].description, "Double check at move 1");
 }
 
+TEST(DiscoveredCheckDetector, FiresOnADoubleCheckToo) {
+  // Nd6+ checks and uncovers Re1 at once. givesCheck reports the direct
+  // half and stops, so a detector built on it alone records no discovery
+  // for any double check — three of them in the parity corpus.
+  const auto found =
+      Found(From("4k3/8/8/8/4N3/8/8/4R2K w - - 0 1", "1. Nd6+"), Motif::kDiscoveredCheck);
+  ASSERT_EQ(found.size(), 1u);
+  EXPECT_EQ(found[0].attacker, "Re1") << "the rook, not the knight that moved";
+  EXPECT_EQ(found[0].moved_piece, "Ne4d6");
+}
+
 TEST(DoubleCheckDetector, OneCheckerIsNotADoubleCheck) {
   EXPECT_THAT(Found(From("4k3/8/8/8/4N3/8/8/4R2K w - - 0 1", "1. Nc5+"), Motif::kDoubleCheck),
               IsEmpty());
@@ -316,15 +327,20 @@ TEST(ZugzwangDetector, FiresWhenEveryMoveLosesMaterial) {
 }
 
 TEST(ZugzwangDetector, IsNotCheck) {
+  // Being in check is not being in zugzwang. Belt and braces: a king in
+  // check is itself attacked and worth more than anything attacking it, so
+  // the "nothing hanging yet" test would reject the position anyway.
   EXPECT_THAT(Found(From("4k3/8/8/8/8/8/8/3R3K w - - 0 1", "1. Re1+"), Motif::kZugzwang),
               IsEmpty());
 }
 
 TEST(ZugzwangDetector, IsNotAPositionWhereSomethingWasAlreadyHanging) {
   // If a piece is en prise before the move, losing it is not the obligation
-  // to move — it is just a piece being en prise.
-  // The same wall, plus a knight on h6 the g5 pawn can already take.
-  EXPECT_THAT(Found(From("6nk/6p1/6Pn/6P1/2B5/8/4R3/K7 w - - 0 1", "1. Re1"), Motif::kZugzwang),
+  // to move — it is just a piece being en prise. Same wall, so every legal
+  // move still costs and the position would otherwise qualify; what changes
+  // is that the pawn on a7 is already hanging, blocked, and cannot be
+  // saved.
+  EXPECT_THAT(Found(From("1B4nk/p5p1/P5P1/6P1/8/8/4R3/K7 w - - 0 1", "1. Re1"), Motif::kZugzwang),
               IsEmpty());
 }
 
@@ -345,11 +361,15 @@ TEST(OverloadedPieceDetector, IgnoresADefenderWithOnlyOneJob) {
 }
 
 TEST(OverloadedPieceDetector, IgnoresADefenceNothingIsThreatening) {
-  // A pawn attacked only by a queen is not being held by its defender —
-  // taking it loses the queen. Counting those makes half the board
-  // overloaded.
-  EXPECT_THAT(Found(From("7k/3r1p2/8/3n4/8/8/8/KR6 w - - 0 1", "1. Rd1"), Motif::kOverloadedPiece),
-              IsEmpty());
+  // Both black pieces are attacked and rd7 alone defends each, so this does
+  // reach the two-duties test. It fails it because the rook cannot take the
+  // pawn on f7 and profit — only the knight, attacked by a pawn, is really
+  // being held. Counting defences like the f7 one makes half the board
+  // overloaded: it is what took this detector from 200 rows to 2547 over
+  // the parity corpus.
+  EXPECT_THAT(
+      Found(From("7k/3r1p2/8/3n4/4P3/8/8/R6K w - - 0 1", "1. Rf1"), Motif::kOverloadedPiece),
+      IsEmpty());
 }
 
 // --- PROMOTION ----------------------------------------------------------
@@ -395,6 +415,17 @@ TEST(BackRankMateDetector, FindsAKingShutInByItsOwnPawns) {
   EXPECT_EQ(found[0].attacker, "ra1");
   EXPECT_EQ(found[0].target, "Kg1");
   EXPECT_TRUE(found[0].is_mate);
+}
+
+TEST(BackRankMateDetector, WantsTheMateDeliveredAlongTheBackRank) {
+  // Mated on its back rank, by a knight standing on the seventh. Mate on
+  // the back rank is not a back-rank mate — ten of the parity corpus's
+  // thirteen rows were this shape, mostly queens and bishops on g7.
+  const std::string pgn = From("6rk/6pp/8/6N1/8/8/8/6K1 w - - 0 1", "1. Nf7#");
+  const auto mates = Found(pgn, Motif::kCheckmate);
+  ASSERT_EQ(mates.size(), 1u) << "the fixture has to be mate for this to mean anything";
+  EXPECT_EQ(mates[0].attacker, "Nf7");
+  EXPECT_THAT(Found(pgn, Motif::kBackRankMate), IsEmpty());
 }
 
 TEST(BackRankMateDetector, WantsTheKingsOwnPiecesInTheWay) {

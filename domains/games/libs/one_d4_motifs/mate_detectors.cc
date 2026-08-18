@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include "absl/strings/str_cat.h"
 #include "chess.hpp"
@@ -48,8 +49,14 @@ class CheckmateDetector : public Detector {
     finding.description = absl::StrCat("Checkmate at move ", final_position.move_number);
     if (const std::optional<chess::Square> checker = Checker(board, mated); checker.has_value()) {
       finding.attacker = PieceNotation(board.at(*checker), *checker);
-      finding.moved_piece = finding.attacker;
     }
+    // The piece that moved, which on a discovered mate is not the piece
+    // giving it.
+    const chess::Move move = final_position.last->move;
+    const std::vector<chess::Square> landed = LandedOn(final_position);
+    finding.moved_piece =
+        MovedPieceNotation(final_position.last->before.at(move.from()), move.from(),
+                           landed.empty() ? std::nullopt : std::optional(landed.front()));
     finding.target = PieceNotation(board.at(king), king);
     finding.is_mate = true;
     out.Add(final_position, std::move(finding));

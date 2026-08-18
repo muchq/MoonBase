@@ -115,9 +115,9 @@ int Count(const Extracted& extracted, const std::string& motif) {
   return found == extracted.by_motif.end() ? 0 : found->second;
 }
 
-/// Extracted once for the suite: the corpus is 150 games through ten
-/// detectors, and running it per test is the difference between a fast
-/// test and a slow one under the sanitizers.
+/// Extracted once for the suite: 150 games through every detector, and
+/// running it per test is the difference between a fast test and a slow one
+/// under the sanitizers.
 class TacticsCorpus : public testing::Test {
  protected:
   static void SetUpTestSuite() { extracted_ = new Extracted(RunCorpus()); }
@@ -146,7 +146,7 @@ TEST_F(TacticsCorpus, CoversTheMotifsTheWideBankIsThinOn) {
       {"CHECKMATE", 92},
       {"CROSS_PIN", 14},
       {"DISCOVERED_ATTACK", 911},
-      {"DISCOVERED_CHECK", 23},
+      {"DISCOVERED_CHECK", 27},
       {"DOUBLE_CHECK", 6},
       {"OVERLOADED_PIECE", 62},
       {"PIN", 877},
@@ -168,7 +168,7 @@ TEST_F(TacticsCorpus, HoldsNoSmotheredMate) {
 
 TEST_F(TacticsCorpus, EveryOccurrenceIsWellFormed) {
   const Extracted& extracted = corpus();
-  EXPECT_EQ(extracted.occurrences, 7585);
+  EXPECT_EQ(extracted.occurrences, 7589);
   // Every row goes to a NOT NULL column or a typed field; these are the
   // invariants the write path would otherwise discover in production.
   EXPECT_TRUE(extracted.malformed.empty()) << absl::StrJoin(extracted.malformed, "\n");
