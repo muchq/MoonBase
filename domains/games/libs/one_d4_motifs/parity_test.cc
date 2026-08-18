@@ -6,9 +6,14 @@
 // regenerates stops describing anything, and a comparison against a file
 // this side generated agrees with itself.
 //
-// The two implementations do not agree, on purpose. Every difference is
-// named below and counted; "allowed to differ" without a count is how a
+// The two implementations agree on every row but one motif's, on purpose:
+// CROSS_PIN could never fire in Java. That difference is pinned row for row
+// rather than counted — "allowed to differ" without identity is how a
 // regression hides inside a known difference.
+//
+// They also used to disagree about Black's ply. That was a Java bug, and it
+// is fixed rather than tolerated (MotifOccurrence.plyOf), so the harness no
+// longer transforms the oracle before comparing it.
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -79,28 +84,6 @@ std::string Row(int game, const MotifOccurrence& occurrence) {
       occurrence.pin_type.has_value() ? std::string(ToString(*occurrence.pin_type)) : "-");
 }
 
-/// The golden with the Java pipeline's ply bug undone.
-///
-/// Black's occurrences are recorded two plies early there. The move number
-/// is right — GameReplayer stores it before advancing it — but every copy
-/// of the ply formula subtracts one from it unconditionally, so Black's row
-/// for move N carries 2(N-1) instead of 2N, and Black's first move comes
-/// out as ply 0 and is discarded. That the move number is untouched is what
-/// makes a ply-only correction sound here.
-///
-/// Correcting the oracle rather than the port is the direction that leaves
-/// the stored data wrong; fixing that is a migration. See #1389.
-std::string WithCorrectedPly(const std::string& row) {
-  const std::vector<std::string> fields = absl::StrSplit(row, '\t');
-  if (fields.size() < 5 || fields[3] != "black") return row;
-
-  int ply = 0;
-  if (!absl::SimpleAtoi(fields[2], &ply)) return row;
-  std::vector<std::string> corrected = fields;
-  corrected[2] = absl::StrFormat("%04d", ply + 2);
-  return absl::StrJoin(corrected, "\t");
-}
-
 std::multiset<std::string> CppRows() {
   const std::vector<std::string> games = SplitGames(Read(kCorpus));
   EXPECT_EQ(games.size(), kGames);
@@ -124,7 +107,7 @@ std::multiset<std::string> GoldenRows() {
   std::multiset<std::string> rows;
   for (const std::string_view line : absl::StrSplit(Read(kGolden), '\n')) {
     if (line.empty()) continue;
-    rows.insert(WithCorrectedPly(std::string(line)));
+    rows.emplace(line);
   }
   return rows;
 }
@@ -168,23 +151,18 @@ std::multiset<std::string>* Parity::golden_ = nullptr;
 
 /// The Java pipeline's own count over this bank, pinned so a regenerated
 /// corpus or golden is loud rather than quiet.
-constexpr int kGoldenRows = 14553;
+constexpr int kGoldenRows = 14554;
 
 /// Cross-pins the Java detector cannot see. It looks for one square found
 /// twice from the same king, which two rays never do, so CROSS_PIN has
 /// never had a single row in it.
 constexpr int kCrossPins = 43;
 
-/// Occurrences on Black's first move. Java derives ply from a move number
-/// that has already advanced, so 1... comes out as ply 0 and is discarded
-/// as "the starting position".
-constexpr int kBlackFirstMove = 1;
-
 TEST_F(Parity, ReadsTheWholeGolden) { EXPECT_EQ(golden_->size(), kGoldenRows); }
 
 TEST_F(Parity, FindsEverythingTheJavaPipelineFinds) {
-  // Nothing lost: 14,553 rows over 500 games, ten detectors, once the
-  // oracle's ply is corrected. Losing one is a port bug.
+  // Nothing lost: 14,554 rows over 500 games and ten detectors, compared
+  // row for row with no transform in between. Losing one is a port bug.
   const std::vector<std::string> lost = Missing(*golden_, *cpp_);
   EXPECT_THAT(lost, IsEmpty()) << "rows the port stopped producing: " << lost.size() << " of "
                                << golden_->size();
@@ -209,21 +187,9 @@ TEST_F(Parity, AddsTheCrossPinsJavaCannotSee) {
   EXPECT_EQ(found, expected);
 }
 
-TEST_F(Parity, AddsWhatJavaDropsFromBlacksFirstMove) {
+TEST_F(Parity, DiffersOnlyInTheCrossPins) {
   const std::vector<std::string> extra = Missing(*cpp_, *golden_);
-  int first_move = 0;
-  for (const std::string& row : extra) {
-    const std::vector<std::string> fields = absl::StrSplit(row, '\t');
-    if (fields.size() > 4 && fields[1] != "CROSS_PIN" && fields[3] == "black" && fields[4] == "1") {
-      ++first_move;
-    }
-  }
-  EXPECT_EQ(first_move, kBlackFirstMove);
-}
-
-TEST_F(Parity, DiffersOnlyInThoseTwoWays) {
-  const std::vector<std::string> extra = Missing(*cpp_, *golden_);
-  EXPECT_EQ(extra.size(), kCrossPins + kBlackFirstMove);
+  EXPECT_EQ(extra.size(), kCrossPins);
   for (const auto& [motif, count] : ByMotif(extra)) {
     std::cerr << "extra " << motif << ": " << count << "\n";
   }

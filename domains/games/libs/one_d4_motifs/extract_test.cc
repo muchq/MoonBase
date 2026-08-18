@@ -59,10 +59,9 @@ TEST(Extract, WhiteMovesAreOddPliesAndBlackEven) {
 }
 
 TEST(Extract, RecordsBlacksFirstMove) {
-  // The Java pipeline drops it: its ply formula subtracts one from a move
-  // number that is already correct, so 1... comes out as ply 0 and is
-  // discarded as "the starting position". Black's occurrences land two
-  // plies early for the whole game.
+  // The shape of the bug this found in the Java pipeline, since fixed: a
+  // ply formula that subtracted one from an already-correct move number, so
+  // 1... came out as ply 0 and was discarded as "the starting position".
   //
   // Black checks on move 1 from a position set up for it.
   const GameFeatures features = Extracted(

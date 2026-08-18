@@ -22,15 +22,35 @@ public record GameFeatures(
       boolean isDiscovered,
       boolean isMate,
       @Nullable String pinType) {
+
+    /**
+     * The half-move index of the move that produced {@code ctx}, counting White's first move as 1.
+     * White's moves are odd, Black's even, and both colors of one move share a move number.
+     *
+     * <p>Returns 0 for the initial position, where no move has been made.
+     *
+     * <p>One definition, called by every factory below and by AttackDetector. It used to be six
+     * copies of {@code 2 * (moveNumber - 1)} for Black, which is two plies early and silently drops
+     * Black's first move; #1389 phase 2 found it by porting the pipeline to C++ and comparing.
+     */
+    public static int plyOf(PositionContext ctx) {
+      if (ctx.moveNumber() == 0) return 0;
+      return movedWhite(ctx) ? 2 * ctx.moveNumber() - 1 : 2 * ctx.moveNumber();
+    }
+
+    /** True when the move that produced {@code ctx} was White's — i.e. Black is to move now. */
+    public static boolean movedWhite(PositionContext ctx) {
+      return !ctx.whiteToMove();
+    }
+
     /**
      * Factory: derives ply and side from the given PositionContext. Returns null if the context
      * represents the initial position (no move has been made).
      */
     public static MotifOccurrence from(PositionContext ctx, String description) {
-      boolean movedWhite = !ctx.whiteToMove();
-      int ply = movedWhite ? 2 * ctx.moveNumber() - 1 : 2 * (ctx.moveNumber() - 1);
-      if (ply <= 0) return null; // initial position, no move made yet
-      String side = movedWhite ? "white" : "black";
+      int ply = plyOf(ctx);
+      if (ply == 0) return null; // initial position, no move made yet
+      String side = movedWhite(ctx) ? "white" : "black";
       return new MotifOccurrence(
           ply, ctx.moveNumber(), side, description, null, null, null, false, false, null);
     }
@@ -42,10 +62,9 @@ public record GameFeatures(
         String movedPiece,
         String attacker,
         String target) {
-      boolean movedWhite = !ctx.whiteToMove();
-      int ply = movedWhite ? 2 * ctx.moveNumber() - 1 : 2 * (ctx.moveNumber() - 1);
-      if (ply <= 0) return null;
-      String side = movedWhite ? "white" : "black";
+      int ply = plyOf(ctx);
+      if (ply == 0) return null;
+      String side = movedWhite(ctx) ? "white" : "black";
       return new MotifOccurrence(
           ply,
           ctx.moveNumber(),
@@ -96,10 +115,9 @@ public record GameFeatures(
         String description,
         @Nullable String attacker,
         @Nullable String target) {
-      boolean movedWhite = !ctx.whiteToMove();
-      int ply = movedWhite ? 2 * ctx.moveNumber() - 1 : 2 * (ctx.moveNumber() - 1);
-      if (ply <= 0) return null;
-      String side = movedWhite ? "white" : "black";
+      int ply = plyOf(ctx);
+      if (ply == 0) return null;
+      String side = movedWhite(ctx) ? "white" : "black";
       return new MotifOccurrence(
           ply, ctx.moveNumber(), side, description, null, attacker, target, false, false, null);
     }
@@ -113,10 +131,9 @@ public record GameFeatures(
         String description,
         @Nullable String attacker,
         @Nullable String target) {
-      boolean movedWhite = !ctx.whiteToMove();
-      int ply = movedWhite ? 2 * ctx.moveNumber() - 1 : 2 * (ctx.moveNumber() - 1);
-      if (ply <= 0) return null;
-      String side = movedWhite ? "white" : "black";
+      int ply = plyOf(ctx);
+      if (ply == 0) return null;
+      String side = movedWhite(ctx) ? "white" : "black";
       return new MotifOccurrence(
           ply, ctx.moveNumber(), side, description, null, attacker, target, false, true, null);
     }
@@ -129,10 +146,9 @@ public record GameFeatures(
      */
     public static MotifOccurrence pin(
         PositionContext ctx, String description, String attacker, String target, String pinType) {
-      boolean movedWhite = !ctx.whiteToMove();
-      int ply = movedWhite ? 2 * ctx.moveNumber() - 1 : 2 * (ctx.moveNumber() - 1);
-      if (ply <= 0) return null;
-      String side = movedWhite ? "white" : "black";
+      int ply = plyOf(ctx);
+      if (ply == 0) return null;
+      String side = movedWhite(ctx) ? "white" : "black";
       return new MotifOccurrence(
           ply, ctx.moveNumber(), side, description, null, attacker, target, false, false, pinType);
     }

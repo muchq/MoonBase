@@ -23,10 +23,10 @@ struct Finding {
 };
 
 /// Findings go here, and this is the only place that derives ply, move
-/// number and side. The Java pipeline spells that arithmetic out per
-/// detector and per factory — five copies of one subtraction, all of them
-/// wrong for Black, which lands its occurrences two plies early and drops
-/// its first move entirely.
+/// number and side. The Java pipeline had six copies of that arithmetic,
+/// all of them wrong for Black — two plies early, and its first move
+/// dropped. Porting is what found it; MotifOccurrence.plyOf is the one
+/// definition it has now.
 class Findings {
  public:
   /// `out` outlives this.

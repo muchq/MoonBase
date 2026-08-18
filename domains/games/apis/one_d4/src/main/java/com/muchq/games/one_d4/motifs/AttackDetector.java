@@ -49,8 +49,9 @@ public class AttackDetector implements MotifDetector {
       boolean moverIsWhite = !after.whiteToMove();
       boolean isCheckmate = move.endsWith("#");
 
-      int ply = moverIsWhite ? 2 * after.moveNumber() - 1 : 2 * (after.moveNumber() - 1);
-      if (ply <= 0) continue;
+      // The same derivation the factories use — see MotifOccurrence.plyOf.
+      int ply = GameFeatures.MotifOccurrence.plyOf(after);
+      if (ply == 0) continue;
       String side = moverIsWhite ? "white" : "black";
 
       int[][] boardBefore = BoardUtils.parsePlacement(before.fen().split(" ")[0]);
