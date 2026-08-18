@@ -817,6 +817,30 @@ TEST(IndexRun, WillNotStartAMonthPastTheRunCeiling) {
   EXPECT_THAT(archive.asked, IsEmpty());
 }
 
+TEST(IndexRun, GivesTheRangeBackRatherThanGoingQuietWhenARefusalIsItsOwnClock) {
+  // A refused checkpoint past the ceiling is this run's own clock running
+  // out, not a takeover. Reported as a lost lease the poller writes
+  // nothing, the row expires still naming this owner, and reclaiming our
+  // own expired row spends no attempt — so a repeatable wedge loops
+  // forever instead of retiring after three.
+  FakeArchive archive;
+  for (int i = 0; i < 4; ++i) archive.months["2026-01"].push_back(AGame(absl::StrCat("g", i)));
+  FakeSink sink;
+  FakeLease lease;
+  lease.holds = 1;
+  lease.out_of_time = true;
+
+  IndexRun::Options options = Options();
+  options.batch_size = 2;
+  IndexRun run(archive, sink, options);
+  const absl::StatusOr<RunReport> report = run.Execute(AJob(), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  EXPECT_FALSE(report->lease_lost);
+  ASSERT_TRUE(report->stopped.has_value());
+  EXPECT_EQ(*report->stopped, Stopped::kRunCeiling);
+}
+
 TEST(IndexRun, FinishesTheMonthItIsAlreadyInsideWhenTheCeilingPasses) {
   // Those games are extracted either way. What the ceiling forbids is
   // starting another month, not throwing away the one in hand.

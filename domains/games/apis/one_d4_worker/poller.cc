@@ -87,12 +87,19 @@ class QueueLease : public LeaseKeeper {
 
  private:
   bool RenewLocked() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
-    // Past the ceiling the claim stops being renewed, which is what
-    // recovers a run wedged inside a single month: it will never reach the
-    // check between months, so the only way its range comes back is the
-    // lease lapsing under it. Java stops its heartbeat here for the same
-    // reason.
-    if (absl::Now() >= deadline_) return false;
+    // Past the ceiling the claim stops being *extended* — which is what
+    // recovers a run wedged inside a single month, since it will never
+    // reach the check between months and the only way its range comes
+    // back is the lease lapsing under it.
+    //
+    // Not renewing is not the same as not owning, though, and answering
+    // false here for both would abort the month in hand the moment the
+    // ceiling passed. We still hold the claim until the lease we last
+    // proved runs out; the month in hand may finish inside it.
+    if (absl::Now() >= deadline_) {
+      if (absl::Now() - proven_ >= lease_) lost_ = true;
+      return !lost_;
+    }
     const absl::StatusOr<bool> held = queue_.Heartbeat(id_, owner_, lease_);
     if (held.ok() && *held) {
       proven_ = absl::Now();
@@ -164,6 +171,16 @@ absl::StatusOr<bool> Poller::PollOnce() {
                    options_.max_run);
   const absl::StatusOr<RunReport> report = run_(job, lease);
 
+  // Ahead of the lease check, unlike everything else. A run that stopped
+  // at its ceiling gives the range back even if its claim lapsed on the
+  // way out: Release is fenced, so it either lands — spending the
+  // attempt, which is what retires a repeatable wedge after three instead
+  // of looping on it forever — or is refused because the range really did
+  // change hands, and Finish calls that what it is.
+  if (report.ok() && report->stopped.has_value() && *report->stopped == Stopped::kRunCeiling) {
+    return Finish(job, RunOutcome::kInterrupted, queue_.Release(job.id, options_.owner));
+  }
+
   // Before anything else, including a failure: a run that lost its lease
   // reports nothing, because the row belongs to whoever holds it now.
   if (lease.lost() || (report.ok() && report->lease_lost)) {
@@ -179,11 +196,10 @@ absl::StatusOr<bool> Poller::PollOnce() {
     return Finish(job, RunOutcome::kFailed, queue_.Fail(job.id, options_.owner, kInternalFailure));
   }
 
+  // Only kShutdown reaches here; the ceiling is handled above. The
+  // request did nothing wrong, so the attempt is refunded.
   if (report->stopped.has_value()) {
-    const absl::StatusOr<bool> handed = *report->stopped == Stopped::kShutdown
-                                            ? queue_.HandBack(job.id, options_.owner)
-                                            : queue_.Release(job.id, options_.owner);
-    return Finish(job, RunOutcome::kInterrupted, handed);
+    return Finish(job, RunOutcome::kInterrupted, queue_.HandBack(job.id, options_.owner));
   }
 
   return Finish(job, RunOutcome::kCompleted,

@@ -87,8 +87,13 @@ int main() {
   // RetentionPolicy.MAX_RUN. Past it a run is treated as wedged: it stops
   // renewing, hands the range back with the attempt spent, and a
   // replacement picks it up.
-  const absl::Duration max_run =
-      absl::Seconds(std::atoi(Env("ONE_D4_MAX_RUN_SECONDS", "21600").c_str()));
+  // Defaulted from the option rather than a literal, so the value the
+  // contract test pins against RetentionPolicy.MAX_RUN is the value this
+  // process actually runs with.
+  const one_d4_worker::Poller::Options defaults;
+  const std::string max_run_seconds =
+      Env("ONE_D4_MAX_RUN_SECONDS", std::to_string(absl::ToInt64Seconds(defaults.max_run)));
+  const absl::Duration max_run = absl::Seconds(std::atoi(max_run_seconds.c_str()));
 
   smithy::Outcome<chess_com::Client> client = chess_com::CreateProductionClient();
   if (!client.ok()) {

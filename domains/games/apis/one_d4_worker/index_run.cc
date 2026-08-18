@@ -28,6 +28,20 @@ std::string EcoFrom(const chess_cpp::Headers& headers) {
 IndexRun::IndexRun(ArchiveSource& archive, GameSink& sink, Options options)
     : archive_(archive), sink_(sink), options_(std::move(options)) {}
 
+void IndexRun::GiveUp(LeaseKeeper& lease, RunReport& report) {
+  // Release is fenced, so calling a ceiling stop a ceiling stop is safe
+  // even here: it lands and spends the attempt, or it is refused because
+  // the range really did change hands. Reporting nothing instead leaves
+  // the row to expire still naming this owner, and reclaiming our own
+  // expired row spends no attempt — so a repeatable wedge would loop
+  // forever rather than retiring after three.
+  if (lease.OutOfTime()) {
+    report.stopped = Stopped::kRunCeiling;
+    return;
+  }
+  report.lease_lost = true;
+}
+
 int64_t IndexRun::Now() const {
   return options_.now ? options_.now() : absl::ToUnixSeconds(absl::Now());
 }
@@ -109,7 +123,7 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
     // Ownership before work: a run that has lost the range must not write
     // over whoever holds it now.
     if (!lease.Keep()) {
-      report.lease_lost = true;
+      GiveUp(lease, report);
       return report;
     }
 
@@ -127,7 +141,7 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
       if (cached->has_value()) {
         report.games_indexed += **cached;
         if (!lease.Report(report.games_indexed)) {
-          report.lease_lost = true;
+          GiveUp(lease, report);
           return report;
         }
         observer().MonthFinished("cached", **cached);
@@ -221,7 +235,7 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
         // Re-checked per batch, not per month: a month of four hundred
         // games outlives a lease that a stalled run stopped renewing.
         if (!lease.Keep()) {
-          report.lease_lost = true;
+          GiveUp(lease, report);
           return report;
         }
         if (const absl::Status written = Flush(batch); !written.ok()) {
@@ -232,7 +246,7 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
         // Per batch, not per game: a hundred games is one row update, and
         // the counter still climbs while a long month is running.
         if (!lease.Report(report.games_indexed)) {
-          report.lease_lost = true;
+          GiveUp(lease, report);
           return report;
         }
       }
@@ -250,7 +264,7 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
       return report;
     }
     if (!lease.Report(report.games_indexed)) {
-      report.lease_lost = true;
+      GiveUp(lease, report);
       return report;
     }
     observer().MonthFinished(complete ? "indexed" : "degraded", month_count);
