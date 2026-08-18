@@ -54,24 +54,73 @@ public class DiscoveredAttackDetector implements MotifDetector {
   public List<RevealedAttack> findDiscoveredAttacks(
       int[][] before, int[][] after, boolean moverIsWhite) {
     List<RevealedAttack> result = new ArrayList<>();
+    List<int[]> landed = BoardUtils.landedSquares(before, after, moverIsWhite);
 
     for (int r = 0; r < 8; r++) {
       for (int c = 0; c < 8; c++) {
         int pieceBefore = before[r][c];
-        int pieceAfter = after[r][c];
+        if (pieceBefore == 0 || after[r][c] != 0) continue;
 
-        if (pieceBefore != 0 && pieceAfter == 0) {
-          boolean isWhite = pieceBefore > 0;
-          if (isWhite == moverIsWhite) {
-            int[] dest = findDestinationCoords(before, after, pieceBefore, r, c);
-            String destSquare = dest != null ? squareName(dest[0], dest[1]) : "??";
-            String movedPiece = pieceLetter(pieceBefore) + squareName(r, c) + destSquare;
-            result.addAll(revealsAttacks(after, r, c, moverIsWhite, movedPiece, dest));
-          }
+        // Every square the move emptied, not just the mover's own. An en
+        // passant capture empties a third square — the taken pawn's, which
+        // is on neither square the move names — and the lines through it
+        // open with nothing of ours near them.
+        boolean ourPiece = (pieceBefore > 0) == moverIsWhite;
+        int[] dest;
+        String movedPiece;
+        if (ourPiece) {
+          // Where this piece went. Null for a promotion: no square holds a
+          // pawn afterwards, because the pawn became something else.
+          int[] samePiece = findDestinationCoords(before, after, pieceBefore, r, c);
+          movedPiece =
+              pieceLetter(pieceBefore)
+                  + squareName(r, c)
+                  + (samePiece != null ? squareName(samePiece[0], samePiece[1]) : "??");
+          // The promoted piece still has to be excluded below, or it reads
+          // as one the pawn had been hiding all along.
+          dest = samePiece != null ? samePiece : nearest(landed, r, c);
+        } else {
+          // The pawn taken en passant. What moved is the pawn that took it.
+          int[] from = moverOrigin(before, after, moverIsWhite);
+          int[] to = nearest(landed, r, c);
+          if (from == null || to == null) continue;
+          movedPiece =
+              pieceLetter(before[from[0]][from[1]])
+                  + squareName(from[0], from[1])
+                  + squareName(to[0], to[1]);
+          dest = to;
         }
+        result.addAll(revealsAttacks(after, r, c, moverIsWhite, movedPiece, dest));
       }
     }
     return result;
+  }
+
+  /** The landing square nearest (row, col) — the one this emptied square belongs to. */
+  private static int[] nearest(List<int[]> landed, int row, int col) {
+    int[] best = null;
+    int bestDistance = Integer.MAX_VALUE;
+    for (int[] square : landed) {
+      int distance = Math.max(Math.abs(square[0] - row), Math.abs(square[1] - col));
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = square;
+      }
+    }
+    return best;
+  }
+
+  /** The first square the mover emptied of one of its own pieces. */
+  private static int[] moverOrigin(int[][] before, int[][] after, boolean moverIsWhite) {
+    for (int r = 0; r < 8; r++) {
+      for (int c = 0; c < 8; c++) {
+        int piece = before[r][c];
+        if (piece != 0 && (piece > 0) == moverIsWhite && after[r][c] == 0) {
+          return new int[] {r, c};
+        }
+      }
+    }
+    return null;
   }
 
   private List<RevealedAttack> revealsAttacks(

@@ -57,11 +57,13 @@ public class AttackDetector implements MotifDetector {
       int[][] boardBefore = BoardUtils.parsePlacement(before.fen().split(" ")[0]);
       int[][] boardAfter = BoardUtils.parsePlacement(after.fen().split(" ")[0]);
 
-      // Part 1: direct attacks by the piece that just moved (skip castling)
-      if (!move.startsWith("O-")) {
+      // Part 1: direct attacks from every square the mover landed on.
+      // Castling lands two — and the rook, not the king, is the one that
+      // arrives on a new file bearing down the board.
+      for (int[] landed : BoardUtils.landedSquares(move, moverIsWhite)) {
         result.addAll(
             findDirectAttacks(
-                boardBefore, boardAfter, moverIsWhite, after.moveNumber(), ply, side, isCheckmate));
+                boardAfter, landed, moverIsWhite, after.moveNumber(), ply, side, isCheckmate));
       }
 
       // Part 2: all discovered attacks revealed by the move
@@ -88,19 +90,13 @@ public class AttackDetector implements MotifDetector {
   }
 
   private static List<GameFeatures.MotifOccurrence> findDirectAttacks(
-      int[][] boardBefore,
       int[][] boardAfter,
+      int[] dest,
       boolean moverIsWhite,
       int moveNumber,
       int ply,
       String side,
       boolean isCheckmate) {
-
-    int[] vacated = findVacatedSquare(boardBefore, boardAfter, moverIsWhite);
-    if (vacated == null) return List.of();
-
-    int[] dest = findDestSquare(boardBefore, boardAfter, moverIsWhite);
-    if (dest == null) return List.of();
 
     int pieceAtDest = boardAfter[dest[0]][dest[1]];
     if (pieceAtDest == 0) return List.of();
@@ -138,36 +134,6 @@ public class AttackDetector implements MotifDetector {
                     false,
                     isCheckmate && isKing(t)))
         .toList();
-  }
-
-  /** Returns the first square vacated by a mover's piece (occupied before, empty after). */
-  private static int[] findVacatedSquare(int[][] before, int[][] after, boolean moverIsWhite) {
-    for (int r = 0; r < 8; r++) {
-      for (int c = 0; c < 8; c++) {
-        int pb = before[r][c];
-        if (pb != 0 && (pb > 0) == moverIsWhite && after[r][c] == 0) {
-          return new int[] {r, c};
-        }
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Returns the first square where a mover's piece appeared that wasn't a mover's piece before (was
-   * empty or was an enemy piece).
-   */
-  private static int[] findDestSquare(int[][] before, int[][] after, boolean moverIsWhite) {
-    for (int r = 0; r < 8; r++) {
-      for (int c = 0; c < 8; c++) {
-        int pa = after[r][c];
-        int pb = before[r][c];
-        if (pa != 0 && (pa > 0) == moverIsWhite && (pb == 0 || (pb > 0) != moverIsWhite)) {
-          return new int[] {r, c};
-        }
-      }
-    }
-    return null;
   }
 
   /**

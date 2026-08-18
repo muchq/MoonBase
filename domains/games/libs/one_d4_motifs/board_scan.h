@@ -3,6 +3,7 @@
 
 #include <array>
 #include <optional>
+#include <vector>
 
 #include "chess.hpp"
 #include "domains/games/libs/chess_cpp/replay.h"
@@ -98,9 +99,13 @@ std::optional<chess::Square> FirstPieceAlong(const chess::Board& board, int row,
 // move, never from the SAN text: '#' and '+' are things a PGN writer
 // chooses to include.
 
-/// Where the move landed. nullopt for castling — two pieces move and the
-/// notation names no single destination.
-std::optional<chess::Square> MovedTo(const chess_cpp::Position& position);
+/// Where the move put a piece. Two squares for castling — the king's and
+/// the rook's — because the rook lands on a new line and can pin, skewer
+/// and attack from it, which is the half the notation "O-O" hides.
+std::vector<chess::Square> LandedOn(const chess_cpp::Position& position);
+
+/// The rook's destination in a castling move, given the king's origin.
+chess::Square CastledRookTo(chess::Square king_from, bool kingside);
 
 bool IsPromotion(const chess_cpp::Position& position);
 

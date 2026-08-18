@@ -61,22 +61,63 @@ std::vector<chess::Square> Significant(const chess::Board& board,
   return kept;
 }
 
-/// Squares the mover vacated, each with where that piece went. Castling
-/// vacates two; a promotion has no destination in moved_piece's spelling,
-/// because the pawn that left is not the piece that arrived.
-std::vector<std::pair<chess::Square, std::optional<chess::Square>>> Vacated(
-    const Position& position) {
+/// A square the move emptied, and what a ray walking through it needs to
+/// know.
+struct Emptied {
+  chess::Square square;
+
+  /// Where the piece that left it went, so a ray does not report the piece
+  /// that just moved as one it uncovered. Absent when nothing landed —
+  /// the pawn taken en passant went nowhere.
+  std::optional<chess::Square> landed;
+
+  /// How the move is spelled in moved_piece, for a discovery through this
+  /// square. Not always the piece that stood here: an en passant capture
+  /// empties the taken pawn's square, and the piece that moved is the pawn
+  /// that took it.
+  std::string moved_piece;
+};
+
+/// Every square the move emptied.
+///
+/// Three moves empty a square that is not simply `from`, and each one is a
+/// discovery the naive reading misses: castling moves a rook as well as a
+/// king, en passant takes a pawn that is on neither square the move names,
+/// and a promotion puts a piece down that is not the one that left.
+std::vector<Emptied> EmptiedBy(const Position& position) {
   const chess::Move move = position.last->move;
+  const chess::Board& before = position.last->before;
+  const auto spell = [&before](chess::Square from, std::optional<chess::Square> to) {
+    return MovedPieceNotation(before.at(from), from, to);
+  };
+
   if (move.typeOf() == chess::Move::CASTLING) {
     // Encoded king-takes-rook: from is the king, to is the rook it swaps with.
     const bool kingside = move.to() > move.from();
-    const int rank = move.from().index() / 8;
-    const chess::Square king_to = chess::Square(rank * 8 + (kingside ? 6 : 2));
-    const chess::Square rook_to = chess::Square(rank * 8 + (kingside ? 5 : 3));
-    return {{move.from(), king_to}, {move.to(), rook_to}};
+    const chess::Square king_to = chess::Square(move.from().index() / 8 * 8 + (kingside ? 6 : 2));
+    const chess::Square rook_to = CastledRookTo(move.from(), kingside);
+    return {{move.from(), king_to, spell(move.from(), king_to)},
+            {move.to(), rook_to, spell(move.to(), rook_to)}};
   }
-  if (move.typeOf() == chess::Move::PROMOTION) return {{move.from(), std::nullopt}};
-  return {{move.from(), move.to()}};
+
+  if (move.typeOf() == chess::Move::ENPASSANT) {
+    // The taken pawn is beside the capturing pawn's origin, not on either
+    // square the move names, and the diagonals and file through it open up
+    // with no piece of ours anywhere near them.
+    const chess::Square taken = SquareAt(RowOf(move.from()), ColOf(move.to()));
+    const std::string moved = spell(move.from(), move.to());
+    return {{move.from(), move.to(), moved}, {taken, std::nullopt, moved}};
+  }
+
+  if (move.typeOf() == chess::Move::PROMOTION) {
+    // `landed` is the promotion square, so the new piece standing there is
+    // not read as one the pawn had been hiding. It is still spelled without
+    // a destination — the pawn that left is not the queen that arrived, and
+    // stored rows carry the "??" that says so.
+    return {{move.from(), move.to(), spell(move.from(), std::nullopt)}};
+  }
+
+  return {{move.from(), move.to(), spell(move.from(), move.to())}};
 }
 
 /// Attacks a slider had blocked by whatever stood on `vacated`.
@@ -120,14 +161,12 @@ class AttackDetector : public Detector {
     const Side mover = chess_cpp::Opponent(position.side_to_move);
     const bool mate = IsCheckmate(position);
 
-    if (const std::optional<chess::Square> landed = MovedTo(position); landed.has_value()) {
-      DirectAttacks(position, *landed, mover, mate, out);
+    for (const chess::Square landed : LandedOn(position)) {
+      DirectAttacks(position, landed, mover, mate, out);
     }
 
-    for (const auto& [vacated, destination] : Vacated(position)) {
-      const chess::Piece moved = position.last->before.at(vacated);
-      RevealedBy(position, vacated, destination, mover,
-                 MovedPieceNotation(moved, vacated, destination), mate, &out);
+    for (const Emptied& emptied : EmptiedBy(position)) {
+      RevealedBy(position, emptied.square, emptied.landed, mover, emptied.moved_piece, mate, &out);
     }
   }
 

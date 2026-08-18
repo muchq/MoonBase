@@ -18,18 +18,17 @@ public class SkewerDetector implements MotifDetector {
     List<GameFeatures.MotifOccurrence> occurrences = new ArrayList<>();
 
     for (PositionContext ctx : positions) {
-      String placement = ctx.fen().split(" ")[0];
-      int[][] board = BoardUtils.parsePlacement(placement);
+      int[][] board = BoardUtils.parsePlacement(ctx.fen().split(" ")[0]);
 
       // A skewer is the opposite of a pin: a more valuable piece is in front,
       // and when it moves, a less valuable piece behind is captured.
       List<int[]> skewers = findSkewers(board, !ctx.whiteToMove());
-      String dest = BoardUtils.destinationSquare(ctx.lastMove());
+      List<int[]> landed = BoardUtils.landedSquares(ctx.lastMove(), !ctx.whiteToMove());
       for (int[] skewer : skewers) {
         // skewer = {attackerR, attackerC, frontR, frontC}
         int ar = skewer[0], ac = skewer[1];
-        // Only fire if the skewering piece is the one that just moved.
-        if (dest == null || !BoardUtils.squareName(ar, ac).equals(dest)) continue;
+        // Only fire if the skewering piece is one that just landed.
+        if (!BoardUtils.isLanded(landed, ar, ac)) continue;
         int fr = skewer[2], fc = skewer[3];
         String attacker = BoardUtils.pieceNotation(board[ar][ac], ar, ac);
         String target = BoardUtils.pieceNotation(board[fr][fc], fr, fc);

@@ -1,6 +1,7 @@
 // PIN and CROSS_PIN. Both are built from the same pin scan; a cross-pin is
 // one piece pinned twice.
 
+#include <algorithm>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -122,14 +123,12 @@ class PinDetector : public Detector {
   Motif motif() const override { return Motif::kPin; }
 
   void OnPosition(const Position& position, Findings& out) override {
-    const std::optional<chess::Square> landed = MovedTo(position);
-    if (!landed.has_value()) return;
-
+    const std::vector<chess::Square> landed = LandedOn(position);
     const chess::Board& board = position.board;
     for (const Pin& pin : DetectPins(board, position.side_to_move)) {
-      // Only the pin this move created: the pinning piece is the one that
-      // just landed. A standing pin is not news every ply it persists.
-      if (pin.attacker != *landed) continue;
+      // Only the pin this move created: the pinning piece is one that just
+      // landed. A standing pin is not news every ply it persists.
+      if (std::find(landed.begin(), landed.end(), pin.attacker) == landed.end()) continue;
       Finding finding;
       finding.description = absl::StrCat("Pin detected at move ", position.move_number);
       finding.attacker = PieceNotation(board.at(pin.attacker), pin.attacker);
@@ -145,8 +144,7 @@ class CrossPinDetector : public Detector {
   Motif motif() const override { return Motif::kCrossPin; }
 
   void OnPosition(const Position& position, Findings& out) override {
-    const std::optional<chess::Square> landed = MovedTo(position);
-    if (!landed.has_value()) return;
+    const std::vector<chess::Square> landed = LandedOn(position);
 
     // One piece held on two lines at once — to the king down a file, say,
     // and to a rook down a diagonal. Two pins with the same target and
@@ -163,12 +161,15 @@ class CrossPinDetector : public Detector {
         if (pins[i].target != pins[j].target) continue;
         if (pins[i].attacker == pins[j].attacker) continue;
         // Only when this move made one of the two halves.
-        if (pins[i].attacker != *landed && pins[j].attacker != *landed) continue;
+        const auto made = std::find_if(landed.begin(), landed.end(), [&](chess::Square square) {
+          return square == pins[i].attacker || square == pins[j].attacker;
+        });
+        if (made == landed.end()) continue;
 
         const chess::Board& board = position.board;
         Finding finding;
         finding.description = absl::StrCat("Cross-pin detected at move ", position.move_number);
-        finding.attacker = PieceNotation(board.at(*landed), *landed);
+        finding.attacker = PieceNotation(board.at(*made), *made);
         finding.target = PieceNotation(board.at(pins[i].target), pins[i].target);
         out.Add(position, std::move(finding));
         return;

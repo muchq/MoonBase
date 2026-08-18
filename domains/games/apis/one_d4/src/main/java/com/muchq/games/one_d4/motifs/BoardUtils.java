@@ -1,5 +1,8 @@
 package com.muchq.games.one_d4.motifs;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Shared board analysis utilities for motif detectors and the SAN replay engine ({@code
  * ReplayBoard}). All coordinates use the board array convention where board[0][0] = a8 (rank 8,
@@ -173,14 +176,66 @@ public class BoardUtils {
   }
 
   /**
-   * Extracts the destination square (e.g. "b5") from a SAN move string. Returns null for castling
-   * or unparseable moves.
+   * Every square the move put a piece on, read from the notation.
+   *
+   * <p>Two squares for castling — the king's and the rook's — because the rook lands on a new file
+   * where it can pin, skewer and attack. The old reader returned null for castling with a comment
+   * that the king cannot create a sliding tactic, which is true of the king and false of the rook
+   * beside it. "O-O" names no square, but the pair it moves is fixed, so the notation is enough.
+   *
+   * <p>One square for everything else, including a promotion (where the new piece stands) and an en
+   * passant capture (where the pawn ended up, not where the taken pawn was).
    */
-  static String destinationSquare(String lastMove) {
-    if (lastMove == null) return null;
-    if (lastMove.startsWith("O-O")) return null; // castling — king can't create a sliding tactic
-    String move = lastMove.replaceAll("[+#]|=[QRBN]", "");
-    return move.length() >= 2 ? move.substring(move.length() - 2) : null;
+  public static List<int[]> landedSquares(String san, boolean moverIsWhite) {
+    if (san == null) return List.of();
+    int backRank = moverIsWhite ? 7 : 0; // row 7 is rank 1
+    if (san.startsWith("O-O-O")) {
+      return List.of(new int[] {backRank, 2}, new int[] {backRank, 3}); // king c-file, rook d-file
+    }
+    if (san.startsWith("O-O")) {
+      return List.of(new int[] {backRank, 6}, new int[] {backRank, 5}); // king g-file, rook f-file
+    }
+    String move = san.replaceAll("[+#]|=[QRBN]", "");
+    if (move.length() < 2) return List.of();
+    String square = move.substring(move.length() - 2);
+    char file = square.charAt(0);
+    char rank = square.charAt(1);
+    if (file < 'a' || file > 'h' || rank < '1' || rank > '8') return List.of();
+    return List.of(new int[] {'8' - rank, file - 'a'});
+  }
+
+  /**
+   * The same question asked of two boards rather than of the notation, for callers that have the
+   * boards and not the move: occupied by the mover after, and not before.
+   */
+  public static List<int[]> landedSquares(int[][] before, int[][] after, boolean moverIsWhite) {
+    List<int[]> landed = new ArrayList<>();
+    for (int r = 0; r < 8; r++) {
+      for (int c = 0; c < 8; c++) {
+        int pa = after[r][c];
+        int pb = before[r][c];
+        if (pa != 0 && (pa > 0) == moverIsWhite && (pb == 0 || (pb > 0) != moverIsWhite)) {
+          landed.add(new int[] {r, c});
+        }
+      }
+    }
+    return landed;
+  }
+
+  /** True when {@code landed} holds the square (row, col). */
+  public static boolean isLanded(List<int[]> landed, int row, int col) {
+    for (int[] square : landed) {
+      if (square[0] == row && square[1] == col) return true;
+    }
+    return false;
+  }
+
+  /** True when {@code landed} holds the square named by {@code squareName}, e.g. "f1". */
+  public static boolean isLanded(List<int[]> landed, String square) {
+    for (int[] s : landed) {
+      if (squareName(s[0], s[1]).equals(square)) return true;
+    }
+    return false;
   }
 
   /**

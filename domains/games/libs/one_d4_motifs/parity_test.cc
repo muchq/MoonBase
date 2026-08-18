@@ -151,7 +151,7 @@ std::multiset<std::string>* Parity::golden_ = nullptr;
 
 /// The Java pipeline's own count over this bank, pinned so a regenerated
 /// corpus or golden is loud rather than quiet.
-constexpr int kGoldenRows = 14554;
+constexpr int kGoldenRows = 14558;
 
 /// Cross-pins the Java detector cannot see. It looks for one square found
 /// twice from the same king, which two rays never do, so CROSS_PIN has
@@ -161,7 +161,7 @@ constexpr int kCrossPins = 43;
 TEST_F(Parity, ReadsTheWholeGolden) { EXPECT_EQ(golden_->size(), kGoldenRows); }
 
 TEST_F(Parity, FindsEverythingTheJavaPipelineFinds) {
-  // Nothing lost: 14,554 rows over 500 games and ten detectors, compared
+  // Nothing lost: 14,558 rows over 500 games and ten detectors, compared
   // row for row with no transform in between. Losing one is a port bug.
   const std::vector<std::string> lost = Missing(*golden_, *cpp_);
   EXPECT_THAT(lost, IsEmpty()) << "rows the port stopped producing: " << lost.size() << " of "
