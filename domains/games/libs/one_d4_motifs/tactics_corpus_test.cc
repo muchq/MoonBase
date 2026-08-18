@@ -115,9 +115,9 @@ int Count(const Extracted& extracted, const std::string& motif) {
   return found == extracted.by_motif.end() ? 0 : found->second;
 }
 
-/// Extracted once for the suite: the corpus is 150 games through ten
-/// detectors, and running it per test is the difference between a fast
-/// test and a slow one under the sanitizers.
+/// Extracted once for the suite: 150 games through every detector, and
+/// running it per test is the difference between a fast test and a slow one
+/// under the sanitizers.
 class TacticsCorpus : public testing::Test {
  protected:
   static void SetUpTestSuite() { extracted_ = new Extracted(RunCorpus()); }
@@ -136,18 +136,27 @@ TEST_F(TacticsCorpus, EveryGameExtracts) {
 }
 
 TEST_F(TacticsCorpus, CoversTheMotifsTheWideBankIsThinOn) {
-  // Exact, because the bank is frozen: a detector that quietly stops firing
-  // moves these, and ">0" would not notice.
+  // Every motif, exactly, because the bank is frozen: a detector that
+  // quietly stops firing moves one of these, and ">0" would not notice.
   const Extracted& extracted = corpus();
-  EXPECT_EQ(Count(extracted, "PROMOTION"), 148);
-  EXPECT_EQ(Count(extracted, "PROMOTION_WITH_CHECK"), 69);
-  EXPECT_EQ(Count(extracted, "PROMOTION_WITH_CHECKMATE"), 4);
-  EXPECT_EQ(Count(extracted, "BACK_RANK_MATE"), 15);
-  EXPECT_EQ(Count(extracted, "CROSS_PIN"), 14);
-  EXPECT_EQ(Count(extracted, "ATTACK"), 3773);
-  EXPECT_EQ(Count(extracted, "CHECK"), 1467);
-  EXPECT_EQ(Count(extracted, "PIN"), 877);
-  EXPECT_EQ(Count(extracted, "SKEWER"), 124);
+  const std::map<std::string, int> expected = {
+      {"ATTACK", 3773},
+      {"BACK_RANK_MATE", 7},
+      {"CHECK", 1467},
+      {"CHECKMATE", 92},
+      {"CROSS_PIN", 14},
+      {"DISCOVERED_ATTACK", 911},
+      {"DISCOVERED_CHECK", 27},
+      {"DOUBLE_CHECK", 6},
+      {"OVERLOADED_PIECE", 40},
+      {"PIN", 877},
+      {"PROMOTION", 148},
+      {"PROMOTION_WITH_CHECK", 69},
+      {"PROMOTION_WITH_CHECKMATE", 4},
+      {"SKEWER", 124},
+      {"ZUGZWANG", 9},
+  };
+  EXPECT_EQ(extracted.by_motif, expected);
 }
 
 TEST_F(TacticsCorpus, HoldsNoSmotheredMate) {
@@ -159,7 +168,7 @@ TEST_F(TacticsCorpus, HoldsNoSmotheredMate) {
 
 TEST_F(TacticsCorpus, EveryOccurrenceIsWellFormed) {
   const Extracted& extracted = corpus();
-  EXPECT_EQ(extracted.occurrences, 6491);
+  EXPECT_EQ(extracted.occurrences, 7568);
   // Every row goes to a NOT NULL column or a typed field; these are the
   // invariants the write path would otherwise discover in production.
   EXPECT_TRUE(extracted.malformed.empty()) << absl::StrJoin(extracted.malformed, "\n");

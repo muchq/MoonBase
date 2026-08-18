@@ -1,7 +1,16 @@
-// CHECK, and the checkmating one as the same row with is_mate set.
+// The check family: CHECK, and the two the read path derives from ATTACK
+// rows because nothing has ever stored them.
+//
+// Both stop being heuristics here. The derivations ask how many discovered
+// ATTACK rows happen to name a king, which depends on the discovery scan
+// having produced those rows; these ask the position which pieces are
+// giving check, and which of them this move did not put down.
 
+#include <algorithm>
 #include <memory>
 #include <optional>
+#include <utility>
+#include <vector>
 
 #include "absl/strings/str_cat.h"
 #include "chess.hpp"
@@ -44,8 +53,77 @@ class CheckDetector : public Detector {
   }
 };
 
+/// DISCOVERED_CHECK: a checking piece that is not one the move put down.
+///
+/// Not ClassifyCheck: upstream's givesCheck returns the first kind it
+/// tests, so a knight that checks while uncovering a rook comes back
+/// DIRECT_CHECK and the discovery is lost — which is every double check.
+/// Asking which checkers the move did not place answers both cases with
+/// one question, and takes the landed squares from LandedOn so castling
+/// (two pieces down) is not a special case here either.
+class DiscoveredCheckDetector : public Detector {
+ public:
+  Motif motif() const override { return Motif::kDiscoveredCheck; }
+
+  void OnPosition(const Position& position, Findings& out) override {
+    const chess::Board& board = position.board;
+    if (!board.inCheck()) return;
+
+    const std::vector<chess::Square> landed = LandedOn(position);
+    chess::Bitboard checkers = chess_cpp::facts::Checkers(board, position.side_to_move);
+    chess::Bitboard uncovered;
+    while (checkers) {
+      const chess::Square square(checkers.pop());
+      if (std::find(landed.begin(), landed.end(), square) == landed.end()) {
+        uncovered.set(square.index());
+      }
+    }
+    const std::optional<chess::Square> checker = FirstInScanOrder(uncovered);
+    if (!checker.has_value()) return;
+
+    const chess::Square king = board.kingSq(chess_cpp::ToColor(position.side_to_move));
+    const chess::Move move = position.last->move;
+    Finding finding;
+    finding.description = absl::StrCat("Discovered check at move ", position.move_number);
+    finding.moved_piece =
+        MovedPieceNotation(position.last->before.at(move.from()), move.from(),
+                           landed.empty() ? std::nullopt : std::optional(landed.front()));
+    finding.attacker = PieceNotation(board.at(*checker), *checker);
+    finding.target = PieceNotation(board.at(king), king);
+    finding.is_discovered = true;
+    finding.is_mate = IsCheckmate(position);
+    out.Add(position, std::move(finding));
+  }
+};
+
+/// DOUBLE_CHECK: two pieces giving check at once, so only the king may
+/// move. Counted on the board rather than inferred from how many ATTACK
+/// rows happen to name the king.
+class DoubleCheckDetector : public Detector {
+ public:
+  Motif motif() const override { return Motif::kDoubleCheck; }
+
+  void OnPosition(const Position& position, Findings& out) override {
+    if (!chess_cpp::facts::InDoubleCheck(position.board, position.side_to_move)) return;
+
+    const chess::Square king = position.board.kingSq(chess_cpp::ToColor(position.side_to_move));
+    Finding finding;
+    finding.description = absl::StrCat("Double check at move ", position.move_number);
+    finding.target = PieceNotation(position.board.at(king), king);
+    out.Add(position, std::move(finding));
+  }
+};
+
 }  // namespace
 
 std::unique_ptr<Detector> MakeCheckDetector() { return std::make_unique<CheckDetector>(); }
+
+std::unique_ptr<Detector> MakeDiscoveredCheckDetector() {
+  return std::make_unique<DiscoveredCheckDetector>();
+}
+
+std::unique_ptr<Detector> MakeDoubleCheckDetector() {
+  return std::make_unique<DoubleCheckDetector>();
+}
 
 }  // namespace one_d4

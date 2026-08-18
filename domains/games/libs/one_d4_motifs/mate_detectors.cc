@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include "absl/strings/str_cat.h"
 #include "chess.hpp"
@@ -27,6 +28,41 @@ std::optional<chess::Square> Checker(const chess::Board& board, Side mated) {
   return FirstInScanOrder(chess_cpp::facts::Checkers(board, mated));
 }
 
+/// CHECKMATE, as a row of its own.
+///
+/// The read path has been deriving this from ATTACK rows carrying is_mate,
+/// which works for the WHERE clause and leaves ORDER BY and sequence()
+/// matching nothing, because no detector has ever stored one. Mate is a
+/// property of the position, so it is read from the position.
+class CheckmateDetector : public Detector {
+ public:
+  Motif motif() const override { return Motif::kCheckmate; }
+
+  void OnGameEnd(const Position& final_position, Findings& out) override {
+    if (!IsCheckmate(final_position)) return;
+
+    const chess::Board& board = final_position.board;
+    const Side mated = final_position.side_to_move;
+    const chess::Square king = board.kingSq(chess_cpp::ToColor(mated));
+
+    Finding finding;
+    finding.description = absl::StrCat("Checkmate at move ", final_position.move_number);
+    if (const std::optional<chess::Square> checker = Checker(board, mated); checker.has_value()) {
+      finding.attacker = PieceNotation(board.at(*checker), *checker);
+    }
+    // The piece that moved, which on a discovered mate is not the piece
+    // giving it.
+    const chess::Move move = final_position.last->move;
+    const std::vector<chess::Square> landed = LandedOn(final_position);
+    finding.moved_piece =
+        MovedPieceNotation(final_position.last->before.at(move.from()), move.from(),
+                           landed.empty() ? std::nullopt : std::optional(landed.front()));
+    finding.target = PieceNotation(board.at(king), king);
+    finding.is_mate = true;
+    out.Add(final_position, std::move(finding));
+  }
+};
+
 class BackRankMateDetector : public Detector {
  public:
   Motif motif() const override { return Motif::kBackRankMate; }
@@ -41,7 +77,24 @@ class BackRankMateDetector : public Detector {
     const int back_rank = mated == Side::kWhite ? 0 : 7;
     if (king.index() / 8 != back_rank) return;
 
-    // Its own men in the way on the rank it would step to.
+    // Mated *along* the back rank. Without this the motif fires on any
+    // mate that happens to land on the back rank with a friendly pawn
+    // nearby — a queen or bishop delivering mate from g7 is neither, and
+    // the corpus is full of them.
+    //
+    // Any checker on that rank, not whichever the scan reaches first: on a
+    // double check the scan order runs rank 8 to rank 1, so a black king's
+    // back-rank checker is found first and a white king's last, and the two
+    // mirror-image mates would classify differently.
+    std::optional<chess::Square> checker;
+    chess::Bitboard checkers = chess_cpp::facts::Checkers(board, mated);
+    while (checkers) {
+      const chess::Square square(checkers.pop());
+      if (square.index() / 8 == back_rank) checker = square;
+    }
+    if (!checker.has_value()) return;
+
+    // ...and shut in by its own men rather than only by the attacker.
     const int escape_rank = mated == Side::kWhite ? 1 : 6;
     bool blocked = false;
     for (int file = ColOf(king) - 1; file <= ColOf(king) + 1; ++file) {
@@ -52,9 +105,7 @@ class BackRankMateDetector : public Detector {
 
     Finding finding;
     finding.description = absl::StrCat("Back rank mate at move ", final_position.move_number);
-    if (const std::optional<chess::Square> checker = Checker(board, mated); checker.has_value()) {
-      finding.attacker = PieceNotation(board.at(*checker), *checker);
-    }
+    finding.attacker = PieceNotation(board.at(*checker), *checker);
     finding.target = PieceNotation(board.at(king), king);
     finding.is_mate = true;
     out.Add(final_position, std::move(finding));
@@ -101,6 +152,8 @@ class SmotheredMateDetector : public Detector {
 };
 
 }  // namespace
+
+std::unique_ptr<Detector> MakeCheckmateDetector() { return std::make_unique<CheckmateDetector>(); }
 
 std::unique_ptr<Detector> MakeBackRankMateDetector() {
   return std::make_unique<BackRankMateDetector>();

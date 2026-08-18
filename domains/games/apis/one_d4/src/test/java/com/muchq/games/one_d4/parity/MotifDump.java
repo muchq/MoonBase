@@ -63,6 +63,7 @@ public final class MotifDump {
         String.format("%04d", occ.ply()),
         occ.side(),
         String.valueOf(occ.moveNumber()),
+        occ.description(),
         or(occ.attacker()),
         or(occ.target()),
         or(occ.movedPiece()),

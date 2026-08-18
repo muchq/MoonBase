@@ -17,11 +17,16 @@ std::unique_ptr<Detector> MakeCrossPinDetector();
 std::unique_ptr<Detector> MakeSkewerDetector();
 std::unique_ptr<Detector> MakeAttackDetector();
 std::unique_ptr<Detector> MakeCheckDetector();
+std::unique_ptr<Detector> MakeDiscoveredCheckDetector();
+std::unique_ptr<Detector> MakeDoubleCheckDetector();
 std::unique_ptr<Detector> MakePromotionDetector();
 std::unique_ptr<Detector> MakePromotionWithCheckDetector();
 std::unique_ptr<Detector> MakePromotionWithCheckmateDetector();
+std::unique_ptr<Detector> MakeCheckmateDetector();
 std::unique_ptr<Detector> MakeBackRankMateDetector();
 std::unique_ptr<Detector> MakeSmotheredMateDetector();
+std::unique_ptr<Detector> MakeZugzwangDetector();
+std::unique_ptr<Detector> MakeOverloadedPieceDetector();
 
 /// What indexing runs. The single definition — two processes assembling
 /// different sets is two disagreeing indexes.

@@ -15,6 +15,9 @@ import java.util.List;
  * <ol>
  *   <li>The move ends with '#' (checkmate).
  *   <li>The checkmated king is on its back rank (row 7 for white king, row 0 for black king).
+ *   <li>The checking piece is on that same back rank, so the mate is delivered along it. A queen or
+ *       bishop giving mate from g7 is a support mate, not this one — ten of the thirteen rows in
+ *       the parity corpus were exactly that.
  *   <li>At least one of the escape squares on the adjacent rank is occupied by a friendly piece.
  * </ol>
  */
@@ -45,7 +48,25 @@ public class BackRankMateDetector implements MotifDetector {
     int[] kingPos = BoardUtils.findKing(board, loserIsWhite);
     if (kingPos[0] == -1 || kingPos[0] != backRankRow) return occurrences;
 
-    // Check that at least one adjacent-rank escape square is blocked by own piece
+    // Mated *along* the back rank. Without this the motif fires on any mate that lands on the
+    // back rank with a friendly pawn nearby: a queen or bishop giving mate from g7 is neither a
+    // back-rank mate nor rare, and ten of this corpus's thirteen rows were exactly that.
+    // Any checker on that rank, not whichever the scan reaches first: on a double check the scan
+    // runs rank 8 to rank 1, so a black king's back-rank checker is found first and a white king's
+    // last, and the two mirror-image mates would classify differently.
+    boolean moverIsWhite = !ctx.whiteToMove();
+    int[] checker = null;
+    for (int c = 0; c < 8; c++) {
+      int piece = board[backRankRow][c];
+      if (piece == 0 || (piece > 0) != moverIsWhite) continue;
+      if (BoardUtils.pieceAttacks(board, backRankRow, c, kingPos[0], kingPos[1])) {
+        checker = new int[] {backRankRow, c};
+        break;
+      }
+    }
+    if (checker == null) return occurrences;
+
+    // ...and shut in by its own men rather than only by the attacker.
     int escapeRankRow = loserIsWhite ? 6 : 1; // rank 2 for white (row 6), rank 7 for black (row 1)
     boolean blockedByOwnPiece = false;
     for (int dc = -1; dc <= 1; dc++) {
@@ -59,12 +80,8 @@ public class BackRankMateDetector implements MotifDetector {
     }
     if (!blockedByOwnPiece) return occurrences;
 
-    boolean moverIsWhite = !ctx.whiteToMove();
-    int[] checker = BoardUtils.findCheckingPiece(board, moverIsWhite);
     String attacker =
-        checker != null
-            ? BoardUtils.pieceNotation(board[checker[0]][checker[1]], checker[0], checker[1])
-            : null;
+        BoardUtils.pieceNotation(board[checker[0]][checker[1]], checker[0], checker[1]);
     String target = BoardUtils.pieceNotation(board[kingPos[0]][kingPos[1]], kingPos[0], kingPos[1]);
 
     GameFeatures.MotifOccurrence occ =

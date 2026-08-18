@@ -88,6 +88,11 @@ bool SlidesAlong(chess::Piece piece, Direction direction);
 /// `piece.color() == ToColor(side)` reads the same and answers differently.
 bool BelongsTo(chess::Piece piece, chess_cpp::Side side);
 
+/// What the cheapest piece of `by` attacking `square` is worth, or nullopt
+/// when nothing of theirs attacks it. The piece that would actually take.
+std::optional<int> CheapestAttackerValue(const chess::Board& board, chess_cpp::Side by,
+                                         chess::Square square);
+
 /// The first set square in scan order.
 std::optional<chess::Square> FirstInScanOrder(chess::Bitboard squares);
 
