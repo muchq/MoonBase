@@ -547,35 +547,35 @@ TEST(IndexRun, FailsWhenTheMonthCannotBeRecorded) {
   EXPECT_EQ(run.Execute(AJob(), lease).status().code(), absl::StatusCode::kDataLoss);
 }
 
-TEST(IndexRun, AsksBeforeRecordingAMonthThatWroteNothing) {
-  // Every game filtered out, so no batch is ever written — and the period
-  // row carries no fence of its own. Without an empty write to ask the
-  // question, this stamps a month over whoever holds the range now.
+TEST(IndexRun, StopsWhenTheMonthItReadIsNoLongerItsToRecord) {
+  // A month whose games were all filtered writes no batch at all, so the
+  // period row's own fence is the only thing that can refuse it. Treated
+  // as an error rather than a takeover, the run would report FAILED for a
+  // range somebody else is working.
   FakeArchive archive;
   ArchivedGame bullet = AGame("g-bullet");
   bullet.time_class = "bullet";
   archive.months["2026-01"] = {bullet};
+  archive.months["2026-02"] = {AGame("g2")};
   FakeSink sink;
-  sink.status = absl::FailedPreconditionError("the request names another owner");
+  sink.month_status = absl::FailedPreconditionError("the request names another owner");
   FakeLease lease;
 
-  IndexJob job = AJob();
+  IndexJob job = AJob("2026-01", "2026-02");
   job.exclude_bullet = true;
   IndexRun run(archive, sink, Options());
   const absl::StatusOr<RunReport> report = run.Execute(job, lease);
 
   ASSERT_TRUE(report.ok()) << report.status();
   EXPECT_TRUE(report->lease_lost);
-  EXPECT_THAT(sink.periods, IsEmpty());
+  EXPECT_THAT(archive.asked, ElementsAre("2026-01")) << "the second month is somebody else's now";
 }
 
-TEST(IndexRun, AsksBeforeRecordingAQuietMonth) {
-  // Same hole by the other road: an empty archive writes no games either,
-  // and the fetch that found it can easily outlive a lease.
+TEST(IndexRun, StopsWhenAQuietMonthIsNoLongerItsToRecord) {
   FakeArchive archive;
   archive.months["2026-01"] = {};
   FakeSink sink;
-  sink.status = absl::FailedPreconditionError("the request names another owner");
+  sink.month_status = absl::FailedPreconditionError("the request names another owner");
   FakeLease lease;
 
   IndexRun run(archive, sink, Options());
@@ -792,6 +792,49 @@ TEST(IndexRun, RetriesATitleLookupThatFailed) {
 
   EXPECT_THAT(archive.looked_up, ElementsAre("alice", "bob", "alice", "bob"))
       << "a month is where the giving-up resets";
+}
+
+TEST(IndexRun, StopsPartWayThroughAMonthWhenAskedTo) {
+  // A month is where the time goes. A shutdown that waits out four
+  // hundred games is one the supervisor kills instead, and a killed
+  // process hands nothing back — the claim sits until the lease expires.
+  FakeArchive archive;
+  for (int i = 0; i < 6; ++i) archive.months["2026-01"].push_back(AGame(absl::StrCat("g", i)));
+  FakeSink sink;
+  FakeLease lease;
+
+  int seen = 0;
+  IndexRun::Options options = Options();
+  options.batch_size = 2;
+  options.stopping = [&seen] { return ++seen > 3; };
+  IndexRun run(archive, sink, options);
+  const absl::StatusOr<RunReport> report = run.Execute(AJob(), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  ASSERT_TRUE(report->stopped.has_value());
+  EXPECT_EQ(*report->stopped, Stopped::kShutdown);
+  EXPECT_LT(report->games_indexed, 6) << "it worked to the end of the month anyway";
+  EXPECT_THAT(sink.periods, IsEmpty()) << "a month cut short is not a month indexed";
+}
+
+TEST(IndexRun, KeepsWhatItHadAlreadyExtractedWhenItStops) {
+  // The games are good; only the month is unfinished. Dropping the batch
+  // would re-extract them on the next attempt for nothing.
+  FakeArchive archive;
+  for (int i = 0; i < 4; ++i) archive.months["2026-01"].push_back(AGame(absl::StrCat("g", i)));
+  FakeSink sink;
+  FakeLease lease;
+
+  int seen = 0;
+  IndexRun::Options options = Options();
+  options.batch_size = 100;
+  options.stopping = [&seen] { return ++seen > 2; };
+  IndexRun run(archive, sink, options);
+  const absl::StatusOr<RunReport> report = run.Execute(AJob(), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  EXPECT_EQ(*report->stopped, Stopped::kShutdown);
+  EXPECT_THAT(sink.written, Not(IsEmpty())) << "the extracted games were thrown away";
 }
 
 TEST(IndexRun, LeavesOutBulletWhenTheRequestSaysTo) {

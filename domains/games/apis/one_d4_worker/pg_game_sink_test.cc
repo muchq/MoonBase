@@ -389,6 +389,31 @@ TEST_F(PgGameSinkTest, RecordsTheMonthAsThePeriodCacheReadsIt) {
             "2023-11-14 22:13:20");
 }
 
+TEST_F(PgGameSinkTest, RefusesToRecordAMonthForARequestItNoLongerOwns) {
+  // The period row is keyed by (player, platform, month) with no request
+  // in it, so nothing about the row itself would refuse a stale writer —
+  // it would simply overwrite the replacement's period.
+  ASSERT_TRUE(client_
+                  ->Exec("UPDATE indexing_requests SET owner_id = 'worker-2' WHERE id = $1"
+                         " RETURNING id",
+                         {kRequest})
+                  .ok());
+
+  EXPECT_EQ(sink_->RecordMonth(AMonth()).code(), absl::StatusCode::kFailedPrecondition);
+  EXPECT_EQ(One("SELECT count(*)::text FROM indexed_periods"), "0");
+}
+
+TEST_F(PgGameSinkTest, RefusesToRecordAMonthOnAnExpiredLease) {
+  ASSERT_TRUE(client_
+                  ->Exec("UPDATE indexing_requests SET lease_expires_at = NOW() -"
+                         " INTERVAL '1 minute' WHERE id = $1 RETURNING id",
+                         {kRequest})
+                  .ok());
+
+  EXPECT_EQ(sink_->RecordMonth(AMonth()).code(), absl::StatusCode::kFailedPrecondition);
+  EXPECT_EQ(One("SELECT count(*)::text FROM indexed_periods"), "0");
+}
+
 TEST_F(PgGameSinkTest, RereadingAMonthUpdatesItsPeriodRatherThanAddingOne) {
   ASSERT_TRUE(sink_->RecordMonth(AMonth()).ok());
   IndexedMonth again = AMonth();
@@ -468,18 +493,11 @@ TEST_F(PgGameSinkTest, AMonthWithAndWithoutBulletAreTwoPeriods) {
   EXPECT_EQ(One("SELECT games_count::text FROM indexed_periods WHERE exclude_bullet"), "7");
 }
 
-TEST_F(PgGameSinkTest, AnEmptyBatchStillAsksWhoOwnsTheRequest) {
-  // The caller uses an empty write purely to ask the question, because the
-  // period row that follows it carries no fence of its own.
+TEST_F(PgGameSinkTest, AnEmptyBatchIsNotAWrite) {
+  // Nothing to write and nothing to fence: the period row that follows
+  // asks its own question.
   EXPECT_TRUE(sink_->Write({}).ok());
   EXPECT_EQ(One("SELECT count(*)::text FROM game_features"), "0");
-
-  ASSERT_TRUE(client_
-                  ->Exec("UPDATE indexing_requests SET owner_id = 'worker-2' WHERE id = $1"
-                         " RETURNING id",
-                         {kRequest})
-                  .ok());
-  EXPECT_EQ(sink_->Write({}).code(), absl::StatusCode::kFailedPrecondition);
 }
 
 TEST_F(PgGameSinkTest, TakesTheRequestRowRatherThanReadingIt) {
@@ -489,12 +507,12 @@ TEST_F(PgGameSinkTest, TakesTheRequestRowRatherThanReadingIt) {
   // the check and the writes, and the batch would land against a request
   // this worker had already lost.
   //
-  // Asked with an empty batch, which is the case that needs the lock and
-  // the only one that can see it. A batch with games in it inserts into
+  // Driven through RecordMonth, which is the case that needs the lock and
+  // the only one that can see it. A batch of games inserts into
   // game_features, whose foreign key takes a KEY SHARE on the same request
-  // row, so it waits behind a rival whether the fence locks or not. The
-  // empty write takes no such lock — and it is the write whose answer
-  // gates the unfenced period row.
+  // row, so it waits behind a rival whether the fence locks or not.
+  // indexed_periods has no such key — nothing but this lock orders the
+  // period write against a takeover.
   pg::Client rival(conninfo_);
 
   absl::Notification held;
@@ -514,7 +532,7 @@ TEST_F(PgGameSinkTest, TakesTheRequestRowRatherThanReadingIt) {
   held.WaitForNotification();
   std::atomic<bool> answered{false};
   std::thread asker([&] {
-    EXPECT_TRUE(sink_->Write({}).ok());
+    EXPECT_TRUE(sink_->RecordMonth(AMonth()).ok());
     answered = true;
   });
   // Long enough that a fence which only read would have answered by now.

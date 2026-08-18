@@ -125,8 +125,8 @@ std::string PinTypeOf(const one_d4::MotifOccurrence& occurrence) {
 }  // namespace
 
 absl::Status PgGameSink::Write(absl::Span<const IndexedGame> games) {
-  // An empty batch still asks. See IndexRun::Flush: the answer is what
-  // gates the period row, which has no fence of its own.
+  if (games.empty()) return absl::OkStatus();
+
   std::vector<const IndexedGame*> ordered;
   ordered.reserve(games.size());
   for (const IndexedGame& game : games) ordered.push_back(&game);
@@ -194,10 +194,30 @@ absl::StatusOr<std::optional<int>> PgGameSink::MonthAlreadyIndexed(const Indexed
 }
 
 absl::Status PgGameSink::RecordMonth(const IndexedMonth& month) {
-  const absl::StatusOr<pg::Result> upserted = client_.Exec(
-      kUpsertPeriod, {month.player, month.platform, month.month, std::to_string(month.fetched_at),
-                      Bool(month.complete), Number(month.games), Bool(month.exclude_bullet)});
-  return upserted.status();
+  bool still_owner = false;
+  const absl::Status written = client_.InTransaction([&](pg::Transaction& tx) -> absl::Status {
+    // In the transaction that writes, not before it. The upsert below
+    // carries no request to be refused by, so a check that commits
+    // separately leaves a window a takeover fits inside — and what lands
+    // in it is a period claiming a month holds the games this run found
+    // rather than the ones its replacement did.
+    const absl::StatusOr<pg::Result> owner = tx.Exec(kFence, {request_id_, owner_});
+    if (!owner.ok()) return owner.status();
+    if (owner->rows() == 0) return absl::OkStatus();
+    still_owner = true;
+
+    const absl::StatusOr<pg::Result> upserted = tx.Exec(
+        kUpsertPeriod, {month.player, month.platform, month.month, std::to_string(month.fetched_at),
+                        Bool(month.complete), Number(month.games), Bool(month.exclude_bullet)});
+    return upserted.status();
+  });
+
+  if (!written.ok()) return written;
+  if (!still_owner) {
+    return absl::FailedPreconditionError(
+        absl::StrCat("request ", request_id_, " no longer names ", owner_));
+  }
+  return absl::OkStatus();
 }
 
 }  // namespace one_d4_worker

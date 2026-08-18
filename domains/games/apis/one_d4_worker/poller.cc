@@ -5,12 +5,18 @@
 #include <utility>
 
 #include "absl/base/thread_annotations.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/time/clock.h"
 
 namespace one_d4_worker {
 namespace {
+
+/// What a failed run stores in `indexing_requests.error_message`, which
+/// the API returns. Verbatim from the Java worker, so the two report a
+/// failure the same way.
+constexpr char kInternalFailure[] = "Indexing failed due to an internal error";
 
 /// Holds a claim open for as long as a run needs it.
 ///
@@ -152,8 +158,11 @@ absl::StatusOr<bool> Poller::PollOnce() {
   }
 
   if (!report.ok()) {
-    return Finish(job, RunOutcome::kFailed,
-                  queue_.Fail(job.id, options_.owner, report.status().message()));
+    // The cause goes to the log, not to the column. error_message is
+    // handed back by the API, and a chess.com body or a libpq diagnostic
+    // in there is an internal detail told to whoever asked for the index.
+    LOG(ERROR) << "Indexing request " << job.id << " failed: " << report.status();
+    return Finish(job, RunOutcome::kFailed, queue_.Fail(job.id, options_.owner, kInternalFailure));
   }
 
   if (report->stopped.has_value()) {

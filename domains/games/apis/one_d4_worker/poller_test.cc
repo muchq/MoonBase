@@ -135,7 +135,10 @@ TEST(Poller, FailsAJobThatRaised) {
       Options());
 
   ASSERT_TRUE(poller.PollOnce().ok());
-  EXPECT_THAT(queue.calls, ElementsAre("fail job-1 chess.com said no"));
+  // The cause is logged, not stored: error_message is handed back by the
+  // API, so a chess.com body or a libpq diagnostic in there is an
+  // internal detail told to whoever asked for the index.
+  EXPECT_THAT(queue.calls, ElementsAre("fail job-1 Indexing failed due to an internal error"));
   EXPECT_EQ(poller.last_outcome(), RunOutcome::kFailed);
 }
 

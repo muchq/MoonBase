@@ -50,6 +50,7 @@ cc_library(
         ":job",
         ":queue",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/synchronization",
@@ -113,6 +114,8 @@ cc_test(
     data = [
         "pg_game_sink_test.cc",
         "pg_queue_test.cc",
+        "poller.cc",
+        "//domains/games/apis/one_d4:worker_metric_names",
         "//domains/games/apis/one_d4:worker_schema_sources",
     ],
     deps = [

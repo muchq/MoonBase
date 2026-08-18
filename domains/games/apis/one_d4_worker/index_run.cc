@@ -60,12 +60,7 @@ RunObserver& IndexRun::observer() {
 }
 
 absl::Status IndexRun::Flush(std::vector<IndexedGame>& batch) {
-  // No early return on an empty batch. An empty write writes nothing but
-  // still asks the question, and the answer is what gates RecordMonth,
-  // which carries no fence of its own. A month whose games were all
-  // bullet-filtered, or whose count is an exact multiple of batch_size,
-  // arrives here empty — and skipping the question there is a hole a
-  // takeover fits through.
+  if (batch.empty()) return absl::OkStatus();
   const absl::Status written = sink_.Write(batch);
   if (written.ok()) batch.clear();
   return written;
@@ -96,9 +91,10 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
 
   RunReport report;
   std::vector<IndexedGame> batch;
+  const auto stopping = [this] { return options_.stopping && options_.stopping(); };
 
   for (const YearMonth month : *months) {
-    if (options_.stopping && options_.stopping()) {
+    if (stopping()) {
       report.stopped = Stopped::kShutdown;
       return report;
     }
@@ -142,18 +138,11 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
       // month with no period row is indistinguishable from one retention
       // swept, and the cache would miss on it forever.
       observer().ArchiveFetched("no_archive");
-      // Ownership first, and asked of the sink rather than the lease: the
-      // fetch above can outlive a lease, and a period row written over a
-      // month a replacement already indexed properly would cache it as
-      // holding zero games.
-      if (const absl::Status written = Flush(batch); !written.ok()) {
-        if (!absl::IsFailedPrecondition(written)) return written;
-        report.lease_lost = true;
-        return report;
-      }
       if (const absl::Status recorded = RecordMonth(job, month, fetched_at, 0, true);
           !recorded.ok()) {
-        return recorded;
+        if (!absl::IsFailedPrecondition(recorded)) return recorded;
+        report.lease_lost = true;
+        return report;
       }
       observer().MonthFinished("empty", 0);
       continue;
@@ -205,6 +194,21 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
       ++month_count;
       ++report.games_indexed;
 
+      // Checked here as well as between months, because a month is where
+      // the time goes: four hundred games is minutes of work, and a
+      // shutdown that waits it out is one the supervisor kills instead —
+      // which strands the claim until the lease expires rather than
+      // handing it straight back.
+      if (stopping()) {
+        if (const absl::Status written = Flush(batch); !written.ok()) {
+          if (!absl::IsFailedPrecondition(written)) return written;
+          report.lease_lost = true;
+          return report;
+        }
+        report.stopped = Stopped::kShutdown;
+        return report;
+      }
+
       if (static_cast<int>(batch.size()) >= options_.batch_size) {
         // Re-checked per batch, not per month: a month of four hundred
         // games outlives a lease that a stalled run stopped renewing.
@@ -233,7 +237,9 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
     }
     if (const absl::Status recorded = RecordMonth(job, month, fetched_at, month_count, complete);
         !recorded.ok()) {
-      return recorded;
+      if (!absl::IsFailedPrecondition(recorded)) return recorded;
+      report.lease_lost = true;
+      return report;
     }
     if (!lease.Report(report.games_indexed)) {
       report.lease_lost = true;

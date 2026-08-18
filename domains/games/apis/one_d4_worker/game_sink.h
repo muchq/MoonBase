@@ -92,10 +92,14 @@ class GameSink {
 
   /// Records that a month was read.
   ///
-  /// Unfenced, because indexed_periods is keyed by (player, platform,
-  /// month) and has no request to condition on. What keeps it safe is
-  /// order: it runs after a write that checked ownership, so a run that
-  /// lost the lease never reaches it.
+  /// Fenced on the same terms as Write, and for a sharper reason: the row
+  /// is keyed by (player, platform, month) with no request in it, so a
+  /// stale writer would overwrite a replacement's period rather than be
+  /// refused by a key. Ordering alone does not close that — it proves
+  /// ownership as of the previous transaction's commit, and the takeover
+  /// fits in the gap after it.
+  ///
+  /// FailedPrecondition means the fence refused, exactly as in Write.
   virtual absl::Status RecordMonth(const IndexedMonth& month) = 0;
 };
 
