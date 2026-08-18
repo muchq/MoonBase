@@ -68,8 +68,12 @@ int main() {
     return 1;
   }
 
-  futility::otel::OtelConfig otel_config{.service_name = "one_d4_worker",
-                                         .service_version = "1.0.0"};
+  futility::otel::OtelConfig otel_config{
+      .service_name = "one_d4_worker",
+      .service_version = "1.0.0",
+      // An index run takes minutes and a month holds hundreds of games.
+      // On the SDK defaults both histograms are one overflow bucket.
+      .histogram_bounds = one_d4_worker::WorkerMetrics::HistogramBounds()};
   futility::otel::OtelProvider otel_provider(otel_config);
   futility::otel::MetricsRecorder recorder("one_d4_worker");
   one_d4_worker::WorkerMetrics metrics(recorder);

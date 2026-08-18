@@ -303,7 +303,10 @@ cc_test(
     name = "metrics_test",
     size = "small",
     srcs = ["metrics_test.cc"],
-    data = ["//domains/games/apis/one_d4:worker_metric_names"],
+    data = [
+        "metrics.cc",
+        "//domains/games/apis/one_d4:worker_metric_names",
+    ],
     deps = [
         ":metrics",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",

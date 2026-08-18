@@ -38,10 +38,22 @@ void WorkerMetrics::Declare() {
   }
 }
 
+std::map<std::string, std::vector<double>> WorkerMetrics::HistogramBounds() {
+  return {
+      {kRunDurationMetric, {std::begin(kRunDurationBounds), std::end(kRunDurationBounds)}},
+      {kGamesPerMonthMetric, {std::begin(kGamesPerMonthBounds), std::end(kGamesPerMonthBounds)}}};
+}
+
 void WorkerMetrics::RunFinished(RunOutcome outcome, absl::Duration elapsed) {
   const Labels labels = With("outcome", std::string(ToString(outcome)));
   metrics_.RecordCounter(kRunsMetric, 1, labels);
-  metrics_.RecordLatency(kRunDurationMetric, absl::ToChronoMicroseconds(elapsed), labels);
+  // RecordDistribution, not RecordLatency: RecordLatency appends
+  // _microseconds to the instrument name, which would export this as
+  // index_run_duration_micros_microseconds — a name the Java worker does
+  // not write and prom_proxy does not query — and hand it the shared HTTP
+  // bucket view, whose top finite bound is ten seconds.
+  metrics_.RecordDistribution(kRunDurationMetric,
+                              static_cast<double>(absl::ToInt64Microseconds(elapsed)), labels);
 }
 
 void WorkerMetrics::ArchiveFetched(std::string_view result) {

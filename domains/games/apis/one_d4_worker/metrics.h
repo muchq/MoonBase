@@ -1,8 +1,10 @@
 #ifndef DOMAINS_GAMES_APIS_ONE_D4_WORKER_METRICS_H
 #define DOMAINS_GAMES_APIS_ONE_D4_WORKER_METRICS_H
 
+#include <map>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "absl/time/time.h"
 #include "domains/games/apis/one_d4_worker/index_run.h"
@@ -24,6 +26,25 @@ inline constexpr char kMotifOccurrencesMetric[] = "motif_occurrences";
 inline constexpr char kRunDurationMetric[] = "index_run_duration_micros";
 inline constexpr char kGamesPerMonthMetric[] = "index_games_per_month";
 
+/// Bucket bounds for kRunDurationMetric, in microseconds, spanning a
+/// millisecond to six hours — IndexWorker.RUN_DURATION_BOUNDS, and pinned
+/// equal to it by metrics_test.
+///
+/// The shared default set tops out at 10ms, which no index run has ever
+/// finished inside. Every observation would land in the overflow bucket,
+/// and histogram_quantile answers the highest *finite* bound when the rank
+/// falls there — so a p95 over runs that all take minutes reads a flat
+/// 10000. A broken histogram that looks like a fast one.
+inline constexpr double kRunDurationBounds[] = {
+    1'000,         10'000,         100'000,       1'000'000,   5'000'000,
+    30'000'000,    60'000'000,     300'000'000,   900'000'000, 1'800'000'000,
+    3'600'000'000, 10'800'000'000, 21'600'000'000};
+
+/// Bucket bounds for kGamesPerMonthMetric, in games.
+/// IndexWorker.GAMES_PER_MONTH_BOUNDS.
+inline constexpr double kGamesPerMonthBounds[] = {1,   2,   5,   10,  25,    50,
+                                                  100, 200, 400, 800, 1'600, 3'200};
+
 /// Which worker wrote a series. The whole point of running two against one
 /// table is being able to tell them apart when one of them is wrong.
 inline constexpr char kIndexerLabel[] = "indexer";
@@ -43,6 +64,9 @@ class WorkerMetrics : public RunObserver {
   void Declare();
 
   void RunFinished(RunOutcome outcome, absl::Duration elapsed);
+
+  /// The bounds this worker's two histograms need, for OtelConfig.
+  static std::map<std::string, std::vector<double>> HistogramBounds();
 
   // RunObserver.
   void ArchiveFetched(std::string_view result) override;

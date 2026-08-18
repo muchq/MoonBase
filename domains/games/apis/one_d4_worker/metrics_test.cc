@@ -3,10 +3,13 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <fstream>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "absl/strings/str_cat.h"
 #include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
@@ -157,6 +160,60 @@ TEST(WorkerMetrics, WritesTheSeriesTheJavaWorkerWrites) {
     EXPECT_THAT(java, ::testing::HasSubstr(absl::StrCat("\"", name, "\"")))
         << name << " is not a name IndexWorker.java uses";
   }
+}
+
+/// The numbers in a Java `static final double[] NAME = { ... };`.
+std::vector<double> JavaBounds(const std::string& name) {
+  const std::string java = JavaSource();
+  const auto start = java.find(name + " = {");
+  EXPECT_NE(start, std::string::npos) << name << " is gone from IndexWorker";
+  if (start == std::string::npos) return {};
+  const std::string body = java.substr(start, java.find("};", start) - start);
+
+  std::vector<double> bounds;
+  const std::regex number(R"(([0-9][0-9_]*)L?)");
+  for (std::sregex_iterator it(body.begin(), body.end(), number), end; it != end; ++it) {
+    std::string digits = (*it)[1];
+    digits.erase(std::remove(digits.begin(), digits.end(), '_'), digits.end());
+    bounds.push_back(std::stod(digits));
+  }
+  return bounds;
+}
+
+TEST(WorkerMetrics, MeasuresARunOnTheSameBucketsTheJavaWorkerDoes) {
+  // One name, two processes, one histogram. Two layouts under it makes any
+  // quantile across them a comparison of nothing — and on the shared HTTP
+  // default the top finite bound is ten seconds, which no index run has
+  // ever finished inside: every observation lands in +Inf and the p95
+  // reads a flat 10ms forever.
+  const std::vector<double> java = JavaBounds("RUN_DURATION_BOUNDS");
+  ASSERT_GE(java.size(), 10u) << "the bounds were not read out of IndexWorker";
+  EXPECT_EQ(WorkerMetrics::HistogramBounds()[kRunDurationMetric], java);
+}
+
+TEST(WorkerMetrics, MeasuresAMonthOnTheSameBucketsToo) {
+  const std::vector<double> java = JavaBounds("GAMES_PER_MONTH_BOUNDS");
+  ASSERT_GE(java.size(), 10u) << "the bounds were not read out of IndexWorker";
+  EXPECT_EQ(WorkerMetrics::HistogramBounds()[kGamesPerMonthMetric], java);
+}
+
+TEST(WorkerMetrics, RecordsTheRunDurationUnderItsOwnNameAndNotARenamedOne) {
+  // MetricsRecorder::RecordLatency appends _microseconds to the instrument
+  // name — which would export this as index_run_duration_micros_microseconds,
+  // a name the Java worker does not write and prom_proxy does not query,
+  // and hand it the shared HTTP bucket view as a bonus. The distribution
+  // form keeps the name. Checked in the source because the capturing
+  // recorder sees the name before the exporter renames it.
+  std::ifstream file("domains/games/apis/one_d4_worker/metrics.cc");
+  ASSERT_TRUE(file.good()) << "metrics.cc is not where this test looks";
+  std::ostringstream contents;
+  contents << file.rdbuf();
+  const std::string source = contents.str();
+
+  EXPECT_NE(source.find("RecordDistribution(kRunDurationMetric"), std::string::npos)
+      << "the run duration is no longer recorded through the name-preserving call";
+  EXPECT_EQ(source.find("RecordLatency("), std::string::npos)
+      << "RecordLatency renames the instrument; these series are shared with Java";
 }
 
 TEST(WorkerMetrics, SpellsTheRunOutcomesTheJavaWorkerSpells) {
