@@ -28,8 +28,6 @@
 0002	DISCOVERED_ATTACK	0094	black	47	Discovered attack at move 47	rf6	Pf3	pf4e3	1	0	-
 0002	DISCOVERED_ATTACK	0109	white	55	Discovered attack at move 55	Qg2	rb2	Ne2f4	1	0	-
 0002	DISCOVERED_ATTACK	0113	white	57	Discovered attack at move 57	Rd1	qh1	Kf1e2	1	0	-
-0002	OVERLOADED_PIECE	0060	black	30	Overloaded piece at move 30	Pg2	Pf3	-	0	0	-
-0002	OVERLOADED_PIECE	0060	black	30	Overloaded piece at move 30	Pg2	Ph3	-	0	0	-
 0003	DISCOVERED_ATTACK	0010	black	5	Discovered attack at move 5	bg7	Pd4	nf6e4	1	0	-
 0003	DISCOVERED_ATTACK	0014	black	7	Discovered attack at move 7	qd8	Ng5	pe7e6	1	0	-
 0003	DISCOVERED_ATTACK	0030	black	15	Discovered attack at move 15	ra8	Pa3	pa5b4	1	0	-
@@ -50,8 +48,6 @@
 0004	DISCOVERED_ATTACK	0105	white	53	Discovered attack at move 53	Rf7	pf3	Bf4d6	1	0	-
 0005	DISCOVERED_ATTACK	0012	black	6	Discovered attack at move 6	qd8	Pd2	pd7c6	1	0	-
 0005	DISCOVERED_ATTACK	0024	black	12	Discovered attack at move 12	rd8	Pd3	nd7c5	1	0	-
-0005	OVERLOADED_PIECE	0050	black	25	Overloaded piece at move 25	Pg2	Nf3	-	0	0	-
-0005	OVERLOADED_PIECE	0050	black	25	Overloaded piece at move 25	Pg2	Ph3	-	0	0	-
 0006	DISCOVERED_ATTACK	0021	white	11	Discovered attack at move 11	Bc1	ph6	Nd2f1	1	0	-
 0006	DISCOVERED_ATTACK	0025	white	13	Discovered attack at move 13	Re1	pe5	Pe4d5	1	0	-
 0006	DISCOVERED_ATTACK	0034	black	17	Discovered attack at move 17	be6	Pa2	nd5e7	1	0	-
@@ -68,10 +64,6 @@
 0007	DISCOVERED_ATTACK	0056	black	28	Discovered attack at move 28	bh7	Be4	qf5d7	1	0	-
 0007	DISCOVERED_ATTACK	0059	white	30	Discovered attack at move 30	Qg3	pg7	Pg6f7	1	0	-
 0007	DISCOVERED_ATTACK	0065	white	33	Discovered attack at move 33	Qg3	pg7	Ng6e7	1	0	-
-0007	OVERLOADED_PIECE	0020	black	10	Overloaded piece at move 10	Pd3	Bc4	-	0	0	-
-0007	OVERLOADED_PIECE	0020	black	10	Overloaded piece at move 10	Pd3	Pe4	-	0	0	-
-0007	OVERLOADED_PIECE	0051	white	26	Overloaded piece at move 26	pg7	ph6	-	0	0	-
-0007	OVERLOADED_PIECE	0051	white	26	Overloaded piece at move 26	pg7	qf6	-	0	0	-
 0008	CHECKMATE	0110	black	55	Checkmate at move 55	qg7	Kh6	qg3g7	0	1	-
 0008	DISCOVERED_ATTACK	0021	white	11	Discovered attack at move 11	Bc1	ph6	Nd2f1	1	0	-
 0008	DISCOVERED_ATTACK	0034	black	17	Discovered attack at move 17	bb7	Pe4	nc6b8	1	0	-
@@ -147,8 +139,6 @@
 0017	DISCOVERED_ATTACK	0078	black	39	Discovered attack at move 39	rc8	Pc2	bc5b4	1	0	-
 0017	DISCOVERED_ATTACK	0083	white	42	Discovered attack at move 42	Re2	pe5	Pe4f5	1	0	-
 0017	DISCOVERED_ATTACK	0086	black	43	Discovered attack at move 43	rc8	Pc3	bc5e7	1	0	-
-0017	OVERLOADED_PIECE	0020	black	10	Overloaded piece at move 10	Be3	Pf4	-	0	0	-
-0017	OVERLOADED_PIECE	0020	black	10	Overloaded piece at move 10	Be3	Qd4	-	0	0	-
 0018	CHECKMATE	0160	black	80	Checkmate at move 80	re8	Kd8	re7e8	0	1	-
 0018	CROSS_PIN	0052	black	26	Cross-pin detected at move 26	bb6	Pd4	-	0	0	-
 0018	CROSS_PIN	0060	black	30	Cross-pin detected at move 30	bc5	Pd4	-	0	0	-
@@ -265,8 +255,6 @@
 0035	DISCOVERED_ATTACK	0036	black	18	Discovered attack at move 18	re8	Ne4	be6d5	1	0	-
 0035	DISCOVERED_ATTACK	0040	black	20	Discovered attack at move 20	qf5	Nc5	bd5f3	1	0	-
 0035	DISCOVERED_ATTACK	0051	white	26	Discovered attack at move 26	Rc1	pc6	Nc5d7	1	0	-
-0035	OVERLOADED_PIECE	0051	white	26	Overloaded piece at move 26	re8	kf8	-	0	0	-
-0035	OVERLOADED_PIECE	0051	white	26	Overloaded piece at move 26	re8	rb8	-	0	0	-
 0036	DISCOVERED_ATTACK	0007	white	4	Discovered attack at move 4	Qd1	pd7	Pd4c5	1	0	-
 0036	DISCOVERED_ATTACK	0031	white	16	Discovered attack at move 16	Bd3	pg6	Pe4d5	1	0	-
 0036	DISCOVERED_ATTACK	0032	black	16	Discovered attack at move 16	qc7	Pc2	nc6e5	1	0	-
@@ -313,8 +301,6 @@
 0043	DISCOVERED_ATTACK	0045	white	23	Discovered attack at move 23	Qh5	ph7	Nh6f7	1	0	-
 0043	DISCOVERED_ATTACK	0047	white	24	Discovered attack at move 24	Bc4	be6	Rd5c5	1	0	-
 0043	DISCOVERED_ATTACK	0054	black	27	Discovered attack at move 27	rf8	Pf2	bf6e7	1	0	-
-0043	OVERLOADED_PIECE	0047	white	24	Overloaded piece at move 24	qb6	be6	-	0	0	-
-0043	OVERLOADED_PIECE	0047	white	24	Overloaded piece at move 24	qb6	kc7	-	0	0	-
 0044	DISCOVERED_ATTACK	0024	black	12	Discovered attack at move 12	bg7	Nd4	ne5g4	1	0	-
 0044	DISCOVERED_ATTACK	0025	white	13	Discovered attack at move 13	Rf1	pf7	Pf3g4	1	0	-
 0044	DISCOVERED_ATTACK	0035	white	18	Discovered attack at move 18	Bc1	bh6	Rf4e4	1	0	-
@@ -392,8 +378,6 @@
 0056	DISCOVERED_ATTACK	0032	black	16	Discovered attack at move 16	qd8	Pd5	pd6e5	1	0	-
 0056	DISCOVERED_ATTACK	0054	black	27	Discovered attack at move 27	bc8	Ne6	nd7e5	1	0	-
 0056	DISCOVERED_ATTACK	0058	black	29	Discovered attack at move 29	bc8	Ph3	nf5e3	1	0	-
-0056	OVERLOADED_PIECE	0051	white	26	Overloaded piece at move 26	nf5	kg7	-	0	0	-
-0056	OVERLOADED_PIECE	0051	white	26	Overloaded piece at move 26	nf5	qe3	-	0	0	-
 0057	DISCOVERED_ATTACK	0020	black	10	Discovered attack at move 10	bg7	Pd4	nf6e4	1	0	-
 0057	DISCOVERED_ATTACK	0028	black	14	Discovered attack at move 14	re8	Pe3	ne4f2	1	0	-
 0057	DISCOVERED_ATTACK	0033	white	17	Discovered attack at move 17	Bb2	bg7	Nd4f3	1	0	-
@@ -421,10 +405,6 @@
 0061	DISCOVERED_ATTACK	0057	white	29	Discovered attack at move 29	Re2	pe5	Ne4g5	1	0	-
 0061	DISCOVERED_ATTACK	0058	black	29	Discovered attack at move 29	be8	Pa4	nd7c5	1	0	-
 0061	DISCOVERED_ATTACK	0067	white	34	Discovered attack at move 34	Re1	pe5	Re2h2	1	0	-
-0061	OVERLOADED_PIECE	0048	black	24	Overloaded piece at move 24	Pb2	Pa3	-	0	0	-
-0061	OVERLOADED_PIECE	0048	black	24	Overloaded piece at move 24	Pb2	Pc3	-	0	0	-
-0061	OVERLOADED_PIECE	0061	white	31	Overloaded piece at move 31	pg6	pf5	-	0	0	-
-0061	OVERLOADED_PIECE	0061	white	31	Overloaded piece at move 31	pg6	ph5	-	0	0	-
 0062	CHECKMATE	0073	white	37	Checkmate at move 37	Qg7	kh8	Qh6g7	0	1	-
 0062	DISCOVERED_ATTACK	0020	black	10	Discovered attack at move 10	be7	Nh4	nf6e8	1	0	-
 0062	DISCOVERED_ATTACK	0031	white	16	Discovered attack at move 16	Bb2	pe5	Pd4d5	1	0	-
@@ -439,8 +419,6 @@
 0064	DISCOVERED_ATTACK	0045	white	23	Discovered attack at move 23	Rd1	rd8	Nd5f4	1	0	-
 0064	DISCOVERED_ATTACK	0048	black	24	Discovered attack at move 24	bb7	Pe4	qc6e6	1	0	-
 0064	DISCOVERED_ATTACK	0119	white	60	Discovered attack at move 60	Bc8	ra6	Pb7??	1	0	-
-0064	OVERLOADED_PIECE	0049	white	25	Overloaded piece at move 25	rg8	kh8	-	0	0	-
-0064	OVERLOADED_PIECE	0049	white	25	Overloaded piece at move 25	rg8	rd8	-	0	0	-
 0065	DISCOVERED_ATTACK	0007	white	4	Discovered attack at move 4	Qd1	pd7	Pd4c5	1	0	-
 0065	DISCOVERED_ATTACK	0031	white	16	Discovered attack at move 16	Bd3	pg6	Pe4d5	1	0	-
 0065	DISCOVERED_ATTACK	0036	black	18	Discovered attack at move 18	bg7	Pb2	pe5e4	1	0	-
@@ -467,8 +445,6 @@
 0070	DISCOVERED_ATTACK	0039	white	20	Discovered attack at move 20	Qb3	pf7	Pc4b5	1	0	-
 0070	DISCOVERED_ATTACK	0067	white	34	Discovered attack at move 34	Rb6	nf6	Bd6e5	1	0	-
 0070	DISCOVERED_ATTACK	0075	white	38	Discovered attack at move 38	Rd5	ph5	Be5d4	1	0	-
-0070	OVERLOADED_PIECE	0019	white	10	Overloaded piece at move 10	qc8	bh3	-	0	0	-
-0070	OVERLOADED_PIECE	0019	white	10	Overloaded piece at move 10	qc8	ke8	-	0	0	-
 0071	DISCOVERED_ATTACK	0015	white	8	Discovered attack at move 8	Bg2	pd5	Nf3e5	1	0	-
 0071	DISCOVERED_ATTACK	0017	white	9	Discovered attack at move 9	Bb2	nf6	Ne5c6	1	0	-
 0071	DISCOVERED_ATTACK	0037	white	19	Discovered attack at move 19	Qd1	ra4	Nb3d4	1	0	-
@@ -521,8 +497,6 @@
 0080	DISCOVERED_ATTACK	0058	black	29	Discovered attack at move 29	bg7	Nd4	nf6d7	1	0	-
 0080	DISCOVERED_ATTACK	0059	white	30	Discovered attack at move 30	Qd2	pd5	Nd4e2	1	0	-
 0080	DISCOVERED_ATTACK	0064	black	32	Discovered attack at move 32	ba6	Ne2	rc4c2	1	0	-
-0080	OVERLOADED_PIECE	0029	white	15	Overloaded piece at move 15	qc8	nd7	-	0	0	-
-0080	OVERLOADED_PIECE	0029	white	15	Overloaded piece at move 15	qc8	re8	-	0	0	-
 0081	CROSS_PIN	0038	black	19	Cross-pin detected at move 19	bb5	Nc4	-	0	0	-
 0081	DISCOVERED_ATTACK	0036	black	18	Discovered attack at move 18	qb7	Pb3	pb5c4	1	0	-
 0081	DISCOVERED_ATTACK	0038	black	19	Discovered attack at move 19	qb7	Pe4	bc6b5	1	0	-
@@ -630,8 +604,6 @@
 0098	DISCOVERED_ATTACK	0043	white	22	Discovered attack at move 22	Rd1	rd8	Nd6b5	1	0	-
 0098	DISCOVERED_ATTACK	0060	black	30	Discovered attack at move 30	qb7	Nd5	nc6b4	1	0	-
 0098	DISCOVERED_ATTACK	0067	white	34	Discovered attack at move 34	Qf3	qb7	Rd5d7	1	0	-
-0098	OVERLOADED_PIECE	0062	black	31	Overloaded piece at move 31	Pb3	Pa4	-	0	0	-
-0098	OVERLOADED_PIECE	0062	black	31	Overloaded piece at move 31	Pb3	Pc4	-	0	0	-
 0099	DISCOVERED_ATTACK	0019	white	10	Discovered attack at move 10	Qd1	ph5	Nf3g5	1	0	-
 0099	DISCOVERED_ATTACK	0036	black	18	Discovered attack at move 18	bg7	Pd4	pf6f5	1	0	-
 0099	DISCOVERED_ATTACK	0046	black	23	Discovered attack at move 23	re8	Be3	ne7f5	1	0	-
@@ -677,8 +649,6 @@
 0107	DISCOVERED_ATTACK	0018	black	9	Discovered attack at move 9	bd7	Bb5	nc6d4	1	0	-
 0107	DISCOVERED_ATTACK	0027	white	14	Discovered attack at move 14	Rf1	na1	Bc1h6	1	0	-
 0107	DISCOVERED_ATTACK	0031	white	16	Discovered attack at move 16	Rf1	nf6	Nf3g5	1	0	-
-0107	OVERLOADED_PIECE	0026	black	13	Overloaded piece at move 13	Pb2	Nc3	-	0	0	-
-0107	OVERLOADED_PIECE	0026	black	13	Overloaded piece at move 13	Pb2	Pa3	-	0	0	-
 0108	DISCOVERED_ATTACK	0015	white	8	Discovered attack at move 8	Bb2	pe5	Nc3e4	1	0	-
 0108	DISCOVERED_ATTACK	0022	black	11	Discovered attack at move 11	bd6	Ph2	pe5d4	1	0	-
 0108	DISCOVERED_ATTACK	0039	white	20	Discovered attack at move 20	Rd1	rd7	Bd4e3	1	0	-
@@ -769,8 +739,6 @@
 0119	DISCOVERED_ATTACK	0080	black	40	Discovered attack at move 40	qf2	Pa2	re2e7	1	0	-
 0119	OVERLOADED_PIECE	0040	black	20	Overloaded piece at move 20	Pg2	Bh3	-	0	0	-
 0119	OVERLOADED_PIECE	0040	black	20	Overloaded piece at move 20	Pg2	Nf3	-	0	0	-
-0119	OVERLOADED_PIECE	0081	white	41	Overloaded piece at move 41	pg6	kh5	-	0	0	-
-0119	OVERLOADED_PIECE	0081	white	41	Overloaded piece at move 41	pg6	pf5	-	0	0	-
 0120	DISCOVERED_ATTACK	0012	black	6	Discovered attack at move 6	ra8	Pa2	pa6b5	1	0	-
 0120	DISCOVERED_ATTACK	0022	black	11	Discovered attack at move 11	bg7	Nc3	nf6d7	1	0	-
 0120	DISCOVERED_ATTACK	0040	black	20	Discovered attack at move 20	qa3	Nc5	nb4c2	1	0	-
@@ -898,10 +866,6 @@
 0138	DISCOVERED_ATTACK	0065	white	33	Discovered attack at move 33	Rd1	pd6	Nd5f4	1	0	-
 0138	DISCOVERED_ATTACK	0072	black	36	Discovered attack at move 36	rc7	Pc4	bc6e8	1	0	-
 0138	DISCOVERED_ATTACK	0112	black	56	Discovered attack at move 56	qe5	Pg3	kf4e4	1	0	-
-0138	OVERLOADED_PIECE	0075	white	38	Overloaded piece at move 38	qe5	bb5	-	0	0	-
-0138	OVERLOADED_PIECE	0075	white	38	Overloaded piece at move 38	qe5	kg7	-	0	0	-
-0138	OVERLOADED_PIECE	0077	white	39	Overloaded piece at move 39	qe5	bb5	-	0	0	-
-0138	OVERLOADED_PIECE	0077	white	39	Overloaded piece at move 39	qe5	kg7	-	0	0	-
 0139	DISCOVERED_ATTACK	0013	white	7	Discovered attack at move 7	Bb2	nf6	Pd4c5	1	0	-
 0139	DISCOVERED_ATTACK	0013	white	7	Discovered attack at move 7	Qd1	pd5	Pd4c5	1	0	-
 0139	DISCOVERED_ATTACK	0030	black	15	Discovered attack at move 15	bg7	Bb2	nf6d5	1	0	-
@@ -921,15 +885,11 @@
 0141	DISCOVERED_ATTACK	0064	black	32	Discovered attack at move 32	rc7	Bc2	nc6b8	1	0	-
 0141	DISCOVERED_ATTACK	0067	white	34	Discovered attack at move 34	Re1	pe6	Ne5g4	1	0	-
 0141	DISCOVERED_ATTACK	0100	black	50	Discovered attack at move 50	be8	Ph5	pf7f6	1	0	-
-0141	OVERLOADED_PIECE	0061	white	31	Overloaded piece at move 31	kf8	be8	-	0	0	-
-0141	OVERLOADED_PIECE	0061	white	31	Overloaded piece at move 31	kf8	ng8	-	0	0	-
 0142	DISCOVERED_ATTACK	0013	white	7	Discovered attack at move 7	Qd1	pd6	Nd4f3	1	0	-
 0142	DISCOVERED_ATTACK	0033	white	17	Discovered attack at move 17	Rf3	qa3	Nc3d5	1	0	-
 0142	DISCOVERED_ATTACK	0040	black	20	Discovered attack at move 20	re8	Pe4	be6d5	1	0	-
 0143	DISCOVERED_ATTACK	0064	black	32	Discovered attack at move 32	qd7	Ph3	pf5f4	1	0	-
 0143	DISCOVERED_ATTACK	0074	black	37	Discovered attack at move 37	rf7	Pf2	bf6g7	1	0	-
-0143	OVERLOADED_PIECE	0035	white	18	Overloaded piece at move 18	qd8	pb6	-	0	0	-
-0143	OVERLOADED_PIECE	0035	white	18	Overloaded piece at move 18	qd8	pd6	-	0	0	-
 0144	DISCOVERED_ATTACK	0022	black	11	Discovered attack at move 11	bc8	Ph3	nd7c5	1	0	-
 0144	DISCOVERED_ATTACK	0025	white	13	Discovered attack at move 13	Bc2	pg6	Pe4d5	1	0	-
 0144	DISCOVERED_ATTACK	0025	white	13	Discovered attack at move 13	Re1	ne7	Pe4d5	1	0	-
@@ -946,8 +906,6 @@
 0146	DISCOVERED_ATTACK	0038	black	19	Discovered attack at move 19	bb7	Pe4	pc6b5	1	0	-
 0146	DISCOVERED_ATTACK	0054	black	27	Discovered attack at move 27	qc7	Bc2	bc5b4	1	0	-
 0146	DISCOVERED_ATTACK	0070	black	35	Discovered attack at move 35	qb6	Pf2	bc5d6	1	0	-
-0146	OVERLOADED_PIECE	0037	white	19	Overloaded piece at move 19	bb7	pa6	-	0	0	-
-0146	OVERLOADED_PIECE	0037	white	19	Overloaded piece at move 19	bb7	pc6	-	0	0	-
 0147	DISCOVERED_ATTACK	0036	black	18	Discovered attack at move 18	rd8	Bd3	nd4c2	1	0	-
 0147	DISCOVERED_ATTACK	0056	black	28	Discovered attack at move 28	re8	Be3	be4c6	1	0	-
 0148	DISCOVERED_ATTACK	0017	white	9	Discovered attack at move 9	Be3	pa7	Nd4b3	1	0	-
@@ -970,8 +928,6 @@
 0150	DISCOVERED_ATTACK	0046	black	23	Discovered attack at move 23	rc8	Nc3	nc5d3	1	0	-
 0150	DISCOVERED_ATTACK	0062	black	31	Discovered attack at move 31	qe7	Qh7	bg7h6	1	0	-
 0150	DISCOVERED_ATTACK	0064	black	32	Discovered attack at move 32	rc8	Qh8	kf8f7	1	0	-
-0150	OVERLOADED_PIECE	0053	white	27	Overloaded piece at move 27	qe8	kg8	-	0	0	-
-0150	OVERLOADED_PIECE	0053	white	27	Overloaded piece at move 27	qe8	re7	-	0	0	-
 0151	DISCOVERED_ATTACK	0008	black	4	Discovered attack at move 4	qd8	Pd2	nd5b6	1	0	-
 0151	DISCOVERED_ATTACK	0036	black	18	Discovered attack at move 18	qd7	Pd5	nd6f5	1	0	-
 0151	DISCOVERED_ATTACK	0037	white	19	Discovered attack at move 19	Ba2	pf7	Pd5d6	1	0	-
@@ -1038,8 +994,6 @@
 0159	DISCOVERED_ATTACK	0056	black	28	Discovered attack at move 28	re8	Ke4	ne5d3	1	0	-
 0159	DISCOVERED_ATTACK	0097	white	49	Discovered attack at move 49	Rb2	re2	Kc2c3	1	0	-
 0159	DISCOVERED_CHECK	0056	black	28	Discovered check at move 28	re8	Ke4	ne5d3	1	0	-
-0159	OVERLOADED_PIECE	0040	black	20	Overloaded piece at move 20	Qf1	Kg1	-	0	0	-
-0159	OVERLOADED_PIECE	0040	black	20	Overloaded piece at move 20	Qf1	Re2	-	0	0	-
 0160	DISCOVERED_ATTACK	0032	black	16	Discovered attack at move 16	bg7	Pe5	nf6e4	1	0	-
 0160	DISCOVERED_ATTACK	0041	white	21	Discovered attack at move 21	Re1	re8	Pe6f7	1	0	-
 0160	DISCOVERED_ATTACK	0045	white	23	Discovered attack at move 23	Re1	re8	Be5g7	1	0	-
@@ -1127,8 +1081,6 @@
 0176	DISCOVERED_ATTACK	0022	black	11	Discovered attack at move 11	qd8	Qd1	nd7b6	1	0	-
 0176	DISCOVERED_ATTACK	0033	white	17	Discovered attack at move 17	Bb2	bg7	Nc3d5	1	0	-
 0176	DISCOVERED_ATTACK	0052	black	26	Discovered attack at move 26	qf6	Ph6	pg6g5	1	0	-
-0176	OVERLOADED_PIECE	0127	white	64	Overloaded piece at move 64	pb7	pa6	-	0	0	-
-0176	OVERLOADED_PIECE	0127	white	64	Overloaded piece at move 64	pb7	pc6	-	0	0	-
 0177	DISCOVERED_ATTACK	0023	white	12	Discovered attack at move 12	Bg2	nc6	Nf3d4	1	0	-
 0177	DISCOVERED_ATTACK	0026	black	13	Discovered attack at move 13	qd8	Ba8	bc8g4	1	0	-
 0178	DISCOVERED_ATTACK	0026	black	13	Discovered attack at move 13	rh8	Bh1	bh3f1	1	0	-
@@ -1143,8 +1095,6 @@
 0179	DISCOVERED_ATTACK	0125	white	63	Discovered attack at move 63	Qe6	qb3	Kd5d6	1	0	-
 0179	DISCOVERED_CHECK	0098	black	49	Discovered check at move 49	qg6	Kg2	pg4f3	1	0	-
 0179	DOUBLE_CHECK	0098	black	49	Double check at move 49	-	Kg2	-	0	0	-
-0179	OVERLOADED_PIECE	0055	white	28	Overloaded piece at move 28	qf5	rc8	-	0	0	-
-0179	OVERLOADED_PIECE	0055	white	28	Overloaded piece at move 28	qf5	rf7	-	0	0	-
 0179	OVERLOADED_PIECE	0070	black	35	Overloaded piece at move 35	Kg1	Pf2	-	0	0	-
 0179	OVERLOADED_PIECE	0070	black	35	Overloaded piece at move 35	Kg1	Ph2	-	0	0	-
 0180	DISCOVERED_ATTACK	0051	white	26	Discovered attack at move 26	Re1	ne7	Ne5c4	1	0	-
@@ -1203,8 +1153,6 @@
 0188	DISCOVERED_ATTACK	0041	white	21	Discovered attack at move 21	Bc1	ph6	Ne3c4	1	0	-
 0188	DISCOVERED_ATTACK	0049	white	25	Discovered attack at move 25	Qc2	pc5	Nc4a3	1	0	-
 0188	DISCOVERED_ATTACK	0070	black	35	Discovered attack at move 35	qb7	Pe4	nc6b4	1	0	-
-0188	OVERLOADED_PIECE	0038	black	19	Overloaded piece at move 19	Pd3	Nc4	-	0	0	-
-0188	OVERLOADED_PIECE	0038	black	19	Overloaded piece at move 19	Pd3	Pe4	-	0	0	-
 0189	DISCOVERED_ATTACK	0025	white	13	Discovered attack at move 13	Bg2	pc6	Pe4f5	1	0	-
 0189	DISCOVERED_ATTACK	0028	black	14	Discovered attack at move 14	ra8	Pa2	pa4b3	1	0	-
 0189	DISCOVERED_ATTACK	0029	white	15	Discovered attack at move 15	Ra1	ra8	Pa2b3	1	0	-
@@ -1212,8 +1160,6 @@
 0190	DISCOVERED_ATTACK	0025	white	13	Discovered attack at move 13	Rf1	pf7	Pf2e3	1	0	-
 0190	DISCOVERED_ATTACK	0051	white	26	Discovered attack at move 26	Bb2	pe5	Pd4c5	1	0	-
 0190	DISCOVERED_ATTACK	0051	white	26	Discovered attack at move 26	Qd2	pd6	Pd4c5	1	0	-
-0190	OVERLOADED_PIECE	0049	white	25	Overloaded piece at move 25	pd6	pc5	-	0	0	-
-0190	OVERLOADED_PIECE	0049	white	25	Overloaded piece at move 25	pd6	pe5	-	0	0	-
 0191	DISCOVERED_ATTACK	0027	white	14	Discovered attack at move 14	Qe2	pa6	Bb5c6	1	0	-
 0191	DISCOVERED_ATTACK	0032	black	16	Discovered attack at move 16	rb8	Pb3	nb6a4	1	0	-
 0191	DISCOVERED_ATTACK	0043	white	22	Discovered attack at move 22	Qe2	pe5	Pe4f5	1	0	-
@@ -1239,7 +1185,6 @@
 0195	DISCOVERED_ATTACK	0034	black	17	Discovered attack at move 17	ra7	Pa2	pa6b5	1	0	-
 0195	DISCOVERED_ATTACK	0066	black	33	Discovered attack at move 33	qa8	Pg2	rd5d1	1	0	-
 0195	DISCOVERED_ATTACK	0149	white	75	Discovered attack at move 75	Qb8	qe8	Kc8b7	1	0	-
-0195	ZUGZWANG	0149	white	75	Zugzwang at move 75	-	kf8	-	0	0	-
 0196	DISCOVERED_ATTACK	0008	black	4	Discovered attack at move 4	qd8	Pd2	pd7c6	1	0	-
 0196	DISCOVERED_ATTACK	0015	white	8	Discovered attack at move 8	Qd1	qd8	Nd4b3	1	0	-
 0196	DISCOVERED_ATTACK	0049	white	25	Discovered attack at move 25	Rd1	nd6	Rd2e2	1	0	-
@@ -1252,8 +1197,6 @@
 0197	DISCOVERED_ATTACK	0031	white	16	Discovered attack at move 16	Ra3	pa7	Pa5b6	1	0	-
 0197	DISCOVERED_ATTACK	0038	black	19	Discovered attack at move 19	bc8	Ph3	nd7f8	1	0	-
 0197	DISCOVERED_ATTACK	0044	black	22	Discovered attack at move 22	re8	Ra8	bc8d7	1	0	-
-0197	OVERLOADED_PIECE	0111	white	56	Overloaded piece at move 56	pf7	ne6	-	0	0	-
-0197	OVERLOADED_PIECE	0111	white	56	Overloaded piece at move 56	pf7	pg6	-	0	0	-
 0197	OVERLOADED_PIECE	0115	white	58	Overloaded piece at move 58	ke8	pe7	-	0	0	-
 0197	OVERLOADED_PIECE	0115	white	58	Overloaded piece at move 58	ke8	pf7	-	0	0	-
 0198	DISCOVERED_ATTACK	0028	black	14	Discovered attack at move 14	rh8	Ph3	ph7g6	1	0	-
@@ -1425,8 +1368,6 @@
 0221	DISCOVERED_ATTACK	0064	black	32	Discovered attack at move 32	bb7	Rf3	pd5d4	1	0	-
 0221	DISCOVERED_ATTACK	0088	black	44	Discovered attack at move 44	qc6	Kh1	pd5d4	1	0	-
 0221	DISCOVERED_CHECK	0088	black	44	Discovered check at move 44	qc6	Kh1	pd5d4	1	0	-
-0221	OVERLOADED_PIECE	0083	white	42	Overloaded piece at move 42	pg6	kh5	-	0	0	-
-0221	OVERLOADED_PIECE	0083	white	42	Overloaded piece at move 42	pg6	pf5	-	0	0	-
 0222	DISCOVERED_ATTACK	0022	black	11	Discovered attack at move 11	ra8	Pa3	pa5b4	1	0	-
 0222	DISCOVERED_ATTACK	0026	black	13	Discovered attack at move 13	bg7	Pd4	nf6e4	1	0	-
 0222	DISCOVERED_ATTACK	0032	black	16	Discovered attack at move 16	qd8	Pd4	nd7c5	1	0	-
@@ -1482,8 +1423,6 @@
 0230	DISCOVERED_ATTACK	0069	white	35	Discovered attack at move 35	Rb4	pb7	Nb5a7	1	0	-
 0230	DISCOVERED_ATTACK	0076	black	38	Discovered attack at move 38	rc8	Pc2	nc5a6	1	0	-
 0230	DISCOVERED_ATTACK	0078	black	39	Discovered attack at move 39	qb8	Rb6	pb7a6	1	0	-
-0230	OVERLOADED_PIECE	0077	white	39	Overloaded piece at move 39	qb8	ka8	-	0	0	-
-0230	OVERLOADED_PIECE	0077	white	39	Overloaded piece at move 39	qb8	pe5	-	0	0	-
 0231	DISCOVERED_ATTACK	0026	black	13	Discovered attack at move 13	qc7	Pc3	nc6a5	1	0	-
 0231	DISCOVERED_ATTACK	0029	white	15	Discovered attack at move 15	Qd2	pd6	Nd4c2	1	0	-
 0231	DISCOVERED_ATTACK	0037	white	19	Discovered attack at move 19	Qd2	ph6	Ne3d5	1	0	-
@@ -1530,8 +1469,6 @@
 0236	DISCOVERED_ATTACK	0044	black	22	Discovered attack at move 22	be5	Pb2	nd4e2	1	0	-
 0236	DISCOVERED_ATTACK	0044	black	22	Discovered attack at move 22	rd8	Rd1	nd4e2	1	0	-
 0236	DISCOVERED_ATTACK	0107	white	54	Discovered attack at move 54	Bd5	nf7	Ke6f5	1	0	-
-0236	OVERLOADED_PIECE	0044	black	22	Overloaded piece at move 22	Rf1	Kg1	-	0	0	-
-0236	OVERLOADED_PIECE	0044	black	22	Overloaded piece at move 22	Rf1	Rd1	-	0	0	-
 0237	CROSS_PIN	0079	white	40	Cross-pin detected at move 40	Qe3	pe6	-	0	0	-
 0237	CROSS_PIN	0081	white	41	Cross-pin detected at move 41	Qe5	pe6	-	0	0	-
 0237	CROSS_PIN	0109	white	55	Cross-pin detected at move 55	Qg6	pf7	-	0	0	-
@@ -1592,7 +1529,6 @@
 0246	DISCOVERED_ATTACK	0045	white	23	Discovered attack at move 23	Qf3	qc6	Rd5d4	1	0	-
 0247	CHECKMATE	0321	white	161	Checkmate at move 161	Rh3	kh1	Rg3h3	0	1	-
 0247	DISCOVERED_ATTACK	0024	black	12	Discovered attack at move 12	qc7	Ph2	pd6c5	1	0	-
-0247	ZUGZWANG	0307	white	154	Zugzwang at move 154	-	kg4	-	0	0	-
 0247	ZUGZWANG	0311	white	156	Zugzwang at move 156	-	kh4	-	0	0	-
 0247	ZUGZWANG	0319	white	160	Zugzwang at move 160	-	kh2	-	0	0	-
 0248	DISCOVERED_ATTACK	0045	white	23	Discovered attack at move 23	Bf2	nb6	Nd4e6	1	0	-
@@ -1646,8 +1582,6 @@
 0255	DISCOVERED_ATTACK	0046	black	23	Discovered attack at move 23	qd8	Qd1	nd7e5	1	0	-
 0255	DISCOVERED_ATTACK	0073	white	37	Discovered attack at move 37	Re1	pe4	Qe3b6	1	0	-
 0255	DISCOVERED_ATTACK	0078	black	39	Discovered attack at move 39	qe7	Qa7	bc7h2	1	0	-
-0255	OVERLOADED_PIECE	0045	white	23	Overloaded piece at move 23	qd8	ra8	-	0	0	-
-0255	OVERLOADED_PIECE	0045	white	23	Overloaded piece at move 23	qd8	re8	-	0	0	-
 0256	DISCOVERED_ATTACK	0017	white	9	Discovered attack at move 9	Bb2	nf6	Nd4c6	1	0	-
 0256	DISCOVERED_ATTACK	0017	white	9	Discovered attack at move 9	Qd1	pd6	Nd4c6	1	0	-
 0256	DISCOVERED_ATTACK	0034	black	17	Discovered attack at move 17	qc7	Ph2	pd6d5	1	0	-
@@ -1680,8 +1614,6 @@
 0260	DISCOVERED_ATTACK	0044	black	22	Discovered attack at move 22	re8	Re4	be7f8	1	0	-
 0260	DISCOVERED_ATTACK	0045	white	23	Discovered attack at move 23	Qf3	pc6	Re4g4	1	0	-
 0260	DISCOVERED_ATTACK	0065	white	33	Discovered attack at move 33	Qf3	pb7	Pd5d6	1	0	-
-0260	OVERLOADED_PIECE	0067	white	34	Overloaded piece at move 34	re8	kg8	-	0	0	-
-0260	OVERLOADED_PIECE	0067	white	34	Overloaded piece at move 34	re8	re7	-	0	0	-
 0261	DISCOVERED_ATTACK	0026	black	13	Discovered attack at move 13	bc8	Ph3	nd7e5	1	0	-
 0261	DISCOVERED_ATTACK	0040	black	20	Discovered attack at move 20	rh8	Ph3	ph4g3	1	0	-
 0261	DISCOVERED_ATTACK	0048	black	24	Discovered attack at move 24	bc8	Ph3	nd7f8	1	0	-
@@ -1690,8 +1622,6 @@
 0261	DISCOVERED_ATTACK	0089	white	45	Discovered attack at move 45	Ra3	ra5	Na4c3	1	0	-
 0261	DISCOVERED_ATTACK	0113	white	57	Discovered attack at move 57	Re1	be4	Be2f3	1	0	-
 0261	DISCOVERED_ATTACK	0129	white	65	Discovered attack at move 65	Rg1	rg5	Kg3f2	1	0	-
-0261	OVERLOADED_PIECE	0111	white	56	Overloaded piece at move 56	nf6	be4	-	0	0	-
-0261	OVERLOADED_PIECE	0111	white	56	Overloaded piece at move 56	nf6	pg4	-	0	0	-
 0262	DISCOVERED_ATTACK	0021	white	11	Discovered attack at move 11	Bg2	pd5	Nf3e5	1	0	-
 0262	DISCOVERED_ATTACK	0033	white	17	Discovered attack at move 17	Re1	be7	Be5b2	1	0	-
 0262	DISCOVERED_ATTACK	0034	black	17	Discovered attack at move 17	re8	Re1	be7f6	1	0	-
@@ -1736,8 +1666,6 @@
 0270	DISCOVERED_ATTACK	0042	black	21	Discovered attack at move 21	qc8	Pc2	pc5d4	1	0	-
 0270	DISCOVERED_ATTACK	0049	white	25	Discovered attack at move 25	Rf1	rf8	Nf3d4	1	0	-
 0270	DISCOVERED_ATTACK	0058	black	29	Discovered attack at move 29	bg7	Pc3	pe5e4	1	0	-
-0270	OVERLOADED_PIECE	0029	white	15	Overloaded piece at move 15	pe7	bf6	-	0	0	-
-0270	OVERLOADED_PIECE	0029	white	15	Overloaded piece at move 15	pe7	pd6	-	0	0	-
 0271	DISCOVERED_ATTACK	0030	black	15	Discovered attack at move 15	re8	Pe3	ne4c3	1	0	-
 0271	DISCOVERED_ATTACK	0036	black	18	Discovered attack at move 18	ra8	Pa4	pa6b5	1	0	-
 0271	DISCOVERED_ATTACK	0037	white	19	Discovered attack at move 19	Ra1	ra8	Pa4b5	1	0	-
@@ -1789,8 +1717,6 @@
 0280	DISCOVERED_ATTACK	0027	white	14	Discovered attack at move 14	Bd3	pg6	Pe4e5	1	0	-
 0280	DISCOVERED_ATTACK	0039	white	20	Discovered attack at move 20	Qc2	ph7	Bf5c8	1	0	-
 0280	DISCOVERED_ATTACK	0053	white	27	Discovered attack at move 27	Re5	pe7	Ne6f4	1	0	-
-0280	OVERLOADED_PIECE	0027	white	14	Overloaded piece at move 14	pe7	nf6	-	0	0	-
-0280	OVERLOADED_PIECE	0027	white	14	Overloaded piece at move 14	pe7	pd6	-	0	0	-
 0281	DISCOVERED_ATTACK	0008	black	4	Discovered attack at move 4	qd8	Pd3	pd5e4	1	0	-
 0281	DISCOVERED_ATTACK	0021	white	11	Discovered attack at move 11	Qc2	pg6	Bd3c4	1	0	-
 0281	DISCOVERED_ATTACK	0024	black	12	Discovered attack at move 12	qd8	Ng5	nf6g4	1	0	-
@@ -1892,8 +1818,6 @@
 0293	DISCOVERED_ATTACK	0079	white	40	Discovered attack at move 40	Rh5	pb5	Qe5e3	1	0	-
 0293	DISCOVERED_CHECK	0063	white	32	Discovered check at move 32	Qg4	kg8	Pg6f7	1	0	-
 0293	DOUBLE_CHECK	0063	white	32	Double check at move 32	-	kg8	-	0	0	-
-0293	OVERLOADED_PIECE	0060	black	30	Overloaded piece at move 30	Qg4	Nf5	-	0	0	-
-0293	OVERLOADED_PIECE	0060	black	30	Overloaded piece at move 30	Qg4	Ph5	-	0	0	-
 0294	DISCOVERED_ATTACK	0016	black	8	Discovered attack at move 8	bg7	Pb2	nf6d7	1	0	-
 0294	DISCOVERED_ATTACK	0023	white	12	Discovered attack at move 12	Ra1	pa6	Pa4b5	1	0	-
 0294	DISCOVERED_ATTACK	0028	black	14	Discovered attack at move 14	rb8	Pb2	pb4c3	1	0	-
@@ -1951,8 +1875,6 @@
 0301	DISCOVERED_ATTACK	0047	white	24	Discovered attack at move 24	Ra1	re1	Bc1h6	1	0	-
 0301	OVERLOADED_PIECE	0019	white	10	Overloaded piece at move 10	nc6	bb4	-	0	0	-
 0301	OVERLOADED_PIECE	0019	white	10	Overloaded piece at move 10	nc6	pe5	-	0	0	-
-0301	OVERLOADED_PIECE	0024	black	12	Overloaded piece at move 12	Qd1	Ne2	-	0	0	-
-0301	OVERLOADED_PIECE	0024	black	12	Overloaded piece at move 12	Qd1	Pc2	-	0	0	-
 0302	DISCOVERED_ATTACK	0012	black	6	Discovered attack at move 6	bg7	Pe5	nf6e8	1	0	-
 0302	DISCOVERED_ATTACK	0030	black	15	Discovered attack at move 15	qc7	Pc3	nc5d3	1	0	-
 0302	DISCOVERED_ATTACK	0040	black	20	Discovered attack at move 20	rc8	Pc3	nc7a6	1	0	-
@@ -2005,8 +1927,6 @@
 0309	DISCOVERED_ATTACK	0064	black	32	Discovered attack at move 32	qb8	Pb2	bb7a6	1	0	-
 0309	DISCOVERED_ATTACK	0069	white	35	Discovered attack at move 35	Bf1	bb5	Nc4e5	1	0	-
 0309	DISCOVERED_ATTACK	0076	black	38	Discovered attack at move 38	re7	Pe4	ne6f4	1	0	-
-0309	OVERLOADED_PIECE	0079	white	40	Overloaded piece at move 40	nh5	kg7	-	0	0	-
-0309	OVERLOADED_PIECE	0079	white	40	Overloaded piece at move 40	nh5	qg3	-	0	0	-
 0310	DISCOVERED_ATTACK	0013	white	7	Discovered attack at move 7	Qd1	pd6	Pd4c5	1	0	-
 0310	DISCOVERED_ATTACK	0029	white	15	Discovered attack at move 15	Rd1	pd6	Qd2e3	1	0	-
 0310	DISCOVERED_ATTACK	0031	white	16	Discovered attack at move 16	Qe3	be6	Pe4d5	1	0	-
@@ -2111,8 +2031,6 @@
 0328	DISCOVERED_ATTACK	0029	white	15	Discovered attack at move 15	Qe2	pe5	Ne4g5	1	0	-
 0328	DISCOVERED_ATTACK	0034	black	17	Discovered attack at move 17	bg7	Pc3	pe5e4	1	0	-
 0328	DISCOVERED_ATTACK	0040	black	20	Discovered attack at move 20	bg7	Pc3	qf6g5	1	0	-
-0328	OVERLOADED_PIECE	0021	white	11	Overloaded piece at move 11	qd8	bf6	-	0	0	-
-0328	OVERLOADED_PIECE	0021	white	11	Overloaded piece at move 11	qd8	pd6	-	0	0	-
 0329	DISCOVERED_ATTACK	0007	white	4	Discovered attack at move 4	Qd1	pd7	Pd4c5	1	0	-
 0329	DISCOVERED_ATTACK	0028	black	14	Discovered attack at move 14	qc7	Pc3	nc6e5	1	0	-
 0329	DISCOVERED_ATTACK	0029	white	15	Discovered attack at move 15	Qd2	pd6	Bd3e2	1	0	-
@@ -2121,8 +2039,6 @@
 0329	DISCOVERED_ATTACK	0052	black	26	Discovered attack at move 26	rc8	Pc4	nc7e6	1	0	-
 0329	DISCOVERED_ATTACK	0058	black	29	Discovered attack at move 29	rc8	Pc4	bc6b7	1	0	-
 0329	DISCOVERED_ATTACK	0065	white	33	Discovered attack at move 33	Re1	pe5	Be3f2	1	0	-
-0329	OVERLOADED_PIECE	0061	white	31	Overloaded piece at move 31	kf7	ne6	-	0	0	-
-0329	OVERLOADED_PIECE	0061	white	31	Overloaded piece at move 31	kf7	pg6	-	0	0	-
 0330	CHECKMATE	0131	white	66	Checkmate at move 66	Be7	kh4	Rf6h6	0	1	-
 0330	DISCOVERED_ATTACK	0021	white	11	Discovered attack at move 11	Qd1	pa4	Pc2c4	1	0	-
 0330	DISCOVERED_ATTACK	0022	black	11	Discovered attack at move 11	qd8	Pd4	pd5c4	1	0	-
@@ -2257,8 +2173,6 @@
 0349	DISCOVERED_ATTACK	0050	black	25	Discovered attack at move 25	bb7	Nd5	nc6a5	1	0	-
 0349	DISCOVERED_ATTACK	0057	white	29	Discovered attack at move 29	Bg2	bb7	Nd5b6	1	0	-
 0349	DISCOVERED_ATTACK	0058	black	29	Discovered attack at move 29	rd8	Pd4	bd6b4	1	0	-
-0349	OVERLOADED_PIECE	0064	black	32	Overloaded piece at move 32	Qb3	Kc2	-	0	0	-
-0349	OVERLOADED_PIECE	0064	black	32	Overloaded piece at move 32	Qb3	Pb4	-	0	0	-
 0350	DISCOVERED_ATTACK	0023	white	12	Discovered attack at move 12	Bg2	pd5	Pe4f5	1	0	-
 0350	DISCOVERED_ATTACK	0041	white	21	Discovered attack at move 21	Qg4	nd4	Nf4g6	1	0	-
 0350	DISCOVERED_ATTACK	0041	white	21	Discovered attack at move 21	Rf1	pf7	Nf4g6	1	0	-
@@ -2278,8 +2192,6 @@
 0352	DISCOVERED_ATTACK	0060	black	30	Discovered attack at move 30	qc8	Pc4	pc5b4	1	0	-
 0352	DISCOVERED_ATTACK	0069	white	35	Discovered attack at move 35	Qf3	pf5	Bf4g5	1	0	-
 0352	DISCOVERED_ATTACK	0084	black	42	Discovered attack at move 42	rb3	Pg3	be3c1	1	0	-
-0352	OVERLOADED_PIECE	0077	white	39	Overloaded piece at move 39	kg8	pf7	-	0	0	-
-0352	OVERLOADED_PIECE	0077	white	39	Overloaded piece at move 39	kg8	ph7	-	0	0	-
 0353	DISCOVERED_ATTACK	0019	white	10	Discovered attack at move 10	Bg2	pd5	Nf3h4	1	0	-
 0353	DISCOVERED_ATTACK	0028	black	14	Discovered attack at move 14	be7	Pg5	nf6d7	1	0	-
 0353	DISCOVERED_ATTACK	0040	black	20	Discovered attack at move 20	qd8	Pg5	be7d6	1	0	-
@@ -2326,14 +2238,10 @@
 0359	DISCOVERED_CHECK	0089	white	45	Discovered check at move 45	Bd4	kh8	Ke5e6	1	0	-
 0359	OVERLOADED_PIECE	0049	white	25	Overloaded piece at move 25	rb8	qa8	-	0	0	-
 0359	OVERLOADED_PIECE	0049	white	25	Overloaded piece at move 25	rb8	re8	-	0	0	-
-0359	OVERLOADED_PIECE	0063	white	32	Overloaded piece at move 32	re8	kg8	-	0	0	-
-0359	OVERLOADED_PIECE	0063	white	32	Overloaded piece at move 32	re8	qa8	-	0	0	-
 0360	DISCOVERED_ATTACK	0031	white	16	Discovered attack at move 16	Rc1	nc8	Qc2d3	1	0	-
 0360	DISCOVERED_ATTACK	0051	white	26	Discovered attack at move 26	Qb3	kg8	Pd5c6	1	0	-
 0360	DISCOVERED_ATTACK	0055	white	28	Discovered attack at move 28	Bc1	bh6	Nd2b3	1	0	-
 0360	DISCOVERED_CHECK	0051	white	26	Discovered check at move 26	Qb3	kg8	Pd5c6	1	0	-
-0360	OVERLOADED_PIECE	0057	white	29	Overloaded piece at move 29	kg8	bf7	-	0	0	-
-0360	OVERLOADED_PIECE	0057	white	29	Overloaded piece at move 29	kg8	ph7	-	0	0	-
 0361	DISCOVERED_ATTACK	0018	black	9	Discovered attack at move 9	bf8	Na3	nb4c6	1	0	-
 0361	DISCOVERED_ATTACK	0035	white	18	Discovered attack at move 18	Qe2	ne4	Ne3c4	1	0	-
 0361	DISCOVERED_ATTACK	0037	white	19	Discovered attack at move 19	Bf1	pc4	Qe2e4	1	0	-
@@ -2350,7 +2258,6 @@
 0363	DISCOVERED_ATTACK	0040	black	20	Discovered attack at move 20	bg7	Ne5	nf6e8	1	0	-
 0363	DISCOVERED_ATTACK	0144	black	72	Discovered attack at move 72	bc4	Kf1	re2e3	1	0	-
 0363	DISCOVERED_CHECK	0144	black	72	Discovered check at move 72	bc4	Kf1	re2e3	1	0	-
-0363	ZUGZWANG	0140	black	70	Zugzwang at move 70	-	Ke1	-	0	0	-
 0364	DISCOVERED_ATTACK	0010	black	5	Discovered attack at move 5	qd8	Bg5	pe7e5	1	0	-
 0364	DISCOVERED_ATTACK	0017	white	9	Discovered attack at move 9	Qd1	pd6	Pd4e5	1	0	-
 0364	DISCOVERED_ATTACK	0023	white	12	Discovered attack at move 12	Qd1	nd7	Nd5c3	1	0	-
@@ -2367,8 +2274,6 @@
 0365	DISCOVERED_ATTACK	0040	black	20	Discovered attack at move 20	qe7	Pb4	nc5b3	1	0	-
 0365	DISCOVERED_ATTACK	0043	white	22	Discovered attack at move 22	Qc2	pc6	Nc4d2	1	0	-
 0365	DISCOVERED_ATTACK	0044	black	22	Discovered attack at move 22	rd8	Pd3	nd5b4	1	0	-
-0365	OVERLOADED_PIECE	0057	white	29	Overloaded piece at move 29	rf8	kh8	-	0	0	-
-0365	OVERLOADED_PIECE	0057	white	29	Overloaded piece at move 29	rf8	pf7	-	0	0	-
 0366	DISCOVERED_ATTACK	0019	white	10	Discovered attack at move 10	Bc1	ph6	Nd2f1	1	0	-
 0366	DISCOVERED_ATTACK	0027	white	14	Discovered attack at move 14	Re1	pe6	Be3d2	1	0	-
 0366	DISCOVERED_ATTACK	0039	white	20	Discovered attack at move 20	Re1	ne5	Ne4g3	1	0	-
@@ -2454,8 +2359,6 @@
 0379	DISCOVERED_ATTACK	0081	white	41	Discovered attack at move 41	Bc1	bh6	Re3c3	1	0	-
 0379	DISCOVERED_ATTACK	0093	white	47	Discovered attack at move 47	Qe2	be4	Re3f3	1	0	-
 0379	DISCOVERED_ATTACK	0148	black	74	Discovered attack at move 74	qd4	Pb4	pc4c3	1	0	-
-0379	OVERLOADED_PIECE	0092	black	46	Overloaded piece at move 46	Qe2	Re3	-	0	0	-
-0379	OVERLOADED_PIECE	0092	black	46	Overloaded piece at move 46	Qe2	Rf1	-	0	0	-
 0380	DISCOVERED_ATTACK	0013	white	7	Discovered attack at move 7	Be2	bg4	Nf3d2	1	0	-
 0380	DISCOVERED_ATTACK	0025	white	13	Discovered attack at move 13	Qe2	pb5	Pc4c5	1	0	-
 0380	DISCOVERED_ATTACK	0038	black	19	Discovered attack at move 19	qc7	Ph2	pe5d4	1	0	-
@@ -2464,10 +2367,6 @@
 0381	DISCOVERED_ATTACK	0038	black	19	Discovered attack at move 19	qf5	Qd3	ne4f6	1	0	-
 0381	DISCOVERED_ATTACK	0046	black	23	Discovered attack at move 23	rh8	Ph3	ph5g4	1	0	-
 0381	DISCOVERED_ATTACK	0047	white	24	Discovered attack at move 24	Rh1	rh8	Ph3g4	1	0	-
-0381	OVERLOADED_PIECE	0046	black	23	Overloaded piece at move 23	Pe2	Kf3	-	0	0	-
-0381	OVERLOADED_PIECE	0046	black	23	Overloaded piece at move 23	Pe2	Qd3	-	0	0	-
-0381	OVERLOADED_PIECE	0048	black	24	Overloaded piece at move 24	Pe2	Kf3	-	0	0	-
-0381	OVERLOADED_PIECE	0048	black	24	Overloaded piece at move 24	Pe2	Qd3	-	0	0	-
 0382	DISCOVERED_ATTACK	0033	white	17	Discovered attack at move 17	Bc3	nf6	Ne5g4	1	0	-
 0382	DISCOVERED_ATTACK	0048	black	24	Discovered attack at move 24	qa5	Pa2	pa4b3	1	0	-
 0382	DISCOVERED_ATTACK	0049	white	25	Discovered attack at move 25	Ra1	qa5	Pa2b3	1	0	-
@@ -2625,8 +2524,6 @@
 0404	DISCOVERED_ATTACK	0047	white	24	Discovered attack at move 24	Qc2	pg6	Be4g2	1	0	-
 0404	DISCOVERED_ATTACK	0050	black	25	Discovered attack at move 25	qf6	Pf2	nf4g2	1	0	-
 0404	DISCOVERED_ATTACK	0069	white	35	Discovered attack at move 35	Rh1	ra1	Ke1e2	1	0	-
-0404	OVERLOADED_PIECE	0062	black	31	Overloaded piece at move 31	Rh3	Kf3	-	0	0	-
-0404	OVERLOADED_PIECE	0062	black	31	Overloaded piece at move 31	Rh3	Ph5	-	0	0	-
 0405	DISCOVERED_ATTACK	0018	black	9	Discovered attack at move 9	bg7	Nc3	pe5e4	1	0	-
 0405	DISCOVERED_ATTACK	0021	white	11	Discovered attack at move 11	Bb2	bg7	Nc3a4	1	0	-
 0405	DISCOVERED_ATTACK	0028	black	14	Discovered attack at move 14	qd8	Pd2	nd5f6	1	0	-
@@ -2775,8 +2672,6 @@
 0432	DISCOVERED_ATTACK	0031	white	16	Discovered attack at move 16	Rh1	ph7	Ph5g6	1	0	-
 0432	DISCOVERED_ATTACK	0041	white	21	Discovered attack at move 21	Rh1	ph7	Qh3g3	1	0	-
 0432	DISCOVERED_ATTACK	0042	black	21	Discovered attack at move 21	qe7	Pe4	ne5d3	1	0	-
-0432	OVERLOADED_PIECE	0042	black	21	Overloaded piece at move 21	Rd1	Kc1	-	0	0	-
-0432	OVERLOADED_PIECE	0042	black	21	Overloaded piece at move 21	Rd1	Rh1	-	0	0	-
 0433	CHECKMATE	0145	white	73	Checkmate at move 73	Qb7	ka7	Qe4b7	0	1	-
 0433	CROSS_PIN	0044	black	22	Cross-pin detected at move 22	qf6	Pd4	-	0	0	-
 0433	CROSS_PIN	0114	black	57	Cross-pin detected at move 57	qf4	Be4	-	0	0	-
@@ -2790,8 +2685,6 @@
 0434	DISCOVERED_ATTACK	0032	black	16	Discovered attack at move 16	bg7	Nc3	pe5e4	1	0	-
 0435	DISCOVERED_ATTACK	0031	white	16	Discovered attack at move 16	Bg2	pb7	Nf3d2	1	0	-
 0435	DISCOVERED_ATTACK	0055	white	28	Discovered attack at move 28	Rg2	qg4	Ng3e4	1	0	-
-0435	OVERLOADED_PIECE	0039	white	20	Overloaded piece at move 20	qc8	ra8	-	0	0	-
-0435	OVERLOADED_PIECE	0039	white	20	Overloaded piece at move 20	qc8	re8	-	0	0	-
 0435	OVERLOADED_PIECE	0057	white	29	Overloaded piece at move 29	re8	pe4	-	0	0	-
 0435	OVERLOADED_PIECE	0057	white	29	Overloaded piece at move 29	re8	ra8	-	0	0	-
 0436	DISCOVERED_ATTACK	0020	black	10	Discovered attack at move 10	bb7	Pe4	nc6d4	1	0	-
@@ -2806,8 +2699,6 @@
 0436	DISCOVERED_ATTACK	0067	white	34	Discovered attack at move 34	Rf6	nc6	Nd6b7	1	0	-
 0436	OVERLOADED_PIECE	0023	white	12	Overloaded piece at move 12	ke8	pf7	-	0	0	-
 0436	OVERLOADED_PIECE	0023	white	12	Overloaded piece at move 12	ke8	qd7	-	0	0	-
-0436	OVERLOADED_PIECE	0041	white	21	Overloaded piece at move 21	qc7	kb6	-	0	0	-
-0436	OVERLOADED_PIECE	0041	white	21	Overloaded piece at move 21	qc7	pd6	-	0	0	-
 0437	DISCOVERED_ATTACK	0014	black	7	Discovered attack at move 7	qd8	Pd3	pd5e4	1	0	-
 0437	DISCOVERED_ATTACK	0029	white	15	Discovered attack at move 15	Rd1	rd4	Qd3e2	1	0	-
 0437	DISCOVERED_ATTACK	0037	white	19	Discovered attack at move 19	Bf1	rd3	Qe2c2	1	0	-
@@ -2951,8 +2842,6 @@
 0460	DISCOVERED_ATTACK	0042	black	21	Discovered attack at move 21	qc6	Pc3	nc4b6	1	0	-
 0460	DISCOVERED_ATTACK	0059	white	30	Discovered attack at move 30	Qf3	pb7	Pe4f5	1	0	-
 0460	DISCOVERED_ATTACK	0061	white	31	Discovered attack at move 31	Qf3	pf7	Pf5g6	1	0	-
-0460	OVERLOADED_PIECE	0057	white	29	Overloaded piece at move 29	pf7	pe6	-	0	0	-
-0460	OVERLOADED_PIECE	0057	white	29	Overloaded piece at move 29	pf7	pg6	-	0	0	-
 0461	DISCOVERED_ATTACK	0041	white	21	Discovered attack at move 21	Qe3	pe6	Pe5f6	1	0	-
 0461	DISCOVERED_ATTACK	0052	black	26	Discovered attack at move 26	bg7	Pd4	nf6e4	1	0	-
 0461	DISCOVERED_ATTACK	0052	black	26	Discovered attack at move 26	rf8	Pf3	nf6e4	1	0	-
@@ -2991,8 +2880,6 @@
 0466	DISCOVERED_ATTACK	0083	white	42	Discovered attack at move 42	Bc3	pf6	Nd4e6	1	0	-
 0466	DISCOVERED_ATTACK	0116	black	58	Discovered attack at move 58	re2	Ke5	ne4g3	1	0	-
 0466	DISCOVERED_CHECK	0116	black	58	Discovered check at move 58	re2	Ke5	ne4g3	1	0	-
-0466	OVERLOADED_PIECE	0090	black	45	Overloaded piece at move 45	Rf3	Bc3	-	0	0	-
-0466	OVERLOADED_PIECE	0090	black	45	Overloaded piece at move 45	Rf3	Kf2	-	0	0	-
 0467	DISCOVERED_ATTACK	0015	white	8	Discovered attack at move 8	Bb2	nf6	Pd4d5	1	0	-
 0467	DISCOVERED_ATTACK	0018	black	9	Discovered attack at move 9	qd8	Pd5	pd6e5	1	0	-
 0467	DISCOVERED_ATTACK	0021	white	11	Discovered attack at move 11	Qd1	qd8	Pd5c6	1	0	-
@@ -3000,8 +2887,6 @@
 0467	DISCOVERED_ATTACK	0056	black	28	Discovered attack at move 28	be7	Pb4	qd6f6	1	0	-
 0467	DISCOVERED_ATTACK	0062	black	31	Discovered attack at move 31	qc3	Ke1	rd2d7	1	0	-
 0467	DISCOVERED_CHECK	0062	black	31	Discovered check at move 31	qc3	Ke1	rd2d7	1	0	-
-0467	OVERLOADED_PIECE	0064	black	32	Overloaded piece at move 32	Bf3	Ke2	-	0	0	-
-0467	OVERLOADED_PIECE	0064	black	32	Overloaded piece at move 32	Bf3	Qb7	-	0	0	-
 0468	DISCOVERED_ATTACK	0008	black	4	Discovered attack at move 4	qd8	Pd4	pd5c4	1	0	-
 0468	DISCOVERED_ATTACK	0033	white	17	Discovered attack at move 17	Be3	pa7	Pd4e5	1	0	-
 0468	DISCOVERED_ATTACK	0033	white	17	Discovered attack at move 17	Rd1	nd7	Pd4e5	1	0	-
@@ -3066,8 +2951,6 @@
 0477	DISCOVERED_ATTACK	0040	black	20	Discovered attack at move 20	rd8	Rd1	nd7f8	1	0	-
 0477	DISCOVERED_ATTACK	0057	white	29	Discovered attack at move 29	Bd1	ph5	Nf3g5	1	0	-
 0477	DISCOVERED_ATTACK	0064	black	32	Discovered attack at move 32	qc7	Qa7	bb7c8	1	0	-
-0477	OVERLOADED_PIECE	0079	white	40	Overloaded piece at move 40	pf7	be6	-	0	0	-
-0477	OVERLOADED_PIECE	0079	white	40	Overloaded piece at move 40	pf7	pg6	-	0	0	-
 0477	ZUGZWANG	0154	black	77	Zugzwang at move 77	-	Kd6	-	0	0	-
 0478	DISCOVERED_ATTACK	0018	black	9	Discovered attack at move 9	qd8	Bd3	pd6e5	1	0	-
 0478	DISCOVERED_ATTACK	0019	white	10	Discovered attack at move 10	Qd1	qd8	Bd3c2	1	0	-
@@ -3101,10 +2984,6 @@
 0482	DISCOVERED_ATTACK	0045	white	23	Discovered attack at move 23	Be3	bh6	Qf4f2	1	0	-
 0482	DISCOVERED_ATTACK	0046	black	23	Discovered attack at move 23	rh8	Ph5	bh6e3	1	0	-
 0482	DISCOVERED_ATTACK	0058	black	29	Discovered attack at move 29	rc7	Pc3	nc4d2	1	0	-
-0482	OVERLOADED_PIECE	0040	black	20	Overloaded piece at move 20	Qf3	Be3	-	0	0	-
-0482	OVERLOADED_PIECE	0040	black	20	Overloaded piece at move 20	Qf3	Ng3	-	0	0	-
-0482	OVERLOADED_PIECE	0058	black	29	Overloaded piece at move 29	Rf1	Kb1	-	0	0	-
-0482	OVERLOADED_PIECE	0058	black	29	Overloaded piece at move 29	Rf1	Qf3	-	0	0	-
 0483	DISCOVERED_ATTACK	0006	black	3	Discovered attack at move 3	qd8	Pd2	pd5e4	1	0	-
 0483	DISCOVERED_ATTACK	0023	white	12	Discovered attack at move 12	Qe2	ke8	Be6b3	1	0	-
 0483	DISCOVERED_ATTACK	0039	white	20	Discovered attack at move 20	Qf3	nf6	Nf5d6	1	0	-
@@ -3132,8 +3011,6 @@
 0486	DISCOVERED_ATTACK	0026	black	13	Discovered attack at move 13	re8	Pe3	be7d6	1	0	-
 0486	DISCOVERED_ATTACK	0029	white	15	Discovered attack at move 15	Bf4	bd6	Ne5f3	1	0	-
 0486	DISCOVERED_ATTACK	0060	black	30	Discovered attack at move 30	re8	Ne3	be6f7	1	0	-
-0486	OVERLOADED_PIECE	0054	black	27	Overloaded piece at move 27	Qd2	Ne3	-	0	0	-
-0486	OVERLOADED_PIECE	0054	black	27	Overloaded piece at move 27	Qd2	Pc3	-	0	0	-
 0487	DISCOVERED_ATTACK	0008	black	4	Discovered attack at move 4	qd8	Pd2	pd5c4	1	0	-
 0487	DISCOVERED_ATTACK	0029	white	15	Discovered attack at move 15	Bg2	pb7	Nf3d4	1	0	-
 0487	DISCOVERED_ATTACK	0031	white	16	Discovered attack at move 16	Qc2	pc7	Nc3e4	1	0	-
@@ -3150,8 +3027,6 @@
 0488	DISCOVERED_ATTACK	0036	black	18	Discovered attack at move 18	qc6	Pc4	bc5d4	1	0	-
 0488	DISCOVERED_ATTACK	0056	black	28	Discovered attack at move 28	qc6	Pc4	nc5d7	1	0	-
 0488	DISCOVERED_ATTACK	0073	white	37	Discovered attack at move 37	Ra7	pg7	Nc7e6	1	0	-
-0488	OVERLOADED_PIECE	0040	black	20	Overloaded piece at move 20	Qd1	Pb3	-	0	0	-
-0488	OVERLOADED_PIECE	0040	black	20	Overloaded piece at move 20	Qd1	Pd3	-	0	0	-
 0490	DISCOVERED_ATTACK	0031	white	16	Discovered attack at move 16	Qc1	pa3	Pb2b3	1	0	-
 0490	DISCOVERED_ATTACK	0042	black	21	Discovered attack at move 21	qb6	Pf2	nc5d7	1	0	-
 0490	DISCOVERED_ATTACK	0045	white	23	Discovered attack at move 23	Bg2	pd5	Pe4e5	1	0	-
@@ -3160,8 +3035,6 @@
 0490	DISCOVERED_ATTACK	0058	black	29	Discovered attack at move 29	re8	Re1	pe6f5	1	0	-
 0490	OVERLOADED_PIECE	0028	black	14	Overloaded piece at move 14	Qc1	Bh6	-	0	0	-
 0490	OVERLOADED_PIECE	0028	black	14	Overloaded piece at move 14	Qc1	Pb2	-	0	0	-
-0490	OVERLOADED_PIECE	0081	white	41	Overloaded piece at move 41	kg6	pf5	-	0	0	-
-0490	OVERLOADED_PIECE	0081	white	41	Overloaded piece at move 41	kg6	ph5	-	0	0	-
 0491	DISCOVERED_ATTACK	0016	black	8	Discovered attack at move 8	bg7	Nc3	pe5e4	1	0	-
 0491	DISCOVERED_ATTACK	0017	white	9	Discovered attack at move 9	Bg2	pe4	Nf3e1	1	0	-
 0491	DISCOVERED_ATTACK	0025	white	13	Discovered attack at move 13	Bb2	bg7	Nc3d5	1	0	-

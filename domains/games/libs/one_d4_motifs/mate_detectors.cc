@@ -81,8 +81,18 @@ class BackRankMateDetector : public Detector {
     // mate that happens to land on the back rank with a friendly pawn
     // nearby — a queen or bishop delivering mate from g7 is neither, and
     // the corpus is full of them.
-    const std::optional<chess::Square> checker = Checker(board, mated);
-    if (!checker.has_value() || checker->index() / 8 != back_rank) return;
+    //
+    // Any checker on that rank, not whichever the scan reaches first: on a
+    // double check the scan order runs rank 8 to rank 1, so a black king's
+    // back-rank checker is found first and a white king's last, and the two
+    // mirror-image mates would classify differently.
+    std::optional<chess::Square> checker;
+    chess::Bitboard checkers = chess_cpp::facts::Checkers(board, mated);
+    while (checkers) {
+      const chess::Square square(checkers.pop());
+      if (square.index() / 8 == back_rank) checker = square;
+    }
+    if (!checker.has_value()) return;
 
     // ...and shut in by its own men rather than only by the attacker.
     const int escape_rank = mated == Side::kWhite ? 1 : 6;

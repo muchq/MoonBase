@@ -327,6 +327,14 @@ TEST(ZugzwangDetector, FiresWhenEveryMoveLosesMaterial) {
   EXPECT_EQ(found[0].side, chess_cpp::Side::kWhite) << "attributed to whoever caused it";
 }
 
+TEST(ZugzwangDetector, IsNotAMoveThatWinsMaterial) {
+  // The same wall, with a rook parked on e7 for the knight to take. Every
+  // other move still hangs it, but Nxe7 wins a rook for it — and a move
+  // that nets material is not one the side would rather not make.
+  EXPECT_THAT(Found(From("6nk/4R1p1/6P1/6P1/2B5/8/4R3/K7 w - - 0 1", "1. Re1"), Motif::kZugzwang),
+              IsEmpty());
+}
+
 TEST(ZugzwangDetector, IsNotCheck) {
   // Being in check is not being in zugzwang. Belt and braces: a king in
   // check is itself attacked and worth more than anything attacking it, so
@@ -354,6 +362,29 @@ TEST(OverloadedPieceDetector, FindsADefenderDoingTwoJobs) {
     EXPECT_EQ(occurrence.attacker, "rd7");
   }
   EXPECT_EQ(Targets(found), (std::vector<std::string>{"pf7", "nd5"}));
+}
+
+TEST(OverloadedPieceDetector, DoesNotCallAKingInCheckADefendedPiece) {
+  // A king in check is not a piece being held. Without this every check
+  // with one defender on the board reads as an overload — and a knight
+  // fork, which checks and attacks a rook at once, reads as one twice.
+  // The rook on e8 is the only thing "defending" both the checked king on
+  // f8 and the knight on d8, and the two are attacked by different pieces —
+  // so this reaches the two-duties test and fails it only because a king is
+  // not a piece that can be held.
+  const std::string pgn = From("3nrk2/2P5/8/8/8/8/8/R6K w - - 0 1", "1. Rf1+");
+  ASSERT_FALSE(Found(pgn, Motif::kCheck).empty()) << "the king really is in check";
+  EXPECT_THAT(Found(pgn, Motif::kOverloadedPiece), IsEmpty());
+}
+
+TEST(OverloadedPieceDetector, WantsTwoAttackersNotOnePieceHittingBoth) {
+  // One attacker cannot deflect two ways: it takes on one square, the
+  // defender recaptures, and the other square is no longer attacked. Pawn
+  // tension reads as an overload without this.
+  // The g2 pawn alone holds f3 and h3, and one black pawn attacks both.
+  EXPECT_THAT(
+      Found(From("6k1/8/8/8/6p1/5P1P/6P1/6K1 b - - 0 1", "1... Kf8"), Motif::kOverloadedPiece),
+      IsEmpty());
 }
 
 TEST(OverloadedPieceDetector, IgnoresADefenderWithOnlyOneJob) {

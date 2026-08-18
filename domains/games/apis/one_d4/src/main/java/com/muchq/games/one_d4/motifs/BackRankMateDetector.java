@@ -51,9 +51,20 @@ public class BackRankMateDetector implements MotifDetector {
     // Mated *along* the back rank. Without this the motif fires on any mate that lands on the
     // back rank with a friendly pawn nearby: a queen or bishop giving mate from g7 is neither a
     // back-rank mate nor rare, and ten of this corpus's thirteen rows were exactly that.
+    // Any checker on that rank, not whichever the scan reaches first: on a double check the scan
+    // runs rank 8 to rank 1, so a black king's back-rank checker is found first and a white king's
+    // last, and the two mirror-image mates would classify differently.
     boolean moverIsWhite = !ctx.whiteToMove();
-    int[] checker = BoardUtils.findCheckingPiece(board, moverIsWhite);
-    if (checker == null || checker[0] != backRankRow) return occurrences;
+    int[] checker = null;
+    for (int c = 0; c < 8; c++) {
+      int piece = board[backRankRow][c];
+      if (piece == 0 || (piece > 0) != moverIsWhite) continue;
+      if (BoardUtils.pieceAttacks(board, backRankRow, c, kingPos[0], kingPos[1])) {
+        checker = new int[] {backRankRow, c};
+        break;
+      }
+    }
+    if (checker == null) return occurrences;
 
     // ...and shut in by its own men rather than only by the attacker.
     int escapeRankRow = loserIsWhite ? 6 : 1; // rank 2 for white (row 6), rank 7 for black (row 1)

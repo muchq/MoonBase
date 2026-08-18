@@ -191,8 +191,8 @@ TEST_F(Parity, TheExtraRowsAreThoseSevenMotifsAndNothingElse) {
                        {"DISCOVERED_ATTACK", 2892},
                        {"DISCOVERED_CHECK", 31},
                        {"DOUBLE_CHECK", 3},
-                       {"OVERLOADED_PIECE", 200},
-                       {"ZUGZWANG", 10},
+                       {"OVERLOADED_PIECE", 76},
+                       {"ZUGZWANG", 7},
                    }));
 }
 

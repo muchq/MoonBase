@@ -31,6 +31,14 @@ namespace {
 using chess_cpp::Position;
 using chess_cpp::Side;
 
+/// A piece, the attacked squares it alone defends, and everything of
+/// theirs bearing on those squares.
+struct Duties {
+  chess::Square defender;
+  std::vector<chess::Square> defended;
+  chess::Bitboard attackers;
+};
+
 class OverloadedPieceDetector : public Detector {
  public:
   Motif motif() const override { return Motif::kOverloadedPiece; }
@@ -43,10 +51,14 @@ class OverloadedPieceDetector : public Detector {
     const Side attacking = chess_cpp::Opponent(defending);
 
     // For each of our pieces, the attacked squares it alone defends.
-    std::vector<std::pair<chess::Square, std::vector<chess::Square>>> duties;
+    std::vector<Duties> duties;
     ForEachSquare([&](int row, int col) {
       const chess::Square square = SquareAt(row, col);
       if (!BelongsTo(board.at(square), defending)) return;
+      // A king in check is not a piece being held; without this every check
+      // with a single defender on the board reads as an overload, and a
+      // knight fork reads as one twice.
+      if (board.at(square).type() == chess::PieceType::KING) return;
       // The defence has to be holding something back. A pawn attacked by a
       // queen is not defended in any meaningful sense — taking it loses the
       // queen — and counting those makes half the pieces on the board
@@ -58,17 +70,23 @@ class OverloadedPieceDetector : public Detector {
       if (defenders.count() != 1) return;
 
       const chess::Square defender(defenders.lsb());
-      for (auto& [piece, defended] : duties) {
-        if (piece == defender) {
-          defended.push_back(square);
+      const chess::Bitboard attackers = chess_cpp::facts::AttackersOf(board, attacking, square);
+      for (Duties& duty : duties) {
+        if (duty.defender == defender) {
+          duty.defended.push_back(square);
+          duty.attackers |= attackers;
           return;
         }
       }
-      duties.push_back({defender, {square}});
+      duties.push_back({defender, {square}, attackers});
     });
 
-    for (const auto& [defender, defended] : duties) {
+    for (const auto& [defender, defended, attackers] : duties) {
       if (defended.size() < 2) continue;
+      // Two jobs and one attacker is not an overload: it can cash one
+      // square, the defender recaptures, and the other square is no longer
+      // attacked. Pawn tension reads as an overload without this.
+      if (attackers.count() < 2) continue;
       // One row per piece it cannot keep, so the read path can name both
       // halves of the tactic.
       for (const chess::Square square : defended) {

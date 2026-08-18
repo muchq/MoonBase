@@ -90,13 +90,19 @@ class ZugzwangDetector : public Detector {
     // Standing still would cost nothing.
     if (Hanging(board, to_move).has_value()) return;
 
-    // ...but every move does.
+    // ...but every move does, net of what it takes on the way. Hanging()
+    // only ever sees the position after the move, so a capture's proceeds
+    // are invisible to it: without this, taking a free bishop counts as a
+    // loss because the pawn it stops defending is now en prise.
     chess::Board after = board;
     for (const chess::Move& move : moves) {
+      const int captured = move.typeOf() == chess::Move::ENPASSANT ? Value(chess::PieceType::PAWN)
+                                                                   : Value(board.at(move.to()));
       after.makeMove(move);
-      const bool costs = Hanging(after, to_move).has_value();
+      const std::optional<chess::Square> hanging = Hanging(after, to_move);
+      const int cost = hanging.has_value() ? Value(after.at(*hanging)) : 0;
       after.unmakeMove(move);
-      if (!costs) return;
+      if (captured >= cost) return;
     }
 
     Finding finding;
