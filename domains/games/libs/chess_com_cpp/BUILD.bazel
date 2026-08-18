@@ -1,0 +1,72 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
+
+smithy_cpp_client_library(
+    name = "chess_com_smithy_client",
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/chess_com.smithy",
+    ],
+    namespace = "moonbase::chess_com",
+    service = "moonbase.chess_com#ChessCom",
+)
+
+smithy_cpp_server_library(
+    name = "chess_com_smithy_server",
+    testonly = True,
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/chess_com.smithy",
+    ],
+    namespace = "moonbase::chess_com",
+    service = "moonbase.chess_com#ChessCom",
+)
+
+cc_library(
+    name = "client",
+    srcs = ["client.cc"],
+    hdrs = ["client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":chess_com_smithy_client",
+        "@smithy_cpp//runtime:client",
+        "@smithy_cpp//runtime:core",
+    ],
+)
+
+cc_library(
+    name = "production_client",
+    srcs = ["production_client.cc"],
+    hdrs = ["production_client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":client",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:http_beast",
+    ],
+)
+
+cc_test(
+    name = "client_test",
+    size = "small",
+    srcs = ["client_test.cc"],
+    deps = [
+        ":chess_com_smithy_server",
+        ":client",
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:client",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
+cc_test(
+    name = "production_client_test",
+    size = "small",
+    srcs = ["production_client_test.cc"],
+    deps = [
+        ":production_client",
+        "@googletest//:gtest_main",
+    ],
+)
