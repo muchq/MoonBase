@@ -19,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
 import org.jdbi.v3.core.Handle;
 import org.jdbi.v3.core.Jdbi;
 import org.jdbi.v3.core.mapper.RowMapper;
@@ -60,12 +61,19 @@ public class GameFeatureDao implements GameFeatureStore {
           + " moved_piece, attacker, target, is_discovered, is_mate, pin_type)"
           + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
+  // FORK is the one motif nothing stores: it is a grouping of ATTACK rows by attacker, derived at
+  // read time and nowhere else, so a FORK row in the table can only be left over from an older
+  // pipeline.
+  //
+  // CHECKMATE, DISCOVERED_CHECK, DOUBLE_CHECK and DISCOVERED_ATTACK used to be filtered here for
+  // the same reason. They are stored again as of #1389 phase 3, from the position rather than by
+  // inference, so filtering them would throw away the better answer — and leftover rows from the
+  // pipeline that last wrote them are no longer hidden. Those age out with retention.
   private static final String QUERY_OCCURRENCES =
       "SELECT game_url, motif, move_number, side, description,"
           + " moved_piece, attacker, target, is_discovered, is_mate, pin_type"
           + " FROM motif_occurrences WHERE game_url IN (<urls>)"
-          + " AND motif NOT IN"
-          + " ('FORK', 'CHECKMATE', 'DISCOVERED_CHECK', 'DOUBLE_CHECK', 'DISCOVERED_ATTACK')"
+          + " AND motif <> 'FORK'"
           + " ORDER BY ply ASC";
 
   private static final RowMapper<GameFeature> GAME_FEATURE_MAPPER =
@@ -486,8 +494,8 @@ public class GameFeatureDao implements GameFeatureStore {
   @Override
   public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
     if (gameUrls.isEmpty()) return Map.of();
-    // Fetch all rows including ATTACK (needed for derivation) but excluding stale materialized
-    // rows for motifs now derived at response time. ATTACK itself is removed in post-processing.
+    // Fetch all rows including ATTACK, which the derivations below need and which is removed in
+    // post-processing.
     Map<String, Map<String, List<OccurrenceRow>>> result =
         withReadHandle(
             h -> {
@@ -530,13 +538,18 @@ public class GameFeatureDao implements GameFeatureStore {
       String gameUrl = entry.getKey();
       List<OccurrenceRow> attackOccs = motifMap.getOrDefault("attack", List.of());
 
-      addIfNonEmpty(motifMap, "fork", deriveForkOccurrences(gameUrl, attackOccs));
-      addIfNonEmpty(
-          motifMap, "discovered_attack", deriveDiscoveredAttackOccurrences(gameUrl, attackOccs));
-      addIfNonEmpty(motifMap, "checkmate", deriveCheckmateOccurrences(gameUrl, attackOccs));
-      addIfNonEmpty(
-          motifMap, "discovered_check", deriveDiscoveredCheckOccurrences(gameUrl, attackOccs));
-      addIfNonEmpty(motifMap, "double_check", deriveDoubleCheckOccurrences(gameUrl, attackOccs));
+      deriveIfAbsent(motifMap, "fork", () -> deriveForkOccurrences(gameUrl, attackOccs));
+      deriveIfAbsent(
+          motifMap,
+          "discovered_attack",
+          () -> deriveDiscoveredAttackOccurrences(gameUrl, attackOccs));
+      deriveIfAbsent(motifMap, "checkmate", () -> deriveCheckmateOccurrences(gameUrl, attackOccs));
+      deriveIfAbsent(
+          motifMap,
+          "discovered_check",
+          () -> deriveDiscoveredCheckOccurrences(gameUrl, attackOccs));
+      deriveIfAbsent(
+          motifMap, "double_check", () -> deriveDoubleCheckOccurrences(gameUrl, attackOccs));
 
       motifMap.remove("attack");
     }
@@ -547,6 +560,24 @@ public class GameFeatureDao implements GameFeatureStore {
   private static void addIfNonEmpty(
       Map<String, List<OccurrenceRow>> motifMap, String key, List<OccurrenceRow> occs) {
     if (!occs.isEmpty()) motifMap.put(key, occs);
+  }
+
+  /**
+   * Derives {@code key} from ATTACK rows only when the game has none of its own.
+   *
+   * <p>These motifs used to be derivable and nothing else, because no detector stored them. The C++
+   * indexer (#1389 phase 3) does, from the position rather than by inference — {@code DOUBLE_CHECK}
+   * counts the checkers instead of counting ATTACK rows that name a king, and {@code
+   * DISCOVERED_CHECK} asks the move generator what kind of check a move gives. Deriving on top of
+   * those would return every occurrence twice.
+   *
+   * <p>The fallback is not transitional politeness: games indexed by the Java worker have no stored
+   * rows for these and would otherwise lose them entirely.
+   */
+  private static void deriveIfAbsent(
+      Map<String, List<OccurrenceRow>> motifMap, String key, Supplier<List<OccurrenceRow>> derive) {
+    if (motifMap.containsKey(key)) return;
+    addIfNonEmpty(motifMap, key, derive.get());
   }
 
   /**

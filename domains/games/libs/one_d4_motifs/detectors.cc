@@ -13,11 +13,16 @@ std::vector<std::unique_ptr<Detector>> DefaultDetectors() {
   detectors.push_back(MakeSkewerDetector());
   detectors.push_back(MakeAttackDetector());
   detectors.push_back(MakeCheckDetector());
+  detectors.push_back(MakeDiscoveredCheckDetector());
+  detectors.push_back(MakeDoubleCheckDetector());
   detectors.push_back(MakePromotionDetector());
   detectors.push_back(MakePromotionWithCheckDetector());
   detectors.push_back(MakePromotionWithCheckmateDetector());
+  detectors.push_back(MakeCheckmateDetector());
   detectors.push_back(MakeBackRankMateDetector());
   detectors.push_back(MakeSmotheredMateDetector());
+  detectors.push_back(MakeZugzwangDetector());
+  detectors.push_back(MakeOverloadedPieceDetector());
   return detectors;
 }
 

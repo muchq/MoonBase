@@ -6,13 +6,13 @@
 // regenerates stops describing anything, and a comparison against a file
 // this side generated agrees with itself.
 //
-// The two implementations agree on every row but one motif's, on purpose:
-// CROSS_PIN could never fire in Java. That difference is pinned row for row
-// rather than counted — "allowed to differ" without identity is how a
-// regression hides inside a known difference.
+// The port reproduces every row the Java pipeline writes, and writes six
+// motifs' worth that Java never has. Both halves are pinned row for row —
+// "allowed to differ" without identity is how a regression hides inside a
+// known difference.
 //
-// They also used to disagree about Black's ply. That was a Java bug, and it
-// is fixed rather than tolerated (MotifOccurrence.plyOf), so the harness no
+// The two used to disagree about Black's ply as well. That was a Java bug,
+// fixed rather than tolerated (MotifOccurrence.plyOf), so the harness no
 // longer transforms the oracle before comparing it.
 
 #include <gmock/gmock.h>
@@ -46,7 +46,7 @@ using ::testing::IsEmpty;
 
 constexpr char kCorpus[] = "domains/games/apis/one_d4/src/test/resources/hikaru_corpus.pgn";
 constexpr char kGolden[] = "domains/games/apis/one_d4/src/test/resources/motif_parity_golden.tsv";
-constexpr char kCrossPinRows[] = "domains/games/libs/one_d4_motifs/testdata/cross_pins.tsv";
+constexpr char kCppOnlyRows[] = "domains/games/libs/one_d4_motifs/testdata/cpp_only_rows.tsv";
 constexpr int kGames = 500;
 
 std::string Read(const std::string& path) {
@@ -151,48 +151,49 @@ std::multiset<std::string>* Parity::golden_ = nullptr;
 
 /// The Java pipeline's own count over this bank, pinned so a regenerated
 /// corpus or golden is loud rather than quiet.
-constexpr int kGoldenRows = 14558;
-
-/// Cross-pins the Java detector cannot see. It looks for one square found
-/// twice from the same king, which two rays never do, so CROSS_PIN has
-/// never had a single row in it.
-constexpr int kCrossPins = 43;
+constexpr int kGoldenRows = 14548;
 
 TEST_F(Parity, ReadsTheWholeGolden) { EXPECT_EQ(golden_->size(), kGoldenRows); }
 
 TEST_F(Parity, FindsEverythingTheJavaPipelineFinds) {
-  // Nothing lost: 14,558 rows over 500 games and ten detectors, compared
-  // row for row with no transform in between. Losing one is a port bug.
+  // Nothing lost: every row the Java pipeline writes, compared row for row
+  // with no transform in between. Losing one is a port bug.
   const std::vector<std::string> lost = Missing(*golden_, *cpp_);
   EXPECT_THAT(lost, IsEmpty()) << "rows the port stopped producing: " << lost.size() << " of "
                                << golden_->size();
 }
 
-TEST_F(Parity, AddsTheCrossPinsJavaCannotSee) {
-  // Row for row, not just 43 of them: Java emits none, so these are the one
-  // motif the golden cannot hold to account. A rewrite of the detector that
-  // found 43 different cross-pins would otherwise pass.
-  std::vector<std::string> found;
-  for (const std::string& row : Missing(*cpp_, *golden_)) {
-    if (absl::StrContains(row, "\tCROSS_PIN\t")) found.push_back(row);
-  }
+TEST_F(Parity, EmitsExactlyTheRowsJavaCannot) {
+  // Six motifs Java has never stored a row for, pinned row for row rather
+  // than counted: three of them the read path derives from ATTACK rows at
+  // query time (so ORDER BY and sequence() match nothing today), and three
+  // no implementation has ever produced.
+  std::vector<std::string> found = Missing(*cpp_, *golden_);
   std::sort(found.begin(), found.end());
 
   std::vector<std::string> expected;
-  for (const std::string_view line : absl::StrSplit(Read(kCrossPinRows), '\n')) {
+  for (const std::string_view line : absl::StrSplit(Read(kCppOnlyRows), '\n')) {
     if (!line.empty()) expected.emplace_back(line);
   }
 
-  EXPECT_EQ(expected.size(), kCrossPins);
+  EXPECT_EQ(found.size(), expected.size());
   EXPECT_EQ(found, expected);
 }
 
-TEST_F(Parity, DiffersOnlyInTheCrossPins) {
-  const std::vector<std::string> extra = Missing(*cpp_, *golden_);
-  EXPECT_EQ(extra.size(), kCrossPins);
-  for (const auto& [motif, count] : ByMotif(extra)) {
-    std::cerr << "extra " << motif << ": " << count << "\n";
-  }
+TEST_F(Parity, TheExtraRowsAreTheSixMotifsAndNothingElse) {
+  // The readable summary of the file above. A detector that started firing
+  // somewhere new moves one of these before the row-for-row diff has to be
+  // read.
+  const std::map<std::string, int> extra = ByMotif(Missing(*cpp_, *golden_));
+  EXPECT_EQ(extra, (std::map<std::string, int>{
+                       {"CHECKMATE", 41},
+                       {"CROSS_PIN", 43},
+                       {"DISCOVERED_ATTACK", 2892},
+                       {"DISCOVERED_CHECK", 28},
+                       {"DOUBLE_CHECK", 3},
+                       {"OVERLOADED_PIECE", 200},
+                       {"ZUGZWANG", 10},
+                   }));
 }
 
 }  // namespace

@@ -1902,7 +1902,6 @@
 0062	ATTACK	0073	white	37	Qg7	kh8	Qg7	0	1	-
 0062	ATTACK	0073	white	37	Qg7	nf8	Qg7	0	0	-
 0062	ATTACK	0073	white	37	Qg7	ng6	Qg7	0	0	-
-0062	BACK_RANK_MATE	0073	white	37	Qg7	kh8	-	0	1	-
 0062	CHECK	0057	white	29	Nh6	kg8	-	0	0	-
 0062	CHECK	0069	white	35	Nf5	kg7	-	0	0	-
 0062	CHECK	0073	white	37	Qg7	kh8	-	0	1	-
@@ -5567,7 +5566,6 @@
 0201	ATTACK	0047	white	24	Bf6	kh8	Bf6	0	0	-
 0201	ATTACK	0047	white	24	Bf6	rd8	Bf6	0	0	-
 0201	ATTACK	0049	white	25	Bg7	kh8	Bg7	0	1	-
-0201	BACK_RANK_MATE	0049	white	25	Bg7	kh8	-	0	1	-
 0201	CHECK	0041	white	21	Be6	kg8	-	0	0	-
 0201	CHECK	0043	white	22	Rc7	kg7	-	0	0	-
 0201	CHECK	0045	white	23	Qf6	kh8	-	0	0	-
@@ -5951,7 +5949,6 @@
 0215	ATTACK	0081	white	41	Rd4	qg4	Rd4	0	0	-
 0215	ATTACK	0082	black	41	qh5	Kh1	qh5	0	0	-
 0215	ATTACK	0084	black	42	qh2	Kg1	qh2	0	1	-
-0215	BACK_RANK_MATE	0084	black	42	qh2	Kg1	-	0	1	-
 0215	CHECK	0008	black	4	qa5	Ke1	-	0	0	-
 0215	CHECK	0076	black	38	qg4	Kg1	-	0	0	-
 0215	CHECK	0082	black	41	qh5	Kh1	-	0	0	-
@@ -5973,7 +5970,6 @@
 0216	ATTACK	0058	black	29	re8	Pe3	pe4f3	1	0	-
 0216	ATTACK	0059	white	30	Bb2	pf6	Pd4d5	1	0	-
 0216	ATTACK	0062	black	31	qg2	Kg1	qg2	0	1	-
-0216	BACK_RANK_MATE	0062	black	31	qg2	Kg1	-	0	1	-
 0216	CHECK	0062	black	31	qg2	Kg1	-	0	1	-
 0216	PIN	0003	white	2	Bb2	pg7	-	0	0	RELATIVE
 0216	PIN	0039	white	20	Be4	pd5	-	0	0	RELATIVE
@@ -6098,7 +6094,6 @@
 0220	ATTACK	0038	black	19	pc5	Qd4	pc5	0	0	-
 0220	ATTACK	0039	white	20	Qg7	bg6	Qg7	0	0	-
 0220	ATTACK	0039	white	20	Qg7	kg8	Qg7	0	1	-
-0220	BACK_RANK_MATE	0039	white	20	Qg7	kg8	-	0	1	-
 0220	CHECK	0015	white	8	Ne7	kg8	-	0	0	-
 0220	CHECK	0039	white	20	Qg7	kg8	-	0	1	-
 0220	PIN	0039	white	20	Qg7	pf7	-	0	0	RELATIVE
@@ -7206,7 +7201,6 @@
 0252	ATTACK	0064	black	32	rc3	Qh3	rc3	0	0	-
 0252	ATTACK	0066	black	33	qg2	Kh1	qg2	0	1	-
 0252	ATTACK	0066	black	33	qg2	Rf1	qg2	0	0	-
-0252	BACK_RANK_MATE	0066	black	33	qg2	Kh1	-	0	1	-
 0252	CHECK	0060	black	30	be3	Kg1	-	0	0	-
 0252	CHECK	0066	black	33	qg2	Kh1	-	0	1	-
 0252	PIN	0026	black	13	qa6	Pa3	-	0	0	RELATIVE
@@ -9358,7 +9352,6 @@
 0318	ATTACK	0030	black	15	rf7	Qf3	rf7	0	0	-
 0318	ATTACK	0035	white	18	Qh7	bg7	Qh7	0	0	-
 0318	ATTACK	0035	white	18	Qh7	kh8	Qh7	0	1	-
-0318	BACK_RANK_MATE	0035	white	18	Qh7	kh8	-	0	1	-
 0318	CHECK	0015	white	8	Pf7	kg8	-	0	0	-
 0318	CHECK	0035	white	18	Qh7	kh8	-	0	1	-
 0318	PIN	0020	black	10	bg4	Nf3	-	0	0	RELATIVE
@@ -10707,7 +10700,6 @@
 0365	ATTACK	0055	white	28	Rh8	kg8	Rh8	0	0	-
 0365	ATTACK	0057	white	29	Qh4	kh8	Qh4	0	0	-
 0365	ATTACK	0059	white	30	Qh7	kg8	Qh7	0	1	-
-0365	BACK_RANK_MATE	0059	white	30	Qh7	kg8	-	0	1	-
 0365	CHECK	0040	black	20	nb3	Kc1	-	0	0	-
 0365	CHECK	0055	white	28	Rh8	kg8	-	0	0	-
 0365	CHECK	0057	white	29	Qh4	kh8	-	0	0	-
@@ -12744,7 +12736,6 @@
 0440	ATTACK	0090	black	45	rb6	Kb2	rb6	0	0	-
 0440	ATTACK	0092	black	46	qc3	Ka1	qc3	0	1	-
 0440	ATTACK	0092	black	46	qc3	Re1	qc3	0	0	-
-0440	BACK_RANK_MATE	0092	black	46	qc3	Ka1	-	0	1	-
 0440	CHECK	0028	black	14	nd3	Kc1	-	0	0	-
 0440	CHECK	0061	white	31	Nd6	kc8	-	0	0	-
 0440	CHECK	0067	white	34	Qf8	kc8	-	0	0	-
@@ -13640,7 +13631,6 @@
 0469	ATTACK	0066	black	33	qf6	Kf2	qf6	0	0	-
 0469	ATTACK	0068	black	34	rg8	Kg2	rg8	0	0	-
 0469	ATTACK	0070	black	35	qf3	Kh1	qf3	0	1	-
-0469	BACK_RANK_MATE	0070	black	35	qf3	Kh1	-	0	1	-
 0469	CHECK	0054	black	27	qe4	Kh1	-	0	0	-
 0469	CHECK	0057	white	29	Rf6	kf8	-	0	0	-
 0469	CHECK	0059	white	30	Qf6	kf8	-	0	0	-

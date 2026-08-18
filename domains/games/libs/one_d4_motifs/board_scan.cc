@@ -1,9 +1,11 @@
 #include "domains/games/libs/one_d4_motifs/board_scan.h"
 
+#include <algorithm>
 #include <optional>
 #include <vector>
 
 #include "chess.hpp"
+#include "domains/games/libs/chess_cpp/board_facts.h"
 #include "domains/games/libs/chess_cpp/replay.h"
 #include "domains/games/libs/chess_cpp/side.h"
 
@@ -26,6 +28,17 @@ bool SlidesAlong(chess::Piece piece, Direction direction) {
 
 bool BelongsTo(chess::Piece piece, chess_cpp::Side side) {
   return piece != chess::Piece::NONE && piece.color() == chess_cpp::ToColor(side);
+}
+
+std::optional<int> CheapestAttackerValue(const chess::Board& board, chess_cpp::Side by,
+                                         chess::Square square) {
+  chess::Bitboard attackers = chess_cpp::facts::AttackersOf(board, by, square);
+  if (!attackers) return std::nullopt;
+  int cheapest = Value(chess::PieceType::KING);
+  while (attackers) {
+    cheapest = std::min(cheapest, Value(board.at(chess::Square(attackers.pop()))));
+  }
+  return cheapest;
 }
 
 std::optional<chess::Square> FirstInScanOrder(chess::Bitboard squares) {

@@ -59,6 +59,23 @@ class FinalPosition {
   chess_cpp::Side by_ = chess_cpp::Side::kWhite;
 };
 
+/// DISCOVERED_ATTACK, from the ATTACK rows that carry is_discovered.
+///
+/// Not a detector: it is the same finding under a second name, and
+/// recomputing it would mean a second copy of the discovery scan. The read
+/// path projects it the same way today (GameFeatureDao); storing it is what
+/// makes ChessQL's ORDER BY and sequence() work on it.
+std::vector<MotifOccurrence> DiscoveredAttacks(const std::vector<MotifOccurrence>& occurrences) {
+  std::vector<MotifOccurrence> projected;
+  for (const MotifOccurrence& occurrence : occurrences) {
+    if (occurrence.motif != Motif::kAttack || !occurrence.is_discovered) continue;
+    MotifOccurrence discovered = occurrence;
+    discovered.motif = Motif::kDiscoveredAttack;
+    projected.push_back(std::move(discovered));
+  }
+  return projected;
+}
+
 }  // namespace
 
 absl::StatusOr<GameFeatures> Extract(const chess_cpp::ParsedGame& game,
@@ -100,6 +117,11 @@ absl::StatusOr<GameFeatures> Extract(const chess_cpp::ParsedGame& game,
     for (MotifOccurrence& occurrence : found) {
       features.occurrences.push_back(std::move(occurrence));
     }
+  }
+
+  for (MotifOccurrence& discovered : DiscoveredAttacks(features.occurrences)) {
+    features.motifs.insert(Motif::kDiscoveredAttack);
+    features.occurrences.push_back(std::move(discovered));
   }
   return features;
 }

@@ -8,6 +8,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "domains/games/libs/chess_cpp/pgn.h"
+#include "domains/games/libs/chess_cpp/side.h"
 #include "domains/games/libs/one_d4_motifs/extract.h"
 #include "domains/games/libs/one_d4_motifs/motif.h"
 #include "domains/games/libs/one_d4_motifs/occurrence.h"
@@ -250,6 +251,105 @@ TEST(CheckDetector, ReadsTheBoardRatherThanTheNotation) {
   const auto found = Found(From("4k3/8/8/8/8/8/8/3RK3 w - - 0 1", "1. Rd8"), Motif::kCheck);
   ASSERT_EQ(found.size(), 1u);
   EXPECT_EQ(found[0].attacker, "Rd8");
+}
+
+// --- DISCOVERED_CHECK / DOUBLE_CHECK / CHECKMATE -------------------------
+
+TEST(DiscoveredCheckDetector, NamesThePieceTheMoveUncovered) {
+  // The knight steps off the e-file and the rook behind it gives check.
+  // The read path infers this from a discovered ATTACK row that happens to
+  // name a king; this asks the move generator what kind of check it is.
+  const auto found =
+      Found(From("4k3/8/8/8/4N3/8/8/4R2K w - - 0 1", "1. Nc5+"), Motif::kDiscoveredCheck);
+  ASSERT_EQ(found.size(), 1u);
+  EXPECT_EQ(found[0].attacker, "Re1");
+  EXPECT_EQ(found[0].target, "ke8");
+  EXPECT_EQ(found[0].moved_piece, "Ne4c5");
+  EXPECT_TRUE(found[0].is_discovered);
+}
+
+TEST(DiscoveredCheckDetector, IgnoresACheckByThePieceThatMoved) {
+  EXPECT_THAT(Found(From("4k3/8/8/8/8/8/8/3R3K w - - 0 1", "1. Re1+"), Motif::kDiscoveredCheck),
+              IsEmpty());
+}
+
+TEST(DoubleCheckDetector, WantsTwoCheckersAtOnce) {
+  // Nd6 checks from d6 and uncovers Re1 at the same time.
+  const auto found =
+      Found(From("4k3/8/8/8/4N3/8/8/4R2K w - - 0 1", "1. Nd6+"), Motif::kDoubleCheck);
+  ASSERT_EQ(found.size(), 1u);
+  EXPECT_EQ(found[0].target, "ke8");
+  EXPECT_EQ(found[0].description, "Double check at move 1");
+}
+
+TEST(DoubleCheckDetector, OneCheckerIsNotADoubleCheck) {
+  EXPECT_THAT(Found(From("4k3/8/8/8/4N3/8/8/4R2K w - - 0 1", "1. Nc5+"), Motif::kDoubleCheck),
+              IsEmpty());
+}
+
+TEST(CheckmateDetector, StoresARowOfItsOwn) {
+  // Derived from ATTACK rows until now, which is why ChessQL's ORDER BY and
+  // sequence() have never matched a checkmate.
+  const auto found =
+      Found("[Event \"x\"]\n\n1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 4. Qxf7# 1-0\n", Motif::kCheckmate);
+  ASSERT_EQ(found.size(), 1u);
+  EXPECT_EQ(found[0].attacker, "Qf7");
+  EXPECT_EQ(found[0].target, "ke8");
+  EXPECT_TRUE(found[0].is_mate);
+  EXPECT_EQ(found[0].ply, 7);
+}
+
+TEST(CheckmateDetector, SaysNothingAboutAnUnfinishedGame) {
+  EXPECT_THAT(Found("[Event \"x\"]\n\n1. e4 e5 *\n", Motif::kCheckmate), IsEmpty());
+}
+
+// --- ZUGZWANG / OVERLOADED_PIECE ----------------------------------------
+
+TEST(ZugzwangDetector, FiresWhenEveryMoveLosesMaterial) {
+  // Black's king is walled in by its own pawn and White's, and the knight
+  // has nowhere to go that a pawn does not take it.
+  const auto found =
+      Found(From("6nk/6p1/6P1/6P1/2B5/8/4R3/K7 w - - 0 1", "1. Re1"), Motif::kZugzwang);
+  ASSERT_EQ(found.size(), 1u);
+  EXPECT_EQ(found[0].target, "kh8");
+  EXPECT_EQ(found[0].side, chess_cpp::Side::kWhite) << "attributed to whoever caused it";
+}
+
+TEST(ZugzwangDetector, IsNotCheck) {
+  EXPECT_THAT(Found(From("4k3/8/8/8/8/8/8/3R3K w - - 0 1", "1. Re1+"), Motif::kZugzwang),
+              IsEmpty());
+}
+
+TEST(ZugzwangDetector, IsNotAPositionWhereSomethingWasAlreadyHanging) {
+  // If a piece is en prise before the move, losing it is not the obligation
+  // to move — it is just a piece being en prise.
+  // The same wall, plus a knight on h6 the g5 pawn can already take.
+  EXPECT_THAT(Found(From("6nk/6p1/6Pn/6P1/2B5/8/4R3/K7 w - - 0 1", "1. Re1"), Motif::kZugzwang),
+              IsEmpty());
+}
+
+TEST(OverloadedPieceDetector, FindsADefenderDoingTwoJobs) {
+  // The rook on d7 is the only thing holding both the knight and the pawn.
+  const auto found =
+      Found(From("7k/3r1p2/8/3nP3/4P3/8/8/K7 w - - 0 1", "1. e6"), Motif::kOverloadedPiece);
+  ASSERT_EQ(found.size(), 2u);
+  for (const MotifOccurrence& occurrence : found) {
+    EXPECT_EQ(occurrence.attacker, "rd7");
+  }
+  EXPECT_EQ(Targets(found), (std::vector<std::string>{"pf7", "nd5"}));
+}
+
+TEST(OverloadedPieceDetector, IgnoresADefenderWithOnlyOneJob) {
+  EXPECT_THAT(Found(From("7k/3r4/8/3nP3/4P3/8/8/K7 w - - 0 1", "1. e6"), Motif::kOverloadedPiece),
+              IsEmpty());
+}
+
+TEST(OverloadedPieceDetector, IgnoresADefenceNothingIsThreatening) {
+  // A pawn attacked only by a queen is not being held by its defender —
+  // taking it loses the queen. Counting those makes half the board
+  // overloaded.
+  EXPECT_THAT(Found(From("7k/3r1p2/8/3n4/8/8/8/KR6 w - - 0 1", "1. Rd1"), Motif::kOverloadedPiece),
+              IsEmpty());
 }
 
 // --- PROMOTION ----------------------------------------------------------

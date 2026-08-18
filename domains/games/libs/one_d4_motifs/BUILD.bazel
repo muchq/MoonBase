@@ -40,6 +40,7 @@ cc_library(
     hdrs = ["board_scan.h"],
     deps = [
         "//bazel/3p/chess_library",
+        "//domains/games/libs/chess_cpp:board_facts",
         "//domains/games/libs/chess_cpp:replay",
         "//domains/games/libs/chess_cpp:side",
     ],
@@ -65,9 +66,11 @@ cc_library(
         "check_detector.cc",
         "detectors.cc",
         "mate_detectors.cc",
+        "overloaded_piece_detector.cc",
         "pin_detectors.cc",
         "promotion_detectors.cc",
         "skewer_detector.cc",
+        "zugzwang_detector.cc",
     ],
     hdrs = ["detectors.h"],
     visibility = ["//visibility:public"],
@@ -146,6 +149,7 @@ cc_test(
         ":motif",
         ":occurrence",
         "//domains/games/libs/chess_cpp:pgn",
+        "//domains/games/libs/chess_cpp:side",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@googletest//:gtest_main",
@@ -168,14 +172,14 @@ cc_test(
 )
 
 # Runs the port over the same 500 games the Java pipeline's golden covers.
-# medium on measurement: 0.3s normally, 11.8s under tsan — the sanitize jobs
+# medium on measurement: 0.4s normally, 19.3s under tsan — the sanitize jobs
 # build -c dbg, which also re-arms the vendored header's asserts.
 cc_test(
     name = "parity_test",
     size = "medium",
     srcs = ["parity_test.cc"],
     data = [
-        "testdata/cross_pins.tsv",
+        "testdata/cpp_only_rows.tsv",
         "//domains/games/apis/one_d4:motif_parity_golden",
         "//domains/games/apis/one_d4:parity_corpora",
     ],

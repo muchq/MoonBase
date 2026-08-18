@@ -30,9 +30,10 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    * have no stored rows of their own in motif_occurrences.
    *
    * <p>Note: discovered_attack, checkmate, discovered_check, and double_check are ALSO expressed
-   * via ATTACK rows in compileMotif(), but they DO have stored rows from their dedicated detectors.
-   * ORDER BY and sequence() for those motifs use stored rows and work normally. See GitHub issue
-   * #1083 for the consistency follow-up on those motifs.
+   * via ATTACK rows in compileMotif(). They had no stored rows at all until #1389 phase 3 — the C++
+   * indexer writes them from the position, so ORDER BY and sequence() on those four match something
+   * for the first time, and match nothing for games the Java worker indexed. The WHERE-clause
+   * derivation covers both. See GitHub issue #1083.
    */
   private static final Set<String> ATTACK_DERIVED_MOTIFS = Set.of("fork");
 
