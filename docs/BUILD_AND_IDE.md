@@ -60,10 +60,21 @@ a blocked archive endpoint, clones each at its pinned tag (git works
 where the archive download does not), replays the BCR's patches, overlay
 files, and registry `MODULE.bazel` from `bcr.bazel.build` — registry
 metadata is not blocked — and writes one `--override_module` line per
-module. It then handles the two repos that come from module extensions
-rather than the registry, and so never appear in that scan: the `bats`
-toolchain gets an empty stub, and `raylib` gets a clone plus this repo's
-own `bazel/3p/raylib.BUILD`.
+module.
+
+It then covers the two kinds that scan structurally cannot find. Modules
+pinned in a `MODULE.bazel` with `archive_override` — `smithy_cpp` — are
+not served by the registry, so they have no `source.json` for the scan to
+walk; they are read straight out of the `MODULE.bazel` files and cloned
+at their pinned commit. And repos created by module extensions are not
+modules at all: the `bats` toolchain gets an empty stub, and `raylib`
+gets a clone plus this repo's own `bazel/3p/raylib.BUILD`.
+
+`smithy_cpp` is worth knowing about specifically, because it fails
+earlier and louder than the rest. Bazel resolves the module graph before
+it analyses anything, so an uncovered `archive_override` takes down
+*every* bazel command — `version` aside — with a 403 during "Computing
+main repo mapping", well before the first target is looked at.
 
 `--lockfile_mode=off` is required: overridden modules drop out of
 lockfile verification, and without it every run dirties the checked-in
@@ -84,7 +95,10 @@ lockfile-resolved 1.1.0 and broke `@openssl` loading, taking every `bazel
 query` that reached it down with it.) A repo created by a module
 extension is the other case — it needs `--override_repository` against
 the canonical name from Bazel's error, following the `bats`/`raylib`
-blocks at the bottom of the script.
+blocks at the bottom of the script. A module added with a *new*
+`archive_override` needs nothing: the script reads those out of the
+`MODULE.bazel` files on every run, so a bumped commit is picked up the
+same way a bumped lockfile version is.
 
 Known residual: `bazel query //...` additionally pulls rules_apple's iOS
 test runner (`xctestrunner`), which is still blocked. `bazel build

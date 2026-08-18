@@ -1,0 +1,136 @@
+#!/bin/bash
+# Pins how scripts/make-git-overrides reads archive_override pins and decides
+# where each clone lands (#1349, and the #1392 review that followed it).
+#
+# The subject under test is text handling over MODULE.bazel files, so the
+# fixtures are MODULE.bazel files and nothing here touches the network — the
+# 78 registry fetches and the clones themselves live on the other side of the
+# seam, in the script that sources this lib.
+#
+# The case that earns this file: the first version of that path keyed its
+# clone directory on the module name alone, so bumping a pin found the old
+# clone already there, skipped the fetch, and emitted an --override_module
+# that quietly built the previous commit. Nothing failed; the build was just
+# wrong. "Two runs whose pins differ pick different directories" is the
+# assertion that catches it.
+set -uo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck source=scripts/make-git-overrides-lib.sh
+. "$REPO/scripts/make-git-overrides-lib.sh"
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+FAILURES=0
+pass() { echo "  ok    $1"; }
+fail() {
+  echo "  FAIL  $1"
+  FAILURES=$((FAILURES + 1))
+}
+equals() {
+  local desc=$1 want=$2 got=$3
+  if [ "$want" = "$got" ]; then pass "$desc"; else fail "$desc: want [$want] got [$got]"; fi
+}
+
+# ------------------------------------------------------------------ fixtures
+
+# Two MODULE files differing only in the pinned commit — the bump this is here
+# to notice.
+pinned_at() {
+  cat > "$1" <<FIXTURE
+bazel_dep(name = "smithy_cpp", version = "0.0.0")
+
+archive_override(
+    module_name = "smithy_cpp",
+    integrity = "sha256-deadbeef",
+    strip_prefix = "smithy-cpp-$2",
+    urls = [
+        "https://github.com/muchq/smithy-cpp/archive/$2.tar.gz",
+    ],
+)
+FIXTURE
+}
+
+OLD_SHA=4208f791464c55520da6db0e4c491da9402c7508
+NEW_SHA=83a42810a680228187abc17230411b27d2a1a341
+pinned_at "$WORK/old.MODULE.bazel" "$OLD_SHA"
+pinned_at "$WORK/new.MODULE.bazel" "$NEW_SHA"
+
+echo "make-git-overrides lib"
+
+# ------------------------------------------------------- reading the pins
+
+equals "reads one pin per archive_override" \
+  "smithy_cpp	https://github.com/muchq/smithy-cpp/archive/$OLD_SHA.tar.gz	smithy-cpp-$OLD_SHA" \
+  "$(archive_override_pins "$WORK/old.MODULE.bazel")"
+
+# A file with no archive_override must read as "no pins", and must not be
+# confused by a bazel_dep or a URL in a comment. An empty field here would
+# look exactly the same as a repo that pins nothing, which is why the lib
+# takes the first quoted string rather than stripping around it.
+cat > "$WORK/none.MODULE.bazel" <<'NONE'
+# See https://github.com/muchq/MoonBase/issues/1349 for why this matters.
+bazel_dep(name = "rules_cc", version = "0.2.22")
+NONE
+equals "reads nothing from a file with no archive_override" \
+  "" "$(archive_override_pins "$WORK/none.MODULE.bazel")"
+
+equals "reads pins across several files" "2" \
+  "$(archive_override_pins "$WORK/old.MODULE.bazel" "$WORK/none.MODULE.bazel" \
+       "$WORK/new.MODULE.bazel" | grep -c .)"
+
+# ------------------------------------------------------- deciding the clone
+
+equals "takes owner/repo from the url" "muchq/smithy-cpp" \
+  "$(override_repo "https://github.com/muchq/smithy-cpp/archive/$OLD_SHA.tar.gz")"
+
+equals "takes a commit ref from the url" "$OLD_SHA" \
+  "$(override_ref "https://github.com/muchq/smithy-cpp/archive/$OLD_SHA.tar.gz")"
+
+equals "takes a tag ref from the url" "v1.2.3" \
+  "$(override_ref "https://github.com/some/dep/archive/refs/tags/v1.2.3.tar.gz")"
+
+# strip_prefix's first component is the wrapper directory a clone does not
+# have; anything after it is a real subdirectory of the repo.
+equals "drops the archive wrapper directory" "" \
+  "$(override_subdir "smithy-cpp-$OLD_SHA")"
+equals "keeps a real subdirectory" "src" \
+  "$(override_subdir "opencensus-proto-0.4.1/src")"
+
+# Only the on-demand archive endpoint is blocked; a release asset needs no
+# override at all.
+check_blocked() {
+  if is_blocked_archive_url "$2"; then got=blocked; else got=allowed; fi
+  equals "$1" "$3" "$got"
+}
+check_blocked "treats a source archive as blocked" \
+  "https://github.com/muchq/smithy-cpp/archive/$OLD_SHA.tar.gz" blocked
+check_blocked "treats a release asset as allowed" \
+  "https://github.com/some/dep/releases/download/v1/dep.tar.gz" allowed
+
+# ------------------------------------------- the property the bug violated
+
+read -r _ old_url _ < <(archive_override_pins "$WORK/old.MODULE.bazel")
+read -r _ new_url _ < <(archive_override_pins "$WORK/new.MODULE.bazel")
+OLD_DIR=$(override_dir /dest smithy_cpp "$(override_ref "$old_url")")
+NEW_DIR=$(override_dir /dest smithy_cpp "$(override_ref "$new_url")")
+
+equals "the clone directory names the ref" "/dest/smithy_cpp-$OLD_SHA" "$OLD_DIR"
+if [ "$OLD_DIR" != "$NEW_DIR" ]; then
+  pass "a bumped pin picks a different clone directory"
+else
+  fail "a bumped pin reused [$OLD_DIR] — the stale-override bug is back"
+fi
+
+# The other half of the same property: an unchanged pin must reuse its clone,
+# or every run re-fetches every module.
+equals "an unchanged pin reuses its clone directory" "$OLD_DIR" \
+  "$(override_dir /dest smithy_cpp "$(override_ref "$old_url")")"
+
+if [ "$FAILURES" -eq 0 ]; then
+  echo "all checks passed"
+else
+  echo "$FAILURES check(s) failed"
+fi
+exit $((FAILURES > 0))
