@@ -56,6 +56,12 @@ mkdir -p "$DEST"
 
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
 
+# Enumerating archive_override pins and deciding where their clones land is
+# pure text handling, so it lives in a sourceable lib that
+# scripts/test-make-git-overrides can exercise offline.
+# shellcheck source=scripts/make-git-overrides-lib.sh
+. "$(dirname "$0")/make-git-overrides-lib.sh"
+
 # The proxy that makes this script necessary also resets connections under
 # load, and one dropped fetch part-way through a 40-module run wastes the
 # whole run. Retry rather than restart.
@@ -161,28 +167,13 @@ done
 MODULE_FILES=("$(dirname "$0")/../MODULE.bazel" "$(dirname "$0")"/../bazel/*.MODULE.bazel)
 while IFS=$'\t' read -r name url strip_prefix; do
   [ -n "$name" ] || continue
-  # Same filter as the registry path: only the on-demand archive endpoints
-  # are blocked, so an override already pinned to a release asset is fine.
-  case "$url" in
-    *github.com/*/archive/*) ;;
-    *) continue ;;
-  esac
+  is_blocked_archive_url "$url" || continue
 
-  # And the same strip_prefix rule: its first component is the directory
-  # GitHub wraps an archive in, which a clone does not have.
-  subdir="${strip_prefix#*/}"
-  [ "$subdir" = "$strip_prefix" ] && subdir=""
+  repo="$(override_repo "$url")"
+  ref="$(override_ref "$url")"
+  subdir="$(override_subdir "$strip_prefix")"
+  out="$(override_dir "$DEST" "$name" "$ref")"
 
-  repo="$(sed -E 's|https://github.com/([^/]+/[^/]+)/archive/.*|\1|' <<<"$url")"
-  ref="$(sed -E 's|.*/archive/(refs/tags/)?(.*)\.(tar\.gz\|zip)|\2|' <<<"$url")"
-
-  # The ref is in the directory name, exactly as the registry loop puts the
-  # version in its own. "$name-override" would be a cache key that never
-  # changes: a bumped pin would find the old clone already there, skip the
-  # fetch, and emit an override that quietly builds the previous commit —
-  # the stale-override failure this whole path exists to avoid, and the
-  # opposite of what the comment above promises.
-  out="$DEST/$name-$ref"
   if [ ! -d "$out" ]; then
     echo ">> $name (archive_override)  <-  $repo @ $ref"
     # Commit-pinned far more often than tagged: a commit is the only thing
@@ -201,28 +192,7 @@ while IFS=$'\t' read -r name url strip_prefix; do
     mv "$out.tmp" "$out"
   fi
   echo "common --override_module=$name=$out${subdir:+/$subdir}" >> "$RC.tmp"
-done < <(awk '
-  # The first double-quoted string on the line, unquoted. Deliberately not
-  # a gsub of the surrounding text: /.*"/ is greedy and eats through the
-  # closing quote, which silently yields an empty field rather than a
-  # wrong one, and an empty field here reads exactly like "this repo pins
-  # nothing with archive_override".
-  function quoted(line,   value) {
-    if (!match(line, /"[^"]*"/)) return ""
-    return substr(line, RSTART + 1, RLENGTH - 2)
-  }
-  /archive_override\(/ { in_block = 1; name = ""; url = ""; prefix = ""; next }
-  in_block && /^\)/ {
-    if (name != "" && url != "") print name "\t" url "\t" prefix
-    in_block = 0
-    next
-  }
-  in_block {
-    if ($0 ~ /module_name[[:space:]]*=/) name = quoted($0)
-    if ($0 ~ /strip_prefix[[:space:]]*=/) prefix = quoted($0)
-    if (url == "" && $0 ~ /"https:\/\//) url = quoted($0)
-  }
-' "${MODULE_FILES[@]}")
+done < <(archive_override_pins "${MODULE_FILES[@]}")
 
 # Two repos come from module extensions rather than the registry, so the
 # lockfile scan above cannot see them and --override_module does not apply.
