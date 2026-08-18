@@ -25,6 +25,9 @@ class PgQueue : public IndexQueue {
                                                     absl::Duration lease) override;
   absl::StatusOr<bool> Heartbeat(std::string_view id, std::string_view owner,
                                  absl::Duration lease) override;
+  absl::StatusOr<bool> Progress(std::string_view id, std::string_view owner,
+                                int games_indexed) override;
+
   absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner,
                                 int games_indexed) override;
   absl::StatusOr<bool> Fail(std::string_view id, std::string_view owner,

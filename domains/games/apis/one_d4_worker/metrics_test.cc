@@ -91,6 +91,19 @@ TEST(WorkerMetrics, LeavesQuietMonthsOutOfTheMonthSizeDistribution) {
   EXPECT_EQ(recorder.ObservationCount(kGamesPerMonthMetric, kCpp), 0);
 }
 
+TEST(WorkerMetrics, DoesNotCountACachedMonthsGamesAgain) {
+  // Nothing was indexed and no archive was read. Counted here, every
+  // re-run of a range doubles the games it claims to have indexed.
+  CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+
+  metrics.MonthFinished("cached", 17);
+
+  EXPECT_EQ(recorder.CounterTotal(kMonthsMetric, Cpp("result", "cached")), 1);
+  EXPECT_EQ(recorder.CounterTotal(kGamesIndexedMetric, kCpp), 0);
+  EXPECT_EQ(recorder.ObservationCount(kGamesPerMonthMetric, kCpp), 0);
+}
+
 TEST(WorkerMetrics, CountsOccurrencesByMotif) {
   CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
@@ -134,8 +147,7 @@ TEST(WorkerMetrics, DeclaresItsSeriesBeforeAnythingHappens) {
   EXPECT_TRUE(recorder.Declared(kMonthsMetric, Cpp("result", "empty")));
   EXPECT_TRUE(recorder.Declared(kArchiveFetchesMetric, Cpp("result", "error")));
   EXPECT_TRUE(recorder.Declared(kGamesIndexedMetric, kCpp));
-  EXPECT_FALSE(recorder.Declared(kMonthsMetric, Cpp("result", "cached")))
-      << "this worker has no period cache to hit, so the series would be a permanent zero";
+  EXPECT_TRUE(recorder.Declared(kMonthsMetric, Cpp("result", "cached")));
 }
 
 // --- the names are the Java worker's ---------------------------------------

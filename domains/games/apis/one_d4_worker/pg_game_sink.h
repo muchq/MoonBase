@@ -1,9 +1,11 @@
 #ifndef DOMAINS_GAMES_APIS_ONE_D4_WORKER_PG_GAME_SINK_H
 #define DOMAINS_GAMES_APIS_ONE_D4_WORKER_PG_GAME_SINK_H
 
+#include <optional>
 #include <string>
 
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "domains/games/apis/one_d4_worker/game_sink.h"
 #include "domains/platform/libs/pg/pg.h"
@@ -22,6 +24,8 @@ class PgGameSink : public GameSink {
       : client_(client), request_id_(std::move(request_id)), owner_(std::move(owner)) {}
 
   absl::Status Write(absl::Span<const IndexedGame> games) override;
+
+  absl::StatusOr<std::optional<int>> MonthAlreadyIndexed(const IndexedMonth& month) override;
 
   absl::Status RecordMonth(const IndexedMonth& month) override;
 

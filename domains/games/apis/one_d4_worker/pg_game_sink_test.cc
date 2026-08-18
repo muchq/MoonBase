@@ -121,7 +121,7 @@ class PgGameSinkTest : public testing::Test {
             target       VARCHAR(20),
             is_discovered BOOLEAN NOT NULL DEFAULT FALSE,
             is_mate       BOOLEAN NOT NULL DEFAULT FALSE,
-            pin_type      VARCHAR(20)
+            pin_type      VARCHAR(8)
         ))")
                     .ok());
 
@@ -399,6 +399,59 @@ TEST_F(PgGameSinkTest, RereadingAMonthUpdatesItsPeriodRatherThanAddingOne) {
   EXPECT_EQ(One("SELECT count(*)::text FROM indexed_periods"), "1");
   EXPECT_EQ(One("SELECT games_count::text FROM indexed_periods"), "15");
   EXPECT_EQ(One("SELECT is_complete::text FROM indexed_periods"), "false");
+}
+
+TEST_F(PgGameSinkTest, FindsAMonthItAlreadyIndexed) {
+  ASSERT_TRUE(sink_->RecordMonth(AMonth()).ok());
+
+  const auto found = sink_->MonthAlreadyIndexed(AMonth());
+  ASSERT_TRUE(found.ok()) << found.status();
+  ASSERT_TRUE(found->has_value());
+  EXPECT_EQ(**found, 12);
+}
+
+TEST_F(PgGameSinkTest, DoesNotFindAMonthItHasNotIndexed) {
+  IndexedMonth other = AMonth();
+  other.month = "2026-02";
+  ASSERT_TRUE(sink_->RecordMonth(other).ok());
+
+  const auto found = sink_->MonthAlreadyIndexed(AMonth());
+  ASSERT_TRUE(found.ok()) << found.status();
+  EXPECT_FALSE(found->has_value());
+}
+
+TEST_F(PgGameSinkTest, DoesNotFindAnIncompleteMonth) {
+  // Incomplete means the row is missing something it should carry, or the
+  // month is not over. Either way it is exactly the month to refetch.
+  IndexedMonth partial = AMonth();
+  partial.complete = false;
+  ASSERT_TRUE(sink_->RecordMonth(partial).ok());
+
+  const auto found = sink_->MonthAlreadyIndexed(AMonth());
+  ASSERT_TRUE(found.ok()) << found.status();
+  EXPECT_FALSE(found->has_value());
+}
+
+TEST_F(PgGameSinkTest, DoesNotFindAMonthIndexedUnderTheOtherFilter) {
+  // A month indexed with bullet games answers nothing about the same month
+  // indexed without them.
+  ASSERT_TRUE(sink_->RecordMonth(AMonth()).ok());
+
+  IndexedMonth without_bullet = AMonth();
+  without_bullet.exclude_bullet = true;
+  const auto found = sink_->MonthAlreadyIndexed(without_bullet);
+  ASSERT_TRUE(found.ok()) << found.status();
+  EXPECT_FALSE(found->has_value());
+}
+
+TEST_F(PgGameSinkTest, DoesNotFindAnotherPlayersMonth) {
+  ASSERT_TRUE(sink_->RecordMonth(AMonth()).ok());
+
+  IndexedMonth someone_else = AMonth();
+  someone_else.player = "bob";
+  const auto found = sink_->MonthAlreadyIndexed(someone_else);
+  ASSERT_TRUE(found.ok()) << found.status();
+  EXPECT_FALSE(found->has_value());
 }
 
 TEST_F(PgGameSinkTest, AMonthWithAndWithoutBulletAreTwoPeriods) {

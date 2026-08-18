@@ -2,10 +2,12 @@
 #define DOMAINS_GAMES_APIS_ONE_D4_WORKER_GAME_SINK_H
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "domains/games/libs/one_d4_motifs/occurrence.h"
 
@@ -79,6 +81,14 @@ class GameSink {
   /// separate check is a snapshot: the takeover can commit in the gap and
   /// the batch lands against a request this worker has already lost.
   virtual absl::Status Write(absl::Span<const IndexedGame> games) = 0;
+
+  /// The count on a complete period for this month, or nullopt when there
+  /// is none — the month has not been indexed, or was indexed under the
+  /// other bullet filter, or was stored incomplete for refetching.
+  ///
+  /// The read half of the row RecordMonth writes, which is why it lives
+  /// here rather than behind a port of its own.
+  virtual absl::StatusOr<std::optional<int>> MonthAlreadyIndexed(const IndexedMonth& month) = 0;
 
   /// Records that a month was read.
   ///

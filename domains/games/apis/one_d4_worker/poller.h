@@ -34,12 +34,19 @@ struct RunReport {
   std::optional<Stopped> stopped;
 };
 
-/// Keeps a claim alive while a run works.
+/// A run's handle to the claim it is working under.
 class LeaseKeeper {
  public:
   virtual ~LeaseKeeper() = default;
-  /// Extends the lease. False once it is lost — stop and report it.
+
+  /// Whether the claim is still ours. False once it is lost — stop and
+  /// report it.
   virtual bool Keep() = 0;
+
+  /// Records how many games have been indexed so far, so a long backfill
+  /// shows progress instead of sitting at zero until it ends. Same answer
+  /// as Keep(), from the same fence, so a refusal is a lost claim.
+  virtual bool Report(int games_indexed) = 0;
 };
 
 /// Claims one request and runs it.

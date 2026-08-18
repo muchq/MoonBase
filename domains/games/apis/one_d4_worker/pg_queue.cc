@@ -92,6 +92,23 @@ absl::StatusOr<bool> PgQueue::Heartbeat(std::string_view id, std::string_view ow
 // Terminal writes need a live lease, not just our name on the row. At
 // expiry a takeover is already licensed even before a rival has written its
 // own owner_id, and the old owner must not win that race.
+absl::StatusOr<bool> PgQueue::Progress(std::string_view id, std::string_view owner,
+                                       int games_indexed) {
+  // Status untouched: the row stays PROCESSING and keeps its owner. Only
+  // the count and updated_at move, so a reader watching a long backfill
+  // sees it climb instead of sitting at zero until the run ends.
+  const auto written = client_.Exec(
+      R"(UPDATE indexing_requests
+         SET games_indexed = $3, updated_at = NOW()
+         WHERE id = $1 AND owner_id = $2
+           AND status IN ('PENDING', 'PROCESSING')
+           AND lease_expires_at > NOW()
+         RETURNING id)",
+      {std::string(id), std::string(owner), std::to_string(games_indexed)});
+  if (!written.ok()) return written.status();
+  return written->rows() > 0;
+}
+
 absl::StatusOr<bool> PgQueue::Complete(std::string_view id, std::string_view owner,
                                        int games_indexed) {
   const auto written = client_.Exec(

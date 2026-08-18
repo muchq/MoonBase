@@ -32,8 +32,8 @@ int64_t IndexRun::Now() const {
   return options_.now ? options_.now() : absl::ToUnixSeconds(absl::Now());
 }
 
-absl::Status IndexRun::RecordMonth(const IndexJob& job, YearMonth month, int64_t fetched_at,
-                                   int games, bool nothing_degraded) {
+IndexedMonth IndexRun::Period(const IndexJob& job, YearMonth month, int64_t fetched_at, int games,
+                              bool nothing_degraded) {
   IndexedMonth period;
   period.player = job.player;
   period.platform = job.platform;
@@ -46,7 +46,12 @@ absl::Status IndexRun::RecordMonth(const IndexJob& job, YearMonth month, int64_t
   // every later request, so games played after this run are never indexed.
   period.complete = fetched_at >= month.Next().FirstInstant() && nothing_degraded;
   period.exclude_bullet = job.exclude_bullet;
-  return sink_.RecordMonth(period);
+  return period;
+}
+
+absl::Status IndexRun::RecordMonth(const IndexJob& job, YearMonth month, int64_t fetched_at,
+                                   int games, bool nothing_degraded) {
+  return sink_.RecordMonth(Period(job, month, fetched_at, games, nothing_degraded));
 }
 
 RunObserver& IndexRun::observer() {
@@ -106,6 +111,26 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
 
     // Stamped before the month's games are written. See IndexedMonth.
     const int64_t fetched_at = Now();
+
+    // A month already indexed under this same filter is not fetched again.
+    // The archive it would return is the one already on disk, and a decade
+    // backfill re-run would otherwise spend a hundred and twenty calls
+    // against a rate-limited API to write the rows it wrote last time.
+    if (!job.skip_cache) {
+      const absl::StatusOr<std::optional<int>> cached =
+          sink_.MonthAlreadyIndexed(Period(job, month, fetched_at, 0, true));
+      if (!cached.ok()) return cached.status();
+      if (cached->has_value()) {
+        report.games_indexed += **cached;
+        if (!lease.Report(report.games_indexed)) {
+          report.lease_lost = true;
+          return report;
+        }
+        observer().MonthFinished("cached", **cached);
+        continue;
+      }
+    }
+
     absl::StatusOr<std::vector<ArchivedGame>> games = archive_.FetchMonth(job.player, month);
     if (!games.ok()) {
       observer().ArchiveFetched("error");
@@ -192,6 +217,12 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
           report.lease_lost = true;
           return report;
         }
+        // Per batch, not per game: a hundred games is one row update, and
+        // the counter still climbs while a long month is running.
+        if (!lease.Report(report.games_indexed)) {
+          report.lease_lost = true;
+          return report;
+        }
       }
     }
 
@@ -203,6 +234,10 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
     if (const absl::Status recorded = RecordMonth(job, month, fetched_at, month_count, complete);
         !recorded.ok()) {
       return recorded;
+    }
+    if (!lease.Report(report.games_indexed)) {
+      report.lease_lost = true;
+      return report;
     }
     observer().MonthFinished(complete ? "indexed" : "degraded", month_count);
   }

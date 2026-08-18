@@ -78,6 +78,14 @@ class FakeSink : public GameSink {
     return absl::OkStatus();
   }
 
+  absl::StatusOr<std::optional<int>> MonthAlreadyIndexed(const IndexedMonth& month) override {
+    asked_about.push_back(month.month);
+    if (!cache_status.ok()) return cache_status;
+    const auto found = cached.find(month.month);
+    if (found == cached.end()) return std::nullopt;
+    return found->second;
+  }
+
   absl::Status RecordMonth(const IndexedMonth& month) override {
     if (!month_status.ok()) return month_status;
     periods.push_back(month);
@@ -90,14 +98,26 @@ class FakeSink : public GameSink {
 
   std::vector<IndexedMonth> periods;
   absl::Status month_status;
+
+  std::map<std::string, int> cached;
+  std::vector<std::string> asked_about;
+  absl::Status cache_status;
 };
 
 /// A lease that survives `holds` renewals and is gone after that.
 class FakeLease : public LeaseKeeper {
  public:
   bool Keep() override { return ++kept <= holds; }
+
+  bool Report(int games_indexed) override {
+    reported.push_back(games_indexed);
+    return reports_accepted;
+  }
+
   int holds = 1000;
   int kept = 0;
+  std::vector<int> reported;
+  bool reports_accepted = true;
 };
 
 IndexJob AJob(std::string_view start = "2026-01", std::string_view end = "2026-01") {
@@ -564,6 +584,134 @@ TEST(IndexRun, AsksBeforeRecordingAQuietMonth) {
   ASSERT_TRUE(report.ok()) << report.status();
   EXPECT_TRUE(report->lease_lost);
   EXPECT_THAT(sink.periods, IsEmpty());
+}
+
+TEST(IndexRun, SkipsAMonthAlreadyIndexedUnderTheSameFilter) {
+  // The archive it would fetch is the one already on disk. A decade
+  // backfill re-run is a hundred and twenty calls against a rate-limited
+  // API to write the rows it wrote last time.
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  archive.months["2026-02"] = {AGame("g2")};
+  FakeSink sink;
+  sink.cached["2026-01"] = 17;
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  const absl::StatusOr<RunReport> report = run.Execute(AJob("2026-01", "2026-02"), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  EXPECT_THAT(archive.asked, ElementsAre("2026-02")) << "the cached month was fetched anyway";
+  EXPECT_EQ(report->games_indexed, 18) << "the cached month's games still count toward the run";
+  ASSERT_EQ(sink.written.size(), 1u);
+  EXPECT_EQ(sink.written[0].url, "g2");
+  EXPECT_THAT(sink.periods, ElementsAre(::testing::Field(&IndexedMonth::month, "2026-02")))
+      << "a cached month's period row is not rewritten";
+}
+
+TEST(IndexRun, AsksTheCacheAboutTheFilterTheRequestNames) {
+  // A month indexed with bullet games answers nothing about the same month
+  // indexed without them, and the row is keyed by the filter for exactly
+  // that reason. Asking under the wrong key skips a month never indexed.
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexJob job = AJob();
+  job.exclude_bullet = true;
+  IndexRun run(archive, sink, Options());
+  ASSERT_TRUE(run.Execute(job, lease).ok());
+
+  EXPECT_THAT(sink.asked_about, ElementsAre("2026-01"));
+}
+
+TEST(IndexRun, RefetchesEverythingWhenTheRequestSaysToSkipTheCache) {
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  FakeSink sink;
+  sink.cached["2026-01"] = 17;
+  FakeLease lease;
+
+  IndexJob job = AJob();
+  job.skip_cache = true;
+  IndexRun run(archive, sink, Options());
+  const absl::StatusOr<RunReport> report = run.Execute(job, lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  EXPECT_THAT(sink.asked_about, IsEmpty());
+  EXPECT_THAT(archive.asked, ElementsAre("2026-01"));
+  EXPECT_EQ(report->games_indexed, 1);
+}
+
+TEST(IndexRun, FailsWhenTheCacheCannotBeRead) {
+  // Not "assume nothing is cached": that refetches and rewrites a month
+  // whose period row may say otherwise, and hides a broken database
+  // behind a slow but green run.
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  FakeSink sink;
+  sink.cache_status = absl::DataLossError("indexed_periods is gone");
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  EXPECT_EQ(run.Execute(AJob(), lease).status().code(), absl::StatusCode::kDataLoss);
+}
+
+TEST(IndexRun, CountsACachedMonthAsCached) {
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  FakeSink sink;
+  sink.cached["2026-01"] = 17;
+  FakeLease lease;
+  FakeObserver observer;
+
+  IndexRun::Options options = Options();
+  options.observer = &observer;
+  IndexRun run(archive, sink, options);
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
+
+  EXPECT_THAT(observer.months, ElementsAre("cached:17"));
+  EXPECT_THAT(observer.fetches, IsEmpty()) << "nothing was fetched to count";
+}
+
+TEST(IndexRun, ReportsProgressPerBatchRatherThanPerGame) {
+  // A long backfill sitting at zero until it ends looks stuck. One row
+  // update per batch is what makes it climb without a write per game.
+  FakeArchive archive;
+  for (int i = 0; i < 5; ++i) archive.months["2026-01"].push_back(AGame(absl::StrCat("g", i)));
+  archive.months["2026-02"] = {AGame("g5")};
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun::Options options = Options();
+  options.batch_size = 2;
+  IndexRun run(archive, sink, options);
+  const absl::StatusOr<RunReport> report = run.Execute(AJob("2026-01", "2026-02"), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  // Two full batches inside the month, then the month, then the second.
+  EXPECT_THAT(lease.reported, ElementsAre(2, 4, 5, 6));
+  EXPECT_EQ(report->games_indexed, 6);
+}
+
+TEST(IndexRun, StopsWhenAProgressWriteIsRefused) {
+  // The progress write is fenced on the same terms as everything else, so
+  // a refusal is the claim being gone — heard here rather than at the end
+  // of the range.
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  archive.months["2026-02"] = {AGame("g2")};
+  FakeSink sink;
+  FakeLease lease;
+  lease.reports_accepted = false;
+
+  IndexRun run(archive, sink, Options());
+  const absl::StatusOr<RunReport> report = run.Execute(AJob("2026-01", "2026-02"), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  EXPECT_TRUE(report->lease_lost);
+  EXPECT_THAT(archive.asked, ElementsAre("2026-01"));
 }
 
 TEST(IndexRun, CarriesThePlayersTitles) {

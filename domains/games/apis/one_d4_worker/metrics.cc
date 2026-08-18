@@ -20,7 +20,7 @@ Labels Bare() { return {{kIndexerLabel, kIndexerValue}}; }
 /// Only what this worker can emit. Declaring a value it never writes
 /// exports a zero series forever, which reads as an answer.
 constexpr std::string_view kRunOutcomes[] = {"completed", "failed", "interrupted", "lease_lost"};
-constexpr std::string_view kMonthResults[] = {"indexed", "degraded", "empty"};
+constexpr std::string_view kMonthResults[] = {"indexed", "degraded", "empty", "cached"};
 constexpr std::string_view kArchiveResults[] = {"ok", "no_archive", "error"};
 
 }  // namespace
@@ -66,6 +66,13 @@ void WorkerMetrics::MonthFinished(std::string_view result, int games) {
     // A decade-long backfill of a three-year player is mostly empty
     // archives, and feeding those zeros in makes the average archive look
     // a third its real size. The empty months are counted above.
+    return;
+  }
+  if (result == "cached") {
+    // Nothing was indexed and no archive was read. Counting the row's
+    // games again here would double every re-run of a range, and feeding
+    // its size into the month distribution would weight a month by how
+    // many times it has been asked for.
     return;
   }
   metrics_.RecordCounter(kGamesIndexedMetric, games, Bare());

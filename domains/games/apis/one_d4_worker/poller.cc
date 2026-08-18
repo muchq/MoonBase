@@ -48,6 +48,26 @@ class QueueLease : public LeaseKeeper {
     return RenewLocked();
   }
 
+  bool Report(int games_indexed) override {
+    const absl::MutexLock lock(&mu_);
+    if (lost_) return false;
+    const absl::StatusOr<bool> recorded = queue_.Progress(id_, owner_, games_indexed);
+    if (recorded.ok() && *recorded) {
+      // A fence that passed is proof of ownership as good as a renewal's,
+      // and it moved lease_expires_at nowhere — so it refreshes what we
+      // last proved, not the lease itself.
+      proven_ = absl::Now();
+      return true;
+    }
+    if (recorded.ok()) {
+      lost_ = true;
+      return false;
+    }
+    // Same benefit of the doubt a renewal gets, and for the same reason.
+    if (absl::Now() - proven_ >= lease_) lost_ = true;
+    return !lost_;
+  }
+
   bool lost() const {
     const absl::MutexLock lock(&mu_);
     return lost_;

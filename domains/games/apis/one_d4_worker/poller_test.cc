@@ -38,6 +38,12 @@ class FakeQueue : public IndexQueue {
     return lease_held.load();
   }
 
+  absl::StatusOr<bool> Progress(std::string_view id, std::string_view owner,
+                                int games_indexed) override {
+    progress.push_back(games_indexed);
+    return progress_accepted.load();
+  }
+
   absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner,
                                 int games_indexed) override {
     calls.push_back(absl::StrCat("complete ", id, " ", games_indexed));
@@ -64,6 +70,8 @@ class FakeQueue : public IndexQueue {
   std::atomic<bool> lease_held{true};
   bool claim_fails = false;
   std::atomic<bool> heartbeat_fails{false};
+  std::vector<int> progress;
+  std::atomic<bool> progress_accepted{true};
   bool terminal_write_wins = true;
   int claims = 0;
   std::atomic<int> heartbeats{0};
@@ -353,6 +361,47 @@ TEST(Poller, GivesUpOnceTheLeaseItLastProvedWouldHaveExpired) {
         return report;
       },
       options);
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_THAT(queue.calls, IsEmpty());
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kLeaseLost);
+}
+
+TEST(Poller, PassesTheRunsProgressStraightToTheQueue) {
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller poller(
+      queue,
+      [](const IndexJob&, LeaseKeeper& lease) {
+        EXPECT_TRUE(lease.Report(12));
+        EXPECT_TRUE(lease.Report(31));
+        RunReport report;
+        report.games_indexed = 31;
+        return report;
+      },
+      Options());
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_THAT(queue.progress, ElementsAre(12, 31));
+  EXPECT_THAT(queue.calls, ElementsAre("complete job-1 31"));
+}
+
+TEST(Poller, ARefusedProgressWriteIsALostClaim) {
+  // Fenced on the same terms as everything else, so a refusal means the
+  // row is somebody else's — and the run must not report an outcome for it.
+  FakeQueue queue;
+  queue.next = AJob();
+  queue.progress_accepted = false;
+  Poller poller(
+      queue,
+      [](const IndexJob&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
+        EXPECT_FALSE(lease.Report(12));
+        EXPECT_FALSE(lease.Keep()) << "the claim stays lost once it is lost";
+        RunReport report;
+        report.lease_lost = true;
+        return report;
+      },
+      Options());
 
   ASSERT_TRUE(poller.PollOnce().ok());
   EXPECT_THAT(queue.calls, IsEmpty());

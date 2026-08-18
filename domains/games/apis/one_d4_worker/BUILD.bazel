@@ -111,6 +111,7 @@ cc_test(
     size = "small",
     srcs = ["schema_contract_test.cc"],
     data = [
+        "pg_game_sink_test.cc",
         "pg_queue_test.cc",
         "//domains/games/apis/one_d4:worker_schema_sources",
     ],

@@ -29,6 +29,15 @@ class IndexQueue {
   virtual absl::StatusOr<bool> Heartbeat(std::string_view id, std::string_view owner,
                                          absl::Duration lease) = 0;
 
+  /// Records how far a run has got, without finishing it. False when we no
+  /// longer hold the claim.
+  ///
+  /// Non-terminal but fenced on the same terms as the writes below, so a
+  /// run that has lost the range cannot walk the counter of a row somebody
+  /// else is now working.
+  virtual absl::StatusOr<bool> Progress(std::string_view id, std::string_view owner,
+                                        int games_indexed) = 0;
+
   virtual absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner,
                                         int games_indexed) = 0;
 

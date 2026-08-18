@@ -26,7 +26,7 @@ class RunObserver {
 
   /// `result` is "ok", "no_archive", or "error".
   virtual void ArchiveFetched(std::string_view result) {}
-  /// `result` is "indexed" or "empty".
+  /// `result` is "indexed", "degraded", "empty", or "cached".
   virtual void MonthFinished(std::string_view result, int games) {}
   virtual void GameIndexed(const IndexedGame& game) {}
 };
@@ -57,6 +57,8 @@ class IndexRun {
 
  private:
   int64_t Now() const;
+  static IndexedMonth Period(const IndexJob& job, YearMonth month, int64_t fetched_at, int games,
+                             bool nothing_degraded);
   absl::Status RecordMonth(const IndexJob& job, YearMonth month, int64_t fetched_at, int games,
                            bool nothing_degraded);
   RunObserver& observer();

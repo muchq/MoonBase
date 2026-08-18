@@ -93,6 +93,15 @@ DO UPDATE SET fetched_at = EXCLUDED.fetched_at, is_complete = EXCLUDED.is_comple
 RETURNING id
 )sql";
 
+// IndexedPeriodDao.FIND_COMPLETE. Keyed by the filter as well as the
+// month, because a range indexed without bullet games answers nothing
+// about the same month indexed with them.
+constexpr char kFindCompletePeriod[] = R"sql(
+SELECT games_count FROM indexed_periods
+WHERE player = $1 AND platform = $2 AND year_month = $3
+  AND exclude_bullet = $4::boolean AND is_complete = true
+)sql";
+
 std::string Number(int value) { return std::to_string(value); }
 
 /// An absent timestamp is NULL, not the epoch.
@@ -172,6 +181,16 @@ absl::Status PgGameSink::Write(absl::Span<const IndexedGame> games) {
         absl::StrCat("request ", request_id_, " no longer names ", owner_));
   }
   return absl::OkStatus();
+}
+
+absl::StatusOr<std::optional<int>> PgGameSink::MonthAlreadyIndexed(const IndexedMonth& month) {
+  const absl::StatusOr<pg::Result> found = client_.Exec(
+      kFindCompletePeriod, {month.player, month.platform, month.month, Bool(month.exclude_bullet)});
+  if (!found.ok()) return found.status();
+  if (found->rows() == 0) return std::nullopt;
+  const std::optional<std::string> count = found->Get(0, 0);
+  if (!count.has_value()) return std::nullopt;
+  return std::stoi(*count);
 }
 
 absl::Status PgGameSink::RecordMonth(const IndexedMonth& month) {
