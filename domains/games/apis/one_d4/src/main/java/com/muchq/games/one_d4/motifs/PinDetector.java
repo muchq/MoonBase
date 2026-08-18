@@ -18,17 +18,16 @@ public class PinDetector implements MotifDetector {
     List<GameFeatures.MotifOccurrence> occurrences = new ArrayList<>();
 
     for (PositionContext ctx : positions) {
-      String fen = ctx.fen();
-      String placement = fen.split(" ")[0];
-      int[][] board = BoardUtils.parsePlacement(placement);
+      int[][] board = BoardUtils.parsePlacement(ctx.fen().split(" ")[0]);
 
       // Detect absolute pins (to the king of side to move)
       // and relative pins (to another valuable piece)
       List<PinData> pins = detectPins(board, ctx.whiteToMove());
-      String dest = BoardUtils.destinationSquare(ctx.lastMove());
+      List<int[]> landed = BoardUtils.landedSquares(ctx.lastMove(), !ctx.whiteToMove());
       for (PinData pin : pins) {
-        // Only fire if the pinning piece is the one that just moved.
-        if (dest == null || !pin.attacker().substring(1).equals(dest)) continue;
+        // Only fire if the pinning piece is one that just landed. Castling
+        // lands two, and the rook is the one that pins.
+        if (!BoardUtils.isLanded(landed, pin.attacker().substring(1))) continue;
         String desc = "Pin detected at move " + ctx.moveNumber();
         GameFeatures.MotifOccurrence occ =
             GameFeatures.MotifOccurrence.pin(

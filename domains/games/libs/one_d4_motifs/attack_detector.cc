@@ -61,44 +61,91 @@ std::vector<chess::Square> Significant(const chess::Board& board,
   return kept;
 }
 
-/// Squares the mover vacated, each with where that piece went. Castling
-/// vacates two; a promotion has no destination in moved_piece's spelling,
-/// because the pawn that left is not the piece that arrived.
-std::vector<std::pair<chess::Square, std::optional<chess::Square>>> Vacated(
-    const Position& position) {
+/// A square the move emptied, and what a ray walking through it needs to
+/// know.
+struct Emptied {
+  chess::Square square;
+
+  /// How the move is spelled in moved_piece, for a discovery through this
+  /// square. Not always the piece that stood here: an en passant capture
+  /// empties the taken pawn's square, and the piece that moved is the pawn
+  /// that took it.
+  std::string moved_piece;
+};
+
+/// Every square the move emptied.
+///
+/// Three moves empty a square that is not simply `from`, and each one is a
+/// discovery the naive reading misses: castling moves a rook as well as a
+/// king, en passant takes a pawn that is on neither square the move names,
+/// and a promotion puts a piece down that is not the one that left.
+std::vector<Emptied> EmptiedBy(const Position& position) {
   const chess::Move move = position.last->move;
+  const chess::Board& before = position.last->before;
+  const auto spell = [&before](chess::Square from, std::optional<chess::Square> to) {
+    return MovedPieceNotation(before.at(from), from, to);
+  };
+
   if (move.typeOf() == chess::Move::CASTLING) {
     // Encoded king-takes-rook: from is the king, to is the rook it swaps with.
     const bool kingside = move.to() > move.from();
-    const int rank = move.from().index() / 8;
-    const chess::Square king_to = chess::Square(rank * 8 + (kingside ? 6 : 2));
-    const chess::Square rook_to = chess::Square(rank * 8 + (kingside ? 5 : 3));
-    return {{move.from(), king_to}, {move.to(), rook_to}};
+    const chess::Square king_to = chess::Square(move.from().index() / 8 * 8 + (kingside ? 6 : 2));
+    const chess::Square rook_to = CastledRookTo(move.from(), kingside);
+    return {{move.from(), spell(move.from(), king_to)}, {move.to(), spell(move.to(), rook_to)}};
   }
-  if (move.typeOf() == chess::Move::PROMOTION) return {{move.from(), std::nullopt}};
-  return {{move.from(), move.to()}};
+
+  if (move.typeOf() == chess::Move::ENPASSANT) {
+    // The taken pawn is beside the capturing pawn's origin, not on either
+    // square the move names, and the diagonals and file through it open up
+    // with no piece of ours anywhere near them.
+    const chess::Square taken = SquareAt(RowOf(move.from()), ColOf(move.to()));
+    const std::string moved = spell(move.from(), move.to());
+    return {{move.from(), moved}, {taken, moved}};
+  }
+
+  if (move.typeOf() == chess::Move::PROMOTION) {
+    // Spelled without a destination — the pawn that left is not the queen
+    // that arrived, and stored rows carry the "??" that says so. The new
+    // piece is still excluded as an uncoverer, by LandedOn rather than here.
+    return {{move.from(), spell(move.from(), std::nullopt)}};
+  }
+
+  return {{move.from(), spell(move.from(), move.to())}};
 }
 
-/// Attacks a slider had blocked by whatever stood on `vacated`.
+/// Attacks a slider had blocked by whatever stood on `emptied`.
 ///
 /// Walk back from the empty square to find the piece that was hiding, then
-/// forward to find what it now bears on. The piece that just moved is not a
-/// discovery, however the ray runs through it.
-void RevealedBy(const Position& position, chess::Square vacated,
-                std::optional<chess::Square> landed, Side mover, const std::string& moved_piece,
-                bool mate, Findings* out) {
+/// forward to find what it now bears on.
+///
+/// `landed` is every square this move put a piece on, and it is checked
+/// against all of them rather than against the one paired with this square:
+/// castling empties two squares and fills two, and a ray out of the king's
+/// old square finds the rook standing on its new one. The rook moved. It
+/// discovered nothing.
+///
+/// Findings go into `seen` keyed by (attacker, target), because one move can
+/// empty two squares on a single ray — an en passant capture takes a pawn
+/// beside the square its captor left, and both lie on the line the piece
+/// behind them now sweeps. The same discovery reported twice reads
+/// downstream as two attackers on one king, which is how a false
+/// DOUBLE_CHECK gets derived.
+void RevealedBy(const Position& position, chess::Square emptied,
+                const std::vector<chess::Square>& landed, Side mover,
+                const std::string& moved_piece, bool mate,
+                std::vector<std::pair<std::string, Finding>>* seen) {
   const chess::Board& board = position.board;
   for (const Direction direction : kDirections) {
     const std::optional<chess::Square> behind =
-        FirstPieceAlong(board, RowOf(vacated), ColOf(vacated), direction.Reversed());
+        FirstPieceAlong(board, RowOf(emptied), ColOf(emptied), direction.Reversed());
     if (!behind.has_value()) continue;
-    if (landed.has_value() && *behind == *landed) continue;
+    if (std::find(landed.begin(), landed.end(), *behind) != landed.end()) continue;
 
     const chess::Piece attacker = board.at(*behind);
     if (!BelongsTo(attacker, mover) || !SlidesAlong(attacker, direction)) continue;
 
     const std::optional<chess::Square> target =
-        FirstPieceAlong(board, RowOf(vacated), ColOf(vacated), direction);
+        FirstPieceAlong(board, RowOf(emptied), ColOf(emptied), direction);
     if (!target.has_value() || BelongsTo(board.at(*target), mover)) continue;
 
     Finding finding;
@@ -108,7 +155,11 @@ void RevealedBy(const Position& position, chess::Square vacated,
     finding.target = PieceNotation(board.at(*target), *target);
     finding.is_discovered = true;
     finding.is_mate = mate && board.at(*target).type() == chess::PieceType::KING;
-    out->Add(position, std::move(finding));
+
+    const std::string key = absl::StrCat(*finding.attacker, ">", *finding.target);
+    const bool already = std::any_of(seen->begin(), seen->end(),
+                                     [&key](const auto& kept) { return kept.first == key; });
+    if (!already) seen->emplace_back(key, std::move(finding));
   }
 }
 
@@ -120,15 +171,16 @@ class AttackDetector : public Detector {
     const Side mover = chess_cpp::Opponent(position.side_to_move);
     const bool mate = IsCheckmate(position);
 
-    if (const std::optional<chess::Square> landed = MovedTo(position); landed.has_value()) {
-      DirectAttacks(position, *landed, mover, mate, out);
+    for (const chess::Square landed : LandedOn(position)) {
+      DirectAttacks(position, landed, mover, mate, out);
     }
 
-    for (const auto& [vacated, destination] : Vacated(position)) {
-      const chess::Piece moved = position.last->before.at(vacated);
-      RevealedBy(position, vacated, destination, mover,
-                 MovedPieceNotation(moved, vacated, destination), mate, &out);
+    const std::vector<chess::Square> landed = LandedOn(position);
+    std::vector<std::pair<std::string, Finding>> revealed;
+    for (const Emptied& emptied : EmptiedBy(position)) {
+      RevealedBy(position, emptied.square, landed, mover, emptied.moved_piece, mate, &revealed);
     }
+    for (auto& [key, finding] : revealed) out.Add(position, std::move(finding));
   }
 
  private:

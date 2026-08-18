@@ -3,8 +3,8 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 # Disservin/chess-library, vendored. See README.md for the version, the
 # commit it came from, and how to update it.
 #
-# Visible to the two packages that hand chess:: types around —
-# //domains/games/libs/chess_cpp, the wrapper that owns the dependency, and
+# Visible to the two packages that hand chess:: types around: the wrapper
+# that owns the dependency, //domains/games/libs/chess_cpp, and
 # //domains/games/libs/one_d4_motifs, whose detectors read a Board. Nothing
 # else can declare a dep on it. That is all the visibility buys: the wrapper's own headers expose chess:: types, and
 # with layering_check off (.bazelrc) a transitive consumer still compiles

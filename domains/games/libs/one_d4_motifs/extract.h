@@ -22,8 +22,9 @@ struct GameFeatures {
   /// The last full-move number played.
   int num_moves = 0;
 
-  /// Every firing, in ply order, detectors in DefaultDetectors() order
-  /// within a ply.
+  /// Every firing, grouped by detector in DefaultDetectors() order, and in
+  /// ply order within a detector. Not ply-major: a game's PIN rows all
+  /// precede its CROSS_PIN rows.
   std::vector<MotifOccurrence> occurrences;
 };
 

@@ -115,7 +115,7 @@ TEST(SkewerDetector, WillNotCallAPinASkewer) {
 
 TEST(AttackDetector, RecordsAnAttackOnTheQueen) {
   const auto found = Found(From("3qk3/8/8/8/8/8/8/3RK3 w - - 0 1", "1. Rd3"), Motif::kAttack);
-  EXPECT_THAT(Targets(found), ElementsAre("qd8"));
+  ASSERT_THAT(Targets(found), ElementsAre("qd8"));
   EXPECT_EQ(found[0].attacker, "Rd3");
   EXPECT_EQ(found[0].moved_piece, "Rd3");
   EXPECT_FALSE(found[0].is_discovered);
@@ -143,6 +143,86 @@ TEST(AttackDetector, RecordsWhatAMoveUncovered) {
   EXPECT_EQ(discovered.moved_piece, "Nd3f4");
   EXPECT_EQ(discovered.attacker, "Rd1");
   EXPECT_EQ(discovered.target, "qd8");
+}
+
+TEST(AttackDetector, SeesThroughTheSquareAnEnPassantCaptureEmpties) {
+  // The taken pawn stood on neither square "exd6" names, and the bishop's
+  // line to the rook ran through it. Missed for as long as the pipeline has
+  // existed: the scan only visited squares the mover's own pieces left.
+  const auto found =
+      Found(From("r6k/3p4/8/4P3/8/8/6B1/6K1 b - - 0 1", "1... d5 2. exd6"), Motif::kAttack);
+  ASSERT_FALSE(found.empty());
+  const MotifOccurrence& discovered = found.back();
+  EXPECT_TRUE(discovered.is_discovered);
+  EXPECT_EQ(discovered.attacker, "Bg2");
+  EXPECT_EQ(discovered.target, "ra8");
+  EXPECT_EQ(discovered.moved_piece, "Pe5d6") << "the pawn that took, not the pawn taken";
+}
+
+TEST(AttackDetector, DoesNotCallAPromotedPieceADiscovery) {
+  // The new queen stands one step up the file from the square the pawn
+  // left, so a ray walking back from that square finds it and reports the
+  // piece that just moved as one it uncovered.
+  const auto found = Found(From("8/4P3/8/8/4r2k/8/8/6K1 w - - 0 1", "1. e8=Q"), Motif::kAttack);
+  for (const MotifOccurrence& occurrence : found) {
+    EXPECT_FALSE(occurrence.is_discovered)
+        << occurrence.attacker.value_or("?") << " -> " << occurrence.target.value_or("?");
+  }
+}
+
+TEST(AttackDetector, ReportsOneDiscoveryWhenAMoveEmptiesTwoSquaresOnOneRay) {
+  // exd6+ empties e5 and d5, and both sit on the rook's line to the king.
+  // Reported twice, the read path counts two attackers on one king and
+  // derives a DOUBLE_CHECK that never happened.
+  const auto found = Found(From("8/8/8/k2pP2R/8/8/8/7K w - d6 0 2", "2. exd6+"), Motif::kAttack);
+  int on_the_king = 0;
+  for (const MotifOccurrence& occurrence : found) {
+    if (occurrence.attacker == "Rh5" && occurrence.target == "ka5") ++on_the_king;
+  }
+  EXPECT_EQ(on_the_king, 1);
+}
+
+TEST(AttackDetector, DoesNotCallTheCastledRookADiscovery) {
+  // A ray out of the square the king left finds the rook on its new square,
+  // and excluding only the destination paired with that origin lets it
+  // through. The rook checks the king on b1 either way, so the row exists —
+  // the question is whether it is reported twice, once as a discovery.
+  const auto found = Found(From("8/8/8/8/8/8/8/nk2K2R w K - 0 1", "1. O-O+"), Motif::kAttack);
+  int on_the_king = 0;
+  for (const MotifOccurrence& occurrence : found) {
+    if (occurrence.target != "kb1") continue;
+    ++on_the_king;
+    EXPECT_EQ(occurrence.attacker, "Rf1");
+    EXPECT_FALSE(occurrence.is_discovered) << "the rook moved; it discovered nothing";
+  }
+  EXPECT_EQ(on_the_king, 1);
+}
+
+TEST(AttackDetector, RecordsWhatACastledRookAttacks) {
+  // "O-O" names no square, so the rook's arrival on a new file used to
+  // produce nothing at all — including when it is the mating move, which
+  // left the derived CHECKMATE and DOUBLE_CHECK rows with no ATTACK to
+  // derive from.
+  const auto found =
+      Found(From("5k2/4p1p1/3N4/8/8/8/B7/4K2R w K - 0 1", "1. O-O#"), Motif::kAttack);
+  ASSERT_FALSE(found.empty());
+  bool rook_on_the_king = false;
+  for (const MotifOccurrence& occurrence : found) {
+    if (occurrence.attacker == "Rf1" && occurrence.target == "kf8") {
+      rook_on_the_king = true;
+      EXPECT_TRUE(occurrence.is_mate);
+      EXPECT_FALSE(occurrence.is_discovered) << "the rook moved; it discovered nothing";
+    }
+  }
+  EXPECT_TRUE(rook_on_the_king);
+}
+
+TEST(PinDetector, SeesAPinTheCastledRookCreates) {
+  const auto pins = Found(From("5k2/8/5n2/8/8/8/8/4K2R w K - 0 1", "1. O-O"), Motif::kPin);
+  ASSERT_EQ(pins.size(), 1u);
+  EXPECT_EQ(pins[0].attacker, "Rf1");
+  EXPECT_EQ(pins[0].target, "nf6");
+  EXPECT_EQ(pins[0].pin_type, PinType::kAbsolute);
 }
 
 // --- CHECK --------------------------------------------------------------
@@ -230,6 +310,21 @@ TEST(SmotheredMateDetector, WantsAKnightAndNoEscape) {
   ASSERT_EQ(found.size(), 1u);
   EXPECT_EQ(found[0].attacker, "Nf7");
   EXPECT_EQ(found[0].target, "kh8");
+}
+
+TEST(SmotheredMateDetector, WantsTheEscapeSquaresFilledByTheKingsOwnMen) {
+  // A knight mate that is not smothered: the rook covers g7 and g8 rather
+  // than the king's own pieces standing on them. Without this the escape
+  // loop is never exercised in the direction that rejects.
+  const std::string pgn = From("7k/7p/8/4N3/8/8/8/6RK w - - 0 1", "1. Nf7#");
+  // It really is mate by a knight, or the detector would be bailing one
+  // step earlier and this would pass without reaching the escape squares.
+  const auto checks = Found(pgn, Motif::kCheck);
+  ASSERT_EQ(checks.size(), 1u);
+  ASSERT_TRUE(checks[0].is_mate);
+  ASSERT_EQ(checks[0].attacker, "Nf7");
+
+  EXPECT_THAT(Found(pgn, Motif::kSmotheredMate), IsEmpty());
 }
 
 TEST(SmotheredMateDetector, IgnoresAMateWithRoomToBreathe) {

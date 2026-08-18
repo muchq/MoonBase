@@ -334,6 +334,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/engine/GameReplayerParityTest.java",
         "src/test/java/com/muchq/games/one_d4/engine/GameReplayerTest.java",
         "src/test/java/com/muchq/games/one_d4/engine/PgnParserTest.java",
+        "src/test/java/com/muchq/games/one_d4/engine/PlyDerivationTest.java",
         "src/test/java/com/muchq/games/one_d4/engine/ReplayBoardTest.java",
     ],
     deps = [
@@ -466,6 +467,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/motifs/CheckDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/DetectorsTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/DiscoveredAttackDetectorTest.java",
+        "src/test/java/com/muchq/games/one_d4/motifs/EmptiedAndLandedSquaresTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/PinDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/PromotionDetectorTest.java",
         "src/test/java/com/muchq/games/one_d4/motifs/PromotionWithCheckDetectorTest.java",

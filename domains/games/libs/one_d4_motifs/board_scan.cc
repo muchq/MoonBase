@@ -1,6 +1,7 @@
 #include "domains/games/libs/one_d4_motifs/board_scan.h"
 
 #include <optional>
+#include <vector>
 
 #include "chess.hpp"
 #include "domains/games/libs/chess_cpp/replay.h"
@@ -50,11 +51,19 @@ std::optional<chess::Square> FirstPieceAlong(const chess::Board& board, int row,
   return std::nullopt;
 }
 
-std::optional<chess::Square> MovedTo(const chess_cpp::Position& position) {
-  if (!position.last.has_value()) return std::nullopt;
+chess::Square CastledRookTo(chess::Square king_from, bool kingside) {
+  return chess::Square(king_from.index() / 8 * 8 + (kingside ? 5 : 3));
+}
+
+std::vector<chess::Square> LandedOn(const chess_cpp::Position& position) {
+  if (!position.last.has_value()) return {};
   const chess::Move move = position.last->move;
-  if (move.typeOf() == chess::Move::CASTLING) return std::nullopt;
-  return move.to();
+  if (move.typeOf() != chess::Move::CASTLING) return {move.to()};
+
+  // Encoded king-takes-rook: from is the king, to is the rook it swaps with.
+  const bool kingside = move.to() > move.from();
+  const chess::Square king_to = chess::Square(move.from().index() / 8 * 8 + (kingside ? 6 : 2));
+  return {king_to, CastledRookTo(move.from(), kingside)};
 }
 
 bool IsPromotion(const chess_cpp::Position& position) {

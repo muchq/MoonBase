@@ -3,7 +3,10 @@ package com.muchq.games.one_d4.parity;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** Writes the parity golden: {@code bazel run //...:motif_dump -- <corpus.pgn> > golden.tsv}. */
+/**
+ * Writes the parity golden: {@code bazel run //domains/games/apis/one_d4:motif_dump_main --
+ * <corpus.pgn> > golden.tsv}.
+ */
 public final class MotifDumpMain {
 
   private MotifDumpMain() {}

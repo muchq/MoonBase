@@ -1,6 +1,7 @@
 // SKEWER: a slider attacks a valuable piece with something cheaper behind
 // it — a pin the other way up.
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -59,9 +60,7 @@ class SkewerDetector : public Detector {
   Motif motif() const override { return Motif::kSkewer; }
 
   void OnPosition(const Position& position, Findings& out) override {
-    const std::optional<chess::Square> landed = MovedTo(position);
-    if (!landed.has_value()) return;
-
+    const std::vector<chess::Square> landed = LandedOn(position);
     const chess::Board& board = position.board;
     const Side attacking_side = chess_cpp::Opponent(position.side_to_move);
 
@@ -80,7 +79,7 @@ class SkewerDetector : public Detector {
 
     for (const Skewer& skewer : skewers) {
       // Only the skewer this move created.
-      if (skewer.attacker != *landed) continue;
+      if (std::find(landed.begin(), landed.end(), skewer.attacker) == landed.end()) continue;
       Finding finding;
       finding.description = absl::StrCat("Skewer detected at move ", position.move_number);
       finding.attacker = PieceNotation(board.at(skewer.attacker), skewer.attacker);
