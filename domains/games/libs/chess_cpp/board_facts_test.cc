@@ -172,4 +172,53 @@ TEST(ClassifyCheck, ReportsDirectForADoubleCheckAndLeavesTheCountingToCheckers) 
 }
 
 }  // namespace
+// --- AttacksFrom --------------------------------------------------------
+
+TEST(AttacksFrom, IsEmptyForAnEmptySquare) {
+  const chess::Board board("4k3/8/8/8/8/8/8/4K3 w - - 0 1");
+  EXPECT_EQ(facts::AttacksFrom(board, chess::Square("d4")).count(), 0);
+}
+
+TEST(AttacksFrom, StopsASliderAtTheFirstPiece) {
+  // Occupancy, not raw geometry: the rook does not see past the pawn.
+  const chess::Board board("4k3/8/8/8/8/8/3P4/3RK3 w - - 0 1");
+  const chess::Bitboard attacked = facts::AttacksFrom(board, chess::Square("d1"));
+  EXPECT_TRUE(attacked.check(chess::Square("d2").index())) << "it does attack the blocker";
+  EXPECT_FALSE(attacked.check(chess::Square("d3").index()));
+}
+
+TEST(AttacksFrom, GivesAPawnItsCapturesAndNotItsPushes) {
+  // The distinction the detectors rest on: an empty square a pawn could
+  // step to is not attacked, and an empty square it could take on is.
+  const chess::Board board("4k3/8/8/8/8/8/4P3/4K3 w - - 0 1");
+  const chess::Bitboard attacked = facts::AttacksFrom(board, chess::Square("e2"));
+  EXPECT_FALSE(attacked.check(chess::Square("e3").index()));
+  EXPECT_TRUE(attacked.check(chess::Square("d3").index()));
+  EXPECT_TRUE(attacked.check(chess::Square("f3").index()));
+  EXPECT_EQ(attacked.count(), 2);
+}
+
+TEST(AttacksFrom, PointsABlackPawnDownTheBoard) {
+  const chess::Board board("4k3/4p3/8/8/8/8/8/4K3 b - - 0 1");
+  const chess::Bitboard attacked = facts::AttacksFrom(board, chess::Square("e7"));
+  EXPECT_TRUE(attacked.check(chess::Square("d6").index()));
+  EXPECT_FALSE(attacked.check(chess::Square("d8").index()));
+}
+
+TEST(AttacksFrom, AgreesWithAttackersOf) {
+  // The two are the same relation read from opposite ends.
+  const chess::Board board("r3k2r/pppq1ppp/2n1bn2/3pp3/3PP3/2N1BN2/PPPQ1PPP/R3K2R w KQkq - 0 8");
+  for (int from = 0; from < 64; ++from) {
+    const chess::Square origin(from);
+    const chess::Piece piece = board.at(origin);
+    if (piece == chess::Piece::NONE) continue;
+    for (int to = 0; to < 64; ++to) {
+      const chess::Square target(to);
+      const bool attacks = facts::AttacksFrom(board, origin).check(to);
+      const bool listed = facts::AttackersOf(board, FromColor(piece.color()), target).check(from);
+      EXPECT_EQ(attacks, listed) << "from " << std::string(origin) << " to " << std::string(target);
+    }
+  }
+}
+
 }  // namespace chess_cpp::facts

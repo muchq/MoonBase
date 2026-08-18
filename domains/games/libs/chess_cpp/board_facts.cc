@@ -14,6 +14,27 @@ bool InDoubleCheck(const chess::Board& board, Side side) {
   return Checkers(board, side).count() >= 2;
 }
 
+chess::Bitboard AttacksFrom(const chess::Board& board, chess::Square square) {
+  const chess::Piece piece = board.at(square);
+  switch (piece.type().internal()) {
+    case chess::PieceType::underlying::PAWN:
+      return chess::attacks::pawn(piece.color(), square);
+    case chess::PieceType::underlying::KNIGHT:
+      return chess::attacks::knight(square);
+    case chess::PieceType::underlying::BISHOP:
+      return chess::attacks::bishop(square, board.occ());
+    case chess::PieceType::underlying::ROOK:
+      return chess::attacks::rook(square, board.occ());
+    case chess::PieceType::underlying::QUEEN:
+      return chess::attacks::queen(square, board.occ());
+    case chess::PieceType::underlying::KING:
+      return chess::attacks::king(square);
+    case chess::PieceType::underlying::NONE:
+      return chess::Bitboard{};
+  }
+  return chess::Bitboard{};
+}
+
 chess::Bitboard AttackersOf(const chess::Board& board, Side by, chess::Square square) {
   return chess::attacks::attackers(board, ToColor(by), square);
 }

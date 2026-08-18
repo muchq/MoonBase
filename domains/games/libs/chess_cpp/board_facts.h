@@ -33,6 +33,11 @@ chess::Bitboard Checkers(const chess::Board& board, Side side);
 /// purely a property of the position.
 bool InDoubleCheck(const chess::Board& board, Side side);
 
+/// The squares the piece on `square` attacks. Attacks, not moves: a pawn's
+/// pushes are absent and its captures present, occupied or not. Upstream
+/// has this per piece type, not per piece.
+chess::Bitboard AttacksFrom(const chess::Board& board, chess::Square square);
+
 /// Every piece of `by` that attacks `square` under the current occupancy.
 ///
 /// Occupancy matters and is the whole subtlety: a rook behind another rook
