@@ -411,5 +411,69 @@ TEST(Poller, ARefusedProgressWriteIsALostClaim) {
   EXPECT_EQ(poller.last_outcome(), RunOutcome::kLeaseLost);
 }
 
+TEST(Poller, GivesTheRangeBackWhenARunHitsItsCeiling) {
+  // The attempt stays spent, unlike a shutdown. A run that has been going
+  // longer than any legitimate run is evidence of a fault, and refunding
+  // it would retry that fault forever.
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller::Options options = Options();
+  options.max_run = absl::ZeroDuration();
+  Poller poller(
+      queue,
+      [](const IndexJob&, LeaseKeeper& lease) {
+        EXPECT_TRUE(lease.OutOfTime());
+        RunReport report;
+        report.stopped = Stopped::kRunCeiling;
+        return report;
+      },
+      options);
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_THAT(queue.calls, ElementsAre("release job-1"));
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kInterrupted);
+}
+
+TEST(Poller, StopsRenewingARunThatIsPastItsCeiling) {
+  // The half that recovers a run wedged inside one month: it will never
+  // reach the check between months, so the only way its range comes back
+  // is the claim lapsing under it.
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller::Options options = Options();
+  options.lease = absl::Milliseconds(400);
+  options.renew_every = absl::Milliseconds(25);
+  options.max_run = absl::ZeroDuration();
+  Poller poller(
+      queue,
+      [](const IndexJob&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
+        absl::SleepFor(absl::Milliseconds(200));
+        EXPECT_FALSE(lease.Keep()) << "the claim was renewed past the ceiling";
+        RunReport report;
+        report.lease_lost = true;
+        return report;
+      },
+      options);
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_EQ(queue.heartbeats.load(), 0) << "the queue was asked to renew past the ceiling";
+  EXPECT_THAT(queue.calls, IsEmpty());
+}
+
+TEST(Poller, LeavesARunInsideItsCeilingAlone) {
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller poller(
+      queue,
+      [](const IndexJob&, LeaseKeeper& lease) {
+        EXPECT_FALSE(lease.OutOfTime());
+        return RunReport{};
+      },
+      Options());
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kCompleted);
+}
+
 }  // namespace
 }  // namespace one_d4_worker

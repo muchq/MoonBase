@@ -116,11 +116,14 @@ cc_test(
         "pg_queue_test.cc",
         "poller.cc",
         "//domains/games/apis/one_d4:worker_metric_names",
+        "//domains/games/apis/one_d4:worker_retention_policy",
         "//domains/games/apis/one_d4:worker_schema_sources",
     ],
     deps = [
         ":pg_queue",
+        ":poller",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
     ],
 )

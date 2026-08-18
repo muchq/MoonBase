@@ -98,6 +98,14 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
       report.stopped = Stopped::kShutdown;
       return report;
     }
+    // Between months only, unlike a shutdown. A run past the ceiling may
+    // finish the month it is inside — those games are extracted either
+    // way — but may not start another. The attempt stays spent, because
+    // refunding it would retry a wedge forever.
+    if (lease.OutOfTime()) {
+      report.stopped = Stopped::kRunCeiling;
+      return report;
+    }
     // Ownership before work: a run that has lost the range must not write
     // over whoever holds it now.
     if (!lease.Keep()) {

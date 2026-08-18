@@ -84,6 +84,11 @@ int main() {
   const absl::Duration lease = absl::Seconds(std::atoi(Env("ONE_D4_LEASE_SECONDS", "300").c_str()));
   const absl::Duration idle_wait =
       absl::Seconds(std::atoi(Env("ONE_D4_POLL_SECONDS", "5").c_str()));
+  // RetentionPolicy.MAX_RUN. Past it a run is treated as wedged: it stops
+  // renewing, hands the range back with the attempt spent, and a
+  // replacement picks it up.
+  const absl::Duration max_run =
+      absl::Seconds(std::atoi(Env("ONE_D4_MAX_RUN_SECONDS", "21600").c_str()));
 
   smithy::Outcome<chess_com::Client> client = chess_com::CreateProductionClient();
   if (!client.ok()) {
@@ -116,7 +121,8 @@ int main() {
         one_d4_worker::IndexRun run(archive, sink, options);
         return run.Execute(job, keeper);
       },
-      one_d4_worker::Poller::Options{.owner = owner, .lease = lease});
+      one_d4_worker::Poller::Options{
+          .owner = owner, .lease = lease, .renew_every = lease / 4, .max_run = max_run});
 
   while (g_stopping == 0) {
     const absl::Time started = absl::Now();

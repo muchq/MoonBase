@@ -47,6 +47,14 @@ class LeaseKeeper {
   /// shows progress instead of sitting at zero until it ends. Same answer
   /// as Keep(), from the same fence, so a refusal is a lost claim.
   virtual bool Report(int games_indexed) = 0;
+
+  /// True once the run has been going longer than any legitimate run.
+  ///
+  /// The wedge ceiling. A run past it may finish the month it is already
+  /// inside — the games are extracted either way — but may not start
+  /// another, and its claim stops being renewed so a replacement can take
+  /// the range even if this run never returns at all.
+  virtual bool OutOfTime() = 0;
 };
 
 /// Claims one request and runs it.
@@ -67,6 +75,18 @@ class Poller {
     /// four archive calls, eight hundred profile lookups and four hundred
     /// extractions between checkpoints, and the lease is five minutes.
     absl::Duration renew_every = absl::Minutes(5) / 4;
+
+    /// How long a run may hold a range before it is treated as wedged.
+    /// RetentionPolicy.MAX_RUN, and pinned equal to it.
+    ///
+    /// Deliberately far above any legitimate run — a twelve-month range
+    /// for a prolific player is minutes against a healthy chess.com — so
+    /// that crossing it is evidence of a fault rather than of a big
+    /// request. The cost of being wrong is asymmetric: too high only
+    /// delays recovering from a wedge, while too low cuts real work short
+    /// and spends an attempt doing it, three of which retire the request
+    /// with a message blaming the range.
+    absl::Duration max_run = absl::Hours(6);
   };
 
   using Run = std::function<absl::StatusOr<RunReport>(const IndexJob&, LeaseKeeper&)>;

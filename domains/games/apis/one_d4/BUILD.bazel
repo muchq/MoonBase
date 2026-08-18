@@ -436,6 +436,15 @@ filegroup(
     visibility = ["//domains/games:__subpackages__"],
 )
 
+# The lease, renewal and run-ceiling durations. Properties of the queue,
+# so both pollers have to agree on them.
+filegroup(
+    name = "worker_retention_policy",
+    testonly = True,
+    srcs = ["src/main/java/com/muchq/games/one_d4/db/RetentionPolicy.java"],
+    visibility = ["//domains/games:__subpackages__"],
+)
+
 filegroup(
     name = "worker_schema_sources",
     testonly = True,

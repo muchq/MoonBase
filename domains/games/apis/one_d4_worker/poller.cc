@@ -27,12 +27,13 @@ constexpr char kInternalFailure[] = "Indexing failed due to an internal error";
 class QueueLease : public LeaseKeeper {
  public:
   QueueLease(IndexQueue& queue, std::string id, std::string owner, absl::Duration lease,
-             absl::Duration renew_every)
+             absl::Duration renew_every, absl::Duration max_run)
       : queue_(queue),
         id_(std::move(id)),
         owner_(std::move(owner)),
         lease_(lease),
         renew_every_(renew_every),
+        deadline_(absl::Now() + max_run),
         proven_(absl::Now()) {
     renewer_ = std::thread([this] { RenewUntilStopped(); });
   }
@@ -52,6 +53,11 @@ class QueueLease : public LeaseKeeper {
     const absl::MutexLock lock(&mu_);
     if (lost_) return false;
     return RenewLocked();
+  }
+
+  bool OutOfTime() override {
+    const absl::MutexLock lock(&mu_);
+    return absl::Now() >= deadline_;
   }
 
   bool Report(int games_indexed) override {
@@ -81,6 +87,12 @@ class QueueLease : public LeaseKeeper {
 
  private:
   bool RenewLocked() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+    // Past the ceiling the claim stops being renewed, which is what
+    // recovers a run wedged inside a single month: it will never reach the
+    // check between months, so the only way its range comes back is the
+    // lease lapsing under it. Java stops its heartbeat here for the same
+    // reason.
+    if (absl::Now() >= deadline_) return false;
     const absl::StatusOr<bool> held = queue_.Heartbeat(id_, owner_, lease_);
     if (held.ok() && *held) {
       proven_ = absl::Now();
@@ -113,6 +125,7 @@ class QueueLease : public LeaseKeeper {
   const std::string owner_;
   const absl::Duration lease_;
   const absl::Duration renew_every_;
+  const absl::Time deadline_;
 
   mutable absl::Mutex mu_;
   bool stop_ ABSL_GUARDED_BY(mu_) = false;
@@ -147,7 +160,8 @@ absl::StatusOr<bool> Poller::PollOnce() {
   if (!claimed->has_value()) return false;
 
   const IndexJob& job = **claimed;
-  QueueLease lease(queue_, job.id, options_.owner, options_.lease, options_.renew_every);
+  QueueLease lease(queue_, job.id, options_.owner, options_.lease, options_.renew_every,
+                   options_.max_run);
   const absl::StatusOr<RunReport> report = run_(job, lease);
 
   // Before anything else, including a failure: a run that lost its lease

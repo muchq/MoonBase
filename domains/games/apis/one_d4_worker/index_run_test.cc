@@ -46,6 +46,7 @@ class FakeArchive : public ArchiveSource {
   absl::StatusOr<std::vector<ArchivedGame>> FetchMonth(std::string_view player,
                                                        YearMonth month) override {
     asked.push_back(month.ToString());
+    if (on_fetch) on_fetch();
     if (!status.ok()) return status;
     const auto found = months.find(month.ToString());
     if (found == months.end()) return absl::NotFoundError("no archive for that month");
@@ -62,6 +63,7 @@ class FakeArchive : public ArchiveSource {
   std::map<std::string, std::vector<ArchivedGame>> months;
   absl::Status status;
   std::vector<std::string> asked;
+  std::function<void()> on_fetch;
 
   std::map<std::string, std::string> titles;
   absl::Status title_status;
@@ -114,10 +116,13 @@ class FakeLease : public LeaseKeeper {
     return reports_accepted;
   }
 
+  bool OutOfTime() override { return out_of_time; }
+
   int holds = 1000;
   int kept = 0;
   std::vector<int> reported;
   bool reports_accepted = true;
+  bool out_of_time = false;
 };
 
 IndexJob AJob(std::string_view start = "2026-01", std::string_view end = "2026-01") {
@@ -792,6 +797,48 @@ TEST(IndexRun, RetriesATitleLookupThatFailed) {
 
   EXPECT_THAT(archive.looked_up, ElementsAre("alice", "bob", "alice", "bob"))
       << "a month is where the giving-up resets";
+}
+
+TEST(IndexRun, WillNotStartAMonthPastTheRunCeiling) {
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  archive.months["2026-02"] = {AGame("g2")};
+  FakeSink sink;
+  FakeLease lease;
+  lease.out_of_time = true;
+
+  IndexRun run(archive, sink, Options());
+  const absl::StatusOr<RunReport> report = run.Execute(AJob("2026-01", "2026-02"), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  ASSERT_TRUE(report->stopped.has_value());
+  EXPECT_EQ(*report->stopped, Stopped::kRunCeiling)
+      << "a ceiling is not a shutdown: the attempt stays spent";
+  EXPECT_THAT(archive.asked, IsEmpty());
+}
+
+TEST(IndexRun, FinishesTheMonthItIsAlreadyInsideWhenTheCeilingPasses) {
+  // Those games are extracted either way. What the ceiling forbids is
+  // starting another month, not throwing away the one in hand.
+  FakeArchive archive;
+  for (int i = 0; i < 4; ++i) archive.months["2026-01"].push_back(AGame(absl::StrCat("g", i)));
+  archive.months["2026-02"] = {AGame("g4")};
+  FakeSink sink;
+  FakeLease lease;
+
+  // Inside the ceiling when the first month starts, past it by the time
+  // the second would.
+  archive.on_fetch = [&lease] { lease.out_of_time = true; };
+
+  IndexRun::Options options = Options();
+  options.batch_size = 2;
+  IndexRun run(archive, sink, options);
+  const absl::StatusOr<RunReport> report = run.Execute(AJob("2026-01", "2026-02"), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  EXPECT_EQ(*report->stopped, Stopped::kRunCeiling);
+  EXPECT_EQ(report->games_indexed, 4) << "the month in hand was abandoned";
+  EXPECT_THAT(sink.periods, ElementsAre(::testing::Field(&IndexedMonth::month, "2026-01")));
 }
 
 TEST(IndexRun, StopsPartWayThroughAMonthWhenAskedTo) {
