@@ -112,6 +112,49 @@ public class EmptiedAndLandedSquaresTest {
   }
 
   @Test
+  public void oneDiscoveryWhenAMoveEmptiesTwoSquaresOnOneRay() {
+    // exd6+ empties e5 and d5, and both sit on Rh5's line to the king. Twice
+    // reported, the read path counts two attackers on one king and derives a
+    // DOUBLE_CHECK that never happened.
+    List<GameFeatures.MotifOccurrence> occurrences =
+        new AttackDetector()
+            .detect(
+                move(
+                    "8/8/8/k2pP2R/8/8/8/7K w - d6 0 2",
+                    "8/8/3P4/k6R/8/8/8/7K b - - 0 2",
+                    false,
+                    "exd6+",
+                    2));
+
+    assertThat(occurrences)
+        .filteredOn(occ -> "Rh5".equals(occ.attacker()) && "ka5".equals(occ.target()))
+        .hasSize(1);
+  }
+
+  @Test
+  public void theCastledRookIsNotADiscovery() {
+    // A ray out of the square the king left finds the rook on its new square.
+    List<GameFeatures.MotifOccurrence> occurrences =
+        new AttackDetector()
+            .detect(
+                move(
+                    "8/8/8/8/8/8/8/nk2K2R w K - 0 1",
+                    "8/8/8/8/8/8/8/nk3RK1 b - - 1 1",
+                    false,
+                    "O-O+",
+                    1));
+
+    assertThat(occurrences)
+        .filteredOn(occ -> "kb1".equals(occ.target()))
+        .hasSize(1)
+        .allSatisfy(
+            occ -> {
+              assertThat(occ.attacker()).isEqualTo("Rf1");
+              assertThat(occ.isDiscovered()).isFalse();
+            });
+  }
+
+  @Test
   public void queensideCastlingLandsTheRookOnTheDFile() {
     assertThat(BoardUtils.landedSquares("O-O-O", true))
         .extracting(square -> BoardUtils.squareName(square[0], square[1]))

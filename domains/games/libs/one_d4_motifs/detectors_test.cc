@@ -170,6 +170,34 @@ TEST(AttackDetector, DoesNotCallAPromotedPieceADiscovery) {
   }
 }
 
+TEST(AttackDetector, ReportsOneDiscoveryWhenAMoveEmptiesTwoSquaresOnOneRay) {
+  // exd6+ empties e5 and d5, and both sit on the rook's line to the king.
+  // Reported twice, the read path counts two attackers on one king and
+  // derives a DOUBLE_CHECK that never happened.
+  const auto found = Found(From("8/8/8/k2pP2R/8/8/8/7K w - d6 0 2", "2. exd6+"), Motif::kAttack);
+  int on_the_king = 0;
+  for (const MotifOccurrence& occurrence : found) {
+    if (occurrence.attacker == "Rh5" && occurrence.target == "ka5") ++on_the_king;
+  }
+  EXPECT_EQ(on_the_king, 1);
+}
+
+TEST(AttackDetector, DoesNotCallTheCastledRookADiscovery) {
+  // A ray out of the square the king left finds the rook on its new square,
+  // and excluding only the destination paired with that origin lets it
+  // through. The rook checks the king on b1 either way, so the row exists —
+  // the question is whether it is reported twice, once as a discovery.
+  const auto found = Found(From("8/8/8/8/8/8/8/nk2K2R w K - 0 1", "1. O-O+"), Motif::kAttack);
+  int on_the_king = 0;
+  for (const MotifOccurrence& occurrence : found) {
+    if (occurrence.target != "kb1") continue;
+    ++on_the_king;
+    EXPECT_EQ(occurrence.attacker, "Rf1");
+    EXPECT_FALSE(occurrence.is_discovered) << "the rook moved; it discovered nothing";
+  }
+  EXPECT_EQ(on_the_king, 1);
+}
+
 TEST(AttackDetector, RecordsWhatACastledRookAttacks) {
   // "O-O" names no square, so the rook's arrival on a new file used to
   // produce nothing at all — including when it is the mating move, which

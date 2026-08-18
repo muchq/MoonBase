@@ -4,7 +4,9 @@ import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import com.muchq.games.one_d4.engine.model.PositionContext;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 public class DiscoveredAttackDetector implements MotifDetector {
 
@@ -55,6 +57,11 @@ public class DiscoveredAttackDetector implements MotifDetector {
       int[][] before, int[][] after, boolean moverIsWhite) {
     List<RevealedAttack> result = new ArrayList<>();
     List<int[]> landed = BoardUtils.landedSquares(before, after, moverIsWhite);
+    // One move can empty two squares on a single ray — an en passant capture
+    // takes a pawn beside the square its captor left — and the same
+    // discovery reported twice reads downstream as two attackers on one
+    // king, which is how a false DOUBLE_CHECK gets derived.
+    Set<String> seen = new LinkedHashSet<>();
 
     for (int r = 0; r < 8; r++) {
       for (int c = 0; c < 8; c++) {
@@ -66,7 +73,6 @@ public class DiscoveredAttackDetector implements MotifDetector {
         // is on neither square the move names — and the lines through it
         // open with nothing of ours near them.
         boolean ourPiece = (pieceBefore > 0) == moverIsWhite;
-        int[] dest;
         String movedPiece;
         if (ourPiece) {
           // Where this piece went. Null for a promotion: no square holds a
@@ -76,9 +82,6 @@ public class DiscoveredAttackDetector implements MotifDetector {
               pieceLetter(pieceBefore)
                   + squareName(r, c)
                   + (samePiece != null ? squareName(samePiece[0], samePiece[1]) : "??");
-          // The promoted piece still has to be excluded below, or it reads
-          // as one the pawn had been hiding all along.
-          dest = samePiece != null ? samePiece : nearest(landed, r, c);
         } else {
           // The pawn taken en passant. What moved is the pawn that took it.
           int[] from = moverOrigin(before, after, moverIsWhite);
@@ -88,9 +91,11 @@ public class DiscoveredAttackDetector implements MotifDetector {
               pieceLetter(before[from[0]][from[1]])
                   + squareName(from[0], from[1])
                   + squareName(to[0], to[1]);
-          dest = to;
         }
-        result.addAll(revealsAttacks(after, r, c, moverIsWhite, movedPiece, dest));
+        for (RevealedAttack revealed :
+            revealsAttacks(after, r, c, moverIsWhite, movedPiece, landed)) {
+          if (seen.add(revealed.attacker() + ">" + revealed.target())) result.add(revealed);
+        }
       }
     }
     return result;
@@ -129,7 +134,7 @@ public class DiscoveredAttackDetector implements MotifDetector {
       int vacatedC,
       boolean moverIsWhite,
       String movedPiece,
-      int[] dest) {
+      List<int[]> landed) {
     int[][] directions = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
     List<RevealedAttack> attacks = new ArrayList<>();
 
@@ -138,8 +143,11 @@ public class DiscoveredAttackDetector implements MotifDetector {
       while (br >= 0 && br < 8 && bc >= 0 && bc < 8) {
         int piece = board[br][bc];
         if (piece != 0) {
-          // The moved piece at its destination is not a revealed attacker
-          if (dest != null && br == dest[0] && bc == dest[1]) {
+          // A piece this move put down is not one it uncovered. Every
+          // landing square, not just the one paired with this origin:
+          // castling empties two squares and fills two, and a ray out of
+          // the king's old square finds the rook on its new one.
+          if (BoardUtils.isLanded(landed, br, bc)) {
             break;
           }
           boolean isWhite = piece > 0;

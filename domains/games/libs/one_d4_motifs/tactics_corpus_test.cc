@@ -144,7 +144,7 @@ TEST_F(TacticsCorpus, CoversTheMotifsTheWideBankIsThinOn) {
   EXPECT_EQ(Count(extracted, "PROMOTION_WITH_CHECKMATE"), 4);
   EXPECT_EQ(Count(extracted, "BACK_RANK_MATE"), 15);
   EXPECT_EQ(Count(extracted, "CROSS_PIN"), 14);
-  EXPECT_EQ(Count(extracted, "ATTACK"), 3774);
+  EXPECT_EQ(Count(extracted, "ATTACK"), 3773);
   EXPECT_EQ(Count(extracted, "CHECK"), 1467);
   EXPECT_EQ(Count(extracted, "PIN"), 877);
   EXPECT_EQ(Count(extracted, "SKEWER"), 124);
@@ -159,7 +159,7 @@ TEST_F(TacticsCorpus, HoldsNoSmotheredMate) {
 
 TEST_F(TacticsCorpus, EveryOccurrenceIsWellFormed) {
   const Extracted& extracted = corpus();
-  EXPECT_EQ(extracted.occurrences, 6492);
+  EXPECT_EQ(extracted.occurrences, 6491);
   // Every row goes to a NOT NULL column or a typed field; these are the
   // invariants the write path would otherwise discover in production.
   EXPECT_TRUE(extracted.malformed.empty()) << absl::StrJoin(extracted.malformed, "\n");
