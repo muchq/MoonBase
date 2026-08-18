@@ -42,6 +42,16 @@ jobs:
       - name: Test diff-build full-build decision
         run: ./scripts/test-diff-build
 
+      # make-git-overrides is what makes this repo buildable behind a proxy
+      # that 403s source archives, and nothing else in CI runs it. Its
+      # archive_override path built a stale commit for a whole release of a
+      # pinned dep because the clone cache key ignored the pinned ref (#1392
+      # review) — a wrong answer that looks exactly like a right one. Exercises
+      # scripts/make-git-overrides-lib.sh against fixture MODULE files; no
+      # network, no clones.
+      - name: Test make-git-overrides
+        run: ./scripts/test-make-git-overrides
+
   # deploy_config_test pins the text of the collector config, which can only
   # catch mistakes someone already knew to look for: `match_type: glob` passed
   # review and passed the line-presence test that existed at the time, and would
