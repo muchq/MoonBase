@@ -1,11 +1,13 @@
 #include "domains/games/apis/one_d4_worker/index_pool.h"
 
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include "absl/cleanup/cleanup.h"
 #include "absl/log/log.h"
 #include "absl/status/statusor.h"
 #include "absl/time/clock.h"
@@ -27,10 +29,15 @@ void IndexPool::Run(const std::function<bool()>& stopping,
   for (int slot = 0; slot < options_.slots; ++slot) {
     workers.emplace_back([this, &stopping, &sleep] { Work(stopping, sleep); });
   }
-  // Said before the wait, not after: a run cannot interrupt a chess.com
-  // call it is already inside, so this can take minutes, and silence
-  // there looks exactly like a hang.
+  // Waited for rather than logged straight away: this thread reaches
+  // here the moment the workers are spawned, and the workers run until
+  // the shutdown. Announced when that lands and not when the drain
+  // finishes, because a run cannot interrupt a chess.com call it is
+  // already inside — so the wait can take minutes, and silence there
+  // looks exactly like a hang.
+  draining_.WaitForNotification();
   LOG(INFO) << "Draining " << options_.slots << " indexing threads";
+
   for (std::thread& worker : workers) worker.join();
 }
 
@@ -40,6 +47,9 @@ void IndexPool::Work(const std::function<bool()>& stopping,
   // connection its own.
   const std::unique_ptr<IndexQueue> queue = make_queue_();
   Poller poller(*queue, run_, poller_);
+  const absl::Cleanup announce = [this] {
+    std::call_once(announced_, [this] { draining_.Notify(); });
+  };
 
   while (!stopping()) {
     const absl::StatusOr<std::optional<Claim>> claim = poller.ClaimOne();

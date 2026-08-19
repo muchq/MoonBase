@@ -421,8 +421,10 @@ cc_library(
     deps = [
         ":metrics",
         ":poller",
+        "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
     ],
 )

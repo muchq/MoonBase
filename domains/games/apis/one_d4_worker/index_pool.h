@@ -3,7 +3,9 @@
 
 #include <functional>
 #include <memory>
+#include <mutex>
 
+#include "absl/synchronization/notification.h"
 #include "absl/time/time.h"
 #include "domains/games/apis/one_d4_worker/metrics.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
@@ -69,6 +71,11 @@ class IndexPool {
  private:
   void Work(const std::function<bool()>& stopping,
             const std::function<void(absl::Duration)>& sleep);
+
+  /// Set by whichever thread notices the shutdown first, so the drain
+  /// is announced when it starts rather than when it ends.
+  std::once_flag announced_;
+  absl::Notification draining_;
 
   const QueueFactory make_queue_;
   const Poller::Run run_;

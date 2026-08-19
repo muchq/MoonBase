@@ -553,5 +553,32 @@ TEST(IndexPool, SaysItIsDrainingBeforeItWaits) {
   log.StopCapturingLogs();
 }
 
+TEST(IndexPool, DoesNotSayItIsDrainingUntilItIs) {
+  // It said so at startup, half a millisecond after the threads were
+  // spawned — which reads as a worker that shut down the moment it came
+  // up, and leaves the real shutdown silent.
+  FakeQueue queue;
+  BlockingRuns runs;
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
+                 PollerOptions(), metrics, PoolOptions(2));
+
+  absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+  EXPECT_CALL(log, Log(testing::_, testing::_, testing::HasSubstr("Draining"))).Times(0);
+
+  std::atomic<bool> stopping{false};
+  log.StartCapturingLogs();
+  std::thread driver(
+      [&] { pool.Run([&stopping] { return stopping.load(); }, [](absl::Duration) {}); });
+  runs.AwaitStarted(2);
+  absl::SleepFor(absl::Milliseconds(200));
+  log.StopCapturingLogs();
+
+  stopping = true;
+  runs.Release();
+  driver.join();
+}
+
 }  // namespace
 }  // namespace one_d4_worker
