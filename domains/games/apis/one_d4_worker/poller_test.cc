@@ -106,7 +106,7 @@ TEST(Poller, GivesEveryRunItsOwnOwnerId) {
   // a pool that is the ordinary case. A request that wedges every run it
   // touches would never reach kMaxAttempts and nothing would retire it.
   FakeQueue queue;
-  Poller poller(queue, [](const IndexJob&, LeaseKeeper&) { return RunReport{}; }, Options());
+  Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, Options());
 
   queue.next = AJob();
   ASSERT_TRUE(poller.PollOnce().ok());
@@ -123,7 +123,7 @@ TEST(Poller, FencesARunsWritesOnTheIdItClaimedWith) {
   // An id that changed mid-run would fence the run out of its own row.
   FakeQueue queue;
   queue.next = AJob();
-  Poller poller(queue, [](const IndexJob&, LeaseKeeper&) { return RunReport{}; }, Options());
+  Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, Options());
 
   ASSERT_TRUE(poller.PollOnce().ok());
 
@@ -139,7 +139,7 @@ TEST(Poller, ClaimsWithoutRunning) {
   int runs = 0;
   Poller poller(
       queue,
-      [&runs](const IndexJob&, LeaseKeeper&) {
+      [&runs](const Claim&, LeaseKeeper&) {
         ++runs;
         return RunReport{};
       },
@@ -159,7 +159,7 @@ TEST(Poller, RunsAClaimAndWritesItsOutcome) {
   queue.next = AJob();
   Poller poller(
       queue,
-      [](const IndexJob&, LeaseKeeper&) {
+      [](const Claim&, LeaseKeeper&) {
         RunReport report;
         report.games_indexed = 3;
         return report;
@@ -175,9 +175,30 @@ TEST(Poller, RunsAClaimAndWritesItsOutcome) {
   EXPECT_THAT(queue.calls, ElementsAre("complete job-1 3"));
 }
 
+TEST(Poller, TellsTheRunWhichIdItMustFenceOn) {
+  // A run's sink fences its writes on the owner id, and the id is minted
+  // per claim — so a run told the process's name instead would have
+  // every write refused and index nothing.
+  FakeQueue queue;
+  queue.next = AJob();
+  std::string seen;
+  Poller poller(
+      queue,
+      [&seen](const Claim& claim, LeaseKeeper&) {
+        seen = claim.owner;
+        return RunReport{};
+      },
+      Options());
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+
+  ASSERT_EQ(queue.owners.size(), 1u);
+  EXPECT_EQ(seen, queue.owners[0]);
+}
+
 TEST(Poller, DoesNothingWhenTheQueueIsEmpty) {
   FakeQueue queue;
-  Poller poller(queue, [](const IndexJob&, LeaseKeeper&) { return RunReport{}; }, Options());
+  Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, Options());
 
   const absl::StatusOr<bool> worked = poller.PollOnce();
   ASSERT_TRUE(worked.ok()) << worked.status();
@@ -190,7 +211,7 @@ TEST(Poller, CompletesAJobItRan) {
   queue.next = AJob();
   Poller poller(
       queue,
-      [](const IndexJob& job, LeaseKeeper&) {
+      [](const Claim& claim, LeaseKeeper&) {
         RunReport report;
         report.games_indexed = 42;
         return report;
@@ -209,7 +230,7 @@ TEST(Poller, FailsAJobThatRaised) {
   queue.next = AJob();
   Poller poller(
       queue,
-      [](const IndexJob&, LeaseKeeper&) -> absl::StatusOr<RunReport> {
+      [](const Claim&, LeaseKeeper&) -> absl::StatusOr<RunReport> {
         return absl::InternalError("chess.com said no");
       },
       Options());
@@ -231,7 +252,7 @@ TEST(Poller, WritesNothingWhenTheLeaseIsLost) {
   queue.lease_held = false;
   Poller poller(
       queue,
-      [](const IndexJob&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
+      [](const Claim&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
         EXPECT_FALSE(lease.Keep());
         RunReport report;
         report.lease_lost = true;
@@ -252,7 +273,7 @@ TEST(Poller, HandsBackAJobItWasShutDownDuring) {
   queue.next = AJob();
   Poller poller(
       queue,
-      [](const IndexJob&, LeaseKeeper&) {
+      [](const Claim&, LeaseKeeper&) {
         RunReport report;
         report.stopped = Stopped::kShutdown;
         return report;
@@ -272,7 +293,7 @@ TEST(Poller, ReleasesAJobThatRanOutOfTime) {
   queue.next = AJob();
   Poller poller(
       queue,
-      [](const IndexJob&, LeaseKeeper&) {
+      [](const Claim&, LeaseKeeper&) {
         RunReport report;
         report.stopped = Stopped::kRunCeiling;
         return report;
@@ -292,7 +313,7 @@ TEST(Poller, DoesNotFailARunThatLostItsLeaseBeforeItRaised) {
   queue.lease_held = false;
   Poller poller(
       queue,
-      [](const IndexJob&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
+      [](const Claim&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
         EXPECT_FALSE(lease.Keep());
         return absl::InternalError("and then it fell over");
       },
@@ -310,7 +331,7 @@ TEST(Poller, ARefusedCompleteMeansTheLeaseWentSomewhereElse) {
   FakeQueue queue;
   queue.next = AJob();
   queue.terminal_write_wins = false;
-  Poller poller(queue, [](const IndexJob&, LeaseKeeper&) { return RunReport{}; }, Options());
+  Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, Options());
 
   ASSERT_TRUE(poller.PollOnce().ok());
   EXPECT_EQ(poller.last_outcome(), RunOutcome::kLeaseLost);
@@ -322,7 +343,7 @@ TEST(Poller, ARefusedFailMeansTheLeaseWentSomewhereElseToo) {
   queue.terminal_write_wins = false;
   Poller poller(
       queue,
-      [](const IndexJob&, LeaseKeeper&) -> absl::StatusOr<RunReport> {
+      [](const Claim&, LeaseKeeper&) -> absl::StatusOr<RunReport> {
         return absl::InternalError("chess.com said no");
       },
       Options());
@@ -334,7 +355,7 @@ TEST(Poller, ARefusedFailMeansTheLeaseWentSomewhereElseToo) {
 TEST(Poller, ReportsAQueueThatWillNotAnswer) {
   FakeQueue queue;
   queue.claim_fails = true;
-  Poller poller(queue, [](const IndexJob&, LeaseKeeper&) { return RunReport{}; }, Options());
+  Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, Options());
 
   EXPECT_EQ(poller.PollOnce().status().code(), absl::StatusCode::kUnavailable);
 }
@@ -344,7 +365,7 @@ TEST(Poller, KeepsTheLeaseWhileTheRunWorks) {
   queue.next = AJob();
   Poller poller(
       queue,
-      [](const IndexJob&, LeaseKeeper& lease) {
+      [](const Claim&, LeaseKeeper& lease) {
         for (int i = 0; i < 3; ++i) EXPECT_TRUE(lease.Keep());
         return RunReport{};
       },
@@ -365,7 +386,7 @@ TEST(Poller, RenewsTheLeaseWithoutBeingAsked) {
   options.renew_every = absl::Milliseconds(50);
   Poller poller(
       queue,
-      [](const IndexJob&, LeaseKeeper&) {
+      [](const Claim&, LeaseKeeper&) {
         // Works, and never asks.
         absl::SleepFor(absl::Milliseconds(300));
         return RunReport{};
@@ -386,7 +407,7 @@ TEST(Poller, NoticesALeaseTakenWhileItWasWorking) {
   options.renew_every = absl::Milliseconds(50);
   Poller poller(
       queue,
-      [&](const IndexJob&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
+      [&](const Claim&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
         queue.lease_held = false;
         absl::SleepFor(absl::Milliseconds(200));
         EXPECT_FALSE(lease.Keep());
@@ -412,7 +433,7 @@ TEST(Poller, KeepsWorkingThroughAQueueItCannotReachForAMoment) {
   options.renew_every = absl::Milliseconds(50);
   Poller poller(
       queue,
-      [&](const IndexJob&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
+      [&](const Claim&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
         queue.heartbeat_fails = true;
         absl::SleepFor(absl::Milliseconds(200));
         EXPECT_TRUE(lease.Keep()) << "one unreachable moment ended the run";
@@ -435,7 +456,7 @@ TEST(Poller, GivesUpOnceTheLeaseItLastProvedWouldHaveExpired) {
   options.renew_every = absl::Milliseconds(25);
   Poller poller(
       queue,
-      [&](const IndexJob&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
+      [&](const Claim&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
         queue.heartbeat_fails = true;
         absl::SleepFor(absl::Milliseconds(400));
         EXPECT_FALSE(lease.Keep());
@@ -455,7 +476,7 @@ TEST(Poller, PassesTheRunsProgressStraightToTheQueue) {
   queue.next = AJob();
   Poller poller(
       queue,
-      [](const IndexJob&, LeaseKeeper& lease) {
+      [](const Claim&, LeaseKeeper& lease) {
         EXPECT_TRUE(lease.Report(12));
         EXPECT_TRUE(lease.Report(31));
         RunReport report;
@@ -477,7 +498,7 @@ TEST(Poller, ARefusedProgressWriteIsALostClaim) {
   queue.progress_accepted = false;
   Poller poller(
       queue,
-      [](const IndexJob&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
+      [](const Claim&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
         EXPECT_FALSE(lease.Report(12));
         EXPECT_FALSE(lease.Keep()) << "the claim stays lost once it is lost";
         RunReport report;
@@ -501,7 +522,7 @@ TEST(Poller, GivesTheRangeBackWhenARunHitsItsCeiling) {
   options.max_run = absl::ZeroDuration();
   Poller poller(
       queue,
-      [](const IndexJob&, LeaseKeeper& lease) {
+      [](const Claim&, LeaseKeeper& lease) {
         EXPECT_TRUE(lease.OutOfTime());
         RunReport report;
         report.stopped = Stopped::kRunCeiling;
@@ -528,7 +549,7 @@ TEST(Poller, StopsRenewingARunThatIsPastItsCeilingWithoutDisowningIt) {
   options.max_run = absl::ZeroDuration();
   Poller poller(
       queue,
-      [](const IndexJob&, LeaseKeeper& lease) {
+      [](const Claim&, LeaseKeeper& lease) {
         absl::SleepFor(absl::Milliseconds(150));
         EXPECT_TRUE(lease.Keep()) << "the month in hand was cut off at the ceiling";
         EXPECT_TRUE(lease.OutOfTime());
@@ -552,7 +573,7 @@ TEST(Poller, DisownsARunWhoseLastLeaseRanOutPastTheCeiling) {
   options.max_run = absl::ZeroDuration();
   Poller poller(
       queue,
-      [](const IndexJob&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
+      [](const Claim&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
         EXPECT_FALSE(lease.Keep());
         RunReport report;
         report.stopped = Stopped::kRunCeiling;
@@ -569,7 +590,7 @@ TEST(Poller, LeavesARunInsideItsCeilingAlone) {
   queue.next = AJob();
   Poller poller(
       queue,
-      [](const IndexJob&, LeaseKeeper& lease) {
+      [](const Claim&, LeaseKeeper& lease) {
         EXPECT_FALSE(lease.OutOfTime());
         return RunReport{};
       },

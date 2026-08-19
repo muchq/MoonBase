@@ -1,6 +1,7 @@
 #ifndef DOMAINS_GAMES_APIS_ONE_D4_WORKER_PG_GAME_SINK_H
 #define DOMAINS_GAMES_APIS_ONE_D4_WORKER_PG_GAME_SINK_H
 
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -34,6 +35,15 @@ class PgGameSink : public GameSink {
   std::string request_id_;
   std::string owner_;
 };
+
+/// A sink with a connection of its own, for one run.
+///
+/// One pg::Client is one connection serialised by a mutex, so runs
+/// sharing one queue every flush behind every other run's — and a flush
+/// is the long part. Sharing it would leave the pool with nothing to
+/// overlap.
+std::unique_ptr<GameSink> NewOwnedPgGameSink(const std::string& db_url, std::string request_id,
+                                             std::string owner);
 
 }  // namespace one_d4_worker
 

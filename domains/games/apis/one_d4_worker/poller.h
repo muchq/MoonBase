@@ -106,7 +106,10 @@ class Poller {
     absl::Duration max_run = absl::Hours(6);
   };
 
-  using Run = std::function<absl::StatusOr<RunReport>(const IndexJob&, LeaseKeeper&)>;
+  /// Runs one claimed request. Given the whole claim, not just the job,
+  /// because the run's writes are fenced on the id it was claimed under
+  /// and that id is minted per claim.
+  using Run = std::function<absl::StatusOr<RunReport>(const Claim&, LeaseKeeper&)>;
 
   Poller(IndexQueue& queue, Run run, Options options);
 

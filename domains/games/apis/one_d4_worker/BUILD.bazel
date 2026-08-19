@@ -334,6 +334,7 @@ cc_binary(
     deps = [
         ":chess_com_archive",
         ":db_options",
+        ":index_pool",
         ":index_run",
         ":metrics",
         ":pg_game_sink",
@@ -411,6 +412,38 @@ cc_test(
 
 # Who holds a title, for the whole site. Ten documents instead of a round
 # trip per opponent — see title_roster.h.
+cc_library(
+    name = "index_pool",
+    srcs = ["index_pool.cc"],
+    hdrs = ["index_pool.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":metrics",
+        ":poller",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_test(
+    name = "index_pool_test",
+    size = "small",
+    srcs = ["index_pool_test.cc"],
+    deps = [
+        ":index_pool",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # The assembly: which pieces a claimed request is run against, and the
 # loop that keeps claiming. Split out of worker_main because a binary has
 # no test target, and every wiring choice in it was one nothing would
@@ -425,12 +458,9 @@ cc_library(
         ":game_sink",
         ":index_run",
         ":job",
-        ":metrics",
         ":poller",
         ":title_roster",
-        "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/time",
     ],
 )
 
@@ -439,11 +469,13 @@ cc_test(
     size = "small",
     srcs = ["worker_test.cc"],
     deps = [
+        ":metrics",
         ":worker",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
     ],

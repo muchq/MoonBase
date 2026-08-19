@@ -175,7 +175,7 @@ absl::StatusOr<RunOutcome> Poller::RunClaimed(const Claim& claim) {
   const IndexJob& job = claim.job;
   const std::string& owner = claim.owner;
   QueueLease lease(queue_, job.id, owner, options_.lease, options_.renew_every, options_.max_run);
-  const absl::StatusOr<RunReport> report = run_(job, lease);
+  const absl::StatusOr<RunReport> report = run_(claim, lease);
 
   // Ahead of the lease check, unlike everything else. A run that stopped
   // at its ceiling gives the range back even if its claim lapsed on the

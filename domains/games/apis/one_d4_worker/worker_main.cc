@@ -27,6 +27,7 @@
 #include "absl/time/time.h"
 #include "domains/games/apis/one_d4_worker/chess_com_archive.h"
 #include "domains/games/apis/one_d4_worker/db_options.h"
+#include "domains/games/apis/one_d4_worker/index_pool.h"
 #include "domains/games/apis/one_d4_worker/index_run.h"
 #include "domains/games/apis/one_d4_worker/metrics.h"
 #include "domains/games/apis/one_d4_worker/pg_game_sink.h"
@@ -55,7 +56,7 @@ std::string Env(const char* name, std::string fallback = "") {
 /// word about it, since a value refused in silence looks like a value
 /// honoured.
 absl::Duration SecondsFromEnv(const char* name, absl::Duration fallback) {
-  const std::optional<int> seconds = futility::env::ReadPositiveSeconds(name);
+  const std::optional<int> seconds = futility::env::ReadPositiveInt(name);
   if (seconds.has_value()) return absl::Seconds(*seconds);
 
   const char* raw = std::getenv(name);
@@ -64,6 +65,24 @@ absl::Duration SecondsFromEnv(const char* name, absl::Duration fallback) {
                  << fallback;
   }
   return fallback;
+}
+
+/// How many requests to index at once.
+///
+/// Local capacity, not a queue protocol constant — two workers may
+/// disagree about it without misbehaving against each other — so unlike
+/// the lease and the ceiling this is a knob. A run is mostly waiting on
+/// chess.com and Postgres, so size it for concurrent calls rather than
+/// for the CPU cap.
+int SlotsFromEnv() {
+  const std::optional<int> slots = futility::env::ReadPositiveInt("ONE_D4_INDEX_SLOTS");
+  if (slots.has_value()) return *slots;
+
+  const char* raw = std::getenv("ONE_D4_INDEX_SLOTS");
+  if (raw != nullptr && *raw != '\0') {
+    LOG(WARNING) << "ONE_D4_INDEX_SLOTS=" << raw << " is not a positive number; using 4";
+  }
+  return 4;
 }
 
 /// Names this process as the holder of a lease: unique across the workers
@@ -135,12 +154,7 @@ int main() {
   pg::Client db(bounded_db_url);
   one_d4_worker::PgQueue queue(db);
 
-  // The sink gets its own connection: a flush is a long transaction, and
-  // the heartbeat that keeps its lease alive must not queue behind it.
-  pg::Client sink_db(bounded_db_url);
-
-  const std::string& owner = poller_options.owner;
-  LOG(INFO) << "Polling indexing_requests as " << owner;
+  LOG(INFO) << "Polling indexing_requests as " << poller_options.owner;
 
   std::signal(SIGINT, RequestShutdown);
   std::signal(SIGTERM, RequestShutdown);
@@ -149,15 +163,24 @@ int main() {
   one_d4_worker::Poller poller(queue,
                                one_d4_worker::MakeRun(
                                    archive, titles,
-                                   [&sink_db, &owner](const one_d4_worker::IndexJob& job) {
-                                     return std::make_unique<one_d4_worker::PgGameSink>(
-                                         sink_db, job.id, owner);
+                                   // A connection per run: one pg::Client is one connection
+                                   // serialised by a mutex, so runs sharing one would queue every
+                                   // flush behind every other run's and leave the pool nothing to
+                                   // overlap.
+                                   [&bounded_db_url](const one_d4_worker::Claim& claim) {
+                                     return one_d4_worker::NewOwnedPgGameSink(
+                                         bounded_db_url, claim.job.id, claim.owner);
                                    },
                                    metrics, stopping),
                                poller_options);
 
-  one_d4_worker::PollLoop(poller, metrics, idle_wait, stopping,
-                          [](absl::Duration wait) { absl::SleepFor(wait); });
+  one_d4_worker::IndexPool::Options pool_options;
+  pool_options.slots = SlotsFromEnv();
+  pool_options.idle_wait = idle_wait;
+  one_d4_worker::IndexPool pool(poller, metrics, pool_options);
+  LOG(INFO) << "Indexing up to " << pool_options.slots << " requests at once";
+
+  pool.Run(stopping, [](absl::Duration wait) { absl::SleepFor(wait); });
 
   LOG(INFO) << "Shutting down";
   return 0;

@@ -220,4 +220,30 @@ absl::Status PgGameSink::RecordMonth(const IndexedMonth& month) {
   return absl::OkStatus();
 }
 
+namespace {
+
+/// PgGameSink plus the connection it writes over.
+class OwnedPgGameSink : public GameSink {
+ public:
+  OwnedPgGameSink(const std::string& db_url, std::string request_id, std::string owner)
+      : client_(db_url), sink_(client_, std::move(request_id), std::move(owner)) {}
+
+  absl::Status Write(absl::Span<const IndexedGame> games) override { return sink_.Write(games); }
+  absl::StatusOr<std::optional<int>> MonthAlreadyIndexed(const IndexedMonth& month) override {
+    return sink_.MonthAlreadyIndexed(month);
+  }
+  absl::Status RecordMonth(const IndexedMonth& month) override { return sink_.RecordMonth(month); }
+
+ private:
+  pg::Client client_;
+  PgGameSink sink_;
+};
+
+}  // namespace
+
+std::unique_ptr<GameSink> NewOwnedPgGameSink(const std::string& db_url, std::string request_id,
+                                             std::string owner) {
+  return std::make_unique<OwnedPgGameSink>(db_url, std::move(request_id), std::move(owner));
+}
+
 }  // namespace one_d4_worker

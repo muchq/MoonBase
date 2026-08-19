@@ -493,6 +493,28 @@ TEST_F(PgGameSinkTest, AMonthWithAndWithoutBulletAreTwoPeriods) {
   EXPECT_EQ(One("SELECT games_count::text FROM indexed_periods WHERE exclude_bullet"), "7");
 }
 
+TEST_F(PgGameSinkTest, ASinkThatOwnsItsConnectionWritesOverIt) {
+  // What every run gets, because one pg::Client is one connection
+  // serialised by a mutex: sharing one would queue every run's flushes
+  // behind every other run's, and a flush is the long part.
+  const std::unique_ptr<GameSink> owned = NewOwnedPgGameSink(conninfo_, kRequest, kOwner);
+  const IndexedGame game = AGame();
+
+  ASSERT_TRUE(owned->Write({&game, 1}).ok());
+
+  EXPECT_EQ(One("SELECT white_username FROM game_features"), "alice");
+}
+
+TEST_F(PgGameSinkTest, ASinkThatOwnsItsConnectionIsFencedLikeAnyOther) {
+  const std::unique_ptr<GameSink> owned = NewOwnedPgGameSink(conninfo_, kRequest, "somebody-else");
+  const IndexedGame game = AGame();
+
+  const absl::Status written = owned->Write({&game, 1});
+
+  EXPECT_TRUE(absl::IsFailedPrecondition(written)) << written;
+  EXPECT_EQ(One("SELECT count(*)::text FROM game_features"), "0");
+}
+
 TEST_F(PgGameSinkTest, AnEmptyBatchIsNotAWrite) {
   // Nothing to write and nothing to fence: the period row that follows
   // asks its own question.
