@@ -206,6 +206,21 @@ TEST_F(PgQueueTest, WillNotHandBackARowWeStillHoldToOurselves) {
   EXPECT_FALSE(again->has_value());
 }
 
+TEST_F(PgQueueTest, AnotherRunReclaimingAnExpiredRowSpendsAnAttempt) {
+  // The pair below is why a run claims under its own id and not the
+  // process's. Sharing one would mean a wedged run's row is reclaimed for
+  // free by the next run, so a request that wedges every run it touches
+  // never reaches kMaxAttempts and nothing retires it — while it sits at
+  // the head of created_at ASC.
+  Insert(Id(1), "hikaru");
+  ASSERT_TRUE(queue_->ClaimNext("worker-1/1", absl::Seconds(-1)).ok());
+
+  const auto again = queue_->ClaimNext("worker-1/2", absl::Minutes(5));
+  ASSERT_TRUE(again.ok()) << again.status();
+  ASSERT_TRUE(again->has_value());
+  EXPECT_EQ((*again)->attempts, 2);
+}
+
 TEST_F(PgQueueTest, ReclaimingOurOwnExpiredRowDoesNotSpendAnAttempt) {
   // We are picking up where we left off, not making a fresh attempt.
   Insert(Id(1), "hikaru");

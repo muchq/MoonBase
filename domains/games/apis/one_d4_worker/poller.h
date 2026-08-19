@@ -1,6 +1,7 @@
 #ifndef DOMAINS_GAMES_APIS_ONE_D4_WORKER_POLLER_H
 #define DOMAINS_GAMES_APIS_ONE_D4_WORKER_POLLER_H
 
+#include <atomic>
 #include <functional>
 #include <optional>
 #include <string>
@@ -64,6 +65,11 @@ class LeaseKeeper {
 class Poller {
  public:
   struct Options {
+    /// Names the process. Each run claims under `owner/<n>`, because an
+    /// id is a fencing token per run and not per worker: reclaiming a row
+    /// under the id that already holds it spends no attempt, which is
+    /// right when the run holding it has ended and wrong when another run
+    /// of this process is still wedged on it.
     std::string owner;
     absl::Duration lease = absl::Minutes(5);
     /// How often a claim is renewed in the background, independent of what
@@ -104,12 +110,12 @@ class Poller {
   RunOutcome last_outcome() const { return last_outcome_; }
 
  private:
-  absl::StatusOr<bool> Finish(const IndexJob& job, RunOutcome outcome,
-                              const absl::StatusOr<bool>& written);
+  absl::StatusOr<bool> Finish(RunOutcome outcome, const absl::StatusOr<bool>& written);
 
   IndexQueue& queue_;
   Run run_;
   Options options_;
+  std::atomic<int> runs_{0};
   RunOutcome last_outcome_ = RunOutcome::kCompleted;
 };
 

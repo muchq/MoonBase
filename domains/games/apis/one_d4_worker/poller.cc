@@ -7,6 +7,7 @@
 #include "absl/base/thread_annotations.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/time/clock.h"
 
@@ -161,14 +162,13 @@ Poller::Poller(IndexQueue& queue, Run run, Options options)
     : queue_(queue), run_(std::move(run)), options_(std::move(options)) {}
 
 absl::StatusOr<bool> Poller::PollOnce() {
-  absl::StatusOr<std::optional<IndexJob>> claimed =
-      queue_.ClaimNext(options_.owner, options_.lease);
+  const std::string owner = absl::StrCat(options_.owner, "/", ++runs_);
+  absl::StatusOr<std::optional<IndexJob>> claimed = queue_.ClaimNext(owner, options_.lease);
   if (!claimed.ok()) return claimed.status();
   if (!claimed->has_value()) return false;
 
   const IndexJob& job = **claimed;
-  QueueLease lease(queue_, job.id, options_.owner, options_.lease, options_.renew_every,
-                   options_.max_run);
+  QueueLease lease(queue_, job.id, owner, options_.lease, options_.renew_every, options_.max_run);
   const absl::StatusOr<RunReport> report = run_(job, lease);
 
   // Ahead of the lease check, unlike everything else. A run that stopped
@@ -178,7 +178,7 @@ absl::StatusOr<bool> Poller::PollOnce() {
   // of looping on it forever — or is refused because the range really did
   // change hands, and Finish calls that what it is.
   if (report.ok() && report->stopped.has_value() && *report->stopped == Stopped::kRunCeiling) {
-    return Finish(job, RunOutcome::kInterrupted, queue_.Release(job.id, options_.owner));
+    return Finish(RunOutcome::kInterrupted, queue_.Release(job.id, owner));
   }
 
   // Before anything else, including a failure: a run that lost its lease
@@ -193,21 +193,19 @@ absl::StatusOr<bool> Poller::PollOnce() {
     // handed back by the API, and a chess.com body or a libpq diagnostic
     // in there is an internal detail told to whoever asked for the index.
     LOG(ERROR) << "Indexing request " << job.id << " failed: " << report.status();
-    return Finish(job, RunOutcome::kFailed, queue_.Fail(job.id, options_.owner, kInternalFailure));
+    return Finish(RunOutcome::kFailed, queue_.Fail(job.id, owner, kInternalFailure));
   }
 
   // Only kShutdown reaches here; the ceiling is handled above. The
   // request did nothing wrong, so the attempt is refunded.
   if (report->stopped.has_value()) {
-    return Finish(job, RunOutcome::kInterrupted, queue_.HandBack(job.id, options_.owner));
+    return Finish(RunOutcome::kInterrupted, queue_.HandBack(job.id, owner));
   }
 
-  return Finish(job, RunOutcome::kCompleted,
-                queue_.Complete(job.id, options_.owner, report->games_indexed));
+  return Finish(RunOutcome::kCompleted, queue_.Complete(job.id, owner, report->games_indexed));
 }
 
-absl::StatusOr<bool> Poller::Finish(const IndexJob& job, RunOutcome outcome,
-                                    const absl::StatusOr<bool>& written) {
+absl::StatusOr<bool> Poller::Finish(RunOutcome outcome, const absl::StatusOr<bool>& written) {
   if (!written.ok()) return written.status();
   // The fence said no, so the row is somebody else's and they own its
   // outcome — whatever we were about to call this run, it is theirs now.

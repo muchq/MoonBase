@@ -24,6 +24,7 @@ class FakeQueue : public IndexQueue {
   absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view owner,
                                                     absl::Duration lease) override {
     ++claims;
+    owners.push_back(std::string(owner));
     if (claim_fails) return absl::UnavailableError("queue is down");
     if (!next.has_value()) return std::nullopt;
     IndexJob job = *next;
@@ -47,6 +48,7 @@ class FakeQueue : public IndexQueue {
   absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner,
                                 int games_indexed) override {
     calls.push_back(absl::StrCat("complete ", id, " ", games_indexed));
+    fenced_on.push_back(std::string(owner));
     return terminal_write_wins;
   }
 
@@ -76,6 +78,8 @@ class FakeQueue : public IndexQueue {
   int claims = 0;
   std::atomic<int> heartbeats{0};
   std::vector<std::string> calls;
+  std::vector<std::string> owners;
+  std::vector<std::string> fenced_on;
 };
 
 IndexJob AJob() {
@@ -93,6 +97,38 @@ Poller::Options Options() {
   options.owner = "worker-1";
   options.lease = absl::Minutes(5);
   return options;
+}
+
+TEST(Poller, GivesEveryRunItsOwnOwnerId) {
+  // Two runs of one process must not share one. Reclaiming a row under
+  // the id that holds it spends no attempt — right when the run holding
+  // it has ended, wrong when a second run is still wedged on it, and with
+  // a pool that is the ordinary case. A request that wedges every run it
+  // touches would never reach kMaxAttempts and nothing would retire it.
+  FakeQueue queue;
+  Poller poller(queue, [](const IndexJob&, LeaseKeeper&) { return RunReport{}; }, Options());
+
+  queue.next = AJob();
+  ASSERT_TRUE(poller.PollOnce().ok());
+  queue.next = AJob();
+  ASSERT_TRUE(poller.PollOnce().ok());
+
+  ASSERT_EQ(queue.owners.size(), 2u);
+  EXPECT_NE(queue.owners[0], queue.owners[1]);
+  EXPECT_THAT(queue.owners[0], ::testing::StartsWith("worker-1/"))
+      << "the process is still named, so a stuck row says which one held it";
+}
+
+TEST(Poller, FencesARunsWritesOnTheIdItClaimedWith) {
+  // An id that changed mid-run would fence the run out of its own row.
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller poller(queue, [](const IndexJob&, LeaseKeeper&) { return RunReport{}; }, Options());
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+
+  ASSERT_EQ(queue.owners.size(), 1u);
+  EXPECT_THAT(queue.fenced_on, ElementsAre(queue.owners[0]));
 }
 
 TEST(Poller, DoesNothingWhenTheQueueIsEmpty) {
