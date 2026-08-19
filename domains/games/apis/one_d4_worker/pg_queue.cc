@@ -41,8 +41,12 @@ absl::StatusOr<std::optional<IndexJob>> PgQueue::ClaimNext(std::string_view owne
   //
   // A live claim of ours is work in progress, not work available, so it is
   // not a candidate — otherwise one process hands itself the same range
-  // twice. Picking our own *expired* row back up is fine and does not spend
-  // an attempt; taking somebody else's does.
+  // twice. Re-presenting the id already on the row does not spend an
+  // attempt; presenting any other id does.
+  //
+  // The C++ worker never takes that refund: it mints an id per run, so no
+  // two of its claims present the same one. The Java worker claims under
+  // its process name and does, which is why the branch stays.
   const auto claimed = client_.Exec(
       R"(UPDATE indexing_requests SET
              owner_id = $1::text,

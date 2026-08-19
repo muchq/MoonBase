@@ -19,7 +19,6 @@ namespace one_d4_worker {
 namespace {
 
 using ::testing::ElementsAre;
-using ::testing::IsEmpty;
 
 /// One game a month, so a run has an opponent to look up.
 ArchivedGame AGame(std::string url) {
@@ -62,7 +61,6 @@ class FakeRosters : public TitleSource {
 /// belongs to one run and is gone when it returns.
 struct Recorded {
   std::vector<std::string> jobs;
-  std::vector<std::string> owners;
   std::vector<IndexedGame> written;
   std::vector<IndexedMonth> periods;
 };
@@ -91,8 +89,9 @@ class FakeSink : public GameSink {
 /// swapped for a note of which job it was asked about.
 SinkFactory SinksInto(Recorded& into) {
   return [&into](const Claim& claim) {
-    into.jobs.push_back(claim.job.id);
-    into.owners.push_back(claim.owner);
+    // Both halves of the claim, because the sink is built from both: the
+    // job's id names the row and the owner is what its writes fence on.
+    into.jobs.push_back(absl::StrCat(claim.job.id, " as ", claim.owner));
     return std::make_unique<FakeSink>(into);
   };
 }
@@ -163,28 +162,6 @@ TEST(MakeRun, EveryRunGetsTheRoster) {
   EXPECT_EQ(recorded.written.front().white_title, "GM");
 }
 
-TEST(MakeRun, TheSinkFencesOnTheIdTheClaimWasMadeUnder) {
-  // The id is minted per claim, and every write the sink makes is fenced
-  // on it. A sink built with the process's name instead would have all
-  // of them refused, and the run would index nothing and call it a lost
-  // lease.
-  FakeArchive archive;
-  archive.months["2026-01"] = {AGame("g1")};
-  FakeRosters rosters;
-  TitleRoster titles(rosters, TitleRoster::Options{});
-  futility::otel::CapturingMetricsRecorder recorder;
-  WorkerMetrics metrics(recorder);
-  FakeLease lease;
-
-  Recorded recorded;
-  const Poller::Run run =
-      MakeRun(archive, titles, SinksInto(recorded), metrics, [] { return false; });
-  const Claim claim = AClaim("first");
-  ASSERT_TRUE(run(claim, lease).ok());
-
-  EXPECT_THAT(recorded.owners, ElementsAre(claim.owner));
-}
-
 TEST(MakeRun, EveryRunGetsItsOwnSinkForTheJobItClaimed) {
   // A sink carries the id it fences on. One shared across jobs would
   // write the second run's games under the first run's claim.
@@ -203,7 +180,7 @@ TEST(MakeRun, EveryRunGetsItsOwnSinkForTheJobItClaimed) {
   ASSERT_TRUE(run(AClaim("first"), lease).ok());
   ASSERT_TRUE(run(AClaim("second"), lease).ok());
 
-  EXPECT_THAT(recorded.jobs, ElementsAre("first", "second"));
+  EXPECT_THAT(recorded.jobs, ElementsAre("first as cpp/test/first", "second as cpp/test/second"));
 }
 
 TEST(MakeRun, EveryRunGetsTheObserver) {

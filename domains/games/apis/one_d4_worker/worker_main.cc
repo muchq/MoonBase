@@ -11,6 +11,8 @@
 
 #include <unistd.h>
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -43,19 +45,26 @@
 
 namespace {
 
-volatile std::sig_atomic_t g_stopping = 0;
+/// Read by the claim thread, every worker thread and the roster, and
+/// written by a signal handler — so std::atomic rather than
+/// sig_atomic_t, which is only defined for the single-thread case. The
+/// static_assert is what makes the handler's store legal.
+std::atomic<bool> g_stopping{false};
+static_assert(std::atomic<bool>::is_always_lock_free,
+              "a signal handler may only store to a lock-free atomic");
 
-void RequestShutdown(int /*signal*/) { g_stopping = 1; }
+void RequestShutdown(int /*signal*/) { g_stopping.store(true, std::memory_order_relaxed); }
 
 std::string Env(const char* name, std::string fallback = "") {
   const char* value = std::getenv(name);
   return value != nullptr && *value != '\0' ? std::string(value) : std::move(fallback);
 }
 
-/// Names this process as the holder of a lease: unique across the workers
-/// competing for the table, and stable for the life of the process, which
-/// is what makes it usable as a fencing token. The host and pid are for
-/// whoever reads the column while debugging a stuck range.
+/// Names this process. Each run fences on `owner/<n>` built from it (see
+/// poller.h), so what this has to be is unique across the workers
+/// competing for the table; the run number supplies the rest. The host
+/// and pid are for whoever reads the column while debugging a stuck
+/// range.
 std::string OwnerId() {
   char host[256] = {};
   if (gethostname(host, sizeof(host) - 1) != 0) std::snprintf(host, sizeof(host), "unknown-host");
@@ -111,7 +120,7 @@ int main() {
   // Ten documents for the whole titled population of the site, held for
   // the life of the process. See title_roster.h.
   one_d4_worker::TitleRoster::Options title_options;
-  title_options.stopping = [] { return g_stopping != 0; };
+  title_options.stopping = [] { return g_stopping.load(std::memory_order_relaxed); };
   one_d4_worker::TitleRoster titles(archive, std::move(title_options));
 
   // Bounded, because nothing else bounds them and the run ceiling cannot:
@@ -127,7 +136,7 @@ int main() {
   std::signal(SIGINT, RequestShutdown);
   std::signal(SIGTERM, RequestShutdown);
 
-  const auto stopping = [] { return g_stopping != 0; };
+  const auto stopping = [] { return g_stopping.load(std::memory_order_relaxed); };
   one_d4_worker::Poller poller(queue,
                                one_d4_worker::MakeRun(
                                    archive, titles,
@@ -146,7 +155,12 @@ int main() {
   // Local capacity, not a queue protocol constant — two workers may
   // disagree about it without misbehaving against each other — so unlike
   // the lease and the ceiling this is a knob. See index_pool.h.
-  pool_options.slots = futility::env::ReadPositiveIntOr("ONE_D4_INDEX_SLOTS", 4);
+  //
+  // Capped, because a slot is a thread, a Postgres connection out of a
+  // shared budget, and a concurrent chess.com request. A typo in a
+  // deployment variable should not exhaust a database two other services
+  // are using.
+  pool_options.slots = std::min(futility::env::ReadPositiveIntOr("ONE_D4_INDEX_SLOTS", 4), 16);
   pool_options.idle_wait = idle_wait;
   one_d4_worker::IndexPool pool(poller, metrics, pool_options);
   LOG(INFO) << "Indexing up to " << pool_options.slots << " requests at once";

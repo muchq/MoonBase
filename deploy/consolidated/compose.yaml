@@ -398,11 +398,14 @@ services:
     depends_on:
       one_d4:
         condition: service_healthy
-    # Shutdown drains the runs in flight, and a run only notices between
-    # batches. The default ten seconds is a kill, and a killed run hands
-    # its claim back to nobody — the range then sits for the rest of the
-    # lease looking like it is being worked on.
-    stop_grace_period: 60s
+    # Shutdown drains the runs in flight. A run checks per game, but it
+    # cannot interrupt a chess.com call it is already inside, and that is
+    # 60s per attempt times three attempts plus backoff — so the grace has
+    # to cover one of those, not one game. The default ten seconds is a
+    # kill, and a killed run hands its claim back to nobody: the range
+    # then sits for the rest of the five-minute lease looking like it is
+    # being worked on, times however many slots were busy.
+    stop_grace_period: 240s
     deploy:
       resources:
         limits:

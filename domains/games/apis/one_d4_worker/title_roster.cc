@@ -2,7 +2,6 @@
 
 #include <utility>
 
-#include "absl/cleanup/cleanup.h"
 #include "absl/status/status.h"
 #include "absl/strings/ascii.h"
 #include "absl/time/clock.h"
@@ -37,11 +36,14 @@ void TitleRoster::RefreshIfStale() {
   if (loaded_ && now - refreshed_ < options_.good_for) return;
   if (now - attempted_ < options_.retry_after) return;
 
+  Rebuild(now);
   // Stamped when the attempt ends rather than when it starts: ten calls
   // against a chess.com that is timing out can themselves take longer
   // than the backoff, and a backoff the attempt outlasts is no backoff.
-  const absl::Cleanup stamp = [this] { attempted_ = Now(); };
+  attempted_ = Now();
+}
 
+void TitleRoster::Rebuild(absl::Time now) {
   std::map<std::string, std::string, std::less<>> titles;
   for (const std::string_view title : kTitles) {
     if (Stopping()) return;
@@ -64,7 +66,10 @@ void TitleRoster::RefreshIfStale() {
   refreshed_ = now;
 }
 
-bool TitleRoster::Stale() const { return !loaded_ || Now() - refreshed_ >= options_.good_for; }
+bool TitleRoster::Stale() const {
+  const absl::MutexLock lock(mu_);
+  return !loaded_ || Now() - refreshed_ >= options_.good_for;
+}
 
 bool TitleRoster::Stopping() const { return options_.stopping && options_.stopping(); }
 

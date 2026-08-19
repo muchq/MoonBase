@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <limits>
 #include <optional>
 #include <string>
 #include <thread>
@@ -19,6 +20,9 @@
 namespace one_d4_worker {
 namespace {
 
+using ::testing::ElementsAre;
+using ::testing::IsEmpty;
+
 /// An endless supply of requests, or none, or an outage.
 class FakeQueue : public IndexQueue {
  public:
@@ -27,7 +31,7 @@ class FakeQueue : public IndexQueue {
     const absl::MutexLock lock(mu_);
     ++claims_;
     if (!status_.ok()) return status_;
-    if (empty_) return std::nullopt;
+    if (empty_ || claims_ > jobs_) return std::nullopt;
     IndexJob job;
     job.id = absl::StrCat("job-", claims_);
     job.player = "hikaru";
@@ -41,7 +45,11 @@ class FakeQueue : public IndexQueue {
     return true;
   }
   absl::StatusOr<bool> Progress(std::string_view, std::string_view, int) override { return true; }
-  absl::StatusOr<bool> Complete(std::string_view, std::string_view, int) override { return true; }
+  absl::StatusOr<bool> Complete(std::string_view, std::string_view, int) override {
+    const absl::MutexLock lock(mu_);
+    if (!terminal_status_.ok()) return terminal_status_;
+    return true;
+  }
   absl::StatusOr<bool> Fail(std::string_view, std::string_view, std::string_view) override {
     return true;
   }
@@ -60,12 +68,25 @@ class FakeQueue : public IndexQueue {
     const absl::MutexLock lock(mu_);
     status_ = std::move(status);
   }
+  /// Hand out at most `n` requests, then answer empty.
+  void set_jobs(int n) {
+    const absl::MutexLock lock(mu_);
+    jobs_ = n;
+  }
+  /// A terminal write the queue will not accept at all — distinct from
+  /// one it refuses, which is a lost lease.
+  void set_terminal_status(absl::Status status) {
+    const absl::MutexLock lock(mu_);
+    terminal_status_ = std::move(status);
+  }
 
  private:
   mutable absl::Mutex mu_;
   int claims_ ABSL_GUARDED_BY(mu_) = 0;
   bool empty_ ABSL_GUARDED_BY(mu_) = false;
+  int jobs_ ABSL_GUARDED_BY(mu_) = std::numeric_limits<int>::max();
   absl::Status status_ ABSL_GUARDED_BY(mu_);
+  absl::Status terminal_status_ ABSL_GUARDED_BY(mu_);
 };
 
 /// Runs that block until released, counting how many were in flight at
@@ -87,8 +108,9 @@ class BlockingRuns {
   /// Waits for `n` runs to have started. Fails rather than hangs.
   void AwaitStarted(int n) {
     const absl::MutexLock lock(mu_);
-    const auto enough = [this, n] { return started_ >= n; };
-    ASSERT_TRUE(mu_.AwaitWithTimeout(absl::Condition(&enough), absl::Seconds(10)))
+    want_ = n;
+    ASSERT_TRUE(mu_.AwaitWithTimeout(absl::Condition(this, &BlockingRuns::EnoughStarted),
+                                     absl::Seconds(10)))
         << "only " << started_ << " of " << n << " runs started";
   }
 
@@ -106,7 +128,10 @@ class BlockingRuns {
   }
 
  private:
+  bool EnoughStarted() const ABSL_SHARED_LOCKS_REQUIRED(mu_) { return started_ >= want_; }
+
   mutable absl::Mutex mu_;
+  int want_ ABSL_GUARDED_BY(mu_) = 0;
   bool released_ ABSL_GUARDED_BY(mu_) = false;
   int running_ ABSL_GUARDED_BY(mu_) = 0;
   int peak_ ABSL_GUARDED_BY(mu_) = 0;
@@ -120,6 +145,37 @@ Poller::Options PollerOptions() {
   options.renew_every = absl::Minutes(5);
   return options;
 }
+
+/// Ends the loop once the queue has been asked `claims` times, and after
+/// two seconds whatever happens.
+///
+/// The deadline is the point: a change that stops the loop claiming — a
+/// slot never given back, a sleep that never returns — has to fail an
+/// assertion rather than spin until the test times out. That distinction
+/// was built once already and lost when this replaced PollLoop.
+std::function<bool()> StopAfter(const FakeQueue& queue, int claims) {
+  const absl::Time deadline = absl::Now() + absl::Seconds(2);
+  return [&queue, claims, deadline] { return queue.claims() >= claims || absl::Now() > deadline; };
+}
+
+/// Records what the loop was asked to wait for, rather than waiting.
+class Naps {
+ public:
+  std::function<void(absl::Duration)> AsSleep() {
+    return [this](absl::Duration wait) {
+      const absl::MutexLock lock(mu_);
+      waits_.push_back(wait);
+    };
+  }
+  std::vector<absl::Duration> waits() const {
+    const absl::MutexLock lock(mu_);
+    return waits_;
+  }
+
+ private:
+  mutable absl::Mutex mu_;
+  std::vector<absl::Duration> waits_ ABSL_GUARDED_BY(mu_);
+};
 
 IndexPool::Options PoolOptions(int slots) {
   IndexPool::Options options;
@@ -222,30 +278,9 @@ TEST(IndexPool, KeepsClaimingAsSlotsFreeUp) {
   driver.join();
 }
 
-TEST(IndexPool, CountsEveryRunItFinished) {
-  FakeQueue queue;
-  BlockingRuns runs;
-  runs.Release();
-  Poller poller(queue, runs.AsRun(), PollerOptions());
-  futility::otel::CapturingMetricsRecorder recorder;
-  WorkerMetrics metrics(recorder);
-  IndexPool pool(poller, metrics, PoolOptions(2));
-
-  std::atomic<bool> stopping{false};
-  std::thread driver(
-      [&] { pool.Run([&stopping] { return stopping.load(); }, [](absl::Duration) {}); });
-  runs.AwaitStarted(4);
-  stopping = true;
-  driver.join();
-
-  EXPECT_GT(recorder.CounterTotal(kRunsMetric,
-                                  {{"outcome", "completed"}, {kIndexerLabel, kIndexerValue}}),
-            0);
-}
-
 TEST(IndexPool, WaitsBeforeAskingAnEmptyQueueAgain) {
-  // Without it an empty queue is a spin: one round trip per iteration
-  // per slot, for as long as there is nothing to do.
+  // Without it an empty queue is a spin: one round trip per iteration,
+  // for as long as there is nothing to do.
   FakeQueue queue;
   queue.set_empty();
   BlockingRuns runs;
@@ -254,22 +289,13 @@ TEST(IndexPool, WaitsBeforeAskingAnEmptyQueueAgain) {
   WorkerMetrics metrics(recorder);
   IndexPool pool(poller, metrics, PoolOptions(2));
 
-  absl::Mutex mu;
-  int slept = 0;
-  std::thread driver([&] {
-    pool.Run(
-        [&mu, &slept] {
-          const absl::MutexLock lock(mu);
-          return slept >= 3;
-        },
-        [&mu, &slept](absl::Duration) {
-          const absl::MutexLock lock(mu);
-          ++slept;
-        });
-  });
-  driver.join();
+  Naps naps;
+  pool.Run(StopAfter(queue, 3), naps.AsSleep());
 
-  EXPECT_EQ(queue.claims(), 3) << "it asked without waiting in between";
+  EXPECT_EQ(queue.claims(), 3);
+  EXPECT_THAT(naps.waits(),
+              ElementsAre(absl::Milliseconds(1), absl::Milliseconds(1), absl::Milliseconds(1)))
+      << "it asked again without waiting, or waited for the wrong thing";
 }
 
 TEST(IndexPool, KeepsGoingAfterAQueueItCannotReach) {
@@ -283,22 +309,84 @@ TEST(IndexPool, KeepsGoingAfterAQueueItCannotReach) {
   WorkerMetrics metrics(recorder);
   IndexPool pool(poller, metrics, PoolOptions(2));
 
-  absl::Mutex mu;
-  int slept = 0;
-  std::thread driver([&] {
-    pool.Run(
-        [&mu, &slept] {
-          const absl::MutexLock lock(mu);
-          return slept >= 3;
-        },
-        [&mu, &slept](absl::Duration) {
-          const absl::MutexLock lock(mu);
-          ++slept;
-        });
-  });
-  driver.join();
+  Naps naps;
+  pool.Run(StopAfter(queue, 3), naps.AsSleep());
 
   EXPECT_EQ(queue.claims(), 3) << "it gave up after the first failure";
+  EXPECT_EQ(naps.waits().size(), 3u);
+}
+
+TEST(IndexPool, DoesNotWaitAfterAClaimThatDidWork) {
+  // A queue with a backlog should be drained, not sipped from every five
+  // seconds.
+  FakeQueue queue;
+  BlockingRuns runs;
+  runs.Release();
+  Poller poller(queue, runs.AsRun(), PollerOptions());
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  IndexPool pool(poller, metrics, PoolOptions(2));
+
+  Naps naps;
+  pool.Run(StopAfter(queue, 5), naps.AsSleep());
+
+  EXPECT_EQ(queue.claims(), 5);
+  EXPECT_THAT(naps.waits(), IsEmpty()) << "it waited between claims that were both there";
+}
+
+TEST(IndexPool, ClaimsNothingWhenItStartsShuttingDown) {
+  // A SIGTERM during startup should not take a range out of the queue on
+  // its way past.
+  FakeQueue queue;
+  BlockingRuns runs;
+  Poller poller(queue, runs.AsRun(), PollerOptions());
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  IndexPool pool(poller, metrics, PoolOptions(2));
+
+  Naps naps;
+  pool.Run([] { return true; }, naps.AsSleep());
+
+  EXPECT_EQ(queue.claims(), 0);
+  EXPECT_THAT(naps.waits(), IsEmpty());
+}
+
+TEST(IndexPool, KeepsItsSlotsWhenATerminalWriteWillNotLand) {
+  // The slot comes back whatever the run's outcome was. Returned only on
+  // the happy path, a database that refuses writes retires the pool one
+  // slot at a time until it claims nothing ever again — and the tests
+  // would not notice, because nothing else makes RunClaimed fail.
+  FakeQueue queue;
+  queue.set_terminal_status(absl::UnavailableError("no route to the database"));
+  BlockingRuns runs;
+  runs.Release();
+  Poller poller(queue, runs.AsRun(), PollerOptions());
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  IndexPool pool(poller, metrics, PoolOptions(2));
+
+  Naps naps;
+  pool.Run(StopAfter(queue, 6), naps.AsSleep());
+
+  EXPECT_EQ(queue.claims(), 6) << "it ran out of slots";
+}
+
+TEST(IndexPool, CountsEveryRunItFinished) {
+  FakeQueue queue;
+  queue.set_jobs(3);
+  BlockingRuns runs;
+  runs.Release();
+  Poller poller(queue, runs.AsRun(), PollerOptions());
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  IndexPool pool(poller, metrics, PoolOptions(2));
+
+  Naps naps;
+  pool.Run(StopAfter(queue, 6), naps.AsSleep());
+
+  EXPECT_EQ(recorder.CounterTotal(kRunsMetric,
+                                  {{"outcome", "completed"}, {kIndexerLabel, kIndexerValue}}),
+            3);
 }
 
 }  // namespace

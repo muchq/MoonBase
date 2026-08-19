@@ -8,8 +8,10 @@
 #include <string>
 #include <vector>
 
+#include "absl/base/thread_annotations.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
+#include "absl/synchronization/mutex.h"
 #include "domains/games/apis/one_d4_worker/queue.h"
 
 namespace one_d4_worker {
@@ -35,6 +37,10 @@ class FakeQueue : public IndexQueue {
   absl::StatusOr<bool> Heartbeat(std::string_view id, std::string_view owner,
                                  absl::Duration lease) override {
     ++heartbeats;
+    {
+      const absl::MutexLock lock(fence_mu);
+      fenced_on.push_back(std::string(owner));
+    }
     if (heartbeat_fails) return absl::UnavailableError("queue is down");
     return lease_held.load();
   }
@@ -42,29 +48,48 @@ class FakeQueue : public IndexQueue {
   absl::StatusOr<bool> Progress(std::string_view id, std::string_view owner,
                                 int games_indexed) override {
     progress.push_back(games_indexed);
+    {
+      const absl::MutexLock lock(fence_mu);
+      fenced_on.push_back(std::string(owner));
+    }
     return progress_accepted.load();
   }
 
   absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner,
                                 int games_indexed) override {
     calls.push_back(absl::StrCat("complete ", id, " ", games_indexed));
-    fenced_on.push_back(std::string(owner));
+    {
+      const absl::MutexLock lock(fence_mu);
+      fenced_on.push_back(std::string(owner));
+    }
     return terminal_write_wins;
   }
 
   absl::StatusOr<bool> Fail(std::string_view id, std::string_view owner,
                             std::string_view message) override {
     calls.push_back(absl::StrCat("fail ", id, " ", message));
+    {
+      const absl::MutexLock lock(fence_mu);
+      fenced_on.push_back(std::string(owner));
+    }
     return terminal_write_wins;
   }
 
   absl::StatusOr<bool> HandBack(std::string_view id, std::string_view owner) override {
     calls.push_back(absl::StrCat("hand back ", id));
+    {
+      const absl::MutexLock lock(fence_mu);
+      fenced_on.push_back(std::string(owner));
+    }
     return true;
   }
 
   absl::StatusOr<bool> Release(std::string_view id, std::string_view owner) override {
     calls.push_back(absl::StrCat("release ", id));
+    {
+      const absl::MutexLock lock(fence_mu);
+      fenced_on.push_back(std::string(owner));
+    }
     return true;
   }
 
@@ -79,7 +104,15 @@ class FakeQueue : public IndexQueue {
   std::atomic<int> heartbeats{0};
   std::vector<std::string> calls;
   std::vector<std::string> owners;
-  std::vector<std::string> fenced_on;
+
+  /// Every id a fenced write was made under, from the run thread and the
+  /// renewer alike.
+  std::vector<std::string> FencedOn() const {
+    const absl::MutexLock lock(fence_mu);
+    return fenced_on;
+  }
+  mutable absl::Mutex fence_mu;
+  std::vector<std::string> fenced_on ABSL_GUARDED_BY(fence_mu);
 };
 
 IndexJob AJob() {
@@ -97,6 +130,16 @@ Poller::Options Options() {
   options.owner = "worker-1";
   options.lease = absl::Minutes(5);
   return options;
+}
+
+/// Every fenced write went out under the id the run claimed with. A
+/// write fenced on anything else is refused by the database, and the run
+/// is told it lost a lease it never lost.
+void ExpectEveryWriteFencedOnTheClaim(const FakeQueue& queue) {
+  ASSERT_EQ(queue.owners.size(), 1u);
+  const std::vector<std::string> fenced = queue.FencedOn();
+  ASSERT_THAT(fenced, ::testing::Not(IsEmpty()));
+  for (const std::string& one : fenced) EXPECT_EQ(one, queue.owners[0]);
 }
 
 TEST(Poller, GivesEveryRunItsOwnOwnerId) {
@@ -119,6 +162,33 @@ TEST(Poller, GivesEveryRunItsOwnOwnerId) {
       << "the process is still named, so a stuck row says which one held it";
 }
 
+TEST(Poller, FencesTheLeaseOnTheIdItClaimedWithToo) {
+  // The renewal is the one that would be silent. Fenced on the process
+  // name instead, every heartbeat is refused at the database, every run
+  // reports a lost lease, and the worker indexes nothing while looking
+  // like it is losing races.
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller::Options options = Options();
+  options.renew_every = absl::Milliseconds(20);
+  Poller poller(
+      queue,
+      [](const Claim&, LeaseKeeper& lease) {
+        absl::SleepFor(absl::Milliseconds(120));
+        lease.Report(1);
+        return RunReport{};
+      },
+      options);
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+
+  ASSERT_EQ(queue.owners.size(), 1u);
+  ASSERT_GT(queue.heartbeats.load(), 0) << "no renewal happened, so nothing was fenced";
+  for (const std::string& fenced : queue.FencedOn()) {
+    EXPECT_EQ(fenced, queue.owners[0]);
+  }
+}
+
 TEST(Poller, FencesARunsWritesOnTheIdItClaimedWith) {
   // An id that changed mid-run would fence the run out of its own row.
   FakeQueue queue;
@@ -128,7 +198,7 @@ TEST(Poller, FencesARunsWritesOnTheIdItClaimedWith) {
   ASSERT_TRUE(poller.PollOnce().ok());
 
   ASSERT_EQ(queue.owners.size(), 1u);
-  EXPECT_THAT(queue.fenced_on, ElementsAre(queue.owners[0]));
+  EXPECT_THAT(queue.FencedOn(), ElementsAre(queue.owners[0]));
 }
 
 TEST(Poller, ClaimsWithoutRunning) {
@@ -241,6 +311,7 @@ TEST(Poller, FailsAJobThatRaised) {
   // internal detail told to whoever asked for the index.
   EXPECT_THAT(queue.calls, ElementsAre("fail job-1 Indexing failed due to an internal error"));
   EXPECT_EQ(poller.last_outcome(), RunOutcome::kFailed);
+  ExpectEveryWriteFencedOnTheClaim(queue);
 }
 
 TEST(Poller, WritesNothingWhenTheLeaseIsLost) {
@@ -283,6 +354,7 @@ TEST(Poller, HandsBackAJobItWasShutDownDuring) {
   ASSERT_TRUE(poller.PollOnce().ok());
   EXPECT_THAT(queue.calls, ElementsAre("hand back job-1"));
   EXPECT_EQ(poller.last_outcome(), RunOutcome::kInterrupted);
+  ExpectEveryWriteFencedOnTheClaim(queue);
 }
 
 TEST(Poller, ReleasesAJobThatRanOutOfTime) {
@@ -303,6 +375,7 @@ TEST(Poller, ReleasesAJobThatRanOutOfTime) {
   ASSERT_TRUE(poller.PollOnce().ok());
   EXPECT_THAT(queue.calls, ElementsAre("release job-1"));
   EXPECT_EQ(poller.last_outcome(), RunOutcome::kInterrupted);
+  ExpectEveryWriteFencedOnTheClaim(queue);
 }
 
 TEST(Poller, DoesNotFailARunThatLostItsLeaseBeforeItRaised) {

@@ -3,6 +3,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <functional>
 #include <map>
 #include <string>
@@ -10,6 +11,7 @@
 #include <vector>
 
 #include "absl/status/status.h"
+#include "absl/time/clock.h"
 #include "absl/time/time.h"
 
 namespace one_d4_worker {

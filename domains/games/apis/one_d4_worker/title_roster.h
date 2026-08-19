@@ -79,6 +79,8 @@ class TitleRoster {
   absl::Time Now() const;
   bool Stopping() const;
   void RefreshIfStale() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
+  /// Reads all ten rosters and installs them, or leaves what we had.
+  void Rebuild(absl::Time now) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   TitleSource& source_;
   const Options options_;
