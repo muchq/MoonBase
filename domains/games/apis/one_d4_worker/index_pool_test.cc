@@ -149,10 +149,15 @@ Poller::Options PollerOptions() {
 /// Ends the loop once the queue has been asked `claims` times, and after
 /// two seconds whatever happens.
 ///
-/// The deadline is the point: a change that stops the loop claiming — a
-/// slot never given back, a sleep that never returns — has to fail an
-/// assertion rather than spin until the test times out. That distinction
-/// was built once already and lost when this replaced PollLoop.
+/// The deadline is the point: a change that stops the loop claiming has
+/// to fail an assertion rather than spin until the test times out. That
+/// distinction was built once already and lost when this replaced
+/// PollLoop.
+///
+/// Tests that count exactly run one thread. Several threads all claim,
+/// so the count overshoots by however many were mid-claim when the last
+/// one tipped it over — real, and nothing to do with what those tests
+/// are about.
 std::function<bool()> StopAfter(const FakeQueue& queue, int claims) {
   const absl::Time deadline = absl::Now() + absl::Seconds(2);
   return [&queue, claims, deadline] { return queue.claims() >= claims || absl::Now() > deadline; };
@@ -287,7 +292,7 @@ TEST(IndexPool, WaitsBeforeAskingAnEmptyQueueAgain) {
   Poller poller(queue, runs.AsRun(), PollerOptions());
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
-  IndexPool pool(poller, metrics, PoolOptions(2));
+  IndexPool pool(poller, metrics, PoolOptions(1));
 
   Naps naps;
   pool.Run(StopAfter(queue, 3), naps.AsSleep());
@@ -307,7 +312,7 @@ TEST(IndexPool, KeepsGoingAfterAQueueItCannotReach) {
   Poller poller(queue, runs.AsRun(), PollerOptions());
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
-  IndexPool pool(poller, metrics, PoolOptions(2));
+  IndexPool pool(poller, metrics, PoolOptions(1));
 
   Naps naps;
   pool.Run(StopAfter(queue, 3), naps.AsSleep());
@@ -325,7 +330,7 @@ TEST(IndexPool, DoesNotWaitAfterAClaimThatDidWork) {
   Poller poller(queue, runs.AsRun(), PollerOptions());
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
-  IndexPool pool(poller, metrics, PoolOptions(2));
+  IndexPool pool(poller, metrics, PoolOptions(1));
 
   Naps naps;
   pool.Run(StopAfter(queue, 5), naps.AsSleep());
@@ -342,7 +347,7 @@ TEST(IndexPool, ClaimsNothingWhenItStartsShuttingDown) {
   Poller poller(queue, runs.AsRun(), PollerOptions());
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
-  IndexPool pool(poller, metrics, PoolOptions(2));
+  IndexPool pool(poller, metrics, PoolOptions(1));
 
   Naps naps;
   pool.Run([] { return true; }, naps.AsSleep());
@@ -351,11 +356,11 @@ TEST(IndexPool, ClaimsNothingWhenItStartsShuttingDown) {
   EXPECT_THAT(naps.waits(), IsEmpty());
 }
 
-TEST(IndexPool, KeepsItsSlotsWhenATerminalWriteWillNotLand) {
-  // The slot comes back whatever the run's outcome was. Returned only on
-  // the happy path, a database that refuses writes retires the pool one
-  // slot at a time until it claims nothing ever again — and the tests
-  // would not notice, because nothing else makes RunClaimed fail.
+TEST(IndexPool, KeepsClaimingWhenATerminalWriteWillNotLand) {
+  // A run whose outcome could not be written is still a finished run.
+  // Treated as fatal, a database that refuses one write stops the thread
+  // for good — and nothing else in these tests makes RunClaimed fail, so
+  // nothing else would notice.
   FakeQueue queue;
   queue.set_terminal_status(absl::UnavailableError("no route to the database"));
   BlockingRuns runs;
@@ -363,7 +368,7 @@ TEST(IndexPool, KeepsItsSlotsWhenATerminalWriteWillNotLand) {
   Poller poller(queue, runs.AsRun(), PollerOptions());
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
-  IndexPool pool(poller, metrics, PoolOptions(2));
+  IndexPool pool(poller, metrics, PoolOptions(1));
 
   Naps naps;
   pool.Run(StopAfter(queue, 6), naps.AsSleep());

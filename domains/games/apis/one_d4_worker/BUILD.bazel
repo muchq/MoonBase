@@ -410,8 +410,8 @@ cc_test(
     ],
 )
 
-# Several requests at once: one thread claims, a fixed set run, and a
-# claim is only made while a slot is free to take it.
+# Several requests at once: every thread claims a request and runs it,
+# so capacity is the thread count.
 cc_library(
     name = "index_pool",
     srcs = ["index_pool.cc"],
@@ -420,10 +420,8 @@ cc_library(
     deps = [
         ":metrics",
         ":poller",
-        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
     ],
 )
