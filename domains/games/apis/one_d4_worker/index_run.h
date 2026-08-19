@@ -61,6 +61,11 @@ class IndexRun {
                              bool nothing_degraded);
   absl::Status RecordMonth(const IndexJob& job, YearMonth month, int64_t fetched_at, int games,
                            bool nothing_degraded);
+  /// Records why a refused checkpoint ends the run. Past the ceiling it
+  /// is this run's own clock running out, so the range goes back with the
+  /// attempt spent; otherwise the range has changed hands and this run
+  /// reports nothing about it.
+  static void GiveUp(LeaseKeeper& lease, RunReport& report);
   RunObserver& observer();
   absl::Status Flush(std::vector<IndexedGame>& batch);
   /// "" for untitled, and for a lookup that failed — which also marks the

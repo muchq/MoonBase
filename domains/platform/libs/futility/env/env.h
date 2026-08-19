@@ -2,10 +2,12 @@
 #define DOMAINS_PLATFORM_LIBS_FUTILITY_ENV_ENV_H
 
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "absl/strings/ascii.h"
+#include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
 
 namespace futility::env {
@@ -29,6 +31,26 @@ inline std::vector<std::string> ReadList(const char* name) {
     if (!entry.empty()) values.emplace_back(entry);
   }
   return values;
+}
+
+/// The named variable as a whole number of seconds, or default_seconds
+/// when it is unset, empty, unreadable, or not positive.
+///
+/// Strict on purpose. std::atoi answers 0 for anything it cannot parse,
+/// so a typo in an interval becomes a tight loop and a typo in a timeout
+/// becomes no timeout — both silently, and both at the moment nobody is
+/// looking. A value that cannot be read is not a value.
+///
+/// Non-positive is refused for the same reason rather than honoured: no
+/// caller here wants a zero interval, and the ones that would notice are
+/// the ones that hurt.
+inline std::optional<int> ReadPositiveSeconds(const char* name) {
+  const char* raw = std::getenv(name);
+  if (raw == nullptr || *raw == '\0') return std::nullopt;
+
+  int seconds = 0;
+  if (!absl::SimpleAtoi(raw, &seconds) || seconds <= 0) return std::nullopt;
+  return seconds;
 }
 
 }  // namespace futility::env

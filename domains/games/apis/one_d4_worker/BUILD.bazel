@@ -329,12 +329,14 @@ cc_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":chess_com_archive",
+        ":db_options",
         ":index_run",
         ":metrics",
         ":pg_game_sink",
         ":pg_queue",
         ":poller",
         "//domains/games/libs/chess_com_cpp:production_client",
+        "//domains/platform/libs/futility/env",
         "//domains/platform/libs/futility/otel:metrics",
         "//domains/platform/libs/futility/otel:otel_provider",
         "//domains/platform/libs/pg",
@@ -356,4 +358,47 @@ filegroup(
     testonly = True,
     srcs = ["worker_main.cc"],
     visibility = ["//domains/platform:__subpackages__"],
+)
+
+# The ceiling is a relationship between the run's checkpoints and the
+# lease's renewal, so it is tested through the real lease rather than a
+# LeaseKeeper that answers as told — a fake that decides both cannot show
+# the policy being violated, and did not.
+cc_test(
+    name = "run_ceiling_test",
+    size = "small",
+    srcs = ["run_ceiling_test.cc"],
+    deps = [
+        ":index_run",
+        ":poller",
+        ":queue",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# Execution bounds for the worker's database connections. Nothing else
+# bounds them, and the run ceiling cannot help: a thread inside libpq
+# never reaches a checkpoint to be told its time is up.
+cc_library(
+    name = "db_options",
+    srcs = ["db_options.cc"],
+    hdrs = ["db_options.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@com_google_absl//absl/strings"],
+)
+
+cc_test(
+    name = "db_options_test",
+    size = "small",
+    srcs = ["db_options_test.cc"],
+    env_inherit = ["PG_TEST_DB_URL"],
+    deps = [
+        ":db_options",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
 )

@@ -411,5 +411,93 @@ TEST(Poller, ARefusedProgressWriteIsALostClaim) {
   EXPECT_EQ(poller.last_outcome(), RunOutcome::kLeaseLost);
 }
 
+TEST(Poller, GivesTheRangeBackWhenARunHitsItsCeiling) {
+  // The attempt stays spent, unlike a shutdown. A run that has been going
+  // longer than any legitimate run is evidence of a fault, and refunding
+  // it would retry that fault forever.
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller::Options options = Options();
+  options.max_run = absl::ZeroDuration();
+  Poller poller(
+      queue,
+      [](const IndexJob&, LeaseKeeper& lease) {
+        EXPECT_TRUE(lease.OutOfTime());
+        RunReport report;
+        report.stopped = Stopped::kRunCeiling;
+        return report;
+      },
+      options);
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_THAT(queue.calls, ElementsAre("release job-1"));
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kInterrupted);
+}
+
+TEST(Poller, StopsRenewingARunThatIsPastItsCeilingWithoutDisowningIt) {
+  // Two things at once, because conflating them is the bug this replaced:
+  // past the ceiling the claim is not extended — so a run wedged inside
+  // one month loses its range to the lease lapsing — but it is still
+  // *held* until that lease runs out, and the month in hand may finish
+  // inside it.
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller::Options options = Options();
+  options.lease = absl::Seconds(30);
+  options.renew_every = absl::Milliseconds(25);
+  options.max_run = absl::ZeroDuration();
+  Poller poller(
+      queue,
+      [](const IndexJob&, LeaseKeeper& lease) {
+        absl::SleepFor(absl::Milliseconds(150));
+        EXPECT_TRUE(lease.Keep()) << "the month in hand was cut off at the ceiling";
+        EXPECT_TRUE(lease.OutOfTime());
+        RunReport report;
+        report.stopped = Stopped::kRunCeiling;
+        return report;
+      },
+      options);
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_EQ(queue.heartbeats.load(), 0) << "the queue was asked to renew past the ceiling";
+  EXPECT_THAT(queue.calls, ElementsAre("release job-1"));
+}
+
+TEST(Poller, DisownsARunWhoseLastLeaseRanOutPastTheCeiling) {
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller::Options options = Options();
+  options.lease = absl::ZeroDuration();
+  options.renew_every = absl::Milliseconds(25);
+  options.max_run = absl::ZeroDuration();
+  Poller poller(
+      queue,
+      [](const IndexJob&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
+        EXPECT_FALSE(lease.Keep());
+        RunReport report;
+        report.stopped = Stopped::kRunCeiling;
+        return report;
+      },
+      options);
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_THAT(queue.calls, ElementsAre("release job-1"));
+}
+
+TEST(Poller, LeavesARunInsideItsCeilingAlone) {
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller poller(
+      queue,
+      [](const IndexJob&, LeaseKeeper& lease) {
+        EXPECT_FALSE(lease.OutOfTime());
+        return RunReport{};
+      },
+      Options());
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kCompleted);
+}
+
 }  // namespace
 }  // namespace one_d4_worker

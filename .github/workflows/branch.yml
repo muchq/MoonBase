@@ -284,6 +284,8 @@ jobs:
             //domains/games/apis/one_d4_worker:pg_game_sink_test union
             //domains/games/apis/one_d4_worker:chess_com_archive_test union
             //domains/games/apis/one_d4_worker:metrics_test union
+            //domains/games/apis/one_d4_worker:run_ceiling_test union
+            //domains/games/apis/one_d4_worker:db_options_test union
             //domains/platform/libs/pg/... union
             //domains/platform/libs/aura/... union
             //domains/platform/libs/futility/otel/... union

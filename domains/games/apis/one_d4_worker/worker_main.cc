@@ -15,6 +15,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "absl/log/globals.h"
@@ -25,12 +26,14 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "domains/games/apis/one_d4_worker/chess_com_archive.h"
+#include "domains/games/apis/one_d4_worker/db_options.h"
 #include "domains/games/apis/one_d4_worker/index_run.h"
 #include "domains/games/apis/one_d4_worker/metrics.h"
 #include "domains/games/apis/one_d4_worker/pg_game_sink.h"
 #include "domains/games/apis/one_d4_worker/pg_queue.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
 #include "domains/games/libs/chess_com_cpp/production_client.h"
+#include "domains/platform/libs/futility/env/env.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/futility/otel/otel_provider.h"
 #include "domains/platform/libs/pg/pg.h"
@@ -44,6 +47,21 @@ void RequestShutdown(int /*signal*/) { g_stopping = 1; }
 std::string Env(const char* name, std::string fallback = "") {
   const char* value = std::getenv(name);
   return value != nullptr && *value != '\0' ? std::string(value) : std::move(fallback);
+}
+
+/// A whole number of seconds from the environment, or `fallback` — and a
+/// word about it, since a value refused in silence looks like a value
+/// honoured.
+absl::Duration SecondsFromEnv(const char* name, absl::Duration fallback) {
+  const std::optional<int> seconds = futility::env::ReadPositiveSeconds(name);
+  if (seconds.has_value()) return absl::Seconds(*seconds);
+
+  const char* raw = std::getenv(name);
+  if (raw != nullptr && *raw != '\0') {
+    LOG(WARNING) << name << "=" << raw << " is not a positive number of seconds; using "
+                 << fallback;
+  }
+  return fallback;
 }
 
 /// Names this process as the holder of a lease: unique across the workers
@@ -81,9 +99,19 @@ int main() {
   // than springing into existence carrying its first event's value.
   metrics.Declare();
 
-  const absl::Duration lease = absl::Seconds(std::atoi(Env("ONE_D4_LEASE_SECONDS", "300").c_str()));
-  const absl::Duration idle_wait =
-      absl::Seconds(std::atoi(Env("ONE_D4_POLL_SECONDS", "5").c_str()));
+  // The lease, its renewal interval and the run ceiling are not
+  // configured here, deliberately. They are protocol constants of the
+  // queue rather than deployment knobs: two pollers that disagree about
+  // them misbehave against each other, and schema_contract_test holds the
+  // C++ values equal to RetentionPolicy's. An environment variable would
+  // put a third value in play that no test can see, at the one moment
+  // nobody is looking. Changing one is a code change with a rationale.
+  one_d4_worker::Poller::Options poller_options;
+  poller_options.owner = OwnerId();
+
+  // How often to ask an empty queue is local: it costs one round trip and
+  // affects nobody else.
+  const absl::Duration idle_wait = SecondsFromEnv("ONE_D4_POLL_SECONDS", absl::Seconds(5));
 
   smithy::Outcome<chess_com::Client> client = chess_com::CreateProductionClient();
   if (!client.ok()) {
@@ -92,14 +120,19 @@ int main() {
   }
   one_d4_worker::ChessComArchive archive(*client);
 
-  pg::Client db(db_url);
+  // Bounded, because nothing else bounds them and the run ceiling cannot:
+  // a thread inside libpq never reaches a checkpoint to be told its time
+  // is up. Cancelling a run that is already blocked is a separate job
+  // (#1400).
+  const std::string bounded_db_url = one_d4_worker::WithExecutionBounds(db_url);
+  pg::Client db(bounded_db_url);
   one_d4_worker::PgQueue queue(db);
 
   // The sink gets its own connection: a flush is a long transaction, and
   // the heartbeat that keeps its lease alive must not queue behind it.
-  pg::Client sink_db(db_url);
+  pg::Client sink_db(bounded_db_url);
 
-  const std::string owner = OwnerId();
+  const std::string& owner = poller_options.owner;
   LOG(INFO) << "Polling indexing_requests as " << owner;
 
   std::signal(SIGINT, RequestShutdown);
@@ -116,7 +149,7 @@ int main() {
         one_d4_worker::IndexRun run(archive, sink, options);
         return run.Execute(job, keeper);
       },
-      one_d4_worker::Poller::Options{.owner = owner, .lease = lease});
+      poller_options);
 
   while (g_stopping == 0) {
     const absl::Time started = absl::Now();

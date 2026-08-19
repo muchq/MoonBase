@@ -27,12 +27,13 @@ constexpr char kInternalFailure[] = "Indexing failed due to an internal error";
 class QueueLease : public LeaseKeeper {
  public:
   QueueLease(IndexQueue& queue, std::string id, std::string owner, absl::Duration lease,
-             absl::Duration renew_every)
+             absl::Duration renew_every, absl::Duration max_run)
       : queue_(queue),
         id_(std::move(id)),
         owner_(std::move(owner)),
         lease_(lease),
         renew_every_(renew_every),
+        deadline_(absl::Now() + max_run),
         proven_(absl::Now()) {
     renewer_ = std::thread([this] { RenewUntilStopped(); });
   }
@@ -52,6 +53,11 @@ class QueueLease : public LeaseKeeper {
     const absl::MutexLock lock(&mu_);
     if (lost_) return false;
     return RenewLocked();
+  }
+
+  bool OutOfTime() override {
+    const absl::MutexLock lock(&mu_);
+    return absl::Now() >= deadline_;
   }
 
   bool Report(int games_indexed) override {
@@ -81,6 +87,19 @@ class QueueLease : public LeaseKeeper {
 
  private:
   bool RenewLocked() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+    // Past the ceiling the claim stops being *extended* — which is what
+    // recovers a run wedged inside a single month, since it will never
+    // reach the check between months and the only way its range comes
+    // back is the lease lapsing under it.
+    //
+    // Not renewing is not the same as not owning, though, and answering
+    // false here for both would abort the month in hand the moment the
+    // ceiling passed. We still hold the claim until the lease we last
+    // proved runs out; the month in hand may finish inside it.
+    if (absl::Now() >= deadline_) {
+      if (absl::Now() - proven_ >= lease_) lost_ = true;
+      return !lost_;
+    }
     const absl::StatusOr<bool> held = queue_.Heartbeat(id_, owner_, lease_);
     if (held.ok() && *held) {
       proven_ = absl::Now();
@@ -113,6 +132,7 @@ class QueueLease : public LeaseKeeper {
   const std::string owner_;
   const absl::Duration lease_;
   const absl::Duration renew_every_;
+  const absl::Time deadline_;
 
   mutable absl::Mutex mu_;
   bool stop_ ABSL_GUARDED_BY(mu_) = false;
@@ -147,8 +167,19 @@ absl::StatusOr<bool> Poller::PollOnce() {
   if (!claimed->has_value()) return false;
 
   const IndexJob& job = **claimed;
-  QueueLease lease(queue_, job.id, options_.owner, options_.lease, options_.renew_every);
+  QueueLease lease(queue_, job.id, options_.owner, options_.lease, options_.renew_every,
+                   options_.max_run);
   const absl::StatusOr<RunReport> report = run_(job, lease);
+
+  // Ahead of the lease check, unlike everything else. A run that stopped
+  // at its ceiling gives the range back even if its claim lapsed on the
+  // way out: Release is fenced, so it either lands — spending the
+  // attempt, which is what retires a repeatable wedge after three instead
+  // of looping on it forever — or is refused because the range really did
+  // change hands, and Finish calls that what it is.
+  if (report.ok() && report->stopped.has_value() && *report->stopped == Stopped::kRunCeiling) {
+    return Finish(job, RunOutcome::kInterrupted, queue_.Release(job.id, options_.owner));
+  }
 
   // Before anything else, including a failure: a run that lost its lease
   // reports nothing, because the row belongs to whoever holds it now.
@@ -165,11 +196,10 @@ absl::StatusOr<bool> Poller::PollOnce() {
     return Finish(job, RunOutcome::kFailed, queue_.Fail(job.id, options_.owner, kInternalFailure));
   }
 
+  // Only kShutdown reaches here; the ceiling is handled above. The
+  // request did nothing wrong, so the attempt is refunded.
   if (report->stopped.has_value()) {
-    const absl::StatusOr<bool> handed = *report->stopped == Stopped::kShutdown
-                                            ? queue_.HandBack(job.id, options_.owner)
-                                            : queue_.Release(job.id, options_.owner);
-    return Finish(job, RunOutcome::kInterrupted, handed);
+    return Finish(job, RunOutcome::kInterrupted, queue_.HandBack(job.id, options_.owner));
   }
 
   return Finish(job, RunOutcome::kCompleted,
