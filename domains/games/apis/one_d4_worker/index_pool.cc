@@ -27,6 +27,10 @@ void IndexPool::Run(const std::function<bool()>& stopping,
   for (int slot = 0; slot < options_.slots; ++slot) {
     workers.emplace_back([this, &stopping, &sleep] { Work(stopping, sleep); });
   }
+  // Said before the wait, not after: a run cannot interrupt a chess.com
+  // call it is already inside, so this can take minutes, and silence
+  // there looks exactly like a hang.
+  LOG(INFO) << "Draining " << options_.slots << " indexing threads";
   for (std::thread& worker : workers) worker.join();
 }
 
@@ -51,16 +55,21 @@ void IndexPool::Work(const std::function<bool()>& stopping,
       continue;
     }
 
+    const IndexJob& job = (*claim)->job;
+    LOG(INFO) << "Claimed " << job.id << " " << job.player << " " << job.start_month << ".."
+              << job.end_month << " as " << (*claim)->owner;
+
     const absl::Time started = absl::Now();
     const absl::StatusOr<RunOutcome> outcome = poller.RunClaimed(**claim);
     if (!outcome.ok()) {
       // The run is over either way; the row expires and somebody retries.
-      LOG(ERROR) << "Could not write the outcome of " << (*claim)->job.id << ": "
-                 << outcome.status();
+      LOG(ERROR) << "Could not write the outcome of " << job.id << ": " << outcome.status();
       continue;
     }
-    metrics_.RunFinished(*outcome, absl::Now() - started);
-    LOG(INFO) << "Run finished: " << ToString(*outcome);
+    const absl::Duration elapsed = absl::Now() - started;
+    metrics_.RunFinished(*outcome, elapsed);
+    LOG(INFO) << "Finished " << job.id << " " << ToString(*outcome) << " in "
+              << absl::ToInt64Milliseconds(elapsed) << "ms";
   }
 }
 
