@@ -340,6 +340,7 @@ cc_binary(
         ":pg_queue",
         ":poller",
         ":title_roster",
+        ":worker",
         "//domains/games/libs/chess_com_cpp:production_client",
         "//domains/platform/libs/futility/env",
         "//domains/platform/libs/futility/otel:metrics",
@@ -410,6 +411,44 @@ cc_test(
 
 # Who holds a title, for the whole site. Ten documents instead of a round
 # trip per opponent — see title_roster.h.
+# The assembly: which pieces a claimed request is run against, and the
+# loop that keeps claiming. Split out of worker_main because a binary has
+# no test target, and every wiring choice in it was one nothing would
+# notice changing (#1406).
+cc_library(
+    name = "worker",
+    srcs = ["worker.cc"],
+    hdrs = ["worker.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":archive",
+        ":game_sink",
+        ":index_run",
+        ":job",
+        ":metrics",
+        ":poller",
+        ":title_roster",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_test(
+    name = "worker_test",
+    size = "small",
+    srcs = ["worker_test.cc"],
+    deps = [
+        ":worker",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_library(
     name = "title_roster",
     srcs = ["title_roster.cc"],
