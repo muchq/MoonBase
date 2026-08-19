@@ -44,4 +44,39 @@ TEST(ReadListTest, TrailingCommaDropsTheEmptyTail) {
   unsetenv("READ_LIST_TEST");
 }
 
+TEST(ReadPositiveSeconds, ReadsAWholeNumberOfSeconds) {
+  setenv("FUTILITY_TEST_SECONDS", "30", 1);
+  EXPECT_EQ(futility::env::ReadPositiveSeconds("FUTILITY_TEST_SECONDS"), 30);
+  unsetenv("FUTILITY_TEST_SECONDS");
+}
+
+TEST(ReadPositiveSeconds, HasNoAnswerWhenItIsUnsetOrEmpty) {
+  unsetenv("FUTILITY_TEST_SECONDS");
+  EXPECT_EQ(futility::env::ReadPositiveSeconds("FUTILITY_TEST_SECONDS"), std::nullopt);
+
+  setenv("FUTILITY_TEST_SECONDS", "", 1);
+  EXPECT_EQ(futility::env::ReadPositiveSeconds("FUTILITY_TEST_SECONDS"), std::nullopt);
+  unsetenv("FUTILITY_TEST_SECONDS");
+}
+
+TEST(ReadPositiveSeconds, RefusesWhatItCannotRead) {
+  // atoi answers 0 for every one of these, which is how a typo becomes a
+  // tight loop or a missing timeout rather than an error.
+  for (const char* value : {"thirty", "30s", "", " ", "3.5", "0x1e"}) {
+    setenv("FUTILITY_TEST_SECONDS", value, 1);
+    EXPECT_EQ(futility::env::ReadPositiveSeconds("FUTILITY_TEST_SECONDS"), std::nullopt)
+        << "read " << value << " as a number of seconds";
+  }
+  unsetenv("FUTILITY_TEST_SECONDS");
+}
+
+TEST(ReadPositiveSeconds, RefusesZeroAndNegative) {
+  for (const char* value : {"0", "-1", "-30"}) {
+    setenv("FUTILITY_TEST_SECONDS", value, 1);
+    EXPECT_EQ(futility::env::ReadPositiveSeconds("FUTILITY_TEST_SECONDS"), std::nullopt)
+        << value << " was honoured as an interval";
+  }
+  unsetenv("FUTILITY_TEST_SECONDS");
+}
+
 }  // namespace

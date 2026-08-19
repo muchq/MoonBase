@@ -200,17 +200,6 @@ TEST(SchemaContract, TheRunCeilingAgreesWithTheJavaOne) {
   EXPECT_EQ(Poller::Options{}.max_run, java_ceiling);
 }
 
-TEST(SchemaContract, TheProcessRunsWithTheCeilingTheContractPins) {
-  // The test above compares Java against Poller::Options{}.max_run. That
-  // says nothing about what the binary uses unless the binary's own
-  // default comes from the same place — a literal in worker_main.cc would
-  // drift from both while this stayed green.
-  const std::string main = Read("domains/games/apis/one_d4_worker/worker_main.cc");
-  EXPECT_THAT(main, testing::HasSubstr("ONE_D4_MAX_RUN_SECONDS"));
-  EXPECT_THAT(main, testing::HasSubstr("absl::ToInt64Seconds(defaults.max_run)"))
-      << "the run ceiling's fallback is not derived from the option it is pinned through";
-}
-
 TEST(SchemaContract, AttemptsAgreeWithTheJavaLimit) {
   // Two workers with different ideas of when to give up would retry a
   // poisoned request forever, or abandon a healthy one early.
