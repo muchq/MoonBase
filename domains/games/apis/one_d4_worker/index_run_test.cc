@@ -3,15 +3,18 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
 
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
+#include "absl/time/time.h"
 #include "domains/games/apis/one_d4_worker/archive.h"
 #include "domains/games/apis/one_d4_worker/game_sink.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
+#include "domains/games/apis/one_d4_worker/title_roster.h"
 
 namespace one_d4_worker {
 namespace {
@@ -53,21 +56,10 @@ class FakeArchive : public ArchiveSource {
     return found->second;
   }
 
-  absl::StatusOr<std::string> FetchTitle(std::string_view player) override {
-    looked_up.push_back(std::string(player));
-    if (!title_status.ok()) return title_status;
-    const auto found = titles.find(std::string(player));
-    return found == titles.end() ? "" : found->second;
-  }
-
   std::map<std::string, std::vector<ArchivedGame>> months;
   absl::Status status;
   std::vector<std::string> asked;
   std::function<void()> on_fetch;
-
-  std::map<std::string, std::string> titles;
-  absl::Status title_status;
-  std::vector<std::string> looked_up;
 };
 
 /// Collects what would have been written.
@@ -104,6 +96,21 @@ class FakeSink : public GameSink {
   std::map<std::string, int> cached;
   std::vector<std::string> asked_about;
   absl::Status cache_status;
+};
+
+/// Rosters, as chess.com would hand them over.
+class FakeRosters : public TitleSource {
+ public:
+  absl::StatusOr<std::vector<std::string>> FetchTitled(std::string_view title) override {
+    ++fetches;
+    if (!status.ok()) return status;
+    const auto found = rosters.find(std::string(title));
+    return found == rosters.end() ? std::vector<std::string>{} : found->second;
+  }
+
+  std::map<std::string, std::vector<std::string>> rosters;
+  absl::Status status;
+  int fetches = 0;
 };
 
 /// A lease that survives `holds` renewals and is gone after that.
@@ -475,35 +482,21 @@ TEST(IndexRun, RecordsAMonthCompleteOnceItIsOver) {
   EXPECT_TRUE(sink.periods[0].complete);
 }
 
-TEST(IndexRun, RecordsAMonthIncompleteWhenSomethingCouldNotBeRead) {
-  // Complete means "this row carries everything it should". A title that
-  // never arrived makes the month worth refetching, and saying otherwise
-  // caches the gap until retention sweeps it.
-  FakeArchive archive;
-  archive.months["2026-01"] = {AGame("g1")};
-  archive.title_status = absl::UnavailableError("profile lookup failed");
-  FakeSink sink;
-  FakeLease lease;
-
-  IndexRun run(archive, sink, Options());
-  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
-
-  ASSERT_EQ(sink.periods.size(), 1u);
-  EXPECT_FALSE(sink.periods[0].complete);
-}
-
 TEST(IndexRun, TellsTheObserverAMonthWasDegraded) {
   // index_months{result="degraded"} is a declared series. Counted as
   // "indexed", it is a permanent zero and nothing shows that a month went
   // in missing something.
   FakeArchive archive;
   archive.months["2026-01"] = {AGame("g1")};
-  archive.title_status = absl::UnavailableError("profile lookup failed");
+  FakeRosters rosters;
+  rosters.status = absl::UnavailableError("chess.com is down");
+  TitleRoster titles(rosters, TitleRoster::Options{});
   FakeSink sink;
   FakeLease lease;
   FakeObserver observer;
 
   IndexRun::Options options = Options();
+  options.titles = &titles;
   options.observer = &observer;
   IndexRun run(archive, sink, options);
   ASSERT_TRUE(run.Execute(AJob(), lease).ok());
@@ -722,11 +715,15 @@ TEST(IndexRun, StopsWhenAProgressWriteIsRefused) {
 TEST(IndexRun, CarriesThePlayersTitles) {
   FakeArchive archive;
   archive.months["2026-01"] = {AGame("g1")};
-  archive.titles["alice"] = "GM";
+  FakeRosters rosters;
+  rosters.rosters["GM"] = {"alice"};
+  TitleRoster titles(rosters, TitleRoster::Options{});
   FakeSink sink;
   FakeLease lease;
 
-  IndexRun run(archive, sink, Options());
+  IndexRun::Options options = Options();
+  options.titles = &titles;
+  IndexRun run(archive, sink, options);
   ASSERT_TRUE(run.Execute(AJob(), lease).ok());
 
   ASSERT_EQ(sink.written.size(), 1u);
@@ -734,31 +731,40 @@ TEST(IndexRun, CarriesThePlayersTitles) {
   EXPECT_EQ(sink.written.front().black_title, "") << "untitled, and said so";
 }
 
-TEST(IndexRun, LooksUpEachPlayerOnce) {
-  // Two hundred games a month against a handful of regulars is two hundred
-  // profile calls if this is not cached, against an API that rate-limits.
+TEST(IndexRun, AsksChessComNothingAboutTheOpponentsItMeets) {
+  // The point of the roster. Four hundred games is ten requests, and the
+  // same ten however many months follow.
   FakeArchive archive;
-  archive.months["2026-01"] = {AGame("g1"), AGame("g2")};
-  archive.months["2026-02"] = {AGame("g3")};
+  for (int i = 0; i < 6; ++i) archive.months["2026-01"].push_back(AGame(absl::StrCat("g", i)));
+  archive.months["2026-02"] = {AGame("g6")};
+  FakeRosters rosters;
+  rosters.rosters["GM"] = {"alice"};
+  TitleRoster titles(rosters, TitleRoster::Options{});
   FakeSink sink;
   FakeLease lease;
 
-  IndexRun run(archive, sink, Options());
+  IndexRun::Options options = Options();
+  options.titles = &titles;
+  IndexRun run(archive, sink, options);
   ASSERT_TRUE(run.Execute(AJob("2026-01", "2026-02"), lease).ok());
 
-  EXPECT_THAT(archive.looked_up, ElementsAre("alice", "bob"));
+  EXPECT_EQ(rosters.fetches, 10) << "a lookup went back to chess.com per player or per month";
 }
 
 TEST(IndexRun, IndexesTheMonthEvenWhenTitlesCannotBeRead) {
-  // A title is decoration on a row. Losing the month over one would be the
-  // tail wagging the dog.
+  // A title is decoration on a row. Losing the month over one would be
+  // the tail wagging the dog.
   FakeArchive archive;
   archive.months["2026-01"] = {AGame("g1")};
-  archive.title_status = absl::UnavailableError("profile lookup failed");
+  FakeRosters rosters;
+  rosters.status = absl::UnavailableError("chess.com is down");
+  TitleRoster titles(rosters, TitleRoster::Options{});
   FakeSink sink;
   FakeLease lease;
 
-  IndexRun run(archive, sink, Options());
+  IndexRun::Options options = Options();
+  options.titles = &titles;
+  IndexRun run(archive, sink, options);
   const absl::StatusOr<RunReport> report = run.Execute(AJob(), lease);
 
   ASSERT_TRUE(report.ok()) << report.status();
@@ -766,37 +772,25 @@ TEST(IndexRun, IndexesTheMonthEvenWhenTitlesCannotBeRead) {
   EXPECT_EQ(sink.written.front().white_title, "");
 }
 
-TEST(IndexRun, DoesNotRetryAFailedTitleLookupOnEveryGameOfTheMonth) {
-  // Two hundred games between two regulars while chess.com is refusing is
-  // four hundred profile calls if a failure is not remembered — against
-  // the API that is already refusing.
-  FakeArchive archive;
-  for (int i = 0; i < 4; ++i) archive.months["2026-01"].push_back(AGame(absl::StrCat("g", i)));
-  archive.title_status = absl::UnavailableError("profile lookup failed");
-  FakeSink sink;
-  FakeLease lease;
-
-  IndexRun run(archive, sink, Options());
-  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
-
-  EXPECT_THAT(archive.looked_up, ElementsAre("alice", "bob"));
-}
-
-TEST(IndexRun, RetriesATitleLookupThatFailed) {
-  // A failed lookup is not an answer, so caching it would carry one bad
-  // minute across a decade of backfill.
+TEST(IndexRun, RecordsAMonthIncompleteWhenTheTitlesWereUnknown) {
+  // Complete means the row carries everything it should. Titles nobody
+  // could read make the month worth refetching, and saying otherwise
+  // freezes a null title until retention sweeps it.
   FakeArchive archive;
   archive.months["2026-01"] = {AGame("g1")};
-  archive.months["2026-02"] = {AGame("g2")};
-  archive.title_status = absl::UnavailableError("profile lookup failed");
+  FakeRosters rosters;
+  rosters.status = absl::UnavailableError("chess.com is down");
+  TitleRoster titles(rosters, TitleRoster::Options{});
   FakeSink sink;
   FakeLease lease;
 
-  IndexRun run(archive, sink, Options());
-  ASSERT_TRUE(run.Execute(AJob("2026-01", "2026-02"), lease).ok());
+  IndexRun::Options options = Options();
+  options.titles = &titles;
+  IndexRun run(archive, sink, options);
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
 
-  EXPECT_THAT(archive.looked_up, ElementsAre("alice", "bob", "alice", "bob"))
-      << "a month is where the giving-up resets";
+  ASSERT_EQ(sink.periods.size(), 1u);
+  EXPECT_FALSE(sink.periods[0].complete);
 }
 
 TEST(IndexRun, WillNotStartAMonthPastTheRunCeiling) {
@@ -906,6 +900,37 @@ TEST(IndexRun, KeepsWhatItHadAlreadyExtractedWhenItStops) {
   ASSERT_TRUE(report.ok()) << report.status();
   EXPECT_EQ(*report->stopped, Stopped::kShutdown);
   EXPECT_THAT(sink.written, Not(IsEmpty())) << "the extracted games were thrown away";
+}
+
+TEST(IndexRun, RecordsAMonthIncompleteWhenTheTitlesWereStale) {
+  // A roster past its day still answers — better than untitling
+  // everyone — but the month it answered for is not complete. Saying
+  // otherwise caches those titles past any chance of correction.
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  FakeRosters rosters;
+  rosters.rosters["GM"] = {"alice"};
+
+  int64_t now = 0;
+  TitleRoster::Options title_options;
+  title_options.now = [&now] { return absl::FromUnixSeconds(now); };
+  TitleRoster titles(rosters, std::move(title_options));
+  ASSERT_TRUE(titles.TitleOf("alice").ok());
+
+  rosters.status = absl::UnavailableError("chess.com is down");
+  now += absl::ToInt64Seconds(absl::Hours(25));
+
+  FakeSink sink;
+  FakeLease lease;
+  IndexRun::Options options = Options();
+  options.titles = &titles;
+  IndexRun run(archive, sink, options);
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
+
+  ASSERT_EQ(sink.written.size(), 1u);
+  EXPECT_EQ(sink.written.front().white_title, "GM") << "a stale roster still answers";
+  ASSERT_EQ(sink.periods.size(), 1u);
+  EXPECT_FALSE(sink.periods[0].complete);
 }
 
 TEST(IndexRun, LeavesOutBulletWhenTheRequestSaysTo) {

@@ -3,8 +3,6 @@
 
 #include <cstdint>
 #include <functional>
-#include <map>
-#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -15,6 +13,7 @@
 #include "domains/games/apis/one_d4_worker/game_sink.h"
 #include "domains/games/apis/one_d4_worker/job.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
+#include "domains/games/apis/one_d4_worker/title_roster.h"
 
 namespace one_d4_worker {
 
@@ -44,6 +43,11 @@ class IndexRun {
     /// True when the worker is shutting down. Checked between months.
     std::function<bool()> stopping;
     RunObserver* observer = nullptr;
+
+    /// Who holds a title. Unset resolves none, which is not a
+    /// degradation — a caller that does not want titles is not a caller
+    /// that failed to read them.
+    TitleRoster* titles = nullptr;
     /// Seconds since the epoch. Injected so a test can pin a period stamp.
     std::function<int64_t()> now;
   };
@@ -68,16 +72,14 @@ class IndexRun {
   static void GiveUp(LeaseKeeper& lease, RunReport& report);
   RunObserver& observer();
   absl::Status Flush(std::vector<IndexedGame>& batch);
-  /// "" for untitled, and for a lookup that failed — which also marks the
-  /// month incomplete, since the row is missing something it should carry.
+  /// "" for untitled, and for a roster nobody could read — which also
+  /// marks the month incomplete, since the row is then missing something
+  /// it should carry.
   std::string TitleOf(std::string_view player, bool& complete);
 
   ArchiveSource& archive_;
   GameSink& sink_;
   Options options_;
-  std::map<std::string, std::string, std::less<>> titles_;
-  /// Cleared at the top of each month. See TitleOf.
-  std::set<std::string, std::less<>> unreachable_titles_;
 };
 
 }  // namespace one_d4_worker

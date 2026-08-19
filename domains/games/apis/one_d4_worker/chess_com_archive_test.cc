@@ -25,12 +25,40 @@ using ::moonbase::chess_com::FetchArchiveInput;
 using ::moonbase::chess_com::FetchArchiveOutput;
 using ::moonbase::chess_com::FetchPlayerInput;
 using ::moonbase::chess_com::FetchPlayerOutput;
+using ::moonbase::chess_com::FetchTitledInput;
+using ::moonbase::chess_com::FetchTitledOutput;
 using ::moonbase::chess_com::PlayedGame;
 using ::moonbase::chess_com::PlayerNotFound;
 using ::moonbase::chess_com::PlayerResult;
+using ::moonbase::chess_com::TitleNotFound;
 
 class ScriptedHandler final : public ChessComHandler {
  public:
+  smithy::Outcome<FetchTitledOutput> FetchTitled(
+      const FetchTitledInput& input, const smithy::server::RequestContext& /*ctx*/) override {
+    const std::lock_guard<std::mutex> lock(mu_);
+    titled_seen_ = input;
+    if (title_not_found_) {
+      smithy::Error error = smithy::Error::Modeled("TitleNotFound", "no such title");
+      error.set_detail(TitleNotFound{.message = "no such title"});
+      return error;
+    }
+    return titled_;
+  }
+
+  void set_titled(FetchTitledOutput titled) {
+    const std::lock_guard<std::mutex> lock(mu_);
+    titled_ = std::move(titled);
+  }
+  void set_title_not_found() {
+    const std::lock_guard<std::mutex> lock(mu_);
+    title_not_found_ = true;
+  }
+  FetchTitledInput titled_seen() const {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return titled_seen_;
+  }
+
   smithy::Outcome<FetchPlayerOutput> FetchPlayer(
       const FetchPlayerInput& /*input*/, const smithy::server::RequestContext& /*ctx*/) override {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -81,6 +109,9 @@ class ScriptedHandler final : public ChessComHandler {
   FetchArchiveInput seen_;
   FetchArchiveOutput output_;
   FetchPlayerOutput player_;
+  FetchTitledInput titled_seen_;
+  FetchTitledOutput titled_;
+  bool title_not_found_ = false;
   bool not_found_ = false;
   bool player_not_found_ = false;
 };
@@ -181,27 +212,35 @@ TEST_F(ChessComArchiveTest, AMissingArchiveIsNotFoundAndNothingElseIs) {
   EXPECT_THAT(std::string(games.status().message()), ::testing::HasSubstr("2026-03"));
 }
 
-TEST_F(ChessComArchiveTest, ReadsATitle) {
-  handler_->set_player(FetchPlayerOutput{.title = "GM"});
+TEST_F(ChessComArchiveTest, ReadsATitledRoster) {
+  handler_->set_titled(FetchTitledOutput{.players = {"hikaru", "magnuscarlsen"}});
 
-  const auto title = archive_->FetchTitle("hikaru");
+  const auto roster = archive_->FetchTitled("GM");
 
-  ASSERT_TRUE(title.ok()) << title.status();
-  EXPECT_EQ(*title, "GM");
+  ASSERT_TRUE(roster.ok()) << roster.status();
+  EXPECT_THAT(*roster, ::testing::ElementsAre("hikaru", "magnuscarlsen"));
+  EXPECT_EQ(handler_->titled_seen().title, "GM");
 }
 
-TEST_F(ChessComArchiveTest, AnUntitledPlayerIsAnAnswerAndNotAFailure) {
-  // Both shapes chess.com uses for "no title": a profile without the field,
-  // and no profile at all. Neither is worth retrying next month.
-  handler_->set_player(FetchPlayerOutput{});
-  const auto untitled = archive_->FetchTitle("someone");
-  ASSERT_TRUE(untitled.ok()) << untitled.status();
-  EXPECT_EQ(*untitled, "");
+TEST_F(ChessComArchiveTest, ATitleNobodyHoldsIsAnEmptyRosterAndNotAFailure) {
+  handler_->set_titled(FetchTitledOutput{});
 
-  handler_->set_player_not_found();
-  const auto missing = archive_->FetchTitle("nobody");
-  ASSERT_TRUE(missing.ok()) << missing.status();
-  EXPECT_EQ(*missing, "");
+  const auto roster = archive_->FetchTitled("WNM");
+
+  ASSERT_TRUE(roster.ok()) << roster.status();
+  EXPECT_THAT(*roster, ::testing::IsEmpty());
+}
+
+TEST_F(ChessComArchiveTest, ATitleWithNoRosterIsEmptyRatherThanAFailedRefresh) {
+  // The caller stops at the first failed title and keeps the rosters it
+  // already had, so flattening this 404 into a transport failure would
+  // take the whole feature down over one retired abbreviation.
+  handler_->set_title_not_found();
+
+  const auto roster = archive_->FetchTitled("M");
+
+  ASSERT_TRUE(roster.ok()) << roster.status();
+  EXPECT_THAT(*roster, ::testing::IsEmpty());
 }
 
 TEST(ChessComArchiveTransportTest, ATransportFailureIsNotAMissingArchive) {
@@ -227,10 +266,10 @@ TEST(ChessComArchiveTransportTest, ATransportFailureIsNotAMissingArchive) {
   ASSERT_FALSE(games.ok());
   EXPECT_NE(games.status().code(), absl::StatusCode::kNotFound);
 
-  // A title lookup that never reached chess.com is not "untitled" either —
-  // caching that answer would leave the GM unlabelled for good.
-  const auto title = archive.FetchTitle("hikaru");
-  EXPECT_FALSE(title.ok());
+  // A roster that never reached chess.com is not an empty roster either —
+  // taking that answer would leave every GM unlabelled.
+  const auto roster = archive.FetchTitled("GM");
+  EXPECT_FALSE(roster.ok());
 }
 
 }  // namespace

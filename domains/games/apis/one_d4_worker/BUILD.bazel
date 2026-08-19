@@ -202,6 +202,7 @@ cc_library(
         ":openings",
         ":poller",
         ":result",
+        ":title_roster",
         "//domains/games/libs/chess_cpp:pgn",
         "//domains/games/libs/one_d4_motifs:extract",
         "@com_google_absl//absl/status",
@@ -216,8 +217,10 @@ cc_test(
     srcs = ["index_run_test.cc"],
     deps = [
         ":index_run",
+        ":title_roster",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
     ],
 )
@@ -229,6 +232,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":archive",
+        ":title_roster",
         "//domains/games/libs/chess_com_cpp:client",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -335,6 +339,8 @@ cc_binary(
         ":pg_game_sink",
         ":pg_queue",
         ":poller",
+        ":title_roster",
+        ":worker",
         "//domains/games/libs/chess_com_cpp:production_client",
         "//domains/platform/libs/futility/env",
         "//domains/platform/libs/futility/otel:metrics",
@@ -399,6 +405,72 @@ cc_test(
         ":db_options",
         "//domains/platform/libs/pg",
         "@com_google_absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# Who holds a title, for the whole site. Ten documents instead of a round
+# trip per opponent — see title_roster.h.
+# The assembly: which pieces a claimed request is run against, and the
+# loop that keeps claiming. Split out of worker_main because a binary has
+# no test target, and every wiring choice in it was one nothing would
+# notice changing (#1406).
+cc_library(
+    name = "worker",
+    srcs = ["worker.cc"],
+    hdrs = ["worker.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":archive",
+        ":game_sink",
+        ":index_run",
+        ":job",
+        ":metrics",
+        ":poller",
+        ":title_roster",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_test(
+    name = "worker_test",
+    size = "small",
+    srcs = ["worker_test.cc"],
+    deps = [
+        ":worker",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "title_roster",
+    srcs = ["title_roster.cc"],
+    hdrs = ["title_roster.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/cleanup",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_test(
+    name = "title_roster_test",
+    size = "small",
+    srcs = ["title_roster_test.cc"],
+    deps = [
+        ":title_roster",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
     ],
 )

@@ -27,6 +27,10 @@ class Client {
                                                                         int year,
                                                                         unsigned month) const;
 
+  /// Every player holding `title` ("GM", "WIM", ...). Uppercased, since
+  /// that is how the path spells them.
+  smithy::Outcome<moonbase::chess_com::FetchTitledOutput> FetchTitled(std::string_view title) const;
+
  private:
   explicit Client(moonbase::chess_com::ChessComClient client) : client_(std::move(client)) {}
 

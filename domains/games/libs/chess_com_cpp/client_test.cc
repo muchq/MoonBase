@@ -25,9 +25,12 @@ using moonbase::chess_com::FetchArchiveInput;
 using moonbase::chess_com::FetchArchiveOutput;
 using moonbase::chess_com::FetchPlayerInput;
 using moonbase::chess_com::FetchPlayerOutput;
+using moonbase::chess_com::FetchTitledInput;
+using moonbase::chess_com::FetchTitledOutput;
 using moonbase::chess_com::PlayedGame;
 using moonbase::chess_com::PlayerNotFound;
 using moonbase::chess_com::PlayerResult;
+using moonbase::chess_com::TitleNotFound;
 
 class ScriptedHttpClient final : public smithy::http::HttpClient {
  public:
@@ -63,6 +66,39 @@ class RecordingHandler final : public ChessComHandler {
       return error;
     }
     return FetchPlayerOutput{.title = "GM"};
+  }
+
+  smithy::Outcome<FetchTitledOutput> FetchTitled(
+      const FetchTitledInput& input, const smithy::server::RequestContext& /*context*/) override {
+    const std::lock_guard<std::mutex> lock(mu_);
+    titled_input_ = input;
+    ++titled_calls_;
+    if (title_not_found_) {
+      smithy::Error error = smithy::Error::Modeled("TitleNotFound", "title not found");
+      error.set_detail(TitleNotFound{.message = "title not found"});
+      return error;
+    }
+    return titled_output_;
+  }
+
+  FetchTitledInput titled_input() const {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return titled_input_;
+  }
+
+  int titled_calls() const {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return titled_calls_;
+  }
+
+  void set_titled_output(FetchTitledOutput output) {
+    const std::lock_guard<std::mutex> lock(mu_);
+    titled_output_ = std::move(output);
+  }
+
+  void set_title_not_found() {
+    const std::lock_guard<std::mutex> lock(mu_);
+    title_not_found_ = true;
   }
 
   smithy::Outcome<FetchArchiveOutput> FetchArchive(
@@ -116,6 +152,10 @@ class RecordingHandler final : public ChessComHandler {
   int archive_calls_ = 0;
   bool player_not_found_ = false;
   bool archive_not_found_ = false;
+  FetchTitledInput titled_input_;
+  FetchTitledOutput titled_output_;
+  int titled_calls_ = 0;
+  bool title_not_found_ = false;
 };
 
 class ClientTest : public ::testing::Test {
@@ -223,6 +263,47 @@ TEST_F(ClientTest, PlayerAndArchiveNotFoundRemainDistinct) {
   ASSERT_FALSE(archive.ok());
   EXPECT_EQ(archive.error().code(), "ArchiveNotFound");
   EXPECT_NE(archive.error().detail<ArchiveNotFound>(), nullptr);
+}
+
+TEST_F(ClientTest, FetchTitledReadsARoster) {
+  handler_->set_titled_output(FetchTitledOutput{.players = {"hikaru", "magnuscarlsen"}});
+
+  const auto titled = client_->FetchTitled("GM");
+
+  ASSERT_TRUE(titled.ok()) << titled.error().message();
+  ASSERT_EQ(titled->players.size(), 2u);
+  EXPECT_EQ(titled->players[0], "hikaru");
+  EXPECT_EQ(titled->players[1], "magnuscarlsen");
+  EXPECT_EQ(handler_->titled_input().title, "GM");
+}
+
+TEST_F(ClientTest, FetchTitledUppercasesTheTitle) {
+  // The path spells titles in upper case; chess.com 404s on "gm".
+  ASSERT_TRUE(client_->FetchTitled("wim").ok());
+
+  EXPECT_EQ(handler_->titled_input().title, "WIM");
+}
+
+TEST_F(ClientTest, AnEmptyTitleNeverReachesTheWire) {
+  // The generated client does not check path labels, so an empty title
+  // would ask for /pub/titled/ — a different resource, whose 404 comes
+  // back as the modeled TitleNotFound and reads as "nobody holds it".
+  const auto empty = client_->FetchTitled("");
+
+  ASSERT_FALSE(empty.ok());
+  EXPECT_EQ(empty.error().code(), "ValidationError")
+      << "the empty title went out and came back 404";
+  EXPECT_EQ(handler_->titled_calls(), 0);
+}
+
+TEST_F(ClientTest, AnUnknownTitleStaysDistinctFromTheOtherNotFounds) {
+  handler_->set_title_not_found();
+
+  const auto titled = client_->FetchTitled("XX");
+
+  ASSERT_FALSE(titled.ok());
+  EXPECT_EQ(titled.error().code(), "TitleNotFound");
+  EXPECT_NE(titled.error().detail<TitleNotFound>(), nullptr);
 }
 
 TEST(ClientContractTest, UnknownResponseMembersDoNotBreakArchiveDecoding) {

@@ -48,14 +48,6 @@ class ArchiveSource {
   /// games" for a month nobody read.
   virtual absl::StatusOr<std::vector<ArchivedGame>> FetchMonth(std::string_view player,
                                                                YearMonth month) = 0;
-
-  /// The player's title ("GM", "WIM", ...), or "" for an untitled player.
-  ///
-  /// Same source, so same port. An error here never fails the run — a
-  /// title is decoration on a row, and losing the month over it would be
-  /// the tail wagging the dog — but it is not cached either, so a later
-  /// month retries it.
-  virtual absl::StatusOr<std::string> FetchTitle(std::string_view player) = 0;
 };
 
 }  // namespace one_d4_worker

@@ -32,6 +32,8 @@
 #include "domains/games/apis/one_d4_worker/pg_game_sink.h"
 #include "domains/games/apis/one_d4_worker/pg_queue.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
+#include "domains/games/apis/one_d4_worker/title_roster.h"
+#include "domains/games/apis/one_d4_worker/worker.h"
 #include "domains/games/libs/chess_com_cpp/production_client.h"
 #include "domains/platform/libs/futility/env/env.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
@@ -119,6 +121,11 @@ int main() {
     return 1;
   }
   one_d4_worker::ChessComArchive archive(*client);
+  // Ten documents for the whole titled population of the site, held for
+  // the life of the process. See title_roster.h.
+  one_d4_worker::TitleRoster::Options title_options;
+  title_options.stopping = [] { return g_stopping != 0; };
+  one_d4_worker::TitleRoster titles(archive, std::move(title_options));
 
   // Bounded, because nothing else bounds them and the run ceiling cannot:
   // a thread inside libpq never reaches a checkpoint to be told its time
@@ -138,36 +145,19 @@ int main() {
   std::signal(SIGINT, RequestShutdown);
   std::signal(SIGTERM, RequestShutdown);
 
-  one_d4_worker::Poller poller(
-      queue,
-      [&](const one_d4_worker::IndexJob& job,
-          one_d4_worker::LeaseKeeper& keeper) -> absl::StatusOr<one_d4_worker::RunReport> {
-        one_d4_worker::PgGameSink sink(sink_db, job.id, owner);
-        one_d4_worker::IndexRun::Options options;
-        options.observer = &metrics;
-        options.stopping = [] { return g_stopping != 0; };
-        one_d4_worker::IndexRun run(archive, sink, options);
-        return run.Execute(job, keeper);
-      },
-      poller_options);
+  const auto stopping = [] { return g_stopping != 0; };
+  one_d4_worker::Poller poller(queue,
+                               one_d4_worker::MakeRun(
+                                   archive, titles,
+                                   [&sink_db, &owner](const one_d4_worker::IndexJob& job) {
+                                     return std::make_unique<one_d4_worker::PgGameSink>(
+                                         sink_db, job.id, owner);
+                                   },
+                                   metrics, stopping),
+                               poller_options);
 
-  while (g_stopping == 0) {
-    const absl::Time started = absl::Now();
-    const absl::StatusOr<bool> ran = poller.PollOnce();
-    if (!ran.ok()) {
-      // A queue we cannot reach is a reason to wait and try again, not to
-      // exit: the supervisor would only restart us into the same outage.
-      LOG(ERROR) << "Poll failed: " << ran.status();
-      absl::SleepFor(idle_wait);
-      continue;
-    }
-    if (!*ran) {
-      absl::SleepFor(idle_wait);
-      continue;
-    }
-    metrics.RunFinished(poller.last_outcome(), absl::Now() - started);
-    LOG(INFO) << "Run finished: " << one_d4_worker::ToString(poller.last_outcome());
-  }
+  one_d4_worker::PollLoop(poller, metrics, idle_wait, stopping,
+                          [](absl::Duration wait) { absl::SleepFor(wait); });
 
   LOG(INFO) << "Shutting down";
   return 0;

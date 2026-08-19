@@ -81,21 +81,19 @@ absl::Status IndexRun::Flush(std::vector<IndexedGame>& batch) {
 }
 
 std::string IndexRun::TitleOf(std::string_view player, bool& complete) {
-  if (player.empty()) return "";
-  const auto cached = titles_.find(player);
-  if (cached != titles_.end()) return cached->second;
-  if (unreachable_titles_.count(player) != 0) return "";
+  if (player.empty() || options_.titles == nullptr) return "";
 
-  const absl::StatusOr<std::string> title = archive_.FetchTitle(player);
-  // A failure is not an answer. Caching one would carry a bad minute
-  // across a decade of backfill; recording the month complete without it
-  // would do the same to the period cache.
+  const absl::StatusOr<std::string> title = options_.titles->TitleOf(player);
+  // No roster at all, so every player in this month looks untitled. Say
+  // the month is missing something rather than freeze that.
   if (!title.ok()) {
-    unreachable_titles_.emplace(player);
     complete = false;
     return "";
   }
-  titles_.emplace(player, *title);
+  // Answered, but from a roster whose refresh is overdue and did not
+  // land. A day of that is nothing; a week of it is a week of months
+  // cached with titles nobody will ever correct.
+  if (options_.titles->Stale()) complete = false;
   return *title;
 }
 
@@ -173,11 +171,6 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
 
     int month_count = 0;
     bool complete = true;
-    // A failed lookup is worth retrying next month, not next game: a month
-    // of four hundred games between two regulars is two profile calls, and
-    // eight hundred against an API that rate-limits is how one bad minute
-    // sustains itself.
-    unreachable_titles_.clear();
     for (const ArchivedGame& game : *games) {
       if (job.exclude_bullet && game.time_class == "bullet") continue;
 

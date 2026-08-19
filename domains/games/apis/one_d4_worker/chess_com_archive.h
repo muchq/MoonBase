@@ -7,6 +7,7 @@
 
 #include "absl/status/statusor.h"
 #include "domains/games/apis/one_d4_worker/archive.h"
+#include "domains/games/apis/one_d4_worker/title_roster.h"
 #include "domains/games/libs/chess_com_cpp/client.h"
 
 namespace one_d4_worker {
@@ -17,14 +18,14 @@ namespace one_d4_worker {
 /// every optional field becomes a present-but-empty one. The run never sees
 /// a nullopt, because "the archive did not say" and "the player has no
 /// rating" are the same row either way.
-class ChessComArchive : public ArchiveSource {
+class ChessComArchive : public ArchiveSource, public TitleSource {
  public:
   explicit ChessComArchive(const chess_com::Client& client) : client_(client) {}
 
   absl::StatusOr<std::vector<ArchivedGame>> FetchMonth(std::string_view player,
                                                        YearMonth month) override;
 
-  absl::StatusOr<std::string> FetchTitle(std::string_view player) override;
+  absl::StatusOr<std::vector<std::string>> FetchTitled(std::string_view title) override;
 
  private:
   const chess_com::Client& client_;

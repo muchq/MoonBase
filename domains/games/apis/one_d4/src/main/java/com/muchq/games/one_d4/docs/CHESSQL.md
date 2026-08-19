@@ -62,9 +62,11 @@ Underscore-separated names also work directly: `white_elo >= 2500` is equivalent
 `date` and `month` have no column of their own: they compile to `played_at` ranges and are
 filter-only, rejected in `IN` lists and in `groupBy`. See [Date scoping](#date-scoping) below.
 
-`white.title` / `black.title` hold chess.com titles (`GM`, `IM`, `WGM`, ...) fetched from player
-profiles at index time; untitled players are NULL. `opening.name` is the human-readable opening
-line derived from the chess.com `ECOUrl` (e.g. `Caro Kann Defense Two Knights Attack 3...dxe4`);
+`white.title` / `black.title` hold chess.com titles (`GM`, `IM`, `WGM`, ...) as of index time;
+untitled players are NULL. A title awarded after a game was indexed does not appear on that row
+until the month is indexed again.
+
+`opening.name` is the human-readable opening line derived from the chess.com `ECOUrl` (e.g. `Caro Kann Defense Two Knights Attack 3...dxe4`);
 `opening.family` is its leading family segment (e.g. `Caro Kann Defense`) — the level most
 questions are asked at, e.g. `white.username = "hikaru" AND opening.family = "Caro Kann Defense"`.
 The family drops the move continuation first, so `Owens Defense...3.Nc3 e6` files under
