@@ -140,5 +140,12 @@ public final class RetentionPolicy {
    */
   public static final Duration MAX_RUN = Duration.ofHours(6);
 
+  /**
+   * The C++ worker keeps this same ceiling in {@code Poller::Options::max_run}
+   * (domains/games/apis/one_d4_worker/poller.h). Both poll one table, so the two must stay equal: a
+   * shorter value there hands back ranges this worker considers healthy, spending an attempt each
+   * time, and a longer one leaves a wedge sitting past the point the system has decided is a fault.
+   * Nothing enforces it — changing one means changing both.
+   */
   private RetentionPolicy() {}
 }

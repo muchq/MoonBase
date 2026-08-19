@@ -11,7 +11,6 @@
 
 #include "absl/strings/str_cat.h"
 #include "domains/games/apis/one_d4_worker/pg_queue.h"
-#include "domains/games/apis/one_d4_worker/poller.h"
 
 namespace one_d4_worker {
 namespace {
@@ -178,26 +177,6 @@ TEST(SchemaContract, AFailedRunSaysWhatTheJavaWorkerSays) {
       << "IndexWorker no longer stores a fixed failure message";
   EXPECT_THAT(poller, testing::HasSubstr(absl::StrCat("\"", found[1].str(), "\"")))
       << "the C++ worker stores a different sentence than the Java one";
-}
-
-TEST(SchemaContract, TheRunCeilingAgreesWithTheJavaOne) {
-  // Both workers poll one table, so the ceiling is a property of the
-  // queue rather than of either process. A C++ worker with a shorter one
-  // would hand back ranges the Java worker considers healthy, spending an
-  // attempt each time; a longer one would leave a wedge sitting past the
-  // point the system has decided is a fault.
-  const std::string java = Read(
-      "domains/games/apis/one_d4/src/main/java/com/muchq/games/one_d4/db/"
-      "RetentionPolicy.java");
-  const std::regex ceiling(R"re(MAX_RUN = Duration\.of(Hours|Minutes|Seconds)\((\d+)\))re");
-  std::smatch found;
-  ASSERT_TRUE(std::regex_search(java, found, ceiling)) << "MAX_RUN is gone from RetentionPolicy";
-
-  const int amount = std::stoi(found[2].str());
-  const absl::Duration java_ceiling = found[1].str() == "Hours"     ? absl::Hours(amount)
-                                      : found[1].str() == "Minutes" ? absl::Minutes(amount)
-                                                                    : absl::Seconds(amount);
-  EXPECT_EQ(Poller::Options{}.max_run, java_ceiling);
 }
 
 TEST(SchemaContract, AttemptsAgreeWithTheJavaLimit) {

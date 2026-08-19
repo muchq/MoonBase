@@ -77,7 +77,12 @@ class Poller {
     absl::Duration renew_every = absl::Minutes(5) / 4;
 
     /// How long a run may hold a range before it is treated as wedged.
-    /// RetentionPolicy.MAX_RUN, and pinned equal to it.
+    ///
+    /// RetentionPolicy.MAX_RUN in the Java worker, and it must stay equal
+    /// to it: both poll one table, so a shorter value here hands back
+    /// ranges the other considers healthy and a longer one leaves a wedge
+    /// sitting past the point the system has decided is a fault. Nothing
+    /// enforces that — changing either means changing both.
     ///
     /// Deliberately far above any legitimate run — a twelve-month range
     /// for a prolific player is minutes against a healthy chess.com — so
