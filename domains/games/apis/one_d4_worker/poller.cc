@@ -161,13 +161,19 @@ std::string_view ToString(RunOutcome outcome) {
 Poller::Poller(IndexQueue& queue, Run run, Options options)
     : queue_(queue), run_(std::move(run)), options_(std::move(options)) {}
 
-absl::StatusOr<bool> Poller::PollOnce() {
-  const std::string owner = absl::StrCat(options_.owner, "/", ++runs_);
-  absl::StatusOr<std::optional<IndexJob>> claimed = queue_.ClaimNext(owner, options_.lease);
+absl::StatusOr<std::optional<Claim>> Poller::ClaimOne() {
+  Claim claim;
+  claim.owner = absl::StrCat(options_.owner, "/", ++runs_);
+  absl::StatusOr<std::optional<IndexJob>> claimed = queue_.ClaimNext(claim.owner, options_.lease);
   if (!claimed.ok()) return claimed.status();
-  if (!claimed->has_value()) return false;
+  if (!claimed->has_value()) return std::nullopt;
+  claim.job = **claimed;
+  return claim;
+}
 
-  const IndexJob& job = **claimed;
+absl::StatusOr<RunOutcome> Poller::RunClaimed(const Claim& claim) {
+  const IndexJob& job = claim.job;
+  const std::string& owner = claim.owner;
   QueueLease lease(queue_, job.id, owner, options_.lease, options_.renew_every, options_.max_run);
   const absl::StatusOr<RunReport> report = run_(job, lease);
 
@@ -183,10 +189,7 @@ absl::StatusOr<bool> Poller::PollOnce() {
 
   // Before anything else, including a failure: a run that lost its lease
   // reports nothing, because the row belongs to whoever holds it now.
-  if (lease.lost() || (report.ok() && report->lease_lost)) {
-    last_outcome_ = RunOutcome::kLeaseLost;
-    return true;
-  }
+  if (lease.lost() || (report.ok() && report->lease_lost)) return RunOutcome::kLeaseLost;
 
   if (!report.ok()) {
     // The cause goes to the log, not to the column. error_message is
@@ -205,12 +208,22 @@ absl::StatusOr<bool> Poller::PollOnce() {
   return Finish(RunOutcome::kCompleted, queue_.Complete(job.id, owner, report->games_indexed));
 }
 
-absl::StatusOr<bool> Poller::Finish(RunOutcome outcome, const absl::StatusOr<bool>& written) {
+absl::StatusOr<bool> Poller::PollOnce() {
+  const absl::StatusOr<std::optional<Claim>> claim = ClaimOne();
+  if (!claim.ok()) return claim.status();
+  if (!claim->has_value()) return false;
+
+  const absl::StatusOr<RunOutcome> outcome = RunClaimed(**claim);
+  if (!outcome.ok()) return outcome.status();
+  last_outcome_ = *outcome;
+  return true;
+}
+
+absl::StatusOr<RunOutcome> Poller::Finish(RunOutcome outcome, const absl::StatusOr<bool>& written) {
   if (!written.ok()) return written.status();
   // The fence said no, so the row is somebody else's and they own its
   // outcome — whatever we were about to call this run, it is theirs now.
-  last_outcome_ = *written ? outcome : RunOutcome::kLeaseLost;
-  return true;
+  return *written ? outcome : RunOutcome::kLeaseLost;
 }
 
 }  // namespace one_d4_worker

@@ -131,6 +131,50 @@ TEST(Poller, FencesARunsWritesOnTheIdItClaimedWith) {
   EXPECT_THAT(queue.fenced_on, ElementsAre(queue.owners[0]));
 }
 
+TEST(Poller, ClaimsWithoutRunning) {
+  // The two halves separate because the pool claims on one thread and
+  // runs on another. A claim is not work started.
+  FakeQueue queue;
+  queue.next = AJob();
+  int runs = 0;
+  Poller poller(
+      queue,
+      [&runs](const IndexJob&, LeaseKeeper&) {
+        ++runs;
+        return RunReport{};
+      },
+      Options());
+
+  const absl::StatusOr<std::optional<Claim>> claim = poller.ClaimOne();
+
+  ASSERT_TRUE(claim.ok()) << claim.status();
+  ASSERT_TRUE(claim->has_value());
+  EXPECT_EQ((*claim)->job.id, "job-1");
+  EXPECT_EQ(runs, 0);
+  EXPECT_THAT(queue.calls, IsEmpty()) << "a claim on its own writes no outcome";
+}
+
+TEST(Poller, RunsAClaimAndWritesItsOutcome) {
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller poller(
+      queue,
+      [](const IndexJob&, LeaseKeeper&) {
+        RunReport report;
+        report.games_indexed = 3;
+        return report;
+      },
+      Options());
+  const absl::StatusOr<std::optional<Claim>> claim = poller.ClaimOne();
+  ASSERT_TRUE(claim.ok() && claim->has_value()) << claim.status();
+
+  const absl::StatusOr<RunOutcome> outcome = poller.RunClaimed(**claim);
+
+  ASSERT_TRUE(outcome.ok()) << outcome.status();
+  EXPECT_EQ(*outcome, RunOutcome::kCompleted);
+  EXPECT_THAT(queue.calls, ElementsAre("complete job-1 3"));
+}
+
 TEST(Poller, DoesNothingWhenTheQueueIsEmpty) {
   FakeQueue queue;
   Poller poller(queue, [](const IndexJob&, LeaseKeeper&) { return RunReport{}; }, Options());

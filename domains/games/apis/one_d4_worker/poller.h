@@ -58,6 +58,12 @@ class LeaseKeeper {
   virtual bool OutOfTime() = 0;
 };
 
+/// A claim, and the id it is fenced on.
+struct Claim {
+  IndexJob job;
+  std::string owner;
+};
+
 /// Claims one request and runs it.
 ///
 /// Terminal writes happen here and nowhere else, so the rule that a run
@@ -104,13 +110,26 @@ class Poller {
 
   Poller(IndexQueue& queue, Run run, Options options);
 
+  /// Claims at most one request. nullopt when there was nothing to take.
+  ///
+  /// Separate from running it because the pool claims on one thread and
+  /// runs on another — and because claiming must be gated on a free slot,
+  /// which the caller knows about and this does not. A claim waiting for
+  /// a thread is a lease renewed for a range nobody is indexing.
+  absl::StatusOr<std::optional<Claim>> ClaimOne();
+
+  /// Runs a claim and writes its outcome. Errors are the queue refusing
+  /// the terminal write, not the run failing — a failed run is an
+  /// outcome.
+  absl::StatusOr<RunOutcome> RunClaimed(const Claim& claim);
+
   /// Claims and runs at most one request. True when it ran one.
   absl::StatusOr<bool> PollOnce();
 
   RunOutcome last_outcome() const { return last_outcome_; }
 
  private:
-  absl::StatusOr<bool> Finish(RunOutcome outcome, const absl::StatusOr<bool>& written);
+  absl::StatusOr<RunOutcome> Finish(RunOutcome outcome, const absl::StatusOr<bool>& written);
 
   IndexQueue& queue_;
   Run run_;
