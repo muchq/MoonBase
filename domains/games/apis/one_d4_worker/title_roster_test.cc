@@ -129,10 +129,43 @@ TEST(TitleRoster, ReadsThemAgainOnceTheyAreStale) {
   TitleRoster roster(rosters, Options(now));
 
   ASSERT_TRUE(roster.TitleOf("nobody").ok());
-  now += absl::ToInt64Seconds(absl::Hours(25));
+  now += absl::ToInt64Seconds(absl::Hours(24));
   ASSERT_TRUE(roster.TitleOf("nobody").ok());
 
   EXPECT_EQ(rosters.asked.size(), 20u);
+}
+
+TEST(TitleRoster, AnswersFromMemoryForTheWholeDayAndNotJustPastTheBackoff) {
+  // Two gates stand between a lookup and chess.com, and the backoff is
+  // the shorter one. Without the day, the rosters would be re-read every
+  // five minutes — the fan-out this exists to remove — and every test
+  // that stops at the backoff would still pass.
+  int64_t now = 0;
+  FakeRosters rosters;
+  rosters.rosters["GM"] = {"hikaru"};
+  TitleRoster roster(rosters, Options(now));
+  ASSERT_EQ(*roster.TitleOf("hikaru"), "GM");
+
+  now += absl::ToInt64Seconds(absl::Hours(23));
+  ASSERT_EQ(*roster.TitleOf("hikaru"), "GM");
+
+  EXPECT_EQ(rosters.asked.size(), 10u) << "the day expired early";
+}
+
+TEST(TitleRoster, ForgetsATitleThatWasTakenAway) {
+  // A refresh replaces what it holds. Merged into it instead, the first
+  // rosters this process ever read would outlive every correction.
+  int64_t now = 0;
+  FakeRosters rosters;
+  rosters.rosters["GM"] = {"hikaru"};
+  rosters.rosters["IM"] = {"someone"};
+  TitleRoster roster(rosters, Options(now));
+  ASSERT_EQ(*roster.TitleOf("hikaru"), "GM");
+
+  rosters.rosters["GM"].clear();
+  now += absl::ToInt64Seconds(absl::Hours(24));
+
+  EXPECT_EQ(*roster.TitleOf("hikaru"), "");
 }
 
 TEST(TitleRoster, SaysSoWhenItHasNoRosterAtAll) {
@@ -189,7 +222,7 @@ TEST(TitleRoster, TriesAgainOnceTheBackoffHasPassed) {
 
   rosters.status = absl::OkStatus();
   rosters.rosters["GM"] = {"hikaru"};
-  now += absl::ToInt64Seconds(absl::Minutes(6));
+  now += absl::ToInt64Seconds(absl::Minutes(5));
 
   EXPECT_EQ(*roster.TitleOf("hikaru"), "GM");
 }
@@ -204,6 +237,8 @@ TEST(TitleRoster, IsNotStaleWhileTheRostersAreFresh) {
   EXPECT_FALSE(roster.Stale());
   now += absl::ToInt64Seconds(absl::Hours(23));
   EXPECT_FALSE(roster.Stale());
+  now += absl::ToInt64Seconds(absl::Hours(1));
+  EXPECT_TRUE(roster.Stale()) << "stale is the same day the refresh came due";
 }
 
 TEST(TitleRoster, DoesNotTakeTenEmptyRostersAsAnAnswer) {
