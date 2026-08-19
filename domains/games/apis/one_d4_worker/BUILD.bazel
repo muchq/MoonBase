@@ -333,6 +333,7 @@ cc_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":chess_com_archive",
+        ":db_options",
         ":index_run",
         ":metrics",
         ":pg_game_sink",
@@ -377,6 +378,30 @@ cc_test(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# Execution bounds for the worker's database connections. Nothing else
+# bounds them, and the run ceiling cannot help: a thread inside libpq
+# never reaches a checkpoint to be told its time is up.
+cc_library(
+    name = "db_options",
+    srcs = ["db_options.cc"],
+    hdrs = ["db_options.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@com_google_absl//absl/strings"],
+)
+
+cc_test(
+    name = "db_options_test",
+    size = "small",
+    srcs = ["db_options_test.cc"],
+    env_inherit = ["PG_TEST_DB_URL"],
+    deps = [
+        ":db_options",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/strings",
         "@googletest//:gtest_main",
     ],
 )

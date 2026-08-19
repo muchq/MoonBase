@@ -25,6 +25,7 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "domains/games/apis/one_d4_worker/chess_com_archive.h"
+#include "domains/games/apis/one_d4_worker/db_options.h"
 #include "domains/games/apis/one_d4_worker/index_run.h"
 #include "domains/games/apis/one_d4_worker/metrics.h"
 #include "domains/games/apis/one_d4_worker/pg_game_sink.h"
@@ -102,12 +103,17 @@ int main() {
   }
   one_d4_worker::ChessComArchive archive(*client);
 
-  pg::Client db(db_url);
+  // Bounded, because nothing else bounds them and the run ceiling cannot:
+  // a thread inside libpq never reaches a checkpoint to be told its time
+  // is up. Cancelling a run that is already blocked is a separate job
+  // (#1400).
+  const std::string bounded_db_url = one_d4_worker::WithExecutionBounds(db_url);
+  pg::Client db(bounded_db_url);
   one_d4_worker::PgQueue queue(db);
 
   // The sink gets its own connection: a flush is a long transaction, and
   // the heartbeat that keeps its lease alive must not queue behind it.
-  pg::Client sink_db(db_url);
+  pg::Client sink_db(bounded_db_url);
 
   const std::string owner = OwnerId();
   LOG(INFO) << "Polling indexing_requests as " << owner;
