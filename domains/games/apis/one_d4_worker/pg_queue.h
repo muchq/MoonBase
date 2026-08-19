@@ -1,6 +1,7 @@
 #ifndef DOMAINS_GAMES_APIS_ONE_D4_WORKER_PG_QUEUE_H
 #define DOMAINS_GAMES_APIS_ONE_D4_WORKER_PG_QUEUE_H
 
+#include <memory>
 #include <optional>
 #include <string_view>
 
@@ -38,6 +39,15 @@ class PgQueue : public IndexQueue {
  private:
   pg::Client& client_;
 };
+
+/// A queue with a connection of its own, for one indexing thread.
+///
+/// One pg::Client is one connection serialised by a mutex. Shared, a
+/// heartbeat blocked behind that thread's own flush — the flush holds a
+/// FOR UPDATE on the same row the heartbeat updates — holds the mutex
+/// while it waits, and stalls every other thread's claims, heartbeats and
+/// terminal writes behind it.
+std::unique_ptr<IndexQueue> NewOwnedPgQueue(const std::string& db_url);
 
 }  // namespace one_d4_worker
 

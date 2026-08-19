@@ -41,8 +41,12 @@ absl::StatusOr<std::optional<IndexJob>> PgQueue::ClaimNext(std::string_view owne
   //
   // A live claim of ours is work in progress, not work available, so it is
   // not a candidate — otherwise one process hands itself the same range
-  // twice. Picking our own *expired* row back up is fine and does not spend
-  // an attempt; taking somebody else's does.
+  // twice. Re-presenting the id already on the row does not spend an
+  // attempt; presenting any other id does.
+  //
+  // The C++ worker never takes that refund: it mints an id per run, so no
+  // two of its claims present the same one. The Java worker claims under
+  // its process name and does, which is why the branch stays.
   const auto claimed = client_.Exec(
       R"(UPDATE indexing_requests SET
              owner_id = $1::text,
@@ -160,6 +164,51 @@ absl::StatusOr<bool> PgQueue::Release(std::string_view id, std::string_view owne
       {std::string(id), std::string(owner)});
   if (!released.ok()) return released.status();
   return released->rows() > 0;
+}
+
+namespace {
+
+/// PgQueue plus the connection it claims over.
+class OwnedPgQueue : public IndexQueue {
+ public:
+  explicit OwnedPgQueue(const std::string& db_url) : client_(db_url), queue_(client_) {}
+
+  absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view owner,
+                                                    absl::Duration lease) override {
+    return queue_.ClaimNext(owner, lease);
+  }
+  absl::StatusOr<bool> Heartbeat(std::string_view id, std::string_view owner,
+                                 absl::Duration lease) override {
+    return queue_.Heartbeat(id, owner, lease);
+  }
+  absl::StatusOr<bool> Progress(std::string_view id, std::string_view owner,
+                                int games_indexed) override {
+    return queue_.Progress(id, owner, games_indexed);
+  }
+  absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner,
+                                int games_indexed) override {
+    return queue_.Complete(id, owner, games_indexed);
+  }
+  absl::StatusOr<bool> Fail(std::string_view id, std::string_view owner,
+                            std::string_view message) override {
+    return queue_.Fail(id, owner, message);
+  }
+  absl::StatusOr<bool> HandBack(std::string_view id, std::string_view owner) override {
+    return queue_.HandBack(id, owner);
+  }
+  absl::StatusOr<bool> Release(std::string_view id, std::string_view owner) override {
+    return queue_.Release(id, owner);
+  }
+
+ private:
+  pg::Client client_;
+  PgQueue queue_;
+};
+
+}  // namespace
+
+std::unique_ptr<IndexQueue> NewOwnedPgQueue(const std::string& db_url) {
+  return std::make_unique<OwnedPgQueue>(db_url);
 }
 
 }  // namespace one_d4_worker

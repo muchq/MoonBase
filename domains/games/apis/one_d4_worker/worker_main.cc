@@ -11,6 +11,8 @@
 
 #include <unistd.h>
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -27,6 +29,7 @@
 #include "absl/time/time.h"
 #include "domains/games/apis/one_d4_worker/chess_com_archive.h"
 #include "domains/games/apis/one_d4_worker/db_options.h"
+#include "domains/games/apis/one_d4_worker/index_pool.h"
 #include "domains/games/apis/one_d4_worker/index_run.h"
 #include "domains/games/apis/one_d4_worker/metrics.h"
 #include "domains/games/apis/one_d4_worker/pg_game_sink.h"
@@ -42,38 +45,26 @@
 
 namespace {
 
-volatile std::sig_atomic_t g_stopping = 0;
+/// Read by the claim thread, every worker thread and the roster, and
+/// written by a signal handler — so std::atomic rather than
+/// sig_atomic_t, which is only defined for the single-thread case. The
+/// static_assert is what makes the handler's store legal.
+std::atomic<bool> g_stopping{false};
+static_assert(std::atomic<bool>::is_always_lock_free,
+              "a signal handler may only store to a lock-free atomic");
 
-void RequestShutdown(int /*signal*/) { g_stopping = 1; }
+void RequestShutdown(int /*signal*/) { g_stopping.store(true, std::memory_order_relaxed); }
 
 std::string Env(const char* name, std::string fallback = "") {
   const char* value = std::getenv(name);
   return value != nullptr && *value != '\0' ? std::string(value) : std::move(fallback);
 }
 
-/// A whole number of seconds from the environment, or `fallback` — and a
-/// word about it, since a value refused in silence looks like a value
-/// honoured.
-absl::Duration SecondsFromEnv(const char* name, absl::Duration fallback) {
-  const std::optional<int> seconds = futility::env::ReadPositiveSeconds(name);
-  if (seconds.has_value()) return absl::Seconds(*seconds);
-
-  const char* raw = std::getenv(name);
-  if (raw != nullptr && *raw != '\0') {
-    LOG(WARNING) << name << "=" << raw << " is not a positive number of seconds; using "
-                 << fallback;
-  }
-  return fallback;
-}
-
-/// Names this process as the holder of a lease: unique across the workers
-/// competing for the table, and stable for the life of the process, which
-/// is what makes it usable as a fencing token. The host and pid are for
-/// whoever reads the column while debugging a stuck range.
-std::string OwnerId() {
+/// This container's name, or a stand-in when the kernel will not say.
+std::string Hostname() {
   char host[256] = {};
-  if (gethostname(host, sizeof(host) - 1) != 0) std::snprintf(host, sizeof(host), "unknown-host");
-  return absl::StrCat("cpp/", host, "/", getpid(), "/", absl::ToUnixNanos(absl::Now()));
+  if (gethostname(host, sizeof(host) - 1) != 0) return "unknown-host";
+  return host;
 }
 
 }  // namespace
@@ -109,11 +100,12 @@ int main() {
   // put a third value in play that no test can see, at the one moment
   // nobody is looking. Changing one is a code change with a rationale.
   one_d4_worker::Poller::Options poller_options;
-  poller_options.owner = OwnerId();
+  poller_options.owner = one_d4_worker::OwnerId(Hostname(), getpid());
 
   // How often to ask an empty queue is local: it costs one round trip and
   // affects nobody else.
-  const absl::Duration idle_wait = SecondsFromEnv("ONE_D4_POLL_SECONDS", absl::Seconds(5));
+  const absl::Duration idle_wait =
+      absl::Seconds(futility::env::ReadPositiveIntOr("ONE_D4_POLL_SECONDS", 5));
 
   smithy::Outcome<chess_com::Client> client = chess_com::CreateProductionClient();
   if (!client.ok()) {
@@ -124,7 +116,7 @@ int main() {
   // Ten documents for the whole titled population of the site, held for
   // the life of the process. See title_roster.h.
   one_d4_worker::TitleRoster::Options title_options;
-  title_options.stopping = [] { return g_stopping != 0; };
+  title_options.stopping = [] { return g_stopping.load(std::memory_order_relaxed); };
   one_d4_worker::TitleRoster titles(archive, std::move(title_options));
 
   // Bounded, because nothing else bounds them and the run ceiling cannot:
@@ -132,32 +124,40 @@ int main() {
   // is up. Cancelling a run that is already blocked is a separate job
   // (#1400).
   const std::string bounded_db_url = one_d4_worker::WithExecutionBounds(db_url);
-  pg::Client db(bounded_db_url);
-  one_d4_worker::PgQueue queue(db);
-
-  // The sink gets its own connection: a flush is a long transaction, and
-  // the heartbeat that keeps its lease alive must not queue behind it.
-  pg::Client sink_db(bounded_db_url);
-
-  const std::string& owner = poller_options.owner;
-  LOG(INFO) << "Polling indexing_requests as " << owner;
+  LOG(INFO) << "Polling indexing_requests as " << poller_options.owner;
 
   std::signal(SIGINT, RequestShutdown);
   std::signal(SIGTERM, RequestShutdown);
 
-  const auto stopping = [] { return g_stopping != 0; };
-  one_d4_worker::Poller poller(queue,
-                               one_d4_worker::MakeRun(
-                                   archive, titles,
-                                   [&sink_db, &owner](const one_d4_worker::IndexJob& job) {
-                                     return std::make_unique<one_d4_worker::PgGameSink>(
-                                         sink_db, job.id, owner);
-                                   },
-                                   metrics, stopping),
-                               poller_options);
+  const auto stopping = [] { return g_stopping.load(std::memory_order_relaxed); };
+  const one_d4_worker::Poller::Run run = one_d4_worker::MakeRun(
+      archive, titles,
+      // A connection per run: one pg::Client is one connection serialised
+      // by a mutex, so runs sharing one would queue every flush behind
+      // every other run's and leave nothing to overlap.
+      [&bounded_db_url](const one_d4_worker::Claim& claim) {
+        return one_d4_worker::NewOwnedPgGameSink(bounded_db_url, claim.job.id, claim.owner);
+      },
+      metrics, stopping);
 
-  one_d4_worker::PollLoop(poller, metrics, idle_wait, stopping,
-                          [](absl::Duration wait) { absl::SleepFor(wait); });
+  one_d4_worker::IndexPool::Options pool_options;
+  // Local capacity, not a queue protocol constant — two workers may
+  // disagree about it without misbehaving against each other — so unlike
+  // the lease and the ceiling this is a knob. See index_pool.h.
+  //
+  // Capped, because a slot is a thread, two Postgres connections out of a
+  // shared budget, and a concurrent chess.com request. A typo in a
+  // deployment variable should not exhaust a database two other services
+  // are using.
+  pool_options.slots = std::min(futility::env::ReadPositiveIntOr("ONE_D4_INDEX_SLOTS", 4), 16);
+  pool_options.idle_wait = idle_wait;
+  // A queue connection per thread as well as per run. See index_pool.h.
+  one_d4_worker::IndexPool pool(
+      [&bounded_db_url] { return one_d4_worker::NewOwnedPgQueue(bounded_db_url); }, run,
+      poller_options, metrics, pool_options);
+  LOG(INFO) << "Indexing up to " << pool_options.slots << " requests at once";
+
+  pool.Run(stopping, [](absl::Duration wait) { absl::SleepFor(wait); });
 
   LOG(INFO) << "Shutting down";
   return 0;

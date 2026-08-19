@@ -10,14 +10,15 @@
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/time/time.h"
+#include "domains/games/apis/one_d4_worker/metrics.h"
 #include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
 
 namespace one_d4_worker {
 namespace {
 
 using ::testing::ElementsAre;
-using ::testing::IsEmpty;
 
 /// One game a month, so a run has an opponent to look up.
 ArchivedGame AGame(std::string url) {
@@ -87,8 +88,10 @@ class FakeSink : public GameSink {
 /// The factory worker_main gives MakeRun, with the connection and owner
 /// swapped for a note of which job it was asked about.
 SinkFactory SinksInto(Recorded& into) {
-  return [&into](const IndexJob& job) {
-    into.jobs.push_back(job.id);
+  return [&into](const Claim& claim) {
+    // Both halves of the claim, because the sink is built from both: the
+    // job's id names the row and the owner is what its writes fence on.
+    into.jobs.push_back(absl::StrCat(claim.job.id, " as ", claim.owner));
     return std::make_unique<FakeSink>(into);
   };
 }
@@ -100,41 +103,16 @@ class FakeLease : public LeaseKeeper {
   bool OutOfTime() override { return false; }
 };
 
-IndexJob AJob(std::string id) {
-  IndexJob job;
-  job.id = std::move(id);
-  job.player = "alice";
-  job.platform = "chess.com";
-  job.start_month = "2026-01";
-  job.end_month = "2026-01";
-  return job;
+Claim AClaim(std::string id) {
+  Claim claim;
+  claim.owner = absl::StrCat("cpp/test/", id);
+  claim.job.id = std::move(id);
+  claim.job.player = "alice";
+  claim.job.platform = "chess.com";
+  claim.job.start_month = "2026-01";
+  claim.job.end_month = "2026-01";
+  return claim;
 }
-
-/// Hands out claims from a script, then nothing.
-class FakeQueue : public IndexQueue {
- public:
-  absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view /*owner*/,
-                                                    absl::Duration /*lease*/) override {
-    if (!claim_status.ok()) return claim_status;
-    if (claims.empty()) return std::nullopt;
-    IndexJob job = claims.front();
-    claims.erase(claims.begin());
-    return job;
-  }
-  absl::StatusOr<bool> Heartbeat(std::string_view, std::string_view, absl::Duration) override {
-    return true;
-  }
-  absl::StatusOr<bool> Progress(std::string_view, std::string_view, int) override { return true; }
-  absl::StatusOr<bool> Complete(std::string_view, std::string_view, int) override { return true; }
-  absl::StatusOr<bool> Fail(std::string_view, std::string_view, std::string_view) override {
-    return true;
-  }
-  absl::StatusOr<bool> HandBack(std::string_view, std::string_view) override { return true; }
-  absl::StatusOr<bool> Release(std::string_view, std::string_view) override { return true; }
-
-  std::vector<IndexJob> claims;
-  absl::Status claim_status;
-};
 
 // ---- MakeRun: which pieces a claimed request is run against ----
 
@@ -156,8 +134,8 @@ TEST(MakeRun, RunsEveryJobAgainstTheOneRoster) {
   const Poller::Run run =
       MakeRun(archive, titles, SinksInto(recorded), metrics, [] { return false; });
 
-  ASSERT_TRUE(run(AJob("first"), lease).ok());
-  ASSERT_TRUE(run(AJob("second"), lease).ok());
+  ASSERT_TRUE(run(AClaim("first"), lease).ok());
+  ASSERT_TRUE(run(AClaim("second"), lease).ok());
 
   EXPECT_EQ(rosters.fetches, 10) << "a second job re-read the rosters";
 }
@@ -178,7 +156,7 @@ TEST(MakeRun, EveryRunGetsTheRoster) {
   Recorded recorded;
   const Poller::Run run =
       MakeRun(archive, titles, SinksInto(recorded), metrics, [] { return false; });
-  ASSERT_TRUE(run(AJob("first"), lease).ok());
+  ASSERT_TRUE(run(AClaim("first"), lease).ok());
 
   ASSERT_EQ(recorded.written.size(), 1u);
   EXPECT_EQ(recorded.written.front().white_title, "GM");
@@ -199,10 +177,10 @@ TEST(MakeRun, EveryRunGetsItsOwnSinkForTheJobItClaimed) {
   const Poller::Run run =
       MakeRun(archive, titles, SinksInto(recorded), metrics, [] { return false; });
 
-  ASSERT_TRUE(run(AJob("first"), lease).ok());
-  ASSERT_TRUE(run(AJob("second"), lease).ok());
+  ASSERT_TRUE(run(AClaim("first"), lease).ok());
+  ASSERT_TRUE(run(AClaim("second"), lease).ok());
 
-  EXPECT_THAT(recorded.jobs, ElementsAre("first", "second"));
+  EXPECT_THAT(recorded.jobs, ElementsAre("first as cpp/test/first", "second as cpp/test/second"));
 }
 
 TEST(MakeRun, EveryRunGetsTheObserver) {
@@ -219,7 +197,7 @@ TEST(MakeRun, EveryRunGetsTheObserver) {
   Recorded recorded;
   const Poller::Run run =
       MakeRun(archive, titles, SinksInto(recorded), metrics, [] { return false; });
-  ASSERT_TRUE(run(AJob("first"), lease).ok());
+  ASSERT_TRUE(run(AClaim("first"), lease).ok());
 
   EXPECT_GT(recorder.CounterTotal(kGamesIndexedMetric, {{kIndexerLabel, kIndexerValue}}), 0);
 }
@@ -238,110 +216,25 @@ TEST(MakeRun, EveryRunGetsTheShutdownSwitch) {
   Recorded recorded;
   const Poller::Run run =
       MakeRun(archive, titles, SinksInto(recorded), metrics, [] { return true; });
-  const absl::StatusOr<RunReport> report = run(AJob("first"), lease);
+  const absl::StatusOr<RunReport> report = run(AClaim("first"), lease);
 
   ASSERT_TRUE(report.ok()) << report.status();
   ASSERT_TRUE(report->stopped.has_value());
   EXPECT_EQ(*report->stopped, Stopped::kShutdown);
 }
 
-// ---- PollLoop ----
-
-struct Loop {
-  FakeQueue queue;
-  futility::otel::CapturingMetricsRecorder recorder;
-  std::vector<absl::Duration> slept;
-  int runs = 0;
-};
-
-/// Runs the loop for exactly `ticks` iterations, so a test does not need
-/// a clock to end one — and so a change that stops it sleeping fails
-/// rather than spins.
-void Drive(Loop& loop, int ticks) {
-  WorkerMetrics metrics(loop.recorder);
-  Poller::Options options;
-  options.owner = "cpp/test";
-  Poller poller(
-      loop.queue,
-      [&loop](const IndexJob&, LeaseKeeper&) -> absl::StatusOr<RunReport> {
-        ++loop.runs;
-        return RunReport{};
-      },
-      options);
-
-  int seen = 0;
-  PollLoop(
-      poller, metrics, absl::Seconds(5), [&seen, ticks] { return ++seen > ticks; },
-      [&loop](absl::Duration wait) { loop.slept.push_back(wait); });
+TEST(OwnerId, NamesTheProcessReadably) {
+  EXPECT_EQ(OwnerId("indexer-7", 1234), "cpp/indexer-7/1234");
 }
 
-TEST(PollLoop, WaitsBeforeAskingAnEmptyQueueAgain) {
-  // Without it an empty queue is a spin: one round trip per iteration,
-  // for as long as there is nothing to do.
-  Loop loop;
+TEST(OwnerId, StaysShortEnoughForTheColumnWhateverTheHostIsCalled) {
+  // owner_id is VARCHAR(128) and pg_queue casts to ::text, so an
+  // over-long id is not truncated — it fails the claim outright, every
+  // time, and the worker indexes nothing. A claim appends "/" and a
+  // 32-character token to this.
+  const std::string owner = OwnerId(std::string(300, 'h'), 2147483647);
 
-  Drive(loop, 1);
-
-  EXPECT_THAT(loop.slept, ElementsAre(absl::Seconds(5)));
-  EXPECT_EQ(loop.runs, 0);
-}
-
-TEST(PollLoop, KeepsGoingAfterAQueueItCannotReach) {
-  // Exiting would only have the supervisor restart us into the same
-  // outage, having given up the process's claims on the way out.
-  Loop loop;
-  loop.queue.claim_status = absl::UnavailableError("no route to the database");
-
-  Drive(loop, 2);
-
-  EXPECT_EQ(loop.slept.size(), 2u) << "it gave up after the first failure";
-}
-
-TEST(PollLoop, DoesNotWaitAfterARunThatDidWork) {
-  // A queue with a backlog should be drained, not sipped from every five
-  // seconds.
-  Loop loop;
-  loop.queue.claims = {AJob("first"), AJob("second")};
-
-  Drive(loop, 3);
-
-  EXPECT_EQ(loop.runs, 2);
-  EXPECT_THAT(loop.slept, ElementsAre(absl::Seconds(5)))
-      << "it waited between two claims that were both there";
-}
-
-TEST(PollLoop, CountsEveryRunItFinished) {
-  Loop loop;
-  loop.queue.claims = {AJob("first")};
-
-  Drive(loop, 1);
-
-  EXPECT_EQ(loop.recorder.CounterTotal(kRunsMetric,
-                                       {{"outcome", "completed"}, {kIndexerLabel, kIndexerValue}}),
-            1);
-}
-
-TEST(PollLoop, StopsWithoutClaimingAnythingWhenItStartsShuttingDown) {
-  Loop loop;
-  loop.queue.claims = {AJob("first")};
-
-  WorkerMetrics metrics(loop.recorder);
-  Poller::Options options;
-  options.owner = "cpp/test";
-  Poller poller(
-      loop.queue,
-      [&loop](const IndexJob&, LeaseKeeper&) -> absl::StatusOr<RunReport> {
-        ++loop.runs;
-        return RunReport{};
-      },
-      options);
-
-  PollLoop(
-      poller, metrics, absl::Seconds(5), [] { return true; },
-      [&loop](absl::Duration wait) { loop.slept.push_back(wait); });
-
-  EXPECT_EQ(loop.runs, 0);
-  EXPECT_THAT(loop.slept, IsEmpty());
+  EXPECT_LE(owner.size() + 1 + 32, 128u);
 }
 
 }  // namespace

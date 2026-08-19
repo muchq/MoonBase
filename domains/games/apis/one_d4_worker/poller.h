@@ -57,6 +57,12 @@ class LeaseKeeper {
   virtual bool OutOfTime() = 0;
 };
 
+/// A claim, and the id it is fenced on.
+struct Claim {
+  IndexJob job;
+  std::string owner;
+};
+
 /// Claims one request and runs it.
 ///
 /// Terminal writes happen here and nowhere else, so the rule that a run
@@ -64,6 +70,12 @@ class LeaseKeeper {
 class Poller {
  public:
   struct Options {
+    /// Names the process, for whoever reads the column. Each claim
+    /// appends a random token of its own, and that is what the fencing
+    /// turns on: an id is a token per run and not per worker, because
+    /// reclaiming a row under the id already on it spends no attempt —
+    /// right when the run holding it has ended, wrong when another run
+    /// of this process is still wedged on it.
     std::string owner;
     absl::Duration lease = absl::Minutes(5);
     /// How often a claim is renewed in the background, independent of what
@@ -94,9 +106,25 @@ class Poller {
     absl::Duration max_run = absl::Hours(6);
   };
 
-  using Run = std::function<absl::StatusOr<RunReport>(const IndexJob&, LeaseKeeper&)>;
+  /// Runs one claimed request. Given the whole claim, not just the job,
+  /// because the run's writes are fenced on the id it was claimed under
+  /// and that id is minted per claim.
+  using Run = std::function<absl::StatusOr<RunReport>(const Claim&, LeaseKeeper&)>;
 
   Poller(IndexQueue& queue, Run run, Options options);
+
+  /// Claims at most one request. nullopt when there was nothing to take.
+  ///
+  /// Separate from running it because the pool claims on one thread and
+  /// runs on another — and because claiming must be gated on a free slot,
+  /// which the caller knows about and this does not. A claim waiting for
+  /// a thread is a lease renewed for a range nobody is indexing.
+  absl::StatusOr<std::optional<Claim>> ClaimOne();
+
+  /// Runs a claim and writes its outcome. Errors are the queue refusing
+  /// the terminal write, not the run failing — a failed run is an
+  /// outcome.
+  absl::StatusOr<RunOutcome> RunClaimed(const Claim& claim);
 
   /// Claims and runs at most one request. True when it ran one.
   absl::StatusOr<bool> PollOnce();
@@ -104,8 +132,7 @@ class Poller {
   RunOutcome last_outcome() const { return last_outcome_; }
 
  private:
-  absl::StatusOr<bool> Finish(const IndexJob& job, RunOutcome outcome,
-                              const absl::StatusOr<bool>& written);
+  absl::StatusOr<RunOutcome> Finish(RunOutcome outcome, const absl::StatusOr<bool>& written);
 
   IndexQueue& queue_;
   Run run_;

@@ -87,6 +87,16 @@ common --bes_upload_mode=fully_async
 # is the difference between a lead and a shrug.
 build:sanitizer --compilation_mode=dbg
 build:sanitizer --strip=never
+# Clang's thread-safety analysis, fatal for our own code.
+#
+# ABSL_GUARDED_BY is documentation until this is on: a member declared
+# guarded and then read without the lock compiles clean and races only
+# under load. It caught exactly that in the index worker's title roster,
+# in a file whose own header said which mutex the field needed.
+#
+# Scoped to domains/ because external code is not ours to annotate.
+build --per_file_copt=domains/.*@-Werror=thread-safety-analysis
+
 build:sanitizer --copt=-g
 build:sanitizer --copt=-fno-omit-frame-pointer
 build:sanitizer --copt=-fno-optimize-sibling-calls

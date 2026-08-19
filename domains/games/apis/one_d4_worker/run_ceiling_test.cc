@@ -144,10 +144,10 @@ IndexJob AJob(std::string start, std::string end) {
 
 /// A poller wired to a real IndexRun, as worker_main wires it.
 Poller::Run RunOver(ArchiveSource& archive, GameSink& sink) {
-  return [&archive, &sink](const IndexJob& job, LeaseKeeper& lease) {
+  return [&archive, &sink](const Claim& claim, LeaseKeeper& lease) {
     IndexRun::Options options;
     options.batch_size = 1;
-    return IndexRun(archive, sink, options).Execute(job, lease);
+    return IndexRun(archive, sink, options).Execute(claim.job, lease);
   };
 }
 

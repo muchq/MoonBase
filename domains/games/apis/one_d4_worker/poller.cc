@@ -6,7 +6,10 @@
 
 #include "absl/base/thread_annotations.h"
 #include "absl/log/log.h"
+#include "absl/random/random.h"
 #include "absl/status/status.h"
+#include "absl/strings/escaping.h"
+#include "absl/strings/str_cat.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/time/clock.h"
 
@@ -17,6 +20,19 @@ namespace {
 /// the API returns. Verbatim from the Java worker, so the two report a
 /// failure the same way.
 constexpr char kInternalFailure[] = "Indexing failed due to an internal error";
+
+/// A token no other claimant will present: 128 random bits.
+///
+/// Not a counter, because there is a poller per indexing thread and
+/// their counts would start at the same place and collide — two runs
+/// sharing a token both pass every fence, which is the whole thing the
+/// per-run id exists to prevent. Not a timestamp either: two threads
+/// claim inside one tick of any clock cheap enough to read here.
+std::string RunToken() {
+  thread_local absl::BitGen bitgen;
+  return absl::StrCat(absl::Hex(absl::Uniform<uint64_t>(bitgen), absl::kZeroPad16),
+                      absl::Hex(absl::Uniform<uint64_t>(bitgen), absl::kZeroPad16));
+}
 
 /// Holds a claim open for as long as a run needs it.
 ///
@@ -160,16 +176,21 @@ std::string_view ToString(RunOutcome outcome) {
 Poller::Poller(IndexQueue& queue, Run run, Options options)
     : queue_(queue), run_(std::move(run)), options_(std::move(options)) {}
 
-absl::StatusOr<bool> Poller::PollOnce() {
-  absl::StatusOr<std::optional<IndexJob>> claimed =
-      queue_.ClaimNext(options_.owner, options_.lease);
+absl::StatusOr<std::optional<Claim>> Poller::ClaimOne() {
+  Claim claim;
+  claim.owner = absl::StrCat(options_.owner, "/", RunToken());
+  absl::StatusOr<std::optional<IndexJob>> claimed = queue_.ClaimNext(claim.owner, options_.lease);
   if (!claimed.ok()) return claimed.status();
-  if (!claimed->has_value()) return false;
+  if (!claimed->has_value()) return std::nullopt;
+  claim.job = **claimed;
+  return claim;
+}
 
-  const IndexJob& job = **claimed;
-  QueueLease lease(queue_, job.id, options_.owner, options_.lease, options_.renew_every,
-                   options_.max_run);
-  const absl::StatusOr<RunReport> report = run_(job, lease);
+absl::StatusOr<RunOutcome> Poller::RunClaimed(const Claim& claim) {
+  const IndexJob& job = claim.job;
+  const std::string& owner = claim.owner;
+  QueueLease lease(queue_, job.id, owner, options_.lease, options_.renew_every, options_.max_run);
+  const absl::StatusOr<RunReport> report = run_(claim, lease);
 
   // Ahead of the lease check, unlike everything else. A run that stopped
   // at its ceiling gives the range back even if its claim lapsed on the
@@ -178,41 +199,46 @@ absl::StatusOr<bool> Poller::PollOnce() {
   // of looping on it forever — or is refused because the range really did
   // change hands, and Finish calls that what it is.
   if (report.ok() && report->stopped.has_value() && *report->stopped == Stopped::kRunCeiling) {
-    return Finish(job, RunOutcome::kInterrupted, queue_.Release(job.id, options_.owner));
+    return Finish(RunOutcome::kInterrupted, queue_.Release(job.id, owner));
   }
 
   // Before anything else, including a failure: a run that lost its lease
   // reports nothing, because the row belongs to whoever holds it now.
-  if (lease.lost() || (report.ok() && report->lease_lost)) {
-    last_outcome_ = RunOutcome::kLeaseLost;
-    return true;
-  }
+  if (lease.lost() || (report.ok() && report->lease_lost)) return RunOutcome::kLeaseLost;
 
   if (!report.ok()) {
     // The cause goes to the log, not to the column. error_message is
     // handed back by the API, and a chess.com body or a libpq diagnostic
     // in there is an internal detail told to whoever asked for the index.
     LOG(ERROR) << "Indexing request " << job.id << " failed: " << report.status();
-    return Finish(job, RunOutcome::kFailed, queue_.Fail(job.id, options_.owner, kInternalFailure));
+    return Finish(RunOutcome::kFailed, queue_.Fail(job.id, owner, kInternalFailure));
   }
 
   // Only kShutdown reaches here; the ceiling is handled above. The
   // request did nothing wrong, so the attempt is refunded.
   if (report->stopped.has_value()) {
-    return Finish(job, RunOutcome::kInterrupted, queue_.HandBack(job.id, options_.owner));
+    return Finish(RunOutcome::kInterrupted, queue_.HandBack(job.id, owner));
   }
 
-  return Finish(job, RunOutcome::kCompleted,
-                queue_.Complete(job.id, options_.owner, report->games_indexed));
+  return Finish(RunOutcome::kCompleted, queue_.Complete(job.id, owner, report->games_indexed));
 }
 
-absl::StatusOr<bool> Poller::Finish(const IndexJob& job, RunOutcome outcome,
-                                    const absl::StatusOr<bool>& written) {
+absl::StatusOr<bool> Poller::PollOnce() {
+  const absl::StatusOr<std::optional<Claim>> claim = ClaimOne();
+  if (!claim.ok()) return claim.status();
+  if (!claim->has_value()) return false;
+
+  const absl::StatusOr<RunOutcome> outcome = RunClaimed(**claim);
+  if (!outcome.ok()) return outcome.status();
+  last_outcome_ = *outcome;
+  return true;
+}
+
+absl::StatusOr<RunOutcome> Poller::Finish(RunOutcome outcome, const absl::StatusOr<bool>& written) {
   if (!written.ok()) return written.status();
   // The fence said no, so the row is somebody else's and they own its
   // outcome — whatever we were about to call this run, it is theirs now.
-  last_outcome_ = *written ? outcome : RunOutcome::kLeaseLost;
-  return true;
+  return *written ? outcome : RunOutcome::kLeaseLost;
 }
 
 }  // namespace one_d4_worker

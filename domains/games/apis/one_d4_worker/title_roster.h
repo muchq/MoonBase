@@ -7,7 +7,9 @@
 #include <string_view>
 #include <vector>
 
+#include "absl/base/thread_annotations.h"
 #include "absl/status/statusor.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 
 namespace one_d4_worker {
@@ -30,8 +32,10 @@ class TitleSource {
 /// titled population, so this reads those instead and answers from
 /// memory.
 ///
-/// Not thread safe, and deliberately unlocked: one index loop calls this,
-/// on the thread that polls. A second one needs a mutex here first.
+/// One roster serves the whole pool, so every lookup takes the lock —
+/// and a refresh holds it for as long as ten sequential calls take. That
+/// is a few seconds a day against a lookup that is a map probe, and it
+/// is what stops several runs refreshing at once when the day turns.
 class TitleRoster {
  public:
   struct Options {
@@ -74,17 +78,20 @@ class TitleRoster {
  private:
   absl::Time Now() const;
   bool Stopping() const;
-  void RefreshIfStale();
+  void RefreshIfStale() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
+  /// Reads all ten rosters and installs them, or leaves what we had.
+  void Rebuild(absl::Time now) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   TitleSource& source_;
   const Options options_;
 
   /// Lowercased username to title. The rosters come back lowercase and an
   /// archive names the same player however they typed it.
-  std::map<std::string, std::string, std::less<>> titles_;
-  bool loaded_ = false;
-  absl::Time refreshed_ = absl::InfinitePast();
-  absl::Time attempted_ = absl::InfinitePast();
+  mutable absl::Mutex mu_;
+  std::map<std::string, std::string, std::less<>> titles_ ABSL_GUARDED_BY(mu_);
+  bool loaded_ ABSL_GUARDED_BY(mu_) = false;
+  absl::Time refreshed_ ABSL_GUARDED_BY(mu_) = absl::InfinitePast();
+  absl::Time attempted_ ABSL_GUARDED_BY(mu_) = absl::InfinitePast();
 };
 
 }  // namespace one_d4_worker

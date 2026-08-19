@@ -384,6 +384,17 @@ services:
     restart: always
     environment:
       - ONE_D4_DB_URL=postgresql://one_d4:${ONE_D4_DB_PASSWORD}@shared_postgres:5432/one_d4
+      # Requests indexed at once. A run is mostly waiting on chess.com and
+      # Postgres, so this is sized for concurrent calls rather than for
+      # the CPU cap below — and it is also what bounds concurrent requests
+      # against chess.com, since a run fetches one month at a time.
+      #
+      # Costs two Postgres connections per slot: one the thread claims and
+      # renews over, one the run flushes over. Eight here, against a
+      # default max_connections of 100 that one_d4 and golf_hub also draw
+      # on. Neither may be shared — a heartbeat queued behind a flush is a
+      # lease lost under a healthy run.
+      - ONE_D4_INDEX_SLOTS=4
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=one_d4_worker
       - OTEL_RESOURCE_ATTRIBUTES=service.name=one_d4_worker,service.version=${ONE_D4_WORKER_SHA:-${DEPLOY_SHA:-latest}}
@@ -392,6 +403,14 @@ services:
     depends_on:
       one_d4:
         condition: service_healthy
+    # Shutdown drains the runs in flight. A run checks per game, but it
+    # cannot interrupt a chess.com call it is already inside, and that is
+    # 60s per attempt times three attempts plus backoff — so the grace has
+    # to cover one of those, not one game. The default ten seconds is a
+    # kill, and a killed run hands its claim back to nobody: the range
+    # then sits for the rest of the five-minute lease looking like it is
+    # being worked on, times however many slots were busy.
+    stop_grace_period: 240s
     deploy:
       resources:
         limits:
