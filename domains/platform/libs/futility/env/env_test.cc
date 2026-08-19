@@ -70,6 +70,22 @@ TEST(ReadPositiveInt, RefusesWhatItCannotRead) {
   unsetenv("FUTILITY_TEST_SECONDS");
 }
 
+TEST(ReadPositiveIntOr, FallsBackToTheDefaultWhenThereIsNoUsableValue) {
+  for (const char* raw : {"", "banana", "0", "-1", "1.5"}) {
+    setenv("FUTILITY_TEST_SECONDS", raw, 1);
+    EXPECT_EQ(futility::env::ReadPositiveIntOr("FUTILITY_TEST_SECONDS", 7), 7)
+        << "honoured " << raw;
+  }
+  unsetenv("FUTILITY_TEST_SECONDS");
+  EXPECT_EQ(futility::env::ReadPositiveIntOr("FUTILITY_TEST_SECONDS", 7), 7);
+}
+
+TEST(ReadPositiveIntOr, PrefersTheValueOverTheDefault) {
+  setenv("FUTILITY_TEST_SECONDS", "30", 1);
+  EXPECT_EQ(futility::env::ReadPositiveIntOr("FUTILITY_TEST_SECONDS", 7), 30);
+  unsetenv("FUTILITY_TEST_SECONDS");
+}
+
 TEST(ReadPositiveInt, RefusesZeroAndNegative) {
   for (const char* value : {"0", "-1", "-30"}) {
     setenv("FUTILITY_TEST_SECONDS", value, 1);

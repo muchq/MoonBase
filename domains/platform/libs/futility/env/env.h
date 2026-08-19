@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/log/log.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
@@ -51,6 +52,20 @@ inline std::optional<int> ReadPositiveInt(const char* name) {
   int value = 0;
   if (!absl::SimpleAtoi(raw, &value) || value <= 0) return std::nullopt;
   return value;
+}
+
+/// The named variable as a positive whole number, or `fallback` — and a
+/// word about it when a value was set and refused, since a value refused
+/// in silence looks like a value honoured.
+inline int ReadPositiveIntOr(const char* name, int fallback) {
+  const std::optional<int> value = ReadPositiveInt(name);
+  if (value.has_value()) return *value;
+
+  const char* raw = std::getenv(name);
+  if (raw != nullptr && *raw != '\0') {
+    LOG(WARNING) << name << "=" << raw << " is not a positive number; using " << fallback;
+  }
+  return fallback;
 }
 
 }  // namespace futility::env

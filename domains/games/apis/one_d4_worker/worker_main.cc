@@ -52,39 +52,6 @@ std::string Env(const char* name, std::string fallback = "") {
   return value != nullptr && *value != '\0' ? std::string(value) : std::move(fallback);
 }
 
-/// A whole number of seconds from the environment, or `fallback` — and a
-/// word about it, since a value refused in silence looks like a value
-/// honoured.
-absl::Duration SecondsFromEnv(const char* name, absl::Duration fallback) {
-  const std::optional<int> seconds = futility::env::ReadPositiveInt(name);
-  if (seconds.has_value()) return absl::Seconds(*seconds);
-
-  const char* raw = std::getenv(name);
-  if (raw != nullptr && *raw != '\0') {
-    LOG(WARNING) << name << "=" << raw << " is not a positive number of seconds; using "
-                 << fallback;
-  }
-  return fallback;
-}
-
-/// How many requests to index at once.
-///
-/// Local capacity, not a queue protocol constant — two workers may
-/// disagree about it without misbehaving against each other — so unlike
-/// the lease and the ceiling this is a knob. A run is mostly waiting on
-/// chess.com and Postgres, so size it for concurrent calls rather than
-/// for the CPU cap.
-int SlotsFromEnv() {
-  const std::optional<int> slots = futility::env::ReadPositiveInt("ONE_D4_INDEX_SLOTS");
-  if (slots.has_value()) return *slots;
-
-  const char* raw = std::getenv("ONE_D4_INDEX_SLOTS");
-  if (raw != nullptr && *raw != '\0') {
-    LOG(WARNING) << "ONE_D4_INDEX_SLOTS=" << raw << " is not a positive number; using 4";
-  }
-  return 4;
-}
-
 /// Names this process as the holder of a lease: unique across the workers
 /// competing for the table, and stable for the life of the process, which
 /// is what makes it usable as a fencing token. The host and pid are for
@@ -132,7 +99,8 @@ int main() {
 
   // How often to ask an empty queue is local: it costs one round trip and
   // affects nobody else.
-  const absl::Duration idle_wait = SecondsFromEnv("ONE_D4_POLL_SECONDS", absl::Seconds(5));
+  const absl::Duration idle_wait =
+      absl::Seconds(futility::env::ReadPositiveIntOr("ONE_D4_POLL_SECONDS", 5));
 
   smithy::Outcome<chess_com::Client> client = chess_com::CreateProductionClient();
   if (!client.ok()) {
@@ -175,7 +143,10 @@ int main() {
                                poller_options);
 
   one_d4_worker::IndexPool::Options pool_options;
-  pool_options.slots = SlotsFromEnv();
+  // Local capacity, not a queue protocol constant — two workers may
+  // disagree about it without misbehaving against each other — so unlike
+  // the lease and the ceiling this is a knob. See index_pool.h.
+  pool_options.slots = futility::env::ReadPositiveIntOr("ONE_D4_INDEX_SLOTS", 4);
   pool_options.idle_wait = idle_wait;
   one_d4_worker::IndexPool pool(poller, metrics, pool_options);
   LOG(INFO) << "Indexing up to " << pool_options.slots << " requests at once";
