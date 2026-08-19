@@ -14,10 +14,10 @@ std::string WithExecutionBounds(std::string_view url) {
   // keepalives so the transport has something to time out on while a
   // statement is running silently; tcp_user_timeout alone measures
   // unacknowledged data, and a connection waiting on a lock sends none.
-  return absl::StrCat(url, url.find('?') == std::string_view::npos ? "?" : "&",
-                      "options=-c%20statement_timeout%3D", kStatementTimeoutSeconds * 1000,
-                      "&tcp_user_timeout=", kSocketTimeoutSeconds * 1000,
-                      "&keepalives=1&keepalives_idle=30");
+  return absl::StrCat(
+      url, url.find('?') == std::string_view::npos ? "?" : "&", "options=-c%20statement_timeout%3D",
+      kStatementTimeoutSeconds * 1000, "&tcp_user_timeout=", kSocketTimeoutSeconds * 1000,
+      "&connect_timeout=", kConnectTimeoutSeconds, "&keepalives=1&keepalives_idle=30");
 }
 
 }  // namespace one_d4_worker
