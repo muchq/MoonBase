@@ -6,6 +6,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "absl/status/status.h"
@@ -297,6 +298,29 @@ TEST(TitleRoster, BacksOffFromWhenTheAttemptEndedRatherThanWhenItStarted) {
   for (int i = 0; i < 5; ++i) EXPECT_FALSE(roster.TitleOf("hikaru").ok());
 
   EXPECT_THAT(rosters.asked, ElementsAre("GM"));
+}
+
+TEST(TitleRoster, AnswersSeveralRunsAtOnce) {
+  // One roster serves the whole pool. Every slot looks up two players per
+  // game, so this is the hottest shared thing in the worker.
+  FakeRosters rosters;
+  rosters.rosters["GM"] = {"hikaru"};
+  TitleRoster roster(rosters, TitleRoster::Options{});
+
+  std::vector<std::thread> lookers;
+  lookers.reserve(4);
+  for (int i = 0; i < 4; ++i) {
+    lookers.emplace_back([&roster] {
+      for (int n = 0; n < 200; ++n) {
+        EXPECT_EQ(*roster.TitleOf("hikaru"), "GM");
+        EXPECT_EQ(*roster.TitleOf("nobody"), "");
+        roster.Stale();
+      }
+    });
+  }
+  for (std::thread& looker : lookers) looker.join();
+
+  EXPECT_EQ(rosters.asked.size(), 10u) << "the rosters were read more than once";
 }
 
 }  // namespace

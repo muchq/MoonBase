@@ -384,6 +384,12 @@ services:
     restart: always
     environment:
       - ONE_D4_DB_URL=postgresql://one_d4:${ONE_D4_DB_PASSWORD}@shared_postgres:5432/one_d4
+      # Requests indexed at once. A run is mostly waiting on chess.com and
+      # Postgres, so this is sized for concurrent calls rather than for
+      # the CPU cap below — and it is also what bounds concurrent requests
+      # against chess.com, since a run fetches one month at a time.
+      # Each slot's run opens a Postgres connection of its own.
+      - ONE_D4_INDEX_SLOTS=4
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=one_d4_worker
       - OTEL_RESOURCE_ATTRIBUTES=service.name=one_d4_worker,service.version=${ONE_D4_WORKER_SHA:-${DEPLOY_SHA:-latest}}
@@ -392,6 +398,11 @@ services:
     depends_on:
       one_d4:
         condition: service_healthy
+    # Shutdown drains the runs in flight, and a run only notices between
+    # batches. The default ten seconds is a kill, and a killed run hands
+    # its claim back to nobody — the range then sits for the rest of the
+    # lease looking like it is being worked on.
+    stop_grace_period: 60s
     deploy:
       resources:
         limits:

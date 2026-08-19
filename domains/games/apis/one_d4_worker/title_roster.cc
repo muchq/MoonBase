@@ -69,6 +69,7 @@ bool TitleRoster::Stale() const { return !loaded_ || Now() - refreshed_ >= optio
 bool TitleRoster::Stopping() const { return options_.stopping && options_.stopping(); }
 
 absl::StatusOr<std::string> TitleRoster::TitleOf(std::string_view username) {
+  const absl::MutexLock lock(mu_);
   RefreshIfStale();
   if (!loaded_) return absl::UnavailableError("no titled rosters to answer from");
   if (username.empty()) return "";

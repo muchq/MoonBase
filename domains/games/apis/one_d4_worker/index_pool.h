@@ -29,6 +29,12 @@ class IndexPool {
     /// Local capacity rather than a queue protocol constant — unlike the
     /// lease and the run ceiling, two workers may disagree about this
     /// without misbehaving — so it is a deployment knob.
+    ///
+    /// It is also what bounds concurrent requests against chess.com. A
+    /// run fetches one month at a time and no longer looks up opponents
+    /// one by one (#1403), so a run in flight is at most one request in
+    /// flight. Should a run ever fan out internally again, that bound
+    /// belongs on the calls rather than here.
     int slots = 4;
 
     /// How long to wait before asking an empty or unreachable queue again.
