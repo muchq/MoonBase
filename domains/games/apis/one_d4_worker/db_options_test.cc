@@ -21,6 +21,8 @@ TEST(DbOptions, BoundsBothWaysAConnectionCanHang) {
 
   EXPECT_THAT(bounded, HasSubstr("statement_timeout%3D120000"));
   EXPECT_THAT(bounded, HasSubstr("tcp_user_timeout=150000"));
+  EXPECT_THAT(bounded, HasSubstr("connect_timeout=10"))
+      << "libpq waits forever to connect by default, and reconnects are lazy";
   EXPECT_THAT(bounded, HasSubstr("keepalives=1"));
 }
 
@@ -43,6 +45,12 @@ TEST(DbOptions, TheServerActuallyCancelsAStatementThatOverruns) {
       absl::StrCat(url, std::string_view(url).find('?') == std::string_view::npos ? "?" : "&",
                    "options=-c%20statement_timeout%3D100");
   pg::Client client(quick);
+
+  // The control. Without it this passes whenever the server is simply
+  // unreachable, which is the one condition under which it proves
+  // nothing at all — every Exec fails and the bound is never exercised.
+  const auto reachable = client.Exec("SELECT 1");
+  ASSERT_TRUE(reachable.ok()) << "no server to time anything out: " << reachable.status();
 
   const auto slept = client.Exec("SELECT pg_sleep(5)");
 

@@ -233,7 +233,11 @@ jobs:
   # call rather than a technical one.
   #
   # Named one by one rather than excluding the package, so a new test in it
-  # is sanitized by default and only leaves on purpose.
+  # is sanitized by default and only leaves on purpose. Adding a line here
+  # REMOVES a test from all three sanitizers — the opposite of what the
+  # shape of the list suggests at a glance, and worth reading twice for a
+  # test that spawns threads, which is what they are for. run_ceiling_test
+  # was added here by mistake on exactly that misreading.
   #
   # A matrix rather than three steps in one job, for two reasons. The three
   # configs share no build output — each is a distinct object tree, so
@@ -284,7 +288,6 @@ jobs:
             //domains/games/apis/one_d4_worker:pg_game_sink_test union
             //domains/games/apis/one_d4_worker:chess_com_archive_test union
             //domains/games/apis/one_d4_worker:metrics_test union
-            //domains/games/apis/one_d4_worker:run_ceiling_test union
             //domains/games/apis/one_d4_worker:db_options_test union
             //domains/platform/libs/pg/... union
             //domains/platform/libs/aura/... union

@@ -28,6 +28,15 @@ inline constexpr int kStatementTimeoutSeconds = 120;
 /// same reason.
 inline constexpr int kSocketTimeoutSeconds = 150;
 
+/// How long establishing a connection may take.
+///
+/// pg::Client connects lazily and reconnects after a connection-level
+/// failure, so this is not a startup-only concern: a black-holed
+/// reconnect blocks whichever call triggered it, and libpq's default is
+/// to wait forever. The call it most often blocks is the claim, which
+/// this worker makes every few seconds.
+inline constexpr int kConnectTimeoutSeconds = 10;
+
 /// `url` with those bounds applied.
 ///
 /// Carried in the conninfo rather than set with a statement, because
