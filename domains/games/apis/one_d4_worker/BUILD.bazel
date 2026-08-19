@@ -202,6 +202,7 @@ cc_library(
         ":openings",
         ":poller",
         ":result",
+        ":title_roster",
         "//domains/games/libs/chess_cpp:pgn",
         "//domains/games/libs/one_d4_motifs:extract",
         "@com_google_absl//absl/status",
@@ -216,6 +217,7 @@ cc_test(
     srcs = ["index_run_test.cc"],
     deps = [
         ":index_run",
+        ":title_roster",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@googletest//:gtest_main",
@@ -229,6 +231,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":archive",
+        ":title_roster",
         "//domains/games/libs/chess_com_cpp:client",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -335,6 +338,7 @@ cc_binary(
         ":pg_game_sink",
         ":pg_queue",
         ":poller",
+        ":title_roster",
         "//domains/games/libs/chess_com_cpp:production_client",
         "//domains/platform/libs/futility/env",
         "//domains/platform/libs/futility/otel:metrics",

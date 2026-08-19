@@ -57,14 +57,11 @@ absl::StatusOr<std::vector<ArchivedGame>> ChessComArchive::FetchMonth(std::strin
   return games;
 }
 
-absl::StatusOr<std::string> ChessComArchive::FetchTitle(std::string_view player) {
-  const auto profile = client_.FetchPlayer(player);
-  if (profile.ok()) return Or(profile->title);
-  // A player who is not there is an answer: they have no title. Anything
-  // else is a lookup that did not happen, and the caller retries it.
-  if (profile.error().code() == "PlayerNotFound") return "";
+absl::StatusOr<std::vector<std::string>> ChessComArchive::FetchTitled(std::string_view title) {
+  const auto roster = client_.FetchTitled(title);
+  if (roster.ok()) return roster->players;
   return absl::UnavailableError(absl::StrCat(
-      "chess.com profile ", player, ": ", profile.error().code(), ": ", profile.error().message()));
+      "chess.com titled ", title, ": ", roster.error().code(), ": ", roster.error().message()));
 }
 
 }  // namespace one_d4_worker

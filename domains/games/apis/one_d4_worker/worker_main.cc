@@ -32,6 +32,7 @@
 #include "domains/games/apis/one_d4_worker/pg_game_sink.h"
 #include "domains/games/apis/one_d4_worker/pg_queue.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
+#include "domains/games/apis/one_d4_worker/title_roster.h"
 #include "domains/games/libs/chess_com_cpp/production_client.h"
 #include "domains/platform/libs/futility/env/env.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
@@ -119,6 +120,9 @@ int main() {
     return 1;
   }
   one_d4_worker::ChessComArchive archive(*client);
+  // Ten documents for the whole titled population of the site, held for
+  // the life of the process. See title_roster.h.
+  one_d4_worker::TitleRoster titles(archive, one_d4_worker::TitleRoster::Options{});
 
   // Bounded, because nothing else bounds them and the run ceiling cannot:
   // a thread inside libpq never reaches a checkpoint to be told its time
@@ -145,6 +149,7 @@ int main() {
         one_d4_worker::PgGameSink sink(sink_db, job.id, owner);
         one_d4_worker::IndexRun::Options options;
         options.observer = &metrics;
+        options.titles = &titles;
         options.stopping = [] { return g_stopping != 0; };
         one_d4_worker::IndexRun run(archive, sink, options);
         return run.Execute(job, keeper);

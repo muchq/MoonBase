@@ -106,8 +106,6 @@ class SlowArchive : public ArchiveSource {
     return found->second;
   }
 
-  absl::StatusOr<std::string> FetchTitle(std::string_view player) override { return ""; }
-
   std::map<std::string, std::vector<ArchivedGame>> months;
   std::vector<std::string> asked;
   absl::Duration per_month = absl::ZeroDuration();
