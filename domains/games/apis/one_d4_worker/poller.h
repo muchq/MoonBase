@@ -1,7 +1,6 @@
 #ifndef DOMAINS_GAMES_APIS_ONE_D4_WORKER_POLLER_H
 #define DOMAINS_GAMES_APIS_ONE_D4_WORKER_POLLER_H
 
-#include <atomic>
 #include <functional>
 #include <optional>
 #include <string>
@@ -71,10 +70,11 @@ struct Claim {
 class Poller {
  public:
   struct Options {
-    /// Names the process. Each run claims under `owner/<n>`, because an
-    /// id is a fencing token per run and not per worker: reclaiming a row
-    /// under the id that already holds it spends no attempt, which is
-    /// right when the run holding it has ended and wrong when another run
+    /// Names the process, for whoever reads the column. Each claim
+    /// appends a random token of its own, and that is what the fencing
+    /// turns on: an id is a token per run and not per worker, because
+    /// reclaiming a row under the id already on it spends no attempt —
+    /// right when the run holding it has ended, wrong when another run
     /// of this process is still wedged on it.
     std::string owner;
     absl::Duration lease = absl::Minutes(5);
@@ -137,7 +137,6 @@ class Poller {
   IndexQueue& queue_;
   Run run_;
   Options options_;
-  std::atomic<int> runs_{0};
   RunOutcome last_outcome_ = RunOutcome::kCompleted;
 };
 

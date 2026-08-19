@@ -1,8 +1,11 @@
 #include "domains/games/apis/one_d4_worker/worker.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <utility>
 
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 
 namespace one_d4_worker {
 
@@ -19,6 +22,11 @@ Poller::Run MakeRun(ArchiveSource& archive, TitleRoster& titles, SinkFactory mak
     IndexRun run(archive, *sink, options);
     return run.Execute(claim.job, keeper);
   };
+}
+
+std::string OwnerId(std::string_view host, int pid) {
+  constexpr int kMaxHost = 40;
+  return absl::StrCat("cpp/", host.substr(0, std::min<size_t>(host.size(), kMaxHost)), "/", pid);
 }
 
 }  // namespace one_d4_worker

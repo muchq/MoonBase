@@ -2,10 +2,12 @@
 #define DOMAINS_GAMES_APIS_ONE_D4_WORKER_INDEX_POOL_H
 
 #include <functional>
+#include <memory>
 
 #include "absl/time/time.h"
 #include "domains/games/apis/one_d4_worker/metrics.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
+#include "domains/games/apis/one_d4_worker/queue.h"
 
 namespace one_d4_worker {
 
@@ -42,7 +44,18 @@ class IndexPool {
     absl::Duration idle_wait = absl::Seconds(5);
   };
 
-  IndexPool(Poller& poller, WorkerMetrics& metrics, Options options);
+  /// Makes the queue one thread claims through. Called once per thread,
+  /// on that thread.
+  ///
+  /// Per thread rather than shared: one pg::Client is one connection
+  /// serialised by a mutex, and a heartbeat blocked behind its own run's
+  /// flush holds that mutex while it waits — stalling every other
+  /// thread's claims and writes behind a lock that has nothing to do
+  /// with them.
+  using QueueFactory = std::function<std::unique_ptr<IndexQueue>()>;
+
+  IndexPool(QueueFactory make_queue, Poller::Run run, Poller::Options poller,
+            WorkerMetrics& metrics, Options options);
 
   /// Runs until `stopping`, then waits for the runs in flight to finish.
   ///
@@ -57,7 +70,9 @@ class IndexPool {
   void Work(const std::function<bool()>& stopping,
             const std::function<void(absl::Duration)>& sleep);
 
-  Poller& poller_;
+  const QueueFactory make_queue_;
+  const Poller::Run run_;
+  const Poller::Options poller_;
   WorkerMetrics& metrics_;
   const Options options_;
 };

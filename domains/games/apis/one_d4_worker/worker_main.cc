@@ -60,15 +60,11 @@ std::string Env(const char* name, std::string fallback = "") {
   return value != nullptr && *value != '\0' ? std::string(value) : std::move(fallback);
 }
 
-/// Names this process. Each run fences on `owner/<n>` built from it (see
-/// poller.h), so what this has to be is unique across the workers
-/// competing for the table; the run number supplies the rest. The host
-/// and pid are for whoever reads the column while debugging a stuck
-/// range.
-std::string OwnerId() {
+/// This container's name, or a stand-in when the kernel will not say.
+std::string Hostname() {
   char host[256] = {};
-  if (gethostname(host, sizeof(host) - 1) != 0) std::snprintf(host, sizeof(host), "unknown-host");
-  return absl::StrCat("cpp/", host, "/", getpid(), "/", absl::ToUnixNanos(absl::Now()));
+  if (gethostname(host, sizeof(host) - 1) != 0) return "unknown-host";
+  return host;
 }
 
 }  // namespace
@@ -104,7 +100,7 @@ int main() {
   // put a third value in play that no test can see, at the one moment
   // nobody is looking. Changing one is a code change with a rationale.
   one_d4_worker::Poller::Options poller_options;
-  poller_options.owner = OwnerId();
+  poller_options.owner = one_d4_worker::OwnerId(Hostname(), getpid());
 
   // How often to ask an empty queue is local: it costs one round trip and
   // affects nobody else.
@@ -128,41 +124,37 @@ int main() {
   // is up. Cancelling a run that is already blocked is a separate job
   // (#1400).
   const std::string bounded_db_url = one_d4_worker::WithExecutionBounds(db_url);
-  pg::Client db(bounded_db_url);
-  one_d4_worker::PgQueue queue(db);
-
   LOG(INFO) << "Polling indexing_requests as " << poller_options.owner;
 
   std::signal(SIGINT, RequestShutdown);
   std::signal(SIGTERM, RequestShutdown);
 
   const auto stopping = [] { return g_stopping.load(std::memory_order_relaxed); };
-  one_d4_worker::Poller poller(queue,
-                               one_d4_worker::MakeRun(
-                                   archive, titles,
-                                   // A connection per run: one pg::Client is one connection
-                                   // serialised by a mutex, so runs sharing one would queue every
-                                   // flush behind every other run's and leave the pool nothing to
-                                   // overlap.
-                                   [&bounded_db_url](const one_d4_worker::Claim& claim) {
-                                     return one_d4_worker::NewOwnedPgGameSink(
-                                         bounded_db_url, claim.job.id, claim.owner);
-                                   },
-                                   metrics, stopping),
-                               poller_options);
+  const one_d4_worker::Poller::Run run = one_d4_worker::MakeRun(
+      archive, titles,
+      // A connection per run: one pg::Client is one connection serialised
+      // by a mutex, so runs sharing one would queue every flush behind
+      // every other run's and leave nothing to overlap.
+      [&bounded_db_url](const one_d4_worker::Claim& claim) {
+        return one_d4_worker::NewOwnedPgGameSink(bounded_db_url, claim.job.id, claim.owner);
+      },
+      metrics, stopping);
 
   one_d4_worker::IndexPool::Options pool_options;
   // Local capacity, not a queue protocol constant — two workers may
   // disagree about it without misbehaving against each other — so unlike
   // the lease and the ceiling this is a knob. See index_pool.h.
   //
-  // Capped, because a slot is a thread, a Postgres connection out of a
+  // Capped, because a slot is a thread, two Postgres connections out of a
   // shared budget, and a concurrent chess.com request. A typo in a
   // deployment variable should not exhaust a database two other services
   // are using.
   pool_options.slots = std::min(futility::env::ReadPositiveIntOr("ONE_D4_INDEX_SLOTS", 4), 16);
   pool_options.idle_wait = idle_wait;
-  one_d4_worker::IndexPool pool(poller, metrics, pool_options);
+  // A queue connection per thread as well as per run. See index_pool.h.
+  one_d4_worker::IndexPool pool(
+      [&bounded_db_url] { return one_d4_worker::NewOwnedPgQueue(bounded_db_url); }, run,
+      poller_options, metrics, pool_options);
   LOG(INFO) << "Indexing up to " << pool_options.slots << " requests at once";
 
   pool.Run(stopping, [](absl::Duration wait) { absl::SleepFor(wait); });

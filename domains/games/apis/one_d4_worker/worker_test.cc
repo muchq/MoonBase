@@ -223,5 +223,19 @@ TEST(MakeRun, EveryRunGetsTheShutdownSwitch) {
   EXPECT_EQ(*report->stopped, Stopped::kShutdown);
 }
 
+TEST(OwnerId, NamesTheProcessReadably) {
+  EXPECT_EQ(OwnerId("indexer-7", 1234), "cpp/indexer-7/1234");
+}
+
+TEST(OwnerId, StaysShortEnoughForTheColumnWhateverTheHostIsCalled) {
+  // owner_id is VARCHAR(128) and pg_queue casts to ::text, so an
+  // over-long id is not truncated — it fails the claim outright, every
+  // time, and the worker indexes nothing. A claim appends "/" and a
+  // 32-character token to this.
+  const std::string owner = OwnerId(std::string(300, 'h'), 2147483647);
+
+  EXPECT_LE(owner.size() + 1 + 32, 128u);
+}
+
 }  // namespace
 }  // namespace one_d4_worker

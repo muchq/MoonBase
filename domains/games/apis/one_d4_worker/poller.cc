@@ -6,7 +6,9 @@
 
 #include "absl/base/thread_annotations.h"
 #include "absl/log/log.h"
+#include "absl/random/random.h"
 #include "absl/status/status.h"
+#include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/time/clock.h"
@@ -18,6 +20,19 @@ namespace {
 /// the API returns. Verbatim from the Java worker, so the two report a
 /// failure the same way.
 constexpr char kInternalFailure[] = "Indexing failed due to an internal error";
+
+/// A token no other claimant will present: 128 random bits.
+///
+/// Not a counter, because there is a poller per indexing thread and
+/// their counts would start at the same place and collide — two runs
+/// sharing a token both pass every fence, which is the whole thing the
+/// per-run id exists to prevent. Not a timestamp either: two threads
+/// claim inside one tick of any clock cheap enough to read here.
+std::string RunToken() {
+  thread_local absl::BitGen bitgen;
+  return absl::StrCat(absl::Hex(absl::Uniform<uint64_t>(bitgen), absl::kZeroPad16),
+                      absl::Hex(absl::Uniform<uint64_t>(bitgen), absl::kZeroPad16));
+}
 
 /// Holds a claim open for as long as a run needs it.
 ///
@@ -163,7 +178,7 @@ Poller::Poller(IndexQueue& queue, Run run, Options options)
 
 absl::StatusOr<std::optional<Claim>> Poller::ClaimOne() {
   Claim claim;
-  claim.owner = absl::StrCat(options_.owner, "/", ++runs_);
+  claim.owner = absl::StrCat(options_.owner, "/", RunToken());
   absl::StatusOr<std::optional<IndexJob>> claimed = queue_.ClaimNext(claim.owner, options_.lease);
   if (!claimed.ok()) return claimed.status();
   if (!claimed->has_value()) return std::nullopt;

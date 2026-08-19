@@ -3,6 +3,8 @@
 
 #include <functional>
 #include <memory>
+#include <string>
+#include <string_view>
 
 #include "domains/games/apis/one_d4_worker/archive.h"
 #include "domains/games/apis/one_d4_worker/game_sink.h"
@@ -27,6 +29,16 @@ using SinkFactory = std::function<std::unique_ptr<GameSink>(const Claim&)>;
 /// only costs.
 Poller::Run MakeRun(ArchiveSource& archive, TitleRoster& titles, SinkFactory make_sink,
                     RunObserver& observer, std::function<bool()> stopping);
+
+/// Names this process in the owner column, for whoever reads it while
+/// debugging a stuck range.
+///
+/// Only has to be readable, not unique: each claim appends a random
+/// token and that is what the fencing turns on (see poller.h). The host
+/// is truncated because owner_id is VARCHAR(128) and the claim appends
+/// 33 characters — a long hostname would otherwise fail every claim
+/// outright rather than merely reading badly.
+std::string OwnerId(std::string_view host, int pid);
 
 }  // namespace one_d4_worker
 

@@ -388,7 +388,12 @@ services:
       # Postgres, so this is sized for concurrent calls rather than for
       # the CPU cap below — and it is also what bounds concurrent requests
       # against chess.com, since a run fetches one month at a time.
-      # Each slot's run opens a Postgres connection of its own.
+      #
+      # Costs two Postgres connections per slot: one the thread claims and
+      # renews over, one the run flushes over. Eight here, against a
+      # default max_connections of 100 that one_d4 and golf_hub also draw
+      # on. Neither may be shared — a heartbeat queued behind a flush is a
+      # lease lost under a healthy run.
       - ONE_D4_INDEX_SLOTS=4
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=one_d4_worker

@@ -6,7 +6,9 @@
 #include <algorithm>
 #include <atomic>
 #include <limits>
+#include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 
@@ -26,10 +28,11 @@ using ::testing::IsEmpty;
 /// An endless supply of requests, or none, or an outage.
 class FakeQueue : public IndexQueue {
  public:
-  absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view /*owner*/,
+  absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view owner,
                                                     absl::Duration /*lease*/) override {
     const absl::MutexLock lock(mu_);
     ++claims_;
+    owners_.insert(std::string(owner));
     if (!status_.ok()) return status_;
     if (empty_ || claims_ > jobs_) return std::nullopt;
     IndexJob job;
@@ -60,6 +63,12 @@ class FakeQueue : public IndexQueue {
     const absl::MutexLock lock(mu_);
     return claims_;
   }
+  /// How many distinct ids claimed. One per claim, or two runs share a
+  /// fencing token.
+  size_t distinct_owners() const {
+    const absl::MutexLock lock(mu_);
+    return owners_.size();
+  }
   void set_empty() {
     const absl::MutexLock lock(mu_);
     empty_ = true;
@@ -87,6 +96,7 @@ class FakeQueue : public IndexQueue {
   int jobs_ ABSL_GUARDED_BY(mu_) = std::numeric_limits<int>::max();
   absl::Status status_ ABSL_GUARDED_BY(mu_);
   absl::Status terminal_status_ ABSL_GUARDED_BY(mu_);
+  std::set<std::string> owners_ ABSL_GUARDED_BY(mu_);
 };
 
 /// Runs that block until released, counting how many were in flight at
@@ -146,6 +156,41 @@ Poller::Options PollerOptions() {
   return options;
 }
 
+/// Forwards to one shared queue, so a test can count what every thread
+/// did while the pool still gets a queue of its own per thread.
+class SharedQueue : public IndexQueue {
+ public:
+  explicit SharedQueue(IndexQueue& to) : to_(to) {}
+
+  absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view owner,
+                                                    absl::Duration lease) override {
+    return to_.ClaimNext(owner, lease);
+  }
+  absl::StatusOr<bool> Heartbeat(std::string_view id, std::string_view owner,
+                                 absl::Duration lease) override {
+    return to_.Heartbeat(id, owner, lease);
+  }
+  absl::StatusOr<bool> Progress(std::string_view id, std::string_view owner, int games) override {
+    return to_.Progress(id, owner, games);
+  }
+  absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner, int games) override {
+    return to_.Complete(id, owner, games);
+  }
+  absl::StatusOr<bool> Fail(std::string_view id, std::string_view owner,
+                            std::string_view message) override {
+    return to_.Fail(id, owner, message);
+  }
+  absl::StatusOr<bool> HandBack(std::string_view id, std::string_view owner) override {
+    return to_.HandBack(id, owner);
+  }
+  absl::StatusOr<bool> Release(std::string_view id, std::string_view owner) override {
+    return to_.Release(id, owner);
+  }
+
+ private:
+  IndexQueue& to_;
+};
+
 /// Ends the loop once the queue has been asked `claims` times, and after
 /// two seconds whatever happens.
 ///
@@ -194,10 +239,10 @@ TEST(IndexPool, RunsSeveralRequestsAtOnce) {
   // is mostly waiting on chess.com and Postgres.
   FakeQueue queue;
   BlockingRuns runs;
-  Poller poller(queue, runs.AsRun(), PollerOptions());
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
-  IndexPool pool(poller, metrics, PoolOptions(3));
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
+                 PollerOptions(), metrics, PoolOptions(3));
 
   std::atomic<bool> stopping{false};
   std::thread driver(
@@ -216,10 +261,10 @@ TEST(IndexPool, ClaimsNothingWhileEverySlotIsBusy) {
   // indexing, and every other worker is kept off it meanwhile.
   FakeQueue queue;
   BlockingRuns runs;
-  Poller poller(queue, runs.AsRun(), PollerOptions());
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
-  IndexPool pool(poller, metrics, PoolOptions(2));
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
+                 PollerOptions(), metrics, PoolOptions(2));
 
   std::atomic<bool> stopping{false};
   std::thread driver(
@@ -240,10 +285,10 @@ TEST(IndexPool, WaitsForTheRunsInFlightBeforeItReturns) {
   // like it is being worked on.
   FakeQueue queue;
   BlockingRuns runs;
-  Poller poller(queue, runs.AsRun(), PollerOptions());
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
-  IndexPool pool(poller, metrics, PoolOptions(2));
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
+                 PollerOptions(), metrics, PoolOptions(2));
 
   std::atomic<bool> stopping{false};
   std::atomic<bool> returned{false};
@@ -265,10 +310,10 @@ TEST(IndexPool, WaitsForTheRunsInFlightBeforeItReturns) {
 TEST(IndexPool, KeepsClaimingAsSlotsFreeUp) {
   FakeQueue queue;
   BlockingRuns runs;
-  Poller poller(queue, runs.AsRun(), PollerOptions());
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
-  IndexPool pool(poller, metrics, PoolOptions(2));
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
+                 PollerOptions(), metrics, PoolOptions(2));
 
   std::atomic<bool> stopping{false};
   std::thread driver(
@@ -289,10 +334,10 @@ TEST(IndexPool, WaitsBeforeAskingAnEmptyQueueAgain) {
   FakeQueue queue;
   queue.set_empty();
   BlockingRuns runs;
-  Poller poller(queue, runs.AsRun(), PollerOptions());
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
-  IndexPool pool(poller, metrics, PoolOptions(1));
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
+                 PollerOptions(), metrics, PoolOptions(1));
 
   Naps naps;
   pool.Run(StopAfter(queue, 3), naps.AsSleep());
@@ -309,10 +354,10 @@ TEST(IndexPool, KeepsGoingAfterAQueueItCannotReach) {
   FakeQueue queue;
   queue.set_status(absl::UnavailableError("no route to the database"));
   BlockingRuns runs;
-  Poller poller(queue, runs.AsRun(), PollerOptions());
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
-  IndexPool pool(poller, metrics, PoolOptions(1));
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
+                 PollerOptions(), metrics, PoolOptions(1));
 
   Naps naps;
   pool.Run(StopAfter(queue, 3), naps.AsSleep());
@@ -327,10 +372,10 @@ TEST(IndexPool, DoesNotWaitAfterAClaimThatDidWork) {
   FakeQueue queue;
   BlockingRuns runs;
   runs.Release();
-  Poller poller(queue, runs.AsRun(), PollerOptions());
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
-  IndexPool pool(poller, metrics, PoolOptions(1));
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
+                 PollerOptions(), metrics, PoolOptions(1));
 
   Naps naps;
   pool.Run(StopAfter(queue, 5), naps.AsSleep());
@@ -344,10 +389,10 @@ TEST(IndexPool, ClaimsNothingWhenItStartsShuttingDown) {
   // its way past.
   FakeQueue queue;
   BlockingRuns runs;
-  Poller poller(queue, runs.AsRun(), PollerOptions());
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
-  IndexPool pool(poller, metrics, PoolOptions(1));
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
+                 PollerOptions(), metrics, PoolOptions(1));
 
   Naps naps;
   pool.Run([] { return true; }, naps.AsSleep());
@@ -365,10 +410,10 @@ TEST(IndexPool, KeepsClaimingWhenATerminalWriteWillNotLand) {
   queue.set_terminal_status(absl::UnavailableError("no route to the database"));
   BlockingRuns runs;
   runs.Release();
-  Poller poller(queue, runs.AsRun(), PollerOptions());
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
-  IndexPool pool(poller, metrics, PoolOptions(1));
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
+                 PollerOptions(), metrics, PoolOptions(1));
 
   Naps naps;
   pool.Run(StopAfter(queue, 6), naps.AsSleep());
@@ -381,10 +426,10 @@ TEST(IndexPool, CountsEveryRunItFinished) {
   queue.set_jobs(3);
   BlockingRuns runs;
   runs.Release();
-  Poller poller(queue, runs.AsRun(), PollerOptions());
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
-  IndexPool pool(poller, metrics, PoolOptions(2));
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
+                 PollerOptions(), metrics, PoolOptions(2));
 
   Naps naps;
   pool.Run(StopAfter(queue, 6), naps.AsSleep());
@@ -392,6 +437,53 @@ TEST(IndexPool, CountsEveryRunItFinished) {
   EXPECT_EQ(recorder.CounterTotal(kRunsMetric,
                                   {{"outcome", "completed"}, {kIndexerLabel, kIndexerValue}}),
             3);
+}
+
+TEST(IndexPool, GivesEveryThreadAQueueOfItsOwn) {
+  // One pg::Client is one connection serialised by a mutex, so a shared
+  // queue puts every thread's claims, heartbeats and terminal writes in
+  // one line — behind, among other things, a heartbeat waiting on a row
+  // lock another thread's flush is holding.
+  FakeQueue queue;
+  BlockingRuns runs;
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  std::atomic<int> queues{0};
+  IndexPool pool(
+      [&queue, &queues] {
+        ++queues;
+        return std::make_unique<SharedQueue>(queue);
+      },
+      runs.AsRun(), PollerOptions(), metrics, PoolOptions(3));
+
+  std::atomic<bool> stopping{false};
+  std::thread driver(
+      [&] { pool.Run([&stopping] { return stopping.load(); }, [](absl::Duration) {}); });
+  runs.AwaitStarted(3);
+
+  EXPECT_EQ(queues.load(), 3);
+
+  stopping = true;
+  runs.Release();
+  driver.join();
+}
+
+TEST(IndexPool, NoTwoRunsClaimUnderTheSameId) {
+  // Every thread has a poller of its own now, so a counter would start
+  // at the same place in each and two runs would present one token —
+  // and two runs sharing a token both pass every fence, which is the
+  // whole thing a per-run id exists to stop.
+  FakeQueue queue;
+  BlockingRuns runs;
+  runs.Release();
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
+                 PollerOptions(), metrics, PoolOptions(4));
+
+  pool.Run(StopAfter(queue, 40), [](absl::Duration) {});
+
+  EXPECT_EQ(queue.distinct_owners(), static_cast<size_t>(queue.claims()));
 }
 
 }  // namespace

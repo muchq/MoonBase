@@ -24,7 +24,8 @@ class PgQueueTest : public testing::Test {
   void SetUp() override {
     const char* url = std::getenv("PG_TEST_DB_URL");
     if (url == nullptr || *url == '\0') GTEST_SKIP() << "PG_TEST_DB_URL unset";
-    client_ = std::make_unique<pg::Client>(url);
+    conninfo_ = url;
+    client_ = std::make_unique<pg::Client>(conninfo_);
 
     // Column for column what PostgresSqlDialect creates and Migration adds,
     // types included — schema_contract_test is what keeps this copy honest.
@@ -78,6 +79,7 @@ class PgQueueTest : public testing::Test {
     return result->Get(0, 0).value_or("(null)");
   }
 
+  std::string conninfo_;
   std::unique_ptr<pg::Client> client_;
   std::unique_ptr<PgQueue> queue_;
 };
@@ -204,6 +206,20 @@ TEST_F(PgQueueTest, WillNotHandBackARowWeStillHoldToOurselves) {
   const auto again = queue_->ClaimNext("worker-1", absl::Minutes(5));
   ASSERT_TRUE(again.ok()) << again.status();
   EXPECT_FALSE(again->has_value());
+}
+
+TEST_F(PgQueueTest, AQueueThatOwnsItsConnectionClaimsOverIt) {
+  // What every indexing thread gets, so that a heartbeat blocked behind
+  // one thread's flush does not stall every other thread's writes.
+  Insert(Id(1), "hikaru");
+  const std::unique_ptr<IndexQueue> owned = NewOwnedPgQueue(conninfo_);
+
+  const auto claimed = owned->ClaimNext("worker-1/0/1", absl::Minutes(5));
+
+  ASSERT_TRUE(claimed.ok()) << claimed.status();
+  ASSERT_TRUE(claimed->has_value());
+  EXPECT_EQ((*claimed)->player, "hikaru");
+  EXPECT_EQ(Column(Id(1), "owner_id"), "worker-1/0/1");
 }
 
 TEST_F(PgQueueTest, AnotherRunReclaimingAnExpiredRowSpendsAnAttempt) {
