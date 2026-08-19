@@ -65,4 +65,13 @@ smithy::Outcome<moonbase::chess_com::FetchArchiveOutput> Client::FetchArchive(
   return client_.FetchArchive(input);
 }
 
+smithy::Outcome<moonbase::chess_com::FetchTitledOutput> Client::FetchTitled(
+    std::string_view title) const {
+  std::string upper(title);
+  for (char& value : upper) {
+    if (value >= 'a' && value <= 'z') value -= 'a' - 'A';
+  }
+  return client_.FetchTitled(moonbase::chess_com::FetchTitledInput{.title = std::move(upper)});
+}
+
 }  // namespace chess_com

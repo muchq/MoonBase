@@ -5,7 +5,7 @@ namespace moonbase.chess_com
 /// The portion of chess.com's public API consumed by the indexer.
 service ChessCom {
     version: "2026-08-18"
-    operations: [FetchPlayer, FetchArchive]
+    operations: [FetchPlayer, FetchArchive, FetchTitled]
 }
 
 @readonly
@@ -47,6 +47,36 @@ operation FetchArchive {
     }
 
     errors: [ArchiveNotFound]
+}
+
+/// Every player holding one title. The whole titled population of the site
+/// is ten of these and a few hundred kilobytes, which is why the indexer
+/// reads them instead of asking about each opponent it meets.
+@readonly
+@http(method: "GET", uri: "/pub/titled/{title}", code: 200)
+operation FetchTitled {
+    input := {
+        @required
+        @httpLabel
+        title: String
+    }
+
+    output := {
+        @required
+        players: UsernameList
+    }
+
+    errors: [TitleNotFound]
+}
+
+list UsernameList {
+    member: String
+}
+
+@error("client")
+@httpError(404)
+structure TitleNotFound {
+    message: String
 }
 
 list PlayedGameList {
