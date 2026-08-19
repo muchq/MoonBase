@@ -402,3 +402,30 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+# Who holds a title, for the whole site. Ten documents instead of a round
+# trip per opponent — see title_roster.h.
+cc_library(
+    name = "title_roster",
+    srcs = ["title_roster.cc"],
+    hdrs = ["title_roster.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_test(
+    name = "title_roster_test",
+    size = "small",
+    srcs = ["title_roster_test.cc"],
+    deps = [
+        ":title_roster",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+    ],
+)
