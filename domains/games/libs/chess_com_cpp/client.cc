@@ -67,6 +67,11 @@ smithy::Outcome<moonbase::chess_com::FetchArchiveOutput> Client::FetchArchive(
 
 smithy::Outcome<moonbase::chess_com::FetchTitledOutput> Client::FetchTitled(
     std::string_view title) const {
+  // An empty title builds /pub/titled/, a different resource that 404s —
+  // and a 404 here is the modeled "no such title", which callers read as
+  // "nobody holds it" rather than as a request they got wrong.
+  if (title.empty()) return smithy::Error::Validation("FetchTitled: title is required");
+
   std::string upper(title);
   for (char& value : upper) {
     if (value >= 'a' && value <= 'z') value -= 'a' - 'A';

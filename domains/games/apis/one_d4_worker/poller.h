@@ -71,9 +71,9 @@ class Poller {
     /// missed before it lapses.
     ///
     /// A run that only renewed where it happens to check would lose a
-    /// month it was still working on: a month of four hundred games is
-    /// four archive calls, eight hundred profile lookups and four hundred
-    /// extractions between checkpoints, and the lease is five minutes.
+    /// month it was still working on: a month of four hundred games is an
+    /// archive call and four hundred PGN replays between checkpoints, and
+    /// the lease is five minutes.
     absl::Duration renew_every = absl::Minutes(5) / 4;
 
     /// How long a run may hold a range before it is treated as wedged.

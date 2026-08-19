@@ -90,6 +90,10 @@ std::string IndexRun::TitleOf(std::string_view player, bool& complete) {
     complete = false;
     return "";
   }
+  // Answered, but from a roster whose refresh is overdue and did not
+  // land. A day of that is nothing; a week of it is a week of months
+  // cached with titles nobody will ever correct.
+  if (options_.titles->Stale()) complete = false;
   return *title;
 }
 

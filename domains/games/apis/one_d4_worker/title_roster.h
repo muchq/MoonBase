@@ -29,6 +29,9 @@ class TitleSource {
 /// rosters are ten documents and a few hundred kilobytes for the entire
 /// titled population, so this reads those instead and answers from
 /// memory.
+///
+/// Not thread safe, and deliberately unlocked: one index loop calls this,
+/// on the thread that polls. A second one needs a mutex here first.
 class TitleRoster {
  public:
   struct Options {
@@ -40,6 +43,12 @@ class TitleRoster {
     /// Without it a bad minute becomes ten failed requests per lookup —
     /// the fan-out this exists to remove, with nothing to show for it.
     absl::Duration retry_after = absl::Minutes(5);
+
+    /// Whether the worker is shutting down. A refresh is ten sequential
+    /// calls, so without this a SIGTERM arriving at the first one is not
+    /// noticed until the tenth returns — long past the grace period, and
+    /// a killed process hands its claim back to nobody.
+    std::function<bool()> stopping;
 
     std::function<absl::Time()> now;
   };
@@ -53,8 +62,18 @@ class TitleRoster {
   /// smaller wrong than every player in the month losing the one it had.
   absl::StatusOr<std::string> TitleOf(std::string_view username);
 
+  /// True when what it answers with is older than `good_for` — a refresh
+  /// came due and did not land.
+  ///
+  /// Answering from a stale roster is the right trade, but the month it
+  /// was answered for is not complete: chess.com being down for a week
+  /// would otherwise write a week of months whose titles nobody will ever
+  /// look at again, because complete months are never refetched.
+  bool Stale() const;
+
  private:
   absl::Time Now() const;
+  bool Stopping() const;
   void RefreshIfStale();
 
   TitleSource& source_;

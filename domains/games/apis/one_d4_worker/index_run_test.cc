@@ -3,12 +3,14 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
 
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
+#include "absl/time/time.h"
 #include "domains/games/apis/one_d4_worker/archive.h"
 #include "domains/games/apis/one_d4_worker/game_sink.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
@@ -736,6 +738,7 @@ TEST(IndexRun, AsksChessComNothingAboutTheOpponentsItMeets) {
   for (int i = 0; i < 6; ++i) archive.months["2026-01"].push_back(AGame(absl::StrCat("g", i)));
   archive.months["2026-02"] = {AGame("g6")};
   FakeRosters rosters;
+  rosters.rosters["GM"] = {"alice"};
   TitleRoster titles(rosters, TitleRoster::Options{});
   FakeSink sink;
   FakeLease lease;
@@ -786,6 +789,146 @@ TEST(IndexRun, RecordsAMonthIncompleteWhenTheTitlesWereUnknown) {
   IndexRun run(archive, sink, options);
   ASSERT_TRUE(run.Execute(AJob(), lease).ok());
 
+  ASSERT_EQ(sink.periods.size(), 1u);
+  EXPECT_FALSE(sink.periods[0].complete);
+}
+
+TEST(IndexRun, WillNotStartAMonthPastTheRunCeiling) {
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  archive.months["2026-02"] = {AGame("g2")};
+  FakeSink sink;
+  FakeLease lease;
+  lease.out_of_time = true;
+
+  IndexRun run(archive, sink, Options());
+  const absl::StatusOr<RunReport> report = run.Execute(AJob("2026-01", "2026-02"), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  ASSERT_TRUE(report->stopped.has_value());
+  EXPECT_EQ(*report->stopped, Stopped::kRunCeiling)
+      << "a ceiling is not a shutdown: the attempt stays spent";
+  EXPECT_THAT(archive.asked, IsEmpty());
+}
+
+TEST(IndexRun, GivesTheRangeBackRatherThanGoingQuietWhenARefusalIsItsOwnClock) {
+  // A refused checkpoint past the ceiling is this run's own clock running
+  // out, not a takeover. Reported as a lost lease the poller writes
+  // nothing, the row expires still naming this owner, and reclaiming our
+  // own expired row spends no attempt — so a repeatable wedge loops
+  // forever instead of retiring after three.
+  FakeArchive archive;
+  for (int i = 0; i < 4; ++i) archive.months["2026-01"].push_back(AGame(absl::StrCat("g", i)));
+  FakeSink sink;
+  FakeLease lease;
+  lease.holds = 1;
+  lease.out_of_time = true;
+
+  IndexRun::Options options = Options();
+  options.batch_size = 2;
+  IndexRun run(archive, sink, options);
+  const absl::StatusOr<RunReport> report = run.Execute(AJob(), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  EXPECT_FALSE(report->lease_lost);
+  ASSERT_TRUE(report->stopped.has_value());
+  EXPECT_EQ(*report->stopped, Stopped::kRunCeiling);
+}
+
+TEST(IndexRun, FinishesTheMonthItIsAlreadyInsideWhenTheCeilingPasses) {
+  // Those games are extracted either way. What the ceiling forbids is
+  // starting another month, not throwing away the one in hand.
+  FakeArchive archive;
+  for (int i = 0; i < 4; ++i) archive.months["2026-01"].push_back(AGame(absl::StrCat("g", i)));
+  archive.months["2026-02"] = {AGame("g4")};
+  FakeSink sink;
+  FakeLease lease;
+
+  // Inside the ceiling when the first month starts, past it by the time
+  // the second would.
+  archive.on_fetch = [&lease] { lease.out_of_time = true; };
+
+  IndexRun::Options options = Options();
+  options.batch_size = 2;
+  IndexRun run(archive, sink, options);
+  const absl::StatusOr<RunReport> report = run.Execute(AJob("2026-01", "2026-02"), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  EXPECT_EQ(*report->stopped, Stopped::kRunCeiling);
+  EXPECT_EQ(report->games_indexed, 4) << "the month in hand was abandoned";
+  EXPECT_THAT(sink.periods, ElementsAre(::testing::Field(&IndexedMonth::month, "2026-01")));
+}
+
+TEST(IndexRun, StopsPartWayThroughAMonthWhenAskedTo) {
+  // A month is where the time goes. A shutdown that waits out four
+  // hundred games is one the supervisor kills instead, and a killed
+  // process hands nothing back — the claim sits until the lease expires.
+  FakeArchive archive;
+  for (int i = 0; i < 6; ++i) archive.months["2026-01"].push_back(AGame(absl::StrCat("g", i)));
+  FakeSink sink;
+  FakeLease lease;
+
+  int seen = 0;
+  IndexRun::Options options = Options();
+  options.batch_size = 2;
+  options.stopping = [&seen] { return ++seen > 3; };
+  IndexRun run(archive, sink, options);
+  const absl::StatusOr<RunReport> report = run.Execute(AJob(), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  ASSERT_TRUE(report->stopped.has_value());
+  EXPECT_EQ(*report->stopped, Stopped::kShutdown);
+  EXPECT_LT(report->games_indexed, 6) << "it worked to the end of the month anyway";
+  EXPECT_THAT(sink.periods, IsEmpty()) << "a month cut short is not a month indexed";
+}
+
+TEST(IndexRun, KeepsWhatItHadAlreadyExtractedWhenItStops) {
+  // The games are good; only the month is unfinished. Dropping the batch
+  // would re-extract them on the next attempt for nothing.
+  FakeArchive archive;
+  for (int i = 0; i < 4; ++i) archive.months["2026-01"].push_back(AGame(absl::StrCat("g", i)));
+  FakeSink sink;
+  FakeLease lease;
+
+  int seen = 0;
+  IndexRun::Options options = Options();
+  options.batch_size = 100;
+  options.stopping = [&seen] { return ++seen > 2; };
+  IndexRun run(archive, sink, options);
+  const absl::StatusOr<RunReport> report = run.Execute(AJob(), lease);
+
+  ASSERT_TRUE(report.ok()) << report.status();
+  EXPECT_EQ(*report->stopped, Stopped::kShutdown);
+  EXPECT_THAT(sink.written, Not(IsEmpty())) << "the extracted games were thrown away";
+}
+
+TEST(IndexRun, RecordsAMonthIncompleteWhenTheTitlesWereStale) {
+  // A roster past its day still answers — better than untitling
+  // everyone — but the month it answered for is not complete. Saying
+  // otherwise caches those titles past any chance of correction.
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  FakeRosters rosters;
+  rosters.rosters["GM"] = {"alice"};
+
+  int64_t now = 0;
+  TitleRoster::Options title_options;
+  title_options.now = [&now] { return absl::FromUnixSeconds(now); };
+  TitleRoster titles(rosters, std::move(title_options));
+  ASSERT_TRUE(titles.TitleOf("alice").ok());
+
+  rosters.status = absl::UnavailableError("chess.com is down");
+  now += absl::ToInt64Seconds(absl::Hours(25));
+
+  FakeSink sink;
+  FakeLease lease;
+  IndexRun::Options options = Options();
+  options.titles = &titles;
+  IndexRun run(archive, sink, options);
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
+
+  ASSERT_EQ(sink.written.size(), 1u);
+  EXPECT_EQ(sink.written.front().white_title, "GM") << "a stale roster still answers";
   ASSERT_EQ(sink.periods.size(), 1u);
   EXPECT_FALSE(sink.periods[0].complete);
 }

@@ -122,7 +122,9 @@ int main() {
   one_d4_worker::ChessComArchive archive(*client);
   // Ten documents for the whole titled population of the site, held for
   // the life of the process. See title_roster.h.
-  one_d4_worker::TitleRoster titles(archive, one_d4_worker::TitleRoster::Options{});
+  one_d4_worker::TitleRoster::Options title_options;
+  title_options.stopping = [] { return g_stopping != 0; };
+  one_d4_worker::TitleRoster titles(archive, std::move(title_options));
 
   // Bounded, because nothing else bounds them and the run ceiling cannot:
   // a thread inside libpq never reaches a checkpoint to be told its time

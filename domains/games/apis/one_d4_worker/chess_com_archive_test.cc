@@ -30,6 +30,7 @@ using ::moonbase::chess_com::FetchTitledOutput;
 using ::moonbase::chess_com::PlayedGame;
 using ::moonbase::chess_com::PlayerNotFound;
 using ::moonbase::chess_com::PlayerResult;
+using ::moonbase::chess_com::TitleNotFound;
 
 class ScriptedHandler final : public ChessComHandler {
  public:
@@ -37,12 +38,21 @@ class ScriptedHandler final : public ChessComHandler {
       const FetchTitledInput& input, const smithy::server::RequestContext& /*ctx*/) override {
     const std::lock_guard<std::mutex> lock(mu_);
     titled_seen_ = input;
+    if (title_not_found_) {
+      smithy::Error error = smithy::Error::Modeled("TitleNotFound", "no such title");
+      error.set_detail(TitleNotFound{.message = "no such title"});
+      return error;
+    }
     return titled_;
   }
 
   void set_titled(FetchTitledOutput titled) {
     const std::lock_guard<std::mutex> lock(mu_);
     titled_ = std::move(titled);
+  }
+  void set_title_not_found() {
+    const std::lock_guard<std::mutex> lock(mu_);
+    title_not_found_ = true;
   }
   FetchTitledInput titled_seen() const {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -101,6 +111,7 @@ class ScriptedHandler final : public ChessComHandler {
   FetchPlayerOutput player_;
   FetchTitledInput titled_seen_;
   FetchTitledOutput titled_;
+  bool title_not_found_ = false;
   bool not_found_ = false;
   bool player_not_found_ = false;
 };
@@ -215,6 +226,18 @@ TEST_F(ChessComArchiveTest, ATitleNobodyHoldsIsAnEmptyRosterAndNotAFailure) {
   handler_->set_titled(FetchTitledOutput{});
 
   const auto roster = archive_->FetchTitled("WNM");
+
+  ASSERT_TRUE(roster.ok()) << roster.status();
+  EXPECT_THAT(*roster, ::testing::IsEmpty());
+}
+
+TEST_F(ChessComArchiveTest, ATitleWithNoRosterIsEmptyRatherThanAFailedRefresh) {
+  // The caller stops at the first failed title and keeps the rosters it
+  // already had, so flattening this 404 into a transport failure would
+  // take the whole feature down over one retired abbreviation.
+  handler_->set_title_not_found();
+
+  const auto roster = archive_->FetchTitled("M");
 
   ASSERT_TRUE(roster.ok()) << roster.status();
   EXPECT_THAT(*roster, ::testing::IsEmpty());

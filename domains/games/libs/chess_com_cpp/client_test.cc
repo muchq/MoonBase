@@ -285,12 +285,14 @@ TEST_F(ClientTest, FetchTitledUppercasesTheTitle) {
 }
 
 TEST_F(ClientTest, AnEmptyTitleNeverReachesTheWire) {
-  // The generated client refuses an empty path label, which is why this
-  // one adds no check of its own — an empty title would otherwise be a
-  // request for /pub/titled/, and that is a different resource.
+  // The generated client does not check path labels, so an empty title
+  // would ask for /pub/titled/ — a different resource, whose 404 comes
+  // back as the modeled TitleNotFound and reads as "nobody holds it".
   const auto empty = client_->FetchTitled("");
 
-  EXPECT_FALSE(empty.ok());
+  ASSERT_FALSE(empty.ok());
+  EXPECT_EQ(empty.error().code(), "ValidationError")
+      << "the empty title went out and came back 404";
   EXPECT_EQ(handler_->titled_calls(), 0);
 }
 

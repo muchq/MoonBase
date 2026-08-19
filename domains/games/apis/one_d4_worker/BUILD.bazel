@@ -220,6 +220,7 @@ cc_test(
         ":title_roster",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
     ],
 )
@@ -415,6 +416,7 @@ cc_library(
     hdrs = ["title_roster.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",

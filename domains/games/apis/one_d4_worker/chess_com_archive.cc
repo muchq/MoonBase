@@ -60,6 +60,10 @@ absl::StatusOr<std::vector<ArchivedGame>> ChessComArchive::FetchMonth(std::strin
 absl::StatusOr<std::vector<std::string>> ChessComArchive::FetchTitled(std::string_view title) {
   const auto roster = client_.FetchTitled(title);
   if (roster.ok()) return roster->players;
+  // A title with no roster is a title nobody holds, and the caller keeps
+  // the other nine. Anything else is a failure to read, and the caller
+  // must keep the rosters it already had rather than build a partial set.
+  if (roster.error().code() == "TitleNotFound") return std::vector<std::string>{};
   return absl::UnavailableError(absl::StrCat(
       "chess.com titled ", title, ": ", roster.error().code(), ": ", roster.error().message()));
 }

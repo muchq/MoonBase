@@ -3,6 +3,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -20,6 +21,7 @@ class FakeRosters : public TitleSource {
  public:
   absl::StatusOr<std::vector<std::string>> FetchTitled(std::string_view title) override {
     asked.push_back(std::string(title));
+    if (on_fetch) on_fetch();
     if (!status.ok()) return status;
     const auto found = rosters.find(std::string(title));
     return found == rosters.end() ? std::vector<std::string>{} : found->second;
@@ -28,6 +30,7 @@ class FakeRosters : public TitleSource {
   std::map<std::string, std::vector<std::string>> rosters;
   absl::Status status;
   std::vector<std::string> asked;
+  std::function<void()> on_fetch;
 };
 
 TitleRoster::Options Options(int64_t& now) {
@@ -40,12 +43,13 @@ TitleRoster::Options Options(int64_t& now) {
 TEST(TitleRoster, ReadsEveryTitleOnce) {
   int64_t now = 0;
   FakeRosters rosters;
+  rosters.rosters["GM"] = {"hikaru"};
   TitleRoster roster(rosters, Options(now));
 
   ASSERT_TRUE(roster.TitleOf("nobody").ok());
 
   EXPECT_THAT(rosters.asked,
-              ElementsAre("GM", "WGM", "IM", "WIM", "FM", "WFM", "NM", "WNM", "CM", "WCM"));
+              ElementsAre("GM", "IM", "FM", "WGM", "CM", "NM", "WIM", "WFM", "WCM", "WNM"));
 }
 
 TEST(TitleRoster, FindsAPlayerInTheRoster) {
@@ -92,13 +96,17 @@ TEST(TitleRoster, KeepsTheStrongerTitleWhenTwoRostersNameOnePlayer) {
   // fetched at ten different instants, so a title awarded between two of
   // them can appear in both. Order decides, and it decides the same way
   // every time.
+  //
+  // IM against WGM rather than GM against FM: chess.com lists the two
+  // paired, WGM ahead of IM, and reading them in that order would answer
+  // WGM where the profile the Java worker reads says IM.
   int64_t now = 0;
   FakeRosters rosters;
-  rosters.rosters["GM"] = {"someone"};
-  rosters.rosters["FM"] = {"someone"};
+  rosters.rosters["WGM"] = {"someone"};
+  rosters.rosters["IM"] = {"someone"};
   TitleRoster roster(rosters, Options(now));
 
-  EXPECT_EQ(*roster.TitleOf("someone"), "GM");
+  EXPECT_EQ(*roster.TitleOf("someone"), "IM");
 }
 
 TEST(TitleRoster, ReadsTheRostersOnceAndThenAnswersFromMemory) {
@@ -117,6 +125,7 @@ TEST(TitleRoster, ReadsThemAgainOnceTheyAreStale) {
   // why a day is generous rather than eager.
   int64_t now = 0;
   FakeRosters rosters;
+  rosters.rosters["GM"] = {"hikaru"};
   TitleRoster roster(rosters, Options(now));
 
   ASSERT_TRUE(roster.TitleOf("nobody").ok());
@@ -153,6 +162,7 @@ TEST(TitleRoster, KeepsAnsweringFromAStaleRosterWhenARefreshFails) {
   const absl::StatusOr<std::string> title = roster.TitleOf("hikaru");
   ASSERT_TRUE(title.ok()) << title.status();
   EXPECT_EQ(*title, "GM");
+  EXPECT_TRUE(roster.Stale()) << "the month it answered for is not complete";
 }
 
 TEST(TitleRoster, DoesNotRetryEveryLookupWhileChessComIsDown) {
@@ -182,6 +192,76 @@ TEST(TitleRoster, TriesAgainOnceTheBackoffHasPassed) {
   now += absl::ToInt64Seconds(absl::Minutes(6));
 
   EXPECT_EQ(*roster.TitleOf("hikaru"), "GM");
+}
+
+TEST(TitleRoster, IsNotStaleWhileTheRostersAreFresh) {
+  int64_t now = 0;
+  FakeRosters rosters;
+  rosters.rosters["GM"] = {"hikaru"};
+  TitleRoster roster(rosters, Options(now));
+  ASSERT_EQ(*roster.TitleOf("hikaru"), "GM");
+
+  EXPECT_FALSE(roster.Stale());
+  now += absl::ToInt64Seconds(absl::Hours(23));
+  EXPECT_FALSE(roster.Stale());
+}
+
+TEST(TitleRoster, DoesNotTakeTenEmptyRostersAsAnAnswer) {
+  // Nobody on the whole site holding any title is not a state chess.com
+  // can be in. Taking it would untitle everyone while reporting nothing
+  // wrong, and every month written under it would be cached that way.
+  int64_t now = 0;
+  FakeRosters rosters;
+  TitleRoster roster(rosters, Options(now));
+
+  EXPECT_FALSE(roster.TitleOf("hikaru").ok());
+  EXPECT_EQ(rosters.asked.size(), 10u) << "an empty roster is not itself a failure";
+}
+
+TEST(TitleRoster, KeepsTheRostersItHadWhenAllTenComeBackEmpty) {
+  int64_t now = 0;
+  FakeRosters rosters;
+  rosters.rosters["GM"] = {"hikaru"};
+  TitleRoster roster(rosters, Options(now));
+  ASSERT_EQ(*roster.TitleOf("hikaru"), "GM");
+
+  rosters.rosters.clear();
+  now += absl::ToInt64Seconds(absl::Hours(25));
+
+  EXPECT_EQ(*roster.TitleOf("hikaru"), "GM");
+}
+
+TEST(TitleRoster, StopsRefreshingWhenTheWorkerIsShuttingDown) {
+  // Ten sequential calls against a chess.com that is timing out. A
+  // shutdown noticed only after the tenth is a process the supervisor
+  // kills instead, and a killed process hands its claim back to nobody.
+  int64_t now = 0;
+  FakeRosters rosters;
+  rosters.rosters["GM"] = {"hikaru"};
+  bool stopping = false;
+  rosters.on_fetch = [&stopping] { stopping = true; };
+
+  TitleRoster::Options options = Options(now);
+  options.stopping = [&stopping] { return stopping; };
+  TitleRoster roster(rosters, std::move(options));
+
+  EXPECT_FALSE(roster.TitleOf("hikaru").ok()) << "a set it abandoned is not a set it has";
+  EXPECT_THAT(rosters.asked, ElementsAre("GM")) << "it worked through all ten anyway";
+}
+
+TEST(TitleRoster, BacksOffFromWhenTheAttemptEndedRatherThanWhenItStarted) {
+  // The failing call is itself slow — that is what failing usually looks
+  // like here. Timed from the start, an attempt that outlasts the backoff
+  // leaves no backoff at all, and every lookup goes back to chess.com.
+  int64_t now = 0;
+  FakeRosters rosters;
+  rosters.status = absl::UnavailableError("chess.com is timing out");
+  rosters.on_fetch = [&now] { now += absl::ToInt64Seconds(absl::Minutes(6)); };
+  TitleRoster roster(rosters, Options(now));
+
+  for (int i = 0; i < 5; ++i) EXPECT_FALSE(roster.TitleOf("hikaru").ok());
+
+  EXPECT_THAT(rosters.asked, ElementsAre("GM"));
 }
 
 }  // namespace
