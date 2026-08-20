@@ -177,7 +177,7 @@ public class IndexWorkerLifecycle implements ApplicationEventListener<ServerStar
       } catch (Exception e) {
         // Shutdown must not throw. Failing here costs the lease's five minutes and one attempt —
         // exactly the pre-#1279 behaviour — which is a worse outcome, not a broken one.
-        LOG.warn("Could not hand request {} back on shutdown", id, e);
+        LOG.warn("Could not hand request_id={} back on shutdown", id, e);
       }
     }
   }

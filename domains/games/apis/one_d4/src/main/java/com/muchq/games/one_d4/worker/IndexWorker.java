@@ -451,7 +451,7 @@ public class IndexWorker {
       // or nothing was running anywhere for long enough that the user was told it failed. Either
       // way it is not this worker's to resume.
       LOG.warn(
-          "Declining request {}: it is not available to claim (already held, or retired while"
+          "Declining request_id={}: it is not available to claim (already held, or retired while"
               + " queued). No games will be indexed for it.",
           message.requestId());
       return;
@@ -690,7 +690,7 @@ public class IndexWorker {
         // Logging the count unconditionally read as success whatever the row said. The games are
         // on disk either way; what is lost is the record that this run produced them.
         LOG.warn(
-            "Indexed {} games for request {} but could not record COMPLETED: the lease is gone.",
+            "Indexed {} games for request_id={} but could not record COMPLETED: the lease is gone.",
             totalIndexed,
             message.requestId());
         // The games landed but the run cannot claim them. Distinct from "completed" on purpose:
@@ -716,7 +716,7 @@ public class IndexWorker {
         // driver's own wrapper, a future that was being waited on. What they have in common is the
         // status, which every one of them restores on the way out.
         LOG.warn(
-            "Abandoning request {}: this run was interrupted before it finished, so it is being"
+            "Abandoning request_id={}: this run was interrupted before it finished, so it is being"
                 + " left for another worker rather than recorded as a failure.",
             message.requestId(),
             e);
@@ -792,7 +792,7 @@ public class IndexWorker {
       requestStore.releaseOwned(requestId, ownerId, clock.instant());
     } catch (RuntimeException e) {
       LOG.warn(
-          "Could not release request {} after its run was cut loose; the hourly sweep will clear"
+          "Could not release request_id={} after its run was cut loose; the hourly sweep will clear"
               + " the owner once the lease lapses.",
           requestId,
           e);
@@ -825,7 +825,7 @@ public class IndexWorker {
       // Only reachable now when the range has genuinely moved on, in which case the replacement
       // owns the outcome and this run has nothing to report.
       LOG.error(
-          "Could not record FAILED for request {}: the lease is gone. The row will be reclaimed"
+          "Could not record FAILED for request_id={}: the lease is gone. The row will be reclaimed"
               + " rather than reporting this error.",
           requestId);
     }
@@ -871,7 +871,7 @@ public class IndexWorker {
               // the request is about to cost an attempt because of it. Whoever reads this needs to
               // go and look at the worker, not at the request.
               LOG.error(
-                  "Request {} has been running for {} without finishing. Releasing the lease and"
+                  "request_id={} has been running for {} without finishing. Releasing the lease and"
                       + " interrupting the run: a run this long is a stuck worker, and holding it"
                       + " open strands this range and hides every other queued request from the"
                       + " staleness sweep.",
@@ -883,7 +883,7 @@ public class IndexWorker {
             if (!requestStore.renewLease(
                 requestId, ownerId, RetentionPolicy.LEASE, clock.instant())) {
               LOG.warn(
-                  "Request {} is no longer live; another owner has taken this range. Stopping"
+                  "request_id={} is no longer live; another owner has taken this range. Stopping"
                       + " heartbeat.",
                   requestId);
               throw new CancellationException("request no longer live");
@@ -1171,7 +1171,7 @@ public class IndexWorker {
       // ceiling just took away and putting the run straight back to holding the range. Capping
       // only the heartbeat looks like a fix and is not one.
       LOG.warn(
-          "Not renewing request {} so that {}: this run is past the {} ceiling and has given the"
+          "Not renewing request_id={} so that {}: this run is past the {} ceiling and has given the"
               + " request up.",
           requestId,
           what,
@@ -1182,7 +1182,7 @@ public class IndexWorker {
       return false;
     }
     LOG.warn(
-        "Lease on request {} had lapsed before {}, but no one else took it. Renewed and"
+        "Lease on request_id={} had lapsed before {}, but no one else took it. Renewed and"
             + " continuing.",
         requestId,
         what);
