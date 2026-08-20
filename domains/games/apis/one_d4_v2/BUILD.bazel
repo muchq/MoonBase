@@ -1,0 +1,88 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
+
+# one_d4_v2: the v2 HTTP API (#1389 phase 6). The seed that eventually
+# replaces the Java service: same detectors as the C++ worker, so /v2/analyze
+# and the indexed corpus can never disagree about what a motif is.
+
+cc_library(
+    name = "analyze",
+    srcs = ["analyze.cc"],
+    hdrs = ["analyze.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/games/libs/chess_cpp:pgn",
+        "//domains/games/libs/one_d4_motifs:extract",
+        "//domains/games/libs/one_d4_motifs:motif",
+        "//domains/games/libs/one_d4_motifs:occurrence",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "analyze_test",
+    size = "small",
+    srcs = ["analyze_test.cc"],
+    deps = [
+        ":analyze",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)
+
+smithy_cpp_server_library(
+    name = "one_d4_v2_smithy_server",
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/one_d4_v2.smithy",
+    ],
+    namespace = "moonbase::one_d4",
+    service = "moonbase.one_d4#OneD4V2",
+)
+
+smithy_cpp_client_library(
+    name = "one_d4_v2_smithy_client",
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/one_d4_v2.smithy",
+    ],
+    namespace = "moonbase::one_d4",
+    service = "moonbase.one_d4#OneD4V2",
+)
+
+cc_library(
+    name = "smithy_handler",
+    srcs = ["smithy_handler.cc"],
+    hdrs = ["smithy_handler.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":analyze",
+        ":one_d4_v2_smithy_server",
+        "//domains/games/libs/chess_cpp:side",
+        "//domains/games/libs/one_d4_motifs:motif",
+        "//domains/games/libs/one_d4_motifs:occurrence",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
+cc_test(
+    name = "wire_test",
+    size = "small",
+    srcs = ["wire_test.cc"],
+    deps = [
+        ":one_d4_v2_smithy_client",
+        ":one_d4_v2_smithy_server",
+        ":smithy_handler",
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:client",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:server",
+    ],
+)
