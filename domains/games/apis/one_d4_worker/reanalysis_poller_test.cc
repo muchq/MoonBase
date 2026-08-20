@@ -32,6 +32,7 @@ class FakeQueue : public ReanalysisQueue {
   absl::StatusOr<bool> Progress(std::string_view, std::string_view, std::string_view cursor, int p,
                                 int f) override {
     progress_.push_back({std::string(cursor), p, f});
+    if (!progress_status_.ok()) return progress_status_;
     return held_;
   }
 
@@ -65,6 +66,7 @@ class FakeQueue : public ReanalysisQueue {
   bool claimable_ = true;
   bool held_ = true;
   std::string claimed_owner_;
+  absl::Status progress_status_;
   std::vector<Checkpoint> progress_;
   std::optional<std::pair<int, int>> completed_;
   std::optional<std::string> failed_;
@@ -300,6 +302,27 @@ TEST(ReanalysisPollerTest, PassesTheRunsProgressStraightToTheQueue) {
   EXPECT_EQ(queue.progress_[0].failed, 1);
 }
 
+// A queue that cannot be reached is not proof the claim was lost — the
+// rule LeaseCore keeps for renewals, and until now pinned for renewals
+// only. Both pollers share that code, so this covers the index one too.
+TEST(ReanalysisPollerTest, ACheckpointAgainstAQueueItCannotReachIsNotALostClaim) {
+  FakeQueue queue;
+  queue.progress_status_ = absl::UnavailableError("pg went away");
+  bool still_ours = false;
+  ReanalysisPoller poller(
+      queue,
+      [&](const ReanalysisClaim&, ReanalysisLease& lease) -> absl::StatusOr<ReanalysisReport> {
+        still_ours = lease.Report("https://chess.com/game/0001", 1, 0);
+        return ReanalysisReport{};
+      },
+      Options());
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_TRUE(still_ours)
+      << "one blip abandons a pass nobody else wants, mid-corpus; the benefit of the doubt "
+         "runs out when the lease we last proved would have expired, not on the first error";
+}
+
 TEST(ReanalysisPollerTest, ARefusedProgressWriteIsALostClaim) {
   FakeQueue queue;
   queue.held_ = false;
@@ -350,6 +373,22 @@ TEST(ReanalysisLoopTest, SleepsOnlyWhenThereWasNothingToTake) {
       },
       absl::Seconds(5));
   EXPECT_EQ(slept, 1);
+}
+
+// The other half of "only". A pass that ran may be resumable right now —
+// sleeping after one would idle a worker for no reason.
+TEST(ReanalysisLoopTest, DoesNotSleepAfterAPassItActuallyRan) {
+  FakeQueue queue;
+  int slept = 0;
+  bool stop = false;
+  PollReanalysisUntilStopped(
+      [&] { return std::unique_ptr<ReanalysisQueue>(new PassThrough(queue)); },
+      [&](const ReanalysisClaim&, ReanalysisLease&) -> absl::StatusOr<ReanalysisReport> {
+        stop = true;
+        return ReanalysisReport{};
+      },
+      Options(), [&] { return stop; }, [&](absl::Duration) { ++slept; }, absl::Seconds(5));
+  EXPECT_EQ(slept, 0);
 }
 
 TEST(ReanalysisLoopTest, KeepsGoingThroughAQueueItCannotReach) {

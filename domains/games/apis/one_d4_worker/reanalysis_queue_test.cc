@@ -5,7 +5,9 @@
 #include <cstdlib>
 #include <memory>
 #include <string>
+#include <utility>
 
+#include "absl/strings/str_cat.h"
 #include "absl/time/time.h"
 #include "domains/platform/libs/pg/pg.h"
 
@@ -20,12 +22,34 @@ namespace {
 // Plus the one this queue has and the other does not: a pass that loses its
 // lease resumes from its cursor.
 
+/// This suite's own schema, for the reason pg_game_sink_test gives: it and
+/// pg_reanalysis_test both drop and recreate reanalysis_requests, and bazel
+/// runs them at the same time against one database.
+constexpr char kSchema[] = "one_d4_reanalysis_queue_test";
+
+/// Carried in the conninfo rather than SET, because pg::Client reconnects
+/// lazily and a reconnect drops a session-level setting silently.
+///
+/// Not UTC, deliberately: every fence here compares lease_expires_at to
+/// NOW(), and under a UTC session a TIMESTAMPTZ column would agree with a
+/// TIMESTAMP one — so the fixture's type could drift from production and
+/// nothing here would notice.
+std::string Conninfo(const std::string& url) {
+  return absl::StrCat(url, url.find('?') == std::string::npos ? "?" : "&",
+                      "options=-c%20search_path%3D", kSchema,
+                      "%20-c%20timezone%3DAmerica/New_York");
+}
+
 class ReanalysisQueueTest : public testing::Test {
  protected:
   void SetUp() override {
     const char* url = std::getenv("PG_TEST_DB_URL");
     if (url == nullptr || *url == '\0') GTEST_SKIP() << "PG_TEST_DB_URL unset";
-    client_ = std::make_unique<pg::Client>(url);
+    {
+      pg::Client bootstrap(url);
+      ASSERT_TRUE(bootstrap.Exec(absl::StrCat("CREATE SCHEMA IF NOT EXISTS ", kSchema)).ok());
+    }
+    client_ = std::make_unique<pg::Client>(Conninfo(url));
 
     // Column for column what PostgresSqlDialect creates —
     // schema_contract_test is what keeps this copy honest.
@@ -249,6 +273,59 @@ TEST_F(ReanalysisQueueTest, HeartbeatHoldsTheLeaseAndSaysWhenItIsLost) {
   auto stranger = queue_->Heartbeat(id, "worker-b", kLease);
   ASSERT_TRUE(stranger.ok());
   EXPECT_FALSE(*stranger);
+}
+
+// The forwarder worker_main actually claims through. Seven hand-written
+// methods, every one of which takes id and owner in that order — swap them
+// in any single one and the fence stops matching, so production reanalysis
+// writes nothing, forever, in silence.
+TEST_F(ReanalysisQueueTest, AQueueThatOwnsItsConnectionClaimsAndFencesLikeAnyOther) {
+  const std::string id = Enqueue();
+  const std::unique_ptr<ReanalysisQueue> owned =
+      NewOwnedReanalysisQueue(Conninfo(std::getenv("PG_TEST_DB_URL")));
+
+  auto claimed = owned->ClaimNext("worker-a", kLease);
+  ASSERT_TRUE(claimed.ok());
+  ASSERT_TRUE(claimed->has_value());
+  EXPECT_EQ((*claimed)->id, id);
+
+  EXPECT_TRUE(*owned->Heartbeat(id, "worker-a", kLease));
+  EXPECT_FALSE(*owned->Heartbeat(id, "worker-b", kLease));
+
+  EXPECT_TRUE(*owned->Progress(id, "worker-a", "https://chess.com/game/0009", 9, 1));
+  EXPECT_FALSE(*owned->Progress(id, "worker-b", "https://chess.com/game/0009", 9, 1));
+
+  EXPECT_FALSE(*owned->Complete(id, "worker-b", 9, 1));
+  EXPECT_TRUE(*owned->Complete(id, "worker-a", 9, 1));
+  EXPECT_EQ(Column(id, "status"), "COMPLETED");
+  EXPECT_EQ(Column(id, "cursor_game_url"), "https://chess.com/game/0009");
+}
+
+TEST_F(ReanalysisQueueTest, AnOwnedQueueHandsBackAndReleasesUnderTheRightOwnerToo) {
+  const std::string id = Enqueue();
+  const std::unique_ptr<ReanalysisQueue> owned =
+      NewOwnedReanalysisQueue(Conninfo(std::getenv("PG_TEST_DB_URL")));
+  ASSERT_TRUE(owned->ClaimNext("worker-a", kLease).ok());
+
+  EXPECT_FALSE(*owned->HandBack(id, "worker-b"));
+  EXPECT_TRUE(*owned->HandBack(id, "worker-a"));
+  EXPECT_EQ(Column(id, "attempts"), "0");
+
+  ASSERT_TRUE(owned->ClaimNext("worker-a", kLease).ok());
+  EXPECT_FALSE(*owned->Release(id, "worker-b"));
+  EXPECT_TRUE(*owned->Release(id, "worker-a"));
+  EXPECT_EQ(Column(id, "attempts"), "1");
+}
+
+TEST_F(ReanalysisQueueTest, AnOwnedQueueFailsUnderTheRightOwner) {
+  const std::string id = Enqueue();
+  const std::unique_ptr<ReanalysisQueue> owned =
+      NewOwnedReanalysisQueue(Conninfo(std::getenv("PG_TEST_DB_URL")));
+  ASSERT_TRUE(owned->ClaimNext("worker-a", kLease).ok());
+
+  EXPECT_FALSE(*owned->Fail(id, "worker-b", "not mine"));
+  EXPECT_TRUE(*owned->Fail(id, "worker-a", "pg went away"));
+  EXPECT_EQ(Column(id, "error_message"), "pg went away");
 }
 
 }  // namespace

@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 
+#include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 
 namespace one_d4_worker {
@@ -21,12 +22,30 @@ using ::testing::IsEmpty;
 
 std::string Url(int n) { return absl::StrFormat("https://chess.com/game/%04d", n); }
 
+/// This suite's own schema. It drops and recreates three tables two other
+/// suites also use, and bazel runs them at the same time against one
+/// database — see pg_game_sink_test, which hit this first.
+constexpr char kSchema[] = "one_d4_pg_reanalysis_test";
+
+/// Not UTC, deliberately: the fence compares lease_expires_at to NOW(), and
+/// under a UTC session a TIMESTAMPTZ column would agree with a TIMESTAMP
+/// one, so the fixture could drift from production unnoticed.
+std::string Conninfo(const std::string& url) {
+  return absl::StrCat(url, url.find('?') == std::string::npos ? "?" : "&",
+                      "options=-c%20search_path%3D", kSchema,
+                      "%20-c%20timezone%3DAmerica/New_York");
+}
+
 class PgReanalysisTest : public testing::Test {
  protected:
   void SetUp() override {
     const char* url = std::getenv("PG_TEST_DB_URL");
     if (url == nullptr || *url == '\0') GTEST_SKIP() << "PG_TEST_DB_URL unset";
-    client_ = std::make_unique<pg::Client>(url);
+    {
+      pg::Client bootstrap(url);
+      ASSERT_TRUE(bootstrap.Exec(absl::StrCat("CREATE SCHEMA IF NOT EXISTS ", kSchema)).ok());
+    }
+    client_ = std::make_unique<pg::Client>(Conninfo(url));
 
     ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS motif_occurrences").ok());
     ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS game_features").ok());
@@ -111,6 +130,22 @@ class PgReanalysisTest : public testing::Test {
 
   std::unique_ptr<pg::Client> client_;
 };
+
+// Inserted descending, so heap order is the reverse of url order. Without
+// ORDER BY, Postgres may return heap order and the keyset walk — whose
+// whole premise is a total order — silently pages backwards.
+TEST_F(PgReanalysisTest, PagesInUrlOrderWhateverOrderTheRowsWereWrittenIn) {
+  for (int i = 9; i >= 0; --i) AddGame(Url(i), "pgn");
+  PgGameCorpus corpus(*client_);
+
+  auto page = corpus.After("", 4);
+  ASSERT_TRUE(page.ok());
+  ASSERT_EQ(page->size(), 4u);
+  EXPECT_EQ((*page)[0].url, Url(0));
+  EXPECT_EQ((*page)[1].url, Url(1));
+  EXPECT_EQ((*page)[2].url, Url(2));
+  EXPECT_EQ((*page)[3].url, Url(3));
+}
 
 TEST_F(PgReanalysisTest, PagesFromTheBeginningWhenTheCursorIsEmpty) {
   for (int i = 0; i < 5; ++i) AddGame(Url(i), "pgn");
@@ -218,8 +253,7 @@ TEST_F(PgReanalysisTest, RefusesToWriteForAPassItNoLongerHolds) {
   game.url = Url(0);
   const absl::Status refused = stranger.Replace({game});
   EXPECT_EQ(refused.code(), absl::StatusCode::kFailedPrecondition);
-  EXPECT_EQ(OccurrenceCount(Url(0)), 1)
-      << "the fence runs inside the transaction, so nothing lands";
+  EXPECT_EQ(OccurrenceCount(Url(0)), 1) << "a pass that does not hold the row rewrote it anyway";
 }
 
 TEST_F(PgReanalysisTest, RefusesToWriteOnAnExpiredLease) {
@@ -240,29 +274,108 @@ TEST_F(PgReanalysisTest, RefusesToWriteOnAnExpiredLease) {
   EXPECT_EQ(OccurrenceCount(Url(0)), 1);
 }
 
-TEST_F(PgReanalysisTest, WritesABatchAsOneUnit) {
-  for (int i = 0; i < 3; ++i) {
-    AddGame(Url(i), "pgn");
-    AddOccurrence(Url(i), "FORK");
-  }
+/// One FORK for `url`, so a batch carries something the writer must place.
+ReanalyzedGame OneMotif(const std::string& url, const std::string& description = "") {
+  ReanalyzedGame game;
+  game.url = url;
+  one_d4::MotifOccurrence occurrence;
+  occurrence.motif = one_d4::Motif::kFork;
+  occurrence.ply = 1;
+  occurrence.move_number = 1;
+  occurrence.description = description;
+  game.occurrences.push_back(occurrence);
+  return game;
+}
+
+// The lock ordering the deadlock avoidance rests on. Handed a batch
+// backwards, the sink must still touch games in url order — the indexer's
+// flush takes the same FOR UPDATE locks in that order, and an inverted
+// pair deadlocks the two writers against each other.
+TEST_F(PgReanalysisTest, WritesABatchInGameUrlOrder) {
+  for (int i = 0; i < 3; ++i) AddGame(Url(i), "pgn");
   const std::string id = ClaimedPass("worker-a");
   PgOccurrenceSink sink(*client_, id, "worker-a");
 
   std::vector<ReanalyzedGame> batch;
-  for (int i = 2; i >= 0; --i) {
-    ReanalyzedGame game;
-    game.url = Url(i);
-    batch.push_back(game);  // deliberately out of url order
-  }
+  for (int i = 2; i >= 0; --i) batch.push_back(OneMotif(Url(i)));
   ASSERT_TRUE(sink.Replace(batch).ok());
 
-  for (int i = 0; i < 3; ++i) EXPECT_EQ(OccurrenceCount(Url(i)), 0) << Url(i);
+  // ctid is physical write order, so this is the order rows were inserted
+  // in and not the order they are read back in.
+  auto written =
+      client_->Exec("SELECT string_agg(game_url, ',' ORDER BY ctid) FROM motif_occurrences");
+  ASSERT_TRUE(written.ok());
+  EXPECT_EQ(written->Get(0, 0).value_or(""), absl::StrCat(Url(0), ",", Url(1), ",", Url(2)));
+}
+
+// One transaction, not one per game. A batch that fails partway must leave
+// every game it had already rewritten exactly as it found it — otherwise a
+// pass that dies mid-page has cleared occurrences it never replaced.
+TEST_F(PgReanalysisTest, WritesABatchAsOneUnitOrNotAtAll) {
+  for (int i = 0; i < 3; ++i) {
+    AddGame(Url(i), "pgn");
+    AddOccurrence(Url(i), "FORK");
+  }
+  // Refuses the last game's insert, after the first two have been deleted
+  // and rewritten inside the same transaction.
+  ASSERT_TRUE(client_
+                  ->Exec("ALTER TABLE motif_occurrences ADD CONSTRAINT short_description "
+                         "CHECK (description IS NULL OR length(description) < 100)")
+                  .ok());
+
+  const std::string id = ClaimedPass("worker-a");
+  PgOccurrenceSink sink(*client_, id, "worker-a");
+
+  std::vector<ReanalyzedGame> batch;
+  batch.push_back(OneMotif(Url(0)));
+  batch.push_back(OneMotif(Url(1)));
+  batch.push_back(OneMotif(Url(2), std::string(200, 'x')));
+
+  EXPECT_FALSE(sink.Replace(batch).ok());
+  for (int i = 0; i < 3; ++i) {
+    EXPECT_EQ(OccurrenceCount(Url(i)), 1)
+        << Url(i) << " lost its rows to a batch that never landed";
+  }
 }
 
 TEST_F(PgReanalysisTest, AnEmptyBatchIsNotAWrite) {
   const std::string id = ClaimedPass("worker-a");
   PgOccurrenceSink sink(*client_, id, "worker-a");
   EXPECT_TRUE(sink.Replace({}).ok()) << "no games is not a lost lease";
+}
+
+// The pair worker_main builds per pass. request_id and owner are two
+// strings of the same type handed to the sink in that order — swapped, the
+// fence never matches and every pass writes nothing while reporting
+// FailedPrecondition, which nothing else here would catch.
+TEST_F(PgReanalysisTest, EndsThatOwnTheirConnectionReadAndWriteUnderTheRightClaim) {
+  AddGame(Url(0), "pgn");
+  AddOccurrence(Url(0), "FORK");
+  const std::string id = ClaimedPass("worker-a");
+
+  const ReanalysisEnds ends =
+      NewOwnedReanalysisEnds(Conninfo(std::getenv("PG_TEST_DB_URL")), id, "worker-a");
+
+  auto page = ends.corpus->After("", 10);
+  ASSERT_TRUE(page.ok());
+  ASSERT_EQ(page->size(), 1u);
+  EXPECT_EQ((*page)[0].url, Url(0));
+
+  ASSERT_TRUE(ends.sink->Replace({OneMotif(Url(0))}).ok())
+      << "the sink was built with its arguments the wrong way round";
+  EXPECT_EQ(OccurrenceCount(Url(0)), 1);
+}
+
+TEST_F(PgReanalysisTest, EndsBuiltForAnotherOwnerAreStillFenced) {
+  AddGame(Url(0), "pgn");
+  AddOccurrence(Url(0), "FORK");
+  const std::string id = ClaimedPass("worker-a");
+
+  const ReanalysisEnds ends =
+      NewOwnedReanalysisEnds(Conninfo(std::getenv("PG_TEST_DB_URL")), id, "worker-b");
+
+  EXPECT_EQ(ends.sink->Replace({OneMotif(Url(0))}).code(), absl::StatusCode::kFailedPrecondition);
+  EXPECT_EQ(OccurrenceCount(Url(0)), 1);
 }
 
 }  // namespace

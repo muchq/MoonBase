@@ -202,15 +202,23 @@ TEST(SchemaContract, TheJavaSchemaHasEveryColumnTheReanalysisQueueTouches) {
 
 TEST(SchemaContract, TheReanalysisRequestFixtureDeclaresTheSameTypes) {
   const std::map<std::string, std::string> java = JavaSchemaFor("reanalysis_requests");
-  const std::map<std::string, std::string> fixture = Columns(
-      Read("domains/games/apis/one_d4_worker/reanalysis_queue_test.cc"), "reanalysis_requests");
-  ASSERT_FALSE(fixture.empty()) << "read no columns from the fixture";
+  // Both copies. pg_reanalysis_test carries one too, and it is the one
+  // behind the fence — a lease_expires_at that drifted to TIMESTAMPTZ
+  // there would compare against NOW() differently than production does.
+  int checked = 0;
+  for (const std::string& path : {"domains/games/apis/one_d4_worker/reanalysis_queue_test.cc",
+                                  "domains/games/apis/one_d4_worker/pg_reanalysis_test.cc"}) {
+    const std::map<std::string, std::string> fixture = Columns(Read(path), "reanalysis_requests");
+    ASSERT_FALSE(fixture.empty()) << "read no columns from " << path;
 
-  for (const auto& [name, type] : fixture) {
-    const auto declared = java.find(name);
-    ASSERT_TRUE(declared != java.end()) << name << " is not in the Java schema";
-    EXPECT_EQ(type, declared->second) << name << " is declared differently in the fixture";
+    for (const auto& [name, type] : fixture) {
+      const auto declared = java.find(name);
+      ASSERT_TRUE(declared != java.end()) << name << " is not in the Java schema";
+      EXPECT_EQ(type, declared->second) << name << " is declared differently in " << path;
+      ++checked;
+    }
   }
+  EXPECT_GT(checked, 20) << "one of the two fixtures was not parsed";
 }
 
 TEST(SchemaContract, TheReanalysisIdIsAUuidToo) {

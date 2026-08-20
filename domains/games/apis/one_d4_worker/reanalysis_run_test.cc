@@ -67,9 +67,12 @@ class FakeSink : public OccurrenceSink {
 class FakeLease : public ReanalysisLease {
  public:
   bool Keep() override { return keep_; }
+  // Separate from keep_, deliberately: the common way a pass loses its row
+  // is mid-page, where Keep() already said yes and the checkpoint is what
+  // refuses. Tying the two together leaves that path untested.
   bool Report(std::string_view cursor, int processed, int failed) override {
     checkpoints_.push_back({std::string(cursor), processed, failed});
-    return keep_;
+    return reports_accepted_;
   }
   bool OutOfTime() override { return out_of_time_; }
 
@@ -80,6 +83,7 @@ class FakeLease : public ReanalysisLease {
   };
   std::vector<Checkpoint> checkpoints_;
   bool keep_ = true;
+  bool reports_accepted_ = true;
   bool out_of_time_ = false;
 };
 
@@ -256,6 +260,23 @@ TEST(ReanalysisRunTest, ALostLeaseStopsThePassAndIsReported) {
   ASSERT_TRUE(report.ok());
   EXPECT_TRUE(report->lease_lost);
   EXPECT_THAT(sink.replaced_, IsEmpty()) << "a pass that no longer holds the row writes nothing";
+}
+
+// A takeover between pages: Keep() passed, the page was written, and the
+// checkpoint is what the fence refuses. The pass must stop there rather
+// than walk the rest of a corpus it no longer owns.
+TEST(ReanalysisRunTest, ARefusedCheckpointStopsThePass) {
+  FakeCorpus corpus;
+  for (int i = 0; i < 6; ++i) corpus.Add(Url(i), kScholarsMate);
+  FakeSink sink;
+  FakeLease lease;
+  lease.reports_accepted_ = false;
+  ReanalysisRun run(corpus, sink, Options(/*batch_size=*/2));
+
+  const auto report = run.Execute(ReanalysisJob{}, lease);
+  ASSERT_TRUE(report.ok());
+  EXPECT_TRUE(report->lease_lost);
+  EXPECT_EQ(sink.batches_, 1) << "it kept paging after the fence said the row was not ours";
 }
 
 TEST(ReanalysisRunTest, TheSinksFailureIsThePassesFailure) {

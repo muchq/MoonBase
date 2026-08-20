@@ -186,6 +186,8 @@ cc_test(
     env_inherit = ["PG_TEST_DB_URL"],
     deps = [
         ":pg_reanalysis",
+        "//domains/games/libs/one_d4_motifs:occurrence",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@googletest//:gtest_main",
     ],
@@ -245,6 +247,7 @@ cc_test(
     deps = [
         ":reanalysis_queue",
         "//domains/platform/libs/pg",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
     ],
