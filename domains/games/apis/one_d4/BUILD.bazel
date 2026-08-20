@@ -433,10 +433,7 @@ filegroup(
     name = "worker_metric_names",
     testonly = True,
     srcs = ["src/main/java/com/muchq/games/one_d4/worker/IndexWorker.java"],
-    visibility = [
-        "//domains/games:__subpackages__",
-        "//domains/platform:__subpackages__",
-    ],
+    visibility = ["//domains/games:__subpackages__"],
 )
 
 filegroup(

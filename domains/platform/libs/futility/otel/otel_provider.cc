@@ -28,6 +28,11 @@ namespace {
 /// What either half of the shutdown export may spend. Small, because a
 /// supervisor is already timing the exit and a collector that cannot answer
 /// must not be the reason it is killed.
+///
+/// It is not the whole story: opentelemetry-cpp hardcodes CURLOPT_LOW_SPEED_TIME
+/// at 30s, so a wedged collector still costs about thirty seconds however small
+/// this is. What it buys is that the wait ends there instead of doubling — see
+/// AWedgedCollectorDoesNotHoldUpTheExit, which measures both.
 constexpr std::chrono::seconds kShutdownTimeout{5};
 
 }  // namespace
@@ -171,15 +176,17 @@ OtelProvider::~OtelProvider() {
     if (auto sdk_provider = std::dynamic_pointer_cast<opentelemetry::sdk::metrics::MeterProvider>(
             meter_provider_)) {
       if (!sdk_provider->ForceFlush(kShutdownTimeout)) {
-        // Said out loud, because a process that failed to export on the way
-        // out looks exactly like one that had nothing to say.
+        // Said out loud, because a flush that ran out of time looks exactly
+        // like one that had nothing to say. Narrower than "the export
+        // failed": a refused connection fails fast and still returns true,
+        // so this reports the collector that hangs, not the one that is
+        // down.
         std::cerr << "otel: metrics did not flush before exit\n";
       }
       // Bounded explicitly, because ~MeterProvider shuts the context down
       // with microseconds::max — which joins the exporter thread and then
-      // waits on pending sessions with no ceiling at all. Against a
-      // black-holed collector that turns a five-second flush into an exit
-      // the supervisor kills instead.
+      // waits on pending sessions with no ceiling at all. Against a wedged
+      // collector that is the difference between one stalled export and two.
       sdk_provider->Shutdown(kShutdownTimeout);
     }
 
