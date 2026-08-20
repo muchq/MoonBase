@@ -163,6 +163,35 @@ public final class PostgresSqlDialect implements SqlDialect {
       "CREATE INDEX IF NOT EXISTS idx_indexing_requests_claimable"
           + " ON indexing_requests(created_at) WHERE status IN ('PENDING', 'PROCESSING')";
 
+  /**
+   * The reanalysis queue. Same claim/lease/fence shape as {@code indexing_requests} and
+   * deliberately not the same table — see {@link SqlDialect#createReanalysisRequests}.
+   *
+   * <p>No claimable index. This table takes one row per reanalysis pass — dozens a year, not the
+   * hundreds of thousands {@code indexing_requests} holds — so the partial index that one needs
+   * would here cost writes to serve a sequential scan of a table that fits in a page.
+   *
+   * <p>{@code cursor_game_url} is the keyset cursor: the last {@code game_url} a completed page
+   * covered, an exclusive lower bound for the next. Replaces the OFFSET paging both admin passes
+   * used, which skipped rows inserted mid-pass and needed a second run to catch them.
+   */
+  private static final String REANALYSIS_REQUESTS =
+      """
+      CREATE TABLE IF NOT EXISTS reanalysis_requests (
+          id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          status           VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+          created_at       TIMESTAMP NOT NULL DEFAULT now(),
+          updated_at       TIMESTAMP NOT NULL DEFAULT now(),
+          owner_id         VARCHAR(128),
+          lease_expires_at TIMESTAMP,
+          attempts         INT NOT NULL DEFAULT 0,
+          error_message    TEXT,
+          cursor_game_url  VARCHAR(1024),
+          games_processed  INT NOT NULL DEFAULT 0,
+          games_failed     INT NOT NULL DEFAULT 0
+      )
+      """;
+
   @Override
   public String insertGameFeature() {
     return INSERT_GAME_FEATURE;
@@ -171,6 +200,11 @@ public final class PostgresSqlDialect implements SqlDialect {
   @Override
   public String upsertIndexedPeriod() {
     return UPSERT_INDEXED_PERIOD;
+  }
+
+  @Override
+  public String createReanalysisRequests() {
+    return REANALYSIS_REQUESTS;
   }
 
   @Override

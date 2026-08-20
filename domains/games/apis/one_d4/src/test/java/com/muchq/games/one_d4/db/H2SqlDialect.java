@@ -43,6 +43,23 @@ public final class H2SqlDialect implements SqlDialect {
       )
       """;
 
+  private static final String REANALYSIS_REQUESTS =
+      """
+      CREATE TABLE IF NOT EXISTS reanalysis_requests (
+          id               UUID DEFAULT random_uuid() PRIMARY KEY,
+          status           VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+          created_at       TIMESTAMP NOT NULL DEFAULT current_timestamp(),
+          updated_at       TIMESTAMP NOT NULL DEFAULT current_timestamp(),
+          owner_id         VARCHAR(128),
+          lease_expires_at TIMESTAMP,
+          attempts         INT NOT NULL DEFAULT 0,
+          error_message    TEXT,
+          cursor_game_url  VARCHAR(1024),
+          games_processed  INT NOT NULL DEFAULT 0,
+          games_failed     INT NOT NULL DEFAULT 0
+      )
+      """;
+
   private static final String GAME_FEATURES =
       """
       CREATE TABLE IF NOT EXISTS game_features (
@@ -112,6 +129,11 @@ public final class H2SqlDialect implements SqlDialect {
   @Override
   public String upsertIndexedPeriod() {
     return UPSERT_INDEXED_PERIOD;
+  }
+
+  @Override
+  public String createReanalysisRequests() {
+    return REANALYSIS_REQUESTS;
   }
 
   @Override

@@ -45,4 +45,14 @@ public interface SqlDialect {
    * because it has no partial indexes.
    */
   String claimableRequestsIndex();
+
+  /**
+   * Create {@code reanalysis_requests}.
+   *
+   * <p>Its own table rather than a {@code job_type} column on {@code indexing_requests}, because
+   * the indexers claim from that one unfiltered: a reanalysis row there is one an indexer takes,
+   * cannot run, and fails. Separate tables make that unreachable rather than a filter every present
+   * and future poller has to remember.
+   */
+  String createReanalysisRequests();
 }
