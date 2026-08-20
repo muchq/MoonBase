@@ -43,12 +43,51 @@ exit 1
     visibility = ["//visibility:private"],
 )
 
+# Two names for the same bytes, because two runtimes look in two places.
+#
+# BoringSSL's set_default_verify_paths() registers exactly two lookups: a
+# file at X509_get_default_cert_file(), which is OPENSSLDIR "/cert.pem"
+# and OPENSSLDIR is /etc/ssl, and a hash dir at /etc/ssl/certs that it
+# only ever reads as <8-hex-hash>.<n>. A bundle at
+# /etc/ssl/certs/ca-certificates.crt matches neither lookup, so shipping
+# that path alone leaves every C++ handshake failing CERTIFICATE_VERIFY_FAILED
+# with the bundle sitting right there in the image, plainly visible and
+# never opened.
+#
+# Go's crypto/x509 does read the Debian bundle path, and this same rule
+# builds the Go images, so both names ship rather than one replacing the
+# other.
+genrule(
+    name = "ca_certificates_pem",
+    srcs = [":ca_certificates_crt"],
+    outs = ["cert.pem"],
+    cmd = "cp $< $@",
+    visibility = ["//visibility:private"],
+)
+
 pkg_tar(
-    name = "ca_certificates_layer",
+    name = "ca_certificates_bundle",
     srcs = [":ca_certificates_crt"],
     modes = {"ca-certificates.crt": "0644"},
     package_dir = "/etc/ssl/certs",
+    visibility = ["//visibility:private"],
+)
+
+pkg_tar(
+    name = "ca_certificates_default_file",
+    srcs = [":ca_certificates_pem"],
+    modes = {"cert.pem": "0644"},
+    package_dir = "/etc/ssl",
+    visibility = ["//visibility:private"],
+)
+
+pkg_tar(
+    name = "ca_certificates_layer",
     visibility = ["//visibility:public"],
+    deps = [
+        ":ca_certificates_bundle",
+        ":ca_certificates_default_file",
+    ],
 )
 
 sh_test(
