@@ -106,6 +106,36 @@ cc_test(
     ],
 )
 
+cc_library(
+    name = "reanalysis_queue",
+    srcs = ["reanalysis_queue.cc"],
+    hdrs = ["reanalysis_queue.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+# Same reasoning as pg_queue_test: a claim being exclusive and a terminal
+# write being fenced are properties of concurrent statements. Skips without
+# PG_TEST_DB_URL.
+cc_test(
+    name = "reanalysis_queue_test",
+    size = "small",
+    srcs = ["reanalysis_queue_test.cc"],
+    env_inherit = ["PG_TEST_DB_URL"],
+    deps = [
+        ":reanalysis_queue",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # The Beyoncé rule applied to somebody else's table: the Java service owns
 # indexing_requests, and nothing but agreement makes a second poller safe.
 cc_test(
@@ -116,6 +146,7 @@ cc_test(
         "pg_game_sink_test.cc",
         "pg_queue_test.cc",
         "poller.cc",
+        "reanalysis_queue_test.cc",
         "//domains/games/apis/one_d4:worker_metric_names",
         "//domains/games/apis/one_d4:worker_schema_sources",
     ],

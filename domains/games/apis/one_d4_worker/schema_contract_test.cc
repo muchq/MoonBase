@@ -162,6 +162,40 @@ TEST(SchemaContract, TheOccurrenceIdIsNotAUuidColumn) {
   EXPECT_EQ(JavaSchemaFor("game_features")["id"], "UUID");
 }
 
+// reanalysis_requests is not a shared table — the indexers never touch it,
+// which is the point of it existing (#1389 phase 5). But the Java migration
+// still owns its DDL and this worker still hand-copies it into a fixture, so
+// the same drift is available: a column renamed in PostgresSqlDialect leaves
+// reanalysis_queue_test green against a table production does not have.
+
+TEST(SchemaContract, TheJavaSchemaHasEveryColumnTheReanalysisQueueTouches) {
+  const std::map<std::string, std::string> java = JavaSchemaFor("reanalysis_requests");
+  ASSERT_FALSE(java.empty()) << "read no columns at all — the DDL moved";
+
+  for (const std::string& column :
+       {"id", "status", "created_at", "updated_at", "owner_id", "lease_expires_at", "attempts",
+        "error_message", "cursor_game_url", "games_processed", "games_failed"}) {
+    EXPECT_TRUE(java.count(column) == 1) << column << " is gone from reanalysis_requests";
+  }
+}
+
+TEST(SchemaContract, TheReanalysisFixtureDeclaresTheSameTypes) {
+  const std::map<std::string, std::string> java = JavaSchemaFor("reanalysis_requests");
+  const std::map<std::string, std::string> fixture = Columns(
+      Read("domains/games/apis/one_d4_worker/reanalysis_queue_test.cc"), "reanalysis_requests");
+  ASSERT_FALSE(fixture.empty()) << "read no columns from the fixture";
+
+  for (const auto& [name, type] : fixture) {
+    const auto declared = java.find(name);
+    ASSERT_TRUE(declared != java.end()) << name << " is not in the Java schema";
+    EXPECT_EQ(type, declared->second) << name << " is declared differently in the fixture";
+  }
+}
+
+TEST(SchemaContract, TheReanalysisIdIsAUuidToo) {
+  EXPECT_EQ(JavaSchemaFor("reanalysis_requests")["id"], "UUID");
+}
+
 TEST(SchemaContract, AFailedRunSaysWhatTheJavaWorkerSays) {
   // error_message is a column the API hands back, so what goes in it is a
   // contract with the caller and not a debugging aid. Both workers write
