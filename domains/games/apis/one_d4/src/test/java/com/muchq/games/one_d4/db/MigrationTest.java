@@ -84,6 +84,97 @@ public class MigrationTest {
   }
 
   /**
+   * Reanalysis is its own queue, deliberately (#1389 phase 5).
+   *
+   * <p>The indexers' {@code claimNext} is unfiltered over {@code indexing_requests}, so a
+   * reanalysis row in that table is one an indexer would claim, find no player or months on, and
+   * fail — spending an attempt on a job it cannot run, during a rolling deploy where some instances
+   * have the filter and some do not. A second table is what keeps the two pollers from ever seeing
+   * each other\'s work.
+   *
+   * <p>Every lease column is read as a primitive by the claim path, so one left nullable arrives
+   * silently as "never attempted" rather than as an error.
+   */
+  @Test
+  public void run_createsReanalysisRequestsWithItsOwnLeaseColumns() throws Exception {
+    new Migration(dataSource, new H2SqlDialect()).run();
+
+    try (Connection conn = dataSource.getConnection()) {
+      DatabaseMetaData meta = conn.getMetaData();
+      try (ResultSet tables =
+          meta.getTables(null, null, "REANALYSIS_REQUESTS", new String[] {"TABLE"})) {
+        assertThat(tables.next()).as("reanalysis_requests table should exist").isTrue();
+      }
+
+      for (String column :
+          new String[] {
+            "ID",
+            "STATUS",
+            "CREATED_AT",
+            "UPDATED_AT",
+            "OWNER_ID",
+            "LEASE_EXPIRES_AT",
+            "ATTEMPTS",
+            "ERROR_MESSAGE",
+            "CURSOR_GAME_URL",
+            "GAMES_PROCESSED",
+            "GAMES_FAILED"
+          }) {
+        try (ResultSet columns = meta.getColumns(null, null, "REANALYSIS_REQUESTS", column)) {
+          assertThat(columns.next())
+              .as("reanalysis_requests.%s should exist", column.toLowerCase())
+              .isTrue();
+        }
+      }
+    }
+
+    // The counters and the attempt budget are read as ints. A default-less column would hand the
+    // claim path a zero it cannot distinguish from a real one.
+    try (Connection conn = dataSource.getConnection();
+        Statement stmt = conn.createStatement()) {
+      stmt.execute("INSERT INTO reanalysis_requests (status) VALUES (\'PENDING\')");
+      try (ResultSet rs =
+          stmt.executeQuery(
+              "SELECT attempts, games_processed, games_failed, cursor_game_url"
+                  + " FROM reanalysis_requests")) {
+        assertThat(rs.next()).isTrue();
+        assertThat(rs.getObject("attempts")).as("attempts must not be NULL").isNotNull();
+        assertThat(rs.getObject("games_processed"))
+            .as("games_processed must not be NULL")
+            .isNotNull();
+        assertThat(rs.getObject("games_failed")).as("games_failed must not be NULL").isNotNull();
+        assertThat(rs.getObject("cursor_game_url"))
+            .as("a fresh pass has not finished a page yet, so its cursor starts unset")
+            .isNull();
+      }
+    }
+  }
+
+  /**
+   * At most one live reanalysis pass. Two PENDING rows are two claimable passes, and two worker
+   * replicas would walk the whole corpus twice for no benefit — so the queue refuses the second at
+   * insert. H2 has no partial indexes, so this asserts existence only; the uniqueness itself is
+   * asserted on the engine that enforces it, in {@code PostgresSingleLiveReanalysisTest}.
+   */
+  @Test
+  public void run_addsTheSingleLiveReanalysisIndex() throws Exception {
+    new Migration(dataSource, new H2SqlDialect()).run();
+
+    try (Connection conn = dataSource.getConnection();
+        ResultSet indexes =
+            conn.getMetaData().getIndexInfo(null, null, "REANALYSIS_REQUESTS", false, false)) {
+      boolean found = false;
+      while (indexes.next()) {
+        String name = indexes.getString("INDEX_NAME");
+        if (name != null && name.equalsIgnoreCase("idx_reanalysis_requests_single_live")) {
+          found = true;
+        }
+      }
+      assertThat(found).as("idx_reanalysis_requests_single_live should exist").isTrue();
+    }
+  }
+
+  /**
    * The index the poller's candidate scan depends on, on a query every instance runs constantly.
    */
   @Test

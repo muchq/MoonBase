@@ -14,6 +14,38 @@ ONE_D4_DB_URL=postgresql://... bazel run //domains/games/apis/one_d4_worker
 kill -TERM <pid>   # drains the runs in flight and exits 0
 ```
 
+## The second queue: reanalysis
+
+Each instance also polls `reanalysis_requests` on a thread of its own
+(#1389 phase 5). A pass re-extracts every stored game against the current
+detectors — same code the index path runs, on `pgn` already in the table,
+so no chess.com call and no network at all.
+
+**Its own table, not a job type on `indexing_requests`.** Both indexers
+claim from that table with no job-type predicate, so a reanalysis row
+there is one an indexer takes, finds no player or months on, and fails —
+spending an attempt on work it cannot do. Separate tables make that
+unreachable rather than a filter every present and future poller has to
+remember.
+
+**Its own thread, not a pool slot.** A pass runs for hours; a slot spent
+on one is a slot not indexing. And one is the fleet-wide total:
+`idx_reanalysis_requests_single_live` — a partial unique index over
+liveness — refuses a second live row at insert, so replicas cannot walk
+the corpus twice however many of them poll.
+
+**It resumes.** Progress writes the last `game_url` a finished page
+covered along with the counts, in one statement, so a pass that loses its
+lease or hits the six-hour ceiling picks up where it stopped instead of
+walking the corpus again. That is also why the ceiling refunds the
+attempt when the cursor moved: a pass making progress on a large corpus
+is not a wedged one, and spending an attempt each time would retire the
+request after three before it ever reached the end. A ceiling that moved
+*nothing* still spends it.
+
+Scaling out does not speed a pass up — one owner at a time is the point —
+but it does mean any instance can pick up a pass whose owner died.
+
 ## Scaling out
 
 There is no ingress. Nothing routes to this service, nothing load
@@ -42,8 +74,10 @@ one_d4_worker:
 ```
 
 Both axes multiply: three replicas of four slots is twelve requests at
-once — and twenty-four Postgres connections, which is the ceiling to
-check first.
+once — and the Postgres connections are the ceiling to check first.
+Each slot holds two (its queue and its run's sink), and each instance
+adds one more for the reanalysis poller plus a second while a pass is
+actually running: four slots is 8–10 per instance, three replicas 27–30.
 
 ### Why that needs no coordination
 
@@ -85,6 +119,18 @@ because slots interleave:
 Claimed 4f3c… hikaru 2026-01..2026-03 as cpp/indexer-7/1234/9a1f…
 Finished 4f3c… completed in 84213ms
 ```
+
+A reanalysis pass says where it resumed from and what it got through:
+
+```
+Claimed reanalysis request_id=b925… from=start owner=cpp/indexer-7/1234/3fc5…
+Finished reanalysis request_id=b925… processed=2 failed=1
+```
+
+`from=start` is a fresh pass; anything else is the cursor it resumed at.
+`failed` counts games whose stored PGN would not replay — those still get
+their occurrences cleared, because a game whose second look finds nothing
+must not keep the rows it had.
 
 `Draining N indexing threads` on the way out means shutdown is waiting
 for runs in flight — expected, and it can take as long as a chess.com

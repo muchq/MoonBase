@@ -11,6 +11,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "domains/games/apis/one_d4_worker/pg_queue.h"
+#include "domains/games/apis/one_d4_worker/reanalysis_queue.h"
 
 namespace one_d4_worker {
 namespace {
@@ -160,6 +161,75 @@ TEST(SchemaContract, TheOccurrenceIdIsNotAUuidColumn) {
   // column rejects.
   EXPECT_EQ(JavaSchemaFor("motif_occurrences")["id"], "VARCHAR(36)");
   EXPECT_EQ(JavaSchemaFor("game_features")["id"], "UUID");
+}
+
+// The reanalysis fixture is a third hand-copy of the two tables the pass
+// reads and writes, so it drifts on the same terms as the sink's.
+TEST(SchemaContract, TheReanalysisFixtureDeclaresTheSameTypes) {
+  const std::string fixture_source = Read("domains/games/apis/one_d4_worker/pg_reanalysis_test.cc");
+  int checked = 0;
+  for (const std::string& table : {"game_features", "motif_occurrences"}) {
+    const std::map<std::string, std::string> java = JavaSchemaFor(table);
+    const std::map<std::string, std::string> fixture = Columns(fixture_source, table);
+    ASSERT_FALSE(fixture.empty()) << "read no columns of " << table << " from the fixture";
+
+    for (const auto& [name, type] : fixture) {
+      const auto declared = java.find(name);
+      ASSERT_TRUE(declared != java.end()) << name << " is not in the Java " << table;
+      EXPECT_EQ(type, declared->second)
+          << name << " is declared differently in the reanalysis " << table << " fixture";
+      ++checked;
+    }
+  }
+  EXPECT_GT(checked, 12) << "the fixture parse found almost nothing to compare";
+}
+
+// reanalysis_requests is not a shared table — the indexers never touch it,
+// which is the point of it existing (#1389 phase 5). But the Java migration
+// still owns its DDL and this worker still hand-copies it into a fixture, so
+// the same drift is available: a column renamed in PostgresSqlDialect leaves
+// reanalysis_queue_test green against a table production does not have.
+
+TEST(SchemaContract, TheJavaSchemaHasEveryColumnTheReanalysisQueueTouches) {
+  const std::map<std::string, std::string> java = JavaSchemaFor("reanalysis_requests");
+  ASSERT_FALSE(java.empty()) << "read no columns at all — the DDL moved";
+
+  for (const std::string& column :
+       {"id", "status", "created_at", "updated_at", "owner_id", "lease_expires_at", "attempts",
+        "error_message", "cursor_game_url", "games_processed", "games_failed"}) {
+    EXPECT_TRUE(java.count(column) == 1) << column << " is gone from reanalysis_requests";
+  }
+}
+
+TEST(SchemaContract, TheReanalysisRequestFixtureDeclaresTheSameTypes) {
+  const std::map<std::string, std::string> java = JavaSchemaFor("reanalysis_requests");
+  // Both copies. pg_reanalysis_test carries one too, and it is the one
+  // behind the fence — a lease_expires_at that drifted to TIMESTAMPTZ
+  // there would compare against NOW() differently than production does.
+  int checked = 0;
+  for (const std::string& path : {"domains/games/apis/one_d4_worker/reanalysis_queue_test.cc",
+                                  "domains/games/apis/one_d4_worker/pg_reanalysis_test.cc"}) {
+    const std::map<std::string, std::string> fixture = Columns(Read(path), "reanalysis_requests");
+    ASSERT_FALSE(fixture.empty()) << "read no columns from " << path;
+
+    for (const auto& [name, type] : fixture) {
+      const auto declared = java.find(name);
+      ASSERT_TRUE(declared != java.end()) << name << " is not in the Java schema";
+      EXPECT_EQ(type, declared->second) << name << " is declared differently in " << path;
+      ++checked;
+    }
+  }
+  EXPECT_GT(checked, 20) << "one of the two fixtures was not parsed";
+}
+
+TEST(SchemaContract, TheReanalysisIdIsAUuidToo) {
+  EXPECT_EQ(JavaSchemaFor("reanalysis_requests")["id"], "UUID");
+}
+
+TEST(SchemaContract, BothQueuesShareOneAttemptBudget) {
+  // The reanalysis header claims the same budget "for the same reason";
+  // this is what makes that a fact rather than a sentence.
+  EXPECT_EQ(PgReanalysisQueue::kMaxAttempts, PgQueue::kMaxAttempts);
 }
 
 TEST(SchemaContract, AFailedRunSaysWhatTheJavaWorkerSays) {
