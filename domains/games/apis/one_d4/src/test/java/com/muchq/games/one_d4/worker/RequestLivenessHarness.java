@@ -815,11 +815,9 @@ abstract class RequestLivenessHarness {
       return 0;
     }
 
-    @Override
     public void insertOccurrencesBatch(
         Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {}
 
-    @Override
     public void deleteOccurrencesByGameUrls(List<String> gameUrls) {}
 
     @Override
@@ -851,11 +849,6 @@ abstract class RequestLivenessHarness {
     @Override
     public int updateOpeningFamilies(java.util.List<GameOpening> updates) {
       return 0;
-    }
-
-    @Override
-    public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
-      return List.of();
     }
   }
 }

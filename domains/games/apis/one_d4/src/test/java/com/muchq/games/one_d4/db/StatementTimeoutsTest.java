@@ -372,15 +372,4 @@ public class StatementTimeoutsTest {
         .as("a failing body must roll its writes back — the transactional half of the contract")
         .isEqualTo(0);
   }
-
-  @Test
-  public void fetchForReanalysisStaysDeliberatelyUnbounded() {
-    timeouts.clear();
-    new GameFeatureDao(testDb.jdbi(), new H2SqlDialect()).fetchForReanalysis(10, 0);
-
-    assertThat(timeouts).as("fetchForReanalysis ran no statements?").isNotEmpty();
-    // The exclusion GameFeatureDao's javadoc states, pinned: the admin batch read pages the whole
-    // table to feed a write path and must not silently gain the serving bound.
-    assertThat(timeouts).allMatch(t -> t == 0);
-  }
 }

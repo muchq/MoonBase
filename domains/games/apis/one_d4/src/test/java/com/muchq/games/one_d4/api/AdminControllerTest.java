@@ -8,7 +8,6 @@ import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.api.dto.ReanalysisRequestResponse;
 import com.muchq.games.one_d4.api.dto.RederiveResponse;
 import com.muchq.games.one_d4.db.GameFeatureStore;
-import com.muchq.games.one_d4.db.GameFeatureStore.GameForReanalysis;
 import com.muchq.games.one_d4.db.GameFeatureStore.GameOpening;
 import com.muchq.games.one_d4.db.ReanalysisRequestDao;
 import com.muchq.games.one_d4.db.TestDb;
@@ -190,7 +189,6 @@ public class AdminControllerTest {
       throw new UnsupportedOperationException("AdminController tests never flush");
     }
 
-    private final List<GameForReanalysis> games = new ArrayList<>();
     private final Map<String, Integer> deleteCount = new HashMap<>();
     private final Map<String, Integer> insertCount = new HashMap<>();
     private final List<GameOpening> openings = new ArrayList<>();
@@ -233,10 +231,6 @@ public class AdminControllerTest {
       return updates.size();
     }
 
-    void addGame(String url, String pgn) {
-      games.add(new GameForReanalysis(UUID.randomUUID(), url, pgn));
-    }
-
     int deleteOccurrencesCount(String url) {
       return deleteCount.getOrDefault(url, 0);
     }
@@ -245,14 +239,6 @@ public class AdminControllerTest {
       return insertCount.getOrDefault(url, 0);
     }
 
-    @Override
-    public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
-      int start = Math.min(offset, games.size());
-      int end = Math.min(offset + limit, games.size());
-      return new ArrayList<>(games.subList(start, end));
-    }
-
-    @Override
     public void deleteOccurrencesByGameUrls(List<String> gameUrls) {
       for (String url : gameUrls) {
         deleteCount.merge(url, 1, Integer::sum);
@@ -267,7 +253,6 @@ public class AdminControllerTest {
       return 0;
     }
 
-    @Override
     public void insertOccurrencesBatch(
         Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
       for (String url : occurrencesByGame.keySet()) {

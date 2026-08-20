@@ -44,31 +44,7 @@ public interface GameFeatureStore {
       List<GameFeature> features,
       Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame);
 
-  /**
-   * Replaces the occurrences for a set of games as one unit. For callers that recompute motifs for
-   * games without holding a request lease — reanalysis — and therefore have no token to present.
-   *
-   * <p>{@code gameUrls} is the full set to clear, which is not the same as the map's key set: a
-   * game whose reanalysis found no motifs must still lose the occurrences it had.
-   *
-   * <p>The default composes the two primitives and is <em>not</em> atomic. It exists so test fakes
-   * need not reimplement a transaction they do not have; any store backed by a real database must
-   * override it, because the whole hazard is that a delete committing separately from its insert
-   * lets a concurrent writer's rows survive alongside the new ones.
-   */
-  default void replaceOccurrences(
-      List<String> gameUrls,
-      Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
-    deleteOccurrencesByGameUrls(gameUrls);
-    insertOccurrencesBatch(occurrencesByGame);
-  }
-
   int deleteOlderThan(Instant threshold);
-
-  void insertOccurrencesBatch(
-      Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame);
-
-  void deleteOccurrencesByGameUrls(List<String> gameUrls);
 
   List<GameFeature> query(Object compiledQuery, int limit, int offset);
 
@@ -97,16 +73,12 @@ public interface GameFeatureStore {
 
   Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls);
 
-  /** Returns a batch of game records (requestId, gameUrl, pgn) for re-analysis. */
-  List<GameForReanalysis> fetchForReanalysis(int limit, int offset);
-
   /**
    * Returns a batch of stored opening values, for re-deriving {@code opening_family} from {@code
    * opening_name} without refetching anything (#1350).
    *
-   * <p>Paged the same way as {@link #fetchForReanalysis}: ordered by {@code (indexed_at,
-   * game_url)}, neither of which this pass writes, so a cursor cannot shift under a row that has
-   * already been rewritten.
+   * <p>Ordered by {@code (indexed_at, game_url)}, neither of which this pass writes, so a cursor
+   * cannot shift under a row that has already been rewritten.
    */
   List<GameOpening> fetchOpeningsForRederive(int limit, int offset);
 
@@ -123,8 +95,6 @@ public interface GameFeatureStore {
    * simply not built here.
    */
   int updateOpeningFamilies(List<GameOpening> updates);
-
-  record GameForReanalysis(UUID requestId, String gameUrl, String pgn) {}
 
   /**
    * A game's stored opening values. Both are nullable: chess.com does not always give an ECOUrl to
