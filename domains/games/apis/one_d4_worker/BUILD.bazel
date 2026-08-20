@@ -421,8 +421,10 @@ cc_library(
     deps = [
         ":metrics",
         ":poller",
+        "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
     ],
 )
@@ -434,6 +436,8 @@ cc_test(
     deps = [
         ":index_pool",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "@com_google_absl//absl/base:log_severity",
+        "@com_google_absl//absl/log:scoped_mock_log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",

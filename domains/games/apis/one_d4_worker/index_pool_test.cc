@@ -12,6 +12,8 @@
 #include <string>
 #include <thread>
 
+#include "absl/base/log_severity.h"
+#include "absl/log/scoped_mock_log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -484,6 +486,98 @@ TEST(IndexPool, NoTwoRunsClaimUnderTheSameId) {
   pool.Run(StopAfter(queue, 40), [](absl::Duration) {});
 
   EXPECT_EQ(queue.distinct_owners(), static_cast<size_t>(queue.claims()));
+}
+
+// ---- What the log has to say with several threads interleaving ----
+
+TEST(IndexPool, SaysWhatItClaimed) {
+  // Four threads make "Run finished" on its own useless: four identical
+  // lines and no way to tie any of them to a request, a player or a
+  // duration. The claim line is what every later line hangs off.
+  FakeQueue queue;
+  queue.set_jobs(1);
+  BlockingRuns runs;
+  runs.Release();
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
+                 PollerOptions(), metrics, PoolOptions(1));
+
+  absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+  EXPECT_CALL(log,
+              Log(absl::LogSeverity::kInfo, testing::_,
+                  testing::AllOf(testing::HasSubstr("job-1"), testing::HasSubstr("hikaru"),
+                                 testing::HasSubstr("2026-01"), testing::HasSubstr("cpp/test/"))));
+  log.StartCapturingLogs();
+  pool.Run(StopAfter(queue, 2), [](absl::Duration) {});
+  log.StopCapturingLogs();
+}
+
+TEST(IndexPool, SaysWhichRunFinishedAndHowLongItTook) {
+  // Without the id the line cannot be matched to its claim, and without
+  // the elapsed there is no way to see a run that is dragging.
+  FakeQueue queue;
+  queue.set_jobs(1);
+  BlockingRuns runs;
+  runs.Release();
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
+                 PollerOptions(), metrics, PoolOptions(1));
+
+  absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+  EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, testing::_,
+                       testing::AllOf(testing::HasSubstr("job-1"), testing::HasSubstr("completed"),
+                                      testing::HasSubstr("ms"))));
+  log.StartCapturingLogs();
+  pool.Run(StopAfter(queue, 2), [](absl::Duration) {});
+  log.StopCapturingLogs();
+}
+
+TEST(IndexPool, SaysItIsDrainingBeforeItWaits) {
+  // The drain can take as long as a chess.com call the run is already
+  // inside, and the stop grace is four minutes. Silence there looks
+  // exactly like a hang.
+  FakeQueue queue;
+  queue.set_empty();
+  BlockingRuns runs;
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
+                 PollerOptions(), metrics, PoolOptions(2));
+
+  absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+  EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, testing::_, testing::HasSubstr("Draining")));
+  log.StartCapturingLogs();
+  pool.Run([] { return true; }, [](absl::Duration) {});
+  log.StopCapturingLogs();
+}
+
+TEST(IndexPool, DoesNotSayItIsDrainingUntilItIs) {
+  // It said so at startup, half a millisecond after the threads were
+  // spawned — which reads as a worker that shut down the moment it came
+  // up, and leaves the real shutdown silent.
+  FakeQueue queue;
+  BlockingRuns runs;
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
+                 PollerOptions(), metrics, PoolOptions(2));
+
+  absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+  EXPECT_CALL(log, Log(testing::_, testing::_, testing::HasSubstr("Draining"))).Times(0);
+
+  std::atomic<bool> stopping{false};
+  log.StartCapturingLogs();
+  std::thread driver(
+      [&] { pool.Run([&stopping] { return stopping.load(); }, [](absl::Duration) {}); });
+  runs.AwaitStarted(2);
+  absl::SleepFor(absl::Milliseconds(200));
+  log.StopCapturingLogs();
+
+  stopping = true;
+  runs.Release();
+  driver.join();
 }
 
 }  // namespace
