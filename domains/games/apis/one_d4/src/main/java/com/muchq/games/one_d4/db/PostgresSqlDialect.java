@@ -202,9 +202,24 @@ public final class PostgresSqlDialect implements SqlDialect {
     return UPSERT_INDEXED_PERIOD;
   }
 
+  /**
+   * Unique over a constant expression, partial over liveness: while any PENDING or PROCESSING row
+   * exists, a second insert violates. Two PENDING rows are two claimable passes — every worker
+   * replica polls this table, and two of them would walk the whole corpus twice for no benefit.
+   * History rows (COMPLETED, FAILED) fall outside the predicate and accumulate freely.
+   */
+  private static final String SINGLE_LIVE_REANALYSIS_INDEX =
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_reanalysis_requests_single_live"
+          + " ON reanalysis_requests ((true)) WHERE status IN ('PENDING', 'PROCESSING')";
+
   @Override
   public String createReanalysisRequests() {
     return REANALYSIS_REQUESTS;
+  }
+
+  @Override
+  public String singleLiveReanalysisIndex() {
+    return SINGLE_LIVE_REANALYSIS_INDEX;
   }
 
   @Override

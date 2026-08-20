@@ -70,6 +70,11 @@ class ReanalysisQueueTest : public testing::Test {
             games_failed     INT NOT NULL DEFAULT 0
         ))")
                     .ok());
+    ASSERT_TRUE(client_
+                    ->Exec("CREATE UNIQUE INDEX idx_reanalysis_requests_single_live ON "
+                           "reanalysis_requests ((true)) WHERE status IN ('PENDING', "
+                           "'PROCESSING')")
+                    .ok());
     queue_ = std::make_unique<PgReanalysisQueue>(*client_);
   }
 

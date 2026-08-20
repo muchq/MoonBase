@@ -55,4 +55,11 @@ public interface SqlDialect {
    * and future poller has to remember.
    */
   String createReanalysisRequests();
+
+  /**
+   * At most one live reanalysis pass, refused at insert. Postgres enforces it with a partial unique
+   * index; H2 has no partial indexes and carries a plain same-named index so the migration path
+   * stays identical — the uniqueness itself is asserted against Postgres.
+   */
+  String singleLiveReanalysisIndex();
 }

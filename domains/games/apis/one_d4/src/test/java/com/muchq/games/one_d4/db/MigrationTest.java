@@ -151,6 +151,30 @@ public class MigrationTest {
   }
 
   /**
+   * At most one live reanalysis pass. Two PENDING rows are two claimable passes, and two worker
+   * replicas would walk the whole corpus twice for no benefit — so the queue refuses the second at
+   * insert. H2 has no partial indexes, so this asserts existence only; the uniqueness itself is
+   * asserted on the engine that enforces it, in {@code PostgresSingleLiveReanalysisTest}.
+   */
+  @Test
+  public void run_addsTheSingleLiveReanalysisIndex() throws Exception {
+    new Migration(dataSource, new H2SqlDialect()).run();
+
+    try (Connection conn = dataSource.getConnection();
+        ResultSet indexes =
+            conn.getMetaData().getIndexInfo(null, null, "REANALYSIS_REQUESTS", false, false)) {
+      boolean found = false;
+      while (indexes.next()) {
+        String name = indexes.getString("INDEX_NAME");
+        if (name != null && name.equalsIgnoreCase("idx_reanalysis_requests_single_live")) {
+          found = true;
+        }
+      }
+      assertThat(found).as("idx_reanalysis_requests_single_live should exist").isTrue();
+    }
+  }
+
+  /**
    * The index the poller's candidate scan depends on, on a query every instance runs constantly.
    */
   @Test

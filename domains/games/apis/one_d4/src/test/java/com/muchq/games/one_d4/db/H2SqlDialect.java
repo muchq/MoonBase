@@ -137,6 +137,14 @@ public final class H2SqlDialect implements SqlDialect {
   }
 
   @Override
+  public String singleLiveReanalysisIndex() {
+    // Plain, not unique: H2 has no partial indexes, and a full unique on a constant would allow
+    // one row ever. Existence keeps the migration path identical; the semantics are Postgres's.
+    return "CREATE INDEX IF NOT EXISTS idx_reanalysis_requests_single_live"
+        + " ON reanalysis_requests(status)";
+  }
+
+  @Override
   public List<String> createCoreTables() {
     return List.of(INDEXING_REQUESTS, GAME_FEATURES, INDEXED_PERIODS);
   }

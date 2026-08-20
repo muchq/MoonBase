@@ -339,6 +339,7 @@ public class Migration {
       // The reanalysis queue (#1389 phase 5). A table of its own, so the indexers' unfiltered
       // claim cannot reach a job they have no way to run.
       stmt.execute(dialect.createReanalysisRequests());
+      stmt.execute(dialect.singleLiveReanalysisIndex());
 
       LOG.info("Database migration completed successfully");
     } catch (SQLException e) {
