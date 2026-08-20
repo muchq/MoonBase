@@ -279,6 +279,23 @@ TEST(ReanalysisRunTest, ARefusedCheckpointStopsThePass) {
   EXPECT_EQ(sink.batches_, 1) << "it kept paging after the fence said the row was not ours";
 }
 
+// FailedPrecondition from the sink is the fence saying no — the claim went
+// somewhere else, which is an outcome and not an error. Mapped like
+// IndexRun maps it: a Fail here would mark FAILED a request somebody else
+// is now running.
+TEST(ReanalysisRunTest, AFencedRefusalFromTheSinkIsALostLeaseNotAFailure) {
+  FakeCorpus corpus;
+  corpus.Add(Url(0), kScholarsMate);
+  FakeSink sink;
+  sink.status_ = absl::FailedPreconditionError("request is no longer held");
+  FakeLease lease;
+  ReanalysisRun run(corpus, sink, Options());
+
+  const auto report = run.Execute(ReanalysisJob{}, lease);
+  ASSERT_TRUE(report.ok()) << "a lost lease is a report, not a status";
+  EXPECT_TRUE(report->lease_lost);
+}
+
 TEST(ReanalysisRunTest, TheSinksFailureIsThePassesFailure) {
   FakeCorpus corpus;
   corpus.Add(Url(0), kScholarsMate);

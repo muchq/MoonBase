@@ -28,6 +28,24 @@ int ToInt(const std::optional<std::string>& value) {
 
 absl::StatusOr<std::optional<ReanalysisJob>> PgReanalysisQueue::ClaimNext(std::string_view owner,
                                                                           absl::Duration lease) {
+  // Retire what the budget has exhausted before looking for work. Merely
+  // not claiming it is not enough: a row left PROCESSING holds the
+  // single-live slot forever — never claimable, never history, and every
+  // later enqueue refused by idx_reanalysis_requests_single_live. The
+  // indexing table has the Java retention worker for this; nothing else
+  // tends this one.
+  const auto retired = client_.Exec(
+      R"(UPDATE reanalysis_requests
+         SET status = 'FAILED', owner_id = NULL, updated_at = NOW(),
+             error_message = 'Reanalysis retired: attempt budget exhausted'
+         WHERE status IN ('PENDING', 'PROCESSING')
+           AND attempts >= $1
+           AND (owner_id IS NULL
+                OR lease_expires_at IS NULL OR lease_expires_at <= NOW())
+         RETURNING id)",
+      {std::to_string(kMaxAttempts)});
+  if (!retired.ok()) return retired.status();
+
   // One conditional UPDATE, so two workers racing for the same row cannot
   // both win. FOR UPDATE SKIP LOCKED picks the candidate without the two of
   // them queueing behind each other first.

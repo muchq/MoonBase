@@ -189,6 +189,8 @@ cc_test(
         "//domains/games/libs/one_d4_motifs:occurrence",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
     ],
 )
@@ -270,6 +272,7 @@ cc_test(
     ],
     deps = [
         ":pg_queue",
+        ":reanalysis_queue",
         "@com_google_absl//absl/strings",
         "@googletest//:gtest_main",
     ],

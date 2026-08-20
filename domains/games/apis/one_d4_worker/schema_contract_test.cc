@@ -11,6 +11,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "domains/games/apis/one_d4_worker/pg_queue.h"
+#include "domains/games/apis/one_d4_worker/reanalysis_queue.h"
 
 namespace one_d4_worker {
 namespace {
@@ -223,6 +224,12 @@ TEST(SchemaContract, TheReanalysisRequestFixtureDeclaresTheSameTypes) {
 
 TEST(SchemaContract, TheReanalysisIdIsAUuidToo) {
   EXPECT_EQ(JavaSchemaFor("reanalysis_requests")["id"], "UUID");
+}
+
+TEST(SchemaContract, BothQueuesShareOneAttemptBudget) {
+  // The reanalysis header claims the same budget "for the same reason";
+  // this is what makes that a fact rather than a sentence.
+  EXPECT_EQ(PgReanalysisQueue::kMaxAttempts, PgQueue::kMaxAttempts);
 }
 
 TEST(SchemaContract, AFailedRunSaysWhatTheJavaWorkerSays) {

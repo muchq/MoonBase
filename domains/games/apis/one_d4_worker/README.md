@@ -29,8 +29,10 @@ unreachable rather than a filter every present and future poller has to
 remember.
 
 **Its own thread, not a pool slot.** A pass runs for hours; a slot spent
-on one is a slot not indexing. The queue hands out at most one pass at a
-time anyway, since a pass is a single-owner walk of the whole corpus.
+on one is a slot not indexing. And one is the fleet-wide total:
+`idx_reanalysis_requests_single_live` — a partial unique index over
+liveness — refuses a second live row at insert, so replicas cannot walk
+the corpus twice however many of them poll.
 
 **It resumes.** Progress writes the last `game_url` a finished page
 covered along with the counts, in one statement, so a pass that loses its

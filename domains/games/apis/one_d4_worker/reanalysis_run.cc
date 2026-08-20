@@ -64,6 +64,14 @@ absl::StatusOr<ReanalysisReport> ReanalysisRun::Execute(const ReanalysisJob& job
     }
 
     const absl::Status written = sink_.Replace(reanalyzed);
+    // FailedPrecondition is the fence saying no: the claim went somewhere
+    // else, which is an outcome and not an error — mapped as IndexRun maps
+    // it, because a Fail here would mark FAILED a request somebody else is
+    // now running.
+    if (absl::IsFailedPrecondition(written)) {
+      report.lease_lost = true;
+      return report;
+    }
     if (!written.ok()) return written;
 
     // Cursor first, then the counts that go with it — one call, because the

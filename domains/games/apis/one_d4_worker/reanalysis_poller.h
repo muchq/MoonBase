@@ -68,11 +68,9 @@ class ReanalysisPoller {
 /// Claims and runs reanalysis passes until `stopping`.
 ///
 /// One thread's worth, not a pool. A pass is a single-owner walk of the
-/// whole corpus — but that is per row, not global: two PENDING rows are
-/// two claimable passes, and two replicas will walk the corpus twice for
-/// no benefit. Keeping it to one live pass is the enqueue side's job
-/// (dedupe, like indexing's dedupe_key), which ships with the endpoint
-/// flip.
+/// whole corpus, and idx_reanalysis_requests_single_live keeps the table
+/// to one live pass — so a second thread here would only ever poll an
+/// empty queue.
 ///
 /// Builds its queue through the factory on the calling thread rather than
 /// taking one, because a pg::Client is one connection serialised by a

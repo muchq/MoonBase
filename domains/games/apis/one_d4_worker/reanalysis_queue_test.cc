@@ -252,6 +252,33 @@ TEST_F(ReanalysisQueueTest, HandBackRefundsTheAttemptAndReleaseSpendsIt) {
   EXPECT_EQ(Column(id, "attempts"), "1");
 }
 
+// The ceiling refund and every shutdown depend on this: both give the row
+// back expecting whoever takes it next to resume, and a HandBack that
+// cleared the cursor would restart a large corpus after every refund with
+// the whole suite green.
+TEST_F(ReanalysisQueueTest, HandBackAndReleaseLeaveTheCursorForTheNextOwner) {
+  const std::string id = Enqueue();
+  ASSERT_TRUE(queue_->ClaimNext("worker-a", kLease).ok());
+  ASSERT_TRUE(queue_->Progress(id, "worker-a", "https://chess.com/game/0500", 500, 3).ok());
+  ASSERT_TRUE(queue_->HandBack(id, "worker-a").ok());
+
+  auto after_handback = queue_->ClaimNext("worker-b", kLease);
+  ASSERT_TRUE(after_handback.ok());
+  ASSERT_TRUE(after_handback->has_value());
+  EXPECT_EQ((*after_handback)->cursor_game_url, "https://chess.com/game/0500");
+  EXPECT_EQ((*after_handback)->games_processed, 500);
+  EXPECT_EQ((*after_handback)->games_failed, 3);
+
+  ASSERT_TRUE(queue_->Progress(id, "worker-b", "https://chess.com/game/0700", 700, 4).ok());
+  ASSERT_TRUE(queue_->Release(id, "worker-b").ok());
+
+  auto after_release = queue_->ClaimNext("worker-c", kLease);
+  ASSERT_TRUE(after_release.ok());
+  ASSERT_TRUE(after_release->has_value());
+  EXPECT_EQ((*after_release)->cursor_game_url, "https://chess.com/game/0700");
+  EXPECT_EQ((*after_release)->games_processed, 700);
+}
+
 TEST_F(ReanalysisQueueTest, StopsClaimingAfterTheAttemptBudget) {
   const std::string id = Enqueue();
   for (int i = 0; i < PgReanalysisQueue::kMaxAttempts; ++i) {
@@ -265,6 +292,13 @@ TEST_F(ReanalysisQueueTest, StopsClaimingAfterTheAttemptBudget) {
   ASSERT_TRUE(exhausted.ok());
   EXPECT_FALSE(exhausted->has_value())
       << "a pass that has killed its worker three times will kill the fourth";
+
+  // Retired, not merely unclaimable. Left PROCESSING it would hold the
+  // single-live slot forever: never claimable again, never history, and
+  // every later enqueue refused by idx_reanalysis_requests_single_live.
+  EXPECT_EQ(Column(id, "status"), "FAILED");
+  auto next = client_->Exec("INSERT INTO reanalysis_requests (status) VALUES ('PENDING')");
+  EXPECT_TRUE(next.ok()) << "the exhausted pass still holds the live slot: " << next.status();
 }
 
 TEST_F(ReanalysisQueueTest, HeartbeatHoldsTheLeaseAndSaysWhenItIsLost) {

@@ -3,12 +3,16 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdlib>
 #include <memory>
 #include <string>
+#include <thread>
 
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "absl/synchronization/notification.h"
+#include "absl/time/clock.h"
 
 namespace one_d4_worker {
 namespace {
@@ -45,7 +49,8 @@ class PgReanalysisTest : public testing::Test {
       pg::Client bootstrap(url);
       ASSERT_TRUE(bootstrap.Exec(absl::StrCat("CREATE SCHEMA IF NOT EXISTS ", kSchema)).ok());
     }
-    client_ = std::make_unique<pg::Client>(Conninfo(url));
+    conninfo_ = Conninfo(url);
+    client_ = std::make_unique<pg::Client>(conninfo_);
 
     ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS motif_occurrences").ok());
     ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS game_features").ok());
@@ -133,6 +138,7 @@ class PgReanalysisTest : public testing::Test {
     return inserted->Get(0, 0).value_or("");
   }
 
+  std::string conninfo_;
   std::unique_ptr<pg::Client> client_;
 };
 
@@ -341,6 +347,53 @@ TEST_F(PgReanalysisTest, WritesABatchAsOneUnitOrNotAtAll) {
     EXPECT_EQ(OccurrenceCount(Url(i)), 1)
         << Url(i) << " lost its rows to a batch that never landed";
   }
+}
+
+// The fence is SELECT ... FOR UPDATE, not a bare read. Under READ
+// COMMITTED a plain SELECT is a snapshot: a takeover could commit between
+// the check and the writes, and the batch would land against a pass this
+// worker had already lost. The indexing sink gets accidental cover from
+// game_features' foreign key onto its request row; reanalysis_requests has
+// no such key, so nothing but this lock orders the write against a
+// takeover. Twin of PgGameSinkTest.TakesTheRequestRowRatherThanReadingIt.
+TEST_F(PgReanalysisTest, TakesThePassRowRatherThanReadingIt) {
+  AddGame(Url(0), "pgn");
+  const std::string id = ClaimedPass("worker-a");
+  PgOccurrenceSink sink(*client_, id, "worker-a");
+
+  pg::Client rival(conninfo_);
+  absl::Notification held;
+  absl::Notification release;
+  std::thread holder([&] {
+    const absl::Status locked = rival.InTransaction([&](pg::Transaction& tx) {
+      const auto row = tx.Exec("SELECT id FROM reanalysis_requests WHERE id = $1 FOR UPDATE", {id});
+      EXPECT_TRUE(row.ok()) << row.status();
+      held.Notify();
+      release.WaitForNotification();
+      return absl::OkStatus();
+    });
+    EXPECT_TRUE(locked.ok()) << locked;
+  });
+
+  held.WaitForNotification();
+  std::atomic<bool> answered{false};
+  std::thread asker([&] {
+    ReanalyzedGame game;
+    game.url = Url(0);
+    EXPECT_TRUE(sink.Replace({game}).ok());
+    answered = true;
+  });
+  // Long enough that a fence which only read would have answered by now.
+  absl::SleepFor(absl::Milliseconds(250));
+  const bool read_through_the_lock = answered;
+
+  release.Notify();
+  holder.join();
+  asker.join();
+
+  EXPECT_FALSE(read_through_the_lock)
+      << "the fence answered while another transaction held the pass row, so it read a"
+         " snapshot rather than claiming the row";
 }
 
 TEST_F(PgReanalysisTest, AnEmptyBatchIsNotAWrite) {
