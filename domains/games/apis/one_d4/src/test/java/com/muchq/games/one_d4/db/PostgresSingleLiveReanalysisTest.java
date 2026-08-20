@@ -9,12 +9,15 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
 import org.jdbi.v3.core.Jdbi;
@@ -88,16 +91,26 @@ public class PostgresSingleLiveReanalysisTest {
     ExecutorService pool = Executors.newFixedThreadPool(racers);
     CountDownLatch start = new CountDownLatch(1);
     Set<UUID> ids = ConcurrentHashMap.newKeySet();
+    List<Future<UUID>> answers = new ArrayList<>();
     try {
       for (int i = 0; i < racers; i++) {
-        pool.submit(
-            () -> {
-              start.await();
-              ids.add(dao.enqueue().request().id());
-              return null;
-            });
+        answers.add(
+            pool.submit(
+                () -> {
+                  start.await();
+                  UUID id = dao.enqueue().request().id();
+                  ids.add(id);
+                  return id;
+                }));
       }
       start.countDown();
+      // Every racer must get an answer, not merely fail quietly: a loser
+      // whose violation went uncaught would throw here, so this get() is
+      // what actually pins the catch branch. hasSize(1) alone passes with
+      // seven racers dead on the floor.
+      for (Future<UUID> answer : answers) {
+        assertThat(answer.get(30, TimeUnit.SECONDS)).isNotNull();
+      }
       pool.shutdown();
       assertThat(pool.awaitTermination(30, TimeUnit.SECONDS)).isTrue();
     } finally {
