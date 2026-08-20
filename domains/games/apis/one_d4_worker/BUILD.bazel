@@ -42,12 +42,26 @@ cc_library(
 )
 
 cc_library(
+    name = "lease_core",
+    srcs = ["lease_core.cc"],
+    hdrs = ["lease_core.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_library(
     name = "poller",
     srcs = ["poller.cc"],
     hdrs = ["poller.h"],
     visibility = ["//visibility:public"],
     deps = [
         ":job",
+        ":lease_core",
         ":queue",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/log",
