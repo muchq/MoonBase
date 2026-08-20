@@ -5,6 +5,7 @@
 
 #include <map>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "absl/status/status.h"
@@ -255,6 +256,50 @@ TEST(ReanalysisPollerTest, ResumesFromWhereTheRowSaysItGotTo) {
   ASSERT_TRUE(poller.PollOnce().ok());
   EXPECT_EQ(seen_cursor, "https://chess.com/game/0500")
       << "the run is handed the claim, not just the id, because where to resume is on the row";
+}
+
+// What the observer is handed is this owner's share, not the row's totals:
+// a resumed pass finishing under a new owner reports totals the earlier
+// owner already counted, and a dashboard summing both would double them.
+TEST(ReanalysisPollerTest, ReportsTheOutcomeAndThisOwnersShareOfTheGames) {
+  FakeQueue queue;
+  queue.job_.cursor_game_url = "https://chess.com/game/0500";
+  queue.job_.games_processed = 500;
+  queue.job_.games_failed = 10;
+
+  ReanalysisReport report;
+  report.games_processed = 620;
+  report.games_failed = 13;
+
+  ReanalysisPoller::Options options = Options();
+  std::vector<std::tuple<RunOutcome, int, int>> finished;
+  options.on_finished = [&](RunOutcome outcome, int processed, int failed) {
+    finished.push_back({outcome, processed, failed});
+  };
+  ReanalysisPoller poller(queue, Reporting(report), options);
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  ASSERT_EQ(finished.size(), 1u);
+  EXPECT_EQ(std::get<0>(finished[0]), RunOutcome::kCompleted);
+  EXPECT_EQ(std::get<1>(finished[0]), 120) << "620 total minus the 500 an earlier owner counted";
+  EXPECT_EQ(std::get<2>(finished[0]), 3);
+}
+
+TEST(ReanalysisPollerTest, AFailedPassStillReportsItsOutcome) {
+  FakeQueue queue;
+  ReanalysisPoller::Options options = Options();
+  std::vector<RunOutcome> outcomes;
+  options.on_finished = [&](RunOutcome outcome, int, int) { outcomes.push_back(outcome); };
+  ReanalysisPoller poller(
+      queue,
+      [](const ReanalysisClaim&, ReanalysisLease&) -> absl::StatusOr<ReanalysisReport> {
+        return absl::UnavailableError("boom");
+      },
+      options);
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  ASSERT_EQ(outcomes.size(), 1u);
+  EXPECT_EQ(outcomes[0], RunOutcome::kFailed);
 }
 
 TEST(ReanalysisPollerTest, ARefusedCompleteMeansTheLeaseWentSomewhereElse) {

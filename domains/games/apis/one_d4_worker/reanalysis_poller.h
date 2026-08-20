@@ -33,6 +33,12 @@ class ReanalysisPoller {
     absl::Duration lease = absl::Minutes(5);
     absl::Duration renew_every = absl::Minutes(5) / 4;
 
+    /// Called once per finished pass with the outcome and this owner's
+    /// share of the games — report totals minus what the claim already
+    /// carried, because a resumed pass finishing under a new owner reports
+    /// totals the earlier owner already counted. Unset is fine.
+    std::function<void(RunOutcome, int games_processed, int games_failed)> on_finished;
+
     /// How long one pass may hold the row before it is treated as wedged.
     ///
     /// Survivable in a way the index ceiling is not: a pass that stops

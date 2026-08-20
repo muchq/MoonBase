@@ -22,6 +22,7 @@ Labels Bare() { return {{kIndexerLabel, kIndexerValue}}; }
 constexpr std::string_view kRunOutcomes[] = {"completed", "failed", "interrupted", "lease_lost"};
 constexpr std::string_view kMonthResults[] = {"indexed", "degraded", "empty", "cached"};
 constexpr std::string_view kArchiveResults[] = {"ok", "no_archive", "error"};
+constexpr std::string_view kReanalyzedResults[] = {"processed", "failed"};
 
 }  // namespace
 
@@ -35,6 +36,23 @@ void WorkerMetrics::Declare() {
   }
   for (std::string_view result : kArchiveResults) {
     metrics_.DeclareCounter(kArchiveFetchesMetric, With("result", std::string(result)));
+  }
+  for (std::string_view outcome : kRunOutcomes) {
+    metrics_.DeclareCounter(kReanalysisPassesMetric, With("outcome", std::string(outcome)));
+  }
+  for (std::string_view result : kReanalyzedResults) {
+    metrics_.DeclareCounter(kGamesReanalyzedMetric, With("result", std::string(result)));
+  }
+}
+
+void WorkerMetrics::PassFinished(RunOutcome outcome, int games_processed, int games_failed) {
+  metrics_.RecordCounter(kReanalysisPassesMetric, 1,
+                         With("outcome", std::string(ToString(outcome))));
+  if (games_processed > 0) {
+    metrics_.RecordCounter(kGamesReanalyzedMetric, games_processed, With("result", "processed"));
+  }
+  if (games_failed > 0) {
+    metrics_.RecordCounter(kGamesReanalyzedMetric, games_failed, With("result", "failed"));
   }
 }
 

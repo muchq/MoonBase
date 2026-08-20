@@ -174,6 +174,10 @@ int main() {
   // indexing claim.
   one_d4_worker::ReanalysisPoller::Options reanalysis_options;
   reanalysis_options.owner = poller_options.owner;
+  reanalysis_options.on_finished = [&metrics](one_d4_worker::RunOutcome outcome, int processed,
+                                              int failed) {
+    metrics.PassFinished(outcome, processed, failed);
+  };
   std::thread reanalysis([&] {
     one_d4_worker::PollReanalysisUntilStopped(
         [&bounded_db_url] { return one_d4_worker::NewOwnedReanalysisQueue(bounded_db_url); },

@@ -26,6 +26,12 @@ inline constexpr char kMotifOccurrencesMetric[] = "motif_occurrences";
 inline constexpr char kRunDurationMetric[] = "index_run_duration_micros";
 inline constexpr char kGamesPerMonthMetric[] = "index_games_per_month";
 
+// The reanalysis pass's series (#1389 phase 5). New names rather than the
+// index ones: a pass reads stored PGNs and an index run fetches months, and
+// a dashboard that cannot tell them apart cannot say which one is failing.
+inline constexpr char kReanalysisPassesMetric[] = "reanalysis_passes";
+inline constexpr char kGamesReanalyzedMetric[] = "games_reanalyzed";
+
 /// Bucket bounds for kRunDurationMetric, in microseconds, spanning a
 /// millisecond to six hours — IndexWorker.RUN_DURATION_BOUNDS, and pinned
 /// equal to it by metrics_test.
@@ -64,6 +70,11 @@ class WorkerMetrics : public RunObserver {
   void Declare();
 
   void RunFinished(RunOutcome outcome, absl::Duration elapsed);
+
+  /// Counts a finished reanalysis pass and this owner's share of its games.
+  /// The share, not the row's totals: a resumed pass finishing under a new
+  /// owner reports totals the earlier owner already exported.
+  void PassFinished(RunOutcome outcome, int games_processed, int games_failed);
 
   /// The bounds this worker's two histograms need, for OtelConfig.
   static std::map<std::string, std::vector<double>> HistogramBounds();

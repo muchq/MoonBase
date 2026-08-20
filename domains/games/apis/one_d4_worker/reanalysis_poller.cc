@@ -77,6 +77,15 @@ absl::StatusOr<RunOutcome> ReanalysisPoller::RunClaimed(const ReanalysisClaim& c
   PassLease lease(queue_, job.id, owner, options_.lease, options_.renew_every, options_.max_run);
   const absl::StatusOr<ReanalysisReport> report = run_(claim, lease);
 
+  const auto finished = [&](RunOutcome outcome) {
+    if (options_.on_finished) {
+      const int processed = report.ok() ? report->games_processed - job.games_processed : 0;
+      const int failed = report.ok() ? report->games_failed - job.games_failed : 0;
+      options_.on_finished(outcome, processed, failed);
+    }
+    return outcome;
+  };
+
   // Ahead of the lease check, like the index poller: a pass that stopped
   // at its ceiling gives the row back even if its claim lapsed on the way
   // out.
@@ -93,26 +102,37 @@ absl::StatusOr<RunOutcome> ReanalysisPoller::RunClaimed(const ReanalysisClaim& c
                   advanced ? queue_.HandBack(job.id, owner) : queue_.Release(job.id, owner));
   }
 
-  if (lease.lost() || (report.ok() && report->lease_lost)) return RunOutcome::kLeaseLost;
+  if (lease.lost() || (report.ok() && report->lease_lost)) {
+    return finished(RunOutcome::kLeaseLost);
+  }
 
   if (!report.ok()) {
     // The cause goes to the log, not to the column: error_message is
     // handed back by the API.
     LOG(ERROR) << "Reanalysis failed request_id=" << job.id << " error=" << report.status();
-    return Finish(RunOutcome::kFailed, queue_.Fail(job.id, owner, kInternalFailure));
+    const absl::StatusOr<RunOutcome> outcome =
+        Finish(RunOutcome::kFailed, queue_.Fail(job.id, owner, kInternalFailure));
+    if (!outcome.ok()) return outcome;
+    return finished(*outcome);
   }
 
   if (report->stopped.has_value()) {
     // Only kShutdown reaches here. The request did nothing wrong, and its
     // cursor is written, so the attempt is refunded and whoever takes it
     // next carries on.
-    return Finish(RunOutcome::kInterrupted, queue_.HandBack(job.id, owner));
+    const absl::StatusOr<RunOutcome> outcome =
+        Finish(RunOutcome::kInterrupted, queue_.HandBack(job.id, owner));
+    if (!outcome.ok()) return outcome;
+    return finished(*outcome);
   }
 
   LOG(INFO) << "Finished reanalysis request_id=" << job.id
             << " processed=" << report->games_processed << " failed=" << report->games_failed;
-  return Finish(RunOutcome::kCompleted,
-                queue_.Complete(job.id, owner, report->games_processed, report->games_failed));
+  const absl::StatusOr<RunOutcome> outcome =
+      Finish(RunOutcome::kCompleted,
+             queue_.Complete(job.id, owner, report->games_processed, report->games_failed));
+  if (!outcome.ok()) return outcome;
+  return finished(*outcome);
 }
 
 absl::StatusOr<bool> ReanalysisPoller::PollOnce() {
