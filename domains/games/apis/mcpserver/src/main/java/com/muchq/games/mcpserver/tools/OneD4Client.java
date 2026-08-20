@@ -39,26 +39,42 @@ public class OneD4Client {
    * <p>Not optional in practice: without it a peer that accepts the connection and then stalls
    * parks the calling thread forever, and forever outlasts every budget above it — including
    * IndexerFacade's polling ceiling, which is only consulted between calls and cannot interrupt one
-   * already in flight. Comfortably above one_d4's own analyze ceiling so a slow-but-working request
-   * is not cut off by the client.
+   * already in flight. For analyze this is the only wall clock anywhere: one_d4_v2 bounds work by
+   * plies, not time, so a slow-but-legal request is cut off here and nowhere upstream.
    */
   static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
 
   private final HttpClient httpClient;
   private final ObjectMapper mapper;
   private final String baseUrl;
+  private final String analyzeBaseUrl;
   private final Duration timeout;
 
-  public OneD4Client(HttpClient httpClient, ObjectMapper mapper, String baseUrl) {
-    this(httpClient, mapper, baseUrl, DEFAULT_TIMEOUT);
+  /**
+   * @param analyzeBaseUrl where analyze goes: the one_d4_v2 service (#1389 phase 6), which runs the
+   *     same fifteen detectors the indexer runs. The other operations stay on the Java service's
+   *     base until their v2 exists. Same wire shape either way — the split is a URL, not a parser.
+   */
+  public OneD4Client(
+      HttpClient httpClient, ObjectMapper mapper, String baseUrl, String analyzeBaseUrl) {
+    this(httpClient, mapper, baseUrl, analyzeBaseUrl, DEFAULT_TIMEOUT);
   }
 
-  OneD4Client(HttpClient httpClient, ObjectMapper mapper, String baseUrl, Duration timeout) {
+  OneD4Client(
+      HttpClient httpClient,
+      ObjectMapper mapper,
+      String baseUrl,
+      String analyzeBaseUrl,
+      Duration timeout) {
     this.timeout = timeout;
     this.httpClient = httpClient;
     this.mapper = mapper;
     // Trailing slashes would produce //v1/index, which some routers treat as a different path.
     this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+    this.analyzeBaseUrl =
+        analyzeBaseUrl.endsWith("/")
+            ? analyzeBaseUrl.substring(0, analyzeBaseUrl.length() - 1)
+            : analyzeBaseUrl;
   }
 
   /**
@@ -74,17 +90,24 @@ public class OneD4Client {
    * this eagerly-built {@code @Context} bean would take the process down and {@code restart:
    * always} would 502 every tool over a corpus misconfiguration.
    */
-  private HttpRequest build(HttpRequest.Builder builder, String description) {
+  private HttpRequest build(HttpRequest.Builder builder, String base, String description) {
     try {
       return builder.build();
     } catch (IllegalArgumentException e) {
+      // The base the request was built from, like the send path: blaming the
+      // v1 base for an unusable v2 base points an operator at the one box
+      // that is fine.
       throw new UpstreamException(
-          description + ": one_d4 base URL " + baseUrl + " is not usable — " + e.getMessage(), e);
+          description + ": upstream base URL " + base + " is not usable — " + e.getMessage(), e);
     }
   }
 
   public String baseUrl() {
     return baseUrl;
+  }
+
+  public String analyzeBaseUrl() {
+    return analyzeBaseUrl;
   }
 
   public IndexResponse index(IndexRequest request) {
@@ -111,10 +134,16 @@ public class OneD4Client {
   }
 
   public AnalyzeResponse analyze(AnalyzeRequest request) {
-    return post("/v1/analyze", request, AnalyzeResponse.class);
+    // The gateway path, not /v1/analyze: one_d4_v2 serves the path Caddy
+    // routes, so this client works aimed at either.
+    return post(analyzeBaseUrl, "/v2/analyze", request, AnalyzeResponse.class);
   }
 
   private <T> T post(String path, Object body, Class<T> type) {
+    return post(baseUrl, path, body, type);
+  }
+
+  private <T> T post(String base, String path, Object body, Class<T> type) {
     String description = "POST " + path;
     String json;
     try {
@@ -125,12 +154,13 @@ public class OneD4Client {
     HttpRequest request =
         build(
             HttpRequest.newBuilder()
-                .setUrl(baseUrl + path)
+                .setUrl(base + path)
                 .setMethod(HttpRequest.Method.POST)
                 .setContentType(HttpRequest.ContentType.JSON)
                 .setAccept(HttpRequest.ContentType.JSON)
                 .setTimeout(timeout)
                 .setBody(json),
+            base,
             description);
     HttpResponse response = send(request, description);
     throwIfNotOk(response, description);
@@ -144,6 +174,7 @@ public class OneD4Client {
             .setMethod(HttpRequest.Method.GET)
             .setAccept(HttpRequest.ContentType.JSON)
             .setTimeout(timeout),
+        baseUrl,
         description);
   }
 
@@ -154,16 +185,21 @@ public class OneD4Client {
    * second timer would only race the first and hand callers whichever exception won.
    */
   private HttpResponse send(HttpRequest request, String description) {
+    // Named off the request rather than assumed: analyze goes to the v2
+    // service, and "one_d4 at <the healthy Java base> is not reachable"
+    // would point an operator at the wrong box during exactly the outage
+    // the message exists for.
+    String base = request.getUrl().toString().startsWith(analyzeBaseUrl) ? analyzeBaseUrl : baseUrl;
     try {
       return httpClient.execute(request);
     } catch (UncheckedIOException e) {
       if (e.getCause() instanceof HttpTimeoutException) {
         throw new UpstreamException(
-            description + ": one_d4 at " + baseUrl + " did not answer within " + timeout, e);
+            description + ": upstream at " + base + " did not answer within " + timeout, e);
       }
-      throw notReachable(e);
+      throw notReachable(base, e);
     } catch (RuntimeException e) {
-      throw notReachable(e);
+      throw notReachable(base, e);
     }
   }
 
@@ -171,7 +207,7 @@ public class OneD4Client {
    * Connection refused, DNS failure, a reset mid-body. one_d4 is not answering — distinct from a
    * 4xx, because nothing the caller changes about their arguments will fix it.
    */
-  private UpstreamException notReachable(RuntimeException cause) {
+  private UpstreamException notReachable(String base, RuntimeException cause) {
     // The cause is named in the message: "not reachable" alone sends a reader to the network
     // without saying whether it was DNS, a refused connection or a reset.
     Throwable root = cause.getCause() != null ? cause.getCause() : cause;
@@ -180,7 +216,7 @@ public class OneD4Client {
             ? root.getClass().getSimpleName()
             : root.getClass().getSimpleName() + ": " + root.getMessage();
     return new UpstreamException(
-        "one_d4 at " + baseUrl + " is not reachable (" + detail + ")", cause);
+        "upstream at " + base + " is not reachable (" + detail + ")", cause);
   }
 
   /**
@@ -192,6 +228,13 @@ public class OneD4Client {
     int status = response.getStatusCode();
     if (status >= 200 && status < 300) {
       return;
+    }
+    if (status == 429) {
+      // Retryable, not a caller mistake: nothing about the arguments is
+      // wrong, the budget is spent. IllegalArgumentException here would
+      // tell an MCP client to rewrite a request that only needs patience.
+      throw new UpstreamException(
+          description + ": rate limited (429); retry after the window resets");
     }
     if (status >= 400 && status < 500) {
       throw new IllegalArgumentException(
@@ -212,6 +255,14 @@ public class OneD4Client {
       JsonNode error = body.get("error");
       if (error != null && !error.isNull()) {
         return error.asText();
+      }
+      // The v2 service's modeled errors: smithy serializes them as
+      // {"__type": ..., "message": ...}. Without this key the carefully
+      // worded rejections — which limit fired and by how much — collapse
+      // to a bare status code.
+      JsonNode message = body.get("message");
+      if (message != null && !message.isNull()) {
+        return message.asText();
       }
     } catch (RuntimeException | java.io.IOException e) {
       // Fall through to the default.

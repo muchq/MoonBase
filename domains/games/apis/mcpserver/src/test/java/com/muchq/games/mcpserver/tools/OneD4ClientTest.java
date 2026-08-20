@@ -18,7 +18,10 @@ public class OneD4ClientTest {
 
   private static OneD4Client clientFor(String baseUrl) {
     return new OneD4Client(
-        new Jdk11HttpClient(java.net.http.HttpClient.newHttpClient()), JsonUtils.mapper(), baseUrl);
+        new Jdk11HttpClient(java.net.http.HttpClient.newHttpClient()),
+        JsonUtils.mapper(),
+        baseUrl,
+        baseUrl);
   }
 
   /**
@@ -40,6 +43,29 @@ public class OneD4ClientTest {
         .hasMessageContaining("not usable")
         .hasMessageNotContaining("not reachable")
         .hasMessageNotContaining("serialize");
+  }
+
+  /**
+   * The fault message must name the base the request was actually built from. With a healthy Java
+   * base and an unusable v2 base, "one_d4 base URL http://one-d4:8080 is not usable" would send an
+   * operator to the one box that is fine — the same misfire the send path already guards against,
+   * only reachable under unequal bases.
+   */
+  @Test
+  public void anUnusableAnalyzeBaseIsBlamedOnTheAnalyzeBase() {
+    OneD4Client client =
+        new OneD4Client(
+            new Jdk11HttpClient(java.net.http.HttpClient.newHttpClient()),
+            JsonUtils.mapper(),
+            "http://one-d4:8080",
+            "http://one_d4_v2:8090");
+
+    assertThatThrownBy(
+            () -> client.analyze(new com.muchq.games.one_d4.api.dto.AnalyzeRequest("1. e4 e5")))
+        .isInstanceOf(OneD4Client.UpstreamException.class)
+        .hasMessageContaining("http://one_d4_v2:8090")
+        .hasMessageContaining("not usable")
+        .hasMessageNotContaining("http://one-d4:8080");
   }
 
   /** The GET path builds its request separately from the POST path and must report it the same. */

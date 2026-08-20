@@ -3,7 +3,8 @@
 > **Status: implemented.** `mcpserver` serves `index_chess_games`, `index_status`,
 > `query_chess_games`, `analyze_position` and `aggregate_chess_games` as `@Tool` methods on
 > `@Singleton` beans, over MCP via micronaut-mcp; their parameters are their input schemas.
-> Each one is an HTTP call to this service — see the Architecture section below. Code is in
+> Each one is an HTTP call to this service, except `analyze_position`, which calls the C++
+> `one_d4_v2` service — see the Architecture section below. Code is in
 > `mcpserver/tools/`, transport in `mcpserver/README.md`. The tool semantics below describe what
 > the tools do; the served schemas are derived from the method signatures and carry no `enum` or
 > `items` constraints, and `McpProtocolTest` is authoritative for their exact shape.
@@ -23,11 +24,20 @@ corpus-backed tool is a call to this service over the internal network (#1332).
 │                  │          │                               │
 │  MCP tools       │  HTTP    │  /v1/index    /v1/query       │
 │      │           │ ───────► │  /v1/index/{id}               │
-│  IndexerFacade   │          │  /v1/aggregate  /v1/analyze   │
+│  IndexerFacade   │          │  /v1/aggregate                │
 │  (HTTP client)   │          │            │                  │
-└──────────────────┘          │  Indexer engine + PostgreSQL  │
-                              └───────────────────────────────┘
+│      │           │          │  Indexer engine + PostgreSQL  │
+│      │           │          └───────────────────────────────┘
+│      │           │          ┌───────────────────────────────┐
+│      └───────────│──HTTP──► │  one_d4_v2 (C++)              │
+│                  │          │  /v2/analyze                  │
+└──────────────────┘          └───────────────────────────────┘
 ```
+
+`analyze_position` moved to the C++ `one_d4_v2` service (#1389 phase 6): analysis touches no
+corpus state, so it was the first route to leave the Java service. Its upstream is configured
+separately (`ONE_D4_V2_BASE_URL`, Compose sets `http://one-d4-v2:8090`), and unlike the corpus
+paths, `/v2/analyze` is also routed publicly through Caddy — it carries its own rate limiter.
 
 One corpus, one owner. `one_d4` keeps validation, the indexing lifecycle, retention, query limits,
 the schema and its migrations; a second process with a connection string would own a copy of all of
@@ -235,8 +245,8 @@ User: Can you analyze this game for tactics?
       1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O ...
 
 [Tool call: analyze_position(pgn="1. e4 e5 2. Nf3 Nc6 ...")]
-→ {"numMoves": 35, "motifs": ["PIN", "FORK"],
-   "occurrences": {"PIN": [{"moveNumber": 12, ...}], "FORK": [{"moveNumber": 23, ...}]}}
+→ {"numMoves": 35, "motifs": ["fork", "pin"],
+   "occurrences": {"pin": [{"moveNumber": 12, ...}], "fork": [{"moveNumber": 23, ...}]}}
 
 LLM: I found two tactical motifs in this game:
      - A pin at move 12 where...
