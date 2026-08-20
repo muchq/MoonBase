@@ -66,20 +66,21 @@ void IndexPool::Work(const std::function<bool()>& stopping,
     }
 
     const IndexJob& job = (*claim)->job;
-    LOG(INFO) << "Claimed " << job.id << " " << job.player << " " << job.start_month << ".."
-              << job.end_month << " as " << (*claim)->owner;
+    LOG(INFO) << "Claimed request_id=" << job.id << " player=" << job.player
+              << " months=" << job.start_month << ".." << job.end_month
+              << " owner=" << (*claim)->owner;
 
     const absl::Time started = absl::Now();
     const absl::StatusOr<RunOutcome> outcome = poller.RunClaimed(**claim);
     if (!outcome.ok()) {
       // The run is over either way; the row expires and somebody retries.
-      LOG(ERROR) << "Could not write the outcome of " << job.id << ": " << outcome.status();
+      LOG(ERROR) << "Outcome not written request_id=" << job.id << " error=" << outcome.status();
       continue;
     }
     const absl::Duration elapsed = absl::Now() - started;
     metrics_.RunFinished(*outcome, elapsed);
-    LOG(INFO) << "Finished " << job.id << " " << ToString(*outcome) << " in "
-              << absl::ToInt64Milliseconds(elapsed) << "ms";
+    LOG(INFO) << "Finished request_id=" << job.id << " outcome=" << ToString(*outcome)
+              << " duration_ms=" << absl::ToInt64Milliseconds(elapsed);
   }
 }
 

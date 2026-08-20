@@ -57,8 +57,23 @@ public class IndexController {
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   public IndexResponse createIndex(IndexRequest request) {
+    IndexResponse response =
+        indexRequestService.submit(
+            new IndexRequestService.Submission(
+                request.player(),
+                request.platform(),
+                request.startMonth(),
+                request.endMonth(),
+                Boolean.TRUE.equals(request.excludeBullet()),
+                Boolean.TRUE.equals(request.skipCache())));
+
+    // After the submit, not before: the id is minted in there, and a line
+    // without it cannot be tied to the request it created. request_id= is
+    // the field both workers log, so one search returns the lifecycle.
     LOG.info(
-        "POST /v1/index player={} platform={} months={}-{} excludeBullet={} skipCache={}",
+        "POST /v1/index request_id={} player={} platform={} months={}-{} excludeBullet={}"
+            + " skipCache={}",
+        response.id(),
         request.player(),
         request.platform(),
         request.startMonth(),
@@ -66,14 +81,7 @@ public class IndexController {
         request.excludeBullet(),
         request.skipCache());
 
-    return indexRequestService.submit(
-        new IndexRequestService.Submission(
-            request.player(),
-            request.platform(),
-            request.startMonth(),
-            request.endMonth(),
-            Boolean.TRUE.equals(request.excludeBullet()),
-            Boolean.TRUE.equals(request.skipCache())));
+    return response;
   }
 
   @GET

@@ -493,7 +493,9 @@ TEST(IndexPool, NoTwoRunsClaimUnderTheSameId) {
 TEST(IndexPool, SaysWhatItClaimed) {
   // Four threads make "Run finished" on its own useless: four identical
   // lines and no way to tie any of them to a request, a player or a
-  // duration. The claim line is what every later line hangs off.
+  // duration. The claim line is what every later line hangs off, and
+  // request_id is the field the API and the Java worker log too — one
+  // search over aggregated logs returns the whole lifecycle.
   FakeQueue queue;
   queue.set_jobs(1);
   BlockingRuns runs;
@@ -504,10 +506,11 @@ TEST(IndexPool, SaysWhatItClaimed) {
                  PollerOptions(), metrics, PoolOptions(1));
 
   absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
-  EXPECT_CALL(log,
-              Log(absl::LogSeverity::kInfo, testing::_,
-                  testing::AllOf(testing::HasSubstr("job-1"), testing::HasSubstr("hikaru"),
-                                 testing::HasSubstr("2026-01"), testing::HasSubstr("cpp/test/"))));
+  EXPECT_CALL(
+      log, Log(absl::LogSeverity::kInfo, testing::_,
+               testing::AllOf(
+                   testing::HasSubstr("request_id=job-1"), testing::HasSubstr("player=hikaru"),
+                   testing::HasSubstr("months=2026-01"), testing::HasSubstr("owner=cpp/test/"))));
   log.StartCapturingLogs();
   pool.Run(StopAfter(queue, 2), [](absl::Duration) {});
   log.StopCapturingLogs();
@@ -527,8 +530,9 @@ TEST(IndexPool, SaysWhichRunFinishedAndHowLongItTook) {
 
   absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
   EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, testing::_,
-                       testing::AllOf(testing::HasSubstr("job-1"), testing::HasSubstr("completed"),
-                                      testing::HasSubstr("ms"))));
+                       testing::AllOf(testing::HasSubstr("request_id=job-1"),
+                                      testing::HasSubstr("outcome=completed"),
+                                      testing::HasSubstr("duration_ms="))));
   log.StartCapturingLogs();
   pool.Run(StopAfter(queue, 2), [](absl::Duration) {});
   log.StopCapturingLogs();
