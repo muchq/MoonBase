@@ -1,24 +1,23 @@
 package com.muchq.games.one_d4.api;
 
-import com.muchq.games.one_d4.api.dto.ReanalysisResponse;
+import com.muchq.games.one_d4.api.dto.ReanalysisRequestResponse;
 import com.muchq.games.one_d4.api.dto.RederiveResponse;
 import com.muchq.games.one_d4.db.GameFeatureStore;
-import com.muchq.games.one_d4.db.GameFeatureStore.GameForReanalysis;
 import com.muchq.games.one_d4.db.GameFeatureStore.GameOpening;
-import com.muchq.games.one_d4.engine.FeatureExtractor;
-import com.muchq.games.one_d4.engine.model.GameFeatures;
-import com.muchq.games.one_d4.engine.model.Motif;
+import com.muchq.games.one_d4.db.ReanalysisRequestDao;
 import com.muchq.games.one_d4.openings.Openings;
 import jakarta.inject.Singleton;
+import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,69 +34,50 @@ public class AdminController {
   static final int BATCH_SIZE = 1000;
 
   private final GameFeatureStore gameFeatureStore;
-  private final FeatureExtractor featureExtractor;
+  private final ReanalysisRequestDao reanalysisRequests;
 
-  public AdminController(GameFeatureStore gameFeatureStore, FeatureExtractor featureExtractor) {
+  public AdminController(
+      GameFeatureStore gameFeatureStore, ReanalysisRequestDao reanalysisRequests) {
     this.gameFeatureStore = gameFeatureStore;
-    this.featureExtractor = featureExtractor;
+    this.reanalysisRequests = reanalysisRequests;
   }
 
   /**
-   * Re-analyzes all games currently stored in {@code game_features}, re-running all motif detectors
-   * against the stored PGN. Existing {@code motif_occurrences} rows for each game are replaced with
-   * the fresh results.
-   *
-   * <p>Games are processed in batches of {@value #BATCH_SIZE} to bound memory usage. The endpoint
-   * is synchronous — it blocks until all games have been processed and returns a summary.
+   * Enqueues a re-analysis of every stored game against the current detectors, and answers with the
+   * pass — freshly created, or the one already live, since one pass walks the whole corpus and a
+   * second live row buys nothing ({@code idx_reanalysis_requests_single_live} refuses it at
+   * insert). The work itself happens in the C++ worker: claim, lease, keyset walk, checkpointed
+   * cursor. Poll {@link #getReanalysis} for progress.
    */
   @POST
   @Path("/reanalyze")
   @Produces(MediaType.APPLICATION_JSON)
-  public ReanalysisResponse reanalyze() {
-    LOG.info("POST /admin/reanalyze — starting full re-analysis");
-    int processed = 0;
-    int failed = 0;
-    int offset = 0;
+  public ReanalysisRequestResponse reanalyze() {
+    ReanalysisRequestDao.EnqueueResult result = reanalysisRequests.enqueue();
+    LOG.info(
+        "POST /admin/reanalyze request_id={} created={}", result.request().id(), result.created());
+    return toResponse(result.request());
+  }
 
-    List<GameForReanalysis> batch;
-    do {
-      batch = gameFeatureStore.fetchForReanalysis(BATCH_SIZE, offset);
+  @GET
+  @Path("/reanalyze/{id}")
+  @Produces(MediaType.APPLICATION_JSON)
+  public ReanalysisRequestResponse getReanalysis(@PathParam("id") UUID id) {
+    LOG.info("GET /admin/reanalyze/{}", id);
+    return reanalysisRequests
+        .findById(id)
+        .map(AdminController::toResponse)
+        .orElseThrow(() -> new NoSuchElementException("Reanalysis request not found: " + id));
+  }
 
-      List<String> gameUrlsToDelete = new ArrayList<>();
-      Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesBatch =
-          new LinkedHashMap<>();
-
-      for (GameForReanalysis game : batch) {
-        try {
-          if (game.pgn() == null || game.pgn().isBlank()) {
-            LOG.warn("Skipping game with no PGN: {}", game.gameUrl());
-            failed++;
-            continue;
-          }
-          GameFeatures features = featureExtractor.extract(game.pgn());
-          gameUrlsToDelete.add(game.gameUrl());
-          occurrencesBatch.put(game.gameUrl(), features.occurrences());
-          processed++;
-        } catch (Exception e) {
-          LOG.warn("Failed to reanalyze game {}", game.gameUrl(), e);
-          failed++;
-        }
-      }
-
-      // One transaction. A delete that commits separately from its insert leaves a window in
-      // which an indexing worker flushing a live request over one of these games can insert its
-      // own occurrences and have both copies survive — the doubling ConcurrentFlushTest
-      // demonstrates. Being single-threaded inside this loop does not help; the other writer is
-      // in another thread.
-      gameFeatureStore.replaceOccurrences(gameUrlsToDelete, occurrencesBatch);
-
-      offset += BATCH_SIZE;
-      LOG.debug(
-          "Re-analysis progress: processed={} failed={} offset={}", processed, failed, offset);
-    } while (batch.size() == BATCH_SIZE);
-
-    LOG.info("POST /admin/reanalyze — done: processed={} failed={}", processed, failed);
-    return new ReanalysisResponse(processed, failed);
+  private static ReanalysisRequestResponse toResponse(
+      ReanalysisRequestDao.ReanalysisRequest request) {
+    return new ReanalysisRequestResponse(
+        request.id(),
+        request.status(),
+        request.gamesProcessed(),
+        request.gamesFailed(),
+        request.errorMessage());
   }
 
   /**

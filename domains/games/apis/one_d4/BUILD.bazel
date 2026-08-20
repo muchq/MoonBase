@@ -158,7 +158,7 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/api/dto/OccurrenceRow.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/QueryRequest.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/QueryResponse.java",
-        "src/main/java/com/muchq/games/one_d4/api/dto/ReanalysisResponse.java",
+        "src/main/java/com/muchq/games/one_d4/api/dto/ReanalysisRequestResponse.java",
         "src/main/java/com/muchq/games/one_d4/api/dto/RederiveResponse.java",
     ],
     visibility = ["//visibility:public"],
@@ -594,6 +594,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/dto/DtoJsonCompatTest.java",
     ],
     deps = [
+        ":test_db",
         ":api",
         ":db",
         ":dto",
@@ -910,7 +911,6 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/games/one_d4/e2e/IndexE2ETest.java",
         "src/test/java/com/muchq/games/one_d4/e2e/MotifE2ETest.java",
-        "src/test/java/com/muchq/games/one_d4/e2e/ReanalysisE2ETest.java",
         "src/test/java/com/muchq/games/one_d4/e2e/RederiveOpeningsE2ETest.java",
     ],
     deps = [

@@ -1,16 +1,17 @@
 package com.muchq.games.one_d4.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
-import com.muchq.games.one_d4.api.dto.ReanalysisResponse;
+import com.muchq.games.one_d4.api.dto.ReanalysisRequestResponse;
 import com.muchq.games.one_d4.api.dto.RederiveResponse;
 import com.muchq.games.one_d4.db.GameFeatureStore;
+import com.muchq.games.one_d4.db.GameFeatureStore.GameForReanalysis;
 import com.muchq.games.one_d4.db.GameFeatureStore.GameOpening;
-import com.muchq.games.one_d4.engine.FeatureExtractor;
-import com.muchq.games.one_d4.engine.GameReplayer;
-import com.muchq.games.one_d4.engine.PgnParser;
+import com.muchq.games.one_d4.db.ReanalysisRequestDao;
+import com.muchq.games.one_d4.db.TestDb;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import java.time.Instant;
@@ -18,7 +19,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.NoSuchElementException;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -26,142 +27,76 @@ public class AdminControllerTest {
 
   // === Tests ===
 
+  // The reanalyze endpoint enqueues; the pass itself runs in the C++ worker.
+  // A real dao over H2, because the interesting behavior — one live pass,
+  // reuse instead of stacking — is the dao's, and a fake of it would just
+  // restate the controller.
+
   @Test
-  public void reanalyze_emptyStore_returnsZeroCounts() {
-    FakeGameFeatureStore store = new FakeGameFeatureStore();
-    AdminController controller = new AdminController(store, noOpExtractor());
+  public void reanalyze_enqueuesAPendingPass() {
+    AdminController controller = controller();
 
-    ReanalysisResponse response = controller.reanalyze();
+    ReanalysisRequestResponse response = controller.reanalyze();
 
-    assertThat(response.gamesProcessed()).isEqualTo(0);
-    assertThat(response.gamesFailed()).isEqualTo(0);
+    assertThat(response.id()).isNotNull();
+    assertThat(response.status()).isEqualTo("PENDING");
+    assertThat(response.gamesProcessed()).isZero();
+    assertThat(response.gamesFailed()).isZero();
+    assertThat(response.errorMessage()).isNull();
   }
 
   @Test
-  public void reanalyze_singleValidGame_returnsOneProcessed() {
-    FakeGameFeatureStore store = new FakeGameFeatureStore();
-    store.addGame("https://chess.com/game/1", "valid pgn");
-    AdminController controller = new AdminController(store, noOpExtractor());
+  public void reanalyze_whileAPassIsLive_answersWithItInsteadOfStackingASecond() {
+    AdminController controller = controller();
 
-    ReanalysisResponse response = controller.reanalyze();
+    ReanalysisRequestResponse first = controller.reanalyze();
+    ReanalysisRequestResponse again = controller.reanalyze();
 
-    assertThat(response.gamesProcessed()).isEqualTo(1);
-    assertThat(response.gamesFailed()).isEqualTo(0);
+    assertThat(again.id()).isEqualTo(first.id());
   }
 
   @Test
-  public void reanalyze_nullPgn_countsAsFailed_extractorNeverCalled() {
-    FakeGameFeatureStore store = new FakeGameFeatureStore();
-    store.addGame("https://chess.com/game/1", null);
-    FakeFeatureExtractor extractor = noOpExtractor();
-    AdminController controller = new AdminController(store, extractor);
+  public void getReanalysis_reportsWhatTheWorkerCheckpointed() {
+    AdminController controller = controller();
+    UUID id = controller.reanalyze().id();
+    testDb
+        .jdbi()
+        .useHandle(
+            h ->
+                h.createUpdate(
+                        "UPDATE reanalysis_requests SET status = 'PROCESSING',"
+                            + " games_processed = 500, games_failed = 3 WHERE id = :id")
+                    .bind("id", id)
+                    .execute());
 
-    ReanalysisResponse response = controller.reanalyze();
+    ReanalysisRequestResponse response = controller.getReanalysis(id);
 
-    assertThat(response.gamesProcessed()).isEqualTo(0);
-    assertThat(response.gamesFailed()).isEqualTo(1);
-    assertThat(extractor.callCount()).isEqualTo(0);
+    assertThat(response.status()).isEqualTo("PROCESSING");
+    assertThat(response.gamesProcessed()).isEqualTo(500);
+    assertThat(response.gamesFailed()).isEqualTo(3);
   }
 
   @Test
-  public void reanalyze_blankPgn_countsAsFailed() {
-    FakeGameFeatureStore store = new FakeGameFeatureStore();
-    store.addGame("https://chess.com/game/1", "   ");
-    AdminController controller = new AdminController(store, noOpExtractor());
+  public void getReanalysis_unknownId_throwsNotFound() {
+    AdminController controller = controller();
 
-    ReanalysisResponse response = controller.reanalyze();
-
-    assertThat(response.gamesProcessed()).isEqualTo(0);
-    assertThat(response.gamesFailed()).isEqualTo(1);
-  }
-
-  @Test
-  public void reanalyze_exceptionOnOneGame_othersStillProcessed() {
-    // Null PGN game is sandwiched between two valid games.
-    FakeGameFeatureStore store = new FakeGameFeatureStore();
-    store.addGame("https://chess.com/game/1", "valid pgn 1");
-    store.addGame("https://chess.com/game/2", null);
-    store.addGame("https://chess.com/game/3", "valid pgn 3");
-    AdminController controller = new AdminController(store, noOpExtractor());
-
-    ReanalysisResponse response = controller.reanalyze();
-
-    assertThat(response.gamesProcessed()).isEqualTo(2);
-    assertThat(response.gamesFailed()).isEqualTo(1);
-    // Game 3 is processed even though game 2 failed.
-    assertThat(store.insertOccurrencesCount("https://chess.com/game/3")).isEqualTo(1);
-  }
-
-  @Test
-  public void reanalyze_validGame_callsDeleteAndInsert() {
-    FakeGameFeatureStore store = new FakeGameFeatureStore();
-    String url = "https://chess.com/game/1";
-    store.addGame(url, "valid pgn");
-    AdminController controller = new AdminController(store, noOpExtractor());
-
-    controller.reanalyze();
-
-    assertThat(store.deleteOccurrencesCount(url)).isEqualTo(1);
-    assertThat(store.insertOccurrencesCount(url)).isEqualTo(1);
-  }
-
-  @Test
-  public void reanalyze_nullPgn_doesNotCallDeleteOrInsert() {
-    FakeGameFeatureStore store = new FakeGameFeatureStore();
-    String url = "https://chess.com/game/1";
-    store.addGame(url, null);
-    AdminController controller = new AdminController(store, noOpExtractor());
-
-    controller.reanalyze();
-
-    assertThat(store.deleteOccurrencesCount(url)).isEqualTo(0);
-    assertThat(store.insertOccurrencesCount(url)).isEqualTo(0);
-  }
-
-  @Test
-  public void reanalyze_multipleGames_correctAggregateCounts() {
-    FakeGameFeatureStore store = new FakeGameFeatureStore();
-    for (int i = 0; i < 5; i++) {
-      store.addGame("https://chess.com/game/" + i, "pgn " + i);
-    }
-    AdminController controller = new AdminController(store, noOpExtractor());
-
-    ReanalysisResponse response = controller.reanalyze();
-
-    assertThat(response.gamesProcessed()).isEqualTo(5);
-    assertThat(response.gamesFailed()).isEqualTo(0);
+    assertThatThrownBy(() -> controller.getReanalysis(UUID.randomUUID()))
+        .isInstanceOf(NoSuchElementException.class);
   }
 
   // === Helpers ===
 
-  private static FakeFeatureExtractor noOpExtractor() {
-    return new FakeFeatureExtractor();
+  private TestDb testDb;
+
+  private AdminController controller() {
+    return controller(new FakeGameFeatureStore());
   }
 
-  private static class FakeFeatureExtractor extends FeatureExtractor {
-    private int callCount = 0;
-
-    FakeFeatureExtractor() {
-      super(new PgnParser(), new GameReplayer(), List.of());
-    }
-
-    @Override
-    public GameFeatures extract(String pgn) {
-      callCount++;
-      return new GameFeatures(Set.of(), 0, Map.of());
-    }
-
-    int callCount() {
-      return callCount;
-    }
+  private AdminController controller(GameFeatureStore store) {
+    testDb = TestDb.create("admin_ctrl_test");
+    return new AdminController(store, new ReanalysisRequestDao(testDb.jdbi()));
   }
 
-  /**
-   * Correcting a derivation like #1344's takes a `skipCache` reindex today, which refetches every
-   * month from chess.com to recompute something the table already determines: opening_family is
-   * Openings.familyFromName(opening_name), and opening_name is stored per row. These pin the local
-   * pass that replaces that round trip (#1350).
-   */
   @Test
   public void rederiveOpenings_rewritesOnlyTheRowsWhoseFamilyIsStale() {
     FakeGameFeatureStore store = new FakeGameFeatureStore();
@@ -169,7 +104,7 @@ public class AdminControllerTest {
     store.addOpening("g1", "Owens Defense 3.Nc3 e6", "Owens Defense...3.Nc3-e6");
     // Already correct — must not be rewritten, or "updated" stops meaning anything.
     store.addOpening("g2", "Caro Kann Defense Two Knights Attack", "Caro Kann Defense");
-    AdminController controller = new AdminController(store, noOpExtractor());
+    AdminController controller = controller(store);
 
     RederiveResponse response = controller.rederiveOpenings();
 
@@ -185,7 +120,7 @@ public class AdminControllerTest {
   public void rederiveOpenings_isIdempotent() {
     FakeGameFeatureStore store = new FakeGameFeatureStore();
     store.addOpening("g1", "Owens Defense 3.Nc3 e6", "Owens Defense...3.Nc3-e6");
-    AdminController controller = new AdminController(store, noOpExtractor());
+    AdminController controller = controller(store);
 
     assertThat(controller.rederiveOpenings().gamesUpdated()).isEqualTo(1);
     RederiveResponse second = controller.rederiveOpenings();
@@ -204,7 +139,7 @@ public class AdminControllerTest {
     FakeGameFeatureStore store = new FakeGameFeatureStore();
     store.addOpening("g1", null, "Stale Family");
     store.addOpening("g2", "Birds Opening 2.Nf3", null);
-    AdminController controller = new AdminController(store, noOpExtractor());
+    AdminController controller = controller(store);
 
     RederiveResponse response = controller.rederiveOpenings();
 
@@ -215,8 +150,7 @@ public class AdminControllerTest {
 
   @Test
   public void rederiveOpenings_emptyStoreReportsNothing() {
-    RederiveResponse response =
-        new AdminController(new FakeGameFeatureStore(), noOpExtractor()).rederiveOpenings();
+    RederiveResponse response = controller().rederiveOpenings();
 
     assertThat(response.gamesScanned()).isZero();
     assertThat(response.gamesUpdated()).isZero();
@@ -234,7 +168,7 @@ public class AdminControllerTest {
     for (int i = 0; i < rows; i++) {
       store.addOpening("g" + i, "Owens Defense 3.Nc3 e6", "stale");
     }
-    AdminController controller = new AdminController(store, noOpExtractor());
+    AdminController controller = controller(store);
 
     RederiveResponse response = controller.rederiveOpenings();
 
