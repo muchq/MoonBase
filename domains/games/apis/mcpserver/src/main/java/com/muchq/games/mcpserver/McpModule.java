@@ -32,6 +32,8 @@ public class McpModule {
    */
   private static final String DEFAULT_ONE_D4_URL = "http://one-d4:8080";
 
+  private static final String DEFAULT_ONE_D4_V2_URL = "http://one-d4-v2:8090";
+
   // Deliberately not the injected Micronaut ObjectMapper: chess.com responses carry fields this
   // client does not model, and JsonUtils' mapper is the one configured to ignore them. Tool
   // payloads get the same treatment for the same reason — see ToolJson. one_d4's responses go
@@ -57,6 +59,19 @@ public class McpModule {
     return env != null && !env.isBlank() ? env.strip() : DEFAULT_ONE_D4_URL;
   }
 
+  static String oneD4V2BaseUrl() {
+    return oneD4V2BaseUrl(null);
+  }
+
+  /** Same precedence as {@link #oneD4BaseUrl}, for the v2 service analyze moved to. */
+  static String oneD4V2BaseUrl(@Nullable String configured) {
+    if (configured != null && !configured.isBlank()) {
+      return configured.strip();
+    }
+    String env = System.getenv("ONE_D4_V2_BASE_URL");
+    return env != null && !env.isBlank() ? env.strip() : DEFAULT_ONE_D4_V2_URL;
+  }
+
   @Context
   public Clock clock() {
     return Clock.systemUTC();
@@ -74,8 +89,11 @@ public class McpModule {
 
   @Context
   public OneD4Client oneD4Client(
-      HttpClient httpClient, @Value("${one.d4.base.url:}") String configuredUrl) {
-    return new OneD4Client(httpClient, CLIENT_MAPPER, oneD4BaseUrl(configuredUrl));
+      HttpClient httpClient,
+      @Value("${one.d4.base.url:}") String configuredUrl,
+      @Value("${one.d4.v2.base.url:}") String configuredV2Url) {
+    return new OneD4Client(
+        httpClient, CLIENT_MAPPER, oneD4BaseUrl(configuredUrl), oneD4V2BaseUrl(configuredV2Url));
   }
 
   @Context

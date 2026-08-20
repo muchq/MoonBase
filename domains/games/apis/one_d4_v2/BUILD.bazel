@@ -1,6 +1,6 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
-load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
+load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
 # one_d4_v2: the v2 HTTP API (#1389 phase 6). The seed that eventually
 # replaces the Java service: same detectors as the C++ worker, so /v2/analyze

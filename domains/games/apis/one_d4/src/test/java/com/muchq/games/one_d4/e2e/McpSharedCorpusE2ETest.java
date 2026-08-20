@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.muchq.games.mcpserver.tools.AggregateGamesTool;
-import com.muchq.games.mcpserver.tools.AnalyzePositionTool;
 import com.muchq.games.mcpserver.tools.IndexGamesTool;
 import com.muchq.games.mcpserver.tools.IndexerFacade;
 import com.muchq.games.mcpserver.tools.OneD4Client;
@@ -52,7 +51,6 @@ public class McpSharedCorpusE2ETest {
   private static IndexGamesTool indexTool;
   private static QueryGamesTool queryTool;
   private static AggregateGamesTool aggregateTool;
-  private static AnalyzePositionTool analyzeTool;
 
   @BeforeAll
   public static void startOneD4() {
@@ -81,12 +79,12 @@ public class McpSharedCorpusE2ETest {
         new OneD4Client(
             new Jdk11HttpClient(java.net.http.HttpClient.newHttpClient()),
             JsonUtils.mapper(),
+            "http://localhost:" + oneD4.getPort(),
             "http://localhost:" + oneD4.getPort());
     IndexerFacade facade = new IndexerFacade(client);
     indexTool = new IndexGamesTool(facade);
     queryTool = new QueryGamesTool(facade);
     aggregateTool = new AggregateGamesTool(facade);
-    analyzeTool = new AnalyzePositionTool(facade);
   }
 
   @AfterAll
@@ -217,38 +215,6 @@ public class McpSharedCorpusE2ETest {
     assertThat(group.has("wins")).isFalse();
     assertThat(group.has("score")).isFalse();
     assertThat(group.get("count").asLong()).isPositive();
-  }
-
-  /**
-   * analyze_position is the one corpus-adjacent tool that writes nothing, and it now runs on one_d4
-   * rather than in the MCP process — so this is the only test that exercises that call as a tool
-   * rather than as an endpoint.
-   */
-  @Test
-  public void analyzingThroughMcpReachesOneD4AndWritesNothing() throws Exception {
-    String pgn = "[Event \"x\"]\n\n1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0";
-
-    JsonNode analysis = JsonUtils.mapper().readTree(payloadOf(analyzeTool.analyzePosition(pgn)));
-
-    assertThat(analysis.path("error").isMissingNode()).as("analyze failed: %s", analysis).isTrue();
-    assertThat(analysis.get("numMoves").asInt()).isEqualTo(4);
-    assertThat(analysis.get("motifs").toString())
-        .as("scholar's mate ends in checkmate")
-        .contains("checkmate");
-
-    // Nothing indexed as a side effect: the request list is still whatever indexing put there.
-    HttpResponse<String> requests =
-        http.send(
-            HttpRequest.newBuilder()
-                .uri(URI.create("http://localhost:" + oneD4.getPort() + "/v1/index"))
-                .GET()
-                .build(),
-            HttpResponse.BodyHandlers.ofString());
-    for (JsonNode request : JsonUtils.mapper().readTree(requests.body())) {
-      assertThat(request.get("player").asText())
-          .as("analysis created an indexing request")
-          .isNotEqualTo("");
-    }
   }
 
   private static List<String> urls(JsonNode games) {

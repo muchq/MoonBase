@@ -272,6 +272,7 @@ services:
       - PORT=8080
       - APP_NAME=mcpserver
       - ONE_D4_BASE_URL=http://one-d4:8080
+      - ONE_D4_V2_BASE_URL=http://one-d4-v2:8090
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=mcpserver
       - OTEL_RESOURCE_ATTRIBUTES=service.name=mcpserver,service.version=${MCPSERVER_SHA:-${DEPLOY_SHA:-latest}}

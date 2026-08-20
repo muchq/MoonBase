@@ -95,6 +95,7 @@ public class IndexerFacadeHttpTest {
         new OneD4Client(
             new Jdk11HttpClient(java.net.http.HttpClient.newHttpClient()),
             JsonUtils.mapper(),
+            baseUrl,
             baseUrl);
     // A no-op sleeper: these tests are about what the polling loop decides, not about it waiting.
     return new IndexerFacade(client, timeout, interval, millis -> {});
@@ -294,10 +295,13 @@ public class IndexerFacadeHttpTest {
     assertThat(result.groups().get(0).group().get("opponent_title")).isNull();
   }
 
+  // The v2 path, not /v1/analyze: analyze moved to the one_d4_v2 service
+  // (#1389 phase 6), and the client posts the gateway path that service
+  // serves directly.
   @Test
-  public void analyzePostsThePgnAndMapsTheMotifs() {
+  public void analyzePostsThePgnToTheV2RouteAndMapsTheMotifs() {
     route(
-        "POST /v1/analyze",
+        "POST /1d4/v2/analyze",
         200,
         "{\"numMoves\":54,\"motifs\":[\"checkmate\"],\"occurrences\":{\"checkmate\":"
             + "[{\"ply\":107,\"moveNumber\":54,\"side\":\"white\",\"description\":\"mate\","
@@ -305,7 +309,7 @@ public class IndexerFacadeHttpTest {
 
     AnalyzeResponse response = facade().analyze("1. e4 e5");
 
-    assertThat(requestLog).containsExactly("POST /v1/analyze");
+    assertThat(requestLog).containsExactly("POST /1d4/v2/analyze");
     assertThat(response.numMoves()).isEqualTo(54);
     assertThat(response.motifs()).containsExactly("checkmate");
     assertThat(response.occurrences().get("checkmate").get(0).ply()).isEqualTo(107);
@@ -494,6 +498,7 @@ public class IndexerFacadeHttpTest {
         new OneD4Client(
             new Jdk11HttpClient(java.net.http.HttpClient.newHttpClient()),
             JsonUtils.mapper(),
+            "http://localhost:1",
             "http://localhost:1");
     IndexerFacade facade =
         new IndexerFacade(dead, Duration.ofSeconds(1), Duration.ofMillis(1), m -> {});
@@ -538,6 +543,7 @@ public class IndexerFacadeHttpTest {
             new Jdk11HttpClient(java.net.http.HttpClient.newHttpClient()),
             JsonUtils.mapper(),
             baseUrl,
+            baseUrl,
             Duration.ofMillis(300));
 
     Thread.interrupted(); // Stand on nothing an earlier case left behind.
@@ -579,6 +585,7 @@ public class IndexerFacadeHttpTest {
         new OneD4Client(
             new Jdk11HttpClient(java.net.http.HttpClient.newHttpClient()),
             JsonUtils.mapper(),
+            baseUrl + "/",
             baseUrl + "/");
 
     new IndexerFacade(client).query("motif(pin)", null, 10);

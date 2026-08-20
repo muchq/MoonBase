@@ -90,6 +90,8 @@ public class McpModuleTest {
     try (ApplicationContext context = ApplicationContext.run()) {
       assertThat(context.getBean(IndexerFacade.class)).isNotNull();
       assertThat(context.getBean(OneD4Client.class).baseUrl()).isEqualTo(McpModule.oneD4BaseUrl());
+      assertThat(context.getBean(OneD4Client.class).analyzeBaseUrl())
+          .isEqualTo(McpModule.oneD4V2BaseUrl());
     }
   }
 }

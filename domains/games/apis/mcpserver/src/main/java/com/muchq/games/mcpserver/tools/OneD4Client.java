@@ -47,18 +47,34 @@ public class OneD4Client {
   private final HttpClient httpClient;
   private final ObjectMapper mapper;
   private final String baseUrl;
+  private final String analyzeBaseUrl;
   private final Duration timeout;
 
-  public OneD4Client(HttpClient httpClient, ObjectMapper mapper, String baseUrl) {
-    this(httpClient, mapper, baseUrl, DEFAULT_TIMEOUT);
+  /**
+   * @param analyzeBaseUrl where analyze goes: the one_d4_v2 service (#1389 phase 6), which runs the
+   *     same fifteen detectors the indexer runs. The other operations stay on the Java service's
+   *     base until their v2 exists. Same wire shape either way — the split is a URL, not a parser.
+   */
+  public OneD4Client(
+      HttpClient httpClient, ObjectMapper mapper, String baseUrl, String analyzeBaseUrl) {
+    this(httpClient, mapper, baseUrl, analyzeBaseUrl, DEFAULT_TIMEOUT);
   }
 
-  OneD4Client(HttpClient httpClient, ObjectMapper mapper, String baseUrl, Duration timeout) {
+  OneD4Client(
+      HttpClient httpClient,
+      ObjectMapper mapper,
+      String baseUrl,
+      String analyzeBaseUrl,
+      Duration timeout) {
     this.timeout = timeout;
     this.httpClient = httpClient;
     this.mapper = mapper;
     // Trailing slashes would produce //v1/index, which some routers treat as a different path.
     this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+    this.analyzeBaseUrl =
+        analyzeBaseUrl.endsWith("/")
+            ? analyzeBaseUrl.substring(0, analyzeBaseUrl.length() - 1)
+            : analyzeBaseUrl;
   }
 
   /**
@@ -87,6 +103,10 @@ public class OneD4Client {
     return baseUrl;
   }
 
+  public String analyzeBaseUrl() {
+    return analyzeBaseUrl;
+  }
+
   public IndexResponse index(IndexRequest request) {
     return post("/v1/index", request, IndexResponse.class);
   }
@@ -111,10 +131,16 @@ public class OneD4Client {
   }
 
   public AnalyzeResponse analyze(AnalyzeRequest request) {
-    return post("/v1/analyze", request, AnalyzeResponse.class);
+    // The gateway path, not /v1/analyze: one_d4_v2 serves the path Caddy
+    // routes, so this client works aimed at either.
+    return post(analyzeBaseUrl, "/1d4/v2/analyze", request, AnalyzeResponse.class);
   }
 
   private <T> T post(String path, Object body, Class<T> type) {
+    return post(baseUrl, path, body, type);
+  }
+
+  private <T> T post(String base, String path, Object body, Class<T> type) {
     String description = "POST " + path;
     String json;
     try {
@@ -125,7 +151,7 @@ public class OneD4Client {
     HttpRequest request =
         build(
             HttpRequest.newBuilder()
-                .setUrl(baseUrl + path)
+                .setUrl(base + path)
                 .setMethod(HttpRequest.Method.POST)
                 .setContentType(HttpRequest.ContentType.JSON)
                 .setAccept(HttpRequest.ContentType.JSON)

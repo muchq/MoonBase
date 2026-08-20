@@ -18,7 +18,10 @@ public class OneD4ClientTest {
 
   private static OneD4Client clientFor(String baseUrl) {
     return new OneD4Client(
-        new Jdk11HttpClient(java.net.http.HttpClient.newHttpClient()), JsonUtils.mapper(), baseUrl);
+        new Jdk11HttpClient(java.net.http.HttpClient.newHttpClient()),
+        JsonUtils.mapper(),
+        baseUrl,
+        baseUrl);
   }
 
   /**
