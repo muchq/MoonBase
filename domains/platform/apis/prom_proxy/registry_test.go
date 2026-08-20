@@ -231,36 +231,63 @@ func TestRegistry_PortraitCacheQueriesUseTheStandardFamily(t *testing.T) {
 // selector added by one sums every service's caches into that service's
 // panel.
 // The migration from the Java indexer to the C++ one is invisible without
-// these: every other one_d4 tile sums both workers through
-// service_name=~"one_d4(_worker)?", so a chart cannot say which of them did
-// the work. #1389 names two numbers as the ones worth building — the share
-// of games the C++ worker indexed, which is what decides when the Java path
-// is deleted, and the motif rate per game on each side, which is the thing
-// most likely to be quietly wrong while nobody can see it.
-func TestRegistry_IndexerMigrationTilesSplitTheTwoWorkers(t *testing.T) {
+// this: every other one_d4 tile sums both workers through
+// service_name=~"one_d4(_worker)?", so no chart can say which of them did the
+// work. #1389 calls this the number that decides when the Java path is
+// deleted.
+//
+// A golden string, like TestStandardQueries_GoldenStrings. Asserting the
+// parts is what let an earlier version of this test pass while the query
+// divided the wrong way round, multiplied by the wrong constant, or dropped
+// the indexer filter from a denominator — each of which renders a plausible
+// number nobody would question.
+func TestRegistry_CppShareOfGamesIsTheMigrationNumber(t *testing.T) {
 	oneD4 := serviceRegistry["one_d4"]
 
-	labels := map[string]string{}
-	for _, def := range oneD4.CustomScalars {
-		labels[def.Label] = def.QueryFor(ViewCount)
+	var share *customScalarDef
+	for i := range oneD4.CustomScalars {
+		if oneD4.CustomScalars[i].Label == "cpp_share_of_games" {
+			share = &oneD4.CustomScalars[i]
+		}
 	}
+	require.NotNil(t, share, "no cpp_share_of_games tile: the migration cannot be read off the dashboard")
 
-	for _, tile := range []string{"cpp_share_of_games", "motifs_per_game_cpp", "motifs_per_game_java"} {
-		query, ok := labels[tile]
-		require.True(t, ok, "no %s tile: the migration cannot be read off the dashboard", tile)
-		assert.NotEmpty(t, query)
+	const want = `sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?",indexer="cpp"}[24h]))` +
+		` / sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?"}[24h])) * 100`
+	assert.Equal(t, want, share.QueryFor(ViewCount))
+
+	// A ratio has one form. Toggled, the rate view would rewrite both halves
+	// into a second expression meaning exactly the same thing.
+	assert.False(t, share.Toggleable())
+	assert.Equal(t, want, share.QueryFor(ViewRate))
+	assert.Equal(t, "%", share.Unit)
+}
+
+// Renaming the value either worker stamps on its series leaves every test in
+// this repo green while the share tile reads zero forever, because the tile
+// hardcodes the string and both emitters reach it through a symbol. Same
+// failure the service_name selector has a test for, one label along.
+func TestRegistry_ShareTileNamesTheValueBothWorkersActuallyWrite(t *testing.T) {
+	query := ""
+	for _, def := range serviceRegistry["one_d4"].CustomScalars {
+		if def.Label == "cpp_share_of_games" {
+			query = def.QueryFor(ViewCount)
+		}
 	}
+	require.NotEmpty(t, query)
 
-	// Named indexers, not a bare sum. A tile that forgot the label reads as
-	// both workers combined and answers a question nobody asked — and it
-	// would look perfectly healthy doing it.
-	assert.Contains(t, labels["cpp_share_of_games"], `indexer="cpp"`)
-	assert.Contains(t, labels["motifs_per_game_cpp"], `indexer="cpp"`)
-	assert.Contains(t, labels["motifs_per_game_java"], `indexer="java"`)
+	cpp, err := os.ReadFile("../../../games/apis/one_d4_worker/metrics.h")
+	require.NoError(t, err)
+	assert.Contains(t, string(cpp), `kIndexerValue[] = "cpp"`,
+		"the C++ worker stamps a value this tile does not select; the share would read zero")
+	assert.Contains(t, string(cpp), `kIndexerLabel[] = "indexer"`)
 
-	// The share is a ratio, so it needs an unfiltered denominator: over the
-	// cpp numerator alone it is one hundred percent from the first game.
-	assert.Contains(t, labels["cpp_share_of_games"], "/")
+	java, err := os.ReadFile(
+		"../../../games/apis/one_d4/src/main/java/com/muchq/games/one_d4/worker/IndexWorker.java")
+	require.NoError(t, err)
+	assert.Contains(t, string(java), `INDEXER_VALUE = "java"`,
+		"the Java worker stamps a value the denominator cannot see")
+	assert.Contains(t, string(java), `INDEXER_LABEL = "indexer"`)
 }
 
 func TestRegistry_EveryCacheQueryNamesItsService(t *testing.T) {
