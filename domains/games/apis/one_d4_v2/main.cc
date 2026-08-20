@@ -3,7 +3,7 @@
 // (#1389 phase 6).
 //
 //   bazel run //domains/games/apis/one_d4_v2
-//   curl localhost:8090/1d4/v2/analyze -H 'content-type: application/json' -d '{"pgn":"..."}'
+//   curl localhost:8090/v2/analyze -H 'content-type: application/json' -d '{"pgn":"..."}'
 
 #include <pthread.h>
 #include <signal.h>
@@ -48,6 +48,13 @@ int main() {
 
   // Portrait's numbers: analysis is cheaper than a render, so a limit that
   // protects that CPU protects this one.
+  //
+  // Keys are client IPs, and mcpserver is one client: every analyze_position
+  // tool call from every MCP user shares one 20/min bucket with itself,
+  // while browser traffic through Caddy spreads across real client IPs.
+  // Accepted for now — MCP analyze volume is a person asking about a game,
+  // not a crawler — but it is the first knob to revisit if the tool ever
+  // fans out.
   futility::rate_limiter::SlidingWindowRateLimiterConfig limiter_config{
       .max_requests_per_key = 20,
       .window_size = std::chrono::seconds(60),
@@ -91,7 +98,7 @@ int main() {
   LOG(INFO) << "one_d4_v2 running on http://" << options.address << ":" << transport.port();
   LOG(INFO) << "Serving:";
   LOG(INFO) << "  GET  http://localhost:" << transport.port() << "/health";
-  LOG(INFO) << "  POST http://localhost:" << transport.port() << "/1d4/v2/analyze";
+  LOG(INFO) << "  POST http://localhost:" << transport.port() << "/v2/analyze";
 
   int signal_number = 0;
   sigwait(&shutdown_signals, &signal_number);

@@ -17,6 +17,7 @@ services:
       - microgpt-serve
       - mithril
       - one_d4
+      - one_d4_v2
       - portrait
       - prom_proxy
       - r3dr
@@ -231,7 +232,7 @@ services:
   one_d4_v2:
     image: ghcr.io/muchq/one_d4_v2:${ONE_D4_V2_SHA:-${DEPLOY_SHA:-latest}}
     labels:
-      com.muchq.description: "one_d4 v2 API: /1d4/v2/analyze on the C++ detectors (#1389 phase 6)"
+      com.muchq.description: "one_d4 v2 API: /v2/analyze on the C++ detectors (#1389 phase 6)"
     restart: always
     ports:
       - "8090:8090"
@@ -280,6 +281,8 @@ services:
       - /etc/mcpserver:/etc/mcpserver
     depends_on:
       one_d4:
+        condition: service_healthy
+      one_d4_v2:
         condition: service_healthy
     networks:
       - app_network

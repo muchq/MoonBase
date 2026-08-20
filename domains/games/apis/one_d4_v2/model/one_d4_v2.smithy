@@ -22,7 +22,7 @@ service OneD4V2 {
 }
 
 /// Finds the motifs in one PGN nobody indexed.
-@http(method: "POST", uri: "/1d4/v2/analyze", code: 200)
+@http(method: "POST", uri: "/v2/analyze", code: 200)
 operation Analyze {
     input := {
         @required

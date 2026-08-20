@@ -54,9 +54,9 @@ api.muchq.com {
 		path /1d4/v1/query
 	}
 
-	@post_1d4_v2_analyze {
+	@post_v2_analyze {
 		method POST
-		path /1d4/v2/analyze
+		path /v2/analyze
 	}
 
 	@ws_thoughts {
@@ -127,7 +127,7 @@ api.muchq.com {
 	}
 	# No rewrite: one_d4_v2 serves the gateway path itself, so the route a
 	# client sees and the route the model declares are one string.
-	reverse_proxy @post_1d4_v2_analyze one_d4_v2:8090
+	reverse_proxy @post_v2_analyze one_d4_v2:8090
 
 	log {
 		output file /var/log/caddy/access.log {

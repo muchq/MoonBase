@@ -1,6 +1,7 @@
 #include "domains/games/apis/one_d4_v2/analyze.h"
 
 #include <utility>
+#include <vector>
 
 #include "absl/status/status.h"
 #include "absl/strings/ascii.h"
@@ -40,6 +41,28 @@ absl::StatusOr<Analysis> Analyze(std::string_view pgn) {
 
   Analysis analysis;
   analysis.num_moves = features->num_moves;
+
+  // FORK is the one motif extraction never writes: it is a grouping of
+  // ATTACK rows — two or more targets, one ply, one attacker, none of them
+  // discovered (an unmasked piece is not forking) — derived at read time in
+  // SQL for the query path and in PositionAnalyzer for /v1/analyze. This is
+  // a read path, so it derives too, or analyze disagrees with motif(fork)
+  // in a way that reads as a query bug.
+  std::map<std::pair<int, std::string>, std::vector<const one_d4::MotifOccurrence*>>
+      attacks_by_ply_attacker;
+  for (const one_d4::MotifOccurrence& occurrence : features->occurrences) {
+    if (occurrence.motif == one_d4::Motif::kAttack && occurrence.attacker.has_value() &&
+        !occurrence.is_discovered) {
+      attacks_by_ply_attacker[{occurrence.ply, *occurrence.attacker}].push_back(&occurrence);
+    }
+  }
+  for (const auto& [key, group] : attacks_by_ply_attacker) {
+    if (group.size() < 2) continue;
+    for (const one_d4::MotifOccurrence* attack : group) {
+      analysis.occurrences["fork"].push_back(*attack);
+    }
+  }
+
   for (one_d4::MotifOccurrence& occurrence : features->occurrences) {
     if (occurrence.motif == one_d4::Motif::kAttack) continue;
     std::string name = absl::AsciiStrToLower(one_d4::ToString(occurrence.motif));

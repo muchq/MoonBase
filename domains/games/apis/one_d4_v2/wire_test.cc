@@ -36,7 +36,7 @@ class WireTest : public testing::Test {
   smithy::http::HttpResponse Post(const std::string& body) {
     smithy::http::HttpRequest request;
     request.method = "POST";
-    request.target = "/1d4/v2/analyze";
+    request.target = "/v2/analyze";
     request.headers.Set("content-type", "application/json");
     request.body = body;
     auto response = loopback_->Send(std::move(request));
@@ -57,6 +57,41 @@ TEST_F(WireTest, AnalyzesAGameAtTheV2Route) {
   EXPECT_THAT(response.body, HasSubstr("\"occurrences\":"));
   EXPECT_THAT(response.body, HasSubstr("\"moveNumber\""));
   EXPECT_THAT(response.body, HasSubstr("\"isMate\":true"));
+}
+
+// The whole body, byte for byte, for a game that exercises the breadth of
+// the shape: a derived fork, both pin types, movedPiece present and absent,
+// isMate both ways. The generated client cannot pin any of this — client
+// and server are generated from one model, so a renamed field round-trips
+// green — which makes this string the only guard on the wire spellings a
+// migrating v1 caller parses. It failed on day one over the missing fork,
+// which is the test working.
+TEST_F(WireTest, ResponseMatchesCurrentWireShape) {
+  const auto response = Post(kScholarsMateJson);
+  ASSERT_EQ(response.status, 200);
+  EXPECT_EQ(response.body,
+            "{\"motifs\":[\"check\",\"checkmate\",\"fork\",\"pin\"],\"numMoves\":4,\"occurrences\":"
+            "{\"check\":[{\"attacker\":\"Qf7\",\"description\":\"Checkmate at move "
+            "4\",\"isDiscovered\":false,\"isMate\":true,\"moveNumber\":4,\"ply\":7,\"side\":"
+            "\"white\",\"target\":\"ke8\"}],\"checkmate\":[{\"attacker\":\"Qf7\",\"description\":"
+            "\"Checkmate at move "
+            "4\",\"isDiscovered\":false,\"isMate\":true,\"moveNumber\":4,\"movedPiece\":\"Qh5f7\","
+            "\"ply\":7,\"side\":\"white\",\"target\":\"ke8\"}],\"fork\":[{\"attacker\":\"Qf7\","
+            "\"description\":\"Attack at move "
+            "4\",\"isDiscovered\":false,\"isMate\":true,\"moveNumber\":4,\"movedPiece\":\"Qf7\","
+            "\"ply\":7,\"side\":\"white\",\"target\":\"ke8\"},{\"attacker\":\"Qf7\","
+            "\"description\":\"Attack at move "
+            "4\",\"isDiscovered\":false,\"isMate\":false,\"moveNumber\":4,\"movedPiece\":\"Qf7\","
+            "\"ply\":7,\"side\":\"white\",\"target\":\"bf8\"},{\"attacker\":\"Qf7\","
+            "\"description\":\"Attack at move "
+            "4\",\"isDiscovered\":false,\"isMate\":false,\"moveNumber\":4,\"movedPiece\":\"Qf7\","
+            "\"ply\":7,\"side\":\"white\",\"target\":\"nf6\"}],\"pin\":[{\"attacker\":\"Qh5\","
+            "\"description\":\"Pin detected at move "
+            "3\",\"isDiscovered\":false,\"isMate\":false,\"moveNumber\":3,\"pinType\":\"ABSOLUTE\","
+            "\"ply\":5,\"side\":\"white\",\"target\":\"pf7\"},{\"attacker\":\"Qh5\","
+            "\"description\":\"Pin detected at move "
+            "3\",\"isDiscovered\":false,\"isMate\":false,\"moveNumber\":3,\"pinType\":\"RELATIVE\","
+            "\"ply\":5,\"side\":\"white\",\"target\":\"ph7\"}]}}");
 }
 
 TEST_F(WireTest, ABadPgnIsA400WithTheModeledError) {

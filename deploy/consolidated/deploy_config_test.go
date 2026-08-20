@@ -733,17 +733,33 @@ func TestMcpserverIsPointedAtOneD4(t *testing.T) {
 	}
 }
 
-// The host in ONE_D4_BASE_URL, or "" if the variable is absent.
-func oneD4UpstreamHost(t *testing.T) string {
+// The analyze tool no longer goes through one_d4: it is served by the C++
+// one_d4_v2 service (#1389), which mcpserver reaches by a second base URL. The
+// same missing-variable failure mode applies — mcpserver's compiled-in default
+// happens to name this compose file's alias, so only the pin here keeps the
+// deployment's answer written down. The hyphenated host is deliberate:
+// java.net.URI nulls the host of an underscored authority, see below.
+func TestMcpserverIsPointedAtOneD4V2(t *testing.T) {
+	block := serviceBlock(t, "compose.yaml", "mcpserver")
+	if !strings.Contains(block, "ONE_D4_V2_BASE_URL=http://one-d4-v2:8090") {
+		t.Errorf("mcpserver does not name one_d4_v2 as its analyze upstream. The analyze tool is "+
+			"an HTTP call to that service (#1389); without the variable the container falls back "+
+			"to a compiled-in default, which is a deployment decision living in Java. "+
+			"Block was:\n%s", block)
+	}
+}
+
+// The host one of mcpserver's upstream URL variables names.
+func mcpserverUpstreamHost(t *testing.T, envVar string) string {
 	t.Helper()
-	match := regexp.MustCompile(`ONE_D4_BASE_URL=(\S+)`).
+	match := regexp.MustCompile(envVar + `=(\S+)`).
 		FindStringSubmatch(serviceBlock(t, "compose.yaml", "mcpserver"))
 	if match == nil {
-		t.Fatalf("mcpserver's compose block sets no ONE_D4_BASE_URL")
+		t.Fatalf("mcpserver's compose block sets no %s", envVar)
 	}
 	parsed, err := url.Parse(match[1])
 	if err != nil {
-		t.Fatalf("ONE_D4_BASE_URL=%q does not parse as a URL: %v", match[1], err)
+		t.Fatalf("%s=%q does not parse as a URL: %v", envVar, match[1], err)
 	}
 	return parsed.Hostname()
 }
@@ -756,13 +772,26 @@ func oneD4UpstreamHost(t *testing.T) string {
 // The host must therefore be a legal RFC 1123 name, not merely one Docker
 // resolves.
 func TestTheOneD4UpstreamHostIsOneJavaCanParse(t *testing.T) {
-	host := oneD4UpstreamHost(t)
+	assertJavaParseableHost(t, "ONE_D4_BASE_URL")
+}
+
+// Same client, same URI parser, same trap: the analyze upstream moved to the
+// C++ one_d4_v2 service (#1389), but the caller is still mcpserver's
+// java.net.http, so its host is under the same RFC 1123 constraint — which is
+// exactly why the alias below exists at all.
+func TestTheOneD4V2UpstreamHostIsOneJavaCanParse(t *testing.T) {
+	assertJavaParseableHost(t, "ONE_D4_V2_BASE_URL")
+}
+
+func assertJavaParseableHost(t *testing.T, envVar string) {
+	t.Helper()
+	host := mcpserverUpstreamHost(t, envVar)
 	legal := regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$`)
 	if !legal.MatchString(host) {
-		t.Errorf("ONE_D4_BASE_URL names host %q, which is not an RFC 1123 hostname. Docker's DNS "+
+		t.Errorf("%s names host %q, which is not an RFC 1123 hostname. Docker's DNS "+
 			"resolves it and curl accepts it, but java.net.URI gives it a null host and "+
 			"java.net.http.HttpRequest rejects the URI, so mcpserver never opens a connection "+
-			"and reports every corpus tool as unreachable.", host)
+			"and reports every corpus tool as unreachable.", envVar, host)
 	}
 }
 
@@ -829,27 +858,38 @@ func networkAliases(t *testing.T, service, network string) []string {
 // A dotted name is an external upstream (api.1d4.net), reached through DNS
 // rather than through this network, and nothing here applies to it.
 func TestTheOneD4UpstreamHostIsAnAliasOneD4Publishes(t *testing.T) {
-	host := oneD4UpstreamHost(t)
-	if host == "one_d4" || strings.Contains(host, ".") {
+	assertUpstreamHostResolves(t, "ONE_D4_BASE_URL", "one_d4")
+}
+
+func TestTheOneD4V2UpstreamHostIsAnAliasOneD4V2Publishes(t *testing.T) {
+	assertUpstreamHostResolves(t, "ONE_D4_V2_BASE_URL", "one_d4_v2")
+}
+
+func assertUpstreamHostResolves(t *testing.T, envVar, service string) {
+	t.Helper()
+	host := mcpserverUpstreamHost(t, envVar)
+	if host == service || strings.Contains(host, ".") {
 		return
 	}
 
-	aliases := networkAliases(t, "one_d4", "app_network")
+	aliases := networkAliases(t, service, "app_network")
 	for _, alias := range aliases {
 		if alias == host {
 			return
 		}
 	}
-	t.Errorf("mcpserver calls %q but one_d4 publishes no such alias on app_network (found %v). "+
-		"Docker resolves a service by its key (one_d4) and by the aliases listed under the "+
-		"network, so %q does not resolve.", host, aliases, host)
+	t.Errorf("mcpserver calls %q but %s publishes no such alias on app_network (found %v). "+
+		"Docker resolves a service by its key (%s) and by the aliases listed under the "+
+		"network, so %q does not resolve.", host, service, aliases, service, host)
 }
 
-// one_d4's API stays internal. mcpserver calls /v1/index, /v1/query,
-// /v1/aggregate and /v1/analyze over the Compose network; none of that requires
-// a public route, and /v1/analyze in particular is unauthenticated CPU on
-// caller-supplied PGN, which is a different proposition on the open internet
-// than between two containers.
+// one_d4's API stays internal. mcpserver calls /v1/index, /v1/query and
+// /v1/aggregate over the Compose network; none of that requires a public
+// route, and /v1/analyze in particular is unauthenticated CPU on
+// caller-supplied PGN with a size cap and a timeout but no rate limiting,
+// which is a different proposition on the open internet than between two
+// containers. The public analyze route is /v2/analyze on one_d4_v2, which
+// carries its own limiter — see the next test.
 func TestTheAnalyzeRouteIsNotPubliclyExposed(t *testing.T) {
 	for _, line := range directiveLines(t, "Caddyfile") {
 		if strings.Contains(line, "/v1/analyze") {
@@ -858,6 +898,56 @@ func TestTheAnalyzeRouteIsNotPubliclyExposed(t *testing.T) {
 				"rate limiting; exposing it publicly is a deliberate decision that needs both "+
 				"(#1332).", line)
 		}
+	}
+}
+
+// /v2/analyze is the deliberate exception: publicly routed, POST-only, straight
+// to one_d4_v2 with no rewrite (the service serves the gateway path itself, so
+// the route a client sees and the route the model declares are one string).
+// The exposure leans on the service's own bounds — 256KB PGN cap, 4096-ply
+// cap, 20 req/min per client IP — rather than anything Caddy adds; auth is
+// still an open question (#1332). This test records the decision so a future
+// route change is a conversation, not an accident.
+func TestTheV2AnalyzeRouteIsDeliberatelyPublic(t *testing.T) {
+	lines := directiveLines(t, "Caddyfile")
+
+	var matcherLines []string
+	inMatcher := false
+	proxied := false
+	for _, line := range lines {
+		switch {
+		case line == "@post_v2_analyze {":
+			inMatcher = true
+		case inMatcher && line == "}":
+			inMatcher = false
+		case inMatcher:
+			matcherLines = append(matcherLines, line)
+		case strings.HasPrefix(line, "reverse_proxy @post_v2_analyze"):
+			proxied = true
+			if line != "reverse_proxy @post_v2_analyze one_d4_v2:8090" {
+				t.Errorf("the v2 analyze route goes somewhere other than one_d4_v2:8090 (%q); "+
+					"one_d4_v2 is the only service that serves /v2/analyze.", line)
+			}
+		}
+	}
+
+	want := map[string]bool{"method POST": false, "path /v2/analyze": false}
+	for _, line := range matcherLines {
+		if _, ok := want[line]; ok {
+			want[line] = true
+		}
+	}
+	for directive, found := range want {
+		if !found {
+			t.Errorf("the @post_v2_analyze matcher does not declare %q (found %v). The route is "+
+				"meant to be exactly POST /v2/analyze — a broader matcher exposes more of "+
+				"one_d4_v2 than the decision covered.", directive, matcherLines)
+		}
+	}
+	if !proxied {
+		t.Errorf("Caddy has no reverse_proxy for @post_v2_analyze. mcpserver reaches one_d4_v2 "+
+			"directly over the Compose network, but the public route (#1389 phase 6) is served "+
+			"through Caddy; without it /v2/analyze is dead from the internet.")
 	}
 }
 

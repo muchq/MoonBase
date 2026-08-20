@@ -46,6 +46,35 @@ TEST(AnalyzeTest, TheAttackPrimitiveIsNotACallerFacingMotif) {
       << "attack is what the detectors build on, not an answer";
 }
 
+// FORK is the one motif extraction never writes: it is a grouping of
+// ATTACK rows by attacker, derived at read time in SQL for the query path
+// and in PositionAnalyzer for /v1/analyze. Skipping the attack primitive
+// without doing that derivation here silently deleted fork from analyze —
+// while motif(fork) still finds it, which reads as a query bug.
+TEST(AnalyzeTest, DerivesForkFromTheAttackRowsLikeEveryOtherReadPath) {
+  // The Legal trap: 5. Nxf7 forks queen and rook.
+  constexpr char kKnightFork[] =
+      "[Event \"Live Chess\"]\n[White \"alice\"]\n[Black \"bob\"]\n\n"
+      "1. e4 e5 2. Nf3 Nc6 3. Bc4 Nd4 4. Nxe5 Qg5 5. Nxf7 Qxg2 6. Rf1 Qxe4+ "
+      "7. Be2 Nf3# 0-1\n";
+
+  const auto analysis = Analyze(kKnightFork);
+  ASSERT_TRUE(analysis.ok()) << analysis.status();
+  ASSERT_TRUE(analysis->occurrences.count("fork"))
+      << "5. Nxf7 forks queen and rook, and /v1/analyze says so";
+
+  // The same rows the attack primitive carried: at least two, same ply,
+  // same attacker, none discovered — a discovered attacker is not forking,
+  // it is unmasking.
+  const auto& forks = analysis->occurrences.at("fork");
+  ASSERT_GE(forks.size(), 2u);
+  for (const auto& fork : forks) {
+    EXPECT_EQ(fork.ply, forks.front().ply);
+    EXPECT_EQ(fork.attacker, forks.front().attacker);
+    EXPECT_FALSE(fork.is_discovered);
+  }
+}
+
 TEST(AnalyzeTest, RejectsAMissingPgn) {
   EXPECT_EQ(Analyze("").status().code(), absl::StatusCode::kInvalidArgument);
   EXPECT_EQ(Analyze("   \n  ").status().code(), absl::StatusCode::kInvalidArgument);
@@ -72,7 +101,10 @@ TEST(AnalyzeTest, RejectsMorePliesThanAnyChessGame) {
   const std::string pgn = absl::StrCat("[Event \"x\"]\n\n", moves, "*\n");
   ASSERT_LE(pgn.size(), kMaxPgnBytes) << "the byte cap fired first, so this proves nothing";
 
-  EXPECT_EQ(Analyze(pgn).status().code(), absl::StatusCode::kInvalidArgument);
+  const absl::Status status = Analyze(pgn).status();
+  EXPECT_EQ(status.code(), absl::StatusCode::kInvalidArgument);
+  EXPECT_THAT(std::string(status.message()), ::testing::HasSubstr("plies"))
+      << "rejected, but not by the cap this test is about";
 }
 
 }  // namespace

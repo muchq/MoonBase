@@ -110,3 +110,32 @@ cc_binary(
 )
 
 linux_amd64_oci_binary(bin_name = "one_d4_v2")
+
+cc_test(
+    name = "smithy_handler_test",
+    size = "small",
+    srcs = ["smithy_handler_test.cc"],
+    deps = [
+        ":smithy_handler",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
+cc_test(
+    name = "production_chain_test",
+    size = "small",
+    srcs = ["production_chain_test.cc"],
+    deps = [
+        ":one_d4_v2_smithy_server",
+        ":smithy_handler",
+        "//domains/platform/libs/aura",
+        "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:http_beast",
+        "@smithy_cpp//runtime:server",
+    ],
+)
