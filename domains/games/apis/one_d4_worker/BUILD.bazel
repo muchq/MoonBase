@@ -120,6 +120,35 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "reanalysis_run",
+    srcs = ["reanalysis_run.cc"],
+    hdrs = ["reanalysis_run.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":poller",
+        ":reanalysis_queue",
+        "//domains/games/libs/chess_cpp:pgn",
+        "//domains/games/libs/one_d4_motifs:extract",
+        "//domains/games/libs/one_d4_motifs:occurrence",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_test(
+    name = "reanalysis_run_test",
+    size = "small",
+    srcs = ["reanalysis_run_test.cc"],
+    deps = [
+        ":reanalysis_run",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # Same reasoning as pg_queue_test: a claim being exclusive and a terminal
 # write being fenced are properties of concurrent statements. Skips without
 # PG_TEST_DB_URL.
