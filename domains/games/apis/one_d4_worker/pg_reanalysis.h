@@ -1,6 +1,7 @@
 #ifndef DOMAINS_GAMES_APIS_ONE_D4_WORKER_PG_REANALYSIS_H
 #define DOMAINS_GAMES_APIS_ONE_D4_WORKER_PG_REANALYSIS_H
 
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -41,6 +42,21 @@ class PgOccurrenceSink : public OccurrenceSink {
   std::string request_id_;
   std::string owner_;
 };
+
+/// The corpus and the sink for one pass, over a connection of their own.
+///
+/// Held together because they must share it: two connections would put the
+/// paging read outside the transaction the replace runs in, which is
+/// harmless but wasteful, and would double this thread's share of a
+/// connection budget two other services draw on.
+struct ReanalysisEnds {
+  std::unique_ptr<pg::Client> client;
+  std::unique_ptr<GameCorpus> corpus;
+  std::unique_ptr<OccurrenceSink> sink;
+};
+
+ReanalysisEnds NewOwnedReanalysisEnds(const std::string& db_url, const std::string& request_id,
+                                      const std::string& owner);
 
 }  // namespace one_d4_worker
 

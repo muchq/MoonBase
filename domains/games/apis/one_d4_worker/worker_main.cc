@@ -19,6 +19,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
@@ -34,7 +35,11 @@
 #include "domains/games/apis/one_d4_worker/metrics.h"
 #include "domains/games/apis/one_d4_worker/pg_game_sink.h"
 #include "domains/games/apis/one_d4_worker/pg_queue.h"
+#include "domains/games/apis/one_d4_worker/pg_reanalysis.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
+#include "domains/games/apis/one_d4_worker/reanalysis_poller.h"
+#include "domains/games/apis/one_d4_worker/reanalysis_queue.h"
+#include "domains/games/apis/one_d4_worker/reanalysis_run.h"
 #include "domains/games/apis/one_d4_worker/title_roster.h"
 #include "domains/games/apis/one_d4_worker/worker.h"
 #include "domains/games/libs/chess_com_cpp/production_client.h"
@@ -157,7 +162,37 @@ int main() {
       poller_options, metrics, pool_options);
   LOG(INFO) << "Indexing up to " << pool_options.slots << " requests at once";
 
-  pool.Run(stopping, [](absl::Duration wait) { absl::SleepFor(wait); });
+  const auto sleep = [](absl::Duration wait) { absl::SleepFor(wait); };
+
+  // A thread of its own, not a slot in the pool (#1389 phase 5). A pass
+  // walks the whole corpus and runs for hours; a slot spent on one is a
+  // slot not indexing, and the queue hands out at most one pass anyway.
+  //
+  // Its connections are built on that thread for the same reason the
+  // pool's are: a pg::Client is one connection serialised by a mutex, and
+  // a pass's progress writes would otherwise queue in front of every
+  // indexing claim.
+  one_d4_worker::ReanalysisPoller::Options reanalysis_options;
+  reanalysis_options.owner = poller_options.owner;
+  std::thread reanalysis([&] {
+    one_d4_worker::PollReanalysisUntilStopped(
+        [&bounded_db_url] { return one_d4_worker::NewOwnedReanalysisQueue(bounded_db_url); },
+        [&bounded_db_url, &stopping](const one_d4_worker::ReanalysisClaim& claim,
+                                     one_d4_worker::ReanalysisLease& lease)
+            -> absl::StatusOr<one_d4_worker::ReanalysisReport> {
+          const auto ends =
+              one_d4_worker::NewOwnedReanalysisEnds(bounded_db_url, claim.job.id, claim.owner);
+          one_d4_worker::ReanalysisRun::Options options;
+          options.stopping = stopping;
+          one_d4_worker::ReanalysisRun run(*ends.corpus, *ends.sink, options);
+          return run.Execute(claim.job, lease);
+        },
+        reanalysis_options, stopping, sleep, idle_wait);
+  });
+  LOG(INFO) << "Polling reanalysis_requests as " << reanalysis_options.owner;
+
+  pool.Run(stopping, sleep);
+  reanalysis.join();
 
   LOG(INFO) << "Shutting down";
   return 0;

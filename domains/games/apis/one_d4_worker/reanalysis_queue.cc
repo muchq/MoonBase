@@ -160,4 +160,49 @@ absl::StatusOr<bool> PgReanalysisQueue::Release(std::string_view id, std::string
   return released->rows() > 0;
 }
 
+namespace {
+
+/// PgReanalysisQueue plus the connection it claims over.
+class OwnedReanalysisQueue : public ReanalysisQueue {
+ public:
+  explicit OwnedReanalysisQueue(const std::string& db_url) : client_(db_url), queue_(client_) {}
+
+  absl::StatusOr<std::optional<ReanalysisJob>> ClaimNext(std::string_view owner,
+                                                         absl::Duration lease) override {
+    return queue_.ClaimNext(owner, lease);
+  }
+  absl::StatusOr<bool> Heartbeat(std::string_view id, std::string_view owner,
+                                 absl::Duration lease) override {
+    return queue_.Heartbeat(id, owner, lease);
+  }
+  absl::StatusOr<bool> Progress(std::string_view id, std::string_view owner,
+                                std::string_view cursor, int processed, int failed) override {
+    return queue_.Progress(id, owner, cursor, processed, failed);
+  }
+  absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner, int processed,
+                                int failed) override {
+    return queue_.Complete(id, owner, processed, failed);
+  }
+  absl::StatusOr<bool> Fail(std::string_view id, std::string_view owner,
+                            std::string_view message) override {
+    return queue_.Fail(id, owner, message);
+  }
+  absl::StatusOr<bool> HandBack(std::string_view id, std::string_view owner) override {
+    return queue_.HandBack(id, owner);
+  }
+  absl::StatusOr<bool> Release(std::string_view id, std::string_view owner) override {
+    return queue_.Release(id, owner);
+  }
+
+ private:
+  pg::Client client_;
+  PgReanalysisQueue queue_;
+};
+
+}  // namespace
+
+std::unique_ptr<ReanalysisQueue> NewOwnedReanalysisQueue(const std::string& db_url) {
+  return std::make_unique<OwnedReanalysisQueue>(db_url);
+}
+
 }  // namespace one_d4_worker

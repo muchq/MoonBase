@@ -1,6 +1,7 @@
 #include "domains/games/apis/one_d4_worker/pg_reanalysis.h"
 
 #include <algorithm>
+#include <memory>
 #include <string>
 
 #include "absl/strings/str_cat.h"
@@ -84,6 +85,15 @@ absl::Status PgOccurrenceSink::Replace(const std::vector<ReanalyzedGame>& games)
         absl::StrCat("reanalysis request ", request_id_, " is no longer held by ", owner_));
   }
   return absl::OkStatus();
+}
+
+ReanalysisEnds NewOwnedReanalysisEnds(const std::string& db_url, const std::string& request_id,
+                                      const std::string& owner) {
+  ReanalysisEnds ends;
+  ends.client = std::make_unique<pg::Client>(db_url);
+  ends.corpus = std::make_unique<PgGameCorpus>(*ends.client);
+  ends.sink = std::make_unique<PgOccurrenceSink>(*ends.client, request_id, owner);
+  return ends;
 }
 
 }  // namespace one_d4_worker

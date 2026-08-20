@@ -96,6 +96,11 @@ class PgReanalysisQueue : public ReanalysisQueue {
   pg::Client& client_;
 };
 
+/// A queue with a connection of its own, for the reanalysis thread. Same
+/// reason NewOwnedPgQueue exists: one pg::Client is one connection
+/// serialised by a mutex.
+std::unique_ptr<ReanalysisQueue> NewOwnedReanalysisQueue(const std::string& db_url);
+
 }  // namespace one_d4_worker
 
 #endif  // DOMAINS_GAMES_APIS_ONE_D4_WORKER_REANALYSIS_QUEUE_H
