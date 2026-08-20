@@ -502,7 +502,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
                     .execute());
     if (updated == 0 && !terminal) {
       LOG.warn(
-          "Refused to move request {} to {}: it is no longer live, most likely retired as stale."
+          "Refused to move request_id={} to {}: it is no longer live, most likely retired as stale."
               + " A replacement request owns this range now.",
           id,
           status);
@@ -552,7 +552,10 @@ public class IndexingRequestDao implements IndexingRequestStore {
                     .execute());
     if (updated == 0) {
       LOG.warn(
-          "Refused to move request {} to {}: {} no longer holds the lease.", id, status, ownerId);
+          "Refused to move request_id={} to {}: {} no longer holds the lease.",
+          id,
+          status,
+          ownerId);
     }
     return updated > 0;
   }
@@ -681,7 +684,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
                     .bind("owner", ownerId)
                     .execute());
     if (handed > 0) {
-      LOG.info("Handed request {} back to the queue on shutdown", id);
+      LOG.info("Handed request_id={} back to the queue on shutdown", id);
     }
     return handed > 0;
   }
@@ -707,7 +710,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
                     .bind("owner", ownerId)
                     .execute());
     if (released > 0) {
-      LOG.warn("Released request {} after the run holding it was cut loose", id);
+      LOG.warn("Released request_id={} after the run holding it was cut loose", id);
     }
     return released > 0;
   }

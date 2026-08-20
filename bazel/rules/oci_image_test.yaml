@@ -1,0 +1,11 @@
+schemaVersion: 2.0.0
+
+# Outbound TLS needs trust roots from the image. The pinned ubuntu base
+# ships libssl but nothing under /etc/ssl, so BoringSSL's
+# set_default_verify_paths() finds nothing and every handshake fails
+# CERTIFICATE_VERIFY_FAILED — which is how the C++ index worker spent its
+# whole deployed life unable to reach chess.com.
+fileExistenceTests:
+  - name: "CA bundle for outbound TLS"
+    path: "/etc/ssl/certs/ca-certificates.crt"
+    shouldExist: true

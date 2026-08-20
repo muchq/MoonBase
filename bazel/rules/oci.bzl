@@ -50,10 +50,23 @@ def _create_oci_image(bin_name, binary_target, binary_path):
         name = image_name,
         base = "@docker_lib_ubuntu",
         entrypoint = [binary_path],
-        tars = [":" + tar_name],
+        # The CA bundle is not optional dressing: the ubuntu base ships no
+        # trust roots, so without this every outbound TLS handshake fails
+        # verification. See //bazel/rules:ca_certificates_layer.
+        tars = [
+            "//bazel/rules:ca_certificates_layer",
+            ":" + tar_name,
+        ],
     )
 
     _push_and_load(image_name = image_name, bin_name = bin_name)
+
+    container_structure_test(
+        name = bin_name + "_image_test",
+        configs = ["//bazel/rules:oci_image_test.yaml"],
+        image = ":" + image_name,
+        tags = ["manual"],
+    )
 
 def linux_oci_go(bin_name):
     """
