@@ -58,6 +58,7 @@ func TestMetricsHandler_GetServiceCatalog(t *testing.T) {
 		{"microgpt-serve", true},
 		{"mithril", true},
 		{"one_d4", true},
+		{"one_d4_v2", true},
 		{"portrait", true},
 		{"posterize", true},
 	}

@@ -307,7 +307,7 @@ const (
 )
 
 // Catalog order doubles as the UI's tab order.
-var serviceOrder = []string{"golf_hub", "mcpserver", "microgpt-serve", "mithril", "one_d4", "portrait", "posterize"}
+var serviceOrder = []string{"golf_hub", "mcpserver", "microgpt-serve", "mithril", "one_d4", "one_d4_v2", "portrait", "posterize"}
 
 var serviceRegistry = map[string]serviceEntry{
 	"golf_hub": {
@@ -492,6 +492,18 @@ var serviceRegistry = map[string]serviceEntry{
 			// run: unconverted, a two-minute run plots as 120000000.
 			"run_duration_avg_ms": tsFixed(`sum(rate(index_run_duration_micros_sum{service_name=~"one_d4(_worker)?",outcome="completed"}[5m]))/sum(rate(index_run_duration_micros_count{service_name=~"one_d4(_worker)?",outcome="completed"}[5m]))/1000`),
 			"motif":               tsCounter(`motif_occurrences_total{service_name=~"one_d4(_worker)?"}`),
+		},
+	},
+	// The C++ analyze service (#1389 phase 6): aura's standard instruments
+	// plus the standard Probes tile. Deliberately not folded into one_d4's
+	// service_name=~"one_d4(_worker)?" selectors: those cover the two
+	// processes indexing into one table, and analyze writes nothing — its
+	// serving numbers answer a different question and belong on their own
+	// tab. Rate-limit rejections land in the standard failure counters
+	// (RejectionMetrics), so no custom tile is needed for them.
+	"one_d4_v2": {
+		CustomScalars: []customScalarDef{
+			probesTile("one_d4_v2"),
 		},
 	},
 	// Wordchains: server_pal's standard instruments plus the standard
