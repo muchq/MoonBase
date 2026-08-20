@@ -72,8 +72,10 @@ one_d4_worker:
 ```
 
 Both axes multiply: three replicas of four slots is twelve requests at
-once — and twenty-four Postgres connections, which is the ceiling to
-check first.
+once — and the Postgres connections are the ceiling to check first.
+Each slot holds two (its queue and its run's sink), and each instance
+adds one more for the reanalysis poller plus a second while a pass is
+actually running: four slots is 8–10 per instance, three replicas 27–30.
 
 ### Why that needs no coordination
 
