@@ -414,6 +414,33 @@ var serviceRegistry = map[string]serviceEntry{
 			// share burstWindow's length by coincidence of both being sparse,
 			// not by meaning: a failed run an hour ago is still the thing an
 			// operator opened this page to find.
+			// The migration, as one number: what share of the games indexed in
+			// the window the C++ worker did. This is what decides when the Java
+			// worker is deleted (#1389), and it is meaningless without the
+			// unfiltered denominator — over its own numerator it reads 100%
+			// from the first game the C++ worker ever indexes.
+			//
+			// A ratio, so no rate/count toggle: both halves are rates over the
+			// same window and the toggle would offer a second form that means
+			// the same thing.
+			scalar("Indexing", "cpp_share_of_games", "%",
+				`sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?",indexer="cpp"}[`+alarmWindow+`]))`+
+					` / sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?"}[`+alarmWindow+`])) * 100`),
+			// Live parity between the two implementations, one number each.
+			// The corpus tests prove the detectors agree on 650 frozen games;
+			// nothing proves it on everything else, and a detector that is
+			// wrong only on positions the fixtures never reach shows up here
+			// as these two numbers separating rather than as a support ticket.
+			//
+			// Per game, not per run: runs differ in size between the workers
+			// and a raw occurrence rate would track that instead of the
+			// detectors.
+			scalar("Indexing", "motifs_per_game_cpp", "",
+				`sum(rate(motif_occurrences_total{service_name=~"one_d4(_worker)?",indexer="cpp"}[`+alarmWindow+`]))`+
+					` / sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?",indexer="cpp"}[`+alarmWindow+`]))`),
+			scalar("Indexing", "motifs_per_game_java", "",
+				`sum(rate(motif_occurrences_total{service_name=~"one_d4(_worker)?",indexer="java"}[`+alarmWindow+`]))`+
+					` / sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?",indexer="java"}[`+alarmWindow+`]))`),
 			counterOver("Indexing", "runs_failed", "",
 				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="failed"}`, alarmWindow),
 			// A wedge cut loose by the MAX_RUN ceiling lands here (#1282). Anything

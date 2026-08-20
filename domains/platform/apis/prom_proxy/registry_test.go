@@ -230,6 +230,39 @@ func TestRegistry_PortraitCacheQueriesUseTheStandardFamily(t *testing.T) {
 // portrait's. registry.go anticipates a second emitter, and an unscoped
 // selector added by one sums every service's caches into that service's
 // panel.
+// The migration from the Java indexer to the C++ one is invisible without
+// these: every other one_d4 tile sums both workers through
+// service_name=~"one_d4(_worker)?", so a chart cannot say which of them did
+// the work. #1389 names two numbers as the ones worth building — the share
+// of games the C++ worker indexed, which is what decides when the Java path
+// is deleted, and the motif rate per game on each side, which is the thing
+// most likely to be quietly wrong while nobody can see it.
+func TestRegistry_IndexerMigrationTilesSplitTheTwoWorkers(t *testing.T) {
+	oneD4 := serviceRegistry["one_d4"]
+
+	labels := map[string]string{}
+	for _, def := range oneD4.CustomScalars {
+		labels[def.Label] = def.QueryFor(ViewCount)
+	}
+
+	for _, tile := range []string{"cpp_share_of_games", "motifs_per_game_cpp", "motifs_per_game_java"} {
+		query, ok := labels[tile]
+		require.True(t, ok, "no %s tile: the migration cannot be read off the dashboard", tile)
+		assert.NotEmpty(t, query)
+	}
+
+	// Named indexers, not a bare sum. A tile that forgot the label reads as
+	// both workers combined and answers a question nobody asked — and it
+	// would look perfectly healthy doing it.
+	assert.Contains(t, labels["cpp_share_of_games"], `indexer="cpp"`)
+	assert.Contains(t, labels["motifs_per_game_cpp"], `indexer="cpp"`)
+	assert.Contains(t, labels["motifs_per_game_java"], `indexer="java"`)
+
+	// The share is a ratio, so it needs an unfiltered denominator: over the
+	// cpp numerator alone it is one hundred percent from the first game.
+	assert.Contains(t, labels["cpp_share_of_games"], "/")
+}
+
 func TestRegistry_EveryCacheQueryNamesItsService(t *testing.T) {
 	for _, name := range serviceOrder {
 		for _, query := range allQueriesFor(serviceRegistry[name]) {
