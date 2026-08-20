@@ -42,6 +42,31 @@ public class IndexControllerTest {
   }
 
   @Test
+  public void createIndex_logsTheRequestIdItMinted() {
+    // The submit line went out before the id existed, so the call that
+    // created a request could not be tied to it. request_id= is the field
+    // both workers log, so one search over aggregated logs returns the
+    // whole lifecycle.
+    ch.qos.logback.classic.Logger logger =
+        (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(IndexController.class);
+    ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+        new ch.qos.logback.core.read.ListAppender<>();
+    appender.start();
+    logger.addAppender(appender);
+    try {
+      IndexResponse response =
+          controller.createIndex(
+              new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-03", null));
+
+      assertThat(appender.list)
+          .extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+          .anyMatch(message -> message.contains("request_id=" + response.id()));
+    } finally {
+      logger.detachAppender(appender);
+    }
+  }
+
+  @Test
   public void createIndex_createsAndEnqueuesWhenNoExistingRequest() {
     IndexRequest request = new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-03", null);
     IndexResponse response = controller.createIndex(request);

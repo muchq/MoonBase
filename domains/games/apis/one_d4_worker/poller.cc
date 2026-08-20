@@ -210,7 +210,7 @@ absl::StatusOr<RunOutcome> Poller::RunClaimed(const Claim& claim) {
     // The cause goes to the log, not to the column. error_message is
     // handed back by the API, and a chess.com body or a libpq diagnostic
     // in there is an internal detail told to whoever asked for the index.
-    LOG(ERROR) << "Indexing request " << job.id << " failed: " << report.status();
+    LOG(ERROR) << "Run failed request_id=" << job.id << " error=" << report.status();
     return Finish(RunOutcome::kFailed, queue_.Fail(job.id, owner, kInternalFailure));
   }
 

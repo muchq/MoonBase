@@ -422,14 +422,14 @@ public class IndexWorker {
 
   public void process(IndexMessage message) {
     LOG.info(
-        "Processing index request {} for player={} platform={}",
+        "Processing request_id={} player={} platform={}",
         message.requestId(),
         message.player(),
         message.platform());
 
     if (!inFlight.add(message.requestId())) {
       LOG.info(
-          "Skipping request {}: this process is already running it. The poller and an inline"
+          "Skipping request_id={}: this process is already running it. The poller and an inline"
               + " dispatch both reached it; one run is enough.",
           message.requestId());
       return;
@@ -684,7 +684,7 @@ public class IndexWorker {
               requestStore.updateStatusOwned(
                   message.requestId(), ownerId, "COMPLETED", null, finalCount, clock.instant()),
           "the run could be completed")) {
-        LOG.info("Completed indexing request {} with {} games", message.requestId(), totalIndexed);
+        LOG.info("Completed request_id={} games={}", message.requestId(), totalIndexed);
         outcome = "completed";
       } else {
         // Logging the count unconditionally read as success whatever the row said. The games are
@@ -702,7 +702,7 @@ public class IndexWorker {
       // It is not that a FAILED here would damage the replacement's row — that write is fenced
       // too, and would simply be refused. It is that attempting it would log a spurious error for
       // a run that did not fail: it was stopped, correctly, because the range moved.
-      LOG.warn("Abandoning request {}: {}", message.requestId(), e.getMessage());
+      LOG.warn("Abandoning request_id={} reason={}", message.requestId(), e.getMessage());
       outcome = "lease_lost";
     } catch (Exception e) {
       if (e instanceof RunInterruptedException || Thread.currentThread().isInterrupted()) {
@@ -810,7 +810,7 @@ public class IndexWorker {
    * responding, which is not what happened.
    */
   private void recordFailure(UUID requestId, Exception cause) {
-    LOG.error("Failed to process index request {}", requestId, cause);
+    LOG.error("Failed to process request_id={}", requestId, cause);
     if (!fenced(
         requestId,
         () ->
@@ -893,7 +893,7 @@ public class IndexWorker {
           } catch (RuntimeException e) {
             // A missed beat is survivable — the interval leaves room for three. Logging and
             // continuing beats killing the schedule on one transient database error.
-            LOG.warn("Heartbeat failed for request {}", requestId, e);
+            LOG.warn("Heartbeat failed request_id={}", requestId, e);
           }
         },
         everyMillis,

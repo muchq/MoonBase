@@ -614,6 +614,9 @@ java_test_suite(
         artifact("tools.jackson.core:jackson-databind"),
         "//domains/platform/resources:micronaut_config_lib",
         artifact("org.junit.jupiter:junit-jupiter-api"),
+        artifact("ch.qos.logback:logback-classic"),
+        artifact("org.slf4j:slf4j-api"),
+        artifact("ch.qos.logback:logback-core"),
         artifact("org.assertj:assertj-core"),
     ],
 )
