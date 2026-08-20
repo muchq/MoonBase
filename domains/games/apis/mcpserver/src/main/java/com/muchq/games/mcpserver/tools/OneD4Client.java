@@ -133,7 +133,7 @@ public class OneD4Client {
   public AnalyzeResponse analyze(AnalyzeRequest request) {
     // The gateway path, not /v1/analyze: one_d4_v2 serves the path Caddy
     // routes, so this client works aimed at either.
-    return post(analyzeBaseUrl, "/1d4/v2/analyze", request, AnalyzeResponse.class);
+    return post(analyzeBaseUrl, "/v2/analyze", request, AnalyzeResponse.class);
   }
 
   private <T> T post(String path, Object body, Class<T> type) {
@@ -180,16 +180,21 @@ public class OneD4Client {
    * second timer would only race the first and hand callers whichever exception won.
    */
   private HttpResponse send(HttpRequest request, String description) {
+    // Named off the request rather than assumed: analyze goes to the v2
+    // service, and "one_d4 at <the healthy Java base> is not reachable"
+    // would point an operator at the wrong box during exactly the outage
+    // the message exists for.
+    String base = request.getUrl().toString().startsWith(analyzeBaseUrl) ? analyzeBaseUrl : baseUrl;
     try {
       return httpClient.execute(request);
     } catch (UncheckedIOException e) {
       if (e.getCause() instanceof HttpTimeoutException) {
         throw new UpstreamException(
-            description + ": one_d4 at " + baseUrl + " did not answer within " + timeout, e);
+            description + ": upstream at " + base + " did not answer within " + timeout, e);
       }
-      throw notReachable(e);
+      throw notReachable(base, e);
     } catch (RuntimeException e) {
-      throw notReachable(e);
+      throw notReachable(base, e);
     }
   }
 
@@ -197,7 +202,7 @@ public class OneD4Client {
    * Connection refused, DNS failure, a reset mid-body. one_d4 is not answering — distinct from a
    * 4xx, because nothing the caller changes about their arguments will fix it.
    */
-  private UpstreamException notReachable(RuntimeException cause) {
+  private UpstreamException notReachable(String base, RuntimeException cause) {
     // The cause is named in the message: "not reachable" alone sends a reader to the network
     // without saying whether it was DNS, a refused connection or a reset.
     Throwable root = cause.getCause() != null ? cause.getCause() : cause;
@@ -206,7 +211,7 @@ public class OneD4Client {
             ? root.getClass().getSimpleName()
             : root.getClass().getSimpleName() + ": " + root.getMessage();
     return new UpstreamException(
-        "one_d4 at " + baseUrl + " is not reachable (" + detail + ")", cause);
+        "upstream at " + base + " is not reachable (" + detail + ")", cause);
   }
 
   /**
@@ -218,6 +223,13 @@ public class OneD4Client {
     int status = response.getStatusCode();
     if (status >= 200 && status < 300) {
       return;
+    }
+    if (status == 429) {
+      // Retryable, not a caller mistake: nothing about the arguments is
+      // wrong, the budget is spent. IllegalArgumentException here would
+      // tell an MCP client to rewrite a request that only needs patience.
+      throw new UpstreamException(
+          description + ": rate limited (429); retry after the window resets");
     }
     if (status >= 400 && status < 500) {
       throw new IllegalArgumentException(
@@ -238,6 +250,14 @@ public class OneD4Client {
       JsonNode error = body.get("error");
       if (error != null && !error.isNull()) {
         return error.asText();
+      }
+      // The v2 service's modeled errors: smithy serializes them as
+      // {"__type": ..., "message": ...}. Without this key the carefully
+      // worded rejections — which limit fired and by how much — collapse
+      // to a bare status code.
+      JsonNode message = body.get("message");
+      if (message != null && !message.isNull()) {
+        return message.asText();
       }
     } catch (RuntimeException | java.io.IOException e) {
       // Fall through to the default.

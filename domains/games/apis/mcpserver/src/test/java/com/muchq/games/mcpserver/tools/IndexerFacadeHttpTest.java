@@ -301,7 +301,7 @@ public class IndexerFacadeHttpTest {
   @Test
   public void analyzePostsThePgnToTheV2RouteAndMapsTheMotifs() {
     route(
-        "POST /1d4/v2/analyze",
+        "POST /v2/analyze",
         200,
         "{\"numMoves\":54,\"motifs\":[\"checkmate\"],\"occurrences\":{\"checkmate\":"
             + "[{\"ply\":107,\"moveNumber\":54,\"side\":\"white\",\"description\":\"mate\","
@@ -309,10 +309,69 @@ public class IndexerFacadeHttpTest {
 
     AnalyzeResponse response = facade().analyze("1. e4 e5");
 
-    assertThat(requestLog).containsExactly("POST /1d4/v2/analyze");
+    assertThat(requestLog).containsExactly("POST /v2/analyze");
     assertThat(response.numMoves()).isEqualTo(54);
     assertThat(response.motifs()).containsExactly("checkmate");
     assertThat(response.occurrences().get("checkmate").get(0).ply()).isEqualTo(107);
+  }
+
+  // The host half of the move, which is the point of it: analyze goes to
+  // the v2 base and nothing else does. Every other test constructs the
+  // client with the two bases equal, so routing analyze back to the v1
+  // host would be green everywhere but 404 in production, where the Java
+  // service does not serve the v2 route.
+  @Test
+  public void analyzeGoesToTheV2BaseAndNothingElseDoes() throws Exception {
+    HttpServer v1 = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+    List<String> v1Log = new ArrayList<>();
+    v1.createContext(
+        "/",
+        exchange -> {
+          v1Log.add(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath());
+          respond(exchange, 404, "{\"error\":\"wrong service\"}");
+        });
+    v1.start();
+    try {
+      route("POST /v2/analyze", 200, "{\"numMoves\":1,\"motifs\":[],\"occurrences\":{}}");
+      OneD4Client client =
+          new OneD4Client(
+              new Jdk11HttpClient(java.net.http.HttpClient.newHttpClient()),
+              JsonUtils.mapper(),
+              "http://localhost:" + v1.getAddress().getPort(),
+              baseUrl);
+      new IndexerFacade(client).analyze("1. e4 e5");
+
+      assertThat(requestLog).containsExactly("POST /v2/analyze");
+      assertThat(v1Log).as("analyze leaked to the v1 base").isEmpty();
+    } finally {
+      v1.stop(0);
+    }
+  }
+
+  // v2's modeled errors carry the reason under "message", not the "error"
+  // key the Java service uses. Without both keys the carefully worded
+  // rejection — which limit fired and by how much — collapses to a status.
+  @Test
+  public void aV2RejectionSurfacesItsReason() {
+    route(
+        "POST /v2/analyze",
+        400,
+        "{\"__type\":\"InvalidPgnError\",\"message\":\"pgn has 4200 plies (max 4096)\"}");
+
+    assertThatThrownBy(() -> facade().analyze("1. e4 e5"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("4200 plies");
+  }
+
+  // Retryable, not a caller mistake: IllegalArgumentException would tell an
+  // MCP client to rewrite a request that only needs patience.
+  @Test
+  public void aRateLimitedAnalyzeIsAnUpstreamConditionNotACallerError() {
+    route("POST /v2/analyze", 429, "{\"error\":\"Too many requests\"}");
+
+    assertThatThrownBy(() -> facade().analyze("1. e4 e5"))
+        .isInstanceOf(OneD4Client.UpstreamException.class)
+        .hasMessageContaining("rate limited");
   }
 
   /** A blank PGN is refused here rather than spending a round trip to be told the same thing. */

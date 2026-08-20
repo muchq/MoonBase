@@ -80,6 +80,16 @@ public class McpModuleTest {
     }
   }
 
+  @Test
+  public void theV2UpstreamUrlCanBeSetByProperty() {
+    try (ApplicationContext context =
+        ApplicationContext.run(
+            java.util.Map.of("one.d4.v2.base.url", "http://one-d4-v2-under-test:9999"))) {
+      assertThat(context.getBean(OneD4Client.class).analyzeBaseUrl())
+          .isEqualTo("http://one-d4-v2-under-test:9999");
+    }
+  }
+
   /**
    * The facade the tools inject points at the configured upstream. A default that silently pointed
    * somewhere else would leave every corpus tool answering "not reachable" in production while

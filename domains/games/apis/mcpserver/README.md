@@ -152,8 +152,12 @@ curl -s http://localhost:8080/mcp \
 
 These are calls to the `one_d4` service, not work this process does. `index_chess_games` is
 `POST /v1/index`, `index_status` is `GET /v1/index/{id}`, `query_chess_games` is `POST /v1/query`,
-`aggregate_chess_games` is `POST /v1/aggregate`, and `analyze_position` is `POST /v1/analyze`. The
-upstream is `ONE_D4_BASE_URL`, which Compose sets to one_d4's `one-d4` network alias.
+and `aggregate_chess_games` is `POST /v1/aggregate`. The upstream is `ONE_D4_BASE_URL`, which
+Compose sets to one_d4's `one-d4` network alias.
+
+`analyze_position` is the exception: it is `POST /v2/analyze` against the C++ `one_d4_v2` service
+(#1389 phase 6), configured separately by `ONE_D4_V2_BASE_URL`, because analysis touches no corpus
+state and moved out of the Java service first.
 
 **They act on the same corpus the site serves** — indexing through MCP puts games where
 `1d4.net` can see them, and a query here sees everything `api.1d4.net` does. That is the point of
@@ -190,7 +194,9 @@ the schema, and its migrations, and this server holds no database credentials at
   off a long tail (common with `opening_family`, whose chess.com ECO-URL-derived values are not
   normalized: "Closed Sicilian Defense" and "Alapin Sicilian Defense" are distinct groups, not
   part of "Sicilian Defense").
-- `analyze_position` — detect motifs in a single `pgn` without indexing it.
+- `analyze_position` — detect motifs in a single `pgn` without indexing it. Served by
+  `one_d4_v2`, not `one_d4`; a 429 from its rate limiter surfaces as an upstream condition,
+  not an input error.
 
 Both query tools see only what has been indexed, and neither reports which periods those are. A
 `date` / `month` filter over a never-indexed period returns an empty result rather than an error,
@@ -235,6 +241,9 @@ Environment variables:
   out the `one_d4` service key — an underscore in an authority yields a null host, so
   no request built from it can be sent. one_d4 publishes `one-d4` as a network alias
   for this.
+- **ONE_D4_V2_BASE_URL**: Base URL of the one_d4_v2 API `analyze_position` calls (default:
+  `http://one-d4-v2:8090`). Hyphenated for the same `java.net.URI` reason; one_d4_v2
+  publishes `one-d4-v2` as its alias.
 
 The MCP transport itself is configured in the shared `application.yml`
 (`domains/platform/resources`) under `micronaut.mcp.server`: `transport: HTTP`,
