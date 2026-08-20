@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <iostream>
 
 #include "opentelemetry/exporters/otlp/otlp_http_metric_exporter.h"
 #include "opentelemetry/exporters/otlp/otlp_http_metric_exporter_factory.h"
@@ -22,6 +23,14 @@
 #include "opentelemetry/semconv/service_attributes.h"
 
 namespace futility::otel {
+namespace {
+
+/// What either half of the shutdown export may spend. Small, because a
+/// supervisor is already timing the exit and a collector that cannot answer
+/// must not be the reason it is killed.
+constexpr std::chrono::seconds kShutdownTimeout{5};
+
+}  // namespace
 
 // The only way to give a histogram explicit bounds in opentelemetry-cpp: the
 // API's CreateUInt64Histogram takes a name, a description and a unit, but no
@@ -161,7 +170,17 @@ OtelProvider::~OtelProvider() {
     // an exit that a supervisor is already timing.
     if (auto sdk_provider = std::dynamic_pointer_cast<opentelemetry::sdk::metrics::MeterProvider>(
             meter_provider_)) {
-      sdk_provider->ForceFlush(std::chrono::seconds(5));
+      if (!sdk_provider->ForceFlush(kShutdownTimeout)) {
+        // Said out loud, because a process that failed to export on the way
+        // out looks exactly like one that had nothing to say.
+        std::cerr << "otel: metrics did not flush before exit\n";
+      }
+      // Bounded explicitly, because ~MeterProvider shuts the context down
+      // with microseconds::max — which joins the exporter thread and then
+      // waits on pending sessions with no ceiling at all. Against a
+      // black-holed collector that turns a five-second flush into an exit
+      // the supervisor kills instead.
+      sdk_provider->Shutdown(kShutdownTimeout);
     }
 
     // Restore the no-op provider, not an empty pointer. The API guarantees

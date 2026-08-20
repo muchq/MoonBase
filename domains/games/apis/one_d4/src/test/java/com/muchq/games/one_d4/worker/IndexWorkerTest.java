@@ -1244,6 +1244,13 @@ public class IndexWorkerTest {
     assertThat(metrics.counterSnapshot()).isNotEmpty();
     assertThat(metrics.counterSnapshot())
         .allSatisfy(s -> assertThat(s.labels()).containsEntry("indexer", "java"));
+    // The distributions too. index_games_per_month is only ever asserted
+    // through the name-only helper, so dropping its labels leaves a declared
+    // series pinned at zero beside a second unlabelled one carrying every
+    // real observation — and every other test still green.
+    assertThat(metrics.distributionSnapshot()).isNotEmpty();
+    assertThat(metrics.distributionSnapshot())
+        .allSatisfy(s -> assertThat(s.labels()).containsEntry("indexer", "java"));
   }
 
   /**
