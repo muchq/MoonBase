@@ -121,6 +121,47 @@ cc_library(
 )
 
 cc_library(
+    name = "pg_reanalysis",
+    srcs = ["pg_reanalysis.cc"],
+    hdrs = ["pg_reanalysis.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":occurrence_writer",
+        ":reanalysis_run",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "pg_reanalysis_test",
+    size = "small",
+    srcs = ["pg_reanalysis_test.cc"],
+    env_inherit = ["PG_TEST_DB_URL"],
+    deps = [
+        ":pg_reanalysis",
+        "@com_google_absl//absl/strings:str_format",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "occurrence_writer",
+    srcs = ["occurrence_writer.cc"],
+    hdrs = ["occurrence_writer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//domains/games/libs/chess_cpp:pgn",
+        "//domains/games/libs/one_d4_motifs:occurrence",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
     name = "reanalysis_run",
     srcs = ["reanalysis_run.cc"],
     hdrs = ["reanalysis_run.h"],
@@ -174,6 +215,7 @@ cc_test(
     data = [
         "pg_game_sink_test.cc",
         "pg_queue_test.cc",
+        "pg_reanalysis_test.cc",
         "poller.cc",
         "reanalysis_queue_test.cc",
         "//domains/games/apis/one_d4:worker_metric_names",
@@ -328,6 +370,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":game_sink",
+        ":occurrence_writer",
         "//domains/games/libs/chess_cpp:side",
         "//domains/games/libs/one_d4_motifs:motif",
         "//domains/platform/libs/pg",

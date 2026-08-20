@@ -162,6 +162,27 @@ TEST(SchemaContract, TheOccurrenceIdIsNotAUuidColumn) {
   EXPECT_EQ(JavaSchemaFor("game_features")["id"], "UUID");
 }
 
+// The reanalysis fixture is a third hand-copy of the two tables the pass
+// reads and writes, so it drifts on the same terms as the sink's.
+TEST(SchemaContract, TheReanalysisFixtureDeclaresTheSameTypes) {
+  const std::string fixture_source = Read("domains/games/apis/one_d4_worker/pg_reanalysis_test.cc");
+  int checked = 0;
+  for (const std::string& table : {"game_features", "motif_occurrences"}) {
+    const std::map<std::string, std::string> java = JavaSchemaFor(table);
+    const std::map<std::string, std::string> fixture = Columns(fixture_source, table);
+    ASSERT_FALSE(fixture.empty()) << "read no columns of " << table << " from the fixture";
+
+    for (const auto& [name, type] : fixture) {
+      const auto declared = java.find(name);
+      ASSERT_TRUE(declared != java.end()) << name << " is not in the Java " << table;
+      EXPECT_EQ(type, declared->second)
+          << name << " is declared differently in the reanalysis " << table << " fixture";
+      ++checked;
+    }
+  }
+  EXPECT_GT(checked, 12) << "the fixture parse found almost nothing to compare";
+}
+
 // reanalysis_requests is not a shared table — the indexers never touch it,
 // which is the point of it existing (#1389 phase 5). But the Java migration
 // still owns its DDL and this worker still hand-copies it into a fixture, so
@@ -179,7 +200,7 @@ TEST(SchemaContract, TheJavaSchemaHasEveryColumnTheReanalysisQueueTouches) {
   }
 }
 
-TEST(SchemaContract, TheReanalysisFixtureDeclaresTheSameTypes) {
+TEST(SchemaContract, TheReanalysisRequestFixtureDeclaresTheSameTypes) {
   const std::map<std::string, std::string> java = JavaSchemaFor("reanalysis_requests");
   const std::map<std::string, std::string> fixture = Columns(
       Read("domains/games/apis/one_d4_worker/reanalysis_queue_test.cc"), "reanalysis_requests");
