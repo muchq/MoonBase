@@ -368,6 +368,15 @@ filegroup(
     visibility = ["//domains/platform:__subpackages__"],
 )
 
+# The indexer label and value this worker stamps. prom_proxy's share tile
+# hardcodes both; renaming either here would make it read zero.
+filegroup(
+    name = "indexer_label",
+    testonly = True,
+    srcs = ["metrics.h"],
+    visibility = ["//domains/platform:__subpackages__"],
+)
+
 # The ceiling is a relationship between the run's checkpoints and the
 # lease's renewal, so it is tested through the real lease rather than a
 # LeaseKeeper that answers as told — a fake that decides both cannot show
