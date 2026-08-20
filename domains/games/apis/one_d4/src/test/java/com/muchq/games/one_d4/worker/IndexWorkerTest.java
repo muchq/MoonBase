@@ -1175,15 +1175,23 @@ public class IndexWorkerTest {
     assertThat(metrics.distributionSnapshot())
         .extracting(
             CustomMetrics.DistributionSnapshot::name, CustomMetrics.DistributionSnapshot::labels)
-        .contains(org.assertj.core.groups.Tuple.tuple(IndexWorker.GAMES_PER_MONTH, Map.of()));
+        .contains(
+            org.assertj.core.groups.Tuple.tuple(
+                IndexWorker.GAMES_PER_MONTH,
+                Map.of(IndexWorker.INDEXER_LABEL, IndexWorker.INDEXER_VALUE)));
     assertThat(distributionCount(IndexWorker.GAMES_PER_MONTH)).isZero();
     for (String outcome : IndexWorker.RUN_OUTCOMES) {
-      Map<String, String> labels = Map.of("outcome", outcome);
+      Map<String, String> labels =
+          Map.of(IndexWorker.INDEXER_LABEL, IndexWorker.INDEXER_VALUE, "outcome", outcome);
       assertThat(metrics.distributionSnapshot())
           .as("run duration series for outcome %s", outcome)
           .extracting(
               CustomMetrics.DistributionSnapshot::name, CustomMetrics.DistributionSnapshot::labels)
-          .contains(org.assertj.core.groups.Tuple.tuple(IndexWorker.RUN_DURATION, labels));
+          .contains(
+              org.assertj.core.groups.Tuple.tuple(
+                  IndexWorker.RUN_DURATION,
+                  Map.of(
+                      IndexWorker.INDEXER_LABEL, IndexWorker.INDEXER_VALUE, "outcome", outcome)));
       assertThat(distributionCount(IndexWorker.RUN_DURATION, labels))
           .as("run duration count for outcome %s", outcome)
           .isZero();
@@ -1219,9 +1227,36 @@ public class IndexWorkerTest {
         .isEmpty();
   }
 
+  @Test
+  public void metrics_everySeriesCarriesTheIndexerLabel() {
+    // Both workers poll the same table, so no dashboard can tell which one
+    // did the work unless every series says so. The C++ worker already
+    // writes indexer=cpp; without the matching value here, "share of games
+    // indexed by C++" has no denominator and motif parity between the two
+    // implementations cannot be plotted at all.
+    stubChessClient.setResponse(
+        java.time.YearMonth.of(2024, 1),
+        List.of(playedGame("https://chess.com/game/lbl", SCHOLARS_MATE_PGN, "blitz")));
+    IndexWorker w = meteredWorker();
+
+    w.process(oneMonth());
+
+    assertThat(metrics.counterSnapshot()).isNotEmpty();
+    assertThat(metrics.counterSnapshot())
+        .allSatisfy(s -> assertThat(s.labels()).containsEntry("indexer", "java"));
+  }
+
+  /**
+   * Still an exact match on the whole label set — the indexer label is merged in rather than
+   * ignored, so a series that carries the wrong value still fails. {@link
+   * #metrics_everySeriesCarriesTheIndexerLabel} is what proves the label is there at all, which is
+   * the part this merge would otherwise hide.
+   */
   private long counter(String name, Map<String, String> labels) {
+    Map<String, String> expected = new java.util.HashMap<>(labels);
+    expected.put(IndexWorker.INDEXER_LABEL, IndexWorker.INDEXER_VALUE);
     return metrics.counterSnapshot().stream()
-        .filter(s -> s.name().equals(name) && s.labels().equals(labels))
+        .filter(s -> s.name().equals(name) && s.labels().equals(expected))
         .mapToLong(CustomMetrics.CounterSnapshot::value)
         .sum();
   }
@@ -1233,9 +1268,12 @@ public class IndexWorkerTest {
         .sum();
   }
 
+  /** Merges the indexer label like {@link #counter}, and for the same reason. */
   private long distributionCount(String name, Map<String, String> labels) {
+    Map<String, String> expected = new java.util.HashMap<>(labels);
+    expected.put(IndexWorker.INDEXER_LABEL, IndexWorker.INDEXER_VALUE);
     return metrics.distributionSnapshot().stream()
-        .filter(s -> s.name().equals(name) && s.labels().equals(labels))
+        .filter(s -> s.name().equals(name) && s.labels().equals(expected))
         .mapToLong(CustomMetrics.DistributionSnapshot::count)
         .sum();
   }

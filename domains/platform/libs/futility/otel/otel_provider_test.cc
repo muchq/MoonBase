@@ -156,6 +156,47 @@ TEST_F(LatencyBucketViewTest, WithoutTheViewTheSameInstrumentGetsTheSdkDefaults)
 // constructor puts production back on the SDK defaults with all four of those
 // tests still green. This closes that by going through the constructor and
 // reading the view off the provider it publishes globally.
+TEST(OtelProviderShutdownTest, FlushesWhatItHasOnTheWayOut) {
+  // The export interval is ten seconds. A worker that starts, does its work
+  // and is stopped inside one of those never exports anything at all — which
+  // is exactly the shape of a rollout, and of a service failing every run
+  // and being turned off. The counts that would have told you what happened
+  // die with the process.
+  auto data = std::make_shared<memory_exporter::SimpleAggregateInMemoryMetricData>();
+  std::shared_ptr<metrics_sdk::MeterProvider> published;
+
+  {
+    OtelConfig config;
+    config.service_name = "otel_provider_shutdown_test";
+    config.enable_metrics = true;
+    config.otlp_endpoint = "http://127.0.0.1:1/v1/metrics";
+    // Longer than this test could possibly take, so nothing is exported on a
+    // timer and the only thing that can flush is the shutdown.
+    config.export_interval = std::chrono::seconds(3600);
+
+    OtelProvider provider(config);
+    published = std::static_pointer_cast<metrics_sdk::MeterProvider>(provider.GetMeterProvider());
+    ASSERT_NE(published, nullptr);
+
+    metrics_sdk::PeriodicExportingMetricReaderOptions options;
+    options.export_interval_millis = std::chrono::milliseconds(3600000);
+    options.export_timeout_millis = std::chrono::milliseconds(1000);
+    published->AddMetricReader(metrics_sdk::PeriodicExportingMetricReaderFactory::Create(
+        memory_exporter::InMemoryMetricExporterFactory::Create(data), options));
+
+    auto meter = published->GetMeter(kScope, "1.0.0");
+    auto counter = meter->CreateUInt64Counter("index_runs");
+    counter->Add(1);
+
+    ASSERT_TRUE(data->Get(kScope, "index_runs").empty())
+        << "something exported on its own, so this test cannot tell a shutdown flush from a timer";
+  }
+
+  EXPECT_FALSE(data->Get(kScope, "index_runs").empty())
+      << "the provider went away without flushing, so everything recorded since the last interval "
+         "is gone — including every metric a short-lived process ever wrote";
+}
+
 TEST(OtelProviderWiringTest, TheConstructorRegistersTheView) {
   auto data = std::make_shared<memory_exporter::SimpleAggregateInMemoryMetricData>();
 

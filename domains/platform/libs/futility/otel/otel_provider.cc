@@ -1,5 +1,6 @@
 #include "domains/platform/libs/futility/otel/otel_provider.h"
 
+#include <chrono>
 #include <cstdlib>
 
 #include "opentelemetry/exporters/otlp/otlp_http_metric_exporter.h"
@@ -151,6 +152,18 @@ OtelProvider::OtelProvider(const OtelConfig& config) : metrics_enabled_(config.e
 
 OtelProvider::~OtelProvider() {
   if (metrics_enabled_ && meter_provider_) {
+    // Everything recorded since the last interval is still only in process
+    // memory, and the interval is ten seconds. A service that starts, works
+    // and stops inside one — a rollout, or a worker failing every run and
+    // being turned off — would otherwise export nothing at all, and the
+    // counts that say what happened are exactly the ones you go looking for
+    // afterwards. Bounded, because a collector that is down must not hold up
+    // an exit that a supervisor is already timing.
+    if (auto sdk_provider = std::dynamic_pointer_cast<opentelemetry::sdk::metrics::MeterProvider>(
+            meter_provider_)) {
+      sdk_provider->ForceFlush(std::chrono::seconds(5));
+    }
+
     // Restore the no-op provider, not an empty pointer. The API guarantees
     // GetMeterProvider() never returns nullptr, and MetricsRecorder's
     // constructor dereferences it without checking — so clearing the singleton
