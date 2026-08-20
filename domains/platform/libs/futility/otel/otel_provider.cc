@@ -1,6 +1,8 @@
 #include "domains/platform/libs/futility/otel/otel_provider.h"
 
+#include <chrono>
 #include <cstdlib>
+#include <iostream>
 
 #include "opentelemetry/exporters/otlp/otlp_http_metric_exporter.h"
 #include "opentelemetry/exporters/otlp/otlp_http_metric_exporter_factory.h"
@@ -21,6 +23,19 @@
 #include "opentelemetry/semconv/service_attributes.h"
 
 namespace futility::otel {
+namespace {
+
+/// What either half of the shutdown export may spend. Small, because a
+/// supervisor is already timing the exit and a collector that cannot answer
+/// must not be the reason it is killed.
+///
+/// It is not the whole story: opentelemetry-cpp hardcodes CURLOPT_LOW_SPEED_TIME
+/// at 30s, so a wedged collector still costs about thirty seconds however small
+/// this is. What it buys is that the wait ends there instead of doubling — see
+/// AWedgedCollectorDoesNotHoldUpTheExit, which measures both.
+constexpr std::chrono::seconds kShutdownTimeout{5};
+
+}  // namespace
 
 // The only way to give a histogram explicit bounds in opentelemetry-cpp: the
 // API's CreateUInt64Histogram takes a name, a description and a unit, but no
@@ -151,6 +166,30 @@ OtelProvider::OtelProvider(const OtelConfig& config) : metrics_enabled_(config.e
 
 OtelProvider::~OtelProvider() {
   if (metrics_enabled_ && meter_provider_) {
+    // Everything recorded since the last interval is still only in process
+    // memory, and the interval is ten seconds. A service that starts, works
+    // and stops inside one — a rollout, or a worker failing every run and
+    // being turned off — would otherwise export nothing at all, and the
+    // counts that say what happened are exactly the ones you go looking for
+    // afterwards. Bounded, because a collector that is down must not hold up
+    // an exit that a supervisor is already timing.
+    if (auto sdk_provider = std::dynamic_pointer_cast<opentelemetry::sdk::metrics::MeterProvider>(
+            meter_provider_)) {
+      if (!sdk_provider->ForceFlush(kShutdownTimeout)) {
+        // Said out loud, because a flush that ran out of time looks exactly
+        // like one that had nothing to say. Narrower than "the export
+        // failed": a refused connection fails fast and still returns true,
+        // so this reports the collector that hangs, not the one that is
+        // down.
+        std::cerr << "otel: metrics did not flush before exit\n";
+      }
+      // Bounded explicitly, because ~MeterProvider shuts the context down
+      // with microseconds::max — which joins the exporter thread and then
+      // waits on pending sessions with no ceiling at all. Against a wedged
+      // collector that is the difference between one stalled export and two.
+      sdk_provider->Shutdown(kShutdownTimeout);
+    }
+
     // Restore the no-op provider, not an empty pointer. The API guarantees
     // GetMeterProvider() never returns nullptr, and MetricsRecorder's
     // constructor dereferences it without checking — so clearing the singleton

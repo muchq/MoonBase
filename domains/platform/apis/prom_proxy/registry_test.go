@@ -230,6 +230,69 @@ func TestRegistry_PortraitCacheQueriesUseTheStandardFamily(t *testing.T) {
 // portrait's. registry.go anticipates a second emitter, and an unscoped
 // selector added by one sums every service's caches into that service's
 // panel.
+// The migration from the Java indexer to the C++ one is invisible without
+// this: every other one_d4 tile sums both workers through
+// service_name=~"one_d4(_worker)?", so no chart can say which of them did the
+// work. #1389 calls this the number that decides when the Java path is
+// deleted.
+//
+// A golden string, like TestStandardQueries_GoldenStrings. Asserting the
+// parts is what let an earlier version of this test pass while the query
+// divided the wrong way round, multiplied by the wrong constant, or dropped
+// the indexer filter from a denominator — each of which renders a plausible
+// number nobody would question.
+func TestRegistry_CppShareOfGamesIsTheMigrationNumber(t *testing.T) {
+	oneD4 := serviceRegistry["one_d4"]
+
+	var share *customScalarDef
+	for i := range oneD4.CustomScalars {
+		if oneD4.CustomScalars[i].Label == "cpp_share_of_games" {
+			share = &oneD4.CustomScalars[i]
+		}
+	}
+	require.NotNil(t, share, "no cpp_share_of_games tile: the migration cannot be read off the dashboard")
+
+	// Built from the constant, not spelling 24h, so retuning the window is not
+	// a golden edit. No assertion here can tell burstWindow from alarmWindow
+	// while the two hold the same string — that choice is readable in
+	// registry.go and nowhere else.
+	const want = `sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?",indexer="cpp"}[` +
+		burstWindow + `])) / sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?"}[` +
+		burstWindow + `])) * 100`
+	assert.Equal(t, want, share.QueryFor(ViewCount))
+
+	// A ratio has one form, so it is registered as a scalar rather than a
+	// counter. TestRegistry_BothViewsShareOneSelector covers what that implies
+	// for the rate view, for every fixed-form tile at once.
+	assert.False(t, share.Toggleable())
+	assert.Equal(t, "%", share.Unit)
+}
+
+// Renaming the value the C++ worker stamps leaves every test in this repo
+// green while the share tile reads zero forever, because the numerator
+// hardcodes the string and the emitter reaches it through a symbol. Same
+// failure the service_name selector has a test for, one label along.
+//
+// The C++ side only. The denominator carries no indexer selector, so the Java
+// worker could stamp anything — or nothing — without moving this number;
+// IndexWorkerTest is what pins that value, and it does not need help here.
+func TestRegistry_ShareTileNamesTheValueTheCppWorkerActuallyWrites(t *testing.T) {
+	query := ""
+	for _, def := range serviceRegistry["one_d4"].CustomScalars {
+		if def.Label == "cpp_share_of_games" {
+			query = def.QueryFor(ViewCount)
+		}
+	}
+	require.Contains(t, query, `indexer="cpp"`,
+		"the tile stopped selecting by indexer, so the literal below pins nothing")
+
+	cpp, err := os.ReadFile("../../../games/apis/one_d4_worker/metrics.h")
+	require.NoError(t, err)
+	assert.Contains(t, string(cpp), `kIndexerValue[] = "cpp"`,
+		"the C++ worker stamps a value this tile does not select; the share would read zero")
+	assert.Contains(t, string(cpp), `kIndexerLabel[] = "indexer"`)
+}
+
 func TestRegistry_EveryCacheQueryNamesItsService(t *testing.T) {
 	for _, name := range serviceOrder {
 		for _, query := range allQueriesFor(serviceRegistry[name]) {

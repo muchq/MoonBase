@@ -82,6 +82,20 @@ cc_test(
     ],
 )
 
+# Its own target because the wedged-collector case spends real seconds; the
+# rest of the otel tests are instant and should stay that way.
+cc_test(
+    name = "otel_shutdown_test",
+    size = "medium",
+    srcs = ["otel_shutdown_test.cc"],
+    deps = [
+        ":otel_provider",
+        "@googletest//:gtest_main",
+        "@opentelemetry-cpp//exporters/memory:in_memory_metric_data",
+        "@opentelemetry-cpp//exporters/memory:in_memory_metric_exporter_factory",
+    ],
+)
+
 cc_test(
     name = "http_instrument_descriptions_test",
     size = "small",

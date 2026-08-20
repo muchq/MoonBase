@@ -426,6 +426,25 @@ var serviceRegistry = map[string]serviceEntry{
 			// reads that way if the two share a window, hence the same one.
 			counterOver("Indexing", "runs_lease_lost", "",
 				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="lease_lost"}`, alarmWindow),
+			// The migration, as one number: what share of the games indexed in
+			// the window the C++ worker did. This is what decides when the Java
+			// worker is deleted (#1389), and it is meaningless without the
+			// unfiltered denominator — over its own numerator it reads 100%
+			// from the first game the C++ worker ever indexes.
+			//
+			// burstWindow, not alarmWindow: every other tile reading
+			// games_indexed_total counts over the burst window, and a share
+			// drawn from a different population than the count beside it is
+			// two tiles describing different things.
+			//
+			// A ratio, so no rate/count toggle: both halves are rates over the
+			// same window and the toggle would offer a second form that means
+			// the same thing. Safe from the Result[0] truncation in
+			// service_handlers.go because sum()/sum() is always one series.
+			scalar("Indexing", "cpp_share_of_games", "%",
+				`sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?",indexer="cpp"}[`+burstWindow+`]))`+
+					` / sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?"}[`+burstWindow+`])) * 100`),
+
 			// Windowed averages over the histograms: rate(sum)/rate(count) is the
 			// mean per run in the window, the same shape portrait uses. Means, so
 			// no rate form.

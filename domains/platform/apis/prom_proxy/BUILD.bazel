@@ -32,7 +32,10 @@ go_test(
         "registry_test.go",
         "service_handlers_test.go",
     ],
-    data = ["//domains/games/apis/one_d4_worker:worker_service_name"],
+    data = [
+        "//domains/games/apis/one_d4_worker:indexer_label",
+        "//domains/games/apis/one_d4_worker:worker_service_name",
+    ],
     embed = [":prom_proxy_lib"],
     deps = [
         "@com_github_prometheus_client_golang//api",

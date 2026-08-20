@@ -89,6 +89,30 @@ public class IndexWorker {
   static final String RUN_DURATION = "index_run_duration_micros";
 
   /**
+   * Which indexer wrote a series. Not the only way to tell the two apart — they already run under
+   * separate {@code service_name}s, and a test pins that — but the one that still works if they are
+   * ever co-deployed, and the key the share tile's numerator selects on (#1389). Two values, no
+   * per-player or per-request cardinality, the same rule the other labels follow. The C++ worker
+   * writes {@code cpp}.
+   */
+  static final String INDEXER_LABEL = "indexer";
+
+  static final String INDEXER_VALUE = "java";
+
+  /** The indexer label on its own, for a series that carries nothing else. */
+  private static Map<String, String> bare() {
+    return Map.of(INDEXER_LABEL, INDEXER_VALUE);
+  }
+
+  /**
+   * The indexer label plus one more. Every emission goes through here or {@link #bare()}, so a new
+   * call site cannot quietly write a series the dashboards cannot attribute.
+   */
+  private static Map<String, String> with(String key, String value) {
+    return Map.of(INDEXER_LABEL, INDEXER_VALUE, key, value);
+  }
+
+  /**
    * The label values the counters above can carry, so each series can be declared at startup and
    * export a zero baseline. Bounded sets only: {@link #MOTIF_OCCURRENCES} is labelled by motif and
    * left to appear on first use, since its baseline would be one series per motif for a tile that
@@ -403,20 +427,20 @@ public class IndexWorker {
     // Bounds are per name; the series is per name and labels, so both are declared. Without the
     // second, avg_run_seconds_1h divides a rate over one sample by a rate over one sample the
     // first time a run finishes — the same blindness as the counters, one level less obvious.
-    metrics.defineDistributionSeries(GAMES_PER_MONTH);
+    metrics.defineDistributionSeries(GAMES_PER_MONTH, bare());
     for (String outcome : RUN_OUTCOMES) {
-      metrics.defineDistributionSeries(RUN_DURATION, Map.of("outcome", outcome));
+      metrics.defineDistributionSeries(RUN_DURATION, with("outcome", outcome));
     }
 
-    metrics.defineCounter(GAMES_INDEXED);
+    metrics.defineCounter(GAMES_INDEXED, bare());
     for (String outcome : RUN_OUTCOMES) {
-      metrics.defineCounter(RUNS, Map.of("outcome", outcome));
+      metrics.defineCounter(RUNS, with("outcome", outcome));
     }
     for (String result : MONTH_RESULTS) {
-      metrics.defineCounter(MONTHS, Map.of("result", result));
+      metrics.defineCounter(MONTHS, with("result", result));
     }
     for (String result : ARCHIVE_FETCH_RESULTS) {
-      metrics.defineCounter(ARCHIVE_FETCHES, Map.of("result", result));
+      metrics.defineCounter(ARCHIVE_FETCHES, with("result", result));
     }
   }
 
@@ -500,7 +524,7 @@ public class IndexWorker {
                 message.platform(),
                 monthStr,
                 count);
-            metrics.increment(MONTHS, Map.of("result", "cached"));
+            metrics.increment(MONTHS, with("result", "cached"));
             progress(message.requestId(), totalIndexed);
             continue;
           }
@@ -513,7 +537,7 @@ public class IndexWorker {
           // Counted before rethrowing. ChessClient maps only a 404 to empty and throws on every
           // other non-200, so without this the rate-limits and 5xx — the failures an operator most
           // wants a rate on — were the one archive outcome the counter could not show.
-          metrics.increment(ARCHIVE_FETCHES, Map.of("result", "error"));
+          metrics.increment(ARCHIVE_FETCHES, with("result", "error"));
           throw e;
         }
         // Checked on the way out of the fetch, not only where an interrupt is thrown, because a
@@ -530,7 +554,7 @@ public class IndexWorker {
         // an upstream failure on a listed archive — both must fail the request, not COMPLETE it
         // as "indexed, no games" (#1360).
         if (response.isEmpty()) {
-          metrics.increment(ARCHIVE_FETCHES, Map.of("result", "error"));
+          metrics.increment(ARCHIVE_FETCHES, with("result", "error"));
           throw new RuntimeException(
               "chess.com returned 404 for player="
                   + message.player()
@@ -562,13 +586,13 @@ public class IndexWorker {
           // GAMES_PER_MONTH: a decade-long backfill of a three-year player is mostly
           // empty archives, and feeding those zeros in makes the average archive look a
           // third its real size. empty_months_total already carries that population.
-          metrics.increment(MONTHS, Map.of("result", "empty"));
+          metrics.increment(MONTHS, with("result", "empty"));
           // no_archive kept as the empty-games label so existing dashboard selectors still match;
           // the fetch itself succeeded (HTTP 200).
-          metrics.increment(ARCHIVE_FETCHES, Map.of("result", "no_archive"));
+          metrics.increment(ARCHIVE_FETCHES, with("result", "no_archive"));
           continue;
         }
-        metrics.increment(ARCHIVE_FETCHES, Map.of("result", "ok"));
+        metrics.increment(ARCHIVE_FETCHES, with("result", "ok"));
 
         List<PlayedGame> games = new ArrayList<>();
         for (PlayedGame game : response.get().games()) {
@@ -640,7 +664,7 @@ public class IndexWorker {
                         metrics.add(
                             MOTIF_OCCURRENCES,
                             occurrences.size(),
-                            Map.of("motif", motif.name().toLowerCase(Locale.ROOT))));
+                            with("motif", motif.name().toLowerCase(Locale.ROOT))));
             monthCount++;
             totalIndexed++;
             if (featureBatch.size() >= BATCH_SIZE) {
@@ -671,9 +695,9 @@ public class IndexWorker {
         // worker has lost it, so this line is unreachable without a live lease.
         upsertPeriod(message, monthStr, month, fetchedAt, monthCount, titleResolution.degraded());
         metrics.increment(
-            MONTHS, Map.of("result", titleResolution.degraded() ? "degraded" : "indexed"));
-        metrics.add(GAMES_INDEXED, monthCount, Map.of());
-        metrics.record(GAMES_PER_MONTH, monthCount);
+            MONTHS, with("result", titleResolution.degraded() ? "degraded" : "indexed"));
+        metrics.add(GAMES_INDEXED, monthCount, bare());
+        metrics.record(GAMES_PER_MONTH, monthCount, bare());
         progress(message.requestId(), totalIndexed);
       }
 
@@ -761,13 +785,13 @@ public class IndexWorker {
         // Reporting those as lease_lost would bury the wedge signal in ordinary range handovers.
         outcome = "interrupted";
       }
-      metrics.increment(RUNS, Map.of("outcome", outcome));
+      metrics.increment(RUNS, with("outcome", outcome));
       // Labelled by outcome, like the counter beside it. An interrupted run sat at the MAX_RUN
       // ceiling by definition, so pooling it with the completed ones makes the average run time
       // jump precisely when a wedge is being cut loose — the tile reads worst exactly when it is
       // being used to judge how bad things are. Four outcomes over these bounds is 64 series.
       metrics.record(
-          RUN_DURATION, (System.nanoTime() - runStartNanos) / 1000.0, Map.of("outcome", outcome));
+          RUN_DURATION, (System.nanoTime() - runStartNanos) / 1000.0, with("outcome", outcome));
     }
   }
 
