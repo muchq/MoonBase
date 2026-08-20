@@ -67,8 +67,12 @@ class ReanalysisPoller {
 
 /// Claims and runs reanalysis passes until `stopping`.
 ///
-/// One thread's worth, not a pool: the queue only ever hands out one pass
-/// at a time, since a pass is a single-owner walk of the whole corpus.
+/// One thread's worth, not a pool. A pass is a single-owner walk of the
+/// whole corpus — but that is per row, not global: two PENDING rows are
+/// two claimable passes, and two replicas will walk the corpus twice for
+/// no benefit. Keeping it to one live pass is the enqueue side's job
+/// (dedupe, like indexing's dedupe_key), which ships with the endpoint
+/// flip.
 ///
 /// Builds its queue through the factory on the calling thread rather than
 /// taking one, because a pg::Client is one connection serialised by a
