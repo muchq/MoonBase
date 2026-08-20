@@ -9,7 +9,18 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
+import org.jdbi.v3.core.Jdbi;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -63,6 +74,95 @@ public class PostgresSingleLiveReanalysisTest {
     try (Connection conn = dataSource.getConnection();
         Statement stmt = conn.createStatement()) {
       stmt.execute("INSERT INTO reanalysis_requests (status) VALUES ('" + status + "')");
+    }
+  }
+
+  /**
+   * The dao's race backstop, against the index it leans on. Check-then-insert means two racers can
+   * both see no live row; the index lets one insert land and the dao maps the other's violation
+   * back to the winner's row. H2's stand-in index is not unique, so only here does that branch
+   * execute.
+   */
+  @Test
+  public void racingEnqueuesConvergeOnOnePass() throws Exception {
+    ReanalysisRequestDao dao = new ReanalysisRequestDao(Jdbi.create(dataSource));
+
+    int racers = 8;
+    ExecutorService pool = Executors.newFixedThreadPool(racers);
+    CountDownLatch start = new CountDownLatch(1);
+    Set<UUID> ids = ConcurrentHashMap.newKeySet();
+    List<Future<UUID>> answers = new ArrayList<>();
+    try {
+      for (int i = 0; i < racers; i++) {
+        answers.add(
+            pool.submit(
+                () -> {
+                  start.await();
+                  UUID id = dao.enqueue().request().id();
+                  ids.add(id);
+                  return id;
+                }));
+      }
+      start.countDown();
+      // Every racer must get an answer, not merely fail quietly: a loser
+      // whose violation went uncaught would throw here, so this get() is
+      // what actually pins the catch branch. hasSize(1) alone passes with
+      // seven racers dead on the floor.
+      for (Future<UUID> answer : answers) {
+        assertThat(answer.get(30, TimeUnit.SECONDS)).isNotNull();
+      }
+      pool.shutdown();
+      assertThat(pool.awaitTermination(30, TimeUnit.SECONDS)).isTrue();
+    } finally {
+      pool.shutdownNow();
+    }
+
+    assertThat(ids).hasSize(1);
+    try (Connection conn = dataSource.getConnection();
+        Statement stmt = conn.createStatement();
+        var rs = stmt.executeQuery("SELECT count(*) FROM reanalysis_requests")) {
+      assertThat(rs.next()).isTrue();
+      assertThat(rs.getInt(1)).as("one row, not one per racer").isEqualTo(1);
+    }
+  }
+
+  /**
+   * The catch branch, forced rather than raced. A raw transaction holds an uncommitted live insert;
+   * the dao's check sees nothing (uncommitted), its insert blocks on the index, and the commit
+   * turns that block into the unique violation the dao must map to the winner's row. Unlike the
+   * racing test above, this path executes every run.
+   */
+  @Test
+  public void aLoserOfTheInsertRaceIsHandedTheWinnersPass() throws Exception {
+    ReanalysisRequestDao dao = new ReanalysisRequestDao(Jdbi.create(dataSource));
+
+    try (Connection raw = dataSource.getConnection()) {
+      raw.setAutoCommit(false);
+      UUID winner;
+      try (Statement stmt = raw.createStatement();
+          var rs =
+              stmt.executeQuery(
+                  "INSERT INTO reanalysis_requests (status) VALUES ('PENDING') RETURNING id")) {
+        assertThat(rs.next()).isTrue();
+        winner = rs.getObject(1, UUID.class);
+      }
+
+      ExecutorService pool = Executors.newSingleThreadExecutor();
+      try {
+        Future<ReanalysisRequestDao.EnqueueResult> loser = pool.submit(dao::enqueue);
+        // The dao is now past its empty check and blocked inside the insert.
+        // A sleep rather than a latch, because the block happens inside
+        // Postgres where no latch can see it.
+        Thread.sleep(500);
+        assertThat(loser.isDone()).as("the loser answered before the winner committed").isFalse();
+
+        raw.commit();
+        ReanalysisRequestDao.EnqueueResult result = loser.get(30, TimeUnit.SECONDS);
+        assertThat(result.created()).isFalse();
+        assertThat(result.request().id()).isEqualTo(winner);
+      } finally {
+        pool.shutdownNow();
+      }
     }
   }
 

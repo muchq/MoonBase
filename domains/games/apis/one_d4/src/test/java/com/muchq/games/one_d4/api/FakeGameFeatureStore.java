@@ -103,11 +103,9 @@ final class FakeGameFeatureStore implements GameFeatureStore {
     return 0;
   }
 
-  @Override
   public void insertOccurrencesBatch(
       Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {}
 
-  @Override
   public void deleteOccurrencesByGameUrls(List<String> gameUrls) {}
 
   @Override
@@ -129,10 +127,5 @@ final class FakeGameFeatureStore implements GameFeatureStore {
   @Override
   public int updateOpeningFamilies(java.util.List<GameOpening> updates) {
     return 0;
-  }
-
-  @Override
-  public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
-    return List.of();
   }
 }

@@ -57,7 +57,59 @@ public class AdminResponseWireTest {
 
   @Test
   public void reanalyzeAnswersWithTheDocumentedFieldNames() throws Exception {
-    assertThat(post("/admin/reanalyze")).isEqualTo("{\"gamesProcessed\":0,\"gamesFailed\":0}");
+    // The id is random, so the shape is pinned by field name rather than by
+    // full-body equality. status is the async contract's load-bearing field:
+    // a client that used to read counts as "done" now has to poll for them.
+    String body = post("/admin/reanalyze");
+    assertThat(body).contains("\"id\":\"");
+    assertThat(body).contains("\"status\":\"PENDING\"");
+    assertThat(body).contains("\"gamesProcessed\":0");
+    assertThat(body).contains("\"gamesFailed\":0");
+    // Omitted, not null — the README says so, and a null here would make
+    // every client's "is it failed" check subtly wrong.
+    assertThat(body).doesNotContain("errorMessage");
+  }
+
+  @Test
+  public void reanalyzeIsAnEnqueueNotARun_soASecondPostAnswersWithTheSamePass() throws Exception {
+    String first = post("/admin/reanalyze");
+    String again = post("/admin/reanalyze");
+    assertThat(again).isEqualTo(first);
+  }
+
+  @Test
+  public void reanalysisStatusIsReadableAtTheIdTheEnqueueAnswered() throws Exception {
+    String body = post("/admin/reanalyze");
+    String id = body.replaceAll(".*\"id\":\"([0-9a-f-]{36})\".*", "$1");
+
+    HttpResponse<String> status =
+        client.send(
+            HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + server.getPort() + "/admin/reanalyze/" + id))
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertThat(status.statusCode()).isEqualTo(200);
+    assertThat(status.body()).isEqualTo(body);
+  }
+
+  // The controller throws NoSuchElementException and trusts the global
+  // ErrorHandler to make that a 404. Trusting is an argument; this is the
+  // wire-level fact, for the admin route rather than the /v1 one.
+  @Test
+  public void anUnknownReanalysisIdIsA404() throws Exception {
+    HttpResponse<String> response =
+        client.send(
+            HttpRequest.newBuilder()
+                .uri(
+                    URI.create(
+                        "http://localhost:"
+                            + server.getPort()
+                            + "/admin/reanalyze/00000000-0000-4000-8000-000000000042"))
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertThat(response.statusCode()).isEqualTo(404);
   }
 
   private String post(String path) throws Exception {

@@ -99,52 +99,6 @@ public class ConcurrentFlushTest {
   }
 
   /**
-   * The hazard, stated as a fact rather than an argument. Driven through the separate public
-   * primitives with the interleaving forced by a latch, doubling is not a race that might happen
-   * but the guaranteed outcome of an ordering the API permits.
-   *
-   * <p>Those primitives are still public, and "single-threaded within its own loop" is not a
-   * defence: {@code AdminController}'s reanalysis used to pair them, and the writer it races is an
-   * indexing worker on another thread, not a second admin call. It now goes through {@code
-   * replaceOccurrences}. This test is what the constraint on their use rests on — if a later change
-   * routes any concurrent writer back through the pair, the explanation is waiting here.
-   */
-  @Test
-  @Timeout(30)
-  public void theSeparateDeleteAndInsertPrimitivesAreNotSafeToPairUnderConcurrency()
-      throws Exception {
-    CountDownLatch bothDeleted = new CountDownLatch(2);
-    CountDownLatch go = new CountDownLatch(1);
-
-    Runnable flush =
-        () -> {
-          store.insertBatch(List.of(gameFeature()));
-          store.deleteOccurrencesByGameUrls(List.of(GAME_URL));
-          bothDeleted.countDown();
-          try {
-            // Hold here until the other writer has also deleted. This is the interleaving the
-            // separate transactions allow; the latch only makes it deterministic.
-            go.await(15, TimeUnit.SECONDS);
-          } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-          }
-          store.insertOccurrencesBatch(Map.of(GAME_URL, occurrences()));
-        };
-
-    pool.submit(flush);
-    pool.submit(flush);
-
-    assertThat(bothDeleted.await(15, TimeUnit.SECONDS)).isTrue();
-    go.countDown();
-    pool.shutdown();
-    assertThat(pool.awaitTermination(20, TimeUnit.SECONDS)).isTrue();
-
-    assertThat(countOccurrences())
-        .as("both inserts survived because neither delete could see the other's rows")
-        .isEqualTo(4);
-  }
-
-  /**
    * The property that removes it, observed from outside: while a flush is in progress, nobody can
    * see the game with its occurrences deleted. The gap the interleaving needs is the same gap a
    * reader can see, so a reader that never sees one is evidence there is none to exploit.
@@ -238,13 +192,10 @@ public class ConcurrentFlushTest {
    */
   @Test
   @Timeout(30)
-  public void bothOccurrenceWritersTakeTheGamesFeatureRowBeforeRewritingIt() throws Exception {
+  public void aFlushTakesTheGamesFeatureRowBeforeRewritingIt() throws Exception {
     store.flushOwned(
         requestId, OWNER_A, NOW, List.of(gameFeature()), Map.of(GAME_URL, occurrences()));
 
-    assertBlocksWhileTheGameRowIsHeld(
-        "reanalysis",
-        () -> store.replaceOccurrences(List.of(GAME_URL), Map.of(GAME_URL, occurrences())));
     assertBlocksWhileTheGameRowIsHeld(
         "an indexing flush",
         () ->
@@ -306,63 +257,6 @@ public class ConcurrentFlushTest {
     releaseRow.countDown();
     blocked.get(20, TimeUnit.SECONDS);
     holder.get(20, TimeUnit.SECONDS);
-  }
-
-  /**
-   * Both writers, run against each other repeatedly with a barrier per round.
-   *
-   * <p>This is a race and says so: it cannot force the delete/delete/insert/insert order, because
-   * neither {@code flushOwned} nor {@code replaceOccurrences} can be paused mid-transaction from
-   * outside. What it adds over the deterministic test above is coverage of orderings nobody thought
-   * to write down. Treat a failure as real and a pass as weak evidence — the lock itself is pinned
-   * by {@code bothOccurrenceWritersTakeTheGamesFeatureRowBeforeRewritingIt}, and the Postgres
-   * behaviour that makes it necessary by {@code PostgresConcurrentWriteTest}.
-   */
-  @Test
-  @Timeout(60)
-  public void reanalysisAndAWorkerFlushOverOneGameDoNotDuplicateOccurrences() throws Exception {
-    store.flushOwned(
-        requestId, OWNER_A, NOW, List.of(gameFeature()), Map.of(GAME_URL, occurrences()));
-    assertThat(countOccurrences()).isEqualTo(2);
-
-    java.util.concurrent.CyclicBarrier round = new java.util.concurrent.CyclicBarrier(2);
-    Runnable sync =
-        () -> {
-          try {
-            round.await(20, TimeUnit.SECONDS);
-          } catch (Exception e) {
-            throw new RuntimeException(e);
-          }
-        };
-
-    Future<?> reanalysis =
-        pool.submit(
-            () -> {
-              for (int i = 0; i < CONTENTION_ROUNDS; i++) {
-                sync.run();
-                store.replaceOccurrences(List.of(GAME_URL), Map.of(GAME_URL, occurrences()));
-              }
-            });
-    Future<?> flush =
-        pool.submit(
-            () -> {
-              for (int i = 0; i < CONTENTION_ROUNDS; i++) {
-                sync.run();
-                store.flushOwned(
-                    requestId,
-                    OWNER_A,
-                    NOW,
-                    List.of(gameFeature()),
-                    Map.of(GAME_URL, occurrences()));
-              }
-            });
-
-    reanalysis.get(45, TimeUnit.SECONDS);
-    flush.get(45, TimeUnit.SECONDS);
-
-    assertThat(countOccurrences())
-        .as("reanalysis and an indexing flush left duplicated motif rows for this game")
-        .isEqualTo(2);
   }
 
   /** The fence: a worker whose lease has been taken writes nothing at all. */

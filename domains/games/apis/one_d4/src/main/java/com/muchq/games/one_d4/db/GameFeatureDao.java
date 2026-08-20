@@ -29,11 +29,7 @@ import org.slf4j.LoggerFactory;
 public class GameFeatureDao implements GameFeatureStore {
   private static final Logger LOG = LoggerFactory.getLogger(GameFeatureDao.class);
 
-  private static final String FETCH_FOR_REANALYSIS =
-      "SELECT request_id, game_url, pgn FROM game_features ORDER BY indexed_at, game_url LIMIT ?"
-          + " OFFSET ?";
-
-  // Ordered like FETCH_FOR_REANALYSIS, and for the same reason: the re-derive pass rewrites
+  // Ordered by columns the re-derive pass does not write: it rewrites
   // opening_family while paging by offset, and neither column in this ORDER BY is one it writes,
   // so a row cannot move across a page boundary between batches and be skipped.
   private static final String FETCH_OPENINGS_FOR_REDERIVE =
@@ -97,13 +93,6 @@ public class GameFeatureDao implements GameFeatureStore {
               rs.getString("game_url"),
               rs.getString("opening_name"),
               rs.getString("opening_family"));
-
-  private static final RowMapper<GameForReanalysis> REANALYSIS_MAPPER =
-      (rs, ctx) ->
-          new GameForReanalysis(
-              UUID.fromString(rs.getString("request_id")),
-              rs.getString("game_url"),
-              rs.getString("pgn"));
 
   private final Jdbi jdbi;
   private final SqlDialect dialect;
@@ -319,43 +308,28 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   /**
-   * Replaces the occurrences for a set of games as one unit, without an ownership check.
-   *
-   * <p>For the reanalysis path, which recomputes motifs for games it does not own a request for.
-   * The atomicity is the same requirement as {@link #flushOwned}'s and for the same reason: a
-   * delete that commits separately from its insert leaves a window in which another writer — an
-   * indexing worker flushing a live request that covers one of these games — can delete nothing,
-   * insert its own rows, and let both copies survive. Being single-threaded within its own loop
-   * does not help, because the other writer is in another thread.
+   * Seeding surface for the read-path tests, package-private on purpose. Production writes
+   * occurrences through {@link #flushOwned} (indexing) or the C++ worker (reanalysis); the query
+   * tests need rows without a request or a lease, and going through the same statement flushOwned
+   * uses is what keeps their fixtures from drifting.
    */
-  @Override
-  public void replaceOccurrences(
-      List<String> gameUrlsToClear,
-      Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
-    if (gameUrlsToClear.isEmpty() && occurrencesByGame.isEmpty()) {
-      return;
-    }
-    List<String> merged = new ArrayList<>(gameUrlsToClear);
-    merged.addAll(occurrencesByGame.keySet());
-    List<String> gameUrls = merged.stream().distinct().sorted().toList();
-    final List<String> locked = gameUrls;
-    jdbi.useTransaction(
-        h -> {
-          lockGames(h, locked);
-          var deletes = h.prepareBatch(DELETE_OCCURRENCES_BY_GAME_URL);
-          for (String gameUrl : locked) {
-            deletes.bind(0, gameUrl).add();
-          }
-          deletes.execute();
-          insertOccurrences(h, occurrencesByGame);
-        });
-  }
-
-  @Override
-  public void insertOccurrencesBatch(
+  void insertOccurrencesBatch(
       Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
     if (occurrencesByGame.isEmpty()) return;
     jdbi.useHandle(h -> insertOccurrences(h, occurrencesByGame));
+  }
+
+  /** Same rationale as {@link #insertOccurrencesBatch}. */
+  void deleteOccurrencesByGameUrls(List<String> gameUrls) {
+    if (gameUrls.isEmpty()) return;
+    jdbi.useHandle(
+        h -> {
+          var batch = h.prepareBatch(DELETE_OCCURRENCES_BY_GAME_URL);
+          for (String gameUrl : gameUrls) {
+            batch.bind(0, gameUrl).add();
+          }
+          batch.execute();
+        });
   }
 
   private void insertOccurrences(
@@ -395,9 +369,7 @@ public class GameFeatureDao implements GameFeatureStore {
 
   /**
    * The serving reads' bounded entry point — see {@link StatementTimeouts#withStatementTimeout} for
-   * the mechanism and {@link StatementTimeouts#SERVING_READ_SECONDS} for the policy. {@link
-   * #fetchForReanalysis} deliberately does not go through here: it is the read half of the admin
-   * reanalysis batch loop, paging the whole table to feed a write path, not a serving read.
+   * the mechanism and {@link StatementTimeouts#SERVING_READ_SECONDS} for the policy.
    */
   private <T> T withReadHandle(org.jdbi.v3.core.HandleCallback<T, RuntimeException> body) {
     return StatementTimeouts.withStatementTimeout(
@@ -700,30 +672,6 @@ public class GameFeatureDao implements GameFeatureStore {
 
   private static boolean isKingTarget(@Nullable String target) {
     return target != null && (target.startsWith("K") || target.startsWith("k"));
-  }
-
-  @Override
-  public void deleteOccurrencesByGameUrls(List<String> gameUrls) {
-    if (gameUrls.isEmpty()) return;
-    jdbi.useHandle(
-        h -> {
-          var batch = h.prepareBatch(DELETE_OCCURRENCES_BY_GAME_URL);
-          for (String gameUrl : gameUrls) {
-            batch.bind(0, gameUrl).add();
-          }
-          batch.execute();
-        });
-  }
-
-  @Override
-  public List<GameForReanalysis> fetchForReanalysis(int limit, int offset) {
-    return jdbi.withHandle(
-        h ->
-            h.createQuery(FETCH_FOR_REANALYSIS)
-                .bind(0, limit)
-                .bind(1, offset)
-                .map(REANALYSIS_MAPPER)
-                .list());
   }
 
   @Override

@@ -12,6 +12,7 @@ import com.muchq.games.one_d4.db.IndexingRequestDao;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.db.Migration;
 import com.muchq.games.one_d4.db.PostgresSqlDialect;
+import com.muchq.games.one_d4.db.ReanalysisRequestDao;
 import com.muchq.games.one_d4.db.SqlDialect;
 import com.muchq.games.one_d4.engine.FeatureExtractor;
 import com.muchq.games.one_d4.engine.GameReplayer;
@@ -152,6 +153,11 @@ public class IndexerModule {
   @Context
   public IndexingRequestStore indexingRequestStore(Jdbi jdbi, Clock clock) {
     return new IndexingRequestDao(jdbi, clock);
+  }
+
+  @Context
+  public ReanalysisRequestDao reanalysisRequestDao(Jdbi jdbi) {
+    return new ReanalysisRequestDao(jdbi);
   }
 
   @Context

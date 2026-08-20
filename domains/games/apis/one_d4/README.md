@@ -350,18 +350,30 @@ load landed wherever the submit happened to arrive.
 
 ### Re-analyze All Games
 
-Re-runs feature extraction on every stored game and updates motif columns and occurrences. Useful after deploying a new detector.
-
-It writes **no** `game_features` columns, so it does not touch the derived/enriched ones —
-`white_title`, `black_title`, `opening_name`, `opening_family`. It reports a large
-`gamesProcessed` and leaves every one of them unchanged. For `opening_family` specifically, use
-the re-derive below; the other three still need a reindex with `skipCache: true`.
+Enqueues a re-extraction of every stored game against the current detectors. Useful after
+deploying a new one. **The pass runs in the C++ worker** (see
+`domains/games/apis/one_d4_worker`), which claims it off `reanalysis_requests` like any other
+job: leased, fenced, resumable from a checkpointed cursor. The endpoint answers immediately.
 
 ```bash
 curl -X POST http://localhost:8080/admin/reanalyze
+# {"id":"…","status":"PENDING","gamesProcessed":0,"gamesFailed":0}
+curl http://localhost:8080/admin/reanalyze/<id>   # poll until COMPLETED or FAILED
 ```
 
-Returns `{"gamesProcessed": N, "gamesFailed": M}`.
+`errorMessage` appears only on a `FAILED` pass — null fields are omitted, as everywhere on this
+server. During a rolling deploy or after a rollback, old instances still run the old synchronous
+pass (and cannot answer the GET); rerun the reanalysis once the fleet has converged.
+
+**Breaking change from the synchronous version:** the counts in the POST response are the pass's
+progress so far — zero at enqueue — not a completed total. Poll the GET for the real numbers. A
+POST while a pass is live answers with that pass rather than starting a second; one pass walks
+the whole corpus, and the database refuses a second live row outright
+(`idx_reanalysis_requests_single_live`).
+
+It writes only motif occurrences, so it does not touch the derived/enriched `game_features`
+columns — `white_title`, `black_title`, `opening_name`, `opening_family`. For `opening_family`
+use the re-derive below; the other three still need a reindex with `skipCache: true`.
 
 ### Re-derive Opening Families
 
@@ -387,7 +399,7 @@ Each write is conditional on the row still holding the `opening_name` it was der
 indexer upsert rewrites `opening_name` and `opening_family` together, so a row reindexed while the
 pass is running keeps the fresher value instead of being overwritten from a stale read; it is
 simply not counted. Rows *inserted* during the pass can still be missed, because paging is by
-offset — as with `/admin/reanalyze`. Neither is a reason to avoid running it live, but a quiet
+offset. Neither is a reason to avoid running it live, but a quiet
 moment costs nothing and a second run will pick up whatever a busy one skipped.
 
 It deliberately covers this one column. `white_title` / `black_title` come from player profiles at

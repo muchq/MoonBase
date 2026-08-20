@@ -1,0 +1,118 @@
+package com.muchq.games.one_d4.db;
+
+import java.util.Optional;
+import java.util.UUID;
+import org.jdbi.v3.core.Jdbi;
+import org.jspecify.annotations.Nullable;
+
+/**
+ * The API side of {@code reanalysis_requests}: enqueue a pass, read one back. Claiming, leases and
+ * every write past that live in the C++ worker — this class must never grow them.
+ */
+public class ReanalysisRequestDao {
+
+  public record ReanalysisRequest(
+      UUID id, String status, int gamesProcessed, int gamesFailed, @Nullable String errorMessage) {}
+
+  /** What enqueue answered with, and whether it made the row or found it. */
+  public record EnqueueResult(ReanalysisRequest request, boolean created) {}
+
+  private static final String SELECT_COLUMNS =
+      "SELECT id, status, games_processed, games_failed, error_message FROM reanalysis_requests ";
+
+  private final Jdbi jdbi;
+
+  public ReanalysisRequestDao(Jdbi jdbi) {
+    this.jdbi = jdbi;
+  }
+
+  /**
+   * The live pass, or a fresh {@code PENDING} one. One pass walks the whole corpus, so a second
+   * live row buys nothing — {@code idx_reanalysis_requests_single_live} refuses it at insert, and
+   * this answers with the pass already doing what was asked instead of surfacing that refusal.
+   *
+   * <p>Check-then-insert, with the insert re-checking on a unique violation: two racers can both
+   * see no live row, but the index lets only one insert land. The loser returns the winner's row.
+   * (H2 carries a non-unique stand-in for the index, so the race backstop is a Postgres behavior —
+   * {@code PostgresSingleLiveReanalysisTest} is where it has teeth.)
+   */
+  public EnqueueResult enqueue() {
+    for (int attempt = 0; ; attempt++) {
+      Optional<ReanalysisRequest> live = findLive();
+      if (live.isPresent()) {
+        return new EnqueueResult(live.get(), false);
+      }
+      try {
+        // Generated keys rather than RETURNING, which H2 does not parse.
+        UUID id =
+            jdbi.withHandle(
+                h ->
+                    h.createUpdate("INSERT INTO reanalysis_requests (status) VALUES ('PENDING')")
+                        .executeAndReturnGeneratedKeys("id")
+                        .mapTo(UUID.class)
+                        .one());
+        return new EnqueueResult(findById(id).orElseThrow(), true);
+      } catch (RuntimeException e) {
+        // Only the single-live index saying no: somebody else's insert
+        // landed between our check and ours, and their pass is the answer —
+        // on every lap, since the race that makes it true does not care
+        // which lap we are on. Anything else — a connection failure lands
+        // here too — rethrows with its own cause rather than being read as
+        // a rival.
+        if (!isUniqueViolation(e)) {
+          throw e;
+        }
+        Optional<ReanalysisRequest> winner = findLive();
+        if (winner.isPresent()) {
+          return new EnqueueResult(winner.get(), false);
+        }
+        // The winner's whole pass finished between our violation and the
+        // re-select, so the slot is free again. One more lap beats handing
+        // the caller a 500 for a request that can succeed right now; only
+        // this empty-slot case is bounded, because it looping forever needs
+        // a flash-completing pass per lap and two in a row is already a
+        // corpus too small to be enqueueing against.
+        if (attempt > 0) {
+          throw e;
+        }
+      }
+    }
+  }
+
+  private static boolean isUniqueViolation(RuntimeException e) {
+    for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+      if (cause instanceof java.sql.SQLException sql && "23505".equals(sql.getSQLState())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  public Optional<ReanalysisRequest> findById(UUID id) {
+    return jdbi.withHandle(
+        h ->
+            h.createQuery(SELECT_COLUMNS + "WHERE id = :id")
+                .bind("id", id)
+                .map(ReanalysisRequestDao::toRequest)
+                .findOne());
+  }
+
+  private Optional<ReanalysisRequest> findLive() {
+    return jdbi.withHandle(
+        h ->
+            h.createQuery(SELECT_COLUMNS + "WHERE status IN ('PENDING', 'PROCESSING') LIMIT 1")
+                .map(ReanalysisRequestDao::toRequest)
+                .findOne());
+  }
+
+  private static ReanalysisRequest toRequest(
+      java.sql.ResultSet rs, org.jdbi.v3.core.statement.StatementContext ctx)
+      throws java.sql.SQLException {
+    return new ReanalysisRequest(
+        rs.getObject("id", UUID.class),
+        rs.getString("status"),
+        rs.getInt("games_processed"),
+        rs.getInt("games_failed"),
+        rs.getString("error_message"));
+  }
+}

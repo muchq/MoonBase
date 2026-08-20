@@ -131,6 +131,34 @@ TEST(WorkerMetrics, PutsNothingUnboundedInALabel) {
   }
 }
 
+TEST(WorkerMetrics, CountsAReanalysisPassByItsOutcomeAndItsGames) {
+  CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+
+  metrics.PassFinished(RunOutcome::kCompleted, /*games_processed=*/120, /*games_failed=*/3);
+
+  EXPECT_EQ(recorder.CounterTotal(kReanalysisPassesMetric, Cpp("outcome", "completed")), 1);
+  EXPECT_EQ(recorder.CounterTotal(kGamesReanalyzedMetric, Cpp("result", "processed")), 120);
+  EXPECT_EQ(recorder.CounterTotal(kGamesReanalyzedMetric, Cpp("result", "failed")), 3);
+}
+
+// The counts on the row are totals across owners, and a resumed pass reports
+// them again at its own finish. Emitting the running total each time would
+// double what the earlier owner already exported — so the caller hands this
+// only its own share, and that contract is here so a refactor cannot lose it.
+TEST(WorkerMetrics, APassThatDidNothingNewEmitsNoGameCounts) {
+  CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+
+  metrics.PassFinished(RunOutcome::kInterrupted, /*games_processed=*/0, /*games_failed=*/0);
+
+  EXPECT_EQ(recorder.CounterTotal(kReanalysisPassesMetric, Cpp("outcome", "interrupted")), 1);
+  // No sample at all, not a zero-valued one — CounterTotal cannot tell those
+  // apart, which is exactly how the guard would go missing unnoticed.
+  EXPECT_EQ(recorder.ObservationCount(kGamesReanalyzedMetric, Cpp("result", "processed")), 0);
+  EXPECT_EQ(recorder.ObservationCount(kGamesReanalyzedMetric, Cpp("result", "failed")), 0);
+}
+
 TEST(WorkerMetrics, DeclaresItsSeriesBeforeAnythingHappens) {
   // A counter created lazily by its first event exports that event as its
   // first sample, and rate() has nothing earlier to measure from — the
@@ -145,6 +173,10 @@ TEST(WorkerMetrics, DeclaresItsSeriesBeforeAnythingHappens) {
   EXPECT_TRUE(recorder.Declared(kRunsMetric, Cpp("outcome", "completed")));
   EXPECT_TRUE(recorder.Declared(kRunsMetric, Cpp("outcome", "lease_lost")));
   EXPECT_TRUE(recorder.Declared(kMonthsMetric, Cpp("result", "empty")));
+  EXPECT_TRUE(recorder.Declared(kReanalysisPassesMetric, Cpp("outcome", "completed")));
+  EXPECT_TRUE(recorder.Declared(kReanalysisPassesMetric, Cpp("outcome", "lease_lost")));
+  EXPECT_TRUE(recorder.Declared(kGamesReanalyzedMetric, Cpp("result", "processed")));
+  EXPECT_TRUE(recorder.Declared(kGamesReanalyzedMetric, Cpp("result", "failed")));
   EXPECT_TRUE(recorder.Declared(kArchiveFetchesMetric, Cpp("result", "error")));
   EXPECT_TRUE(recorder.Declared(kGamesIndexedMetric, kCpp));
   EXPECT_TRUE(recorder.Declared(kMonthsMetric, Cpp("result", "cached")));
