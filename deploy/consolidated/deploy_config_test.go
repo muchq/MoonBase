@@ -103,6 +103,7 @@ var servicesWithSteadyProbes = []string{
 	"microgpt-serve",
 	"mithril",
 	"one_d4",
+	"one_d4_v2",
 	"portrait",
 	"posterize",
 }
@@ -928,6 +929,14 @@ func TestTheV2AnalyzeRouteIsDeliberatelyPublic(t *testing.T) {
 				t.Errorf("the v2 analyze route goes somewhere other than one_d4_v2:8090 (%q); "+
 					"one_d4_v2 is the only service that serves /v2/analyze.", line)
 			}
+		case strings.HasPrefix(line, "rewrite") &&
+			(strings.Contains(line, "@post_v2_analyze") || strings.Contains(line, "/v2/analyze")):
+			// The no-rewrite property is the design point, not a side effect:
+			// the service serves the gateway path itself, so a rewrite here
+			// reintroduces exactly the path drift the v1 routes live with.
+			t.Errorf("Caddy rewrites the v2 analyze route (%q). one_d4_v2 serves /v2/analyze "+
+				"directly; the route a client sees and the route the model declares are meant "+
+				"to be one string.", line)
 		}
 	}
 

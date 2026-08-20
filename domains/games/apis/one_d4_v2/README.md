@@ -12,8 +12,8 @@ is gone, the same way nobody renames a `/v2` path once clients hold it.
 ## What it is, and isn't
 
 Analysis is stateless motif detection over a single PGN: parse, run the
-detectors from `//domains/games/libs/chariot` (the same ones the C++ indexing
-worker uses), answer. This service holds **no database credentials and no
+detectors from `//domains/games/libs/one_d4_motifs` (the same `Extract` the
+C++ indexing worker runs), answer. This service holds **no database credentials and no
 corpus state** — indexing, querying, aggregation, retention and the schema all
 stay with `one_d4` (#1332) until their own phases move them.
 

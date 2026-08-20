@@ -39,8 +39,8 @@ public class OneD4Client {
    * <p>Not optional in practice: without it a peer that accepts the connection and then stalls
    * parks the calling thread forever, and forever outlasts every budget above it — including
    * IndexerFacade's polling ceiling, which is only consulted between calls and cannot interrupt one
-   * already in flight. Comfortably above one_d4's own analyze ceiling so a slow-but-working request
-   * is not cut off by the client.
+   * already in flight. For analyze this is the only wall clock anywhere: one_d4_v2 bounds work by
+   * plies, not time, so a slow-but-legal request is cut off here and nowhere upstream.
    */
   static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
 
@@ -90,12 +90,15 @@ public class OneD4Client {
    * this eagerly-built {@code @Context} bean would take the process down and {@code restart:
    * always} would 502 every tool over a corpus misconfiguration.
    */
-  private HttpRequest build(HttpRequest.Builder builder, String description) {
+  private HttpRequest build(HttpRequest.Builder builder, String base, String description) {
     try {
       return builder.build();
     } catch (IllegalArgumentException e) {
+      // The base the request was built from, like the send path: blaming the
+      // v1 base for an unusable v2 base points an operator at the one box
+      // that is fine.
       throw new UpstreamException(
-          description + ": one_d4 base URL " + baseUrl + " is not usable — " + e.getMessage(), e);
+          description + ": upstream base URL " + base + " is not usable — " + e.getMessage(), e);
     }
   }
 
@@ -157,6 +160,7 @@ public class OneD4Client {
                 .setAccept(HttpRequest.ContentType.JSON)
                 .setTimeout(timeout)
                 .setBody(json),
+            base,
             description);
     HttpResponse response = send(request, description);
     throwIfNotOk(response, description);
@@ -170,6 +174,7 @@ public class OneD4Client {
             .setMethod(HttpRequest.Method.GET)
             .setAccept(HttpRequest.ContentType.JSON)
             .setTimeout(timeout),
+        baseUrl,
         description);
   }
 
