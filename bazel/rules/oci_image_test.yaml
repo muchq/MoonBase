@@ -5,7 +5,15 @@ schemaVersion: 2.0.0
 # set_default_verify_paths() finds nothing and every handshake fails
 # CERTIFICATE_VERIFY_FAILED — which is how the C++ index worker spent its
 # whole deployed life unable to reach chess.com.
+#
+# Both paths, because the two runtimes this rule builds for disagree about
+# where roots live: BoringSSL opens X509_get_default_cert_file(), which is
+# /etc/ssl/cert.pem, and reads /etc/ssl/certs only as <hash>.<n>; Go's
+# crypto/x509 reads the Debian bundle path instead.
 fileExistenceTests:
-  - name: "CA bundle for outbound TLS"
+  - name: "CA bundle at BoringSSL's default cert file"
+    path: "/etc/ssl/cert.pem"
+    shouldExist: true
+  - name: "CA bundle at the path Go's crypto/x509 reads"
     path: "/etc/ssl/certs/ca-certificates.crt"
     shouldExist: true
