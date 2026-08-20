@@ -228,6 +228,39 @@ services:
           cpus: '0.25'
           memory: 256M
 
+  one_d4_v2:
+    image: ghcr.io/muchq/one_d4_v2:${ONE_D4_V2_SHA:-${DEPLOY_SHA:-latest}}
+    labels:
+      com.muchq.description: "one_d4 v2 API: /1d4/v2/analyze on the C++ detectors (#1389 phase 6)"
+    restart: always
+    ports:
+      - "8090:8090"
+    environment:
+      PORT: "8090"
+      TRUSTED_PROXY_CIDRS: *caddy_ip
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
+      OTEL_SERVICE_NAME: one_d4_v2
+      OTEL_RESOURCE_ATTRIBUTES: service.name=one_d4_v2,service.version=${ONE_D4_V2_SHA:-${DEPLOY_SHA:-latest}}
+    networks:
+      # one-d4-v2 for Java callers: java.net.URI gives a hostname containing
+      # an underscore a null host. Caddy keeps using the service key.
+      app_network:
+        aliases:
+          - one-d4-v2
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      # Steady /health probe; never the analyze route — a 400 for a bad PGN
+      # must stay a per-request error, not evidence the container is sick.
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8090 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   mcpserver:
     image: ghcr.io/muchq/mcpserver:${MCPSERVER_SHA:-${DEPLOY_SHA:-latest}}
     labels:

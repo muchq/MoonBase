@@ -1,4 +1,5 @@
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
 
 # one_d4_v2: the v2 HTTP API (#1389 phase 6). The seed that eventually
@@ -86,3 +87,26 @@ cc_test(
         "@smithy_cpp//runtime:server",
     ],
 )
+
+cc_binary(
+    name = "one_d4_v2",
+    srcs = ["main.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":one_d4_v2_smithy_server",
+        ":smithy_handler",
+        "//domains/platform/libs/aura",
+        "//domains/platform/libs/futility/env",
+        "//domains/platform/libs/futility/otel:http_metrics",
+        "//domains/platform/libs/futility/otel:otel_provider",
+        "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:globals",
+        "@com_google_absl//absl/log:initialize",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:http_beast",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
+linux_amd64_oci_binary(bin_name = "one_d4_v2")
