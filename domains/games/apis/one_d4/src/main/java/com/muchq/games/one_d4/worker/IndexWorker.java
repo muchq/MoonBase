@@ -89,10 +89,11 @@ public class IndexWorker {
   static final String RUN_DURATION = "index_run_duration_micros";
 
   /**
-   * Which indexer wrote a series. Both workers poll the same table, so the only way to see whether
-   * the C++ path is carrying the work — the number that decides when this one is deleted (#1389) —
-   * is for both to say which they are. Two values, no per-player or per-request cardinality, the
-   * same rule the other labels follow. The C++ worker writes {@code cpp}.
+   * Which indexer wrote a series. Not the only way to tell the two apart — they already run under
+   * separate {@code service_name}s, and a test pins that — but the one that still works if they are
+   * ever co-deployed, and the key the share tile's numerator selects on (#1389). Two values, no
+   * per-player or per-request cardinality, the same rule the other labels follow. The C++ worker
+   * writes {@code cpp}.
    */
   static final String INDEXER_LABEL = "indexer";
 

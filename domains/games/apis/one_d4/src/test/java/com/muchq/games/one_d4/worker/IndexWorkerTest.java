@@ -1229,11 +1229,12 @@ public class IndexWorkerTest {
 
   @Test
   public void metrics_everySeriesCarriesTheIndexerLabel() {
-    // Both workers poll the same table, so no dashboard can tell which one
-    // did the work unless every series says so. The C++ worker already
-    // writes indexer=cpp; without the matching value here, "share of games
-    // indexed by C++" has no denominator and motif parity between the two
-    // implementations cannot be plotted at all.
+    // Attribution, not arithmetic: the share tile's denominator selects on
+    // service_name and computes the same number whatever this worker stamps.
+    // What the label buys is asking which indexer wrote a series directly,
+    // and an answer that survives the two being co-deployed. Half a pair is
+    // worse than neither — cpp labelled and java not reads as every series
+    // being cpp's.
     stubChessClient.setResponse(
         java.time.YearMonth.of(2024, 1),
         List.of(playedGame("https://chess.com/game/lbl", SCHOLARS_MATE_PGN, "blitz")));
