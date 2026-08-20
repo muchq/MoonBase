@@ -15,7 +15,6 @@ import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -189,8 +188,6 @@ public class AdminControllerTest {
       throw new UnsupportedOperationException("AdminController tests never flush");
     }
 
-    private final Map<String, Integer> deleteCount = new HashMap<>();
-    private final Map<String, Integer> insertCount = new HashMap<>();
     private final List<GameOpening> openings = new ArrayList<>();
     private final List<String> written = new ArrayList<>();
 
@@ -231,19 +228,7 @@ public class AdminControllerTest {
       return updates.size();
     }
 
-    int deleteOccurrencesCount(String url) {
-      return deleteCount.getOrDefault(url, 0);
-    }
-
-    int insertOccurrencesCount(String url) {
-      return insertCount.getOrDefault(url, 0);
-    }
-
-    public void deleteOccurrencesByGameUrls(List<String> gameUrls) {
-      for (String url : gameUrls) {
-        deleteCount.merge(url, 1, Integer::sum);
-      }
-    }
+    public void deleteOccurrencesByGameUrls(List<String> gameUrls) {}
 
     @Override
     public void insertBatch(List<GameFeature> features) {}
@@ -254,11 +239,7 @@ public class AdminControllerTest {
     }
 
     public void insertOccurrencesBatch(
-        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
-      for (String url : occurrencesByGame.keySet()) {
-        insertCount.merge(url, 1, Integer::sum);
-      }
-    }
+        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {}
 
     @Override
     public List<GameFeature> query(Object compiledQuery, int limit, int offset) {

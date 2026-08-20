@@ -42,6 +42,48 @@ public class ReanalysisRequestDaoTest {
     assertThat(again.request().id()).isEqualTo(first);
   }
 
+  // The likeliest real re-post is while the worker is mid-corpus. A
+  // findLive narrowed to PENDING answers that POST with a 500 on Postgres
+  // (the index refuses the insert, the re-check sees nothing live) and a
+  // stacked second row here.
+  @Test
+  public void enqueue_whileAPassIsRunning_returnsItToo() {
+    UUID first = dao.enqueue().request().id();
+    testDb
+        .jdbi()
+        .useHandle(
+            h ->
+                h.createUpdate(
+                        "UPDATE reanalysis_requests SET status = 'PROCESSING' WHERE id = :id")
+                    .bind("id", first)
+                    .execute());
+
+    ReanalysisRequestDao.EnqueueResult again = dao.enqueue();
+    assertThat(again.created()).isFalse();
+    assertThat(again.request().id()).isEqualTo(first);
+    assertThat(again.request().status()).isEqualTo("PROCESSING");
+  }
+
+  // Test-quality panel: error_message was read by nothing. The C++ worker
+  // writes it on FAILED, and the API's whole job is handing it back.
+  @Test
+  public void findById_handsBackTheWorkersErrorMessage() {
+    UUID id = dao.enqueue().request().id();
+    testDb
+        .jdbi()
+        .useHandle(
+            h ->
+                h.createUpdate(
+                        "UPDATE reanalysis_requests SET status = 'FAILED',"
+                            + " error_message = 'Reanalysis retired: attempt budget exhausted'"
+                            + " WHERE id = :id")
+                    .bind("id", id)
+                    .execute());
+
+    assertThat(dao.findById(id).orElseThrow().errorMessage())
+        .isEqualTo("Reanalysis retired: attempt budget exhausted");
+  }
+
   @Test
   public void enqueue_afterThePassFinishes_createsAFreshOne() {
     UUID first = dao.enqueue().request().id();

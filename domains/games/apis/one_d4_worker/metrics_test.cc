@@ -153,7 +153,10 @@ TEST(WorkerMetrics, APassThatDidNothingNewEmitsNoGameCounts) {
   metrics.PassFinished(RunOutcome::kInterrupted, /*games_processed=*/0, /*games_failed=*/0);
 
   EXPECT_EQ(recorder.CounterTotal(kReanalysisPassesMetric, Cpp("outcome", "interrupted")), 1);
-  EXPECT_EQ(recorder.CounterTotal(kGamesReanalyzedMetric, Cpp("result", "processed")), 0);
+  // No sample at all, not a zero-valued one — CounterTotal cannot tell those
+  // apart, which is exactly how the guard would go missing unnoticed.
+  EXPECT_EQ(recorder.ObservationCount(kGamesReanalyzedMetric, Cpp("result", "processed")), 0);
+  EXPECT_EQ(recorder.ObservationCount(kGamesReanalyzedMetric, Cpp("result", "failed")), 0);
 }
 
 TEST(WorkerMetrics, DeclaresItsSeriesBeforeAnythingHappens) {

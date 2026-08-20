@@ -98,8 +98,11 @@ absl::StatusOr<RunOutcome> ReanalysisPoller::RunClaimed(const ReanalysisClaim& c
     const bool advanced = report->cursor != job.cursor_game_url;
     LOG(INFO) << "Reanalysis hit its ceiling request_id=" << job.id << " cursor=" << report->cursor
               << " advanced=" << advanced;
-    return Finish(RunOutcome::kInterrupted,
-                  advanced ? queue_.HandBack(job.id, owner) : queue_.Release(job.id, owner));
+    const absl::StatusOr<RunOutcome> outcome =
+        Finish(RunOutcome::kInterrupted,
+               advanced ? queue_.HandBack(job.id, owner) : queue_.Release(job.id, owner));
+    if (!outcome.ok()) return outcome;
+    return finished(*outcome);
   }
 
   if (lease.lost() || (report.ok() && report->lease_lost)) {

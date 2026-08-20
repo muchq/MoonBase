@@ -357,9 +357,13 @@ job: leased, fenced, resumable from a checkpointed cursor. The endpoint answers 
 
 ```bash
 curl -X POST http://localhost:8080/admin/reanalyze
-# {"id":"…","status":"PENDING","gamesProcessed":0,"gamesFailed":0,"errorMessage":null}
+# {"id":"…","status":"PENDING","gamesProcessed":0,"gamesFailed":0}
 curl http://localhost:8080/admin/reanalyze/<id>   # poll until COMPLETED or FAILED
 ```
+
+`errorMessage` appears only on a `FAILED` pass — null fields are omitted, as everywhere on this
+server. During a rolling deploy or after a rollback, old instances still run the old synchronous
+pass (and cannot answer the GET); rerun the reanalysis once the fleet has converged.
 
 **Breaking change from the synchronous version:** the counts in the POST response are the pass's
 progress so far — zero at enqueue — not a completed total. Poll the GET for the real numbers. A

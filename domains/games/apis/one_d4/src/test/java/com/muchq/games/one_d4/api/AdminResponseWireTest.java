@@ -90,6 +90,25 @@ public class AdminResponseWireTest {
     assertThat(status.body()).isEqualTo(body);
   }
 
+  // The controller throws NoSuchElementException and trusts the global
+  // ErrorHandler to make that a 404. Trusting is an argument; this is the
+  // wire-level fact, for the admin route rather than the /v1 one.
+  @Test
+  public void anUnknownReanalysisIdIsA404() throws Exception {
+    HttpResponse<String> response =
+        client.send(
+            HttpRequest.newBuilder()
+                .uri(
+                    URI.create(
+                        "http://localhost:"
+                            + server.getPort()
+                            + "/admin/reanalyze/00000000-0000-4000-8000-000000000042"))
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertThat(response.statusCode()).isEqualTo(404);
+  }
+
   private String post(String path) throws Exception {
     HttpResponse<String> response =
         client.send(

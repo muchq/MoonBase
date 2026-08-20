@@ -285,6 +285,87 @@ TEST(ReanalysisPollerTest, ReportsTheOutcomeAndThisOwnersShareOfTheGames) {
   EXPECT_EQ(std::get<2>(finished[0]), 3);
 }
 
+// The branch a large corpus is guaranteed to hit. A ceiling stint that is
+// not observed loses its games from the series forever: the next owner's
+// carried baseline already includes them, so its delta excludes them, and
+// this owner never exported them.
+TEST(ReanalysisPollerTest, ACeilingStintReportsItsOutcomeAndItsShare) {
+  FakeQueue queue;
+  queue.job_.cursor_game_url = "https://chess.com/game/0100";
+  queue.job_.games_processed = 100;
+
+  ReanalysisReport report;
+  report.stopped = Stopped::kRunCeiling;
+  report.cursor = "https://chess.com/game/0900";
+  report.games_processed = 900;
+
+  ReanalysisPoller::Options options = Options();
+  std::vector<std::tuple<RunOutcome, int, int>> finished;
+  options.on_finished = [&](RunOutcome outcome, int processed, int failed) {
+    finished.push_back({outcome, processed, failed});
+  };
+  ReanalysisPoller poller(queue, Reporting(report), options);
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  ASSERT_EQ(finished.size(), 1u);
+  EXPECT_EQ(std::get<0>(finished[0]), RunOutcome::kInterrupted);
+  EXPECT_EQ(std::get<1>(finished[0]), 800);
+}
+
+TEST(ReanalysisPollerTest, AShutdownHandBackReportsItsShareToo) {
+  FakeQueue queue;
+  queue.job_.games_processed = 100;
+  ReanalysisReport report;
+  report.stopped = Stopped::kShutdown;
+  report.games_processed = 150;
+
+  ReanalysisPoller::Options options = Options();
+  std::vector<std::tuple<RunOutcome, int, int>> finished;
+  options.on_finished = [&](RunOutcome outcome, int processed, int failed) {
+    finished.push_back({outcome, processed, failed});
+  };
+  ReanalysisPoller poller(queue, Reporting(report), options);
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  ASSERT_EQ(finished.size(), 1u);
+  EXPECT_EQ(std::get<0>(finished[0]), RunOutcome::kInterrupted);
+  EXPECT_EQ(std::get<1>(finished[0]), 50);
+}
+
+TEST(ReanalysisPollerTest, ALostLeaseStillReportsItsOutcome) {
+  FakeQueue queue;
+  ReanalysisReport report;
+  report.lease_lost = true;
+  ReanalysisPoller::Options options = Options();
+  std::vector<RunOutcome> outcomes;
+  options.on_finished = [&](RunOutcome outcome, int, int) { outcomes.push_back(outcome); };
+  ReanalysisPoller poller(queue, Reporting(report), options);
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  ASSERT_EQ(outcomes.size(), 1u);
+  EXPECT_EQ(outcomes[0], RunOutcome::kLeaseLost);
+}
+
+// A terminal write the queue could not answer is not an outcome — the row
+// expires and somebody retries, and whoever finishes it then reports it.
+// Emitting here too would count that pass twice.
+TEST(ReanalysisPollerTest, AQueueErrorOnTheTerminalWriteEmitsNothing) {
+  class BrokenComplete : public FakeQueue {
+   public:
+    absl::StatusOr<bool> Complete(std::string_view, std::string_view, int, int) override {
+      return absl::UnavailableError("pg went away");
+    }
+  };
+  BrokenComplete queue;
+  ReanalysisPoller::Options options = Options();
+  int calls = 0;
+  options.on_finished = [&](RunOutcome, int, int) { ++calls; };
+  ReanalysisPoller poller(queue, Reporting({}), options);
+
+  EXPECT_FALSE(poller.PollOnce().ok());
+  EXPECT_EQ(calls, 0);
+}
+
 TEST(ReanalysisPollerTest, AFailedPassStillReportsItsOutcome) {
   FakeQueue queue;
   ReanalysisPoller::Options options = Options();

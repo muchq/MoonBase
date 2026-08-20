@@ -396,6 +396,51 @@ TEST_F(PgReanalysisTest, TakesThePassRowRatherThanReadingIt) {
          " snapshot rather than claiming the row";
 }
 
+// The game-row lock inside ReplaceOccurrences, pinned from this side of the
+// language boundary. The deleted Java cross-writer tests were the last thing
+// holding it: without this lock, two writers over one game interleave as
+// delete, delete, insert, insert under READ COMMITTED and both copies
+// survive — and both sinks funnel through this one function.
+TEST_F(PgReanalysisTest, TheReplaceTakesTheGameRowBeforeRewritingIt) {
+  AddGame(Url(0), "pgn");
+  const std::string id = ClaimedPass("worker-a");
+  PgOccurrenceSink sink(*client_, id, "worker-a");
+
+  pg::Client rival(conninfo_);
+  absl::Notification held;
+  absl::Notification release;
+  std::thread holder([&] {
+    const absl::Status locked = rival.InTransaction([&](pg::Transaction& tx) {
+      const auto row =
+          tx.Exec("SELECT game_url FROM game_features WHERE game_url = $1 FOR UPDATE", {Url(0)});
+      EXPECT_TRUE(row.ok()) << row.status();
+      held.Notify();
+      release.WaitForNotification();
+      return absl::OkStatus();
+    });
+    EXPECT_TRUE(locked.ok()) << locked;
+  });
+
+  held.WaitForNotification();
+  std::atomic<bool> answered{false};
+  std::thread asker([&] {
+    ReanalyzedGame game;
+    game.url = Url(0);
+    EXPECT_TRUE(sink.Replace({game}).ok());
+    answered = true;
+  });
+  absl::SleepFor(absl::Milliseconds(250));
+  const bool wrote_through_the_lock = answered;
+
+  release.Notify();
+  holder.join();
+  asker.join();
+
+  EXPECT_FALSE(wrote_through_the_lock)
+      << "the replace finished while another transaction held the game row, so it never "
+         "asked for the lock that keeps two writers from doubling";
+}
+
 TEST_F(PgReanalysisTest, AnEmptyBatchIsNotAWrite) {
   const std::string id = ClaimedPass("worker-a");
   PgOccurrenceSink sink(*client_, id, "worker-a");

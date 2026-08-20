@@ -37,29 +37,47 @@ public class ReanalysisRequestDao {
    * {@code PostgresSingleLiveReanalysisTest} is where it has teeth.)
    */
   public EnqueueResult enqueue() {
-    Optional<ReanalysisRequest> live = findLive();
-    if (live.isPresent()) {
-      return new EnqueueResult(live.get(), false);
-    }
-    try {
-      // Generated keys rather than RETURNING, which H2 does not parse.
-      UUID id =
-          jdbi.withHandle(
-              h ->
-                  h.createUpdate("INSERT INTO reanalysis_requests (status) VALUES ('PENDING')")
-                      .executeAndReturnGeneratedKeys("id")
-                      .mapTo(UUID.class)
-                      .one());
-      return new EnqueueResult(findById(id).orElseThrow(), true);
-    } catch (RuntimeException e) {
-      // The single-live index said no: somebody else's insert landed between
-      // our check and ours. Their pass is the answer.
-      Optional<ReanalysisRequest> winner = findLive();
-      if (winner.isPresent()) {
-        return new EnqueueResult(winner.get(), false);
+    for (int attempt = 0; ; attempt++) {
+      Optional<ReanalysisRequest> live = findLive();
+      if (live.isPresent()) {
+        return new EnqueueResult(live.get(), false);
       }
-      throw e;
+      try {
+        // Generated keys rather than RETURNING, which H2 does not parse.
+        UUID id =
+            jdbi.withHandle(
+                h ->
+                    h.createUpdate("INSERT INTO reanalysis_requests (status) VALUES ('PENDING')")
+                        .executeAndReturnGeneratedKeys("id")
+                        .mapTo(UUID.class)
+                        .one());
+        return new EnqueueResult(findById(id).orElseThrow(), true);
+      } catch (RuntimeException e) {
+        // Only the single-live index saying no: somebody else's insert
+        // landed between our check and ours, and their pass is the answer.
+        // Anything else — a connection failure lands here too — rethrows
+        // with its own cause rather than being read as a rival.
+        if (!isUniqueViolation(e) || attempt > 0) {
+          throw e;
+        }
+        Optional<ReanalysisRequest> winner = findLive();
+        if (winner.isPresent()) {
+          return new EnqueueResult(winner.get(), false);
+        }
+        // The winner's whole pass finished between our violation and the
+        // re-select, so the slot is free again. One more try beats handing
+        // the caller a 500 for a request that can succeed right now.
+      }
     }
+  }
+
+  private static boolean isUniqueViolation(RuntimeException e) {
+    for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+      if (cause instanceof java.sql.SQLException sql && "23505".equals(sql.getSQLState())) {
+        return true;
+      }
+    }
+    return false;
   }
 
   public Optional<ReanalysisRequest> findById(UUID id) {

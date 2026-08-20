@@ -126,6 +126,46 @@ public class PostgresSingleLiveReanalysisTest {
     }
   }
 
+  /**
+   * The catch branch, forced rather than raced. A raw transaction holds an uncommitted live insert;
+   * the dao's check sees nothing (uncommitted), its insert blocks on the index, and the commit
+   * turns that block into the unique violation the dao must map to the winner's row. Unlike the
+   * racing test above, this path executes every run.
+   */
+  @Test
+  public void aLoserOfTheInsertRaceIsHandedTheWinnersPass() throws Exception {
+    ReanalysisRequestDao dao = new ReanalysisRequestDao(Jdbi.create(dataSource));
+
+    try (Connection raw = dataSource.getConnection()) {
+      raw.setAutoCommit(false);
+      UUID winner;
+      try (Statement stmt = raw.createStatement();
+          var rs =
+              stmt.executeQuery(
+                  "INSERT INTO reanalysis_requests (status) VALUES ('PENDING') RETURNING id")) {
+        assertThat(rs.next()).isTrue();
+        winner = rs.getObject(1, UUID.class);
+      }
+
+      ExecutorService pool = Executors.newSingleThreadExecutor();
+      try {
+        Future<ReanalysisRequestDao.EnqueueResult> loser = pool.submit(dao::enqueue);
+        // The dao is now past its empty check and blocked inside the insert.
+        // A sleep rather than a latch, because the block happens inside
+        // Postgres where no latch can see it.
+        Thread.sleep(500);
+        assertThat(loser.isDone()).as("the loser answered before the winner committed").isFalse();
+
+        raw.commit();
+        ReanalysisRequestDao.EnqueueResult result = loser.get(30, TimeUnit.SECONDS);
+        assertThat(result.created()).isFalse();
+        assertThat(result.request().id()).isEqualTo(winner);
+      } finally {
+        pool.shutdownNow();
+      }
+    }
+  }
+
   @Test
   public void aSecondLivePassIsRefusedAtInsert() throws Exception {
     insert("PENDING");
