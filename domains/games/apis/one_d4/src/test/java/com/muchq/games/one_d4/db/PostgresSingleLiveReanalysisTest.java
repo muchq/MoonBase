@@ -9,7 +9,15 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
+import org.jdbi.v3.core.Jdbi;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -63,6 +71,45 @@ public class PostgresSingleLiveReanalysisTest {
     try (Connection conn = dataSource.getConnection();
         Statement stmt = conn.createStatement()) {
       stmt.execute("INSERT INTO reanalysis_requests (status) VALUES ('" + status + "')");
+    }
+  }
+
+  /**
+   * The dao's race backstop, against the index it leans on. Check-then-insert means two racers can
+   * both see no live row; the index lets one insert land and the dao maps the other's violation
+   * back to the winner's row. H2's stand-in index is not unique, so only here does that branch
+   * execute.
+   */
+  @Test
+  public void racingEnqueuesConvergeOnOnePass() throws Exception {
+    ReanalysisRequestDao dao = new ReanalysisRequestDao(Jdbi.create(dataSource));
+
+    int racers = 8;
+    ExecutorService pool = Executors.newFixedThreadPool(racers);
+    CountDownLatch start = new CountDownLatch(1);
+    Set<UUID> ids = ConcurrentHashMap.newKeySet();
+    try {
+      for (int i = 0; i < racers; i++) {
+        pool.submit(
+            () -> {
+              start.await();
+              ids.add(dao.enqueue().request().id());
+              return null;
+            });
+      }
+      start.countDown();
+      pool.shutdown();
+      assertThat(pool.awaitTermination(30, TimeUnit.SECONDS)).isTrue();
+    } finally {
+      pool.shutdownNow();
+    }
+
+    assertThat(ids).hasSize(1);
+    try (Connection conn = dataSource.getConnection();
+        Statement stmt = conn.createStatement();
+        var rs = stmt.executeQuery("SELECT count(*) FROM reanalysis_requests")) {
+      assertThat(rs.next()).isTrue();
+      assertThat(rs.getInt(1)).as("one row, not one per racer").isEqualTo(1);
     }
   }
 
