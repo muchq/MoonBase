@@ -64,8 +64,9 @@ public class ReanalysisRequestDaoTest {
     assertThat(again.request().status()).isEqualTo("PROCESSING");
   }
 
-  // Test-quality panel: error_message was read by nothing. The C++ worker
-  // writes it on FAILED, and the API's whole job is handing it back.
+  // The C++ worker writes error_message on FAILED, and handing it back is
+  // the API's whole job — a mapper that dropped it would leave every failed
+  // pass mute.
   @Test
   public void findById_handsBackTheWorkersErrorMessage() {
     UUID id = dao.enqueue().request().id();

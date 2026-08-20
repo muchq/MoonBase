@@ -54,10 +54,12 @@ public class ReanalysisRequestDao {
         return new EnqueueResult(findById(id).orElseThrow(), true);
       } catch (RuntimeException e) {
         // Only the single-live index saying no: somebody else's insert
-        // landed between our check and ours, and their pass is the answer.
-        // Anything else — a connection failure lands here too — rethrows
-        // with its own cause rather than being read as a rival.
-        if (!isUniqueViolation(e) || attempt > 0) {
+        // landed between our check and ours, and their pass is the answer —
+        // on every lap, since the race that makes it true does not care
+        // which lap we are on. Anything else — a connection failure lands
+        // here too — rethrows with its own cause rather than being read as
+        // a rival.
+        if (!isUniqueViolation(e)) {
           throw e;
         }
         Optional<ReanalysisRequest> winner = findLive();
@@ -65,8 +67,14 @@ public class ReanalysisRequestDao {
           return new EnqueueResult(winner.get(), false);
         }
         // The winner's whole pass finished between our violation and the
-        // re-select, so the slot is free again. One more try beats handing
-        // the caller a 500 for a request that can succeed right now.
+        // re-select, so the slot is free again. One more lap beats handing
+        // the caller a 500 for a request that can succeed right now; only
+        // this empty-slot case is bounded, because it looping forever needs
+        // a flash-completing pass per lap and two in a row is already a
+        // corpus too small to be enqueueing against.
+        if (attempt > 0) {
+          throw e;
+        }
       }
     }
   }

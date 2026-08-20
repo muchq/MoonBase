@@ -102,11 +102,13 @@ public class AdminController {
    *
    * <p>Concurrency: each write is conditional on the row still holding the name it was derived
    * from, so a game reindexed mid-pass keeps the fresher value rather than being overwritten from a
-   * stale read. Rows inserted during the pass can still be missed, since paging is by offset — the
-   * same property {@link #reanalyze} has, and a second run picks them up.
+   * stale read. Rows inserted during the pass can still be missed, since paging is by offset, and a
+   * second run picks them up.
    *
    * <p>Only rows whose family actually changes are written, so a second run reports zero updates
-   * and the number means something. Batched like {@link #reanalyze} to bound memory; synchronous.
+   * and the number means something. Batched to bound memory; synchronous — unlike {@link
+   * #reanalyze}, deliberately: this pass is column arithmetic over rows already held, not a corpus
+   * walk, and finishes in the time an enqueue round trip would take to poll.
    */
   @POST
   @Path("/rederive-openings")

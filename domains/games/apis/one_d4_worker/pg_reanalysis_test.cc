@@ -396,11 +396,10 @@ TEST_F(PgReanalysisTest, TakesThePassRowRatherThanReadingIt) {
          " snapshot rather than claiming the row";
 }
 
-// The game-row lock inside ReplaceOccurrences, pinned from this side of the
-// language boundary. The deleted Java cross-writer tests were the last thing
-// holding it: without this lock, two writers over one game interleave as
-// delete, delete, insert, insert under READ COMMITTED and both copies
-// survive — and both sinks funnel through this one function.
+// The game-row lock inside ReplaceOccurrences. Without it, two writers over
+// one game interleave as delete, delete, insert, insert under READ COMMITTED
+// and both copies survive — and both sinks funnel through this one function,
+// so this single test is what keeps either of them from doubling the other.
 TEST_F(PgReanalysisTest, TheReplaceTakesTheGameRowBeforeRewritingIt) {
   AddGame(Url(0), "pgn");
   const std::string id = ClaimedPass("worker-a");

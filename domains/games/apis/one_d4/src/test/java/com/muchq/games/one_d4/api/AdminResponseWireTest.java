@@ -65,6 +65,9 @@ public class AdminResponseWireTest {
     assertThat(body).contains("\"status\":\"PENDING\"");
     assertThat(body).contains("\"gamesProcessed\":0");
     assertThat(body).contains("\"gamesFailed\":0");
+    // Omitted, not null — the README says so, and a null here would make
+    // every client's "is it failed" check subtly wrong.
+    assertThat(body).doesNotContain("errorMessage");
   }
 
   @Test
