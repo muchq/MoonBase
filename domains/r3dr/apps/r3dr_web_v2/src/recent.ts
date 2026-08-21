@@ -11,9 +11,10 @@ export interface RecentLink {
 const KEY = 'r3dr.recent';
 const MAX = 5;
 
-// Slugs are 3/6/11 base64url chars. A hand-edited store must not render
-// arbitrary text into links.
-const SLUG_SHAPE = /^[A-Za-z0-9_-]{3,11}$/;
+// Slugs are exactly 3, 6, or 11 base64url chars (the encoder's widths). A
+// hand-edited store must not render arbitrary text — or never-resolvable
+// lengths — into links.
+const SLUG_SHAPE = /^(?:[A-Za-z0-9_-]{3}|[A-Za-z0-9_-]{6}|[A-Za-z0-9_-]{11})$/;
 
 export function loadRecent(now: number): RecentLink[] {
   try {

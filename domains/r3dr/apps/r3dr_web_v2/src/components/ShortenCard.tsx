@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { shorten, shortLink } from '../api';
+import { shorten, shortLink, shortLinkLabel } from '../api';
 import { DEFAULT_EXPIRY, describeExpiry, EXPIRY_OPTIONS, type ExpiryOption } from '../expiry';
 import type { RecentLink } from '../recent';
 import CopyButton from './CopyButton';
@@ -124,7 +124,7 @@ export default function ShortenCard({ onMinted }: { onMinted: (link: RecentLink)
                 target="_blank"
                 rel="noreferrer"
               >
-                r3dr.net/r/{minted.slug}
+                {shortLinkLabel(minted.slug)}
               </a>
               <CopyButton text={shortLink(minted.slug)} />
             </div>

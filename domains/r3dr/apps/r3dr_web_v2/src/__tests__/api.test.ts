@@ -24,6 +24,8 @@ describe('shorten', () => {
     // Without this header the browser sends text/plain and drops out of the
     // preflighted class the Caddy CORS allow-list serves.
     expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
+    // The timeout that hands a dead-network form back to the user.
+    expect(init.signal).toBeInstanceOf(AbortSignal);
     expect(JSON.parse(init.body)).toEqual({
       longUrl: 'https://example.com/page',
       expiresAt: 1755003600000,

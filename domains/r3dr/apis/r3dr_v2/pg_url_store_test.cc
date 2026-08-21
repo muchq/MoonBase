@@ -135,16 +135,43 @@ TEST_F(PgUrlStoreTest, AForeignSlugAtOurIdRefusesEvenWithMatchingFields) {
 
 // v1 minted the same slugs from its own url_ids; the migration floor keeps
 // v2's ids out of v1's space so dead v1 links 404 rather than alias — and
-// re-floors a rewound sequence on the next boot.
+// re-floors a rewound sequence on the next boot. nextval, not last_value:
+// an is_called flip would hand out 1000000 itself, inside v1's space.
 TEST_F(PgUrlStoreTest, MigrationsFloorTheSequenceAboveV1sIdSpace) {
   ASSERT_TRUE(db_->Exec("SELECT setval('url_ids', 3)").ok());
   ASSERT_TRUE(RunMigrations(*db_).ok());
 
-  const auto raw = db_->Exec("SELECT last_value FROM url_ids");
-  ASSERT_TRUE(raw.ok());
-  int64_t last = 0;
-  ASSERT_TRUE(absl::SimpleAtoi(*raw->Get(0, 0), &last));
-  EXPECT_GE(last, 1000000);
+  const auto next = db_->Exec("SELECT nextval('url_ids')");
+  ASSERT_TRUE(next.ok());
+  int64_t id = 0;
+  ASSERT_TRUE(absl::SimpleAtoi(*next->Get(0, 0), &id));
+  EXPECT_GT(id, 1000000);
+}
+
+// The floor is a floor, not a reset: a sequence already past it stays put.
+TEST_F(PgUrlStoreTest, RemigratingAboveTheFloorStaysMonotone) {
+  ASSERT_TRUE(db_->Exec("SELECT setval('url_ids', 2000000)").ok());
+  ASSERT_TRUE(RunMigrations(*db_).ok());
+
+  const auto next = db_->Exec("SELECT nextval('url_ids')");
+  ASSERT_TRUE(next.ok());
+  int64_t id = 0;
+  ASSERT_TRUE(absl::SimpleAtoi(*next->Get(0, 0), &id));
+  EXPECT_GT(id, 2000000);
+}
+
+// Rows minted below the floor sit in v1's slug space; migrations clear
+// them so the 404 contract holds even for pre-floor deploys.
+TEST_F(PgUrlStoreTest, MigrationsClearRowsMintedBelowTheFloor) {
+  ASSERT_TRUE(db_->Exec("INSERT INTO urls (id, short_url, long_url, expires_at)"
+                        " VALUES (42, 'KgA', 'https://example.com/prefloor',"
+                        " now() + interval '1 hour')")
+                  .ok());
+  ASSERT_TRUE(RunMigrations(*db_).ok());
+
+  const auto found = store_->Lookup("KgA");
+  ASSERT_TRUE(found.ok());
+  EXPECT_FALSE(found->has_value());
 }
 
 // A sequence behind the table (an import without setval) must refuse, not

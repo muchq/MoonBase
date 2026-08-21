@@ -1,4 +1,4 @@
-import { shortLink } from '../api';
+import { shortLink, shortLinkLabel } from '../api';
 import { describeExpiry } from '../expiry';
 import type { RecentLink } from '../recent';
 import CopyButton from './CopyButton';
@@ -29,7 +29,7 @@ export default function RecentLinks({
           <li key={link.slug} className="recent-row">
             <div className="recent-urls">
               <a href={shortLink(link.slug)} target="_blank" rel="noreferrer">
-                r3dr.net/r/{link.slug}
+                {shortLinkLabel(link.slug)}
               </a>
               <span className="recent-target" title={link.longUrl}>
                 {link.longUrl}

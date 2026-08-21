@@ -741,7 +741,8 @@ func TestApiCorsEchoesEachAllowedOrigin(t *testing.T) {
 					"deliberately or remove it.", line)
 			}
 		}
-		if strings.HasPrefix(line, "Access-Control-Allow-Origin") {
+		if strings.HasPrefix(line, "Access-Control-Allow-Origin") ||
+			strings.HasPrefix(line, "header Access-Control-Allow-Origin") {
 			t.Errorf("unconditional %q would override the per-origin echo for every caller.", line)
 		}
 	}
@@ -754,17 +755,25 @@ func TestApiCorsEchoesEachAllowedOrigin(t *testing.T) {
 			t.Errorf("found %d `Vary Origin` in the %s, want 1; a shared cache can serve one "+
 				"origin's answer to another.", n, half.name)
 		}
-		// Content-Type in the allow-list is what admits the JSON POST.
-		found := false
+		// Content-Type in the allow-list and POST in the methods are what
+		// admit the JSON POST.
+		headers, methods := false, false
 		for _, line := range half.lines {
 			if strings.HasPrefix(line, "Access-Control-Allow-Headers") &&
 				strings.Contains(line, "Content-Type") {
-				found = true
+				headers = true
+			}
+			if strings.HasPrefix(line, "Access-Control-Allow-Methods") &&
+				strings.Contains(line, "POST") {
+				methods = true
 			}
 		}
-		if !found {
+		if !headers {
 			t.Errorf("the %s allow-list lost Content-Type; the shorten preflight fails and "+
 				"no JSON POST leaves the browser.", half.name)
+		}
+		if !methods {
+			t.Errorf("the %s allow-methods lost POST; the shorten preflight fails.", half.name)
 		}
 	}
 }

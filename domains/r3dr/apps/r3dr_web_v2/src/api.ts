@@ -14,6 +14,11 @@ export function shortLink(slug: string): string {
   return `${SHORT_LINK_BASE}${encodeURIComponent(slug)}`;
 }
 
+/** The visible label for a short link — same base as the href, sans scheme. */
+export function shortLinkLabel(slug: string): string {
+  return shortLink(slug).replace(/^https?:\/\//, '');
+}
+
 // Two error shapes: generated trait validation ({fieldList: [{message}...],
 // message}) and modeled errors ({message}). The fieldList entry names the
 // one broken constraint; the top-level message prefixes a count on it.

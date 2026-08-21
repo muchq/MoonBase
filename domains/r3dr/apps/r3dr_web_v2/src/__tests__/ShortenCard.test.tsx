@@ -159,7 +159,12 @@ describe('ShortenCard', () => {
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('Long link'), 'https://example.com/page');
     await user.click(screen.getByRole('button', { name: 'Shorten' }));
-    await user.click(screen.getByRole('button', { name: 'Shortening…' }));
+
+    // Busy, never disabled: disabling would blur keyboard focus.
+    const busy = screen.getByRole('button', { name: 'Shortening…' });
+    expect(busy).not.toBeDisabled();
+    expect(busy).toHaveAttribute('aria-busy', 'true');
+    await user.click(busy);
 
     release({ slug: 'AQA' });
     await screen.findByRole('link', { name: 'r3dr.net/r/AQA' });

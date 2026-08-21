@@ -33,9 +33,9 @@ describe('addRecent + loadRecent', () => {
   });
 
   it('drops expired links on load', () => {
-    addRecent(addRecent([], link('dead', NOW - 1)), link('live', NOW + 1));
+    addRecent(addRecent([], link('ded', NOW - 1)), link('liv', NOW + 1));
 
-    expect(loadRecent(NOW).map((l) => l.slug)).toEqual(['live']);
+    expect(loadRecent(NOW).map((l) => l.slug)).toEqual(['liv']);
   });
 
   it('shrugs off garbage and missing storage', () => {
@@ -55,6 +55,8 @@ describe('addRecent + loadRecent', () => {
       JSON.stringify([
         { slug: '<img src=x>', longUrl: 'https://example.com/a', expiresAt: NOW + 1000 },
         { slug: 'javascript:alert(1)', longUrl: 'https://example.com/b', expiresAt: NOW + 1000 },
+        // Right alphabet, impossible length: the encoder mints 3/6/11 only.
+        { slug: 'AQAB', longUrl: 'https://example.com/d', expiresAt: NOW + 1000 },
         { slug: 'AQA', longUrl: 'https://example.com/c', expiresAt: NOW + 1000 },
       ])
     );

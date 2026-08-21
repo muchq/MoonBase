@@ -8,9 +8,10 @@ that served the Go service and its static page.
 ## What it does
 
 - **Shorten** — paste a link (bare domains get `https://` for free), pick an
-  expiry (1 hour / 1 day / 7 days / 30 days — the API's ceiling), copy the
-  result. The last five links live in `localStorage`; nothing is tracked
-  server-side.
+  expiry (1 hour / 1 day / 7 days / 30 days — the top one sits just under
+  the API's ceiling, on purpose: a fast client clock must not turn it into
+  a 400), copy the result. The last five links live in `localStorage`;
+  nothing is tracked server-side.
 - **Redirect** — the worker 302s `GET /r/{slug}` — v1's short-link shape — to
   `api.muchq.com/r3dr/v2/r/{slug}`, so the API's per-client rate limit still
   keys on the real client. Everything else is the SPA.
@@ -60,9 +61,12 @@ database) stop resolving — as 404s, not misdirections: v2's migrations floor
 its `url_ids` sequence above v1's lifetime id space, since both generations
 derive the same slug from the same id. That retirement is #1359 chunk 3.
 
-To smoke-test on a `workers.dev` preview before the flip, build with
-`VITE_SHORT_LINK_BASE=https://r3dr-web.<account>.workers.dev/r/` — minted
-`r3dr.net` links would otherwise still resolve through the old stack.
+To smoke-test before the flip: the `workers.dev` preview exercises the
+redirect path and the static UI, but can't mint — API CORS echoes only
+`r3dr.net`, `muchq.com`, and `localhost:5173`. Mint from `npm run dev`
+with `VITE_SHORT_LINK_BASE=https://r3dr-web.<account>.workers.dev/r/`, so
+the minted links exercise the preview worker instead of `r3dr.net` links
+that still resolve through the old stack.
 
 ## Dependencies
 
