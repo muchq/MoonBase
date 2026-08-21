@@ -799,11 +799,35 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     }
 
     String column = resolveColumn(cmp.field());
-    params.add(cmp.value());
+    params.add(
+        "played_at".equals(column) ? parsePlayedAtValue(cmp.field(), cmp.value()) : cmp.value());
     if (STRING_COLUMNS.contains(column) && (op.equals("=") || op.equals("!="))) {
       return "LOWER(" + column + ") " + op + " LOWER(?)";
     }
     return column + " " + op + " ?";
+  }
+
+  /**
+   * played.at compares the raw TIMESTAMP, so its value must be a full ISO timestamp, bound as the
+   * zone-free {@link LocalDateTime} the column stores (the UTC wall clock — same convention as
+   * {@link #compileDateComparison}). Binding the string itself would coerce on H2 and fail the bind
+   * on Postgres; and the likeliest malformed value — a bare date — would otherwise compare as
+   * midnight while reading as "that day", so the rejection hands over the fields that mean that.
+   */
+  private static LocalDateTime parsePlayedAtValue(String field, Object value) {
+    if (value instanceof String s) {
+      try {
+        return LocalDateTime.parse(s);
+      } catch (DateTimeParseException e) {
+        // fall through to the shared error below
+      }
+    }
+    throw new IllegalArgumentException(
+        field
+            + " requires a full ISO timestamp (\"YYYY-MM-DDTHH:MM:SS\", the UTC wall clock), got: "
+            + value
+            + ". To filter by day or month use date or month instead, e.g. date >="
+            + " \"2026-07-01\" or month = \"2026-07\"");
   }
 
   /**
@@ -909,7 +933,11 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     }
 
     String column = resolveColumn(in.field());
-    params.addAll(in.values());
+    if ("played_at".equals(column)) {
+      in.values().forEach(v -> params.add(parsePlayedAtValue(in.field(), v)));
+    } else {
+      params.addAll(in.values());
+    }
     if (STRING_COLUMNS.contains(column)) {
       String lowerPlaceholders =
           in.values().stream().map(v -> "LOWER(?)").collect(Collectors.joining(", "));

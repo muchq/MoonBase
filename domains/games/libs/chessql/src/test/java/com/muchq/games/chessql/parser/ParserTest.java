@@ -2,6 +2,7 @@ package com.muchq.games.chessql.parser;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 import com.muchq.games.chessql.ast.AndExpr;
 import com.muchq.games.chessql.ast.ComparisonExpr;
@@ -120,6 +121,100 @@ public class ParserTest {
   @Test
   public void testParseError() {
     assertThatThrownBy(() -> Parser.parse("AND")).isInstanceOf(ParseException.class);
+  }
+
+  // Error-message tests. Messages are user-facing — the web UI and MCP clients render them
+  // verbatim — so they must name what the language wanted in the language's own terms, never the
+  // parser's internals (Token(IDENTIFIER, NULL, pos=12) helped nobody; see the NULL tests).
+
+  @Test
+  public void nullValueSaysChessQlHasNoNullLiteral() {
+    assertThatThrownBy(() -> Parser.parse("played.at = NULL"))
+        .isInstanceOf(ParseException.class)
+        .hasMessageContaining("ChessQL has no NULL literal")
+        .hasMessageContaining("number or a double-quoted string")
+        .hasMessageNotContaining("Token(");
+  }
+
+  @Test
+  public void nullValueHintFiresCaseInsensitively() {
+    assertThatThrownBy(() -> Parser.parse("white.title = null"))
+        .isInstanceOf(ParseException.class)
+        .hasMessageContaining("ChessQL has no NULL literal");
+  }
+
+  @Test
+  public void nullValueInAnInListGetsTheSameHint() {
+    assertThatThrownBy(() -> Parser.parse("platform IN [NULL]"))
+        .isInstanceOf(ParseException.class)
+        .hasMessageContaining("ChessQL has no NULL literal");
+  }
+
+  @Test
+  public void nullValuePositionPointsAtTheNullToken() {
+    ParseException ex =
+        catchThrowableOfType(ParseException.class, () -> Parser.parse("played.at = NULL"));
+    assertThat(ex.getPosition()).isEqualTo(12);
+    assertThat(ex.getMessage()).contains("at position 12");
+  }
+
+  @Test
+  public void unquotedStringValueSuggestsDoubleQuoting() {
+    assertThatThrownBy(() -> Parser.parse("eco = B90"))
+        .isInstanceOf(ParseException.class)
+        .hasMessageContaining("got 'B90'")
+        .hasMessageContaining("\"B90\"")
+        .hasMessageNotContaining("Token(");
+  }
+
+  @Test
+  public void valueErrorAtEndOfQuerySaysEndOfQuery() {
+    assertThatThrownBy(() -> Parser.parse("white.elo ="))
+        .isInstanceOf(ParseException.class)
+        .hasMessageContaining("Expected a number or a double-quoted string, got end of query");
+  }
+
+  @Test
+  public void comparisonOperatorErrorListsTheOperators() {
+    assertThatThrownBy(() -> Parser.parse("eco LIKE \"B90\""))
+        .isInstanceOf(ParseException.class)
+        .hasMessageContaining("=, !=, <, <=, >, >=")
+        .hasMessageContaining("IN")
+        .hasMessageContaining("'LIKE'");
+  }
+
+  @Test
+  public void primaryErrorDescribesWhatAConditionIs() {
+    assertThatThrownBy(() -> Parser.parse("AND"))
+        .isInstanceOf(ParseException.class)
+        .hasMessageContaining("motif(")
+        .hasMessageContaining("got 'AND'")
+        .hasMessageNotContaining("Token(");
+  }
+
+  @Test
+  public void expectedTokenErrorsNameTheTokenNotTheEnumConstant() {
+    assertThatThrownBy(() -> Parser.parse("motif(fork"))
+        .isInstanceOf(ParseException.class)
+        .hasMessageContaining("Expected ')', got end of query")
+        .hasMessageNotContaining("RPAREN");
+  }
+
+  @Test
+  public void trailingConditionSuggestsAndOr() {
+    assertThatThrownBy(() -> Parser.parse("motif(fork) motif(pin)"))
+        .isInstanceOf(ParseException.class)
+        .hasMessageContaining("Expected end of query, got 'motif'")
+        .hasMessageContaining("AND or OR");
+  }
+
+  @Test
+  public void trailingNonConditionGetsNoAndOrHint() {
+    // A stray ')' is an unbalanced-paren mistake; suggesting AND/OR there would mislead.
+    assertThatThrownBy(() -> Parser.parse("motif(fork))"))
+        .isInstanceOf(ParseException.class)
+        .hasMessageContaining("Expected end of query, got ')'")
+        .hasMessageNotContaining("AND or OR");
   }
 
   @Test

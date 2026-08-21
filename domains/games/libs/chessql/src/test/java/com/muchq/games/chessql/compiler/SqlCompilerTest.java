@@ -574,6 +574,66 @@ public class SqlCompilerTest {
         .isEqualTo(List.of(utc("2026-07-01T00:00:00Z"), utc("2026-08-01T00:00:00Z")));
   }
 
+  // === played.at (direct timestamp comparisons) ===
+
+  @Test
+  public void testPlayedAtBindsAFullTimestampAsLocalDateTime() {
+    CompiledQuery result = compile("played.at >= \"2026-07-01T13:30:00\"");
+    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + "played_at >= ?" + BASE_SUFFIX);
+    assertThat(result.parameters()).isEqualTo(List.of(utc("2026-07-01T13:30:00Z")));
+  }
+
+  @Test
+  public void testPlayedAtUnderscoreFormBindsTheSameWay() {
+    CompiledQuery result = compile("played_at < \"2026-07-01T00:00:00\"");
+    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + "played_at < ?" + BASE_SUFFIX);
+    assertThat(result.parameters()).isEqualTo(List.of(utc("2026-07-01T00:00:00Z")));
+  }
+
+  @Test
+  public void testPlayedAtRejectsABareDatePointingAtDateAndMonth() {
+    // The likeliest near-miss: a bare date bound raw would either compare as midnight (matching
+    // almost nothing while looking like "that day") or, on Postgres, fail the bind outright.
+    // date/month are the fields that mean "that day"/"that month", so the error hands them over.
+    assertThatThrownBy(() -> compile("played.at >= \"2026-07-01\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(
+            "played.at requires a full ISO timestamp (\"YYYY-MM-DDTHH:MM:SS\", the UTC wall"
+                + " clock), got: 2026-07-01. To filter by day or month use date or month instead,"
+                + " e.g. date >= \"2026-07-01\" or month = \"2026-07\"");
+  }
+
+  @Test
+  public void testPlayedAtRejectsNumbers() {
+    assertThatThrownBy(() -> compile("played.at > 2026"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("played.at requires a full ISO timestamp")
+        .hasMessageContaining("got: 2026");
+  }
+
+  @Test
+  public void testPlayedAtErrorNamesTheSpellingTheCallerWrote() {
+    assertThatThrownBy(() -> compile("played_at = \"yesterday\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("played_at requires a full ISO timestamp");
+  }
+
+  @Test
+  public void testPlayedAtInListConvertsEveryValue() {
+    CompiledQuery result =
+        compile("played.at IN [\"2026-07-01T13:30:00\", \"2026-07-02T09:00:00\"]");
+    assertThat(result.selectSql()).isEqualTo(BASE_PREFIX + "played_at IN (?, ?)" + BASE_SUFFIX);
+    assertThat(result.parameters())
+        .isEqualTo(List.of(utc("2026-07-01T13:30:00Z"), utc("2026-07-02T09:00:00Z")));
+  }
+
+  @Test
+  public void testPlayedAtInListRejectsBareDates() {
+    assertThatThrownBy(() -> compile("played.at IN [\"2026-07-01\"]"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("played.at requires a full ISO timestamp");
+  }
+
   @Test
   public void testMonthRejectsNonEqualityOperators() {
     assertThatThrownBy(() -> compile("month >= \"2026-07\""))
@@ -1728,7 +1788,12 @@ public class SqlCompilerTest {
   public void everyFilterableFieldActuallyCompiles() {
     for (String field : SqlCompiler.filterableFields()) {
       String literal =
-          field.equals("date") ? "\"2026-07-01\"" : field.equals("month") ? "\"2026-07\"" : "\"x\"";
+          switch (field) {
+            case "date" -> "\"2026-07-01\"";
+            case "month" -> "\"2026-07\"";
+            case "played.at" -> "\"2026-07-01T13:30:00\"";
+            default -> "\"x\"";
+          };
       assertThatCode(() -> compile(field + " = " + literal))
           .as("%s is advertised by filterableFields() but the compiler rejects it", field)
           .doesNotThrowAnyException();

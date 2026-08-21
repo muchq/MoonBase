@@ -10,6 +10,40 @@ interface ApiError extends Error {
   body?: string | null;
 }
 
+// The API reports failures as {"error": string, ...} (see one_d4's ErrorHandler). Surface that
+// string as the Error message so the UI shows "Expected a number..." instead of the raw JSON
+// envelope; anything else (plain text, proxy HTML) falls through as-is.
+function errorMessage(body: string | null): string | null {
+  if (!body) return null;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      typeof (parsed as { error?: unknown }).error === 'string'
+    ) {
+      return (parsed as { error: string }).error;
+    }
+  } catch (_) {
+    // not JSON
+  }
+  return body;
+}
+
+// react-query retry policy: a 4xx is deterministic (the same bad query fails identically every
+// time), so retrying only delays showing the error — ~7s under the default 3-retry backoff.
+// Everything else keeps the default three attempts.
+export function retryUnlessClientError(
+  failureCount: number,
+  error: unknown
+): boolean {
+  const status = (error as ApiError | null)?.status;
+  if (typeof status === 'number' && status >= 400 && status < 500) {
+    return false;
+  }
+  return failureCount < 3;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${path}`;
   const res = await fetch(url, {
@@ -26,7 +60,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     } catch (_) {
       // ignore
     }
-    const err = new Error(body || res.statusText) as ApiError;
+    const err = new Error(errorMessage(body) || res.statusText) as ApiError;
     err.status = res.status;
     err.body = body;
     throw err;

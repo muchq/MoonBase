@@ -34,8 +34,22 @@ public class Parser {
       parser.expect(TokenType.BY);
       orderBy = parser.parseOrderByClause();
     }
-    parser.expect(TokenType.EOF);
+    if (!parser.check(TokenType.EOF)) {
+      // Trailing input. When it could start another condition the mistake is almost always a
+      // missing connector, so say so; a stray ')' or ',' gets no hint rather than a wrong one.
+      Token t = parser.current();
+      String hint = startsACondition(t.type()) ? " — combine conditions with AND or OR" : "";
+      throw new ParseException("Expected end of query, got " + describe(t) + hint, t.position());
+    }
     return new ParsedQuery(expr, orderBy);
+  }
+
+  private static boolean startsACondition(TokenType type) {
+    return type == TokenType.IDENTIFIER
+        || type == TokenType.MOTIF
+        || type == TokenType.SEQUENCE
+        || type == TokenType.NOT
+        || type == TokenType.LPAREN;
   }
 
   public Expr parseExpr() {
@@ -96,7 +110,11 @@ public class Parser {
       return parseFieldExpr();
     }
 
-    throw new ParseException("Unexpected token: " + current(), current().position());
+    throw new ParseException(
+        "Expected a condition — a field comparison like white.elo >= 2500, motif(...),"
+            + " sequence(...), or a parenthesized expression — got "
+            + describe(current()),
+        current().position());
   }
 
   private Expr parseMotif() {
@@ -188,10 +206,17 @@ public class Parser {
         advance();
         yield ">=";
       }
-      default -> throw new ParseException("Expected comparison operator, got: " + t, t.position());
+      default ->
+          throw new ParseException(
+              "Expected a comparison operator (=, !=, <, <=, >, >=) or IN, got " + describe(t),
+              t.position());
     };
   }
 
+  // Values are where SQL habits land, so the two commonest mistakes get their own message: NULL
+  // (which the language deliberately lacks) and an unquoted string. These strings are user-facing
+  // — the web UI and MCP clients render them verbatim — so they speak ChessQL, not parser
+  // internals.
   private Object parseValue() {
     Token t = current();
     if (t.type() == TokenType.NUMBER) {
@@ -202,7 +227,24 @@ public class Parser {
       advance();
       return t.value();
     }
-    throw new ParseException("Expected value, got: " + t, t.position());
+    if (t.type() == TokenType.IDENTIFIER && t.value().equalsIgnoreCase("null")) {
+      throw new ParseException(
+          "ChessQL has no NULL literal — a game whose field is unset never matches any comparison,"
+              + " so there is nothing to compare NULL against. Expected a number or a double-quoted"
+              + " string",
+          t.position());
+    }
+    if (t.type() == TokenType.IDENTIFIER) {
+      throw new ParseException(
+          "Expected a number or a double-quoted string, got "
+              + describe(t)
+              + " — strings must be double-quoted: \""
+              + t.value()
+              + "\"",
+          t.position());
+    }
+    throw new ParseException(
+        "Expected a number or a double-quoted string, got " + describe(t), t.position());
   }
 
   private InExpr parseInValues(String field) {
@@ -234,8 +276,45 @@ public class Parser {
   private Token expect(TokenType type) {
     Token t = current();
     if (t.type() != type) {
-      throw new ParseException("Expected " + type + ", got " + t.type(), t.position());
+      throw new ParseException("Expected " + describe(type) + ", got " + describe(t), t.position());
     }
     return advance();
+  }
+
+  private static String describe(Token t) {
+    return t.type() == TokenType.EOF ? "end of query" : "'" + t.value() + "'";
+  }
+
+  private static String describe(TokenType type) {
+    return switch (type) {
+      case NUMBER -> "a number";
+      case STRING -> "a double-quoted string";
+      case IDENTIFIER -> "a name";
+      case EQ -> "'='";
+      case NEQ -> "'!='";
+      case LT -> "'<'";
+      case LTE -> "'<='";
+      case GT -> "'>'";
+      case GTE -> "'>='";
+      case AND -> "AND";
+      case OR -> "OR";
+      case NOT -> "NOT";
+      case IN -> "IN";
+      case MOTIF -> "motif";
+      case ORDER -> "ORDER";
+      case BY -> "BY";
+      case ASC -> "ASC";
+      case DESC -> "DESC";
+      case MOTIF_COUNT -> "motif_count";
+      case SEQUENCE -> "sequence";
+      case THEN -> "THEN";
+      case LPAREN -> "'('";
+      case RPAREN -> "')'";
+      case LBRACKET -> "'['";
+      case RBRACKET -> "']'";
+      case COMMA -> "','";
+      case DOT -> "'.'";
+      case EOF -> "end of query";
+    };
   }
 }

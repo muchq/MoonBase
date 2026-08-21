@@ -30,7 +30,8 @@ public class QueryGamesTool {
               + " opening.family = \"Caro Kann Defense\"', 'eco = \"B90\" AND NOT motif(pin)'."
               + " Available fields: white.elo, black.elo, white.username, black.username,"
               + " white.title, black.title, time.class, eco, opening.name, opening.family, result,"
-              + " num.moves, platform, game.url, played.at, date (ISO comparisons, e.g. 'date >="
+              + " num.moves, platform, game.url, played.at (full ISO timestamp, 'played.at >="
+              + " \"2026-07-01T13:30:00\"'), date (ISO comparisons, e.g. 'date >="
               + " \"2026-07-01\"'), and month (equality only, 'month = \"2026-07\"'). "
               + ToolDescriptions.UNINDEXED_PERIODS_READ_AS_EMPTY
               + " "
