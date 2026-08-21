@@ -6,8 +6,6 @@ import com.muchq.games.one_d4.api.dto.IndexRequest;
 import com.muchq.games.one_d4.api.dto.IndexResponse;
 import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
-import com.muchq.games.one_d4.queue.IndexMessage;
-import com.muchq.games.one_d4.queue.IndexQueue;
 import com.muchq.games.one_d4.service.DataAvailabilityResolver;
 import com.muchq.games.one_d4.service.IndexRequestService;
 import java.time.Duration;
@@ -25,18 +23,15 @@ public class IndexControllerTest {
 
   private IndexController controller;
   private FakeIndexingRequestStore requestStore;
-  private FakeIndexQueue queue;
   private FakePeriodStore periodStore;
 
   @BeforeEach
   public void setUp() {
     requestStore = new FakeIndexingRequestStore();
-    queue = new FakeIndexQueue();
     periodStore = new FakePeriodStore();
     controller =
         new IndexController(
-            new IndexRequestService(
-                requestStore, queue, message -> {}, new DataAvailabilityResolver(periodStore)),
+            new IndexRequestService(requestStore, new DataAvailabilityResolver(periodStore)),
             requestStore,
             new DataAvailabilityResolver(periodStore));
   }
@@ -67,7 +62,7 @@ public class IndexControllerTest {
   }
 
   @Test
-  public void createIndex_createsAndEnqueuesWhenNoExistingRequest() {
+  public void createIndex_createsTheRowTheWorkerWillClaim() {
     IndexRequest request = new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-03", null);
     IndexResponse response = controller.createIndex(request);
 
@@ -80,12 +75,12 @@ public class IndexControllerTest {
     assertThat(response.gamesIndexed()).isEqualTo(0);
     assertThat(response.excludeBullet()).isFalse();
     assertThat(requestStore.createCallCount()).isEqualTo(1);
-    assertThat(queue.enqueued()).hasSize(1);
-    assertThat(queue.enqueued().get(0).player()).isEqualTo("hikaru");
-    assertThat(queue.enqueued().get(0).platform()).isEqualTo("CHESS_COM");
-    assertThat(queue.enqueued().get(0).startMonth()).isEqualTo("2024-01");
-    assertThat(queue.enqueued().get(0).endMonth()).isEqualTo("2024-03");
-    assertThat(queue.enqueued().get(0).excludeBullet()).isFalse();
+    assertThat(requestStore.created()).hasSize(1);
+    assertThat(requestStore.created().get(0).player()).isEqualTo("hikaru");
+    assertThat(requestStore.created().get(0).platform()).isEqualTo("CHESS_COM");
+    assertThat(requestStore.created().get(0).startMonth()).isEqualTo("2024-01");
+    assertThat(requestStore.created().get(0).endMonth()).isEqualTo("2024-03");
+    assertThat(requestStore.created().get(0).excludeBullet()).isFalse();
   }
 
   @Test
@@ -94,7 +89,7 @@ public class IndexControllerTest {
     IndexResponse response = controller.createIndex(request);
 
     assertThat(response.excludeBullet()).isTrue();
-    assertThat(queue.enqueued().get(0).excludeBullet()).isTrue();
+    assertThat(requestStore.created().get(0).excludeBullet()).isTrue();
   }
 
   @Test
@@ -127,7 +122,7 @@ public class IndexControllerTest {
     assertThat(response.status()).isEqualTo("PROCESSING");
     assertThat(response.gamesIndexed()).isEqualTo(50);
     assertThat(requestStore.createCallCount()).isEqualTo(0);
-    assertThat(queue.enqueued()).isEmpty();
+    assertThat(requestStore.created()).isEmpty();
   }
 
   @Test
@@ -169,7 +164,7 @@ public class IndexControllerTest {
 
     // Dedupe and the indexed-period cache key on the player string, so case must not split them
     assertThat(response.player()).isEqualTo("hikaru");
-    assertThat(queue.enqueued().get(0).player()).isEqualTo("hikaru");
+    assertThat(requestStore.created().get(0).player()).isEqualTo("hikaru");
   }
 
   @Test
@@ -180,8 +175,8 @@ public class IndexControllerTest {
 
     assertThat(response.id()).isNotNull();
     assertThat(requestStore.createCallCount()).isEqualTo(1);
-    assertThat(queue.enqueued()).hasSize(1);
-    assertThat(queue.enqueued().get(0).skipCache()).isTrue();
+    assertThat(requestStore.created()).hasSize(1);
+    assertThat(requestStore.created().get(0).skipCache()).isTrue();
   }
 
   /**
@@ -215,13 +210,13 @@ public class IndexControllerTest {
 
     assertThat(response.id()).isEqualTo(existingId);
     assertThat(requestStore.createCallCount()).isZero();
-    assertThat(queue.enqueued()).isEmpty();
+    assertThat(requestStore.created()).isEmpty();
   }
 
   @Test
   public void createIndex_defaultsToRespectingCache() {
     controller.createIndex(new IndexRequest("hikaru", "CHESS_COM", "2024-01", "2024-01", null));
-    assertThat(queue.enqueued().get(0).skipCache()).isFalse();
+    assertThat(requestStore.created().get(0).skipCache()).isFalse();
   }
 
   @Test
@@ -405,7 +400,14 @@ public class IndexControllerTest {
     private Optional<IndexingRequestStore.IndexingRequest> existingRequest = Optional.empty();
     private Optional<IndexingRequestStore.IndexingRequest> findByIdResponse = Optional.empty();
     private final List<IndexingRequestStore.IndexingRequest> allRequests = new ArrayList<>();
+    // The rows createOrAdopt minted. The row is the queue (#1279): the created row is the
+    // dispatch, and it is what the C++ worker will claim.
+    private final List<IndexingRequestStore.IndexingRequest> created = new ArrayList<>();
     private int createCallCount = 0;
+
+    List<IndexingRequestStore.IndexingRequest> created() {
+      return created;
+    }
 
     void setExistingRequest(IndexingRequestStore.IndexingRequest request) {
       this.existingRequest = Optional.of(request);
@@ -447,7 +449,7 @@ public class IndexControllerTest {
         return new Claim(holder.get(), false);
       }
       createCallCount++;
-      return new Claim(
+      IndexingRequestStore.IndexingRequest row =
           new IndexingRequestStore.IndexingRequest(
               UUID.randomUUID(),
               player,
@@ -460,9 +462,10 @@ public class IndexControllerTest {
               null,
               0,
               excludeBullet,
-              false,
-              0),
-          true);
+              skipCache,
+              0);
+      created.add(row);
+      return new Claim(row, true);
     }
 
     /** Not exercised by IndexController tests: nothing here dispatches from the table. */
@@ -543,29 +546,6 @@ public class IndexControllerTest {
                   && r.startMonth().equals(startMonth)
                   && r.endMonth().equals(endMonth)
                   && r.excludeBullet() == excludeBullet);
-    }
-  }
-
-  private static final class FakeIndexQueue implements IndexQueue {
-    private final List<IndexMessage> enqueued = new ArrayList<>();
-
-    List<IndexMessage> enqueued() {
-      return enqueued;
-    }
-
-    @Override
-    public void enqueue(IndexMessage message) {
-      enqueued.add(message);
-    }
-
-    @Override
-    public Optional<IndexMessage> poll(Duration timeout) {
-      return Optional.empty();
-    }
-
-    @Override
-    public int size() {
-      return enqueued.size();
     }
   }
 }

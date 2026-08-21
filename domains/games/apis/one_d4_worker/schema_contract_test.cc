@@ -11,6 +11,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "domains/games/apis/one_d4_worker/pg_queue.h"
+#include "domains/games/apis/one_d4_worker/poller.h"
 #include "domains/games/apis/one_d4_worker/reanalysis_queue.h"
 
 namespace one_d4_worker {
@@ -226,27 +227,38 @@ TEST(SchemaContract, TheReanalysisIdIsAUuidToo) {
   EXPECT_EQ(JavaSchemaFor("reanalysis_requests")["id"], "UUID");
 }
 
+TEST(SchemaContract, ThePollerDefaultsMatchTheRetentionPolicy) {
+  // The lease vocabulary is the Java service's: RetentionPolicy.LEASE is
+  // what reclaimStale compares lease_expires_at against, and MAX_RUN is
+  // the ceiling both sides agree makes a run a fault. The renewal interval
+  // must leave several losable renewals inside one lease, or every lease
+  // lapses between beats and healthy workers lose their ranges.
+  const Poller::Options defaults;
+  EXPECT_EQ(defaults.lease, absl::Minutes(5));
+  EXPECT_EQ(defaults.max_run, absl::Hours(6));
+  EXPECT_LE(defaults.renew_every * 4, defaults.lease);
+
+  const std::string policy = Read(
+      "domains/games/apis/one_d4/src/main/java/com/muchq/games/one_d4/db/"
+      "RetentionPolicy.java");
+  EXPECT_THAT(policy, testing::HasSubstr("LEASE = Duration.ofMinutes(5)"));
+  EXPECT_THAT(policy, testing::HasSubstr("MAX_RUN = Duration.ofHours(6)"));
+}
+
 TEST(SchemaContract, BothQueuesShareOneAttemptBudget) {
   // The reanalysis header claims the same budget "for the same reason";
   // this is what makes that a fact rather than a sentence.
   EXPECT_EQ(PgReanalysisQueue::kMaxAttempts, PgQueue::kMaxAttempts);
 }
 
-TEST(SchemaContract, AFailedRunSaysWhatTheJavaWorkerSays) {
+TEST(SchemaContract, AFailedRunSaysAFixedSentenceAndNotTheCause) {
   // error_message is a column the API hands back, so what goes in it is a
-  // contract with the caller and not a debugging aid. Both workers write
-  // the same sentence, and neither writes the cause.
-  const std::string java = Read(
-      "domains/games/apis/one_d4/src/main/java/com/muchq/games/one_d4/worker/"
-      "IndexWorker.java");
+  // contract with the caller and not a debugging aid: one fixed sentence,
+  // never the cause. Stored rows already carry this exact string, so a
+  // caller that matches on it must keep matching.
   const std::string poller = Read("domains/games/apis/one_d4_worker/poller.cc");
-
-  const std::regex message(R"re("(Indexing failed[^"]*)")re");
-  std::smatch found;
-  ASSERT_TRUE(std::regex_search(java, found, message))
-      << "IndexWorker no longer stores a fixed failure message";
-  EXPECT_THAT(poller, testing::HasSubstr(absl::StrCat("\"", found[1].str(), "\"")))
-      << "the C++ worker stores a different sentence than the Java one";
+  EXPECT_THAT(poller, testing::HasSubstr("\"Indexing failed due to an internal error\""))
+      << "the worker stores a different sentence than the API's callers have seen";
 }
 
 TEST(SchemaContract, AttemptsAgreeWithTheJavaLimit) {

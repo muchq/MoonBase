@@ -6,13 +6,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.muchq.games.one_d4.api.dto.IndexResponse;
 import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
-import com.muchq.games.one_d4.queue.IndexMessage;
-import com.muchq.games.one_d4.queue.IndexQueue;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -27,25 +24,12 @@ public class IndexRequestServiceTest {
   private static final Instant NOW = Instant.parse("2026-07-01T12:00:00Z");
 
   private InMemoryRequestStore requestStore;
-  private RecordingQueue queue;
-  private List<IndexMessage> inlineProcessed;
   private IndexRequestService service;
 
   @BeforeEach
   public void setUp() {
     requestStore = new InMemoryRequestStore();
-    queue = new RecordingQueue();
-    inlineProcessed = new ArrayList<>();
-    service =
-        new IndexRequestService(
-            requestStore,
-            queue,
-            message -> {
-              inlineProcessed.add(message);
-              requestStore.updateStatus(message.requestId(), "COMPLETED", null, 42);
-            },
-            noPeriods(),
-            Clock.fixed(NOW, ZoneOffset.UTC));
+    service = new IndexRequestService(requestStore, noPeriods(), Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
   /** No period rows: availability resolves to EXPIRED, which these tests don't assert on. */
@@ -84,14 +68,14 @@ public class IndexRequestServiceTest {
     return new IndexRequestService.Submission(player, platform, "2024-01", "2024-03", false, false);
   }
 
+  /** The row is the dispatch: nothing in this JVM runs the work (#1389 phase 7). */
   @Test
-  public void submit_createsEnqueuesAndReturnsPending() {
+  public void submit_createsTheRowAndReturnsPending() {
     IndexResponse response = service.submit(submission("hikaru", "CHESS_COM"));
 
     assertThat(response.status()).isEqualTo("PENDING");
     assertThat(response.player()).isEqualTo("hikaru");
-    assertThat(queue.enqueued).hasSize(1);
-    assertThat(inlineProcessed).isEmpty();
+    assertThat(requestStore.listRecent(10)).hasSize(1);
   }
 
   @Test
@@ -102,14 +86,14 @@ public class IndexRequestServiceTest {
     assertThat(first.player()).isEqualTo("hikaru");
     // Same lowercased identity → deduped onto the existing PENDING request
     assertThat(second.id()).isEqualTo(first.id());
-    assertThat(queue.enqueued).hasSize(1);
+    assertThat(requestStore.listRecent(10)).hasSize(1);
   }
 
   @Test
   public void submit_acceptsChessComPlatformSpelling() {
     IndexResponse response = service.submit(submission("hikaru", "chess.com"));
     assertThat(response.platform()).isEqualTo("CHESS_COM");
-    assertThat(queue.enqueued.get(0).platform()).isEqualTo("CHESS_COM");
+    assertThat(requestStore.listRecent(10).get(0).platform()).isEqualTo("CHESS_COM");
   }
 
   @Test
@@ -119,8 +103,8 @@ public class IndexRequestServiceTest {
             new IndexRequestService.Submission(
                 "hikaru", "CHESS_COM", "2024-01", "2024-03", false, true));
 
-    assertThat(queue.enqueued).hasSize(1);
-    assertThat(queue.enqueued.get(0).skipCache()).isTrue();
+    assertThat(requestStore.listRecent(10)).hasSize(1);
+    assertThat(requestStore.findById(forced.id()).orElseThrow().skipCache()).isTrue();
     assertThat(forced.status()).isEqualTo("PENDING");
   }
 
@@ -138,7 +122,7 @@ public class IndexRequestServiceTest {
             new IndexRequestService.Submission(
                 "hikaru", "CHESS_COM", "2024-01", "2024-03", false, true));
 
-    assertThat(queue.enqueued).hasSize(1);
+    assertThat(requestStore.listRecent(10)).hasSize(1);
     assertThat(forced.id()).isEqualTo(first.id());
     assertThat(forced.status()).isEqualTo("PENDING");
   }
@@ -154,8 +138,8 @@ public class IndexRequestServiceTest {
             new IndexRequestService.Submission(
                 "hikaru", "CHESS_COM", "2024-01", "2024-03", false, true));
 
-    assertThat(queue.enqueued).hasSize(2);
-    assertThat(queue.enqueued.get(1).skipCache()).isTrue();
+    assertThat(requestStore.listRecent(10)).hasSize(2);
+    assertThat(requestStore.findById(forced.id()).orElseThrow().skipCache()).isTrue();
     assertThat(forced.id()).isNotEqualTo(first.id());
   }
 
@@ -170,7 +154,7 @@ public class IndexRequestServiceTest {
     IndexResponse second = service.submit(submission("hikaru", "CHESS_COM"));
 
     assertThat(second.id()).isEqualTo(first.id());
-    assertThat(queue.enqueued).hasSize(1);
+    assertThat(requestStore.listRecent(10)).hasSize(1);
   }
 
   /**
@@ -195,7 +179,7 @@ public class IndexRequestServiceTest {
 
     assertThat(replacement.id()).isNotEqualTo(stranded.id());
     assertThat(replacement.status()).isEqualTo("PENDING");
-    assertThat(queue.enqueued).hasSize(2);
+    assertThat(requestStore.listRecent(10)).hasSize(2);
     assertThat(requestStore.findById(stranded.id()).orElseThrow().status()).isEqualTo("FAILED");
   }
 
@@ -207,29 +191,7 @@ public class IndexRequestServiceTest {
     IndexResponse second = service.submit(submission("hikaru", "CHESS_COM"));
 
     assertThat(second.id()).isEqualTo(first.id());
-    assertThat(queue.enqueued).hasSize(1);
-  }
-
-  @Test
-  public void submitHybrid_singleMonthRunsInlineAndReturnsFinalStatus() {
-    IndexResponse response =
-        service.submitHybrid(
-            new IndexRequestService.Submission(
-                "hikaru", "CHESS_COM", "2024-01", "2024-01", false, false));
-
-    assertThat(inlineProcessed).hasSize(1);
-    assertThat(queue.enqueued).isEmpty();
-    assertThat(response.status()).isEqualTo("COMPLETED");
-    assertThat(response.gamesIndexed()).isEqualTo(42);
-  }
-
-  @Test
-  public void submitHybrid_multiMonthEnqueues() {
-    IndexResponse response = service.submitHybrid(submission("hikaru", "CHESS_COM"));
-
-    assertThat(inlineProcessed).isEmpty();
-    assertThat(queue.enqueued).hasSize(1);
-    assertThat(response.status()).isEqualTo("PENDING");
+    assertThat(requestStore.listRecent(10)).hasSize(1);
   }
 
   @Test
@@ -240,105 +202,7 @@ public class IndexRequestServiceTest {
                 "hikaru", "CHESS_COM", "2024-01", "2024-12", false, false));
 
     assertThat(response.status()).isEqualTo("PENDING");
-    assertThat(queue.enqueued).hasSize(1);
-  }
-
-  @Test
-  public void submitHybrid_dedupeHitReturnsExistingWithoutRunningInline() {
-    IndexResponse first =
-        service.submit(
-            new IndexRequestService.Submission(
-                "hikaru", "CHESS_COM", "2024-01", "2024-01", false, false));
-
-    IndexResponse second =
-        service.submitHybrid(
-            new IndexRequestService.Submission(
-                "hikaru", "CHESS_COM", "2024-01", "2024-01", false, false));
-
-    assertThat(second.id()).isEqualTo(first.id());
-    assertThat(inlineProcessed).isEmpty();
-    assertThat(queue.enqueued).hasSize(1); // only the original submit's message
-  }
-
-  @Test
-  public void submitHybrid_inlineFailurePropagatesFailedStatusAndError() {
-    IndexRequestService failing =
-        new IndexRequestService(
-            requestStore,
-            queue,
-            message -> requestStore.updateStatus(message.requestId(), "FAILED", "chess.com 429", 0),
-            noPeriods());
-
-    IndexResponse response =
-        failing.submitHybrid(
-            new IndexRequestService.Submission(
-                "hikaru", "CHESS_COM", "2024-01", "2024-01", false, false));
-
-    assertThat(response.status()).isEqualTo("FAILED");
-    assertThat(response.errorMessage()).isEqualTo("chess.com 429");
-  }
-
-  /**
-   * The inline path owns its row outright — no queue entry, no worker to pick it up — so an
-   * exception escaping the processor used to leave it PENDING forever, holding the range against
-   * every later submit. The failure still reaches the caller; the row no longer outlives it.
-   */
-  @Test
-  public void submitHybrid_inlineProcessorThrowingPropagatesAndRetiresTheRow() {
-    IndexRequestService throwing =
-        new IndexRequestService(
-            requestStore,
-            queue,
-            message -> {
-              throw new RuntimeException("boom");
-            },
-            noPeriods(),
-            Clock.fixed(NOW, ZoneOffset.UTC));
-
-    assertThatThrownBy(
-            () ->
-                throwing.submitHybrid(
-                    new IndexRequestService.Submission(
-                        "hikaru", "CHESS_COM", "2024-01", "2024-01", false, false)))
-        .isInstanceOf(RuntimeException.class)
-        .hasMessage("boom");
-
-    assertThat(requestStore.findExistingRequest("hikaru", "CHESS_COM", "2024-01", "2024-01", false))
-        .as("the range must not stay locked by a row nothing will ever finish")
-        .isEmpty();
-
-    IndexingRequestStore.IndexingRequest row =
-        requestStore.listRecent(10).stream().findFirst().orElseThrow();
-    assertThat(row.status()).isEqualTo("FAILED");
-    assertThat(row.errorMessage()).contains("boom");
-  }
-
-  /** A retired inline failure frees the slot, so the caller can immediately try again. */
-  @Test
-  public void submitHybrid_rangeIsRequestableAgainAfterAnInlineFailure() {
-    IndexRequestService throwing =
-        new IndexRequestService(
-            requestStore,
-            queue,
-            message -> {
-              throw new RuntimeException("boom");
-            },
-            noPeriods(),
-            Clock.fixed(NOW, ZoneOffset.UTC));
-
-    assertThatThrownBy(
-            () ->
-                throwing.submitHybrid(
-                    new IndexRequestService.Submission(
-                        "hikaru", "CHESS_COM", "2024-01", "2024-01", false, false)))
-        .isInstanceOf(RuntimeException.class);
-
-    IndexResponse retry =
-        service.submitHybrid(
-            new IndexRequestService.Submission(
-                "hikaru", "CHESS_COM", "2024-01", "2024-01", false, false));
-
-    assertThat(retry.status()).isEqualTo("COMPLETED");
+    assertThat(requestStore.listRecent(10)).hasSize(1);
   }
 
   @Test
@@ -482,15 +346,15 @@ public class IndexRequestServiceTest {
     }
 
     /**
-     * Unimplemented on purpose. The submit path never claims — it creates a row and hands the work
-     * to a worker, and {@code IndexWorkerLifecycle} is the only thing that takes rows off the
-     * table. Returning empty here would be the quieter choice and the worse one: if a later change
-     * makes the service claim, an empty answer looks like "no work" and the test still passes.
+     * Unimplemented on purpose. The submit path never claims — it creates a row, and the C++
+     * worker's poller is the only thing that takes rows off the table. Returning empty here would
+     * be the quieter choice and the worse one: if a later change makes the service claim, an empty
+     * answer looks like "no work" and the test still passes.
      */
     @Override
     public Optional<IndexingRequest> claimNext(String ownerId, Duration lease, Instant now) {
       throw new UnsupportedOperationException(
-          "the submit path does not claim; see IndexWorkerLifecycleTest");
+          "the submit path does not claim; the worker's poller does");
     }
 
     @Override
@@ -745,25 +609,6 @@ public class IndexRequestServiceTest {
     /** Backdates {@code updated_at}, so a test can age a row past the staleness window. */
     void strand(UUID id, Instant updatedAt) {
       rows.put(id, touched(rows.get(id), updatedAt));
-    }
-  }
-
-  private static final class RecordingQueue implements IndexQueue {
-    private final List<IndexMessage> enqueued = new ArrayList<>();
-
-    @Override
-    public void enqueue(IndexMessage message) {
-      enqueued.add(message);
-    }
-
-    @Override
-    public Optional<IndexMessage> poll(Duration timeout) {
-      return Optional.empty();
-    }
-
-    @Override
-    public int size() {
-      return enqueued.size();
     }
   }
 }

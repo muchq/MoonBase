@@ -57,8 +57,6 @@ _NULLAWAY_LEGACY_OPT_OUTS = [
     "com.muchq.games.one_d4.api",
     "com.muchq.games.one_d4.db",
     "com.muchq.games.one_d4.e2e",
-    "com.muchq.games.one_d4.engine",
-    "com.muchq.games.one_d4.motifs",
     "com.muchq.games.one_d4.service",
     "com.muchq.games.one_d4.worker",
 ]

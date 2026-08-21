@@ -171,7 +171,7 @@ cc_test(
     ],
 )
 
-# Runs the port over the same 500 games the Java pipeline's golden covers.
+# Runs the detectors over the 500 games the frozen golden covers (#1389).
 # medium on measurement: 0.4s normally, 19.3s under tsan — the sanitize jobs
 # build -c dbg, which also re-arms the vendored header's asserts.
 cc_test(

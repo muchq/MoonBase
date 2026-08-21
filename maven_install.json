@@ -21,8 +21,6 @@
     "com.h2database:h2": 867138720,
     "com.uber.nullaway:nullaway": 1940496150,
     "com.zaxxer:HikariCP": 1991920386,
-    "dev.failsafe:failsafe": -1314791755,
-    "io.github.tors42:chariot": 479633826,
     "io.micronaut.jaxrs:micronaut-jaxrs-bom": -1922445730,
     "io.micronaut.jaxrs:micronaut-jaxrs-processor": -1554586820,
     "io.micronaut.jaxrs:micronaut-jaxrs-server": -831028121,
@@ -98,10 +96,8 @@
     "com.thoughtworks.paranamer:paranamer": -1233040102,
     "com.uber.nullaway:nullaway": 435081709,
     "com.zaxxer:HikariCP": 1080799863,
-    "dev.failsafe:failsafe": -253921025,
     "io.github.eisop:dataflow-errorprone": 1875600084,
     "io.github.java-diff-utils:java-diff-utils": -1540151507,
-    "io.github.tors42:chariot": 1344261327,
     "io.leangen.geantyref:geantyref": 669182600,
     "io.micronaut.jaxrs:micronaut-jaxrs-common": -2107790014,
     "io.micronaut.jaxrs:micronaut-jaxrs-processor": 1022854398,
@@ -450,12 +446,6 @@
       },
       "version": "7.1.0"
     },
-    "dev.failsafe:failsafe": {
-      "shasums": {
-        "jar": "2c5dc879a6dac7ea3a7b29d795e27bd49b8e7908b05c2f3e56053c19d79850f5"
-      },
-      "version": "3.3.2"
-    },
     "io.github.eisop:dataflow-errorprone": {
       "shasums": {
         "jar": "10434fba4e53f55fa9c76904cde414b918932548c9dfc4e2d634ac05ff7a7d10"
@@ -467,12 +457,6 @@
         "jar": "9990a2039778f6b4cc94790141c2868864eacee0620c6c459451121a901cd5b5"
       },
       "version": "4.12"
-    },
-    "io.github.tors42:chariot": {
-      "shasums": {
-        "jar": "911011f4fb87b59df12b5f5c0792c4069bdb7374be2a4db468d3a88fc2000735"
-      },
-      "version": "0.2.10"
     },
     "io.leangen.geantyref:geantyref": {
       "shasums": {
@@ -2152,14 +2136,6 @@
       "com.zaxxer.hikari.pool",
       "com.zaxxer.hikari.util"
     ],
-    "dev.failsafe:failsafe": [
-      "dev.failsafe",
-      "dev.failsafe.event",
-      "dev.failsafe.function",
-      "dev.failsafe.internal",
-      "dev.failsafe.internal.util",
-      "dev.failsafe.spi"
-    ],
     "io.github.eisop:dataflow-errorprone": [
       "org.checkerframework.dataflow.qual",
       "org.checkerframework.errorprone.checker.builder.qual",
@@ -2236,19 +2212,6 @@
       "com.github.difflib.patch",
       "com.github.difflib.text",
       "com.github.difflib.unifieddiff"
-    ],
-    "io.github.tors42:chariot": [
-      "chariot",
-      "chariot.api",
-      "chariot.chess",
-      "chariot.internal",
-      "chariot.internal.chess",
-      "chariot.internal.impl",
-      "chariot.internal.model",
-      "chariot.internal.modeladapter",
-      "chariot.internal.yayson",
-      "chariot.model",
-      "chariot.util"
     ],
     "io.leangen.geantyref:geantyref": [
       "io.leangen.geantyref"
@@ -3462,10 +3425,8 @@
       "com.thoughtworks.paranamer:paranamer",
       "com.uber.nullaway:nullaway",
       "com.zaxxer:HikariCP",
-      "dev.failsafe:failsafe",
       "io.github.eisop:dataflow-errorprone",
       "io.github.java-diff-utils:java-diff-utils",
-      "io.github.tors42:chariot",
       "io.leangen.geantyref:geantyref",
       "io.micronaut.jaxrs:micronaut-jaxrs-common",
       "io.micronaut.jaxrs:micronaut-jaxrs-processor",

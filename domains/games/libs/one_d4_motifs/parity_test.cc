@@ -1,19 +1,16 @@
-// The C++ port against the Java pipeline, over 500 real games.
+// The detectors against their frozen oracle, over 500 real games.
 //
-// The oracle is motif_parity_golden.tsv — what the Java pipeline extracts
-// from hikaru_corpus.pgn, checked into that package and kept current by its
-// own MotifGoldenTest. Neither half is any use alone: a golden nobody
-// regenerates stops describing anything, and a comparison against a file
-// this side generated agrees with itself.
+// motif_parity_golden.tsv is the Java pipeline's extraction output over
+// hikaru_corpus.pgn (#1389) and has no generator: the corpus in production
+// was indexed under what it records, and this test keeps the port from
+// drifting away from it. A comparison against a file this side generated
+// would agree with itself, so a deliberate detector change means editing
+// the golden by hand, in the same commit, with the reason.
 //
-// The port reproduces every row the Java pipeline writes, and writes seven
-// motifs' worth that Java never has. Both halves are pinned row for row —
+// The detectors reproduce every row in the golden, and emit seven motifs'
+// worth the golden does not have. Both halves are pinned row for row —
 // "allowed to differ" without identity is how a regression hides inside a
 // known difference.
-//
-// The two used to disagree about Black's ply as well. That was a Java bug,
-// fixed rather than tolerated (MotifOccurrence.plyOf), so the harness no
-// longer transforms the oracle before comparing it.
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>

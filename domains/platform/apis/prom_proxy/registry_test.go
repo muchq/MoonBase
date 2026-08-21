@@ -230,69 +230,6 @@ func TestRegistry_PortraitCacheQueriesUseTheStandardFamily(t *testing.T) {
 // portrait's. registry.go anticipates a second emitter, and an unscoped
 // selector added by one sums every service's caches into that service's
 // panel.
-// The migration from the Java indexer to the C++ one is invisible without
-// this: every other one_d4 tile sums both workers through
-// service_name=~"one_d4(_worker)?", so no chart can say which of them did the
-// work. #1389 calls this the number that decides when the Java path is
-// deleted.
-//
-// A golden string, like TestStandardQueries_GoldenStrings. Asserting the
-// parts is what let an earlier version of this test pass while the query
-// divided the wrong way round, multiplied by the wrong constant, or dropped
-// the indexer filter from a denominator — each of which renders a plausible
-// number nobody would question.
-func TestRegistry_CppShareOfGamesIsTheMigrationNumber(t *testing.T) {
-	oneD4 := serviceRegistry["one_d4"]
-
-	var share *customScalarDef
-	for i := range oneD4.CustomScalars {
-		if oneD4.CustomScalars[i].Label == "cpp_share_of_games" {
-			share = &oneD4.CustomScalars[i]
-		}
-	}
-	require.NotNil(t, share, "no cpp_share_of_games tile: the migration cannot be read off the dashboard")
-
-	// Built from the constant, not spelling 24h, so retuning the window is not
-	// a golden edit. No assertion here can tell burstWindow from alarmWindow
-	// while the two hold the same string — that choice is readable in
-	// registry.go and nowhere else.
-	const want = `sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?",indexer="cpp"}[` +
-		burstWindow + `])) / sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?"}[` +
-		burstWindow + `])) * 100`
-	assert.Equal(t, want, share.QueryFor(ViewCount))
-
-	// A ratio has one form, so it is registered as a scalar rather than a
-	// counter. TestRegistry_BothViewsShareOneSelector covers what that implies
-	// for the rate view, for every fixed-form tile at once.
-	assert.False(t, share.Toggleable())
-	assert.Equal(t, "%", share.Unit)
-}
-
-// Renaming the value the C++ worker stamps leaves every test in this repo
-// green while the share tile reads zero forever, because the numerator
-// hardcodes the string and the emitter reaches it through a symbol. Same
-// failure the service_name selector has a test for, one label along.
-//
-// The C++ side only. The denominator carries no indexer selector, so the Java
-// worker could stamp anything — or nothing — without moving this number;
-// IndexWorkerTest is what pins that value, and it does not need help here.
-func TestRegistry_ShareTileNamesTheValueTheCppWorkerActuallyWrites(t *testing.T) {
-	query := ""
-	for _, def := range serviceRegistry["one_d4"].CustomScalars {
-		if def.Label == "cpp_share_of_games" {
-			query = def.QueryFor(ViewCount)
-		}
-	}
-	require.Contains(t, query, `indexer="cpp"`,
-		"the tile stopped selecting by indexer, so the literal below pins nothing")
-
-	cpp, err := os.ReadFile("../../../games/apis/one_d4_worker/metrics.h")
-	require.NoError(t, err)
-	assert.Contains(t, string(cpp), `kIndexerValue[] = "cpp"`,
-		"the C++ worker stamps a value this tile does not select; the share would read zero")
-	assert.Contains(t, string(cpp), `kIndexerLabel[] = "indexer"`)
-}
-
 func TestRegistry_EveryCacheQueryNamesItsService(t *testing.T) {
 	for _, name := range serviceOrder {
 		for _, query := range allQueriesFor(serviceRegistry[name]) {
@@ -529,9 +466,9 @@ func TestRegistry_MicrogptTokensReplacesTokensPerSecond(t *testing.T) {
 // names so a new instrument has to be declared here too.
 var oneD4SelectorPattern = regexp.MustCompile(`\b((?:games_indexed|index_runs|index_months|chess_com_archive_fetches|motif_occurrences|index_run_duration_micros|index_games_per_month)[a-z_]*)(\{[^}]*\})?`)
 
-// What IndexWorker emits, plus the suffixes the collector's Prometheus exporter
-// appends: _total for a cumulative monotonic sum, _sum/_count for a histogram.
-// The Java end is IndexWorkerTest#metrics_exportedInstrumentNames.
+// What one_d4_worker emits, plus the suffixes the collector's Prometheus
+// exporter appends: _total for a cumulative monotonic sum, _sum/_count for
+// a histogram. The recording end is the worker's own metrics_test.
 var oneD4ExportedNames = map[string]bool{
 	"games_indexed_total":             true,
 	"index_runs_total":                true,
@@ -598,7 +535,7 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 	for what, queries := range labelled {
 		for _, query := range queries {
 			// The probes tile (#1303) is the one entry that reads the standard
-			// http_server family rather than an IndexWorker instrument: it
+			// http_server family rather than a worker instrument: it
 			// shows the /health traffic probeFilter subtracts from every
 			// Serving number. Keyed on the route literal, not the instrument,
 			// so a future http_server tile on another route writes its own
@@ -617,7 +554,7 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 				name := match[1]
 				seen[name]++
 				assert.True(t, oneD4ExportedNames[name],
-					"%s reads %q, which IndexWorker does not export", what, name)
+					"%s reads %q, which one_d4_worker does not export", what, name)
 				// Both indexers, and only the two. An unscoped selector sums
 				// every service that ever emits the name; one pinned to
 				// service_name="one_d4" shows half the indexing the day the
@@ -634,7 +571,7 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 		assert.NotZero(t, seen[name], "nothing in the one_d4 entry reads %s", name)
 	}
 
-	// Outcome labels are IndexWorker's vocabulary. A typo selects nothing rather
+	// Outcome labels are one_d4_worker's vocabulary. A typo selects nothing rather
 	// than erroring, so the tiles would read zero forever.
 	joined := strings.Join([]string{}, "")
 	for _, def := range entry.CustomScalars {
@@ -666,7 +603,7 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 	}
 
 	// And selected positively. outcome!="completed" reads as "everything that went wrong",
-	// but IndexWorker's fourth outcome is lease_lost — a range changing hands because two
+	// but the worker's fourth outcome is lease_lost — a range changing hands because two
 	// pollers overlapped, which is ordinary — so a negation puts a permanent floor under the
 	// failure line. It also opts every future outcome in by default: whoever adds a fifth
 	// label gets it counted as a failure without deciding that it is one.
@@ -706,7 +643,7 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 // is the only place the unit is ever stated, and it is stated in a different file
 // from the arithmetic that has to match it.
 //
-// IndexWorker records this histogram in microseconds, the unit yodel's standard
+// The worker records this histogram in microseconds, the unit yodel's standard
 // latency series use — right for an HTTP request, six orders of magnitude off for
 // an index run — so every reader converts. The failure this pins is silent in both
 // directions: a chart titled "Run Duration Avg Ms" plotting 120000000 for a
