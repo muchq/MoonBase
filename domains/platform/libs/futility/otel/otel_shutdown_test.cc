@@ -39,14 +39,14 @@ class WedgedCollector {
     EXPECT_GE(fd_, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = ::htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = 0;
     EXPECT_EQ(::bind(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)), 0);
     EXPECT_EQ(::listen(fd_, 16), 0);
 
     socklen_t len = sizeof(addr);
     EXPECT_EQ(::getsockname(fd_, reinterpret_cast<sockaddr*>(&addr), &len), 0);
-    port_ = ::ntohs(addr.sin_port);
+    port_ = ntohs(addr.sin_port);
   }
 
   ~WedgedCollector() { ::close(fd_); }
