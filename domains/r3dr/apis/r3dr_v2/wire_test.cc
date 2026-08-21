@@ -149,10 +149,17 @@ TEST_F(WireTest, RedirectIsA302WithLocationAndTheConformancePinnedBody) {
   EXPECT_EQ(response.body, "{}");
 }
 
-TEST_F(WireTest, AnUnknownSlugIsTheModeledJson404) {
-  const auto response = Send("GET", "/r3dr/v1/r/zzz", "");
-  EXPECT_EQ(response.status, 404);
-  EXPECT_THAT(response.body, HasSubstr("no such link"));
+// Unknown and expired collapse into one exact 404 body: the reader can't
+// probe which it was.
+TEST_F(WireTest, UnknownAndExpiredSlugsShareTheOneModeledJson404) {
+  const auto unknown = Send("GET", "/r3dr/v1/r/zzz", "");
+  EXPECT_EQ(unknown.status, 404);
+  EXPECT_EQ(unknown.body, R"({"message":"no such link"})");
+
+  store_->targets["DAA"] = Target{"https://www.example.com", kNow - absl::Seconds(1)};
+  const auto expired = Send("GET", "/r3dr/v1/r/DAA", "");
+  EXPECT_EQ(expired.status, 404);
+  EXPECT_EQ(expired.body, unknown.body);
 }
 
 // The redirect arrives as a typed success carrying Location — what the

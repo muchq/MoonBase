@@ -110,6 +110,18 @@ TEST_F(ProductionChainTest, ServesRedirectHealthAnd429ThroughTheChain) {
   EXPECT_EQ(limited.status, 429);
   EXPECT_EQ(limited.headers.Get("retry-after").value_or(""), "60");
 
+  // One bucket for both operations: the exhausted client can't shorten
+  // either. A per-op split in main.cc must fail here.
+  smithy::http::HttpRequest shorten;
+  shorten.method = "POST";
+  shorten.target = "/r3dr/v1/shorten";
+  shorten.peer_address = "203.0.113.4";
+  shorten.headers.Set("content-type", "application/json");
+  shorten.body = R"({"longUrl":"https://www.example.com","expiresAt":1755003600000})";
+  auto blocked = loopback_->Send(std::move(shorten));
+  ASSERT_TRUE(blocked.ok());
+  EXPECT_EQ(blocked->status, 429);
+
   // Health sits before the guard: still served for the exhausted client.
   smithy::http::HttpRequest health;
   health.method = "GET";

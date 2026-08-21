@@ -2,10 +2,12 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <cstdlib>
 #include <memory>
 #include <string>
 
+#include "absl/strings/str_cat.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "domains/platform/libs/pg/pg.h"
@@ -90,22 +92,45 @@ TEST_F(PgUrlStoreTest, ConsecutiveInsertsMintDistinctSlugs) {
   EXPECT_NE(*first, *second);
 }
 
-// The reconnect-retry contract: a replayed insert is zero rows, not an
-// error. Raw SQL because the client retry needs a severed connection.
+// The reconnect-retry contract: replaying an identical insert is success
+// and the same slug. The sequence rewind forces the same id twice.
 TEST_F(PgUrlStoreTest, AReplayedInsertIsSuccessNotAConflictError) {
-  const auto replayed = db_->Exec(
-      "INSERT INTO urls (id, short_url, long_url, expires_at)"
-      " VALUES (42, 'KgA', 'https://example.com/x', now() + interval '1 hour')"
-      " ON CONFLICT (id) DO NOTHING RETURNING 1");
-  ASSERT_TRUE(replayed.ok());
-  EXPECT_EQ(replayed->rows(), 1);
+  const absl::Time expires = absl::Now() + absl::Hours(1);
+  const auto first = store_->Insert("https://example.com/x", expires);
+  ASSERT_TRUE(first.ok()) << first.status();
 
-  const auto again = db_->Exec(
-      "INSERT INTO urls (id, short_url, long_url, expires_at)"
-      " VALUES (42, 'KgA', 'https://example.com/x', now() + interval '1 hour')"
-      " ON CONFLICT (id) DO NOTHING RETURNING 1");
-  ASSERT_TRUE(again.ok()) << "the replay must not surface as an error";
-  EXPECT_EQ(again->rows(), 0);
+  ASSERT_TRUE(db_->Exec("SELECT setval('url_ids', (SELECT last_value FROM url_ids) - 1)").ok());
+  const auto replayed = store_->Insert("https://example.com/x", expires);
+  ASSERT_TRUE(replayed.ok()) << "the replay must not surface as an error";
+  EXPECT_EQ(*replayed, *first);
+}
+
+// Same URL is not enough: a different expiry means an import's row, and
+// success would cache an expiry the row doesn't hold.
+TEST_F(PgUrlStoreTest, ASameUrlConflictWithADifferentExpiryRefuses) {
+  const absl::Time expires = absl::Now() + absl::Hours(1);
+  ASSERT_TRUE(store_->Insert("https://example.com/x", expires).ok());
+  ASSERT_TRUE(db_->Exec("SELECT setval('url_ids', (SELECT last_value FROM url_ids) - 1)").ok());
+
+  const auto refused = store_->Insert("https://example.com/x", expires + absl::Hours(1));
+  EXPECT_FALSE(refused.ok());
+  EXPECT_EQ(refused.status().code(), absl::StatusCode::kInternal);
+}
+
+// Matching URL and expiry still refuse when the row's slug isn't ours —
+// an import that encoded ids differently.
+TEST_F(PgUrlStoreTest, AForeignSlugAtOurIdRefusesEvenWithMatchingFields) {
+  const int64_t millis = absl::ToUnixMillis(absl::Now() + absl::Hours(1));
+  ASSERT_TRUE(db_->Exec("SELECT setval('url_ids', 100)").ok());
+  ASSERT_TRUE(db_->Exec("INSERT INTO urls (id, short_url, long_url, expires_at)"
+                        " VALUES (101, 'xxx', 'https://example.com/mine',"
+                        " to_timestamp($1::bigint / 1000.0))",
+                        {absl::StrCat(millis)})
+                  .ok());
+
+  const auto refused = store_->Insert("https://example.com/mine", absl::FromUnixMillis(millis));
+  EXPECT_FALSE(refused.ok());
+  EXPECT_EQ(refused.status().code(), absl::StatusCode::kInternal);
 }
 
 // A sequence behind the table (an import without setval) must refuse, not

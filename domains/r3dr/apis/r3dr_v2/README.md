@@ -34,8 +34,11 @@ Own `r3dr_v2` database/role on `shared_postgres`, provisioned by the
 `r3dr_v2_db_init` one-shot from `R3DR_V2_DB_PASSWORD` — a new `~/.env`
 secret; compose refuses to start without it. Schema applied at startup by `migrations.cc`
 (idempotent, fail-fast) and in every DB test's SetUp. Two `pg::Client`s so
-redirects don't queue behind shortens; inserts are `ON CONFLICT DO NOTHING`
-so the client's reconnect-retry can't mint duplicates.
+redirects don't queue behind shortens. Inserts are `ON CONFLICT (id) DO
+UPDATE … RETURNING (xmax = 0)`: a conflict row identical to ours is the
+client's reconnect-retry replaying (success, same slug); any other row means
+the sequence is behind the table (an import without `setval`) and the insert
+refuses rather than alias a slug.
 
 ## Run it
 
@@ -43,7 +46,7 @@ so the client's reconnect-retry can't mint duplicates.
 R3DR_V2_DB_URL=postgresql://user:pass@localhost:5432/r3dr_v2 \
   bazel run //domains/r3dr/apis/r3dr_v2
 curl localhost:8091/r3dr/v1/shorten -H 'content-type: application/json' \
-  -d '{"longUrl":"https://example.com/some/where"}'
+  -d "{\"longUrl\":\"https://example.com/some/where\",\"expiresAt\":$(( ($(date +%s) + 3600) * 1000 ))}"
 curl -i localhost:8091/r3dr/v1/r/AQA
 ```
 

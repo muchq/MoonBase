@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -44,6 +45,18 @@ TEST(EncodingTest, SlugsAreThreeSixOrElevenCharacters) {
   }
   for (const int64_t id : {int64_t{2147483648}, std::numeric_limits<int64_t>::max()}) {
     EXPECT_EQ(EncodeId(id)->size(), 11u) << id;
+  }
+}
+
+// Exactly the three encoded widths — nothing between, nothing longer.
+// Accepting 4/5/7–10 would reopen the store traffic the filter exists
+// to avoid.
+TEST(EncodingTest, IsPossibleSlugAcceptsOnlyTheThreeEncodedLengths) {
+  EXPECT_TRUE(IsPossibleSlug("AQA"));
+  EXPECT_TRUE(IsPossibleSlug("AIAAAA"));
+  EXPECT_TRUE(IsPossibleSlug("AAAAgAAAAAA"));
+  for (const size_t wrong : {0u, 1u, 2u, 4u, 5u, 7u, 8u, 9u, 10u, 12u, 64u}) {
+    EXPECT_FALSE(IsPossibleSlug(std::string(wrong, 'A'))) << "length " << wrong;
   }
 }
 

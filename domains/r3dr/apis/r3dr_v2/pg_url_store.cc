@@ -13,14 +13,15 @@ namespace r3dr_v2 {
 namespace {
 
 // $1 = id, $2 = slug, $3 = long url, $4 = expiry epoch millis. One row
-// always: xmax = 0 marks a fresh insert; on conflict the returned long_url
-// tells a replay (ours) from an import that outran the sequence (someone
-// else's), atomically.
+// always: xmax = 0 marks a fresh insert; on conflict the returned row
+// tells a replay (identical to ours) from an import that outran the
+// sequence (someone else's), atomically.
 constexpr char kInsert[] = R"sql(
     INSERT INTO urls (id, short_url, long_url, expires_at)
     VALUES ($1::bigint, $2, $3, to_timestamp($4::bigint / 1000.0))
     ON CONFLICT (id) DO UPDATE SET long_url = urls.long_url
-    RETURNING (xmax = 0) AS inserted, long_url)sql";
+    RETURNING (xmax = 0) AS inserted, short_url, long_url,
+              (extract(epoch FROM expires_at) * 1000)::bigint)sql";
 
 // Millis out, so the value reaches absl::Time without a timestamp parse.
 constexpr char kLookup[] = R"sql(
@@ -45,16 +46,21 @@ absl::StatusOr<std::string> PgUrlStore::Insert(const std::string& long_url, absl
     // A negative sequence value is server-side corruption, not client fault.
     return absl::InternalError(std::string(slug.status().message()));
   }
-  auto inserted = writes_->Exec(
-      kInsert, {absl::StrCat(id), *slug, long_url, absl::StrCat(absl::ToUnixMillis(expires_at))});
+  const std::string expires_millis = absl::StrCat(absl::ToUnixMillis(expires_at));
+  auto inserted = writes_->Exec(kInsert, {absl::StrCat(id), *slug, long_url, expires_millis});
   if (!inserted.ok()) {
     return inserted.status();
   }
   if (inserted->rows() != 1) {
     return absl::InternalError("insert returned no row");
   }
-  if (inserted->Get(0, 0) != std::optional<std::string>("t") &&
-      inserted->Get(0, 1) != std::optional<std::string>(long_url)) {
+  // A conflict row identical to ours is pg::Client's reconnect-retry
+  // replaying this statement; anything else is an import's row.
+  const bool fresh = inserted->Get(0, 0) == std::optional<std::string>("t");
+  const bool replay = inserted->Get(0, 1) == std::optional<std::string>(*slug) &&
+                      inserted->Get(0, 2) == std::optional<std::string>(long_url) &&
+                      inserted->Get(0, 3) == std::optional<std::string>(expires_millis);
+  if (!fresh && !replay) {
     return absl::InternalError("url_ids is behind the urls table; refusing to alias a slug");
   }
   return slug;

@@ -21,10 +21,12 @@ class PgUrlStore final : public UrlStore {
   PgUrlStore(std::shared_ptr<pg::Client> reads, std::shared_ptr<pg::Client> writes)
       : reads_(std::move(reads)), writes_(std::move(writes)) {}
 
-  /// nextval, encode, insert. ON CONFLICT (id) DO NOTHING makes
-  /// pg::Client's reconnect-retry safe: a replayed insert reads as zero
-  /// rows, which is success — only this process ever holds that id. A
-  /// retried nextval just burns a sequence gap.
+  /// nextval, encode, insert. ON CONFLICT (id) DO UPDATE with
+  /// RETURNING (xmax = 0) tells fresh from conflict in one statement:
+  /// a conflict row identical to ours is pg::Client's reconnect-retry
+  /// replaying (success); any other row means the sequence is behind
+  /// the table — refuse rather than alias a slug. A retried nextval
+  /// just burns a sequence gap.
   absl::StatusOr<std::string> Insert(const std::string& long_url, absl::Time expires_at) override;
 
   absl::StatusOr<std::optional<Target>> Lookup(const std::string& slug) override;
