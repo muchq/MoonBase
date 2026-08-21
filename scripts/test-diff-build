@@ -109,6 +109,16 @@ check "a bazel/rules *.bzl edit forces a full build" \
   test "$(decide)" = "full"
 
 reset_to_base
+commit_change_to bazel/smithy.MODULE.bazel '# pin bumped'
+check "a module pin bump forces a full build" \
+  test "$(decide)" = "full"
+
+reset_to_base
+commit_change_to MODULE.bazel '# dep added'
+check "a MODULE.bazel edit forces a full build" \
+  test "$(decide)" = "full"
+
+reset_to_base
 commit_change_to bazel/rules/testdata/Probe.java 'probe changed'
 DECISION=$(decide)
 check "a rules testdata fixture keeps the bazel-diff path" \

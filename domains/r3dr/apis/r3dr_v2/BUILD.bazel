@@ -1,0 +1,230 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
+load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
+
+# r3dr_v2 (#1359): the C++ URL shortener serving /r3dr/v1/* on
+# api.muchq.com, beside the Go service until it retires.
+
+cc_library(
+    name = "encoding",
+    srcs = ["encoding.cc"],
+    hdrs = ["encoding.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "encoding_test",
+    size = "small",
+    srcs = ["encoding_test.cc"],
+    deps = [
+        ":encoding",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# Domain core: expiry policy, cache, store seam. No postgres, no smithy.
+cc_library(
+    name = "shortener",
+    srcs = ["shortener.cc"],
+    hdrs = [
+        "shortener.h",
+        "url_store.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":encoding",
+        "//domains/platform/libs/aura:cache",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+# Shared test doubles: the in-memory store and Shortener factory all three
+# suites use.
+cc_library(
+    name = "test_support",
+    testonly = True,
+    hdrs = ["test_support.h"],
+    deps = [
+        ":shortener",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_test(
+    name = "shortener_test",
+    size = "small",
+    srcs = ["shortener_test.cc"],
+    deps = [
+        ":shortener",
+        ":test_support",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "pg_url_store",
+    srcs = [
+        "migrations.cc",
+        "pg_url_store.cc",
+    ],
+    hdrs = [
+        "migrations.h",
+        "pg_url_store.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":encoding",
+        ":shortener",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+# Real SQL against real Postgres; skips without PG_TEST_DB_URL (CI's
+# build-and-test job supplies it).
+cc_test(
+    name = "pg_url_store_test",
+    size = "small",
+    srcs = ["pg_url_store_test.cc"],
+    env_inherit = ["PG_TEST_DB_URL"],
+    # One shared scratch database: concurrent DB tests truncate each other.
+    tags = ["exclusive"],
+    deps = [
+        ":pg_url_store",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+    ],
+)
+
+smithy_cpp_server_library(
+    name = "r3dr_v2_smithy_server",
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/r3dr_v2.smithy",
+    ],
+    namespace = "moonbase::r3dr",
+    service = "moonbase.r3dr#R3drV2",
+)
+
+smithy_cpp_client_library(
+    name = "r3dr_v2_smithy_client",
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/r3dr_v2.smithy",
+    ],
+    namespace = "moonbase::r3dr",
+    service = "moonbase.r3dr#R3drV2",
+)
+
+cc_library(
+    name = "smithy_handler",
+    srcs = ["smithy_handler.cc"],
+    hdrs = ["smithy_handler.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":r3dr_v2_smithy_server",
+        ":shortener",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
+cc_test(
+    name = "smithy_handler_test",
+    size = "small",
+    srcs = ["smithy_handler_test.cc"],
+    deps = [
+        ":smithy_handler",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:core",
+    ],
+)
+
+cc_test(
+    name = "wire_test",
+    size = "small",
+    srcs = ["wire_test.cc"],
+    deps = [
+        ":r3dr_v2_smithy_client",
+        ":r3dr_v2_smithy_server",
+        ":shortener",
+        ":smithy_handler",
+        ":test_support",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:client",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
+cc_binary(
+    name = "r3dr_v2",
+    srcs = ["main.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":pg_url_store",
+        ":r3dr_v2_smithy_server",
+        ":shortener",
+        ":smithy_handler",
+        "//domains/platform/libs/aura",
+        "//domains/platform/libs/aura:cache",
+        "//domains/platform/libs/futility/env",
+        "//domains/platform/libs/futility/otel:http_metrics",
+        "//domains/platform/libs/futility/otel:metrics",
+        "//domains/platform/libs/futility/otel:otel_provider",
+        "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:globals",
+        "@com_google_absl//absl/log:initialize",
+        "@com_google_absl//absl/time",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:http_beast",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
+linux_amd64_oci_binary(bin_name = "r3dr_v2")
+
+cc_test(
+    name = "production_chain_test",
+    size = "small",
+    srcs = ["production_chain_test.cc"],
+    deps = [
+        ":r3dr_v2_smithy_server",
+        ":shortener",
+        ":smithy_handler",
+        ":test_support",
+        "//domains/platform/libs/aura",
+        "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:http_beast",
+        "@smithy_cpp//runtime:server",
+    ],
+)

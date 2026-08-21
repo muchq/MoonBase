@@ -307,7 +307,7 @@ const (
 )
 
 // Catalog order doubles as the UI's tab order.
-var serviceOrder = []string{"golf_hub", "mcpserver", "microgpt-serve", "mithril", "one_d4", "one_d4_v2", "portrait", "posterize"}
+var serviceOrder = []string{"golf_hub", "mcpserver", "microgpt-serve", "mithril", "one_d4", "one_d4_v2", "portrait", "posterize", "r3dr_v2"}
 
 var serviceRegistry = map[string]serviceEntry{
 	"golf_hub": {
@@ -484,6 +484,12 @@ var serviceRegistry = map[string]serviceEntry{
 	"one_d4_v2": {
 		CustomScalars: []customScalarDef{
 			probesTile("one_d4_v2"),
+		},
+	},
+	// r3dr v2 (#1359): standard instruments plus the Probes tile.
+	"r3dr_v2": {
+		CustomScalars: []customScalarDef{
+			probesTile("r3dr_v2"),
 		},
 	},
 	// Wordchains: server_pal's standard instruments plus the standard
